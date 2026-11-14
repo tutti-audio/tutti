@@ -20,7 +20,7 @@ use crate::control::plugin_error;
 use crate::controller::AuController;
 use crate::error::AuError;
 use crate::instance::AuLoaded;
-use crate::processor::{AuProcessor, ProcessorParts, Rendering, UninitializeOnDrop};
+use crate::processor::{AuProcessor, MidiOut, ProcessorParts, Rendering, UninitializeOnDrop};
 
 impl Loaded for AuLoaded {
     type Processor = AuProcessor;
@@ -137,6 +137,12 @@ impl AuLoaded {
                 None
             };
 
+        // A unit that generates MIDI hands it to the host while it renders. The
+        // callback is installed on the main thread, before `AudioUnitInitialize`
+        // as the host's own tests do, and held for the activation. A failed
+        // initialize drops it, which withdraws it.
+        let midi_out = MidiOut::install(self.unit());
+
         if let Err(e) = self.unit().initialize() {
             return Err((Some(self), e.into()));
         }
@@ -164,6 +170,7 @@ impl AuLoaded {
             },
             notify,
             renderer,
+            midi_out,
         });
 
         if self.config().channels.has_input

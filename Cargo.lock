@@ -2508,6 +2508,7 @@ dependencies = [
  "core-foundation",
  "core-foundation-sys",
  "coreaudio-sys",
+ "crossbeam-queue",
  "dpi",
  "thiserror 2.0.21",
  "tutti-au-ffi",

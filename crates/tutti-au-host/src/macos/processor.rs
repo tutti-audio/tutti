@@ -9,21 +9,24 @@
 //! its own [`Unit`] handle so the instance outlives whichever drops last.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
+use crossbeam_queue::ArrayQueue;
 use tutti_au_ffi::{
     AuParameterListener, Element, EventAddress, EventList, Pushed, RenderNotify, Renderer, Scope,
     TransportState, Unit, Wire,
 };
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    AudioBufferMut, ParamMapping, PlayheadWatch, PluginError, PluginIo, PluginResult,
-    ProcessContext, ProcessOutput, Processor, TransportInfo, is_usable,
+    AudioBufferMut, MIDI_STACK_CAPACITY, ParamMapping, PlayheadWatch, PluginError, PluginIo,
+    PluginResult, ProcessContext, ProcessOutput, Processor, TransportInfo, WireMidi, is_usable,
 };
 use tutti_rt::Reader;
 use tutti_ump::SysexAssembler;
 
 use crate::automation::SharedStage;
 use crate::error::{AuError, Result};
+use crate::midi_out::{self, AuMidiOutput, MidiOutSink};
 use crate::ranges::RangeTable;
 use crate::types::K_AUDIO_UNIT_ERR_UNINITIALIZED;
 
@@ -55,6 +58,78 @@ pub(crate) struct Rendering {
     /// the renderer: it removes itself from the unit.
     pub(crate) notify: Option<RenderNotify>,
     pub(crate) renderer: Renderer,
+    /// The MIDI the unit generates while it renders, for a unit that publishes
+    /// output streams. Last, so the callback is withdrawn only after the unit
+    /// is uninitialized and nothing renders.
+    pub(crate) midi_out: Option<MidiOut>,
+}
+
+/// The MIDI a unit emits during a render: its callback's registration, and the
+/// queue the callback fills inside `AudioUnitRender` for the block's
+/// [`ProcessOutput`] to take once the render returns.
+///
+/// The callback runs on the render thread and holds no reference to the
+/// block's output, so it pushes into a bounded lock-free queue allocated here,
+/// at activation, on the main thread: a block that emits more than the queue
+/// holds drops the rest and counts it ([`overflow`](Self::overflow)), and
+/// nothing grows.
+pub(crate) struct MidiOut {
+    /// Keeps the callback installed for the activation; dropping it withdraws
+    /// the callback before the state the unit points at is freed.
+    registration: AuMidiOutput,
+    /// What the callback has pushed since the last block took it, in order.
+    queue: Arc<ArrayQueue<WireMidi>>,
+    /// Events the callback dropped for want of room in `queue`.
+    overflow: Arc<AtomicU64>,
+}
+
+impl MidiOut {
+    /// Installs the output callback on `unit` if it publishes MIDI output
+    /// streams, and reads each stream through its own translator
+    /// ([`tutti_au_ffi`]'s decoder). `None` for a unit that publishes none (an
+    /// AU that accepts the callback without publishing a stream is not a MIDI
+    /// source) and for one that refuses the callback: it then renders without
+    /// MIDI output. Main thread.
+    pub(crate) fn install(unit: &Unit) -> Option<Self> {
+        midi_out::midi_output_info(unit).filter(|info| info.stream_count() > 0)?;
+        let queue = Arc::new(ArrayQueue::new(MIDI_STACK_CAPACITY));
+        let overflow = Arc::new(AtomicU64::new(0));
+        let sink: MidiOutSink = {
+            let (queue, overflow) = (Arc::clone(&queue), Arc::clone(&overflow));
+            Box::new(move |_stream, events| {
+                for &event in events {
+                    if queue.push(event).is_err() {
+                        overflow.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            })
+        };
+        let registration = midi_out::install(unit, sink).ok()?;
+        Some(Self {
+            registration,
+            queue,
+            overflow,
+        })
+    }
+
+    /// Moves what the render's callback queued into `out`, in order; what `out`
+    /// has no room for is counted in `out`'s own `midi_dropped`.
+    fn take_into(&self, out: &mut ProcessOutput) {
+        while let Some(event) = self.queue.pop() {
+            out.emit_midi([event]);
+        }
+    }
+
+    /// Forgets the streams' open SysEx and parameter runs, and what is queued.
+    fn reset(&self) {
+        self.registration.reset();
+        while self.queue.pop().is_some() {}
+    }
+
+    /// Events dropped for want of room in the queue, since activation.
+    pub(crate) fn overflow(&self) -> u64 {
+        self.overflow.load(Ordering::Relaxed)
+    }
 }
 
 /// Uninitializes the unit when a [`Rendering`] is dropped without
@@ -228,6 +303,16 @@ impl AuProcessor {
             block_size,
             stage,
         }
+    }
+
+    /// MIDI events the unit emitted that the output queue had no room for,
+    /// since activation: `0` for a unit with no MIDI output.
+    #[must_use]
+    pub fn midi_out_overflow(&self) -> u64 {
+        self.rendering
+            .midi_out
+            .as_ref()
+            .map_or(0, MidiOut::overflow)
     }
 
     /// Whether this Processor and `unit` are of one activation.
@@ -605,9 +690,12 @@ impl AuProcessor {
             }
         }
         drop(stage);
-        // AUv2 reports no per-block MIDI, parameter or note-expression output
-        // through this path, so `out` is left as the caller cleared it.
-        let _ = out;
+        // The MIDI the unit generated while it rendered, taken even from a block
+        // that failed: what it emitted before the failure happened. AUv2 reports
+        // no parameter or note-expression output through this path.
+        if let Some(midi_out) = &self.rendering.midi_out {
+            midi_out.take_into(out);
+        }
         rendered.map_err(|e| PluginError::Block(block_reason(&e)))
     }
 }
@@ -639,6 +727,9 @@ impl Processor for AuProcessor {
         // A refusal leaves the AU holding the history it had and the cursor
         // where it was (see `flush`); `Processor::reset` has nowhere to put it.
         let _ = self.flush();
+        if let Some(midi_out) = &self.rendering.midi_out {
+            midi_out.reset();
+        }
     }
 }
 

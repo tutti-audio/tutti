@@ -10,13 +10,15 @@
 
 use std::mem::align_of;
 use std::os::raw::c_void;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use coreaudio_sys::{AudioTimeStamp, MIDIPacket, MIDIPacketList, OSStatus};
+use tutti_midi_protocol::Translator;
 #[cfg(feature = "testing")]
 use tutti_midi_protocol::midi1;
-use tutti_midi_protocol::widen_message;
-use tutti_plugin_types::{MidiEventVec, WireMidi};
-use tutti_ump::{Message, Midi1Parser, MidiGroup};
+use tutti_plugin_types::{MidiEventVec, WireMidi, group_of_port};
+use tutti_ump::{Message, Midi1Parser, MidiGroup, Ump};
 
 use crate::callback::with_state_mut;
 use crate::error::Result;
@@ -70,8 +72,19 @@ pub type MidiOutSink = Box<dyn FnMut(u32, &[WireMidi]) + Send>;
 /// removal ordering protects.
 struct MidiOutState {
     sink: MidiOutSink,
-    /// Reads the packets' bytes into events.
-    decoder: Decoder,
+    /// One reader per output stream the AU published, by the `midi_out_num` the
+    /// AU calls with: a stream is a Group of its own number, and each keeps
+    /// its own parameter-number and bank runs. Fixed at install, so the render
+    /// thread never grows it.
+    decoders: Box<[Decoder]>,
+    /// Lists the AU delivered for a stream with no decoder (it published
+    /// fewer streams than it calls with, or more than the sixteen Groups):
+    /// dropped and counted here, read through
+    /// [`AuMidiOutput::unrouted_lists`].
+    unrouted: Arc<AtomicU64>,
+    /// Set by [`AuMidiOutput::reset`]: the next list finds every reader forgotten
+    /// before it is read.
+    reset: Arc<AtomicBool>,
 }
 
 /// A plugin's MIDI 1.0 byte stream as engine events.
@@ -82,24 +95,41 @@ struct MidiOutState {
 /// a packet's end ends a short message (`end_of_message`), and a SysEx goes on
 /// as SysEx7 packets in the order the parser completes them, each at the
 /// offset of the packet that held its `0xF0` (offset 0 for one opened in an
-/// earlier list). A channel voice message is widened to MIDI 2.0, as every
-/// plugin's output is. Events are handed to the sink in batches of a
-/// [`MidiEventVec`]; nothing allocates.
+/// earlier list). A channel voice message goes through the stream's
+/// [`Translator`] to MIDI 2.0 (M2-104 Appendix D.3), as every plugin's output
+/// does: its RPN, NRPN and Bank Select runs are assembled across messages and
+/// lists. Events are handed to the sink in batches of a [`MidiEventVec`];
+/// nothing allocates (the parser holds one SysEx7 packet's payload inline, and
+/// the batch and the translator are fixed-size).
 #[derive(Debug)]
 struct Decoder {
+    group: MidiGroup,
     parser: Midi1Parser,
+    translator: Translator,
     batch: MidiEventVec,
     /// The offset of the SysEx being read.
     sysex_at: u32,
 }
 
 impl Decoder {
-    fn new() -> Self {
+    /// A reader of the stream that is `group`.
+    fn new(group: MidiGroup) -> Self {
         Self {
-            parser: Midi1Parser::new(MidiGroup::FIRST),
+            group,
+            parser: Midi1Parser::new(group),
+            translator: Translator::new(),
             batch: MidiEventVec::new(),
             sysex_at: 0,
         }
+    }
+
+    /// Forgets the stream: the open SysEx, the running status and every
+    /// parameter-number and bank run. Nothing pending is sent.
+    fn reset(&mut self) {
+        self.parser = Midi1Parser::new(self.group);
+        self.translator.reset();
+        self.batch.clear();
+        self.sysex_at = 0;
     }
 
     /// A new list: events staged and not flushed (a list cut short by a
@@ -127,11 +157,12 @@ impl Decoder {
             if self.batch.is_full() {
                 self.flush(flush);
             }
+            // A message that ends no run (a select, a Data Entry MSB) is absorbed.
+            let Some(ump) = self.translator.translate(Ump::from(message)) else {
+                continue;
+            };
             // Room: the batch is not full, or was just flushed.
-            let _ = self.batch.try_push(WireMidi {
-                offset,
-                ump: widen_message(message).into(),
-            });
+            let _ = self.batch.try_push(WireMidi { offset, ump });
         }
         self.parser.end_of_message();
     }
@@ -163,6 +194,30 @@ pub struct AuMidiOutput {
     /// `Option` so [`Self::remove`] can take the box out *after* the property has
     /// been cleared, giving `Drop` nothing left to free.
     state: Option<Box<MidiOutState>>,
+    /// [`MidiOutState::unrouted`], shared so the handle reads it without
+    /// touching the state the render thread holds.
+    unrouted: Arc<AtomicU64>,
+    /// [`MidiOutState::reset`], shared for the same reason.
+    reset: Arc<AtomicBool>,
+}
+
+impl AuMidiOutput {
+    /// How many lists the AU delivered for an output stream this registration
+    /// has no reader for, since it was installed: dropped, never routed to
+    /// another stream's Group.
+    #[must_use]
+    pub fn unrouted_lists(&self) -> u64 {
+        self.unrouted.load(Ordering::Relaxed)
+    }
+
+    /// Forgets what the output streams have read: a SysEx open across a
+    /// discontinuity (a reset, a locate) must not complete on the far side of
+    /// it, nor an RPN, NRPN or Bank Select run. Nothing pending is sent. Takes
+    /// effect at the next list the AU delivers; call it between blocks, from
+    /// the thread that renders.
+    pub fn reset(&self) {
+        self.reset.store(true, Ordering::Relaxed);
+    }
 }
 
 impl std::fmt::Debug for AuMidiOutput {
@@ -244,9 +299,21 @@ pub fn install(unit: &Unit, sink: MidiOutSink) -> Result<AuMidiOutput> {
     // Boxed once, here, on the control thread — the only allocation in the whole
     // path. `MidiOutState` is heap-pinned so the `userData` the AU retains stays
     // valid across moves of the returned handle.
+    // One reader for each stream the AU publishes (one when it publishes
+    // none, which every AU that accepts the callback does not), at most one
+    // for each of the sixteen Groups.
+    let streams = midi_output_info(unit).map_or(1, |info| info.stream_count().max(1));
+    let decoders: Box<[Decoder]> = (0..streams)
+        .map_while(|stream| group_of_port(u16::try_from(stream).ok()?))
+        .map(Decoder::new)
+        .collect();
+    let unrouted = Arc::new(AtomicU64::new(0));
+    let reset = Arc::new(AtomicBool::new(false));
     let state = Box::new(MidiOutState {
         sink,
-        decoder: Decoder::new(),
+        decoders,
+        unrouted: Arc::clone(&unrouted),
+        reset: Arc::clone(&reset),
     });
     let user_data: *mut c_void = &*state as *const MidiOutState as *mut c_void;
 
@@ -262,6 +329,8 @@ pub fn install(unit: &Unit, sink: MidiOutSink) -> Result<AuMidiOutput> {
     let handle = AuMidiOutput {
         unit: unit.clone(),
         state: Some(state),
+        unrouted,
+        reset,
     };
     unit.set::<MidiOutputCallbackProperty>(Scope::GLOBAL, Element::ZERO, &callback)?;
     Ok(handle)
@@ -404,10 +473,25 @@ fn dispatch(
     midi_out_num: u32,
     pktlist: *const MIDIPacketList,
 ) -> OSStatus {
+    let MidiOutState {
+        sink,
+        decoders,
+        unrouted,
+        reset,
+    } = &mut *state;
+    if reset.swap(false, Ordering::Relaxed) {
+        decoders.iter_mut().for_each(Decoder::reset);
+    }
+    let Some(decoder) = usize::try_from(midi_out_num)
+        .ok()
+        .and_then(|stream| decoders.get_mut(stream))
+    else {
+        unrouted.fetch_add(1, Ordering::Relaxed);
+        return NO_ERR;
+    };
     // A list cut short by a panic last time leaves events staged; they belong
     // to a block that is gone.
-    state.decoder.begin_list();
-    let MidiOutState { sink, decoder, .. } = &mut *state;
+    decoder.begin_list();
     let mut flush = |events: &[WireMidi]| (*sink)(midi_out_num, events);
     // SAFETY: `pktlist` is non-null (checked) and a valid packet list for the
     // call, which is `for_each_packet`'s contract.
@@ -552,7 +636,7 @@ fn next_packet(raw_next: *const u8) -> *const u8 {
 #[cfg(feature = "testing")]
 pub unsafe fn decode_packet_list_for_test(pktlist: *const MIDIPacketList) -> Vec<WireMidi> {
     let mut out = Vec::new();
-    let mut decoder = Decoder::new();
+    let mut decoder = Decoder::new(MidiGroup::FIRST);
     let mut flush = |events: &[WireMidi]| out.extend_from_slice(events);
     // SAFETY: the test passes a packet list it built; see `for_each_packet`.
     unsafe {
@@ -787,6 +871,93 @@ mod tests {
         assert!(events[1].ump.is_note_off());
         assert_eq!(note_on(&events[4]), Some(64));
         assert_eq!(events[4].offset, 384);
+    }
+
+    /// What `decoder` makes of `bytes` as one list at `offset`.
+    fn list(decoder: &mut Decoder, bytes: &[u8], offset: u32) -> Vec<WireMidi> {
+        let mut out = Vec::new();
+        decoder.begin_list();
+        decoder.decode(bytes, offset, &mut |events| out.extend_from_slice(events));
+        decoder.flush(&mut |events| out.extend_from_slice(events));
+        out
+    }
+
+    /// **A parameter run assembles across lists**: the Data Entry LSB that ends
+    /// a Registered Parameter run arrives in a later list than the select and
+    /// the MSB (M2-104 Appendix D.3.3), and the run is one controller (pitch
+    /// bend sensitivity of 12 semitones, zero-extended, M2-115 section 4.1).
+    /// A decoder that widened each message alone would send three Control
+    /// Changes and then a fourth.
+    #[test]
+    fn a_parameter_run_assembles_across_lists() {
+        let mut decoder = Decoder::new(MidiGroup::FIRST);
+        let first = list(&mut decoder, &[0xB0, 101, 0, 0xB0, 100, 0, 0xB0, 6, 12], 0);
+        assert!(first.is_empty(), "a select and an MSB end no run");
+        let second = list(&mut decoder, &[0xB0, 38, 0], 5);
+        let [event] = second[..] else {
+            panic!("expected one Registered Controller, got {second:?}");
+        };
+        assert_eq!(event.offset, 5);
+        let Ok(Message::Midi2(_, tutti_ump::Voice2::Registered { bank, index, value })) =
+            event.ump.decode()
+        else {
+            panic!(
+                "expected a Registered Controller, got {:?}",
+                event.ump.decode()
+            );
+        };
+        assert_eq!((bank.get(), index.get(), value.get()), (0, 0, 12 << 25));
+
+        // After a reset the run is forgotten: the same LSB is a plain Control Change.
+        list(&mut decoder, &[0xB0, 101, 0, 0xB0, 100, 0, 0xB0, 6, 12], 0);
+        decoder.reset();
+        let after = list(&mut decoder, &[0xB0, 38, 0], 0);
+        assert!(matches!(
+            after[..],
+            [WireMidi { ump, .. }] if matches!(
+                ump.decode(),
+                Ok(Message::Midi2(_, tutti_ump::Voice2::ControlChange { .. }))
+            )
+        ));
+    }
+
+    /// **An output stream is the Group of its number**: its messages, SysEx
+    /// included, carry that Group.
+    #[test]
+    fn a_stream_is_the_group_of_its_number() {
+        let mut decoder = Decoder::new(MidiGroup::of(3));
+        let events = list(&mut decoder, &[0x90, 60, 100, 0xF0, 1, 2, 3, 0xF7], 0);
+        assert_eq!(events.len(), 2);
+        for event in events {
+            match event.ump.decode() {
+                Ok(Message::Midi2(address, _)) => assert_eq!(address.group, MidiGroup::of(3)),
+                Ok(Message::Sysex7(group, _)) => assert_eq!(group, MidiGroup::of(3)),
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+    }
+
+    /// **Decoding a list allocates nothing**, a SysEx of several packets and a
+    /// parameter run included: the parser holds a packet's payload inline, the
+    /// batch and the translator are fixed-size.
+    #[test]
+    fn decoding_allocates_nothing() {
+        let mut decoder = Decoder::new(MidiGroup::FIRST);
+        let mut bytes = vec![0xF0];
+        bytes.extend((1..=40).map(|b| b % 0x7F));
+        bytes.push(0xF7);
+        bytes.extend([
+            0xB0, 101, 0, 0xB0, 100, 0, 0xB0, 6, 12, 0xB0, 38, 0, 0x90, 60, 100,
+        ]);
+        let mut seen = 0usize;
+        assert_no_alloc::assert_no_alloc(|| {
+            decoder.begin_list();
+            decoder.decode(&bytes, 0, &mut |events| seen += events.len());
+            decoder.flush(&mut |events| seen += events.len());
+        });
+        // The SysEx (7 packets of at most 6 bytes), the run's one controller
+        // and the note.
+        assert_eq!(seen, 7 + 1 + 1);
     }
 
     /// `next_packet` must reproduce `MIDIPacketNext` for this architecture.

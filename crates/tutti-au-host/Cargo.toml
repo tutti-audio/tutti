@@ -38,6 +38,9 @@ tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 # defaults, which the unit vocabulary does not need.
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
+# The queue the MIDI-output callback pushes into during a render. `ArrayQueue`
+# is bounded and lock-free, so the render thread never allocates or waits.
+crossbeam-queue = { version = "0.3", default-features = false, features = ["alloc"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 coreaudio-sys = "0.2"
