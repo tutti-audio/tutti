@@ -125,11 +125,12 @@ pub enum Error {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    /// A write found a file at its path and was not told to replace it
-    /// ([`WriteOptions::replace`]); the file is untouched.
+    /// A write found something at its path (a file, a directory or a symlink)
+    /// and was not told to replace it ([`WriteOptions::replace`]); it is
+    /// untouched.
     #[error("{} already exists", path.display())]
     Exists {
-        /// The path that holds a file.
+        /// The path that is taken.
         path: std::path::PathBuf,
     },
 

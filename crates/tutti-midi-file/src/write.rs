@@ -38,22 +38,26 @@ impl WriteOptions<'_> {
 
     /// Serialises the file, stages it and renames it to `path`.
     ///
-    /// An existing file is checked for first (a fast refusal); the rename is
-    /// the authority, so a file that appears meanwhile is refused too, and the
-    /// caller still holds the [`MidiFile`] to retry.
+    /// Without [`replace`](Self::replace) the no-clobber rename is the
+    /// authority: anything at `path` when it runs, however it got there, is
+    /// refused, and the caller still holds the [`MidiFile`] to retry.
+    ///
+    /// With `replace` the staged file takes the place of whatever is at
+    /// `path` (the inode is swapped): it has the default mode and owner,
+    /// hard links to the old file are broken, and a symlink at `path` is
+    /// replaced, not followed.
     ///
     /// # Errors
     ///
-    /// [`Error::Exists`] if `path` holds a file and
-    /// [`replace`](Self::replace) was not called; [`Error::Io`] if the staging
-    /// or the rename fails; otherwise as [`MidiFile::to_bytes`].
+    /// [`Error::Exists`] if something (a file, a directory or a symlink) is at
+    /// `path` and `replace` was not called; [`Error::Io`] if the staging or
+    /// the rename fails. A filesystem without an atomic no-replace rename
+    /// falls back to a hard link; on one with neither the write fails with
+    /// [`Error::Io`] and never overwrites. Otherwise as
+    /// [`MidiFile::to_bytes`].
     pub fn write(self, path: impl AsRef<Path>) -> Result<()> {
         let Self { file, existing } = self;
         let path = path.as_ref().to_path_buf();
-        let exists = || Error::Exists { path: path.clone() };
-        if matches!(existing, Existing::Refuse) && path.symlink_metadata().is_ok() {
-            return Err(exists());
-        }
         let bytes = file.to_bytes()?;
         let dir = match path.parent() {
             Some(dir) if !dir.as_os_str().is_empty() => dir,
@@ -72,7 +76,7 @@ impl WriteOptions<'_> {
             Existing::Refuse => {
                 staged.persist_noclobber(&path).map_err(|e| {
                     if e.error.kind() == ErrorKind::AlreadyExists {
-                        exists()
+                        Error::Exists { path: path.clone() }
                     } else {
                         Error::Io(e.error)
                     }

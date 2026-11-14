@@ -919,8 +919,8 @@ impl MidiFile {
         Ok(())
     }
 
-    /// Writes [`to_bytes`](Self::to_bytes) to `path`, refusing an existing
-    /// file. Use [`write_options`](Self::write_options) to replace one.
+    /// Writes [`to_bytes`](Self::to_bytes) to `path`, refusing anything
+    /// already there. Use [`write_options`](Self::write_options) to replace one.
     ///
     /// The bytes are staged in a temporary file beside `path` and renamed into
     /// place, so a crash leaves no partial file under `path`.
@@ -938,9 +938,12 @@ impl MidiFile {
     ///
     /// # Errors
     ///
-    /// [`Error::Exists`] if `path` holds a file (it is untouched, and `self`
-    /// can be written again); [`Error::Io`] if the staging or the rename
-    /// fails; otherwise as [`to_bytes`](Self::to_bytes).
+    /// [`Error::Exists`] if something is at `path` (it is untouched, and
+    /// `self` can be written again); [`Error::Io`] if the staging or the
+    /// rename fails. A filesystem without an atomic no-replace rename falls
+    /// back to a hard link; on one with neither the write fails with
+    /// [`Error::Io`] and never overwrites. Otherwise as
+    /// [`to_bytes`](Self::to_bytes).
     pub fn write(&self, path: impl AsRef<Path>) -> Result<()> {
         self.write_options().write(path)
     }
