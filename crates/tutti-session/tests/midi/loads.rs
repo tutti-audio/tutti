@@ -27,7 +27,7 @@ fn write_file(dir: &Path, name: &str, key: u8) -> (std::path::PathBuf, MidiFile)
     );
     let file = MidiFile::smf(SmfFormat::SingleTrack, 480, vec![track]).expect("builds");
     let path = dir.join(name);
-    file.write(&path).commit().expect("writes");
+    file.write(&path).expect("writes");
     (path, file)
 }
 

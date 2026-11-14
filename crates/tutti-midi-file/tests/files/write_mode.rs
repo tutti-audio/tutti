@@ -18,7 +18,6 @@ fn a_written_file_has_the_umask_mode_not_the_private_temp_mode() {
     MidiFile::smf(SmfFormat::SingleTrack, 96, vec![track(vec![])])
         .unwrap()
         .write(&path)
-        .commit()
         .unwrap();
     let mode = std::fs::metadata(&path).unwrap().permissions().mode();
     assert_eq!(mode, expected);

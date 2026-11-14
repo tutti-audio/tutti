@@ -112,7 +112,7 @@ pub use file::{
     SmfFormat, TextKind, Tick, ToClipError, Track,
 };
 pub use kind::MidiFileKind;
-pub use write::FileWrite;
+pub use write::WriteOptions;
 
 use thiserror::Error;
 
@@ -126,7 +126,7 @@ pub enum Error {
     Io(#[from] std::io::Error),
 
     /// A write found a file at its path and was not told to replace it
-    /// ([`FileWrite::replace`]); the file is untouched.
+    /// ([`WriteOptions::replace`]); the file is untouched.
     #[error("{} already exists", path.display())]
     Exists {
         /// The path that holds a file.

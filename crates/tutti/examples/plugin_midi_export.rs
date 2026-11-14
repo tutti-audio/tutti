@@ -129,9 +129,9 @@ fn phrase(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     MidiFile::smf(SmfFormat::SingleTrack, TPQ, vec![track])?
-        .write(path)
+        .write_options()
         .replace()
-        .commit()?;
+        .write(path)?;
     Ok(())
 }
 

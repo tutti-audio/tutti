@@ -44,7 +44,6 @@ fn detect_path_reads_the_magic_not_the_extension() {
     MidiFile::clip(96, crate::Track::default())
         .unwrap()
         .write(&misnamed)
-        .commit()
         .unwrap();
     assert_eq!(
         MidiFileKind::detect_path(&misnamed).unwrap(),

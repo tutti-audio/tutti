@@ -29,7 +29,7 @@ use tutti_ump::{
 };
 
 use crate::MidiFileKind;
-use crate::write::{Existing, FileWrite};
+use crate::write::{Existing, WriteOptions};
 use crate::{ConfigError, Error, OutOfOrder, Refusal, Result, clip_file, smf};
 
 mod to_clip;
@@ -919,15 +919,38 @@ impl MidiFile {
         Ok(())
     }
 
-    /// Starts writing [`to_bytes`](Self::to_bytes) to `path`: nothing is written
-    /// until [`FileWrite::commit`]. The bytes are staged in a temporary file
-    /// beside `path` and renamed into place, so a crash leaves no partial file
-    /// under `path`; an existing file is refused unless
-    /// [`replace`](FileWrite::replace) is called.
-    pub fn write<'a>(&'a self, path: impl AsRef<Path>) -> FileWrite<'a> {
-        FileWrite {
+    /// Writes [`to_bytes`](Self::to_bytes) to `path`, refusing an existing
+    /// file. Use [`write_options`](Self::write_options) to replace one.
+    ///
+    /// The bytes are staged in a temporary file beside `path` and renamed into
+    /// place, so a crash leaves no partial file under `path`.
+    ///
+    /// ```
+    /// # use tutti_midi_file::{Error, MidiFile, SmfFormat, Track};
+    /// # let dir = tempfile::tempdir()?;
+    /// # let path = dir.path().join("song.mid");
+    /// let file = MidiFile::smf(SmfFormat::SingleTrack, 480, vec![Track::new()])?;
+    /// file.write(&path)?;
+    /// assert!(matches!(file.write(&path), Err(Error::Exists { .. })));
+    /// file.write_options().replace().write(&path)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Exists`] if `path` holds a file (it is untouched, and `self`
+    /// can be written again); [`Error::Io`] if the staging or the rename
+    /// fails; otherwise as [`to_bytes`](Self::to_bytes).
+    pub fn write(&self, path: impl AsRef<Path>) -> Result<()> {
+        self.write_options().write(path)
+    }
+
+    /// How to write this file to a path: [`replace`](WriteOptions::replace)
+    /// overwrites an existing file, and [`write`](WriteOptions::write) ends
+    /// the call.
+    pub fn write_options(&self) -> WriteOptions<'_> {
+        WriteOptions {
             file: self,
-            path: path.as_ref().to_path_buf(),
             existing: Existing::Refuse,
         }
     }

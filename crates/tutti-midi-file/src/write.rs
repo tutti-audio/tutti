@@ -3,7 +3,7 @@
 
 use std::fs::OpenOptions;
 use std::io::{ErrorKind, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::{Error, MidiFile, Result};
 
@@ -16,43 +16,40 @@ pub(crate) enum Existing {
     Replace,
 }
 
-/// A write of a [`MidiFile`] to a path, begun by [`MidiFile::write`].
+/// How a [`MidiFile`] is written to a path, from [`MidiFile::write_options`].
 ///
 /// The bytes go to a temporary file in the target's directory, created with
-/// the process umask's mode, and are renamed to the target by
-/// [`commit`](Self::commit). A failed or crashed write leaves nothing under
-/// the target's name, and a failed commit removes its temporary file.
+/// the process umask's mode, and are renamed to the target. A failed or
+/// crashed write leaves nothing under the target's name, and a failed write
+/// removes its temporary file.
 #[derive(Debug)]
-#[must_use = "a write does nothing until it is committed"]
-pub struct FileWrite<'a> {
+#[must_use = "options do nothing until `write` is called"]
+pub struct WriteOptions<'a> {
     pub(crate) file: &'a MidiFile,
-    pub(crate) path: PathBuf,
     pub(crate) existing: Existing,
 }
 
-impl FileWrite<'_> {
+impl WriteOptions<'_> {
     /// Replaces a file already at the path instead of refusing it.
     pub fn replace(mut self) -> Self {
         self.existing = Existing::Replace;
         self
     }
 
-    /// Serialises the file, stages it and renames it to the path.
+    /// Serialises the file, stages it and renames it to `path`.
     ///
     /// An existing file is checked for first (a fast refusal); the rename is
-    /// the authority, so a file that appears meanwhile is refused too.
+    /// the authority, so a file that appears meanwhile is refused too, and the
+    /// caller still holds the [`MidiFile`] to retry.
     ///
     /// # Errors
     ///
-    /// [`Error::Exists`] if the path holds a file and [`replace`](Self::replace)
-    /// was not called; [`Error::Io`] if the staging or the rename fails;
-    /// otherwise as [`MidiFile::to_bytes`].
-    pub fn commit(self) -> Result<()> {
-        let Self {
-            file,
-            path,
-            existing,
-        } = self;
+    /// [`Error::Exists`] if `path` holds a file and
+    /// [`replace`](Self::replace) was not called; [`Error::Io`] if the staging
+    /// or the rename fails; otherwise as [`MidiFile::to_bytes`].
+    pub fn write(self, path: impl AsRef<Path>) -> Result<()> {
+        let Self { file, existing } = self;
+        let path = path.as_ref().to_path_buf();
         let exists = || Error::Exists { path: path.clone() };
         if matches!(existing, Existing::Refuse) && path.symlink_metadata().is_ok() {
             return Err(exists());

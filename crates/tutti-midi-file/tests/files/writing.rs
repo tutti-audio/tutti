@@ -25,9 +25,10 @@ fn a_write_to_a_new_path_creates_exactly_the_files_bytes_and_no_temp() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("a.mid");
     let f = file(480);
-    f.write(&path).commit().unwrap();
+    f.write(&path).unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), f.to_bytes().unwrap());
     assert_eq!(entries(dir.path()), ["a.mid"]);
+    assert_eq!(MidiFile::read(&path).unwrap(), f);
 }
 
 #[test]
@@ -35,7 +36,7 @@ fn a_write_over_an_existing_file_is_exists_and_keeps_the_old_bytes_and_no_temp()
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("a.mid");
     std::fs::write(&path, b"old").unwrap();
-    let err = file(480).write(&path).commit().unwrap_err();
+    let err = file(480).write(&path).unwrap_err();
     assert!(
         matches!(err, Error::Exists { path: ref p } if *p == path),
         "{err:?}"
@@ -50,8 +51,9 @@ fn replace_swaps_the_old_file_for_the_new_bytes_and_leaves_no_temp() {
     let path = dir.path().join("a.mid");
     std::fs::write(&path, b"old").unwrap();
     let f = file(96);
-    f.write(&path).replace().commit().unwrap();
+    f.write_options().replace().write(&path).unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), f.to_bytes().unwrap());
+    assert_eq!(MidiFile::read(&path).unwrap(), f);
     assert_eq!(entries(dir.path()), ["a.mid"]);
 }
 
@@ -59,7 +61,7 @@ fn replace_swaps_the_old_file_for_the_new_bytes_and_leaves_no_temp() {
 fn replace_on_a_new_path_creates_it() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("a.mid");
-    file(96).write(&path).replace().commit().unwrap();
+    file(96).write_options().replace().write(&path).unwrap();
     assert!(path.is_file());
 }
 
@@ -67,7 +69,7 @@ fn replace_on_a_new_path_creates_it() {
 fn a_write_into_a_missing_directory_is_an_io_error_and_creates_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("no").join("a.mid");
-    let err = file(96).write(&path).commit().unwrap_err();
+    let err = file(96).write(&path).unwrap_err();
     assert!(matches!(err, Error::Io(_)), "{err:?}");
     assert!(entries(dir.path()).is_empty());
 }
