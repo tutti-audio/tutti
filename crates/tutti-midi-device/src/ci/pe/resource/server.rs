@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use super::super::body::{BodyLimit, decode_body, encode_body};
 use super::super::capabilities::{PeCapabilities, PeCiMessage, SimultaneousRequests};
-use super::super::chunk::{PeChunk, PeRequestId, split_message};
+use super::super::chunk::{PeChunk, PeChunkError, PeRequestId, split_message};
 use super::super::flow::{
     PE_TIMEOUT, PeAnswer, PeMessageKind, PeSignal, PeTerminator, PeTransaction,
 };
@@ -181,12 +181,6 @@ enum Pending {
     Resync,
     /// The Subscription ended.
     End,
-}
-
-/// A Subscription message before it is split into chunks.
-struct Update {
-    header: PeHeader,
-    body: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -1354,23 +1348,17 @@ impl ResourceResponder {
             })
         };
         let notify = || update(PeUpdateCommand::Notify, PeEncoding::Ascii, None);
+        let Some(max) = self.peer(peer).map(|p| p.max_sysex) else {
+            return;
+        };
+        let split = |header: &PeHeader, body: &[u8]| split_message(id, header, body, max);
         if pending == Pending::End {
             let header = PeHeader::Subscription(PeSubscription::End {
                 subscribe_id: sub.clone(),
                 ended_by: Some(PeEndedBy::Responder),
                 extra: Default::default(),
             });
-            self.send_update(
-                peer,
-                id,
-                sub,
-                &Update {
-                    header,
-                    body: Vec::new(),
-                },
-                now,
-                out,
-            );
+            self.send_update(peer, id, sub, split(&header, &[]), now, out);
             return;
         }
         let Some((target, encoding)) = self
@@ -1382,23 +1370,18 @@ impl ResourceResponder {
             self.release(peer, id);
             return;
         };
-        let max = self.peer(peer).map(|p| p.max_sysex);
-        let fits = |header: &PeHeader, body: &[u8]| {
-            max.is_some_and(|max| {
-                split_message(PeRequestId::of(0), header, body, max)
-                    .is_ok_and(|chunks| chunks.len() == 1)
-            })
+        let one_chunk = |header: &PeHeader, body: &[u8]| {
+            split(header, body).ok().filter(|chunks| chunks.len() == 1)
         };
-        // The message, and the body it carries: a `partial` as it was queued, a
+        // The message, split under its Request ID: a `partial` as it was queued, a
         // `full` of the data as it is, and a `notify` when neither fits a chunk.
-        let mut message: Option<(PeHeader, Vec<u8>)> = None;
+        let mut message: Option<Vec<PeChunk>> = None;
         if let Pending::Partial(changes) = &pending {
             let header = update(PeUpdateCommand::Partial, encoding, None);
             if let Ok(body) =
                 encode_body(encoding, &PeJson::Object(changes_object(changes)).encode())
-                && fits(&header, &body)
             {
-                message = Some((header, body));
+                message = one_chunk(&header, &body);
             }
         }
         if message.is_none()
@@ -1406,37 +1389,32 @@ impl ResourceResponder {
         {
             let (media_type, bytes) = data.to_wire();
             let header = update(PeUpdateCommand::Full, encoding, media_type);
-            if let Ok(body) = encode_body(encoding, &bytes)
-                && fits(&header, &body)
-            {
-                message = Some((header, body));
+            if let Ok(body) = encode_body(encoding, &bytes) {
+                message = one_chunk(&header, &body);
             }
         }
-        let (header, body) = message.unwrap_or_else(|| (notify(), Vec::new()));
-        self.send_update(peer, id, sub, &Update { header, body }, now, out);
+        let chunks = message.map_or_else(|| split(&notify(), &[]), Ok);
+        self.send_update(peer, id, sub, chunks, now, out);
     }
 
-    /// Sends a Subscription message to `peer` under `id`, which the caller took
-    /// from the peer's pool.
+    /// Sends the Subscription message `split` to `peer` under `id`, which the
+    /// caller took from the peer's pool and split the message under.
     ///
-    /// The message always splits: a body is encoded 7-bit before it gets here
-    /// and carries at most one chunk of data (`fits`) or none (`notify`, `end`),
-    /// and a header is a few tens of bytes against a receivable size of at least
-    /// 128. A message that did not would be a bug of this crate: it is not sent
-    /// and its ID is given back.
+    /// A message always splits: a body is encoded 7-bit before it gets here and
+    /// carries at most one chunk of data (`full`, `partial`) or none (`notify`,
+    /// `end`), and a header is a few tens of bytes against a receivable size of
+    /// at least 128. One that did not would be a bug of this crate: it is not
+    /// sent and its ID is given back.
     fn send_update(
         &mut self,
         peer: Muid,
         id: PeRequestId,
         sub: &SubscribeId,
-        update: &Update,
+        split: Result<Vec<PeChunk>, PeChunkError>,
         now: Instant,
         out: &mut Vec<ResponderAction>,
     ) {
-        let Some(max) = self.peer(peer).map(|p| p.max_sysex) else {
-            return;
-        };
-        let Ok(chunks) = split_message(id, &update.header, &update.body, max) else {
+        let Ok(chunks) = split else {
             debug_assert!(false, "a Subscription message always splits");
             self.release(peer, id);
             return;
