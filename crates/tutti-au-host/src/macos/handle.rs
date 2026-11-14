@@ -1,6 +1,7 @@
 //! Owned handle to an instantiated (but not necessarily initialized) AU.
 
 use tutti_au_ffi::{ComponentRef, Unit};
+use tutti_plugin_types::MainWorkHandle;
 
 use crate::component::AuType;
 use crate::error::{AuError, LoadStage, Result};
@@ -27,13 +28,14 @@ impl std::fmt::Debug for AuHandle {
 }
 
 impl AuHandle {
-    /// Instantiates a component, returning a handle that owns the lifetime.
+    /// Instantiates a component, returning a handle that owns the lifetime. A last
+    /// drop off the calling thread hands the disposal to `work`'s collector.
     ///
     /// # Errors
     /// Returns [`AuError::RequiresAsyncInstantiation`] for a v3 unit that must
     /// be created asynchronously, or [`AuError::LoadFailed`] if the component
     /// cannot be described or instantiated.
-    pub fn new(component: ComponentRef) -> Result<Self> {
+    pub fn new(component: ComponentRef, work: &MainWorkHandle) -> Result<Self> {
         // The component came from the registry, so describing it must not fail.
         // Swallowing a failure here would silently misclassify the AU as
         // `Unknown(0)`, breaking MIDI routing / type-gated behavior downstream
@@ -59,7 +61,7 @@ impl AuHandle {
             return Err(AuError::RequiresAsyncInstantiation);
         }
 
-        let unit = Unit::new(component).map_err(|e| {
+        let unit = Unit::new(component, work).map_err(|e| {
             AuError::load_failed(
                 component_triple(&desc),
                 LoadStage::Instantiation,

@@ -19,8 +19,9 @@
 //! list lends a queue a larger buffer for a block
 //! ([`QueueState::lend_from`]).
 
-use crate::guard::{Out, guard};
+use crate::guard::Out;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+use tutti_plugin_types::ffi_guard;
 use vst3::Steinberg::{
     Vst::{IParamValueQueue, IParamValueQueueTrait, kNoParamId},
     kInvalidArgument, kResultFalse, kResultOk, tresult,
@@ -210,14 +211,14 @@ impl IParamValueQueueTrait for ParamValueQueueImpl {
     /// `kNoParamId` while another thread is resetting the queue.
     unsafe fn getParameterId(&self) -> u32 {
         // The ABI's bare `ParamID`, which is where the opaque id leaves.
-        guard(kNoParamId, || {
+        ffi_guard(kNoParamId, || {
             self.try_param_id().map_or(kNoParamId, ParamId::get)
         })
     }
 
     /// Zero while another thread is writing the queue.
     unsafe fn getPointCount(&self) -> i32 {
-        guard(0, || {
+        ffi_guard(0, || {
             self.state.try_borrow().map_or(0, |s| s.points.len() as i32)
         })
     }
@@ -226,7 +227,7 @@ impl IParamValueQueueTrait for ParamValueQueueImpl {
     unsafe fn getPoint(&self, index: i32, sample_offset: *mut i32, value: *mut f64) -> tresult {
         // SAFETY: COM out-parameters: each null or valid for this call.
         let (offset_out, value_out) = unsafe { (Out::new(sample_offset), Out::new(value)) };
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             let Some(state) = self.state.try_borrow() else {
                 return kResultFalse;
             };
@@ -255,7 +256,7 @@ impl IParamValueQueueTrait for ParamValueQueueImpl {
     unsafe fn addPoint(&self, sample_offset: i32, value: f64, index: *mut i32) -> tresult {
         // SAFETY: a COM out-parameter: null or valid for this call.
         let index = unsafe { Out::new(index) };
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             let Some(mut state) = self.state.try_borrow_mut() else {
                 self.count_dropped();
                 return kResultFalse;
