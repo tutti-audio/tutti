@@ -4,7 +4,7 @@
 
 use std::vec::Vec;
 
-use tutti_ump::U7;
+use tutti_ump::{U7, U14};
 
 use super::MessageText;
 
@@ -79,9 +79,9 @@ macro_rules! status_message {
                 self.message.encode(&mut text);
                 // The length is a 14-bit field; the text of a message we hold
                 // is at most 103 bytes, and one read from a peer fits it.
-                let len = text.len().min(0x3FFF);
-                out.extend([(len & 0x7F) as u8, ((len >> 7) & 0x7F) as u8]);
-                out.extend(text.into_iter().take(len));
+                let len = U14::from_len(text.len()).unwrap_or(U14::MAX);
+                out.extend(len.to_le7());
+                out.extend(text.into_iter().take(usize::from(len.get())));
             }
 
             /// Reads the body, or `None` when it is malformed: a byte with its

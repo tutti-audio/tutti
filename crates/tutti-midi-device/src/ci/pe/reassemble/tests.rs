@@ -634,14 +634,14 @@ fn the_stream_and_buffer_limits_are_range_checked_values() {
     check_range_contract(&RangeContract {
         new: StreamLimit::new,
         get: StreamLimit::get,
-        of: None,
+        of: Some(StreamLimit::of),
         valid: &[1, 128],
         invalid: &[0, 129, 255],
     });
     check_range_contract(&RangeContract {
         new: BufferLimit::new,
         get: BufferLimit::get,
-        of: None,
+        of: Some(BufferLimit::of),
         valid: &[1, usize::MAX],
         invalid: &[0],
     });
