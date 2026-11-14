@@ -10,7 +10,7 @@ use super::disk_voice::DiskVoice;
 use super::fault::FaultLatch;
 use super::loop_span::Loop;
 use super::memory_source::{MemorySource, VoiceWindow};
-use tutti_graph::{ForkCause, ForkMode, Node};
+use tutti_graph::{ForkCause, ForkMode, Node, RenderMode};
 use tutti_types::{Amplitude, Cents, PlaybackRate, SampleRate, StretchFactor, Tail};
 
 /// Whether anything can still steer a voice node: the live node, which a
@@ -128,14 +128,14 @@ impl Clone for VoiceSource {
 }
 
 impl VoiceSource {
-    /// Run the source at the owner's rate (what `prepare` does to the
-    /// source as a node of its own: the memory tier's conversion, the disk
-    /// tier's step). Allocation-free: a rate and a ratio, so the pool's
-    /// `AddVoice` drain can run it.
-    pub(crate) fn prepare_rate(&mut self, sample_rate: SampleRate) {
+    /// Run the source at the owner's rate and render mode (what `prepare`
+    /// does to the source as a node of its own: the memory tier's conversion,
+    /// the disk tier's step and its file read's permission). Allocation-free:
+    /// a rate, a ratio and a mode, so the pool's `AddVoice` drain can run it.
+    pub(crate) fn prepare_rate(&mut self, sample_rate: SampleRate, mode: RenderMode) {
         match self {
             Self::Memory(s) => s.set_render_rate(sample_rate),
-            Self::Disk(s) => s.set_render_rate(sample_rate),
+            Self::Disk(s) => s.set_render(sample_rate, mode),
         }
     }
 

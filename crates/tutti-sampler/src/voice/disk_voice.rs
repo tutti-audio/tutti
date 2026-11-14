@@ -20,7 +20,7 @@ use std::sync::Arc;
 use crate::MAX_SAMPLER_CHANNELS;
 use tutti_graph::{
     Cx, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, IntoNode, Io, Node,
-    NodeParts, Prepare, Shape, Status,
+    NodeParts, Prepare, RenderMode, Shape, Status,
 };
 use tutti_types::{
     Amplitude, ChannelLayout, PlaybackRate, ReadRate, SamplePosition, SampleRate, SrcRatio, Tail,
@@ -233,6 +233,10 @@ pub struct DiskVoice {
     /// steps by the streamer's conversion for the session rate.
     sample_rate: Option<SampleRate>,
 
+    /// The render mode `prepare` last gave this voice: a fork reads its file
+    /// on the render's thread, which only an offline render allows.
+    render_mode: RenderMode,
+
     /// The transport as this voice reads it when it is a graph node of its
     /// own (a voice in a pool or a `VoiceNode` reads its owner's).
     clock: Clock,
@@ -291,6 +295,10 @@ enum OfflineFault {
     /// It was asked to render before it was prepared with a sample rate.
     #[error("it was rendered before it was given a sample rate")]
     NoRenderRate,
+    /// It was prepared for a realtime render, where its file read would block
+    /// the audio thread.
+    #[error("it was prepared for a realtime render, and its file read blocks")]
+    PreparedRealtime,
 }
 
 /// Why a disk voice refused a fork.
@@ -338,6 +346,7 @@ impl Clone for DiskVoice {
             origin: self.origin.clone(),
             offline: self.offline.clone(),
             sample_rate: self.sample_rate,
+            render_mode: self.render_mode,
             clock: Clock::new(),
             tempo: self.tempo.clone(),
             // Unsized, so a clone stays allocation-free as it was: a copy
@@ -367,6 +376,7 @@ impl DiskVoice {
             origin: None,
             offline: None,
             sample_rate: None,
+            render_mode: RenderMode::Realtime,
             clock: Clock::new(),
             tempo: None,
             positions: Vec::new(),
@@ -731,6 +741,12 @@ impl DiskVoice {
                 emit(i, &silent[..w]);
                 continue;
             }
+            // Its read blocks on file I/O, which a realtime render never waits on.
+            if !self.render_mode.is_offline() {
+                offline.fault.latch(OfflineFault::PreparedRealtime);
+                emit(i, &silent[..w]);
+                continue;
+            }
             match offline.read.as_mut() {
                 Some(read) => {
                     read.read_into(*pos, direction, self.inner.read.place(), &mut frame[..w]);
@@ -747,10 +763,12 @@ impl DiskVoice {
         }
     }
 
-    /// Run at `sample_rate`: the step converts the file's rate to it. What
+    /// Run at `sample_rate` under `mode`: the step converts the file's rate to
+    /// it, and a fork reads its file only when `mode` is offline. What
     /// [`Node::prepare`] does; allocation-free.
-    pub(crate) fn set_render_rate(&mut self, sample_rate: SampleRate) {
+    pub(crate) fn set_render(&mut self, sample_rate: SampleRate, mode: RenderMode) {
         self.sample_rate = Some(sample_rate);
+        self.render_mode = mode;
     }
 
     /// Forget the read's jump state (a slot's flush at a jump, a reset).
@@ -828,7 +846,7 @@ impl Node for DiskVoice {
     /// The render rate, and the block's position scratch sized from
     /// `max_block` (a re-prepare at another size resizes it).
     fn prepare(&mut self, p: &Prepare) {
-        self.set_render_rate(p.sample_rate());
+        self.set_render(p.sample_rate(), p.render_mode());
         let frames = p.max_block().get();
         self.positions.clear();
         self.positions.resize(frames, None);

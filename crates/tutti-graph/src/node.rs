@@ -31,6 +31,7 @@ use crate::history::TransportHistory;
 use crate::io::Io;
 use crate::param::ParamPorts;
 use crate::play::PlayClock;
+use crate::render_mode::RenderMode;
 use crate::time::Offset;
 use crate::wake::Wake;
 use tutti_types::PlayReading;
@@ -689,6 +690,7 @@ pub struct Prepare {
     sample_rate: SampleRate,
     max_block: MaxBlock,
     quantum: Option<MaxBlock>,
+    render_mode: RenderMode,
 }
 
 impl Prepare {
@@ -699,7 +701,22 @@ impl Prepare {
             sample_rate,
             max_block,
             quantum: None,
+            render_mode: RenderMode::Realtime,
         }
+    }
+
+    /// This prepare, under `mode`: whether blocks arrive under realtime
+    /// pressure. Realtime unless set.
+    #[must_use]
+    pub const fn with_render_mode(mut self, mode: RenderMode) -> Self {
+        self.render_mode = mode;
+        self
+    }
+
+    /// Whether blocks arrive under realtime pressure, fixed until the next
+    /// prepare (never per block). See [`RenderMode`].
+    pub const fn render_mode(&self) -> RenderMode {
+        self.render_mode
     }
 
     /// This prepare, for a host whose device calls back with `quantum`

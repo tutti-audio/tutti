@@ -48,7 +48,7 @@ use tutti_graph::{BusRef, BusSource, Buses, EdgeFade, EdgeGain};
 use tutti_graph::{
     CommitError, Editor, EventEdge, EventIn, EventOut, Executor, Fade, GraphInvalid, InletNode,
     InletRing, IntoNode, MeterReader, MixError, ModeError, NodeMode, ParamIn, ParamMod, ParamRange,
-    ParamSet, Prepare, TapWriter, TransportPosition,
+    ParamSet, Prepare, RenderMode, TapWriter, TransportPosition,
 };
 use tutti_graph::{
     Edge as RawEdge, EdgeId, InPort as RawIn, NodeKey, OutPort as RawOut, Sink, Source,
@@ -420,13 +420,15 @@ fn compensation_of(plan: &tutti_graph::Plan) -> Compensation {
 /// The graph's `Prepare`: `rate`, `max_block`, and the device's callback
 /// `quantum` when the host knows it (`tutti_cpal::OutputSpec::quantum`). A
 /// hosted out-of-process plugin ships one quantum per callback to its server,
-/// so the quantum is what keeps its pipeline in step with the device.
+/// so the quantum is what keeps its pipeline in step with the device. The
+/// session's own graph is live: [`RenderMode::Realtime`]. An offline render or
+/// a bounce prepares its fork with `RenderGraph::prepare`, which is offline.
 pub(crate) fn prepare_for(
     rate: SampleRate,
     max_block: MaxBlock,
     quantum: Option<MaxBlock>,
 ) -> Prepare {
-    let p = Prepare::new(rate, max_block);
+    let p = Prepare::new(rate, max_block).with_render_mode(RenderMode::Realtime);
     match quantum {
         Some(q) => p.with_quantum(q),
         None => p,

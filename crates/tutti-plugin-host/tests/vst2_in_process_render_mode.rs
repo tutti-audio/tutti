@@ -31,9 +31,9 @@ use tutti_fixtures::main_thread;
 use tutti_plugin_types::Load;
 use tutti_vst2_host::Vst2Loaded;
 
+use tutti_graph::RenderMode;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_host::{PluginNode, load_client};
-use tutti_plugin_types::RenderMode;
 use tutti_types::SampleRate;
 use tutti_vst2_test_plugin::ProcessCapture;
 
@@ -145,11 +145,23 @@ fn drive_blocks(unit: &mut PluginNode<Vst2Loaded>, max: usize, frames: usize) {
 
 /// [`drive_blocks`] at `hz`: the node is prepared at that rate.
 fn drive_blocks_at(unit: &mut PluginNode<Vst2Loaded>, hz: f64, max: usize, frames: usize) {
+    drive_blocks_in(unit, hz, max, frames, RenderMode::Realtime);
+}
+
+/// [`drive_blocks_at`] with the node prepared under `mode`.
+fn drive_blocks_in(
+    unit: &mut PluginNode<Vst2Loaded>,
+    hz: f64,
+    max: usize,
+    frames: usize,
+    mode: RenderMode,
+) {
     use tutti_graph::{Env, Node, Prepare, TransportChanges, TransportPosition};
     let rate = SampleRate::of(hz);
     Node::prepare(
         unit,
-        &Prepare::new(rate, tutti_types::MaxBlock::of(tutti_types::Samples(max))),
+        &Prepare::new(rate, tutti_types::MaxBlock::of(tutti_types::Samples(max)))
+            .with_render_mode(mode),
     );
     let silence = vec![0.0f32; frames];
     let inputs: Vec<&[f32]> = (0..Node::shape(unit).audio_in().count())
@@ -234,6 +246,29 @@ fn an_offline_mode_set_on_the_handle_reaches_the_plugin() {
         cap.process_level, LEVEL_OFFLINE,
         "the plugin still reports realtime, so the mode set on the handle never \
          reached the instance the node renders"
+    );
+}
+
+/// **The mode a graph prepares the node under reaches the plugin**, with no
+/// call on the handle: the session's render mode is carried by `Prepare`.
+#[test]
+fn a_node_prepared_offline_renders_the_plugin_offline() {
+    let _guard = lock_probe();
+    let mut loaded = load();
+
+    drive_blocks_in(
+        &mut loaded.unit,
+        SAMPLE_RATE,
+        BLOCK,
+        BLOCK,
+        RenderMode::Offline,
+    );
+    let cap = read_capture(&loaded.path);
+
+    assert!(cap.process_level_queries > 0, "the probe never asked");
+    assert_eq!(
+        cap.process_level, LEVEL_OFFLINE,
+        "the node was prepared offline and the plugin still reports realtime"
     );
 }
 

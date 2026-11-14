@@ -109,6 +109,8 @@ where
         } else {
             this.set_rate(p.sample_rate());
         }
+        // The session's mode, at configure time beside the rate.
+        this.set_render_mode_from(p);
         // A chunked Processor's delivery chunk is its own (`Processor::chunk`),
         // and it starts counting from here.
         this.phase = Samples(0);
