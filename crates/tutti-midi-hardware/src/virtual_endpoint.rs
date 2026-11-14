@@ -23,13 +23,14 @@
 use std::sync::{Mutex, PoisonError};
 
 use tutti_midi_device::{EndpointName, FunctionBlock};
-use tutti_midi_protocol::{Translator, narrow_message};
-use tutti_ump::Ump;
+use tutti_midi_protocol::{Narrower, Translator, narrow_message};
+use tutti_ump::{Message, Ump};
 
 use crate::InputProducerHandle;
 use crate::backend;
 use crate::endpoints::InputConnection;
 use crate::error::Result;
+use crate::wire::narrow_voice;
 
 /// The UMP protocol an endpoint carries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -101,8 +102,10 @@ pub(crate) trait SourceBackend: Send + Sync {
 
 /// How a source brings a message to its protocol.
 enum Conversion {
-    /// A MIDI 1.0 endpoint: MIDI 2.0 voice messages narrow.
-    Narrow,
+    /// A MIDI 1.0 endpoint: MIDI 2.0 voice messages narrow through the one
+    /// [`Narrower`] of the endpoint's life, which keeps the parameter and bank
+    /// the subscribers have been sent (M2-104 Appendix D.2).
+    Narrow(Box<Mutex<Narrower>>),
     /// A MIDI 2.0 endpoint: MIDI 1.0 voice messages widen, holding the
     /// Registered and Assignable Controller runs a MIDI 1.0 stream spreads over
     /// several messages.
@@ -139,7 +142,7 @@ impl VirtualSource {
     pub fn open(spec: &VirtualSpec) -> Result<Self> {
         let (backend, protocol) = backend::open_virtual_source(spec)?;
         let conversion = match protocol {
-            VirtualProtocol::Midi1 => Conversion::Narrow,
+            VirtualProtocol::Midi1 => Conversion::Narrow(Box::new(Mutex::new(Narrower::new()))),
             VirtualProtocol::Midi2 => Conversion::Widen(Box::new(Mutex::new(Translator::new()))),
         };
         Ok(Self {
@@ -153,26 +156,44 @@ impl VirtualSource {
     /// Sends `ump` to everything connected to the endpoint, in the endpoint's
     /// [`protocol`](Self::protocol).
     ///
-    /// A MIDI 2.0 voice message narrows to its MIDI 1.0 message on a MIDI 1.0
-    /// endpoint (M2-115), and a MIDI 1.0 voice message widens on a MIDI 2.0 one.
-    /// A MIDI 1.0 Registered or Assignable Controller is several messages, so
-    /// the widened controller is sent with the message that completes it and
-    /// the earlier ones send nothing. Any other message is sent as it is.
+    /// A MIDI 2.0 voice message narrows to its MIDI 1.0 messages on a MIDI 1.0
+    /// endpoint (M2-115, M2-104 Appendix D.2): a Program Change with a bank is
+    /// the Bank Select controllers and the Program Change, and a Registered or
+    /// Assignable Controller is its four Control Changes, the parameter select
+    /// skipped when the subscribers have it. A MIDI 1.0 voice message widens on
+    /// a MIDI 2.0 one; a MIDI 1.0 Registered or Assignable Controller is several
+    /// messages, so the widened controller is sent with the message that
+    /// completes it and the earlier ones send nothing. Any other message is
+    /// sent as it is.
     ///
     /// # Errors
     ///
     /// [`Error::NoMidi1Form`](crate::Error::NoMidi1Form) for a MIDI 2.0 message
-    /// on a MIDI 1.0 endpoint that has no single MIDI 1.0 message (a per-note
-    /// controller, a registered or assignable controller, per-note management);
-    /// nothing is sent. Otherwise the platform's error when the OS refuses the
+    /// on a MIDI 1.0 endpoint that has no MIDI 1.0 form even in sequence (a
+    /// per-note controller, per-note management); nothing is sent. Otherwise the platform's error when the OS refuses the
     /// message.
     pub fn send(&self, ump: Ump) -> Result<()> {
         let ump = match &self.conversion {
-            Conversion::Narrow => match ump.decode() {
-                Ok(message) => Ump::from(narrow_message(message)?),
-                // A packet no message is defined for is forwarded as it is.
-                Err(_) => ump,
-            },
+            Conversion::Narrow(narrower) => {
+                // A packet no message is defined for, and any that is not MIDI 2.0
+                // voice, is forwarded as it is.
+                let Ok(message @ Message::Midi2(..)) = ump.decode() else {
+                    return self.backend.send(ump.words());
+                };
+                // The packets go in order under the lock: the narrower assumes
+                // that what it emitted was sent before the next message.
+                let mut narrower = narrower.lock().unwrap_or_else(PoisonError::into_inner);
+                let mut sent = Ok(());
+                let count = narrow_voice(&mut narrower, message, |packet| {
+                    if sent.is_ok() {
+                        sent = self.backend.send(packet.words());
+                    }
+                });
+                if count == 0 {
+                    narrow_message(message)?;
+                }
+                return sent;
+            }
             Conversion::Widen(translator) => {
                 let widened = translator
                     .lock()

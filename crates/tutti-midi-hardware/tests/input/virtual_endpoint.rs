@@ -13,14 +13,19 @@ use tutti_alsa_ffi::{
     Blocking, CAP_READ, CAP_WRITE, Client, PROTO_MIDI1, PROTO_MIDI2, PortEntry, Read,
     TYPE_APPLICATION, TYPE_MIDI_GENERIC, UmpVersion,
 };
-use tutti_fixtures::midi::{m1_note_on, note_on, per_note_pitch_bend};
+use tutti_fixtures::midi::{
+    m1_cc, m1_note_on, note_on, per_note_pitch_bend, program_change, registered,
+};
 use tutti_graph::EventCapacity;
 use tutti_midi_device::{BlockName, EndpointName, FunctionBlock};
 use tutti_midi_hardware::{
     DeviceInlets, HardwareMidiInputs, VirtualDestination, VirtualProtocol, VirtualSource,
     VirtualSpec,
 };
-use tutti_ump::{Direction, FirstGroup, FunctionBlockId, GroupSpan, MidiChannel, U7, UiHint, Ump};
+use tutti_ump::{
+    Bank, CCNumber, Direction, FirstGroup, FunctionBlockId, GroupSpan, Message, MidiChannel, Rpn, U7, UiHint,
+    Ump, Voice1,
+};
 
 const PATIENCE: Duration = Duration::from_secs(5);
 
@@ -238,6 +243,72 @@ fn a_message_with_no_midi1_form_is_refused_by_a_midi1_source() {
     ));
     std::thread::sleep(Duration::from_millis(100));
     assert!(matches!(peer.read_event(), Ok(Read::Empty)));
+}
+
+/// A MIDI 2.0 Program Change with a bank sent into a MIDI 1.0 source reaches a
+/// subscriber as Bank Select MSB and LSB (CC 0, CC 32) and then the Program
+/// Change (M2-104 Appendix D.2.4): the bank is not lost.
+#[test]
+fn a_program_change_with_a_bank_reaches_a_midi1_subscriber_as_bank_select_and_program() {
+    let spec = spec("bank").with_protocol(VirtualProtocol::Midi1);
+    let source = VirtualSource::open(&spec).expect("a virtual source");
+    let (peer, port) = peer_in(CAP_WRITE, UmpVersion::Midi1);
+    let found = find(&peer, &spec).expect("listed");
+    peer.connect_from(port, found.client, found.port)
+        .expect("subscribes");
+
+    let channel = MidiChannel::of(2);
+    let bank = Bank {
+        msb: U7::of(3),
+        lsb: U7::of(9),
+    };
+    source
+        .send(program_change(channel, 17, Some(bank)))
+        .expect("sends");
+    let got = read(&peer, 3);
+    let want = [
+        m1_cc(channel, CCNumber::BANK_SELECT, bank.msb),
+        m1_cc(channel, CCNumber::BANK_SELECT_LSB, bank.lsb),
+        Message::midi1(channel, Voice1::ProgramChange(U7::of(17))).into(),
+    ];
+    for (got, want) in got.iter().zip(&want) {
+        assert_eq!(&got[..want.words().len()], want.words());
+    }
+}
+
+/// A Registered Controller sent into a MIDI 1.0 source reaches a subscriber as
+/// the four Control Changes of M2-104 Appendix D.2.3 (CC 101, 100, 6, 38), and
+/// a second value for the same parameter, from the source's one narrower, is
+/// only CC 6 and CC 38: the select is already there.
+#[test]
+fn a_registered_controller_reaches_a_midi1_subscriber_as_the_rpn_sequence() {
+    let spec = spec("rpn").with_protocol(VirtualProtocol::Midi1);
+    let source = VirtualSource::open(&spec).expect("a virtual source");
+    let (peer, port) = peer_in(CAP_WRITE, UmpVersion::Midi1);
+    let found = find(&peer, &spec).expect("listed");
+    peer.connect_from(port, found.client, found.port)
+        .expect("subscribes");
+
+    let channel = MidiChannel::of(2);
+    let cc = |n: u8, value: u8| m1_cc(channel, CCNumber::of(n), U7::of(value));
+    source
+        .send(registered(channel, Rpn::PITCH_BEND_SENSITIVITY, 12 << 25))
+        .expect("sends");
+    source
+        .send(registered(channel, Rpn::PITCH_BEND_SENSITIVITY, 7 << 25))
+        .expect("sends");
+    let got = read(&peer, 6);
+    let want = [
+        cc(101, 0),
+        cc(100, 0),
+        cc(6, 12),
+        cc(38, 0),
+        cc(6, 7),
+        cc(38, 0),
+    ];
+    for (got, want) in got.iter().zip(&want) {
+        assert_eq!(&got[..want.words().len()], want.words());
+    }
 }
 
 /// A MIDI 1.0 note sent into a MIDI 2.0 source reaches a subscriber widened:

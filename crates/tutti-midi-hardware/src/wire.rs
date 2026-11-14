@@ -99,16 +99,14 @@ impl Wire {
                     }
                 }
                 4 if narrows => {
-                    if let Ok(message @ Message::Midi2(address, _)) = ump.decode() {
+                    if let Ok(message) = ump.decode() {
                         let out = &mut self.out;
-                        self.narrower.feed(message, |bytes| {
-                            if let Some(packet) = parse_exact(address.group, bytes.as_slice()) {
-                                out.push(Outgoing {
-                                    at,
-                                    send,
-                                    ump: Ump::from(packet),
-                                });
-                            }
+                        narrow_voice(&mut self.narrower, message, |packet| {
+                            out.push(Outgoing {
+                                at,
+                                send,
+                                ump: packet,
+                            });
                         });
                     }
                 }
@@ -129,6 +127,28 @@ impl Wire {
     pub(crate) fn accepted(&self, taken: usize) -> usize {
         self.ends.partition_point(|&end| end <= taken)
     }
+}
+
+/// Runs a MIDI 2.0 Channel Voice `message` through `narrower` and calls `out`
+/// with each MIDI 1.0 packet it becomes, in the order to send them; returns how
+/// many that was. Any other message, and one with no MIDI 1.0 form (a per-note
+/// controller, D.2.8), is none.
+pub(crate) fn narrow_voice(
+    narrower: &mut Narrower,
+    message: Message,
+    mut out: impl FnMut(Ump),
+) -> usize {
+    let Message::Midi2(address, _) = message else {
+        return 0;
+    };
+    let mut count = 0;
+    narrower.feed(message, |bytes| {
+        if let Some(packet) = parse_exact(address.group, bytes.as_slice()) {
+            out(Ump::from(packet));
+            count += 1;
+        }
+    });
+    count
 }
 
 /// A Utility packet as the wire carries it: the JR messages when the device
