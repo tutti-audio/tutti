@@ -1,13 +1,13 @@
 //! Parametric EQ band: an SVF with a mono layout and an EQ band's constructor.
 
-use tutti_dsp::Real;
+use tutti_buffers::Float;
 use tutti_graph::{
     Cx, HasParam, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
 };
 use tutti_types::{ChannelLayout, Db, Hz, Q};
 
 use super::svf::SvfFilterNode;
-use tutti_dsp::{SvfControls, SvfType};
+use tutti_dsp::{Lanes, SvfControls, SvfType};
 
 /// Parametric EQ band: an [`SvfFilterNode`] at one channel. 1 input, 1
 /// output.
@@ -21,11 +21,11 @@ use tutti_dsp::{SvfControls, SvfType};
 ///
 /// `F` is the internal state precision; defaults to `f64`.
 #[derive(Clone, Debug)]
-pub struct EqBandNode<F: Real = f64> {
+pub struct EqBandNode<F: Float + Lanes = f64> {
     svf: SvfFilterNode<F>,
 }
 
-impl<F: Real> EqBandNode<F> {
+impl<F: Float + Lanes> EqBandNode<F> {
     /// Builds a band of `filter_type` at
     /// `frequency`, `q` and `gain_db`.
     ///
@@ -53,7 +53,7 @@ impl<F: Real> EqBandNode<F> {
     }
 }
 
-impl<F: Real + 'static> Node for EqBandNode<F> {
+impl<F: Float + Lanes> Node for EqBandNode<F> {
     /// Mono in and out. Unlike the bare filter it declares no modulatable
     /// params: a band is set, not swept.
     /// Its tail is the inner filter's: [`Tail::Unknown`](tutti_types::Tail::Unknown).
@@ -76,7 +76,7 @@ impl<F: Real + 'static> Node for EqBandNode<F> {
     }
 }
 
-impl<F: Real + 'static> ParamNode for EqBandNode<F> {
+impl<F: Float + Lanes> ParamNode for EqBandNode<F> {
     /// The inner filter's: cutoff, Q and gain.
     fn param_set(&self) -> ParamSet {
         self.svf.param_set()
@@ -90,7 +90,7 @@ impl<F: Real + 'static> ParamNode for EqBandNode<F> {
 }
 
 /// A band has the params of the filter inside it, in its units.
-impl<F: Real, const P: u16> HasParam<P> for EqBandNode<F>
+impl<F: Float + Lanes, const P: u16> HasParam<P> for EqBandNode<F>
 where
     SvfFilterNode<F>: HasParam<P>,
 {
@@ -99,7 +99,7 @@ where
 
 /// Inserted as the inner filter is: its [`ParamSet`] as its controls, and a
 /// fork from the values last set through it.
-impl<F: Real + 'static> IntoNode for EqBandNode<F> {
+impl<F: Float + Lanes> IntoNode for EqBandNode<F> {
     type Controls = ParamSet;
 
     fn into_parts(self) -> NodeParts<ParamSet> {
@@ -115,7 +115,7 @@ mod tests {
     use tutti_types::SampleRate;
 
     /// `eq`, prepared at 44.1 kHz, over `input` in one block.
-    fn render<F: Real + 'static>(eq: EqBandNode<F>, input: &[f32]) -> Vec<f32> {
+    fn render<F: Float + Lanes>(eq: EqBandNode<F>, input: &[f32]) -> Vec<f32> {
         let rate = SampleRate::SR_44K1;
         let mut eq = prepared(eq, rate, input.len());
         drive(&mut eq, rate, &[input], &[]).remove(0)
