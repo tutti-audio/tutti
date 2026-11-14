@@ -71,19 +71,3 @@ fn a_write_into_a_missing_directory_is_an_io_error_and_creates_nothing() {
     assert!(matches!(err, Error::Io(_)), "{err:?}");
     assert!(entries(dir.path()).is_empty());
 }
-
-/// The staged file is created at `0o666` under the umask, as `std::fs::write`
-/// would, not at the temp file's private `0o600`.
-#[cfg(unix)]
-#[test]
-fn a_written_file_has_the_umask_mode_not_the_private_temp_mode() {
-    use std::os::unix::fs::PermissionsExt;
-    let dir = tempfile::tempdir().unwrap();
-    let reference = dir.path().join("reference");
-    std::fs::write(&reference, b"").unwrap();
-    let expected = std::fs::metadata(&reference).unwrap().permissions().mode();
-    let path = dir.path().join("a.mid");
-    file(96).write(&path).commit().unwrap();
-    let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-    assert_eq!(mode, expected);
-}

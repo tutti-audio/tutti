@@ -8,4 +8,6 @@ mod smf_model;
 mod smf_wire;
 mod support;
 mod to_clip;
+#[cfg(unix)]
+mod write_mode;
 mod writing;
