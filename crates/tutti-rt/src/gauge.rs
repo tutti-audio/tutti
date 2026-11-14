@@ -3,7 +3,9 @@
 //!
 //! A node measures something (a gain reduction, a lock, a count of dropped
 //! events) and the app reads it. The two shapes share one cell: the value in
-//! one atomic word and a flag the writer raises when it is gone.
+//! one atomic word and a flag the writer raises when it is gone. The word is
+//! its own `AtomicU64` of bits rather than a `PackedAtomic`: the unit blanket
+//! reads a value through [`Reading`], not bytemuck, and the flag sits beside it.
 //!
 //! - A [`Gauge<U>`] is a latest value. [`GaugeWriter::set`] replaces it,
 //!   [`Gauge::get`] reads it; any number of `Clone`s read the same cell.
@@ -11,9 +13,15 @@
 //!   and saturates; [`Counter::get`] never returns less than an earlier `get`.
 //!
 //! Nothing resets on read, and a reader never blocks: one load of one word.
-//! The writer is not `Clone`, so the cell has one writer, and it is
-//! audio-thread safe: no allocation, no lock, no wait. The cell is allocated
-//! once, on the control side, by [`gauge()`] or [`counter()`].
+//! The writer is not `Clone` and writes through `&mut self`, so the cell has
+//! one writer at a time by type (a shared reference cannot write, and two
+//! threads cannot race a read-modify-write). Writing is audio-thread safe: no
+//! allocation, no lock, no wait. The cell is allocated once, on the control
+//! side, by [`gauge()`] or [`counter()`].
+//!
+//! **Freeing.** A writer lives in its node, and a node is retired and dropped
+//! on the control side, so the audio thread never drops the last handle on the
+//! cell and never frees it, even when every reader went first.
 //!
 //! The cell knows no reading: `U` is whatever the owner of the measurement
 //! defines. A gauge's `U` is a [`Reading`], which every `tutti_types` unit over a
@@ -43,20 +51,22 @@ mod sync {
     pub(super) use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 }
 
-/// A raw number a unit wraps, as the bits of one word. Sealed: `f32` and
-/// `f64`.
-pub trait RawBits: Copy + bits::Sealed {
-    /// The number as the low bits of a word.
-    fn to_word(self) -> u64;
-    /// The number whose bits `to_word` returned.
-    fn from_word(word: u64) -> Self;
-}
-
+/// Plumbing for the unit blanket of [`Reading`]: a raw number as the bits of
+/// one word. Not nameable outside this module; owners never implement it.
 mod bits {
     pub trait Sealed {}
     impl Sealed for f32 {}
     impl Sealed for f64 {}
+
+    pub trait RawBits: Copy + Sealed {
+        /// The number as the low bits of a word.
+        fn to_word(self) -> u64;
+        /// The number whose bits `to_word` returned.
+        fn from_word(word: u64) -> Self;
+    }
 }
+
+use bits::RawBits;
 
 impl RawBits for f32 {
     #[inline]
@@ -65,6 +75,7 @@ impl RawBits for f32 {
     }
     #[inline]
     fn from_word(word: u64) -> Self {
+        debug_assert!(u32::try_from(word).is_ok(), "an f32 reading is 32 bits");
         f32::from_bits(u32::try_from(word).unwrap_or(0))
     }
 }
@@ -176,13 +187,12 @@ impl Shared {
 /// use tutti_rt::gauge;
 /// use tutti_types::Db;
 ///
-/// let (writer, reduction) = gauge(Db(0.0));
+/// let (mut writer, reduction) = gauge(Db(0.0));
 /// writer.set(Db(-6.0));
 /// assert_eq!(reduction.get(), Db(-6.0));
 /// writer.set(Db(-3.0)); // a level moves both ways
 /// assert_eq!(reduction.clone().get(), Db(-3.0));
 /// ```
-#[derive(Debug)]
 pub struct Gauge<U: Reading> {
     cell: Arc<Shared>,
     _reading: PhantomData<fn() -> U>,
@@ -214,7 +224,6 @@ impl<U: Reading> Gauge<U> {
 }
 
 /// The writing end of a [`Gauge`]. Not `Clone`: one writer.
-#[derive(Debug)]
 #[must_use]
 pub struct GaugeWriter<U: Reading> {
     cell: Arc<Shared>,
@@ -222,9 +231,10 @@ pub struct GaugeWriter<U: Reading> {
 }
 
 impl<U: Reading> GaugeWriter<U> {
-    /// Replaces the reading. Wait-free; allocates nothing.
+    /// Replaces the reading. Wait-free; allocates nothing. Takes `&mut self`:
+    /// the one writer is not shared.
     #[inline]
-    pub fn set(&self, value: U) {
+    pub fn set(&mut self, value: U) {
         self.cell.value.store(value.to_bits(), Ordering::Release);
     }
 }
@@ -236,6 +246,7 @@ impl<U: Reading> Drop for GaugeWriter<U> {
 }
 
 /// A gauge holding `initial`, and its writer. Allocates: control side.
+#[must_use = "the writer is the only way to set the reading"]
 pub fn gauge<U: Reading>(initial: U) -> (GaugeWriter<U>, Gauge<U>) {
     let cell = Shared::new(initial.to_bits());
     (
@@ -258,13 +269,22 @@ pub fn gauge<U: Reading>(initial: U) -> (GaugeWriter<U>, Gauge<U>) {
 /// ```
 /// use tutti_rt::counter;
 ///
-/// let (writer, lost) = counter::<u64>();
+/// let (mut writer, lost) = counter::<u64>();
 /// writer.add(2);
 /// writer.add(3);
 /// assert_eq!(lost.get(), 5);
 /// assert_eq!(lost.get(), 5); // a read takes nothing
 /// ```
-#[derive(Debug)]
+///
+/// The writer is one: two threads cannot share it to add.
+///
+/// ```compile_fail
+/// let (writer, _lost) = tutti_rt::counter::<u64>();
+/// std::thread::scope(|s| {
+///     s.spawn(|| writer.add(1));
+///     s.spawn(|| writer.add(1));
+/// });
+/// ```
 pub struct Counter<U: Count> {
     cell: Arc<Shared>,
     _count: PhantomData<fn() -> U>,
@@ -296,7 +316,6 @@ impl<U: Count> Counter<U> {
 }
 
 /// The writing end of a [`Counter`]. Not `Clone`: one writer.
-#[derive(Debug)]
 #[must_use]
 pub struct CounterWriter<U: Count> {
     cell: Arc<Shared>,
@@ -305,9 +324,10 @@ pub struct CounterWriter<U: Count> {
 
 impl<U: Count> CounterWriter<U> {
     /// Adds `by` to the total, saturating at `u64::MAX`. Wait-free; allocates
-    /// nothing. The one writer reads and stores the word, so no add is lost.
+    /// nothing. Takes `&mut self`, so the read-then-store of the word has no
+    /// second writer to race and no add is lost.
     #[inline]
-    pub fn add(&self, by: U) {
+    pub fn add(&mut self, by: U) {
         let total = self
             .cell
             .value
@@ -324,6 +344,7 @@ impl<U: Count> Drop for CounterWriter<U> {
 }
 
 /// A counter at zero, and its writer. Allocates: control side.
+#[must_use = "the writer is the only way to count"]
 pub fn counter<U: Count>() -> (CounterWriter<U>, Counter<U>) {
     let cell = Shared::new(0);
     (
@@ -336,6 +357,34 @@ pub fn counter<U: Count>() -> (CounterWriter<U>, Counter<U>) {
             _count: PhantomData,
         },
     )
+}
+
+impl<U: Reading> std::fmt::Debug for Gauge<U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Gauge")
+            .field("closed", &self.is_closed())
+            .finish_non_exhaustive()
+    }
+}
+
+impl<U: Reading> std::fmt::Debug for GaugeWriter<U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GaugeWriter").finish_non_exhaustive()
+    }
+}
+
+impl<U: Count> std::fmt::Debug for Counter<U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Counter")
+            .field("closed", &self.is_closed())
+            .finish_non_exhaustive()
+    }
+}
+
+impl<U: Count> std::fmt::Debug for CounterWriter<U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CounterWriter").finish_non_exhaustive()
+    }
 }
 
 #[cfg(all(test, not(loom)))]

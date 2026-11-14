@@ -199,9 +199,7 @@ pub use doorbell::Doorbell;
 pub use drain_clock::{DrainBeat, DrainMark, DrainWatch, drain_clock};
 pub use edits::{EditReader, EditWriter, RingFull, edit_ring};
 pub use fault_latch::{Drained, FaultLatch};
-pub use gauge::{
-    Count, Counter, CounterWriter, Gauge, GaugeWriter, RawBits, Reading, counter, gauge,
-};
+pub use gauge::{Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, counter, gauge};
 pub use handoff::{Hand, Rt, handoff};
 pub use job_gate::JobGate;
 pub use level_cell::{LevelReader, LevelSpan, LevelWriter, level_cell};

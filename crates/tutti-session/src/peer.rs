@@ -52,12 +52,6 @@ impl ResourceIds {
     }
 }
 
-impl Default for ResourceIds {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 pub(crate) mod sealed {
     /// Names the types allowed to be a [`Resource`](super::Resource): the
     /// tokens of this crate.
@@ -144,8 +138,7 @@ pub enum ResourceFact {
     Presence,
     /// [`Peer::info`].
     Info,
-    /// A plugin's editor asked for a size: read the editor's
-    /// `requested_size`.
+    /// A plugin's editor asked for a size.
     Editor,
 }
 

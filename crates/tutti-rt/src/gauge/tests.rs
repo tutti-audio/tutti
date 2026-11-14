@@ -30,10 +30,10 @@ impl Reading for Pair {
 
 #[test]
 fn a_gauge_holds_a_unit() {
-    let (writer, reduction) = gauge(Db(0.0));
+    let (mut writer, reduction) = gauge(Db(0.0));
     writer.set(Db(-12.5));
     assert_eq!(reduction.get(), Db(-12.5));
-    let (writer, cursor) = gauge(SamplePosition(0.0));
+    let (mut writer, cursor) = gauge(SamplePosition(0.0));
     writer.set(SamplePosition(48_000.25));
     assert_eq!(
         cursor.get(),
@@ -44,14 +44,14 @@ fn a_gauge_holds_a_unit() {
 
 #[test]
 fn an_owners_own_reading_round_trips() {
-    let (writer, state) = gauge(Pair([0, 0]));
+    let (mut writer, state) = gauge(Pair([0, 0]));
     writer.set(Pair([u32::MAX, 1]));
     assert_eq!(state.get(), Pair([u32::MAX, 1]));
 }
 
 #[test]
 fn a_counter_counts_frames() {
-    let (writer, lost) = counter::<Samples>();
+    let (mut writer, lost) = counter::<Samples>();
     writer.add(Samples(512));
     writer.add(Samples(64));
     assert_eq!(lost.get(), Samples(576));
@@ -59,7 +59,7 @@ fn a_counter_counts_frames() {
 
 #[test]
 fn a_gauge_reads_the_latest_value_written() {
-    let (writer, reading) = gauge(Db(1.0));
+    let (mut writer, reading) = gauge(Db(1.0));
     assert_eq!(
         reading.get(),
         Db(1.0),
@@ -77,7 +77,7 @@ fn a_gauge_reads_the_latest_value_written() {
 
 #[test]
 fn a_gauge_moves_both_ways() {
-    let (writer, reading) = gauge(Db(0.0));
+    let (mut writer, reading) = gauge(Db(0.0));
     for level in [Db(3.0), Db(-3.0), Db(0.5), Db(-9.0)] {
         writer.set(level);
         assert_eq!(reading.get(), level);
@@ -86,7 +86,7 @@ fn a_gauge_moves_both_ways() {
 
 #[test]
 fn a_gauge_holds_its_last_value_when_the_writer_drops() {
-    let (writer, reading) = gauge(Pair([7, 9]));
+    let (mut writer, reading) = gauge(Pair([7, 9]));
     assert!(!reading.is_closed());
     writer.set(Pair([1, 2]));
     drop(writer);
@@ -96,7 +96,7 @@ fn a_gauge_holds_its_last_value_when_the_writer_drops() {
 
 #[test]
 fn a_counter_never_decreases() {
-    let (writer, lost) = counter::<Dropped>();
+    let (mut writer, lost) = counter::<Dropped>();
     let mut last = lost.get().0;
     for by in [0, 1, 0, 7, 2] {
         writer.add(Dropped(by));
@@ -110,14 +110,14 @@ fn a_counter_never_decreases() {
 
 #[test]
 fn a_counter_read_takes_nothing() {
-    let (writer, lost) = counter::<u64>();
+    let (mut writer, lost) = counter::<u64>();
     writer.add(4);
     assert_eq!((lost.get(), lost.get()), (4, 4));
 }
 
 #[test]
 fn a_counter_saturates_instead_of_wrapping() {
-    let (writer, lost) = counter::<u64>();
+    let (mut writer, lost) = counter::<u64>();
     writer.add(u64::MAX - 1);
     writer.add(5);
     assert_eq!(lost.get(), u64::MAX);
@@ -125,7 +125,7 @@ fn a_counter_saturates_instead_of_wrapping() {
 
 #[test]
 fn a_counter_is_final_when_the_writer_drops() {
-    let (writer, lost) = counter::<u64>();
+    let (mut writer, lost) = counter::<u64>();
     writer.add(3);
     assert!(!lost.is_closed());
     drop(writer);
@@ -145,7 +145,7 @@ const _: () = {
 
 #[test]
 fn a_reader_on_another_thread_sees_a_final_count() {
-    let (writer, lost) = counter::<u64>();
+    let (mut writer, lost) = counter::<u64>();
     let reader = std::thread::spawn(move || {
         while !lost.is_closed() {
             std::thread::yield_now();

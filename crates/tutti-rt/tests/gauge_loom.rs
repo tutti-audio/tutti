@@ -34,7 +34,7 @@ impl Reading for Pair {
 #[test]
 fn a_counter_never_goes_back_and_closed_is_final() {
     loom::model(|| {
-        let (writer, total) = counter::<u64>();
+        let (mut writer, total) = counter::<u64>();
         let observer = thread::spawn(move || {
             let closed = total.is_closed();
             let first = total.get();
@@ -57,7 +57,7 @@ fn a_counter_never_goes_back_and_closed_is_final() {
 #[test]
 fn a_gauge_reads_one_store_and_closed_is_final() {
     loom::model(|| {
-        let (writer, level) = gauge(Pair([0, 0]));
+        let (mut writer, level) = gauge(Pair([0, 0]));
         let observer = thread::spawn(move || {
             let closed = level.is_closed();
             let seen = level.get();
