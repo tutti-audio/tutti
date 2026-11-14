@@ -289,7 +289,7 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
             node,
             Box::new(incoming),
             Seconds(0.005),
-            tutti_graph::CrossfadeCurve::EqualAmplitude,
+            tutti_graph::FadeLaw::EqualAmplitude,
         )
         .expect("the crossfade is accepted");
     assert!(matches!(landed, Crossfade::Landed(())), "nothing waits");

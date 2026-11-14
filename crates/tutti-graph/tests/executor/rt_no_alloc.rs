@@ -28,8 +28,8 @@ use common::{Kind, TestNode, prepare};
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Buses, CrossfadeCurve, Cx, Editor, EventEdge, EventIn, EventKind, EventOut, Fade, Io, Law,
-    Node, ParamRamp, ParamSegment, Prepare, Shape, Status, TransportPosition, Unforkable,
+    Buses, Cx, Editor, EventEdge, EventIn, EventKind, EventOut, Fade, FadeLaw, Io, Law, Node,
+    ParamRamp, ParamSegment, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
 use tutti_types::{At, Beat, ChannelLayout, Frame, Latency, Samples, Tail};
@@ -338,7 +338,7 @@ fn crossfades_are_allocation_free_on(workers: usize) {
     ed.collect();
 
     // A long fade, one queued behind it, and one on the event node.
-    let fade = |n| Fade::new(Samples(n), CrossfadeCurve::EqualPower);
+    let fade = |n| Fade::new(Samples(n), FadeLaw::EqualPower);
     ed.replace(NodeKey(1), Unforkable(gain(2.0)), fade(3_000))
         .expect("fits");
     ed.commit().expect("commits");
@@ -451,7 +451,7 @@ fn a_held_chase_is_delivered_allocation_free_on(workers: usize) {
         exec.process(64, &transport, &[], &mut slices);
     };
     block(&mut exec);
-    let fade = |n| Fade::new(Samples(n), CrossfadeCurve::EqualPower);
+    let fade = |n| Fade::new(Samples(n), FadeLaw::EqualPower);
     for k in 0..KEYS {
         ed.replace(
             NodeKey(k + 1),
@@ -1752,7 +1752,7 @@ fn a_swap_is_allocation_free_on(workers: usize) {
             Unforkable(Chaser {
                 seen: Arc::clone(second),
             }),
-            Fade::new(Samples(0), CrossfadeCurve::EqualPower),
+            Fade::new(Samples(0), FadeLaw::EqualPower),
         )
         .expect("fits");
     }

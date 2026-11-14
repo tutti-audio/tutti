@@ -12,7 +12,7 @@
 //! `A / 2 * 0.5 + A * 0.5`, each exact in `f32`.
 
 use tutti_buffers::InterleavedMut;
-use tutti_graph::{CrossfadeCurve, Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
+use tutti_graph::{Cx, FadeLaw, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
 use tutti_session::{InPort, MixError, NodeMode, OutPort, Root, Session};
 use tutti_types::{ChannelLayout, Mix, Seconds};
@@ -244,7 +244,7 @@ fn a_refused_replace_keeps_the_last_plan_until_the_mix_or_mode_is_set_back() {
                     r.halve,
                     ForkByClone(Quarter),
                     Seconds(0.0),
-                    CrossfadeCurve::EqualAmplitude
+                    FadeLaw::EqualAmplitude
                 )
                 .is_ok()
         );

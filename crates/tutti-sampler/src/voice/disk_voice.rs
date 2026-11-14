@@ -20,7 +20,7 @@ use std::sync::Arc;
 use crate::MAX_SAMPLER_CHANNELS;
 use tutti_graph::{
     Cx, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, IntoNode, Io, Node,
-    NodeParts, Prepare, Shape, Status,
+    NodeParts, Prepare, Shape, Status, declick_frames,
 };
 use tutti_types::{
     Amplitude, ChannelLayout, PlaybackRate, ReadRate, SamplePosition, SampleRate, SrcRatio, Tail,
@@ -672,6 +672,7 @@ impl DiskVoice {
         out: &mut Out<'_, F>,
     ) {
         let rate = self.step_rate();
+        let declick = declick_frames(self.sample_rate.unwrap_or(self.file_sample_rate)).get();
         let gain = audible(self.shared_state.gain().get());
         // Borrowed beside `inner`, not cloned: `self` holds a strong
         // reference, so a clone only adds two atomic refcount updates.
@@ -683,6 +684,7 @@ impl DiskVoice {
                 &positions[a - base..b - base],
                 run.generation,
                 rate.get(),
+                declick,
                 gain,
                 state,
                 a - base,

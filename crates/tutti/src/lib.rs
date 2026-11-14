@@ -386,7 +386,7 @@ pub use tutti_plugin_host as plugin_host;
 // The engine, the transport and the graph's vocabulary.
 pub use tutti_engine::Engine;
 pub use tutti_graph::{
-    CrossfadeCurve, EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapReader,
+    DECLICK, EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapReader, FadeLaw,
     Level, Losses, MAX_ROOT_CHANNELS, MeterReader, NodeMode, Refused, Stamp, TapAlign, TapEvent,
     TapId, TapReader,
 };

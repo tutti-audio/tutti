@@ -24,7 +24,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_codec::Wave;
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
-use tutti_graph::{CrossfadeCurve, Editor, Fade, Prepare};
+use tutti_graph::{Editor, Fade, FadeLaw, Prepare};
 use tutti_graph::{OutPort, Source};
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
 use tutti_transport::{FadeOut, LoopEdit, MotionEvent, Then, Timeline, Transport};
@@ -247,7 +247,7 @@ fn a_crossfaded_voice_plays_on_through_the_fade() {
                 ed.replace(
                     NodeKey(1),
                     spare.take().expect("once"),
-                    Fade::new(Samples(4096), CrossfadeCurve::EqualAmplitude),
+                    Fade::new(Samples(4096), FadeLaw::EqualAmplitude),
                 )
                 .expect("same shape");
                 ed.commit().expect("commits");
@@ -306,7 +306,7 @@ fn a_loop_wrap_plays_the_tone_a_loop_back_from_its_frame() {
         let k = (f - end) % len;
         let head = tone_at(FPB + k);
         if k < fade {
-            let (g_in, g_out) = CrossfadeCurve::EqualPower.gains(k, fade);
+            let (g_out, g_in) = FadeLaw::EqualPower.gains(k, fade);
             let want = g_in * head + g_out * tone_at(end + k);
             let got = b[2 * f];
             assert!(

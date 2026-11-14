@@ -3,7 +3,7 @@
 //! side (the executor hands the old unit back; `Editor::collect` drops it), as
 //! a tap's lanes are.
 
-use tutti_graph::{CrossfadeCurve, Editor, Fade, InletNode, Prepare, TapReader, TransportPosition};
+use tutti_graph::{Editor, Fade, FadeLaw, InletNode, Prepare, TapReader, TransportPosition};
 use tutti_graph::{NodeKey, TapId};
 use tutti_graph::{OutPort, Source};
 use tutti_types::MaxBlock;
@@ -48,8 +48,8 @@ fn replacing_and_removing_an_inlet_drops_it_on_the_control_side() {
 
     // A cut, then a crossfade, each over a fresh ring.
     for fade in [
-        Fade::new(Samples(0), CrossfadeCurve::default()),
-        Fade::new(Samples(96), CrossfadeCurve::default()),
+        Fade::new(Samples(0), FadeLaw::default()),
+        Fade::new(Samples(96), FadeLaw::default()),
     ] {
         let (next, mut w) = inlet();
         ed.replace(KEY, next, fade).expect("replaces");
