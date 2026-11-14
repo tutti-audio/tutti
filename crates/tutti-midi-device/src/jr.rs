@@ -61,7 +61,8 @@ const MAX_DRIFT: f64 = 0.01;
 const STALE_AFTER: Duration = LOST_AFTER;
 
 /// The least spread a window is taken to have when it judges a JR Clock off its
-/// line: 1 ms, the frame of a USB MIDI transport. A window of one or two
+/// line: 1 ms, an allowance for a transport's arrival quantization (a USB MIDI
+/// frame), not a figure of the specification. A window of one or two
 /// readings has seen almost no jitter, so without it the ordinary shrinking of
 /// a connection's delay reads as a clock that jumped, and restarts keep the
 /// window too short to fit a drift.

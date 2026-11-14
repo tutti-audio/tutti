@@ -40,7 +40,7 @@ impl SharedTiming {
     }
 
     fn get(&self) -> InputTiming {
-        // Only `set` stores, and it stores `to_raw`: every byte is a timing.
+        // Only `set` stores, and it stores `to_raw`, so the `Arrival` fallback is unreachable.
         InputTiming::from_raw(self.0.load(Ordering::Acquire)).unwrap_or(InputTiming::Arrival)
     }
 
