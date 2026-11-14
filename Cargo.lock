@@ -2778,6 +2778,7 @@ name = "tutti-midi-device"
 version = "0.0.1"
 dependencies = [
  "bitflags 2.13.2",
+ "getrandom",
  "miniz_oxide",
  "proptest",
  "serde",

@@ -6,7 +6,6 @@ use std::time::Instant;
 use super::super::body::{BodyLimit, decode_body, encode_body};
 use super::super::capabilities::{PeCapabilities, PeCiMessage, SimultaneousRequests};
 use super::super::chunk::{PeChunk, PeChunkError, PeRequestId, split_message};
-use super::super::request_ids::RequestIds;
 use super::super::flow::{
     PE_TIMEOUT, PeAnswer, PeMessageKind, PeSignal, PeTerminator, PeTransaction,
 };
@@ -19,6 +18,7 @@ use super::super::partial::{JsonPointer, PartialError, PartialUpdate};
 use super::super::reassemble::{
     PeFlowControl, PeReassembler, PeReassemblyLimits, PeReceived, PeStep,
 };
+use super::super::request_ids::RequestIds;
 use super::super::tree::PeJson;
 use super::data::PeData;
 use super::fields::PeDataError;

@@ -23,8 +23,8 @@ use tutti_midi_hardware::{
     VirtualSpec,
 };
 use tutti_ump::{
-    Bank, CCNumber, Direction, FirstGroup, FunctionBlockId, GroupSpan, Message, MidiChannel, Rpn, U7, UiHint,
-    Ump, Voice1,
+    Bank, CCNumber, Direction, FirstGroup, FunctionBlockId, GroupSpan, Message, MidiChannel, Rpn,
+    U7, UiHint, Ump, Voice1,
 };
 
 const PATIENCE: Duration = Duration::from_secs(5);

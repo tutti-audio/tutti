@@ -116,21 +116,22 @@
 //! - **Receivable Maximum SysEx Message Size**: [`MAX_SYSEX`], 512 bytes, the
 //!   floor of a device that will initiate Profile Configuration or Property
 //!   Exchange (§5.5.3); the reassembler is sized for it, delimiters included.
-//! - **MUIDs** are drawn from std's OS-seeded hasher keys ([`entropy`]), which
-//!   M2-101 Appendix A asks of a desktop OS's random numbers; no dependency.
+//! - **MUIDs** are drawn from a stream the operating system seeded
+//!   ([`entropy`]), which M2-101 Appendix A asks of a desktop OS's random
+//!   numbers. A Group whose stream cannot be seeded starts no device and is
+//!   tried again at the next change of Groups.
 //!
 //! Time is an argument: nothing here reads a clock.
 
 use std::collections::BTreeMap;
-use std::collections::hash_map::RandomState;
-use std::hash::{BuildHasher, Hasher};
 use std::sync::Arc;
 use std::time::Instant;
 
 use tutti_graph::Offset;
 use tutti_midi_device::{
-    CiAction, CiCategories, CiDevice, CiHeader, CiMessage, CiPeer, Decoded, DeviceId, MaxSysexSize,
-    Muid, ProcessAction, ProcessFeatures, ProcessInitiator, ProfileAction, ProfileInitiator,
+    CiAction, CiCategories, CiDevice, CiHeader, CiMessage, CiPeer, Decoded, DeviceId, EntropyError,
+    EntropyWords, MaxSysexSize, Muid, ProcessAction, ProcessFeatures, ProcessInitiator,
+    ProfileAction, ProfileInitiator,
 };
 use tutti_ump::{DeviceIdentity, MidiGroup, SysexAssembler, SysexStep, Ump};
 
@@ -265,21 +266,18 @@ pub enum CiChange {
     Lost,
 }
 
-/// The MUID source: std's OS-seeded hasher keys over a counter.
+/// The MUID source: words from a stream the operating system seeded.
 type Entropy = Box<dyn FnMut() -> u32 + Send>;
 
-/// A source of words for MUIDs (the module's "MUIDs"). Each call of `entropy`
-/// has keys of its own.
-fn entropy() -> Entropy {
-    let keys = RandomState::new();
-    let mut count = 0u64;
-    Box::new(move || {
-        count += 1;
-        let mut hasher = keys.build_hasher();
-        hasher.write_u64(count);
-        // The high half: the low 28 bits are the MUID's, and a hash mixes all.
-        (hasher.finish() >> 32) as u32
-    })
+/// A source of words for MUIDs (the module's "MUIDs"), seeded on its own for
+/// each device.
+///
+/// # Errors
+///
+/// [`EntropyError`] when the operating system has no random bytes to seed it.
+fn entropy() -> Result<Entropy, EntropyError> {
+    let mut words = EntropyWords::from_os()?;
+    Ok(Box::new(move || words.next_word()))
 }
 
 /// One MIDI-CI Device on its Group.
@@ -572,11 +570,10 @@ impl Running {
         let mut firsts = Vec::new();
         let members: Vec<Member> = groups
             .iter()
-            .map(|&group| {
-                let (device, first) =
-                    CiDevice::new(identity, CATEGORIES, MAX_SYSEX, entropy(), now);
+            .filter_map(|&group| {
+                let (device, first) = start_device(identity, now)?;
                 firsts.push(first);
-                Member::new(group, device)
+                Some(Member::new(group, device))
             })
             .collect();
         let max = MAX_SYSEX.get() as usize;
@@ -629,8 +626,9 @@ impl Running {
             if self.members.iter().any(|m| m.group == group) {
                 continue;
             }
-            let (device, first) =
-                CiDevice::new(self.identity, CATEGORIES, MAX_SYSEX, entropy(), now);
+            let Some((device, first)) = start_device(self.identity, now) else {
+                continue;
+            };
             started.push((group, first));
             self.members.push(Member::new(group, device));
         }
@@ -647,6 +645,21 @@ impl Running {
         let room = SysexAssembler::room_for(max, 1, lanes);
         self.assembler = SysexAssembler::new(vec![0; room].into_boxed_slice(), max, lanes);
         send(out, &sends);
+    }
+}
+
+/// A device with a MUID of its own and its first actions, or `None` when the
+/// operating system gives no random bytes for the MUID.
+fn start_device(
+    identity: DeviceIdentity,
+    now: Instant,
+) -> Option<(CiDevice<Entropy>, Vec<CiAction>)> {
+    match entropy() {
+        Ok(entropy) => Some(CiDevice::new(identity, CATEGORIES, MAX_SYSEX, entropy, now)),
+        Err(error) => {
+            tracing::warn!("MIDI-CI starts no device: {error}");
+            None
+        }
     }
 }
 
@@ -1084,17 +1097,25 @@ impl Member {
     }
 }
 
-/// Queues the messages as SysEx7 on `out`. A refusal is not retried: Discovery
-/// and its replies are repeated by their protocol, and a lost one is a peer
-/// found later or never.
+/// Queues the messages as SysEx7 on `out`, each in one batch. A refusal is not
+/// retried: Discovery and its replies are repeated by their protocol, and a
+/// lost one is a peer found later or never. A device takes a batch as a prefix
+/// (`MidiOut::queue`), so a message taken in part is a SysEx7 whose end the
+/// device never gets; it is logged as cut, apart from one wholly refused.
 fn send(out: &mut OpenOutput, sends: &[(MidiGroup, CiMessage)]) {
     for (group, message) in sends {
         let packets: Vec<_> = message
             .packets(*group)
             .map(|ump| (Offset::ZERO, ump))
             .collect();
-        if out.queue(&packets) < packets.len() {
-            tracing::debug!("a MIDI-CI message was refused by {}", out.name());
+        match out.queue(&packets) {
+            taken if taken == packets.len() => {}
+            0 => tracing::debug!("a MIDI-CI message was refused by {}", out.name()),
+            taken => tracing::debug!(
+                "a MIDI-CI message was cut after {taken} of {} packets by {}",
+                packets.len(),
+                out.name()
+            ),
         }
     }
 }

@@ -16,12 +16,12 @@ workspace = true
 [dependencies]
 thiserror = { workspace = true }
 sha2 = { workspace = true }
-getrandom = { workspace = true }
 mdns-sd = { workspace = true }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device", default-features = false }
 
 [dev-dependencies]
+getrandom = { workspace = true }
 proptest = "1.9.0"
 
 [package.metadata.docs.rs]

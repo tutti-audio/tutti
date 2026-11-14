@@ -76,10 +76,10 @@ use super::header::{
     PeStatusClass, PeSubscription, PeUpdateCommand,
 };
 use super::limits::{MediaType, PeMessage, ResourceId, ResourceName, SubscribeId};
-use super::request_ids::RequestIds;
 use super::reassemble::{
     PeFlowControl, PeReassembler, PeReassemblyError, PeReassemblyLimits, PeReceived, PeStep,
 };
+use super::request_ids::RequestIds;
 use crate::{CiHeader, CiMessage, Decoded, Destination, MaxSysexSize, Muid, Nak, TimeoutWait};
 
 /// The most times a chunk is sent again, whether for a NAK or for the lack of an

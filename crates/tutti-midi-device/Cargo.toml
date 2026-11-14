@@ -20,6 +20,7 @@ serde = ["dep:serde", "tutti-ump/serde"]
 
 [dependencies]
 bitflags = "2"
+getrandom = { workspace = true }
 thiserror = { workspace = true }
 unicode-normalization = { workspace = true }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
