@@ -600,3 +600,44 @@ fn a_714_file_plays_at_its_own_width_in_the_engines_order() {
         .collect();
     assert_channels(&settled_block(voice_of(reader)), &want, "7.1.4 at twelve");
 }
+
+/// A file of 12 and of 16 channels (the cap) is read at its own width without
+/// allocating, forward and looped, and every channel carries its figure: the
+/// 7.1.4 in the engine's order (a permutation), the 16 unassigned straight.
+#[test]
+fn a_wide_file_at_its_own_width_is_allocation_free() {
+    // FL FR FC LFE BL BR SL SR TFL TFR TBL TBR in the file; the engine's order
+    // swaps the backs and sides.
+    let perm = [0usize, 1, 2, 3, 6, 7, 4, 5, 8, 9, 10, 11];
+    let identity: Vec<usize> = (0..16).collect();
+    for (channels, mask, order) in [(12u16, 0x2D63Fu32, &perm[..]), (16, 0, &identity[..])] {
+        for looped in [false, true] {
+            let (_dir, mut rig, reader) = stream(channels, mask);
+            if looped {
+                rig.stream.set_loop(loop_1000_3000()).expect("alive");
+                assert!(rig.streamer.step_until_settled(1_000) < 1_000);
+            }
+            let voice = voice_of(reader);
+            let mut direct = contract::Direct::new(voice, SampleRate::of(SR), BLOCK);
+            let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
+            direct.block_in(&clock.env(BLOCK, SampleRate::of(SR)));
+            clock.advance(BLOCK as i64, SampleRate::of(SR));
+            assert_no_alloc::assert_no_alloc(|| {
+                for _ in 0..80 {
+                    direct.block_in(&clock.env(BLOCK, SampleRate::of(SR)));
+                    clock.advance(BLOCK as i64, SampleRate::of(SR));
+                }
+            });
+            for (c, &file) in order.iter().enumerate() {
+                assert!(
+                    direct
+                        .output(c)
+                        .iter()
+                        .all(|s| s.to_bits() == value(file).to_bits()),
+                    "{channels} channels, looped {looped}: channel {c} is not {}",
+                    value(file)
+                );
+            }
+        }
+    }
+}

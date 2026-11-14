@@ -1,6 +1,6 @@
 //! [`Bed`]: the closed set of speaker layouts, positioned by ITU-R BS.2051.
 
-use crate::{Azimuth, ChannelLayout, ChannelTopology, Direction, Elevation, Speaker};
+use crate::{Azimuth, ChannelLayout, ChannelTopology, Direction, Elevation, MAX_CHANNELS, Speaker};
 
 /// A speaker layout of a known shape, in tutti's channel order.
 ///
@@ -205,13 +205,21 @@ impl Bed {
 
     /// The bed a topology is, or `None`.
     ///
-    /// Matches up to a side/back counterpart: a channel that is the
-    /// [counterpart](Speaker::counterpart) of the bed's speaker counts as it
-    /// when the topology has no channel of the bed's own spelling. So VST3's and
-    /// AU's `FL FR SL SR` and WAVE's `FL FR BL BR` are both [`Quad`](Self::Quad),
-    /// and WAVE's `FL FR FC LFE BL BR` is 5.1, but WAVE's 7.1
-    /// (`FL FR FC LFE BL BR SL SR`) is no bed, since its side and back pairs
-    /// sit in the other order. An ambisonic set is no bed.
+    /// Matches the speaker **set**, whatever the order: each channel of the
+    /// topology must be one row of the bed, one to one. A channel that is the
+    /// [counterpart](Speaker::counterpart) of a row (a side for a back, a back
+    /// for a side) stands for it only when it is not itself a row of the bed, so
+    /// VST3's and AU's `FL FR SL SR` and WAVE's `FL FR BL BR` are both
+    /// [`Quad`](Self::Quad), WAVE's `FL FR FC LFE BL BR` is 5.1, and WAVE's
+    /// 7.1 (`FL FR FC LFE BL BR SL SR`, the other order) is
+    /// [`Surround71`](Self::Surround71). In the 7.x beds both pairs are rows, so
+    /// a back is never taken for a side. An ambisonic set is no bed.
+    ///
+    /// The answer says nothing of the channel order: the bed's own order is
+    /// [`topology`](Self::topology), and what is derived from a bed
+    /// ([`direction`](Self::direction), `SpeakerLayout::from_bed`'s gains)
+    /// follows it. A consumer holding another order maps each channel through
+    /// [`index_of`](ChannelTopology::index_of) on the bed's topology.
     ///
     /// ```
     /// use tutti_types::{Bed, ChannelTopology, Speaker::*};
@@ -226,11 +234,12 @@ impl Bed {
         let list = topology.positions()?;
         Self::ALL.into_iter().find(|bed| {
             let rows = bed.rows();
+            let mut taken = [false; MAX_CHANNELS];
             rows.len() == list.len()
-                && rows.iter().zip(list).all(|(row, &speaker)| {
-                    speaker == row.speaker
-                        || (speaker.counterpart() == Some(row.speaker)
-                            && !list.contains(&row.speaker))
+                && list.iter().all(|&speaker| {
+                    let at = |s: Speaker| rows.iter().position(|r| r.speaker == s);
+                    let row = at(speaker).or_else(|| speaker.counterpart().and_then(at));
+                    row.is_some_and(|i| !std::mem::replace(&mut taken[i], true))
                 })
         })
     }
@@ -483,11 +492,10 @@ mod tests {
         );
     }
 
-    /// WAVE's 7.1 order puts the backs before the sides: reading it as tutti's
-    /// 7.1 would swap the 90 and 135 degree pairs, so it is no bed. Order and
-    /// speaker set both matter.
+    /// The match is of the speaker set: WAVE's 7.1 order (the backs before the
+    /// sides) is the 7.1 bed, and so is a reordered stereo pair.
     #[test]
-    fn a_swapped_side_and_back_pair_is_no_bed() {
+    fn a_bed_is_matched_whatever_the_order() {
         use Speaker::*;
         let wav_order = ChannelTopology::new([
             FrontLeft,
@@ -500,9 +508,31 @@ mod tests {
             SideRight,
         ])
         .unwrap();
-        assert_eq!(Bed::from_topology(&wav_order), None);
-        let reordered = ChannelTopology::new([FrontRight, FrontLeft]).unwrap();
-        assert_eq!(Bed::from_topology(&reordered), None);
+        assert_eq!(Bed::from_topology(&wav_order), Some(Bed::Surround71));
+        let swapped = ChannelTopology::new([FrontRight, FrontLeft]).unwrap();
+        assert_eq!(Bed::from_topology(&swapped), Some(Bed::Stereo));
+    }
+
+    /// One channel never stands for two rows: a back is no side where the bed
+    /// has both pairs, and a counterpart fills only a row the topology lacks.
+    #[test]
+    fn a_speaker_is_taken_once() {
+        use Speaker::*;
+        let two_backs = ChannelTopology::new([
+            FrontLeft,
+            FrontRight,
+            FrontCenter,
+            LowFrequency,
+            BackLeft,
+            BackRight,
+            Unassigned,
+            Unassigned,
+        ])
+        .unwrap();
+        assert_eq!(Bed::from_topology(&two_backs), None);
+        // A side and a back for the quad's one back pair: the back row is taken twice.
+        let twice = ChannelTopology::new([FrontLeft, FrontRight, BackLeft, SideLeft]).unwrap();
+        assert_eq!(Bed::from_topology(&twice), None);
         assert_eq!(
             Bed::from_topology(&ChannelTopology::unassigned(ChannelLayout::STEREO)),
             None

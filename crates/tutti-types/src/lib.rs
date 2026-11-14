@@ -169,7 +169,8 @@ pub use channels::{ChannelCountOutOfRange, ChannelLayout, MAX_CHANNELS};
 // Channel topology — which speaker each channel feeds. Distinct from the count
 // above, and additive to it: a width-only caller keeps using `ChannelLayout`.
 pub use ambisonic::{
-    AmbisonicFormat, AmbisonicOrder, AmbisonicOrderOutOfRange, Normalization, Ordering,
+    AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
+    AmbisonicOrdering,
 };
 pub use bed::Bed;
 pub use topology::{ChannelTopology, Placement, Speaker, Speakers, TopologyError};

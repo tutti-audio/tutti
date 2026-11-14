@@ -490,7 +490,7 @@ pub enum Placement {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AmbisonicOrder, Normalization, Ordering};
+    use crate::{AmbisonicNormalization, AmbisonicOrder, AmbisonicOrdering};
 
     fn topology(list: &[Speaker]) -> ChannelTopology {
         ChannelTopology::new(list.iter().copied()).unwrap()
@@ -659,13 +659,16 @@ mod tests {
     fn an_ambisonic_set_answers_no_speaker_question() {
         let t = ChannelTopology::from(AmbisonicFormat::new(
             AmbisonicOrder::of(1),
-            Ordering::Acn,
-            Normalization::N3d,
+            AmbisonicOrdering::Acn,
+            AmbisonicNormalization::N3d,
         ));
         assert_eq!(t.index_of(Speaker::FrontLeft), None);
         assert_eq!(t.lfe_index(), None);
         assert!(t.is_fully_named() && !t.is_unassigned());
-        assert_eq!(t.ambisonic().unwrap().normalization(), Normalization::N3d);
+        assert_eq!(
+            t.ambisonic().unwrap().normalization(),
+            AmbisonicNormalization::N3d
+        );
         assert_eq!(topology(&[Speaker::FrontLeft]).ambisonic(), None);
     }
 

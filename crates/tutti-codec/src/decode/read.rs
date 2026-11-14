@@ -300,10 +300,8 @@ fn decode(mut reader: Box<dyn FormatReader>) -> Result<Wave, DecodeError> {
             none => {
                 let spec = decoder.spec();
                 let rate = SampleRate::from_hz(spec.rate()).ok_or(DecodeError::NoSampleRate)?;
-                {
-                    let (topology, placement) = topology_of(Some(spec.channels()));
-                    none.insert(Wave::with_placement(topology, placement, rate))
-                }
+                let (topology, placement) = topology_of(Some(spec.channels()));
+                none.insert(Wave::with_placement(topology, placement, rate))
             }
         };
 

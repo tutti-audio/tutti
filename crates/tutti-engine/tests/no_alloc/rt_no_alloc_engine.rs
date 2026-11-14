@@ -636,3 +636,66 @@ fn graph_engine_on_a_worker_pool_is_allocation_free() {
     });
     assert!(output.iter().any(|&x| x != 0.0), "the graph rendered");
 }
+
+/// A source of twelve channels, one constant per channel.
+struct TwelveWide;
+
+impl tutti_graph::Node for TwelveWide {
+    fn shape(&self) -> tutti_graph::Shape {
+        tutti_graph::Shape::source_unassigned(ChannelLayout::from(12u16))
+            .with_tail(tutti_types::Tail::Unbounded)
+    }
+    fn prepare(&mut self, _: &tutti_graph::Prepare) {}
+    fn process(
+        &mut self,
+        _: &tutti_graph::Cx<'_>,
+        mut io: tutti_graph::Io<'_>,
+    ) -> tutti_graph::Status {
+        for c in 0..12 {
+            io.output(c).fill((c + 1) as f32 / 16.0);
+        }
+        tutti_graph::Status::Modified
+    }
+    fn reset(&mut self) {}
+}
+
+/// A 7.1.4 root (twelve channels, the widest the cap allows past the old
+/// eight) renders into a twelve-wide device straight and into a stereo one
+/// through its fold without allocating, and the blocks carry the signal.
+#[test]
+fn a_714_root_block_is_allocation_free() {
+    use tutti_graph::{Editor, NodeKey, OutPort, Prepare, Source, Unforkable};
+
+    let transport = Transport::new(SampleRate::of(48_000.0));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::of(48_000.0),
+        tutti_types::MaxBlock::of(tutti_types::Samples(512)),
+    ));
+    ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
+    ed.spec_mut().topology.set_outputs((0..12).map(|port| {
+        Source::Node(OutPort {
+            node: NodeKey(1),
+            port,
+        })
+    }));
+    ed.commit().expect("commits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
+    engine
+        .support_output(ChannelLayout::from(12u16))
+        .expect("a width");
+
+    let mut wide = vec![0.0f32; 512 * 12];
+    let mut stereo = vec![0.0f32; 512 * 2];
+    let layout = ChannelLayout::from(12u16);
+    // The commit applies on the first block, which may allocate.
+    engine.process(&mut InterleavedMut::new(&mut wide, layout).unwrap());
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..16 {
+            engine.process(&mut InterleavedMut::new(&mut wide, layout).unwrap());
+            engine.process(&mut InterleavedMut::new(&mut stereo, ChannelLayout::STEREO).unwrap());
+        }
+    });
+    // Channel 11 (the top back right) is its own constant on the wide device.
+    assert_eq!(wide[11], 12.0 / 16.0);
+    assert!(stereo.iter().any(|&s| s != 0.0), "the fold carries signal");
+}

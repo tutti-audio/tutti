@@ -86,9 +86,11 @@ impl SpeakerLayout {
     /// The layout of a [`Bed`], from its BS.2051 positions
     /// ([`Bed::direction`]).
     ///
-    /// Gain `i` is the `i`-th placed speaker of the bed in channel order: the
-    /// LFE has no direction and is never fed, so a bed with one has a gain slice
-    /// one shorter than its width.
+    /// Gain `i` is the `i`-th placed speaker of the bed in the bed's own channel
+    /// order ([`Bed::topology`]): the LFE has no direction and is never fed, so a
+    /// bed with one has a gain slice one shorter than its width. A topology that
+    /// [`Bed::from_topology`] matched in another order maps each of its channels
+    /// through `index_of` on the bed's topology.
     ///
     /// # Errors
     ///

@@ -629,8 +629,9 @@ impl MonoSpread {
     }
 }
 
-/// The stack a frame's channels are gathered into: more than the engine has
-/// speakers for (18), and more than any placement reads.
+/// The stack a wave's channels are gathered into when a fold reads them: twice
+/// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS), and more than the 20 speakers
+/// the vocabulary names, so any placed wave fits.
 pub const MAX_WAVE_CHANNELS: usize = 32;
 
 /// Where the channels of a wave go in a frame of some width.
@@ -1260,6 +1261,42 @@ mod tests {
                 .unwrap()
                 .is_direct()
         );
+    }
+
+    /// A named file wider than the cap is refused, not truncated: all twenty
+    /// speakers the vocabulary names into a frame of `MAX_CHANNELS` (which has no
+    /// order to fold to) is `Unplaced`.
+    #[test]
+    fn a_named_file_wider_than_the_cap_is_refused() {
+        use tutti_types::Speaker::*;
+        let twenty = ChannelTopology::new([
+            FrontLeft,
+            FrontRight,
+            FrontCenter,
+            LowFrequency,
+            BackLeft,
+            BackRight,
+            FrontLeftOfCenter,
+            FrontRightOfCenter,
+            BackCenter,
+            SideLeft,
+            SideRight,
+            TopCenter,
+            TopFrontLeft,
+            TopFrontCenter,
+            TopFrontRight,
+            TopBackLeft,
+            TopBackCenter,
+            TopBackRight,
+            TopSideLeft,
+            TopSideRight,
+        ])
+        .unwrap();
+        let frame = ChannelLayout::try_from(MAX_CHANNELS).unwrap();
+        assert!(matches!(
+            Place::for_topology(&twenty, frame),
+            Err(crate::PlaceError::Fold(FoldError::Unplaced { .. }))
+        ));
     }
 
     /// A wave wider than its frame (12 channels into a frame of 8) is folded,

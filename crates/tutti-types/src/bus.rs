@@ -26,8 +26,8 @@ enum Repr {
 /// then a fold from or to it is `tutti_buffers::FoldError::Empty`,
 /// as for any empty topology.
 ///
-/// `new` refuses a list wider than a bus can hold; it never truncates, and it
-/// does not check for a repeated named speaker (a [`ChannelTopology`] does).
+/// `new` refuses a list wider than a bus can hold, and a repeated named
+/// speaker; it never truncates.
 /// The slots past the length are always [`Speaker::Unassigned`], so the derived
 /// equality compares the bus and nothing else.
 ///
@@ -72,11 +72,17 @@ impl BusTopology {
         Self(Repr::Speakers { len: 2, speakers })
     };
 
-    /// The bus of these speakers, or `None` past [`MAX_CHANNELS`].
+    /// The bus of these speakers, or `None` past [`MAX_CHANNELS`] or when a
+    /// named speaker repeats (as [`Speakers::new`] refuses it).
     pub fn new(positions: impl IntoIterator<Item = Speaker>) -> Option<Self> {
         let mut speakers = [Speaker::Unassigned; MAX_CHANNELS];
         let mut len = 0u8;
         for speaker in positions {
+            let repeats = !matches!(speaker, Speaker::Unassigned | Speaker::Unknown(_))
+                && speakers[..usize::from(len)].contains(&speaker);
+            if repeats {
+                return None;
+            }
             *speakers.get_mut(usize::from(len))? = speaker;
             len += 1;
         }
@@ -155,8 +161,7 @@ impl From<BusTopology> for ChannelTopology {
     fn from(bus: BusTopology) -> Self {
         match bus.0 {
             Repr::Speakers { len, speakers } => {
-                // A bus built by `new` may repeat a named speaker; the topology
-                // keeps its slots and names each speaker once.
+                // `new` refuses a repeated named speaker, so the list is valid.
                 Self::Speakers(Speakers::from_format(
                     speakers[..usize::from(len)].iter().copied(),
                 ))
@@ -266,6 +271,18 @@ mod tests {
             BusTopology::ambisonic(AmbisonicFormat::ambix(AmbisonicOrder::of(1))),
             BusTopology::ambisonic(AmbisonicFormat::fuma(AmbisonicOrder::of(1)))
         );
+    }
+
+    /// A repeated named speaker is no bus, as it is no topology; `Unassigned`
+    /// and `Unknown` repeat.
+    #[test]
+    fn a_bus_refuses_a_named_speaker_twice() {
+        use Speaker::*;
+        assert_eq!(BusTopology::new([FrontLeft, FrontLeft]), None);
+        assert!(BusTopology::new([Unassigned, Unassigned, Unknown(3), Unknown(3)]).is_some());
+        let bus = BusTopology::new([FrontLeft, FrontRight, Unknown(1), Unknown(1)]).unwrap();
+        let topology = ChannelTopology::from(bus);
+        assert_eq!(BusTopology::try_from(&topology), Ok(bus));
     }
 
     /// Every bed fits a bus and converts back to its topology.

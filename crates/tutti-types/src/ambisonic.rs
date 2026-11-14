@@ -33,7 +33,7 @@ impl AmbisonicOrder {
 /// The order in which an ambisonic signal's channels are stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum Ordering {
+pub enum AmbisonicOrdering {
     /// Ambisonic channel number, `n = l² + l + m`: the order of AmbiX and of
     /// every order up to the cap.
     Acn,
@@ -45,7 +45,7 @@ pub enum Ordering {
 /// How the channels of an ambisonic signal are scaled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum Normalization {
+pub enum AmbisonicNormalization {
     /// Schmidt semi-normalised: AmbiX's scaling.
     Sn3d,
     /// Fully normalised.
@@ -74,20 +74,20 @@ pub enum Normalization {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AmbisonicFormat {
     order: AmbisonicOrder,
-    ordering: Ordering,
-    normalization: Normalization,
+    ordering: AmbisonicOrdering,
+    normalization: AmbisonicNormalization,
 }
 
 impl AmbisonicFormat {
     /// A format of `order` stored in `ordering` and scaled by `normalization`.
     ///
-    /// Every combination is a format: [`Ordering::FuMa`] is defined to third
+    /// Every combination is a format: [`AmbisonicOrdering::FuMa`] is defined to third
     /// order, which [`AmbisonicOrder`] caps at, so no order refuses it.
     #[must_use]
     pub const fn new(
         order: AmbisonicOrder,
-        ordering: Ordering,
-        normalization: Normalization,
+        ordering: AmbisonicOrdering,
+        normalization: AmbisonicNormalization,
     ) -> Self {
         Self {
             order,
@@ -99,13 +99,13 @@ impl AmbisonicFormat {
     /// AmbiX: ACN order, SN3D scaling.
     #[must_use]
     pub const fn ambix(order: AmbisonicOrder) -> Self {
-        Self::new(order, Ordering::Acn, Normalization::Sn3d)
+        Self::new(order, AmbisonicOrdering::Acn, AmbisonicNormalization::Sn3d)
     }
 
     /// Furse-Malham B-format: FuMa order and scaling.
     #[must_use]
     pub const fn fuma(order: AmbisonicOrder) -> Self {
-        Self::new(order, Ordering::FuMa, Normalization::FuMa)
+        Self::new(order, AmbisonicOrdering::FuMa, AmbisonicNormalization::FuMa)
     }
 
     /// The order.
@@ -116,13 +116,13 @@ impl AmbisonicFormat {
 
     /// The channel order.
     #[must_use]
-    pub const fn ordering(&self) -> Ordering {
+    pub const fn ordering(&self) -> AmbisonicOrdering {
         self.ordering
     }
 
     /// The scaling.
     #[must_use]
-    pub const fn normalization(&self) -> Normalization {
+    pub const fn normalization(&self) -> AmbisonicNormalization {
         self.normalization
     }
 
@@ -160,11 +160,11 @@ mod tests {
     #[test]
     fn the_two_named_formats_state_their_conventions() {
         let ambix = AmbisonicFormat::ambix(AmbisonicOrder::of(2));
-        assert_eq!(ambix.ordering(), Ordering::Acn);
-        assert_eq!(ambix.normalization(), Normalization::Sn3d);
+        assert_eq!(ambix.ordering(), AmbisonicOrdering::Acn);
+        assert_eq!(ambix.normalization(), AmbisonicNormalization::Sn3d);
         let fuma = AmbisonicFormat::fuma(AmbisonicOrder::of(1));
-        assert_eq!(fuma.ordering(), Ordering::FuMa);
-        assert_eq!(fuma.normalization(), Normalization::FuMa);
+        assert_eq!(fuma.ordering(), AmbisonicOrdering::FuMa);
+        assert_eq!(fuma.normalization(), AmbisonicNormalization::FuMa);
         assert_eq!(fuma.order(), AmbisonicOrder::of(1));
     }
 
