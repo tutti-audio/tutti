@@ -418,10 +418,13 @@ impl DetailsData {
         let [a, b, c, d] = self.0[..] else {
             return None;
         };
-        let count = |lsb: u8, msb: u8| U14::from_le7([lsb, msb]).map(ProfileChannels::from_wire);
+        // The bytes are 7-bit: `DetailsData::new` refused any other.
+        let count = |lsb: u8, msb: u8| {
+            ProfileChannels::from_wire(U14::from_halves(U7::masked(msb), U7::masked(lsb)))
+        };
         Some(ChannelsDetail {
-            in_use: count(a, b)?,
-            max: count(c, d)?,
+            in_use: count(a, b),
+            max: count(c, d),
         })
     }
 }
