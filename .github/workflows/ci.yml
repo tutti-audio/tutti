@@ -151,7 +151,8 @@ jobs:
   # Lints what the Linux job cannot see: `#[cfg(windows)]` blocks, and casts that differ by platform (the vst3
   # bindings type SDK enum constants `c_uint` on unix and `c_int` on Windows). A native runner, because
   # `cargo xtask check-windows` cannot reach `ogg_next_sys` or `tutti-vst3-host`'s `conformance` build, which need
-  # real MSVC headers. Nothing runs tests here.
+  # real MSVC headers. The job also runs the tests of the two MIDI crates (`tutti-winmm-ffi`, `tutti-midi-hardware`)
+  # against the runner's own winmm; no other suite runs here.
   clippy-windows:
     name: clippy (windows)
     needs: changes

@@ -260,7 +260,7 @@ pub use devices::{
     ChangeSink, DeviceEvents, Devices, OpenInput, OpenOutput, Pending, RecvTimeoutError, SeedError,
     WatchFailure,
 };
-pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Tally, Watch};
+pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 pub use error::{Error, Result};
 pub use port::{HardwareMidiInputs, InputProducerHandle, PortInfo, Pushed, StreamDrain};
 pub use process::{ProcessChange, ReportAsk, ReportError, ReportPeer};

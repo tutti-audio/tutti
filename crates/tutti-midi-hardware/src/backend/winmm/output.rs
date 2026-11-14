@@ -8,9 +8,9 @@ use std::time::{Duration, Instant};
 
 use super::super::legacy_port::bytes::{ByteOut, Wire};
 use super::super::legacy_port::schedule::Schedule;
-use crate::endpoints::{DeviceOut, Tally};
+use crate::endpoints::DeviceOut;
 use crate::error::{Error, Result};
-use tutti_graph::UmpAt;
+use tutti_graph::{Losses, UmpAt};
 use tutti_midi_runtime::{MidiOut, Outgoing, SendAt};
 use tutti_ump::Ump;
 use tutti_winmm_ffi::{MidiOut as Port, Sleeper};
@@ -35,8 +35,12 @@ struct Shared {
     sleeper: Sleeper,
     /// Cleared when the thread ends other than by a stop.
     alive: AtomicBool,
-    sent: AtomicU64,
+    /// Events taken and not yet sent.
+    pending: AtomicU64,
+    /// Sends the device refused.
     lost: AtomicU64,
+    /// Events dropped when the sender ended.
+    refused: AtomicU64,
 }
 
 impl Shared {
@@ -62,7 +66,7 @@ impl MidiOut for WinMmOutput {
 
     /// Returns how many events were taken: an unbroken prefix, short only when
     /// [`MAX_PENDING`] events already wait, and none once the output is dead.
-    /// A send that then fails is counted in [`tally`](DeviceOut::tally).
+    /// A send that then fails is counted in [`losses`](DeviceOut::losses).
     fn queue_timed(&self, events: &[Outgoing]) -> usize {
         if !self.shared.alive.load(Ordering::Acquire) {
             return 0;
@@ -81,6 +85,9 @@ impl MidiOut for WinMmOutput {
             }),
         );
         drop(state);
+        self.shared
+            .pending
+            .fetch_add(taken as u64, Ordering::AcqRel);
         if taken > 0
             && let Err(e) = self.shared.sleeper.wake()
         {
@@ -95,11 +102,13 @@ impl DeviceOut for WinMmOutput {
         self.shared.alive.load(Ordering::Acquire)
     }
 
-    fn tally(&self) -> Tally {
-        Tally {
-            sent: self.shared.sent.load(Ordering::Acquire),
-            lost: self.shared.lost.load(Ordering::Acquire),
-        }
+    fn losses(&self) -> Losses {
+        Losses::lost(self.shared.lost.load(Ordering::Acquire))
+            + Losses::refused(self.shared.refused.load(Ordering::Acquire))
+    }
+
+    fn pending(&self) -> usize {
+        usize::try_from(self.shared.pending.load(Ordering::Acquire)).unwrap_or(usize::MAX)
     }
 }
 
@@ -144,6 +153,8 @@ fn run(mut port: Port, shared: &Shared) {
         };
         if !due.is_empty() {
             for ump in due {
+                // Per event, not per batch: a long run of due events must not
+                // keep a dropped output sending.
                 if shared.state().stop {
                     return;
                 }
@@ -151,23 +162,22 @@ fn run(mut port: Port, shared: &Shared) {
                     Wire::Short(message) => port.short(message),
                     Wire::Long(message) => port.long(message),
                 });
-                match sent {
-                    Ok(()) => shared.sent.fetch_add(1, Ordering::AcqRel),
-                    Err(e) => {
-                        tracing::debug!("winmm MIDI send: {e}");
-                        shared.lost.fetch_add(1, Ordering::AcqRel)
-                    }
-                };
+                if let Err(e) = sent {
+                    tracing::debug!("winmm MIDI send: {e}");
+                    shared.lost.fetch_add(1, Ordering::AcqRel);
+                }
+                shared.pending.fetch_sub(1, Ordering::AcqRel);
             }
             // Look again: more may have come due while sending.
             continue;
         }
         if let Err(e) = shared.sleeper.wait(wait) {
             tracing::warn!("winmm MIDI output stopped: {e}");
-            // What is held can no longer be sent: it is lost.
+            // What is held can no longer be sent: it had nowhere to go.
             let mut state = shared.state();
             let held = state.queue.clear() as u64;
-            shared.lost.fetch_add(held, Ordering::AcqRel);
+            shared.refused.fetch_add(held, Ordering::AcqRel);
+            shared.pending.fetch_sub(held, Ordering::AcqRel);
             shared.alive.store(false, Ordering::Release);
             return;
         }
@@ -189,8 +199,9 @@ pub(super) fn open(index: u32) -> Result<WinMmOutput> {
         }),
         sleeper: Sleeper::new()?,
         alive: AtomicBool::new(true),
-        sent: AtomicU64::new(0),
+        pending: AtomicU64::new(0),
         lost: AtomicU64::new(0),
+        refused: AtomicU64::new(0),
     });
     let (ending, ended) = mpsc::channel();
     let thread = std::thread::Builder::new()

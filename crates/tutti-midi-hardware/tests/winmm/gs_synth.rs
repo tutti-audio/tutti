@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use tutti_fixtures::midi::{GS_RESET, GS_WAVETABLE};
 use tutti_graph::Offset;
-use tutti_midi_hardware::{DeviceInfo, Devices, OpenOutput, Tally};
+use tutti_midi_hardware::{DeviceInfo, Devices, OpenOutput};
 use tutti_midi_runtime::{Outgoing, SendAt};
 use tutti_ump::{MidiGroup, SysexMessage, Ump};
 
@@ -33,14 +33,15 @@ fn at(send: SendAt, ump: Ump) -> Outgoing {
     }
 }
 
-/// Waits until the output has handled `events` packets, and returns its tally.
-fn settled(out: &OpenOutput, events: u64) -> Tally {
+/// Waits until the output has nothing left to send.
+fn drained(out: &OpenOutput) {
     let start = Instant::now();
-    loop {
-        let tally = out.tally();
-        if tally.sent + tally.lost >= events || start.elapsed() > PATIENCE {
-            return tally;
-        }
+    while out.pending() > 0 {
+        assert!(
+            start.elapsed() < PATIENCE,
+            "{} events never sent",
+            out.pending()
+        );
         std::thread::sleep(Duration::from_millis(5));
     }
 }
@@ -84,14 +85,8 @@ fn the_synth_is_sent_every_event_at_its_time_and_opens_again_after_a_close() {
         ];
         batch.extend(reset.iter().map(|&ump| at(SendAt::At(later), ump)));
         assert_eq!(out.queue_timed(&batch), batch.len());
-        let tally = settled(&out, batch.len() as u64);
-        assert_eq!(
-            tally,
-            Tally {
-                sent: batch.len() as u64,
-                lost: 0
-            }
-        );
+        drained(&out);
+        assert_eq!(out.losses(), tutti_graph::Losses::NONE);
         assert!(out.is_alive());
         // Each was held to its time: the last was due 90 ms in.
         assert!(

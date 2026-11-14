@@ -3,8 +3,8 @@
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Media::Audio::{
-    CALLBACK_NULL, HMIDIOUT, MHDR_DONE, MIDIHDR, midiOutClose, midiOutLongMsg, midiOutOpen,
-    midiOutPrepareHeader, midiOutReset, midiOutShortMsg, midiOutUnprepareHeader,
+    CALLBACK_NULL, HMIDIOUT, MIDIERR_STILLPLAYING, MIDIHDR, midiOutClose, midiOutLongMsg,
+    midiOutOpen, midiOutPrepareHeader, midiOutReset, midiOutShortMsg, midiOutUnprepareHeader,
 };
 
 use crate::error::{Error, check};
@@ -64,56 +64,62 @@ impl MidiOut {
     /// The failing call; and `midiOutLongMsg` after its timeout, in which case
     /// the buffer is kept for good (the driver may still read it).
     pub fn long(&mut self, message: &[u8]) -> Result<(), Error> {
-        let mut data = message.to_vec().into_boxed_slice();
-        let mut header = Box::new(MIDIHDR::default());
-        header.lpData = data.as_mut_ptr();
-        header.dwBufferLength = u32::try_from(data.len()).map_err(|_| Error {
+        let length = u32::try_from(message.len()).map_err(|_| Error {
             operation: "midiOutLongMsg",
             code: windows_sys::Win32::Media::MMSYSERR_INVALPARAM,
         })?;
+        // The bytes and the header are raw allocations while the driver may own
+        // them; they are rebuilt as boxes, and freed, only once it is done.
+        let data: *mut [u8] = Box::into_raw(message.to_vec().into_boxed_slice());
+        let header: *mut MIDIHDR = Box::into_raw(Box::new(MIDIHDR {
+            lpData: data.cast::<u8>(),
+            dwBufferLength: length,
+            ..MIDIHDR::default()
+        }));
         let size = size_of::<MIDIHDR>() as u32;
-        let ptr = &raw mut *header;
-        // SAFETY: `ptr` is a live header whose `lpData` is a live buffer of
-        // `dwBufferLength` bytes, both owned here until unprepared.
-        let code = unsafe { midiOutPrepareHeader(self.handle, ptr, size) };
-        check("midiOutPrepareHeader", code)?;
-        // SAFETY: the header is prepared and stays put until it is done.
-        let sent = check("midiOutLongMsg", unsafe {
-            midiOutLongMsg(self.handle, ptr, size)
+        // SAFETY: `header` is a live header whose `lpData` is a live buffer of
+        // `dwBufferLength` bytes, both allocated above and not freed before the
+        // driver is done with them.
+        let prepared = check("midiOutPrepareHeader", unsafe {
+            midiOutPrepareHeader(self.handle, header, size)
         });
-        let mut done = sent.is_err();
-        if sent.is_ok() {
-            let bound = Duration::from_millis(message.len() as u64 / 3 + 1) + SLACK;
-            let started = Instant::now();
-            while started.elapsed() < bound {
-                // SAFETY: the header is live. The driver sets `MHDR_DONE` from its
-                // own thread, so the read is a single `u32` load that is not
-                // assumed aligned (the struct is packed): `read_unaligned`
-                // makes no claim about alignment, and the fence after a done
-                // flag orders the driver's writes before what follows.
-                let flags = unsafe { (&raw const (*ptr).dwFlags).read_unaligned() };
-                if flags & MHDR_DONE != 0 {
-                    std::sync::atomic::fence(std::sync::atomic::Ordering::Acquire);
-                    done = true;
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(1));
+        let sent = prepared.and_then(|()| {
+            // SAFETY: the header is prepared and stays allocated until it is
+            // unprepared below.
+            check("midiOutLongMsg", unsafe {
+                midiOutLongMsg(self.handle, header, size)
+            })
+        });
+        // Unpreparing a header the driver is still playing fails with
+        // `MIDIERR_STILLPLAYING`, so the call that releases it is also the
+        // wait for it.
+        let bound = Duration::from_millis(message.len() as u64 / 3 + 1) + SLACK;
+        let started = Instant::now();
+        let released = loop {
+            // SAFETY: `header` is the header prepared above (or one whose
+            // preparation failed, which unprepare accepts).
+            let code = unsafe { midiOutUnprepareHeader(self.handle, header, size) };
+            if code != MIDIERR_STILLPLAYING {
+                break code;
             }
+            if started.elapsed() >= bound {
+                // The driver may still read the header and the bytes: they
+                // are never freed.
+                return Err(Error {
+                    operation: "midiOutLongMsg",
+                    code: Error::NOT_RETURNED,
+                });
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        // SAFETY: the driver is done with the header, so nothing else points at
+        // either allocation; each is freed once, by the pointer that made it.
+        unsafe {
+            drop(Box::from_raw(header));
+            drop(Box::from_raw(data));
         }
-        if !done {
-            // The driver may still read the header and the bytes: keep both.
-            std::mem::forget(header);
-            std::mem::forget(data);
-            return Err(Error {
-                operation: "midiOutLongMsg",
-                code: Error::NOT_RETURNED,
-            });
-        }
-        // SAFETY: the header is prepared and the driver has finished with it
-        // (or never took it).
-        let code = unsafe { midiOutUnprepareHeader(self.handle, ptr, size) };
         sent?;
-        check("midiOutUnprepareHeader", code)
+        check("midiOutUnprepareHeader", released)
     }
 }
 

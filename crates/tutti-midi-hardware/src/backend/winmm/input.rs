@@ -16,12 +16,12 @@ use tutti_winmm_ffi::{Event, MidiIn};
 pub struct WinMmInput {
     /// Set when the driver closes the port or the callback panics.
     died: Arc<AtomicBool>,
-    _port: MidiIn,
+    port: MidiIn,
 }
 
 impl InputConnection for WinMmInput {
     fn is_alive(&self) -> bool {
-        !self.died.load(Ordering::Acquire)
+        !self.died.load(Ordering::Acquire) && self.port.is_alive()
     }
 }
 
@@ -38,10 +38,10 @@ pub(super) fn open(index: u32, mut producer: InputProducerHandle) -> Result<WinM
     let mut bytes = ByteIn::new();
     // Read before the port starts, so no stamp precedes it.
     let mut anchor = Anchor::new(Instant::now());
+    // A full inlet counts the drop itself (`HardwareMidiInputs::losses`); a log
+    // line here would run on winmm's thread.
     let mut push = move |ump, at| {
-        if producer.push(ump, at) == Pushed::Full {
-            tracing::debug!("MIDI input ring full, dropping event");
-        }
+        let _: Pushed = producer.push(ump, at);
     };
     // winmm calls this on its own thread, and a panic must not leave it: the
     // guard catches it and ends the input.
@@ -64,5 +64,5 @@ pub(super) fn open(index: u32, mut producer: InputProducerHandle) -> Result<WinM
             }
         });
     })?;
-    Ok(WinMmInput { died, _port: port })
+    Ok(WinMmInput { died, port })
 }

@@ -610,11 +610,18 @@ impl OpenOutput {
         self.sink.is_alive()
     }
 
-    /// What the output has sent and lost so far, in packets of the device's
-    /// wire form.
+    /// What the output took and then could not send; see
+    /// [`DeviceOut::losses`].
     #[must_use]
-    pub fn tally(&self) -> crate::Tally {
-        self.sink.tally()
+    pub fn losses(&self) -> tutti_graph::Losses {
+        self.sink.losses()
+    }
+
+    /// How many events the output has taken and not yet sent; see
+    /// [`DeviceOut::pending`].
+    #[must_use]
+    pub fn pending(&self) -> usize {
+        self.sink.pending()
     }
 
     /// The device this output is open on.

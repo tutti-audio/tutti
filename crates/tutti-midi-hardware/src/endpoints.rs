@@ -41,6 +41,7 @@ use crate::InputProducerHandle;
 use crate::capability::EndpointInfo;
 use crate::devices::ChangeSink;
 use crate::error::Result;
+use tutti_graph::Losses;
 use tutti_midi_device::EndpointId;
 use tutti_midi_runtime::MidiOut;
 use tutti_ump::Protocol;
@@ -146,17 +147,29 @@ pub trait MidiEndpoints: Send + Sync {
 /// that one, not the one the OS reported when the output opened: a negotiation
 /// can settle on the other.
 pub trait DeviceOut: MidiOut {
-    /// Whether the output can still send. An output whose sender ended on its
-    /// own, on an error, returns `false` from then on and takes no more events.
-    /// The default is `true`, for a transport that cannot tell.
+    /// Whether the output can still send. An output with a sender thread of its
+    /// own returns `false` from then on once that thread has ended other than
+    /// by a stop, and takes no more events. An output that sends inside
+    /// [`queue`](MidiOut::queue) cannot end on its own, so it is alive for as
+    /// long as it is open, which is the default.
     fn is_alive(&self) -> bool {
         true
     }
 
-    /// What the output has sent and lost so far; see [`Tally`]. The default is
-    /// a transport that counts nothing.
-    fn tally(&self) -> Tally {
-        Tally::default()
+    /// What the output took and then could not send: a send the device refused
+    /// is [`lost`](Losses::lost), and an event waiting when the sender ended is
+    /// [`refused`](Losses::refused). An output that sends inside `queue` takes
+    /// nothing it does not send (a failure there is the shorter count `queue`
+    /// returns), so it loses nothing after taking, which is the default.
+    fn losses(&self) -> Losses {
+        Losses::NONE
+    }
+
+    /// How many events were taken and are not yet sent: waiting for their time
+    /// or for the sender. An output that sends inside `queue` holds none, which
+    /// is the default.
+    fn pending(&self) -> usize {
+        0
     }
 
     /// The batches from now on are in `protocol`. Called when the output opens
@@ -164,17 +177,4 @@ pub trait DeviceOut: MidiOut {
     /// [`queue`](MidiOut::queue). The default is for a transport that does not
     /// tag.
     fn follow(&self, _protocol: Protocol) {}
-}
-
-/// What an output with a sender of its own has done with the events it took:
-/// the sends happen after `queue` has returned, so this is where a failure of
-/// one shows.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Tally {
-    /// Events sent: each went to the device, or had no form on its wire and
-    /// was consumed.
-    pub sent: u64,
-    /// Events taken that could not be sent: the device refused one, or the
-    /// sender had ended.
-    pub lost: u64,
 }
