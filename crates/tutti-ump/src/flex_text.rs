@@ -16,7 +16,7 @@ const BYTES_PER_PACKET: usize = 12;
 /// A text of up to 12 bytes is one `Complete` packet (an empty one is a
 /// `Complete` of zeros). A longer one is a `Start`, any number of `Continue`,
 /// then an `End`, each carrying 12 bytes but the last, which carries one to 12
-/// and is padded with zeros (see [`text_packets`](crate::text_packets)). A NUL
+/// and is padded with zeros (see [`text_packets`]). A NUL
 /// is refused because zero is the padding: a reader cannot tell it from the end
 /// of the text. Nothing is allocated, and the packets carry no timing.
 ///

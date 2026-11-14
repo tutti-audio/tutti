@@ -1513,7 +1513,7 @@ fn a_members_reset_sends_the_managers_bend_again() {
 /// binary fraction** (M2-104 sections 7.4.7.1 and 7.4.13): a Manager Channel's
 /// 2 semitones 50 cents is 2.5 semitones as each member's per-note range, and
 /// the manager's own message passes on in the form it came.
-/// Spec: m2-104/7.4.7.1, m2-104/7.4.13.2#1
+/// Spec: m2-104/7.4.13.2#1
 #[test]
 fn a_manager_range_in_cents_is_the_same_range_per_note() {
     let two_and_a_half = RegisteredData::new(U7::of(2), U7::of(50));

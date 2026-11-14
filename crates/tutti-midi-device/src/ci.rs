@@ -205,9 +205,9 @@ tutti_types::ranged! {
     /// A 28-bit **MIDI Unique Identifier** (M2-101 §3.3): the random address a CI
     /// device gives itself. Four 7-bit bytes, least significant first, on the wire.
     ///
-    /// It holds a MUID a device can *own*: the reserved range
-    /// `RESERVED_START` to `0x0FFF_FFFE` and the broadcast
-    /// value `BROADCAST_RAW` are refused. The broadcast
+    /// It holds a MUID a device can *own*: the reserved range `0x0FFF_FF00` to
+    /// `0x0FFF_FFFE` and the broadcast
+    /// value `0x0FFF_FFFF` are refused. The broadcast
     /// address is a [`Destination`], not a `Muid`. A MUID is drawn from an OS random
     /// source by whoever owns the device; this type only checks one.
     #[derive(Eq, Hash, PartialOrd, Ord)]

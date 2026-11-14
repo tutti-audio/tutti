@@ -108,7 +108,7 @@ pub(super) const LAYERS: &[&[&str]] = &[
 /// The crates whose normal and build dependencies on workspace crates are exactly these.
 const ONLY: &[(&str, &[&str])] = &[
     ("tutti-midi-protocol", &["tutti-ump", "tutti-types"]),
-    ("tutti-midi-device", &["tutti-ump"]),
+    ("tutti-midi-device", &["tutti-ump", "tutti-types"]),
     ("tutti-midi-network", &["tutti-ump", "tutti-midi-device"]),
     ("tutti-metering", &["tutti-types"]),
     ("tutti-codec", &["tutti-types", "tutti-buffers"]),
