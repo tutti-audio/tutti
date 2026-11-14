@@ -182,7 +182,7 @@ fn live_realtime_prefetch_toggle_is_spec_clean() {
         .collect();
     let event_in = info.has_midi_input as c_int;
     let event_out = info.has_midi_output as c_int;
-    for id in inst.loaded().parameter_ids(&main_thread()) {
+    for id in inst.loaded().parameter_ids(main_thread()) {
         let _hc = hostcheck_lock();
         unsafe { hc_add_parameter(id.get() as c_uint) };
     }
@@ -413,7 +413,12 @@ fn host_context_is_borrowed_not_consumed() {
     let mut exercised = 0usize;
 
     for (name, path) in sample_plugins() {
-        let Ok(loaded) = Vst3Loaded::load(&main_thread(), &path, LoadOptions::new()) else {
+        let Ok(loaded) = Vst3Loaded::load(
+            main_thread(),
+            &tutti_fixtures::detached_work(),
+            &path,
+            LoadOptions::new(),
+        ) else {
             eprintln!("  {name}: skipped (load failed)");
             continue;
         };

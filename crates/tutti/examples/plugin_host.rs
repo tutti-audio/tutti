@@ -16,7 +16,7 @@
 //! `state().save()` and written beside the WAV.
 //!
 //! The plugin is a [`Plugin`](tutti::Plugin) view (`session.plugin(node)`), and what happens to
-//! it is a [`PluginEvent`] in `update()`'s events. The host's thread claims the
+//! it is a [`PluginEvent`] in `update()`'s events. The host makes the token on its
 //! main thread and calls `session.main(main).update()`, which services the
 //! editors it opened (`ui.plugin(node)?.editor().open(&window, scale)`, with a
 //! window of a winit app; this host has none) and raises
@@ -76,17 +76,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    blocks); here it runs on this thread. The load names the catalog, so a
     //    plugin it blacklisted is refused here (`BridgeError::Blacklisted`),
     //    before any server starts. The thread that loads an in-process plugin
-    //    is the main thread: claim the token once.
+    //    is the main thread: make the token once.
     let mut session = Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples(512)))
         .build()?;
-    let main = tutti::plugin::MainThread::claim()?;
+    let main = tutti::plugin::MainThreadMarker::new().ok_or("run on the process's main thread")?;
     let loaded = session
         .plugin_load(PluginLoadRequest::new(plugin))
         .with_catalog(&catalog)
         .run();
-    let node = session.add_plugin(&main, loaded)?;
+    let node = session.add_plugin(main, loaded)?;
 
     // 4. Wire it: the plugin's outputs feed the root's channels. `node` is a
     //    `Key<PluginNode>`: ports come from it as from any node's key

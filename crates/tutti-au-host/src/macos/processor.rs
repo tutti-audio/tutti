@@ -649,7 +649,7 @@ mod tests {
     use crate::instance::AuLoaded;
     use crate::types::{AudioComponentDescription, K_AUDIO_UNIT_TYPE_EFFECT};
     use tutti_plugin_types::{
-        AudioBuffer, Loaded, MainThread, MaxBlock, ParamId, ParameterChanges, Prepare, SampleRate,
+        AudioBuffer, Loaded, MaxBlock, ParamId, ParameterChanges, Prepare, SampleRate,
     };
 
     fn delay() -> (AuProcessor, crate::controller::AuController) {
@@ -661,9 +661,15 @@ mod tests {
             componentFlagsMask: 0,
         };
         let comp = find_component(&desc).expect("AUDelay ships with macOS");
-        let au = AuLoaded::new(comp, SampleRate::SR_48K, 512).unwrap();
+        let au = AuLoaded::new(
+            comp,
+            SampleRate::SR_48K,
+            512,
+            &tutti_fixtures::detached_work(),
+        )
+        .unwrap();
         let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(tutti_types::Samples(512)));
-        au.activate(&MainThread::claim().unwrap(), prepare)
+        au.activate(tutti_fixtures::main_thread(), prepare)
             .unwrap_or_else(|e| panic!("AUDelay activates: {}", e.reason))
     }
 

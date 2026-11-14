@@ -28,7 +28,7 @@ use tutti_plugin_db::PluginDb;
 use tutti_plugin_ipc::{BridgeConfig as IpcConfig, Ipc, Launched};
 use tutti_plugin_types::{
     BridgeError, BridgeResult, Control, Editor, InProcess, LatencyVerdict, Load, LoadStage,
-    MainThread, MaxBlock, Measured, NotChecked, PROBE_FLOOR, SampleRate, Samples, StateHash,
+    MainThreadMarker, MaxBlock, Measured, NotChecked, PROBE_FLOOR, SampleRate, Samples, StateHash,
     TailVerdict,
 };
 use tutti_vst2_host::Vst2Loaded;
@@ -137,7 +137,12 @@ fn vst3_cpp_is_probed_through_the_binary() {
 }
 
 /// No editor in these tests: the served plugin is driven through `Ipc` alone.
-fn no_editor(_: &MainThread, path: &Path, _: &Load) -> BridgeResult<Box<dyn Editor>> {
+fn no_editor(
+    _: MainThreadMarker,
+    _: &tutti_plugin_types::MainWorkHandle,
+    path: &Path,
+    _: &Load,
+) -> BridgeResult<Box<dyn Editor>> {
     Err(BridgeError::LoadFailed {
         path: path.to_path_buf(),
         stage: LoadStage::Opening,
@@ -157,7 +162,10 @@ fn served_id(plugin: &PluginRef) -> String {
         SampleRate::SR_48K,
         None,
         tutti_plugin_types::StateUse::Project,
-        Some(no_editor),
+        Some(tutti_plugin_ipc::EditorLoader::new(
+            no_editor,
+            tutti_fixtures::detached_work(),
+        )),
     )
     .unwrap_or_else(|e| panic!("{plugin:?}: the server loads it: {e:?}"));
     Control::info(&ipc).id.clone()
@@ -238,8 +246,13 @@ fn a_vst2_shell_is_probed_as_its_sub_plugins() {
     let main = tutti_fixtures::main_thread();
     for entry in db.plugins() {
         let plugin = PluginRef::from(&entry);
-        let loaded = Vst2Loaded::load_in_process(&main, plugin.path(), &plugin.load())
-            .expect("the sub-plugin loads");
+        let loaded = Vst2Loaded::load_in_process(
+            main,
+            &tutti_fixtures::detached_work(),
+            plugin.path(),
+            &plugin.load(),
+        )
+        .expect("the sub-plugin loads");
         assert_eq!(loaded.metadata().id, entry.descriptor.id);
     }
 }

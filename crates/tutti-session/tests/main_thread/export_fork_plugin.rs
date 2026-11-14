@@ -98,12 +98,6 @@ fn probe_env(key: &str, value: impl ToString) {
     unsafe { std::env::set_var(key, value.to_string()) };
 }
 
-/// This process's main thread. Each test is its own process under nextest, so
-/// the claim cannot be refused.
-fn main_thread() -> tutti_plugin_types::MainThread {
-    tutti_plugin_types::MainThread::claim().expect("one test, one process")
-}
-
 /// A detached stereo session at the export's rate, with the reference plugin
 /// loaded from `path` in `mode` and routed to the outputs.
 fn session_with_probe_at(
@@ -121,7 +115,7 @@ fn session_with_probe_at(
     session.graph().set_sample_rate(SampleRate::of(RATE));
     let probe = session
         .add_plugin_blocking(
-            &main_thread(),
+            tutti_fixtures::main_thread(),
             PluginLoadRequest::new(
                 PluginRef::file(path)
                     .expect("a plugin file")
@@ -194,7 +188,6 @@ impl Node for Ramp {
 /// sample for sample: a trim one frame off in either direction reads the
 /// neighbouring frame's value everywhere. (A constant input could not
 /// tell a trim of 64 from one of 201.)
-#[test]
 fn a_plugin_effect_exports_through_its_fork() {
     let (mut session, probe) = session_with_probe(LATENCY);
     feed_with(&mut session, probe, ForkByClone(Ramp { n: 0 }));
@@ -211,7 +204,6 @@ fn a_plugin_effect_exports_through_its_fork() {
 /// key**, before anything renders (`Error::Fork(ForkError::Source)`), with
 /// the plugin's own reason: the plugin's file is gone since it loaded, so no
 /// fresh instance loads (`PluginForkError::Load`).
-#[test]
 fn a_plugin_fork_that_cannot_be_built_is_a_named_failure() {
     // A link of our own to the plugin, so removing it touches no other
     // test's (the suites publish one shared `.clap` link).
@@ -263,7 +255,6 @@ fn a_plugin_fork_that_cannot_be_built_is_a_named_failure() {
 /// the live rate and prepared at the render's, and the clip places its
 /// notes at the rate the fork polls it at (a beat is 64 000 frames
 /// there).
-#[test]
 fn an_exported_plugin_instrument_plays_its_clip() {
     for rate in [RATE, 2.0 * RATE] {
         instrument_at(rate, Hosting::OutOfProcess);
@@ -273,7 +264,6 @@ fn an_exported_plugin_instrument_plays_its_clip() {
 /// **An instrument hosted in this process bounces its clip the same way**, its
 /// note on time and none of the clip's events lost: the bounce fails a render
 /// that dropped one.
-#[test]
 fn an_exported_in_process_plugin_instrument_plays_its_clip() {
     instrument_at(RATE, Hosting::InProcess);
 }
@@ -336,7 +326,6 @@ fn instrument_at(rate: f64, hosting: Hosting) {
 /// key**, promptly, instead of writing the silence it rendered after the
 /// crash. The crash switch is set after the live instance loaded, so only
 /// the fork's server reads it; it aborts on its 8th block.
-#[test]
 fn a_plugin_fork_that_crashes_mid_export_is_a_named_failure() {
     let (mut session, probe) = session_with_probe(TAG_PASSTHROUGH);
     feed_with(&mut session, probe, ForkByClone(Const::mono(0.25)));
@@ -355,3 +344,12 @@ fn a_plugin_fork_that_crashes_mid_export_is_a_named_failure() {
         started.elapsed()
     );
 }
+
+/// The cases of this module, run by `main`.
+pub(crate) const CASES: &[(&str, fn())] = tutti_fixtures::cases!["export_fork_plugin";
+a_plugin_effect_exports_through_its_fork,
+a_plugin_fork_that_cannot_be_built_is_a_named_failure,
+an_exported_plugin_instrument_plays_its_clip,
+an_exported_in_process_plugin_instrument_plays_its_clip,
+a_plugin_fork_that_crashes_mid_export_is_a_named_failure,
+];

@@ -56,7 +56,7 @@ use crossbeam_queue::ArrayQueue;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use tutti_plugin_types::{
-    AutomationMode, MainThread, Request, RescanScope, WireMidi, sysex_packets,
+    AutomationMode, MainThreadMarker, Request, RescanScope, WireMidi, sysex_packets,
 };
 use tutti_rt::RequestWord;
 use vst::api::{AutomationState, ProcessLevel, Supported};
@@ -192,6 +192,9 @@ pub(crate) struct HostState {
     /// create, `0` when the load names none (and for a plugin that is no shell, which
     /// never asks).
     current_id: i32,
+    /// The thread the host was made on, under a `MainThreadMarker`: the one a call from
+    /// outside a process scope answers `User` for.
+    main_thread: std::thread::ThreadId,
 }
 
 impl HostState {
@@ -207,6 +210,7 @@ impl HostState {
     }
 
     pub(crate) fn new(
+        _main: MainThreadMarker,
         param_tx: Arc<ArrayQueue<ParameterChange>>,
         midi_out_tx: Arc<ArrayQueue<WireMidi>>,
         time_info: TransportReader,
@@ -228,6 +232,7 @@ impl HostState {
             requests: RequestWord::new(),
             size_request: AtomicU64::new(0),
             current_id,
+            main_thread: std::thread::current().id(),
         }
     }
 
@@ -485,7 +490,7 @@ impl Host for HostState {
 
     /// The level of the thread asking (`audioMasterGetCurrentProcessLevel`): from inside the
     /// plugin's process call, `Offline` while the host renders offline and `Realtime`
-    /// otherwise; from the process's main thread, `User`; from any other thread,
+    /// otherwise; from the thread the host was made on under a `MainThreadMarker`, `User`; from any other thread,
     /// `Unknown`. `Prefetch` is never answered: the host runs no sequencing thread. The
     /// caller is told what its own thread is, never a guess.
     fn get_process_level(&self) -> ProcessLevel {
@@ -496,7 +501,7 @@ impl Host for HostState {
             } else {
                 ProcessLevel::Realtime
             }
-        } else if MainThread::current().is_some() {
+        } else if std::thread::current().id() == self.main_thread {
             ProcessLevel::User
         } else {
             ProcessLevel::Unknown
@@ -624,6 +629,7 @@ mod tests {
 
     fn make_host(time_info: TransportReader, default_sample_rate: f64) -> HostState {
         HostState::new(
+            tutti_fixtures::main_thread(),
             Arc::new(ArrayQueue::new(PARAM_QUEUE_CAPACITY)),
             Arc::new(ArrayQueue::new(MIDI_OUT_QUEUE_CAPACITY)),
             time_info,
@@ -784,6 +790,7 @@ mod tests {
         let none = make_host(TransportWriter::new().reader(), 48_000.0);
         assert_eq!(none.get_plugin_id(), 0);
         let chosen = HostState::new(
+            tutti_fixtures::main_thread(),
             Arc::new(ArrayQueue::new(PARAM_QUEUE_CAPACITY)),
             Arc::new(ArrayQueue::new(MIDI_OUT_QUEUE_CAPACITY)),
             TransportWriter::new().reader(),
@@ -813,12 +820,12 @@ mod tests {
         assert_eq!(host.get_process_level(), ProcessLevel::Realtime);
     }
 
-    /// Outside a process call the answer is the caller's thread: the claimed main thread is
+    /// Outside a process call the answer is the caller's thread: the main thread is
     /// `User`, another thread is `Unknown`, and the process scope ending ends `Realtime`.
     #[test]
     fn process_level_outside_process_is_user_on_main_and_unknown_elsewhere() {
         let host = Arc::new(make_host(TransportWriter::new().reader(), 48_000.0));
-        let _main = MainThread::claim().expect("one test, one process");
+        let _main = tutti_fixtures::main_thread();
 
         assert_eq!(host.get_process_level(), ProcessLevel::User);
         let other = {
@@ -848,7 +855,7 @@ mod tests {
     #[test]
     fn process_level_on_a_process_thread_that_is_not_main() {
         let host = Arc::new(make_host(TransportWriter::new().reader(), 48_000.0));
-        let _main = MainThread::claim().expect("one test, one process");
+        let _main = tutti_fixtures::main_thread();
         host.set_offline(true);
         let answers = {
             let host = Arc::clone(&host);
