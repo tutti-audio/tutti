@@ -847,7 +847,7 @@ impl Session {
                     self.root_refusal = None;
                     self.commit();
                 }
-                Err(e) => self.root_refusal = Some(e),
+                Err(e) => self.root_refusal = Some(e.into()),
             }
         }
         // A wider device widens the root, by the build's rule; a narrower one

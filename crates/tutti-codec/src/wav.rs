@@ -199,8 +199,8 @@ impl<W: Write + Seek> FormatWriter for WavWriter<W> {
 
     fn write(&mut self, block: Interleaved<'_>) -> Result<()> {
         let room = self.max_frames - self.frames;
-        let fits = (block.len().get() as u64).min(room) as usize;
-        let samples = &block.samples()[..fits * block.stride()];
+        let fits = (block.frames().get() as u64).min(room) as usize;
+        let samples = &block.samples()[..fits * block.channels()];
         self.bytes.clear();
         for &s in samples {
             match self.pcm.quantize(s) {
@@ -213,7 +213,7 @@ impl<W: Write + Seek> FormatWriter for WavWriter<W> {
             sink.write_all(&self.bytes)?;
         }
         self.frames += fits as u64;
-        if fits < block.len().get() {
+        if fits < block.frames().get() {
             return Err(Error::WavTooLarge {
                 limit_frames: self.max_frames,
             });

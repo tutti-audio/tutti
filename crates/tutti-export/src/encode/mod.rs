@@ -171,7 +171,7 @@ impl Sink for EncoderSink {
             self.error = Some(Error::from(e));
             SinkFailed
         })?;
-        self.frames += block.len();
+        self.frames += block.frames();
         Ok(())
     }
 
@@ -282,7 +282,7 @@ impl Chain {
     pub(crate) fn block(&mut self, block: Interleaved<'_>) -> Result<()> {
         let gain = self.gain;
         if let Some((rs, planes, out)) = self.resampler.as_mut() {
-            block.deinterleave_into(planes);
+            crate::planar::split(block, planes)?;
             rs.push(planes, out)?;
             emit_planes(out, &mut self.staging, &mut self.sink, self.layout, gain)
         } else if let Some(gain) = gain {
@@ -338,10 +338,7 @@ fn emit_planes(
     layout: ChannelLayout,
     gain: Option<Amplitude>,
 ) -> Result<()> {
-    let frames = Samples(out.first().map_or(0, Vec::len));
-    staging.clear();
-    staging.resize(frames.interleaved_len(layout), 0.0);
-    InterleavedMut::new(staging, layout)?.interleave_from(out, Samples::ZERO);
+    crate::planar::join(out, staging, layout)?;
     if let Some(gain) = gain {
         for s in staging.iter_mut() {
             *s *= gain.get();
@@ -386,7 +383,7 @@ pub(crate) fn replay_through(
         if n == 0 {
             break;
         }
-        chain.block(block.as_ref().window(Samples::ZERO..Samples(n)))?;
+        chain.block(block.as_interleaved().slice(Samples::ZERO..Samples(n)))?;
         at += n;
         control.advance(stage, Samples(at), total);
     }

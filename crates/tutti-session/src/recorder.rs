@@ -151,7 +151,7 @@ where
     };
     let pull = src.pull(out.reborrow());
     if let Pull::Frames(n) = pull {
-        dst.write(out.as_ref().window(Samples::ZERO..n))?;
+        dst.write(out.as_interleaved().slice(Samples::ZERO..n))?;
     }
     Ok(pull)
 }

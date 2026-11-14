@@ -1,10 +1,11 @@
-//! Applying a `Fold` allocates nothing: the frame, planar and planar-to-interleaved
-//! entry points, over every shape of row (copy, zero, sum, summed group, mono
-//! mix), 1 000 blocks under `assert_no_alloc`. Building the fold allocates and
-//! happens outside the gate.
+//! Applying a `Fold` allocates nothing: every applier (frame, interleaved,
+//! planar, planar to interleaved and one planar channel), over every shape of
+//! row (copy, zero, sum, summed group, mono mix), 1 000 blocks under
+//! `assert_no_alloc`. Building the fold allocates and happens outside the
+//! gate.
 
 use assert_no_alloc::assert_no_alloc;
-use tutti_buffers::{Fold, InterleavedMut};
+use tutti_buffers::{Fold, Interleaved, InterleavedMut, MonoMut, Planes, PlanesMut};
 use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
 
 fn smpte(n: u16) -> ChannelTopology {
@@ -41,24 +42,41 @@ fn applying_a_fold_is_allocation_free() {
             .map(|c| data.chunks_exact(sw).map(|f| f[c]).collect())
             .collect();
         let mut block = vec![0.0f32; dw * FRAMES];
+        let mut flat = vec![0.0f32; dw * FRAMES];
         let mut out = vec![0.0f32; FRAMES];
         let mut frame = vec![0.0f32; dw];
+        let mut folded = vec![vec![0.0f32; FRAMES]; dw];
         // Warm up: first-touch faults are not the fold's.
         fold.frame(&data[..sw], &mut frame);
         assert_no_alloc(|| {
             for _ in 0..1_000 {
                 fold.frame(&data[..sw], &mut frame);
+                let planar = Planes::from_vecs(&planes).unwrap();
                 for c in 0..dw {
-                    fold.planar_channel(|k| &planes[k][..], c, &mut out);
+                    fold.fold_planar_channel(planar, c, MonoMut::new(&mut out))
+                        .unwrap();
                 }
-                fold.planar_to_interleaved(
-                    |k| &planes[k][..],
+                fold.fold_planar_to_interleaved(
+                    planar,
                     InterleavedMut::new(&mut block, dst.layout()).unwrap(),
-                );
+                )
+                .unwrap();
+                fold.fold(
+                    Interleaved::new(&data, src.layout()).unwrap(),
+                    InterleavedMut::new(&mut flat, dst.layout()).unwrap(),
+                )
+                .unwrap();
+                fold.fold_planar(planar, PlanesMut::from_vecs(&mut folded).unwrap())
+                    .unwrap();
             }
         });
         assert!(
-            block.iter().chain(&out).any(|s| s.abs() > 1e-6),
+            block
+                .iter()
+                .chain(&out)
+                .chain(&flat)
+                .any(|s| s.abs() > 1e-6)
+                && folded.iter().flatten().any(|s| s.abs() > 1e-6),
             "the fold rendered silence; the gate would walk no DSP"
         );
     }

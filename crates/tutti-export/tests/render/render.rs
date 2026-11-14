@@ -1334,8 +1334,9 @@ fn first_frame(graph: &mut RenderGraph, width: u16) -> Result<Vec<f32>, tutti_ex
 /// A declared root is what the file is placed from: four `Unassigned` buses into
 /// a six-channel file keep channels 2 and 3 at 2 and 3 (undeclared, a four is
 /// quad and its rears land on the side pair at 4 and 5), a declared 5.1 folds
-/// into stereo by the 5.1 rules, and a declaration the file cannot take, or
-/// that is not as wide as the graph, is `ConfigError::Placement`.
+/// into stereo by the 5.1 rules, and a declaration the file cannot take is
+/// `ConfigError::Placement`, and one that is not as wide as the graph
+/// `ConfigError::Root`.
 #[test]
 fn a_declared_root_is_what_the_file_is_placed_from() {
     use tutti_buffers::FoldError;
@@ -1362,8 +1363,8 @@ fn a_declared_root_is_what_the_file_is_placed_from() {
     let mut graph = four_buses(Some(ChannelTopology::unassigned(ChannelLayout::from(6u16))));
     assert!(matches!(
         first_frame(&mut graph, 6),
-        Err(tutti_export::Error::InvalidConfig(ConfigError::Placement(
-            FoldError::RootWidth { .. }
+        Err(tutti_export::Error::InvalidConfig(ConfigError::Root(
+            tutti_graph::RootError::Width { .. }
         )))
     ));
     // Declared as a 5.1 (six wide), a six-channel graph folds to stereo by it.
@@ -1376,7 +1377,7 @@ fn a_declared_root_is_what_the_file_is_placed_from() {
     let swapped = ChannelTopology::smpte(ChannelLayout::from(6u16)).unwrap();
     assert!(swapped.index_of(Speaker::FrontLeft).is_some());
     let mut six = six_channels(swapped);
-    let m = tutti_buffers::M3DB;
+    let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
     let stereo = first_frame(&mut six, 2).unwrap();
     assert_eq!(stereo, [1.0 + m * 3.0 + m * 5.0, 2.0 + m * 3.0 + m * 6.0]);
     // The same six, the front pair declared the other way round.

@@ -215,7 +215,7 @@ impl OutputBlock {
         };
         process_audio(&self.state, &mut mix);
         // Back to a flat slice for the device write.
-        let mix = mix.as_ref().samples();
+        let mix = mix.as_interleaved().samples();
 
         write_output(data, channels, mix, frames);
     }
