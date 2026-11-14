@@ -1,75 +1,20 @@
-//! CPAL audio I/O — callback state, RT entry point, and device stream management.
+//! CPAL audio I/O: the output device and its stream lifecycle.
 //!
-//! The RT callback renders the graph ([`Engine`]) once per block; MIDI is
-//! the graph's (its input, clock and out nodes run in the render). Metering
-//! runs over the result.
+//! The callback itself (rendering the graph, `process_audio`, the fault and
+//! latency cells) is `tutti-engine`'s; this module resolves a device and holds
+//! the [`OutputStream`] that runs on it.
 
 use cpal::traits::DeviceTrait;
 use std::sync::Arc;
-use tutti_buffers::InterleavedMut;
-use tutti_engine::Engine;
-use tutti_rt::with_no_denormals;
+use tutti_engine::{
+    AudioCallbackState, OutputSpec, OutputStream, StreamDriver, StreamFaults, StreamLatency,
+};
 use tutti_types::{ChannelLayout, SampleRate};
 
-use crate::block::OutputBlock;
-use crate::driver_seam::{CpalDriver, OutputSpec, RunningStream, StreamDriver};
+use crate::driver_seam::{CpalDriver, spec_from_supported};
 use crate::error::{Error, Result};
-use crate::faults::StreamFaults;
 use crate::host::{AudioHost, DeviceHost, DeviceSelector, device_name};
-use crate::latency::StreamLatency;
 use crate::roster::Direction;
-
-/// Maximum frames per CPAL callback buffer.
-///
-/// The stream's mix buffer is sized to this once and never resized, so it is
-/// also the largest block [`process_audio`] can be handed: a longer callback is
-/// clamped and its tail silenced rather than reallocating on the audio thread.
-pub const MAX_FRAMES: usize = 8192;
-
-/// Everything the output callback reads: the [`Engine`].
-///
-/// Built once on the control thread and shared as an `Arc` between the
-/// [`TuttiDriver`](crate::TuttiDriver) (or [`AudioEngine`]) that owns the stream
-/// and the stream's callback, which passes it to [`process_audio`].
-#[derive(Debug)]
-pub struct AudioCallbackState {
-    pub(crate) engine: Engine,
-}
-
-impl AudioCallbackState {
-    /// Creates the state a stream's callback reads, on the control thread.
-    pub fn new(engine: Engine) -> Self {
-        Self { engine }
-    }
-}
-
-/// Renders one block of the graph into `output`, an interleaved device buffer
-/// that carries its own width.
-///
-/// The graph's root outputs are folded to that width (see [`Engine::process`]),
-/// and denormals are flushed for the duration of the call. This is the render
-/// the output stream runs each callback; call it directly only on a state no
-/// running stream is also rendering (see
-/// [`TuttiDriver::new`](crate::TuttiDriver::new)).
-///
-/// # Real-time
-///
-/// **Runs on the audio thread. Must not allocate, lock, or block.** Every
-/// buffer it touches is sized once at stream build to [`MAX_FRAMES`]; a longer
-/// callback is clamped and its tail silenced rather than reallocating here.
-/// `tests/device/rt_no_alloc.rs` gates this against a disabled allocator.
-///
-/// # Panics
-///
-/// If a node, the executor or the engine panics, the panic propagates from
-/// here: this function is not a guard. A stream's callback runs it through
-/// [`OutputBlock::render`], which catches the panic, writes silence and stops
-/// rendering (see there); a caller on a thread of its own that a C frame
-/// called must do the same.
-#[inline]
-pub fn process_audio(state: &AudioCallbackState, output: &mut InterleavedMut<'_>) {
-    with_no_denormals(|| state.engine.process(output));
-}
 
 /// An output device, its stream configuration, and the stream while it runs.
 ///
@@ -80,22 +25,15 @@ pub fn process_audio(state: &AudioCallbackState, output: &mut InterleavedMut<'_>
 ///
 /// The stream runs until [`stop`](Self::stop) or until the engine is dropped.
 /// Backend errors go to [`faults`](Self::faults).
-// The running stream is a `Box<dyn RunningStream>` rather than a type
-// parameter so the driver choice does not leak into every type that stores an
-// `AudioEngine`.
 pub struct AudioEngine {
-    spec: OutputSpec,
+    pub(crate) stream: OutputStream,
     /// `None` for an engine built from a bare spec — no host, no device, so
     /// nothing to re-resolve on start. That is what makes a device-free
     /// lifecycle test possible.
-    target: Option<(DeviceHost, DeviceSelector)>,
-    faults: Arc<StreamFaults>,
-    /// The output callback's reported delay, shared with each stream's block.
-    latency: Arc<StreamLatency>,
-    running: Option<Box<dyn RunningStream>>,
+    pub(crate) target: Option<(DeviceHost, DeviceSelector)>,
     /// What the stream last started is running on, kept so that naming it
     /// never enumerates the host.
-    opened: Opened,
+    pub(crate) opened: Opened,
 }
 
 /// The device a stream runs on, as the engine learned it when it opened.
@@ -110,19 +48,29 @@ pub(crate) enum Opened {
 }
 
 impl Opened {
-    fn of(device: &cpal::Device) -> Self {
+    pub(crate) fn of(device: &cpal::Device) -> Self {
         device_name(device).map_or_else(|e| Self::Unnamed(e.to_string()), Self::Named)
+    }
+
+    /// The name, `Ok(None)` for a supplied driver, or an error for a device the
+    /// host could not name.
+    pub(crate) fn name(&self) -> Result<Option<String>> {
+        match self {
+            Self::Supplied => Ok(None),
+            Self::Named(name) => Ok(Some(name.clone())),
+            Self::Unnamed(why) => Err(Error::InvalidDevice(format!(
+                "the opened device could not be named: {why}"
+            ))),
+        }
     }
 }
 
-// Hand-rolled: the running stream is not `Debug`. Reports the configuration a
-// host would want in a log line; whether a stream exists is `is_running`.
+// Hand-rolled: the device handles are not `Debug`. Forwards the stream, which
+// carries the configuration a host would want in a log line.
 impl std::fmt::Debug for AudioEngine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AudioEngine")
-            .field("spec", &self.spec)
-            .field("is_running", &self.is_running())
-            .field("faults", &self.faults.count())
+            .field("stream", &self.stream)
             .finish_non_exhaustive()
     }
 }
@@ -147,12 +95,10 @@ impl AudioEngine {
         let config = device
             .default_output_config()
             .map_err(Error::DeviceNotAvailable)?;
+        let (spec, _) = spec_from_supported(&config)?;
         Ok(Self {
-            spec: OutputSpec::from_supported(&config)?,
+            stream: OutputStream::new(spec),
             target: Some((host, sel)),
-            faults: Arc::new(StreamFaults::new()),
-            latency: Arc::new(StreamLatency::new()),
-            running: None,
             opened: Opened::of(&device),
         })
     }
@@ -168,11 +114,8 @@ impl AudioEngine {
     #[must_use]
     pub fn from_spec(spec: OutputSpec) -> Self {
         Self {
-            spec,
+            stream: OutputStream::new(spec),
             target: None,
-            faults: Arc::new(StreamFaults::new()),
-            latency: Arc::new(StreamLatency::new()),
-            running: None,
             opened: Opened::Supplied,
         }
     }
@@ -180,7 +123,7 @@ impl AudioEngine {
     /// Returns the configuration of the stream that is playing, or that the
     /// next start would use.
     pub fn spec(&self) -> &OutputSpec {
-        &self.spec
+        self.stream.spec()
     }
 
     /// Returns the backend fault record, which survives stop and restart.
@@ -188,14 +131,14 @@ impl AudioEngine {
     /// Take it once at startup and poll it; CPAL's error callback returns
     /// nothing, so a fault such as an unplugged device is reported only here.
     pub fn faults(&self) -> Arc<StreamFaults> {
-        Arc::clone(&self.faults)
+        self.stream.faults()
     }
 
     /// The delay the output callback last reported between rendering a block
     /// and its playing ([`StreamLatency`]): `None` until a callback of the
     /// running stream reports one, and again after a restart.
     pub fn latency(&self) -> Arc<StreamLatency> {
-        Arc::clone(&self.latency)
+        self.stream.latency()
     }
 
     /// Builds a stream on the selected device and starts it. A stream that is
@@ -219,18 +162,26 @@ impl AudioEngine {
         if self.is_running() {
             return Err(Error::AlreadyRunning);
         }
-        let (device, opened) = self.resolve()?;
-        self.start_with(state, CpalDriver::from_device(device))?;
+        let (driver, spec, opened) = self.resolve()?;
+        self.stream.start_at(state, spec, driver)?;
         self.opened = opened;
         Ok(())
     }
 
-    /// Resolve the selected device and read its config into
-    /// [`spec`](Self::spec), without opening a stream: the first half of
-    /// [`start`](Self::start), split out so a restart can see the config the
-    /// stream will run at before it runs (`TuttiDriver::restart_with`).
-    pub(crate) fn resolve(&mut self) -> Result<(cpal::Device, Opened)> {
-        let Some((host, sel)) = &self.target else {
+    /// Resolve the selected device and read its config, without opening a
+    /// stream: the first half of [`start`](Self::start), split out so a restart
+    /// can see the config the stream will run at before it runs
+    /// (`TuttiDriver::restart_with`).
+    pub(crate) fn resolve(&self) -> Result<(CpalDriver, OutputSpec, Opened)> {
+        Self::resolve_target(self.target.as_ref())
+    }
+
+    /// [`resolve`](Self::resolve) for a bare `target`, which a restart reads
+    /// while the stream is borrowed elsewhere.
+    pub(crate) fn resolve_target(
+        target: Option<&(DeviceHost, DeviceSelector)>,
+    ) -> Result<(CpalDriver, OutputSpec, Opened)> {
+        let Some((host, sel)) = target else {
             return Err(Error::InvalidDevice(
                 "this engine was built from a bare spec and has no device to open; \
                  use `start_with` and supply a driver"
@@ -241,24 +192,12 @@ impl AudioEngine {
         let config = device
             .default_output_config()
             .map_err(Error::DeviceNotAvailable)?;
-        self.spec = OutputSpec::from_supported(&config)?;
+        let (spec, format) = spec_from_supported(&config)?;
         // What it is called is recorded by the caller once the stream runs
-        // (`set_opened`): a restart that fails leaves the name of the device
-        // the previous stream ran on.
+        // (`opened`): a restart that fails leaves the name of the device the
+        // previous stream ran on.
         let opened = Opened::of(&device);
-        Ok((device, opened))
-    }
-
-    /// Replace the spec the next [`start_with`](Self::start_with) opens at:
-    /// the device-free counterpart of [`resolve`](Self::resolve), where the
-    /// caller is the device.
-    pub(crate) fn set_spec(&mut self, spec: OutputSpec) {
-        self.spec = spec;
-    }
-
-    /// Records what the stream that just started runs on.
-    pub(crate) fn set_opened(&mut self, opened: Opened) {
-        self.opened = opened;
+        Ok((CpalDriver::new(device, format)?, spec, opened))
     }
 
     /// Starts a stream at the current [`spec`](Self::spec) through `driver`.
@@ -266,57 +205,42 @@ impl AudioEngine {
     ///
     /// Unlike [`start`](Self::start) it resolves no device: the driver decides
     /// where the callback runs. With a
-    /// [`ManualStreamDriver`](crate::ManualStreamDriver) the caller runs each
-    /// callback by hand. Clears [`faults`](Self::faults).
+    /// [`ManualStreamDriver`](tutti_engine::ManualStreamDriver) the caller runs
+    /// each callback by hand. Clears [`faults`](Self::faults).
     ///
     /// # Errors
     /// [`Error::AlreadyRunning`] if a stream is running (it is left running);
     /// otherwise whatever the driver's [`open`](StreamDriver::open) reports; for
-    /// [`CpalDriver`], [`Error::InvalidConfig`] for an
-    /// unsupported sample format or [`Error::BuildStream`] /
-    /// [`Error::PlayStream`] from CPAL.
+    /// [`CpalDriver`], [`Error::BuildStream`] / [`Error::PlayStream`] from CPAL.
     pub fn start_with<D: StreamDriver>(
         &mut self,
         state: Arc<AudioCallbackState>,
         driver: D,
     ) -> Result<()>
     where
-        D::Running: 'static,
+        D::Error: Into<Error>,
     {
-        if self.is_running() {
-            return Err(Error::AlreadyRunning);
-        }
-        // A restart after a disconnect must report healthy again.
-        self.faults.clear();
-        // The new stream has reported no delay yet.
-        self.latency.reset();
-        let block = OutputBlock::new(state, self.spec.channels)
-            .with_latency(Arc::clone(&self.latency))
-            .with_faults(Arc::clone(&self.faults));
-        let running = driver.open(&self.spec, block, Arc::clone(&self.faults))?;
-        self.running = Some(Box::new(running));
-        Ok(())
+        Ok(self.stream.start_with(state, driver)?)
     }
 
     /// Stops and drops the running stream, if any. Idempotent.
     ///
     /// When this returns, the callback no longer runs.
     pub fn stop(&mut self) {
-        if let Some(running) = self.running.take() {
-            running.stop();
-        }
+        self.stream.stop();
     }
 
     /// Returns the sample rate of the running stream, or of the config the
     /// next start would use.
     pub fn sample_rate(&self) -> SampleRate {
-        self.spec.sample_rate
+        self.stream.sample_rate()
     }
 
     /// Returns the channel layout of the running stream, or of the config the
-    /// next start would use. This is the width [`process_audio`] is handed.
+    /// next start would use. This is the width
+    /// [`process_audio`](tutti_engine::process_audio) is handed.
     pub fn channels(&self) -> ChannelLayout {
-        self.spec.channels
+        self.stream.channels()
     }
 
     /// Returns whether a stream is open **and** the backend has not reported
@@ -326,7 +250,7 @@ impl AudioEngine {
     /// has not been stopped; see [`StreamFaults::is_disconnected`].
     #[must_use]
     pub fn is_running(&self) -> bool {
-        self.running.is_some() && !self.faults.is_disconnected()
+        self.stream.is_running()
     }
 
     /// Selects the device the next [`start`](Self::start) opens, by name or
@@ -351,13 +275,7 @@ impl AudioEngine {
     /// [`Error::InvalidDevice`] when the device opened but the host could
     /// not name it.
     pub fn opened_name(&self) -> Result<Option<String>> {
-        match &self.opened {
-            Opened::Supplied => Ok(None),
-            Opened::Named(name) => Ok(Some(name.clone())),
-            Opened::Unnamed(why) => Err(Error::InvalidDevice(format!(
-                "the opened device could not be named: {why}"
-            ))),
-        }
+        self.opened.name()
     }
 }
 

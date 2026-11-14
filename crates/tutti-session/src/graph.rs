@@ -418,7 +418,7 @@ fn compensation_of(plan: &tutti_graph::Plan) -> Compensation {
 }
 
 /// The graph's `Prepare`: `rate`, `max_block`, and the device's callback
-/// `quantum` when the host knows it (`tutti_cpal::OutputSpec::quantum`). A
+/// `quantum` when the host knows it (`tutti_engine::OutputSpec::quantum`). A
 /// hosted out-of-process plugin ships one quantum per callback to its server,
 /// so the quantum is what keeps its pipeline in step with the device.
 pub(crate) fn prepare_for(

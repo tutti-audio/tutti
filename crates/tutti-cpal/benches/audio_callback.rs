@@ -19,8 +19,7 @@ use tutti_types::MaxBlock;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_buffers::InterleavedMut;
-use tutti_cpal::{AudioCallbackState, OutputBlock, process_audio};
-use tutti_engine::Engine;
+use tutti_engine::{AudioCallbackState, Engine, OutputBlock, process_audio};
 use tutti_graph::{Editor, Prepare, TapReader};
 use tutti_graph::{NodeKey, TapAlign, TapId};
 use tutti_graph::{OutPort, Source};
@@ -116,7 +115,11 @@ fn bench_vs_render(c: &mut Criterion) {
     let mut block16 = OutputBlock::new(st3, ChannelLayout::STEREO);
     let mut data16 = vec![0i16; FRAMES * 2];
     group.bench_function("full_callback_i16", |b| {
-        b.iter(|| block16.render(black_box(&mut data16)));
+        b.iter(|| {
+            block16.render_with(black_box(&mut data16), |x: f32| {
+                cpal::Sample::from_sample(x)
+            })
+        });
     });
 
     group.finish();

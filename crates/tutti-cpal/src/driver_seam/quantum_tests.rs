@@ -1,4 +1,5 @@
 use super::*;
+use tutti_buffers::SampleFormat;
 
 /// A device reporting a buffer range is opened with a fixed callback size:
 /// the preferred 512 when it fits, clamped to the range when not, and
@@ -29,23 +30,15 @@ fn a_device_range_gives_a_fixed_quantum() {
         quantum_for(&Range { min: 0, max: 4096 }),
         Some(MaxBlock::of(Samples(512)))
     );
-    let spec = OutputSpec::new(
-        SampleRate::SR_48K,
-        ChannelLayout::STEREO,
-        cpal::SampleFormat::F32,
-    )
-    .with_quantum(MaxBlock::of(Samples(480)));
+    let spec = OutputSpec::new(SampleRate::SR_48K, ChannelLayout::STEREO, SampleFormat::F32)
+        .with_quantum(MaxBlock::of(Samples(480)));
     assert!(matches!(
-        spec.stream_config().buffer_size,
+        stream_config(&spec).buffer_size,
         cpal::BufferSize::Fixed(480)
     ));
-    let spec = OutputSpec::new(
-        SampleRate::SR_48K,
-        ChannelLayout::STEREO,
-        cpal::SampleFormat::F32,
-    );
+    let spec = OutputSpec::new(SampleRate::SR_48K, ChannelLayout::STEREO, SampleFormat::F32);
     assert!(matches!(
-        spec.stream_config().buffer_size,
+        stream_config(&spec).buffer_size,
         cpal::BufferSize::Default
     ));
 }

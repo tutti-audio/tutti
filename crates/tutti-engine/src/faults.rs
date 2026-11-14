@@ -1,24 +1,22 @@
 //! Where a stream error goes when there is no call to return it from.
 //!
-//! CPAL's error callback has no return value, so a device unplugged
+//! A backend's error callback has no return value, so a device unplugged
 //! mid-session would otherwise surface nowhere. The fault is stored in
 //! [`StreamFaults`] for the host to read.
 //!
-//! [`StreamFaults::record`] can run on the audio thread: with cpal 0.15 ALSA
-//! and WASAPI call the error callback on the data callback's worker thread,
-//! and CoreAudio can call it inside the render callback. So `record` never
-//! waits: the counters are atomics, and the lock around the last fault is only
-//! `try_lock`ed there. It still allocates the message string, as cpal's own
-//! error path does.
+//! [`StreamFaults::record`] can run on the audio thread: some backends call
+//! their error callback on the data callback's worker thread, and CoreAudio can
+//! call it inside the render callback. So `record` never waits: the counters
+//! are atomics, and the lock around the last fault is only `try_lock`ed there.
+//! It still allocates the message string, as a backend's own error path does.
 
 use std::borrow::Cow;
+use std::fmt::Display;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-#[cfg(feature = "capture")]
-use tutti_rt::Drained;
-use tutti_rt::FaultLatch;
+use tutti_rt::{Drained, FaultLatch};
 
 /// How long backend errors may arrive with no audio delivered before the
 /// stream counts as gone.
@@ -29,15 +27,13 @@ use tutti_rt::FaultLatch;
 /// does is time: an xrun is followed by data within a few periods, a lost
 /// device is not. 500 ms is many periods at any usual buffer size and
 /// still short enough to end a take promptly.
-pub(crate) const STALL_GRACE: Duration = Duration::from_millis(500);
+pub const STALL_GRACE: Duration = Duration::from_millis(500);
 
 /// What kind of fault the backend reported.
 ///
 /// A disconnect means the stream is gone and will not recover without a
-/// restart, so [`AudioEngine::is_running`] consults it. A backend-specific
-/// error may be transient.
-///
-/// [`AudioEngine::is_running`]: crate::AudioEngine::is_running
+/// restart, so [`OutputStream::is_running`](crate::OutputStream::is_running)
+/// consults it. A backend-specific error may be transient.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum StreamFaultKind {
@@ -62,11 +58,27 @@ pub struct StreamFault {
     pub message: Cow<'static, str>,
 }
 
-/// The accumulated faults of one output stream, shared between CPAL's error
-/// callback and the host.
+/// What a backend's error means for the stream, as the driver classifies it
+/// ([`StreamFaults::record`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum BackendErrorKind {
+    /// The backend says the device is gone: unplugged, or taken by an
+    /// exclusive-mode client.
+    DeviceGone,
+    /// The backend reports a change the stream survives (a route change, a
+    /// refused real-time promotion): not a fault.
+    Survivable,
+    /// Any other error. It may be transient (an xrun) or the first of a lost
+    /// device's spinning errors; time tells them apart.
+    Other,
+}
+
+/// The accumulated faults of one output stream, shared between the backend's
+/// error callback and the host.
 ///
-/// Created by [`AudioEngine`](crate::AudioEngine) and handed out by
-/// [`AudioEngine::faults`](crate::AudioEngine::faults). The same handle
+/// Created by [`OutputStream`](crate::OutputStream) and handed out by
+/// [`OutputStream::faults`](crate::OutputStream::faults). The same handle
 /// survives stop and restart, so a host can take it once at startup. Starting
 /// a stream clears it, so a restart after a disconnect reads healthy again.
 #[derive(Debug)]
@@ -105,7 +117,7 @@ impl StreamFaults {
     /// Notes that the stream delivered audio, which ends any run of backend
     /// errors: they were transient. Lock-free; the data callback calls it once
     /// per callback.
-    pub(crate) fn delivered(&self) {
+    pub fn delivered(&self) {
         self.run_start.store(0, Ordering::Relaxed);
     }
 
@@ -141,8 +153,7 @@ impl StreamFaults {
     /// ([`FaultLatch::drain`]). The order is the point: a pop first and a flag
     /// after could report a drained ring with frames the callback pushed in
     /// between.
-    #[cfg(feature = "capture")]
-    pub(crate) fn drain<T>(&self, pop: impl FnOnce() -> Option<T>) -> Drained<T> {
+    pub fn drain<T>(&self, pop: impl FnOnce() -> Option<T>) -> Drained<T> {
         self.disconnected.drain(pop)
     }
 
@@ -158,34 +169,34 @@ impl StreamFaults {
         self.last_guard().take()
     }
 
-    /// Records a fault from the backend's error callback. Never waits: if
+    /// Records a fault from the backend's error callback: `kind` is the
+    /// driver's reading of `err`, which supplies the message. Never waits: if
     /// another thread holds `last`, the message is dropped and the count still
     /// moves. Written message, then `disconnected`, then `count`, so a reader
     /// that sees the count also sees the message.
     ///
-    /// [`DeviceNotAvailable`](cpal::ErrorKind::DeviceNotAvailable) is a
-    /// disconnect at once. [`DeviceChanged`](cpal::ErrorKind::DeviceChanged) and
-    /// [`RealtimeDenied`](cpal::ErrorKind::RealtimeDenied) say the stream keeps
-    /// playing, so they are not faults and are not recorded. Any other error starts a run, counted and
-    /// described once; the run becomes a disconnect when errors still arrive
-    /// [`STALL_GRACE`] later with no [`delivered`](Self::delivered) between.
-    /// Errors repeated inside a run, and every backend error after the
-    /// disconnect, only cost two atomic loads: no string, no count, so a
-    /// backend that spins on `POLLERR` neither allocates nor floods a host
-    /// that reports each new count.
-    pub(crate) fn record(&self, err: &cpal::Error) {
-        self.record_at(err, Instant::now());
+    /// [`DeviceGone`](BackendErrorKind::DeviceGone) is a disconnect at once.
+    /// [`Survivable`](BackendErrorKind::Survivable) says the stream keeps
+    /// playing, so it is not a fault and is not recorded. Any other error
+    /// starts a run, counted and described once; the run becomes a disconnect
+    /// when errors still arrive [`STALL_GRACE`] later with no
+    /// [`delivered`](Self::delivered) between. Errors repeated inside a run,
+    /// and every backend error after the disconnect, only cost two atomic
+    /// loads: no string, no count, so a backend that spins on `POLLERR` neither
+    /// allocates nor floods a host that reports each new count.
+    pub fn record(&self, kind: BackendErrorKind, err: &dyn Display) {
+        self.record_at(kind, err, Instant::now());
     }
 
     /// [`record`](Self::record) at a given time, for tests.
-    pub(crate) fn record_at(&self, err: &cpal::Error, now: Instant) {
-        match err.kind() {
-            cpal::ErrorKind::DeviceChanged | cpal::ErrorKind::RealtimeDenied => return,
-            cpal::ErrorKind::DeviceNotAvailable => {
+    pub(crate) fn record_at(&self, kind: BackendErrorKind, err: &dyn Display, now: Instant) {
+        match kind {
+            BackendErrorKind::Survivable => return,
+            BackendErrorKind::DeviceGone => {
                 self.publish(StreamFaultKind::Disconnected, err.to_string().into());
                 return;
             }
-            _ => {}
+            BackendErrorKind::Other => {}
         }
         if self.is_disconnected() {
             return;
@@ -210,11 +221,10 @@ impl StreamFaults {
     /// Records that a callback of this stream panicked, from the audio thread
     /// that caught it: `what` names the callback. Allocates nothing and never
     /// waits (the message is dropped if another thread holds `last`). Raises
-    /// the same latch a disconnect does, so [`AudioEngine::is_running`] reads
+    /// the same latch a disconnect does, so
+    /// [`OutputStream::is_running`](crate::OutputStream::is_running) reads
     /// `false` and a capture source answers `Failed`.
-    ///
-    /// [`AudioEngine::is_running`]: crate::AudioEngine::is_running
-    pub(crate) fn record_panic(&self, what: &'static str) {
+    pub fn record_panic(&self, what: &'static str) {
         self.publish(StreamFaultKind::CallbackPanicked, Cow::Borrowed(what));
     }
 

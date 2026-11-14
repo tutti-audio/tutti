@@ -826,7 +826,7 @@ impl Engine {
     /// `Editor::reprepare` so the re-prepare finishes before the first block
     /// at the new rate, which then renders the re-prepared graph rather than
     /// the executor's silent checked-out block.
-    /// Hosts reach it through `tutti_cpal::Stopped::apply_pending`, which only
+    /// Hosts reach it through [`Stopped::apply_pending`](crate::Stopped::apply_pending), which only
     /// a restart hook is handed.
     ///
     /// Allocates nothing itself; a commit it installs was built on the

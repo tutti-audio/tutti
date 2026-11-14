@@ -1,23 +1,23 @@
 //! One callback's worth of output work, with no device and no thread.
 //!
-//! [`process_audio`] is the *inner* seam — the engine render, callable without
-//! a device. Everything around it in the output callback lives here: the
-//! [`MAX_FRAMES`] clamp, the zero-fill and the sample-format conversion. Keeping it outside
-//! the closure handed to `device.build_output_stream` is what lets a test run
-//! it without a sound card.
+//! [`process_audio`] is the *inner* seam: the engine render, callable without a
+//! driver. Everything around it in an output callback lives here: the
+//! [`MAX_FRAMES`] clamp, the zero-fill and the write to the driver's buffer.
+//! Keeping it outside the closure a backend runs is what lets a test run it
+//! without a sound card.
 //!
 //! [`OutputBlock`] is the *outer* seam, the output side's `PumpLoop`
 //! (`tutti-session`'s recorder keeps one pass's work apart from the thread that
-//! runs it the same way): buffers, layout and stride, with `StreamDriver` as
-//! who calls it and on what thread, and `RunningStream` the handle whose drop
-//! is the stop.
+//! runs it the same way): buffers, layout and stride, with
+//! [`StreamDriver`](crate::StreamDriver) as who calls it and on what thread, and
+//! [`RunningStream`](crate::RunningStream) the handle whose drop is the stop.
 //!
-//! [`OutputBlock::render`] is **not a second implementation of the callback**.
-//! `CpalDriver`'s closure body is `move |data, _| block.render(data)`, and a
-//! manual driver calls the identical method.
+//! [`OutputBlock::render_with`] is **not a second implementation of the
+//! callback**: a device driver's closure body is one call to it, and a manual
+//! driver calls the identical method.
 //!
 //! The `debug_assert!` on the callback size deliberately does **not** live
-//! here: an over-sized buffer is a claim about *CPAL's* contract, not about
+//! here: an over-sized buffer is a claim about a *backend's* contract, not about
 //! this block, so it belongs at the driver boundary. Keeping it out is also
 //! what lets a debug-build test observe the clamp instead of panicking before
 //! it.
@@ -26,22 +26,75 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_buffers::InterleavedMut;
+use tutti_rt::with_no_denormals;
 use tutti_types::ChannelLayout;
 
+use crate::Engine;
 use crate::faults::StreamFaults;
 use crate::latency::StreamLatency;
-use crate::output::{AudioCallbackState, MAX_FRAMES, process_audio};
+
+/// Maximum frames per driver callback buffer.
+///
+/// The stream's mix buffer is sized to this once and never resized, so it is
+/// also the largest block [`process_audio`] can be handed: a longer callback is
+/// clamped and its tail silenced rather than reallocating on the audio thread.
+pub const MAX_FRAMES: usize = 8192;
+
+/// Everything the output callback reads: the [`Engine`].
+///
+/// Built once on the control thread and shared as an `Arc` between the host
+/// that owns the stream ([`StreamHost`](crate::StreamHost), or an
+/// [`OutputStream`](crate::OutputStream) on its own) and the stream's callback,
+/// which passes it to [`process_audio`].
+#[derive(Debug)]
+pub struct AudioCallbackState {
+    pub(crate) engine: Engine,
+}
+
+impl AudioCallbackState {
+    /// Creates the state a stream's callback reads, on the control thread.
+    pub fn new(engine: Engine) -> Self {
+        Self { engine }
+    }
+}
+
+/// Renders one block of the graph into `output`, an interleaved device buffer
+/// that carries its own width.
+///
+/// The graph's root outputs are folded to that width (see [`Engine::process`]),
+/// and denormals are flushed for the duration of the call. This is the render
+/// the output stream runs each callback; call it directly only on a state no
+/// stream renders.
+///
+/// # Real-time
+///
+/// **Runs on the audio thread. Must not allocate, lock, or block.** Every
+/// buffer it touches is sized once at stream build to [`MAX_FRAMES`]; a longer
+/// callback is clamped and its tail silenced rather than reallocating here.
+/// `tests/no_alloc/block_no_alloc.rs` gates this against a disabled allocator.
+///
+/// # Panics
+///
+/// If a node, the executor or the engine panics, the panic propagates from
+/// here: this function is not a guard. A stream's callback runs it through
+/// [`OutputBlock::render_with`], which catches the panic, writes silence and
+/// stops rendering (see there); a caller on a thread of its own that a C frame
+/// called must do the same.
+#[inline]
+pub fn process_audio(state: &AudioCallbackState, output: &mut InterleavedMut<'_>) {
+    with_no_denormals(|| state.engine.process(output));
+}
 
 /// The working set one output stream's callback reads, sized once.
 ///
 /// Every buffer here is allocated in [`OutputBlock::new`], on the control
-/// thread, and never resized: a CPAL callback larger than [`MAX_FRAMES`] is
-/// clamped in [`render`](OutputBlock::render) and its tail silenced rather
-/// than reallocating on the audio thread.
+/// thread, and never resized: a callback larger than [`MAX_FRAMES`] is
+/// clamped in [`render_with`](OutputBlock::render_with) and its tail silenced
+/// rather than reallocating on the audio thread.
 pub struct OutputBlock {
     state: Arc<AudioCallbackState>,
     /// The device's true channel layout. The engine folds the graph root to
-    /// this width (declared with [`Engine::support_output`](tutti_engine::Engine::support_output)
+    /// this width (declared with [`Engine::support_output`](crate::Engine::support_output)
     /// when the block is built); a device wider than `MAX_ROOT_CHANNELS` (rare)
     /// simply gets silent extra channels — the root renders ≤ 8 and the fold
     /// zero-fills the rest.
@@ -77,7 +130,7 @@ impl OutputBlock {
     /// Control-thread only. This is the only allocation on the output path,
     /// and the one place the device's width reaches the engine: it builds the
     /// engine's fold from the graph root to the device
-    /// ([`Engine::support_output`](tutti_engine::Engine::support_output)), so the
+    /// ([`Engine::support_output`](crate::Engine::support_output)), so the
     /// callback never does.
     ///
     /// # Panics
@@ -127,8 +180,8 @@ impl OutputBlock {
         self.channels
     }
 
-    /// Frames the last [`render`](Self::render) actually produced, after the
-    /// [`MAX_FRAMES`] clamp.
+    /// Frames the last render actually produced, after the [`MAX_FRAMES`]
+    /// clamp.
     ///
     /// Exists so a test can assert the clamp happened rather than infer it
     /// from a silent tail.
@@ -136,24 +189,37 @@ impl OutputBlock {
         self.last_rendered_frames
     }
 
-    /// [`render`](Self::render), first recording the delay the callback's
-    /// timestamp reports between now and when this block plays (`None`: the
-    /// backend gave none, which clears the reading). A stream driver calls
-    /// this with what its backend stamped; wait-free like `render`.
+    /// [`render_with`](Self::render_with), first recording the delay the
+    /// callback's timestamp reports between now and when this block plays
+    /// (`None`: the backend gave none, which clears the reading). A stream
+    /// driver calls this with what its backend stamped; wait-free like
+    /// `render_with`.
     #[inline]
-    pub fn render_delayed<T>(&mut self, data: &mut [T], delay: Option<Duration>)
-    where
-        T: cpal::SizedSample + cpal::FromSample<f32>,
-    {
+    pub fn render_delayed_with<T: Copy>(
+        &mut self,
+        data: &mut [T],
+        delay: Option<Duration>,
+        convert: impl Fn(f32) -> T,
+    ) {
         self.latency.record(delay);
-        self.render(data);
+        self.render_with(data, convert);
     }
 
-    /// Render one block and write it to `data` in the device's sample format.
+    /// [`render_with`](Self::render_with) into an `f32` device buffer.
+    #[inline]
+    pub fn render(&mut self, data: &mut [f32]) {
+        self.render_with(data, |x| x);
+    }
+
+    /// Render one block and write it to `data`, each sample made from the
+    /// rendered `f32` by `convert` (the driver's sample format).
     ///
-    /// This is the entire output callback. CPAL calls it with whatever buffer
-    /// the backend handed over; a manual driver calls it with a buffer of the
-    /// caller's choosing.
+    /// This is the entire output callback. A device driver calls it with
+    /// whatever buffer the backend handed over; a manual driver calls it with a
+    /// buffer of the caller's choosing. `convert` is the driver's one
+    /// conversion from the engine's nominal `f32` to its device's type; it runs
+    /// on the audio thread, so it does not allocate, lock or wait, and it maps
+    /// `0.0` to the format's silence.
     ///
     /// # Panics in the render
     ///
@@ -170,19 +236,16 @@ impl OutputBlock {
     ///
     /// # Real-time
     ///
-    /// Runs on the audio thread. Must not allocate, lock, or block — see
-    /// `tests/device/rt_no_alloc.rs`.
+    /// Runs on the audio thread. Must not allocate, lock, or block, which
+    /// `tests/no_alloc/block_no_alloc.rs` gates.
     #[inline]
-    pub fn render<T>(&mut self, data: &mut [T])
-    where
-        T: cpal::SizedSample + cpal::FromSample<f32>,
-    {
-        let silence = T::from_sample(0.0);
+    pub fn render_with<T: Copy>(&mut self, data: &mut [T], convert: impl Fn(f32) -> T) {
+        let silence = convert(0.0);
         if self.failed {
             data.fill(silence);
             return;
         }
-        let rendered = catch_unwind(AssertUnwindSafe(|| self.render_unguarded(data)));
+        let rendered = catch_unwind(AssertUnwindSafe(|| self.render_unguarded(data, &convert)));
         if let Err(payload) = rendered {
             self.failed = true;
             data.fill(silence);
@@ -193,19 +256,16 @@ impl OutputBlock {
         }
     }
 
-    fn render_unguarded<T>(&mut self, data: &mut [T])
-    where
-        T: cpal::SizedSample + cpal::FromSample<f32>,
-    {
+    fn render_unguarded<T: Copy>(&mut self, data: &mut [T], convert: &impl Fn(f32) -> T) {
         let channels = self.channels;
-        // Clamp so we never allocate. If CPAL hands us a larger buffer we
+        // Clamp so we never allocate. If a backend hands us a larger buffer we
         // process the head and write silence to the tail. The assertion that
         // this should not happen lives at the driver boundary, not here.
         let frames = (data.len() / channels).min(MAX_FRAMES);
         self.last_rendered_frames = frames;
 
         let mix = &mut self.buffer[..frames * channels];
-        // Zero before rendering — the previous callback's contents are not
+        // Zero before rendering: the previous callback's contents are not
         // meaningful input for the graph.
         mix.fill(0.0);
         // `frames * channels` samples of a `channels`-wide layout: whole frames
@@ -217,38 +277,39 @@ impl OutputBlock {
         // Back to a flat slice for the device write.
         let mix = mix.as_interleaved().samples();
 
-        write_output(data, channels, mix, frames);
+        write_output(data, channels, mix, frames, convert);
     }
 }
 
-/// Convert the rendered f32 mix into the device's sample format.
+/// Convert the rendered f32 mix into the driver's sample type.
 ///
 /// `data` stays a bare `&mut [T]` and `channels` a bare `usize`: `T` is
-/// `cpal::SizedSample`, which includes the unsigned formats (u8, u16, u32) that
-/// no `tutti_buffers::Sample` is, so `InterleavedMut` cannot describe every
-/// destination. The only arithmetic in this function is `i / channels`, and the
-/// width it needs is the *source's*, which the caller already reads off the
-/// `InterleavedMut` it built. The vocabulary stops at the format boundary, as
-/// it does at the C ABI and WIT boundaries.
+/// whatever the backend's buffer holds, including offset-binary unsigned
+/// formats that no `tutti_buffers::Sample` is, so `InterleavedMut` cannot
+/// describe every destination. The only arithmetic in this function is
+/// `i / channels`, and the width it needs is the *source's*, which the caller
+/// already reads off the `InterleavedMut` it built. The vocabulary stops at the
+/// backend's buffer, as it does at the C ABI and wire boundaries.
 ///
-/// Private on purpose: it is reached through [`OutputBlock::render`], which is
-/// how CPAL reaches it. A parallel public conversion helper would be a second
-/// implementation of the matrix under test.
+/// Private on purpose: it is reached through [`OutputBlock::render_with`], which
+/// is how a driver reaches it. A parallel public conversion helper would be a
+/// second implementation of the matrix under test.
 #[inline]
-fn write_output<T: cpal::SizedSample + cpal::FromSample<f32>>(
+fn write_output<T: Copy>(
     data: &mut [T],
     channels: usize,
     output: &[f32],
     rendered_frames: usize,
+    convert: &impl Fn(f32) -> T,
 ) {
     // `output` is already `channels`-wide interleaved (the engine folded the
     // graph root to the device width). Copy every channel through; frames past
-    // what we rendered (an over-sized CPAL callback) get silence.
-    let silence = T::from_sample(0.0);
+    // what we rendered (an over-sized callback) get silence.
+    let silence = convert(0.0);
     for (i, sample) in data.iter_mut().enumerate() {
         let frame = i / channels;
         *sample = if frame < rendered_frames {
-            T::from_sample(output[i])
+            convert(output[i])
         } else {
             silence
         };

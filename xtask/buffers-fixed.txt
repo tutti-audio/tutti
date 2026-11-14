@@ -20,9 +20,9 @@ crates/tutti-codec/src/wave.rs::Wave::channel_mut  pending
 crates/tutti-codec/src/wave.rs::Wave::from_samples  pending
 crates/tutti-codec/src/wave.rs::Wave::push_frame  pending
 crates/tutti-codec/src/writer.rs::FormatWriter::write  pending
-crates/tutti-cpal/src/driver_seam.rs::ManualStream::render_block  pending
-crates/tutti-cpal/src/driver_seam.rs::ManualStream::render_block_delayed  pending
-crates/tutti-cpal/src/output.rs::process_audio  pending
+crates/tutti-engine/src/manual.rs::ManualStream::render_block  pending
+crates/tutti-engine/src/manual.rs::ManualStream::render_block_delayed  pending
+crates/tutti-engine/src/callback.rs::process_audio  pending
 crates/tutti-dsp/src/contract/harness.rs::Burst.signal  pending
 crates/tutti-dsp/src/contract/harness.rs::energy  pending
 crates/tutti-dsp/src/contract/harness.rs::noise  pending

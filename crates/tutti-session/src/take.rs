@@ -51,7 +51,7 @@ use std::sync::{Arc, OnceLock};
 use thiserror::Error;
 use tutti_buffers::{Interleaved, Sink, SinkFailed};
 use tutti_codec::{FileOut, Format, Spec};
-use tutti_cpal::StreamLatency;
+use tutti_engine::StreamLatency;
 use tutti_graph::{MissingSource, NodeKey, TapAlign, TapReader};
 use tutti_tempo::TempoMap;
 use tutti_types::{

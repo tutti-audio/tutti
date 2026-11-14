@@ -31,8 +31,9 @@
 //!   `TapReader`.
 //! - **MIDI.** `Engine` is MIDI-free; MIDI travels on the graph's event ports
 //!   (`tutti-graph`), and the MIDI nodes are `tutti-midi-runtime`'s.
-//! - **The device.** Opening a stream and driving the real-time callback is
-//!   `tutti-cpal`'s job. This crate only knows how to render a block.
+//! - **The device.** Opening a sound card's stream is `tutti-cpal`'s job; this
+//!   crate owns the block seam under it ([`StreamDriver`], [`OutputBlock`]), so a
+//!   driver of any other clock calls the same block.
 //! - **The value vocabulary.** The unit newtypes, the `Source`/`Sink` traits
 //!   and the meter math are `tutti-types`'. Delay compensation (`latency_plan`,
 //!   `delays`) is `tutti-graph`'s pure pass, applied by the graph compiler.
@@ -121,10 +122,22 @@ mod error;
 pub use error::{Error, Result};
 
 mod block_clock;
+mod callback;
 mod engine;
+mod faults;
 mod hearing;
+mod latency;
+mod manual;
 mod output;
+mod restart;
+mod stream;
 pub use block_clock::{BlockClockReader, BlockReading, Playhead};
+pub use callback::{AudioCallbackState, MAX_FRAMES, OutputBlock, process_audio};
 pub use engine::{DEFAULT_BLOCK_CAPACITY, Engine, GraphEngineError};
+pub use faults::{BackendErrorKind, STALL_GRACE, StreamFault, StreamFaultKind, StreamFaults};
 pub use hearing::{HeardOpen, HeardTapError, HeardTaps};
+pub use latency::StreamLatency;
+pub use manual::{ManualRunning, ManualStream, ManualStreamDriver};
 pub use output::OutputControl;
+pub use restart::{Stopped, StreamHost};
+pub use stream::{OutputSpec, OutputStream, RunningStream, StartError, StreamDriver};

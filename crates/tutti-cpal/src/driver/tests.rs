@@ -1,6 +1,7 @@
 use super::*;
-use crate::{AudioEngine, ManualStreamDriver, OutputSpec};
-use tutti_engine::Engine;
+use crate::AudioEngine;
+use tutti_buffers::SampleFormat;
+use tutti_engine::{Engine, ManualStreamDriver};
 use tutti_graph::{Editor, Prepare};
 use tutti_transport::Transport;
 use tutti_types::MaxBlock;
@@ -10,7 +11,7 @@ fn spec_at(rate: f64) -> OutputSpec {
     OutputSpec::new(
         SampleRate::of(rate),
         ChannelLayout::STEREO,
-        cpal::SampleFormat::F32,
+        SampleFormat::F32,
     )
 }
 
@@ -50,13 +51,13 @@ fn a_plain_restart_refuses_a_new_rate_and_stays_stopped() {
             "attempt {attempt}: {err}"
         );
         assert!(
-            !driver.engine().is_running(),
+            !driver.stream().is_running(),
             "nothing plays at the wrong rate"
         );
         assert!(!stream.is_open());
         assert_eq!(driver.graph_rate(), graph, "the graph did not move");
         assert_eq!(
-            driver.engine().spec().sample_rate,
+            driver.stream().spec().sample_rate,
             graph,
             "the spec does not claim the refused rate"
         );
@@ -66,6 +67,6 @@ fn a_plain_restart_refuses_a_new_rate_and_stays_stopped() {
     driver
         .restart_on(spec_at(44_100.0), d, refuse_rate_change(graph))
         .expect("the same rate restarts");
-    assert!(driver.engine().is_running() && stream.is_open());
+    assert!(driver.stream().is_running() && stream.is_open());
     drop(ed);
 }

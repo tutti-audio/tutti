@@ -1,6 +1,7 @@
 //! Errors from the device layer.
 
 use thiserror::Error;
+use tutti_engine::StartError;
 
 /// A failure opening, configuring, or running an audio device.
 ///
@@ -93,7 +94,7 @@ pub enum Error {
 
     /// [`AudioEngine::start`](crate::AudioEngine::start) or
     /// [`start_with`](crate::AudioEngine::start_with) was called while a
-    /// stream is running.
+    /// stream is running ([`StartError::AlreadyRunning`]).
     ///
     /// The new state is not adopted and the running stream is untouched; stop
     /// the engine first to replace it.
@@ -108,6 +109,23 @@ pub enum Error {
     /// I/O failure while reading or writing audio data.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+}
+
+impl From<std::convert::Infallible> for Error {
+    fn from(never: std::convert::Infallible) -> Self {
+        match never {}
+    }
+}
+
+impl<E: std::error::Error + Into<Error> + 'static> From<StartError<E>> for Error {
+    fn from(err: StartError<E>) -> Self {
+        match err {
+            StartError::AlreadyRunning => Self::AlreadyRunning,
+            StartError::Driver(e) => e.into(),
+            // `StartError` is non-exhaustive; a reason added there needs a row here.
+            other => Self::InvalidConfig(other.to_string()),
+        }
+    }
 }
 
 /// Convenience alias for `Result<T, `[`enum@Error`]`>`.

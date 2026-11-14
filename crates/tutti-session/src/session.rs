@@ -436,7 +436,7 @@ pub struct Session {
     /// The device's fault record, shared with the [`Device`](crate::Device),
     /// and the count the last poll saw.
     #[cfg(feature = "device")]
-    pub(crate) faults: Option<(Arc<tutti_cpal::StreamFaults>, u64)>,
+    pub(crate) faults: Option<(Arc<tutti_engine::StreamFaults>, u64)>,
     /// The device watch, and what restarts reported since the
     /// last poll.
     #[cfg(feature = "device")]

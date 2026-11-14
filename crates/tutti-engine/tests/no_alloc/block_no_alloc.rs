@@ -1,8 +1,9 @@
-//! The allocation gate `lib.rs` and `output.rs` promise for [`process_audio`].
+//! The allocation gate the callback module promises for [`process_audio`] and
+//! `OutputBlock`.
 //!
-//! Both crate docs state that the RT callback "must not allocate, lock, or
-//! block", that its buffers are sized once at stream build to `MAX_FRAMES`,
-//! and that `tests/device/rt_no_alloc.rs` gates that. This is that file.
+//! The docs state that the RT callback "must not allocate, lock, or block",
+//! and that its buffers are sized once at stream build to `MAX_FRAMES`. This
+//! file gates that.
 //!
 //! # Why it is here and not in `src/`
 //!
@@ -10,7 +11,7 @@
 //! AllocDisabler` is installed, and that can only be declared at the root of a
 //! *binary*. The crate's unit-test binary declares none, so an
 //! `assert_no_alloc` gate written in `src/` passes whether or not the callback
-//! allocated. This file is therefore the only allocation gate on
+//! allocated. This binary is therefore the allocation gate on
 //! `process_audio`. **Add new allocation gates here, never in `src/`.**
 //!
 //! # The fixture has to render
@@ -23,8 +24,7 @@
 //! by rendering nothing.
 
 use tutti_buffers::InterleavedMut;
-use tutti_cpal::{AudioCallbackState, MAX_FRAMES, OutputBlock, process_audio};
-use tutti_engine::Engine;
+use tutti_engine::{AudioCallbackState, Engine, MAX_FRAMES, OutputBlock, process_audio};
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_graph::{Editor, MeterReader, Prepare, TapReader};
 use tutti_graph::{MeterId, MeterSpec, NodeKey, TapAlign, TapId};
@@ -38,9 +38,8 @@ const SAMPLE_RATE: f64 = 48_000.0;
 
 /// Build an engine + transport pair whose graph actually renders, rolling.
 ///
-/// Mirrors `output.rs`'s own `build_callback_state` fixture; it is duplicated
-/// rather than shared because that one is `#[cfg(test)]`-private to the unit
-/// binary, and every type it needs is public.
+/// Mirrors `stream/fixtures.rs`; it is kept here so every line this binary
+/// runs before the gate is auditable in one file.
 fn rolling_state() -> (Transport, AudioCallbackState) {
     let (transport, state, _, _) = rolling_state_with(false);
     (transport, state)

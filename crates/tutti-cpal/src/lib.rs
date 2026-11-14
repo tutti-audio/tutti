@@ -1,10 +1,10 @@
 #![doc = include_str!("../README.md")]
 //! The CPAL device layer: the seam between Tutti's audio graph and a sound card.
 //!
-//! Device enumeration, output stream lifecycle, the real-time callback body, and
-//! microphone capture. `tutti-engine` knows how to render a block; this crate knows
-//! how to open a device, hand it blocks on time, and pull audio back in from a
-//! microphone. It is the only Tutti crate that links a platform audio API, so a
+//! Device enumeration, the device's output stream and microphone capture.
+//! `tutti-engine` knows how to render a block and owns the seam under every
+//! clock (`StreamDriver`, `OutputBlock`); this crate knows how to open a device,
+//! hand it blocks on time, and pull audio back in from a microphone. It is the only Tutti crate that links a platform audio API, so a
 //! headless render, an offline export or a test never pulls one in.
 //!
 //! Use it directly when you assemble the engine yourself; the `tutti` facade
@@ -39,7 +39,8 @@
 //! use tutti_graph::NodeKey;
 //! use tutti_graph::{Editor, Prepare};
 //! use tutti_nodes::testing::Osc;
-//! use tutti_cpal::{AudioCallbackState, AudioEngine, TuttiDriver};
+//! use tutti_engine::AudioCallbackState;
+//! use tutti_cpal::{AudioEngine, TuttiDriver};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Open a device first: it reports the rate the graph must be built at.
@@ -62,7 +63,7 @@
 //!
 //! audio_engine.start(Arc::clone(&state))?;
 //! let driver = TuttiDriver::new(audio_engine, state);
-//! assert!(driver.engine().is_running());
+//! assert!(driver.stream().is_running());
 //! # Ok(())
 //! # }
 //! ```
@@ -71,16 +72,14 @@
 //!
 //! - [`TuttiDriver`] — what a host holds: start, restart on another device or
 //!   rate ([`TuttiDriver::restart_with`] re-rates the graph in a hook), stop.
-//! - [`AudioEngine`] — one output device, its [`OutputSpec`], and the stream
-//!   while it runs.
-//! - [`AudioCallbackState`] and [`process_audio`] — what the output callback reads
-//!   and runs each block.
+//! - [`AudioEngine`] — one output device, its [`OutputSpec`](tutti_engine::OutputSpec),
+//!   and the stream while it runs.
+//! - [`CpalDriver`] — the `tutti_engine::StreamDriver` that runs the output
+//!   callback (`AudioCallbackState`, `process_audio`) on CPAL's thread.
 //! - [`DeviceHost`], [`AudioHost`], [`DeviceSelector`] — choose a platform host
 //!   (default or JACK) and a device on it, by name (and order among same-named devices).
-//! - [`StreamFaults`] — backend errors (such as an unplugged device), which CPAL's
-//!   error callback cannot return anywhere else.
-//! - [`ManualStreamDriver`] — runs the same lifecycle with no device, the caller
-//!   rendering each callback; for tests.
+//! - `tutti_engine::StreamFaults` — backend errors (such as an unplugged device),
+//!   which CPAL's error callback cannot return anywhere else.
 //! - `MicIn` (feature `capture`) — a microphone as a `tutti_buffers::Source`,
 //!   optionally with a live-monitor graph node. It delivers the inputs it was
 //!   opened with, as unassigned channels: the first two by default, any
@@ -89,7 +88,7 @@
 //! ## Real-time behaviour
 //!
 //! The output callback runs on CPAL's audio thread and does not allocate, lock or
-//! block. Its buffers are sized once at stream start to [`MAX_FRAMES`] frames; a
+//! block. Its buffers are sized once at stream start to `tutti_engine::MAX_FRAMES` frames; a
 //! larger callback is clamped and its tail silenced rather than reallocating. Every
 //! other method runs on the control thread.
 //!
@@ -109,13 +108,11 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
 
-mod block;
 mod driver;
 mod driver_seam;
+mod edge;
 mod error;
-mod faults;
 mod host;
-mod latency;
 mod listing;
 mod output;
 mod owner;
@@ -125,25 +122,18 @@ mod roster;
 #[cfg(feature = "capture")]
 mod mic;
 
-pub use block::OutputBlock;
-pub use driver::{Stopped, TuttiDriver};
-pub use driver_seam::{
-    CpalDriver, CpalStream, ManualRunning, ManualStream, ManualStreamDriver, OutputSpec,
-    PREFERRED_QUANTUM, RunningStream, StreamDriver,
-};
+pub use driver::TuttiDriver;
+pub use driver_seam::{CpalDriver, CpalStream, PREFERRED_QUANTUM};
 pub use error::{Error, Result};
-pub use faults::{StreamFault, StreamFaultKind, StreamFaults};
 pub use host::{AudioHost, DeviceHost, DeviceSelector, available_hosts};
-pub use latency::StreamLatency;
 pub use listing::{DeviceListing, Listed};
-pub use output::{AudioCallbackState, AudioEngine, MAX_FRAMES, process_audio};
+pub use output::AudioEngine;
 pub use poller::{DevicePoller, MIN_POLL_INTERVAL};
 pub use roster::{DeviceChange, DeviceId, DeviceRoster, Direction, Snapshot, SnapshotSource};
 
-// Re-exported because this crate's public surface already names cpal types (`SampleFormat` in
-// `OutputSpec`, `Error` in `ManualStream::fail`, cpal errors inside
-// `Error`), so a consumer needs the vocabulary and should not have to pin a
-// matching cpal version of its own.
+// Re-exported because this crate's public surface already names cpal types
+// (cpal errors inside `Error`), so a consumer needs the vocabulary and should
+// not have to pin a matching cpal version of its own.
 pub use cpal;
 
 #[cfg(feature = "capture")]

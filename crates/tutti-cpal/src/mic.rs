@@ -57,12 +57,12 @@ use tutti_types::Samples;
 use tutti_types::{ChannelLayout, ChannelTopology};
 
 use crate::driver_seam::device_rate;
+use crate::edge;
 use crate::error::{Error, Result};
-use crate::faults::StreamFaults;
 use crate::host::{AudioHost, DeviceHost, DeviceSelector, device_name};
-use crate::latency::StreamLatency;
 use crate::owner::Owned;
 use crate::roster::Direction;
+use tutti_engine::{StreamFaults, StreamLatency};
 
 /// Capture-ring capacity in frames — ~1s at 48kHz. Large enough that a
 /// briefly descheduled pump thread doesn't overrun, small enough to bound
@@ -567,7 +567,7 @@ where
                     return;
                 }
                 delivering.delivered();
-                latency.record(crate::latency::input_delay(&info.timestamp()));
+                latency.record(edge::input_delay(&info.timestamp()));
                 // A panic must not unwind out of the device's C frame.
                 let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     capture.block(data);
@@ -581,7 +581,7 @@ where
             },
             // Not exercised without a device: what it calls, `StreamFaults::record`
             // and `MicIn::pull`'s verdict, is tested on its own.
-            move |err| faults.record(&err),
+            move |err| edge::record(&faults, &err),
             None,
         )
         .map_err(Error::BuildStream)?;

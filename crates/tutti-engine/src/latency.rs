@@ -2,13 +2,12 @@
 //! callback and when its audio is played (an output) or was captured (an
 //! input).
 //!
-//! cpal stamps each callback with two instants
-//! ([`OutputStreamTimestamp`](cpal::OutputStreamTimestamp): the callback and
-//! the predicted playback; [`InputStreamTimestamp`](cpal::InputStreamTimestamp):
-//! the callback and the capture). Their difference is the buffering the device
-//! adds in that direction. A backend that cannot say gives a timestamp with no
-//! difference to read (the playback before the callback, say), and that is
-//! "not reported", never zero.
+//! A backend stamps each callback with two instants (the callback and the
+//! predicted playback of an output; the callback and the capture of an input).
+//! Their difference is the buffering the device adds in that direction. A
+//! backend that cannot say gives a timestamp with no difference to read (the
+//! playback before the callback, say), and that is "not reported", never zero:
+//! the driver passes `None`.
 //!
 //! [`StreamLatency`] holds the last difference one stream's callback measured,
 //! one atomic, so the callback records it without waiting and the control side
@@ -72,20 +71,6 @@ impl StreamLatency {
     pub fn reset(&self) {
         self.record(None);
     }
-}
-
-/// The delay an output callback's timestamp reports: the playback instant
-/// after the callback's. `None` if the backend gives a playback before the
-/// callback.
-pub(crate) fn output_delay(stamp: &cpal::OutputStreamTimestamp) -> Option<Duration> {
-    stamp.playback.checked_duration_since(stamp.callback)
-}
-
-/// The delay an input callback's timestamp reports: the callback after the
-/// capture instant. `None` if the backend gives a capture after the callback.
-#[cfg(feature = "capture")]
-pub(crate) fn input_delay(stamp: &cpal::InputStreamTimestamp) -> Option<Duration> {
-    stamp.callback.checked_duration_since(stamp.capture)
 }
 
 #[cfg(test)]
