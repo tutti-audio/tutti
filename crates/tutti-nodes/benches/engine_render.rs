@@ -152,7 +152,7 @@ fn bench_depth(c: &mut Criterion) {
     group.finish();
 }
 
-/// Device width. Prices the fold at the root (`Fold::planar_to_interleaved`):
+/// Device width. Prices the fold at the root (`Fold::fold_planar_to_interleaved`):
 /// the graph work is identical, only the fold width changes.
 fn bench_width(c: &mut Criterion) {
     let mut group = c.benchmark_group("width");

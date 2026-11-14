@@ -588,9 +588,19 @@ fn a_caller_can_still_fold_to_stereo_itself() {
     ));
 
     let mut stereo = [0.0f32; 2];
-    tutti_buffers::Fold::to_width(decoder.topology(), tutti_types::ChannelLayout::STEREO)
-        .expect("a 5.1 file places into stereo")
-        .frame(&native[..ch], &mut stereo);
+    // A file that names no speakers is read in the engine's order for its width.
+    let file = decoder.topology();
+    let file = if file.is_unassigned() {
+        tutti_types::ChannelTopology::assumed(file.layout())
+    } else {
+        file.clone()
+    };
+    tutti_buffers::Fold::between(
+        &file,
+        &tutti_types::ChannelTopology::assumed(tutti_types::ChannelLayout::STEREO),
+    )
+    .expect("a 5.1 file places into stereo")
+    .frame(&native[..ch], &mut stereo);
 
     // The centre reaches both sides rather than being dropped with the
     // surrounds.

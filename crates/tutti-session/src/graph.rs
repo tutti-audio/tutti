@@ -334,7 +334,7 @@ pub struct Graph {
     /// over this graph: a declaration is published through it.
     output: Option<tutti_engine::OutputControl>,
     /// The last widening [`widen_outputs`](Self::widen_outputs) refused.
-    widen_refusal: Option<tutti_buffers::FoldError>,
+    widen_refusal: Option<tutti_graph::RootError>,
     /// The hosted plugins' records, by node (`plugin.rs`): kept here so a
     /// crossfade to another plugin and a removal update them where they
     /// happen.
@@ -2083,7 +2083,7 @@ impl Graph {
     ///   must be the same width. A bus into the root may be narrower than it:
     ///   it is placed by speaker, on the topology the root was declared with,
     ///   else on the engine's order for the root's width
-    ///   ([`Fold::to_width`](tutti_buffers::Fold::to_width)), so a mono source
+    ///   ([`fold_to_width`](tutti_graph::fold_to_width)), so a mono source
     ///   feeds both channels of a stereo root at gain 1.0. A placement that
     ///   would weight a channel (a centre into a root with none) is refused:
     ///   a weighted fold is a bus edge. A connection never truncates;
@@ -2326,19 +2326,17 @@ impl Graph {
                 // A narrower bus is placed on the root by speaker: the root's
                 // declared topology, else the engine's order for its width. A
                 // bus that names no speaker is read in the engine's order for
-                // its width, as `Fold::to_width` reads it.
+                // its width.
                 let source = tutti_types::ChannelTopology::from(out_topology);
+                let placed = if source.is_unassigned() {
+                    tutti_types::ChannelTopology::assumed(source.layout())
+                } else {
+                    source
+                };
                 let fold = match self.root_topology() {
-                    Some(root) => {
-                        let placed = if source.is_unassigned() {
-                            tutti_types::ChannelTopology::assumed(source.layout()).unwrap_or(source)
-                        } else {
-                            source
-                        };
-                        tutti_buffers::Fold::between(&placed, root)
-                    }
-                    None => tutti_buffers::Fold::to_width(
-                        &source,
+                    Some(root) => tutti_buffers::Fold::between(&placed, root),
+                    None => tutti_graph::fold_to_width(
+                        &placed,
                         // The root's width is a `ChannelLayout`'s: every call
                         // that sizes it takes one.
                         ChannelLayout::try_from(root_width).expect("a root width fits a layout"),
@@ -2796,7 +2794,7 @@ impl Graph {
     /// - on a root whose topology was declared
     ///   ([`Session::declare_root_topology`](crate::Session::declare_root_topology)),
     ///   anything wider than the declaration: the root is not widened under
-    ///   it ([`FoldError::RootWidth`](tutti_buffers::FoldError::RootWidth));
+    ///   it ([`RootError::Width`](tutti_graph::RootError::Width));
     /// - past [`MAX_ROOT_CHANNELS`](tutti_graph::MAX_ROOT_CHANNELS): the root
     ///   is widened to that and the excess is not rendered
     ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), the first
@@ -2807,13 +2805,13 @@ impl Graph {
     /// # Errors
     ///
     /// As above.
-    pub fn widen_outputs(&mut self, channels: usize) -> Result<(), tutti_buffers::FoldError> {
+    pub fn widen_outputs(&mut self, channels: usize) -> Result<(), tutti_graph::RootError> {
         let refused = if let Some(root) = self
             .root
             .as_ref()
             .filter(|r| channels > r.positions().len())
         {
-            Some(tutti_buffers::FoldError::RootWidth {
+            Some(tutti_graph::RootError::Width {
                 declared: root.layout(),
                 // Only the report names the request; one past `u16::MAX` is
                 // refused either way (it is past `MAX_ROOT_CHANNELS`), so the
@@ -2821,10 +2819,12 @@ impl Graph {
                 requested: ChannelLayout::clamped(channels),
             })
         } else if channels > tutti_graph::MAX_ROOT_CHANNELS {
-            Some(tutti_buffers::FoldError::Unplaced {
-                channel: tutti_graph::MAX_ROOT_CHANNELS,
-                speaker: tutti_types::Speaker::Unassigned,
-            })
+            Some(tutti_graph::RootError::Fold(
+                tutti_buffers::FoldError::Unplaced {
+                    channel: tutti_graph::MAX_ROOT_CHANNELS,
+                    speaker: tutti_types::Speaker::Unassigned,
+                },
+            ))
         } else {
             None
         };
@@ -2832,7 +2832,7 @@ impl Graph {
         // A declared root is not widened at all when refused; an over-wide
         // request widens as far as the engine renders.
         let target = match refused {
-            Some(tutti_buffers::FoldError::RootWidth { .. }) => 0,
+            Some(tutti_graph::RootError::Width { .. }) => 0,
             _ => channels.min(tutti_graph::MAX_ROOT_CHANNELS),
         };
         let outputs = &mut self.editor.spec_mut().topology.outputs;
@@ -2845,7 +2845,7 @@ impl Graph {
 
     /// The last widening [`widen_outputs`](Self::widen_outputs) refused, until
     /// a request is not or a declaration is made.
-    pub(crate) fn widen_refusal(&self) -> Option<tutti_buffers::FoldError> {
+    pub(crate) fn widen_refusal(&self) -> Option<tutti_graph::RootError> {
         self.widen_refusal
     }
 
@@ -2885,15 +2885,15 @@ impl Graph {
     /// changed.
     /// Whether `root` can be a root, and be placed on `device` when there is
     /// one: not empty, no wider than the engine renders, and every channel
-    /// has a place on the device ([`Fold::declared`](tutti_buffers::Fold::declared)).
+    /// has a place on the device ([`fold_to_width`](tutti_graph::fold_to_width)).
     pub(crate) fn check_root(
         root: &tutti_types::ChannelTopology,
         device: impl Into<Option<ChannelLayout>>,
     ) -> Result<(), tutti_buffers::FoldError> {
-        use tutti_buffers::{Fold, FoldEnd, FoldError};
+        use tutti_buffers::{BufferError, FoldError};
         let width = root.positions().len();
         if width == 0 {
-            return Err(FoldError::Empty(FoldEnd::Source));
+            return Err(BufferError::ZeroWidth.into());
         }
         if width > tutti_graph::MAX_ROOT_CHANNELS {
             return Err(FoldError::Unplaced {
@@ -2902,7 +2902,7 @@ impl Graph {
             });
         }
         if let Some(device) = device.into() {
-            Fold::declared(root, device)?;
+            tutti_graph::fold_to_width(root, device)?;
         }
         Ok(())
     }
@@ -2912,7 +2912,6 @@ impl Graph {
         root: Option<tutti_types::ChannelTopology>,
         device: Option<ChannelLayout>,
     ) -> Result<(), tutti_buffers::FoldError> {
-        use tutti_buffers::Fold;
         let width = match &root {
             Some(root) => {
                 Self::check_root(root, device)?;
@@ -2921,9 +2920,15 @@ impl Graph {
             None => {
                 if let Some(device) = device {
                     let outputs = self.outputs();
-                    let width = ChannelLayout::try_from(outputs)
-                        .map_err(|_| tutti_buffers::FoldError::TooWide(outputs))?;
-                    Fold::widths(width, device)?;
+                    let width = ChannelLayout::try_from(outputs).map_err(|_| {
+                        tutti_buffers::FoldError::from(tutti_buffers::BufferError::TooWide {
+                            channels: outputs,
+                        })
+                    })?;
+                    tutti_graph::fold_to_width(
+                        &tutti_types::ChannelTopology::assumed(width),
+                        device,
+                    )?;
                 }
                 self.outputs()
             }

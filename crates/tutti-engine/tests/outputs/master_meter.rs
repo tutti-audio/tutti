@@ -96,7 +96,7 @@ fn render(engine: &Engine, frames: usize, width: usize) -> Vec<f32> {
 /// the bug. The signal is put on the **centre** channel with the front pair
 /// silent, which is the only arrangement that separates a per-channel meter
 /// from a `[..2]` truncation: under a uniform-DC graph the two agree exactly.
-/// (This was a stereo fold of the device buffer, `M3DB` on each side; the
+/// (This was a stereo fold of the device buffer, `MINUS_3_DB` on each side; the
 /// meter now reads the graph's outputs one by one and folds nothing.)
 #[test]
 fn a_wide_device_meters_each_channel_not_the_first_two() {
@@ -297,7 +297,7 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
 /// **A stereo root reaches a stereo device unchanged.**
 ///
 /// The engine folds the graph's outputs to the device's width with
-/// `Fold::widths`; a stereo root to a stereo device is the identity, which
+/// `fold_to_width` over the engine's order for the root's width; a stereo root to a stereo device is the identity, which
 /// must stay a passthrough. (This pinned the premise of the meter's
 /// stereo shortcut, which went with the fold; the passthrough is still the
 /// engine's own.)
@@ -305,7 +305,8 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
 fn a_stereo_root_folds_to_a_stereo_device_unchanged() {
     let mut folded = [0.0f32; 2];
     let stereo = tutti_types::ChannelLayout::STEREO;
-    let fold = tutti_buffers::Fold::widths(stereo, stereo).unwrap();
+    let fold =
+        tutti_graph::fold_to_width(&tutti_types::ChannelTopology::assumed(stereo), stereo).unwrap();
     fold.frame(&[0.25, -0.75], &mut folded);
     assert!(fold.is_identity());
     assert_eq!(

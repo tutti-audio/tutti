@@ -74,7 +74,7 @@ fn a_centre_source_lands_in_the_centre_and_never_in_the_lfe() {
 #[test]
 fn for_topology_dispatches_and_rejects_unsupported() {
     for width in [2u16, 4, 6] {
-        let topology = ChannelTopology::for_width(ChannelLayout::from(width));
+        let topology = ChannelTopology::assumed(ChannelLayout::from(width));
         assert_eq!(
             VbapPannerNode::for_topology(&topology)
                 .unwrap()
@@ -83,7 +83,7 @@ fn for_topology_dispatches_and_rejects_unsupported() {
             usize::from(width)
         );
     }
-    let three = ChannelTopology::for_width(ChannelLayout::from(3u16));
+    let three = ChannelTopology::assumed(ChannelLayout::from(3u16));
     assert!(matches!(
         VbapPannerNode::for_topology(&three),
         Err(VbapError::NoBed(_))

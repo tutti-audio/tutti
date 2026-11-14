@@ -43,8 +43,8 @@
 //! # Counts are in FRAMES. Always. Everywhere.
 //!
 //! - [`Source::pull`] answers [`Pull::Frames`] with a frame count, a
-//!   [`Samples`], bounded by `out.len()`.
-//! - [`Sink::write`] is handed a view whose `len()` is its frame count.
+//!   [`Samples`], bounded by `out.frames()`.
+//! - [`Sink::write`] is handed a view whose `frames()` is its frame count.
 //!
 //! Crossing to a slice length goes through [`Samples::interleaved_len`] and
 //! [`Samples::from_interleaved_len`], so a stride mistake has one home.
@@ -164,7 +164,7 @@ pub trait Source {
 
     /// Fills the front of `out` with the next available frames.
     ///
-    /// A [`Frames`](Pull::Frames) count is bounded by `out.len()`. Frames past
+    /// A [`Frames`](Pull::Frames) count is bounded by `out.frames()`. Frames past
     /// the count are left untouched. A view whose width is not
     /// [`layout`](Self::layout) is a caller's bug, and the source answers
     /// [`Failed`](Pull::Failed) for it.

@@ -397,7 +397,7 @@ fn a_channels_speaker_skips_the_lfe() {
         ),
     ];
     for (count, want) in rows {
-        let topology = ChannelTopology::for_width(ChannelLayout::from(count));
+        let topology = ChannelTopology::assumed(ChannelLayout::from(count));
         assert_eq!(speaker_of_channel(&topology), want, "{count} channels");
     }
 }
