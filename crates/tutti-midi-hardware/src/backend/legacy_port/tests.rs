@@ -7,6 +7,7 @@ use super::bytes::{ByteIn, ByteOut, Wire};
 use super::poll;
 use super::ports::{PortInfo, Side, endpoint, endpoint_id, endpoints, locate, slot_of};
 use super::schedule::{Next, Outbox, Schedule};
+use super::sender::{Mailbox, run};
 use crate::Devices;
 use crate::capability::{EndpointInfo, UmpCapability};
 use crate::devices::ChangeSink;
@@ -268,10 +269,10 @@ fn a_schedule_releases_the_earliest_first_and_ties_in_push_order() {
     let t0 = Instant::now();
     let at = |ms| t0 + Duration::from_millis(ms);
     let mut held = Schedule::new();
-    held.push(at(30), "late");
-    held.push(at(10), "first");
-    held.push(at(10), "second");
-    held.push(at(20), "middle");
+    held.push_batch(8, [(at(30), "late")]);
+    held.push_batch(8, [(at(10), "first")]);
+    held.push_batch(8, [(at(10), "second")]);
+    held.push_batch(8, [(at(20), "middle")]);
     let now = at(25);
     let due: Vec<_> = std::iter::from_fn(|| held.pop_due(now)).collect();
     assert_eq!(due, ["first", "second", "middle"]);
@@ -291,6 +292,18 @@ fn a_batch_event_stamped_before_the_one_ahead_of_it_goes_after_it() {
 }
 
 #[test]
+fn a_batch_is_merged_among_held_items_by_time_with_held_first_on_a_tie() {
+    let t0 = Instant::now();
+    let at = |ms| t0 + Duration::from_millis(ms);
+    let mut held = Schedule::new();
+    held.push_batch(8, [(at(10), "h10")]);
+    held.push_batch(8, [(at(30), "h30")]);
+    held.push_batch(8, [(at(10), "b10"), (at(20), "b20"), (at(40), "b40")]);
+    let all: Vec<_> = std::iter::from_fn(|| held.pop_due(at(100))).collect();
+    assert_eq!(all, ["h10", "b10", "b20", "h30", "b40"]);
+}
+
+#[test]
 fn a_batch_past_the_room_takes_a_prefix() {
     let t0 = Instant::now();
     let mut held = Schedule::new();
@@ -303,7 +316,7 @@ fn a_schedule_says_how_long_until_the_earliest_and_zero_when_late() {
     let t0 = Instant::now();
     let mut held = Schedule::new();
     assert_eq!(held.wait(t0), None);
-    held.push(t0 + Duration::from_millis(40), ());
+    held.push_batch(8, [(t0 + Duration::from_millis(40), ())]);
     assert_eq!(
         held.wait(t0 + Duration::from_millis(15)),
         Some(Duration::from_millis(25))
@@ -355,6 +368,63 @@ fn a_dead_outbox_takes_nothing_and_drops_what_it_held() {
     );
     assert_eq!(outbox.take(8, [(t0, 3)]), 0);
     assert_eq!(outbox.pending(), 0);
+}
+
+#[test]
+fn ending_an_outbox_returns_the_held_events_and_the_one_in_hand() {
+    let t0 = Instant::now();
+    let mut outbox = Outbox::new();
+    outbox.take(8, [(t0, 1), (t0 + Duration::from_secs(9), 2)]);
+    assert_eq!(outbox.next(t0), Next::Send(1), "one is now in hand");
+    assert_eq!(outbox.end(), 2);
+}
+
+#[test]
+fn a_sender_that_panics_leaves_a_dead_mailbox_that_counts_what_it_dropped() {
+    let mailbox = Mailbox::new();
+    let now = Instant::now();
+    assert_eq!(mailbox.state().take(8, [(now, 1), (now, 2), (now, 3)]), 3);
+    let sent = std::cell::RefCell::new(Vec::new());
+    let ended = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run(
+            &mailbox,
+            |event| -> std::result::Result<(), String> {
+                assert!(event != 2, "the sender fails on the second");
+                sent.borrow_mut().push(event);
+                Ok(())
+            },
+            |_| -> std::result::Result<(), String> { unreachable!("events are due") },
+        );
+    }));
+    assert!(ended.is_err());
+    assert_eq!(*sent.borrow(), [1]);
+    let state = mailbox.state();
+    assert!(!state.alive());
+    assert_eq!(state.pending(), 0);
+    drop(state);
+    // The second was in hand and the third held: both are refused.
+    assert_eq!(mailbox.losses(), tutti_graph::Losses::refused(2));
+    assert_eq!(mailbox.state().take(8, [(now, 4)]), 0);
+}
+
+#[test]
+fn a_send_the_device_refuses_is_lost_and_the_sender_goes_on() {
+    let mailbox = Mailbox::new();
+    let now = Instant::now();
+    mailbox.state().take(8, [(now, 1), (now, 2)]);
+    let mut waits = 0;
+    run(
+        &mailbox,
+        |event| if event == 1 { Err("refused") } else { Ok(()) },
+        |_| -> std::result::Result<(), &str> {
+            waits += 1;
+            mailbox.state().stop();
+            Ok(())
+        },
+    );
+    assert_eq!(waits, 1);
+    assert_eq!(mailbox.losses(), tutti_graph::Losses::lost(1));
+    assert_eq!(mailbox.state().pending(), 0);
 }
 
 #[test]

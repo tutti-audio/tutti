@@ -61,8 +61,10 @@ impl MidiOut {
     ///
     /// # Errors
     ///
-    /// The failing call; and `midiOutLongMsg` after its timeout, in which case
-    /// the buffer is kept for good (the driver may still read it).
+    /// The failing call. Two failures leave the header and the bytes
+    /// allocated for good, because the driver may still read them: the send
+    /// outlasting its timeout (code [`Error::NOT_RETURNED`]), and an unprepare
+    /// that returns any code but `MIDIERR_STILLPLAYING` or success.
     pub fn long(&mut self, message: &[u8]) -> Result<(), Error> {
         let length = u32::try_from(message.len()).map_err(|_| Error {
             operation: "midiOutLongMsg",

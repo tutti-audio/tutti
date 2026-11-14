@@ -27,28 +27,41 @@ impl<T> Schedule<T> {
         held
     }
 
-    /// Holds `item` until `due`.
-    pub(in crate::backend) fn push(&mut self, due: Instant, item: T) {
-        let at = self.held.partition_point(|(held, _)| *held <= due);
-        self.held.insert(at, (due, item));
-    }
-
     /// Holds a batch, each item until its time but never before the batch's
     /// item ahead of it: a batch is in order, so an event stamped earlier than
     /// the one before it goes right after it, not ahead. At most `room` items
     /// are taken; returns how many (a prefix).
+    ///
+    /// The clamped batch is in time order, so it is merged with what is held in
+    /// one pass, a held item first when due at or before a batch item: the
+    /// cost is the held count plus the batch's, not one insertion each.
     pub(in crate::backend) fn push_batch(
         &mut self,
         room: usize,
         batch: impl IntoIterator<Item = (Instant, T)>,
     ) -> usize {
         let mut floor: Option<Instant> = None;
-        let mut taken = 0;
-        for (due, item) in batch.into_iter().take(room) {
-            let due = floor.map_or(due, |floor| due.max(floor));
-            self.push(due, item);
-            floor = Some(due);
-            taken += 1;
+        let batch: Vec<(Instant, T)> = batch
+            .into_iter()
+            .take(room)
+            .map(|(due, item)| {
+                let due = floor.map_or(due, |floor| due.max(floor));
+                floor = Some(due);
+                (due, item)
+            })
+            .collect();
+        let taken = batch.len();
+        let held = std::mem::take(&mut self.held);
+        let mut held = held.into_iter().peekable();
+        let mut batch = batch.into_iter().peekable();
+        loop {
+            let next = match (held.peek(), batch.peek()) {
+                (Some((h, _)), Some((b, _))) if h <= b => held.next(),
+                (_, Some(_)) => batch.next(),
+                (Some(_), None) => held.next(),
+                (None, None) => break,
+            };
+            self.held.extend(next);
         }
         taken
     }
@@ -134,13 +147,13 @@ impl<T> Outbox<T> {
         self.stop = true;
     }
 
-    /// The sender is gone: it takes nothing more, and what it held (and the
-    /// event in its hand, if it panicked) is dropped. Returns how many events
-    /// were held.
+    /// The sender is gone: it takes nothing more, and what it held and the
+    /// event in its hand (if it panicked sending) are dropped. Returns how many
+    /// events that was: the pending count, before it is zeroed.
     pub(in crate::backend) fn end(&mut self) -> usize {
         self.alive = false;
-        self.pending = 0;
-        self.queue.clear()
+        self.queue.clear();
+        std::mem::take(&mut self.pending)
     }
 
     /// Whether the sender can still send.

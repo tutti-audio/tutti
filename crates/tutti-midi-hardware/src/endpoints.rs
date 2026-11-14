@@ -148,8 +148,9 @@ pub trait MidiEndpoints: Send + Sync {
 /// can settle on the other.
 pub trait DeviceOut: MidiOut {
     /// Whether the output can still send. An output with a sender thread of its
-    /// own returns `false` from then on once that thread has ended other than
-    /// by a stop, and takes no more events. An output that sends inside
+    /// own answers under that thread's lock, held briefly, and returns `false`
+    /// from then on once the thread has ended other than by a stop; it takes no
+    /// more events. An output that sends inside
     /// [`queue`](MidiOut::queue) cannot end on its own, so it is alive for as
     /// long as it is open, which is the default.
     fn is_alive(&self) -> bool {
@@ -166,7 +167,8 @@ pub trait DeviceOut: MidiOut {
     }
 
     /// How many events this crate's own sender thread has taken and not yet
-    /// sent: waiting for their time or for the thread. An output that sends
+    /// sent: waiting for their time or for the thread, read under the thread's
+    /// lock, held briefly. An output that sends
     /// inside `queue` has no such thread, so the default is 0. For ALSA and
     /// CoreMIDI, which hand timed events to the OS's scheduler, 0 means this
     /// crate holds none, not that the OS has sent them.

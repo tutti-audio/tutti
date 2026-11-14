@@ -13,6 +13,8 @@
 //!   `Instant`.
 //! - [`schedule`]: items held until their time and released in order, for an
 //!   output that sends each event when it is due.
+//! - [`sender`]: the loop of an output's sender thread over that queue, and what
+//!   it shares with the output.
 //! - [`poll`]: a device watch for an OS that cannot say a device came or went,
 //!   by listing again on a timer.
 //!
@@ -25,6 +27,7 @@ pub(super) mod bytes;
 pub(super) mod poll;
 pub(super) mod ports;
 pub(super) mod schedule;
+pub(super) mod sender;
 
 #[cfg(test)]
 mod tests;
