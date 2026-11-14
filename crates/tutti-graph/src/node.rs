@@ -641,8 +641,7 @@ impl Shape {
 
     /// This shape, declaring that the node handles
     /// [`NodeMode::Bypassed`](crate::NodeMode::Bypassed) itself, as a plugin
-    /// with a native bypass parameter does (VST3 `kIsBypass`, CLAP
-    /// `CLAP_PARAM_IS_BYPASS`, AU `BypassEffect`).
+    /// with a native bypass parameter does.
     ///
     /// The executor then neither blends nor parks the node when its mode is
     /// `Bypassed`: it is called every block as in `Active`, with no crossfade

@@ -10,7 +10,7 @@
 //! buffers at `AudioUnitInitialize`, and VST2 answers it through a host
 //! callback, so a plugin takes it beside the sample rate and block size.
 
-/// How a plugin takes a change of [`RenderMode`], fixed for a loaded plugin.
+/// How a plugin takes a change of [`RenderMode`](tutti_graph::RenderMode), fixed for a loaded plugin.
 ///
 /// Every format has the concept, but they differ in when the plugin reads it,
 /// and a plugin may lack it altogether. A host asks this once and acts on the
