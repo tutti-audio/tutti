@@ -17,6 +17,8 @@
 //!   subsystem shares instead of a bare integer. `ChannelTopology` + `Speaker`
 //!   answer the *different* question of which speaker each channel feeds; distinct
 //!   questions, so distinct types.
+//! - **Ids** — `Mint`, a lock-free counter of unique non-zero numbers from 1, and
+//!   `id!`, the macro that writes an id type minted from one.
 //! - **`meter`** — musical meter: `TimeSignature`, the `MeterMap` timeline of
 //!   changes, and the `Meter` trait that turns a `Beat` into a bar and beat. Pure
 //!   musical math, so it layers *over* a transport rather than living inside one.
@@ -126,6 +128,11 @@ pub mod value;
 // range-checked type, used as `tutti_types::ranged!`.
 mod ranged;
 
+// `id!` is `#[macro_export]`ed for the same reason: the one way any crate
+// writes an id, used as `tutti_types::id!`.
+mod id;
+mod mint;
+
 // Private: everything public in these is re-exported at the root below, so the
 // module path would be a second name for a type that already has one.
 mod bus;
@@ -138,6 +145,9 @@ pub mod meter;
 // addresses params without their unit types need not depend on `atomic_float`
 // itself.
 pub use atomic_float::{AtomicF32, AtomicF64};
+
+// The counter ids and file-name suffixes are numbered from.
+pub use mint::Mint;
 
 // Value vocabulary.
 pub use value::{
