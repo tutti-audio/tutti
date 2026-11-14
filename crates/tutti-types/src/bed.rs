@@ -513,6 +513,34 @@ mod tests {
         assert_eq!(Bed::from_topology(&swapped), Some(Bed::Stereo));
     }
 
+    /// A quad or a 5.1 written with both spellings of its surround pair (a back
+    /// left and a side right) is still that bed: each channel is one row's own
+    /// spelling or its counterpart, once.
+    #[test]
+    fn mixed_spellings_of_a_pair_match_the_bed() {
+        use Speaker::*;
+        let t = |list: &[Speaker]| ChannelTopology::new(list.iter().copied()).unwrap();
+        assert_eq!(
+            Bed::from_topology(&t(&[FrontLeft, FrontRight, BackLeft, SideRight])),
+            Some(Bed::Quad)
+        );
+        assert_eq!(
+            Bed::from_topology(&t(&[FrontLeft, FrontRight, SideLeft, BackRight])),
+            Some(Bed::Quad)
+        );
+        assert_eq!(
+            Bed::from_topology(&t(&[
+                FrontLeft,
+                FrontRight,
+                FrontCenter,
+                LowFrequency,
+                BackLeft,
+                SideRight
+            ])),
+            Some(Bed::Surround51)
+        );
+    }
+
     /// One channel never stands for two rows: a back is no side where the bed
     /// has both pairs, and a counterpart fills only a row the topology lacks.
     #[test]

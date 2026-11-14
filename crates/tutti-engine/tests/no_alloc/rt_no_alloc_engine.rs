@@ -695,7 +695,30 @@ fn a_714_root_block_is_allocation_free() {
             engine.process(&mut InterleavedMut::new(&mut stereo, ChannelLayout::STEREO).unwrap());
         }
     });
-    // Channel 11 (the top back right) is its own constant on the wide device.
-    assert_eq!(wide[11], 12.0 / 16.0);
-    assert!(stereo.iter().any(|&s| s != 0.0), "the fold carries signal");
+    // Every channel of the twelve-wide device is its own constant, in every frame.
+    for frame in wide.chunks_exact(12) {
+        for (c, &s) in frame.iter().enumerate() {
+            assert_eq!(s, (c + 1) as f32 / 16.0, "channel {c}");
+        }
+    }
+    // The 7.1.4 root (FL FR FC LFE SL SR BL BR TFL TFR TBL TBR) into stereo, by
+    // ITU-R BS.775's rule: the fronts straight, the LFE omitted, and the centre,
+    // the surrounds and the heights at -3 dB into the front speaker on their
+    // side (the centre into both).
+    let v = |c: usize| (c + 1) as f32 / 16.0;
+    let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
+    let left = v(0) + m * (v(2) + v(4) + v(6) + v(8) + v(10));
+    let right = v(1) + m * (v(2) + v(5) + v(7) + v(9) + v(11));
+    for frame in stereo.chunks_exact(2) {
+        assert!(
+            (frame[0] - left).abs() < 1e-5,
+            "left {} vs {left}",
+            frame[0]
+        );
+        assert!(
+            (frame[1] - right).abs() < 1e-5,
+            "right {} vs {right}",
+            frame[1]
+        );
+    }
 }

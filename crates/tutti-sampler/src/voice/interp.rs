@@ -632,7 +632,7 @@ impl MonoSpread {
 /// The stack a wave's channels are gathered into when a fold reads them: twice
 /// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS), and more than the 20 speakers
 /// the vocabulary names, so any placed wave fits.
-pub const MAX_WAVE_CHANNELS: usize = 32;
+pub const MAX_WAVE_CHANNELS: usize = 2 * tutti_types::MAX_CHANNELS;
 
 /// Where the channels of a wave go in a frame of some width.
 ///
