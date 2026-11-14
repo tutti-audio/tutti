@@ -88,7 +88,7 @@ use tutti_graph::{
 use crate::block_clock::{BlockClock, BlockClockReader, Pose};
 use crate::output::{DEFAULT_DEVICE_WIDTHS, OutputControl, OutputFolds};
 use std::time::Instant;
-use tutti_buffers::{FoldError, InterleavedMut};
+use tutti_buffers::{FoldError, InterleavedMut, Planes};
 use tutti_metering::{LoadMeter, LoadRecorder};
 use tutti_rt::{AudioThreadCell, Reader, RtScope};
 #[cfg(doc)]
@@ -378,7 +378,7 @@ impl Engine {
     /// wider than that (or at all, to say so); it is a no-op for a width
     /// already supported. The device is taken to be the engine's order for its
     /// width where it has one, and the root the same: see
-    /// [`Fold::widths`](tutti_buffers::Fold::widths). A buffer of a width not
+    /// [`fold_to_width`](tutti_graph::fold_to_width). A buffer of a width not
     /// supported is not rendered into: the call is silent and counted in
     /// [`LoadReading::silenced`](tutti_metering::LoadReading::silenced), in
     /// every build.
@@ -399,7 +399,7 @@ impl Engine {
     ///
     /// # Errors
     ///
-    /// [`FoldError::Empty`] for a device of no channels; nothing is published.
+    /// [`FoldError::Buffer`] (a zero width) for a device of no channels; nothing is published.
     pub fn support_output(&self, device: ChannelLayout) -> Result<(), FoldError> {
         self.output.support(device)
     }
@@ -484,7 +484,7 @@ impl Engine {
     /// rendered at its **own** output width (at most [`MAX_ROOT_CHANNELS`],
     /// which the editor's limits enforce) into scratch, then each frame is
     /// folded to the *output's* width — the device / target width — by
-    /// [`Fold::widths`](tutti_buffers::Fold::widths), built in
+    /// [`fold_to_width`](tutti_graph::fold_to_width), built in
     /// [`support_output`](Self::support_output): a surround root plays folded to a
     /// stereo device by the ITU/Dolby matrix, or straight through to a
     /// matching-width one; a mono root feeds the centre of a surround device
@@ -507,8 +507,8 @@ impl Engine {
         // is not vDSO-capable, e.g. some VMs), the commpage on macOS, QPC
         // on Windows.
         let start = Instant::now();
-        let out_ch = output.stride();
-        let frames = output.len().get();
+        let out_ch = output.channels();
+        let frames = output.frames().get();
         let output = output.samples_mut();
         // A free in a block is a debug panic: the hand-over of the heard tap
         // sends what it replaces back to the control side.
@@ -591,8 +591,8 @@ impl Engine {
     pub fn process(&self, output: &mut InterleavedMut<'_>) {
         // Timed for the load meter (`load_meter`): see `process_segment`.
         let start = Instant::now();
-        let out_ch = output.stride();
-        let frames = output.len().get();
+        let out_ch = output.channels();
+        let frames = output.frames().get();
         let output = output.samples_mut();
         // A free in a block is a debug panic: the hand-over of the heard tap
         // sends what it replaces back to the control side.
@@ -1174,14 +1174,27 @@ impl GraphRender {
         // fold is there.
         match folds.get(out_ch, width) {
             Some(fold) => {
-                fold.planar_to_interleaved(
-                    |c| &outs[c][..len],
-                    ChannelLayout::try_from(out_ch)
-                        .ok()
-                        .and_then(|layout| InterleavedMut::new(block, layout).ok())
-                        .expect("a fold exists only for a held device width, and the block is whole frames of it"),
+                let mut device = ChannelLayout::try_from(out_ch)
+                    .ok()
+                    .and_then(|layout| InterleavedMut::new(block, layout).ok())
+                    .expect("a fold exists only for a held device width, and the block is whole frames of it");
+                // The rendered channels, a block long each, as one table on
+                // the stack.
+                let mut table: [&[f32]; MAX_ROOT_CHANNELS] = [&[]; MAX_ROOT_CHANNELS];
+                for (slot, out) in table.iter_mut().zip(&outs).take(width) {
+                    *slot = &out[..len];
+                }
+                let folded = Planes::new(&table[..width])
+                    .and_then(|planes| fold.fold_planar_to_interleaved(planes, device.reborrow()));
+                debug_assert!(
+                    folded.is_ok(),
+                    "the root's channels are a block long and the fold is for its width: {folded:?}"
                 );
-                true
+                if folded.is_err() {
+                    // Not placed: silent, and the caller counts it.
+                    device.samples_mut().fill(0.0);
+                }
+                folded.is_ok()
             }
             // A root width that cannot be placed on this device: silent, and
             // the caller counts it.
@@ -1641,7 +1654,7 @@ mod tests {
         assert!(folds.get(2, MAX_ROOT_CHANNELS + 1).is_none());
         assert!(folds.get(0, 2).is_none() && folds.get(2, 0).is_none());
 
-        let m = tutti_buffers::M3DB;
+        let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
         let run = |root: usize, device: usize, frame: &[f32]| {
             let mut out = vec![9.0f32; device];
             folds.get(device, root).unwrap().frame(frame, &mut out);
@@ -1676,7 +1689,7 @@ mod tests {
         }
         assert_eq!(
             engine.support_output(ChannelLayout::EMPTY),
-            Err(FoldError::Empty(tutti_buffers::FoldEnd::Destination))
+            Err(FoldError::Buffer(tutti_buffers::BufferError::ZeroWidth))
         );
         // Not added: silent, and counted, in every build.
         let mut out = vec![-9.0f32; 40 * 8];
@@ -1761,7 +1774,7 @@ mod tests {
         let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
         rewire(&mut ed, 6);
         let _ = first_frame(&engine, 2);
-        let m = tutti_buffers::M3DB;
+        let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
         let folded = [61.0 + m * 63.0 + m * 65.0, 62.0 + m * 63.0 + m * 66.0];
         assert_eq!(first_frame(&engine, 2), folded);
         let control = engine.output_control();

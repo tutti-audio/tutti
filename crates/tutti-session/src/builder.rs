@@ -956,9 +956,12 @@ impl<S> SessionBuilder<S> {
             // how much is built before the refusal.
             Some(declared) => Graph::check_root(declared, device)?,
             None => {
-                let width = ChannelLayout::try_from(root)
-                    .map_err(|_| tutti_buffers::FoldError::TooWide(root))?;
-                tutti_buffers::Fold::widths(width, device)?;
+                let width = ChannelLayout::try_from(root).map_err(|_| {
+                    tutti_buffers::FoldError::from(tutti_buffers::BufferError::TooWide {
+                        channels: root,
+                    })
+                })?;
+                tutti_graph::fold_to_width(&tutti_types::ChannelTopology::assumed(width), device)?;
             }
         }
         Ok(())

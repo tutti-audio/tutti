@@ -350,7 +350,7 @@ pub enum RootTopologyStatus {
     /// In force: the root is what was declared (or nothing was).
     Applied,
     /// Not in force, and why. The previous state stands.
-    Refused(tutti_buffers::FoldError),
+    Refused(tutti_graph::RootError),
 }
 
 /// The tutti engine: a [`Graph`], its transport, and the engine
@@ -414,7 +414,7 @@ pub struct Session {
     /// ([`declare_root_topology`](Self::declare_root_topology)), applied or not.
     pub(crate) root_request: Option<ChannelTopology>,
     /// Why `root_request` is not in force, if it is not.
-    pub(crate) root_refusal: Option<tutti_buffers::FoldError>,
+    pub(crate) root_refusal: Option<tutti_graph::RootError>,
     pub(crate) click: Option<NodeKey>,
     pub(crate) click_settings: Arc<ClickSettings>,
     /// The per-channel pre-roll of the plan sent last, for sources outside
@@ -570,7 +570,7 @@ impl Session {
                 Ok(())
             }
             Err(e) => {
-                self.root_refusal = Some(e);
+                self.root_refusal = Some(e.into());
                 Err(e.into())
             }
         }
@@ -597,9 +597,10 @@ impl Session {
     ///   places it.
     /// - Otherwise `Refused` with [`Graph::widen_outputs`]'s last refusal: a
     ///   widening the declared root could not take
-    ///   ([`FoldError::RootWidth`](tutti_buffers::FoldError::RootWidth)), or
+    ///   ([`RootError::Width`](tutti_graph::RootError::Width)), or
     ///   channels past `MAX_ROOT_CHANNELS`
-    ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced)); that
+    ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), as a
+    ///   [`RootError::Fold`](tutti_graph::RootError::Fold)); that
     ///   is what a host's `MasterSources` longer than the root comes to.
     /// - Otherwise `Applied`.
     pub fn root_topology_status(&self) -> RootTopologyStatus {

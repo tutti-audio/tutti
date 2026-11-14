@@ -13,7 +13,9 @@ categories = ["multimedia::audio"]
 [lints]
 workspace = true
 
-# No features: a view is a borrowed slice and a `Sample` is a plain `Copy` value.
+[features]
+# `serde` for `I24`: a value is its `i32`, refused outside the 24-bit range.
+serde = ["dep:serde"]
 
 [dependencies]
 # `Samples`, the frame count every view speaks, and `ChannelLayout`, its width.
@@ -23,11 +25,15 @@ tutti-types = { version = "0.0.1", path = "../tutti-types" }
 libm = "0.2.15"
 # The `Error` derive of `BufferError` and `I24OutOfRange`.
 thiserror = { workspace = true }
+# `I24`'s `Serialize` and `Deserialize`, behind the `serde` feature.
+serde = { version = "1", optional = true, features = ["derive"] }
 
 [dev-dependencies]
 # The fold's allocation gate: the test binary installs `AllocDisabler`.
 assert_no_alloc = { version = "1", default-features = false }
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
+# The `serde` feature's round trip.
+serde_json = "1"
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]

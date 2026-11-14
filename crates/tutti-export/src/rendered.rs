@@ -233,10 +233,19 @@ impl Rendered {
             return;
         }
         out.resize(self.frames().interleaved_len(self.layout()), 0.0);
-        // At least one plane, and `out` is whole frames of them: the view
-        // always builds.
-        if let Ok(mut out) = tutti_buffers::InterleavedMut::new(out, self.layout()) {
-            out.interleave_from(&self.planes, Samples::ZERO);
+        // At least one plane of one length, and `out` is whole frames of them:
+        // the views always build and agree.
+        let written = tutti_buffers::Planes::from_vecs(&self.planes).and_then(|planes| {
+            tutti_buffers::InterleavedMut::new(out, self.layout())
+                .and_then(|out| tutti_buffers::interleave(planes, out))
+        });
+        debug_assert!(
+            written.is_ok(),
+            "a render's planes are one length: {written:?}"
+        );
+        if written.is_err() {
+            // Not interleaved: silent, never a partial write.
+            out.fill(0.0);
         }
     }
 }

@@ -786,7 +786,7 @@ fn named_ten() -> tutti_types::ChannelTopology {
 /// into the centre at -3 dB; the back centre into both backs at -3 dB; the
 /// right side has no source, so it is silent.
 fn ten_into_seven_one(v: impl Fn(usize) -> f32) -> [f32; 8] {
-    let m = tutti_buffers::M3DB;
+    let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
     [
         v(0),
         v(1),

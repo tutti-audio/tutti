@@ -17,11 +17,14 @@
 //! writes them after they are built. Each channel and each fork keeps only
 //! its own running state.
 
-use tutti_buffers::{Fold, FoldError};
+use tutti_buffers::{Fold, FoldError, MonoMut, Planes};
 use tutti_graph::{
-    Cx, Inputs, IntoNode, Io, Node, NodeParts, Outputs, ParamNode, ParamSet, Prepare, Shape, Status,
+    Cx, Inputs, IntoNode, Io, Node, NodeParts, Outputs, ParamNode, ParamSet, Prepare, Shape,
+    Status, fold_to_width,
 };
-use tutti_types::{Amplitude, ChannelLayout, Param, Samples, UnitParam};
+use tutti_types::{
+    Amplitude, ChannelLayout, ChannelTopology, MAX_BUS_CHANNELS, Param, Samples, UnitParam,
+};
 use tutti_types::{Latency, Tail};
 
 use crate::ramp::LastGood;
@@ -173,8 +176,11 @@ impl ConvolverNode {
         })?;
         let fold = match config {
             IrChannelConfig::MonoToStereo => Some(
-                Fold::widths(ChannelLayout::from(width), ChannelLayout::MONO)
-                    .map_err(|source| ConvolverError::NoFold { width, source })?,
+                fold_to_width(
+                    &ChannelTopology::assumed(ChannelLayout::from(width)),
+                    ChannelLayout::MONO,
+                )
+                .map_err(|source| ConvolverError::NoFold { width, source })?,
             ),
             IrChannelConfig::Mono | IrChannelConfig::Stereo => None,
         };
@@ -284,7 +290,7 @@ impl ConvolverNode {
     ///
     /// As [`per_channel`](Self::per_channel), and [`ConvolverError::NoFold`] for a
     /// width with no fold to mono: only 1, 2, 4, 6, 8 and 12 have an order
-    /// ([`Fold::widths`] places any other by index and refuses to narrow it).
+    /// ([`fold_to_width`] places any other by index and refuses to narrow it).
     pub fn folded(irs: &[&[f32]], block_size: usize) -> Result<Self, ConvolverError> {
         Self::per_ir(irs, block_size, IrChannelConfig::MonoToStereo)
     }
@@ -445,10 +451,28 @@ impl ConvolverNode {
             }
             IrChannelConfig::MonoToStereo => {
                 // Folded once per block, not once per output channel.
-                self.fold
+                let fold = self
+                    .fold
                     .as_ref()
-                    .expect("a MonoToStereo node builds its fold")
-                    .planar_channel(input, 0, &mut self.mono[..size]);
+                    .expect("a MonoToStereo node builds its fold");
+                // The inputs, a block long each, as one table on the stack: a
+                // fold exists only at a width with an order, at most one bus.
+                let width = usize::from(fold.src_layout().count()).min(MAX_BUS_CHANNELS);
+                let mut table: [&[f32]; MAX_BUS_CHANNELS] = [&[]; MAX_BUS_CHANNELS];
+                for (c, slot) in table.iter_mut().enumerate().take(width) {
+                    *slot = input(c);
+                }
+                let folded = Planes::new(&table[..width]).and_then(|planes| {
+                    fold.fold_planar_channel(planes, 0, MonoMut::new(&mut self.mono[..size]))
+                });
+                debug_assert!(
+                    folded.is_ok(),
+                    "the inputs are a block long and the fold's width: {folded:?}"
+                );
+                if folded.is_err() {
+                    // Not folded: silent, never the previous block's mono.
+                    self.mono[..size].fill(0.0);
+                }
                 for c in 0..n {
                     let out = &mut outputs.get(c)[at..at + size];
                     self.convolvers[c].process_block(&self.mono[..size], out);
@@ -957,9 +981,13 @@ mod golden {
             let x = signal(node.width(), FRAMES);
             let mut mono = vec![0.0f32; FRAMES];
             if x.len() == 2 {
-                Fold::widths(ChannelLayout::STEREO, ChannelLayout::MONO)
-                    .expect("stereo folds to mono")
-                    .planar_channel(|c| &x[c][..], 0, &mut mono);
+                Fold::between(
+                    &ChannelTopology::assumed(ChannelLayout::STEREO),
+                    &ChannelTopology::assumed(ChannelLayout::MONO),
+                )
+                .expect("stereo folds to mono")
+                .fold_planar_channel(Planes::from_vecs(&x).unwrap(), 0, MonoMut::new(&mut mono))
+                .unwrap();
             }
             let out = render(node, &x);
             assert_eq!(out.len(), outputs.len(), "{name}: width");
@@ -1053,7 +1081,11 @@ mod golden {
         let node = ConvolverNode::folded(&refs, 32).unwrap();
         let x = signal(6, 700);
         let got = render(node, &x);
-        let to_mono = Fold::widths(ChannelLayout::from(6u16), ChannelLayout::MONO).unwrap();
+        let to_mono = Fold::between(
+            &ChannelTopology::assumed(ChannelLayout::from(6u16)),
+            &ChannelTopology::assumed(ChannelLayout::MONO),
+        )
+        .unwrap();
         let mono: Vec<f32> = (0..700)
             .map(|i| {
                 let frame: Vec<f32> = x.iter().map(|xc| xc[i]).collect();

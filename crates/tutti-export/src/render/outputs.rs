@@ -14,7 +14,7 @@
 
 use std::path::PathBuf;
 
-use tutti_buffers::{Fold, InterleavedMut};
+use tutti_buffers::{Fold, Interleaved, InterleavedMut, Planes};
 use tutti_graph::TapReader;
 use tutti_measure::Loudness;
 use tutti_transport::RenderClock;
@@ -124,15 +124,18 @@ pub(crate) fn render_outputs(
                     let frames = window.len();
                     let samples = Samples(frames).interleaved_len(lane.layout);
                     let mut block = InterleavedMut::new(&mut lane.scratch[..samples], lane.layout)?;
-                    lane.fold
-                        .planar_to_interleaved(|c| &planes[c][window.clone()], block.reborrow());
-                    let block = block.as_ref();
+                    let span = Samples(window.start)..Samples(window.end);
+                    lane.fold.fold_planar_to_interleaved(
+                        Planes::from_vecs(planes)?.slice(span),
+                        block.reborrow(),
+                    )?;
+                    let block = block.as_interleaved();
                     match &mut lane.sink {
                         Sink::Stream { chain } => chain.block(block)?,
                         Sink::Spill { waiting, .. } => {
                             waiting.spill.push(block.samples(), &mut budget)?;
                         }
-                        Sink::Buffers { planes } => block.append_to_planes(planes),
+                        Sink::Buffers { planes } => crate::planar::append(block, planes)?,
                     }
                 }
                 Ok(())
@@ -512,10 +515,10 @@ fn measure(
         if n == 0 {
             break;
         }
-        let frames = block.as_ref().window(Samples::ZERO..Samples(n));
+        let frames = block.as_interleaved().slice(Samples::ZERO..Samples(n));
         match resampler.as_mut() {
             Some((rs, planes, out)) => {
-                frames.deinterleave_into(planes);
+                crate::planar::split(frames, planes)?;
                 rs.push(planes, out)?;
                 feed_planes(&mut measurer, out, &mut staging, layout)?;
             }
@@ -542,12 +545,8 @@ fn feed_planes(
     staging: &mut Vec<f32>,
     layout: ChannelLayout,
 ) -> Result<()> {
-    let frames = Samples(out.first().map_or(0, Vec::len));
-    staging.clear();
-    staging.resize(frames.interleaved_len(layout), 0.0);
-    let mut staged = InterleavedMut::new(staging, layout)?;
-    staged.interleave_from(out, Samples::ZERO);
-    measurer.feed_interleaved(staged.as_ref());
+    crate::planar::join(out, staging, layout)?;
+    measurer.feed_interleaved(Interleaved::new(staging, layout)?);
     for p in out.iter_mut() {
         p.clear();
     }

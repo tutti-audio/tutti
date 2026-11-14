@@ -14,7 +14,7 @@ use tutti_graph::testing as common;
 use std::collections::BTreeMap;
 
 use common::{Kind, Pair, TestNode, bits, input_signal, prepare, shapes_of};
-use tutti_buffers::{FoldError, M3DB};
+use tutti_buffers::{BufferError, Float, FoldError};
 use tutti_graph::Node;
 use tutti_graph::{
     Bus, BusError, BusFeed, BusFold, BusRef, BusRole, BusSide, BusSource, Buses, CommitError,
@@ -282,11 +282,11 @@ fn five_one_into_stereo_follows_the_itu_rows() {
         .collect();
     let expect = [
         (lane(2, 0, out_port(1, 0)), 1.0),
-        (lane(2, 0, out_port(1, 2)), M3DB),
-        (lane(2, 0, out_port(1, 4)), M3DB),
+        (lane(2, 0, out_port(1, 2)), f32::MINUS_3_DB),
+        (lane(2, 0, out_port(1, 4)), f32::MINUS_3_DB),
         (lane(2, 1, out_port(1, 1)), 1.0),
-        (lane(2, 1, out_port(1, 2)), M3DB),
-        (lane(2, 1, out_port(1, 5)), M3DB),
+        (lane(2, 1, out_port(1, 2)), f32::MINUS_3_DB),
+        (lane(2, 1, out_port(1, 5)), f32::MINUS_3_DB),
     ];
     assert_eq!(weights, expect);
 
@@ -298,7 +298,11 @@ fn five_one_into_stereo_follows_the_itu_rows() {
             .map(|i| {
                 // The unity lane is a plain addend, the others weighted.
                 weighted_fold(
-                    &[(1.0, &ch6[front]), (M3DB, &ch6[2]), (M3DB, &ch6[surround])],
+                    &[
+                        (1.0, &ch6[front]),
+                        (f32::MINUS_3_DB, &ch6[2]),
+                        (f32::MINUS_3_DB, &ch6[surround]),
+                    ],
                     i,
                 )
                 .to_bits()
@@ -338,7 +342,7 @@ fn mono_into_stereo_copies_to_both_sides() {
 /// pinned, now through the bus edge it was deleted for.)
 #[test]
 fn seven_one_into_stereo_reads_out_the_matrix() {
-    let m = M3DB;
+    let m = f32::MINUS_3_DB;
     let want = [
         [1.0, 0.0, m, 0.0, m, 0.0, m, 0.0],
         [0.0, 1.0, m, 0.0, 0.0, m, 0.0, m],
@@ -505,7 +509,7 @@ fn the_global_input_is_a_unassigned_bus() {
         matches!(
             refused,
             BusError::Fold {
-                error: FoldError::Empty(_),
+                error: FoldError::Buffer(BufferError::ZeroWidth),
                 ..
             }
         ),
@@ -976,11 +980,11 @@ fn five_one_into_a_stereo_root_follows_the_itu_rows() {
         .collect();
     let expect = [
         (root_lane(0, out_port(1, 0)), 1.0),
-        (root_lane(0, out_port(1, 2)), M3DB),
-        (root_lane(0, out_port(1, 4)), M3DB),
+        (root_lane(0, out_port(1, 2)), f32::MINUS_3_DB),
+        (root_lane(0, out_port(1, 4)), f32::MINUS_3_DB),
         (root_lane(1, out_port(1, 1)), 1.0),
-        (root_lane(1, out_port(1, 2)), M3DB),
-        (root_lane(1, out_port(1, 5)), M3DB),
+        (root_lane(1, out_port(1, 2)), f32::MINUS_3_DB),
+        (root_lane(1, out_port(1, 5)), f32::MINUS_3_DB),
     ];
     assert_eq!(weights, expect);
     assert!(lowering.spec.root_sources.is_empty() && lowering.spec.bus_edges.is_empty());
@@ -992,7 +996,11 @@ fn five_one_into_a_stereo_root_follows_the_itu_rows() {
         (0..ch6[0].len())
             .map(|i| {
                 weighted_fold(
-                    &[(1.0, &ch6[front]), (M3DB, &ch6[2]), (M3DB, &ch6[surround])],
+                    &[
+                        (1.0, &ch6[front]),
+                        (f32::MINUS_3_DB, &ch6[2]),
+                        (f32::MINUS_3_DB, &ch6[surround]),
+                    ],
                     i,
                 )
                 .to_bits()

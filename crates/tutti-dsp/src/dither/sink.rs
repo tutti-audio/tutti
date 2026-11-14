@@ -123,11 +123,11 @@ impl<S: Sink<Sample = f32>> Sink for DitherSink<S> {
             return self.inner.write(frames);
         };
         let mut at = Samples::ZERO;
-        while at < frames.len() {
-            let end = (at + CHUNK).min(frames.len());
+        while at < frames.frames() {
+            let end = (at + CHUNK).min(frames.frames());
             self.scratch.clear();
             self.scratch
-                .extend_from_slice(frames.window(at..end).samples());
+                .extend_from_slice(frames.slice(at..end).samples());
             self.noise.apply(spec.shape, spec.lsb, &mut self.scratch);
             // The scratch holds whole frames at `layout`, so the view builds.
             let dithered = Interleaved::new(&self.scratch, layout).map_err(|_| SinkFailed)?;

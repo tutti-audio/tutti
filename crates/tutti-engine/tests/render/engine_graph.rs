@@ -285,7 +285,7 @@ fn fold_and_declick_are_the_fold_matrix_and_a_linear_fade() {
             let frame: Vec<f32> = (0..src).map(|c| value(f as u64, c)).collect();
             // The ITU formulas, written out: 6 -> 2 is `FL + m·C + m·SL`, and
             // equal widths pass through; 2 -> 6 leaves the rest silent.
-            let m = tutti_buffers::M3DB;
+            let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
             let folded: Vec<f32> = match (src, device) {
                 (6, 2) => vec![
                     frame[0] + m * frame[2] + m * frame[4],

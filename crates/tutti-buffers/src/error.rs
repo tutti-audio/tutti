@@ -7,6 +7,7 @@ use tutti_types::{ChannelLayout, Samples};
 /// Nothing is truncated or zero-filled to make a mismatch fit: the call that
 /// meets one returns the error and touches nothing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum BufferError {
     /// The width is zero channels, so a frame count is undefined.
     #[error("a buffer needs at least one channel")]

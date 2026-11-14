@@ -988,7 +988,7 @@ impl Pump {
                     failed = true;
                     break 'pump;
                 };
-                let kept = popped_view.window(Samples(from)..Samples(to));
+                let kept = popped_view.slice(Samples(from)..Samples(to));
                 if self.sink.write(kept).is_err() {
                     failed = true;
                     break 'pump;
@@ -1058,9 +1058,9 @@ impl Pump {
 fn write_silence(sink: &mut dyn DynSink, silence: Interleaved<'_, f32>, frames: usize) -> bool {
     let mut left = frames;
     while left > 0 {
-        let now = left.min(silence.len().get());
+        let now = left.min(silence.frames().get());
         if sink
-            .write(silence.window(Samples::ZERO..Samples(now)))
+            .write(silence.slice(Samples::ZERO..Samples(now)))
             .is_err()
         {
             return false;

@@ -1,7 +1,9 @@
 //! [`Interleaved`] and [`InterleavedMut`]: a flat run of whole frames that
 //! carries its own width.
 
-use crate::{BufferError, Sample};
+use crate::{BufferError, Sample, bounds};
+use core::fmt;
+use core::iter::FusedIterator;
 use core::ops::Range;
 use tutti_types::{ChannelLayout, Samples};
 
@@ -20,14 +22,14 @@ fn check(len: usize, layout: ChannelLayout) -> Result<(), BufferError> {
 ///
 /// A flat slice plus a separate channel count reads identically whether an
 /// index is a frame index or a sample index; the two differ by the width.
-/// Here the width travels with the buffer: [`len`](Self::len) counts frames,
-/// and every range and index is in frames. Construction checks once that the
-/// slice is whole frames; nothing after it re-checks.
+/// Here the width travels with the buffer: [`frames`](Self::frames) counts
+/// frames, and every range and index is in frames. Construction checks once
+/// that the slice is whole frames; nothing after it re-checks.
 ///
 /// # Not for inner loops
 ///
 /// Take one at a signature, then destructure with [`samples`](Self::samples)
-/// and [`stride`](Self::stride) at the top of the body and index raw below.
+/// and [`channels`](Self::channels) at the top of the body and index raw below.
 ///
 /// ```
 /// use tutti_buffers::Interleaved;
@@ -35,13 +37,14 @@ fn check(len: usize, layout: ChannelLayout) -> Result<(), BufferError> {
 ///
 /// let data = [0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6]; // three stereo frames
 /// let buf = Interleaved::new(&data, ChannelLayout::STEREO)?;
-/// assert_eq!(buf.len(), Samples(3));
+/// assert_eq!(buf.frames(), Samples(3));
 /// assert_eq!(buf.frame(Samples(1)), &[0.3, 0.4]);
-/// assert_eq!(buf.window(Samples(1)..Samples(3)).samples(), &[0.3, 0.4, 0.5, 0.6]);
+/// assert_eq!(buf.slice(Samples(1)..Samples(3)).samples(), &[0.3, 0.4, 0.5, 0.6]);
+/// assert_eq!(buf.iter().len(), 3);
 /// assert!(Interleaved::new(&data[..5], ChannelLayout::STEREO).is_err());
 /// # Ok::<(), tutti_buffers::BufferError>(())
 /// ```
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Interleaved<'a, S: Sample = f32> {
     data: &'a [S],
     layout: ChannelLayout,
@@ -64,28 +67,29 @@ impl<'a, S: Sample> Interleaved<'a, S> {
     /// Returns the width these frames carry.
     #[inline]
     #[must_use]
-    pub fn layout(&self) -> ChannelLayout {
+    pub const fn layout(&self) -> ChannelLayout {
         self.layout
     }
 
-    /// Returns the interleave stride: `layout().count()` as a `usize`.
+    /// Returns the channel count, the interleave stride: `layout().count()` as
+    /// a `usize`.
     #[inline]
     #[must_use]
-    pub fn stride(&self) -> usize {
-        usize::from(self.layout.count())
+    pub const fn channels(&self) -> usize {
+        self.layout.count() as usize
     }
 
     /// Returns the frame count, not the sample count.
     #[inline]
     #[must_use]
-    pub fn len(&self) -> Samples {
+    pub const fn frames(&self) -> Samples {
         Samples::from_interleaved_len(self.data.len(), self.layout)
     }
 
     /// Returns whether there are no frames.
     #[inline]
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
 
@@ -93,7 +97,7 @@ impl<'a, S: Sample> Interleaved<'a, S> {
     /// device callbacks want.
     #[inline]
     #[must_use]
-    pub fn samples(&self) -> &'a [S] {
+    pub const fn samples(&self) -> &'a [S] {
         self.data
     }
 
@@ -102,89 +106,116 @@ impl<'a, S: Sample> Interleaved<'a, S> {
     ///
     /// # Panics
     ///
-    /// If the range is out of bounds, like slice indexing.
+    /// If the range is out of bounds ([`get_slice`](Self::get_slice) is the
+    /// form that returns `None`).
     #[inline]
     #[must_use]
-    pub fn window(&self, frames: Range<Samples>) -> Interleaved<'a, S> {
-        let start = frames.start.interleaved_len(self.layout);
-        let end = frames.end.interleaved_len(self.layout);
+    #[track_caller]
+    pub fn slice(&self, frames: Range<Samples>) -> Interleaved<'a, S> {
+        let r = bounds::slice(&frames, self.frames().get());
+        self.run(&r)
+    }
+
+    /// Returns the sub-run covering a frame range, or `None` if the range is
+    /// out of bounds.
+    #[inline]
+    #[must_use]
+    pub fn get_slice(&self, frames: Range<Samples>) -> Option<Interleaved<'a, S>> {
+        bounds::get(&frames, self.frames().get()).map(|r| self.run(&r))
+    }
+
+    /// The sub-run of an in-bounds frame range.
+    fn run(&self, r: &Range<usize>) -> Interleaved<'a, S> {
+        let start = Samples(r.start).interleaved_len(self.layout);
+        let end = Samples(r.end).interleaved_len(self.layout);
         Interleaved {
             data: &self.data[start..end],
             layout: self.layout,
         }
     }
 
+    /// Splits into the first `at` frames and the rest.
+    ///
+    /// # Panics
+    ///
+    /// If `at` is past [`frames`](Self::frames).
+    #[inline]
+    #[must_use]
+    #[track_caller]
+    pub fn split_at(&self, at: Samples) -> (Interleaved<'a, S>, Interleaved<'a, S>) {
+        let at = bounds::split(at, self.frames().get());
+        let (a, b) = self.data.split_at(Samples(at).interleaved_len(self.layout));
+        let layout = self.layout;
+        (
+            Interleaved { data: a, layout },
+            Interleaved { data: b, layout },
+        )
+    }
+
     /// Returns one frame, by frame index.
     ///
     /// # Panics
     ///
-    /// If `i` is not below [`len`](Self::len).
+    /// If `i` is not below [`frames`](Self::frames).
     #[inline]
     #[must_use]
+    #[track_caller]
     pub fn frame(&self, i: Samples) -> &'a [S] {
-        let start = i.interleaved_len(self.layout);
-        &self.data[start..start + self.stride()]
+        let i = bounds::index(i, self.frames().get());
+        let start = Samples(i).interleaved_len(self.layout);
+        &self.data[start..start + self.channels()]
     }
 
-    /// Iterates frame by frame; each item is `stride()` long.
+    /// Returns one frame, by frame index, or `None` past the end.
     #[inline]
-    pub fn iter_frames(&self) -> impl Iterator<Item = &'a [S]> + use<'a, S> {
-        self.data.chunks_exact(self.stride())
+    #[must_use]
+    pub fn get_frame(&self, i: Samples) -> Option<&'a [S]> {
+        let start = i.interleaved_len(self.layout);
+        self.data.get(start..start.checked_add(self.channels())?)
     }
 
-    /// Deinterleaves into caller-owned planes, reusing their allocations.
-    ///
-    /// Each plane is cleared and refilled; it grows only when it has less
-    /// capacity than [`len`](Self::len). Planes past `stride()` are cleared, so
-    /// a wider `planes` carries no stale data from a previous block. Channels
-    /// past `planes.len()` are skipped.
-    pub fn deinterleave_into(&self, planes: &mut [Vec<S>]) {
-        for plane in planes.iter_mut() {
-            plane.clear();
-        }
-        self.append_to_planes(planes);
+    /// Iterates frame by frame; each item is [`channels`](Self::channels)
+    /// long.
+    #[inline]
+    #[must_use]
+    pub fn iter(&self) -> Frames<'a, S> {
+        Frames(self.data.chunks_exact(self.channels()))
     }
+}
 
-    /// Deinterleaves onto the end of caller-owned planes: channel `c` is
-    /// appended to `planes[c]`.
-    ///
-    /// The accumulating form of [`deinterleave_into`](Self::deinterleave_into),
-    /// for a caller collecting a whole render block by block. Planes past
-    /// `stride()` are left as they are, and channels past `planes.len()` are
-    /// skipped.
-    pub fn append_to_planes(&self, planes: &mut [Vec<S>]) {
-        let ch = self.stride();
-        for (c, plane) in planes.iter_mut().enumerate().take(ch) {
-            plane.reserve(self.len().get());
-            plane.extend(self.data.chunks_exact(ch).map(|f| f[c]));
+impl<S: Sample> fmt::Debug for Interleaved<'_, S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Interleaved")
+            .field("frames", &self.frames())
+            .field("layout", &self.layout)
+            .finish()
+    }
+}
+
+impl<S: Sample> AsRef<[S]> for Interleaved<'_, S> {
+    #[inline]
+    fn as_ref(&self) -> &[S] {
+        self.data
+    }
+}
+
+impl<'a, S: Sample> From<InterleavedMut<'a, S>> for Interleaved<'a, S> {
+    #[inline]
+    fn from(view: InterleavedMut<'a, S>) -> Self {
+        Self {
+            data: view.data,
+            layout: view.layout,
         }
     }
 }
 
-impl Interleaved<'_, f32> {
-    /// Folds every frame through `fold` into a caller-owned buffer, reusing its
-    /// allocation: the result is interleaved at the fold's destination width,
-    /// [`len`](Self::len) frames long.
-    ///
-    /// `out` is resized to the result, so it is a destination and not an
-    /// accumulator. It grows only when it has less capacity than the result, so
-    /// a streaming consumer that reuses one `out` stops allocating once it has
-    /// seen its largest chunk.
-    ///
-    /// # Panics
-    ///
-    /// If `fold` does not read this buffer's width.
-    pub fn fold_into(&self, fold: &crate::Fold, out: &mut Vec<f32>) {
-        assert_eq!(
-            fold.src_layout(),
-            self.layout,
-            "the fold reads another width"
-        );
-        let width = usize::from(fold.dst_layout().count());
-        out.resize(self.len().interleaved_len(fold.dst_layout()), 0.0);
-        for (frame, dst) in self.iter_frames().zip(out.chunks_exact_mut(width)) {
-            fold.frame(frame, dst);
-        }
+impl<'a, S: Sample> IntoIterator for Interleaved<'a, S> {
+    type Item = &'a [S];
+    type IntoIter = Frames<'a, S>;
+
+    #[inline]
+    fn into_iter(self) -> Frames<'a, S> {
+        self.iter()
     }
 }
 
@@ -192,7 +223,6 @@ impl Interleaved<'_, f32> {
 ///
 /// Separate because a mutable borrow cannot be `Copy`, and the read side is
 /// passed around freely.
-#[derive(Debug)]
 pub struct InterleavedMut<'a, S: Sample = f32> {
     data: &'a mut [S],
     layout: ChannelLayout,
@@ -213,41 +243,56 @@ impl<'a, S: Sample> InterleavedMut<'a, S> {
     /// Returns the width these frames carry.
     #[inline]
     #[must_use]
-    pub fn layout(&self) -> ChannelLayout {
+    pub const fn layout(&self) -> ChannelLayout {
         self.layout
     }
 
-    /// Returns the interleave stride as a `usize`.
+    /// Returns the channel count, the interleave stride.
     #[inline]
     #[must_use]
-    pub fn stride(&self) -> usize {
-        usize::from(self.layout.count())
+    pub const fn channels(&self) -> usize {
+        self.layout.count() as usize
     }
 
     /// Returns the frame count, not the sample count.
     #[inline]
     #[must_use]
-    pub fn len(&self) -> Samples {
+    pub const fn frames(&self) -> Samples {
         Samples::from_interleaved_len(self.data.len(), self.layout)
     }
 
     /// Returns whether there are no frames.
     #[inline]
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.data.is_empty()
+    }
+
+    /// Returns the flat interleaved samples.
+    #[inline]
+    #[must_use]
+    pub const fn samples(&self) -> &[S] {
+        self.data
     }
 
     /// Returns the flat interleaved samples, mutably.
     #[inline]
-    pub fn samples_mut(&mut self) -> &mut [S] {
+    #[must_use]
+    pub const fn samples_mut(&mut self) -> &mut [S] {
+        self.data
+    }
+
+    /// Consumes the view into its flat samples, for the view's whole lifetime.
+    #[inline]
+    #[must_use]
+    pub const fn into_samples_mut(self) -> &'a mut [S] {
         self.data
     }
 
     /// Reborrows as a read-only view.
     #[inline]
     #[must_use]
-    pub fn as_ref(&self) -> Interleaved<'_, S> {
+    pub const fn as_interleaved(&self) -> Interleaved<'_, S> {
         Interleaved {
             data: self.data,
             layout: self.layout,
@@ -258,78 +303,235 @@ impl<'a, S: Sample> InterleavedMut<'a, S> {
     /// again.
     #[inline]
     #[must_use]
-    pub fn reborrow(&mut self) -> InterleavedMut<'_, S> {
+    pub const fn reborrow(&mut self) -> InterleavedMut<'_, S> {
         InterleavedMut {
             data: self.data,
             layout: self.layout,
         }
     }
 
+    /// Returns the sub-run covering a frame range, read-only.
+    ///
+    /// # Panics
+    ///
+    /// If the range is out of bounds.
+    #[inline]
+    #[must_use]
+    #[track_caller]
+    pub fn slice(&self, frames: Range<Samples>) -> Interleaved<'_, S> {
+        self.as_interleaved().slice(frames)
+    }
+
+    /// Returns the sub-run covering a frame range, read-only, or `None` if the
+    /// range is out of bounds.
+    #[inline]
+    #[must_use]
+    pub fn get_slice(&self, frames: Range<Samples>) -> Option<Interleaved<'_, S>> {
+        self.as_interleaved().get_slice(frames)
+    }
+
     /// Returns the writable sub-run covering a frame range.
     ///
     /// # Panics
     ///
-    /// If the range is out of bounds, like slice indexing.
+    /// If the range is out of bounds.
     #[inline]
     #[must_use]
-    pub fn window_mut(&mut self, frames: Range<Samples>) -> InterleavedMut<'_, S> {
-        let start = frames.start.interleaved_len(self.layout);
-        let end = frames.end.interleaved_len(self.layout);
+    #[track_caller]
+    pub fn slice_mut(&mut self, frames: Range<Samples>) -> InterleavedMut<'_, S> {
+        let r = bounds::slice(&frames, self.frames().get());
+        self.run_mut(&r)
+    }
+
+    /// Returns the writable sub-run covering a frame range, or `None` if the
+    /// range is out of bounds.
+    #[inline]
+    #[must_use]
+    pub fn get_slice_mut(&mut self, frames: Range<Samples>) -> Option<InterleavedMut<'_, S>> {
+        bounds::get(&frames, self.frames().get()).map(|r| self.run_mut(&r))
+    }
+
+    /// The writable sub-run of an in-bounds frame range.
+    fn run_mut(&mut self, r: &Range<usize>) -> InterleavedMut<'_, S> {
+        let start = Samples(r.start).interleaved_len(self.layout);
+        let end = Samples(r.end).interleaved_len(self.layout);
         InterleavedMut {
             data: &mut self.data[start..end],
             layout: self.layout,
         }
     }
 
+    /// Splits into the first `at` frames and the rest, two disjoint views.
+    ///
+    /// # Panics
+    ///
+    /// If `at` is past [`frames`](Self::frames).
+    #[inline]
+    #[must_use]
+    #[track_caller]
+    pub fn split_at_mut(&mut self, at: Samples) -> (InterleavedMut<'_, S>, InterleavedMut<'_, S>) {
+        let at = bounds::split(at, self.frames().get());
+        let layout = self.layout;
+        let (a, b) = self.data.split_at_mut(Samples(at).interleaved_len(layout));
+        (
+            InterleavedMut { data: a, layout },
+            InterleavedMut { data: b, layout },
+        )
+    }
+
+    /// Returns one frame, by frame index.
+    ///
+    /// # Panics
+    ///
+    /// If `i` is not below [`frames`](Self::frames).
+    #[inline]
+    #[must_use]
+    #[track_caller]
+    pub fn frame(&self, i: Samples) -> &[S] {
+        self.as_interleaved().frame(i)
+    }
+
+    /// Returns one frame, by frame index, or `None` past the end.
+    #[inline]
+    #[must_use]
+    pub fn get_frame(&self, i: Samples) -> Option<&[S]> {
+        self.as_interleaved().get_frame(i)
+    }
+
     /// Returns one frame mutably, by frame index.
     ///
     /// # Panics
     ///
-    /// If `i` is not below [`len`](Self::len).
+    /// If `i` is not below [`frames`](Self::frames).
     #[inline]
+    #[must_use]
+    #[track_caller]
     pub fn frame_mut(&mut self, i: Samples) -> &mut [S] {
-        let start = i.interleaved_len(self.layout);
-        let stride = self.stride();
-        &mut self.data[start..start + stride]
+        let i = bounds::index(i, self.frames().get());
+        let start = Samples(i).interleaved_len(self.layout);
+        let channels = self.channels();
+        &mut self.data[start..start + channels]
     }
 
-    /// Iterates frame by frame, mutably; each item is `stride()` long.
+    /// Returns one frame mutably, by frame index, or `None` past the end.
     #[inline]
-    pub fn iter_frames_mut(&mut self) -> impl Iterator<Item = &mut [S]> + use<'_, S> {
-        let stride = self.stride();
-        self.data.chunks_exact_mut(stride)
+    #[must_use]
+    pub fn get_frame_mut(&mut self, i: Samples) -> Option<&mut [S]> {
+        let start = i.interleaved_len(self.layout);
+        let end = start.checked_add(self.channels())?;
+        self.data.get_mut(start..end)
     }
 
-    /// Interleaves `planes` from frame `start` into every whole frame.
-    ///
-    /// Every sample is written, so a reused buffer keeps nothing from its last
-    /// use: a channel with no plane, and the frames a plane is too short to
-    /// reach, are silence. A plane past `stride()` is ignored. The strict form,
-    /// which refuses a mismatch, is [`interleave`](crate::interleave).
-    pub fn interleave_from<P: AsRef<[S]>>(&mut self, planes: &[P], start: Samples) {
-        let ch = self.stride();
-        let frames = self.len().get();
-        for c in 0..ch {
-            let src = planes
-                .get(c)
-                .and_then(|p| p.as_ref().get(start.get()..))
-                .unwrap_or(&[]);
-            let src = &src[..src.len().min(frames)];
-            let mut dst = self
-                .data
-                .get_mut(c..)
-                .unwrap_or_default()
-                .iter_mut()
-                .step_by(ch)
-                .take(frames);
-            // `src` leads the zip: it is the one that runs out, and a zip whose
-            // first side is `dst` would take one slot past it.
-            for (&s, d) in src.iter().zip(&mut dst) {
-                *d = s;
-            }
-            for d in dst {
-                *d = S::SILENCE;
-            }
-        }
+    /// Iterates frame by frame; each item is [`channels`](Self::channels)
+    /// long.
+    #[inline]
+    #[must_use]
+    pub fn iter(&self) -> Frames<'_, S> {
+        self.as_interleaved().iter()
+    }
+
+    /// Iterates frame by frame, mutably; each item is
+    /// [`channels`](Self::channels) long.
+    #[inline]
+    #[must_use]
+    pub fn iter_mut(&mut self) -> FramesMut<'_, S> {
+        let channels = self.channels();
+        FramesMut(self.data.chunks_exact_mut(channels))
     }
 }
+
+impl<S: Sample> fmt::Debug for InterleavedMut<'_, S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InterleavedMut")
+            .field("frames", &self.frames())
+            .field("layout", &self.layout)
+            .finish()
+    }
+}
+
+impl<S: Sample> AsRef<[S]> for InterleavedMut<'_, S> {
+    #[inline]
+    fn as_ref(&self) -> &[S] {
+        self.data
+    }
+}
+
+impl<S: Sample> AsMut<[S]> for InterleavedMut<'_, S> {
+    #[inline]
+    fn as_mut(&mut self) -> &mut [S] {
+        self.data
+    }
+}
+
+/// The frames of an [`Interleaved`], in order: each item is one frame's
+/// samples.
+///
+/// A named type so a struct can hold one; it knows its remaining length and
+/// runs from either end.
+#[derive(Clone, Debug)]
+pub struct Frames<'a, S: Sample = f32>(core::slice::ChunksExact<'a, S>);
+
+impl<'a, S: Sample> Iterator for Frames<'a, S> {
+    type Item = &'a [S];
+
+    #[inline]
+    fn next(&mut self) -> Option<&'a [S]> {
+        self.0.next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+
+    #[inline]
+    fn nth(&mut self, n: usize) -> Option<&'a [S]> {
+        self.0.nth(n)
+    }
+}
+
+impl<S: Sample> DoubleEndedIterator for Frames<'_, S> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.0.next_back()
+    }
+}
+
+impl<S: Sample> ExactSizeIterator for Frames<'_, S> {}
+
+impl<S: Sample> FusedIterator for Frames<'_, S> {}
+
+/// The frames of an [`InterleavedMut`], in order: each item is one frame's
+/// samples, writable and disjoint from the others.
+#[derive(Debug)]
+pub struct FramesMut<'a, S: Sample = f32>(core::slice::ChunksExactMut<'a, S>);
+
+impl<'a, S: Sample> Iterator for FramesMut<'a, S> {
+    type Item = &'a mut [S];
+
+    #[inline]
+    fn next(&mut self) -> Option<&'a mut [S]> {
+        self.0.next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+
+    #[inline]
+    fn nth(&mut self, n: usize) -> Option<&'a mut [S]> {
+        self.0.nth(n)
+    }
+}
+
+impl<S: Sample> DoubleEndedIterator for FramesMut<'_, S> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.0.next_back()
+    }
+}
+
+impl<S: Sample> ExactSizeIterator for FramesMut<'_, S> {}
+
+impl<S: Sample> FusedIterator for FramesMut<'_, S> {}
