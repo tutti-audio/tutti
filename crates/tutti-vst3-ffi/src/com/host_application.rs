@@ -10,8 +10,9 @@
 //! `IPlugView::attached` — a segfault on the first editor open. See
 //! `run_loop.rs` for the full mechanism and how it was confirmed.
 
-use crate::guard::{Out, guard};
+use crate::guard::Out;
 use std::ffi::c_void;
+use tutti_plugin_types::ffi_guard;
 
 use vst3::Steinberg::{
     IPlugFrame_iid, TUID,
@@ -103,7 +104,7 @@ super::run_loop::delegate_run_loop!(HostApplication);
 
 impl IHostApplicationTrait for HostApplication {
     unsafe fn getName(&self, name: *mut String128) -> tresult {
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             if name.is_null() {
                 return kInvalidArgument;
             }
@@ -123,7 +124,7 @@ impl IHostApplicationTrait for HostApplication {
         // SAFETY: a COM out-parameter: null or valid for this call.
         let out = unsafe { Out::new(obj) };
         out.set(std::ptr::null_mut());
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             if cid.is_null() || iid.is_null() || out.is_null() {
                 return kInvalidArgument;
             }
@@ -205,7 +206,7 @@ const SUPPORTED_IIDS: &[TUID] = &[
 impl IPlugInterfaceSupportTrait for HostApplication {
     unsafe fn isPlugInterfaceSupported(&self, iid: *const TUID) -> tresult {
         // `kResultFalse`: "not supported" is also the honest answer after a panic.
-        guard(vst3::Steinberg::kResultFalse, || {
+        ffi_guard(vst3::Steinberg::kResultFalse, || {
             if iid.is_null() {
                 return kInvalidArgument;
             }

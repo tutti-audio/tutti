@@ -207,6 +207,14 @@ impl Home {
     fn here(&self) -> Option<MainThreadMarker> {
         (std::thread::current().id() == self.thread).then_some(self.main)
     }
+
+    /// Makes the calling thread the home, under `main`, the collector's token:
+    /// a plugin handed to the main thread's collector is torn down there, with
+    /// the proof that thread holds, whichever thread made it.
+    fn collected(&mut self, main: MainThreadMarker) {
+        self.thread = std::thread::current().id();
+        self.main = main;
+    }
 }
 
 /// What a [`Plugin`] holds: the instance itself, apart from the wrapper whose
@@ -306,14 +314,20 @@ impl Drop for Plugin {
         // SAFETY: taken once, here, and `self.parts` is not used again.
         let parts = unsafe { ManuallyDrop::take(&mut self.parts) };
         if parts.home.here().is_none() {
-            eprintln!(
-                "tutti-vst3-ffi: a VST3 plugin was dropped off the main thread; its teardown is \
-                 handed to the main thread"
+            log::warn!(
+                "a VST3 plugin was dropped off the main thread; its teardown is handed to the \
+                 main thread"
             );
             // Never the audio thread: a unit leaves the graph on the control side
             // (`MainWorkHandle::defer`, "Never from an audio thread"). The audio half holds
             // the shared claim, not this value.
-            self.work.defer(move |_main| drop(parts));
+            self.work.defer_drop(move |main| {
+                let mut parts = parts;
+                // The collector's thread runs the teardown, so the editor closes
+                // and `terminate` runs under its token.
+                parts.home.collected(main);
+                drop(parts);
+            });
         }
     }
 }

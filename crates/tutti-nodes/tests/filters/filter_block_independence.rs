@@ -7,6 +7,7 @@
 //! impulse into a filter with no state answers with its first coefficient set, so
 //! the output at the impulse is the coefficient set in force there).
 
+use tutti_dsp::{SvfCoefficients, SvfModel};
 use tutti_graph::contract::{drive_input, prepared};
 use tutti_graph::{Env, Node, ParamNode, PlayClock, TransportChanges, TransportPosition};
 use tutti_nodes::{
@@ -221,6 +222,52 @@ fn a_drive_lane_step_is_in_the_render_within_one_segment() {
         "frame 47 is still on the old drive"
     );
     assert_eq!(response(None, 63), at_new, "frame 63 is on the new drive");
+}
+
+/// A step in a cutoff lane at frame 40 reaches the SVF on the stream grid: the point
+/// at 32 reads the old cutoff, the point at 48 the new one, and the coefficients glide
+/// from 48 to land at frame 63. With no state a low-pass answers an impulse with the
+/// `a3` of the set in force at that frame, so the output at frame 47 is the old set's
+/// `a3` and at frame 63 the new set's, bit for bit.
+#[test]
+fn an_svf_cutoff_step_lands_on_the_grid_point_after_it() {
+    const STEP: usize = 40;
+    let (old, new) = (500.0f32, 5_000.0f32);
+    let step: Vec<f32> = (0..64).map(|i| if i < STEP { old } else { new }).collect();
+    let response = |at: usize| -> f32 {
+        let mut x = vec![0.0f32; 64];
+        x[at] = 1.0;
+        let node = SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(old), Q::new(0.707));
+        let out = render(node, 64, &[x], &[Some(step.clone()), None, None], |_| {});
+        out[0][at]
+    };
+    let a3 = |freq: f32| {
+        let controls = SvfControls {
+            ty: SvfType::LowPass,
+            freq: Hz(freq),
+            q: Q::new(0.707),
+            gain: Db::new(0.0),
+        };
+        SvfCoefficients::<f64>::from(&SvfModel::new(controls, RATE)).a3 as f32
+    };
+    assert_ne!(a3(old), a3(new), "the two sets must be told apart");
+    assert_eq!(
+        response(47).to_bits(),
+        a3(old).to_bits(),
+        "frame 47 is on the old set"
+    );
+    assert_eq!(
+        response(63).to_bits(),
+        a3(new).to_bits(),
+        "frame 63 is on the new set"
+    );
+    let mid = response(55);
+    assert!(
+        a3(old) < mid && mid < a3(new),
+        "frame 55 is under way: {mid}, between {} and {}",
+        a3(old),
+        a3(new)
+    );
 }
 
 /// A cell moved before the first block (no lane) is held: every block length

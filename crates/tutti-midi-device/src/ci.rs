@@ -29,6 +29,7 @@ use tutti_ump::{MidiChannel, MidiGroup, Sysex7Packets, U7, Ump};
 mod device;
 mod discovery;
 mod endpoint;
+mod escape;
 mod initiator;
 mod link;
 mod pe;

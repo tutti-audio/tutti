@@ -41,9 +41,9 @@ use crate::error::{Error, Result};
 use crate::process::{ProcessChange, ReportAsk, ReportError, ReportPeer};
 use crate::profiles::{PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange};
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
-use tutti_midi_device::{DeviceId, DeviceInfo, Learned, SavedDevice};
+use tutti_midi_device::{DeviceId, DeviceInfo, EntropyError, Learned, SavedDevice};
 use tutti_midi_runtime::{DeviceInlets, DeviceSlot};
-use tutti_ump::DeviceIdentity;
+use tutti_ump::{DeviceIdentity, MidiGroup};
 
 /// The set of open MIDI inputs, and the endpoints available to open.
 ///
@@ -185,6 +185,12 @@ pub enum Polled {
     /// A MIDI-CI peer answered Process Inquiry, a MIDI Message Report began or
     /// ended, or the peer's Process Inquiry was dropped.
     Process(DeviceId, PeerId, ProcessChange),
+    /// MIDI-CI could not start a device on a Group of the device: the operating
+    /// system gave no random bytes for its MUID. It is reported once until the
+    /// device starts, and again if the Group leaves the device's Groups and
+    /// returns or MIDI-CI is disabled and enabled again; the Group is tried
+    /// again at every poll while MIDI-CI is enabled.
+    CiNotStarted(DeviceId, MidiGroup, EntropyError),
 }
 
 impl MidiSession {
@@ -492,6 +498,12 @@ impl MidiSession {
                     .process
                     .into_iter()
                     .map(|(peer, change)| Polled::Process(id.clone(), peer, change)),
+            );
+            polled.extend(
+                stepped
+                    .unstarted
+                    .into_iter()
+                    .map(|(group, error)| Polled::CiNotStarted(id.clone(), group, error)),
             );
         }
         polled.into_iter()

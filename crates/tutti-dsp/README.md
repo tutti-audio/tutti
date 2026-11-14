@@ -1,8 +1,8 @@
 # tutti-dsp
 
-This crate is a collection of audio signal-processing algorithms that work on plain slices of samples: filters, compressors and limiters, delay lines, reverb, convolution, waveshapers, a resampler and an FFT.
+This crate is a collection of audio signal-processing algorithms that work on audio buffers: filters, compressors and limiters, delay lines, reverb, convolution, waveshapers, a resampler and an FFT.
 
-It aims to give the same results on every CPU. It needs only `tutti-types` (units such as hertz and decibels), so you can use it on its own to build effects without a graph or audio engine.
+It aims to give the same results on every CPU. It needs only `tutti-types` (units such as hertz and decibels) and `tutti-buffers` (the audio buffers), so you can use it on its own to build effects without a graph or audio engine.
 
 This crate is part of [tutti](https://github.com/tutti-audio/tutti), a real-time audio engine for Rust.
 

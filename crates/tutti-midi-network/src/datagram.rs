@@ -24,7 +24,7 @@ pub enum SignatureError {
 }
 
 /// A command that is refused: its header, and why.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Refused {
     /// The header of the refused command (the words that were present, for a
     /// command cut short by the end of the datagram).

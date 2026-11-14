@@ -180,11 +180,19 @@ fn control_characters_are_escaped_on_write_and_ignored_raw_on_read() {
     // The line feed is the one raw control character.
     assert_eq!(wire("a\nb"), "a\nb");
     // Any other is written as an escape, so no raw byte below 0x20 is sent...
-    assert_eq!(wire("a\tb\r\u{7f}"), "a\\u0009b\\u000d\\u007f");
+    assert_eq!(wire("a\tb\r\u{7f}"), "a\\u0009b\\u000d\u{7f}");
     // ...and the escape reads back as the character it stands for.
     assert_eq!(unescaped(b"a\\u0009b"), "a\tb");
     // A raw one is ignored.
     assert_eq!(unescaped(b"a\tb\rc\x08d\ne"), "abcd\ne");
+}
+
+// §5.10.4 is not a JSON document: a quote is an ordinary 7-bit character and
+// is sent as it is, where a Property Exchange string value escapes it.
+#[test]
+fn a_quote_in_message_text_is_sent_raw_and_read_back() {
+    assert_eq!(wire("say \"hi\""), "say \"hi\"");
+    assert_eq!(unescaped(b"say \"hi\""), "say \"hi\"");
 }
 
 // §5.10.4: up to 103 bytes of Message text is safe to send. The

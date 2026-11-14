@@ -427,7 +427,6 @@ unsafe fn guarded(
     // all the procs need.
     unsafe {
         with_state::<TransportState, _>(
-            "a host transport callback",
             user_data,
             CANNOT_DO_IN_CURRENT_CONTEXT,
             CANNOT_DO_IN_CURRENT_CONTEXT,
