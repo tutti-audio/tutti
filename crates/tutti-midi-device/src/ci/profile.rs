@@ -24,7 +24,7 @@
 
 use std::vec::Vec;
 
-use tutti_ump::{ManufacturerId, U7, U14, first_non_seven_bit};
+use tutti_ump::{ManufacturerId, U7, U14, U28, first_non_seven_bit};
 
 /// Profile Inquiry, Sub-ID#2 `0x20` (§7.2).
 pub const SUB_ID2_PROFILE_INQUIRY: u8 = 0x20;
@@ -216,10 +216,10 @@ impl ProfileChannels {
         Self::of(raw.get())
     }
 
-    pub(crate) const fn to_wire(self) -> [u8; 2] {
-        U14::new(self.get())
-            .expect("a Channel count is 14 bits")
-            .to_le7()
+    /// The two 7-bit wire bytes, least significant first.
+    pub(crate) const fn to_le7(self) -> [u8; 2] {
+        // The range holds 14 bits, so nothing is masked off.
+        U14::masked(self.get()).to_le7()
     }
 }
 
@@ -341,14 +341,14 @@ pub enum ProfileDataError {
 }
 
 macro_rules! seven_bit_data {
-    ($(#[$doc:meta])* $name:ident, $max:expr) => {
+    ($(#[$doc:meta])* $name:ident, $len:ty) => {
         $(#[$doc])*
         #[derive(Clone, Debug, Default, PartialEq, Eq)]
-        pub struct $name(Vec<u8>);
+        pub struct $name(Vec<u8>, $len);
 
         impl $name {
             /// The most bytes the length field holds.
-            pub const MAX_LEN: usize = $max;
+            pub const MAX_LEN: usize = <$len>::MAX.get() as usize;
 
             /// The data, or why it cannot be carried.
             ///
@@ -357,19 +357,22 @@ macro_rules! seven_bit_data {
             /// [`ProfileDataError`] for a byte with its top bit set, or more than
             /// [`MAX_LEN`](Self::MAX_LEN) bytes.
             pub fn new(bytes: Vec<u8>) -> Result<Self, ProfileDataError> {
-                if bytes.len() > Self::MAX_LEN {
-                    Err(ProfileDataError::TooLong)
-                } else if first_non_seven_bit(&bytes).is_some() {
-                    Err(ProfileDataError::NotSevenBit)
-                } else {
-                    Ok(Self(bytes))
+                let len = <$len>::from_len(bytes.len()).ok_or(ProfileDataError::TooLong)?;
+                if first_non_seven_bit(&bytes).is_some() {
+                    return Err(ProfileDataError::NotSevenBit);
                 }
+                Ok(Self(bytes, len))
             }
 
             /// The bytes.
             #[must_use]
             pub fn as_bytes(&self) -> &[u8] {
                 &self.0
+            }
+
+            /// The length as the wire field that carries it.
+            pub(crate) fn wire_len(&self) -> $len {
+                self.1
             }
 
             /// The bytes, by value.
@@ -385,7 +388,7 @@ seven_bit_data!(
     /// The Inquiry Target Data of a Reply to Profile Details Inquiry (§7.7.3): at
     /// most 16383 bytes (the length is 14 bits), 7-bit. Its format is the target's.
     DetailsData,
-    0x3FFF
+    U14
 );
 
 seven_bit_data!(
@@ -393,7 +396,7 @@ seven_bit_data!(
     /// 2^28 - 1 of them (the length is four 7-bit bytes). Their meaning is the
     /// Profile's.
     SpecificData,
-    0x0FFF_FFFF
+    U28
 );
 
 /// The Registered Target Data `Number of MIDI Channels` (M2-102 §2.5.1, Table 8).
@@ -410,9 +413,9 @@ impl ChannelsDetail {
     /// The data of a reply to [`InquiryTarget::NUMBER_OF_CHANNELS`]: length 4.
     #[must_use]
     pub fn to_data(self) -> DetailsData {
-        let [a, b] = self.in_use.to_wire();
-        let [c, d] = self.max.to_wire();
-        DetailsData(vec![a, b, c, d])
+        let [a, b] = self.in_use.to_le7();
+        let [c, d] = self.max.to_le7();
+        DetailsData(vec![a, b, c, d], U14::of(4))
     }
 }
 

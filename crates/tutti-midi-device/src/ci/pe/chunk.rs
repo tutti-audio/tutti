@@ -30,6 +30,13 @@ tutti_types::ranged! {
 }
 
 impl ChunkNo {
+    /// The two 7-bit wire bytes, least significant first.
+    #[must_use]
+    pub const fn to_le7(self) -> [u8; 2] {
+        // The range holds 14 bits, so nothing is masked off.
+        U14::masked(self.get()).to_le7()
+    }
+
     /// The largest chunk number, 16383.
     pub const MAX: u16 = 0x3FFF;
 
@@ -54,6 +61,15 @@ pub enum ChunkTotal {
 }
 
 impl ChunkTotal {
+    /// The two 7-bit wire bytes, least significant first.
+    #[must_use]
+    pub const fn to_le7(self) -> [u8; 2] {
+        match self {
+            Self::Unknown => [0, 0],
+            Self::Known(n) => n.to_le7(),
+        }
+    }
+
     /// The wire value.
     #[must_use]
     pub const fn wire(self) -> u16 {
@@ -88,6 +104,15 @@ pub enum ChunkPosition {
 }
 
 impl ChunkPosition {
+    /// The two 7-bit wire bytes, least significant first.
+    #[must_use]
+    pub const fn to_le7(self) -> [u8; 2] {
+        match self {
+            Self::Abandoned => [0, 0],
+            Self::Number(n) => n.to_le7(),
+        }
+    }
+
     /// The wire value.
     #[must_use]
     pub const fn wire(self) -> u16 {
@@ -163,7 +188,9 @@ pub struct PeChunk {
     total: ChunkTotal,
     position: ChunkPosition,
     header: Vec<u8>,
+    header_len: U14,
     data: Vec<u8>,
+    data_len: U14,
 }
 
 fn seven_bit(bytes: &[u8]) -> Result<(), PeChunkError> {
@@ -192,12 +219,12 @@ impl PeChunk {
         if !header.is_empty() && position != ChunkPosition::Number(ChunkNo::FIRST) {
             return Err(PeChunkError::HeaderNotInFirst);
         }
-        if header.len() > PE_MAX_HEADER_LEN {
-            return Err(PeChunkError::HeaderTooLong { len: header.len() });
-        }
-        if data.len() > PE_MAX_CHUNK_DATA_LEN {
-            return Err(PeChunkError::DataTooLong { len: data.len() });
-        }
+        let header_len = U14::from_len(header.len())
+            .filter(|len| usize::from(len.get()) <= PE_MAX_HEADER_LEN)
+            .ok_or(PeChunkError::HeaderTooLong { len: header.len() })?;
+        let data_len = U14::from_len(data.len())
+            .filter(|len| usize::from(len.get()) <= PE_MAX_CHUNK_DATA_LEN)
+            .ok_or(PeChunkError::DataTooLong { len: data.len() })?;
         seven_bit(&header)?;
         seven_bit(&data)?;
         Ok(Self {
@@ -205,7 +232,9 @@ impl PeChunk {
             total,
             position,
             header,
+            header_len,
             data,
+            data_len,
         })
     }
 
@@ -214,12 +243,16 @@ impl PeChunk {
     /// [`PeCiMessage::Notify`](super::PeCiMessage::Notify) carries it.
     #[must_use]
     pub fn notify(request_id: PeRequestId, status: PeStatus) -> Self {
+        let header = format!("{{\"status\":{}}}", status.code()).into_bytes();
         Self {
+            // `{"status":` and a status code are a few bytes.
+            header_len: U14::masked(header.len() as u16),
             request_id,
             total: ChunkTotal::Known(ChunkNo::FIRST),
             position: ChunkPosition::Number(ChunkNo::FIRST),
-            header: format!("{{\"status\":{}}}", status.code()).into_bytes(),
+            header,
             data: Vec::new(),
+            data_len: U14::of(0),
         }
     }
 
@@ -274,34 +307,14 @@ impl PeChunk {
     /// The fields from the Request ID to the Property Data, as they follow the
     /// destination MUID.
     #[must_use]
-    #[allow(
-        clippy::missing_panics_doc,
-        reason = "the `expect`s state widths the types already hold"
-    )]
     pub fn encode_fields(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.sysex_len() - MESSAGE_OVERHEAD + 9);
         out.push(self.request_id.get());
-        out.extend(
-            U14::from_len(self.header.len())
-                .expect("`new` holds the header to 14 bits")
-                .to_le7(),
-        );
+        out.extend(self.header_len.to_le7());
         out.extend(&self.header);
-        out.extend(
-            U14::new(self.total.wire())
-                .expect("a chunk count is 14 bits")
-                .to_le7(),
-        );
-        out.extend(
-            U14::new(self.position.wire())
-                .expect("a chunk position is 14 bits")
-                .to_le7(),
-        );
-        out.extend(
-            U14::from_len(self.data.len())
-                .expect("`new` holds the data to 14 bits")
-                .to_le7(),
-        );
+        out.extend(self.total.to_le7());
+        out.extend(self.position.to_le7());
+        out.extend(self.data_len.to_le7());
         out.extend(&self.data);
         out
     }

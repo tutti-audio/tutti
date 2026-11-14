@@ -30,6 +30,13 @@ impl Lane {
     }
 
     /// Every lane, in table order.
+    ///
+    /// ```
+    /// use tutti_ump::Lane;
+    ///
+    /// assert_eq!(Lane::all().count(), Lane::COUNT);
+    /// assert_eq!(Lane::all().next().map(Lane::index), Some(0));
+    /// ```
     pub fn all() -> impl Iterator<Item = Lane> {
         (0..Self::COUNT as u16).map(Lane)
     }
@@ -73,7 +80,8 @@ impl Lane {
 
 const WORDS: usize = 1 << 10;
 
-/// A set of [`Lane`]s: one bit for each of the 512, kept in lane order.
+/// A set of [`Lane`]s: one bit for each of the 512, kept in lane order. The
+/// default is the empty set.
 ///
 /// ```
 /// use tutti_ump::{Address, Lane, LaneSet, MidiChannel, Protocol};

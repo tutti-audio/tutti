@@ -7,8 +7,8 @@
 //! the injection path that flushes a vanished delay. Nodes know nothing of
 //! this.
 //!
-//! The set is a bitset over the 16-bit [`Key`](tutti_ump::Key), fixed at 8 KiB, allocated when
-//! a plan is applied and never grown. A node's op writes only its own unit's
+//! The set is a bitset over the 16-bit [`Key`](tutti_ump::Key), fixed at 8 KiB,
+//! allocated when a plan is applied and never grown. A node's op writes only its own unit's
 //! sets, so a parallel block needs no new claim.
 //!
 //! A sink fed by several sources cannot tell whose note a key is: one source's

@@ -1060,13 +1060,14 @@ fn enabling_the_profile_starts_every_channel_at_48_semitones() {
     let mut ingest = MpeIngest::new(MpeMode::Disabled);
     let out = enable(&mut ingest, MpeZones::single(zone(2, 4)));
     let forty_eight = PitchBendSensitivity::of(48).to_rpn_bits();
+    let channel_forty_eight = RegisteredData::new(U7::of(48), U7::of(0)).to_word();
     assert_eq!(
         rpns(out.iter().copied(), Rpn::PITCH_BEND_SENSITIVITY),
         [
-            (2, forty_eight),
-            (3, forty_eight),
-            (4, forty_eight),
-            (5, forty_eight)
+            (2, channel_forty_eight),
+            (3, channel_forty_eight),
+            (4, channel_forty_eight),
+            (5, channel_forty_eight)
         ],
         "the manager's, and each member's channel range under it"
     );
@@ -1078,7 +1079,7 @@ fn enabling_the_profile_starts_every_channel_at_48_semitones() {
     // MPE 1.1, by contrast, starts the manager at 2.
     let mpe11 = MpeIngest::new(midi::lower_zone(3));
     let out: Vec<UmpAt> = mpe11.defaults(MidiGroup::FIRST, Offset::ZERO).collect();
-    let two = PitchBendSensitivity::of(2).to_rpn_bits();
+    let two = RegisteredData::new(U7::of(2), U7::of(0)).to_word();
     assert_eq!(
         rpns(out, Rpn::PITCH_BEND_SENSITIVITY),
         [(0, two), (1, two), (2, two), (3, two)]
@@ -1192,6 +1193,7 @@ fn the_pitch_bend_sensitivity_is_the_managers() {
         )
     };
     let twelve = PitchBendSensitivity::of(12).to_rpn_bits();
+    let channel_twelve = RegisteredData::new(U7::of(12), U7::of(0)).to_word();
     let mut ingest = profiled(0, 4);
     let out: Vec<UmpAt> = ingest.translated(&sensitivity(0, 12)).collect();
     assert_eq!(
@@ -1200,7 +1202,12 @@ fn the_pitch_bend_sensitivity_is_the_managers() {
     );
     assert_eq!(
         rpns(out, Rpn::PITCH_BEND_SENSITIVITY),
-        [(0, twelve), (1, twelve), (2, twelve), (3, twelve)],
+        [
+            (0, channel_twelve),
+            (1, channel_twelve),
+            (2, channel_twelve),
+            (3, channel_twelve)
+        ],
         "and the manager's own passes, copied onto each member"
     );
     assert_eq!(ingest.translated(&sensitivity(2, 7)).count(), 0);
@@ -1333,7 +1340,7 @@ fn disabling_the_profile_restores_the_mpe_11_zones_at_their_ranges() {
     let mut ingest = MpeIngest::new(midi::lower_zone(3));
     enable(&mut ingest, MpeZones::single(zone(4, 4)));
     let out = disable(&mut ingest);
-    let two = PitchBendSensitivity::of(2).to_rpn_bits();
+    let two = RegisteredData::new(U7::of(2), U7::of(0)).to_word();
     assert_eq!(
         rpns(out.iter().copied(), Rpn::PITCH_BEND_SENSITIVITY),
         [(0, two), (1, two), (2, two), (3, two)]

@@ -24,7 +24,7 @@
 
 use std::vec::Vec;
 
-use tutti_ump::{MidiChannel, MidiGroup, Sysex7Packets, U7, U14, U28, Ump};
+use tutti_ump::{MidiChannel, MidiGroup, Sysex7Packets, U7, U28, Ump};
 
 mod device;
 mod discovery;
@@ -57,8 +57,9 @@ pub use pe::{
     ChunkNo, ChunkPosition, ChunkTotal, ClusterKind, ColumnSource, CommonState, ConfirmIcon,
     ConfirmType, Confirmation, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource,
     DefaultMapNotCc, EntryError, GetStateError, JsonPointer, LinkRole, ListedTwice,
-    MAX_LIST_ENTRIES, MediaType, ModeId, NotAChunkNo, NotAPeChannel, NotAPriority, NotARequestId,
-    NotAStateSize, NotAStepCount, NotSignificantBits, NotUnixSeconds, NotValid, NotVendorName,
+    MAX_LIST_ENTRIES, MediaType, ModeId, NotABodyLimit, NotABufferLimit, NotAChunkNo,
+    NotAPeChannel, NotAPriority, NotARequestId, NotASimultaneousRequests, NotAStateSize,
+    NotAStepCount, NotAStreamLimit, NotSignificantBits, NotUnixSeconds, NotValid, NotVendorName,
     OpaqueBody, PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN, PE_MAX_HEADER_LEN, PE_TIMEOUT,
     PaginationFault, ParamPath, PartialError, PartialUpdate, PeAction, PeAllCtrlEntry,
     PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx, PeBodyError,
@@ -234,12 +235,9 @@ impl Muid {
 
     /// The four little-endian 7-bit wire bytes.
     #[must_use]
-    #[allow(
-        clippy::missing_panics_doc,
-        reason = "the `expect`s state widths the types already hold"
-    )]
     pub const fn to_bytes(self) -> [u8; 4] {
-        U28::new(self.get()).expect("a MUID is 28 bits").to_le7()
+        // The range holds 28 bits, so nothing is masked off.
+        U28::masked(self.get()).to_le7()
     }
 
     /// The MUID of four little-endian 7-bit wire bytes, or `None` for a byte
@@ -680,10 +678,6 @@ impl CiMessage {
 
     /// Appends the CI byte payload (what [`encode`](Self::encode) returns) to
     /// `out`: a `Vec<u8>`, a `VecDeque`, any collection of bytes.
-    #[allow(
-        clippy::missing_panics_doc,
-        reason = "the `expect`s state widths the types already hold"
-    )]
     pub fn encode_into(&self, out: &mut impl Extend<u8>) {
         let mut header = *self.header();
         // The Device ID of a Process Inquiry message is the one the message or its
@@ -720,7 +714,7 @@ impl CiMessage {
                 profile, channels, ..
             } => {
                 out.extend(profile.to_bytes());
-                out.extend(channels.to_wire());
+                out.extend(channels.to_le7());
             }
             // Two reserved bytes (Table 25).
             CiMessage::SetProfileOff { profile, .. } => {
@@ -734,7 +728,7 @@ impl CiMessage {
                 profile, channels, ..
             } => {
                 out.extend(profile.to_bytes());
-                out.extend(channels.to_wire());
+                out.extend(channels.to_le7());
             }
             CiMessage::ProfileAdded { profile, .. } | CiMessage::ProfileRemoved { profile, .. } => {
                 out.extend(profile.to_bytes());
@@ -754,22 +748,14 @@ impl CiMessage {
                 out.extend(profile.to_bytes());
                 out.extend([target.get().get()]);
                 // Table 23: 14-bit length, least significant byte first.
-                out.extend(
-                    U14::from_len(data.as_bytes().len())
-                        .expect("Details data holds at most 14 bits of length")
-                        .to_le7(),
-                );
+                out.extend(data.wire_len().to_le7());
                 out.extend(data.as_bytes().iter().copied());
             }
             CiMessage::PropertyExchange { message, .. } => message.encode_body(out),
             CiMessage::ProfileSpecificData { profile, data, .. } => {
                 out.extend(profile.to_bytes());
                 // Table 28: a 4-byte length of the Profile Specific Data that follows, LSB first.
-                out.extend(
-                    U28::from_len(data.as_bytes().len())
-                        .expect("Specific data holds at most 28 bits of length")
-                        .to_le7(),
-                );
+                out.extend(data.wire_len().to_le7());
                 out.extend(data.as_bytes().iter().copied());
             }
         }

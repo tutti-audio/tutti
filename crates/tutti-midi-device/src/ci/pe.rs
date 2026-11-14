@@ -104,10 +104,11 @@ mod tree;
 mod value;
 mod write;
 
-pub use body::{BodyLimit, PeBodyError, decode_body, encode_body};
+pub use body::{BodyLimit, NotABodyLimit, PeBodyError, decode_body, encode_body};
 pub use capabilities::{
-    PeCapabilities, PeCiMessage, PeVersion, SUB_ID2_PE_CAPABILITIES_INQUIRY,
-    SUB_ID2_PE_CAPABILITIES_REPLY, SUB_ID2_PE_NOTIFY, SimultaneousRequests,
+    NotASimultaneousRequests, PeCapabilities, PeCiMessage, PeVersion,
+    SUB_ID2_PE_CAPABILITIES_INQUIRY, SUB_ID2_PE_CAPABILITIES_REPLY, SUB_ID2_PE_NOTIFY,
+    SimultaneousRequests,
 };
 pub use chunk::{
     ChunkNo, ChunkPosition, ChunkTotal, NotAChunkNo, NotARequestId, PE_MAX_CHUNK_DATA_LEN, PeChunk,
@@ -127,8 +128,9 @@ pub use limits::{
 };
 pub use partial::{JsonPointer, PartialError, PartialUpdate};
 pub use reassemble::{
-    BufferLimit, PeBuffered, PeExpired, PeFlowControl, PeHeld, PeReassembler, PeReassemblyError,
-    PeReassemblyLimits, PeReceived, PeRefused, PeStep, StreamLimit,
+    BufferLimit, NotABufferLimit, NotAStreamLimit, PeBuffered, PeExpired, PeFlowControl, PeHeld,
+    PeReassembler, PeReassemblyError, PeReassemblyLimits, PeReceived, PeRefused, PeStep,
+    StreamLimit,
 };
 pub use resource::{
     ActionError, Arrival, CallError, CallId, CanSet, CcIndex, ChangeKind, ClusterKind,
