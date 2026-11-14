@@ -443,3 +443,37 @@ fn a_start_without_its_end_before_the_next_start_is_dropped() {
     assert_eq!(sysex_read_by_plugin(&list), vec![(4, framed(&b))]);
     assert_eq!(list.sysex_dropped(), 1);
 }
+
+/// **A reset drops a SysEx the plugin was sent the start of, counted, whether or
+/// not processing was on, and a second reset has nothing left to drop.** The
+/// plugin forgets its input across it, so the message must not complete on the
+/// far side.
+#[test]
+fn a_stop_drops_an_open_sysex_once() {
+    use crate::active::{Active, ActiveExt};
+    use tutti_vst3_host::{AudioBuffer, TransportInfo};
+
+    let library = tutti_fixtures::cdylib("tutti_shared_plugin", "tutti-shared-plugin");
+    let mut plugin = Active::<f32>::load(&library, 48_000.0, 16).expect("the plugin loads");
+    let mut open = sysex_packets(&midi::sysex_payload(30), 0);
+    open.truncate(2); // START and one CONTINUE: no END
+    let input = [[1.0f32; 16]; 2];
+    let mut out = [[0.0f32; 16]; 2];
+    let [l, r] = &mut out;
+    let outs: &mut [&mut [f32]] = &mut [&mut l[..], &mut r[..]];
+    let ins: &[&[f32]] = &[&input[0][..], &input[1][..]];
+    let mut buffer = AudioBuffer::new(ins, outs, 48_000.0);
+    let _ = plugin.process(
+        &mut buffer,
+        &midi_only(&open),
+        None,
+        &TransportInfo::default(),
+    );
+    assert_eq!(plugin.sysex_dropped(), 0, "an open SysEx is not a drop yet");
+
+    plugin.stop();
+    assert!(!plugin.processor().is_processing());
+    assert_eq!(plugin.sysex_dropped(), 1, "the stop dropped the open one");
+    plugin.stop();
+    assert_eq!(plugin.sysex_dropped(), 1, "and a second finds none");
+}
