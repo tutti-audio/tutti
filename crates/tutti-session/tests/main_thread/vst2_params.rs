@@ -13,10 +13,6 @@ use tutti_types::{ChannelLayout, Db, Hz, SampleRate};
 /// The probe's parameter that is labelled `Hz` and has an integer range.
 const HERTZ: ParamId = ParamId::new(1);
 
-fn main_thread() -> tutti_plugin_types::MainThread {
-    tutti_plugin_types::MainThread::claim().expect("one test, one process")
-}
-
 /// The probe's image, opened here and held, with its parameter-properties
 /// switch on: the host's own load of the same file shares the image, so its
 /// first read of the parameters sees the integer range (a default VST2 plugin,
@@ -43,7 +39,7 @@ fn session_with_probe() -> (Session, NodeKey, libloading::Library) {
         .expect("a detached session builds");
     let node = s
         .add_plugin_blocking(
-            &main_thread(),
+            tutti_fixtures::main_thread(),
             PluginLoadRequest::new(PluginRef::file(probe).expect("a plugin file")),
         )
         .expect("the in-process VST2 loads");
@@ -54,7 +50,6 @@ fn session_with_probe() -> (Session, NodeKey, libloading::Library) {
 
 /// **`typed` round-trips plain values through VST2's own map**, and refuses the
 /// wrong unit on the same parameter: `Db` on a parameter that measures hertz.
-#[test]
 fn a_typed_hertz_parameter_round_trips_through_the_formats_own_range() {
     let (s, node, _image) = session_with_probe();
     let params = s.plugin(node).unwrap().params();
@@ -91,3 +86,8 @@ fn a_typed_hertz_parameter_round_trips_through_the_formats_own_range() {
         "past the declared range"
     );
 }
+
+/// The cases of this module, run by `main`.
+pub(crate) const CASES: &[(&str, fn())] = tutti_fixtures::cases!["vst2_params";
+a_typed_hertz_parameter_round_trips_through_the_formats_own_range,
+];

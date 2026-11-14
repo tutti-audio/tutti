@@ -30,7 +30,9 @@ use vst3::Steinberg::{
 };
 use vst3::{ComPtr, ComWrapper};
 
-use tutti_plugin_types::{ContentScale, EditorCapabilities, MainThread, ParamId, WindowHandle};
+use tutti_plugin_types::{
+    ContentScale, EditorCapabilities, MainThreadMarker, MainWorkHandle, ParamId, WindowHandle,
+};
 use tutti_types::ChannelLayout;
 
 use crate::audio::{Arrangement, AudioSide, Setup, Shared};
@@ -186,6 +188,35 @@ struct Extensions {
     audio_presentation_latency: Option<ComPtr<IAudioPresentationLatency>>,
 }
 
+/// The thread a plugin was made on, under a `MainThreadMarker`, and that proof: a
+/// drop has no token, and on this thread the stored one is the caller's.
+struct Home {
+    thread: std::thread::ThreadId,
+    main: MainThreadMarker,
+}
+
+impl Home {
+    fn new(main: MainThreadMarker) -> Self {
+        Self {
+            thread: std::thread::current().id(),
+            main,
+        }
+    }
+
+    /// The token, when the caller is the thread it was made on.
+    fn here(&self) -> Option<MainThreadMarker> {
+        (std::thread::current().id() == self.thread).then_some(self.main)
+    }
+
+    /// Makes the calling thread the home, under `main`, the collector's token:
+    /// a plugin handed to the main thread's collector is torn down there, with
+    /// the proof that thread holds, whichever thread made it.
+    fn collected(&mut self, main: MainThreadMarker) {
+        self.thread = std::thread::current().id();
+        self.main = main;
+    }
+}
+
 /// What a [`Plugin`] holds: the instance itself, apart from the wrapper whose
 /// `Drop` decides where the teardown runs. Reached through `Plugin`'s `Deref`.
 pub struct Parts {
@@ -200,6 +231,8 @@ pub struct Parts {
     handler: ComWrapper<ComponentHandler>,
     application: ComWrapper<HostApplication>,
     editor: Option<Editor>,
+    /// The thread the plugin was made on, and the proof it held there.
+    home: Home,
     /// This plugin's claim on the module's run loop: what it registers there is
     /// taken back when its editor closes and when it drops.
     #[cfg(target_os = "linux")]
@@ -236,13 +269,15 @@ pub(super) struct CallScope;
 /// and deactivate, close the editor, disconnect a separate controller, clear
 /// the component handler, terminate the controller, terminate the component.
 ///
-/// A plugin dropped with an editor open on a thread that is not the main thread
-/// is not torn down there (a view cannot be detached off its thread, and
-/// `terminate` and a module's close are main-thread calls too): it is handed to
-/// the main thread (`tutti_plugin_types::defer_to_main`) and dropped at its next
-/// `run_deferred`, as the CLAP and VST2 hosts do.
+/// A plugin dropped on a thread other than the one it was made on is not torn
+/// down there (`terminate` and a module's close are main-thread calls, and a
+/// view cannot be detached off its thread): it is handed to its owner's
+/// main-thread collector (`tutti_plugin_types::MainWorkHandle`) and dropped at
+/// the collector's next run, as the CLAP and VST2 hosts do.
 pub struct Plugin {
     parts: ManuallyDrop<Parts>,
+    /// Where a drop off the plugin's home thread hands the teardown.
+    work: MainWorkHandle,
 }
 
 impl std::ops::Deref for Plugin {
@@ -264,9 +299,12 @@ impl Plugin {
     pub(crate) fn assemble(
         module: &Arc<Module>,
         component: Component,
+        main: MainThreadMarker,
+        work: MainWorkHandle,
     ) -> Result<Self, CreateError> {
         Ok(Self {
-            parts: ManuallyDrop::new(Parts::assemble(module, component)?),
+            parts: ManuallyDrop::new(Parts::assemble(module, component, main)?),
+            work,
         })
     }
 }
@@ -275,15 +313,21 @@ impl Drop for Plugin {
     fn drop(&mut self) {
         // SAFETY: taken once, here, and `self.parts` is not used again.
         let parts = unsafe { ManuallyDrop::take(&mut self.parts) };
-        if parts.editor.is_some() && tutti_plugin_types::MainThread::current().is_none() {
-            eprintln!(
-                "tutti-vst3-ffi: a VST3 plugin with an open editor was dropped off the main thread; its \
-                 teardown is handed to the main thread"
+        if parts.home.here().is_none() {
+            log::warn!(
+                "a VST3 plugin was dropped off the main thread; its teardown is handed to the \
+                 main thread"
             );
             // Never the audio thread: a unit leaves the graph on the control side
-            // (`defer_to_main`, "Never from an audio thread"). The audio half holds
+            // (`MainWorkHandle::defer`, "Never from an audio thread"). The audio half holds
             // the shared claim, not this value.
-            tutti_plugin_types::defer_to_main(move |_main| drop(parts));
+            self.work.defer_drop(move |main| {
+                let mut parts = parts;
+                // The collector's thread runs the teardown, so the editor closes
+                // and `terminate` runs under its token.
+                parts.home.collected(main);
+                drop(parts);
+            });
         }
     }
 }
@@ -312,18 +356,24 @@ impl std::fmt::Debug for Parts {
 // breaks the SDK's contract, not this type's. The host objects are `Send + Sync`
 // and touch atomics, queues and mutexes only. The editor view, the controller,
 // the component's buses and state, and the lifecycle calls are main-thread by
-// spec: each of those entries takes a `&MainThread`, which only the claiming
-// thread holds. The tokenless entries are `latency_samples` and `tail_samples`
+// spec: each of those entries takes a `MainThreadMarker`, which only the main
+// thread holds. `Home` stores the marker but hands it out only on the thread it
+// was made on (thread ids are never reused), so moving it to another thread
+// does not move the proof. The tokenless entries are `latency_samples` and `tail_samples`
 // (plain getters; see their docs), `is_active`, `set_processing` and
 // `audio_side` (audio-half bookkeeping under the claim), and the
 // `MidiLearn` handle, which forwards live MIDI. `Plugin`'s `Drop` has no token:
-// with an editor open and no main thread under it, it hands the whole plugin to
-// the main thread (`defer_to_main`); otherwise it tears down as usual.
+// off the thread the plugin was made on, it hands the whole plugin to the
+// owner's main-thread collector (`MainWorkHandle`); on it, it tears down as usual.
 unsafe impl Send for Parts {}
 
 impl Parts {
     /// Queries the interfaces of a freshly created component.
-    fn assemble(module: &Arc<Module>, component: Component) -> Result<Self, CreateError> {
+    fn assemble(
+        module: &Arc<Module>,
+        component: Component,
+        main: MainThreadMarker,
+    ) -> Result<Self, CreateError> {
         let component = component.0;
         let processor = component
             .cast::<IAudioProcessor>()
@@ -359,6 +409,7 @@ impl Parts {
                 owner,
             ),
             editor: None,
+            home: Home::new(main),
             #[cfg(target_os = "linux")]
             owner,
             component_initialized: false,
@@ -374,16 +425,17 @@ impl Parts {
 
     /// Until it drops, what the plugin registers with the module's run loop
     /// through a context that names no owner is this plugin's. Every call into
-    /// the plugin that takes a `&MainThread` runs under one: a toolkit
+    /// the plugin that takes a `MainThreadMarker` runs under one: a toolkit
     /// registers lazily (in `onSize`, on an event, from a controller call), not
     /// only inside `attached`.
-    pub(super) fn scoped(&self, _main: &MainThread) -> CallScope {
+    pub(super) fn scoped(&self, main: MainThreadMarker) -> CallScope {
         #[cfg(target_os = "linux")]
         {
-            CallScope(self.module.run_loop().scope_owned(self.owner))
+            CallScope(self.module.run_loop().scope_owned(self.owner, main))
         }
         #[cfg(not(target_os = "linux"))]
         {
+            let _ = main;
             CallScope
         }
     }

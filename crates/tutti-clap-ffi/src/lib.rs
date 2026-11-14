@@ -6,7 +6,7 @@
 //!
 //! This crate names nothing of tutti's except `tutti-plugin-types` (`WindowHandle`,
 //! whose unsafe constructor carries the claim of a valid parent window, and
-//! `MainThread`, the proof of the main thread) and, for `GraphPool`, `tutti-graph`
+//! `MainThreadMarker`, the proof of the main thread) and, for `GraphPool`, `tutti-graph`
 //! and `tutti-rt`.
 //!
 //! ## What is here
@@ -27,15 +27,16 @@
 //!
 //! CLAP annotates every entry with the thread it may be called on. Here a
 //! `[main-thread]` entry is a method of `Plugin`, which is `Send` but not `Sync`
-//! and takes a `&MainThread`: holding one is the proof, and `ThreadRoles` (built
+//! and takes a `MainThreadMarker`: holding one is the proof, and `ThreadRoles` (built
 //! from one) is the single place the main thread is named. An `[audio-thread]`
 //! entry is a method of `AudioSide`, which takes the instance's `AudioClaim` for
 //! the whole call. A processor that holds an `AudioSide` therefore cannot make a
 //! main-thread call, and a controller that holds the `Plugin` cannot make an
 //! audio-thread one, however the embedder wires them.
 //!
-//! A `Plugin` dropped on another thread calls nothing and leaks the instance,
-//! since its `gui.destroy` and `destroy` are main-thread entries too. The host
+//! A `Plugin` dropped on another thread calls nothing there: `gui.destroy` and
+//! `destroy` are main-thread entries too, so the whole value is handed to its
+//! owner's `MainWork` and torn down at that collector's next run. The host
 //! callbacks CLAP marks `[main-thread]` (timers, descriptors, rescans) are refused
 //! when a plugin makes them from another thread, or from inside an audio-side
 //! call such as `process`; `deactivate` and `destroy` run under the roles lock
@@ -95,7 +96,7 @@ pub use gui::{EmbedOutcome, GuiError, GuiHints, gui_size};
 pub use host::{Host, HostCallbacks};
 pub use library::{Bundle, DescriptorInfo, LoadError, Stage, chars_to_string};
 pub use plugin::PortConfigRequest;
-pub use plugin::{ActivateError, AudioPortInfo, CallError, Plugin, PortKind, off_thread_drops};
+pub use plugin::{ActivateError, AudioPortInfo, CallError, Plugin, PortKind};
 pub use pool::{GraphPool, PoolHandle, TaskPool};
 pub use roles::{AudioClaim, LifecycleClaim, ThreadRoles};
 pub use stream::{InputStream, OutputStream};

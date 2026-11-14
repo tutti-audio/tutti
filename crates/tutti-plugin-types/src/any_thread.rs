@@ -4,7 +4,7 @@
 //! Both are what a `PluginHandle` holds beside the main-thread
 //! [`Control`](crate::Control): a handle is cloned into pool jobs and
 //! polled from any thread, so these calls take no
-//! [`MainThread`](crate::MainThread).
+//! [`MainThreadMarker`](crate::MainThreadMarker).
 
 use crate::{
     AutomationMode, AutomationModeError, BlockCounts, Normalized, ParamId, ParameterInfo,
@@ -19,10 +19,12 @@ use crate::{
 /// reach the plugin from a thread that is not the main one:
 ///
 /// - **In-process**, the plugin may only be touched on the main thread, so the
-///   hosting hops there (`defer_to_main`) and calls `Control`; off the main
+///   hosting hops there (through its owner's `MainWork`) and calls `Control`; off the main
 ///   thread the call waits for the next main-thread tick up to a deadline, and
 ///   answers "unavailable" when it passes (`None`, `false`,
-///   [`StateError::Unavailable`], or the write is dropped).
+///   [`StateError::Unavailable`], or the write is dropped). An owner that has
+///   never run its collector has no main thread to hop to: the call answers
+///   "unavailable" at once, and a write is dropped rather than queued.
 /// - **Served**, a bridge answers from any thread, concurrently with the main
 ///   thread's own calls, so no hop is added. A host
 ///   that blocks its main thread on a snapshot or a parameter read would be

@@ -21,8 +21,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    AudioBuffer, AudioBufferMut, Loaded, MainThread, Origin, PluginDescriptor, PluginIo,
-    PluginTail, ProcessContext, ProcessOutput, Processor,
+    AudioBuffer, AudioBufferMut, Loaded, MainThreadMarker, MainWorkHandle, Origin,
+    PluginDescriptor, PluginIo, PluginTail, ProcessContext, ProcessOutput, Processor, sanitize,
 };
 use tutti_rt::Rt;
 
@@ -73,7 +73,7 @@ pub struct InProcClient<F: Loaded> {
     pub(super) descriptor: PluginDescriptor,
     /// Where the plugin came from, for an in-process one: what a fork loads
     /// again. `None` for a hosting that reopens another way.
-    pub(super) origin: Option<Origin>,
+    pub(super) reload: Option<Reload>,
     /// What the Processor adds to the plugin's own latency
     /// ([`Processor::latency`]), as the last `prepare` read it: the served
     /// pipeline's chunk.
@@ -415,7 +415,7 @@ pub(super) fn queue_sample_rate(cell: &AtomicU64, rate: SampleRate) {
 /// change starts with a recall and finishes at a later pump, once the audio
 /// thread has handed it back.
 pub(super) fn drain_sample_rate<F: Loaded>(
-    main: &MainThread,
+    main: MainThreadMarker,
     cell: &AtomicU64,
     inner: &Mutex<Instance<F>>,
 ) -> bool {
@@ -431,12 +431,20 @@ pub(super) fn drain_sample_rate<F: Loaded>(
     true
 }
 
+/// What a fork loads a plugin again from: where it came from, and the collector
+/// of its owner, which the new instance hands its close to.
+#[derive(Clone)]
+pub(super) struct Reload {
+    pub(super) origin: Origin,
+    pub(super) work: MainWorkHandle,
+}
+
 impl<F: Loaded> InProcClient<F> {
     pub(super) fn new(
         inner: Arc<Mutex<Instance<F>>>,
         rt: Rt<F::Processor>,
         descriptor: PluginDescriptor,
-        origin: Option<Origin>,
+        reload: Option<Reload>,
         declared: Declared,
         features: Features,
         sample_rate: f64,
@@ -470,7 +478,7 @@ impl<F: Loaded> InProcClient<F> {
             inner,
             rt,
             descriptor,
-            origin,
+            reload,
             pipeline,
             declared,
             midi: MidiEventVec::new(),
@@ -527,8 +535,8 @@ impl<F: Loaded> InProcClient<F> {
     /// reconfiguration. Takes the instance lock, so call it from a control
     /// thread, not the audio thread.
     pub fn set_render_mode(&self, mode: tutti_plugin_types::RenderMode) -> bool {
-        match MainThread::current() {
-            Some(main) => self.inner.lock().set_render_mode(&main, mode, None),
+        match MainThreadMarker::new() {
+            Some(main) => self.inner.lock().set_render_mode(main, mode, None),
             None => false,
         }
     }
@@ -660,11 +668,11 @@ impl<F: Loaded> InProcClient<F> {
         // node is out of any executor (`Node::prepare`'s contract), so its
         // realtime end hands the Processor back and takes the new one in this
         // call.
-        if let Some(main) = MainThread::current() {
+        if let Some(main) = MainThreadMarker::new() {
             let outcome = self
                 .inner
                 .lock()
-                .set_sample_rate(&main, rate, Some(&mut self.rt));
+                .set_sample_rate(main, rate, Some(&mut self.rt));
             // A refusal renders silence (no Processor is lent) and is reported
             // through the handle (`take_rate_report`).
             self.rate_refused = outcome.is_err();
@@ -802,8 +810,15 @@ pub(super) fn render_with<P: Processor>(
         ctx: &ctx,
         out,
     };
-    match processor.process(&mut io) {
-        Ok(()) => Rendered::Ran,
+    let processed = processor.process(&mut io);
+    match processed {
+        Ok(()) => {
+            // A plugin's NaN or infinity would poison every node downstream of it.
+            for channel in outputs.iter_mut().take(width) {
+                sanitize(channel);
+            }
+            Rendered::Ran
+        }
         Err(_) => {
             failed.fetch_add(1, Ordering::Relaxed);
             Rendered::Failed
@@ -1171,6 +1186,61 @@ mod render_tests {
             out.midi_events.is_empty(),
             "last block's MIDI is not this one's"
         );
+    }
+}
+
+/// A plugin that emits a non-finite sample does not reach the graph with it.
+#[cfg(test)]
+mod sanitize_tests {
+    use super::*;
+    use tutti_plugin_types::PluginResult;
+
+    /// Writes NaN, +inf and -inf among finite samples to its first output channel.
+    struct Poisoned;
+
+    impl Processor for Poisoned {
+        fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
+            if let AudioBufferMut::F32(buf) = &mut io.buffer {
+                buf.outputs[0].copy_from_slice(&[0.5, f32::NAN, f32::INFINITY, f32::NEG_INFINITY]);
+            }
+            Ok(())
+        }
+
+        fn stop(&mut self) {}
+
+        fn reset(&mut self) {}
+    }
+
+    /// **The in-process path zeroes NaN and both infinities of a block the
+    /// plugin rendered and keeps its finite samples**, as the plugin server does
+    /// before a block leaves its process.
+    #[test]
+    fn an_in_process_plugins_non_finite_output_is_zeroed_and_finite_output_kept() {
+        let counters = (AtomicU64::new(0), AtomicU64::new(0));
+        let params = ParamDelivery::closed([], Arc::default());
+        let mut midi = MidiEventVec::new();
+        let mut out = ProcessOutput::default();
+        let mut channel = [1.0f32; 4];
+        let (mut hand, mut rt) = tutti_rt::handoff();
+        assert!(hand.lend(Poisoned).is_ok());
+        let rendered = render_with(
+            rt.poll(Processor::stop),
+            (&counters.0, &counters.1),
+            &params,
+            &mut midi,
+            &mut out,
+            Inputs {
+                transport: &TransportInfo::default(),
+                changes: &[],
+                expressive: None,
+            },
+            &[],
+            &mut [&mut channel[..]],
+            4,
+            48_000.0,
+        );
+        assert_eq!(rendered, Rendered::Ran);
+        assert_eq!(channel, [0.5, 0.0, 0.0, 0.0]);
     }
 }
 

@@ -186,6 +186,7 @@ mod failure;
 #[cfg(any(test, feature = "testing"))]
 pub mod fake;
 pub mod features;
+mod guard;
 mod harmony;
 mod host;
 mod hosting;
@@ -247,7 +248,7 @@ pub use automation::{ParameterChanges, ParameterPoint, ParameterQueue};
 pub use automation_mode::{AutomationMode, AutomationModeError};
 pub use bridge_error::{BridgeError, BridgeResult, PluginForkError};
 pub use channels::{
-    AudioBuffer, AudioBuffer32, AudioBuffer64, AudioBufferMut, MAX_BLOCK_CHANNELS, Sample,
+    AudioBuffer, AudioBuffer32, AudioBuffer64, AudioBufferMut, MAX_BLOCK_CHANNELS, Sample, sanitize,
 };
 pub use classification::{ClapFeature, PluginRole, Vst2Category, Vst3PlugType, Vst3SubCategories};
 pub use descriptor::{AuComponentType, EditorPresence, PluginClass, PluginDescriptor};
@@ -257,6 +258,7 @@ pub use editor::{
     KeyEvent, KeyUse, ModifierConvention, ResizeHints, WindowHandle,
 };
 pub use failure::{PluginFailure, TerminationReason};
+pub use guard::{contained_panics, ffi_guard};
 pub use host::{Control, Controller, Loaded, PluginIo, Processor, Refused, Stuck, Wraps};
 pub use hosting::{Editor, EditorWindow, InProcess, Load, Origin, OutOfProcess, Reopen};
 pub use invalidation::{PluginInvalidation, PluginRefresh, ResyncClass, ResyncKind};
@@ -281,7 +283,7 @@ pub use lifecycle::{
     step,
 };
 pub use load_stage::LoadStage;
-pub use main_thread::{MainThread, NotMainThread, defer_to_main, run_deferred};
+pub use main_thread::{MainThreadMarker, MainWork, MainWorkHandle};
 pub use measured::{
     LatencyVerdict, Measured, NotChecked, PROBE_FLOOR, ProbeConfig, StateHash, TailVerdict, Verdict,
 };

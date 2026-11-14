@@ -33,6 +33,8 @@ tutti-types = { version = "0.0.1", path = "../tutti-types" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 vst3 = "0.3"
+# The warning of a plugin dropped off the main thread.
+log = "0.4"
 # `IRunLoop` (Linux): the look at the descriptors a plugin registered.
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 
@@ -43,6 +45,8 @@ core-foundation-sys = "0.8"
 
 [dev-dependencies]
 assert_no_alloc = { version = "1", default-features = false }
+# `main_thread`: the token a test passes where an entry wants the main thread.
+tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 # `module_entry`'s macOS bundle-directory test builds a bundle on disk.
 tempfile = "3"
 

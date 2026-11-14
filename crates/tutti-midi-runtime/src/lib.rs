@@ -245,8 +245,7 @@ pub use live::{
 };
 pub use outbound::{
     CLOCK_EVENT_CAPACITY, ClockControls, ClockMaster, ClockNode, JR_CLOCK_INTERVAL,
-    JR_CLOCK_MAX_INTERVAL, JrClock, JrClockEmitter, JrReceiver, JrStamper, JrStream,
-    MachineControlSender,
+    JR_CLOCK_MAX_INTERVAL, JrClock, JrClockEmitter, JrStamper, JrStream, MachineControlSender,
 };
 pub use output_plan::{
     MAX_OUTPUT_AHEAD, MAX_OUTPUT_LATENCY, OffsetOutOfRange, Outgoing, OutputLatency, OutputOffset,

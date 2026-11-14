@@ -11,14 +11,13 @@ use std::ffi::CString;
 use std::marker::PhantomData;
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::os::raw::c_void;
-use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, TryLockError};
 use std::thread::ThreadId;
 use std::{fmt, ptr, slice};
 
-use tutti_plugin_types::{MainThread, WindowHandle};
+use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, WindowHandle, ffi_guard};
 
 use crate::{
     api::{self, AEffect, ChunkError, PluginFlags, PluginMain, Supported, TimeInfo, consts::*},
@@ -372,9 +371,9 @@ pub struct ShellPlugin {
 ///
 /// # Thread rules
 ///
-/// The rule is in the types, as in the other formats (`tutti_plugin_types::MainThread`):
+/// The rule is in the types, as in the other formats (`tutti_plugin_types::MainThreadMarker`):
 ///
-/// - An entry that VST2 puts on the main thread takes a `&MainThread`, the proof that the
+/// - An entry that VST2 puts on the main thread takes a `MainThreadMarker`, the proof that the
 ///   caller is on it: `effOpen`, `effMainsChanged`, the sample rate and block size, state
 ///   (`effGetChunk`, `effSetChunk`), programs, bypass, the editor, the MIDI program
 ///   queries, `effCanDo`, `effGetTailSize`. Nothing is checked at the call.
@@ -402,11 +401,12 @@ pub struct ShellPlugin {
 /// permits moving it and is not a claim that any thread may call it. It is not `Sync`.
 ///
 /// **A drop has no token**, so the close is guarded another way: the instance records the
-/// thread it was made on (the one that held the `&MainThread` it was made with), and drops
-/// the plugin properly only there. Dropped anywhere else it **leaks** the plugin, never
-/// closing it and never freeing its core: a plugin that closes on the wrong thread may not
-/// survive, and the live [`RenderHandle`] may still be rendering. The host crate that owns
-/// the instance drops it on the control side.
+/// thread it was made on (the one that held the `MainThreadMarker` it was made with), and drops
+/// the plugin properly only there. Dropped anywhere else it hands the close to its owner's
+/// [`MainWorkHandle`], to run at the collector's next
+/// run on the main thread, with the core alive in it: a plugin that closes on the wrong
+/// thread may not survive, and the live [`RenderHandle`] may still be rendering. The host
+/// crate that owns the instance drops it on the control side.
 ///
 /// The drop on the right thread is: close the editor if open, `effStopProcess` if
 /// processing, `effMainsChanged(0)` if resumed, then `effClose`, in that order and under the
@@ -438,7 +438,7 @@ pub struct PluginInstance {
     /// instances and licence seats.
     lib: ManuallyDrop<Arc<Library>>,
     info: Info,
-    /// The thread this instance was made on, under a `&MainThread`: the only one it closes on.
+    /// The thread this instance was made on, under a `MainThreadMarker`: the only one it closes on.
     main_thread: ThreadId,
     /// Whether the last `effMainsChanged` dispatched carried `value=1`.
     ///
@@ -551,6 +551,9 @@ struct Core {
     /// The thread the instance was made on: the one the plugin is closed on, and the one a
     /// core the audio side outlives it on is freed on.
     main_thread: ThreadId,
+    /// Where a close or a free that finds itself off that thread is handed: the
+    /// collector of the instance's owner.
+    work: MainWorkHandle,
 }
 
 impl fmt::Debug for Core {
@@ -562,7 +565,12 @@ impl fmt::Debug for Core {
 impl Core {
     /// A core over `effect`, which must be a live `AEffect` that the plugin has not
     /// closed. Nothing here closes it; the instance does.
-    fn new(effect: *mut AEffect, host_ref: Option<HostRef>, main_thread: ThreadId) -> Arc<Self> {
+    fn new(
+        effect: *mut AEffect,
+        host_ref: Option<HostRef>,
+        main_thread: ThreadId,
+        work: MainWorkHandle,
+    ) -> Arc<Self> {
         let core = Arc::new(Core {
             effect: UnsafeCell::new(effect),
             _host_ref: host_ref,
@@ -572,6 +580,7 @@ impl Core {
             gate: Mutex::new(false),
             dispatcher: Mutex::new(()),
             main_thread,
+            work,
         });
         // Warm the gate here, on the control side. On macOS (and the other platforms whose
         // `std::sync::Mutex` is a `pthread_mutex_t`) the mutex allocates its 64-byte
@@ -605,7 +614,7 @@ unsafe impl Sync for Core {}
 /// What a close needs of an instance, once the instance itself is gone: the core, and the two
 /// flags that say which opcodes the sequence sends. The instance's drop runs it on the spot
 /// when it is on the right thread; off it, the sequence is handed to the main thread
-/// ([`defer_to_main`](tutti_plugin_types::defer_to_main)) instead of being skipped.
+/// ([`MainWorkHandle::defer`](tutti_plugin_types::MainWorkHandle::defer)) instead of being skipped.
 struct Closer {
     core: Arc<Core>,
     editor_open: bool,
@@ -658,19 +667,6 @@ impl Closer {
     }
 }
 
-/// How many instances were dropped off the thread they were made on, since the process began.
-/// Each one's close was handed to the main thread; one still waiting for a tick is the plugin
-/// not yet closed.
-static OFF_THREAD_DROPS: AtomicU64 = AtomicU64::new(0);
-
-/// How many [`PluginInstance`]s have been dropped off their own thread so far: each had its
-/// close handed to the main thread ([`tutti_plugin_types::run_deferred`], which the session's
-/// `Phase::Collect` calls). A nonzero count is worth a look, since the owner should have
-/// dropped it on the main thread.
-pub fn off_thread_drops() -> u64 {
-    OFF_THREAD_DROPS.load(Ordering::Relaxed)
-}
-
 impl Drop for PluginInstance {
     fn drop(&mut self) {
         let closer = Closer {
@@ -685,15 +681,14 @@ impl Drop for PluginInstance {
         // A drop has no token. Off the main thread `effClose` and the rest would run on the
         // wrong thread, which a plugin may not survive, and skipping them leaks the plugin and
         // its licence seat. So the sequence goes to the main thread, to run at its next
-        // `run_deferred` (the session's collect tick); the core stays alive in the closure,
+        // `MainWork::run` (the session's collect tick); the core stays alive in the closure,
         // so a live `RenderHandle` keeps working until then. This is a control thread (never
         // the audio thread, which owns no instance), so a log line is fine.
-        let count = OFF_THREAD_DROPS.fetch_add(1, Ordering::Relaxed) + 1;
         warn!(
-            "a VST2 plugin instance was dropped off its own thread ({count} so far); its close \
-             is handed to the main thread"
+            "a VST2 plugin instance was dropped off its own thread; its close is handed to the \
+             main thread"
         );
-        tutti_plugin_types::defer_to_main(move |_main| closer.close());
+        self.core.work.defer_drop(move |_main| closer.close());
     }
 }
 
@@ -740,8 +735,9 @@ impl<T: Host + Send + Sync + 'static> PluginLoader<T> {
     ///
     /// let mut plugin = PluginLoader::load(path, host.clone()).unwrap();
     ///
-    /// let main = tutti_plugin_types::MainThread::claim().unwrap();
-    /// let instance = plugin.instance(&main).unwrap();
+    /// let main = tutti_plugin_types::MainThreadMarker::new().unwrap();
+    /// let (_collector, work) = tutti_plugin_types::MainWork::new();
+    /// let instance = plugin.instance(main, &work).unwrap();
     /// // ...
     /// ```
     ///
@@ -812,7 +808,11 @@ impl<T: Host + Send + Sync + 'static> PluginLoader<T> {
     /// [`PluginLoadError::InstanceFailed`] if the plugin's entry point returns
     /// no instance, and [`PluginLoadError::InvalidApiVersion`] if the instance
     /// speaks a VST API version this library does not support.
-    pub fn instance(&mut self, main: &MainThread) -> Result<PluginInstance, PluginLoadError> {
+    pub fn instance(
+        &mut self,
+        main: MainThreadMarker,
+        work: &MainWorkHandle,
+    ) -> Result<PluginInstance, PluginLoadError> {
         // A load is in progress from before `main` until this returns, so a callback made
         // by any thread of the plugin in that window is told apart from a steady-state one
         // (`callback_wrapper`).
@@ -846,7 +846,13 @@ impl<T: Host + Send + Sync + 'static> PluginLoader<T> {
         // callback that does is let through by `adopt` above.
         unsafe { (*effect).reserved1 = host_ref.ptr as isize };
 
-        let instance = PluginInstance::new(effect, Arc::clone(&self.lib), Some(host_ref), main);
+        let instance = PluginInstance::new(
+            effect,
+            Arc::clone(&self.lib),
+            Some(host_ref),
+            main,
+            work.clone(),
+        );
 
         let api_ver = instance.dispatch(plugin::OpCode::GetApiVersion, 0, 0, ptr::null_mut(), 0.0);
         if api_ver >= 2400 {
@@ -908,7 +914,7 @@ impl PluginInstance {
     /// happens. The bracket is advisory, so there is nothing here to report.
     pub fn with_preset_bracket<R>(
         &mut self,
-        _main: &MainThread,
+        _main: MainThreadMarker,
         change: impl FnOnce(&mut Self) -> R,
     ) -> R {
         self.opcode(plugin::OpCode::BeginSetPreset);
@@ -934,7 +940,7 @@ impl PluginInstance {
     /// Check [`can_do(CanDo::Bypass)`](Self::can_do) first. A plugin that
     /// does not advertise `"bypass"` may still return non-zero here, and the
     /// advertisement is the documented contract.
-    pub fn set_bypass(&mut self, _main: &MainThread, bypass: bool) -> bool {
+    pub fn set_bypass(&mut self, _main: MainThreadMarker, bypass: bool) -> bool {
         self.dispatch(
             plugin::OpCode::SoftBypass,
             0,
@@ -975,7 +981,7 @@ impl PluginInstance {
     /// Read live rather than from the `get_info` snapshot, for the same reason
     /// [`read_initial_delay`](Self::read_initial_delay) is: a plugin may not
     /// know its tail until it knows its sample rate.
-    pub fn read_tail_size(&self, _main: &MainThread) -> isize {
+    pub fn read_tail_size(&self, _main: MainThreadMarker) -> isize {
         self.dispatch(plugin::OpCode::GetTailSize, 0, 0, std::ptr::null_mut(), 0.0)
     }
 
@@ -994,7 +1000,7 @@ impl PluginInstance {
     /// `new`, before `effOpen`, and a plugin may not know its MIDI
     /// configuration until it is initialised — the same trap
     /// [`read_initial_delay`](Self::read_initial_delay) documents for latency.
-    pub fn read_midi_channels(&self, _main: &MainThread) -> MidiChannelCounts {
+    pub fn read_midi_channels(&self, _main: MainThreadMarker) -> MidiChannelCounts {
         fn ask(this: &PluginInstance, opcode: plugin::OpCode) -> Option<u8> {
             // VST 2.4 documents the valid answer as 1..=15. Out of that range —
             // including the 0 an unimplemented opcode returns — means the
@@ -1015,7 +1021,7 @@ impl PluginInstance {
     /// plugin's uniqueID"). The walk is capped at `MAX_SHELL_PLUGINS` and stops at a
     /// repeated id, so a plugin that never answers 0 cannot hold the caller forever. A plugin
     /// that is not a shell answers 0 at once and gives none.
-    pub fn shell_plugins(&self, _main: &MainThread) -> Vec<ShellPlugin> {
+    pub fn shell_plugins(&self, _main: MainThreadMarker) -> Vec<ShellPlugin> {
         let mut found: Vec<ShellPlugin> = Vec::new();
         while found.len() < MAX_SHELL_PLUGINS {
             // As `read_string_param`: the spec's size is a floor, real plugins write more.
@@ -1059,7 +1065,7 @@ impl PluginInstance {
     /// The handle shares the instance's core and does not own the plugin: dropping it never
     /// closes the plugin, and dropping the instance while the handle lives closes it (on the
     /// instance's thread) and leaves the handle refusing every entry.
-    pub fn render_handle(&self, _main: &MainThread) -> RenderHandle {
+    pub fn render_handle(&self, _main: MainThreadMarker) -> RenderHandle {
         let (inputs, outputs) = self.read_pin_counts();
         RenderHandle {
             entry: RenderEntry {
@@ -1116,12 +1122,13 @@ impl PluginInstance {
         effect: *mut AEffect,
         lib: Arc<Library>,
         host_ref: Option<HostRef>,
-        _main: &MainThread,
+        _main: MainThreadMarker,
+        work: MainWorkHandle,
     ) -> PluginInstance {
         use plugin::OpCode as op;
 
         let main_thread = std::thread::current().id();
-        let core = Core::new(effect, host_ref, main_thread);
+        let core = Core::new(effect, host_ref, main_thread, work);
         let mut plug = PluginInstance {
             core,
             lib: ManuallyDrop::new(lib),
@@ -1257,7 +1264,7 @@ impl PluginInstance {
     /// which reads as "the plugin reports the same name for every program".
     pub fn midi_program_name(
         &self,
-        _main: &MainThread,
+        _main: MainThreadMarker,
         channel: i32,
         program_index: i32,
     ) -> Option<(api::MidiProgramName, i32)> {
@@ -1306,7 +1313,7 @@ impl PluginInstance {
     /// `tutti-vst2-host` does exactly that; see its `current_midi_program`.
     pub fn current_midi_program(
         &self,
-        _main: &MainThread,
+        _main: MainThreadMarker,
         channel: i32,
     ) -> Option<(api::MidiProgramName, i32)> {
         // SAFETY: as above — `#[repr(C)]` POD, all-zero is valid.
@@ -1334,7 +1341,7 @@ impl PluginInstance {
     /// when unsupported or when the count is not positive.
     pub fn midi_program_category(
         &self,
-        _main: &MainThread,
+        _main: MainThreadMarker,
         channel: i32,
         category_index: i32,
     ) -> Option<(api::MidiProgramCategory, i32)> {
@@ -1368,7 +1375,7 @@ impl PluginInstance {
     ///
     /// `true` only on an exact `1`. This is a cache-invalidation signal, so a
     /// garbage non-zero answer must not be read as "changed" forever.
-    pub fn midi_programs_changed(&self, _main: &MainThread, channel: i32) -> bool {
+    pub fn midi_programs_changed(&self, _main: MainThreadMarker, channel: i32) -> bool {
         self.dispatch(
             plugin::OpCode::HasMidiProgramsChanged,
             channel,
@@ -1388,7 +1395,7 @@ impl PluginInstance {
     /// 0 = not", so this compares against 1.
     pub fn midi_key_name(
         &self,
-        _main: &MainThread,
+        _main: MainThreadMarker,
         channel: i32,
         program_index: i32,
         key_number: i32,
@@ -1861,7 +1868,7 @@ impl Drop for RenderHandle {
     /// frees the host box and may free the host state it keeps alive. That must not happen on
     /// the audio thread, which is where a Processor could be dropped. The graph keeps it off
     /// that thread (it retires a plugin node's unit, and so its `Processor`, to the control
-    /// side: see `tutti_plugin_types::defer_to_main`, "Never from an audio thread", and
+    /// side: see `tutti_plugin_types::MainWorkHandle::defer`, "Never from an audio thread", and
     /// `tutti-plugin-host/tests/node/vst2_in_process_retire.rs`), so this branch runs on a control or
     /// pool thread. **It must not run on an audio thread:** it takes a lock and allocates.
     /// Off the instance's thread, the last holder's share goes to the main thread to be freed
@@ -1871,7 +1878,7 @@ impl Drop for RenderHandle {
             && std::thread::current().id() != self.core.main_thread
         {
             let core = Arc::clone(&self.core);
-            tutti_plugin_types::defer_to_main(move |_main| drop(core));
+            core.work.clone().defer_drop(move |_main| drop(core));
         }
     }
 }
@@ -2007,9 +2014,9 @@ impl RenderHandle {
 // SAFETY: the instance is a pointer to the plugin's `AEffect` (through the core), an `Arc` of
 // that core (which is `Send + Sync`) and a library handle. `Send` is what lets a host load on
 // one thread and own the plugin on another. It permits moving only: the entries that VST2
-// puts on the main thread take a `&MainThread`, which only that thread holds, and a drop off
-// the thread the instance was made on leaks the plugin instead of closing it (see the type's
-// docs). It is not `Sync` (`_not_sync`).
+// puts on the main thread take a `MainThreadMarker`, which only that thread holds, and a drop off
+// the thread the instance was made on defers the close to the owner's main-thread collector
+// (see the type's docs). It is not `Sync` (`_not_sync`).
 unsafe impl Send for PluginInstance {}
 
 /// The entries of the main thread. See the type's docs for which take a token and why.
@@ -2026,7 +2033,7 @@ impl PluginInstance {
     /// `initialDelay`): a plugin, a shell plugin above all, settles on which
     /// effect it is during init, and [`get_info`](Self::get_info) and the
     /// process entry points' channel-count checks read this snapshot.
-    pub fn init(&mut self, _main: &MainThread) {
+    pub fn init(&mut self, _main: MainThreadMarker) {
         self.opcode(plugin::OpCode::Initialize);
         self.refresh_effect_fields();
     }
@@ -2077,14 +2084,14 @@ impl PluginInstance {
     }
 
     /// `effSetSampleRate`; exclusive (see [`PluginInstance`]'s docs).
-    pub fn set_sample_rate(&mut self, _main: &MainThread, rate: f32) {
+    pub fn set_sample_rate(&mut self, _main: MainThreadMarker, rate: f32) {
         self.exclusive(|| {
             self.dispatch(plugin::OpCode::SetSampleRate, 0, 0, ptr::null_mut(), rate);
         });
     }
 
     /// `effSetBlockSize`; exclusive.
-    pub fn set_block_size(&mut self, _main: &MainThread, size: i64) {
+    pub fn set_block_size(&mut self, _main: MainThreadMarker, size: i64) {
         self.exclusive(|| {
             self.dispatch(
                 plugin::OpCode::SetBlockSize,
@@ -2097,7 +2104,7 @@ impl PluginInstance {
     }
 
     /// `effMainsChanged(1)`; exclusive.
-    pub fn resume(&mut self, _main: &MainThread) {
+    pub fn resume(&mut self, _main: MainThreadMarker) {
         self.exclusive(|| {
             self.dispatch(plugin::OpCode::StateChanged, 0, 1, ptr::null_mut(), 0.0);
         });
@@ -2106,7 +2113,7 @@ impl PluginInstance {
 
     /// `effMainsChanged(0)`, if the plugin is resumed: a plugin already suspended would see a
     /// second one with no start before it. Exclusive.
-    pub fn suspend(&mut self, _main: &MainThread) {
+    pub fn suspend(&mut self, _main: MainThreadMarker) {
         if self.resumed {
             self.exclusive(|| {
                 self.dispatch(plugin::OpCode::StateChanged, 0, 0, ptr::null_mut(), 0.0);
@@ -2122,7 +2129,7 @@ impl PluginInstance {
 
     /// Dispatch `effSetProcessPrecision`, carrying the width in `value`:
     /// `0` = 32-bit, `1` = 64-bit. Exclusive.
-    pub fn set_precision(&mut self, _main: &MainThread, double: bool) {
+    pub fn set_precision(&mut self, _main: MainThreadMarker, double: bool) {
         self.exclusive(|| {
             self.dispatch(
                 plugin::OpCode::SetPrecision,
@@ -2136,12 +2143,12 @@ impl PluginInstance {
 
     /// `effEditKeyDown` for `key`, to the open editor: whether the plugin used the key.
     /// `false` with no call when no editor is open.
-    pub fn editor_key_down(&mut self, _main: &MainThread, key: KeyCode) -> bool {
+    pub fn editor_key_down(&mut self, _main: MainThreadMarker, key: KeyCode) -> bool {
         self.editor_key(plugin::OpCode::EditorKeyDown, key)
     }
 
     /// `effEditKeyUp`, as [`editor_key_down`](Self::editor_key_down).
-    pub fn editor_key_up(&mut self, _main: &MainThread, key: KeyCode) -> bool {
+    pub fn editor_key_up(&mut self, _main: MainThreadMarker, key: KeyCode) -> bool {
         self.editor_key(plugin::OpCode::EditorKeyUp, key)
     }
 
@@ -2167,7 +2174,7 @@ impl PluginInstance {
     }
 
     /// `effCanDo`.
-    pub fn can_do(&self, _main: &MainThread, can_do: plugin::CanDo) -> Supported {
+    pub fn can_do(&self, _main: MainThreadMarker, can_do: plugin::CanDo) -> Supported {
         let s: String = can_do.into();
         // `Supported::from` is total: undocumented `effCanDo` returns (a string
         // length, an uninitialised stack slot) become `Supported::Custom`.
@@ -2188,7 +2195,7 @@ impl PluginInstance {
     }
 
     /// The editor's size, `effEditGetRect`; `(0, 0)` when the plugin gives no rect.
-    pub fn editor_size(&self, _main: &MainThread) -> (i32, i32) {
+    pub fn editor_size(&self, _main: MainThreadMarker) -> (i32, i32) {
         // Assuming coordinate origins from top-left
         match self.editor_rect() {
             None => (0, 0),
@@ -2232,7 +2239,7 @@ impl PluginInstance {
     ///   two `effEditOpen`s; opening twice leaks the first window in practice.
     ///   The already-open case answers `true`, since the editor *is* open, so a
     ///   caller does not read an idempotent open as a failure.
-    pub fn open_editor(&mut self, _main: &MainThread, parent: WindowHandle) -> bool {
+    pub fn open_editor(&mut self, _main: MainThreadMarker, parent: WindowHandle) -> bool {
         if self.editor_open {
             warn!("effEditOpen called on an already-open editor; ignoring the second open");
             return true;
@@ -2254,7 +2261,7 @@ impl PluginInstance {
     /// explicit close and the drop), and a second `effEditClose` has no
     /// defined meaning in VST 2.4 — several real plugins double-free their
     /// window resources on it. Idempotence lives here, where `editor_open` lives.
-    pub fn close_editor(&mut self, _main: &MainThread) {
+    pub fn close_editor(&mut self, _main: MainThreadMarker) {
         if !self.editor_open {
             return;
         }
@@ -2268,7 +2275,7 @@ impl PluginInstance {
     /// editors that animate or flush UI work do it here. Never before
     /// `effEditOpen` or after `effEditClose`: the opcode has no meaning for a
     /// window that does not exist.
-    pub fn idle_editor(&mut self, _main: &MainThread) {
+    pub fn idle_editor(&mut self, _main: MainThreadMarker) {
         if !self.editor_open {
             return;
         }
@@ -2276,7 +2283,7 @@ impl PluginInstance {
     }
 
     /// `effChangeProgram`.
-    pub fn change_preset(&self, _main: &MainThread, preset: i32) {
+    pub fn change_preset(&self, _main: MainThreadMarker, preset: i32) {
         self.dispatch(
             plugin::OpCode::ChangePreset,
             0,
@@ -2287,11 +2294,11 @@ impl PluginInstance {
     }
 
     /// `effGetProgram`.
-    pub fn get_preset_num(&self, _main: &MainThread) -> i32 {
+    pub fn get_preset_num(&self, _main: MainThreadMarker) -> i32 {
         self.opcode(plugin::OpCode::GetCurrentPresetNum) as i32
     }
 
-    pub fn get_preset_name(&self, _main: &MainThread, preset: i32) -> String {
+    pub fn get_preset_name(&self, _main: MainThreadMarker, preset: i32) -> String {
         self.read_string_param(
             plugin::OpCode::GetPresetName,
             preset,
@@ -2307,7 +2314,7 @@ impl PluginInstance {
     /// # Errors
     ///
     /// [`ChunkError`] when the plugin attempted the save and failed.
-    pub fn try_get_preset_data(&self, _main: &MainThread) -> Result<Vec<u8>, ChunkError> {
+    pub fn try_get_preset_data(&self, _main: MainThreadMarker) -> Result<Vec<u8>, ChunkError> {
         self.core.get_chunk(1 /*preset*/)
     }
 
@@ -2316,7 +2323,7 @@ impl PluginInstance {
     /// Nothing is reported back: the header gives the opcode no return value, so there is no
     /// refusal to read (see `Core::set_chunk`). Set the program first
     /// ([`change_preset`](Self::change_preset)): a program chunk is the current program's.
-    pub fn load_preset_data(&self, _main: &MainThread, data: &[u8]) {
+    pub fn load_preset_data(&self, _main: MainThreadMarker, data: &[u8]) {
         self.core.set_chunk(1, data);
     }
 }
@@ -2642,7 +2649,7 @@ thread_local! {
 ///   block on the GUI thread.
 /// * **No unwinding.** Unwinding out of an `extern "C"` frame into the
 ///   plugin's C++ stack is undefined behaviour, so the whole dispatch is
-///   wrapped in `catch_unwind` and a panic degrades to `0` — the VST2 "not
+///   run under `ffi_guard` and a panic degrades to `0` — the VST2 "not
 ///   handled / not supported" answer for every host opcode.
 extern "C" fn callback_wrapper<T: Host>(
     effect: *mut AEffect,
@@ -2652,8 +2659,8 @@ extern "C" fn callback_wrapper<T: Host>(
     ptr: *mut c_void,
     opt: f32,
 ) -> isize {
-    // AssertUnwindSafe: on a panic we return 0 and touch none of the captured
-    // state again — the host is behind a shared reference and the raw pointers
+    // Unwind safety is asserted by `ffi_guard`: on a panic we return 0 and touch none of the
+    // captured state again — the host is behind a shared reference and the raw pointers
     // are not re-read.
     //
     // SAFETY: which host a call reaches is decided without trusting `effect` until it is
@@ -2686,7 +2693,7 @@ extern "C" fn callback_wrapper<T: Host>(
     //
     // A plugin that overwrites `reserved1` or calls the host after `effClose` breaks (2)
     // too, which is unchecked.
-    let result = panic::catch_unwind(AssertUnwindSafe(|| unsafe {
+    ffi_guard(0, || unsafe {
         let load_ptr = LOAD_HOST.get() as *const Arc<T>;
         let host: &T = if !load_ptr.is_null() {
             // Used only during the plugin initialization.
@@ -2704,16 +2711,7 @@ extern "C" fn callback_wrapper<T: Host>(
             return 0;
         };
         interfaces::host_dispatch(host, effect, opcode, index, value, ptr, opt)
-    }));
-
-    match result {
-        Ok(value) => value,
-        Err(_) => {
-            // Cannot let this cross back into the plugin's C++ frame.
-            error!("host callback panicked (opcode {opcode}); reporting unhandled");
-            0
-        }
-    }
+    })
 }
 
 #[cfg(test)]
@@ -2876,7 +2874,7 @@ mod tests {
 
         // Closing an editor that was never opened must not reach the plugin.
         reset();
-        ed.close_editor(&main);
+        ed.close_editor(main);
         assert_eq!(
             CLOSES.load(Ordering::SeqCst),
             0,
@@ -2887,13 +2885,13 @@ mod tests {
         reset();
         OPEN_ANSWER.store(2, Ordering::SeqCst);
         assert!(
-            ed.open_editor(&main, no_window()),
+            ed.open_editor(main, no_window()),
             "a truthy non-1 effEditOpen return must read as success; `== 1` \
              reported an embedded editor as a refusal"
         );
 
         // A second open must not reach the plugin.
-        ed.open_editor(&main, no_window());
+        ed.open_editor(main, no_window());
         assert_eq!(
             OPENS.load(Ordering::SeqCst),
             1,
@@ -2902,8 +2900,8 @@ mod tests {
         );
 
         // Close twice: only the first reaches the plugin.
-        ed.close_editor(&main);
-        ed.close_editor(&main);
+        ed.close_editor(main);
+        ed.close_editor(main);
         assert_eq!(
             CLOSES.load(Ordering::SeqCst),
             1,
@@ -2916,10 +2914,10 @@ mod tests {
         reset();
         OPEN_ANSWER.store(0, Ordering::SeqCst);
         assert!(
-            !ed.open_editor(&main, no_window()),
+            !ed.open_editor(main, no_window()),
             "effEditOpen returned 0 (refused)"
         );
-        ed.close_editor(&main);
+        ed.close_editor(main);
         assert_eq!(
             CLOSES.load(Ordering::SeqCst),
             0,
@@ -2964,16 +2962,16 @@ mod tests {
         let (mut ed, main) = instance_over(&mut effect as *mut AEffect);
 
         IDLES.store(0, Ordering::SeqCst);
-        ed.idle_editor(&main);
+        ed.idle_editor(main);
         assert_eq!(IDLES.load(Ordering::SeqCst), 0, "idle before open");
 
-        assert!(ed.open_editor(&main, no_window()));
-        ed.idle_editor(&main);
-        ed.idle_editor(&main);
+        assert!(ed.open_editor(main, no_window()));
+        ed.idle_editor(main);
+        ed.idle_editor(main);
         assert_eq!(IDLES.load(Ordering::SeqCst), 2, "one effEditIdle per idle");
 
-        ed.close_editor(&main);
-        ed.idle_editor(&main);
+        ed.close_editor(main);
+        ed.idle_editor(main);
         assert_eq!(IDLES.load(Ordering::SeqCst), 2, "idle after close");
     }
 
@@ -3072,7 +3070,7 @@ mod tests {
         effect.magic = VST_MAGIC;
         effect.dispatcher = Some(dispatch as DispatcherProc);
         let (params, main) = instance_over(&mut effect as *mut AEffect);
-        params.load_preset_data(&main, b"program");
+        params.load_preset_data(main, b"program");
         assert_eq!(*SEEN.lock().unwrap(), [(1, 7, b"program".to_vec())]);
     }
 
@@ -3440,10 +3438,30 @@ mod tests {
     }
 
     /// An instance over a fake `AEffect`, and the proof of the thread it lives on.
-    fn instance_over(effect: *mut AEffect) -> (PluginInstance, MainThread) {
-        let main = MainThread::claim().expect("a test claims the main thread freely");
-        let instance = PluginInstance::new(effect, this_library(), None, &main);
+    fn instance_over(effect: *mut AEffect) -> (PluginInstance, MainThreadMarker) {
+        let (instance, main, _work) = collected_instance_over(effect);
         (instance, main)
+    }
+
+    /// A handle whose collector is gone: a close handed to it runs at once on the main
+    /// thread and is otherwise stranded.
+    #[cfg(unix)]
+    fn detached() -> MainWorkHandle {
+        tutti_plugin_types::MainWork::new().1
+    }
+
+    /// [`instance_over`], and the collector the instance hands an off-thread close to.
+    fn collected_instance_over(
+        effect: *mut AEffect,
+    ) -> (
+        PluginInstance,
+        MainThreadMarker,
+        tutti_plugin_types::MainWork,
+    ) {
+        let main = tutti_fixtures::main_thread();
+        let (work, handle) = tutti_plugin_types::MainWork::new();
+        let instance = PluginInstance::new(effect, this_library(), None, main, handle);
+        (instance, main, work)
     }
 
     /// A window handle for an editor test: the fake plugin never reads it.
@@ -3516,7 +3534,7 @@ mod tests {
             (*effect).flags = PluginFlags::CAN_REPLACING.bits();
         }
         let (instance, main) = instance_over(effect);
-        let mut render = instance.render_handle(&main);
+        let mut render = instance.render_handle(main);
         let mut host: HostBuffer<f32> = HostBuffer::new(0, 1);
         let mut out = vec![vec![9.0f32; 4]];
         let silent: Vec<Vec<f32>> = Vec::new();
@@ -3569,8 +3587,8 @@ mod tests {
     }
 
     /// **A drop off the instance's thread does not close there, and does not skip the close**:
-    /// the sequence is handed to the main thread and runs at its next tick
-    /// (`run_deferred`), once, and a live handle keeps working until then. A close on the
+    /// the sequence is handed to the owner's collector and runs at its next tick
+    /// (`MainWork::run`), once, and a live handle keeps working until then. A close on the
     /// wrong thread is what a plugin may not survive; a skipped one leaks the plugin and its
     /// licence seat. A drop has no token, so the thread is recorded and compared.
     #[cfg(unix)]
@@ -3603,9 +3621,9 @@ mod tests {
             (*effect).processReplacing = Some(render);
             (*effect).flags = PluginFlags::CAN_REPLACING.bits();
         }
-        let (instance, main) = instance_over(effect);
-        let mut render = instance.render_handle(&main);
-        assert_eq!(off_thread_drops(), 0);
+        let (instance, main, work) = collected_instance_over(effect);
+        let mut render = instance.render_handle(main);
+        let deferred = tutti_plugin_types::MainWork::deferred_drops();
 
         std::thread::spawn(move || drop(instance))
             .join()
@@ -3615,7 +3633,11 @@ mod tests {
             0,
             "effClose ran on a thread that is not the instance's"
         );
-        assert_eq!(off_thread_drops(), 1, "the off-thread drop is counted");
+        assert_eq!(
+            tutti_plugin_types::MainWork::deferred_drops(),
+            deferred + 1,
+            "the off-thread drop is counted"
+        );
         let mut host: HostBuffer<f32> = HostBuffer::new(0, 0);
         let none: Vec<Vec<f32>> = Vec::new();
         let mut none_out: Vec<Vec<f32>> = Vec::new();
@@ -3626,7 +3648,7 @@ mod tests {
             "the plugin stays valid for the render handle until the tick"
         );
 
-        assert!(tutti_plugin_types::run_deferred(&main) >= 1);
+        assert!(work.run(main) >= 1);
         assert_eq!(
             CLOSES.load(Ordering::SeqCst),
             1,
@@ -3638,7 +3660,7 @@ mod tests {
             1,
             "and the handle then finds the plugin closed"
         );
-        assert_eq!(tutti_plugin_types::run_deferred(&main), 0);
+        assert_eq!(work.run(main), 0);
         assert_eq!(CLOSES.load(Ordering::SeqCst), 1, "once");
     }
 
@@ -3651,14 +3673,16 @@ mod tests {
     fn the_last_render_handle_dropped_off_the_main_thread_frees_nothing_there() {
         let host = Arc::new(IdHost(4));
         let effect = fake_effect(noop_dispatch);
-        let main = MainThread::claim().unwrap();
+        let main = tutti_fixtures::main_thread();
+        let (work, handle) = tutti_plugin_types::MainWork::new();
         let instance = PluginInstance::new(
             effect,
             this_library(),
             Some(HostRef::new(Arc::clone(&host))),
-            &main,
+            main,
+            handle,
         );
-        let render = instance.render_handle(&main);
+        let render = instance.render_handle(main);
         assert_eq!(Arc::strong_count(&host), 2, "the core holds the host");
         drop(instance);
         assert_eq!(
@@ -3673,7 +3697,7 @@ mod tests {
             2,
             "the core was not freed on the dropping thread"
         );
-        tutti_plugin_types::run_deferred(&main);
+        work.run(main);
         assert_eq!(Arc::strong_count(&host), 1, "the main thread freed it");
     }
 
@@ -3731,7 +3755,7 @@ mod tests {
             (*effect).flags = PluginFlags::CAN_REPLACING.bits();
         }
         let (instance, main) = instance_over(effect);
-        let mut handle = instance.render_handle(&main);
+        let mut handle = instance.render_handle(main);
         let none: Vec<Vec<f32>> = Vec::new();
 
         // A buffer with one output channel for a plugin with two: the entry panics under the gate.
@@ -3795,9 +3819,9 @@ mod tests {
 
         // Resumed and processing, editor open: all four, in order.
         let (mut instance, main) = instance_over(fake_effect(dispatch));
-        let mut render = instance.render_handle(&main);
-        instance.resume(&main);
-        assert!(instance.open_editor(&main, no_window()));
+        let mut render = instance.render_handle(main);
+        instance.resume(main);
+        assert!(instance.open_editor(main, no_window()));
         render.start_process();
         take();
         drop(instance);
@@ -3880,7 +3904,7 @@ mod tests {
             (*effect).flags = PluginFlags::CAN_REPLACING.bits();
         }
         let (mut instance, main) = instance_over(effect);
-        let mut handle = instance.render_handle(&main);
+        let mut handle = instance.render_handle(main);
         let block = |handle: &mut RenderHandle| {
             let mut host: HostBuffer<f32> = HostBuffer::new(0, 1);
             let none: Vec<Vec<f32>> = Vec::new();
@@ -3906,7 +3930,7 @@ mod tests {
             early
         });
         RELEASE_RATE.store(true, Ordering::SeqCst);
-        instance.set_sample_rate(&main, 48_000.0);
+        instance.set_sample_rate(main, 48_000.0);
         assert!(
             !watcher.join().unwrap(),
             "the exclusive call ran while a render was in flight"
@@ -3928,7 +3952,7 @@ mod tests {
             RELEASE_RATE.store(true, Ordering::SeqCst);
             out
         });
-        instance.set_sample_rate(&main, 44_100.0);
+        instance.set_sample_rate(main, 44_100.0);
         let out = during.join().unwrap();
         assert_eq!(
             PROCESSES.load(Ordering::SeqCst),
@@ -3998,7 +4022,7 @@ mod tests {
             (*effect).flags = PluginFlags::CAN_REPLACING.bits();
         }
         let (instance, main) = instance_over(effect);
-        let mut handle = instance.render_handle(&main);
+        let mut handle = instance.render_handle(main);
         let block = |handle: &mut RenderHandle| {
             let mut host: HostBuffer<f32> = HostBuffer::new(0, 1);
             let none: Vec<Vec<f32>> = Vec::new();
@@ -4102,7 +4126,7 @@ mod tests {
                 (PluginFlags::CAN_REPLACING | PluginFlags::CAN_DOUBLE_REPLACING).bits();
         }
         let (instance, main) = instance_over(effect);
-        let mut render = instance.render_handle(&main);
+        let mut render = instance.render_handle(main);
 
         let inputs = vec![vec![0.0f32; 8]; 2];
         let mut outputs = vec![vec![9.0f32; 8]; 2];
@@ -4198,7 +4222,8 @@ mod tests {
         // SAFETY: the test's leaked `AEffect`.
         unsafe { (*effect).magic = 0x1234 };
         EFFECT.store(effect, Ordering::SeqCst);
-        let result = loader_over(main_returning_effect, 1).instance(&MainThread::claim().unwrap());
+        let result = loader_over(main_returning_effect, 1)
+            .instance(tutti_fixtures::main_thread(), &detached());
         assert!(matches!(result, Err(PluginLoadError::InvalidEffect)));
         assert_eq!(CALLS.load(Ordering::SeqCst), 0, "a bad AEffect was called");
         // SAFETY: as above.
@@ -4209,7 +4234,8 @@ mod tests {
         // SAFETY: as above.
         unsafe { (*effect).dispatcher = None };
         EFFECT.store(effect, Ordering::SeqCst);
-        let result = loader_over(main_returning_effect, 1).instance(&MainThread::claim().unwrap());
+        let result = loader_over(main_returning_effect, 1)
+            .instance(tutti_fixtures::main_thread(), &detached());
         assert!(matches!(result, Err(PluginLoadError::InvalidEffect)));
         assert_eq!(CALLS.load(Ordering::SeqCst), 0);
 
@@ -4217,7 +4243,7 @@ mod tests {
         let effect = fake_effect(dispatch);
         EFFECT.store(effect, Ordering::SeqCst);
         let instance = loader_over(main_returning_effect, 1)
-            .instance(&MainThread::claim().unwrap())
+            .instance(tutti_fixtures::main_thread(), &detached())
             .expect("a valid AEffect loads");
         assert_eq!(CLOSES.load(Ordering::SeqCst), 0);
         drop(instance);
@@ -4301,10 +4327,11 @@ mod tests {
         }
 
         let first = loader_over(first_main, 5)
-            .instance(&MainThread::claim().unwrap())
+            .instance(tutti_fixtures::main_thread(), &detached())
             .expect("the first plugin loads");
         OTHER.store(first.core.get_effect(), Ordering::SeqCst);
-        let second = loader_over(second_main, 9).instance(&MainThread::claim().unwrap());
+        let second =
+            loader_over(second_main, 9).instance(tutti_fixtures::main_thread(), &detached());
         assert!(matches!(second, Err(PluginLoadError::InstanceFailed)));
         assert_eq!(
             GARBAGE_ANSWER.load(Ordering::SeqCst),
@@ -4362,9 +4389,9 @@ mod tests {
         }
 
         let instance = loader_over(main_fn, 5)
-            .instance(&MainThread::claim().unwrap())
+            .instance(tutti_fixtures::main_thread(), &detached())
             .expect("loads");
-        let mut handle = instance.render_handle(&MainThread::claim().unwrap());
+        let mut handle = instance.render_handle(tutti_fixtures::main_thread());
         let mut host32: HostBuffer<f32> = HostBuffer::new(0, 0);
         let none: Vec<Vec<f32>> = Vec::new();
         let mut none_out: Vec<Vec<f32>> = Vec::new();
@@ -4423,7 +4450,7 @@ mod tests {
         }
         let (params, main) = instance_over(fake_effect(dispatch));
         let data = vec![1u8, 2, 3, 4];
-        params.load_preset_data(&main, &data);
+        params.load_preset_data(main, &data);
         assert_eq!(
             data,
             vec![1, 2, 3, 4],
