@@ -219,19 +219,18 @@ mod tests {
         let comp = ComponentRef::first_matching(&desc).expect("AUDelay should be present");
         let (_work, handle) = tutti_plugin_types::MainWork::new();
         let unit = Unit::new(comp, &handle).expect("instantiate");
-        // Scoped, so the unit is dropped here, on its home thread, and disposed.
-        let refused = std::thread::scope(|scope| {
-            scope
-                .spawn(|| {
-                    let size = LogicalSize::new(100, 100);
-                    match AuEditor::open(&unit, None, size) {
-                        Err(crate::Error::Invalid(why)) => why.contains("main thread"),
-                        _ => false,
-                    }
-                })
-                .join()
-                .expect("thread")
-        });
+        // The unit comes back, so it is dropped here, on its home thread, and disposed.
+        let (refused, unit) = std::thread::spawn(move || {
+            let size = LogicalSize::new(100, 100);
+            let refused = match AuEditor::open(&unit, None, size) {
+                Err(crate::Error::Invalid(why)) => why.contains("main thread"),
+                _ => false,
+            };
+            (refused, unit)
+        })
+        .join()
+        .expect("thread");
+        drop(unit);
         assert!(refused);
     }
 }
