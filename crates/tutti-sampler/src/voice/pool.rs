@@ -18,14 +18,14 @@ use super::memory_source::MemorySource;
 use super::slot::{PlaybackSlot, stretch_wanted};
 use super::types::{Playback, Reach, SlotId, Voice, VoiceSource};
 use crate::lanes::{BlockScratch, UNPREPARED_FRAMES};
-use crossbeam_channel::{Receiver, Sender, bounded};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use tutti_codec::Wave;
 use tutti_graph::{
     Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare, Shape,
     Status,
 };
+use tutti_rt::{Overflow, Ring, RingReader, RingWriter};
 use tutti_transport::TempoReader;
 use tutti_types::{ChannelLayout, SampleRate, Tail};
 
@@ -66,7 +66,7 @@ use tutti_types::{ChannelLayout, SampleRate, Tail};
 /// filter), which normally argues for boxing the large one. Not here: this value
 /// exists to cross a thread boundary and be dropped, so a `Box` would add an
 /// allocation on one side and a free on the other — the exact cost being avoided.
-/// The channel is `bounded(MAX_RESIDENT_VOICES)`, so the waste is one slot-sized
+/// The ring holds `MAX_RESIDENT_VOICES`, so the waste is one slot-sized
 /// element per queue entry, bounded and never in the callback's path.
 #[allow(
     dead_code,
@@ -272,7 +272,7 @@ pub struct VoicePool {
     /// This pool's own: a dead one until [`into_parts`](IntoNode::into_parts)
     /// (or [`with_handle`](Self::with_handle)) hands out the sending end; a
     /// clone gets a dead one — see this type's `Clone`.
-    pub(crate) rx: Receiver<Queued>,
+    pub(crate) rx: RingReader<Queued>,
 
     /// Where removed slots go to be freed, off the audio thread.
     ///
@@ -286,7 +286,7 @@ pub struct VoicePool {
     /// if nobody ever does, the channel fills and the slot is dropped in the
     /// callback — a degraded free, never a leak, counted as
     /// [`PoolDrops::freed_in_callback`].
-    pub(crate) retired: Sender<Retired>,
+    pub(crate) retired: RingWriter<Retired>,
     /// What the drain dropped or refused, shared with the handle
     /// ([`VoicePoolHandle::drops`]).
     pub(crate) counters: Arc<DrainCounters>,
@@ -347,11 +347,11 @@ impl VoicePool {
     /// dead): [`with_handle`](Self::with_handle) or
     /// [`into_parts`](IntoNode::into_parts) makes them.
     fn from_parts(channels: impl Into<ChannelLayout>) -> Self {
-        // A full `bounded(0)` never accepts, so until a handle exists `Remove`
+        // A zero-capacity ring never accepts, so until a handle exists `Remove`
         // falls back to dropping in place — correct for a pool nothing
         // controls (a fork, which owns its voices outright and has no control
         // thread waiting to collect).
-        let (retired, _) = bounded(0);
+        let (retired, _) = Ring::pair(0, Overflow::Refuse);
         let sample_rate = SampleRate::SR_44K1;
         let channels = nonempty(channels.into());
         Self {
@@ -362,7 +362,7 @@ impl VoicePool {
             // audio callback. The drain refuses an add past the capacity
             // instead (`Retired::Refused`).
             voices: Vec::with_capacity(MAX_RESIDENT_VOICES),
-            rx: bounded(0).1,
+            rx: Ring::pair(0, Overflow::Refuse).1,
             sample_rate,
             rate: SharedRate::new(sample_rate),
             channels,
@@ -438,15 +438,15 @@ impl VoicePool {
     /// loop or a direction set for one is set on its stream.
     #[must_use]
     pub fn with_handle(mut self) -> (Self, VoicePoolHandle) {
-        let (tx, rx) = bounded(COMMAND_CAPACITY);
-        let (retired_tx, retired) = bounded(MAX_RESIDENT_VOICES);
+        let (tx, rx) = Ring::pair(COMMAND_CAPACITY, Overflow::Refuse);
+        let (retired_tx, retired) = Ring::pair(MAX_RESIDENT_VOICES, Overflow::Refuse);
         self.rx = rx;
         self.retired = retired_tx;
         // The handle mirrors the reader's width and shares its rate so `send`
         // can build a stretch filter that matches it, on the control thread.
         let handle = VoicePoolHandle {
-            tx,
-            retired,
+            tx: Arc::new(Mutex::new(tx)),
+            retired: Arc::new(Mutex::new(retired)),
             channels: self.channels,
             rate: self.rate.clone(),
             counters: Arc::clone(&self.counters),
@@ -703,14 +703,14 @@ impl VoicePool {
     /// overflows it. Refused voices share the bound with every other
     /// retirement, so a host that floods a full pool with adds and never
     /// collects frees the 65th refusal in the callback, counted.
-    fn retire(&self, value: Retired) {
-        if self.retired.try_send(value).is_err() {
+    fn retire(&mut self, value: Retired) {
+        if self.retired.push(value).is_err() {
             DrainCounters::bump(&self.counters.freed_in_callback);
         }
     }
 
     fn drain_commands(&mut self) {
-        while let Ok(Queued { cmd, forwarded }) = self.rx.try_recv() {
+        while let Some(Queued { cmd, forwarded }) = self.rx.pop() {
             match cmd {
                 VoiceCommand::AddVoice { id, voice, stretch } => {
                     // A new slot in a full vector would grow it here, in the
@@ -829,14 +829,14 @@ impl VoicePool {
 impl Clone for VoicePool {
     /// A copy of the voices and settings, with no command channel and no
     /// retirement channel of its own: a copy draining the live handle's
-    /// commands would steal edits from the audio thread (crossbeam hands each
-    /// message to exactly one receiver), so the `Receiver` stays with the
+    /// commands would steal edits from the audio thread (a ring's one reader
+    /// takes each message), so the `Receiver` stays with the
     /// pool that owns it.
     fn clone(&self) -> Self {
         Self {
             // Dead, like the command `Receiver` beside it: a clone must not hand
             // slots back to the live pool's control thread.
-            retired: bounded(0).0,
+            retired: Ring::pair(0, Overflow::Refuse).0,
             counters: Arc::default(),
             voices: {
                 // Reserved like a new pool's, so a clone's drain refuses at the
@@ -851,7 +851,7 @@ impl Clone for VoicePool {
                 }));
                 voices
             },
-            rx: bounded(0).1,
+            rx: Ring::pair(0, Overflow::Refuse).1,
             sample_rate: self.sample_rate,
             rate: SharedRate::new(self.sample_rate),
             clock: Clock::new(),

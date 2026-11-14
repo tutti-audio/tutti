@@ -20,10 +20,9 @@ use super::memory_source::{MemorySource, VoiceWindow};
 use super::pool::{DrainCounters, PoolDrops, Retired};
 use super::slot::{stretch_values_want_filter, stretch_wanted};
 use super::types::{Direction, Playback, SlotId, Voice, VoiceSource};
-use crossbeam_channel::{Receiver, Sender, TrySendError};
 use tutti_codec::Wave;
 use tutti_graph::ParamSet;
-use tutti_rt::ArcLend;
+use tutti_rt::{ArcLend, PushError, RingReader, RingWriter};
 use tutti_types::{
     Amplitude, AtomicSampleRate, Cents, ChannelLayout, Param, PlaybackRate, SampleRate,
     StretchFactor,
@@ -624,14 +623,16 @@ impl VoiceNodeHandle {
 /// stream nothing plays, and the drain finds no slot to record it on.
 #[derive(Clone, Debug)]
 pub struct VoicePoolHandle {
-    /// Sends into the reader's bounded command queue.
-    pub(crate) tx: Sender<Queued>,
+    /// Pushes into the pool's bounded command ring. A handle is `Clone` and
+    /// several control threads send, so the one writer sits behind a lock no
+    /// audio thread ever takes.
+    pub(crate) tx: Arc<Mutex<RingWriter<Queued>>>,
     /// Slots the audio thread has removed and handed back to be freed here.
     ///
     /// See [`VoicePool`](super::pool::VoicePool)'s `retired`. Draining this is what actually moves the
     /// deallocation off the callback; [`collect_retired`](Self::collect_retired)
     /// is the call that does it.
-    pub(crate) retired: Receiver<Retired>,
+    pub(crate) retired: Arc<Mutex<RingReader<Retired>>>,
     /// The reader's output width, copied at construction (it is fixed for the
     /// reader's lifetime). Lets [`send`](Self::send) build a stretch filter at
     /// the right width on the CONTROL thread — see
@@ -685,11 +686,11 @@ impl VoicePoolHandle {
     ///
     /// Returns how many values were freed, which is what a test can assert on.
     pub fn collect_retired(&self) -> usize {
-        let mut n = 0;
-        while self.retired.try_recv().is_ok() {
-            n += 1;
-        }
-        n
+        self.retired
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .drain()
+            .count()
     }
 
     /// What the pool's drain has dropped, refused, or freed in the callback
@@ -947,7 +948,7 @@ impl VoicePoolHandle {
         mut stream: Stream,
         stretch: Option<stretch::Unit>,
     ) -> Result<(), Box<StreamingAddError>> {
-        if self.tx.is_full() {
+        if self.writer().is_full() {
             let error = SendError::Full;
             return Err(Box::new(StreamingAddError { error, stream }));
         }
@@ -1053,6 +1054,11 @@ impl VoicePoolHandle {
         self.streams().get(&id).cloned()
     }
 
+    /// The command ring's writer, locked.
+    fn writer(&self) -> std::sync::MutexGuard<'_, RingWriter<Queued>> {
+        self.tx.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// The stream table, locked.
     fn streams(&self) -> std::sync::MutexGuard<'_, HashMap<SlotId, Arc<Mutex<Stream>>>> {
         self.streams.lock().unwrap_or_else(PoisonError::into_inner)
@@ -1060,11 +1066,11 @@ impl VoicePoolHandle {
 
     /// Queues `cmd` for the drain, with the stream its loop was set on.
     fn queue(&self, cmd: VoiceCommand, forwarded: Option<StreamId>) -> Result<(), SendError> {
-        self.tx
-            .try_send(Queued { cmd, forwarded })
-            .map_err(|e| match e {
-                TrySendError::Full(_) => SendError::Full,
-                TrySendError::Disconnected(_) => SendError::Disconnected,
+        self.writer()
+            .push(Queued { cmd, forwarded })
+            .map_err(|r| match r.error {
+                PushError::Disconnected => SendError::Disconnected,
+                PushError::Full => SendError::Full,
             })?;
         self.counters.note_queued();
         Ok(())
