@@ -186,6 +186,7 @@ mod failure;
 #[cfg(any(test, feature = "testing"))]
 pub mod fake;
 pub mod features;
+mod guard;
 mod harmony;
 mod host;
 mod hosting;
@@ -257,6 +258,7 @@ pub use editor::{
     KeyEvent, KeyUse, ModifierConvention, ResizeHints, WindowHandle,
 };
 pub use failure::{PluginFailure, TerminationReason};
+pub use guard::{contained_panics, ffi_guard};
 pub use host::{Control, Controller, Loaded, PluginIo, Processor, Refused, Stuck, Wraps};
 pub use hosting::{Editor, EditorWindow, InProcess, Load, Origin, OutOfProcess, Reopen};
 pub use invalidation::{PluginInvalidation, PluginRefresh, ResyncClass, ResyncKind};

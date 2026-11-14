@@ -38,6 +38,9 @@ type Work = Box<dyn FnOnce(MainThreadMarker) + Send>;
 /// Work that found no collector and no main thread to run it.
 static STRANDED: AtomicU64 = AtomicU64::new(0);
 
+/// Plugin drops handed to a collector by [`MainWorkHandle::defer_drop`].
+static DEFERRED_DROPS: AtomicU64 = AtomicU64::new(0);
+
 /// The collector of the work other threads hand to the main thread: owned by
 /// the owner of the plugins that send it (a session), drained on the main
 /// thread.
@@ -101,6 +104,16 @@ impl MainWork {
     #[must_use]
     pub fn stranded() -> u64 {
         STRANDED.load(Ordering::Relaxed)
+    }
+
+    /// How many plugin drops, process-wide since the process began, a thread
+    /// that is not the plugin's own handed to a collector
+    /// ([`MainWorkHandle::defer_drop`]), whichever format the plugin is. A
+    /// diagnostic only: the owner of the plugins should have dropped them on the
+    /// main thread, so a nonzero count is worth a look.
+    #[must_use]
+    pub fn deferred_drops() -> u64 {
+        DEFERRED_DROPS.load(Ordering::Relaxed)
     }
 }
 
@@ -173,5 +186,33 @@ impl MainWorkHandle {
                 std::mem::forget(gone.0);
             }
         }
+    }
+
+    /// [`defer`](Self::defer) for the close of a plugin dropped off its own
+    /// thread, counted in [`MainWork::deferred_drops`]. The same rules apply,
+    /// including "never from an audio thread".
+    pub fn defer_drop(&self, work: impl FnOnce(MainThreadMarker) + Send + 'static) {
+        DEFERRED_DROPS.fetch_add(1, Ordering::Relaxed);
+        self.defer(work);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MainWork;
+
+    /// **Only a plugin drop counts as a deferred drop**: `defer_drop` adds one
+    /// each, plain `defer` adds none, and the collector runs both.
+    #[test]
+    fn a_deferred_drop_is_counted_and_other_deferred_work_is_not() {
+        let main = tutti_fixtures::main_thread();
+        let (work, handle) = MainWork::new();
+        let before = MainWork::deferred_drops();
+        handle.defer(|_main| {});
+        assert_eq!(MainWork::deferred_drops(), before, "plain work");
+        handle.defer_drop(|_main| {});
+        handle.defer_drop(|_main| {});
+        assert_eq!(MainWork::deferred_drops(), before + 2, "two drops");
+        assert_eq!(work.run(main), 3, "the collector runs all three");
     }
 }

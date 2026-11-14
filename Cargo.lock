@@ -3479,6 +3479,7 @@ dependencies = [
  "crossbeam-queue",
  "dpi",
  "libloading 0.9.1",
+ "log",
  "parking_lot",
  "tempfile",
  "thiserror 2.0.21",

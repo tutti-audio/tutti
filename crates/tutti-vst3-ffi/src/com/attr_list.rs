@@ -1,9 +1,10 @@
 //! IAttributeList COM implementation — key/value store for plugin messages.
 
-use crate::guard::{Out, guard};
+use crate::guard::Out;
 use std::collections::HashMap;
 use std::ffi::{CStr, c_void};
 use std::sync::Arc;
+use tutti_plugin_types::ffi_guard;
 
 use parking_lot::Mutex;
 use vst3::Steinberg::{
@@ -57,7 +58,7 @@ fn key_from_ptr(key: AttrID) -> Option<String> {
 
 impl IAttributeListTrait for AttributeList {
     unsafe fn setInt(&self, id: AttrID, value: i64) -> tresult {
-        guard(kInternalError, || {
+        ffi_guard(kInternalError, || {
             let Some(k) = key_from_ptr(id) else {
                 return kInvalidArgument;
             };
@@ -69,7 +70,7 @@ impl IAttributeListTrait for AttributeList {
     unsafe fn getInt(&self, id: AttrID, value: *mut i64) -> tresult {
         // SAFETY: a COM out-parameter: null or valid for this call.
         let value = unsafe { Out::new(value) };
-        guard(kInternalError, || {
+        ffi_guard(kInternalError, || {
             let Some(k) = key_from_ptr(id) else {
                 return kInvalidArgument;
             };
@@ -87,7 +88,7 @@ impl IAttributeListTrait for AttributeList {
     }
 
     unsafe fn setFloat(&self, id: AttrID, value: f64) -> tresult {
-        guard(kInternalError, || {
+        ffi_guard(kInternalError, || {
             let Some(k) = key_from_ptr(id) else {
                 return kInvalidArgument;
             };
@@ -101,7 +102,7 @@ impl IAttributeListTrait for AttributeList {
     unsafe fn getFloat(&self, id: AttrID, value: *mut f64) -> tresult {
         // SAFETY: a COM out-parameter: null or valid for this call.
         let value = unsafe { Out::new(value) };
-        guard(kInternalError, || {
+        ffi_guard(kInternalError, || {
             let Some(k) = key_from_ptr(id) else {
                 return kInvalidArgument;
             };
@@ -119,7 +120,7 @@ impl IAttributeListTrait for AttributeList {
     }
 
     unsafe fn setString(&self, id: AttrID, string: *const TChar) -> tresult {
-        guard(kInternalError, || {
+        ffi_guard(kInternalError, || {
             let Some(k) = key_from_ptr(id) else {
                 return kInvalidArgument;
             };
@@ -151,7 +152,7 @@ impl IAttributeListTrait for AttributeList {
     }
 
     unsafe fn getString(&self, id: AttrID, string: *mut TChar, size_in_bytes: u32) -> tresult {
-        guard(kInternalError, || {
+        ffi_guard(kInternalError, || {
             if string.is_null() || size_in_bytes == 0 {
                 return kInvalidArgument;
             }
@@ -186,7 +187,7 @@ impl IAttributeListTrait for AttributeList {
     }
 
     unsafe fn setBinary(&self, id: AttrID, data: *const c_void, size_in_bytes: u32) -> tresult {
-        guard(kInternalError, || {
+        ffi_guard(kInternalError, || {
             let Some(k) = key_from_ptr(id) else {
                 return kInvalidArgument;
             };
@@ -221,7 +222,7 @@ impl IAttributeListTrait for AttributeList {
     ) -> tresult {
         // SAFETY: COM out-parameters: each null or valid for this call.
         let (data, size) = unsafe { (Out::new(data), Out::new(size_in_bytes)) };
-        guard(kInternalError, || {
+        ffi_guard(kInternalError, || {
             let Some(k) = key_from_ptr(id) else {
                 return kInvalidArgument;
             };

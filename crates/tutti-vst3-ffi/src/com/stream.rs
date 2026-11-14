@@ -1,8 +1,9 @@
 //! IBStream COM implementation backed by an in-memory `Cursor<Vec<u8>>`.
 
-use crate::guard::{Out, guard};
+use crate::guard::Out;
 use std::ffi::c_void;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+use tutti_plugin_types::ffi_guard;
 
 use parking_lot::Mutex;
 use vst3::Steinberg::{
@@ -63,7 +64,7 @@ impl IBStreamTrait for BStream {
         // SAFETY: a COM out-parameter: null or valid for this call.
         let read = unsafe { Out::new(num_bytes_read) };
         read.set(0);
-        guard(kInternalError, || {
+        ffi_guard(kInternalError, || {
             let Ok(len) = usize::try_from(num_bytes) else {
                 return kInvalidArgument;
             };
@@ -96,7 +97,7 @@ impl IBStreamTrait for BStream {
         // SAFETY: a COM out-parameter: null or valid for this call.
         let written = unsafe { Out::new(num_bytes_written) };
         written.set(0);
-        guard(kInternalError, || {
+        ffi_guard(kInternalError, || {
             let Ok(len) = usize::try_from(num_bytes) else {
                 return kInvalidArgument;
             };
@@ -129,7 +130,7 @@ impl IBStreamTrait for BStream {
     unsafe fn seek(&self, pos: i64, mode: i32, result: *mut i64) -> tresult {
         // SAFETY: a COM out-parameter: null or valid for this call.
         let result = unsafe { Out::new(result) };
-        guard(kInternalError, || {
+        ffi_guard(kInternalError, || {
             let seek_from = match mode {
                 m if m == sdk_enum_i32(kIBSeekSet) => match u64::try_from(pos) {
                     Ok(start) if start <= MAX_STREAM_BYTES => SeekFrom::Start(start),
@@ -157,7 +158,7 @@ impl IBStreamTrait for BStream {
     unsafe fn tell(&self, pos: *mut i64) -> tresult {
         // SAFETY: a COM out-parameter: null or valid for this call.
         let pos = unsafe { Out::new(pos) };
-        guard(kInternalError, || {
+        ffi_guard(kInternalError, || {
             pos.set(self.cursor.lock().position() as i64);
             kResultOk
         })

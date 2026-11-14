@@ -434,7 +434,6 @@ unsafe extern "C" fn au_input_render_callback(
     // this pull, checked for null below.
     unsafe {
         with_state_mut::<RenderScratch, _>(
-            "the input render callback",
             in_ref_con,
             -1,
             CANNOT_DO_IN_CURRENT_CONTEXT,

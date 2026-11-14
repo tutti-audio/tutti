@@ -1120,16 +1120,6 @@ impl Plugin {
     }
 }
 
-/// How many [`Plugin`]s have been dropped off the main thread since the process began. Each
-/// one's destruction was handed to its owner's main-thread collector
-/// ([`tutti_plugin_types::MainWork`], which the session's `Phase::Collect` drains); a
-/// nonzero count is worth a look, since the owner should have dropped it there.
-pub fn off_thread_drops() -> u64 {
-    OFF_THREAD_DROPS.load(Ordering::Relaxed)
-}
-
-static OFF_THREAD_DROPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
 impl Drop for Plugin {
     fn drop(&mut self) {
         // Rule 4: retire, then wait out the audio side, then stop, deactivate
@@ -1168,12 +1158,11 @@ impl Drop for Plugin {
                 collected: true,
                 _not_sync: PhantomData,
             };
-            let count = OFF_THREAD_DROPS.fetch_add(1, Ordering::Relaxed) + 1;
             log::warn!(
-                "a CLAP plugin was dropped off the main thread ({count} so far); its \
-                 destruction is handed to the main thread"
+                "a CLAP plugin was dropped off the main thread; its destruction is handed to \
+                 the main thread"
             );
-            self.work.defer(move |_main| drop(moved));
+            self.work.defer_drop(move |_main| drop(moved));
             return;
         }
         // CLAP: `gui.destroy` comes before `plugin.destroy`. A caller that
