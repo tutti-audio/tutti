@@ -2871,6 +2871,7 @@ dependencies = [
  "tutti-engine",
  "tutti-fixtures",
  "tutti-graph",
+ "tutti-midi-device",
  "tutti-midi-protocol",
  "tutti-rt",
  "tutti-tempo",

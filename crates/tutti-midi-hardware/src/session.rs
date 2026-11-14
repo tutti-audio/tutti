@@ -40,7 +40,7 @@ use crate::endpoints::MidiEndpoints;
 use crate::error::{Error, Result};
 use crate::process::{ProcessChange, ReportAsk, ReportError, ReportPeer};
 use crate::profiles::{PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange};
-use crate::stream::{DeviceStream, Negotiation};
+use crate::stream::{DeviceStream, InputTiming, Negotiation};
 use tutti_midi_device::{DeviceId, DeviceInfo, Learned, SavedDevice};
 use tutti_midi_runtime::{DeviceInlets, DeviceSlot};
 use tutti_ump::DeviceIdentity;
@@ -84,6 +84,8 @@ pub struct MidiSession {
 /// it reads its answers from goes after.
 struct Held {
     stream: Negotiation,
+    /// Where the input's event times come from.
+    timing: InputTiming,
     /// Whether the port's input edge is copying SysEx7 packets to the stream
     /// ring, for the Identity Request or MIDI-CI.
     hearing: bool,
@@ -266,6 +268,15 @@ impl MidiSession {
     /// input. An output that will not open
     /// leaves the input connected and the device as the OS describes it.
     ///
+    /// `timing` is the source of the input's event times:
+    /// [`InputTiming::JitterReduction`] asks the device for JR Timestamps and
+    /// places its events by them once it agrees, while [`InputTiming::Arrival`]
+    /// is the OS's arrival stamp. An input already open with another timing
+    /// keeps its port and its queued events: its time source follows at once
+    /// (arrival until the device agrees to JR), and the UMP Stream negotiation
+    /// runs again with the new request, reported by [`poll`](Self::poll) as a
+    /// settle is.
+    ///
     /// # Errors
     ///
     /// [`Error::NoDeviceNamed`] when a name matches no input (listing the
@@ -274,14 +285,21 @@ impl MidiSession {
     /// shape a stale id takes after a hot-plug — and [`Error::WrongDirection`]
     /// when it is not an input. Otherwise whatever the backend raises while
     /// opening the port.
-    pub fn connect_input(&mut self, device: impl Into<DeviceQuery>) -> Result<()> {
+    pub fn connect_input(
+        &mut self,
+        device: impl Into<DeviceQuery>,
+        timing: InputTiming,
+    ) -> Result<()> {
         let id = device.into().pick(self.inputs())?;
         // An input whose reader died is replaced, not kept: it is silent.
-        if self
-            .inputs
-            .get(&id)
-            .is_some_and(|held| held.input.is_alive())
+        if let Some(held) = self.inputs.get_mut(&id)
+            && held.input.is_alive()
         {
+            if held.timing != timing {
+                held.stream.retime(timing);
+                held.timing = timing;
+                follow_timing(&self.ports, held);
+            }
             return Ok(());
         }
         if let Some(mut held) = self.inputs.remove(&id) {
@@ -296,16 +314,16 @@ impl MidiSession {
         let os = self.devices.capability(&id).unwrap_or_default();
         // A MIDI 1.0 port with an output is asked for its identity instead.
         let out = self.devices.open_output(&id).ok();
-        let stream = Negotiation::new(id.clone(), os, out);
-        self.inputs.insert(
-            id,
-            Held {
-                stream,
-                hearing: false,
-                lost_seen: 0,
-                input,
-            },
-        );
+        let stream = Negotiation::new(id.clone(), os, out, timing);
+        let held = Held {
+            stream,
+            timing,
+            hearing: false,
+            lost_seen: 0,
+            input,
+        };
+        follow_timing(&self.ports, &held);
+        self.inputs.insert(id, held);
         Ok(())
     }
 
@@ -454,6 +472,7 @@ impl MidiSession {
             // Off the moment nothing listens, so no packet is kept for no one.
             sync_hearing(ports, held, ci.is_some());
             if let Some(stream) = stepped.stream {
+                follow_timing(ports, held);
                 polled.push(Polled::Stream(id.clone(), Box::new(stream)));
             }
             polled.extend(
@@ -650,6 +669,19 @@ impl MidiSession {
         self.is_input_connected(id)
             .then(|| SavedDevice::new(info, self.learned(id)))
     }
+}
+
+/// Points the port's event times at what the device's configuration says: its
+/// JR Timestamps where it sends them and the input was opened to use them.
+/// Arrival until the device has settled.
+fn follow_timing(ports: &HardwareMidiInputs, held: &Held) {
+    let source = held
+        .stream
+        .settled()
+        .map_or(InputTiming::Arrival, |stream| {
+            held.timing.applied(stream.config())
+        });
+    ports.set_input_timing(held.input.slot(), source);
 }
 
 /// Makes the port's copy of SysEx7 packets what the negotiation wants.
