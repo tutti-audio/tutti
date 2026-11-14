@@ -648,12 +648,16 @@ fn a_declick_lasts_five_milliseconds_at_any_rate() {
             .expect("room");
         let out = render(&engine, ChannelLayout::MONO, &[256; 40]);
         assert_eq!(out[4_000 - fade - 1], 1.0, "{rate}: full before the lead");
-        // The first gains are within an `f32` of 1: the fade has begun a few
-        // frames in.
-        assert!(
-            out[4_000 - fade + 8] < 1.0,
-            "{rate}: the fade-out starts {fade} ahead"
-        );
+        // Frame k of the fade-out is `1 - s((k + 1) / (fade + 1))`; the first
+        // gains are within an `f32` of 1, so the fade starts at most at 1.
+        assert!(out[4_000 - fade] <= 1.0, "{rate}: the fade-out starts");
+        for (k, &g) in out[4_000 - fade..4_000].iter().enumerate() {
+            let want = 1.0 - rise_of(k, fade);
+            assert!(
+                (f64::from(g) - want).abs() < 3e-6,
+                "{rate}: fade-out frame {k}: {g}, want {want}"
+            );
+        }
         assert_eq!(out[4_000], 0.0, "{rate}: zero on the command frame");
         assert!(out[4_000 + fade / 2] < 1.0, "{rate}: still rising");
         assert_eq!(

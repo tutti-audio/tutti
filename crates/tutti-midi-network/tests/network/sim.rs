@@ -4,7 +4,7 @@
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
-use tutti_midi_device::{EndpointName, ProductInstanceId};
+use tutti_midi_device::{EndpointName, EntropyError, ProductInstanceId};
 use tutti_midi_network::{
     Client, Command, Credentials, Endpoint, EndpointIdentity, Event, Host, HostConfig, Nonce,
     SessionConfig, Transmit, parse,
@@ -29,6 +29,11 @@ pub fn client_addr() -> SocketAddr {
 /// A nonce the tests know: the same every time.
 pub fn fixed_nonce() -> Nonce {
     Nonce::new(*b"0123456789abcdef").unwrap()
+}
+
+/// The nonce source of a Host that issues [`fixed_nonce`] every time.
+pub fn fixed_nonce_source() -> Result<Nonce, EntropyError> {
+    Ok(fixed_nonce())
 }
 
 pub fn note_on(note: u8) -> Ump {
@@ -62,14 +67,14 @@ pub struct Sim {
 
 impl Sim {
     pub fn new(host: HostConfig, credentials: Credentials, client: SessionConfig) -> Self {
-        Self::with_nonces(host, credentials, client, fixed_nonce)
+        Self::with_nonces(host, credentials, client, fixed_nonce_source)
     }
 
     pub fn with_nonces(
         host: HostConfig,
         credentials: Credentials,
         client: SessionConfig,
-        nonces: fn() -> Nonce,
+        nonces: fn() -> Result<Nonce, EntropyError>,
     ) -> Self {
         let now = Instant::now();
         Self {

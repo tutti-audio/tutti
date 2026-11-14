@@ -18,13 +18,16 @@ use std::f64::consts::TAU;
 use std::fmt::Write as _;
 use std::path::Path;
 
+use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    ChunkSize, CrossoverControls, CrossoverFamily, Family, LadderControls, LadderFamily,
-    LadderType, Recurrence, Setup, StreamingResampler, SvfControls, SvfFamily, SvfType,
-    allpass_chain, allpass_coeff,
+    ChunkSize, CrossoverControls, CrossoverFamily, Family, Glide, LadderControls, LadderFamily,
+    LadderType, Lanes, Recurrence, Setup, StreamingResampler, SvfBank, SvfCoefficients,
+    SvfControls, SvfModel, SvfType, allpass_chain, allpass_coeff,
 };
 use tutti_fixtures::signal::write_wav_f32;
-use tutti_types::{BusTopology, Db, Drive, Hz, MaxBlock, Q, Resonance, SampleRate, Samples};
+use tutti_types::{
+    BusTopology, ChannelLayout, Db, Drive, Hz, MaxBlock, Q, Resonance, SampleRate, Samples,
+};
 
 const RATE: f64 = 48_000.0;
 /// Impulse-response length: long enough that every case below has rung out.
@@ -57,6 +60,29 @@ fn run<D: Family<Recurrence: Recurrence<Capacity = ()>>>(
         k.process(&tutti_dsp::Feed::new(&[block]), &mut outs, block.len());
     }
     out
+}
+
+/// Runs an SVF in state precision `F`, held at `controls`, over `input` in blocks of
+/// 512 frames.
+fn run_svf<F: Float + Lanes>(
+    controls: &SvfControls,
+    rate: SampleRate,
+    input: &[f32],
+) -> Vec<Vec<f32>> {
+    let mut bank = SvfBank::<F>::new(ChannelLayout::MONO);
+    let mut coefficients = Glide::landed(SvfCoefficients::from(&SvfModel::new(*controls, rate)));
+    let mut out = vec![0.0f32; input.len()];
+    for start in (0..input.len()).step_by(512) {
+        let end = (start + 512).min(input.len());
+        let ins = [&input[start..end]];
+        let mut outs = [&mut out[start..end]];
+        bank.process(
+            &mut coefficients,
+            Planes::new(&ins).expect("one plane"),
+            PlanesMut::new(&mut outs).expect("one plane"),
+        );
+    }
+    vec![out]
 }
 
 fn impulse(amplitude: f32) -> Vec<f32> {
@@ -121,8 +147,6 @@ fn svf(dir: &Path, cases: &mut Cases) {
         (SvfType::HighShelf, "highshelf", 8_000.0, 0.5, -6.0),
         (SvfType::HighShelf, "highshelf", 12_000.0, 0.707, 6.0),
     ];
-    let d64 = SvfFamily::<f64>::new(BusTopology::MONO);
-    let d32 = SvfFamily::<f32>::new(BusTopology::MONO);
     for (i, (ty, label, freq, q, gain)) in settings.into_iter().enumerate() {
         let c = SvfControls {
             ty,
@@ -132,11 +156,11 @@ fn svf(dir: &Path, cases: &mut Cases) {
         };
         // Every setting in f64; the first of each type again in f32 state.
         let name = format!("svf_f64_{label}_{freq}_{q}_{gain}_{i}");
-        wav(dir, &name, RATE, &run(&d64, &c, rate, &impulse(1.0)));
+        wav(dir, &name, RATE, &run_svf::<f64>(&c, rate, &impulse(1.0)));
         cases.push(&name, "svf", RATE, &format!(r#""type": "{label}", "freq": {freq}, "q": {q}, "gain_db": {gain}, "precision": "f64""#));
         if i % 3 == 1 {
             let name = format!("svf_f32_{label}_{freq}_{q}_{gain}_{i}");
-            wav(dir, &name, RATE, &run(&d32, &c, rate, &impulse(1.0)));
+            wav(dir, &name, RATE, &run_svf::<f32>(&c, rate, &impulse(1.0)));
             cases.push(&name, "svf", RATE, &format!(r#""type": "{label}", "freq": {freq}, "q": {q}, "gain_db": {gain}, "precision": "f32""#));
         }
     }

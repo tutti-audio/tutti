@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use super::super::capabilities::PeCiMessage;
+use super::super::capabilities::{PeCiMessage, SimultaneousRequests};
 use super::super::chunk::{PeChunk, PeRequestId, split_message};
 use super::super::flow::{
     PE_TIMEOUT, PeAnswer, PeMessageKind, PeSignal, PeTerminator, PeTransaction,
@@ -356,6 +356,35 @@ fn a_terminate_of_an_update_frees_its_request_id() {
         link.now,
     );
     assert_eq!(updates_of(&after).len(), 1);
+}
+
+// M2-103 §5.3, M2-101 §8.5: a peer takes at most 127 Subscription messages at
+// once, each under a distinct Request ID of the 128; the update after them waits
+// in the queue, and goes when a reply frees an ID.
+#[test]
+fn the_update_past_the_peers_count_waits_for_a_reply_and_then_goes() {
+    let most = SimultaneousRequests::MAX;
+    let (mut link, target) = subscribed_link(most, PeResource::ChannelList, None);
+    for _ in 1..=most {
+        let made = link.init.subscribe(
+            &ResourceGet::new(target.clone()).encoded(PeEncoding::Ascii),
+            link.now,
+        );
+        link.call(made);
+    }
+    assert_eq!(link.resp.subscriptions().count(), usize::from(most) + 1);
+    let sent = link.resp.publish(&target, channels(1), link.now).unwrap();
+    let mut ids: Vec<u8> = chunks_of(&sent)
+        .iter()
+        .map(|(_, c)| c.request_id().get())
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), usize::from(most), "127 distinct Request IDs");
+    assert_eq!(link.resp.queued(Muid::of(OURS)), 1, "the 128th waits");
+    let after = reply_to_update(&mut link, request_id(&sent), PeStatus::Ok);
+    assert_eq!(updates_of(&after).len(), 1, "it goes when one completes");
+    assert_eq!(link.resp.queued(Muid::of(OURS)), 0);
 }
 
 fn flow_get(resource: &str) -> PeHeader {

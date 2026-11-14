@@ -197,7 +197,7 @@ fn a_fade_reversed_midway_continues_from_the_weight_it_had() {
     rig.commit();
     let up = rig.blocks(1);
     assert!(
-        (up[0] - at).abs() < 1e-3,
+        (up[0] - at).abs() < 1e-5,
         "rises from the weight the fade out had reached: {} from {at}",
         up[0]
     );

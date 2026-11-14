@@ -851,9 +851,9 @@ fn fades_chain_without_a_step() {
 /// A starved reader ramps out and back in: a jump outside the window
 /// with the streamer stalled plays the old continuation, which runs out after `OLD_FRAMES`; it ramps to silence over
 /// its last frames instead of cutting, and when the streamer resumes the ring
-/// ramps back in. On a sine, no step exceeds the sine's own plus a ramp's
-/// `1 / 64` per frame — where cut hard it steps by up to the sine's full
-/// swing.
+/// ramps back in. On a sine, no step exceeds the sine's own plus a fade's
+/// steepest step (the smootherstep's `15/8` over `DECLICK`) per frame — where
+/// cut hard it steps by up to the sine's full swing.
 #[test]
 fn a_starved_reader_ramps_out_and_back_in() {
     let dir = tempfile::tempdir().expect("a temp dir");

@@ -14,11 +14,11 @@
 //! and a message may span blocks; one past [`SYSEX_MESSAGE_CAPACITY`] is
 //! dropped whole and counted ([`EventList::sysex_dropped`]).
 
-use crate::guard::guard;
 use std::sync::{
     Arc,
     atomic::{AtomicU64, Ordering::Relaxed},
 };
+use tutti_plugin_types::ffi_guard;
 use vst3::Steinberg::{
     Vst::{IEventList, IEventListTrait},
     kInvalidArgument, kResultFalse, kResultOk, tresult,
@@ -476,7 +476,7 @@ opaque_debug!(Staging<'_>, "Staging");
 impl IEventListTrait for EventList {
     /// Zero while another thread is adding to the list.
     unsafe fn getEventCount(&self) -> i32 {
-        guard(0, || {
+        ffi_guard(0, || {
             self.inner
                 .try_borrow()
                 .map_or(0, |i| i32::try_from(i.events.len()).unwrap_or(i32::MAX))
@@ -489,7 +489,7 @@ impl IEventListTrait for EventList {
             // SAFETY: a COM out-parameter valid for this call; all-zero is a valid `Event`.
             unsafe { std::ptr::write_bytes(e, 0, 1) };
         }
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             if e.is_null() {
                 return kInvalidArgument;
             }
@@ -511,7 +511,7 @@ impl IEventListTrait for EventList {
     }
 
     unsafe fn addEvent(&self, e: *mut vst3::Steinberg::Vst::Event) -> tresult {
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             if e.is_null() {
                 return kInvalidArgument;
             }

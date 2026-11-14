@@ -1784,3 +1784,63 @@ fn a_swap_is_allocation_free() {
 fn parallel_swap_is_allocation_free() {
     a_swap_is_allocation_free_on(4);
 }
+
+/// An edge fading in, out and back in, and a weight ramping beside it, render
+/// inside `assert_no_alloc`: the fade kernel (`Weight::Fade`) and the ramp run
+/// on every block, across commits (which allocate, outside the gate).
+#[test]
+fn edge_fades_are_allocation_free() {
+    use tutti_graph::{EdgeFade, EdgeGain, EdgeId, Sink};
+    use tutti_types::Amplitude;
+    const BLOCK: usize = 64;
+    let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
+    for n in 1..=2u64 {
+        let k = Kind::Const {
+            value: n as f32,
+            width: 1,
+        };
+        ed.insert(NodeKey(n), "const", Unforkable(TestNode::new(k)));
+    }
+    let src = |n: u64| {
+        Source::Node(OutPort {
+            node: NodeKey(n),
+            port: 0,
+        })
+    };
+    ed.spec_mut().topology.outputs = vec![vec![src(1), src(2)]];
+    let id = |n: u64| EdgeId {
+        sink: Sink::Output(0),
+        from: Edge::Direct(src(n)),
+    };
+    ed.spec_mut()
+        .set_edge_gain(id(1), EdgeGain::new(Amplitude::new(0.5)));
+    ed.spec_mut()
+        .set_edge_gain(id(2), EdgeGain::new(Amplitude::new(0.25)));
+    ed.set_edge_fade(id(1), EdgeFade::In).expect("the edge");
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    ed.collect();
+    let mut out = vec![0.0f32; BLOCK];
+    let mut heard = false;
+    for block in 0..40usize {
+        match block % 10 {
+            3 => ed.set_edge_fade(id(1), EdgeFade::Out).expect("the edge"),
+            6 => ed.set_edge_fade(id(1), EdgeFade::In).expect("the edge"),
+            8 => ed
+                .set_edge_gain(id(2), Amplitude::new(0.75))
+                .expect("the edge"),
+            _ => {}
+        }
+        assert_no_alloc::assert_no_alloc(|| {
+            exec.process(
+                BLOCK,
+                &TransportPosition::default(),
+                &[],
+                &mut [&mut out[..]],
+            );
+        });
+        heard |= out.iter().any(|&x| x != 0.0);
+        ed.collect();
+    }
+    assert!(heard);
+}

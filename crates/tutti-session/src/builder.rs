@@ -801,6 +801,7 @@ impl<S> SessionBuilder<S> {
         let (main_work, work) = tutti_plugin_types::MainWork::new();
         Ok(Session {
             graph: parts.graph,
+            resource_ids: crate::peer::ResourceIds::new(),
             transport: parts.transport,
             load,
             heard: None,
