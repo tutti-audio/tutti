@@ -278,8 +278,8 @@ pub fn gauge<U: Reading>(initial: U) -> (GaugeWriter<U>, Gauge<U>) {
 ///
 /// The writer is one: two threads cannot share it to add.
 ///
-/// ```compile_fail
-/// let (writer, _lost) = tutti_rt::counter::<u64>();
+/// ```compile_fail,E0499
+/// let (mut writer, _lost) = tutti_rt::counter::<u64>();
 /// std::thread::scope(|s| {
 ///     s.spawn(|| writer.add(1));
 ///     s.spawn(|| writer.add(1));
