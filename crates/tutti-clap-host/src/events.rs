@@ -37,8 +37,8 @@ use tutti_plugin_types::{
 
 use crate::types::RtNoteExpressions;
 use tutti_midi_protocol::{
-    Narrower, PitchBendSensitivity, narrow, value_to_unit_f32, velocity_to_unit_f32, widen,
-    widen_bytes,
+    Narrower, PitchBendSensitivity, narrow, narrow_velocity, unit_f32_to_velocity, value_to_unit_f32,
+    velocity_to_unit_f32, widen, widen_bytes,
 };
 use tutti_ump::ControlValue;
 use tutti_ump::{
@@ -502,8 +502,7 @@ impl ClapEvent {
     /// controllers) is `None`. Other events pass through.
     #[allow(
         clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "velocity is clamped to 0..=127 before the cast"
+        reason = "CLAP carries a velocity as f64; the MIDI-2 conversion helper takes f32"
     )]
     fn into_midi_dialect(self, port: u16, key_pressure: Option<[u8; 3]>) -> Option<Self> {
         let (note_on, e) = match self {
@@ -514,10 +513,15 @@ impl ClapEvent {
             }
             other => return Some(other),
         };
-        // A note-on at velocity 0 is a note-off in MIDI 1.0, so the lowest
-        // audible note-on velocity is 1.
-        let floor = if note_on { 1.0 } else { 0.0 };
-        let velocity = U7::new((e.velocity * 127.0).round().clamp(floor, 127.0) as u8)?;
+        // The 16-bit velocity the event came from, narrowed by the shift of
+        // M2-115 section 3.4. A note-on at velocity 0 is a note-off in
+        // MIDI 1.0, so the lowest audible note-on velocity is 1.
+        let narrowed = narrow_velocity(unit_f32_to_velocity(e.velocity as f32));
+        let velocity = if note_on && narrowed.get() == 0 {
+            U7::of(1)
+        } else {
+            narrowed
+        };
         let (channel, key) = (u8::try_from(e.channel).ok()?, u8::try_from(e.key).ok()?);
         let (channel, note) = (MidiChannel::masked(channel), NoteNumber::masked(key));
         let voice = if note_on {
@@ -3865,6 +3869,27 @@ mod tests {
         list.set_note_ports(&[true]);
         list.add_note_expressions(&expr);
         assert!(list.events().is_empty());
+    }
+
+    /// A note's 16-bit velocity reaches a MIDI-dialect port as its top 7 bits
+    /// (M2-115 section 3.4: the downscale is a right shift by 9). 0xE665 is
+    /// 115.2 in those units, which is 115; a rounding conversion gives 114.
+    #[test]
+    fn midi_dialect_velocity_is_the_m2_115_shift() {
+        let ch = MidiChannel::of(0);
+        let mut list = InputEventList::new();
+        list.set_note_ports(&[true]);
+        list.add_midi(&(at(0), midi::note_on(ch, 60, 0xE665)));
+        list.add_midi(&(at(0), midi::note_off(ch, 60, 0xE665)));
+        let sent: Vec<[u8; 3]> = list
+            .events()
+            .iter()
+            .map(|e| match e {
+                ClapEvent::Midi(m) => m.data,
+                other => panic!("expected a MIDI event, got {:?}", other.header().type_),
+            })
+            .collect();
+        assert_eq!(sent, [[0x90, 60, 115], [0x80, 60, 115]]);
     }
 
     /// Poly pressure (`0xAn`) is a per-note expression to a CLAP-dialect port
