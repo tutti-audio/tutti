@@ -12,10 +12,10 @@
 //! own idle loop between jobs (the test pool spins; `tutti_graph::WorkerPool`'s
 //! park and wake are covered by `tutti-engine`'s `rt_no_alloc_engine`).
 //!
-//! What this cannot cover, stated rather than implied: applying a commit
-//! allocates (see `exec.rs`), so it runs outside the gate; and a node
-//! that allocates is the node's bug, which this test catches only for the
-//! nodes it runs.
+//! Applying a commit is inside the gate too (`applying_*`): it moves and
+//! swaps what the editor built with the commit. What this cannot cover,
+//! stated rather than implied: a node that allocates is the node's bug,
+//! which this test catches only for the nodes it runs.
 
 use tutti_graph::testing as common;
 use tutti_graph::{Curvature, Exponent};
@@ -273,8 +273,7 @@ fn parallel_process_is_allocation_free_in_steady_state() {
 /// blend, a fade's end (the crossfade and its outgoing unit onto the
 /// fade-return ring) and the start of the fade waiting behind it —
 /// on an in-place stereo gain and on an event consumer (the general form).
-/// The commits are applied before the gate, since applying allocates by
-/// design; everything a fade does after that runs inside it.
+/// Everything a fade does runs inside the gate.
 fn crossfades_are_allocation_free_on(workers: usize) {
     let (mut ed, mut exec) = Editor::new(prepare(256));
     use_pool(&mut exec, workers);
@@ -413,9 +412,8 @@ impl Node for HeldChaser {
 }
 
 /// **A chase held behind a running fade is delivered without allocating**:
-/// A fades to B, C waits behind B (the commit that queued it applied before
-/// the gate, since applying allocates by design), and inside the gate B's
-/// fade ends, C takes over and its first block carries B's three messages.
+/// A fades to B, C waits behind B, and inside the gate B's fade ends, C takes
+/// over and its first block carries B's three messages.
 /// The count of what C received proves the delivery ran inside the gate.
 fn a_held_chase_is_delivered_allocation_free_on(workers: usize) {
     const KEYS: u64 = 6;
@@ -801,9 +799,8 @@ impl Node for RampEvery {
 /// sibling), an event source of ramps and curve segments (every shape
 /// class) and LUT shapings, the declick of a connection
 /// made and one broken, blocks of every length, and ranges moved between
-/// blocks without a commit. The commits are applied before the gate
-/// (applying allocates by design); the declicks they start, and every block
-/// that reads a moved range, run inside it.
+/// blocks without a commit. The declicks the commits start, and every block
+/// that reads a moved range, run inside the gate.
 fn modulated_params_are_allocation_free_on(workers: usize) {
     use tutti_graph::ParamIn;
     let (mut ed, mut exec) = Editor::new(prepare(256));
@@ -1843,4 +1840,187 @@ fn edge_fades_are_allocation_free() {
         ed.collect();
     }
     assert!(heard);
+}
+
+/// Adds a chain `lag -> sum <- smooth` fed by the global input: the sum's
+/// second path is delayed by a PDC ring of the lag's latency. Keys start at
+/// `base`; returns the sum's key.
+fn pdc_pair(ed: &mut Editor, base: u64, latency: usize) -> NodeKey {
+    let (lag, smooth, sum) = (NodeKey(base), NodeKey(base + 1), NodeKey(base + 2));
+    ed.insert(lag, "lag", Unforkable(TestNode::new(Kind::Lag { latency })));
+    ed.insert(smooth, "smooth", Unforkable(TestNode::new(Kind::Smooth)));
+    ed.insert(
+        sum,
+        "sum",
+        Unforkable(TestNode::new(Kind::Sum { inputs: 2 })),
+    );
+    let t = &mut ed.spec_mut().topology;
+    t.edges
+        .insert(at(base, 0), vec![Edge::Direct(Source::Global(0))]);
+    t.edges
+        .insert(at(base + 1, 0), vec![Edge::Direct(Source::Global(0))]);
+    t.edges.insert(at(base + 2, 0), vec![from(base, 0)]);
+    t.edges.insert(at(base + 2, 1), vec![from(base + 1, 0)]);
+    sum
+}
+
+/// Adds an event consumer fed by an emitter directly and by another through
+/// a lagging event node: the direct source gets an event PDC FIFO. Keys start
+/// at `base`.
+fn event_pdc(ed: &mut Editor, base: u64) {
+    let ev = |node, port| EventOut {
+        node: NodeKey(node),
+        port,
+    };
+    let kinds = [
+        Kind::Emitter {
+            period: 5,
+            phase: 0,
+        },
+        Kind::Emitter {
+            period: 7,
+            phase: 3,
+        },
+        Kind::EventLag { latency: 11 },
+        Kind::Consumer { inputs: 2 },
+    ];
+    for (i, kind) in kinds.into_iter().enumerate() {
+        ed.insert(
+            NodeKey(base + i as u64),
+            "n",
+            Unforkable(TestNode::new(kind)),
+        );
+    }
+    let spec = ed.spec_mut();
+    let sink = |node, port| EventIn {
+        node: NodeKey(node),
+        port,
+    };
+    spec.connect_events(sink(base + 2, 0), EventEdge::Direct(ev(base + 1, 0)));
+    spec.connect_events(sink(base + 3, 0), EventEdge::Direct(ev(base + 2, 0)));
+    spec.connect_events(sink(base + 3, 1), EventEdge::Direct(ev(base, 0)));
+}
+
+/// **Applying a commit allocates and frees nothing**: the new arena, every
+/// ring and FIFO, and the state they carry across are built with the commit
+/// (`exec/stage.rs`), and applying moves them. Each commit below is applied
+/// inside the gate, then blocks render inside it:
+///
+/// - a commit that adds nodes with an audio PDC ring and an event PDC FIFO,
+///   while rings that carry history run (`pdc_pair`, `event_pdc`);
+/// - a commit that changes the arena's size, a wide fan-in of new chains;
+/// - a commit that retunes the rings it keeps (a latency change) and removes
+///   the event consumer, which flushes what its FIFO holds.
+fn applying_a_commit_allocates_nothing_on(workers: usize) {
+    let (mut ed, mut exec) = Editor::new(prepare(64));
+    use_pool(&mut exec, workers);
+    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    let first = pdc_pair(&mut ed, 1, 40);
+    ed.spec_mut()
+        .topology
+        .set_outputs(vec![Source::Node(OutPort {
+            node: first,
+            port: 0,
+        })]);
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    ed.collect();
+
+    let input = vec![0.25f32; 64];
+    let mut out = vec![0.0f32; 64];
+    let mut out2 = vec![0.0f32; 64];
+    let transport = TransportPosition::default();
+    let mut blocks = |exec: &mut tutti_graph::Executor, n: usize| {
+        for _ in 0..n {
+            let mut outs = [&mut out[..], &mut out2[..]];
+            let wide = exec.plan().map_or(1, |p| p.global_outputs());
+            exec.process(64, &transport, &[&input[..]], &mut outs[..wide]);
+        }
+    };
+    blocks(&mut exec, 8);
+    let slots = |exec: &tutti_graph::Executor| {
+        exec.plan()
+            .expect("applied")
+            .slots(tutti_graph::PortKind::Audio)
+    };
+
+    // A node with a PDC ring and an event FIFO joins.
+    let second = pdc_pair(&mut ed, 10, 25);
+    event_pdc(&mut ed, 20);
+    ed.spec_mut().topology.set_outputs(vec![
+        Source::Node(OutPort {
+            node: first,
+            port: 0,
+        }),
+        Source::Node(OutPort {
+            node: second,
+            port: 0,
+        }),
+    ]);
+    ed.commit().expect("commits");
+    let delays = exec.plan().expect("applied").delays().len();
+    assert_no_alloc::assert_no_alloc(|| exec.apply_pending());
+    assert!(
+        exec.plan().expect("applied").delays().len() > delays,
+        "the commit placed rings"
+    );
+    assert_no_alloc::assert_no_alloc(|| blocks(&mut exec, 32));
+    ed.collect();
+
+    // The arena grows: eight chains feed one wide sum.
+    let before = slots(&exec);
+    let sums: Vec<NodeKey> = (0..8)
+        .map(|i| pdc_pair(&mut ed, 100 + 3 * i, 8 + i as usize))
+        .collect();
+    let wide = NodeKey(200);
+    ed.insert(
+        wide,
+        "sum",
+        Unforkable(TestNode::new(Kind::Sum { inputs: 8 })),
+    );
+    for (i, sum) in sums.iter().enumerate() {
+        ed.spec_mut()
+            .topology
+            .edges
+            .insert(at(200, i as u16), vec![from(sum.0, 0)]);
+    }
+    ed.spec_mut().topology.set_outputs(vec![
+        Source::Node(OutPort {
+            node: first,
+            port: 0,
+        }),
+        Source::Node(OutPort {
+            node: wide,
+            port: 0,
+        }),
+    ]);
+    ed.commit().expect("commits");
+    assert_no_alloc::assert_no_alloc(|| exec.apply_pending());
+    assert!(slots(&exec) > before, "the commit made the arena larger");
+    assert_no_alloc::assert_no_alloc(|| blocks(&mut exec, 32));
+    ed.collect();
+
+    // The rings that stay are retuned, and the consumer's FIFO flushes.
+    ed.set_latency(NodeKey(1), Latency::new(Samples(70)))
+        .expect("fits");
+    for k in 20..24 {
+        ed.remove(NodeKey(k));
+    }
+    ed.commit().expect("commits");
+    assert_no_alloc::assert_no_alloc(|| exec.apply_pending());
+    assert_no_alloc::assert_no_alloc(|| blocks(&mut exec, 32));
+    assert_eq!(exec.dropped_event_count(), 0);
+    ed.collect();
+}
+
+#[test]
+fn applying_a_commit_allocates_nothing() {
+    applying_a_commit_allocates_nothing_on(1);
+}
+
+/// The same with a pool of four: the parallel state is built with the commit
+/// too.
+#[test]
+fn applying_a_commit_allocates_nothing_in_parallel() {
+    applying_a_commit_allocates_nothing_on(4);
 }
