@@ -5,7 +5,8 @@ use std::time::Instant;
 
 use super::super::body::{BodyLimit, decode_body, encode_body};
 use super::super::capabilities::{PeCapabilities, PeCiMessage, SimultaneousRequests};
-use super::super::chunk::{PeChunk, PeRequestId, split_message};
+use super::super::chunk::{PeChunk, PeChunkError, PeRequestId, split_message};
+use super::super::request_ids::RequestIds;
 use super::super::flow::{
     PE_TIMEOUT, PeAnswer, PeMessageKind, PeSignal, PeTerminator, PeTransaction,
 };
@@ -86,6 +87,17 @@ pub enum ResponderEvent {
         /// Which device ended it.
         by: PeEndedBy,
     },
+    /// A Subscription message cannot be sent in the peer's Maximum SysEx Message
+    /// Size, even as a `notify`: the Initiator is not told, and the next change
+    /// queues a new message.
+    UpdateNotSent {
+        /// The Initiator.
+        peer: Muid,
+        /// The Subscription.
+        subscribe_id: SubscribeId,
+        /// Why the message does not split into chunks.
+        error: PeChunkError,
+    },
     /// An inquiry for a Resource marked busy is held, and the Initiator was asked to
     /// wait (M2-103 §12.2.1). It is answered when the Resource is ready.
     Deferred {
@@ -138,6 +150,8 @@ struct Peer {
     max_sysex: MaxSysexSize,
     /// How many Subscription messages the peer takes at once.
     takes: SimultaneousRequests,
+    /// The Request IDs of the Subscription messages sent and not yet replied to.
+    ids: RequestIds,
 }
 
 #[derive(Debug)]
@@ -254,7 +268,6 @@ pub struct ResourceResponder {
     busy: Vec<(ResourceTarget, TimeoutWait)>,
     deferred: Vec<Deferred>,
     next_sub: u32,
-    next_request: u8,
 }
 
 /// The status a request is answered with, and the explanation.
@@ -305,7 +318,6 @@ impl ResourceResponder {
             busy: Vec::new(),
             deferred: Vec::new(),
             next_sub: 1,
-            next_request: 0,
         }
     }
 
@@ -334,6 +346,7 @@ impl ResourceResponder {
             muid: peer,
             max_sysex,
             takes: SimultaneousRequests::ONE,
+            ids: RequestIds::default(),
         });
     }
 
@@ -401,16 +414,13 @@ impl ResourceResponder {
         for expired in self.reassembler.expire(now) {
             out.push(self.signal(expired.peer, expired.kind, expired.send));
         }
-        let mut freed = Vec::new();
-        self.outgoing.retain(|o| {
-            let live = o.deadline > now;
-            if !live {
-                freed.push(o.peer);
-            }
-            live
-        });
-        for peer in freed {
-            self.drain(peer, now, &mut out);
+        let (live, expired): (Vec<_>, Vec<_>) = std::mem::take(&mut self.outgoing)
+            .into_iter()
+            .partition(|o| o.deadline > now);
+        self.outgoing = live;
+        for o in expired {
+            self.release(o.peer, o.id);
+            self.drain(o.peer, now, &mut out);
         }
         self.streams_timed_out(now, &mut out);
         for at in 0..self.deferred.len() {
@@ -582,7 +592,8 @@ impl ResourceResponder {
                     | PeSignal::OutOfSequence { .. }
                     | PeSignal::Malformed { .. }
                     | PeSignal::TimedOut { .. } => {
-                        self.outgoing.remove(at);
+                        let gone = self.outgoing.remove(at);
+                        self.release(peer, gone.id);
                         self.drain(peer, now, out);
                     }
                 }
@@ -1050,6 +1061,7 @@ impl ResourceResponder {
             return;
         };
         let sent = self.outgoing.remove(at);
+        self.release(peer, id);
         // A failure ends the Subscription, which the spec lets the sender do in
         // place of a retry (M2-103 §11.2).
         if matches!(
@@ -1177,24 +1189,36 @@ impl ResourceResponder {
     /// Sends the queued Subscription messages of `peer` that its count of
     /// simultaneous requests has a place for, oldest first.
     fn drain(&mut self, peer: Muid, now: Instant, out: &mut Vec<ResponderAction>) {
-        loop {
-            let Some(takes) = self.peer(peer).map(|p| usize::from(p.takes.get())) else {
+        while self.queue.iter().any(|q| q.peer == peer) {
+            let Some(id) = self
+                .peers
+                .iter_mut()
+                .find(|p| p.muid == peer)
+                .and_then(|p| p.ids.allocate(p.takes))
+            else {
                 return;
             };
-            if self.outgoing.iter().filter(|o| o.peer == peer).count() >= takes {
-                return;
-            }
-            let Some(at) = self.queue.iter().position(|q| q.peer == peer) else {
-                return;
-            };
+            let at = self
+                .queue
+                .iter()
+                .position(|q| q.peer == peer)
+                .expect("the loop condition found an item");
             let Queued { sub, pending, .. } = self.queue.remove(at);
-            self.send_pending(peer, &sub, pending, now, out);
+            self.send_pending(peer, id, &sub, pending, now, out);
+        }
+    }
+
+    /// Gives `id` of `peer` back to its pool.
+    fn release(&mut self, peer: Muid, id: PeRequestId) {
+        if let Some(p) = self.peers.iter_mut().find(|p| p.muid == peer) {
+            p.ids.release(id);
         }
     }
 
     fn send_pending(
         &mut self,
         peer: Muid,
+        id: PeRequestId,
         sub: &SubscribeId,
         pending: Pending,
         now: Instant,
@@ -1216,7 +1240,7 @@ impl ResourceResponder {
                 ended_by: Some(PeEndedBy::Responder),
                 extra: Default::default(),
             });
-            self.send_update(peer, sub, &header, &[], now, out);
+            self.send_update(peer, id, sub, &header, &[], now, out);
             return;
         }
         let Some((target, encoding)) = self
@@ -1225,6 +1249,7 @@ impl ResourceResponder {
             .find(|s| s.id == *sub && s.peer == peer)
             .map(|s| (s.target.clone(), s.encoding))
         else {
+            self.release(peer, id);
             return;
         };
         let max = self.peer(peer).map(|p| p.max_sysex);
@@ -1258,13 +1283,17 @@ impl ResourceResponder {
             }
         }
         let (header, body) = message.unwrap_or_else(|| (notify(), Vec::new()));
-        self.send_update(peer, sub, &header, &body, now, out);
+        self.send_update(peer, id, sub, &header, &body, now, out);
     }
 
-    /// Sends a Subscription message to `peer` under a Request ID not in use.
-    fn send_update(
+    /// Sends a Subscription message to `peer` under `id`, which the caller took
+    /// from the peer's pool: a message that does not split gives the ID back and
+    /// is reported.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn send_update(
         &mut self,
         peer: Muid,
+        id: PeRequestId,
         sub: &SubscribeId,
         header: &PeHeader,
         body: &[u8],
@@ -1274,27 +1303,25 @@ impl ResourceResponder {
         let Some(max) = self.peer(peer).map(|p| p.max_sysex) else {
             return;
         };
-        let free = (0..128u8)
-            .map(|step| (self.next_request + step) % 128)
-            .find(|n| {
-                !self
-                    .outgoing
-                    .iter()
-                    .any(|o| o.peer == peer && o.id.get() == *n)
-            })
-            .and_then(PeRequestId::new);
-        let Some(id) = free else { return };
-        let Ok(chunks) = split_message(id, header, body, max) else {
-            return;
-        };
-        self.next_request = (id.get() + 1) % 128;
-        self.outgoing.push(Outgoing {
-            peer,
-            id,
-            sub: sub.clone(),
-            deadline: now + PE_TIMEOUT,
-        });
-        self.send_chunks(peer, PeMessageKind::SUBSCRIPTION_INQUIRY, chunks, out);
+        match split_message(id, header, body, max) {
+            Ok(chunks) => {
+                self.outgoing.push(Outgoing {
+                    peer,
+                    id,
+                    sub: sub.clone(),
+                    deadline: now + PE_TIMEOUT,
+                });
+                self.send_chunks(peer, PeMessageKind::SUBSCRIPTION_INQUIRY, chunks, out);
+            }
+            Err(error) => {
+                self.release(peer, id);
+                out.push(ResponderAction::Event(ResponderEvent::UpdateNotSent {
+                    peer,
+                    subscribe_id: sub.clone(),
+                    error,
+                }));
+            }
+        }
     }
 }
 
