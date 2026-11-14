@@ -63,7 +63,7 @@ use std::time::Instant;
 
 use tutti_graph::Offset;
 use tutti_midi_device::{
-    Action, Connection, Ending, Endpoint, IdentityInquiry, InquiryAction, Learned,
+    Action, Connection, Ending, Endpoint, EntropyError, IdentityInquiry, InquiryAction, Learned,
 };
 use tutti_midi_protocol::{Addressed, Read, Universal, read};
 use tutti_ump::{
@@ -187,6 +187,8 @@ pub(crate) struct Stepped {
     pub(crate) profiles: Vec<(PeerId, ProfilesChange)>,
     /// The Process Inquiry of the peers that changed.
     pub(crate) process: Vec<(PeerId, ProcessChange)>,
+    /// The Groups whose MIDI-CI device could not start, with why.
+    pub(crate) unstarted: Vec<(MidiGroup, EntropyError)>,
 }
 
 /// The Identity Request of a MIDI 1.0 port that has an output (the module's
@@ -409,6 +411,7 @@ impl Negotiation {
             ci: changes.peers,
             profiles: changes.profiles,
             process: changes.process,
+            unstarted: changes.unstarted,
         }
     }
 

@@ -406,7 +406,7 @@ fn counting_nonce() -> Result<Nonce, EntropyError> {
 }
 
 fn no_nonce() -> Result<Nonce, EntropyError> {
-    Err(getrandom::Error::UNSUPPORTED.into())
+    Err(EntropyError::unavailable())
 }
 
 // A Host that cannot get random bytes for a challenge refuses the Invitation
@@ -422,7 +422,7 @@ fn a_host_without_a_nonce_refuses_the_invitation_that_needs_one() {
     sim.connect();
     assert!(sim.host_events.contains(&Event::NonceUnavailable {
         peer: client_addr(),
-        error: getrandom::Error::UNSUPPORTED.into(),
+        error: EntropyError::unavailable(),
     }));
     assert_ne!(sim.client.state(), SessionState::Established);
 }

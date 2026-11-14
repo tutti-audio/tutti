@@ -21,7 +21,6 @@ tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false
 tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device", default-features = false }
 
 [dev-dependencies]
-getrandom = { workspace = true }
 proptest = "1.9.0"
 
 [package.metadata.docs.rs]

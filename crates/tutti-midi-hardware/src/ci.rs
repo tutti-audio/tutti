@@ -118,8 +118,9 @@
 //!   Exchange (§5.5.3); the reassembler is sized for it, delimiters included.
 //! - **MUIDs** are drawn from a stream the operating system seeded
 //!   ([`entropy`]), which M2-101 Appendix A asks of a desktop OS's random
-//!   numbers. A Group whose stream cannot be seeded starts no device and is
-//!   tried again at the next change of Groups.
+//!   numbers. A Group whose stream cannot be seeded starts no device; the
+//!   failure is reported ([`Polled::CiNotStarted`](crate::Polled::CiNotStarted))
+//!   and the Group is tried again at every poll while MIDI-CI is enabled.
 //!
 //! Time is an argument: nothing here reads a clock.
 
@@ -163,6 +164,8 @@ pub(crate) struct CiChanges {
     pub(crate) profiles: Vec<(PeerId, ProfilesChange)>,
     /// Peers' Process Inquiry.
     pub(crate) process: Vec<(PeerId, ProcessChange)>,
+    /// The Groups whose device could not start, with why.
+    pub(crate) unstarted: Vec<(MidiGroup, EntropyError)>,
 }
 
 impl CiChanges {
@@ -416,6 +419,7 @@ impl Ci {
                 changes.peers.extend(started.peers);
                 changes.profiles.extend(started.profiles);
                 changes.process.extend(started.process);
+                changes.unstarted.extend(started.unstarted);
             }
             _ => {}
         }
@@ -568,12 +572,18 @@ impl Running {
     ) -> (Self, CiChanges) {
         let mut sends = Vec::new();
         let mut firsts = Vec::new();
+        let mut unstarted = Vec::new();
         let members: Vec<Member> = groups
             .iter()
-            .filter_map(|&group| {
-                let (device, first) = start_device(identity, now)?;
-                firsts.push(first);
-                Some(Member::new(group, device))
+            .filter_map(|&group| match start_device(identity, now) {
+                Ok((device, first)) => {
+                    firsts.push(first);
+                    Some(Member::new(group, device))
+                }
+                Err(error) => {
+                    unstarted.push((group, error));
+                    None
+                }
             })
             .collect();
         let max = MAX_SYSEX.get() as usize;
@@ -584,7 +594,10 @@ impl Running {
             members,
             assembler,
         };
-        let mut changes = CiChanges::default();
+        let mut changes = CiChanges {
+            unstarted,
+            ..CiChanges::default()
+        };
         for (member, actions) in running.members.iter_mut().zip(firsts) {
             member.apply(actions, now, &mut sends, &mut changes);
         }
@@ -626,8 +639,12 @@ impl Running {
             if self.members.iter().any(|m| m.group == group) {
                 continue;
             }
-            let Some((device, first)) = start_device(self.identity, now) else {
-                continue;
+            let (device, first) = match start_device(self.identity, now) {
+                Ok(started) => started,
+                Err(error) => {
+                    changes.unstarted.push((group, error));
+                    continue;
+                }
             };
             started.push((group, first));
             self.members.push(Member::new(group, device));
@@ -648,19 +665,23 @@ impl Running {
     }
 }
 
-/// A device with a MUID of its own and its first actions, or `None` when the
-/// operating system gives no random bytes for the MUID.
+/// A device with a MUID of its own and its first actions.
+///
+/// # Errors
+///
+/// [`EntropyError`] when the operating system gives no random bytes for the
+/// MUID.
 fn start_device(
     identity: DeviceIdentity,
     now: Instant,
-) -> Option<(CiDevice<Entropy>, Vec<CiAction>)> {
-    match entropy() {
-        Ok(entropy) => Some(CiDevice::new(identity, CATEGORIES, MAX_SYSEX, entropy, now)),
-        Err(error) => {
-            tracing::warn!("MIDI-CI starts no device: {error}");
-            None
-        }
-    }
+) -> Result<(CiDevice<Entropy>, Vec<CiAction>), EntropyError> {
+    Ok(CiDevice::new(
+        identity,
+        CATEGORIES,
+        MAX_SYSEX,
+        entropy()?,
+        now,
+    ))
 }
 
 /// Each of `members` announces that its MUID is no longer valid (an Invalidate

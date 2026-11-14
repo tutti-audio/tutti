@@ -194,6 +194,12 @@ enum Pending {
     End,
 }
 
+/// A Subscription message before it is split into chunks.
+struct Update {
+    header: PeHeader,
+    body: Vec<u8>,
+}
+
 #[derive(Debug)]
 struct Queued {
     peer: Muid,
@@ -1319,7 +1325,7 @@ impl ResourceResponder {
     /// Sends the queued Subscription messages of `peer` that its count of
     /// simultaneous requests has a place for, oldest first.
     fn drain(&mut self, peer: Muid, now: Instant, out: &mut Vec<ResponderAction>) {
-        while self.queue.iter().any(|q| q.peer == peer) {
+        while let Some(at) = self.queue.iter().position(|q| q.peer == peer) {
             let Some(id) = self
                 .peers
                 .iter_mut()
@@ -1328,11 +1334,6 @@ impl ResourceResponder {
             else {
                 return;
             };
-            let at = self
-                .queue
-                .iter()
-                .position(|q| q.peer == peer)
-                .expect("the loop condition found an item");
             let Queued { sub, pending, .. } = self.queue.remove(at);
             self.send_pending(peer, id, &sub, pending, now, out);
         }
@@ -1370,7 +1371,17 @@ impl ResourceResponder {
                 ended_by: Some(PeEndedBy::Responder),
                 extra: Default::default(),
             });
-            self.send_update(peer, id, sub, &header, &[], now, out);
+            self.send_update(
+                peer,
+                id,
+                sub,
+                &Update {
+                    header,
+                    body: Vec::new(),
+                },
+                now,
+                out,
+            );
             return;
         }
         let Some((target, encoding)) = self
@@ -1413,27 +1424,25 @@ impl ResourceResponder {
             }
         }
         let (header, body) = message.unwrap_or_else(|| (notify(), Vec::new()));
-        self.send_update(peer, id, sub, &header, &body, now, out);
+        self.send_update(peer, id, sub, &Update { header, body }, now, out);
     }
 
     /// Sends a Subscription message to `peer` under `id`, which the caller took
     /// from the peer's pool: a message that does not split gives the ID back and
     /// is reported.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn send_update(
+    fn send_update(
         &mut self,
         peer: Muid,
         id: PeRequestId,
         sub: &SubscribeId,
-        header: &PeHeader,
-        body: &[u8],
+        update: &Update,
         now: Instant,
         out: &mut Vec<ResponderAction>,
     ) {
         let Some(max) = self.peer(peer).map(|p| p.max_sysex) else {
             return;
         };
-        match split_message(id, header, body, max) {
+        match split_message(id, &update.header, &update.body, max) {
             Ok(chunks) => {
                 self.outgoing.push(Outgoing {
                     peer,
@@ -1460,5 +1469,55 @@ fn changes_object(update: &PartialUpdate) -> super::super::tree::PeObject {
     match update.to_json() {
         PeJson::Object(object) => object,
         _ => super::super::tree::PeObject::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::exchange::{responder_settings, store};
+    use super::*;
+    use crate::ci::testing::{OURS, PEER};
+
+    // M2-101 §8.3: a message whose body is not 7-bit does not split; it is not
+    // sent, the Responder reports it, and the Request ID it took is free again.
+    // No public call builds such a body (the bodies are encoded 7-bit before
+    // they are split), so the failure is driven at the sender.
+    #[test]
+    fn an_update_that_does_not_split_is_reported_and_gives_its_request_id_back() {
+        let (own, initiator) = (Muid::of(PEER), Muid::of(OURS));
+        let mut resp = ResourceResponder::new(own, responder_settings(), store());
+        resp.accept(initiator, MaxSysexSize::of(256));
+        let sub = SubscribeId::new("s1").unwrap();
+        let id = resp.peers[0]
+            .ids
+            .allocate(SimultaneousRequests::ONE)
+            .unwrap();
+        let update = Update {
+            header: PeHeader::Subscription(PeSubscription::Update {
+                command: PeUpdateCommand::Full,
+                subscribe_id: sub.clone(),
+                mutual_encoding: None,
+                media_type: None,
+                extra: Default::default(),
+            }),
+            body: vec![0x80],
+        };
+        let mut out = Vec::new();
+        resp.send_update(initiator, id, &sub, &update, Instant::now(), &mut out);
+        assert_eq!(
+            out,
+            [ResponderAction::Event(ResponderEvent::UpdateNotSent {
+                peer: initiator,
+                subscribe_id: sub,
+                error: PeChunkError::NotSevenBit { at: 0 },
+            })]
+        );
+        // The one request the peer takes is free again.
+        assert!(
+            resp.peers[0]
+                .ids
+                .allocate(SimultaneousRequests::ONE)
+                .is_some()
+        );
     }
 }

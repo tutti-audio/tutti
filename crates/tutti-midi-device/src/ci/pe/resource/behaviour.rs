@@ -5,7 +5,6 @@
 use std::time::Duration;
 
 use super::super::capabilities::{PeCiMessage, SimultaneousRequests};
-use super::super::chunk::PeChunkError;
 use super::super::chunk::{PeChunk, PeRequestId, split_message};
 use super::super::flow::{
     PE_TIMEOUT, PeAnswer, PeMessageKind, PeSignal, PeTerminator, PeTransaction,
@@ -386,40 +385,6 @@ fn the_update_past_the_peers_count_waits_for_a_reply_and_then_goes() {
     let after = reply_to_update(&mut link, request_id(&sent), PeStatus::Ok);
     assert_eq!(updates_of(&after).len(), 1, "it goes when one completes");
     assert_eq!(link.resp.queued(Muid::of(OURS)), 0);
-}
-
-// M2-101 §8.3: a message that does not split is not sent; the Responder reports
-// it, and the next update goes.
-#[test]
-fn an_update_that_does_not_split_is_reported_and_leaves_the_queue_working() {
-    let (mut link, target) = subscribed_link(1, PeResource::ChannelList, None);
-    let (sub, peer) = link
-        .resp
-        .subscriptions()
-        .map(|(id, peer, _)| (id.clone(), peer))
-        .next()
-        .unwrap();
-    let id = PeRequestId::of(5);
-    let header = PeHeader::Subscription(PeSubscription::Update {
-        command: PeUpdateCommand::Full,
-        subscribe_id: sub.clone(),
-        mutual_encoding: None,
-        media_type: None,
-        extra: Default::default(),
-    });
-    let mut out = Vec::new();
-    link.resp
-        .send_update(peer, id, &sub, &header, &[0x80], link.now, &mut out);
-    assert_eq!(
-        out,
-        [ResponderAction::Event(ResponderEvent::UpdateNotSent {
-            peer,
-            subscribe_id: sub,
-            error: PeChunkError::NotSevenBit { at: 0 },
-        })]
-    );
-    let sent = link.resp.publish(&target, channels(1), link.now).unwrap();
-    assert_eq!(chunks_of(&sent).len(), 1, "the one allowed request is free");
 }
 
 fn flow_get(resource: &str) -> PeHeader {
