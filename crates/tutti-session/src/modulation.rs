@@ -246,6 +246,12 @@ tutti_types::id! {
     /// ```compile_fail,E0624
     /// let _ = tutti_session::ModSourceId::of(1);
     /// ```
+    ///
+    /// Nor mint one:
+    ///
+    /// ```compile_fail,E0624
+    /// let _ = tutti_session::ModSourceId::mint(&tutti_types::Mint::new());
+    /// ```
     pub struct ModSourceId;
 }
 
@@ -258,6 +264,12 @@ tutti_types::id! {
     ///
     /// ```compile_fail,E0624
     /// let _ = tutti_session::ModRouteId::of(1);
+    /// ```
+    ///
+    /// Nor mint one:
+    ///
+    /// ```compile_fail,E0624
+    /// let _ = tutti_session::ModRouteId::mint(&tutti_types::Mint::new());
     /// ```
     pub struct ModRouteId;
 }

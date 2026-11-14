@@ -1551,6 +1551,8 @@ fn open_stem_taps(
     editor: &mut Editor,
     stems: &[StemTap],
 ) -> Result<Vec<tutti_graph::TapReader>, BounceConfigError> {
+    // The fork's topology is isolated and never merges back, so its ids are
+    // numbered above the ones it holds instead of minted from a counter.
     let mut next = editor
         .spec()
         .topology

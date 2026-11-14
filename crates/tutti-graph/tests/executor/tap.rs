@@ -340,7 +340,8 @@ fn a_closed_tap_leaves_no_op() {
         "a raw tap is one op, whatever its width"
     );
 
-    r.ed.close_tap(tap.id()).unwrap();
+    r.ed.close_tap(tap.id().expect("the editor named it"))
+        .unwrap();
     commit(&mut r);
     assert_eq!(
         ops(&r),
@@ -382,7 +383,8 @@ fn a_full_ring_counts_what_it_lost_and_a_closed_tap_receives_nothing() {
     assert_eq!(tap.take_lost().get(), 150);
     assert_eq!(tap.available().get(), 150);
     assert_eq!(tap.take_lost().get(), 0, "reading clears");
-    r.ed.close_tap(tap.id()).unwrap();
+    r.ed.close_tap(tap.id().expect("the editor named it"))
+        .unwrap();
     commit(&mut r);
     block(&mut r, 100, 300);
     assert_eq!(
@@ -717,10 +719,11 @@ fn closing_a_tap_twice_is_refused_by_name() {
         r.ed.open_tap(TapId::of(1), vec![r.gains[0]], TapAlign::Raw, Samples(8))
             .expect("the sources exist");
     commit(&mut r);
-    r.ed.close_tap(tap.id()).unwrap();
+    r.ed.close_tap(tap.id().expect("the editor named it"))
+        .unwrap();
     assert_eq!(
-        r.ed.close_tap(tap.id()),
-        Err(CloseError::Tap(tap.id())),
+        r.ed.close_tap(tap.id().expect("the editor named it")),
+        Err(CloseError::Tap(tap.id().expect("the editor named it"))),
         "a closed tap is not open"
     );
     assert_eq!(
@@ -925,7 +928,7 @@ fn a_tap_cannot_change_its_width_under_its_writer() {
 /// level.
 #[test]
 fn pop_planes_reads_whole_frames_and_keeps_the_lanes_level() {
-    let (mut reader, mut writer) = TapReader::pair(TapId::of(7), 3, Samples(8));
+    let (mut reader, mut writer) = TapReader::pair(3, Samples(8));
     writer.push_interleaved(&[1.0, 10.0, 100.0, 2.0, 20.0, 200.0, 3.0, 30.0, 300.0]);
     let (mut a, mut b) = ([9.0f32; 4], [9.0f32; 4]);
     // Two planes for three lanes, two frames wanted of three there.

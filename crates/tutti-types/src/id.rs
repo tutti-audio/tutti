@@ -4,21 +4,22 @@
 /// and never zero.
 ///
 /// It emits the type (`Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord,
-/// Hash`, a private field), `mint(&Mint)` for the next id of a counter,
-/// `get`, and a `Display` that writes the number. The number is an identity,
-/// not a quantity: the type has no arithmetic, and the first id of a fresh
-/// `Mint` is 1.
+/// Hash`, a private field), `get`, and a `Display` that writes the number. The
+/// number is an identity, not a quantity: the type has no arithmetic, and the
+/// first id of a fresh `Mint` is 1.
 ///
 /// An id is **opaque** by default: the only way to hold one outside its crate
 /// is to be handed it, so a holder cannot name a thing that was never minted.
-/// The crate itself may build one from a number, with `new(raw) -> Option`
-/// (`None` for 0) and a const `of` that panics for a zero literal. An id
-/// written `struct Name: named;` is one the caller chooses (the key of a
-/// map the caller fills): `new` and `of` are public.
+/// Only the crate that defines it has `mint(&Mint)` for the next id of a
+/// counter, `new(raw) -> Option` (`None` for 0) and a const `of` that panics
+/// for a zero literal. An id written `struct Name: named;` is one the caller
+/// chooses (the key of a map the caller fills): `mint`, `new` and `of` are
+/// public.
 ///
-/// A type that is stored adds serde among the attributes, through `try_from`
-/// so a document cannot hold a zero. An id that crosses a C ABI, an IPC or a
-/// wire keeps its raw type there and converts with `new` and `get`.
+/// The macro emits no serde and no `TryFrom`. A stored id derives
+/// `Serialize` and writes its own `Deserialize` through `new`, so a document
+/// cannot hold a zero. An id that crosses a C ABI, an IPC or a wire keeps its
+/// raw type there and converts with `new` and `get`.
 ///
 /// ```
 /// use tutti_types::Mint;
@@ -39,6 +40,7 @@
 ///
 /// assert_eq!(MeterId::new(0), None);
 /// assert_eq!(MeterId::of(2).get(), 2);
+/// assert_eq!(MeterId::mint(&mint).get(), 3);
 /// ```
 #[macro_export]
 macro_rules! id {
@@ -67,7 +69,8 @@ macro_rules! id {
             /// The next id of `mint`: one `Mint` never hands out an id twice.
             #[inline]
             #[must_use]
-            pub fn mint(mint: &$crate::Mint) -> Self {
+            #[allow(dead_code)]
+            $($ctor)* fn mint(mint: &$crate::Mint) -> Self {
                 Self(mint.mint())
             }
 

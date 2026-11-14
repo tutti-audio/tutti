@@ -1070,7 +1070,6 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
     use std::time::Instant;
-    use tutti_graph::TapId;
     use tutti_types::Bpm;
 
     /// A sink that keeps what it is written.
@@ -1117,7 +1116,7 @@ mod tests {
 
     #[test]
     fn a_lost_gap_is_silence_in_place_and_counted() {
-        let (reader, mut writer) = TapReader::pair(TapId::of(1), 1, Samples(4096));
+        let (reader, mut writer) = TapReader::pair(1, Samples(4096));
         let ramp = |from: usize, to: usize| (from..to).map(|i| i as f32 + 1.0).collect::<Vec<_>>();
         writer.push_interleaved(&ramp(0, 100));
         writer.skip(50);

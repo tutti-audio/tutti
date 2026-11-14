@@ -283,10 +283,10 @@ impl Stream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::loop_frames;
 
     const STREAM_1: StreamId = StreamId::of(1);
     const STREAM_2: StreamId = StreamId::of(2);
-    use crate::testing::loop_frames;
 
     fn on(start: usize, end: usize) -> Option<Loop> {
         Some(loop_frames(start, end, 7))

@@ -38,7 +38,10 @@
 //! dependencies are `atomic_float` and `libm`, plus `serde`
 //! behind its feature) and `#![forbid(unsafe_code)]`. The lock-free and `unsafe`
 //! runtime primitives, the graph runtime, the engine, the device and the file
-//! codecs are other crates'. One consequence makes the split load-bearing:
+//! codecs are other crates'. The exception is `Mint`, a bare atomic counter:
+//! it has no protocol to model, like `Param` and `AtomicSampleRate`, so it
+//! needs no loom model and sits with the vocabulary. One consequence makes the
+//! split load-bearing:
 //!
 //! - Unit newtypes are **mandatory** across the engine, so their home has to be
 //!   reachable from everywhere. A crate that only needs `Beat` gets `Beat` and
