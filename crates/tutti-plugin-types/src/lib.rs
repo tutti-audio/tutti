@@ -247,7 +247,7 @@ pub use automation::{ParameterChanges, ParameterPoint, ParameterQueue};
 pub use automation_mode::{AutomationMode, AutomationModeError};
 pub use bridge_error::{BridgeError, BridgeResult, PluginForkError};
 pub use channels::{
-    AudioBuffer, AudioBuffer32, AudioBuffer64, AudioBufferMut, MAX_BLOCK_CHANNELS, Sample,
+    AudioBuffer, AudioBuffer32, AudioBuffer64, AudioBufferMut, MAX_BLOCK_CHANNELS, Sample, sanitize,
 };
 pub use classification::{ClapFeature, PluginRole, Vst2Category, Vst3PlugType, Vst3SubCategories};
 pub use descriptor::{AuComponentType, EditorPresence, PluginClass, PluginDescriptor};

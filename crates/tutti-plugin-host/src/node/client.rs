@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
     AudioBuffer, AudioBufferMut, Loaded, MainThreadMarker, MainWorkHandle, Origin,
-    PluginDescriptor, PluginIo, PluginTail, ProcessContext, ProcessOutput, Processor,
+    PluginDescriptor, PluginIo, PluginTail, ProcessContext, ProcessOutput, Processor, sanitize,
 };
 use tutti_rt::Rt;
 
@@ -776,8 +776,15 @@ pub(super) fn render_with<P: Processor>(
         ctx: &ctx,
         out,
     };
-    match processor.process(&mut io) {
-        Ok(()) => Rendered::Ran,
+    let processed = processor.process(&mut io);
+    match processed {
+        Ok(()) => {
+            // A plugin's NaN or infinity would poison every node downstream of it.
+            for channel in outputs.iter_mut().take(width) {
+                sanitize(channel);
+            }
+            Rendered::Ran
+        }
         Err(_) => {
             failed.fetch_add(1, Ordering::Relaxed);
             Rendered::Failed
@@ -1145,6 +1152,61 @@ mod render_tests {
             out.midi_events.is_empty(),
             "last block's MIDI is not this one's"
         );
+    }
+}
+
+/// A plugin that emits a non-finite sample does not reach the graph with it.
+#[cfg(test)]
+mod sanitize_tests {
+    use super::*;
+    use tutti_plugin_types::PluginResult;
+
+    /// Writes NaN, +inf and -inf among finite samples to its first output channel.
+    struct Poisoned;
+
+    impl Processor for Poisoned {
+        fn process(&mut self, io: &mut PluginIo<'_>) -> PluginResult<()> {
+            if let AudioBufferMut::F32(buf) = &mut io.buffer {
+                buf.outputs[0].copy_from_slice(&[0.5, f32::NAN, f32::INFINITY, f32::NEG_INFINITY]);
+            }
+            Ok(())
+        }
+
+        fn stop(&mut self) {}
+
+        fn reset(&mut self) {}
+    }
+
+    /// **The in-process path zeroes NaN and both infinities of a block the
+    /// plugin rendered and keeps its finite samples**, as the plugin server does
+    /// before a block leaves its process.
+    #[test]
+    fn an_in_process_plugins_non_finite_output_is_zeroed_and_finite_output_kept() {
+        let counters = (AtomicU64::new(0), AtomicU64::new(0));
+        let params = ParamDelivery::closed([], Arc::default());
+        let mut midi = MidiEventVec::new();
+        let mut out = ProcessOutput::default();
+        let mut channel = [1.0f32; 4];
+        let (mut hand, mut rt) = tutti_rt::handoff();
+        assert!(hand.lend(Poisoned).is_ok());
+        let rendered = render_with(
+            rt.poll(Processor::stop),
+            (&counters.0, &counters.1),
+            &params,
+            &mut midi,
+            &mut out,
+            Inputs {
+                transport: &TransportInfo::default(),
+                changes: &[],
+                expressive: None,
+            },
+            &[],
+            &mut [&mut channel[..]],
+            4,
+            48_000.0,
+        );
+        assert_eq!(rendered, Rendered::Ran);
+        assert_eq!(channel, [0.5, 0.0, 0.0, 0.0]);
     }
 }
 
