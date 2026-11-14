@@ -12,10 +12,10 @@
 //! executor's** for every node but one that declares
 //! [`Shape::with_own_bypass`](crate::Shape::with_own_bypass) (a plugin with a
 //! native bypass parameter): the executor neither blends nor parks such a node
-//! in `Bypassed`, but calls it as in `Active`, and the node's host writes the
-//! node's own bypass when the mode changes. The node's own bypass is not
-//! timed by the executor, so there is no crossfade and no reset; `Muted` and
-//! the [`Mix`] stay the executor's for every node, since no format has either.
+//! in `Bypassed`, but calls it as in `Active`, with no crossfade and no reset.
+//! What the node does in `Bypassed` is the node's: it reads the mode from
+//! [`Editor::mode`](crate::Editor::mode) on the control side, not on the
+//! audio thread. `Muted` and the [`Mix`] stay the executor's for every node.
 //! [`Editor::set_mode`](crate::Editor::set_mode) stores into a cell the unit
 //! holds and marks nothing for commit, as a param range is; the executor
 //! loads the cell once per block, before the first op, so every op of the

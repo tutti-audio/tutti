@@ -273,7 +273,7 @@ fn a_fork_closes_its_file_once_past_its_window() {
 }
 
 /// A fork prepared for a realtime render renders silence and latches a fault
-/// rather than block the audio thread on its file read; prepared offline, the
+/// without allocating, rather than block the audio thread on its file read; prepared offline, the
 /// same fork plays the file.
 #[test]
 fn a_fork_prepared_realtime_latches_instead_of_reading_its_file() {
@@ -307,14 +307,21 @@ fn a_fork_prepared_realtime_latches_instead_of_reading_its_file() {
     );
     assert!(offline.fault().expect("a fork").fault().is_none());
 
-    let mut realtime = voice.fork_copy();
-    realtime.set_render(SampleRate::SR_48K, RenderMode::Realtime);
+    // Prepared realtime by `Direct`: the audio thread finds the fault, so it
+    // is latched without allocating.
+    let mut realtime = Direct::new(voice.fork_copy(), SampleRate::SR_48K, 64);
+    let health = realtime.node.fault().expect("a fork");
+    assert!(health.fault().is_none());
+    assert_no_alloc::assert_no_alloc(|| {
+        realtime.block_in(&clock.env(64, SampleRate::SR_48K));
+    });
     assert!(
-        under(&mut realtime, &clock, 48_000.0, 64)[0]
+        realtime
+            .outputs_mut()
             .iter()
-            .all(|&s| s == 0.0)
+            .all(|c| c.iter().all(|&s| s == 0.0))
     );
-    assert!(realtime.fault().expect("a fork").fault().is_some());
+    assert!(health.fault().is_some());
 }
 
 /// A stopped clock silences a fork mid-clip, in a 64-frame block and

@@ -132,7 +132,7 @@ impl VoiceSource {
     /// does to the source as a node of its own: the memory tier's conversion,
     /// the disk tier's step and its file read's permission). Allocation-free:
     /// a rate, a ratio and a mode, so the pool's `AddVoice` drain can run it.
-    pub(crate) fn prepare_rate(&mut self, sample_rate: SampleRate, mode: RenderMode) {
+    pub(crate) fn set_render(&mut self, sample_rate: SampleRate, mode: RenderMode) {
         match self {
             Self::Memory(s) => s.set_render_rate(sample_rate),
             Self::Disk(s) => s.set_render(sample_rate, mode),

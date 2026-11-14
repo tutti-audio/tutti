@@ -74,7 +74,8 @@
 //!   with the executor); the aligned input is the input through a
 //!   `VecDeque` of the declared latency. A bypassed node whose fade is done
 //!   is **not called**; leaving Bypassed resets it and keeps the aligned
-//!   input audible for the latency before the fade in. A kept key's state
+//!   input audible for the latency before the fade in. A node whose shape
+//!   declares its own bypass is never Bypassed here: it reads as Active. A kept key's state
 //!   survives a new graph, a swap without a fade starts steady, and a swap
 //!   with one keeps it.
 //!
@@ -1419,7 +1420,7 @@ impl Reference {
         let mut xhat: Vec<Vec<f32>> = Vec::new();
         let mut parked = false;
         if let Some(m) = &mut mode {
-            let want = self.wanted.get(&key).copied().unwrap_or_default();
+            let want = read_mode(&shape, self.wanted.get(&key).copied().unwrap_or_default());
             // The mix as the block starts: the previous block's is its start.
             m.take_mix(self.wanted_mix.get(&key).map_or(1.0, |m| m.get()));
             // Its lane, when a source drives it: the param port's rule over
@@ -2057,6 +2058,17 @@ enum RefFrame {
     Steady { mix: f32, moving: bool },
 }
 
+/// The mode the executor acts on for a cell holding `mode`: a node whose shape
+/// declares its own bypass is never `Bypassed` to the executor (it is called
+/// as in `Active`).
+fn read_mode(shape: &crate::node::Shape, mode: NodeMode) -> NodeMode {
+    if shape.own_bypass && mode == NodeMode::Bypassed {
+        NodeMode::Active
+    } else {
+        mode
+    }
+}
+
 fn weights_of(mode: NodeMode, mix: f32) -> (f32, f32) {
     match mode {
         NodeMode::Active => (mix, 1.0 - mix),
@@ -2067,6 +2079,7 @@ fn weights_of(mode: NodeMode, mix: f32) -> (f32, f32) {
 
 impl RefMode {
     fn new(mode: NodeMode, mix: f32, shape: &crate::node::Shape, latency: usize) -> Self {
+        let mode = read_mode(shape, mode);
         let (y, x) = weights_of(mode, mix);
         let mut m = Self {
             heading: mode,

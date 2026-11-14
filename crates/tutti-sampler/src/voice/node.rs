@@ -356,7 +356,7 @@ impl Node for VoiceNode {
         self.slot
             .voice
             .source
-            .prepare_rate(sample_rate, p.render_mode());
+            .set_render(sample_rate, p.render_mode());
         self.slot.sample_rate = sample_rate;
         if let Some(unit) = &mut self.slot.stretch {
             unit.set_sample_rate(sample_rate);

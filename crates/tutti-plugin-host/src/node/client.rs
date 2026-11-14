@@ -618,24 +618,26 @@ impl<F: Loaded> InProcClient<F> {
     /// is a main-thread call on every format.
     pub(super) fn set_render_mode_from(&mut self, p: &tutti_graph::Prepare) {
         let mode = p.render_mode();
-        let moved = self.prepared_mode != mode;
-        self.prepared_mode = mode;
-        if !moved {
+        // Temporary: the guard keeps a mode the handle or `Phase::RenderMode`
+        // set from being undone by a re-prepare at the same mode. When
+        // `Prepare` is the only source of a plugin's mode, it goes.
+        if self.prepared_mode == mode {
             return;
         }
         let mut inner = self.inner.lock();
-        if inner.render_mode() == mode {
-            return;
+        if inner.render_mode() != mode {
+            // The node is out of any executor (`Node::prepare`'s contract), so
+            // its realtime end is here: the exchange finishes in this call.
+            let Some(main) = MainThread::current() else {
+                // Not recorded, so the next prepare on the main thread tells it.
+                tracing::error!(
+                    "a plugin was prepared off the main thread in {mode:?}; it keeps its render mode"
+                );
+                return;
+            };
+            inner.set_render_mode(&main, mode, Some(&mut self.rt));
         }
-        // The node is out of any executor (`Node::prepare`'s contract), so its
-        // realtime end is here: the exchange finishes in this call.
-        let Some(main) = MainThread::current() else {
-            tracing::error!(
-                "a plugin was prepared off the main thread in {mode:?}; it keeps its render mode"
-            );
-            return;
-        };
-        inner.set_render_mode(&main, mode, Some(&mut self.rt));
+        self.prepared_mode = mode;
     }
 
     /// Take `sample_rate` as the rate blocks run at, and hand it to the

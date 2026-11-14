@@ -680,7 +680,7 @@ impl VoicePool {
         // Allocation-free: a rate and a ratio.
         slot.voice
             .source
-            .prepare_rate(self.sample_rate, self.render_mode);
+            .set_render(self.sample_rate, self.render_mode);
         self.voices.push(slot);
 
         // Realise the remaining intent through the same appliers the update
@@ -900,9 +900,7 @@ impl Node for VoicePool {
         self.scratch
             .resize(p.max_block().get(), self.channels.count() as usize);
         for slot in &mut self.voices {
-            slot.voice
-                .source
-                .prepare_rate(sample_rate, self.render_mode);
+            slot.voice.source.set_render(sample_rate, self.render_mode);
             slot.sample_rate = sample_rate;
             if let Some(unit) = &mut slot.stretch {
                 unit.set_sample_rate(sample_rate);

@@ -272,6 +272,60 @@ fn a_node_prepared_offline_renders_the_plugin_offline() {
     );
 }
 
+/// **A re-prepare at the mode the last prepare carried changes nothing**: a
+/// mode set on the handle since survives it, and a changed one is told.
+#[test]
+fn a_re_prepare_at_the_same_mode_keeps_what_the_handle_set() {
+    let _guard = lock_probe();
+    let mut loaded = load();
+
+    drive_blocks_in(
+        &mut loaded.unit,
+        SAMPLE_RATE,
+        BLOCK,
+        BLOCK,
+        RenderMode::Offline,
+    );
+    assert_eq!(read_capture(&loaded.path).process_level, LEVEL_OFFLINE);
+    assert!(
+        loaded
+            .handle
+            .any_thread()
+            .set_render_mode(RenderMode::Realtime)
+    );
+    drive_blocks_in(
+        &mut loaded.unit,
+        SAMPLE_RATE,
+        BLOCK,
+        BLOCK,
+        RenderMode::Offline,
+    );
+    assert_eq!(
+        read_capture(&loaded.path).process_level,
+        LEVEL_REALTIME,
+        "a prepare at the mode the last one carried must not undo the handle's"
+    );
+    drive_blocks_in(
+        &mut loaded.unit,
+        SAMPLE_RATE,
+        BLOCK,
+        BLOCK,
+        RenderMode::Realtime,
+    );
+    drive_blocks_in(
+        &mut loaded.unit,
+        SAMPLE_RATE,
+        BLOCK,
+        BLOCK,
+        RenderMode::Offline,
+    );
+    assert_eq!(
+        read_capture(&loaded.path).process_level,
+        LEVEL_OFFLINE,
+        "a prepare at a changed mode is told"
+    );
+}
+
 /// Restoring realtime reaches the plugin too.
 ///
 /// A bounce must put the session back. Half a route — offline arrives, realtime

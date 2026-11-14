@@ -737,13 +737,13 @@ impl DiskVoice {
             };
             // A copy never told a rate latches, inside its window.
             if !told_rate {
-                offline.fault.latch(OfflineFault::NoRenderRate);
+                offline.fault.latch_static(&OfflineFault::NoRenderRate);
                 emit(i, &silent[..w]);
                 continue;
             }
             // Its read blocks on file I/O, which a realtime render never waits on.
             if !self.render_mode.is_offline() {
-                offline.fault.latch(OfflineFault::PreparedRealtime);
+                offline.fault.latch_static(&OfflineFault::PreparedRealtime);
                 emit(i, &silent[..w]);
                 continue;
             }

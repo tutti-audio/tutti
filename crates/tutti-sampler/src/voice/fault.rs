@@ -11,29 +11,57 @@ use std::sync::{Arc, OnceLock};
 /// path.
 ///
 /// Latching takes no lock and, after the first, allocates nothing (a later
-/// error is dropped unboxed), but the first boxes its error: latch from a
-/// thread that may allocate, which an offline render's is.
+/// error is dropped unboxed). [`latch`](Self::latch) boxes its first error:
+/// latch from a thread that may allocate, which an offline render's is.
+/// [`latch_static`](Self::latch_static) keeps a reference to an error that
+/// lives forever and allocates nothing, for a failure the audio thread finds;
+/// [`fault`](Self::fault), on the control side, boxes it.
 #[derive(Default)]
-pub(crate) struct FaultLatch(OnceLock<Arc<dyn Error + Send + Sync>>);
+pub(crate) struct FaultLatch {
+    boxed: OnceLock<Arc<dyn Error + Send + Sync>>,
+    fixed: OnceLock<&'static (dyn Error + Send + Sync)>,
+}
+
+/// A `'static` error read as an owned one.
+#[derive(Debug)]
+struct Fixed(&'static (dyn Error + Send + Sync));
+
+impl core::fmt::Display for Fixed {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Display::fmt(self.0, f)
+    }
+}
+
+impl Error for Fixed {}
 
 impl FaultLatch {
     /// Keep `error` unless an earlier one is already kept.
     pub(crate) fn latch(&self, error: impl Error + Send + Sync + 'static) {
-        if self.0.get().is_none() {
-            let _ = self.0.set(Arc::new(error));
+        if self.boxed.get().is_none() {
+            let _ = self.boxed.set(Arc::new(error));
         }
+    }
+
+    /// Keep `error` unless an earlier one is already kept. Allocates nothing:
+    /// any thread, the audio thread included.
+    pub(crate) fn latch_static(&self, error: &'static (dyn Error + Send + Sync)) {
+        let _ = self.fixed.set(error);
     }
 
     /// `None` while the voice renders what it describes; the first failure
     /// otherwise. Once failed, it stays failed.
     pub(crate) fn fault(&self) -> Option<Arc<dyn Error + Send + Sync>> {
-        self.0.get().cloned()
+        self.boxed.get().cloned().or_else(|| {
+            self.fixed
+                .get()
+                .map(|e| Arc::new(Fixed(*e)) as Arc<dyn Error + Send + Sync>)
+        })
     }
 }
 
 impl core::fmt::Debug for FaultLatch {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self.0.get() {
+        match self.fault() {
             Some(e) => write!(f, "FaultLatch({e})"),
             None => f.write_str("FaultLatch(ok)"),
         }
@@ -62,5 +90,14 @@ mod tests {
         l.latch(E("first"));
         l.latch(E("second"));
         assert_eq!(l.fault().expect("latched").to_string(), "first");
+    }
+
+    /// A static error latches and reads back as the same error.
+    #[test]
+    fn a_static_error_is_kept() {
+        static E_STATIC: E = E("fixed");
+        let l = FaultLatch::default();
+        l.latch_static(&E_STATIC);
+        assert_eq!(l.fault().expect("latched").to_string(), "fixed");
     }
 }

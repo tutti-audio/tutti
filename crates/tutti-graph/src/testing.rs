@@ -139,6 +139,9 @@ pub enum Kind {
         buses_in: Box<crate::Buses>,
         buses_out: Box<crate::Buses>,
     },
+    /// `inner`, declaring `Shape::with_own_bypass`: the node behaves as
+    /// `inner` and the executor never blends or parks it in `Bypassed`.
+    OwnBypass { inner: Box<Kind> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -164,6 +167,8 @@ pub struct TestNode {
     cost: crate::Cost,
     /// The buses a `Kind::Bused` declares.
     buses: Option<(crate::Buses, crate::Buses)>,
+    /// Whether a `Kind::OwnBypass` wrapped the kind.
+    own_bypass: bool,
 }
 
 impl TestNode {
@@ -173,6 +178,10 @@ impl TestNode {
 
     /// A node that counts its `process` calls into `calls`.
     pub fn counted(kind: Kind, calls: Arc<AtomicUsize>) -> Self {
+        let (kind, own_bypass) = match kind {
+            Kind::OwnBypass { inner } => (*inner, true),
+            kind => (kind, false),
+        };
         let (kind, buses) = match kind {
             Kind::Bused {
                 inner,
@@ -196,6 +205,7 @@ impl TestNode {
             calls,
             cost: crate::Cost::default(),
             buses,
+            own_bypass,
         }
     }
 
@@ -209,7 +219,9 @@ impl TestNode {
 impl TestNode {
     fn kind_shape(&self) -> Shape {
         match self.kind {
-            Kind::Bused { .. } => unreachable!("`counted` unwraps the buses"),
+            Kind::Bused { .. } | Kind::OwnBypass { .. } => {
+                unreachable!("`counted` unwraps the buses and the own bypass")
+            }
             Kind::Const { width, .. } => Shape::source_unassigned(ch(width)),
             Kind::Gain { width, .. } => Shape::through_unassigned(ch(width)).with_in_place(),
             // Any number of inputs, which are not a bus: ports.
@@ -279,12 +291,16 @@ pub fn rebused(shape: Shape, buses_in: crate::Buses, buses_out: crate::Buses) ->
     bused.params = shape.params;
     bused.cost = shape.cost;
     bused.note_events = shape.note_events;
+    bused.own_bypass = shape.own_bypass;
     bused
 }
 
 impl Node for TestNode {
     fn shape(&self) -> Shape {
-        let shape = self.kind_shape().with_cost(self.cost);
+        let mut shape = self.kind_shape().with_cost(self.cost);
+        if self.own_bypass {
+            shape = shape.with_own_bypass();
+        }
         match self.buses {
             // The kind's figures over the buses the test declared.
             Some((buses_in, buses_out)) => rebused(shape, buses_in, buses_out),
@@ -309,7 +325,9 @@ impl Node for TestNode {
         self.calls.fetch_add(1, Ordering::Relaxed);
         let n = io.frames();
         match self.kind {
-            Kind::Bused { .. } => unreachable!("`counted` unwraps the buses"),
+            Kind::Bused { .. } | Kind::OwnBypass { .. } => {
+                unreachable!("`counted` unwraps the buses and the own bypass")
+            }
             Kind::Const { value, .. } => {
                 for c in 0..io.output_count() {
                     io.output(c)[0] = value;
