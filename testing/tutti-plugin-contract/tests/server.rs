@@ -201,7 +201,8 @@ fn a_served_value_keeps_its_f64_width<F: Format>(path: PathBuf) {
         F::NAME
     );
     a.controller_mut()
-        .set_parameter(main, Param::Level.id(), Normalized::of(SENT));
+        .set_parameter(main, Param::Level.id(), Normalized::of(SENT))
+        .expect("a declared, writable parameter");
     // A control-side write reaches the plugin at the head of a block after the
     // server's main thread has read it, not in step with a particular block:
     // it travels on the control connection and the blocks on the audio one.
