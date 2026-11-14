@@ -120,7 +120,7 @@ pub struct CommandId {
 }
 
 /// Pair identities: every command channel takes the next one.
-static NEXT_PAIR: AtomicU64 = AtomicU64::new(0);
+static NEXT_PAIR: tutti_types::Mint = tutti_types::Mint::new();
 
 /// Why [`Editor::schedule`](crate::Editor::schedule) refused a command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
@@ -264,7 +264,7 @@ pub(crate) fn command_channel() -> (CommandTx, CommandRx) {
     let done = Arc::new(AtomicU64::new(0));
     (
         CommandTx {
-            pair: NEXT_PAIR.fetch_add(1, Ordering::Relaxed),
+            pair: NEXT_PAIR.mint().get(),
             tx,
             cancel: cancel_tx,
             sent: 0,

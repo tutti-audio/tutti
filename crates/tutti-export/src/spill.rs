@@ -10,7 +10,6 @@
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use tutti_buffers::InterleavedMut;
 use tutti_types::{ChannelLayout, Samples};
@@ -178,14 +177,14 @@ impl Drop for Spill {
 
 /// A name beside `target` no other spill (or process) uses.
 fn unique_beside(target: &Path) -> PathBuf {
-    static NEXT: AtomicU32 = AtomicU32::new(0);
+    static NEXT: tutti_types::Mint = tutti_types::Mint::new();
     let name = target
         .file_name()
         .map_or_else(|| "export".to_owned(), |n| n.to_string_lossy().into_owned());
     target.with_file_name(format!(
         ".{name}.{}.{}.spill",
         std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
+        NEXT.mint()
     ))
 }
 
