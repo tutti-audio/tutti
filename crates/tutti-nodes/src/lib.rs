@@ -274,7 +274,9 @@ pub use distortion::DistortionNode;
 pub use tutti_dsp::ShapeKind;
 
 mod filter;
-pub use filter::{CrossoverNode, EqBandNode, LadderFilterNode, NodeRecurrence, SvfFilterNode};
+pub use filter::{
+    CrossoverNode, EqBandNode, LadderFilterNode, NodeRecurrence, SvfFilterNode, SvfKernel,
+};
 // The types in the filter nodes' signatures stay reachable from here; the
 // algorithms behind them (`SvfCoeffs`, `LadderCoeffs`, `CrossoverModel`) are
 // `tutti-dsp`'s only.
@@ -296,6 +298,11 @@ pub use tutti_dsp::{CompressorControls, GateControls, KeySource, LimiterControls
 mod strip;
 pub use strip::BusStripNode;
 
+// The one node over an effect's algorithm and state: the driver and the trait an
+// algorithm implements to run in it.
+mod kernel;
+pub use kernel::{Kernel, KernelNode};
+
 // The reverb: any `tutti_dsp::Family` as a node, and the Freeverb send (mono in,
 // stereo wet out) the SoundFont player's General MIDI setup uses.
 mod reverb;
@@ -307,7 +314,7 @@ mod reverb_fdn;
 pub use reverb_fdn::FdnNode;
 
 // The families and controls that sit in a `FamilyNode<F>`'s signature.
-pub use tutti_dsp::{FdnControls, FdnFamily, FreeverbControls, FreeverbFamily, SvfFamily};
+pub use tutti_dsp::{FdnControls, FdnFamily, FreeverbControls, FreeverbFamily};
 
 // The spatial panners: VBAP speaker panning and binaural HRTF rendering.
 mod spatial;

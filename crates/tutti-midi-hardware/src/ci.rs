@@ -116,21 +116,26 @@
 //! - **Receivable Maximum SysEx Message Size**: [`MAX_SYSEX`], 512 bytes, the
 //!   floor of a device that will initiate Profile Configuration or Property
 //!   Exchange (§5.5.3); the reassembler is sized for it, delimiters included.
-//! - **MUIDs** are drawn from std's OS-seeded hasher keys ([`entropy`]), which
-//!   M2-101 Appendix A asks of a desktop OS's random numbers; no dependency.
+//! - **MUIDs** are drawn from a stream the operating system seeded
+//!   ([`entropy`]), which M2-101 Appendix A asks of a desktop OS's random
+//!   numbers. A Group whose stream cannot be seeded starts no device; the
+//!   failure is reported once until it starts
+//!   ([`Polled::CiNotStarted`](crate::Polled::CiNotStarted); a Group that
+//!   leaves the Groups and returns, or MIDI-CI is disabled and enabled again, is
+//!   reported again) and
+//!   the Group is tried again at every poll while MIDI-CI is enabled.
 //!
 //! Time is an argument: nothing here reads a clock.
 
 use std::collections::BTreeMap;
-use std::collections::hash_map::RandomState;
-use std::hash::{BuildHasher, Hasher};
 use std::sync::Arc;
 use std::time::Instant;
 
 use tutti_graph::Offset;
 use tutti_midi_device::{
-    CiAction, CiCategories, CiDevice, CiHeader, CiMessage, CiPeer, Decoded, DeviceId, MaxSysexSize,
-    Muid, ProcessAction, ProcessFeatures, ProcessInitiator, ProfileAction, ProfileInitiator,
+    CiAction, CiCategories, CiDevice, CiHeader, CiMessage, CiPeer, Decoded, DeviceId, EntropyError,
+    EntropyWords, MaxSysexSize, Muid, ProcessAction, ProcessFeatures, ProcessInitiator,
+    ProfileAction, ProfileInitiator,
 };
 use tutti_ump::{DeviceIdentity, MidiGroup, SysexAssembler, SysexStep, Ump};
 
@@ -162,6 +167,8 @@ pub(crate) struct CiChanges {
     pub(crate) profiles: Vec<(PeerId, ProfilesChange)>,
     /// Peers' Process Inquiry.
     pub(crate) process: Vec<(PeerId, ProcessChange)>,
+    /// The Groups whose device could not start, with why.
+    pub(crate) unstarted: Vec<(MidiGroup, EntropyError)>,
 }
 
 impl CiChanges {
@@ -265,21 +272,18 @@ pub enum CiChange {
     Lost,
 }
 
-/// The MUID source: std's OS-seeded hasher keys over a counter.
+/// The MUID source: words from a stream the operating system seeded.
 type Entropy = Box<dyn FnMut() -> u32 + Send>;
 
-/// A source of words for MUIDs (the module's "MUIDs"). Each call of `entropy`
-/// has keys of its own.
-fn entropy() -> Entropy {
-    let keys = RandomState::new();
-    let mut count = 0u64;
-    Box::new(move || {
-        count += 1;
-        let mut hasher = keys.build_hasher();
-        hasher.write_u64(count);
-        // The high half: the low 28 bits are the MUID's, and a hash mixes all.
-        (hasher.finish() >> 32) as u32
-    })
+/// A source of words for MUIDs (the module's "MUIDs"), seeded on its own for
+/// each device.
+///
+/// # Errors
+///
+/// [`EntropyError`] when the operating system has no random bytes to seed it.
+fn entropy() -> Result<Entropy, EntropyError> {
+    let mut words = EntropyWords::from_os()?;
+    Ok(Box::new(move || words.next_word()))
 }
 
 /// One MIDI-CI Device on its Group.
@@ -309,6 +313,11 @@ struct Running {
     identity: DeviceIdentity,
     members: Vec<Member>,
     assembler: SysexAssembler<Box<[u8]>>,
+    /// The Groups whose device could not start and was reported: reported once
+    /// until it starts, tried again at every poll. A Group that leaves the
+    /// Groups and returns, or MIDI-CI is disabled and enabled again, is reported
+    /// again.
+    unstarted: Vec<MidiGroup>,
 }
 
 /// One input's MIDI-CI: the Groups it is to run on, once the negotiation or the
@@ -407,23 +416,25 @@ impl Ci {
         }
         match (&mut self.running, enabled) {
             (Some(running), _) => {
-                running.reconcile(&self.groups, now, out, &mut changes);
+                running.reconcile(&self.groups, &mut entropy, now, out, &mut changes);
                 running.step(now, heard, out, &mut changes);
                 running.start_switches(&mut self.queue, now, out, &mut changes);
                 running.start_reports(&mut self.reports, now, out, &mut changes);
             }
             (None, Some(identity)) if !self.groups.is_empty() => {
-                let (running, started) = Running::start(&self.groups, identity, now, out);
+                let (running, started) =
+                    Running::start(&self.groups, identity, &mut entropy, now, out);
                 self.running = Some(Box::new(running));
                 changes.peers.extend(started.peers);
                 changes.profiles.extend(started.profiles);
                 changes.process.extend(started.process);
+                changes.unstarted.extend(started.unstarted);
             }
             _ => {}
         }
         self.queue.clear();
         self.reports.clear();
-        if self.running.as_ref().is_some_and(|r| r.members.is_empty()) {
+        if self.running.as_ref().is_some_and(|r| r.is_idle()) {
             self.running = None;
         }
         if !changes.is_empty() {
@@ -561,33 +572,53 @@ impl Ci {
 }
 
 impl Running {
-    /// The devices of `groups`, each with its first Discovery sent on `out`.
+    /// Whether nothing runs and nothing waits to start: the devices are done.
+    fn is_idle(&self) -> bool {
+        self.members.is_empty() && self.unstarted.is_empty()
+    }
+
+    /// The devices of `groups`, each with its first Discovery sent on `out`. A
+    /// Group whose device cannot start is reported in the changes and kept in
+    /// [`unstarted`](Self::unstarted).
     fn start(
         groups: &[MidiGroup],
         identity: DeviceIdentity,
+        entropy: &mut impl FnMut() -> Result<Entropy, EntropyError>,
         now: Instant,
         out: &mut OpenOutput,
     ) -> (Self, CiChanges) {
         let mut sends = Vec::new();
         let mut firsts = Vec::new();
+        let mut unstarted = Vec::new();
+        let mut failures = Vec::new();
         let members: Vec<Member> = groups
             .iter()
-            .map(|&group| {
-                let (device, first) =
-                    CiDevice::new(identity, CATEGORIES, MAX_SYSEX, entropy(), now);
-                firsts.push(first);
-                Member::new(group, device)
+            .filter_map(|&group| match start_device(identity, entropy, now) {
+                Ok((device, first)) => {
+                    firsts.push(first);
+                    Some(Member::new(group, device))
+                }
+                Err(error) => {
+                    unstarted.push(group);
+                    failures.push((group, error));
+                    None
+                }
             })
             .collect();
         let max = MAX_SYSEX.get() as usize;
-        let room = SysexAssembler::room_for(max, 1, members.len());
-        let assembler = SysexAssembler::new(vec![0; room].into_boxed_slice(), max, members.len());
+        let lanes = members.len().max(1);
+        let room = SysexAssembler::room_for(max, 1, lanes);
+        let assembler = SysexAssembler::new(vec![0; room].into_boxed_slice(), max, lanes);
         let mut running = Self {
             identity,
             members,
             assembler,
+            unstarted,
         };
-        let mut changes = CiChanges::default();
+        let mut changes = CiChanges {
+            unstarted: failures,
+            ..CiChanges::default()
+        };
         for (member, actions) in running.members.iter_mut().zip(firsts) {
             member.apply(actions, now, &mut sends, &mut changes);
         }
@@ -605,34 +636,48 @@ impl Running {
     /// Brings the devices to `groups` (the Groups MIDI-CI is now called for,
     /// sorted): a Group no longer called for ends its device (as
     /// [`stop`](Self::stop)), a new one starts a device with its first
-    /// Discovery, and a Group that stays keeps its device and peers.
+    /// Discovery, and a Group that stays keeps its device and peers. A Group
+    /// whose device cannot start is tried again each time and reported once per
+    /// failure episode (until it starts or leaves the Groups); nothing is
+    /// rebuilt while the devices are the same.
     fn reconcile(
         &mut self,
         groups: &[MidiGroup],
+        entropy: &mut impl FnMut() -> Result<Entropy, EntropyError>,
         now: Instant,
         out: &mut OpenOutput,
         changes: &mut CiChanges,
     ) {
-        let same = self.members.len() == groups.len()
-            && self.members.iter().zip(groups).all(|(m, g)| m.group == *g);
-        if same {
-            return;
-        }
         let (kept, gone): (Vec<Member>, Vec<Member>) = std::mem::take(&mut self.members)
             .into_iter()
             .partition(|m| groups.contains(&m.group));
+        let mut changed = !gone.is_empty();
         stop_members(&gone, out, changes);
         self.members = kept;
+        self.unstarted.retain(|g| groups.contains(g));
         let mut sends = Vec::new();
         let mut started = Vec::new();
         for &group in groups {
             if self.members.iter().any(|m| m.group == group) {
                 continue;
             }
-            let (device, first) =
-                CiDevice::new(self.identity, CATEGORIES, MAX_SYSEX, entropy(), now);
-            started.push((group, first));
-            self.members.push(Member::new(group, device));
+            match start_device(self.identity, entropy, now) {
+                Ok((device, first)) => {
+                    started.push((group, first));
+                    self.unstarted.retain(|g| *g != group);
+                    self.members.push(Member::new(group, device));
+                    changed = true;
+                }
+                Err(error) => {
+                    if !self.unstarted.contains(&group) {
+                        self.unstarted.push(group);
+                        changes.unstarted.push((group, error));
+                    }
+                }
+            }
+        }
+        if !changed {
+            return;
         }
         self.members.sort_by_key(|m| m.group);
         for (group, actions) in started {
@@ -648,6 +693,26 @@ impl Running {
         self.assembler = SysexAssembler::new(vec![0; room].into_boxed_slice(), max, lanes);
         send(out, &sends);
     }
+}
+
+/// A device with a MUID of its own and its first actions.
+///
+/// # Errors
+///
+/// [`EntropyError`] when `entropy` gives none for the MUID: the operating
+/// system has no random bytes.
+fn start_device(
+    identity: DeviceIdentity,
+    entropy: &mut impl FnMut() -> Result<Entropy, EntropyError>,
+    now: Instant,
+) -> Result<(CiDevice<Entropy>, Vec<CiAction>), EntropyError> {
+    Ok(CiDevice::new(
+        identity,
+        CATEGORIES,
+        MAX_SYSEX,
+        entropy()?,
+        now,
+    ))
 }
 
 /// Each of `members` announces that its MUID is no longer valid (an Invalidate
@@ -1084,17 +1149,196 @@ impl Member {
     }
 }
 
-/// Queues the messages as SysEx7 on `out`. A refusal is not retried: Discovery
-/// and its replies are repeated by their protocol, and a lost one is a peer
-/// found later or never.
+/// Queues the messages as SysEx7 on `out`, each in one batch. A refusal is not
+/// retried: Discovery and its replies are repeated by their protocol, and a
+/// lost one is a peer found later or never. A device takes a batch as a prefix
+/// (`MidiOut::queue`), so a message taken in part is a SysEx7 whose end the
+/// device never gets; it is logged as cut, apart from one wholly refused.
 fn send(out: &mut OpenOutput, sends: &[(MidiGroup, CiMessage)]) {
     for (group, message) in sends {
         let packets: Vec<_> = message
             .packets(*group)
             .map(|ump| (Offset::ZERO, ump))
             .collect();
-        if out.queue(&packets) < packets.len() {
-            tracing::debug!("a MIDI-CI message was refused by {}", out.name());
+        match out.queue(&packets) {
+            taken if taken == packets.len() => {}
+            0 => tracing::debug!("a MIDI-CI message was refused by {}", out.name()),
+            taken => tracing::debug!(
+                "a MIDI-CI message was cut after {taken} of {} packets by {}",
+                packets.len(),
+                out.name()
+            ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroUsize;
+    use std::time::Duration;
+
+    use tutti_midi_device::{CiCategories, DiscoveryData, EndpointId, PortDirection};
+    use tutti_ump::{ManufacturerId, U7};
+
+    use super::*;
+    use crate::MidiSession;
+    use crate::test_support::{FakeBackend, FakeCounters, endpoint};
+
+    fn identity() -> DeviceIdentity {
+        DeviceIdentity {
+            manufacturer: ManufacturerId::new(0x41).unwrap(),
+            family: [U7::of(1), U7::of(2)],
+            model: [U7::of(3), U7::of(4)],
+            revision: [U7::of(5), U7::of(6), U7::of(7), U7::of(8)],
+        }
+    }
+
+    /// The output of a fake device, and the counters of what it was sent.
+    fn output() -> (OpenOutput, FakeCounters) {
+        let (backend, counters) = FakeBackend::build_with(vec![], vec![], usize::MAX);
+        let inlets = tutti_midi_runtime::DeviceInlets::new(
+            NonZeroUsize::new(4).unwrap(),
+            tutti_graph::EventCapacity::of(64),
+            Duration::ZERO,
+        );
+        let session = MidiSession::open_over(backend, inlets).unwrap();
+        counters.plug(endpoint(7, "Wire"), PortDirection::Duplex);
+        let id = session.outputs().first().expect("the device").id.clone();
+        (session.connect_output(&id).unwrap(), counters)
+    }
+
+    /// An entropy source that refuses draws `from..to` (counted from 1) and
+    /// gives every other, with the count it keeps.
+    fn refusing(from: usize, to: usize) -> impl FnMut() -> Result<Entropy, EntropyError> {
+        let mut draws = 0;
+        move || {
+            draws += 1;
+            if (from..to).contains(&draws) {
+                Err(EntropyError::unavailable())
+            } else {
+                entropy()
+            }
+        }
+    }
+
+    fn heard(packets: &[Ump]) -> Heard<'_> {
+        Heard {
+            packets,
+            lost_before: false,
+            lost_during: false,
+        }
+    }
+
+    fn group_of(ump: &Ump) -> u8 {
+        ((ump.0[0] >> 24) & 0xF) as u8
+    }
+
+    const G0: MidiGroup = MidiGroup::of(0);
+    const G1: MidiGroup = MidiGroup::of(1);
+
+    // A Group whose device cannot start is reported once, however many polls
+    // retry it, and the retries do not rebuild the reader, so a message open on
+    // a Group that did start is finished; the Group starts when the source gives.
+    #[test]
+    fn a_group_that_cannot_start_is_reported_once_and_retried_without_dropping_a_message() {
+        let (mut out, counters) = output();
+        let raw = EndpointId::from_raw(7);
+        // Group 0 takes the first draw; Group 1 is refused the next three.
+        let mut source = refusing(2, 5);
+        let t0 = Instant::now();
+        let at = |ms| t0 + Duration::from_millis(ms);
+
+        let (mut running, first) =
+            Running::start(&[G0, G1], identity(), &mut source, at(0), &mut out);
+        assert_eq!(first.unstarted, [(G1, EntropyError::unavailable())]);
+        let _ = counters.take_sent(raw);
+
+        // A peer's Discovery arrives on Group 0 in two polls; Group 1 is refused
+        // again in both and is not reported again.
+        let message = CiMessage::Discovery {
+            header: CiHeader::new(Muid::of(0x0012_3456)),
+            data: DiscoveryData::new(identity(), CiCategories::empty(), MaxSysexSize::of(256)),
+        };
+        let packets: Vec<Ump> = message.packets(G0).collect();
+        assert!(packets.len() >= 2);
+        let (head, tail) = packets.split_at(packets.len() / 2);
+        for (ms, part) in [(1, head), (2, tail)] {
+            let mut changes = CiChanges::default();
+            running.reconcile(&[G0, G1], &mut source, at(ms), &mut out, &mut changes);
+            running.step(at(ms), &heard(part), &mut out, &mut changes);
+            assert!(changes.unstarted.is_empty(), "reported once");
+            if ms == 1 {
+                assert!(
+                    counters.take_sent(raw).is_empty(),
+                    "the message is not whole yet"
+                );
+            }
+        }
+        assert!(
+            !counters.take_sent(raw).is_empty(),
+            "the message survived the retries and was answered"
+        );
+
+        // The next draw succeeds: Group 1 starts and sends its Discovery.
+        let mut changes = CiChanges::default();
+        running.reconcile(&[G0, G1], &mut source, at(3), &mut out, &mut changes);
+        assert!(changes.unstarted.is_empty());
+        assert!(running.unstarted.is_empty());
+        let sent = counters.take_sent(raw);
+        assert!(!sent.is_empty() && sent.iter().all(|u| group_of(u) == 1));
+    }
+
+    // Every Group refused: each is reported once over several polls, the set
+    // stays not idle (what keeps `Ci::poll` from dropping it), and the retry goes
+    // on: the first draw that succeeds starts both Groups.
+    #[test]
+    fn when_every_group_is_refused_each_is_reported_once_and_the_retry_goes_on() {
+        let (mut out, _counters) = output();
+        // Two draws at the start and two on each of three polls are refused.
+        let mut source = refusing(1, 9);
+        let now = Instant::now();
+        let (mut running, first) =
+            Running::start(&[G0, G1], identity(), &mut source, now, &mut out);
+        assert_eq!(
+            first.unstarted,
+            [
+                (G0, EntropyError::unavailable()),
+                (G1, EntropyError::unavailable())
+            ]
+        );
+        assert!(!running.is_idle(), "the Groups still wait to start");
+        for _ in 0..3 {
+            let mut changes = CiChanges::default();
+            running.reconcile(&[G0, G1], &mut source, now, &mut out, &mut changes);
+            assert!(changes.unstarted.is_empty(), "reported once");
+            assert!(!running.is_idle());
+            assert!(running.members.is_empty());
+        }
+        // The next draws succeed: both Groups start, and nothing is reported.
+        let mut changes = CiChanges::default();
+        running.reconcile(&[G0, G1], &mut source, now, &mut out, &mut changes);
+        assert!(changes.unstarted.is_empty());
+        assert_eq!(running.members.len(), 2);
+        assert!(running.unstarted.is_empty());
+        // No Group is called for: nothing waits and nothing runs.
+        running.reconcile(&[], &mut source, now, &mut out, &mut changes);
+        assert!(running.is_idle());
+    }
+
+    // A Group that leaves the Groups while it is refused and returns is a new
+    // failure: it is reported again.
+    #[test]
+    fn a_group_that_leaves_and_returns_while_refused_is_reported_again() {
+        let (mut out, _counters) = output();
+        let mut source = refusing(1, 100);
+        let now = Instant::now();
+        let (mut running, first) = Running::start(&[G0], identity(), &mut source, now, &mut out);
+        assert_eq!(first.unstarted.len(), 1);
+        let mut changes = CiChanges::default();
+        running.reconcile(&[G1], &mut source, now, &mut out, &mut changes);
+        assert_eq!(changes.unstarted, [(G1, EntropyError::unavailable())]);
+        let mut changes = CiChanges::default();
+        running.reconcile(&[G0, G1], &mut source, now, &mut out, &mut changes);
+        assert_eq!(changes.unstarted, [(G0, EntropyError::unavailable())]);
     }
 }

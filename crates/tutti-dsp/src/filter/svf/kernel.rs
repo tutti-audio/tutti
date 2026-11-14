@@ -4,8 +4,9 @@
 //! One coefficient computation serves eight responses ([`SvfType`]), so
 //! switching type is as cheap as any parameter change.
 
-use crate::Lerp;
-use crate::{Lanes, Real};
+use tutti_buffers::Float;
+
+use crate::{Lanes, Lerp};
 use tutti_types::{Db, Hz, Q, SampleRate};
 
 /// Which response the state-variable filter presents.
@@ -179,7 +180,7 @@ pub struct SvfCoefficients<L: Lanes> {
     pub m2: L,
 }
 
-impl<F: Real> From<&SvfCoeffs> for SvfCoefficients<F> {
+impl<F: Float + Lanes> From<&SvfCoeffs> for SvfCoefficients<F> {
     /// The solve's `f64` set narrowed once to `F`.
     fn from(c: &SvfCoeffs) -> Self {
         Self {
@@ -193,7 +194,15 @@ impl<F: Real> From<&SvfCoeffs> for SvfCoefficients<F> {
     }
 }
 
-impl<F: Real> Lerp for SvfCoefficients<F> {
+impl<F: Float + Lanes> From<&super::SvfModel> for SvfCoefficients<F> {
+    /// The model's own coefficients ([`SvfModel::new`](super::SvfModel::new) sanitises the
+    /// controls first), narrowed once to `F`.
+    fn from(model: &super::SvfModel) -> Self {
+        Self::from(model.coeffs())
+    }
+}
+
+impl<F: Float + Lanes> Lerp for SvfCoefficients<F> {
     /// Each coefficient blended linearly, `t = k / n` in `F`: an interpolated set is only
     /// ever used for one sample and never stored.
     #[inline]
