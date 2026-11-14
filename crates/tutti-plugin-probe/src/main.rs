@@ -32,7 +32,7 @@
 
 use std::path::Path;
 use std::process::ExitCode;
-use tutti_plugin_probe::{describe, describe_measured};
+use tutti_plugin_probe::{Format, describe, describe_measured};
 use tutti_plugin_types::{MainThreadMarker, ProbeOutcome, write_result};
 
 fn main() -> ExitCode {
@@ -45,8 +45,8 @@ fn main() -> ExitCode {
     };
     let mut rest: Vec<_> = args.collect();
     let format = match rest.as_slice() {
-        [a, f, ..] if a == "--as" => match f.to_str() {
-            Some(f) => Some(f.to_owned()),
+        [a, f, ..] if a == "--as" => match f.to_str().and_then(Format::from_name) {
+            Some(format) => Some(format),
             None => {
                 eprintln!("{USAGE}");
                 return ExitCode::from(2);
@@ -82,9 +82,9 @@ fn main() -> ExitCode {
         return ExitCode::from(3);
     };
     let described = if measure {
-        describe_measured(main, Path::new(&path), format.as_deref(), state.as_deref())
+        describe_measured(main, Path::new(&path), format, state.as_deref())
     } else {
-        describe(main, Path::new(&path), format.as_deref())
+        describe(main, Path::new(&path), format)
     };
     let outcome = match described {
         Ok(plugins) if plugins.is_empty() => {

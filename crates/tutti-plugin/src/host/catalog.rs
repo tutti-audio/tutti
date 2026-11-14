@@ -364,9 +364,13 @@ impl Catalog {
     /// missing, an I/O error) leaves the row as it was. Unlike a scan, a missing
     /// `plugin-probe` does not record the file under its name: it is a failure.
     ///
+    /// A link whose target has another extension (`Foo.clap` to `libfoo.so`) is
+    /// probed as named and recorded under its target, as CLAP. Loading it by that
+    /// key is not covered yet: the load picks the format by extension.
+    ///
     /// # Errors
     ///
-    /// [`FilesError::Missing`] when `path` is not a file,
+    /// [`FilesError::Missing`] when `path` is not a file (checked first),
     /// [`FilesError::UnrecognizedFormat`] when its extension names no plugin
     /// format, and [`FilesError::Busy`] as for [`scan`](Self::scan). A file the
     /// probe fails on is not an error of the call: the result's
@@ -379,6 +383,9 @@ impl Catalog {
     /// Panics if the operating system cannot spawn the scanner thread.
     pub fn register(&mut self, path: impl AsRef<Path>) -> std::result::Result<Scan, FilesError> {
         let path = path.as_ref();
+        if !path.exists() {
+            return Err(FilesError::Missing(path.to_path_buf()));
+        }
         let format = format_from_path(path)
             .ok_or_else(|| FilesError::UnrecognizedFormat(path.to_path_buf()))?;
         let probing = Probing {

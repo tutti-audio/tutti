@@ -16,15 +16,42 @@ pub use measure::{
     measure_at,
 };
 
-/// The routing key of a file: the name of the format whose loader reads it. It
-/// is `format` when the caller names one (`clap`, `vst3`, `vst2`, `au`: a link
-/// named `Foo.clap` to a file named `libfoo.so` is a CLAP plugin), and the path's
-/// own extension otherwise.
-fn routing(path: &Path, format: Option<&str>) -> String {
+/// A plugin format a caller can name, to have a file read as it whatever the
+/// file's extension (a link `Foo.clap` to a file named `libfoo.so` is CLAP).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Format {
+    /// CLAP.
+    Clap,
+    /// Steinberg VST3.
+    Vst3,
+    /// Steinberg VST2.
+    Vst2,
+    /// Apple Audio Unit.
+    Au,
+}
+
+impl Format {
+    /// The format a command-line name (`clap`, `vst3`, `vst2`, `au`) names.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "clap" => Some(Self::Clap),
+            "vst3" => Some(Self::Vst3),
+            "vst2" => Some(Self::Vst2),
+            "au" => Some(Self::Au),
+            _ => None,
+        }
+    }
+}
+
+/// The routing key of a file: the extension of the loader that reads it. It is
+/// `format`'s when the caller names one, and the path's own extension otherwise.
+fn routing(path: &Path, format: Option<Format>) -> String {
     match format {
-        Some("vst2") => "vst".to_string(),
-        Some("au") => "component".to_string(),
-        Some(other) => other.to_lowercase(),
+        Some(Format::Clap) => "clap".to_string(),
+        Some(Format::Vst3) => "vst3".to_string(),
+        Some(Format::Vst2) => "vst".to_string(),
+        Some(Format::Au) => "component".to_string(),
         None => path
             .extension()
             .and_then(|e| e.to_str())
@@ -33,9 +60,9 @@ fn routing(path: &Path, format: Option<&str>) -> String {
     }
 }
 
-/// The descriptor of every plugin the file at `path` holds, by `format` or, with
-/// none, by its extension, in
-/// the file's own order, or the reason it could not be read. A CLAP factory
+/// The descriptor of every plugin the file at `path` holds, read as `format` or,
+/// with none, as its extension says, in the file's own order, or the reason it
+/// could not be read. A CLAP factory
 /// gives each plugin it lists, a VST3 factory each audio class, an AU bundle each
 /// unit it declares, a VST2 shell each sub-plugin; any other file is one plugin.
 /// `main` proves the caller is on the main thread, which VST2's load needs and the
@@ -48,7 +75,7 @@ fn routing(path: &Path, format: Option<&str>) -> String {
 pub fn describe(
     main: MainThreadMarker,
     path: &Path,
-    format: Option<&str>,
+    format: Option<Format>,
 ) -> Result<Vec<PluginDescriptor>, String> {
     if !path.exists() {
         return Err(format!("Plugin not found: {}", path.display()));
@@ -154,7 +181,7 @@ fn au(path: &Path) -> Result<Vec<PluginDescriptor>, String> {
 pub fn describe_measured(
     main: MainThreadMarker,
     path: &Path,
-    format: Option<&str>,
+    format: Option<Format>,
     state: Option<&[u8]>,
 ) -> Result<Vec<PluginDescriptor>, String> {
     let mut plugins = describe(main, path, format)?;

@@ -202,8 +202,8 @@ impl Scanner {
     /// Probes the given plugin files on a background thread, returning
     /// immediately, whether or not a row for them is up to date: the delta of
     /// each replaces its file's row. Each file comes with the format the caller
-    /// knows it as, which the probe reads it as whatever its extension says (a
-    /// link `Foo.clap` to `libfoo.so` is CLAP). A row is keyed by the file's
+    /// knows it as. The probe reads each file as that format, whatever its
+    /// extension (a link `Foo.clap` to `libfoo.so` is CLAP). A row is keyed by the file's
     /// canonical path, as a scan keys it. In every other respect as
     /// [`spawn`](Self::spawn): the same pedal, claim, deltas and drop.
     ///
@@ -352,7 +352,9 @@ pub enum FilesError {
     /// A path is not a file that exists.
     #[error("no plugin file at {0}")]
     Missing(PathBuf),
-    /// A path's extension names no plugin format, and none was given.
+    /// A path's extension names no plugin format. `Catalog::register` returns it,
+    /// after checking that the file exists; [`Scanner::spawn_files`] is given the
+    /// format and never does.
     #[error("{0} has no plugin format's extension")]
     UnrecognizedFormat(PathBuf),
 }

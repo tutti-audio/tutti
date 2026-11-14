@@ -470,7 +470,7 @@ mod links {
     }
 
     /// **A link whose target has another extension is still the format it was
-    /// named as**, all the way through: registered under the target's canonical
+    /// named as**, through `measure`: registered under the target's canonical
     /// path, the row says CLAP, and a `measure` of the plugin that row lists
     /// probes the target as CLAP, not as the format its `.so` extension names.
     #[test]
@@ -496,5 +496,37 @@ mod links {
         let (_, descriptor) = catalog.iter().next().expect("still listed");
         assert!(descriptor.measured.is_some());
         assert!(!catalog.is_blacklisted(&canonical));
+    }
+
+    /// **A scan of a directory holding a link `Foo.clap` to `libfoo.so`** finds
+    /// one row, keyed by the target's canonical path, typed CLAP, and the probe
+    /// is started `--as clap` on it.
+    #[test]
+    fn a_scanned_link_to_a_differently_named_target_is_one_clap_row() {
+        let dir = tempfile::TempDir::new().expect("a scratch directory");
+        let target = dir.path().join("libfoo.so");
+        std::fs::copy(tutti_fixtures::clap_probe(), &target).expect("a plugin");
+        let scanned = dir.path().join("plugins");
+        std::fs::create_dir(&scanned).expect("the scanned directory");
+        std::os::unix::fs::symlink(&target, scanned.join("Foo.clap")).expect("a link");
+        let (locator, log) = logging_probe(dir.path());
+        let config = CatalogConfig::new(dir.path(), vec![scanned]).probe_locator(locator);
+        let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
+
+        let result = scan(&mut catalog);
+
+        assert_eq!(
+            (result.scanned, result.new),
+            (1, 1),
+            "{:?}",
+            result.failures
+        );
+        let canonical = tutti_plugin_db::canonical_path(&target);
+        let rows: Vec<_> = catalog.db().rows().map(|(p, _)| p.to_path_buf()).collect();
+        assert_eq!(rows, std::slice::from_ref(&canonical));
+        let row = catalog.db().row(&canonical).expect("the row");
+        assert_eq!(row.format, tutti_plugin_db::PluginFormat::Clap);
+        let args = std::fs::read_to_string(log).expect("the probe ran");
+        assert!(args.contains("--as clap"), "{args:?}");
     }
 }
