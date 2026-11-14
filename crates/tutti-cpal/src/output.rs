@@ -105,7 +105,7 @@ impl AudioEngine {
 
     /// Creates an engine with no host and no device, at the caller's spec.
     ///
-    /// Pairs with [`ManualStreamDriver`](crate::ManualStreamDriver) to run the
+    /// Pairs with [`ManualStreamDriver`](tutti_engine::ManualStreamDriver) to run the
     /// whole lifecycle — start, render, fault, stop, restart — with no sound
     /// card. Such an engine can only be started with
     /// [`start_with`](Self::start_with); [`start`](Self::start) returns

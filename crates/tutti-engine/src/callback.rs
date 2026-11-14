@@ -104,7 +104,7 @@ pub struct OutputBlock {
     channels: usize,
     buffer: Vec<f32>,
     last_rendered_frames: usize,
-    /// Where each callback's reported delay goes ([`render_delayed`](Self::render_delayed)).
+    /// Where each callback's reported delay goes ([`render_delayed_with`](Self::render_delayed_with)).
     latency: Arc<StreamLatency>,
     /// Where a panic of the render is recorded.
     faults: Arc<StreamFaults>,

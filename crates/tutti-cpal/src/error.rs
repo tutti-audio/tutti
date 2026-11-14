@@ -8,7 +8,7 @@ use tutti_engine::StartError;
 /// Every variant is a device concern; failures from other subsystems (synth,
 /// plugin, export) are the host's to aggregate. Errors reported by a stream
 /// that is already running do not come back as an `Error`: CPAL delivers them
-/// to [`StreamFaults`](crate::StreamFaults).
+/// to [`StreamFaults`](tutti_engine::StreamFaults).
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
