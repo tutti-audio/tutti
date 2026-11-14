@@ -1,29 +1,19 @@
 //! Applying a commit: installing its plan, units and state, or checking
 //! every unit out for a re-prepare.
 
-use std::collections::BTreeMap;
-
 use ringbuf::traits::Consumer;
-use tutti_curve::declick_frames;
 use tutti_rt::RtScope;
 
-use super::commit::{Commit, Incoming, Opened, Relined, cut_fades, retire_fade, send_back};
-use super::node_op::{CONSTANT, SILENT};
+use super::commit::{Commit, Incoming, Relined, cut_fades, retire_fade, send_back};
+use super::stage::{RingFrom, Staged, sort_by_offset};
 use super::state::{Gone, Inject, Ring, State, Unit};
-use super::{Executor, Suspension, par_for};
+use super::{Executor, Suspension};
 use crate::NodeKey;
-use crate::arena::Arena;
-use crate::command::overlay_capacity;
 use crate::event::Event;
-use crate::event_tap::EventTapWriter;
 use crate::gain::SumLane;
 use crate::held::Held;
-use crate::kernels::{AudioRing, EventFifo};
-use crate::meter::MeterWriter;
-use crate::plan::{DelayKey, FeedbackKey, Op, ParamPortOp, Plan};
+use crate::plan::{DelayKey, Plan};
 use crate::spec::{EventIn, EventOut};
-use crate::tap::TapWriter;
-use crate::{EdgeId, EventTapId, MeterId, TapId};
 
 impl Executor {
     /// Applies every queued commit, in the order the editor sent them, and
@@ -43,6 +33,11 @@ impl Executor {
     /// [`Editor::package`](crate::Editor::package)).
     pub fn apply_pending(&mut self) {
         let _rt = RtScope::enter();
+        while !self.stash.is_empty() {
+            let mut commit = self.stash.remove(0);
+            self.apply(&mut commit);
+            send_back(&mut self.inbox.back, commit);
+        }
         while let Some(mut commit) = self.inbox.queue.try_pop() {
             self.apply(&mut commit);
             send_back(&mut self.inbox.back, commit);
@@ -60,6 +55,7 @@ impl Executor {
             // A re-prepare cuts every crossfade: what is checked out is the
             // newest unit at each key (a waiting one, if any), the one the
             // plan's generation names; the others go back with their fades.
+            std::mem::swap(&mut self.parked, &mut c.parked);
             if let Some(plan) = &self.plan {
                 for u in &plan.units {
                     let Some(mut unit) =
@@ -120,12 +116,16 @@ impl Executor {
             plan.prepare, self.prepare,
             "a plan compiled for another Prepare: every unit is prepared for the executor's"
         );
+        let mut st = c
+            .staged
+            .take()
+            .expect("a commit that places a plan carries what it needs staged");
 
         // A key retired or replaced leaves its held keys behind: the rebuild
         // below closes them on the edges they were held on. Not so a key
         // replaced with a fade while one runs: its unit keeps writing, and
         // the replacement waits (`end_fades` closes its keys then).
-        let mut departed = Gone::default();
+        let mut departed = std::mem::take(&mut c.gone);
         let n_retire = c.delta.retire.len();
         for (i, p) in c
             .delta
@@ -154,7 +154,9 @@ impl Executor {
                     .push((p.key, u.keys.depart(&mut departed.spare)));
             }
         }
-        departed.replaced = c.delta.replace.iter().map(|(_, new)| new.key).collect();
+        departed
+            .replaced
+            .extend(c.delta.replace.iter().map(|(_, new)| new.key));
         // The state a replaced node hands its successor, written while it is
         // still in the store (see `Node::chase`).
         departed.chase_events = std::mem::take(&mut self.chase);
@@ -243,18 +245,28 @@ impl Executor {
                 }
             }
         }
+        if let Some(mut store) = st.store.take() {
+            // A store with room for the plan's units, built with the commit:
+            // the units move into it.
+            store.append(&mut self.store);
+            std::mem::swap(&mut self.store, &mut store);
+            st.store = Some(store);
+        }
         if self.store.len() < c.delta.store_len as usize {
             self.store.resize_with(c.delta.store_len as usize, || None);
         }
         // Taken out and put back, so the list's buffer is not freed here.
         let mut incoming = std::mem::take(&mut c.incoming);
         for Incoming {
+            key: _,
             idx,
             generation,
             node,
             fade,
             params,
             mode,
+            keys,
+            staging,
         } in incoming.drain(..)
         {
             let slot = &mut self.store[idx.0 as usize];
@@ -265,6 +277,9 @@ impl Executor {
                     // unused.
                     c.spare_params.push(params);
                     c.spare_modes.push(mode);
+                    // A crossfade replaced without one running here has
+                    // departed the unit's keys: it gets its tables back.
+                    u.keys.refill(keys, &mut c.spare_held);
                     // A crossfade: the unit at this key fades out — or, with
                     // a fade already running here, this one waits for it,
                     // superseding one that was waiting.
@@ -274,7 +289,11 @@ impl Executor {
                         if let Some(q) = u.queued.replace(x) {
                             retire_fade(&mut self.inbox.fade_back, q);
                         }
+                        // The tables the waiting unit will write, unless the
+                        // unit has them already.
+                        c.spare_held.push(u.keys.wait(staging));
                     } else {
+                        c.spare_held.push(staging);
                         x.out = Some(std::mem::replace(&mut u.node, node));
                         u.fade = Some(x);
                         u.quiet = 0;
@@ -285,7 +304,8 @@ impl Executor {
                 }
                 (fade, _) => {
                     debug_assert!(slot.is_none(), "store index {} is occupied", idx.0);
-                    *slot = Some(Unit::new(generation, node, params, mode));
+                    *slot = Some(Unit::new(generation, node, params, mode, keys));
+                    c.spare_held.push(staging);
                     // Nothing to fade from (reachable only through
                     // `package`): the crossfade goes back unused.
                     if let Some(x) = fade {
@@ -307,307 +327,135 @@ impl Executor {
         c.relined = relined;
 
         let old_plan = self.plan.take();
-        let new_state = self.rebuild(
-            &plan,
-            old_plan.as_deref(),
-            &mut departed,
-            &mut c.opened,
-            carry,
+        debug_assert_eq!(
+            st.carry, carry,
+            "staged for the rate the executor resumes at"
         );
-        self.chase = std::mem::take(&mut departed.chase_events);
-        self.chase.clear();
-        let wanted: usize = plan
-            .units
-            .iter()
-            .filter_map(|u| u.shape.chase)
-            .map(|n| n.get() as usize)
-            .sum();
-        self.chase.reserve(wanted);
+        let new_state = self.adopt(&plan, old_plan.as_deref(), &mut st, &mut departed);
+        // The chase buffer sized for this plan; the old one goes back.
+        departed.chase_events.clear();
+        self.chase = std::mem::replace(&mut st.chase, std::mem::take(&mut departed.chase_events));
         c.spare_held.extend(departed.held.drain(..).map(|(_, k)| k));
         c.spare_held.append(&mut departed.spare);
-        // Which units' mix this plan drives: a lane's state is built here for
-        // a unit that has none (the plan's own sizing, as a driven edge's).
-        let max_block = self.prepare.max_block().get();
-        for rec in &plan.nodes.recs {
-            let driven = plan.param_ports[rec.params.range()]
-                .last()
-                .is_some_and(ParamPortOp::is_mix);
-            if let Some(u) = self.store[rec.store as usize].as_mut() {
-                u.mode.set_driven(driven, max_block);
+        // Units whose mix this plan drives and that have no lane yet.
+        for (store, lane) in st.drives.drain(..) {
+            match self.store.get_mut(store as usize).and_then(Option::as_mut) {
+                Some(u) => u.mode.drive_with(lane, &mut st.spare_drives),
+                None => st.spare_drives.push(lane),
             }
         }
         let old_state = std::mem::replace(&mut self.state, new_state);
         c.old_state = Some(old_state);
+        c.gone = departed;
+        // A re-prepare's buffer of parked tables goes back with the resume.
+        if self.parked.capacity() > 0 {
+            std::mem::swap(&mut self.parked, &mut c.parked);
+        }
+        c.staged = Some(st);
         self.plan = Some(plan);
         c.plan = old_plan;
     }
 
-    /// The state for `plan`, carrying what survives out of `self.state`
-    /// (which keeps what does not, to be retired with it).
-    fn rebuild(
+    /// Installs the state staged for `plan` (`stage.rs`), moving into it
+    /// what carries out of `self.state` (which keeps what does not, to be
+    /// retired with it), and flushing what disappeared to the sinks that
+    /// remain. Allocates and frees nothing: every buffer was built with the
+    /// commit, and what is replaced goes back in it.
+    #[allow(clippy::too_many_lines)]
+    fn adopt(
         &mut self,
         plan: &Plan,
         old_plan: Option<&Plan>,
+        st: &mut Staged,
         departed: &mut Gone,
-        opened: &mut Opened,
-        carry: bool,
     ) -> State {
-        let cap = self.event_cap;
         let max_block = self.prepare.max_block().get();
-        // After a sample-rate change nothing time-based carries: every ring
-        // and FIFO below starts fresh, and the old event FIFOs, left behind,
-        // are flushed by the pass that flushes vanished delays (see
-        // `Editor::reprepare` for the rule).
+        let mut new = st.state.take().expect("a staged commit carries its state");
         let old = &mut self.state;
 
-        // PDC rings and FIFOs, by key.
-        let old_delays: BTreeMap<DelayKey, usize> = old_plan
-            .map(|p| {
-                p.delays
-                    .iter()
-                    .enumerate()
-                    .map(|(i, d)| (d.key, i))
-                    .collect()
-            })
-            .unwrap_or_default();
-        // An event FIFO is sized from its source port's declared rate
-        // (`Shape::event_capacity`), or the default for one that declared
-        // none: the same figure the source's writer enforces.
-        // The rate is what the port can hold, note-off room included: the
-        // FIFO takes every event the port wrote.
-        let rate = |from: crate::EventTapSource| plan.event_tap_rate(from, cap);
-        let mut rings: Vec<Option<Ring>> = plan
-            .delays
-            .iter()
-            .map(|d| {
-                let carried = old_delays
-                    .get(&d.key)
-                    .filter(|_| carry)
-                    .and_then(|&i| old.rings.get_mut(i))
-                    .and_then(Option::take);
-                Some(match (d.key, carried) {
-                    (key, Some(Ring::Event(mut f))) if let Some(from) = key.event_origin() => {
-                        f.retune(d.len);
-                        f.resize(rate(from), max_block);
-                        Ring::Event(f)
+        // PDC rings and FIFOs: one moves in whole when its length stands, and
+        // is copied into the ring built for its new length when it does not.
+        for (i, from) in st.rings.iter().enumerate() {
+            match *from {
+                RingFrom::New => {}
+                RingFrom::Keep { from, rate } => {
+                    let mut ring = old.rings.get_mut(from as usize).and_then(Option::take);
+                    if let Some(Ring::Event(f)) = &mut ring {
+                        f.retune(plan.delays[i].len);
+                        f.resize(rate, max_block);
                     }
-                    (key, _) if let Some(from) = key.event_origin() => {
-                        Ring::Event(EventFifo::sized(d.len, rate(from), max_block))
-                    }
-                    (_, Some(Ring::Audio(mut r))) => {
-                        r.retune(d.len);
-                        Ring::Audio(r)
-                    }
-                    (_, _) => Ring::Audio(AudioRing::new(d.len)),
-                })
-            })
-            .collect();
-
-        // Feedback delays, by key: exactly the edge's delay long.
-        let old_fb = |kind: &[crate::plan::FeedbackSpec]| -> BTreeMap<FeedbackKey, usize> {
-            kind.iter().enumerate().map(|(i, f)| (f.key, i)).collect()
-        };
-        let old_afb = old_plan
-            .map(|p| old_fb(&p.audio_feedback))
-            .unwrap_or_default();
-        let old_efb = old_plan
-            .map(|p| old_fb(&p.event_feedback))
-            .unwrap_or_default();
-        let audio_fb = plan
-            .audio_feedback
-            .iter()
-            .map(|f| {
-                let carried = old_afb
-                    .get(&f.key)
-                    .filter(|_| carry)
-                    .and_then(|&i| old.audio_fb.get_mut(i))
-                    .and_then(Option::take);
-                Some(carried.unwrap_or_else(|| AudioRing::new(f.key.delay())))
-            })
-            .collect();
-        let event_fb: Vec<Option<EventFifo>> = plan
-            .event_feedback
-            .iter()
-            .map(|f| {
-                let FeedbackKey::Event { from, .. } = f.key else {
-                    unreachable!("event feedback keys are events")
-                };
-                let carried = old_efb
-                    .get(&f.key)
-                    .filter(|_| carry)
-                    .and_then(|&i| old.event_fb.get_mut(i))
-                    .and_then(Option::take)
-                    .map(|mut fifo| {
-                        fifo.resize(rate(crate::EventTapSource::Out(from)), max_block);
-                        fifo
-                    });
-                Some(carried.unwrap_or_else(|| {
-                    EventFifo::sized(
-                        f.key.delay(),
-                        rate(crate::EventTapSource::Out(from)),
-                        max_block,
-                    )
-                }))
-            })
-            .collect();
-
-        // Taps, by id: a tap the old plan ran carries its writer; one opened
-        // since the last commit arrives in the commit and wins over a carried
-        // one of the same id (opening an id again replaces it). A writer the
-        // new plan does not name stays in the old state (or the commit) and is
-        // freed on the control side with it.
-        let old_taps: BTreeMap<TapId, usize> = old_plan
-            .map(|p| p.taps.iter().enumerate().map(|(i, k)| (*k, i)).collect())
-            .unwrap_or_default();
-        let taps: Vec<Option<TapWriter>> = plan
-            .taps
-            .iter()
-            .map(|k| {
-                opened
-                    .taps
-                    .iter()
-                    .position(|(o, _)| o == k)
-                    .map(|at| opened.taps.swap_remove(at).1)
-                    .or_else(|| {
-                        old_taps
-                            .get(k)
-                            .and_then(|&i| old.taps.get_mut(i))
-                            .and_then(Option::take)
-                    })
-            })
-            .collect();
-
-        // Event taps, the same way. A tap whose port is missing has an entry
-        // and no op, so its writer is carried across plans all the same.
-        let old_event_taps: BTreeMap<EventTapId, usize> = old_plan
-            .map(|p| {
-                p.event_taps
-                    .iter()
-                    .enumerate()
-                    .map(|(i, k)| (*k, i))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let event_taps: Vec<Option<EventTapWriter>> = plan
-            .event_taps
-            .iter()
-            .map(|k| {
-                opened
-                    .event_taps
-                    .iter()
-                    .position(|(o, _)| o == k)
-                    .map(|at| opened.event_taps.swap_remove(at).1)
-                    .or_else(|| {
-                        old_event_taps
-                            .get(k)
-                            .and_then(|&i| old.event_taps.get_mut(i))
-                            .and_then(Option::take)
-                    })
-            })
-            .collect();
-
-        // Meters, the same way: carried by id, replaced by one opened since,
-        // and the width each now measures told to its cells.
-        let old_meters: BTreeMap<MeterId, usize> = old_plan
-            .map(|p| {
-                p.meters
-                    .iter()
-                    .enumerate()
-                    .map(|(i, (k, _))| (*k, i))
-                    .collect()
-            })
-            .unwrap_or_default();
-        // Weighted lanes, by edge: what a lane holds (the weight it was last
-        // given, and a driven lane's param state) carries across a commit
-        // that keeps the edge (not a sample-rate change's reset: a weight is
-        // not time), and a new edge starts at its value.
-        let mut old_lanes: BTreeMap<EdgeId, usize> = old_plan
-            .map(|p| {
-                p.sum_lanes
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, id)| Some(((*id)?, i)))
-                    .collect()
-            })
-            .unwrap_or_default();
-        // The lanes a source drives in this plan: each driven lane's state
-        // is sized here, with the plan, so the audio thread allocates none.
-        let mut driven = vec![false; plan.sum_lanes.len()];
-        for op in &plan.ops {
-            if let Op::WeightedSum { lanes, gains, .. } = *op {
-                for g in &plan.gain_ports[gains.range()] {
-                    driven[lanes.start as usize + usize::from(g.lane)] = true;
+                    new.rings[i] = ring;
+                }
+                RingFrom::Move { from } => {
+                    let carried = old.rings.get_mut(from as usize).and_then(Option::take);
+                    move_ring(new.rings[i].as_mut(), carried, &mut st.spare_rings);
                 }
             }
         }
-        let lanes: Vec<SumLane> = plan
-            .sum_lanes
-            .iter()
-            .zip(&driven)
-            .map(|(id, &driven)| match id {
-                None => SumLane::plain(),
-                Some(id) => SumLane::weighted(
-                    opened
-                        .gains
-                        .get(id)
-                        .cloned()
-                        .expect("the editor sends a cell for every weighted lane"),
-                    old_lanes
-                        .remove(id)
-                        .and_then(|i| old.lanes.get_mut(i))
-                        .map(SumLane::carry)
-                        .unwrap_or_default(),
-                    driven,
-                    max_block,
-                    declick_frames(plan.prepare.sample_rate()).get(),
-                ),
-            })
-            .collect();
-        let meters: Vec<Option<MeterWriter>> = plan
-            .meters
-            .iter()
-            .map(|(k, lanes)| {
-                let writer = opened
-                    .meters
-                    .iter()
-                    .position(|(o, _)| o == k)
-                    .map(|at| opened.meters.swap_remove(at).1)
-                    .or_else(|| {
-                        old_meters
-                            .get(k)
-                            .and_then(|&i| old.meters.get_mut(i))
-                            .and_then(Option::take)
-                    });
-                if let Some(w) = &writer {
-                    w.set_width(*lanes);
-                }
-                writer
-            })
-            .collect();
-
-        // Flush what disappeared, to sinks that survive. Order: injections
-        // not yet delivered, then event delays in key order, then event
-        // feedback in key order — the reference interpreter's order too.
-        let sink_of = |at: EventIn| -> Option<u32> {
-            let u = plan.units.binary_search_by_key(&at.node, |u| u.key).ok()?;
-            (at.port < plan.units[u].shape.event_in).then_some(u as u32)
-        };
-        let mut flushed: BTreeMap<(u32, u16), Vec<Event>> = BTreeMap::new();
-        let mut take_into = |at: EventIn, events: Vec<Event>| {
-            if let Some(u) = sink_of(at) {
-                flushed.entry((u, at.port)).or_default().extend(events);
+        for (i, from) in st.audio_fb.iter().enumerate() {
+            if let Some(j) = *from {
+                new.audio_fb[i] = old.audio_fb.get_mut(j as usize).and_then(Option::take);
             }
-        };
-        // What replaced nodes wrote for their successors goes first: it is
-        // the oldest, and lands at offset 0 ahead of everything else. A
-        // successor with no event input drops it, counted.
+        }
+        for (i, from) in st.event_fb.iter().enumerate() {
+            match *from {
+                RingFrom::New => {}
+                RingFrom::Keep { from, rate } => {
+                    let mut fifo = old.event_fb.get_mut(from as usize).and_then(Option::take);
+                    if let Some(f) = &mut fifo {
+                        f.resize(rate, max_block);
+                    }
+                    new.event_fb[i] = fifo;
+                }
+                RingFrom::Move { from } => {
+                    let carried = old.event_fb.get_mut(from as usize).and_then(Option::take);
+                    if let (Some(n), Some(mut o)) = (new.event_fb[i].as_mut(), carried) {
+                        n.transfer_from(&mut o);
+                        st.spare_rings.push(Ring::Event(o));
+                    }
+                }
+            }
+        }
+        for (i, from) in st.taps.iter().enumerate() {
+            if let Some(j) = *from {
+                new.taps[i] = old.taps.get_mut(j as usize).and_then(Option::take);
+            }
+        }
+        for (i, from) in st.event_taps.iter().enumerate() {
+            if let Some(j) = *from {
+                new.event_taps[i] = old.event_taps.get_mut(j as usize).and_then(Option::take);
+            }
+        }
+        for (i, from) in st.meters.iter().enumerate() {
+            if let Some(j) = *from {
+                let writer = old.meters.get_mut(j as usize).and_then(Option::take);
+                if let Some(w) = &writer {
+                    w.set_width(plan.meters[i].1);
+                }
+                new.meters[i] = writer;
+            }
+        }
+        for (i, from) in st.lanes.iter().enumerate() {
+            if let Some(carried) = from
+                .and_then(|j| old.lanes.get_mut(j as usize))
+                .map(SumLane::carry)
+            {
+                new.lanes[i].adopt(carried, max_block, &mut st.spare_drives);
+            }
+        }
+
+        // Flush what disappeared, to sinks that survive. Order: what replaced
+        // nodes wrote for their successors, injections not yet delivered,
+        // then event delays and event feedback in key order — the reference
+        // interpreter's order too.
+        let (inject, has_inject) = (&mut new.inject, &mut new.has_inject);
         for (key, span, refused) in departed.chased.drain(..) {
             let at = EventIn { node: key, port: 0 };
             let events = &departed.chase_events[span];
-            match sink_of(at) {
-                Some(u) => {
-                    take_into(at, events.to_vec());
-                    self.dropped.at_node(u, refused);
+            match flush_target(plan, inject, has_inject, at) {
+                Some((u, shell)) => {
+                    let lost = fill(&mut shell.events, events);
+                    self.dropped.at_node(u, refused.saturating_add(lost));
                 }
                 None => {
                     if let Ok(u) = plan.units.binary_search_by_key(&key, |u| u.key) {
@@ -623,30 +471,34 @@ impl Executor {
                     node: op.units[inj.unit as usize].key,
                     port: inj.port,
                 };
-                take_into(at, inj.events.clone());
-            }
-            let mut gone: Vec<(DelayKey, usize)> = old_delays
-                .iter()
-                .filter(|(k, _)| matches!(k, DelayKey::Event { .. }))
-                .map(|(&k, &i)| (k, i))
-                .collect();
-            gone.sort();
-            for (k, i) in gone {
-                if let (DelayKey::Event { at, .. }, Some(Some(Ring::Event(f)))) =
-                    (k, old.rings.get(i))
-                {
-                    take_into(at, f.flushed());
+                if let Some((u, shell)) = flush_target(plan, inject, has_inject, at) {
+                    let lost = fill(&mut shell.events, &inj.events);
+                    self.dropped.at_node(u, lost);
                 }
             }
-            for (k, &i) in &old_efb {
-                if let (FeedbackKey::Event { at, .. }, Some(Some(f))) = (k, old.event_fb.get(i)) {
-                    take_into(*at, f.flushed());
+            for g in &st.gone_delays {
+                if let Some(Some(Ring::Event(f))) = old.rings.get(g.from as usize)
+                    && let Some((u, shell)) = flush_target(plan, inject, has_inject, g.at)
+                {
+                    let lost = f.flush_into(&mut shell.events);
+                    self.dropped
+                        .at_node(u, u32::try_from(lost).unwrap_or(u32::MAX));
+                }
+            }
+            for g in &st.gone_feedback {
+                if let Some(Some(f)) = old.event_fb.get(g.from as usize)
+                    && let Some((u, shell)) = flush_target(plan, inject, has_inject, g.at)
+                {
+                    let lost = f.flush_into(&mut shell.events);
+                    self.dropped
+                        .at_node(u, u32::try_from(lost).unwrap_or(u32::MAX));
                 }
             }
         }
         // A re-prepare's tables go back to the units that come back; the
         // others are as retired.
-        for (key, mut keys) in std::mem::take(&mut self.parked) {
+        let mut parked = std::mem::take(&mut self.parked);
+        for (key, mut keys) in parked.drain(..) {
             let same = |a: Option<&Plan>| a.and_then(|p| p.unit(key)).map(|u| u.generation);
             let back = (same(old_plan) == same(Some(plan)))
                 .then(|| plan.units.binary_search_by_key(&key, |u| u.key).ok())
@@ -660,10 +512,14 @@ impl Executor {
                 None => departed.held.push((key, keys.depart(&mut departed.spare))),
             }
         }
+        self.parked = parked;
         // Keys held on an edge that ended go to the sink that lost it, after
         // everything flushed to that sink (the offs of notes whose ons were in
         // flight). See `held.rs`.
-        if let Some(op) = old_plan {
+        if old_plan.is_some() {
+            for i in inject.iter_mut() {
+                i.closed_from = i.events.len();
+            }
             let source_gone = |n: NodeKey| departed.held.iter().any(|(k, _)| *k == n);
             // What a port holds, and what it owes and has not yet sent.
             let held_of = |from: EventOut| -> (Option<&Held>, Option<&Held>) {
@@ -684,23 +540,14 @@ impl Executor {
                     None => (None, None),
                 }
             };
-            let mut closing: BTreeMap<(u32, u16), Vec<Event>> = BTreeMap::new();
-            for e in &op.event_edges {
-                let &(from, at) = e;
-                let in_plan = plan.event_edges.binary_search(e).is_ok();
+            for &(from, at) in &st.closers {
+                let in_plan = plan.event_edges.binary_search(&(from, at)).is_ok();
                 if (in_plan && !source_gone(from.node)) || departed.replaced.contains(&at.node) {
                     continue;
                 }
-                let Some(u) = sink_of(at) else {
-                    continue;
-                };
                 let (held, owed) = held_of(from);
-                let owing = [held, owed]
-                    .into_iter()
-                    .flatten()
-                    .filter(|h| !h.is_empty())
-                    .collect::<Vec<_>>();
-                if owing.is_empty() {
+                let owing = [held, owed].into_iter().flatten().filter(|h| !h.is_empty());
+                if owing.clone().next().is_none() {
                     continue;
                 }
                 // A replaced source whose edge (and its delay) goes on: the
@@ -709,190 +556,118 @@ impl Executor {
                     .delays
                     .iter()
                     .position(|d| d.key == DelayKey::Event { at, from });
-                if in_plan && let Some(Some(Ring::Event(f))) = delay.map(|i| &mut rings[i]) {
-                    let mut offs = Vec::new();
-                    owing.iter().for_each(|h| h.close_into(&mut offs));
-                    let lost = f.push(&offs);
+                if in_plan && let Some(Some(Ring::Event(f))) = delay.map(|i| &mut new.rings[i]) {
+                    st.closes.clear();
+                    let missed: usize = owing.map(|h| h.close_into(&mut st.closes)).sum();
+                    let lost = f.push(&st.closes);
                     self.dropped.charge_source(from, lost);
-                } else {
-                    let offs = closing.entry((u, at.port)).or_default();
-                    owing.iter().for_each(|h| h.close_into(offs));
+                    if let Some(u) = plan.units.binary_search_by_key(&at.node, |u| u.key).ok() {
+                        self.dropped
+                            .at_node(u as u32, u32::try_from(missed).unwrap_or(u32::MAX));
+                    }
+                } else if let Some((u, shell)) = flush_target(plan, inject, has_inject, at) {
+                    let missed: usize = owing.map(|h| h.close_into(&mut shell.events)).sum();
+                    self.dropped
+                        .at_node(u, u32::try_from(missed).unwrap_or(u32::MAX));
                 }
             }
-            for (k, mut offs) in closing {
-                let end = flushed
-                    .get(&k)
-                    .and_then(|v| v.iter().map(|e| e.offset).max())
+            // The closes land at the end of what was flushed, after it.
+            for shell in inject.iter_mut().filter(|i| i.events.len() > i.closed_from) {
+                let (before, closes) = shell.events.split_at_mut(shell.closed_from);
+                let end = before
+                    .iter()
+                    .map(|e| e.offset)
+                    .max()
                     .unwrap_or(crate::time::Offset::ZERO);
-                for e in &mut offs {
+                for e in closes {
                     e.offset = end;
                 }
-                flushed.entry(k).or_default().extend(offs);
             }
         }
-        // A port that carries notes is tracked from its unit's first block, so
-        // an edge added later knows what the port already holds.
-        for pu in plan.units.iter().filter(|u| u.shape.event_out > 0) {
-            if let Some(u) = self.store[pu.idx.0 as usize].as_mut() {
-                let waiting = u.queued.is_some();
-                u.keys
-                    .size(pu.shape.event_out as usize, pu.shape.note_events, waiting);
-            }
+        // By offset, ties in flush order.
+        for shell in inject.iter_mut().filter(|i| i.live) {
+            sort_by_offset(&mut shell.events);
         }
-
-        // A FIFO carried across a commit that lowered its bound (a source
-        // now declaring a smaller rate, a shorter delay, a larger
-        // `MaxBlock`) can hold more than the bound its output slot was
-        // priced at. The compiler is pure and cannot know what is queued, so
-        // the slot is widened here, by that excess (`EventFifo::excess`),
-        // where the state is built — and so is every merge downstream of
-        // it, which the compiler priced at the sum of its inputs, and the
-        // buffers a sink merges its inputs into (a flush's `merged`, the
-        // command overlay, below): the backlog the FIFO holds can still go
-        // out in one block, on its frames, and pass everything after it.
-        // (One corner stays late, as it was without an excess: a delay
-        // retuned below one block makes its whole backlog overdue at offset
-        // 0; if that fills the slot, new input falling due in the same
-        // block waits for the next.) Here and only here, on a commit that
-        // already allocates this whole state; the queue never grows past it
-        // (a new non-note-off is refused while it is full), so rendering
-        // stays allocation-free. The next rebuild prices it afresh.
-        //
-        // Per slot, not per value: a slot the colouring pass shares takes
-        // the largest excess of anything it holds, which only over-sizes.
-        let mut extra = vec![0usize; plan.event_slot_capacity.len()];
-        for (f, spec) in event_fb.iter().zip(&plan.event_feedback) {
-            if let Some(f) = f {
-                let x = &mut extra[spec.slot as usize];
-                *x = (*x).max(f.excess());
-            }
-        }
-        // Ops run in topological order, so a merge comes after whatever
-        // feeds it.
-        for op in &plan.ops {
-            match *op {
-                Op::EventDelay { delay, dst, .. } => {
-                    if let Some(Ring::Event(f)) = &rings[delay as usize] {
-                        let x = &mut extra[dst as usize];
-                        *x = (*x).max(f.excess());
-                    }
-                }
-                Op::EventMerge { srcs, dst } => {
-                    let sum = plan.event_list[srcs.range()]
-                        .iter()
-                        .map(|&s| extra[s as usize])
-                        .sum::<usize>();
-                    let x = &mut extra[dst as usize];
-                    *x = (*x).max(sum);
-                }
-                _ => {}
-            }
-        }
-        let extra_total: usize = extra.iter().sum();
-        let slot_capacity = |i: usize| plan.event_slot_capacity[i].events(cap) + extra[i];
 
         // What a crossfade queued behind a running one holds for the unit
-        // that waits (`Node::chase`): delivered by `end_fades`, so its room is
-        // made here, with the plan, and the audio thread allocates none. What
-        // its buffer refused is counted now, and what a successor with no
-        // event input cannot take is dropped, counted.
+        // that waits (`Node::chase`): delivered by `end_fades` into room made
+        // with the plan. What its buffer refused is counted now, and what a
+        // successor with no event input cannot take is dropped, counted.
         for (key, refused) in departed.held_refused.drain(..) {
             if let Ok(u) = plan.units.binary_search_by_key(&key, |u| u.key) {
                 self.dropped.at_node(u as u32, refused);
             }
         }
-        let mut held: BTreeMap<u32, usize> = BTreeMap::new();
-        for (u, unit) in plan.units.iter().enumerate() {
-            let Some(queued) = self
+        for &u in &st.queued {
+            let unit = &plan.units[u as usize];
+            if unit.shape.event_in > 0 {
+                continue;
+            }
+            if let Some(queued) = self
                 .store
                 .get_mut(unit.idx.0 as usize)
                 .and_then(Option::as_mut)
                 .and_then(|s| s.queued.as_mut())
-            else {
-                continue;
-            };
-            if queued.chase.is_empty() {
-                continue;
-            }
-            if unit.shape.event_in == 0 {
+                && !queued.chase.is_empty()
+            {
                 let lost = u32::try_from(queued.chase.len()).unwrap_or(u32::MAX);
-                self.dropped.at_node(u as u32, lost);
+                self.dropped.at_node(u, lost);
                 queued.chase.clear();
-            } else {
-                held.insert(u as u32, queued.chase.len());
             }
         }
-        let held_total: usize = held.values().sum();
 
-        let mut has_inject = vec![false; plan.units.len()];
-        let flushed_total: usize = flushed.values().map(Vec::len).sum();
-        let widest = (0..plan.event_slot_capacity.len())
-            .map(slot_capacity)
-            .max()
-            .unwrap_or(0);
-        let mut inject: Vec<Inject> = Vec::with_capacity(flushed.len() + held.len());
-        for ((unit, port), mut events) in flushed {
-            has_inject[unit as usize] = true;
-            // Several flushes into one sink: one sorted list, ties in
-            // flush order (stable).
-            events.sort_by_key(|e| e.offset);
-            // Room for what `end_fades` may deliver to this input later.
-            let room = if port == 0 {
-                held.remove(&unit).unwrap_or(0)
-            } else {
-                0
-            };
-            events.reserve(room);
-            let merged = Vec::with_capacity(events.len() + room + widest);
-            inject.push(Inject {
-                unit,
-                port,
-                events,
-                merged,
-                live: true,
-            });
+        // The parallel state was built for the pool the editor saw; a pool
+        // set since runs the serial walk until the next commit, which is
+        // bit for bit the same render.
+        if st.participants != self.pool.as_ref().map_or(0, |p| p.participants()) {
+            new.par = None;
         }
-        // The rest of the held: an injection nobody has delivered into yet.
-        for (unit, len) in held {
-            inject.push(Inject {
-                unit,
-                port: 0,
-                events: Vec::with_capacity(len),
-                merged: Vec::with_capacity(len + widest),
-                live: false,
-            });
-        }
-        // By unit, then port: the parallel executor's claims take each unit's
-        // run of the list (`par.rs`).
-        inject.sort_by_key(|i| (i.unit, i.port));
+        new
+    }
+}
 
-        // The widened slots, all of them: an over-estimate of what they add
-        // to the widest node's inputs. The parallel workers' overlays take
-        // the same figure.
-        let overlay = overlay_capacity(plan, cap, flushed_total + held_total + extra_total);
-        let par = par_for(plan, self.pool.as_ref(), self.store.len(), &inject, overlay);
-        State {
-            arena: Arena::new(plan.audio_slots as usize, max_block),
-            flags: {
-                let mut v = vec![0u8; plan.audio_slots as usize];
-                v[0] = SILENT | CONSTANT;
-                v
-            },
-            events: (0..plan.event_slot_capacity.len())
-                .map(|i| Vec::with_capacity(slot_capacity(i)))
-                .collect(),
-            rings,
-            audio_fb,
-            event_fb,
-            taps,
-            event_taps,
-            meters,
-            lanes,
-            inject,
-            has_inject,
-            has_due: vec![false; plan.units.len()],
-            overlay: Vec::with_capacity(overlay),
-            par,
+/// The injection buffer for the sink `at`, marked as holding a flush: `None`
+/// when the plan has no such input.
+fn flush_target<'a>(
+    plan: &Plan,
+    inject: &'a mut [Inject],
+    has_inject: &mut [bool],
+    at: EventIn,
+) -> Option<(u32, &'a mut Inject)> {
+    let u = plan.units.binary_search_by_key(&at.node, |u| u.key).ok()?;
+    if at.port >= plan.units[u].shape.event_in {
+        return None;
+    }
+    let u = u as u32;
+    let i = inject
+        .binary_search_by_key(&(u, at.port), |i| (i.unit, i.port))
+        .ok()?;
+    has_inject[u as usize] = true;
+    inject[i].live = true;
+    Some((u, &mut inject[i]))
+}
+
+/// Appends `events` to `to` as far as its capacity takes. Returns how many
+/// did not fit.
+fn fill(to: &mut Vec<Event>, events: &[Event]) -> u32 {
+    let room = (to.capacity() - to.len()).min(events.len());
+    to.extend_from_slice(&events[..room]);
+    u32::try_from(events.len() - room).unwrap_or(u32::MAX)
+}
+
+/// `carried`, copied into `target`, the ring built for its new length: both
+/// go on, the old one to `spare`.
+fn move_ring(target: Option<&mut Ring>, carried: Option<Ring>, spare: &mut Vec<Ring>) {
+    match (target, carried) {
+        (Some(Ring::Audio(n)), Some(Ring::Audio(o))) => {
+            n.transfer_from(&o);
+            spare.push(Ring::Audio(o));
         }
+        (Some(Ring::Event(n)), Some(Ring::Event(mut o))) => {
+            n.transfer_from(&mut o);
+            spare.push(Ring::Event(o));
+        }
+        (_, Some(o)) => spare.push(o),
+        (_, None) => {}
     }
 }

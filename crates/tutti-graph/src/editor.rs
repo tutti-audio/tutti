@@ -61,7 +61,7 @@ use crate::command::{CommandId, ScheduleError, command_channel};
 use crate::compile::{CompileError, Shapes};
 use crate::event::EventKind;
 use crate::event_tap::EventTapWriter;
-use crate::exec::{DEFAULT_EVENT_CAPACITY, Executor, channels};
+use crate::exec::{DEFAULT_EVENT_CAPACITY, Executor, Stager, channels};
 use crate::fork::{ForkHealth, ForkSource};
 use crate::gain::EdgeFade;
 use crate::meter::MeterWriter;
@@ -247,6 +247,9 @@ pub struct Editor {
     /// [`revision`](Self::revision): moved by every call that can change
     /// what a reader of the editor sees.
     revision: u64,
+    /// What the executor will hold once the commits sent are applied: the
+    /// bounds each commit's state is built from.
+    stager: Stager,
 }
 
 impl std::fmt::Debug for Editor {
@@ -299,6 +302,11 @@ impl Editor {
     pub fn with_event_capacity(prepare: Prepare, cap: usize) -> (Self, Executor) {
         let (channels, ends) = channels();
         let (commands, command_rx) = command_channel();
+        let stager = Stager::new(
+            cap,
+            Arc::clone(&channels.pool),
+            Arc::clone(&channels.rendered),
+        );
         let editor = Self {
             link: Link::new(channels, commands),
             prepare,
@@ -314,6 +322,7 @@ impl Editor {
             fork_health: Vec::new(),
             cells: LiveCells::new(),
             revision: 0,
+            stager,
         };
         (editor, Executor::new(prepare, cap, ends, command_rx))
     }

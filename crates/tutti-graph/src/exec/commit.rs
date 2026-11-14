@@ -4,21 +4,22 @@
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, AtomicUsize};
 
 use ringbuf::traits::{Producer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
 use tutti_curve::FadeLaw;
 use tutti_rt::RtScope;
 
-use super::state::{State, Unit};
+use super::stage::Staged;
+use super::state::{Gone, State, Unit};
 use super::{EDGE_FADE_CAPACITY, FADE_CAPACITY, QUEUE_CAPACITY};
 use crate::NodeKey;
 use crate::arena::Arena;
 use crate::event::Event;
 use crate::event_tap::EventTapWriter;
 use crate::gain::GainCell;
-use crate::held::Tables;
+use crate::held::{Keys, Tables};
 use crate::io::Io;
 use crate::loss::EventLoss;
 use crate::meter::MeterWriter;
@@ -142,6 +143,7 @@ impl Drop for Crossfade {
 /// A unit a commit places, with everything built for it on the control
 /// side.
 pub(super) struct Incoming {
+    pub(super) key: NodeKey,
     pub(super) idx: UnitIdx,
     pub(super) generation: u32,
     pub(super) node: NodeBox,
@@ -149,6 +151,11 @@ pub(super) struct Incoming {
     pub(super) fade: Option<Box<Crossfade>>,
     pub(super) params: ParamState,
     pub(super) mode: ModeState,
+    /// The held-key tables of a unit placed now, sized for its shape.
+    pub(super) keys: Keys,
+    /// The tables it writes into while it waits behind a running fade
+    /// (`Keys::wait`); empty for a unit with no event outputs or no fade.
+    pub(super) staging: Tables,
 }
 
 /// A kept unit's rebuilt bypass line.
@@ -191,6 +198,14 @@ pub(crate) struct Commit {
     /// Held-key tables the executor let go of, freed on the control side.
     pub(super) spare_held: Vec<Tables>,
     pub(super) old_state: Option<State>,
+    /// The state the plan needs, built on the control side (`stage.rs`);
+    /// after applying, what applying did not use.
+    pub(super) staged: Option<Box<Staged>>,
+    /// The lists applying fills, with room reserved here.
+    pub(super) gone: Gone,
+    /// A re-prepare's first half: where the units' held-key tables wait for
+    /// the resume (`Executor::parked`), with room for every unit.
+    pub(super) parked: Vec<(NodeKey, Keys)>,
     /// Tap producers and meter cells the editor opened since the last commit.
     pub(super) opened: Opened,
 }
@@ -265,12 +280,15 @@ impl Commit {
                     max_block,
                 );
                 Incoming {
+                    key: p.key,
                     idx: p.idx,
                     generation: p.generation,
                     node: NodeBox::new(unit, wakes(p.key)),
                     fade,
                     params,
                     mode: modes(p.key),
+                    keys: Keys::default(),
+                    staging: Tables::new(),
                 }
             })
             .collect::<Vec<_>>();
@@ -313,8 +331,11 @@ impl Commit {
             spare_params,
             spare_modes,
             spare_lines,
-            spare_held: Vec::with_capacity(delta_units),
+            spare_held: Vec::new(),
             old_state: None,
+            staged: None,
+            gone: Gone::default(),
+            parked: Vec::new(),
             opened,
         })
     }
@@ -337,6 +358,9 @@ impl Commit {
             spare_lines: Vec::new(),
             spare_held: Vec::with_capacity(units),
             old_state: None,
+            staged: None,
+            gone: Gone::default(),
+            parked: Vec::with_capacity(units),
             opened: Opened::default(),
         })
     }
@@ -428,6 +452,10 @@ pub(crate) struct Channels {
     pub(crate) unreported: Arc<AtomicU64>,
     /// The edges whose declick fade ended (`EdgeFade`), by the kind that did.
     pub(crate) edge_fades: HeapCons<(EdgeId, EdgeFade)>,
+    /// The executor's pool participants, and the blocks it has rendered
+    /// (`Stager`).
+    pub(crate) pool: Arc<AtomicUsize>,
+    pub(crate) rendered: Arc<AtomicU64>,
 }
 
 /// The executor's ends of the rings.
@@ -439,6 +467,8 @@ pub(crate) struct ExecutorEnds {
     pub(super) losses: HeapProd<EventLoss>,
     pub(super) unreported: Arc<AtomicU64>,
     pub(super) edge_fades: HeapProd<(EdgeId, EdgeFade)>,
+    pub(super) pool: Arc<AtomicUsize>,
+    pub(super) rendered: Arc<AtomicU64>,
 }
 
 /// Build the rings: the editor's ends and the executor's.
@@ -450,6 +480,8 @@ pub(crate) fn channels() -> (Channels, ExecutorEnds) {
     let unreported = Arc::new(AtomicU64::new(0));
     let (loss_tx, loss_rx) = HeapRb::<EventLoss>::new(crate::loss::RING_CAPACITY).split();
     let (fade_end_tx, fade_end_rx) = HeapRb::<(EdgeId, EdgeFade)>::new(EDGE_FADE_CAPACITY).split();
+    let pool = Arc::new(AtomicUsize::new(0));
+    let rendered = Arc::new(AtomicU64::new(0));
     (
         Channels {
             to_executor: tx,
@@ -459,6 +491,8 @@ pub(crate) fn channels() -> (Channels, ExecutorEnds) {
             losses: loss_rx,
             unreported: Arc::clone(&unreported),
             edge_fades: fade_end_rx,
+            pool: Arc::clone(&pool),
+            rendered: Arc::clone(&rendered),
         },
         ExecutorEnds {
             queue: rx,
@@ -468,6 +502,8 @@ pub(crate) fn channels() -> (Channels, ExecutorEnds) {
             losses: loss_tx,
             unreported,
             edge_fades: fade_end_tx,
+            pool,
+            rendered,
         },
     )
 }

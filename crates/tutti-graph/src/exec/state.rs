@@ -47,7 +47,13 @@ pub(crate) struct Unit {
 }
 
 impl Unit {
-    pub(super) fn new(generation: u32, node: NodeBox, params: ParamState, mode: ModeState) -> Self {
+    pub(super) fn new(
+        generation: u32,
+        node: NodeBox,
+        params: ParamState,
+        mode: ModeState,
+        keys: Keys,
+    ) -> Self {
         Self {
             generation,
             node,
@@ -58,7 +64,7 @@ impl Unit {
             fade: None,
             queued: None,
             params,
-            keys: Keys::default(),
+            keys,
             mode,
         }
     }
@@ -89,6 +95,8 @@ pub(crate) enum Ring {
 
 /// Events flushed from a delay that went away, waiting for their sink's next
 /// call, at their offsets relative to the earliest (see the module docs).
+/// Built on the control side with room for everything that can flow in
+/// (`stage.rs`); `live` is whether anything was flushed into it.
 pub(crate) struct Inject {
     pub(crate) unit: u32,
     pub(super) port: u16,
@@ -97,6 +105,9 @@ pub(crate) struct Inject {
     /// applying so the merge never grows.
     pub(super) merged: Vec<Event>,
     pub(super) live: bool,
+    /// While a commit's flush is written: how many of `events` came before
+    /// the closes of the edges it cut.
+    pub(super) closed_from: usize,
 }
 
 /// Everything the executor rebuilds when applying: the arenas, the delay and

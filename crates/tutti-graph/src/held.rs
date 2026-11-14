@@ -7,8 +7,8 @@
 //! the injection path that flushes a vanished delay. Nodes know nothing of
 //! this.
 //!
-//! The set is a bitset over the 16-bit [`Key`], fixed at 8 KiB, allocated when
-//! a plan is applied and never grown. A node's op writes only its own unit's
+//! The set is a bitset over the 16-bit [`Key`], fixed at 8 KiB, allocated on the
+//! control side with the commit that places the unit and never grown. A node's op writes only its own unit's
 //! sets, so a parallel block needs no new claim.
 //!
 //! A sink fed by several sources cannot tell whose note a key is: one source's
@@ -161,9 +161,18 @@ impl Held {
     }
 
     /// The messages that close everything held: pedals up, then every note
-    /// off, at offset 0 (ties keep this order).
-    pub(crate) fn close_into(&self, out: &mut Vec<Event>) {
-        self.for_each_close(|e| out.push(e));
+    /// off, at offset 0 (ties keep this order), as many as `out`'s capacity
+    /// takes. Returns how many did not fit. Allocates nothing.
+    pub(crate) fn close_into(&self, out: &mut Vec<Event>) -> usize {
+        let mut lost = 0;
+        self.for_each_close(|e| {
+            if out.len() < out.capacity() {
+                out.push(e);
+            } else {
+                lost += 1;
+            }
+        });
+        lost
     }
 
     fn for_each_close(&self, mut f: impl FnMut(Event)) {
@@ -200,6 +209,16 @@ fn pedal_up(i: usize) -> Option<Ump> {
 /// One table per event output port of a unit; `None` for a port that carries
 /// no notes.
 pub(crate) type Tables = Vec<Option<Held>>;
+
+/// `ports` tables, one for each port when `notes`: allocates what is missing.
+fn fill_tables(t: &mut Tables, ports: usize, notes: bool) {
+    t.resize_with(ports, || None);
+    if notes {
+        t.iter_mut().for_each(|h| {
+            h.get_or_insert_with(Held::new);
+        });
+    }
+}
 
 /// Add every table of `from` to the matching table of `into`, and empty
 /// `from` (its tables stay allocated).
@@ -257,21 +276,51 @@ impl Keys {
     /// carries notes gets a table per port, and while a replace waits, its
     /// `staged` and `owed` too. Allocates: control side, or applying a commit.
     pub(crate) fn size(&mut self, ports: usize, notes: bool, waiting: bool) {
-        let fill = |t: &mut Tables| {
-            t.resize_with(ports, || None);
-            if notes {
-                t.iter_mut().for_each(|h| {
-                    h.get_or_insert_with(Held::new);
-                });
-            }
-        };
-        fill(&mut self.held);
+        fill_tables(&mut self.held, ports, notes);
         // `owed` for every unit that carries notes: a bypass owes what the
         // unit held when it parks (`owe_held`).
-        fill(&mut self.owed);
+        fill_tables(&mut self.owed, ports, notes);
         if waiting {
-            fill(&mut self.staged);
+            fill_tables(&mut self.staged, ports, notes);
         }
+    }
+
+    /// The tables a waiting replace's unit writes into (`staged`), built on
+    /// the control side for [`wait`](Self::wait).
+    pub(crate) fn staging(ports: usize, notes: bool) -> Tables {
+        let mut t = Tables::new();
+        fill_tables(&mut t, ports, notes);
+        t
+    }
+
+    /// A replace waits behind a running one: `staged` is `tables` unless it
+    /// is already sized. Returns the tables not used, to free on the control
+    /// side. Allocates nothing.
+    pub(crate) fn wait(&mut self, tables: Tables) -> Tables {
+        if self.staged.len() < self.held.len() {
+            std::mem::replace(&mut self.staged, tables)
+        } else {
+            tables
+        }
+    }
+
+    /// Hands every table to `spare`, to be freed on the control side.
+    pub(crate) fn retire_into(self, spare: &mut Vec<Tables>) {
+        spare.extend([self.held, self.staged, self.owed]);
+    }
+
+    /// A replace with a crossfade departed the running unit's keys (it
+    /// stays in the store, fading out, and its keys are closed at the
+    /// commit): take the tables of `fresh`, sized for the unit, where it has
+    /// none now. Every table not used goes to `spare`. Allocates nothing.
+    pub(crate) fn refill(&mut self, mut fresh: Keys, spare: &mut Vec<Tables>) {
+        if self.held.len() < fresh.held.len() {
+            std::mem::swap(&mut self.held, &mut fresh.held);
+        }
+        if self.owed.len() < fresh.owed.len() {
+            std::mem::swap(&mut self.owed, &mut fresh.owed);
+        }
+        fresh.retire_into(spare);
     }
 
     pub(crate) fn held(&self) -> &Tables {

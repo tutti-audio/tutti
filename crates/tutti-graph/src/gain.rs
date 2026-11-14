@@ -369,41 +369,49 @@ impl SumLane {
         }
     }
 
-    /// A lane reading `cell`. `carried` is what the same edge's lane held
-    /// when a commit keeps it (`Carried::default()` starts at the value).
-    /// `driven` says whether this plan's lane has a source; `max` is the
-    /// prepared block, which sizes the driven state's values, and `declick`
-    /// the declick's length in frames.
-    pub(crate) fn weighted(
-        cell: GainCell,
-        carried: Carried,
-        driven: bool,
-        max: usize,
-        declick: usize,
-    ) -> Self {
-        let Carried { prev, drive, fade } = carried;
-        // A driven lane keeps its state across the commit; an undriven one
-        // keeps it only while it fades to its base. A lane that has run
-        // before resumes (a source connected now is a connection to a
-        // running port); a new one is on its first block.
-        let drive = match drive {
-            Some(state) if (driven || state.busy()) && state.fits(max, declick) => Some(state),
-            _ if driven => Some(ParamState::lane(
-                max,
-                declick,
-                cell.ranges(),
-                prev.is_some(),
-            )),
-            _ => None,
-        };
+    /// A lane reading `cell`, starting at its value. `driven` says whether
+    /// this plan's lane has a source; `max` is the prepared block, which
+    /// sizes the driven state's values, and `declick` the declick's length
+    /// in frames. A lane the same edge had in the plan it replaces takes
+    /// that one's state with [`adopt`](Self::adopt). Control side: allocates
+    /// the driven state.
+    pub(crate) fn weighted(cell: GainCell, driven: bool, max: usize, declick: usize) -> Self {
         Self {
             target: cell.load(),
             want: cell.load_fade(),
+            drive: driven.then(|| ParamState::lane(max, declick, cell.ranges())),
             cell: Some(cell),
-            prev,
-            drive,
-            fade,
+            prev: None,
+            fade: FadeState::default(),
             declick,
+        }
+    }
+
+    /// Take over what the same edge's lane held (`carried`) when a commit
+    /// keeps the edge. A driven lane keeps its state across the commit; an
+    /// undriven one keeps it only while it fades to its base. A lane that
+    /// has run before resumes (a source connected now is a connection to a
+    /// running port); a new one is on its first block. A state this lane
+    /// does not keep goes to `spare`, to be freed on the control side
+    /// (`spare` has room: one for each lane that carries).
+    pub(crate) fn adopt(&mut self, carried: Carried, max: usize, spare: &mut Vec<ParamState>) {
+        let Carried { prev, drive, fade } = carried;
+        self.prev = prev;
+        self.fade = fade;
+        match drive {
+            Some(state)
+                if (self.drive.is_some() || state.busy()) && state.fits(max, self.declick) =>
+            {
+                spare.extend(self.drive.replace(state));
+            }
+            other => {
+                spare.extend(other);
+                if prev.is_some()
+                    && let Some(state) = &mut self.drive
+                {
+                    state.resume();
+                }
+            }
         }
     }
 
@@ -683,10 +691,7 @@ mod tests {
 
     fn lane(base: f32) -> (GainCell, SumLane) {
         let cell = GainCell::new(amp(base), EdgeGain::DEFAULT_RANGE);
-        (
-            cell.clone(),
-            SumLane::weighted(cell, Carried::default(), false, 8, 240),
-        )
+        (cell.clone(), SumLane::weighted(cell, false, 8, 240))
     }
 
     /// The lane reads the snapshot, never the cell: a store after the

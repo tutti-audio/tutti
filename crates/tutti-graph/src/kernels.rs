@@ -57,24 +57,20 @@ impl AudioRing {
             .copied()
     }
 
-    /// Change the length, keeping the most recent `min(old, new)` inputs.
-    /// Control side: allocates.
-    pub(crate) fn retune(&mut self, len: Samples) {
-        let m = len.get().max(1);
-        let n = self.buf.len();
-        if m == n {
-            return;
-        }
-        let mut next = vec![0.0; m];
+    /// Take over `old`'s state into this ring, built zeroed on the control
+    /// side for the new length: the most recent `min(old, new)` inputs, the
+    /// older end zero-filled. Allocates nothing.
+    pub(crate) fn transfer_from(&mut self, old: &AudioRing) {
+        let (n, m) = (old.buf.len(), self.buf.len());
         let keep = n.min(m);
-        for (slot, x) in next[m - keep..]
+        for (slot, x) in self.buf[m - keep..]
             .iter_mut()
-            .zip(self.history().skip(n - keep))
+            .zip(old.history().skip(n - keep))
         {
             *slot = x;
         }
-        self.buf = next;
         self.pos = 0;
+        self.quiet = old.quiet;
     }
 
     /// Delay `src` into `dst`. Returns whether `dst` is known silent.
@@ -167,10 +163,10 @@ impl AudioRing {
 /// (`EventSlotCapacity::fifo`), so everything that falls due in a block —
 /// events input across several source blocks, or a backlog a retune made
 /// overdue — is delivered in it. A FIFO carried across a recompile that
-/// lowered its bound may hold more than the new one ([`excess`](Self::excess))
-/// until it drains; the executor widens its output slot (and every merge
-/// after it) by that excess when it builds the new state, so those are
-/// delivered on their frames too. Delivery never
+/// lowered its bound may hold more than the new one until it drains; the
+/// editor widens its output slot (and every merge after it) by the most it
+/// can hold past the new bound when it stages the commit (`exec/stage.rs`),
+/// so those are delivered on their frames too. Delivery never
 /// drops: should the slot be full anyway, the due events stay queued and go
 /// out at offset 0 of the next block — late, not lost.
 pub(crate) struct EventFifo {
@@ -185,9 +181,16 @@ impl EventFifo {
     /// A FIFO for a delay of `len`, sized from the declared rate (see the
     /// type docs). Control side: allocates.
     pub(crate) fn sized(len: Samples, cap: usize, max_block: usize) -> Self {
+        Self::sized_for(len, cap, max_block, 0)
+    }
+
+    /// As [`sized`](Self::sized), with room for at least `room` events: a
+    /// FIFO that takes over another's queue must hold all of it. Control
+    /// side: allocates.
+    pub(crate) fn sized_for(len: Samples, cap: usize, max_block: usize, room: usize) -> Self {
         let (limit, reserve) = Self::bounds(len.get(), cap, max_block);
         Self {
-            q: VecDeque::with_capacity(limit + reserve),
+            q: VecDeque::with_capacity((limit + reserve).max(room)),
             len: len.get() as u64,
             clock: 0,
             limit,
@@ -232,10 +235,11 @@ impl EventFifo {
     /// while the backlog is at or past the new limit, a new non-note-off is
     /// refused (dropped, and counted in the executor's dropped events) and a
     /// note-off takes the reserve or evicts the oldest non-note-off, as
-    /// [`push`](Self::push) does at any full FIFO. Queued events past a smaller new bound are
-    /// kept, and are the FIFO's [`excess`](Self::excess), which the executor
-    /// adds to the output slot it prices at the bound, so they still go out
-    /// on their frames even if they all fall due at once.
+    /// [`push`](Self::push) does at any full FIFO. Queued events past a smaller
+    /// new bound are kept, and the output slot is widened by the most they
+    /// can be, so they still go out on their frames even if they all fall
+    /// due at once. On the audio thread this never grows the queue: the
+    /// FIFO was built with room for the new bound.
     pub(crate) fn resize(&mut self, cap: usize, max_block: usize) {
         let (limit, reserve) = Self::bounds(self.len as usize, cap, max_block);
         self.limit = limit;
@@ -246,13 +250,17 @@ impl EventFifo {
         }
     }
 
-    /// How many queued events lie past the FIFO's bound: zero, except
-    /// after a [`resize`](Self::resize) that lowered the bound below what
-    /// was queued. The queue never grows while above its bound (a new
-    /// non-note-off is refused, a note-off evicts), so this is the most the
-    /// FIFO can hold past what its output slot was priced for.
-    pub(crate) fn excess(&self) -> usize {
-        self.q.len().saturating_sub(self.limit + self.reserve)
+    /// Take over `old`'s queue and clock into this FIFO, which was built on
+    /// the control side for the new length and rate with room for all of
+    /// it: what [`retune`](Self::retune) and [`resize`](Self::resize) leave.
+    /// Allocates nothing.
+    pub(crate) fn transfer_from(&mut self, old: &mut EventFifo) {
+        debug_assert!(
+            self.q.capacity() - self.q.len() >= old.q.len(),
+            "the FIFO built for a carry holds the queue it takes"
+        );
+        self.q.extend(old.q.drain(..));
+        self.clock = old.clock;
     }
 
     /// Every event still queued, oldest first.
@@ -263,18 +271,22 @@ impl EventFifo {
 
     /// The queued events for a flush, when the delay itself goes away: each
     /// at its due time relative to the earliest, so a note-on/note-off pair
-    /// keeps its length. Control side (allocates).
-    pub(crate) fn flushed(&self) -> Vec<Event> {
+    /// keeps its length, appended to `out` as far as its capacity takes.
+    /// Returns how many did not fit. Allocates nothing.
+    pub(crate) fn flush_into(&self, out: &mut Vec<Event>) -> usize {
         let first = self.q.front().map_or(0, |&(t, _)| t + self.len);
-        // Raw offsets: the spacing, not yet inside any block — the block
-        // that delivers them clamps them (`Offset::clamp_to`).
-        self.q
-            .iter()
-            .map(|&(t, e)| Event {
+        let mut lost = 0;
+        for &(t, e) in &self.q {
+            if out.len() == out.capacity() {
+                lost += 1;
+                continue;
+            }
+            out.push(Event {
                 offset: Offset::raw((t + self.len - first).min(u64::from(u32::MAX)) as u32),
                 ..e
-            })
-            .collect()
+            });
+        }
+        lost
     }
 
     /// Queue this block's `input`. Returns how many were dropped.
@@ -365,19 +377,22 @@ mod tests {
         assert_eq!(dst, vec![0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
     }
 
-    /// Retuning keeps the newest inputs and zero-pads the oldest end.
+    /// A ring built for another length takes the newest inputs and
+    /// zero-pads the oldest end.
     #[test]
-    fn retune_keeps_recent_history() {
+    fn transfer_keeps_recent_history() {
         let mut r = AudioRing::new(Samples(4));
         let mut sink = vec![0.0; 4];
         r.run(&[1.0, 2.0, 3.0, 4.0], &mut sink, false);
-        r.retune(Samples(2));
+        let mut shorter = AudioRing::new(Samples(2));
+        shorter.transfer_from(&r);
         let mut out = vec![0.0; 2];
-        r.run(&[0.0, 0.0], &mut out, false);
+        shorter.run(&[0.0, 0.0], &mut out, false);
         assert_eq!(out, vec![3.0, 4.0]);
-        r.retune(Samples(4));
+        let mut longer = AudioRing::new(Samples(4));
+        longer.transfer_from(&shorter);
         let mut out = vec![0.0; 4];
-        r.run(&[0.0; 4], &mut out, false);
+        longer.run(&[0.0; 4], &mut out, false);
         assert_eq!(out, vec![0.0, 0.0, 0.0, 0.0]);
     }
 

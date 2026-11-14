@@ -164,6 +164,11 @@ impl Link {
         self.out
     }
 
+    /// Commits the executor has applied: handed back, every one.
+    pub(super) fn acked(&self) -> u64 {
+        self.acked
+    }
+
     /// Crossfades sent and not yet handed back.
     pub(super) fn fades_in_flight(&self) -> usize {
         self.fades_out
