@@ -79,8 +79,11 @@ pub(crate) struct MidiOut {
     registration: AuMidiOutput,
     /// What the callback has pushed since the last block took it, in order.
     queue: Arc<ArrayQueue<WireMidi>>,
-    /// Events the callback dropped for want of room in `queue`.
+    /// Events the callback dropped for want of room in `queue` since the last
+    /// block took them.
     overflow: Arc<AtomicU64>,
+    /// Every event lost to `overflow`, since activation.
+    lost_total: u64,
 }
 
 impl MidiOut {
@@ -109,15 +112,20 @@ impl MidiOut {
             registration,
             queue,
             overflow,
+            lost_total: 0,
         })
     }
 
-    /// Moves what the render's callback queued into `out`, in order; what `out`
-    /// has no room for is counted in `out`'s own `midi_dropped`.
-    fn take_into(&self, out: &mut ProcessOutput) {
-        while let Some(event) = self.queue.pop() {
-            out.emit_midi([event]);
-        }
+    /// Moves what the render's callback queued into `out` in one pass, in
+    /// order. What `out` has no room for, and what the queue had none for, is
+    /// counted in `out`'s `midi_dropped`, which is how every Processor reports
+    /// MIDI it lost. The queue and `out` hold [`MIDI_STACK_CAPACITY`] each, so a
+    /// block loses events only when the unit emits more than that.
+    fn take_into(&mut self, out: &mut ProcessOutput) {
+        out.emit_midi(std::iter::from_fn(|| self.queue.pop()));
+        let lost = self.overflow.swap(0, Ordering::Relaxed);
+        self.lost_total += lost;
+        out.count_midi_dropped(usize::try_from(lost).unwrap_or(usize::MAX));
     }
 
     /// Forgets the streams' open SysEx and parameter runs, and what is queued.
@@ -128,7 +136,7 @@ impl MidiOut {
 
     /// Events dropped for want of room in the queue, since activation.
     pub(crate) fn overflow(&self) -> u64 {
-        self.overflow.load(Ordering::Relaxed)
+        self.lost_total + self.overflow.load(Ordering::Relaxed)
     }
 }
 
@@ -693,7 +701,7 @@ impl AuProcessor {
         // The MIDI the unit generated while it rendered, taken even from a block
         // that failed: what it emitted before the failure happened. AUv2 reports
         // no parameter or note-expression output through this path.
-        if let Some(midi_out) = &self.rendering.midi_out {
+        if let Some(midi_out) = &mut self.rendering.midi_out {
             midi_out.take_into(out);
         }
         rendered.map_err(|e| PluginError::Block(block_reason(&e)))

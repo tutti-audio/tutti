@@ -801,7 +801,7 @@ fn an_orphan_data_byte_is_dropped() {
 ///
 /// 1. it never reads past the **declared** window, so a truncated message at the
 ///    window's end is dropped rather than completed from adjacent memory;
-/// 2. it never honours a length beyond Apple's documented 256-byte maximum, since
+/// 2. it stops at a length beyond Apple's documented 256-byte maximum, since
 ///    a `u16` can claim 65535 and that read *would* leave the allocation.
 #[test]
 fn a_packet_claiming_more_bytes_than_it_holds_is_not_over_read() {
@@ -853,32 +853,15 @@ fn a_packet_claiming_more_bytes_than_it_holds_is_not_over_read() {
         "a status byte with no data bytes at all must be dropped"
     );
 
-    // The second guarantee: a length beyond Apple's documented maximum is clamped.
-    // `u16::MAX` is 65535 — 255 packets' worth of memory the AU never wrote — and
-    // honouring it would read ~61 KiB past this 512-byte-slack allocation.
-    //
-    // The clamp to 256 bounds the walk at **127** messages, and the arithmetic is
-    // worth spelling out because getting it wrong is how this assertion was first
-    // written twice over. The 256-byte window holds `90 3C 64` (3 bytes) followed by
-    // 253 zeros. Those zeros are consumed as running-status note-ons at **two** bytes
-    // each — running status reuses the status byte, so a continuation costs 2, not 3.
-    // 1 + floor(253 / 2) = 1 + 126 = 127. (A `size_of - header` bound of 258 gives
-    // 128, which is how the padding bug in `MAX_PACKET_PAYLOAD` first showed up
-    // here.)
-    //
-    // Asserted as an exact equality rather than a bound, because the count is the
-    // evidence the clamp landed on exactly 256: larger means the 65535 claim was
-    // honoured and the walk left the allocation; smaller means the clamp is tighter
-    // than Apple's documented maximum and would truncate a legitimate full packet.
+    // The second guarantee: a length beyond Apple's documented maximum ends the
+    // walk. `u16::MAX` is 65535 — 255 packets' worth of memory the AU never wrote —
+    // and where the next packet starts cannot be told from a length that is a lie,
+    // so nothing of the list from that packet on is read.
     let list = PacketListBuf::from_raw_overclaiming(&[(0, u16::MAX, &[0x90, 60, 100])]);
-    let split = list.split();
-    assert_eq!(split[0], (0, vec![0x90, 60, 100]));
-    assert_eq!(
-        split.len(),
-        127,
-        "a 65535-byte claim must be clamped to Apple's `Byte data[256]` maximum: \
-         3 bytes of explicit message + floor(253/2) running-status continuations \
-         = 127. See the comment above for why 128 is the wrong answer."
+    assert!(
+        list.split().is_empty(),
+        "a length past Apple's `Byte data[256]` maximum ends the walk, got {:?}",
+        list.split()
     );
 }
 

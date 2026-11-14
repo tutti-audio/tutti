@@ -332,7 +332,16 @@ pub fn install(unit: &Unit, sink: MidiOutSink) -> Result<AuMidiOutput> {
         unrouted,
         reset,
     };
-    unit.set::<MidiOutputCallbackProperty>(Scope::GLOBAL, Element::ZERO, &callback)?;
+    let mut handle = handle;
+    if let Err(refused) =
+        unit.set::<MidiOutputCallbackProperty>(Scope::GLOBAL, Element::ZERO, &callback)
+    {
+        // The AU refused the property, so it never held the pointer: the state
+        // is the host's to free, not one to leak against a withdrawal that
+        // cannot be needed.
+        drop(handle.state.take());
+        return Err(refused);
+    }
     Ok(handle)
 }
 
@@ -444,9 +453,11 @@ unsafe extern "C" fn au_midi_output_callback(
     pktlist: *const MIDIPacketList,
 ) -> OSStatus {
     // SAFETY: `user_data` is the `MidiOutState` box `install` registered, which
-    // the withdrawing property write outlives; the AU calls only from inside its
-    // own render, one call at a time, and the host touches the box only before
-    // installing and after withdrawing, so this is the only reference.
+    // the withdrawing property write outlives. This `&mut MidiOutState` is the
+    // only reference to it because of one invariant: the AU calls this only from
+    // inside its own render (a render-time callback, never from another thread
+    // or between renders), one call at a time, and the host touches the box only
+    // before installing and after withdrawing.
     unsafe {
         with_state_mut::<MidiOutState, _>(
             user_data,
@@ -524,13 +535,25 @@ unsafe fn for_each_packet(pktlist: *const MIDIPacketList, mut f: impl FnMut(u32,
                 as *const u32,
         )
     };
+    // The list is at most `MAX_LIST_BYTES` (`MIDIServices.h`: a `MIDIPacketList`
+    // is never larger than 65536 bytes), and a packet takes at least its header,
+    // so a count past what fits is a lie: it is capped, and the walk below stops
+    // at the bound whatever the count says.
+    let num_packets = num_packets.min(MAX_PACKETS);
     // The first packet begins at the `packet` field's offset — 4, immediately
     // after `numPackets`.
+    let first = std::mem::offset_of!(MIDIPacketList, packet);
     // SAFETY: the first packet starts at `offset_of!(MIDIPacketList, packet)`, within the list.
-    let mut p = unsafe { (pktlist as *const u8).add(std::mem::offset_of!(MIDIPacketList, packet)) };
+    let mut p = unsafe { (pktlist as *const u8).add(first) };
+    // Bytes of the list walked so far, from its start.
+    let mut walked = first;
 
     for _ in 0..num_packets {
-        // SAFETY: `p` points at a packet header inside the list: the walk advances only by each packet's own length.
+        // A packet's header must lie within the list's documented size.
+        if walked + PACKET_HEADER_SIZE > MAX_LIST_BYTES {
+            break;
+        }
+        // SAFETY: `p` points at a packet header inside the list: the walk advances only by each packet's own length, and stops at the documented size.
         let time_stamp = unsafe {
             std::ptr::read_unaligned(
                 p.add(std::mem::offset_of!(MIDIPacket, timeStamp)) as *const u64
@@ -540,45 +563,50 @@ unsafe fn for_each_packet(pktlist: *const MIDIPacketList, mut f: impl FnMut(u32,
         let length = unsafe {
             std::ptr::read_unaligned(p.add(std::mem::offset_of!(MIDIPacket, length)) as *const u16)
         };
-        // Clamp the plugin-supplied length to Apple's own documented maximum.
-        // `MIDIServices.h` declares `Byte data[256]`, so a packet claiming more
-        // than that is malformed by the framework's own definition, and honouring
-        // the claim would read past the end of the list. This is the packet-level
-        // twin of `render_input`'s "never trust the buffer the AU handed over": a
-        // `u16` length can say 65535, which is 255 packets' worth of memory the AU
-        // never wrote.
-        //
-        // It cannot catch a *legal* over-claim — a packet declaring 64 bytes and
-        // meaning 3 is indistinguishable from one that really carries 64, and those
-        // bytes are inside the allocation the AU sized. What that produces is
-        // garbage messages from the AU's own slack, which is the plugin's bug; what
-        // this prevents is a read outside the allocation entirely, which would be
-        // ours.
-        let length = length.min(MAX_PACKET_PAYLOAD);
+        // A packet claiming more than Apple's own documented maximum (`Byte
+        // data[256]`) is malformed, and where the next one starts cannot be
+        // told from it: the walk ends here rather than read on from a length
+        // it cannot trust. (A *legal* over-claim, a packet declaring 64 bytes
+        // and meaning 3, is indistinguishable from an honest one, and the
+        // bytes are inside the allocation the AU sized.)
+        if length > MAX_PACKET_PAYLOAD
+            || walked + PACKET_HEADER_SIZE + usize::from(length) > MAX_LIST_BYTES
+        {
+            break;
+        }
         // SAFETY: the data follows the packet header, within the packet.
         let data = unsafe { p.add(PACKET_HEADER_SIZE) };
 
         // Apple's header: "The time stamp values contained within the MIDIPackets
         // in this list are **sample offsets** from the AudioTimeStamp provided."
         // So the value is already the frame offset this host wants — no host-time
-        // conversion, and no clock to consult. It is a `u64` at the ABI and a
-        // `u32` in `WireMidi`; a value past `u32::MAX` would be nonsense from a
-        // render block, and saturating is the honest narrowing (the alternative,
-        // wrapping, would place a late event at the start of the block).
+        // conversion. It is a `u64` at the ABI and a `u32` in `WireMidi`; a value
+        // past `u32::MAX` saturates (wrapping would place a late event at the
+        // start of the block), and the consumer clamps any offset into its block.
         let frame_offset = u32::try_from(time_stamp).unwrap_or(u32::MAX);
 
-        // SAFETY: `length` bytes follow the header (clamped to the maximum packet size), within the list the AU built.
-        let bytes = unsafe { std::slice::from_raw_parts(data, length as usize) };
+        // SAFETY: `length` bytes follow the header (at most the maximum packet size), within the list the AU built.
+        let bytes = unsafe { std::slice::from_raw_parts(data, usize::from(length)) };
         f(frame_offset, bytes);
 
         // `MIDIPacketNext`: advance past the header and payload, then align. On
         // arm64 Apple rounds up to 4; on x86_64 it does not round at all, and
         // rounding there would skip bytes of the next packet.
         // SAFETY: the end of this packet, from which the next header starts (rounded on ARM by `next_packet`).
-        let raw_next = unsafe { p.add(PACKET_HEADER_SIZE + length as usize) };
-        p = next_packet(raw_next);
+        let raw_next = unsafe { p.add(PACKET_HEADER_SIZE + usize::from(length)) };
+        let next = next_packet(raw_next);
+        walked += next as usize - p as usize;
+        p = next;
     }
 }
+
+/// The most bytes a `MIDIPacketList` holds: `MIDIServices.h` caps one at
+/// 65536 bytes.
+const MAX_LIST_BYTES: usize = 65_536;
+
+/// The most packets such a list can hold: its count field, then a header each.
+#[allow(clippy::cast_possible_truncation, reason = "65532 / 10 fits a u32")]
+const MAX_PACKETS: u32 = ((MAX_LIST_BYTES - 4) / PACKET_HEADER_SIZE) as u32;
 
 /// The `MIDIPacket` header size — `timeStamp` (8) + `length` (2) = 10 bytes,
 /// with `data` starting immediately after.
@@ -769,20 +797,18 @@ mod tests {
         const { assert!(MAX_PACKET_PAYLOAD < u16::MAX) };
     }
 
-    /// A packet claiming more than Apple's 256-byte maximum is clamped, not
-    /// honoured.
+    /// A packet claiming more than Apple's 256-byte maximum ends the walk.
     ///
-    /// A `u16` length can say 65535. Reading that many bytes from a packet the AU
-    /// sized for three is a read far outside the list allocation — the one failure
-    /// in this walk that is the *host's* bug rather than the plugin's, since a
-    /// legal-but-inflated length is indistinguishable from an honest one.
+    /// A `u16` length can say 65535, and where the next packet starts cannot be
+    /// told from a length that is a lie: reading on from a clamped one would read
+    /// whatever lies there as packets. Nothing of the list after it is read.
     #[test]
-    fn a_length_beyond_apples_maximum_is_clamped() {
-        // Hand-built: `numPackets = 1`, one packet declaring u16::MAX with three
-        // real bytes, then 4 KiB of slack so a failure to clamp lands inside this
-        // allocation and fails an assertion rather than segfaulting.
+    fn a_length_beyond_apples_maximum_ends_the_walk() {
+        // `numPackets = 2`: a packet declaring u16::MAX, then a real one that
+        // must not be reached; 4 KiB of slack so a failure fails an assertion
+        // rather than faulting.
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(&1u32.to_ne_bytes());
+        bytes.extend_from_slice(&2u32.to_ne_bytes());
         bytes.extend_from_slice(&0u64.to_ne_bytes());
         bytes.extend_from_slice(&u16::MAX.to_ne_bytes());
         bytes.extend_from_slice(&[0x90, 60, 100]);
@@ -792,22 +818,29 @@ mod tests {
         // declared length is the thing under test and the slack bounds any
         // over-read.
         let found = unsafe { split_packet_list_for_test(bytes.as_ptr() as *const MIDIPacketList) };
-
-        // The real message is found, and the clamp bounds how much slack can be
-        // misread. 256 bytes yields 1 explicit message plus running-status
-        // continuations at TWO bytes each (the status byte is reused), so ~128 —
-        // not ~85, which is the answer if one forgets running status. Without the
-        // clamp the walk would consume 65535 bytes and run 61 KiB past the
-        // allocation.
-        assert!(!found.is_empty(), "the real message must still be decoded");
-        assert_eq!(found[0], (0, vec![0x90, 60, 100]));
         assert!(
-            found.len() <= 129,
-            "a 65535-byte claim must be clamped to Apple's 256-byte maximum, \
-             which bounds the walk at ~128 messages; {} means the claim was \
-             honoured and the walk left the allocation",
-            found.len()
+            found.is_empty(),
+            "nothing is read past a lying length: {found:?}"
         );
+    }
+
+    /// A packet count the list's documented size cannot hold is capped, and the
+    /// walk ends at that size: a list of `MAX_LIST_BYTES` zero bytes claiming
+    /// `u32::MAX` packets visits at most as many as fit, and never reads past it.
+    #[test]
+    fn a_packet_count_past_the_documented_size_is_bounded() {
+        let mut bytes = vec![0u8; MAX_LIST_BYTES];
+        bytes[..4].copy_from_slice(&u32::MAX.to_ne_bytes());
+        let mut visited = 0u32;
+        // SAFETY: a `MAX_LIST_BYTES` allocation, the largest a list is; the
+        // header's count is the thing under test.
+        unsafe {
+            for_each_packet(bytes.as_ptr() as *const MIDIPacketList, |_, payload| {
+                assert!(payload.is_empty());
+                visited += 1;
+            });
+        }
+        assert!(visited > 0 && visited <= MAX_PACKETS, "visited {visited}");
     }
 
     /// Builds a list with Apple's OWN `MIDIPacketListInit`/`MIDIPacketListAdd` and
@@ -908,17 +941,13 @@ mod tests {
         };
         assert_eq!((bank.get(), index.get(), value.get()), (0, 0, 12 << 25));
 
-        // After a reset the run is forgotten: the same LSB is a plain Control Change.
+        // After a reset the run is forgotten: with nothing selected, the same
+        // Data Entry LSB is dropped (it would otherwise complete the held run
+        // into a Registered Controller).
         list(&mut decoder, &[0xB0, 101, 0, 0xB0, 100, 0, 0xB0, 6, 12], 0);
         decoder.reset();
         let after = list(&mut decoder, &[0xB0, 38, 0], 0);
-        assert!(matches!(
-            after[..],
-            [WireMidi { ump, .. }] if matches!(
-                ump.decode(),
-                Ok(Message::Midi2(_, tutti_ump::Voice2::ControlChange { .. }))
-            )
-        ));
+        assert!(after.is_empty(), "got {after:?}");
     }
 
     /// **An output stream is the Group of its number**: its messages, SysEx

@@ -223,6 +223,14 @@ impl ProcessOutput {
         dropped
     }
 
+    /// Adds `n` to the events [`midi_dropped`](Self::midi_dropped) counts: MIDI a
+    /// Processor lost before it reached [`midi_events`](Self::midi_events) (an
+    /// output queue between the plugin and the block that had no room), so the
+    /// loss is reported with the rest.
+    pub fn count_midi_dropped(&mut self, n: usize) {
+        self.midi_dropped += n;
+    }
+
     /// The MIDI events [`emit_midi`](Self::emit_midi) dropped since the last
     /// [`clear`](Self::clear), for want of room: the plugin emitted more than
     /// [`MIDI_STACK_CAPACITY`](crate::MIDI_STACK_CAPACITY) in one block.
