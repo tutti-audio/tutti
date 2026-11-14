@@ -245,9 +245,9 @@ impl<F: Float> Row<F> {
 /// How a signal of one [`ChannelTopology`] becomes another's.
 ///
 /// A signal states the [`ChannelTopology`] it has. [`Fold::between`] is built
-/// once, on the control side (it allocates), from two topologies, and applied to views by [`fold`](Self::fold)
-/// (interleaved to interleaved), [`fold_planar`](Self::fold_planar) (planes to
-/// planes), [`fold_planar_to_interleaved`](Self::fold_planar_to_interleaved)
+/// once, on the control side (it allocates), from two topologies, and applied
+/// to views by [`fold`](Self::fold) (interleaved to interleaved),
+/// [`fold_planar`](Self::fold_planar) (planes to planes), [`fold_planar_to_interleaved`](Self::fold_planar_to_interleaved)
 /// and [`fold_planar_channel`](Self::fold_planar_channel) (one destination
 /// channel). [`frame`](Self::frame) is the same fold over one frame, on raw
 /// slices. None of them allocate, so all are safe on the audio thread. A fold
