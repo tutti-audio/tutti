@@ -133,7 +133,7 @@ impl AuLoaded {
         block_size: u32,
         work: &MainWorkHandle,
     ) -> Result<Self> {
-        let handle = AuHandle::new(component)?;
+        let handle = AuHandle::new(component, work)?;
 
         let probed = StreamConfig::probe(&handle);
         // The stereo floor lives HERE, in the layout-less constructor, because
@@ -169,7 +169,7 @@ impl AuLoaded {
         config: StreamConfig,
         work: &MainWorkHandle,
     ) -> Result<Self> {
-        Self::with_layout(AuHandle::new(component)?, config, work)
+        Self::with_layout(AuHandle::new(component, work)?, config, work)
     }
 
     /// Shared tail of both constructors: apply the config, verify the block size

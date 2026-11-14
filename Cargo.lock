@@ -2779,6 +2779,7 @@ name = "tutti-midi-device"
 version = "0.0.1"
 dependencies = [
  "bitflags 2.13.2",
+ "getrandom",
  "miniz_oxide",
  "proptest",
  "serde",
@@ -2832,7 +2833,6 @@ dependencies = [
 name = "tutti-midi-network"
 version = "0.0.1"
 dependencies = [
- "getrandom",
  "mdns-sd",
  "proptest",
  "sha2",
@@ -3169,6 +3169,7 @@ dependencies = [
  "loom",
  "thiserror 2.0.21",
  "thread-priority",
+ "tutti-types",
  "windows",
 ]
 
@@ -3478,6 +3479,7 @@ dependencies = [
  "crossbeam-queue",
  "dpi",
  "libloading 0.9.1",
+ "log",
  "parking_lot",
  "tempfile",
  "thiserror 2.0.21",

@@ -40,11 +40,40 @@ pub const MAX_BLOCK_CHANNELS: usize = 16;
 /// is written `<T: Sample>`, so the compiler monomorphizes one specialization
 /// per concrete width: the two a plugin bus can negotiate, `f32` and `f64` (a
 /// 64-bit plugin bus).
-pub trait Sample: Copy + Default + Send + 'static {}
+pub trait Sample: Copy + Default + Send + 'static {
+    /// Whether the value is neither NaN nor infinite.
+    fn is_finite(self) -> bool;
+}
 
-impl Sample for f32 {}
+impl Sample for f32 {
+    fn is_finite(self) -> bool {
+        f32::is_finite(self)
+    }
+}
 
-impl Sample for f64 {}
+impl Sample for f64 {
+    fn is_finite(self) -> bool {
+        f64::is_finite(self)
+    }
+}
+
+/// Replaces every NaN and infinite sample with zero and says whether any was
+/// replaced.
+///
+/// A plugin that emits one non-finite sample would poison every node
+/// downstream of it, so both the in-process node and the plugin server run each
+/// block of plugin output through this before it leaves the plugin's stage.
+/// Allocation-free and RT-safe.
+pub fn sanitize<T: Sample>(samples: &mut [T]) -> bool {
+    let mut replaced = false;
+    for s in samples {
+        if !s.is_finite() {
+            *s = T::default();
+            replaced = true;
+        }
+    }
+    replaced
+}
 
 /// A block of deinterleaved audio passed to a plugin's process call.
 ///
@@ -170,5 +199,34 @@ impl<'t, 'd: 't> AudioBufferMut<'t, 'd> {
             Self::F32(b) => b.sample_rate,
             Self::F64(b) => b.sample_rate,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize;
+
+    #[test]
+    fn sanitize_zeroes_nan_and_both_infinities_and_keeps_finite_samples() {
+        let mut block = [
+            0.5_f32,
+            f32::NAN,
+            -0.25,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            0.0,
+        ];
+        assert!(sanitize(&mut block));
+        assert_eq!(block, [0.5, 0.0, -0.25, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn sanitize_reports_nothing_replaced_for_a_finite_f64_block() {
+        let mut block = [1.0_f64, -1.0, f64::MIN_POSITIVE, f64::MAX];
+        assert!(!sanitize(&mut block));
+        assert_eq!(block, [1.0, -1.0, f64::MIN_POSITIVE, f64::MAX]);
+        let mut bad = [f64::NAN];
+        assert!(sanitize(&mut bad));
+        assert_eq!(bad, [0.0]);
     }
 }

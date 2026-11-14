@@ -3,8 +3,8 @@
 use std::time::{Duration, Instant};
 
 use tutti_midi_network::{
-    ByeReason, Client, Credentials, Event, Host, HostConfig, Initiator, SessionConfig,
-    SessionState, UdpDriver,
+    ByeReason, Client, Credentials, EndedBy, Event, Host, HostConfig, SessionConfig, SessionState,
+    UdpDriver,
 };
 
 use crate::sim::{identity, note_on};
@@ -101,7 +101,7 @@ fn a_session_runs_over_real_udp_sockets_from_invitation_to_bye() {
             && matches!(
                 ev,
                 Event::Closed {
-                    initiator: Initiator::Remote,
+                    ended_by: EndedBy::Remote,
                     reason: ByeReason::UserTerminated,
                     ..
                 }
