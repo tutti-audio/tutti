@@ -29,6 +29,7 @@ use tutti_ump::{
 };
 
 use crate::MidiFileKind;
+use crate::write::{Existing, WriteOptions};
 use crate::{ConfigError, Error, OutOfOrder, Refusal, Result, clip_file, smf};
 
 mod to_clip;
@@ -918,14 +919,43 @@ impl MidiFile {
         Ok(())
     }
 
-    /// Writes [`to_bytes`](Self::to_bytes) to `path`.
+    /// Writes [`to_bytes`](Self::to_bytes) to `path`, refusing anything
+    /// already there. Use [`write_options`](Self::write_options) to replace one.
+    ///
+    /// The bytes are staged in a temporary file beside `path` and renamed into
+    /// place, so a crash leaves no partial file under `path`.
+    ///
+    /// ```
+    /// # use tutti_midi_file::{Error, MidiFile, SmfFormat, Track};
+    /// # let dir = tempfile::tempdir()?;
+    /// # let path = dir.path().join("song.mid");
+    /// let file = MidiFile::smf(SmfFormat::SingleTrack, 480, vec![Track::new()])?;
+    /// file.write(&path)?;
+    /// assert!(matches!(file.write(&path), Err(Error::Exists { .. })));
+    /// file.write_options().replace().write(&path)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     ///
     /// # Errors
     ///
-    /// [`Error::Io`] if the write fails; otherwise as [`to_bytes`](Self::to_bytes).
+    /// [`Error::Exists`] if something is at `path` (it is untouched, and
+    /// `self` can be written again); [`Error::Io`] if the staging or the
+    /// rename fails. A filesystem without an atomic no-replace rename falls
+    /// back to a hard link; on one with neither the write fails with
+    /// [`Error::Io`] and never overwrites. Otherwise as
+    /// [`to_bytes`](Self::to_bytes).
     pub fn write(&self, path: impl AsRef<Path>) -> Result<()> {
-        std::fs::write(path, self.to_bytes()?)?;
-        Ok(())
+        self.write_options().write(path)
+    }
+
+    /// How to write this file to a path: [`replace`](WriteOptions::replace)
+    /// overwrites an existing file, and [`write`](WriteOptions::write) ends
+    /// the call.
+    pub fn write_options(&self) -> WriteOptions<'_> {
+        WriteOptions {
+            file: self,
+            existing: Existing::Refuse,
+        }
     }
 
     /// Which container this file is.

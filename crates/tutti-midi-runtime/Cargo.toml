@@ -25,6 +25,7 @@ crossbeam-queue = "0.3"
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
+tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device" }
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 
 [dev-dependencies]
