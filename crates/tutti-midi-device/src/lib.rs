@@ -125,9 +125,7 @@ pub use endpoint::{
 };
 pub use id::{DeviceId, DeviceInfo, EndpointId, Identity, PortDirection};
 pub use inquiry::{INQUIRY_ATTEMPTS, INQUIRY_TIMEOUT, IdentityInquiry, InquiryAction};
-pub use jr::{
-    ClockHeard, DRIFT_SPAN, JrLock, JrReceiver, JrTime, LOST_AFTER, TICK_HZ, Unmapped, WINDOW,
-};
+pub use jr::{ClockHeard, JrLock, JrReceiver, JrTime, TICK_HZ, Unmapped};
 pub use learned::{Learned, Match, SavedDevice};
 pub use name::{BlockName, EndpointName, Name, NameError, ProductInstanceId};
 pub use table::{BindPolicy, DeviceEvent, DeviceTable, OsChange, OsDevice, Resolved};

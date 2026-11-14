@@ -38,7 +38,6 @@ use crate::ci::{CiChange, CiPeerInfo, Heard, PeerId};
 use crate::devices::{Devices, OpenInput, OpenOutput};
 use crate::endpoints::MidiEndpoints;
 use crate::error::{Error, Result};
-use crate::port::TimeSource;
 use crate::process::{ProcessChange, ReportAsk, ReportError, ReportPeer};
 use crate::profiles::{PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange};
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
@@ -672,17 +671,20 @@ impl MidiSession {
     }
 }
 
-/// Makes the port's copy of SysEx7 packets what the negotiation wants.
 /// Points the port's event times at what the device's configuration says: its
 /// JR Timestamps where it sends them and the input was opened to use them.
 /// Arrival until the device has settled.
 fn follow_timing(ports: &HardwareMidiInputs, held: &Held) {
-    let source = held.stream.settled().map_or(TimeSource::Arrival, |stream| {
-        held.timing.source(stream.config())
-    });
-    ports.time_source(held.input.slot(), source);
+    let source = held
+        .stream
+        .settled()
+        .map_or(InputTiming::Arrival, |stream| {
+            held.timing.applied(stream.config())
+        });
+    ports.set_input_timing(held.input.slot(), source);
 }
 
+/// Makes the port's copy of SysEx7 packets what the negotiation wants.
 fn sync_hearing(ports: &HardwareMidiInputs, held: &mut Held, ci: bool) {
     let slot = held.input.slot();
     let want = held.stream.hears_sysex(ci);

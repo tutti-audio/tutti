@@ -16,76 +16,86 @@
 //!
 //! [`HardwareMidiInputs`]: super::HardwareMidiInputs
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use ringbuf::traits::{Consumer, Producer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
 use tutti_graph::Losses;
-use tutti_midi_device::JrReceiver;
+use tutti_midi_device::{ClockHeard, JrReceiver};
 use tutti_midi_runtime::{DeviceInput, DeviceSlot, InletCounts};
 use tutti_ump::{Message, Ump, Utility};
 
-/// Where the time of an input's events comes from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum TimeSource {
-    /// The OS's arrival stamp of each event.
-    Arrival,
-    /// The device's JR Timestamps, read against its JR Clock messages, for an
-    /// event that has one in front of it (M2-104 §7.2.2).
-    JrTimestamps,
-}
+use crate::InputTiming;
 
-/// A [`TimeSource`] both ends of a port read: the control side sets it as the
+/// A [`InputTiming`] both ends of a port read: the control side sets it as the
 /// device's configuration settles, and the driver thread follows it.
-#[derive(Debug, Default)]
-struct SharedSource(AtomicBool);
+#[derive(Debug)]
+struct SharedSource(AtomicU8);
 
 impl SharedSource {
-    fn get(&self) -> TimeSource {
-        if self.0.load(Ordering::Acquire) {
-            TimeSource::JrTimestamps
-        } else {
-            TimeSource::Arrival
+    const ARRIVAL: u8 = 0;
+    const JITTER_REDUCTION: u8 = 1;
+
+    fn new() -> Self {
+        Self(AtomicU8::new(Self::ARRIVAL))
+    }
+
+    fn get(&self) -> InputTiming {
+        match self.0.load(Ordering::Acquire) {
+            Self::JITTER_REDUCTION => InputTiming::JitterReduction,
+            _ => InputTiming::Arrival,
         }
     }
 
-    fn set(&self, source: TimeSource) {
-        self.0
-            .store(source == TimeSource::JrTimestamps, Ordering::Release);
+    fn set(&self, source: InputTiming) {
+        let raw = match source {
+            InputTiming::Arrival => Self::ARRIVAL,
+            InputTiming::JitterReduction => Self::JITTER_REDUCTION,
+        };
+        self.0.store(raw, Ordering::Release);
     }
 }
 
+/// What a port counts of its device's JR Clock messages, shared with the
+/// port's entry: how many restarted the sender's clock, and how many were
+/// ignored as late.
+#[derive(Debug, Default)]
+struct JrCounts {
+    restarted: AtomicU64,
+    late: AtomicU64,
+}
+
 /// What the handle holds of a device that sends JR Timestamps: the sender's
-/// clock on the host's, and the timestamp the next events are under.
+/// clock on the host's and the timestamp the next events are under.
 #[derive(Debug)]
 struct JrInput {
-    following: TimeSource,
+    following: InputTiming,
     clock: JrReceiver,
-    /// The last JR Timestamp: it applies to every event until the next one
-    /// (M2-104 §7.2.2.2).
-    stamp: Option<u16>,
+    counts: Arc<JrCounts>,
     /// The time the last event was placed at: events are rendered in the order
-    /// they arrive (M2-104 §7.2.2.2), so none is placed before it.
+    /// they arrive (M2-104 §7.2.2.2), so none is placed before it, whichever
+    /// source times them.
     placed: Option<Instant>,
 }
 
 impl JrInput {
-    fn new() -> Self {
+    fn new(counts: Arc<JrCounts>) -> Self {
         Self {
-            following: TimeSource::Arrival,
+            following: InputTiming::Arrival,
             clock: JrReceiver::new(),
-            stamp: None,
+            counts,
             placed: None,
         }
     }
 
-    /// Follows `source`: a change starts the sender's clock over, since what
-    /// was heard before it was not meant for this.
-    fn follow(&mut self, source: TimeSource) {
+    /// Follows `source`: a change starts the sender's clock and timestamp
+    /// over, since what was heard before it was not meant for this. The time
+    /// of the last event is kept, so the events stay in order across it.
+    fn follow(&mut self, source: InputTiming) {
         if source != self.following {
-            *self = Self::new();
+            self.clock.reset();
             self.following = source;
         }
     }
@@ -93,32 +103,47 @@ impl JrInput {
     /// Takes a JR message. Whatever else it is, the caller keeps it from the
     /// graph.
     fn take(&mut self, utility: Utility, arrival: Instant) {
-        if self.following != TimeSource::JrTimestamps {
+        if self.following != InputTiming::JitterReduction {
             return;
         }
         match utility {
-            Utility::JrClock(ticks) => {
-                let _ = self.clock.clock(ticks, arrival);
-            }
-            Utility::JrTimestamp(ticks) => self.stamp = Some(ticks),
+            Utility::JrClock(ticks) => match self.clock.clock(ticks, arrival) {
+                ClockHeard::Restarted => {
+                    self.counts.restarted.fetch_add(1, Ordering::Relaxed);
+                }
+                ClockHeard::Late => {
+                    self.counts.late.fetch_add(1, Ordering::Relaxed);
+                }
+                _ => {}
+            },
+            Utility::JrTimestamp(ticks) => self.clock.timestamp(ticks, arrival),
             _ => {}
         }
     }
 
     /// Where an event that arrived at `arrival` is placed: the time its JR
     /// Timestamp gives, rendered after the connection's jitter, or its arrival
-    /// where it has no timestamp or the clock cannot map it.
+    /// where it has no timestamp or the clock cannot map it; never before the
+    /// event before it.
     fn place(&mut self, arrival: Instant) -> Instant {
-        if self.following != TimeSource::JrTimestamps {
-            return arrival;
-        }
-        let at = match self.stamp {
-            Some(ticks) => self.clock.resolve(ticks, arrival).render_at(arrival),
-            None => arrival,
+        let at = match self.following {
+            InputTiming::Arrival => arrival,
+            InputTiming::JitterReduction => self.clock.resolve_held(arrival).render_at(arrival),
         };
-        let at = self.placed.map_or(at, |placed| at.max(placed));
-        self.placed = Some(at);
-        at
+        match self.placed {
+            // Only a port that has been timed by JR keeps the order.
+            Some(placed) => {
+                let at = at.max(placed);
+                self.placed = Some(at);
+                at
+            }
+            None => {
+                if self.following == InputTiming::JitterReduction {
+                    self.placed = Some(at);
+                }
+                at
+            }
+        }
     }
 }
 
@@ -304,6 +329,7 @@ pub(crate) struct HardwareMidiInput {
     stream_lost: Arc<AtomicU64>,
     hear_sysex: Arc<AtomicBool>,
     source: Arc<SharedSource>,
+    jr_counts: Arc<JrCounts>,
 }
 
 impl HardwareMidiInput {
@@ -312,7 +338,8 @@ impl HardwareMidiInput {
         let active = Arc::new(AtomicBool::new(true));
         let stream_lost = Arc::new(AtomicU64::new(0));
         let hear_sysex = Arc::new(AtomicBool::new(false));
-        let source = Arc::new(SharedSource::default());
+        let source = Arc::new(SharedSource::new());
+        let jr_counts = Arc::new(JrCounts::default());
         let (stream_in, stream_out) = HeapRb::<Ump>::new(STREAM_CAPACITY).split();
         (
             Self {
@@ -323,6 +350,7 @@ impl HardwareMidiInput {
                 stream_lost: Arc::clone(&stream_lost),
                 hear_sysex: Arc::clone(&hear_sysex),
                 source: Arc::clone(&source),
+                jr_counts: Arc::clone(&jr_counts),
             },
             InputProducerHandle {
                 input,
@@ -331,7 +359,7 @@ impl HardwareMidiInput {
                 stream_lost,
                 hear_sysex,
                 source,
-                jr: JrInput::new(),
+                jr: JrInput::new(jr_counts),
             },
         )
     }
@@ -351,8 +379,18 @@ impl HardwareMidiInput {
         self.hear_sysex.store(hear, Ordering::Relaxed);
     }
 
+    /// How many JR Clock messages restarted the sender's clock.
+    pub(crate) fn jr_restarted(&self) -> u64 {
+        self.jr_counts.restarted.load(Ordering::Relaxed)
+    }
+
+    /// How many JR Clock messages were ignored as late.
+    pub(crate) fn jr_late(&self) -> u64 {
+        self.jr_counts.late.load(Ordering::Relaxed)
+    }
+
     /// Where the port's event times come from from now on.
-    pub(crate) fn set_time_source(&self, source: TimeSource) {
+    pub(crate) fn set_timing(&self, source: InputTiming) {
         self.source.set(source);
     }
 

@@ -14,6 +14,5 @@
 pub(crate) mod async_port;
 mod manager;
 
-pub(crate) use async_port::TimeSource;
 pub use async_port::{InputProducerHandle, Pushed, StreamDrain};
 pub use manager::{HardwareMidiInputs, PortInfo};

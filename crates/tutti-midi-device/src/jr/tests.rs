@@ -2,7 +2,8 @@ use super::*;
 
 const MS: Duration = Duration::from_millis(1);
 
-/// A SplitMix64 stream from a fixed seed: the jitter of the arrivals.
+/// A SplitMix64 stream from a fixed seed: the jitter of the arrivals. Private to
+/// this test: no shared generator exists in `tutti_fixtures`.
 struct Rng(u64);
 
 impl Rng {
@@ -225,33 +226,100 @@ fn a_late_or_repeated_clock_is_ignored() {
     assert_eq!(rx.resolve(link.ticks(0.35), link.arrival(0.35)), before);
 }
 
-/// The render time is the send time plus the jitter, which is after every
-/// arrival of the window.
+/// On a link whose delay is 0 or 2 ms, both seen in the window, the render time
+/// (send time plus jitter) is never before the arrival of a message whose delay
+/// is either, and never more than the spread and a tick after it.
 #[test]
-fn render_time_is_send_time_plus_jitter_and_after_the_arrival() {
+fn render_time_is_after_every_arrival_within_the_observed_delays() {
     let jitter = 2 * MS;
-    let mut link = Link::new(0.0, 0.0, jitter);
+    let tick = Duration::from_secs_f64(1.0 / f64::from(TICK_HZ));
+    let link = Link::new(0.0, 0.0, jitter);
+    let delayed = |k: u32| {
+        if k.is_multiple_of(2) {
+            Duration::ZERO
+        } else {
+            jitter
+        }
+    };
     let mut rx = JrReceiver::new();
     let mut t = 0.0;
-    while t < 3.0 {
-        let _ = link.clock(&mut rx, t);
+    for k in 0..30 {
+        let arrival = link.send(t) + link.latency + delayed(k);
+        let _ = rx.clock(link.ticks(t), arrival);
         t += 0.1;
     }
-    let mut late = 0;
     for k in 0..50 {
         let sent = t + f64::from(k) * 0.001;
-        let (_, arrival, time) = link.error(&rx, sent);
-        let JrTime::Sent { at, jitter: spread } = time else {
-            unreachable!()
+        let arrival = link.send(sent) + link.latency + delayed(k);
+        let time = rx.resolve(link.ticks(sent), arrival);
+        let JrTime::Sent { jitter: spread, .. } = time else {
+            panic!("locked: {time:?}")
         };
-        assert_eq!(time.render_at(arrival), at + spread);
-        // Only an arrival that is later than any the window held is after it.
-        late += usize::from(time.render_at(arrival) + MS / 2 < arrival);
+        // The window holds both delays; a fitted slope adds a little.
+        assert!(
+            spread + tick >= jitter && spread <= jitter.mul_f64(1.25),
+            "{spread:?}"
+        );
+        let render = time.render_at(arrival);
+        assert!(render + tick >= arrival, "rendered before it arrived");
+        assert!(render <= arrival + spread + tick, "rendered too late");
     }
-    assert!(
-        late <= 2,
-        "{late} of 50 arrive well after their render time"
+}
+
+/// A slope fitted over a short span with heavy jitter (here 30%, far beyond any
+/// sender's drift) is not taken as drift: the line keeps the nominal rate and a
+/// message after the span is mapped to its send time.
+#[test]
+fn a_slope_beyond_any_crystals_drift_is_not_used() {
+    let mut link = Link::new(0.0, 0.0, Duration::ZERO);
+    link.latency = Duration::ZERO;
+    let mut rx = JrReceiver::new();
+    // Five clocks over one second, the later ones increasingly late.
+    for (k, late_ms) in [0u64, 0, 100, 200, 300].into_iter().enumerate() {
+        let t = k as f64 * 0.25;
+        let arrival = link.send(t) + Duration::from_millis(late_ms);
+        let _ = rx.clock(link.ticks(t), arrival);
+    }
+    let sent = 1.1;
+    let JrTime::Sent { at, .. } = rx.resolve(link.ticks(sent), link.send(sent) + 300 * MS) else {
+        panic!("locked")
+    };
+    let error = if at > link.send(sent) {
+        at.duration_since(link.send(sent))
+    } else {
+        link.send(sent).duration_since(at)
+    };
+    assert!(error < Duration::from_micros(40), "{error:?}");
+}
+
+/// The held JR Timestamp times the messages after it, and is not used once the
+/// clock restarted or it is older than a second: it is `NoTimestamp`, not a wrap
+/// later.
+#[test]
+fn a_held_timestamp_is_dropped_by_a_restart_and_by_age() {
+    let mut link = Link::new(0.0, 7.0, Duration::ZERO);
+    link.latency = Duration::ZERO;
+    let mut rx = JrReceiver::new();
+    let none = JrTime::Arrival(Unmapped::NoTimestamp);
+    assert_eq!(rx.resolve_held(link.send(0.0)), none);
+    for k in 0..20 {
+        let _ = link.clock(&mut rx, f64::from(k) * 0.1);
+    }
+    rx.timestamp(link.ticks(0.45), link.arrival(0.45));
+    assert!(matches!(
+        rx.resolve_held(link.arrival(1.4)),
+        JrTime::Sent { .. }
+    ));
+    assert_eq!(
+        rx.resolve_held(link.arrival(1.6)),
+        none,
+        "older than a second"
     );
+    // A restart takes the stamp with the window.
+    rx.timestamp(link.ticks(1.7), link.arrival(1.7));
+    link.phase += 0.5 * f64::from(TICK_HZ);
+    assert_eq!(link.clock(&mut rx, 1.9), ClockHeard::Restarted);
+    assert_eq!(rx.resolve_held(link.arrival(1.9)), none);
 }
 
 /// After a reset the receiver is as one that never heard a clock.

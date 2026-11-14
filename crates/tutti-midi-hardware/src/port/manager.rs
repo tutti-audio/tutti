@@ -14,7 +14,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use tutti_graph::Losses;
 use tutti_midi_runtime::{DeviceInlets, DeviceSlot, NoFreeSlot};
 
-use super::async_port::{HardwareMidiInput, InputProducerHandle, StreamDrain, TimeSource};
+use super::async_port::{HardwareMidiInput, InputProducerHandle, StreamDrain};
+use crate::InputTiming;
 
 /// A snapshot view of one port, computed on demand from the underlying
 /// `HardwareMidiInput`. The port is the single source of truth for `name` and
@@ -41,6 +42,14 @@ pub struct PortInfo {
     /// How many UMP Stream messages the port's stream ring had no room for,
     /// since the port opened.
     pub stream_lost: u64,
+    /// How many JR Clock messages restarted the sender's clock, since the port
+    /// opened: each is a jump the clock could not follow, or a silence of a
+    /// second. Counted only while the port is timed by the device's JR
+    /// Timestamps.
+    pub jr_restarted: u64,
+    /// How many JR Clock messages were ignored as late (reordered, repeated, or
+    /// from a clock that stepped back), under the same condition.
+    pub jr_late: u64,
 }
 
 impl PortInfo {
@@ -51,6 +60,8 @@ impl PortInfo {
             active: port.is_active(),
             losses: port.losses(),
             stream_lost: port.stream_lost(),
+            jr_restarted: port.jr_restarted(),
+            jr_late: port.jr_late(),
         }
     }
 }
@@ -215,12 +226,16 @@ impl HardwareMidiInputs {
         }
     }
 
-    /// Sets where the event times of the port `id` names come from, as its
-    /// device's configuration says. `false` for a stale id.
-    pub(crate) fn time_source(&self, id: DeviceSlot, source: TimeSource) -> bool {
+    /// Sets where the event times of the port `id` names come from:
+    /// [`InputTiming::JitterReduction`] places its events by the JR Timestamps
+    /// the device sends, [`InputTiming::Arrival`] by the OS's arrival stamp
+    /// (the port's state until this is called). A [`MidiSession`](crate::MidiSession)
+    /// sets it as an input's device settles; a port fed without a session sets
+    /// it itself. `false` for a stale id.
+    pub fn set_input_timing(&self, id: DeviceSlot, timing: InputTiming) -> bool {
         match self.port(id) {
             Some(port) => {
-                port.set_time_source(source);
+                port.set_timing(timing);
                 true
             }
             None => false,

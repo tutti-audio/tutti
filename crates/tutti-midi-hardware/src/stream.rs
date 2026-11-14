@@ -80,7 +80,6 @@ use crate::ci::{
     Ci, CiChange, CiChanges, CiPeerInfo, Heard, PeerId, groups_after_settle, groups_of_a_midi1_port,
 };
 use crate::devices::OpenOutput;
-use crate::port::TimeSource;
 use crate::process::{self, ProcessChange, ReportAsk, ReportError};
 use crate::profiles::{ProfileError, ProfileSwitch, ProfilesChange, Snapshot};
 use tutti_midi_device::DeviceId;
@@ -88,6 +87,7 @@ use tutti_midi_device::DeviceId;
 /// Where an input's event times come from: what a device is asked to send, and
 /// what the input edge reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum InputTiming {
     /// The OS's arrival stamp of each event. The device is asked for no JR
     /// Timestamps, and one that sends them anyway has them ignored.
@@ -114,11 +114,11 @@ impl InputTiming {
     }
 
     /// Where the events of a device configured as `config` are timed from.
-    pub(crate) const fn source(self, config: StreamConfig) -> TimeSource {
+    pub(crate) const fn applied(self, config: StreamConfig) -> Self {
         if matches!(self, Self::JitterReduction) && config.tx_jr {
-            TimeSource::JrTimestamps
+            Self::JitterReduction
         } else {
-            TimeSource::Arrival
+            Self::Arrival
         }
     }
 }

@@ -10,8 +10,9 @@
 //! through them:
 //!
 //! - **Drift** is the slope of a least-squares fit, used once the window spans
-//!   [`DRIFT_SPAN`]; before that the sender's clock is taken as exactly
-//!   [`TICK_HZ`], since a short span would read jitter as drift.
+//!   [`DRIFT_SPAN`] and while it stays within [`MAX_DRIFT`] of 1; otherwise the
+//!   sender's clock is taken as exactly [`TICK_HZ`], since a short span or heavy
+//!   jitter would read jitter as drift.
 //! - **Offset** is the line's lowest point: a message is never sent after it
 //!   arrives, so the arrival nearest the line is the one with the least delay,
 //!   and the line through it is the sender's clock on the host's.
@@ -34,17 +35,22 @@ pub const TICK_HZ: u32 = 31_250;
 
 /// How many JR Clock messages the fit keeps: 3.2 s of them at the 100 ms
 /// cadence a sender may use, and 8 s at the 250 ms ceiling.
-pub const WINDOW: usize = 32;
+const WINDOW: usize = 32;
 
 /// How long the window must span before its slope is taken as the sender's
 /// drift.
-pub const DRIFT_SPAN: Duration = Duration::from_secs(1);
+const DRIFT_SPAN: Duration = Duration::from_secs(1);
 
 /// How long without a JR Clock message before the sender's clock is lost: just
 /// under half a wrap, the longest silence after which a timestamp is still
 /// unambiguous. The spec's ceiling on the interval is 250 ms
 /// (M2-104 §7.2.2.1), so a sender that keeps it never gets here.
-pub const LOST_AFTER: Duration = Duration::from_secs(1);
+const LOST_AFTER: Duration = Duration::from_secs(1);
+
+/// How far from 1 a fitted slope may be (host seconds per sender second): 1%,
+/// ten times what any crystal drifts (tens of ppm to a few hundred), so a slope
+/// outside it is jitter over too short a span, not a sender's drift.
+const MAX_DRIFT: f64 = 0.01;
 
 /// How long before its arrival a JR Clock may map: a clock older than the
 /// silence that loses the clock is not live, so the line does not describe its
@@ -56,24 +62,29 @@ const WRAP: f64 = 65_536.0;
 
 /// Where a receiver is with a sender's clock, at an instant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum JrLock {
     /// No JR Clock message has been heard: a message is rendered as soon as it
     /// arrives (M2-104 §7.2.2.3).
     Waiting,
     /// The last JR Clock message is recent enough that a timestamp is mapped.
     Locked,
-    /// The sender has been silent for [`LOST_AFTER`]: a timestamp is not
-    /// mapped until the clock is heard again.
+    /// The sender has been silent for a second (just under half a wrap): a
+    /// timestamp is not mapped until the clock is heard again.
     Lost,
 }
 
 /// Why a JR Timestamp has no host time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Unmapped {
     /// The sender's clock was never heard.
     NoClock,
     /// The sender's clock was heard, and not lately ([`JrLock::Lost`]).
     ClockLost,
+    /// There is no JR Timestamp to map: none was heard, or the last is older
+    /// than a second, which is too old for its wrap to be told.
+    NoTimestamp,
     /// The mapped time cannot be an `Instant`.
     OutOfRange,
 }
@@ -102,6 +113,9 @@ impl JrTime {
     #[must_use]
     pub fn render_at(self, arrival: Instant) -> Instant {
         match self {
+            // `jitter` is a spread of arrivals over the window, seconds at
+            // most, so the sum is past `Instant`'s range only for an `at` that
+            // is already at its end, where `at` is kept.
             Self::Sent { at, jitter } => at.checked_add(jitter).unwrap_or(at),
             Self::Arrival(_) => arrival,
         }
@@ -111,16 +125,20 @@ impl JrTime {
 /// What a JR Clock message did to the receiver.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[must_use]
+#[non_exhaustive]
 pub enum ClockHeard {
     /// It joined the window.
     Taken,
-    /// It came after a silence of more than [`LOST_AFTER`], or does not fit the
-    /// line the window holds (it maps after its arrival by more than the
-    /// window's jitter, or more than [`LOST_AFTER`] before it, as a sender
-    /// whose clock restarted or jumped does): the window started over with it.
+    /// It came after a silence of more than a second, or does not fit the line
+    /// the window holds (it maps after its arrival by more than the window's
+    /// jitter, or more than a second before it, as a sender whose clock
+    /// restarted or jumped does): the window started over with it.
     Restarted,
     /// Its time is not after the last one's (it was reordered, or sent twice):
     /// it is ignored. A clock is monotonic but for the wrap (M2-104 §7.2.2.1).
+    /// A sender whose clock steps back by under a second keeps being ignored
+    /// until its clock passes the last one's or the silence reaches a second,
+    /// when the window restarts.
     Late,
 }
 
@@ -145,6 +163,11 @@ pub struct JrReceiver {
     /// The last clock message's 16 bits and arrival, for the wrap and the
     /// silence.
     last: Option<(u16, Instant)>,
+    /// The line the window fits, kept until the window changes.
+    fit: Option<Line>,
+    /// The last JR Timestamp and its arrival: it times every message after it
+    /// until the next.
+    stamp: Option<(u16, Instant)>,
 }
 
 impl Default for JrReceiver {
@@ -173,6 +196,8 @@ impl JrReceiver {
             start: 0,
             origin: None,
             last: None,
+            fit: None,
+            stamp: None,
         }
     }
 
@@ -232,6 +257,7 @@ impl JrReceiver {
         self.window[(self.start + self.len) % WINDOW] = reading;
         self.len += 1;
         self.last = Some((ticks, arrival));
+        self.fit = self.fit_window();
         heard
     }
 
@@ -239,6 +265,8 @@ impl JrReceiver {
     fn restart(&mut self) {
         self.len = 0;
         self.start = 0;
+        self.fit = None;
+        self.stamp = None;
     }
 
     /// Whether a clock of unwrapped sender time `ticks` that arrived at
@@ -249,12 +277,31 @@ impl JrReceiver {
     /// sender's rounding), or is more than
     /// [`STALE_AFTER`] before it (older than a live clock).
     fn off_line(&self, ticks: i64, arrival: Instant) -> bool {
-        let (Some(origin), Some(line)) = (self.origin, self.line()) else {
+        let (Some(origin), Some(line)) = (self.origin, self.fit) else {
             return false;
         };
         let sent = line.slope * (ticks - line.ticks0) as f64 / f64::from(TICK_HZ) + line.offset;
         let age = seconds_from(origin, arrival) - sent;
         age < -(line.jitter + 1.0 / f64::from(TICK_HZ)) || age > STALE_AFTER.as_secs_f64()
+    }
+
+    /// Takes a JR Timestamp of sender time `ticks` that arrived at `arrival`: it
+    /// times the messages after it, until the next ([`resolve_held`](Self::resolve_held)).
+    pub fn timestamp(&mut self, ticks: u16, arrival: Instant) {
+        self.stamp = Some((ticks, arrival));
+    }
+
+    /// The host time of a message that arrived at `arrival` under the last JR
+    /// Timestamp taken. A timestamp older than `LOST_AFTER` is not used: its
+    /// wrap cannot be told, as a clock's cannot. One taken before the clock
+    /// restarted is dropped with the window.
+    pub fn resolve_held(&self, arrival: Instant) -> JrTime {
+        match self.stamp {
+            Some((ticks, at)) if arrival.saturating_duration_since(at) <= LOST_AFTER => {
+                self.resolve(ticks, arrival)
+            }
+            _ => JrTime::Arrival(Unmapped::NoTimestamp),
+        }
     }
 
     /// The host time of a message that a JR Timestamp of sender time `ticks`
@@ -265,7 +312,7 @@ impl JrReceiver {
             JrLock::Lost => return JrTime::Arrival(Unmapped::ClockLost),
             JrLock::Locked => {}
         }
-        let (Some(origin), Some(line)) = (self.origin, self.line()) else {
+        let (Some(origin), Some(line)) = (self.origin, self.fit) else {
             return JrTime::Arrival(Unmapped::NoClock);
         };
         // The sender time the line gives at the arrival, and the timestamp's
@@ -292,7 +339,7 @@ impl JrReceiver {
     }
 
     /// The line through the window: `None` while it is empty.
-    fn line(&self) -> Option<Line> {
+    fn fit_window(&self) -> Option<Line> {
         let first = self.readings().next()?;
         let x = |r: Reading| (r.ticks - first.ticks) as f64 / f64::from(TICK_HZ);
         let n = self.len as f64;
@@ -305,8 +352,13 @@ impl JrReceiver {
             (c + dx * (r.at - my), v + dx * dx)
         });
         let span = self.readings().last().map_or(0.0, x);
-        let slope = if self.len >= 2 && span >= DRIFT_SPAN.as_secs_f64() && var > 0.0 {
-            cov / var
+        let fitted = cov / var;
+        let slope = if self.len >= 2
+            && span >= DRIFT_SPAN.as_secs_f64()
+            && var > 0.0
+            && (fitted - 1.0).abs() <= MAX_DRIFT
+        {
+            fitted
         } else {
             1.0
         };
