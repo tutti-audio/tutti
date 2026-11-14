@@ -1,6 +1,6 @@
 #![doc = include_str!("../README.md")]
-//! Pure DSP algorithms over `&[f32]` for the Tutti audio engine: a CPU-independent
-//! real FFT and the algorithms behind the built-in effect nodes: filters, dynamics,
+//! Pure DSP algorithms over `tutti_buffers` views for the Tutti audio engine: a
+//! CPU-independent real FFT and the algorithms behind the built-in effect nodes: filters, dynamics,
 //! the partitioned convolver, delay lines, reverb, waveshapers and the export
 //! resampler. The analyzers (loudness, pitch, onsets, spectra, ...) are `tutti-measure`,
 //! built on this crate's FFT, windows and `StftGeometry` (whose refusals are `Error`).
@@ -10,7 +10,7 @@
 //! `tutti-nodes` wraps each of these in a graph node that owns the params, the
 //! ramps and the graph shape. Here they take plain typed values per call.
 //!
-//! - **Filters** — `SvfCoeffs` and `SvfFamily<F>` (Simper's trapezoidal
+//! - **Filters** — `SvfCoeffs` and `SvfBank<F>` (Simper's trapezoidal
 //!   state-variable filter, eight responses by `SvfType`);
 //!   `LadderCoeffs` and `LadderFamily<F>` (the Moog
 //!   ladder, `tanh` feedback); `CrossoverFamily`, a 2 to 6 band Linkwitz-Riley 4th-order
@@ -102,7 +102,7 @@
 //!   [`reach`](Grows::reach) over a [`Reach`] (with a family's [`Domain`], [`MaxDecay`] for a
 //!   reverb) is a [`Capacity`], what its recurrence allocates; [`Effort`] and [`Cadence`]
 //!   are the engineering that schedules it.
-//! - **Filters** (`filter/`): the SVF ([`SvfFamily`], [`SvfModel`], [`SvfType`]), the
+//! - **Filters** (`filter/`): the SVF ([`SvfBank`], [`SvfModel`], [`SvfType`]), the
 //!   ladder ([`LadderFamily`], [`LadderModel`], [`LadderType`]) and the Linkwitz-Riley
 //!   crossover ([`CrossoverFamily`], [`CrossoverModel`]), each a [`ChannelRecurrence`] under the one
 //!   [`Filter`] family, run by [`PerChannel`]; [`Real`], the `f32` or `f64` their state
@@ -174,6 +174,7 @@ mod dither;
 mod dynamics;
 mod fft;
 mod filter;
+mod glide;
 mod interp;
 mod modulation;
 mod oscillator;
@@ -211,15 +212,16 @@ pub use fft::{Complex32, FftScratch, RealFft};
 pub use filter::{
     Biquad, ChannelRecurrence, CrossoverControls, CrossoverError, CrossoverFamily, CrossoverModel,
     CrossoverTree, DirectForm1, Filter, Ladder, LadderCoefficients, LadderCoeffs, LadderControls,
-    LadderFamily, LadderModel, LadderType, Lanes, MAX_SPLITS, PerChannel, Real, SOLVE_CEILING, Svf,
-    SvfCoefficients, SvfCoeffs, SvfControls, SvfFamily, SvfModel, SvfType, fit_to_rate,
-    ladder_step, svf_step,
+    LadderFamily, LadderModel, LadderType, Lanes, MAX_SPLITS, PerChannel, Real, SOLVE_CEILING,
+    SvfBank, SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType, fit_to_rate, ladder_step,
+    svf_step,
 };
+pub use glide::{Glide, Lerp, Steps};
 pub use interp::cubic_hermite;
 pub use model::{
-    Approach, Cadence, Capacity, Channels, Domain, Effort, Family, Feed, Glide, Grows, Lerp, Lti,
-    MAX_LANES, MaxDecay, MaxDecayError, Reach, Readout, Realized, Recurrence, Ring, Setup, Start,
-    Step, Steps, System, TAIL_FLOOR,
+    Approach, Cadence, Capacity, Channels, Domain, Effort, Family, Feed, Grows, Lti, MAX_LANES,
+    MaxDecay, MaxDecayError, Reach, Readout, Realized, Recurrence, Ring, Setup, Start, Step,
+    System, TAIL_FLOOR,
 };
 pub use modulation::allpass::{allpass_chain, allpass_coeff, sweep_hz};
 pub use modulation::mod_delay::{

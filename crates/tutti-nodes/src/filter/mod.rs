@@ -10,7 +10,7 @@ pub use crossover::CrossoverNode;
 pub(crate) use crossover::Splits;
 pub use eq_band::EqBandNode;
 pub use ladder::LadderFilterNode;
-pub use svf::SvfFilterNode;
+pub use svf::{SvfFilterNode, SvfKernel};
 
 use tutti_dsp::{Cadence, ChannelRecurrence, Family, Filter};
 use tutti_types::{BusTopology, ChannelLayout, SampleRate};

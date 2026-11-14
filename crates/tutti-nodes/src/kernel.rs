@@ -1,0 +1,346 @@
+//! [`Kernel`]: what a family of effects tells the one node that runs it, and
+//! [`KernelNode`], that node.
+//!
+//! A kernel is the effect's algorithm with its state: it designs itself from its plain
+//! controls ([`Kernel::retarget`]) and runs a stretch of audio
+//! ([`Kernel::render`]). Everything about being a graph node is the node's, written
+//! once: reading the param cells and ports, the solve grid on the stream clock, the
+//! corners of a driving port, the dead-band, the fork.
+
+use core::ops::Range;
+
+use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_graph::{
+    Cx, HasParam, HasParams, IntoNode, Io, Node, NodeParts, OutBus, ParamNode, ParamSet, Prepare,
+    Shape, Status,
+};
+use tutti_types::{Latency, MAX_BUS_CHANNELS, MaxBlock, SampleRate, Samples, Tail};
+
+use crate::params::{At, ControlSet, HasControl, HasControls, Params};
+
+/// An effect's algorithm with its state, as [`KernelNode`] runs it.
+///
+/// Built on the control side, where it allocates everything it will hold; nothing it does
+/// after that allocates.
+pub trait Kernel: Clone + Send + 'static {
+    /// Its params: their addresses, units and the plain controls they assemble into.
+    type Set: ControlSet;
+
+    /// The frames between two designs while a control moves, at least one: the node
+    /// designs at every `GRID`-th frame of the stream clock, counted from the last reset,
+    /// and only while a control moves, so a held block renders in one call.
+    const GRID: usize;
+
+    /// The ports: the input and output buses and the cost. The node adds the params, the
+    /// latency and the tail.
+    fn shape(&self) -> Shape;
+
+    /// Prepares for `rate` and blocks of at most `max_block` frames. Control side. The
+    /// first [`retarget`](Self::retarget) after it lands at once.
+    fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock);
+
+    /// Back to silence. Audio thread: no allocation.
+    fn reset(&mut self);
+
+    /// Designs `controls` and aims the running coefficients at the design. Audio thread:
+    /// no allocation.
+    fn retarget(&mut self, controls: &<Self::Set as ControlSet>::Controls);
+
+    /// Runs `input` into `output`, the same number of frames, in any sample format (the
+    /// graph's is `f32`). Audio thread: no allocation.
+    fn render<S: Float>(&mut self, input: Planes<'_, S>, output: PlanesMut<'_, '_, S>);
+
+    /// The processing latency, once prepared.
+    fn latency(&self) -> Samples {
+        Samples::ZERO
+    }
+
+    /// How long it rings after its input stops, once prepared.
+    fn tail(&self) -> Tail;
+}
+
+/// An effect of any [`Kernel`] as a graph node.
+///
+/// # Controls
+///
+/// Per block the node reads its cells once ([`Params`]) at the block's last frame. When
+/// a port drives a control, or a cell moved past the dead-band, the block is cut at the
+/// kernel's grid points ([`Kernel::GRID`], counted on the stream clock from the last reset,
+/// so the render does not depend on where blocks fall) and at the corners of a driving
+/// port, and each cut that moved a control designs and retargets before the frames after
+/// it render. Otherwise the block renders in one call.
+///
+/// # In a graph
+///
+/// Inserted with its [`ParamSet`] as its controls ([`tutti_graph::param_parts`]); a fork
+/// shares nothing and starts silent.
+pub struct KernelNode<K: Kernel> {
+    kernel: K,
+    params: Params<K::Set>,
+    /// The output bus.
+    out: OutBus,
+    /// The input width.
+    inputs: usize,
+    /// What [`prepare`](Node::prepare) sets: `None` until the node has a rate.
+    tuned: Option<Tuned<<K::Set as ControlSet>::Controls>>,
+}
+
+/// A [`KernelNode`]'s state that exists once it has a rate.
+#[derive(Clone, Copy, Debug)]
+struct Tuned<C> {
+    rate: SampleRate,
+    /// The controls the kernel was last designed from.
+    applied: Option<C>,
+    /// Frames rendered since the last reset: where the grid points fall.
+    position: u64,
+}
+
+impl<K: Kernel> std::fmt::Debug for KernelNode<K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut d = f.debug_struct("KernelNode");
+        d.field("inputs", &self.inputs);
+        if let Some(t) = &self.tuned {
+            d.field("rate", &t.rate).field("position", &t.position);
+        }
+        d.finish_non_exhaustive()
+    }
+}
+
+impl<K: Kernel> KernelNode<K> {
+    /// A node running `kernel`, its cells `set` at `controls`. It has no rate until the
+    /// graph's `prepare` gives it one and renders silence before. Allocates: build it
+    /// before the node goes live.
+    ///
+    /// # Panics
+    ///
+    /// If the kernel's [`shape`](Kernel::shape) declares no output bus.
+    #[must_use]
+    pub fn with_kernel(kernel: K, set: K::Set, controls: <K::Set as ControlSet>::Controls) -> Self {
+        const { assert!(K::GRID > 0, "a kernel's grid is at least one frame") };
+        let shape = kernel.shape();
+        let out = shape.output_bus(0).expect("a kernel has an output");
+        let inputs = shape.input_bus(0).map_or(0, |b| b.width());
+        let params = Params::new(set, &controls);
+        Self {
+            kernel,
+            params,
+            out,
+            inputs,
+            tuned: None,
+        }
+    }
+
+    /// The controls the kernel was last designed from, for a node's own tests.
+    #[cfg(test)]
+    pub(crate) fn applied(&self) -> Option<<K::Set as ControlSet>::Controls> {
+        self.tuned.as_ref().and_then(|t| t.applied)
+    }
+
+    /// Back to silence, the grid counted from here.
+    fn clear(&mut self) {
+        self.kernel.reset();
+        if let Some(t) = &mut self.tuned {
+            t.position = 0;
+        }
+        self.params.land();
+    }
+
+    /// Renders `frames` of the block through the kernel.
+    fn render(&mut self, io: &mut Io<'_>, frames: Range<usize>) {
+        if frames.is_empty() {
+            return;
+        }
+        let (ins, mut outs) = io.split();
+        let mut input: [&[f32]; MAX_BUS_CHANNELS] = [&[]; MAX_BUS_CHANNELS];
+        for (c, slot) in input.iter_mut().enumerate().take(self.inputs) {
+            *slot = &ins.get(c)[frames.clone()];
+        }
+        let mut output: [&mut [f32]; MAX_BUS_CHANNELS] =
+            core::array::from_fn(|_| Default::default());
+        let mut width = 0;
+        for (slot, ch) in output.iter_mut().zip(outs.bus(self.out).into_channels()) {
+            *slot = &mut ch[frames.clone()];
+            width += 1;
+        }
+        // Both views are whole planes of `frames.len()` frames, at most
+        // `MAX_BUS_CHANNELS` wide; a bus with no channels is the one refusal, and it has
+        // nothing to render.
+        if let (Ok(input), Ok(output)) = (
+            Planes::new(&input[..self.inputs]),
+            PlanesMut::new(&mut output[..width]),
+        ) {
+            self.kernel.render(input, output);
+        }
+    }
+
+    /// Renders the block cut at the grid points and the corners of a driving port, the
+    /// block beginning at stream frame `position`: each cut reads the controls at its
+    /// frame, and one that moved past the dead-band of the last design designs and
+    /// retargets before the frames after it render. Cuts that did not move render
+    /// together, in one call.
+    fn render_steps(&mut self, io: &mut Io<'_>, position: u64, rate: SampleRate) {
+        let size = io.frames();
+        let period = K::GRID as u64;
+        let first = ((period - position % period) % period) as usize;
+        let mut grid = (first..size).step_by(K::GRID).peekable();
+        let mut held = 0;
+        let mut from = 0;
+        loop {
+            let corner = self.params.corner_from(io, from);
+            let cut = match (grid.peek().copied(), corner) {
+                (Some(g), Some(c)) if g <= c => {
+                    grid.next();
+                    g
+                }
+                (_, Some(c)) => c,
+                (Some(g), None) => {
+                    grid.next();
+                    g
+                }
+                (None, None) => break,
+            };
+            from = cut + 1;
+            let target = self.params.read(
+                io,
+                At {
+                    position,
+                    frame: cut,
+                    rate,
+                },
+            );
+            let applied = self.tuned.as_ref().and_then(|t| t.applied);
+            if applied.is_none_or(|a| self.params.moved(&a, &target)) {
+                self.render(io, held..cut);
+                self.apply(target);
+                held = cut;
+            }
+        }
+        self.render(io, held..size);
+    }
+
+    fn apply(&mut self, controls: <K::Set as ControlSet>::Controls) {
+        self.kernel.retarget(&controls);
+        if let Some(t) = &mut self.tuned {
+            t.applied = Some(controls);
+        }
+    }
+}
+
+impl<K: Kernel> Node for KernelNode<K> {
+    /// The ports and cells always; latency and tail from the prepared rate. Unprepared, a
+    /// node declares no latency and an unknown tail.
+    fn shape(&self) -> Shape {
+        let shape = self.kernel.shape().with_param_addrs(self.params.addrs());
+        if self.tuned.is_none() {
+            return shape.with_tail(Tail::Unknown);
+        }
+        shape
+            .with_latency(Latency::new(self.kernel.latency()))
+            .with_tail(self.kernel.tail())
+    }
+
+    fn prepare(&mut self, p: &Prepare) {
+        self.kernel.prepare(p.sample_rate(), p.max_block());
+        self.params.retune(p.sample_rate(), true);
+        self.tuned = Some(Tuned {
+            rate: p.sample_rate(),
+            applied: None,
+            position: 0,
+        });
+        self.clear();
+    }
+
+    fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+        let Some(t) = &mut self.tuned else {
+            return Status::Silent;
+        };
+        let size = io.frames();
+        if size == 0 {
+            return Status::Modified;
+        }
+        let (position, rate, applied) = (t.position, t.rate, t.applied);
+        t.position += size as u64;
+
+        self.params.begin(position);
+        let target = self.params.read(
+            &io,
+            At {
+                position,
+                frame: size - 1,
+                rate,
+            },
+        );
+        let moved = applied
+            .as_ref()
+            .is_none_or(|a| self.params.moved(a, &target));
+        let stepped = self.params.driven(&io) || (applied.is_some() && moved);
+        if stepped {
+            self.render_steps(&mut io, position, rate);
+        } else {
+            if moved {
+                self.apply(target);
+            }
+            self.render(&mut io, 0..size);
+        }
+        Status::Modified
+    }
+
+    fn reset(&mut self) {
+        self.clear();
+    }
+
+    fn param_base(&self, k: usize) -> Option<f32> {
+        self.params.base(k)
+    }
+}
+
+/// A clone shares the cells and starts silent.
+impl<K: Kernel> Clone for KernelNode<K> {
+    fn clone(&self) -> Self {
+        let mut kernel = self.kernel.clone();
+        kernel.reset();
+        let mut params = self.params.clone();
+        params.land();
+        Self {
+            kernel,
+            params,
+            out: self.out,
+            inputs: self.inputs,
+            tuned: self.tuned.map(|t| Tuned { position: 0, ..t }),
+        }
+    }
+}
+
+impl<K: Kernel> ParamNode for KernelNode<K> {
+    fn param_set(&self) -> ParamSet {
+        self.params.bind(ParamSet::builder()).build()
+    }
+
+    /// A clone with every cell detached (at its value now) and silent.
+    fn fork_fresh(&self) -> Self {
+        let mut fork = self.clone();
+        fork.params.detach();
+        fork
+    }
+}
+
+/// A kernel node has the params its [`ControlSet`] declares, in the units its controls
+/// hold them in.
+impl<K: Kernel, const P: u16> HasParam<P> for KernelNode<K>
+where
+    K::Set: HasControl<P>,
+{
+    type Unit = <K::Set as HasControl<P>>::Unit;
+}
+
+impl<K: Kernel, const P: u16> HasParams<P> for KernelNode<K> where K::Set: HasControls<P> {}
+
+/// Inserted with its [`ParamSet`] as its controls and a fork that starts from the values
+/// last set through it ([`tutti_graph::param_parts`]).
+impl<K: Kernel> IntoNode for KernelNode<K> {
+    type Controls = ParamSet;
+
+    fn into_parts(self) -> NodeParts<ParamSet> {
+        tutti_graph::param_parts(self)
+    }
+}
