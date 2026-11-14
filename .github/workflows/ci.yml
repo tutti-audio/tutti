@@ -1104,6 +1104,9 @@ jobs:
       # `WakeFlag` (a raise racing a take is seen by that take or the next,
       # never lost, never invented), against the shipped code.
       - run: cargo test --locked -p tutti-rt --release --test wake_flag_loom
+      # `Gauge` and `Counter` (a counter never goes back, a closed cell is read
+      # at its final value, a gauge is never torn), against the shipped code.
+      - run: cargo test --locked -p tutti-rt --release --test gauge_loom
 
   # The one check the merge queue's ruleset requires. It waits for every other
   # job and passes when each succeeded or was skipped; a failed or cancelled

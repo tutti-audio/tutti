@@ -129,6 +129,9 @@
 //! - [`level_cell()`] — a peak and an energy the audio thread folds each block
 //!   into and one reader takes whole, since its last take: two slots and a
 //!   flip, so a block lands in one take with its peak and frames together.
+//! - [`gauge()`] / [`counter()`] — a reading a node writes and any thread reads: a
+//!   level that moves both ways ([`Gauge`]) or a count that only grows
+//!   ([`Counter`]), each one word, never reset by a read.
 //! - [`RequestWord`] — up to 32 kinds of request a callee raises from any
 //!   thread (one `fetch_or`) and a control thread takes whole.
 //! - [`WakeFlag`] — a flag any thread raises (one store) and the audio thread
@@ -171,6 +174,7 @@ mod doorbell;
 mod drain_clock;
 mod edits;
 mod fault_latch;
+mod gauge;
 mod handoff;
 mod job_gate;
 mod level_cell;
@@ -195,6 +199,7 @@ pub use doorbell::Doorbell;
 pub use drain_clock::{DrainBeat, DrainMark, DrainWatch, drain_clock};
 pub use edits::{EditReader, EditWriter, RingFull, edit_ring};
 pub use fault_latch::{Drained, FaultLatch};
+pub use gauge::{Count, Counter, CounterWriter, Gauge, GaugeWriter, counter, gauge};
 pub use handoff::{Hand, Rt, handoff};
 pub use job_gate::JobGate;
 pub use level_cell::{LevelReader, LevelSpan, LevelWriter, level_cell};
