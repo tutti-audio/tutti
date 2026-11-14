@@ -752,7 +752,7 @@ pub enum ParamWriteError {
 }
 
 /// What a format reports of a declared parameter's writability.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParamAccess {
     /// The format never reports the read-only bit (VST2 has no such opcode); a
     /// parameter whose state is unknown is writable.
