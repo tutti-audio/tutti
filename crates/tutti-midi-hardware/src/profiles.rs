@@ -30,29 +30,17 @@ use tutti_midi_device::{
 use tutti_midi_protocol::{ChannelResponse, MpeZoneConfig, MpeZones, PitchBendSensitivity};
 use tutti_ump::{MidiChannel, MidiGroup};
 
-/// The Channels a Profile is asked to use when it is enabled on a Channel: the
-/// Manager and its Members, at least 1 and at most 14 bits (M2-101 §7.8).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ChannelCount(ProfileChannels);
+tutti_types::ranged! {
+    /// The Channels a Profile is asked to use when it is enabled on a Channel: the
+    /// Manager and its Members, at least 1 and at most 14 bits (M2-101 §7.8).
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    ChannelCount(u16), NotAChannelCount, "a Channel count (1 to 16383)",
+    |raw| raw >= 1 && raw <= 0x3FFF
+}
 
 impl ChannelCount {
     /// One Channel: a Profile on a single Channel.
-    pub const ONE: Self = Self(ProfileChannels::of(1));
-
-    /// A count, or `None` for 0 or more than [`ProfileChannels::MAX`].
-    #[must_use]
-    pub const fn new(count: u16) -> Option<Self> {
-        match ProfileChannels::new(count) {
-            Some(channels) if count != 0 => Some(Self(channels)),
-            _ => None,
-        }
-    }
-
-    /// The count.
-    #[must_use]
-    pub const fn get(self) -> u16 {
-        self.0.get()
-    }
+    pub const ONE: Self = Self::of(1);
 }
 
 /// What a peer's Profiles are at one address, as of when it was read.
@@ -147,7 +135,7 @@ impl ChannelProfile {
     pub fn enable(&self, channels: ChannelCount) -> ProfileSwitch {
         self.listed.on(ProfileTarget::Channel {
             channel: self.channel,
-            channels: channels.0,
+            channels: ProfileChannels::of(channels.get()),
         })
     }
 

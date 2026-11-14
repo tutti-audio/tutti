@@ -320,51 +320,51 @@ fn the_device_id_and_version_are_range_checked_values() {
 }
 
 /// The ranged values of the CI messages keep the range-checked contract at
-/// each edge of their spec range.
+/// each edge of their spec range, and the ones that are stored keep it through
+/// serde.
 #[test]
 fn the_ci_ranged_values_keep_the_range_contract() {
     use tutti_fixtures::{RangeContract, check_range_contract};
-    check_range_contract(&RangeContract {
-        new: Muid::new,
-        get: Muid::get,
-        of: Some(Muid::of),
-        valid: &[0, 1, 0x0FFF_FEFF],
-        invalid: &[0x0FFF_FF00, 0x0FFF_FFFF, 0x1000_0000, u32::MAX],
-    });
-    check_range_contract(&RangeContract {
-        new: MaxSysexSize::new,
-        get: MaxSysexSize::get,
-        of: Some(MaxSysexSize::of),
-        valid: &[128, 512, 0x0FFF_FFFF],
-        invalid: &[0, 127, 0x1000_0000],
-    });
+    macro_rules! contract {
+        ($ty:ty, $raw:ty, $valid:expr, $invalid:expr) => {{
+            let c = RangeContract {
+                new: <$ty>::new,
+                get: <$ty>::get,
+                of: Some(<$ty>::of),
+                valid: &$valid,
+                invalid: &$invalid,
+            };
+            check_range_contract(&c);
+            #[cfg(feature = "serde")]
+            tutti_fixtures::check_range_serde(&c);
+        }};
+    }
+    contract!(
+        Muid,
+        u32,
+        [0, 1, 0x0FFF_FEFF],
+        [0x0FFF_FF00, 0x0FFF_FFFF, 0x1000_0000, u32::MAX]
+    );
+    contract!(
+        MaxSysexSize,
+        u32,
+        [128, 512, 0x0FFF_FFFF],
+        [0, 127, 0x1000_0000]
+    );
+    contract!(TimeoutWait, u8, [0, 1, 127], [128, 255]);
+    contract!(PeRequestId, u8, [0, 127], [128, 255]);
+    contract!(ChunkNo, u16, [1, 0x3FFF], [0, 0x4000]);
+    contract!(PeChannel, u16, [1, 256], [0, 257, u16::MAX]);
+    contract!(Priority, u8, [1, 5], [0, 6]);
+    contract!(SignificantBits, u8, [1, 32], [0, 33]);
+    contract!(StepCount, u32, [1, u32::MAX], [0]);
+    // `ProfileChannels` is not stored, so it has no serde form.
     check_range_contract(&RangeContract {
         new: ProfileChannels::new,
         get: ProfileChannels::get,
         of: Some(ProfileChannels::of),
         valid: &[0, 1, 0x3FFF],
         invalid: &[0x4000, u16::MAX],
-    });
-    check_range_contract(&RangeContract {
-        new: TimeoutWait::new,
-        get: TimeoutWait::tenths,
-        of: Some(TimeoutWait::of),
-        valid: &[0, 1, 127],
-        invalid: &[128, 255],
-    });
-    check_range_contract(&RangeContract {
-        new: PeRequestId::new,
-        get: PeRequestId::get,
-        of: Some(PeRequestId::of),
-        valid: &[0, 127],
-        invalid: &[128, 255],
-    });
-    check_range_contract(&RangeContract {
-        new: ChunkNo::new,
-        get: ChunkNo::get,
-        of: Some(ChunkNo::of),
-        valid: &[1, 0x3FFF],
-        invalid: &[0, 0x4000],
     });
 }
 
