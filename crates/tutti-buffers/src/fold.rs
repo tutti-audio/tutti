@@ -244,8 +244,8 @@ impl<F: Float> Row<F> {
 
 /// How a signal of one [`ChannelTopology`] becomes another's.
 ///
-/// A signal states the [`ChannelTopology`] it has. [`Fold::between`] is built once, on the control side (it allocates),
-/// from two topologies, and applied to views by [`fold`](Self::fold)
+/// A signal states the [`ChannelTopology`] it has. [`Fold::between`] is built
+/// once, on the control side (it allocates), from two topologies, and applied to views by [`fold`](Self::fold)
 /// (interleaved to interleaved), [`fold_planar`](Self::fold_planar) (planes to
 /// planes), [`fold_planar_to_interleaved`](Self::fold_planar_to_interleaved)
 /// and [`fold_planar_channel`](Self::fold_planar_channel) (one destination
@@ -264,8 +264,9 @@ impl<F: Float> Row<F> {
 ///   samples copied bit for bit.
 /// - **A speaker in both:** it goes straight across at gain 1.0.
 /// - **A speaker the destination lacks** folds into the nearest ones the
-///   destination has, at −3 dB ([`Float::MINUS_3_DB`]), by a fixed table: the centre into front left and right; a side or rear speaker
-///   into its counterpart (side for rear and back) or else the front speaker on
+///   destination has, at −3 dB ([`Float::MINUS_3_DB`]), by a fixed table:
+///   the centre into front left and right; a side or rear speaker into its
+///   counterpart (side for rear and back) or else the front speaker on
 ///   its side; a top-back speaker into the back, else the side surround, else
 ///   the front speaker on its side; the top-front centre and the left/right of
 ///   centre pair into the centre if the destination has one, else the front

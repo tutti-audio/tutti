@@ -64,3 +64,6 @@ pub(crate) fn append(block: Interleaved<'_>, planes: &mut [Vec<f32>]) -> Result<
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
