@@ -199,7 +199,7 @@ fn a_reconnect_during_a_fade_out_rises_from_where_it_was() {
     let _ = s.update();
     let up = frames(&mut s, 8);
     assert!(
-        (up[0] - *down.last().unwrap()).abs() < 1e-3,
+        (up[0] - *down.last().unwrap()).abs() < 1e-5,
         "no step at the turn: {} after {}",
         up[0],
         down.last().unwrap()
