@@ -327,7 +327,7 @@ fn the_server_is_sent_the_schedule_on_the_chunks_frames() {
 /// **A served plugin reopens and restores its state off the main thread**,
 /// against a real `plugin-server` and the reference CLAP plugin: the
 /// token-free [`Ipc::reopen_restoring`], called on a thread that holds no
-/// [`MainThread`](tutti_plugin_types::MainThread), starts a server of its own
+/// [`MainThreadMarker`], starts a server of its own
 /// (another process), hands it the saved state before it is activated, and the
 /// state is taken (`Some(Ok(()))`). The reopened plugin is the same plugin and
 /// renders through the generic node: a click comes out a declared latency
@@ -349,7 +349,10 @@ fn a_served_plugin_reopens_and_restores_off_the_main_thread() {
         SR,
         None,
         tutti_plugin_types::StateUse::Project,
-        Some(crate::format::gui::load_gui_instance),
+        Some(tutti_plugin_ipc::EditorLoader::new(
+            crate::format::gui::load_gui_instance,
+            tutti_fixtures::detached_work(),
+        )),
     )
     .expect("the reference plugin loads in a real server")
     .ipc;
@@ -360,7 +363,7 @@ fn a_served_plugin_reopens_and_restores_off_the_main_thread() {
     let first_pid = first.guard().pid();
     let reopened = std::thread::spawn(move || {
         assert!(
-            tutti_plugin_types::MainThread::current().is_none(),
+            tutti_plugin_types::MainThreadMarker::new().is_none(),
             "no main thread here"
         );
         first.reopen_restoring(Some(&state)).map(|r| (first, r))
@@ -400,7 +403,10 @@ fn a_chosen_plugin_is_the_one_a_reopen_loads() {
         SR,
         None,
         tutti_plugin_types::StateUse::Project,
-        Some(crate::format::gui::load_gui_instance),
+        Some(tutti_plugin_ipc::EditorLoader::new(
+            crate::format::gui::load_gui_instance,
+            tutti_fixtures::detached_work(),
+        )),
     )
     .expect("the factory's second plugin loads in a real server")
     .ipc;

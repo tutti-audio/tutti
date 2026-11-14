@@ -158,7 +158,10 @@ fn handle_with_mock_server(
         path.clone(),
         buffer,
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
-        Some(crate::format::gui::load_gui_instance),
+        Some(tutti_plugin_ipc::EditorLoader::new(
+            crate::format::gui::load_gui_instance,
+            tutti_fixtures::detached_work(),
+        )),
         SampleRate::SR_48K,
     )
     .unwrap();
@@ -244,7 +247,10 @@ fn handle_with_multi_reply_server(
         path.clone(),
         buffer,
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
-        Some(crate::format::gui::load_gui_instance),
+        Some(tutti_plugin_ipc::EditorLoader::new(
+            crate::format::gui::load_gui_instance,
+            tutti_fixtures::detached_work(),
+        )),
         SampleRate::SR_48K,
     )
     .unwrap();
@@ -503,7 +509,7 @@ fn handle_open_editor_errors_for_missing_plugin() {
     assert!(
         handle
             .open_editor(
-                &main_thread(),
+                main_thread(),
                 tutti_fixtures::StandInWindow.handle(),
                 tutti_plugin_types::ContentScale::IDENTITY
             )

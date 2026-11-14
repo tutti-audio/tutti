@@ -4,34 +4,30 @@
 //! The snapshot and parameter-read jobs the session hands out run on a pool
 //! thread and call `AnyThread::save_state` and `AnyThread::parameter_value` on
 //! the handle; the backend posts them to the main thread, and the update's
-//! `Phase::Collect` runs them (`run_deferred`). `Session::update` is a
-//! main-thread call (it debug-asserts that it is not off a claimed main
-//! thread), so a host that does not call it on its main thread must call
-//! `tutti_plugin_types::run_deferred` from its main-thread loop instead (the
-//! `tutti-plugin` unit tests pump it directly).
+//! `MainSession::update` runs them (the session's `MainWork`). The target runs on the
+//! process's main thread, where the handle's own calls run at once.
 
 use std::time::Duration;
 use tutti_types::ChannelLayout;
 
 use tutti_plugin::catalog::PluginRef;
-use tutti_plugin_types::{MainThread, Normalized, ParamId};
+use tutti_plugin_types::{Normalized, ParamId};
 use tutti_session::{PluginLoadRequest, Session};
 use tutti_types::SampleRate;
 
 /// **A pool thread asks the handle for its state and a parameter while the
-/// main thread runs the session's update.** The answers are real: the state
-/// equals one saved on the main thread, and the parameter is the value written
-/// first.
-#[test]
+/// main thread runs the session's update.** The calls wait for the update
+/// rather than being refused, and the answers are real: the state equals one
+/// saved on the main thread, and the parameter is the value written first.
 fn a_pool_thread_is_answered_while_the_main_thread_updates_the_session() {
-    let main = MainThread::claim().expect("one test, one process");
+    let main = tutti_fixtures::main_thread();
     let mut session = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::SR_48K)
         .expect("a detached session builds");
     let node = session
         .add_plugin_blocking(
-            &main,
+            main,
             PluginLoadRequest::new(
                 PluginRef::file(tutti_fixtures::vst2_probe()).expect("a plugin file"),
             ),
@@ -53,6 +49,13 @@ fn a_pool_thread_is_answered_while_the_main_thread_updates_the_session() {
             handle.any_thread().parameter_value(id),
         )
     });
+    // The load gave the session a main thread, so the calls wait for an update
+    // rather than answering "unavailable" at once.
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(
+        !pool.is_finished(),
+        "the pool thread was answered before any update ran its work"
+    );
     while !pool.is_finished() {
         let _ = session.update();
         std::thread::sleep(Duration::from_millis(1));
@@ -62,3 +65,8 @@ fn a_pool_thread_is_answered_while_the_main_thread_updates_the_session() {
     assert_eq!(state.expect("a real state, not the deadline"), expected);
     assert_eq!(value.map(Normalized::get), Some(0.75));
 }
+
+/// The cases of this module, run by `main`.
+pub(crate) const CASES: &[(&str, fn())] = tutti_fixtures::cases!["vst2_off_main_handle";
+a_pool_thread_is_answered_while_the_main_thread_updates_the_session,
+];

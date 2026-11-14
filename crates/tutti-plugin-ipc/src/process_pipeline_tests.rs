@@ -44,7 +44,8 @@ use tutti_ump::MidiChannel;
 /// The bridge's editor loader: these peers never open an editor, and one that
 /// tried is refused (the suite loads no plugin format).
 fn no_editor(
-    _: &tutti_plugin_types::MainThread,
+    _: tutti_plugin_types::MainThreadMarker,
+    _: &tutti_plugin_types::MainWorkHandle,
     path: &std::path::Path,
     _: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
@@ -221,7 +222,10 @@ fn bridge_with_server(
         path.clone(),
         Arc::clone(host_slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
-        Some(no_editor),
+        Some(crate::EditorLoader::new(
+            no_editor,
+            tutti_fixtures::detached_work(),
+        )),
         SampleRate::SR_48K,
     )
     .unwrap();
@@ -916,7 +920,10 @@ fn bridge_with_no_server() -> (Arc<PluginBridge>, BridgeThread, SlabWriter) {
         path,
         Arc::clone(host_slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
-        Some(no_editor),
+        Some(crate::EditorLoader::new(
+            no_editor,
+            tutti_fixtures::detached_work(),
+        )),
         SampleRate::SR_48K,
     )
     .unwrap();
@@ -1419,7 +1426,10 @@ fn stamped_server(stall: std::time::Duration, first_only: bool, rate: SampleRate
         path.clone(),
         Arc::clone(host_slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
-        Some(no_editor),
+        Some(crate::EditorLoader::new(
+            no_editor,
+            tutti_fixtures::detached_work(),
+        )),
         rate,
     )
     .unwrap();
@@ -1679,7 +1689,10 @@ fn a_refused_chunk_reports_its_midi_lost() {
         path,
         Arc::clone(slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
-        Some(no_editor),
+        Some(crate::EditorLoader::new(
+            no_editor,
+            tutti_fixtures::detached_work(),
+        )),
         SampleRate::SR_48K,
     )
     .unwrap();
@@ -1806,7 +1819,10 @@ fn two_stale_blocks(
         path.clone(),
         Arc::clone(slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
-        Some(no_editor),
+        Some(crate::EditorLoader::new(
+            no_editor,
+            tutti_fixtures::detached_work(),
+        )),
         SampleRate::SR_48K,
     )
     .unwrap();

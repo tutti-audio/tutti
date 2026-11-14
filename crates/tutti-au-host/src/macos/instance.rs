@@ -24,7 +24,9 @@ use std::sync::Arc;
 
 use tutti_au_ffi::property::{BypassEffect, ClassInfo, ClassInfoFromDocument, Latency};
 use tutti_au_ffi::{AuEditor, Element, HostCallbacks, Scope, TransportState, Unit};
-use tutti_plugin_types::{ChannelLayout, MainThread, PluginDescriptor, RequestWord, TransportInfo};
+use tutti_plugin_types::{
+    ChannelLayout, MainThreadMarker, MainWorkHandle, PluginDescriptor, RequestWord, TransportInfo,
+};
 use tutti_types::value::units::Seconds;
 use tutti_types::{SampleRate, Samples};
 
@@ -103,6 +105,9 @@ pub struct AuLoaded {
     /// ([`new`](Self::new)) has no bundle, so its origin is an empty path, and
     /// reopening it fails at the `Scanning` stage rather than finding another unit.
     pub(crate) origin: tutti_plugin_types::Origin,
+    /// The collector of this unit's owner, given at construction, which a reopen
+    /// gives its new instance.
+    pub(crate) work: MainWorkHandle,
 }
 
 impl std::fmt::Debug for AuLoaded {
@@ -114,7 +119,8 @@ impl std::fmt::Debug for AuLoaded {
 }
 
 impl AuLoaded {
-    /// Instantiates and applies the initial stream configuration.
+    /// Instantiates and applies the initial stream configuration. `work` is where
+    /// the unit's drop off the main thread hands its close.
     ///
     /// # Errors
     /// [`AuError::LoadFailed`](crate::AuError::LoadFailed) or
@@ -125,6 +131,7 @@ impl AuLoaded {
         component: AuComponentRef,
         sample_rate: SampleRate,
         block_size: u32,
+        work: &MainWorkHandle,
     ) -> Result<Self> {
         let handle = AuHandle::new(component)?;
 
@@ -140,7 +147,11 @@ impl AuLoaded {
             outputs: ChannelLayout::from(probed.outputs.count().max(2)),
             has_input: probed.has_input,
         };
-        Self::with_layout(handle, StreamConfig::new(sample_rate, block_size, channels))
+        Self::with_layout(
+            handle,
+            StreamConfig::new(sample_rate, block_size, channels),
+            work,
+        )
     }
 
     /// Instantiates at a caller-chosen [`StreamConfig`], bypassing the stereo
@@ -153,8 +164,12 @@ impl AuLoaded {
     ///
     /// # Errors
     /// As [`AuLoaded::new`].
-    pub fn new_with_config(component: AuComponentRef, config: StreamConfig) -> Result<Self> {
-        Self::with_layout(AuHandle::new(component)?, config)
+    pub fn new_with_config(
+        component: AuComponentRef,
+        config: StreamConfig,
+        work: &MainWorkHandle,
+    ) -> Result<Self> {
+        Self::with_layout(AuHandle::new(component)?, config, work)
     }
 
     /// Shared tail of both constructors: apply the config, verify the block size
@@ -180,7 +195,11 @@ impl AuLoaded {
     /// exception: it is *returned* rather than enforced because a narrower width
     /// is recoverable by resizing the scratch, and nothing downstream indexes
     /// past an allocation on account of it.
-    fn with_layout(handle: AuHandle, mut config: StreamConfig) -> Result<Self> {
+    fn with_layout(
+        handle: AuHandle,
+        mut config: StreamConfig,
+        work: &MainWorkHandle,
+    ) -> Result<Self> {
         // `apply` returns the layout the AU actually accepted, which may differ
         // from what was requested. Store the effective layout so the render
         // scratch is later sized to the real topology, not the wished-for one.
@@ -207,6 +226,7 @@ impl AuLoaded {
             mode_accepted,
             last_latency: Cell::new(Samples::ZERO),
             origin: tutti_plugin_types::Origin::new("", tutti_plugin_types::Load::new()),
+            work: work.clone(),
         })
     }
 
@@ -1304,7 +1324,7 @@ impl AuLoaded {
     /// Returns the **fallback's** error if both properties fail, since that is the
     /// path a host without this method would have taken anyway. A refusal of
     /// property 50 alone is not an error — it is the documented normal case.
-    pub fn load_document_state(&mut self, _main: &MainThread, data: &[u8]) -> Result<()> {
+    pub fn load_document_state(&mut self, _main: MainThreadMarker, data: &[u8]) -> Result<()> {
         if data.is_empty() {
             return Ok(());
         }
@@ -1334,7 +1354,7 @@ impl AuLoaded {
     /// [`AuError::InvalidPreset`](crate::AuError::InvalidPreset) if what it hands over is not a dictionary.
     pub fn save_preset_file(
         &self,
-        _main: &MainThread,
+        _main: MainThreadMarker,
         path: &std::path::Path,
         name: &str,
     ) -> Result<()> {
@@ -1364,7 +1384,7 @@ impl AuLoaded {
     /// the state it had and is still renderable.
     pub fn load_preset_file(
         &mut self,
-        _main: &MainThread,
+        _main: MainThreadMarker,
         path: &std::path::Path,
     ) -> Result<crate::aupreset::AuPresetIdentity> {
         let identity =

@@ -97,7 +97,7 @@
 //!   is inserted bare, like every forked node.
 
 use std::sync::{Arc, Weak};
-use tutti_plugin_types::MainThread;
+use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 
 use parking_lot::Mutex;
 use tutti_graph::{ForkBuild, ForkCause, ForkMode, ForkSource, Forked};
@@ -120,6 +120,9 @@ pub(super) struct Fork<F: InProcess> {
     /// Where the live instance came from: the file and the choice of plugin
     /// in it, which the second instance loads again.
     origin: Origin,
+    /// The collector of the live instance's owner, which the second instance hands
+    /// its close to.
+    work: MainWorkHandle,
     /// The live instance's plugin id, which the second one must match.
     id: String,
     /// The live node's rate when this source was taken: what the second
@@ -147,10 +150,12 @@ where
     /// again.
     pub(super) fn of(bound: &PluginNode<F>) -> Option<Self> {
         let client = &bound.client;
+        let reload = client.reload.as_ref()?;
         Some(Self {
             tempo: bound.tempo.clone(),
             live: Arc::downgrade(&client.inner),
-            origin: client.origin.clone()?,
+            origin: reload.origin.clone(),
+            work: reload.work.clone(),
             id: client.descriptor.id.clone(),
             sample_rate: tutti_types::SampleRate::new(client.sample_rate)?,
             features: client.features,
@@ -162,7 +167,7 @@ where
     /// The six steps in the module docs, in order.
     fn instance(
         &self,
-        main: &MainThread,
+        main: MainThreadMarker,
         mode: ForkMode,
     ) -> Result<PluginNode<F>, PluginForkError> {
         // First, so a plugin that cannot save costs no second instance. The
@@ -207,6 +212,7 @@ where
         // holds a Controller, not the `&F` that `reopen` needs.
         let (mut fork, handle, restored) = load_client_restoring::<F>(
             main,
+            &self.work,
             self.origin.path(),
             self.origin.load(),
             self.sample_rate,
@@ -262,9 +268,9 @@ where
         // The gather runs on the main thread (below), which `current` confirms;
         // off it there is no way to load a second instance, so the fork is
         // refused rather than loaded where the format forbids it.
-        let main =
-            MainThread::current().ok_or_else(|| ForkCause::new(PluginForkError::OffMainThread))?;
-        let fork = self.instance(&main, mode).map_err(ForkCause::new)?;
+        let main = MainThreadMarker::new()
+            .ok_or_else(|| ForkCause::new(PluginForkError::OffMainThread))?;
+        let fork = self.instance(main, mode).map_err(ForkCause::new)?;
         // In this process: nothing can fail while it renders that the render
         // would not see, so no health probe. Boxed bare: no fork of its own.
         Ok(Forked::new(Box::new(fork)))
@@ -317,7 +323,7 @@ where
     /// built is closed before this returns.
     pub fn fork_instance(
         &self,
-        main: &MainThread,
+        main: MainThreadMarker,
         mode: ForkMode,
     ) -> Result<PluginNode<F>, PluginForkError> {
         Fork::of(self)

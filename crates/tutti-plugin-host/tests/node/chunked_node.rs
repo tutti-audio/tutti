@@ -24,10 +24,10 @@ use tutti_midi_protocol::widen_velocity;
 use tutti_plugin_host::{InProcClient, NodeControls, PluginNode, load_client};
 use tutti_plugin_types::{
     AudioBufferMut, BusRole, ChannelLayout, ChannelTopology, ContentScale, Control, Controller,
-    EditorError, EditorWindow, Features, InProcess, Load, Loaded, LoadedPlugin, MainThread,
-    Normalized, Origin, ParamId, ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo,
-    PluginResult, PluginTail, Prepare, Processor, Refused, RenderModeSupport, RestartRules,
-    Samples, Speaker, Stuck, WindowHandle,
+    EditorError, EditorWindow, Features, InProcess, Load, Loaded, LoadedPlugin, MainThreadMarker,
+    MainWorkHandle, Normalized, Origin, ParamId, ParameterInfo, PluginBus, PluginDescriptor,
+    PluginError, PluginIo, PluginResult, PluginTail, Prepare, Processor, Refused,
+    RenderModeSupport, RestartRules, Samples, Speaker, Stuck, WindowHandle,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_transport::TempoReader;
@@ -98,6 +98,7 @@ struct Rec {
     rig: Arc<Rig>,
     descriptor: PluginDescriptor,
     origin: Origin,
+    work: MainWorkHandle,
 }
 
 struct RecProcessor {
@@ -110,6 +111,7 @@ struct RecController {
     rig: Arc<Rig>,
     descriptor: PluginDescriptor,
     origin: Origin,
+    work: MainWorkHandle,
 }
 
 macro_rules! rec_control {
@@ -118,10 +120,10 @@ macro_rules! rec_control {
             fn info(&self) -> &PluginDescriptor {
                 &self.descriptor
             }
-            fn render_mode_support(&self, _: &MainThread) -> RenderModeSupport {
+            fn render_mode_support(&self, _: MainThreadMarker) -> RenderModeSupport {
                 RenderModeSupport::OnActivation
             }
-            fn wiring(&self, _: &MainThread) -> LoadedPlugin {
+            fn wiring(&self, _: MainThreadMarker) -> LoadedPlugin {
                 let stereo = ChannelTopology::new([Speaker::FrontLeft, Speaker::FrontRight]);
                 let mut wiring = LoadedPlugin {
                     inputs: vec![
@@ -139,19 +141,24 @@ macro_rules! rec_control {
                 }
                 wiring
             }
-            fn parameters(&self, _: &MainThread) -> Vec<ParameterInfo> {
+            fn parameters(&self, _: MainThreadMarker) -> Vec<ParameterInfo> {
                 vec![ParameterInfo::new(ParamId::new(PARAM), "p")]
             }
-            fn parameter(&self, _: &MainThread, _: ParamId) -> Option<Normalized> {
+            fn parameter(&self, _: MainThreadMarker, _: ParamId) -> Option<Normalized> {
                 None
             }
-            fn set_parameter(&mut self, _: &MainThread, _: ParamId, _: Normalized) {}
-            fn parameter_plain(&self, _: &MainThread, _: ParamId, _: Normalized) -> Option<f64> {
+            fn set_parameter(&mut self, _: MainThreadMarker, _: ParamId, _: Normalized) {}
+            fn parameter_plain(
+                &self,
+                _: MainThreadMarker,
+                _: ParamId,
+                _: Normalized,
+            ) -> Option<f64> {
                 None
             }
             fn parameter_normalized(
                 &self,
-                _: &MainThread,
+                _: MainThreadMarker,
                 _: ParamId,
                 _: f64,
             ) -> Option<Normalized> {
@@ -159,14 +166,14 @@ macro_rules! rec_control {
             }
             fn save_state(
                 &mut self,
-                _: &MainThread,
+                _: MainThreadMarker,
                 _: tutti_plugin_types::StateUse,
             ) -> PluginResult<Vec<u8>> {
                 Ok(Vec::new())
             }
             fn load_state(
                 &mut self,
-                _: &MainThread,
+                _: MainThreadMarker,
                 _: &[u8],
                 _: tutti_plugin_types::StateUse,
             ) -> PluginResult<()> {
@@ -177,24 +184,24 @@ macro_rules! rec_control {
             }
         }
         impl EditorWindow for $ty {
-            fn has_editor(&self, _: &MainThread) -> bool {
+            fn has_editor(&self, _: MainThreadMarker) -> bool {
                 false
             }
             fn open_editor(
                 &mut self,
-                _: &MainThread,
+                _: MainThreadMarker,
                 _: WindowHandle,
                 _: ContentScale,
             ) -> PluginResult<dpi::Size> {
                 Err(PluginError::Editor(EditorError::PluginError("none".into())))
             }
-            fn close_editor(&mut self, _: &MainThread) {}
-            fn editor_idle(&mut self, _: &MainThread) {}
+            fn close_editor(&mut self, _: MainThreadMarker) {}
+            fn editor_idle(&mut self, _: MainThreadMarker) {}
 
             /// The default capabilities: this surface reports no resize support.
             fn editor_capabilities(
                 &mut self,
-                _main: &tutti_plugin_types::MainThread,
+                _main: tutti_plugin_types::MainThreadMarker,
             ) -> tutti_plugin_types::EditorCapabilities {
                 tutti_plugin_types::EditorCapabilities::default()
             }
@@ -202,7 +209,7 @@ macro_rules! rec_control {
             /// Not supported here.
             fn set_editor_size(
                 &mut self,
-                _main: &tutti_plugin_types::MainThread,
+                _main: tutti_plugin_types::MainThreadMarker,
                 _requested: dpi::Size,
             ) -> tutti_plugin_types::PluginResult<dpi::Size> {
                 Err(tutti_plugin_types::PluginError::Editor(
@@ -215,7 +222,7 @@ macro_rules! rec_control {
             /// Nothing asked: this surface never queues a resize request.
             fn poll_editor_resize_request(
                 &mut self,
-                _main: &tutti_plugin_types::MainThread,
+                _main: tutti_plugin_types::MainThreadMarker,
             ) -> Option<dpi::Size> {
                 None
             }
@@ -232,7 +239,7 @@ impl Loaded for Rec {
 
     fn activate(
         self,
-        _: &MainThread,
+        _: MainThreadMarker,
         _: Prepare,
     ) -> Result<(RecProcessor, RecController), Refused<Self>> {
         Ok((
@@ -244,12 +251,13 @@ impl Loaded for Rec {
                 rig: self.rig,
                 descriptor: self.descriptor,
                 origin: self.origin,
+                work: self.work,
             },
         ))
     }
 
     fn deactivate(
-        _: &MainThread,
+        _: MainThreadMarker,
         processor: RecProcessor,
         controller: RecController,
     ) -> Result<Self, Stuck<RecProcessor, RecController>> {
@@ -258,6 +266,7 @@ impl Loaded for Rec {
             rig: controller.rig,
             descriptor: controller.descriptor,
             origin: controller.origin,
+            work: controller.work,
         })
     }
 }
@@ -265,16 +274,21 @@ impl Loaded for Rec {
 impl Controller for RecController {
     type Loaded = Rec;
     type Processor = RecProcessor;
-    fn latency(&self, _: &MainThread) -> Samples {
+    fn latency(&self, _: MainThreadMarker) -> Samples {
         Samples(0)
     }
-    fn tail(&self, _: &MainThread) -> PluginTail {
+    fn tail(&self, _: MainThreadMarker) -> PluginTail {
         PluginTail::None
     }
 }
 
 impl InProcess for Rec {
-    fn load_in_process(_: &MainThread, path: &Path, load: &Load) -> PluginResult<Self> {
+    fn load_in_process(
+        _: MainThreadMarker,
+        work: &MainWorkHandle,
+        path: &Path,
+        load: &Load,
+    ) -> PluginResult<Self> {
         let rig = ROUTE.with(|r| r.borrow_mut().take()).expect("a rig routed");
         Ok(Rec {
             rig,
@@ -284,10 +298,14 @@ impl InProcess for Rec {
                 ..PluginDescriptor::default()
             },
             origin: Origin::new(path, load.clone()),
+            work: work.clone(),
         })
     }
     fn origin(&self) -> &Origin {
         &self.origin
+    }
+    fn main_work(&self) -> &MainWorkHandle {
+        &self.work
     }
 }
 
@@ -378,9 +396,14 @@ fn tempo(to_90: Option<f64>) -> TempoReader {
 /// The node over `rig`, prepared for blocks of up to `block`.
 fn node(rig: &Arc<Rig>, block: usize, map: TempoReader) -> (Direct<PluginNode<Rec>>, NodeControls) {
     ROUTE.with(|r| *r.borrow_mut() = Some(rig.clone()));
-    let (client, _handle): (InProcClient<Rec>, _) =
-        load_client::<Rec>(&main_thread(), Path::new("rec"), &Load::new(), SR)
-            .expect("the recording plugin loads");
+    let (client, _handle): (InProcClient<Rec>, _) = load_client::<Rec>(
+        main_thread(),
+        &tutti_fixtures::detached_work(),
+        Path::new("rec"),
+        &Load::new(),
+        SR,
+    )
+    .expect("the recording plugin loads");
     let controls = client.controls();
     (Direct::new(client.bind(map), SR, block), controls)
 }
@@ -704,9 +727,14 @@ fn a_chunked_processors_lost_midi_reaches_the_graphs_event_losses() {
     let rig = Rig::new(Some(64), Features::TRANSPORT);
     rig.lose.store(3, Ordering::Relaxed);
     ROUTE.with(|r| *r.borrow_mut() = Some(rig.clone()));
-    let (client, _handle): (InProcClient<Rec>, _) =
-        load_client::<Rec>(&main_thread(), Path::new("rec"), &Load::new(), SR)
-            .expect("the recording plugin loads");
+    let (client, _handle): (InProcClient<Rec>, _) = load_client::<Rec>(
+        main_thread(),
+        &tutti_fixtures::detached_work(),
+        Path::new("rec"),
+        &Load::new(),
+        SR,
+    )
+    .expect("the recording plugin loads");
     let (mut editor, mut exec) = Editor::new(Prepare::new(SR, MaxBlock::of(Samples(100))));
     let key = NodeKey(1);
     editor.insert(key, "rec", client.bind(tempo(None)));
@@ -864,9 +892,14 @@ fn the_shape_declares_the_plugins_buses_with_their_placement() {
         let rig = Rig::new(None, Features::empty());
         rig.key_bus.store(key_bus, Ordering::Relaxed);
         ROUTE.with(|r| *r.borrow_mut() = Some(rig));
-        let (client, _handle): (InProcClient<Rec>, _) =
-            load_client::<Rec>(&main_thread(), Path::new("rec"), &Load::new(), SR)
-                .expect("the recording plugin loads");
+        let (client, _handle): (InProcClient<Rec>, _) = load_client::<Rec>(
+            main_thread(),
+            &tutti_fixtures::detached_work(),
+            Path::new("rec"),
+            &Load::new(),
+            SR,
+        )
+        .expect("the recording plugin loads");
         client.bind(tempo(None)).shape()
     };
     let stereo = [Speaker::FrontLeft, Speaker::FrontRight];

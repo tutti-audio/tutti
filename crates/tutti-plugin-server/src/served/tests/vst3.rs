@@ -83,7 +83,7 @@ const ACTIVATION_COUNT_BASE: f32 = 9000.0;
 /// believes.
 fn activations_seen_by_the_plugin(instance: &mut Vst3Instance) -> u32 {
     instance.set_parameter(
-        &main_thread(),
+        main_thread(),
         tutti_plugin_types::ParamId::new(PARAM_MODE),
         Normalized::clamped(MODE_ACTIVATION_COUNT),
     );
@@ -135,7 +135,7 @@ fn the_request_reads_do_not_allocate_with_edits_pending() {
 
     let _lock = crate::test_utils::plugin_load_lock();
     let mut instance = Vst3Instance::load_first(
-        &main_thread(),
+        main_thread(),
         Path::new(vst3_plugin()),
         48_000.0,
         128,
@@ -148,7 +148,7 @@ fn the_request_reads_do_not_allocate_with_edits_pending() {
     assert_no_alloc::assert_no_alloc(|| {
         let loaded = instance.vst3_loaded_mut();
         loaded.discard_notifications();
-        Control::take_requests(loaded, &main_thread(), &mut requests);
+        Control::take_requests(loaded, main_thread(), &mut requests);
     });
     assert!(requests.is_empty());
 
@@ -164,7 +164,7 @@ fn the_request_reads_do_not_allocate_with_edits_pending() {
 
     assert_no_alloc::assert_no_alloc(|| {
         loaded.discard_notifications();
-        Control::take_requests(loaded, &main_thread(), &mut requests);
+        Control::take_requests(loaded, main_thread(), &mut requests);
     });
     assert_eq!(
         loaded.pending_notifications(),
@@ -179,17 +179,17 @@ fn the_request_reads_do_not_allocate_with_edits_pending() {
         "two flags are one request"
     );
     requests.clear();
-    Control::take_requests(loaded, &main_thread(), &mut requests);
+    Control::take_requests(loaded, main_thread(), &mut requests);
     assert!(requests.is_empty(), "a take consumes the requests");
 
     // And the bridge turns one into the host's event, once.
     plugin_restart_component(loaded, K_PARAM_VALUES_CHANGED);
     assert!(matches!(
-        instance.poll(&main_thread()).as_slice(),
+        instance.poll(main_thread()).as_slice(),
         [BridgeMessage::PluginParamValuesChanged]
     ));
     assert!(
-        instance.poll(&main_thread()).is_empty(),
+        instance.poll(main_thread()).is_empty(),
         "a poll consumes the restart"
     );
 }
@@ -204,7 +204,7 @@ fn a_latency_that_follows_the_rate_is_reread_after_a_rate_change() {
     // `kMisbehaveLatencyFollowsRate`: the latency is the rate in kHz.
     let _misbehaviour = probe_misbehaviour("12");
     let mut instance = Vst3Instance::load_first(
-        &main_thread(),
+        main_thread(),
         Path::new(vst3_plugin()),
         44_100.0,
         128,
@@ -212,21 +212,21 @@ fn a_latency_that_follows_the_rate_is_reread_after_a_rate_change() {
     )
     .expect("the vendored VST3 probe loads");
     assert_eq!(instance.wiring.latency_samples, Samples(44));
-    assert!(instance.poll(&main_thread()).is_empty());
+    assert!(instance.poll(main_thread()).is_empty());
 
     instance
-        .set_sample_rate(&main_thread(), SampleRate::of(96_000.0))
+        .set_sample_rate(main_thread(), SampleRate::of(96_000.0))
         .expect("rate change");
 
     assert_eq!(instance.wiring.latency_samples, Samples(96));
     assert!(
         matches!(
-            instance.poll(&main_thread()).as_slice(),
+            instance.poll(main_thread()).as_slice(),
             [BridgeMessage::LatencyChanged { samples }] if *samples == Samples(96)
         ),
         "the new figure reaches the host"
     );
-    assert!(instance.poll(&main_thread()).is_empty(), "once");
+    assert!(instance.poll(main_thread()).is_empty(), "once");
 }
 
 /// **`kPrefetchableSupportChanged` runs the deactivate and activate the
@@ -239,7 +239,7 @@ fn a_prefetchable_support_change_restarts_the_plugin() {
     const K_PREFETCHABLE_SUPPORT_CHANGED: i32 = 1 << 8;
     let _lock = crate::test_utils::plugin_load_lock();
     let mut instance = Vst3Instance::load_first(
-        &main_thread(),
+        main_thread(),
         Path::new(vst3_plugin()),
         48_000.0,
         128,
@@ -251,11 +251,11 @@ fn a_prefetchable_support_change_restarts_the_plugin() {
         1,
         "a fresh load activates once"
     );
-    assert!(instance.poll(&main_thread()).is_empty());
+    assert!(instance.poll(main_thread()).is_empty());
 
     instance.plugin_restart_component(K_PREFETCHABLE_SUPPORT_CHANGED);
 
-    let events = instance.poll(&main_thread());
+    let events = instance.poll(main_thread());
     assert!(
         !events
             .iter()
@@ -279,7 +279,7 @@ fn a_param_id_remap_is_reported_as_a_changed_list() {
     const K_PARAM_ID_MAPPING_CHANGED: i32 = 1 << 11;
     let _lock = crate::test_utils::plugin_load_lock();
     let mut instance = Vst3Instance::load_first(
-        &main_thread(),
+        main_thread(),
         Path::new(vst3_plugin()),
         48_000.0,
         128,
@@ -291,7 +291,7 @@ fn a_param_id_remap_is_reported_as_a_changed_list() {
 
     assert!(
         instance
-            .poll(&main_thread())
+            .poll(main_thread())
             .iter()
             .any(|e| matches!(e, BridgeMessage::PluginParamTitlesChanged))
     );
@@ -307,18 +307,18 @@ fn a_refused_rate_is_rolled_back_to_the_previous_one() {
     // `kMisbehaveRefusesHighRates`: `setActive(true)` fails above 50 kHz.
     let _misbehaviour = probe_misbehaviour("14");
     let mut instance = Vst3Instance::load_first(
-        &main_thread(),
+        main_thread(),
         Path::new(vst3_plugin()),
         48_000.0,
         128,
         false,
     )
     .expect("the vendored VST3 probe loads");
-    assert!(instance.poll(&main_thread()).is_empty());
+    assert!(instance.poll(main_thread()).is_empty());
     let layout = instance.wiring.clone();
 
     let error = instance
-        .set_sample_rate(&main_thread(), SampleRate::of(96_000.0))
+        .set_sample_rate(main_thread(), SampleRate::of(96_000.0))
         .expect_err("the probe refuses 96 kHz");
     assert!(
         error.to_string().contains("running at 48000"),
@@ -327,7 +327,7 @@ fn a_refused_rate_is_rolled_back_to_the_previous_one() {
     assert!(instance.is_active(), "the rollback revived the plugin");
     // The core tells the host to re-read a plugin it revived (`IoChanged`);
     // what the host reads is the layout the plugin had.
-    let told = instance.poll(&main_thread());
+    let told = instance.poll(main_thread());
     assert!(
         told.iter()
             .all(|e| matches!(e, BridgeMessage::PluginIoChanged)),
@@ -338,7 +338,7 @@ fn a_refused_rate_is_rolled_back_to_the_previous_one() {
     assert_eq!(activations_seen_by_the_plugin(&mut instance), 2);
 
     instance
-        .set_sample_rate(&main_thread(), SampleRate::of(44_100.0))
+        .set_sample_rate(main_thread(), SampleRate::of(44_100.0))
         .expect("a rate it takes is taken");
     assert!(instance.is_active());
 }
@@ -349,7 +349,7 @@ fn a_refused_rate_is_rolled_back_to_the_previous_one() {
 #[test]
 fn a_load_with_no_block_is_refused() {
     let _lock = crate::test_utils::plugin_load_lock();
-    match Vst3Instance::load_first(&main_thread(), Path::new(vst3_plugin()), 48_000.0, 0, false) {
+    match Vst3Instance::load_first(main_thread(), Path::new(vst3_plugin()), 48_000.0, 0, false) {
         Err(PluginError::Load {
             stage: LoadStage::Activation,
             reason,
@@ -358,7 +358,7 @@ fn a_load_with_no_block_is_refused() {
         Ok(_) => panic!("a block of no frames must be refused"),
     }
     let mut instance = Vst3Instance::load_first(
-        &main_thread(),
+        main_thread(),
         Path::new(vst3_plugin()),
         48_000.0,
         128,
@@ -374,7 +374,7 @@ fn a_render_mode_change_activates_the_plugin_again_in_the_new_mode() {
     // `kMisbehaveRefusesOffline`: `setActive(true)` fails under `kOffline`.
     let _misbehaviour = probe_misbehaviour("15");
     let mut instance = Vst3Instance::load_first(
-        &main_thread(),
+        main_thread(),
         Path::new(vst3_plugin()),
         48_000.0,
         128,
@@ -384,7 +384,7 @@ fn a_render_mode_change_activates_the_plugin_again_in_the_new_mode() {
     assert_eq!(activations_seen_by_the_plugin(&mut instance), 1);
 
     assert!(
-        !instance.set_render_mode(&main_thread(), RenderMode::Offline),
+        !instance.set_render_mode(main_thread(), RenderMode::Offline),
         "the probe refuses offline"
     );
     assert!(instance.is_active(), "the refusal was rolled back");
@@ -400,7 +400,7 @@ fn a_render_mode_change_activates_the_plugin_again_in_the_new_mode() {
     );
 
     assert!(
-        instance.set_render_mode(&main_thread(), RenderMode::Realtime),
+        instance.set_render_mode(main_thread(), RenderMode::Realtime),
         "the mode it already has is taken without a restart"
     );
     assert_eq!(activations_seen_by_the_plugin(&mut instance), 2);
@@ -422,7 +422,7 @@ fn a_render_mode_change_activates_the_plugin_again_in_the_new_mode() {
 fn a_vst3_program_keeps_its_list_id_and_bank() {
     let _lock = crate::test_utils::plugin_load_lock();
     let mut instance = Vst3Instance::load_first(
-        &main_thread(),
+        main_thread(),
         Path::new(multi_program_sample()),
         44_100.0,
         512,
@@ -430,7 +430,7 @@ fn a_vst3_program_keeps_its_list_id_and_bank() {
     )
     .expect("the multiple-program-changes sample loads");
 
-    let presets = instance.presets(&main_thread());
+    let presets = instance.presets(main_thread());
     assert!(
         presets.len() > 128,
         "16 lists of 128 programs must not collapse onto one another; got {}",
@@ -498,7 +498,7 @@ fn a_vst3_program_keeps_its_list_id_and_bank() {
 fn a_vst3_program_loads_and_reads_back() {
     let _lock = crate::test_utils::plugin_load_lock();
     let mut instance = Vst3Instance::load_first(
-        &main_thread(),
+        main_thread(),
         Path::new(multi_program_sample()),
         44_100.0,
         512,
@@ -506,17 +506,17 @@ fn a_vst3_program_loads_and_reads_back() {
     )
     .expect("the multiple-program-changes sample loads");
 
-    let presets = instance.presets(&main_thread());
+    let presets = instance.presets(main_thread());
     assert!(presets.len() > 2, "the sample publishes many programs");
 
     // Taken from the listing, never constructed.
     let wanted = presets[2].id.clone();
     assert!(
-        instance.load_preset(&main_thread(), &wanted),
+        instance.load_preset(main_thread(), &wanted),
         "a program the plugin listed must load"
     );
     assert_eq!(
-        instance.current_preset(&main_thread()),
+        instance.current_preset(main_thread()),
         Some(wanted.clone()),
         "the plugin must report the program just written"
     );
@@ -532,10 +532,10 @@ fn a_vst3_program_loads_and_reads_back() {
     };
     let (param_id, step_count) = instance
         .vst3_loaded()
-        .program_change_parameter(&main_thread(), *list_id)
+        .program_change_parameter(main_thread(), *list_id)
         .expect("the list has a program-change parameter");
     assert_eq!(step_count, 127, "128 programs report 127 steps, not 128");
-    let raw = Control::parameter(instance.vst3_loaded(), &main_thread(), param_id)
+    let raw = Control::parameter(instance.vst3_loaded(), main_thread(), param_id)
         .expect("the plugin has a controller")
         .get();
     let expected = f64::from(*index) / f64::from(step_count);
@@ -556,7 +556,7 @@ fn a_vst3_program_loads_and_reads_back() {
 fn a_vst3_load_refuses_an_id_from_another_format() {
     let _lock = crate::test_utils::plugin_load_lock();
     let mut instance = Vst3Instance::load_first(
-        &main_thread(),
+        main_thread(),
         Path::new(multi_program_sample()),
         44_100.0,
         512,
@@ -564,17 +564,17 @@ fn a_vst3_load_refuses_an_id_from_another_format() {
     )
     .expect("the multiple-program-changes sample loads");
 
-    let before = instance.current_preset(&main_thread());
+    let before = instance.current_preset(main_thread());
     assert!(
-        !instance.load_preset(&main_thread(), &PresetId::Number(1)),
+        !instance.load_preset(main_thread(), &PresetId::Number(1)),
         "an AU selector / VST2 index addresses no VST3 program"
     );
     assert!(
-        !instance.load_preset(&main_thread(), &PresetId::Location("/x.clap-preset".into())),
+        !instance.load_preset(main_thread(), &PresetId::Location("/x.clap-preset".into())),
         "a CLAP path addresses no VST3 program"
     );
     assert_eq!(
-        instance.current_preset(&main_thread()),
+        instance.current_preset(main_thread()),
         before,
         "a refused load must not move the program"
     );
@@ -584,7 +584,7 @@ fn a_vst3_load_refuses_an_id_from_another_format() {
 fn test_vst3_load() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(vst3_plugin());
-    let instance = Vst3Instance::load_first(&main_thread(), path, 44100.0, 512, false);
+    let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, false);
     assert!(
         instance.is_ok(),
         "Failed to load VST3 plugin: {:?}",
@@ -601,7 +601,7 @@ fn test_vst3_load() {
 fn test_vst3_metadata() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(vst3_plugin());
-    let instance = Vst3Instance::load_first(&main_thread(), path, 44100.0, 512, false)
+    let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, false)
         .expect("Failed to load VST3 plugin");
     let outputs = instance.loaded().total_outputs();
 
@@ -612,10 +612,10 @@ fn test_vst3_metadata() {
 fn test_vst3_parameter_count() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(vst3_plugin());
-    let instance = Vst3Instance::load_first(&main_thread(), path, 44100.0, 512, false)
+    let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, false)
         .expect("Failed to load VST3 plugin");
 
-    let count = instance.parameters(&main_thread()).len();
+    let count = instance.parameters(main_thread()).len();
     assert!(
         count > 0,
         "the plugin should have parameters, got {}",
@@ -627,10 +627,10 @@ fn test_vst3_parameter_count() {
 fn test_vst3_parameter_list() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(vst3_plugin());
-    let instance = Vst3Instance::load_first(&main_thread(), path, 44100.0, 512, false)
+    let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, false)
         .expect("Failed to load VST3 plugin");
 
-    let params = instance.parameters(&main_thread());
+    let params = instance.parameters(main_thread());
     assert!(
         !params.is_empty(),
         "Parameter list should not be empty for the plugin"
@@ -649,14 +649,14 @@ fn test_vst3_parameter_list() {
 fn test_vst3_get_parameter() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(vst3_plugin());
-    let instance = Vst3Instance::load_first(&main_thread(), path, 44100.0, 512, false)
+    let instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, false)
         .expect("Failed to load VST3 plugin");
 
-    let params = instance.parameters(&main_thread());
+    let params = instance.parameters(main_thread());
     assert!(!params.is_empty(), "Need at least one parameter");
 
     let first_id = params[0].id();
-    let value = instance.normalized(&main_thread(), first_id);
+    let value = instance.normalized(main_thread(), first_id);
     assert!(
         value.is_finite(),
         "Parameter value should be finite, got {}",
@@ -668,7 +668,7 @@ fn test_vst3_get_parameter() {
 fn test_vst3_process_f32_silence() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(vst3_plugin());
-    let mut instance = Vst3Instance::load_first(&main_thread(), path, 44100.0, 512, false)
+    let mut instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, false)
         .expect("Failed to load VST3 plugin");
 
     let num_samples = 512;
@@ -696,7 +696,7 @@ fn test_vst3_process_f32_silence() {
 fn test_vst3_process_f32_with_note() {
     let _lock = crate::test_utils::plugin_load_lock();
     let path = Path::new(vst3_plugin());
-    let mut instance = Vst3Instance::load_first(&main_thread(), path, 44100.0, 512, false)
+    let mut instance = Vst3Instance::load_first(main_thread(), path, 44100.0, 512, false)
         .expect("Failed to load VST3 plugin");
 
     let num_samples = 512;
@@ -792,7 +792,7 @@ fn test_voxengo_span_load_and_f64_support() {
         eprintln!("Skipping: SPAN.vst3 not found at {:?}", path);
         return;
     }
-    let instance = Vst3Instance::load_first(&main_thread(), &path, 44100.0, 512, false);
+    let instance = Vst3Instance::load_first(main_thread(), &path, 44100.0, 512, false);
     assert!(
         instance.is_ok(),
         "Failed to load SPAN: {:?}",
@@ -816,7 +816,7 @@ fn test_voxengo_boogex_load_and_f64_support() {
         eprintln!("Skipping: Boogex.vst3 not found at {:?}", path);
         return;
     }
-    let instance = Vst3Instance::load_first(&main_thread(), &path, 44100.0, 512, false);
+    let instance = Vst3Instance::load_first(main_thread(), &path, 44100.0, 512, false);
     assert!(
         instance.is_ok(),
         "Failed to load Boogex: {:?}",
@@ -841,7 +841,7 @@ fn test_voxengo_span_process_f64() {
         return;
     }
     // Load with f64 preference — if the plugin supports it, inner will be F64.
-    let mut instance = Vst3Instance::load_first(&main_thread(), &path, 44100.0, 512, true)
+    let mut instance = Vst3Instance::load_first(main_thread(), &path, 44100.0, 512, true)
         .expect("Failed to load SPAN");
 
     if !instance.loaded().features.contains(Features::F64_AUDIO) {
@@ -900,7 +900,7 @@ fn test_voxengo_boogex_process_f64() {
         return;
     }
     // Load with f64 preference — if the plugin supports it, inner will be F64.
-    let mut instance = Vst3Instance::load_first(&main_thread(), &path, 44100.0, 512, true)
+    let mut instance = Vst3Instance::load_first(main_thread(), &path, 44100.0, 512, true)
         .expect("Failed to load Boogex");
 
     if !instance.loaded().features.contains(Features::F64_AUDIO) {
