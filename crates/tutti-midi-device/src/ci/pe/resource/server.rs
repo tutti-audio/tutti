@@ -1358,7 +1358,9 @@ impl ResourceResponder {
                 ended_by: Some(PeEndedBy::Responder),
                 extra: Default::default(),
             });
-            self.send_update(peer, id, sub, split(&header, &[]), now, out);
+            if let Some(chunks) = self.sendable(peer, id, split(&header, &[])) {
+                self.send_update(peer, id, sub, chunks, now, out);
+            }
             return;
         }
         let Some((target, encoding)) = self
@@ -1393,32 +1395,45 @@ impl ResourceResponder {
                 message = one_chunk(&header, &body);
             }
         }
-        let chunks = message.map_or_else(|| split(&notify(), &[]), Ok);
+        let Some(chunks) = message.or_else(|| self.sendable(peer, id, split(&notify(), &[])))
+        else {
+            return;
+        };
         self.send_update(peer, id, sub, chunks, now, out);
     }
 
-    /// Sends the Subscription message `split` to `peer` under `id`, which the
-    /// caller took from the peer's pool and split the message under.
+    /// The chunks of a Subscription message `split` under `id`, which the
+    /// caller took from the peer's pool.
     ///
     /// A message always splits: a body is encoded 7-bit before it gets here and
     /// carries at most one chunk of data (`full`, `partial`) or none (`notify`,
     /// `end`), and a header is a few tens of bytes against a receivable size of
     /// at least 128. One that did not would be a bug of this crate: it is not
     /// sent and its ID is given back.
+    fn sendable(
+        &mut self,
+        peer: Muid,
+        id: PeRequestId,
+        split: Result<Vec<PeChunk>, PeChunkError>,
+    ) -> Option<Vec<PeChunk>> {
+        let chunks = split.ok();
+        debug_assert!(chunks.is_some(), "a Subscription message always splits");
+        if chunks.is_none() {
+            self.release(peer, id);
+        }
+        chunks
+    }
+
+    /// Sends the `chunks` of a Subscription message to `peer` under `id`.
     fn send_update(
         &mut self,
         peer: Muid,
         id: PeRequestId,
         sub: &SubscribeId,
-        split: Result<Vec<PeChunk>, PeChunkError>,
+        chunks: Vec<PeChunk>,
         now: Instant,
         out: &mut Vec<ResponderAction>,
     ) {
-        let Ok(chunks) = split else {
-            debug_assert!(false, "a Subscription message always splits");
-            self.release(peer, id);
-            return;
-        };
         self.outgoing.push(Outgoing {
             peer,
             id,

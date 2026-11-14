@@ -186,7 +186,7 @@ pub enum Polled {
     /// MIDI-CI could not start a device on a Group of the device: the operating
     /// system gave no random bytes for its MUID. It is reported once until the
     /// device starts, and again if the Group leaves the device's Groups and
-    /// returns or MIDI-CI is enabled with another identity; the Group is tried
+    /// returns or MIDI-CI is disabled and enabled again; the Group is tried
     /// again at every poll while MIDI-CI is enabled.
     CiNotStarted(DeviceId, MidiGroup, EntropyError),
 }

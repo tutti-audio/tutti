@@ -121,7 +121,8 @@
 //!   numbers. A Group whose stream cannot be seeded starts no device; the
 //!   failure is reported once until it starts
 //!   ([`Polled::CiNotStarted`](crate::Polled::CiNotStarted); a Group that
-//!   leaves the Groups and returns, or a new identity, is reported again) and
+//!   leaves the Groups and returns, or MIDI-CI is disabled and enabled again, is
+//!   reported again) and
 //!   the Group is tried again at every poll while MIDI-CI is enabled.
 //!
 //! Time is an argument: nothing here reads a clock.
@@ -314,7 +315,8 @@ struct Running {
     assembler: SysexAssembler<Box<[u8]>>,
     /// The Groups whose device could not start and was reported: reported once
     /// until it starts, tried again at every poll. A Group that leaves the
-    /// Groups and returns, or a new identity, is reported again.
+    /// Groups and returns, or MIDI-CI is disabled and enabled again, is reported
+    /// again.
     unstarted: Vec<MidiGroup>,
 }
 
@@ -635,8 +637,9 @@ impl Running {
     /// sorted): a Group no longer called for ends its device (as
     /// [`stop`](Self::stop)), a new one starts a device with its first
     /// Discovery, and a Group that stays keeps its device and peers. A Group
-    /// whose device cannot start is tried again each time and reported only when
-    /// it first fails; nothing is rebuilt while the devices are the same.
+    /// whose device cannot start is tried again each time and reported once per
+    /// failure episode (until it starts or leaves the Groups); nothing is
+    /// rebuilt while the devices are the same.
     fn reconcile(
         &mut self,
         groups: &[MidiGroup],
@@ -1285,12 +1288,14 @@ mod tests {
         assert!(!sent.is_empty() && sent.iter().all(|u| group_of(u) == 1));
     }
 
-    // Every Group refused: each is reported once over several polls, and the
-    // devices are not idle, so `Ci::poll` keeps them and retries.
+    // Every Group refused: each is reported once over several polls, the set
+    // stays not idle (what keeps `Ci::poll` from dropping it), and the retry goes
+    // on: the first draw that succeeds starts both Groups.
     #[test]
     fn when_every_group_is_refused_each_is_reported_once_and_the_retry_goes_on() {
         let (mut out, _counters) = output();
-        let mut source = refusing(1, 100);
+        // Two draws at the start and two on each of three polls are refused.
+        let mut source = refusing(1, 9);
         let now = Instant::now();
         let (mut running, first) =
             Running::start(&[G0, G1], identity(), &mut source, now, &mut out);
@@ -1307,9 +1312,15 @@ mod tests {
             running.reconcile(&[G0, G1], &mut source, now, &mut out, &mut changes);
             assert!(changes.unstarted.is_empty(), "reported once");
             assert!(!running.is_idle());
+            assert!(running.members.is_empty());
         }
-        // No Group is called for: nothing waits and nothing runs.
+        // The next draws succeed: both Groups start, and nothing is reported.
         let mut changes = CiChanges::default();
+        running.reconcile(&[G0, G1], &mut source, now, &mut out, &mut changes);
+        assert!(changes.unstarted.is_empty());
+        assert_eq!(running.members.len(), 2);
+        assert!(running.unstarted.is_empty());
+        // No Group is called for: nothing waits and nothing runs.
         running.reconcile(&[], &mut source, now, &mut out, &mut changes);
         assert!(running.is_idle());
     }
