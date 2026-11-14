@@ -94,7 +94,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytemuck::{Pod, Zeroable};
-use tutti_rt::{Overflow, Ring, RingLosses, RingReader, RingWriter, SeqReader, SeqWriter};
+use tutti_rt::{Counter, Overflow, Ring, RingReader, RingWriter, SeqReader, SeqWriter};
 use tutti_types::{At, Frame, Moment, SampleRate};
 use tutti_ump::Ump;
 
@@ -194,7 +194,7 @@ struct Counts {
 #[derive(Clone, Debug)]
 pub struct InletCounts {
     counts: Arc<Counts>,
-    lost: RingLosses,
+    lost: Counter<u64>,
 }
 
 impl InletCounts {
@@ -207,7 +207,7 @@ impl InletCounts {
     pub fn losses(&self) -> Losses {
         let c = &*self.counts;
         Losses {
-            lost: self.lost.lost(),
+            lost: self.lost.get(),
             evicted: c.evicted.load(Ordering::Relaxed),
             refused: c.refused.load(Ordering::Relaxed),
             late: c.late.load(Ordering::Relaxed),

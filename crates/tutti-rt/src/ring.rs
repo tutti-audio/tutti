@@ -43,6 +43,7 @@
 use std::mem::MaybeUninit;
 use std::sync::Arc;
 
+use crate::gauge::{Counter, CounterWriter, counter};
 use sync::{AtomicBool, AtomicU64, Ordering};
 
 mod sync {
@@ -171,7 +172,6 @@ struct Shared<T> {
     overflow: Overflow,
     writer_gone: AtomicBool,
     reader_gone: AtomicBool,
-    lost: Arc<AtomicU64>,
 }
 
 // SAFETY: the slot cells are the only non-`Sync` field. The writer writes a
@@ -224,28 +224,11 @@ impl<T> Shared<T> {
             }
         }
     }
-
-    fn lose(&self) {
-        self.lost.fetch_add(1, Ordering::Relaxed);
-    }
 }
 
 impl<T> Drop for Shared<T> {
     fn drop(&mut self) {
         while self.take().is_some() {}
-    }
-}
-
-/// A cloneable view of a ring's loss count, for a thread that holds neither
-/// end (the control side reading what the audio side lost).
-#[derive(Clone, Debug)]
-pub struct RingLosses(Arc<AtomicU64>);
-
-impl RingLosses {
-    /// Values the ring has lost since it was made, cumulative.
-    #[must_use]
-    pub fn lost(&self) -> u64 {
-        self.0.load(Ordering::Relaxed)
     }
 }
 
@@ -282,7 +265,7 @@ impl<T: Send> Ring<T> {
                 value: Cell::new(),
             })
             .collect();
-        let lost = Arc::new(AtomicU64::new(0));
+        let (lost_writer, lost) = counter::<u64>();
         let shared = Arc::new(Shared {
             slots,
             head: AtomicU64::new(0),
@@ -290,16 +273,18 @@ impl<T: Send> Ring<T> {
             overflow,
             writer_gone: AtomicBool::new(false),
             reader_gone: AtomicBool::new(false),
-            lost,
         });
         (
             RingWriter {
                 shared: Arc::clone(&shared),
                 head: 0,
+                lost_writer,
+                lost: lost.clone(),
                 taken_lost: 0,
             },
             RingReader {
                 shared,
+                lost,
                 taken_lost: 0,
             },
         )
@@ -310,12 +295,16 @@ impl<T: Send> Ring<T> {
 pub struct RingWriter<T> {
     shared: Arc<Shared<T>>,
     head: u64,
+    /// The one writer of the loss count: only a push loses a value.
+    lost_writer: CounterWriter<u64>,
+    lost: Counter<u64>,
     taken_lost: u64,
 }
 
 /// The consuming end of a [`Ring`]. `Send`, not `Clone`: one thread takes.
 pub struct RingReader<T> {
     shared: Arc<Shared<T>>,
+    lost: Counter<u64>,
     taken_lost: u64,
 }
 
@@ -370,7 +359,7 @@ impl<T: Send> RingWriter<T> {
         }
         let capacity = shared.capacity();
         if capacity == 0 {
-            return Err(self.refuse(value));
+            return Err(Self::refuse(&mut self.lost_writer, shared.overflow, value));
         }
         let pos = self.head;
         let slot = &shared.slots[(pos % capacity) as usize];
@@ -390,21 +379,21 @@ impl<T: Send> RingWriter<T> {
             // and evicting more would lose a value the ring has room for.
             let full = pos - shared.tail.load(Ordering::Acquire) >= capacity;
             if shared.overflow != Overflow::Evict || !full {
-                return Err(self.refuse(value));
+                return Err(Self::refuse(&mut self.lost_writer, shared.overflow, value));
             }
             match shared.take() {
                 Some(oldest) => {
-                    shared.lose();
+                    self.lost_writer.add(1);
                     drop(oldest);
                 }
-                None => return Err(self.refuse(value)),
+                None => return Err(Self::refuse(&mut self.lost_writer, shared.overflow, value)),
             }
         }
     }
 
-    fn refuse(&self, value: T) -> Returned<T> {
-        if self.shared.overflow != Overflow::Refuse {
-            self.shared.lose();
+    fn refuse(lost: &mut CounterWriter<u64>, overflow: Overflow, value: T) -> Returned<T> {
+        if overflow != Overflow::Refuse {
+            lost.add(1);
         }
         Returned {
             error: PushError::Full,
@@ -465,7 +454,7 @@ impl<T: Send> RingWriter<T> {
     /// [`Overflow`] for what counts).
     #[must_use]
     pub fn lost(&self) -> u64 {
-        self.shared.lost.load(Ordering::Relaxed)
+        self.lost.get()
     }
 
     /// Values lost since this end's last `take_lost`, and resets that count;
@@ -477,8 +466,8 @@ impl<T: Send> RingWriter<T> {
 
     /// A view of the loss count that outlives the end.
     #[must_use]
-    pub fn losses(&self) -> RingLosses {
-        RingLosses(Arc::clone(&self.shared.lost))
+    pub fn losses(&self) -> Counter<u64> {
+        self.lost.clone()
     }
 }
 
@@ -579,7 +568,7 @@ impl<T: Send> RingReader<T> {
     /// Values the ring has lost since it was made, cumulative.
     #[must_use]
     pub fn lost(&self) -> u64 {
-        self.shared.lost.load(Ordering::Relaxed)
+        self.lost.get()
     }
 
     /// Values lost since this end's last `take_lost`, and resets that count;
@@ -591,8 +580,8 @@ impl<T: Send> RingReader<T> {
 
     /// A view of the loss count that outlives the end.
     #[must_use]
-    pub fn losses(&self) -> RingLosses {
-        RingLosses(Arc::clone(&self.shared.lost))
+    pub fn losses(&self) -> Counter<u64> {
+        self.lost.clone()
     }
 }
 

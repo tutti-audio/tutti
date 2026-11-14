@@ -229,9 +229,7 @@ pub use pos_ring::{
 pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priority};
 pub use reclaim::Reclaim;
 pub use request_word::{REQUEST_BITS, RequestBit, RequestBitOutOfRange, RequestBits, RequestWord};
-pub use ring::{
-    Drain, Iter, Overflow, PushError, Returned, Ring, RingLosses, RingReader, RingWriter,
-};
+pub use ring::{Drain, Iter, Overflow, PushError, Returned, Ring, RingReader, RingWriter};
 pub use scope::{RtScope, RtScopeGuard};
 pub use seq_cell::{Contended, SeqReader, SeqWriter};
 pub use spin::BlockWaits;

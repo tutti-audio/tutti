@@ -101,7 +101,7 @@ fn take_lost_resets_and_lost_accumulates() {
     assert_eq!(reader.take_lost(), 1);
     assert_eq!(writer.take_lost(), 3, "each end's reset is its own");
     drop((writer, reader));
-    assert_eq!(view.lost(), 3, "cumulative, after both ends are gone");
+    assert_eq!(view.get(), 3, "cumulative, after both ends are gone");
 }
 
 /// **A dropped reader disconnects pushes, and the value comes back**; a
