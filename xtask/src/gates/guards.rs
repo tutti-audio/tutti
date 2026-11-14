@@ -4,7 +4,7 @@
 //!
 //! - `tutti-clap-ffi`: each `extern "C" fn NAME(` outside test code (the text
 //!   from the first `#[cfg(test)] mod` of a file on is skipped) runs under
-//!   `guard(..)`, `guarded(..)`, `main_only(..)`, `or_abort(..)`,
+//!   `ffi_guard(..)`, `guarded(..)`, `main_only(..)`, `or_abort(..)`,
 //!   `with_state(..)` or `with_state_mut(..)`. Each `trampoline!(NAME(..), KIND, ..)`
 //!   names `main_only` for a callback CLAP marks `[main-thread]`
 //!   ([`MAIN_THREAD`]) and `guarded` for every other, so a plugin that calls
@@ -14,7 +14,7 @@
 //! - `tutti-vst3-ffi`: each `unsafe fn` in an `impl ...Trait for ...` block
 //!   under `src/com`.
 //! - `tutti-vst2-ffi`: each `extern "C" fn` in `src/host.rs` runs under
-//!   `catch_unwind(..)`: the audioMaster callback is the only function a VST2
+//!   `ffi_guard(..)`: the audioMaster callback is the only function a VST2
 //!   plugin calls in the host.
 //!
 //! [`ALLOW`] lists the functions that only return a constant or have an empty
@@ -80,7 +80,7 @@ const MAIN_THREAD: &[&str] = &[
 ];
 
 const GUARDS: &[&str] = &[
-    "guard",
+    "ffi_guard",
     "guarded",
     "main_only",
     "or_abort",
@@ -152,10 +152,11 @@ fn guarded(body: &str) -> bool {
     })
 }
 
-fn catches_unwind(body: &str) -> bool {
+/// Whether the body calls `ffi_guard(..)`, the one panic guard.
+fn ffi_guarded(body: &str) -> bool {
     let mut from = 0;
-    while let Some(at) = find_word_from(body, "catch_unwind", from) {
-        if body[at + "catch_unwind".len()..].starts_with('(') {
+    while let Some(at) = find_word_from(body, "ffi_guard", from) {
+        if body[at + "ffi_guard".len()..].starts_with('(') {
             return true;
         }
         from = at + 1;
@@ -340,8 +341,7 @@ impl Scan<'_> {
         for (name, paren) in extern_fns(raw, &code, true) {
             self.seen += 1;
             n += 1;
-            if !ALLOW.contains(&name.as_str()) && !body_of(&code, paren).is_some_and(catches_unwind)
-            {
+            if !ALLOW.contains(&name.as_str()) && !body_of(&code, paren).is_some_and(ffi_guarded) {
                 self.flag(&name, path);
             }
         }
@@ -420,7 +420,7 @@ mod tests {
              // extern \"C\" fn in_a_comment() {}\n\
              #[cfg(test)]\nmod tests {\n    extern \"C\" fn t() {}\n}\n",
         ),
-        (AU, "extern \"C\" fn render(a: u8) { guard(|| 1) }\n"),
+        (AU, "extern \"C\" fn render(a: u8) { ffi_guard(0, || 1) }\n"),
         (
             VST3,
             "impl IFooTrait for Foo {\n    unsafe fn getEventCount(&self) -> i32 {\n        guarded(|| 1)\n    }\n    unsafe fn createContextMenu(&self) {}\n}\n\
@@ -428,7 +428,7 @@ mod tests {
         ),
         (
             VST2,
-            "unsafe extern \"C\" fn callback_wrapper<T>(a: u8) -> isize {\n    catch_unwind(|| 1).unwrap_or(0)\n}\n",
+            "unsafe extern \"C\" fn callback_wrapper<T>(a: u8) -> isize {\n    ffi_guard(0, || 1)\n}\n",
         ),
     ];
 
@@ -460,7 +460,7 @@ mod tests {
         // A guard named only in a comment or a string is not a guard.
         let r = run(&[(
             AU,
-            "extern \"C\" fn render(a: u8) { /* guard(x) */ let s = \"guard(\"; }\n",
+            "extern \"C\" fn render(a: u8) { /* ffi_guard(x) */ let s = \"ffi_guard(\"; }\n",
         )]);
         assert!(!r.passed());
     }

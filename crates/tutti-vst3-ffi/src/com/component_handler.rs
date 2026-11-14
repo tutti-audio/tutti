@@ -34,8 +34,9 @@
 //! truncated at [`PROGRESS_DESCRIPTION_CAPACITY`] bytes), so no callback
 //! allocates, and dropping a queued notification frees nothing.
 
-use crate::guard::{Out, guard};
+use crate::guard::Out;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
+use tutti_plugin_types::ffi_guard;
 
 use tutti_plugin_types::{Normalized, Request, RescanScope};
 use tutti_rt::RequestWord;
@@ -479,14 +480,14 @@ impl ComponentHandler {
 
 impl IComponentHandlerTrait for ComponentHandler {
     unsafe fn beginEdit(&self, id: ParamID) -> tresult {
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             self.edit(ParameterEditEvent::BeginEdit(id));
             kResultOk
         })
     }
 
     unsafe fn performEdit(&self, id: ParamID, value_normalized: ParamValue) -> tresult {
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             self.edit(ParameterEditEvent::PerformEdit {
                 param_id: id,
                 // The plugin's `f64` is untrusted, as `addPoint`'s is.
@@ -497,14 +498,14 @@ impl IComponentHandlerTrait for ComponentHandler {
     }
 
     unsafe fn endEdit(&self, id: ParamID) -> tresult {
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             self.edit(ParameterEditEvent::EndEdit(id));
             kResultOk
         })
     }
 
     unsafe fn restartComponent(&self, flags: i32) -> tresult {
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             // Release pairs with `take_restart_bits`' Acquire; see there.
             self.restart_bits.fetch_or(flags, Ordering::Release);
             RestartFlags::from_bits(flags).raise_into(&self.requests);
@@ -515,28 +516,28 @@ impl IComponentHandlerTrait for ComponentHandler {
 
 impl IComponentHandler2Trait for ComponentHandler {
     unsafe fn setDirty(&self, state: TBool) -> tresult {
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             self.edit(ParameterEditEvent::SetDirty(state != 0));
             kResultOk
         })
     }
 
     unsafe fn requestOpenEditor(&self, _name: FIDString) -> tresult {
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             self.edit(ParameterEditEvent::RequestOpenEditor);
             kResultOk
         })
     }
 
     unsafe fn startGroupEdit(&self) -> tresult {
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             self.edit(ParameterEditEvent::StartGroupEdit);
             kResultOk
         })
     }
 
     unsafe fn finishGroupEdit(&self) -> tresult {
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             self.edit(ParameterEditEvent::FinishGroupEdit);
             kResultOk
         })
@@ -564,7 +565,7 @@ impl IComponentHandlerBusActivationTrait for ComponentHandler {
         index: i32,
         state: TBool,
     ) -> tresult {
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             // A media type or direction the SDK does not define names no bus.
             let (Some(media_type), Some(direction)) = (
                 crate::MediaType::from_raw(media_type),
@@ -593,7 +594,7 @@ impl IProgressTrait for ComponentHandler {
         // SAFETY: a COM out-parameter: null or valid for this call.
         let out_id = unsafe { Out::new(out_id) };
         out_id.set(0);
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             let id = self.next_progress_id.fetch_add(1, Ordering::SeqCst);
             // SAFETY: the interface passes null or a NUL-terminated string.
             let desc = unsafe { ProgressDescription::from_utf16_nul(optional_description) };
@@ -608,7 +609,7 @@ impl IProgressTrait for ComponentHandler {
     }
 
     unsafe fn update(&self, id: ID, norm_value: ParamValue) -> tresult {
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             self.push(PluginNotification::Progress(ProgressEvent::Updated {
                 id,
                 progress: Normalized::clamped(norm_value).get(),
@@ -618,7 +619,7 @@ impl IProgressTrait for ComponentHandler {
     }
 
     unsafe fn finish(&self, id: ID) -> tresult {
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             self.push(PluginNotification::Progress(ProgressEvent::Finished { id }));
             kResultOk
         })
@@ -627,7 +628,7 @@ impl IProgressTrait for ComponentHandler {
 
 impl IUnitHandlerTrait for ComponentHandler {
     unsafe fn notifyUnitSelection(&self, unit_id: UnitID) -> tresult {
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             self.push(PluginNotification::Unit(UnitEvent::UnitSelected(unit_id)));
             kResultOk
         })
@@ -638,7 +639,7 @@ impl IUnitHandlerTrait for ComponentHandler {
         list_id: ProgramListID,
         program_index: i32,
     ) -> tresult {
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             self.push(PluginNotification::Unit(UnitEvent::ProgramListChanged {
                 list_id,
                 program_index,
@@ -650,7 +651,7 @@ impl IUnitHandlerTrait for ComponentHandler {
 
 impl IUnitHandler2Trait for ComponentHandler {
     unsafe fn notifyUnitByBusChange(&self) -> tresult {
-        guard(vst3::Steinberg::kInternalError, || {
+        ffi_guard(vst3::Steinberg::kInternalError, || {
             self.push(PluginNotification::Unit(UnitEvent::UnitByBusChanged));
             kResultOk
         })

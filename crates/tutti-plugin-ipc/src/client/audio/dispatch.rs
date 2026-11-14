@@ -50,7 +50,9 @@ const MAX_PROCESS_TIMEOUT: Duration = Duration::from_millis(50);
 /// once it has gone quiet: news the server sent is already in the socket.
 const DRAIN_UNSOLICITED: Duration = Duration::from_millis(1);
 
-const PARAM_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long the bridge waits for the server to answer a query, and so the
+/// deadline the host's wait for the bridge's answer is built on.
+pub(super) const PARAM_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How long the bridge waits for the server to open its editor or resize it:
 /// a plugin builds its window in the call, which a large one takes seconds to

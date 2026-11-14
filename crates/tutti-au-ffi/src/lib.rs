@@ -32,7 +32,6 @@ mod component;
 mod editor;
 mod error;
 mod event_list;
-mod guard;
 mod listener;
 mod midi_out;
 mod parameters;

@@ -90,6 +90,7 @@ mod midi_hardware;
 mod modulation;
 mod node;
 mod params;
+mod peer;
 #[cfg(feature = "plugin")]
 mod plugin;
 #[cfg(feature = "plugin")]
@@ -176,6 +177,7 @@ pub use modulation::{
 };
 pub use node::{Reclaimer, SessionNode};
 pub use params::{ParamError, RangeError, TypedParamRef};
+pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 #[cfg(feature = "plugin")]
 pub use plugin::{
     Plugin, PluginChange, PluginEvent, PluginHealth, PluginLoad, PluginLoadRequest, PluginLoaded,
