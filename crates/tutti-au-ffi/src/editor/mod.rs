@@ -200,7 +200,8 @@ mod tests {
             componentFlagsMask: 0,
         };
         let comp = ComponentRef::first_matching(&desc).expect("AUDelay should be present");
-        let unit = Unit::new(comp).expect("instantiate");
+        let (_work, handle) = tutti_plugin_types::MainWork::new();
+        let unit = Unit::new(comp, &handle).expect("instantiate");
         unit.initialize().expect("initialize");
         let _has = AuEditor::has_editor(&unit);
     }
@@ -216,16 +217,20 @@ mod tests {
             componentFlagsMask: 0,
         };
         let comp = ComponentRef::first_matching(&desc).expect("AUDelay should be present");
-        let unit = Unit::new(comp).expect("instantiate");
-        let refused = std::thread::spawn(move || {
+        let (_work, handle) = tutti_plugin_types::MainWork::new();
+        let unit = Unit::new(comp, &handle).expect("instantiate");
+        // The unit comes back, so it is dropped here, on its home thread, and disposed.
+        let (refused, unit) = std::thread::spawn(move || {
             let size = LogicalSize::new(100, 100);
-            match AuEditor::open(&unit, None, size) {
+            let refused = match AuEditor::open(&unit, None, size) {
                 Err(crate::Error::Invalid(why)) => why.contains("main thread"),
                 _ => false,
-            }
+            };
+            (refused, unit)
         })
         .join()
         .expect("thread");
+        drop(unit);
         assert!(refused);
     }
 }

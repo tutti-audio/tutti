@@ -5,12 +5,13 @@ use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
+use tutti_midi_device::EntropyError;
 use tutti_ump::Ump;
 
 use crate::link::{Link, Loss};
 use crate::{
     Admission, AuthChallenge, AuthFailure, AuthMethods, AuthState, Bye, ByeReason, Command,
-    Credentials, Digest, EndpointIdentity, Event, Header, Initiator, Invitation, Nak, NakReason,
+    Credentials, Digest, EndedBy, EndpointIdentity, Event, Header, Invitation, Nak, NakReason,
     Nonce, PingId, Retransmit, SendError, SessionConfig, SessionState, UserAuthChallenge,
     UserAuthState, UserAuthentication,
 };
@@ -81,7 +82,7 @@ pub(crate) enum Role {
     Client(Credentials),
     Host {
         admission: Admission,
-        nonce_source: fn() -> Nonce,
+        nonce_source: fn() -> Result<Nonce, EntropyError>,
     },
 }
 
@@ -209,7 +210,7 @@ impl Session {
         self.phase = Phase::Closing { repeat, reason };
     }
 
-    fn finish(&mut self, initiator: Initiator, reason: ByeReason) {
+    fn finish(&mut self, ended_by: EndedBy, reason: ByeReason) {
         self.phase = Phase::Idle;
         self.link = Link::new();
         self.remote = None;
@@ -217,7 +218,7 @@ impl Session {
         self.last_ping = None;
         self.events.push(Event::Closed {
             peer: self.peer,
-            initiator,
+            ended_by,
             reason,
         });
     }
@@ -313,7 +314,7 @@ impl Session {
             Command::Bye(bye) => self.on_bye(&bye),
             Command::ByeReply => {
                 if let Phase::Closing { reason, .. } = self.phase {
-                    self.finish(Initiator::Local, reason);
+                    self.finish(EndedBy::Local, reason);
                 }
             }
             Command::Invitation(inv) => self.on_invitation(now, inv),
@@ -441,8 +442,8 @@ impl Session {
         self.out.push(Command::ByeReply);
         match self.phase {
             Phase::Idle => {}
-            Phase::Closing { reason, .. } => self.finish(Initiator::Local, reason),
-            _ => self.finish(Initiator::Remote, bye.reason),
+            Phase::Closing { reason, .. } => self.finish(EndedBy::Local, reason),
+            _ => self.finish(EndedBy::Remote, bye.reason),
         }
     }
 
@@ -605,7 +606,16 @@ impl Session {
                 } else {
                     Challenge::SharedSecret
                 };
-                let nonce = nonce_source();
+                let nonce = match nonce_source() {
+                    Ok(nonce) => nonce,
+                    Err(error) => {
+                        self.events.push(Event::NonceUnavailable {
+                            peer: self.peer,
+                            error,
+                        });
+                        return self.refuse(now, ByeReason::Unknown);
+                    }
+                };
                 self.out
                     .push(challenge_command(kind, nonce, Because::Invited, self.local));
                 self.phase = Phase::Challenged(Challenged {
@@ -771,7 +781,7 @@ impl Session {
             Phase::Closing { repeat, reason } => {
                 let reason = *reason;
                 if now >= repeat.started + cfg.command_timeout {
-                    return self.finish(Initiator::Local, reason);
+                    return self.finish(EndedBy::Local, reason);
                 }
                 if now >= repeat.next {
                     repeat.next = now + cfg.repeat_interval;
@@ -810,7 +820,7 @@ impl Session {
             return self.close(now, ByeReason::Timeout);
         }
         if now >= self.next_ping() {
-            let id = PingId(self.ping_counter);
+            let id = PingId::new(self.ping_counter);
             self.ping_counter = self.ping_counter.wrapping_add(1);
             self.outstanding_pings.push_back(id);
             if self.outstanding_pings.len() > OUTSTANDING_PINGS {

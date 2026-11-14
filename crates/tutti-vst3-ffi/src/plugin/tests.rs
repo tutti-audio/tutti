@@ -63,3 +63,26 @@ fn an_undefined_media_type_or_direction_is_none() {
         assert_eq!(BusDirection::from_raw(direction.raw()), Some(direction));
     }
 }
+
+/// **A plugin handed to the collector is torn down under the collector's
+/// token**: made on one thread, it is no one's home on another, and `collected`
+/// makes the collecting thread its home with the token that thread holds, so
+/// the editor closes and `terminate` runs there.
+#[test]
+fn a_collected_home_is_the_collecting_thread_with_its_token() {
+    struct Moved(Home);
+    // SAFETY: the test moves a `Home` to one thread that makes its own token; the
+    // original token is not used there (`here` hands it out only on its own thread).
+    unsafe impl Send for Moved {}
+
+    let home = Moved(Home::new(tutti_fixtures::main_thread()));
+    assert!(home.0.here().is_some(), "home on the thread that made it");
+    std::thread::spawn(move || {
+        let mut home = home;
+        assert!(home.0.here().is_none(), "no home on another thread");
+        home.0.collected(tutti_fixtures::main_thread());
+        assert!(home.0.here().is_some(), "home on the collecting thread");
+    })
+    .join()
+    .unwrap();
+}

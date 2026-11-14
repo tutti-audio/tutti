@@ -3,9 +3,13 @@
 
 use std::fmt::Write as _;
 
+use super::super::escape::{is_plain, push_utf16_escapes};
 use super::tree::PeJson;
 
-/// Appends `text` to `out` as a JSON string, quotes included.
+/// Appends `text` to `out` as a JSON string, quotes included: `"`, `\` and
+/// every control character are escaped as JSON requires of a string, which
+/// the Message Text dialect (M2-101 §5.10.4) does not do for `"` or a line
+/// feed because it is not a JSON document; the `\u` codec is shared.
 pub(super) fn string(out: &mut String, text: &str) {
     out.push('"');
     for c in text.chars() {
@@ -17,14 +21,8 @@ pub(super) fn string(out: &mut String, text: &str) {
             '\t' => out.push_str("\\t"),
             '\u{8}' => out.push_str("\\b"),
             '\u{c}' => out.push_str("\\f"),
-            ' '..='~' | '\u{7f}' => out.push(c),
-            _ => {
-                let mut units = [0u16; 2];
-                for unit in c.encode_utf16(&mut units) {
-                    // Writing to a `String` cannot fail.
-                    let _ = write!(out, "\\u{unit:04x}");
-                }
-            }
+            c if is_plain(c) => out.push(c),
+            c => push_utf16_escapes(out, c),
         }
     }
     out.push('"');
@@ -124,5 +122,34 @@ pub(super) fn json(out: &mut String, value: &PeJson) {
             }
             out.push('}');
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn written(text: &str) -> String {
+        let mut out = String::new();
+        string(&mut out, text);
+        out
+    }
+
+    // M2-103 §6.1.1: a string value is JSON (ECMA-404), so a quote, a backslash
+    // and a control character are escaped, where Message Text (M2-101 §5.10.4)
+    // sends a quote and a line feed as they are.
+    #[test]
+    fn a_property_string_escapes_what_json_requires() {
+        assert_eq!(written("a\"b\\c\nd\te"), r#""a\"b\\c\nd\te""#);
+        assert_eq!(written("\u{1}"), "\"\\u0001\"");
+    }
+
+    // M2-103 §6.1.1: a character that is not 7-bit ASCII is its UTF-16 units,
+    // each a `\u` escape.
+    #[test]
+    fn a_property_string_escapes_non_ascii_as_utf16_units() {
+        assert_eq!(written("Beats\u{266a}"), "\"Beats\\u266a\"");
+        assert_eq!(written("\u{1d11e}"), "\"\\ud834\\udd1e\"");
+        assert_eq!(escaped_len("\u{266a}"), 6);
     }
 }

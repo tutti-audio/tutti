@@ -348,10 +348,9 @@ impl Drop for AuMidiOutput {
 /// The AU calls this on its **render thread** to hand the host MIDI it generated.
 ///
 /// `extern "C"`, so a panic must never escape: unwinding across the FFI boundary
-/// into AudioToolbox is undefined behaviour. The whole body runs inside
-/// [`catch_unwind`](std::panic::catch_unwind) and a caught panic becomes an error
-/// status — the identical discipline
-/// `instance.rs::au_input_render_callback` applies, and for the identical reason.
+/// into AudioToolbox is undefined behaviour. The whole body runs under
+/// [`with_state_mut`], which contains a panic and answers an error status, as
+/// `render.rs`'s `au_input_render_callback` does and for the same reason.
 /// A host sink is arbitrary user code; a `[]` index in it must degrade to a
 /// dropped block, not to undefined behaviour.
 ///
@@ -381,7 +380,6 @@ unsafe extern "C" fn au_midi_output_callback(
     // installing and after withdrawing, so this is the only reference.
     unsafe {
         with_state_mut::<MidiOutState, _>(
-            "the MIDI output callback",
             user_data,
             NOT_INSTALLED,
             CANNOT_DO_IN_CURRENT_CONTEXT,
@@ -396,7 +394,7 @@ unsafe extern "C" fn au_midi_output_callback(
 }
 
 /// The actual decode-and-deliver body. Split out so
-/// [`au_midi_output_callback`] is nothing but the `catch_unwind` guard around it.
+/// [`au_midi_output_callback`] is nothing but the panic guard around it.
 ///
 /// # Safety
 /// `user_data` must be null or point at a live `MidiOutState`; `pktlist` must be
