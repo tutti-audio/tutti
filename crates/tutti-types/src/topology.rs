@@ -326,29 +326,22 @@ impl ChannelTopology {
         Some(Self::new(positions.iter().copied()))
     }
 
-    /// Returns what a bare width is taken to mean at the engine's edges (a
-    /// device, a node's outputs, a file that states nothing): [`smpte`](Self::smpte)
-    /// where it has an order, quad at 4, and `None` elsewhere.
+    /// Returns what a bare width of `layout` channels is taken to mean at the
+    /// engine's edges (a device, a node's outputs, a file that states nothing):
+    /// [`smpte`](Self::smpte) where it has an order, quad at 4, and
+    /// [`unassigned`](Self::unassigned) channels elsewhere.
     ///
     /// The quad is an assumption [`smpte`](Self::smpte) refuses to make: a
     /// four-channel device or graph root is far more often quad than B-format.
-    /// An edge that knows better states its own topology instead.
+    /// An edge that knows better states its own topology instead. A width with
+    /// no order (3, 5, 7, 9 to 11, 13 and up, and zero) names no speaker, so
+    /// each channel is unassigned and a fold places it by index.
     #[must_use]
-    pub fn assumed(layout: ChannelLayout) -> Option<Self> {
+    pub fn assumed(layout: ChannelLayout) -> Self {
         match layout.count() {
-            4 => Some(Self::quad()),
-            _ => Self::smpte(layout),
+            4 => Self::quad(),
+            _ => Self::smpte(layout).unwrap_or_else(|| Self::unassigned(layout)),
         }
-    }
-
-    /// Returns what a bare width of `layout` channels feeds: [`assumed`](Self::assumed)
-    /// where it has an order, and [`unassigned`](Self::unassigned) channels where
-    /// it has none.
-    ///
-    /// The one answer for the edges that know only a count (a graph root, a
-    /// device, an export file, a decoded file read at its own width).
-    pub fn for_width(layout: ChannelLayout) -> Self {
-        Self::assumed(layout).unwrap_or_else(|| Self::unassigned(layout))
     }
 
     /// Returns the quad topology, `FL FR BL BR`: four speaker feeds.
@@ -618,16 +611,16 @@ mod tests {
     #[test]
     fn a_bare_width_is_assumed_else_unassigned() {
         assert_eq!(
-            ChannelTopology::for_width(ChannelLayout::from(4u16)),
+            ChannelTopology::assumed(ChannelLayout::from(4u16)),
             ChannelTopology::quad()
         );
         assert_eq!(
-            ChannelTopology::for_width(ChannelLayout::from(6u16)).lfe_index(),
+            ChannelTopology::assumed(ChannelLayout::from(6u16)).lfe_index(),
             Some(3)
         );
         let odd = ChannelLayout::from(3u16);
         assert_eq!(
-            ChannelTopology::for_width(odd),
+            ChannelTopology::assumed(odd),
             ChannelTopology::unassigned(odd)
         );
     }

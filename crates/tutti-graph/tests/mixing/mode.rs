@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use common::{Kind, Pair, Ringer, SpecBehaviour, TestNode, bits, prepare};
-use tutti_buffers::{FoldError, M3DB};
+use tutti_buffers::{Float, FoldError};
 use tutti_graph::{
     Bus, BusRole, Buses, CrossfadeCurve, Cx, Edge, Editor, Event, EventEdge, EventIn, EventKind,
     EventOut, Executor, ForkByClone, ForkMode, ForkTarget, GraphInvalid, GraphSpec, InPort, Io,
@@ -439,8 +439,10 @@ fn a_bypass_is_the_fold_between_the_main_buses() {
             // second block, it holds still at DRY.
             let from = if parked { 0 } else { BLOCK as u64 };
             for n in from..256u64 {
-                let left = input(0, n) + M3DB * input(2, n) + M3DB * input(4, n);
-                let right = input(1, n) + M3DB * input(2, n) + M3DB * input(5, n);
+                let left =
+                    input(0, n) + f32::MINUS_3_DB * input(2, n) + f32::MINUS_3_DB * input(4, n);
+                let right =
+                    input(1, n) + f32::MINUS_3_DB * input(2, n) + f32::MINUS_3_DB * input(5, n);
                 let i = n as usize;
                 assert!((got[0][i] - left).abs() < 1e-5, "left, {n}: {}", got[0][i]);
                 assert!(

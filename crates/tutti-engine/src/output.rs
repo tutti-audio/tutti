@@ -24,8 +24,8 @@
 //! root renders a silent, counted block into that device.
 
 use std::sync::{Arc, Mutex, PoisonError};
-use tutti_buffers::{Fold, FoldError};
-use tutti_graph::MAX_ROOT_CHANNELS;
+use tutti_buffers::{BufferError, Fold, FoldError};
+use tutti_graph::{MAX_ROOT_CHANNELS, fold_to_width};
 use tutti_rt::ArcLend;
 use tutti_types::{ChannelLayout, ChannelTopology};
 
@@ -93,10 +93,10 @@ impl OutputFolds {
     ///
     /// # Errors
     ///
-    /// [`FoldError::Empty`] for a device of no channels.
+    /// [`FoldError::Buffer`] (a zero width) for a device of no channels.
     pub(crate) fn support(&mut self, device: ChannelLayout) -> Result<(), FoldError> {
         let Some(slot) = usize::from(device.count()).checked_sub(1) else {
-            return Err(FoldError::Empty(tutti_buffers::FoldEnd::Destination));
+            return Err(BufferError::ZeroWidth.into());
         };
         if self.by_device.len() <= slot {
             self.by_device.resize(slot + 1, None);
@@ -124,9 +124,12 @@ impl OutputFolds {
             .iter()
             .find(|root| usize::from(root.layout().count()) == width);
         match declared {
-            Some(root) => Fold::declared(root, device),
-            None => Fold::widths(
-                ChannelLayout::try_from(width).expect("a root width is within MAX_ROOT_CHANNELS"),
+            Some(root) => fold_to_width(root, device),
+            None => fold_to_width(
+                &ChannelTopology::assumed(
+                    ChannelLayout::try_from(width)
+                        .expect("a root width is within MAX_ROOT_CHANNELS"),
+                ),
                 device,
             ),
         }
@@ -197,7 +200,7 @@ impl OutputControl {
     ///
     /// # Errors
     ///
-    /// [`FoldError::Empty`] for a device of no channels.
+    /// [`FoldError::Buffer`] (a zero width) for a device of no channels.
     pub fn support(&self, device: ChannelLayout) -> Result<(), FoldError> {
         if self.cell.current().supports(device) {
             return Ok(());
@@ -230,7 +233,7 @@ impl OutputControl {
         device: ChannelLayout,
     ) -> Result<(), FoldError> {
         if let Some(root) = &root {
-            Fold::declared(root, device)?;
+            fold_to_width(root, device)?;
         }
         self.update(|folds| {
             let mut next = folds.roots.clone();
@@ -249,7 +252,10 @@ impl OutputControl {
             // Every held device is rebuilt against the new declaration.
             let held = (1..=folds.by_device.len())
                 .filter(|d| folds.has_device(*d))
-                .map(|d| ChannelLayout::try_from(d).map_err(|_| FoldError::TooWide(d)))
+                .map(|d| {
+                    ChannelLayout::try_from(d)
+                        .map_err(|_| FoldError::from(BufferError::TooWide { channels: d }))
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             folds.by_device.clear();
             for device in held {

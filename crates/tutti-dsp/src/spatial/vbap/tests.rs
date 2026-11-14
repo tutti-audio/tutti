@@ -1,5 +1,5 @@
 use super::*;
-use tutti_types::ChannelLayout;
+use tutti_types::{ChannelLayout, ChannelTopology};
 
 /// The held-gain shortcut is taken only where it has the ramp's bits.
 /// A gain moving from `+0.0` to `-0.0` has a delta of `-0.0`, which
@@ -17,7 +17,11 @@ fn a_signed_zero_gain_change_takes_the_ramp() {
     to.a[0] = -0.0;
     let ones = [1.0f32; 8];
     let mut out = [1.0f32; 8];
-    let fold = Fold::widths(ChannelLayout::STEREO, ChannelLayout::MONO).unwrap();
+    let fold = Fold::between(
+        &ChannelTopology::assumed(ChannelLayout::STEREO),
+        &ChannelTopology::assumed(ChannelLayout::MONO),
+    )
+    .unwrap();
     VbapGains::render_channel(&from, &to, Some(0), &fold, &ones, &ones, &mut out);
     assert!(
         out.iter().all(|o| o.to_bits() == 0.0f32.to_bits()),

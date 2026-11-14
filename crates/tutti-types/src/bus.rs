@@ -99,8 +99,8 @@ impl BusTopology {
     /// once here.
     #[must_use]
     pub fn assumed(width: ChannelLayout) -> Option<Self> {
-        ChannelTopology::assumed(width)
-            .and_then(|t| Self::try_from(&t).ok())
+        Self::try_from(&ChannelTopology::assumed(width))
+            .ok()
             .or_else(|| Self::unassigned(width))
     }
 
@@ -151,9 +151,8 @@ mod tests {
             Some(BusTopology::STEREO)
         );
         let nine = ChannelLayout::from_count(9);
-        assert_eq!(
-            ChannelTopology::assumed(nine),
-            None,
+        assert!(
+            ChannelTopology::assumed(nine).is_unassigned(),
             "the case needs a width with no order"
         );
         assert_eq!(BusTopology::assumed(nine), BusTopology::unassigned(nine));

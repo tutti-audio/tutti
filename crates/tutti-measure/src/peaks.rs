@@ -27,7 +27,7 @@
 //! site — and where its semantics can be stated, because they are *not* the
 //! semantics of folding first.
 
-use tutti_buffers::Interleaved;
+use tutti_buffers::{Interleaved, PlanesMut, deinterleave};
 use tutti_types::{Amplitude, ChannelLayout, Samples};
 
 /// One block of a waveform summary, for one channel.
@@ -162,7 +162,8 @@ impl PeakBlocks {
     /// So this is the right reduction for a *waveform* that needs one row. It
     /// is **not** a downmix: a caller that wants the mono signal's own peaks —
     /// what the listener hears through a mono fold — folds the samples with
-    /// [`Interleaved::fold_into`] (through a [`Fold`](tutti_buffers::Fold) to one channel) and blocks that instead.
+    /// [`Fold::fold`](tutti_buffers::Fold::fold) (a fold to one channel) and blocks that
+    /// instead.
     ///
     /// `rms` merges quadratically; see [`PeakBlock::merge`].
     #[must_use]
@@ -297,7 +298,14 @@ pub fn step_peaks(
 
     let mut planes = core::mem::take(&mut state.planes);
     planes.resize_with(channels, Vec::new);
-    chunk.deinterleave_into(&mut planes);
+    // Each plane is sized to the chunk and written whole; `chunk_matches`
+    // made the chunk `channels` wide, so the table is the chunk's width.
+    for plane in &mut planes {
+        plane.clear();
+        plane.resize(chunk.frames().get(), 0.0);
+    }
+    let split = PlanesMut::from_vecs(&mut planes).and_then(|out| deinterleave(chunk, out));
+    debug_assert!(split.is_ok(), "the chunk is the config's width: {split:?}");
 
     // Every plane holds the same frame count, so channel 0 speaks for all.
     state.consumed = Samples(state.consumed.get() + planes[0].len());
@@ -435,12 +443,12 @@ pub fn summarize(cfg: &PeakConfig, buffer: Interleaved<'_>) -> PeakBlocks {
     let mut state = PeakState::new();
     let block = cfg.samples_per_block.get().max(1);
     let per_chunk = (SUMMARIZE_CHUNK_FRAMES / block).max(1) * block;
-    let frames = buffer.len();
+    let frames = buffer.frames();
     let mut start = Samples::ZERO;
     // At least one call, so an empty buffer still adopts the layout.
     loop {
         let end = frames.min(start + Samples(per_chunk));
-        step_peaks(cfg, &mut state, buffer.window(start..end), &mut out);
+        step_peaks(cfg, &mut state, buffer.slice(start..end), &mut out);
         start = end;
         if start >= frames {
             break;

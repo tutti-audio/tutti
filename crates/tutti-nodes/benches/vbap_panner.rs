@@ -46,7 +46,7 @@ fn bench(c: &mut Criterion) {
         let mut g = c.benchmark_group(name);
         for (speakers, block) in [(2u16, 64usize), (6, 64), (2, 1024), (6, 1024)] {
             g.throughput(Throughput::Elements(block as u64));
-            let node = VbapPannerNode::for_topology(&ChannelTopology::for_width(
+            let node = VbapPannerNode::for_topology(&ChannelTopology::assumed(
                 ChannelLayout::from(speakers),
             ))
             .unwrap();

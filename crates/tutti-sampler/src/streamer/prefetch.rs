@@ -229,7 +229,7 @@ pub(crate) struct RegionOut {
     /// only in the LRU cache, so a file too large to cache still streams.
     resident: Option<Arc<Wave>>,
     /// Test seam: runs where the stream reads its file, and may block or
-    /// panic (a decode that panics, B5).
+    /// panic (a decode that panics).
     #[cfg(test)]
     read_hook: Option<super::decode::ReadHook>,
 }
@@ -426,7 +426,7 @@ impl RegionBuffer {
         fade_frames: Samples,
     ) -> (RegionOut, SharedReader, PosReader) {
         let layout = nonempty(channels.into());
-        let topology = ChannelTopology::for_width(layout);
+        let topology = ChannelTopology::assumed(layout);
         Self::for_file(region_id, file_path, capacity, topology, None, fade_frames)
     }
 

@@ -216,14 +216,14 @@ impl Replay for SpillReplay<'_> {
         let width = usize::from(out.layout().count());
         match self {
             Self::Memory { held, at } => {
-                let n = (held.len() - *at).min(out.len().get() * width);
+                let n = (held.len() - *at).min(out.frames().get() * width);
                 let n = n - n % width;
                 out.samples_mut()[..n].copy_from_slice(&held[*at..*at + n]);
                 *at += n;
                 Ok(n / width)
             }
             Self::File { reader, bytes } => {
-                let want = out.len().get() * width;
+                let want = out.frames().get() * width;
                 bytes.resize(want * 4, 0);
                 let mut got = 0;
                 while got < bytes.len() {

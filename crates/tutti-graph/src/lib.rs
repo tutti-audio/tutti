@@ -585,6 +585,7 @@ mod pool;
 mod preroll;
 #[cfg(feature = "testing")]
 mod reference;
+mod root;
 mod slots;
 mod spec;
 mod tail;
@@ -656,6 +657,7 @@ pub use plan::{
 pub use play::PlayClock;
 pub use pool::{WorkerPool, WorkerPoolBuilder};
 pub use preroll::PrerollTable;
+pub use root::{RootError, fold_to_width};
 pub use tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};
 pub use wake::Wake;
 // The reading is a value type, `tutti-types`' (the modulation compiler

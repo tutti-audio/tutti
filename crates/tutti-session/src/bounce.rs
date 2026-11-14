@@ -1824,7 +1824,7 @@ impl Session {
             }
             let lanes = ChannelLayout::from_count(ports.len().try_into().unwrap_or(u16::MAX));
             let placement =
-                Placement::new(topology.unwrap_or_else(|| ChannelTopology::for_width(lanes)));
+                Placement::new(topology.unwrap_or_else(|| ChannelTopology::assumed(lanes)));
             let layout = layout.unwrap_or(lanes);
             let target: Target = match kind {
                 StemTo::File(FileStem { path, format, gain }) => {
