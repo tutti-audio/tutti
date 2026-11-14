@@ -48,9 +48,16 @@ pub(crate) fn probe_fn(
     };
     move |path, format, cancel| {
         let probed = if how.measure {
-            measure_metadata_with(&locator, path, timeout, cancel, how.state.as_deref())
+            measure_metadata_with(
+                &locator,
+                path,
+                format,
+                timeout,
+                cancel,
+                how.state.as_deref(),
+            )
         } else {
-            probe_metadata_with(&locator, path, timeout, cancel)
+            probe_metadata_with(&locator, path, format, timeout, cancel)
         };
         interpret_probe(probed, path, format, how.fallback)
     }
@@ -100,9 +107,10 @@ fn interpret_probe(
 ) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
     match result {
         Ok(plugins) => Ok(plugins),
-        Err(ProbeError::Cancelled) => Err(ProbeFailure {
-            reason: "the probe was cancelled".to_string(),
-            kind: ProbeFailureKind::Cancelled,
+        // The scan that cancelled it discards what a probe returns after that.
+        Err(e @ ProbeError::Cancelled) => Err(ProbeFailure {
+            reason: e.to_string(),
+            kind: ProbeFailureKind::Environment,
         }),
         // The only error that means "we could not look", as opposed to "we looked
         // and this plugin is bad". Widening it would hide real failures.

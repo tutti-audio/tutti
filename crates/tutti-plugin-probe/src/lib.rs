@@ -16,7 +16,25 @@ pub use measure::{
     measure_at,
 };
 
-/// The descriptor of every plugin the file at `path` holds, by its extension, in
+/// The routing key of a file: the name of the format whose loader reads it. It
+/// is `format` when the caller names one (`clap`, `vst3`, `vst2`, `au`: a link
+/// named `Foo.clap` to a file named `libfoo.so` is a CLAP plugin), and the path's
+/// own extension otherwise.
+fn routing(path: &Path, format: Option<&str>) -> String {
+    match format {
+        Some("vst2") => "vst".to_string(),
+        Some("au") => "component".to_string(),
+        Some(other) => other.to_lowercase(),
+        None => path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase(),
+    }
+}
+
+/// The descriptor of every plugin the file at `path` holds, by `format` or, with
+/// none, by its extension, in
 /// the file's own order, or the reason it could not be read. A CLAP factory
 /// gives each plugin it lists, a VST3 factory each audio class, an AU bundle each
 /// unit it declares, a VST2 shell each sub-plugin; any other file is one plugin.
@@ -26,16 +44,16 @@ pub use measure::{
 /// # Errors
 ///
 /// The loader's own reason, as text: the file is missing, the format is not
-/// compiled in, or the file would not open.
-pub fn describe(main: MainThreadMarker, path: &Path) -> Result<Vec<PluginDescriptor>, String> {
+/// compiled in or unknown, or the file would not open.
+pub fn describe(
+    main: MainThreadMarker,
+    path: &Path,
+    format: Option<&str>,
+) -> Result<Vec<PluginDescriptor>, String> {
     if !path.exists() {
         return Err(format!("Plugin not found: {}", path.display()));
     }
-    let extension = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
+    let extension = routing(path, format);
     // Only VST2 reads it; a build without that format has nothing to hand it to.
     let _ = main;
     match extension.as_str() {
@@ -136,14 +154,11 @@ fn au(path: &Path) -> Result<Vec<PluginDescriptor>, String> {
 pub fn describe_measured(
     main: MainThreadMarker,
     path: &Path,
+    format: Option<&str>,
     state: Option<&[u8]>,
 ) -> Result<Vec<PluginDescriptor>, String> {
-    let mut plugins = describe(main, path)?;
-    let extension = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
+    let mut plugins = describe(main, path, format)?;
+    let extension = routing(path, format);
     for plugin in &mut plugins {
         plugin.measured = match extension.as_str() {
             #[cfg(feature = "vst3")]

@@ -201,15 +201,16 @@ impl Scanner {
 
     /// Probes the given plugin files on a background thread, returning
     /// immediately, whether or not a row for them is up to date: the delta of
-    /// each replaces its file's row. In every other respect as
+    /// each replaces its file's row. Each file comes with the format the caller
+    /// knows it as, which the probe reads it as whatever its extension says (a
+    /// link `Foo.clap` to `libfoo.so` is CLAP). A row is keyed by the file's
+    /// canonical path, as a scan keys it. In every other respect as
     /// [`spawn`](Self::spawn): the same pedal, claim, deltas and drop.
     ///
     /// # Errors
     ///
-    /// [`FilesError::Missing`] for a path that is not a file, and
-    /// [`FilesError::UnrecognizedFormat`] for one whose extension names no plugin
-    /// format, before anything starts; [`FilesError::Busy`] as for
-    /// [`spawn`](Self::spawn).
+    /// [`FilesError::Missing`] for a path that is not a file, before anything
+    /// starts; [`FilesError::Busy`] as for [`spawn`](Self::spawn).
     ///
     /// # Panics
     ///
@@ -217,19 +218,15 @@ impl Scanner {
     pub fn spawn_files(
         &self,
         db: &mut PluginDb,
-        files: impl IntoIterator<Item = impl AsRef<Path>>,
+        files: impl IntoIterator<Item = (impl AsRef<Path>, PluginFormat)>,
         save: impl FnOnce(&PluginDb) -> std::io::Result<()>,
     ) -> Result<Scan, FilesError> {
         let mut targets = Vec::new();
-        for file in files {
+        for (file, format) in files {
             let file = file.as_ref();
-            let facts = FileFacts::read(file);
-            if !facts.exists {
+            if !FileFacts::read_as(file, Some(format)).exists {
                 return Err(FilesError::Missing(file.to_path_buf()));
             }
-            let format = facts
-                .format
-                .ok_or_else(|| FilesError::UnrecognizedFormat(file.to_path_buf()))?;
             targets.push((file.to_path_buf(), format));
         }
         Ok(Self::start(self.job(db, Targets::Files(targets), save)?))
@@ -345,7 +342,8 @@ impl Drop for Claim {
 #[error("a plugin scan is already running on this pedal")]
 pub struct ScanBusy;
 
-/// Why [`Scanner::spawn_files`] did not start.
+/// Why a task over named files did not start ([`Scanner::spawn_files`], and the
+/// catalog's `register` and `measure` over it).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum FilesError {
     /// A scan or a crash recovery is already using the pedal.
@@ -354,7 +352,7 @@ pub enum FilesError {
     /// A path is not a file that exists.
     #[error("no plugin file at {0}")]
     Missing(PathBuf),
-    /// A path's extension names no plugin format.
+    /// A path's extension names no plugin format, and none was given.
     #[error("{0} has no plugin format's extension")]
     UnrecognizedFormat(PathBuf),
 }
@@ -670,8 +668,6 @@ pub enum ProbeFailureKind {
     LoadFailed,
     /// The probe executable could not be found, so nothing was looked at.
     ProbeNotFound,
-    /// The probe was cancelled before it finished.
-    Cancelled,
     /// Anything else of the environment: an I/O error, a protocol mismatch.
     Environment,
 }
@@ -1723,7 +1719,9 @@ mod tests {
             .unwrap();
         let before = db.row(&file).cloned().expect("a row");
 
-        let task = scanner.spawn_files(&mut db, [&file], no_save).unwrap();
+        let task = scanner
+            .spawn_files(&mut db, [(&file, PluginFormat::Clap)], no_save)
+            .unwrap();
         probing_rx.recv_timeout(Duration::from_secs(30)).unwrap();
         task.cancel.cancel();
         worker_exited(&task.progress_rx);
@@ -1753,7 +1751,9 @@ mod tests {
         );
         assert_eq!(calls.load(Ordering::SeqCst), 1);
 
-        let task = scanner.spawn_files(&mut db, [&file], no_save).unwrap();
+        let task = scanner
+            .spawn_files(&mut db, [(&file, PluginFormat::Clap)], no_save)
+            .unwrap();
         let result = task.wait(&mut db).expect("the task finishes");
 
         assert_eq!(
@@ -1765,31 +1765,52 @@ mod tests {
         assert!(db.row(&file).is_some());
     }
 
-    /// A file task refuses a path it cannot probe at the call, with a named
+    /// **A file task hands the probe the format it was given**, whatever the
+    /// file's extension says, and records the row under that format: a plugin
+    /// whose file is named for another extension (a link's target) is still read
+    /// as the format its caller knows it as.
+    #[test]
+    fn a_file_task_probes_as_the_format_it_was_given() {
+        let dir = TempDir::new().unwrap();
+        let plugins_dir = plugins_dir(&dir);
+        let file = create_fake_plugin(&plugins_dir, "libsynth.so");
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&seen);
+        let scanner = Scanner::new(dir.path().join(".scanning"), move |path, format, _| {
+            recorded.lock().unwrap().push(format);
+            Ok(vec![probe_plugin_fallback(path, format)])
+        });
+        let mut db = PluginDb::new();
+
+        let task = scanner
+            .spawn_files(&mut db, [(&file, PluginFormat::Clap)], no_save)
+            .unwrap();
+        task.wait(&mut db).expect("the task finishes");
+
+        assert_eq!(*seen.lock().unwrap(), [PluginFormat::Clap]);
+        assert_eq!(db.row(&file).expect("a row").format, PluginFormat::Clap);
+    }
+
+    /// A file task refuses a path that is not a file at the call, with a named
     /// error, and starts nothing.
     #[test]
     fn a_file_task_names_what_is_wrong_with_a_path_at_the_call() {
         let dir = TempDir::new().unwrap();
         let plugins_dir = plugins_dir(&dir);
-        let other = create_fake_plugin(&plugins_dir, "notes.txt");
         let missing = plugins_dir.join("gone.clap");
         let (scanner, calls) = counting_scanner(dir.path(), named);
         let mut db = PluginDb::new();
 
         assert_eq!(
             scanner
-                .spawn_files(&mut db, [&missing], no_save)
+                .spawn_files(&mut db, [(&missing, PluginFormat::Clap)], no_save)
                 .unwrap_err(),
             FilesError::Missing(missing)
-        );
-        assert_eq!(
-            scanner.spawn_files(&mut db, [&other], no_save).unwrap_err(),
-            FilesError::UnrecognizedFormat(other)
         );
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         assert!(
             scanner
-                .spawn_files(&mut db, Vec::<PathBuf>::new(), no_save)
+                .spawn_files(&mut db, Vec::<(PathBuf, PluginFormat)>::new(), no_save)
                 .is_ok(),
             "a refused call did not claim the pedal"
         );

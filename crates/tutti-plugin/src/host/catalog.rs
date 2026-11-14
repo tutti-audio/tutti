@@ -57,8 +57,8 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use tutti_plugin_db::{
-    BlacklistedFile, Delta, FileFacts, FilesError, PluginDb, PluginEntry, Scan, ScanBusy, ScanPoll,
-    Scanner,
+    BlacklistedFile, Delta, FileFacts, FilesError, PluginDb, PluginEntry, PluginFormat, Scan,
+    ScanBusy, ScanPoll, Scanner, format_from_path,
 };
 use tutti_plugin_ipc::CatalogConfig;
 use tutti_plugin_types::PluginDescriptor;
@@ -217,7 +217,12 @@ impl Catalog {
     /// so no change leaves a [`BlacklistView`] behind.
     fn change<R>(&mut self, f: impl FnOnce(&mut PluginDb, &Scanner, &CatalogConfig) -> R) -> R {
         let scanner = self.scanner(self.scanning());
-        let out = f(&mut self.db, &scanner, &self.config);
+        self.change_with(|db, config| f(db, &scanner, config))
+    }
+
+    /// [`change`](Self::change) for a caller that brings its own scanner.
+    fn change_with<R>(&mut self, f: impl FnOnce(&mut PluginDb, &CatalogConfig) -> R) -> R {
+        let out = f(&mut self.db, &self.config);
         *self
             .blacklist
             .write()
@@ -373,13 +378,28 @@ impl Catalog {
     ///
     /// Panics if the operating system cannot spawn the scanner thread.
     pub fn register(&mut self, path: impl AsRef<Path>) -> std::result::Result<Scan, FilesError> {
-        self.finish_pending_save();
-        let save = self.autosave();
-        let scanner = self.scanner(Probing {
+        let path = path.as_ref();
+        let format = format_from_path(path)
+            .ok_or_else(|| FilesError::UnrecognizedFormat(path.to_path_buf()))?;
+        let probing = Probing {
             fallback: false,
             ..self.scanning()
-        });
-        self.change(|db, _, _| scanner.spawn_files(db, [path], save))
+        };
+        self.spawn_file(probing, path, format)
+    }
+
+    /// Starts a task probing the one file `path`, read as `format`, as `probing`
+    /// says, on one scanner of this catalog's pedal.
+    fn spawn_file(
+        &mut self,
+        probing: Probing,
+        path: &Path,
+        format: PluginFormat,
+    ) -> std::result::Result<Scan, FilesError> {
+        self.finish_pending_save();
+        let save = self.autosave();
+        let scanner = self.scanner(probing);
+        self.change_with(|db, _| scanner.spawn_files(db, [(path, format)], save))
     }
 
     /// Applies what a task ([`scan`](Self::scan), [`register`](Self::register) or
@@ -582,36 +602,45 @@ impl Catalog {
         self.change(|db, _, _| db.apply(Delta::remove(path)));
     }
 
-    /// Measures the file `plugin` names on a background thread and records the
-    /// result: the tail and latency each of its plugins reports, against what it
-    /// renders, in each descriptor's [`measured`](PluginDescriptor::measured).
-    /// The row is replaced, so the file is probed again too. The task is the one
-    /// [`scan`](Self::scan) returns: [`try_apply`](Self::try_apply) applies its
-    /// delta.
+    /// Measures the file `plugin` names, as the format `plugin` has, on a
+    /// background thread and records the result: the tail and latency each of its
+    /// plugins reports, against what it renders, in each descriptor's
+    /// [`measured`](PluginDescriptor::measured). The row is replaced, so the file
+    /// is probed again too. The task is the one [`scan`](Self::scan) returns:
+    /// [`try_apply`](Self::try_apply) applies its delta.
+    ///
+    /// `state` is a file of the bytes the plugin's own `save_state` wrote: the
+    /// plugin is put in that state before it is measured, so the figure is of that
+    /// patch (for a file of one plugin; the row records a hash of it). It belongs
+    /// to this call alone: another `measure` without one measures its plugin as
+    /// it loads.
     ///
     /// The probe renders each plugin at two configurations, up to
     /// [`DEFAULT_MEASURE_TIMEOUT`](crate::catalog::DEFAULT_MEASURE_TIMEOUT).
     /// As in a measuring scan, a plugin that crashes, hangs or will not load while
-    /// being measured is **blacklisted**. Dropping the task kills the probe. The
-    /// configuration's [`measure_state`](CatalogConfig::measure_state), if set, is
-    /// the state the plugin is put in first.
+    /// being measured is **blacklisted**. Dropping the task kills the probe. A
+    /// missing `plugin-probe` is a failure in the result, as for
+    /// [`register`](Self::register).
     ///
     /// # Errors
     ///
-    /// [`FilesError`] as for [`register`](Self::register).
+    /// [`FilesError`] as for [`register`](Self::register), the format being the
+    /// ref's.
     ///
     /// # Panics
     ///
     /// Panics if the operating system cannot spawn the scanner thread.
-    pub fn measure(&mut self, plugin: &PluginRef) -> std::result::Result<Scan, FilesError> {
-        self.finish_pending_save();
-        let save = self.autosave();
-        let scanner = self.scanner(Probing {
+    pub fn measure(
+        &mut self,
+        plugin: &PluginRef,
+        state: Option<&Path>,
+    ) -> std::result::Result<Scan, FilesError> {
+        let probing = Probing {
             measure: true,
-            state: self.config.measure_state.clone(),
+            state: state.map(Path::to_path_buf),
             fallback: false,
-        });
-        self.change(|db, _, _| scanner.spawn_files(db, [plugin.path()], save))
+        };
+        self.spawn_file(probing, plugin.path(), plugin.format())
     }
 
     /// Applies a delta the caller built to the catalog, such as a

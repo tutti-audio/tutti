@@ -12,24 +12,20 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
-use tutti_plugin_db::Cancel;
+use tutti_plugin_db::{Cancel, PluginFormat};
 use tutti_plugin_ipc::Reaped;
 use tutti_plugin_types::BridgeError;
 use tutti_plugin_types::{Helper, Locator, PluginDescriptor, ProbeOutcome, read_result};
 
 /// Why a probe returned no descriptors.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub(crate) enum ProbeError {
     /// The caller's [`Cancel`] was raised, and the child was killed.
+    #[error("the probe was cancelled")]
     Cancelled,
     /// The probe ran, or could not be started, and failed.
-    Bridge(BridgeError),
-}
-
-impl From<BridgeError> for ProbeError {
-    fn from(e: BridgeError) -> Self {
-        Self::Bridge(e)
-    }
+    #[error(transparent)]
+    Bridge(#[from] BridgeError),
 }
 
 /// How long a probe may take, spawn and the plugin's load included, unless the
@@ -54,10 +50,11 @@ const POLL: Duration = Duration::from_millis(5);
 pub(crate) fn probe_metadata_with(
     locator: &Locator,
     plugin_path: &Path,
+    format: PluginFormat,
     timeout: Duration,
     cancel: &Cancel,
 ) -> Result<Vec<PluginDescriptor>, ProbeError> {
-    run(locator, plugin_path, timeout, cancel, &[])
+    run(locator, plugin_path, format, timeout, cancel, &[])
 }
 
 /// [`probe_metadata_with`] that also **measures** each plugin (`plugin-probe
@@ -79,6 +76,7 @@ pub(crate) fn probe_metadata_with(
 pub(crate) fn measure_metadata_with(
     locator: &Locator,
     plugin_path: &Path,
+    format: PluginFormat,
     timeout: Duration,
     cancel: &Cancel,
     state: Option<&Path>,
@@ -88,12 +86,13 @@ pub(crate) fn measure_metadata_with(
         args.push("--state".as_ref());
         args.push(state.as_os_str());
     }
-    run(locator, plugin_path, timeout, cancel, &args)
+    run(locator, plugin_path, format, timeout, cancel, &args)
 }
 
 fn run(
     locator: &Locator,
     plugin_path: &Path,
+    format: PluginFormat,
     timeout: Duration,
     cancel: &Cancel,
     flags: &[&std::ffi::OsStr],
@@ -112,6 +111,9 @@ fn run(
     let child = Command::new(&probe)
         .arg(plugin_path)
         .arg(&result)
+        // The format the caller knows the file by, which a link's target need
+        // not name in its own extension.
+        .args(["--as", format.extension_id()])
         .args(flags)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -207,6 +209,7 @@ mod tests {
         probe_metadata_with(
             locator,
             Path::new("/plugins/Some.clap"),
+            PluginFormat::Clap,
             timeout,
             &Cancel::new(),
         )
@@ -286,6 +289,7 @@ mod tests {
         let result = probe_metadata_with(
             &locator,
             Path::new("/plugins/Some.clap"),
+            PluginFormat::Clap,
             Duration::from_secs(60),
             &cancel,
         );

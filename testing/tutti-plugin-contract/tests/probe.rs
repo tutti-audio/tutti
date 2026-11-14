@@ -41,7 +41,8 @@ fn config(dir: &Path) -> CatalogConfig {
 }
 
 /// Runs the catalog task `start` makes to its end and returns the database it
-/// built, or the first failure the task reports.
+/// built, or the **first** failure the task reports: every test here probes one
+/// file, so a task has at most one.
 fn run_task(
     config: CatalogConfig,
     start: impl FnOnce(&mut Catalog) -> tutti_plugin_db::Scan,
@@ -101,12 +102,10 @@ fn probe_all_with_timeout(
 /// first, under the deadline `timeout`.
 fn measure_db(path: &Path, file: &Path, timeout: Duration) -> Result<PluginDb, ProbeFailure> {
     let pedal = tempfile::tempdir().unwrap();
-    let config = config(pedal.path())
-        .measure_timeout(timeout)
-        .measure_state(file);
+    let config = config(pedal.path()).measure_timeout(timeout);
     run_task(config, |catalog| {
         let plugin = PluginRef::file(path).expect("a plugin file");
-        catalog.measure(&plugin).expect("a plugin file")
+        catalog.measure(&plugin, Some(file)).expect("a plugin file")
     })
 }
 

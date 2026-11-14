@@ -44,12 +44,6 @@ pub struct CatalogConfig {
     /// How long a measuring probe may take, or `None` for the catalog's default
     /// (three minutes: two renders of up to the longest tail).
     pub measure_timeout: Option<Duration>,
-
-    /// A file of the bytes a plugin's own `save_state` wrote. A measure task puts
-    /// the plugin in that state before it measures it, so it is for a file of
-    /// one plugin; the record's `ProbeConfig::state` hashes it. A scan never
-    /// reads it.
-    pub measure_state: Option<PathBuf>,
 }
 
 /// An empty `scan_dirs` list, for [`CatalogConfig::new`].
@@ -73,7 +67,6 @@ impl CatalogConfig {
             probe_locator: Locator::Search,
             probe_timeout: None,
             measure_timeout: None,
-            measure_state: None,
         }
     }
 
@@ -115,14 +108,6 @@ impl CatalogConfig {
     #[must_use]
     pub fn measure_timeout(mut self, timeout: Duration) -> Self {
         self.measure_timeout = Some(timeout);
-        self
-    }
-
-    /// Sets the state file a measure task puts the plugin in
-    /// ([`measure_state`](Self::measure_state)).
-    #[must_use]
-    pub fn measure_state(mut self, file: impl Into<PathBuf>) -> Self {
-        self.measure_state = Some(file.into());
         self
     }
 

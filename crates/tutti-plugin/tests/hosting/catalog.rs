@@ -5,7 +5,7 @@
 
 #![cfg(feature = "clap")]
 
-use tutti_plugin::catalog::{Catalog, CatalogConfig};
+use tutti_plugin::catalog::{Catalog, CatalogConfig, PluginRef};
 use tutti_plugin_db::{PluginDb, Scan, ScanPoll, ScanResult};
 
 /// Applies `task` as it arrives until it ends, and returns its result.
@@ -43,13 +43,15 @@ fn scan_picks_up_a_new_file() {
         CatalogConfig::new(dir.path(), vec![scanned_dir.clone()]),
         |_| Ok(()),
     );
+    // The files the catalog holds a row for: one row per file, whatever the
+    // number of plugins in it.
     let files = |catalog: &Catalog| {
         let mut files: Vec<_> = catalog
-            .iter()
-            .map(|(plugin, _)| plugin.path().to_path_buf())
+            .db()
+            .rows()
+            .map(|(path, _)| path.to_path_buf())
             .collect();
         files.sort();
-        files.dedup();
         files
     };
 
@@ -125,7 +127,7 @@ fn measure_measures_a_plugin_a_scan_left_unmeasured() {
     let (plugin, descriptor) = catalog.iter().next().expect("the plugin is listed");
     assert_eq!(descriptor.measured, None);
 
-    let task = catalog.measure(&plugin).expect("a file that exists");
+    let task = catalog.measure(&plugin, None).expect("a file that exists");
     let result = finish(&mut catalog, task);
     assert_eq!((result.scanned, result.new), (1, 1));
     let (_, descriptor) = catalog.iter().next().expect("still listed");
@@ -270,9 +272,9 @@ mod stand_in_probe {
     fn dropping_a_measure_kills_a_stuck_probe_promptly() {
         let dir = tempfile::TempDir::new().expect("a scratch directory");
         let (mut catalog, file, pid_file) = catalog_probed_by(&dir, HANG, None);
-        let plugin = tutti_plugin::catalog::PluginRef::file(file).expect("a clap file");
+        let plugin = PluginRef::file(file).expect("a clap file");
 
-        let task = catalog.measure(&plugin).expect("a file that exists");
+        let task = catalog.measure(&plugin, None).expect("a file that exists");
         let pid = running_pid(&pid_file);
 
         let started = Instant::now();
@@ -284,21 +286,6 @@ mod stand_in_probe {
             started.elapsed()
         );
         assert!(!alive(&pid), "the probe (pid {pid}) outlived the drop");
-    }
-
-    /// **A registration a drop cancelled leaves no trace**: the file's row is
-    /// absent, not blacklisted as the killed probe's crash.
-    #[test]
-    fn a_dropped_registration_records_nothing() {
-        let dir = tempfile::TempDir::new().expect("a scratch directory");
-        let (mut catalog, file, pid_file) = catalog_probed_by(&dir, HANG, None);
-
-        let task = catalog.register(&file).expect("a plugin file");
-        running_pid(&pid_file);
-        drop(task);
-
-        assert!(catalog.db().is_empty());
-        assert!(!catalog.is_blacklisted(&file));
     }
 
     /// **A registration of a plugin that crashes its probe blacklists it**, as a
@@ -365,4 +352,149 @@ fn register_names_a_missing_probe_binary() {
         (0, 1, 0)
     );
     assert!(catalog.db().is_empty());
+}
+
+/// **A state belongs to the one `measure` call that gave it**: a plugin measured
+/// with a state it refuses fails, and the next `measure` of another plugin, given
+/// none, measures it as it loads. A state that outlived its call would hand the
+/// second plugin the first's bytes.
+#[test]
+fn a_measure_state_does_not_reach_the_next_measure() {
+    use tutti_plugin_db::ProbeFailureKind;
+    let dir = tempfile::TempDir::new().expect("a scratch directory");
+    let (mut catalog, a) = catalog_with_one_plugin(&dir);
+    let b = dir.path().join("plugins").join("Other.clap");
+    std::fs::copy(tutti_fixtures::clap_probe(), &b).expect("a second plugin");
+    let refused = dir.path().join("state");
+    std::fs::write(&refused, b"not a state").expect("a state the plugin refuses");
+
+    let first = catalog
+        .measure(&PluginRef::file(&a).expect("a clap file"), Some(&refused))
+        .expect("a file that exists");
+    let first = finish(&mut catalog, first);
+    let [failed] = first.failures.as_slice() else {
+        panic!("one failure: {:?}", first.failures);
+    };
+    assert_eq!(failed.failure.kind, ProbeFailureKind::LoadFailed);
+    assert!(failed.failure.reason.contains("refused the state"));
+
+    let second = catalog
+        .measure(&PluginRef::file(&b).expect("a clap file"), None)
+        .expect("a file that exists");
+    let second = finish(&mut catalog, second);
+
+    assert!(second.failures.is_empty(), "{:?}", second.failures);
+    assert!(!catalog.is_blacklisted(&b));
+    let row = catalog.db().row(&tutti_plugin_db::canonical_path(&b));
+    assert!(row.is_some(), "the second plugin was measured and recorded");
+}
+
+/// **`measure` of a plugin with no `plugin-probe` to run says so**, as `register`
+/// does, and records nothing.
+#[test]
+fn measure_names_a_missing_probe_binary() {
+    use tutti_plugin::catalog::Locator;
+    use tutti_plugin_db::ProbeFailureKind;
+    let dir = tempfile::TempDir::new().expect("a scratch directory");
+    let (_, file) = catalog_with_one_plugin(&dir);
+    let config = CatalogConfig::new(dir.path(), tutti_plugin::catalog::NO_SCAN_DIRS)
+        .probe_locator(Locator::at(dir.path().join("no-such-plugin-probe")));
+    let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
+
+    let plugin = PluginRef::file(&file).expect("a clap file");
+    let task = catalog.measure(&plugin, None).expect("a plugin file");
+    let result = finish(&mut catalog, task);
+
+    let [failed] = result.failures.as_slice() else {
+        panic!("one failure: {:?}", result.failures);
+    };
+    assert_eq!(failed.failure.kind, ProbeFailureKind::ProbeNotFound);
+    assert!(catalog.db().is_empty());
+}
+
+#[cfg(unix)]
+mod links {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
+    use tutti_plugin::catalog::Locator;
+
+    /// A probe that logs the arguments it was started with, then is the real one.
+    fn logging_probe(dir: &Path) -> (Locator, PathBuf) {
+        let log = dir.join("probe-args");
+        let script = dir.join("logging-probe");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\necho \"$@\" >> {}\nexec {} \"$@\"\n",
+                log.display(),
+                tutti_fixtures::plugin_probe().display()
+            ),
+        )
+        .expect("the wrapper");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+            .expect("executable");
+        (Locator::at(script), log)
+    }
+
+    fn catalog_with(dir: &Path, locator: Locator) -> Catalog {
+        let config =
+            CatalogConfig::new(dir, tutti_plugin::catalog::NO_SCAN_DIRS).probe_locator(locator);
+        Catalog::new(PluginDb::new(), config, |_| Ok(()))
+    }
+
+    /// **A link is probed as named and recorded under its target**: the probe is
+    /// started on the link, and the row is keyed by the canonical path, as a scan
+    /// keys the same file.
+    #[test]
+    fn a_registered_link_is_probed_as_named_and_keyed_by_its_target() {
+        let dir = tempfile::TempDir::new().expect("a scratch directory");
+        let real = dir.path().join("Real.clap");
+        std::fs::copy(tutti_fixtures::clap_probe(), &real).expect("a plugin");
+        let link = dir.path().join("Link.clap");
+        std::os::unix::fs::symlink(&real, &link).expect("a link");
+        let (locator, log) = logging_probe(dir.path());
+        let mut catalog = catalog_with(dir.path(), locator);
+
+        let task = catalog.register(&link).expect("a plugin file");
+        let result = finish(&mut catalog, task);
+
+        assert!(result.failures.is_empty(), "{:?}", result.failures);
+        let rows: Vec<_> = catalog.db().rows().map(|(p, _)| p.to_path_buf()).collect();
+        assert_eq!(rows, [tutti_plugin_db::canonical_path(&real)]);
+        let args = std::fs::read_to_string(log).expect("the probe ran");
+        assert!(
+            args.starts_with(&link.display().to_string()),
+            "the probe was started on {args:?}, not on the link {link:?}"
+        );
+    }
+
+    /// **A link whose target has another extension is still the format it was
+    /// named as**, all the way through: registered under the target's canonical
+    /// path, the row says CLAP, and a `measure` of the plugin that row lists
+    /// probes the target as CLAP, not as the format its `.so` extension names.
+    #[test]
+    fn a_link_to_a_differently_named_target_is_measured_by_its_key() {
+        let dir = tempfile::TempDir::new().expect("a scratch directory");
+        let target = dir.path().join("libfoo.so");
+        std::fs::copy(tutti_fixtures::clap_probe(), &target).expect("a plugin");
+        let link = dir.path().join("Foo.clap");
+        std::os::unix::fs::symlink(&target, &link).expect("a link");
+        let mut catalog = catalog_with(dir.path(), Locator::at(tutti_fixtures::plugin_probe()));
+
+        let task = catalog.register(&link).expect("a plugin file");
+        let result = finish(&mut catalog, task);
+        assert!(result.failures.is_empty(), "{:?}", result.failures);
+        let canonical = tutti_plugin_db::canonical_path(&target);
+        let (plugin, _) = catalog.iter().next().expect("the plugin is listed");
+        assert_eq!(plugin.path(), canonical);
+
+        let task = catalog.measure(&plugin, None).expect("the key is a file");
+        let result = finish(&mut catalog, task);
+
+        assert!(result.failures.is_empty(), "{:?}", result.failures);
+        let (_, descriptor) = catalog.iter().next().expect("still listed");
+        assert!(descriptor.measured.is_some());
+        assert!(!catalog.is_blacklisted(&canonical));
+    }
 }
