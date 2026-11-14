@@ -696,7 +696,7 @@ fn a_714_root_block_is_allocation_free() {
         }
     });
     // Every channel of the twelve-wide device is its own constant, in every frame.
-    for frame in wide.chunks_exact(12) {
+    for frame in wide.as_chunks::<12>().0 {
         for (c, &s) in frame.iter().enumerate() {
             assert_eq!(s, (c + 1) as f32 / 16.0, "channel {c}");
         }
@@ -709,7 +709,7 @@ fn a_714_root_block_is_allocation_free() {
     let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
     let left = v(0) + m * (v(2) + v(4) + v(6) + v(8) + v(10));
     let right = v(1) + m * (v(2) + v(5) + v(7) + v(9) + v(11));
-    for frame in stereo.chunks_exact(2) {
+    for frame in stereo.as_chunks::<2>().0 {
         assert!(
             (frame[0] - left).abs() < 1e-5,
             "left {} vs {left}",
