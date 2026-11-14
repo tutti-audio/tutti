@@ -7,8 +7,8 @@ use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
     AudioBuffer, AudioBufferMut, BusRole, Control, Controller, Loaded, Normalized, ParamFlags,
-    ParameterChanges, PluginBus, PluginIo, PluginTail, ProcessContext, ProcessOutput, Processor,
-    Reopen, SampleFormat, Samples, TransportChange, TransportInfo,
+    ParamWriteError, ParameterChanges, PluginBus, PluginIo, PluginTail, ProcessContext,
+    ProcessOutput, Processor, Reopen, SampleFormat, Samples, TransportChange, TransportInfo,
 };
 use tutti_plugin_types::{ParamEdit, Request};
 use tutti_ump::{MidiChannel, MidiGroup};
@@ -27,7 +27,8 @@ fn read<C: Control + ?Sized>(c: &C, param: Param) -> Option<f64> {
 }
 
 fn write<C: Control + ?Sized>(c: &mut C, param: Param, value: f64) {
-    c.set_parameter(main_thread(), param.id(), Normalized::clamped(value));
+    c.set_parameter(main_thread(), param.id(), Normalized::clamped(value))
+        .unwrap_or_else(|why| panic!("writing {param:?}: {why}"));
 }
 
 fn activate<L: Loaded>(loaded: L, block: usize) -> Active<L> {
@@ -297,6 +298,27 @@ pub fn parameter_conversion_is_the_formats_own<F: Format>() {
                 back.get()
             );
         }
+        // A value past an end reads as that end, an infinity included, and
+        // NaN, which is past neither, reads as position 0 (`ParamMapping`).
+        if let Some(want) = tone.plain {
+            let rising = want[want.len() - 1] > want[0];
+            let at = |plain: f64| {
+                c.parameter_normalized(main, Param::Tone.id(), plain)
+                    .unwrap_or_else(|| panic!("tone normalized at {plain} ({when}): none"))
+                    .get()
+            };
+            assert_eq!(at(f64::NAN), 0.0, "tone at NaN ({when})");
+            assert_eq!(
+                at(f64::INFINITY),
+                if rising { 1.0 } else { 0.0 },
+                "tone at +inf ({when})"
+            );
+            assert_eq!(
+                at(f64::NEG_INFINITY),
+                if rising { 0.0 } else { 1.0 },
+                "tone at -inf ({when})"
+            );
+        }
         assert_eq!(
             c.parameter_plain(main, spec::UNLISTED, Normalized::of(0.5)),
             None,
@@ -335,6 +357,33 @@ pub fn unlisted_parameter_is_none<F: Format>() {
     let a = activate(loaded, BLOCK);
     assert_eq!(
         a.controller().parameter(main_thread(), spec::UNLISTED),
+        None,
+        "active"
+    );
+}
+
+/// A write to an id the plugin does not declare fails at the call with a named
+/// error, loaded and active, and writes nothing (`ParamWriteError`, one policy
+/// for every format).
+pub fn undeclared_parameter_write_is_refused<F: Format>() {
+    let main = main_thread();
+    let refused = Err(ParamWriteError::Undeclared(spec::UNLISTED));
+    let mut loaded = F::load();
+    assert_eq!(
+        loaded.set_parameter(main, spec::UNLISTED, Normalized::of(0.25)),
+        refused,
+        "loaded"
+    );
+    assert_eq!(loaded.parameter(main, spec::UNLISTED), None, "loaded");
+    let mut a = activate(loaded, BLOCK);
+    assert_eq!(
+        a.controller_mut()
+            .set_parameter(main, spec::UNLISTED, Normalized::of(0.25)),
+        refused,
+        "active"
+    );
+    assert_eq!(
+        a.controller().parameter(main, spec::UNLISTED),
         None,
         "active"
     );

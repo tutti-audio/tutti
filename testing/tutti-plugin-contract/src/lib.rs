@@ -60,6 +60,7 @@ macro_rules! contract {
             parameter_conversion_is_the_formats_own,
             parameter_round_trip,
             unlisted_parameter_is_none,
+            undeclared_parameter_write_is_refused,
             active_write_applied,
             automation_point_offset,
             automation_segment_and_step,

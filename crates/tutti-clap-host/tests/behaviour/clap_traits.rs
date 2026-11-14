@@ -356,7 +356,9 @@ fn a_controller_write_is_a_param_value_event_at_the_head_of_the_next_block() {
     let id = ParamId::new(cutoff.id);
 
     render(&mut processor, SampleFormat::Float32).expect("block");
-    controller.set_parameter(main_thread(), id, Normalized::of(0.25));
+    controller
+        .set_parameter(main_thread(), id, Normalized::of(0.25))
+        .expect("a declared, writable parameter");
     let before = process_capture();
     assert!(
         !before.events[..before.event_count as usize]
@@ -389,14 +391,18 @@ fn a_state_load_makes_queued_writes_stale() {
     let id = ParamId::new(cutoff.id);
 
     render(&mut processor, SampleFormat::Float32).expect("block");
-    controller.set_parameter(main_thread(), id, Normalized::of(0.25));
+    controller
+        .set_parameter(main_thread(), id, Normalized::of(0.25))
+        .expect("a declared, writable parameter");
     let saved = controller
         .save_state(main_thread(), tutti_plugin_types::StateUse::Project)
         .expect("saves");
     controller
         .load_state(main_thread(), &saved, tutti_plugin_types::StateUse::Project)
         .expect("restores");
-    controller.set_parameter(main_thread(), id, Normalized::of(0.75));
+    controller
+        .set_parameter(main_thread(), id, Normalized::of(0.75))
+        .expect("a declared, writable parameter");
 
     render(&mut processor, SampleFormat::Float32).expect("block");
     let cap = process_capture();
@@ -424,11 +430,13 @@ fn a_full_ring_keeps_the_latest_value_and_retries_on_flush() {
     let id = ParamId::new(cutoff.id);
 
     for step in 0..1000 {
-        controller.set_parameter(
-            main_thread(),
-            id,
-            Normalized::clamped(f64::from(step) / 1000.0),
-        );
+        controller
+            .set_parameter(
+                main_thread(),
+                id,
+                Normalized::clamped(f64::from(step) / 1000.0),
+            )
+            .expect("a declared, writable parameter");
     }
     assert!(controller.refused_edits() > 0, "the ring filled");
 
@@ -459,11 +467,13 @@ fn draining_edits_does_not_allocate() {
     let id = ParamId::new(probe_params()[0].id);
     render(&mut processor, SampleFormat::Float32).expect("warm up");
     for step in 0..200 {
-        controller.set_parameter(
-            main_thread(),
-            id,
-            Normalized::clamped(f64::from(step) / 200.0),
-        );
+        controller
+            .set_parameter(
+                main_thread(),
+                id,
+                Normalized::clamped(f64::from(step) / 200.0),
+            )
+            .expect("a declared, writable parameter");
     }
     assert_no_alloc(|| {
         render(&mut processor, SampleFormat::Float32).expect("block");
@@ -525,11 +535,13 @@ fn the_controller_serves_reads_while_the_processor_renders() {
         controller
             .save_state(main_thread(), tutti_plugin_types::StateUse::Project)
             .expect("state saves beside process");
-        controller.set_parameter(
-            main_thread(),
-            id,
-            Normalized::clamped(f64::from(step % 10) / 10.0),
-        );
+        controller
+            .set_parameter(
+                main_thread(),
+                id,
+                Normalized::clamped(f64::from(step % 10) / 10.0),
+            )
+            .expect("a declared, writable parameter");
         controller.flush_edits(main_thread());
         std::thread::yield_now();
     }
@@ -597,7 +609,9 @@ fn queued_edits_survive_a_rejoin() {
         .load()
         .activate(main_thread(), prepare())
         .expect("activates");
-    controller.set_parameter(main_thread(), id, Normalized::of(0.25));
+    controller
+        .set_parameter(main_thread(), id, Normalized::of(0.25))
+        .expect("a declared, writable parameter");
     assert_eq!(peek_param(cutoff.id), Some(cutoff.default), "queued only");
     let loaded = ClapLoaded::deactivate(main_thread(), processor, controller).expect("a pair");
     assert_eq!(peek_param(cutoff.id), Some(350.0), "100 + 0.25 * 1000");
@@ -607,11 +621,13 @@ fn queued_edits_survive_a_rejoin() {
         .activate(main_thread(), prepare())
         .expect("activates");
     for step in 0..1000 {
-        controller.set_parameter(
-            main_thread(),
-            id,
-            Normalized::clamped(f64::from(step) / 1000.0),
-        );
+        controller
+            .set_parameter(
+                main_thread(),
+                id,
+                Normalized::clamped(f64::from(step) / 1000.0),
+            )
+            .expect("a declared, writable parameter");
     }
     let _loaded = ClapLoaded::deactivate(main_thread(), processor, controller).expect("a pair");
     let wanted = cutoff.min + 0.999 * (cutoff.max - cutoff.min);

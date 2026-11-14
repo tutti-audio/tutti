@@ -305,7 +305,9 @@ fn a_controller_write_is_direct_and_automation_lands_at_the_block_head() {
     let probe = Probe::acquire();
     let (mut processor, mut controller) = probe.activate();
     let id = ParamId::new(1);
-    controller.set_parameter(main_thread(), id, Normalized::of(0.5));
+    controller
+        .set_parameter(main_thread(), id, Normalized::of(0.5))
+        .expect("a declared, writable parameter");
     assert_eq!(
         Control::parameter(&controller, main_thread(), id),
         Some(Normalized::of(0.5))
@@ -476,11 +478,13 @@ fn the_controller_serves_the_surface_while_the_processor_renders() {
             controller
                 .load_state(main_thread(), &saved, tutti_plugin_types::StateUse::Project)
                 .expect("loads");
-            controller.set_parameter(
-                main_thread(),
-                ParamId::new(0),
-                Normalized::clamped(f64::from(round) / 40.0),
-            );
+            controller
+                .set_parameter(
+                    main_thread(),
+                    ParamId::new(0),
+                    Normalized::clamped(f64::from(round) / 40.0),
+                )
+                .expect("a declared, writable parameter");
             let _ = controller.parameter(main_thread(), ParamId::new(0));
             let _ = controller.wiring(main_thread());
             let _ = controller.presets(main_thread());

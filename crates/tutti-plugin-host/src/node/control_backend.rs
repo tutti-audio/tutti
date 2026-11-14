@@ -155,7 +155,9 @@ where
     fn set_parameter_value(&self, id: ParamId, value: Normalized) {
         self.post(move |main, instance| {
             if let Some(control) = instance.control() {
-                control.set_parameter(main, id, value);
+                // Fire-and-forget: the session names a write the plugin
+                // refuses (undeclared, read-only) at its own call, before this.
+                let _ = control.set_parameter(main, id, value);
             }
         });
     }

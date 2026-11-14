@@ -169,8 +169,17 @@ macro_rules! served_control {
                 AnyThread::parameter_value(self, id)
             }
 
-            fn set_parameter(&mut self, _main: MainThreadMarker, id: ParamId, value: Normalized) {
+            fn set_parameter(
+                &mut self,
+                main: MainThreadMarker,
+                id: ParamId,
+                value: Normalized,
+            ) -> Result<(), tutti_plugin_types::ParamWriteError> {
+                // The policy answers here, at the call; the write itself is
+                // fire-and-forget across the wire.
+                self.parameter_writable(main, id)?;
                 AnyThread::set_parameter_value(self, id, value);
+                Ok(())
             }
 
             fn parameter_plain(

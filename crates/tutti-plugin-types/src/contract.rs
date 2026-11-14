@@ -101,7 +101,8 @@ pub mod cases {
     }
 
     /// Law 2: any plain value, finite or not, maps onto `0..=1`; NaN is `0.0`;
-    /// a value past an end of the map reads as that end.
+    /// a value past an end of the map reads as that end, an infinity as the end
+    /// it lies past.
     pub fn bounded<M: ParamMapping + ?Sized>(map: &M) -> Result<(), String> {
         let (lo, hi) = (map.plain(position(0.0)), map.plain(position(1.0)));
         let (low, high) = (lo.min(hi), lo.max(hi));
@@ -125,7 +126,12 @@ pub mod cases {
             return Err(format!("normalized(NaN) is {nan}, not 0.0"));
         }
         if low != high {
-            for (past, end) in [(low - 1.0, low), (high + 1.0, high)] {
+            for (past, end) in [
+                (low - 1.0, low),
+                (high + 1.0, high),
+                (f64::NEG_INFINITY, low),
+                (f64::INFINITY, high),
+            ] {
                 let (got, want) = (map.normalized(past), map.normalized(end));
                 if got.get() != want.get() {
                     return Err(format!(

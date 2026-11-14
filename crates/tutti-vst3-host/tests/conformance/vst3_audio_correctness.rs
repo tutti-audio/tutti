@@ -1451,7 +1451,11 @@ fn an_unlisted_parameter_id_is_reported_not_written() {
         tutti_plugin_types::StateUse::Project,
     )
     .expect("the probe saves");
-    Control::set_parameter(&mut loaded, main_thread(), unlisted, Normalized::of(0.25));
+    assert_eq!(
+        Control::set_parameter(&mut loaded, main_thread(), unlisted, Normalized::of(0.25)),
+        Err(tutti_plugin_types::ParamWriteError::Undeclared(unlisted)),
+        "the write fails at the call, naming the id"
+    );
     assert_eq!(Control::parameter(&loaded, main_thread(), unlisted), None);
     let after: Vec<_> = listed
         .iter()
@@ -1500,7 +1504,8 @@ mod loaded_writes {
             main_thread(),
             ParamId::new(id),
             Normalized::clamped(value),
-        );
+        )
+        .expect("a declared, writable parameter");
     }
 
     fn read(plugin: &impl Control, id: u32) -> Option<f64> {
@@ -1605,7 +1610,8 @@ mod loaded_writes {
             main_thread(),
             ParamId::new(PARAM_RAMP),
             Normalized::of(0.5),
-        );
+        )
+        .expect("a declared, writable parameter");
         for _ in 0..3 {
             render(&mut inst, 64, &[], None, |_, _, _| 0.0);
         }
@@ -1692,7 +1698,8 @@ mod loaded_writes {
             main_thread(),
             ParamId::new(id),
             Normalized::clamped(value),
-        );
+        )
+        .expect("a declared, writable parameter");
     }
 
     /// A version 2 blob loaded into an active plugin reaches its next block: the

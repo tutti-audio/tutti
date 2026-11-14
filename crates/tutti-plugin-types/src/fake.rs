@@ -540,11 +540,19 @@ macro_rules! fake_control {
                 Normalized::new(plain)
             }
 
-            fn set_parameter(&mut self, _main: MainThreadMarker, id: ParamId, value: Normalized) {
+            /// The double takes every write: a parameter it was never given is
+            /// added, as a test arranges its values by writing them.
+            fn set_parameter(
+                &mut self,
+                _main: MainThreadMarker,
+                id: ParamId,
+                value: Normalized,
+            ) -> Result<(), $crate::ParamWriteError> {
                 self.shared.log.push(Call::SetParameter(id));
                 set_value(&mut self.values, id, value);
                 let set: fn(&mut Self, ParamId, Normalized) = $set;
                 set(self, id, value);
+                Ok(())
             }
 
             fn save_state(

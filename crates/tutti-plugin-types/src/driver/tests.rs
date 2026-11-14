@@ -342,7 +342,8 @@ fn a_parameter_set_reaches_the_processor_at_the_next_block() {
     rig.lifecycle
         .control()
         .unwrap()
-        .set_parameter(main(), a, Normalized::of(0.5));
+        .set_parameter(main(), a, Normalized::of(0.5))
+        .expect("a declared, writable parameter");
     assert_eq!(rig.plugin.calls(), [Call::SetParameter(a)]);
     rig.plugin.clear_calls();
 
@@ -359,11 +360,13 @@ fn a_parameter_set_reaches_the_processor_at_the_next_block() {
     rig.lifecycle
         .control()
         .expect("the plugin is there")
-        .set_parameter(main(), a, Normalized::of(0.25));
+        .set_parameter(main(), a, Normalized::of(0.25))
+        .expect("a declared, writable parameter");
     rig.lifecycle
         .control()
         .expect("the plugin is there")
-        .set_parameter(main(), b, Normalized::of(0.75));
+        .set_parameter(main(), b, Normalized::of(0.75))
+        .expect("a declared, writable parameter");
     rig.render(64).unwrap();
     rig.render(64).unwrap();
     assert_eq!(
@@ -586,16 +589,19 @@ fn a_refused_edit_is_retried_on_the_next_tick() {
     rig.lifecycle
         .control()
         .expect("the plugin is there")
-        .set_parameter(main(), a, Normalized::of(0.1));
+        .set_parameter(main(), a, Normalized::of(0.1))
+        .expect("a declared, writable parameter");
     // The ring holds one: these are refused, `b` twice.
     rig.lifecycle
         .control()
         .expect("the plugin is there")
-        .set_parameter(main(), b, Normalized::of(0.2));
+        .set_parameter(main(), b, Normalized::of(0.2))
+        .expect("a declared, writable parameter");
     rig.lifecycle
         .control()
         .expect("the plugin is there")
-        .set_parameter(main(), b, Normalized::of(0.9));
+        .set_parameter(main(), b, Normalized::of(0.9))
+        .expect("a declared, writable parameter");
     rig.plugin.clear_calls();
     rig.render(64).unwrap();
     assert_eq!(

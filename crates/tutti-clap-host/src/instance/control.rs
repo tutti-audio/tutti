@@ -10,10 +10,10 @@ use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, BusRole, ChannelLayout, ClapFeature, ContentScale, Control, Delivered,
     EditorPresence, EditorWindow, FdId, Features, Layout, LoadedPlugin, Normalized, ParamEdit,
-    ParamFlags, ParamId, ParamMapping, ParameterInfo, PluginBus, PluginBuses, PluginClass,
-    PluginDescriptor, PluginError, PluginResult, PluginTail, PresetId, ProcessWake, RenderMode,
-    RenderModeSupport, Request, RescanScope, Samples, StateUse, TimerId, TrackInfo, WindowHandle,
-    Wraps,
+    ParamFlags, ParamId, ParamMapping, ParamWriteError, ParameterInfo, PluginBus, PluginBuses,
+    PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, PresetId, ProcessWake,
+    RenderMode, RenderModeSupport, Request, RescanScope, Samples, StateUse, TimerId, TrackInfo,
+    WindowHandle, Wraps,
 };
 
 use super::ClapLoaded;
@@ -85,27 +85,20 @@ pub fn descriptor_of(info: &PluginInfo, editor: EditorPresence) -> PluginDescrip
     }
 }
 
-/// `plain` against the parameter's bounds, `0..=1`. A parameter the plugin
-/// declares no range for is passed through rather than scaled against invented
-/// bounds, the same choice `add_param_changes` makes for an id missing from its
-/// range table.
-fn normalize(bounds: Option<ParamBounds>, plain: f64) -> f64 {
-    match bounds {
-        Some(bounds) => bounds.normalized(plain).get(),
-        None => plain,
-    }
-}
-
-/// The inverse of [`normalize`]: the plain value, in `f64`, with a stepped
-/// parameter on its integer step.
-pub(super) fn denormalize(bounds: Option<ParamBounds>, value: Normalized) -> f64 {
-    match bounds {
-        Some(bounds) => bounds.plain(value),
-        None => value.get(),
-    }
-}
-
 impl ClapLoaded {
+    /// The declared bounds of `id` when the host may write it: a read-only
+    /// parameter "can't be changed by the host" (`params.h`), and an id the
+    /// plugin does not declare has no range to write against.
+    fn writable_bounds(
+        &self,
+        main: MainThreadMarker,
+        id: ParamId,
+    ) -> Result<ParamBounds, ParamWriteError> {
+        let bounds = self.parameter_bounds(main, id.get());
+        ParamWriteError::check(id, bounds.map(|b| Some(b.read_only)))?;
+        bounds.ok_or(ParamWriteError::Undeclared(id))
+    }
+
     /// The descriptor for this plugin as loaded: its factory info, with whether
     /// it has an editor measured from the plugin itself.
     pub(crate) fn measured_descriptor(&self, main: MainThreadMarker) -> PluginDescriptor {
@@ -333,22 +326,29 @@ impl Control for ClapLoaded {
     /// answers in its plain range and the declared bounds map it back.
     fn parameter(&self, main: MainThreadMarker, id: ParamId) -> Option<Normalized> {
         let plain = self.plain_value(main, id.get())?;
-        Some(Normalized::clamped(normalize(
-            self.parameter_bounds(main, id.get()),
-            plain,
-        )))
+        Some(self.parameter_bounds(main, id.get())?.normalized(plain))
     }
 
     /// Applied now, as a flushed `PARAM_VALUE` event. CLAP events carry the
     /// plain value, so the declared range denormalizes it.
-    fn set_parameter(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
-        let bounds = self.parameter_bounds(main, id.get());
-        // A read-only parameter "can't be changed by the host" (`params.h`).
-        if bounds.is_some_and(|b| b.read_only) {
-            return;
-        }
-        let plain = denormalize(bounds, value);
-        self.set_plain_value(main, id.get(), plain);
+    fn set_parameter(
+        &mut self,
+        main: MainThreadMarker,
+        id: ParamId,
+        value: Normalized,
+    ) -> Result<(), ParamWriteError> {
+        let bounds = self.writable_bounds(main, id)?;
+        self.set_plain_value(main, id.get(), bounds.plain(value));
+        Ok(())
+    }
+
+    /// From the declared bounds, which carry the read-only flag.
+    fn parameter_writable(
+        &self,
+        main: MainThreadMarker,
+        id: ParamId,
+    ) -> Result<(), ParamWriteError> {
+        self.writable_bounds(main, id).map(|_| ())
     }
 
     /// Plain from [`ParamBounds`]'s [`ParamMapping`], which CLAP's own range
@@ -381,7 +381,7 @@ impl Control for ClapLoaded {
         id: ParamId,
         value: Normalized,
     ) -> Option<String> {
-        let plain = denormalize(self.parameter_bounds(main, id.get()), value);
+        let plain = self.parameter_bounds(main, id.get())?.plain(value);
         self.value_to_text(main, id.get(), plain)
     }
 
@@ -394,10 +394,7 @@ impl Control for ClapLoaded {
         text: &str,
     ) -> Option<Normalized> {
         let plain = self.text_to_value(main, id.get(), text)?;
-        Some(Normalized::clamped(normalize(
-            self.parameter_bounds(main, id.get()),
-            plain,
-        )))
+        Some(self.parameter_bounds(main, id.get())?.normalized(plain))
     }
 
     /// `state-context` for the context `state_use` names when the plugin has

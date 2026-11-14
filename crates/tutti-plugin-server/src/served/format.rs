@@ -192,10 +192,12 @@ pub(in crate::served) mod clap {
                 };
                 if flush_out_of_band(requires, processing) {
                     if let Lifecycle::Active { controller, .. } = lifecycle {
-                        Control::set_parameter(controller.loaded_mut(), main, id, value);
+                        // A refused write has no reply on the wire: the
+                        // client's session named it at its own call.
+                        let _ = Control::set_parameter(controller.loaded_mut(), main, id, value);
                     }
                 } else if let Some(control) = lifecycle.control() {
-                    control.set_parameter(main, id, value);
+                    let _ = control.set_parameter(main, id, value);
                 }
             }
         }
