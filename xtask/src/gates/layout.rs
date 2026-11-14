@@ -109,6 +109,8 @@ pub(super) const LAYERS: &[&[&str]] = &[
 const ONLY: &[(&str, &[&str])] = &[
     ("tutti-midi-protocol", &["tutti-ump", "tutti-types"]),
     ("tutti-midi-device", &["tutti-ump"]),
+    // The unit vocabulary a `Gauge<U>` reads through (`Reading` for a `Unit`).
+    ("tutti-rt", &["tutti-types"]),
     ("tutti-midi-network", &["tutti-ump", "tutti-midi-device"]),
     ("tutti-metering", &["tutti-types"]),
     ("tutti-codec", &["tutti-types", "tutti-buffers"]),
@@ -199,7 +201,7 @@ const ONLY: &[(&str, &[&str])] = &[
 ];
 
 /// Depend on no workspace crate, of any kind (a dev-dependency too).
-const ALONE: &[&str] = &["tutti-rt", "tutti-ump"];
+const ALONE: &[&str] = &["tutti-ump"];
 
 const CODEC_LIBS: &[&str] = &["symphonia", "flacenc", "aifc", "vorbis_rs"];
 const ENCODERS: &[&str] = &["flacenc", "aifc", "vorbis_rs", "md-5"];
@@ -828,6 +830,24 @@ mod tests {
         let r = run(&v);
         assert!(r.findings.iter().any(|l| l.contains(
             "tutti-metering may depend on [\"tutti-types\"] only; it depends on {\"tutti-ump\"}"
+        )));
+    }
+
+    #[test]
+    fn the_runtime_primitives_name_the_units_and_nothing_else() {
+        let r = with((
+            "crates/tutti-rt",
+            "tutti-rt",
+            "[dependencies]\ntutti-types = { path = \"x\" }\n",
+        ));
+        assert!(r.passed(), "{:?}", r.findings);
+        let r = with((
+            "crates/tutti-rt",
+            "tutti-rt",
+            "[dependencies]\ntutti-types = { path = \"x\" }\ntutti-ump = { path = \"x\" }\n",
+        ));
+        assert!(r.findings.iter().any(|l| l.contains(
+            "tutti-rt may depend on [\"tutti-types\"] only; it depends on {\"tutti-ump\"}"
         )));
     }
 

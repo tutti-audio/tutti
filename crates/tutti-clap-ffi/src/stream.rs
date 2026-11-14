@@ -5,10 +5,11 @@
 //! for the span of one extension call ([`Plugin::state_save`](crate::Plugin)
 //! and friends build it on their own stack).
 
-use crate::guard::{ctx_mut, guard};
+use crate::guard::ctx_mut;
 use clap_sys::stream::{clap_istream, clap_ostream};
 use std::ffi::c_void;
 use std::ptr;
+use tutti_plugin_types::ffi_guard;
 
 /// The most a plugin may write to one [`OutputStream`]: the bound on what a
 /// plugin that never stops writing takes from the host. 1 GiB holds any
@@ -64,7 +65,7 @@ impl OutputStream {
 }
 
 extern "C" fn ostream_write(stream: *const clap_ostream, buffer: *const c_void, size: u64) -> i64 {
-    guard(-1, || {
+    ffi_guard(-1, || {
         if stream.is_null() || (buffer.is_null() && size != 0) {
             return -1;
         }
@@ -153,7 +154,7 @@ impl<'a> InputStream<'a> {
 }
 
 extern "C" fn istream_read(stream: *const clap_istream, buffer: *mut c_void, size: u64) -> i64 {
-    guard(-1, || {
+    ffi_guard(-1, || {
         if stream.is_null() || (buffer.is_null() && size != 0) {
             return -1;
         }

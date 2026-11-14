@@ -810,6 +810,15 @@ mod tests {
     }
 
     fn apple_effect(sub_type: [u8; 4], name: &str) -> Unit {
+        apple_effect_in(sub_type, name, &tutti_fixtures::detached_work())
+    }
+
+    /// [`apple_effect`], whose off-thread drop is handed to `work`.
+    fn apple_effect_in(
+        sub_type: [u8; 4],
+        name: &str,
+        work: &tutti_plugin_types::MainWorkHandle,
+    ) -> Unit {
         let desc = AudioComponentDescription {
             componentType: K_AUDIO_UNIT_TYPE_EFFECT,
             componentSubType: u32::from_be_bytes(sub_type),
@@ -818,9 +827,28 @@ mod tests {
             componentFlagsMask: 0,
         };
         let comp = find_component(&desc).unwrap_or_else(|| panic!("{name} should be present"));
-        let unit = Unit::new(comp).expect("instantiate");
+        let unit = Unit::new(comp, work).expect("instantiate");
         unit.initialize().expect("initialize");
         unit
+    }
+
+    /// **A unit dropped off the thread that made it is disposed by the owner's
+    /// collector, not on the dropping thread**: the drop is counted, and the
+    /// collector's next run disposes it once.
+    #[test]
+    fn a_unit_dropped_off_its_thread_is_disposed_at_the_collectors_next_run() {
+        let main = tutti_fixtures::main_thread();
+        let (work, handle) = tutti_plugin_types::MainWork::new();
+        let unit = apple_effect_in(*b"dely", "AUDelay", &handle);
+        let before = tutti_plugin_types::MainWork::deferred_drops();
+        std::thread::spawn(move || drop(unit)).join().unwrap();
+        assert_eq!(
+            tutti_plugin_types::MainWork::deferred_drops(),
+            before + 1,
+            "the off-thread drop is counted"
+        );
+        assert_eq!(work.run(main), 1, "the disposal ran at the tick");
+        assert_eq!(work.run(main), 0, "once");
     }
 
     /// `kAudioUnitParameterUnit_Indexed` (1) decodes to its own variant, not
