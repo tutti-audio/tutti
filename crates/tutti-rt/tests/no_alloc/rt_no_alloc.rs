@@ -377,3 +377,33 @@ fn a_handoff_trades_without_allocating() {
         }
     });
 }
+
+/// A `Ring` push and pop on every overflow policy (full, evicting, empty and
+/// disconnected answers included), `drain`, `pop_slice` and the loss reads,
+/// neither allocate nor free: the whole of what an audio-thread end does with
+/// values that need no drop.
+#[test]
+fn ring_is_allocation_free() {
+    use tutti_rt::{Overflow, Ring};
+
+    for overflow in [Overflow::DropNewest, Overflow::Evict, Overflow::Refuse] {
+        let (mut writer, mut reader) = Ring::<[u32; 3]>::pair(4, overflow);
+        let mut out = [[0u32; 3]; 2];
+        assert_no_alloc::assert_no_alloc(|| {
+            for round in 0..1_000u32 {
+                for n in 0..6 {
+                    let _ = writer.push([round, n, 0]);
+                }
+                assert!(writer.vacant() <= 4);
+                core::hint::black_box(reader.pop_slice(&mut out));
+                for edit in reader.drain() {
+                    core::hint::black_box(edit);
+                }
+                assert!(reader.pop().is_none());
+                core::hint::black_box((writer.take_lost(), reader.lost()));
+            }
+        });
+        drop(reader);
+        assert_no_alloc::assert_no_alloc(|| assert!(writer.push([0; 3]).is_err()));
+    }
+}
