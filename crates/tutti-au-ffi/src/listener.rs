@@ -13,9 +13,9 @@ use coreaudio_sys::{
 };
 
 use crate::error::{Error, Result, check};
-use crate::guard::guard;
 use crate::property::{Element, Scope};
 use crate::unit::{Inner, Unit};
+use tutti_plugin_types::ffi_guard;
 
 // ---------------------------------------------------------------- raw FFI
 //
@@ -364,11 +364,11 @@ impl AuParameterListener {
         F: Fn(AuEvent) + Send + Sync + 'static,
     {
         let callback = Arc::new(callback);
-        // The block AudioToolbox calls. Everything runs inside `catch_unwind`:
+        // The block AudioToolbox calls. Everything runs under `ffi_guard`:
         // this is invoked through a C function pointer from libdispatch, and a
         // Rust panic crossing that frame is undefined behaviour.
         //
-        // `AssertUnwindSafe` is sound here for the same reason as in the render
+        // Asserting unwind safety is sound here for the same reason as in the render
         // callback: the only state reachable is the host's `Fn` (shared, behind
         // an `Arc`) and a `*const AudioUnitEvent` read and decoded before
         // anything else happens. A panic mid-callback drops one event; it
@@ -380,7 +380,7 @@ impl AuParameterListener {
                 // Everything runs under the guard: this is invoked through a C
                 // function pointer from libdispatch, and a Rust panic crossing
                 // that frame is undefined behaviour. A panic drops one event.
-                guard("an AU event listener callback", (), || {
+                ffi_guard((), || {
                     let event = event.cast::<AudioUnitEvent>();
                     // SAFETY: AudioToolbox passes a valid `const AudioUnitEvent *`
                     // for the duration of the call; the block signature spells it

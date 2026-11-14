@@ -1,42 +1,11 @@
-//! The panic guard every `extern "C"` host callback runs its body in.
-//!
-//! A panic unwinding out of an `extern "C"` function aborts the process, which
-//! takes the host (in-process) or the plugin server with it. A callback
-//! answers "not handled" instead.
+//! What the `extern "C"` host callbacks share: the abort guard of the thread
+//! pool's `request_exec`, the plugin's C strings, and the `ctx` pointers. The
+//! panic guard every other callback runs in is
+//! [`ffi_guard`](tutti_plugin_types::ffi_guard).
 
 use std::ffi::{CStr, c_char, c_void};
 use std::io::Write;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicBool, Ordering};
-
-static REPORTED: AtomicBool = AtomicBool::new(false);
-
-/// Run `f`; if it panics, return `fallback` (the callback's "not handled"
-/// value) and note it on stderr once per process.
-///
-/// No-panic path: `catch_unwind` does not allocate, so this is safe on the
-/// audio thread. Only the guard's own line is once-only: the default panic
-/// hook still prints, allocates and takes locks on every panic. Under
-/// `panic = "abort"` the guards do nothing and a panic aborts.
-///
-/// The report cannot panic (`writeln!` to a `stderr()` handle returns an
-/// error instead), and the panic payload is forgotten rather than dropped,
-/// since a payload's `Drop` could itself panic outside the `catch_unwind`.
-pub(crate) fn guard<R>(fallback: R, f: impl FnOnce() -> R) -> R {
-    match catch_unwind(AssertUnwindSafe(f)) {
-        Ok(r) => r,
-        Err(payload) => {
-            std::mem::forget(payload);
-            if !REPORTED.swap(true, Ordering::Relaxed) {
-                let _ = writeln!(
-                    std::io::stderr(),
-                    "[tutti-clap-ffi] a host callback panicked; answered 'not handled'"
-                );
-            }
-            fallback
-        }
-    }
-}
 
 /// Run `f`; if it panics, abort the process.
 ///
@@ -58,6 +27,7 @@ pub(crate) fn or_abort<R>(f: impl FnOnce() -> R) -> R {
         }
     }
 }
+
 /// A nul-terminated string a plugin passed, copied lossily; empty for null.
 ///
 /// # Safety
@@ -91,22 +61,4 @@ pub(crate) unsafe fn ctx_ref<'a, T>(ctx: *mut c_void) -> &'a T {
 pub(crate) unsafe fn ctx_mut<'a, T>(ctx: *mut c_void) -> &'a mut T {
     // SAFETY: the contract.
     unsafe { &mut *ctx.cast::<T>() }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::guard;
-
-    #[test]
-    fn a_panicking_body_returns_the_fallback() {
-        let r = guard(7_u32, || -> u32 { panic!("callback body") });
-        assert_eq!(r, 7);
-        let p = guard(std::ptr::null::<u8>(), || -> *const u8 { panic!("again") });
-        assert!(p.is_null());
-    }
-
-    #[test]
-    fn a_returning_body_keeps_its_value() {
-        assert_eq!(guard(0_u32, || 41 + 1), 42);
-    }
 }

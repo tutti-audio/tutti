@@ -3173,6 +3173,7 @@ dependencies = [
  "loom",
  "thiserror 2.0.21",
  "thread-priority",
+ "tutti-types",
  "windows",
 ]
 
@@ -3482,6 +3483,7 @@ dependencies = [
  "crossbeam-queue",
  "dpi",
  "libloading 0.9.1",
+ "log",
  "parking_lot",
  "tempfile",
  "thiserror 2.0.21",

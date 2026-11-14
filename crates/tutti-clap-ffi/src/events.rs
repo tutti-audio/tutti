@@ -28,7 +28,8 @@ use clap_sys::events::{
     clap_output_events,
 };
 
-use crate::guard::{ctx_ref, guard};
+use crate::guard::ctx_ref;
+use tutti_plugin_types::ffi_guard;
 
 /// A header no plugin acts on (a space of no plugin's), handed in place of a
 /// host event that failed validation, so `get` never answers null.
@@ -289,7 +290,7 @@ pub unsafe fn output_raw_for_test(sink: *mut dyn EventSink) -> *const clap_outpu
 }
 
 extern "C" fn input_events_size(list: *const clap_input_events) -> u32 {
-    guard(0, || {
+    ffi_guard(0, || {
         if list.is_null() {
             return 0;
         }
@@ -305,7 +306,7 @@ extern "C" fn input_events_get(
     list: *const clap_input_events,
     index: u32,
 ) -> *const clap_event_header {
-    guard(ptr::null(), || {
+    ffi_guard(ptr::null(), || {
         if list.is_null() {
             return ptr::null();
         }
@@ -354,7 +355,7 @@ extern "C" fn output_events_try_push(
     list: *const clap_output_events,
     event: *const clap_event_header,
 ) -> bool {
-    guard(false, || {
+    ffi_guard(false, || {
         if event.is_null() || list.is_null() {
             return false;
         }

@@ -271,12 +271,17 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         if std::mem::take(&mut self.processing) {
             // A refusal (the plugin is gone or deactivated) leaves nothing to stop.
             let _ = self.audio_side.set_processing(false);
-            // The plugin forgets its input across the stop: a SysEx open in the
-            // input list must not complete on the far side of it.
-            self.audio.input.events.reset_sysex();
-            // ... and its notes and MIDI 1.0 selections.
-            self.audio.input.stager.reset();
         }
+        self.reset_midi_state();
+    }
+
+    /// Drops the MIDI state the plugin forgets across a stop or a reset: a SysEx
+    /// open in the input list must not complete on the far side of it, and the
+    /// stager's notes and MIDI 1.0 selections go with it. [`stop`](Self::stop) runs it
+    /// whether or not processing was on, since the state is the host's.
+    fn reset_midi_state(&mut self) {
+        self.audio.input.events.reset_sysex();
+        self.audio.input.stager.reset();
     }
 
     /// Takes the parameter writes the Controller queued that no block has

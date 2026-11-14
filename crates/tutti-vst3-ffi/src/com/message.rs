@@ -1,9 +1,9 @@
 //! IMessage COM implementation — paired with IConnectionPoint for plugin
 //! component ↔ controller messaging.
 
-use crate::guard::guard;
 use std::ffi::CStr;
 use std::sync::Arc;
+use tutti_plugin_types::ffi_guard;
 
 use parking_lot::Mutex;
 use vst3::Steinberg::{
@@ -46,7 +46,7 @@ impl Message {
 
 impl IMessageTrait for Message {
     unsafe fn getMessageID(&self) -> FIDString {
-        guard(std::ptr::null(), || {
+        ffi_guard(std::ptr::null(), || {
             // A bare pointer: `FIDString` carries no lifetime. The id is kept
             // in `lent` once handed out, so it stays valid until the next
             // `getMessageID` or the message's drop, whatever `setMessageID`
@@ -62,7 +62,7 @@ impl IMessageTrait for Message {
     }
 
     unsafe fn setMessageID(&self, id: FIDString) {
-        guard((), || {
+        ffi_guard((), || {
             let mut ids = self.message_id.lock();
             ids.current = if id.is_null() {
                 None
@@ -75,7 +75,7 @@ impl IMessageTrait for Message {
     }
 
     unsafe fn getAttributes(&self) -> *mut IAttributeList {
-        guard(std::ptr::null_mut(), || {
+        ffi_guard(std::ptr::null_mut(), || {
             // Borrowed pointer (plugin does not release).
             self.attributes
                 .as_com_ref::<IAttributeList>()

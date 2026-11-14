@@ -55,8 +55,9 @@ use clap_sys::version::CLAP_VERSION;
 use tutti_plugin_types::{TrackInfo, TrackKind, TransportRequest};
 use tutti_types::{Beat, BeatDuration};
 
-use crate::guard::{guard, lossy, or_abort};
+use crate::guard::{lossy, or_abort};
 use crate::types::{AudioPortsRescanFlags, LogSeverity, ParamsRescanFlags};
+use tutti_plugin_types::ffi_guard;
 
 /// What a plugin's calls into the host reach.
 ///
@@ -290,7 +291,7 @@ fn guarded<R: Copy>(
     fallback: R,
     f: impl FnOnce(&dyn HostCallbacks) -> R,
 ) -> R {
-    guard(fallback, || {
+    ffi_guard(fallback, || {
         // SAFETY: a CLAP host callback: the plugin passes back the vtable it
         // was handed, which `Host::new` built and the plugin outlives.
         match unsafe { callbacks(host) } {
@@ -348,7 +349,7 @@ extern "C" fn host_get_extension(
     _host: *const clap_host,
     extension_id: *const c_char,
 ) -> *const c_void {
-    guard(std::ptr::null(), || {
+    ffi_guard(std::ptr::null(), || {
         if extension_id.is_null() {
             return std::ptr::null();
         }
@@ -527,7 +528,7 @@ extern "C" fn host_audio_ports_is_rescan_flag_supported(
     _host: *const clap_host,
     flag: u32,
 ) -> bool {
-    guard(false, || {
+    ffi_guard(false, || {
         const KNOWN: u32 = AudioPortsRescanFlags::all().bits();
         // A plugin asks about one flag at a time, but a caller passing several
         // must not get a `true` that only covers some of them.
@@ -773,7 +774,7 @@ extern "C" fn host_event_registry_query(
     _space_name: *const c_char,
     space_id: *mut u16,
 ) -> bool {
-    guard(false, || {
+    ffi_guard(false, || {
         if !space_id.is_null() {
             // SAFETY: a writable `u16` valid for the call (`event-registry.h`);
             // checked non-null.
