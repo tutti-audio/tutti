@@ -636,14 +636,14 @@ impl<F: Loaded> InProcClient<F> {
         if inner.render_mode() != mode {
             // The node is out of any executor (`Node::prepare`'s contract), so
             // its realtime end is here: the exchange finishes in this call.
-            let Some(main) = MainThread::current() else {
+            let Some(main) = MainThreadMarker::new() else {
                 // Not recorded, so the next prepare on the main thread tells it.
                 tracing::error!(
                     "a plugin was prepared off the main thread in {mode:?}; it keeps its render mode"
                 );
                 return;
             };
-            inner.set_render_mode(&main, mode, Some(&mut self.rt));
+            inner.set_render_mode(main, mode, Some(&mut self.rt));
         }
         self.prepared_mode = mode;
     }
