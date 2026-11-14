@@ -107,8 +107,8 @@ pub use capabilities::{
     SUB_ID2_PE_CAPABILITIES_REPLY, SUB_ID2_PE_NOTIFY, SimultaneousRequests,
 };
 pub use chunk::{
-    ChunkNo, ChunkPosition, ChunkTotal, PE_MAX_CHUNK_DATA_LEN, PeChunk, PeChunkError, PeRequestId,
-    split_message,
+    ChunkNo, ChunkPosition, ChunkTotal, NotAChunkNo, NotARequestId, PE_MAX_CHUNK_DATA_LEN, PeChunk,
+    PeChunkError, PeRequestId, split_message,
 };
 pub use flow::{PE_TIMEOUT, PeAnswer, PeMessageKind, PeSignal, PeTerminator, PeTransaction};
 pub use header::{
@@ -131,17 +131,17 @@ pub use resource::{
     ActionError, CallError, CallId, CanSet, CcIndex, ChangeKind, ClusterKind, ColumnSource,
     ConfirmIcon, ConfirmType, Confirmation, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind,
     CustomResource, DefaultMapNotCc, EntryError, LinkRole, ListedTwice, MAX_LIST_ENTRIES, ModeId,
-    NotVendorName, OpaqueBody, PaginationFault, ParamPath, PeAllCtrlEntry, PeAllCtrlList,
-    PeBankProgram, PeBasicChannelRx, PeBasicChannelTx, PeChCtrlEntry, PeChCtrlList, PeChannel,
-    PeChannelEntry, PeChannelList, PeChannelMode, PeCluster, PeColumn, PeController, PeCtrl,
-    PeCtrlMapEntry, PeCtrlMapList, PeCurrentMode, PeData, PeDataError, PeDataFault, PeDeviceInfo,
-    PeExtensions, PeExternalSync, PeJsonSchema, PeLink, PeLocalOn, PeMidiMode, PeModeEntry,
-    PeModeList, PeOpaque, PeProgramEntry, PeProgramList, PeResource, PeResourceList, PeText,
-    Priority, PublishError, RequestRefused, ResIdUse, ResourceAction, ResourceDefaults,
-    ResourceEntry, ResourceEvent, ResourceFailure, ResourceGet, ResourceInitiator,
-    ResourceResponder, ResourceSet, ResourceStore, ResourceTarget, ResponderAction, ResponderEvent,
-    ResponderSettings, RoleName, SelectorAction, SetBody, SignificantBits, SimpleAction, StepCount,
-    StoreError, TypeHint, UpdateKind,
+    NotAPeChannel, NotAPriority, NotAStepCount, NotSignificantBits, NotVendorName, OpaqueBody,
+    PaginationFault, ParamPath, PeAllCtrlEntry, PeAllCtrlList, PeBankProgram, PeBasicChannelRx,
+    PeBasicChannelTx, PeChCtrlEntry, PeChCtrlList, PeChannel, PeChannelEntry, PeChannelList,
+    PeChannelMode, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList,
+    PeCurrentMode, PeData, PeDataError, PeDataFault, PeDeviceInfo, PeExtensions, PeExternalSync,
+    PeJsonSchema, PeLink, PeLocalOn, PeMidiMode, PeModeEntry, PeModeList, PeOpaque, PeProgramEntry,
+    PeProgramList, PeResource, PeResourceList, PeText, Priority, PublishError, RequestRefused,
+    ResIdUse, ResourceAction, ResourceDefaults, ResourceEntry, ResourceEvent, ResourceFailure,
+    ResourceGet, ResourceInitiator, ResourceResponder, ResourceSet, ResourceStore, ResourceTarget,
+    ResponderAction, ResponderEvent, ResponderSettings, RoleName, SelectorAction, SetBody,
+    SignificantBits, SimpleAction, StepCount, StoreError, TypeHint, UpdateKind,
 };
 pub use tree::{PE_JSON_MAX_DEPTH, PeDecimal, PeJson, PeJsonError, PeObject};
 pub use value::{PeExtra, PeExtraError};

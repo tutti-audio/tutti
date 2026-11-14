@@ -9,10 +9,10 @@
 use tutti_ump::{
     BlockFilter, BlockSelect, DeviceIdentity, Direction as BlockDirection, DiscoveryFilter,
     FirstGroup, FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, Midi1Port, Protocol,
-    Stream, StreamConfig, U7, UiHint, Ump, UmpVersion,
+    Stream, StreamConfig, U7, UiHint, Ump, UmpVersion, text_packets,
 };
 
-use crate::name::{BlockName, EndpointName, ProductInstanceId, packets};
+use crate::name::{BlockName, EndpointName, ProductInstanceId};
 
 /// How many Function Blocks an Endpoint holds (M2-104 §7.1.7: numbers `0..=31`).
 pub const MAX_FUNCTION_BLOCKS: usize = 32;
@@ -547,14 +547,14 @@ impl Endpoint {
             send(out, Stream::DeviceIdentity(identity));
         }
         if let (true, Some(name)) = (filter.endpoint_name, &self.name) {
-            packets::<14>(name.as_bytes(), |form, b| {
+            for (form, b) in text_packets::<14>(name.as_bytes()) {
                 send(out, Stream::EndpointName(form, b));
-            });
+            }
         }
         if let (true, Some(id)) = (filter.product_instance_id, &self.instance_id) {
-            packets::<14>(id.as_str().as_bytes(), |form, b| {
+            for (form, b) in text_packets::<14>(id.as_str().as_bytes()) {
                 send(out, Stream::ProductInstanceId(form, b));
-            });
+            }
         }
         if filter.stream_configuration {
             send(out, Stream::StreamConfigurationNotification(self.active));
@@ -586,7 +586,7 @@ impl Endpoint {
         if filter.name {
             for block in asked.iter().flatten() {
                 if let Some(name) = &block.name {
-                    packets::<13>(name.as_bytes(), |form, bytes| {
+                    for (form, bytes) in text_packets::<13>(name.as_bytes()) {
                         send(
                             out,
                             Stream::FunctionBlockName {
@@ -595,7 +595,7 @@ impl Endpoint {
                                 bytes,
                             },
                         );
-                    });
+                    }
                 }
             }
         }

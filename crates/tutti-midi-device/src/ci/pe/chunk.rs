@@ -3,109 +3,44 @@
 //! chunks that fit a device's Receivable Maximum SysEx Message Size.
 
 use super::header::{MESSAGE_OVERHEAD, PE_MAX_HEADER_LEN, PeHeader, PeHeaderTooLong, PeStatus};
-use super::limits::NotInRange;
 use crate::MaxSysexSize;
+use tutti_ump::{U14, first_non_seven_bit};
 
 /// The most bytes the Property Data of one chunk holds, 16383: its length is a
 /// 14-bit value (M2-101 Tables 33 to 35).
 pub const PE_MAX_CHUNK_DATA_LEN: usize = 0x3FFF;
 
-/// Defines a number type with the `MidiChannel` shape over a `u8` or `u16`.
-macro_rules! ranged {
-    ($(#[$meta:meta])* $name:ident($raw:ty), $rawname:literal, $min:expr, $max:expr, $what:literal) => {
-        $(#[$meta])*
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-        #[cfg_attr(feature = "serde", serde(try_from = $rawname, into = $rawname))]
-        pub struct $name($raw);
-
-        impl $name {
-            /// The smallest value.
-            pub const MIN: $raw = $min;
-            /// The largest value.
-            pub const MAX: $raw = $max;
-
-            /// The value, or `None` outside [`MIN`](Self::MIN) to [`MAX`](Self::MAX).
-            #[must_use]
-            pub const fn new(raw: $raw) -> Option<Self> {
-                if raw >= Self::MIN && raw <= Self::MAX {
-                    Some(Self(raw))
-                } else {
-                    None
-                }
-            }
-
-            /// The value for a literal or a constant.
-            ///
-            /// # Panics
-            ///
-            /// Outside the range; in a `const` that is a compile error.
-            #[must_use]
-            #[track_caller]
-            pub const fn of(raw: $raw) -> Self {
-                match Self::new(raw) {
-                    Some(value) => value,
-                    None => panic!(concat!("not a ", $what)),
-                }
-            }
-
-            /// The raw value.
-            #[must_use]
-            pub const fn get(self) -> $raw {
-                self.0
-            }
-        }
-
-        impl TryFrom<$raw> for $name {
-            type Error = NotInRange<$raw>;
-
-            fn try_from(raw: $raw) -> Result<Self, NotInRange<$raw>> {
-                Self::new(raw).ok_or(NotInRange { what: $what, raw })
-            }
-        }
-
-        impl From<$name> for $raw {
-            fn from(value: $name) -> $raw {
-                value.0
-            }
-        }
-    };
-}
-
-pub(super) use ranged;
-
-ranged! {
+tutti_types::ranged! {
     /// A Request ID: 0 to 127 (M2-103 §5.3). It ties the chunks of a message
     /// together and a reply to its inquiry, and is unique among the
     /// transactions between one Initiator and one Responder.
-    PeRequestId(u8), "u8", 0, 127, "request id"
+    #[derive(Eq, Hash, PartialOrd, Ord)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    PeRequestId(u8), NotARequestId, "a request id (0 to 127)", |raw| raw <= 127
 }
 
-ranged! {
+tutti_types::ranged! {
     /// The number of a chunk, or a count of chunks: 1 to 16383, since the
     /// count starts from 1 and is a 14-bit value (M2-101 §8.3, Table 33).
-    ChunkNo(u16), "u16", 1, 0x3FFF, "chunk number"
+    #[derive(Eq, Hash, PartialOrd, Ord)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u16", into = "u16"))]
+    ChunkNo(u16), NotAChunkNo, "a chunk number (1 to 16383)", |raw| raw >= 1 && raw <= 0x3FFF
 }
 
 impl ChunkNo {
+    /// The largest chunk number, 16383.
+    pub const MAX: u16 = 0x3FFF;
+
     /// The first chunk.
-    pub const FIRST: Self = Self(1);
+    pub const FIRST: Self = Self::of(1);
 
     /// The number after this one, or `None` past the 14-bit limit.
     #[must_use]
     pub const fn next(self) -> Option<Self> {
-        Self::new(self.0 + 1)
+        Self::new(self.get() + 1)
     }
-}
-
-/// A 14-bit value as two 7-bit bytes, least significant first.
-pub(super) const fn wire14(value: u16) -> [u8; 2] {
-    [(value & 0x7F) as u8, ((value >> 7) & 0x7F) as u8]
-}
-
-/// Two 7-bit bytes, least significant first, as the value they carry.
-pub(super) fn unwire14(lsb: u8, msb: u8) -> u16 {
-    u16::from(lsb) | u16::from(msb) << 7
 }
 
 /// The Number of Chunks in Message (M2-101 §8.3).
@@ -232,7 +167,7 @@ pub struct PeChunk {
 }
 
 fn seven_bit(bytes: &[u8]) -> Result<(), PeChunkError> {
-    match bytes.iter().position(|b| b & 0x80 != 0) {
+    match first_non_seven_bit(bytes) {
         Some(at) => Err(PeChunkError::NotSevenBit { at }),
         None => Ok(()),
     }
@@ -342,11 +277,11 @@ impl PeChunk {
     pub fn encode_fields(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.sysex_len() - MESSAGE_OVERHEAD + 9);
         out.push(self.request_id.get());
-        out.extend(wire14(self.header.len() as u16));
+        out.extend(U14::masked(self.header.len() as u16).to_le7());
         out.extend(&self.header);
-        out.extend(wire14(self.total.wire()));
-        out.extend(wire14(self.position.wire()));
-        out.extend(wire14(self.data.len() as u16));
+        out.extend(U14::masked(self.total.wire()).to_le7());
+        out.extend(U14::masked(self.position.wire()).to_le7());
+        out.extend(U14::masked(self.data.len() as u16).to_le7());
         out.extend(&self.data);
         out
     }
@@ -400,10 +335,9 @@ impl<'a> Cursor<'a> {
     /// A 14-bit value of two bytes, least significant first.
     fn pair(&mut self) -> Result<u16, PeChunkError> {
         let two = self.take(2)?;
-        if two.iter().any(|b| b & 0x80 != 0) {
-            return Err(PeChunkError::NotSevenBit { at: 0 });
-        }
-        Ok(unwire14(two[0], two[1]))
+        U14::from_le7([two[0], two[1]])
+            .map(U14::get)
+            .ok_or(PeChunkError::NotSevenBit { at: 0 })
     }
 }
 

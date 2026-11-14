@@ -7,9 +7,9 @@
 //! here sends.
 
 use std::time::Duration;
-use tutti_ump::U7;
+use tutti_ump::{U7, U14};
 
-use super::chunk::{ChunkNo, PeRequestId, unwire14, wire14};
+use super::chunk::{ChunkNo, PeRequestId};
 use crate::{Ack, Nak, TimeoutWait};
 
 /// The time that may pass between the chunks of a message, and before a reply to
@@ -207,7 +207,7 @@ impl PeSignal {
     pub fn answer(self, transaction: PeTransaction) -> PeAnswer {
         let sub_id2 = u7(transaction.inquiry_sub_id2());
         let detail = |chunk: Option<ChunkNo>| {
-            let [lo, hi] = wire14(chunk.map_or(0, ChunkNo::get));
+            let [lo, hi] = U14::masked(chunk.map_or(0, ChunkNo::get)).to_le7();
             [self.request_id().get(), lo, hi, 0, 0].map(u7)
         };
         let ack = |code: U7, data: u8, chunk| {
@@ -295,8 +295,8 @@ impl PeSignal {
 /// The Request ID and chunk number of the 5 details bytes.
 fn details(bytes: &[U7; 5]) -> Option<(PeRequestId, Option<ChunkNo>)> {
     let request_id = PeRequestId::new(bytes[0].get())?;
-    let chunk = unwire14(bytes[1].get(), bytes[2].get());
-    Some((request_id, ChunkNo::new(chunk)))
+    let chunk = U14::from_le7([bytes[1].get(), bytes[2].get()])?;
+    Some((request_id, ChunkNo::new(chunk.get())))
 }
 
 #[cfg(test)]

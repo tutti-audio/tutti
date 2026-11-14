@@ -24,7 +24,7 @@
 
 use std::vec::Vec;
 
-use tutti_ump::{ManufacturerId, U7, U14};
+use tutti_ump::{ManufacturerId, U7, U14, first_non_seven_bit};
 
 /// Profile Inquiry, Sub-ID#2 `0x20` (§7.2).
 pub const SUB_ID2_PROFILE_INQUIRY: u8 = 0x20;
@@ -187,56 +187,37 @@ impl ProfileId {
     }
 }
 
-/// The number of Channels a Profile uses or is asked to use (§7.8, §7.10,
-/// §7.11): the Manager plus Member Channels, 14 bits.
-///
-/// Zero is a value the spec gives a meaning: when the Profile Destination is
-/// address 0x7E or 0x7F, the number of Channels is the
-/// width of the Group or Function Block, and the field is then 0
-/// (`BY_ADDRESS`).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ProfileChannels(U14);
+tutti_types::ranged! {
+    /// The number of Channels a Profile uses or is asked to use (§7.8, §7.10,
+    /// §7.11): the Manager plus Member Channels, 14 bits.
+    ///
+    /// Zero is a value the spec gives a meaning: when the Profile Destination is
+    /// address 0x7E or 0x7F, the number of Channels is the
+    /// width of the Group or Function Block, and the field is then 0
+    /// (`BY_ADDRESS`).
+    #[derive(Default, Eq, PartialOrd, Ord, Hash)]
+    ProfileChannels(u16), NotProfileChannels, "a 14-bit Channel count",
+    |raw| raw <= 0x3FFF
+}
 
 impl ProfileChannels {
     /// `0x0000`: the width of the Group or Function Block addressed.
-    pub(crate) const BY_ADDRESS: Self = Self(U14::of(0));
+    pub(crate) const BY_ADDRESS: Self = Self::of(0);
     /// The most the field holds, 16383.
     pub const MAX: u16 = U14::MAX.get();
-
-    /// A count, or `None` above 14 bits.
-    #[must_use]
-    pub const fn new(count: u16) -> Option<Self> {
-        match U14::new(count) {
-            Some(count) => Some(Self(count)),
-            None => None,
-        }
-    }
-
-    /// A count for a literal or a constant.
-    ///
-    /// # Panics
-    ///
-    /// Above 14 bits; in a `const` that is a compile error.
-    #[must_use]
-    #[track_caller]
-    pub const fn of(count: u16) -> Self {
-        Self(U14::of(count))
-    }
-
-    /// The count.
-    #[must_use]
-    pub const fn get(self) -> u16 {
-        self.0.get()
-    }
 
     /// Whether the field is 0, the Group or Function Block's own width.
     #[must_use]
     pub const fn is_by_address(self) -> bool {
-        self.0.get() == 0
+        self.get() == 0
     }
 
     pub(crate) const fn from_wire(raw: U14) -> Self {
-        Self(raw)
+        Self::of(raw.get())
+    }
+
+    pub(crate) const fn to_wire(self) -> [u8; 2] {
+        U14::masked(self.get()).to_le7()
     }
 }
 
@@ -305,7 +286,7 @@ impl ProfileLists {
     pub(crate) fn encode_body(&self, out: &mut impl Extend<u8>) {
         for list in [&self.enabled, &self.disabled] {
             // `new` holds each length to 14 bits.
-            out.extend([(list.len() & 0x7F) as u8, ((list.len() >> 7) & 0x7F) as u8]);
+            out.extend(U14::masked(list.len() as u16).to_le7());
             for id in list {
                 out.extend(id.to_bytes());
             }
@@ -372,7 +353,7 @@ macro_rules! seven_bit_data {
             pub fn new(bytes: Vec<u8>) -> Result<Self, ProfileDataError> {
                 if bytes.len() > Self::MAX_LEN {
                     Err(ProfileDataError::TooLong)
-                } else if bytes.iter().any(|b| b & 0x80 != 0) {
+                } else if first_non_seven_bit(&bytes).is_some() {
                     Err(ProfileDataError::NotSevenBit)
                 } else {
                     Ok(Self(bytes))
@@ -423,14 +404,10 @@ impl ChannelsDetail {
     /// The data of a reply to [`InquiryTarget::NUMBER_OF_CHANNELS`]: length 4.
     #[must_use]
     pub fn to_data(self) -> DetailsData {
-        let [a, b] = split(self.in_use);
-        let [c, d] = split(self.max);
+        let [a, b] = self.in_use.to_wire();
+        let [c, d] = self.max.to_wire();
         DetailsData(vec![a, b, c, d])
     }
-}
-
-fn split(count: ProfileChannels) -> [u8; 2] {
-    [(count.get() & 0x7F) as u8, (count.get() >> 7) as u8]
 }
 
 impl DetailsData {
@@ -441,12 +418,10 @@ impl DetailsData {
         let [a, b, c, d] = self.0[..] else {
             return None;
         };
-        let count = |lsb: u8, msb: u8| {
-            ProfileChannels::from_wire(U14::masked(u16::from(msb) << 7 | u16::from(lsb)))
-        };
+        let count = |lsb: u8, msb: u8| U14::from_le7([lsb, msb]).map(ProfileChannels::from_wire);
         Some(ChannelsDetail {
-            in_use: count(a, b),
-            max: count(c, d),
+            in_use: count(a, b)?,
+            max: count(c, d)?,
         })
     }
 }

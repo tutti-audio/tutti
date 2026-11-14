@@ -82,6 +82,7 @@ mod note_velocity;
 mod rpn;
 mod sysex;
 mod sysex8;
+mod text;
 mod ump;
 
 pub use bend_value::BendValue;
@@ -89,7 +90,7 @@ pub use cc_number::CCNumber;
 pub use control_value::ControlValue;
 pub use field::{
     DeltaTicks, FirstGroup, FunctionBlockId, GroupSpan, NoteNumber, OutOfRange, Pitch, SharpsFlats,
-    U4, U7, U14,
+    U4, U7, U14, U28, first_non_seven_bit,
 };
 pub use flex_text::{
     FlexText, FlexTextAssembler, FlexTextPackets, FlexTextStep, flex_text_packets,
@@ -118,4 +119,5 @@ pub use sysex::{
     SysexStep,
 };
 pub use sysex8::{Sysex8Assembler, Sysex8Message, Sysex8Packets, Sysex8Step};
+pub use text::{StreamTextAssembler, TextPackets, text_packets};
 pub use ump::{Key, KeyEvent, Ump, split_stream};

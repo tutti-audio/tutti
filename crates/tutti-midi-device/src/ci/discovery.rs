@@ -6,7 +6,7 @@
 //! shares the Discovery *body* format, so [`DiscoveryData`] serves both.
 
 use bitflags::bitflags;
-use tutti_ump::{DeviceIdentity, FunctionBlockId, U7};
+use tutti_ump::{DeviceIdentity, FunctionBlockId, U7, U28};
 
 /// Sub-ID#2: Discovery message (M2-101 §5.5).
 pub const SUB_ID2_DISCOVERY: u8 = 0x70;
@@ -46,18 +46,21 @@ bitflags! {
 /// byte stream). [`DiscoveryData::function_block`] is `None` for it.
 const NO_FUNCTION_BLOCK_WIRE: u8 = 0x7F;
 
-/// The Receivable Maximum SysEx Message Size (M2-101 §5.5.3): 28 bits, and at
-/// least 128.
-///
-/// Every device must support System Exclusive messages of at least 128 bytes,
-/// so 128 is the smallest value. A device that can initiate Profile Configuration
-/// or Property Exchange must support at least 512 bytes:
-/// whether a device is one is the caller's to say, so that floor is
-/// [`INITIATOR_MIN`](Self::INITIATOR_MIN) and not checked here.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "u32", into = "u32"))]
-pub struct MaxSysexSize(u32);
+tutti_types::ranged! {
+    /// The Receivable Maximum SysEx Message Size (M2-101 §5.5.3): 28 bits, and at
+    /// least 128.
+    ///
+    /// Every device must support System Exclusive messages of at least 128 bytes,
+    /// so 128 is the smallest value. A device that can initiate Profile Configuration
+    /// or Property Exchange must support at least 512 bytes:
+    /// whether a device is one is the caller's to say, so that floor is
+    /// [`INITIATOR_MIN`](Self::INITIATOR_MIN) and not checked here.
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u32", into = "u32"))]
+    MaxSysexSize(u32), NotASysexSize, "a receivable SysEx size (128 to 2^28 - 1)",
+    |raw| raw >= 128 && raw <= 0x0FFF_FFFF
+}
 
 impl MaxSysexSize {
     /// The smallest size, 128 bytes (§5.5.3).
@@ -67,55 +70,6 @@ impl MaxSysexSize {
     pub const INITIATOR_MIN: u32 = 512;
     /// The largest, 28 bits: four 7-bit bytes.
     pub const MAX: u32 = 0x0FFF_FFFF;
-
-    /// The size, or `None` below 128 bytes or past 28 bits.
-    #[must_use]
-    pub const fn new(raw: u32) -> Option<Self> {
-        if raw >= Self::MIN && raw <= Self::MAX {
-            Some(Self(raw))
-        } else {
-            None
-        }
-    }
-
-    /// The size for a literal or a constant.
-    ///
-    /// # Panics
-    ///
-    /// Below 128 or past 28 bits; in a `const` that is a compile error.
-    #[must_use]
-    #[track_caller]
-    pub const fn of(raw: u32) -> Self {
-        match Self::new(raw) {
-            Some(size) => size,
-            None => panic!("a receivable maximum SysEx size is 128 to 2^28 - 1"),
-        }
-    }
-
-    /// The size in bytes.
-    #[must_use]
-    pub const fn get(self) -> u32 {
-        self.0
-    }
-}
-
-/// A raw value that is not a Receivable Maximum SysEx Message Size.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{} is not a receivable SysEx size (128 to 2^28 - 1)", .0)]
-pub struct NotASysexSize(pub u32);
-
-impl TryFrom<u32> for MaxSysexSize {
-    type Error = NotASysexSize;
-
-    fn try_from(raw: u32) -> Result<Self, NotASysexSize> {
-        Self::new(raw).ok_or(NotASysexSize(raw))
-    }
-}
-
-impl From<MaxSysexSize> for u32 {
-    fn from(size: MaxSysexSize) -> u32 {
-        size.0
-    }
 }
 
 /// The body of a Discovery / Discovery Reply message (M2-101 Tables 6 and 8):
@@ -199,9 +153,7 @@ impl DiscoveryData {
                 .map(|b| b.get()),
         );
         out.extend(self.categories.bits().to_le_bytes());
-        // 28-bit max size as four little-endian 7-bit bytes.
-        let size = self.max_sysex_size.get();
-        out.extend([0, 7, 14, 21].map(|shift| ((size >> shift) & 0x7F) as u8));
+        out.extend(U28::masked(self.max_sysex_size.get()).to_le7());
         let Some(path) = self.output_path_id else {
             return;
         };

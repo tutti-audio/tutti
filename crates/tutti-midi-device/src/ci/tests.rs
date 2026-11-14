@@ -319,6 +319,55 @@ fn the_device_id_and_version_are_range_checked_values() {
     check_range_serde(&c);
 }
 
+/// The ranged values of the CI messages keep the range-checked contract at
+/// each edge of their spec range.
+#[test]
+fn the_ci_ranged_values_keep_the_range_contract() {
+    use tutti_fixtures::{RangeContract, check_range_contract};
+    check_range_contract(&RangeContract {
+        new: Muid::new,
+        get: Muid::get,
+        of: Some(Muid::of),
+        valid: &[0, 1, 0x0FFF_FEFF],
+        invalid: &[0x0FFF_FF00, 0x0FFF_FFFF, 0x1000_0000, u32::MAX],
+    });
+    check_range_contract(&RangeContract {
+        new: MaxSysexSize::new,
+        get: MaxSysexSize::get,
+        of: Some(MaxSysexSize::of),
+        valid: &[128, 512, 0x0FFF_FFFF],
+        invalid: &[0, 127, 0x1000_0000],
+    });
+    check_range_contract(&RangeContract {
+        new: ProfileChannels::new,
+        get: ProfileChannels::get,
+        of: Some(ProfileChannels::of),
+        valid: &[0, 1, 0x3FFF],
+        invalid: &[0x4000, u16::MAX],
+    });
+    check_range_contract(&RangeContract {
+        new: TimeoutWait::new,
+        get: TimeoutWait::tenths,
+        of: Some(TimeoutWait::of),
+        valid: &[0, 1, 127],
+        invalid: &[128, 255],
+    });
+    check_range_contract(&RangeContract {
+        new: PeRequestId::new,
+        get: PeRequestId::get,
+        of: Some(PeRequestId::of),
+        valid: &[0, 127],
+        invalid: &[128, 255],
+    });
+    check_range_contract(&RangeContract {
+        new: ChunkNo::new,
+        get: ChunkNo::get,
+        of: Some(ChunkNo::of),
+        valid: &[1, 0x3FFF],
+        invalid: &[0, 0x4000],
+    });
+}
+
 fn long_message() -> CiMessage {
     CiMessage::DiscoveryReply {
         header: header(),

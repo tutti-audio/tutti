@@ -24,7 +24,7 @@
 
 use std::vec::Vec;
 
-use tutti_ump::{MidiChannel, MidiGroup, Sysex7Packets, U7, Ump};
+use tutti_ump::{MidiChannel, MidiGroup, Sysex7Packets, U7, U14, U28, Ump};
 
 mod device;
 mod discovery;
@@ -55,15 +55,16 @@ pub use pe::{
     ActionError, BodyLimit, BufferLimit, CallError, CallId, CanSet, CcIndex, ChangeKind, ChunkNo,
     ChunkPosition, ChunkTotal, ClusterKind, ColumnSource, ConfirmIcon, ConfirmType, Confirmation,
     CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource, DefaultMapNotCc, EntryError,
-    JsonPointer, LinkRole, ListedTwice, MAX_LIST_ENTRIES, MediaType, ModeId, NotInRange, NotValid,
-    NotVendorName, OpaqueBody, PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN, PE_MAX_HEADER_LEN,
-    PE_TIMEOUT, PaginationFault, ParamPath, PartialError, PartialUpdate, PeAction, PeAllCtrlEntry,
-    PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx, PeBodyError,
-    PeBuffered, PeCall, PeCapabilities, PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList,
-    PeChange, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode, PeChunk, PeChunkError,
-    PeCiMessage, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList,
-    PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding,
-    PeEndedBy, PeError, PeExpired, PeExtensions, PeExternalSync, PeExtra, PeExtraError,
+    JsonPointer, LinkRole, ListedTwice, MAX_LIST_ENTRIES, MediaType, ModeId, NotAChunkNo,
+    NotAPeChannel, NotAPriority, NotARequestId, NotAStepCount, NotInRange, NotSignificantBits,
+    NotValid, NotVendorName, OpaqueBody, PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN,
+    PE_MAX_HEADER_LEN, PE_TIMEOUT, PaginationFault, ParamPath, PartialError, PartialUpdate,
+    PeAction, PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx,
+    PeBasicChannelTx, PeBodyError, PeBuffered, PeCall, PeCapabilities, PeCapabilitiesFailure,
+    PeChCtrlEntry, PeChCtrlList, PeChange, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode,
+    PeChunk, PeChunkError, PeCiMessage, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry,
+    PeCtrlMapList, PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo,
+    PeEncoding, PeEndedBy, PeError, PeExpired, PeExtensions, PeExternalSync, PeExtra, PeExtraError,
     PeFlowControl, PeGet, PeHeader, PeHeaderError, PeHeaderTooLong, PeInitiator, PeJson,
     PeJsonError, PeJsonSchema, PeKind, PeLink, PeLocalOn, PeMessage, PeMessageKind, PeMidiMode,
     PeModeEntry, PeModeList, PeNotification, PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry,
@@ -88,16 +89,16 @@ pub use process_initiator::{
     PROCESS_TIMEOUT, ProcessAction, ProcessError, ProcessInitiator, ReportRequest,
 };
 pub use profile::{
-    ChannelsDetail, DetailsData, InquiryTarget, ListTooLong, ManufacturerProfile, ProfileChannels,
-    ProfileDataError, ProfileId, ProfileLists, ProfileState, SUB_ID2_PROFILE_ADDED,
-    SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_DETAILS_REPLY, SUB_ID2_PROFILE_DISABLED,
-    SUB_ID2_PROFILE_ENABLED, SUB_ID2_PROFILE_INQUIRY, SUB_ID2_PROFILE_REMOVED,
-    SUB_ID2_PROFILE_REPLY, SUB_ID2_PROFILE_SPECIFIC_DATA, SUB_ID2_SET_PROFILE_OFF,
-    SUB_ID2_SET_PROFILE_ON, SpecificData, StandardProfile,
+    ChannelsDetail, DetailsData, InquiryTarget, ListTooLong, ManufacturerProfile,
+    NotProfileChannels, ProfileChannels, ProfileDataError, ProfileId, ProfileLists, ProfileState,
+    SUB_ID2_PROFILE_ADDED, SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_DETAILS_REPLY,
+    SUB_ID2_PROFILE_DISABLED, SUB_ID2_PROFILE_ENABLED, SUB_ID2_PROFILE_INQUIRY,
+    SUB_ID2_PROFILE_REMOVED, SUB_ID2_PROFILE_REPLY, SUB_ID2_PROFILE_SPECIFIC_DATA,
+    SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SpecificData, StandardProfile,
 };
 pub use status::{Ack, Nak};
 pub use text::MessageText;
-pub use wait::TimeoutWait;
+pub use wait::{NotATimeoutWait, TimeoutWait};
 
 /// Universal SysEx non-real-time id, the first byte of every CI message: `0x7E`.
 pub const CI_UNIVERSAL_SYSEX: u8 = 0x7E;
@@ -122,72 +123,19 @@ pub const CI_SUB_ID_1: u8 = 0x0D;
 /// must invalidate its MUID and start a new Discovery Transaction.
 pub const CI_VERSION: CiVersion = CiVersion::of(0x02);
 
-/// The Message Format Version byte (M2-101 §5.2.1, §5.3, §5.4): `0x01` to
-/// `0x1F`.
-///
-/// Version 1.1 is 0x01 and version 1.2 is 0x02. Bits 7 to 5 are reserved for
-/// future major revisions, and a device that sees one set replies with a NAK
-/// (error code 0x02), so a value with one set is not a version a message
-/// carries; Message Format Version 0x00 is deprecated (§5.4).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
-pub struct CiVersion(u8);
-
-impl CiVersion {
-    /// The mask of the reserved bits, 7 to 5.
-    pub(crate) const RESERVED_BITS: u8 = 0xE0;
-
-    /// The version, or `None` for `0x00` and for a value with a reserved bit
-    /// set.
-    #[must_use]
-    pub const fn new(raw: u8) -> Option<Self> {
-        if raw != 0 && raw & Self::RESERVED_BITS == 0 {
-            Some(Self(raw))
-        } else {
-            None
-        }
-    }
-
-    /// The version for a literal or a constant.
+tutti_types::ranged! {
+    /// The Message Format Version byte (M2-101 §5.2.1, §5.3, §5.4): `0x01` to
+    /// `0x1F`.
     ///
-    /// # Panics
-    ///
-    /// For `0x00` or a value with a reserved bit set; in a `const` that is a
-    /// compile error.
-    #[must_use]
-    #[track_caller]
-    pub const fn of(raw: u8) -> Self {
-        match Self::new(raw) {
-            Some(version) => version,
-            None => panic!("a MIDI-CI version is 0x01 to 0x1F"),
-        }
-    }
-
-    /// The version byte.
-    #[must_use]
-    pub const fn get(self) -> u8 {
-        self.0
-    }
-}
-
-/// A raw value that is not a Message Format Version.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{:#04x} is not a MIDI-CI message format version", .0)]
-pub struct NotAVersion(pub u8);
-
-impl TryFrom<u8> for CiVersion {
-    type Error = NotAVersion;
-
-    fn try_from(raw: u8) -> Result<Self, NotAVersion> {
-        Self::new(raw).ok_or(NotAVersion(raw))
-    }
-}
-
-impl From<CiVersion> for u8 {
-    fn from(version: CiVersion) -> u8 {
-        version.0
-    }
+    /// Version 1.1 is 0x01 and version 1.2 is 0x02. Bits 7 to 5 are reserved for
+    /// future major revisions, and a device that sees one set replies with a NAK
+    /// (error code 0x02), so a value with one set is not a version a message
+    /// carries; Message Format Version 0x00 is deprecated (§5.4).
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    CiVersion(u8), NotAVersion, "a MIDI-CI message format version (0x01 to 0x1F)",
+    |raw| raw != 0 && raw & 0xE0 == 0
 }
 
 /// The Device ID byte of a message (M2-101 §3.2 and Table 5): which Channel,
@@ -253,51 +201,25 @@ impl From<CiDeviceId> for u8 {
     }
 }
 
-/// A 28-bit **MIDI Unique Identifier** (M2-101 §3.3): the random address a CI
-/// device gives itself. Four 7-bit bytes, least significant first, on the wire.
-///
-/// It holds a MUID a device can *own*: the reserved range
-/// `RESERVED_START` to `0x0FFF_FFFE` and the broadcast
-/// value `BROADCAST_RAW` are refused. The broadcast
-/// address is a [`Destination`], not a `Muid`. A MUID is drawn from an OS random
-/// source by whoever owns the device; this type only checks one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "u32", into = "u32"))]
-pub struct Muid(u32);
+tutti_types::ranged! {
+    /// A 28-bit **MIDI Unique Identifier** (M2-101 §3.3): the random address a CI
+    /// device gives itself. Four 7-bit bytes, least significant first, on the wire.
+    ///
+    /// It holds a MUID a device can *own*: the reserved range
+    /// `RESERVED_START` to `0x0FFF_FFFE` and the broadcast
+    /// value `BROADCAST_RAW` are refused. The broadcast
+    /// address is a [`Destination`], not a `Muid`. A MUID is drawn from an OS random
+    /// source by whoever owns the device; this type only checks one.
+    #[derive(Eq, Hash, PartialOrd, Ord)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u32", into = "u32"))]
+    Muid(u32), NotAMuid, "a MUID (past 28 bits, reserved, or broadcast)",
+    |raw| raw < 0x0FFF_FF00
+}
 
 impl Muid {
-    /// The first reserved MUID, `0x0FFF_FF00` (M2-101 §3.3: `0x0FFF_FF00` to
-    /// `0x0FFF_FFFE` are reserved).
-    pub(crate) const RESERVED_START: u32 = 0x0FFF_FF00;
     /// The broadcast value, `0x0FFF_FFFF` (M2-101 §3.3.3).
     pub(crate) const BROADCAST_RAW: u32 = 0x0FFF_FFFF;
-
-    /// A MUID, or `None` for a value past 28 bits, in the reserved range or the
-    /// broadcast value.
-    #[must_use]
-    pub const fn new(raw: u32) -> Option<Self> {
-        if raw < Self::RESERVED_START {
-            Some(Muid(raw))
-        } else {
-            None
-        }
-    }
-
-    /// The MUID of a literal or a constant.
-    ///
-    /// # Panics
-    ///
-    /// When `raw` is no MUID [`Muid::new`] takes; in a `const` that is a compile
-    /// error.
-    #[must_use]
-    #[track_caller]
-    pub const fn of(raw: u32) -> Self {
-        match Self::new(raw) {
-            Some(muid) => muid,
-            None => panic!("not a MUID a device can own"),
-        }
-    }
 
     /// A MUID from a caller's random word: its low 28 bits, or `None` when
     /// they fall in the reserved range or on the broadcast value, so the caller
@@ -308,42 +230,17 @@ impl Muid {
         Self::new(word & Self::BROADCAST_RAW)
     }
 
-    /// The 28-bit value.
-    #[must_use]
-    pub const fn get(self) -> u32 {
-        self.0
-    }
-
     /// The four little-endian 7-bit wire bytes.
     #[must_use]
-    pub fn to_bytes(self) -> [u8; 4] {
-        wire_bytes(self.0)
+    pub const fn to_bytes(self) -> [u8; 4] {
+        U28::masked(self.get()).to_le7()
     }
 
     /// The MUID of four little-endian 7-bit wire bytes, or `None` for a byte
     /// with its top bit set, a reserved value or the broadcast value.
     #[must_use]
     pub fn from_bytes(b: [u8; 4]) -> Option<Self> {
-        Self::new(from_wire_bytes(b)?)
-    }
-}
-
-/// A raw value that is not a MUID a device can own ([`Muid::new`] refused it).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{:#010x} is not a MUID (past 28 bits, reserved, or broadcast)", .0)]
-pub struct NotAMuid(pub u32);
-
-impl TryFrom<u32> for Muid {
-    type Error = NotAMuid;
-
-    fn try_from(raw: u32) -> Result<Self, NotAMuid> {
-        Self::new(raw).ok_or(NotAMuid(raw))
-    }
-}
-
-impl From<Muid> for u32 {
-    fn from(muid: Muid) -> u32 {
-        muid.0
+        Self::new(U28::from_le7(b)?.get())
     }
 }
 
@@ -359,48 +256,19 @@ pub enum Destination {
 impl Destination {
     fn to_bytes(self) -> [u8; 4] {
         match self {
-            Destination::Broadcast => wire_bytes(Muid::BROADCAST_RAW),
+            Destination::Broadcast => U28::masked(Muid::BROADCAST_RAW).to_le7(),
             Destination::Muid(muid) => muid.to_bytes(),
         }
     }
 
     fn from_bytes(b: [u8; 4]) -> Option<Self> {
-        let raw = from_wire_bytes(b)?;
+        let raw = U28::from_le7(b)?.get();
         if raw == Muid::BROADCAST_RAW {
             Some(Destination::Broadcast)
         } else {
             Muid::new(raw).map(Destination::Muid)
         }
     }
-}
-
-/// A 14-bit value as two 7-bit bytes, least significant first.
-fn wire_u14(raw: u16) -> [u8; 2] {
-    [(raw & 0x7F) as u8, ((raw >> 7) & 0x7F) as u8]
-}
-
-/// A 28-bit value as four little-endian 7-bit bytes.
-fn wire_bytes(raw: u32) -> [u8; 4] {
-    [
-        (raw & 0x7F) as u8,
-        ((raw >> 7) & 0x7F) as u8,
-        ((raw >> 14) & 0x7F) as u8,
-        ((raw >> 21) & 0x7F) as u8,
-    ]
-}
-
-/// Four little-endian 7-bit bytes as a 28-bit value, or `None` for a byte with
-/// its top bit set.
-fn from_wire_bytes(b: [u8; 4]) -> Option<u32> {
-    if b.iter().any(|byte| byte & 0x80 != 0) {
-        return None;
-    }
-    Some(
-        u32::from(b[0])
-            | (u32::from(b[1]) << 7)
-            | (u32::from(b[2]) << 14)
-            | (u32::from(b[3]) << 21),
-    )
 }
 
 /// The fixed MIDI-CI preamble shared by every message (M2-101 §3.3 and §5.2.1):
@@ -842,7 +710,7 @@ impl CiMessage {
                 profile, channels, ..
             } => {
                 out.extend(profile.to_bytes());
-                out.extend(wire_u14(channels.get()));
+                out.extend(channels.to_wire());
             }
             // Two reserved bytes (Table 25).
             CiMessage::SetProfileOff { profile, .. } => {
@@ -856,7 +724,7 @@ impl CiMessage {
                 profile, channels, ..
             } => {
                 out.extend(profile.to_bytes());
-                out.extend(wire_u14(channels.get()));
+                out.extend(channels.to_wire());
             }
             CiMessage::ProfileAdded { profile, .. } | CiMessage::ProfileRemoved { profile, .. } => {
                 out.extend(profile.to_bytes());
@@ -876,14 +744,14 @@ impl CiMessage {
                 out.extend(profile.to_bytes());
                 out.extend([target.get().get()]);
                 // Table 23: 14-bit length, least significant byte first.
-                out.extend(wire_u14(data.as_bytes().len() as u16));
+                out.extend(U14::masked(data.as_bytes().len() as u16).to_le7());
                 out.extend(data.as_bytes().iter().copied());
             }
             CiMessage::PropertyExchange { message, .. } => message.encode_body(out),
             CiMessage::ProfileSpecificData { profile, data, .. } => {
                 out.extend(profile.to_bytes());
                 // Table 28: a 4-byte length of the Profile Specific Data that follows, LSB first.
-                out.extend(wire_bytes(data.as_bytes().len() as u32));
+                out.extend(U28::masked(data.as_bytes().len() as u32).to_le7());
                 out.extend(data.as_bytes().iter().copied());
             }
         }

@@ -1,12 +1,10 @@
-use tutti_ump::Form;
+use tutti_ump::{Form, text_packets};
 
 use super::*;
 use crate::MessageText;
 
 fn collect<const W: usize>(bytes: &[u8]) -> Vec<(Form, [u8; W])> {
-    let mut out = Vec::new();
-    packets::<W>(bytes, |form, packet| out.push((form, packet)));
-    out
+    text_packets::<W>(bytes).collect()
 }
 
 // The longest text of each kind, from the packet counts of M2-104 §7.1.4,
@@ -84,7 +82,8 @@ fn an_instance_id_is_printable_ascii() {
 /// Spec: m2-104/7.1.4#3, m2-104/7.1.4#4, m2-104/7.1.4#5
 #[test]
 fn packets_are_complete_start_continue_end() {
-    assert!(collect::<14>(b"").is_empty());
+    // Each filter bit set is owed a reply, so an empty name is a Complete of zeros.
+    assert_eq!(collect::<14>(b""), [(Form::Complete, [0; 14])]);
     let one = collect::<14>(&[b'a'; 14]);
     assert_eq!(one.len(), 1);
     assert_eq!(one[0].0, Form::Complete);
@@ -108,57 +107,6 @@ fn packets_are_complete_start_continue_end() {
         ]
     );
     assert!(seven[6].1.iter().all(|&b| b == b'a'));
-}
-
-fn assemble<const N: usize>(parts: &[(Form, &[u8])]) -> Vec<Option<Vec<u8>>> {
-    let mut asm = Assembler::<N>::new();
-    parts
-        .iter()
-        .map(|(form, bytes)| asm.feed(*form, bytes).map(<[u8]>::to_vec))
-        .collect()
-}
-
-#[test]
-fn the_assembler_cuts_at_the_padding_and_restarts_on_a_start() {
-    let out = assemble::<98>(&[
-        (Form::Start, b"AAAAAAAAAAAAAA"),
-        (Form::End, b"BB\0\0\0\0\0\0\0\0\0\0\0\0"),
-    ]);
-    assert_eq!(out, [None, Some(b"AAAAAAAAAAAAAABB".to_vec())]);
-    let out = assemble::<98>(&[
-        (Form::Start, b"XXXXXXXXXXXXXX"),
-        (Form::Complete, b"hi\0\0\0\0\0\0\0\0\0\0\0\0"),
-    ]);
-    assert_eq!(out, [None, Some(b"hi".to_vec())]);
-}
-
-#[test]
-fn the_assembler_drops_what_has_no_start_or_does_not_fit() {
-    assert_eq!(assemble::<98>(&[(Form::End, b"zz")]), [None]);
-    assert_eq!(assemble::<98>(&[(Form::Continue, b"zz")]), [None]);
-    let long = [b'a'; 14];
-    let mut parts = vec![(Form::Start, &long[..])];
-    parts.extend([(Form::Continue, &long[..]); 5]);
-    parts.extend([(Form::Continue, &long[..]); 2]); // 98 bytes, then 112 > 98
-    // The End is empty: were the message still open it would complete with the
-    // 98 bytes before the overflow.
-    parts.push((Form::End, &[]));
-    assert!(assemble::<98>(&parts).iter().all(Option::is_none));
-}
-
-#[test]
-fn the_packets_of_a_name_reassemble_to_it() {
-    for len in [1, 13, 14, 15, 28, 29, 91, 98] {
-        let text = "ab".repeat(49)[..len].to_owned();
-        let mut asm = Assembler::<98>::new();
-        let mut done = None;
-        packets::<14>(text.as_bytes(), |form, b| {
-            if let Some(t) = asm.feed(form, &b) {
-                done = Some(t.to_vec());
-            }
-        });
-        assert_eq!(done.as_deref(), Some(text.as_bytes()), "{len}");
-    }
 }
 
 // §7.1.4, §7.1.5, §7.1.9: a name at its limit is seven, seven and three packets.
