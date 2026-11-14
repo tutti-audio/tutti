@@ -1,11 +1,15 @@
 use std::time::{Duration, Instant};
 
+use tutti_fixtures::midi::{GS_RESET, GS_WAVETABLE};
 use tutti_graph::Offset;
-use tutti_midi_hardware::Devices;
+use tutti_midi_hardware::{DeviceInfo, Devices, OpenOutput, Tally};
 use tutti_midi_runtime::{Outgoing, SendAt};
-use tutti_ump::{Message, MidiGroup, Sysex7Packet, SysexStatus, Ump};
+use tutti_ump::{MidiGroup, SysexMessage, Ump};
 
-fn synth(devices: &Devices) -> tutti_midi_hardware::DeviceInfo {
+/// Long enough to be a failure, not a race.
+const PATIENCE: Duration = Duration::from_secs(5);
+
+fn synth(devices: &Devices) -> DeviceInfo {
     let outputs: Vec<_> = devices
         .list()
         .into_iter()
@@ -13,7 +17,7 @@ fn synth(devices: &Devices) -> tutti_midi_hardware::DeviceInfo {
         .collect();
     outputs
         .iter()
-        .find(|d| d.name.contains("GS Wavetable"))
+        .find(|d| d.name.contains(GS_WAVETABLE))
         .cloned()
         .unwrap_or_else(|| {
             let names: Vec<_> = outputs.iter().map(|d| d.name.as_str()).collect();
@@ -29,11 +33,16 @@ fn at(send: SendAt, ump: Ump) -> Outgoing {
     }
 }
 
-fn sysex(status: SysexStatus, data: &[u8]) -> Ump {
-    Ump::from(Message::Sysex7(
-        MidiGroup::FIRST,
-        Sysex7Packet::new(status, data).unwrap(),
-    ))
+/// Waits until the output has handled `events` packets, and returns its tally.
+fn settled(out: &OpenOutput, events: u64) -> Tally {
+    let start = Instant::now();
+    loop {
+        let tally = out.tally();
+        if tally.sent + tally.lost >= events || start.elapsed() > PATIENCE {
+            return tally;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 #[test]
@@ -56,29 +65,39 @@ fn the_synth_is_listed_as_an_output_with_a_stable_id_and_a_clean_input_list() {
 }
 
 #[test]
-fn the_synth_takes_notes_scheduled_notes_and_a_sysex_and_opens_again_after_a_close() {
+fn the_synth_is_sent_every_event_at_its_time_and_opens_again_after_a_close() {
     let devices = Devices::open().unwrap();
     let id = synth(&devices).id;
     let note_on = Ump([0x2090_3C64, 0, 0, 0]);
     let note_off = Ump([0x2080_3C00, 0, 0, 0]);
+    let reset: Vec<Ump> = SysexMessage::from_framed(&GS_RESET)
+        .unwrap()
+        .packets(MidiGroup::FIRST)
+        .collect();
     for _ in 0..2 {
         let mut out = devices.open_output(&id).expect("the synth opens");
         let now = Instant::now();
-        let batch = [
+        let later = now + Duration::from_millis(90);
+        let mut batch = vec![
             at(SendAt::Now, note_on),
             at(SendAt::At(now + Duration::from_millis(60)), note_off),
-            // The GS reset as SysEx7: 11 bytes without delimiters 9, two packets.
-            at(
-                SendAt::At(now + Duration::from_millis(90)),
-                sysex(SysexStatus::Start, &[0x41, 0x10, 0x42, 0x12, 0x40, 0x00]),
-            ),
-            at(
-                SendAt::At(now + Duration::from_millis(90)),
-                sysex(SysexStatus::End, &[0x7F, 0x00, 0x41]),
-            ),
         ];
+        batch.extend(reset.iter().map(|&ump| at(SendAt::At(later), ump)));
         assert_eq!(out.queue_timed(&batch), batch.len());
-        // Dropping closes the port; what is not yet due is dropped with it.
-        std::thread::sleep(Duration::from_millis(150));
+        let tally = settled(&out, batch.len() as u64);
+        assert_eq!(
+            tally,
+            Tally {
+                sent: batch.len() as u64,
+                lost: 0
+            }
+        );
+        assert!(out.is_alive());
+        // Each was held to its time: the last was due 90 ms in.
+        assert!(
+            now.elapsed() >= Duration::from_millis(85),
+            "{:?}",
+            now.elapsed()
+        );
     }
 }

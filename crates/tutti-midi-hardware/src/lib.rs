@@ -1,8 +1,8 @@
 #![doc = include_str!("../README.md")]
 //! OS MIDI I/O for the Tutti audio engine: enumerate endpoints, connect
 //! them, send MIDI out and receive it back, through CoreMIDI (macOS), the
-//! ALSA UMP sequencer (Linux) and Windows Multimedia (Windows). Re-exported by `tutti` as `tutti::midi_hardware`
-//! (feature `midi-hardware`).
+//! ALSA UMP sequencer (Linux) and Windows Multimedia (Windows). Re-exported by
+//! `tutti` as `tutti::midi_hardware` (feature `midi-hardware`).
 //!
 //! Events reach the wire as UMP words, not MIDI 1.0 bytes, so MIDI-2-only messages
 //! (per-note controllers, per-note pitch bend, JR Timestamps) survive where the
@@ -61,8 +61,8 @@
 //!   stays as it was.
 //! - **Windows:** Windows Multimedia has no notification, so the watch lists the
 //!   ports once a second and reports the difference; a device shows within about
-//!   that long. A [`DeviceId`] is the driver's product name and ids, with the
-//!   direction. Untested on Windows.
+//!   that long. A [`DeviceId`] is the device interface path the driver reports,
+//!   or the product name and ids when it reports none, with the direction.
 //! - **Linux without alsa-lib 1.2.10:** the list is empty and stays so, as
 //!   enumeration is; opening reports [`Error::Unsupported`].
 //!
@@ -76,8 +76,8 @@
 //! [`VirtualSpec`] gives the name, the [`VirtualProtocol`] and the Function
 //! Blocks. A destination delivers into an [`InputProducerHandle`], so its events
 //! take the path a device input's do. Where the platform cannot publish what the
-//! spec asks, opening says so: [`Error::Unsupported`] where there is no backend or the API has no virtual ports (Windows
-//! Multimedia),
+//! spec asks, opening says so: [`Error::Unsupported`] where there is no backend
+//! or the API has no virtual ports (Windows Multimedia),
 //! [`Error::VirtualBlocksUnsupported`] for Function Blocks on macOS, where an
 //! endpoint carries a name and a protocol only. On Linux the sequencer is
 //! opened as a MIDI 2.0 client when the kernel has that mode and as a MIDI 1.0
@@ -165,7 +165,7 @@
 //! |---|---|---|
 //! | macOS | CoreMIDI | `MIDIInputPortCreateWithProtocol` / `MIDISendEventList`. |
 //! | Linux | ALSA UMP sequencer | Needs alsa-lib ≥ 1.2.10. Kernel ≥ 6.5 converts UMP↔legacy at the port boundary, so it works against MIDI 1.0 hardware. |
-//! | Windows | Windows Multimedia (winmm) | MIDI 1.0 bytes, carried as MIDI 1.0 UMP and widened as a legacy ALSA port is. Polled device watch, no virtual ports, and an event's send time is not honoured. Windows MIDI Services (UMP-native) is not used. |
+//! | Windows | Windows Multimedia (winmm) | MIDI 1.0 bytes, carried as MIDI 1.0 UMP and widened as a legacy ALSA port is. Polled device watch, no virtual ports. An output holds each event until its send time on a thread of its own. Windows MIDI Services (UMP-native) is not used. |
 //! | Elsewhere | stub | Enumerates nothing, [`Error::Unsupported`] on open. |
 //!
 //! [`MidiSession::open`] picks one, once, at construction; nothing downstream learns
@@ -260,7 +260,7 @@ pub use devices::{
     ChangeSink, DeviceEvents, Devices, OpenInput, OpenOutput, Pending, RecvTimeoutError, SeedError,
     WatchFailure,
 };
-pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
+pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Tally, Watch};
 pub use error::{Error, Result};
 pub use port::{HardwareMidiInputs, InputProducerHandle, PortInfo, Pushed, StreamDrain};
 pub use process::{ProcessChange, ReportAsk, ReportError, ReportPeer};

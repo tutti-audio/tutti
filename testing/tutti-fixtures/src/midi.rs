@@ -193,6 +193,16 @@ fn zones(lower: Option<u8>, upper: Option<u8>) -> MpeMode {
     )
 }
 
+/// The Roland GS reset as a framed SysEx message: Data Set 1 to device 0x10,
+/// address 40 00 7F, data 00. The Windows built-in synth takes it, and a test
+/// that opens that synth sends it.
+pub const GS_RESET: [u8; 11] = [
+    0xF0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7F, 0x00, 0x41, 0xF7,
+];
+
+/// Part of the name the Windows built-in synth is listed under.
+pub const GS_WAVETABLE: &str = "GS Wavetable";
+
 #[cfg(test)]
 mod tests {
     use super::*;

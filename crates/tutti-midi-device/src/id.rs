@@ -33,6 +33,7 @@ impl EndpointId {
 /// breaks saved files.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[non_exhaustive]
 pub enum Identity {
     /// The UMP Product Instance Id: the device's own, the same across restarts
     /// and across ports.
@@ -87,6 +88,7 @@ impl Identity {
 /// characters) and the driver's ids.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[non_exhaustive]
 pub enum WinMmDevice {
     /// The device interface path the driver reports.
     Interface(String),

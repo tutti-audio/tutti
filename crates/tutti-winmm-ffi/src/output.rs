@@ -86,11 +86,14 @@ impl MidiOut {
             let bound = Duration::from_millis(message.len() as u64 / 3 + 1) + SLACK;
             let started = Instant::now();
             while started.elapsed() < bound {
-                // SAFETY: the header is live; the driver sets `MHDR_DONE` from
-                // its own thread, so the field is read volatile (and
-                // unaligned, the struct being packed).
-                let flags = unsafe { (&raw const (*ptr).dwFlags).read_volatile() };
+                // SAFETY: the header is live. The driver sets `MHDR_DONE` from its
+                // own thread, so the read is a single `u32` load that is not
+                // assumed aligned (the struct is packed): `read_unaligned`
+                // makes no claim about alignment, and the fence after a done
+                // flag orders the driver's writes before what follows.
+                let flags = unsafe { (&raw const (*ptr).dwFlags).read_unaligned() };
                 if flags & MHDR_DONE != 0 {
+                    std::sync::atomic::fence(std::sync::atomic::Ordering::Acquire);
                     done = true;
                     break;
                 }

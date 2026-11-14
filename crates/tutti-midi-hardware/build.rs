@@ -4,8 +4,9 @@
 //!   endpoint.
 //! - `midi_backend`: the one platform decision. `"coremidi"` on macOS, `"winmm"`
 //!   on Windows, `"alsa"` on Linux with alsa-lib >= 1.2.10 (the UMP sequencer
-//!   API that backend needs), `"none"` everywhere else. The `backend` module declares the
-//!   platform module this names; no other file branches on the platform.
+//!   API that backend needs), `"none"` everywhere else. The `backend` module
+//!   declares the platform module this names; no other file branches on the
+//!   platform.
 //!
 //! An older or absent alsa-lib degrades to the empty stub rather than failing
 //! the build; the ffi crate's build script prints the reason as a warning.

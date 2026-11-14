@@ -1,21 +1,44 @@
 //! An open winmm input.
+//!
+//! # Who may touch what, and when
+//!
+//! winmm calls the input's callback on a thread of its own and documents no
+//! wait for a callback in flight when a port is reset or closed. So the
+//! callback is handed an *id*, not a pointer, and finds its state in a
+//! process-wide registry that holds one `Arc` per open input:
+//!
+//! - the callback looks its id up and clones the `Arc` under the registry
+//!   lock, so what it touches stays allocated for as long as it runs;
+//! - dropping the input removes it from the registry first, so no callback
+//!   that has not yet looked it up finds anything, then waits (bounded) for
+//!   the callbacks already inside to leave;
+//! - the callback only hands the recorded bytes to the handler and marks the
+//!   buffer done; a worker thread gives the buffer back to winmm, because
+//!   `midiInAddBuffer` is not one of the calls a `MIDIINPROC` may make.
 
+use std::cell::UnsafeCell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, PoisonError};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Media::Audio::{
     CALLBACK_FUNCTION, HMIDIIN, MIDIHDR, midiInAddBuffer, midiInClose, midiInOpen,
     midiInPrepareHeader, midiInReset, midiInStart, midiInUnprepareHeader,
 };
-use windows_sys::Win32::Media::{MM_MIM_CLOSE, MM_MIM_DATA, MM_MIM_LONGDATA};
+use windows_sys::Win32::Media::{MM_MIM_CLOSE, MM_MIM_DATA, MM_MIM_LONGDATA, MMSYSERR_INVALHANDLE};
 
 use crate::error::{Error, check};
+use crate::sleeper::Sleeper;
 
 /// How many SysEx buffers an input keeps with winmm, and how long each is:
 /// a message longer than one buffer arrives as consecutive [`Event::Long`]s.
 const BUFFERS: usize = 4;
 const BUFFER_BYTES: usize = 4096;
+
+/// How long dropping an input waits for callbacks already running to return.
+const LEAVE_BOUND: Duration = Duration::from_secs(1);
 
 /// What winmm delivered, with its stamp.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,44 +67,73 @@ pub enum Event<'a> {
 
 type Handler = Box<dyn FnMut(Event<'_>) + Send>;
 
-/// One SysEx buffer: winmm holds the header's address while it is prepared, so
-/// it lives in a box that never moves.
+/// One SysEx buffer. winmm holds the header's address while it is prepared and
+/// writes the header and the bytes while the buffer is queued, so both are
+/// behind `UnsafeCell`s and the buffer sits in the `Shared` allocation, which
+/// never moves.
 struct Buffer {
-    header: MIDIHDR,
-    /// What the header's `lpData` points into; owned here, never resized.
-    _data: Box<[u8]>,
+    header: UnsafeCell<MIDIHDR>,
+    data: UnsafeCell<[u8; BUFFER_BYTES]>,
+    /// Set by the callback when winmm has returned the buffer; cleared by the
+    /// worker when it hands the buffer back.
+    done: AtomicBool,
 }
+
+// SAFETY: `header` and `data` are written by winmm only while the buffer is
+// queued with it, and read by this crate only in the callback that winmm makes
+// when it returns the buffer, before the worker queues it again; the queued and
+// returned states alternate, so no read overlaps a write. `done` is atomic.
+unsafe impl Sync for Buffer {}
+// SAFETY: the one pointer a buffer holds (the header's `lpData`) points into the
+// buffer itself, and nothing is tied to the thread that made it.
+unsafe impl Send for Buffer {}
 
 impl Buffer {
     fn new() -> Self {
-        let mut data = vec![0u8; BUFFER_BYTES].into_boxed_slice();
-        let header = MIDIHDR {
-            lpData: data.as_mut_ptr(),
-            dwBufferLength: BUFFER_BYTES as u32,
-            ..MIDIHDR::default()
-        };
         Self {
-            header,
-            _data: data,
+            header: UnsafeCell::new(MIDIHDR::default()),
+            data: UnsafeCell::new([0; BUFFER_BYTES]),
+            done: AtomicBool::new(false),
         }
+    }
+
+    /// The header, pointing at this buffer's bytes. Every use goes through
+    /// this one pointer.
+    fn header(&self) -> *mut MIDIHDR {
+        self.header.get()
     }
 }
 
-/// What the driver's thread reaches through the instance pointer.
+/// What the callback, the worker and the owner share.
 struct Shared {
     handler: Mutex<Handler>,
-    /// Set before the input resets: a buffer winmm returns after that is not
-    /// handed back to it.
+    buffers: [Buffer; BUFFERS],
+    /// The open port, set once `midiInOpen` has returned; the worker queues
+    /// buffers on it.
+    handle: AtomicPtr<core::ffi::c_void>,
+    /// Set before the input resets: nothing is handed back to winmm after.
     closing: AtomicBool,
+    /// Callbacks inside their body; incremented under the registry lock.
+    in_flight: AtomicUsize,
+    /// Wakes the worker: a buffer is done, or the input is closing.
+    worker: Sleeper,
+}
+
+/// The inputs that are open, by the id their callback is given.
+static REGISTRY: Mutex<Vec<(usize, Arc<Shared>)>> = Mutex::new(Vec::new());
+static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
+
+fn registry() -> std::sync::MutexGuard<'static, Vec<(usize, Arc<Shared>)>> {
+    REGISTRY.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// An open input, started. Dropping it returns winmm's buffers and closes the
-/// port; no event is delivered after the drop returns.
+/// port.
 pub struct MidiIn {
+    id: usize,
     handle: HMIDIIN,
-    shared: Box<Shared>,
-    /// Allocated once and never grown, so each header keeps its address.
-    buffers: Box<[Buffer]>,
+    shared: Arc<Shared>,
+    worker: Option<JoinHandle<()>>,
 }
 
 impl std::fmt::Debug for MidiIn {
@@ -90,62 +142,105 @@ impl std::fmt::Debug for MidiIn {
     }
 }
 
-// SAFETY: a winmm handle names a driver object and is not tied to the thread
-// that opened it; `MidiIn` is used from one thread at a time (it is not
-// `Sync`), and everything else it holds is `Send`.
+// SAFETY: the `HMIDIIN` is a token for a driver object; winmm takes it from any
+// thread, and `MidiIn` uses it only in `Drop`, once. The rest of `MidiIn` is
+// `Send` (an `Arc` of `Sync` state and a `JoinHandle`).
 unsafe impl Send for MidiIn {}
+
+fn header_size() -> u32 {
+    size_of::<MIDIHDR>() as u32
+}
 
 impl MidiIn {
     /// Opens input port `index` and starts it: `handler` runs on winmm's
     /// thread for each message from then on.
     ///
     /// The handler is called from a thread winmm owns, one call at a time, and
-    /// must return quickly and call no winmm function.
+    /// must return quickly and call no winmm function. Buffers are handed back
+    /// to winmm by a thread of this input's own, never by the callback.
     ///
     /// # Errors
     ///
     /// The failing call: `midiInOpen` (`MMSYSERR_ALLOCATED` when another
     /// application holds the port exclusively, `MMSYSERR_BADDEVICEID` when it
-    /// is gone), a buffer's preparation, or `midiInStart`.
+    /// is gone), a buffer's preparation, `midiInStart`, or the worker's or
+    /// its wake event's creation.
     pub fn open(
         index: u32,
         handler: impl FnMut(Event<'_>) + Send + 'static,
     ) -> Result<Self, Error> {
-        let shared = Box::new(Shared {
+        let shared = Arc::new(Shared {
             handler: Mutex::new(Box::new(handler)),
+            buffers: std::array::from_fn(|_| Buffer::new()),
+            handle: AtomicPtr::new(std::ptr::null_mut()),
             closing: AtomicBool::new(false),
+            in_flight: AtomicUsize::new(0),
+            worker: Sleeper::new()?,
         });
+        for buffer in &shared.buffers {
+            // SAFETY: the header is not yet shared with winmm or any thread.
+            unsafe {
+                (*buffer.header()).lpData = buffer.data.get().cast();
+                (*buffer.header()).dwBufferLength = BUFFER_BYTES as u32;
+            }
+        }
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        registry().push((id, Arc::clone(&shared)));
         let mut handle: HMIDIIN = std::ptr::null_mut();
         // SAFETY: `handle` is a live out-pointer. The callback has the
-        // `MIDIINPROC` signature, and the instance value is the address of the
-        // boxed `Shared`, which this `MidiIn` keeps alive and unmoved until
-        // `midiInClose` has returned (see `Drop`).
+        // `MIDIINPROC` signature, and the instance value is an id, which names
+        // no memory.
         let code = unsafe {
             midiInOpen(
                 &raw mut handle,
                 index,
                 callback as *const () as usize,
-                std::ptr::from_ref::<Shared>(&*shared) as usize,
+                id,
                 CALLBACK_FUNCTION,
             )
         };
-        check("midiInOpen", code)?;
-        let mut input = Self {
+        if let Err(e) = check("midiInOpen", code) {
+            unregister(id);
+            return Err(e);
+        }
+        shared.handle.store(handle, Ordering::Release);
+        let worker = {
+            let shared = Arc::clone(&shared);
+            std::thread::Builder::new()
+                .name("tutti-winmm-in".to_string())
+                .spawn(move || requeue(&shared))
+        };
+        let worker = match worker {
+            Ok(worker) => worker,
+            Err(_) => {
+                let mut input = Self {
+                    id,
+                    handle,
+                    shared,
+                    worker: None,
+                };
+                input.close();
+                return Err(Error {
+                    operation: "spawn the input worker",
+                    code: Error::NOT_RETURNED,
+                });
+            }
+        };
+        let input = Self {
+            id,
             handle,
             shared,
-            buffers: (0..BUFFERS).map(|_| Buffer::new()).collect(),
+            worker: Some(worker),
         };
         // From here a failure drops `input`, which closes the port.
-        for buffer in &mut input.buffers {
-            let header = &raw mut buffer.header;
-            // SAFETY: `header` points at a live header whose `lpData` is a live
-            // buffer of `dwBufferLength` bytes, both owned by `input`, whose
-            // `buffers` slice is never moved, resized or freed while the port
-            // is open.
-            let code = unsafe { midiInPrepareHeader(input.handle, header, header_size()) };
+        for buffer in &input.shared.buffers {
+            // SAFETY: `header` is this buffer's header, whose `lpData` is its
+            // bytes; both live in `Shared`, which this input and the registry
+            // keep allocated, unmoved, until the port is closed.
+            let code = unsafe { midiInPrepareHeader(input.handle, buffer.header(), header_size()) };
             check("midiInPrepareHeader", code)?;
-            // SAFETY: the header was prepared just above and is owned by `input`.
-            let code = unsafe { midiInAddBuffer(input.handle, header, header_size()) };
+            // SAFETY: the header was prepared just above.
+            let code = unsafe { midiInAddBuffer(input.handle, buffer.header(), header_size()) };
             check("midiInAddBuffer", code)?;
         }
         // SAFETY: `handle` is the open input.
@@ -153,114 +248,170 @@ impl MidiIn {
         check("midiInStart", code)?;
         Ok(input)
     }
-}
 
-impl Drop for MidiIn {
-    fn drop(&mut self) {
+    /// Stops the worker and callbacks, returns the buffers and closes the
+    /// port; leaks the buffers if winmm may still hold them.
+    fn close(&mut self) {
+        // No callback that looks the id up from here on finds the input.
+        unregister(self.id);
         self.shared.closing.store(true, Ordering::Release);
+        // The worker queues no buffer after it has been joined.
+        let _ = self.shared.worker.wake();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+        // Callbacks that found the input before it was removed finish.
+        let started = Instant::now();
+        while self.shared.in_flight.load(Ordering::Acquire) > 0 && started.elapsed() < LEAVE_BOUND {
+            std::thread::yield_now();
+        }
         // SAFETY: `handle` is the open input. A reset stops recording and
-        // returns every queued buffer to its owner; the driver's callbacks
-        // for them see `closing` and hand nothing back.
-        let reset = unsafe { midiInReset(self.handle) };
-        let mut returned = reset == 0;
-        for buffer in &mut self.buffers {
-            let header = &raw mut buffer.header;
-            // SAFETY: the header was prepared by `add_buffer` and is owned by
-            // `self`; winmm refuses (and leaves it prepared) while it is
-            // still queued.
-            let code = unsafe { midiInUnprepareHeader(self.handle, header, header_size()) };
-            returned &= code == 0;
+        // returns every queued buffer to its owner.
+        unsafe { midiInReset(self.handle) };
+        for buffer in &self.shared.buffers {
+            // SAFETY: the header was prepared by `open`; a header that was
+            // never prepared is accepted, and one still queued is refused.
+            unsafe { midiInUnprepareHeader(self.handle, buffer.header(), header_size()) };
         }
         // SAFETY: `handle` is the open input, closed once.
-        let closed = unsafe { midiInClose(self.handle) } == 0;
-        if !(returned && closed) {
-            // winmm may still hold the buffers or call back: freeing them, or
-            // the closure's state, would be a use after free. Keep both.
-            std::mem::forget(std::mem::take(&mut self.buffers));
-            let shared = std::mem::replace(
-                &mut self.shared,
-                Box::new(Shared {
-                    handler: Mutex::new(Box::new(|_| {})),
-                    closing: AtomicBool::new(true),
-                }),
-            );
-            std::mem::forget(shared);
+        let closed = unsafe { midiInClose(self.handle) };
+        // A close that succeeded means winmm queues nothing of ours; one that
+        // found the port already gone (the device was removed) means the same.
+        // Any other result may leave winmm holding the buffers, so the
+        // allocation is kept for ever.
+        if closed != 0 && closed != MMSYSERR_INVALHANDLE {
+            std::mem::forget(Arc::clone(&self.shared));
         }
     }
 }
 
-fn header_size() -> u32 {
-    size_of::<MIDIHDR>() as u32
+impl Drop for MidiIn {
+    fn drop(&mut self) {
+        self.close();
+    }
 }
 
-/// winmm's `MIDIINPROC`: runs on the driver's thread.
-///
-/// # Safety
-///
-/// `instance` is the address of the `Shared` that `MidiIn::open` passed, and
-/// for a `MIM_LONGDATA` message `param1` is the address of one of that input's
-/// prepared headers; winmm guarantees both for the lifetime of the open port.
-unsafe extern "system" fn callback(
-    handle: HMIDIIN,
+fn unregister(id: usize) {
+    registry().retain(|(registered, _)| *registered != id);
+}
+
+/// Gives each done buffer back to winmm until the input closes.
+fn requeue(shared: &Shared) {
+    loop {
+        if shared.worker.wait(None).is_err() || shared.closing.load(Ordering::Acquire) {
+            return;
+        }
+        for buffer in &shared.buffers {
+            if buffer.done.swap(false, Ordering::AcqRel) {
+                let handle = shared.handle.load(Ordering::Acquire);
+                // SAFETY: the header is prepared and has been returned to us
+                // by the callback that set `done`; `handle` is the open port,
+                // which is not closed until this thread has been joined.
+                unsafe { midiInAddBuffer(handle, buffer.header(), header_size()) };
+            }
+        }
+    }
+}
+
+/// Leaves the callback: the count drops when this does, however the body ends.
+struct Inside(Arc<Shared>);
+
+impl Drop for Inside {
+    fn drop(&mut self) {
+        self.0.in_flight.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Hands a buffer back to the worker when dropped, so a handler that panics
+/// does not lose it.
+struct Requeue<'a> {
+    shared: &'a Shared,
+    buffer: &'a Buffer,
+}
+
+impl Drop for Requeue<'_> {
+    fn drop(&mut self) {
+        if !self.shared.closing.load(Ordering::Acquire) {
+            self.buffer.done.store(true, Ordering::Release);
+            let _ = self.shared.worker.wake();
+        }
+    }
+}
+
+/// winmm's `MIDIINPROC`: runs on the driver's thread. `instance` is the id
+/// `MidiIn::open` passed; `param1` and `param2` are the message's.
+extern "system" fn callback(
+    _handle: HMIDIIN,
     message: u32,
     instance: usize,
     param1: usize,
     param2: usize,
 ) {
-    // SAFETY: see the function's contract: the `Shared` outlives every
-    // callback, because `Drop` closes the port before it is freed.
-    let shared = unsafe { &*(instance as *const Shared) };
+    let inside = {
+        let registered = registry();
+        let Some((_, shared)) = registered.iter().find(|(id, _)| *id == instance) else {
+            return;
+        };
+        shared.in_flight.fetch_add(1, Ordering::AcqRel);
+        Inside(Arc::clone(shared))
+    };
+    let shared: &Shared = &inside.0;
+    if shared.closing.load(Ordering::Acquire) {
+        return;
+    }
     // A panic must not unwind into winmm; a panicking handler drops the event.
-    let _ = catch_unwind(AssertUnwindSafe(|| match message {
-        MM_MIM_DATA => {
-            let mut handler = shared
-                .handler
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            handler(Event::Short {
-                message: param1 as u32,
-                millis: param2 as u32,
-            });
-        }
+    // The payload is forgotten: dropping it here would run arbitrary code on
+    // the driver's thread.
+    if let Err(payload) = catch_unwind(AssertUnwindSafe(|| {
+        dispatch(shared, message, param1, param2);
+    })) {
+        std::mem::forget(payload);
+    }
+}
+
+fn dispatch(shared: &Shared, message: u32, param1: usize, param2: usize) {
+    let call = |event: Event<'_>| {
+        let mut handler = shared
+            .handler
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        handler(event);
+    };
+    match message {
+        MM_MIM_DATA => call(Event::Short {
+            message: param1 as u32,
+            millis: param2 as u32,
+        }),
         MM_MIM_LONGDATA => {
-            let header = param1 as *mut MIDIHDR;
-            // SAFETY: the header is the input's own (see the contract); it is
-            // packed, so its fields are read unaligned.
-            let (data, recorded) = unsafe {
-                (
-                    (&raw const (*header).lpData).read_unaligned(),
-                    (&raw const (*header).dwBytesRecorded).read_unaligned(),
-                )
+            // The header winmm names is matched against this input's own and
+            // never dereferenced as given.
+            let Some(buffer) = shared
+                .buffers
+                .iter()
+                .find(|b| b.header() as usize == param1)
+            else {
+                return;
             };
-            if recorded > 0 && !shared.closing.load(Ordering::Acquire) {
-                // SAFETY: `lpData` is the buffer `add_buffer` made and winmm
-                // wrote `recorded` bytes into; nothing else touches it until
-                // it is handed back below.
+            let _requeue = Requeue { shared, buffer };
+            // SAFETY: winmm has returned the buffer (this is the message that
+            // says so) and the worker has not queued it again, so nothing
+            // writes the header; it is packed, so the field is read unaligned.
+            let recorded =
+                unsafe { (&raw const (*buffer.header()).dwBytesRecorded).read_unaligned() };
+            let recorded = (recorded as usize).min(BUFFER_BYTES);
+            if recorded > 0 {
+                // SAFETY: as above, for the bytes: `recorded` of them are
+                // initialised and nothing writes them until the buffer is
+                // queued again, after this call.
                 let bytes =
-                    unsafe { std::slice::from_raw_parts(data.cast_const(), recorded as usize) };
-                let mut handler = shared
-                    .handler
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner);
-                handler(Event::Long {
+                    unsafe { std::slice::from_raw_parts(buffer.data.get().cast::<u8>(), recorded) };
+                call(Event::Long {
                     data: bytes,
                     millis: param2 as u32,
                 });
             }
-            if !shared.closing.load(Ordering::Acquire) {
-                // SAFETY: the header is prepared and has been returned to us by
-                // this very message; handing it back is how a recording
-                // continues.
-                unsafe { midiInAddBuffer(handle, header, header_size()) };
-            }
         }
-        MM_MIM_CLOSE if !shared.closing.load(Ordering::Acquire) => {
-            let mut handler = shared
-                .handler
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            handler(Event::Closed);
-        }
+        MM_MIM_CLOSE => call(Event::Closed),
         _ => {}
-    }));
+    }
 }

@@ -10,10 +10,11 @@
 //! - **Enumeration** names each port by the device interface path the driver
 //!   reports (`DRV_QUERYDEVICEINTERFACE`), which survives a replug, and by its
 //!   product name and ids when it reports none. An
-//!   [`EndpointId`](tutti_midi_device::EndpointId) carries the position and a
-//!   digest of that name: opening looks for the device where the id says and,
-//!   when the list has shifted, where it went, and fails when it is gone
-//!   instead of opening the device that took its place. The name shown is
+//!   [`EndpointId`](tutti_midi_device::EndpointId) carries the direction, a
+//!   digest of that name and a count among ports with the same digest, never
+//!   the list position (it shifts when an earlier device is unplugged):
+//!   opening finds the device wherever the list has put it, and fails when it
+//!   is gone instead of opening the device that took its place. The name shown is
 //!   winmm's product name (31 characters at most): the longer one lives in the
 //!   device's property store, which reading takes a second API and a query per
 //!   port for.
@@ -98,7 +99,7 @@ fn ports(side: Side) -> impl Iterator<Item = (u32, PortInfo)> {
 
 /// The endpoints of `side` now.
 fn list(side: Side) -> Vec<EndpointInfo> {
-    endpoints(side, ports(side))
+    endpoints(side, ports(side).map(|(_, info)| info))
 }
 
 /// Every device now.

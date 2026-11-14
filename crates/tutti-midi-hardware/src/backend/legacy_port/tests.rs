@@ -33,25 +33,53 @@ fn info(name: &str) -> PortInfo {
 // ---- ports ----------------------------------------------------------------
 
 #[test]
-fn an_id_gives_back_its_side_and_position() {
-    for (side, index) in [(Side::Input, 0), (Side::Output, 5), (Side::Input, u32::MAX)] {
-        let id = endpoint_id(side, index, &info("Keystep"));
+fn an_id_gives_back_its_side_and_occurrence() {
+    for (side, occurrence) in [(Side::Input, 0), (Side::Output, 5), (Side::Input, u32::MAX)] {
+        let id = endpoint_id(side, occurrence, &info("Keystep"));
         let slot = slot_of(id);
-        assert_eq!((slot.side, slot.index), (side, index));
-        assert!(slot.matches(&info("Keystep")));
+        assert_eq!((slot.side, slot.occurrence), (side, occurrence));
+        assert_eq!(
+            slot.fingerprint,
+            super::ports::fingerprint(&info("Keystep"))
+        );
     }
 }
 
 #[test]
-fn an_id_refuses_the_port_that_took_its_position() {
+fn an_id_does_not_find_the_port_that_took_its_position() {
     // The list shifts when a device is unplugged: position 1 is another device.
-    let slot = slot_of(endpoint_id(Side::Input, 1, &info("Keystep")));
-    assert!(!slot.matches(&info("Launchpad")));
+    let slot = slot_of(endpoint_id(Side::Input, 0, &info("Keystep")));
+    let listed = |names: &[&str]| -> Vec<(u32, PortInfo)> {
+        names.iter().zip(0..).map(|(n, i)| (i, info(n))).collect()
+    };
+    assert_eq!(locate(slot, listed(&["Launchpad"])), None);
     let other_product = PortInfo {
         device: named("Keystep", 8),
         ..info("Keystep")
     };
-    assert!(!slot.matches(&other_product));
+    assert_eq!(locate(slot, [(0, other_product)]), None);
+}
+
+#[test]
+fn removing_the_first_of_three_ports_keeps_the_other_two_handles() {
+    let ids = |names: &[&str]| -> Vec<EndpointId> {
+        endpoints(Side::Input, names.iter().map(|n| info(n)))
+            .into_iter()
+            .map(|e| e.id)
+            .collect()
+    };
+    let before = ids(&["A", "B", "C"]);
+    let after = ids(&["B", "C"]);
+    assert_eq!(after, before[1..], "B and C never left");
+}
+
+#[test]
+fn ports_that_cannot_be_told_apart_are_numbered_in_list_order() {
+    let twins = endpoints(Side::Output, [info("Twin"), info("Twin"), info("Other")]);
+    assert_ne!(twins[0].id, twins[1].id);
+    assert_eq!(slot_of(twins[0].id).occurrence, 0);
+    assert_eq!(slot_of(twins[1].id).occurrence, 1);
+    assert_eq!(slot_of(twins[2].id).occurrence, 0);
 }
 
 #[test]
@@ -60,27 +88,23 @@ fn an_interface_path_names_the_device_whatever_its_position_or_name() {
         name: name.to_owned(),
         device: WinMmDevice::Interface("\\\\?\\usb#vid_0001".to_owned()),
     };
-    let slot = slot_of(endpoint_id(Side::Input, 3, &path("Keystep")));
+    let slot = slot_of(endpoint_id(Side::Input, 0, &path("Keystep")));
     // The same device, listed elsewhere with a different cut of its name.
-    assert!(slot.matches(&path("Keystep Pro MIDI")));
+    assert_eq!(locate(slot, [(3, path("Keystep Pro MIDI"))]), Some(3));
     let other = PortInfo {
         device: WinMmDevice::Interface("\\\\?\\usb#vid_0002".to_owned()),
         ..path("Keystep")
     };
-    assert!(!slot.matches(&other));
+    assert_eq!(locate(slot, [(0, other)]), None);
 }
 
 #[test]
 fn a_device_that_moved_in_the_list_is_found_where_it_went_and_one_gone_is_not() {
-    let slot = slot_of(endpoint_id(Side::Input, 2, &info("B")));
+    let slot = slot_of(endpoint_id(Side::Input, 0, &info("B")));
     let list = |names: &[&str]| -> Vec<(u32, PortInfo)> {
         names.iter().zip(0..).map(|(n, i)| (i, info(n))).collect()
     };
-    assert_eq!(
-        locate(slot, list(&["A", "C", "B"])),
-        Some(2),
-        "where it was"
-    );
+    assert_eq!(locate(slot, list(&["A", "C", "B"])), Some(2));
     assert_eq!(
         locate(slot, list(&["B", "C"])),
         Some(0),
@@ -104,12 +128,12 @@ fn the_input_and_the_output_of_one_unit_have_different_ids_and_identities() {
 
 #[test]
 fn a_byte_port_is_listed_as_midi1_with_no_blocks_in_list_order() {
-    let listed = endpoints(Side::Output, vec![(0, info("A")), (1, info("B"))]);
+    let listed = endpoints(Side::Output, vec![info("A"), info("B")]);
     assert_eq!(
         listed.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
         ["A", "B"]
     );
-    assert_eq!(slot_of(listed[1].id).index, 1);
+    assert_ne!(listed[0].id, listed[1].id);
     assert!(
         listed
             .iter()
@@ -253,6 +277,26 @@ fn a_schedule_releases_the_earliest_first_and_ties_in_push_order() {
     let due: Vec<_> = std::iter::from_fn(|| held.pop_due(now)).collect();
     assert_eq!(due, ["first", "second", "middle"]);
     assert_eq!(held.pop_due(now), None, "the last is still to wait");
+}
+
+#[test]
+fn a_batch_event_stamped_before_the_one_ahead_of_it_goes_after_it() {
+    let t0 = Instant::now();
+    let at = |ms| t0 + Duration::from_millis(ms);
+    let mut held = Schedule::new();
+    // In batch order: a note at +50, then one "now" (+0), then one at +10.
+    let taken = held.push_batch(8, [(at(50), "a"), (at(0), "b"), (at(10), "c")]);
+    assert_eq!(taken, 3);
+    let due: Vec<_> = std::iter::from_fn(|| held.pop_due(at(100))).collect();
+    assert_eq!(due, ["a", "b", "c"]);
+}
+
+#[test]
+fn a_batch_past_the_room_takes_a_prefix() {
+    let t0 = Instant::now();
+    let mut held = Schedule::new();
+    assert_eq!(held.push_batch(2, [(t0, 1), (t0, 2), (t0, 3)]), 2);
+    assert_eq!(held.len(), 2);
 }
 
 #[test]

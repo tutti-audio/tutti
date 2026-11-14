@@ -29,10 +29,13 @@ pub struct Sleeper {
 }
 
 // SAFETY: both handles are kernel objects, valid from any thread for their
-// whole life; the calls made on them (`SetEvent`, and the wait and re-arm
-// the one waiting thread makes) are thread-safe.
+// whole life, and nothing here is tied to the thread that made them.
 unsafe impl Send for Sleeper {}
-// SAFETY: see `Send`.
+// SAFETY: `wake` is `SetEvent`, which any thread may call at any time. `wait`
+// re-arms the timer and waits on it, which is sound for one waiting thread at
+// a time: every user of a `Sleeper` has one (the output's or the input's
+// worker), and two waiters would only share the timer's due time, not break
+// memory safety.
 unsafe impl Sync for Sleeper {}
 
 fn last(operation: &'static str) -> Error {

@@ -146,9 +146,35 @@ pub trait MidiEndpoints: Send + Sync {
 /// that one, not the one the OS reported when the output opened: a negotiation
 /// can settle on the other.
 pub trait DeviceOut: MidiOut {
+    /// Whether the output can still send. An output whose sender ended on its
+    /// own, on an error, returns `false` from then on and takes no more events.
+    /// The default is `true`, for a transport that cannot tell.
+    fn is_alive(&self) -> bool {
+        true
+    }
+
+    /// What the output has sent and lost so far; see [`Tally`]. The default is
+    /// a transport that counts nothing.
+    fn tally(&self) -> Tally {
+        Tally::default()
+    }
+
     /// The batches from now on are in `protocol`. Called when the output opens
     /// and whenever the device's configuration changes, never during a
     /// [`queue`](MidiOut::queue). The default is for a transport that does not
     /// tag.
     fn follow(&self, _protocol: Protocol) {}
+}
+
+/// What an output with a sender of its own has done with the events it took:
+/// the sends happen after `queue` has returned, so this is where a failure of
+/// one shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Tally {
+    /// Events sent: each went to the device, or had no form on its wire and
+    /// was consumed.
+    pub sent: u64,
+    /// Events taken that could not be sent: the device refused one, or the
+    /// sender had ended.
+    pub lost: u64,
 }

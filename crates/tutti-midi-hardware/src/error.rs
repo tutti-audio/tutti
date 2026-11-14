@@ -114,9 +114,9 @@ pub enum Error {
     /// Distinct from "no devices found", which is an empty list and not an
     /// error. This says the *platform* has no backend compiled in (a Linux built
     /// against an alsa-lib older than 1.2.10), or that its API cannot do what
-    /// was asked (Windows Multimedia has no virtual ports). A caller
-    /// that shows the user "no MIDI devices" for this case is hiding a build
-    /// fact behind a runtime one.
+    /// was asked (Windows Multimedia has no virtual ports). A caller that
+    /// shows the user "no MIDI devices" for this case is hiding a build fact
+    /// behind a runtime one.
     #[error("MIDI backend unavailable: {0}")]
     Unsupported(&'static str),
 

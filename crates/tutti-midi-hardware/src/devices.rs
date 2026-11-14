@@ -603,6 +603,20 @@ impl core::fmt::Debug for OpenOutput {
 }
 
 impl OpenOutput {
+    /// Whether the output can still send; see
+    /// [`DeviceOut::is_alive`].
+    #[must_use]
+    pub fn is_alive(&self) -> bool {
+        self.sink.is_alive()
+    }
+
+    /// What the output has sent and lost so far, in packets of the device's
+    /// wire form.
+    #[must_use]
+    pub fn tally(&self) -> crate::Tally {
+        self.sink.tally()
+    }
+
     /// The device this output is open on.
     #[must_use]
     pub fn id(&self) -> &DeviceId {

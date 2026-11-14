@@ -2,21 +2,18 @@ use tutti_winmm_ffi::{
     MidiOut, input_caps, input_count, input_interface, output_caps, output_count, output_interface,
 };
 
-/// The GS reset: Roland GS, device 0x10, Data Set 1, address 40 00 7F, data 00.
-const GS_RESET: [u8; 11] = [
-    0xF0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7F, 0x00, 0x41, 0xF7,
-];
+use tutti_fixtures::midi::{GS_RESET, GS_WAVETABLE};
 
 /// The position of the built-in synth, or a failure that lists what is there.
 pub fn synth() -> u32 {
     let names: Vec<String> = (0..output_count())
         .filter_map(|i| output_caps(i).ok().map(|c| c.name))
         .collect();
-    let found = names.iter().position(|n| n.contains("GS Wavetable"));
+    let found = names.iter().position(|n| n.contains(GS_WAVETABLE));
     let Some(index) = found else {
         panic!("the built-in GS Wavetable Synth output is missing; outputs: {names:?}");
     };
-    index as u32
+    u32::try_from(index).expect("a position fits u32")
 }
 
 #[test]
