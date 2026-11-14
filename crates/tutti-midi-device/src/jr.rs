@@ -22,8 +22,8 @@
 //!   delay.
 //!
 //! The wrap is resolved against the line itself: a timestamp's 16 bits are
-//! taken to be the sender time nearest the one the line gives at the
-//! timestamp's arrival, which is right for a timestamp within half a wrap
+//! taken to be the sender time nearest the one the line gives at the arrival
+//! of the message it times, which is right for a timestamp within half a wrap
 //! (1.048 s) of it. A sender silent for [`LOST_AFTER`] is [`JrLock::Lost`]: its
 //! timestamps are not mapped, and the next clock message starts the window
 //! over.
@@ -48,14 +48,24 @@ const DRIFT_SPAN: Duration = Duration::from_secs(1);
 const LOST_AFTER: Duration = Duration::from_secs(1);
 
 /// How far from 1 a fitted slope may be (host seconds per sender second): 1%,
-/// ten times what any crystal drifts (tens of ppm to a few hundred), so a slope
-/// outside it is jitter over too short a span, not a sender's drift.
+/// 10 000 ppm, thirty to a hundred times what a crystal drifts (tens to a few
+/// hundred ppm), so a slope outside it is jitter over too short a span, not a
+/// sender's drift. A sender beyond it is taken at slope 1: the window's spread
+/// absorbs its drift, and the delay the jitter adds is bounded by about the
+/// window's length times the drift.
 const MAX_DRIFT: f64 = 0.01;
 
 /// How long before its arrival a JR Clock may map: a clock older than the
 /// silence that loses the clock is not live, so the line does not describe its
 /// sender.
 const STALE_AFTER: Duration = LOST_AFTER;
+
+/// The least spread a window is taken to have when it judges a JR Clock off its
+/// line: 1 ms, the frame of a USB MIDI transport. A window of one or two
+/// readings has seen almost no jitter, so without it the ordinary shrinking of
+/// a connection's delay reads as a clock that jumped, and restarts keep the
+/// window too short to fit a drift.
+const MIN_JITTER_TOLERANCE: f64 = 0.001;
 
 /// A sender clock's wrap, in ticks.
 const WRAP: f64 = 65_536.0;
@@ -92,6 +102,7 @@ pub enum Unmapped {
 /// The host time of a message a JR Timestamp precedes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[must_use = "an `Arrival` outcome means the message keeps its arrival time"]
+#[non_exhaustive]
 pub enum JrTime {
     /// The instant the sender sent the message at, on the host's clock, never
     /// after the message arrived.
@@ -272,9 +283,9 @@ impl JrReceiver {
     /// Whether a clock of unwrapped sender time `ticks` that arrived at
     /// `arrival` cannot come from the sender the window describes: its send
     /// time on the line is after its arrival by more than the window's jitter
-    /// and a tick (a message is not heard before it is sent, the jitter bounds
-    /// how much earlier than the line an arrival has been, and a tick is the
-    /// sender's rounding), or is more than
+    /// (at least [`MIN_JITTER_TOLERANCE`]) and a tick (a message is not heard
+    /// before it is sent, the jitter bounds how much earlier than the line an
+    /// arrival has been, and a tick is the sender's rounding), or is more than
     /// [`STALE_AFTER`] before it (older than a live clock).
     fn off_line(&self, ticks: i64, arrival: Instant) -> bool {
         let (Some(origin), Some(line)) = (self.origin, self.fit) else {
@@ -282,7 +293,8 @@ impl JrReceiver {
         };
         let sent = line.slope * (ticks - line.ticks0) as f64 / f64::from(TICK_HZ) + line.offset;
         let age = seconds_from(origin, arrival) - sent;
-        age < -(line.jitter + 1.0 / f64::from(TICK_HZ)) || age > STALE_AFTER.as_secs_f64()
+        age < -(line.jitter.max(MIN_JITTER_TOLERANCE) + 1.0 / f64::from(TICK_HZ))
+            || age > STALE_AFTER.as_secs_f64()
     }
 
     /// Takes a JR Timestamp of sender time `ticks` that arrived at `arrival`: it

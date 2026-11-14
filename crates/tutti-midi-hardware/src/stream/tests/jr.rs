@@ -245,3 +245,34 @@ fn changing_an_open_inputs_timing_keeps_its_queued_events() {
     }
     assert_eq!(heard.len(), 4);
 }
+
+/// A JR Clock repeated is counted late once, and one that jumps restarts the
+/// sender's clock once, in the port's counts; no other count moves.
+#[test]
+fn a_repeated_clock_and_a_jump_are_counted_once_each() {
+    let (wire, mut rig, _) = settled(InputTiming::JitterReduction, offering_both());
+    let slot = wire.session.ports().list_input_ports()[0].id;
+    let counts = |wire: &Wire| {
+        let info = wire.session.ports().port_info(slot).unwrap();
+        (info.jr_late, info.jr_restarted, info.stream_lost)
+    };
+    let before = counts(&wire);
+    let send = |ticks: u16, ms: u64| {
+        assert!(wire.counters.send_input(
+            wire.raw,
+            jr(Utility::JrClock(ticks)),
+            wire.at(1_000 + ms + LATENCY)
+        ));
+    };
+    for sent in [0, 100, 200] {
+        send(ticks(sent), sent);
+    }
+    assert_eq!(counts(&wire), before, "clocks in order count nothing");
+    send(ticks(200), 205);
+    assert_eq!(counts(&wire), (before.0 + 1, before.1, before.2));
+    // The sender's clock jumps half a second ahead.
+    send(ticks(300) + 15_625, 300);
+    assert_eq!(counts(&wire), (before.0 + 1, before.1 + 1, before.2));
+    rig.run(8);
+    assert_eq!(wire.session.ports().losses().dropped(), 0);
+}

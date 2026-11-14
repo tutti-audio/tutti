@@ -36,6 +36,7 @@
 1 crates/tutti-clap-host/src/types.rs
 1 crates/tutti-clap-host/tests/behaviour/clap_event_lists.rs
 1 crates/tutti-clap-host/tests/behaviour/clap_midi_groups.rs
+1 crates/tutti-clap-host/tests/behaviour/clap_param_gain.rs
 3 crates/tutti-clap-host/tests/conformance/clap_params_state_conformance.rs
 1 crates/tutti-codec/src/contract.rs
 1 crates/tutti-codec/src/decode/extensions.rs
@@ -55,6 +56,7 @@
 1 crates/tutti-graph/src/graph.rs
 2 crates/tutti-graph/src/node.rs
 1 crates/tutti-graph/tests/topology/bus_edges.rs
+1 crates/tutti-measure/src/loudness.rs
 1 crates/tutti-measure/src/yin.rs
 3 crates/tutti-midi-device/src/table/tests.rs
 2 crates/tutti-midi-file/src/file.rs
@@ -93,6 +95,7 @@
 1 crates/tutti-polysynth/src/polysynth.rs
 1 crates/tutti-polysynth/src/polysynth/tests.rs
 1 crates/tutti-sampler/src/lib.rs
+1 crates/tutti-sampler/src/streamer/record.rs
 2 crates/tutti-sampler/src/stretch/mod.rs
 1 crates/tutti-sampler/src/stretch/tests.rs
 1 crates/tutti-sampler/src/voice/memory_source.rs
@@ -138,7 +141,7 @@
 3 crates/tutti-vst3-host/src/host/midi_mapping.rs
 2 crates/tutti-vst3-host/src/host/processor.rs
 2 crates/tutti-vst3-host/src/host/speakers.rs
-5 crates/tutti-vst3-host/tests/conformance/vst3_audio_correctness.rs
+6 crates/tutti-vst3-host/tests/conformance/vst3_audio_correctness.rs
 1 crates/tutti-vst3-host/tests/conformance/vst3_com_dispatch.rs
 6 crates/tutti-vst3-host/tests/conformance/vst3_conformance_blocks.rs
 5 crates/tutti-vst3-host/tests/conformance/vst3_conformance_interfaces.rs
@@ -150,7 +153,7 @@
 3 crates/tutti-vst3-host/tests/support/audio-probe/README.md
 10 crates/tutti-vst3-host/tests/support/conformance.rs
 43 docs/engineering-notes.md
-5 docs/style-guide.md
+6 docs/style-guide.md
 1 testing/tutti-clap-test-plugin/src/lib.rs
 3 testing/tutti-clap-test-plugin/src/params_state.rs
 1 testing/tutti-fixtures/src/sf2.rs

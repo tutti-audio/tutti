@@ -374,3 +374,20 @@ fn a_sender_clock_that_jumps_forward_is_relocked() {
 fn a_sender_clock_that_jumps_back_is_relocked() {
     assert_relocks_after_a_jump(-1.02);
 }
+
+/// A connection whose delay shrinks by a few hundred microseconds over its first
+/// clocks (the least latency is found as clocks arrive) is not a clock that
+/// jumped: a young window has seen almost no jitter and must not read this as one.
+#[test]
+fn early_readings_whose_delay_shrinks_do_not_restart() {
+    let mut link = Link::new(0.0, 0.0, Duration::ZERO);
+    let mut rx = JrReceiver::new();
+    for (k, delay_us) in [1_000u64, 700, 400, 250, 250].into_iter().enumerate() {
+        let t = k as f64 * 0.1;
+        let arrival = link.send(t) + Duration::from_micros(delay_us);
+        assert_eq!(rx.clock(link.ticks(t), arrival), ClockHeard::Taken, "{k}");
+    }
+    link.latency = Duration::from_micros(250);
+    let (error, ..) = link.error(&rx, 0.55);
+    assert!(error < 40e-6, "{error}");
+}

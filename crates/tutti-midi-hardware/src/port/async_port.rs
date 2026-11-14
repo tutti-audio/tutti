@@ -29,32 +29,23 @@ use tutti_ump::{Message, Ump, Utility};
 
 use crate::InputTiming;
 
-/// A [`InputTiming`] both ends of a port read: the control side sets it as the
+/// An [`InputTiming`] both ends of a port read: the control side sets it as the
 /// device's configuration settles, and the driver thread follows it.
 #[derive(Debug)]
-struct SharedSource(AtomicU8);
+struct SharedTiming(AtomicU8);
 
-impl SharedSource {
-    const ARRIVAL: u8 = 0;
-    const JITTER_REDUCTION: u8 = 1;
-
+impl SharedTiming {
     fn new() -> Self {
-        Self(AtomicU8::new(Self::ARRIVAL))
+        Self(AtomicU8::new(InputTiming::Arrival.to_raw()))
     }
 
     fn get(&self) -> InputTiming {
-        match self.0.load(Ordering::Acquire) {
-            Self::JITTER_REDUCTION => InputTiming::JitterReduction,
-            _ => InputTiming::Arrival,
-        }
+        // Only `set` stores, and it stores `to_raw`: every byte is a timing.
+        InputTiming::from_raw(self.0.load(Ordering::Acquire)).unwrap_or(InputTiming::Arrival)
     }
 
-    fn set(&self, source: InputTiming) {
-        let raw = match source {
-            InputTiming::Arrival => Self::ARRIVAL,
-            InputTiming::JitterReduction => Self::JITTER_REDUCTION,
-        };
-        self.0.store(raw, Ordering::Release);
+    fn set(&self, timing: InputTiming) {
+        self.0.store(timing.to_raw(), Ordering::Release);
     }
 }
 
@@ -76,7 +67,7 @@ struct JrInput {
     counts: Arc<JrCounts>,
     /// The time the last event was placed at: events are rendered in the order
     /// they arrive (M2-104 §7.2.2.2), so none is placed before it, whichever
-    /// source times them.
+    /// timing times them.
     placed: Option<Instant>,
 }
 
@@ -90,13 +81,13 @@ impl JrInput {
         }
     }
 
-    /// Follows `source`: a change starts the sender's clock and timestamp
+    /// Follows `timing`: a change starts the sender's clock and timestamp
     /// over, since what was heard before it was not meant for this. The time
     /// of the last event is kept, so the events stay in order across it.
-    fn follow(&mut self, source: InputTiming) {
-        if source != self.following {
+    fn follow(&mut self, timing: InputTiming) {
+        if timing != self.following {
             self.clock.reset();
-            self.following = source;
+            self.following = timing;
         }
     }
 
@@ -175,7 +166,7 @@ pub struct InputProducerHandle {
     /// sends (it is waiting for an Identity Reply): shared with the port's entry.
     hear_sysex: Arc<AtomicBool>,
     /// Where event times come from: shared with the port's entry.
-    source: Arc<SharedSource>,
+    timing: Arc<SharedTiming>,
     jr: JrInput,
 }
 
@@ -251,7 +242,7 @@ impl InputProducerHandle {
             }
             return Pushed::Diverted;
         }
-        self.jr.follow(self.source.get());
+        self.jr.follow(self.timing.get());
         if event.is_jr() {
             if let Ok(Message::Utility(utility)) = event.decode() {
                 self.jr.take(utility, timestamp);
@@ -328,7 +319,7 @@ pub(crate) struct HardwareMidiInput {
     stream: Mutex<HeapCons<Ump>>,
     stream_lost: Arc<AtomicU64>,
     hear_sysex: Arc<AtomicBool>,
-    source: Arc<SharedSource>,
+    timing: Arc<SharedTiming>,
     jr_counts: Arc<JrCounts>,
 }
 
@@ -338,7 +329,7 @@ impl HardwareMidiInput {
         let active = Arc::new(AtomicBool::new(true));
         let stream_lost = Arc::new(AtomicU64::new(0));
         let hear_sysex = Arc::new(AtomicBool::new(false));
-        let source = Arc::new(SharedSource::new());
+        let timing = Arc::new(SharedTiming::new());
         let jr_counts = Arc::new(JrCounts::default());
         let (stream_in, stream_out) = HeapRb::<Ump>::new(STREAM_CAPACITY).split();
         (
@@ -349,7 +340,7 @@ impl HardwareMidiInput {
                 stream: Mutex::new(stream_out),
                 stream_lost: Arc::clone(&stream_lost),
                 hear_sysex: Arc::clone(&hear_sysex),
-                source: Arc::clone(&source),
+                timing: Arc::clone(&timing),
                 jr_counts: Arc::clone(&jr_counts),
             },
             InputProducerHandle {
@@ -358,7 +349,7 @@ impl HardwareMidiInput {
                 stream: stream_in,
                 stream_lost,
                 hear_sysex,
-                source,
+                timing,
                 jr: JrInput::new(jr_counts),
             },
         )
@@ -390,8 +381,8 @@ impl HardwareMidiInput {
     }
 
     /// Where the port's event times come from from now on.
-    pub(crate) fn set_timing(&self, source: InputTiming) {
-        self.source.set(source);
+    pub(crate) fn set_timing(&self, timing: InputTiming) {
+        self.timing.set(timing);
     }
 
     /// The oldest Stream message held, if any.

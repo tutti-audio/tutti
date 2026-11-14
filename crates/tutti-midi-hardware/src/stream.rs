@@ -88,20 +88,36 @@ use tutti_midi_device::DeviceId;
 /// what the input edge reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[repr(u8)]
 pub enum InputTiming {
     /// The OS's arrival stamp of each event. The device is asked for no JR
     /// Timestamps, and one that sends them anyway has them ignored.
-    Arrival,
+    Arrival = 0,
     /// The device's JR Timestamps (M2-104 §7.2.2), where its configuration says
     /// it sends them: it is asked to (TXJR), and a device that agrees has each
     /// event placed at the time its timestamp maps to on the host's clock. A
     /// device that does not agree is timed by arrival, as [`Arrival`] is.
     ///
     /// [`Arrival`]: Self::Arrival
-    JitterReduction,
+    JitterReduction = 1,
 }
 
 impl InputTiming {
+    /// The timing as a byte a port holds in an atomic: its discriminant.
+    pub(crate) const fn to_raw(self) -> u8 {
+        self as u8
+    }
+
+    /// The timing a byte holds, `None` for a byte [`to_raw`](Self::to_raw)
+    /// never made.
+    pub(crate) const fn from_raw(raw: u8) -> Option<Self> {
+        match raw {
+            0 => Some(Self::Arrival),
+            1 => Some(Self::JitterReduction),
+            _ => None,
+        }
+    }
+
     /// The configuration the session asks every Endpoint for: the MIDI 2.0
     /// Protocol where it is offered, JR Timestamps only as this asks for them
     /// and never to the device (RXJR).
