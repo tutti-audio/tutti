@@ -206,6 +206,8 @@ pub use resample::Resample;
 mod normalize;
 pub use normalize::Normalize;
 
+mod planar;
+
 mod spill;
 
 mod graph;

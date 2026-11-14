@@ -92,7 +92,7 @@ fn the_gain_ramp_is_continuous_across_block_boundaries() {
     for speakers in [2u16, 6] {
         for width in [0.0f32, 1.0] {
             let mut node = prep(
-                VbapPannerNode::for_topology(&ChannelTopology::for_width(ChannelLayout::from(
+                VbapPannerNode::for_topology(&ChannelTopology::assumed(ChannelLayout::from(
                     speakers,
                 )))
                 .unwrap(),

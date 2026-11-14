@@ -3,10 +3,10 @@
 //!
 //! Every figure is analytic: a `Const` writes a known value per channel, and
 //! where a fold is involved the expected frame is written out from the ITU
-//! rules (`M3DB`), not read from another render.
+//! rules (`MINUS_3_DB`), not read from another render.
 
-use tutti_buffers::{FoldError, InterleavedMut, M3DB};
-use tutti_graph::ForkByClone;
+use tutti_buffers::{Float, FoldError, InterleavedMut};
+use tutti_graph::{ForkByClone, RootError};
 use tutti_nodes::testing::Const;
 use tutti_session::{Error, OutPort, Root, RootTopologyStatus, Session, SessionBuilder};
 use tutti_types::MaxBlock;
@@ -72,7 +72,10 @@ fn a_declared_surround_root_folds_by_the_surround_rules() {
     feed(&mut s, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     assert_eq!(
         heard(&mut s, 2),
-        [1.0 + M3DB * 3.0 + M3DB * 5.0, 2.0 + M3DB * 3.0 + M3DB * 6.0]
+        [
+            1.0 + f32::MINUS_3_DB * 3.0 + f32::MINUS_3_DB * 5.0,
+            2.0 + f32::MINUS_3_DB * 3.0 + f32::MINUS_3_DB * 6.0
+        ]
     );
     let swapped = ChannelTopology::new([
         Speaker::FrontRight,
@@ -85,7 +88,10 @@ fn a_declared_surround_root_folds_by_the_surround_rules() {
     s.declare_root_topology(Some(swapped)).unwrap();
     assert_eq!(
         heard(&mut s, 2),
-        [2.0 + M3DB * 3.0 + M3DB * 5.0, 1.0 + M3DB * 3.0 + M3DB * 6.0]
+        [
+            2.0 + f32::MINUS_3_DB * 3.0 + f32::MINUS_3_DB * 5.0,
+            1.0 + f32::MINUS_3_DB * 3.0 + f32::MINUS_3_DB * 6.0
+        ]
     );
 }
 
@@ -103,7 +109,10 @@ fn an_undeclared_root_is_as_it_was() {
     let mut quad = offline(Session::builder().outputs_floor(ChannelLayout::QUAD), 2).unwrap();
     assert_eq!(quad.graph_ref().outputs(), 4);
     feed(&mut quad, &[0.1, 0.2, 0.3, 0.4]);
-    assert_eq!(heard(&mut quad, 2), [0.1 + M3DB * 0.3, 0.2 + M3DB * 0.4]);
+    assert_eq!(
+        heard(&mut quad, 2),
+        [0.1 + f32::MINUS_3_DB * 0.3, 0.2 + f32::MINUS_3_DB * 0.4]
+    );
 }
 
 /// A declaration the device cannot place is refused, at build and after, and
@@ -166,7 +175,7 @@ fn a_declaration_sets_the_roots_width_and_the_width_cannot_leave_it() {
     let err = s.graph().widen_outputs(5).unwrap_err();
     assert_eq!(
         err,
-        FoldError::RootWidth {
+        RootError::Width {
             declared: ChannelLayout::QUAD,
             requested: ChannelLayout::from(5u16)
         }
@@ -194,7 +203,7 @@ fn a_refusal_is_a_status_not_a_log_line() {
     let Error::Output(refusal) = e else { panic!() };
     assert_eq!(
         s.root_topology_status(),
-        RootTopologyStatus::Refused(refusal)
+        RootTopologyStatus::Refused(refusal.into())
     );
     assert_eq!(s.requested_root_topology(), Some(&buses(4)), "kept");
     assert_eq!(s.root_topology(), None, "the previous stands");
@@ -207,7 +216,10 @@ fn a_refusal_is_a_status_not_a_log_line() {
     let max = tutti_graph::MAX_ROOT_CHANNELS;
     let err = s.graph().widen_outputs(max + 8).unwrap_err();
     assert_eq!(s.graph_ref().outputs(), max);
-    assert!(matches!(err, FoldError::Unplaced { channel, .. } if channel == max));
+    assert!(matches!(
+        err,
+        RootError::Fold(FoldError::Unplaced { channel, .. }) if channel == max
+    ));
     assert_eq!(s.root_topology_status(), RootTopologyStatus::Refused(err));
     s.graph().widen_outputs(max).unwrap();
     assert_eq!(s.root_topology_status(), RootTopologyStatus::Applied);

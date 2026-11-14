@@ -23,9 +23,10 @@
 //! an interleaved view of the implementor's format, on a clock the graph does
 //! not keep. A [`Pull`] says whether an empty read is late, finished or broken.
 //!
-//! [`convert()`] changes format, [`interleave`] and [`deinterleave`] change
-//! layout; a mismatch is an error, never a short copy. [`Fold`] turns one
-//! channel topology into another, built once on the control side.
+//! [`convert()`] and [`convert_planes`] change format, [`interleave`] and
+//! [`deinterleave`] change layout and format in one pass; a mismatch is an
+//! error, never a short copy. [`Fold`] turns one channel topology into
+//! another, built once on the control side.
 //!
 //! ```
 //! use tutti_buffers::{convert, deinterleave, Interleaved, InterleavedMut, PlanesMut};
@@ -50,6 +51,7 @@
 //! ```
 #![forbid(unsafe_code)]
 
+mod bounds;
 mod convert;
 mod edge;
 mod error;
@@ -61,13 +63,13 @@ mod planes;
 mod sample;
 mod stereo;
 
-pub use convert::{convert, deinterleave, interleave};
+pub use convert::{convert, convert_planes, deinterleave, interleave};
 pub use edge::{FiniteSource, Pull, Sink, SinkFailed, Source, Stop};
 pub use error::BufferError;
-pub use fold::{Fold, FoldEnd, FoldError, M3DB};
+pub use fold::{Fold, FoldEnd, FoldError};
 pub use i24::{I24, I24OutOfRange};
-pub use interleaved::{Interleaved, InterleavedMut};
+pub use interleaved::{Frames, FramesMut, Interleaved, InterleavedMut};
 pub use mono::{Mono, MonoMut};
-pub use planes::{Planes, PlanesMut};
-pub use sample::{Float, Sample};
+pub use planes::{PlaneIter, PlaneIterMut, Planes, PlanesMut};
+pub use sample::{Float, Sample, SampleFormat};
 pub use stereo::StereoPlanes;

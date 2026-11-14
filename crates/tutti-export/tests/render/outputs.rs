@@ -93,7 +93,7 @@ fn finish(g: GraphBuilder) -> RenderGraph {
 }
 
 fn stereo_placement() -> Placement {
-    Placement::new(ChannelTopology::for_width(ChannelLayout::STEREO))
+    Placement::new(ChannelTopology::assumed(ChannelLayout::STEREO))
 }
 
 fn job(frames: usize) -> Job {
@@ -402,7 +402,7 @@ fn a_tap_that_cannot_be_placed_is_a_named_error() {
         &FrozenClock,
         vec![Output::tap(
             wide,
-            Placement::new(ChannelTopology::for_width(ChannelLayout::MONO)),
+            Placement::new(ChannelTopology::assumed(ChannelLayout::MONO)),
             wav(&dir.path().join("a.wav"), Pcm::Int16),
         )],
         &mut Control::none(),

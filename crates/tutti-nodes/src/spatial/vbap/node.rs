@@ -34,7 +34,7 @@ struct Held {
 /// [`surround_5_1`](Self::surround_5_1), [`surround_7_1`](Self::surround_7_1),
 /// [`atmos_7_1_4`](Self::atmos_7_1_4)), or from a topology
 /// ([`for_topology`](Self::for_topology), with
-/// [`ChannelTopology::for_width`] for a bare count). It is a graph node
+/// [`ChannelTopology::assumed`] for a bare count). It is a graph node
 /// (`tutti_graph::Node` and [`ParamNode`]); inserting it hands back its
 /// [`ParamSet`] ([`UnitParam::Azimuth`], [`Elevation`](tutti_types::UnitParam::Elevation),
 /// [`Spread`](tutti_types::UnitParam::Spread) and [`StereoWidth`](tutti_types::UnitParam::StereoWidth)),
@@ -182,7 +182,7 @@ impl VbapPannerNode {
             12 => SpeakerLayout::atmos_7_1_4(),
             _ => return Err(VbapError::NoBed(topology.clone())),
         };
-        if ChannelTopology::assumed(layout).as_ref() != Some(topology) {
+        if ChannelTopology::assumed(layout) != *topology {
             return Err(VbapError::NoBed(topology.clone()));
         }
         Ok(Self::on_bed(layout, speakers))
@@ -191,7 +191,7 @@ impl VbapPannerNode {
     /// A panner over `speakers`, whose channels run in the engine's order for
     /// `layout`. The bed picks the angles; the order picks the channels.
     fn on_bed(layout: ChannelLayout, speakers: SpeakerLayout) -> Self {
-        let topology = ChannelTopology::for_width(layout);
+        let topology = ChannelTopology::assumed(layout);
         Self {
             panner: VbapPanner::new(speakers),
             layout,
@@ -202,8 +202,11 @@ impl VbapPannerNode {
             sample_rate: SampleRate::SR_48K,
             speaker_of_channel: speaker_of_channel(&topology),
             ramp_from: None,
-            fold: Fold::widths(ChannelLayout::STEREO, ChannelLayout::MONO)
-                .expect("stereo folds to mono"),
+            fold: Fold::between(
+                &ChannelTopology::assumed(ChannelLayout::STEREO),
+                &ChannelTopology::assumed(ChannelLayout::MONO),
+            )
+            .expect("stereo folds to mono"),
             good: Held {
                 azimuth: LastGood::fixed(Azimuth::FRONT.get()),
                 elevation: LastGood::fixed(Elevation::LEVEL.get()),

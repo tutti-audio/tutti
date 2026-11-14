@@ -199,7 +199,7 @@ pub fn finish(state: &SilenceState) -> Vec<Region> {
 /// The signal regions of a whole buffer: [`step_silence`] over it, then
 /// [`finish`].
 ///
-/// Mono. Fold a multichannel buffer first (`Interleaved::fold_into`), or take the
+/// Mono. Fold a multichannel buffer first (`Fold::fold`), or take the
 /// union of per-channel results.
 pub fn strip_silence(cfg: &SilenceConfig, samples: &[f32]) -> Vec<Region> {
     let mut state = SilenceState::new();

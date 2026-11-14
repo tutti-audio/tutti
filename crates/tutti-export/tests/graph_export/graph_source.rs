@@ -439,9 +439,9 @@ fn a_surround_mix_folds_to_every_width() {
     for width in [ChannelLayout::STEREO, ChannelLayout::MONO] {
         let got = buffers(built(quad_vbap()), &config(Pcm::Float32, width)).into_planes();
         let n = width.count() as usize;
-        // The ITU quad fold, written out: `Lo = FL + M3DB·BL`, `Ro = FR + M3DB·BR`,
-        // and the mono file is `(Lo + Ro)·M3DB`.
-        let m = tutti_buffers::M3DB;
+        // The ITU quad fold, written out: `Lo = FL + f32::MINUS_3_DB·BL`, `Ro = FR + f32::MINUS_3_DB·BR`,
+        // and the mono file is `(Lo + Ro)·f32::MINUS_3_DB`.
+        let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
         let mut folded = vec![Vec::with_capacity(FRAMES); n];
         let [fl, fr, bl, br] = [0, 1, 2, 3].map(|c| &quad[c]);
         for (((&fl, &fr), &bl), &br) in fl.iter().zip(fr).zip(bl).zip(br) {

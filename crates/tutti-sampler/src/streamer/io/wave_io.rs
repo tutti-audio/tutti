@@ -144,7 +144,7 @@ mod tests {
         let mut narrow = [0.0f32; 2];
         frame_into(&six, 0, &mut narrow);
         // The ITU figures, in the fold's order of operations.
-        let m = tutti_buffers::M3DB;
+        let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
         assert_eq!(
             narrow,
             [1.0 + m * 3.0 + m * 5.0, 2.0 + m * 3.0 + m * 6.0],
