@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 use tutti_plugin_probe::describe;
-use tutti_plugin_types::{Loaded, MainThread};
+use tutti_plugin_types::Loaded;
 use tutti_vst2_host::Vst2Loaded;
 use tutti_vst2_test_plugin::ProcessCapture;
 
@@ -57,18 +57,18 @@ fn reset(path: &PathBuf) {
 
 #[test]
 fn a_probe_does_not_activate() {
-    let main = MainThread::claim().expect("one test, one process");
+    let main = tutti_fixtures::main_thread();
     let dir = tempfile::tempdir().unwrap();
     let path = plugin(&dir);
 
     // Control: a real activation is seen.
     reset(&path);
-    let loaded = Vst2Loaded::load(&main, &path).expect("loads");
+    let loaded = Vst2Loaded::load(main, &tutti_fixtures::detached_work(), &path).expect("loads");
     let prepare = tutti_plugin_types::Prepare::new(
         tutti_types::SampleRate::SR_48K,
         tutti_plugin_types::MaxBlock::new(tutti_types::Samples(64)).unwrap(),
     );
-    let active = loaded.activate(&main, prepare);
+    let active = loaded.activate(main, prepare);
     assert!(active.is_ok(), "the control activation");
     assert_eq!(
         capture(&path).resume_count,
@@ -78,7 +78,7 @@ fn a_probe_does_not_activate() {
     drop(active);
 
     reset(&path);
-    let plugins = describe(&main, &path).expect("probes");
+    let plugins = describe(main, &path).expect("probes");
     let [descriptor] = plugins.as_slice() else {
         panic!("a plugin that is no shell is one plugin: {plugins:?}");
     };

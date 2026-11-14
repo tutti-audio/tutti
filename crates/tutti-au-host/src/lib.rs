@@ -75,14 +75,15 @@
 //! # {
 //! use tutti_au_host::component::enumerate_components_of_type;
 //! use tutti_au_host::{AuLoaded, AuType};
-//! use tutti_plugin_types::{Loaded, MainThread, MaxBlock, Prepare, SampleRate, Samples};
+//! use tutti_plugin_types::{Loaded, MainThreadMarker, MainWork, MaxBlock, Prepare, SampleRate, Samples};
 //!
 //! let effects = enumerate_components_of_type(AuType::Effect);
 //! if let Some(info) = effects.first() {
-//!     let main = MainThread::claim().unwrap();
-//!     let au = AuLoaded::new(info.component, SampleRate::SR_44K1, 512).unwrap();
+//!     let main = MainThreadMarker::new().unwrap();
+//!     let (_collector, work) = MainWork::new();
+//!     let au = AuLoaded::new(info.component, SampleRate::SR_44K1, 512, &work).unwrap();
 //!     let prepare = Prepare::new(SampleRate::SR_44K1, MaxBlock::of(Samples(512)));
-//!     let Ok((mut processor, _controller)) = au.activate(&main, prepare) else {
+//!     let Ok((mut processor, _controller)) = au.activate(main, prepare) else {
 //!         return;
 //!     };
 //!
@@ -102,11 +103,12 @@
 //! # {
 //! use tutti_au_host::component::enumerate_components_of_type;
 //! use tutti_au_host::{AuLoaded, AuType};
-//! use tutti_plugin_types::SampleRate;
+//! use tutti_plugin_types::{MainWork, SampleRate};
 //!
 //! # let effects = enumerate_components_of_type(AuType::Effect);
 //! # if let Some(info) = effects.first() {
-//! let au = AuLoaded::new(info.component, SampleRate::SR_44K1, 512).unwrap();
+//! let (_collector, work) = MainWork::new();
+//! let au = AuLoaded::new(info.component, SampleRate::SR_44K1, 512, &work).unwrap();
 //!
 //! // `Samples` and `Seconds`, not bare numbers: the engine's unit newtypes reach
 //! // this far, and stop at the C ABI below them.
@@ -182,7 +184,7 @@
 //! `AuProcessor::render` (and `render_f32`/`render_f64`) belong on the audio thread and does not allocate in the
 //! steady state: render buffers are sized at initialization. Loading,
 //! initialization, state, presets and the editor belong on the main thread; the
-//! editor, state and preset-file methods take a `tutti_plugin_types::MainThread`,
+//! editor, state and preset-file methods take a `tutti_plugin_types::MainThreadMarker`,
 //! and `AuEditor` also asks the OS (`pthread_main_np`).
 //!
 //! [`AuComponentInfo`]: crate::AuComponentInfo

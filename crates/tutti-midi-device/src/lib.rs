@@ -67,6 +67,7 @@ mod connection;
 mod endpoint;
 mod id;
 mod inquiry;
+mod jr;
 mod learned;
 mod name;
 mod table;
@@ -83,29 +84,29 @@ pub use ci::{
     ManufacturerProfile, MaxSysexSize, MediaType, MessageText, ModeId, Muid, Nak, NotADataControl,
     NotADeviceId, NotAMuid, NotASysexSize, NotAVersion, NotInRange, NotValid, NotVendorName,
     NoteData, OpaqueBody, Outcome, PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN, PE_MAX_HEADER_LEN,
-    PE_TIMEOUT, PROCESS_TIMEOUT, PROFILE_TIMEOUT, PaginationFault, ParamPath, PartialError,
-    PartialUpdate, PeAction, PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram,
-    PeBasicChannelRx, PeBasicChannelTx, PeBodyError, PeBuffered, PeCall, PeCapabilities,
-    PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList, PeChange, PeChannel, PeChannelEntry,
-    PeChannelList, PeChannelMode, PeChunk, PeChunkError, PeCiMessage, PeCluster, PeColumn,
-    PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList, PeCurrentMode, PeData, PeDataError,
-    PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding, PeEndedBy, PeError, PeExpired, PeExtensions,
-    PeExternalSync, PeExtra, PeExtraError, PeFlowControl, PeGet, PeHeader, PeHeaderError,
-    PeHeaderTooLong, PeHeld, PeInitiator, PeJson, PeJsonError, PeJsonSchema, PeKind, PeLink,
-    PeLocalOn, PeMessage, PeMessageKind, PeMidiMode, PeModeEntry, PeModeList, PeNotification,
-    PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry, PeProgramList, PeReassembler,
-    PeReassemblyError, PeReassemblyLimits, PeReceived, PeRefused, PeReply, PeRequest, PeRequestId,
-    PeResource, PeResourceList, PeResponse, PeSet, PeSetScope, PeSettings, PeSignal, PeState,
-    PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeStep, PeSubscribed, PeSubscription,
-    PeTerminator, PeText, PeTransaction, PeUnreadable, PeUpdateCommand, PeVersion, Priority,
-    ProcessAction, ProcessError, ProcessFeatures, ProcessInitiator, ProfileAction, ProfileChange,
-    ProfileChannels, ProfileDataError, ProfileEntry, ProfileId, ProfileInitiator, ProfileLists,
-    ProfileState, ProfileTable, ProfileTarget, PropertyName, PublishError, RefusedAt,
-    ReportRequest, ReportScope, Request, RequestError, RequestRefused, ResIdUse, ResourceAction,
-    ResourceDefaults, ResourceEntry, ResourceEvent, ResourceFailure, ResourceGet, ResourceId,
-    ResourceInitiator, ResourceName, ResourceResponder, ResourceSet, ResourceStore, ResourceTarget,
-    ResponderAction, ResponderEvent, ResponderSettings, RestoreError, RoleName, SUB_ID2_ACK,
-    SUB_ID2_DISCOVERY, SUB_ID2_DISCOVERY_REPLY, SUB_ID2_ENDPOINT_INQUIRY, SUB_ID2_ENDPOINT_REPLY,
+    PE_TIMEOUT, PEER_REPLY_TIMEOUT, PaginationFault, ParamPath, PartialError, PartialUpdate,
+    PeAction, PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx,
+    PeBasicChannelTx, PeBodyError, PeBuffered, PeCall, PeCapabilities, PeCapabilitiesFailure,
+    PeChCtrlEntry, PeChCtrlList, PeChange, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode,
+    PeChunk, PeChunkError, PeCiMessage, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry,
+    PeCtrlMapList, PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo,
+    PeEncoding, PeEndedBy, PeError, PeExpired, PeExtensions, PeExternalSync, PeExtra, PeExtraError,
+    PeFlowControl, PeGet, PeHeader, PeHeaderError, PeHeaderTooLong, PeHeld, PeInitiator, PeJson,
+    PeJsonError, PeJsonSchema, PeKind, PeLink, PeLocalOn, PeMessage, PeMessageKind, PeMidiMode,
+    PeModeEntry, PeModeList, PeNotification, PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry,
+    PeProgramList, PeReassembler, PeReassemblyError, PeReassemblyLimits, PeReceived, PeRefused,
+    PeReply, PeRequest, PeRequestId, PeResource, PeResourceList, PeResponse, PeSet, PeSetScope,
+    PeSettings, PeSignal, PeState, PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeStep,
+    PeSubscribed, PeSubscription, PeTerminator, PeText, PeTransaction, PeUnreadable,
+    PeUpdateCommand, PeVersion, Priority, ProcessAction, ProcessError, ProcessFeatures,
+    ProcessInitiator, ProfileAction, ProfileChange, ProfileChannels, ProfileDataError,
+    ProfileEntry, ProfileId, ProfileInitiator, ProfileLists, ProfileState, ProfileTable,
+    ProfileTarget, PropertyName, PublishError, RefusedAt, ReportRequest, ReportScope, Request,
+    RequestError, RequestRefused, ResIdUse, ResourceAction, ResourceDefaults, ResourceEntry,
+    ResourceEvent, ResourceFailure, ResourceGet, ResourceId, ResourceInitiator, ResourceName,
+    ResourceResponder, ResourceSet, ResourceStore, ResourceTarget, ResponderAction, ResponderEvent,
+    ResponderSettings, RestoreError, RoleName, SUB_ID2_ACK, SUB_ID2_DISCOVERY,
+    SUB_ID2_DISCOVERY_REPLY, SUB_ID2_ENDPOINT_INQUIRY, SUB_ID2_ENDPOINT_REPLY,
     SUB_ID2_INVALIDATE_MUID, SUB_ID2_MESSAGE_REPORT_END, SUB_ID2_MESSAGE_REPORT_INQUIRY,
     SUB_ID2_MESSAGE_REPORT_REPLY, SUB_ID2_NAK, SUB_ID2_PE_CAPABILITIES_INQUIRY,
     SUB_ID2_PE_CAPABILITIES_REPLY, SUB_ID2_PE_NOTIFY, SUB_ID2_PROCESS_CAPABILITIES_INQUIRY,
@@ -127,6 +128,7 @@ pub use endpoint::{
 };
 pub use id::{DeviceId, DeviceInfo, EndpointId, Identity, PortDirection};
 pub use inquiry::{INQUIRY_ATTEMPTS, INQUIRY_TIMEOUT, IdentityInquiry, InquiryAction};
+pub use jr::{ClockHeard, JrLock, JrReceiver, JrTime, TICK_HZ, Unmapped};
 pub use learned::{Learned, Match, SavedDevice};
 pub use name::{BlockName, EndpointName, Name, NameError, ProductInstanceId};
 pub use table::{BindPolicy, DeviceEvent, DeviceTable, OsChange, OsDevice, Resolved};

@@ -2,16 +2,16 @@
 //! plugin format requires on the UI thread, and the servicing they need.
 //!
 //! A [`Session`] is `Send` and has no main thread of its own: a headless
-//! session has none to be handed. A caller that has one (it claimed it with
-//! [`MainThread::claim`], once, on its UI thread) makes a [`MainSession`] with
+//! session has none to be handed. A caller that has one (the app makes it once,
+//! on its main thread, with [`MainThreadMarker::new`]) makes a [`MainSession`] with
 //! [`Session::main`], which is `&mut Session` and that proof, and nothing else.
 //!
 //! What only the main thread may do is reachable only through the view:
 //!
 //! - [`MainSession::update`] runs [`Session::update`], then drops what the
 //!   session retired (a removed plugin, the outgoing plugin of a crossfade: the
-//!   graveyard), runs the work other threads handed to the main thread
-//!   (`tutti_plugin_types::run_deferred`) and services every open editor.
+//!   graveyard), runs the work other threads handed to the session
+//!   ([`MainWork`](tutti_plugin_types::MainWork)) and services every open editor.
 //! - [`MainPlugin::editor`] is the editor: `open`, `resize`, `rescale`, `close`.
 //! - [`MainPlugin::presets`] lists and loads presets.
 //!
@@ -24,9 +24,9 @@
 //! ```no_run
 //! # use tutti_session::Session;
 //! # use tutti_graph::NodeKey;
-//! # use tutti_plugin_types::{ContentScale, MainThread};
+//! # use tutti_plugin_types::{ContentScale, MainThreadMarker};
 //! # fn open(session: &mut Session, node: NodeKey, window: &impl raw_window_handle::HasWindowHandle) {
-//! let main = MainThread::claim().expect("the UI thread claims first");
+//! let main = MainThreadMarker::new().expect("the app's main thread makes the token");
 //! let mut ui = session.main(main);
 //! let _events = ui.update();
 //! let _ = ui.plugin(node).unwrap().editor().open(window, ContentScale::IDENTITY);
@@ -62,7 +62,8 @@ use dpi::Size;
 use raw_window_handle::HasWindowHandle;
 use tutti_graph::NodeKey;
 use tutti_plugin_types::{
-    ContentScale, EditorError, Features, KeyEvent, KeyUse, MainThread, PresetError, WindowHandle,
+    ContentScale, EditorError, Features, KeyEvent, KeyUse, MainThreadMarker, PresetError,
+    WindowHandle,
 };
 
 use crate::plugin::HostedPlugin;
@@ -82,14 +83,14 @@ use crate::{NoSuchNode, PluginChange, PluginEvent, Session, SessionEvent};
 #[derive(Debug)]
 pub struct MainSession<'a> {
     session: &'a mut Session,
-    main: MainThread,
+    main: MainThreadMarker,
 }
 
 impl Session {
     /// The main-thread view of this session, for the caller that holds the
-    /// proof ([`MainThread::claim`]). `MainThread` is a `Copy`, zero-sized
+    /// proof ([`MainThreadMarker::new`]). `MainThreadMarker` is a `Copy`, zero-sized
     /// value passed as it is.
-    pub fn main(&mut self, main: MainThread) -> MainSession<'_> {
+    pub fn main(&mut self, main: MainThreadMarker) -> MainSession<'_> {
         MainSession {
             session: self,
             main,
@@ -111,7 +112,7 @@ impl MainSession<'_> {
     }
 
     /// The proof this view holds.
-    pub fn proof(&self) -> MainThread {
+    pub fn proof(&self) -> MainThreadMarker {
         self.main
     }
 
@@ -127,14 +128,14 @@ impl MainSession<'_> {
         let main = self.main;
         // Before the servicing: a plugin the update removed has no editor left
         // to service.
-        self.session.graph.graveyard.exhume(&main);
-        tutti_plugin_types::run_deferred(&main);
+        self.session.graph.graveyard.exhume(main);
+        self.session.main_work.run(main);
         for (&node, hosted) in &self.session.graph.plugins {
             if !hosted.editor_open {
                 continue;
             }
-            hosted.handle.editor_idle(&main);
-            if let Some(size) = hosted.handle.poll_editor_resize_request(&main) {
+            hosted.handle.editor_idle(main);
+            if let Some(size) = hosted.handle.poll_editor_resize_request(main) {
                 out.push(SessionEvent::Plugin(PluginEvent {
                     node,
                     change: PluginChange::EditorWantsSize(size),
@@ -173,7 +174,7 @@ impl MainSession<'_> {
 pub struct MainPlugin<'a> {
     node: NodeKey,
     hosted: &'a mut HostedPlugin,
-    main: MainThread,
+    main: MainThreadMarker,
     figures: Figures,
 }
 
@@ -227,7 +228,7 @@ pub enum Opened {
 #[derive(Debug)]
 pub struct EditorView<'a> {
     hosted: &'a mut HostedPlugin,
-    main: MainThread,
+    main: MainThreadMarker,
 }
 
 impl EditorView<'_> {
@@ -255,12 +256,12 @@ impl EditorView<'_> {
     ) -> Result<Opened, EditorError> {
         let handle = &self.hosted.handle;
         if handle.loaded().features.contains(Features::EDITOR_FLOATING) {
-            handle.open_floating_editor(&self.main)?;
+            handle.open_floating_editor(self.main)?;
             self.hosted.editor_open = true;
             return Ok(Opened::Floating);
         }
         let parent = WindowHandle::from_window(window)?;
-        let size = handle.open_editor(&self.main, parent, scale)?;
+        let size = handle.open_editor(self.main, parent, scale)?;
         self.hosted.editor_open = true;
         Ok(Opened::Embedded(size))
     }
@@ -276,7 +277,7 @@ impl EditorView<'_> {
     ///
     /// No editor is open, or the plugin cannot resize.
     pub fn resize(&mut self, requested: Size) -> Result<Size, EditorError> {
-        self.hosted.handle.set_editor_size(&self.main, requested)
+        self.hosted.handle.set_editor_size(self.main, requested)
     }
 
     /// Tells the open editor its window's backing-store scale changed (it moved
@@ -291,7 +292,7 @@ impl EditorView<'_> {
     /// such as Cocoa's): there is nothing to do, and the host keeps its window
     /// as it is. Another error: no editor is open, or the plugin refused.
     pub fn rescale(&mut self, scale: ContentScale) -> Result<(), EditorError> {
-        self.hosted.handle.set_editor_scale(&self.main, scale)
+        self.hosted.handle.set_editor_scale(self.main, scale)
     }
 
     /// Forwards a key the host's window received to the open editor.
@@ -301,13 +302,13 @@ impl EditorView<'_> {
     /// [`EditorError::KeysUnsupported`] where the format takes no keys in its editor.
     /// Another error: no editor is open, or the plugin refused.
     pub fn editor_key(&mut self, event: KeyEvent) -> Result<KeyUse, EditorError> {
-        self.hosted.handle.editor_key(&self.main, event)
+        self.hosted.handle.editor_key(self.main, event)
     }
 
     /// Closes the editor; the plugin stays loaded. Nothing happens when none
     /// is open.
     pub fn close(&mut self) {
-        self.hosted.handle.close_editor(&self.main);
+        self.hosted.handle.close_editor(self.main);
         self.hosted.editor_open = false;
     }
 }
