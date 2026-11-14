@@ -43,12 +43,16 @@
 //!
 //! The MIDI 2.0 Protocol where the device offers it, else MIDI 1.0
 //! ([`Connection::with_wanted`] narrows the request to what the Endpoint
-//! supports), with **JR Timestamps off both ways**. Input time comes from the
-//! OS's arrival stamp (`InputProducerHandle::push`), which JR would only
-//! repeat, and the input edge drops a JR Clock or JR Timestamp a device sends
-//! anyway; JR on the output side is the session's `UmpOut` stamping, which
-//! follows the configuration the negotiation settled (`rx_jr`), so a device
-//! that is not asked is not sent it, and one that turns it on itself is.
+//! supports), with **JR Timestamps off to the device** (RXJR is never asked
+//! for) and, from the device, off unless the input was opened with
+//! [`InputTiming::JitterReduction`]. Input time then comes from the OS's
+//! arrival stamp (`InputProducerHandle::push`), and the input edge ignores a JR
+//! Clock or JR Timestamp a device sends anyway; with
+//! [`JitterReduction`](InputTiming::JitterReduction) TXJR is asked for, and a
+//! device that settles on it has its events placed by its JR Timestamps. JR on
+//! the output side is the session's `UmpOut` stamping, which follows the
+//! configuration the negotiation settled (`rx_jr`), so a device that is not
+//! asked is not sent it, and one that turns it on itself is.
 //!
 //! # After the settle
 //!
@@ -57,7 +61,8 @@
 //! not declare its Function Blocks static) a Function Block Info or Name
 //! changes a block (`Connection::on_message`, `Action::Changed`). A change is
 //! returned by [`MidiSession::poll`](crate::MidiSession::poll) as the settle
-//! is, and what the output sends in follows it.
+//! is, and what the output sends in follows it, and where the input's event
+//! times come from follows its TXJR.
 
 use std::time::Instant;
 
@@ -79,12 +84,60 @@ use crate::process::{self, ProcessChange, ReportAsk, ReportError};
 use crate::profiles::{ProfileError, ProfileSwitch, ProfilesChange, Snapshot};
 use tutti_midi_device::DeviceId;
 
-/// The configuration the session asks every Endpoint for (see the module).
-const WANTED: StreamConfig = StreamConfig {
-    protocol: Protocol::Midi2,
-    rx_jr: false,
-    tx_jr: false,
-};
+/// Where an input's event times come from: what a device is asked to send, and
+/// what the input edge reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+#[repr(u8)]
+pub enum InputTiming {
+    /// The OS's arrival stamp of each event. The device is asked for no JR
+    /// Timestamps, and one that sends them anyway has them ignored.
+    Arrival = 0,
+    /// The device's JR Timestamps (M2-104 §7.2.2), where its configuration says
+    /// it sends them: it is asked to (TXJR), and a device that agrees has each
+    /// event placed at the time its timestamp maps to on the host's clock. A
+    /// device that does not agree is timed by arrival, as [`Arrival`] is.
+    ///
+    /// [`Arrival`]: Self::Arrival
+    JitterReduction = 1,
+}
+
+impl InputTiming {
+    /// The timing as a byte a port holds in an atomic: its discriminant.
+    pub(crate) const fn to_raw(self) -> u8 {
+        self as u8
+    }
+
+    /// The timing a byte holds, `None` for a byte [`to_raw`](Self::to_raw)
+    /// never made.
+    pub(crate) const fn from_raw(raw: u8) -> Option<Self> {
+        match raw {
+            0 => Some(Self::Arrival),
+            1 => Some(Self::JitterReduction),
+            _ => None,
+        }
+    }
+
+    /// The configuration the session asks every Endpoint for: the MIDI 2.0
+    /// Protocol where it is offered, JR Timestamps only as this asks for them
+    /// and never to the device (RXJR).
+    const fn wanted(self) -> StreamConfig {
+        StreamConfig {
+            protocol: Protocol::Midi2,
+            rx_jr: false,
+            tx_jr: matches!(self, Self::JitterReduction),
+        }
+    }
+
+    /// Where the events of a device configured as `config` are timed from.
+    pub(crate) const fn applied(self, config: StreamConfig) -> Self {
+        if matches!(self, Self::JitterReduction) && config.tx_jr {
+            Self::JitterReduction
+        } else {
+            Self::Arrival
+        }
+    }
+}
 
 /// How a device's [`DeviceStream`] came to be known.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -175,6 +228,7 @@ pub(crate) struct Negotiation {
     run: Run,
     inquire: Inquire,
     ci: Ci,
+    timing: InputTiming,
 }
 
 /// What one [`Negotiation::poll`] did.
@@ -259,7 +313,12 @@ impl Negotiation {
     /// The negotiation for a device the OS describes as `os`, on `out` when it
     /// has an output. It asks only a UMP Endpoint that has an output; any
     /// other is [`Basis::Described`] at once.
-    pub(crate) fn new(device: DeviceId, os: UmpCapability, out: Option<OpenOutput>) -> Self {
+    pub(crate) fn new(
+        device: DeviceId,
+        os: UmpCapability,
+        out: Option<OpenOutput>,
+        timing: InputTiming,
+    ) -> Self {
         let asks = os.is_ump_endpoint() && out.is_some();
         let inquire = if !os.is_ump_endpoint() && out.is_some() {
             Inquire::Idle
@@ -283,6 +342,17 @@ impl Negotiation {
             run,
             inquire,
             ci: Ci::new(device),
+            timing,
+        }
+    }
+
+    /// The input is now opened with `timing`: a device that is asked what it is
+    /// is asked again, with the request `timing` makes, and is unsettled until
+    /// it answers. A device that is not asked has nothing to renegotiate.
+    pub(crate) fn retime(&mut self, timing: InputTiming) {
+        self.timing = timing;
+        if self.os.is_ump_endpoint() && self.out.is_some() {
+            self.run = Run::Idle;
         }
     }
 
@@ -423,7 +493,7 @@ impl Negotiation {
         let mut actions = Vec::new();
         match &mut self.run {
             Run::Idle => {
-                let (connection, first) = Connection::with_wanted(WANTED, now);
+                let (connection, first) = Connection::with_wanted(self.timing.wanted(), now);
                 actions.push(first);
                 self.run = Run::Asking(Box::new(connection));
             }

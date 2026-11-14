@@ -35,7 +35,7 @@ fn clock_maps_samples_to_ticks_monotonically() {
 fn clock_wraps_at_16_bits() {
     // At exactly the JR reference rate, one sample is one tick, so the wrap
     // boundary is integer-exact (no float rounding at the edge).
-    let clock = JrClock::new(SampleRate::of(JR_TICKS_PER_SECOND as f64));
+    let clock = JrClock::new(SampleRate::of(f64::from(TICK_HZ)));
     assert_eq!(clock.ticks_at(Frame::new(0xFFFF)), 0xFFFF);
     assert_eq!(
         clock.ticks_at(Frame::new(0x1_0000)),
@@ -257,64 +257,4 @@ fn stamp_block_prefixes_each_event() {
     assert!(matches!(out[1].1.key_event(), Some(KeyEvent::On(_))));
     assert_eq!(jr_timestamp_value(&out[2].1), Some(15_625));
     assert!(out[3].1.is_note_off());
-}
-
-#[test]
-fn stamp_then_observe_recovers_spacing() {
-    // Two events 0.25 s apart at 48 kHz → the receiver reconstructs ~0.25 s.
-    let sr = 48_000.0;
-    let stamper = JrStamper::new(SampleRate::of(sr));
-    let quarter_second = 12_000; // 0.25 s of samples at 48 kHz
-    let events = [
-        at(0, midi::note_on(MidiChannel::FIRST, 60, 0x8000)),
-        at(
-            quarter_second,
-            midi::note_on(MidiChannel::FIRST, 64, 0x8000),
-        ),
-    ];
-    let mut stream = Vec::new();
-    stamper.stamp_block(&events, Frame::new(0), &mut stream);
-
-    let mut rx = JrReceiver::new();
-    let mut recovered = Vec::new();
-    for ev in &stream {
-        if let Some(d) = rx.observe(&ev.1) {
-            recovered.push(d);
-        }
-    }
-    // First timestamp: no prior → no delay. Its note: ZERO. Second timestamp:
-    // delta ~0.25 s. Its note: ZERO.
-    // The meaningful reconstruction is the second timestamp's delta.
-    let nonzero: Vec<_> = recovered.iter().filter(|d| **d > Duration::ZERO).collect();
-    assert_eq!(nonzero.len(), 1, "exactly one inter-event gap");
-    let gap = *nonzero[0];
-    let expected = Duration::from_secs_f64(0.25);
-    let diff = gap.abs_diff(expected);
-    assert!(
-        diff < Duration::from_secs_f64(JR_SECONDS_PER_TICK * 2.0),
-        "recovered {gap:?} within one tick of {expected:?}"
-    );
-}
-
-#[test]
-fn observe_before_any_timestamp_is_none() {
-    let mut rx = JrReceiver::new();
-    assert_eq!(
-        rx.observe(&midi::note_on(MidiChannel::FIRST, 60, 0x8000)),
-        None
-    );
-}
-
-#[test]
-fn observe_handles_16bit_wrap() {
-    // Two timestamps straddling the wrap: 0xFFF0 → 0x0010 is a delta of 0x20.
-    let mut rx = JrReceiver::new();
-    assert_eq!(
-        rx.observe(&Ump::from(Message::Utility(Utility::JrTimestamp(0xFFF0)))),
-        None
-    );
-    let d = rx
-        .observe(&Ump::from(Message::Utility(Utility::JrTimestamp(0x0010))))
-        .expect("has a prior stamp");
-    assert_eq!(d, ticks_to_duration(0x20));
 }
