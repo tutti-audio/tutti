@@ -12,7 +12,7 @@
 //! A caller who holds planes and wants the reading for itself uses
 //! [`Normalize::gain_for_rendered`] and [`Rendered::apply_gain`](crate::Rendered::apply_gain).
 
-use tutti_buffers::{Interleaved, InterleavedMut};
+use tutti_buffers::{Interleaved, InterleavedMut, Planes, interleave};
 use tutti_dsp::DitherShape;
 use tutti_measure::{Loudness, LoudnessConfig, LoudnessState, finish_loudness, step_loudness};
 use tutti_types::{Amplitude, ChannelLayout, Db, SampleRate, Samples};
@@ -337,8 +337,9 @@ impl Measurer {
         self.scratch
             .resize(Samples(frames).interleaved_len(layout), 0.0);
         let mut scratch = InterleavedMut::new(&mut self.scratch, layout)?;
-        scratch.interleave_from(planes, Samples(span.start));
-        step_loudness(&self.cfg, &mut self.state, scratch.as_ref());
+        let span = Samples(span.start)..Samples(span.end);
+        interleave(Planes::from_vecs(planes)?.slice(span), scratch.reborrow())?;
+        step_loudness(&self.cfg, &mut self.state, scratch.as_interleaved());
         Ok(())
     }
 

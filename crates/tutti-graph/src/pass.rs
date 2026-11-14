@@ -19,8 +19,8 @@
 //!
 //! Built on the control side (a fold allocates); applied without allocating.
 
-use tutti_buffers::{Fold, FoldError};
-use tutti_types::{ChannelTopology, Speaker};
+use tutti_buffers::{Fold, FoldError, MonoMut, Planes};
+use tutti_types::{ChannelTopology, MAX_BUS_CHANNELS, Speaker};
 
 /// Why a node has no pass: what it would need to declare to be bypassed or
 /// mixed.
@@ -141,6 +141,7 @@ impl Pass {
         let reads = (0..outputs)
             .map(|o| {
                 fold.contributions(o)
+                    .into_iter()
                     .fold(0u16, |mask, (i, _)| mask | 1 << i)
             })
             .collect();
@@ -176,7 +177,7 @@ impl Pass {
     pub fn contributions(&self, c: usize) -> impl Iterator<Item = (usize, f32)> + use<> {
         let terms: Vec<(usize, f32)> = match (&self.fold, c < self.outputs) {
             (_, false) => Vec::new(),
-            (Some(fold), true) => fold.contributions(c).collect(),
+            (Some(fold), true) => fold.contributions(c),
             (None, true) => vec![(c, 1.0)],
         };
         terms.into_iter()
@@ -208,9 +209,19 @@ impl Pass {
         c: usize,
         out: &mut [f32],
     ) {
-        self.fold
-            .as_ref()
-            .expect("a pass that folds")
-            .planar_channel(src, c, out);
+        let fold = self.fold.as_ref().expect("a pass that folds");
+        // The aligned slots are separate slices; the table of them is a stack
+        // array, at most one bus wide.
+        let width = usize::from(fold.src_layout().count()).min(MAX_BUS_CHANNELS);
+        let mut table: [&[f32]; MAX_BUS_CHANNELS] = [&[]; MAX_BUS_CHANNELS];
+        for (i, slot) in table.iter_mut().enumerate().take(width) {
+            *slot = src(i);
+        }
+        let folded = Planes::new(&table[..width])
+            .and_then(|planes| fold.fold_planar_channel(planes, c, MonoMut::new(out)));
+        debug_assert!(
+            folded.is_ok(),
+            "the aligned slots are a bus wide and a block long: {folded:?}"
+        );
     }
 }

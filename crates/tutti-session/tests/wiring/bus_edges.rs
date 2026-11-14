@@ -5,7 +5,7 @@
 //! Every figure is analytic: constants of exactly representable values, so
 //! `0.5 L + 0.5 R` is exact in `f32`.
 
-use tutti_buffers::{FoldError, InterleavedMut, M3DB};
+use tutti_buffers::{Float, FoldError, InterleavedMut};
 use tutti_graph::{BusError, BusRef, BusSource, Buses, NodeKey, Unforkable};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_session::{
@@ -322,8 +322,8 @@ fn a_bus_into_the_declared_root_renders_the_itu_rows() {
     assert_eq!(g.bus_sources(Root).unwrap(), [BusSource::Node(bus(src))]);
     let [l, r] = stereo_block(&mut s);
     // The unity lane is a plain addend, the others weighted, in source order.
-    let left = ((0.0f32 + 0.5) + M3DB * 0.125) + M3DB * 0.0625;
-    let right = ((0.0f32 + 0.25) + M3DB * 0.125) + M3DB * 0.03125;
+    let left = ((0.0f32 + 0.5) + f32::MINUS_3_DB * 0.125) + f32::MINUS_3_DB * 0.0625;
+    let right = ((0.0f32 + 0.25) + f32::MINUS_3_DB * 0.125) + f32::MINUS_3_DB * 0.03125;
     assert!(all_are(&l, left), "{:?}", &l[..2]);
     assert!(all_are(&r, right), "{:?}", &r[..2]);
 

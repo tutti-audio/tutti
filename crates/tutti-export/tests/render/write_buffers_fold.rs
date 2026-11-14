@@ -3,11 +3,11 @@
 //! topology), never a truncation or a zero-pad, and an error for a width it
 //! cannot place.
 //!
-//! Every expected figure is the analytic ITU/Dolby coefficient (`M3DB` on the
+//! Every expected figure is the analytic ITU/Dolby coefficient (`MINUS_3_DB` on the
 //! centre and the surrounds, the LFE left out), not another render.
 
 use crate::support::{EncodeConfig, ExportConfig, write_buffers};
-use tutti_buffers::M3DB;
+use tutti_buffers::Float;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{ConfigError, Error, Rendered};
 use tutti_types::ChannelLayout;
@@ -43,7 +43,7 @@ fn first_frame(path: &std::path::Path, width: u16) -> Vec<f32> {
 }
 
 /// 5.1 planes written as stereo carry the centre and the surrounds at -3 dB
-/// into the front pair, and drop only the LFE: `L + C*M3DB + Ls*M3DB`.
+/// into the front pair, and drop only the LFE: `L + C*f32::MINUS_3_DB + Ls*f32::MINUS_3_DB`.
 #[test]
 fn surround_planes_written_as_stereo_are_folded_not_truncated() {
     let dir = tempfile::tempdir().unwrap();
@@ -52,8 +52,8 @@ fn surround_planes_written_as_stereo_are_folded_not_truncated() {
     let planes = rendered(&[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
     write_buffers(&planes, &config(ChannelLayout::STEREO, None), &path).unwrap();
     let frame = first_frame(&path, 2);
-    let left = 0.1 + 0.3 * M3DB + 0.5 * M3DB;
-    let right = 0.2 + 0.3 * M3DB + 0.6 * M3DB;
+    let left = 0.1 + 0.3 * f32::MINUS_3_DB + 0.5 * f32::MINUS_3_DB;
+    let right = 0.2 + 0.3 * f32::MINUS_3_DB + 0.6 * f32::MINUS_3_DB;
     assert!((frame[0] - left).abs() < 1e-6, "{} vs {left}", frame[0]);
     assert!((frame[1] - right).abs() < 1e-6, "{} vs {right}", frame[1]);
 }

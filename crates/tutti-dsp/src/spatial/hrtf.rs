@@ -28,8 +28,8 @@
 
 use std::sync::Arc;
 
-use tutti_buffers::Fold;
-use tutti_types::{ChannelLayout, Direction, Mix, Radians, SampleRate};
+use tutti_buffers::{Fold, MonoMut, Planes};
+use tutti_types::{ChannelLayout, ChannelTopology, Direction, Mix, Radians, SampleRate};
 
 mod sphere;
 
@@ -235,8 +235,11 @@ impl HrtfBinaural {
             scratch: set.fft.new_scratch(),
             current,
             face_hint,
-            fold: Fold::widths(ChannelLayout::STEREO, ChannelLayout::MONO)
-                .expect("stereo folds to mono"),
+            fold: Fold::between(
+                &ChannelTopology::assumed(ChannelLayout::STEREO),
+                &ChannelTopology::assumed(ChannelLayout::MONO),
+            )
+            .expect("stereo folds to mono"),
             sphere,
             set,
         }
@@ -316,8 +319,10 @@ impl HrtfBinaural {
                 *r = blend.blend(d, wr);
             }
             let fresh = &mut self.history[start + at..start + at + n];
-            self.fold
-                .planar_channel(|c| if c == 0 { ins.0 } else { ins.1 }, 0, fresh);
+            let pair = [ins.0, ins.1];
+            let folded = Planes::new(&pair)
+                .and_then(|pair| self.fold.fold_planar_channel(pair, 0, MonoMut::new(fresh)));
+            debug_assert!(folded.is_ok(), "a step's planes are one length: {folded:?}");
             self.fill += n;
             done += n;
             if self.fill == HRTF_STEP {

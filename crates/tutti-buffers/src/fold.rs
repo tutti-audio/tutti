@@ -1,15 +1,12 @@
-//! [`Fold`] — the one way a signal of one channel topology becomes another's.
+//! [`Fold`]: the one way a signal of one channel topology becomes another's.
 
-use crate::InterleavedMut;
+use crate::convert::same_frames;
+use crate::{BufferError, Float, Interleaved, InterleavedMut, MonoMut, Planes, PlanesMut};
 use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
-
-/// The −3 dB attenuation (`1/√2 ≈ 0.7071`) of the ITU-R BS.775 / Dolby consumer
-/// downmix, applied by a [`Fold`] to the centre and surround channels it folds
-/// into the front pair.
-pub const M3DB: f32 = core::f32::consts::FRAC_1_SQRT_2;
 
 /// Which end of a fold a [`FoldError`] is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum FoldEnd {
     /// The topology being read.
     Source,
@@ -19,10 +16,12 @@ pub enum FoldEnd {
 
 /// Why two topologies cannot be folded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum FoldError {
-    /// The topology has no channels.
-    #[error("the {0:?} topology has no channels")]
-    Empty(FoldEnd),
+    /// A width is zero channels ([`BufferError::ZeroWidth`]) or does not fit a
+    /// channel layout ([`BufferError::TooWide`]).
+    #[error(transparent)]
+    Buffer(#[from] BufferError),
     /// Source channel `channel` (speaker `speaker`) has no place in the
     /// destination and no rule folds it elsewhere.
     #[error("source channel {channel} ({speaker:?}) has no place in the destination")]
@@ -59,9 +58,6 @@ pub enum FoldError {
         /// The destination width.
         dst: ChannelLayout,
     },
-    /// [`Fold::assuming_smpte`] was given a width the engine has no order for.
-    #[error("{0:?} has no SMPTE order")]
-    NoSmpteOrder(ChannelLayout),
     /// [`Fold::select`] named a channel the source does not have.
     #[error("channel {channel} is not in a {width:?} source")]
     NoSuchChannel {
@@ -70,18 +66,6 @@ pub enum FoldError {
         /// The source width.
         width: ChannelLayout,
     },
-    /// [`Fold::select`] was given more channels than a width can count.
-    #[error("{0} channels is more than a width can count")]
-    TooWide(usize),
-    /// A graph root's channels were declared at one width and the root is, or
-    /// was asked to be, another: the declaration owns the root's width.
-    #[error("the root is declared {declared:?} wide and cannot be {requested:?}")]
-    RootWidth {
-        /// The width the root was declared with.
-        declared: ChannelLayout,
-        /// The width the root has, or was asked to widen to.
-        requested: ChannelLayout,
-    },
 }
 
 /// Frames per chunk of the planar group sum's stack scratch.
@@ -89,37 +73,37 @@ const CHUNK: usize = 64;
 
 /// One product term of an output: `gain · (x[a] + x[b] + …)`.
 #[derive(Debug, Clone, PartialEq)]
-struct Term {
-    gain: f32,
+struct Term<F> {
+    gain: F,
     srcs: Box<[u16]>,
 }
 
 /// A sum of terms, evaluated left to right as `((t0 + t1) + t2)…`.
 #[derive(Debug, Clone, PartialEq)]
-enum Expr {
+enum Expr<F> {
     Zero,
     Copy(u16),
-    Sum(Box<[Term]>),
+    Sum(Box<[Term<F>]>),
 }
 
 /// One output channel.
 #[derive(Debug, Clone, PartialEq)]
-enum Row {
-    One(Expr),
+enum Row<F> {
+    One(Expr<F>),
     /// `(a + b) · scale`: the mono mix of a stereo pair.
     Mix {
-        a: Expr,
-        b: Expr,
-        scale: f32,
+        a: Expr<F>,
+        b: Expr<F>,
+        scale: F,
     },
 }
 
-impl Expr {
+impl<F: Float> Expr<F> {
     /// Value at one frame, `get(c)` reading source channel `c`.
     #[inline]
-    fn at(&self, get: &impl Fn(usize) -> f32) -> f32 {
+    fn at(&self, get: &impl Fn(usize) -> F) -> F {
         match self {
-            Self::Zero => 0.0,
+            Self::Zero => F::ZERO,
             Self::Copy(c) => get(usize::from(*c)),
             Self::Sum(terms) => terms
                 .iter()
@@ -129,19 +113,19 @@ impl Expr {
                             .iter()
                             .map(|&c| get(usize::from(c)))
                             .reduce(|a, b| a + b)
-                            .unwrap_or(0.0)
+                            .unwrap_or(F::ZERO)
                 })
                 .reduce(|a, b| a + b)
-                .unwrap_or(0.0),
+                .unwrap_or(F::ZERO),
         }
     }
 
     /// The same values over a block, term by term. A lone-source term runs as
     /// a plain loop over whole slices; a summed group reads per frame.
-    fn planar<'a>(&self, src: &impl Fn(usize) -> &'a [f32], out: &mut [f32]) {
+    fn planar<'a>(&self, src: &impl Fn(usize) -> &'a [F], out: &mut [F]) {
         let n = out.len();
         match self {
-            Self::Zero => out.fill(0.0),
+            Self::Zero => out.fill(F::ZERO),
             Self::Copy(c) => out.copy_from_slice(&src(usize::from(*c))[..n]),
             Self::Sum(terms) => {
                 for (k, t) in terms.iter().enumerate() {
@@ -157,7 +141,7 @@ impl Expr {
                         group => {
                             // The group sum a chunk at a time, in a stack
                             // scratch, so every loop runs over whole slices.
-                            let mut sum = [0.0f32; CHUNK];
+                            let mut sum = [F::ZERO; CHUNK];
                             for (n, o) in out.chunks_mut(CHUNK).enumerate() {
                                 let at = n * CHUNK..n * CHUNK + o.len();
                                 let sum = &mut sum[..o.len()];
@@ -181,161 +165,10 @@ impl Expr {
             }
         }
     }
-}
 
-fn lane_mut(samples: &mut [f32], ch: usize, width: usize) -> impl Iterator<Item = &mut f32> {
-    samples.iter_mut().skip(ch).step_by(width)
-}
-
-/// An expression of exactly `N` terms that each read one source, as
-/// `(gain, source)`: the shape of a stereo fold up to 7.1.
-fn lone_terms<const N: usize>(e: &Expr) -> Option<[(f32, u16); N]> {
-    match e {
-        Expr::Sum(terms) if terms.len() == N && terms.iter().all(|t| t.srcs.len() == 1) => {
-            Some(std::array::from_fn(|k| (terms[k].gain, terms[k].srcs[0])))
-        }
-        _ => None,
-    }
-}
-
-/// The hot kernel of a mono mix: `(Σ a + Σ b) · scale` over a block, both
-/// sums of `N` single-source terms, with the sums in registers so each source
-/// is read once, as the old per-width mono kernel did. A plain index loop
-/// because the term count is a const generic: the loop over terms unrolls and
-/// the loop over frames vectorises, which an iterator chain over the stored
-/// terms does not. Returns whether the row had this shape.
-fn mix_fused<'a, const N: usize>(
-    a: &Expr,
-    b: &Expr,
-    src: &impl Fn(usize) -> &'a [f32],
-    scale: f32,
-    out: &mut [f32],
-) -> bool {
-    let (Some(ta), Some(tb)) = (lone_terms::<N>(a), lone_terms::<N>(b)) else {
-        return false;
-    };
-    let n = out.len();
-    let plane = |(g, c): (f32, u16)| (g, &src(usize::from(c))[..n]);
-    let (ta, tb) = (ta.map(plane), tb.map(plane));
-    for (i, o) in out.iter_mut().enumerate() {
-        let sum = |t: &[(f32, &[f32]); N]| {
-            t.iter()
-                .map(|&(g, x)| g * x[i])
-                .reduce(|p, q| p + q)
-                .unwrap_or(0.0)
-        };
-        *o = (sum(&ta) + sum(&tb)) * scale;
-    }
-    true
-}
-
-impl Row {
-    #[inline]
-    fn at(&self, get: &impl Fn(usize) -> f32) -> f32 {
-        match self {
-            Self::One(e) => e.at(get),
-            Self::Mix { a, b, scale } => (a.at(get) + b.at(get)) * scale,
-        }
-    }
-}
-
-/// How a signal of one [`ChannelTopology`] becomes another's.
-///
-/// An edge (a file, a device, a plugin bus) states the [`ChannelTopology`] it
-/// has; the engine's graph keeps its own order. [`Fold::between`] is built
-/// once, on the control side (it allocates), from two topologies, and applied
-/// by [`frame`](Self::frame) (one frame: the mic, the sampler),
-/// [`planar_channel`](Self::planar_channel) (a graph node) and
-/// [`planar_to_interleaved`](Self::planar_to_interleaved) (the engine and
-/// export, graph to device or file), none of which allocate, so all are safe on
-/// the audio thread. It places channels by *speaker*, never by width: a width alone
-/// is not a placement (see [`ChannelTopology`]).
-///
-/// # The rules
-///
-/// - **Same speakers, any order:** a pure permutation. Gain exactly 1.0, the
-///   samples copied bit for bit.
-/// - **A speaker in both:** it goes straight across at gain 1.0.
-/// - **A speaker the destination lacks** folds into the nearest ones the
-///   destination has, at −3 dB ([`M3DB`]), by the table in `fallbacks`:
-///   the centre into front left and right; a side or rear speaker into its
-///   counterpart (side for rear and back) or else the front speaker on its
-///   side; a top-back speaker into the back, else the side surround, else the
-///   front speaker on its side; the top-front centre and the left/right of
-///   centre pair into the centre if the destination has one, else the front
-///   pair; any other overhead speaker into the front speaker on its side. The
-///   LFE is omitted unless the destination has one. This is the ITU-R BS.775 /
-///   Dolby consumer downmix for a stereo destination, the coefficients
-///   the width folds always used. For any other destination
-///   (5.1 to quad, 7.1.4 to 7.1) the same −3 dB table applies and the
-///   coefficients and the choice of nearest speaker are this crate's own: no
-///   standard fixes them.
-///   A side or rear speaker whose counterpart the *source* lacks and the
-///   destination has is moved there at gain 1.0 (a pure reposition, so 5.1 to
-///   quad keeps its surrounds at full level).
-/// - **A lone centre channel** (a mono source) feeds the destination's centre
-///   if it has one, else its front left and right, each at gain 1.0.
-/// - **A destination with one channel** is a mono mix, whatever it is called:
-///   a one-channel source is copied, front left and right alone are averaged
-///   (`(L + R) / 2`), and anything else is the stereo fold times −3 dB. The
-///   two rules do not meet (`[0.1, 0.2]` gives `0.15`, `[0.1, 0.2, 0.0]` gives
-///   `0.212`), as before.
-/// - **Upmix zero-fills.** A destination speaker nothing feeds is silent;
-///   nothing is invented.
-/// - **Unassigned channels** never pass through a surround matrix, and are
-///   never padded or dropped by a guess. An unassigned side against any other at
-///   the same width is a relabelling, channel `i` to channel `i`; at another
-///   width it is [`FoldError::Unassigned`], since a channel that names no
-///   speaker says nothing about where it goes. An edge that wants channels by
-///   index says so: [`Fold::by_index`] widens and zero-fills, [`Fold::select`]
-///   chooses, and [`Fold::to_width`] and [`Fold::widths`] serve an edge that
-///   knows only a width (a device, a file).
-///   B-format is not speaker feeds and has no [`Speaker`]: an edge that has it
-///   declares it unassigned, never quad.
-/// - **Not silent.** A source channel the destination has no place for is
-///   [`FoldError::Unplaced`]; an [`Unknown`](Speaker::Unknown) speaker is
-///   [`FoldError::Unnamed`] (unless the two topologies are identical, which is
-///   an identity), and a speaker listed twice is [`FoldError::Duplicate`].
-///
-/// The matrix is **not normalised**: full scale on every 5.1 channel gives
-/// `1 + 2·`[`M3DB`]` = 2.414` per side. Headroom is the caller's.
-///
-/// # Summing order
-///
-/// For the topologies [`ChannelTopology::smpte`] (and [`quad`](ChannelTopology::quad))
-/// gives, a fold to one or two channels sums in a fixed order, which
-/// `tests::widths_write_the_itu_formulas_to_the_bit` pins against the closed
-/// forms: the direct channel, then each folded channel in source order,
-/// `acc + gain·x`. With overhead speakers in the source (7.1.4) the −3 dB
-/// channels of a side are summed first and then scaled once; summing then
-/// scaling rounds differently from scaling each channel, so the grouping is
-/// kept for exactly the sources that have it.
-///
-/// # Examples
-///
-/// ```
-/// use tutti_buffers::{Fold, M3DB};
-/// use tutti_types::{ChannelLayout, ChannelTopology};
-///
-/// let five_one = ChannelTopology::smpte(ChannelLayout::from(6u16)).unwrap();
-/// let stereo = ChannelTopology::smpte(ChannelLayout::STEREO).unwrap();
-/// let fold = Fold::between(&five_one, &stereo).unwrap();
-///
-/// // Only the centre active: both sides get it at −3 dB.
-/// let mut out = [0.0f32; 2];
-/// fold.frame(&[0.0, 0.0, 1.0, 0.0, 0.0, 0.0], &mut out);
-/// assert_eq!(out, [M3DB, M3DB]);
-/// ```
-#[derive(Debug, Clone, PartialEq)]
-pub struct Fold {
-    src: u16,
-    rows: Box<[Row]>,
-}
-
-impl Expr {
     /// Adds every source of this expression, each at `scale · gain`, to `acc`.
-    fn contribute(&self, scale: f32, acc: &mut Vec<(usize, f32)>) {
-        let mut add = |src: usize, gain: f32| match acc.iter_mut().find(|(s, _)| *s == src) {
+    fn contribute(&self, scale: F, acc: &mut Vec<(usize, F)>) {
+        let mut add = |src: usize, gain: F| match acc.iter_mut().find(|(s, _)| *s == src) {
             Some((_, g)) => *g += gain,
             None => acc.push((src, gain)),
         };
@@ -353,11 +186,162 @@ impl Expr {
     }
 }
 
+fn lane_mut<F>(samples: &mut [F], ch: usize, width: usize) -> impl Iterator<Item = &mut F> {
+    samples.iter_mut().skip(ch).step_by(width)
+}
+
+/// An expression of exactly `N` terms that each read one source, as
+/// `(gain, source)`: the shape of a stereo fold up to 7.1.
+fn lone_terms<F: Float, const N: usize>(e: &Expr<F>) -> Option<[(F, u16); N]> {
+    match e {
+        Expr::Sum(terms) if terms.len() == N && terms.iter().all(|t| t.srcs.len() == 1) => {
+            Some(std::array::from_fn(|k| (terms[k].gain, terms[k].srcs[0])))
+        }
+        _ => None,
+    }
+}
+
+/// The hot kernel of a mono mix: `(Σ a + Σ b) · scale` over a block, both
+/// sums of `N` single-source terms, with the sums in registers so each source
+/// is read once. A plain index loop because the term count is a const generic:
+/// the loop over terms unrolls and the loop over frames vectorises, which an
+/// iterator chain over the stored terms does not. Returns whether the row had
+/// this shape.
+fn mix_fused<'a, F: Float, const N: usize>(
+    a: &Expr<F>,
+    b: &Expr<F>,
+    src: &impl Fn(usize) -> &'a [F],
+    scale: F,
+    out: &mut [F],
+) -> bool {
+    let (Some(ta), Some(tb)) = (lone_terms::<F, N>(a), lone_terms::<F, N>(b)) else {
+        return false;
+    };
+    let n = out.len();
+    let plane = |(g, c): (F, u16)| (g, &src(usize::from(c))[..n]);
+    let (ta, tb) = (ta.map(plane), tb.map(plane));
+    for (i, o) in out.iter_mut().enumerate() {
+        let sum = |t: &[(F, &[F]); N]| {
+            t.iter()
+                .map(|&(g, x)| g * x[i])
+                .reduce(|p, q| p + q)
+                .unwrap_or(F::ZERO)
+        };
+        *o = (sum(&ta) + sum(&tb)) * scale;
+    }
+    true
+}
+
+impl<F: Float> Row<F> {
+    #[inline]
+    fn at(&self, get: &impl Fn(usize) -> F) -> F {
+        match self {
+            Self::One(e) => e.at(get),
+            Self::Mix { a, b, scale } => (a.at(get) + b.at(get)) * *scale,
+        }
+    }
+}
+
+/// How a signal of one [`ChannelTopology`] becomes another's.
+///
+/// An edge (a file, a device, a plugin bus) states the [`ChannelTopology`] it
+/// has. [`Fold::between`] is built once, on the control side (it allocates),
+/// from two topologies, and applied to views by [`fold`](Self::fold)
+/// (interleaved to interleaved), [`fold_planar`](Self::fold_planar) (planes to
+/// planes), [`fold_planar_to_interleaved`](Self::fold_planar_to_interleaved)
+/// and [`fold_planar_channel`](Self::fold_planar_channel) (one destination
+/// channel). [`frame`](Self::frame) is the same fold over one frame, on raw
+/// slices. None of them allocate, so all are safe on the audio thread. A fold
+/// places channels by *speaker*, never by width: a width alone is not a
+/// placement (see [`ChannelTopology`]); [`ChannelTopology::assumed`] says what
+/// a bare width is taken to mean.
+///
+/// `F` is the float the gains and the sums are in: `f32` by default, `f64`
+/// where the signal is.
+///
+/// # The rules
+///
+/// - **Same speakers, any order:** a pure permutation. Gain exactly 1.0, the
+///   samples copied bit for bit.
+/// - **A speaker in both:** it goes straight across at gain 1.0.
+/// - **A speaker the destination lacks** folds into the nearest ones the
+///   destination has, at −3 dB ([`Float::MINUS_3_DB`]), by the table in
+///   `fallbacks`: the centre into front left and right; a side or rear speaker
+///   into its counterpart (side for rear and back) or else the front speaker on
+///   its side; a top-back speaker into the back, else the side surround, else
+///   the front speaker on its side; the top-front centre and the left/right of
+///   centre pair into the centre if the destination has one, else the front
+///   pair; any other overhead speaker into the front speaker on its side. The
+///   LFE is omitted unless the destination has one. This is the ITU-R BS.775 /
+///   Dolby consumer downmix for a stereo destination. For any other
+///   destination (5.1 to quad, 7.1.4 to 7.1) the same −3 dB table applies and
+///   the coefficients and the choice of nearest speaker are this crate's own:
+///   no standard fixes them. A side or rear speaker whose counterpart the
+///   *source* lacks and the destination has is moved there at gain 1.0 (a pure
+///   reposition, so 5.1 to quad keeps its surrounds at full level).
+/// - **A lone centre channel** (a mono source) feeds the destination's centre
+///   if it has one, else its front left and right, each at gain 1.0.
+/// - **A destination with one channel** is a mono mix, whatever it is called:
+///   a one-channel source is copied, front left and right alone are averaged
+///   (`(L + R) / 2`), and anything else is the stereo fold times −3 dB. The
+///   two rules do not meet (`[0.1, 0.2]` gives `0.15`, `[0.1, 0.2, 0.0]` gives
+///   `0.212`).
+/// - **Upmix zero-fills.** A destination speaker nothing feeds is silent;
+///   nothing is invented.
+/// - **Unassigned channels** never pass through a surround matrix, and are
+///   never padded or dropped by a guess. An unassigned side against any other at
+///   the same width is a relabelling, channel `i` to channel `i`; at another
+///   width it is [`FoldError::Unassigned`], since a channel that names no
+///   speaker says nothing about where it goes. A caller that wants channels by
+///   index says so: [`Fold::by_index`] widens and zero-fills, [`Fold::select`]
+///   chooses. B-format is not speaker feeds and has no [`Speaker`]: an edge
+///   that has it declares it unassigned, never quad.
+/// - **Not silent.** A source channel the destination has no place for is
+///   [`FoldError::Unplaced`]; an [`Unknown`](Speaker::Unknown) speaker is
+///   [`FoldError::Unnamed`] (unless the two topologies are identical, which is
+///   an identity), and a speaker listed twice is [`FoldError::Duplicate`].
+///
+/// The matrix is **not normalised**: full scale on every 5.1 channel gives
+/// `1 + 2·`[`MINUS_3_DB`](Float::MINUS_3_DB)` = 2.414` per side. Headroom is
+/// the caller's.
+///
+/// # Summing order
+///
+/// For the topologies [`ChannelTopology::smpte`] (and
+/// [`quad`](ChannelTopology::quad)) gives, a fold to one or two channels sums
+/// in a fixed order: the direct channel, then each folded channel in source
+/// order, `acc + gain·x`. With overhead speakers in the source (7.1.4) the
+/// −3 dB channels of a side are summed first and then scaled once; summing then
+/// scaling rounds differently from scaling each channel, so the grouping is
+/// kept for exactly the sources that have it. Every applier sums in this order,
+/// so a planar fold and a per-frame fold agree bit for bit.
+///
+/// # Examples
+///
+/// ```
+/// use tutti_buffers::{Float, Fold};
+/// use tutti_types::{ChannelLayout, ChannelTopology};
+///
+/// let five_one = ChannelTopology::smpte(ChannelLayout::from(6u16)).unwrap();
+/// let stereo = ChannelTopology::smpte(ChannelLayout::STEREO).unwrap();
+/// let fold: Fold = Fold::between(&five_one, &stereo).unwrap();
+///
+/// // Only the centre active: both sides get it at −3 dB.
+/// let mut out = [0.0f32; 2];
+/// fold.frame(&[0.0, 0.0, 1.0, 0.0, 0.0, 0.0], &mut out);
+/// assert_eq!(out, [f32::MINUS_3_DB, f32::MINUS_3_DB]);
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct Fold<F: Float = f32> {
+    src: u16,
+    rows: Box<[Row<F>]>,
+}
+
 /// One source channel's contribution to one destination channel.
-struct Hit {
+struct Hit<F> {
     src: usize,
     dst: usize,
-    gain: f32,
+    gain: F,
     /// The same speaker on both sides (or a lone mono fan-out), not a fold.
     direct: bool,
 }
@@ -423,7 +407,7 @@ fn narrow(i: usize) -> u16 {
 }
 
 /// Every source channel's hits into `dst`, or the first channel with none.
-fn hits(src: &[Speaker], dst: &[Speaker]) -> Result<Vec<Hit>, FoldError> {
+fn hits<F: Float>(src: &[Speaker], dst: &[Speaker]) -> Result<Vec<Hit<F>>, FoldError> {
     let lone_mono = src == [Speaker::FrontCenter];
     src.iter()
         .enumerate()
@@ -432,7 +416,7 @@ fn hits(src: &[Speaker], dst: &[Speaker]) -> Result<Vec<Hit>, FoldError> {
                 return Ok(vec![Hit {
                     src: i,
                     dst: j,
-                    gain: 1.0,
+                    gain: F::ONE,
                     direct: true,
                 }]);
             }
@@ -451,7 +435,7 @@ fn hits(src: &[Speaker], dst: &[Speaker]) -> Result<Vec<Hit>, FoldError> {
                             .map(|j| Hit {
                                 src: i,
                                 dst: j,
-                                gain: 1.0,
+                                gain: F::ONE,
                                 direct: true,
                             })
                             .into()
@@ -474,7 +458,7 @@ fn hits(src: &[Speaker], dst: &[Speaker]) -> Result<Vec<Hit>, FoldError> {
                             Hit {
                                 src: i,
                                 dst: j,
-                                gain: if reposition { 1.0 } else { M3DB },
+                                gain: if reposition { F::ONE } else { F::MINUS_3_DB },
                                 direct: false,
                             }
                         })
@@ -489,24 +473,24 @@ fn hits(src: &[Speaker], dst: &[Speaker]) -> Result<Vec<Hit>, FoldError> {
 /// The expression of destination channel `j`: the direct channel, then the
 /// folded ones in source order; with overhead speakers in the source the −3 dB
 /// ones are summed first and scaled once.
-fn expr(src: &[Speaker], hits: &[Hit], j: usize) -> Expr {
+fn expr<F: Float>(src: &[Speaker], hits: &[Hit<F>], j: usize) -> Expr<F> {
     let mine = || hits.iter().filter(move |h| h.dst == j);
-    let single = |h: &Hit| Term {
+    let single = |h: &Hit<F>| Term {
         gain: h.gain,
         srcs: Box::new([narrow(h.src)]),
     };
     let folded = || mine().filter(|h| !h.direct);
     let grouped = src.iter().copied().any(is_overhead);
-    let (summed, apart): (Vec<&Hit>, Vec<&Hit>) = if grouped {
-        folded().partition(|h| h.gain == M3DB)
+    let (summed, apart): (Vec<&Hit<F>>, Vec<&Hit<F>>) = if grouped {
+        folded().partition(|h| h.gain == F::MINUS_3_DB)
     } else {
         (Vec::new(), folded().collect())
     };
     let group = (!summed.is_empty()).then(|| Term {
-        gain: M3DB,
+        gain: F::MINUS_3_DB,
         srcs: summed.iter().map(|h| narrow(h.src)).collect(),
     });
-    let terms: Vec<Term> = mine()
+    let terms: Vec<Term<F>> = mine()
         .filter(|h| h.direct)
         .map(single)
         .chain(apart.into_iter().map(single))
@@ -514,7 +498,7 @@ fn expr(src: &[Speaker], hits: &[Hit], j: usize) -> Expr {
         .collect();
     match &*terms {
         [] => Expr::Zero,
-        [Term { gain, srcs }] if *gain == 1.0 && srcs.len() == 1 => Expr::Copy(srcs[0]),
+        [Term { gain, srcs }] if *gain == F::ONE && srcs.len() == 1 => Expr::Copy(srcs[0]),
         _ => Expr::Sum(terms.into()),
     }
 }
@@ -526,7 +510,7 @@ fn first_duplicate(of: &[Speaker]) -> Option<Speaker> {
         .map(|(_, &sp)| sp)
 }
 
-impl Fold {
+impl<F: Float> Fold<F> {
     /// Builds the fold from `src` into `dst`.
     ///
     /// Control side: it allocates. The rules are on [`Fold`].
@@ -536,10 +520,8 @@ impl Fold {
     /// [`FoldError`] when a channel cannot be placed, never a silent drop.
     pub fn between(src: &ChannelTopology, dst: &ChannelTopology) -> Result<Self, FoldError> {
         let (s, d) = (src.positions(), dst.positions());
-        for (end, side) in [(FoldEnd::Source, s), (FoldEnd::Destination, d)] {
-            if side.is_empty() {
-                return Err(FoldError::Empty(end));
-            }
+        if s.is_empty() || d.is_empty() {
+            return Err(BufferError::ZeroWidth.into());
         }
         let rows = if s == d {
             (0..s.len())
@@ -568,22 +550,6 @@ impl Fold {
         })
     }
 
-    /// As [`between`](Self::between) for two bare widths, **assuming** each is
-    /// the engine's SMPTE order ([`ChannelTopology::smpte`]).
-    ///
-    /// The name is the warning: a width is not a placement, and 6 may be six
-    /// interface inputs. Use it only where the edge cannot say more. A width
-    /// with no SMPTE order (4 is quad or B-format) is
-    /// [`FoldError::NoSmpteOrder`].
-    ///
-    /// # Errors
-    ///
-    /// As [`between`](Self::between), and for a width with no SMPTE order.
-    pub fn assuming_smpte(src: ChannelLayout, dst: ChannelLayout) -> Result<Self, FoldError> {
-        let order = |w: ChannelLayout| ChannelTopology::smpte(w).ok_or(FoldError::NoSmpteOrder(w));
-        Self::between(&order(src)?, &order(dst)?)
-    }
-
     /// Places the channels of a source by index, for widths that have no order:
     /// widening only.
     ///
@@ -597,14 +563,12 @@ impl Fold {
     ///
     /// # Errors
     ///
-    /// [`FoldError::Empty`] for a width of zero, [`FoldError::Unplaced`] for a
-    /// narrowing.
+    /// [`FoldError::Buffer`] with [`BufferError::ZeroWidth`] for a width of
+    /// zero, [`FoldError::Unplaced`] for a narrowing.
     pub fn by_index(src: ChannelLayout, dst: ChannelLayout) -> Result<Self, FoldError> {
         let (s, d) = (src.count(), dst.count());
-        for (end, n) in [(FoldEnd::Source, s), (FoldEnd::Destination, d)] {
-            if n == 0 {
-                return Err(FoldError::Empty(end));
-            }
+        if s == 0 || d == 0 {
+            return Err(BufferError::ZeroWidth.into());
         }
         if s > d {
             return Err(FoldError::Unplaced {
@@ -618,112 +582,30 @@ impl Fold {
         Ok(Self { src: s, rows })
     }
 
-    /// Builds the fold from `src` into a destination of which only the width
-    /// is known: a device, a node's outputs, a file.
-    ///
-    /// The destination is taken to be the engine's own order for its width
-    /// ([`ChannelTopology::assumed`]); a mono source lands on the centre of a
-    /// 6, 8 or 12-wide one and the front pair of a 2 or 4-wide one. The source is placed by speaker:
-    ///
-    /// - a source with an [`Unknown`](Speaker::Unknown) channel (a second LFE,
-    ///   a wide or high speaker) is [`FoldError::Unnamed`], whatever the
-    ///   destination: nothing can be said about where it goes;
-    /// - a [`Unassigned`](Speaker::Unassigned) source is a bare count, and is read
-    ///   in the engine's order for it where it has one (a stereo-or-wider file
-    ///   whose container states nothing; a quad);
-    /// - where both ends have an order, [`between`](Self::between);
-    /// - where either has none (3, 5, 7, 9 to 11, 13 and up), no speaker can be
-    ///   named, so channels go by index ([`by_index`](Self::by_index)): a mono
-    ///   source widens to the first channel, and a narrowing is an error
-    ///   ([`FoldError::Unplaced`]), not a truncation.
-    ///
-    /// # Errors
-    ///
-    /// As [`between`](Self::between), and [`FoldError::Unnamed`] as above.
-    pub fn to_width(src: &ChannelTopology, dst: ChannelLayout) -> Result<Self, FoldError> {
-        if let Some(channel) = src
-            .positions()
-            .iter()
-            .position(|p| matches!(p, Speaker::Unknown(_)))
-        {
-            return Err(FoldError::Unnamed {
-                end: FoldEnd::Source,
-                channel,
-            });
-        }
-        let from = if src.is_unassigned() {
-            ChannelTopology::assumed(src.layout())
-        } else {
-            Some(src.clone())
-        };
-        match (from, ChannelTopology::assumed(dst)) {
-            (Some(from), Some(to)) => Self::between(&from, &to),
-            _ => Self::by_index(src.layout(), dst),
-        }
-    }
-
-    /// As [`to_width`](Self::to_width) for a source that **says what it is**: a
-    /// graph root whose topology was declared, against a device or file of
-    /// which only the width is known.
-    ///
-    /// The difference from `to_width` is the all-[`Unassigned`](Speaker::Unassigned)
-    /// source. There it is a bare count and is read in the engine's order for
-    /// its width (a quad at 4); here the caller *declared* the channels to be
-    /// independent buses, so they are placed by index
-    /// ([`by_index`](Self::by_index)): channel `i` stays channel `i`, a wider
-    /// destination is zero-filled, and a narrower one is an error, never a
-    /// matrix. Any other source is `to_width`'s.
-    ///
-    /// # Errors
-    ///
-    /// As [`to_width`](Self::to_width), and [`FoldError::Unplaced`] for a
-    /// unassigned source wider than `dst`.
-    pub fn declared(src: &ChannelTopology, dst: ChannelLayout) -> Result<Self, FoldError> {
-        if src.is_unassigned() {
-            Self::by_index(src.layout(), dst)
-        } else {
-            Self::to_width(src, dst)
-        }
-    }
-
-    /// As [`to_width`](Self::to_width) for two bare widths: each is the
-    /// engine's order for it where it has one, and channels go by index where
-    /// it has none.
-    ///
-    /// For the edges that know no more than a count: the graph root against a
-    /// device or an export file.
-    ///
-    /// # Errors
-    ///
-    /// [`FoldError::Empty`] for a width of zero.
-    pub fn widths(src: ChannelLayout, dst: ChannelLayout) -> Result<Self, FoldError> {
-        Self::to_width(&ChannelTopology::for_width(src), dst)
-    }
-
     /// Chooses source channels for an unassigned destination: destination channel
     /// `i` is source channel `channels[i]`, gain 1.0, bit-exact. A channel may
     /// be chosen twice (one input to both sides); the rest are not read.
     ///
-    /// For the edges that take part of a wider bus: the mic picks its inputs
-    /// out of an interface's, and the cpal meter reads two of a device's
-    /// channels (their ports, in the next PRs). A named source is chosen by
-    /// index too; use [`between`](Self::between) when speakers matter.
+    /// For an edge that takes part of a wider bus: a microphone input picks its
+    /// channels out of an interface's. A named source is chosen by index too;
+    /// use [`between`](Self::between) when speakers matter.
     ///
     /// # Errors
     ///
-    /// [`FoldError::Empty`] for no channels or an empty source,
-    /// [`FoldError::NoSuchChannel`] for a channel at or past `src`'s width,
-    /// [`FoldError::TooWide`] for more than `u16::MAX` channels.
+    /// [`FoldError::Buffer`] with [`BufferError::ZeroWidth`] for no channels or
+    /// an empty source and [`BufferError::TooWide`] for more than `u16::MAX`
+    /// channels, and [`FoldError::NoSuchChannel`] for a channel at or past
+    /// `src`'s width.
     pub fn select(src: ChannelLayout, channels: &[usize]) -> Result<Self, FoldError> {
-        if src == ChannelLayout::EMPTY {
-            return Err(FoldError::Empty(FoldEnd::Source));
-        }
-        if channels.is_empty() {
-            return Err(FoldError::Empty(FoldEnd::Destination));
+        if src == ChannelLayout::EMPTY || channels.is_empty() {
+            return Err(BufferError::ZeroWidth.into());
         }
         // A list is a destination width, which `narrow` later assumes fits.
         if u16::try_from(channels.len()).is_err() {
-            return Err(FoldError::TooWide(channels.len()));
+            return Err(BufferError::TooWide {
+                channels: channels.len(),
+            }
+            .into());
         }
         let rows = channels
             .iter()
@@ -746,7 +628,10 @@ impl Fold {
 
     /// An unassigned side relabels at equal width, channel `i` to channel `i`,
     /// and is refused at any other.
-    fn unassigned(src: &ChannelTopology, dst: &ChannelTopology) -> Result<Box<[Row]>, FoldError> {
+    fn unassigned(
+        src: &ChannelTopology,
+        dst: &ChannelTopology,
+    ) -> Result<Box<[Row<F>]>, FoldError> {
         if src.layout() != dst.layout() {
             return Err(FoldError::Unassigned {
                 src: src.layout(),
@@ -758,19 +643,19 @@ impl Fold {
             .collect())
     }
 
-    fn placed(s: &[Speaker], d: &[Speaker]) -> Result<Box<[Row]>, FoldError> {
+    fn placed(s: &[Speaker], d: &[Speaker]) -> Result<Box<[Row<F>]>, FoldError> {
         let hits = hits(s, d)?;
         Ok((0..d.len()).map(|j| Row::One(expr(s, &hits, j))).collect())
     }
 
-    fn mono(s: &[Speaker]) -> Result<Box<[Row]>, FoldError> {
+    fn mono(s: &[Speaker]) -> Result<Box<[Row<F>]>, FoldError> {
         use Speaker::{FrontLeft, FrontRight};
         let row = match (s, index(s, FrontLeft), index(s, FrontRight)) {
             ([_], ..) => Row::One(Expr::Copy(0)),
             ([_, _], Some(l), Some(r)) => Row::Mix {
                 a: Expr::Copy(narrow(l)),
                 b: Expr::Copy(narrow(r)),
-                scale: 0.5,
+                scale: F::from_f32(0.5),
             },
             _ => {
                 let pair = [FrontLeft, FrontRight];
@@ -778,7 +663,7 @@ impl Fold {
                 Row::Mix {
                     a: expr(s, &hits, 0),
                     b: expr(s, &hits, 1),
-                    scale: M3DB,
+                    scale: F::MINUS_3_DB,
                 }
             }
         };
@@ -809,19 +694,36 @@ impl Fold {
         ChannelLayout::from_count(narrow(self.rows.len()))
     }
 
-    /// Folds one frame: `src` has [`src_layout`](Self::src_layout) samples and
-    /// `dst` [`dst_layout`](Self::dst_layout), and every `dst` sample is written.
+    /// Refuses a view whose width is not the fold's, input then output.
+    fn check_widths(&self, src: ChannelLayout, dst: ChannelLayout) -> Result<(), BufferError> {
+        if src != self.src_layout() {
+            return Err(BufferError::WidthMismatch {
+                src,
+                dst: self.src_layout(),
+            });
+        }
+        if dst != self.dst_layout() {
+            return Err(BufferError::WidthMismatch {
+                src: self.dst_layout(),
+                dst,
+            });
+        }
+        Ok(())
+    }
+
+    /// Folds one frame on raw slices, the per-frame hot path: `src` has
+    /// [`src_layout`](Self::src_layout) samples and `dst`
+    /// [`dst_layout`](Self::dst_layout), and every `dst` sample is written.
     ///
-    /// Allocation-free.
-    ///
-    /// # Panics
-    ///
-    /// If either slice is not the fold's width: a short `dst` would leave
-    /// samples unwritten, so the lengths are checked in release builds too.
+    /// The one applier that takes slices rather than views, so a caller that
+    /// holds a frame in a fixed array pays for no view. The widths are
+    /// debug-asserted: a `src` shorter than the fold reads panics at the
+    /// index, and a `dst` of another width leaves samples unwritten in a
+    /// release build. Allocation-free.
     #[inline]
-    pub fn frame(&self, src: &[f32], dst: &mut [f32]) {
-        assert_eq!(src.len(), usize::from(self.src), "source width");
-        assert_eq!(dst.len(), self.rows.len(), "destination width");
+    pub fn frame(&self, src: &[F], dst: &mut [F]) {
+        debug_assert_eq!(src.len(), usize::from(self.src), "source width");
+        debug_assert_eq!(dst.len(), self.rows.len(), "destination width");
         // The one hot kernel: a flat zip, no per-channel arithmetic on indices.
         self.rows
             .iter()
@@ -829,38 +731,119 @@ impl Fold {
             .for_each(|(row, o)| *o = row.at(&|c| src[c]));
     }
 
-    /// Folds planar channels into an interleaved block: `src(c)` is source
-    /// channel `c`, at least `dst.len()` frames long, and every sample of `dst`
-    /// is written. The graph-to-device shape; a chunk of frames at a time
-    /// through a stack scratch, so each channel runs over whole slices.
+    /// Folds every frame of `src` into `dst`.
     ///
-    /// Allocation-free.
+    /// Every sample of `dst` is written. Allocation-free.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// If `dst`'s width is not this fold's, or a source channel is shorter than
-    /// `dst`.
-    pub fn planar_to_interleaved<'a>(
+    /// [`BufferError::WidthMismatch`] if `src` is not
+    /// [`src_layout`](Self::src_layout) wide (`src` is the view's width, `dst`
+    /// the fold's) or `dst` is not [`dst_layout`](Self::dst_layout) wide (`src`
+    /// is the fold's width, `dst` the view's), and
+    /// [`BufferError::LengthMismatch`] if the frame counts differ. Nothing is
+    /// written then.
+    pub fn fold(
         &self,
-        src: impl Fn(usize) -> &'a [f32],
-        mut dst: InterleavedMut<'_>,
-    ) {
-        assert_eq!(dst.layout(), self.dst_layout(), "destination width");
-        let dw = dst.stride();
-        let frames = dst.len().get();
+        src: Interleaved<'_, F>,
+        mut dst: InterleavedMut<'_, F>,
+    ) -> Result<(), BufferError> {
+        self.check_widths(src.layout(), dst.layout())?;
+        same_frames(src.frames(), dst.frames())?;
+        for (s, d) in src.iter().zip(dst.iter_mut()) {
+            self.frame(s, d);
+        }
+        Ok(())
+    }
+
+    /// Folds every plane of `src` into the planes of `dst`.
+    ///
+    /// Every sample of `dst` is written. Allocation-free.
+    ///
+    /// # Errors
+    ///
+    /// As [`fold`](Self::fold).
+    pub fn fold_planar(
+        &self,
+        src: Planes<'_, F>,
+        mut dst: PlanesMut<'_, '_, F>,
+    ) -> Result<(), BufferError> {
+        self.check_widths(src.layout(), dst.layout())?;
+        same_frames(src.frames(), dst.frames())?;
+        let read = |c: usize| src.plane(c).samples();
+        for (c, mut out) in dst.iter_mut().enumerate() {
+            self.planar_row(&read, c, out.samples_mut());
+        }
+        Ok(())
+    }
+
+    /// Folds planar channels into an interleaved block, a chunk of frames at a
+    /// time through a stack scratch so each channel runs over whole slices.
+    ///
+    /// Every sample of `dst` is written. Allocation-free.
+    ///
+    /// # Errors
+    ///
+    /// As [`fold`](Self::fold).
+    pub fn fold_planar_to_interleaved(
+        &self,
+        src: Planes<'_, F>,
+        mut dst: InterleavedMut<'_, F>,
+    ) -> Result<(), BufferError> {
+        self.check_widths(src.layout(), dst.layout())?;
+        same_frames(src.frames(), dst.frames())?;
+        let dw = dst.channels();
+        let frames = dst.frames().get();
         let samples = dst.samples_mut();
-        let mut scratch = [0.0f32; CHUNK];
+        let mut scratch = [F::ZERO; CHUNK];
         for start in (0..frames).step_by(CHUNK) {
             let n = CHUNK.min(frames - start);
             let block = &mut samples[start * dw..(start + n) * dw];
             for ch in 0..dw {
                 let out = &mut scratch[..n];
-                self.planar_channel(|c| &src(c)[start..start + n], ch, out);
+                self.planar_row(&|c| &src.plane(c).samples()[start..start + n], ch, out);
                 lane_mut(block, ch, dw)
                     .zip(&*out)
                     .for_each(|(o, &x)| *o = x);
             }
         }
+        Ok(())
+    }
+
+    /// Folds planar channels into destination channel `dst_c`. Every sample of
+    /// `out` is the bit-identical value [`frame`](Self::frame) writes.
+    /// Allocation-free.
+    ///
+    /// # Errors
+    ///
+    /// [`BufferError::WidthMismatch`] if `src` is not
+    /// [`src_layout`](Self::src_layout) wide, and
+    /// [`BufferError::LengthMismatch`] if `out` and `src` hold different frame
+    /// counts. Nothing is written then.
+    ///
+    /// # Panics
+    ///
+    /// If `dst_c` is not below the destination width.
+    pub fn fold_planar_channel(
+        &self,
+        src: Planes<'_, F>,
+        dst_c: usize,
+        mut out: MonoMut<'_, F>,
+    ) -> Result<(), BufferError> {
+        assert!(
+            dst_c < self.rows.len(),
+            "destination channel {dst_c} is out of bounds for {} channels",
+            self.rows.len()
+        );
+        if src.layout() != self.src_layout() {
+            return Err(BufferError::WidthMismatch {
+                src: src.layout(),
+                dst: self.src_layout(),
+            });
+        }
+        same_frames(src.frames(), out.frames())?;
+        self.planar_row(&|c| src.plane(c).samples(), dst_c, out.samples_mut());
+        Ok(())
     }
 
     /// The `(source channel, gain)` pairs destination channel `dst_c` is the
@@ -870,69 +853,55 @@ impl Fold {
     /// `dst_c` (the LFE a stereo destination drops, a channel a select left
     /// out) is absent, and a silent destination channel has no pairs.
     ///
-    /// The fold as a matrix, for a caller that wants each coefficient (the
-    /// graph lowers a bus edge to one weighted lane per pair). It is the same
-    /// fold to rounding only: [`frame`](Self::frame) and
-    /// [`planar_channel`](Self::planar_channel) sum in the fixed order and
+    /// The fold as a matrix, for a caller that wants each coefficient. It is
+    /// the same fold to rounding only: the appliers sum in the fixed order and
     /// grouping documented on [`Fold`] (`(L + R) · ½`, a side's −3 dB channels
     /// summed and then scaled), and a caller summing `gain · x` term by term
     /// rounds differently, by a few ulps. Control side: it allocates.
     ///
     /// ```
-    /// use tutti_buffers::{Fold, M3DB};
+    /// use tutti_buffers::{Float, Fold};
     /// use tutti_types::{ChannelLayout, ChannelTopology};
     ///
     /// let five_one = ChannelTopology::smpte(ChannelLayout::from(6u16)).unwrap();
     /// let stereo = ChannelTopology::smpte(ChannelLayout::STEREO).unwrap();
-    /// let fold = Fold::between(&five_one, &stereo).unwrap();
+    /// let fold: Fold = Fold::between(&five_one, &stereo).unwrap();
     /// // Left: the front left, the centre at -3 dB, the left surround at -3 dB;
     /// // the LFE (channel 3) is dropped.
-    /// let left: Vec<_> = fold.contributions(0).collect();
-    /// assert_eq!(left, [(0, 1.0), (2, M3DB), (4, M3DB)]);
+    /// let m = f32::MINUS_3_DB;
+    /// assert_eq!(fold.contributions(0), [(0, 1.0), (2, m), (4, m)]);
     /// ```
     ///
     /// # Panics
     ///
     /// If `dst_c` is not below the destination width.
-    pub fn contributions(&self, dst_c: usize) -> impl Iterator<Item = (usize, f32)> + use<> {
+    #[must_use]
+    pub fn contributions(&self, dst_c: usize) -> Vec<(usize, F)> {
         let mut acc = Vec::new();
         match &self.rows[dst_c] {
-            Row::One(e) => e.contribute(1.0, &mut acc),
+            Row::One(e) => e.contribute(F::ONE, &mut acc),
             Row::Mix { a, b, scale } => {
                 a.contribute(*scale, &mut acc);
                 b.contribute(*scale, &mut acc);
             }
         }
         acc.sort_unstable_by_key(|&(src, _)| src);
-        acc.into_iter()
+        acc
     }
 
-    /// Folds planar channels into destination channel `dst_c`, `out.len()`
-    /// frames long: `src(c)` is source channel `c`, at least that long. Every
-    /// sample is the bit-identical value [`frame`](Self::frame) writes.
-    ///
-    /// Allocation-free.
-    ///
-    /// # Panics
-    ///
-    /// If `dst_c` is not below the destination width, or a source channel the
-    /// fold reads is shorter than `out`.
-    pub fn planar_channel<'a>(
-        &self,
-        src: impl Fn(usize) -> &'a [f32],
-        dst_c: usize,
-        out: &mut [f32],
-    ) {
+    /// Destination channel `dst_c` over a block: `src(c)` is source channel
+    /// `c`, at least `out.len()` frames long.
+    fn planar_row<'a>(&self, src: &impl Fn(usize) -> &'a [F], dst_c: usize, out: &mut [F]) {
         match &self.rows[dst_c] {
-            Row::One(e) => e.planar(&src, out),
+            Row::One(e) => e.planar(src, out),
             Row::Mix { a, b, scale }
-                if mix_fused::<2>(a, b, &src, *scale, out)
-                    || mix_fused::<3>(a, b, &src, *scale, out)
-                    || mix_fused::<4>(a, b, &src, *scale, out) => {}
+                if mix_fused::<F, 2>(a, b, src, *scale, out)
+                    || mix_fused::<F, 3>(a, b, src, *scale, out)
+                    || mix_fused::<F, 4>(a, b, src, *scale, out) => {}
             Row::Mix { a, b, scale } => {
                 // Both halves a chunk at a time, `b` in a stack scratch, so
                 // every loop runs over whole slices like the other rows.
-                let mut half = [0.0f32; CHUNK];
+                let mut half = [F::ZERO; CHUNK];
                 for (n, o) in out.chunks_mut(CHUNK).enumerate() {
                     let at = n * CHUNK..n * CHUNK + o.len();
                     let chunk = |c: usize| &src(c)[at.clone()];
@@ -941,7 +910,7 @@ impl Fold {
                     b.planar(&chunk, half);
                     o.iter_mut()
                         .zip(&*half)
-                        .for_each(|(o, &b)| *o = (*o + b) * scale);
+                        .for_each(|(o, &b)| *o = (*o + b) * *scale);
                 }
             }
         }

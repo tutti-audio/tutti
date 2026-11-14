@@ -3,16 +3,14 @@
 use tutti_buffers::{I24, Sample};
 
 /// An integer format, by its raw `i32` value, so one body covers all five.
-trait Int: Sample + Copy {
-    const BITS: u32;
+trait Int: Sample {
     fn make(raw: i32) -> Self;
     fn raw(self) -> i32;
 }
 
 macro_rules! int {
-    ($t:ty, $bits:literal) => {
+    ($t:ty) => {
         impl Int for $t {
-            const BITS: u32 = $bits;
             fn make(raw: i32) -> Self {
                 Self::try_from(raw).unwrap()
             }
@@ -22,12 +20,11 @@ macro_rules! int {
         }
     };
 }
-int!(i8, 8);
-int!(i16, 16);
-int!(i32, 32);
+int!(i8);
+int!(i16);
+int!(i32);
 
 impl Int for I24 {
-    const BITS: u32 = 24;
     fn make(raw: i32) -> Self {
         I24::of(raw)
     }
@@ -62,7 +59,7 @@ fn int_to_float_edges<T: Int>() {
 }
 
 /// Float to integer is `x * 2^(n-1)`, half to even, clipped; NaN is zero.
-fn float_to_int_edges<T: Int, F: Sample + Copy>(f: impl Fn(f64) -> F) {
+fn float_to_int_edges<T: Int, F: Sample>(f: impl Fn(f64) -> F) {
     let s = (1i64 << (T::BITS - 1)) as f64;
     let to = |x: f64| f(x).convert_to::<T>().raw();
     let (lo, hi) = (min::<T>().raw(), max::<T>().raw());

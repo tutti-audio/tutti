@@ -1,7 +1,8 @@
 //! `convert`, `interleave` and `deinterleave`: figures and mismatch errors.
 
 use tutti_buffers::{
-    BufferError, Interleaved, InterleavedMut, Planes, PlanesMut, convert, deinterleave, interleave,
+    BufferError, Interleaved, InterleavedMut, Planes, PlanesMut, convert, convert_planes,
+    deinterleave, interleave,
 };
 use tutti_types::{ChannelLayout, Samples};
 
@@ -103,10 +104,10 @@ fn deinterleave_places_frame_i_channel_c_in_plane_c_at_i() {
 }
 
 #[test]
-fn interleave_of_a_window_writes_only_that_window() {
+fn interleave_of_a_slice_writes_only_that_slice() {
     let (l, r) = ([1i32, 2, 3, 4], [5, 6, 7, 8]);
     let slices = [&l[..], &r[..]];
-    let p = Planes::new(&slices).unwrap().window(Samples(1)..Samples(3));
+    let p = Planes::new(&slices).unwrap().slice(Samples(1)..Samples(3));
     let mut out = [0i32; 4];
     interleave(p, InterleavedMut::new(&mut out, ST).unwrap()).unwrap();
     assert_eq!(out, [2, 6, 3, 7]);
@@ -198,4 +199,124 @@ fn buffer_errors_say_what_was_refused() {
     assert!(e.to_string().contains("5 samples") && e.to_string().contains("Stereo"));
     let e = BufferError::TooWide { channels: 70_000 };
     assert!(e.to_string().contains("70000"));
+}
+
+/// Planes the caller sized (`from_vecs`) take the strict path: every sample is
+/// overwritten, so a reused table keeps nothing from its last use.
+#[test]
+fn deinterleave_fills_planes_the_caller_sized_and_overwrites_stale_samples() {
+    let buf = [1.0f32, -1.0, 2.0, -2.0, 3.0, -3.0];
+    let mut planes = vec![vec![99.0f32; 3], vec![99.0f32; 3]];
+    deinterleave(
+        Interleaved::new(&buf, ST).unwrap(),
+        PlanesMut::from_vecs(&mut planes).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(planes[0], [1.0, 2.0, 3.0]);
+    assert_eq!(planes[1], [-1.0, -2.0, -3.0]);
+}
+
+/// A table of another width than the source is refused and left as it was,
+/// where the lenient helper silently emptied the extra planes.
+#[test]
+fn deinterleave_refuses_a_wider_table_and_leaves_it_untouched() {
+    let buf = [1.0f32, 2.0];
+    let mut planes = vec![vec![99.0f32], vec![99.0f32], vec![99.0f32]];
+    assert_eq!(
+        deinterleave(
+            Interleaved::new(&buf, ST).unwrap(),
+            PlanesMut::from_vecs(&mut planes).unwrap()
+        ),
+        Err(BufferError::WidthMismatch {
+            src: ST,
+            dst: ChannelLayout::from(3u16)
+        })
+    );
+    assert_eq!(planes, [[99.0], [99.0], [99.0]]);
+}
+
+/// Format and layout change in one pass, by the rule in `Sample`.
+#[test]
+fn interleave_converts_the_format_in_the_same_pass() {
+    let planes = vec![vec![16384i16, 0, -32768], vec![8192, -16384, 0]];
+    let mut out = [9.0f32; 6];
+    interleave(
+        Planes::from_vecs(&planes).unwrap(),
+        InterleavedMut::new(&mut out, ST).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(out, [0.5, 0.25, 0.0, -0.5, -1.0, 0.0]);
+}
+
+#[test]
+fn deinterleave_converts_the_format_in_the_same_pass() {
+    let src = [0.5f32, -1.0, 2.0, f32::NAN];
+    let mut planes = vec![vec![0i16; 2], vec![0i16; 2]];
+    deinterleave(
+        Interleaved::new(&src, ST).unwrap(),
+        PlanesMut::from_vecs(&mut planes).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(planes, [[16384, 32767], [-32768, 0]]);
+}
+
+#[test]
+fn convert_planes_converts_plane_by_plane() {
+    let src = vec![vec![0.5f32, -0.5], vec![1.0, -1.0]];
+    let mut dst = vec![vec![0i16; 2]; 2];
+    convert_planes(
+        Planes::from_vecs(&src).unwrap(),
+        PlanesMut::from_vecs(&mut dst).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(dst, [[16384, -16384], [32767, -32768]]);
+}
+
+#[test]
+fn convert_planes_refuses_mismatches_and_writes_nothing() {
+    let src = vec![vec![0.5f32; 3], vec![0.5f32; 3]];
+    let mut short = vec![vec![7i16; 2]; 2];
+    assert_eq!(
+        convert_planes(
+            Planes::from_vecs(&src).unwrap(),
+            PlanesMut::from_vecs(&mut short).unwrap()
+        ),
+        Err(BufferError::LengthMismatch {
+            src: Samples(3),
+            dst: Samples(2)
+        })
+    );
+    let mut narrow = vec![vec![7i16; 3]];
+    assert_eq!(
+        convert_planes(
+            Planes::from_vecs(&src).unwrap(),
+            PlanesMut::from_vecs(&mut narrow).unwrap()
+        ),
+        Err(BufferError::WidthMismatch {
+            src: ST,
+            dst: ChannelLayout::MONO
+        })
+    );
+    assert_eq!((short, narrow), (vec![vec![7; 2]; 2], vec![vec![7; 3]]));
+}
+
+#[test]
+fn interleave_inverts_deinterleave_at_every_width() {
+    for width in 1u16..=8 {
+        let layout = ChannelLayout::from(width);
+        let data: Vec<f32> = (0..usize::from(width) * 37).map(|i| i as f32).collect();
+        let mut planes = vec![vec![0.0f32; 37]; usize::from(width)];
+        deinterleave(
+            Interleaved::new(&data, layout).unwrap(),
+            PlanesMut::from_vecs(&mut planes).unwrap(),
+        )
+        .unwrap();
+        let mut back = vec![f32::NAN; data.len()];
+        interleave(
+            Planes::from_vecs(&planes).unwrap(),
+            InterleavedMut::new(&mut back, layout).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(back, data, "width {width}");
+    }
 }

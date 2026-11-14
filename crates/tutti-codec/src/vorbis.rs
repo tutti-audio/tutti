@@ -46,7 +46,7 @@ use std::io::{Seek, Write};
 use std::num::{NonZeroU8, NonZeroU32};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::JoinHandle;
-use tutti_buffers::Interleaved;
+use tutti_buffers::{Interleaved, PlanesMut, deinterleave};
 use tutti_types::{ChannelLayout, Speaker};
 use vorbis_rs::{VorbisBitrateManagementStrategy, VorbisEncoder, VorbisEncoderBuilder};
 
@@ -344,8 +344,16 @@ fn run<W: Write>(
             let result = match Interleaved::new(&samples, layout) {
                 Err(e) => Err(e.to_string()),
                 Ok(block) => {
-                    block.deinterleave_into(&mut planes);
-                    encode(&mut encoder, &mut planes, &mut ordered, order)
+                    // Each plane is sized to the block (it grows only past its
+                    // capacity), then written whole by the strict path.
+                    for plane in &mut planes {
+                        plane.clear();
+                        plane.resize(block.frames().get(), 0.0);
+                    }
+                    PlanesMut::from_vecs(&mut planes)
+                        .and_then(|out| deinterleave(block, out))
+                        .map_err(|e| e.to_string())
+                        .and_then(|()| encode(&mut encoder, &mut planes, &mut ordered, order))
                 }
             };
             if let Err(e) = result {

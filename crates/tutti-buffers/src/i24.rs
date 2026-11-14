@@ -9,7 +9,9 @@
 /// It has the range-checked shape (`new` never clamps, a const `of` panics for
 /// a literal, `get`, `TryFrom<i32>` agreeing with `new`, `From<I24> for i32`)
 /// written by hand, because [`ranged!`](tutti_types::ranged) stores the raw
-/// value and this type stores three bytes.
+/// value and this type stores three bytes. The two narrower signed integers
+/// convert without loss (`From<i8>`, `From<i16>`), and with the `serde`
+/// feature a value is its `i32`, refused outside the range on the way in.
 ///
 /// ```
 /// use tutti_buffers::I24;
@@ -19,6 +21,8 @@
 /// assert_eq!(size_of::<I24>(), 3);
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "i32", into = "i32"))]
 #[repr(transparent)]
 pub struct I24([u8; 3]);
 
@@ -87,6 +91,26 @@ impl I24 {
     pub const fn from_le_bytes(bytes: [u8; 3]) -> Self {
         Self(bytes)
     }
+
+    /// The three big-endian bytes: the order of 24-bit AIFF.
+    #[inline]
+    #[must_use]
+    pub const fn to_be_bytes(self) -> [u8; 3] {
+        [self.0[2], self.0[1], self.0[0]]
+    }
+
+    /// The value held by three big-endian bytes. Every byte triple is a value.
+    #[inline]
+    #[must_use]
+    pub const fn from_be_bytes(bytes: [u8; 3]) -> Self {
+        Self([bytes[2], bytes[1], bytes[0]])
+    }
+}
+
+impl core::fmt::Display for I24 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Display::fmt(&self.get(), f)
+    }
 }
 
 impl Default for I24 {
@@ -126,5 +150,21 @@ impl From<I24> for i32 {
     #[inline]
     fn from(value: I24) -> i32 {
         value.get()
+    }
+}
+
+impl From<i8> for I24 {
+    #[inline]
+    fn from(value: i8) -> Self {
+        let b = i32::from(value).to_le_bytes();
+        Self([b[0], b[1], b[2]])
+    }
+}
+
+impl From<i16> for I24 {
+    #[inline]
+    fn from(value: i16) -> Self {
+        let b = i32::from(value).to_le_bytes();
+        Self([b[0], b[1], b[2]])
     }
 }

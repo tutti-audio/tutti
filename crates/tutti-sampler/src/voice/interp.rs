@@ -21,9 +21,10 @@
 
 use std::ops::Range;
 use std::sync::Arc;
-use tutti_buffers::{Fold, FoldEnd, FoldError};
+use tutti_buffers::{Fold, FoldEnd, FoldError, MonoMut, Planes};
 use tutti_codec::Wave;
 use tutti_dsp::cubic_hermite;
+use tutti_graph::fold_to_width;
 use tutti_types::{
     Beat, BeatDuration, Bpm, ChannelLayout, ChannelTopology, Frame, ReadRate, SamplePosition,
     SampleRate, Samples, Speaker, TimelineSegment, snap_to_whole_frame,
@@ -390,7 +391,7 @@ pub(crate) fn hermite_lanes(out: &mut [f32], y: [&[f32]; 4], t: &[f32]) {
 ///   the sample fans to every channel, as it did before.
 /// - any other wave → a frame of another width or another order: the
 ///   [`Fold`] from the wave's topology to the frame's
-///   ([`Fold::to_width`]). A wider wave folds by the ITU-R BS.775 matrix at
+///   ([`fold_to_width`]). A wider wave folds by the ITU-R BS.775 matrix at
 ///   width 2 (front-pair passthrough would silently drop the centre and the
 ///   surrounds), and by position at the widths between; a narrower one keeps
 ///   its channels where they are and leaves the rest silent (stereo carries a
@@ -516,7 +517,7 @@ pub(crate) fn read_looped_frame(
 /// allocation-free.
 ///
 /// The destination is taken to be the engine's own order for its width
-/// ([`Fold::assuming_smpte`]): a voice's outputs are a count, and the count is
+/// ([`ChannelTopology::smpte`]): a voice's outputs are a count, and the count is
 /// all there is to go on. A width with no order (3, 4, 5, 7, 9 to 11, 13 and up)
 /// has no centre to name, so the sample goes to every channel, as it always
 /// did; so does a width of one or two, where the rule is exactly that, and a
@@ -549,7 +550,9 @@ impl MonoSpread {
             return Self::FAN;
         }
         Self {
-            fold: Fold::assuming_smpte(ChannelLayout::MONO, width).ok(),
+            fold: ChannelTopology::smpte(width).and_then(|dst| {
+                Fold::between(&ChannelTopology::assumed(ChannelLayout::MONO), &dst).ok()
+            }),
         }
     }
 
@@ -601,8 +604,20 @@ impl MonoSpread {
             Some(fold) => {
                 let mono = &mut scratch[..range.len()];
                 mono.copy_from_slice(&lanes[0].as_mut()[range.clone()]);
+                // The fold reads one channel, the mono block.
+                let source = [&*mono];
                 for (c, lane) in lanes.iter_mut().enumerate() {
-                    fold.planar_channel(|_| &*mono, c, &mut lane.as_mut()[range.clone()]);
+                    let folded = Planes::new(&source).and_then(|planes| {
+                        fold.fold_planar_channel(
+                            planes,
+                            c,
+                            MonoMut::new(&mut lane.as_mut()[range.clone()]),
+                        )
+                    });
+                    debug_assert!(
+                        folded.is_ok(),
+                        "the lane and the mono block are one range long: {folded:?}"
+                    );
                 }
             }
         }
@@ -617,7 +632,7 @@ pub const MAX_WAVE_CHANNELS: usize = 32;
 ///
 /// A mono wave is placed by its [`MonoSpread`]; any other is placed by the
 /// [`Fold`] from the wave's own [`topology`](Wave::topology) to the frame's
-/// ([`Fold::to_width`]), unless it is already the frame's width and order, in
+/// ([`fold_to_width`]), unless it is already the frame's width and order, in
 /// which case it is read channel for channel and there is no fold. Built once
 /// per reader, on the control side ([`for_wave`](Self::for_wave) allocates and
 /// can refuse); the per-frame and per-block writes are allocation-free.
@@ -696,7 +711,14 @@ impl Place {
         if topology.positions().len() == 1 {
             return Ok(Self::native(frame));
         }
-        let fold = Fold::to_width(topology, frame)?;
+        // A file that names no speakers is read in the engine's order for its
+        // width.
+        let named = if topology.is_unassigned() {
+            ChannelTopology::assumed(topology.layout())
+        } else {
+            topology.clone()
+        };
+        let fold = fold_to_width(&named, frame)?;
         if fold.is_identity() {
             return Ok(Self::native(frame));
         }
@@ -1077,7 +1099,11 @@ mod tests {
         let v = 0.3f32;
         for width in [1u16, 2, 6, 8] {
             let layout = ChannelLayout::from(width);
-            let fold = Fold::assuming_smpte(ChannelLayout::MONO, layout).unwrap();
+            let fold = Fold::between(
+                &ChannelTopology::assumed(ChannelLayout::MONO),
+                &ChannelTopology::assumed(layout),
+            )
+            .unwrap();
             let spread = MonoSpread::to(layout);
             let mut by_fold = vec![0.0f32; usize::from(width)];
             fold.frame(&[v], &mut by_fold);
@@ -1121,7 +1147,7 @@ mod tests {
 
     /// Narrowing goes through the engine's ITU-R BS.775 matrix, not a front-pair
     /// truncation: a centre-only 5.1 source must reach both stereo outputs at
-    /// −3 dB ([`M3DB`](tutti_buffers::M3DB)), the ITU figure.
+    /// −3 dB ([`MINUS_3_DB`](tutti_buffers::Float::MINUS_3_DB)), the ITU figure.
     #[test]
     fn six_channel_wave_on_a_stereo_frame_folds_through_the_itu_matrix() {
         // 5.1 order: L R C LFE Ls Rs — centre only.
@@ -1134,7 +1160,11 @@ mod tests {
         let mut out = [0.0f32; 2];
         read_frame(&w, 4.0, &mut out);
 
-        assert_eq!(out, [tutti_buffers::M3DB; 2], "the ITU centre figure");
+        assert_eq!(
+            out,
+            [<f32 as tutti_buffers::Float>::MINUS_3_DB; 2],
+            "the ITU centre figure"
+        );
         assert!(
             out[0] > 0.5 && out[1] > 0.5,
             "centre was dropped — this is front-pair truncation, not a fold: {out:?}"
@@ -1238,7 +1268,10 @@ mod tests {
         let place = Place::for_wave(&w, ChannelLayout::from(12u16)).unwrap();
         let mut out = [9.0f32; MAX_SAMPLER_CHANNELS];
         super::read_frame(&w, &place, 4.0, &mut out);
-        assert!((out[0] - tutti_buffers::M3DB).abs() < 1e-6, "{out:?}");
+        assert!(
+            (out[0] - <f32 as tutti_buffers::Float>::MINUS_3_DB).abs() < 1e-6,
+            "{out:?}"
+        );
         assert!(out[1..].iter().all(|&s| s.abs() < 1e-6), "{out:?}");
 
         let mut quad = Wave::new(4, SampleRate::SR_48K);
@@ -1253,7 +1286,7 @@ mod tests {
             4.0,
             &mut out,
         );
-        let m = tutti_buffers::M3DB;
+        let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
         assert!((out[0] - (1.0 + m * 4.0)).abs() < 1e-5 && (out[1] - (2.0 + m * 8.0)).abs() < 1e-5);
     }
 

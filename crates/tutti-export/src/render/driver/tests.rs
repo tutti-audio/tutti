@@ -2,7 +2,7 @@ use super::*;
 use crate::control::{CancelToken, Progress, Stage};
 use crate::{GRAPH_MAX_BLOCK, Setup};
 use std::sync::Arc;
-use tutti_buffers::Interleaved;
+use tutti_buffers::{Interleaved, Planes};
 use tutti_graph::GraphBuilder;
 use tutti_tempo::TempoMap;
 use tutti_transport::{FrozenClock, OfflineTimeline, OfflineTimelineConfig};
@@ -53,14 +53,17 @@ fn render(
             |src, _, window| {
                 let planes = src.planes();
                 let block = &mut scratch[..window.len() * ch];
-                fold.planar_to_interleaved(
-                    |c| &planes[c][window.clone()],
+                fold.fold_planar_to_interleaved(
+                    Planes::from_vecs(planes)
+                        .unwrap()
+                        .slice(Samples(window.start)..Samples(window.end)),
                     InterleavedMut::new(block, layout).unwrap(),
-                );
+                )
+                .unwrap();
                 out.extend(
                     Interleaved::new(block, layout)
                         .unwrap()
-                        .iter_frames()
+                        .iter()
                         .map(<[f32]>::to_vec),
                 );
                 Ok(())

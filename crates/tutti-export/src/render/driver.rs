@@ -23,7 +23,8 @@ use crate::control::{Control, Outcome, Stage};
 use crate::render::BlockCursor;
 use crate::{ConfigError, RenderGraph};
 use std::ops::Range;
-use tutti_buffers::{Fold, InterleavedMut};
+use tutti_buffers::{Fold, InterleavedMut, Planes, interleave};
+use tutti_graph::fold_to_width;
 use tutti_transport::RenderClock;
 use tutti_types::{ChannelLayout, ChannelTopology, Samples};
 
@@ -39,26 +40,27 @@ impl FileChannels<'_> {
     /// declared (`root`: the graph's root, or a tap's placement), or else the engine's order for its width (a bare 4 is
     /// quad); the file the topology it states or else the same assumption for
     /// its width; where either has no order, or the file states unassigned
-    /// channels, the channels go by index ([`Fold::widths`],
-    /// [`Fold::declared`], [`Fold::by_index`]).
+    /// channels, the channels go by index ([`fold_to_width`],
+    /// [`Fold::by_index`]).
     ///
     /// # Errors
     ///
     /// [`ConfigError::Placement`] when the file's topology cannot take the
     /// graph's channels, or the declared root is
     /// not as wide as the graph, or the graph has more channels than a layout
-    /// holds ([`FoldError::TooWide`](tutti_buffers::FoldError::TooWide)).
+    /// holds ([`BufferError::TooWide`](tutti_buffers::BufferError::TooWide)).
     pub(crate) fn fold_from(
         &self,
         outputs: usize,
         root: Option<&ChannelTopology>,
     ) -> crate::Result<Fold> {
-        let graph = ChannelLayout::try_from(outputs)
-            .map_err(|_| ConfigError::Placement(tutti_buffers::FoldError::TooWide(outputs)))?;
+        let graph = ChannelLayout::try_from(outputs).map_err(|_| {
+            ConfigError::Placement(tutti_buffers::BufferError::TooWide { channels: outputs }.into())
+        })?;
         if let Some(root) = root
             && root.layout() != graph
         {
-            return Err(ConfigError::Placement(tutti_buffers::FoldError::RootWidth {
+            return Err(ConfigError::Root(tutti_graph::RootError::Width {
                 declared: root.layout(),
                 requested: graph,
             })
@@ -66,14 +68,14 @@ impl FileChannels<'_> {
         }
         let Some(topology) = self.topology else {
             let fold = match root {
-                Some(root) => Fold::declared(root, self.layout),
-                None => Fold::widths(graph, self.layout),
+                Some(root) => fold_to_width(root, self.layout),
+                None => fold_to_width(&ChannelTopology::assumed(graph), self.layout),
             };
             return fold.map_err(|e| ConfigError::Placement(e).into());
         };
         let from = match root {
             Some(root) => root.clone(),
-            None => ChannelTopology::for_width(graph),
+            None => ChannelTopology::assumed(graph),
         };
         // A file that names no speaker takes the graph's channels by index,
         // as it says; `between` never pads by a guess.
@@ -370,20 +372,37 @@ impl Replay for PlaneSource<'_> {
             .planes
             .first()
             .map_or(0, |p| p.len().saturating_sub(self.pos.get()));
-        let n = out.len().get().min(available);
-        let block = out.window_mut(Samples::ZERO..Samples(n));
+        let n = out.frames().get().min(available);
+        if n == 0 {
+            return Ok(0);
+        }
+        let mut block = out.slice_mut(Samples::ZERO..Samples(n));
         let pos = self.pos.get();
+        let span = Samples(pos)..Samples(pos + n);
+        // Both write every sample of every frame (rather than leaving whatever
+        // the buffer held), which matters because the caller's block is reused
+        // across iterations.
         match &self.fold {
             Some(fold) => {
-                let planes = self.planes;
-                fold.planar_to_interleaved(|c| &planes[c][pos..pos + n], block);
+                let planes = Planes::from_vecs(self.planes)?.slice(span);
+                fold.fold_planar_to_interleaved(planes, block)?;
             }
-            // `interleave_from` writes every sample of every frame (rather
-            // than leaving whatever the buffer held), which matters because
-            // the caller's block is reused across iterations.
+            // Planes of the file's own width interleave strictly. A render with
+            // another channel count is silent in the channels it lacks, and its
+            // extra planes are not written: the block is cleared, then each
+            // plane the file has fills its channel.
+            None if self.planes.len() == block.channels() => {
+                interleave(Planes::from_vecs(self.planes)?.slice(span), block)?;
+            }
             None => {
-                let mut block = block;
-                block.interleave_from(self.planes, Samples(pos));
+                let width = block.channels();
+                block.samples_mut().fill(0.0);
+                for (c, plane) in self.planes.iter().enumerate().take(width) {
+                    let lane = block.samples_mut().iter_mut().skip(c).step_by(width);
+                    for (d, &s) in lane.zip(&plane[pos..pos + n]) {
+                        *d = s;
+                    }
+                }
             }
         }
         self.pos = Samples(self.pos.get() + n);
