@@ -701,10 +701,11 @@ fn a_714_root_block_is_allocation_free() {
             assert_eq!(s, (c + 1) as f32 / 16.0, "channel {c}");
         }
     }
-    // The 7.1.4 root (FL FR FC LFE SL SR BL BR TFL TFR TBL TBR) into stereo, by
-    // ITU-R BS.775's rule: the fronts straight, the LFE omitted, and the centre,
-    // the surrounds and the heights at -3 dB into the front speaker on their
-    // side (the centre into both).
+    // The 7.1.4 root (FL FR FC LFE SL SR BL BR TFL TFR TBL TBR) into stereo by
+    // `Fold`'s documented rule: ITU-R BS.775 for the fronts (straight), the
+    // centre (-3 dB into both) and the surrounds (-3 dB into the front on their
+    // side), the LFE omitted, and tutti's table for the heights (-3 dB into the
+    // front on their side).
     let v = |c: usize| (c + 1) as f32 / 16.0;
     let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
     let left = v(0) + m * (v(2) + v(4) + v(6) + v(8) + v(10));
