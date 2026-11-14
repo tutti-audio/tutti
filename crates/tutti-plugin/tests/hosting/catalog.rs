@@ -146,12 +146,13 @@ fn register_delivers_the_row_of_a_file_outside_the_scanned_directories() {
     let result = finish(&mut catalog, task);
 
     assert_eq!((result.scanned, result.new), (1, 1));
-    let mut files: Vec<_> = catalog
-        .iter()
-        .map(|(plugin, _)| plugin.path().to_path_buf())
+    let rows: Vec<_> = catalog
+        .db()
+        .rows()
+        .map(|(path, _)| path.to_path_buf())
         .collect();
-    files.dedup();
-    assert_eq!(files, [tutti_plugin_db::canonical_path(&elsewhere)]);
+    assert_eq!(rows, [tutti_plugin_db::canonical_path(&elsewhere)]);
+    assert!(catalog.iter().count() > 0, "the file's plugins are listed");
 }
 
 /// A task names a path that cannot be probed at the call.
@@ -175,33 +176,47 @@ fn register_and_measure_refuse_a_missing_or_unrecognized_file_at_the_call() {
 }
 
 #[cfg(unix)]
-mod stuck_probe {
+mod stand_in_probe {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
+    use tutti_plugin::catalog::Locator;
+    use tutti_plugin_db::ProbeFailureKind;
 
-    /// A `plugin-probe` that records its pid and then hangs, as a plugin stuck in
-    /// its load does. Returns the file the pid lands in. The environment points
-    /// the catalog's probe search at it until `env` drops.
-    fn stuck_probe(dir: &Path, env: &mut tutti_fixtures::ScopedEnv) -> PathBuf {
-        let pid_file = dir.join("pid");
-        let script = dir.join("plugin-probe");
-        std::fs::write(
-            &script,
-            format!(
-                "#!/bin/sh\necho $$ > {}\nexec sleep 600\n",
-                pid_file.display()
-            ),
-        )
-        .expect("the stand-in");
+    /// A catalog over one plugin file whose probe is the script `body`, which
+    /// gets the pid file's path as `$PID_FILE` replaced in the text. Returns the
+    /// catalog, the file and the file the script writes its pid to.
+    fn catalog_probed_by(
+        dir: &tempfile::TempDir,
+        body: &str,
+        probe_timeout: Option<Duration>,
+    ) -> (Catalog, PathBuf, PathBuf) {
+        let pid_file = dir.path().join("pid");
+        let script = dir.path().join("plugin-probe");
+        let text = body.replace("$PID_FILE", &pid_file.display().to_string());
+        std::fs::write(&script, format!("#!/bin/sh\n{text}\n")).expect("the stand-in");
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
             .expect("executable");
-        env.set("TUTTI_PLUGIN_PROBE", &script);
-        pid_file
+        let scanned_dir = dir.path().join("plugins");
+        std::fs::create_dir(&scanned_dir).expect("the scanned directory");
+        let file = scanned_dir.join("Only.clap");
+        std::fs::copy(tutti_fixtures::clap_probe(), &file).expect("drop a plugin in");
+        let mut config =
+            CatalogConfig::new(dir.path(), vec![scanned_dir]).probe_locator(Locator::at(script));
+        if let Some(timeout) = probe_timeout {
+            config = config.probe_timeout(timeout).measure_timeout(timeout);
+        }
+        (
+            Catalog::new(PluginDb::new(), config, |_| Ok(())),
+            file,
+            pid_file,
+        )
     }
 
-    /// The pid the stuck probe wrote, once it is running.
+    const HANG: &str = "echo $$ > $PID_FILE\nexec sleep 600";
+
+    /// The pid the stand-in wrote, once it is running.
     fn running_pid(pid_file: &Path) -> String {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
@@ -231,9 +246,7 @@ mod stuck_probe {
     #[test]
     fn dropping_a_scan_kills_a_stuck_probe_promptly() {
         let dir = tempfile::TempDir::new().expect("a scratch directory");
-        let mut env = tutti_fixtures::ScopedEnv::new();
-        let pid_file = stuck_probe(dir.path(), &mut env);
-        let (mut catalog, _) = catalog_with_one_plugin(&dir);
+        let (mut catalog, _, pid_file) = catalog_probed_by(&dir, HANG, None);
 
         let task = catalog.scan().expect("no task is running");
         let pid = running_pid(&pid_file);
@@ -256,9 +269,7 @@ mod stuck_probe {
     #[test]
     fn dropping_a_measure_kills_a_stuck_probe_promptly() {
         let dir = tempfile::TempDir::new().expect("a scratch directory");
-        let mut env = tutti_fixtures::ScopedEnv::new();
-        let pid_file = stuck_probe(dir.path(), &mut env);
-        let (mut catalog, file) = catalog_with_one_plugin(&dir);
+        let (mut catalog, file, pid_file) = catalog_probed_by(&dir, HANG, None);
         let plugin = tutti_plugin::catalog::PluginRef::file(file).expect("a clap file");
 
         let task = catalog.measure(&plugin).expect("a file that exists");
@@ -274,4 +285,84 @@ mod stuck_probe {
         );
         assert!(!alive(&pid), "the probe (pid {pid}) outlived the drop");
     }
+
+    /// **A registration a drop cancelled leaves no trace**: the file's row is
+    /// absent, not blacklisted as the killed probe's crash.
+    #[test]
+    fn a_dropped_registration_records_nothing() {
+        let dir = tempfile::TempDir::new().expect("a scratch directory");
+        let (mut catalog, file, pid_file) = catalog_probed_by(&dir, HANG, None);
+
+        let task = catalog.register(&file).expect("a plugin file");
+        running_pid(&pid_file);
+        drop(task);
+
+        assert!(catalog.db().is_empty());
+        assert!(!catalog.is_blacklisted(&file));
+    }
+
+    /// **A registration of a plugin that crashes its probe blacklists it**, as a
+    /// scan does, and the result names the crash.
+    #[test]
+    fn registering_a_plugin_that_crashes_its_probe_blacklists_it() {
+        let dir = tempfile::TempDir::new().expect("a scratch directory");
+        let (mut catalog, file, _) = catalog_probed_by(&dir, "exit 3", None);
+
+        let task = catalog.register(&file).expect("a plugin file");
+        let result = finish(&mut catalog, task);
+
+        assert_eq!(result.newly_blacklisted, 1);
+        let [failed] = result.failures.as_slice() else {
+            panic!("one failure: {:?}", result.failures);
+        };
+        assert_eq!(failed.path, tutti_plugin_db::canonical_path(&file));
+        assert_eq!(failed.failure.kind, ProbeFailureKind::Crashed);
+        assert!(catalog.is_blacklisted(&file));
+    }
+
+    /// **A registration of a plugin that hangs its probe blacklists it** once
+    /// the deadline passes.
+    #[test]
+    fn registering_a_plugin_that_hangs_its_probe_blacklists_it() {
+        let dir = tempfile::TempDir::new().expect("a scratch directory");
+        let (mut catalog, file, _) =
+            catalog_probed_by(&dir, HANG, Some(Duration::from_millis(500)));
+
+        let task = catalog.register(&file).expect("a plugin file");
+        let result = finish(&mut catalog, task);
+
+        let [failed] = result.failures.as_slice() else {
+            panic!("one failure: {:?}", result.failures);
+        };
+        assert_eq!(failed.failure.kind, ProbeFailureKind::TimedOut);
+        assert!(catalog.is_blacklisted(&file));
+    }
+}
+
+/// **A registration with no `plugin-probe` to run says so**: the failure's kind
+/// is the probe's absence, not a crash or a timeout, the file is not recorded
+/// under its name, and nothing is blacklisted.
+#[test]
+fn register_names_a_missing_probe_binary() {
+    use tutti_plugin::catalog::Locator;
+    use tutti_plugin_db::ProbeFailureKind;
+    let dir = tempfile::TempDir::new().expect("a scratch directory");
+    let (catalog, file) = catalog_with_one_plugin(&dir);
+    let config = CatalogConfig::new(dir.path(), tutti_plugin::catalog::NO_SCAN_DIRS)
+        .probe_locator(Locator::at(dir.path().join("no-such-plugin-probe")));
+    drop(catalog);
+    let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
+
+    let task = catalog.register(&file).expect("a plugin file");
+    let result = finish(&mut catalog, task);
+
+    let [failed] = result.failures.as_slice() else {
+        panic!("one failure: {:?}", result.failures);
+    };
+    assert_eq!(failed.failure.kind, ProbeFailureKind::ProbeNotFound);
+    assert_eq!(
+        (result.new, result.failed, result.newly_blacklisted),
+        (0, 1, 0)
+    );
+    assert!(catalog.db().is_empty());
 }

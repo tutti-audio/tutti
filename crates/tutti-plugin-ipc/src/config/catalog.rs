@@ -20,6 +20,7 @@ use super::bridge::BridgeConfig;
 use crate::protocol::SampleFormat;
 use std::path::PathBuf;
 use std::time::Duration;
+use tutti_plugin_types::Locator;
 
 /// Where the scanner keeps its crash sentinel and which directories to scan.
 #[derive(Debug, Clone)]
@@ -31,6 +32,24 @@ pub struct CatalogConfig {
 
     /// Directories to scan for plugins.
     pub scan_dirs: Vec<PathBuf>,
+
+    /// Where the catalog finds `plugin-probe`, the process every probe runs in:
+    /// [`Locator::Search`] unless a host or a test names the binary.
+    pub probe_locator: Locator,
+
+    /// How long a probe may take, or `None` for the catalog's default (fifteen
+    /// seconds, a cold plugin's load included).
+    pub probe_timeout: Option<Duration>,
+
+    /// How long a measuring probe may take, or `None` for the catalog's default
+    /// (three minutes: two renders of up to the longest tail).
+    pub measure_timeout: Option<Duration>,
+
+    /// A file of the bytes a plugin's own `save_state` wrote. A measure task puts
+    /// the plugin in that state before it measures it, so it is for a file of
+    /// one plugin; the record's `ProbeConfig::state` hashes it. A scan never
+    /// reads it.
+    pub measure_state: Option<PathBuf>,
 }
 
 /// An empty `scan_dirs` list, for [`CatalogConfig::new`].
@@ -51,6 +70,10 @@ impl CatalogConfig {
         Self {
             pedal_dir: pedal_dir.into(),
             scan_dirs: scan_dirs.into_iter().map(Into::into).collect(),
+            probe_locator: Locator::Search,
+            probe_timeout: None,
+            measure_timeout: None,
+            measure_state: None,
         }
     }
 
@@ -71,6 +94,35 @@ impl CatalogConfig {
         P: Into<PathBuf>,
     {
         self.scan_dirs = dirs.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets where the catalog finds `plugin-probe`.
+    #[must_use]
+    pub fn probe_locator(mut self, locator: Locator) -> Self {
+        self.probe_locator = locator;
+        self
+    }
+
+    /// Sets how long a probe may take.
+    #[must_use]
+    pub fn probe_timeout(mut self, timeout: Duration) -> Self {
+        self.probe_timeout = Some(timeout);
+        self
+    }
+
+    /// Sets how long a measuring probe may take.
+    #[must_use]
+    pub fn measure_timeout(mut self, timeout: Duration) -> Self {
+        self.measure_timeout = Some(timeout);
+        self
+    }
+
+    /// Sets the state file a measure task puts the plugin in
+    /// ([`measure_state`](Self::measure_state)).
+    #[must_use]
+    pub fn measure_state(mut self, file: impl Into<PathBuf>) -> Self {
+        self.measure_state = Some(file.into());
         self
     }
 

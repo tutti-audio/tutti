@@ -1,5 +1,5 @@
-//! The plugin probe, a separate process: `tutti_plugin::catalog::probe_record_with`
-//! spawns `plugin-probe`, which loads the file just far enough to read the
+//! The plugin probe, a separate process: a `tutti_plugin::catalog::Catalog` task
+//! (`register`, `measure`) spawns `plugin-probe`, which loads the file just far enough to read the
 //! descriptor of every plugin it holds and writes them to a result file.
 //!
 //! One test per format reads the shared plugin's descriptor, and one test each
@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use tutti_plugin::catalog::{
-    DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, Locator, PluginDescriptor, PluginRef,
-    measure_record_with, probe_failure, probe_record_with,
+    Catalog, CatalogConfig, DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, Locator, NO_SCAN_DIRS,
+    PluginDescriptor, PluginRef, ProbeFailure, ProbeFailureKind, ScanPoll,
 };
 use tutti_plugin_contract::{
     Clap, Format, Vst2, Vst3, Vst3Cpp, bundle_of, clap_path, library, spec, state_with_fault,
@@ -33,40 +33,81 @@ use tutti_plugin_types::{
 };
 use tutti_vst2_host::Vst2Loaded;
 
-/// The one descriptor `probe_record_with` found at `path`.
-fn probe(path: &Path) -> Result<PluginDescriptor, BridgeError> {
+/// A catalog whose probes run in the `plugin-probe` built in this profile, named
+/// through [`Locator::at`], so nothing writes the process-global environment. Its
+/// sentinel lives in `dir`.
+fn config(dir: &Path) -> CatalogConfig {
+    CatalogConfig::new(dir, NO_SCAN_DIRS).probe_locator(Locator::at(tutti_fixtures::plugin_probe()))
+}
+
+/// Runs the catalog task `start` makes to its end and returns the database it
+/// built, or the first failure the task reports.
+fn run_task(
+    config: CatalogConfig,
+    start: impl FnOnce(&mut Catalog) -> tutti_plugin_db::Scan,
+) -> Result<PluginDb, ProbeFailure> {
+    let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
+    let mut task = start(&mut catalog);
+    let deadline = Instant::now() + Duration::from_secs(300);
+    let result = loop {
+        match catalog.try_apply(&mut task) {
+            ScanPoll::Running => {
+                assert!(Instant::now() < deadline, "the task never ended");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            ScanPoll::Done(result) => break result,
+            ScanPoll::Died => panic!("the task's worker died"),
+        }
+    };
+    match result.failures.into_iter().next() {
+        Some(failed) => Err(failed.failure),
+        None => Ok(catalog.db().clone()),
+    }
+}
+
+/// The one descriptor a catalog registration found at `path`.
+fn probe(path: &Path) -> Result<PluginDescriptor, ProbeFailure> {
     probe_with_timeout(path, DEFAULT_PROBE_TIMEOUT)
 }
 
 /// [`probe`] under a deadline of the test's choosing.
-fn probe_with_timeout(path: &Path, timeout: Duration) -> Result<PluginDescriptor, BridgeError> {
+fn probe_with_timeout(path: &Path, timeout: Duration) -> Result<PluginDescriptor, ProbeFailure> {
     let found = probe_all_with_timeout(path, timeout)?;
     assert_eq!(found.len(), 1, "one plugin in {}", path.display());
     Ok(found.into_iter().next().unwrap())
 }
 
-/// Every plugin `probe_record_with` found at `path`, as the catalog holds them: the
-/// db a probe's delta was applied to.
-fn probe_db(path: &Path) -> Result<PluginDb, BridgeError> {
+/// Every plugin a registration found at `path`, as the catalog holds them.
+fn probe_db(path: &Path) -> Result<PluginDb, ProbeFailure> {
     probe_db_with_timeout(path, DEFAULT_PROBE_TIMEOUT)
 }
 
-/// The probe is the one built in this profile, named through [`Locator::at`], so
-/// nothing writes the process-global environment.
-fn probe_db_with_timeout(path: &Path, timeout: Duration) -> Result<PluginDb, BridgeError> {
-    let locator = Locator::at(tutti_fixtures::plugin_probe());
-    let delta = probe_record_with(path, &locator, timeout)?;
-    let mut db = PluginDb::new();
-    db.apply(delta);
-    Ok(db)
+fn probe_db_with_timeout(path: &Path, timeout: Duration) -> Result<PluginDb, ProbeFailure> {
+    let pedal = tempfile::tempdir().unwrap();
+    run_task(config(pedal.path()).probe_timeout(timeout), |catalog| {
+        catalog.register(path).expect("a plugin file")
+    })
 }
 
 fn probe_all_with_timeout(
     path: &Path,
     timeout: Duration,
-) -> Result<Vec<PluginDescriptor>, BridgeError> {
+) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
     let db = probe_db_with_timeout(path, timeout)?;
     Ok(db.plugins().map(|p| p.descriptor.clone()).collect())
+}
+
+/// A catalog measure task over `path`, the plugin put in the state `file` holds
+/// first, under the deadline `timeout`.
+fn measure_db(path: &Path, file: &Path, timeout: Duration) -> Result<PluginDb, ProbeFailure> {
+    let pedal = tempfile::tempdir().unwrap();
+    let config = config(pedal.path())
+        .measure_timeout(timeout)
+        .measure_state(file);
+    run_task(config, |catalog| {
+        let plugin = PluginRef::file(path).expect("a plugin file");
+        catalog.measure(&plugin).expect("a plugin file")
+    })
 }
 
 /// The shared plugin as the spec describes it, whatever the format.
@@ -270,10 +311,9 @@ fn clap_named(dir: &tempfile::TempDir, name: &str) -> PathBuf {
 #[test]
 fn a_plugin_that_crashes_in_init_is_a_crash() {
     let dir = tempfile::tempdir().unwrap();
-    let err = probe(&clap_named(&dir, "init-crash")).expect_err("must not probe");
-    assert!(matches!(err, BridgeError::ProcessCrashed), "{err:?}");
-    let failure = probe_failure(err);
-    assert!(failure.blacklistable, "{failure:?}");
+    let failure = probe(&clap_named(&dir, "init-crash")).expect_err("must not probe");
+    assert_eq!(failure.kind, ProbeFailureKind::Crashed, "{failure:?}");
+    assert!(failure.blacklistable(), "{failure:?}");
     assert!(failure.reason.contains("crashed"), "{failure:?}");
 }
 
@@ -283,16 +323,15 @@ fn a_plugin_that_crashes_in_init_is_a_crash() {
 fn a_plugin_that_hangs_in_init_times_out() {
     let dir = tempfile::tempdir().unwrap();
     let started = Instant::now();
-    let err = probe_with_timeout(&clap_named(&dir, "init-hang"), Duration::from_secs(2))
+    let failure = probe_with_timeout(&clap_named(&dir, "init-hang"), Duration::from_secs(2))
         .expect_err("must not probe");
-    assert!(matches!(err, BridgeError::Timeout { .. }), "{err:?}");
+    assert_eq!(failure.kind, ProbeFailureKind::TimedOut, "{failure:?}");
     assert!(
         started.elapsed() < Duration::from_secs(10),
         "{:?}",
         started.elapsed()
     );
-    let failure = probe_failure(err);
-    assert!(failure.blacklistable, "{failure:?}");
+    assert!(failure.blacklistable(), "{failure:?}");
     assert!(failure.reason.contains("timed out"), "{failure:?}");
 }
 
@@ -301,13 +340,10 @@ fn a_plugin_that_hangs_in_init_times_out() {
 #[test]
 fn a_plugin_that_refuses_to_load_is_a_typed_failure() {
     let dir = tempfile::tempdir().unwrap();
-    let err = probe(&clap_named(&dir, "init-refuse")).expect_err("must not probe");
-    assert!(
-        matches!(&err, BridgeError::LoadFailed { reason, .. }
-        if reason.contains("Entry init failed")),
-        "{err:?}"
-    );
-    assert!(probe_failure(err).blacklistable);
+    let failure = probe(&clap_named(&dir, "init-refuse")).expect_err("must not probe");
+    assert_eq!(failure.kind, ProbeFailureKind::LoadFailed, "{failure:?}");
+    assert!(failure.reason.contains("Entry init failed"), "{failure:?}");
+    assert!(failure.blacklistable());
 }
 
 /// **A plugin that prints from its init still probes**: stdout and stderr carry
@@ -345,11 +381,7 @@ fn measured<F: Format>(path: &Path, rings: u32, tail: u32) -> (Measured, Vec<u8>
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("state");
     std::fs::write(&file, &state).unwrap();
-    let locator = Locator::at(tutti_fixtures::plugin_probe());
-    let delta = measure_record_with(path, &locator, DEFAULT_MEASURE_TIMEOUT, Some(&file))
-        .expect("the probe measures");
-    let mut db = PluginDb::new();
-    db.apply(delta);
+    let db = measure_db(path, &file, DEFAULT_MEASURE_TIMEOUT).expect("the probe measures");
     let first = db.plugins().next().expect("a plugin").descriptor.clone();
     (first.measured.expect("the probe measured it"), state)
 }
@@ -484,25 +516,23 @@ fn a_plain_probe_leaves_measured_empty() {
 }
 
 /// `--measure` on the shared plugin put in the state with fault `fault`.
-fn measure_with_fault(fault: u32, timeout: Duration) -> BridgeResult<()> {
+fn measure_with_fault(fault: u32, timeout: Duration) -> Result<(), ProbeFailure> {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("state");
     std::fs::write(&file, state_with_fault::<Clap>(fault)).unwrap();
-    let locator = Locator::at(tutti_fixtures::plugin_probe());
-    measure_record_with(clap_path(), &locator, timeout, Some(&file)).map(|_| ())
+    measure_db(&clap_path(), &file, timeout).map(|_| ())
 }
 
 /// **A plugin that crashes while rendering is the crash a load is**: it loads,
 /// its descriptor reads (a plain probe is fine), and the measuring probe dies with
-/// no result file, which `probe_failure` calls blacklistable.
+/// no result file, which a failure of kind `Crashed` calls blacklistable.
 #[test]
 fn a_plugin_that_crashes_while_measured_is_a_crash() {
     probe(&clap_path()).expect("it loads and describes");
-    let err = measure_with_fault(spec::FAULT_CRASH, DEFAULT_MEASURE_TIMEOUT)
+    let failure = measure_with_fault(spec::FAULT_CRASH, DEFAULT_MEASURE_TIMEOUT)
         .expect_err("must not measure");
-    assert!(matches!(err, BridgeError::ProcessCrashed), "{err:?}");
-    let failure = probe_failure(err);
-    assert!(failure.blacklistable, "{failure:?}");
+    assert_eq!(failure.kind, ProbeFailureKind::Crashed, "{failure:?}");
+    assert!(failure.blacklistable(), "{failure:?}");
     assert!(failure.reason.contains("crashed"), "{failure:?}");
 }
 
@@ -511,11 +541,11 @@ fn a_plugin_that_crashes_while_measured_is_a_crash() {
 #[test]
 fn a_plugin_that_hangs_while_measured_times_out() {
     let started = Instant::now();
-    let err =
+    let failure =
         measure_with_fault(spec::FAULT_HANG, Duration::from_secs(3)).expect_err("must not measure");
-    assert!(matches!(err, BridgeError::Timeout { .. }), "{err:?}");
+    assert_eq!(failure.kind, ProbeFailureKind::TimedOut, "{failure:?}");
     assert!(started.elapsed() < Duration::from_secs(20));
-    assert!(probe_failure(err).blacklistable);
+    assert!(failure.blacklistable());
 }
 
 /// **A state the plugin refuses is a typed failure, not a measurement of the
@@ -525,11 +555,8 @@ fn a_state_the_plugin_refuses_is_a_failure() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("state");
     std::fs::write(&file, b"not a state").unwrap();
-    let locator = Locator::at(tutti_fixtures::plugin_probe());
-    let err = measure_record_with(clap_path(), &locator, DEFAULT_MEASURE_TIMEOUT, Some(&file))
-        .expect_err("must not measure");
-    assert!(
-        matches!(&err, BridgeError::LoadFailed { reason, .. } if reason.contains("refused the state")),
-        "{err:?}"
-    );
+    let failure =
+        measure_db(&clap_path(), &file, DEFAULT_MEASURE_TIMEOUT).expect_err("must not measure");
+    assert_eq!(failure.kind, ProbeFailureKind::LoadFailed, "{failure:?}");
+    assert!(failure.reason.contains("refused the state"), "{failure:?}");
 }

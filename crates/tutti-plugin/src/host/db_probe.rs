@@ -1,15 +1,15 @@
 //! The subprocess probe, as the probe `tutti-plugin-db` scans with.
 
 pub use super::probe::DEFAULT_PROBE_TIMEOUT;
-use super::probe::{measure_metadata_with, probe_metadata_with};
-use std::path::Path;
+use super::probe::{ProbeError, measure_metadata_with, probe_metadata_with};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::debug;
 use tutti_plugin_db::{
-    Cancel, Delta, FileFacts, FileRow, PluginFormat, ProbeFailure, probe_plugin_fallback,
+    Cancel, PluginFormat, ProbeFailure, ProbeFailureKind, probe_plugin_fallback,
 };
+use tutti_plugin_ipc::CatalogConfig;
 use tutti_plugin_types::BridgeError;
-use tutti_plugin_types::LoadStage;
 use tutti_plugin_types::Locator;
 use tutti_plugin_types::PluginDescriptor;
 
@@ -17,6 +17,44 @@ use tutti_plugin_types::PluginDescriptor;
 /// (two configurations, each up to the render budget of `MAX_NODE_TAIL` and 5 s of
 /// audio, which a plugin slower than real time cannot meet in 15 s).
 pub const DEFAULT_MEASURE_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// What a probe the catalog hands its scanner does.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Probing {
+    /// Also render each plugin ([`DEFAULT_MEASURE_TIMEOUT`]).
+    pub(crate) measure: bool,
+    /// The state file a measurement puts the plugin in first.
+    pub(crate) state: Option<PathBuf>,
+    /// Answer with filename metadata when `plugin-probe` cannot be found. A scan
+    /// lists what it found by file name then; a task that was asked about one
+    /// file reports the probe's absence instead.
+    pub(crate) fallback: bool,
+}
+
+/// The probe a scanner calls, as `config` and `how` say: the binary
+/// `config.probe_locator` names, the deadlines `config` gives or the defaults.
+pub(crate) fn probe_fn(
+    config: &CatalogConfig,
+    how: Probing,
+) -> impl Fn(&Path, PluginFormat, &Cancel) -> Result<Vec<PluginDescriptor>, ProbeFailure>
++ Send
++ Sync
++ 'static {
+    let locator: Locator = config.probe_locator.clone();
+    let timeout = if how.measure {
+        config.measure_timeout.unwrap_or(DEFAULT_MEASURE_TIMEOUT)
+    } else {
+        config.probe_timeout.unwrap_or(DEFAULT_PROBE_TIMEOUT)
+    };
+    move |path, format, cancel| {
+        let probed = if how.measure {
+            measure_metadata_with(&locator, path, timeout, cancel, how.state.as_deref())
+        } else {
+            probe_metadata_with(&locator, path, timeout, cancel)
+        };
+        interpret_probe(probed, path, format, how.fallback)
+    }
+}
 
 /// The blacklist decision for a failed probe: whether the scan may blacklist
 /// the plugin, and why. One function, so the tests exercise this code rather
@@ -26,170 +64,57 @@ pub const DEFAULT_MEASURE_TIMEOUT: Duration = Duration::from_secs(180);
 /// environment?" — not severity. A crash and a broken library are equally
 /// informative; a missing `plugin-probe` tells us nothing.
 #[must_use]
-pub fn probe_failure(e: BridgeError) -> ProbeFailure {
-    match e {
-        BridgeError::ProcessCrashed => ProbeFailure {
-            reason: format!("crashed during probe: {e}"),
-            blacklistable: true,
-        },
-        BridgeError::Timeout { .. } => ProbeFailure {
-            reason: format!("timed out during probe: {e}"),
-            blacklistable: true,
-        },
+pub(crate) fn probe_failure(e: BridgeError) -> ProbeFailure {
+    let (kind, reason) = match &e {
+        BridgeError::ProcessCrashed => (
+            ProbeFailureKind::Crashed,
+            format!("crashed during probe: {e}"),
+        ),
+        BridgeError::Timeout { .. } => (
+            ProbeFailureKind::TimedOut,
+            format!("timed out during probe: {e}"),
+        ),
         // The plugin was reached and its library would not load — a stub
         // file, a wrong-arch binary, a broken install. Deterministic, and each
         // retry costs a full subprocess spawn. Carries the loader's own stage
         // and reason so the catalog entry says *why*.
-        BridgeError::LoadFailed { .. } => ProbeFailure {
-            reason: format!("failed to load during probe: {e}"),
-            blacklistable: true,
-        },
-        // IO, a missing binary, a protocol mismatch — the environment's
-        // fault, not the plugin's.
-        other => ProbeFailure {
-            reason: other.to_string(),
-            blacklistable: false,
-        },
-    }
-}
-
-/// Probe a plugin file by spawning a `plugin-probe` subprocess and reading the
-/// descriptor of every plugin it holds. Falls back to one filename-based
-/// descriptor if the `plugin-probe` binary is not available.
-pub(crate) fn probe_plugin(
-    path: &Path,
-    format: PluginFormat,
-    cancel: &Cancel,
-) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
-    interpret_probe(
-        probe_metadata_with(&Locator::Search, path, DEFAULT_PROBE_TIMEOUT, cancel),
-        path,
-        format,
-    )
-}
-
-/// [`probe_plugin`] that also measures: what a catalog scans with once it has
-/// opted in ([`Catalog::with_measuring`](crate::catalog::Catalog::with_measuring)).
-/// A plugin that crashes or hangs while rendering is blacklisted as it is for
-/// one that crashes in its load.
-pub(crate) fn probe_plugin_measured(
-    path: &Path,
-    format: PluginFormat,
-    cancel: &Cancel,
-) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
-    interpret_probe(
-        measure_metadata_with(
-            &Locator::Search,
-            path,
-            DEFAULT_MEASURE_TIMEOUT,
-            cancel,
-            None,
+        BridgeError::LoadFailed { .. } => (
+            ProbeFailureKind::LoadFailed,
+            format!("failed to load during probe: {e}"),
         ),
-        path,
-        format,
-    )
+        BridgeError::ProbeNotFound => (ProbeFailureKind::ProbeNotFound, e.to_string()),
+        // IO, a protocol mismatch — the environment's fault, not the plugin's.
+        _ => (ProbeFailureKind::Environment, e.to_string()),
+    };
+    ProbeFailure { reason, kind }
 }
 
-/// Decide what a raw probe result means. Split from [`probe_plugin`] so the
+/// Decide what a raw probe result means. Split from [`probe_fn`] so the
 /// fallback rule is testable without a subprocess — a test that spawns a real
 /// probe depends on whether `target/debug/` happens to be warm.
 fn interpret_probe(
-    result: Result<Vec<PluginDescriptor>, BridgeError>,
+    result: Result<Vec<PluginDescriptor>, ProbeError>,
     path: &Path,
     format: PluginFormat,
+    fallback: bool,
 ) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
     match result {
         Ok(plugins) => Ok(plugins),
+        Err(ProbeError::Cancelled) => Err(ProbeFailure {
+            reason: "the probe was cancelled".to_string(),
+            kind: ProbeFailureKind::Cancelled,
+        }),
         // The only error that means "we could not look", as opposed to "we looked
         // and this plugin is bad". Widening it would hide real failures.
-        Err(BridgeError::ProbeNotFound) => {
+        Err(ProbeError::Bridge(BridgeError::ProbeNotFound)) if fallback => {
             debug!(
                 "plugin-probe not available, using filename metadata for {:?}",
                 path
             );
             Ok(vec![probe_plugin_fallback(path, format)])
         }
-        Err(e) => Err(probe_failure(e)),
+        Err(ProbeError::Bridge(e)) => Err(probe_failure(e)),
     }
-}
-
-/// Probes a plugin file into the delta that records it: one row holding every
-/// plugin the file has (a CLAP factory's, a VST3 factory's audio classes, an AU
-/// bundle's units, a VST2 shell's sub-plugins).
-///
-/// Spawns a short-lived `plugin-probe` subprocess, the binary `locator` names,
-/// to read the file's metadata, so a plugin that crashes while being probed does
-/// not take the caller down. Blocks for up to `timeout` ([`DEFAULT_PROBE_TIMEOUT`],
-/// fifteen seconds, is what a scan allows and a plugin that loads slowly from
-/// cold may need); call it off the audio and UI threads, or let a catalog task
-/// ([`Catalog::register`](crate::catalog::Catalog::register)) do it. The delta
-/// puts the same row a scan stores; apply it with
-/// [`PluginDb::apply`](tutti_plugin_db::PluginDb::apply).
-///
-/// # Errors
-///
-/// Returns [`BridgeError::LoadFailed`] for an unrecognized extension or a
-/// plugin the probe cannot load,
-/// [`BridgeError::ProbeNotFound`] when the `plugin-probe` binary cannot
-/// be located, [`BridgeError::ProcessCrashed`] or [`BridgeError::Timeout`] when
-/// the plugin brought the probe down, and an I/O variant when it cannot be
-/// spawned.
-pub fn probe_record_with(
-    path: impl AsRef<Path>,
-    locator: &Locator,
-    timeout: Duration,
-) -> Result<Delta, BridgeError> {
-    let path = path.as_ref();
-    let facts = FileFacts::read(path);
-    let format = facts.format.ok_or_else(|| BridgeError::LoadFailed {
-        path: path.to_path_buf(),
-        stage: LoadStage::Opening,
-        reason: "unrecognized plugin extension".to_string(),
-    })?;
-
-    let plugins = probe_metadata_with(locator, path, timeout, &Cancel::new())?;
-
-    // Keyed like a scan keys it, by canonical path, so an alias and the real
-    // path are one row.
-    let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    Ok(Delta::put(key, FileRow::probed(format, &facts, plugins)))
-}
-
-/// [`probe_record_with`] that also **measures** each plugin the file holds: the delta's row carries
-/// every descriptor's
-/// [`measured`](PluginDescriptor::measured), the tail and latency the plugin
-/// reports against what it renders. The way to measure one file, or one a scan
-/// already probed without measuring (a scan skips a file whose time has not
-/// changed). The row replaces the file's old one, as a probe's does.
-///
-/// Renders the plugin at two configurations, so it takes longer
-/// ([`DEFAULT_MEASURE_TIMEOUT`]); call it off the audio and UI threads, or let a
-/// catalog task ([`Catalog::measure`](crate::catalog::Catalog::measure)) do it.
-/// `locator` names the `plugin-probe` binary, `timeout` is the deadline and, if
-/// `state` is given, the file of bytes a plugin's own `save_state` wrote, which
-/// the plugin is put in before it is measured (for a file of one plugin; the
-/// record's `ProbeConfig::state` hashes it).
-///
-/// # Errors
-///
-/// As [`probe_record_with`]; a plugin that crashes or hangs while rendering is
-/// [`BridgeError::ProcessCrashed`] or [`BridgeError::Timeout`].
-pub fn measure_record_with(
-    path: impl AsRef<Path>,
-    locator: &Locator,
-    timeout: Duration,
-    state: Option<&Path>,
-) -> Result<Delta, BridgeError> {
-    let path = path.as_ref();
-    let facts = FileFacts::read(path);
-    let format = facts.format.ok_or_else(|| BridgeError::LoadFailed {
-        path: path.to_path_buf(),
-        stage: LoadStage::Opening,
-        reason: "unrecognized plugin extension".to_string(),
-    })?;
-    let plugins = measure_metadata_with(locator, path, timeout, &Cancel::new(), state)?;
-    let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    Ok(Delta::put(key, FileRow::probed(format, &facts, plugins)))
 }
 
 #[cfg(test)]
@@ -213,7 +138,7 @@ mod tests {
         // Exercises the *production* classifier, not a copy of it.
         let crashed = probe_failure(BridgeError::ProcessCrashed);
         assert!(
-            crashed.blacklistable,
+            crashed.blacklistable(),
             "ProcessCrashed must be blacklistable"
         );
         assert!(crashed.reason.contains("crashed"));
@@ -225,7 +150,7 @@ mod tests {
             // a probe that timed out is unusable either way.
             partial: false,
         });
-        assert!(timed_out.blacklistable, "Timeout must be blacklistable");
+        assert!(timed_out.blacklistable(), "Timeout must be blacklistable");
         assert!(timed_out.reason.contains("timed out"));
 
         // A load failure was the one path that recorded nothing.
@@ -235,7 +160,7 @@ mod tests {
             reason: "dlopen failed".into(),
         });
         assert!(
-            load_failed.blacklistable,
+            load_failed.blacklistable(),
             "a library that will not open fails identically on every scan, at a \
              full subprocess spawn each time — it must be recorded"
         );
@@ -247,16 +172,16 @@ mod tests {
         );
 
         // Environmental failures say nothing about the plugin — never hide it.
-        assert!(!probe_failure(BridgeError::IpcError("socket".into())).blacklistable);
+        assert!(!probe_failure(BridgeError::IpcError("socket".into())).blacklistable());
         assert!(
             !probe_failure(BridgeError::ProtocolMismatch {
                 expected: 2,
                 got: 1
             })
-            .blacklistable
+            .blacklistable()
         );
         assert!(
-            !probe_failure(BridgeError::ProbeNotFound).blacklistable,
+            !probe_failure(BridgeError::ProbeNotFound).blacklistable(),
             "a missing plugin-probe must never blacklist a plugin"
         );
     }
@@ -280,8 +205,13 @@ mod tests {
         use tutti_plugin_types::BridgeError;
 
         let path = Path::new("/plugins/Plain.vst3");
-        let plugins = interpret_probe(Err(BridgeError::ProbeNotFound), path, PluginFormat::Vst3)
-            .expect("a missing plugin-probe is a fallback, not an error");
+        let plugins = interpret_probe(
+            Err(BridgeError::ProbeNotFound.into()),
+            path,
+            PluginFormat::Vst3,
+            true,
+        )
+        .expect("a missing plugin-probe is a fallback, not an error");
         let [descriptor] = plugins.as_slice() else {
             panic!("the filename names one plugin: {plugins:?}");
         };
@@ -308,12 +238,30 @@ mod tests {
                 path: path.to_path_buf(),
                 stage: tutti_plugin_types::LoadStage::Opening,
                 reason: "dlopen failed".into(),
-            }),
+            }
+            .into()),
             path,
             PluginFormat::Vst3,
+            true,
         )
         .expect_err("a load failure must not be reported as successful metadata");
 
         assert!(failure.reason.contains("dlopen failed"));
+    }
+
+    /// A task about one file reports a missing `plugin-probe`, as a kind a caller
+    /// can tell from a crash or a hang, rather than answering with a filename.
+    #[test]
+    fn a_missing_probe_is_a_failure_of_its_own_kind_without_the_fallback() {
+        let failure = interpret_probe(
+            Err(BridgeError::ProbeNotFound.into()),
+            Path::new("/plugins/Plain.vst3"),
+            PluginFormat::Vst3,
+            false,
+        )
+        .expect_err("no fallback was asked for");
+
+        assert_eq!(failure.kind, ProbeFailureKind::ProbeNotFound);
+        assert!(!failure.blacklistable());
     }
 }

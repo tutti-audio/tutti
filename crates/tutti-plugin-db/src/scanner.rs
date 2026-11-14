@@ -230,7 +230,7 @@ impl Scanner {
             let format = facts
                 .format
                 .ok_or_else(|| FilesError::UnrecognizedFormat(file.to_path_buf()))?;
-            targets.push((canonical_path(file), format));
+            targets.push((file.to_path_buf(), format));
         }
         Ok(Self::start(self.job(db, Targets::Files(targets), save)?))
     }
@@ -359,8 +359,9 @@ pub enum FilesError {
     UnrecognizedFormat(PathBuf),
 }
 
-/// A scan in flight on its worker thread: of directories ([`Scanner::spawn`]) or
-/// of named files ([`Scanner::spawn_files`]).
+/// The one task type of discovery: a worker probing files, in flight. A scan of
+/// directories ([`Scanner::spawn`]), a registration and a measurement (both
+/// [`Scanner::spawn_files`]) each probe files and send a [`Delta`] per file.
 ///
 /// Dropping it cancels the work ([`Cancel`]).
 ///
@@ -370,7 +371,10 @@ pub enum FilesError {
 #[derive(Debug)]
 #[must_use]
 pub struct Scan {
-    /// Per-plugin progress, emitted as the scan advances.
+    /// Per-plugin progress, emitted as the scan advances. Only a scan of
+    /// directories emits [`ScanPhase::Discovery`] (one per directory, before the
+    /// walk); a task over named files emits [`ScanPhase::Scanning`] and
+    /// [`ScanPhase::Complete`] only.
     pub progress_rx: Receiver<ScanProgress>,
     rx: Receiver<Message>,
     cancel: Cancel,
@@ -445,7 +449,8 @@ impl Scan {
 enum Targets {
     /// Directories to walk; a file whose row is current is skipped.
     Directories(Vec<PathBuf>),
-    /// Canonical paths to probe whether or not their rows are current.
+    /// Files to probe, as given, whether or not their rows are current; their
+    /// rows are keyed by canonical path.
     Files(Vec<(PathBuf, PluginFormat)>),
 }
 
@@ -507,24 +512,37 @@ impl Job {
                 current_path: path.clone(),
                 phase: ScanPhase::Scanning,
             });
+            // A named file is probed as named (a link keeps the extension that
+            // names its format) and recorded under its canonical path.
+            let key = if force {
+                canonical_path(path)
+            } else {
+                path.clone()
+            };
             let facts = FileFacts::read_as(path, Some(*format));
             let decision = if force {
                 ScanDecision::Probe
             } else {
-                facts::classify(self.snapshot.row(path), &facts)
+                facts::classify(self.snapshot.row(&key), &facts)
             };
-            let (outcome, delta) = match decision {
+            let (outcome, delta, failure) = match decision {
                 ScanDecision::Blacklisted => {
                     debug!("skipping blacklisted plugin: {:?}", path);
-                    (ScanOutcome::Blacklisted, None)
+                    (ScanOutcome::Blacklisted, None, None)
                 }
                 ScanDecision::UpToDate => {
                     debug!("skipping up-to-date plugin: {:?}", path);
-                    (ScanOutcome::UpToDate, None)
+                    (ScanOutcome::UpToDate, None, None)
                 }
-                ScanDecision::Probe => self.probe_one(path, *format, &facts),
+                ScanDecision::Probe => self.probe_one(path, &key, *format, &facts),
             };
             result = result.tally(outcome);
+            if let Some(failure) = failure {
+                result.failures.push(FileFailure {
+                    path: key.clone(),
+                    failure,
+                });
+            }
             if let Some(delta) = delta
                 && !sink(delta)
             {
@@ -562,9 +580,10 @@ impl Job {
     fn probe_one(
         &self,
         path: &Path,
+        key: &Path,
         format: PluginFormat,
         facts: &FileFacts,
-    ) -> (ScanOutcome, Option<Delta>) {
+    ) -> (ScanOutcome, Option<Delta>, Option<ProbeFailure>) {
         if let Err(e) = self.pedal.arm(path) {
             warn!("failed to arm dead-man's pedal: {e}");
         }
@@ -572,21 +591,23 @@ impl Job {
         self.pedal.disarm(path);
         // A probe a cancel ended says nothing about the plugin.
         if self.cancel.is_cancelled() {
-            return (ScanOutcome::Failed, None);
+            return (ScanOutcome::Failed, None, None);
         }
         match probed {
             Ok(plugins) => (
                 ScanOutcome::New,
-                Some(Delta::put(path, FileRow::probed(format, facts, plugins))),
+                Some(Delta::put(key, FileRow::probed(format, facts, plugins))),
+                None,
             ),
-            Err(failure) if failure.blacklistable => {
+            Err(failure) if failure.blacklistable() => {
                 warn!("failed to probe plugin {:?}: {}", path, failure.reason);
                 (
                     ScanOutcome::NewlyBlacklisted,
                     Some(Delta::put(
-                        path,
-                        FileRow::blacklisted(failure.reason, facts),
+                        key,
+                        FileRow::blacklisted(failure.reason.clone(), facts),
                     )),
+                    Some(failure),
                 )
             }
             // Environmental (no plugin-server, an IO error, a protocol
@@ -594,7 +615,7 @@ impl Job {
             // retry once the environment is fixed.
             Err(failure) => {
                 warn!("failed to probe plugin {:?}: {}", path, failure.reason);
-                (ScanOutcome::Failed, None)
+                (ScanOutcome::Failed, None, Some(failure))
             }
         }
     }
@@ -627,18 +648,67 @@ pub struct ScanResult {
     /// failed to load. Surface this so a UI can tell the user something was hidden
     /// and point at [`PluginDb::unblacklist`] / [`PluginDb::clear_blacklist`].
     pub newly_blacklisted: usize,
+    /// Every file whose probe failed, with the reason, in the order they were
+    /// probed. `failed` counts these.
+    pub failures: Vec<FileFailure>,
 }
 
-/// A probe failure, plus whether it earns a blacklist entry.
-#[derive(Debug)]
+/// What went wrong in a probe.
+///
+/// The first three are properties of the plugin: each recurs identically on every
+/// future scan, at the same cost, so recording it beats re-probing forever
+/// ([`blacklistable`](Self::blacklistable)). The rest say nothing about the plugin
+/// and stay retryable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ProbeFailureKind {
+    /// The probe process died without a result.
+    Crashed,
+    /// The probe did not finish by its deadline.
+    TimedOut,
+    /// The probe ran to its end and the plugin would not load.
+    LoadFailed,
+    /// The probe executable could not be found, so nothing was looked at.
+    ProbeNotFound,
+    /// The probe was cancelled before it finished.
+    Cancelled,
+    /// Anything else of the environment: an I/O error, a protocol mismatch.
+    Environment,
+}
+
+impl ProbeFailureKind {
+    /// Whether the failure is a property of the plugin, so a scan blacklists it.
+    #[must_use]
+    pub const fn blacklistable(self) -> bool {
+        matches!(self, Self::Crashed | Self::TimedOut | Self::LoadFailed)
+    }
+}
+
+/// A probe failure: what kind it was and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbeFailure {
     /// Why the probe failed; stored as the blacklist reason.
     pub reason: String,
-    /// Set when the failure is a property of *this plugin* — it will recur
-    /// identically on every future scan, at the same cost — so recording it beats
-    /// re-probing forever. Clear for environmental failures, which say nothing
-    /// about the plugin and must stay retryable.
-    pub blacklistable: bool,
+    /// What kind of failure it was.
+    pub kind: ProbeFailureKind,
+}
+
+impl ProbeFailure {
+    /// Whether this failure earns a blacklist entry
+    /// ([`ProbeFailureKind::blacklistable`]).
+    #[must_use]
+    pub const fn blacklistable(&self) -> bool {
+        self.kind.blacklistable()
+    }
+}
+
+/// A file a task could not read, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileFailure {
+    /// The file, by canonical path.
+    pub path: PathBuf,
+    /// Why its probe failed.
+    pub failure: ProbeFailure,
 }
 
 impl ScanResult {
@@ -649,6 +719,7 @@ impl ScanResult {
             failed: 0,
             blacklisted: 0,
             newly_blacklisted: 0,
+            failures: Vec::new(),
         }
     }
 
@@ -748,7 +819,7 @@ mod tests {
     fn crashes(_: &Path) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
         Err(ProbeFailure {
             reason: "crashed during probe".into(),
-            blacklistable: true,
+            kind: ProbeFailureKind::Crashed,
         })
     }
 
@@ -1095,7 +1166,7 @@ mod tests {
         // What `probe_one` does for a LoadFailed.
         let failure = ProbeFailure {
             reason: "failed to load during probe: dlopen failed".into(),
-            blacklistable: true,
+            kind: ProbeFailureKind::LoadFailed,
         };
         db.blacklist(&broken, failure.reason, &FileFacts::read(&broken));
 
@@ -1255,7 +1326,7 @@ mod tests {
         let (scanner, calls) = counting_scanner(dir.path(), |_| {
             Err(ProbeFailure {
                 reason: "no plugin-server".into(),
-                blacklistable: false,
+                kind: ProbeFailureKind::Environment,
             })
         });
         let mut db = PluginDb::new();
@@ -1464,7 +1535,7 @@ mod tests {
     fn environmental(_: &Path) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
         Err(ProbeFailure {
             reason: "no plugin-server".into(),
-            blacklistable: false,
+            kind: ProbeFailureKind::Environment,
         })
     }
 
@@ -1625,6 +1696,46 @@ mod tests {
             scanner.spawn(&mut db, [&plugins_dir], no_save).is_ok(),
             "the pedal is released"
         );
+    }
+
+    /// **A probe a cancel ended records nothing**: no delta, no blacklist row,
+    /// not even when the probe reports what a killed child looks like (a crash),
+    /// and the row that was there is as it was.
+    #[test]
+    fn a_cancelled_probe_leaves_the_row_as_it_was() {
+        let dir = TempDir::new().unwrap();
+        let plugins_dir = plugins_dir(&dir);
+        let file = create_fake_plugin(&plugins_dir, "a.clap");
+        let (probing_tx, probing_rx) = crossbeam_channel::bounded::<()>(1);
+        let scanner = Scanner::new(dir.path().join(".scanning"), move |_, _, cancel| {
+            let _ = probing_tx.try_send(());
+            while !cancel.is_cancelled() {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            Err(ProbeFailure {
+                reason: "crashed during probe".into(),
+                kind: ProbeFailureKind::Crashed,
+            })
+        });
+        let mut db = PluginDb::new();
+        scanner_for(dir.path())
+            .scan(&mut db, [&plugins_dir], no_save)
+            .unwrap();
+        let before = db.row(&file).cloned().expect("a row");
+
+        let task = scanner.spawn_files(&mut db, [&file], no_save).unwrap();
+        probing_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+        task.cancel.cancel();
+        worker_exited(&task.progress_rx);
+        // The worker's whole output is waiting in the task: apply it.
+        let end = task.poll(&mut db);
+
+        assert!(
+            matches!(&end, ScanPoll::Done(r) if r.failures.is_empty()),
+            "{end:?}"
+        );
+        assert_eq!(db.row(&file), Some(&before));
+        assert!(!db.is_blacklisted(&file));
     }
 
     /// **A file task probes the files it names whether or not their rows are

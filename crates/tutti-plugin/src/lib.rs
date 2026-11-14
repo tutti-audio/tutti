@@ -54,10 +54,9 @@
 //! ```
 //!
 //! A host that does not already know the path discovers one first — see
-//! [`catalog`], whose [`probe_record_with`](catalog::probe_record_with) pairs with
-//! `tutti_plugin_db::discover` and needs no feature flag, and
-//! whose [`Catalog`](catalog::Catalog) adds incremental rescan and crash recovery on
-//! top, and says what is blacklisted (the session's load asks it).
+//! [`catalog`], whose [`Catalog`](catalog::Catalog) scans, registers and measures plugin files
+//! as cancellable tasks, recovers from a crashed scan, and says what is
+//! blacklisted (the session's load asks it). It needs no feature flag.
 //!
 //! ## Architecture
 //!
@@ -105,7 +104,7 @@
 //! - [`catalog`] — discovering, persisting and loading plugins:
 //!   [`Plugin`](catalog::Plugin) (one loaded plugin),
 //!   [`Catalog`](catalog::Catalog) (catalog with incremental rescan and crash
-//!   recovery), [`probe_record_with`](catalog::probe_record_with) (the stateless probe),
+//!   recovery),
 //!   and the [`PluginDescriptor`](catalog::PluginDescriptor) identity type. The
 //!   scanner, the catalog traits and their records are `tutti-plugin-db`'s.
 //! - [`handles`] — [`PluginClient`](handles::PluginClient), the client and graph
@@ -383,45 +382,55 @@ pub use tutti_plugin_types::{Normalized, ParamId};
 /// Discovery itself lives in `tutti-plugin-db`; this module supplies what needs
 /// the plugin server and loads what was found.
 ///
-/// **Bring your own store.** [`discover`](tutti_plugin_db::discover) walks
-/// directories and returns paths; [`probe_record_with`](catalog::probe_record_with)
-/// turns one path into the [`Delta`](tutti_plugin_db::Delta) that records it.
-/// Two functions and a plain table, no feature flags:
+/// **The catalog.** [`Catalog`](catalog::Catalog) wraps a
+/// [`PluginDb`](tutti_plugin_db::PluginDb) and does what a bare table cannot:
+/// incremental rescan (probe only what changed, via stored mtimes, on a worker
+/// thread while the catalog stays readable: the difference between a multi-minute
+/// startup and an instant one) and crash recovery (a plugin that hard-crashes the
+/// scanner is auto-blacklisted on the next run).
+///
+/// Discovery is three tasks, each of which probes files in a `plugin-probe`
+/// subprocess on a worker and streams the rows it finds:
+/// [`scan`](catalog::Catalog::scan) walks the configured directories,
+/// [`register`](catalog::Catalog::register) adds one file, and
+/// [`measure`](catalog::Catalog::measure) renders one. The owner applies them
+/// with [`try_apply`](catalog::Catalog::try_apply); dropping a task cancels it.
 ///
 /// ```no_run
-/// use tutti_plugin::catalog::{DEFAULT_PROBE_TIMEOUT, Locator, probe_record_with};
-/// use tutti_plugin_db::{PluginDb, discover};
-/// # let dirs = vec![std::path::PathBuf::from("/Library/Audio/Plug-Ins/VST3")];
-/// let mut db = PluginDb::new();
-/// for (path, _format) in discover(&dirs) {
-///     if let Ok(delta) = probe_record_with(path, &Locator::Search, DEFAULT_PROBE_TIMEOUT) {
-///         db.apply(delta);
+/// use tutti_plugin::catalog::{Catalog, CatalogConfig, NO_SCAN_DIRS, ScanPoll};
+/// use tutti_plugin_db::PluginDb;
+/// # fn ex(dir: std::path::PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+/// let mut catalog = Catalog::new(PluginDb::new(), CatalogConfig::new(dir, NO_SCAN_DIRS), |_| Ok(()));
+/// let mut task = catalog.register("/Library/Audio/Plug-Ins/CLAP/Some.clap")?;
+/// let result = loop {
+///     match catalog.try_apply(&mut task) {
+///         ScanPoll::Running => std::thread::sleep(std::time::Duration::from_millis(10)),
+///         ScanPoll::Done(result) => break result,
+///         ScanPoll::Died => return Ok(()),
 ///     }
+/// };
+/// for failed in &result.failures {
+///     eprintln!("{}: {}", failed.path.display(), failed.failure.reason);
 /// }
+/// # Ok(())
+/// # }
 /// ```
-///
-/// **Or let the library manage it.** [`Catalog`](catalog::Catalog) wraps a
-/// [`PluginDb`](tutti_plugin_db::PluginDb) and adds the two things the pure path
-/// cannot give you: incremental rescan (probe only what changed, via stored
-/// mtimes, on a worker thread while the catalog stays readable: the difference
-/// between a multi-minute startup and an instant one) and crash recovery (a
-/// plugin that hard-crashes the scanner is auto-blacklisted on the next run).
 ///
 /// The catalog stores nothing itself: [`Catalog::new`](catalog::Catalog::new)
 /// takes the `PluginDb` to start from and a persistence closure that stores it.
 /// With the `serde` feature a `PluginDb` is `Serialize` and `Deserialize`, so
 /// the app picks the file format and where it lives.
 pub mod catalog {
-    pub use crate::host::db_probe::{
-        DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, measure_record_with, probe_failure,
-        probe_record_with,
-    };
+    pub use crate::host::db_probe::{DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT};
     pub use tutti_plugin_types::{Helper, Locator};
     // Named in `Plugin::role` and `Catalog::iter`.
     pub use crate::host::catalog::{BlacklistView, Catalog, PersistError};
     pub use crate::host::plugin::{BoundPlugin, Plugin};
     pub use crate::host::plugin_ref::{Hosting, PluginRef, PluginState};
-    pub use tutti_plugin_db::{FilesError, PluginDb, Scan, ScanBusy, ScanPoll, ScanResult};
+    pub use tutti_plugin_db::{
+        FileFailure, FilesError, PluginDb, ProbeFailure, ProbeFailureKind, Scan, ScanBusy,
+        ScanPoll, ScanResult,
+    };
     pub use tutti_plugin_ipc::{AudioConfig, CatalogConfig, NO_SCAN_DIRS};
     pub use tutti_plugin_types::{PluginDescriptor, PluginRole};
 }

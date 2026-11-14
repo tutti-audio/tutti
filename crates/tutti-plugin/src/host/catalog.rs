@@ -30,7 +30,7 @@
 //! let mut scan = catalog.scan()?;
 //! loop {
 //!     match catalog.try_apply(&mut scan) {
-//!         ScanPoll::Running => std::thread::yield_now(),
+//!         ScanPoll::Running => std::thread::sleep(std::time::Duration::from_millis(10)),
 //!         ScanPoll::Done(result) => break println!("{} new", result.new),
 //!         ScanPoll::Died => break,
 //!     }
@@ -51,7 +51,7 @@
 //! without waiting for the probe's deadline. Nothing here runs on or reaches
 //! the audio thread.
 
-use crate::host::db_probe::{probe_plugin, probe_plugin_measured};
+use crate::host::db_probe::{Probing, probe_fn};
 use crate::host::plugin_ref::PluginRef;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -102,10 +102,8 @@ pub struct Catalog {
     /// The blacklisted rows of `db`, republished by every method that changes
     /// the table: what a [`BlacklistView`] reads.
     blacklist: Arc<RwLock<PluginDb>>,
-    scanner: Scanner,
-    /// The scanner [`measure`](Self::measure) uses: the same pedal, a probe that
-    /// measures.
-    measurer: Scanner,
+    /// Whether scans and registrations measure ([`with_measuring`](Self::with_measuring)).
+    measuring: bool,
     config: CatalogConfig,
     persist: Persist,
     unreported: Unreported,
@@ -218,12 +216,28 @@ impl Catalog {
     /// the configuration, then republishes the blacklisted rows to the views,
     /// so no change leaves a [`BlacklistView`] behind.
     fn change<R>(&mut self, f: impl FnOnce(&mut PluginDb, &Scanner, &CatalogConfig) -> R) -> R {
-        let out = f(&mut self.db, &self.scanner, &self.config);
+        let scanner = self.scanner(self.scanning());
+        let out = f(&mut self.db, &scanner, &self.config);
         *self
             .blacklist
             .write()
             .unwrap_or_else(PoisonError::into_inner) = blacklisted_rows(&self.db);
         out
+    }
+
+    /// What a scan's probe does: measures if the catalog was told to, and lists
+    /// a file by its name when `plugin-probe` is missing.
+    fn scanning(&self) -> Probing {
+        Probing {
+            measure: self.measuring,
+            state: None,
+            fallback: true,
+        }
+    }
+
+    /// A scanner on this catalog's pedal whose probe does what `how` says.
+    fn scanner(&self, how: Probing) -> Scanner {
+        Scanner::new(self.config.pedal_path(), probe_fn(&self.config, how))
     }
 
     /// The blacklist as a handle that outlives this borrow and is `Send`: what
@@ -248,14 +262,11 @@ impl Catalog {
         config: CatalogConfig,
         persist: impl Fn(&PluginDb) -> Result<(), PersistError> + Send + Sync + 'static,
     ) -> Self {
-        let scanner = Scanner::new(config.pedal_path(), probe_plugin);
-        let measurer = Scanner::new(config.pedal_path(), probe_plugin_measured);
         let blacklist = Arc::new(RwLock::new(blacklisted_rows(&db)));
         Self {
             db,
             blacklist,
-            scanner,
-            measurer,
+            measuring: false,
             config,
             persist: Arc::new(persist),
             unreported: Unreported::default(),
@@ -273,7 +284,7 @@ impl Catalog {
     /// already probed: [`measure`](Self::measure) does.
     #[must_use]
     pub fn with_measuring(mut self) -> Self {
-        self.scanner = self.measurer.clone();
+        self.measuring = true;
         self
     }
 
@@ -324,7 +335,7 @@ impl Catalog {
     ///         println!("{}/{}", progress.current, progress.total);
     ///     }
     ///     match plugins.try_apply(&mut scan) {
-    ///         ScanPoll::Running => std::thread::yield_now(),
+    ///         ScanPoll::Running => std::thread::sleep(std::time::Duration::from_millis(10)),
     ///         ScanPoll::Done(result) => break println!("{} new", result.new),
     ///         ScanPoll::Died => break,
     ///     }
@@ -342,15 +353,21 @@ impl Catalog {
     /// catalog holds a current row for it, and records what it holds, as a scan
     /// would; the task is the one [`scan`](Self::scan) returns, so
     /// [`try_apply`](Self::try_apply) applies its delta. The way to add a plugin
-    /// outside the scanned directories. The file is probed as a scan probes it: a
-    /// plugin that crashes or hangs its probe is blacklisted, and one the probe
-    /// cannot reach leaves the row as it was and counts as failed in the result.
+    /// outside the scanned directories. The file is probed as a scan probes it,
+    /// and a plugin that crashes, hangs or will not load is **blacklisted**, as in
+    /// a scan; a failure that says nothing about the plugin (the probe binary is
+    /// missing, an I/O error) leaves the row as it was. Unlike a scan, a missing
+    /// `plugin-probe` does not record the file under its name: it is a failure.
     ///
     /// # Errors
     ///
     /// [`FilesError::Missing`] when `path` is not a file,
     /// [`FilesError::UnrecognizedFormat`] when its extension names no plugin
-    /// format, and [`FilesError::Busy`] as for [`scan`](Self::scan).
+    /// format, and [`FilesError::Busy`] as for [`scan`](Self::scan). A file the
+    /// probe fails on is not an error of the call: the result's
+    /// [`failures`](tutti_plugin_db::ScanResult::failures) name it and say why
+    /// ([`ProbeFailureKind`](tutti_plugin_db::ProbeFailureKind)), a missing
+    /// `plugin-probe` among them.
     ///
     /// # Panics
     ///
@@ -358,7 +375,11 @@ impl Catalog {
     pub fn register(&mut self, path: impl AsRef<Path>) -> std::result::Result<Scan, FilesError> {
         self.finish_pending_save();
         let save = self.autosave();
-        self.change(|db, scanner, _| scanner.spawn_files(db, [path], save))
+        let scanner = self.scanner(Probing {
+            fallback: false,
+            ..self.scanning()
+        });
+        self.change(|db, _, _| scanner.spawn_files(db, [path], save))
     }
 
     /// Applies what a task ([`scan`](Self::scan), [`register`](Self::register) or
@@ -541,7 +562,7 @@ impl Catalog {
     }
 
     fn forget_in_pedal(&self, file: &Path) {
-        if self.scanner.forget(file).is_err() {
+        if self.scanner(self.scanning()).forget(file).is_err() {
             tracing::warn!("a rescan is running; not touching its crash sentinel for {file:?}");
         }
     }
@@ -570,8 +591,10 @@ impl Catalog {
     ///
     /// The probe renders each plugin at two configurations, up to
     /// [`DEFAULT_MEASURE_TIMEOUT`](crate::catalog::DEFAULT_MEASURE_TIMEOUT).
-    /// As in a measuring scan, a plugin that crashes or hangs while rendering is
-    /// blacklisted. Dropping the task kills the probe.
+    /// As in a measuring scan, a plugin that crashes, hangs or will not load while
+    /// being measured is **blacklisted**. Dropping the task kills the probe. The
+    /// configuration's [`measure_state`](CatalogConfig::measure_state), if set, is
+    /// the state the plugin is put in first.
     ///
     /// # Errors
     ///
@@ -583,15 +606,17 @@ impl Catalog {
     pub fn measure(&mut self, plugin: &PluginRef) -> std::result::Result<Scan, FilesError> {
         self.finish_pending_save();
         let save = self.autosave();
-        let measurer = self.measurer.clone();
-        self.change(|db, _, _| measurer.spawn_files(db, [plugin.path()], save))
+        let scanner = self.scanner(Probing {
+            measure: true,
+            state: self.config.measure_state.clone(),
+            fallback: false,
+        });
+        self.change(|db, _, _| scanner.spawn_files(db, [plugin.path()], save))
     }
 
-    /// Applies a delta to the catalog, such as the one
-    /// [`probe_record_with`](crate::catalog::probe_record_with) returns.
-    ///
-    /// Run it on any thread (it needs no catalog) and pass the result here. Call
-    /// [`save`](Self::save) to persist.
+    /// Applies a delta the caller built to the catalog, such as a
+    /// [`Delta::put`] of a row from its own source. A task's deltas go through
+    /// [`try_apply`](Self::try_apply). Call [`save`](Self::save) to persist.
     pub fn apply(&mut self, delta: Delta) {
         self.change(|db, _, _| db.apply(delta));
     }
