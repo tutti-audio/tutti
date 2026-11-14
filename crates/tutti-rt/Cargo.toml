@@ -44,6 +44,8 @@ bytemuck = "1.16"
 # `QueryPerformanceCounter` on Windows.
 # The `Error` derive of the crate's error types.
 thiserror = { workspace = true }
+# `Reading` for every `Unit`: a `Gauge<Db>` holds a unit, and the unit vocabulary is below this crate.
+tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

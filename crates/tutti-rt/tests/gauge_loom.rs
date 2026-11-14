@@ -16,7 +16,20 @@
 #![cfg(loom)]
 
 use loom::thread;
-use tutti_rt::{counter, gauge};
+use tutti_rt::{Reading, counter, gauge};
+
+/// Two halves of one word: a torn read would pair halves of two stores.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Pair([u32; 2]);
+
+impl Reading for Pair {
+    fn to_bits(self) -> u64 {
+        u64::from(self.0[0]) << 32 | u64::from(self.0[1])
+    }
+    fn from_bits(bits: u64) -> Self {
+        Self([(bits >> 32) as u32, bits as u32])
+    }
+}
 
 #[test]
 fn a_counter_never_goes_back_and_closed_is_final() {
@@ -44,20 +57,24 @@ fn a_counter_never_goes_back_and_closed_is_final() {
 #[test]
 fn a_gauge_reads_one_store_and_closed_is_final() {
     loom::model(|| {
-        let (writer, level) = gauge([0u32, 0]);
+        let (writer, level) = gauge(Pair([0, 0]));
         let observer = thread::spawn(move || {
             let closed = level.is_closed();
             let seen = level.get();
             assert!(
-                matches!(seen, [0, 0] | [1, 1] | [2, 2]),
+                matches!(seen, Pair([0, 0] | [1, 1] | [2, 2])),
                 "a torn gauge: {seen:?}"
             );
             if closed {
-                assert_eq!(seen, [2, 2], "a closed gauge read before its last write");
+                assert_eq!(
+                    seen,
+                    Pair([2, 2]),
+                    "a closed gauge read before its last write"
+                );
             }
         });
-        writer.set([1, 1]);
-        writer.set([2, 2]);
+        writer.set(Pair([1, 1]));
+        writer.set(Pair([2, 2]));
         drop(writer);
         observer.join().unwrap();
     });

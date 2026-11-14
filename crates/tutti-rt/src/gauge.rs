@@ -3,7 +3,7 @@
 //!
 //! A node measures something (a gain reduction, a lock, a count of dropped
 //! events) and the app reads it. The two shapes share one cell: the value in
-//! one word ([`PackedAtomic`]) and a flag the writer raises when it is gone.
+//! one atomic word and a flag the writer raises when it is gone.
 //!
 //! - A [`Gauge<U>`] is a latest value. [`GaugeWriter::set`] replaces it,
 //!   [`Gauge::get`] reads it; any number of `Clone`s read the same cell.
@@ -16,8 +16,9 @@
 //! once, on the control side, by [`gauge()`] or [`counter()`].
 //!
 //! The cell knows no reading: `U` is whatever the owner of the measurement
-//! defines. A gauge's `U` is a plain value of at most eight bytes ([`NoUninit`]
-//! and [`AnyBitPattern`], as [`PackedAtomic`]'s); a counter's is a [`Count`].
+//! defines. A gauge's `U` is a [`Reading`], which every `tutti_types` unit over a
+//! float is (`Db`, `SamplePosition`, ...); an owner's own type (a
+//! lock state) implements it. A counter's is a [`Count`].
 //!
 //! **Closed.** When the [`GaugeWriter`] or [`CounterWriter`] drops, the cell
 //! holds its last value and `is_closed` answers `true`: the subject is gone,
@@ -28,20 +29,82 @@
 
 use std::marker::PhantomData;
 
-use bytemuck::{AnyBitPattern, NoUninit};
-use sync::{Arc, AtomicBool, Ordering};
-
-use crate::PackedAtomic;
+use sync::{Arc, AtomicBool, AtomicU64, Ordering};
+use tutti_types::Unit;
 
 mod sync {
     #[cfg(loom)]
     pub(super) use loom::sync::Arc;
     #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicBool, Ordering};
+    pub(super) use loom::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     #[cfg(not(loom))]
     pub(super) use std::sync::Arc;
     #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicBool, Ordering};
+    pub(super) use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+}
+
+/// A raw number a unit wraps, as the bits of one word. Sealed: `f32` and
+/// `f64`.
+pub trait RawBits: Copy + bits::Sealed {
+    /// The number as the low bits of a word.
+    fn to_word(self) -> u64;
+    /// The number whose bits `to_word` returned.
+    fn from_word(word: u64) -> Self;
+}
+
+mod bits {
+    pub trait Sealed {}
+    impl Sealed for f32 {}
+    impl Sealed for f64 {}
+}
+
+impl RawBits for f32 {
+    #[inline]
+    fn to_word(self) -> u64 {
+        u64::from(self.to_bits())
+    }
+    #[inline]
+    fn from_word(word: u64) -> Self {
+        f32::from_bits(u32::try_from(word).unwrap_or(0))
+    }
+}
+
+impl RawBits for f64 {
+    #[inline]
+    fn to_word(self) -> u64 {
+        self.to_bits()
+    }
+    #[inline]
+    fn from_word(word: u64) -> Self {
+        f64::from_bits(word)
+    }
+}
+
+/// A value a [`Gauge`] holds: one that converts to and from one 64-bit word.
+///
+/// `from_bits(to_bits(v))` is `v`. Every `tutti_types` unit whose raw number
+/// is `f32` or `f64` is a `Reading`; the owner of any other
+/// measurement implements it for its own type. Do not implement it for a bare
+/// number: a quantity has a unit.
+pub trait Reading: Copy + Send + Sync + 'static {
+    /// The value as a word.
+    fn to_bits(self) -> u64;
+    /// The value whose word `to_bits` returned.
+    fn from_bits(bits: u64) -> Self;
+}
+
+impl<T: Unit + Send + Sync + 'static> Reading for T
+where
+    T::Raw: RawBits,
+{
+    #[inline]
+    fn to_bits(self) -> u64 {
+        self.to_raw().to_word()
+    }
+    #[inline]
+    fn from_bits(bits: u64) -> Self {
+        T::from_raw(T::Raw::from_word(bits))
+    }
 }
 
 /// A quantity a [`Counter`] counts: a whole number of something.
@@ -68,18 +131,30 @@ impl Count for u64 {
     }
 }
 
-/// The cell both shapes read: the value and the writer's gone flag.
+/// Frames, as a [`Counter`] counts them.
+impl Count for tutti_types::Samples {
+    #[inline]
+    fn count(self) -> u64 {
+        self.0 as u64
+    }
+    #[inline]
+    fn from_count(count: u64) -> Self {
+        Self(usize::try_from(count).unwrap_or(usize::MAX))
+    }
+}
+
+/// The cell both shapes read: the value's word and the writer's gone flag.
 #[derive(Debug)]
-struct Shared<W: NoUninit + AnyBitPattern> {
-    value: PackedAtomic<W>,
+struct Shared {
+    value: AtomicU64,
     /// Raised (`Release`) by the writer's drop, after its last store.
     closed: AtomicBool,
 }
 
-impl<W: NoUninit + AnyBitPattern> Shared<W> {
-    fn new(initial: W) -> Arc<Self> {
+impl Shared {
+    fn new(initial: u64) -> Arc<Self> {
         Arc::new(Self {
-            value: PackedAtomic::new(initial),
+            value: AtomicU64::new(initial),
             closed: AtomicBool::new(false),
         })
     }
@@ -99,32 +174,35 @@ impl<W: NoUninit + AnyBitPattern> Shared<W> {
 ///
 /// ```
 /// use tutti_rt::gauge;
+/// use tutti_types::Db;
 ///
-/// let (writer, reading) = gauge(0.0f32);
-/// writer.set(-6.0);
-/// assert_eq!(reading.get(), -6.0);
-/// writer.set(-3.0); // a level moves both ways
-/// assert_eq!(reading.clone().get(), -3.0);
+/// let (writer, reduction) = gauge(Db(0.0));
+/// writer.set(Db(-6.0));
+/// assert_eq!(reduction.get(), Db(-6.0));
+/// writer.set(Db(-3.0)); // a level moves both ways
+/// assert_eq!(reduction.clone().get(), Db(-3.0));
 /// ```
 #[derive(Debug)]
-pub struct Gauge<U: NoUninit + AnyBitPattern> {
-    cell: Arc<Shared<U>>,
+pub struct Gauge<U: Reading> {
+    cell: Arc<Shared>,
+    _reading: PhantomData<fn() -> U>,
 }
 
-impl<U: NoUninit + AnyBitPattern> Clone for Gauge<U> {
+impl<U: Reading> Clone for Gauge<U> {
     fn clone(&self) -> Self {
         Self {
             cell: Arc::clone(&self.cell),
+            _reading: PhantomData,
         }
     }
 }
 
-impl<U: NoUninit + AnyBitPattern> Gauge<U> {
+impl<U: Reading> Gauge<U> {
     /// The latest value written, or the initial one if none was. Wait-free.
     #[inline]
     #[must_use]
     pub fn get(&self) -> U {
-        self.cell.value.load()
+        U::from_bits(self.cell.value.load(Ordering::Acquire))
     }
 
     /// Whether the writer is gone: the value read is the last it wrote.
@@ -138,32 +216,37 @@ impl<U: NoUninit + AnyBitPattern> Gauge<U> {
 /// The writing end of a [`Gauge`]. Not `Clone`: one writer.
 #[derive(Debug)]
 #[must_use]
-pub struct GaugeWriter<U: NoUninit + AnyBitPattern> {
-    cell: Arc<Shared<U>>,
+pub struct GaugeWriter<U: Reading> {
+    cell: Arc<Shared>,
+    _reading: PhantomData<fn(U)>,
 }
 
-impl<U: NoUninit + AnyBitPattern> GaugeWriter<U> {
+impl<U: Reading> GaugeWriter<U> {
     /// Replaces the reading. Wait-free; allocates nothing.
     #[inline]
     pub fn set(&self, value: U) {
-        self.cell.value.store(value);
+        self.cell.value.store(value.to_bits(), Ordering::Release);
     }
 }
 
-impl<U: NoUninit + AnyBitPattern> Drop for GaugeWriter<U> {
+impl<U: Reading> Drop for GaugeWriter<U> {
     fn drop(&mut self) {
         self.cell.closed.store(true, Ordering::Release);
     }
 }
 
 /// A gauge holding `initial`, and its writer. Allocates: control side.
-pub fn gauge<U: NoUninit + AnyBitPattern>(initial: U) -> (GaugeWriter<U>, Gauge<U>) {
-    let cell = Shared::new(initial);
+pub fn gauge<U: Reading>(initial: U) -> (GaugeWriter<U>, Gauge<U>) {
+    let cell = Shared::new(initial.to_bits());
     (
         GaugeWriter {
             cell: Arc::clone(&cell),
+            _reading: PhantomData,
         },
-        Gauge { cell },
+        Gauge {
+            cell,
+            _reading: PhantomData,
+        },
     )
 }
 
@@ -183,7 +266,7 @@ pub fn gauge<U: NoUninit + AnyBitPattern>(initial: U) -> (GaugeWriter<U>, Gauge<
 /// ```
 #[derive(Debug)]
 pub struct Counter<U: Count> {
-    cell: Arc<Shared<u64>>,
+    cell: Arc<Shared>,
     _count: PhantomData<fn() -> U>,
 }
 
@@ -201,7 +284,7 @@ impl<U: Count> Counter<U> {
     #[inline]
     #[must_use]
     pub fn get(&self) -> U {
-        U::from_count(self.cell.value.load())
+        U::from_count(self.cell.value.load(Ordering::Acquire))
     }
 
     /// Whether the writer is gone: the total read is final.
@@ -216,7 +299,7 @@ impl<U: Count> Counter<U> {
 #[derive(Debug)]
 #[must_use]
 pub struct CounterWriter<U: Count> {
-    cell: Arc<Shared<u64>>,
+    cell: Arc<Shared>,
     _count: PhantomData<fn(U)>,
 }
 
@@ -225,8 +308,12 @@ impl<U: Count> CounterWriter<U> {
     /// nothing. The one writer reads and stores the word, so no add is lost.
     #[inline]
     pub fn add(&self, by: U) {
-        let total = self.cell.value.load().saturating_add(by.count());
-        self.cell.value.store(total);
+        let total = self
+            .cell
+            .value
+            .load(Ordering::Relaxed)
+            .saturating_add(by.count());
+        self.cell.value.store(total, Ordering::Release);
     }
 }
 

@@ -4,9 +4,9 @@
 //! ## What this is
 //!
 //! The structures the engine's audio callback touches, and the home of the
-//! engine's lock-free and `unsafe` runtime structures. It names no tutti crate: its dependencies are
-//! `arc-lend`, `arrayvec` and `bytemuck` (and `loom` under `--cfg loom`), so any crate may take it without
-//! taking the unit vocabulary.
+//! engine's lock-free and `unsafe` runtime structures. It names one tutti crate, `tutti-types` (the units a
+//! [`Gauge`] reads); its other dependencies are `arc-lend`, `arrayvec` and `bytemuck` (and `loom`
+//! under `--cfg loom`).
 //!
 //! - **`AudioThreadCell`** — interior mutability with a one-borrow-at-a-time
 //!   contract checked in every build, reached through `&self`.
@@ -199,7 +199,9 @@ pub use doorbell::Doorbell;
 pub use drain_clock::{DrainBeat, DrainMark, DrainWatch, drain_clock};
 pub use edits::{EditReader, EditWriter, RingFull, edit_ring};
 pub use fault_latch::{Drained, FaultLatch};
-pub use gauge::{Count, Counter, CounterWriter, Gauge, GaugeWriter, counter, gauge};
+pub use gauge::{
+    Count, Counter, CounterWriter, Gauge, GaugeWriter, RawBits, Reading, counter, gauge,
+};
 pub use handoff::{Hand, Rt, handoff};
 pub use job_gate::JobGate;
 pub use level_cell::{LevelReader, LevelSpan, LevelWriter, level_cell};
