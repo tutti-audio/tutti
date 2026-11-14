@@ -16,7 +16,6 @@ workspace = true
 [dependencies]
 thiserror = { workspace = true }
 sha2 = { workspace = true }
-getrandom = { workspace = true }
 mdns-sd = { workspace = true }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-midi-device = { version = "0.0.1", path = "../tutti-midi-device", default-features = false }

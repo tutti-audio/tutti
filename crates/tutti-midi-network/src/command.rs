@@ -4,7 +4,7 @@
 use tutti_midi_device::{EndpointName, NameError, ProductInstanceId};
 use tutti_ump::{Ump, split_stream};
 
-use crate::{Digest, Nonce, SequenceNumber, Text, Username};
+use crate::{Digest, Nonce, SequenceNumber, Text, TextError, Username};
 
 /// Command Codes (M2-124 Table 8).
 mod code {
@@ -201,7 +201,21 @@ pub struct UserAuthentication {
 /// A Ping's identifier (M2-124 section 6.13): the sender's own, matched
 /// against the Ping Reply and used for nothing else.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct PingId(pub u32);
+pub struct PingId(u32);
+
+impl PingId {
+    /// The Ping with identifier `id`.
+    #[must_use]
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    /// The identifier.
+    #[must_use]
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
 
 /// A Retransmit Request (M2-124 section 7.2.3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -434,7 +448,7 @@ pub enum UmpDataError {
     },
     /// The words end inside a packet.
     #[error("the words end inside a UMP")]
-    Truncated,
+    EndsInsidePacket,
 }
 
 impl UmpData {
@@ -500,7 +514,7 @@ impl UmpData {
         // A payload ends on a packet boundary, or its last packet is cut.
         let whole: usize = split_stream(&words).map(|p| p.words().len()).sum();
         if whole != words.len() {
-            return Err(UmpDataError::Truncated);
+            return Err(UmpDataError::EndsInsidePacket);
         }
         if words.len() > MAX_UMP_DATA_WORDS {
             return Err(UmpDataError::TooLong { words: words.len() });
@@ -573,7 +587,7 @@ pub enum Command {
 }
 
 /// Why a Command Packet is refused.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ParseError {
     /// The command runs past the end of the datagram. The datagram cannot be
     /// read further: the next command's start is not known.
@@ -594,17 +608,17 @@ pub enum ParseError {
     #[error("a required text is empty")]
     EmptyText,
     /// A text is not UTF-8.
-    #[error("a text is not UTF-8")]
-    Utf8,
+    #[error("a text is not UTF-8: {0}")]
+    Utf8(#[source] std::str::Utf8Error),
     /// The Endpoint Name is not a valid name.
     #[error("the Endpoint Name is invalid: {0}")]
     Name(NameError),
     /// The Product Instance Id is not a valid Id.
     #[error("the Product Instance Id is invalid: {0}")]
     InstanceId(NameError),
-    /// A text is longer than its field allows.
-    #[error("a text is longer than its field allows")]
-    TextTooLong,
+    /// A text is empty or too long for its field, or holds a NUL.
+    #[error("a text is not valid for its field: {0}")]
+    Text(#[source] TextError),
     /// The nonce is not ASCII.
     #[error("the nonce is not ASCII")]
     Nonce,
@@ -613,8 +627,8 @@ pub enum ParseError {
     #[error("a reserved value in an enumerated field")]
     Reserved,
     /// A UMP Data Command does not hold whole UMPs, or holds too many words.
-    #[error("{0}")]
-    UmpData(UmpDataError),
+    #[error(transparent)]
+    UmpData(#[from] UmpDataError),
 }
 
 fn push_word(out: &mut Vec<u8>, word: u32) {
@@ -666,8 +680,8 @@ fn read_identity(name: &[u8], id: &[u8]) -> Result<EndpointIdentity, ParseError>
     if name.is_empty() || id.is_empty() {
         return Err(ParseError::EmptyText);
     }
-    let name = std::str::from_utf8(name).map_err(|_| ParseError::Utf8)?;
-    let id = std::str::from_utf8(id).map_err(|_| ParseError::Utf8)?;
+    let name = std::str::from_utf8(name).map_err(ParseError::Utf8)?;
+    let id = std::str::from_utf8(id).map_err(ParseError::Utf8)?;
     Ok(EndpointIdentity {
         name: EndpointName::parse(name).map_err(ParseError::Name)?,
         instance_id: ProductInstanceId::parse(id).map_err(ParseError::InstanceId)?,
@@ -675,8 +689,8 @@ fn read_identity(name: &[u8], id: &[u8]) -> Result<EndpointIdentity, ParseError>
 }
 
 fn read_text(field: &[u8]) -> Result<Text, ParseError> {
-    let text = std::str::from_utf8(trimmed(field)).map_err(|_| ParseError::Utf8)?;
-    Text::new(text).map_err(|_| ParseError::TextTooLong)
+    let text = std::str::from_utf8(trimmed(field)).map_err(ParseError::Utf8)?;
+    Text::new(text).map_err(ParseError::Text)
 }
 
 fn be16(bytes: &[u8]) -> u16 {
@@ -760,7 +774,7 @@ impl Command {
             }
             Self::Ping(id) | Self::PingReply(id) => {
                 let at = begin(out, code, 0, 0);
-                push_word(out, id.0);
+                push_word(out, id.get());
                 at
             }
             Self::RetransmitRequest(req) => {
@@ -829,8 +843,8 @@ impl Command {
             code::INVITATION_USER_AUTH => {
                 let digest = payload.get(..32).ok_or_else(bad_length)?;
                 let name =
-                    std::str::from_utf8(trimmed(&payload[32..])).map_err(|_| ParseError::Utf8)?;
-                let username = Username::new(name).map_err(|_| ParseError::EmptyText)?;
+                    std::str::from_utf8(trimmed(&payload[32..])).map_err(ParseError::Utf8)?;
+                let username = Username::new(name).map_err(ParseError::Text)?;
                 Ok(Self::InvitationWithUserAuth(UserAuthentication {
                     digest: read_digest(digest),
                     username,
@@ -879,7 +893,7 @@ impl Command {
                 }
             }
             code::PING | code::PING_REPLY => {
-                let id = PingId(u32::from_be_bytes(
+                let id = PingId::new(u32::from_be_bytes(
                     payload
                         .get(..4)
                         .and_then(|b| b.try_into().ok())
