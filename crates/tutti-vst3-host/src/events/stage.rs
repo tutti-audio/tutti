@@ -1,8 +1,8 @@
 //! Staging a block's input events into a plugin's `IEventList`, and reading
 //! back what the plugin wrote.
 
+use super::OutputStream;
 use tutti_graph::UmpAt;
-use tutti_midi_protocol::Translator;
 use tutti_plugin_types::{
     NoteExpressionIntValue, NoteExpressionValue, RtMidiEvents, group_of_port, push_sysex,
 };
@@ -180,11 +180,11 @@ fn stage_with_text(stage: &mut Staging<'_>, make: impl FnOnce(&mut Staging<'_>) 
 }
 
 /// Drains the plugin's emitted MIDI from its output `list` into `out`, each
-/// event on the Group of its event bus, MIDI 1.0 through `translator`. Clears
+/// event on the Group of its event bus, MIDI 1.0 through `stream`. Clears
 /// `out` first and never grows it: events past its cap are dropped
 /// (`out.is_overflowed()` reports it), a SysEx that does not fit is dropped
 /// whole and counted in the list's [`dropped`](EventList::dropped).
-pub fn drain_midi(list: &EventList, translator: &mut Translator, out: &mut RtMidiEvents) {
+pub fn drain_midi(list: &EventList, stream: &mut OutputStream, out: &mut RtMidiEvents) {
     out.clear();
     let Some(refused) = list.try_with_events(|staged| {
         let mut refused = 0;
@@ -205,7 +205,7 @@ pub fn drain_midi(list: &EventList, translator: &mut Translator, out: &mut RtMid
                     Some(_) => {}
                     None => refused += 1,
                 }
-            } else if let Some(midi) = event.to_midi(translator)
+            } else if let Some(midi) = event.to_midi(stream)
                 && !out.push(midi)
             {
                 break;

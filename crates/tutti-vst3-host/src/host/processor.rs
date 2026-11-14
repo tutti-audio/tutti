@@ -4,7 +4,6 @@
 
 use std::sync::Arc;
 use tutti_graph::UmpAt;
-use tutti_midi_protocol::Translator;
 
 use vst3::Steinberg::Vst::ProcessSetup;
 
@@ -15,7 +14,7 @@ use tutti_plugin_types::{
 use tutti_rt::DrainBeat;
 use tutti_types::{ChannelLayout, SampleRate};
 
-use crate::events::{InputEvents, Stager, drain_midi};
+use crate::events::{InputEvents, OutputStream, Stager, drain_midi};
 use crate::types::{
     AudioBuffer, ParameterChanges, ProcessContextRequirements, ProcessMode, ProcessOutputRef,
     TransportInfo, Vst3Sample, to_process_context,
@@ -95,7 +94,7 @@ pub(super) struct OutputStaging {
     /// parameter-number and bank runs across blocks (one event bus is one
     /// Group of its state). Built with the activation, so a deactivation drops
     /// it; [`Vst3Processor::stop`] forgets the runs without sending them.
-    pub(super) emitted_translator: Translator,
+    pub(super) emitted_stream: OutputStream,
     pub(super) emitted_param_changes: ParameterChanges,
 }
 
@@ -124,7 +123,7 @@ impl OutputStaging {
     pub(super) fn drain_emitted(&mut self) {
         drain_midi(
             &self.events,
-            &mut self.emitted_translator,
+            &mut self.emitted_stream,
             &mut self.emitted_midi,
         );
         // A refusal is counted in `lists_busy` and leaves the pool empty.
@@ -293,7 +292,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         self.audio.input.events.reset_sysex();
         self.audio.input.stager.reset();
         // Nor does the plugin's output carry a parameter run across it.
-        self.audio.output.emitted_translator.reset();
+        self.audio.output.emitted_stream.reset();
     }
 
     /// Takes the parameter writes the Controller queued that no block has
@@ -303,6 +302,14 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     pub fn take_edits(&mut self, out: &mut Vec<(ParamId, Normalized)>) {
         self.drain_ring();
         out.append(&mut self.pending);
+    }
+
+    /// Notes the plugin started under an id of its own that its table had no
+    /// room for, since activation: their expressions fall back to the host's id
+    /// space.
+    #[must_use]
+    pub fn emitted_notes_dropped(&self) -> u64 {
+        self.audio.output.emitted_stream.notes_dropped()
     }
 
     /// Writes the ring held that no block took, since activation, for want of

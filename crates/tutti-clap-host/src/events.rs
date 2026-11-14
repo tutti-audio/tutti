@@ -31,10 +31,10 @@ use std::ptr;
 use tutti_clap_ffi::{EventRef, EventSink, PluginEvent};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    Normalized, ParamEdit, ParamId, ParamMapping, RtMidiEvents,
-    SYSEX_MESSAGE_CAPACITY, StableOrder, WireMidi, expression_of_per_note_controller,
-    group_of_port, note_id_to_channel_note, per_note_message, per_note_tuning, plugin_note_id,
-    port_of_group, push_sysex, sysex_assembler,
+    Normalized, ParamEdit, ParamId, ParamMapping, RtMidiEvents, SYSEX_MESSAGE_CAPACITY,
+    StableOrder, WireMidi, expression_of_per_note_controller, group_of_port,
+    note_id_to_channel_note, per_note_message, per_note_tuning, plugin_note_id, port_of_group,
+    push_sysex, sysex_assembler,
 };
 
 use crate::types::RtNoteExpressions;
@@ -303,10 +303,12 @@ fn voice2(group: MidiGroup, channel: MidiChannel, voice: Voice2) -> Ump {
 }
 
 /// The Group of the note port `port_index` of a plugin's output event: a port
-/// is the Group of its number, and the `-1` wildcard or a port past the
-/// sixteen Groups names none.
+/// is the Group of its number. The `-1` wildcard of `events.h` is the first
+/// port, as a plugin with one note port means it; a port past the sixteen
+/// Groups, or any other negative one, names none.
 fn group_of_event_port(port_index: i16) -> Option<MidiGroup> {
-    group_of_port(u16::try_from(port_index).ok()?)
+    let port = if port_index == -1 { 0 } else { port_index };
+    group_of_port(u16::try_from(port).ok()?)
 }
 
 fn note_address(channel: i16, key: i16, note_id: i32) -> Option<(MidiChannel, NoteNumber)> {
@@ -604,6 +606,19 @@ impl ClapEvent {
             key: -1,
             value,
         }))
+    }
+
+    /// Whether this is a note, MIDI or note-expression event from a port no
+    /// Group has ([`group_of_event_port`]): its loss is the port's.
+    fn names_no_group(&self) -> bool {
+        match self {
+            ClapEvent::NoteOn(e) | ClapEvent::NoteOff(e) => {
+                group_of_event_port(e.port_index).is_none()
+            }
+            ClapEvent::NoteExpression(e) => group_of_event_port(e.port_index).is_none(),
+            ClapEvent::Midi(e) => group_of_port(e.port_index).is_none(),
+            _ => false,
+        }
     }
 
     /// The bytes and frame offset of a plugin-emitted SysEx message, which
@@ -1722,6 +1737,9 @@ pub struct OutputEventList {
     /// Pushes `try_push` refused since the list was built: see
     /// [`events_refused`](Self::events_refused).
     refused: u64,
+    /// MIDI events and SysEx the plugin sent from a port no Group has, since
+    /// the list was built: see [`midi_ports_dropped`](Self::midi_ports_dropped).
+    midi_ports_dropped: std::sync::atomic::AtomicU64,
 }
 
 impl std::fmt::Debug for OutputEventList {
@@ -1752,7 +1770,17 @@ impl OutputEventList {
             touched: Vec::new(),
             coalesced: 0,
             refused: 0,
+            midi_ports_dropped: std::sync::atomic::AtomicU64::new(0),
         }
+    }
+
+    /// How many MIDI events and SysEx messages the plugin sent from a port past
+    /// the sixteen Groups (or a negative one that is not the `-1` wildcard),
+    /// since the list was built. They are dropped: a port names the Group it
+    /// would land on, and none is a Group's.
+    pub fn midi_ports_dropped(&self) -> u64 {
+        self.midi_ports_dropped
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Borrows the events the plugin has pushed.
@@ -1888,15 +1916,25 @@ impl OutputEventList {
                 // (and reported through `is_overflowed`), and later events
                 // still get the room that is left. A port past the Groups
                 // names none, and the message is dropped.
-                if let Some(group) = group_of_port(port) {
-                    push_sysex(out, group, time, bytes);
+                match group_of_port(port) {
+                    Some(group) => {
+                        push_sysex(out, group, time, bytes);
+                    }
+                    None => self.count_port_dropped(),
                 }
-            } else if let Some(midi) = e.to_midi(translator)
-                && !out.push(midi)
-            {
-                break;
+            } else if let Some(midi) = e.to_midi(translator) {
+                if !out.push(midi) {
+                    break;
+                }
+            } else if e.names_no_group() {
+                self.count_port_dropped();
             }
         }
+    }
+
+    fn count_port_dropped(&self) {
+        self.midi_ports_dropped
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Drains the parameter-value events, grouped by parameter ID, into a
@@ -3884,6 +3922,11 @@ mod tests {
         }
         list.events.push(pan);
         list.events.push(ClapEvent::midi(4, 16, [0xB2, 7, 100]));
+        // `-1`, the wildcard of `events.h`, is the first port; port 40 is none.
+        list.events
+            .push(ClapEvent::note_on(5, 2, 61, 1.0).addressed(u16::MAX, -1));
+        list.events
+            .push(ClapEvent::note_on(6, 2, 62, 1.0).addressed(40, -1));
 
         let mut pool = RtMidiEvents::new();
         list.fill_midi_events(&mut Translator::new(), &mut pool);
@@ -3894,7 +3937,12 @@ mod tests {
                 other => panic!("expected MIDI 2.0, got {other:?}"),
             })
             .collect();
-        assert_eq!(groups, [3, 4, 5, 6], "the port-16 event names no Group");
+        assert_eq!(
+            groups,
+            [3, 4, 5, 6, 0],
+            "the wildcard is Group 0; ports 16 and 40 name none"
+        );
+        assert_eq!(list.midi_ports_dropped(), 2, "and they are counted");
     }
 
     /// **A parameter run assembles across blocks**: the Data Entry LSB that

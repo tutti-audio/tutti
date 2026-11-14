@@ -108,15 +108,18 @@ impl MidiIo {
     pub fn drain_from(&mut self, start: usize) {
         let start = u32::try_from(start).unwrap_or(u32::MAX);
         while let Some(ev) = self.out_rx.pop() {
+            // Translated before the room check: the translator sees every packet
+            // of the stream, so a run whose data entry arrives while the list is
+            // full still assembles for the block after.
+            let Some(ump) = self.translator.translate(ev.ump) else {
+                continue;
+            };
             // Never past the reservation: a split block drains once a piece,
             // and growing here would allocate on the audio thread.
             if self.out.len() >= self.room {
                 self.out_overflow += 1;
                 continue;
             }
-            let Some(ump) = self.translator.translate(ev.ump) else {
-                continue;
-            };
             self.out.push(WireMidi {
                 offset: ev.offset.saturating_add(start),
                 ump,
@@ -652,6 +655,50 @@ mod tests {
             assert_eq!(io.out[255].offset, 255, "in order");
         }
     }
+    /// **The translator sees every packet, whether or not the list has room for
+    /// what it makes**: an RPN run whose data entry arrives while the list is
+    /// full is counted as lost, and the selection it made still holds for the
+    /// run after (M2-104 Appendix D.3.3, a selected parameter stays selected).
+    #[test]
+    fn a_run_through_a_full_list_still_assembles() {
+        let cc =
+            |controller: u32, value: u32| Ump([0x20B0_0000 | controller << 8 | value, 0, 0, 0]);
+        let inbox = Arc::new(ArrayQueue::new(4));
+        let mut io = MidiIo::new(Arc::clone(&inbox));
+        // The list is full of notes, then the run (select, MSB, LSB) arrives.
+        for i in 0..4 {
+            inbox
+                .push(wire(Ump([0x2090_3C40, 0, 0, 0]), i))
+                .expect("room");
+        }
+        io.drain_from(0);
+        assert_eq!(io.out.len(), 4);
+        for packet in [cc(101, 0), cc(100, 0), cc(6, 12), cc(38, 0)] {
+            inbox.push(wire(packet, 0)).expect("room");
+        }
+        io.drain_from(0);
+        assert_eq!(io.out.len(), 4, "no room for the controller");
+        assert_eq!(io.out_overflow(), 1, "which is counted");
+        // The next block: RPN 0/0 is still selected, so a new value is one
+        // Registered Controller (7 semitones, zero-extended, M2-115 4.1).
+        io.out.clear();
+        for packet in [cc(6, 7), cc(38, 0)] {
+            inbox.push(wire(packet, 0)).expect("room");
+        }
+        io.drain_from(0);
+        let [event] = io.out[..] else {
+            panic!("expected one controller, got {:?}", io.out);
+        };
+        let Ok(Message::Midi2(_, tutti_ump::Voice2::Registered { value, .. })) = event.ump.decode()
+        else {
+            panic!(
+                "expected a Registered Controller, got {:?}",
+                event.ump.decode()
+            );
+        };
+        assert_eq!(value.get(), 7 << 25);
+    }
+
     /// **A split block's pieces cannot grow the MIDI-out list**: each piece
     /// drains a full inbox, the list holds one inbox's worth, and what does not
     /// fit is counted, not pushed. Inside the no-alloc gate.

@@ -2,7 +2,7 @@
 
 use tutti_graph::UmpAt;
 use tutti_midi_protocol::{
-    PitchBendSensitivity, Translator, unit_f32_to_value, unit_f32_to_velocity, value_to_unit_f32,
+    PitchBendSensitivity, unit_f32_to_value, unit_f32_to_velocity, value_to_unit_f32,
     velocity_to_unit_f32, widen,
 };
 use tutti_plugin_types::{
@@ -17,8 +17,8 @@ use tutti_ump::{
 use tutti_voicing::{LIVE_NOTES, NOTE_CONTROLS, NoteControl, NoteEvent, PerNoteState};
 
 use super::{
-    Data, Event, K_DATA_TYPE_MIDI_SYSEX, NoteOff, NoteOn, Payload, PolyPressure, ToEvent,
-    expression_type_from_id, sample_offset,
+    Data, Event, K_DATA_TYPE_MIDI_SYSEX, NoteOff, NoteOn, OutputStream, Payload, PolyPressure,
+    ToEvent, expression_type_from_id, sample_offset,
 };
 use tutti_ump::ControlValue;
 
@@ -44,12 +44,29 @@ fn tuning_semitones(value: f64) -> f64 {
 /// and an attribute.
 const MAX_EVENTS: usize = 128 * LIVE_NOTES + 5 * LIVE_NOTES + NOTE_CONTROLS + 16;
 
+/// `kVolumeTypeID`'s normalized value for unity gain: the scale is `0` for
+/// silence, `0.25` for 0 dB and `1` for +12 dB (`ivstnoteexpression.h`).
+const VOLUME_UNITY: f64 = 0.25;
+
+/// The VST3 volume of a per-note controller's `unit` (`0..=1`, full scale is
+/// unity gain): the unity point of VST3's scale, as CLAP's volume does.
+fn volume_expression(unit: f64) -> f64 {
+    unit * VOLUME_UNITY
+}
+
+/// The per-note controller value (`0..=1`, full scale unity) of a plugin's VST3
+/// volume `norm`: `4 * norm`, so a boost past 0 dB saturates at full scale
+/// rather than rescaling everything below it.
+fn volume_unit(norm: f64) -> f64 {
+    (norm / VOLUME_UNITY).min(1.0)
+}
+
 /// What a Per-Note Management Reset puts each expression of a note back to,
 /// as VST3's normalized values: no tuning, unity volume, centred pan and
 /// brightness. (Pressure is a `PolyPressure` of 0.)
 const EXPRESSION_DEFAULTS: [(NoteExpressionType, f64); 4] = [
     (NoteExpressionType::Tuning, 0.5),
-    (NoteExpressionType::Volume, 1.0),
+    (NoteExpressionType::Volume, VOLUME_UNITY),
     (NoteExpressionType::Pan, 0.5),
     (NoteExpressionType::Brightness, 0.5),
 ];
@@ -361,7 +378,12 @@ fn control_event(
     id: NoteId,
     control: &NoteControl,
 ) -> Option<Event> {
-    let expression = |expression_type, value| {
+    let expression = |expression_type, value: f64| {
+        let value = if expression_type == NoteExpressionType::Volume {
+            volume_expression(value)
+        } else {
+            value
+        };
         NoteExpressionValue {
             sample_offset: offset,
             note_id: plugin_note_id(id),
@@ -448,7 +470,7 @@ fn address(group: MidiGroup, channel: i16) -> Address {
 }
 
 /// See [`EventExt::to_midi`](super::EventExt::to_midi).
-pub(super) fn decode(event: &Event, translator: &mut Translator) -> Option<WireMidi> {
+pub(super) fn decode(event: &Event, stream: &mut OutputStream) -> Option<WireMidi> {
     let frame = event.sample_offset().max(0).cast_unsigned();
     // An output event's `busIndex` is the event output bus it left on (ivstevents.h),
     // and an event bus is a UMP Group, as it is on the input side. A bus past the
@@ -457,20 +479,26 @@ pub(super) fn decode(event: &Event, translator: &mut Translator) -> Option<WireM
     // Notes and poly-pressure build native MIDI-2 Channel Voice events so the
     // plugin's f32 velocity and pressure keep their full 16 and 32-bit width.
     let built = match &event.payload {
-        Payload::NoteOn(e) => Ump::from(Message::Midi2(
-            address(group, e.channel),
-            Voice2::note_on(
-                note_number(e.pitch),
-                NoteVelocity::new(unit_f32_to_velocity(e.velocity).get()),
-            ),
-        )),
-        Payload::NoteOff(e) => Ump::from(Message::Midi2(
-            address(group, e.channel),
-            Voice2::note_off(
-                note_number(e.pitch),
-                NoteVelocity::new(unit_f32_to_velocity(e.velocity).get()),
-            ),
-        )),
+        Payload::NoteOn(e) => {
+            stream.note_on(e.noteId, midi_channel(e.channel), note_number(e.pitch));
+            Ump::from(Message::Midi2(
+                address(group, e.channel),
+                Voice2::note_on(
+                    note_number(e.pitch),
+                    NoteVelocity::new(unit_f32_to_velocity(e.velocity).get()),
+                ),
+            ))
+        }
+        Payload::NoteOff(e) => {
+            stream.note_off(e.noteId, midi_channel(e.channel), note_number(e.pitch));
+            Ump::from(Message::Midi2(
+                address(group, e.channel),
+                Voice2::note_off(
+                    note_number(e.pitch),
+                    NoteVelocity::new(unit_f32_to_velocity(e.velocity).get()),
+                ),
+            ))
+        }
         Payload::PolyPressure(e) => Ump::from(Message::Midi2(
             address(group, e.channel),
             Voice2::PolyPressure {
@@ -499,14 +527,14 @@ pub(super) fn decode(event: &Event, translator: &mut Translator) -> Option<WireM
             // through unchanged.
             return Some(WireMidi {
                 offset: frame,
-                ump: translator.translate(parse_exact(group, bytes)?)?,
+                ump: stream.translator.translate(parse_exact(group, bytes)?)?,
             });
         }
         Payload::LegacyCcOut(e) => {
-            return super::legacy_cc::decode(e, frame, group, translator);
+            return super::legacy_cc::decode(e, frame, group, &mut stream.translator);
         }
         Payload::ExpressionValue(e) => {
-            return expression(e.typeId, e.noteId, e.value, frame, group);
+            return expression(stream, e.typeId, e.noteId, e.value, frame, group);
         }
         // A reassembled SysEx's bytes are in the list's buffer, which the list drains.
         Payload::SysEx(_)
@@ -523,11 +551,13 @@ pub(super) fn decode(event: &Event, translator: &mut Translator) -> Option<WireM
 
 /// The per-note message a plugin's note expression (`typeId`, `value` normalized
 /// on `[0, 1]`, tuning `0.5` at the key and `1/240` per semitone) of the note
-/// `note_id` is, on `group`. `None` for a dimension with no per-note message
+/// `note_id` is, on `group`: the note the plugin started under that id, else the
+/// host's `channel * 128 + note` id. `None` for a dimension with no per-note message
 /// (vibrato, expression, a custom id), a non-finite value, and a `note_id` that
 /// is not the host's `channel * 128 + note`: a plugin's own id space cannot be
 /// decoded, and binding it to a phantom voice would be worse than dropping it.
 fn expression(
+    stream: &OutputStream,
     type_id: u32,
     note_id: i32,
     value: f64,
@@ -537,9 +567,16 @@ fn expression(
     if !value.is_finite() {
         return None;
     }
-    let (channel, note) = note_id_to_channel_note(note_id)?;
+    let (channel, note) = stream
+        .note_of(note_id)
+        .or_else(|| note_id_to_channel_note(note_id))?;
     let voice = match expression_type_from_id(type_id)? {
         NoteExpressionType::Tuning => per_note_tuning(note, tuning_semitones(value)),
+        NoteExpressionType::Volume => per_note_message(
+            NoteExpressionType::Volume,
+            note,
+            unit_f32(volume_unit(value)),
+        )?,
         other => per_note_message(other, note, unit_f32(value))?,
     };
     Some(WireMidi {
