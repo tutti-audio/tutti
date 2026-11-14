@@ -23,12 +23,6 @@ fn vst2_probe() -> std::path::PathBuf {
     tutti_fixtures::vst2_probe().to_path_buf()
 }
 
-/// This process's main thread. Each test is its own process under nextest, so
-/// the claim cannot be refused.
-fn main_thread() -> tutti_plugin_types::MainThread {
-    tutti_plugin_types::MainThread::claim().expect("one test, one process")
-}
-
 /// A detached stereo session at 48 kHz with the probe loaded in process, on
 /// the outputs, its parameter values read.
 fn session_with_probe() -> (Session, NodeKey) {
@@ -38,7 +32,7 @@ fn session_with_probe() -> (Session, NodeKey) {
         .expect("a detached session builds");
     let node = s
         .add_plugin_blocking(
-            &main_thread(),
+            tutti_fixtures::main_thread(),
             PluginLoadRequest::new(PluginRef::file(vst2_probe()).expect("a plugin file")),
         )
         .expect("the in-process VST2 loads");
@@ -101,7 +95,6 @@ fn probe_switch<T>(name: &[u8], arg: T) {
 /// the host's drain (`editor_idle`) hands it to the parameter callback, and
 /// the next update writes it into the lane's knob on parameter 0, leaving
 /// parameter 1's knob where the plugin started it.
-#[test]
 fn a_plugin_gui_edit_becomes_the_knob() {
     let (mut s, node) = session_with_probe();
     let (p0, p1) = (ParamRef::plugin(node, 0), ParamRef::plugin(node, 1));
@@ -132,7 +125,7 @@ fn a_plugin_gui_edit_becomes_the_knob() {
     s.plugin(node)
         .expect("the plugin's handle")
         .handle()
-        .editor_idle(&main_thread());
+        .editor_idle(tutti_fixtures::main_thread());
     update(&mut s, Instant::now());
 
     let state = s.mod_state();
@@ -177,7 +170,6 @@ impl Node for EventSource1 {
 /// rewrite of the port's declared sources leaves the lane's edge where it was
 /// (`Graph::set_sources` keeps the edges it did not make), so
 /// `sources` still lists the lane and the plugin still reads `0.25`.
-#[test]
 fn a_plugins_midi_rewiring_keeps_its_lanes() {
     let (mut s, node) = session_with_probe();
     let p0 = ParamRef::plugin(node, 0);
@@ -241,7 +233,6 @@ fn a_plugins_midi_rewiring_keeps_its_lanes() {
 /// host drops a report made inside its own `setParameter` call
 /// (`tutti-vst2-host`'s `host_write`), so after four rounds of render, drain
 /// and update the knob is still 0 and the plugin still reads 0.25.
-#[test]
 fn a_plugin_echoing_the_lane_keeps_its_knob() {
     let (mut s, node) = session_with_probe();
     let p0 = ParamRef::plugin(node, 0);
@@ -264,7 +255,7 @@ fn a_plugin_echoing_the_lane_keeps_its_knob() {
             .expect("the plugin's handle")
             .handle()
             .clone();
-        handle.editor_idle(&main_thread());
+        handle.editor_idle(tutti_fixtures::main_thread());
         update(&mut s, Instant::now());
         assert_eq!(
             s.mod_state().lane(p0.key()).expect("a lane").1.knob(),
@@ -279,3 +270,10 @@ fn a_plugin_echoing_the_lane_keeps_its_knob() {
     }
     probe_switch::<bool>(b"tutti_vst2_probe_set_echo_set_parameter\0", false);
 }
+
+/// The cases of this module, run by `main`.
+pub(crate) const CASES: &[(&str, fn())] = tutti_fixtures::cases!["vst2_modulation";
+a_plugin_gui_edit_becomes_the_knob,
+a_plugins_midi_rewiring_keeps_its_lanes,
+a_plugin_echoing_the_lane_keeps_its_knob,
+];

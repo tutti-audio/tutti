@@ -32,10 +32,10 @@ use std::path::Path;
 
 use tutti_graph::{MAX_NODE_TAIL, Offset, UmpAt};
 use tutti_plugin_types::{
-    AudioBuffer, AudioBufferMut, Controller, InProcess, LatencyVerdict, Load, MainThread, MaxBlock,
-    Measured, NotChecked, PROBE_FLOOR, PluginDescriptor, PluginError, PluginIo, PluginTail,
-    Prepare, ProbeConfig, ProcessContext, ProcessOutput, Processor, StateHash, TailVerdict,
-    Verdict,
+    AudioBuffer, AudioBufferMut, Controller, InProcess, LatencyVerdict, Load, MainThreadMarker,
+    MaxBlock, Measured, NotChecked, PROBE_FLOOR, PluginDescriptor, PluginError, PluginIo,
+    PluginTail, Prepare, ProbeConfig, ProcessContext, ProcessOutput, Processor, StateHash,
+    TailVerdict, Verdict,
 };
 use tutti_types::{Amplitude, Db, SampleRate, Samples, Seconds};
 use tutti_ump::{
@@ -367,12 +367,16 @@ fn judge(
 /// The plugin refused `state`: a measurement of a state it would not take is no
 /// measurement, and the caller asked for that state.
 pub fn measure<L: InProcess>(
-    main: &MainThread,
+    main: MainThreadMarker,
     path: &Path,
     descriptor: &PluginDescriptor,
     state: Option<&[u8]>,
 ) -> Result<Option<Measured>, String> {
-    let Ok(mut loaded) = L::load_in_process(main, path, &Load::new().plugin(&descriptor.id)) else {
+    // The plugin closes on this thread when `loaded` drops, so the collector it is
+    // given never receives work.
+    let (_collector, work) = tutti_plugin_types::MainWork::new();
+    let Ok(mut loaded) = L::load_in_process(main, &work, path, &Load::new().plugin(&descriptor.id))
+    else {
         return Ok(None);
     };
     if let Some(bytes) = state {

@@ -15,7 +15,9 @@ use tutti_plugin_types::{
     BridgeResult, Delivered, EditorError, PluginError, PluginFailure, Request, StateError,
 };
 use tutti_plugin_types::{ContentScale, EditorCapabilities, WindowHandle};
-use tutti_plugin_types::{Edit, EditDrain, EditSink, MainThread, ParamEdit, edits};
+use tutti_plugin_types::{
+    Edit, EditDrain, EditSink, MainThreadMarker, MainWorkHandle, ParamEdit, edits,
+};
 use tutti_plugin_types::{Editor, EditorWindow, Load, Origin};
 use tutti_types::SampleRate;
 
@@ -39,7 +41,7 @@ use tutti_types::SampleRate;
 /// The editor's state cannot be read (nothing is loaded), or the audio
 /// instance refuses it (the baseline stays, so the next pull tries again).
 fn pull_editor_state(
-    main: &MainThread,
+    main: MainThreadMarker,
     gui: &mut dyn Editor,
     baseline: &mut Option<Vec<u8>>,
     load: impl FnOnce(&[u8]) -> std::result::Result<(), StateError>,
@@ -90,11 +92,43 @@ impl std::fmt::Debug for PluginBridge {
     }
 }
 
-/// Loads the editor-only instance of the plugin `load` chooses in the file at
-/// a path, in this process (`OutOfProcess::load_editor` for the path's
-/// format). The host passes its own: which formats it was built with is the
-/// host's, not the bridge's.
-pub type EditorLoader = fn(&MainThread, &Path, &Load) -> BridgeResult<Box<dyn Editor>>;
+/// What loads the editor-only instance of the plugin `load` chooses in the file
+/// at a path, in this process (`OutOfProcess::load_editor` for the path's
+/// format), and the collector of the plugin's owner that instance hands its close
+/// to. The host passes its own: which formats it was built with is the host's, not
+/// the bridge's.
+#[derive(Clone)]
+pub struct EditorLoader {
+    load: fn(MainThreadMarker, &MainWorkHandle, &Path, &Load) -> BridgeResult<Box<dyn Editor>>,
+    work: MainWorkHandle,
+}
+
+impl EditorLoader {
+    /// A loader that makes the editor instance with `load`, which hands its close
+    /// to `work`.
+    #[must_use]
+    pub fn new(
+        load: fn(MainThreadMarker, &MainWorkHandle, &Path, &Load) -> BridgeResult<Box<dyn Editor>>,
+        work: MainWorkHandle,
+    ) -> Self {
+        Self { load, work }
+    }
+
+    fn load(
+        &self,
+        main: MainThreadMarker,
+        path: &Path,
+        load: &Load,
+    ) -> BridgeResult<Box<dyn Editor>> {
+        (self.load)(main, &self.work, path, load)
+    }
+}
+
+impl std::fmt::Debug for EditorLoader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EditorLoader").finish_non_exhaustive()
+    }
+}
 
 /// How many parameter writes wait for the next editor idle. A full ring drops
 /// the newest: the mirror is cosmetic, and the audio command is authoritative.
@@ -432,18 +466,19 @@ impl PluginBridge {
     /// this is the first open.
     fn editor_instance<'a>(
         &self,
-        main: &MainThread,
+        main: MainThreadMarker,
         slot: &'a mut Option<Box<dyn Editor>>,
     ) -> std::result::Result<&'a mut Box<dyn Editor>, EditorError> {
         match slot {
             Some(gui) => Ok(gui),
             empty => {
                 tracing::info!("[bridge] lazy-loading the in-process GUI");
-                let load_editor = self.load_editor.ok_or_else(|| {
+                let load_editor = self.load_editor.as_ref().ok_or_else(|| {
                     EditorError::PluginError("this bridge has no in-process editor loader".into())
                 })?;
-                let instance =
-                    load_editor(main, self.origin.path(), self.origin.load()).map_err(|e| {
+                let instance = load_editor
+                    .load(main, self.origin.path(), self.origin.load())
+                    .map_err(|e| {
                         EditorError::PluginError(format!("failed to load in-process GUI: {e}"))
                     })?;
                 Ok(empty.insert(instance))
@@ -461,7 +496,7 @@ impl PluginBridge {
     /// refuses to open its editor.
     pub fn open_editor(
         &self,
-        main: &MainThread,
+        main: MainThreadMarker,
         parent: WindowHandle,
         scale: ContentScale,
     ) -> std::result::Result<Size, EditorError> {
@@ -524,7 +559,10 @@ impl PluginBridge {
     /// # Errors
     ///
     /// As [`open_editor`](Self::open_editor).
-    pub fn open_floating_editor(&self, main: &MainThread) -> std::result::Result<(), EditorError> {
+    pub fn open_floating_editor(
+        &self,
+        main: MainThreadMarker,
+    ) -> std::result::Result<(), EditorError> {
         if self.audio.is_crashed() {
             return Err(EditorError::PluginCrashed);
         }
@@ -603,7 +641,7 @@ impl PluginBridge {
 
     /// Closes the editor, after sending the audio instance what the user changed
     /// in it. `false` when no editor was open.
-    pub fn close_editor(&self, main: &MainThread) -> bool {
+    pub fn close_editor(&self, main: MainThreadMarker) -> bool {
         if self.load_editor.is_none() {
             let Ok(mut remote) = self.remote.lock() else {
                 return false;
@@ -635,7 +673,7 @@ impl PluginBridge {
     /// wait on (its descriptors and timers, added to `out`). A served editor
     /// (`remote`) lives in the server, whose own loop waits on them: nothing
     /// here.
-    pub fn wakeups(&self, main: &MainThread, out: &mut tutti_plugin_types::Wakeups) {
+    pub fn wakeups(&self, main: MainThreadMarker, out: &mut tutti_plugin_types::Wakeups) {
         if self.load_editor.is_none() {
             return;
         }
@@ -650,7 +688,7 @@ impl PluginBridge {
     /// [`wakeups`](Self::wakeups) found.
     pub fn wake(
         &self,
-        main: &MainThread,
+        main: MainThreadMarker,
         ready: &[tutti_plugin_types::Ready],
         now: std::time::Instant,
     ) {
@@ -666,7 +704,7 @@ impl PluginBridge {
 
     /// The editor's main-thread tick: applies what the realtime setters queued
     /// for it and sends the audio instance the user's edits.
-    pub fn editor_idle(&self, main: &MainThread) {
+    pub fn editor_idle(&self, main: MainThreadMarker) {
         if self.load_editor.is_none() {
             if let Ok(mut remote) = self.remote.lock() {
                 remote.editor_idle(main);
@@ -711,12 +749,12 @@ impl PluginBridge {
     /// [`pull_editor_state`]: called once the open has synced it from the
     /// audio instance. Read back rather than taken from the sync's bytes,
     /// because a plugin may normalise a state it is given.
-    fn take_baseline(&self, main: &MainThread, gui: &mut dyn Editor) {
+    fn take_baseline(&self, main: MainThreadMarker, gui: &mut dyn Editor) {
         *self.baseline.lock().unwrap_or_else(PoisonError::into_inner) = gui.save_state(main).ok();
     }
 
     /// [`pull_editor_state`] against this bridge's audio instance.
-    fn pull_editor_state(&self, main: &MainThread, gui: &mut dyn Editor) {
+    fn pull_editor_state(&self, main: MainThreadMarker, gui: &mut dyn Editor) {
         let mut baseline = self.baseline.lock().unwrap_or_else(PoisonError::into_inner);
         let pulled = pull_editor_state(main, gui, &mut baseline, |state| {
             self.audio
@@ -752,7 +790,7 @@ impl PluginBridge {
     /// As `AudioBridge::load_state`.
     pub fn load_state(
         &self,
-        main: &MainThread,
+        main: MainThreadMarker,
         data: &[u8],
         state_use: tutti_plugin_types::StateUse,
     ) -> std::result::Result<(), StateError> {
@@ -830,7 +868,7 @@ impl PluginBridge {
     }
 
     /// The open editor's resize capabilities (the default when none is open).
-    pub fn editor_capabilities(&self, main: &MainThread) -> EditorCapabilities {
+    pub fn editor_capabilities(&self, main: MainThreadMarker) -> EditorCapabilities {
         if self.load_editor.is_none() {
             return self
                 .remote
@@ -854,7 +892,7 @@ impl PluginBridge {
     /// No editor is open, or it cannot resize.
     pub fn set_editor_size(
         &self,
-        main: &MainThread,
+        main: MainThreadMarker,
         requested: Size,
     ) -> std::result::Result<Size, EditorError> {
         if self.load_editor.is_none() {
@@ -877,7 +915,7 @@ impl PluginBridge {
     /// No editor is open, or the editor's own refusal (`set_editor_scale`).
     pub fn set_editor_scale(
         &self,
-        main: &MainThread,
+        main: MainThreadMarker,
         scale: ContentScale,
     ) -> std::result::Result<(), EditorError> {
         if self.load_editor.is_none() {
@@ -894,7 +932,7 @@ impl PluginBridge {
     }
 
     /// A size the open editor asked its window to take since the last poll.
-    pub fn poll_editor_resize_request(&self, main: &MainThread) -> Option<Size> {
+    pub fn poll_editor_resize_request(&self, main: MainThreadMarker) -> Option<Size> {
         if self.load_editor.is_none() {
             return self.remote.lock().ok()?.poll_editor_resize_request(main);
         }
@@ -922,8 +960,8 @@ impl Drop for PluginBridge {
         // be on the main thread; off it, the instance is leaked below with its
         // editor still open, which is what an app that closes the editor first
         // (the `NonSend` editor system) never meets.
-        if let Some(main) = MainThread::current() {
-            self.close_editor(&main);
+        if let Some(main) = MainThreadMarker::new() {
+            self.close_editor(main);
         }
         if let Ok(mut guard) = self.gui.lock()
             && let Some(gui) = guard.take()
@@ -1004,14 +1042,14 @@ mod state_back_tests {
     }
 
     impl Editor for FakeEditor {
-        fn set_parameter(&mut self, _: &MainThread, _: ParamId, _: Normalized) {}
-        fn set_state(&mut self, _: &MainThread, _: &[u8]) -> PluginResult<()> {
+        fn set_parameter(&mut self, _: MainThreadMarker, _: ParamId, _: Normalized) {}
+        fn set_state(&mut self, _: MainThreadMarker, _: &[u8]) -> PluginResult<()> {
             Ok(())
         }
-        fn poll_edits(&mut self, _: &MainThread) -> Vec<ParamEdit> {
+        fn poll_edits(&mut self, _: MainThreadMarker) -> Vec<ParamEdit> {
             Vec::new()
         }
-        fn save_state(&mut self, _: &MainThread) -> PluginResult<Vec<u8>> {
+        fn save_state(&mut self, _: MainThreadMarker) -> PluginResult<Vec<u8>> {
             self.state
                 .clone()
                 .ok_or_else(|| PluginError::State("unreadable".into()))
@@ -1019,27 +1057,27 @@ mod state_back_tests {
     }
 
     impl EditorWindow for FakeEditor {
-        fn has_editor(&self, _: &MainThread) -> bool {
+        fn has_editor(&self, _: MainThreadMarker) -> bool {
             false
         }
 
         fn open_editor(
             &mut self,
-            _: &MainThread,
+            _: MainThreadMarker,
             _: WindowHandle,
             _: ContentScale,
         ) -> PluginResult<Size> {
             unreachable!("the state-back never opens")
         }
 
-        fn close_editor(&mut self, _: &MainThread) {}
+        fn close_editor(&mut self, _: MainThreadMarker) {}
 
-        fn editor_idle(&mut self, _: &MainThread) {}
+        fn editor_idle(&mut self, _: MainThreadMarker) {}
 
         /// The default capabilities: this surface reports no resize support.
         fn editor_capabilities(
             &mut self,
-            _main: &tutti_plugin_types::MainThread,
+            _main: tutti_plugin_types::MainThreadMarker,
         ) -> tutti_plugin_types::EditorCapabilities {
             tutti_plugin_types::EditorCapabilities::default()
         }
@@ -1047,7 +1085,7 @@ mod state_back_tests {
         /// Not supported here.
         fn set_editor_size(
             &mut self,
-            _main: &tutti_plugin_types::MainThread,
+            _main: tutti_plugin_types::MainThreadMarker,
             _requested: dpi::Size,
         ) -> tutti_plugin_types::PluginResult<dpi::Size> {
             Err(tutti_plugin_types::PluginError::Editor(
@@ -1060,7 +1098,7 @@ mod state_back_tests {
         /// Nothing asked: this surface never queues a resize request.
         fn poll_editor_resize_request(
             &mut self,
-            _main: &tutti_plugin_types::MainThread,
+            _main: tutti_plugin_types::MainThreadMarker,
         ) -> Option<dpi::Size> {
             None
         }
@@ -1074,7 +1112,7 @@ mod state_back_tests {
         let loaded = RefCell::new(None);
         let mut gui = FakeEditor { state: editor };
         let mut baseline = baseline;
-        let _ = pull_editor_state(&main_thread(), &mut gui, &mut baseline, |state| {
+        let _ = pull_editor_state(main_thread(), &mut gui, &mut baseline, |state| {
             *loaded.borrow_mut() = Some(state.to_vec());
             Ok(())
         });
