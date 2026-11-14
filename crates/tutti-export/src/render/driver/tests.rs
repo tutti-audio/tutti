@@ -2,7 +2,7 @@ use super::*;
 use crate::control::{CancelToken, Progress, Stage};
 use crate::{GRAPH_MAX_BLOCK, Setup};
 use std::sync::Arc;
-use tutti_buffers::Interleaved;
+use tutti_buffers::{Interleaved, Planes};
 use tutti_graph::GraphBuilder;
 use tutti_tempo::TempoMap;
 use tutti_transport::{FrozenClock, OfflineTimeline, OfflineTimelineConfig};
@@ -53,14 +53,17 @@ fn render(
             |src, _, window| {
                 let planes = src.planes();
                 let block = &mut scratch[..window.len() * ch];
-                fold.planar_to_interleaved(
-                    |c| &planes[c][window.clone()],
+                fold.fold_planar_to_interleaved(
+                    Planes::from_vecs(planes)
+                        .unwrap()
+                        .slice(Samples(window.start)..Samples(window.end)),
                     InterleavedMut::new(block, layout).unwrap(),
-                );
+                )
+                .unwrap();
                 out.extend(
                     Interleaved::new(block, layout)
                         .unwrap()
-                        .iter_frames()
+                        .iter()
                         .map(<[f32]>::to_vec),
                 );
                 Ok(())
@@ -293,6 +296,24 @@ fn plane_source_zero_fills_a_missing_channel_every_block() {
     );
     for f in out.as_chunks::<4>().0 {
         assert_eq!(f, &[1.0, 0.0, 0.0, 0.0]);
+    }
+}
+
+/// A render with more planes than the file has channels writes the first
+/// planes and never the extra ones.
+#[test]
+fn plane_source_leaves_out_planes_past_the_file_width() {
+    let planes = vec![vec![1.0f32; 8], vec![2.0f32; 8], vec![3.0f32; 8]];
+    let mut src = PlaneSource::new(&planes, None);
+    let mut out = vec![9.9f32; 2 * 4];
+    let stereo = ChannelLayout::from(2u16);
+    assert_eq!(
+        src.fill(InterleavedMut::new(&mut out, stereo).unwrap())
+            .unwrap(),
+        4
+    );
+    for f in out.as_chunks::<2>().0 {
+        assert_eq!(f, &[1.0, 2.0]);
     }
 }
 

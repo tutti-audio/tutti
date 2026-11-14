@@ -13,10 +13,6 @@
 #         measured: <why>   kept after judging.
 crates/tutti-au-host/src/macos/processor.rs::AuProcessor::render_f32  pending
 crates/tutti-au-host/src/macos/processor.rs::AuProcessor::render_f64  pending
-crates/tutti-buffers/src/fold.rs::Fold::frame  pending
-crates/tutti-buffers/src/fold.rs::Fold::planar_channel  pending
-crates/tutti-buffers/src/fold.rs::Fold::planar_to_interleaved  pending
-crates/tutti-buffers/src/interleaved.rs::Interleaved::fold_into  pending
 crates/tutti-codec/src/decode/file_in.rs::FileIn::fill_sequential_interleaved  pending
 crates/tutti-codec/src/encoder.rs::Encoder::write  pending
 crates/tutti-codec/src/wave.rs::Wave::channel  pending

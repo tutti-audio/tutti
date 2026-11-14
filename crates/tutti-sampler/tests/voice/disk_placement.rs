@@ -278,7 +278,7 @@ struct Fixture {
 
 fn fixtures() -> [Fixture; 3] {
     use tutti_types::Speaker::*;
-    let m = tutti_buffers::M3DB;
+    let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
     let v = value;
     [
         // The rears before the sides.

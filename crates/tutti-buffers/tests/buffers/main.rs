@@ -11,8 +11,12 @@ static ALLOC: AllocDisabler = AllocDisabler;
 mod convert;
 mod float;
 mod fold_no_alloc;
-mod helpers;
+mod fold_views;
 mod i24;
+#[cfg(feature = "serde")]
+mod i24_serde;
 mod interleaved;
 mod planes;
 mod sample_conversion;
+mod sample_format;
+mod views;

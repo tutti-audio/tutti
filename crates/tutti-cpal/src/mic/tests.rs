@@ -259,7 +259,7 @@ fn the_default_is_the_first_two_inputs_or_the_lone_one_twice() {
 /// reason; so is an empty selection.
 #[test]
 fn an_input_past_the_devices_last_is_an_error() {
-    let err = Error::from(Fold::select(ChannelLayout::from(4u16), &[2, 4]).unwrap_err());
+    let err = Error::from(Fold::<f32>::select(ChannelLayout::from(4u16), &[2, 4]).unwrap_err());
     assert!(
         matches!(
             err,
@@ -268,8 +268,10 @@ fn an_input_past_the_devices_last_is_an_error() {
         "{err}"
     );
     assert!(matches!(
-        Error::from(Fold::select(ChannelLayout::STEREO, &[]).unwrap_err()),
-        Error::Inputs(tutti_buffers::FoldError::Empty(_))
+        Error::from(Fold::<f32>::select(ChannelLayout::STEREO, &[]).unwrap_err()),
+        Error::Inputs(tutti_buffers::FoldError::Buffer(
+            tutti_buffers::BufferError::ZeroWidth
+        ))
     ));
 }
 
