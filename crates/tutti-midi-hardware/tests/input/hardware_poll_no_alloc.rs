@@ -297,3 +297,49 @@ fn hardware_input_before_the_first_reading_is_allocation_free() {
     rig.run(512);
     assert_eq!(rig.carried, 16, "pushed for the next block, all of them");
 }
+
+/// A port timed by the device's JR Timestamps takes every branch of the JR path
+/// without allocating: a clock heard, a timestamp mapped, a timestamp before any
+/// clock, a clock restarted by a jump, a clock lost to silence, a late clock, and
+/// a timestamp after a silence of two seconds.
+#[test]
+fn hardware_input_timed_by_jr_is_allocation_free() {
+    use tutti_midi_hardware::InputTiming;
+    let inputs = inputs(1, 256);
+    let mut port = inputs.open_input_port("Test Input").unwrap();
+    let mut rig = Rig::new(&inputs);
+    rig.run(512);
+    assert!(inputs.set_input_timing(port.slot(), InputTiming::JitterReduction));
+    let jr = |utility| Ump::from(Message::Utility(utility));
+
+    assert_no_alloc::assert_no_alloc(|| {
+        for round in 0..100u64 {
+            // The block's arrivals, a timestamp before any clock first.
+            let at = rig.time_of(rig.frames + 100);
+            let _ = port.push(jr(Utility::JrTimestamp(40)), at);
+            let _ = port.push(note(), at);
+            for k in 0..8u16 {
+                let at = rig.time_of(rig.frames + 100 + u64::from(k));
+                let _ = port.push(jr(Utility::JrClock(k * 3_125)), at);
+                let _ = port.push(jr(Utility::JrTimestamp(k * 3_125 + 20)), at);
+                let _ = port.push(note(), at);
+            }
+            // Late (a repeat) and restarted (a jump).
+            let at = rig.time_of(rig.frames + 100);
+            let _ = port.push(jr(Utility::JrClock(7 * 3_125)), at);
+            let _ = port.push(jr(Utility::JrClock(30_000 + round as u16)), at);
+            let _ = port.push(jr(Utility::JrTimestamp(0)), at);
+            let _ = port.push(note(), at);
+            if round % 10 == 0 {
+                // A timestamp two seconds after the last clock: it is lost.
+                let later = at + Duration::from_secs(2);
+                let _ = port.push(jr(Utility::JrTimestamp(9)), later);
+                let _ = port.push(note(), later);
+            }
+            rig.run(512);
+        }
+    });
+    assert!(rig.carried > 0);
+    let info = inputs.port_info(port.slot()).unwrap();
+    assert!(info.jr_restarted > 0 && info.jr_late > 0, "{info:?}");
+}
