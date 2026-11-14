@@ -147,12 +147,13 @@ pub trait MidiEndpoints: Send + Sync {
 /// that one, not the one the OS reported when the output opened: a negotiation
 /// can settle on the other.
 pub trait DeviceOut: MidiOut {
-    /// Whether the output can still send. An output with a sender thread of its
-    /// own answers under that thread's lock, held briefly, and returns `false`
-    /// from then on once the thread has ended other than by a stop; it takes no
-    /// more events. An output that sends inside
-    /// [`queue`](MidiOut::queue) cannot end on its own, so it is alive for as
-    /// long as it is open, which is the default.
+    /// Whether the output can still send.
+    ///
+    /// An output with a sender thread of its own answers under that thread's
+    /// lock, held briefly, and returns `false` from then on once the thread has
+    /// ended other than by a stop; it takes no more events. An output that
+    /// sends inside [`queue`](MidiOut::queue) cannot end on its own, so it is
+    /// alive for as long as it is open, which is the default.
     fn is_alive(&self) -> bool {
         true
     }

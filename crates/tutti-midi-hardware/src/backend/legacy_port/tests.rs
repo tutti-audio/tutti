@@ -304,6 +304,24 @@ fn a_batch_is_merged_among_held_items_by_time_with_held_first_on_a_tie() {
 }
 
 #[test]
+fn a_batch_no_earlier_than_the_last_held_item_is_appended_in_its_own_order() {
+    let t0 = Instant::now();
+    let at = |ms| t0 + Duration::from_millis(ms);
+    let mut held = Schedule::new();
+    held.push_batch(8, [(at(10), "h10"), (at(30), "h30")]);
+    held.push_batch(
+        8,
+        [
+            (at(30), "b30"),
+            (at(20), "b20 clamped to 30"),
+            (at(50), "b50"),
+        ],
+    );
+    let all: Vec<_> = std::iter::from_fn(|| held.pop_due(at(100))).collect();
+    assert_eq!(all, ["h10", "h30", "b30", "b20 clamped to 30", "b50"]);
+}
+
+#[test]
 fn a_batch_past_the_room_takes_a_prefix() {
     let t0 = Instant::now();
     let mut held = Schedule::new();
@@ -386,15 +404,16 @@ fn a_sender_that_panics_leaves_a_dead_mailbox_that_counts_what_it_dropped() {
     assert_eq!(mailbox.state().take(8, [(now, 1), (now, 2), (now, 3)]), 3);
     let sent = std::cell::RefCell::new(Vec::new());
     let ended = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        run(
-            &mailbox,
-            |event| -> std::result::Result<(), String> {
-                assert!(event != 2, "the sender fails on the second");
-                sent.borrow_mut().push(event);
-                Ok(())
-            },
-            |_| -> std::result::Result<(), String> { unreachable!("events are due") },
-        );
+        run(&mailbox, || {
+            (
+                |event| -> std::result::Result<(), String> {
+                    assert!(event != 2, "the sender fails on the second");
+                    sent.borrow_mut().push(event);
+                    Ok(())
+                },
+                |_| -> std::result::Result<(), String> { unreachable!("events are due") },
+            )
+        });
     }));
     assert!(ended.is_err());
     assert_eq!(*sent.borrow(), [1]);
@@ -408,20 +427,38 @@ fn a_sender_that_panics_leaves_a_dead_mailbox_that_counts_what_it_dropped() {
 }
 
 #[test]
+fn a_sender_whose_setup_panics_is_a_dead_mailbox_too() {
+    let mailbox = Mailbox::new();
+    mailbox.state().take(8, [(Instant::now(), 1)]);
+    let ended = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run(&mailbox, || -> (
+            fn(i32) -> std::result::Result<(), String>,
+            fn(Option<Duration>) -> std::result::Result<(), String>,
+        ) {
+            panic!("the setup fails")
+        });
+    }));
+    assert!(ended.is_err());
+    assert!(!mailbox.state().alive());
+    assert_eq!(mailbox.losses(), tutti_graph::Losses::refused(1));
+}
+
+#[test]
 fn a_send_the_device_refuses_is_lost_and_the_sender_goes_on() {
     let mailbox = Mailbox::new();
     let now = Instant::now();
     mailbox.state().take(8, [(now, 1), (now, 2)]);
     let mut waits = 0;
-    run(
-        &mailbox,
-        |event| if event == 1 { Err("refused") } else { Ok(()) },
-        |_| -> std::result::Result<(), &str> {
-            waits += 1;
-            mailbox.state().stop();
-            Ok(())
-        },
-    );
+    run(&mailbox, || {
+        (
+            |event| if event == 1 { Err("refused") } else { Ok(()) },
+            |_| -> std::result::Result<(), &str> {
+                waits += 1;
+                mailbox.state().stop();
+                Ok(())
+            },
+        )
+    });
     assert_eq!(waits, 1);
     assert_eq!(mailbox.losses(), tutti_graph::Losses::lost(1));
     assert_eq!(mailbox.state().pending(), 0);

@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 /// instant in the order they were pushed.
 #[derive(Debug)]
 pub(in crate::backend) struct Schedule<T> {
-    /// Sorted by due time; ties keep push order (a later push goes after every
+    /// Sorted by due time; ties keep push order (a later batch goes after every
     /// item due at or before it).
     held: VecDeque<(Instant, T)>,
 }
@@ -32,36 +32,29 @@ impl<T> Schedule<T> {
     /// the one before it goes right after it, not ahead. At most `room` items
     /// are taken; returns how many (a prefix).
     ///
-    /// The clamped batch is in time order, so it is merged with what is held in
-    /// one pass, a held item first when due at or before a batch item: the
-    /// cost is the held count plus the batch's, not one insertion each.
+    /// The clamped batch is in time order, so it is appended to what is held,
+    /// with no allocation beyond the deque's growth: the common case, a batch
+    /// that is no earlier than the last held item. A batch that starts before
+    /// it is put in place by a stable sort of the two runs, which keeps a held
+    /// item ahead of a batch item due at the same time; that costs the held
+    /// count plus the batch's, and only for such a batch.
     pub(in crate::backend) fn push_batch(
         &mut self,
         room: usize,
         batch: impl IntoIterator<Item = (Instant, T)>,
     ) -> usize {
+        let before = self.held.len();
         let mut floor: Option<Instant> = None;
-        let batch: Vec<(Instant, T)> = batch
-            .into_iter()
-            .take(room)
-            .map(|(due, item)| {
+        self.held
+            .extend(batch.into_iter().take(room).map(|(due, item)| {
                 let due = floor.map_or(due, |floor| due.max(floor));
                 floor = Some(due);
                 (due, item)
-            })
-            .collect();
-        let taken = batch.len();
-        let held = std::mem::take(&mut self.held);
-        let mut held = held.into_iter().peekable();
-        let mut batch = batch.into_iter().peekable();
-        loop {
-            let next = match (held.peek(), batch.peek()) {
-                (Some((h, _)), Some((b, _))) if h <= b => held.next(),
-                (_, Some(_)) => batch.next(),
-                (Some(_), None) => held.next(),
-                (None, None) => break,
-            };
-            self.held.extend(next);
+            }));
+        let taken = self.held.len() - before;
+        let out_of_order = before > 0 && taken > 0 && self.held[before - 1].0 > self.held[before].0;
+        if out_of_order {
+            self.held.make_contiguous().sort_by_key(|(due, _)| *due);
         }
         taken
     }

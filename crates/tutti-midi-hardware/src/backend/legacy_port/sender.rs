@@ -50,19 +50,28 @@ struct Ends<'a, T>(&'a Mailbox<T>);
 impl<T> Drop for Ends<'_, T> {
     fn drop(&mut self) {
         let dropped = self.0.state().end();
-        self.0.refused.fetch_add(dropped as u64, Ordering::AcqRel);
+        // A count of events held in memory fits `u64` on every platform.
+        let dropped = u64::try_from(dropped).unwrap_or(u64::MAX);
+        self.0.refused.fetch_add(dropped, Ordering::AcqRel);
     }
 }
 
-/// Sends what is due, in order, with `send`, and waits with `wait` (for the
-/// time it is given, `None` for ever) until the next. Returns on a stop or when
-/// `wait` fails; the mailbox is dead then, and when the loop unwinds.
-pub(in crate::backend) fn run<T, S: Display, W: Display>(
+/// Sends what is due, in order, with the `send` that `setup` makes, and waits
+/// with its `wait` (for the time it is given, `None` for ever) until the next.
+/// Returns on a stop or when `wait` fails; the mailbox is dead then, and when
+/// the loop unwinds. `setup` runs after the guard that marks the mailbox dead
+/// exists, so a setup that panics ends the sender the same way.
+pub(in crate::backend) fn run<T, S, W, Send, Wait>(
     mailbox: &Mailbox<T>,
-    mut send: impl FnMut(T) -> Result<(), S>,
-    mut wait: impl FnMut(Option<Duration>) -> Result<(), W>,
-) {
+    setup: impl FnOnce() -> (Send, Wait),
+) where
+    S: Display,
+    W: Display,
+    Send: FnMut(T) -> Result<(), S>,
+    Wait: FnMut(Option<Duration>) -> Result<(), W>,
+{
     let _ends = Ends(mailbox);
+    let (mut send, mut wait) = setup();
     loop {
         // The stop is looked at with each event, not once per batch: a long run
         // of due events must not keep a dropped output sending.

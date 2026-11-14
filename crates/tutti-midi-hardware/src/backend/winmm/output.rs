@@ -110,17 +110,18 @@ impl Drop for WinMmOutput {
 /// The sender thread: the loop of [`run`], with winmm for the send and the
 /// timer for the wait.
 fn thread(mut port: Port, shared: &Shared) {
-    let mut bytes = ByteOut::new();
-    run(
-        &shared.mailbox,
-        |ump| {
-            bytes.encode(ump, |wire| match wire {
-                Wire::Short(message) => port.short(message),
-                Wire::Long(message) => port.long(message),
-            })
-        },
-        |time| shared.sleeper.wait(time).map(|_| ()),
-    );
+    run(&shared.mailbox, || {
+        let mut bytes = ByteOut::new();
+        (
+            move |ump| {
+                bytes.encode(ump, |wire| match wire {
+                    Wire::Short(message) => port.short(message),
+                    Wire::Long(message) => port.long(message),
+                })
+            },
+            |time| shared.sleeper.wait(time).map(|_| ()),
+        )
+    });
 }
 
 /// Opens the output at `index`.
