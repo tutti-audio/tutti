@@ -68,8 +68,8 @@
 //! - [`midi1()`](fn@midi1) for the bytes of the wire, a Program Change with a
 //!   bank as its three messages.
 //!
-//! The float scaling is here too: [`u7_to_unit_f32`], [`velocity_to_unit_f32`],
-//! [`value_to_unit_f32`], [`bend_u14_to_signed_f32`], [`bend_to_signed_f32`]
+//! The float scaling is here too: [`velocity_to_unit_f32`],
+//! [`value_to_unit_f32`], [`bend_to_signed_f32`]
 //! and the inverses [`unit_f32_to_velocity`], [`unit_f32_to_value`] and
 //! [`signed_f32_to_bend`], a native value as the `[0, 1]` or `[-1, 1]`
 //! float a DSP node wants. Lossy by design; not the MIDI 1.0 to 2.0 path. A
@@ -150,7 +150,7 @@ pub use mpe::{
     ChannelResponse, ControllerSupport, MpeFeatures, MpeMode, MpeSpec, MpeZone, MpeZoneConfig,
     MpeZones, PitchBendSupport,
 };
-pub use narrow::{narrow_bend, narrow_value, narrow_velocity};
+pub use narrow::{narrow_bend, narrow_note_on_velocity, narrow_value, narrow_velocity};
 pub use narrower::Narrower;
 pub use sensitivity::PitchBendSensitivity;
 pub use smpte::{MtcRate, SmpteFrameRate, SmpteTimecode, UnknownFrameRate};
@@ -160,8 +160,8 @@ pub use tuning::{
     Timing, TuningFrequency, TuningMessage, TuningName,
 };
 pub use unit::{
-    bend_to_signed_f32, bend_u14_to_signed_f32, signed_f32_to_bend, u7_to_unit_f32,
-    unit_f32_to_value, unit_f32_to_velocity, value_to_unit_f32, velocity_to_unit_f32,
+    bend_to_signed_f32, signed_f32_to_bend, unit_f32_to_value, unit_f32_to_velocity,
+    value_to_unit_f32, velocity_to_unit_f32,
 };
 pub use universal::*;
 pub use voice::{

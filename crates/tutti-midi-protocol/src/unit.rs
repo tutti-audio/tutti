@@ -20,12 +20,6 @@
 
 use tutti_ump::{BendValue, ControlValue, NoteVelocity};
 
-/// 7-bit value (0-127) → `[0.0, 1.0]`.
-#[inline]
-pub fn u7_to_unit_f32(v: u8) -> f32 {
-    f32::from(v) / 127.0
-}
-
 /// A MIDI 2.0 velocity → `[0.0, 1.0]`.
 #[inline]
 pub fn velocity_to_unit_f32(v: NoteVelocity) -> f32 {
@@ -36,12 +30,6 @@ pub fn velocity_to_unit_f32(v: NoteVelocity) -> f32 {
 #[inline]
 pub fn value_to_unit_f32(v: ControlValue) -> f32 {
     (v.get() as f64 / u32::MAX as f64) as f32
-}
-
-/// 14-bit pitch bend (center 8192) → `[-1.0, 1.0]`.
-#[inline]
-pub fn bend_u14_to_signed_f32(v: u16) -> f32 {
-    (f32::from(v) - 8192.0) / 8192.0
 }
 
 /// A MIDI 2.0 pitch bend (centre [`BendValue::CENTER`]) → `[-1.0, 1.0]`.

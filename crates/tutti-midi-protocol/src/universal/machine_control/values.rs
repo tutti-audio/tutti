@@ -67,55 +67,10 @@ wire_enum! {
     }
 }
 
-/// A fraction of a frame in hundredths, `0` to `99` (RP-013 p.8).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct MmcSubframes(u8);
-
-/// A subframe count of 100 or more.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{0} is not a subframe count (0 to 99)")]
-pub struct NotMmcSubframes(pub u8);
-
-impl MmcSubframes {
-    /// The count `raw`, or `None` from 100 up.
-    #[must_use]
-    pub const fn new(raw: u8) -> Option<Self> {
-        if raw < 100 { Some(Self(raw)) } else { None }
-    }
-
-    /// The count for a literal or a constant.
-    ///
-    /// # Panics
-    ///
-    /// From 100 up; in a `const` that is a compile error.
-    #[must_use]
-    #[track_caller]
-    pub const fn of(raw: u8) -> Self {
-        match Self::new(raw) {
-            Some(count) => count,
-            None => panic!("a subframe count is 0 to 99"),
-        }
-    }
-
-    /// The count in hundredths of a frame.
-    #[must_use]
-    pub const fn get(self) -> u8 {
-        self.0
-    }
-}
-
-impl From<MmcSubframes> for u8 {
-    fn from(count: MmcSubframes) -> Self {
-        count.0
-    }
-}
-
-impl TryFrom<u8> for MmcSubframes {
-    type Error = NotMmcSubframes;
-
-    fn try_from(raw: u8) -> Result<Self, NotMmcSubframes> {
-        Self::new(raw).ok_or(NotMmcSubframes(raw))
-    }
+tutti_types::ranged! {
+    /// A fraction of a frame in hundredths, `0` to `99` (RP-013 p.8).
+    #[derive(Eq, Hash)]
+    MmcSubframes(u8), NotMmcSubframes, "a subframe count (0 to 99)", |raw| raw < 100
 }
 
 /// The hours, minutes, seconds and frames of a time code with the flags that

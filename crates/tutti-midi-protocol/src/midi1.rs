@@ -3,10 +3,7 @@
 
 use tutti_ump::{Message, Midi1Bytes, U7, Ump, Voice1, Voice2};
 
-use crate::{narrow_bend, narrow_value, narrow_velocity};
-
-/// The velocity a Note On narrows to when the shift leaves 0.
-const NOTE_ON_FLOOR: U7 = U7::of(1);
+use crate::{narrow_bend, narrow_note_on_velocity, narrow_value, narrow_velocity};
 
 /// Why a MIDI 2.0 channel voice message has no single MIDI 1.0 message
 /// ([`narrow`]'s refusal): the kind of message, as M2-104 Appendix D.2 groups
@@ -46,7 +43,7 @@ pub fn narrow(voice: Voice2) -> Result<Voice1, NoMidi1Form> {
     Ok(match voice {
         Voice2::NoteOn { note, velocity, .. } => Voice1::NoteOn {
             note,
-            velocity: narrow_velocity(velocity).max(NOTE_ON_FLOOR),
+            velocity: narrow_note_on_velocity(velocity),
         },
         Voice2::NoteOff { note, velocity, .. } => Voice1::NoteOff {
             note,

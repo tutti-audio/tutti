@@ -1110,3 +1110,16 @@ mod machine_control {
         assert_eq!(at(86_400.0), None);
     }
 }
+
+/// RP-013 p.8: a subframe count is hundredths of a frame, 0 to 99.
+#[test]
+fn a_subframe_count_keeps_the_range_contract() {
+    use tutti_midi_protocol::MmcSubframes;
+    tutti_fixtures::check_range_contract(&tutti_fixtures::RangeContract {
+        new: MmcSubframes::new,
+        get: MmcSubframes::get,
+        of: Some(MmcSubframes::of),
+        valid: &[0, 50, 99],
+        invalid: &[100, 127, 255],
+    });
+}
