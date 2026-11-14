@@ -1,7 +1,7 @@
 //! The values MIDI Machine Control commands and information fields are made
 //! of: time code, speeds, track bitmaps, user bits and names (RP-013 pp.8 to 12).
 
-use tutti_ump::{U4, U7};
+use tutti_ump::{U4, U7, first_non_seven_bit};
 
 use super::MmcBytes;
 use tutti_types::Seconds;
@@ -552,7 +552,7 @@ impl MmcTrackBitmap {
     pub fn from_bytes(wire: &[u8]) -> Option<Self> {
         let len = u8::try_from(wire.len()).ok()?;
         if wire.len() > MMC_MAX_TRACK_BITMAP_BYTES
-            || wire.iter().any(|b| *b >= 0x80)
+            || first_non_seven_bit(wire).is_some()
             || wire.first().is_some_and(|b| b & 0x02 != 0)
         {
             return None;
@@ -690,60 +690,14 @@ impl MmcName {
     }
 }
 
-/// A procedure or event name: `00` to `7E` (`7F` is reserved,
-/// RP-013 pp.34 to 38).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct MmcSlot(U7);
-
-/// A `7F`, which is no procedure's or event's name.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("7F is reserved, not a procedure or event name")]
-pub struct NotMmcSlot;
-
-impl MmcSlot {
-    /// The slot `id`, or `None` for `7F`.
-    #[must_use]
-    pub const fn new(id: U7) -> Option<Self> {
-        if id.get() == 0x7F {
-            None
-        } else {
-            Some(Self(id))
-        }
-    }
-
-    /// The slot for a literal or a constant.
-    ///
-    /// # Panics
-    ///
-    /// For `7F`; in a `const` that is a compile error.
-    #[must_use]
-    #[track_caller]
-    pub const fn of(id: u8) -> Self {
-        match Self::new(U7::of(id)) {
-            Some(slot) => slot,
-            None => panic!("7F is reserved"),
-        }
-    }
-
-    /// The name as its 7-bit byte.
-    #[must_use]
-    pub const fn get(self) -> U7 {
-        self.0
-    }
-}
-
-impl From<MmcSlot> for U7 {
-    fn from(slot: MmcSlot) -> Self {
-        slot.0
-    }
-}
-
-impl TryFrom<U7> for MmcSlot {
-    type Error = NotMmcSlot;
-
-    fn try_from(id: U7) -> Result<Self, NotMmcSlot> {
-        Self::new(id).ok_or(NotMmcSlot)
-    }
+tutti_types::ranged! {
+    /// A procedure or event name: `00` to `7E` (`7F` is reserved,
+    /// RP-013 pp.34 to 38).
+    #[derive(Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    MmcSlot(u8), NotMmcSlot, "a procedure or event name (00 to 7E, 7F is reserved)",
+    |raw| raw <= 0x7E
 }
 
 /// One slot or all of them: `7F` selects every procedure, event or group.
@@ -769,7 +723,7 @@ impl MmcFragment {
     /// [`MAX`](Self::MAX).
     #[must_use]
     pub fn new(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() > Self::MAX || bytes.iter().any(|b| *b >= 0x80) {
+        if bytes.len() > Self::MAX || first_non_seven_bit(bytes).is_some() {
             return None;
         }
         MmcBytes::from_slice(bytes).map(Self)

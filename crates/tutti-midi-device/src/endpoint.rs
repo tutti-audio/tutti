@@ -493,7 +493,9 @@ impl Endpoint {
     /// - Endpoint Discovery (§7.1.1): one reply for each filter bit set, in
     ///   the order Endpoint Info, Device Identity, Endpoint Name, Product
     ///   Instance Id, Stream Configuration Notification. A reply for a part
-    ///   the Endpoint does not have (no identity, no name) is left out.
+    ///   the Endpoint does not have (no identity, no name) is left out. A name
+    ///   that is empty is answered with one Complete message of zeros: each
+    ///   Filter bit set is owed a reply (M2-104 section 7.1.1).
     /// - Function Block Discovery (§7.1.7): Function Block Info (§7.1.8) for
     ///   the block asked for, or for every known block for `0xFF`, then, if
     ///   asked, each Function Block Name (§7.1.9). A number above 31, or of a

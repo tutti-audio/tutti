@@ -113,7 +113,7 @@
 //!
 //! [`PitchBendSensitivity`] is the 7.25 fixed-point range of RPN #00/07 (M2-104
 //! section 7.4.13), and also the range of RPN #00/00, whose data is whole
-//! semitones and cents ([`RegisteredData`], M2-104 section 7.4.7.1): the one
+//! semitones and cents ([`RegisteredData`](tutti_ump::RegisteredData), M2-104 section 7.4.7.1): the one
 //! value type here that is not a function converts between the two.
 //!
 //! **One input type at the edge:** a packet is a [`Ump`](tutti_ump::Ump), and
@@ -154,7 +154,7 @@ pub use mpe::{
 };
 pub use narrow::{narrow_bend, narrow_note_on_velocity, narrow_value, narrow_velocity};
 pub use narrower::Narrower;
-pub use sensitivity::{PitchBendSensitivity, RegisteredData};
+pub use sensitivity::PitchBendSensitivity;
 pub use smpte::{MtcRate, SmpteFrameRate, SmpteTimecode, UnknownFrameRate};
 pub use translator::Translator;
 pub use tuning::{

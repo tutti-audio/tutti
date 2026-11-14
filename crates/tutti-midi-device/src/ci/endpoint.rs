@@ -119,7 +119,11 @@ impl EndpointInfo {
         match self {
             Self::ProductInstanceId(id) => {
                 let text = id.get().as_str().as_bytes();
-                out.extend(U14::masked(text.len() as u16).to_le7());
+                out.extend(
+                    U14::from_len(text.len())
+                        .expect("an Instance Id is 42 bytes at most")
+                        .to_le7(),
+                );
                 out.extend(text.iter().copied());
             }
         }

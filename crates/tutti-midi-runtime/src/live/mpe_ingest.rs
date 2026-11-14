@@ -122,9 +122,11 @@ use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_midi_protocol::{
     ChannelResponse, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones, PitchBendSensitivity,
-    RegisteredData,
 };
-use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, Rpn, Ump, Voice2};
+use tutti_ump::{
+    Address, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, RegisteredData, Rpn, Ump,
+    Voice2,
+};
 use tutti_ump::{BendValue, ControlValue};
 
 /// The Registered Controller `rpn` carrying `data` on each channel of `channels`, on `group`

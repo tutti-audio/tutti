@@ -6,7 +6,7 @@ use std::fmt;
 
 use tutti_ump::{Bank, U7};
 
-use super::super::limits::{NotInRange, NotValid, PropertyName, text_type};
+use super::super::limits::{NotValid, PropertyName, text_type};
 use super::super::tree::{PeJson, PeObject};
 
 tutti_types::ranged! {
@@ -329,12 +329,6 @@ impl PeDataError {
 
 impl From<NotValid> for PeDataFault {
     fn from(error: NotValid) -> Self {
-        Self::NotValid(error.what)
-    }
-}
-
-impl<R: fmt::Display + fmt::Debug> From<NotInRange<R>> for PeDataFault {
-    fn from(error: NotInRange<R>) -> Self {
         Self::NotValid(error.what)
     }
 }

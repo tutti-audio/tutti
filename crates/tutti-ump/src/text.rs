@@ -9,8 +9,9 @@ use crate::Form;
 
 /// The packets of `bytes`, `W` bytes each: one `Complete` when it fits, else a
 /// `Start`, any number of `Continue` and an `End`, the last padded with `0x00`.
-/// An empty text is one `Complete` of zeros, the reply a request for a text
-/// that is empty is owed. A packet may end inside a multi-byte character: the
+/// An empty text is one `Complete` of zeros: each Filter bit of an Endpoint
+/// Discovery is owed a reply (M2-104 section 7.1.1), so a text that is empty
+/// is still answered. A packet may end inside a multi-byte character: the
 /// reader joins the bytes before it decodes them. Nothing is allocated.
 ///
 /// ```

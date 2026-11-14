@@ -204,10 +204,16 @@ impl PeSignal {
 
     /// The ACK or NAK that says it, for a message of `transaction`.
     #[must_use]
+    #[allow(
+        clippy::missing_panics_doc,
+        reason = "the `expect`s state widths the types already hold"
+    )]
     pub fn answer(self, transaction: PeTransaction) -> PeAnswer {
         let sub_id2 = u7(transaction.inquiry_sub_id2());
         let detail = |chunk: Option<ChunkNo>| {
-            let [lo, hi] = U14::masked(chunk.map_or(0, ChunkNo::get)).to_le7();
+            let [lo, hi] = U14::new(chunk.map_or(0, ChunkNo::get))
+                .expect("a chunk number is 14 bits")
+                .to_le7();
             [self.request_id().get(), lo, hi, 0, 0].map(u7)
         };
         let ack = |code: U7, data: u8, chunk| {

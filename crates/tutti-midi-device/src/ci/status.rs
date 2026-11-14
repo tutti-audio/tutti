@@ -80,7 +80,9 @@ macro_rules! status_message {
                 // The length is a 14-bit field; the text of a message we hold
                 // is at most 103 bytes, and one read from a peer fits it.
                 let len = text.len().min(0x3FFF);
-                out.extend(U14::masked(len as u16).to_le7());
+                out.extend(U14::from_len(len)
+                        .expect("the length is held to 14 bits above")
+                        .to_le7());
                 out.extend(text.into_iter().take(len));
             }
 

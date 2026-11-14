@@ -118,8 +118,7 @@ impl Controllers {
     /// one the rest are not tried (it is full) but each is owed and counted.
     pub(crate) fn lift_all(&mut self, out: &mut EventWriter<'_>, at: Offset) {
         let mut full = false;
-        for (i, state) in self.lanes.iter_mut().enumerate() {
-            let lane = Lane::from_index(i).expect("a lane");
+        for (lane, state) in Lane::all().zip(self.lanes.iter_mut()) {
             for bit in 0..=BEND {
                 let (held, owed) = (*state & (1 << bit) != 0, *state & (0x100 << bit) != 0);
                 if !held {
@@ -156,8 +155,7 @@ impl Controllers {
         group: Option<MidiGroup>,
         mut accept: impl FnMut(Ump) -> bool,
     ) -> bool {
-        for (i, state) in self.lanes.iter_mut().enumerate() {
-            let lane = Lane::from_index(i).expect("a lane");
+        for (lane, state) in Lane::all().zip(self.lanes.iter_mut()) {
             if group.is_some_and(|g| lane.address().group != g) {
                 continue;
             }
@@ -188,8 +186,7 @@ impl Controllers {
         }
         let mut full = false;
         let mut left = false;
-        for (i, state) in self.lanes.iter_mut().enumerate() {
-            let lane = Lane::from_index(i).expect("a lane");
+        for (lane, state) in Lane::all().zip(self.lanes.iter_mut()) {
             for bit in 0..=BEND {
                 if *state & (0x100 << bit) == 0 {
                     continue;

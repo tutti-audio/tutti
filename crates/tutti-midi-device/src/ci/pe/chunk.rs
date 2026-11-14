@@ -274,14 +274,34 @@ impl PeChunk {
     /// The fields from the Request ID to the Property Data, as they follow the
     /// destination MUID.
     #[must_use]
+    #[allow(
+        clippy::missing_panics_doc,
+        reason = "the `expect`s state widths the types already hold"
+    )]
     pub fn encode_fields(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.sysex_len() - MESSAGE_OVERHEAD + 9);
         out.push(self.request_id.get());
-        out.extend(U14::masked(self.header.len() as u16).to_le7());
+        out.extend(
+            U14::from_len(self.header.len())
+                .expect("`new` holds the header to 14 bits")
+                .to_le7(),
+        );
         out.extend(&self.header);
-        out.extend(U14::masked(self.total.wire()).to_le7());
-        out.extend(U14::masked(self.position.wire()).to_le7());
-        out.extend(U14::masked(self.data.len() as u16).to_le7());
+        out.extend(
+            U14::new(self.total.wire())
+                .expect("a chunk count is 14 bits")
+                .to_le7(),
+        );
+        out.extend(
+            U14::new(self.position.wire())
+                .expect("a chunk position is 14 bits")
+                .to_le7(),
+        );
+        out.extend(
+            U14::from_len(self.data.len())
+                .expect("`new` holds the data to 14 bits")
+                .to_le7(),
+        );
         out.extend(&self.data);
         out
     }

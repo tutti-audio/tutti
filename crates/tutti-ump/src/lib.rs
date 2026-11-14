@@ -96,7 +96,7 @@ pub use field::{
 pub use flex_text::{
     FlexText, FlexTextAssembler, FlexTextPackets, FlexTextStep, flex_text_packets,
 };
-pub use held_keys::{KeyBitset, Lane};
+pub use held_keys::{KeyBitset, Lane, LaneSet};
 pub use manufacturer::{ManufacturerId, NotManufacturerId};
 pub use message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BlockFilter, BlockSelect,
@@ -115,7 +115,7 @@ pub use mixed_data::{
 };
 pub use note_id::NoteId;
 pub use note_velocity::NoteVelocity;
-pub use rpn::Rpn;
+pub use rpn::{RegisteredData, Rpn};
 pub use sysex::{
     SYSEX7_MAX_PAYLOAD, Sysex7Packets, SysexAssembler, SysexError, SysexMessage, SysexRef,
     SysexStep,

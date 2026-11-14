@@ -65,6 +65,7 @@ fn serde_carries_the_bare_bits() {
 /// **RPN #00/00's data is whole semitones then cents** (M2-104 section 7.4.7.1,
 /// M2-115 section 4.1): 2 semitones 50 cents is 2.5 semitones, not the 2.39 the
 /// same word is as a binary fraction (50 / 128).
+/// Spec: m2-104/7.4.7.1#1
 #[test]
 fn channel_data_is_semitones_and_cents() {
     let data = RegisteredData::new(U7::of(2), U7::of(50));
@@ -82,6 +83,7 @@ fn channel_data_is_semitones_and_cents() {
 
 /// The cents field is hundredths of a semitone, so every (semitones, cents)
 /// pair with cents below 100 comes back from its sensitivity.
+/// Spec: m2-104/7.4.7.1#1
 #[test]
 fn channel_data_round_trips_every_cent() {
     for semitones in 0..=127 {
@@ -101,17 +103,4 @@ fn channel_data_saturates_at_127_semitones_99_cents() {
     assert_eq!((top.msb().get(), top.lsb().get()), (127, 99));
     let whole = PitchBendSensitivity::of(48).to_channel_data();
     assert_eq!((whole.msb().get(), whole.lsb().get()), (48, 0));
-}
-
-/// The two fields are the top 14 bits, and the 18 bits under them are ignored.
-#[test]
-fn registered_data_reads_the_top_fourteen_bits() {
-    let data = RegisteredData::from_word(0xFFFF_FFFF);
-    assert_eq!((data.msb().get(), data.lsb().get()), (127, 127));
-    assert_eq!(data.fourteen(), U14::MAX);
-    assert_eq!(
-        RegisteredData::from_fourteen(U14::of(0x2001)).to_word(),
-        0x2001 << 18
-    );
-    assert_eq!(RegisteredData::from_word(0x0003_FFFF).to_word(), 0);
 }

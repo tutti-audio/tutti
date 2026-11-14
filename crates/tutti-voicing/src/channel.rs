@@ -15,10 +15,10 @@
 //! per-channel controller state, so it can be handed on whole (a SoundFont swap
 //! keeps what a performer set, and takes a new font).
 
-use tutti_midi_protocol::{RegisteredData, signed_f32_to_bend, unit_f32_to_value};
+use tutti_midi_protocol::{signed_f32_to_bend, unit_f32_to_value};
 use tutti_types::{Cents, Pan, Seconds, Semitones};
 use tutti_ump::ControlValue;
-use tutti_ump::{CCNumber, NoteNumber, Rpn, U7, U14, Voice2};
+use tutti_ump::{CCNumber, NoteNumber, RegisteredData, Rpn, U7, U14, Voice2};
 
 /// What a full Modulation Wheel spans until RPN 5 says otherwise: General MIDI
 /// 2 section 3.4.4, default 00H/40H (+/-50 cents) (MSB semitones, LSB

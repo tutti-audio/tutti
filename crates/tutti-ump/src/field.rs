@@ -166,6 +166,17 @@ impl U14 {
         [(self.0 & 0x7F) as u8, (self.0 >> 7) as u8]
     }
 
+    /// The value of a length, or `None` above 14 bits.
+    #[inline]
+    #[must_use]
+    pub const fn from_len(len: usize) -> Option<Self> {
+        if len <= Self::MAX.0 as usize {
+            Some(Self(len as u16))
+        } else {
+            None
+        }
+    }
+
     /// The value of two 7-bit wire bytes, least significant first, or `None`
     /// when a byte has its top bit set.
     #[inline]
@@ -189,6 +200,17 @@ impl U28 {
             ((self.0 >> 14) & 0x7F) as u8,
             (self.0 >> 21) as u8,
         ]
+    }
+
+    /// The value of a length, or `None` above 28 bits.
+    #[inline]
+    #[must_use]
+    pub const fn from_len(len: usize) -> Option<Self> {
+        if len <= Self::MAX.0 as usize {
+            Some(Self(len as u32))
+        } else {
+            None
+        }
     }
 
     /// The value of four 7-bit wire bytes, least significant first, or `None`
@@ -308,6 +330,14 @@ mod tests {
             bytes[at] = 0x80;
             assert_eq!(U28::from_le7(bytes), None);
         }
+    }
+
+    #[test]
+    fn a_length_is_refused_above_the_width() {
+        assert_eq!(U14::from_len(0x3FFF), Some(U14::MAX));
+        assert_eq!(U14::from_len(0x4000), None);
+        assert_eq!(U28::from_len(0x0FFF_FFFF), Some(U28::MAX));
+        assert_eq!(U28::from_len(0x1000_0000), None);
     }
 
     #[test]

@@ -7,7 +7,7 @@
 //! the injection path that flushes a vanished delay. Nodes know nothing of
 //! this.
 //!
-//! The set is a bitset over the 16-bit [`Key`], fixed at 8 KiB, allocated when
+//! The set is a bitset over the 16-bit [`Key`](tutti_ump::Key), fixed at 8 KiB, allocated when
 //! a plan is applied and never grown. A node's op writes only its own unit's
 //! sets, so a parallel block needs no new claim.
 //!
@@ -16,55 +16,38 @@
 //! replacement: past about 72 held keys (what a block's slot takes) it can end a
 //! note the new unit started on the same key.
 
-use tutti_ump::{Address, Key, KeyEvent, Protocol, Ump};
+use tutti_ump::{Address, KeyBitset, KeyEvent, Lane, LaneSet, Protocol, Ump};
 
 use crate::event::{Event, EventKind};
 use crate::time::Offset;
 
-const WORDS: usize = 1 << 10;
-const PEDALS: usize = 512;
-
 #[derive(Clone, Debug)]
 pub(crate) struct Held {
-    keys: Box<[u64; WORDS]>,
-    live: u32,
-    /// Sustain pedals down, by `m2 * 256 + lane`.
-    pedals: [u64; PEDALS / 64],
+    keys: Box<KeyBitset>,
+    /// Sustain pedals down.
+    pedals: LaneSet,
 }
 
 impl Held {
     pub(crate) fn new() -> Self {
         Self {
-            keys: Box::new([0; WORDS]),
-            live: 0,
-            pedals: [0; PEDALS / 64],
+            keys: Box::default(),
+            pedals: LaneSet::new(),
         }
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.live == 0 && self.pedals == [0; PEDALS / 64]
-    }
-
-    #[inline]
-    fn set(&mut self, k: Key, on: bool) {
-        let (w, b) = (usize::from(k.index() >> 6), 1u64 << (k.index() & 63));
-        let was = self.keys[w] & b != 0;
-        if on && !was {
-            self.keys[w] |= b;
-            self.live += 1;
-        } else if !on && was {
-            self.keys[w] &= !b;
-            self.live -= 1;
-        }
+        self.keys.is_empty() && self.pedals.is_empty()
     }
 
     fn pedal(&mut self, protocol: Protocol, address: Address, down: bool) {
-        let i = usize::from(protocol == Protocol::Midi2) * 256 + address.index();
-        let (w, b) = (i >> 6, 1u64 << (i & 63));
+        let Some(lane) = Lane::new(protocol, address) else {
+            return;
+        };
         if down {
-            self.pedals[w] |= b;
+            self.pedals.insert(lane);
         } else {
-            self.pedals[w] &= !b;
+            self.pedals.remove(lane);
         }
     }
 
@@ -74,8 +57,12 @@ impl Held {
         for e in events {
             let EventKind::Midi(u) = e.kind else { continue };
             match u.key_event() {
-                Some(KeyEvent::On(k)) => self.set(k, true),
-                Some(KeyEvent::Off(k)) => self.set(k, false),
+                Some(KeyEvent::On(k)) => {
+                    self.keys.insert(k);
+                }
+                Some(KeyEvent::Off(k)) => {
+                    self.keys.remove(k);
+                }
                 Some(KeyEvent::Sustain {
                     protocol,
                     address,
@@ -95,20 +82,14 @@ impl Held {
 
     /// Forget everything held.
     fn clear(&mut self) {
-        self.keys.fill(0);
-        self.live = 0;
-        self.pedals = [0; PEDALS / 64];
+        self.keys.clear();
+        self.pedals.clear();
     }
 
     /// Add what `other` holds.
     pub(crate) fn merge(&mut self, other: &Held) {
-        for (a, b) in self.keys.iter_mut().zip(other.keys.iter()) {
-            *a |= b;
-        }
-        self.live = self.keys.iter().map(|w| w.count_ones()).sum();
-        for (a, b) in self.pedals.iter_mut().zip(other.pedals.iter()) {
-            *a |= b;
-        }
+        self.keys.union_with(&other.keys);
+        self.pedals.union_with(&other.pedals);
     }
 
     /// Write the close of what is held ahead of `events` (at offset 0, so the
@@ -127,28 +108,24 @@ impl Held {
     pub(crate) fn drain_into(&mut self, events: &mut Vec<Event>) -> usize {
         let start = events.len();
         let room = |e: &Vec<Event>| e.len() < e.capacity();
-        for i in 0..PEDALS {
-            let (w, b) = (i >> 6, 1u64 << (i & 63));
-            if self.pedals[w] & b != 0 {
-                if !room(events) {
-                    break;
-                }
-                events.extend(pedal_up(i).map(Self::event));
-                self.pedals[w] &= !b;
+        for lane in Lane::all() {
+            if !self.pedals.contains(lane) {
+                continue;
             }
+            if !room(events) {
+                break;
+            }
+            events.extend(pedal_up(lane).map(Self::event));
+            self.pedals.remove(lane);
         }
-        'keys: for w in 0..WORDS {
-            while self.keys[w] != 0 {
-                if !room(events) {
-                    break 'keys;
-                }
-                let b = self.keys[w].trailing_zeros() as usize;
-                self.keys[w] &= self.keys[w] - 1;
-                self.live -= 1;
-                events.push(Self::event(Ump::note_off(Key::from_index(
-                    (w * 64 + b) as u16,
-                ))));
+        let mut next = 0;
+        while let Some(key) = self.keys.next_from(next) {
+            if !room(events) {
+                break;
             }
+            next = u32::from(key.index()) + 1;
+            self.keys.remove(key);
+            events.push(Self::event(Ump::note_off(key)));
         }
         events.len() - start
     }
@@ -167,34 +144,20 @@ impl Held {
     }
 
     fn for_each_close(&self, mut f: impl FnMut(Event)) {
-        let event = |ump| Event {
-            offset: Offset::ZERO,
-            kind: EventKind::Midi(ump),
-        };
-        for i in (0..PEDALS).filter(|&i| self.pedals[i >> 6] & (1u64 << (i & 63)) != 0) {
-            if let Some(up) = pedal_up(i) {
-                f(event(up));
+        for lane in self.pedals.iter() {
+            if let Some(up) = pedal_up(lane) {
+                f(Self::event(up));
             }
         }
-        for (w, &word) in self.keys.iter().enumerate() {
-            let mut bits = word;
-            while bits != 0 {
-                let b = bits.trailing_zeros() as usize;
-                bits &= bits - 1;
-                f(event(Ump::note_off(Key::from_index((w * 64 + b) as u16))));
-            }
+        for key in self.keys.iter() {
+            f(Self::event(Ump::note_off(key)));
         }
     }
 }
 
-/// The sustain-pedal-up that closes pedal slot `i` (`protocol * 256 + address`).
-fn pedal_up(i: usize) -> Option<Ump> {
-    let protocol = if i >= 256 {
-        Protocol::Midi2
-    } else {
-        Protocol::Midi1
-    };
-    Ump::sustain_up(protocol, Address::from_index(i & 255)?)
+/// The sustain-pedal-up that closes `lane`'s pedal.
+fn pedal_up(lane: Lane) -> Option<Ump> {
+    Ump::sustain_up(lane.protocol(), lane.address())
 }
 
 /// One table per event output port of a unit; `None` for a port that carries

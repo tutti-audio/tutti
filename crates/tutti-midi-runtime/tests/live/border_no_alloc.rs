@@ -120,7 +120,8 @@ fn bend_range(device: &mut EventInletWriter, block: u64) {
             midi::registered(
                 MidiChannel::of(2),
                 tutti_ump::Rpn::PITCH_BEND_SENSITIVITY,
-                tutti_midi_protocol::PitchBendSensitivity::of(12).to_rpn_bits(),
+                tutti_ump::RegisteredData::new(tutti_ump::U7::of(12), tutti_ump::U7::of(0))
+                    .to_word(),
             ),
         )
         .unwrap();

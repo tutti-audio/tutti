@@ -217,7 +217,9 @@ impl ProfileChannels {
     }
 
     pub(crate) const fn to_wire(self) -> [u8; 2] {
-        U14::masked(self.get()).to_le7()
+        U14::new(self.get())
+            .expect("a Channel count is 14 bits")
+            .to_le7()
     }
 }
 
@@ -286,7 +288,11 @@ impl ProfileLists {
     pub(crate) fn encode_body(&self, out: &mut impl Extend<u8>) {
         for list in [&self.enabled, &self.disabled] {
             // `new` holds each length to 14 bits.
-            out.extend(U14::masked(list.len() as u16).to_le7());
+            out.extend(
+                U14::from_len(list.len())
+                    .expect("`new` holds each list to 14 bits of length")
+                    .to_le7(),
+            );
             for id in list {
                 out.extend(id.to_bytes());
             }

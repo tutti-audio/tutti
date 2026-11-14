@@ -59,11 +59,9 @@ use tutti_midi_protocol::{
 };
 use tutti_types::{Amplitude, Seconds, Semitones};
 use tutti_ump::{
-    Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, Rpn, U7,
-    Ump, Voice2,
+    Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteId, NoteNumber,
+    RegisteredData, Rpn, U7, Ump, Voice2,
 };
-
-use tutti_midi_protocol::RegisteredData;
 
 use crate::channel::{Bend, ChannelState};
 use crate::master::{Master, MasterGain};

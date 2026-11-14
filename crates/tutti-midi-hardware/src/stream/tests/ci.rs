@@ -1674,13 +1674,7 @@ fn a_channel_count_is_at_least_one_and_fits_fourteen_bits() {
         valid: &[1, 3, 16_383],
         invalid: &[0, 16_384, u16::MAX],
     });
-    assert_eq!(ChannelCount::new(0), None);
     assert_eq!(ChannelCount::new(1), Some(ChannelCount::ONE));
-    assert_eq!(
-        ChannelCount::new(16_383).map(ChannelCount::get),
-        Some(16_383)
-    );
-    assert_eq!(ChannelCount::new(16_384), None);
 }
 
 use crate::{ProcessChange, ReportError};

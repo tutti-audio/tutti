@@ -850,14 +850,13 @@ fn clearing_a_slots_profiles_returns_it_to_the_rules_it_had() {
 #[test]
 fn a_host_set_modes_reset_goes_ahead_of_the_blocks_events() {
     use tutti_fixtures::midi::BendRanges;
-    use tutti_midi_protocol::PitchBendSensitivity;
-    use tutti_ump::Rpn;
+    use tutti_ump::{RegisteredData, Rpn, U7};
     let range = at(
         0,
         midi::registered(
             MidiChannel::of(2),
             Rpn::PITCH_BEND_SENSITIVITY,
-            PitchBendSensitivity::of(12).to_rpn_bits(),
+            RegisteredData::new(U7::of(12), U7::of(0)).to_word(),
         ),
     );
     let wire = Script::new(vec![vec![range]]);

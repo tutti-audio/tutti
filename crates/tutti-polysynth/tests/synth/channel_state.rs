@@ -20,7 +20,7 @@ use tutti_polysynth::{
     Adsr, AllocationStrategy, OscillatorType, PolySynth, SynthConfig, VoiceMode,
 };
 use tutti_types::{Amplitude, Seconds, Semitones};
-use tutti_ump::{CCNumber, MidiChannel, Rpn, Ump};
+use tutti_ump::{CCNumber, MidiChannel, RegisteredData, Rpn, Ump};
 
 const SR: f64 = 48_000.0;
 /// The envelope's release, seconds.
@@ -78,7 +78,7 @@ fn sensitivity(channel: u8, semitones: u8) -> Ump {
     midi::registered(
         MidiChannel::of(channel),
         Rpn::PITCH_BEND_SENSITIVITY,
-        PitchBendSensitivity::of(semitones).to_rpn_bits(),
+        RegisteredData::new(U7::of(semitones), U7::of(0)).to_word(),
     )
 }
 

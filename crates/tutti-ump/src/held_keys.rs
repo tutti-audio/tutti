@@ -29,6 +29,11 @@ impl Lane {
         Self(bits & 0x1ff)
     }
 
+    /// Every lane, in table order.
+    pub fn all() -> impl Iterator<Item = Lane> {
+        (0..Self::COUNT as u16).map(Lane)
+    }
+
     /// The lane at table position `index`, or `None` from [`COUNT`](Self::COUNT) up.
     #[must_use]
     pub const fn from_index(index: usize) -> Option<Self> {
@@ -67,6 +72,72 @@ impl Lane {
 }
 
 const WORDS: usize = 1 << 10;
+
+/// A set of [`Lane`]s: one bit for each of the 512, kept in lane order.
+///
+/// ```
+/// use tutti_ump::{Address, Lane, LaneSet, MidiChannel, Protocol};
+///
+/// let lane = Lane::new(Protocol::Midi2, Address::first(MidiChannel::of(3))).unwrap();
+/// let mut down = LaneSet::new();
+/// assert!(down.insert(lane));
+/// assert_eq!(down.iter().collect::<Vec<_>>(), [lane]);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct LaneSet([u64; Lane::COUNT / 64]);
+
+impl LaneSet {
+    /// The empty set.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self([0; Lane::COUNT / 64])
+    }
+
+    /// Adds `lane`; whether it was not there.
+    pub fn insert(&mut self, lane: Lane) -> bool {
+        let (word, bit) = (lane.index() >> 6, 1u64 << (lane.index() & 63));
+        let added = self.0[word] & bit == 0;
+        self.0[word] |= bit;
+        added
+    }
+
+    /// Removes `lane`; whether it was there.
+    pub fn remove(&mut self, lane: Lane) -> bool {
+        let (word, bit) = (lane.index() >> 6, 1u64 << (lane.index() & 63));
+        let removed = self.0[word] & bit != 0;
+        self.0[word] &= !bit;
+        removed
+    }
+
+    /// Whether `lane` is in the set.
+    #[must_use]
+    pub fn contains(&self, lane: Lane) -> bool {
+        self.0[lane.index() >> 6] & (1u64 << (lane.index() & 63)) != 0
+    }
+
+    /// Whether no lane is in the set.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0 == [0; Lane::COUNT / 64]
+    }
+
+    /// Empties the set.
+    pub fn clear(&mut self) {
+        self.0 = [0; Lane::COUNT / 64];
+    }
+
+    /// Adds every lane of `other`.
+    pub fn union_with(&mut self, other: &Self) {
+        for (a, b) in self.0.iter_mut().zip(&other.0) {
+            *a |= b;
+        }
+    }
+
+    /// The lanes, in lane order.
+    pub fn iter(&self) -> impl Iterator<Item = Lane> + '_ {
+        Lane::all().filter(|&lane| self.contains(lane))
+    }
+}
 
 /// A set of [`Key`]s: one bit for each of the 65536 packed keys, 8 KiB, kept in
 /// key order. It holds no allocation: a caller that wants it off the stack boxes
@@ -121,13 +192,6 @@ impl KeyBitset {
         self.words[word] &= !bit;
         self.len -= u32::from(removed);
         removed
-    }
-
-    /// Whether `key` is in the set.
-    #[must_use]
-    pub fn contains(&self, key: Key) -> bool {
-        let (word, bit) = Self::place(key);
-        self.words[word] & bit != 0
     }
 
     /// How many keys are in the set.
@@ -213,7 +277,6 @@ mod tests {
         let k = key(Protocol::Midi1, 17, 60);
         assert!(set.insert(k));
         assert!(!set.insert(k));
-        assert!(set.contains(k));
         assert_eq!(set.len(), 1);
         assert!(set.remove(k));
         assert!(!set.remove(k));
@@ -271,6 +334,23 @@ mod tests {
         assert_eq!(a.len(), 2);
         a.clear();
         assert!(a.is_empty());
+    }
+
+    #[test]
+    fn a_lane_set_holds_lanes_in_order_and_unions() {
+        let lane = |i| Lane::from_index(i).unwrap();
+        let (mut a, mut b) = (LaneSet::new(), LaneSet::new());
+        assert!(a.insert(lane(300)));
+        assert!(!a.insert(lane(300)));
+        b.insert(lane(2));
+        b.insert(lane(511));
+        a.union_with(&b);
+        assert_eq!(a.iter().map(Lane::index).collect::<Vec<_>>(), [2, 300, 511]);
+        assert!(a.remove(lane(300)));
+        assert!(!a.remove(lane(300)));
+        a.clear();
+        assert!(a.is_empty());
+        assert_eq!(Lane::all().count(), Lane::COUNT);
     }
 
     #[test]

@@ -57,9 +57,9 @@ pub use pe::{
     ConfirmType, Confirmation, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource,
     DefaultMapNotCc, EntryError, GetStateError, JsonPointer, LinkRole, ListedTwice,
     MAX_LIST_ENTRIES, MediaType, ModeId, NotAChunkNo, NotAPeChannel, NotAPriority, NotARequestId,
-    NotAStateSize, NotAStepCount, NotInRange, NotSignificantBits, NotUnixSeconds, NotValid,
-    NotVendorName, OpaqueBody, PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN, PE_MAX_HEADER_LEN,
-    PE_TIMEOUT, PaginationFault, ParamPath, PartialError, PartialUpdate, PeAction, PeAllCtrlEntry,
+    NotAStateSize, NotAStepCount, NotSignificantBits, NotUnixSeconds, NotValid, NotVendorName,
+    OpaqueBody, PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN, PE_MAX_HEADER_LEN, PE_TIMEOUT,
+    PaginationFault, ParamPath, PartialError, PartialUpdate, PeAction, PeAllCtrlEntry,
     PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx, PeBodyError,
     PeBuffered, PeCall, PeCapabilities, PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList,
     PeChange, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode, PeChunk, PeChunkError,
@@ -233,8 +233,12 @@ impl Muid {
 
     /// The four little-endian 7-bit wire bytes.
     #[must_use]
+    #[allow(
+        clippy::missing_panics_doc,
+        reason = "the `expect`s state widths the types already hold"
+    )]
     pub const fn to_bytes(self) -> [u8; 4] {
-        U28::masked(self.get()).to_le7()
+        U28::new(self.get()).expect("a MUID is 28 bits").to_le7()
     }
 
     /// The MUID of four little-endian 7-bit wire bytes, or `None` for a byte
@@ -257,7 +261,7 @@ pub enum Destination {
 impl Destination {
     fn to_bytes(self) -> [u8; 4] {
         match self {
-            Destination::Broadcast => U28::masked(Muid::BROADCAST_RAW).to_le7(),
+            Destination::Broadcast => U28::of(Muid::BROADCAST_RAW).to_le7(),
             Destination::Muid(muid) => muid.to_bytes(),
         }
     }
@@ -675,6 +679,10 @@ impl CiMessage {
 
     /// Appends the CI byte payload (what [`encode`](Self::encode) returns) to
     /// `out`: a `Vec<u8>`, a `VecDeque`, any collection of bytes.
+    #[allow(
+        clippy::missing_panics_doc,
+        reason = "the `expect`s state widths the types already hold"
+    )]
     pub fn encode_into(&self, out: &mut impl Extend<u8>) {
         let mut header = *self.header();
         // The Device ID of a Process Inquiry message is the one the message or its
@@ -745,14 +753,22 @@ impl CiMessage {
                 out.extend(profile.to_bytes());
                 out.extend([target.get().get()]);
                 // Table 23: 14-bit length, least significant byte first.
-                out.extend(U14::masked(data.as_bytes().len() as u16).to_le7());
+                out.extend(
+                    U14::from_len(data.as_bytes().len())
+                        .expect("Details data holds at most 14 bits of length")
+                        .to_le7(),
+                );
                 out.extend(data.as_bytes().iter().copied());
             }
             CiMessage::PropertyExchange { message, .. } => message.encode_body(out),
             CiMessage::ProfileSpecificData { profile, data, .. } => {
                 out.extend(profile.to_bytes());
                 // Table 28: a 4-byte length of the Profile Specific Data that follows, LSB first.
-                out.extend(U28::masked(data.as_bytes().len() as u32).to_le7());
+                out.extend(
+                    U28::from_len(data.as_bytes().len())
+                        .expect("Specific data holds at most 28 bits of length")
+                        .to_le7(),
+                );
                 out.extend(data.as_bytes().iter().copied());
             }
         }

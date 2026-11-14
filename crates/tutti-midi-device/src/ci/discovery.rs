@@ -153,7 +153,11 @@ impl DiscoveryData {
                 .map(|b| b.get()),
         );
         out.extend(self.categories.bits().to_le_bytes());
-        out.extend(U28::masked(self.max_sysex_size.get()).to_le7());
+        out.extend(
+            U28::new(self.max_sysex_size.get())
+                .expect("a SysEx size is 28 bits")
+                .to_le7(),
+        );
         let Some(path) = self.output_path_id else {
             return;
         };
