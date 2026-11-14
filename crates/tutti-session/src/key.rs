@@ -847,7 +847,7 @@ impl<'g, W: Wire> Connection<'g, W> {
     }
 
     /// Connects at full weight at once: no fade in. The default is a fade in
-    /// over [`EDGE_DECLICK`](tutti_graph::EDGE_DECLICK) frames (256), so a new
+    /// over [`DECLICK`](tutti_graph::DECLICK) (5 ms), so a new
     /// wire never steps into a running sum; `hard` is for a test, an analysis
     /// graph or a wire made before anything is listening. It also stops a
     /// fade-out of an edge this call brought back.

@@ -21,16 +21,11 @@ use std::any::Any;
 use std::sync::Arc;
 
 use tutti_cpal::{AudioHost, DeviceSelector, MONITOR_RING_FRAMES, MicConfig, MicIn, StreamLatency};
-use tutti_graph::{CrossfadeCurve, InletNode, InletRing};
-use tutti_types::{Mint, SampleRate, Samples, Seconds};
+use tutti_graph::{DECLICK, FadeLaw, InletNode, InletRing};
+use tutti_types::{Mint, SampleRate, Samples};
 
 use crate::graph::CrossfadeRefused;
 use crate::{DeviceEvent, Error, Key, Result, Session, SessionEvent};
-
-/// How long a reopened input's new ring takes over from the old one in its
-/// node: the old ring is silent by then (its stream was dropped first), so
-/// this only smooths the step.
-const REOPEN_FADE: Seconds = Seconds(0.01);
 
 /// What [`Session::add_input`] opens: the capture device, which of its inputs,
 /// and how deep the ring that carries them into the graph is.
@@ -371,7 +366,9 @@ impl Session {
             .open(&self.inputs.mic(&input.config), rate)?;
         let node = self.graph.inlet_node(opened.ring)?;
         self.graph
-            .crossfade(input.node, node, REOPEN_FADE, CrossfadeCurve::default())?;
+            // The old ring is silent by now (its stream was dropped first), so
+            // the fade only smooths the step.
+            .crossfade(input.node, node, DECLICK, FadeLaw::default())?;
         input.keep = Some(opened.keep);
         input.lead = opened.lead;
         Ok(())

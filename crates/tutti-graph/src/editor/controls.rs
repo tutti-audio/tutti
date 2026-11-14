@@ -419,8 +419,8 @@ impl Editor {
     /// compiled or sent, so the plan is the same `Arc` and a host may call
     /// this for every click.
     ///
-    /// A change of mode is a crossfade of [`MODE_DECLICK`](crate::MODE_DECLICK)
-    /// frames, counted from the first frame of the block it lands on; see
+    /// A change of mode is a crossfade of [`DECLICK`](crate::DECLICK),
+    /// counted from the first frame of the block it lands on; see
     /// [`NodeMode`] and `src/mode.rs` for what each mode does. A fork starts
     /// every unit steady in the mode the spec holds, with no fade.
     ///

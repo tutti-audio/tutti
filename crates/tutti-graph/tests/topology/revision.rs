@@ -8,8 +8,7 @@
 
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    CrossfadeCurve, Cx, Editor, Fade, Io, Node, ParamIn, ParamRange, Prepare, Shape, Status,
-    Unforkable,
+    Cx, Editor, Fade, FadeLaw, Io, Node, ParamIn, ParamRange, Prepare, Shape, Status, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
 use tutti_types::MaxBlock;
@@ -92,7 +91,7 @@ fn every_edit_moves_the_revision_and_nothing_else_does() {
         ed.replace(
             one,
             Unforkable(Out),
-            Fade::new(Samples(64), CrossfadeCurve::EqualPower),
+            Fade::new(Samples(64), FadeLaw::EqualPower),
         )
         .expect("replaces");
     });
