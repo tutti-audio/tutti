@@ -16,9 +16,9 @@ use tutti_session::{PluginLoadRequest, Session};
 use tutti_types::SampleRate;
 
 /// **A pool thread asks the handle for its state and a parameter while the
-/// main thread runs the session's update.** The answers are real: the state
-/// equals one saved on the main thread, and the parameter is the value written
-/// first.
+/// main thread runs the session's update.** The calls wait for the update
+/// rather than being refused, and the answers are real: the state equals one
+/// saved on the main thread, and the parameter is the value written first.
 fn a_pool_thread_is_answered_while_the_main_thread_updates_the_session() {
     let main = tutti_fixtures::main_thread();
     let mut session = Session::builder()
@@ -49,6 +49,13 @@ fn a_pool_thread_is_answered_while_the_main_thread_updates_the_session() {
             handle.any_thread().parameter_value(id),
         )
     });
+    // The load gave the session a main thread, so the calls wait for an update
+    // rather than answering "unavailable" at once.
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(
+        !pool.is_finished(),
+        "the pool thread was answered before any update ran its work"
+    );
     while !pool.is_finished() {
         let _ = session.update();
         std::thread::sleep(Duration::from_millis(1));

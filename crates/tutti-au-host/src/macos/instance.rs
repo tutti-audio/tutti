@@ -105,10 +105,8 @@ pub struct AuLoaded {
     /// ([`new`](Self::new)) has no bundle, so its origin is an empty path, and
     /// reopening it fails at the `Scanning` stage rather than finding another unit.
     pub(crate) origin: tutti_plugin_types::Origin,
-    /// The collector of this unit's owner, which a reopen gives its new instance.
-    /// A unit made straight from a component has no owner: its collector is gone,
-    /// so work sent to it runs at once on the main thread and is otherwise counted
-    /// ([`MainWork::stranded`](tutti_plugin_types::MainWork::stranded)).
+    /// The collector of this unit's owner, given at construction, which a reopen
+    /// gives its new instance.
     pub(crate) work: MainWorkHandle,
 }
 

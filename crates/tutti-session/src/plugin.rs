@@ -1312,6 +1312,10 @@ impl Session {
         main: MainThreadMarker,
         loaded: PluginLoaded,
     ) -> Result<Key<PluginNode>, BridgeError> {
+        // The session now has a main thread: running its collector here marks it
+        // run, so a pool thread's call on this plugin's handle waits for the next
+        // update instead of being refused as having no main thread.
+        self.main_work.run(main);
         let requested = loaded.plugin;
         let config = loaded.config;
         let Open {
