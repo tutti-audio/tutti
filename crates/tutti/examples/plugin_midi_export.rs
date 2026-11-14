@@ -128,7 +128,10 @@ fn phrase(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
             U7::of(100),
         );
     }
-    MidiFile::smf(SmfFormat::SingleTrack, TPQ, vec![track])?.write(path)?;
+    MidiFile::smf(SmfFormat::SingleTrack, TPQ, vec![track])?
+        .write(path)
+        .replace()
+        .commit()?;
     Ok(())
 }
 

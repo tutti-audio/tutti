@@ -29,6 +29,7 @@ use tutti_ump::{
 };
 
 use crate::MidiFileKind;
+use crate::write::{Existing, FileWrite};
 use crate::{ConfigError, Error, OutOfOrder, Refusal, Result, clip_file, smf};
 
 mod to_clip;
@@ -918,14 +919,17 @@ impl MidiFile {
         Ok(())
     }
 
-    /// Writes [`to_bytes`](Self::to_bytes) to `path`.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Io`] if the write fails; otherwise as [`to_bytes`](Self::to_bytes).
-    pub fn write(&self, path: impl AsRef<Path>) -> Result<()> {
-        std::fs::write(path, self.to_bytes()?)?;
-        Ok(())
+    /// Starts writing [`to_bytes`](Self::to_bytes) to `path`: nothing is written
+    /// until [`FileWrite::commit`]. The bytes are staged in a temporary file
+    /// beside `path` and renamed into place, so a crash leaves no partial file
+    /// under `path`; an existing file is refused unless
+    /// [`replace`](FileWrite::replace) is called.
+    pub fn write<'a>(&'a self, path: impl AsRef<Path>) -> FileWrite<'a> {
+        FileWrite {
+            file: self,
+            path: path.as_ref().to_path_buf(),
+            existing: Existing::Refuse,
+        }
     }
 
     /// Which container this file is.

@@ -789,7 +789,7 @@ fn a_file_reads_and_writes_a_path() {
         vec![track(vec![(0, on(0, 60, 1))])],
     )
     .unwrap();
-    file.write(&path).unwrap();
+    file.write(&path).commit().unwrap();
     assert_eq!(MidiFile::read(&path).unwrap(), file);
     assert!(matches!(
         MidiFile::read(dir.path().join("absent.mid")),

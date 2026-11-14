@@ -1,0 +1,89 @@
+//! Writing a file to a path: staged beside the target, refused over an
+//! existing file unless replaced.
+
+use std::path::Path;
+
+use tutti_midi_file::{Error, MidiFile, SmfFormat};
+
+use crate::common::track;
+
+fn file(tpq: u16) -> MidiFile {
+    MidiFile::smf(SmfFormat::SingleTrack, tpq, vec![track(vec![])]).unwrap()
+}
+
+fn entries(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn a_write_to_a_new_path_creates_exactly_the_files_bytes_and_no_temp() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("a.mid");
+    let f = file(480);
+    f.write(&path).commit().unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), f.to_bytes().unwrap());
+    assert_eq!(entries(dir.path()), ["a.mid"]);
+}
+
+#[test]
+fn a_write_over_an_existing_file_is_exists_and_keeps_the_old_bytes_and_no_temp() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("a.mid");
+    std::fs::write(&path, b"old").unwrap();
+    let err = file(480).write(&path).commit().unwrap_err();
+    assert!(
+        matches!(err, Error::Exists { path: ref p } if *p == path),
+        "{err:?}"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), b"old");
+    assert_eq!(entries(dir.path()), ["a.mid"]);
+}
+
+#[test]
+fn replace_swaps_the_old_file_for_the_new_bytes_and_leaves_no_temp() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("a.mid");
+    std::fs::write(&path, b"old").unwrap();
+    let f = file(96);
+    f.write(&path).replace().commit().unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), f.to_bytes().unwrap());
+    assert_eq!(entries(dir.path()), ["a.mid"]);
+}
+
+#[test]
+fn replace_on_a_new_path_creates_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("a.mid");
+    file(96).write(&path).replace().commit().unwrap();
+    assert!(path.is_file());
+}
+
+#[test]
+fn a_write_into_a_missing_directory_is_an_io_error_and_creates_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("no").join("a.mid");
+    let err = file(96).write(&path).commit().unwrap_err();
+    assert!(matches!(err, Error::Io(_)), "{err:?}");
+    assert!(entries(dir.path()).is_empty());
+}
+
+/// The staged file is created at `0o666` under the umask, as `std::fs::write`
+/// would, not at the temp file's private `0o600`.
+#[cfg(unix)]
+#[test]
+fn a_written_file_has_the_umask_mode_not_the_private_temp_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let reference = dir.path().join("reference");
+    std::fs::write(&reference, b"").unwrap();
+    let expected = std::fs::metadata(&reference).unwrap().permissions().mode();
+    let path = dir.path().join("a.mid");
+    file(96).write(&path).commit().unwrap();
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+    assert_eq!(mode, expected);
+}
