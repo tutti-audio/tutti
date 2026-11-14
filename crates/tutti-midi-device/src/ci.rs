@@ -48,46 +48,47 @@ pub use discovery::{
 };
 pub use endpoint::{CiInstanceId, EndpointInfo, EndpointStatus};
 pub use initiator::{
-    Outcome, PROFILE_TIMEOUT, ProfileAction, ProfileChange, ProfileEntry, ProfileInitiator,
-    ProfileTable, ProfileTarget, Request, RequestError,
+    Outcome, ProfileAction, ProfileChange, ProfileEntry, ProfileInitiator, ProfileTable,
+    ProfileTarget, Request, RequestError,
 };
 pub use pe::{
-    ActionError, BodyLimit, BufferLimit, CallError, CallId, CanSet, CcIndex, ChangeKind, ChunkNo,
-    ChunkPosition, ChunkTotal, ClusterKind, ColumnSource, ConfirmIcon, ConfirmType, Confirmation,
-    CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource, DefaultMapNotCc, EntryError,
-    JsonPointer, LinkRole, ListedTwice, MAX_LIST_ENTRIES, MediaType, ModeId, NotAChunkNo,
-    NotAPeChannel, NotAPriority, NotARequestId, NotAStepCount, NotInRange, NotSignificantBits,
-    NotValid, NotVendorName, OpaqueBody, PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN,
-    PE_MAX_HEADER_LEN, PE_TIMEOUT, PaginationFault, ParamPath, PartialError, PartialUpdate,
-    PeAction, PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx,
-    PeBasicChannelTx, PeBodyError, PeBuffered, PeCall, PeCapabilities, PeCapabilitiesFailure,
-    PeChCtrlEntry, PeChCtrlList, PeChange, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode,
-    PeChunk, PeChunkError, PeCiMessage, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry,
-    PeCtrlMapList, PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo,
-    PeEncoding, PeEndedBy, PeError, PeExpired, PeExtensions, PeExternalSync, PeExtra, PeExtraError,
-    PeFlowControl, PeGet, PeHeader, PeHeaderError, PeHeaderTooLong, PeInitiator, PeJson,
+    ActionError, Arrival, BodyLimit, BufferLimit, CallError, CallId, CanSet, CcIndex, ChangeKind,
+    ChunkNo, ChunkPosition, ChunkTotal, ClusterKind, ColumnSource, CommonState, ConfirmIcon,
+    ConfirmType, Confirmation, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource,
+    DefaultMapNotCc, EntryError, GetStateError, JsonPointer, LinkRole, ListedTwice,
+    MAX_LIST_ENTRIES, MediaType, ModeId, NotAChunkNo, NotAPeChannel, NotAPriority, NotARequestId,
+    NotAStateSize, NotAStepCount, NotInRange, NotSignificantBits, NotUnixSeconds, NotValid,
+    NotVendorName, OpaqueBody, PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN, PE_MAX_HEADER_LEN,
+    PE_TIMEOUT, PaginationFault, ParamPath, PartialError, PartialUpdate, PeAction, PeAllCtrlEntry,
+    PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx, PeBodyError,
+    PeBuffered, PeCall, PeCapabilities, PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList,
+    PeChange, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode, PeChunk, PeChunkError,
+    PeCiMessage, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList,
+    PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding,
+    PeEndedBy, PeError, PeExpired, PeExtensions, PeExternalSync, PeExtra, PeExtraError,
+    PeFlowControl, PeGet, PeHeader, PeHeaderError, PeHeaderTooLong, PeHeld, PeInitiator, PeJson,
     PeJsonError, PeJsonSchema, PeKind, PeLink, PeLocalOn, PeMessage, PeMessageKind, PeMidiMode,
     PeModeEntry, PeModeList, PeNotification, PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry,
     PeProgramList, PeReassembler, PeReassemblyError, PeReassemblyLimits, PeReceived, PeRefused,
     PeReply, PeRequest, PeRequestId, PeResource, PeResourceList, PeResponse, PeSet, PeSetScope,
-    PeSettings, PeSignal, PeStatus, PeStatusClass, PeStep, PeSubscribed, PeSubscription,
-    PeTerminator, PeText, PeTransaction, PeUnreadable, PeUpdateCommand, PeVersion, Priority,
-    PropertyName, PublishError, RequestRefused, ResIdUse, ResourceAction, ResourceDefaults,
-    ResourceEntry, ResourceEvent, ResourceFailure, ResourceGet, ResourceId, ResourceInitiator,
-    ResourceName, ResourceResponder, ResourceSet, ResourceStore, ResourceTarget, ResponderAction,
-    ResponderEvent, ResponderSettings, RoleName, SUB_ID2_PE_CAPABILITIES_INQUIRY,
-    SUB_ID2_PE_CAPABILITIES_REPLY, SUB_ID2_PE_NOTIFY, SelectorAction, SetBody, SignificantBits,
-    SimpleAction, SimultaneousRequests, StepCount, StoreError, StreamLimit, SubscribeId, TypeHint,
-    UpdateKind, decode_body, encode_body, mcoded7, split_message,
+    PeSettings, PeSignal, PeState, PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeStep,
+    PeSubscribed, PeSubscription, PeTerminator, PeText, PeTransaction, PeUnreadable,
+    PeUpdateCommand, PeVersion, Priority, PropertyName, PublishError, RefusedAt, RequestRefused,
+    ResIdUse, ResourceAction, ResourceDefaults, ResourceEntry, ResourceEvent, ResourceFailure,
+    ResourceGet, ResourceId, ResourceInitiator, ResourceName, ResourceResponder, ResourceSet,
+    ResourceStore, ResourceTarget, ResponderAction, ResponderEvent, ResponderSettings,
+    RestoreError, RoleName, SUB_ID2_PE_CAPABILITIES_INQUIRY, SUB_ID2_PE_CAPABILITIES_REPLY,
+    SUB_ID2_PE_NOTIFY, SavedState, SelectorAction, SetBody, SignificantBits, SimpleAction,
+    SimultaneousRequests, StateDevice, StateId, StateRev, StateSize, StateStamp, StepCount,
+    StoreError, StreamLimit, SubscribeId, TypeHint, UnixSeconds, UpdateKind, Verdict, WrongDevice,
+    decode_body, encode_body, mcoded7, split_message,
 };
 pub use process::{
     ChannelControllers, DataControl, NotADataControl, NoteData, ProcessFeatures, ReportScope,
     SUB_ID2_MESSAGE_REPORT_END, SUB_ID2_MESSAGE_REPORT_INQUIRY, SUB_ID2_MESSAGE_REPORT_REPLY,
     SUB_ID2_PROCESS_CAPABILITIES_INQUIRY, SUB_ID2_PROCESS_CAPABILITIES_REPLY, SystemMessages,
 };
-pub use process_initiator::{
-    PROCESS_TIMEOUT, ProcessAction, ProcessError, ProcessInitiator, ReportRequest,
-};
+pub use process_initiator::{ProcessAction, ProcessError, ProcessInitiator, ReportRequest};
 pub use profile::{
     ChannelsDetail, DetailsData, InquiryTarget, ListTooLong, ManufacturerProfile,
     NotProfileChannels, ProfileChannels, ProfileDataError, ProfileId, ProfileLists, ProfileState,
@@ -98,7 +99,7 @@ pub use profile::{
 };
 pub use status::{Ack, Nak};
 pub use text::MessageText;
-pub use wait::{NotATimeoutWait, TimeoutWait};
+pub use wait::{NotATimeoutWait, PEER_REPLY_TIMEOUT, TimeoutWait};
 
 /// Universal SysEx non-real-time id, the first byte of every CI message: `0x7E`.
 pub const CI_UNIVERSAL_SYSEX: u8 = 0x7E;

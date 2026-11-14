@@ -358,6 +358,18 @@ fn the_ci_ranged_values_keep_the_range_contract() {
     contract!(Priority, u8, [1, 5], [0, 6]);
     contract!(SignificantBits, u8, [1, 32], [0, 33]);
     contract!(StepCount, u32, [1, u32::MAX], [0]);
+    contract!(
+        UnixSeconds,
+        u64,
+        [0, 0x7FFF_FFFF_FFFF_FFFF],
+        [0x8000_0000_0000_0000, u64::MAX]
+    );
+    contract!(
+        StateSize,
+        u64,
+        [0, 0x7FFF_FFFF_FFFF_FFFF],
+        [0x8000_0000_0000_0000, u64::MAX]
+    );
     // `ProfileChannels` is not stored, so it has no serde form.
     check_range_contract(&RangeContract {
         new: ProfileChannels::new,
