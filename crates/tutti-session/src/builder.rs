@@ -833,7 +833,7 @@ impl<S> SessionBuilder<S> {
             #[cfg(feature = "sampler")]
             disk_streamer,
             #[cfg(feature = "sampler")]
-            sampler_opens: 0,
+            sampler_opens: tutti_types::Mint::new(),
             #[cfg(feature = "device")]
             faults: None,
             #[cfg(feature = "device")]

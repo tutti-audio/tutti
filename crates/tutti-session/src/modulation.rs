@@ -233,32 +233,45 @@ impl Ranged for MixRef {
     type Unit = tutti_types::Mix;
 }
 
-/// A modulation source the session declared, named. Minted by [`Mods`]
-/// (`lfo`, `macro_`, `follower`, ...), never built: a value is one this
-/// session returned, so it names a source that was declared, and a removed
-/// one is [`NoSuchModSource`], not another source. (A host that declares its
-/// own modulation names its sources with
-/// [`tutti_modulation::SourceKey`], its own minting.)
-///
-/// There is no way to make one:
-///
-/// ```compile_fail,E0423
-/// let _ = tutti_session::ModSourceId(1);
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ModSourceId(u64);
+tutti_types::id! {
+    /// A modulation source the session declared, named. Minted by [`Mods`]
+    /// (`lfo`, `macro_`, `follower`, ...), never built: a value is one this
+    /// session returned, so it names a source that was declared, and a removed
+    /// one is [`NoSuchModSource`], not another source. (A host that declares its
+    /// own modulation names its sources with
+    /// [`tutti_modulation::SourceKey`], its own minting.)
+    ///
+    /// There is no way to make one:
+    ///
+    /// ```compile_fail,E0624
+    /// let _ = tutti_session::ModSourceId::of(1);
+    /// ```
+    pub struct ModSourceId;
+}
 
-/// A modulation route the session declared, named; as [`ModSourceId`] is for
-/// a source: minted by [`Mods::route`], found again through
-/// [`ModsView::routes`] and [`ModsView::routes_to`].
-///
-/// There is no way to make one:
-///
-/// ```compile_fail,E0423
-/// let _ = tutti_session::ModRouteId(1);
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ModRouteId(u64);
+tutti_types::id! {
+    /// A modulation route the session declared, named; as [`ModSourceId`] is for
+    /// a source: minted by [`Mods::route`], found again through
+    /// [`ModsView::routes`] and [`ModsView::routes_to`].
+    ///
+    /// There is no way to make one:
+    ///
+    /// ```compile_fail,E0624
+    /// let _ = tutti_session::ModRouteId::of(1);
+    /// ```
+    pub struct ModRouteId;
+}
+
+/// The source `key` names: a key of the session's own declarations is minted
+/// from a [`Mint`](tutti_types::Mint), so it is never 0.
+fn source_id(key: SourceKey) -> ModSourceId {
+    ModSourceId::new(key.0).expect("a key the session minted is not 0")
+}
+
+/// The route `key` names; see [`source_id`].
+fn route_id(key: RouteKey) -> ModRouteId {
+    ModRouteId::new(key.0).expect("a key the session minted is not 0")
+}
 
 /// What [`Mods::remove_source`] and [`Mods::set_source`] found missing: the
 /// source the id named.
@@ -533,7 +546,7 @@ impl std::fmt::Display for SourceName {
             Self::Own {
                 fed_by: Some(node), ..
             } => write!(f, "the source fed by node {}", node.0),
-            Self::Own { id, fed_by: None } => write!(f, "source {}", id.0),
+            Self::Own { id, fed_by: None } => write!(f, "source {id}"),
             Self::Host(key) => write!(f, "the host's source {key:?}"),
         }
     }
@@ -610,7 +623,7 @@ impl Names<'_> {
     fn source(self, key: SourceKey) -> SourceName {
         match self {
             Self::Own(own) => SourceName::Own {
-                id: ModSourceId(key.0),
+                id: source_id(key),
                 fed_by: own.sources.get(&key).and_then(|s| match s.feed {
                     Some(OwnFeed::Audio(node) | OwnFeed::Events(node, _)) => Some(node),
                     None => None,
@@ -713,7 +726,7 @@ impl ModState {
 
     /// Signal source `source`'s node (a follower's, a note envelope's).
     pub fn source_node(&self, source: ModSourceId) -> Option<NodeKey> {
-        self.modulation.source(SourceKey(source.0))
+        self.modulation.source(SourceKey(source.get()))
     }
 
     /// Note-envelope resyncs owed to the next `AfterCommit`.
@@ -831,8 +844,8 @@ impl std::fmt::Debug for OwnAutomation {
 /// The session's own declarations, made through [`Mods`].
 #[derive(Default, Debug)]
 pub(crate) struct OwnMods {
-    /// The last key minted, sources and routes alike.
-    minted: u64,
+    /// Names sources, routes and edges alike.
+    minted: tutti_types::Mint,
     sources: BTreeMap<SourceKey, OwnSource>,
     routes: BTreeMap<RouteKey, OwnRoute>,
     ranges: BTreeMap<TargetKey, (f32, f32)>,
@@ -877,9 +890,8 @@ impl OwnMods {
             && self.automation.is_empty()
     }
 
-    fn mint(&mut self) -> u64 {
-        self.minted += 1;
-        self.minted
+    fn mint(&self) -> u64 {
+        self.minted.mint().get()
     }
 
     /// `target`'s key for the reconciler: a param's is its node's bits and
@@ -1231,8 +1243,8 @@ impl ModsView<'_> {
     pub fn route(&self, id: ModRouteId) -> Option<RouteInfo> {
         self.own
             .routes
-            .get(&RouteKey(id.0))
-            .map(|r| r.info(RouteKey(id.0)))
+            .get(&RouteKey(id.get()))
+            .map(|r| r.info(RouteKey(id.get())))
     }
 
     /// Every source, in the order they were declared.
@@ -1246,7 +1258,7 @@ impl ModsView<'_> {
     /// The source `id`, or `None` when it was removed.
     #[must_use]
     pub fn source(&self, id: ModSourceId) -> Option<SourceInfo> {
-        let key = SourceKey(id.0);
+        let key = SourceKey(id.get());
         self.own.sources.get(&key).map(|s| s.info(key))
     }
 
@@ -1275,8 +1287,8 @@ impl ModsView<'_> {
 impl OwnRoute {
     fn info(&self, key: RouteKey) -> RouteInfo {
         RouteInfo {
-            id: ModRouteId(key.0),
-            source: ModSourceId(self.decl.source.0),
+            id: route_id(key),
+            source: source_id(self.decl.source),
             target: self.target,
             depth: self.decl.depth,
             polarity: self.decl.polarity,
@@ -1288,7 +1300,7 @@ impl OwnRoute {
 impl OwnSource {
     fn info(&self, key: SourceKey) -> SourceInfo {
         SourceInfo {
-            id: ModSourceId(key.0),
+            id: source_id(key),
             source: self.source.clone(),
             fed_by: match self.feed {
                 Some(OwnFeed::Audio(node) | OwnFeed::Events(node, _)) => Some(node),
@@ -1310,7 +1322,7 @@ impl RouteMut<'_> {
     /// The route as it is now.
     #[must_use]
     pub fn info(&self) -> RouteInfo {
-        self.route.info(RouteKey(self.id.0))
+        self.route.info(RouteKey(self.id.get()))
     }
 
     /// Sets the depth, a fraction of the target's range.
@@ -1361,7 +1373,7 @@ impl Mods<'_> {
     fn add_source(&mut self, source: Source, feed: Option<OwnFeed>) -> ModSourceId {
         let key = SourceKey(self.own.mint());
         self.own.sources.insert(key, OwnSource { source, feed });
-        ModSourceId(key.0)
+        source_id(key)
     }
 
     /// A source of any kind with no node to feed (an LFO, a macro).
@@ -1410,7 +1422,7 @@ impl Mods<'_> {
         id: ModSourceId,
         source: impl Into<Source>,
     ) -> Result<(), NoSuchModSource> {
-        match self.own.sources.get_mut(&SourceKey(id.0)) {
+        match self.own.sources.get_mut(&SourceKey(id.get())) {
             Some(s) => {
                 s.source = source.into();
                 Ok(())
@@ -1426,7 +1438,7 @@ impl Mods<'_> {
     /// [`NoSuchModSource`] when this session declared no source `id` (removed
     /// already); nothing changes.
     pub fn remove_source(&mut self, id: ModSourceId) -> Result<(), NoSuchModSource> {
-        let key = SourceKey(id.0);
+        let key = SourceKey(id.get());
         if self.own.sources.remove(&key).is_none() {
             return Err(NoSuchModSource(id));
         }
@@ -1447,7 +1459,7 @@ impl Mods<'_> {
     /// declared for it; [`RouteError::NoSuchSource`] when the source was
     /// removed. Nothing is added.
     pub fn route(&mut self, spec: RouteSpec) -> Result<ModRouteId, RouteError> {
-        let source = SourceKey(spec.source.0);
+        let source = SourceKey(spec.source.get());
         if !self.own.sources.contains_key(&source) {
             return Err(RouteError::NoSuchSource(NoSuchModSource(spec.source)));
         }
@@ -1471,7 +1483,7 @@ impl Mods<'_> {
                 target: spec.target,
             },
         );
-        Ok(ModRouteId(key.0))
+        Ok(route_id(key))
     }
 
     /// The route `id`, to edit in place: its depth, polarity or curve.
@@ -1480,7 +1492,7 @@ impl Mods<'_> {
     ///
     /// [`NoSuchModRoute`] when this session declared no route `id`.
     pub fn route_of(&mut self, id: ModRouteId) -> Result<RouteMut<'_>, NoSuchModRoute> {
-        match self.own.routes.get_mut(&RouteKey(id.0)) {
+        match self.own.routes.get_mut(&RouteKey(id.get())) {
             Some(route) => Ok(RouteMut { id, route }),
             None => Err(NoSuchModRoute(id)),
         }
@@ -1493,7 +1505,7 @@ impl Mods<'_> {
     /// [`NoSuchModRoute`] when this session declared no route `id` (removed
     /// already, or went with its source); nothing changes.
     pub fn remove_route(&mut self, id: ModRouteId) -> Result<(), NoSuchModRoute> {
-        match self.own.routes.remove(&RouteKey(id.0)) {
+        match self.own.routes.remove(&RouteKey(id.get())) {
             Some(_) => Ok(()),
             None => Err(NoSuchModRoute(id)),
         }

@@ -193,7 +193,7 @@ impl HeardTaps {
         if c.owed_close || c.install.vacant_len() <= 1 {
             return Ok(HeardOpen::Retry);
         }
-        let (reader, writer) = TapReader::pair(TapId(0), usize::from(width.count()), capacity);
+        let (reader, writer) = TapReader::pair(TapId::of(1), usize::from(width.count()), capacity);
         if c.install.try_push(Some(Box::new(writer))).is_err() {
             unreachable!("the queue has a free slot");
         }
@@ -267,7 +267,7 @@ mod tests {
     use super::*;
 
     fn writer(width: usize) -> Box<TapWriter> {
-        Box::new(TapReader::pair(TapId(0), width, Samples(8)).1)
+        Box::new(TapReader::pair(TapId::of(1), width, Samples(8)).1)
     }
 
     fn width(h: &Hearing) -> Option<usize> {

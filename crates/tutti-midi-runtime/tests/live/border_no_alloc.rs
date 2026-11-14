@@ -74,7 +74,7 @@ fn the_border_nodes_process_without_allocating() {
         "clock",
         ClockNode::new(tutti_ump::MidiGroup::FIRST, tutti_types::SampleRate::SR_48K),
     );
-    let mut out = common::sink(&mut ed, 0, &[(1, 0), (1, 3), (2, 0), (3, 0)]);
+    let mut out = common::sink(&mut ed, 1, &[(1, 0), (1, 3), (2, 0), (3, 0)]);
     clock.set_enabled(true);
     ed.commit().unwrap();
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
@@ -138,7 +138,7 @@ fn the_mpe_bend_range_fan_out_processes_without_allocating() {
         MidiIngestNode::new(NonZeroUsize::MIN).with_mpe(tutti_fixtures::midi::lower_zone(15)),
     );
     let mut dev = device(&mut ed, 4);
-    let mut out = common::sink(&mut ed, 0, &[(1, 15)]);
+    let mut out = common::sink(&mut ed, 1, &[(1, 15)]);
     ed.commit().unwrap();
     let t = TransportPosition::default();
     let mut drain = [(0, Ump([0; 4])); 256];
@@ -196,7 +196,7 @@ fn the_mpe_expression_paths_process_without_allocating() {
         MidiIngestNode::new(NonZeroUsize::MIN).with_mpe(tutti_fixtures::midi::lower_zone(15)),
     );
     let mut dev = device(&mut ed, 4);
-    let mut out = common::sink(&mut ed, 0, &[(1, 2)]);
+    let mut out = common::sink(&mut ed, 1, &[(1, 2)]);
     ed.commit().unwrap();
     let t = TransportPosition::default();
     let mut drain = [(0, Ump([0; 4])); 256];
@@ -250,7 +250,7 @@ fn an_mpe_mode_change_and_an_mcm_process_without_allocating() {
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
     let controls = ed.insert(NodeKey(1), "in", MidiIngestNode::new(NonZeroUsize::MIN));
     let mut dev = device(&mut ed, 4);
-    let mut out = common::sink(&mut ed, 0, &[(1, 15)]);
+    let mut out = common::sink(&mut ed, 1, &[(1, 15)]);
     ed.commit().unwrap();
     let t = TransportPosition::default();
     let mut drain = [(0, Ump([0; 4])); 256];
@@ -326,7 +326,7 @@ fn a_block_of_many_loop_passes_walks_without_allocating() {
             TimedHarmony::new(beat(1_032.0), Harmony::chord(67, 67, 0b1001_0001)),
         ]),
     );
-    let mut out = common::sink(&mut ed, 0, &[(1, 0), (2, 0)]);
+    let mut out = common::sink(&mut ed, 1, &[(1, 0), (2, 0)]);
     ed.commit().unwrap();
     let region = tutti_types::LoopRange::new(start, end).unwrap();
     let looping = Some(LoopRange { start, end });
@@ -390,7 +390,7 @@ fn a_clip_overflowing_its_port_refuses_and_retries_without_allocating() {
         MaxBlock::of(Samples(64)),
     ));
     ed.insert(NodeKey(1), "clip", MidiClipNode::new(events));
-    let mut out = common::sink(&mut ed, 0, &[(1, 0)]);
+    let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
     let mut drain = [(0, Ump([0; 4])); 1024];
     let mut polled = 0;
@@ -459,7 +459,7 @@ fn a_clip_with_a_full_table_sends_and_pays_without_allocating() {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
     ed.insert(NodeKey(1), "clip", MidiClipNode::new(events));
-    let mut out = common::sink(&mut ed, 0, &[(1, 0)]);
+    let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
     let mut drain = [(0, Ump([0; 4])); 1024];
     let mut f = 0u64;
@@ -517,7 +517,7 @@ fn the_event_inlet_processes_without_allocating() {
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
     let (queue, mut tx) = EventInletNode::pair(LIVE_INLET_CAPACITY);
     ed.insert(NodeKey(1), "timed", queue);
-    let mut out = common::sink(&mut ed, 0, &[(1, 0)]);
+    let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
     let mut drain = [(0, Ump([0; 4])); 256];
@@ -554,7 +554,7 @@ fn the_event_inlet_with_a_full_list_processes_without_allocating() {
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
     let (queue, mut tx) = EventInletNode::pair(LIVE_INLET_CAPACITY);
     ed.insert(NodeKey(1), "timed", queue);
-    let mut out = common::sink(&mut ed, 0, &[(1, 0)]);
+    let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
     let mut drain = [(0, Ump([0; 4])); 256];
@@ -600,7 +600,7 @@ fn the_mpe_transform_node_processes_without_allocating() {
         MpeTransformNode::new(tutti_fixtures::midi::lower_zone(15)),
     );
     let mut dev = device(&mut ed, 4);
-    let mut out = common::sink(&mut ed, 0, &[(1, 0)]);
+    let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
     let t = TransportPosition::default();
     let mut drain = [(0, Ump([0; 4])); 256];

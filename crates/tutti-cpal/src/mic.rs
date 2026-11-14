@@ -270,8 +270,11 @@ impl MicIn {
         let width = select.dst_layout();
 
         let faults = Arc::new(StreamFaults::new());
-        let (reader, rec) =
-            TapReader::pair(TapId(0), usize::from(width.count()), Samples(RING_FRAMES));
+        let (reader, rec) = TapReader::pair(
+            TapId::of(1),
+            usize::from(width.count()),
+            Samples(RING_FRAMES),
+        );
         let (ring, mon) = if monitor {
             // The ring carries the rate the stream runs at, so whoever takes it
             // into a graph can check it there.

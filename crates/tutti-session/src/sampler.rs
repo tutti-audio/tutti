@@ -16,12 +16,13 @@ use tutti_sampler::{Clip, OpenError, PlaceError, Placement, ProbeError, Stream, 
 use crate::jobs::JobFailed;
 use crate::{Session, SessionEvent};
 
-/// A load ([`Session::open_stream`] or [`Session::load_clip`]) the session
-/// started, named so the event that lands it can be matched to the call: [`SamplerEvent::Opened`] and
-/// [`SamplerEvent::OpenFailed`] carry it. The session mints it; it names
-/// nothing else.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SamplerLoad(u64);
+tutti_types::id! {
+    /// A load ([`Session::open_stream`] or [`Session::load_clip`]) the session
+    /// started, named so the event that lands it can be matched to the call:
+    /// [`SamplerEvent::Opened`] and [`SamplerEvent::OpenFailed`] carry it. The
+    /// session mints it; it names nothing else.
+    pub struct SamplerLoad;
+}
 
 /// Past how many bytes of decoded audio [`Residency::Auto`] streams a file
 /// instead of holding it: 32 MiB of 32-bit floats, 95 seconds of 44.1 kHz
@@ -149,8 +150,7 @@ impl Session {
             .as_ref()
             .ok_or(SamplerError::NoStreamer)?;
         let opening = streamer.open(&path.into(), place);
-        self.sampler_opens += 1;
-        let id = SamplerLoad(self.sampler_opens);
+        let id = SamplerLoad::mint(&self.sampler_opens);
         self.jobs.submit(
             move || opening.wait(),
             move |_, done, events| {
@@ -205,8 +205,7 @@ impl Session {
         if residency == Residency::Streamed && self.disk_streamer.is_none() {
             return Err(SamplerError::NoStreamer);
         }
-        self.sampler_opens += 1;
-        let id = SamplerLoad(self.sampler_opens);
+        let id = SamplerLoad::mint(&self.sampler_opens);
         let path: PathBuf = path.into();
         let at = path.clone();
         let can_stream = self.disk_streamer.is_some();

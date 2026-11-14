@@ -1557,7 +1557,7 @@ fn open_stem_taps(
         .taps
         .keys()
         .next_back()
-        .map_or(0, |id| id.0 + 1);
+        .map_or(1, |id| id.get() + 1);
     let capacity = Samples(2 * GRAPH_MAX_BLOCK.get());
     stems
         .iter()
@@ -1572,7 +1572,7 @@ fn open_stem_taps(
                     })
                 })
                 .collect();
-            let id = TapId(next);
+            let id = TapId::of(next);
             next += 1;
             editor
                 .open_tap(id, sources, TapAlign::ToOutput, capacity)

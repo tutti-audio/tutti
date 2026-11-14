@@ -104,7 +104,7 @@ impl tutti_graph::IntoNode for DropsInBlock {
 #[cfg(debug_assertions)]
 #[should_panic(expected = "tap reader")]
 fn a_reader_dropped_in_a_block_panics() {
-    let (reader, _writer) = TapReader::pair(TapId(0), 2, Samples(8));
+    let (reader, _writer) = TapReader::pair(TapId::of(1), 2, Samples(8));
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
     ed.insert(KEY, "drops", DropsInBlock(Some(reader)));
