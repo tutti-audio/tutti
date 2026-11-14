@@ -90,7 +90,7 @@ pub use discovery::{
     KEY_PRODUCT_INSTANCE_ID, SERVICE_TYPE, instance_name, txt_properties,
 };
 pub use endpoint::{Client, Endpoint, Host, HostConfig};
-pub use event::{AuthFailure, Event, Initiator, SendError, SessionState, Transmit};
+pub use event::{AuthFailure, EndedBy, Event, SendError, SessionState, Transmit};
 pub use policy::{Admission, Credentials};
 pub use sequence::SequenceNumber;
 pub use text::{BoundedText, Text, TextError, Username};

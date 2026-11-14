@@ -14,123 +14,7 @@ use core::ops::Range;
 use tutti_types::Samples;
 
 use super::{Capacity, Effort, Feed, Setup};
-
-impl Lerp for f32 {
-    #[inline]
-    fn lerp(&self, to: &f32, k: u32, n: u32) -> f32 {
-        self + (to - self) * (k as f32 / n as f32)
-    }
-}
-
-/// A coefficient set that can be blended toward another.
-///
-/// The glide assumes the coefficient space is affine: a blend of two sets is a set the
-/// recurrence can run. A set for which it is not has no `Lerp`.
-pub trait Lerp: Copy + PartialEq + core::fmt::Debug {
-    /// The set `k` of `n` steps of the way from `self` to `to`, computed from the
-    /// two ends and the step, never accumulated, so step `n` is `to` to the bit.
-    /// Each set computes its own `k / n`, in the precision it runs in.
-    #[must_use]
-    fn lerp(&self, to: &Self, k: u32, n: u32) -> Self;
-}
-
-/// How many steps a glide takes: a number, or from how far it goes at a rate.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Steps {
-    /// This many (`Fixed(0)` lands at once).
-    Fixed(u32),
-    /// No faster than this much a step: `ceil(distance / rate)` steps, so a length
-    /// whose sweep is a pitch shift has its speed bounded whatever the distance.
-    Rate(f32),
-}
-
-/// A linear approach to a target in `n` steps, from where it was when it was aimed:
-/// γ for one coefficient set `T` that glides as a whole, with one rate.
-///
-/// Step `k` is `from.lerp(to, k, n)`, so it lands exactly and a new aim starts from
-/// the value in flight, never jumping over a glide cut short. `n = 0` lands at once.
-/// The number of steps a [`Approach::aim`] takes is the glide's own, set where it is
-/// built ([`by`](Self::by)); [`aim_by`](Glide::aim_by) of a `Glide<f32>` takes a
-/// [`Steps`] per call instead, for a coefficient with a rate of its own.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Glide<T: Lerp> {
-    from: T,
-    to: T,
-    k: u32,
-    n: u32,
-    /// The steps [`Approach::aim`] takes.
-    steps: u32,
-}
-
-impl<T: Lerp> Glide<T> {
-    /// A glide at rest on `value`, whose [`Approach::aim`] lands at once (see
-    /// [`by`](Self::by)).
-    #[must_use]
-    pub fn landed(value: T) -> Self {
-        Self {
-            from: value,
-            to: value,
-            k: 0,
-            n: 0,
-            steps: 0,
-        }
-    }
-
-    /// The same glide, taking `steps` steps to each target it is [aimed](Approach::aim) at.
-    #[must_use]
-    pub fn by(self, steps: u32) -> Self {
-        Self { steps, ..self }
-    }
-
-    /// Aims at `to`, arriving in `n` steps from the value in flight.
-    pub fn aim_in(&mut self, to: T, n: u32) {
-        *self = Self {
-            from: self.now(),
-            to,
-            k: 0,
-            n,
-            steps: self.steps,
-        };
-    }
-
-    /// The value it is moving to.
-    #[must_use]
-    pub fn target(&self) -> T {
-        self.to
-    }
-
-    /// Whether steps remain: the last one has not been taken.
-    #[must_use]
-    pub fn moving(&self) -> bool {
-        self.k < self.n
-    }
-
-    /// The value at the current step.
-    #[inline]
-    #[must_use]
-    pub fn now(&self) -> T {
-        if self.k >= self.n {
-            self.to
-        } else {
-            self.from.lerp(&self.to, self.k, self.n)
-        }
-    }
-}
-
-impl Glide<f32> {
-    /// Aims at `to` in `steps`. A target already aimed at leaves the glide as it is
-    /// (a member sent again every block does not stretch it).
-    pub fn aim_by(&mut self, to: f32, steps: Steps) {
-        if to == self.to {
-            return;
-        }
-        let n = match steps {
-            Steps::Fixed(n) => n,
-            Steps::Rate(rate) => ((to - self.now()).abs() / rate).ceil() as u32,
-        };
-        self.aim_in(to, n);
-    }
-}
+use crate::glide::{Glide, Lerp};
 
 /// γ: a coefficient set that approaches the point κ asked for, a step at a time.
 pub trait Approach {
@@ -155,7 +39,7 @@ impl<T: Lerp> Approach for Glide<T> {
     type Target = T;
 
     fn aim(&mut self, target: &T) {
-        self.aim_in(*target, self.steps);
+        Glide::aim(self, *target);
     }
 
     #[inline]
@@ -172,8 +56,7 @@ impl<T: Lerp> Approach for Glide<T> {
     }
 
     fn settle(&mut self) {
-        self.from = self.to;
-        self.k = self.n;
+        Self::settle(self);
     }
 }
 
@@ -445,34 +328,5 @@ impl<R: Recurrence> Realized<R> {
             self.into,
         );
         self.into = (self.into + n) % R::STEP;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A glide by a rate takes `ceil(distance / rate)` steps from where it is, lands
-    /// on the target exactly, and is not restarted by an aim at the target it already
-    /// has; `Fixed(0)` lands at once.
-    #[test]
-    fn a_rate_is_a_number_of_steps_from_the_distance() {
-        let count = |g: &mut Glide<f32>| (0..100).take_while(|_| g.step()).count();
-        let mut g = Glide::landed(0.0f32);
-        g.aim_by(2.5, Steps::Rate(1.0));
-        assert_eq!(count(&mut g), 3);
-        assert_eq!(g.now(), 2.5);
-        // The same target again, mid-flight, leaves the glide where it was: four
-        // of its five steps remain.
-        g.aim_by(0.0, Steps::Fixed(5));
-        assert!(g.step());
-        g.aim_by(0.0, Steps::Fixed(5));
-        assert_eq!(count(&mut g), 4);
-        g.aim_by(1.5, Steps::Fixed(0));
-        assert_eq!((g.now(), g.step()), (1.5, false));
-        // An exact multiple takes exactly that many steps.
-        let mut h = Glide::landed(1.0f32);
-        h.aim_by(5.0, Steps::Rate(2.0));
-        assert_eq!(count(&mut h), 2);
     }
 }

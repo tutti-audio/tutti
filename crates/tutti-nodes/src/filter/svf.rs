@@ -4,15 +4,16 @@
 //! switching type is as cheap as any parameter change. One width-generic node,
 //! [`SvfFilterNode`]: the coefficients are shared across channels and only the
 //! integrator state is per channel. The algorithm is `tutti-dsp`'s
-//! ([`SvfFamily`]); the node is a [`FamilyNode`] over it, and this file holds the
-//! cells and how a block reads them.
+//! ([`SvfBank`]); the node is a [`KernelNode`] over it, and this file holds the
+//! kernel, the cells and how a block reads them.
 
-use tutti_dsp::{Real, Svf, SvfControls, SvfFamily, SvfType};
-use tutti_types::{ChannelLayout, Db, Hz, Q};
+use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_dsp::{Glide, Lanes, SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType};
+use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_types::{BusTopology, ChannelLayout, Db, Hz, MaxBlock, Q, SampleRate, Tail};
 
-use super::NodeRecurrence;
 use super::filter_bus;
-use crate::reverb::FamilyNode;
+use crate::kernel::{Kernel, KernelNode};
 
 /// A state-variable filter of any width: `N` audio inputs, `N` outputs, one
 /// coefficient set shared across the channels and one integrator pair per
@@ -74,13 +75,13 @@ use crate::reverb::FamilyNode;
 /// A graph node ([`IntoNode`](tutti_graph::IntoNode)): inserted, its controls are
 /// a [`ParamSet`](tutti_graph::ParamSet) over cutoff, Q and gain by [`UnitParam`](tutti_types::UnitParam),
 /// and a fork of it starts from the values last set through that set. Its tail is
-/// [`Tail::Unknown`](tutti_types::Tail::Unknown): a resonant filter rings on after
+/// [`Tail::Unknown`]: a resonant filter rings on after
 /// its input stops, for as long as its Q says, so the graph's tail fold must not
 /// read it as `None`; it never parks. The graph prepares it at the device rate
 /// before its first block. Rendering allocates nothing.
-pub type SvfFilterNode<F = f64> = FamilyNode<SvfFamily<F>>;
+pub type SvfFilterNode<F = f64> = KernelNode<SvfKernel<F>>;
 
-impl<F: Real> SvfFilterNode<F> {
+impl<F: Float + Lanes> SvfFilterNode<F> {
     /// A mono filter (1 in, 1 out) of `filter_type` at `frequency` cutoff and
     /// resonance `q`, with 0 dB gain.
     ///
@@ -126,7 +127,93 @@ impl<F: Real> SvfFilterNode<F> {
     /// fixed here: a node with another one is another node.
     #[must_use]
     pub fn with_controls(channels: impl Into<ChannelLayout>, controls: SvfControls) -> Self {
-        Self::live(SvfFamily::new(filter_bus(channels.into())), controls)
+        Self::with_kernel(
+            SvfKernel::new(filter_bus(channels.into())),
+            SvfSet(controls.ty),
+            controls,
+        )
+    }
+}
+
+/// The steps the coefficients take to a new design: one grid period, so a design
+/// arrives at the next grid point.
+const GLIDE_STEPS: u32 = 16;
+
+/// The state-variable filter as a [`Kernel`]: an [`SvfBank`] in state precision `F`
+/// and the glide of the coefficients every channel shares.
+#[derive(Clone, Debug)]
+pub struct SvfKernel<F: Float + Lanes> {
+    input: BusTopology,
+    bank: SvfBank<F>,
+    /// The coefficients in flight; the first design after `prepare` lands at once.
+    coefficients: Glide<SvfCoefficients<F>>,
+    rate: SampleRate,
+    landed: bool,
+}
+
+impl<F: Float + Lanes> SvfKernel<F> {
+    /// A filter on the bus `input`, its output where it is. Allocates the state. Its
+    /// coefficients until `prepare` are a placeholder at 48 kHz: an unprepared node renders
+    /// nothing, and `prepare` designs for the rate it is given.
+    fn new(input: BusTopology) -> Self {
+        let rate = SampleRate::SR_48K;
+        Self {
+            input,
+            bank: SvfBank::new(input.layout()),
+            coefficients: Glide::landed(Self::design(&SvfControls::DEFAULT, rate)),
+            rate,
+            landed: false,
+        }
+    }
+
+    fn design(controls: &SvfControls, rate: SampleRate) -> SvfCoefficients<F> {
+        SvfCoefficients::from(&SvfModel::new(*controls, rate))
+    }
+}
+
+impl<F: Float + Lanes> Kernel for SvfKernel<F> {
+    type Set = SvfSet;
+
+    // A design arrives at the next grid point: the glide is one grid period long.
+    const GRID: usize = GLIDE_STEPS as usize;
+
+    fn shape(&self) -> Shape {
+        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
+        Shape::buses(
+            Buses::main(self.input),
+            Buses::NONE.with(output).expect("one bus"),
+        )
+        .with_cost(Cost::Moderate)
+    }
+
+    fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
+        self.rate = rate;
+        self.coefficients =
+            Glide::landed(Self::design(&SvfControls::DEFAULT, rate)).by(GLIDE_STEPS);
+        self.landed = false;
+    }
+
+    fn reset(&mut self) {
+        self.coefficients.settle();
+        self.bank.reset();
+    }
+
+    fn retarget(&mut self, controls: &SvfControls) {
+        self.coefficients.aim(Self::design(controls, self.rate));
+        if !self.landed {
+            self.coefficients.settle();
+            self.landed = true;
+        }
+    }
+
+    fn render<S: Float>(&mut self, input: Planes<'_, S>, output: PlanesMut<'_, '_, S>) {
+        self.bank.process(&mut self.coefficients, input, output);
+    }
+
+    /// A resonant filter rings for as long as its Q says, which is too dear to find per
+    /// block: unknown, so the graph's tail fold never reads it as none.
+    fn tail(&self) -> Tail {
+        Tail::Unknown
     }
 }
 
@@ -148,14 +235,6 @@ control_set! {
 
     fn defaults(&self) -> SvfControls {
         SvfControls::DEFAULT
-    }
-}
-
-impl<F: Real> NodeRecurrence for Svf<F> {
-    type Set = SvfSet;
-
-    fn set(&self, initial: &SvfControls) -> SvfSet {
-        SvfSet(initial.ty)
     }
 }
 
@@ -593,6 +672,35 @@ mod tests {
         let (mid, _) = render_change(make, change, &before, &one, 64);
         let f = mid.applied().unwrap().freq.get();
         assert!(400.0 < f && f < 6_000.0, "under way after 64 frames: {f}");
+    }
+
+    /// A clone starts with its cells landed: a clone of a node whose cutoff glide is in
+    /// flight designs its first block from the cell's value, not from where the source's
+    /// glide stands on the source's clock.
+    #[test]
+    fn a_clone_of_a_node_mid_glide_starts_landed() {
+        let rate = SampleRate::SR_48K;
+        let mut node = tutti_graph::contract::prepared(
+            SvfFilterNode::<f64>::new(SvfType::LowPass, Hz::new(400.0), Q::new(0.707)),
+            rate,
+            64,
+        );
+        let x = [0.25f32; 64];
+        drive(&mut node, rate, &[&x], &[]);
+        assert!(node.param_set().set(UnitParam::Cutoff, 6_000.0));
+        drive(&mut node, rate, &[&x], &[]);
+        let source = node.applied().expect("designed").freq.get();
+        assert!(
+            400.0 < source && source < 6_000.0,
+            "the source is under way: {source}"
+        );
+        let mut clone = node.clone();
+        drive(&mut clone, rate, &[&x], &[]);
+        assert_eq!(
+            clone.applied().map(|c| c.freq),
+            Some(Hz(6_000.0)),
+            "the clone landed"
+        );
     }
 
     /// A NaN Q at construction is read as the Butterworth Q, not as 0, which

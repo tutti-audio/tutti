@@ -4,9 +4,11 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
+use tutti_midi_device::EntropyError;
+
 use tutti_midi_network::{
     Admission, AuthFailure, AuthMethods, AuthState, Bye, ByeReason, Command, Credentials,
-    DatagramBuilder, Digest, Endpoint, Event, Fec, HostConfig, Initiator, Invitation, NakReason,
+    DatagramBuilder, Digest, EndedBy, Endpoint, Event, Fec, HostConfig, Invitation, NakReason,
     Nonce, PingId, Requests, Retransmit, RetransmitRequest, SendError, SequenceNumber,
     SessionConfig, SessionState, UmpData, UserAuthState, Username,
 };
@@ -111,7 +113,7 @@ fn a_declined_invitation_ends_with_the_user_declined_reason() {
     sim.flush();
     assert!(sim.client_events.contains(&Event::Closed {
         peer: host_addr(),
-        initiator: Initiator::Remote,
+        ended_by: EndedBy::Remote,
         reason: ByeReason::UserDeclined
     }));
     assert_eq!(sim.client.state(), SessionState::Idle);
@@ -160,7 +162,7 @@ fn an_unanswered_invitation_is_cancelled_with_a_bye_after_the_timeout() {
     assert_eq!(sim.client.state(), SessionState::Idle);
     assert!(sim.client_events.contains(&Event::Closed {
         peer: host_addr(),
-        initiator: Initiator::Local,
+        ended_by: EndedBy::Local,
         reason: ByeReason::InvitationCanceled
     }));
 }
@@ -390,7 +392,7 @@ fn a_client_with_no_matching_credentials_is_told_there_is_no_matching_method() {
     sim.connect();
     assert!(sim.client_events.contains(&Event::Closed {
         peer: host_addr(),
-        initiator: Initiator::Remote,
+        ended_by: EndedBy::Remote,
         reason: ByeReason::NoMatchingAuthentication
     }));
     assert_eq!(sim.host.state(client_addr()), SessionState::Idle);
@@ -398,9 +400,31 @@ fn a_client_with_no_matching_credentials_is_told_there_is_no_matching_method() {
 
 static NONCE_CALLS: AtomicU8 = AtomicU8::new(0);
 
-fn counting_nonce() -> Nonce {
+fn counting_nonce() -> Result<Nonce, EntropyError> {
     let n = NONCE_CALLS.fetch_add(1, Ordering::SeqCst);
-    Nonce::from_entropy([n; 16])
+    Ok(Nonce::from_entropy([n; 16]))
+}
+
+fn no_nonce() -> Result<Nonce, EntropyError> {
+    Err(EntropyError::unavailable())
+}
+
+// A Host that cannot get random bytes for a challenge refuses the Invitation
+// that needed it, and tells its application why; it does not panic.
+#[test]
+fn a_host_without_a_nonce_refuses_the_invitation_that_needs_one() {
+    let mut sim = Sim::with_nonces(
+        host_with(Admission::SharedSecret("5483".into())),
+        Credentials::none().with_secret("5483"),
+        SessionConfig::default(),
+        no_nonce,
+    );
+    sim.connect();
+    assert!(sim.host_events.contains(&Event::NonceUnavailable {
+        peer: client_addr(),
+        error: EntropyError::unavailable(),
+    }));
+    assert_ne!(sim.client.state(), SessionState::Established);
 }
 
 #[test]
@@ -970,12 +994,12 @@ fn a_ping_gets_a_reply_with_the_same_id_in_any_state() {
     sim.host.handle_datagram(
         sim.now,
         client_addr(),
-        &datagram(&Command::Ping(PingId(0xCAFE))),
+        &datagram(&Command::Ping(PingId::new(0xCAFE))),
     );
     sim.flush();
     assert_eq!(
         sim.commands(Direction::HostToClient),
-        vec![Command::PingReply(PingId(0xCAFE))]
+        vec![Command::PingReply(PingId::new(0xCAFE))]
     );
 }
 
@@ -985,7 +1009,7 @@ fn a_ping_reply_nobody_asked_for_gets_a_bad_ping_reply_nak() {
     sim.host.handle_datagram(
         sim.now,
         client_addr(),
-        &datagram(&Command::PingReply(PingId(77))),
+        &datagram(&Command::PingReply(PingId::new(77))),
     );
     sim.flush();
     assert!(
@@ -1020,12 +1044,12 @@ fn a_silent_peer_ends_the_session_with_a_timeout_bye_that_is_repeated() {
     );
     assert!(sim.host_events.contains(&Event::Closed {
         peer: client_addr(),
-        initiator: Initiator::Remote,
+        ended_by: EndedBy::Remote,
         reason: ByeReason::Timeout
     }));
     assert!(sim.client_events.contains(&Event::Closed {
         peer: host_addr(),
-        initiator: Initiator::Local,
+        ended_by: EndedBy::Local,
         reason: ByeReason::Timeout
     }));
     assert_eq!(sim.client.state(), SessionState::Idle);
@@ -1042,12 +1066,12 @@ fn a_bye_is_answered_once_and_both_ends_return_to_idle() {
     assert_eq!(sim.host.state(client_addr()), SessionState::Idle);
     assert!(sim.host_events.contains(&Event::Closed {
         peer: client_addr(),
-        initiator: Initiator::Remote,
+        ended_by: EndedBy::Remote,
         reason: ByeReason::UserTerminated
     }));
     assert!(sim.client_events.contains(&Event::Closed {
         peer: host_addr(),
-        initiator: Initiator::Local,
+        ended_by: EndedBy::Local,
         reason: ByeReason::UserTerminated
     }));
     let replies = sim
@@ -1087,7 +1111,7 @@ fn a_host_that_powers_down_ends_every_session() {
     sim.flush();
     assert!(sim.client_events.contains(&Event::Closed {
         peer: host_addr(),
-        initiator: Initiator::Remote,
+        ended_by: EndedBy::Remote,
         reason: ByeReason::PowerDown
     }));
 }
@@ -1278,8 +1302,8 @@ fn a_stranger_that_is_not_inviting_is_answered_statelessly_and_costs_the_host_no
     );
     assert_eq!(sim.host.session_count(), 0);
     assert_eq!(
-        replies(&mut sim, &datagram(&Command::Ping(PingId(5)))),
-        vec![Command::PingReply(PingId(5))]
+        replies(&mut sim, &datagram(&Command::Ping(PingId::new(5)))),
+        vec![Command::PingReply(PingId::new(5))]
     );
     assert_eq!(sim.host.session_count(), 0);
     assert_eq!(

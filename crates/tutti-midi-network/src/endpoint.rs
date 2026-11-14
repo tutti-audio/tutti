@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::time::Instant;
 
+use tutti_midi_device::EntropyError;
 use tutti_ump::Ump;
 
 use crate::datagram::{self, pack};
@@ -202,7 +203,7 @@ impl HostConfig {
 #[derive(Debug)]
 pub struct Host {
     config: HostConfig,
-    nonce_source: fn() -> Nonce,
+    nonce_source: fn() -> Result<Nonce, EntropyError>,
     sessions: HashMap<SocketAddr, Session>,
     outbox: Outbox,
 }
@@ -217,7 +218,10 @@ impl Host {
     /// A Host that takes its nonces from `nonce_source`, which a test
     /// replaces to make the run repeatable.
     #[must_use]
-    pub fn with_nonce_source(config: HostConfig, nonce_source: fn() -> Nonce) -> Self {
+    pub fn with_nonce_source(
+        config: HostConfig,
+        nonce_source: fn() -> Result<Nonce, EntropyError>,
+    ) -> Self {
         Self {
             config,
             nonce_source,
