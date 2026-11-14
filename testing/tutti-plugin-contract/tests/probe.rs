@@ -1,4 +1,4 @@
-//! The plugin probe, a separate process: `tutti_plugin::catalog::probe_record`
+//! The plugin probe, a separate process: `tutti_plugin::catalog::probe_record_with`
 //! spawns `plugin-probe`, which loads the file just far enough to read the
 //! descriptor of every plugin it holds and writes them to a result file.
 //!
@@ -33,7 +33,7 @@ use tutti_plugin_types::{
 };
 use tutti_vst2_host::Vst2Loaded;
 
-/// The one descriptor `probe_record` found at `path`.
+/// The one descriptor `probe_record_with` found at `path`.
 fn probe(path: &Path) -> Result<PluginDescriptor, BridgeError> {
     probe_with_timeout(path, DEFAULT_PROBE_TIMEOUT)
 }
@@ -45,7 +45,7 @@ fn probe_with_timeout(path: &Path, timeout: Duration) -> Result<PluginDescriptor
     Ok(found.into_iter().next().unwrap())
 }
 
-/// Every plugin `probe_record` found at `path`, as the catalog holds them: the
+/// Every plugin `probe_record_with` found at `path`, as the catalog holds them: the
 /// db a probe's delta was applied to.
 fn probe_db(path: &Path) -> Result<PluginDb, BridgeError> {
     probe_db_with_timeout(path, DEFAULT_PROBE_TIMEOUT)
