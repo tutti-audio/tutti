@@ -444,10 +444,9 @@ fn a_start_without_its_end_before_the_next_start_is_dropped() {
     assert_eq!(list.sysex_dropped(), 1);
 }
 
-/// **A reset drops a SysEx the plugin was sent the start of, counted, whether or
-/// not processing was on, and a second reset has nothing left to drop.** The
-/// plugin forgets its input across it, so the message must not complete on the
-/// far side.
+/// **A stop drops a SysEx the plugin was sent the start of, counted, and a second
+/// stop (processing already off) has nothing left to drop.** The plugin forgets
+/// its input across a stop, so the message must not complete on the far side.
 #[test]
 fn a_stop_drops_an_open_sysex_once() {
     use crate::active::{Active, ActiveExt};

@@ -7,8 +7,8 @@
 ///
 /// It is the one place the host writes through a plugin's out-pointer, so the
 /// null check and the SAFETY argument are made once. Build it before the
-/// [`ffi_guard`](tutti_plugin_types::ffi_guard) and set it to the "nothing" answer first, so a panic in the body
-/// leaves the plugin a defined value.
+/// [`ffi_guard`](tutti_plugin_types::ffi_guard) and set it to the "nothing" answer
+/// first, so a panic in the body leaves the plugin a defined value.
 pub(crate) struct Out<T>(*mut T);
 
 impl<T> Out<T> {

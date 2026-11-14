@@ -28,6 +28,13 @@ pub struct PropertyInfo {
 }
 
 /// The instance behind every [`Unit`] clone; disposed when the last goes.
+///
+/// The home is the thread that called [`Unit::new`]. The last drop on the home
+/// thread disposes the instance there; a drop on any other thread hands the
+/// disposal to the owner's collector (`work`), counted in
+/// `MainWork::deferred_drops`. If that collector is gone and the dropping thread
+/// is not the main thread, nothing can run the disposal: the instance leaks and
+/// is counted in `MainWork::stranded`.
 pub(crate) struct Inner {
     pub(crate) instance: sys::AudioComponentInstance,
     /// The thread the unit was made on, which disposes it.

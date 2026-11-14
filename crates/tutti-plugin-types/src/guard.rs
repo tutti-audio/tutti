@@ -14,12 +14,12 @@ static CONTAINED: AtomicU64 = AtomicU64::new(0);
 /// Runs `f`; if it panics, returns `fallback` (the callback's "not handled"
 /// value) and counts the panic in [`contained_panics`].
 ///
-/// Callable on the audio thread: the no-panic path allocates nothing, and the
-/// panic path only increments a counter and forgets the payload (a payload's
-/// `Drop` could itself panic outside the `catch_unwind`, and dropping it frees).
-/// Nothing is logged: the default panic hook has already printed the message and
-/// its location by the time this sees the panic, and the guard has no thread it
-/// may print from. Under `panic = "abort"` the guard does nothing and a panic
+/// Callable on the audio thread: the no-panic path allocates nothing. The panic
+/// path is a bug path, not a real-time one: the default panic hook has already
+/// formatted the message and written it to stderr before the guard sees the
+/// panic, and the payload is leaked (forgotten, since its `Drop` could itself
+/// panic outside the `catch_unwind`). The guard itself only increments a counter
+/// and logs nothing. Under `panic = "abort"` the guard does nothing and a panic
 /// aborts.
 ///
 /// ```
@@ -40,7 +40,10 @@ pub fn ffi_guard<R>(fallback: R, f: impl FnOnce() -> R) -> R {
 
 /// How many panics [`ffi_guard`] has contained, process-wide since the process
 /// began. Each is a host callback that answered its fallback instead of
-/// unwinding into a plugin; a nonzero count is a bug in the host.
+/// unwinding into a plugin, so a nonzero count is a bug in the host.
+///
+/// A diagnostic only; it changes no behaviour. An app reads it after a session
+/// (or a test run) to learn whether any callback panicked.
 #[must_use]
 pub fn contained_panics() -> u64 {
     CONTAINED.load(Ordering::Relaxed)

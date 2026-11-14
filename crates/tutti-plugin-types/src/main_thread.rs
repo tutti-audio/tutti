@@ -109,8 +109,9 @@ impl MainWork {
     /// How many plugin drops, process-wide since the process began, a thread
     /// that is not the plugin's own handed to a collector
     /// ([`MainWorkHandle::defer_drop`]), whichever format the plugin is. A
-    /// diagnostic only: the owner of the plugins should have dropped them on the
-    /// main thread, so a nonzero count is worth a look.
+    /// diagnostic only; it changes no behaviour. The owner of the plugins should
+    /// have dropped them on the main thread, so an app reads it after closing a
+    /// session, and a nonzero count is worth a look.
     #[must_use]
     pub fn deferred_drops() -> u64 {
         DEFERRED_DROPS.load(Ordering::Relaxed)

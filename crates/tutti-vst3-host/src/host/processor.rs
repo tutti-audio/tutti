@@ -277,8 +277,8 @@ impl<T: Vst3Sample> Vst3Processor<T> {
 
     /// Drops the MIDI state the plugin forgets across a stop or a reset: a SysEx
     /// open in the input list must not complete on the far side of it, and the
-    /// stager's notes and MIDI 1.0 selections go with it. Whether processing
-    /// was on does not matter: the state is the host's.
+    /// stager's notes and MIDI 1.0 selections go with it. [`stop`](Self::stop) runs it
+    /// whether or not processing was on, since the state is the host's.
     fn reset_midi_state(&mut self) {
         self.audio.input.events.reset_sysex();
         self.audio.input.stager.reset();

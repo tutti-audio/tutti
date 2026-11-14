@@ -1589,7 +1589,8 @@ mod tests {
             componentFlagsMask: 0,
         };
         let comp = crate::ComponentRef::first_matching(&desc).expect("AUDelay ships with macOS");
-        let unit = Unit::new(comp, &tutti_plugin_types::MainWork::new().1).expect("instantiate");
+        let (_work, handle) = tutti_plugin_types::MainWork::new();
+        let unit = Unit::new(comp, &handle).expect("instantiate");
         let mut renderer = Renderer::new(
             &unit,
             BusLayout {

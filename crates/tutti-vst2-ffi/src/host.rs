@@ -2659,8 +2659,8 @@ extern "C" fn callback_wrapper<T: Host>(
     ptr: *mut c_void,
     opt: f32,
 ) -> isize {
-    // Unwind safety is asserted by `ffi_guard`: on a panic we return 0 and touch none of the captured
-    // state again — the host is behind a shared reference and the raw pointers
+    // Unwind safety is asserted by `ffi_guard`: on a panic we return 0 and touch none of the
+    // captured state again — the host is behind a shared reference and the raw pointers
     // are not re-read.
     //
     // SAFETY: which host a call reaches is decided without trusting `effect` until it is
