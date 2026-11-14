@@ -16,6 +16,7 @@ use crate::plain::Plain;
 use crate::property::{
     AudioUnitMidiProtocol, Element, FactoryPresets, PresentPreset, Property, Scope,
 };
+use tutti_plugin_types::MainWorkHandle;
 
 /// The size and writability of a property, from `AudioUnitGetPropertyInfo`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +30,10 @@ pub struct PropertyInfo {
 /// The instance behind every [`Unit`] clone; disposed when the last goes.
 pub(crate) struct Inner {
     pub(crate) instance: sys::AudioComponentInstance,
+    /// The thread the unit was made on, which disposes it.
+    home: std::thread::ThreadId,
+    /// Where a drop off that thread hands the disposal.
+    work: MainWorkHandle,
 }
 
 // SAFETY: the instance is an opaque handle into AudioToolbox. Nothing in Rust
@@ -42,11 +47,34 @@ unsafe impl Send for Inner {}
 // SAFETY: as for `Send`.
 unsafe impl Sync for Inner {}
 
+/// The disposal of an instance, which moves to the thread that runs it.
+struct Disposal(sys::AudioComponentInstance);
+
+// SAFETY: the handle is opaque and `AudioComponentInstanceDispose` is called
+// once, on the one thread that runs this; see `Inner`'s `Send`.
+unsafe impl Send for Disposal {}
+
+impl Disposal {
+    fn run(self) {
+        // SAFETY: `self.0` came from `AudioComponentInstanceNew` and its last
+        // reference is gone, so nothing can use it after this call.
+        unsafe { sys::AudioComponentInstanceDispose(self.0) };
+    }
+}
+
 impl Drop for Inner {
     fn drop(&mut self) {
-        // SAFETY: `instance` came from `AudioComponentInstanceNew` and this is
-        // the last reference to it, so nothing can use it after this call.
-        unsafe { sys::AudioComponentInstanceDispose(self.instance) };
+        let disposal = Disposal(self.instance);
+        if std::thread::current().id() == self.home {
+            disposal.run();
+        } else {
+            // A drop has no token, and an AudioUnit is disposed on the thread it was
+            // made on. The disposal goes to the owner's main-thread collector, to run
+            // at its next tick. A unit leaves the graph on the control side, so this is
+            // never the audio thread (`MainWorkHandle::defer`, "Never from an audio
+            // thread").
+            self.work.defer_drop(move |_main| disposal.run());
+        }
     }
 }
 
@@ -70,18 +98,27 @@ impl std::fmt::Debug for Unit {
 }
 
 impl Unit {
-    /// Instantiates `component` synchronously (`AudioComponentInstanceNew`).
+    /// Instantiates `component` synchronously (`AudioComponentInstanceNew`). The
+    /// calling thread is the unit's home: a last drop on another thread hands the
+    /// disposal to `work`'s collector.
     ///
     /// # Errors
     /// The `OSStatus` of the call; a v3 unit that requires asynchronous
     /// instantiation answers `-10863`.
-    pub fn new(component: ComponentRef) -> std::result::Result<Self, OsError> {
+    pub fn new(
+        component: ComponentRef,
+        work: &MainWorkHandle,
+    ) -> std::result::Result<Self, OsError> {
         let mut instance: sys::AudioComponentInstance = std::ptr::null_mut();
         // SAFETY: `component` came from the registry and `instance` is writable.
         let status = unsafe { sys::AudioComponentInstanceNew(component.raw(), &mut instance) };
         check("AudioComponentInstanceNew", status)?;
         Ok(Self {
-            inner: Arc::new(Inner { instance }),
+            inner: Arc::new(Inner {
+                instance,
+                home: std::thread::current().id(),
+                work: work.clone(),
+            }),
             _not_sync: PhantomData,
         })
     }

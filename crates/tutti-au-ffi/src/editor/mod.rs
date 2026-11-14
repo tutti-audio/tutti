@@ -200,7 +200,7 @@ mod tests {
             componentFlagsMask: 0,
         };
         let comp = ComponentRef::first_matching(&desc).expect("AUDelay should be present");
-        let unit = Unit::new(comp).expect("instantiate");
+        let unit = Unit::new(comp, &tutti_plugin_types::MainWork::new().1).expect("instantiate");
         unit.initialize().expect("initialize");
         let _has = AuEditor::has_editor(&unit);
     }
@@ -216,7 +216,7 @@ mod tests {
             componentFlagsMask: 0,
         };
         let comp = ComponentRef::first_matching(&desc).expect("AUDelay should be present");
-        let unit = Unit::new(comp).expect("instantiate");
+        let unit = Unit::new(comp, &tutti_plugin_types::MainWork::new().1).expect("instantiate");
         let refused = std::thread::spawn(move || {
             let size = LogicalSize::new(100, 100);
             match AuEditor::open(&unit, None, size) {
