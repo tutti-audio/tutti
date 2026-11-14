@@ -20,7 +20,8 @@
 //! a queue keeps the parameter's latest value, counted
 //! ([`points_dropped`](ParameterChangesImpl::points_dropped)).
 
-use crate::guard::{Out, guard};
+use crate::guard::Out;
+use tutti_plugin_types::ffi_guard;
 use vst3::Steinberg::Vst::{IParamValueQueue, IParameterChanges, IParameterChangesTrait};
 use vst3::{Class, ComWrapper};
 
@@ -361,7 +362,7 @@ opaque_debug!(ParamStaging<'_>, "ParamStaging");
 impl IParameterChangesTrait for ParameterChangesImpl {
     /// Zero while another thread is adding to the list.
     unsafe fn getParameterCount(&self) -> i32 {
-        guard(0, || {
+        ffi_guard(0, || {
             self.inner
                 .try_borrow()
                 .map_or(0, |inner| i32::try_from(inner.live).unwrap_or(i32::MAX))
@@ -370,7 +371,7 @@ impl IParameterChangesTrait for ParameterChangesImpl {
 
     /// Null while another thread is adding to the list.
     unsafe fn getParameterData(&self, index: i32) -> *mut IParamValueQueue {
-        guard(std::ptr::null_mut(), || {
+        ffi_guard(std::ptr::null_mut(), || {
             let Some(inner) = self.inner.try_borrow() else {
                 return std::ptr::null_mut();
             };
@@ -399,7 +400,7 @@ impl IParameterChangesTrait for ParameterChangesImpl {
     unsafe fn addParameterData(&self, id: *const u32, index: *mut i32) -> *mut IParamValueQueue {
         // SAFETY: a COM out-parameter: null or valid for this call.
         let index = unsafe { Out::new(index) };
-        guard(std::ptr::null_mut(), || {
+        ffi_guard(std::ptr::null_mut(), || {
             if id.is_null() {
                 return std::ptr::null_mut();
             }

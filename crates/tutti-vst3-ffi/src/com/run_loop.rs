@@ -472,7 +472,7 @@ macro_rules! delegate_run_loop {
                 handler: *mut ::vst3::Steinberg::Linux::IEventHandler,
                 fd: ::vst3::Steinberg::Linux::FileDescriptor,
             ) -> ::vst3::Steinberg::tresult {
-                $crate::guard::guard(::vst3::Steinberg::kInternalError, || {
+                ::tutti_plugin_types::ffi_guard(::vst3::Steinberg::kInternalError, || {
                     // SAFETY: the plugin keeps `handler` alive until it unregisters
                     // it and calls from the UI thread (the `IRunLoop` contract).
                     unsafe {
@@ -486,7 +486,7 @@ macro_rules! delegate_run_loop {
                 &self,
                 handler: *mut ::vst3::Steinberg::Linux::IEventHandler,
             ) -> ::vst3::Steinberg::tresult {
-                $crate::guard::guard(::vst3::Steinberg::kInternalError, || {
+                ::tutti_plugin_types::ffi_guard(::vst3::Steinberg::kInternalError, || {
                     self.run_loop.unregister_event_handler(handler)
                 })
             }
@@ -496,7 +496,7 @@ macro_rules! delegate_run_loop {
                 handler: *mut ::vst3::Steinberg::Linux::ITimerHandler,
                 milliseconds: ::vst3::Steinberg::Linux::TimerInterval,
             ) -> ::vst3::Steinberg::tresult {
-                $crate::guard::guard(::vst3::Steinberg::kInternalError, || {
+                ::tutti_plugin_types::ffi_guard(::vst3::Steinberg::kInternalError, || {
                     // SAFETY: as for `registerEventHandler`.
                     unsafe {
                         self.run_loop
@@ -509,7 +509,7 @@ macro_rules! delegate_run_loop {
                 &self,
                 handler: *mut ::vst3::Steinberg::Linux::ITimerHandler,
             ) -> ::vst3::Steinberg::tresult {
-                $crate::guard::guard(::vst3::Steinberg::kInternalError, || {
+                ::tutti_plugin_types::ffi_guard(::vst3::Steinberg::kInternalError, || {
                     self.run_loop.unregister_timer(handler)
                 })
             }

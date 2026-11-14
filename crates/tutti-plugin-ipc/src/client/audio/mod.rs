@@ -80,7 +80,23 @@ use std::time::Duration;
 pub use messages::BridgeEvent;
 pub use thread::BridgeThread;
 
-const PARAM_TIMEOUT: Duration = Duration::from_secs(5);
+/// What the host adds to the bridge's own deadline ([`dispatch::PARAM_TIMEOUT`],
+/// [`dispatch::RATE_TIMEOUT`]) before it gives up on an answer: the bridge replies
+/// into its one-shot `Ask` at its deadline, so a wait that ended at the deadline would
+/// give up as the answer arrived. Shortened under `cfg(test)`.
+#[cfg(not(test))]
+const REPLY_MARGIN: Duration = Duration::from_secs(1);
+#[cfg(test)]
+const REPLY_MARGIN: Duration = Duration::from_millis(200);
+
+/// Waits for the bridge's answer to a query it gives up on after `deadline`: the
+/// deadline and [`REPLY_MARGIN`] for the answer to arrive.
+fn await_reply<T>(
+    ask: ask::Ask<T>,
+    deadline: Duration,
+) -> std::result::Result<T, crossbeam_channel::RecvTimeoutError> {
+    ask.recv_timeout(deadline.saturating_add(REPLY_MARGIN))
+}
 
 /// Listener for plugin-originated unsolicited events. Invoked on the
 /// bridge thread (a plain OS thread) — blocking is OK, but prefer posting
@@ -622,7 +638,7 @@ impl AudioBridge {
         // The server may take as long as a plugin takes to build its window; the
         // bridge thread answers with its own refusal at `EDITOR_TIMEOUT`, so this
         // outlasts it by a margin and only ends sooner if that thread is gone.
-        match ask_resp.recv_timeout(dispatch::EDITOR_TIMEOUT + PARAM_TIMEOUT) {
+        match ask_resp.recv_timeout(dispatch::EDITOR_TIMEOUT + dispatch::PARAM_TIMEOUT) {
             Ok(result) => result.map_err(EditorError::PluginError),
             Err(_) if self.lifecycle.is_crashed() => Err(EditorError::PluginCrashed),
             Err(_) => Err(EditorError::Busy),
@@ -655,7 +671,7 @@ impl AudioBridge {
         {
             return Err(EditorError::Busy);
         }
-        match ask_resp.recv_timeout(dispatch::EDITOR_TIMEOUT + PARAM_TIMEOUT) {
+        match ask_resp.recv_timeout(dispatch::EDITOR_TIMEOUT + dispatch::PARAM_TIMEOUT) {
             Ok(result) => result.map_err(EditorError::PluginError),
             Err(_) if self.lifecycle.is_crashed() => Err(EditorError::PluginCrashed),
             Err(_) => Err(EditorError::Busy),
@@ -686,7 +702,9 @@ impl AudioBridge {
         {
             return None;
         }
-        ask_resp.recv_timeout(PARAM_TIMEOUT).ok().flatten()
+        await_reply(ask_resp, dispatch::PARAM_TIMEOUT)
+            .ok()
+            .flatten()
     }
 
     /// The plugin's preset list, or `None` when the subprocess is gone.
@@ -701,7 +719,9 @@ impl AudioBridge {
         if !self.channels.push_command(Command::GetPresetList { reply }) {
             return None;
         }
-        ask_resp.recv_timeout(PARAM_TIMEOUT).ok().flatten()
+        await_reply(ask_resp, dispatch::PARAM_TIMEOUT)
+            .ok()
+            .flatten()
     }
 
     /// Ask the plugin to load a preset. `false` when it refused, the format has
@@ -718,7 +738,7 @@ impl AudioBridge {
         {
             return false;
         }
-        ask_resp.recv_timeout(PARAM_TIMEOUT).unwrap_or(false)
+        await_reply(ask_resp, dispatch::PARAM_TIMEOUT).unwrap_or(false)
     }
 
     /// Wait until every command queued before this call has reached the
@@ -745,14 +765,14 @@ impl AudioBridge {
     pub fn settle(&self) {
         // The first query waits behind an outstanding rate change, so its
         // budget is the rate change's plus its own.
-        let budget = dispatch::RATE_TIMEOUT + PARAM_TIMEOUT;
+        let budget = dispatch::RATE_TIMEOUT + dispatch::PARAM_TIMEOUT;
         let _ = self.current_preset_within(budget);
-        let _ = self.current_preset_within(PARAM_TIMEOUT);
+        let _ = self.current_preset_within(dispatch::PARAM_TIMEOUT);
     }
 
     /// Which preset the plugin considers current, if it will say.
     pub fn current_preset(&self) -> Option<PresetId> {
-        self.current_preset_within(PARAM_TIMEOUT)
+        self.current_preset_within(dispatch::PARAM_TIMEOUT)
     }
 
     fn current_preset_within(&self, timeout: Duration) -> Option<PresetId> {
@@ -766,7 +786,7 @@ impl AudioBridge {
         {
             return None;
         }
-        ask_resp.recv_timeout(timeout).ok().flatten()
+        await_reply(ask_resp, timeout).ok().flatten()
     }
 
     /// A parameter's value, or `None` when it cannot be asked.
@@ -781,7 +801,9 @@ impl AudioBridge {
         {
             return None;
         }
-        ask_resp.recv_timeout(PARAM_TIMEOUT).ok().flatten()
+        await_reply(ask_resp, dispatch::PARAM_TIMEOUT)
+            .ok()
+            .flatten()
     }
 
     /// The plain value the plugin's format converts `value` to, on one
@@ -799,7 +821,9 @@ impl AudioBridge {
         }) {
             return None;
         }
-        ask_resp.recv_timeout(PARAM_TIMEOUT).ok().flatten()
+        await_reply(ask_resp, dispatch::PARAM_TIMEOUT)
+            .ok()
+            .flatten()
     }
 
     /// The inverse of [`parameter_plain`](Self::parameter_plain).
@@ -815,7 +839,9 @@ impl AudioBridge {
         }) {
             return None;
         }
-        ask_resp.recv_timeout(PARAM_TIMEOUT).ok().flatten()
+        await_reply(ask_resp, dispatch::PARAM_TIMEOUT)
+            .ok()
+            .flatten()
     }
 
     /// The plugin's display string for `value` on one parameter.
@@ -835,7 +861,9 @@ impl AudioBridge {
         }) {
             return None;
         }
-        ask_resp.recv_timeout(PARAM_TIMEOUT).ok().flatten()
+        await_reply(ask_resp, dispatch::PARAM_TIMEOUT)
+            .ok()
+            .flatten()
     }
 
     /// The value the plugin parses `text` into.
@@ -858,7 +886,9 @@ impl AudioBridge {
         {
             return None;
         }
-        ask_resp.recv_timeout(PARAM_TIMEOUT).ok().flatten()
+        await_reply(ask_resp, dispatch::PARAM_TIMEOUT)
+            .ok()
+            .flatten()
     }
 }
 
@@ -904,6 +934,36 @@ mod tests {
             bridge.load_state(&[1, 2, 3], tutti_plugin_types::StateUse::Project),
             Err(StateError::PluginCrashed)
         );
+    }
+
+    /// **A bridge that answers at its own deadline is still heard.** The bridge
+    /// gives up on the server at `deadline` and replies into the `ask` then (a
+    /// late answer or its `None`); the host's wait ends a margin after, so it
+    /// does not give up the instant the bridge answers.
+    #[test]
+    fn an_answer_after_the_bridges_deadline_is_heard_within_the_margin() {
+        let deadline = Duration::from_millis(100);
+        let (waiting, reply) = ask::ask::<u8>();
+        let bridge = std::thread::spawn(move || {
+            std::thread::sleep(deadline + REPLY_MARGIN / 2);
+            reply.send(7);
+        });
+        assert_eq!(await_reply(waiting, deadline), Ok(7));
+        bridge.join().unwrap();
+    }
+
+    /// The wait is still bounded: a bridge that never answers is given up on a
+    /// margin after its deadline.
+    #[test]
+    fn a_bridge_that_never_answers_is_given_up_on_after_the_margin() {
+        let deadline = Duration::from_millis(50);
+        let (waiting, _reply) = ask::ask::<u8>();
+        let started = std::time::Instant::now();
+        assert_eq!(
+            await_reply(waiting, deadline),
+            Err(crossbeam_channel::RecvTimeoutError::Timeout)
+        );
+        assert!(started.elapsed() >= deadline + REPLY_MARGIN);
     }
 
     /// The negotiated rate is stored once and read live.

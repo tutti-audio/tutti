@@ -244,7 +244,11 @@ impl PluginInfo {
 ///
 /// #[derive(Clone, Copy, Default)]
 /// struct Half(u16);
-/// impl Sample for Half {}
+/// impl Sample for Half {
+///     fn is_finite(self) -> bool {
+///         true
+///     }
+/// }
 ///
 /// // The trait is sealed: `Half` cannot implement it, whatever it defines.
 /// impl Vst3Sample for Half {
