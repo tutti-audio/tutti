@@ -38,8 +38,14 @@ pub enum DiscoveryError {
     #[error("the TXT record has no {0} key")]
     MissingKey(&'static str),
     /// A TXT value is not UTF-8.
-    #[error("the TXT value of {0} is not UTF-8")]
-    Utf8(&'static str),
+    #[error("the TXT value of {key} is not UTF-8: {source}")]
+    Utf8 {
+        /// The TXT key.
+        key: &'static str,
+        /// What is wrong with the bytes.
+        #[source]
+        source: std::str::Utf8Error,
+    },
     /// The Endpoint Name in the TXT record is not a valid name.
     #[error("the UMPEndpointName is invalid: {0}")]
     EndpointName(NameError),
@@ -197,7 +203,7 @@ fn txt_text<'a>(
         .get_property_val(key)
         .flatten()
         .ok_or(DiscoveryError::MissingKey(key))?;
-    std::str::from_utf8(value).map_err(|_| DiscoveryError::Utf8(key))
+    std::str::from_utf8(value).map_err(|source| DiscoveryError::Utf8 { key, source })
 }
 
 /// What a [`Browser`] saw.

@@ -121,11 +121,11 @@ fn session_commands_without_payload_are_a_zero_length_header() {
 #[test]
 fn ping_and_ping_reply_carry_the_id_in_one_payload_word() {
     assert_eq!(
-        cmd_bytes(&Command::Ping(PingId(0x0102_0304))),
+        cmd_bytes(&Command::Ping(PingId::new(0x0102_0304))),
         [0x20, 0x01, 0, 0, 1, 2, 3, 4]
     );
     assert_eq!(
-        cmd_bytes(&Command::PingReply(PingId(0xDEAD_BEEF))),
+        cmd_bytes(&Command::PingReply(PingId::new(0xDEAD_BEEF))),
         [0x21, 0x01, 0, 0, 0xDE, 0xAD, 0xBE, 0xEF]
     );
 }
@@ -330,8 +330,8 @@ fn every_command_round_trips() {
             nonce,
             identity: id,
         }),
-        Command::Ping(PingId(1)),
-        Command::PingReply(PingId(u32::MAX)),
+        Command::Ping(PingId::new(1)),
+        Command::PingReply(PingId::new(u32::MAX)),
         Command::RetransmitRequest(RetransmitRequest {
             first: SequenceNumber::new(65535),
             count: 0,
@@ -430,7 +430,7 @@ fn payload_words_past_the_defined_fields_are_ignored() {
     let c = one(&[0x20, 0x02, 0xAB, 0xCD, 0, 0, 0, 5, 9, 9, 9, 9]).unwrap();
     assert_eq!(
         c,
-        Command::Ping(PingId(5)),
+        Command::Ping(PingId::new(5)),
         "the header's reserved data and the extra word are not read"
     );
 }
@@ -457,7 +457,7 @@ fn an_invitation_with_an_all_zero_name_is_refused_as_empty() {
 #[test]
 fn an_invitation_name_that_is_not_utf8_is_refused() {
     let e = one(&[0x01, 0x02, 0x01, 0x00, 0xFF, 0xFE, 0, 0, b'i', 0, 0, 0]).unwrap_err();
-    assert_eq!(e.error, ParseError::Utf8);
+    assert!(matches!(e.error, ParseError::Utf8(_)));
 }
 
 #[test]
@@ -521,7 +521,7 @@ fn ump_data_over_sixty_four_words_is_refused() {
 fn ump_data_that_ends_inside_a_packet_is_refused() {
     // A MIDI 2.0 channel voice packet is two words; one is present.
     let e = one(&[0xFF, 0x01, 0, 0, 0x40, 0x90, 0x3C, 0x00]).unwrap_err();
-    assert_eq!(e.error, ParseError::UmpData(UmpDataError::Truncated));
+    assert_eq!(e.error, ParseError::UmpData(UmpDataError::EndsInsidePacket));
 }
 
 #[test]

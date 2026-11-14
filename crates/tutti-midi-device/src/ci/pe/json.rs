@@ -29,6 +29,7 @@ use winnow::combinator::{alt, delimited, opt, repeat, separated};
 use winnow::error::{ContextError, ErrMode};
 use winnow::token::{literal, one_of, take, take_while};
 
+use super::super::escape::hex4;
 use super::tree::{PE_JSON_MAX_DEPTH, PeDecimal, PeJson, PeObject};
 
 type Res<T> = winnow::ModalResult<T, ContextError>;
@@ -61,13 +62,6 @@ fn escape(input: &mut &[u8]) -> Res<u16> {
         (literal(b'u'), take(4usize).verify_map(hex4)).map(|(_, unit)| unit),
     ))
     .parse_next(input)
-}
-
-fn hex4(digits: &[u8]) -> Option<u16> {
-    if !digits.iter().all(u8::is_ascii_hexdigit) {
-        return None;
-    }
-    u16::from_str_radix(std::str::from_utf8(digits).ok()?, 16).ok()
 }
 
 fn string(input: &mut &[u8]) -> Res<String> {

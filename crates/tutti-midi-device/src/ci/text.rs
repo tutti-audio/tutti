@@ -1,10 +1,11 @@
 //! The Message Text of an ACK or a NAK (M2-101 §5.10.4, §5.11.4): ASCII on the
 //! wire, with everything else a JSON `\u` escape.
 
-use std::fmt::{self, Write as _};
+use std::fmt;
 use std::str::FromStr;
 use std::vec::Vec;
 
+use super::escape::{hex4, is_plain, push_utf16_escapes, utf16_escapes_len};
 use crate::name::NameError;
 
 /// The human-readable text of an ACK or NAK, held as the text it says and
@@ -19,10 +20,16 @@ use crate::name::NameError;
 /// 3. A message should not use ASCII below 0x20 except 0x0A (line feed); other
 ///    such characters, tab and carriage return among them, should be ignored.
 ///
-/// So the writer escapes `\` as `\\`, every character outside `0x20..=0x7E`
+/// So the writer escapes `\` as `\\`, every character outside `0x20..=0x7F`
 /// other than a line feed as one `\uXXXX` per UTF-16 unit (a character past the
 /// Basic Multilingual Plane is a surrogate pair, as in JSON), and the reader
 /// undoes both, and drops a raw control character the rule says to ignore.
+///
+/// This dialect differs from the Property Exchange JSON writer in two things
+/// the rules above set: the text is not a JSON document, so a quote is an
+/// ordinary character and stays as it is; and rule 3 allows a line feed raw
+/// where JSON escapes it. The reader is as lenient as the rules: a lone
+/// surrogate or a malformed escape is kept or replaced, never refused.
 ///
 /// The bound: a NAK may not exceed the responder's Maximum Receivable SysEx
 /// Size from Discovery, so the spec calls up to 103 bytes of Message text safe
@@ -64,14 +71,9 @@ impl MessageText {
         for c in self.0.chars() {
             match c {
                 '\\' => escaped.push_str("\\\\"),
-                '\n' | ' '..='~' => escaped.push(c),
-                _ => {
-                    let mut units = [0u16; 2];
-                    for unit in c.encode_utf16(&mut units) {
-                        // Writing to a `String` cannot fail.
-                        let _ = write!(escaped, "\\u{unit:04x}");
-                    }
-                }
+                '\n' => escaped.push(c),
+                c if is_plain(c) => escaped.push(c),
+                c => push_utf16_escapes(&mut escaped, c),
             }
         }
         out.extend_from_slice(escaped.as_bytes());
@@ -177,10 +179,11 @@ fn push_escaped(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, out: &mut 
 /// there.
 fn read_unit(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<u16> {
     let mut ahead = chars.clone();
-    let mut unit = 0u16;
-    for _ in 0..4 {
-        unit = unit << 4 | u16::try_from(ahead.next()?.to_digit(16)?).ok()?;
+    let mut digits = [0u8; 4];
+    for digit in &mut digits {
+        *digit = u8::try_from(ahead.next()?).ok()?;
     }
+    let unit = hex4(&digits)?;
     *chars = ahead;
     Some(unit)
 }
@@ -189,8 +192,9 @@ fn encoded_len(text: &str) -> usize {
     text.chars()
         .map(|c| match c {
             '\\' => 2,
-            '\n' | ' '..='~' => 1,
-            c => 6 * c.len_utf16(),
+            '\n' => 1,
+            c if is_plain(c) => 1,
+            c => utf16_escapes_len(c),
         })
         .sum()
 }
