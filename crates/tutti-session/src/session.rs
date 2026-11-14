@@ -365,12 +365,13 @@ pub enum RootTopologyStatus {
 /// Nothing the session frees needs the main thread: a plugin a removal, a
 /// replacement or a crossfade retires is parked in a graveyard, which the main
 /// thread empties (`MainSession::update`, with `plugin`), and a format closes an
-/// in-process plugin that is released off the main thread there
-/// (`tutti_plugin_types::defer_to_main`). A host that never claims a main
-/// thread keeps the parked plugins until it does, and the session says so once
+/// in-process plugin that is released off the main thread there (it hands the
+/// close to the session's `MainWork`, which the main thread's update runs). A
+/// host with no main-thread update keeps the parked plugins until it has one, and
+/// the session says so once
 /// (`Session::retired_plugins`). What does need the main thread (an editor,
 /// loading an in-process plugin, restoring state) takes the proof
-/// (`MainThread`), or is the view's (`Session::main`).
+/// (`MainThreadMarker`), or is the view's (`Session::main`).
 ///
 /// ```
 /// use tutti_types::MaxBlock;
@@ -488,6 +489,32 @@ pub struct Session {
     pub(crate) bounce: crate::bounce::BounceState,
     /// The blocking work running on the spawner, landed in `Phase::Collect`.
     pub(crate) jobs: crate::jobs::Jobs,
+    /// What every plugin this session loads hands to the main thread: the closes of
+    /// a drop off the main thread. The handle is cloned into each load.
+    #[cfg(feature = "plugin")]
+    pub(crate) work: tutti_plugin_types::MainWorkHandle,
+    /// The receiving end of `work`, drained on the main thread by the session's
+    /// update. Declared last, so it drops after every plugin the session holds: a
+    /// close handed over while the session drops is still collected, and
+    /// [`MainWork`](tutti_plugin_types::MainWork)'s own drop runs what is left.
+    #[cfg(feature = "plugin")]
+    pub(crate) main_work: tutti_plugin_types::MainWork,
+}
+
+#[cfg(feature = "plugin")]
+impl Drop for Session {
+    /// The fallback of `Session::close`: on the main
+    /// thread, runs the work other threads handed over, and the plugins then drop
+    /// with the fields, their closes collected by the last field's own drop.
+    ///
+    /// End a session that hosted an in-process plugin with `close` on the main
+    /// thread; dropped elsewhere, it leaks those plugins and counts them in
+    /// `tutti_plugin_types::MainWork::stranded()`.
+    fn drop(&mut self) {
+        if let Some(main) = tutti_plugin_types::MainThreadMarker::new() {
+            self.main_work.run(main);
+        }
+    }
 }
 
 impl Session {
@@ -498,6 +525,27 @@ impl Session {
     )]
     pub(crate) fn mint_resource_id(&mut self) -> crate::ResourceId {
         self.resource_ids.mint()
+    }
+
+    /// Ends the session on the main thread: runs the work other threads handed to
+    /// it, drops the session's plugins (each closes on `main`, or hands its close
+    /// to the session's collector), and runs what that handed over. Nothing a
+    /// plugin owes the main thread is left undone.
+    ///
+    /// End a session that hosted an in-process plugin with `close` on the main
+    /// thread; dropped elsewhere, it leaks those plugins and counts them in
+    /// [`stranded()`](tutti_plugin_types::MainWork::stranded).
+    #[cfg(feature = "plugin")]
+    pub fn close(self, main: tutti_plugin_types::MainThreadMarker) {
+        let mut session = self;
+        session.main_work.run(main);
+        // The plugins close in the drop below and hand what they cannot do
+        // there to their handles, which feed the collector taken out here;
+        // the session keeps an empty one.
+        let (inert, _) = tutti_plugin_types::MainWork::new();
+        let collected = std::mem::replace(&mut session.main_work, inert);
+        drop(session);
+        collected.run(main);
     }
 
     /// A builder with the defaults: offline, 48 kHz, stereo, blocks of up to
@@ -666,11 +714,11 @@ impl Session {
                 let repreparing = self.graph.is_repreparing();
                 self.graph.collect();
                 // Closes a plugin that was dropped off its own thread (a pool thread at an
-                // export's end, say): its owner handed the close to the main thread, which is
-                // this tick. `MainThread::current` is `Some` only on the claiming thread.
+                // export's end, say): it handed the close to this session's collector, which
+                // runs on the process's main thread (`MainThreadMarker::new` is `Some` only there).
                 #[cfg(feature = "plugin")]
-                if let Some(main) = tutti_plugin_types::MainThread::current() {
-                    tutti_plugin_types::run_deferred(&main);
+                if let Some(main) = tutti_plugin_types::MainThreadMarker::new() {
+                    self.main_work.run(main);
                 }
                 self.report_event_losses(out);
                 self.report_silenced(out);

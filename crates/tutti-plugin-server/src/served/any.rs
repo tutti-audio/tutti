@@ -11,7 +11,9 @@
 
 use std::path::Path;
 
-use tutti_plugin_types::{Hand, Load, LoadStage, MainThread, PluginError, PluginResult, StateUse};
+use tutti_plugin_types::{
+    Hand, Load, LoadStage, MainThreadMarker, MainWorkHandle, PluginError, PluginResult, StateUse,
+};
 
 use super::{Served, ServedPlugin};
 use crate::render::{End, RenderEnd};
@@ -41,7 +43,8 @@ macro_rules! served {
             /// row names, else the format's own.
             #[allow(clippy::too_many_arguments)] // one load's parameters, as the wire carries them
             pub(crate) fn load(
-                main: &MainThread,
+                main: MainThreadMarker,
+                work: &MainWorkHandle,
                 path: &Path,
                 load: &Load,
                 sample_rate: tutti_plugin_types::SampleRate,
@@ -66,6 +69,7 @@ macro_rules! served {
                         let (hand, rt) = Hand::threaded();
                         let (plugin, state_error) = Served::<$loaded>::load(
                             main,
+                            work,
                             path,
                             load,
                             sample_rate,

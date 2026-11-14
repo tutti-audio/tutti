@@ -21,6 +21,4 @@ pub use ladder::{
 };
 pub use per_channel::{ChannelRecurrence, Filter, PerChannel};
 pub use real::{Lanes, Real};
-pub use svf::{
-    Svf, SvfCoefficients, SvfCoeffs, SvfControls, SvfFamily, SvfModel, SvfType, svf_step,
-};
+pub use svf::{SvfBank, SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType, svf_step};

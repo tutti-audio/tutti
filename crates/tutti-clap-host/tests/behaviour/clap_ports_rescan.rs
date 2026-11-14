@@ -93,8 +93,13 @@ impl Probe {
 
     fn load(&self) -> ClapLoaded {
         let path = Path::new(tutti_fixtures::clap_probe());
-        ClapLoaded::load(&main_thread(), path, LoadOptions::new().library(path))
-            .expect("reference plugin should load")
+        ClapLoaded::load(
+            main_thread(),
+            &tutti_fixtures::detached_work(),
+            path,
+            LoadOptions::new().library(path),
+        )
+        .expect("reference plugin should load")
     }
 }
 
@@ -118,13 +123,13 @@ fn a_rescan_rereads_the_f64_flag() {
 
     probe.ports_64bit(BOTH_SIDES);
     loaded
-        .rescan_audio_ports(&main_thread())
+        .rescan_audio_ports(main_thread())
         .expect("deactivated");
     assert!(loaded.supports_f64(), "the plugin now flags its ports");
 
     probe.ports_64bit(PORTS_64BIT_OUTPUTS);
     loaded
-        .rescan_audio_ports(&main_thread())
+        .rescan_audio_ports(main_thread())
         .expect("deactivated");
     assert!(
         !loaded.supports_f64(),
@@ -164,11 +169,11 @@ fn a_plugin_without_clap_tail_has_no_answer() {
     let probe = Probe::acquire();
 
     probe.tail_extension(false);
-    assert_eq!(probe.load().tail_samples(&main_thread()), None);
+    assert_eq!(probe.load().tail_samples(main_thread()), None);
 
     probe.tail_extension(true);
     assert_eq!(
-        probe.load().tail_samples(&main_thread()),
+        probe.load().tail_samples(main_thread()),
         Some(REPORTED_TAIL_SAMPLES)
     );
 }
@@ -189,7 +194,7 @@ fn a_rescan_of_an_active_plugin_is_refused() {
     probe.ports_64bit(BOTH_SIDES);
     let err = active
         .loaded_mut()
-        .rescan_audio_ports(&main_thread())
+        .rescan_audio_ports(main_thread())
         .expect_err("the plugin is active");
     assert!(matches!(err, ClapError::NotSupported(_)), "got {err}");
     assert!(
@@ -211,7 +216,7 @@ fn a_rate_change_rereads_the_port_layout() {
         .map_err(|(_, e)| e)
         .expect("activates");
     assert_eq!(
-        active.loaded().audio_port_count(&main_thread(), true),
+        active.loaded().audio_port_count(main_thread(), true),
         1,
         "fixture: one input port"
     );
@@ -221,7 +226,7 @@ fn a_rate_change_rereads_the_port_layout() {
     active.reconfigure_at(44_100.0, 512).expect("re-activates");
 
     assert_eq!(
-        active.loaded().audio_port_count(&main_thread(), true),
+        active.loaded().audio_port_count(main_thread(), true),
         2,
         "the plugin's new layout"
     );
@@ -321,7 +326,7 @@ fn a_refused_activation_with_a_new_layout_leaves_ports_the_next_one_fits() {
         .map_err(|(_, e)| e)
         .expect("flagged, so 64-bit activation is allowed");
     assert_eq!(
-        active.loaded().audio_port_count(&main_thread(), true),
+        active.loaded().audio_port_count(main_thread(), true),
         1,
         "fixture: one input port"
     );
@@ -333,7 +338,7 @@ fn a_refused_activation_with_a_new_layout_leaves_ports_the_next_one_fits() {
         .activate_at::<f64>(44_100.0, 512)
         .expect_err("the flags are gone");
     assert_eq!(
-        loaded.audio_port_count(&main_thread(), true),
+        loaded.audio_port_count(main_thread(), true),
         2,
         "the rescan is committed, so the layout is the plugin's"
     );

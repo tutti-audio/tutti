@@ -21,10 +21,6 @@ fn second_id() -> &'static str {
         .expect("utf-8")
 }
 
-fn main_thread() -> tutti_plugin_types::MainThread {
-    tutti_plugin_types::MainThread::claim().expect("one test, one process")
-}
-
 fn session() -> Session {
     // SAFETY: nextest runs each test in its own process, and this is set before
     // the first server is spawned, from the test's own thread.
@@ -53,10 +49,10 @@ fn entry_ref(path: &std::path::Path, id: &str) -> PluginRef {
 fn the_second_plugin_of_a_bundle_loads_by_its_entry() {
     let path = clap_probe();
     let mut s = session();
-    let main = main_thread();
+    let main = tutti_fixtures::main_thread();
 
     let second = s
-        .add_plugin_blocking(&main, PluginLoadRequest::new(entry_ref(&path, second_id())))
+        .add_plugin_blocking(main, PluginLoadRequest::new(entry_ref(&path, second_id())))
         .expect("the second plugin loads");
     let hosted = s.plugin(second).unwrap();
     assert_eq!(hosted.descriptor().id, second_id());
@@ -64,7 +60,7 @@ fn the_second_plugin_of_a_bundle_loads_by_its_entry() {
 
     let first = s
         .add_plugin_blocking(
-            &main,
+            main,
             PluginLoadRequest::new(PluginRef::file(&path).expect("a plugin file")),
         )
         .expect("the file's first plugin loads");
@@ -86,12 +82,12 @@ fn a_state_is_refused_by_another_plugin() {
     let first_ref = entry_ref(&path, first_id());
     let second_ref = entry_ref(&path, second_id());
     let mut s = session();
-    let main = main_thread();
+    let main = tutti_fixtures::main_thread();
     let first = s
-        .add_plugin_blocking(&main, PluginLoadRequest::new(first_ref.clone()))
+        .add_plugin_blocking(main, PluginLoadRequest::new(first_ref.clone()))
         .expect("loads");
     let second = s
-        .add_plugin_blocking(&main, PluginLoadRequest::new(second_ref.clone()))
+        .add_plugin_blocking(main, PluginLoadRequest::new(second_ref.clone()))
         .expect("loads");
 
     let from_first = s.plugin(first).unwrap().state().save().expect("saves");
@@ -118,7 +114,7 @@ fn a_state_is_refused_by_another_plugin() {
     let hosted = s.plugin(second).unwrap();
     let refused = hosted
         .state()
-        .restore(&main, &from_first)
+        .restore(main, &from_first)
         .expect_err("a hosted plugin refuses another's state");
     assert!(
         matches!(refused, StateError::OtherPlugin { .. }),
@@ -126,7 +122,7 @@ fn a_state_is_refused_by_another_plugin() {
     );
     hosted
         .state()
-        .restore(&main, &from_second)
+        .restore(main, &from_second)
         .expect("and takes its own");
     let _: &PluginState = &from_second;
 }

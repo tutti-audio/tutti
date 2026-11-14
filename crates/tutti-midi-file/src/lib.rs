@@ -103,6 +103,7 @@ mod config;
 mod file;
 mod kind;
 mod smf;
+mod write;
 
 pub use clip_file::ClipFileError;
 pub use config::{ConfigError, OutOfOrder, Refusal};
@@ -111,6 +112,7 @@ pub use file::{
     SmfFormat, TextKind, Tick, ToClipError, Track,
 };
 pub use kind::MidiFileKind;
+pub use write::WriteOptions;
 
 use thiserror::Error;
 
@@ -122,6 +124,15 @@ pub enum Error {
     /// the write failed.
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    /// A write found something at its path (a file, a directory or a symlink)
+    /// and was not told to replace it ([`WriteOptions::replace`]); it is
+    /// untouched.
+    #[error("{} already exists", path.display())]
+    Exists {
+        /// The path that is taken.
+        path: std::path::PathBuf,
+    },
 
     /// The bytes are not a well-formed SMF: a malformed event (a data byte
     /// with its top bit set, a running status with none active, a

@@ -20,8 +20,8 @@ use tutti_plugin_contract::{
 };
 use tutti_plugin_ipc::{BridgeConfig as IpcConfig, BridgeEvent, Ipc, Launched};
 use tutti_plugin_types::{
-    BridgeError, BridgeResult, Control, Editor, Load, LoadStage, MainThread, Normalized, ParamEdit,
-    ParamId, SampleFormat, SampleRate,
+    BridgeError, BridgeResult, Control, Editor, Load, LoadStage, MainThreadMarker, Normalized,
+    ParamEdit, ParamId, SampleFormat, SampleRate,
 };
 
 fn through_server<F: Format>(path: PathBuf) {
@@ -29,6 +29,7 @@ fn through_server<F: Format>(path: PathBuf) {
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
     let client = PluginClient::new(
         BridgeConfig::default(),
+        &tutti_fixtures::detached_work(),
         &tutti_plugin::catalog::PluginRef::file(path).expect("a plugin file"),
         tutti_plugin_types::SampleRate::SR_48K,
     )
@@ -40,7 +41,7 @@ fn through_server<F: Format>(path: PathBuf) {
     let state = handle.any_thread().save_state().expect("saves");
     let blob = patch_mode(F::extract_blob(&state), Mode::Level);
     handle
-        .load_state(&main_thread(), &F::embed_blob(&state, &blob))
+        .load_state(main_thread(), &F::embed_blob(&state, &blob))
         .expect("loads");
 
     let saved = handle.any_thread().save_state().expect("saves again");
@@ -97,7 +98,12 @@ fn vst3_cpp_mode_and_transcript_cross_the_process_boundary() {
 }
 
 /// No editor in these tests: the served plugin is driven through `Ipc` alone.
-fn no_editor(_: &MainThread, path: &std::path::Path, _: &Load) -> BridgeResult<Box<dyn Editor>> {
+fn no_editor(
+    _: MainThreadMarker,
+    _: &tutti_plugin_types::MainWorkHandle,
+    path: &std::path::Path,
+    _: &Load,
+) -> BridgeResult<Box<dyn Editor>> {
     Err(BridgeError::LoadFailed {
         path: path.to_path_buf(),
         stage: LoadStage::Opening,
@@ -122,7 +128,10 @@ fn served<F: Format>(
         SampleRate::of(RATE),
         None,
         tutti_plugin_types::StateUse::Project,
-        Some(no_editor),
+        Some(tutti_plugin_ipc::EditorLoader::new(
+            no_editor,
+            tutti_fixtures::detached_work(),
+        )),
     )
     .unwrap_or_else(|e| panic!("{}: the server loads the plugin: {e:?}", F::NAME));
     let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -184,7 +193,7 @@ fn a_served_value_keeps_its_f64_width<F: Format>(path: PathBuf) {
     );
     let (mut a, _) = served::<F>(path);
     let main = tutti_fixtures::main_thread();
-    let before = a.controller().parameter(&main, Param::Level.id());
+    let before = a.controller().parameter(main, Param::Level.id());
     assert_ne!(
         before.map(Normalized::get),
         Some(SENT),
@@ -192,7 +201,7 @@ fn a_served_value_keeps_its_f64_width<F: Format>(path: PathBuf) {
         F::NAME
     );
     a.controller_mut()
-        .set_parameter(&main, Param::Level.id(), Normalized::of(SENT));
+        .set_parameter(main, Param::Level.id(), Normalized::of(SENT));
     // A control-side write reaches the plugin at the head of a block after the
     // server's main thread has read it, not in step with a particular block:
     // it travels on the control connection and the blocks on the audio one.
@@ -201,7 +210,7 @@ fn a_served_value_keeps_its_f64_width<F: Format>(path: PathBuf) {
     let mut got = before;
     for _ in 0..200 {
         a.silent(BLOCK);
-        got = a.controller().parameter(&main, Param::Level.id());
+        got = a.controller().parameter(main, Param::Level.id());
         if got != before {
             break;
         }

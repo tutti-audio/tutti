@@ -21,8 +21,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    AudioBuffer, AudioBufferMut, Loaded, MainThread, Origin, PluginDescriptor, PluginIo,
-    PluginTail, ProcessContext, ProcessOutput, Processor,
+    AudioBuffer, AudioBufferMut, Loaded, MainThreadMarker, MainWorkHandle, Origin,
+    PluginDescriptor, PluginIo, PluginTail, ProcessContext, ProcessOutput, Processor,
 };
 use tutti_rt::Rt;
 
@@ -73,7 +73,7 @@ pub struct InProcClient<F: Loaded> {
     pub(super) descriptor: PluginDescriptor,
     /// Where the plugin came from, for an in-process one: what a fork loads
     /// again. `None` for a hosting that reopens another way.
-    pub(super) origin: Option<Origin>,
+    pub(super) reload: Option<Reload>,
     /// What the Processor adds to the plugin's own latency
     /// ([`Processor::latency`]), as the last `prepare` read it: the served
     /// pipeline's chunk.
@@ -410,7 +410,7 @@ pub(super) fn queue_sample_rate(cell: &AtomicU64, rate: SampleRate) {
 /// change starts with a recall and finishes at a later pump, once the audio
 /// thread has handed it back.
 pub(super) fn drain_sample_rate<F: Loaded>(
-    main: &MainThread,
+    main: MainThreadMarker,
     cell: &AtomicU64,
     inner: &Mutex<Instance<F>>,
 ) -> bool {
@@ -426,12 +426,20 @@ pub(super) fn drain_sample_rate<F: Loaded>(
     true
 }
 
+/// What a fork loads a plugin again from: where it came from, and the collector
+/// of its owner, which the new instance hands its close to.
+#[derive(Clone)]
+pub(super) struct Reload {
+    pub(super) origin: Origin,
+    pub(super) work: MainWorkHandle,
+}
+
 impl<F: Loaded> InProcClient<F> {
     pub(super) fn new(
         inner: Arc<Mutex<Instance<F>>>,
         rt: Rt<F::Processor>,
         descriptor: PluginDescriptor,
-        origin: Option<Origin>,
+        reload: Option<Reload>,
         declared: Declared,
         features: Features,
         sample_rate: f64,
@@ -465,7 +473,7 @@ impl<F: Loaded> InProcClient<F> {
             inner,
             rt,
             descriptor,
-            origin,
+            reload,
             pipeline,
             declared,
             midi: MidiEventVec::new(),
@@ -521,8 +529,8 @@ impl<F: Loaded> InProcClient<F> {
     /// reconfiguration. Takes the instance lock, so call it from a control
     /// thread, not the audio thread.
     pub fn set_render_mode(&self, mode: tutti_plugin_types::RenderMode) -> bool {
-        match MainThread::current() {
-            Some(main) => self.inner.lock().set_render_mode(&main, mode, None),
+        match MainThreadMarker::new() {
+            Some(main) => self.inner.lock().set_render_mode(main, mode, None),
             None => false,
         }
     }
@@ -626,11 +634,11 @@ impl<F: Loaded> InProcClient<F> {
         // node is out of any executor (`Node::prepare`'s contract), so its
         // realtime end hands the Processor back and takes the new one in this
         // call.
-        if let Some(main) = MainThread::current() {
+        if let Some(main) = MainThreadMarker::new() {
             let outcome = self
                 .inner
                 .lock()
-                .set_sample_rate(&main, rate, Some(&mut self.rt));
+                .set_sample_rate(main, rate, Some(&mut self.rt));
             // A refusal renders silence (no Processor is lent) and is reported
             // through the handle (`take_rate_report`).
             self.rate_refused = outcome.is_err();
