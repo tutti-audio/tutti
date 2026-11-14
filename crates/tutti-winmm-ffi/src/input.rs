@@ -12,8 +12,13 @@
 //! - dropping the input removes it from the registry first, so no callback
 //!   that has not yet looked it up finds anything, then waits (bounded) for
 //!   the callbacks already inside to leave;
-//! - the callback takes one user-mode lock, the registry's, held only for a scan
-//!   of the open inputs' slots; it calls no other function of the system's;
+//! - the callback is not confined to what a `MIDIINPROC` may call. It takes two
+//!   user-mode locks, which are outside that list: the registry's, held only for
+//!   a scan of the open inputs' slots, and the handler's `Mutex` in `dispatch`,
+//!   held for the handler's call. It also calls `SetEvent` (through
+//!   `Requeue::drop` and the worker's wake), which is on the list. It calls no
+//!   other function of the system's, and the buffers go back to winmm only from
+//!   the worker;
 //! - the callback only hands the recorded bytes to the handler and marks the
 //!   buffer done; a worker thread gives the buffer back to winmm, because
 //!   `midiInAddBuffer` is not one of the calls a `MIDIINPROC` may make.

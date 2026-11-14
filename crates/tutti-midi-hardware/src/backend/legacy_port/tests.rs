@@ -6,7 +6,7 @@ use super::anchor::Anchor;
 use super::bytes::{ByteIn, ByteOut, Wire};
 use super::poll;
 use super::ports::{PortInfo, Side, endpoint, endpoint_id, endpoints, locate, slot_of};
-use super::schedule::Schedule;
+use super::schedule::{Next, Outbox, Schedule};
 use crate::Devices;
 use crate::capability::{EndpointInfo, UmpCapability};
 use crate::devices::ChangeSink;
@@ -272,7 +272,6 @@ fn a_schedule_releases_the_earliest_first_and_ties_in_push_order() {
     held.push(at(10), "first");
     held.push(at(10), "second");
     held.push(at(20), "middle");
-    assert_eq!(held.len(), 4);
     let now = at(25);
     let due: Vec<_> = std::iter::from_fn(|| held.pop_due(now)).collect();
     assert_eq!(due, ["first", "second", "middle"]);
@@ -296,7 +295,7 @@ fn a_batch_past_the_room_takes_a_prefix() {
     let t0 = Instant::now();
     let mut held = Schedule::new();
     assert_eq!(held.push_batch(2, [(t0, 1), (t0, 2), (t0, 3)]), 2);
-    assert_eq!(held.len(), 2);
+    assert_eq!(std::iter::from_fn(|| held.pop_due(t0)).count(), 2);
 }
 
 #[test]
@@ -313,6 +312,66 @@ fn a_schedule_says_how_long_until_the_earliest_and_zero_when_late() {
         held.wait(t0 + Duration::from_millis(90)),
         Some(Duration::ZERO)
     );
+}
+
+#[test]
+fn an_outbox_counts_what_is_taken_until_each_is_handled() {
+    let t0 = Instant::now();
+    let mut outbox = Outbox::new();
+    assert_eq!(
+        outbox.take(8, [(t0, 1), (t0, 2), (t0 + Duration::from_secs(60), 3)]),
+        3
+    );
+    assert_eq!(outbox.pending(), 3);
+    assert_eq!(outbox.next(t0), Next::Send(1));
+    assert_eq!(outbox.pending(), 3, "in hand is still pending");
+    outbox.done();
+    assert_eq!(outbox.next(t0), Next::Send(2));
+    outbox.done();
+    assert_eq!(outbox.pending(), 1);
+    assert_eq!(outbox.next(t0), Next::Wait(Some(Duration::from_secs(60))));
+}
+
+#[test]
+fn a_dead_outbox_takes_nothing_and_drops_what_it_held() {
+    let t0 = Instant::now();
+    let mut outbox = Outbox::new();
+    assert_eq!(
+        outbox.take(
+            8,
+            [
+                (t0 + Duration::from_secs(1), 1),
+                (t0 + Duration::from_secs(2), 2)
+            ]
+        ),
+        2
+    );
+    assert_eq!(outbox.end(), 2, "both were held");
+    assert!(!outbox.alive());
+    assert_eq!(
+        outbox.pending(),
+        0,
+        "nothing is left waiting for a sender that is gone"
+    );
+    assert_eq!(outbox.take(8, [(t0, 3)]), 0);
+    assert_eq!(outbox.pending(), 0);
+}
+
+#[test]
+fn an_outbox_takes_no_more_than_its_room_counting_what_is_pending() {
+    let t0 = Instant::now();
+    let mut outbox = Outbox::new();
+    assert_eq!(outbox.take(3, [(t0, 1), (t0, 2)]), 2);
+    assert_eq!(outbox.take(3, [(t0, 3), (t0, 4)]), 1);
+}
+
+#[test]
+fn a_stopped_outbox_tells_the_sender_to_stop_before_anything_due() {
+    let t0 = Instant::now();
+    let mut outbox = Outbox::new();
+    outbox.take(8, [(t0, 1)]);
+    outbox.stop();
+    assert_eq!(outbox.next(t0), Next::Stop);
 }
 
 // ---- anchor ---------------------------------------------------------------

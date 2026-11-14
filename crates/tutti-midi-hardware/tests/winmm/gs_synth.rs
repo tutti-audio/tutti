@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use tutti_fixtures::midi::{GS_RESET, GS_WAVETABLE};
-use tutti_graph::Offset;
+use tutti_graph::{Losses, Offset};
 use tutti_midi_hardware::{DeviceInfo, Devices, OpenOutput};
 use tutti_midi_runtime::{Outgoing, SendAt};
 use tutti_ump::{MidiGroup, SysexMessage, Ump};
@@ -86,7 +86,7 @@ fn the_synth_is_sent_every_event_at_its_time_and_opens_again_after_a_close() {
         batch.extend(reset.iter().map(|&ump| at(SendAt::At(later), ump)));
         assert_eq!(out.queue_timed(&batch), batch.len());
         drained(&out);
-        assert_eq!(out.losses(), tutti_graph::Losses::NONE);
+        assert_eq!(out.losses(), Losses::NONE);
         assert!(out.is_alive());
         // Each was held to its time: the last was due 90 ms in.
         assert!(

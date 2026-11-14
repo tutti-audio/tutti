@@ -20,11 +20,6 @@ impl<T> Schedule<T> {
         }
     }
 
-    /// How many items are held.
-    pub(in crate::backend) fn len(&self) -> usize {
-        self.held.len()
-    }
-
     /// Drops every held item; returns how many.
     pub(in crate::backend) fn clear(&mut self) -> usize {
         let held = self.held.len();
@@ -74,4 +69,98 @@ impl<T> Schedule<T> {
         let (due, _) = self.held.front()?;
         Some(due.saturating_duration_since(now))
     }
+}
+
+/// What an output with a sender thread shares with it, behind one lock: the
+/// held events, whether the sender is alive, and how many events were taken and
+/// not yet sent. Every change of the three is one method, so no count is
+/// touched outside the lock that decides it.
+#[derive(Debug)]
+pub(in crate::backend) struct Outbox<T> {
+    queue: Schedule<T>,
+    stop: bool,
+    alive: bool,
+    /// Taken and not yet sent: held, plus the one the sender has in hand.
+    pending: usize,
+}
+
+impl<T> Outbox<T> {
+    /// An outbox with a live sender and nothing held.
+    pub(in crate::backend) fn new() -> Self {
+        Self {
+            queue: Schedule::new(),
+            stop: false,
+            alive: true,
+            pending: 0,
+        }
+    }
+
+    /// Takes a batch as [`Schedule::push_batch`] does, `room` bounding what is
+    /// held and pending. A dead sender takes nothing.
+    pub(in crate::backend) fn take(
+        &mut self,
+        room: usize,
+        batch: impl IntoIterator<Item = (Instant, T)>,
+    ) -> usize {
+        if !self.alive {
+            return 0;
+        }
+        let room = room.saturating_sub(self.pending);
+        let taken = self.queue.push_batch(room, batch);
+        self.pending += taken;
+        taken
+    }
+
+    /// The sender's next step: `None` to stop, or the earliest event due at
+    /// `now` (it stays pending until [`done`](Self::done)), or how long to
+    /// wait.
+    pub(in crate::backend) fn next(&mut self, now: Instant) -> Next<T> {
+        if self.stop {
+            return Next::Stop;
+        }
+        match self.queue.pop_due(now) {
+            Some(event) => Next::Send(event),
+            None => Next::Wait(self.queue.wait(now)),
+        }
+    }
+
+    /// The event [`next`](Self::next) gave has been handled.
+    pub(in crate::backend) fn done(&mut self) {
+        self.pending = self.pending.saturating_sub(1);
+    }
+
+    /// Asks the sender to stop.
+    pub(in crate::backend) fn stop(&mut self) {
+        self.stop = true;
+    }
+
+    /// The sender is gone: it takes nothing more, and what it held (and the
+    /// event in its hand, if it panicked) is dropped. Returns how many events
+    /// were held.
+    pub(in crate::backend) fn end(&mut self) -> usize {
+        self.alive = false;
+        self.pending = 0;
+        self.queue.clear()
+    }
+
+    /// Whether the sender can still send.
+    pub(in crate::backend) fn alive(&self) -> bool {
+        self.alive
+    }
+
+    /// How many events were taken and not yet sent.
+    pub(in crate::backend) fn pending(&self) -> usize {
+        self.pending
+    }
+}
+
+/// What a sender does next ([`Outbox::next`]).
+#[derive(Debug, PartialEq, Eq)]
+pub(in crate::backend) enum Next<T> {
+    /// The output was dropped.
+    Stop,
+    /// An event is due.
+    Send(T),
+    /// Nothing is due: wait this long (for ever for `None`) or for a wake.
+    Wait(Option<Duration>),
 }

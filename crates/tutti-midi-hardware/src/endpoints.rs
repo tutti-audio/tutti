@@ -165,9 +165,11 @@ pub trait DeviceOut: MidiOut {
         Losses::NONE
     }
 
-    /// How many events were taken and are not yet sent: waiting for their time
-    /// or for the sender. An output that sends inside `queue` holds none, which
-    /// is the default.
+    /// How many events this crate's own sender thread has taken and not yet
+    /// sent: waiting for their time or for the thread. An output that sends
+    /// inside `queue` has no such thread, so the default is 0. For ALSA and
+    /// CoreMIDI, which hand timed events to the OS's scheduler, 0 means this
+    /// crate holds none, not that the OS has sent them.
     fn pending(&self) -> usize {
         0
     }

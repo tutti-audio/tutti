@@ -1,13 +1,13 @@
 //! Sending MIDI 1.0 to a winmm output, each event at its time.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use super::super::legacy_port::bytes::{ByteOut, Wire};
-use super::super::legacy_port::schedule::Schedule;
+use super::super::legacy_port::schedule::{Next, Outbox};
 use crate::endpoints::DeviceOut;
 use crate::error::{Error, Result};
 use tutti_graph::{Losses, UmpAt};
@@ -24,19 +24,13 @@ const MAX_PENDING: usize = 8192;
 /// detached with a warning.
 const JOIN_BOUND: Duration = Duration::from_secs(2);
 
-struct State {
-    queue: Schedule<Ump>,
-    stop: bool,
-}
-
 struct Shared {
-    state: Mutex<State>,
+    /// The held events, whether the sender lives, and how many are pending:
+    /// all decided under this one lock, which the sender also holds when it
+    /// ends.
+    state: Mutex<Outbox<Ump>>,
     /// Ends the thread's wait when an earlier event arrives or the output stops.
     sleeper: Sleeper,
-    /// Cleared when the thread ends other than by a stop.
-    alive: AtomicBool,
-    /// Events taken and not yet sent.
-    pending: AtomicU64,
     /// Sends the device refused.
     lost: AtomicU64,
     /// Events dropped when the sender ended.
@@ -44,7 +38,7 @@ struct Shared {
 }
 
 impl Shared {
-    fn state(&self) -> MutexGuard<'_, State> {
+    fn state(&self) -> MutexGuard<'_, Outbox<Ump>> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -68,14 +62,9 @@ impl MidiOut for WinMmOutput {
     /// [`MAX_PENDING`] events already wait, and none once the output is dead.
     /// A send that then fails is counted in [`losses`](DeviceOut::losses).
     fn queue_timed(&self, events: &[Outgoing]) -> usize {
-        if !self.shared.alive.load(Ordering::Acquire) {
-            return 0;
-        }
         let now = Instant::now();
-        let mut state = self.shared.state();
-        let room = MAX_PENDING.saturating_sub(state.queue.len());
-        let taken = state.queue.push_batch(
-            room,
+        let taken = self.shared.state().take(
+            MAX_PENDING,
             events.iter().map(|event| {
                 let due = match event.send {
                     SendAt::Now => now,
@@ -84,10 +73,6 @@ impl MidiOut for WinMmOutput {
                 (due, event.ump)
             }),
         );
-        drop(state);
-        self.shared
-            .pending
-            .fetch_add(taken as u64, Ordering::AcqRel);
         if taken > 0
             && let Err(e) = self.shared.sleeper.wake()
         {
@@ -99,7 +84,7 @@ impl MidiOut for WinMmOutput {
 
 impl DeviceOut for WinMmOutput {
     fn is_alive(&self) -> bool {
-        self.shared.alive.load(Ordering::Acquire)
+        self.shared.state().alive()
     }
 
     fn losses(&self) -> Losses {
@@ -108,13 +93,13 @@ impl DeviceOut for WinMmOutput {
     }
 
     fn pending(&self) -> usize {
-        usize::try_from(self.shared.pending.load(Ordering::Acquire)).unwrap_or(usize::MAX)
+        self.shared.state().pending()
     }
 }
 
 impl Drop for WinMmOutput {
     fn drop(&mut self) {
-        self.shared.state().stop = true;
+        self.shared.state().stop();
         if let Err(e) = self.shared.sleeper.wake() {
             tracing::warn!("winmm MIDI output wake: {e}");
         }
@@ -137,27 +122,29 @@ impl Drop for WinMmOutput {
     }
 }
 
-/// Sends what is due, in order, then waits for the next time or a wake. Ends
-/// on a stop, or marks the output dead when the wait fails.
+/// Marks the output dead when the sender thread ends, however it ends, a panic
+/// included: what it held had nowhere to go.
+struct Ends<'a>(&'a Shared);
+
+impl Drop for Ends<'_> {
+    fn drop(&mut self) {
+        let held = self.0.state().end();
+        self.0.refused.fetch_add(held as u64, Ordering::AcqRel);
+    }
+}
+
+/// Sends what is due, in order, then waits for the next time or a wake. Ends on
+/// a stop, or when the wait fails.
 fn run(mut port: Port, shared: &Shared) {
+    let _ends = Ends(shared);
     let mut bytes = ByteOut::new();
     loop {
-        let (due, wait) = {
-            let mut state = shared.state();
-            if state.stop {
-                return;
-            }
-            let now = Instant::now();
-            let due: Vec<Ump> = std::iter::from_fn(|| state.queue.pop_due(now)).collect();
-            (due, state.queue.wait(now))
-        };
-        if !due.is_empty() {
-            for ump in due {
-                // Per event, not per batch: a long run of due events must not
-                // keep a dropped output sending.
-                if shared.state().stop {
-                    return;
-                }
+        // The stop is looked at with each event, not once per batch: a long run
+        // of due events must not keep a dropped output sending.
+        let step = shared.state().next(Instant::now());
+        match step {
+            Next::Stop => return,
+            Next::Send(ump) => {
                 let sent = bytes.encode(ump, |wire| match wire {
                     Wire::Short(message) => port.short(message),
                     Wire::Long(message) => port.long(message),
@@ -166,20 +153,14 @@ fn run(mut port: Port, shared: &Shared) {
                     tracing::debug!("winmm MIDI send: {e}");
                     shared.lost.fetch_add(1, Ordering::AcqRel);
                 }
-                shared.pending.fetch_sub(1, Ordering::AcqRel);
+                shared.state().done();
             }
-            // Look again: more may have come due while sending.
-            continue;
-        }
-        if let Err(e) = shared.sleeper.wait(wait) {
-            tracing::warn!("winmm MIDI output stopped: {e}");
-            // What is held can no longer be sent: it had nowhere to go.
-            let mut state = shared.state();
-            let held = state.queue.clear() as u64;
-            shared.refused.fetch_add(held, Ordering::AcqRel);
-            shared.pending.fetch_sub(held, Ordering::AcqRel);
-            shared.alive.store(false, Ordering::Release);
-            return;
+            Next::Wait(wait) => {
+                if let Err(e) = shared.sleeper.wait(wait) {
+                    tracing::warn!("winmm MIDI output stopped: {e}");
+                    return;
+                }
+            }
         }
     }
 }
@@ -193,13 +174,8 @@ fn run(mut port: Port, shared: &Shared) {
 pub(super) fn open(index: u32) -> Result<WinMmOutput> {
     let port = Port::open(index)?;
     let shared = Arc::new(Shared {
-        state: Mutex::new(State {
-            queue: Schedule::new(),
-            stop: false,
-        }),
+        state: Mutex::new(Outbox::new()),
         sleeper: Sleeper::new()?,
-        alive: AtomicBool::new(true),
-        pending: AtomicU64::new(0),
         lost: AtomicU64::new(0),
         refused: AtomicU64::new(0),
     });

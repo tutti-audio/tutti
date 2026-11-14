@@ -12,7 +12,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
-use tutti_graph::UmpAt;
+use tutti_graph::{Losses, UmpAt};
 
 use tutti_midi_device::{
     DeviceEvent, DeviceId, DeviceInfo, DeviceTable, EndpointId, OsChange, OsDevice, PortDirection,
@@ -613,7 +613,7 @@ impl OpenOutput {
     /// What the output took and then could not send; see
     /// [`DeviceOut::losses`].
     #[must_use]
-    pub fn losses(&self) -> tutti_graph::Losses {
+    pub fn losses(&self) -> Losses {
         self.sink.losses()
     }
 

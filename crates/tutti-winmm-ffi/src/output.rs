@@ -112,14 +112,21 @@ impl MidiOut {
             }
             std::thread::sleep(Duration::from_millis(1));
         };
-        // SAFETY: the driver is done with the header, so nothing else points at
-        // either allocation; each is freed once, by the pointer that made it.
+        if released != 0 {
+            // The driver did not say it was done with the header (a failure
+            // other than `MIDIERR_STILLPLAYING`): it may still read it and the
+            // bytes, so neither is freed.
+            sent?;
+            return check("midiOutUnprepareHeader", released);
+        }
+        // SAFETY: the unprepare returned 0, so the driver holds neither the
+        // header nor the bytes; nothing else points at either allocation, and
+        // each is freed once, by the pointer that made it.
         unsafe {
             drop(Box::from_raw(header));
             drop(Box::from_raw(data));
         }
-        sent?;
-        check("midiOutUnprepareHeader", released)
+        sent
     }
 }
 
