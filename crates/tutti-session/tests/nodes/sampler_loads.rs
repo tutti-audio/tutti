@@ -179,41 +179,36 @@ fn a_clip_of_either_tier_plays_the_files_samples() {
         assert_eq!(clip.is_streamed(), residency == Residency::Streamed);
         let heard = play(clip.at(Beat(0.0)), 3_000);
         // The transport starts on the render's next block, so the file begins
-        // a block or so in, under the engine's start fade: frame `k` of the
-        // fade, `DECLICK` frames at `x = (k + 1) / (n + 1)` on the
-        // smootherstep, scales the output, so the first sound is the fade's
-        // frame 0, `s(1 / (n + 1))` times a file frame (the file's first
-        // frame, or its second when the gain is zero on the file's first).
-        // Past the fade the output is the file's frames, one per frame.
+        // a block or so in, under the engine's start fade: over
+        // `n = declick_frames(rate)` frames, frame `k` scales the output by the
+        // smootherstep at `x = (k + 1) / (n + 1)`. A clip at beat 0 plays the
+        // file's frame 0 on the fade's frame 0, and no fade gain and no file
+        // frame is zero, so the first sound is the file's frame 0 times
+        // `s(1 / (n + 1))`. Past the fade the output is the file's frames, one
+        // per frame.
         let n = tutti_graph::declick_frames(SampleRate::of(RATE)).get();
         let gain = |k: usize| {
             let x = (k + 1) as f64 / (n + 1) as f64;
             x * x * x * (6.0 * x * x - 15.0 * x + 10.0)
         };
-        let p = heard
+        // The file's frame 0 is output frame `first`, the first sound.
+        let first = heard
             .iter()
             .position(|&x| x != 0.0)
             .unwrap_or_else(|| panic!("{residency:?}: silent"));
-        let lead = (0..=1usize)
-            .find(|&j| {
-                let want = f64::from(value(j)) * gain(0);
-                (f64::from(heard[p]) - want).abs() <= want * 1e-3
-            })
-            .unwrap_or_else(|| {
-                panic!(
-                    "{residency:?}: the first sound {} is no fade figure",
-                    heard[p]
-                )
-            });
-        // The file's frame 0 is output frame `first`.
-        let first = p - lead;
+        let want = f64::from(value(0)) * gain(0);
+        assert!(
+            (f64::from(heard[first]) - want).abs() <= want * 1e-3,
+            "{residency:?}: the first sound {} is not the file's frame 0 under the fade's frame 0, {want}",
+            heard[first]
+        );
         assert!(first <= 2 * BLOCK, "{residency:?}: began at frame {first}");
         for k in 0..n {
-            let want = f64::from(value(p + k - first)) * gain(k);
+            let want = f64::from(value(k)) * gain(k);
             assert!(
-                (f64::from(heard[p + k]) - want).abs() <= 1e-8,
+                (f64::from(heard[first + k]) - want).abs() <= 1e-8,
                 "{residency:?}: fade frame {k}: {}, want {want}",
-                heard[p + k]
+                heard[first + k]
             );
         }
         for k in 1_100..2_000 {
