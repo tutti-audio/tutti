@@ -1302,7 +1302,10 @@ impl Session {
     /// library's init, the state restore and (`modulation`) the parameter
     /// read: a frame-driven host opens at most one per frame.
     ///
-    /// A main-thread call (design 015 §4.2).
+    /// A main-thread call (design 015 §4.2). It runs the session's main-thread
+    /// work first, so from here an in-process plugin's handle, called off the
+    /// main thread, waits for the next update rather than answering
+    /// "unavailable" at once.
     ///
     /// # Errors
     ///
@@ -1312,9 +1315,8 @@ impl Session {
         main: MainThreadMarker,
         loaded: PluginLoaded,
     ) -> Result<Key<PluginNode>, BridgeError> {
-        // The session now has a main thread: running its collector here marks it
-        // run, so a pool thread's call on this plugin's handle waits for the next
-        // update instead of being refused as having no main thread.
+        // Marks the collector run: from here the session has a main thread, so an
+        // off-main call on an in-process handle waits for the next update.
         self.main_work.run(main);
         let requested = loaded.plugin;
         let config = loaded.config;
