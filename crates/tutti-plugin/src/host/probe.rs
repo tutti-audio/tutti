@@ -12,6 +12,7 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
+use tutti_plugin_db::Cancel;
 use tutti_plugin_ipc::Reaped;
 use tutti_plugin_types::{BridgeError, BridgeResult};
 use tutti_plugin_types::{Helper, Locator, PluginDescriptor, ProbeOutcome, read_result};
@@ -32,13 +33,16 @@ const POLL: Duration = Duration::from_millis(5);
 /// [`BridgeError::ProbeNotFound`] if the binary cannot be located;
 /// [`BridgeError::LoadFailed`] if the probe ran to its end and the plugin could
 /// not be read; [`BridgeError::ProcessCrashed`] if it died without a result;
-/// [`BridgeError::Timeout`] if it did not finish within `timeout` (it is killed).
+/// [`BridgeError::Timeout`] if it did not finish within `timeout` (it is killed);
+/// [`BridgeError::Io`] of kind [`Interrupted`](std::io::ErrorKind::Interrupted)
+/// if `cancel` was raised (it is killed and reaped before this returns).
 pub fn probe_metadata_with(
     locator: &Locator,
     plugin_path: &Path,
     timeout: Duration,
+    cancel: &Cancel,
 ) -> BridgeResult<Vec<PluginDescriptor>> {
-    run(locator, plugin_path, timeout, &[])
+    run(locator, plugin_path, timeout, cancel, &[])
 }
 
 /// [`probe_metadata_with`] that also **measures** each plugin (`plugin-probe
@@ -61,6 +65,7 @@ pub fn measure_metadata_with(
     locator: &Locator,
     plugin_path: &Path,
     timeout: Duration,
+    cancel: &Cancel,
     state: Option<&Path>,
 ) -> BridgeResult<Vec<PluginDescriptor>> {
     let mut args = vec!["--measure".as_ref()];
@@ -68,13 +73,14 @@ pub fn measure_metadata_with(
         args.push("--state".as_ref());
         args.push(state.as_os_str());
     }
-    run(locator, plugin_path, timeout, &args)
+    run(locator, plugin_path, timeout, cancel, &args)
 }
 
 fn run(
     locator: &Locator,
     plugin_path: &Path,
     timeout: Duration,
+    cancel: &Cancel,
     flags: &[&std::ffi::OsStr],
 ) -> BridgeResult<Vec<PluginDescriptor>> {
     let probe = locator
@@ -98,7 +104,7 @@ fn run(
         .spawn()
         .map_err(BridgeError::Io)?;
     let mut child = Reaped::new(child);
-    let status = wait(&mut child, timeout);
+    let status = wait(&mut child, timeout, cancel);
     // The file is read even after a timeout or a bad exit: it is the only proof
     // of finishing, and a probe that finished at the deadline did.
     let file = read_result(&result).map_err(|e| BridgeError::IpcError(e.to_string()));
@@ -114,6 +120,9 @@ fn run(
             });
         }
         (Ok(None), Waited::Lost(e)) => return Err(BridgeError::Io(e)),
+        (Ok(None), Waited::Cancelled) => {
+            return Err(BridgeError::Io(std::io::ErrorKind::Interrupted.into()));
+        }
     };
     match outcome {
         ProbeOutcome::Described(plugins) if plugins.is_empty() => Err(
@@ -131,15 +140,22 @@ fn run(
 enum Waited {
     Exited,
     TimedOut,
+    Cancelled,
     Lost(std::io::Error),
 }
 
-/// Waits for `child` to exit, killing and reaping it at `timeout`.
-fn wait(child: &mut Child, timeout: Duration) -> Waited {
+/// Waits for `child` to exit, killing and reaping it at `timeout` or when
+/// `cancel` is raised.
+fn wait(child: &mut Child, timeout: Duration, cancel: &Cancel) -> Waited {
     let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
             Ok(Some(_)) => return Waited::Exited,
+            Ok(None) if cancel.is_cancelled() => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Waited::Cancelled;
+            }
             Ok(None) if Instant::now() >= deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -172,7 +188,12 @@ mod tests {
     }
 
     fn probe(locator: &Locator, timeout: Duration) -> BridgeResult<Vec<PluginDescriptor>> {
-        probe_metadata_with(locator, Path::new("/plugins/Some.clap"), timeout)
+        probe_metadata_with(
+            locator,
+            Path::new("/plugins/Some.clap"),
+            timeout,
+            &Cancel::new(),
+        )
     }
 
     /// A probe that does not finish by the deadline is killed and reaped, and the
@@ -211,6 +232,63 @@ mod tests {
         assert!(
             !alive,
             "the hung probe (pid {}) is still running",
+            pid.trim()
+        );
+    }
+
+    /// **A cancel kills the probe in flight and returns at once**: the child
+    /// has the whole 30 s of its sleep and the caller a 60 s deadline, and the
+    /// probe is gone (killed and reaped) by the time the call returns.
+    #[test]
+    fn a_cancel_kills_the_probe_without_waiting_for_the_deadline() {
+        let dir = TempDir::new().unwrap();
+        let pid_file = dir.path().join("pid");
+        let locator = stand_in(
+            &dir,
+            &format!("echo $$ > {}\nexec sleep 30", pid_file.display()),
+        );
+        let cancel = Cancel::new();
+        let raiser = {
+            let (cancel, pid_file) = (cancel.clone(), pid_file.clone());
+            thread::spawn(move || {
+                // The child has written its pid once it is running.
+                while std::fs::read_to_string(&pid_file).is_ok_and(|p| p.trim().is_empty())
+                    || !pid_file.exists()
+                {
+                    thread::sleep(Duration::from_millis(2));
+                }
+                cancel.cancel();
+            })
+        };
+
+        let started = Instant::now();
+        let result = probe_metadata_with(
+            &locator,
+            Path::new("/plugins/Some.clap"),
+            Duration::from_secs(60),
+            &cancel,
+        );
+        raiser.join().unwrap();
+
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the cancel waited for the child or the deadline: {:?}",
+            started.elapsed()
+        );
+        assert!(
+            matches!(&result, Err(BridgeError::Io(e)) if e.kind() == std::io::ErrorKind::Interrupted),
+            "{result:?}"
+        );
+        let pid = std::fs::read_to_string(&pid_file).unwrap();
+        let alive = Command::new("kill")
+            .args(["-0", pid.trim()])
+            .stderr(Stdio::null())
+            .status()
+            .unwrap()
+            .success();
+        assert!(
+            !alive,
+            "the cancelled probe (pid {}) is still running",
             pid.trim()
         );
     }

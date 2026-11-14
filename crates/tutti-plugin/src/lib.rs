@@ -54,7 +54,7 @@
 //! ```
 //!
 //! A host that does not already know the path discovers one first — see
-//! [`catalog`], whose [`probe_record`](catalog::probe_record) pairs with
+//! [`catalog`], whose [`probe_record_with`](catalog::probe_record_with) pairs with
 //! `tutti_plugin_db::discover` and needs no feature flag, and
 //! whose [`Catalog`](catalog::Catalog) adds incremental rescan and crash recovery on
 //! top, and says what is blacklisted (the session's load asks it).
@@ -105,7 +105,7 @@
 //! - [`catalog`] — discovering, persisting and loading plugins:
 //!   [`Plugin`](catalog::Plugin) (one loaded plugin),
 //!   [`Catalog`](catalog::Catalog) (catalog with incremental rescan and crash
-//!   recovery), [`probe_record`](catalog::probe_record) (the stateless probe),
+//!   recovery), [`probe_record_with`](catalog::probe_record_with) (the stateless probe),
 //!   and the [`PluginDescriptor`](catalog::PluginDescriptor) identity type. The
 //!   scanner, the catalog traits and their records are `tutti-plugin-db`'s.
 //! - [`handles`] — [`PluginClient`](handles::PluginClient), the client and graph
@@ -384,17 +384,17 @@ pub use tutti_plugin_types::{Normalized, ParamId};
 /// the plugin server and loads what was found.
 ///
 /// **Bring your own store.** [`discover`](tutti_plugin_db::discover) walks
-/// directories and returns paths; [`probe_record`](catalog::probe_record)
+/// directories and returns paths; [`probe_record_with`](catalog::probe_record_with)
 /// turns one path into the [`Delta`](tutti_plugin_db::Delta) that records it.
 /// Two functions and a plain table, no feature flags:
 ///
 /// ```no_run
-/// use tutti_plugin::catalog::probe_record;
+/// use tutti_plugin::catalog::{DEFAULT_PROBE_TIMEOUT, Locator, probe_record_with};
 /// use tutti_plugin_db::{PluginDb, discover};
 /// # let dirs = vec![std::path::PathBuf::from("/Library/Audio/Plug-Ins/VST3")];
 /// let mut db = PluginDb::new();
 /// for (path, _format) in discover(&dirs) {
-///     if let Ok(delta) = probe_record(path) {
+///     if let Ok(delta) = probe_record_with(path, &Locator::Search, DEFAULT_PROBE_TIMEOUT) {
 ///         db.apply(delta);
 ///     }
 /// }
@@ -413,15 +413,15 @@ pub use tutti_plugin_types::{Normalized, ParamId};
 /// the app picks the file format and where it lives.
 pub mod catalog {
     pub use crate::host::db_probe::{
-        DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, measure_record, measure_record_with,
-        probe_failure, probe_record, probe_record_with,
+        DEFAULT_MEASURE_TIMEOUT, DEFAULT_PROBE_TIMEOUT, measure_record_with, probe_failure,
+        probe_record_with,
     };
     pub use tutti_plugin_types::{Helper, Locator};
     // Named in `Plugin::role` and `Catalog::iter`.
     pub use crate::host::catalog::{BlacklistView, Catalog, PersistError};
     pub use crate::host::plugin::{BoundPlugin, Plugin};
     pub use crate::host::plugin_ref::{Hosting, PluginRef, PluginState};
-    pub use tutti_plugin_db::PluginDb;
+    pub use tutti_plugin_db::{FilesError, PluginDb, Scan, ScanBusy, ScanPoll, ScanResult};
     pub use tutti_plugin_ipc::{AudioConfig, CatalogConfig, NO_SCAN_DIRS};
     pub use tutti_plugin_types::{PluginDescriptor, PluginRole};
 }

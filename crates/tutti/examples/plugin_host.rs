@@ -28,7 +28,7 @@
 
 use std::path::PathBuf;
 
-use tutti::plugin::catalog::{CatalogConfig, PluginDb};
+use tutti::plugin::catalog::{CatalogConfig, PluginDb, ScanPoll};
 use tutti::ump::{Address, Message, NoteNumber, U7, Ump, Voice1};
 use tutti::{
     Beat, Bounce, Catalog, Format, Hosting, MaxBlock, MidiChannel, Normalized, ParamId, Pcm,
@@ -56,7 +56,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         CatalogConfig::new(std::env::temp_dir(), dirs),
         |_| Ok(()),
     );
-    let scanned = catalog.scan()?;
+    //    The scan is a task: this example has nothing else to do, so it polls it to
+    //    its end; a host with a frame loop calls `try_apply` once per frame.
+    let mut scan = catalog.scan()?;
+    let scanned = loop {
+        match catalog.try_apply(&mut scan) {
+            ScanPoll::Running => std::thread::sleep(std::time::Duration::from_millis(10)),
+            ScanPoll::Done(result) => break result,
+            ScanPoll::Died => return Err("the scan's worker died".into()),
+        }
+    };
     eprintln!("scanned {} plugin file(s)", scanned.scanned);
 
     // 2. Pick by name. An entry knows its file, its format and its descriptor;

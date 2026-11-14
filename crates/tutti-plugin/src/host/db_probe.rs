@@ -6,7 +6,7 @@ use std::path::Path;
 use std::time::Duration;
 use tracing::debug;
 use tutti_plugin_db::{
-    Delta, FileFacts, FileRow, PluginFormat, ProbeFailure, probe_plugin_fallback,
+    Cancel, Delta, FileFacts, FileRow, PluginFormat, ProbeFailure, probe_plugin_fallback,
 };
 use tutti_plugin_types::BridgeError;
 use tutti_plugin_types::LoadStage;
@@ -59,9 +59,10 @@ pub fn probe_failure(e: BridgeError) -> ProbeFailure {
 pub(crate) fn probe_plugin(
     path: &Path,
     format: PluginFormat,
+    cancel: &Cancel,
 ) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
     interpret_probe(
-        probe_metadata_with(&Locator::Search, path, DEFAULT_PROBE_TIMEOUT),
+        probe_metadata_with(&Locator::Search, path, DEFAULT_PROBE_TIMEOUT, cancel),
         path,
         format,
     )
@@ -74,9 +75,16 @@ pub(crate) fn probe_plugin(
 pub(crate) fn probe_plugin_measured(
     path: &Path,
     format: PluginFormat,
+    cancel: &Cancel,
 ) -> Result<Vec<PluginDescriptor>, ProbeFailure> {
     interpret_probe(
-        measure_metadata_with(&Locator::Search, path, DEFAULT_MEASURE_TIMEOUT, None),
+        measure_metadata_with(
+            &Locator::Search,
+            path,
+            DEFAULT_MEASURE_TIMEOUT,
+            cancel,
+            None,
+        ),
         path,
         format,
     )
@@ -109,10 +117,13 @@ fn interpret_probe(
 /// plugin the file has (a CLAP factory's, a VST3 factory's audio classes, an AU
 /// bundle's units, a VST2 shell's sub-plugins).
 ///
-/// Spawns a short-lived `plugin-probe` subprocess to read the file's
-/// metadata, so a plugin that crashes while being probed does not take the
-/// caller down. Blocks for up to the deadline (fifteen seconds by default); call
-/// it off the audio and UI threads. The delta puts the same row a scan stores; apply it with
+/// Spawns a short-lived `plugin-probe` subprocess, the binary `locator` names,
+/// to read the file's metadata, so a plugin that crashes while being probed does
+/// not take the caller down. Blocks for up to `timeout` ([`DEFAULT_PROBE_TIMEOUT`],
+/// fifteen seconds, is what a scan allows and a plugin that loads slowly from
+/// cold may need); call it off the audio and UI threads, or let a catalog task
+/// ([`Catalog::register`](crate::catalog::Catalog::register)) do it. The delta
+/// puts the same row a scan stores; apply it with
 /// [`PluginDb::apply`](tutti_plugin_db::PluginDb::apply).
 ///
 /// # Errors
@@ -123,17 +134,6 @@ fn interpret_probe(
 /// be located, [`BridgeError::ProcessCrashed`] or [`BridgeError::Timeout`] when
 /// the plugin brought the probe down, and an I/O variant when it cannot be
 /// spawned.
-pub fn probe_record(path: impl AsRef<Path>) -> Result<Delta, BridgeError> {
-    probe_record_with(path, &Locator::Search, DEFAULT_PROBE_TIMEOUT)
-}
-
-/// [`probe_record`] with the `plugin-probe` binary named by `locator` and the
-/// deadline `timeout` (the default is [`DEFAULT_PROBE_TIMEOUT`], fifteen
-/// seconds, which a plugin that loads slowly from cold may need).
-///
-/// # Errors
-///
-/// As [`probe_record`].
 pub fn probe_record_with(
     path: impl AsRef<Path>,
     locator: &Locator,
@@ -147,7 +147,7 @@ pub fn probe_record_with(
         reason: "unrecognized plugin extension".to_string(),
     })?;
 
-    let plugins = probe_metadata_with(locator, path, timeout)?;
+    let plugins = probe_metadata_with(locator, path, timeout, &Cancel::new())?;
 
     // Keyed like a scan keys it, by canonical path, so an alias and the real
     // path are one row.
@@ -155,7 +155,7 @@ pub fn probe_record_with(
     Ok(Delta::put(key, FileRow::probed(format, &facts, plugins)))
 }
 
-/// [`probe_record`] that also **measures** each plugin the file holds: the delta's row carries
+/// [`probe_record_with`] that also **measures** each plugin the file holds: the delta's row carries
 /// every descriptor's
 /// [`measured`](PluginDescriptor::measured), the tail and latency the plugin
 /// reports against what it renders. The way to measure one file, or one a scan
@@ -163,24 +163,17 @@ pub fn probe_record_with(
 /// changed). The row replaces the file's old one, as a probe's does.
 ///
 /// Renders the plugin at two configurations, so it takes longer
-/// ([`DEFAULT_MEASURE_TIMEOUT`]); call it off the audio and UI threads.
+/// ([`DEFAULT_MEASURE_TIMEOUT`]); call it off the audio and UI threads, or let a
+/// catalog task ([`Catalog::measure`](crate::catalog::Catalog::measure)) do it.
+/// `locator` names the `plugin-probe` binary, `timeout` is the deadline and, if
+/// `state` is given, the file of bytes a plugin's own `save_state` wrote, which
+/// the plugin is put in before it is measured (for a file of one plugin; the
+/// record's `ProbeConfig::state` hashes it).
 ///
 /// # Errors
 ///
-/// As [`probe_record`]; a plugin that crashes or hangs while rendering is
+/// As [`probe_record_with`]; a plugin that crashes or hangs while rendering is
 /// [`BridgeError::ProcessCrashed`] or [`BridgeError::Timeout`].
-pub fn measure_record(path: impl AsRef<Path>) -> Result<Delta, BridgeError> {
-    measure_record_with(path, &Locator::Search, DEFAULT_MEASURE_TIMEOUT, None)
-}
-
-/// [`measure_record`] with the `plugin-probe` binary named by `locator`, the
-/// deadline `timeout`, and, if `state` is given, the file of bytes a plugin's own
-/// `save_state` wrote, which the plugin is put in before it is measured (for a
-/// file of one plugin; the record's `ProbeConfig::state` hashes it).
-///
-/// # Errors
-///
-/// As [`measure_record`].
 pub fn measure_record_with(
     path: impl AsRef<Path>,
     locator: &Locator,
@@ -194,7 +187,7 @@ pub fn measure_record_with(
         stage: LoadStage::Opening,
         reason: "unrecognized plugin extension".to_string(),
     })?;
-    let plugins = measure_metadata_with(locator, path, timeout, state)?;
+    let plugins = measure_metadata_with(locator, path, timeout, &Cancel::new(), state)?;
     let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     Ok(Delta::put(key, FileRow::probed(format, &facts, plugins)))
 }
