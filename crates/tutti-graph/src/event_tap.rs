@@ -28,9 +28,8 @@
 //! (`tutti-session`'s `Graph::reopen_event_taps`), and one reader's frames are
 //! always on one scale.
 //!
-//! The ring is `ringbuf`'s single-producer, single-consumer heap ring, already
-//! this crate's dependency for the editor-to-executor queue; no new lock-free
-//! structure. The producer is owned by the executor (it rides a commit in, as
+//! The ring is `tutti_rt::Ring`, the one single-producer, single-consumer
+//! queue, as the editor-to-executor queue is. The producer is owned by the executor (it rides a commit in, as
 //! an audio tap's does), the consumer by the caller, so the audio thread takes
 //! no lock and frees nothing: a producer left behind by a plan that no longer
 //! names it is retired with the old state, on the control side.
@@ -45,9 +44,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
-use ringbuf::traits::{Consumer, Observer, Producer, Split};
-use ringbuf::{HeapCons, HeapProd, HeapRb};
 use tutti_rt::RtScope;
+use tutti_rt::{Overflow, Ring, RingReader, RingWriter};
 use tutti_types::{Frame, SampleRate};
 use tutti_ump::Ump;
 
@@ -82,10 +80,11 @@ const _: () = assert!(std::mem::size_of::<TapEvent>() == 24);
 /// writer takes can only be an overestimate. An event may be refused that the
 /// reader had just made room for, and none is taken past the ring.
 pub struct EventTapWriter {
-    ring: HeapProd<TapEvent>,
+    ring: RingWriter<TapEvent>,
     /// The events held before anything but a note-off is refused.
     capacity: usize,
-    /// Events the ring refused, shared with the reader.
+    /// Events refused, by the capacity rule or by a full ring, shared with the
+    /// reader: one count for both, so the ring itself (`Refuse`) counts nothing.
     lost: Arc<AtomicU64>,
 }
 
@@ -117,21 +116,21 @@ pub(crate) fn event_tap_op<E: EventSlots + ?Sized>(
     src: u32,
     env: &Env,
 ) {
-    if !tap.ring.read_is_held() {
+    if tap.ring.is_disconnected() {
         return;
     }
-    let total = tap.ring.capacity().get();
+    let total = tap.ring.capacity();
     let mut lost = 0u64;
     for event in events.ev(src) {
         let EventKind::Midi(ump) = event.kind else {
             continue;
         };
-        let held = total - tap.ring.vacant_len();
+        let held = total - tap.ring.vacant();
         if held >= tap.capacity && (held >= total || !ump.is_note_off()) {
             lost += 1;
             continue;
         }
-        let pushed = tap.ring.try_push(TapEvent {
+        let pushed = tap.ring.push(TapEvent {
             frame: env.frame_at(event.offset),
             ump,
         });
@@ -160,7 +159,7 @@ pub(crate) fn event_tap_op<E: EventSlots + ?Sized>(
 /// It must not be dropped on the audio thread (debug builds panic there).
 pub struct EventTapReader {
     id: EventTapId,
-    ring: HeapCons<TapEvent>,
+    ring: RingReader<TapEvent>,
     lost: Arc<AtomicU64>,
     rate: SampleRate,
     /// The editor holds a `Weak` of this: when it dies, the reader is gone.
@@ -194,7 +193,7 @@ impl EventTapReader {
     ) -> (Self, EventTapWriter) {
         let capacity = capacity.slots();
         let lost = Arc::new(AtomicU64::new(0));
-        let (prod, cons) = HeapRb::<TapEvent>::new(note_off_room(capacity)).split();
+        let (prod, cons) = Ring::<TapEvent>::pair(note_off_room(capacity), Overflow::Refuse);
         let reader = Self {
             id,
             ring: cons,
@@ -228,13 +227,13 @@ impl EventTapReader {
     /// still counted for [`take_lost`](Self::take_lost), whether or not the
     /// ring is drained.
     pub fn drain(&mut self) -> impl Iterator<Item = TapEvent> + '_ {
-        self.ring.pop_iter()
+        self.ring.drain()
     }
 
     /// Events readable now.
     #[must_use]
     pub fn available(&self) -> usize {
-        self.ring.occupied_len()
+        self.ring.len()
     }
 
     /// Events the executor could not push since the last call, and clears the

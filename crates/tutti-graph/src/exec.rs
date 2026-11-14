@@ -186,7 +186,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-use ringbuf::{HeapCons, HeapProd};
+use tutti_rt::{RingReader, RingWriter};
 use tutti_types::PlayReading;
 use tutti_types::{Frame, Tail};
 
@@ -302,16 +302,16 @@ pub struct Executor {
 /// The executor's end of the rings to its editor, and the commands it
 /// delivers.
 struct Inbox {
-    queue: HeapCons<Box<Commit>>,
-    back: HeapProd<Box<Commit>>,
+    queue: RingReader<Box<Commit>>,
+    back: RingWriter<Box<Commit>>,
     /// Where crossfades go back (see the module docs, "Crossfades").
-    fade_back: HeapProd<Box<Crossfade>>,
+    fade_back: RingWriter<Box<Crossfade>>,
     /// Where each block's log of dropped events goes, for the editor to
     /// drain.
-    losses: HeapProd<EventLoss>,
+    losses: RingWriter<EventLoss>,
     unreported: Arc<AtomicU64>,
     /// Where an edge whose declick fade ended is reported.
-    edge_fades: HeapProd<(EdgeId, EdgeFade)>,
+    edge_fades: RingWriter<(EdgeId, EdgeFade)>,
     commands: CommandRx,
     /// `seq` of the last commit applied.
     applied: u64,

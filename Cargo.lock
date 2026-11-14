@@ -2674,7 +2674,6 @@ version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
  "bytemuck",
- "ringbuf",
  "thiserror 2.0.21",
  "tutti-buffers",
  "tutti-fixtures",
@@ -2741,7 +2740,6 @@ dependencies = [
  "criterion",
  "libc",
  "proptest",
- "ringbuf",
  "thiserror 2.0.21",
  "tutti-buffers",
  "tutti-curve",

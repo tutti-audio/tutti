@@ -3,7 +3,6 @@
 
 use std::collections::BTreeMap;
 
-use ringbuf::traits::Consumer;
 use tutti_rt::RtScope;
 
 use super::commit::{Commit, Incoming, Opened, Relined, cut_fades, retire_fade, send_back};
@@ -42,7 +41,7 @@ impl Executor {
     /// [`Editor::package`](crate::Editor::package)).
     pub fn apply_pending(&mut self) {
         let _rt = RtScope::enter();
-        while let Some(mut commit) = self.inbox.queue.try_pop() {
+        while let Some(mut commit) = self.inbox.queue.pop() {
             self.apply(&mut commit);
             send_back(&mut self.inbox.back, commit);
         }

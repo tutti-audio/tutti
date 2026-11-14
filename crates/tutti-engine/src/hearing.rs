@@ -12,9 +12,8 @@
 //!
 //! # The hand-over
 //!
-//! The writer reaches the audio thread over a bounded `ringbuf` queue of boxed
-//! writers (the editor-to-executor pattern; no new lock-free structure, so
-//! nothing for `tutti-rt` and no loom model). The audio thread pops installs
+//! The writer reaches the audio thread over a bounded `tutti_rt::Ring` of boxed
+//! writers (the editor-to-executor pattern). The audio thread pops installs
 //! at the start of each call, and the writer it replaces goes back over a
 //! second queue to be freed on the control side: the audio thread never
 //! drops one (`TapWriter` panics in debug if it is dropped inside
@@ -33,10 +32,9 @@
 
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
-use ringbuf::traits::{Consumer, Observer, Producer, Split};
-use ringbuf::{HeapCons, HeapProd, HeapRb};
 use tutti_graph::TapId;
 use tutti_graph::{TapReader, TapWriter};
+use tutti_rt::{Overflow, PushError, Ring, RingReader, RingWriter};
 use tutti_types::{ChannelLayout, Samples};
 
 /// Opens that can be in flight at once. The install queue holds one more: a
@@ -92,8 +90,8 @@ impl HeardOpen {
 pub struct HeardTaps(Arc<Mutex<Control>>);
 
 struct Control {
-    install: HeapProd<Install>,
-    retired: HeapCons<Box<TapWriter>>,
+    install: RingWriter<Install>,
+    retired: RingReader<Box<TapWriter>>,
     /// The open tap's reader, to see when it was dropped.
     reader: Option<Weak<()>>,
     /// A close the install queue had no room for, owed to the audio thread:
@@ -110,7 +108,7 @@ impl std::fmt::Debug for Control {
 impl Control {
     /// Frees what the audio thread retired.
     fn free(&mut self) {
-        while self.retired.try_pop().is_some() {}
+        while self.retired.pop().is_some() {}
     }
 
     fn alive(&self) -> bool {
@@ -122,7 +120,7 @@ impl Control {
     /// keeps feeding its reader (which no longer exists for the caller) until
     /// then.
     fn send_close(&mut self) {
-        self.owed_close = self.install.try_push(None).is_err();
+        self.owed_close = self.install.push(None).is_err();
     }
 
     /// Settles what is owed before anything new is queued behind it.
@@ -136,17 +134,17 @@ impl Control {
 
 /// The audio thread's ends: installs in, retired writers out, the live one.
 pub(crate) struct Hearing {
-    install: HeapCons<Install>,
-    retire: HeapProd<Box<TapWriter>>,
+    install: RingReader<Install>,
+    retire: RingWriter<Box<TapWriter>>,
     writer: Option<Box<TapWriter>>,
 }
 
 /// A linked pair, built with the engine.
 pub(crate) fn link() -> (HeardTaps, Hearing) {
-    let (install_tx, install_rx) = HeapRb::<Install>::new(INSTALLS + 1).split();
+    let (install_tx, install_rx) = Ring::<Install>::pair(INSTALLS + 1, Overflow::Refuse);
     // A retired writer waits here for the control side; this holds every
     // install that can be in flight and the live one.
-    let (retire_tx, retire_rx) = HeapRb::<Box<TapWriter>>::new(INSTALLS + 3).split();
+    let (retire_tx, retire_rx) = Ring::<Box<TapWriter>>::pair(INSTALLS + 3, Overflow::Refuse);
     (
         HeardTaps(Arc::new(Mutex::new(Control {
             install: install_tx,
@@ -190,12 +188,19 @@ impl HeardTaps {
             return Err(HeardTapError::Busy);
         }
         // One slot stays free for a close.
-        if c.owed_close || c.install.vacant_len() <= 1 {
+        if c.owed_close || c.install.vacant() <= 1 {
             return Ok(HeardOpen::Retry);
         }
         let (reader, writer) = TapReader::pair(TapId(0), usize::from(width.count()), capacity);
-        if c.install.try_push(Some(Box::new(writer))).is_err() {
-            unreachable!("the queue has a free slot");
+        // Full cannot happen (the vacancy was checked). With the engine gone the
+        // writer is dropped here and the reader stays open, as one opened just
+        // before the engine went would be.
+        if let Err(refused) = c.install.push(Some(Box::new(writer))) {
+            debug_assert_eq!(
+                refused.error,
+                PushError::Disconnected,
+                "the queue has a free slot"
+            );
         }
         c.reader = Some(reader.watch());
         Ok(HeardOpen::Opened(reader))
@@ -237,11 +242,11 @@ impl Hearing {
     /// Audio thread: pops and pushes boxes, drops nothing, allocates nothing.
     #[inline]
     pub(crate) fn swap(&mut self) {
-        while self.retire.vacant_len() > 0
-            && let Some(install) = self.install.try_pop()
+        while self.retire.vacant() > 0
+            && let Some(install) = self.install.pop()
         {
             if let Some(old) = std::mem::replace(&mut self.writer, install)
-                && let Err(old) = self.retire.try_push(old)
+                && let Err(old) = self.retire.push(old)
             {
                 // Unreachable: the vacancy was checked above.
                 std::mem::forget(old);
@@ -285,21 +290,18 @@ mod tests {
     fn a_full_retire_queue_holds_the_install_and_drops_nothing() {
         let (taps, mut h) = link();
         h.writer = Some(writer(2));
-        while h.retire.vacant_len() > 0 {
-            assert!(h.retire.try_push(writer(9)).is_ok());
+        while h.retire.vacant() > 0 {
+            assert!(h.retire.push(writer(9)).is_ok());
         }
-        let full = h.retire.occupied_len();
-        taps.control()
-            .install
-            .try_push(Some(writer(3)))
-            .expect("room");
+        let full = h.retire.len();
+        taps.control().install.push(Some(writer(3))).expect("room");
         {
             let _rt = tutti_rt::RtScope::enter();
             h.swap();
         }
         assert_eq!(width(&h), Some(2), "the writer is kept");
-        assert_eq!(h.install.occupied_len(), 1, "the install waits");
-        assert_eq!(h.retire.occupied_len(), full, "nothing was sent or dropped");
+        assert_eq!(h.install.len(), 1, "the install waits");
+        assert_eq!(h.retire.len(), full, "nothing was sent or dropped");
 
         taps.reclaim();
         {
@@ -307,7 +309,7 @@ mod tests {
             h.swap();
         }
         assert_eq!(width(&h), Some(3), "the install went through");
-        assert_eq!(h.install.occupied_len(), 0);
-        assert_eq!(h.retire.occupied_len(), 1, "the old writer was sent back");
+        assert_eq!(h.install.len(), 0);
+        assert_eq!(h.retire.len(), 1, "the old writer was sent back");
     }
 }
