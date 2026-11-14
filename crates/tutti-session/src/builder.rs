@@ -799,6 +799,7 @@ impl<S> SessionBuilder<S> {
             .and_then(tutti_engine::Engine::take_load_meter);
         Ok(Session {
             graph: parts.graph,
+            resource_ids: crate::peer::ResourceIds::new(),
             transport: parts.transport,
             load,
             heard: None,

@@ -1,0 +1,180 @@
+//! Resources and peers: what a token reads, and the one notice and error a
+//! peer has.
+//!
+//! A *resource* is something the session holds for the app and names by a
+//! token: a loaded wave, a MIDI port, a hosted plugin. A *peer* is a resource
+//! with something live behind it that can change on its own, go away, come
+//! back and be asked things (a port's device, a capture's audio device, a
+//! plugin). Whatever its kind, a peer is read through [`Peer::info`] and
+//! [`Peer::presence`], told about through one
+//! [`SessionEvent::ResourceChanged`](crate::SessionEvent::ResourceChanged), and
+//! asked with requests that fail as [`PeerError`].
+//!
+//! Only this crate implements [`Resource`]: a token is the session's, minted
+//! with an id no other token of the session has.
+
+use std::fmt;
+use std::sync::Arc;
+
+use thiserror::Error;
+
+/// A resource's identity in one session: unique among every token the session
+/// has handed out, and never reused.
+///
+/// A [`SessionEvent::ResourceChanged`](crate::SessionEvent::ResourceChanged)
+/// names the resource it is about by this id; the token's [`Resource::id`]
+/// matches it. An id means nothing in another session, and an app cannot make
+/// one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ResourceId(u64);
+
+impl fmt::Display for ResourceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "resource {}", self.0)
+    }
+}
+
+/// The session's source of [`ResourceId`]s: one counter, from 1.
+#[derive(Debug)]
+pub(crate) struct ResourceIds {
+    last: u64,
+}
+
+impl ResourceIds {
+    pub(crate) const fn new() -> Self {
+        Self { last: 0 }
+    }
+
+    /// The next id: distinct from every one this source returned before.
+    pub(crate) fn mint(&mut self) -> ResourceId {
+        self.last += 1;
+        ResourceId(self.last)
+    }
+}
+
+impl Default for ResourceIds {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub(crate) mod sealed {
+    /// Names the types allowed to be a [`Resource`](super::Resource): the
+    /// tokens of this crate.
+    pub trait Sealed {}
+}
+
+/// What the session holds for the app and names by a token.
+///
+/// Sealed: the tokens are this crate's. A wave, an impulse response or a
+/// SoundFont is a `Resource` only; a resource with something live behind it is
+/// also a [`Peer`].
+pub trait Resource: sealed::Sealed {
+    /// The token's identity, the one a
+    /// [`SessionEvent::ResourceChanged`](crate::SessionEvent::ResourceChanged)
+    /// carries.
+    fn id(&self) -> ResourceId;
+}
+
+/// A [`Resource`] with something live behind it: it can change on its own, go
+/// away, come back, and be asked things.
+///
+/// Both readings are the session's last known, taken on the control thread.
+/// Neither asks the peer, so neither blocks.
+pub trait Peer: Resource {
+    /// What the peer says of itself: one snapshot.
+    type Info;
+    /// Why the peer is not live.
+    type Cause;
+
+    /// The last known snapshot of what the peer says of itself. Never blocks.
+    fn info(&self) -> Arc<Self::Info>;
+
+    /// Whether the peer is there. Never blocks.
+    fn presence(&self) -> Presence<Self::Cause>;
+}
+
+/// Whether a [`Peer`] is there, and when it is not, why.
+///
+/// A change of presence is noticed once, as
+/// [`ResourceChanged`](crate::SessionEvent::ResourceChanged) with
+/// [`ResourceFact::Presence`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Presence<C> {
+    /// There and answering.
+    Live,
+    /// There, but not answering: an out-of-process plugin only.
+    Stalled,
+    /// Gone, and the session is bringing it back: this is the `attempt`th
+    /// try, and `cause` is why it went (or why the last try failed).
+    Recovering {
+        /// Which try this is, from 1.
+        attempt: u32,
+        /// Why it is not live.
+        cause: C,
+    },
+    /// Gone; the cause says whether it can return.
+    Lost(C),
+}
+
+impl<C> Presence<C> {
+    /// Whether the peer is there and answering.
+    #[must_use]
+    pub const fn is_live(&self) -> bool {
+        matches!(self, Self::Live)
+    }
+
+    /// Why the peer is not live, for the two readings that have a cause.
+    #[must_use]
+    pub const fn cause(&self) -> Option<&C> {
+        match self {
+            Self::Recovering { cause, .. } | Self::Lost(cause) => Some(cause),
+            Self::Live | Self::Stalled => None,
+        }
+    }
+}
+
+/// Which reading of a peer a
+/// [`ResourceChanged`](crate::SessionEvent::ResourceChanged) says changed:
+/// read it again. The notice carries no value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ResourceFact {
+    /// [`Peer::presence`].
+    Presence,
+    /// [`Peer::info`].
+    Info,
+    /// A plugin's editor asked for a size: read the editor's
+    /// `requested_size`.
+    Editor,
+}
+
+/// Why a request to a [`Peer`] failed. `E` is the request's own refusal.
+///
+/// A request on a peer that is `Lost` fails at the call, not here.
+///
+/// # Examples
+///
+/// ```
+/// use tutti_session::PeerError;
+///
+/// let nak: PeerError<&str> = PeerError::Refused("not supported");
+/// assert_eq!(nak.to_string(), "the peer refused the request: not supported");
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[non_exhaustive]
+pub enum PeerError<E> {
+    /// The peer went away before the request landed, or the session the
+    /// request was queued on is gone.
+    #[error("the peer went away before the request landed")]
+    Disconnected,
+    /// The peer did not answer in time.
+    #[error("the peer did not answer in time")]
+    TimedOut,
+    /// The peer answered, and the answer is not success.
+    #[error("the peer refused the request: {0}")]
+    Refused(E),
+}
+
+#[cfg(test)]
+mod tests;
