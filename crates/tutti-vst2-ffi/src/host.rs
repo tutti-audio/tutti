@@ -11,14 +11,13 @@ use std::ffi::CString;
 use std::marker::PhantomData;
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::os::raw::c_void;
-use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, TryLockError};
 use std::thread::ThreadId;
 use std::{fmt, ptr, slice};
 
-use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, WindowHandle};
+use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, WindowHandle, ffi_guard};
 
 use crate::{
     api::{self, AEffect, ChunkError, PluginFlags, PluginMain, Supported, TimeInfo, consts::*},
@@ -668,19 +667,6 @@ impl Closer {
     }
 }
 
-/// How many instances were dropped off the thread they were made on, since the process began.
-/// Each one's close was handed to the main thread; one still waiting for a tick is the plugin
-/// not yet closed.
-static OFF_THREAD_DROPS: AtomicU64 = AtomicU64::new(0);
-
-/// How many [`PluginInstance`]s have been dropped off their own thread so far: each had its
-/// close handed to its owner's main-thread collector ([`tutti_plugin_types::MainWork::run`], which the session's
-/// `Phase::Collect` calls). A nonzero count is worth a look, since the owner should have
-/// dropped it on the main thread.
-pub fn off_thread_drops() -> u64 {
-    OFF_THREAD_DROPS.load(Ordering::Relaxed)
-}
-
 impl Drop for PluginInstance {
     fn drop(&mut self) {
         let closer = Closer {
@@ -698,12 +684,11 @@ impl Drop for PluginInstance {
         // `MainWork::run` (the session's collect tick); the core stays alive in the closure,
         // so a live `RenderHandle` keeps working until then. This is a control thread (never
         // the audio thread, which owns no instance), so a log line is fine.
-        let count = OFF_THREAD_DROPS.fetch_add(1, Ordering::Relaxed) + 1;
         warn!(
-            "a VST2 plugin instance was dropped off its own thread ({count} so far); its close \
-             is handed to the main thread"
+            "a VST2 plugin instance was dropped off its own thread; its close is handed to the \
+             main thread"
         );
-        self.core.work.defer(move |_main| closer.close());
+        self.core.work.defer_drop(move |_main| closer.close());
     }
 }
 
@@ -1893,7 +1878,7 @@ impl Drop for RenderHandle {
             && std::thread::current().id() != self.core.main_thread
         {
             let core = Arc::clone(&self.core);
-            core.work.clone().defer(move |_main| drop(core));
+            core.work.clone().defer_drop(move |_main| drop(core));
         }
     }
 }
@@ -2664,7 +2649,7 @@ thread_local! {
 ///   block on the GUI thread.
 /// * **No unwinding.** Unwinding out of an `extern "C"` frame into the
 ///   plugin's C++ stack is undefined behaviour, so the whole dispatch is
-///   wrapped in `catch_unwind` and a panic degrades to `0` — the VST2 "not
+///   run under `ffi_guard` and a panic degrades to `0` — the VST2 "not
 ///   handled / not supported" answer for every host opcode.
 extern "C" fn callback_wrapper<T: Host>(
     effect: *mut AEffect,
@@ -2674,8 +2659,8 @@ extern "C" fn callback_wrapper<T: Host>(
     ptr: *mut c_void,
     opt: f32,
 ) -> isize {
-    // AssertUnwindSafe: on a panic we return 0 and touch none of the captured
-    // state again — the host is behind a shared reference and the raw pointers
+    // Unwind safety is asserted by `ffi_guard`: on a panic we return 0 and touch none of the
+    // captured state again — the host is behind a shared reference and the raw pointers
     // are not re-read.
     //
     // SAFETY: which host a call reaches is decided without trusting `effect` until it is
@@ -2708,7 +2693,7 @@ extern "C" fn callback_wrapper<T: Host>(
     //
     // A plugin that overwrites `reserved1` or calls the host after `effClose` breaks (2)
     // too, which is unchecked.
-    let result = panic::catch_unwind(AssertUnwindSafe(|| unsafe {
+    ffi_guard(0, || unsafe {
         let load_ptr = LOAD_HOST.get() as *const Arc<T>;
         let host: &T = if !load_ptr.is_null() {
             // Used only during the plugin initialization.
@@ -2726,16 +2711,7 @@ extern "C" fn callback_wrapper<T: Host>(
             return 0;
         };
         interfaces::host_dispatch(host, effect, opcode, index, value, ptr, opt)
-    }));
-
-    match result {
-        Ok(value) => value,
-        Err(_) => {
-            // Cannot let this cross back into the plugin's C++ frame.
-            error!("host callback panicked (opcode {opcode}); reporting unhandled");
-            0
-        }
-    }
+    })
 }
 
 #[cfg(test)]
@@ -3647,7 +3623,7 @@ mod tests {
         }
         let (instance, main, work) = collected_instance_over(effect);
         let mut render = instance.render_handle(main);
-        assert_eq!(off_thread_drops(), 0);
+        let deferred = tutti_plugin_types::MainWork::deferred_drops();
 
         std::thread::spawn(move || drop(instance))
             .join()
@@ -3657,7 +3633,11 @@ mod tests {
             0,
             "effClose ran on a thread that is not the instance's"
         );
-        assert_eq!(off_thread_drops(), 1, "the off-thread drop is counted");
+        assert_eq!(
+            tutti_plugin_types::MainWork::deferred_drops(),
+            deferred + 1,
+            "the off-thread drop is counted"
+        );
         let mut host: HostBuffer<f32> = HostBuffer::new(0, 0);
         let none: Vec<Vec<f32>> = Vec::new();
         let mut none_out: Vec<Vec<f32>> = Vec::new();

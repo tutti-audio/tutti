@@ -14,7 +14,7 @@ fn model(ty: SvfType, freq: f32, q: f32, gain: f32, rate: f64) -> SvfModel {
 
 /// The RBJ cookbook biquad of a response (`Q` form), as coefficients: an
 /// independent derivation of the same `H(z)` (the shelves use `2 sqrt(A) alpha`).
-fn rbj(ty: SvfType, fc: f64, q: f64, gain_db: f64, rate: f64) -> Biquad {
+pub(crate) fn rbj(ty: SvfType, fc: f64, q: f64, gain_db: f64, rate: f64) -> Biquad {
     let a = 10f64.powf(gain_db / 40.0);
     let w0 = 2.0 * PI * fc / rate;
     let (sn, cs) = w0.sin_cos();
@@ -73,7 +73,7 @@ fn rbj(ty: SvfType, fc: f64, q: f64, gain_db: f64, rate: f64) -> Biquad {
     }
 }
 
-const TYPES: [SvfType; 8] = [
+pub(crate) const TYPES: [SvfType; 8] = [
     SvfType::LowPass,
     SvfType::HighPass,
     SvfType::BandPass,
@@ -281,4 +281,24 @@ fn a_hostile_control_still_gives_a_stable_model() {
         );
         assert!(m.spectral_radius() < 1.0, "{f} {q} {g}");
     }
+}
+
+/// The dead-band: a control moves the design when it passes its epsilon or the
+/// response changes, and not below it.
+#[test]
+fn a_control_moves_the_design_only_past_its_dead_band() {
+    let controls = |ty, freq, q, gain| SvfControls {
+        ty,
+        freq: Hz(freq),
+        q: Q(q),
+        gain: Db(gain),
+    };
+    let base = controls(SvfType::Bell, 1_000.0, 1.0, 3.0);
+    assert!(!controls(SvfType::Bell, 1_000.005, 1.0, 3.0).moved_from(&base));
+    assert!(!controls(SvfType::Bell, 1_000.0, 1.00005, 3.0).moved_from(&base));
+    assert!(!controls(SvfType::Bell, 1_000.0, 1.0, 3.005).moved_from(&base));
+    assert!(controls(SvfType::Bell, 1_000.02, 1.0, 3.0).moved_from(&base));
+    assert!(controls(SvfType::Bell, 1_000.0, 1.0002, 3.0).moved_from(&base));
+    assert!(controls(SvfType::Bell, 1_000.0, 1.0, 3.02).moved_from(&base));
+    assert!(controls(SvfType::Notch, 1_000.0, 1.0, 3.0).moved_from(&base));
 }

@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use super::super::body::{BodyLimit, decode_body, encode_body};
 use super::super::capabilities::{PeCapabilities, PeCiMessage, SimultaneousRequests};
-use super::super::chunk::{PeChunk, PeRequestId, split_message};
+use super::super::chunk::{PeChunk, PeChunkError, PeRequestId, split_message};
 use super::super::flow::{
     PE_TIMEOUT, PeAnswer, PeMessageKind, PeSignal, PeTerminator, PeTransaction,
 };
@@ -18,6 +18,7 @@ use super::super::partial::{JsonPointer, PartialError, PartialUpdate};
 use super::super::reassemble::{
     PeFlowControl, PeReassembler, PeReassemblyLimits, PeReceived, PeStep,
 };
+use super::super::request_ids::RequestIds;
 use super::super::tree::PeJson;
 use super::data::PeData;
 use super::fields::PeDataError;
@@ -148,6 +149,8 @@ struct Peer {
     max_sysex: MaxSysexSize,
     /// How many Subscription messages the peer takes at once.
     takes: SimultaneousRequests,
+    /// The Request IDs of the Subscription messages sent and not yet replied to.
+    ids: RequestIds,
 }
 
 #[derive(Debug)]
@@ -265,7 +268,6 @@ pub struct ResourceResponder {
     busy: Vec<(ResourceTarget, TimeoutWait)>,
     deferred: Vec<Deferred>,
     next_sub: u32,
-    next_request: u8,
 }
 
 /// The status a request is answered with, and the explanation.
@@ -317,7 +319,6 @@ impl ResourceResponder {
             busy: Vec::new(),
             deferred: Vec::new(),
             next_sub: 1,
-            next_request: 0,
         }
     }
 
@@ -353,6 +354,7 @@ impl ResourceResponder {
             muid: peer,
             max_sysex,
             takes: SimultaneousRequests::ONE,
+            ids: RequestIds::default(),
         });
     }
 
@@ -420,16 +422,13 @@ impl ResourceResponder {
         for expired in self.reassembler.expire(now) {
             out.push(self.signal(expired.peer, expired.kind, expired.send));
         }
-        let mut freed = Vec::new();
-        self.outgoing.retain(|o| {
-            let live = o.deadline > now;
-            if !live {
-                freed.push(o.peer);
-            }
-            live
-        });
-        for peer in freed {
-            self.drain(peer, now, &mut out);
+        let (live, expired): (Vec<_>, Vec<_>) = std::mem::take(&mut self.outgoing)
+            .into_iter()
+            .partition(|o| o.deadline > now);
+        self.outgoing = live;
+        for o in expired {
+            self.release(o.peer, o.id);
+            self.drain(o.peer, now, &mut out);
         }
         self.streams_timed_out(now, &mut out);
         for at in 0..self.deferred.len() {
@@ -601,7 +600,8 @@ impl ResourceResponder {
                     | PeSignal::OutOfSequence { .. }
                     | PeSignal::Malformed { .. }
                     | PeSignal::TimedOut { .. } => {
-                        self.outgoing.remove(at);
+                        let gone = self.outgoing.remove(at);
+                        self.release(peer, gone.id);
                         self.drain(peer, now, out);
                     }
                 }
@@ -1180,6 +1180,7 @@ impl ResourceResponder {
             return;
         };
         let sent = self.outgoing.remove(at);
+        self.release(peer, id);
         // A failure ends the Subscription, which the spec lets the sender do in
         // place of a retry (M2-103 §11.2).
         if matches!(
@@ -1307,24 +1308,31 @@ impl ResourceResponder {
     /// Sends the queued Subscription messages of `peer` that its count of
     /// simultaneous requests has a place for, oldest first.
     fn drain(&mut self, peer: Muid, now: Instant, out: &mut Vec<ResponderAction>) {
-        loop {
-            let Some(takes) = self.peer(peer).map(|p| usize::from(p.takes.get())) else {
-                return;
-            };
-            if self.outgoing.iter().filter(|o| o.peer == peer).count() >= takes {
-                return;
-            }
-            let Some(at) = self.queue.iter().position(|q| q.peer == peer) else {
+        while let Some(at) = self.queue.iter().position(|q| q.peer == peer) {
+            let Some(id) = self
+                .peers
+                .iter_mut()
+                .find(|p| p.muid == peer)
+                .and_then(|p| p.ids.allocate(p.takes))
+            else {
                 return;
             };
             let Queued { sub, pending, .. } = self.queue.remove(at);
-            self.send_pending(peer, &sub, pending, now, out);
+            self.send_pending(peer, id, &sub, pending, now, out);
+        }
+    }
+
+    /// Gives `id` of `peer` back to its pool.
+    fn release(&mut self, peer: Muid, id: PeRequestId) {
+        if let Some(p) = self.peers.iter_mut().find(|p| p.muid == peer) {
+            p.ids.release(id);
         }
     }
 
     fn send_pending(
         &mut self,
         peer: Muid,
+        id: PeRequestId,
         sub: &SubscribeId,
         pending: Pending,
         now: Instant,
@@ -1340,13 +1348,19 @@ impl ResourceResponder {
             })
         };
         let notify = || update(PeUpdateCommand::Notify, PeEncoding::Ascii, None);
+        let Some(max) = self.peer(peer).map(|p| p.max_sysex) else {
+            return;
+        };
+        let split = |header: &PeHeader, body: &[u8]| split_message(id, header, body, max);
         if pending == Pending::End {
             let header = PeHeader::Subscription(PeSubscription::End {
                 subscribe_id: sub.clone(),
                 ended_by: Some(PeEndedBy::Responder),
                 extra: Default::default(),
             });
-            self.send_update(peer, sub, &header, &[], now, out);
+            if let Some(chunks) = self.sendable(peer, id, split(&header, &[])) {
+                self.send_update(peer, id, sub, chunks, now, out);
+            }
             return;
         }
         let Some((target, encoding)) = self
@@ -1355,25 +1369,21 @@ impl ResourceResponder {
             .find(|s| s.id == *sub && s.peer == peer)
             .map(|s| (s.target.clone(), s.encoding))
         else {
+            self.release(peer, id);
             return;
         };
-        let max = self.peer(peer).map(|p| p.max_sysex);
-        let fits = |header: &PeHeader, body: &[u8]| {
-            max.is_some_and(|max| {
-                split_message(PeRequestId::of(0), header, body, max)
-                    .is_ok_and(|chunks| chunks.len() == 1)
-            })
+        let one_chunk = |header: &PeHeader, body: &[u8]| {
+            split(header, body).ok().filter(|chunks| chunks.len() == 1)
         };
-        // The message, and the body it carries: a `partial` as it was queued, a
+        // The message, split under its Request ID: a `partial` as it was queued, a
         // `full` of the data as it is, and a `notify` when neither fits a chunk.
-        let mut message: Option<(PeHeader, Vec<u8>)> = None;
+        let mut message: Option<Vec<PeChunk>> = None;
         if let Pending::Partial(changes) = &pending {
             let header = update(PeUpdateCommand::Partial, encoding, None);
             if let Ok(body) =
                 encode_body(encoding, &PeJson::Object(changes_object(changes)).encode())
-                && fits(&header, &body)
             {
-                message = Some((header, body));
+                message = one_chunk(&header, &body);
             }
         }
         if message.is_none()
@@ -1381,43 +1391,49 @@ impl ResourceResponder {
         {
             let (media_type, bytes) = data.to_wire();
             let header = update(PeUpdateCommand::Full, encoding, media_type);
-            if let Ok(body) = encode_body(encoding, &bytes)
-                && fits(&header, &body)
-            {
-                message = Some((header, body));
+            if let Ok(body) = encode_body(encoding, &bytes) {
+                message = one_chunk(&header, &body);
             }
         }
-        let (header, body) = message.unwrap_or_else(|| (notify(), Vec::new()));
-        self.send_update(peer, sub, &header, &body, now, out);
+        let Some(chunks) = message.or_else(|| self.sendable(peer, id, split(&notify(), &[])))
+        else {
+            return;
+        };
+        self.send_update(peer, id, sub, chunks, now, out);
     }
 
-    /// Sends a Subscription message to `peer` under a Request ID not in use.
+    /// The chunks of a Subscription message `split` under `id`, which the
+    /// caller took from the peer's pool.
+    ///
+    /// A message always splits: a body is encoded 7-bit before it gets here and
+    /// carries at most one chunk of data (`full`, `partial`) or none (`notify`,
+    /// `end`), and a header is a few tens of bytes against a receivable size of
+    /// at least 128. One that did not would be a bug of this crate: it is not
+    /// sent and its ID is given back.
+    fn sendable(
+        &mut self,
+        peer: Muid,
+        id: PeRequestId,
+        split: Result<Vec<PeChunk>, PeChunkError>,
+    ) -> Option<Vec<PeChunk>> {
+        let chunks = split.ok();
+        debug_assert!(chunks.is_some(), "a Subscription message always splits");
+        if chunks.is_none() {
+            self.release(peer, id);
+        }
+        chunks
+    }
+
+    /// Sends the `chunks` of a Subscription message to `peer` under `id`.
     fn send_update(
         &mut self,
         peer: Muid,
+        id: PeRequestId,
         sub: &SubscribeId,
-        header: &PeHeader,
-        body: &[u8],
+        chunks: Vec<PeChunk>,
         now: Instant,
         out: &mut Vec<ResponderAction>,
     ) {
-        let Some(max) = self.peer(peer).map(|p| p.max_sysex) else {
-            return;
-        };
-        let free = (0..128u8)
-            .map(|step| (self.next_request + step) % 128)
-            .find(|n| {
-                !self
-                    .outgoing
-                    .iter()
-                    .any(|o| o.peer == peer && o.id.get() == *n)
-            })
-            .and_then(PeRequestId::new);
-        let Some(id) = free else { return };
-        let Ok(chunks) = split_message(id, header, body, max) else {
-            return;
-        };
-        self.next_request = (id.get() + 1) % 128;
         self.outgoing.push(Outgoing {
             peer,
             id,

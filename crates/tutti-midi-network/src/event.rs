@@ -2,6 +2,7 @@
 
 use std::net::SocketAddr;
 
+use tutti_midi_device::EntropyError;
 use tutti_ump::Ump;
 
 use crate::{ByeReason, EndpointIdentity, Header, NakReason, SequenceNumber};
@@ -26,7 +27,7 @@ pub enum SessionState {
 
 /// Which end ended a Session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Initiator {
+pub enum EndedBy {
     /// This endpoint sent the Bye, or gave up.
     Local,
     /// The peer sent the Bye.
@@ -91,9 +92,17 @@ pub enum Event {
         /// The peer's address.
         peer: SocketAddr,
         /// Which end ended it.
-        initiator: Initiator,
+        ended_by: EndedBy,
         /// The reason given.
         reason: ByeReason,
+    },
+    /// The Host could not issue a nonce to an Invitation that needs one, and
+    /// refused the Invitation.
+    NonceUnavailable {
+        /// The peer's address.
+        peer: SocketAddr,
+        /// Why the operating system gave no random bytes.
+        error: EntropyError,
     },
     /// A Client's authentication did not succeed.
     AuthenticationFailed {

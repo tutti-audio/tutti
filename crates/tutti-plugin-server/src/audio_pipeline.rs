@@ -19,6 +19,7 @@ use tutti_plugin_types::{
     MAX_BLOCK_CHANNELS, MIDI_STACK_CAPACITY, MidiEventVec, NoteExpressionChanges,
     NoteExpressionIntChanges, NoteExpressionTextChanges, ParameterChanges, ProcessContext,
     ProcessOutput, SampleFormat, Samples, ScaleChanges, TransportChange, TransportInfo, WireMidi,
+    sanitize,
 };
 use tutti_ump::Ump;
 
@@ -486,12 +487,8 @@ impl AudioPipeline {
                         // production hazard, and a finite-check per sample is cheap
                         // on an already memory-bound path.
                         for (ch, chan) in output.iter_mut().enumerate().take(out_n) {
-                            for s in &mut chan[..num_samples] {
-                                if !s.is_finite() {
-                                    *s = 0.0;
-                                }
-                                silent &= *s == 0.0;
-                            }
+                            sanitize(&mut chan[..num_samples]);
+                            silent &= chan[..num_samples].iter().all(|s| *s == 0.0);
                             if shm.write::<f32>(seq, ch, &chan[..num_samples]).is_err() {
                                 all_channels_written = false;
                             }
@@ -523,12 +520,8 @@ impl AudioPipeline {
                     } else {
                         // Sanitize NaN/Inf — see the F32 arm above.
                         for (ch, chan) in output.iter_mut().enumerate().take(out_n) {
-                            for s in &mut chan[..num_samples] {
-                                if !s.is_finite() {
-                                    *s = 0.0;
-                                }
-                                silent &= *s == 0.0;
-                            }
+                            sanitize(&mut chan[..num_samples]);
+                            silent &= chan[..num_samples].iter().all(|s| *s == 0.0);
                             if shm.write::<f64>(seq, ch, &chan[..num_samples]).is_err() {
                                 all_channels_written = false;
                             }

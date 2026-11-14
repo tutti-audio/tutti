@@ -415,40 +415,34 @@ unsafe extern "C" fn au_render_notify(
     // registered, live until `AudioUnitRemoveRenderNotify` returns (its `Drop`
     // removes the notify before releasing the state).
     unsafe {
-        with_state::<NotifyState, _>(
-            "a render notify callback",
-            in_ref_con,
-            NO_ERR,
-            CANNOT_DO_IN_CURRENT_CONTEXT,
-            |state| {
-                if io_action_flags.is_null() {
-                    return NO_ERR;
-                }
-                // AudioToolbox passes a valid flags word for the call.
-                let flags = *io_action_flags;
-                // The AU sets exactly one phase per call; a word with neither is
-                // not a notification this module models.
-                let phase = if flags & K_AUDIO_UNIT_RENDER_ACTION_PRE_RENDER != 0 {
-                    RenderPhase::Pre
-                } else if flags & K_AUDIO_UNIT_RENDER_ACTION_POST_RENDER != 0 {
-                    RenderPhase::Post
-                } else {
-                    return NO_ERR;
-                };
-                state
-                    .deliveries
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                (state.callback)(RenderNotification {
-                    phase,
-                    flags,
-                    frames: in_number_frames,
-                    bus: in_bus_number,
-                    io_data,
-                    timestamp: in_time_stamp,
-                });
-                NO_ERR
-            },
-        )
+        with_state::<NotifyState, _>(in_ref_con, NO_ERR, CANNOT_DO_IN_CURRENT_CONTEXT, |state| {
+            if io_action_flags.is_null() {
+                return NO_ERR;
+            }
+            // AudioToolbox passes a valid flags word for the call.
+            let flags = *io_action_flags;
+            // The AU sets exactly one phase per call; a word with neither is
+            // not a notification this module models.
+            let phase = if flags & K_AUDIO_UNIT_RENDER_ACTION_PRE_RENDER != 0 {
+                RenderPhase::Pre
+            } else if flags & K_AUDIO_UNIT_RENDER_ACTION_POST_RENDER != 0 {
+                RenderPhase::Post
+            } else {
+                return NO_ERR;
+            };
+            state
+                .deliveries
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            (state.callback)(RenderNotification {
+                phase,
+                flags,
+                frames: in_number_frames,
+                bus: in_bus_number,
+                io_data,
+                timestamp: in_time_stamp,
+            });
+            NO_ERR
+        })
     }
 }
 
