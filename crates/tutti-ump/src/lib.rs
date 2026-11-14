@@ -71,6 +71,7 @@ mod decode;
 mod encode;
 mod field;
 mod flex_text;
+mod held_keys;
 mod manufacturer;
 mod message;
 mod midi1;
@@ -95,6 +96,7 @@ pub use field::{
 pub use flex_text::{
     FlexText, FlexTextAssembler, FlexTextPackets, FlexTextStep, flex_text_packets,
 };
+pub use held_keys::{KeyBitset, Lane};
 pub use manufacturer::{ManufacturerId, NotManufacturerId};
 pub use message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BlockFilter, BlockSelect,

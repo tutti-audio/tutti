@@ -2,7 +2,7 @@
 
 use bytemuck::{Pod, Zeroable};
 
-use crate::{Address, CCNumber, MidiChannel, MidiGroup, NoteNumber, Protocol};
+use crate::{Address, CCNumber, Lane, MidiChannel, MidiGroup, NoteNumber, Protocol};
 
 /// One Universal MIDI Packet: four 32-bit words, of which the message type in
 /// the top nibble of the first word says how many are meaningful
@@ -347,6 +347,12 @@ impl Key {
 
     const fn is_midi2(self) -> bool {
         self.0 >> 15 != 0
+    }
+
+    /// The channel in its protocol.
+    #[must_use]
+    pub const fn lane(self) -> Lane {
+        Lane::from_packed(self.0 >> 7)
     }
 
     /// The Group and Channel.

@@ -1,7 +1,7 @@
 //! A message at MIDI 1.0: the narrowing of a MIDI 2.0 voice message, and the
 //! MIDI 1.0 messages a [`Message`] stands for.
 
-use tutti_ump::{Message, Midi1Bytes, U7, Ump, Voice1, Voice2};
+use tutti_ump::{Message, Midi1Bytes, Ump, Voice1, Voice2};
 
 use crate::{narrow_bend, narrow_note_on_velocity, narrow_value, narrow_velocity};
 

@@ -17,22 +17,20 @@
 //! controller when its note ends, and the ledger ends every note first.
 
 use tutti_graph::{Event, EventWriter, Offset};
-use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, U7, U14, Ump, Voice1, Voice2};
-use tutti_ump::{BendValue, ControlValue};
+use tutti_ump::{
+    BendValue, CCNumber, ControlValue, Lane, Message, MidiGroup, Protocol, U7, U14, Ump, Voice1,
+    Voice2,
+};
 
-const LANES: usize = 512;
 /// The hold controllers: sustain, sostenuto, soft pedal, hold 2.
 const PEDALS: [u8; 4] = [64, 66, 67, 69];
 /// The bit of the pitch bend in a lane's state; the pedals are bits 0 to 3.
 const BEND: u8 = 4;
-/// A 14-bit bend at rest (M1) and its MIDI 2.0 32-bit image.
-const CENTRE_14: u16 = 0x2000;
-const CENTRE_32: u32 = 0x8000_0000;
 
 /// Which controllers are off their normal position, low byte, and which of
 /// those a refused reset still owes, high byte (the same bits).
 pub(crate) struct Controllers {
-    lanes: Box<[u16; LANES]>,
+    lanes: Box<[u16; Lane::COUNT]>,
     /// Some lane owes a reset: a block with no debt pays in one test.
     owing: bool,
 }
@@ -41,7 +39,7 @@ impl Controllers {
     /// Control thread: allocates.
     pub(crate) fn new() -> Self {
         Self {
-            lanes: Box::new([0; LANES]),
+            lanes: Box::new([0; Lane::COUNT]),
             owing: false,
         }
     }
@@ -51,33 +49,34 @@ impl Controllers {
         self.owing = false;
     }
 
-    fn lane(m2: bool, address: Address) -> usize {
-        usize::from(m2) * 256 + address.index()
-    }
-
     /// Folds in a message the port took. A controller back at its normal
     /// position is forgotten, and a new value supersedes a reset still owed.
     pub(crate) fn observe(&mut self, ump: Ump) {
-        let (m2, address, bit, off_normal) = match ump.decode() {
+        let (protocol, address, bit, off_normal) = match ump.decode() {
             Ok(Message::Midi1(a, Voice1::ControlChange { controller, value })) => {
                 let Some(bit) = pedal_bit(controller) else {
                     return;
                 };
-                (false, a, bit, value.get() >= 64)
+                (Protocol::Midi1, a, bit, value.get() >= 64)
             }
-            Ok(Message::Midi1(a, Voice1::PitchBend(b))) => (false, a, BEND, b.get() != CENTRE_14),
+            Ok(Message::Midi1(a, Voice1::PitchBend(b))) => {
+                (Protocol::Midi1, a, BEND, b != U14::CENTER)
+            }
             Ok(Message::Midi2(a, Voice2::ControlChange { controller, value })) => {
                 let Some(bit) = pedal_bit(controller) else {
                     return;
                 };
-                (true, a, bit, value >= ControlValue::new(CENTRE_32))
+                (Protocol::Midi2, a, bit, value >= ControlValue::CENTER)
             }
             Ok(Message::Midi2(a, Voice2::PitchBend(v))) => {
-                (true, a, BEND, v != BendValue::new(CENTRE_32))
+                (Protocol::Midi2, a, BEND, v != BendValue::CENTER)
             }
             _ => return,
         };
-        let lane = &mut self.lanes[Self::lane(m2, address)];
+        let Some(lane) = Lane::new(protocol, address) else {
+            return;
+        };
+        let lane = &mut self.lanes[lane.index()];
         *lane &= !(0x101 << bit);
         if off_normal {
             *lane |= 1 << bit;
@@ -85,13 +84,9 @@ impl Controllers {
     }
 
     /// The message that returns control `bit` of `lane` to its normal position.
-    fn reset(lane: usize, bit: u8) -> Ump {
-        let m2 = lane >= 256;
-        let address = Address {
-            group: MidiGroup::masked((lane >> 4) as u8),
-            channel: MidiChannel::masked(lane as u8),
-        };
-        let message = if m2 {
+    fn reset(lane: Lane, bit: u8) -> Ump {
+        let address = lane.address();
+        let message = if lane.protocol() == Protocol::Midi2 {
             Message::Midi2(
                 address,
                 match PEDALS.get(usize::from(bit)) {
@@ -99,7 +94,7 @@ impl Controllers {
                         controller: CCNumber::new(cc).expect("a controller"),
                         value: ControlValue::MIN,
                     },
-                    None => Voice2::PitchBend(BendValue::new(CENTRE_32)),
+                    None => Voice2::PitchBend(BendValue::CENTER),
                 },
             )
         } else {
@@ -110,7 +105,7 @@ impl Controllers {
                         controller: CCNumber::new(cc).expect("a controller"),
                         value: U7::of(0),
                     },
-                    None => Voice1::PitchBend(U14::of(CENTRE_14)),
+                    None => Voice1::PitchBend(U14::CENTER),
                 },
             )
         };
@@ -123,7 +118,8 @@ impl Controllers {
     /// one the rest are not tried (it is full) but each is owed and counted.
     pub(crate) fn lift_all(&mut self, out: &mut EventWriter<'_>, at: Offset) {
         let mut full = false;
-        for (lane, state) in self.lanes.iter_mut().enumerate() {
+        for (i, state) in self.lanes.iter_mut().enumerate() {
+            let lane = Lane::from_index(i).expect("a lane");
             for bit in 0..=BEND {
                 let (held, owed) = (*state & (1 << bit) != 0, *state & (0x100 << bit) != 0);
                 if !held {
@@ -160,8 +156,9 @@ impl Controllers {
         group: Option<MidiGroup>,
         mut accept: impl FnMut(Ump) -> bool,
     ) -> bool {
-        for (lane, state) in self.lanes.iter_mut().enumerate() {
-            if group.is_some_and(|g| (lane >> 4) & 0xf != usize::from(g.get())) {
+        for (i, state) in self.lanes.iter_mut().enumerate() {
+            let lane = Lane::from_index(i).expect("a lane");
+            if group.is_some_and(|g| lane.address().group != g) {
                 continue;
             }
             for bit in 0..=BEND {
@@ -191,7 +188,8 @@ impl Controllers {
         }
         let mut full = false;
         let mut left = false;
-        for (lane, state) in self.lanes.iter_mut().enumerate() {
+        for (i, state) in self.lanes.iter_mut().enumerate() {
+            let lane = Lane::from_index(i).expect("a lane");
             for bit in 0..=BEND {
                 if *state & (0x100 << bit) == 0 {
                     continue;
