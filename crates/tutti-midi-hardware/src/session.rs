@@ -184,8 +184,9 @@ pub enum Polled {
     /// ended, or the peer's Process Inquiry was dropped.
     Process(DeviceId, PeerId, ProcessChange),
     /// MIDI-CI could not start a device on a Group of the device: the operating
-    /// system gave no random bytes for its MUID. The Group is tried again at
-    /// the next poll while MIDI-CI is enabled.
+    /// system gave no random bytes for its MUID. It is reported once until the
+    /// device starts; the Group is tried again at every poll while MIDI-CI is
+    /// enabled.
     CiNotStarted(DeviceId, MidiGroup, EntropyError),
 }
 

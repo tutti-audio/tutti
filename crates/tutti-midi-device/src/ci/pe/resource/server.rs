@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use super::super::body::{BodyLimit, decode_body, encode_body};
 use super::super::capabilities::{PeCapabilities, PeCiMessage, SimultaneousRequests};
-use super::super::chunk::{PeChunk, PeChunkError, PeRequestId, split_message};
+use super::super::chunk::{PeChunk, PeRequestId, split_message};
 use super::super::flow::{
     PE_TIMEOUT, PeAnswer, PeMessageKind, PeSignal, PeTerminator, PeTransaction,
 };
@@ -87,17 +87,6 @@ pub enum ResponderEvent {
         subscribe_id: SubscribeId,
         /// Which device ended it.
         by: PeEndedBy,
-    },
-    /// A Subscription message cannot be sent in the peer's Maximum SysEx Message
-    /// Size, even as a `notify`: the Initiator is not told, and the next change
-    /// queues a new message.
-    UpdateNotSent {
-        /// The Initiator.
-        peer: Muid,
-        /// The Subscription.
-        subscribe_id: SubscribeId,
-        /// Why the message does not split into chunks.
-        error: PeChunkError,
     },
     /// The device refused the body of a state an Initiator was setting.
     StateRefused {
@@ -1428,8 +1417,13 @@ impl ResourceResponder {
     }
 
     /// Sends a Subscription message to `peer` under `id`, which the caller took
-    /// from the peer's pool: a message that does not split gives the ID back and
-    /// is reported.
+    /// from the peer's pool.
+    ///
+    /// The message always splits: a body is encoded 7-bit before it gets here
+    /// and carries at most one chunk of data (`fits`) or none (`notify`, `end`),
+    /// and a header is a few tens of bytes against a receivable size of at least
+    /// 128. A message that did not would be a bug of this crate: it is not sent
+    /// and its ID is given back.
     fn send_update(
         &mut self,
         peer: Muid,
@@ -1442,25 +1436,18 @@ impl ResourceResponder {
         let Some(max) = self.peer(peer).map(|p| p.max_sysex) else {
             return;
         };
-        match split_message(id, &update.header, &update.body, max) {
-            Ok(chunks) => {
-                self.outgoing.push(Outgoing {
-                    peer,
-                    id,
-                    sub: sub.clone(),
-                    deadline: now + PE_TIMEOUT,
-                });
-                self.send_chunks(peer, PeMessageKind::SUBSCRIPTION_INQUIRY, chunks, out);
-            }
-            Err(error) => {
-                self.release(peer, id);
-                out.push(ResponderAction::Event(ResponderEvent::UpdateNotSent {
-                    peer,
-                    subscribe_id: sub.clone(),
-                    error,
-                }));
-            }
-        }
+        let Ok(chunks) = split_message(id, &update.header, &update.body, max) else {
+            debug_assert!(false, "a Subscription message always splits");
+            self.release(peer, id);
+            return;
+        };
+        self.outgoing.push(Outgoing {
+            peer,
+            id,
+            sub: sub.clone(),
+            deadline: now + PE_TIMEOUT,
+        });
+        self.send_chunks(peer, PeMessageKind::SUBSCRIPTION_INQUIRY, chunks, out);
     }
 }
 
@@ -1469,55 +1456,5 @@ fn changes_object(update: &PartialUpdate) -> super::super::tree::PeObject {
     match update.to_json() {
         PeJson::Object(object) => object,
         _ => super::super::tree::PeObject::new(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::exchange::{responder_settings, store};
-    use super::*;
-    use crate::ci::testing::{OURS, PEER};
-
-    // M2-101 §8.3: a message whose body is not 7-bit does not split; it is not
-    // sent, the Responder reports it, and the Request ID it took is free again.
-    // No public call builds such a body (the bodies are encoded 7-bit before
-    // they are split), so the failure is driven at the sender.
-    #[test]
-    fn an_update_that_does_not_split_is_reported_and_gives_its_request_id_back() {
-        let (own, initiator) = (Muid::of(PEER), Muid::of(OURS));
-        let mut resp = ResourceResponder::new(own, responder_settings(), store());
-        resp.accept(initiator, MaxSysexSize::of(256));
-        let sub = SubscribeId::new("s1").unwrap();
-        let id = resp.peers[0]
-            .ids
-            .allocate(SimultaneousRequests::ONE)
-            .unwrap();
-        let update = Update {
-            header: PeHeader::Subscription(PeSubscription::Update {
-                command: PeUpdateCommand::Full,
-                subscribe_id: sub.clone(),
-                mutual_encoding: None,
-                media_type: None,
-                extra: Default::default(),
-            }),
-            body: vec![0x80],
-        };
-        let mut out = Vec::new();
-        resp.send_update(initiator, id, &sub, &update, Instant::now(), &mut out);
-        assert_eq!(
-            out,
-            [ResponderAction::Event(ResponderEvent::UpdateNotSent {
-                peer: initiator,
-                subscribe_id: sub,
-                error: PeChunkError::NotSevenBit { at: 0 },
-            })]
-        );
-        // The one request the peer takes is free again.
-        assert!(
-            resp.peers[0]
-                .ids
-                .allocate(SimultaneousRequests::ONE)
-                .is_some()
-        );
     }
 }

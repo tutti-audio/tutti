@@ -15,8 +15,9 @@ enum Cause {
 }
 
 impl EntropyError {
-    /// The error of a source that has no random bytes to give, for a nonce
-    /// source of a platform with none.
+    /// The error of a source that has no random bytes to give: for a nonce
+    /// source with a failure of its own, such as a `Host::with_nonce_source`
+    /// replacement.
     #[must_use]
     pub const fn unavailable() -> Self {
         Self(Cause::Unavailable)
