@@ -17,7 +17,6 @@ pub mod machine_control_out;
 pub use clock_master::{ClockControls, ClockMaster};
 pub use clock_node::{CLOCK_EVENT_CAPACITY, ClockNode};
 pub use jr_timestamp::{
-    JR_CLOCK_INTERVAL, JR_CLOCK_MAX_INTERVAL, JrClock, JrClockEmitter, JrReceiver, JrStamper,
-    JrStream,
+    JR_CLOCK_INTERVAL, JR_CLOCK_MAX_INTERVAL, JrClock, JrClockEmitter, JrStamper, JrStream,
 };
 pub use machine_control_out::MachineControlSender;
