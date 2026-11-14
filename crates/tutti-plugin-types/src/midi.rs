@@ -9,7 +9,7 @@ use arrayvec::ArrayVec;
 use tutti_rt::RtVec;
 
 use tutti_graph::Offset;
-use tutti_ump::Ump;
+use tutti_ump::{MidiGroup, Ump};
 
 /// One MIDI packet a plugin reported, with the offset it reported it at.
 ///
@@ -78,3 +78,35 @@ pub const RT_MIDI_CAPACITY: usize = 64;
 /// discretion. [`RtVec`] refuses instead, and reports it through
 /// `is_overflowed()`.
 pub type RtMidiEvents = RtVec<WireMidi, RT_MIDI_CAPACITY>;
+
+/// The note port or event bus of `group`: a UMP Group is the port of its own
+/// number (M2-104 section 2.1.2: a Group is a channel space of its own), in
+/// every format and both directions. [`group_of_port`] is its inverse.
+#[must_use]
+pub fn port_of_group(group: MidiGroup) -> u16 {
+    u16::from(group.get())
+}
+
+/// The Group of the plugin's note port or event bus `port`, or `None` for a
+/// port past the sixteen Groups. A plugin's output on `port` is that Group's.
+#[must_use]
+pub fn group_of_port(port: u16) -> Option<MidiGroup> {
+    MidiGroup::new(u8::try_from(port).ok()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Port `n` is Group `n` for all sixteen Groups, and port 16 is none.
+    #[test]
+    fn a_port_is_the_group_of_its_number() {
+        for n in 0..16u8 {
+            let group = MidiGroup::new(n).unwrap();
+            assert_eq!(port_of_group(group), u16::from(n));
+            assert_eq!(group_of_port(u16::from(n)), Some(group));
+        }
+        assert_eq!(group_of_port(16), None);
+        assert_eq!(group_of_port(u16::MAX), None);
+    }
+}

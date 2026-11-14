@@ -19,9 +19,9 @@
 
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
-use tutti_midi_protocol::{Narrower, widen_bytes};
+use tutti_midi_protocol::{Narrower, Translator};
 use tutti_plugin_types::WireMidi;
-use tutti_ump::{Message, MidiGroup, Ump};
+use tutti_ump::{Message, MidiGroup, Ump, parse_exact};
 
 /// A block's plugin-to-host MIDI, reserved once and reused.
 pub type MidiEventVec = Vec<WireMidi>;
@@ -51,6 +51,10 @@ pub struct MidiIo {
     room: usize,
     /// Events dropped because `out` was full, since load.
     out_overflow: u64,
+    /// Translates the plugin's MIDI 1.0 output into UMP, keeping its
+    /// parameter-number and bank runs across blocks: VST2 has one output
+    /// stream, so one translator.
+    translator: Translator,
 }
 
 impl std::fmt::Debug for MidiIo {
@@ -77,6 +81,7 @@ impl MidiIo {
             out_rx,
             out,
             out_overflow: 0,
+            translator: Translator::new(),
         }
     }
 
@@ -88,8 +93,15 @@ impl MidiIo {
 }
 
 impl MidiIo {
+    /// Forgets the output's parameter-number and bank runs, sending nothing: the
+    /// plugin's output has a discontinuity (a reset, a deactivation).
+    pub fn reset_out(&mut self) {
+        self.translator.reset();
+    }
+
     /// Moves everything in the plugin→host inbox into [`out`](Self::out), in
-    /// order, for the piece of a block that starts `start` frames into it: the
+    /// order, each MIDI 1.0 message through the output's translator (a message
+    /// that ends no run is absorbed), for the piece of a block that starts `start` frames into it: the
     /// plugin's offsets are relative to its call, the returned ones to the
     /// block. Allocation-free: `out` is reserved for the inbox's whole
     /// capacity at construction, so draining a full inbox cannot grow it.
@@ -102,22 +114,27 @@ impl MidiIo {
                 self.out_overflow += 1;
                 continue;
             }
+            let Some(ump) = self.translator.translate(ev.ump) else {
+                continue;
+            };
             self.out.push(WireMidi {
                 offset: ev.offset.saturating_add(start),
-                ..ev
+                ump,
             });
         }
     }
 }
 
-/// Parses a VST2 `crate::api::MidiEvent` (MIDI 1.0 wire bytes) into a Tutti
-/// UMP [`WireMidi`]. Tags the event with the original `delta_frames`.
+/// Parses a VST2 `crate::api::MidiEvent` (MIDI 1.0 wire bytes) into a MIDI 1.0
+/// [`WireMidi`], tagged with the original `delta_frames`. The packet stays
+/// MIDI 1.0: [`MidiIo::drain_from`] runs it through the output's translator,
+/// which needs the stream in order (RPN, NRPN and Bank Select span messages).
 pub fn to_midi(event: &crate::api::MidiEvent) -> Option<WireMidi> {
     let frame = event.delta_frames.max(0) as u32;
-    // Widen the MIDI-1 message to Channel Voice 2 at this edge, so the engine
-    // sees one vocabulary regardless of source (a Note On at velocity 0 is a
-    // Note Off). System messages pass through unchanged.
-    widen_bytes(MidiGroup::FIRST, &event.midi_data).map(|ump| WireMidi { offset: frame, ump })
+    parse_exact(MidiGroup::FIRST, &event.midi_data).map(|message| WireMidi {
+        offset: frame,
+        ump: Ump::from(message),
+    })
 }
 
 /// Serializes a Tutti UMP [`WireMidi`] to a VST2 `crate::api::MidiEvent`.
@@ -845,16 +862,19 @@ mod tests {
         }
     }
 
-    /// A plugin-emitted MIDI-1 CC must arrive as MIDI-2 Channel Voice 2, not
-    /// CV1: the engine sees one vocabulary regardless of source (as the
-    /// hardware input path's widening does).
+    /// A plugin-emitted MIDI-1 CC arrives as MIDI-2 Channel Voice 2, not
+    /// CV1, once the output's translator has it: the engine sees one
+    /// vocabulary regardless of source (as the hardware input path's does).
     #[test]
     fn inbound_cc_promotes_to_cv2() {
         use tutti_ump::{Message, Voice2};
 
         // 0xB1 = CC on channel 1, controller 74, value 100.
         let midi = to_midi(&api_from_bytes([0xB1, 74, 100])).expect("CC decodes");
-        match midi.ump.decode().expect("valid UMP") {
+        let ump = Translator::new()
+            .translate(midi.ump)
+            .expect("a CC outside a run is sent");
+        match ump.decode().expect("valid UMP") {
             Message::Midi2(address, Voice2::ControlChange { controller, value }) => {
                 assert_eq!(address.channel, MidiChannel::of(1));
                 assert_eq!(controller, CCNumber::of(74));

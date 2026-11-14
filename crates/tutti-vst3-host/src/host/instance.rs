@@ -13,6 +13,7 @@
 //! negotiated arrangements, the input and output staging, and the sample width
 //! `T`.
 
+use tutti_midi_protocol::Translator;
 use tutti_plugin_types::MainThreadMarker;
 use vst3::Steinberg::Vst::{SpeakerArr, SpeakerArrangement};
 
@@ -227,6 +228,7 @@ impl<T: Vst3Sample> Staged<T> {
                     PointPool::default(),
                 ),
                 emitted_midi: RtMidiEvents::new(),
+                emitted_translator: Translator::new(),
                 emitted_param_changes,
             },
             cc: CcRoute::following(

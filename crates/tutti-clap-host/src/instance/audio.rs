@@ -439,6 +439,7 @@ impl ClapProcessor {
             input_events,
             output_events,
             out_midi,
+            out_translator,
             out_param_changes,
             out_param_points_dropped,
             out_note_expressions,
@@ -451,7 +452,7 @@ impl ClapProcessor {
                 input_events.note_ended(end.note_id);
             }
         }
-        output_events.fill_midi_events(out_midi);
+        output_events.fill_midi_events(out_translator, out_midi);
         *out_param_points_dropped += output_events.fill_param_changes(out_param_changes);
         output_events.fill_note_expressions(out_note_expressions);
 

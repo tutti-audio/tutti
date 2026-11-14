@@ -537,7 +537,7 @@ fn a_long_sysex_from_the_plugin_drains_whole() {
     };
     assert_eq!(reassemble(&midi_events(&output)), vec![message.clone()]);
     let mut pool = RtMidiEvents::new();
-    output.fill_midi_events(&mut pool);
+    output.fill_midi_events(&mut tutti_midi_protocol::Translator::new(), &mut pool);
     assert!(!pool.is_overflowed());
     assert_eq!(reassemble(pool.as_slice()), vec![message]);
 }

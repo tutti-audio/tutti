@@ -14,6 +14,7 @@
 //! velocity). Where a cast is sound, its `#[allow]` says why.
 #![deny(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
 
+use tutti_midi_protocol::Translator;
 use tutti_plugin_types::WireMidi;
 
 mod harmony;
@@ -35,12 +36,15 @@ use crate::types::NoteExpressionIntValue;
 
 /// Reads an [`Event`] as the engine's types.
 pub trait EventExt {
-    /// The event as a UMP [`WireMidi`] (the offset the event carries, unclamped), promoting a MIDI-1 payload to Channel
-    /// Voice 2. `None` for the non-MIDI events and for a reassembled
-    /// [`Payload::SysEx`] (input-only; the list's buffer holds its bytes). The
-    /// other direction is [`MidiEncoder`], which keeps the per-note bend ranges
-    /// one event cannot carry.
-    fn to_midi(&self) -> Option<WireMidi>;
+    /// The event as a UMP [`WireMidi`] on the Group of its event bus (the
+    /// offset the event carries, unclamped). A MIDI 1.0 payload goes through
+    /// `translator`, the output stream's one (M2-104 Appendix D.3); a note
+    /// expression with a per-note message is that message. `None` for the
+    /// other non-MIDI events, for a message the translator absorbs and for a
+    /// reassembled [`Payload::SysEx`] (input-only; the list's buffer holds its
+    /// bytes). The other direction is [`MidiEncoder`], which keeps the per-note
+    /// bend ranges one event cannot carry.
+    fn to_midi(&self, translator: &mut Translator) -> Option<WireMidi>;
 }
 
 /// An engine value that stages as one [`Event`].
@@ -50,8 +54,8 @@ pub trait ToEvent {
 }
 
 impl EventExt for Event {
-    fn to_midi(&self) -> Option<WireMidi> {
-        midi::decode(self)
+    fn to_midi(&self, translator: &mut Translator) -> Option<WireMidi> {
+        midi::decode(self, translator)
     }
 }
 

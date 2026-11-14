@@ -55,7 +55,9 @@ fn test_note_on_roundtrip() {
     let event = (at(10), midi::note_on(MidiChannel::of(3), 60, 0x8000));
     let clap = first(&event).expect("NoteOn should convert");
     assert!(matches!(clap, ClapEvent::NoteOn(_)));
-    let back = clap.to_midi().expect("round-trip should succeed");
+    let back = clap
+        .to_midi(&mut tutti_midi_protocol::Translator::new())
+        .expect("round-trip should succeed");
     assert_eq!(back.offset, 10);
     assert!(matches!(
         channel_voice(back.ump),
@@ -69,7 +71,9 @@ fn test_note_off_roundtrip() {
     let event = (at(20), midi::note_off(MidiChannel::of(5), 72, 0x4000));
     let clap = first(&event).expect("NoteOff should convert");
     assert!(matches!(clap, ClapEvent::NoteOff(_)));
-    let back = clap.to_midi().expect("round-trip should succeed");
+    let back = clap
+        .to_midi(&mut tutti_midi_protocol::Translator::new())
+        .expect("round-trip should succeed");
     assert_eq!(back.offset, 20);
     assert!(matches!(
         channel_voice(back.ump),

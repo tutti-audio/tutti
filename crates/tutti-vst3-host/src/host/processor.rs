@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 use tutti_graph::UmpAt;
+use tutti_midi_protocol::Translator;
 
 use vst3::Steinberg::Vst::ProcessSetup;
 
@@ -90,6 +91,11 @@ pub(super) struct OutputStaging {
     /// Capped: the plugin decides how many events it emits, so an unbounded
     /// pool would let it provoke a `malloc` in the audio callback.
     pub(super) emitted_midi: RtMidiEvents,
+    /// Translates the plugin's MIDI 1.0 output into UMP, keeping its
+    /// parameter-number and bank runs across blocks (one event bus is one
+    /// Group of its state). Built with the activation, so a deactivation drops
+    /// it; [`Vst3Processor::stop`] forgets the runs without sending them.
+    pub(super) emitted_translator: Translator,
     pub(super) emitted_param_changes: ParameterChanges,
 }
 
@@ -116,7 +122,11 @@ impl OutputStaging {
     /// return pools. Both `fill_*` clear their destination first and reuse its
     /// heap capacity, so this is allocation-free after warmup.
     pub(super) fn drain_emitted(&mut self) {
-        drain_midi(&self.events, &mut self.emitted_midi);
+        drain_midi(
+            &self.events,
+            &mut self.emitted_translator,
+            &mut self.emitted_midi,
+        );
         // A refusal is counted in `lists_busy` and leaves the pool empty.
         if !self
             .param_changes
@@ -282,6 +292,8 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     fn reset_midi_state(&mut self) {
         self.audio.input.events.reset_sysex();
         self.audio.input.stager.reset();
+        // Nor does the plugin's output carry a parameter run across it.
+        self.audio.output.emitted_translator.reset();
     }
 
     /// Takes the parameter writes the Controller queued that no block has

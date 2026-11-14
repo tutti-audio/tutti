@@ -1,6 +1,6 @@
 //! The legacy MIDI CC a plugin sends to the host, as a [`WireMidi`].
 
-use tutti_midi_protocol::widen;
+use tutti_midi_protocol::Translator;
 use tutti_ump::{
     Address, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, System, U7, U14, Ump, Voice1,
 };
@@ -22,14 +22,19 @@ fn data_byte(raw: i8) -> U7 {
 }
 
 /// The UMP message a [`LegacyCcOut`] stands for, on `group` (the event output
-/// bus it left on), as a MIDI 1.0 message widened to MIDI 2.0 (M2-104 App.
-/// D.3). `controlNumber` is a VST3 `ControllerNumbers` index (ivstmidicontrollers.h):
+/// bus it left on), as a MIDI 1.0 message translated to MIDI 2.0 (M2-104 App.
+/// D.3), or `None` for one the translator absorbs. `controlNumber` is a VST3 `ControllerNumbers` index (ivstmidicontrollers.h):
 /// 0-127 are real CCs, and the slots above are pitch bend, channel pressure,
 /// program change, poly-pressure and the System messages, with `value2`
 /// supplying the second data byte for pitch bend, poly-pressure and song
 /// position. Cable Select (135) has no MIDI message, and a number past 140 is
 /// none: both are `None`.
-pub(super) fn decode(e: &LegacyCcOut, frame: u32, group: MidiGroup) -> Option<WireMidi> {
+pub(super) fn decode(
+    e: &LegacyCcOut,
+    frame: u32,
+    group: MidiGroup,
+    translator: &mut Translator,
+) -> Option<WireMidi> {
     let address = Address::new(group, MidiChannel::masked(e.channel as u8));
     let v1 = data_byte(e.value);
     let v2 = data_byte(e.value2);
@@ -82,6 +87,8 @@ pub(super) fn decode(e: &LegacyCcOut, frame: u32, group: MidiGroup) -> Option<Wi
             value: v1,
         }
     };
-    let ump = Ump::from(Message::Midi2(address, widen(voice)));
+    // A MIDI 1.0 message through the output's translator, which assembles the
+    // stream's RPN and Bank Select runs (M2-104 Appendix D.3).
+    let ump = translator.translate(Message::Midi1(address, voice))?;
     Some(WireMidi { offset: frame, ump })
 }

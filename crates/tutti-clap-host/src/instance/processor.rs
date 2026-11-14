@@ -138,6 +138,8 @@ impl ClapProcessor {
         // The plugin forgot its input: a SysEx open across the reset must not
         // complete on the far side of it.
         self.scratch.input_events.reset_midi();
+        // Nor does the plugin's output carry a parameter run across it.
+        self.scratch.out_translator.reset();
     }
 
     /// Takes the parameter edits the Controller queued that no block has

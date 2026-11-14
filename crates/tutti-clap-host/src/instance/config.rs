@@ -9,6 +9,7 @@ use crate::types::{ClapNoteExpression, ParameterChanges, RtNoteExpressions};
 use clap_sys::process::CLAP_PROCESS_CONTINUE;
 use std::sync::atomic::AtomicI32;
 use tutti_clap_ffi::PortScratch;
+use tutti_midi_protocol::Translator;
 use tutti_plugin_types::BusChannels;
 use tutti_plugin_types::RtMidiEvents;
 use tutti_plugin_types::SampleFormat;
@@ -48,6 +49,11 @@ pub(crate) struct AudioScratch {
     /// would let a plugin provoke a `malloc` inside the audio callback. Events
     /// past the cap are dropped; `overflowed()` reports it.
     pub out_midi: RtMidiEvents,
+    /// Translates the plugin's MIDI 1.0 output into UMP, keeping the stream's
+    /// parameter-number and bank runs across blocks. One per activation, so a
+    /// deactivation drops it; [`ClapProcessor::reset`](super::ClapProcessor::reset)
+    /// forgets them without sending what was pending.
+    pub out_translator: Translator,
     /// Reserved at activation, one queue per parameter with a block's point
     /// room, and filled within that room (`fill_param_changes`); points past
     /// it are counted in `out_param_points_dropped`.
@@ -86,6 +92,7 @@ impl AudioScratch {
             input_events: InputEventList::new(),
             output_events: OutputEventList::new(),
             out_midi: RtMidiEvents::new(),
+            out_translator: Translator::new(),
             out_param_changes: ParameterChanges::new(),
             out_param_points_dropped: 0,
             out_note_expressions: RtNoteExpressions::new(),

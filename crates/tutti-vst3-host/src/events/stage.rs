@@ -2,7 +2,10 @@
 //! back what the plugin wrote.
 
 use tutti_graph::UmpAt;
-use tutti_plugin_types::{NoteExpressionIntValue, NoteExpressionValue, RtMidiEvents, push_sysex};
+use tutti_midi_protocol::Translator;
+use tutti_plugin_types::{
+    NoteExpressionIntValue, NoteExpressionValue, RtMidiEvents, group_of_port, push_sysex,
+};
 use tutti_ump::SysexStep;
 use tutti_vst3_ffi::{EventList, NOTE_EXPRESSION_ROOM, Staging};
 
@@ -176,21 +179,33 @@ fn stage_with_text(stage: &mut Staging<'_>, make: impl FnOnce(&mut Staging<'_>) 
     }
 }
 
-/// Drains the plugin's emitted MIDI from its output `list` into `out`. Clears
+/// Drains the plugin's emitted MIDI from its output `list` into `out`, each
+/// event on the Group of its event bus, MIDI 1.0 through `translator`. Clears
 /// `out` first and never grows it: events past its cap are dropped
 /// (`out.is_overflowed()` reports it), a SysEx that does not fit is dropped
 /// whole and counted in the list's [`dropped`](EventList::dropped).
-pub fn drain_midi(list: &EventList, out: &mut RtMidiEvents) {
+pub fn drain_midi(list: &EventList, translator: &mut Translator, out: &mut RtMidiEvents) {
     out.clear();
     let Some(refused) = list.try_with_events(|staged| {
         let mut refused = 0;
         for event in staged.events {
             if let Payload::SysEx(message) = event.payload {
                 let frame = u32::try_from(event.sample_offset()).unwrap_or(0);
-                if !push_sysex(out, frame, &staged.sysex[message.range()]) {
-                    refused += 1;
+                // A bus past the sixteen Groups names none: dropped, as any
+                // other event on it is.
+                let group = u16::try_from(event.header.bus_index)
+                    .ok()
+                    .and_then(group_of_port);
+                match group {
+                    Some(group)
+                        if !push_sysex(out, group, frame, &staged.sysex[message.range()]) =>
+                    {
+                        refused += 1;
+                    }
+                    Some(_) => {}
+                    None => refused += 1,
                 }
-            } else if let Some(midi) = event.to_midi()
+            } else if let Some(midi) = event.to_midi(translator)
                 && !out.push(midi)
             {
                 break;

@@ -624,7 +624,9 @@ fn draining_a_plugins_sysex_allocates_nothing() {
     }
     staging.finish();
     let mut out = RtMidiEvents::new();
-    assert_no_alloc::assert_no_alloc(|| drain_midi(&list, &mut out));
+    assert_no_alloc::assert_no_alloc(|| {
+        drain_midi(&list, &mut tutti_midi_protocol::Translator::new(), &mut out)
+    });
     let payloads: Vec<Vec<u8>> = out
         .iter()
         .map(|e| {
@@ -645,7 +647,7 @@ fn draining_a_plugins_sysex_allocates_nothing() {
     assert!(staging.push(Event::at(7, Payload::Data(data))));
     staging.finish();
     let mut out = RtMidiEvents::new();
-    drain_midi(&list, &mut out);
+    drain_midi(&list, &mut tutti_midi_protocol::Translator::new(), &mut out);
     assert!(out.is_empty());
     assert!(!out.is_overflowed(), "malformed is not an overflow");
 
@@ -663,7 +665,9 @@ fn draining_a_plugins_sysex_allocates_nothing() {
     let list = EventList::input();
     assert!(Stager::default().stage(&list, &midi_only(&packets)));
     let mut out = RtMidiEvents::new();
-    assert_no_alloc::assert_no_alloc(|| drain_midi(&list, &mut out));
+    assert_no_alloc::assert_no_alloc(|| {
+        drain_midi(&list, &mut tutti_midi_protocol::Translator::new(), &mut out)
+    });
     // 20 payload bytes, six to a packet (M2-104 section 7.7): 4 packets.
     assert_eq!(out.len(), 4);
 }

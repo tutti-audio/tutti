@@ -83,7 +83,11 @@ fn a_sysex_from_the_plugin_reaches_the_host_whole() {
         // for the call.
         assert_eq!(unsafe { ptr.addEvent(&mut e) }, kResultOk, "{len} bytes");
         let mut pool = RtMidiEvents::new();
-        drain_midi(&list, &mut pool);
+        drain_midi(
+            &list,
+            &mut tutti_midi_protocol::Translator::new(),
+            &mut pool,
+        );
         assert!(!pool.is_overflowed());
         assert!(pool.iter().all(|m| m.offset == 11));
         assert_eq!(reassembled(pool.as_slice()), vec![message], "{len} bytes");
@@ -112,7 +116,11 @@ fn a_sysex_past_the_output_room_is_dropped_whole_and_counted() {
     // the call.
     assert_eq!(unsafe { ptr.addEvent(&mut e) }, kResultOk);
     let mut pool = RtMidiEvents::new();
-    drain_midi(&list, &mut pool);
+    drain_midi(
+        &list,
+        &mut tutti_midi_protocol::Translator::new(),
+        &mut pool,
+    );
     assert_eq!(reassembled(pool.as_slice()), vec![short.to_vec()]);
 }
 
@@ -132,7 +140,11 @@ fn a_sysex_is_detected_by_its_data_type() {
         // for the call.
         assert_eq!(unsafe { ptr.addEvent(&mut e) }, kResultOk, "{len} bytes");
         let mut pool = RtMidiEvents::new();
-        drain_midi(&list, &mut pool);
+        drain_midi(
+            &list,
+            &mut tutti_midi_protocol::Translator::new(),
+            &mut pool,
+        );
         assert_eq!(reassembled(pool.as_slice()), vec![framed(&payload)]);
     }
 
@@ -149,7 +161,11 @@ fn a_sysex_is_detected_by_its_data_type() {
     assert_eq!(unsafe { ptr.addEvent(&mut e) }, kResultOk);
     assert_eq!(count(&list), 1);
     let mut pool = RtMidiEvents::new();
-    drain_midi(&list, &mut pool);
+    drain_midi(
+        &list,
+        &mut tutti_midi_protocol::Translator::new(),
+        &mut pool,
+    );
     assert!(reassembled(pool.as_slice()).is_empty());
 
     // A raw note-on carried as data (status byte first) is still a
@@ -162,7 +178,11 @@ fn a_sysex_is_detected_by_its_data_type() {
     // the call.
     assert_eq!(unsafe { ptr.addEvent(&mut e) }, kResultOk);
     let mut pool = RtMidiEvents::new();
-    drain_midi(&list, &mut pool);
+    drain_midi(
+        &list,
+        &mut tutti_midi_protocol::Translator::new(),
+        &mut pool,
+    );
     assert_eq!(pool.len(), 1);
     assert!(!matches!(
         pool.as_slice()[0].ump.decode(),
@@ -189,7 +209,11 @@ fn a_sysex_past_the_midi_pool_is_counted_in_dropped() {
     }
     assert_eq!(list.dropped(), 0);
     let mut pool = RtMidiEvents::new();
-    drain_midi(&list, &mut pool);
+    drain_midi(
+        &list,
+        &mut tutti_midi_protocol::Translator::new(),
+        &mut pool,
+    );
     assert!(pool.is_overflowed());
     assert_eq!(list.dropped(), 1);
     assert_eq!(reassembled(pool.as_slice()), vec![framed(&first)]);
@@ -215,7 +239,11 @@ fn the_plugin_sysex_path_is_allocation_free() {
             // valid for the call.
             refused |= unsafe { ptr.addEvent(&mut e) } == kResultFalse;
         }
-        drain_midi(&list, &mut pool);
+        drain_midi(
+            &list,
+            &mut tutti_midi_protocol::Translator::new(),
+            &mut pool,
+        );
     });
     assert!(refused, "the arena refused one inside the gate");
     assert!(!pool.is_empty());
