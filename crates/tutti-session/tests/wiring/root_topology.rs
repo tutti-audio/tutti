@@ -66,7 +66,7 @@ fn a_declared_unassigned_root_keeps_its_buses_by_index() {
 /// six gives, so only the swapped declaration shows the engine read it.)
 #[test]
 fn a_declared_surround_root_folds_by_the_surround_rules() {
-    let five_one = ChannelTopology::smpte(ChannelLayout::from(6u16)).unwrap();
+    let five_one = ChannelTopology::assumed(ChannelLayout::from(6u16));
     let mut s = offline(Session::builder().root_topology(five_one), 2).unwrap();
     assert_eq!(s.graph_ref().outputs(), 6);
     feed(&mut s, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
@@ -84,7 +84,8 @@ fn a_declared_surround_root_folds_by_the_surround_rules() {
         Speaker::LowFrequency,
         Speaker::SideLeft,
         Speaker::SideRight,
-    ]);
+    ])
+    .unwrap();
     s.declare_root_topology(Some(swapped)).unwrap();
     assert_eq!(
         heard(&mut s, 2),
@@ -130,13 +131,13 @@ fn an_unplaceable_declaration_is_refused() {
             speaker: Speaker::Unassigned
         }
     );
-    let unnamed = ChannelTopology::new([Speaker::FrontLeft, Speaker::Unknown(9)]);
+    let unnamed = ChannelTopology::new([Speaker::FrontLeft, Speaker::Unknown(9)]).unwrap();
     assert!(matches!(
         refused(offline(Session::builder().root_topology(unnamed), 2)),
         FoldError::Unnamed { .. }
     ));
     // Wider than the engine renders.
-    let wide = buses(tutti_graph::MAX_ROOT_CHANNELS as u16 + 1);
+    let wide = buses(tutti_types::MAX_CHANNELS as u16 + 1);
     assert!(matches!(
         refused(offline(Session::builder().root_topology(wide), 32)),
         FoldError::Unplaced { .. }
@@ -213,7 +214,7 @@ fn a_refusal_is_a_status_not_a_log_line() {
 
     // A root wider than the engine renders is widened as far as it goes, and the
     // excess is a refusal.
-    let max = tutti_graph::MAX_ROOT_CHANNELS;
+    let max = tutti_types::MAX_CHANNELS;
     let err = s.graph().widen_outputs(max + 8).unwrap_err();
     assert_eq!(s.graph_ref().outputs(), max);
     assert!(matches!(

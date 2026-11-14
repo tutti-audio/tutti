@@ -3,7 +3,7 @@
 
 use tutti_types::Samples;
 
-use super::{CloseError, CommitError, Editor, MAX_ROOT_CHANNELS, MissingSource, TapOpened};
+use super::{CloseError, CommitError, Editor, MAX_CHANNELS, MissingSource, TapOpened};
 use crate::Source;
 use crate::event_tap::EventTapReader;
 use crate::meter::MeterReader;
@@ -300,7 +300,7 @@ impl Editor {
     /// executor its cells; until then the reader sees nothing.
     ///
     /// [`MeterSpec::Outputs`] meters the graph's global outputs, one channel
-    /// each, following them as they change (up to [`MAX_ROOT_CHANNELS`]),
+    /// each, following them as they change (up to [`MAX_CHANNELS`]),
     /// aligned: each lane is what its output channel carries, at the
     /// output's time. [`MeterSpec::Ports`] meters those sources, fixed at the
     /// width given here, as they leave their nodes or aligned to the output
@@ -331,7 +331,7 @@ impl Editor {
             self.check_sources(sources)?;
         }
         let (lanes, width) = match &spec {
-            MeterSpec::Outputs => (MAX_ROOT_CHANNELS, 0),
+            MeterSpec::Outputs => (MAX_CHANNELS, 0),
             MeterSpec::Ports { sources, .. } => (sources.len(), sources.len()),
         };
         let (reader, writer) = MeterReader::pair(id, lanes, width);

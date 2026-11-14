@@ -23,7 +23,7 @@ use tutti_graph::{
     Status, fold_to_width,
 };
 use tutti_types::{
-    Amplitude, ChannelLayout, ChannelTopology, MAX_BUS_CHANNELS, Param, Samples, UnitParam,
+    Amplitude, ChannelLayout, ChannelTopology, MAX_CHANNELS, Param, Samples, UnitParam,
 };
 use tutti_types::{Latency, Tail};
 
@@ -457,8 +457,8 @@ impl ConvolverNode {
                     .expect("a MonoToStereo node builds its fold");
                 // The inputs, a block long each, as one table on the stack: a
                 // fold exists only at a width with an order, at most one bus.
-                let width = usize::from(fold.src_layout().count()).min(MAX_BUS_CHANNELS);
-                let mut table: [&[f32]; MAX_BUS_CHANNELS] = [&[]; MAX_BUS_CHANNELS];
+                let width = usize::from(fold.src_layout().count()).min(MAX_CHANNELS);
+                let mut table: [&[f32]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
                 for (c, slot) in table.iter_mut().enumerate().take(width) {
                     *slot = input(c);
                 }

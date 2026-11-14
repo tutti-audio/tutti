@@ -173,11 +173,11 @@ fn check_outputs(outputs: &[Output]) -> Result<()> {
             return Err(Error::UnsupportedChannels);
         }
         if let crate::Feed::Tap { reader, lanes } = output.feed()
-            && reader.layout() != lanes.topology().layout()
+            && reader.layout() != lanes.topology().width()
         {
             return Err(target_error(TargetError::Lanes {
                 lanes: reader.layout(),
-                placement: lanes.topology().layout(),
+                placement: lanes.topology().width(),
             }));
         }
         let Some(file) = file else { continue };
@@ -225,7 +225,7 @@ fn open_lanes(
         let (fold, tap) = match feed {
             crate::Feed::Master => (channels.fold_from(graph_outputs, root)?, None),
             crate::Feed::Tap { reader, lanes } => {
-                let width = lanes.topology().layout();
+                let width = lanes.topology().width();
                 let fold = channels
                     .fold_from(usize::from(width.count()), Some(lanes.topology()))
                     .map_err(|e| match e {

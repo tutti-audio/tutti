@@ -2923,9 +2923,10 @@ struct BusGraph {
 
 fn bus_of(width: usize, named: bool) -> Bus {
     let layout = ChannelLayout::from_count(width as u16);
-    let topology = match ChannelTopology::smpte(layout).filter(|_| named) {
-        Some(t) => BusTopology::try_from(&t).expect("fits a bus"),
-        None => BusTopology::unassigned(layout).expect("fits a bus"),
+    let topology = if named {
+        BusTopology::try_from(&ChannelTopology::assumed(layout)).expect("fits a bus")
+    } else {
+        BusTopology::unassigned(layout).expect("fits a bus")
     };
     Bus::new(topology, BusRole::Main)
 }

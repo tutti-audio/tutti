@@ -2329,7 +2329,7 @@ impl Graph {
                 // its width.
                 let source = tutti_types::ChannelTopology::from(out_topology);
                 let placed = if source.is_unassigned() {
-                    tutti_types::ChannelTopology::assumed(source.layout())
+                    tutti_types::ChannelTopology::assumed(source.width())
                 } else {
                     source
                 };
@@ -2795,7 +2795,7 @@ impl Graph {
     ///   ([`Session::declare_root_topology`](crate::Session::declare_root_topology)),
     ///   anything wider than the declaration: the root is not widened under
     ///   it ([`RootError::Width`](tutti_graph::RootError::Width));
-    /// - past [`MAX_ROOT_CHANNELS`](tutti_graph::MAX_ROOT_CHANNELS): the root
+    /// - past [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS): the root
     ///   is widened to that and the excess is not rendered
     ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), the first
     ///   channel with no place).
@@ -2809,19 +2809,19 @@ impl Graph {
         let refused = if let Some(root) = self
             .root
             .as_ref()
-            .filter(|r| channels > r.positions().len())
+            .filter(|r| channels > usize::from(r.width().count()))
         {
             Some(tutti_graph::RootError::Width {
-                declared: root.layout(),
+                declared: root.width(),
                 // Only the report names the request; one past `u16::MAX` is
-                // refused either way (it is past `MAX_ROOT_CHANNELS`), so the
+                // refused either way (it is past `MAX_CHANNELS`), so the
                 // saturated figure loses nothing.
                 requested: ChannelLayout::clamped(channels),
             })
-        } else if channels > tutti_graph::MAX_ROOT_CHANNELS {
+        } else if channels > tutti_types::MAX_CHANNELS {
             Some(tutti_graph::RootError::Fold(
                 tutti_buffers::FoldError::Unplaced {
-                    channel: tutti_graph::MAX_ROOT_CHANNELS,
+                    channel: tutti_types::MAX_CHANNELS,
                     speaker: tutti_types::Speaker::Unassigned,
                 },
             ))
@@ -2833,7 +2833,7 @@ impl Graph {
         // request widens as far as the engine renders.
         let target = match refused {
             Some(tutti_graph::RootError::Width { .. }) => 0,
-            _ => channels.min(tutti_graph::MAX_ROOT_CHANNELS),
+            _ => channels.min(tutti_types::MAX_CHANNELS),
         };
         let outputs = &mut self.editor.spec_mut().topology.outputs;
         if outputs.len() < target {
@@ -2880,7 +2880,7 @@ impl Graph {
     /// # Errors
     ///
     /// The [`FoldError`](tutti_buffers::FoldError) when the declaration is empty, wider than the engine
-    /// renders ([`MAX_ROOT_CHANNELS`](tutti_graph::MAX_ROOT_CHANNELS),
+    /// renders ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS),
     /// [`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced)), or cannot be placed on `device`. Nothing is
     /// changed.
     /// Whether `root` can be a root, and be placed on `device` when there is
@@ -2891,14 +2891,18 @@ impl Graph {
         device: impl Into<Option<ChannelLayout>>,
     ) -> Result<(), tutti_buffers::FoldError> {
         use tutti_buffers::{BufferError, FoldError};
-        let width = root.positions().len();
+        let width = usize::from(root.width().count());
         if width == 0 {
             return Err(BufferError::ZeroWidth.into());
         }
-        if width > tutti_graph::MAX_ROOT_CHANNELS {
+        if width > tutti_types::MAX_CHANNELS {
             return Err(FoldError::Unplaced {
-                channel: tutti_graph::MAX_ROOT_CHANNELS,
-                speaker: root.positions()[tutti_graph::MAX_ROOT_CHANNELS],
+                channel: tutti_types::MAX_CHANNELS,
+                speaker: root
+                    .positions()
+                    .and_then(|list| list.get(tutti_types::MAX_CHANNELS))
+                    .copied()
+                    .unwrap_or(tutti_types::Speaker::Unassigned),
             });
         }
         if let Some(device) = device.into() {
@@ -2915,7 +2919,7 @@ impl Graph {
         let width = match &root {
             Some(root) => {
                 Self::check_root(root, device)?;
-                root.positions().len()
+                usize::from(root.width().count())
             }
             None => {
                 if let Some(device) = device {
@@ -2938,9 +2942,8 @@ impl Graph {
         if let (Some(output), Some(device)) = (&self.output, device) {
             output.declare_root(root.clone(), device)?;
         }
-        // The bus form of the declaration; `check_root` held it to the
-        // engine's `MAX_ROOT_CHANNELS`, which fit a bus (asserted at build).
-        const _: () = assert!(tutti_graph::MAX_ROOT_CHANNELS <= tutti_types::MAX_BUS_CHANNELS);
+        // The bus form of the declaration; `check_root` held it to
+        // `MAX_CHANNELS`, which is a bus's width.
         let bus = root
             .as_ref()
             .map(|r| tutti_types::BusTopology::try_from(r).expect("a checked root fits a bus"));

@@ -35,4 +35,4 @@ pub use hrtf::{
     HRTF_LATENCY, HRTF_STEP, HrtfBinaural, HrtfBinauralError, MAX_PREPARED_RATE, MAX_SPHERE_RATE,
     MIN_SPHERE_RATE,
 };
-pub use vbap::{MAX_SPEAKERS, SpeakerGeometryError, SpeakerLayout, VbapGains, VbapKernel};
+pub use vbap::{SpeakerGeometryError, SpeakerLayout, VbapGains, VbapKernel};

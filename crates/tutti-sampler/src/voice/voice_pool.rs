@@ -2145,11 +2145,11 @@ fn reader_and_voice_node_default_to_stereo() {
 }
 
 /// A pool wider than the sampler reads is refused, by name, where one
-/// at the ceiling is built: past `MAX_SAMPLER_CHANNELS` it would declare
+/// at the ceiling is built: past `MAX_CHANNELS` it would declare
 /// outputs its read never writes.
 #[test]
 fn a_pool_wider_than_the_sampler_reads_is_refused() {
-    let ceiling = crate::MAX_SAMPLER_CHANNELS;
+    let ceiling = tutti_types::MAX_CHANNELS;
     assert!(
         VoicePool::with_channels(ChannelLayout::try_from(ceiling).expect("a test width is small"))
             .is_ok()
@@ -2173,7 +2173,7 @@ fn a_voice_node_wider_than_the_sampler_reads_leaves_no_stale_channels() {
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let sampler = MemorySource::placed(make_wave(4096), VoiceWindow::from(Beat::new(0.0)))
         .expect("a placeable wave");
-    let wide = crate::MAX_SAMPLER_CHANNELS + 2;
+    let wide = tutti_types::MAX_CHANNELS + 2;
     let node = VoiceNode::with_channels(
         Voice {
             source: VoiceSource::Memory(sampler),
@@ -2186,7 +2186,7 @@ fn a_voice_node_wider_than_the_sampler_reads_leaves_no_stale_channels() {
         ch.fill(7.0);
     }
     direct.block_in(&transport.env(64, SampleRate::of(SR)));
-    for c in crate::MAX_SAMPLER_CHANNELS..wide {
+    for c in tutti_types::MAX_CHANNELS..wide {
         for i in 0..64 {
             assert_eq!(
                 direct.output(c)[i],

@@ -1,6 +1,11 @@
 use super::*;
 use Speaker::*;
 
+/// The topology alone, for the cases that are about the speakers.
+fn topology_of(channels: &Channels) -> ChannelTopology {
+    super::topology_of(Some(channels)).0
+}
+
 /// The samples come in ascending flag order, so the topology lists the
 /// speakers in that order whatever order the flags were written in; the
 /// layouts the three codecs state come out as the speakers their specs name.
@@ -16,7 +21,7 @@ fn flags_become_speakers_in_sample_order() {
             | Position::LFE1,
     );
     assert_eq!(
-        topology_of(&vorbis_six).positions(),
+        topology_of(&vorbis_six).positions().unwrap(),
         [
             FrontLeft,
             FrontRight,
@@ -30,14 +35,14 @@ fn flags_become_speakers_in_sample_order() {
         Position::FRONT_LEFT | Position::FRONT_RIGHT | Position::REAR_LEFT | Position::REAR_RIGHT,
     );
     assert_eq!(
-        topology_of(&quad).positions(),
+        topology_of(&quad).positions().unwrap(),
         [FrontLeft, FrontRight, BackLeft, BackRight]
     );
     // WAV 5.1 (0x60F): side surrounds.
     let wav_six = Channels::Positioned(Position::from_bits_truncate(0x60F));
     assert_eq!(
         topology_of(&wav_six),
-        ChannelTopology::smpte(tutti_types::ChannelLayout::from(6u16)).unwrap()
+        ChannelTopology::assumed(tutti_types::ChannelLayout::from(6u16))
     );
 }
 
@@ -45,11 +50,13 @@ fn flags_become_speakers_in_sample_order() {
 #[test]
 fn a_lone_channel_is_mono() {
     assert_eq!(
-        topology_of(&Channels::Positioned(Position::FRONT_LEFT)).positions(),
+        topology_of(&Channels::Positioned(Position::FRONT_LEFT))
+            .positions()
+            .unwrap(),
         [FrontCenter]
     );
     assert_eq!(
-        topology_of(&Channels::Discrete(1)).positions(),
+        topology_of(&Channels::Discrete(1)).positions().unwrap(),
         [FrontCenter]
     );
 }
@@ -61,12 +68,16 @@ fn a_flag_with_no_speaker_keeps_its_slot_as_unknown() {
     let t = topology_of(&Channels::Positioned(
         Position::LFE1 | Position::LFE2 | Position::FRONT_LEFT,
     ));
-    assert_eq!(t.positions(), [FrontLeft, LowFrequency, Unknown(18)]);
+    assert_eq!(
+        t.positions().unwrap(),
+        [FrontLeft, LowFrequency, Unknown(18)]
+    );
     assert_eq!(
         topology_of(&Channels::Positioned(
             Position::FRONT_LEFT_WIDE | Position::FRONT_RIGHT_WIDE
         ))
-        .positions(),
+        .positions()
+        .unwrap(),
         [Unknown(24), Unknown(25)]
     );
 }
@@ -76,7 +87,60 @@ fn a_flag_with_no_speaker_keeps_its_slot_as_unknown() {
 #[test]
 fn channels_without_positions_are_unassigned() {
     assert_eq!(
-        topology_of(&Channels::Discrete(3)).positions(),
+        topology_of(&Channels::Discrete(3)).positions().unwrap(),
         [Unassigned; 3]
     );
+}
+
+/// A positioned set is stated, a container that states a count and no placement
+/// is the assumed topology of that count and says so, and a container that
+/// states nothing is assumed stereo.
+#[test]
+fn a_count_without_positions_is_assumed_and_says_so() {
+    use tutti_types::{Bed, ChannelLayout};
+    let basis = |c: &Channels| super::topology_of(Some(c)).1;
+    assert_eq!(
+        basis(&Channels::Positioned(
+            Position::FRONT_LEFT | Position::FRONT_RIGHT
+        )),
+        Placement::Stated
+    );
+    for (n, bed) in [
+        (2u16, Bed::Stereo),
+        (4, Bed::Quad),
+        (6, Bed::Surround51),
+        (8, Bed::Surround71),
+        (12, Bed::Surround714),
+    ] {
+        let (t, p) = super::topology_of(Some(&Channels::Discrete(n)));
+        assert_eq!((t, p), (bed.topology(), Placement::Assumed), "{n}");
+    }
+    let (t, p) = super::topology_of(Some(&Channels::Discrete(3)));
+    assert_eq!(
+        (t, p),
+        (
+            ChannelTopology::unassigned(ChannelLayout::from(3u16)),
+            Placement::Assumed
+        )
+    );
+    assert_eq!(
+        super::topology_of(None),
+        (Bed::Stereo.topology(), Placement::Assumed)
+    );
+}
+
+/// An ambisonic track is the ACN, SN3D format of its order, stated, from first
+/// order to the cap (a zeroth-order track is one channel: the mono); a higher
+/// order keeps its width as unassigned channels.
+#[test]
+fn an_ambisonic_track_is_its_format() {
+    use tutti_types::{AmbisonicFormat, AmbisonicOrder};
+    for order in 1u8..=3 {
+        let (t, p) = super::topology_of(Some(&Channels::Ambisonic(order)));
+        assert_eq!(t, AmbisonicFormat::ambix(AmbisonicOrder::of(order)).into());
+        assert_eq!(p, Placement::Stated);
+    }
+    let (t, _) = super::topology_of(Some(&Channels::Ambisonic(4)));
+    assert_eq!(t.width().count(), 25);
+    assert!(t.is_unassigned());
 }

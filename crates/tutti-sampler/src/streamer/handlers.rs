@@ -374,7 +374,7 @@ fn build_stream(
 
     // Where the file's channels go in the voice, built (and so refused) now,
     // before a ring exists to free again.
-    let width = voice_width(width.unwrap_or_else(|| nonempty(file_topology.layout())));
+    let width = voice_width(width.unwrap_or_else(|| nonempty(file_topology.width())));
     let place = Place::for_topology(&file_topology, width).map_err(OpenError::Placement)?;
 
     // Sizing only: a rate that moves before the ratio is set below changes the

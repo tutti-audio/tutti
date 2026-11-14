@@ -24,7 +24,7 @@ fn layout(n: u16) -> ChannelLayout {
 }
 
 fn named(n: u16) -> BusTopology {
-    BusTopology::try_from(&ChannelTopology::smpte(layout(n)).expect("an SMPTE width")).unwrap()
+    BusTopology::try_from(&ChannelTopology::assumed(layout(n))).unwrap()
 }
 
 fn unassigned(n: u16) -> BusTopology {
@@ -283,7 +283,7 @@ fn a_lane_takes_no_session_gain_and_a_removed_node_takes_its_bus_edges() {
 // ---------------------------------------------------------------------------
 
 fn smpte(n: u16) -> ChannelTopology {
-    ChannelTopology::smpte(layout(n)).expect("an SMPTE width")
+    ChannelTopology::assumed(layout(n))
 }
 
 /// Both output channels of a committed block.

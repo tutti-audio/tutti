@@ -17,11 +17,11 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::MAX_SAMPLER_CHANNELS;
 use tutti_graph::{
     Cx, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, IntoNode, Io, Node,
     NodeParts, Prepare, Shape, Status,
 };
+use tutti_types::MAX_CHANNELS;
 use tutti_types::{
     Amplitude, ChannelLayout, PlaybackRate, ReadRate, SamplePosition, SampleRate, SrcRatio, Tail,
 };
@@ -104,7 +104,7 @@ impl DiskSource {
     }
 
     /// A source over `consumer` through its one `reader` and the reader of its
-    /// map (`None`: silent), `width` wide (at most [`MAX_SAMPLER_CHANNELS`],
+    /// map (`None`: silent), `width` wide (at most [`MAX_CHANNELS`],
     /// the widest frame the read path stacks), placing the ring's channels by
     /// `place`: the [`Place`] of the ring's topology into `width`
     /// ([`Place::for_topology`], built, and so refusing, when the stream was
@@ -705,8 +705,8 @@ impl DiskVoice {
         positions: &mut [Option<SamplePosition>],
         mut emit: impl FnMut(usize, &[f32]),
     ) {
-        let w = self.width().min(MAX_SAMPLER_CHANNELS);
-        let silent = [0.0f32; MAX_SAMPLER_CHANNELS];
+        let w = self.width().min(MAX_CHANNELS);
+        let silent = [0.0f32; MAX_CHANNELS];
         let frames = range.len();
         let gate = self.gate();
         let rate = self.step_rate();
@@ -719,7 +719,7 @@ impl DiskVoice {
             return;
         };
         let direction = offline.direction;
-        let mut frame = [0.0f32; MAX_SAMPLER_CHANNELS];
+        let mut frame = [0.0f32; MAX_CHANNELS];
         for (i, pos) in positions[..frames].iter().enumerate() {
             let Some(pos) = pos else {
                 emit(i, &silent[..w]);
@@ -846,12 +846,11 @@ impl Node for DiskVoice {
         let clock = self.clock.observe_with(cx.env, map.as_deref());
         let frames = io.frames();
         let (_, mut outs) = io.split();
-        let n = self.width().min(outs.len()).min(MAX_SAMPLER_CHANNELS);
+        let n = self.width().min(outs.len()).min(MAX_CHANNELS);
         for c in n..outs.len() {
             outs.get(c).fill(0.0);
         }
-        let mut refs: [&mut [f32]; MAX_SAMPLER_CHANNELS] =
-            std::array::from_fn(|_| Default::default());
+        let mut refs: [&mut [f32]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
         for (slot, ch) in refs.iter_mut().zip(outs.iter_mut()) {
             *slot = ch;
         }

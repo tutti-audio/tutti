@@ -577,7 +577,7 @@ impl Session {
     /// # Errors
     ///
     /// [`Error::Output`](crate::Error::Output) when the declaration is empty, wider than the engine
-    /// renders ([`MAX_ROOT_CHANNELS`](tutti_graph::MAX_ROOT_CHANNELS)), or the
+    /// renders ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)), or the
     /// device cannot place it (an unassigned root wider than the device, a channel
     /// no speaker names). Nothing is changed.
     pub fn declare_root_topology(&mut self, root: Option<ChannelTopology>) -> crate::Result<()> {
@@ -621,7 +621,7 @@ impl Session {
     /// - Otherwise `Refused` with [`Graph::widen_outputs`]'s last refusal: a
     ///   widening the declared root could not take
     ///   ([`RootError::Width`](tutti_graph::RootError::Width)), or
-    ///   channels past `MAX_ROOT_CHANNELS`
+    ///   channels past `MAX_CHANNELS`
     ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), as a
     ///   [`RootError::Fold`](tutti_graph::RootError::Fold)); that
     ///   is what a host's `MasterSources` longer than the root comes to.

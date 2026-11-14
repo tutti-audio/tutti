@@ -387,7 +387,7 @@ fn main_bus(topology: ChannelTopology) -> Bus {
 }
 
 fn smpte(n: u16) -> Bus {
-    main_bus(ChannelTopology::smpte(ChannelLayout::from_count(n)).expect("an SMPTE width"))
+    main_bus(ChannelTopology::assumed(ChannelLayout::from_count(n)))
 }
 
 fn unassigned(n: u16) -> Bus {

@@ -1159,7 +1159,7 @@ mod declared_buses {
     }
 
     fn stereo() -> ChannelTopology {
-        ChannelTopology::new([Speaker::FrontLeft, Speaker::FrontRight])
+        ChannelTopology::new([Speaker::FrontLeft, Speaker::FrontRight]).unwrap()
     }
 
     /// A plugin's buses are the node's, in order, each with the plugin's role
@@ -1183,7 +1183,7 @@ mod declared_buses {
         let ins: Vec<_> = shape
             .buses_in()
             .iter()
-            .map(|b| (b.role, b.topology.positions().to_vec()))
+            .map(|b| (b.role, b.topology.positions().unwrap().to_vec()))
             .collect();
         assert_eq!(
             ins,
@@ -1195,7 +1195,13 @@ mod declared_buses {
         );
         assert_eq!(shape.buses_in().first_port(2), Some(3));
         assert_eq!(
-            shape.buses_out().get(0).unwrap().topology.positions(),
+            shape
+                .buses_out()
+                .get(0)
+                .unwrap()
+                .topology
+                .positions()
+                .unwrap(),
             &[Speaker::FrontLeft, Speaker::FrontRight]
         );
     }

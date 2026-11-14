@@ -316,7 +316,7 @@ impl Shape {
     /// processor built for a width. Its dry path is output `c` = input `c`, and
     /// a bus edge folds it only to a bus of the same width (a width is not a
     /// placement). Past a bus's width
-    /// ([`MAX_BUS_CHANNELS`](tutti_types::MAX_BUS_CHANNELS)) the channels are
+    /// ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)) the channels are
     /// ports with no bus, passed by index all the same.
     #[must_use]
     pub const fn through_unassigned(width: ChannelLayout) -> Self {
@@ -325,7 +325,7 @@ impl Shape {
 
     /// `inputs` channels in and `outputs` out that name no speaker: a node built
     /// for widths, not placements (a sum of `inputs` channels into one). Past a
-    /// bus's width ([`MAX_BUS_CHANNELS`](tutti_types::MAX_BUS_CHANNELS)) a side's
+    /// bus's width ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)) a side's
     /// channels are ports with no bus, reached by port. Unequal widths have no
     /// dry path to fold ([`PassError`](crate::PassError)).
     ///
@@ -370,7 +370,7 @@ impl Shape {
 
     /// This shape with `audio_in` and `audio_out` ports, of which its buses
     /// cover a prefix: the channels past them are ports with no bus (a
-    /// plugin's bus wider than [`MAX_BUS_CHANNELS`](tutti_types::MAX_BUS_CHANNELS),
+    /// plugin's bus wider than [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS),
     /// or past [`MAX_BUSES`](crate::MAX_BUSES)), reached by port. A side whose
     /// ports outnumber its buses has no main bus to fold, so a dry path across
     /// unequal widths is refused ([`PassError::Unplaced`](crate::PassError::Unplaced)).

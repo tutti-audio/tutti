@@ -186,7 +186,7 @@ fn inputs_three_and_four_of_sixteen_are_the_recording() {
     cap.block(&data);
     assert_eq!(Source::layout(&mic), ChannelLayout::STEREO);
     assert_eq!(
-        mic.topology().positions(),
+        mic.topology().positions().unwrap(),
         [tutti_types::Speaker::Unassigned; 2]
     );
     assert_eq!(mic.device_inputs(), ChannelLayout::from(16u16));

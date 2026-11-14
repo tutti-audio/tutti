@@ -4,11 +4,11 @@
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use tutti_graph::MAX_ROOT_CHANNELS;
 use tutti_graph::NodeKey;
 use tutti_graph::PrerollTable;
 use tutti_nodes::{ClickNode, ClickSettings};
 use tutti_transport::Transport;
+use tutti_types::MAX_CHANNELS;
 use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock, SampleRate, Samples};
 
 use crate::graph::{Graph, LIVE_MAX_BLOCK};
@@ -357,7 +357,7 @@ impl SessionBuilder<Offline> {
     pub fn build_detached(mut self, rate: SampleRate) -> Result<Session> {
         let outputs = self.opts.root.as_ref().map_or_else(
             || usize::from(self.opts.outputs_floor.count()),
-            |r| r.positions().len(),
+            |r| usize::from(r.width().count()),
         );
         let transport = Transport::new(rate);
         let mut graph = Graph::new(
@@ -939,7 +939,7 @@ impl<S> SessionBuilder<S> {
     fn root_width(&self, device: ChannelLayout) -> usize {
         self.opts.root.as_ref().map_or_else(
             || root_width(self.opts.outputs_floor, device),
-            |root| root.positions().len(),
+            |root| usize::from(root.width().count()),
         )
     }
 
@@ -949,7 +949,7 @@ impl<S> SessionBuilder<S> {
     /// is empty or wider than the engine renders); an undeclared one is a bare
     /// width.
     ///
-    /// The root is at least as wide as the device up to [`MAX_ROOT_CHANNELS`],
+    /// The root is at least as wide as the device up to [`MAX_CHANNELS`],
     /// so what this refuses of an undeclared root is a project wider than the
     /// device where either width has no channel order (a 6-channel project on
     /// a 5-channel interface).
@@ -997,14 +997,14 @@ impl<S> SessionBuilder<S> {
 /// the extra device channels permanently silent: the fold zero-fills
 /// rather than upmixing, so nothing downstream can recover them.
 ///
-/// The [`MAX_ROOT_CHANNELS`] clamp is applied here, at construction:
+/// The [`MAX_CHANNELS`] clamp is applied here, at construction:
 /// `Engine::new` bounds the editor to that many global outputs, so a wider
 /// root would be refused at its first commit and never play. An export's
 /// fork is prepared on its own, with no such cap.
 pub fn root_width(project: ChannelLayout, device: ChannelLayout) -> usize {
     usize::from(project.count())
         .max(usize::from(device.count()))
-        .clamp(1, MAX_ROOT_CHANNELS)
+        .clamp(1, MAX_CHANNELS)
 }
 
 #[cfg(test)]

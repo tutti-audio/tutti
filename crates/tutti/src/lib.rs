@@ -387,8 +387,7 @@ pub use tutti_plugin_host as plugin_host;
 pub use tutti_engine::Engine;
 pub use tutti_graph::{
     CrossfadeCurve, EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapReader,
-    Level, Losses, MAX_ROOT_CHANNELS, MeterReader, NodeMode, Refused, Stamp, TapAlign, TapEvent,
-    TapId, TapReader,
+    Level, Losses, MeterReader, NodeMode, Refused, Stamp, TapAlign, TapEvent, TapId, TapReader,
 };
 pub use tutti_metering::{LoadMeter, LoadReading};
 pub use tutti_nodes::{ClickState, MetronomeMode};
