@@ -17,29 +17,22 @@
 //! - [`JrStream`] — a stamper plus the running sample origin one outbound wire
 //!   stamps against, and optionally the clock cadence. This is what a pump
 //!   holds; see its doc for why the origin is per-wire rather than per-caller.
-//! - [`JrReceiver`] — inbound: read stamps, reconstruct the delay before the
-//!   next event as a [`Duration`].
 //!
-//! The clock, stamper and receiver are pure (no interior transport, no I/O), so
-//! a stamp → observe loopback recovers the injected spacing — see the tests.
+//! The inbound side, reading a sender's JR Clock and JR Timestamp messages, is
+//! `tutti_midi_device::JrReceiver`.
+//!
+//! The clock and stamper are pure (no interior transport, no I/O).
 
 use std::time::Duration;
 use tutti_graph::UmpAt;
 
 use tutti_graph::Offset;
+use tutti_midi_device::TICK_HZ;
 use tutti_types::{Frame, SampleRate, Samples};
 use tutti_ump::{Message, Ump, Utility};
 
-/// The JR timestamp reference clock: **31 250 ticks per second** (one tick every
-/// 32 µs), a 16-bit counter that wraps roughly every 2.097 s (M2-104 §2.1.4).
-pub const JR_TICKS_PER_SECOND: u32 = 31_250;
-
-/// Seconds per JR tick — the reciprocal of [`JR_TICKS_PER_SECOND`].
-pub const JR_SECONDS_PER_TICK: f64 = 1.0 / JR_TICKS_PER_SECOND as f64;
-
 /// Converts sample positions to 16-bit JR ticks at a fixed sample rate. Cheap,
-/// `Copy`, and stateless — the shared reference both [`JrStamper`] and
-/// [`JrReceiver`] reason in.
+/// `Copy`, and stateless — the shared reference both [`JrStamper`] reasons in.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct JrClock {
     sample_rate: SampleRate,
@@ -58,7 +51,7 @@ impl JrClock {
     #[inline]
     pub(crate) fn ticks_at(&self, frame: Frame) -> u16 {
         // ticks = frames * (JR_ticks/sec) / (frames/sec)
-        let ticks = (frame.get() as f64) * JR_TICKS_PER_SECOND as f64 / self.sample_rate.get();
+        let ticks = (frame.get() as f64) * f64::from(TICK_HZ) / self.sample_rate.get();
         (ticks as u64 & 0xFFFF) as u16
     }
 }
@@ -300,57 +293,6 @@ impl JrStream {
     pub fn origin(&self) -> Frame {
         self.origin
     }
-}
-
-/// Inbound JR reconstruction: reads JR Timestamps out of a stream and reports the
-/// intended delay before the *next* non-timestamp event. Stateful — it remembers
-/// the previous stamp to compute a 16-bit-wrap-correct delta.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct JrReceiver {
-    /// The last-seen JR tick, `None` until the first timestamp arrives.
-    prev: Option<u16>,
-    /// The tick of the timestamp most recently seen but not yet "spent" on an
-    /// event — the delay applied to the next event that follows it.
-    pending: Option<u16>,
-}
-
-impl JrReceiver {
-    /// A fresh receiver with no history.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Feeds one event. On a JR Timestamp, records it and returns `None` (its delay
-    /// applies to what follows). On any other event, returns the reconstructed
-    /// delay since the previous timestamp — `Some(Duration::ZERO)` when two events
-    /// share a timestamp, `None` before any timestamp has been seen.
-    pub fn observe(&mut self, event: &Ump) -> Option<Duration> {
-        if let Ok(Message::Utility(Utility::JrTimestamp(ticks))) = (*event).decode() {
-            // Delta from the previous timestamp, honoring the 16-bit wrap.
-            let delay = self.prev.map(|p| wrap_delta(p, ticks));
-            self.prev = Some(ticks);
-            self.pending = Some(ticks);
-            return delay.map(ticks_to_duration);
-        }
-        // A non-timestamp event: it happens at the pending timestamp. The interval
-        // to report is the gap from the previous event's timestamp, already
-        // returned when that timestamp arrived, so a bare event carries no *new*
-        // delay — ZERO while a clock is running, else None.
-        self.pending.map(|_| Duration::ZERO)
-    }
-}
-
-/// Forward distance from `from` to `to` on a 16-bit wrapping counter.
-#[inline]
-fn wrap_delta(from: u16, to: u16) -> u16 {
-    to.wrapping_sub(from)
-}
-
-/// Convert a JR tick count to a wall-clock [`Duration`].
-#[inline]
-fn ticks_to_duration(ticks: u16) -> Duration {
-    Duration::from_secs_f64(ticks as f64 * JR_SECONDS_PER_TICK)
 }
 
 #[cfg(test)]

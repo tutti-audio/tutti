@@ -13,7 +13,7 @@ impl<F: ServerSide> Served<F> {
     /// The plugin a file's first, at `rate`, for blocks of up to `block`, with no
     /// state to restore: the shortest load a test needs.
     fn load_first(
-        main: &MainThread,
+        main: MainThreadMarker,
         path: &Path,
         rate: f64,
         block: usize,
@@ -21,6 +21,7 @@ impl<F: ServerSide> Served<F> {
     ) -> PluginResult<Self> {
         Self::load(
             main,
+            &tutti_fixtures::detached_work(),
             path,
             &Load::new(),
             SampleRate::of(rate),
@@ -37,7 +38,7 @@ impl<F: ServerSide> Served<F> {
     /// 32-bit.
     #[cfg_attr(not(all(feature = "au", target_os = "macos")), allow(dead_code))]
     fn load_with(
-        main: &MainThread,
+        main: MainThreadMarker,
         path: &Path,
         load: &Load,
         rate: f64,
@@ -45,6 +46,7 @@ impl<F: ServerSide> Served<F> {
     ) -> PluginResult<Self> {
         Self::load(
             main,
+            &tutti_fixtures::detached_work(),
             path,
             load,
             SampleRate::of(rate),
@@ -60,7 +62,7 @@ impl<F: ServerSide> Served<F> {
 
 impl<F: ServerSide> Served<F> {
     /// A parameter's value, which the plugin must have.
-    fn normalized(&self, main: &MainThread, id: ParamId) -> f64 {
+    fn normalized(&self, main: MainThreadMarker, id: ParamId) -> f64 {
         self.parameter(main, id)
             .expect("the plugin has the parameter")
             .get()
@@ -72,7 +74,8 @@ use tutti_fixtures::main_thread;
 /// Loads `path` through the table, with everything else defaulted.
 fn load_any(path: &Path) -> PluginResult<AnyServed> {
     AnyServed::load(
-        &main_thread(),
+        main_thread(),
+        &tutti_fixtures::detached_work(),
         path,
         &Load::new(),
         SampleRate::SR_44K1,

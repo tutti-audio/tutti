@@ -10,7 +10,8 @@ use std::path::Path;
 use dpi::Size;
 use tutti_plugin_types::{
     ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow, InProcess, Load,
-    MainThread, Normalized, ParamEdit, ParamId, PluginError, PluginResult, WindowHandle,
+    MainThreadMarker, MainWorkHandle, Normalized, ParamEdit, ParamId, PluginError, PluginResult,
+    WindowHandle,
 };
 
 use crate::instance::AuLoaded;
@@ -38,8 +39,13 @@ pub struct AuEditorInstance {
 impl AuEditorInstance {
     /// Loads the editor-only instance, resolved by [`AuLoaded::load`] so it
     /// finds the same component the audio path does.
-    pub(crate) fn load(main: &MainThread, path: &Path, load: &Load) -> PluginResult<Self> {
-        let mut inner = AuLoaded::load_in_process(main, path, load)?;
+    pub(crate) fn load(
+        main: MainThreadMarker,
+        work: &MainWorkHandle,
+        path: &Path,
+        load: &Load,
+    ) -> PluginResult<Self> {
+        let mut inner = AuLoaded::load_in_process(main, work, path, load)?;
         // The unit's own view changes parameters through `AudioUnitSetParameter`,
         // which only a parameter listener hears: the one `AuLoaded` installs for
         // the audio instance, so `poll_edits` reports what the user does in it.
@@ -64,23 +70,23 @@ impl Editor for AuEditorInstance {
     /// The unit's own [`Control::set_parameter`]: `AudioUnitSetParameter` takes
     /// **plain** units, and the host denormalizes against the one range table
     /// the audio path reads too, so the editor's knob and what is heard agree.
-    fn set_parameter(&mut self, main: &MainThread, id: ParamId, value: Normalized) {
+    fn set_parameter(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
         Control::set_parameter(&mut self.inner, main, id, value);
     }
 
-    fn set_state(&mut self, _main: &MainThread, data: &[u8]) -> PluginResult<()> {
+    fn set_state(&mut self, _main: MainThreadMarker, data: &[u8]) -> PluginResult<()> {
         self.inner
             .set_class_info(data)
             .map_err(|e| editor_error(format!("AU set_state failed: {e}")))
     }
 
-    fn save_state(&mut self, _main: &MainThread) -> PluginResult<Vec<u8>> {
+    fn save_state(&mut self, _main: MainThreadMarker) -> PluginResult<Vec<u8>> {
         self.inner
             .class_info()
             .map_err(|e| editor_error(format!("AU get_state failed: {e}")))
     }
 
-    fn poll_edits(&mut self, main: &MainThread) -> Vec<ParamEdit> {
+    fn poll_edits(&mut self, main: MainThreadMarker) -> Vec<ParamEdit> {
         // What the Cocoa view changed, heard by the listener `load` installed.
         let mut edits = Vec::new();
         Control::take_reported_edits(&mut self.inner, main, &mut edits);
@@ -89,7 +95,7 @@ impl Editor for AuEditorInstance {
 }
 
 impl EditorWindow for AuEditorInstance {
-    fn has_editor(&self, main: &MainThread) -> bool {
+    fn has_editor(&self, main: MainThreadMarker) -> bool {
         // Asks the live (uninitialized) unit for its Cocoa view property.
         EditorWindow::has_editor(&self.inner, main)
     }
@@ -98,32 +104,32 @@ impl EditorWindow for AuEditorInstance {
     /// backing scale itself.
     fn open_editor(
         &mut self,
-        main: &MainThread,
+        main: MainThreadMarker,
         parent: WindowHandle,
         scale: ContentScale,
     ) -> PluginResult<Size> {
         EditorWindow::open_editor(&mut self.inner, main, parent, scale)
     }
 
-    fn close_editor(&mut self, main: &MainThread) {
+    fn close_editor(&mut self, main: MainThreadMarker) {
         EditorWindow::close_editor(&mut self.inner, main);
     }
 
-    fn editor_idle(&mut self, _main: &MainThread) {
+    fn editor_idle(&mut self, _main: MainThreadMarker) {
         // AUv2 Cocoa views are driven by the AppKit run loop; no explicit idle needed.
     }
 
     /// The default capabilities: this surface reports no resize support.
-    fn editor_capabilities(&mut self, _main: &MainThread) -> EditorCapabilities {
+    fn editor_capabilities(&mut self, _main: MainThreadMarker) -> EditorCapabilities {
         EditorCapabilities::default()
     }
 
-    fn set_editor_size(&mut self, _main: &MainThread, _requested: Size) -> PluginResult<Size> {
+    fn set_editor_size(&mut self, _main: MainThreadMarker, _requested: Size) -> PluginResult<Size> {
         Err(editor_error("set_editor_size not supported".into()))
     }
 
     /// Nothing asked: this surface never queues a resize request.
-    fn poll_editor_resize_request(&mut self, _main: &MainThread) -> Option<Size> {
+    fn poll_editor_resize_request(&mut self, _main: MainThreadMarker) -> Option<Size> {
         None
     }
 }
@@ -141,8 +147,10 @@ mod tests {
     #[test]
     fn the_gui_mirror_denormalizes_against_the_declared_range() {
         let main = tutti_fixtures::main_thread();
+        let (_collector, work) = tutti_plugin_types::MainWork::new();
         let mut gui = AuEditorInstance::load(
-            &main,
+            main,
+            &work,
             Path::new("/System/Library/Components/CoreAudio.component"),
             &Load::new().plugin("au.aufx.dely.appl"),
         )
@@ -160,9 +168,9 @@ mod tests {
             .expect("AUDelay declares parameters with ranges wider than 0..=1");
         let id = ParamId::new(wide.id);
 
-        Editor::set_parameter(&mut gui, &main, id, Normalized::of(1.0));
+        Editor::set_parameter(&mut gui, main, id, Normalized::of(1.0));
         assert_eq!(gui.inner.get_parameter(wide.id).unwrap(), wide.range.max);
-        Editor::set_parameter(&mut gui, &main, id, Normalized::of(0.0));
+        Editor::set_parameter(&mut gui, main, id, Normalized::of(0.0));
         assert_eq!(gui.inner.get_parameter(wide.id).unwrap(), wide.range.min);
     }
 }

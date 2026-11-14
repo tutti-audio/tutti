@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tutti_plugin_types::MainThread;
+use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 
 use vst::host::{PluginInstance, PluginLoader};
 use vst::plugin::Category;
@@ -99,7 +99,7 @@ fn map_category(c: Category, raw: i32) -> Vst2Category {
 ///
 /// The type is `Send`, not `Sync`: the plugin behind it is not thread-safe, and
 /// the caller owns it on one thread at a time. Methods documented as main-thread
-/// only take a [`MainThread`], the proof that the caller is on the process's
+/// only take a [`MainThreadMarker`], the proof that the caller is on the process's
 /// main thread.
 ///
 /// Dropping it closes the editor, stops processing if it is on, suspends the plugin if it
@@ -111,7 +111,7 @@ fn map_category(c: Category, raw: i32) -> Vst2Category {
 /// crash many JUCE-based plugins.
 ///
 /// Not `Sync`: the instance behind it is not, and an entry the format puts on the main
-/// thread takes a [`MainThread`] (see [`PluginInstance`]).
+/// thread takes a [`MainThreadMarker`] (see [`PluginInstance`]).
 ///
 /// The doc test below is the guard: an `unsafe impl Sync` for the
 /// type makes it compile, and the test fails:
@@ -161,8 +161,9 @@ fn map_category(c: Category, raw: i32) -> Vst2Category {
 /// ```no_run
 /// use tutti_vst2_host::Vst2Loaded;
 ///
-/// let main = tutti_plugin_types::MainThread::claim().expect("on the UI thread");
-/// let plugin = Vst2Loaded::load(&main, "/usr/lib/vst/MyPlugin.so")?;
+/// let main = tutti_plugin_types::MainThreadMarker::new().expect("on the UI thread");
+/// let (_collector, work) = tutti_plugin_types::MainWork::new();
+/// let plugin = Vst2Loaded::load(main, &work, "/usr/lib/vst/MyPlugin.so")?;
 /// println!("{} by {}", plugin.metadata().name, plugin.metadata().vendor);
 /// # Ok::<(), tutti_vst2_host::Vst2Error>(())
 /// ```
@@ -200,6 +201,8 @@ pub struct Vst2Loaded {
     /// The module opened and the choice of plugin in it (a shell's sub-plugin, as
     /// `vst2.<uniqueID>`), what a reopen loads again.
     pub(crate) origin: tutti_plugin_types::Origin,
+    /// The collector of this plugin's owner, which a reopen gives its new instance.
+    pub(crate) work: MainWorkHandle,
 }
 
 /// What the realtime half keeps between activations: the transport snapshot the
@@ -242,8 +245,12 @@ impl Vst2Loaded {
     /// module ([`LoadStage::Factory`]) or the plugin's entry point fails to
     /// produce an instance ([`LoadStage::Instantiation`]).
     ///
-    pub fn load(main: &MainThread, path: impl AsRef<Path>) -> Result<Self> {
-        Self::open(main, path.as_ref(), None)
+    pub fn load(
+        main: MainThreadMarker,
+        work: &MainWorkHandle,
+        path: impl AsRef<Path>,
+    ) -> Result<Self> {
+        Self::open(main, work, path.as_ref(), None)
     }
 
     /// Opens the plugin of `path` whose `uniqueID` is `id`: a shell's sub-plugin (the host
@@ -254,8 +261,13 @@ impl Vst2Loaded {
     ///
     /// As [`load`](Self::load), and [`LoadStage::Instantiation`] when the plugin that
     /// came up is not the one with `id` (a shell that does not know it creates its default).
-    pub fn load_plugin(main: &MainThread, path: impl AsRef<Path>, id: i32) -> Result<Self> {
-        Self::open(main, path.as_ref(), Some(id))
+    pub fn load_plugin(
+        main: MainThreadMarker,
+        work: &MainWorkHandle,
+        path: impl AsRef<Path>,
+        id: i32,
+    ) -> Result<Self> {
+        Self::open(main, work, path.as_ref(), Some(id))
     }
 
     /// Every plugin the file at `path` holds, as the catalog describes them: the one plugin
@@ -269,11 +281,14 @@ impl Vst2Loaded {
     /// As [`load`](Self::load), and [`LoadStage::Initialization`] for a shell that names no
     /// sub-plugin.
     pub fn describe_all(
-        main: &MainThread,
+        main: MainThreadMarker,
         path: impl AsRef<Path>,
     ) -> Result<Vec<PluginDescriptor>> {
         let path = path.as_ref();
-        let first = Self::load(main, path)?;
+        // Every instance here closes on this thread before the next opens, so its
+        // collector never receives work.
+        let (_collector, work) = tutti_plugin_types::MainWork::new();
+        let first = Self::load(main, &work, path)?;
         if first.metadata.category != Vst2Category::Shell {
             return Ok(vec![first.descriptor.clone()]);
         }
@@ -289,7 +304,7 @@ impl Vst2Loaded {
         }
         Ok(subs
             .into_iter()
-            .map(|sub| match Self::load_plugin(main, path, sub.id) {
+            .map(|sub| match Self::load_plugin(main, &work, path, sub.id) {
                 Ok(loaded) => loaded.descriptor.clone(),
                 Err(_) => PluginDescriptor {
                     id: format!("vst2.{}", sub.id),
@@ -306,7 +321,12 @@ impl Vst2Loaded {
             .collect())
     }
 
-    fn open(main: &MainThread, path: &Path, chosen: Option<i32>) -> Result<Self> {
+    fn open(
+        main: MainThreadMarker,
+        work: &MainWorkHandle,
+        path: &Path,
+        chosen: Option<i32>,
+    ) -> Result<Self> {
         // Loading runs the plugin's init sequence and probes its editor — VST2
         // requires this happen on the host main thread, which `main` proves.
 
@@ -327,6 +347,7 @@ impl Vst2Loaded {
         // `HostState`'s fields are already lock-free (a seqlock, a request word
         // and two `ArrayQueue`s), so the lock bought nothing.
         let host = Arc::new(HostState::new(
+            main,
             Arc::clone(&param_q),
             Arc::clone(&midi_out_q),
             time_info.reader(),
@@ -343,11 +364,13 @@ impl Vst2Loaded {
             }
         })?;
 
-        let mut instance = loader.instance(main).map_err(|e| Vst2Error::LoadFailed {
-            path: path.to_path_buf(),
-            stage: LoadStage::Instantiation,
-            reason: format!("loader.instance failed: {:?}", e),
-        })?;
+        let mut instance = loader
+            .instance(main, work)
+            .map_err(|e| Vst2Error::LoadFailed {
+                path: path.to_path_buf(),
+                stage: LoadStage::Instantiation,
+                reason: format!("loader.instance failed: {:?}", e),
+            })?;
 
         instance.init(main);
 
@@ -460,6 +483,7 @@ impl Vst2Loaded {
             metadata,
             descriptor,
             origin: tutti_plugin_types::Origin::new(resolved, load),
+            work: work.clone(),
         })
     }
 
@@ -499,7 +523,7 @@ impl Vst2Loaded {
     /// Sets whether the host reports itself as rendering offline: the body of
     /// [`Control::set_render_mode`](tutti_plugin_types::Control::set_render_mode),
     /// kept inherent for the one caller that has no
-    /// [`MainThread`] (a render-mode change from
+    /// [`MainThreadMarker`] (a render-mode change from
     /// the thread that drives the plugin's node) and holds only a `&self`.
     ///
     /// VST2 carries the mode through `audioMasterGetCurrentProcessLevel`, a
@@ -532,7 +556,7 @@ impl Vst2Loaded {
     /// Returns the plugin's tail, read from the plugin now and decoded from
     /// VST2's inverted convention (see [`PluginInfo`]).
     #[must_use]
-    pub fn tail(&self, main: &MainThread) -> PluginTail {
+    pub fn tail(&self, main: MainThreadMarker) -> PluginTail {
         decode_tail(self.instance.read_tail_size(main))
     }
 
@@ -548,7 +572,7 @@ impl Vst2Loaded {
     /// plugin never had. An unnamed slot yields an empty string and is kept,
     /// not skipped — dropping it would renumber every program after it, and the
     /// number is the identifier.
-    pub fn programs(&self, main: &MainThread) -> Vec<(i32, String)> {
+    pub fn programs(&self, main: MainThreadMarker) -> Vec<(i32, String)> {
         let count = self.instance.read_num_programs().max(0);
         (0..count)
             .map(|i| (i, self.instance.get_preset_name(main, i)))
@@ -556,7 +580,7 @@ impl Vst2Loaded {
     }
 
     /// Returns the index of the program the plugin reports as active.
-    pub fn current_program(&self, main: &MainThread) -> i32 {
+    pub fn current_program(&self, main: MainThreadMarker) -> i32 {
         self.instance.get_preset_num(main)
     }
 
@@ -572,7 +596,7 @@ impl Vst2Loaded {
     /// Returns `false` for an out-of-range index without dispatching anything.
     /// VST2 gives no confirmation that an in-range change took — `effProgramChange`
     /// returns nothing — so `true` means "dispatched", not "the plugin moved".
-    pub fn set_program(&mut self, main: &MainThread, index: i32) -> bool {
+    pub fn set_program(&mut self, main: MainThreadMarker, index: i32) -> bool {
         if index < 0 || index >= self.instance.read_num_programs() {
             return false;
         }
@@ -593,7 +617,7 @@ impl Vst2Loaded {
     /// of these is what [`metadata`](Self::metadata)'s `receives_midi` /
     /// `emits_midi` are inferred from; this exposes the raw answer for a caller
     /// that needs the distinction rather than the verdict.
-    pub fn midi_channel_counts(&self, main: &MainThread) -> vst::host::MidiChannelCounts {
+    pub fn midi_channel_counts(&self, main: MainThreadMarker) -> vst::host::MidiChannelCounts {
         self.instance.read_midi_channels(main)
     }
 
@@ -604,7 +628,7 @@ impl Vst2Loaded {
     /// answer and is not a yes. A plugin that does not advertise one has to be
     /// bypassed by the host instead, by not routing audio through it.
     #[must_use]
-    pub fn supports_soft_bypass(&self, main: &MainThread) -> bool {
+    pub fn supports_soft_bypass(&self, main: MainThreadMarker) -> bool {
         use vst::api::Supported;
         use vst::plugin::CanDo;
         matches!(self.instance.can_do(main, CanDo::Bypass), Supported::Yes)
@@ -622,7 +646,7 @@ impl Vst2Loaded {
     /// replacement, so the answer is returned rather than swallowed — a caller
     /// that ignores a `false` leaves the plugin processing while its UI says
     /// bypassed, and that surfaces as "the bypass button does nothing".
-    pub fn set_bypass(&mut self, main: &MainThread, bypass: bool) -> bool {
+    pub fn set_bypass(&mut self, main: MainThreadMarker, bypass: bool) -> bool {
         self.instance.set_bypass(main, bypass)
     }
 }

@@ -2725,6 +2725,7 @@ dependencies = [
  "tempfile",
  "tutti-midi-protocol",
  "tutti-plugin-types",
+ "tutti-rt",
  "tutti-shared-plugin",
  "tutti-shared-plugin-vst3-cpp",
  "tutti-types",
@@ -2780,6 +2781,7 @@ name = "tutti-midi-device"
 version = "0.0.1"
 dependencies = [
  "bitflags 2.13.2",
+ "getrandom",
  "miniz_oxide",
  "proptest",
  "serde",
@@ -2834,7 +2836,6 @@ dependencies = [
 name = "tutti-midi-network"
 version = "0.0.1"
 dependencies = [
- "getrandom",
  "mdns-sd",
  "proptest",
  "sha2",
@@ -2871,6 +2872,7 @@ dependencies = [
  "tutti-engine",
  "tutti-fixtures",
  "tutti-graph",
+ "tutti-midi-device",
  "tutti-midi-protocol",
  "tutti-rt",
  "tutti-tempo",
@@ -3483,6 +3485,7 @@ dependencies = [
  "parking_lot",
  "tempfile",
  "thiserror 2.0.21",
+ "tutti-fixtures",
  "tutti-plugin-ipc-ffi",
  "tutti-plugin-types",
  "tutti-rt",

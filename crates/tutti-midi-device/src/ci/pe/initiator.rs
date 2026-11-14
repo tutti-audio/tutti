@@ -79,6 +79,7 @@ use super::limits::{MediaType, PeMessage, ResourceId, ResourceName, SubscribeId}
 use super::reassemble::{
     PeFlowControl, PeReassembler, PeReassemblyError, PeReassemblyLimits, PeReceived, PeStep,
 };
+use super::request_ids::RequestIds;
 use crate::{CiHeader, CiMessage, Decoded, Destination, MaxSysexSize, Muid, Nak, TimeoutWait};
 
 /// The most times a chunk is sent again, whether for a NAK or for the lack of an
@@ -408,38 +409,6 @@ enum Phase {
     Asking { deadline: Instant },
     Ready(PeCapabilities),
     Unavailable,
-}
-
-/// The Request IDs of one peer: a set of the 128 that are in use, and where the
-/// next search starts.
-#[derive(Clone, Debug, Default)]
-struct RequestIds {
-    used: u128,
-    next: u8,
-}
-
-impl RequestIds {
-    const COUNT: u8 = 128;
-
-    /// An ID not in use, searching on from the one after the last given, unless
-    /// `limit` IDs are in use already.
-    fn allocate(&mut self, limit: SimultaneousRequests) -> Option<PeRequestId> {
-        if self.used.count_ones() >= u32::from(limit.get()) {
-            return None;
-        }
-        (0..Self::COUNT)
-            .map(|step| (self.next + step) % Self::COUNT)
-            .find(|n| self.used & (1u128 << n) == 0)
-            .and_then(|n| {
-                self.used |= 1u128 << n;
-                self.next = (n + 1) % Self::COUNT;
-                PeRequestId::new(n)
-            })
-    }
-
-    fn release(&mut self, id: PeRequestId) {
-        self.used &= !(1u128 << id.get());
-    }
 }
 
 #[derive(Clone, Debug)]

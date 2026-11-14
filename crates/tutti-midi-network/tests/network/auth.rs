@@ -41,5 +41,9 @@ fn a_nonce_must_be_ascii_and_entropy_makes_printable_ascii() {
     assert!(Nonce::new(bad).is_none());
     let nonce = Nonce::from_entropy([0xFF; 16]);
     assert!(nonce.get().iter().all(|b| (32..=126).contains(b)));
-    assert_ne!(Nonce::random(), Nonce::random(), "two random nonces differ");
+    assert_ne!(
+        Nonce::random().unwrap(),
+        Nonce::random().unwrap(),
+        "two random nonces differ"
+    );
 }
