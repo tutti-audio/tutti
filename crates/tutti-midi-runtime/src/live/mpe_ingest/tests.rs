@@ -293,7 +293,12 @@ fn ranges_after(events: impl IntoIterator<Item = UmpAt>) -> Vec<(u8, u8, f32)> {
                 panic!("{ev:?} is not a registered controller");
             };
             assert_eq!(bank.get(), Rpn::PITCH_BEND_SENSITIVITY.bank().get());
-            let range = PitchBendSensitivity::from_rpn_bits(value.get());
+            // RPN #00/00 is semitones and cents, #00/07 a binary fraction.
+            let range = if Rpn::new(bank, index) == Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY {
+                PitchBendSensitivity::from_rpn_bits(value.get())
+            } else {
+                PitchBendSensitivity::from_channel_data(RegisteredData::from_word(value.get()))
+            };
             (address.channel.get(), index.get(), range.semitones().get())
         })
         .collect()
@@ -450,7 +455,7 @@ fn bend_sensitivity(channel: u8, semitones: u8) -> UmpAt {
         midi::registered(
             MidiChannel::of(channel),
             Rpn::PITCH_BEND_SENSITIVITY,
-            PitchBendSensitivity::of(semitones).to_rpn_bits(),
+            RegisteredData::new(U7::of(semitones), U7::of(0)).to_word(),
         ),
     )
 }
@@ -1502,4 +1507,59 @@ fn a_members_reset_sends_the_managers_bend_again() {
 
     ingest.translated(&cc(0, CCNumber::RESET_ALL, 0));
     assert_eq!(ingest.translated(&reset).collect::<Vec<_>>(), vec![reset]);
+}
+
+/// **RPN #00/00's data is semitones then cents, the per-note RPN #00/07's a
+/// binary fraction** (M2-104 sections 7.4.7.1 and 7.4.13): a Manager Channel's
+/// 2 semitones 50 cents is 2.5 semitones as each member's per-note range, and
+/// the manager's own message passes on in the form it came.
+/// Spec: m2-104/7.4.7.1, m2-104/7.4.13.2#1
+#[test]
+fn a_manager_range_in_cents_is_the_same_range_per_note() {
+    let two_and_a_half = RegisteredData::new(U7::of(2), U7::of(50));
+    let message = at(
+        3,
+        midi::registered(
+            MidiChannel::of(0),
+            Rpn::PITCH_BEND_SENSITIVITY,
+            two_and_a_half.to_word(),
+        ),
+    );
+    let mut ingest = profiled(0, 3);
+    let out: Vec<UmpAt> = ingest.translated(&message).collect();
+    let per_note = 5 << 24;
+    assert_eq!(
+        rpns(out.iter().copied(), Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY),
+        [(1, per_note), (2, per_note)],
+        "2.5 semitones is 5 << 24, not the 2.39 of the same word read as a fraction"
+    );
+    assert_eq!(
+        rpns(out, Rpn::PITCH_BEND_SENSITIVITY),
+        [
+            (0, two_and_a_half.to_word()),
+            (1, two_and_a_half.to_word()),
+            (2, two_and_a_half.to_word())
+        ]
+    );
+}
+
+/// A zone that starts at a range with a fraction of a semitone tells its
+/// manager and members that range in RPN #00/00's semitones and cents, and
+/// each member's per-note range in RPN #00/07's binary fraction.
+#[test]
+fn a_zone_starting_at_a_fractional_range_sends_it_in_each_forms() {
+    let range = PitchBendSensitivity::from_channel_data(RegisteredData::new(U7::of(2), U7::of(50)));
+    let config = MpeZoneConfig::profile(MidiChannel::of(0), 3, range).expect("a zone");
+    let mut ingest = MpeIngest::new(MpeMode::Disabled);
+    let out = enable(&mut ingest, MpeZones::single(config));
+    let word = RegisteredData::new(U7::of(2), U7::of(50)).to_word();
+    assert_eq!(
+        rpns(out.iter().copied(), Rpn::PITCH_BEND_SENSITIVITY),
+        [(0, word), (1, word), (2, word)]
+    );
+    assert_eq!(
+        rpns(out, Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY),
+        [(1, 5 << 24), (2, 5 << 24)],
+        "2.5 semitones is 5 << 24 in 7.25 fixed point"
+    );
 }
