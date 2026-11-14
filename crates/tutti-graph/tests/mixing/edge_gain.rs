@@ -378,10 +378,16 @@ fn a_unity_entry_on_a_one_edge_sink_turns_negative_zero_positive() {
 // Ramps.
 // ---------------------------------------------------------------------------
 
-/// `w[i]` as the doc writes it.
+/// `w[i]` as the doc writes it, landing exactly on `to` at the last frame.
 fn ramp(from: f32, to: f32, frames: usize) -> Vec<f32> {
     (0..frames)
-        .map(|i| from + (to - from) * ((i + 1) as f32 / frames as f32))
+        .map(|i| {
+            if i + 1 == frames {
+                to
+            } else {
+                from + (to - from) * ((i + 1) as f32 / frames as f32)
+            }
+        })
         .collect()
 }
 
@@ -396,19 +402,16 @@ fn one_lane() -> (Fan, ValidGraph) {
 /// A move ramps across one block, pinned from the formula: the first block
 /// has no ramp (it starts at its value); the next ramps from the first's
 /// weight to the new one across **that block's own length** (a short block
-/// here); a block with no move is static; a move after a ramp starts from the
-/// weight the ramp was *given* (its target), not the last sample it computed.
-/// Serial, parallel and reference.
+/// here) and lands on the new one exactly at its last frame; a block with no
+/// move is static; a move after a ramp starts from the weight the ramp was
+/// given, which its last sample is. Serial, parallel and reference.
 #[test]
 fn a_move_ramps_across_the_block_from_the_last_weight() {
-    // 0.7 + (0.15 - 0.7) * 1.0 is not 0.15 in f32: the target and the last
-    // sample the ramp computes differ, so a lane that carried the sample would
-    // ramp again in the next block.
     let (a, b, c) = (0.7f32, 0.15f32, 0.25f32);
-    assert_ne!(
+    assert_eq!(
         ramp(a, b, 40)[39].to_bits(),
         b.to_bits(),
-        "the figures separate the target from the last sample"
+        "the last frame is the target"
     );
     for workers in [1usize, 4] {
         let (fan, _) = one_lane();

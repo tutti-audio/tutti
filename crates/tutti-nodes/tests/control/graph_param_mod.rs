@@ -25,8 +25,8 @@ use tutti_types::MaxBlock;
 use tutti_curve::Law;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Editor, EventOut, GraphBuilder, IntoNode, NodeMix, NodeParts, PARAM_DECLICK, ParamIn,
-    ParamNode, ParamRange, Prepare, Renderer,
+    Editor, EventOut, GraphBuilder, IntoNode, NodeMix, NodeParts, ParamIn, ParamNode, ParamRange,
+    Prepare, Renderer, declick_frames,
 };
 use tutti_modulation::{Amount, Clock, ControlProgram, Layer, LayerId, Polarity, Waveform};
 use tutti_nodes::automation::ControlLaneNode;
@@ -1008,7 +1008,7 @@ fn an_authored_write_moves_the_base_under_modulation() {
     let x = noise(7);
     let before = r.render_input(&[&x[..1_000]]).remove(0);
     let at_1_5 = plain_distortion(1.5);
-    for i in PARAM_DECLICK.get()..1_000 {
+    for i in declick_frames(SampleRate::SR_48K).get()..1_000 {
         assert!(
             (before[i] - at_1_5[i]).abs() < 1e-6,
             "frame {i}: knob 1.0 + 0.5 is drive 1.5"
@@ -1047,7 +1047,7 @@ fn a_crossed_range_is_survivable() {
     drive(r.editor_mut(), at, Arc::new(AtomicF32::new(100.0)), vec![]);
     let out = r.render_input(&[&noise(7)]).remove(0);
     let at_4 = plain_distortion(4.0);
-    for i in PARAM_DECLICK.get()..FRAMES {
+    for i in declick_frames(SampleRate::SR_48K).get()..FRAMES {
         assert!((out[i] - at_4[i]).abs() < 1e-6, "frame {i}: clamped at 4");
     }
 }
@@ -1107,9 +1107,10 @@ fn an_unmodulated_param_adds_nothing_to_the_plan() {
     );
     assert!(plan.param_ports().is_empty(), "and nothing left behind");
     // Every frame-to-frame step is bounded by the declick's slope: the drive
-    // moves 4 over `PARAM_DECLICK` frames, and `tanh(0.25 d)` moves at most
+    // moves 4 over `DECLICK` along the smootherstep (steepest slope 15/8), and
+    // `tanh(0.25 d)` moves at most
     // 0.25 per unit of drive.
-    let slope = 0.25 * 4.0 / PARAM_DECLICK.get() as f32 + 1e-6;
+    let slope = 0.25 * 4.0 * 1.875 / declick_frames(SampleRate::SR_48K).get() as f32 + 1e-6;
     for (i, w) in out.windows(2).enumerate() {
         assert!(
             (w[1] - w[0]).abs() <= slope,

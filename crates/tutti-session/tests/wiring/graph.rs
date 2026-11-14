@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tutti_types::MaxBlock;
 
 use tutti_buffers::InterleavedMut;
-use tutti_graph::CrossfadeCurve;
+use tutti_graph::FadeLaw;
 use tutti_graph::MAX_ROOT_CHANNELS;
 use tutti_graph::Params;
 use tutti_graph::{
@@ -431,7 +431,7 @@ fn a_crossfade_on_a_removed_node_is_refused_naming_it() {
             knob,
             Params(Knob::at(3.0)),
             Seconds(0.005),
-            CrossfadeCurve::EqualAmplitude,
+            FadeLaw::EqualAmplitude,
         )
         .expect_err("the node is gone");
     assert_eq!(refused, CrossfadeRefused::NoSuchNode(knob.erase()));
@@ -461,15 +461,14 @@ fn a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update() {
     // the executor has not run it yet.
     s.graph().set_sample_rate(SampleRate::SR_44K1);
     let fade = Seconds(0.005);
-    let waiting = match s.graph().crossfade(
-        knob,
-        Params(Knob::at(3.0)),
-        fade,
-        CrossfadeCurve::EqualAmplitude,
-    ) {
-        Ok(Crossfade::Waiting(id)) => id,
-        other => panic!("the crossfade waits for the re-prepare: {other:?}"),
-    };
+    let waiting =
+        match s
+            .graph()
+            .crossfade(knob, Params(Knob::at(3.0)), fade, FadeLaw::EqualAmplitude)
+        {
+            Ok(Crossfade::Waiting(id)) => id,
+            other => panic!("the crossfade waits for the re-prepare: {other:?}"),
+        };
     assert_eq!(s.graph_ref().testing().waiting_crossfades(), 1);
 
     // Update by update through the re-prepare: the executor checks its units
@@ -528,7 +527,7 @@ fn removing_a_node_purges_the_crossfades_parked_on_it() {
         knob,
         Params(Knob::at(3.0).holding(&token)),
         Seconds(0.005),
-        CrossfadeCurve::EqualAmplitude,
+        FadeLaw::EqualAmplitude,
     );
     assert!(matches!(waiting, Ok(Crossfade::Waiting(_))), "{waiting:?}");
     assert_eq!(s.graph_ref().testing().waiting_crossfades(), 1);
@@ -565,7 +564,7 @@ fn a_crossfade_on_a_poisoned_graph_is_refused() {
         knob,
         Params(Knob::at(3.0)),
         Seconds(0.005),
-        CrossfadeCurve::EqualAmplitude,
+        FadeLaw::EqualAmplitude,
     );
     assert!(refused.is_err(), "{refused:?}");
     assert_eq!(
@@ -949,7 +948,7 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
             node,
             Published::new(),
             Seconds(0.0),
-            CrossfadeCurve::EqualAmplitude,
+            FadeLaw::EqualAmplitude,
         )
         .expect("the node is in the graph")
     {
@@ -979,7 +978,7 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
                 node,
                 ForkByClone(Const::mono(0.0)),
                 Seconds(0.0),
-                CrossfadeCurve::EqualAmplitude
+                FadeLaw::EqualAmplitude
             )
             .is_ok()
     );

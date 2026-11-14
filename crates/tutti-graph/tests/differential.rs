@@ -1924,9 +1924,9 @@ fn fits(a: &Kind, b: &Kind) -> bool {
 
 fn random_fade(rng: &mut Rng) -> tutti_graph::Fade {
     let curve = if rng.chance(50) {
-        tutti_graph::CrossfadeCurve::EqualPower
+        tutti_graph::FadeLaw::EqualPower
     } else {
-        tutti_graph::CrossfadeCurve::EqualAmplitude
+        tutti_graph::FadeLaw::EqualAmplitude
     };
     // Mostly shorter than the rounds between edits, often longer, so fades
     // end mid-block, run across edits, and queue behind each other.

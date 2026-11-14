@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex};
 
 use common::{Kind, Pair, SpecBehaviour, TestNode, bits, prepare};
 use tutti_graph::{
-    CommitError, CrossfadeCurve, Cx, Edge, Editor, EventOut, ForkMode, ForkTarget, GraphInvalid,
+    CommitError, Cx, Edge, Editor, EventOut, FadeLaw, ForkMode, ForkTarget, GraphInvalid,
     GraphSpec, InPort, Io, MixError, Node, NodeKey, NodeMix, NodeMode, OutPort, ParamIn, PassError,
     Prepare, Shape, Source, Status, Topology, TransportPosition, Unforkable,
 };
@@ -33,8 +33,8 @@ use tutti_types::{ChannelLayout, Mix, Tail};
 const BLOCK: usize = 64;
 /// The most a block here is: what every `Pair` is prepared for.
 const MAX_BLOCK: usize = 128;
-/// `MODE_DECLICK`.
-const FADE: usize = 256;
+/// `DECLICK` at the rig's 48 kHz.
+const FADE: usize = 240;
 /// The latency of the latent node: its aligned input is its input this late.
 const L: usize = 480;
 
@@ -441,11 +441,11 @@ fn a_fade_runs_against_the_weights_of_the_mix() {
         rig.frames(BLOCK, &wave);
         rig.mode(NodeMode::Active);
         let start = rig.frame;
-        let got = rig.frames(FADE + 128, &wave);
+        let got = rig.frames((FADE + 128).next_multiple_of(BLOCK), &wave);
         for (i, &y) in got.iter().enumerate() {
             let n = start + i as u64;
             let want = if i < FADE {
-                let g = CrossfadeCurve::EqualAmplitude.gains(i, FADE).0;
+                let g = FadeLaw::EqualAmplitude.gains(i, FADE).1;
                 let (wy, wx) = (0.0 + (M - 0.0) * g, 0.0 + ((1.0 - M) - 0.0) * g);
                 (3.0 * wave(n)) * wy + wave(n) * wx
             } else {
@@ -457,11 +457,11 @@ fn a_fade_runs_against_the_weights_of_the_mix() {
         // Active at M, toggled to Bypassed: `(M, 1 - M)` to `(0, 1)`.
         rig.mode(NodeMode::Bypassed);
         let start = rig.frame;
-        let got = rig.frames(FADE + 128, &wave);
+        let got = rig.frames((FADE + 128).next_multiple_of(BLOCK), &wave);
         for (i, &y) in got.iter().enumerate() {
             let n = start + i as u64;
             let want = if i < FADE {
-                let g = CrossfadeCurve::EqualAmplitude.gains(i, FADE).0;
+                let g = FadeLaw::EqualAmplitude.gains(i, FADE).1;
                 let (wy, wx) = (M + (0.0 - M) * g, (1.0 - M) + (1.0 - (1.0 - M)) * g);
                 (3.0 * wave(n)) * wy + wave(n) * wx
             } else {
@@ -495,7 +495,7 @@ fn a_mix_moving_during_a_fade_follows_frame_by_frame() {
         for (i, &y) in got.iter().enumerate() {
             let n = start + i as u64;
             let k = (n - fade_start) as usize;
-            let g = CrossfadeCurve::EqualAmplitude.gains(k, FADE).0;
+            let g = FadeLaw::EqualAmplitude.gains(k, FADE).1;
             let m = ramp(0.5, 1.0, i, BLOCK);
             let (wy, wx) = (0.0 + (m - 0.0) * g, 0.0 + ((1.0 - m) - 0.0) * g);
             let want = (3.0 * wave(n)) * wy + wave(n) * wx;
