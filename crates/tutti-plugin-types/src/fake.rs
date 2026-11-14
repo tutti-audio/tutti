@@ -22,9 +22,9 @@ use tutti_rt::RequestWord;
 use crate::{
     AudioBufferMut, ChannelLayout, ContentScale, Control, Controller, EditDrain, EditSink,
     EditorError, EditorWindow, FdId, Layout, Loaded, LoadedPlugin, MainThreadMarker, Normalized,
-    ParamEdit, ParamId, ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo,
-    PluginResult, PluginTail, Prepare, Processor, Refused, RenderMode, RenderModeSupport, Request,
-    RescanScope, RestartRules, SampleRate, Samples, Stuck, TimerId, WindowHandle, edits,
+    ParamEdit, ParamFlags, ParamId, ParameterInfo, PluginBus, PluginDescriptor, PluginError,
+    PluginIo, PluginResult, PluginTail, Prepare, Processor, Refused, RenderMode, RenderModeSupport,
+    Request, RescanScope, RestartRules, SampleRate, Samples, Stuck, TimerId, WindowHandle, edits,
 };
 
 /// One call the fake received.
@@ -238,9 +238,20 @@ struct Shared {
     /// The mode the fake was last told live: `0` none, `1` realtime, `2`
     /// offline.
     told_mode: AtomicU8,
+    /// The parameters the fake declares and which of them are read-only; `None`
+    /// declares none, and the fake then takes a write to any id.
+    declared: Mutex<Option<Vec<(ParamId, bool)>>>,
 }
 
 impl Shared {
+    /// The declared parameters, if the fake declares any.
+    fn declared(&self) -> Option<Vec<(ParamId, bool)>> {
+        self.declared
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
     fn wiring(&self) -> LoadedPlugin {
         self.log.push(Call::Wiring);
         let outputs = ChannelLayout::try_from(self.outputs.load(Ordering::Relaxed))
@@ -303,6 +314,7 @@ impl FakePlugin {
             resize_request: AtomicU64::new(0),
             render_mode_support: AtomicU8::new(0),
             told_mode: AtomicU8::new(0),
+            declared: Mutex::new(None),
         });
         (
             Self(shared.clone()),
@@ -428,6 +440,20 @@ impl FakePlugin {
         self.0.outputs.store(u32::from(channels), Ordering::Relaxed);
     }
 
+    /// Declares the fake's parameters: each `(id, read_only)`. The fake then
+    /// follows the write policy of every format: a write to an id it does not
+    /// declare is [`Undeclared`](crate::ParamWriteError::Undeclared), and one to a read-only
+    /// parameter is [`ReadOnly`](crate::ParamWriteError::ReadOnly). Until this is called it
+    /// declares none and takes every write, adding the parameter, as a test
+    /// arranges its values by writing them.
+    pub fn declare(&self, parameters: &[(ParamId, bool)]) {
+        *self
+            .0
+            .declared
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(parameters.to_vec());
+    }
+
     /// Gives the fake an editor: `open_editor` answers 640 by 480 and the
     /// window calls are logged. The default is none.
     pub fn with_editor(&self, has: bool) {
@@ -512,10 +538,25 @@ macro_rules! fake_control {
             }
 
             fn parameters(&self, _main: MainThreadMarker) -> Vec<ParameterInfo> {
-                self.values
-                    .iter()
-                    .map(|&(id, _)| ParameterInfo::new(id, "p"))
-                    .collect()
+                let declared = self.shared.declared();
+                match declared {
+                    Some(declared) => declared
+                        .into_iter()
+                        .map(|(id, read_only)| {
+                            let flags = if read_only {
+                                ParamFlags::READ_ONLY
+                            } else {
+                                ParamFlags::empty()
+                            };
+                            ParameterInfo::new(id, "p").with_flags(ParamFlags::READ_ONLY, flags)
+                        })
+                        .collect(),
+                    None => self
+                        .values
+                        .iter()
+                        .map(|&(id, _)| ParameterInfo::new(id, "p"))
+                        .collect(),
+                }
             }
 
             fn parameter(&self, _main: MainThreadMarker, id: ParamId) -> Option<Normalized> {
@@ -548,6 +589,11 @@ macro_rules! fake_control {
                 id: ParamId,
                 value: Normalized,
             ) -> Result<(), $crate::ParamWriteError> {
+                // A fake that declares parameters follows the policy; one that
+                // declares none takes every write.
+                if self.shared.declared().is_some() {
+                    self.parameter_writable(_main, id)?;
+                }
                 self.shared.log.push(Call::SetParameter(id));
                 set_value(&mut self.values, id, value);
                 let set: fn(&mut Self, ParamId, Normalized) = $set;
@@ -919,5 +965,33 @@ impl Processor for FakeProcessor {
 impl From<&FakeLoaded> for Layout {
     fn from(fake: &FakeLoaded) -> Self {
         Layout::from(&fake.shared.wiring())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fake that declares parameters follows the write policy of every
+    /// format: an undeclared id and a read-only parameter are refused at the
+    /// call and write nothing; a declared one is written.
+    #[test]
+    fn a_fake_that_declares_parameters_follows_the_write_policy() {
+        let (plugin, mut loaded) = FakePlugin::new();
+        let (open, meter, gone) = (ParamId::new(1), ParamId::new(2), ParamId::new(3));
+        plugin.declare(&[(open, false), (meter, true)]);
+        let main = tutti_fixtures::main_thread();
+        let half = Normalized::of(0.5);
+        assert_eq!(loaded.set_parameter(main, open, half), Ok(()));
+        assert_eq!(
+            loaded.set_parameter(main, meter, half),
+            Err(crate::ParamWriteError::ReadOnly(meter))
+        );
+        assert_eq!(
+            loaded.set_parameter(main, gone, half),
+            Err(crate::ParamWriteError::Undeclared(gone))
+        );
+        assert_eq!(loaded.parameter(main, meter), None);
+        assert_eq!(loaded.parameter(main, open), Some(half));
     }
 }

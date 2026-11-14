@@ -343,6 +343,11 @@ pub trait Editor: EditorWindow + Send {
     /// Mirrors a parameter write so the editor's display follows a host-side
     /// edit. Normalized, as the audio path takes it; an impl denormalizes at its
     /// own edge if its format speaks plain units.
+    ///
+    /// This carries host writes only: a value the plugin reports of its own
+    /// parameters (a meter, a read-only parameter) does not come through here.
+    /// A write the plugin refuses ([`ParamWriteError`](crate::ParamWriteError):
+    /// undeclared, read-only) is not mirrored either.
     fn set_parameter(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized);
 
     /// Mirrors the audio instance's state into the editor instance.

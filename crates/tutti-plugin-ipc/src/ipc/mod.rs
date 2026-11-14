@@ -51,9 +51,9 @@ use std::time::Duration;
 
 use tutti_plugin_types::{
     BridgeError, BridgeResult, ChunkCounters, Controller, Load, LoadStage, Loaded, LoadedPlugin,
-    MainThreadMarker, ParameterChanges, ParameterQueue, PluginDescriptor, PluginError,
-    PluginResult, PluginTail, Prepare, ProcessWake, Refused, Reopen, Request, RestartRules,
-    SampleFormat, SampleRate, Samples, StateUse, Stuck,
+    MainThreadMarker, ParamAccess, ParamFlags, ParamId, ParameterChanges, ParameterQueue,
+    PluginDescriptor, PluginError, PluginResult, PluginTail, Prepare, ProcessWake, Refused, Reopen,
+    Request, RestartRules, SampleFormat, SampleRate, Samples, StateUse, Stuck,
 };
 use tutti_types::AtomicSampleRate;
 
@@ -160,6 +160,11 @@ struct Events {
     /// What the plugin's request to be processed again raises, from the
     /// bridge's thread ([`Control::bind_wake`](tutti_plugin_types::Control::bind_wake)).
     wake: OnceLock<ProcessWake>,
+    /// The parameters the plugin declares and whether each is read-only: asked
+    /// of the server once, then kept, and forgotten when the plugin says its
+    /// parameters changed ([`BridgeEvent::Resync`]). The write policy reads
+    /// it, so a write does not cost a round trip.
+    declared: Mutex<Option<Arc<[(ParamId, ParamAccess)]>>>,
 }
 
 impl Events {
@@ -182,6 +187,11 @@ impl Events {
             // listener, in order. Nothing is queued for `take_requests`, which
             // a served plugin's host does not drain: a request kept here would
             // only pile up.
+            // Whatever the plugin says went stale, its parameter list may have:
+            // the next write asks again.
+            BridgeEvent::Resync(_) => {
+                *self.declared.lock().unwrap_or_else(PoisonError::into_inner) = None;
+            }
             _ => {}
         }
         let forward = self
@@ -226,6 +236,40 @@ impl Link {
     /// The latency the plugin reports now.
     pub(crate) fn latency(&self) -> Samples {
         Samples(self.events.latency.load(Ordering::Acquire))
+    }
+
+    /// What the write policy needs of the plugin's parameters, from the cache the
+    /// server's last answer filled; asks the server only when there is none (the
+    /// first write, or the first after a resync). `None` when the plugin cannot
+    /// be asked (lost): the policy then has nothing to refuse a write for.
+    pub(crate) fn declared(&self) -> Option<Arc<[(ParamId, ParamAccess)]>> {
+        if let Some(kept) = self
+            .events
+            .declared
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+        {
+            return Some(kept);
+        }
+        let list: Arc<[(ParamId, ParamAccess)]> = self
+            .bridge
+            .parameters()?
+            .iter()
+            .map(|info| {
+                let access = match info.flag(ParamFlags::READ_ONLY) {
+                    Some(read_only) => ParamAccess::reported(read_only),
+                    None => ParamAccess::Unreported,
+                };
+                (info.id(), access)
+            })
+            .collect();
+        *self
+            .events
+            .declared
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Arc::clone(&list));
+        Some(list)
     }
 
     pub(crate) fn tail(&self) -> PluginTail {
@@ -333,6 +377,7 @@ impl Ipc {
             requests: Mutex::new(Vec::new()),
             forward: Mutex::new(None),
             wake: OnceLock::new(),
+            declared: Mutex::new(None),
         });
         let listening = Arc::clone(&events);
         bridge.set_listener(Some(Arc::new(move |event| listening.on(event))));

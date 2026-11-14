@@ -175,11 +175,33 @@ macro_rules! served_control {
                 id: ParamId,
                 value: Normalized,
             ) -> Result<(), tutti_plugin_types::ParamWriteError> {
-                // The policy answers here, at the call; the write itself is
+                // The policy answers here, at the call, from the declared
+                // parameters kept on the client; the write itself is
                 // fire-and-forget across the wire.
                 self.parameter_writable(main, id)?;
                 AnyThread::set_parameter_value(self, id, value);
                 Ok(())
+            }
+
+            /// From the declared parameters the client keeps, not a round trip
+            /// per write. A plugin that cannot be asked (lost) has none to
+            /// refuse a write for, and the write is then a no-op, so both
+            /// answer `Ok`.
+            fn parameter_writable(
+                &self,
+                _main: MainThreadMarker,
+                id: ParamId,
+            ) -> Result<(), tutti_plugin_types::ParamWriteError> {
+                let Some(declared) = self.link.declared() else {
+                    return Ok(());
+                };
+                tutti_plugin_types::ParamWriteError::check(
+                    id,
+                    declared
+                        .iter()
+                        .find(|(known, _)| *known == id)
+                        .map(|&(_, access)| access),
+                )
             }
 
             fn parameter_plain(

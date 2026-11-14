@@ -310,8 +310,8 @@ pub use param_edit::ParamEdit;
 pub use param_mapping::{LinearRange, ParamMapping};
 pub use param_unit::{ParamUnit, PlainUnit};
 pub use parameters::{
-    InvalidNormalized, Normalized, ParamFlags, ParamId, ParamRange, ParamSteps, ParamWriteError,
-    ParameterInfo,
+    InvalidNormalized, Normalized, ParamAccess, ParamFlags, ParamId, ParamRange, ParamSteps,
+    ParamWriteError, ParameterInfo,
 };
 pub use pipeline::{BlockCounts, ChunkCounters, MAX_CHUNK};
 pub use presets::{Preset, PresetId, PresetSupport};

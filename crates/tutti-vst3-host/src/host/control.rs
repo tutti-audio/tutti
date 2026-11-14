@@ -6,10 +6,10 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
-    KeyUse, LoadedPlugin, ModifierConvention, Normalized, ParamEdit, ParamId, ParamMapping,
-    ParamWriteError, ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginResult,
-    PluginTail, Preset, PresetId, RenderModeSupport, Request, RescanScope, Samples, StateUse,
-    Vst3SubCategories, WindowHandle,
+    KeyUse, LoadedPlugin, ModifierConvention, Normalized, ParamAccess, ParamEdit, ParamId,
+    ParamMapping, ParamWriteError, ParameterInfo, PluginClass, PluginDescriptor, PluginError,
+    PluginResult, PluginTail, Preset, PresetId, RenderModeSupport, Request, RescanScope, Samples,
+    StateUse, Vst3SubCategories, WindowHandle,
 };
 
 use crate::error::Vst3Error;
@@ -294,7 +294,10 @@ impl Control for Vst3Loaded {
         id: ParamId,
     ) -> Result<(), ParamWriteError> {
         let info = self.parameter_info(main, id);
-        ParamWriteError::check(id, info.map(|info| Some(info.is_read_only())))
+        ParamWriteError::check(
+            id,
+            info.map(|info| ParamAccess::reported(info.is_read_only())),
+        )
     }
 
     /// The controller's own `normalizedParamToPlain`, whatever shape it has

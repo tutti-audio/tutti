@@ -751,25 +751,47 @@ pub enum ParamWriteError {
     ReadOnly(ParamId),
 }
 
+/// What a format reports of a declared parameter's writability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParamAccess {
+    /// The format never reports the read-only bit (VST2 has no such opcode); a
+    /// parameter whose state is unknown is writable.
+    Unreported,
+    /// Declared, and not read-only.
+    Writable,
+    /// Declared read-only.
+    ReadOnly,
+}
+
+impl ParamAccess {
+    /// The access of a parameter whose read-only bit the format reports.
+    #[must_use]
+    pub fn reported(read_only: bool) -> Self {
+        if read_only {
+            Self::ReadOnly
+        } else {
+            Self::Writable
+        }
+    }
+}
+
 impl ParamWriteError {
     /// The policy: `Ok` for a write to a declared parameter that is not
     /// declared read-only.
     ///
     /// `declared` is what the format knows of the parameter `id`: `None` when
-    /// the plugin declares none, else its [`ParamFlags::READ_ONLY`] bit as
-    /// [`ParameterInfo::flag`] reads it (`None` for a format that never
-    /// reports the bit: VST2 has no such opcode, and a parameter whose
-    /// read-only state is unknown is writable).
+    /// the plugin declares none, else its [`ParamAccess`], which is its
+    /// [`ParamFlags::READ_ONLY`] bit as [`ParameterInfo::flag`] reads it.
     ///
     /// # Errors
     ///
     /// [`Undeclared`](Self::Undeclared) for a parameter that is not declared,
     /// [`ReadOnly`](Self::ReadOnly) for one declared read-only.
-    pub fn check(id: ParamId, declared: Option<Option<bool>>) -> Result<(), Self> {
+    pub fn check(id: ParamId, declared: Option<ParamAccess>) -> Result<(), Self> {
         match declared {
             None => Err(Self::Undeclared(id)),
-            Some(Some(true)) => Err(Self::ReadOnly(id)),
-            Some(Some(false) | None) => Ok(()),
+            Some(ParamAccess::ReadOnly) => Err(Self::ReadOnly(id)),
+            Some(ParamAccess::Writable | ParamAccess::Unreported) => Ok(()),
         }
     }
 
@@ -780,12 +802,19 @@ impl ParamWriteError {
     ///
     /// As [`check`](Self::check).
     pub fn check_info(id: ParamId, info: Option<&ParameterInfo>) -> Result<(), Self> {
-        Self::check(id, info.map(|info| info.flag(ParamFlags::READ_ONLY)))
+        Self::check(
+            id,
+            info.map(|info| match info.flag(ParamFlags::READ_ONLY) {
+                Some(read_only) => ParamAccess::reported(read_only),
+                None => ParamAccess::Unreported,
+            }),
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     /// **A write names a declared, writable parameter, or fails at the call**:
     /// an id the plugin does not declare is `Undeclared`, a declared read-only
@@ -821,7 +850,6 @@ mod tests {
         );
         assert_eq!(ParamWriteError::check_info(id, Some(&info(None))), Ok(()));
     }
-    use super::*;
 
     /// Bounds of `0.0..1.0` that the plugin *declared* stay distinguishable
     /// from a parameter that declared none.

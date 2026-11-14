@@ -9,11 +9,11 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, BusRole, ChannelLayout, ClapFeature, ContentScale, Control, Delivered,
-    EditorPresence, EditorWindow, FdId, Features, Layout, LoadedPlugin, Normalized, ParamEdit,
-    ParamFlags, ParamId, ParamMapping, ParamWriteError, ParameterInfo, PluginBus, PluginBuses,
-    PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, PresetId, ProcessWake,
-    RenderMode, RenderModeSupport, Request, RescanScope, Samples, StateUse, TimerId, TrackInfo,
-    WindowHandle, Wraps,
+    EditorPresence, EditorWindow, FdId, Features, Layout, LoadedPlugin, Normalized, ParamAccess,
+    ParamEdit, ParamFlags, ParamId, ParamMapping, ParamWriteError, ParameterInfo, PluginBus,
+    PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, PresetId,
+    ProcessWake, RenderMode, RenderModeSupport, Request, RescanScope, Samples, StateUse, TimerId,
+    TrackInfo, WindowHandle, Wraps,
 };
 
 use super::ClapLoaded;
@@ -95,7 +95,7 @@ impl ClapLoaded {
         id: ParamId,
     ) -> Result<ParamBounds, ParamWriteError> {
         let bounds = self.parameter_bounds(main, id.get());
-        ParamWriteError::check(id, bounds.map(|b| Some(b.read_only)))?;
+        ParamWriteError::check(id, bounds.map(|b| ParamAccess::reported(b.read_only)))?;
         bounds.ok_or(ParamWriteError::Undeclared(id))
     }
 

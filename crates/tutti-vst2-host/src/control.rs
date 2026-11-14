@@ -5,9 +5,9 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
-    KeyUse, LoadedPlugin, ModifierConvention, Normalized, ParamEdit, ParamId, ParamWriteError,
-    ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginError, PluginResult, Preset,
-    PresetId, RenderMode, RenderModeSupport, Request, StateUse, WindowHandle,
+    KeyUse, LoadedPlugin, ModifierConvention, Normalized, ParamAccess, ParamEdit, ParamId,
+    ParamWriteError, ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginError,
+    PluginResult, Preset, PresetId, RenderMode, RenderModeSupport, Request, StateUse, WindowHandle,
 };
 
 use crate::error::Vst2Error;
@@ -128,7 +128,7 @@ impl Control for Vst2Loaded {
         _main: MainThreadMarker,
         id: ParamId,
     ) -> Result<(), ParamWriteError> {
-        ParamWriteError::check(id, self.param_index(id).map(|_| None))
+        ParamWriteError::check(id, self.param_index(id).map(|_| ParamAccess::Unreported))
     }
 
     fn parameter_plain(
