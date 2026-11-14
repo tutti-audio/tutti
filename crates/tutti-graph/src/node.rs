@@ -165,6 +165,11 @@ pub struct Shape {
     /// [`with_chase`](Self::with_chase)). `None`: the node carries no state
     /// across a swap, and the executor sizes nothing for it.
     pub chase: Option<NonZeroU32>,
+    /// Whether the node bypasses itself: the executor neither blends nor
+    /// parks it in [`NodeMode::Bypassed`](crate::NodeMode::Bypassed), and it
+    /// needs no pass to be bypassed. `false` unless set with
+    /// [`with_own_bypass`](Self::with_own_bypass).
+    pub own_bypass: bool,
 }
 
 /// Where a node writes its state for its successor ([`Node::chase`]): a
@@ -302,6 +307,7 @@ impl Shape {
             cost: Cost::Heavy,
             note_events: true,
             chase: None,
+            own_bypass: false,
         }
     }
 
@@ -630,6 +636,32 @@ impl Shape {
     #[must_use]
     pub const fn with_cost(mut self, cost: Cost) -> Self {
         self.cost = cost;
+        self
+    }
+
+    /// This shape, declaring that the node handles
+    /// [`NodeMode::Bypassed`](crate::NodeMode::Bypassed) itself, as a plugin
+    /// with a native bypass parameter does (VST3 `kIsBypass`, CLAP
+    /// `CLAP_PARAM_IS_BYPASS`, AU `BypassEffect`).
+    ///
+    /// The executor then neither blends nor parks the node when its mode is
+    /// `Bypassed`: it is called every block as in `Active`, with no crossfade
+    /// and no reset when it leaves the mode, and its latency and tail stay what
+    /// it reports, so compensation does not move. What it does with its input,
+    /// its tail and its dry path is the node's. It is told through the
+    /// key's mode on the control side ([`Editor::mode`](crate::Editor::mode)),
+    /// not on the audio thread. A node with no pass can be set `Bypassed`.
+    /// [`Muted`](crate::NodeMode::Muted) and a [`Mix`](tutti_types::Mix) stay
+    /// the executor's.
+    ///
+    /// ```
+    /// use tutti_graph::Shape;
+    /// assert!(Shape::EMPTY.with_own_bypass().own_bypass);
+    /// assert!(!Shape::EMPTY.own_bypass);
+    /// ```
+    #[must_use]
+    pub const fn with_own_bypass(mut self) -> Self {
+        self.own_bypass = true;
         self
     }
 

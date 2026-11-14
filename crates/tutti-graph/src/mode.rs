@@ -9,7 +9,13 @@
 //! (it runs and its audio outputs are silence) or
 //! [`Bypassed`](NodeMode::Bypassed) (its audio outputs are its inputs, delayed
 //! by its declared latency, and it is not called). The mode is **the
-//! executor's**: the node and the host of a plugin know nothing of it.
+//! executor's** for every node but one that declares
+//! [`Shape::with_own_bypass`](crate::Shape::with_own_bypass) (a plugin with a
+//! native bypass parameter): the executor neither blends nor parks such a node
+//! in `Bypassed`, but calls it as in `Active`, and the node's host writes the
+//! node's own bypass when the mode changes. The node's own bypass is not
+//! timed by the executor, so there is no crossfade and no reset; `Muted` and
+//! the [`Mix`] stay the executor's for every node, since no format has either.
 //! [`Editor::set_mode`](crate::Editor::set_mode) stores into a cell the unit
 //! holds and marks nothing for commit, as a param range is; the executor
 //! loads the cell once per block, before the first op, so every op of the
@@ -606,6 +612,9 @@ impl BypassLine {
 /// store, as its crossfade does, and is cut by a hard edit as one is.
 pub(crate) struct ModeState {
     cell: ModeCell,
+    /// The node bypasses itself ([`Shape::own_bypass`]): `Bypassed` in the cell
+    /// is read as `Active`.
+    own_bypass: bool,
     /// The mode this block reads (the cell, once per block).
     seen: NodeMode,
     /// Whether this block's op is the plain one (`snapshot` decides, once).
@@ -658,13 +667,15 @@ impl ModeState {
     /// no fade (a fork, a new unit). Control side: allocates its line, its
     /// scratch and its tables.
     pub(crate) fn new(cell: ModeCell, shape: &Shape, max_block: usize) -> Self {
-        let mode = cell.load();
+        let own_bypass = shape.own_bypass;
+        let mode = Self::read(own_bypass, cell.load());
         let mix = cell.load_mix().get();
         let pass = Pass::of_or_nothing(shape);
         let main = pass.inputs();
         let folded = pass.folds().then(|| Arena::new(pass.outputs(), max_block));
         Self {
             cell,
+            own_bypass,
             seen: mode,
             plain: false,
             mix_from: mix,
@@ -685,6 +696,16 @@ impl ModeState {
             drive: None,
             lane_on: false,
             ran: false,
+        }
+    }
+
+    /// The mode the executor acts on for a cell holding `mode`: a node that
+    /// bypasses itself is never `Bypassed` to the executor.
+    fn read(own_bypass: bool, mode: NodeMode) -> NodeMode {
+        if own_bypass && mode == NodeMode::Bypassed {
+            NodeMode::Active
+        } else {
+            mode
         }
     }
 
@@ -736,7 +757,7 @@ impl ModeState {
     /// state moves only inside the unit's own op, after that decision.)
     #[inline]
     pub(crate) fn snapshot(&mut self) {
-        self.seen = self.cell.load();
+        self.seen = Self::read(self.own_bypass, self.cell.load());
         self.ran = true;
         self.lane_on = false;
         // The mix advances every block, parked or silent or not, so a move
