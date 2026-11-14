@@ -183,7 +183,9 @@ impl StreamFaults {
     /// [`delivered`](Self::delivered) between. Errors repeated inside a run,
     /// and every backend error after the disconnect, only cost two atomic
     /// loads: no string, no count, so a backend that spins on `POLLERR` neither
-    /// allocates nor floods a host that reports each new count.
+    /// allocates nor floods a host that reports each new count. The message
+    /// string is allocated on the first error of a run and at the disconnect,
+    /// as a backend's own error path does.
     pub fn record(&self, kind: BackendErrorKind, err: &dyn Display) {
         self.record_at(kind, err, Instant::now());
     }

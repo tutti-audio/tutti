@@ -109,7 +109,7 @@ pub trait RunningStream: Send {
 /// Why a stream did not start.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum StartError<E: std::error::Error + 'static> {
+pub enum StartError<E> {
     /// A stream is running. It is left running and the state handed in is not
     /// adopted; stop the stream first to replace it.
     #[error("the audio stream is already running; stop it before starting another")]

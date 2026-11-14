@@ -245,7 +245,9 @@ impl OutputBlock {
             data.fill(silence);
             return;
         }
-        let rendered = catch_unwind(AssertUnwindSafe(|| self.render_unguarded(data, &convert)));
+        let rendered = catch_unwind(AssertUnwindSafe(|| {
+            self.render_unguarded(data, &convert, silence)
+        }));
         if let Err(payload) = rendered {
             self.failed = true;
             data.fill(silence);
@@ -256,7 +258,12 @@ impl OutputBlock {
         }
     }
 
-    fn render_unguarded<T: Copy>(&mut self, data: &mut [T], convert: &impl Fn(f32) -> T) {
+    fn render_unguarded<T: Copy>(
+        &mut self,
+        data: &mut [T],
+        convert: &impl Fn(f32) -> T,
+        silence: T,
+    ) {
         let channels = self.channels;
         // Clamp so we never allocate. If a backend hands us a larger buffer we
         // process the head and write silence to the tail. The assertion that
@@ -277,7 +284,7 @@ impl OutputBlock {
         // Back to a flat slice for the device write.
         let mix = mix.as_interleaved().samples();
 
-        write_output(data, channels, mix, frames, convert);
+        write_output(data, channels, mix, frames, convert, silence);
     }
 }
 
@@ -301,11 +308,11 @@ fn write_output<T: Copy>(
     output: &[f32],
     rendered_frames: usize,
     convert: &impl Fn(f32) -> T,
+    silence: T,
 ) {
     // `output` is already `channels`-wide interleaved (the engine folded the
     // graph root to the device width). Copy every channel through; frames past
     // what we rendered (an over-sized callback) get silence.
-    let silence = convert(0.0);
     for (i, sample) in data.iter_mut().enumerate() {
         let frame = i / channels;
         *sample = if frame < rendered_frames {
