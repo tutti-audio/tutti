@@ -353,6 +353,9 @@ pub(crate) trait Replay {
 pub(crate) struct PlaneSource<'a> {
     planes: &'a [Vec<f32>],
     fold: Option<Fold>,
+    /// The zeros a channel the planes lack reads: grown to a block, never
+    /// shrunk.
+    silence: Vec<f32>,
     pos: Samples,
 }
 
@@ -361,6 +364,7 @@ impl<'a> PlaneSource<'a> {
         Self {
             planes,
             fold,
+            silence: Vec::new(),
             pos: Samples(0),
         }
     }
@@ -376,7 +380,7 @@ impl Replay for PlaneSource<'_> {
         if n == 0 {
             return Ok(0);
         }
-        let mut block = out.slice_mut(Samples::ZERO..Samples(n));
+        let block = out.slice_mut(Samples::ZERO..Samples(n));
         let pos = self.pos.get();
         let span = Samples(pos)..Samples(pos + n);
         // Both write every sample of every frame (rather than leaving whatever
@@ -388,21 +392,23 @@ impl Replay for PlaneSource<'_> {
                 fold.fold_planar_to_interleaved(planes, block)?;
             }
             // Planes of the file's own width interleave strictly. A render with
-            // another channel count is silent in the channels it lacks, and its
-            // extra planes are not written: the block is cleared, then each
-            // plane the file has fills its channel.
+            // another channel count is silent in the channels it lacks (a
+            // plane of zeros stands in for each) and its extra planes are not
+            // written: the planes the file has are interleaved strictly.
             None if self.planes.len() == block.channels() => {
                 interleave(Planes::from_vecs(self.planes)?.slice(span), block)?;
             }
             None => {
                 let width = block.channels();
-                block.samples_mut().fill(0.0);
-                for (c, plane) in self.planes.iter().enumerate().take(width) {
-                    let lane = block.samples_mut().iter_mut().skip(c).step_by(width);
-                    for (d, &s) in lane.zip(&plane[pos..pos + n]) {
-                        *d = s;
-                    }
+                if self.silence.len() < n {
+                    self.silence.resize(n, 0.0);
                 }
+                self.silence[..n].fill(0.0);
+                let silence = &self.silence[..n];
+                let table: Vec<&[f32]> = (0..width)
+                    .map(|c| self.planes.get(c).map_or(silence, |p| &p[pos..pos + n]))
+                    .collect();
+                interleave(Planes::new(&table)?, block)?;
             }
         }
         self.pos = Samples(self.pos.get() + n);

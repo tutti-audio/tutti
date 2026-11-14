@@ -135,7 +135,7 @@ pub(crate) fn render_outputs(
                         Sink::Spill { waiting, .. } => {
                             waiting.spill.push(block.samples(), &mut budget)?;
                         }
-                        Sink::Buffers { planes } => crate::planar::append(block, planes),
+                        Sink::Buffers { planes } => crate::planar::append(block, planes)?,
                     }
                 }
                 Ok(())

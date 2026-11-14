@@ -320,9 +320,15 @@ impl HrtfBinaural {
             }
             let fresh = &mut self.history[start + at..start + at + n];
             let pair = [ins.0, ins.1];
-            let folded = Planes::new(&pair)
-                .and_then(|pair| self.fold.fold_planar_channel(pair, 0, MonoMut::new(fresh)));
+            let folded = Planes::new(&pair).and_then(|pair| {
+                self.fold
+                    .fold_planar_channel(pair, 0, MonoMut::new(&mut *fresh))
+            });
             debug_assert!(folded.is_ok(), "a step's planes are one length: {folded:?}");
+            if folded.is_err() {
+                // Not folded: silent, never the history's previous contents.
+                fresh.fill(0.0);
+            }
             self.fill += n;
             done += n;
             if self.fill == HRTF_STEP {

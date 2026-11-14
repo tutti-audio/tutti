@@ -244,8 +244,7 @@ impl<F: Float> Row<F> {
 
 /// How a signal of one [`ChannelTopology`] becomes another's.
 ///
-/// An edge (a file, a device, a plugin bus) states the [`ChannelTopology`] it
-/// has. [`Fold::between`] is built once, on the control side (it allocates),
+/// A signal states the [`ChannelTopology`] it has. [`Fold::between`] is built once, on the control side (it allocates),
 /// from two topologies, and applied to views by [`fold`](Self::fold)
 /// (interleaved to interleaved), [`fold_planar`](Self::fold_planar) (planes to
 /// planes), [`fold_planar_to_interleaved`](Self::fold_planar_to_interleaved)
@@ -265,8 +264,7 @@ impl<F: Float> Row<F> {
 ///   samples copied bit for bit.
 /// - **A speaker in both:** it goes straight across at gain 1.0.
 /// - **A speaker the destination lacks** folds into the nearest ones the
-///   destination has, at −3 dB ([`Float::MINUS_3_DB`]), by the table in
-///   `fallbacks`: the centre into front left and right; a side or rear speaker
+///   destination has, at −3 dB ([`Float::MINUS_3_DB`]), by a fixed table: the centre into front left and right; a side or rear speaker
 ///   into its counterpart (side for rear and back) or else the front speaker on
 ///   its side; a top-back speaker into the back, else the side surround, else
 ///   the front speaker on its side; the top-front centre and the left/right of
@@ -294,8 +292,8 @@ impl<F: Float> Row<F> {
 ///   width it is [`FoldError::Unassigned`], since a channel that names no
 ///   speaker says nothing about where it goes. A caller that wants channels by
 ///   index says so: [`Fold::by_index`] widens and zero-fills, [`Fold::select`]
-///   chooses. B-format is not speaker feeds and has no [`Speaker`]: an edge
-///   that has it declares it unassigned, never quad.
+///   chooses. B-format is not speaker feeds and has no [`Speaker`]: a signal
+///   that has it is declared unassigned, never quad.
 /// - **Not silent.** A source channel the destination has no place for is
 ///   [`FoldError::Unplaced`]; an [`Unknown`](Speaker::Unknown) speaker is
 ///   [`FoldError::Unnamed`] (unless the two topologies are identical, which is
@@ -586,9 +584,9 @@ impl<F: Float> Fold<F> {
     /// `i` is source channel `channels[i]`, gain 1.0, bit-exact. A channel may
     /// be chosen twice (one input to both sides); the rest are not read.
     ///
-    /// For an edge that takes part of a wider bus: a microphone input picks its
-    /// channels out of an interface's. A named source is chosen by index too;
-    /// use [`between`](Self::between) when speakers matter.
+    /// For taking part of a wider source: a stereo pair out of an eight-channel
+    /// run. A named source is chosen by index too; use
+    /// [`between`](Self::between) when speakers matter.
     ///
     /// # Errors
     ///
@@ -716,10 +714,16 @@ impl<F: Float> Fold<F> {
     /// [`dst_layout`](Self::dst_layout), and every `dst` sample is written.
     ///
     /// The one applier that takes slices rather than views, so a caller that
-    /// holds a frame in a fixed array pays for no view. The widths are
-    /// debug-asserted: a `src` shorter than the fold reads panics at the
-    /// index, and a `dst` of another width leaves samples unwritten in a
-    /// release build. Allocation-free.
+    /// holds a frame in a fixed array pays for no view. Allocation-free.
+    ///
+    /// The widths are a precondition, debug-asserted and not checked in a
+    /// release build: `dst.len()` equals the destination width and `src.len()`
+    /// the source width. A `dst` of another width leaves samples partly
+    /// unwritten.
+    ///
+    /// # Panics
+    ///
+    /// A `src` shorter than the source width panics at the index it reads.
     #[inline]
     pub fn frame(&self, src: &[F], dst: &mut [F]) {
         debug_assert_eq!(src.len(), usize::from(self.src), "source width");

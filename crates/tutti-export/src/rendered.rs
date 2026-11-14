@@ -243,6 +243,10 @@ impl Rendered {
             written.is_ok(),
             "a render's planes are one length: {written:?}"
         );
+        if written.is_err() {
+            // Not interleaved: silent, never a partial write.
+            out.fill(0.0);
+        }
     }
 }
 

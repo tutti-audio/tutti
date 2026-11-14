@@ -618,6 +618,10 @@ impl MonoSpread {
                         folded.is_ok(),
                         "the lane and the mono block are one range long: {folded:?}"
                     );
+                    if folded.is_err() {
+                        // Not folded: silent, never the lane's previous contents.
+                        lane.as_mut()[range.clone()].fill(0.0);
+                    }
                 }
             }
         }

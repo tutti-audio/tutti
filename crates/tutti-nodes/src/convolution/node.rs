@@ -469,6 +469,10 @@ impl ConvolverNode {
                     folded.is_ok(),
                     "the inputs are a block long and the fold's width: {folded:?}"
                 );
+                if folded.is_err() {
+                    // Not folded: silent, never the previous block's mono.
+                    self.mono[..size].fill(0.0);
+                }
                 for c in 0..n {
                     let out = &mut outputs.get(c)[at..at + size];
                     self.convolvers[c].process_block(&self.mono[..size], out);

@@ -250,6 +250,9 @@ impl<'a, S: Sample> Planes<'a, S> {
 }
 
 impl<S: Sample> Default for Planes<'_, S> {
+    /// No planes, no frames: the empty view. It has no channel, so
+    /// [`plane(0)`](Planes::plane) panics on it; [`get_plane`](Planes::get_plane)
+    /// is the checked form.
     fn default() -> Self {
         Self {
             planes: Table::Shared(&[]),

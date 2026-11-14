@@ -211,17 +211,27 @@ impl Pass {
     ) {
         let fold = self.fold.as_ref().expect("a pass that folds");
         // The aligned slots are separate slices; the table of them is a stack
-        // array, at most one bus wide.
+        // array, at most one bus wide: `width` is clamped to
+        // `MAX_BUS_CHANNELS` above, and a fold's source layout is at most a
+        // bus wide, so the clamp never narrows it.
+        debug_assert!(
+            usize::from(fold.src_layout().count()) <= MAX_BUS_CHANNELS,
+            "a fold's source is at most a bus wide"
+        );
         let width = usize::from(fold.src_layout().count()).min(MAX_BUS_CHANNELS);
         let mut table: [&[f32]; MAX_BUS_CHANNELS] = [&[]; MAX_BUS_CHANNELS];
         for (i, slot) in table.iter_mut().enumerate().take(width) {
             *slot = src(i);
         }
         let folded = Planes::new(&table[..width])
-            .and_then(|planes| fold.fold_planar_channel(planes, c, MonoMut::new(out)));
+            .and_then(|planes| fold.fold_planar_channel(planes, c, MonoMut::new(&mut *out)));
         debug_assert!(
             folded.is_ok(),
             "the aligned slots are a bus wide and a block long: {folded:?}"
         );
+        if folded.is_err() {
+            // Not folded: silent, never the block's previous contents.
+            out.fill(0.0);
+        }
     }
 }

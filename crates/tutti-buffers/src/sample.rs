@@ -363,6 +363,9 @@ pub trait Float:
     #[must_use]
     fn atan2(self, other: Self) -> Self;
     /// `self * a + b` with one rounding.
+    ///
+    /// This is libm's software `fma`, slow on x86: not for a per-sample loop
+    /// unless the single rounding is needed.
     #[must_use]
     fn mul_add(self, a: Self, b: Self) -> Self;
     /// The smaller of the two; a NaN loses to a number.

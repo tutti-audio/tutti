@@ -2,7 +2,9 @@
 //! an encoder takes and the planes a converter or a buffer holds.
 
 use crate::Result;
-use tutti_buffers::{Interleaved, InterleavedMut, Planes, PlanesMut, deinterleave, interleave};
+use tutti_buffers::{
+    BufferError, Interleaved, InterleavedMut, Planes, PlanesMut, deinterleave, interleave,
+};
 use tutti_types::{ChannelLayout, Samples};
 
 /// Deinterleaves `block` into `planes`, each sized to the block's frames (a
@@ -36,13 +38,29 @@ pub(crate) fn join(
     Ok(())
 }
 
-/// Appends channel `c` of `block` to the end of `planes[c]`. Planes past the
-/// block's width are left as they are, and channels past `planes.len()` are
-/// skipped.
-pub(crate) fn append(block: Interleaved<'_>, planes: &mut [Vec<f32>]) {
+/// Appends channel `c` of `block` to the end of `planes[c]`: the caller's own
+/// extend of its planes, which the owned `Wave` replaces.
+///
+/// # Errors
+///
+/// [`BufferError::WidthMismatch`] when `planes` is not as wide as `block`;
+/// nothing is appended.
+pub(crate) fn append(block: Interleaved<'_>, planes: &mut [Vec<f32>]) -> Result<()> {
+    if planes.len() != block.channels() {
+        return Err(BufferError::WidthMismatch {
+            src: block.layout(),
+            dst: u16::try_from(planes.len())
+                .map(ChannelLayout::from)
+                .map_err(|_| BufferError::TooWide {
+                    channels: planes.len(),
+                })?,
+        }
+        .into());
+    }
     let frames = block.frames().get();
-    for (c, plane) in planes.iter_mut().enumerate().take(block.channels()) {
+    for (c, plane) in planes.iter_mut().enumerate() {
         plane.reserve(frames);
         plane.extend(block.iter().map(|frame| frame[c]));
     }
+    Ok(())
 }
