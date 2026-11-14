@@ -493,8 +493,9 @@ impl Drop for Session {
     ///
     /// End a session that hosted an in-process plugin with `close` on the main
     /// thread; dropped elsewhere, it leaks those plugins and counts them in
-    /// `tutti_plugin_types::MainWork::stranded()` (and see `deferred_drops()` and
-    /// `contained_panics()` there for the other two readings).
+    /// `tutti_plugin_types::MainWork::stranded()`; `MainWork::deferred_drops()` and
+    /// `contained_panics()`, both in `tutti_plugin_types`, are the other two
+    /// process-wide readings.
     fn drop(&mut self) {
         if let Some(main) = tutti_plugin_types::MainThreadMarker::new() {
             self.main_work.run(main);
@@ -511,10 +512,10 @@ impl Session {
     /// End a session that hosted an in-process plugin with `close` on the main
     /// thread; dropped elsewhere, it leaks those plugins and counts them in
     /// [`stranded()`](tutti_plugin_types::MainWork::stranded). Plugins dropped off their
-    /// own thread but closed by the collector are counted in
-    /// [`deferred_drops()`](tutti_plugin_types::MainWork::deferred_drops), and a panic a
-    /// plugin callback caused is contained and counted in
-    /// [`contained_panics()`](tutti_plugin_types::contained_panics).
+    /// own thread are counted in
+    /// [`deferred_drops()`](tutti_plugin_types::MainWork::deferred_drops). Both counts are
+    /// process-wide, as is [`contained_panics()`](tutti_plugin_types::contained_panics),
+    /// the panics plugin callbacks caused and the host contained.
     #[cfg(feature = "plugin")]
     pub fn close(self, main: tutti_plugin_types::MainThreadMarker) {
         let mut session = self;
