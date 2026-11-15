@@ -204,7 +204,7 @@ pub(crate) fn property_exchange(message: &Message) -> bool {
 ///
 /// [`MidiFile`]: crate::MidiFile
 pub(crate) fn write(
-    ticks_per_quarter: u16,
+    ticks_per_quarter: TicksPerQuarterNote,
     header: &[(u64, Ump)],
     header_end: u64,
     events: &[(u64, Ump)],
@@ -326,10 +326,10 @@ fn push_delta(out: &mut Vec<u8>, mut ticks: u64) {
     push_words(out, delta_clockstamp(ticks).words());
 }
 
-fn dctpq(ticks_per_quarter: u16) -> Ump {
-    // `ConfigError::Division` refuses a zero division at construction.
-    let ticks = TicksPerQuarterNote::new(ticks_per_quarter).expect("a division is not zero");
-    Ump::from(Message::Utility(Utility::TicksPerQuarterNote(ticks)))
+fn dctpq(ticks_per_quarter: TicksPerQuarterNote) -> Ump {
+    Ump::from(Message::Utility(Utility::TicksPerQuarterNote(
+        ticks_per_quarter,
+    )))
 }
 
 fn start_of_clip() -> Ump {
