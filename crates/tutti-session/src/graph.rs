@@ -2452,10 +2452,9 @@ impl Graph {
     ///
     /// A hosted plugin with a bypass of its own is not bypassed by the
     /// executor: the host writes the plugin's bypass in this call
-    /// (`PluginHandle::set_bypassed`) and compares it on every tick
-    /// ([`reconcile_own_bypass`](Self::reconcile_own_bypass)). Off the main
-    /// thread an in-process plugin's write is lost, and it is kept only by a
-    /// tick on the main thread.
+    /// (`PluginHandle::set_bypassed`) and compares it on every control tick.
+    /// Off the main thread an in-process plugin's write is lost, and it is kept
+    /// only by a tick on the main thread.
     ///
     /// # Errors
     ///
