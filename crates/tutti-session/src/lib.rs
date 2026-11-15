@@ -106,6 +106,7 @@ mod recovery;
 #[cfg(feature = "sampler")]
 mod sampler;
 mod session;
+mod system;
 #[cfg(all(feature = "device", feature = "audio-io"))]
 mod take;
 #[cfg(feature = "device")]
@@ -119,7 +120,9 @@ pub use bounce::{
 };
 #[cfg(feature = "device")]
 pub use builder::OnDevice;
-pub use builder::{Offline, SessionBuilder, Workers, root_width};
+pub use builder::{
+    BlockConfig, HasBlockConfig, Offline, SessionBuilder, SystemClock, Workers, root_width,
+};
 #[cfg(feature = "device")]
 pub use device::{
     Device, DeviceEvent, DeviceLatency, DeviceRestart, DeviceRestarted, LiveSession, RestartError,
@@ -208,6 +211,7 @@ pub use session::MidiNodes;
 #[cfg(feature = "modulation")]
 pub use session::ModInput;
 pub use session::{PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent};
+pub use system::SystemSession;
 #[cfg(all(feature = "device", feature = "audio-io"))]
 pub use take::{
     Armed, InFlight, Placement, Punch, PunchError, Recorded, Rolling, Start, Take, TakeEnd,
