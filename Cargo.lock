@@ -3366,6 +3366,7 @@ dependencies = [
  "keyboard-types",
  "libloading 0.9.1",
  "raw-window-handle",
+ "tempfile",
  "thiserror 2.0.21",
  "tutti-fixtures",
  "tutti-graph",

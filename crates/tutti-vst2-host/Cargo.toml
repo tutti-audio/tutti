@@ -52,6 +52,7 @@ assert_no_alloc = { version = "1", default-features = false }
 # only ever touches the cdylib's. The rlib is still linked, for the shared
 # `#[repr(C)]` type definitions.
 libloading.workspace = true
+tempfile = "3"
 # The reference plugin the conformance harness loads. As a dev-dependency,
 # Cargo builds its cdylib in the same `cargo test` invocation (no nested
 # cargo / no target-dir-lock deadlock); the rlib side gives
