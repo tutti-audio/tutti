@@ -10,6 +10,12 @@
 //! Inquiry), shaped as [`Connection`] is, and [`ProfileInitiator`] the Initiator of Profile
 //! Configuration with one peer, and [`ProcessInitiator`] the Initiator of Process Inquiry.
 //!
+//! What a peer declares about itself becomes values the rest of tutti shares:
+//! [`Dialect::of`] reads an [`Endpoint`] and a [`ProfileTable`] and says what
+//! to send to a Function Block (MIDI 1.0 or MIDI 2.0 channel voice, and the MPE
+//! zones enabled on it), and [`SuggestedCc`] is the table of the Default Control
+//! Change Mapping Profile, the functions it suggests for each Control Change.
+//!
 //! A backend reports what the OS says as an [`OsChange`]; [`DeviceTable::apply`]
 //! returns the [`DeviceEvent`] that change causes, or `None` when it alters
 //! nothing. The table holds no OS handle, thread or clock, so every transition
@@ -64,6 +70,7 @@
 
 mod ci;
 mod connection;
+mod dialect;
 mod endpoint;
 mod entropy;
 mod id;
@@ -75,26 +82,26 @@ mod table;
 
 pub use ci::{
     Ack, ActionError, Arrival, BodyLimit, BufferLimit, CI_SUB_ID_1, CI_UNIVERSAL_SYSEX, CI_VERSION,
-    CallError, CallId, CanSet, CcIndex, ChangeKind, ChannelControllers, ChannelsDetail, ChunkNo,
-    ChunkPosition, ChunkTotal, CiAction, CiCategories, CiDevice, CiDeviceId, CiHeader,
-    CiInstanceId, CiMessage, CiPeer, CiVersion, ClusterKind, ColumnSource, CommonState,
-    ConfirmIcon, ConfirmType, Confirmation, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind,
-    CustomResource, DISCOVERY_WINDOW, DataControl, Decoded, DefaultMapNotCc, Destination,
-    DetailsData, DiscoveryData, EndpointInfo, EndpointStatus, EntryError, GetStateError,
-    InquiryTarget, JsonPointer, LinkRole, ListTooLong, ListedTwice, MAX_LIST_ENTRIES,
-    ManufacturerProfile, MaxSysexSize, MediaType, MessageText, ModeId, Muid, Nak, NotABodyLimit,
-    NotABufferLimit, NotAChunkNo, NotADataControl, NotADeviceId, NotAMuid, NotAPeChannel,
-    NotAPriority, NotARequestId, NotASimultaneousRequests, NotAStateSize, NotAStepCount,
-    NotAStreamLimit, NotASysexSize, NotATimeoutWait, NotAVersion, NotProfileChannels,
-    NotSignificantBits, NotUnixSeconds, NotValid, NotVendorName, NoteData, OpaqueBody, Outcome,
-    PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN, PE_MAX_HEADER_LEN, PE_TIMEOUT, PEER_REPLY_TIMEOUT,
-    PaginationFault, ParamPath, PartialError, PartialUpdate, PeAction, PeAllCtrlEntry,
-    PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx, PeBodyError,
-    PeBuffered, PeCall, PeCapabilities, PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList,
-    PeChange, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode, PeChunk, PeChunkError,
-    PeCiMessage, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList,
-    PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding,
-    PeEndedBy, PeError, PeExpired, PeExtensions, PeExternalSync, PeExtra, PeExtraError,
+    CallError, CallId, CanSet, CcFunction, CcIndex, CcPart, CcReset, CcValue, ChangeKind,
+    ChannelControllers, ChannelsDetail, ChunkNo, ChunkPosition, ChunkTotal, CiAction, CiCategories,
+    CiDevice, CiDeviceId, CiHeader, CiInstanceId, CiMessage, CiPeer, CiVersion, ClusterKind,
+    ColumnSource, CommonState, ConfirmIcon, ConfirmType, Confirmation, CtrlControl, CtrlKind,
+    CtrlRange, CtrlValueKind, CustomResource, DISCOVERY_WINDOW, DataControl, Decoded,
+    DefaultCcLevel, DefaultMapNotCc, Destination, DetailsData, DiscoveryData, EndpointInfo,
+    EndpointStatus, EntryError, GetStateError, InquiryTarget, JsonPointer, LinkRole, ListTooLong,
+    ListedTwice, MAX_LIST_ENTRIES, ManufacturerProfile, MaxSysexSize, MediaType, MessageText,
+    ModeId, Muid, Nak, NotABodyLimit, NotABufferLimit, NotAChunkNo, NotADataControl, NotADeviceId,
+    NotAMuid, NotAPeChannel, NotAPriority, NotARequestId, NotASimultaneousRequests, NotAStateSize,
+    NotAStepCount, NotAStreamLimit, NotASysexSize, NotATimeoutWait, NotAVersion,
+    NotProfileChannels, NotSignificantBits, NotUnixSeconds, NotValid, NotVendorName, NoteData,
+    OpaqueBody, Outcome, PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN, PE_MAX_HEADER_LEN, PE_TIMEOUT,
+    PEER_REPLY_TIMEOUT, PaginationFault, ParamPath, PartialError, PartialUpdate, PeAction,
+    PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx,
+    PeBodyError, PeBuffered, PeCall, PeCapabilities, PeCapabilitiesFailure, PeChCtrlEntry,
+    PeChCtrlList, PeChange, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode, PeChunk,
+    PeChunkError, PeCiMessage, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry,
+    PeCtrlMapList, PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo,
+    PeEncoding, PeEndedBy, PeError, PeExpired, PeExtensions, PeExternalSync, PeExtra, PeExtraError,
     PeFlowControl, PeGet, PeHeader, PeHeaderError, PeHeaderTooLong, PeHeld, PeInitiator, PeJson,
     PeJsonError, PeJsonSchema, PeKind, PeLink, PeLocalOn, PeMessage, PeMessageKind, PeMidiMode,
     PeModeEntry, PeModeList, PeNotification, PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry,
@@ -120,12 +127,16 @@ pub use ci::{
     SUB_ID2_PROFILE_SPECIFIC_DATA, SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SavedState,
     SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests, SpecificData,
     StandardProfile, StateDevice, StateId, StateRev, StateSize, StateStamp, StepCount, StoreError,
-    StreamLimit, SubscribeId, SystemMessages, TimeoutWait, TypeHint, UnixSeconds, Unread,
-    UnreadReason, UpdateKind, Verdict, WrongDevice, decode_body, encode_body, mcoded7,
+    StreamLimit, SubscribeId, SuggestedCc, SystemMessages, TimeoutWait, TypeHint, UnixSeconds,
+    Unread, UnreadReason, UpdateKind, Verdict, WrongDevice, decode_body, encode_body, mcoded7,
     split_message,
 };
 
 pub use connection::{Action, Connection, Ending, MAX_ATTEMPTS, NAME_GRACE, STEP_TIMEOUT};
+pub use dialect::{
+    ChannelVoice, Dialect, Expression, JrTimestamps, Midi1Rate, MpeChannels, MpeZoneSet,
+    MpeZoneSpan, NoDialect, NotMpeChannels,
+};
 pub use endpoint::{
     BlockError, Capabilities, Configuration, Endpoint, FunctionBlock, FunctionBlockBuilder,
     MAX_FUNCTION_BLOCKS, Reply, UMP_VERSION,
