@@ -183,8 +183,8 @@ pub enum SessionEvent {
     /// a node re-declared at a new width) lost wiring to the ports it no
     /// longer has. Reported once, by the update that commits the re-insert,
     /// per node: the audio edges, the event edges and the bus edges (root feeds
-    /// included) that were dropped, by the ports the app named them with. Edges to the ports the node still has
-    /// are kept, gains included.
+    /// included) that were dropped, by the ports the app named them with.
+    /// Edges to the ports the node still has are kept, gains included.
     ///
     /// A feedback edge is listed as the pair of ports it joined (its delay
     /// is not part of an [`Edge`](crate::Edge)). A modulation route onto a

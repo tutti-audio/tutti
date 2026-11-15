@@ -500,8 +500,8 @@ fn a_tap_lane_on_a_lost_port_reads_silence() {
 
 /// A narrower re-insert while a root crossfade is set drops the new spec's
 /// edges to the lost ports and nothing of the old root's bank: the bank is
-/// built from the committed wiring over the ports the units still have, so
-/// the lost output is absent from it and the surviving one is carried.
+/// built from the committed wiring over the ports the units still have, and
+/// the commit carries it.
 #[test]
 fn a_narrower_reinsert_during_a_root_fade_prunes_the_spec_and_not_the_bank() {
     let (mut ed, _exec) = rig();
@@ -535,6 +535,6 @@ fn a_narrower_reinsert_during_a_root_fade_prunes_the_spec_and_not_the_bank() {
     assert_eq!(
         plan.rendered_outputs(),
         4,
-        "two new channels and the old root's two, one of them silent"
+        "the new root's two channels and the old root's two"
     );
 }

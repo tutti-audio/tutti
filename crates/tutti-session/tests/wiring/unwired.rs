@@ -198,7 +198,8 @@ fn a_wider_reinsert_reports_nothing() {
     let (x, _) = g.add(ForkByClone(Pass::<1, 1>));
     g.connect(OutPort::new(a, 0), x.input(0)).unwrap().hard();
     g.connect(x.out(0), Root::output(0)).unwrap().hard();
-    let _ = s.update();
+    let events = s.update();
+    assert!(!refused(&events));
     s.graph()
         .replace(
             x,
@@ -375,4 +376,44 @@ fn a_narrower_reinsert_reports_the_root_feed_it_dropped() {
         })
         .collect();
     assert_eq!(reported, [vec![(y.bus_out(1), BusSink::Root)]]);
+}
+
+/// **A commit that is refused reports nothing, and the record waits for the
+/// commit that lands.** After a narrowing re-insert a cycle makes every commit
+/// fail: the updates report the refusal and no `Unwired`; once the cycle is
+/// cut, the update that lands the commit reports the dropped edge, once.
+#[test]
+fn unwired_waits_for_the_commit_that_lands() {
+    let mut s = Session::builder().build().expect("builds");
+    let g = s.graph();
+    let (a, _) = g.add(ForkByClone(Const::mono(A)));
+    let (x, _) = g.add(ForkByClone(Pass::<2, 1>));
+    let (u, _) = g.add(ForkByClone(Pass::<1, 1>));
+    let (v, _) = g.add(ForkByClone(Pass::<1, 1>));
+    g.connect(OutPort::new(a, 0), x.input(1)).unwrap().hard();
+    let _ = s.update();
+
+    let g = s.graph();
+    g.replace(
+        x,
+        ForkByClone(Pass::<1, 1>),
+        Seconds(0.0),
+        FadeLaw::EqualAmplitude,
+    )
+    .expect("the node is there");
+    g.connect(u.out(0), v.input(0)).unwrap().hard();
+    g.connect(v.out(0), u.input(0)).unwrap().hard();
+    let events = s.update();
+    assert!(refused(&events), "the cycle is refused: {events:?}");
+    assert!(unwired(&events).is_empty(), "nothing landed yet");
+    let events = s.update();
+    assert!(unwired(&events).is_empty(), "still refused, still nothing");
+
+    assert!(s.graph().disconnect(v.out(0), u.input(0)).unwrap());
+    let events = s.update();
+    assert!(!refused(&events), "{events:?}");
+    let [(node, edges, _)] = <[_; 1]>::try_from(unwired(&events)).expect("reported once");
+    assert_eq!(node, x.erase());
+    assert_eq!(edges, [Edge::new(OutPort::new(a, 0), x.input(1))]);
+    assert!(unwired(&s.update()).is_empty());
 }
