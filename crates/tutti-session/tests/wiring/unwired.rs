@@ -10,9 +10,7 @@
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, FadeLaw, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
-use tutti_session::{
-    Edge, EventEdge, EventInPort, EventOutPort, InPort, OutPort, Root, Session, SessionEvent,
-};
+use tutti_session::{Edge, EventEdge, InPort, OutPort, Root, Session, SessionEvent};
 use tutti_types::{Amplitude, ChannelLayout, Seconds};
 
 const BLOCK: usize = 64;
