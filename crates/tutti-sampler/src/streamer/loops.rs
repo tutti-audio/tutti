@@ -1078,7 +1078,7 @@ mod tests {
             &(0..LEN).map(|i| i as f32).collect::<Vec<_>>(),
         ));
         let (mut writer, _ring, mut reader) = RegionBuffer::for_file(
-            StreamId(1),
+            StreamId::of(1),
             std::path::PathBuf::new(),
             LEN,
             tutti_types::ChannelTopology::new([tutti_types::Speaker::FrontCenter]),

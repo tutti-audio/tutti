@@ -108,7 +108,7 @@ pub(super) const LAYERS: &[&[&str]] = &[
 /// The crates whose normal and build dependencies on workspace crates are exactly these.
 const ONLY: &[(&str, &[&str])] = &[
     ("tutti-midi-protocol", &["tutti-ump", "tutti-types"]),
-    ("tutti-midi-device", &["tutti-ump"]),
+    ("tutti-midi-device", &["tutti-ump", "tutti-types"]),
     // The unit vocabulary a `Gauge<U>` reads through (`Reading` for a `Unit`).
     ("tutti-rt", &["tutti-types"]),
     ("tutti-midi-network", &["tutti-ump", "tutti-midi-device"]),
@@ -123,7 +123,7 @@ const ONLY: &[(&str, &[&str])] = &[
         "tutti-transport",
         &["tutti-types", "tutti-rt", "tutti-graph", "tutti-tempo"],
     ),
-    ("tutti-plugin-db", &["tutti-plugin-types"]),
+    ("tutti-plugin-db", &["tutti-plugin-types", "tutti-types"]),
     (
         "tutti-plugin-ipc",
         &[

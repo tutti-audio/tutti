@@ -4,7 +4,7 @@
 
 //! The voices that sound, and the commands that start and end them.
 
-use tutti_midi_protocol::narrow_velocity;
+use tutti_midi_protocol::narrow_note_on_velocity;
 use tutti_sf2::{SamplePool, SoundFont};
 use tutti_types::{Amplitude, Semitones};
 use tutti_ump::{MidiChannel, NoteVelocity};
@@ -95,7 +95,7 @@ impl Voices {
                         &RegionPair::new(preset_zone, instrument_zone),
                         i32::from(channel.get()),
                         i32::from(key.get()),
-                        i32::from(narrow_velocity(NoteVelocity::new(velocity)).get().max(1)),
+                        i32::from(narrow_note_on_velocity(NoteVelocity::new(velocity)).get()),
                     );
                     voice.tune(tune);
                     voice.glide(glide);

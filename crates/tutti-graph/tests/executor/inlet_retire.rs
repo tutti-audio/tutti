@@ -3,8 +3,8 @@
 //! side (the executor hands the old unit back; `Editor::collect` drops it), as
 //! a tap's lanes are.
 
+use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Fade, FadeLaw, InletNode, Prepare, TapReader, TransportPosition};
-use tutti_graph::{NodeKey, TapId};
 use tutti_graph::{OutPort, Source};
 use tutti_types::MaxBlock;
 use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
@@ -104,7 +104,7 @@ impl tutti_graph::IntoNode for DropsInBlock {
 #[cfg(debug_assertions)]
 #[should_panic(expected = "tap reader")]
 fn a_reader_dropped_in_a_block_panics() {
-    let (reader, _writer) = TapReader::pair(TapId(0), 2, Samples(8));
+    let (reader, _writer) = TapReader::pair(2, Samples(8));
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
     ed.insert(KEY, "drops", DropsInBlock(Some(reader)));

@@ -63,10 +63,11 @@ fn closing_the_tap_stops_the_copy() {
         .expect("the sources exist");
     let mut out = [0.0f32];
     s.render_frame(&mut out);
-    s.graph().taps().close(reader.id()).unwrap();
+    let id = reader.id().expect("the session named it");
+    s.graph().taps().close(id).unwrap();
     assert_eq!(
-        s.graph().taps().close(reader.id()),
-        Err(CloseError::Tap(reader.id())),
+        s.graph().taps().close(id),
+        Err(CloseError::Tap(id)),
         "a closed tap is not open"
     );
     s.render_frame(&mut out);

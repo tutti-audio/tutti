@@ -61,14 +61,14 @@ pub struct NodeKey(pub u64);
 
 impl NodeKey {
     /// Returns a key no earlier call in this process returned: a
-    /// process-wide counter from 0, one step per call, from any thread.
+    /// process-wide counter from 1, one step per call, from any thread.
     ///
     /// Unique among its own calls only. A key a host writes itself (an
     /// `Entity`'s bits, a literal) is not reserved against it, so a host
     /// mixing the two keeps them in ranges that cannot meet.
     pub fn fresh() -> Self {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+        static NEXT: tutti_types::Mint = tutti_types::Mint::new();
+        Self(NEXT.mint().get())
     }
 }
 
@@ -297,9 +297,10 @@ pub struct Topology {
     pub meters: BTreeMap<MeterId, MeterSpec>,
 }
 
-/// The name of one level meter.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MeterId(pub u32);
+tutti_types::id! {
+    /// The name of one level meter.
+    pub struct MeterId: named;
+}
 
 /// What a level meter measures: one lane per source.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -362,9 +363,10 @@ impl MeterSpec {
     }
 }
 
-/// The name of one tap.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TapId(pub u32);
+tutti_types::id! {
+    /// The name of one tap.
+    pub struct TapId: named;
+}
 
 /// Where a tap's copy sits in time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
@@ -380,10 +382,11 @@ pub enum TapAlign {
     ToOutput,
 }
 
-/// The name of one event tap. Its own type: a [`TapId`] names a key of
-/// [`Topology::taps`], and the two maps do not share a namespace.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct EventTapId(pub u32);
+tutti_types::id! {
+    /// The name of one event tap. Its own type: a [`TapId`] names a key of
+    /// [`Topology::taps`], and the two maps do not share a namespace.
+    pub struct EventTapId: named;
+}
 
 /// The event port an event tap copies: an output, or an input.
 ///

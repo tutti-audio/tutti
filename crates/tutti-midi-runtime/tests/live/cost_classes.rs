@@ -116,10 +116,10 @@ fn graph(workers: usize, declared: bool) -> (Executor, Vec<common::Sink>, Vec<Se
             }));
         } else if declared {
             ed.insert(source, "clip", clip(k));
-            outs.push(common::sink(&mut ed, k as u32, &[(source.0, 0)]));
+            outs.push(common::sink(&mut ed, k + 1, &[(source.0, 0)]));
         } else {
             ed.insert(source, "clip", Unforkable(Undeclared(clip(k))));
-            outs.push(common::sink(&mut ed, k as u32, &[(source.0, 0)]));
+            outs.push(common::sink(&mut ed, k + 1, &[(source.0, 0)]));
         }
         if k >= LANES {
             common::connect(&mut ed, source.0, sink.0);
