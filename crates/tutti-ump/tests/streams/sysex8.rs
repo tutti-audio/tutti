@@ -370,3 +370,30 @@ fn only_sysex8_packets_are_taken() {
         (SysexStatus::Start, 0, &[1][..])
     );
 }
+
+/// Section 7.8, `# of bytes`: the bytes after the valid ones, the Stream ID
+/// included in the count, are zero.
+/// Spec: m2-104/7.8#3
+#[test]
+fn unused_bytes_of_a_packet_are_zero() {
+    for len in 0..=40 {
+        let data = vec![0xFF; len];
+        let message = Sysex8Message {
+            group: G0,
+            stream_id: 0x55,
+            payload: &data,
+        };
+        for ump in message.packets() {
+            let count = ((ump.0[0] >> 16) & 0xF) as usize;
+            let mut bytes = Vec::new();
+            bytes.extend([ump.0[0] >> 8, ump.0[0]].map(|w| w as u8));
+            for w in &ump.0[1..] {
+                bytes.extend(w.to_be_bytes());
+            }
+            // The first byte is the Stream ID, counted by `# of bytes`.
+            assert_eq!(bytes[0], 0x55, "{len}");
+            assert!(bytes[1..count].iter().all(|b| *b == 0xFF), "{len}");
+            assert!(bytes[count..].iter().all(|b| *b == 0), "{len}");
+        }
+    }
+}

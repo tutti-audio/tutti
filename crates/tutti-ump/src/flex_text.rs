@@ -11,7 +11,15 @@ use crate::{
 /// The bytes one Flex text packet carries.
 const BYTES_PER_PACKET: usize = 12;
 
-/// The Flex text packets of `text`, `None` if it holds a NUL.
+/// The most packets one Flex Data message has (M2-104 section 7.5.1).
+const MAX_PACKETS: usize = 32;
+
+/// The longest text one Flex Data message carries: a `Start`, 30 `Continue`
+/// and an `End` of 12 bytes each.
+pub const FLEX_TEXT_MAX_LEN: usize = MAX_PACKETS * BYTES_PER_PACKET;
+
+/// The Flex text packets of `text`, `None` if it holds a NUL or is longer than
+/// [`FLEX_TEXT_MAX_LEN`] bytes (a Flex Data message has at most 32 packets).
 ///
 /// A text of up to 12 bytes is one `Complete` packet (an empty one is a
 /// `Complete` of zeros). A longer one is a `Start`, any number of `Continue`,
@@ -41,7 +49,7 @@ pub fn flex_text_packets(
     kind: FlexTextKind,
     text: &str,
 ) -> Option<FlexTextPackets<'_>> {
-    (!text.as_bytes().contains(&0)).then_some(FlexTextPackets {
+    (text.len() <= FLEX_TEXT_MAX_LEN && !text.as_bytes().contains(&0)).then_some(FlexTextPackets {
         group,
         address,
         kind,

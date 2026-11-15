@@ -1,6 +1,6 @@
 //! The Linkwitz-Riley crossover as a model: [`CrossoverModel`], the design
 //! (the splits' coefficients at a rate), separated from the state that runs it
-//! (`CrossoverState`).
+//! ([`CrossoverBank`](super::CrossoverBank)).
 //!
 //! A band of an `n`-split tree is `HP^2` of every earlier split, `LP^2` of its
 //! own and the all-pass of every later one (see `state.rs`), so each band's
@@ -10,7 +10,8 @@ use core::f64::consts::{FRAC_1_SQRT_2, PI};
 
 use tutti_types::{Db, Hz, SampleRate, Samples};
 
-use super::bands::{CrossoverError, MAX_SPLITS, SOLVE_CEILING, validate};
+use super::CrossoverControls;
+use super::bands::{CrossoverError, MAX_BANDS, MAX_SPLITS, SOLVE_CEILING, check_bands, validate};
 use crate::filter::biquad::{Biquad, decay_ring, section_l1};
 use crate::{Complex64, Lti, Ring, System};
 
@@ -25,9 +26,9 @@ pub(super) struct Split {
 impl Split {
     /// The Butterworth (Q = 1/sqrt(2)) low-pass, high-pass and all-pass at
     /// `hz` against `rate` (bilinear transform).
-    pub(super) fn solve(hz: f64, rate: f64) -> Self {
-        let hz = hz.min(SOLVE_CEILING * rate);
-        let k = libm::tan(PI * hz / rate);
+    pub(super) fn solve(hz: Hz, rate: SampleRate) -> Self {
+        let hz = f64::from(hz.get()).min(SOLVE_CEILING * rate.get());
+        let k = libm::tan(PI * hz / rate.get());
         let k2 = k * k;
         let norm = 1.0 / (1.0 + k / FRAC_1_SQRT_2 + k2);
         let a1 = 2.0 * (k2 - 1.0) * norm;
@@ -69,11 +70,14 @@ impl Split {
 pub struct CrossoverModel {
     pub(super) rate: SampleRate,
     pub(super) bands: usize,
-    pub(super) freqs: [f64; MAX_SPLITS],
+    pub(super) freqs: [Hz; MAX_SPLITS],
     pub(super) coeffs: [Split; MAX_SPLITS],
 }
 
 impl CrossoverModel {
+    /// The most bands.
+    pub const MAX_BANDS: usize = MAX_BANDS;
+
     /// A model with a split at each of `frequencies` at `rate`, so
     /// `frequencies.len() + 1` bands.
     ///
@@ -85,28 +89,61 @@ impl CrossoverModel {
     pub fn new(frequencies: &[Hz], rate: impl Into<SampleRate>) -> Result<Self, CrossoverError> {
         let rate = rate.into();
         validate(frequencies, rate)?;
-        let mut model = Self::unsolved(frequencies.len() + 1, rate);
-        for (f, hz) in model.freqs.iter_mut().zip(frequencies) {
-            *f = f64::from(hz.get());
-        }
+        let mut model = Self::empty(frequencies.len() + 1, rate);
+        model.freqs[..frequencies.len()].copy_from_slice(frequencies);
         model.solve();
         Ok(model)
     }
 
-    /// `bands` bands at `rate`, the coefficients not yet solved for any frequency.
-    pub(super) fn unsolved(bands: usize, rate: SampleRate) -> Self {
+    /// The model of `controls` at `rate`, `bands` bands wide. Total in the controls (see
+    /// [`design_into`](Self::design_into)).
+    ///
+    /// # Errors
+    ///
+    /// [`CrossoverError::Bands`] outside 2 to 6.
+    pub fn designed(
+        bands: usize,
+        controls: &CrossoverControls,
+        rate: SampleRate,
+    ) -> Result<Self, CrossoverError> {
+        check_bands(bands)?;
+        let mut model = Self::empty(bands, rate);
+        model.design_into(controls, rate);
+        Ok(model)
+    }
+
+    /// Designs `controls` at `rate` in place, keeping the band count. Total: a frequency is
+    /// held between the split below it (1 Hz for the first) and what the coefficients can
+    /// be solved at ([`SOLVE_CEILING`] of the rate), a NaN reading as the floor, so a set
+    /// that is not increasing is solved with its splits no lower than the one before.
+    /// [`CrossoverControls::new`] is what refuses one. Allocates nothing.
+    pub fn design_into(&mut self, controls: &CrossoverControls, rate: SampleRate) {
+        self.rate = rate;
+        let cap = SOLVE_CEILING * rate.get();
+        let mut floor = 1.0f64;
+        for (f, hz) in self.freqs.iter_mut().zip(&controls.frequencies) {
+            floor = f64::from(hz.get()).max(floor).min(cap);
+            *f = Hz(floor as f32);
+        }
+        self.solve();
+    }
+
+    /// A model of `bands` bands at `rate` before any design: every split at 1 kHz, with
+    /// the coefficients of 1 kHz at 48 kHz. [`design_into`](Self::design_into) is what sets them.
+    fn empty(bands: usize, rate: SampleRate) -> Self {
+        let split = Split::solve(Hz(1_000.0), SampleRate::SR_48K);
         Self {
             rate,
             bands,
-            freqs: [0.0; MAX_SPLITS],
-            coeffs: [Split::solve(1_000.0, 48_000.0); MAX_SPLITS],
+            freqs: [Hz(1_000.0); MAX_SPLITS],
+            coeffs: [split; MAX_SPLITS],
         }
     }
 
     /// Solves every split's coefficients at `self.freqs`.
-    pub(super) fn solve(&mut self) {
+    fn solve(&mut self) {
         for j in 0..self.splits() {
-            self.coeffs[j] = Split::solve(self.freqs[j], self.rate.get());
+            self.coeffs[j] = Split::solve(self.freqs[j], self.rate);
         }
     }
 
@@ -119,7 +156,7 @@ impl CrossoverModel {
     /// Crossover `i`'s frequency as solved, or `None` past the last.
     #[must_use]
     pub fn frequency(&self, i: usize) -> Option<Hz> {
-        (i < self.splits()).then(|| Hz(self.freqs[i] as f32))
+        (i < self.splits()).then(|| self.freqs[i])
     }
 
     /// The sample rate the coefficients are solved at.

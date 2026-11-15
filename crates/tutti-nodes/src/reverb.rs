@@ -347,12 +347,6 @@ impl<F: NodeFamily> FamilyNode<F> {
             tuned: None,
         }
     }
-
-    /// The controls the model was last designed from, for a node's own tests.
-    #[cfg(test)]
-    pub(crate) fn applied(&self) -> Option<F::Controls> {
-        self.tuned.as_ref().and_then(|t| t.applied)
-    }
 }
 
 impl<F: NodeFamily> Tuned<F> {

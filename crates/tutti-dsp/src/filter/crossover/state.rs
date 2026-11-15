@@ -1,5 +1,6 @@
 //! The state of a Linkwitz-Riley crossover tree: [`CrossoverState`], the sections' words of one
-//! channel, run with the coefficients of a [`CrossoverModel`].
+//! channel, run with the coefficients of a [`CrossoverModel`] (a
+//! [`CrossoverBank`](super::CrossoverBank) holds one per channel).
 //!
 //! Each split is a low-pass and a high-pass of two cascaded 2nd-order Butterworth sections
 //! (Q = 1/sqrt(2)) at the crossover frequency (Linkwitz and Riley, 1976). The two branches
@@ -52,9 +53,15 @@ impl CrossoverState {
     /// the first entries of the result (the rest are 0).
     #[inline]
     pub(crate) fn tick(&mut self, model: &CrossoverModel, x: f32) -> [f32; MAX_BANDS] {
-        let mut out = [0.0f32; MAX_BANDS];
+        self.tick_f64(model, f64::from(x)).map(|y| y as f32)
+    }
+
+    /// [`tick`](Self::tick) in the state's own precision.
+    #[inline]
+    pub(super) fn tick_f64(&mut self, model: &CrossoverModel, x: f64) -> [f64; MAX_BANDS] {
+        let mut out = [0.0f64; MAX_BANDS];
         let splits = model.bands - 1;
-        let mut rest = f64::from(x);
+        let mut rest = x;
         for (j, slot) in out.iter_mut().enumerate().take(splits) {
             let c = &model.coeffs[j];
             let mut lo = rest;
@@ -66,10 +73,10 @@ impl CrossoverState {
             for k in j + 1..splits {
                 lo = self.all_pass[j][k].tick(&model.coeffs[k].all_pass, lo);
             }
-            *slot = lo as f32;
+            *slot = lo;
             rest = hi;
         }
-        out[splits] = rest as f32;
+        out[splits] = rest;
         out
     }
 }

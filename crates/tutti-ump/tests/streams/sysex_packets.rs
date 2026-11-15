@@ -76,8 +76,9 @@ fn twelve_and_thirteen_bytes() {
     );
 }
 
-/// A long payload: `Start`, `Continue`*, `End`, six bytes each but the last.
-/// Spec: m2-104/7.7#1, m2-104/7.7#2
+/// A long payload: `Start`, `Continue`*, `End`, six bytes each but the last,
+/// and nothing else between the `Start` and the `End`.
+/// Spec: m2-104/7.7#1, m2-104/7.7#2, m2-104/7.7.1#1, m2-104/7.7.1#2
 #[test]
 fn a_long_payload_runs_start_continue_end() {
     let p = payload(1000);
@@ -214,5 +215,33 @@ fn a_high_bit_is_refused_not_masked() {
     assert!(Sysex7Packets::from_payload(MidiGroup::of(0), &[0x7F]).is_ok());
     for len in 0..=20 {
         assert!(Sysex7Packets::from_payload(MidiGroup::of(2), &raw(&payload(len))).is_ok());
+    }
+}
+
+/// Section 7.7, `# of bytes`: the bytes after the valid ones are zero, and a
+/// packet may hold fewer than six (the last of a message, any length).
+/// Spec: m2-104/7.7#3, m2-104/7.7#4
+#[test]
+fn unused_bytes_of_a_packet_are_zero() {
+    for len in 0..=13 {
+        let body = vec![0x7F; len];
+        for ump in sysex7_packets(MidiGroup::of(0), &body) {
+            let count = ((ump.0[0] >> 16) & 0xF) as usize;
+            assert!(count <= 6);
+            let bytes: Vec<u8> = [
+                ump.0[0] >> 8,
+                ump.0[0],
+                ump.0[1] >> 24,
+                ump.0[1] >> 16,
+                ump.0[1] >> 8,
+                ump.0[1],
+            ]
+            .iter()
+            .map(|w| *w as u8)
+            .collect();
+            assert!(bytes[..count].iter().all(|b| *b == 0x7F), "{len}");
+            assert!(bytes[count..].iter().all(|b| *b == 0), "{len}");
+            assert_eq!(ump.0[2..], [0, 0], "{len}");
+        }
     }
 }
