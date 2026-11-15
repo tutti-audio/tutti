@@ -19,6 +19,7 @@ use std::sync::Arc;
 use tutti_curve::{Law, Piece};
 use tutti_types::{
     Beat, BeatsPerCycle, Depth, Frame, Hz, Phase, PhaseIncrement, SamplePosition, SampleRate,
+    UnitParam,
 };
 
 use crate::curve::{Curve, CurveSegment};
@@ -486,7 +487,7 @@ impl ControlProgram {
         span: f64,
         inputs: &[Option<f32>],
     ) -> Option<f32> {
-        self.evaluate(knob, at, span, inputs, Limit::At)
+        self.evaluate(None, knob, at, span, inputs, Limit::At)
     }
 
     /// The left limit at `at`: [`value_at`](Self::value_at) just before it,
@@ -500,21 +501,52 @@ impl ControlProgram {
         span: f64,
         inputs: &[Option<f32>],
     ) -> Option<f32> {
-        self.evaluate(knob, at, span, inputs, Limit::Before)
+        self.evaluate(None, knob, at, span, inputs, Limit::Before)
+    }
+
+    /// [`value_at`](Self::value_at) for a program that drives `param`. A
+    /// circular param ([`UnitParam::is_circular`], `Azimuth`) moves along the
+    /// short arc between an automation curve's breakpoints and takes its
+    /// offsets as `wrap(base + offsets)`, never a clamp; `span` is then the
+    /// arc's length. Any other param is [`value_at`](Self::value_at).
+    pub fn value_at_for(
+        &self,
+        param: UnitParam,
+        knob: Option<f32>,
+        at: &ProgramTime,
+        span: f64,
+        inputs: &[Option<f32>],
+    ) -> Option<f32> {
+        self.evaluate(Some(param), knob, at, span, inputs, Limit::At)
+    }
+
+    /// [`value_before`](Self::value_before) for a program that drives
+    /// `param` (see [`value_at_for`](Self::value_at_for)).
+    pub fn value_before_for(
+        &self,
+        param: UnitParam,
+        knob: Option<f32>,
+        at: &ProgramTime,
+        span: f64,
+        inputs: &[Option<f32>],
+    ) -> Option<f32> {
+        self.evaluate(Some(param), knob, at, span, inputs, Limit::Before)
     }
 
     fn evaluate(
         &self,
+        param: Option<UnitParam>,
         knob: Option<f32>,
         at: &ProgramTime,
         span: f64,
         inputs: &[Option<f32>],
         limit: Limit,
     ) -> Option<f32> {
+        let circular = param.filter(|p| p.is_circular());
         let base = self
             .automation
             .as_ref()
-            .and_then(|c| automation_at(c.as_ref(), at.beat.get(), limit))
+            .and_then(|c| automation_at(c.as_ref(), at.beat.get(), limit, circular))
             .filter(|v| v.is_finite())
             .or(knob)?;
         if !span.is_finite() {
@@ -531,7 +563,8 @@ impl ControlProgram {
                 acc += l.amount.offset(x, span);
             }
         }
-        Some((f64::from(base) + acc) as f32)
+        let sum = (f64::from(base) + acc) as f32;
+        Some(circular.map_or(sum, |p| p.wrap(sum)))
     }
 
     /// The next corner strictly after `at` on each clock: the earliest of
@@ -596,8 +629,28 @@ enum Limit {
 /// the piece, its position rounded *down* to `f32`: a trajectory rounds the
 /// position up to 1.0 a nanobeat before a breakpoint, which on a stepped
 /// piece reads the level after the step.
-fn automation_at(curve: &dyn Curve, b: f64, limit: Limit) -> Option<f32> {
+fn automation_at(
+    curve: &dyn Curve,
+    b: f64,
+    limit: Limit,
+    circular: Option<UnitParam>,
+) -> Option<f32> {
     if limit == Limit::At {
+        // A circular param's move is the short arc, which the curve's own
+        // `value_at` (a straight line between values) does not know.
+        if let Some(p) = circular
+            && let Some(CurveSegment::Move {
+                start,
+                end,
+                from,
+                to,
+                shape,
+            }) = curve.segment_at(Beat(b))
+            && end.get() > start.get()
+        {
+            let t = ((b - start.get()) / (end.get() - start.get())) as f32;
+            return Some(Piece::new(from, to, shape).value_of(p, t));
+        }
         return curve.value_at(Beat(b));
     }
     let x = b - tol(b);
@@ -616,7 +669,10 @@ fn automation_at(curve: &dyn Curve, b: f64, limit: Limit) -> Option<f32> {
             if f64::from(t32) > t {
                 t32 = t32.next_down();
             }
-            return Some(Piece::new(from, to, shape).value(t32));
+            return Some(match circular {
+                Some(p) => Piece::new(from, to, shape).value_of(p, t32),
+                None => Piece::new(from, to, shape).value(t32),
+            });
         }
     }
     curve.value_at(Beat(x))

@@ -597,6 +597,17 @@ fn each_refusal_fires_by_name() {
         run(&one_lfo, &r1, &[(target(1), ranged(f32::NAN, 1.0))]),
         Err(CompileError::NanRange(target(1)))
     );
+    // A circular target's range is an arc, min at most max: 170..-170 would
+    // read the opposite arc once ordered. A line takes crossed bounds as ever,
+    // and an arc across ±180 is 170..190.
+    let bearing = TargetKey::param(1, ParamAddr::Unit(UnitParam::Azimuth));
+    assert_eq!(
+        run(&one_lfo, &[], &[(bearing, ranged(170.0, -170.0))]),
+        Err(CompileError::CrossedArc(bearing))
+    );
+    assert!(run(&one_lfo, &[], &[(bearing, ranged(170.0, 190.0))]).is_ok());
+    let height = TargetKey::param(1, ParamAddr::Unit(UnitParam::Elevation));
+    assert!(run(&one_lfo, &[], &[(height, ranged(170.0, -170.0))]).is_ok());
     // An automation curve that is not frozen.
     struct Live;
     impl Curve for Live {

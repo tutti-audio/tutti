@@ -16,6 +16,7 @@ use tutti_modulation::{
 use tutti_rt::{ArcLend, PackedAtomic, Reader};
 use tutti_types::{
     AtomicF32, Beat, Frame, ParamAddr, ParamCell, SamplePosition, Samples, Tail, UnitAddr,
+    UnitParam,
 };
 
 use crate::SOURCE_EVENT_CAPACITY;
@@ -68,6 +69,10 @@ struct Shared {
     resync: AtomicBool,
     knob: Option<ParamCell>,
     range: RangeSource,
+    /// The built-in param the lane drives; `None` for a foreign one. A
+    /// circular one ([`UnitParam::is_circular`]) takes the short arc between
+    /// its values and sums its offsets as `wrap(base + offsets)`.
+    unit: Option<UnitParam>,
     thinned: AtomicU64,
     truncated: AtomicU64,
     unranged: AtomicU64,
@@ -351,6 +356,7 @@ impl ControlLaneNode {
         program: Arc<ControlProgram>,
         knob: Option<ParamCell>,
         range: RangeSource,
+        unit: Option<UnitParam>,
         make: Arc<MakeSegment>,
         native: bool,
     ) -> Self {
@@ -363,6 +369,7 @@ impl ControlLaneNode {
             resync: AtomicBool::new(false),
             knob,
             range,
+            unit,
             thinned: AtomicU64::new(0),
             truncated: AtomicU64::new(0),
             unranged: AtomicU64::new(0),
@@ -400,6 +407,7 @@ impl ControlLaneNode {
             Arc::new(program),
             knob,
             range.map_or(RangeSource::None, RangeSource::Port),
+            Some(param.param),
             Arc::new(move |from, to, shape| ParamSegment::unit(param, from, to, Samples(0), shape)),
             true,
         )
@@ -419,6 +427,7 @@ impl ControlLaneNode {
             Arc::new(program),
             knob.map(|k| Arc::new(AtomicF32::new(k)).into()),
             RangeSource::Own(PackedAtomic::new(ParamRange::new(range.0, range.1))),
+            None,
             Arc::new(move |from, to, shape| ParamSegment::foreign(id, from, to, Samples(0), shape)),
             false,
         )
@@ -452,7 +461,7 @@ impl ControlLaneNode {
             RangeSource::None => RangeSource::None,
             r => RangeSource::Own(PackedAtomic::new(r.load())),
         };
-        Self::build(program, knob, range, Arc::clone(make), native)
+        Self::build(program, knob, range, s.unit, Arc::clone(make), native)
     }
 }
 
@@ -489,7 +498,9 @@ fn value_along(seg: &ParamSegment, from: f32, to: f32, j: f64) -> f32 {
     }
     let t = ((p + j) / l) as f32;
     if t < 1.0 {
-        Piece::new(from, to, seg.shape()).value(t)
+        let piece = Piece::new(from, to, seg.shape());
+        seg.unit_param()
+            .map_or_else(|| piece.value(t), |p| piece.value_of(p, t))
     } else {
         to
     }
@@ -534,6 +545,7 @@ struct Block<'b> {
     knob: Option<f32>,
     range: (f32, f32),
     span: f64,
+    unit: Option<UnitParam>,
     native: bool,
     make: &'b MakeSegment,
     stride: u64,
@@ -564,6 +576,26 @@ impl Block<'_> {
                 .map(|i| i.value(at, self.base()));
         }
         out
+    }
+
+    /// The program's value at `time`, for the lane's param.
+    fn value_at(&self, time: &ProgramTime, ins: &[Option<f32>]) -> Option<f32> {
+        match self.unit {
+            Some(p) => self
+                .program
+                .value_at_for(p, self.knob, time, self.span, ins),
+            None => self.program.value_at(self.knob, time, self.span, ins),
+        }
+    }
+
+    /// The program's left limit at `time`, for the lane's param.
+    fn value_before(&self, time: &ProgramTime, ins: &[Option<f32>]) -> Option<f32> {
+        match self.unit {
+            Some(p) => self
+                .program
+                .value_before_for(p, self.knob, time, self.span, ins),
+            None => self.program.value_before(self.knob, time, self.span, ins),
+        }
     }
 
     /// The earliest arrival of an input still moving at `at`, in frames.
@@ -699,9 +731,7 @@ impl Block<'_> {
             (true, Some((seg, sent))) => {
                 Some(seg.raw_value_after(abs.since(sent).unwrap_or(Samples(0))))
             }
-            _ => self
-                .program
-                .value_at(self.knob, &time, self.span, &ins[..n_in]),
+            _ => self.value_at(&time, &ins[..n_in]),
         };
         // What moves with time: a constant layer (a macro) does not.
         let layers = self.program.layers().iter().any(|l| !l.is_constant())
@@ -716,9 +746,7 @@ impl Block<'_> {
         };
         if steady {
             let v = if glide {
-                self.program
-                    .value_at(self.knob, &time, self.span, &ins[..n_in])
-                    .map(|v| self.clamp(v))
+                self.value_at(&time, &ins[..n_in]).map(|v| self.clamp(v))
             } else {
                 Some(self.clamp(v0))
             };
@@ -759,10 +787,7 @@ impl Block<'_> {
             ..time
         };
         let ins_end = self.inputs_at(walk, pf + d);
-        let mut v1 = self
-            .program
-            .value_before(self.knob, &end, self.span, &ins_end[..n_in])
-            .unwrap_or(v0);
+        let mut v1 = self.value_before(&end, &ins_end[..n_in]).unwrap_or(v0);
         // A plugin lane clamps, split where the piece crosses a bound.
         if !self.native {
             let (lo, hi) = self.range;
@@ -970,9 +995,9 @@ impl Node for ControlLaneNode {
             .as_ref()
             .map(|k| k.load(Ordering::Acquire))
             .filter(|k| k.is_finite());
-        let ParamRange { min, max } = s.range.load();
-        let range = (min, max);
-        let span = f64::from(range.1) - f64::from(range.0);
+        let live = s.range.load();
+        let range = (live.min, live.max);
+        let span = live.span(s.unit.is_some_and(UnitParam::is_circular));
         let span = if span.is_finite() && span >= 0.0 {
             span
         } else {
@@ -1021,6 +1046,7 @@ impl Node for ControlLaneNode {
             knob,
             range,
             span,
+            unit: s.unit,
             native: self.native,
             make: &*self.make,
             stride: u64::from(CONTROL_GRID.stride()),

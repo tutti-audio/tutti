@@ -4,6 +4,7 @@
 use super::*;
 use tutti_curve::{Breakpoint, Trajectory};
 use tutti_curve::{Curvature, Exponent};
+use tutti_types::UnitParam;
 
 const SR: f64 = 48_000.0;
 
@@ -677,4 +678,54 @@ fn new_refuses_a_nan() {
     }
     let p = program(vec![l()]);
     assert_eq!(p, p.clone());
+}
+
+/// A bearing's value: automation from 170 to -170 over four beats turns
+/// through 180 (`wrap(170 + 5 b)`), where a line's goes through 0; the sum
+/// with an offset is wrapped, never clamped; an offset scales by the span
+/// given (the arc's length).
+#[test]
+fn a_circular_params_value_takes_the_short_arc_and_wraps_its_sum() {
+    let mut e = Trajectory::new();
+    e.add_breakpoint(Breakpoint::new(Beat(0.0), 170.0));
+    e.add_breakpoint(Breakpoint::new(Beat(4.0), -170.0));
+    let p = ControlProgram::from_curve(Arc::new(e));
+    let az = UnitParam::Azimuth;
+    for b in [0.5f64, 1.0, 1.9, 2.0, 2.1, 3.0, 3.5] {
+        let want = az.wrap((170.0 + 5.0 * b) as f32);
+        let got = p
+            .value_at_for(az, None, &at_beat(b), 360.0, &[])
+            .expect("a value");
+        assert!((got - want).abs() < 1e-3, "beat {b}: {got} against {want}");
+        assert!(got.abs() > 170.0 - 1e-3, "beat {b}: {got} left the seam");
+        // The left limit agrees inside a piece.
+        let before = p
+            .value_before_for(az, None, &at_beat(b), 360.0, &[])
+            .expect("a value");
+        assert!((before - want).abs() < 1e-2, "beat {b}: {before}");
+        // A height over the same curve is the straight line.
+        let line = p
+            .value_at_for(UnitParam::Elevation, None, &at_beat(b), 360.0, &[])
+            .expect("a value");
+        assert!(
+            (f64::from(line) - (170.0 - 85.0 * b)).abs() < 1e-3,
+            "beat {b}: {line}"
+        );
+    }
+    // 170 and a constant layer of 0.1 of a 360 arc (36) is 206: -154.
+    let l = layer(1, beats(4.0), LfoShape::Square, amount(0.1));
+    let l = Layer {
+        wave: Waveform::Const(1.0),
+        ..l
+    };
+    let q = program(vec![l]);
+    assert_eq!(
+        q.value_at_for(az, Some(170.0), &at_beat(1.0), 360.0, &[]),
+        Some(-154.0)
+    );
+    assert_eq!(
+        q.value_at_for(UnitParam::Elevation, Some(170.0), &at_beat(1.0), 360.0, &[]),
+        Some(206.0),
+        "a line's sum is not wrapped"
+    );
 }
