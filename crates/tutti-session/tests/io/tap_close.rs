@@ -9,12 +9,12 @@
 
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
-use tutti_session::{CloseError, OutPort, Root, Session};
+use tutti_session::{CloseError, DetachedSession, OutPort, Root, Session};
 use tutti_types::ChannelLayout;
 use tutti_types::{SampleRate, Samples};
 
 /// A detached one-output session playing a constant 0.25.
-fn session() -> Session {
+fn session() -> DetachedSession {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::SR_48K)

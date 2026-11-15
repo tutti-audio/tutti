@@ -305,14 +305,14 @@ impl Inputs {
     }
 }
 
-impl Session {
+impl Session<crate::DeviceClock> {
     /// Opens a capture input on the session's host and puts it in the graph:
     /// the capture stream ([`tutti_cpal::MicIn`]) and the inlet node that copies
     /// it in ([`Graph::add_inlet`](crate::Graph::add_inlet)), in one call. Wire
     /// [`Input::node`] to monitor it.
     ///
     /// The session keeps the input's config and **reopens it after every
-    /// restart** ([`LiveSession::restart`](crate::LiveSession::restart)), at
+    /// restart** ([`Session::restart`](crate::Session::restart)), at
     /// the graph's new rate, into the same node: nothing to rewire. The capture
     /// delay it reports reads back as [`Device::latency`](crate::Device::latency)'s
     /// `input`.
@@ -348,7 +348,8 @@ impl Session {
             // The host removed the node: there is no input to keep.
             Err(Error::Crossfade(CrossfadeRefused::NoSuchNode(_))) => false,
             Err(error) => {
-                self.device_events
+                self.running
+                    .events
                     .push(SessionEvent::Device(DeviceEvent::InputReopenFailed {
                         input: Input { node: input.node },
                         error,

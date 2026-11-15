@@ -1322,7 +1322,7 @@ impl Default for RenderModeState {
     }
 }
 
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// A load of `request`'s plugin at the session's rate, as a job:
     /// [`run`](PluginLoad::run) it on any thread (it blocks), then hand the
     /// result to [`add_plugin`](Self::add_plugin).
@@ -2297,7 +2297,7 @@ mod tests {
     }
 
     struct Rig {
-        session: Session,
+        session: crate::DetachedSession,
         node: NodeKey,
         saves: Arc<AtomicUsize>,
         dead: Arc<AtomicBool>,

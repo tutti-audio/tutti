@@ -93,7 +93,7 @@ pub use wait::PoolWait;
 #[cfg(test)]
 mod tests;
 
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// Declares what the session keeps loaded: the whole set, each time.
     ///
     /// The set is diffed against the one declared before, by key and by
@@ -256,7 +256,7 @@ impl Session {
 }
 
 #[cfg(feature = "sampler")]
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// What the `audio_file` entry under `key` read: its wave, or its stream's
     /// header ([`AudioEntry`]).
     ///
@@ -277,7 +277,7 @@ impl Session {
 }
 
 #[cfg(feature = "soundfont")]
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// The SoundFont of the `soundfont` entry under `key`, shared by its `Arc`.
     /// The handle owns nothing: dropping it leaves the entry loaded.
     ///

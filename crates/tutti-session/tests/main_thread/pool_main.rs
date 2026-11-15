@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, ThreadId};
 
 use tutti_plugin_types::MainWork;
-use tutti_session::{Declared, Job, Life, Load, PoolEntry, RetryError, Session};
+use tutti_session::{Declared, DetachedSession, Job, Life, Load, PoolEntry, RetryError, Session};
 use tutti_types::SampleRate;
 
 /// What the worker hands the main stage: it says where it is dropped.
@@ -54,7 +54,11 @@ impl PoolEntry for InProcess {
 
 /// A session whose worker has run and whose update has not: the output is in
 /// the jobs' channel, with its main stage.
-fn session_with_output() -> (Session, Arc<Mutex<Option<ThreadId>>>, Arc<AtomicBool>) {
+fn session_with_output() -> (
+    DetachedSession,
+    Arc<Mutex<Option<ThreadId>>>,
+    Arc<AtomicBool>,
+) {
     let held: Arc<Mutex<Vec<Job>>> = Arc::default();
     let spawned = Arc::clone(&held);
     let mut session = Session::builder()
@@ -138,7 +142,7 @@ impl PoolEntry for Dual {
     }
 }
 
-fn held_session() -> (Session, Arc<Mutex<Vec<Job>>>) {
+fn held_session() -> (DetachedSession, Arc<Mutex<Vec<Job>>>) {
     let held: Arc<Mutex<Vec<Job>>> = Arc::default();
     let spawned = Arc::clone(&held);
     let session = Session::builder()

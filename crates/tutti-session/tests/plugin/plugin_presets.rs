@@ -9,7 +9,7 @@
 
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_types::PresetError;
-use tutti_session::{PluginLoadRequest, PresetKind, Session};
+use tutti_session::{DetachedSession, PluginLoadRequest, PresetKind, Session};
 use tutti_types::{ChannelLayout, SampleRate};
 
 #[cfg(feature = "clap")]
@@ -41,7 +41,7 @@ mod clap {
         (s, node)
     }
 
-    fn saved(s: &Session, node: NodeKey) -> Vec<u8> {
+    fn saved<C: tutti_session::Clock>(s: &Session<C>, node: NodeKey) -> Vec<u8> {
         s.plugin(node)
             .unwrap()
             .state()
@@ -90,7 +90,7 @@ mod clap {
     }
 
     /// The mirror's value of the plugin's first parameter (Cutoff).
-    fn cutoff(s: &Session, node: NodeKey) -> Option<f64> {
+    fn cutoff<C: tutti_session::Clock>(s: &Session<C>, node: NodeKey) -> Option<f64> {
         let plugin = s.plugin(node).unwrap();
         let params = plugin.params();
         let first = params.iter().next()?.id();
@@ -142,7 +142,7 @@ mod vst2 {
     use tutti_fixtures::ScopedEnv;
     use tutti_plugin_types::PresetId;
 
-    fn probe_with(programs: &str) -> (Session, tutti_graph::NodeKey, ScopedEnv) {
+    fn probe_with(programs: &str) -> (DetachedSession, tutti_graph::NodeKey, ScopedEnv) {
         let mut env = ScopedEnv::new();
         env.set("TUTTI_VST2_PROBE_PROGRAMS", programs);
         let mut s = Session::builder()
