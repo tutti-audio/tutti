@@ -9,7 +9,7 @@
 //! or never answered. The handle is a snapshot: the peer may be lost before the
 //! request is sent, and that is refused ([`PropertyError::NoSuchPeer`]).
 //!
-//! As the Responder it serves a [`ResourceStore`]
+//! As the Responder it serves a [`ResourceStore`](tutti_midi_device::ResourceStore)
 //! ([`MidiSession::serve_properties`](crate::MidiSession::serve_properties)),
 //! empty until the app gives one: it answers a peer's Capabilities Inquiry,
 //! Get, Set and Subscription, and tells what a peer changed

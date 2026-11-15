@@ -451,8 +451,9 @@ pub enum Verdict {
 }
 
 /// The device's say over the states its Responder is sent (M2-111 §3.3): whether a
-/// body is its own, and what revision and time an accepted one gets.
-pub trait StateDevice: std::fmt::Debug {
+/// body is its own, and what revision and time an accepted one gets. It is `Send`:
+/// the Responder that holds it moves with the session that drives it.
+pub trait StateDevice: std::fmt::Debug + Send {
     /// Judges the body of the state `id` that an Initiator is setting. It is called
     /// after each chunk with the prefix that has come, until it answers
     /// [`Sound`](Verdict::Sound) or [`Refuse`](Verdict::Refuse), and once more

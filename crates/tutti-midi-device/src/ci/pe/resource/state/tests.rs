@@ -2,8 +2,7 @@
 
 use std::num::NonZeroU32;
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use tutti_ump::{DeviceIdentity, ManufacturerId, U7};
 
@@ -515,20 +514,20 @@ fn an_inquiry_for_state_without_a_res_id_is_refused_by_the_type() {
 #[derive(Debug)]
 struct Device {
     /// Each prefix length judged, and `usize::MAX` for the whole body.
-    asked: Rc<RefCell<Vec<(usize, bool)>>>,
+    asked: Arc<Mutex<Vec<(usize, bool)>>>,
     /// The prefixes judged, kept for comparison.
-    seen: Rc<RefCell<Vec<u8>>>,
+    seen: Arc<Mutex<Vec<u8>>>,
     refuse_prefix_from: Option<usize>,
     refuse_whole: bool,
 }
 
 impl Device {
-    fn new() -> (Self, Rc<RefCell<Vec<(usize, bool)>>>, Rc<RefCell<Vec<u8>>>) {
-        let asked = Rc::new(RefCell::new(Vec::new()));
-        let seen = Rc::new(RefCell::new(Vec::new()));
+    fn new() -> (Self, Arc<Mutex<Vec<(usize, bool)>>>, Arc<Mutex<Vec<u8>>>) {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::new(Mutex::new(Vec::new()));
         let device = Self {
-            asked: asked.clone(),
-            seen: seen.clone(),
+            asked: Arc::clone(&asked),
+            seen: Arc::clone(&seen),
             refuse_prefix_from: None,
             refuse_whole: false,
         };
@@ -540,8 +539,8 @@ impl StateDevice for Device {
     fn judge(&mut self, _: &StateId, arrival: Arrival<'_>) -> Verdict {
         match arrival {
             Arrival::Prefix(prefix) => {
-                self.asked.borrow_mut().push((prefix.len(), false));
-                *self.seen.borrow_mut() = prefix.to_vec();
+                self.asked.lock().unwrap().push((prefix.len(), false));
+                *self.seen.lock().unwrap() = prefix.to_vec();
                 match self.refuse_prefix_from {
                     Some(at) if prefix.len() >= at => Verdict::Refuse,
                     _ => Verdict::Undecided,
@@ -549,7 +548,8 @@ impl StateDevice for Device {
             }
             Arrival::Whole(state) => {
                 self.asked
-                    .borrow_mut()
+                    .lock()
+                    .unwrap()
                     .push((state.to_wire().1.len(), true));
                 if self.refuse_whole {
                     Verdict::Refuse
@@ -699,7 +699,7 @@ fn a_refused_body_is_ended_midway_with_terminate_inquiry() {
     assert!(terminates(&link, false));
     let used = chunks(&link, true, PeMessageKind::SET_INQUIRY) - sent;
     assert!(used < 5, "{used} chunks of the body were sent");
-    assert!(asked.borrow().iter().all(|(_, whole)| !whole));
+    assert!(asked.lock().unwrap().iter().all(|(_, whole)| !whole));
     assert_eq!(stored_state(&link, "buffer"), before);
     assert!(matches!(
         link.served.last(),
@@ -720,13 +720,13 @@ fn the_device_is_asked_after_each_chunk_with_the_decoded_start_of_the_body() {
     let body = bytes(3000);
     let call = restore(&mut link, PeState::octets(body.clone()));
     assert_eq!(link.set_result(call), Ok(PeStatus::Ok));
-    let asked = asked.borrow();
+    let asked = asked.lock().unwrap();
     let (whole, prefixes): (Vec<&(usize, bool)>, Vec<&(usize, bool)>) =
         asked.iter().partition(|(_, w)| *w);
     assert_eq!(whole, [&(3000, true)]);
     assert!(prefixes.len() > 10);
     assert!(prefixes.windows(2).all(|w| w[0].0 < w[1].0));
-    let last = seen.borrow();
+    let last = seen.lock().unwrap();
     assert_eq!(&body[..last.len()], &last[..]);
 }
 
