@@ -28,7 +28,7 @@ use tutti_graph::UmpAt;
 
 use tutti_graph::Offset;
 use tutti_midi_device::TICK_HZ;
-use tutti_types::{Frame, SampleRate, Samples};
+use tutti_types::{Frame, SampleRate, Samples, Seconds};
 use tutti_ump::{Message, Ump, Utility};
 
 /// Converts sample positions to 16-bit JR ticks at a fixed sample rate. Cheap,
@@ -173,7 +173,7 @@ impl JrClockEmitter {
         Self {
             clock: JrClock::new(sample_rate),
             sample_rate,
-            interval: Samples((interval.as_secs_f64() * sample_rate.get()).round() as usize),
+            interval: Seconds::new(interval.as_secs_f64()).to_samples(sample_rate),
             last_emit: None,
         }
     }
