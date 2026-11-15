@@ -18,15 +18,19 @@ pub enum Param {
     /// exponential, `20000 * 1000^(-n)` for the normalized `n`. It changes
     /// nothing a block renders.
     Tone,
+    /// The read-only parameter: a meter the host never writes, always 0.
+    /// Every format that has the flag declares it read-only; VST2 has none.
+    Meter,
 }
 
 impl Param {
     /// Every parameter the plugin lists, with its default.
-    pub const ALL: [(Param, f64); 4] = [
+    pub const ALL: [(Param, f64); 5] = [
         (Param::Level, 0.5),
         (Param::Aux, 0.25),
         (Param::Mode, 0.0),
         (Param::Tone, 0.5),
+        (Param::Meter, 0.0),
     ];
 
     /// The id every format lists it under.
@@ -45,6 +49,7 @@ impl Param {
             Param::Aux => "aux",
             Param::Mode => "mode",
             Param::Tone => "tone",
+            Param::Meter => "meter",
         }
     }
 }

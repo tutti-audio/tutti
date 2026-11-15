@@ -241,11 +241,13 @@ pub fn parameters_listed<F: Format>() {
         } else {
             assert_eq!(info.default_value(), default, "{param:?} default");
         }
-        assert_ne!(
-            info.flag(ParamFlags::AUTOMATABLE),
-            Some(false),
-            "{param:?} automatable"
-        );
+        if param != Param::Meter {
+            assert_ne!(
+                info.flag(ParamFlags::AUTOMATABLE),
+                Some(false),
+                "{param:?} automatable"
+            );
+        }
     }
 }
 
@@ -360,6 +362,29 @@ pub fn unlisted_parameter_is_none<F: Format>() {
         None,
         "active"
     );
+}
+
+/// A write to the parameter the plugin declares read-only (the meter) fails at
+/// the call with `ReadOnly`, loaded and active, and writes nothing.
+pub fn read_only_parameter_write_is_refused<F: Format>() {
+    let main = main_thread();
+    let id = Param::Meter.id();
+    let refused = Err(ParamWriteError::ReadOnly(id));
+    let mut loaded = F::load();
+    assert_eq!(
+        loaded.set_parameter(main, id, Normalized::of(0.75)),
+        refused,
+        "read-only write refused (loaded)"
+    );
+    assert_eq!(read(&loaded, Param::Meter), Some(0.0), "loaded");
+    let mut a = activate(loaded, BLOCK);
+    assert_eq!(
+        a.controller_mut()
+            .set_parameter(main, id, Normalized::of(0.75)),
+        refused,
+        "read-only write refused (active)"
+    );
+    assert_eq!(read(a.controller(), Param::Meter), Some(0.0), "active");
 }
 
 /// A write to an id the plugin does not declare fails at the call with a named
