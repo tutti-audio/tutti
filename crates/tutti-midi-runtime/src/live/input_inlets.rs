@@ -1,0 +1,241 @@
+//! [`InputInlets`]: the source of the event inlets of the hardware MIDI inputs, and
+//! the producer end ([`DeviceInput`]) a device's thread stamps and pushes through.
+//!
+//! A device's thread learns when an event arrived from the OS, as an
+//! [`Instant`]. The graph wants a frame. The thread places each arrival itself,
+//! so the audio thread converts nothing: it holds a [`ClockMap`] fed the
+//! engine's block-start readings (an [`ArrivalClock`]: one per render call, the
+//! OS time the block began and the graph frame it began at) and pushes the
+//! event for the [`Moment`] the map names, through the device's own
+//! [`EventInletWriter`]. The inlet holds the event until its block and emits it
+//! on its frame. **The map is the device's own**: each [`DeviceInput`] keeps
+//! one, fed from the shared clock, so a device that restarts or whose clock
+//! reading is rejected re-anchors alone.
+//!
+//! # The lead
+//!
+//! An event that arrived between two blocks maps to a frame before the next
+//! block's start: the block that would play it has already begun by the time
+//! the thread pushes it, so it would land late, at offset 0, and the spacing
+//! of a run of events would collapse. The thread therefore places each arrival
+//! a fixed **lead** after its mapped frame ([`InputInlets::new`]: a block's
+//! length is the natural value). An event then sounds exactly the lead after
+//! it arrived, whatever the block boundaries, and the spacing between events
+//! is the map's: within the bound [`ClockMap`] states. An event is late, and counted so
+//! (`late` in [`InletCounts::losses`]), only when the
+//! thread's push comes more than the lead after its arrival.
+//!
+//! # One inlet per input
+//!
+//! [`open`](InputInlets::open) makes one inlet for one input: the [`DeviceInput`]
+//! its thread pushes through, and the [`EventInletNode`] the graph's owner adds
+//! to the graph and wires to the input's ingest node. Nothing is shared between
+//! inputs but the clock and the lead, so there is no table of slots and no cap.
+
+use std::num::NonZeroU64;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
+use tutti_graph::{EventCapacity, EventInletNode, EventInletWriter, InletCounts, Stamp};
+use tutti_rt::{ArcLend, Reader};
+use tutti_types::Moment;
+use tutti_ump::Ump;
+
+use crate::clock_map::{ClockMap, ClockReading, Observed};
+
+/// The engine's block clock as a device's thread reads it: the latest render
+/// call's start as an [`Instant`] and the graph [`Moment`] it began at, `None`
+/// before the first call. A function, not an engine type: this crate depends on
+/// no engine, and whoever owns both ends (the session) builds it, converting
+/// the engine's OS nanoseconds onto the `Instant`s the backends stamp with.
+/// Called from each device's thread on every push: lock-free and
+/// allocation-free.
+pub type ArrivalClock = Arc<dyn Fn() -> Option<(Instant, Moment)> + Send + Sync>;
+
+/// One open input's identity among the inputs one [`InputInlets`] opened:
+/// minted in the order they opened and never reused, so a stale id names
+/// nothing.
+///
+/// Ephemeral: it names a connection of this run, so it has no serde (a saved
+/// device is a `DeviceId`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct InputId(NonZeroU64);
+
+impl InputId {
+    /// The id's number: unique for the inlets' life, increasing in the order
+    /// inputs opened, from 1.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0.get()
+    }
+}
+
+/// The inlets of the hardware inputs, shared between the threads that connect
+/// devices and the owner of the graph. See the module docs.
+pub struct InputInlets {
+    /// The last id minted.
+    last: AtomicU64,
+    capacity: EventCapacity,
+    /// Nanoseconds: what each device's thread adds to an arrival's frame.
+    lead: Arc<AtomicU64>,
+    /// The engine's block clock, lent to each device's thread. `None` until
+    /// the owner has an engine ([`set_clock`](Self::set_clock)).
+    clock: Arc<ArcLend<Option<ArrivalClock>>>,
+}
+
+impl std::fmt::Debug for InputInlets {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InputInlets")
+            .field("capacity", &self.capacity)
+            .finish_non_exhaustive()
+    }
+}
+
+impl InputInlets {
+    /// Inlets holding `capacity` events each, with `lead` the time each
+    /// arrival is placed after its mapped frame (see the module docs).
+    #[must_use]
+    pub fn new(capacity: EventCapacity, lead: Duration) -> Arc<Self> {
+        Arc::new(Self {
+            last: AtomicU64::new(0),
+            capacity,
+            lead: Arc::new(AtomicU64::new(nanos(lead))),
+            clock: Arc::new(ArcLend::new(None)),
+        })
+    }
+
+    /// Sets the engine's block clock the devices' threads place arrivals
+    /// with (`None`: there is none, and events are pushed for the next
+    /// block). Takes effect on each thread's next event. Control side.
+    pub fn set_clock(&self, clock: Option<ArrivalClock>) {
+        self.clock.publish(clock);
+    }
+
+    /// Sets the lead (see the module docs); each device's thread reads it on
+    /// its next event.
+    pub fn set_lead(&self, lead: Duration) {
+        self.lead.store(nanos(lead), Ordering::Relaxed);
+    }
+
+    /// Frees the clocks the devices' threads have let go of; control side, from
+    /// the owner's tick (a session's `Reclaim` phase). Returns how many are
+    /// still held.
+    pub fn reclaim(&self) -> usize {
+        self.clock.reclaim()
+    }
+
+    /// Makes one input's inlet: the end its thread pushes through and the
+    /// node the graph's owner adds. Control side: allocates the inlet's ring
+    /// and waiting list. The inlet ends with the node (taken out of the graph)
+    /// and the [`DeviceInput`] (dropped).
+    #[must_use = "the node is the inlet's graph side: until it is added, what the device sends goes nowhere"]
+    pub fn open(&self) -> (DeviceInput, EventInletNode) {
+        let id = self.last.fetch_add(1, Ordering::Relaxed) + 1;
+        let (node, writer) = EventInletNode::pair(self.capacity);
+        let input = DeviceInput {
+            id: InputId(NonZeroU64::new(id).unwrap_or(NonZeroU64::MAX)),
+            counts: writer.counts(),
+            writer,
+            clock: self.clock.reader(),
+            lead: Arc::clone(&self.lead),
+            seen: None,
+            map: None,
+        };
+        (input, node)
+    }
+}
+
+fn nanos(d: Duration) -> u64 {
+    u64::try_from(d.as_nanos()).unwrap_or(u64::MAX)
+}
+
+/// One device's end of its inlet: stamp each arrival with a frame and push it.
+/// Owned by the device's thread: `Send`, not `Clone`, and
+/// [`push`](Self::push) takes `&mut self`. Nothing here blocks, locks or
+/// allocates.
+pub struct DeviceInput {
+    id: InputId,
+    writer: EventInletWriter,
+    counts: InletCounts,
+    clock: Reader<Option<ArrivalClock>>,
+    lead: Arc<AtomicU64>,
+    /// The latest reading the map was fed.
+    seen: Option<(Instant, Moment)>,
+    map: Option<ClockMap>,
+}
+
+impl std::fmt::Debug for DeviceInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeviceInput")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl DeviceInput {
+    /// The input's id.
+    #[must_use]
+    pub fn id(&self) -> InputId {
+        self.id
+    }
+
+    /// The inlet's counts, readable from any thread ([`InletCounts::losses`]):
+    /// events the ring had no room for (`lost`), the waiting list had no room
+    /// for (`evicted`), the port refused (`refused`), and events that came
+    /// late.
+    #[must_use]
+    pub fn counts(&self) -> InletCounts {
+        self.counts.clone()
+    }
+
+    /// Pushes `ump`, which the OS delivered at `arrival`, for the frame the
+    /// block clock puts that time on, plus the lead; or for the next block
+    /// while no reading exists (no engine yet, or `arrival` before frame 0).
+    /// `false` when the ring was full: the event is dropped and counted in
+    /// [`Losses::lost`](tutti_graph::Losses::lost). Lock-free and allocation-free, so safe to
+    /// call from a driver callback.
+    #[inline]
+    pub fn push(&mut self, ump: impl Into<Ump>, arrival: Instant) -> bool {
+        let ump = ump.into();
+        let sent = match self.moment_of(arrival) {
+            Some(at) => self.writer.push(at, ump),
+            None => self.writer.push(Stamp::NextBlock, ump),
+        };
+        sent.is_ok()
+    }
+
+    /// The moment `arrival` plus the lead is, by the latest block reading.
+    fn moment_of(&mut self, arrival: Instant) -> Option<Moment> {
+        let reading = {
+            let clock = self.clock.lend();
+            (clock.as_ref()?)()?
+        };
+        if self.seen != Some(reading) {
+            self.seen = Some(reading);
+            self.follow(reading);
+        }
+        let lead = Duration::from_nanos(self.lead.load(Ordering::Relaxed));
+        let at = arrival.checked_add(lead).unwrap_or(arrival);
+        self.map.as_ref()?.moment_at(at)
+    }
+
+    /// Feeds the map a reading: it follows the engine's clock, or is built
+    /// again where the clock was restarted (a reading the map rejects, a
+    /// frame that went back) or at another rate.
+    fn follow(&mut self, (os, at): (Instant, Moment)) {
+        let reading = ClockReading::new(os, at.frame());
+        let rebuild = match self.map.as_mut() {
+            None => true,
+            Some(map) => {
+                if map.rate() != at.rate() {
+                    map.set_rate(at.rate());
+                }
+                map.observe(reading) == Observed::Rejected
+            }
+        };
+        if rebuild {
+            self.map = Some(ClockMap::new(at.rate(), reading));
+        }
+    }
+}

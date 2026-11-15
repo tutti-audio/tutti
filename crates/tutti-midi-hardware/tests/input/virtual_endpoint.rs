@@ -4,7 +4,6 @@
 //! Each test names its endpoints with its own process id, so tests (each its
 //! own process under nextest) and other clients on the machine do not meet.
 
-use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
 use super::listener::Listener;
@@ -19,7 +18,7 @@ use tutti_fixtures::midi::{
 use tutti_graph::EventCapacity;
 use tutti_midi_device::{BlockName, EndpointName, FunctionBlock};
 use tutti_midi_hardware::{
-    DeviceInlets, HardwareMidiInputs, VirtualDestination, VirtualProtocol, VirtualSource,
+    HardwareMidiInputs, InputInlets, VirtualDestination, VirtualProtocol, VirtualSource,
     VirtualSpec,
 };
 use tutti_ump::{
@@ -102,11 +101,11 @@ fn a_subscriber_receives_what_a_virtual_source_sends_in_order() {
 #[test]
 fn a_virtual_destination_delivers_what_a_client_sends_to_the_graph_in_order() {
     let spec = spec("destination");
-    let inlets = DeviceInlets::new(NonZeroUsize::MIN, EventCapacity::of(64), Duration::ZERO);
+    let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let mut listener = Listener::over(&inlets);
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
-    let producer = ports.open_input_port("virtual").expect("a slot");
-    listener.apply();
+    let (producer, inlet) = ports.open_input_port("virtual");
+    listener.attach(inlet);
     let destination = VirtualDestination::open(&spec, producer).expect("a virtual destination");
     let (peer, port) = peer(CAP_READ);
     let found = find(&peer, &spec).expect("the destination is listed");
@@ -128,11 +127,11 @@ fn a_virtual_destination_delivers_what_a_client_sends_to_the_graph_in_order() {
 #[test]
 fn jr_messages_a_client_sends_are_not_heard_by_an_arrival_port() {
     let spec = spec("jr");
-    let inlets = DeviceInlets::new(NonZeroUsize::MIN, EventCapacity::of(64), Duration::ZERO);
+    let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let mut listener = Listener::over(&inlets);
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
-    let producer = ports.open_input_port("virtual").expect("a slot");
-    listener.apply();
+    let (producer, inlet) = ports.open_input_port("virtual");
+    listener.attach(inlet);
     let _destination = VirtualDestination::open(&spec, producer).expect("a virtual destination");
     let (peer, port) = peer(CAP_READ);
     let found = find(&peer, &spec).expect("the destination is listed");
@@ -172,9 +171,9 @@ fn the_published_endpoint_record_carries_the_protocol_and_the_blocks() {
     let source_spec = spec("record-source").with_function_block(block());
     let dest_spec = spec("record-destination").with_function_block(block());
     let source = VirtualSource::open(&source_spec).expect("a virtual source");
-    let inlets = DeviceInlets::new(NonZeroUsize::MIN, EventCapacity::of(8), Duration::ZERO);
+    let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let ports = HardwareMidiInputs::new(inlets);
-    let producer = ports.open_input_port("virtual").expect("a slot");
+    let producer = ports.open_input_port("virtual").0;
     let destination = VirtualDestination::open(&dest_spec, producer).expect("a destination");
     assert_eq!(source.protocol(), VirtualProtocol::Midi2);
     assert_eq!(destination.protocol(), VirtualProtocol::Midi2);
@@ -207,11 +206,11 @@ fn the_published_endpoint_record_carries_the_protocol_and_the_blocks() {
 #[test]
 fn a_midi1_destination_reports_midi1_and_its_messages_arrive_widened() {
     let spec = spec("midi1").with_protocol(VirtualProtocol::Midi1);
-    let inlets = DeviceInlets::new(NonZeroUsize::MIN, EventCapacity::of(8), Duration::ZERO);
+    let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let mut listener = Listener::over_ingest(&inlets);
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
-    let producer = ports.open_input_port("virtual").expect("a slot");
-    listener.apply();
+    let (producer, inlet) = ports.open_input_port("virtual");
+    listener.attach(inlet);
     let destination = VirtualDestination::open(&spec, producer).expect("a destination");
     assert_eq!(destination.protocol(), VirtualProtocol::Midi1);
 

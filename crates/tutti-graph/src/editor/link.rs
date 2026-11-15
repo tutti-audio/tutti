@@ -69,6 +69,14 @@ impl Link {
         Ok(())
     }
 
+    /// The `seq` of the newest commit whose root crossfade the executor has
+    /// rendered through, 0 before any.
+    pub(super) fn root_fade_ended(&self) -> u64 {
+        self.channels
+            .root_fade_ended
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
     /// The sequence number the next commit sends with.
     pub(super) fn next_seq(&self) -> u64 {
         self.sent + 1

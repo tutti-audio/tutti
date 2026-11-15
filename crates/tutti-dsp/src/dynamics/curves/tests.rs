@@ -137,12 +137,10 @@ fn the_curve_is_the_input_plus_the_drive_up_to_the_ceiling() {
         (0.0, -0.3),
         (12.0, -0.3),
     ] {
-        let peak = Db(input).to_amplitude().get();
-        let block = amplitude_to_db(Amplitude::new(peak) * curve.gain(peak)).get();
+        let peak = Db(input).to_amplitude();
+        let block = amplitude_to_db(peak * curve.gain(peak).get()).get();
         let fed = amplitude_to_db(
-            Amplitude::new(peak)
-                * compute_limiter_gain(amplitude_to_db(Amplitude::new(peak)), threshold, ceiling)
-                    .get(),
+            peak * compute_limiter_gain(amplitude_to_db(peak), threshold, ceiling).get(),
         )
         .get();
         assert!((block - want).abs() < 1e-3, "block: {input} -> {block}");
@@ -164,10 +162,9 @@ fn the_block_and_fed_forms_are_one_curve() {
         let curve = LimiterCurve::new(Db(t), Db(c));
         let mut peak_db = -80.0f32;
         while peak_db <= 12.0 {
-            let peak = Db(peak_db).to_amplitude().get();
-            let block = curve.gain(peak);
-            let fed =
-                compute_limiter_gain(amplitude_to_db(Amplitude::new(peak)), Db(t), Db(c)).get();
+            let peak = Db(peak_db).to_amplitude();
+            let block = curve.gain(peak).get();
+            let fed = compute_limiter_gain(amplitude_to_db(peak), Db(t), Db(c)).get();
             assert!(
                 (block - fed).abs() <= 1e-5 * fed,
                 "({t}, {c}) at {peak_db}: {block} against {fed}"
@@ -181,6 +178,6 @@ fn the_block_and_fed_forms_are_one_curve() {
 #[test]
 fn a_nan_peak_takes_the_below_gain() {
     let curve = LimiterCurve::new(Db(-6.0), Db(-3.0));
-    assert_eq!(curve.gain(f32::NAN), curve.below);
+    assert_eq!(curve.gain(Amplitude(f32::NAN)).get(), curve.below);
     assert!(curve.below > 1.0);
 }

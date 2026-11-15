@@ -1,5 +1,5 @@
-//! Dynamics algorithms: the gain curves, the compressor, gate, limiter, brickwall and
-//! multiband families, and the limiter's lookahead ring.
+//! Dynamics algorithms: the gain curves, the compressor, gate, limiter and brickwall over
+//! buffers views, the multiband family, and the limiter's lookahead ring.
 
 mod brickwall;
 mod compressor;
@@ -9,21 +9,19 @@ mod key_source;
 mod limiter;
 mod lookahead;
 mod multiband;
+mod shared;
 mod window;
 
-pub use brickwall::{BrickwallControls, BrickwallFamily, BrickwallMember, BrickwallRecurrence};
-pub use compressor::{
-    CompressorControls, CompressorFamily, CompressorMember, CompressorRecurrence, GAIN_GLIDE,
-};
+pub use brickwall::{BrickwallBank, BrickwallControls, BrickwallLanes};
+pub use compressor::{CompressorBank, CompressorControls, CompressorLanes};
 pub use curves::{
     LimiterCurve, amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
 };
-pub use gate::{GateControls, GateFamily, GateMember, GateRecurrence};
+pub use gate::{GateBank, GateControls, GateLanes};
 pub use key_source::KeySource;
-pub use limiter::{
-    LimiterControls, LimiterFamily, LimiterMember, LimiterRecurrence, Lookahead, LookaheadError,
-};
+pub use limiter::{LimiterBank, LimiterControls, LimiterLanes, Lookahead, LookaheadError};
 pub use multiband::{
     BandReductions, BandSettings, MultibandFamily, MultibandMember, MultibandRecurrence,
     MultibandSettings, MultibandState,
 };
+pub use shared::GAIN_GLIDE;

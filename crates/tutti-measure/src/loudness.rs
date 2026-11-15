@@ -23,43 +23,81 @@
 //! # Interleaved in, unit-typed out
 //!
 //! `step_loudness` takes an [`Interleaved`] — the shape a render loop already
-//! has, now carrying its own width instead of borrowing `cfg.layout`'s by
-//! convention. Results come back as [`Db`]: LUFS and dBTP
+//! has, carrying its own width. Results come back as [`Db`]: LUFS and dBTP
 //! are both decibel readings, and the f32 that `Db` carries is ~3× finer than a
 //! 24-bit LSB at any level these reach, so nothing measurable is lost by not
 //! keeping them `f64`.
+//!
+//! # Weighted by placement
+//!
+//! A config takes a [`ChannelTopology`], and each speaker's weight is read from
+//! where it stands (ITU-R BS.1770-5, Annex 3, Table 4): 1.41 when its elevation
+//! is under 30 degrees and its azimuth is within 60 to 120 degrees either side,
+//! else 1.0; the LFE adds no loudness (its peak still counts). The angles are the bed's own
+//! ([`Bed::direction`](tutti_types::Bed::direction)), so a 5.1's side speakers (M+110 and M-110) weigh 1.41 and a
+//! 7.1's rear speakers (M+135 and M-135) and every upper speaker weigh 1.0, as Table 5
+//! lists them. A quad's side speakers (VST3's FL FR SL SR) stand for the bed's
+//! M+-135 backs and weigh 1.0. `ebur128` has no free weights, so each speaker is given the
+//! channel label of its weight. A topology without positions (an unplaced set of
+//! speakers) and an ambisonic one are refused: neither has an angle to weigh.
 
-use ebur128::{EbuR128, Mode};
-use tutti_buffers::Interleaved;
-use tutti_types::{ChannelLayout, Db, SampleRate};
+use ebur128::{Channel, EbuR128, Mode};
+use tutti_buffers::{Interleaved, Sample};
+use tutti_types::{ChannelLayout, ChannelTopology, Db, Direction, SampleRate};
 
 use crate::{Error, Result};
 use tutti_types::ranged;
 
-/// What the meter is measuring: the rate and channel layout of the frames fed
+/// What the meter is measuring: the rate and channel topology of the frames fed
 /// to [`step_loudness`].
 ///
 /// The rate is **not** optional and **not** defaulted. Hardcode it to 48 kHz
 /// and a 44.1 kHz render measures its peaks through a filter built for the
 /// wrong rate and normalizes to a biased target. Carrying the rate in the
 /// config makes that unrepresentable.
-#[derive(Debug, Clone, Copy, PartialEq)]
+///
+/// The topology says where each channel stands, and with it how much the
+/// channel counts: see the module docs. Building the config refuses a topology
+/// that has no placement to weigh. The LFE adds no loudness, and its peak still
+/// counts in [`Loudness::true_peak`].
+#[derive(Debug, Clone, PartialEq)]
 pub struct LoudnessConfig {
-    /// Rate the fed frames are denominated at. Sets the true-peak
-    /// oversampling filter, so a wrong value biases the reading silently.
-    pub rate: SampleRate,
-    /// Channel layout of the fed frames. Fixed at meter construction — a chunk
-    /// of a different width is read as a different signal.
-    pub layout: ChannelLayout,
+    rate: SampleRate,
+    topology: ChannelTopology,
+    /// The `ebur128` label of each channel, derived from `topology`.
+    labels: Box<[Channel]>,
 }
 
 impl LoudnessConfig {
-    /// A config for frames at `rate` in `layout`.
-    pub fn new(rate: impl Into<SampleRate>, layout: ChannelLayout) -> Self {
-        Self {
+    /// A config for frames at `rate` in `topology`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AmbisonicLoudness`] for an ambisonic topology;
+    /// [`Error::UnplacedLoudnessChannels`] for speakers that are not a
+    /// [`Bed`](tutti_types::Bed)'s, whose angles are unknown.
+    pub fn new(rate: impl Into<SampleRate>, topology: ChannelTopology) -> Result<Self> {
+        let labels = channel_labels(&topology)?;
+        Ok(Self {
             rate: rate.into(),
-            layout,
-        }
+            topology,
+            labels,
+        })
+    }
+
+    /// The rate the fed frames are denominated at.
+    #[inline]
+    #[must_use]
+    pub fn rate(&self) -> SampleRate {
+        self.rate
+    }
+
+    /// The topology of the fed frames. Fixed at meter construction: a chunk of
+    /// a different width is read as a different signal.
+    #[inline]
+    #[must_use]
+    pub fn topology(&self) -> &ChannelTopology {
+        &self.topology
     }
 
     /// Whether `chunk` is the width this config's meter was built for.
@@ -67,11 +105,53 @@ impl LoudnessConfig {
     /// The meter's channel count is fixed at construction, so a chunk of a
     /// different width is split into the wrong number of frames and read as a
     /// different signal. Expressible only because the width travels with the
-    /// buffer — a bare slice leaves the config's layout merely assumed.
+    /// buffer.
     #[inline]
     pub fn chunk_matches(&self, chunk: Interleaved<'_>) -> bool {
-        chunk.layout() == self.layout
+        chunk.layout() == self.topology.width()
     }
+}
+
+/// BS.1770-5 Table 4's weight is 1.41 for a speaker in the horizontal band
+/// (elevation within 30 degrees, exclusive) and 60 to 120 degrees to either
+/// side, and 1.0 elsewhere. The label is one `ebur128` weighs the same: the
+/// surround labels carry 1.41 and the rest 1.0.
+fn label_at(direction: Direction) -> Channel {
+    let azimuth = direction.azimuth.get();
+    let beside = direction.elevation.get().abs() < 30.0 && (60.0..=120.0).contains(&azimuth.abs());
+    match (beside, azimuth) {
+        (true, a) if a > 0.0 => Channel::LeftSurround,
+        (true, _) => Channel::RightSurround,
+        (false, a) if a > 0.0 => Channel::Left,
+        (false, a) if a < 0.0 => Channel::Right,
+        (false, _) => Channel::Center,
+    }
+}
+
+/// The label of every channel of `topology`, in channel order: the LFE unused,
+/// every other speaker by [`label_at`] its bed's direction.
+fn channel_labels(topology: &ChannelTopology) -> Result<Box<[Channel]>> {
+    let speakers = topology.positions().ok_or(Error::AmbisonicLoudness)?;
+    let bed = topology.bed().ok_or(Error::UnplacedLoudnessChannels {
+        width: topology.width(),
+    })?;
+    speakers
+        .iter()
+        .map(|&speaker| {
+            if speaker.is_lfe() {
+                return Ok(Channel::Unused);
+            }
+            // A side/back counterpart stands for the bed's own spelling of it
+            // (`Bed::from_topology`).
+            let direction = bed
+                .direction(speaker)
+                .or_else(|| speaker.counterpart().and_then(|c| bed.direction(c)))
+                .ok_or(Error::UnplacedLoudnessChannels {
+                    width: topology.width(),
+                })?;
+            Ok(label_at(direction))
+        })
+        .collect()
 }
 
 /// An EBU R128 reading.
@@ -80,13 +160,13 @@ impl LoudnessConfig {
 /// not given their own types. That is a deliberate call: an affine `Lufs`/`Lu`
 /// pair would be two new types for three fields, and the one operation anyone
 /// performs on them (`target - measured`, giving a gain) is exactly what
-/// [`gain_to`](Self::gain_to) already names. Revisit if surround R128 lands and
-/// these grow real algebra.
+/// [`gain_to`](Self::gain_to) already names.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Loudness {
     /// Integrated (gated) loudness, in LUFS.
     pub lufs: Db,
-    /// Maximum true peak, in dBTP. The meter oversamples 4× below 96 kHz and
+    /// Maximum true peak, in dBTP, over every channel including the LFE: the
+    /// LFE adds no loudness, but its peak still counts. The meter oversamples 4× below 96 kHz and
     /// 2× from 96 kHz to below 192 kHz, so it catches inter-sample peaks a
     /// plain sample peak misses; at 192 kHz and above it is the sample peak.
     pub true_peak: Db,
@@ -128,21 +208,18 @@ impl std::fmt::Debug for LoudnessState {
 impl LoudnessState {
     /// Builds a meter for `cfg`.
     ///
-    /// Returns `None` for a layout `ebur128` cannot meter (zero channels), so
-    /// the failure is a value rather than a panic inside a render.
+    /// Returns `None` when `ebur128` cannot meter the rate, so the failure is
+    /// a value rather than a panic inside a render.
     #[must_use]
     pub fn new(cfg: &LoudnessConfig) -> Option<Self> {
-        let channels = u32::from(cfg.layout.count());
-        if channels == 0 {
-            return None;
-        }
-        EbuR128::new(
-            channels,
+        let mut meter = EbuR128::new(
+            u32::from(cfg.topology.width().count()),
             cfg.rate.get().round() as u32,
             Mode::I | Mode::LRA | Mode::TRUE_PEAK,
         )
-        .ok()
-        .map(|meter| Self { meter })
+        .ok()?;
+        meter.set_channel_map(&cfg.labels).ok()?;
+        Some(Self { meter })
     }
 }
 
@@ -199,6 +276,73 @@ pub fn finish(state: LoudnessState) -> Loudness {
     }
 }
 
+/// A true-peak meter: the largest inter-sample peak over every channel, for
+/// channels with no placement to weigh a loudness by.
+///
+/// Reads nothing but the peak, so it takes no [`ChannelTopology`] and pays for
+/// no integrated or range gating. Shaped as [`LoudnessState`] is: build it,
+/// feed it with [`step_true_peak`], read it with [`finish_true_peak`].
+pub struct TruePeakState {
+    layout: ChannelLayout,
+    meter: EbuR128,
+    /// A chunk widened to the meter's `f64`, reused so a step allocates only
+    /// when a chunk is longer than any before it.
+    scratch: Vec<f64>,
+}
+
+// `EbuR128` is not `Debug`.
+impl std::fmt::Debug for TruePeakState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TruePeakState")
+            .field("layout", &self.layout)
+            .finish_non_exhaustive()
+    }
+}
+
+impl TruePeakState {
+    /// Builds a meter for `layout` at `rate`.
+    ///
+    /// Returns `None` when `ebur128` cannot meter the width or the rate.
+    #[must_use]
+    pub fn new(rate: impl Into<SampleRate>, layout: ChannelLayout) -> Option<Self> {
+        EbuR128::new(
+            u32::from(layout.count()),
+            rate.into().get().round() as u32,
+            Mode::TRUE_PEAK,
+        )
+        .ok()
+        .map(|meter| Self {
+            layout,
+            meter,
+            scratch: Vec::new(),
+        })
+    }
+}
+
+/// Feeds one chunk of frames.
+///
+/// Any sample format is metered at its nominal level (an integer as a fraction
+/// of full scale). A chunk of another width than the state's is ignored, as
+/// [`step_loudness`] ignores it: a metering miss must not fail a render.
+pub fn step_true_peak<S: Sample>(state: &mut TruePeakState, chunk: Interleaved<'_, S>) {
+    if chunk.layout() == state.layout && !chunk.is_empty() {
+        state.scratch.clear();
+        state
+            .scratch
+            .extend(chunk.samples().iter().map(|s| s.to_f64()));
+        let _ = state.meter.add_frames_f64(&state.scratch);
+    }
+}
+
+/// The largest true peak of every channel fed, in dBTP; [`Db::FLOOR`] for
+/// silence. Consumes the state, as [`finish`] does.
+pub fn finish_true_peak(state: TruePeakState) -> Db {
+    let peak = (0..u32::from(state.layout.count()))
+        .filter_map(|c| state.meter.true_peak(c).ok())
+        .fold(0.0f64, f64::max);
+    true_peak_db(peak)
+}
+
 /// An `f64` true-peak amplitude as dBTP, pinning silence at [`Db::FLOOR`].
 ///
 /// [`Db::from_amplitude`] leaves silence at `-inf` because the floor belongs to
@@ -219,54 +363,56 @@ fn true_peak_db(peak_linear: f64) -> Db {
 }
 
 // The window a windowed meter keeps is three seconds of every channel, so the
-// upper bounds below cap its allocation.
+// rate's upper bound caps its allocation (a topology is at most 16 channels).
 ranged! {
     /// A rate a windowed meter is built for: within 8 kHz..=192 kHz.
     WindowedRate(SampleRate), WindowedRateError, "a windowed rate within 8 kHz..=192 kHz",
     |raw| raw.get() >= 8_000.0 && raw.get() <= 192_000.0
 }
 
-ranged! {
-    /// A layout a windowed meter is built for: 1..=16 channels.
-    WindowedLayout(ChannelLayout), WindowedLayoutError, "a windowed layout of 1..=16 channels",
-    |raw| raw.count() >= 1 && raw.count() <= 16
-}
-
 /// What a [`WindowedLoudnessState`] meters: the rate and layout of the frames fed
-/// to [`step_windowed_loudness`].
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// to [`step_windowed_loudness`], weighted by placement as [`LoudnessConfig`] is.
+#[derive(Debug, Clone, PartialEq)]
 pub struct WindowedLoudnessConfig {
-    rate: SampleRate,
-    layout: ChannelLayout,
+    config: LoudnessConfig,
 }
 
 impl WindowedLoudnessConfig {
-    /// A config for frames at `rate` in `layout`.
-    #[must_use]
-    pub fn new(rate: WindowedRate, layout: WindowedLayout) -> Self {
-        Self {
-            rate: rate.get(),
-            layout: layout.get(),
-        }
+    /// A config for frames at `rate` in `topology`.
+    ///
+    /// # Errors
+    ///
+    /// As [`LoudnessConfig::new`].
+    pub fn new(rate: WindowedRate, topology: ChannelTopology) -> Result<Self> {
+        Ok(Self {
+            config: LoudnessConfig::new(rate.get(), topology)?,
+        })
     }
 
     /// The rate the fed frames are denominated at.
     #[inline]
     #[must_use]
     pub fn rate(&self) -> SampleRate {
-        self.rate
+        self.config.rate()
     }
 
-    /// The channel layout of the fed frames.
+    /// The channel topology of the fed frames.
+    #[inline]
+    #[must_use]
+    pub fn topology(&self) -> &ChannelTopology {
+        self.config.topology()
+    }
+
+    /// The channel count of the fed frames.
     #[inline]
     #[must_use]
     pub fn layout(&self) -> ChannelLayout {
-        self.layout
+        self.config.topology().width()
     }
 
     /// Frames in `tenths` hundred-millisecond units, as the meter counts them.
     fn window_frames(&self, tenths: u64) -> u64 {
-        ((self.rate.get().round() as u64 + 5) / 10) * tenths
+        ((self.rate().get().round() as u64 + 5) / 10) * tenths
     }
 }
 
@@ -325,15 +471,17 @@ impl WindowedLoudnessState {
     ///
     /// [`Error::MeterUnavailable`] if the meter cannot be built.
     pub fn new(cfg: &WindowedLoudnessConfig) -> Result<Self> {
-        let channels = cfg.layout.count();
-        let meter = EbuR128::new(
-            u32::from(channels),
-            cfg.rate.get().round() as u32,
+        let mut meter = EbuR128::new(
+            u32::from(cfg.layout().count()),
+            cfg.rate().get().round() as u32,
             Mode::M | Mode::S | Mode::TRUE_PEAK,
         )
         .map_err(|_| Error::MeterUnavailable)?;
+        meter
+            .set_channel_map(&cfg.config.labels)
+            .map_err(|_| Error::MeterUnavailable)?;
         Ok(Self {
-            cfg: *cfg,
+            cfg: cfg.clone(),
             meter,
             frames: 0,
         })
@@ -360,7 +508,7 @@ impl WindowedLoudnessState {
         self.meter
             .add_frames_f32(samples)
             .map_err(|_| Error::MeterRejectedFrames)?;
-        self.frames += (samples.len() / usize::from(self.cfg.layout.count())) as u64;
+        self.frames += (samples.len() / usize::from(self.cfg.layout().count())) as u64;
         Ok(())
     }
 }
@@ -403,10 +551,10 @@ pub fn step_windowed_loudness(
     if state.cfg != *cfg {
         return Err(Error::StateMismatch);
     }
-    if chunk.layout() != cfg.layout {
+    if chunk.layout() != cfg.layout() {
         return Err(Error::ChunkLayoutMismatch {
             chunk: chunk.layout(),
-            config: cfg.layout,
+            config: cfg.layout(),
         });
     }
     let samples = chunk.samples();
@@ -416,7 +564,7 @@ pub fn step_windowed_loudness(
 
     state.feed(samples)?;
 
-    let peak = (0..u32::from(cfg.layout.count()))
+    let peak = (0..u32::from(cfg.layout().count()))
         .filter_map(|c| state.meter.true_peak(c).ok())
         .fold(0.0f64, f64::max);
     Ok(WindowedReading {
@@ -437,7 +585,7 @@ pub fn step_windowed_loudness(
 /// Measures a whole buffer.
 ///
 /// Folds [`step_loudness`] — the same implementation the streaming path uses,
-/// so the two can never disagree. `None` when the layout has no channels.
+/// so the two can never disagree. `None` when the meter cannot be built.
 pub fn measure_loudness(cfg: &LoudnessConfig, buffer: Interleaved<'_>) -> Option<Loudness> {
     let mut state = LoudnessState::new(cfg)?;
     step_loudness(cfg, &mut state, buffer);
@@ -448,7 +596,9 @@ pub fn measure_loudness(cfg: &LoudnessConfig, buffer: Interleaved<'_>) -> Option
 mod tests {
     use super::*;
     use std::f32::consts::TAU;
-    use tutti_types::Amplitude;
+    use tutti_types::{
+        AmbisonicFormat, AmbisonicOrder, Amplitude, Azimuth, Bed, Elevation, Speaker,
+    };
 
     /// The true-peak floor lives at this boundary, not in `Db::from_amplitude`.
     #[test]
@@ -500,7 +650,7 @@ mod tests {
     }
 
     fn cfg(rate: f64) -> LoudnessConfig {
-        LoudnessConfig::new(SampleRate::of(rate), ChannelLayout::STEREO)
+        LoudnessConfig::new(SampleRate::of(rate), Bed::Stereo.topology()).unwrap()
     }
 
     /// The one-shot form must fold the streaming form exactly — the property
@@ -696,8 +846,9 @@ mod tests {
     fn windowed_cfg(rate: f64) -> WindowedLoudnessConfig {
         WindowedLoudnessConfig::new(
             WindowedRate::new(SampleRate::of(rate)).unwrap(),
-            WindowedLayout::of(ChannelLayout::STEREO),
+            Bed::Stereo.topology(),
         )
+        .unwrap()
     }
 
     /// Feeds `buf` in `frames`-frame chunks, returning the reading after each.
@@ -961,5 +1112,335 @@ mod tests {
             ),
             Err(Error::StateMismatch)
         ));
+    }
+
+    // The oracle is BS.1770-5 Table 5: the weight of each speaker of each BS.2051
+    // system, and Annex 1's loudness `-0.691 + 10 log10(sum_i G_i z_i)` over the
+    // mean squares `z_i` of the K-weighted channels. A sine of amplitude `a` has
+    // `z = a^2 / 2 * k`, `k` the K-filter's power gain at its frequency, which
+    // cancels against a reference channel of weight 1.0 at the same tone.
+
+    const TONE_HZ: f32 = 1_000.0;
+    const TONE_AMP: f32 = 0.1;
+
+    /// Integrated loudness of `bed` with a tone of `TONE_AMP` on the `index`th
+    /// channel alone, two seconds at 48 kHz.
+    fn tone_on(bed: Bed, index: usize) -> Loudness {
+        let width = usize::from(bed.width().count());
+        let rate = SampleRate::SR_48K;
+        let tone = tutti_fixtures::signal::sine(
+            tutti_types::Hz(TONE_HZ),
+            Amplitude(TONE_AMP),
+            rate,
+            tutti_types::Samples(2 * 48_000),
+        );
+        let mut buf = vec![0.0f32; tone.len() * width];
+        for (frame, v) in tone.iter().enumerate() {
+            buf[frame * width + index] = *v;
+        }
+        let c = LoudnessConfig::new(rate, bed.topology()).unwrap();
+        measure_loudness(&c, Interleaved::new(&buf, bed.width()).unwrap()).unwrap()
+    }
+
+    /// Table 5, per system: the weight of each speaker (1.00 or 1.41) in the
+    /// bed's channel order, `None` for the LFE.
+    fn table_5(bed: Bed) -> Vec<Option<f32>> {
+        const W: Option<f32> = Some(1.41);
+        const U: Option<f32> = Some(1.0);
+        match bed {
+            // System A, 0+2+0: M+030 M-030.
+            Bed::Stereo => vec![U, U],
+            // System B, 0+5+0: M+030 M-030 M+000 LFE M+110 M-110.
+            Bed::Surround51 => vec![U, U, U, None, W, W],
+            // System I, 0+7+0: M+030 M-030 M+000 LFE M+090 M-090 M+135 M-135.
+            Bed::Surround71 => vec![U, U, U, None, W, W, U, U],
+            // System J, 4+7+0: system I then U+045 U-045 U+135 U-135.
+            Bed::Surround714 => vec![U, U, U, None, W, W, U, U, U, U, U, U],
+            // System C, 2+5+0: system B then U+030 U-030.
+            Bed::Surround512 => vec![U, U, U, None, W, W, U, U],
+            // System D, 4+5+0: system B then U+030 U-030 U+110 U-110.
+            Bed::Surround514 => vec![U, U, U, None, W, W, U, U, U, U],
+            other => panic!("{other:?} is not pinned"),
+        }
+    }
+
+    /// Each speaker of each BS.2051 bed the crate pins weighs what Table 5
+    /// says: a tone on it reads `-0.691 + 10 log10(G z)`, so against the same
+    /// tone on the front left (weight 1.0) it is `10 log10(G)` louder; and the
+    /// LFE adds no loudness (its peak still counts).
+    #[test]
+    fn a_speaker_weighs_what_table_5_lists_for_its_system() {
+        for bed in [
+            Bed::Stereo,
+            Bed::Surround51,
+            Bed::Surround71,
+            Bed::Surround512,
+            Bed::Surround514,
+            Bed::Surround714,
+        ] {
+            let reference = tone_on(bed, 0);
+            for (index, weight) in table_5(bed).into_iter().enumerate() {
+                let read = tone_on(bed, index);
+                match weight {
+                    Some(g) => {
+                        let want = reference.lufs.get() + 10.0 * g.log10();
+                        assert!(
+                            (read.lufs.get() - want).abs() < 0.01,
+                            "{bed:?} channel {index}: {:?} vs {want}",
+                            read.lufs
+                        );
+                    }
+                    None => {
+                        assert_eq!(read.lufs, Db(-70.0), "{bed:?} LFE counted: {:?}", read.lufs);
+                        // The LFE is unweighted, not unmetered: the file's peak
+                        // is still the tone's amplitude, 20 log10 0.1 = -20 dBTP.
+                        assert!(
+                            (read.true_peak.get() + 20.0).abs() < 0.1,
+                            "{bed:?} LFE peak {:?}",
+                            read.true_peak
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// The absolute figure, from Annex 1: a 1 kHz sine of amplitude 0.1 on one
+    /// 1.0 speaker has mean square `a^2 / 2 = 0.005`, and K-weighting's gain at
+    /// 1 kHz is 0.691 dB (the constant of the formula, cancelling at 997 Hz), so
+    /// it reads `10 log10(0.005) = -23.01` LKFS; on a 1.41 speaker it reads
+    /// 1.49 dB (`10 log10 1.41`) more.
+    #[test]
+    fn one_tone_reads_the_annex_1_figure_at_weight_one_and_one_point_four_one() {
+        let unit = tone_on(Bed::Surround51, 0).lufs.get();
+        let side = tone_on(Bed::Surround51, 4).lufs.get();
+        let analytic = 10.0 * (f64::from(TONE_AMP).powi(2) / 2.0).log10() as f32;
+        assert!((unit - analytic).abs() < 0.05, "{unit} vs {analytic}");
+        assert!((side - (analytic + 1.4922)).abs() < 0.05, "{side}");
+    }
+
+    /// The 7.1's rears (M+-135) are 1.0 although the 5.1's M+-110 is 1.41, and
+    /// the 7.1.4's upper speakers are 1.0: a tone on each reads as the front
+    /// left's.
+    #[test]
+    fn rears_and_upper_speakers_weigh_one() {
+        let front = tone_on(Bed::Surround714, 0).lufs.get();
+        for index in [6, 7, 8, 9, 10, 11] {
+            let read = tone_on(Bed::Surround714, index).lufs.get();
+            assert!(
+                (read - front).abs() < 0.01,
+                "channel {index}: {read} vs {front}"
+            );
+        }
+    }
+
+    /// A topology in another order is weighed by speaker, not by index: the
+    /// WAVE 5.1 (`FL FR FC LFE BL BR`) puts the 1.41 speakers on the BL and BR
+    /// channels, which are the 5.1's M+-110.
+    #[test]
+    fn the_weight_follows_the_speaker_in_a_reordered_topology() {
+        let reordered = ChannelTopology::new([
+            Speaker::SideLeft,
+            Speaker::FrontLeft,
+            Speaker::LowFrequency,
+            Speaker::FrontRight,
+            Speaker::FrontCenter,
+            Speaker::SideRight,
+        ])
+        .unwrap();
+        let c = LoudnessConfig::new(SampleRate::SR_48K, reordered).unwrap();
+        let tone = tutti_fixtures::signal::sine(
+            tutti_types::Hz(TONE_HZ),
+            Amplitude(TONE_AMP),
+            SampleRate::SR_48K,
+            tutti_types::Samples(2 * 48_000),
+        );
+        let read = |channel: usize| {
+            let mut buf = vec![0.0f32; tone.len() * 6];
+            for (frame, v) in tone.iter().enumerate() {
+                buf[frame * 6 + channel] = *v;
+            }
+            measure_loudness(
+                &c,
+                Interleaved::new(&buf, ChannelLayout::from(6u16)).unwrap(),
+            )
+            .unwrap()
+            .lufs
+            .get()
+        };
+        let (side, front, lfe) = (read(0), read(1), read(2));
+        assert!((side - front - 10.0 * 1.41f32.log10()).abs() < 0.01);
+        assert_eq!(lfe, -70.0);
+    }
+
+    /// Ambisonic input and speakers that are no known bed are refused with
+    /// their own errors, by both configs.
+    #[test]
+    fn a_topology_without_angles_is_refused_by_name() {
+        let ambisonic: ChannelTopology = AmbisonicFormat::ambix(AmbisonicOrder::of(1)).into();
+        assert_eq!(
+            LoudnessConfig::new(SampleRate::SR_48K, ambisonic.clone()),
+            Err(Error::AmbisonicLoudness)
+        );
+        let unplaced = ChannelTopology::unassigned(ChannelLayout::from(3u16));
+        assert_eq!(
+            LoudnessConfig::new(SampleRate::SR_48K, unplaced.clone()),
+            Err(Error::UnplacedLoudnessChannels {
+                width: ChannelLayout::from(3u16)
+            })
+        );
+        let rate = WindowedRate::of(SampleRate::SR_48K);
+        assert_eq!(
+            WindowedLoudnessConfig::new(rate, ambisonic),
+            Err(Error::AmbisonicLoudness)
+        );
+        assert!(matches!(
+            WindowedLoudnessConfig::new(rate, unplaced),
+            Err(Error::UnplacedLoudnessChannels { .. })
+        ));
+    }
+
+    /// The windowed meter weighs by placement as the integrated one does: the
+    /// momentary loudness of a tone on the 5.1's side speaker is `10 log10 1.41`
+    /// above the same tone on its front left.
+    #[test]
+    fn the_windowed_meter_weighs_by_placement() {
+        let cfg = WindowedLoudnessConfig::new(
+            WindowedRate::of(SampleRate::SR_48K),
+            Bed::Surround51.topology(),
+        )
+        .unwrap();
+        let tone = tutti_fixtures::signal::sine(
+            tutti_types::Hz(TONE_HZ),
+            Amplitude(TONE_AMP),
+            SampleRate::SR_48K,
+            tutti_types::Samples(48_000),
+        );
+        let momentary = |channel: usize| {
+            let mut buf = vec![0.0f32; tone.len() * 6];
+            for (frame, v) in tone.iter().enumerate() {
+                buf[frame * 6 + channel] = *v;
+            }
+            let mut state = WindowedLoudnessState::new(&cfg).unwrap();
+            step_windowed_loudness(
+                &cfg,
+                &mut state,
+                Interleaved::new(&buf, Bed::Surround51.width()).unwrap(),
+            )
+            .unwrap()
+            .momentary
+            .get()
+        };
+        let (front, side, lfe) = (momentary(0), momentary(4), momentary(3));
+        assert!((side - front - 10.0 * 1.41f32.log10()).abs() < 0.01);
+        assert_eq!(lfe, WindowedReading::LOUDNESS_FLOOR.get());
+    }
+
+    /// Whether `label` is one `ebur128` weighs 1.41.
+    fn weighs_141(label: Channel) -> bool {
+        matches!(label, Channel::LeftSurround | Channel::RightSurround)
+    }
+
+    /// Table 4's edges: 1.41 needs |elevation| < 30 (open) and 60 <= |azimuth|
+    /// <= 120 (closed), on either side. A `<=` on the elevation or an open
+    /// azimuth range moves one of these rows.
+    #[test]
+    fn table_4_edges_are_closed_on_azimuth_and_open_on_elevation() {
+        let at = |azimuth: f32, elevation: f32| {
+            weighs_141(label_at(Direction::new(
+                Azimuth(azimuth),
+                Elevation(elevation),
+            )))
+        };
+        for sign in [1.0f32, -1.0] {
+            assert!(at(sign * 60.0, 0.0), "60 is inside");
+            assert!(at(sign * 120.0, 0.0), "120 is inside");
+            assert!(!at(sign * 59.9, 0.0), "59.9 is outside");
+            assert!(!at(sign * 120.1, 0.0), "120.1 is outside");
+            assert!(at(sign * 90.0, 29.9), "elevation 29.9 is inside");
+            assert!(!at(sign * 90.0, 30.0), "elevation 30 is outside");
+            assert!(at(sign * 90.0, -29.9), "elevation -29.9 is inside");
+            assert!(!at(sign * 90.0, -30.0), "elevation -30 is outside");
+        }
+    }
+
+    /// A quad given as VST3 spells it (`FL FR SL SR`) is the bed's M+-135
+    /// backs, which weigh 1.0.
+    #[test]
+    fn a_quads_side_speakers_stand_for_its_backs_and_weigh_one() {
+        let vst3_quad = ChannelTopology::new([
+            Speaker::FrontLeft,
+            Speaker::FrontRight,
+            Speaker::SideLeft,
+            Speaker::SideRight,
+        ])
+        .unwrap();
+        let labels = channel_labels(&vst3_quad).unwrap();
+        assert!(labels.iter().all(|&l| !weighs_141(l)), "{labels:?}");
+    }
+
+    /// The classic inter-sample case: a sine at a quarter of the rate, phase 45
+    /// degrees, has samples of +-a/sqrt(2) and a true peak of `a`. At a = 0.5
+    /// the sample peak is -9.03 dBFS and the true peak -6.02 dBTP.
+    #[test]
+    fn the_true_peak_meter_reads_the_inter_sample_peak() {
+        let rate = SampleRate::SR_48K;
+        let samples: Vec<f32> = (0..48_000)
+            // The phase repeats every four samples: reduced first, so the f32
+            // argument stays exact.
+            .map(|n| {
+                0.5 * ((n % 4) as f32 * std::f32::consts::FRAC_PI_2 + std::f32::consts::FRAC_PI_4)
+                    .sin()
+            })
+            .collect();
+        let sample_peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        assert!((sample_peak - 0.5 / 2f32.sqrt()).abs() < 1e-3);
+        let mut state = TruePeakState::new(rate, ChannelLayout::MONO).unwrap();
+        step_true_peak(
+            &mut state,
+            Interleaved::new(&samples, ChannelLayout::MONO).unwrap(),
+        );
+        let peak = finish_true_peak(state).get();
+        let analytic = 20.0 * 0.5f32.log10();
+        // The 4x oversampling filter reads 0.1 dB high at this phase.
+        assert!((peak - analytic).abs() < 0.15, "{peak} vs {analytic}");
+        assert!(peak > 20.0 * sample_peak.log10() + 2.9, "{peak}");
+    }
+
+    /// Silence reads the floor, and a chunk of another width is not metered.
+    #[test]
+    fn the_true_peak_meter_floors_silence_and_skips_a_wrong_width() {
+        let mut state = TruePeakState::new(SampleRate::SR_48K, ChannelLayout::STEREO).unwrap();
+        let loud = vec![0.9f32; 4_800 * 4];
+        step_true_peak(
+            &mut state,
+            Interleaved::new(&loud, ChannelLayout::QUAD).unwrap(),
+        );
+        step_true_peak(
+            &mut state,
+            Interleaved::new(&[0.0; 960], ChannelLayout::STEREO).unwrap(),
+        );
+        assert_eq!(finish_true_peak(state), Db::FLOOR);
+    }
+
+    /// The same fs/4 figure at 16-bit: the samples are the same sine rounded to
+    /// the format, and the meter reads its nominal level, -6.02 dBTP.
+    #[test]
+    fn the_true_peak_meter_reads_the_same_figure_at_i16() {
+        let samples: Vec<i16> = (0..48_000)
+            .map(|n| {
+                let x = 0.5
+                    * ((n % 4) as f32 * std::f32::consts::FRAC_PI_2 + std::f32::consts::FRAC_PI_4)
+                        .sin();
+                x.convert_to::<i16>()
+            })
+            .collect();
+        let mut state = TruePeakState::new(SampleRate::SR_48K, ChannelLayout::MONO).unwrap();
+        step_true_peak(
+            &mut state,
+            Interleaved::new(&samples, ChannelLayout::MONO).unwrap(),
+        );
+        let peak = finish_true_peak(state).get();
+        assert!((peak - 20.0 * 0.5f32.log10()).abs() < 0.15, "{peak}");
     }
 }

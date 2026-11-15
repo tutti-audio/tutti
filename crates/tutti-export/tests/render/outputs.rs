@@ -26,7 +26,7 @@ use tutti_graph::{
 use tutti_nodes::testing::{Const, Osc};
 use tutti_transport::FrozenClock;
 use tutti_types::ChannelLayout;
-use tutti_types::{Amplitude, ChannelTopology, Db, Hz, SampleRate, Samples};
+use tutti_types::{Amplitude, Bed, ChannelTopology, Db, Hz, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -764,4 +764,165 @@ fn an_unmeasurable_output_names_its_index() {
         "{err:?}"
     );
     assert!(names(dir.path()).is_empty(), "nothing was put in place");
+}
+
+/// A graph of `width` outputs, each a constant `0.5`.
+fn wide(width: u16) -> RenderGraph {
+    let layout = ChannelLayout::from(width);
+    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, layout);
+    let node = g.add(Const::new(0.5, layout));
+    for c in 0..usize::from(width) {
+        g.connect_output(node, c, c);
+    }
+    finish(g)
+}
+
+fn file_of(path: &std::path::Path, width: u16) -> FileTarget {
+    FileTarget::new(path, Format::Wav(Pcm::Float32), ChannelLayout::from(width))
+}
+
+/// A file whose topology is not stated is taken to be the engine's order for
+/// its width, and its `Written` says so; a stated one says it was stated.
+#[test]
+fn a_file_reports_whether_its_placement_was_assumed_or_stated() {
+    let dir = tempfile::tempdir().unwrap();
+    let placement = |target: FileTarget| {
+        let mut graph = wide(6);
+        let produced = render(
+            &mut graph,
+            &job(2_000),
+            &FrozenClock,
+            vec![Output::master(target)],
+            &mut Control::none(),
+        )
+        .expect("renders");
+        produced
+            .into_finished()
+            .expect("not cancelled")
+            .into_iter()
+            .next()
+            .and_then(Produced::into_file)
+            .expect("a file")
+            .placement
+    };
+    assert_eq!(
+        placement(file_of(&dir.path().join("a.wav"), 6)),
+        tutti_types::Placement::Assumed
+    );
+    assert_eq!(
+        placement(file_of(&dir.path().join("b.wav"), 6).with_topology(Bed::Surround51.topology())),
+        tutti_types::Placement::Stated
+    );
+}
+
+/// A Lufs output of a width with no assumed placement is refused up front with
+/// a name that says to state a topology, and nothing is rendered or written; a
+/// peak output of the same width needs no placement and renders.
+#[test]
+fn a_lufs_output_with_no_placement_is_refused_before_the_render() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut graph = wide(3);
+    let lufs = file_of(&dir.path().join("l.wav"), 3)
+        .with_normalize(Some(NormalizeSpec::own(Normalize::lufs(Db(-23.0)))));
+    let err = render(
+        &mut graph,
+        &job(2_000),
+        &FrozenClock,
+        vec![Output::master(lufs)],
+        &mut Control::none(),
+    )
+    .expect_err("three channels name no speakers");
+    assert!(
+        matches!(
+            err,
+            Error::Target {
+                output: 0,
+                why: TargetError::UnplacedLoudness { channels }
+            } if channels == ChannelLayout::from(3u16)
+        ),
+        "{err:?}"
+    );
+    assert!(names(dir.path()).is_empty());
+}
+
+/// A graph of `width` outputs, each a 1 kHz sine of amplitude 0.5.
+fn tone(width: u16) -> RenderGraph {
+    let layout = ChannelLayout::from(width);
+    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, layout);
+    let node = g.add(
+        Osc::sine(Hz(1_000.0))
+            .with_amplitude(Amplitude(0.5))
+            .with_layout(layout),
+    );
+    for c in 0..usize::from(width) {
+        g.connect_output(node, c, c);
+    }
+    finish(g)
+}
+
+/// A Peak output at a width with no placement reaches its target by the true
+/// peak alone: a sine of amplitude 0.5 (-6.02 dBTP) normalized to -12 dBTP
+/// takes `-12 + 6.02` dB, and the file's peak is `10^(-12/20)`. It has no
+/// placement to weigh a loudness by, so it reports none.
+#[test]
+fn a_peak_output_with_no_placement_reaches_its_target_and_reports_no_loudness() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("p.wav");
+    let target =
+        file_of(&path, 3).with_normalize(Some(NormalizeSpec::own(Normalize::peak(Db(-12.0)))));
+    let written = render(
+        &mut tone(3),
+        &job(48_000),
+        &FrozenClock,
+        vec![Output::master(target)],
+        &mut Control::none(),
+    )
+    .expect("a peak needs no placement")
+    .into_finished()
+    .expect("not cancelled")
+    .into_iter()
+    .next()
+    .and_then(Produced::into_file)
+    .unwrap();
+    assert_eq!(written.measured, None);
+    let gain = written.gain.expect("normalized").get();
+    assert!(
+        (gain - (-12.0 - 20.0 * 0.5f32.log10())).abs() < 0.1,
+        "{gain}"
+    );
+    let peak = decode(&path)
+        .iter()
+        .flatten()
+        .fold(0.0f32, |m, s| m.max(s.abs()));
+    assert!((peak - 10f32.powf(-12.0 / 20.0)).abs() < 0.005, "{peak}");
+}
+
+/// A Peak output at a width with an assumed placement still reads a real
+/// loudness, weighted by it: six channels of the same tone read the five
+/// non-LFE channels at weights 1, 1, 1, 1.41, 1.41 (sum 5.82) (BS.1770-5 Table 5, system
+/// B): `10 log10(0.5^2 / 2 * 5.82)` = -1.38 LUFS, where the LFE counted too
+/// would read -0.64.
+#[test]
+fn a_peak_output_with_an_assumed_placement_reports_its_weighted_loudness() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = file_of(&dir.path().join("p.wav"), 6)
+        .with_normalize(Some(NormalizeSpec::own(Normalize::peak(Db(-12.0)))));
+    let written = render(
+        &mut tone(6),
+        &job(48_000),
+        &FrozenClock,
+        vec![Output::master(target)],
+        &mut Control::none(),
+    )
+    .expect("renders")
+    .into_finished()
+    .expect("not cancelled")
+    .into_iter()
+    .next()
+    .and_then(Produced::into_file)
+    .unwrap();
+    assert_eq!(written.placement, tutti_types::Placement::Assumed);
+    let lufs = written.measured.expect("a placed loudness").lufs.get();
+    let analytic = 10.0 * (0.5f32.powi(2) / 2.0 * 5.82).log10();
+    assert!((lufs - analytic).abs() < 0.1, "{lufs} vs {analytic}");
 }

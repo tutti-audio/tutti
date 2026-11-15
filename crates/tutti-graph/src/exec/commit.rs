@@ -464,6 +464,9 @@ pub(crate) struct Channels {
     /// (`Stager`).
     pub(crate) pool: Arc<AtomicUsize>,
     pub(crate) rendered: Arc<AtomicU64>,
+    /// The `seq` of the commit whose root crossfade the executor last
+    /// finished (`Editor::settle_fades`).
+    pub(crate) root_fade_ended: Arc<AtomicU64>,
 }
 
 /// The executor's ends of the rings.
@@ -477,6 +480,7 @@ pub(crate) struct ExecutorEnds {
     pub(super) edge_fades: RingWriter<(EdgeId, EdgeFade)>,
     pub(super) pool: Arc<AtomicUsize>,
     pub(super) rendered: Arc<AtomicU64>,
+    pub(super) root_fade_ended: Arc<AtomicU64>,
 }
 
 /// Build the rings: the editor's ends and the executor's.
@@ -491,6 +495,7 @@ pub(crate) fn channels() -> (Channels, ExecutorEnds) {
         ring::<(EdgeId, EdgeFade)>(EDGE_FADE_CAPACITY, Overflow::Refuse);
     let pool = Arc::new(AtomicUsize::new(0));
     let rendered = Arc::new(AtomicU64::new(0));
+    let root_fade_ended = Arc::new(AtomicU64::new(0));
     (
         Channels {
             to_executor: tx,
@@ -502,6 +507,7 @@ pub(crate) fn channels() -> (Channels, ExecutorEnds) {
             edge_fades: fade_end_rx,
             pool: Arc::clone(&pool),
             rendered: Arc::clone(&rendered),
+            root_fade_ended: Arc::clone(&root_fade_ended),
         },
         ExecutorEnds {
             queue: rx,
@@ -513,6 +519,7 @@ pub(crate) fn channels() -> (Channels, ExecutorEnds) {
             edge_fades: fade_end_tx,
             pool,
             rendered,
+            root_fade_ended,
         },
     )
 }

@@ -1,21 +1,16 @@
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
-use tutti_types::{BusTopology, Db, SampleRate, Seconds};
+use tutti_buffers::{Mono, Planes, PlanesMut};
+use tutti_types::{ChannelLayout, Db, SampleRate, Seconds};
 
 use super::*;
-use crate::contract::{FamilyCase, Hook, RecurrenceCase, built};
-use crate::{Realized, System};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 /// 5 ms at 48 kHz: 240 frames.
 const LOOKAHEAD: Lookahead = Lookahead::of(Seconds(0.005));
 const L: usize = 240;
-/// The longest block `run` hands the runner.
+/// The longest block `run` hands the bank.
 const CHUNK: usize = 256;
-
-fn design() -> LimiterFamily {
-    LimiterFamily::new(BusTopology::STEREO, LOOKAHEAD)
-}
 
 fn controls(threshold: f32, ceiling: f32, release: f64) -> LimiterControls {
     LimiterControls {
@@ -25,112 +20,74 @@ fn controls(threshold: f32, ceiling: f32, release: f64) -> LimiterControls {
     }
 }
 
-impl FamilyCase for LimiterFamily {
-    fn capacity(&self, _: SampleRate) {}
-
-    fn reachable(&self) -> Vec<LimiterControls> {
-        let mut all = Vec::new();
-        for threshold in [-30.0, -12.0, -6.0, 0.0] {
-            for ceiling in [-12.0, -6.0, -0.3, 0.0] {
-                for release in [0.001, 0.02, 0.1, 0.5] {
-                    all.push(controls(threshold, ceiling, release));
-                }
+/// A grid and seeded draws across every control.
+fn reachable() -> Vec<LimiterControls> {
+    let mut all = Vec::new();
+    for threshold in [-30.0, -12.0, -6.0, 0.0] {
+        for ceiling in [-12.0, -6.0, -0.3, 0.0] {
+            for release in [0.001, 0.02, 0.1, 0.5] {
+                all.push(controls(threshold, ceiling, release));
             }
         }
-        let mut rng = StdRng::seed_from_u64(24);
-        all.extend((0..64).map(|_| {
-            controls(
-                rng.random_range(-40.0..6.0),
-                rng.random_range(-20.0..3.0),
-                rng.random_range(0.0..1.0),
-            )
-        }));
-        all
     }
-
-    /// A release under the floor, and each control not finite (a threshold or a ceiling
-    /// only fails at NaN: `+-inf` are levels): each is a member the family can run.
-    fn hostile(&self) -> Vec<LimiterControls> {
-        let base = controls(-6.0, -0.3, 0.1);
-        let mut all = vec![
-            LimiterControls {
-                release: Seconds(-1.0),
-                ..base
-            },
-            LimiterControls {
-                release: Seconds(0.0),
-                ..base
-            },
-        ];
-        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            all.push(LimiterControls {
-                threshold: Db(bad),
-                ..base
-            });
-            all.push(LimiterControls {
-                ceiling: Db(bad),
-                ..base
-            });
-            all.push(LimiterControls {
-                release: Seconds(f64::from(bad)),
-                ..base
-            });
-        }
-        all
-    }
-
-    fn vacant(&self) -> &'static [(Hook, &'static str)] {
-        &[(
-            Hook::Extremes,
-            "the envelope is a one-pole inside the unit circle for every release and the \
-             window is a finite count: there is no loop to close on its limit",
-        )]
-    }
+    let mut rng = StdRng::seed_from_u64(24);
+    all.extend((0..64).map(|_| {
+        controls(
+            rng.random_range(-40.0..6.0),
+            rng.random_range(-20.0..3.0),
+            rng.random_range(0.0..1.0),
+        )
+    }));
+    all
 }
 
-impl RecurrenceCase for LimiterFamily {
-    fn probes(&self) -> Vec<LimiterControls> {
-        vec![
-            controls(-6.0, -0.3, 0.1),
-            controls(-12.0, -12.0, 0.02),
-            controls(-20.0, -3.0, 0.3),
-        ]
+/// A release under the floor, and each control not finite (a threshold or a ceiling only
+/// fails at NaN: `+-inf` are levels): each is a control the bank can run.
+fn hostile() -> Vec<LimiterControls> {
+    let base = controls(-6.0, -0.3, 0.1);
+    let mut all = vec![
+        LimiterControls {
+            release: Seconds(-1.0),
+            ..base
+        },
+        LimiterControls {
+            release: Seconds(0.0),
+            ..base
+        },
+    ];
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        all.push(LimiterControls {
+            threshold: Db(bad),
+            ..base
+        });
+        all.push(LimiterControls {
+            ceiling: Db(bad),
+            ..base
+        });
+        all.push(LimiterControls {
+            release: Seconds(f64::from(bad)),
+            ..base
+        });
     }
-
-    fn extremes(&self) -> Vec<LimiterControls> {
-        Vec::new()
-    }
-
-    /// A release that moves, a ceiling that moves a little and a threshold that moves a
-    /// little. They land whole, and a limiter's attack is instant, so a step in the
-    /// ceiling or the threshold is a step in the gain: it clicks by what it moves, and a
-    /// step a few tenths of a dB apart is what a click stays within the contract's bound
-    /// for.
-    fn steps(&self) -> Vec<(LimiterControls, LimiterControls)> {
-        vec![
-            (controls(-12.0, -6.0, 0.02), controls(-12.0, -6.0, 0.4)),
-            (controls(-12.0, -6.0, 0.1), controls(-12.0, -6.3, 0.1)),
-            (controls(-12.0, -6.0, 0.1), controls(-12.4, -6.0, 0.1)),
-        ]
-    }
+    all
 }
 
-crate::family_contract!(design());
-crate::recurrence_contract!(design(), BlockIndependent);
-
-/// A prepared runner on `family` at `c`.
-fn runner_on(family: &LimiterFamily, c: &LimiterControls) -> Realized<LimiterRecurrence> {
-    built(family, c, RATE).0
+/// A stereo bank at `rate` aimed at `c`.
+fn runner_at(c: &LimiterControls, rate: SampleRate) -> LimiterBank {
+    let mut bank = LimiterBank::new(ChannelLayout::STEREO, LOOKAHEAD, rate);
+    bank.aim(c);
+    bank
 }
 
-fn runner(c: &LimiterControls) -> Realized<LimiterRecurrence> {
-    runner_on(&design(), c)
+/// A stereo bank at 48 kHz aimed at `c`.
+fn runner(c: &LimiterControls) -> LimiterBank {
+    runner_at(c, RATE)
 }
 
-/// `audio` (one slice per channel) through `k` in blocks of `block`, with the threshold
+/// `audio` (one slice per channel) through `bank` in blocks of `block`, with the threshold
 /// and ceiling lanes when given.
 fn run_in(
-    k: &mut Realized<LimiterRecurrence>,
+    bank: &mut LimiterBank,
     audio: &[&[f32]],
     lanes: [Option<&[f32]>; 2],
     block: usize,
@@ -141,26 +98,28 @@ fn run_in(
     while at < n {
         let end = (at + block).min(n);
         let a: Vec<&[f32]> = audio.iter().map(|c| &c[at..end]).collect();
-        let mut feed = Inputs::new(&a);
-        for (i, lane) in lanes.iter().enumerate() {
-            if let Some(lane) = lane {
-                feed = feed.with_lane(i, &lane[at..end]);
-            }
-        }
+        let lanes = LimiterLanes {
+            threshold: lanes[0].map(|l| Mono::new(&l[at..end])),
+            ceiling: lanes[1].map(|l| Mono::new(&l[at..end])),
+        };
         let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
-        k.process(&feed, &mut outs, end - at);
+        bank.process(
+            lanes,
+            Planes::new(&a).unwrap(),
+            PlanesMut::new(&mut outs).unwrap(),
+        );
         at = end;
     }
     out
 }
 
-fn run(k: &mut Realized<LimiterRecurrence>, audio: &[&[f32]]) -> Vec<Vec<f32>> {
-    run_in(k, audio, [None, None], CHUNK)
+fn run(bank: &mut LimiterBank, audio: &[&[f32]]) -> Vec<Vec<f32>> {
+    run_in(bank, audio, [None, None], CHUNK)
 }
 
 /// The same signal on both channels, run with no lane.
-fn run_mono(k: &mut Realized<LimiterRecurrence>, audio: &[f32]) -> Vec<f32> {
-    run(k, &[audio, audio]).remove(0)
+fn run_mono(bank: &mut LimiterBank, audio: &[f32]) -> Vec<f32> {
+    run(bank, &[audio, audio]).remove(0)
 }
 
 /// `frames` of seeded noise in `-level..=level`.
@@ -176,32 +135,43 @@ fn amplitude(db: f64) -> f64 {
     10f64.powf(db / 20.0)
 }
 
-/// The member holds the figures its definition gives: the lookahead is `ceil(lookahead *
-/// rate)` frames and is the latency, the tail is none, the release is floored at 1 ms
-/// and a non-finite control is the default's (a ceiling only for a NaN).
+/// How many ulps (`f32::EPSILON`) over its ceiling a limiter's sample peak may land: the
+/// ceiling's amplitude, the curve's divide and the gain's product each round, so the bound
+/// is a few ulps, not an exact one. The node sweep (`tutti-nodes`, `rt_no_alloc_dynamics`)
+/// states the same four.
+const CEILING_ULPS: f32 = 4.0;
+
+/// The most a sample may reach under a ceiling of `db`: the ceiling's amplitude plus
+/// [`CEILING_ULPS`] ulps, since the curve's roundings (the ceiling's amplitude, the divide, the
+/// product) can put a sample a few ulps over it.
+fn bound_of(db: f64) -> f64 {
+    amplitude(db) * (1.0 + f64::from(CEILING_ULPS * f32::EPSILON))
+}
+
+/// The design holds the figures its definition gives: the lookahead is `ceil(lookahead *
+/// rate)` frames and is the latency, the release is floored at 1 ms and a non-finite control
+/// is the default's (a ceiling only for a NaN).
 #[test]
-fn the_member_holds_the_figures_of_its_definition() {
+fn the_bank_holds_the_figures_of_its_definition() {
     // 5 ms is 220.5 frames at 44.1 kHz, rounded up; exact at the others.
     for (rate, frames) in [(44_100.0, 221), (48_000.0, 240), (96_000.0, 480)] {
-        let m = design().member(&LimiterControls::DEFAULT, SampleRate::of(rate));
-        assert_eq!(m.latency().get(), frames, "at {rate}");
-        assert_eq!(m.tail(Db(-60.0)), Ring::Finite(Seconds(0.0)));
+        let bank = runner_at(&LimiterControls::DEFAULT, SampleRate::of(rate));
+        assert_eq!(bank.latency().get(), frames, "at {rate}");
     }
     // A lookahead under one frame is one frame: the window rounds up.
-    let m = LimiterFamily::new(BusTopology::MONO, Lookahead::of(Seconds(1e-9)))
-        .member(&LimiterControls::DEFAULT, RATE);
-    assert_eq!(m.latency().get(), 1);
+    let bank = LimiterBank::new(ChannelLayout::MONO, Lookahead::of(Seconds(1e-9)), RATE);
+    assert_eq!(bank.latency().get(), 1);
 
-    let m = design().member(&controls(-12.0, -3.0, 0.0002), RATE);
+    let m = Design::of(&controls(-12.0, -3.0, 0.0002), RATE);
     assert_eq!(
-        m.release(),
-        Seconds(0.001),
+        m.release,
+        Seconds(0.001).one_pole_coeff(RATE),
         "a release under 1 ms reads as 1 ms"
     );
-    assert_eq!((m.threshold(), m.ceiling()), (Db(-12.0), Db(-3.0)));
+    assert_eq!((m.threshold, m.ceiling), (Db(-12.0), Db(-3.0)));
 
     let d = LimiterControls::DEFAULT;
-    let m = design().member(
+    let m = Design::of(
         &LimiterControls {
             threshold: Db(f32::NAN),
             ceiling: Db(f32::NAN),
@@ -210,34 +180,27 @@ fn the_member_holds_the_figures_of_its_definition() {
         RATE,
     );
     assert_eq!(
-        (m.threshold(), m.ceiling(), m.release()),
-        (d.threshold, d.ceiling, d.release)
+        (m.threshold, m.ceiling, m.release),
+        (d.threshold, d.ceiling, d.release.one_pole_coeff(RATE))
     );
     for inf in [f32::INFINITY, f32::NEG_INFINITY] {
-        let m = design().member(
+        let m = Design::of(
             &LimiterControls {
                 ceiling: Db(inf),
                 ..d
             },
             RATE,
         );
-        assert_eq!(m.ceiling(), Db(inf), "`+-inf` are ceilings");
-        let m = design().member(
+        assert_eq!(m.ceiling, Db(inf), "`+-inf` are ceilings");
+        let m = Design::of(
             &LimiterControls {
                 threshold: Db(inf),
                 ..d
             },
             RATE,
         );
-        assert_eq!(m.threshold(), Db(inf), "`+-inf` are thresholds");
+        assert_eq!(m.threshold, Db(inf), "`+-inf` are thresholds");
     }
-}
-
-/// The recurrence adds no latency of its own: the lookahead is the member's, and a node
-/// that sums the two is told it once.
-#[test]
-fn the_recurrence_adds_no_latency_of_its_own() {
-    assert_eq!(runner(&LimiterControls::DEFAULT).latency().get(), 0);
 }
 
 /// An independent figure for every output sample, from the definition and not from the
@@ -339,17 +302,15 @@ fn the_output_is_the_delayed_input_scaled_by_the_window_minimum_of_the_envelope(
     }
 }
 
-/// The output never exceeds the ceiling, at every block length, for loud input: nothing
-/// is allowed past it (a gain divide and a product can in principle round one ulp
-/// past, so the bound has two ulps' room), whatever the ceiling's order against the
-/// threshold.
+/// The output stays within the ceiling's bound ([`bound_of`]), at every block length, for loud
+/// input, whatever the ceiling's order against the threshold.
 #[test]
-fn the_output_never_exceeds_the_ceiling() {
+fn the_output_stays_within_the_ceiling_bound() {
     let x = [noise(5, 20_000, 2.0), noise(6, 20_000, 1.4)];
     for (threshold, ceiling, release) in
         [(-12.0, -6.0, 0.05), (-20.0, -3.0, 0.2), (-3.0, -9.0, 0.01)]
     {
-        let bound = amplitude(ceiling) * (1.0 + 2.0 * f64::from(f32::EPSILON));
+        let bound = bound_of(ceiling);
         for block in [1, 7, 64, 256] {
             let mut k = runner(&controls(threshold as f32, ceiling as f32, release));
             let out = run_in(&mut k, &[&x[0], &x[1]], [None, None], block);
@@ -541,13 +502,13 @@ fn the_attack_is_instant_and_the_release_is_one_pole() {
 /// A threshold and a ceiling lane are read at every frame, not once per block: a ceiling
 /// that alternates per frame bounds each output sample by its own frame's ceiling (the
 /// sample a lookahead ago, which that frame's gain was made for), and a frame the lane
-/// leaves non-finite is bounded by the member's ceiling and does not poison the gain.
+/// leaves non-finite is bounded by the aimed ceiling and does not poison the gain.
 #[test]
 fn the_ceiling_lane_bounds_each_sample_by_its_own_frames_ceiling() {
     let n = 12_000;
     let x = noise(11, n, 1.5);
-    // The member's ceiling is 0 dB, which the lane's -20 and -6 dB are under; a NaN frame
-    // is the member's.
+    // The aimed ceiling is 0 dB, which the lane's -20 and -6 dB are under; a NaN frame
+    // is the aimed one.
     let c = controls(-30.0, 0.0, 0.01);
     let lane: Vec<f32> = (0..n)
         .map(|i| match i % 8 {
@@ -564,7 +525,7 @@ fn the_ceiling_lane_bounds_each_sample_by_its_own_frames_ceiling() {
             amplitude(0.0)
         } else {
             amplitude(f64::from(lane[i]))
-        } * (1.0 + 4.0 * f64::from(f32::EPSILON));
+        } * (1.0 + f64::from(CEILING_ULPS * f32::EPSILON));
         let got = f64::from(out[0][i + L]);
         assert!(got.is_finite(), "frame {i}: {got}");
         assert!(
@@ -583,7 +544,7 @@ fn the_ceiling_lane_bounds_each_sample_by_its_own_frames_ceiling() {
 /// The threshold lane is the threshold of its frame: a quiet signal is moved by the
 /// drive, so a lane at -30 dB and a base at -10 dB give a drive of 24 dB against 4 dB,
 /// and a lane that changes inside a block (not at a block's edge) changes the gain there.
-/// A frame the lane leaves non-finite is the member's threshold.
+/// A frame the lane leaves non-finite is the aimed threshold.
 #[test]
 fn the_threshold_lane_is_read_per_frame_and_a_non_finite_frame_is_the_members() {
     let n = 12_000;
@@ -611,7 +572,7 @@ fn the_threshold_lane_is_read_per_frame_and_a_non_finite_frame_is_the_members() 
     let thr = vec![-20.0f32; n];
     let mut k = runner(&c);
     let out = run_in(&mut k, &[&loud, &loud], [Some(&thr), Some(&ceiling)], 64);
-    let bound = amplitude(-12.0) * (1.0 + 4.0 * f64::from(f32::EPSILON));
+    let bound = bound_of(-12.0);
     assert!(out[0].iter().all(|&s| f64::from(s).abs() <= bound));
 }
 
@@ -626,10 +587,10 @@ fn a_moved_ceiling_lands_at_once() {
     let (old, new) = (controls(-12.0, -3.0, 0.1), controls(-12.0, -18.0, 0.1));
     let mut k = runner(&old);
     let mut out = run(&mut k, &[&x[..at], &x[..at]]).remove(0);
-    k.retarget(&design().member(&new, RATE));
+    k.aim(&new);
     out.extend(run(&mut k, &[&x[at..], &x[at..]]).remove(0));
 
-    let bound = amplitude(-18.0) * (1.0 + 4.0 * f64::from(f32::EPSILON));
+    let bound = bound_of(-18.0);
     // What was fed from the retarget on leaves a lookahead later, every frame under it.
     for (i, &s) in out.iter().enumerate().skip(at + L) {
         assert!(f64::from(s).abs() <= bound, "frame {i}: {s} over {bound}");
@@ -642,8 +603,8 @@ fn a_moved_ceiling_lands_at_once() {
     assert!(before > 2.0 * bound, "{before}");
 }
 
-/// A reset clears the envelope and the delay: the realization renders what a fresh one
-/// does, and nothing of the audio before it is heard after (the delay does not hold it).
+/// A reset clears the envelope and the delay: nothing of the audio before it is heard after
+/// (the delay does not hold it).
 #[test]
 fn a_reset_empties_the_delay() {
     let mut k = runner(&controls(-6.0, -6.0, 0.05));
@@ -661,7 +622,7 @@ fn a_reset_empties_the_delay() {
 #[test]
 fn hostile_controls_render_finite() {
     let x = noise(15, 4_000, 1.0);
-    for c in design().hostile() {
+    for c in hostile() {
         let mut k = runner(&c);
         let out = run_mono(&mut k, &x);
         assert!(out.iter().all(|s| s.is_finite()), "{c:?}");
@@ -692,5 +653,333 @@ fn a_lookahead_keeps_the_range_checked_shape() {
     assert_eq!(
         Lookahead::try_from(Seconds(-1.0)),
         Err(LookaheadError(Seconds(-1.0)))
+    );
+}
+
+/// The ceiling bounds the **sample** peak of the output: a full-scale square, an impulse train
+/// and a burst of 1e30 all leave under it at every ceiling from -20 to 0 dB (a gain divide
+/// and a product can round one ulp past, so the bound has two ulps' room). It is not a
+/// true-peak limit: the bound is on the samples, which is what the brickwall's clamp bounds
+/// too.
+#[test]
+fn a_square_an_impulse_train_and_a_burst_stay_under_the_ceiling() {
+    let n = 12_000;
+    let square: Vec<f32> = (0..n)
+        .map(|i| if (i / 50) % 2 == 0 { 1.0 } else { -1.0 })
+        .collect();
+    let train: Vec<f32> = (0..n)
+        .map(|i| if i % 997 == 0 { 8.0 } else { 0.0 })
+        .collect();
+    let burst: Vec<f32> = (0..n)
+        .map(|i| {
+            if (4000..4100).contains(&i) {
+                1e30 * if i % 2 == 0 { 1.0 } else { -1.0 }
+            } else {
+                0.01
+            }
+        })
+        .collect();
+    for ceiling in [-20.0f64, -6.0, -0.3, 0.0] {
+        let bound = bound_of(ceiling);
+        for (name, x) in [("square", &square), ("train", &train), ("burst", &burst)] {
+            for block in [1, 33, 256] {
+                let mut k = runner(&controls(-12.0, ceiling as f32, 0.05));
+                let out = run_in(&mut k, &[x, x], [None, None], block);
+                let peak = out
+                    .iter()
+                    .flatten()
+                    .map(|&s| f64::from(s).abs())
+                    .fold(0.0, f64::max);
+                assert!(
+                    peak <= bound,
+                    "{name} at {ceiling} dB, block {block}: peak {peak} over {bound}"
+                );
+            }
+        }
+    }
+}
+
+/// The reduction begins `lookahead` frames before the peak reaches the output: the gain on
+/// the sample `j` frames before a peak is already the peak's, for every `j` up to the
+/// lookahead, and the sample before that is untouched. (The same figure, measured on the
+/// output of a signal at 0.1 with one peak of 1.)
+#[test]
+fn the_reduction_begins_a_lookahead_before_the_peak_leaves() {
+    let mut x = vec![0.1f32; 20_000];
+    let peak_at = 10_000;
+    x[peak_at] = 1.0;
+    let mut k = runner(&controls(-6.0, -6.0, 0.05));
+    let out = run_mono(&mut k, &x);
+    let g0 = amplitude(-6.0);
+    let gain = |i: usize| f64::from(out[i + L]) / f64::from(x[i]);
+    assert!((gain(peak_at) / g0 - 1.0).abs() < 1e-5);
+    assert!((gain(peak_at - L) / g0 - 1.0).abs() < 1e-5, "L before");
+    assert!(gain(peak_at - L - 1) > 0.99, "L + 1 before");
+}
+
+/// The render does not depend on how the stream is cut: calls of 1, 7, 33, 64, 100 and 255
+/// frames give the bits of one call, with both lanes and a moving release.
+#[test]
+fn a_split_stream_renders_the_bits_of_the_whole() {
+    let n = 4000;
+    let audio = [noise(1, n, 1.4), noise(2, n, 0.9)];
+    let thr: Vec<f32> = (0..n).map(|i| -20.0 + (i % 500) as f32 * 0.03).collect();
+    let ceil: Vec<f32> = (0..n).map(|i| -3.0 - (i % 300) as f32 * 0.02).collect();
+    let render = |block: usize| {
+        let mut k = runner(&controls(-12.0, -6.0, 0.05));
+        run_in(
+            &mut k,
+            &[&audio[0], &audio[1]],
+            [Some(&thr), Some(&ceil)],
+            block,
+        )
+    };
+    let whole = render(n);
+    for block in [1, 7, 33, 64, 100, 255] {
+        assert_eq!(render(block), whole, "blocks of {block}");
+    }
+}
+
+/// A reset bank renders as a fresh one, bit for bit, though the controls moved meanwhile
+/// (the design is kept, the envelope and the rings are not).
+#[test]
+fn a_reset_bank_renders_as_a_fresh_one() {
+    let c = controls(-12.0, -6.0, 0.05);
+    let x = noise(3, 3000, 1.5);
+    let mut worn = runner(&c);
+    let _ = run_mono(&mut worn, &x);
+    worn.reset();
+    let mut fresh = runner(&c);
+    assert_eq!(run_mono(&mut worn, &x), run_mono(&mut fresh, &x));
+}
+
+/// A clone continues exactly where the original is, and shares nothing with it.
+#[test]
+fn a_clone_continues_identically_and_shares_nothing() {
+    let x = noise(4, 3000, 1.5);
+    let mut a = runner(&controls(-12.0, -6.0, 0.05));
+    let _ = run_mono(&mut a, &x);
+    let mut b = a.clone();
+    let from_a = run_mono(&mut a, &x);
+    assert_eq!(run_mono(&mut b, &x), from_a);
+}
+
+/// Over a grid and seeded draws of every control, the output stays within the ceiling's bound
+/// ([`bound_of`]), whatever the threshold's order against it and the release.
+#[test]
+fn every_reachable_limiter_stays_within_its_ceiling_bound() {
+    let x = [noise(31, 3_000, 2.0), noise(32, 3_000, 1.2)];
+    for c in reachable() {
+        let bound = bound_of(f64::from(c.ceiling.get()));
+        let mut k = runner(&c);
+        let out = run(&mut k, &[&x[0], &x[1]]);
+        let peak = out
+            .iter()
+            .flatten()
+            .map(|&s| f64::from(s).abs())
+            .fold(0.0, f64::max);
+        assert!(peak <= bound, "{c:?}: peak {peak} over {bound}");
+    }
+}
+
+/// A finite lane value of any size is a level and not an overflow: a ceiling lane of +-1e30 dB
+/// and a threshold lane of -1e3, -1e6 and -1e10 dB leave the render finite (an envelope that
+/// took an infinite target would keep it, `toward(inf, inf)` being NaN), and a threshold far
+/// under the ceiling still puts the output on the ceiling: the gain is the ceiling over the
+/// peak, not the difference of two enormous levels.
+#[test]
+fn a_hostile_lane_is_clamped_and_does_not_latch_or_lose_the_ceiling() {
+    let n = 4_000;
+    let x = [noise(41, n, 1.5), noise(42, n, 1.0)];
+    for ceiling in [1.0e30f32, -1.0e30] {
+        let lane = vec![ceiling; n];
+        let mut k = runner(&controls(-12.0, -6.0, 0.05));
+        let out = run_in(&mut k, &[&x[0], &x[1]], [None, Some(&lane)], 64);
+        assert!(
+            out.iter().flatten().all(|s| s.is_finite()),
+            "ceiling lane {ceiling}"
+        );
+        // The bank still works after it: a finite lane is limited to its own ceiling.
+        let sane = vec![-6.0f32; n];
+        let after = run_in(&mut k, &[&x[0], &x[1]], [None, Some(&sane)], 64);
+        // The first `L` frames are the audio the hostile lane's gain was made for.
+        let peak = after
+            .iter()
+            .flat_map(|c| &c[L..])
+            .map(|&s| f64::from(s).abs())
+            .fold(0.0, f64::max);
+        assert!(
+            peak <= bound_of(-6.0) && peak > 0.9 * amplitude(-6.0),
+            "{ceiling}: {peak}"
+        );
+    }
+    for threshold in [-1.0e3f32, -1.0e6, -1.0e10] {
+        let lane = vec![threshold; n];
+        let mut k = runner(&controls(-12.0, -6.0, 0.05));
+        let out = run_in(&mut k, &[&x[0], &x[1]], [Some(&lane), None], 64);
+        let peak = out
+            .iter()
+            .flatten()
+            .map(|&s| f64::from(s).abs())
+            .fold(0.0, f64::max);
+        assert!(
+            peak <= bound_of(-6.0) && peak > 0.95 * amplitude(-6.0),
+            "threshold lane {threshold}: peak {peak}, the ceiling {}",
+            amplitude(-6.0)
+        );
+    }
+}
+
+/// A cell threshold of `-inf` or far under -758 dB leaves the output under the ceiling: the
+/// boost under the threshold is held to the ceiling over the (clamped) threshold amplitude,
+/// not the 1.175 a clamped gap would give, and a ceiling of `-inf` mutes. Silence, tiny
+/// samples at the clamp (1e-38 to 1.2e-38, where `over / peak` would overflow at a boosted
+/// ceiling) and a loud signal, at ceilings 0, 12 and 20 dB and `-inf`.
+#[test]
+fn a_threshold_past_the_clamp_does_not_overshoot_the_ceiling() {
+    let n = 3_000;
+    let mut x = noise(43, n, 1.0);
+    x[100] = 1.0e-38;
+    x[101] = 1.1e-38;
+    x[102] = 1.2e-38;
+    for threshold in [f32::NEG_INFINITY, -800.0, -758.0, -2000.0] {
+        for ceiling in [0.0f32, f32::NEG_INFINITY, 12.0, 20.0] {
+            let mut k = runner(&controls(threshold, ceiling, 0.05));
+            for scale in [1.0f32, 1.0e-30, 1.0e-38] {
+                let scaled: Vec<f32> = x.iter().map(|v| v * scale).collect();
+                let out = run_mono(&mut k, &scaled);
+                let peak = out.iter().map(|&s| f64::from(s).abs()).fold(0.0, f64::max);
+                let bound = if ceiling.is_finite() {
+                    bound_of(f64::from(ceiling))
+                } else {
+                    0.0
+                };
+                assert!(
+                    peak <= bound,
+                    "threshold {threshold}, ceiling {ceiling}, scale {scale}: peak {peak} over {bound}"
+                );
+            }
+        }
+    }
+}
+
+/// An infinite input sample reads as the largest finite level: every output frame is finite
+/// (the sample's own frame leaves at about the ceiling, `inf` held to `f32::MAX` before the
+/// gain), the following finite audio is limited as ever (a stuck or NaN envelope would
+/// not be), and a ceiling of `-inf` mutes it.
+#[test]
+fn an_infinite_sample_is_finite_on_its_own_frame_and_does_not_latch_the_envelope() {
+    let n = 6_000;
+    let mut x = noise(44, n, 0.5);
+    x[1000] = f32::INFINITY;
+    x[1001] = f32::NEG_INFINITY;
+    let mut k = runner(&controls(-12.0, -6.0, 0.01));
+    let out = run_mono(&mut k, &x);
+    assert!(out.iter().all(|s| s.is_finite()), "every frame is finite");
+    // The infinities leave on frames 1000 + L and 1001 + L, at the ceiling.
+    assert!(f64::from(out[1000 + L].abs()) <= bound_of(-6.0));
+    assert!(f64::from(out[1001 + L].abs()) <= bound_of(-6.0));
+    // The audio after is limited to the ceiling's bound and loud enough to be limited (the
+    // input is 0.5 under a -6 dB ceiling at threshold -12 dB: it settles on 0.5 * drive).
+    let tail = &out[2000 + L..];
+    let peak = tail.iter().map(|&s| f64::from(s).abs()).fold(0.0, f64::max);
+    assert!(
+        peak <= bound_of(-6.0) && peak > 0.2,
+        "the tail: peak {peak}"
+    );
+    let mut k = runner(&controls(-12.0, f32::NEG_INFINITY, 0.01));
+    let out = run_mono(&mut k, &x);
+    assert!(out.iter().all(|&s| s == 0.0), "a ceiling of -inf mutes it");
+}
+
+/// The aimed ceiling and threshold are held like a lane's: a ceiling cell of +inf or 1e30 dB
+/// with a threshold lane and no ceiling lane (the fallback path) leaves the render finite
+/// and the next sane ceiling limited to itself; and the quiet signal's gain is not `inf * 0`.
+#[test]
+fn a_hostile_aimed_ceiling_read_with_a_lane_is_clamped_too() {
+    let n = 4_000;
+    let x = [noise(45, n, 1.5), noise(46, n, 1.0)];
+    let thr = vec![-20.0f32; n];
+    for ceiling in [f32::INFINITY, 1.0e30] {
+        let mut k = runner(&controls(-12.0, ceiling, 0.05));
+        let mut silent_then_loud = vec![0.0f32; 500];
+        silent_then_loud.extend_from_slice(&x[0][..n - 500]);
+        let out = run_in(&mut k, &[&silent_then_loud, &x[1]], [Some(&thr), None], 64);
+        assert!(
+            out.iter().flatten().all(|s| s.is_finite()),
+            "ceiling {ceiling}"
+        );
+        k.aim(&controls(-12.0, -6.0, 0.05));
+        let after = run_in(&mut k, &[&x[0], &x[1]], [Some(&thr), None], 64);
+        let peak = after
+            .iter()
+            .flat_map(|c| &c[L..])
+            .map(|&s| f64::from(s).abs())
+            .fold(0.0, f64::max);
+        assert!(
+            peak <= bound_of(-6.0) && peak > 0.9 * amplitude(-6.0),
+            "{ceiling}: {peak}"
+        );
+    }
+}
+
+/// A limiter does not park: after `L` frames of silence the output is exactly zero, and a gap
+/// of digital silence at least a lookahead long leaves the release running (it is not reset
+/// to full drive): quiet audio after a 6 ms gap is still being scaled by the envelope the
+/// reduction left, not by the drive.
+#[test]
+fn the_output_is_silent_a_lookahead_after_the_input_and_the_release_runs_on() {
+    let mut x = vec![1.0f32; 2_000];
+    x.extend(vec![0.0f32; 300]);
+    x.extend(vec![0.05f32; 4_000]);
+    let mut k = runner(&controls(-6.0, -6.0, 0.5));
+    let out = run_mono(&mut k, &x);
+    // The gap, 300 frames, leaves its own `L` frames silent from where the loud audio ends
+    // leaving the delay: frames 2000 + L .. 2300 + L hold the gap's silence.
+    assert!(out[2000 + L..2300 + L].iter().all(|&s| s == 0.0));
+    // The quiet audio leaves at 2300 + L at the release's gain (about -6 dB a half second
+    // from full drive), not at the drive's unity.
+    let first = f64::from(out[2300 + L + 10]) / 0.05;
+    assert!(
+        first < 0.6,
+        "the release ran on across the gap: gain {first}"
+    );
+}
+
+/// The aimed value a frame falls back to keeps its documented meaning with a lane driven: an
+/// aimed ceiling of `-inf` mutes exactly (a gain of 0, not the -300 dB a lane value is held
+/// to), an aimed threshold of `+inf` is a gain of 0 whatever the ceiling lane says, and one of
+/// `-inf` limits every signal to the ceiling.
+#[test]
+fn the_aimed_extremes_keep_their_meaning_on_the_lane_path() {
+    let n = 3_000;
+    let x = [noise(47, n, 1.5), noise(48, n, 1.0)];
+    let thr = vec![-20.0f32; n];
+    let ceil = vec![-6.0f32; n];
+
+    let mut k = runner(&controls(-12.0, f32::NEG_INFINITY, 0.05));
+    let out = run_in(&mut k, &[&x[0], &x[1]], [Some(&thr), None], 64);
+    assert!(
+        out.iter().flatten().all(|&s| s == 0.0),
+        "a -inf ceiling mutes exactly"
+    );
+
+    let mut k = runner(&controls(f32::INFINITY, -6.0, 0.05));
+    let out = run_in(&mut k, &[&x[0], &x[1]], [None, Some(&ceil)], 64);
+    assert!(
+        out.iter().flatten().all(|&s| s == 0.0),
+        "a +inf threshold is a gain of 0"
+    );
+
+    let mut k = runner(&controls(f32::NEG_INFINITY, -6.0, 0.05));
+    let out = run_in(&mut k, &[&x[0], &x[1]], [None, Some(&ceil)], 64);
+    let peak = out
+        .iter()
+        .flat_map(|c| &c[L..])
+        .map(|&s| f64::from(s).abs())
+        .fold(0.0, f64::max);
+    assert!(
+        peak <= bound_of(-6.0) && peak > 0.9 * amplitude(-6.0),
+        "a -inf threshold limits everything: peak {peak}"
     );
 }

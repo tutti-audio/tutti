@@ -8,7 +8,6 @@ use crate::MidiSession;
 use crate::session::Polled;
 use crate::test_support::{FakeBackend, FakeCounters, endpoint};
 use crate::{HardwareMidiInputs, Pushed};
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_fixtures::midi;
@@ -35,6 +34,8 @@ struct Wire {
     /// The device's own state, which answers what it is sent.
     device: Endpoint,
     start: Instant,
+    /// The inlet of the input a helper connected, for a test that reads the graph.
+    inlet: Option<tutti_graph::EventInletNode>,
 }
 
 /// The stream reports among what a poll returned.
@@ -50,11 +51,8 @@ fn streams(polled: impl IntoIterator<Item = Polled>) -> Vec<(DeviceId, DeviceStr
 
 fn session_over(os: UmpCapability, direction: PortDirection, device: Endpoint) -> Wire {
     let (backend, counters) = FakeBackend::build_with(vec![], vec![], usize::MAX);
-    let inlets = tutti_midi_runtime::DeviceInlets::new(
-        NonZeroUsize::new(4).unwrap(),
-        tutti_graph::EventCapacity::of(64),
-        Duration::ZERO,
-    );
+    let inlets =
+        tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
     let session = MidiSession::open_over(backend, inlets).unwrap();
     let mut info = endpoint(7, "Wire");
     info.capability = os;
@@ -72,10 +70,23 @@ fn session_over(os: UmpCapability, direction: PortDirection, device: Endpoint) -
         raw: EndpointId::from_raw(7),
         device,
         start: Instant::now(),
+        inlet: None,
     }
 }
 
 impl Wire {
+    /// Connects the wire's input, keeping its inlet so what the device sends
+    /// has somewhere to go.
+    fn open(&mut self, timing: InputTiming) {
+        if let crate::Connected::Opened(inlet) = self
+            .session
+            .connect_input(&self.id.clone(), timing)
+            .unwrap()
+        {
+            self.inlet = Some(inlet);
+        }
+    }
+
     fn at(&self, ms: u64) -> Instant {
         self.start + Duration::from_millis(ms)
     }
@@ -169,9 +180,7 @@ fn a_device_that_answers_is_negotiated_onto_midi2_with_jr_off() {
         offering_both(),
     );
     // The OS says MIDI 1.0 with no blocks: not a UMP Endpoint, nothing asked.
-    wire.session
-        .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+    wire.open(InputTiming::Arrival);
     assert_eq!(
         wire.session.stream(&wire.id).unwrap().basis(),
         Basis::Described
@@ -182,9 +191,7 @@ fn a_device_that_answers_is_negotiated_onto_midi2_with_jr_off() {
         PortDirection::Duplex,
         offering_both(),
     );
-    wire.session
-        .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+    wire.open(InputTiming::Arrival);
     assert_eq!(
         wire.session.stream(&wire.id),
         None,
@@ -249,9 +256,7 @@ fn a_device_that_offers_only_midi1_stays_in_midi1() {
     })
     .with_function_block(block());
     let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
-    wire.session
-        .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+    wire.open(InputTiming::Arrival);
     let mut all = Vec::new();
     let mut settled = Vec::new();
     for ms in 0..4 {
@@ -279,9 +284,7 @@ fn a_device_that_offers_only_midi1_stays_in_midi1() {
 fn a_silent_device_settles_as_the_os_describes_it() {
     let silent = Endpoint::new(Capabilities::default());
     let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, silent);
-    wire.session
-        .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+    wire.open(InputTiming::Arrival);
 
     let step = STEP_TIMEOUT.as_millis() as u64;
     let mut sent = 0;
@@ -320,9 +323,7 @@ fn a_midi1_port_is_not_sent_stream_messages_and_is_described_at_once() {
         PortDirection::Duplex,
         Endpoint::new(Capabilities::default()),
     );
-    wire.session
-        .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+    wire.open(InputTiming::Arrival);
     let stream = wire.session.stream(&wire.id).expect("settled at connect");
     assert_eq!(stream.basis(), Basis::Described);
     assert_eq!(stream.config().protocol, Protocol::Midi1);
@@ -344,9 +345,13 @@ fn midi1_wire() -> Wire {
         PortDirection::Duplex,
         Endpoint::new(Capabilities::default()),
     );
-    wire.session
+    if let crate::Connected::Opened(inlet) = wire
+        .session
         .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+        .unwrap()
+    {
+        wire.inlet = Some(inlet);
+    }
     wire
 }
 
@@ -479,9 +484,7 @@ fn a_refused_output_does_not_fail_the_input_and_nothing_is_asked() {
         Endpoint::new(Capabilities::default()),
     );
     wire.counters.refuse_output_opens(true);
-    wire.session
-        .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+    wire.open(InputTiming::Arrival);
     assert!(wire.session.is_input_connected(&wire.id));
     let ms = INQUIRY_TIMEOUT.as_millis() as u64;
     for step in 0..4 {
@@ -595,17 +598,14 @@ fn only_an_identity_reply_inside_the_inquiry_answers_it() {
 fn sysex_is_copied_to_the_stream_ring_while_asked_and_always_reaches_the_graph() {
     use crate::testing::Rig;
 
-    let inlets = tutti_midi_runtime::DeviceInlets::new(
-        NonZeroUsize::new(2).unwrap(),
-        tutti_graph::EventCapacity::of(64),
-        Duration::ZERO,
-    );
+    let inlets =
+        tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
     let ports = Arc::new(HardwareMidiInputs::new(Arc::clone(&inlets)));
     let mut rig = Rig::over(&inlets, Instant::now());
     rig.run(1);
-    let mut producer = ports.open_input_port("dev").unwrap();
-    let port = producer.slot();
-    rig.apply();
+    let (mut producer, inlet) = ports.open_input_port("dev");
+    let port = producer.port();
+    rig.attach(inlet);
     let packets = identity_reply(0);
     let arrival = rig.origin + Duration::from_millis(1);
 
@@ -635,9 +635,7 @@ fn an_endpoint_with_no_output_is_described_not_waited_for() {
         PortDirection::Input,
         Endpoint::new(Capabilities::default()),
     );
-    wire.session
-        .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+    wire.open(InputTiming::Arrival);
     let stream = wire.session.stream(&wire.id).expect("settled at connect");
     assert_eq!(stream.basis(), Basis::Described);
     assert_eq!(stream.config().protocol, Protocol::Midi2);
@@ -649,18 +647,15 @@ fn an_endpoint_with_no_output_is_described_not_waited_for() {
 fn stream_messages_never_reach_the_graph() {
     use crate::testing::Rig;
 
-    let inlets = tutti_midi_runtime::DeviceInlets::new(
-        NonZeroUsize::new(2).unwrap(),
-        tutti_graph::EventCapacity::of(64),
-        Duration::ZERO,
-    );
+    let inlets =
+        tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
     let ports = Arc::new(HardwareMidiInputs::new(Arc::clone(&inlets)));
     let start = Instant::now();
     let mut rig = Rig::over(&inlets, start);
     rig.run(1);
-    let mut producer = ports.open_input_port("dev").unwrap();
-    let port = producer.slot();
-    rig.apply();
+    let (mut producer, inlet) = ports.open_input_port("dev");
+    let port = producer.port();
+    rig.attach(inlet);
     let stream = tutti_ump::Ump::from(Message::Stream(Stream::EndpointDiscovery {
         version: tutti_midi_device::UMP_VERSION,
         filter: tutti_ump::DiscoveryFilter {
@@ -796,9 +791,7 @@ fn the_output_follows_the_negotiated_protocol() {
     // A device that has MIDI 2.0 on offer but is in MIDI 1.0; the session asks
     // for MIDI 2.0, so it ends in MIDI 2.0 ...
     let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
-    wire.session
-        .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+    wire.open(InputTiming::Arrival);
     wire.connect_output();
     let note = [(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 0xFFFF))];
     // ... but until then the output is what the OS said: MIDI 2.0.
@@ -839,9 +832,7 @@ fn jr_reaches_a_device_only_after_its_notification_enables_it() {
         PortDirection::Duplex,
         offering_both(),
     );
-    wire.session
-        .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+    wire.open(InputTiming::Arrival);
     let stream = settle(&mut wire);
     assert!(!stream.config().rx_jr);
     wire.connect_output();
@@ -880,9 +871,7 @@ fn static_blocks_are_not_re_read_and_others_are() {
     for is_static in [true, false] {
         let device = offering_both().with_static_function_blocks(is_static);
         let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
-        wire.session
-            .connect_input(&wire.id.clone(), InputTiming::Arrival)
-            .unwrap();
+        wire.open(InputTiming::Arrival);
         settle(&mut wire);
         send_ump(&wire, moved_block(6), 40);
         let changed = streams(wire.session.poll(wire.at(40)));
@@ -910,16 +899,13 @@ fn a_jr_message_a_device_sends_never_reaches_the_graph() {
 
     use tutti_ump::Utility;
 
-    let inlets = tutti_midi_runtime::DeviceInlets::new(
-        NonZeroUsize::new(2).unwrap(),
-        tutti_graph::EventCapacity::of(64),
-        Duration::ZERO,
-    );
+    let inlets =
+        tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
     let ports = Arc::new(HardwareMidiInputs::new(Arc::clone(&inlets)));
     let mut rig = Rig::over(&inlets, Instant::now());
     rig.run(1);
-    let mut producer = ports.open_input_port("dev").unwrap();
-    rig.apply();
+    let (mut producer, inlet) = ports.open_input_port("dev");
+    rig.attach(inlet);
     let note = midi::note_on(MidiChannel::FIRST, 60, 0x8000);
     let arrival = rig.origin + Duration::from_millis(1);
     for jr in [Utility::JrClock(10), Utility::JrTimestamp(20)] {
@@ -945,9 +931,7 @@ fn an_output_connected_after_the_settle_starts_in_the_settled_protocol() {
     })
     .with_function_block(block());
     let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
-    wire.session
-        .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+    wire.open(InputTiming::Arrival);
     assert_eq!(settle(&mut wire).config().protocol, Protocol::Midi1);
     wire.connect_output();
     wire.send(&[(Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 0xFFFF))]);
@@ -1014,9 +998,7 @@ fn an_endpoint_that_answers_declares_its_identity_and_product_instance_id() {
         .with_identity(identity())
         .with_instance_id(ProductInstanceId::new("SN-0042").unwrap());
     let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
-    wire.session
-        .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+    wire.open(InputTiming::Arrival);
     assert!(wire.session.learned(&wire.id).is_empty(), "not settled yet");
     let stream = settle(&mut wire);
     assert_eq!(stream.basis(), Basis::Negotiated);

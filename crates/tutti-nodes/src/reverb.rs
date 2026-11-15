@@ -233,7 +233,7 @@ enum Mode<C> {
 ///
 /// Per block the node reads its cells once ([`Params`]), and when
 /// the controls differ from the last block's it designs the [`Member`](Family::Member) **in
-/// place** into one it owns ([`Family::member_into`]: a network is about 56 KB,
+/// place** into one it owns ([`Family::member_into`]: a network is about 67 KB,
 /// too large to build on an audio thread) and calls [`Realized::retarget`], which
 /// moves the realization toward it. An unmodulated, unchanged reverb designs once.
 /// The audio thread is the only place that sees a modulated value (a lane

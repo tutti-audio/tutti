@@ -1,11 +1,11 @@
 //! The analytic queries of a [`Network`]: pure functions of the value.
 
-use tutti_types::{Db, Hz, Samples, Seconds};
+use tutti_types::{Db, Hz, SampleRate, SampleSpan, Samples, Seconds};
 
 use crate::{Ring, System};
 
 use super::gain::decay_seconds;
-use super::{AllPass, AllPassForm, Band, Fdn, Matrix, Network, Stage};
+use super::{AllPass, AllPassForm, Band, Fdn, Matrix, Network, Stage, energy};
 
 /// How far from 1 a gain may be and still be lossless.
 const LOSSLESS_TOLERANCE: f64 = 1e-6;
@@ -41,14 +41,17 @@ impl Fdn {
             Matrix::Diagonal | Matrix::Householder | Matrix::Hadamard => 0.0,
             Matrix::Reflection(v) => {
                 // `A Aᵀ - I = 4 (|v|² - 1) v vᵀ`.
-                let s: f64 = v.iter().map(|&x| f64::from(x) * f64::from(x)).sum();
-                let peak = v.iter().map(|&x| f64::from(x).abs()).fold(0.0, f64::max);
+                let s = energy(v);
+                let peak = v
+                    .iter()
+                    .map(|&x| f64::from(x.get()).abs())
+                    .fold(0.0, f64::max);
                 4.0 * (s - 1.0).abs() * peak * peak
             }
             Matrix::Circulant(c) => (0..n)
                 .map(|k| {
                     let r: f64 = (0..n)
-                        .map(|j| f64::from(c[j]) * f64::from(c[(j + k) % n]))
+                        .map(|j| f64::from(c[j].get()) * f64::from(c[(j + k) % n].get()))
                         .sum();
                     (r - delta(k, 0)).abs()
                 })
@@ -57,7 +60,7 @@ impl Fdn {
                 .flat_map(|i| (0..n).map(move |j| (i, j)))
                 .map(|(i, j)| {
                     let dot: f64 = (0..n)
-                        .map(|k| f64::from(a[i * n + k]) * f64::from(a[j * n + k]))
+                        .map(|k| f64::from(a[i * n + k].get()) * f64::from(a[j * n + k].get()))
                         .sum();
                     (dot - delta(i, j)).abs()
                 })
@@ -91,7 +94,7 @@ impl Fdn {
             if !self.matrix_fits(self.lines.len()) {
                 return libm::sqrt(n);
             }
-            let s: f64 = v.iter().map(|&x| f64::from(x) * f64::from(x)).sum();
+            let s = energy(v);
             return (1.0 - 2.0 * s).abs().max(1.0);
         }
         match self.orthogonality_error() {
@@ -99,12 +102,8 @@ impl Fdn {
             _ => match &self.matrix {
                 Matrix::Diagonal | Matrix::Householder | Matrix::Hadamard => libm::sqrt(n),
                 Matrix::Reflection(_) => libm::sqrt(n),
-                Matrix::Circulant(c) => {
-                    libm::sqrt(n * c.iter().map(|&x| f64::from(x) * f64::from(x)).sum::<f64>())
-                }
-                Matrix::Dense(a) => {
-                    libm::sqrt(a.iter().map(|&x| f64::from(x) * f64::from(x)).sum())
-                }
+                Matrix::Circulant(c) => libm::sqrt(n * energy(c)),
+                Matrix::Dense(a) => libm::sqrt(energy(a)),
             },
         }
     }
@@ -125,20 +124,14 @@ impl Fdn {
     }
 
     /// Whether every line can be analysed: a finite positive length (a
-    /// delay-free loop is not a loop), a finite modulation depth, and a nested
-    /// all-pass that is a lattice (the form this analysis models) with
-    /// `|g| < 1` and a finite non-negative delay.
+    /// delay-free loop is not a loop), and a nested all-pass that is a lattice
+    /// (the form this analysis models) with `|g| < 1`. (A span is finite and
+    /// non-negative by its type.)
     pub(super) fn lines_hold(&self) -> bool {
         self.lines.iter().all(|l| {
-            l.length.is_finite()
-                && l.length > 0.0
-                && l.modulation.depth.is_finite()
-                && l.diffuser.is_none_or(|d| {
-                    d.form == AllPassForm::Lattice
-                        && d.gain.abs() < 1.0
-                        && d.delay.is_finite()
-                        && d.delay >= 0.0
-                })
+            l.length > SampleSpan::ZERO
+                && l.diffuser
+                    .is_none_or(|d| d.form == AllPassForm::Lattice && d.gain.get().abs() < 1.0)
         })
     }
 
@@ -150,10 +143,11 @@ impl Fdn {
     /// the lines differ: use [`Network::tail`] where a figure
     /// must cover the ring. `m` is the effective length.
     #[must_use]
-    pub fn rt60(&self, band: Band, rate: f64) -> Seconds {
+    pub fn rt60(&self, band: Band, rate: SampleRate) -> Seconds {
+        let rate = rate.get();
         let lines = self.lines.iter().map(|l| {
             (
-                f64::from(l.effective_length()),
+                l.effective_frames(),
                 libm::log10(f64::from(l.absorption.gain(band).get())),
             )
         });
@@ -184,10 +178,10 @@ impl Fdn {
         let mut longest = 0.0f64;
         for l in self.lines.iter() {
             let peak = l.diffuser.map_or(0.0, |d| {
-                let g = f64::from(d.gain).abs();
-                f64::from(d.delay) * (1.0 + g) / (1.0 - g)
+                let g = f64::from(d.gain.get()).abs();
+                d.delay.get() * (1.0 + g) / (1.0 - g)
             });
-            let m = f64::from(l.length) + peak;
+            let m = l.length.get() + peak;
             let log_g = libm::log10(f64::from(l.absorption.gain(band).get()));
             if m.is_nan() || m <= 0.0 || log_g.is_nan() {
                 return None;
@@ -226,7 +220,8 @@ impl Fdn {
     /// [`rt60`](Self::rt60), the length-weighted mean, is not such a bound: for
     /// a mixing `A` with lines of different decay it can be shorter than the
     /// slowest line's.
-    fn rt60_bound(&self, band: Band, rate: f64) -> Seconds {
+    fn rt60_bound(&self, band: Band, rate: SampleRate) -> Seconds {
+        let rate = rate.get();
         if self.lines.is_empty() {
             return Seconds(0.0);
         }
@@ -293,7 +288,7 @@ impl Fdn {
     pub(super) fn transit(&self) -> f64 {
         self.lines
             .iter()
-            .map(|l| f64::from(l.effective_length()))
+            .map(|l| l.effective_frames())
             .fold(0.0, f64::max)
     }
 }
@@ -301,7 +296,7 @@ impl Fdn {
 /// Frames an all-pass keeps ringing: its delay times the trips its geometric
 /// train takes to fall to `amplitude` (infinity when `|g| >= 1`).
 fn all_pass_ring(a: &AllPass, amplitude: f64) -> f64 {
-    let g = f64::from(a.gain).abs();
+    let g = f64::from(a.gain.get()).abs();
     if g >= 1.0 {
         return f64::INFINITY;
     }
@@ -310,7 +305,7 @@ fn all_pass_ring(a: &AllPass, amplitude: f64) -> f64 {
     } else {
         libm::ceil(libm::log(amplitude) / libm::log(g))
     };
-    f64::from(a.delay) * (1.0 + trips)
+    a.delay.get() * (1.0 + trips)
 }
 
 impl Network {
@@ -331,7 +326,7 @@ impl Network {
     /// [`Fdn::rt60`]); [`tail`](Self::tail) is the figure that covers the ring.
     #[must_use]
     pub fn rt60(&self, band: Band) -> Seconds {
-        let rate = self.rate.get();
+        let rate = self.rate;
         let mut slowest = Seconds(0.0);
         for stage in self.stages.iter() {
             let r = match stage {
@@ -366,12 +361,8 @@ impl Network {
             .stages
             .iter()
             .map(|s| match s {
-                Stage::Fdn(f) => f
-                    .lines
-                    .iter()
-                    .map(|l| f64::from(l.effective_length()))
-                    .sum(),
-                Stage::AllPass(a) => a.iter().map(|a| f64::from(a.delay)).sum(),
+                Stage::Fdn(f) => f.lines.iter().map(|l| l.effective_frames()).sum(),
+                Stage::AllPass(a) => a.iter().map(|a| a.delay.get()).sum(),
                 Stage::Fir(s) => s.length.get() as f64,
                 Stage::Taps(_) => 0.0,
             })
@@ -407,35 +398,37 @@ impl Network {
     /// The shortest path from the input to the output, in frames: the
     /// pre-delay plus each stage's shortest path (a series all-pass has a
     /// direct term, zero; a line, its length; a tap, its delay; a FIR, its
-    /// onset). Infinity when a stage has no path.
+    /// onset). `None` when a stage has no path.
     #[must_use]
-    pub(crate) fn min_delay(&self) -> f32 {
-        let mut frames = self.pre_delay.get() as f32;
+    pub(crate) fn min_delay(&self) -> Option<SampleSpan> {
+        let mut frames = SampleSpan::from_samples(self.pre_delay);
         for stage in self.stages.iter() {
             frames += match stage {
-                Stage::Taps(t) => t.taps.iter().map(|t| t.delay).fold(f32::INFINITY, f32::min),
+                Stage::Taps(t) => t.taps.iter().map(|t| t.delay).reduce(SampleSpan::min),
                 // A form with a direct term (`-g`, or `-1`) is a path of no
                 // delay; a lattice at `g = 0` is a plain delay.
                 Stage::AllPass(a) => a
                     .iter()
-                    .map(|a| if a.has_direct_term() { 0.0 } else { a.delay })
-                    .fold(f32::INFINITY, f32::min),
-                Stage::Fdn(f) => f
-                    .lines
-                    .iter()
-                    .map(|l| l.length)
-                    .fold(f32::INFINITY, f32::min),
-                Stage::Fir(s) => s.onset.get() as f32,
-            };
+                    .map(|a| {
+                        if a.has_direct_term() {
+                            SampleSpan::ZERO
+                        } else {
+                            a.delay
+                        }
+                    })
+                    .reduce(SampleSpan::min),
+                Stage::Fdn(f) => f.lines.iter().map(|l| l.length).reduce(SampleSpan::min),
+                Stage::Fir(s) => Some(SampleSpan::from_samples(s.onset)),
+            }?;
         }
-        frames
+        Some(frames)
     }
 
     /// Whether the output can depend on the input of the same frame: the
     /// shortest path is under one frame. A wet-only design has none.
     #[must_use]
     pub fn has_direct_path(&self) -> bool {
-        self.min_delay() < 1.0
+        self.min_delay().is_some_and(|d| d < SampleSpan::of(1.0))
     }
 }
 
@@ -475,11 +468,7 @@ impl System for Network {
         for stage in self.stages.iter() {
             match stage {
                 Stage::Taps(t) => {
-                    frames += t
-                        .taps
-                        .iter()
-                        .map(|t| f64::from(t.delay))
-                        .fold(0.0, f64::max);
+                    frames += t.taps.iter().map(|t| t.delay.get()).fold(0.0, f64::max);
                 }
                 Stage::AllPass(a) => {
                     frames += a
@@ -493,9 +482,8 @@ impl System for Network {
                         return Ring::Unbounded;
                     }
                     for band in Band::ALL {
-                        let rate = self.rate.get();
-                        let seconds = f.rt60_bound(band, rate).get() * depth / 60.0
-                            + f.lag_extra_frames(band) / rate;
+                        let seconds = f.rt60_bound(band, self.rate).get() * depth / 60.0
+                            + f.lag_extra_frames(band) / self.rate.get();
                         decay = decay.max(seconds);
                     }
                 }
@@ -511,16 +499,13 @@ impl System for Network {
 
 fn fdn_density(f: &Fdn, rate: f64, t: f64) -> f64 {
     let n = f.lines.len() as f64;
-    let taus = f
-        .lines
-        .iter()
-        .map(|l| f64::from(l.effective_length()) / rate);
+    let taus = f.lines.iter().map(|l| l.effective_frames() / rate);
     if f.mixing() {
         let mean = taus.sum::<f64>() / n;
         let first = f
             .lines
             .iter()
-            .map(|l| f64::from(l.effective_length()) / rate)
+            .map(|l| l.effective_frames() / rate)
             .fold(f64::INFINITY, f64::min);
         if t < first || mean <= 0.0 {
             return 0.0;

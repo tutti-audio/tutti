@@ -13,7 +13,7 @@ use tutti_graph::GraphBuilder;
 use tutti_measure::{LoudnessConfig, measure_loudness};
 use tutti_nodes::testing::Osc;
 use tutti_transport::FrozenClock;
-use tutti_types::{ChannelLayout, Db, Hz, SampleRate, Seconds};
+use tutti_types::{Bed, ChannelLayout, Db, Hz, SampleRate, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -103,7 +103,7 @@ fn a_loudness_normalized_export_reports_the_gain_to_its_target() {
         .into_samples::<f32>()
         .map(Result::unwrap)
         .collect();
-    let meter = LoudnessConfig::new(RATE, ChannelLayout::STEREO);
+    let meter = LoudnessConfig::new(RATE, Bed::Stereo.topology()).unwrap();
     let written_loudness = measure_loudness(
         &meter,
         Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),

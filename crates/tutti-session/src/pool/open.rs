@@ -43,9 +43,12 @@ impl<'a> OpenCx<'a> {
 
     /// The id of a new resource: no other token of this session has it. The
     /// peer a stage opens takes its id here.
-    #[expect(
-        dead_code,
-        reason = "the pool's MIDI ports mint their ids here; no stage opens a peer yet"
+    #[cfg_attr(
+        not(feature = "midi-hardware"),
+        expect(
+            dead_code,
+            reason = "the pool's MIDI ports (feature `midi-hardware`) mint their ids here"
+        )
     )]
     pub(crate) fn mint_resource_id(&mut self) -> crate::ResourceId {
         self.ids.mint()

@@ -346,7 +346,11 @@ fn machine_control(to: Recipient) -> impl FnMut(&mut &[u8]) -> Res<Universal> {
         let sub_id = u7.parse_next(input)?.get();
         let rest = take_rest(input);
         match (sub_id, to) {
-            (0x06, _) => machine_control::commands(rest).map(Universal::MachineControl),
+            (0x06, _) => machine_control::commands(rest)
+                .map(Universal::MachineControl)
+                .or_else(|| {
+                    machine_control::truncated_segment(rest).map(Universal::MachineControlTruncated)
+                }),
             (0x07, Recipient::Device(_)) => {
                 machine_control::fields(rest).map(Universal::MachineControlResponse)
             }
