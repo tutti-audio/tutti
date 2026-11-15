@@ -2,7 +2,6 @@ use super::{bar_step, snap, whole_tick_step};
 
 /// The grid position nearest a tick (a tie later) is analytic: a step of 20
 /// from 0 puts 29 at 20, the tie 30 at 40, and 31 at 40.
-/// Spec: m2-104/7.5.3#4
 #[test]
 fn snap_takes_the_nearest_position_and_a_tie_later() {
     assert_eq!([29, 30, 31].map(|t| snap(t, 0, 20, u64::MAX)), [20, 40, 40]);
@@ -16,7 +15,6 @@ fn snap_takes_the_nearest_position_and_a_tie_later() {
 /// At the top of the range nothing overflows: the nearest position past `end`
 /// is the last one at or before it, and a tick past the last whole step of
 /// `u64` is clamped the same way.
-/// Spec: m2-104/7.5.3#4, m2-104/7.5.4#3
 #[test]
 fn snap_cannot_overflow_near_the_top_of_u64() {
     let top = u64::MAX - 3;
@@ -34,7 +32,6 @@ fn snap_cannot_overflow_near_the_top_of_u64() {
 /// 4/4 at 96 per quarter is a 384 tick bar, 6/8 is 3 quarters, 7/16 at 100
 /// per quarter is 175 ticks (7 sixteenths of 100 ticks per quarter, whole), and a
 /// quarter of 100 ticks has a clock grid every 25 ticks.
-/// Spec: m2-104/7.5.3#4, m2-104/7.5.4#3
 #[test]
 fn bar_and_clock_steps_are_whole_ticks() {
     assert_eq!(bar_step(96, 4, 2), 384);

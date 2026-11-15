@@ -1035,7 +1035,6 @@ fn an_endpoint_that_answers_declares_its_identity_and_product_instance_id() {
 /// The request to stop JR is made on the first poll of an episode, retried
 /// while the output refuses it, and not repeated once it is out until the
 /// episode ends.
-/// Spec: m2-104/7.2.2.3#2
 #[test]
 fn a_refused_stop_request_is_retried_until_it_goes_out() {
     use super::StopJr;

@@ -474,7 +474,8 @@ impl MidiFile {
         }
         let mut landings: Vec<Landing<'_>> = Vec::with_capacity(all.len());
         // The bar grids of the signatures that stand, the last being current.
-        let mut grids = vec![(0, bar_step(tpq, 4, 2))];
+        let four_four = (0, bar_step(tpq, 4, 2));
+        let mut grids = vec![four_four];
         let (mut last_tempo, mut last_signature) = (None::<usize>, None::<usize>);
         for (from, track, event) in all {
             let is_tempo = matches!(event, FileEvent::Meta(Meta::Tempo { .. }));
@@ -497,14 +498,14 @@ impl MidiFile {
                 }
                 last_tempo = Some(landings.len());
             } else if let Some(step) = bar {
-                let current = *grids.last().expect("the 4/4 grid is never popped");
+                let current = grids.last().copied().unwrap_or(four_four);
                 to = snapped(current);
                 if let Some(earlier) = last_signature.filter(|&i| landings[i].to == to) {
                     // The earlier signature is replaced, so the later one
                     // counts its bars from the signature before it.
                     landings[earlier].superseded = true;
                     grids.pop();
-                    to = snapped(*grids.last().expect("the 4/4 grid is never popped"));
+                    to = snapped(grids.last().copied().unwrap_or(four_four));
                 }
                 last_signature = Some(landings.len());
                 grids.push((to.0, step));

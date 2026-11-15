@@ -58,7 +58,11 @@ impl Supports {
         }
     }
 
-    /// As [`new`](Self::new), for a literal: panics with neither Protocol.
+    /// As [`new`](Self::new), for a literal.
+    ///
+    /// # Panics
+    ///
+    /// With neither Protocol.
     #[must_use]
     pub const fn of(capabilities: Capabilities) -> Self {
         match Self::new(capabilities) {
