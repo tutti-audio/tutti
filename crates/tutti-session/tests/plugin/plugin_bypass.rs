@@ -178,7 +178,7 @@ fn a_plugin_without_its_own_bypass_is_left_to_the_executor() {
         1.0f32.to_bits(),
         "the click is the executor's bypass line, ticks and all"
     );
-    let plugin = r.s.plugin(r.plugin).expect("hosted");
+    let plugin = r.s.plugin_view(r.plugin).expect("hosted");
     assert_eq!(plugin.handle().loaded().own_bypass, None);
     assert_eq!(plugin.bypass_writes_unapplied(), 0);
     assert_eq!(plugin.handle().bypassed(), None, "nothing to read back");

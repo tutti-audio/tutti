@@ -15,7 +15,8 @@ use tutti_buffers::InterleavedMut;
 use tutti_plugin::catalog::{Loadable, PluginRef};
 use tutti_plugin::handles::PluginClient;
 use tutti_plugin_types::{Normalized, ParamId};
-use tutti_session::{NodeMode, PluginLoadRequest, Session};
+use crate::pooled::{LoadPlugin, Spec};
+use tutti_session::{NodeMode, Session};
 use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples, Seconds};
 
 const BLOCK: usize = 512;
@@ -36,9 +37,9 @@ fn session_with_plugin() -> (Session, tutti_graph::NodeKey) {
         .expect("an offline session builds");
     let file = plugin_file();
     let plugin = s
-        .add_plugin_blocking(
+        .load_plugin_blocking(
             tutti_fixtures::main_thread(),
-            PluginLoadRequest::new(PluginRef::file(file).expect("a plugin file")),
+            Spec::new(PluginRef::file(file).expect("a plugin file")),
         )
         .expect("the shared plugin loads");
     let _ = s.update();
@@ -53,7 +54,7 @@ const BYPASS: ParamId = ParamId::new(5);
 
 /// The bypass the plugin holds now.
 fn told(s: &Session, node: tutti_graph::NodeKey) -> Option<f64> {
-    s.plugin(node)
+    s.plugin_view(node)
         .expect("hosted")
         .handle()
         .any_thread()
@@ -101,7 +102,7 @@ fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
         "the first plugin is bypassed"
     );
 
-    let outgoing_pid = s.plugin(node).expect("hosted").handle().server_pid();
+    let outgoing_pid = s.plugin_view(node).expect("hosted").handle().server_pid();
     let incoming = PluginClient::new(
         tutti_plugin::BridgeConfig::default(),
         &tutti_fixtures::detached_work(),
@@ -118,7 +119,7 @@ fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
         )
         .expect("the crossfade is accepted");
     // The record now holds the incoming plugin's handle, which is what is read.
-    let incoming_pid = s.plugin(node).expect("hosted").handle().server_pid();
+    let incoming_pid = s.plugin_view(node).expect("hosted").handle().server_pid();
     assert_ne!(
         incoming_pid, outgoing_pid,
         "the node's plugin is the new one"
@@ -144,7 +145,7 @@ fn a_restore_that_leaves_the_bypass_on_under_an_active_node_is_reconciled() {
         s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
         let _ = s.update();
     }
-    let handle = s.plugin(node).expect("hosted").handle().clone();
+    let handle = s.plugin_view(node).expect("hosted").handle().clone();
     handle
         .any_thread()
         .set_parameter_value(BYPASS, Normalized::of(1.0));
@@ -153,12 +154,12 @@ fn a_restore_that_leaves_the_bypass_on_under_an_active_node_is_reconciled() {
         "the plugin's own bypass went on"
     );
     let state = s
-        .plugin(node)
+        .plugin_view(node)
         .expect("hosted")
         .state()
         .save()
         .expect("saves");
-    s.plugin(node)
+    s.plugin_view(node)
         .expect("hosted")
         .state()
         .restore(tutti_fixtures::main_thread(), &state)
@@ -168,7 +169,7 @@ fn a_restore_that_leaves_the_bypass_on_under_an_active_node_is_reconciled() {
         "the session did not make the plugin's bypass the node's mode"
     );
     assert!(
-        s.plugin(node).expect("hosted").bypass_writes_unapplied() >= 1,
+        s.plugin_view(node).expect("hosted").bypass_writes_unapplied() >= 1,
         "the correction is counted"
     );
 }
