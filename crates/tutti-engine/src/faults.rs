@@ -239,7 +239,7 @@ impl StreamFaults {
 
     /// Records that a callback of this stream panicked, from the audio thread
     /// that caught it: `what` names the callback. Allocates nothing and never
-    /// waits (the message is dropped if another thread holds `last`). Raises
+    /// waits (the message is dropped if another thread holds `slots`). Raises
     /// the same latch a disconnect does, so
     /// [`OutputStream::is_running`](crate::OutputStream::is_running) reads
     /// `false` and a capture source answers `Failed`.
@@ -271,8 +271,9 @@ impl StreamFaults {
     ///   [`CallbackPanicked`](StreamFaultKind::CallbackPanicked)), nor an owned
     ///   message it could not free; it only counts.
     /// - A panic replaces any message. An owned one moves to `retired`, which
-    ///   the control side frees; if that is occupied (a second panic, which the
-    ///   latch prevents) the old message is leaked.
+    ///   the control side frees; if that is occupied (a second panic after an
+    ///   owned message was published since, which a latched stream does not
+    ///   reach in practice) the old message is leaked.
     fn publish_rt(&self, kind: StreamFaultKind, what: &'static str) {
         let place = |slots: &mut Slots| {
             let keep = kind == StreamFaultKind::Overrun

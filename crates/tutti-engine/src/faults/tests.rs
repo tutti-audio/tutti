@@ -160,3 +160,53 @@ fn an_overrun_keeps_a_latching_message_and_a_panic_replaces_a_lesser_one() {
         Some(StreamFaultKind::CallbackPanicked)
     );
 }
+
+/// **A panic retires the owned message it replaces** instead of dropping it
+/// on the render thread, and a control-side read frees it.
+#[test]
+fn a_panic_retires_an_owned_message_and_a_read_frees_it() {
+    let faults = StreamFaults::new();
+    faults.record(BackendErrorKind::Other, &"xrun");
+    faults.record_panic("panicked");
+    assert_eq!(
+        faults
+            .last_guard()
+            .retired
+            .as_ref()
+            .map(|f| f.message.clone()),
+        Some(Cow::Owned::<str>("xrun".to_string())),
+        "the replaced owned message is held aside"
+    );
+    let last = faults.last().expect("a fault");
+    assert_eq!(last.kind, StreamFaultKind::CallbackPanicked);
+    assert_eq!(last.message, "panicked");
+    assert!(faults.last_guard().retired.is_none(), "the read freed it");
+    assert_eq!(
+        faults.last().map(|f| f.kind),
+        Some(StreamFaultKind::CallbackPanicked)
+    );
+}
+
+/// **With the retired slot occupied, a second panic over an owned message
+/// leaks that message rather than freeing it:** the slot keeps the first one.
+#[test]
+fn a_panic_over_an_owned_message_with_the_slot_taken_leaves_the_slot_alone() {
+    let faults = StreamFaults::new();
+    faults.record(BackendErrorKind::Other, &"xrun");
+    faults.record_panic("first");
+    faults.record(BackendErrorKind::DeviceGone, &"gone");
+    faults.record_panic("second");
+    assert_eq!(
+        faults
+            .last_guard()
+            .retired
+            .as_ref()
+            .map(|f| f.message.to_string()),
+        Some("xrun".to_string())
+    );
+    assert_eq!(
+        faults.last().map(|f| f.message.to_string()),
+        Some("second".to_string())
+    );
+    assert_eq!(faults.count(), 4);
+}
