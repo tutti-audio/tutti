@@ -172,7 +172,7 @@ fn test_all_does_not_repeat_the_plugin_builds() {
 #[test]
 fn bench_save_and_cmp_name_the_baseline() {
     let save = dry("bench-save", &["x"]);
-    assert_eq!(save.len(), 9);
+    assert_eq!(save.len(), 10);
     assert!(save.iter().all(|l| l.ends_with("-- --save-baseline x")));
     let cmp = dry("bench-cmp", &[]);
     assert!(cmp.iter().all(|l| l.ends_with("-- --baseline main")));
@@ -181,7 +181,7 @@ fn bench_save_and_cmp_name_the_baseline() {
 #[test]
 fn bench_smoke_runs_every_bench_once() {
     let s = dry("bench-smoke", &[]);
-    assert_eq!(s.len(), 9);
+    assert_eq!(s.len(), 10);
     assert!(s.iter().all(|l| l.ends_with("-- --test")));
 }
 
