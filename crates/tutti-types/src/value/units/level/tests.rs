@@ -16,8 +16,8 @@ use super::*;
 ///   negative gain has no logarithm. `Gain::recip` refuses a non-finite
 ///   reciprocal; `to_amplitude` gives the `Amplitude` whose `to_db` is the level.
 /// - `From<Gain> for Amplitude` — a negative gain has no amplitude. `to_amplitude`
-///   refuses it. (`From<Amplitude>
-///   for Gain` is present: total and lossless.)
+///   refuses it; `magnitude` names dropping the sign. (`From<Amplitude> for Gain`
+///   is present: total and lossless.)
 /// - `From<raw> for Unit`, `From<Unit> for raw`, so `.into()` between a unit and
 ///   its bare number — a bare float must not become a unit unnamed at the call
 ///   site, and a unit must not leave as a float by an `.into()` that hides which
@@ -161,6 +161,20 @@ fn a_gain_converts_to_and_from_an_amplitude() {
     );
     for a in [0.0_f32, 0.25, 1.0, 8.0] {
         assert_eq!(Gain::from(Amplitude(a)).to_amplitude(), Some(Amplitude(a)));
+    }
+}
+
+#[test]
+fn a_gain_magnitude_drops_the_sign_and_keeps_the_level() {
+    assert_eq!(Gain(-0.5).magnitude(), Amplitude(0.5));
+    assert_eq!(Gain(0.5).magnitude(), Amplitude(0.5));
+    assert_eq!(Gain::INVERTING.magnitude(), Amplitude::UNITY);
+    assert_eq!(Gain::SILENT.magnitude(), Amplitude::SILENT);
+    assert_eq!(Gain(-0.0).magnitude().get().to_bits(), 0.0f32.to_bits());
+    assert!(Gain(f32::NAN).magnitude().get().is_nan());
+    for g in [-4.0, -1.0, -0.25, 0.0, 0.25, 1.0, 4.0] {
+        assert_eq!(Gain(g).magnitude(), Gain(-g).magnitude());
+        assert_eq!(Gain(g).magnitude().get(), g.abs());
     }
 }
 
