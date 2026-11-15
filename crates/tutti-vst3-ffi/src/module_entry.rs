@@ -86,6 +86,7 @@ mod platform {
     use core_foundation_sys::bundle::{CFBundleCreate, CFBundleRef};
     use core_foundation_sys::url::{CFURLCreateFromFileSystemRepresentation, CFURLRef};
     use std::os::unix::ffi::OsStrExt;
+    use tutti_plugin_types::bundle::{ModuleKind, bundle_dir_of};
 
     type BundleEntryFn = unsafe extern "C" fn(CFBundleRef) -> bool;
     type BundleExitFn = unsafe extern "C" fn() -> bool;
@@ -98,15 +99,6 @@ mod platform {
         /// Resolved `bundleExit`, if the module exports one. Stored as a raw fn
         /// pointer rather than a `Symbol` so `Entry` doesn't borrow the library.
         exit: Option<BundleExitFn>,
-    }
-
-    /// Walks up from the inner Mach-O (`Foo.vst3/Contents/MacOS/Foo`) to the
-    /// `.vst3` bundle directory it lives in. Returns `None` for a bare dylib
-    /// with no surrounding bundle.
-    pub(super) fn bundle_dir(lib_path: &Path) -> Option<&Path> {
-        lib_path
-            .ancestors()
-            .find(|p| p.extension().is_some_and(|e| e == "vst3") && p.is_dir())
     }
 
     /// Builds a `CFBundleRef` for a `.vst3` bundle directory, or `None` if
@@ -150,7 +142,7 @@ mod platform {
         // `bundleEntry` takes the plugin's own CFBundleRef; without a real
         // bundle there is nothing honest to pass, and handing a plugin a null
         // CFBundleRef invites it to dereference it. Skip the call instead.
-        let Some(dir) = bundle_dir(lib_path) else {
+        let Some(dir) = bundle_dir_of(lib_path, ModuleKind::Vst3) else {
             return Ok(Entry {
                 bundle: std::ptr::null_mut(),
                 exit: None,
@@ -370,33 +362,5 @@ mod tests {
         let b = ModuleEntry::enter(&lib, Path::new("/nonexistent/Fake.vst3")).unwrap();
         drop(a);
         drop(b);
-    }
-
-    /// The macOS entry needs the plugin's own `.vst3` bundle directory, walked
-    /// up from the inner Mach-O. Only a directory that actually exists counts.
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn bundle_dir_is_found_from_the_inner_binary() {
-        let tmp = tempfile::tempdir().unwrap();
-        let bundle = tmp.path().join("Reverb.vst3");
-        let macos = bundle.join("Contents/MacOS");
-        std::fs::create_dir_all(&macos).unwrap();
-        let inner = macos.join("Reverb");
-        std::fs::write(&inner, b"").unwrap();
-
-        assert_eq!(super::platform::bundle_dir(&inner), Some(bundle.as_path()));
-
-        // A bare dylib with no surrounding bundle yields None, which makes
-        // `enter` skip `bundleEntry` rather than hand the plugin a null
-        // CFBundleRef to dereference.
-        let bare = tmp.path().join("libplain.dylib");
-        std::fs::write(&bare, b"").unwrap();
-        assert_eq!(super::platform::bundle_dir(&bare), None);
-
-        // A `.vst3` component that is a *file*, not a directory, is not a
-        // bundle either.
-        let notabundle = tmp.path().join("Fake.vst3");
-        std::fs::write(&notabundle, b"").unwrap();
-        assert_eq!(super::platform::bundle_dir(&notabundle), None);
     }
 }
