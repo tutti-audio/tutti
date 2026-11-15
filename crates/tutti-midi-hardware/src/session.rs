@@ -32,6 +32,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
+use tutti_graph::Losses;
+use tutti_midi_device::ResourceStore;
+
 use crate::HardwareMidiInputs;
 use crate::backend;
 use crate::ci::{CiChange, CiPeerInfo, Heard, PeerId};
@@ -40,6 +43,7 @@ use crate::endpoints::MidiEndpoints;
 use crate::error::{Error, Result};
 use crate::process::{ProcessChange, ReportAsk, ReportError, ReportPeer};
 use crate::profiles::{PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange};
+use crate::properties::{PropertyAsk, PropertyChange, PropertyError, PropertyPeer};
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
 use tutti_midi_device::{DeviceId, DeviceInfo, EntropyError, Learned, SavedDevice};
 use tutti_midi_runtime::{DeviceInlets, DeviceSlot};
@@ -76,6 +80,9 @@ pub struct MidiSession {
     /// The identity MIDI-CI is enabled with; none while it is off, which is
     /// the default ([`MidiSession::enable_ci`]).
     ci_identity: Option<DeviceIdentity>,
+    /// What the MIDI-CI devices' Property Exchange Responders serve
+    /// ([`MidiSession::serve_properties`]); empty by default.
+    properties: Arc<ResourceStore>,
 }
 
 /// One open input, and the UMP Stream negotiation of its device.
@@ -185,6 +192,10 @@ pub enum Polled {
     /// A MIDI-CI peer answered Process Inquiry, a MIDI Message Report began or
     /// ended, or the peer's Process Inquiry was dropped.
     Process(DeviceId, PeerId, ProcessChange),
+    /// A MIDI-CI peer answered Property Exchange, a call ended, the peer
+    /// changed what the device serves, or the peer's Property Exchange was
+    /// dropped.
+    Property(DeviceId, PeerId, PropertyChange),
     /// MIDI-CI could not start a device on a Group of the device: the operating
     /// system gave no random bytes for its MUID. It is reported once until the
     /// device starts, and again if the Group leaves the device's Groups and
@@ -221,6 +232,7 @@ impl MidiSession {
             ports: Arc::new(HardwareMidiInputs::new(inlets)),
             devices: Devices::open_over(backend)?,
             ci_identity: None,
+            properties: Arc::default(),
         })
     }
 
@@ -474,7 +486,7 @@ impl MidiSession {
                 lost_during: after > before,
             };
             held.lost_seen = after;
-            let stepped = held.stream.poll(now, &heard, ci);
+            let stepped = held.stream.poll(now, &heard, ci, &self.properties);
             // Off the moment nothing listens, so no packet is kept for no one.
             sync_hearing(ports, held, ci.is_some());
             if let Some(stream) = stepped.stream {
@@ -498,6 +510,12 @@ impl MidiSession {
                     .process
                     .into_iter()
                     .map(|(peer, change)| Polled::Process(id.clone(), peer, change)),
+            );
+            polled.extend(
+                stepped
+                    .properties
+                    .into_iter()
+                    .map(|(peer, change)| Polled::Property(id.clone(), peer, change)),
             );
             polled.extend(
                 stepped
@@ -552,6 +570,57 @@ impl MidiSession {
         self.inputs
             .get(id)
             .map_or_else(Arc::default, |held| held.stream.ci_peers())
+    }
+
+    /// The MIDI-CI messages the output of the open input `id` has refused, as
+    /// [`refused`](Losses::refused): a message the output had no room for, or
+    /// that it could no longer take, is not sent again (the protocol repeats what
+    /// matters), so this is how many a peer may never have heard. Empty when the
+    /// input is not open.
+    #[must_use]
+    pub fn ci_losses(&self, id: &DeviceId) -> Losses {
+        self.inputs
+            .get(id)
+            .map_or(Losses::NONE, |held| held.stream.ci_losses())
+    }
+
+    /// Makes the MIDI-CI devices' Property Exchange Responders serve `store`
+    /// (M2-103): on every open input and every input opened later, at the next
+    /// [`poll`](Self::poll). It replaces what was served, and the Subscriptions
+    /// the peers held end without a message. The session serves an empty store
+    /// until this is called.
+    pub fn serve_properties(&mut self, store: ResourceStore) {
+        self.properties = Arc::new(store);
+    }
+
+    /// The MIDI-CI peers of the open input `id` that declared Property Exchange
+    /// and answered its Capabilities (M2-103 §3.2), by Group then MUID: empty
+    /// when it is not open or no peer did. The session asks each such peer for
+    /// its Capabilities when it is found. Shared like
+    /// [`ci_peers`](Self::ci_peers): read again after a [`Polled::Property`].
+    #[must_use]
+    pub fn property_peers(&self, id: &DeviceId) -> Arc<[PropertyPeer]> {
+        self.inputs
+            .get(id)
+            .map_or_else(Arc::default, |held| held.stream.property_peers())
+    }
+
+    /// Asks a peer for a Property Exchange call, as the Initiator (M2-103): the
+    /// request is made at the next [`poll`](Self::poll), a
+    /// [`PropertyChange::Started`] names its call and the
+    /// [`PropertyChange::Event`]s that follow end it. Make the [`PropertyAsk`]
+    /// from a handle in [`property_peers`](Self::property_peers).
+    ///
+    /// # Errors
+    ///
+    /// [`PropertyError::NotOpen`] when that input has since closed, and
+    /// [`PropertyError::NoSuchPeer`] when the peer is gone.
+    pub fn ask_property(&mut self, ask: PropertyAsk) -> std::result::Result<(), PropertyError> {
+        self.inputs
+            .get_mut(&ask.peer.device)
+            .ok_or(PropertyError::NotOpen)?
+            .stream
+            .ask_property(ask)
     }
 
     /// The inlet slot the open input `id` holds, `None` when it is not open: the

@@ -64,9 +64,11 @@
 //! is, and what the output sends in follows it, and where the input's event
 //! times come from follows its TXJR.
 
+use std::sync::Arc;
 use std::time::Instant;
 
-use tutti_graph::Offset;
+use tutti_graph::{Losses, Offset};
+use tutti_midi_device::ResourceStore;
 use tutti_midi_device::{
     Action, Connection, Ending, Endpoint, EntropyError, IdentityInquiry, InquiryAction, Learned,
 };
@@ -82,6 +84,7 @@ use crate::ci::{
 use crate::devices::OpenOutput;
 use crate::process::{self, ProcessChange, ReportAsk, ReportError};
 use crate::profiles::{ProfileError, ProfileSwitch, ProfilesChange, Snapshot};
+use crate::properties::{self, PropertyAsk, PropertyChange, PropertyError};
 use tutti_midi_device::DeviceId;
 
 /// Where an input's event times come from: what a device is asked to send, and
@@ -241,6 +244,8 @@ pub(crate) struct Stepped {
     pub(crate) profiles: Vec<(PeerId, ProfilesChange)>,
     /// The Process Inquiry of the peers that changed.
     pub(crate) process: Vec<(PeerId, ProcessChange)>,
+    /// The Property Exchange of the peers that changed.
+    pub(crate) properties: Vec<(PeerId, PropertyChange)>,
     /// The Groups whose MIDI-CI device could not start, with why.
     pub(crate) unstarted: Vec<(MidiGroup, EntropyError)>,
 }
@@ -380,8 +385,13 @@ impl Negotiation {
     }
 
     /// The MIDI-CI peers found on this device.
-    pub(crate) fn ci_peers(&self) -> std::sync::Arc<[CiPeerInfo]> {
+    pub(crate) fn ci_peers(&self) -> Arc<[CiPeerInfo]> {
         self.ci.peers()
+    }
+
+    /// The MIDI-CI messages this device's output refused.
+    pub(crate) const fn ci_losses(&self) -> Losses {
+        self.ci.losses()
     }
 
     /// The Profiles of the MIDI-CI peers found on this device.
@@ -393,6 +403,16 @@ impl Negotiation {
     /// Report.
     pub(crate) fn report_peers(&self) -> process::Snapshot {
         self.ci.report_peers()
+    }
+
+    /// The MIDI-CI peers of this device that can be asked for Property Exchange.
+    pub(crate) fn property_peers(&self) -> properties::Snapshot {
+        self.ci.property_peers()
+    }
+
+    /// Asks that a peer be made a Property Exchange call at the next poll.
+    pub(crate) fn ask_property(&mut self, ask: PropertyAsk) -> Result<(), PropertyError> {
+        self.ci.ask_property(ask)
     }
 
     /// Asks that a peer be sent a MIDI Message Report request at the next poll.
@@ -470,9 +490,10 @@ impl Negotiation {
         now: Instant,
         heard: &Heard<'_>,
         ci: Option<DeviceIdentity>,
+        store: &Arc<ResourceStore>,
     ) -> Stepped {
         let changes = match &mut self.out {
-            Some(out) => self.ci.poll(now, heard, ci, out),
+            Some(out) => self.ci.poll(now, heard, ci, store, out),
             None => CiChanges::default(),
         };
         let stream = self.poll_stream(now, heard);
@@ -481,6 +502,7 @@ impl Negotiation {
             ci: changes.peers,
             profiles: changes.profiles,
             process: changes.process,
+            properties: changes.properties,
             unstarted: changes.unstarted,
         }
     }

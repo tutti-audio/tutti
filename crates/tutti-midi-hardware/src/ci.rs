@@ -2,8 +2,9 @@
 //! [`CiDevice`] (Discovery, Invalidate MUID, NAK)
 //! run on an open input, the peers it finds
 //! ([`CiPeerInfo`], reported as [`CiChange`]), and Profile Configuration
-//! with those that declare it (reported as [`ProfilesChange`]), and Process Inquiry with
-//! those that declare that (reported as [`ProcessChange`]).
+//! with those that declare it (reported as [`ProfilesChange`]), Process Inquiry with
+//! those that declare that (reported as [`ProcessChange`]), and Property Exchange with
+//! those that declare it (reported as [`PropertyChange`]).
 //!
 //! # Opt-in
 //!
@@ -61,8 +62,9 @@
 //! It runs while enabled and the input is open: the Discovery it sends when it
 //! starts is only the first round, and it answers a Discovery or an Invalidate
 //! MUID from anyone, at any time (M2-101 Appendix E: a Responder). It speaks
-//! Management and, as the Initiator, Profile Configuration and Process Inquiry; there is no Property
-//! Exchange, so every other message addressed to it is NAK'd by the core.
+//! Management, as the Initiator Profile Configuration, Process Inquiry and Property
+//! Exchange, and as the Responder Property Exchange; every other message addressed to
+//! it is NAK'd by the core.
 //!
 //! # Profiles
 //!
@@ -93,6 +95,23 @@
 //! [`ProcessChange::ReportBegan`] and the [`ProcessChange::ReportEnded`] the
 //! session reports. A lost peer's Initiator goes with it ([`ProcessChange::Dropped`]).
 //!
+//! # Property Exchange
+//!
+//! A peer whose Discovery Reply declares Property Exchange
+//! ([`CiCategories::PROPERTY_EXCHANGE`]) gets a [`ResourceInitiator`], made when it is
+//! found: it sends an Inquiry: Property Exchange Capabilities, then gets the peer's
+//! ResourceList, and a peer that answered is listed
+//! ([`MidiSession::property_peers`](crate::MidiSession::property_peers)). An app's call
+//! ([`MidiSession::ask_property`](crate::MidiSession::ask_property)) is queued and
+//! started by the next poll. Each member device also holds one [`ResourceResponder`]
+//! serving the store the app gave
+//! ([`MidiSession::serve_properties`](crate::MidiSession::serve_properties), empty
+//! until then) to the peers that declared the category: the member routes it every
+//! message, runs its deadline on the same step as the device's, and sends its replies
+//! in the same batch. When the device's MUID changes the Responder is made again for
+//! the new one, over the store as the peers left it, and holds no Subscription. A lost
+//! peer's Initiator and Subscriptions go with it ([`PropertyChange::Dropped`]).
+//!
 //! The port copies the device's SysEx7 packets to the stream ring while any
 //! device is to run (`hears_sysex`); the graph still gets them all. They are
 //! reassembled per Group, decoded, and routed to that Group's device. **A gap
@@ -100,14 +119,15 @@
 //! room for, the session tells the reader ([`Heard`]), and the assembler drops
 //! its open messages ([`SysexAssembler::lost_tail`]) before the next packets.
 //! What a device sends goes out as SysEx7 on its Group, on the output of the
-//! negotiation, never the session's MIDI output; a refused send is logged and
-//! not repeated, since the protocol is built to tolerate loss.
+//! negotiation, never the session's MIDI output; a refused send is logged, counted
+//! ([`MidiSession::ci_losses`](crate::MidiSession::ci_losses)) and not repeated, since
+//! the protocol is built to tolerate loss.
 //!
 //! # What it declares
 //!
 //! - **Identity**: the app's, as given to `enable_ci`.
-//! - **Categories**: Profile Configuration and Process Inquiry. The devices initiate
-//!   both. They answer a Profile Inquiry with no Profiles (M2-101 §7.13 allows a device
+//! - **Categories**: Profile Configuration, Process Inquiry and Property Exchange. The
+//!   devices initiate all three and answer Property Exchange from their store. They answer a Profile Inquiry with no Profiles (M2-101 §7.13 allows a device
 //!   that has none to reply) and NAK a Set Profile On or Off; they answer an Inquiry:
 //!   Process Inquiry Capabilities with MIDI Message Report supported, and a MIDI Message
 //!   Report of the Function Block or Group with an empty Reply and the End (§9.6, §9.8),
@@ -131,11 +151,11 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use tutti_graph::Offset;
+use tutti_graph::{Losses, Offset};
 use tutti_midi_device::{
     CiAction, CiCategories, CiDevice, CiHeader, CiMessage, CiPeer, Decoded, DeviceId, EntropyError,
     EntropyWords, MaxSysexSize, Muid, ProcessAction, ProcessFeatures, ProcessInitiator,
-    ProfileAction, ProfileInitiator,
+    ProfileAction, ProfileInitiator, ResourceInitiator, ResourceResponder, ResourceStore,
 };
 use tutti_ump::{DeviceIdentity, MidiGroup, SysexAssembler, SysexStep, Ump};
 
@@ -144,19 +164,24 @@ use crate::process::{self, ProcessChange, ReportAsk, ReportError, ReportPeer};
 use crate::profiles::{
     PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange, Snapshot, Switch,
 };
+use crate::properties::{self, PropertyAsk, PropertyChange, PropertyError, PropertyPeer};
 use crate::stream::DeviceStream;
+
+mod property;
 
 /// The Receivable Maximum SysEx Message Size the session declares: 512 bytes
 /// (see the module).
 pub(crate) const MAX_SYSEX: MaxSysexSize = MaxSysexSize::of(MaxSysexSize::INITIATOR_MIN);
 
-/// What the devices declare: Management, Profile Configuration and Process
-/// Inquiry, which the session initiates with every peer that declares them too (the
+/// What the devices declare: Management, Profile Configuration, Process
+/// Inquiry and Property Exchange, which the session initiates with every peer that
+/// declares them too (the
 /// module's "What it does"). They answer a Profile Inquiry with no Profiles, and NAK a
 /// Set Profile On or Off, since they have none to enable; they answer a Process
 /// Inquiry with the report of a device with no MIDI state.
-const CATEGORIES: CiCategories =
-    CiCategories::PROFILE_CONFIGURATION.union(CiCategories::PROCESS_INQUIRY);
+const CATEGORIES: CiCategories = CiCategories::PROFILE_CONFIGURATION
+    .union(CiCategories::PROCESS_INQUIRY)
+    .union(CiCategories::PROPERTY_EXCHANGE);
 
 /// What one step of an input's MIDI-CI changed, for the app.
 #[derive(Default)]
@@ -167,13 +192,20 @@ pub(crate) struct CiChanges {
     pub(crate) profiles: Vec<(PeerId, ProfilesChange)>,
     /// Peers' Process Inquiry.
     pub(crate) process: Vec<(PeerId, ProcessChange)>,
+    /// Peers' Property Exchange.
+    pub(crate) properties: Vec<(PeerId, PropertyChange)>,
     /// The Groups whose device could not start, with why.
     pub(crate) unstarted: Vec<(MidiGroup, EntropyError)>,
+    /// The CI messages the output refused in this step.
+    pub(crate) refused: Losses,
 }
 
 impl CiChanges {
     fn is_empty(&self) -> bool {
-        self.peers.is_empty() && self.profiles.is_empty() && self.process.is_empty()
+        self.peers.is_empty()
+            && self.profiles.is_empty()
+            && self.process.is_empty()
+            && self.properties.is_empty()
     }
 }
 
@@ -294,15 +326,22 @@ struct Member {
     initiators: BTreeMap<Muid, ProfileInitiator>,
     /// The Initiator of Process Inquiry with each peer that declared it.
     process: BTreeMap<Muid, ProcessInitiator>,
+    /// The Initiator of Property Exchange with each peer that declared it.
+    properties: BTreeMap<Muid, ResourceInitiator>,
+    /// The Responder that serves the device's store to those peers.
+    server: ResourceResponder,
 }
 
 impl Member {
-    fn new(group: MidiGroup, device: CiDevice<Entropy>) -> Self {
+    fn new(group: MidiGroup, device: CiDevice<Entropy>, store: ResourceStore) -> Self {
+        let server = property::responder(device.muid(), store);
         Self {
             group,
             device,
             initiators: BTreeMap::new(),
             process: BTreeMap::new(),
+            properties: BTreeMap::new(),
+            server,
         }
     }
 }
@@ -313,6 +352,8 @@ struct Running {
     identity: DeviceIdentity,
     members: Vec<Member>,
     assembler: SysexAssembler<Box<[u8]>>,
+    /// What the devices' Responders serve.
+    store: ResourceStore,
     /// The Groups whose device could not start and was reported: reported once
     /// until it starts, tried again at every poll. A Group that leaves the
     /// Groups and returns, or MIDI-CI is disabled and enabled again, is reported
@@ -339,6 +380,14 @@ pub(crate) struct Ci {
     reporters: process::Snapshot,
     /// Reports asked for, started by the next poll.
     reports: Vec<ReportAsk>,
+    /// The peers that can be asked for Property Exchange, rebuilt with `peers`.
+    property_peers: properties::Snapshot,
+    /// Property Exchange calls asked for, started by the next poll.
+    calls: Vec<PropertyAsk>,
+    /// What the devices' Responders serve.
+    store: Arc<ResourceStore>,
+    /// The CI messages the output has refused, over the input's life.
+    refused: Losses,
 }
 
 /// Group 0, the Group of a MIDI 1.0 port and of an Endpoint that says nothing
@@ -379,6 +428,10 @@ impl Ci {
             queue: Vec::new(),
             reporters: Arc::default(),
             reports: Vec::new(),
+            property_peers: Arc::default(),
+            calls: Vec::new(),
+            store: Arc::default(),
+            refused: Losses::NONE,
         }
     }
 
@@ -403,6 +456,7 @@ impl Ci {
         now: Instant,
         heard: &Heard<'_>,
         enabled: Option<DeviceIdentity>,
+        store: &Arc<ResourceStore>,
         out: &mut OpenOutput,
     ) -> CiChanges {
         let mut changes = CiChanges::default();
@@ -414,26 +468,38 @@ impl Ci {
         {
             running.stop(out, &mut changes);
         }
+        if !Arc::ptr_eq(&self.store, store) {
+            self.store = Arc::clone(store);
+            if let Some(running) = &mut self.running {
+                running.serve(&self.store);
+            }
+        }
         match (&mut self.running, enabled) {
             (Some(running), _) => {
                 running.reconcile(&self.groups, &mut entropy, now, out, &mut changes);
                 running.step(now, heard, out, &mut changes);
                 running.start_switches(&mut self.queue, now, out, &mut changes);
                 running.start_reports(&mut self.reports, now, out, &mut changes);
+                running.start_properties(&mut self.calls, now, out, &mut changes);
             }
             (None, Some(identity)) if !self.groups.is_empty() => {
-                let (running, started) =
+                let (mut running, started) =
                     Running::start(&self.groups, identity, &mut entropy, now, out);
+                running.serve(&self.store);
                 self.running = Some(Box::new(running));
                 changes.peers.extend(started.peers);
                 changes.profiles.extend(started.profiles);
                 changes.process.extend(started.process);
+                changes.properties.extend(started.properties);
+                changes.refused += started.refused;
                 changes.unstarted.extend(started.unstarted);
             }
             _ => {}
         }
         self.queue.clear();
         self.reports.clear();
+        self.calls.clear();
+        self.refused += changes.refused;
         if self.running.as_ref().is_some_and(|r| r.is_idle()) {
             self.running = None;
         }
@@ -441,6 +507,7 @@ impl Ci {
             self.peers = self.collect_peers();
             self.profiles = self.collect_profiles();
             self.reporters = self.collect_reporters();
+            self.property_peers = self.collect_property_peers();
         }
         changes
     }
@@ -450,13 +517,17 @@ impl Ci {
     /// it closed the input, so it knows the peers went with it.
     pub(crate) fn close(&mut self, out: &mut OpenOutput) {
         if let Some(running) = self.running.take() {
-            running.stop(out, &mut CiChanges::default());
+            let mut changes = CiChanges::default();
+            running.stop(out, &mut changes);
+            self.refused += changes.refused;
         }
         self.peers = Arc::default();
         self.profiles = Arc::default();
         self.reporters = Arc::default();
+        self.property_peers = Arc::default();
         self.queue.clear();
         self.reports.clear();
+        self.calls.clear();
     }
 
     /// Every peer's Profiles, by Group then MUID: only the peers that declared
@@ -497,6 +568,28 @@ impl Ci {
         }
         self.reports.push(ask);
         Ok(())
+    }
+
+    /// The peers that can be asked for Property Exchange, by Group then MUID.
+    pub(crate) fn property_peers(&self) -> properties::Snapshot {
+        Arc::clone(&self.property_peers)
+    }
+
+    /// Asks that the call of `ask` be made of its peer at the next poll, after
+    /// checking it is still one that answered its Capabilities.
+    pub(crate) fn ask_property(&mut self, ask: PropertyAsk) -> Result<(), PropertyError> {
+        if !self.property_peers.contains(&ask.peer) {
+            return Err(PropertyError::NoSuchPeer);
+        }
+        self.calls.push(ask);
+        Ok(())
+    }
+
+    /// The CI messages the output refused (a full or gone output), counted as
+    /// [`refused`](Losses::refused) over the input's life: a refused message is
+    /// not repeated, so the count is how many a peer may never have heard.
+    pub(crate) const fn losses(&self) -> Losses {
+        self.refused
     }
 
     /// Every peer found, by Group then MUID.
@@ -551,6 +644,27 @@ impl Ci {
             .collect()
     }
 
+    fn collect_property_peers(&self) -> properties::Snapshot {
+        let Some(running) = &self.running else {
+            return Arc::default();
+        };
+        running
+            .members
+            .iter()
+            .flat_map(|member| {
+                member
+                    .properties
+                    .iter()
+                    .filter(|(_, initiator)| initiator.transactions().capabilities().is_some())
+                    .map(|(&muid, _)| PropertyPeer {
+                        device: self.device.clone(),
+                        group: member.group,
+                        muid,
+                    })
+            })
+            .collect()
+    }
+
     fn collect_peers(&self) -> Arc<[CiPeerInfo]> {
         let Some(running) = &self.running else {
             return Arc::default();
@@ -596,7 +710,7 @@ impl Running {
             .filter_map(|&group| match start_device(identity, entropy, now) {
                 Ok((device, first)) => {
                     firsts.push(first);
-                    Some(Member::new(group, device))
+                    Some(Member::new(group, device, ResourceStore::new()))
                 }
                 Err(error) => {
                     unstarted.push(group);
@@ -613,6 +727,7 @@ impl Running {
             identity,
             members,
             assembler,
+            store: ResourceStore::new(),
             unstarted,
         };
         let mut changes = CiChanges {
@@ -622,7 +737,7 @@ impl Running {
         for (member, actions) in running.members.iter_mut().zip(firsts) {
             member.apply(actions, now, &mut sends, &mut changes);
         }
-        send(out, &sends);
+        changes.refused += send(out, &sends);
         (running, changes)
     }
 
@@ -665,7 +780,8 @@ impl Running {
                 Ok((device, first)) => {
                     started.push((group, first));
                     self.unstarted.retain(|g| *g != group);
-                    self.members.push(Member::new(group, device));
+                    self.members
+                        .push(Member::new(group, device, self.store.clone()));
                     changed = true;
                 }
                 Err(error) => {
@@ -691,7 +807,7 @@ impl Running {
         let lanes = self.members.len().max(1);
         let room = SysexAssembler::room_for(max, 1, lanes);
         self.assembler = SysexAssembler::new(vec![0; room].into_boxed_slice(), max, lanes);
-        send(out, &sends);
+        changes.refused += send(out, &sends);
     }
 }
 
@@ -750,8 +866,14 @@ fn stop_members(members: &[Member], out: &mut OpenOutput, changes: &mut CiChange
                 .keys()
                 .map(|&muid| (peer(muid), ProcessChange::Dropped)),
         );
+        changes.properties.extend(
+            member
+                .properties
+                .keys()
+                .map(|&muid| (peer(muid), PropertyChange::Dropped)),
+        );
     }
-    send(out, &sends);
+    changes.refused += send(out, &sends);
 }
 
 impl Running {
@@ -783,6 +905,7 @@ impl Running {
                 member.apply(actions, now, &mut sends, changes);
                 member.route(&decoded, now, &mut sends, changes);
                 member.route_process(&decoded, now, &mut sends, changes);
+                member.route_property(&decoded, now, &mut sends, changes);
             }
         }
         if heard.gap() {
@@ -796,8 +919,9 @@ impl Running {
             }
             member.expire(now, &mut sends, changes);
             member.expire_process(now, &mut sends, changes);
+            member.expire_property(now, &mut sends, changes);
         }
-        send(out, &sends);
+        changes.refused += send(out, &sends);
     }
 
     /// Sends the switches the app asked for (see [`Ci::set_profile`]): each goes
@@ -816,7 +940,7 @@ impl Running {
             };
             member.start_switch(&switch, now, &mut sends, changes);
         }
-        send(out, &sends);
+        changes.refused += send(out, &sends);
     }
 }
 
@@ -837,7 +961,7 @@ impl Running {
             };
             member.start_report(&ask, now, &mut sends, changes);
         }
-        send(out, &sends);
+        changes.refused += send(out, &sends);
     }
 }
 
@@ -862,6 +986,7 @@ impl Member {
                     );
                     self.initiate(muid, now, sends, changes);
                     self.initiate_process(muid, now, sends, changes);
+                    self.initiate_property(muid, now, sends, changes);
                 }
                 CiAction::Updated(muid) => {
                     changes.peers.extend(
@@ -878,10 +1003,13 @@ impl Member {
                     if self.process.remove(&muid).is_some() {
                         changes.process.push((id, ProcessChange::Dropped));
                     }
+                    self.forget_property(muid, changes);
                 }
+                CiAction::MuidChanged { new, .. } => self.renew_property(new),
                 // The device's own MUID changing reaches the app as every peer
-                // lost (and so every Initiator dropped); the window closing is
-                // the core's own bookkeeping.
+                // lost (and so every Initiator dropped), and the Responder is
+                // made again for it; the window closing is the core's own
+                // bookkeeping.
                 _ => {}
             }
         }
@@ -1155,7 +1283,8 @@ impl Member {
 /// lost one is a peer found later or never. A device takes a batch as a prefix
 /// (`MidiOut::queue`), so a message taken in part is a SysEx7 whose end the
 /// device never gets; it is logged as cut, apart from one wholly refused.
-fn send(out: &mut OpenOutput, sends: &[(MidiGroup, CiMessage)]) {
+fn send(out: &mut OpenOutput, sends: &[(MidiGroup, CiMessage)]) -> Losses {
+    let mut refused = 0;
     for (group, message) in sends {
         let packets: Vec<_> = message
             .packets(*group)
@@ -1163,14 +1292,21 @@ fn send(out: &mut OpenOutput, sends: &[(MidiGroup, CiMessage)]) {
             .collect();
         match out.queue(&packets) {
             taken if taken == packets.len() => {}
-            0 => tracing::debug!("a MIDI-CI message was refused by {}", out.name()),
-            taken => tracing::debug!(
-                "a MIDI-CI message was cut after {taken} of {} packets by {}",
-                packets.len(),
-                out.name()
-            ),
+            0 => {
+                refused += 1;
+                tracing::debug!("a MIDI-CI message was refused by {}", out.name());
+            }
+            taken => {
+                refused += 1;
+                tracing::debug!(
+                    "a MIDI-CI message was cut after {taken} of {} packets by {}",
+                    packets.len(),
+                    out.name()
+                );
+            }
         }
     }
+    Losses::refused(refused)
 }
 
 #[cfg(test)]
@@ -1196,7 +1332,12 @@ mod tests {
 
     /// The output of a fake device, and the counters of what it was sent.
     fn output() -> (OpenOutput, FakeCounters) {
-        let (backend, counters) = FakeBackend::build_with(vec![], vec![], usize::MAX);
+        output_accepting(usize::MAX)
+    }
+
+    /// As [`output`], taking at most `accepts` packets of a batch.
+    fn output_accepting(accepts: usize) -> (OpenOutput, FakeCounters) {
+        let (backend, counters) = FakeBackend::build_with(vec![], vec![], accepts);
         let inlets = tutti_midi_runtime::DeviceInlets::new(
             NonZeroUsize::new(4).unwrap(),
             tutti_graph::EventCapacity::of(64),
@@ -1341,5 +1482,32 @@ mod tests {
         let mut changes = CiChanges::default();
         running.reconcile(&[G0, G1], &mut source, now, &mut out, &mut changes);
         assert_eq!(changes.unstarted, [(G0, EntropyError::unavailable())]);
+    }
+
+    // A CI message the output cannot take is counted, not dropped without a
+    // trace: the first Discovery of each of two Groups goes to an output that
+    // takes nothing, so two messages are refused; an output that takes them
+    // counts none.
+    #[test]
+    fn a_ci_message_the_output_refuses_is_counted_and_one_it_takes_is_not() {
+        let now = Instant::now();
+        let (mut full, _counters) = output_accepting(0);
+        let (_, changes) = Running::start(&[G0, G1], identity(), &mut entropy, now, &mut full);
+        assert_eq!(changes.refused, Losses::refused(2));
+
+        let (mut roomy, counters) = output();
+        let (_, changes) = Running::start(&[G0, G1], identity(), &mut entropy, now, &mut roomy);
+        assert_eq!(changes.refused, Losses::NONE);
+        assert!(counters.sent() > 0, "the messages were sent");
+    }
+
+    // A message taken in part is a SysEx whose end the device never gets: it
+    // is counted too.
+    #[test]
+    fn a_ci_message_the_output_takes_in_part_is_counted() {
+        let now = Instant::now();
+        let (mut short, _counters) = output_accepting(1);
+        let (_, changes) = Running::start(&[G0], identity(), &mut entropy, now, &mut short);
+        assert_eq!(changes.refused, Losses::refused(1));
     }
 }

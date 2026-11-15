@@ -144,16 +144,19 @@ fn a_function_block_that_declares_midi_ci_is_sent_discovery_on_its_first_group()
     };
     assert_eq!(header.device_id, CiDeviceId::FunctionBlock);
     // The body (Table 6): exactly the app's identity (`identity()`: manufacturer
-    // `41 00 00`, family 1 2, model 3 4, revision 5 6 7 8), Profile Configuration and Process Inquiry as the categories
-    // (bits 2 and 4 of Table 7: the session initiates both), 512 as
-    // four 7-bit bytes, Output Path 0.
+    // `41 00 00`, family 1 2, model 3 4, revision 5 6 7 8), Profile Configuration,
+    // Property Exchange and Process Inquiry as the categories (bits 2, 3 and 4 of
+    // Table 7: the session initiates all three), 512 as four 7-bit bytes, Output
+    // Path 0.
     assert_eq!(payload[13..16], [0x41, 0x00, 0x00]);
     assert_eq!(payload[16..24], [1, 2, 3, 4, 5, 6, 7, 8]);
     assert_eq!(data.identity, identity());
-    assert_eq!(payload[24], 0b1_0100);
+    assert_eq!(payload[24], 0b1_1100);
     assert_eq!(
         data.categories,
-        CiCategories::PROFILE_CONFIGURATION | CiCategories::PROCESS_INQUIRY
+        CiCategories::PROFILE_CONFIGURATION
+            | CiCategories::PROPERTY_EXCHANGE
+            | CiCategories::PROCESS_INQUIRY
     );
     assert_eq!(payload[25..29], [0x00, 0x04, 0x00, 0x00]);
     assert_eq!(payload[29], 0);
@@ -2031,4 +2034,356 @@ fn the_session_answers_a_process_inquiry_as_a_device_with_nothing_to_report() {
     assert_eq!(begin[13..], [0, 0, 0, 0]);
     assert_eq!(end[..4], [0x7E, 0x7E, 0x0D, 0x44]);
     assert_eq!(end.len(), 13);
+}
+
+// ---- Property Exchange ----
+
+use crate::{PropertyCall, PropertyChange};
+use tutti_midi_device::{
+    BodyLimit, BufferLimit, PE_TIMEOUT, PeCapabilities, PeCapabilitiesFailure, PeCiMessage, PeData,
+    PeLocalOn, PeReassemblyLimits, PeResource, PeSettings, ResourceEntry, ResourceEvent,
+    ResourceGet, ResourceInitiator, ResourceResponder, ResourceStore, ResourceTarget,
+    ResponderSettings, SimultaneousRequests, StreamLimit,
+};
+
+fn property_events(polled: &[Polled]) -> Vec<&PropertyChange> {
+    polled
+        .iter()
+        .filter_map(|p| match p {
+            Polled::Property(_, who, change) => {
+                assert_eq!(*who, peer_id(), "every change names the peer");
+                Some(change)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn pe_limits() -> PeReassemblyLimits {
+    PeReassemblyLimits {
+        streams: StreamLimit::of(8),
+        bytes: BufferLimit::of(1 << 16),
+    }
+}
+
+fn local_on(on: bool) -> ResourceStore {
+    let mut store = ResourceStore::new();
+    store.declare(ResourceEntry::new(PeResource::LocalOn).unwrap());
+    store
+        .put(None, PeData::LocalOn(PeLocalOn(on)))
+        .expect("declared");
+    store
+}
+
+/// The far end of a Property Exchange: a Responder serving `store`, and, when
+/// the test needs one, an Initiator that asks the session.
+struct Far {
+    resp: ResourceResponder,
+    init: Option<ResourceInitiator>,
+    events: Vec<ResourceEvent>,
+}
+
+impl Far {
+    fn new(ours: Muid, store: ResourceStore, asks: Option<Instant>) -> (Self, Vec<CiMessage>) {
+        let mut resp = ResourceResponder::new(
+            peer(),
+            ResponderSettings {
+                capabilities: PeCapabilities::new(SimultaneousRequests::of(4)),
+                reassembly: pe_limits(),
+                body_limit: BodyLimit::of(1 << 16),
+            },
+            store,
+        );
+        resp.accept(ours, MaxSysexSize::of(512));
+        let mut first = Vec::new();
+        let init = asks.map(|now| {
+            let (init, actions) = ResourceInitiator::new(
+                peer(),
+                ours,
+                PeSettings {
+                    capabilities: PeCapabilities::new(SimultaneousRequests::of(4)),
+                    peer_max_sysex: MaxSysexSize::of(512),
+                    reassembly: pe_limits(),
+                    body_limit: BodyLimit::of(1 << 16),
+                },
+                now,
+            );
+            first = Self::sends_of(actions);
+            init
+        });
+        (
+            Self {
+                resp,
+                init,
+                events: Vec::new(),
+            },
+            first,
+        )
+    }
+
+    fn sends_of(actions: Vec<tutti_midi_device::ResourceAction>) -> Vec<CiMessage> {
+        actions
+            .into_iter()
+            .filter_map(|a| match a {
+                tutti_midi_device::ResourceAction::Send(m) => Some(m),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// What the far end says to a message of the session.
+    fn hear(&mut self, message: &CiMessage, now: Instant) -> Vec<CiMessage> {
+        let decoded = Decoded::Message(message.clone());
+        let mut said: Vec<CiMessage> = self
+            .resp
+            .on_message(&decoded, now)
+            .into_iter()
+            .filter_map(|a| match a {
+                tutti_midi_device::ResponderAction::Send(m) => Some(m),
+                _ => None,
+            })
+            .collect();
+        if let Some(init) = &mut self.init {
+            let actions = init.on_message(&decoded, now);
+            for action in &actions {
+                if let tutti_midi_device::ResourceAction::Event(e) = action {
+                    self.events.push((**e).clone());
+                }
+            }
+            said.extend(Self::sends_of(actions));
+        }
+        said
+    }
+}
+
+/// The far end and the session trade messages until neither has more to say,
+/// from `ms` on in steps of 2 ms; every poll's reports are returned.
+fn pump(wire: &mut Wire, far: &mut Far, mut said: Vec<CiMessage>, mut ms: u64) -> Vec<Polled> {
+    let mut all = Vec::new();
+    for _ in 0..40 {
+        for message in said.drain(..) {
+            say(wire, GROUP_0, &message, ms);
+        }
+        ms += 2;
+        all.extend(polled(wire, ms));
+        let now = wire.at(ms);
+        for (_, message) in ci_sent(wire) {
+            said.extend(far.hear(&message, now));
+        }
+        if said.is_empty() {
+            break;
+        }
+    }
+    all
+}
+
+/// A peer that declared Property Exchange, found at 40 ms; the Capabilities
+/// Inquiry the session sent is returned for the far end to hear.
+fn property_peer() -> (Wire, Muid, Vec<CiMessage>) {
+    let (mut wire, ours) = midi1_running();
+    say(
+        &wire,
+        GROUP_0,
+        &CiMessage::DiscoveryReply {
+            header: CiHeader::new(peer()),
+            to: ours,
+            data: peer_data_of(CiCategories::PROPERTY_EXCHANGE),
+        },
+        40,
+    );
+    let _ = polled(&mut wire, 50);
+    let sent = ci_sent(&wire).into_iter().map(|(_, m)| m).collect();
+    (wire, ours, sent)
+}
+
+/// The far end hears what the session sent, and what it answers is returned.
+fn answers(far: &mut Far, heard: &[CiMessage], ms: u64, wire: &Wire) -> Vec<CiMessage> {
+    heard
+        .iter()
+        .flat_map(|message| far.hear(message, wire.at(ms)))
+        .collect()
+}
+
+/// M2-101 section 8.5: a peer that declared Property Exchange (Table 7, D3) is
+/// sent Inquiry: Property Exchange Capabilities (Sub-ID#2 `0x30`) from our MUID
+/// to its own, and has no handle until it answers.
+#[test]
+fn a_peer_that_declares_property_exchange_is_sent_a_capabilities_inquiry() {
+    let (wire, ours, sent) = property_peer();
+    let [
+        CiMessage::PropertyExchange {
+            header,
+            to,
+            message,
+        },
+    ] = sent.as_slice()
+    else {
+        panic!("one message, the capabilities inquiry: {sent:?}");
+    };
+    assert_eq!(header.source, ours);
+    assert_eq!(*to, peer());
+    assert!(matches!(message, PeCiMessage::CapabilitiesInquiry(_)));
+    assert!(wire.session.property_peers(&wire.id).is_empty());
+}
+
+/// The session declares Property Exchange, so a peer's Capabilities Inquiry is
+/// answered with the Capabilities Reply (`0x31`) and not refused.
+#[test]
+fn the_session_answers_a_property_exchange_capabilities_inquiry_and_does_not_nak_it() {
+    let (mut wire, ours, _) = property_peer();
+    say(
+        &wire,
+        GROUP_0,
+        &CiMessage::PropertyExchange {
+            header: CiHeader::new(peer()),
+            to: ours,
+            message: PeCiMessage::CapabilitiesInquiry(PeCapabilities::new(
+                SimultaneousRequests::of(2),
+            )),
+        },
+        60,
+    );
+    let _ = polled(&mut wire, 70);
+    let sent = ci_sent(&wire);
+    assert!(
+        matches!(
+            sent.as_slice(),
+            [(
+                _,
+                CiMessage::PropertyExchange {
+                    message: PeCiMessage::CapabilitiesReply(_),
+                    ..
+                }
+            )]
+        ),
+        "{sent:?}"
+    );
+}
+
+/// M2-103 section 3.2: after the Capabilities Reply the Initiator gets the
+/// ResourceList, and the peer is listed; a Get of a Resource it lists is
+/// answered with the data the peer holds.
+#[test]
+fn the_session_initiates_property_exchange_with_a_peer_that_declared_it() {
+    let (mut wire, ours, inquiry) = property_peer();
+    let (mut far, _) = Far::new(ours, local_on(false), None);
+    let said = answers(&mut far, &inquiry, 60, &wire);
+    let all = pump(&mut wire, &mut far, said, 60);
+    let changes = property_events(&all);
+    assert!(
+        changes.iter().any(
+            |c| matches!(c, PropertyChange::Event(e) if matches!(**e, ResourceEvent::Ready(_)))
+        ),
+        "{changes:?}"
+    );
+    let list = changes.iter().find_map(|c| match c {
+        PropertyChange::Event(e) => match &**e {
+            ResourceEvent::ResourceList(list) => Some(list.clone()),
+            _ => None,
+        },
+        _ => None,
+    });
+    assert_eq!(list, Some(far.resp.store().resource_list()));
+
+    let peers = wire.session.property_peers(&wire.id);
+    let [handle] = &*peers else {
+        panic!("the peer is listed: {peers:?}");
+    };
+    let get = ResourceGet::new(ResourceTarget::new(PeResource::LocalOn).unwrap());
+    wire.session
+        .ask_property(handle.ask(PropertyCall::Get(get)))
+        .unwrap();
+    let mut all = polled(&mut wire, 300);
+    let said = answers(
+        &mut far,
+        &ci_sent(&wire)
+            .into_iter()
+            .map(|(_, m)| m)
+            .collect::<Vec<_>>(),
+        300,
+        &wire,
+    );
+    all.extend(pump(&mut wire, &mut far, said, 302));
+    let changes = property_events(&all);
+    assert!(
+        matches!(changes.first(), Some(PropertyChange::Started(_))),
+        "{changes:?}"
+    );
+    let got = changes.iter().find_map(|c| match c {
+        PropertyChange::Event(e) => match &**e {
+            ResourceEvent::Got { result, .. } => Some(result.clone()),
+            _ => None,
+        },
+        _ => None,
+    });
+    assert_eq!(got, Some(Ok(PeData::LocalOn(PeLocalOn(false)))));
+}
+
+/// The session serves what the app gave: a peer's Initiator gets the
+/// ResourceList and the data of the store.
+#[test]
+fn the_session_serves_its_store_to_a_peer_that_declared_property_exchange() {
+    let (mut wire, ours, _) = property_peer();
+    wire.session.serve_properties(local_on(true));
+    let _ = polled(&mut wire, 55);
+    let (mut far, first) = Far::new(ours, ResourceStore::new(), Some(wire.at(60)));
+    let _ = pump(&mut wire, &mut far, first, 60);
+    let list = far.events.iter().find_map(|e| match e {
+        ResourceEvent::ResourceList(list) => Some(list.clone()),
+        _ => None,
+    });
+    assert_eq!(list, Some(local_on(true).resource_list()));
+
+    let get = ResourceGet::new(ResourceTarget::new(PeResource::LocalOn).unwrap());
+    let init = far.init.as_mut().unwrap();
+    let (_, actions) = init.get(&get, wire.at(300)).unwrap();
+    let said = Far::sends_of(actions);
+    let _ = pump(&mut wire, &mut far, said, 300);
+    let got = far.events.iter().find_map(|e| match e {
+        ResourceEvent::Got { result, .. } => Some(result.clone()),
+        _ => None,
+    });
+    assert_eq!(got, Some(Ok(PeData::LocalOn(PeLocalOn(true)))));
+}
+
+/// M2-103 section 12.2: a Capabilities Inquiry nothing answers ends after
+/// [`PE_TIMEOUT`], on the session's own poll.
+#[test]
+fn an_unanswered_property_exchange_inquiry_fails_after_the_property_exchange_timeout() {
+    let (mut wire, _, _) = property_peer();
+    let timeout = PE_TIMEOUT.as_millis() as u64;
+    let early = polled(&mut wire, 50 + timeout - 10);
+    assert!(property_events(&early).is_empty());
+    let late = polled(&mut wire, 50 + timeout + 10);
+    let changes = property_events(&late);
+    assert!(
+        matches!(
+            changes.as_slice(),
+            [PropertyChange::Event(e)]
+                if matches!(**e, ResourceEvent::CapabilitiesFailed(PeCapabilitiesFailure::TimedOut))
+        ),
+        "{changes:?}"
+    );
+}
+
+/// A lost peer takes its Property Exchange with it and its handle goes stale.
+#[test]
+fn a_lost_peer_drops_its_property_exchange() {
+    let (mut wire, ours, inquiry) = property_peer();
+    let (mut far, _) = Far::new(ours, ResourceStore::new(), None);
+    let said = answers(&mut far, &inquiry, 60, &wire);
+    let _ = pump(&mut wire, &mut far, said, 60);
+    assert_eq!(wire.session.property_peers(&wire.id).len(), 1);
+    say(
+        &wire,
+        GROUP_0,
+        &CiMessage::InvalidateMuid {
+            header: CiHeader::new(peer()),
+            target: peer(),
+        },
+        400,
+    );
+    let gone = polled(&mut wire, 410);
+    assert!(property_events(&gone).contains(&&PropertyChange::Dropped));
+    assert!(wire.session.property_peers(&wire.id).is_empty());
 }
