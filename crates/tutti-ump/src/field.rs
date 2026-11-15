@@ -114,6 +114,21 @@ macro_rules! bounded {
                 if raw >= $min && raw <= $max { Some(Self(raw)) } else { None }
             }
 
+            /// The value, for a literal or a constant. For a value that
+            /// arrives from outside, use [`new`](Self::new).
+            ///
+            /// # Panics
+            ///
+            /// When `raw` is out of range; in a `const` that is a compile error.
+            #[must_use]
+            #[track_caller]
+            pub const fn of(raw: $repr) -> Self {
+                match Self::new(raw) {
+                    Some(value) => value,
+                    None => panic!(concat!("a ", stringify!($name), " is out of range")),
+                }
+            }
+
             /// The raw value.
             #[must_use]
             pub const fn get(self) -> $repr {
@@ -251,6 +266,11 @@ bounded!(
     /// How many Groups a Function Block spans (`1..=16`). A reserved count read
     /// from the wire is kept.
     GroupSpan, u8, 1, 16
+);
+bounded!(
+    /// How many channels an MPE Profile zone has, its Manager Channel and one
+    /// to fifteen Member Channels: `2..=16` (M2-120 §2.1).
+    MpeChannels, u8, 2, 16
 );
 bounded!(
     /// Sharps (positive) or flats (negative) in a key signature, `-7..=7`.

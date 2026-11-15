@@ -255,14 +255,10 @@ fn voice2(a: Address, v: Voice2) -> [u32; 4] {
         }
         Voice2::ChannelPressure(value) => (0xD, 0, 0, value.get()),
         Voice2::PitchBend(value) => (0xE, 0, 0, value.get()),
-        Voice2::PerNoteManagement {
-            note,
-            detach,
-            reset,
-        } => (
+        Voice2::PerNoteManagement { note, management } => (
             0xF,
             u32::from(note.get()),
-            (u32::from(detach) << 1) | u32::from(reset),
+            (u32::from(management.detaches()) << 1) | u32::from(management.resets()),
             0,
         ),
     };

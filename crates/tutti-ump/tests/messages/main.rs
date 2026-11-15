@@ -11,6 +11,7 @@ mod by_value;
 mod constructors;
 mod fields;
 mod key_event;
+mod mpe_zone;
 mod no_alloc;
 mod note_id;
 mod note_velocity;
