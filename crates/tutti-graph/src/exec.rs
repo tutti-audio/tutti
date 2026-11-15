@@ -310,7 +310,7 @@ pub struct Executor {
     rendered: Arc<AtomicU64>,
     /// Commits taken off the queue by [`set_pool`](Self::set_pool), to apply
     /// first: room for every commit the queue holds.
-    stash: Vec<Box<Commit>>,
+    stash: std::collections::VecDeque<Box<Commit>>,
 }
 
 /// The executor's end of the rings to its editor, and the commands it
@@ -446,7 +446,7 @@ impl Executor {
             pool: None,
             pool_participants: ends.pool,
             rendered: ends.rendered,
-            stash: Vec::with_capacity(QUEUE_CAPACITY),
+            stash: std::collections::VecDeque::with_capacity(QUEUE_CAPACITY),
         }
     }
 
@@ -473,7 +473,7 @@ impl Executor {
         // A commit already sent was staged for the pool before this one: it
         // gets the parallel state for this pool, and is applied first.
         while let Some(commit) = self.inbox.queue.try_pop() {
-            self.stash.push(commit);
+            self.stash.push_back(commit);
         }
         for commit in &mut self.stash {
             if let (Some(plan), Some(staged)) = (&commit.plan, &mut commit.staged) {

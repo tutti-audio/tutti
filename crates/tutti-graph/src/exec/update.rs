@@ -21,7 +21,7 @@ impl Executor {
     /// public so a caller can install a commit without rendering.
     ///
     /// Delay rings, feedback state and units carry over by key (see
-    /// [`DelayKey`] and [`FeedbackKey`]). An event delay or event feedback
+    /// [`DelayKey`] and [`FeedbackKey`](crate::FeedbackKey)). An event delay or event feedback
     /// whose key disappears flushes its pending events to its sink when the
     /// sink survives: they arrive on the sink's next call, keeping their
     /// relative spacing, with the earliest at offset 0.
@@ -33,8 +33,7 @@ impl Executor {
     /// [`Editor::package`](crate::Editor::package)).
     pub fn apply_pending(&mut self) {
         let _rt = RtScope::enter();
-        while !self.stash.is_empty() {
-            let mut commit = self.stash.remove(0);
+        while let Some(mut commit) = self.stash.pop_front() {
             self.apply(&mut commit);
             send_back(&mut self.inbox.back, commit);
         }
@@ -561,7 +560,7 @@ impl Executor {
                     let missed: usize = owing.map(|h| h.close_into(&mut st.closes)).sum();
                     let lost = f.push(&st.closes);
                     self.dropped.charge_source(from, lost);
-                    if let Some(u) = plan.units.binary_search_by_key(&at.node, |u| u.key).ok() {
+                    if let Ok(u) = plan.units.binary_search_by_key(&at.node, |u| u.key) {
                         self.dropped
                             .at_node(u as u32, u32::try_from(missed).unwrap_or(u32::MAX));
                     }
