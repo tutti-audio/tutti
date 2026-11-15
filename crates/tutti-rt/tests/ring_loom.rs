@@ -1,23 +1,26 @@
-//! `loom` models of [`ring`] and [`evicting_ring`]: the shipped code, whose
-//! atomics and slot cells are loom's under the flag (see `src/ring/`).
+//! `loom` models of [`ring`]: the shipped code, whose atomics and slot cells
+//! are loom's under the flag (see `src/ring/`).
 //!
 //! ```text
 //! LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test -p tutti-rt --release --test ring_loom
 //! ```
 //!
 //! The rings hold `[u32; 3]`, each value's elements equal, so a torn slot
-//! shows as unequal elements. Over every interleaving (preemption bound 3 from
-//! the recipe's `LOOM_MAX_PREEMPTIONS`; the four-push evicting model sets 4
-//! itself):
+//! shows as unequal elements. Over every interleaving within the preemption
+//! bound: 3, from the recipe's `LOOM_MAX_PREEMPTIONS`. Every model is two
+//! threads and a handful of operations, whose races need at most two
+//! preemptions between a store and the load that pairs with it; a third is
+//! headroom, and each further one multiplies the executions several-fold for
+//! no new interleaving of those few operations.
 //!
 //! - **no accepted value is lost, none repeated, order kept** (`DropNewest`,
 //!   `Refuse`, with `push`/`pop` and with `push_slice`/`pop_slice`): the
 //!   values popped equal the values accepted, in order, and the loss count
 //!   equals the refusals;
-//! - **every value is popped or counted** (the evicting ring, where the writer
-//!   takes from the reader's end too): the values popped are in increasing
-//!   order and `popped + lost == pushed`, so a value the writer evicted while
-//!   the reader claimed the next one is neither duplicated nor dropped twice;
+//! - **`push_iter` and `pop_each`** move runs whole, in order, with one
+//!   publish: what the reader hands out is what the writer took;
+//! - **`peek` and `iter` against a concurrent push** see only published
+//!   values, in order, and never a torn slot;
 //! - **`len` and `drain` while the writer pushes**: a drain takes consecutive
 //!   values from where the last stopped, and `len` never exceeds what was
 //!   pushed (the `head` ordering);
@@ -37,7 +40,7 @@
 use loom::thread;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tutti_rt::{EvictReader, Overflow, PushError, RingReader, evicting_ring, ring};
+use tutti_rt::{Overflow, PushError, RingReader, ring};
 
 /// A value that counts its own drops, so a leak or a double free is a count.
 struct Tracked(Arc<AtomicUsize>);
@@ -203,30 +206,6 @@ fn a_reader_dropped_mid_push_frees_every_value_once() {
 }
 
 #[test]
-fn an_evicting_reader_dropped_mid_push_frees_every_value_once() {
-    loom::model(|| {
-        let drops = Arc::new(AtomicUsize::new(0));
-        let (mut writer, mut reader) = evicting_ring::<Tracked>(1);
-        let values: Vec<Tracked> = (0..3).map(|_| Tracked(Arc::clone(&drops))).collect();
-        let producer = thread::spawn(move || {
-            for value in values {
-                let _ = writer.push(value);
-            }
-            writer
-        });
-        let first = reader.pop();
-        drop(reader);
-        drop(producer.join().unwrap());
-        drop(first);
-        assert_eq!(
-            drops.load(Ordering::SeqCst),
-            3,
-            "a value leaked or freed twice"
-        );
-    });
-}
-
-#[test]
 fn the_loss_count_survives_a_race() {
     loom::model(|| {
         let (mut writer, mut reader) = ring::<u32>(1, Overflow::DropNewest);
@@ -249,53 +228,65 @@ fn the_loss_count_survives_a_race() {
     });
 }
 
-fn evict_run(capacity: usize, pushes: u32, bound: usize) {
-    let mut model = loom::model::Builder::new();
-    model.preemption_bound = Some(bound);
-    model.check(move || {
-        let (mut writer, mut reader) = evicting_ring::<[u32; 3]>(capacity);
+#[test]
+fn push_iter_and_pop_each_move_runs_whole_and_in_order() {
+    loom::model(|| {
+        let (mut writer, mut reader) = ring::<u32>(3, Overflow::Refuse);
         let producer = thread::spawn(move || {
-            for n in 1..=pushes {
-                let _ = writer.push([n; 3]);
+            let mut sent = Vec::new();
+            let mut next = 1;
+            for _ in 0..2 {
+                let run = [next, next + 1];
+                let took = writer.push_iter(run);
+                sent.extend_from_slice(&run[..took]);
+                next += 2;
             }
-            writer.lost()
+            sent
         });
-        let mut popped = Vec::new();
-        let take = |reader: &mut EvictReader<[u32; 3]>, popped: &mut Vec<u32>| match reader.pop() {
-            Some(v) => {
-                popped.push(checked(v));
-                true
-            }
-            None => false,
-        };
+        let mut got = Vec::new();
         for _ in 0..2 {
-            if !take(&mut reader, &mut popped) {
+            if reader.pop_each(2, |n| got.push(n)) == 0 {
                 thread::yield_now();
             }
         }
-        let lost = producer.join().unwrap();
-        while take(&mut reader, &mut popped) {}
-        assert!(
-            popped.windows(2).all(|w| w[0] < w[1]),
-            "order or repeat: {popped:?}"
-        );
-        assert_eq!(
-            popped.len() as u64 + lost,
-            u64::from(pushes),
-            "a value neither popped nor counted"
-        );
+        let sent = producer.join().unwrap();
+        while reader.pop_each(2, |n| got.push(n)) > 0 {}
+        assert_eq!(got, sent, "a run was torn, lost or reordered");
     });
 }
 
 #[test]
-fn an_evicting_ring_pops_or_counts_every_value() {
-    evict_run(1, 3, 3);
-    evict_run(2, 3, 3);
-}
-
-#[test]
-fn an_evicting_ring_holds_through_four_pushes() {
-    evict_run(2, 4, 4);
+fn peek_and_iter_see_only_published_values() {
+    loom::model(|| {
+        let (mut writer, mut reader) = ring::<[u32; 3]>(3, Overflow::Refuse);
+        let producer = thread::spawn(move || {
+            for n in 1..=3u32 {
+                assert!(writer.push([n; 3]).is_ok());
+            }
+        });
+        let mut expect = 1;
+        for _ in 0..2 {
+            let seen: Vec<u32> = reader.iter().map(|v| checked(*v)).collect();
+            assert!(
+                seen.iter().zip(expect..).all(|(a, b)| *a == b),
+                "iter skipped or reordered: {seen:?} from {expect}"
+            );
+            if let Some(first) = reader.peek() {
+                assert_eq!(checked(*first), expect, "peek is not the oldest");
+            }
+            while let Some(v) = reader.pop() {
+                assert_eq!(checked(v), expect);
+                expect += 1;
+            }
+            thread::yield_now();
+        }
+        producer.join().unwrap();
+        while let Some(v) = reader.pop() {
+            assert_eq!(checked(v), expect);
+            expect += 1;
+        }
+        assert_eq!(expect, 4);
+    });
 }
 
 #[test]

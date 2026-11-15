@@ -211,15 +211,24 @@ impl<T> Drop for RingReader<T> {
         self.shared.reader_gone.store(true, Ordering::Release);
         let head = self.shared.head.0.load(Ordering::Acquire);
         if self.tail < head {
+            // In a debug build inside an audio block this panics before any
+            // value is taken, so the unwind leaves them queued for `Shared`'s
+            // drop; that one runs while unwinding, where the check stands
+            // down (`RtScope::check_outside`), so the panic is not doubled
+            // into an abort.
             check_free_outside::<T>();
         }
         while self.tail < head {
             // SAFETY: `tail < head`: the slot is published, and this is the
             // only reader.
-            drop(unsafe { self.shared.slot(self.tail).take() });
+            let value = unsafe { self.shared.slot(self.tail).take() };
+            // Published before the value drops: if its drop panics, the
+            // slot is already given up and `Shared`'s drop does not take it
+            // again.
             self.tail += 1;
+            self.shared.tail.0.store(self.tail, Ordering::Release);
+            drop(value);
         }
-        self.shared.tail.0.store(self.tail, Ordering::Release);
     }
 }
 
@@ -297,25 +306,31 @@ impl<T: Send> RingWriter<T> {
     /// publish, and returns how many it took. Stops at the first value that
     /// does not fit and leaves the rest of the iterator unread: nothing is
     /// counted lost here, so a caller that wants a loss counted checks
-    /// [`vacant`](Self::vacant) first. A panic in the iterator leaks the
-    /// values already written rather than publishing them.
+    /// [`vacant`](Self::vacant) first. A panic in the iterator publishes the
+    /// values already written.
     pub fn push_iter(&mut self, values: impl IntoIterator<Item = T>) -> usize {
+        struct Publish<'a, T>(&'a mut RingWriter<T>);
+        impl<T> Drop for Publish<'_, T> {
+            fn drop(&mut self) {
+                self.0.shared.head.0.store(self.0.head, Ordering::Release);
+            }
+        }
         if self.shared.reader_gone.load(Ordering::Acquire) {
             return 0;
         }
+        // `u64::MAX` always refreshes the cached tail: one `Acquire` load
+        // for the whole run.
         let room = self.room(u64::MAX);
-        let mut at = self.shared.start(self.head);
+        let writer = Publish(self);
+        let mut at = writer.0.shared.start(writer.0.head);
         let mut taken = 0;
         for value in values.into_iter().take(room as usize) {
             // SAFETY: `taken < room` slots are free (see `push`), and this is
             // the only writer; the publish below follows every write.
-            unsafe { self.shared.slots[at].write(value) };
-            at = self.shared.next(at);
+            unsafe { writer.0.shared.slots[at].write(value) };
+            at = writer.0.shared.next(at);
             taken += 1;
-            self.head += 1;
-        }
-        if taken > 0 {
-            self.shared.head.0.store(self.head, Ordering::Release);
+            writer.0.head += 1;
         }
         taken
     }

@@ -1,23 +1,18 @@
 //! [`ring()`]: a bounded single-producer single-consumer queue of any `Send`
 //! value, its full-ring policy chosen at construction and its losses counted
-//! by the ring; [`evicting_ring()`], the variant whose writer drops the oldest
-//! value instead of refusing the newest.
+//! by the ring.
 //!
-//! # Two shapes, split by type
+//! # The protocol
 //!
-//! - **[`ring()`]**: the reader is the only taker, so the queue is a classic
-//!   head/tail ring over packed slots: a push or a pop is a few plain loads
-//!   and one `Release` store, wait-free, and `push_slice`/`pop_slice` move a
-//!   whole run with one publish. Values can be borrowed in place
-//!   ([`RingReader::peek`], [`RingReader::iter`]).
-//! - **[`evicting_ring()`]**: the writer may also take the oldest value, so
-//!   both ends claim a position by compare and exchange on a per-slot
-//!   sequence number (lock-free, not wait-free). A queued value can be taken
-//!   from under a borrow, so this shape has no `peek` or `iter`.
+//! The reader is the only taker, so the queue is a classic head/tail ring over
+//! packed slots: a push or a pop is a few plain loads and one `Release` store,
+//! wait-free, and `push_slice`/`pop_slice`/`push_iter`/`pop_each` move a run
+//! with one publish. Values can be borrowed in place ([`RingReader::peek`],
+//! [`RingReader::iter`]).
 //!
 //! # The policy
 //!
-//! [`Overflow`] says what a push into a full plain ring does:
+//! [`Overflow`] says what a push into a full ring does:
 //!
 //! - **`DropNewest`**: the pushed value is refused and counted lost; what is
 //!   queued stays. The value comes back in the error, so a caller whose value
@@ -26,25 +21,26 @@
 //!   decision (retry later, count it in its own unit, or treat it as
 //!   impossible by a credit count).
 //!
-//! An evicting ring drops the oldest queued value (on the pushing thread) and
-//! counts it lost.
-//!
 //! # Where values are freed
 //!
 //! A value is freed by whoever pops it, or, if it is still queued when the
-//! ring is dropped, by the reader's drop (and by the last end to drop if a
-//! push raced the reader's drop). The writer's drop frees nothing. So an
-//! audio-thread end must be dropped outside the audio callback when values
-//! may be queued; a drop that frees a value inside a block panics in debug
-//! builds ([`RtScope::check_outside`](crate::RtScope::check_outside)).
+//! ring is dropped, by the reader's drop. The writer's drop frees nothing; the
+//! last end to drop frees a value only when a push raced the reader's drop and
+//! landed after its drain.
+//!
+//! **Contract:** an end that can hold queued boxes is dropped off the audio
+//! thread. Dropping a reader with values queued, or the last end after such a
+//! race, frees them on the dropping thread, so the audio-side end of a ring of
+//! `Box`es goes with its owner (the executor, the pool, the engine) on the
+//! control side. A drop that frees a value inside an audio block panics in
+//! debug builds ([`RtScope::check_outside`](crate::RtScope::check_outside)).
 //!
 //! # Counting
 //!
 //! Positions are `u64` counts that only grow; at a billion pushes a second
-//! they last centuries (the evicting ring's sequence numbers, which are twice
-//! a position, last half that), so they are never wrapped or compared
-//! modulo. The loss count is a [`Counter`] with the writer as its one
-//! writer: only a push loses a value.
+//! they last centuries, so they are never wrapped or compared modulo. The loss
+//! count is a [`Counter`] with the writer as its one writer: only a push
+//! loses a value.
 //!
 //! The models in `tests/ring_loom.rs` run this code.
 
@@ -55,10 +51,8 @@ use std::mem::MaybeUninit;
 use crate::gauge::{Counter, CounterWriter, counter};
 use crate::scope::RtScope;
 
-mod evict;
 mod plain;
 
-pub use evict::{EvictReader, EvictWriter, evicting_ring};
 pub use plain::{Drain, Iter, RingReader, RingWriter, ring};
 
 mod sync {
@@ -81,7 +75,7 @@ pub enum Overflow {
 /// Why a push did not queue its value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum PushError {
-    /// The ring was full (and did not evict).
+    /// The ring was full.
     #[error("the ring is full")]
     Full,
     /// The reading end was dropped: nothing will take the value, now or later.

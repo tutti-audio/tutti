@@ -29,45 +29,6 @@ fn refuse_hands_the_value_back_without_counting() {
     assert_eq!(reader.lost(), 0);
 }
 
-/// **An evicting ring keeps the newest `capacity` values in order** and
-/// counts one loss per value it dropped.
-#[test]
-fn evict_keeps_the_newest_values_in_order() {
-    let (mut writer, mut reader) = evicting_ring::<u32>(3);
-    for n in 0..10 {
-        writer.push(n).unwrap();
-    }
-    assert_eq!(writer.lost(), 7);
-    assert_eq!(reader.drain().collect::<Vec<_>>(), [7, 8, 9]);
-    writer.push(10).unwrap();
-    assert_eq!(reader.pop(), Some(10));
-}
-
-/// **Evicting drops each evicted value on the pushing thread, exactly once**,
-/// and the values left queued drop with the ring.
-#[test]
-fn evict_drops_each_evicted_value_once() {
-    static DROPS: AtomicUsize = AtomicUsize::new(0);
-    struct Counted(u32);
-    impl Drop for Counted {
-        fn drop(&mut self) {
-            DROPS.fetch_add(1, StdOrdering::Relaxed);
-        }
-    }
-    let (mut writer, mut reader) = evicting_ring::<Counted>(2);
-    for n in 0..5 {
-        writer.push(Counted(n)).unwrap();
-    }
-    assert_eq!(DROPS.load(StdOrdering::Relaxed), 3);
-    assert_eq!(reader.pop().map(|c| c.0), Some(3));
-    drop((writer, reader));
-    assert_eq!(
-        DROPS.load(StdOrdering::Relaxed),
-        5,
-        "the queued one frees with the ring"
-    );
-}
-
 /// **Values come out in order across many laps**, for a ring of three.
 #[test]
 fn values_wrap_around_in_order() {
@@ -123,8 +84,7 @@ fn a_dropped_end_is_seen_by_the_other() {
     assert_eq!(reader.pop(), None);
 }
 
-/// **A zero-capacity ring refuses everything and holds nothing**, on both
-/// shapes.
+/// **A zero-capacity ring refuses everything and holds nothing.**
 #[test]
 fn a_zero_capacity_ring_is_always_full() {
     let (mut writer, mut reader) = ring::<u8>(0, Overflow::Refuse);
@@ -132,10 +92,6 @@ fn a_zero_capacity_ring_is_always_full() {
     assert_eq!(writer.push(1).unwrap_err().error, PushError::Full);
     assert_eq!(reader.pop(), None);
     assert!(reader.iter().next().is_none());
-
-    let (mut writer, mut reader) = evicting_ring::<u8>(0);
-    assert_eq!(writer.push(1).unwrap_err().error, PushError::Full);
-    assert_eq!(reader.pop(), None);
 }
 
 /// **The slice helpers move whole runs in order**, report the count, and
@@ -184,8 +140,7 @@ fn iter_and_peek_leave_values_queued_and_drain_is_bounded() {
     assert_eq!(reader.pop(), Some(4));
 }
 
-/// **Queued values drop with the ring**, none leaked and none twice, on both
-/// shapes.
+/// **Queued values drop with the ring**, none leaked and none twice.
 #[test]
 fn queued_values_drop_with_the_ring() {
     let live = std::sync::Arc::new(());
@@ -196,11 +151,7 @@ fn queued_values_drop_with_the_ring() {
     assert_eq!(std::sync::Arc::strong_count(&live), 4);
     drop((writer, reader));
     assert_eq!(std::sync::Arc::strong_count(&live), 1);
-
-    let (mut writer, reader) = evicting_ring::<std::sync::Arc<()>>(4);
-    for _ in 0..6 {
-        writer.push(live.clone()).unwrap();
-    }
+}
     assert_eq!(std::sync::Arc::strong_count(&live), 5);
     drop((writer, reader));
     assert_eq!(std::sync::Arc::strong_count(&live), 1);
@@ -276,29 +227,6 @@ fn two_threads_lose_nothing_unaccounted() {
     assert_eq!(got.len() as u64 + lost, u64::from(PUSHES));
 }
 
-/// **An evicting ring under a racing reader never repeats or reorders a
-/// value**, and what it lost plus what arrived is what was pushed.
-#[test]
-fn an_evicting_ring_with_a_reader_keeps_order_and_counts() {
-    let (mut writer, reader) = evicting_ring::<u32>(4);
-    let (got, lost) = two_threads(
-        move |pushes| {
-            for n in 0..pushes {
-                let _ = writer.push(n);
-            }
-            writer.lost()
-        },
-        |r: &mut EvictReader<u32>| r.pop(),
-        reader,
-        EvictReader::is_disconnected,
-    );
-    assert!(
-        got.windows(2).all(|w| w[0] < w[1]),
-        "order kept, none repeated"
-    );
-    assert_eq!(got.len() as u64 + lost, u64::from(PUSHES));
-}
-
 /// **Bulk runs across threads arrive whole and in order**: `push_slice` and
 /// `pop_slice` with one publish each.
 #[test]
@@ -346,4 +274,63 @@ fn a_reader_dropped_during_pushes_leaves_no_value_behind() {
         drop(first);
         assert_eq!(std::sync::Arc::strong_count(&token), 1);
     }
+}
+
+/// **A value whose drop panics is dropped exactly once**: the reader's drop
+/// gives up each slot before dropping its value, so the unwind leaves the
+/// slots after it for the ring's own drop and takes none twice.
+#[test]
+fn a_panicking_drop_in_the_readers_drop_double_drops_nothing() {
+    static DROPS: [AtomicUsize; 4] = [const { AtomicUsize::new(0) }; 4];
+    struct Value(usize);
+    impl Drop for Value {
+        fn drop(&mut self) {
+            DROPS[self.0].fetch_add(1, StdOrdering::SeqCst);
+            assert!(self.0 != 1, "the second value's drop panics");
+        }
+    }
+    let (mut writer, reader) = ring::<Value>(4, Overflow::Refuse);
+    for n in 0..4 {
+        writer.push(Value(n)).unwrap();
+    }
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(reader)));
+    assert!(unwound.is_err(), "the drop of the second value panicked");
+    drop(writer);
+    let counts: Vec<usize> = DROPS.iter().map(|d| d.load(StdOrdering::SeqCst)).collect();
+    assert_eq!(counts, [1, 1, 1, 1], "each value dropped exactly once");
+}
+
+/// **A panic in `push_iter`'s iterator publishes what was written**, so the
+/// reader sees the values and none is lost.
+#[test]
+fn a_panicking_iterator_in_push_iter_publishes_what_it_wrote() {
+    let (mut writer, mut reader) = ring::<u32>(8, Overflow::Refuse);
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        writer.push_iter((0..5).map(|n| {
+            assert!(n < 3, "the iterator panics at 3");
+            n
+        }));
+    }));
+    assert!(unwound.is_err());
+    assert_eq!(reader.drain().collect::<Vec<_>>(), [0, 1, 2]);
+    assert_eq!(writer.push_iter([7, 8]), 2, "the writer carries on from there");
+    assert_eq!(reader.drain().collect::<Vec<_>>(), [7, 8]);
+}
+
+/// **A panic in `pop_each`'s closure leaves the handed values taken**: the
+/// next pop starts after them.
+#[test]
+fn a_panicking_closure_in_pop_each_leaves_the_handed_values_taken() {
+    let (mut writer, mut reader) = ring::<u32>(8, Overflow::Refuse);
+    writer.push_slice(&[0, 1, 2, 3]);
+    let mut seen = Vec::new();
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        reader.pop_each(4, |n| {
+            seen.push(n);
+            assert!(n < 1, "the closure panics at 1");
+        });
+    }));
+    assert!(unwound.is_err());
+    assert_eq!(seen, [0, 1]);
+    assert_eq!(reader.drain().collect::<Vec<_>>(), [2, 3]);
 }

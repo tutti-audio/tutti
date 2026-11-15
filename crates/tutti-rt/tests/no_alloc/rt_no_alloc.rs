@@ -378,13 +378,13 @@ fn a_handoff_trades_without_allocating() {
     });
 }
 
-/// A `ring` and an `evicting_ring` push and pop on every overflow policy
-/// (full, evicting, empty and disconnected answers included), `drain`,
-/// `push_slice`, `pop_slice` and the loss reads, neither allocate nor free:
+/// A `ring` push and pop on every overflow policy (full, empty and
+/// disconnected answers included), `drain`,
+/// `push_slice`, `pop_slice`, `push_iter`, `pop_each` and the loss reads, neither allocate nor free:
 /// the whole of what an audio-thread end does with values that need no drop.
 #[test]
 fn ring_is_allocation_free() {
-    use tutti_rt::{Overflow, evicting_ring, ring};
+    use tutti_rt::{Overflow, ring};
 
     for overflow in [Overflow::DropNewest, Overflow::Refuse] {
         let (mut writer, mut reader) = ring::<[u32; 3]>(4, overflow);
@@ -397,6 +397,8 @@ fn ring_is_allocation_free() {
                 assert!(writer.vacant() <= 4);
                 core::hint::black_box(reader.pop_slice(&mut out));
                 core::hint::black_box(writer.push_slice(&out));
+                core::hint::black_box(writer.push_iter(out.iter().copied()));
+                core::hint::black_box(reader.pop_each(1, core::hint::black_box));
                 for edit in reader.drain() {
                     core::hint::black_box(edit);
                 }
@@ -408,18 +410,4 @@ fn ring_is_allocation_free() {
         drop(reader);
         assert_no_alloc::assert_no_alloc(|| assert!(writer.push([0; 3]).is_err()));
     }
-
-    let (mut writer, mut reader) = evicting_ring::<[u32; 3]>(4);
-    assert_no_alloc::assert_no_alloc(|| {
-        for round in 0..1_000u32 {
-            for n in 0..6 {
-                let _ = writer.push([round, n, 0]);
-            }
-            for edit in reader.drain() {
-                core::hint::black_box(edit);
-            }
-            assert!(reader.pop().is_none());
-            core::hint::black_box((writer.take_lost(), reader.lost()));
-        }
-    });
 }

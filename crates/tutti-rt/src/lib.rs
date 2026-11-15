@@ -18,7 +18,7 @@
 //!   **`edit_ring`**, **`DirtySet`** — a value in one atomic word, a sequence lock, a request
 //!   bitset, a bounded single-producer single-consumer queue, and a sized set of
 //!   dirty flags (an atomic bit per index) with no capacity to overflow.
-//! - **`ring()`**, **`evicting_ring()`** — a bounded single-producer single-consumer queue of any
+//! - **`ring()`** — a bounded single-producer single-consumer queue of any
 //!   `Send` value, its full-ring policy chosen at construction and its losses counted by the ring.
 //! - **`RtScope`** — a per-thread "inside a block" marker that a `Drop` impl checks.
 //! - **`SplitMut`/`SplitRw`**, **`TaskGraph`**, **`JobGate`**, **`BlockWaits`** — the
@@ -71,8 +71,7 @@
 //! - `ring()` (`ring/plain.rs`): packed `UnsafeCell<MaybeUninit<T>>` slots under a head and a
 //!   tail index; the one writer writes a slot only after the reader's `Release` store of `tail`
 //!   freed it, and the one reader reads it only after the writer's `Release` store of `head`
-//!   published it. `evicting_ring()` (`ring/evict.rs`): the same cells under a sequence number
-//!   per slot, a position's value read only by the taker that won its claim on `tail`.
+//!   published it.
 //! - `handoff` (`handoff.rs`): one `MaybeUninit` slot moved between the two ends
 //!   under a state word.
 //! - `with_no_denormals` (`denormals.rs`): saves, sets and restores the FPU
@@ -151,15 +150,11 @@
 //!   outside the block.
 //! - [`edit_ring()`] — a bounded single-producer single-consumer queue of small
 //!   `Copy` values, for edits the control thread hands the audio thread.
-//!   *Follow-up:* `edit_ring` folds into [`ring()`] (its one user, `tutti-plugin-types`' request
-//!   queue, is a bounded `Copy` queue of the same shape).
 //! - [`ring()`] — the same shape for any `Send` value, with the full-ring policy chosen at
 //!   construction ([`Overflow`]: refuse and count, or refuse and leave the count to the caller)
 //!   and the losses counted by the ring ([`RingWriter::take_lost`], [`RingWriter::lost`]); its
-//!   values can be borrowed in place, and a run of `Copy` values moves with one publish.
-//!   [`evicting_ring()`] is the variant whose writer drops the oldest value instead (no
-//!   borrowing). The loss count is a `Counter<u64>`; *follow-up:* `Counter<Losses>` when the
-//!   `Losses` unit lands. What the engine's command, event and tap queues are.
+//!   values can be borrowed in place, and a run of values moves with one publish. What the
+//!   engine's command, event and tap queues are.
 //! - [`drain_clock()`] — counts the drains the audio side begins, so the control
 //!   side can tell which of its writes a block has surely taken.
 //! - [`FaultLatch`] — a flag a producer raises when it stops for good, read
@@ -235,10 +230,7 @@ pub use pos_ring::{
 pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priority};
 pub use reclaim::Reclaim;
 pub use request_word::{REQUEST_BITS, RequestBit, RequestBitOutOfRange, RequestBits, RequestWord};
-pub use ring::{
-    Drain, EvictReader, EvictWriter, Iter, Overflow, PushError, Returned, RingReader, RingWriter,
-    evicting_ring, ring,
-};
+pub use ring::{Drain, Iter, Overflow, PushError, Returned, RingReader, RingWriter, ring};
 pub use scope::{RtScope, RtScopeGuard};
 pub use seq_cell::{Contended, SeqReader, SeqWriter};
 pub use spin::BlockWaits;
