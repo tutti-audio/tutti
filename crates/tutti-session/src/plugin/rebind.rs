@@ -4,9 +4,9 @@
 //! its node declares. When they differ it asks the plugin's
 //! [`PluginRebinder`](tutti_plugin::catalog::PluginRebinder) for a node over the
 //! same plugin and swaps it in at the same key
-//! ([`Graph::replace_rebound`]): the wiring to ports the new shape keeps stays,
+//! (`Graph::replace_rebound`): the wiring to ports the new shape keeps stays,
 //! and the wiring to ports it lacks is reported as
-//! [`SessionEvent::Unwired`](crate::SessionEvent::Unwired) by the update that
+//! [`SessionEvent::Unwired`] by the update that
 //! commits the swap. The plugin keeps running; its Processor moves to the new
 //! node at a later tick.
 //!

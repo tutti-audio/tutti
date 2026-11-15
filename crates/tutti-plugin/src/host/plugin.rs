@@ -611,7 +611,7 @@ pub struct BoundPlugin {
 }
 
 /// Builds the node that replaces a plugin's node when the plugin changes its
-/// audio ports ([`BoundPlugin::rebinder`]): an in-process plugin's successor
+/// audio ports ([`Plugin::bind_with_rebinder`]): an in-process plugin's successor
 /// is over the same instance, and the Processor moves to it with no
 /// restart. A served plugin's launch fixed its shared-memory slab, so ports
 /// of other widths are refused by name and nothing is built.
