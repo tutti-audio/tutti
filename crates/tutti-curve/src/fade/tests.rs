@@ -22,6 +22,8 @@ fn equal_amplitude_is_the_smootherstep_at_every_frame() {
                 (0.0..=1.0).contains(&out) && (0.0..=1.0).contains(&inn),
                 "{k}/{len}: ({out}, {inn})"
             );
+            // `f32` position rounding and the Horner form's ~19 ulp near 1
+            // stay within about 1.2e-6, under the 5e-6 bound.
             let want = smootherstep((k + 1) as f64 / (len + 1) as f64);
             assert!((f64::from(inn) - want).abs() < 5e-6, "{k}/{len}: {inn}");
             assert!(
