@@ -24,7 +24,8 @@
 //!   figures a block reads ([`RenderConfig`]) and the seat the Processor
 //!   arrives in. What the render thread has finished with goes back through a
 //!   second queue ([`Back`]) to be dropped on the main thread: a plugin's
-//!   objects are never freed on the render thread.
+//!   objects are freed on the render thread only when that queue refuses
+//!   them, which only an abandoned session reaches.
 //!
 //! Commands are applied before the request that follows them is served, so a
 //! command the main thread pushed before it answered the host is in effect for
@@ -309,6 +310,14 @@ pub(crate) struct RenderSide {
     refused_blocks: u64,
 }
 
+/// Logs a hand-back the queue to the main thread refused.
+fn unreaped(error: PushError) {
+    match error {
+        PushError::Full => tracing::error!("plugin-server: the main thread reaps nothing"),
+        PushError::Disconnected => tracing::error!("plugin-server: the main thread's end is gone"),
+    }
+}
+
 /// A session's two halves: the control side the main thread drives, and the
 /// render side, which a thread runs ([`RenderThread::spawn`]) once the host's
 /// audio connection is there.
@@ -385,12 +394,12 @@ impl RenderSide {
         }
     }
 
-    /// Hands something back to the main thread. A full queue drops it here,
-    /// which only an abandoned session reaches: the main thread reaps on every
-    /// command it sends.
+    /// Hands something back to the main thread. A full queue, or one whose
+    /// main-thread end is gone, drops it here, which only an abandoned session
+    /// reaches: the main thread reaps on every command it sends.
     fn give_back(&mut self, back: Back) {
-        if self.back.push(back).is_err() {
-            tracing::error!("plugin-server: the main thread reaps nothing");
+        if let Err(refused) = self.back.push(back) {
+            unreaped(refused.error);
         }
     }
 
@@ -560,8 +569,8 @@ impl RenderSide {
         let output = pipeline.process(seat.as_mut(), slab, &config.clock, block)?;
         if reaches && let Some(id) = barrier.take() {
             // This block ran the Processor after the barrier was taken.
-            if back.push(Back::Ack(id)).is_err() {
-                tracing::error!("plugin-server: the main thread reaps nothing");
+            if let Err(refused) = back.push(Back::Ack(id)) {
+                unreaped(refused.error);
             }
         }
         Ok(BridgeMessage::AudioProcessed {
