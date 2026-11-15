@@ -113,14 +113,8 @@ impl Planar {
 }
 
 fn unique_shm_name(label: &str) -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    format!(
-        "test_{}_{}_{}",
-        label,
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    )
+    static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
+    format!("test_{}_{}_{}", label, std::process::id(), COUNTER.mint())
 }
 
 /// `None` on a clean EOF — the host side closing the socket at teardown is

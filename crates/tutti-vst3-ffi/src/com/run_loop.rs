@@ -36,7 +36,6 @@
 #![cfg(target_os = "linux")]
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tutti_plugin_types::{FdId, Interest, MainThreadMarker, Ready, Wakeups};
@@ -49,22 +48,23 @@ use vst3::Steinberg::Linux::{
 use vst3::Steinberg::tresult;
 use vst3::Steinberg::{kResultFalse, kResultOk};
 
-/// Which plugin instance a registration belongs to.
-///
-/// The module's run loop is shared by every plugin made from it, and the
-/// handlers it holds are raw pointers into the plugin that registered them. A
-/// plugin that leaves one registered when its editor closes (or when it is
-/// dropped) would have the next [`RunLoop::dispatch`], on behalf of any
-/// plugin of the module, call into freed memory. The owner lets
-/// [`RunLoop::purge`] take them back.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct Owner(u64);
+tutti_types::id! {
+    /// Which plugin instance a registration belongs to.
+    ///
+    /// The module's run loop is shared by every plugin made from it, and the
+    /// handlers it holds are raw pointers into the plugin that registered them. A
+    /// plugin that leaves one registered when its editor closes (or when it is
+    /// dropped) would have the next [`RunLoop::dispatch`], on behalf of any
+    /// plugin of the module, call into freed memory. The owner lets
+    /// [`RunLoop::purge`] take them back.
+    pub(crate) struct Owner;
+}
 
 impl Owner {
     /// A new owner, distinct from every other in the process.
     pub(crate) fn next() -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(1);
-        Self(NEXT.fetch_add(1, Ordering::Relaxed))
+        static NEXT: tutti_types::Mint = tutti_types::Mint::new();
+        Self::mint(&NEXT)
     }
 }
 

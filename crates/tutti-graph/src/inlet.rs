@@ -54,7 +54,6 @@
 //!
 //! There is no gain: a level belongs in a node downstream of this one.
 
-use crate::TapId;
 use tutti_types::{ChannelLayout, SampleRate, Samples, Tail};
 
 use crate::cost::Cost;
@@ -92,7 +91,7 @@ impl InletRing {
     /// side.
     #[must_use = "the writer is the only way to fill the ring"]
     pub fn pair(width: ChannelLayout, capacity: Samples, rate: SampleRate) -> (Self, TapWriter) {
-        let (reader, writer) = TapReader::pair(TapId(0), usize::from(width.count()), capacity);
+        let (reader, writer) = TapReader::pair(usize::from(width.count()), capacity);
         (Self { reader, rate }, writer)
     }
 
@@ -162,7 +161,7 @@ impl InletNode {
     /// the writer the producer fills it with. Allocates; control side.
     #[must_use = "the writer is the only way to fill the ring"]
     pub fn pair(width: ChannelLayout, capacity: Samples) -> (Self, TapWriter) {
-        let (ring, writer) = TapReader::pair(TapId(0), usize::from(width.count()), capacity);
+        let (ring, writer) = TapReader::pair(usize::from(width.count()), capacity);
         (Self::new(ring), writer)
     }
 

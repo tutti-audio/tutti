@@ -72,13 +72,11 @@ pub use step::StepOutcome;
 #[cfg(test)]
 pub(crate) use prefetch::RegionBuffer;
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use crate::error::Result;
 use decode::Seams;
 use handlers::Handles;
 use thread::Built;
-use tutti_types::SampleRate;
+use tutti_types::{Mint, SampleRate};
 
 /// The disk-streaming engine: owns the streamer thread that reads files into
 /// per-stream rings for [`DiskVoice`](crate::DiskVoice)s to play.
@@ -160,7 +158,7 @@ pub struct DiskStreamer<D = Running> {
     #[cfg_attr(not(any(test, feature = "testing")), allow(dead_code))]
     driver: D,
     /// The next stream's identity, minted here on the control side.
-    next_stream: AtomicU64,
+    next_stream: Mint,
 }
 
 // The driver holds a thread handle or a cycle that can't derive `Debug`; print
@@ -205,7 +203,7 @@ impl DiskStreamer<Running> {
             streamer_tx,
             shared,
             driver: built.start()?,
-            next_stream: AtomicU64::new(0),
+            next_stream: Mint::new(),
         })
     }
 }
@@ -254,7 +252,7 @@ impl DiskStreamer<ByHand> {
             streamer_tx,
             shared,
             driver: built.by_hand(),
-            next_stream: AtomicU64::new(0),
+            next_stream: Mint::new(),
         })
     }
 
@@ -340,7 +338,7 @@ impl<D> DiskStreamer<D> {
         place: Placement,
         width: Option<tutti_types::ChannelLayout>,
     ) -> Opening {
-        let id = StreamId(self.next_stream.fetch_add(1, Ordering::Relaxed) + 1);
+        let id = StreamId::mint(&self.next_stream);
         let (reply, answer) = crossbeam_channel::bounded(1);
         // A refused send drops the command and with it `reply`, which is how
         // a gone streamer reaches the caller: the answer is disconnected.

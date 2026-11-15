@@ -1015,7 +1015,7 @@ fn an_event_tap_hands_midi_back_and_counts_drops() {
     ));
     let (inlet, mut keys) = EventInletNode::pair(EventCapacity::of(256));
     ed.insert(NodeKey(1), "keys", inlet);
-    let mut out = common::sink(&mut ed, 0, &[(1, 0)]);
+    let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
     for k in 0..5u64 {
         // The inlet holds each event for its frame: offset 7, then 8, in

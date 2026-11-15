@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use tutti_cpal::{AudioHost, DeviceSelector, MONITOR_RING_FRAMES, MicConfig, MicIn, StreamLatency};
 use tutti_graph::{DECLICK, FadeLaw, InletNode, InletRing};
-use tutti_types::{SampleRate, Samples};
+use tutti_types::{Mint, SampleRate, Samples};
 
 use crate::graph::CrossfadeRefused;
 use crate::{DeviceEvent, Error, Key, Result, Session, SessionEvent};
@@ -236,8 +236,8 @@ pub(crate) struct Inputs {
     /// Where the output stream's callback reports its delay, once the session
     /// has a device ([`Device::latency`](crate::Device::latency)'s `output`).
     output_latency: Option<Arc<StreamLatency>>,
-    /// The takes begun, for their ids.
-    takes: u64,
+    /// Names the takes begun.
+    takes: Mint,
 }
 
 impl std::fmt::Debug for Inputs {
@@ -257,7 +257,7 @@ impl Inputs {
             opener: opener.unwrap_or_else(|| Box::new(Capture)),
             held: Vec::new(),
             output_latency: None,
-            takes: 0,
+            takes: Mint::new(),
         }
     }
 
@@ -283,10 +283,9 @@ impl Inputs {
         crate::take::LatencyProbe::new(Arc::clone(&self.latency), self.output_latency.clone())
     }
 
-    /// The next take's id.
-    pub(crate) fn next_take(&mut self) -> u64 {
-        self.takes += 1;
-        self.takes
+    /// What names the takes begun.
+    pub(crate) fn takes(&self) -> &Mint {
+        &self.takes
     }
 
     /// The cell the capture callbacks report into.

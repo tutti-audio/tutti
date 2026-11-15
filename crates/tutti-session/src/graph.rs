@@ -60,6 +60,7 @@ use tutti_graph::{
 #[cfg(feature = "plugin")]
 use tutti_types::Latency;
 use tutti_types::MaxBlock;
+use tutti_types::Mint;
 use tutti_types::{Amplitude, ChannelLayout, Mix, SampleRate, Seconds, UnitAddr};
 use tutti_types::{Samples, Tail};
 
@@ -130,10 +131,11 @@ pub enum Feeder {
     Declared,
 }
 
-/// A crossfade waiting for a re-prepare, named so its landing can be told
-/// from another's ([`SessionEvent::CrossfadeLanded`](crate::SessionEvent)).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct CrossfadeId(u64);
+tutti_types::id! {
+    /// A crossfade waiting for a re-prepare, named so its landing can be told
+    /// from another's ([`SessionEvent::CrossfadeLanded`](crate::SessionEvent)).
+    pub struct CrossfadeId;
+}
 
 /// What [`Graph::crossfade`] came to, when the graph did not refuse it.
 #[derive(Debug)]
@@ -308,16 +310,12 @@ pub struct Graph {
     /// there and the host did not wire itself, which are all a change of the
     /// feeds may take away. Every other edge on the input is the host's.
     fed_edges: BTreeMap<NodeKey, Vec<EventOutPort>>,
-    /// The id the next tap takes.
-    next_tap: u32,
-    /// The id the next event tap takes.
-    next_event_tap: u32,
+    /// Names every tap, event tap, meter and crossfade of this graph.
+    ids: Mint,
     /// Each open event tap as it was opened (its port, alignment and
     /// capacity), so [`Taps::reopen_events`] can open it
     /// again.
     event_taps: BTreeMap<EventTapId, (tutti_graph::EventTapSource, TapAlign, EventCapacity)>,
-    /// The id the next meter takes (`MASTER_METER` is taken at construction).
-    next_meter: u32,
     /// The master meter's reader until a host takes it.
     master_meter: Option<MeterReader>,
     /// Crossfades refused `Busy`, in request order.
@@ -325,7 +323,6 @@ pub struct Graph {
     /// The nodes [`remove`](Self::remove) took out since the session last
     /// forgot what it declared on them ([`Graph::take_removed`]).
     removed: Vec<NodeKey>,
-    next_crossfade: u64,
     /// What the root's channels are, when a host declared it
     /// ([`Session::declare_root_topology`](crate::Session::declare_root_topology));
     /// `None` is the engine's order for the root's width.
@@ -386,8 +383,7 @@ impl std::fmt::Debug for Graph {
             .field("render_workers", &self.render_workers)
             .field("feeds", &self.feeds)
             .field("fed_edges", &self.fed_edges)
-            .field("parked", &self.parked)
-            .field("next_crossfade", &self.next_crossfade);
+            .field("parked", &self.parked);
         #[cfg(feature = "plugin")]
         d.field("plugins", &self.plugins);
         d.finish_non_exhaustive()
@@ -409,9 +405,6 @@ pub enum Committed {
     /// next update retries.
     Retry,
 }
-
-/// The master meter's id; every other meter takes the ids after it.
-const MASTER_METER: MeterId = MeterId(0);
 
 fn compensation_of(plan: &tutti_graph::Plan) -> Compensation {
     Compensation::new(plan.compensation().to_vec(), plan.total_latency().samples())
@@ -459,8 +452,9 @@ impl Graph {
         // Declared and on from the start: a host reads the master level
         // without asking for it.
         // `Outputs` names no source, so the open cannot be refused.
+        let ids = Mint::new();
         let master_meter = editor
-            .open_meter(MASTER_METER, MeterSpec::Outputs)
+            .open_meter(MeterId::mint(&ids), MeterSpec::Outputs)
             .expect("a master meter names no source");
         master_meter.enable();
         Self {
@@ -477,14 +471,11 @@ impl Graph {
             render_worker_start: None,
             feeds: BTreeMap::new(),
             fed_edges: BTreeMap::new(),
-            next_tap: 0,
-            next_event_tap: 0,
+            ids,
             event_taps: BTreeMap::new(),
-            next_meter: 1,
             master_meter: Some(master_meter),
             parked: VecDeque::new(),
             removed: Vec::new(),
-            next_crossfade: 0,
             root: None,
             output: None,
             widen_refusal: None,
@@ -1181,8 +1172,7 @@ impl Graph {
         fade: Seconds,
         law: FadeLaw,
     ) -> CrossfadeId {
-        let id = CrossfadeId(self.next_crossfade);
-        self.next_crossfade += 1;
+        let id = CrossfadeId::mint(&self.ids);
         self.parked.push_back(Parked {
             id,
             node,
