@@ -17,8 +17,8 @@
 //! SysEx 7 data), which is part of the byte being 7-bit, not a reserved bit.
 
 use crate::field::{
-    DeltaTicks, FirstGroup, FunctionBlockId, GroupSpan, NoteNumber, SharpsFlats,
-    TicksPerQuarterNote, U4, U7, U14,
+    DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan, NoteNumber,
+    SharpsFlats, TicksPerQuarterNote, U4, U7, U14,
 };
 use crate::message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockFilter,
@@ -548,7 +548,7 @@ fn stream(w: [u32; 4]) -> Option<Stream> {
         0x01 if complete => Some(Stream::EndpointInfo(EndpointInfo {
             version,
             static_function_blocks: flag(w[1], 31),
-            function_blocks: u7(w[1], 3),
+            function_blocks: FunctionBlockCount::wire(byte(w[1], 3) & 0x7f),
             midi2: flag(w[1], 9),
             midi1: flag(w[1], 8),
             rx_jr: flag(w[1], 1),

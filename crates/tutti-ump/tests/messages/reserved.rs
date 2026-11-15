@@ -14,10 +14,11 @@
 use tutti_ump::ControlValue;
 use tutti_ump::{
     Accidental, Address, Alteration, AlterationKind, Attribute, BlockSelect, ChordBass, ChordName,
-    ChordPitch, ChordType, Direction, EndpointInfo, FirstGroup, Flex, FlexAddress, FlexTextKind,
-    FunctionBlockId, FunctionBlockInfo, GroupSpan, KeySignature, Letter, Message, Midi1Port,
-    MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Protocol, RegisteredPerNoteController,
-    SharpsFlats, Stream, StreamConfig, U4, U7, UiHint, Ump, UmpVersion, Unknown, Utility, Voice2,
+    ChordPitch, ChordType, Direction, FirstGroup, Flex, FlexAddress, FlexTextKind,
+    FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, GroupSpan, KeySignature, Letter,
+    Message, Midi1Port, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Protocol,
+    RegisteredPerNoteController, SharpsFlats, Stream, StreamConfig, U4, UiHint, Ump, Unknown,
+    Utility, Voice2,
 };
 
 /// `dirty` decodes to the message `clean` encodes, and re-encoding gives
@@ -209,13 +210,6 @@ fn undefined_statuses_are_unknown() {
     }
 }
 
-/// A reserved value in an enumerated or bounded field is kept: the message is
-/// read, with the raw value, and re-encodes to the same words.
-fn kept(words: [u32; 4], message: Message) {
-    assert_eq!(Ump(words).decode(), Ok(message), "decode {words:08x?}");
-    assert_eq!(Ump::from(message), Ump(words), "encode {message:?}");
-}
-
 /// The message `words` decode to, which re-encodes to `words`.
 fn read(words: [u32; 4]) -> Message {
     let message = Ump(words)
@@ -286,8 +280,6 @@ fn reserved_values_are_kept() {
     let g = MidiGroup::of;
     let ch = MidiChannel::of;
     let n = |v| NoteNumber::new(v).unwrap();
-    let u7 = |v| U7::new(v).unwrap();
-    let stream = Message::Stream;
 
     // A Delta Clockstamp Ticks Per Quarter Note of 0 is reserved (§7.2.3.1).
     let Message::Utility(Utility::TicksPerQuarterNote(zero)) = read([0x0030_0000, 0, 0, 0]) else {
@@ -374,18 +366,13 @@ fn reserved_values_are_kept() {
     assert_eq!(chord.bass.pitch.and_then(|p| p.accidental.raw()), Some(8));
     // Endpoint Info: 33 to 127 Function Blocks are reserved (§7.1.2).
     for count in [33u8, 127] {
-        kept(
-            [0xF001_0101, u32::from(count) << 24, 0, 0],
-            stream(Stream::EndpointInfo(EndpointInfo {
-                version: UmpVersion { major: 1, minor: 1 },
-                static_function_blocks: false,
-                function_blocks: u7(count),
-                midi2: false,
-                midi1: false,
-                rx_jr: false,
-                tx_jr: false,
-            })),
-        );
+        let Message::Stream(Stream::EndpointInfo(info)) =
+            read([0xF001_0101, u32::from(count) << 24, 0, 0])
+        else {
+            panic!("{count}")
+        };
+        assert_eq!(info.function_blocks.get(), count);
+        assert!(FunctionBlockCount::new(count).is_none());
     }
     // Stream Configuration: protocols other than 1 and 2.
     for protocol in [0u8, 3, 0xFF] {

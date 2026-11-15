@@ -16,11 +16,12 @@
 //! Every other number-to-name table is held by `spec_words.rs`.
 
 use core::num::NonZeroU8;
+use tutti_ump::FunctionBlockCount;
 use tutti_ump::{
     Accidental, Alteration, AlterationKind, BarAccents, ChordBass, ChordName, ChordPitch,
     ChordType, Direction, DiscoveryFilter, EndpointInfo, FirstGroup, Flex, FlexAddress,
     FlexTextKind, Form, FunctionBlockId, FunctionBlockInfo, GroupSpan, Letter, Message, Metronome,
-    Midi1Port, MidiGroup, Protocol, Stream, StreamConfig, U4, U7, UiHint, Ump, UmpVersion,
+    Midi1Port, MidiGroup, Protocol, Stream, StreamConfig, U4, UiHint, Ump, UmpVersion,
 };
 
 /// Decode gives the message, and encode gives the words back.
@@ -252,7 +253,7 @@ fn the_version_is_major_then_minor() {
         Message::Stream(Stream::EndpointInfo(EndpointInfo {
             version,
             static_function_blocks: false,
-            function_blocks: U7::new(0).unwrap(),
+            function_blocks: FunctionBlockCount::of(0),
             midi2: false,
             midi1: false,
             rx_jr: false,
@@ -268,7 +269,7 @@ fn endpoint_info_flags_each_alone() {
     let none = EndpointInfo {
         version: UmpVersion { major: 1, minor: 1 },
         static_function_blocks: false,
-        function_blocks: U7::new(0).unwrap(),
+        function_blocks: FunctionBlockCount::of(0),
         midi2: false,
         midi1: false,
         rx_jr: false,
@@ -290,7 +291,7 @@ fn endpoint_info_flags_each_alone() {
     case(
         0x0500_0000,
         EndpointInfo {
-            function_blocks: U7::new(5).unwrap(),
+            function_blocks: FunctionBlockCount::of(5),
             ..none
         },
     );

@@ -2,9 +2,9 @@ use std::time::{Duration, Instant};
 
 use tutti_ump::ManufacturerId;
 use tutti_ump::{
-    DeviceIdentity, Direction as BlockDirection, FirstGroup, Form, FunctionBlockId,
-    FunctionBlockInfo, GroupSpan, Message, Midi1Port, Protocol, Stream, StreamConfig, U7, UiHint,
-    Ump,
+    DeviceIdentity, Direction as BlockDirection, FirstGroup, Form, FunctionBlockCount,
+    FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, Midi1Port, Protocol, Stream,
+    StreamConfig, U7, UiHint, Ump,
 };
 
 use super::*;
@@ -470,7 +470,7 @@ fn in_blocks_declaring(t0: Instant, n: u8, is_static: bool) -> Connection {
         stream(Stream::EndpointInfo(tutti_ump::EndpointInfo {
             version: UMP_VERSION,
             static_function_blocks: is_static,
-            function_blocks: U7::new(n).unwrap(),
+            function_blocks: FunctionBlockCount::new(n).unwrap(),
             midi2: true,
             midi1: true,
             rx_jr: false,
@@ -715,16 +715,12 @@ fn a_block_outside_the_declared_count_is_not_read() {
 fn a_declared_count_above_32_is_refused() {
     let t0 = Instant::now();
     let (mut c, _) = Connection::new(t0);
+    // A count of 33 or more is reserved, so no sender builds one: it is read
+    // from the packet, as a peer's is.
     let info = |count: u8| {
-        stream(Stream::EndpointInfo(tutti_ump::EndpointInfo {
-            version: UMP_VERSION,
-            static_function_blocks: false,
-            function_blocks: U7::new(count).unwrap(),
-            midi2: true,
-            midi1: true,
-            rx_jr: false,
-            tx_jr: false,
-        }))
+        Ump([0xF001_0101, u32::from(count) << 24 | 0x300, 0, 0])
+            .decode()
+            .unwrap()
     };
     assert_eq!(c.on_message(info(33), t0), Action::Wait);
     assert_eq!(

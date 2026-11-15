@@ -299,6 +299,19 @@ macro_rules! bounded_conversions {
 }
 
 bounded!(
+    /// How many Function Blocks an Endpoint Info Notification declares
+    /// (`0..=32`, M2-104 §7.1.2). A reserved count (`33..=127`) read from the
+    /// wire is kept, so such a message re-encodes exactly.
+    FunctionBlockCount, u8, 0, 32
+);
+bounded_conversions!(FunctionBlockCount, u8);
+
+impl FunctionBlockCount {
+    /// The most blocks an Endpoint declares.
+    pub const MAX: Self = Self(32);
+}
+
+bounded!(
     /// The Delta Clockstamp ticks per quarter note (`1..=65535`, M2-104
     /// §7.2.3.1); `0` is reserved. A zero read from the wire is kept, so such a
     /// message re-encodes exactly.

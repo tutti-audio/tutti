@@ -4,8 +4,8 @@
 use core::num::NonZeroU8;
 
 use crate::field::{
-    DeltaTicks, FirstGroup, FunctionBlockId, GroupSpan, NoteNumber, Pitch, SharpsFlats,
-    TicksPerQuarterNote, U4, U7, U14,
+    DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan, NoteNumber, Pitch,
+    SharpsFlats, TicksPerQuarterNote, U4, U7, U14,
 };
 use crate::{
     BendValue, CCNumber, ControlValue, ManufacturerId, MdsChunk, MdsChunkSize, MdsChunks,
@@ -1289,10 +1289,9 @@ pub struct EndpointInfo {
     pub version: UmpVersion,
     /// The Function Blocks never change.
     pub static_function_blocks: bool,
-    /// How many Function Blocks.
-    /// How many Function Blocks: `0..=32` is defined, `33..=127` reserved and
-    /// kept.
-    pub function_blocks: U7,
+    /// How many Function Blocks: `0..=32` is defined, a `33..=127` read from
+    /// the wire is reserved and kept.
+    pub function_blocks: FunctionBlockCount,
     /// Supports the MIDI 2.0 Protocol.
     pub midi2: bool,
     /// Supports the MIDI 1.0 Protocol.

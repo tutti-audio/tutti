@@ -8,8 +8,8 @@
 
 use tutti_ump::{
     BlockFilter, BlockSelect, DeviceIdentity, Direction as BlockDirection, DiscoveryFilter,
-    FirstGroup, FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, Midi1Port, Protocol,
-    Stream, StreamConfig, U7, UiHint, Ump, UmpVersion, text_packets,
+    FirstGroup, FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, GroupSpan, Message,
+    Midi1Port, Protocol, Stream, StreamConfig, UiHint, Ump, UmpVersion, text_packets,
 };
 
 use crate::name::{BlockName, EndpointName, ProductInstanceId};
@@ -658,7 +658,8 @@ impl Endpoint {
                 Stream::EndpointInfo(tutti_ump::EndpointInfo {
                     version: self.version,
                     static_function_blocks: self.static_function_blocks,
-                    function_blocks: U7::masked(self.declared_blocks),
+                    function_blocks: FunctionBlockCount::new(self.declared_blocks)
+                        .unwrap_or(FunctionBlockCount::MAX),
                     midi2: self.capabilities.midi2,
                     midi1: self.capabilities.midi1,
                     rx_jr: self.capabilities.rx_jr,

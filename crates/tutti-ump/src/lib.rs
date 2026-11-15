@@ -101,8 +101,9 @@ pub use bend_value::BendValue;
 pub use cc_number::CCNumber;
 pub use control_value::ControlValue;
 pub use field::{
-    DeltaTicks, FirstGroup, FunctionBlockId, GroupSpan, MonoChannels, MpeChannels, NoteNumber,
-    OutOfRange, Pitch, SharpsFlats, TicksPerQuarterNote, U4, U7, U14, U28, first_non_seven_bit,
+    DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan, MonoChannels,
+    MpeChannels, NoteNumber, OutOfRange, Pitch, SharpsFlats, TicksPerQuarterNote, U4, U7, U14, U28,
+    first_non_seven_bit,
 };
 pub use flex_text::{
     FLEX_TEXT_MAX_LEN, FlexText, FlexTextAssembler, FlexTextPackets, FlexTextStep,
