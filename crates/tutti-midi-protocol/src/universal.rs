@@ -288,6 +288,10 @@ impl MtcFullMessage {
 
     /// The two SysEx7 packets of [`payload`](Self::payload) on `group`: a
     /// Start of six bytes and an End of two.
+    ///
+    /// # Panics
+    ///
+    /// Never: the payload is eight bytes, each below 128, which is two packets.
     #[must_use]
     pub fn packets(self, group: MidiGroup) -> [Ump; 2] {
         let payload = self.payload();
