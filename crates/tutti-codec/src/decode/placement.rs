@@ -7,7 +7,10 @@
 //! is entry `n` of the topology.
 
 use symphonia::core::audio::{Channels, Position};
-use tutti_types::{ChannelTopology, Speaker};
+use tutti_types::{
+    AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, ChannelTopology, Placement, Speaker,
+    Speakers,
+};
 
 /// The speaker of one symphonia position flag.
 ///
@@ -27,25 +30,46 @@ fn speaker(flag: Position) -> Speaker {
         .unwrap_or_else(|| Speaker::Unknown(bits.trailing_zeros() as u16))
 }
 
-/// The topology of a track's channels, in the order its decoder writes them.
+/// The topology of a track's channels, in the order its decoder writes them,
+/// and whether the container stated it.
 ///
-/// A lone channel is the engine's mono ([`Speaker::FrontCenter`]): symphonia
-/// names the only channel of a mono file `FRONT_LEFT`, and the engine's mono
-/// is the centre. Channels that name no position (discrete, ambisonic or
-/// labelled ones) feed no speaker: each is [`Speaker::Unassigned`].
-pub(super) fn topology_of(channels: &Channels) -> ChannelTopology {
-    if channels.count() == 1 {
-        return ChannelTopology::new([Speaker::FrontCenter]);
-    }
+/// A positioned set is [`Stated`](Placement::Stated), and a lone channel is the
+/// engine's mono ([`Speaker::FrontCenter`]): symphonia names the only channel of
+/// a mono file `FRONT_LEFT`, and the engine's mono is the centre. An ambisonic
+/// set of up to third order is stated too: symphonia's is ACN with SN3D. A
+/// container that states a count and no placement (discrete channels) is
+/// [`ChannelTopology::assumed`] at that count and [`Assumed`](Placement::Assumed).
+/// A container that states no channels at all is assumed stereo; a track
+/// whose decoder then reports another set is read from that set.
+pub(super) fn topology_of(channels: Option<&Channels>) -> (ChannelTopology, Placement) {
+    let assumed = |count: usize| {
+        (
+            ChannelTopology::assumed(ChannelLayout::clamped(count)),
+            Placement::Assumed,
+        )
+    };
     match channels {
-        Channels::Positioned(positions) => ChannelTopology::new(positions.iter().map(speaker)),
-        other => ChannelTopology::new(std::iter::repeat_n(Speaker::Unassigned, other.count())),
+        Some(channels) if channels.count() == 1 => (Bed::Mono.topology(), Placement::Stated),
+        Some(Channels::Positioned(positions)) => (
+            ChannelTopology::Speakers(Speakers::from_format(positions.iter().map(speaker))),
+            Placement::Stated,
+        ),
+        Some(all @ Channels::Ambisonic(order)) => match AmbisonicOrder::new(*order) {
+            Some(order) => (AmbisonicFormat::ambix(order).into(), Placement::Stated),
+            // Past third order no bus holds it; the width is kept for the caller to refuse.
+            None => (
+                ChannelTopology::unassigned(ChannelLayout::clamped(all.count())),
+                Placement::Stated,
+            ),
+        },
+        // Labelled channels name no speaker this vocabulary reads.
+        Some(Channels::Custom(labels)) => (
+            ChannelTopology::unassigned(ChannelLayout::clamped(labels.len())),
+            Placement::Stated,
+        ),
+        Some(channels) if channels.count() > 0 => assumed(channels.count()),
+        Some(_) | None => assumed(2),
     }
-}
-
-/// What a container that states no channels is taken to have: stereo.
-pub(super) fn unstated() -> ChannelTopology {
-    ChannelTopology::new([Speaker::FrontLeft, Speaker::FrontRight])
 }
 
 #[cfg(test)]

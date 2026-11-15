@@ -742,7 +742,10 @@ fn a_steady_lane_read_writes_the_callers_lanes_as_put_does() {
 /// topology's), so the voice places the ring's channels by it.
 fn placed_clip(topology: tutti_types::ChannelTopology) -> DiskVoice {
     const AT: u64 = 22_000;
-    let width = topology.positions().len();
+    let width = usize::from(topology.width().count());
+    // The frame the ring is placed into: the file's own width, or the 7.1's
+    // eight where the file is wider (a fold).
+    let frame = ChannelLayout::from(topology.width().count().min(8));
     let (mut writer, reader, pos) = RegionBuffer::for_file(
         StreamId::of(1),
         PathBuf::new(),
@@ -758,7 +761,15 @@ fn placed_clip(topology: tutti_types::ChannelTopology) -> DiskVoice {
         .collect();
     writer.push_interleaved(&flat);
     let state = Arc::new(Cells::new());
-    let inner = DiskSource::new(reader, pos, Arc::clone(&state));
+    let place = Place::for_topology(reader.topology(), frame).expect("a test ring places");
+    let control = reader.control_reader();
+    let inner = DiskSource::with_reader(
+        reader,
+        Some(crate::streamer::RingReader::new(pos, control)),
+        Arc::clone(&state),
+        frame,
+        place,
+    );
     DiskVoice::new(
         inner,
         state,
@@ -782,6 +793,7 @@ fn wav_seven_one() -> tutti_types::ChannelTopology {
         SideLeft,
         SideRight,
     ])
+    .unwrap()
 }
 
 /// A 10-channel file with no mask, as the decoder names it: WAVE's first
@@ -800,6 +812,7 @@ fn named_ten() -> tutti_types::ChannelTopology {
         BackCenter,
         SideLeft,
     ])
+    .unwrap()
 }
 
 /// The eight channels a placed 10-channel file ([`named_ten`]) plays in the

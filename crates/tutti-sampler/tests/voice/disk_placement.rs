@@ -12,7 +12,7 @@
 //! channel mask hand-written: channel `c` holds the constant `(c + 1) / 16`
 //! (a dyadic value, so the read is exact), which makes a channel in the wrong
 //! place a wrong value. The expected figures come from the engine's speaker
-//! order (`ChannelTopology::smpte`), not from the placement under test.
+//! order (`ChannelTopology::assumed`), not from the placement under test.
 
 use tutti_sampler::VoiceWindow;
 
@@ -106,14 +106,24 @@ struct Rig {
     stream: Stream,
 }
 
-/// A file written to a temp dir and streamed at its own width.
-fn stream(channels: u16, mask: u32) -> (tempfile::TempDir, Rig, StreamReader) {
+/// A file written to a temp dir and streamed into a frame of `frame` channels
+/// (the file's own width when `None`).
+fn stream_into(
+    channels: u16,
+    mask: u32,
+    frame: Option<ChannelLayout>,
+) -> (tempfile::TempDir, Rig, StreamReader) {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("placed.wav");
     write_wav(&path, channels, mask);
-    let (streamer, answer) = open(&path, None);
+    let (streamer, answer) = open(&path, frame);
     let (stream, reader) = answer.expect("a placeable file opens");
     (dir, Rig { streamer, stream }, reader)
+}
+
+/// A file written to a temp dir and streamed at its own width.
+fn stream(channels: u16, mask: u32) -> (tempfile::TempDir, Rig, StreamReader) {
+    stream_into(channels, mask, None)
 }
 
 /// The voice that plays `reader`, placed at beat 0 for the file's length.
@@ -169,10 +179,12 @@ fn a_wav_order_seven_one_is_permuted_to_the_engines_order() {
             SideLeft,
             SideRight,
         ])
+        .unwrap()
     };
-    let engine = ChannelTopology::smpte(ChannelLayout::from(8u16)).expect("7.1 has an order");
+    let engine = ChannelTopology::assumed(ChannelLayout::from(8u16));
     let want: Vec<f32> = engine
         .positions()
+        .unwrap()
         .iter()
         .map(|&s| value(file.index_of(s).expect("the same speakers")))
         .collect();
@@ -361,12 +373,13 @@ fn fixtures() -> [Fixture; 3] {
 
 /// A file with a Fixture's shape, streamed.
 fn stream_fixture(f: &Fixture) -> (tempfile::TempDir, Rig, StreamReader) {
-    let (dir, rig, reader) = stream(f.channels, f.mask);
+    let (dir, rig, reader) = stream_into(f.channels, f.mask, Some(ChannelLayout::from(8u16)));
     assert_eq!(
         tutti_codec::FileIn::open(dir.path().join("placed.wav"))
             .expect("opens")
             .topology()
-            .positions(),
+            .positions()
+            .unwrap(),
         f.speakers
     );
     (dir, rig, reader)
@@ -385,7 +398,7 @@ fn assert_near(block: &[Vec<f32>], want: &[f32; 8], what: &str) {
 }
 
 /// A file wider than a frame folds into it by position (10 and 12 channels into
-/// 8, where the tier cut them to their first 8), to the figures `Fold`'s rules
+/// a frame of 8, which the fixtures ask for), to the figures `Fold`'s rules
 /// give, and a WAV-order 7.1 is permuted.
 #[test]
 fn a_file_wider_than_a_frame_folds_into_it() {
@@ -567,6 +580,62 @@ fn a_loop_edit_and_wrap_on_a_placed_stream_allocate_nothing() {
                     &lanes(&direct),
                     &f.want,
                     &format!("{} channels, block {b}", f.channels),
+                );
+            }
+        }
+    }
+}
+
+/// A 7.1.4 file (twelve channels, WAV order: the backs before the sides) is
+/// played at its own width, a permutation and no fold: file channel 4 and 5
+/// (the backs) are the voice's 6 and 7, and the heights keep their places.
+#[test]
+fn a_714_file_plays_at_its_own_width_in_the_engines_order() {
+    // FL FR FC LFE BL BR SL SR TFL TFR TBL TBR.
+    const WAV_7_1_4: u32 = 0x2D63F;
+    let (_dir, _rig, reader) = stream(12, WAV_7_1_4);
+    let want: Vec<f32> = [0usize, 1, 2, 3, 6, 7, 4, 5, 8, 9, 10, 11]
+        .iter()
+        .map(|&c| value(c))
+        .collect();
+    assert_channels(&settled_block(voice_of(reader)), &want, "7.1.4 at twelve");
+}
+
+/// A file of 12 and of 16 channels (the cap) is read at its own width without
+/// allocating, forward and looped, and every channel carries its figure: the
+/// 7.1.4 in the engine's order (a permutation), the 16 unassigned straight.
+#[test]
+fn a_wide_file_at_its_own_width_is_allocation_free() {
+    // FL FR FC LFE BL BR SL SR TFL TFR TBL TBR in the file; the engine's order
+    // swaps the backs and sides.
+    let perm = [0usize, 1, 2, 3, 6, 7, 4, 5, 8, 9, 10, 11];
+    let identity: Vec<usize> = (0..16).collect();
+    for (channels, mask, order) in [(12u16, 0x2D63Fu32, &perm[..]), (16, 0, &identity[..])] {
+        for looped in [false, true] {
+            let (_dir, mut rig, reader) = stream(channels, mask);
+            if looped {
+                rig.stream.set_loop(loop_1000_3000()).expect("alive");
+                assert!(rig.streamer.step_until_settled(1_000) < 1_000);
+            }
+            let voice = voice_of(reader);
+            let mut direct = contract::Direct::new(voice, SampleRate::of(SR), BLOCK);
+            let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
+            direct.block_in(&clock.env(BLOCK, SampleRate::of(SR)));
+            clock.advance(BLOCK as i64, SampleRate::of(SR));
+            assert_no_alloc::assert_no_alloc(|| {
+                for _ in 0..80 {
+                    direct.block_in(&clock.env(BLOCK, SampleRate::of(SR)));
+                    clock.advance(BLOCK as i64, SampleRate::of(SR));
+                }
+            });
+            for (c, &file) in order.iter().enumerate() {
+                assert!(
+                    direct
+                        .output(c)
+                        .iter()
+                        .all(|s| s.to_bits() == value(file).to_bits()),
+                    "{channels} channels, looped {looped}: channel {c} is not {}",
+                    value(file)
                 );
             }
         }

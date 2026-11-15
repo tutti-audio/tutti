@@ -753,7 +753,7 @@ fn a_meter_cannot_change_its_width_under_its_cells() {
             .expect("the sources exist");
     r.ed.spec_mut()
         .topology
-        .set_outputs(vec![Source::Zero; tutti_graph::MAX_ROOT_CHANNELS + 1]);
+        .set_outputs(vec![Source::Zero; tutti_types::MAX_CHANNELS + 1]);
     assert!(matches!(
         r.ed.commit(),
         Err(CommitError::MeterWidth { meter, .. }) if meter == MeterId::of(2)

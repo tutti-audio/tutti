@@ -1081,7 +1081,7 @@ mod tests {
             StreamId::of(1),
             std::path::PathBuf::new(),
             LEN,
-            tutti_types::ChannelTopology::new([tutti_types::Speaker::FrontCenter]),
+            tutti_types::ChannelTopology::new([tutti_types::Speaker::FrontCenter]).unwrap(),
             Some(Samples::new(LEN)),
             Samples::new(0),
         );

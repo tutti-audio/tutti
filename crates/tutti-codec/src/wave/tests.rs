@@ -24,23 +24,28 @@ fn zero_rounds_the_duration_to_the_nearest_frame() {
     assert!(w.channel(0).iter().all(|&s| s == 0.0));
 }
 
-/// A wave built from a count assumes the engine's order where it has one and
-/// says "unassigned" where it does not (4 is quad or B-format; 3 and 5 have no
-/// order), and one built from a topology keeps it, one channel per speaker.
+/// A wave built from a count takes `ChannelTopology::assumed` (the engine's
+/// order for 1, 2, 4, 6, 8 and 12, unassigned for the other widths) and says it
+/// guessed, and one built from a topology keeps it, one channel per speaker, as
+/// stated.
 #[test]
-fn a_count_assumes_smpte_or_unassigned_and_a_topology_is_kept() {
-    use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
-    for n in [1u16, 2, 6, 8, 12] {
+fn a_count_is_assumed_and_a_topology_is_kept_as_stated() {
+    use tutti_types::{ChannelLayout, ChannelTopology, Placement, Speaker};
+    for n in [1u16, 2, 4, 6, 8, 12] {
         let w = Wave::new(usize::from(n), SampleRate::SR_48K);
         assert_eq!(
-            Some(w.topology()),
-            ChannelTopology::smpte(ChannelLayout::from(n)).as_ref(),
+            w.topology(),
+            &ChannelTopology::assumed(ChannelLayout::from(n)),
             "{n}"
         );
+        assert_eq!(w.placement(), Placement::Assumed, "{n}");
     }
-    for n in [3usize, 4, 5, 7, 16] {
+    for n in [3usize, 5, 7, 16] {
         assert_eq!(
-            Wave::new(n, SampleRate::SR_48K).topology().positions(),
+            Wave::new(n, SampleRate::SR_48K)
+                .topology()
+                .positions()
+                .unwrap(),
             vec![Speaker::Unassigned; n],
             "{n}"
         );
@@ -49,18 +54,20 @@ fn a_count_assumes_smpte_or_unassigned_and_a_topology_is_kept() {
         Wave::new(0, SampleRate::SR_48K)
             .topology()
             .positions()
+            .unwrap()
             .is_empty()
     );
     assert_eq!(
         Wave::from_samples(SampleRate::SR_48K, &[0.5])
             .topology()
-            .positions(),
+            .positions()
+            .unwrap(),
         [Speaker::FrontCenter]
     );
-
-    let quad = Wave::with_topology(ChannelTopology::quad(), SampleRate::SR_48K);
+    let quad = Wave::with_topology(tutti_types::Bed::Quad.topology(), SampleRate::SR_48K);
     assert_eq!(quad.channels(), 4);
-    assert_eq!(quad.topology(), &ChannelTopology::quad());
+    assert_eq!(quad.topology(), &tutti_types::Bed::Quad.topology());
+    assert_eq!(quad.placement(), Placement::Stated);
 }
 
 /// A wave wider than a layout holds is refused, not given the wrapped width
@@ -99,21 +106,25 @@ fn a_written_wave_reads_back_as_itself() {
         (
             "stereo.wav",
             Format::Wav(Pcm::Int16),
-            ChannelTopology::smpte(ChannelLayout::STEREO).unwrap(),
+            ChannelTopology::assumed(ChannelLayout::STEREO),
         ),
         (
             "float.wav",
             Format::Wav(Pcm::Float32),
-            ChannelTopology::smpte(ChannelLayout::STEREO).unwrap(),
+            ChannelTopology::assumed(ChannelLayout::STEREO),
         ),
-        ("quad.wav", Format::Wav(Pcm::Int16), ChannelTopology::quad()),
+        (
+            "quad.wav",
+            Format::Wav(Pcm::Int16),
+            tutti_types::Bed::Quad.topology(),
+        ),
         (
             "stereo.flac",
             Format::Flac {
                 depth: IntDepth::Int16,
                 level: FlacLevel::Standard,
             },
-            ChannelTopology::smpte(ChannelLayout::STEREO).unwrap(),
+            ChannelTopology::assumed(ChannelLayout::STEREO),
         ),
     ];
     for (name, format, topology) in cases {
