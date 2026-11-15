@@ -236,17 +236,17 @@ fn sweep() {
         // A channel's own time is a `ChannelTimes`, which refuses a time that is not
         // finite or is negative; the delay falls back to linked channels.
         add(probe("delay stereo", b, || {
-            let family = DelayFamily::new(
+            let layout = DelayLayout::new(
                 BusTopology::STEREO,
                 MaxDelay::of(s(0.5)),
                 InterpolationMode::Linear,
             );
-            let family = match ChannelTimes::each(&[s(b)]) {
-                Ok(times) => family.with_times(times).unwrap(),
-                Err(_) => family,
+            let layout = match ChannelTimes::each(&[s(b)]) {
+                Ok(times) => layout.with_times(times).unwrap(),
+                Err(_) => layout,
             };
-            Box::new(DelayNode::live(
-                family,
+            Box::new(DelayNode::from_layout(
+                layout,
                 DelayControls {
                     time: s(b),
                     feedback: Feedback::new(0.3),
