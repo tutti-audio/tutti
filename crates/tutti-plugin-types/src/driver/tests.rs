@@ -804,22 +804,51 @@ fn a_rehand_of_a_held_processor_lends_to_the_new_end_on_the_next_tick() {
     assert!(poll(&mut new));
 }
 
-/// **An old end dropped while it holds the Processor takes the Processor with
-/// it:** the plan stays parked on a Processor nothing returns, and the
-/// successor is not lent to (`pending`). The caller keeps the old node until
-/// `pending` is false.
+/// **A relend moves the Processor with no deactivation and no activation:**
+/// the plugin keeps running, the old end returns the Processor at its poll and
+/// the same Processor is lent to the new end.
 #[test]
-fn an_old_end_dropped_before_the_swap_keeps_the_restart_parked() {
+fn a_relend_moves_the_processor_without_restarting_the_plugin() {
     let (mut rig, mut old) = Rig::threaded();
     rig.op(HostOp::Activate(prepare(48_000.0)));
     assert!(poll(&mut old));
     let mut new = rig.hand.rehand();
-    drop(old);
-    rig.op(HostOp::Reconfigure(prepare(44_100.0)));
+    rig.op(HostOp::Relend);
+    assert!(rig.state.is_parked(), "waits for the old end to return it");
+    assert!(!poll(&mut old), "the old end hands it back");
     rig.tick();
-    assert!(rig.state.is_parked(), "no Processor ever returns");
-    assert!(rig.hand.pending());
-    assert!(!poll(&mut new));
+    assert!(!rig.hand.pending());
+    assert!(poll(&mut new), "lent to the new end");
+    assert!(old.held().is_none());
+    let calls = rig.plugin.calls();
+    assert_eq!(activations(&calls), 1, "no second activation");
+    assert!(!calls.contains(&Call::Deactivate), "no deactivation");
+}
+
+/// **A relend of a plugin that is not active does nothing:** nothing is
+/// recalled, parked or lent, and the successor stays pending.
+#[test]
+fn a_relend_of_a_plugin_that_is_not_active_does_nothing() {
+    let mut rig = Rig::new();
+    rig.op(HostOp::Relend);
+    assert!(!rig.state.is_parked());
+    assert!(rig.plugin.calls().is_empty());
+}
+
+/// **A relend raised while an activation is in flight does not displace
+/// it:** the activation lends at its end, to the successor.
+#[test]
+fn a_relend_during_an_activation_is_left_to_the_activation() {
+    let (mut rig, mut old) = Rig::threaded();
+    rig.op(HostOp::Activate(prepare(48_000.0)));
+    assert!(poll(&mut old));
+    let mut new = rig.hand.rehand();
+    rig.op(HostOp::Reconfigure(prepare(44_100.0)));
+    rig.op(HostOp::Relend);
+    assert!(!poll(&mut old));
+    rig.tick();
+    assert!(poll(&mut new), "the reconfigure's lend went to the new end");
+    assert_eq!(activations(&rig.plugin.calls()), 2);
 }
 
 /// **The fake's explicit answers for the editor, render-mode, request and

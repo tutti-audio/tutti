@@ -181,6 +181,22 @@ pub struct InProcClient<F: Loaded> {
     pub(super) out_events: MidiEventVec,
 }
 
+/// A node dropped while its realtime end holds the Processor and a recall is
+/// raised (a [`Rebinder`](super::Rebinder) raises one) hands it back through the
+/// handoff instead of dropping it: the control side collects it at the
+/// instance's next pump. Without a raised recall the Processor drops with the
+/// end, as for any node that leaves the graph.
+///
+/// The node is off the audio thread by then (a node leaves the graph before it
+/// is dropped), so this is the end's only user.
+impl<F: Loaded> Drop for InProcClient<F> {
+    fn drop(&mut self) {
+        if self.rt.held().is_some() {
+            let _ = self.rt.poll(Processor::stop);
+        }
+    }
+}
+
 /// Omits `inner`: formatting must not wait on the control side's lock.
 impl<F: Loaded> std::fmt::Debug for InProcClient<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

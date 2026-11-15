@@ -25,4 +25,4 @@ mod rebind;
 
 pub use client::{InProcClient, PluginNode};
 pub use loader::{client_over, load_client, load_client_restoring};
-pub use rebind::{PortLimit, RebindError, Rebinder};
+pub use rebind::{PortLimit, RebindError, Rebinder, Settlement};

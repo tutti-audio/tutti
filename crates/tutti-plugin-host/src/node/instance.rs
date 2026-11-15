@@ -14,12 +14,14 @@ use std::path::Path;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 
 use tutti_plugin_types::{
-    Event, Hand, HostOp, InProcess, Lifecycle, Load, Loaded, MaxBlock, Notice, Origin, PluginError,
-    Prepare, Processor, RenderMode, RenderModeSupport, SampleRate, Samples, State, standing,
+    Event, Hand, HostOp, InProcess, Layout, Lifecycle, Load, Loaded, MaxBlock, Notice, Origin,
+    PluginError, Prepare, Processor, RenderMode, RenderModeSupport, SampleRate, Samples, State,
+    standing,
 };
 use tutti_rt::Rt;
 
-use tutti_plugin_types::Layout;
+use super::rebind::{RebindError, Settlement};
+
 use tutti_plugin_types::LoadStage;
 use tutti_plugin_types::ParamEdit;
 use tutti_plugin_types::PluginTail;
@@ -226,36 +228,50 @@ impl<F: Loaded> Instance<F> {
     }
 
     /// Points the Processor's way at a new realtime end, which this returns,
-    /// and restarts the plugin so the Processor comes back to be lent to it
-    /// ([`Hand::rehand`]). Main thread.
+    /// and brings the Processor back to be lent to it ([`Hand::rehand`]): a
+    /// [`HostOp::Relend`], so the plugin keeps running and is neither
+    /// deactivated nor activated. Main thread.
     ///
-    /// The restart is a [`HostOp::Reconfigure`] at the activation the plugin
-    /// has: the end the node in the graph holds hands the Processor back at
-    /// its next poll, and the pump's tick reactivates it and lends it to the
-    /// returned end. Until then the returned end is empty and a node over it
-    /// renders silence; [`handed_over`](Self::handed_over) says when it
-    /// holds the Processor's way.
+    /// The end the node in the graph holds hands the Processor back at its
+    /// next poll (or when that node is dropped), and the pump's tick lends it
+    /// to the returned end. Until then the returned end is empty and a node
+    /// over it renders silence; [`settlement`](Self::settlement) says when the
+    /// way is the new end's.
     ///
-    /// A plugin that refuses the restart renders nothing until a restart it
-    /// takes, which lends to the returned end (the only one now): the refusal
-    /// is kept for the control side, as a rate's is
-    /// ([`take_rate_report`](Self::take_rate_report)), and the end is returned
-    /// all the same.
-    pub(super) fn rehand(&mut self, main: MainThreadMarker) -> Rt<F::Processor> {
+    /// # Errors
+    ///
+    /// [`RebindError::NotRunning`] for a plugin that is not active (loaded,
+    /// refused or lost): there is no Processor to move, and nothing is
+    /// changed. [`RebindError::Restarting`] while the plugin's own restart or
+    /// a request still to be read is under way: the layout the lifecycle
+    /// holds is not the one the plugin will run with, so the caller pumps and
+    /// tries again.
+    pub(super) fn rehand(
+        &mut self,
+        main: MainThreadMarker,
+    ) -> Result<Rt<F::Processor>, RebindError> {
+        if !self.state.renders() {
+            return Err(RebindError::NotRunning);
+        }
+        if !self.state.is_quiet() || self.state.is_parked() {
+            return Err(RebindError::Restarting);
+        }
         let rt = self.hand.rehand();
-        if let Some(why) = self.drive(main, Event::Op(HostOp::Reconfigure(self.prepare))) {
+        if let Some(why) = self.drive(main, Event::Op(HostOp::Relend)) {
             self.note_refusal(why);
         }
-        rt
+        Ok(rt)
     }
 
-    /// Whether the Processor's way is to the newest realtime end
-    /// ([`Hand::pending`] is false): the end it left holds none and may be
-    /// dropped.
-    ///
-    /// A lost plugin has no Processor to move, so it is handed over too.
-    pub(super) fn handed_over(&self) -> bool {
-        !self.hand.pending() || self.lifecycle.is_poisoned()
+    /// Where the Processor's way is, after a [`rehand`](Self::rehand).
+    pub(super) fn settlement(&self) -> Settlement {
+        if self.lifecycle.is_poisoned() {
+            Settlement::Lost
+        } else if self.hand.pending() {
+            Settlement::Pending
+        } else {
+            Settlement::Moved
+        }
     }
 
     /// The render mode the plugin runs in, or was last told.

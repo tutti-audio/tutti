@@ -71,7 +71,8 @@ impl<P> Hand<P> {
     /// A new realtime end for the Processor to move to: the node that replaces
     /// the one holding the current end, with other ports over the same plugin.
     ///
-    /// The Processor does not move now. It stays where it is until the main
+    /// [`HostOp::Relend`] moves the Processor without restarting the plugin.
+    /// The Processor does not move at this call. It stays where it is until the main
     /// thread holds it (recalled, or returned and collected), and the next
     /// [`Effect::Lend`] then lends it to the returned end instead of the old
     /// one. So:
@@ -89,8 +90,9 @@ impl<P> Hand<P> {
     ///   holds the Processor, drops the Processor with it, on the thread that
     ///   drops it. The seat then stays lent: nothing returns the Processor, the
     ///   restart stays parked and the plugin cannot be activated again until
-    ///   the [`Lifecycle`] is dropped. Keep the old node until
-    ///   [`pending`](Self::pending) is `false`.
+    ///   the [`Lifecycle`] is dropped. A user whose end is dropped while a recall
+    ///   is raised returns the Processor first (`tutti-plugin-host`'s node does,
+    ///   in its `Drop`).
     ///
     /// A local hand becomes a threaded one at the swap.
     #[must_use]
