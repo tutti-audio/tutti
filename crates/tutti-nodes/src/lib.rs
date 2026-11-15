@@ -27,7 +27,7 @@
 //!   gate read a typed `KeySource`, the limiter reports its lookahead as latency), and
 //!   `MultibandCompressorNode` (2 to 4 bands, a linked
 //!   compressor per band of a Linkwitz-Riley crossover, a hand-written node over
-//!   `Realized<MultibandRecurrence>`). Every setting is an indexed param: a
+//!   `tutti_dsp::MultibandBank`). Every setting is an indexed param: a
 //!   threshold, knee, ratio, attack, release and make-up (`GainDb`) per band, a
 //!   `Cutoff` per crossover (27 ports at 4 bands), and a `Bypass` and `Solo`
 //!   toggle per band (`>= 0.5` is on, as every toggle; cells without a port). The

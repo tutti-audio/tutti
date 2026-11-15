@@ -111,7 +111,7 @@ fn the_response_is_what_the_crossover_runs() {
     let c = m.coefficients();
     let mut bands = vec![vec![0.0f32; N]; 3];
     for n in 0..N {
-        let out = xo.tick(&c, if n == 0 { 1.0 } else { 0.0 });
+        let out = tick(&mut xo, &c, if n == 0 { 1.0 } else { 0.0 });
         for (b, v) in bands.iter_mut().zip(out) {
             b[n] = v;
         }
@@ -158,7 +158,7 @@ fn the_tail_covers_the_measured_ring_and_the_norms_bound_the_output() {
     let mut xo = CrossoverState::default();
     let c = m.coefficients();
     let ir: Vec<f32> = (0..N)
-        .map(|n| xo.tick(&c, if n == 0 { 1.0 } else { 0.0 })[0])
+        .map(|n| tick(&mut xo, &c, if n == 0 { 1.0 } else { 0.0 })[0])
         .collect();
     let win = 256;
     let env: Vec<f64> = ir
@@ -188,7 +188,7 @@ fn the_tail_covers_the_measured_ring_and_the_norms_bound_the_output() {
     for _ in 0..(60 * 48_000) {
         state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         let x = (state >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
-        let out = xo.tick(&c, x);
+        let out = tick(&mut xo, &c, x);
         worst = out[..3]
             .iter()
             .fold(worst, |m, &s| m.max(f64::from(s.abs())));
@@ -248,4 +248,13 @@ fn a_design_refuses_a_band_count_a_tree_does_not_have() {
             bands
         );
     }
+}
+
+/// One sample through `state` at `c`, in `f32`.
+fn tick(
+    state: &mut CrossoverState,
+    c: &crate::CrossoverCoefficients,
+    x: f32,
+) -> [f32; CrossoverModel::MAX_BANDS] {
+    state.tick_f64(c, f64::from(x)).map(|y| y as f32)
 }

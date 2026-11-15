@@ -25,9 +25,9 @@
 //!   threshold a per-frame lane, the makeup and the range `Glide`s over `GAIN_GLIDE`); the
 //!   lookahead limiter (`LimiterBank`: threshold and ceiling per-frame lanes, every coefficient
 //!   landing whole, the lookahead its latency); the brickwall clipper (`BrickwallBank`); and
-//!   the multiband compressor (`MultibandFamily`, run by `MultibandRecurrence`: a crossover tree
-//!   per channel and the compressor's one frame step per band, each band's makeup, bypass and
-//!   solo gliding over `GAIN_GLIDE`).
+//!   the multiband compressor (`MultibandBank`: a crossover tree per channel and a
+//!   `CompressorBank` per band, each band's makeup, bypass and solo gliding over
+//!   `GAIN_GLIDE`).
 //! - **Convolution** — `Convolver`, a uniform or non-uniform partitioned FFT
 //!   convolution over an IR's shared, read-only `IrSpectra`.
 //! - **Delay** — `DelayLine`, a fractional-read ring with an `InterpolationMode`;
@@ -114,9 +114,9 @@
 //!   ([`BrickwallBank`], its ceiling a per-frame lane); the compressor ([`CompressorBank`],
 //!   keyed, its threshold a lane, its makeup a [`Glide`] over [`GAIN_GLIDE`]) and the noise
 //!   gate ([`GateBank`], its range gliding likewise). Both read a [`KeySource`]: a side-chain
-//!   bus or the signal itself. The multiband compressor is a family ([`MultibandFamily`], run
-//!   by [`MultibandRecurrence`]): a crossover tree per channel and the compressor's frame step
-//!   per band, each band's makeup, bypass and solo gliding over [`GAIN_GLIDE`].
+//!   bus or the signal itself. The multiband compressor ([`MultibandBank`]) is a crossover tree
+//!   per channel and a [`CompressorBank`] per band, each band's makeup, bypass and solo
+//!   gliding over [`GAIN_GLIDE`].
 //! - **Reverb** (`reverb/`): the model, a [`Network`] of [`Stage`]s with
 //!   analytic queries ([`Network::rt60`], [`tail`](System::tail),
 //!   [`is_stable`](Lti::is_stable), the densities) and a [`NetworkCapacity`] worst case;
@@ -199,11 +199,11 @@ pub use delay::{
 pub use dither::sink::{DitherSink, DitherSpec};
 pub use dither::{DitherNoise, DitherShape};
 pub use dynamics::{
-    BandReductions, BandSettings, BrickwallBank, BrickwallControls, BrickwallLanes, CompressorBank,
-    CompressorControls, CompressorLanes, GAIN_GLIDE, GateBank, GateControls, GateLanes, KeySource,
-    LimiterBank, LimiterControls, LimiterCurve, LimiterLanes, Lookahead, LookaheadError,
-    MultibandFamily, MultibandMember, MultibandRecurrence, MultibandSettings, MultibandState,
-    amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
+    BandReductions, BandSettings, BankShape, BrickwallBank, BrickwallControls, BrickwallLanes,
+    CompressorBank, CompressorControls, CompressorLanes, GAIN_GLIDE, GateBank, GateControls,
+    GateLanes, KeySource, LimiterBank, LimiterControls, LimiterCurve, LimiterLanes, Lookahead,
+    LookaheadError, MultibandBank, MultibandLanes, MultibandSettings, amplitude_to_db,
+    compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use fft::{Complex32, FftScratch, RealFft};
 pub use filter::{
@@ -216,8 +216,8 @@ pub use glide::{Glide, Lerp, Steps};
 pub use interp::cubic_hermite;
 pub use model::{
     Approach, Cadence, Capacity, Channels, Domain, Effort, Family, Grows, Inputs, Lti, MAX_LANES,
-    MaxDecay, MaxDecayError, Reach, Readout, Realized, Recurrence, Ring, Setup, Start, Step,
-    System, TAIL_FLOOR,
+    MaxDecay, MaxDecayError, Reach, Realized, Recurrence, Ring, Setup, Start, Step, System,
+    TAIL_FLOOR,
 };
 pub use modulation::allpass::{allpass_coeff, sweep_hz};
 pub use modulation::mod_delay::{

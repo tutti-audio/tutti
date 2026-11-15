@@ -162,6 +162,7 @@ impl Vst3Loaded {
             descriptor: OnceLock::new(),
             active: Activation::default(),
             carried: Vec::new(),
+            declared: None,
             midi_cc: Arc::new(ArcLend::new(MidiCcCell(MidiCcMapping::empty()))),
             stashed: Vec::new(),
         }

@@ -582,7 +582,11 @@ impl IEditControllerTrait for Plugin {
         };
         info.defaultNormalizedValue = default;
         info.unitId = 0;
-        info.flags = sdk(ParameterInfo_::ParameterFlags_::kCanAutomate);
+        info.flags = if index as u32 == core::METER {
+            sdk(ParameterInfo_::ParameterFlags_::kIsReadOnly)
+        } else {
+            sdk(ParameterInfo_::ParameterFlags_::kCanAutomate)
+        };
         kResultOk
     }
     unsafe fn getParamStringByValue(&self, id: u32, v: f64, s: *mut String128) -> tresult {

@@ -676,7 +676,11 @@ impl<S> PluginClient<S> {
         self.bridge.dropped_parameter_events()
     }
 
-    /// Queues a parameter change for the plugin. RT-safe, fire-and-forget.
+    /// Queues a parameter change for the plugin. RT-safe, fire-and-forget: it
+    /// never waits on a round trip, so it does not check the write against the
+    /// plugin's declared parameters. The server's own `Control::set_parameter`
+    /// refuses a write to a parameter the plugin does not declare or declares
+    /// read-only, and writes nothing; the wire has no reply to say so.
     ///
     /// Main-thread parameter reads and writes are on
     /// [`PluginHandle`]; this lets a

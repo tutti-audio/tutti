@@ -271,12 +271,16 @@ fn a_controller_write_reaches_the_plugin_in_the_next_block() {
         .load()
         .activate(main_thread(), prepare())
         .expect("activates");
-    controller.set_parameter(
-        main_thread(),
-        id(PARAM_MODE),
-        Normalized::clamped(MODE_PARAM_RAMP),
-    );
-    controller.set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.25));
+    controller
+        .set_parameter(
+            main_thread(),
+            id(PARAM_MODE),
+            Normalized::clamped(MODE_PARAM_RAMP),
+        )
+        .expect("a declared, writable parameter");
+    controller
+        .set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.25))
+        .expect("a declared, writable parameter");
     assert_eq!(
         controller
             .parameter(main_thread(), id(PARAM_RAMP))
@@ -297,12 +301,16 @@ fn automation_in_the_block_overrides_a_queued_write() {
         .load()
         .activate(main_thread(), prepare())
         .expect("activates");
-    controller.set_parameter(
-        main_thread(),
-        id(PARAM_MODE),
-        Normalized::clamped(MODE_PARAM_RAMP),
-    );
-    controller.set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.25));
+    controller
+        .set_parameter(
+            main_thread(),
+            id(PARAM_MODE),
+            Normalized::clamped(MODE_PARAM_RAMP),
+        )
+        .expect("a declared, writable parameter");
+    controller
+        .set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.25))
+        .expect("a declared, writable parameter");
     let mut automation = tutti_plugin_types::ParameterChanges::reserved(1, 4);
     automation.add_change(ParamId::new(PARAM_RAMP), 0, 0.75);
     let ctx = ProcessContext::new().params(&automation);
@@ -322,17 +330,21 @@ fn a_full_ring_keeps_the_latest_write_and_retries_it() {
         .load()
         .activate(main_thread(), prepare())
         .expect("activates");
-    controller.set_parameter(
-        main_thread(),
-        id(PARAM_MODE),
-        Normalized::clamped(MODE_PARAM_RAMP),
-    );
-    for step in 0..600 {
-        controller.set_parameter(
+    controller
+        .set_parameter(
             main_thread(),
-            id(PARAM_RAMP),
-            Normalized::clamped(f64::from(step) / 1000.0),
-        );
+            id(PARAM_MODE),
+            Normalized::clamped(MODE_PARAM_RAMP),
+        )
+        .expect("a declared, writable parameter");
+    for step in 0..600 {
+        controller
+            .set_parameter(
+                main_thread(),
+                id(PARAM_RAMP),
+                Normalized::clamped(f64::from(step) / 1000.0),
+            )
+            .expect("a declared, writable parameter");
     }
     assert!(controller.refused_edits() > 0, "the ring filled");
     render_f32(&mut processor);
@@ -355,12 +367,16 @@ fn a_write_survives_a_rejoin() {
         .load()
         .activate(main_thread(), prepare())
         .expect("activates");
-    controller.set_parameter(
-        main_thread(),
-        id(PARAM_MODE),
-        Normalized::clamped(MODE_PARAM_RAMP),
-    );
-    controller.set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.4));
+    controller
+        .set_parameter(
+            main_thread(),
+            id(PARAM_MODE),
+            Normalized::clamped(MODE_PARAM_RAMP),
+        )
+        .expect("a declared, writable parameter");
+    controller
+        .set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.4))
+        .expect("a declared, writable parameter");
     // No block has run: both writes are still in the ring.
     let loaded = Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
     let (mut processor, controller) = loaded
@@ -437,17 +453,21 @@ fn draining_the_ring_does_not_allocate() {
         .expect("activates");
     let mut block = Block::new();
     block.run(&mut processor).expect("warm");
-    controller.set_parameter(
-        main_thread(),
-        id(PARAM_MODE),
-        Normalized::clamped(MODE_PARAM_RAMP),
-    );
-    for step in 0..64 {
-        controller.set_parameter(
+    controller
+        .set_parameter(
             main_thread(),
-            id(PARAM_RAMP),
-            Normalized::clamped(f64::from(step) / 100.0),
-        );
+            id(PARAM_MODE),
+            Normalized::clamped(MODE_PARAM_RAMP),
+        )
+        .expect("a declared, writable parameter");
+    for step in 0..64 {
+        controller
+            .set_parameter(
+                main_thread(),
+                id(PARAM_RAMP),
+                Normalized::clamped(f64::from(step) / 100.0),
+            )
+            .expect("a declared, writable parameter");
     }
     assert_no_alloc(|| block.run(&mut processor)).expect("renders");
     assert_eq!(block.outputs[0][0], 0.63, "the writes were drained");
@@ -536,7 +556,8 @@ fn a_rebuild_keeps_the_state() {
         main_thread(),
         id(PARAM_UI_STATE),
         Normalized::of(0.625),
-    );
+    )
+    .expect("a declared, writable parameter");
     let rebuilt = loaded
         .rebuild(main_thread())
         .expect("the probe loads again");
@@ -557,7 +578,9 @@ fn a_write_is_in_the_state_saved_before_any_block() {
         .load()
         .activate(main_thread(), prepare())
         .expect("activates");
-    controller.set_parameter(main_thread(), id(PARAM_UI_STATE), Normalized::of(0.375));
+    controller
+        .set_parameter(main_thread(), id(PARAM_UI_STATE), Normalized::of(0.375))
+        .expect("a declared, writable parameter");
     let saved = controller
         .save_state(main_thread(), tutti_plugin_types::StateUse::Project)
         .expect("the probe saves");
@@ -691,19 +714,24 @@ fn a_write_on_a_loaded_plugin_overrides_a_carried_one() {
         .load()
         .activate(main_thread(), prepare())
         .expect("activates");
-    controller.set_parameter(
-        main_thread(),
-        id(PARAM_MODE),
-        Normalized::clamped(MODE_PARAM_RAMP),
-    );
-    controller.set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.3));
+    controller
+        .set_parameter(
+            main_thread(),
+            id(PARAM_MODE),
+            Normalized::clamped(MODE_PARAM_RAMP),
+        )
+        .expect("a declared, writable parameter");
+    controller
+        .set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.3))
+        .expect("a declared, writable parameter");
     let mut loaded = Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
     Control::set_parameter(
         &mut loaded,
         main_thread(),
         id(PARAM_RAMP),
         Normalized::of(0.9),
-    );
+    )
+    .expect("a declared, writable parameter");
     let (mut processor, controller) = loaded
         .activate(main_thread(), prepare())
         .expect("activates again");
@@ -722,12 +750,16 @@ fn a_state_load_on_a_loaded_plugin_drops_the_carried_writes() {
         .load()
         .activate(main_thread(), prepare())
         .expect("activates");
-    controller.set_parameter(
-        main_thread(),
-        id(PARAM_MODE),
-        Normalized::clamped(MODE_PARAM_RAMP),
-    );
-    controller.set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.3));
+    controller
+        .set_parameter(
+            main_thread(),
+            id(PARAM_MODE),
+            Normalized::clamped(MODE_PARAM_RAMP),
+        )
+        .expect("a declared, writable parameter");
+    controller
+        .set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.3))
+        .expect("a declared, writable parameter");
     let mut loaded = Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
     Control::load_state(
         &mut loaded,
@@ -753,12 +785,16 @@ fn a_state_load_makes_the_queued_writes_stale() {
         .load()
         .activate(main_thread(), prepare())
         .expect("activates");
-    controller.set_parameter(
-        main_thread(),
-        id(PARAM_MODE),
-        Normalized::clamped(MODE_PARAM_RAMP),
-    );
-    controller.set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.3));
+    controller
+        .set_parameter(
+            main_thread(),
+            id(PARAM_MODE),
+            Normalized::clamped(MODE_PARAM_RAMP),
+        )
+        .expect("a declared, writable parameter");
+    controller
+        .set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.3))
+        .expect("a declared, writable parameter");
     controller
         .load_state(main_thread(), &state, tutti_plugin_types::StateUse::Project)
         .expect("restores");
@@ -768,12 +804,16 @@ fn a_state_load_makes_the_queued_writes_stale() {
         "the stale writes did not land"
     );
     // What is written after the load is not stale.
-    controller.set_parameter(
-        main_thread(),
-        id(PARAM_MODE),
-        Normalized::clamped(MODE_PARAM_RAMP),
-    );
-    controller.set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.6));
+    controller
+        .set_parameter(
+            main_thread(),
+            id(PARAM_MODE),
+            Normalized::clamped(MODE_PARAM_RAMP),
+        )
+        .expect("a declared, writable parameter");
+    controller
+        .set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.6))
+        .expect("a declared, writable parameter");
     let rendered = render_f32(&mut processor);
     assert!((rendered - 0.6).abs() < 1e-6, "{rendered}");
     Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");

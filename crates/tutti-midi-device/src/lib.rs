@@ -146,8 +146,8 @@ pub use ci::{
 pub use connection::{Action, Connection, Ending, MAX_ATTEMPTS, NAME_GRACE, STEP_TIMEOUT};
 pub use dialect::{ChannelVoice, Dialect, Expression, JrTimestamps, Midi1Rate, NoDialect};
 pub use endpoint::{
-    BlockError, Capabilities, Configuration, Endpoint, FunctionBlock, FunctionBlockBuilder,
-    MAX_FUNCTION_BLOCKS, Reply, UMP_VERSION,
+    BlockError, Capabilities, ChangeError, Configuration, Endpoint, EndpointChange, FunctionBlock,
+    FunctionBlockBuilder, MAX_FUNCTION_BLOCKS, NoProtocol, Reply, Supports, UMP_VERSION,
 };
 pub use entropy::{EntropyError, EntropyWords, random_bytes};
 pub use id::{DeviceId, DeviceInfo, EndpointId, Identity, PortDirection, WinMmDevice};

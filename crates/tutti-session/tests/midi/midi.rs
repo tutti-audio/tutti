@@ -1035,7 +1035,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
     use tutti_midi_device::{
         BlockName, CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, MaxSysexSize, Muid,
     };
-    use tutti_midi_hardware::{Capabilities, Endpoint, FunctionBlock};
+    use tutti_midi_hardware::{Capabilities, Endpoint, FunctionBlock, Supports};
     use tutti_ump::{Direction, FirstGroup, FunctionBlockId, GroupSpan, SysexAssembler, SysexStep};
 
     let (mut s, fake) = hot_plug_session();
@@ -1063,11 +1063,11 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
     .name(BlockName::new("Main").unwrap())
     .build()
     .unwrap();
-    let mut device = Endpoint::new(Capabilities {
+    let mut device = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         ..Capabilities::default()
-    })
+    }))
     .with_function_block(block);
     let raw = EndpointId::from_raw(7);
     let peer = Muid::of(0x0012_3456);
@@ -1155,6 +1155,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     };
     use tutti_midi_hardware::{
         Capabilities, ChannelCount, Endpoint, FunctionBlock, ListedProfile, ProfilesChange,
+        Supports,
     };
     use tutti_ump::{
         DeviceIdentity, Direction, FirstGroup, FunctionBlockId, GroupSpan, ManufacturerId,
@@ -1187,11 +1188,11 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     .name(BlockName::new("Main").unwrap())
     .build()
     .unwrap();
-    let mut device = Endpoint::new(Capabilities {
+    let mut device = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         ..Capabilities::default()
-    })
+    }))
     .with_function_block(block);
     let raw = EndpointId::from_raw(7);
     let peer = Muid::of(0x0012_3456);
@@ -1429,7 +1430,7 @@ impl MpePeer {
     const RAW: u64 = 7;
 
     fn new() -> Self {
-        use tutti_midi_hardware::{Capabilities, Endpoint, FunctionBlock};
+        use tutti_midi_hardware::{Capabilities, Endpoint, FunctionBlock, Supports};
         use tutti_ump::{Direction, FirstGroup, FunctionBlockId, GroupSpan, SysexAssembler};
         let block = FunctionBlock::builder(
             FunctionBlockId::new(0).unwrap(),
@@ -1443,11 +1444,11 @@ impl MpePeer {
         .unwrap();
         let room = SysexAssembler::room_for(256, 1, 16);
         Self {
-            device: Endpoint::new(Capabilities {
+            device: Endpoint::new(Supports::of(Capabilities {
                 midi1: true,
                 midi2: true,
                 ..Capabilities::default()
-            })
+            }))
             .with_function_block(block),
             assembler: SysexAssembler::new(vec![0; room].into_boxed_slice(), 256, 16),
             muid: tutti_midi_device::Muid::of(0x0012_3456),
@@ -1709,7 +1710,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
         DataControl, Decoded, DiscoveryData, MaxSysexSize, Muid, NoteData, ProcessFeatures,
         ReportRequest, ReportScope, SystemMessages,
     };
-    use tutti_midi_hardware::{Capabilities, Endpoint, FunctionBlock, ProcessChange};
+    use tutti_midi_hardware::{Capabilities, Endpoint, FunctionBlock, ProcessChange, Supports};
     use tutti_ump::{
         DeviceIdentity, Direction, FirstGroup, FunctionBlockId, GroupSpan, ManufacturerId,
         SysexAssembler, SysexStep, U7,
@@ -1741,11 +1742,11 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
     .name(BlockName::new("Main").unwrap())
     .build()
     .unwrap();
-    let mut device = Endpoint::new(Capabilities {
+    let mut device = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         ..Capabilities::default()
-    })
+    }))
     .with_function_block(block);
     let raw = EndpointId::from_raw(7);
     let peer = Muid::of(0x0012_3456);
@@ -1914,15 +1915,15 @@ fn settle(
     fake: &tutti_midi_hardware::test_support::FakeCounters,
     raw: EndpointId,
 ) -> Instant {
-    use tutti_midi_hardware::{Capabilities, Endpoint};
+    use tutti_midi_hardware::{Capabilities, Endpoint, Supports};
     use tutti_ump::Message;
     // The device answers the session's Stream messages as an Endpoint does.
-    let mut device = Endpoint::new(Capabilities {
+    let mut device = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         rx_jr: true,
         tx_jr: false,
-    });
+    }));
     let start = Instant::now();
     let mut settled = false;
     for ms in 0..8 {
@@ -2013,4 +2014,51 @@ fn an_output_port_stamps_as_the_devices_configuration_says() {
     assert!(!out.info().config().rx_jr);
     assert!(!sent.iter().any(|u| u.is_jr()), "{sent:?}");
     assert!(!sent.is_empty(), "the clock still goes out");
+}
+
+/// M2-104 §7.1.6.2: a device that asked to receive JR Timestamps (RXJR) has
+/// every message prefixed with one. Once it notifies RXJR, each message the
+/// clock master sends it follows a JR Timestamp directly, and the stamps never
+/// go backwards.
+/// Spec: m2-104/7.1.6.2#4
+#[cfg(feature = "midi-hardware")]
+#[test]
+fn a_device_that_receives_jr_has_every_message_prefixed_by_a_timestamp() {
+    use tutti_ump::{Message, Protocol, Stream, StreamConfig, Utility};
+
+    let (mut s, fake) = hot_plug_session();
+    plug(&fake, 7, "Dev", PortDirection::Duplex);
+    let _ = s.update();
+    let raw = EndpointId::from_raw(7);
+    declare_dev(&mut s);
+    s.midi_nodes().unwrap().clock_master.set_enabled(true);
+    let start = settle(&mut s, &fake, raw);
+    let on = Ump::from(Message::Stream(Stream::StreamConfigurationNotification(
+        StreamConfig {
+            protocol: Protocol::Midi2,
+            rx_jr: true,
+            tx_jr: false,
+        },
+    )));
+    assert!(fake.send_input(raw, on, start));
+    update_at(&mut s, start + Duration::from_millis(20));
+    fake.take_sent(raw);
+    roll(&s, 4_096);
+    update_at(&mut s, start + Duration::from_millis(21));
+    let sent = fake.take_sent(raw);
+    let stamp = |u: &Ump| match u.decode() {
+        Ok(Message::Utility(Utility::JrTimestamp(t))) => Some(t),
+        _ => None,
+    };
+    let messages: Vec<usize> = (0..sent.len())
+        .filter(|&i| sent[i].message_type() != 0)
+        .collect();
+    assert!(!messages.is_empty(), "the clock goes out: {sent:?}");
+    let mut last = 0;
+    for i in messages {
+        let before = i.checked_sub(1).and_then(|j| stamp(&sent[j]));
+        let t = before.unwrap_or_else(|| panic!("message {i} has no stamp: {sent:?}"));
+        assert!(t >= last, "stamps do not go back: {sent:?}");
+        last = t;
+    }
 }

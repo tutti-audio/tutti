@@ -129,8 +129,8 @@
 //! // Values are normalized `0..=1` at the trait. A loaded plugin takes the write
 //! // now; a controller queues it to the Processor, which applies it at the head
 //! // of its next block.
-//! plugin.set_parameter(main, ParamId::new(0), Normalized::of(0.75));
-//! plugin.set_parameter(main, ParamId::new(1), Normalized::of(0.5));
+//! plugin.set_parameter(main, ParamId::new(0), Normalized::of(0.75))?;
+//! plugin.set_parameter(main, ParamId::new(1), Normalized::of(0.5))?;
 //!
 //! // State save/restore is legal before any buffer exists. A project's state is
 //! // saved for `CLAP_STATE_CONTEXT_FOR_PROJECT` when the plugin implements

@@ -7,8 +7,8 @@ use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
     AudioBuffer, AudioBufferMut, BusRole, Control, Controller, Loaded, Normalized, ParamFlags,
-    ParameterChanges, PluginBus, PluginIo, PluginTail, ProcessContext, ProcessOutput, Processor,
-    Reopen, SampleFormat, Samples, TransportChange, TransportInfo,
+    ParamWriteError, ParameterChanges, PluginBus, PluginIo, PluginTail, ProcessContext,
+    ProcessOutput, Processor, Reopen, SampleFormat, Samples, TransportChange, TransportInfo,
 };
 use tutti_plugin_types::{ParamEdit, Request};
 use tutti_ump::{MidiChannel, MidiGroup};
@@ -27,7 +27,8 @@ fn read<C: Control + ?Sized>(c: &C, param: Param) -> Option<f64> {
 }
 
 fn write<C: Control + ?Sized>(c: &mut C, param: Param, value: f64) {
-    c.set_parameter(main_thread(), param.id(), Normalized::clamped(value));
+    c.set_parameter(main_thread(), param.id(), Normalized::clamped(value))
+        .unwrap_or_else(|why| panic!("writing {param:?}: {why}"));
 }
 
 fn activate<L: Loaded>(loaded: L, block: usize) -> Active<L> {
@@ -240,11 +241,23 @@ pub fn parameters_listed<F: Format>() {
         } else {
             assert_eq!(info.default_value(), default, "{param:?} default");
         }
-        assert_ne!(
-            info.flag(ParamFlags::AUTOMATABLE),
-            Some(false),
-            "{param:?} automatable"
-        );
+        // The access the spec gives each parameter: the meter alone is read-only
+        // and never automatable; the others are writable. A format that reports
+        // no read-only bit (VST2) reports neither answer.
+        if F::SURFACE.reports_access {
+            assert_eq!(
+                info.flag(ParamFlags::READ_ONLY),
+                Some(param == Param::Meter),
+                "{param:?} read-only"
+            );
+        }
+        if F::SURFACE.reports_automatable {
+            assert_eq!(
+                info.flag(ParamFlags::AUTOMATABLE),
+                Some(param != Param::Meter),
+                "{param:?} automatable"
+            );
+        }
     }
 }
 
@@ -297,6 +310,27 @@ pub fn parameter_conversion_is_the_formats_own<F: Format>() {
                 back.get()
             );
         }
+        // A value past an end reads as that end, an infinity included, and
+        // NaN, which is past neither, reads as position 0 (`ParamMapping`).
+        if let Some(want) = tone.plain {
+            let rising = want[want.len() - 1] > want[0];
+            let at = |plain: f64| {
+                c.parameter_normalized(main, Param::Tone.id(), plain)
+                    .unwrap_or_else(|| panic!("tone normalized at {plain} ({when}): none"))
+                    .get()
+            };
+            assert_eq!(at(f64::NAN), 0.0, "tone at NaN ({when})");
+            assert_eq!(
+                at(f64::INFINITY),
+                if rising { 1.0 } else { 0.0 },
+                "tone at +inf ({when})"
+            );
+            assert_eq!(
+                at(f64::NEG_INFINITY),
+                if rising { 0.0 } else { 1.0 },
+                "tone at -inf ({when})"
+            );
+        }
         assert_eq!(
             c.parameter_plain(main, spec::UNLISTED, Normalized::of(0.5)),
             None,
@@ -336,6 +370,138 @@ pub fn unlisted_parameter_is_none<F: Format>() {
     assert_eq!(
         a.controller().parameter(main_thread(), spec::UNLISTED),
         None,
+        "active"
+    );
+}
+
+/// A write to the parameter the plugin declares read-only (the meter) fails at
+/// the call with `ReadOnly`, loaded and active, and does not reach the plugin:
+/// beside an accepted write of `level`, which the plugin holds afterwards, the
+/// plugin's record of what the host sent has no event for the meter. (A format
+/// that delivers a write directly, as AU's `AudioUnitSetParameter` and VST2's
+/// `setParameter` do, leaves no event for either, so the transcript half is
+/// vacuous there and `Err(ReadOnly)` is the check.)
+///
+/// VST2 is not applicable by its spec: no opcode carries a read-only bit
+/// (`effGetParameterProperties` has none), so the format has no read-only
+/// parameter to refuse a write to ([`spec::Surface::reports_access`]).
+pub fn read_only_parameter_write_is_refused<F: Format>() {
+    if !F::SURFACE.reports_access {
+        return;
+    }
+    let main = main_thread();
+    let id = Param::Meter.id();
+    let refused = Err(ParamWriteError::ReadOnly(id));
+    let mut loaded = F::load();
+    assert_eq!(
+        loaded.set_parameter(main, id, Normalized::of(spec::WRITE)),
+        refused,
+        "read-only write refused (loaded)"
+    );
+    let mut a = activate(loaded, BLOCK);
+    assert_eq!(
+        a.controller_mut()
+            .set_parameter(main, id, Normalized::of(spec::WRITE)),
+        refused,
+        "read-only write refused (active)"
+    );
+    write(a.controller_mut(), Param::Level, spec::WRITE);
+    a.silent(BLOCK);
+    tutti_plugin_types::Control::flush_edits(a.controller_mut(), main_thread());
+    let t = transcript::<F, _>(a.controller_mut());
+    assert_eq!(
+        t.level,
+        spec::WRITE,
+        "the writable parameter took its write"
+    );
+    assert!(
+        t.of(Kind::Param).all(|e| e.id != id.get()),
+        "the refused write reached the plugin: {:?}",
+        t.events
+    );
+}
+
+/// Automation for the read-only parameter is not applied: a block whose
+/// automation names the meter and the level moves the level and sends the
+/// plugin no event for the meter, whichever route carries the points. (A format
+/// that delivers a point directly leaves no event for either, so the transcript
+/// half is vacuous there, as in [`read_only_parameter_write_is_refused`]; VST2
+/// is not applicable for the same spec reason.)
+pub fn automation_to_a_read_only_parameter_is_not_applied<F: Format>() {
+    if !F::SURFACE.reports_access {
+        return;
+    }
+    let mut a = active_in::<F>(Mode::Level);
+    let points = changes(&[
+        (Param::Meter, 0, spec::WRITE),
+        (Param::Level, 0, spec::WRITE),
+    ]);
+    let out = a.render(
+        &silence(BLOCK),
+        BLOCK,
+        &ProcessContext::new().params(&points),
+    );
+    assert!(
+        out[0].iter().all(|&v| v == spec::WRITE as f32),
+        "the writable parameter took its point"
+    );
+    tutti_plugin_types::Control::flush_edits(a.controller_mut(), main_thread());
+    let t = transcript::<F, _>(a.controller_mut());
+    assert!(
+        t.of(Kind::Param).all(|e| e.id != Param::Meter.id().get()),
+        "automation reached the read-only parameter: {:?}",
+        t.events
+    );
+}
+
+/// Automation for an id the plugin does not declare is not applied: a block
+/// whose automation names it and the level moves the level and sends the plugin
+/// no event for the undeclared id, whichever route carries the points. (AU and
+/// VST2 deliver a point directly and leave no event for either id, so the
+/// transcript half is vacuous there. AU's refusal is pinned by its own unit test,
+/// `automation_for_an_undeclared_parameter_is_counted_not_written` in
+/// `tutti-au-host`'s processor; VST2's is `Vst2Processor::write_automation`, which
+/// turns an id outside `numParams` into a refusal before `setParameter` and
+/// counts it.)
+pub fn automation_to_an_undeclared_parameter_is_not_applied<F: Format>() {
+    let mut a = active_in::<F>(Mode::Level);
+    let mut points = ParameterChanges::reserved(2, 4);
+    assert!(points.add_change(spec::UNLISTED, 0, spec::WRITE));
+    assert!(points.add_change(Param::Level.id(), 0, spec::WRITE));
+    let out = a.render(
+        &silence(BLOCK),
+        BLOCK,
+        &ProcessContext::new().params(&points),
+    );
+    assert!(
+        out[0].iter().all(|&v| v == spec::WRITE as f32),
+        "the declared parameter took its point"
+    );
+    tutti_plugin_types::Control::flush_edits(a.controller_mut(), main_thread());
+    let t = transcript::<F, _>(a.controller_mut());
+    assert!(
+        t.of(Kind::Param).all(|e| e.id != spec::UNLISTED.get()),
+        "automation reached an undeclared parameter: {:?}",
+        t.events
+    );
+}
+
+/// A write to an id the plugin does not declare fails at the call with a named
+/// error, loaded and active (`ParamWriteError`, one policy for every format).
+pub fn undeclared_parameter_write_is_refused<F: Format>() {
+    let main = main_thread();
+    let refused = Err(ParamWriteError::Undeclared(spec::UNLISTED));
+    let mut loaded = F::load();
+    assert_eq!(
+        loaded.set_parameter(main, spec::UNLISTED, Normalized::of(0.25)),
+        refused,
+        "loaded"
+    );
+    let mut a = activate(loaded, BLOCK);
+    assert_eq!(
+        a.controller_mut()
+            .set_parameter(main, spec::UNLISTED, Normalized::of(0.25)),
+        refused,
         "active"
     );
 }

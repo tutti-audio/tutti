@@ -34,7 +34,9 @@ pub struct CompressorControls {
     /// The level above which reduction begins, in dB.
     pub threshold: Db,
     /// The width of the soft knee in dB, centred on the threshold; 0 is a hard knee.
-    /// Below 0 reads as 0.
+    /// Below 0 reads as 0, and above 400 dB as 400: the curve's knee term is at most
+    /// `knee / 2` dB, so a wider knee changes nothing a finite follower can use, and a knee
+    /// of 1e20 or 3e38 would overflow its square.
     pub knee: Db,
     /// dB in per dB out above the threshold. Below 1 reads as 1: a compressor does not
     /// expand.
@@ -71,9 +73,13 @@ impl Default for CompressorControls {
 /// makeup and a reduction stays finite whatever either is.
 const MAX_MAKEUP_DB: f32 = 400.0;
 
+/// The widest knee, in dB, a compressor runs: the knee term `(1 - 1/ratio) x^2 / (2 knee)`
+/// with `x` inside the knee is at most `knee / 2`, and `x^2` stays finite.
+const MAX_KNEE_DB: f32 = 400.0;
+
 /// A compressor at one set of controls and one rate: the controls made runnable.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct CompressorMember {
+struct CompressorMember {
     threshold: Db,
     knee: Db,
     ratio: CompressionRatio,
@@ -84,29 +90,15 @@ pub(crate) struct CompressorMember {
 }
 
 impl CompressorMember {
-    /// The makeup gain, in dB.
-    pub(crate) fn makeup(&self) -> Db {
-        self.makeup
-    }
-
-    /// The reduction, in dB and positive, that a steady key at `level` asks for: the
-    /// static curve (Giannoulis, Massberg and Reiss, 2012). Nothing below
-    /// `threshold - knee/2`, `(1 - 1/ratio) (level - threshold)` above
-    /// `threshold + knee/2`, and the quadratic that joins them inside the knee.
-    #[must_use]
-    pub(crate) fn reduction_db(&self, level: Db) -> Db {
-        compute_compressor_gain_reduction(level, self.threshold, self.ratio, self.knee)
-    }
-
     /// The member for `c` at `rate`: a non-finite control is the default's, a knee and
     /// the times are floored at 0 and a ratio at 1.
-    pub(crate) fn designed(c: &CompressorControls, rate: SampleRate) -> Self {
+    fn designed(c: &CompressorControls, rate: SampleRate) -> Self {
         let d = CompressorControls::DEFAULT;
         // A NaN time reads as 0 (`max` ignores it), instant; an infinite one holds the
         // follower (a coefficient of 0), as `Seconds::one_pole_coeff` says.
         Self {
             threshold: Db(finite_or(c.threshold.get(), d.threshold.get())),
-            knee: Db(finite_or(c.knee.get(), d.knee.get()).max(0.0)),
+            knee: Db(finite_or(c.knee.get(), d.knee.get()).clamp(0.0, MAX_KNEE_DB)),
             ratio: CompressionRatio::new_clamped(finite_or(c.ratio.get(), d.ratio.get())),
             attack: Seconds(c.attack.get().max(0.0)),
             release: Seconds(c.release.get().max(0.0)),
@@ -121,7 +113,7 @@ impl CompressorMember {
 /// The figures the detector runs on: the controls it follows, with the times as
 /// one-pole coefficients at the rate.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Detector {
+struct Detector {
     threshold: Db,
     knee: Db,
     ratio: CompressionRatio,
@@ -134,7 +126,7 @@ pub(crate) struct Detector {
 impl Detector {
     /// The figures member `m` asks for: its controls, and the times as coefficients at
     /// its rate.
-    pub(crate) fn of(m: &CompressorMember) -> Self {
+    fn of(m: &CompressorMember) -> Self {
         Self {
             threshold: m.threshold,
             knee: m.knee,
@@ -144,13 +136,8 @@ impl Detector {
         }
     }
 
-    /// The threshold, in dB.
-    pub(crate) fn threshold(&self) -> Db {
-        self.threshold
-    }
-
     /// The figures of a compressor that does nothing, for a target to start from.
-    pub(crate) const NEUTRAL: Self = Self {
+    const NEUTRAL: Self = Self {
         threshold: Db(0.0),
         knee: Db(0.0),
         ratio: CompressionRatio::UNITY,
@@ -161,16 +148,9 @@ impl Detector {
     /// One frame of the compressor: the key's `level` (an amplitude) in dB, the static
     /// curve at `threshold`, the one-pole follower `reduction` on it (the attack
     /// coefficient while it rises, the release while it falls) and the linear gain
-    /// `-reduction + makeup`. The one copy of the compressor's frame, run by
-    /// [`CompressorBank`] and by each band of the multiband.
+    /// `-reduction + makeup`.
     #[inline]
-    pub(crate) fn frame(
-        &self,
-        reduction: &mut f32,
-        level: f32,
-        threshold: Db,
-        makeup_db: f32,
-    ) -> f32 {
+    fn frame(&self, reduction: &mut f32, level: f32, threshold: Db, makeup_db: f32) -> f32 {
         let input_db = amplitude_to_db(Amplitude::new(level));
         let target = compute_compressor_gain_reduction(input_db, threshold, self.ratio, self.knee);
         let coeff = if target.get() > *reduction {
@@ -207,6 +187,9 @@ pub struct CompressorBank {
     rate: SampleRate,
     /// The smoothed reduction, in dB and positive.
     reduction: f32,
+    /// The deepest reduction since the last [`take_deepest`](Self::take_deepest), in dB
+    /// and positive.
+    deepest: f32,
 }
 
 impl CompressorBank {
@@ -222,12 +205,15 @@ impl CompressorBank {
             steps,
             rate,
             reduction: 0.0,
+            deepest: 0.0,
         }
     }
 
-    /// Back to silence: no reduction, and the makeup landed on its target. No allocation.
+    /// Back to silence: no reduction, nothing metered, and the makeup landed on its target.
+    /// No allocation.
     pub fn reset(&mut self) {
         self.reduction = 0.0;
+        self.deepest = 0.0;
         self.makeup.settle();
     }
 
@@ -244,6 +230,13 @@ impl CompressorBank {
         self.detector = Detector::of(&member);
         self.makeup
             .aim_by(member.makeup.get(), Steps::Fixed(self.steps));
+    }
+
+    /// The deepest smoothed reduction any frame reached since the last call (or since
+    /// [`reset`](Self::reset)), in dB and positive; [`Db::UNITY`] is none. A **measurement**,
+    /// for a reduction meter. No allocation.
+    pub fn take_deepest(&mut self) -> Db {
+        Db(core::mem::take(&mut self.deepest))
     }
 
     /// Runs `input` into `output`, scaled by one gain from the loudest channel of `key`.
@@ -293,6 +286,7 @@ impl CompressorBank {
                     self.makeup.target()
                 };
                 *g = d.frame(&mut self.reduction, *g, threshold, makeup);
+                self.deepest = self.deepest.max(self.reduction);
             }
             for c in 0..width {
                 let xs = &input.plane(c).samples()[start..end];

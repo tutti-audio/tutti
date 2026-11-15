@@ -10,7 +10,7 @@
 //! once, when the plugin loads, and again when it says its parameter list moved.
 
 use tutti_au_ffi::Unit;
-use tutti_plugin_types::{Normalized, ParamMapping};
+use tutti_plugin_types::{LinearRange, Normalized, ParamMapping};
 
 use std::sync::Arc;
 
@@ -31,11 +31,9 @@ pub(crate) struct ParamBounds {
 }
 
 impl ParamBounds {
-    /// The bounds as an `f64` span, `None` for a non-finite bound or a range
-    /// that is not increasing: a malformed AU, which gets no invented span.
-    fn span(self) -> Option<(f64, f64)> {
-        let (min, max) = (f64::from(self.min), f64::from(self.max));
-        (min.is_finite() && max.is_finite() && max > min).then_some((min, max))
+    /// The line between the bounds, in `f64`.
+    fn line(self) -> LinearRange {
+        LinearRange::new(f64::from(self.min), f64::from(self.max))
     }
 }
 
@@ -50,33 +48,18 @@ impl ParamBounds {
 impl ParamMapping for ParamBounds {
     /// Maps a position onto `[min, max]`, narrowed to the `f32` that
     /// `AudioUnitSetParameter` takes (and widened back, so the value is the one
-    /// the unit is given).
-    ///
-    /// A non-finite or non-increasing range yields `min` when finite and `0.0`
-    /// otherwise, so the result is always finite and inside `[min, max]` (both
-    /// came from an `f32`).
+    /// the unit is given). A range with no span yields `min` when finite and
+    /// `0.0` otherwise ([`LinearRange`]), so the result is always finite and
+    /// inside `[min, max]` (both came from an `f32`).
     fn plain(&self, value: Normalized) -> f64 {
-        let Some((min, max)) = self.span() else {
-            return if self.min.is_finite() {
-                f64::from(self.min)
-            } else {
-                0.0
-            };
-        };
-        f64::from((min + value.get() * (max - min)) as f32)
+        f64::from(self.line().plain(value) as f32)
     }
 
     /// The AU's plain value back onto `0..=1`, the read direction of the same
     /// boundary: clamped into the range, `0.0` for NaN and for a range with no
-    /// span.
+    /// span ([`LinearRange`]).
     fn normalized(&self, plain: f64) -> Normalized {
-        let Some((min, max)) = self.span() else {
-            return Normalized::of(0.0);
-        };
-        if plain.is_nan() {
-            return Normalized::of(0.0);
-        }
-        Normalized::clamped((plain.clamp(min, max) - min) / (max - min))
+        self.line().normalized(plain)
     }
 }
 
@@ -92,6 +75,10 @@ pub(crate) struct RangeTable {
     /// "in real-time will cause a glitch or otherwise undesirable effect"
     /// (`AudioUnitProperties.h`), so the audio thread never makes one.
     non_realtime: Vec<u32>,
+    /// The ids the AU does not declare writable
+    /// (`kAudioUnitParameterFlag_IsWritable` clear), sorted: the host never
+    /// writes them.
+    read_only: Vec<u32>,
     /// What the render tells the control side of each parameter here: sized for
     /// every id in `ranges`, so each declared parameter has a [`Slot`].
     marks: Arc<Marks>,
@@ -108,6 +95,8 @@ impl RangeTable {
             .map(|p| p.id)
             .collect();
         non_realtime.sort_unstable();
+        let mut read_only: Vec<u32> = list.iter().filter(|p| !p.writable).map(|p| p.id).collect();
+        read_only.sort_unstable();
         let mut ranges: Vec<(u32, ParamBounds)> = list
             .into_iter()
             .map(|p| {
@@ -126,6 +115,7 @@ impl RangeTable {
             marks: Marks::covering(previous, &ids),
             ranges,
             non_realtime,
+            read_only,
         }
     }
 
@@ -143,6 +133,20 @@ impl RangeTable {
     /// blocks, on the control side.
     pub(crate) fn is_non_realtime(&self, id: u32) -> bool {
         self.non_realtime.binary_search(&id).is_ok()
+    }
+
+    /// Whether the AU declared `id` read-only: not writable by the host.
+    pub(crate) fn is_read_only(&self, id: u32) -> bool {
+        self.read_only.binary_search(&id).is_ok()
+    }
+
+    /// What the AU declares of `id`'s writability, `None` for a parameter it
+    /// never declared: the figure the write policy
+    /// ([`ParamWriteError::check`](tutti_plugin_types::ParamWriteError::check))
+    /// reads.
+    pub(crate) fn access(&self, id: u32) -> Option<tutti_plugin_types::ParamAccess> {
+        self.bounds(id)
+            .map(|_| tutti_plugin_types::ParamAccess::reported(self.is_read_only(id)))
     }
 
     /// Every declared id, ascending.
@@ -268,10 +272,12 @@ mod tests {
                 ),
             ],
             non_realtime: vec![7],
+            read_only: vec![2],
             marks: Arc::new(Marks::new(vec![2, 7])),
         };
         assert!(table.is_non_realtime(7));
         assert!(!table.is_non_realtime(2));
+        assert!(table.is_read_only(2) && !table.is_read_only(7));
         assert_eq!(table.bounds(7).map(|b| b.max), Some(22_050.0));
         assert_eq!(table.bounds(2).map(|b| b.min), Some(0.0));
         // A parameter the AU never declared has no range to denormalize

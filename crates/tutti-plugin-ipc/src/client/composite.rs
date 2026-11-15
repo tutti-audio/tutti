@@ -409,6 +409,11 @@ impl PluginBridge {
         self.audio.is_crashed()
     }
 
+    /// See `AudioBridge::news_settled`.
+    pub fn news_settled(&self, within: std::time::Duration) -> bool {
+        self.audio.news_settled(within)
+    }
+
     /// How many plugin parameter-change events the bridge dropped. See
     /// `AudioBridge::dropped_parameter_events`.
     pub fn dropped_parameter_events(&self) -> u64 {

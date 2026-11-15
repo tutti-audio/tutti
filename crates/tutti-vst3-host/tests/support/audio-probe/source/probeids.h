@@ -439,6 +439,13 @@ enum ProbeMisbehaviour : int32
     /// given `kOffline`, as a plugin that cannot render faster than realtime
     /// would.
     kMisbehaveRefusesOffline = 15,
+
+    /// Writing `kParamRequestIoChanged` also makes `kParamObservedProcessMode`
+    /// report itself writable (it clears `kIsReadOnly` in the controller's live
+    /// parameter info), as a plugin does that changes a parameter's flags while
+    /// it is active. The host's table of what the plugin declared is the
+    /// activation's, so the two differ until the host reads again.
+    kMisbehaveObservedWritableLate = 16,
 };
 
 static const double kRefusedAboveHz = 50000.0;
@@ -484,7 +491,7 @@ inline int32 probeMisbehaviour ()
     // whose value falls outside this range is silently read as `kMisbehaveNone`,
     // so the plugin behaves and the test passes against a probe that never
     // misbehaved.
-    return (v >= kMisbehaveNone && v <= kMisbehaveRefusesOffline) ? v : kMisbehaveNone;
+    return (v >= kMisbehaveNone && v <= kMisbehaveObservedWritableLate) ? v : kMisbehaveNone;
 }
 
 /// Bus count reported under [`kMisbehaveExtraBuses`]. Larger than any real

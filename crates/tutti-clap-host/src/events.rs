@@ -31,10 +31,10 @@ use std::ptr;
 use tutti_clap_ffi::{EventRef, EventSink, PluginEvent};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    Normalized, ParamEdit, ParamId, ParamMapping, RtMidiEvents, SYSEX_MESSAGE_CAPACITY,
-    StableOrder, WireMidi, expression_of_per_note_controller, group_of_port,
-    note_id_to_channel_note, per_note_message, per_note_tuning, plugin_note_id, push_sysex,
-    sysex_assembler,
+    LinearRange, Normalized, ParamEdit, ParamId, ParamMapping, RtMidiEvents,
+    SYSEX_MESSAGE_CAPACITY, StableOrder, WireMidi, expression_of_per_note_controller,
+    group_of_port, note_id_to_channel_note, per_note_message, per_note_tuning, plugin_note_id,
+    push_sysex, sysex_assembler,
 };
 
 use crate::types::RtNoteExpressions;
@@ -106,44 +106,31 @@ impl ParamBounds {
             .map(|i| &table[i])
     }
 
-    /// The declared bounds, `None` for a degenerate span or a non-finite
-    /// bound: a malformed plugin, which no conversion invents a range for.
-    fn span(&self) -> Option<(f64, f64)> {
-        (self.min.is_finite() && self.max.is_finite() && self.max > self.min)
-            .then_some((self.min, self.max))
+    /// The line between the declared bounds.
+    fn line(&self) -> LinearRange {
+        LinearRange::new(self.min, self.max)
     }
 }
 
 /// CLAP has no normalized value of its own (`params.h` speaks plain `double`s
-/// only), so the position is this crate's: linear over `[min, max]`, the one
-/// place the map is written. A degenerate or non-finite span yields `min` when
-/// that is finite and `0.0` otherwise, so the plain value is always finite and
-/// inside the declared bounds. A stepped parameter's value is rounded to the
+/// only), so the position is the [`LinearRange`] over `[min, max]`, the one
+/// place the map is written. A stepped parameter's value is rounded to the
 /// nearest integer, so the plugin's truncation reads the step the position
 /// names (and `plain(normalized(step))` is `step`).
 impl ParamMapping for ParamBounds {
     fn plain(&self, value: Normalized) -> f64 {
-        let Some((min, max)) = self.span() else {
-            return if self.min.is_finite() { self.min } else { 0.0 };
-        };
-        let plain = min + value.get() * (max - min);
-        if self.stepped {
-            plain.round().clamp(min, max)
+        let plain = self.line().plain(value);
+        if self.stepped && self.min.is_finite() && self.max.is_finite() {
+            plain
+                .round()
+                .clamp(self.min.min(self.max), self.min.max(self.max))
         } else {
             plain
         }
     }
 
-    /// `plain` clamped into the bounds, as a position on `0..=1`. `0.0` for
-    /// NaN and for a degenerate span.
     fn normalized(&self, plain: f64) -> Normalized {
-        let Some((min, max)) = self.span() else {
-            return Normalized::of(0.0);
-        };
-        if plain.is_nan() {
-            return Normalized::of(0.0);
-        }
-        Normalized::clamped((plain.clamp(min, max) - min) / (max - min))
+        self.line().normalized(plain)
     }
 }
 
