@@ -57,8 +57,8 @@ enum Standing {
 /// episode: a new mode, [`assert_mode`](Self::assert_mode), or a reload (which
 /// makes a new `BypassSync`). A later refusal then counts again, one episode per
 /// refused mode. A plugin still in another mode than the node's reopens an
-/// episode at the next comparison, which a lifted refusal makes on the next
-/// tick.
+/// episode at the next comparison: the same tick when `reconcile` lifts the
+/// refusal, the next tick when `assert_mode` does.
 #[derive(Debug)]
 pub(crate) struct BypassSync {
     /// Episodes: a bypass found other than the mode after a write.
@@ -429,6 +429,35 @@ pub(crate) mod tests {
         }
         assert_eq!(plugin.attempts.load(SeqCst), 1);
         assert_eq!(sync.unapplied(), 1, "it cannot be read, so it is counted");
+    }
+
+    /// **Lifting a refusal that `reconcile` itself met compares on that tick.**
+    /// The ignored writes back the retries off; the refusal then arrives from
+    /// `reconcile`'s own send and leaves a long wait, and the node's next mode
+    /// is attempted on the same tick instead of after it.
+    #[test]
+    fn a_lifted_refusal_from_reconcile_is_compared_on_the_same_tick() {
+        let (handle, plugin, mirror) = rig(false);
+        plugin.accepts.store(false, SeqCst);
+        let mut sync = BypassSync::default();
+        while plugin.writes.load(SeqCst) < 3 {
+            sync.reconcile(&handle, &mirror, NodeMode::Bypassed);
+        }
+        plugin.refuses.store(true, SeqCst);
+        let before = plugin.attempts.load(SeqCst);
+        while plugin.attempts.load(SeqCst) == before {
+            sync.reconcile(&handle, &mirror, NodeMode::Bypassed);
+        }
+        let refused_at = plugin.attempts.load(SeqCst);
+        // The plugin's bypass is moved on behind the host's back: processing
+        // now differs from what it holds.
+        plugin.held.store(true, SeqCst);
+        sync.reconcile(&handle, &mirror, NodeMode::Active);
+        assert_eq!(
+            plugin.attempts.load(SeqCst),
+            refused_at + 1,
+            "attempted on the tick that lifted the refusal"
+        );
     }
 
     /// **Muted lets the plugin process: after Bypassed, it writes processing.**
