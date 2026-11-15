@@ -4,6 +4,11 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+// Loading a plugin file through the pool, as a test does where an app declares the entry.
+#[cfg(feature = "plugin")]
+#[path = "../support/pooled.rs"]
+mod pooled;
+
 // Hosted plugins, their render mode and exports, over the reference CLAP
 // plugin in a real `plugin-server`: fails without the server, by design.
 #[cfg(all(feature = "clap", feature = "export"))]

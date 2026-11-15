@@ -1,6 +1,6 @@
 //! The plugin as a pool entry: [`Session::plugin_entry`] declares it, the pool
 //! loads it, [`Session::add_pooled_plugin`] puts its node in the graph, and
-//! [`Session::pooled_plugin`] is its handle.
+//! [`Session::plugin`] is its handle.
 //!
 //! The entry's identity is the [`PluginId`] and the [`Hosting`]. The id is
 //! resolved and bound against the catalog when the entry is built; the load
@@ -495,13 +495,13 @@ impl<K: Ord + Clone + fmt::Debug + Send + Sync + 'static> IntoPool<K> for Plugin
     }
 }
 
-/// A pooled plugin's handle: [`Session::pooled_plugin`].
+/// A pooled plugin's handle: [`Session::plugin`].
 ///
 /// It exists from the entry's first landing and owns nothing: the plugin lives
 /// in its node, and a handle never keeps its server alive. A handle belongs to
 /// one load of the entry: once the entry is released or reloaded (a changed
 /// identity, a [`retry`](Session::retry)) it reads [`Presence::Closed`], and
-/// [`Session::pooled_plugin`] gives the new one.
+/// [`Session::plugin`] gives the new one.
 #[derive(Clone)]
 pub struct PooledPlugin {
     id: ResourceId,
@@ -622,7 +622,7 @@ impl<C: crate::Clock> Session<C> {
     /// released); [`HandleError::WrongKind`] when it is another kind of
     /// entry; [`HandleError::NotLoaded`] before the load lands, or after it
     /// failed.
-    pub fn pooled_plugin<K>(&self, key: &K) -> Result<PooledPlugin, HandleError<K>>
+    pub fn plugin<K>(&self, key: &K) -> Result<PooledPlugin, HandleError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
@@ -633,8 +633,7 @@ impl<C: crate::Clock> Session<C> {
     /// node, which holds the entry (the pool keeps it, whether or not the
     /// app still declares it, until the node is removed).
     ///
-    /// The one way a pooled plugin enters the graph; it installs as
-    /// [`add_plugin`](Self::add_plugin) does. An in-process plugin was opened
+    /// The one way a plugin enters the graph. An in-process plugin was opened
     /// on the main thread by the load, so this call needs no main thread.
     /// An entry has one plugin: after the node is removed the entry stays
     /// loaded and this call is [`AddPluginError::Installed`] until the entry

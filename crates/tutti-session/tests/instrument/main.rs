@@ -15,5 +15,8 @@ mod instrument_support;
 mod main_pair;
 mod plugin;
 mod polysynth;
+// Loading a plugin file through the pool.
+#[path = "../support/pooled.rs"]
+mod pooled;
 mod refusal;
 mod soundfont;

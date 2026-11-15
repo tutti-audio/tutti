@@ -57,11 +57,6 @@ pub(super) const ALLOW: &[(&str, usize, &str)] = &[
         2,
         CORE,
     ),
-    (
-        "crates/tutti-session/tests/main_thread/export_fork_plugin.rs",
-        2,
-        CORE,
-    ),
     ("crates/tutti-session/tests/plugin/plugin.rs", 5, CORE),
     (
         "crates/tutti-session/tests/plugin/plugin_diagnostics.rs",
