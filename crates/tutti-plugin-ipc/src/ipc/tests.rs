@@ -204,6 +204,8 @@ fn mock_with(
             let Ok(message) = postcard::from_bytes::<HostMessage>(&bytes) else {
                 break;
             };
+            // Recorded before it is answered: a count read after the reply sees it.
+            log.lock().unwrap().push(message.clone());
             match &message {
                 HostMessage::SetSampleRate { rate } => reply(
                     &served,
@@ -235,7 +237,6 @@ fn mock_with(
                 ),
                 _ => {}
             }
-            log.lock().unwrap().push(message);
         }
         let _ = std::fs::remove_file(&path);
     });
