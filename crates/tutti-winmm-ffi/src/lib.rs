@@ -22,7 +22,8 @@
 //! ## Features
 //!
 //! - `synth-tests`: the suite that opens the GS Wavetable Synth. It needs an
-//!   audio endpoint, which a hosted CI runner lacks. Off by default.
+//!   audio endpoint, which a machine with no sound hardware gets from a virtual
+//!   audio driver. Off by default.
 #![cfg(windows)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 // Every `unsafe` block says why it is sound, and every `unsafe fn` what it
