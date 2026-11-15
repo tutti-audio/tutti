@@ -4,6 +4,7 @@
 use super::types::*;
 use crate::component::{AuComponentInfo, AuType};
 pub use tutti_au_ffi::ComponentRef as AuComponentRef;
+use tutti_plugin_types::PluginVersion;
 
 impl AuType {
     /// Converts a raw AudioToolbox `componentType` code to its typed variant.
@@ -111,35 +112,20 @@ pub(crate) fn component_info(component: AuComponentRef) -> Option<AuComponentInf
     })
 }
 
-/// Decodes `AudioComponentGetVersion` into a `"major.minor.dot"` string.
+/// Decodes `AudioComponentGetVersion`, `0xMMMMmmdd` (a 16-bit major, an 8-bit minor and an
+/// 8-bit dot, as `AudioComponent.h` documents), into a [`PluginVersion`].
 ///
-/// Empty when the component refuses the call. Every AU registered on macOS 15.6
-/// answers (measured: 0 of ~130 fail), so this is the unmeasured third-party
+/// [`PluginVersion::Absent`] when the component refuses the call. Every AU registered on
+/// macOS 15.6 answers (measured: 0 of ~130 fail), so this is the unmeasured third-party
 /// case rather than a path the corpus exercises.
 ///
-/// The minor/dot split is measured: `0x00020202` / `0x00050006` / `0x00040004`
-/// for TDR Nova, TAL-NoiseMaker and TAL-Reverb-4, whose bundles declare `2.2.2`,
-/// `5.0.6` and `4.0.4` in `CFBundleShortVersionString`. Swapping those two
-/// fields disagrees with all three.
-///
-/// The major's width is NOT settled by anything installed here. Masking the top
-/// half to 8 bits and reading it as a full 16 give identical output for every AU
-/// on this machine, because no major exceeds 255 — a `& 0xffff` mask
-/// passes the whole suite. Apple's header documents `0xMMMMmmDD`, i.e. a 16-bit
-/// major, so a unit numbered past 255 would print as `1.x.y` here and want the
-/// wider mask. Kept at 8 bits because that is the field width the other two
-/// components use and no observation contradicts it; changing it needs a real
-/// unit, not a re-reading of this comment.
-fn component_version(component: AuComponentRef) -> String {
-    let Some(raw) = component.version() else {
-        return String::new();
-    };
-    format!(
-        "{}.{}.{}",
-        (raw >> 16) & 0xff,
-        (raw >> 8) & 0xff,
-        raw & 0xff
-    )
+/// The minor/dot split is measured: `0x00020202` / `0x00050006` / `0x00040004` for TDR Nova,
+/// TAL-NoiseMaker and TAL-Reverb-4, whose bundles declare `2.2.2`, `5.0.6` and `4.0.4` in
+/// `CFBundleShortVersionString`.
+fn component_version(component: AuComponentRef) -> PluginVersion {
+    component
+        .version()
+        .map_or(PluginVersion::Absent, PluginVersion::from_au)
 }
 
 #[cfg(test)]

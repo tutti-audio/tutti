@@ -15,7 +15,7 @@ use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 use vst::host::{PluginInstance, PluginLoader};
 use vst::plugin::Category;
 
-use tutti_plugin_types::PluginDescriptor;
+use tutti_plugin_types::{PluginDescriptor, PluginVersion};
 
 use crate::error::{LoadStage, Result, Vst2Error};
 use crate::host::{HostState, MIDI_OUT_QUEUE_CAPACITY, PARAM_QUEUE_CAPACITY, ParameterChange};
@@ -310,7 +310,7 @@ impl Vst2Loaded {
                     id: format!("vst2.{}", sub.id),
                     name: sub.name,
                     vendor: shell.vendor.clone(),
-                    version: String::new(),
+                    version: PluginVersion::Absent,
                     class: tutti_plugin_types::PluginClass::Vst2 {
                         category: Vst2Category::Unasked,
                     },
@@ -436,7 +436,7 @@ impl Vst2Loaded {
             id: format!("vst2.{}", info.unique_id),
             name: info.name.clone(),
             vendor: info.vendor.clone(),
-            version: info.version.to_string(),
+            version: PluginVersion::integer(info.version),
             category: map_category(info.category, info.category_code),
             receives_midi,
             emits_midi,

@@ -1,7 +1,7 @@
 //! Loading, initialization and the plugin's requests and notifications.
 
 use super::*;
-use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
+use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, PluginVersion};
 
 impl Vst3Loaded {
     /// Reads a plugin's metadata without initializing it.
@@ -472,9 +472,9 @@ pub(super) fn build_plugin_info_raw(library: &Library, class: &AudioClass) -> Pl
             .unwrap_or_default()
     });
     // The real version string lives on the class (e.g. "1.0.0.512",
-    // Major.Minor.Subversion.Build). A plugin that declares none falls back to
-    // the "1.0.0" placeholder rather than showing an empty version field.
-    let version = class.version.clone().unwrap_or_else(|| "1.0.0".to_string());
+    // Major.Minor.Subversion.Build), and is kept as the plugin wrote it. A class that
+    // declares none is `Absent`.
+    let version = PluginVersion::text(class.version.clone().unwrap_or_default());
 
     PluginInfo::new(id_of(&class.cid), class.name.clone())
         .vendor(vendor)

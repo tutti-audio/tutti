@@ -17,8 +17,8 @@ pub use tutti_vst3_ffi::{
 
 pub use tutti_plugin_types::{
     AudioBuffer, ContentScale, EditorCapabilities, NoteExpressionIntValue, NoteExpressionType,
-    NoteExpressionValue, ParameterChanges, ParameterPoint, ParameterQueue, Sample, SampleFormat,
-    TransportInfo, WindowHandle, WireMidi,
+    NoteExpressionValue, ParameterChanges, ParameterPoint, ParameterQueue, PluginVersion, Sample,
+    SampleFormat, TransportInfo, WindowHandle, WireMidi,
 };
 
 /// A parameter's own `[min, max]`, as the plugin's controller maps the
@@ -86,8 +86,9 @@ pub struct PluginInfo {
     pub name: String,
     /// Vendor string; empty when the factory declares none.
     pub vendor: String,
-    /// Vendor-formatted version string; empty when the factory declares none.
-    pub version: String,
+    /// The class's version string verbatim (`PClassInfo2::version`, such as `"1.0.0.512"`);
+    /// [`PluginVersion::Absent`] when the class declares none.
+    pub version: PluginVersion,
     /// Input channel count on bus 0.
     pub num_inputs: usize,
     /// Output channel count on bus 0.
@@ -127,7 +128,7 @@ impl PluginInfo {
             id: id.into(),
             name: name.into(),
             vendor: String::new(),
-            version: String::new(),
+            version: PluginVersion::Absent,
             num_inputs: 2,
             num_outputs: 2,
             input_bus_channels: Vec::new(),
@@ -146,10 +147,10 @@ impl PluginInfo {
         self
     }
 
-    /// Sets the version string.
+    /// Sets the version.
     #[must_use]
-    pub fn version(mut self, version: impl Into<String>) -> Self {
-        self.version = version.into();
+    pub fn version(mut self, version: PluginVersion) -> Self {
+        self.version = version;
         self
     }
 

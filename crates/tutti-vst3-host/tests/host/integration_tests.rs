@@ -144,7 +144,7 @@ fn a_plugins_flat_channel_counts_match_its_bus_zero() {
 ///
 /// Asserted as "at least one plugin disagrees with a `"1.0.0"` placeholder"
 /// rather than per-plugin: a plugin that genuinely is version 1.0.0, or that
-/// declares none and falls back, is not a bug. What would be a bug is *every*
+/// declares none (`PluginVersion::Absent`), is not a bug. What would be a bug is *every*
 /// plugin agreeing with the placeholder, which a hardcoded version guarantees.
 #[test]
 fn a_plugins_version_is_read_from_it_rather_than_assumed() {
@@ -162,15 +162,9 @@ fn a_plugins_version_is_read_from_it_rather_than_assumed() {
             info.name, info.version, info.vendor
         );
         loaded += 1;
-        if info.version != "1.0.0" {
+        if info.version.to_string() != "1.0.0" {
             non_placeholder += 1;
         }
-        assert!(
-            !info.version.is_empty(),
-            "{}: version is empty — a plugin declaring none should keep the \
-             placeholder, not report nothing",
-            info.name
-        );
     }
 
     assert!(loaded > 0, "no VST3 plugin in the corpus could be loaded");

@@ -108,8 +108,8 @@ impl Parts {
     ) -> Option<f64> {
         let _scope = self.scoped(main);
         let controller = self.controller.get()?;
-        let mut buf: Vec<u16> = text.encode_utf16().take(127).collect();
-        buf.push(0);
+        let mut buf = [0u16; 128];
+        write_utf16_str(&mut buf, text);
         let mut value: f64 = 0.0;
         // SAFETY: `buf` is a NUL-terminated UTF-16 string that outlives the
         // call, and `value` a valid out-parameter. The ABI takes it mutable but
@@ -415,10 +415,10 @@ impl Parts {
         let _scope = self.scoped(main);
         let ctrl = self.ext.xml_representation.as_ref()?;
         let mut info = zeroed::<RepresentationInfo>();
-        fill_char8_64(&mut info.vendor, vendor);
-        fill_char8_64(&mut info.name, name);
-        fill_char8_64(&mut info.version, version);
-        fill_char8_64(&mut info.host, host);
+        write_char8(&mut info.vendor, vendor);
+        write_char8(&mut info.name, name);
+        write_char8(&mut info.version, version);
+        write_char8(&mut info.host, host);
 
         let stream = BStream::new();
         let stream_ptr = stream.as_com_ref::<IBStream>()?;
@@ -515,49 +515,5 @@ impl Parts {
             shared: self.shared.clone(),
             _module: self.module.clone(),
         })
-    }
-}
-
-/// Writes `src` into a `char8[64]`, cut to 63 bytes and NUL-terminated.
-pub(super) fn fill_char8_64(dst: &mut [i8; 64], src: &str) {
-    let bytes = src.as_bytes();
-    let n = bytes.len().min(dst.len() - 1);
-    for (slot, &b) in dst.iter_mut().zip(&bytes[..n]) {
-        *slot = b as i8;
-    }
-    dst[n] = 0;
-}
-
-#[cfg(test)]
-mod char8_fill_tests {
-    use super::fill_char8_64;
-
-    /// A short string is copied verbatim and NUL-terminated.
-    #[test]
-    fn fills_and_terminates() {
-        let mut buf = [0i8; 64];
-        fill_char8_64(&mut buf, "Acme");
-        assert_eq!(&buf[..4], &[b'A' as i8, b'c' as i8, b'm' as i8, b'e' as i8]);
-        assert_eq!(buf[4], 0);
-    }
-
-    /// An over-long string is truncated, always leaving room for the NUL
-    /// terminator at index 63.
-    #[test]
-    fn truncates_leaving_room_for_terminator() {
-        let mut buf = [1i8; 64];
-        let long = "x".repeat(100);
-        fill_char8_64(&mut buf, &long);
-        // 63 chars written, last slot is the terminator.
-        assert!(buf[..63].iter().all(|&b| b == b'x' as i8));
-        assert_eq!(buf[63], 0);
-    }
-
-    /// An empty string yields an immediate terminator.
-    #[test]
-    fn empty_is_just_terminator() {
-        let mut buf = [9i8; 64];
-        fill_char8_64(&mut buf, "");
-        assert_eq!(buf[0], 0);
     }
 }

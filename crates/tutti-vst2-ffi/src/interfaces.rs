@@ -6,7 +6,9 @@
 #![doc(hidden)]
 
 use std::cell::Cell;
-use std::os::raw::{c_char, c_void};
+use std::os::raw::c_void;
+
+use tutti_plugin_types::{c_str_prefix, read_c_str, write_c_str};
 
 use crate::{
     api::{self, AEffect, Supported, TimeInfo, consts::*},
@@ -18,32 +20,24 @@ const LANGUAGE_ENGLISH: isize = 1;
 
 /// Copy a string into a destination buffer.
 ///
-/// String will be cut at `max` characters.
 /// Returns `0` (not handled) for a null `dst`.
 ///
-/// `max` counts the NUL, as the SDK's `kVstMax*Len` constants do. What is written is the
-/// string up to its first NUL, cut to at most `max - 1` bytes at a char boundary, then a
-/// NUL: always terminated, and nothing is written past that NUL, so a destination that
-/// is shorter than `max` but holds the string is not overrun by a clearing pass.
+/// `max` counts the NUL, as the SDK's `kVstMax*Len` constants do. What is written is
+/// [`c_str_prefix`]`(src, max)` and a NUL: always terminated, cut at a char boundary, and
+/// nothing is written past that NUL, so a destination that is shorter than `max` but holds
+/// the string is not overrun by a clearing pass.
 pub fn copy_string(dst: *mut c_void, src: &str, max: usize) -> isize {
     if dst.is_null() || max == 0 {
         return 0;
     }
-    let src = src.split('\0').next().unwrap_or("");
-    let mut len = src.len().min(max - 1);
-    while !src.is_char_boundary(len) {
-        len -= 1;
-    }
+    let text = c_str_prefix(src, max);
     // SAFETY: `dst` is non-null and the opcode's buffer, which the VST2 ABI has hold at
     // least `max` writable bytes (the callers pass the SDK's fixed size for the opcode;
     // a host that offers less is outside the ABI, and this fn does not and cannot check
-    // it). Exactly `len + 1 <= max` bytes are written. `src` is a live `&str`, read for
-    // `len`, and a plugin's buffer does not overlap it.
-    unsafe {
-        let dst = dst as *mut u8;
-        std::ptr::copy_nonoverlapping(src.as_ptr(), dst, len);
-        dst.add(len).write(0);
-    }
+    // it). The slice is `text.len() + 1 <= max` bytes of it, so only the text and its NUL
+    // are formed and written, and a plugin's buffer does not alias the `&mut`.
+    let out = unsafe { std::slice::from_raw_parts_mut(dst.cast::<u8>(), text.len() + 1) };
+    write_c_str(out, text);
 
     1 // Success
 }
@@ -184,18 +178,32 @@ pub fn host_dispatch(
     0
 }
 
-/// Read a string from the `ptr` buffer. A null `ptr` reads as the empty string.
-pub fn read_string(ptr: *mut c_void) -> String {
-    use std::ffi::CStr;
+/// The most bytes `read_string` reads: a plugin's `canDo` query is a short capability name,
+/// and the pointer carries no length, so the read is bounded here.
+const MAX_QUERY_LEN: usize = 256;
 
+/// Read a string from the `ptr` buffer, up to its first NUL or `MAX_QUERY_LEN` (256) bytes. A
+/// null `ptr` reads as the empty string.
+pub fn read_string(ptr: *mut c_void) -> String {
     if ptr.is_null() {
         return String::new();
     }
-    // SAFETY: `ptr` is non-null (checked above), and the VST2 ABI has every opcode that
-    // passes a string send a NUL-terminated C string that the sender keeps valid for the
-    // call. The length is found by scanning for the NUL, so a sender that breaks that
-    // is the only way to read past the buffer; it cannot be checked from here.
-    String::from_utf8_lossy(unsafe { CStr::from_ptr(ptr as *mut c_char).to_bytes() }).into_owned()
+    let ptr = ptr.cast::<u8>().cast_const();
+    let mut bytes = Vec::new();
+    for at in 0..MAX_QUERY_LEN {
+        // SAFETY: `ptr` is non-null (checked above), and the VST2 ABI has every opcode that
+        // passes a string send a NUL-terminated C string that the sender keeps valid for the
+        // call. Bytes are read one at a time and the read stops at the first NUL, so it
+        // never goes past the terminator; a sender that breaks the ABI by sending no NUL
+        // within a shorter buffer is the only way to read past it, and no read here can
+        // check that.
+        let byte = unsafe { ptr.add(at).read() };
+        if byte == 0 {
+            break;
+        }
+        bytes.push(byte);
+    }
+    read_c_str(&bytes)
 }
 
 #[cfg(test)]

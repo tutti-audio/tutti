@@ -19,8 +19,8 @@ use tutti_plugin_types::{
     EditorPresence, EditorWindow, Features, LoadedPlugin, MainThreadMarker, Normalized, ParamEdit,
     ParamFlags, ParamId, ParamMapping, ParamRange, ParamSteps, ParamWriteError, ParameterInfo,
     PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail,
-    Preset, PresetId, RenderModeSupport, Request, RescanScope, StateUse, WindowHandle, Wraps,
-    taken,
+    PluginVersion, Preset, PresetId, RenderModeSupport, Request, RescanScope, StateUse,
+    WindowHandle, Wraps, taken,
 };
 use tutti_types::Samples;
 
@@ -82,7 +82,11 @@ pub(crate) fn describe(handle: &AuHandle) -> PluginDescriptor {
             info.manufacturer.clone(),
             info.version.clone(),
         ),
-        None => (String::from("au.unknown"), String::new(), String::new()),
+        None => (
+            String::from("au.unknown"),
+            String::new(),
+            PluginVersion::Absent,
+        ),
     };
     PluginDescriptor {
         id,

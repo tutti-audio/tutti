@@ -26,7 +26,7 @@
 //! does with a program chunk it is handed while another program is current; setting the
 //! program first is the only order the opcodes' wording allows.
 
-use tutti_plugin_types::MainThreadMarker;
+use tutti_plugin_types::{MainThreadMarker, Opened, StateFrame, StateFrameError, Unframed};
 
 use crate::error::{Result, Vst2Error};
 use crate::loaded::Vst2Loaded;
@@ -39,6 +39,27 @@ const STATE_HEADER_CHUNK: [u8; 4] = *b"CHK\x01";
 const STATE_HEADER_PARAMS: [u8; 4] = *b"PRM\x01";
 const STATE_HEADER_CHUNK_NO_PROGRAM: [u8; 4] = *b"CHK\0";
 const STATE_HEADER_PARAMS_NO_PROGRAM: [u8; 4] = *b"PRM\0";
+
+const TAG_CHUNK: usize = 0;
+const TAG_PARAMS: usize = 1;
+const TAG_CHUNK_NO_PROGRAM: usize = 2;
+
+/// How a VST2 state blob opens: by one of the four tags, and nothing else.
+///
+/// The VST2 spec has no state container beyond `effGetChunk`/`effSetChunk`'s opaque bytes
+/// (`aeffect.h`), and a plugin without chunks has no stream at all, so every state this host
+/// writes is tagged and an untagged blob is no state of this host's: it is refused rather
+/// than handed to `effSetChunk`.
+const FRAME: StateFrame = StateFrame::new(
+    "VST2",
+    &[
+        &STATE_HEADER_CHUNK,
+        &STATE_HEADER_PARAMS,
+        &STATE_HEADER_CHUNK_NO_PROGRAM,
+        &STATE_HEADER_PARAMS_NO_PROGRAM,
+    ],
+    Unframed::Refused,
+);
 
 /// The program index a state records when the plugin has no programs to select.
 const NO_PROGRAM: i32 = -1;
@@ -70,77 +91,50 @@ pub(crate) enum StateHeader<'a> {
 /// plugin (the plugin-parameter-count cross-check stays in `write_state`).
 /// Errors mirror the `write_state` early-returns exactly.
 pub(crate) fn parse_state_header(data: &[u8]) -> Result<StateHeader<'_>> {
-    if data.len() < 4 {
-        return Err(Vst2Error::StateError(
-            "State data too short (missing header)".into(),
-        ));
-    }
+    parse_frame(data).map_err(|e| Vst2Error::StateError(e.to_string()))
+}
 
-    let header: [u8; 4] = [data[0], data[1], data[2], data[3]];
-    let body = &data[4..];
-
-    let (with_program, chunk) = if header == STATE_HEADER_CHUNK {
-        (true, true)
-    } else if header == STATE_HEADER_CHUNK_NO_PROGRAM {
-        (false, true)
-    } else if header == STATE_HEADER_PARAMS {
-        (true, false)
-    } else if header == STATE_HEADER_PARAMS_NO_PROGRAM {
-        (false, false)
-    } else {
-        return Err(Vst2Error::StateError(format!(
-            "Unknown state header: {:?}",
-            header
-        )));
+/// [`parse_state_header`], with the frame's own error.
+fn parse_frame(data: &[u8]) -> std::result::Result<StateHeader<'_>, StateFrameError> {
+    let Opened::Framed { tag, body } = FRAME.open(data)? else {
+        unreachable!("`FRAME` refuses an unframed blob");
     };
-
-    let (program, payload) = if with_program {
-        if body.len() < 4 {
-            return Err(Vst2Error::StateError(
-                "State data too short (missing program index)".into(),
-            ));
-        }
-        let program = i32::from_le_bytes([body[0], body[1], body[2], body[3]]);
-        (Some(program), &body[4..])
+    let chunk = tag == TAG_CHUNK || tag == TAG_CHUNK_NO_PROGRAM;
+    let with_program = tag == TAG_CHUNK || tag == TAG_PARAMS;
+    let mut reader = FRAME.reader(body);
+    let program = if with_program {
+        Some(reader.i32_le("program index")?)
     } else {
-        (None, body)
+        None
     };
 
     if chunk {
+        let payload = reader.take_rest();
         if payload.is_empty() {
-            return Err(Vst2Error::StateError("Empty chunk data".into()));
+            return Err(reader.invalid("chunk", "empty"));
         }
         return Ok(StateHeader::Chunk { program, payload });
     }
 
-    if payload.len() < 4 {
-        return Err(Vst2Error::StateError(
-            "Invalid parameter state (missing count)".into(),
+    let count = reader.i32_le("parameter count")?;
+    if count < 0 {
+        return Err(reader.invalid("parameter count", format!("{count} is negative")));
+    }
+    let values = reader.take_rest();
+    let expected = count as usize * 4;
+    if values.len() != expected {
+        return Err(reader.invalid(
+            "parameter values",
+            format!(
+                "{count} values need {expected} bytes, {} follow",
+                values.len()
+            ),
         ));
     }
-
-    let count = i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    if count < 0 {
-        return Err(Vst2Error::StateError(format!(
-            "Invalid parameter count: {}",
-            count
-        )));
-    }
-
-    let expected_payload = 4 + (count as usize) * 4;
-    if payload.len() != expected_payload {
-        return Err(Vst2Error::StateError(format!(
-            "Parameter state size mismatch: expected {} bytes, got {}",
-            expected_payload,
-            payload.len()
-        )));
-    }
-
-    // Strip the count prefix; leave just the f32 value bytes.
     Ok(StateHeader::Params {
         program,
         count,
-        values: &payload[4..],
+        values,
     })
 }
 
@@ -297,13 +291,13 @@ mod tests {
     fn header_too_short() {
         let err = parse_state_header(&[0x43, 0x48]).unwrap_err();
         assert!(matches!(err, Vst2Error::StateError(_)));
-        assert!(err.to_string().contains("too short"));
+        assert!(err.to_string().contains("none of the tags"));
     }
 
     #[test]
     fn unknown_header() {
         let err = parse_state_header(b"XXX\0payload").unwrap_err();
-        assert!(err.to_string().contains("Unknown state header"));
+        assert!(err.to_string().contains("none of the tags"));
     }
 
     #[test]
@@ -311,7 +305,7 @@ mod tests {
         let mut data = STATE_HEADER_CHUNK.to_vec();
         data.extend_from_slice(&0i32.to_le_bytes());
         let err = parse_state_header(&data).unwrap_err();
-        assert!(err.to_string().contains("Empty chunk data"));
+        assert!(err.to_string().contains("chunk is invalid: empty"));
     }
 
     #[test]
@@ -346,7 +340,7 @@ mod tests {
         let mut data = STATE_HEADER_CHUNK.to_vec();
         data.extend_from_slice(&[0, 0]);
         let err = parse_state_header(&data).unwrap_err();
-        assert!(err.to_string().contains("missing program index"));
+        assert!(err.to_string().contains("program index is missing"));
     }
 
     #[test]
@@ -355,7 +349,7 @@ mod tests {
         let mut data = STATE_HEADER_PARAMS_NO_PROGRAM.to_vec();
         data.extend_from_slice(&[0, 0]);
         let err = parse_state_header(&data).unwrap_err();
-        assert!(err.to_string().contains("missing count"));
+        assert!(err.to_string().contains("parameter count is missing"));
     }
 
     #[test]
@@ -363,7 +357,10 @@ mod tests {
         let mut data = STATE_HEADER_PARAMS_NO_PROGRAM.to_vec();
         data.extend_from_slice(&(-1i32).to_le_bytes());
         let err = parse_state_header(&data).unwrap_err();
-        assert!(err.to_string().contains("Invalid parameter count"));
+        assert!(
+            err.to_string()
+                .contains("parameter count is invalid: -1 is negative")
+        );
     }
 
     #[test]
@@ -374,7 +371,7 @@ mod tests {
         data.extend_from_slice(&2i32.to_le_bytes());
         data.extend_from_slice(&1.0f32.to_le_bytes());
         let err = parse_state_header(&data).unwrap_err();
-        assert!(err.to_string().contains("size mismatch"));
+        assert!(err.to_string().contains("parameter values is invalid"));
     }
 
     #[test]

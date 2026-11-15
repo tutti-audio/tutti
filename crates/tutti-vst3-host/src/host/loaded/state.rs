@@ -1,7 +1,7 @@
 //! Programs and units, the compatibility JSON, and the state container.
 
 use std::collections::HashSet;
-use tutti_plugin_types::MainThreadMarker;
+use tutti_plugin_types::{MainThreadMarker, Opened, StateFrame, StateFrameError, Unframed};
 
 use super::*;
 use crate::host::controller::latest_per_parameter;
@@ -214,7 +214,9 @@ impl Vst3Loaded {
     ///
     /// # Errors
     ///
-    /// Returns [`Vst3Error::StateError`] if the
+    /// Returns [`Vst3Error::StateError`] if the blob carries this host's container magic and
+    /// the container is malformed (an unknown version, a field cut short, a length past the
+    /// end), if the
     /// `IBStream` wrapper cannot be created, or
     /// [`Vst3Error::PluginError`] if the plugin
     /// rejects the component blob via `setState`. A controller that rejects its
@@ -232,7 +234,7 @@ impl Vst3Loaded {
             component,
             controller,
             pending,
-        } = unpack_full(data);
+        } = unpack_full(data).map_err(|e| Vst3Error::StateError(e.to_string()))?;
 
         // A plugin with no component state still gets the controller's stream
         // and the pending writes: the writes are for its separate controller's
@@ -278,22 +280,34 @@ impl Vst3Loaded {
     }
 }
 
-/// Magic prefixing a two-stream state blob. Chosen to be something no VST3
-/// plugin would plausibly open its own private state with, so
-/// [`unpack_state`] can tell a packed blob from a bare component stream saved
-/// before this host carried the controller's half.
-pub(super) const STATE_MAGIC: &[u8; 8] = b"TUTTIVS3";
+/// Magic prefixing a two-stream state blob. Chosen to be something no VST3 plugin would
+/// plausibly open its own private state with; [`pack_state`] frames a component stream that
+/// does begin with it, so a blob that carries the magic is always a container.
+pub(super) const STATE_MAGIC: &[u8] = b"TUTTIVS3";
 
-/// Container version. Bump only if the layout after the magic changes; a
-/// reader that meets a version it does not know falls back to treating the
-/// whole blob as a bare component stream, which is wrong but recoverable —
-/// where mis-splitting it would hand the plugin garbage.
+/// How a VST3 state blob opens: the host's magic is the one tag, and a blob without it is the
+/// component's own stream.
+///
+/// VST3 defines no container for a saved state: `IComponent::getState` and
+/// `IEditController::getState` each write a stream whose bytes are the plugin's own
+/// (`ivstcomponent.h`, `ivsteditcontroller.h`). The container is this host's, so a blob
+/// without its magic is accepted as the component stream alone, which [`pack_state`] writes
+/// when the controller has no state of its own.
+const FRAME: StateFrame = StateFrame::new(
+    "VST3",
+    &[STATE_MAGIC],
+    Unframed::Accepted(
+        "VST3 specifies no state container: a blob without the host's magic is the \
+         component's own getState stream",
+    ),
+);
+
+/// Container version: the component's length, then the component, then the controller.
 pub(super) const STATE_VERSION: u8 = 1;
 
 /// Container version that also stores the parameter writes the component's
 /// stream does not hold yet. Written only when there are some, so a blob with
-/// nothing pending is version 1's, byte for byte. A build that predates it
-/// reads the whole blob as a component stream.
+/// nothing pending is version 1's, byte for byte.
 pub(super) const STATE_VERSION_PENDING: u8 = 2;
 
 /// Bytes of one pending write in a version 2 container: a `u32` id and an
@@ -306,14 +320,16 @@ const PENDING_BYTES: usize = 12;
 /// then the two payloads. The controller half is whatever remains, so it needs
 /// no length of its own.
 ///
-/// A plugin with no controller state at all packs to `component` alone, with
-/// no header. That keeps the common case byte-identical to what this host
-/// saved before the controller stream existed, so nothing re-saves a project
-/// merely for having been opened.
+/// A plugin with no controller state at all packs to `component` alone, with no header, unless
+/// the component's own bytes begin with the magic: then the container is written with an
+/// empty controller half, so the blob is never read as a container it is not. That keeps the
+/// common case byte-identical to what this host saved before the controller stream existed,
+/// so nothing re-saves a project merely for having been opened.
 pub(super) fn pack_state(component: &[u8], controller: &Option<Vec<u8>>) -> Vec<u8> {
-    let Some(controller) = controller.as_ref().filter(|c| !c.is_empty()) else {
+    let controller = controller.as_deref().unwrap_or_default();
+    if controller.is_empty() && !component.starts_with(STATE_MAGIC) {
         return component.to_vec();
-    };
+    }
 
     // A component stream too long to describe in a u32 cannot be split back
     // apart, so keep the half a project cannot be restored without and drop
@@ -397,80 +413,69 @@ pub(super) struct Unpacked<'a> {
     pub(super) pending: Vec<(ParamId, Normalized)>,
 }
 
-/// [`unpack_state`], and the pending writes of a version 2 container. A
-/// version 2 blob that does not parse is a bare component stream, as a
-/// malformed version 1 one is.
-pub(super) fn unpack_full(data: &[u8]) -> Unpacked<'_> {
-    let bare = |(component, controller)| Unpacked {
+/// Splits a blob into its component and controller halves and the pending writes of a
+/// version 2 container.
+///
+/// A blob without [`STATE_MAGIC`] is the component's own stream ([`FRAME`]). A blob with it
+/// is a container, and one that does not read (an unknown version, a field cut short, a
+/// length past the end) is refused by name: splitting at a length there is reason to distrust
+/// would hand the component a corrupt stream, and handing it the whole blob would hand it
+/// the host's header.
+///
+/// # Errors
+///
+/// [`StateFrameError`] for a container that is malformed.
+pub(super) fn unpack_full(data: &[u8]) -> std::result::Result<Unpacked<'_>, StateFrameError> {
+    let body = match FRAME.open(data)? {
+        Opened::Unframed(component) => {
+            return Ok(Unpacked {
+                component,
+                controller: None,
+                pending: Vec::new(),
+            });
+        }
+        Opened::Framed { body, .. } => body,
+    };
+    let mut reader = FRAME.reader(body);
+    let pending = match reader.u8("version")? {
+        STATE_VERSION => Vec::new(),
+        STATE_VERSION_PENDING => {
+            let count = reader.u32_le("pending count")?;
+            let table = reader.bytes(u64::from(count) * PENDING_BYTES as u64, "pending writes")?;
+            table
+                .as_chunks::<PENDING_BYTES>()
+                .0
+                .iter()
+                .map(|&[i0, i1, i2, i3, v0, v1, v2, v3, v4, v5, v6, v7]| {
+                    (
+                        ParamId::new(u32::from_le_bytes([i0, i1, i2, i3])),
+                        Normalized::clamped(f64::from_le_bytes([v0, v1, v2, v3, v4, v5, v6, v7])),
+                    )
+                })
+                .collect()
+        }
+        found => {
+            return Err(StateFrameError::UnknownVersion {
+                format: FRAME.format(),
+                found,
+            });
+        }
+    };
+    let len = reader.u32_le("component length")?;
+    let component = reader.bytes(u64::from(len), "component")?;
+    let controller = reader.take_rest();
+    Ok(Unpacked {
         component,
-        controller,
-        pending: Vec::new(),
-    };
-    let version_2 = data
-        .strip_prefix(STATE_MAGIC.as_slice())
-        .and_then(|rest| rest.strip_prefix(&[STATE_VERSION_PENDING]));
-    let Some(rest) = version_2 else {
-        return bare(unpack_state(data));
-    };
-    let parsed = (|| {
-        let (count, rest) = rest.split_first_chunk::<4>()?;
-        let table_len = (u32::from_le_bytes(*count) as usize).checked_mul(PENDING_BYTES)?;
-        let (table, body) = rest.split_at_checked(table_len)?;
-        let pending = table
-            .as_chunks::<PENDING_BYTES>()
-            .0
-            .iter()
-            .map(|entry| {
-                let (id, value) = entry.split_first_chunk::<4>()?;
-                Some((
-                    ParamId::new(u32::from_le_bytes(*id)),
-                    Normalized::clamped(f64::from_le_bytes(value.try_into().ok()?)),
-                ))
-            })
-            .collect::<Option<Vec<_>>>()?;
-        let (component, controller) = split_body(body)?;
-        Some(Unpacked {
-            component,
-            controller,
-            pending,
-        })
-    })();
-    parsed.unwrap_or_else(|| bare((data, None)))
-}
-
-/// Splits a blob back into its component and controller halves.
-///
-/// Anything not carrying [`STATE_MAGIC`] is a bare component stream — either
-/// saved by an older build of this host, or packed by [`pack_state`] for a
-/// plugin with no controller state. Both restore correctly by handing the
-/// whole blob to the component, which is what this host has always done.
-///
-/// A blob that starts with the magic but is then malformed (unknown version,
-/// truncated, a length past the end) is treated the same way. That cannot
-/// restore the controller half, but the alternative — splitting at a length
-/// there is reason to distrust — hands the *component* a corrupt stream, and the
-/// component half is the one a project cannot be restored without.
-pub(super) fn unpack_state(data: &[u8]) -> (&[u8], Option<&[u8]>) {
-    data.strip_prefix(STATE_MAGIC.as_slice())
-        .and_then(|rest| rest.strip_prefix(&[STATE_VERSION]))
-        .and_then(split_body)
-        .unwrap_or((data, None))
-}
-
-/// The component length, the component and the controller that follow the
-/// version byte (and, in version 2, the pending table). `None` when the length
-/// field is short or points past the end.
-fn split_body(body: &[u8]) -> Option<(&[u8], Option<&[u8]>)> {
-    let (len, payload) = body.split_first_chunk::<4>()?;
-    let (component, controller) = payload.split_at_checked(u32::from_le_bytes(*len) as usize)?;
-    Some((component, (!controller.is_empty()).then_some(controller)))
+        controller: (!controller.is_empty()).then_some(controller),
+        pending,
+    })
 }
 
 #[cfg(test)]
 mod state_container_tests {
     use super::{
-        Normalized, ParamId, STATE_MAGIC, STATE_VERSION, STATE_VERSION_PENDING, Unpacked,
-        latest_listed, pack_state, pack_state_with_pending, unpack_full, unpack_state,
+        Normalized, ParamId, STATE_MAGIC, STATE_VERSION, STATE_VERSION_PENDING, StateFrameError,
+        Unpacked, latest_listed, pack_state, pack_state_with_pending, unpack_full,
     };
 
     /// Both halves survive the round trip, split back at the right byte.
@@ -480,31 +485,26 @@ mod state_container_tests {
         let controller = b"scroll=42;tab=2".to_vec();
 
         let packed = pack_state(component, &Some(controller.clone()));
-        let (got_component, got_controller) = unpack_state(&packed);
+        let got = unpack_full(&packed).unwrap();
 
-        assert_eq!(got_component, component);
-        assert_eq!(got_controller, Some(controller.as_slice()));
+        assert_eq!(got.component, component);
+        assert_eq!(got.controller, Some(controller.as_slice()));
     }
 
-    /// A blob saved before this host carried the controller's stream is a bare
-    /// component blob with no header. It must still restore, or every existing
-    /// project loses its plugin state.
-    ///
-    /// The fixture is binary rather than text, and its leading bytes are chosen
-    /// to parse as a *valid* header if the magic check were skipped: a version
-    /// byte, then a little-endian length well inside the blob. A plugin's
-    /// private state is binary, so opening on such bytes is ordinary rather
-    /// than contrived — and a reader that trusted them would hand the component
-    /// the first three bytes of a twenty-byte stream and call the rest UI state.
+    /// A blob with none of the host's magic is the component's own stream, which VST3 gives
+    /// no container (`FRAME`'s rule), and is accepted whole. The fixture is binary and its
+    /// leading bytes parse as a valid version-1 header if the magic check were skipped: a
+    /// version byte, then a little-endian length well inside the blob.
     #[test]
-    fn a_bare_component_blob_still_restores() {
-        let mut legacy = vec![STATE_VERSION];
-        legacy.extend_from_slice(&3u32.to_le_bytes());
-        legacy.extend_from_slice(b"abcdefghijklmno");
+    fn a_blob_without_the_magic_is_the_component_stream() {
+        let mut bare = vec![STATE_VERSION];
+        bare.extend_from_slice(&3u32.to_le_bytes());
+        bare.extend_from_slice(b"abcdefghijklmno");
 
-        let (component, controller) = unpack_state(&legacy);
-        assert_eq!(component, legacy.as_slice());
-        assert_eq!(controller, None);
+        let got = unpack_full(&bare).unwrap();
+        assert_eq!(got.component, bare.as_slice());
+        assert_eq!(got.controller, None);
+        assert!(got.pending.is_empty());
     }
 
     /// A plugin with no controller state packs to exactly the component bytes,
@@ -517,8 +517,8 @@ mod state_container_tests {
         assert_eq!(pack_state(component, &Some(Vec::new())), component);
     }
 
-    /// A component half whose own bytes begin with the magic must not be
-    /// mistaken for a container when it is handed back unpacked.
+    /// A component half whose own bytes begin with the magic is not mistaken for a
+    /// container, with a controller half and without one.
     #[test]
     fn a_component_blob_starting_with_the_magic_round_trips() {
         let mut component = STATE_MAGIC.to_vec();
@@ -526,34 +526,63 @@ mod state_container_tests {
         let controller = b"ui".to_vec();
 
         let packed = pack_state(&component, &Some(controller.clone()));
-        let (got_component, got_controller) = unpack_state(&packed);
+        let got = unpack_full(&packed).unwrap();
+        assert_eq!(got.component, component);
+        assert_eq!(got.controller, Some(controller.as_slice()));
 
-        assert_eq!(got_component, component);
-        assert_eq!(got_controller, Some(controller.as_slice()));
+        let packed = pack_state(&component, &None);
+        let got = unpack_full(&packed).unwrap();
+        assert_eq!(got.component, component);
+        assert_eq!(got.controller, None);
     }
 
-    /// A truncated or otherwise malformed container degrades to "all of it is
-    /// component state" rather than splitting at a length it cannot trust.
-    /// Restoring the component half wrongly is worse than losing the UI half.
+    /// A container that does not read is refused by name, never read as the component's own
+    /// stream: a field cut short, a length past the end, a version this host does not know.
     #[test]
-    fn a_malformed_container_falls_back_to_the_whole_blob() {
+    fn a_malformed_container_is_refused_by_name() {
         let mut truncated = STATE_MAGIC.to_vec();
         truncated.push(STATE_VERSION);
         truncated.extend_from_slice(&[0u8, 1]); // a 2-byte length field, not 4
-        assert_eq!(unpack_state(&truncated), (truncated.as_slice(), None));
+        assert_eq!(
+            unpack_full(&truncated),
+            Err(StateFrameError::Truncated {
+                format: "VST3",
+                field: "component length"
+            })
+        );
 
         let mut past_the_end = STATE_MAGIC.to_vec();
         past_the_end.push(STATE_VERSION);
         past_the_end.extend_from_slice(&99u32.to_le_bytes());
         past_the_end.extend_from_slice(b"short");
-        assert_eq!(unpack_state(&past_the_end), (past_the_end.as_slice(), None));
+        assert_eq!(
+            unpack_full(&past_the_end),
+            Err(StateFrameError::LengthPastEnd {
+                format: "VST3",
+                field: "component",
+                claimed: 99,
+                available: 5
+            })
+        );
 
         let mut unknown_version = STATE_MAGIC.to_vec();
         unknown_version.push(STATE_VERSION_PENDING.wrapping_add(1));
         unknown_version.extend_from_slice(&0u32.to_le_bytes());
         assert_eq!(
-            unpack_state(&unknown_version),
-            (unknown_version.as_slice(), None)
+            unpack_full(&unknown_version),
+            Err(StateFrameError::UnknownVersion {
+                format: "VST3",
+                found: 3
+            })
+        );
+
+        // The magic alone, with no version byte.
+        assert_eq!(
+            unpack_full(STATE_MAGIC),
+            Err(StateFrameError::Truncated {
+                format: "VST3",
+                field: "version"
+            })
         );
     }
 
@@ -563,7 +592,7 @@ mod state_container_tests {
     #[test]
     fn an_empty_controller_half_reads_back_as_absent() {
         let packed = pack_state(b"component", &Some(b"x".to_vec()));
-        let (_, controller) = unpack_state(&packed);
+        let controller = unpack_full(&packed).unwrap().controller;
         assert_eq!(controller, Some(b"x".as_slice()));
 
         // Built by hand: a container claiming the whole payload is component.
@@ -571,7 +600,11 @@ mod state_container_tests {
         zero_tail.push(STATE_VERSION);
         zero_tail.extend_from_slice(&9u32.to_le_bytes());
         zero_tail.extend_from_slice(b"component");
-        assert_eq!(unpack_state(&zero_tail), (b"component".as_slice(), None));
+        let got = unpack_full(&zero_tail).unwrap();
+        assert_eq!(
+            (got.component, got.controller),
+            (b"component".as_slice(), None)
+        );
     }
 
     fn writes() -> [(ParamId, Normalized); 2] {
@@ -587,17 +620,17 @@ mod state_container_tests {
         let packed = pack_state_with_pending(b"component", &Some(b"ui".to_vec()), &writes());
         assert_eq!(
             unpack_full(&packed),
-            Unpacked {
+            Ok(Unpacked {
                 component: b"component",
                 controller: Some(b"ui".as_slice()),
                 pending: writes().to_vec(),
-            }
+            })
         );
         // A plugin with no controller stream still gets a header, because the
         // writes need one.
         let bare = pack_state_with_pending(b"component", &None, &writes());
-        assert_eq!(unpack_full(&bare).pending, writes().to_vec());
-        assert_eq!(unpack_full(&bare).controller, None);
+        assert_eq!(unpack_full(&bare).unwrap().pending, writes().to_vec());
+        assert_eq!(unpack_full(&bare).unwrap().controller, None);
     }
 
     /// With nothing pending the blob is version 1's, byte for byte, for a
@@ -620,24 +653,20 @@ mod state_container_tests {
     #[test]
     fn older_blobs_read_with_nothing_pending() {
         let v1 = pack_state(b"component", &Some(b"ui".to_vec()));
-        let got = unpack_full(&v1);
+        let got = unpack_full(&v1).unwrap();
         assert_eq!(
             (got.component, got.controller, got.pending.len()),
             (b"component".as_slice(), Some(b"ui".as_slice()), 0)
         );
-        let got = unpack_full(b"bare component stream");
+        let got = unpack_full(b"bare component stream").unwrap();
         assert_eq!(got.component, b"bare component stream");
         assert!(got.pending.is_empty());
     }
 
-    /// A version 2 container that does not parse is a bare component stream,
-    /// like a malformed version 1: a length there is no reason to trust is not
-    /// used to split the component.
-    ///
-    /// Not covered: the `checked_mul` on the table length, which only matters where `usize`
-    /// is 32 bits.
+    /// A version 2 container that does not parse is refused by name, like a malformed
+    /// version 1: a length there is no reason to trust is not used to split the component.
     #[test]
-    fn a_malformed_version_2_container_falls_back_to_the_whole_blob() {
+    fn a_malformed_version_2_container_is_refused() {
         let good = pack_state_with_pending(b"component", &Some(b"ui".to_vec()), &writes());
         let header = STATE_MAGIC.len() + 1;
         let table_end = header + 4 + 2 * 12;
@@ -656,11 +685,16 @@ mod state_container_tests {
         long[table_end..table_end + 4].copy_from_slice(&99u32.to_le_bytes());
         cases.push(long);
         for case in cases {
-            let got = unpack_full(&case);
-            assert_eq!(got.component, case.as_slice(), "{case:?}");
-            assert!(got.controller.is_none() && got.pending.is_empty());
+            assert!(unpack_full(&case).is_err(), "{case:?}");
         }
         assert_eq!(good[header - 1], STATE_VERSION_PENDING);
+        assert_eq!(
+            unpack_full(&good[..header + 2]),
+            Err(StateFrameError::Truncated {
+                format: "VST3",
+                field: "pending count"
+            })
+        );
     }
 
     /// A million duplicates, and ids the plugin does not list, come out as one

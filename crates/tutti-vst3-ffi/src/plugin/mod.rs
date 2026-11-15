@@ -32,6 +32,7 @@ use vst3::{ComPtr, ComWrapper};
 
 use tutti_plugin_types::{
     ContentScale, EditorCapabilities, MainThreadMarker, MainWorkHandle, ParamId, WindowHandle,
+    write_utf16_str,
 };
 use tutti_types::ChannelLayout;
 
@@ -39,7 +40,7 @@ use crate::audio::{Arrangement, AudioSide, Setup, Shared};
 use crate::com::{BStream, ComponentHandler, HostApplication, HostPlugFrame};
 use crate::error::{Vst3Error, check, is_ok};
 use crate::module::{CreateError, Module};
-use crate::sdk::{sdk_enum_i32, utf16_to_string, zeroed};
+use crate::sdk::{sdk_enum_i32, utf16_to_string, write_char8, zeroed};
 use crate::types::{
     BusInfo, K_SAMPLE_64_INT, Vst3KeyswitchInfo, Vst3NoteExpressionInfo, Vst3ParameterInfo,
     Vst3ProgramListInfo, Vst3UnitInfo,
@@ -461,8 +462,6 @@ mod lifecycle;
 
 #[cfg(test)]
 use component::state_ok;
-#[cfg(test)]
-use controller::fill_char8_64;
 use lifecycle::query_controller;
 
 #[cfg(test)]
