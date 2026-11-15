@@ -153,11 +153,8 @@ fn a_gain_converts_to_and_from_an_amplitude() {
     assert_eq!(Gain(-2.0).to_amplitude(), None);
     assert_eq!(Gain(f32::NAN).to_amplitude(), None);
 
-    // -6 dB and its inversion share a level: the sign is the refusal's.
-    assert_eq!(
-        Gain(0.5).to_amplitude(),
-        Some(Amplitude(Gain(-0.5).get().abs()))
-    );
+    assert_eq!(Gain(0.5).to_amplitude(), Some(Amplitude(0.5)));
+    assert_eq!(Gain(-0.5).to_amplitude(), None);
     assert_eq!(
         Gain(1.0).to_amplitude().map(Amplitude::to_db),
         Some(Db::UNITY)

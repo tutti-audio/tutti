@@ -14,8 +14,8 @@ crate::ranged! {
     /// position far into a long buffer.
     ///
     /// **Range-checked**: [`new`](Self::new) refuses NaN, the infinities and
-    /// anything below zero (negative zero included), and so do `TryFrom<f64>` and serde. [`of`](Self::of)
-    /// is for a literal. [`clamped`](Self::clamped) is the one saturating
+    /// anything below zero (negative zero included), and so do `TryFrom<f64>`
+    /// and serde. [`of`](Self::of) is for a literal. [`clamped`](Self::clamped) is the one saturating
     /// constructor; [`Unit::from_raw`] is it too, since a parameter cell holds
     /// any float.
     ///
@@ -65,7 +65,8 @@ impl SampleSpan {
     /// The frames `time` occupies at `rate`, kept fractional; the inverse of
     /// [`to_seconds`](Self::to_seconds).
     ///
-    /// Negative zero is [`ZERO`](Self::ZERO). `None` for a negative or NaN time, and for a product past `f64::MAX`.
+    /// Negative zero is [`ZERO`](Self::ZERO). `None` for a negative or NaN
+    /// time, and for a product past `f64::MAX`.
     #[inline]
     #[must_use]
     pub fn from_seconds(time: Seconds, rate: impl Into<SampleRate>) -> Option<SampleSpan> {

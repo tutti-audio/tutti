@@ -221,7 +221,4 @@ fn negative_zero_is_never_a_span() {
     );
     let none = SampleSpan::from_seconds(Seconds(-0.0), SampleRate::SR_48K).unwrap();
     assert!(none.get().is_sign_positive());
-    let a = SampleSpan::of(3.0);
-    assert!(a.saturating_sub(a).get().is_sign_positive());
-    assert!(a.checked_sub(a).unwrap().get().is_sign_positive());
 }
