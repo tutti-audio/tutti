@@ -244,7 +244,7 @@ impl Par {
             inject_spans,
             has_inject: ClaimTable::new(units),
             has_due: ClaimTable::new(units),
-            outputs: ClaimTable::new(plan.global_outputs()),
+            outputs: ClaimTable::new(plan.rendered_outputs()),
             workers: (0..participants.max(1))
                 .map(|_| Worker {
                     held_audio: Held::new(held),

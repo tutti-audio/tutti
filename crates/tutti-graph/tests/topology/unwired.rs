@@ -497,3 +497,44 @@ fn a_tap_lane_on_a_lost_port_reads_silence() {
     assert_eq!(tap.pop_into(&mut buf).get(), 64);
     assert!(buf.chunks(2).all(|f| f[0] == 0.5 && f[1] == 0.0));
 }
+
+/// A narrower re-insert while a root crossfade is set drops the new spec's
+/// edges to the lost ports and nothing of the old root's bank: the bank is
+/// built from the committed wiring over the ports the units still have, so
+/// the lost output is absent from it and the surviving one is carried.
+#[test]
+fn a_narrower_reinsert_during_a_root_fade_prunes_the_spec_and_not_the_bank() {
+    let (mut ed, _exec) = rig();
+    ed.set_root_fade(Some(tutti_graph::Fade::new(
+        Samples(64),
+        tutti_graph::FadeLaw::EqualAmplitude,
+    )));
+    ed.spec_mut().root_id = ed.spec().root_id.next();
+    let placed = ed.insert(X, "ported", Unforkable(narrow()));
+    let lost = EdgeId {
+        sink: Sink::Output(1),
+        from: direct(X, 1),
+    };
+    assert!(placed.unwired.edges.contains(&lost));
+    assert_eq!(
+        placed
+            .unwired
+            .edges
+            .iter()
+            .filter(|e| matches!(e.sink, Sink::Output(_)))
+            .count(),
+        1,
+        "only the new root's own output edge: nothing of the bank is in the spec"
+    );
+    ed.commit().expect("commits with the bank");
+    let plan = ed.base().expect("sent");
+    assert!(
+        plan.root_bank().is_some(),
+        "the old root's surviving output is carried"
+    );
+    assert_eq!(
+        plan.rendered_outputs(),
+        4,
+        "two new channels and the old root's two, one of them silent"
+    );
+}

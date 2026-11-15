@@ -945,8 +945,7 @@ fn pop_planes_reads_whole_frames_and_keeps_the_lanes_level() {
 
 /// A wide `Const` node (key 1, two outputs of `value`) outside the outputs.
 fn wide(r: &mut Rig, value: f32, width: usize) {
-    let _ =
-        r.ed.insert(NodeKey(1), "const", Forkable(Kind::Const { value, width }));
+    r.ed.insert(NodeKey(1), "const", Forkable(Kind::Const { value, width }));
 }
 
 fn port(node: u64, port: u16) -> Source {

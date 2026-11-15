@@ -41,6 +41,21 @@ pub(crate) struct Inner {
     home: std::thread::ThreadId,
     /// Where a drop off that thread hands the disposal.
     work: MainWorkHandle,
+    /// A MIDI-output registration holds the unit
+    /// ([`install`](crate::install_midi_output) takes it, a withdrawal gives it
+    /// back): `kAudioUnitProperty_MIDIOutputCallback` cannot be read, so this is
+    /// how a second registration is refused.
+    midi_output: std::sync::atomic::AtomicBool,
+    /// The safe render calls of this crate in flight on the unit
+    /// ([`Unit::rendering`]): what a withdrawal checks, after its write, before
+    /// it frees what the AU's callback reads.
+    renders: tutti_rt::RenderCount,
+    /// Whether the unit is initialized: `AudioUnitInitialize` has succeeded and
+    /// `AudioUnitUninitialize` has not since. The lock is held across each of
+    /// those calls and across a withdrawal's free ([`Unit::while_uninitialized`]),
+    /// so no `initialize` overlaps the free; only control-side calls take it, the
+    /// render path never does.
+    initialized: std::sync::Mutex<bool>,
 }
 
 // SAFETY: the instance is an opaque handle into AudioToolbox. Nothing in Rust
@@ -125,13 +140,34 @@ impl Unit {
                 instance,
                 home: std::thread::current().id(),
                 work: work.clone(),
+                midi_output: std::sync::atomic::AtomicBool::new(false),
+                renders: tutti_rt::RenderCount::new(),
+                initialized: std::sync::Mutex::new(false),
             }),
             _not_sync: PhantomData,
         })
     }
 
+    /// Takes the unit's MIDI-output claim: `true` when it was free.
+    pub(crate) fn claim_midi_output(&self) -> bool {
+        !self
+            .inner
+            .midi_output
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
+    }
+
+    /// Gives the claim back.
+    pub(crate) fn release_midi_output(&self) {
+        self.inner
+            .midi_output
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+
     /// The raw `AudioUnit`, for a call this crate does not wrap. Using it is the
-    /// caller's `unsafe`, and it is valid only while a `Unit` clone lives.
+    /// caller's `unsafe`, and it is valid only while a `Unit` clone lives. A
+    /// render made through it is not counted: hold [`rendering`](Self::rendering)
+    /// across it, or keep it from overlapping
+    /// [`AuMidiOutput::withdraw`](crate::AuMidiOutput::withdraw).
     #[cfg(feature = "testing")]
     pub fn as_raw(&self) -> sys::AudioUnit {
         self.inner.instance
@@ -157,26 +193,87 @@ impl Unit {
 
     // ---- lifecycle ----
 
-    /// `AudioUnitInitialize`.
+    fn lifecycle(&self) -> std::sync::MutexGuard<'_, bool> {
+        self.inner
+            .initialized
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// `AudioUnitInitialize`. Serialized with every other lifecycle call and with
+    /// a withdrawal's free ([`while_uninitialized`](Self::while_uninitialized)).
     ///
     /// # Errors
-    /// The `OSStatus` of the call.
+    /// The `OSStatus` of the call. The unit is then taken to be uninitialized (a
+    /// refused `AudioUnitInitialize` leaves it so), which is what lets a
+    /// withdrawal free; an AU that took its callbacks before refusing would
+    /// break that, and none measured does.
     pub fn initialize(&self) -> std::result::Result<(), OsError> {
+        let mut initialized = self.lifecycle();
         // SAFETY: `raw()` is a live instance.
         check("AudioUnitInitialize", unsafe {
             sys::AudioUnitInitialize(self.raw())
-        })
+        })?;
+        *initialized = true;
+        Ok(())
     }
 
-    /// `AudioUnitUninitialize`.
+    /// `AudioUnitUninitialize`. Serialized as [`initialize`](Self::initialize) is.
+    ///
+    /// Must not overlap a render of the unit on any thread (a `Unit` clone may
+    /// be rendering): whether the AU waits for a render in flight is the AU's, and
+    /// nothing here orders the two. The host keeps the lifecycle calls on the
+    /// thread that renders, or between its blocks.
     ///
     /// # Errors
-    /// The `OSStatus` of the call.
+    /// The `OSStatus` of the call, which leaves the unit initialized.
     pub fn uninitialize(&self) -> std::result::Result<(), OsError> {
+        let mut initialized = self.lifecycle();
         // SAFETY: `raw()` is a live instance.
         check("AudioUnitUninitialize", unsafe {
             sys::AudioUnitUninitialize(self.raw())
-        })
+        })?;
+        *initialized = false;
+        Ok(())
+    }
+
+    /// Runs `f` while the unit is known uninitialized and no `initialize` can
+    /// begin: `None`, without running it, when the unit is initialized (or its
+    /// `AudioUnitUninitialize` failed). A unit that was never initialized is
+    /// uninitialized.
+    pub(crate) fn while_uninitialized<R>(&self, f: impl FnOnce() -> R) -> Option<R> {
+        let initialized = self.lifecycle();
+        if *initialized {
+            return None;
+        }
+        let result = f();
+        drop(initialized);
+        Some(result)
+    }
+
+    /// Counts a render of the unit as in flight until the guard drops. Every
+    /// call this crate makes that can run the unit's MIDI-output callback
+    /// (`AudioUnitRender`, `AudioUnitProcess`, `AudioUnitProcessMultiple`) holds
+    /// one across it. Two atomic operations and a fence
+    /// ([`RenderCount::enter`](tutti_rt::RenderCount::enter)): no lock, so the
+    /// render thread may call it. A guard that is leaked counts forever, so
+    /// [`AuMidiOutput::withdraw`](crate::AuMidiOutput::withdraw) on this unit
+    /// always refuses and leaves the callback's state allocated.
+    ///
+    /// A render made through the raw handle (`as_raw` (the `testing` feature),
+    /// [`RenderUnit::get`]) is not counted for its caller: it holds this guard
+    /// across the call, or it does not overlap
+    /// [`AuMidiOutput::withdraw`](crate::AuMidiOutput::withdraw), which frees the
+    /// state the unit's MIDI-output callback reads once the count shows no render.
+    pub fn rendering(&self) -> tutti_rt::RenderGuard<'_> {
+        self.inner.renders.enter()
+    }
+
+    /// Whether no render of this crate's is in flight on the unit, as of a
+    /// fence after the caller's last write to the unit
+    /// ([`RenderCount::quiescent`](tutti_rt::RenderCount::quiescent)).
+    pub(crate) fn no_render_in_flight(&self) -> bool {
+        self.inner.renders.quiescent()
     }
 
     /// `AudioUnitReset` on `scope` and `element`.
@@ -813,8 +910,18 @@ impl RenderUnit {
 
     /// The raw `AudioUnit`, valid while a `RenderUnit` or `Unit` lives, for a
     /// call this crate does not wrap (`AudioUnitRender` from a notify
-    /// callback, `schedule`). Using it is the caller's `unsafe`.
+    /// callback, `schedule`). Using it is the caller's `unsafe`, and a render
+    /// made through it is not counted: hold [`rendering`](Self::rendering)
+    /// across it, or keep it from overlapping
+    /// [`AuMidiOutput::withdraw`](crate::AuMidiOutput::withdraw), which frees the
+    /// MIDI-output callback's state once no counted render is in flight.
     pub fn get(&self) -> sys::AudioUnit {
         self.0.instance
+    }
+
+    /// Counts a render through [`get`](Self::get) in flight until the guard
+    /// drops: [`Unit::rendering`], for the thread that holds this handle.
+    pub fn rendering(&self) -> tutti_rt::RenderGuard<'_> {
+        self.0.renders.enter()
     }
 }

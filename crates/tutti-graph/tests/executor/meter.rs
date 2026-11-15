@@ -454,8 +454,7 @@ fn output_bits(workers: usize, master: bool, track: bool) -> Vec<u32> {
     let mut outputs = Vec::new();
     for (k, latency) in [30usize, 11, 0].into_iter().enumerate() {
         let (lag, gain) = (10 + k as u64, 20 + k as u64);
-        let _ =
-            r.ed.insert(NodeKey(lag), "lag", Forkable(Kind::Lag { latency }));
+        r.ed.insert(NodeKey(lag), "lag", Forkable(Kind::Lag { latency }));
         r.ed.insert(
             NodeKey(gain),
             "gain",
@@ -625,12 +624,9 @@ impl Node for Pulse {
 #[test]
 fn the_master_reads_at_the_outputs_time() {
     let mut r = rig(1, false);
-    let _ =
-        r.ed.insert(NodeKey(1), "pulse", Unforkable(Pulse { len: 50, done: 0 }));
-    let _ =
-        r.ed.insert(NodeKey(2), "pulse", Unforkable(Pulse { len: 50, done: 0 }));
-    let _ =
-        r.ed.insert(NodeKey(3), "lag", Forkable(Kind::Lag { latency: 30 }));
+    r.ed.insert(NodeKey(1), "pulse", Unforkable(Pulse { len: 50, done: 0 }));
+    r.ed.insert(NodeKey(2), "pulse", Unforkable(Pulse { len: 50, done: 0 }));
+    r.ed.insert(NodeKey(3), "lag", Forkable(Kind::Lag { latency: 30 }));
     r.ed.spec_mut().topology.edges.insert(
         InPort {
             node: NodeKey(3),
@@ -816,8 +812,7 @@ fn run(r: &mut Rig, blocks: usize) -> Vec<Vec<Level>> {
     let values: Vec<f32> = (0..6).map(|k| 0.1 + 0.13 * k as f32).collect();
     constants(r, &values);
     // A chain with latency so the compiler aligns the outputs.
-    let _ =
-        r.ed.insert(NodeKey(20), "lag", Forkable(Kind::Lag { latency: 7 }));
+    r.ed.insert(NodeKey(20), "lag", Forkable(Kind::Lag { latency: 7 }));
     r.ed.spec_mut().topology.edges.insert(
         InPort {
             node: NodeKey(20),

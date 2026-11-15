@@ -16,7 +16,7 @@ use tutti_nodes::testing::Const;
 use tutti_session::{
     BusSink, Edge, EventEdge, Feeder, InPort, OutPort, Root, Session, SessionEvent,
 };
-use tutti_types::{Amplitude, BusTopology, ChannelLayout, Seconds, Speaker};
+use tutti_types::{Amplitude, BusTopology, ChannelLayout, ChannelTopology, Seconds, Speaker};
 
 const BLOCK: usize = 64;
 /// The sources' levels, and the gain of the wire that survives.
@@ -272,7 +272,7 @@ fn a_feed_naming_a_lost_event_output_is_not_written_back() {
     );
 }
 
-/// A node with a main stereo bus, and with `aux` a mono aux bus, on each side.
+/// A node with a main stereo bus, and with `aux` a second stereo bus, on each side.
 #[derive(Clone)]
 struct Bused {
     aux: bool,
@@ -281,11 +281,10 @@ struct Bused {
 impl Node for Bused {
     fn shape(&self) -> Shape {
         let stereo = BusTopology::new([Speaker::FrontLeft, Speaker::FrontRight]).unwrap();
-        let mono = BusTopology::unassigned(ChannelLayout::MONO).unwrap();
         let side = |role| {
             let main = Buses::NONE.with(Bus::main(stereo)).unwrap();
             if self.aux {
-                main.with(Bus::new(mono, role)).unwrap()
+                main.with(Bus::new(stereo, role)).unwrap()
             } else {
                 main
             }
@@ -342,4 +341,38 @@ fn a_narrower_reinsert_reports_the_bus_edges_it_dropped() {
     for w in want.drain(..) {
         assert!(bus_edges.contains(&w), "{w:?} in {bus_edges:?}");
     }
+}
+
+/// **A root feed from a lost bus is reported as `(source, Root)`.**
+#[test]
+fn a_narrower_reinsert_reports_the_root_feed_it_dropped() {
+    let mut s = Session::builder().build().expect("builds");
+    let g = s.graph();
+    let (y, _) = g.add(ForkByClone(Bused { aux: true }));
+    s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::STEREO)))
+        .expect("stereo");
+    let g = s.graph();
+    g.connect(y.bus_out(0), Root).unwrap().hard();
+    g.connect(y.bus_out(1), Root).unwrap().hard();
+    let events = s.update();
+    assert!(!refused(&events), "{events:?}");
+
+    s.graph()
+        .replace(
+            y,
+            ForkByClone(Bused { aux: false }),
+            Seconds(0.0),
+            FadeLaw::EqualAmplitude,
+        )
+        .expect("the node is there");
+    let events = s.update();
+    assert!(!refused(&events), "{events:?}");
+    let reported: Vec<Vec<(BusSource, BusSink)>> = events
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::Unwired { bus_edges, .. } => Some(bus_edges.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reported, [vec![(y.bus_out(1), BusSink::Root)]]);
 }

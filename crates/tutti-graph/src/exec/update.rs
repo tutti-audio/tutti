@@ -6,7 +6,7 @@ use tutti_rt::RtScope;
 use super::commit::{Commit, Incoming, Relined, cut_fades, retire_fade, send_back};
 use super::stage::{RingFrom, Route, Staged, sort_by_offset};
 use super::state::{Gone, Inject, Ring, State, Unit};
-use super::{Executor, Suspension};
+use super::{Executor, RootFadeRun, Suspension};
 use crate::NodeKey;
 use crate::event::Event;
 use crate::gain::SumLane;
@@ -350,6 +350,12 @@ impl Executor {
             std::mem::swap(&mut self.parked, &mut c.parked);
         }
         c.staged = Some(st);
+        // A root crossfade starts with the plan that carries it; a plan that
+        // carries none (a later commit) ends one running.
+        self.root_fade = plan.root_bank().map(|_| RootFadeRun {
+            seq: c.seq,
+            done: 0,
+        });
         self.plan = Some(plan);
         c.plan = old_plan;
     }
@@ -373,9 +379,18 @@ impl Executor {
 
         // PDC rings and FIFOs: one moves in whole when its length stands, and
         // is copied into the ring built for its new length when it does not.
+        // A ring copied from one that another ring then takes: before it goes.
+        for (i, from) in st.rings.iter().enumerate() {
+            if let RingFrom::Copy { from } = *from
+                && let (Some(Ring::Audio(n)), Some(Some(Ring::Audio(o)))) =
+                    (new.rings[i].as_mut(), old.rings.get(from as usize))
+            {
+                n.transfer_from(o);
+            }
+        }
         for (i, from) in st.rings.iter().enumerate() {
             match *from {
-                RingFrom::New => {}
+                RingFrom::New | RingFrom::Copy { .. } => {}
                 RingFrom::Keep { from, rate } => {
                     let mut ring = old.rings.get_mut(from as usize).and_then(Option::take);
                     if let Some(Ring::Event(f)) = &mut ring {
@@ -398,7 +413,7 @@ impl Executor {
         }
         for (i, from) in st.event_fb.iter().enumerate() {
             match *from {
-                RingFrom::New => {}
+                RingFrom::New | RingFrom::Copy { .. } => {}
                 RingFrom::Keep { from, rate } => {
                     let mut fifo = old.event_fb.get_mut(from as usize).and_then(Option::take);
                     if let Some(f) = &mut fifo {

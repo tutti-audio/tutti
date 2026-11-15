@@ -56,6 +56,7 @@ use std::sync::Arc;
 use tutti_types::At;
 
 use crate::EdgeId;
+use crate::Fade;
 use crate::bus_edge::{BusError, BusFold, BusRef, BusSource, Lowering};
 use crate::command::{CommandId, ScheduleError, command_channel};
 use crate::compile::{CompileError, Shapes};
@@ -256,6 +257,21 @@ pub struct Editor {
     /// What the executor will hold once the commits sent are applied: the
     /// bounds each commit's state is built from.
     stager: Stager,
+    /// How a commit that changes the root's generation trades the old root
+    /// for the new ([`set_root_fade`](Self::set_root_fade)); `None` cuts.
+    root_fade: Option<Fade>,
+    /// The commit sent last that carries an old root's channels, until a
+    /// commit without them follows.
+    bank: Option<SentBank>,
+}
+
+/// A commit sent with an old root's channels beside the root's own.
+#[derive(Clone, Copy, Debug)]
+struct SentBank {
+    /// Its `seq`.
+    seq: u64,
+    /// Whether the executor has rendered its crossfade through.
+    ended: bool,
 }
 
 impl std::fmt::Debug for Editor {
@@ -330,6 +346,8 @@ impl Editor {
             cells: LiveCells::new(),
             revision: 0,
             stager,
+            root_fade: None,
+            bank: None,
         };
         (editor, Executor::new(prepare, cap, ends, command_rx))
     }
