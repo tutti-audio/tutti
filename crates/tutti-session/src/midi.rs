@@ -1141,9 +1141,7 @@ impl MidiState {
         let timing = self.output_timing();
         // Every open output is sent it; with none open it is counted dropped.
         #[cfg(feature = "midi-hardware")]
-        let devices = self
-            .ports
-            .route(&batch, &self.drops, timing.as_ref());
+        let devices = self.ports.route(&batch, &self.drops, timing.as_ref());
         #[cfg(not(feature = "midi-hardware"))]
         let devices = false;
         if self.out.is_some() || !devices {
@@ -1936,7 +1934,11 @@ impl Midi<'_> {
             .ok_or(MidiError::GroupNotHeard(group))?;
         self.graph
             .taps()
-            .open_event(EventOutPort::new(input, port), tutti_graph::TapAlign::Raw, capacity)
+            .open_event(
+                EventOutPort::new(input, port),
+                tutti_graph::TapAlign::Raw,
+                capacity,
+            )
             // The Group's port was just found on the input: a refusal is a port it lacks.
             .map_err(|_| MidiError::GroupNotHeard(group))
     }

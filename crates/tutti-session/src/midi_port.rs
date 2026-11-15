@@ -30,8 +30,8 @@ use tutti_ump::StreamConfig;
 use crate::midi::UmpOut;
 use crate::pool::{Declared, HandleError, Life, Load, LoadError, OpenCx, PoolEntry};
 use crate::{
-    EventInPort, EventOutPort, Feeder, MidiEvent, Peer, PeerError, Presence, Resource, ResourceFact,
-    ResourceId, Session, SessionEvent,
+    EventInPort, EventOutPort, Feeder, MidiEvent, Peer, PeerError, Presence, Resource,
+    ResourceFact, ResourceId, Session, SessionEvent,
 };
 
 // --- Vocabulary ---
@@ -450,7 +450,8 @@ impl Peer for MidiInput {
     }
 
     fn presence(&self) -> Presence<PortCause> {
-        self.life.presence(|| self.shared.read(|cell| cell.presence))
+        self.life
+            .presence(|| self.shared.read(|cell| cell.presence))
     }
 }
 
@@ -499,7 +500,8 @@ impl Peer for MidiOutput {
     }
 
     fn presence(&self) -> Presence<PortCause> {
-        self.life.presence(|| self.shared.read(|cell| cell.presence))
+        self.life
+            .presence(|| self.shared.read(|cell| cell.presence))
     }
 }
 
@@ -711,8 +713,7 @@ impl Ports {
             let Some(enabled) = peer.mpe_zones() else {
                 continue;
             };
-            let held: &mut Option<tutti_midi_protocol::MpeZones> =
-                &mut zones[peer.group().index()];
+            let held: &mut Option<tutti_midi_protocol::MpeZones> = &mut zones[peer.group().index()];
             *held = match *held {
                 None => Some(enabled),
                 // A zone that shares a Channel with one held is left out (M2-120
@@ -748,10 +749,8 @@ impl Ports {
             tutti_midi_hardware::Connected::Opened(inlet) => {
                 let key = graph.add_event_inlet(inlet).erase();
                 // The ingest node has the one event input.
-                let _ = graph.set_sources(
-                    EventInPort::new(port.node, 0),
-                    [EventOutPort::new(key, 0)],
-                );
+                let _ =
+                    graph.set_sources(EventInPort::new(port.node, 0), [EventOutPort::new(key, 0)]);
                 port.inlet = Some(key);
                 port.epochs.arrive(0);
                 port.open = Some(info.id.clone());
@@ -909,9 +908,7 @@ impl Ports {
         let mut edits = Edits::default();
         // The one matcher: only a device that is surely the saved one is bound
         // unasked.
-        let is_arrived = |io: &MidiSession, saved: &DeviceInfo| {
-            matches!(io.devices().resolve(saved), Resolved::Exact(found) if found.id == arrived.id)
-        };
+        let is_arrived = |io: &MidiSession, saved: &DeviceInfo| matches!(io.devices().resolve(saved), Resolved::Exact(found) if found.id == arrived.id);
         for at in 0..self.inputs.len() {
             let port = &self.inputs[at];
             if port.open.is_some() || !arrived.direction.is_input() || !is_arrived(io, &port.saved)
@@ -971,7 +968,9 @@ impl Ports {
                 // The peer or its input went since the call: the request has no
                 // end to report, and says so in the log.
                 let sent = match request {
-                    InputRequest::Profile(switch) => io.set_profile(switch).map_err(|e| e.to_string()),
+                    InputRequest::Profile(switch) => {
+                        io.set_profile(switch).map_err(|e| e.to_string())
+                    }
                     InputRequest::Report(ask) => io.report(ask).map_err(|e| e.to_string()),
                 };
                 if let Err(why) = sent {
@@ -1110,10 +1109,7 @@ impl crate::Midi<'_> {
         id: ResourceId,
         saved: DeviceInfo,
     ) -> Result<InputLoaded, MidiPortError> {
-        let io = self
-            .io
-            .as_deref_mut()
-            .ok_or(MidiPortError::NoHardware)?;
+        let io = self.io.as_deref_mut().ok_or(MidiPortError::NoHardware)?;
         // A present device is bound when it is surely the saved one, or the one
         // of its name; one of several that could be is for the app to choose.
         let found = match io.devices().resolve(&saved) {
@@ -1183,10 +1179,7 @@ impl crate::Midi<'_> {
         id: ResourceId,
         saved: DeviceInfo,
     ) -> Result<OutputLoaded, MidiPortError> {
-        let io = self
-            .io
-            .as_deref()
-            .ok_or(MidiPortError::NoHardware)?;
+        let io = self.io.as_deref().ok_or(MidiPortError::NoHardware)?;
         let found = match io.devices().resolve(&saved) {
             Resolved::Exact(info) | Resolved::SameName(info) => Some(info),
             Resolved::Ambiguous(candidates) => return Err(MidiPortError::Ambiguous(candidates)),
@@ -1201,9 +1194,9 @@ impl crate::Midi<'_> {
             None => None,
         };
         let rate = self.graph.prepared().sample_rate();
-        let (key, _) = self
-            .graph
-            .add(tutti_graph::ForkByClone(tutti_midi_runtime::MidiOutNode::new()));
+        let (key, _) = self.graph.add(tutti_graph::ForkByClone(
+            tutti_midi_runtime::MidiOutNode::new(),
+        ));
         let node = key.erase();
         if let Some(nodes) = self.nodes {
             // The session's own clock goes out through every output.

@@ -25,6 +25,7 @@ use tutti_session::{
     EventInPort, EventOutPort, Feeder, MIDI_OUT_DROP_REPORT, MidiError, MidiEvent, MidiRouteRule,
     NoSuchMidiRoute, PHASES, PhaseCx, RouteDeclarer, Session, SessionEvent, UmpOut,
 };
+use tutti_session::{Peer as _, Resource as _};
 use tutti_ump::{Message, Voice2};
 
 /// Every phase at `now`: one update, at a time the test picks.
@@ -739,7 +740,11 @@ fn two_devices_are_two_ports_and_one_leaving_takes_only_its_own() {
     let (mut s, fake, seen) = keyboards();
     let before = plan_nodes(&s);
     connect(&mut s, &["keys", "pads"]);
-    assert_eq!(plan_nodes(&s), before + 4, "an ingest node and an inlet each");
+    assert_eq!(
+        plan_nodes(&s),
+        before + 4,
+        "an ingest node and an inlet each"
+    );
     roll(&s, 1_024);
     assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), Instant::now()));
     assert!(fake.send_input(EndpointId::from_raw(2), key(0, 64), Instant::now()));
@@ -776,7 +781,9 @@ fn a_removed_port_ends_its_held_key_once() {
     assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), Instant::now()));
     roll(&s, 8_192);
     assert_eq!(note_ons(&seen).len(), 1);
-    s.pool(Vec::<tutti_session::Declared<&str, tutti_session::MidiInputEntry>>::new())
+    s.pool(Vec::<
+        tutti_session::Declared<&str, tutti_session::MidiInputEntry>,
+    >::new())
         .expect("declares nothing");
     let _ = s.update();
     roll(&s, 8_192);
@@ -1289,7 +1296,9 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     let [ListedProfile::Channel(c)] = listed.as_slice() else {
         panic!("one Profile on a Channel: {listed:?}");
     };
-    s.pool(Vec::<tutti_session::Declared<&str, tutti_session::MidiInputEntry>>::new())
+    s.pool(Vec::<
+        tutti_session::Declared<&str, tutti_session::MidiInputEntry>,
+    >::new())
         .expect("declares nothing");
     let _ = s.update();
     assert_eq!(port.presence(), tutti_session::Presence::Closed);
@@ -1489,11 +1498,12 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
         changes
     };
     let changes = run(&mut s, 60);
-    let (device, _) = changes
-        .iter()
-        .find(|(_, c)| matches!(c, ProfilesChange::Known))
-        .expect("the peer's Profiles are known");
-    let device = device.clone();
+    assert!(
+        changes
+            .iter()
+            .any(|(_, c)| matches!(c, ProfilesChange::Known)),
+        "the peer's Profiles are known"
+    );
     let all: Vec<_> = port.info().profiles()[0].listed().collect();
     let [ListedProfile::Channel(listed)] = all.as_slice() else {
         panic!("one Profile on a Channel: {all:?}");
@@ -1805,7 +1815,7 @@ fn declare_dev(s: &mut Session) {
         .expect("Dev is listed");
     s.pool((
         tutti_session::midi_input("dev", dev.clone()),
-        tutti_session::midi_output("dev", dev),
+        tutti_session::midi_output("dev out", dev),
     ))
     .expect("declares");
     let _ = s.update();
@@ -1828,7 +1838,7 @@ fn an_output_port_stamps_as_the_devices_configuration_says() {
     let _ = s.update();
     let raw = EndpointId::from_raw(7);
     declare_dev(&mut s);
-    let out = s.midi_output(&"dev").expect("loaded");
+    let out = s.midi_output(&"dev out").expect("loaded");
     s.midi_nodes().unwrap().clock_master.set_enabled(true);
 
     let start = settle(&mut s, &fake, raw);

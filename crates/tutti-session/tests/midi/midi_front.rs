@@ -460,7 +460,9 @@ mod hardware {
         assert!(s.graph_ref().contains(out.node()), "the output's node");
         assert_eq!(out.info().device(), &all[1]);
 
-        s.pool(Vec::<tutti_session::Declared<&str, tutti_session::MidiOutputEntry>>::new())
+        s.pool(Vec::<
+            tutti_session::Declared<&str, tutti_session::MidiOutputEntry>,
+        >::new())
             .expect("declares nothing");
         let _ = s.update();
         assert!(
@@ -507,8 +509,11 @@ mod hardware {
         let saved = |name: &str| all.iter().find(|d| d.name == name).cloned().unwrap();
         let (pad_out, keys) = (saved("Pad Out"), saved("Keys"));
 
-        s.pool((midi_output("pad out", pad_out.clone()), midi_input("keys", keys.clone())))
-            .expect("declares");
+        s.pool((
+            midi_output("pad out", pad_out.clone()),
+            midi_input("keys", keys.clone()),
+        ))
+        .expect("declares");
         let _ = s.update();
         assert_eq!(
             s.midi_output(&"pad out").unwrap().presence(),
@@ -525,7 +530,8 @@ mod hardware {
         // with one other present device, so it can no longer be told for sure.
         fake.unplug(EndpointId::from_raw(2));
         let _ = s.update();
-        s.pool(midi_output("again", pad_out.clone())).expect("declares");
+        s.pool(midi_output("again", pad_out.clone()))
+            .expect("declares");
         let _ = s.update();
         let Some(PoolState::Failed(LoadError::Midi(error))) = s.pool_state(&"again") else {
             panic!("ambiguous: {:?}", s.pool_state(&"again"));

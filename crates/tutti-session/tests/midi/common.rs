@@ -102,11 +102,8 @@ pub fn play(s: &Session) {
 #[cfg(feature = "midi-hardware")]
 pub fn with_input(groups: Option<tutti_ump::MidiGroup>) -> (Session, NodeKey) {
     use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};
-    let (backend, _fake) = FakeBackend::build_with(
-        vec![persistent_endpoint(1, "Keys")],
-        vec![],
-        usize::MAX,
-    );
+    let (backend, _fake) =
+        FakeBackend::build_with(vec![persistent_endpoint(1, "Keys")], vec![], usize::MAX);
     let mut builder = Session::builder().midi_hardware_over(backend);
     if let Some(last) = groups {
         builder = builder.midi_groups(last);

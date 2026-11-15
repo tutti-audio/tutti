@@ -13,8 +13,8 @@ use tutti_midi_hardware::{DeviceInfo, EndpointId, PortDirection};
 use tutti_midi_runtime::MidiClipNode;
 use tutti_session::{
     Declared, EventInPort, HandleError, LoadError, MidiInputEntry, MidiPortError, MidiRouteRule,
-    Peer, PoolEvent, PoolState, PortCause, Presence, Resource, ResourceFact, Session,
-    SessionEvent, midi_input, midi_output,
+    Peer, PoolEvent, PoolState, PortCause, Presence, Resource, ResourceFact, Session, SessionEvent,
+    midi_input, midi_output,
 };
 use tutti_types::{Beat, BeatDuration, SampleRate};
 use tutti_ump::{KeyEvent, MidiChannel};
@@ -169,7 +169,11 @@ fn a_replug_goes_live_on_the_same_key_and_node() {
         changed(&events, port.id()).contains(&ResourceFact::Presence),
         "{events:?}"
     );
-    assert_eq!(port.presence(), Presence::Live, "the handle read before follows");
+    assert_eq!(
+        port.presence(),
+        Presence::Live,
+        "the handle read before follows"
+    );
     let again = s.midi_input(&"keys").expect("still loaded");
     assert_eq!(again.id(), port.id(), "the same port, not a new one");
     assert_eq!(again.node(), node, "wired to the same ingest node");
@@ -188,7 +192,11 @@ fn a_returning_device_known_only_by_name_stays_lost() {
     declare(&mut s, &[("keys", &keys)], &[]);
     let _ = s.update();
     let port = s.midi_input(&"keys").expect("loaded");
-    assert_eq!(port.presence(), Presence::Live, "the only one of its name is bound at load");
+    assert_eq!(
+        port.presence(),
+        Presence::Live,
+        "the only one of its name is bound at load"
+    );
 
     unplug(&fake, 1);
     let _ = s.update();
@@ -330,7 +338,11 @@ fn held_notes_are_released_when_the_port_is_removed() {
         .expect("declares nothing");
     let _ = s.update();
     blocks(&s, 2);
-    assert_eq!(note_offs(&seen), [60], "the port's removal released the key");
+    assert_eq!(
+        note_offs(&seen),
+        [60],
+        "the port's removal released the key"
+    );
     let _ = s.update();
     assert!(!s.graph_ref().contains(node), "and the node went after");
 }
@@ -392,7 +404,11 @@ fn every_input_port_has_its_own_ingest_node() {
     let nodes: BTreeSet<NodeKey> = ports.iter().map(|p| p.node()).collect();
     assert_eq!(nodes.len(), 10, "one node each");
     for n in 0..10u64 {
-        assert!(fake.send_input(EndpointId::from_raw(n + 1), key(0, 40 + n as u8), Instant::now()));
+        assert!(fake.send_input(
+            EndpointId::from_raw(n + 1),
+            key(0, 40 + n as u8),
+            Instant::now()
+        ));
     }
     roll(&s, 8_192);
     let mut heard = note_ons(&seen);
@@ -475,9 +491,12 @@ fn an_output_port_sends_what_its_node_is_fed_to_the_device() {
     let out = s.midi_output(&"synth").expect("loaded");
     assert_eq!(out.presence(), Presence::Live);
 
-    let (clip, _) = s
-        .graph()
-        .add(MidiClipNode::new(note(60, MF, Beat(0.0), BeatDuration(1.0))));
+    let (clip, _) = s.graph().add(MidiClipNode::new(note(
+        60,
+        MF,
+        Beat(0.0),
+        BeatDuration(1.0),
+    )));
     s.graph()
         .set_sources(EventInPort::new(out.node(), 0), [clip.events_out()])
         .expect("the port's node takes events");
@@ -520,7 +539,10 @@ fn an_output_port_follows_its_device_through_an_unplug() {
     let before = s.midi().out_drops();
     blocks(&s, 8);
     let _ = s.update();
-    assert!(s.midi().out_drops() > before, "events with no device are dropped");
+    assert!(
+        s.midi().out_drops() > before,
+        "events with no device are dropped"
+    );
 
     plug(&fake, 10, "Synth", PortDirection::Output);
     let _ = s.update();
@@ -545,7 +567,10 @@ fn a_ports_id_names_it_in_the_events() {
     let (keys, pads) = (device(&mut s, "Keys"), device(&mut s, "Pads"));
     declare(&mut s, &[("keys", &keys), ("pads", &pads)], &[]);
     let _ = s.update();
-    let (a, b) = (s.midi_input(&"keys").unwrap(), s.midi_input(&"pads").unwrap());
+    let (a, b) = (
+        s.midi_input(&"keys").unwrap(),
+        s.midi_input(&"pads").unwrap(),
+    );
     assert_ne!(a.id(), b.id());
     unplug(&fake, 1);
     let events = s.update();
