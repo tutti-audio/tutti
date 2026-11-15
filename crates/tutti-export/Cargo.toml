@@ -48,7 +48,7 @@ tempfile = "3.10"
 approx = "0.5"
 # The packets a test stimulus emits (`Event::midi` takes an `Ump`).
 tutti-ump = { path = "../tutti-ump", default-features = false }
-# `Fnv`, the digest of the golden tests.
+# `signal::sine`, the stimulus of the normalize tests.
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 # The tempo map an offline timeline runs on.
 tutti-tempo = { path = "../tutti-tempo" }

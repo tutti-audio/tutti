@@ -2,9 +2,8 @@
 //! cdylibs and the `plugin-server` and `plugin-probe` binaries;
 //! [`check_range_contract`] and [`check_range_serde`], the checks a range-checked
 //! type keeps its contract and its serde form by, and [`check_round_trip`], a
-//! value's JSON spelling pinned both ways; [`Fnv`], [`digest()`] and [`noise`], what a digest test is made of, and [`assert_golden`],
-//! the gate that pins a digest where its libm was recorded; and
-//! [`sf2`], a SoundFont built in memory.
+//! value's JSON spelling pinned both ways; [`noise`], a seeded stimulus, and
+//! [`Fnv`], a bit hash; and [`sf2`], a SoundFont built in memory.
 //!
 //! A test finds a repo file through [`repo_root`] and [`asset`], never through
 //! a relative `..` path, so moving a crate never changes what a test reads.
@@ -35,8 +34,9 @@
 //! test result.
 
 // Test-only `unsafe` the suites need lives here, each behind a safe call with
-// its argument at the site (`ScopedEnv`, `StandInWindow`, the glibc read);
-// `deny` so every site is a named `allow`. A reference plugin's probe symbols
+// its argument at the site (`ScopedEnv`, `StandInWindow`, the counting
+// allocator, the main-thread and AU helpers); `deny` so each site carries its
+// own named `allow`. A reference plugin's probe symbols
 // are its own crate's (`tutti_clap_test_plugin::ClapProbe`,
 // `tutti_vst2_test_plugin::Vst2Probe`): depending on a plugin here would link
 // its entry point into every suite.
@@ -47,8 +47,6 @@ mod alloc_count;
 mod au;
 mod digest;
 mod env;
-mod glibc;
-mod golden;
 mod machine_lock;
 mod main_thread;
 pub mod midi;
@@ -64,9 +62,8 @@ mod vst3_cpp;
 pub use alloc_count::{ThreadCounting, allocations};
 #[cfg(all(feature = "au", target_os = "macos"))]
 pub use au::{au_bundle, element_name_retain_count};
-pub use digest::{Fnv, Noise, digest, digest_planes, noise};
+pub use digest::{Fnv, Noise, noise};
 pub use env::{ScopedEnv, cases};
-pub use golden::{RECORDED_ARCH, RECORDED_GLIBC, assert_golden};
 pub use machine_lock::{MachineLock, machine_lock};
 pub use main_thread::{main_thread, main_thread_cases};
 #[cfg(feature = "plugin")]
