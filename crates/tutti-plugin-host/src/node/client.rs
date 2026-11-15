@@ -130,6 +130,11 @@ pub struct InProcClient<F: Loaded> {
     /// main thread), so it is at a rate other than the node's: the node renders
     /// silence until a `prepare` on the main thread tells it.
     pub(super) rate_refused: bool,
+    /// The render mode the last `prepare` carried (realtime before one): a
+    /// `prepare` tells the plugin its mode only when the one it carries
+    /// changed, so a re-prepare at the same mode leaves what the session
+    /// announced since.
+    prepared_mode: tutti_graph::RenderMode,
     /// The parameter events on the event input, as changes only: a slot per
     /// parameter the plugin declared at load and no spares (`closed`: the
     /// node addresses only its declared parameters), the value last
@@ -488,6 +493,7 @@ impl<F: Loaded> InProcClient<F> {
             failed: Arc::default(),
             rate_delivery: RateDelivery::Parked,
             rate_refused: false,
+            prepared_mode: tutti_graph::RenderMode::Realtime,
             params,
             segments,
             phase: Samples(0),
@@ -612,6 +618,37 @@ impl<F: Loaded> InProcClient<F> {
         self.rate_refused = false;
         self.inner.lock().retuned(rate);
         true
+    }
+
+    /// Tells the plugin the render mode `p` carries when it is not the mode
+    /// the plugin runs in and not the one the last `prepare` carried. What the
+    /// node's `prepare` does with its mode; main thread only, as a mode change
+    /// is a main-thread call on every format.
+    pub(super) fn set_render_mode_from(&mut self, p: &tutti_graph::Prepare) {
+        let mode = p.render_mode();
+        // Temporary: the guard keeps a mode the handle or `Phase::RenderMode`
+        // set from being undone by a re-prepare at the same mode, and from
+        // being undone by a first prepare in realtime (`prepared_mode` starts
+        // there). So a plugin set offline on its handle stays offline through
+        // a realtime prepare until a prepare carries a change. When `Prepare`
+        // is the only source of a plugin's mode, it goes.
+        if self.prepared_mode == mode {
+            return;
+        }
+        let mut inner = self.inner.lock();
+        if inner.render_mode() != mode {
+            // The node is out of any executor (`Node::prepare`'s contract), so
+            // its realtime end is here: the exchange finishes in this call.
+            let Some(main) = MainThreadMarker::new() else {
+                // Not recorded, so the next prepare on the main thread tells it.
+                tracing::error!(
+                    "a plugin was prepared off the main thread in {mode:?}; it keeps its render mode until a prepare on the main thread"
+                );
+                return;
+            };
+            inner.set_render_mode(main, mode, Some(&mut self.rt));
+        }
+        self.prepared_mode = mode;
     }
 
     /// Take `sample_rate` as the rate blocks run at, and hand it to the

@@ -3,6 +3,7 @@ use crate::VoiceWindow;
 use crate::streamer::{RegionBuffer, StreamId};
 use crate::testing::{MockTransport, block, play};
 use std::path::PathBuf;
+use tutti_graph::RenderMode;
 use tutti_graph::contract::Direct;
 use tutti_types::MaxBlock;
 use tutti_types::{Beat, BeatDuration, Bpm, Samples};
@@ -172,7 +173,7 @@ fn placement_gate_applies_src_ratio_exactly_once() {
 
     // Two seconds in at 120 BPM = beat 4.0.
     transport.set_beat(Beat::new(4.0));
-    reader.set_render_rate(SampleRate::SR_44K1);
+    reader.set_render(SampleRate::SR_44K1, RenderMode::Realtime);
     under(&mut reader, &transport, SR, 1);
     let offset = ring.play() as f64;
 
@@ -252,7 +253,7 @@ fn a_fork_closes_its_file_once_past_its_window() {
 
     let render = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut copy = voice.fork_copy();
-    copy.set_render_rate(SampleRate::SR_48K);
+    copy.set_render(SampleRate::SR_48K, RenderMode::Offline);
     let is_open = |copy: &DiskVoice| {
         copy.offline
             .as_ref()
@@ -269,6 +270,58 @@ fn a_fork_closes_its_file_once_past_its_window() {
         }
     }
     assert!(!is_open(&copy), "the file is still open past the window");
+}
+
+/// A fork prepared for a realtime render renders silence and latches a fault
+/// without allocating, rather than block the audio thread on its file read; prepared offline, the
+/// same fork plays the file.
+#[test]
+fn a_fork_prepared_realtime_latches_instead_of_reading_its_file() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("ramp.wav");
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: 48_000,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut w = hound::WavWriter::create(&path, spec).expect("writes");
+    for i in 0..20_000 {
+        w.write_sample((i + 1) as f32 * 1e-5).expect("writes");
+        w.write_sample((i + 1) as f32 * 1e-5).expect("writes");
+    }
+    w.finalize().expect("writes");
+    let mut streamer =
+        crate::DiskStreamer::manual(SampleRate::SR_48K, Default::default()).expect("builds");
+    let opening = streamer.open(&path, crate::Placement::HEAD);
+    let (_stream, reader) = crate::testing::settle(&mut streamer, opening).expect("the file opens");
+    let voice = crate::DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
+    let clock = MockTransport::rolling(Beat::new(0.25), Bpm::of(120.0));
+
+    let mut offline = voice.fork_copy();
+    offline.set_render(SampleRate::SR_48K, RenderMode::Offline);
+    assert!(
+        under(&mut offline, &clock, 48_000.0, 64)[0]
+            .iter()
+            .all(|&s| s != 0.0)
+    );
+    assert!(offline.fault().expect("a fork").fault().is_none());
+
+    // Prepared realtime by `Direct`: the audio thread finds the fault, so it
+    // is latched without allocating.
+    let mut realtime = Direct::new(voice.fork_copy(), SampleRate::SR_48K, 64);
+    let health = realtime.node.fault().expect("a fork");
+    assert!(health.fault().is_none());
+    assert_no_alloc::assert_no_alloc(|| {
+        realtime.block_in(&clock.env(64, SampleRate::SR_48K));
+    });
+    assert!(
+        realtime
+            .outputs_mut()
+            .iter()
+            .all(|c| c.iter().all(|&s| s == 0.0))
+    );
+    assert!(health.fault().is_some());
 }
 
 /// A stopped clock silences a fork mid-clip, in a 64-frame block and
@@ -300,7 +353,7 @@ fn a_stopped_clock_silences_a_fork() {
 
     for single in [false, true] {
         let mut copy = voice.fork_copy();
-        copy.set_render_rate(SampleRate::SR_48K);
+        copy.set_render(SampleRate::SR_48K, RenderMode::Offline);
         let clock = MockTransport::rolling(Beat::new(0.25), Bpm::of(120.0));
         let blk = |copy: &mut DiskVoice| -> Vec<f32> {
             if single {
@@ -1561,7 +1614,7 @@ fn streamer_fed(script: &Script, no_skip: bool) -> (Vec<Vec<u32>>, u64, usize) {
         }
     }
     let mut voice = crate::DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
-    voice.set_render_rate(SampleRate::of(SR));
+    voice.set_render(SampleRate::of(SR), RenderMode::Realtime);
     let mut scratch = crate::lanes::BlockScratch::new(BLOCK, 1);
     let mut clock = crate::voice::clock::Clock::new();
     let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));

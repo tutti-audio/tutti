@@ -387,11 +387,17 @@ impl Editor {
             .map_or(Ok(()), |shape| Pass::of(shape).map(drop))
     }
 
+    /// Whether `key`'s shape declares its own bypass
+    /// ([`Shape::with_own_bypass`](crate::Shape::with_own_bypass)).
+    fn bypasses_itself(&self, key: NodeKey) -> bool {
+        self.shapes.get(&key).is_some_and(|shape| shape.own_bypass)
+    }
+
     /// Refuses a spec that would hear a node's pass where it has none: a
     /// bypass, a mix short of [`Mix::WET`], or a lane on the mix.
     pub(super) fn check_passes(&self) -> Result<(), CommitError> {
         let heard = |key: NodeKey| {
-            self.spec.mode(key) == NodeMode::Bypassed
+            (self.spec.mode(key) == NodeMode::Bypassed && !self.bypasses_itself(key))
                 || self.spec.mix(key) != Mix::WET
                 || self
                     .spec
@@ -438,6 +444,7 @@ impl Editor {
             return Err(ModeError::NoSuchNode { node: key });
         }
         if mode == NodeMode::Bypassed
+            && !self.bypasses_itself(key)
             && let Err(error) = self.check_pass(key)
         {
             return Err(ModeError::Unplaced { node: key, error });

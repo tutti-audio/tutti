@@ -31,6 +31,7 @@ use crate::history::TransportHistory;
 use crate::io::Io;
 use crate::param::ParamPorts;
 use crate::play::PlayClock;
+use crate::render_mode::RenderMode;
 use crate::time::Offset;
 use crate::wake::Wake;
 use tutti_types::PlayReading;
@@ -164,6 +165,11 @@ pub struct Shape {
     /// [`with_chase`](Self::with_chase)). `None`: the node carries no state
     /// across a swap, and the executor sizes nothing for it.
     pub chase: Option<NonZeroU32>,
+    /// Whether the node bypasses itself: the executor neither blends nor
+    /// parks it in [`NodeMode::Bypassed`](crate::NodeMode::Bypassed), and it
+    /// needs no pass to be bypassed. `false` unless set with
+    /// [`with_own_bypass`](Self::with_own_bypass).
+    pub own_bypass: bool,
 }
 
 /// Where a node writes its state for its successor ([`Node::chase`]): a
@@ -301,6 +307,7 @@ impl Shape {
             cost: Cost::Heavy,
             note_events: true,
             chase: None,
+            own_bypass: false,
         }
     }
 
@@ -632,6 +639,31 @@ impl Shape {
         self
     }
 
+    /// This shape, declaring that the node handles
+    /// [`NodeMode::Bypassed`](crate::NodeMode::Bypassed) itself, as a plugin
+    /// with a native bypass parameter does.
+    ///
+    /// The executor then neither blends nor parks the node when its mode is
+    /// `Bypassed`: it is called every block as in `Active`, with no crossfade
+    /// and no reset when it leaves the mode, and its latency and tail stay what
+    /// it reports, so compensation does not move. What it does with its input,
+    /// its tail and its dry path is the node's, and the executor tells it
+    /// nothing: the mode is [`Editor::mode`](crate::Editor::mode), on the
+    /// control side, not on the audio thread. A node with no pass can be set `Bypassed`.
+    /// [`Muted`](crate::NodeMode::Muted) and a [`Mix`](tutti_types::Mix) stay
+    /// the executor's.
+    ///
+    /// ```
+    /// use tutti_graph::Shape;
+    /// assert!(Shape::EMPTY.with_own_bypass().own_bypass);
+    /// assert!(!Shape::EMPTY.own_bypass);
+    /// ```
+    #[must_use]
+    pub const fn with_own_bypass(mut self) -> Self {
+        self.own_bypass = true;
+        self
+    }
+
     /// This shape, declaring that its event outputs never carry a note or a
     /// sustain pedal (a clock, a segment stream), so the executor keeps no
     /// held-key table for them. A node that then writes one trips a debug
@@ -689,6 +721,7 @@ pub struct Prepare {
     sample_rate: SampleRate,
     max_block: MaxBlock,
     quantum: Option<MaxBlock>,
+    render_mode: RenderMode,
 }
 
 impl Prepare {
@@ -699,7 +732,22 @@ impl Prepare {
             sample_rate,
             max_block,
             quantum: None,
+            render_mode: RenderMode::Realtime,
         }
+    }
+
+    /// This prepare, under `mode`: whether blocks arrive under realtime
+    /// pressure. Realtime unless set.
+    #[must_use]
+    pub const fn with_render_mode(mut self, mode: RenderMode) -> Self {
+        self.render_mode = mode;
+        self
+    }
+
+    /// Whether blocks arrive under realtime pressure, fixed until the next
+    /// prepare (never per block). See [`RenderMode`].
+    pub const fn render_mode(&self) -> RenderMode {
+        self.render_mode
     }
 
     /// This prepare, for a host whose device calls back with `quantum`
