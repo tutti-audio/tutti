@@ -1234,9 +1234,9 @@ impl MidiState {
 
 tutti_types::id! {
     /// A file load a [`Midi`] started, named so the event that lands it can be
-    /// matched to the call: [`Midi::load_file`] and `Midi::load_soundfont`
-    /// return one, and [`MidiEvent::FileLoaded`] and
-    /// `SoundFontLoaded` carry it. The session mints it; it names nothing else.
+    /// matched to the call: [`Midi::load_file`] returns one, and
+    /// [`MidiEvent::FileLoaded`] carries it. The session mints it; it names
+    /// nothing else.
     pub struct MidiLoad;
 }
 
@@ -1370,40 +1370,6 @@ impl Midi<'_> {
                     Err(failed) => Err(failed.into()),
                 };
                 events.push(MidiEvent::FileLoaded { load, file }.into());
-            },
-        );
-        load
-    }
-
-    /// Opens the SoundFont at `path` and builds a unit from it with
-    /// `settings`, on the session's spawner. Returns at once; the result
-    /// lands as [`MidiEvent::SoundFontLoaded`] with the returned id in a later
-    /// [`Session::update`](crate::Session::update), on the thread that calls
-    /// `update()`. The host adds the unit (`add_instrument`,
-    /// `add_general_midi`) when it lands.
-    #[must_use = "the id matches the event that lands the load"]
-    #[cfg(feature = "soundfont")]
-    pub fn load_soundfont(
-        &mut self,
-        path: impl Into<std::path::PathBuf>,
-        settings: tutti_soundfont::Settings,
-    ) -> MidiLoad {
-        let load = self.next_load();
-        let path = path.into();
-        self.jobs.submit(
-            move || -> Result<Box<tutti_soundfont::SoundFontUnit>> {
-                let font = tutti_sf2::SoundFont::open(path)?;
-                Ok(Box::new(tutti_soundfont::SoundFontUnit::new(
-                    std::sync::Arc::new(font),
-                    settings,
-                )?))
-            },
-            move |_, done, events| {
-                let unit = match done {
-                    Ok(built) => built,
-                    Err(failed) => Err(failed.into()),
-                };
-                events.push(MidiEvent::SoundFontLoaded { load, unit }.into());
             },
         );
         load
