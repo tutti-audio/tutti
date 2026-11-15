@@ -318,8 +318,9 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "public-api",
         "<crate> [<base>]",
-        "a crate's public API on the docs nightly, or its diff from <base> to HEAD \
-         (needs cargo-public-api; checks <base> out in place, so commit first)",
+        "a crate's public API with all its features on the docs nightly, or its diff from <base> \
+         to HEAD (needs cargo-public-api; the diff checks each commit out in place, refuses a \
+         dirty tree and restores the checkout)",
     ),
     (
         "book",
@@ -666,7 +667,10 @@ impl Planner<'_> {
                             .to_owned(),
                     );
                 }
-                let list = format!("cargo +{DOCS_NIGHTLY} public-api --package {krate} -ss");
+                // `-s` omits blanket impls only: a lost auto-trait impl is a break.
+                let list = format!(
+                    "cargo +{DOCS_NIGHTLY} public-api --package {krate} --all-features -s"
+                );
                 if base.is_empty() {
                     self.lines(&[list]);
                 } else {

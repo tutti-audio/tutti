@@ -427,17 +427,25 @@ fn check_no_std_builds_each_listed_crate_for_the_bare_metal_target() {
 fn public_api_lists_on_the_docs_nightly_or_diffs_from_a_base() {
     assert_eq!(
         dry("public-api", &["tutti-rt"]),
-        ["cargo +nightly-2026-10-14 public-api --package tutti-rt -ss"]
+        ["cargo +nightly-2026-10-14 public-api --package tutti-rt --all-features -s"]
     );
     assert_eq!(
         dry("public-api", &["tutti-rt", "origin/main"]),
-        ["cargo +nightly-2026-10-14 public-api --package tutti-rt -ss diff origin/main..HEAD"]
+        [
+            "cargo +nightly-2026-10-14 public-api --package tutti-rt --all-features -s diff origin/main..HEAD"
+        ]
     );
 }
 
 #[test]
 fn public_api_refuses_no_crate_and_a_third_argument() {
-    assert!(plan("public-api", &[], &ctx()).is_err());
+    assert_eq!(
+        plan("public-api", &[], &ctx()).unwrap_err(),
+        "`public-api` takes a crate: `cargo xtask public-api <crate> [<base>]`"
+    );
     let three: Vec<String> = ["a", "b", "c"].iter().map(|s| (*s).to_owned()).collect();
-    assert!(plan("public-api", &three, &ctx()).is_err());
+    assert_eq!(
+        plan("public-api", &three, &ctx()).unwrap_err(),
+        "`public-api` takes at most 2 argument(s), got 3"
+    );
 }
