@@ -12,10 +12,18 @@ slow-timeout = { period = "30s", terminate-after = 2 }
 # ENOMEM). At most four of these tests run at once in a copy.
 [test-groups]
 sequencer = { max-threads = 4 }
+gs-synth = { max-threads = 1 }
 
 [[profile.default.overrides]]
 filter = 'package(tutti-midi-hardware) and test(/backend::alsa::tests::/)'
 test-group = 'sequencer'
+
+# Windows' GS Wavetable Synth takes one client at a time: a second
+# `midiOutOpen` while another test binary holds it fails (`MMSYSERR_ERROR`).
+# The synth tests of every crate run one at a time.
+[[profile.default.overrides]]
+filter = 'test(/^gs_synth::/)'
+test-group = 'gs-synth'
 
 # `cargo xtask conformance` joins each test's result to the spec rows it tags.
 # CI runs the plugin test tiers with this profile and uploads the file per OS.
