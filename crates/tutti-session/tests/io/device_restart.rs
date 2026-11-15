@@ -129,7 +129,8 @@ fn a_restart_at_a_new_rate_re_rates_the_graph_and_everything_on_it() {
     assert_eq!(s.latency(), old_latency, "the 44.1 kHz figure is published");
 
     let (driver, new) = ManualStreamDriver::new();
-    s.restart_on(spec_at(NEW), driver, None).expect("restarts");
+    s.restart_on(spec_at(NEW), driver, None, None)
+        .expect("restarts");
     assert!(!old.is_open() && new.is_open(), "on the new device");
     assert_eq!(
         s.graph_ref().testing().prepared().sample_rate(),
@@ -209,7 +210,12 @@ fn a_restart_past_the_block_capacity_is_refused_and_keeps_playing() {
     let (mut s, old, _, _) = engine();
     let (driver, new) = ManualStreamDriver::new();
     let err = s
-        .restart_on(spec_at(NEW), driver, Some(MaxBlock::of(Samples(16_384))))
+        .restart_on(
+            spec_at(NEW),
+            driver,
+            Some(MaxBlock::of(Samples(16_384))),
+            None,
+        )
         .expect_err("past the capacity");
     assert!(
         matches!(
@@ -233,6 +239,7 @@ fn a_restart_past_the_block_capacity_is_refused_and_keeps_playing() {
         spec_with(NEW, 6),
         driver,
         Some(MaxBlock::of(Samples(2_048))),
+        None,
     )
     .expect("at a block the engine holds");
     assert!(new.is_open());
@@ -252,7 +259,7 @@ fn a_restart_onto_a_wider_device_widens_the_root() {
     assert_eq!(s.graph_ref().outputs(), 2);
 
     let (driver, surround) = ManualStreamDriver::new();
-    s.restart_on(spec_with(NEW, 6), driver, None)
+    s.restart_on(spec_with(NEW, 6), driver, None, None)
         .expect("restarts");
     assert_eq!(
         s.graph_ref().outputs(),
@@ -272,7 +279,8 @@ fn a_restart_onto_a_wider_device_widens_the_root() {
     );
 
     let (driver, stereo) = ManualStreamDriver::new();
-    s.restart_on(spec_at(NEW), driver, None).expect("restarts");
+    s.restart_on(spec_at(NEW), driver, None, None)
+        .expect("restarts");
     assert_eq!(s.graph_ref().outputs(), 6);
     assert_eq!(s.device().spec().channels, ChannelLayout::STEREO);
     let out = play(&mut s, &stereo, 480, 20);
@@ -299,7 +307,7 @@ fn a_restart_after_a_failed_hook_recovers_on_the_old_device() {
         .set_sources(InPort::new(lim, 0), [OutPort::new(loop_back, 0)])
         .unwrap();
     let (driver, new) = ManualStreamDriver::new();
-    s.restart_on(spec_at(NEW), driver, None)
+    s.restart_on(spec_at(NEW), driver, None, None)
         .expect_err("the graph no longer compiles");
     assert!(!old.is_open() && !new.is_open(), "left stopped");
     assert_eq!(s.device().graph_rate(), SampleRate::of(OLD));
@@ -312,12 +320,46 @@ fn a_restart_after_a_failed_hook_recovers_on_the_old_device() {
     s.graph().remove(loop_back).unwrap();
     let _ = s.update();
     let (driver, back) = ManualStreamDriver::new();
-    s.restart_on(spec_at(OLD), driver, None).expect("recovers");
+    s.restart_on(spec_at(OLD), driver, None, None)
+        .expect("recovers");
     assert!(back.is_open());
     let out = play(&mut s, &back, 441, 20);
     assert!(
         (period(&out[4_410..]) - 44.1).abs() < 0.01,
         "plays again at 44.1 kHz"
+    );
+}
+
+/// **A restart the hook refuses moves nothing of the engine's placement**: the
+/// device the session reads is the old one, as it was stated, and the new
+/// device's statement was never taken, so the old device is as it was when the
+/// stream is restarted onto it.
+#[test]
+fn a_restart_the_hook_refuses_leaves_the_device_placement_as_it_was() {
+    use tutti_types::{Bed, Placement};
+    let (mut s, _old, _osc, lim) = engine();
+    let before = s.output_device().expect("an engine renders it");
+    assert_eq!(before.placement, Placement::Assumed);
+    let (loop_back, ()) = s.graph().add(ForkByClone(Through::mono()));
+    s.graph()
+        .set_sources(InPort::new(loop_back, 0), [OutPort::new(lim, 0)])
+        .unwrap();
+    s.graph()
+        .set_sources(InPort::new(lim, 0), [OutPort::new(loop_back, 0)])
+        .unwrap();
+    let (driver, _new) = ManualStreamDriver::new();
+    s.restart_on(
+        spec_with(NEW, 6),
+        driver,
+        None,
+        Some(Bed::Surround51.topology()),
+    )
+    .expect_err("the graph no longer compiles");
+    assert_eq!(s.output_device(), Some(before), "still the stereo device");
+    assert_eq!(
+        s.graph_ref().outputs(),
+        2,
+        "and the root was not widened for the refused device"
     );
 }
 
@@ -332,7 +374,8 @@ fn a_restart_after_a_failed_hook_recovers_on_the_old_device() {
 fn a_crossfade_after_the_restart_lands_at_once() {
     let (mut s, _old, osc, _) = engine();
     let (driver, new) = ManualStreamDriver::new();
-    s.restart_on(spec_at(NEW), driver, None).expect("restarts");
+    s.restart_on(spec_at(NEW), driver, None, None)
+        .expect("restarts");
     let landed = s
         .graph()
         .crossfade(

@@ -78,8 +78,8 @@
 //! aligns its source to the node's arrival as any param's, and counts it in the
 //! cycle check, the claims and the verifier like any read of the op. The mode
 //! state keeps the lane's state, a one-port [`ParamState`] built when a plan
-//! first drives the unit's mix (`ModeState::set_driven`, at apply: the only
-//! allocation) and kept for the unit's life.
+//! first drives the unit's mix (built on the control side with the commit and
+//! taken at apply, `ModeState::drive_with`) and kept for the unit's life.
 //!
 //! A driven unit never takes the plain op. Each block, before anything reads
 //! the mix, the lane runs the param port's step on its source's events
@@ -332,7 +332,7 @@ impl ModeCell {
     }
 
     /// The range cells, for a driven lane's state.
-    fn ranges(&self) -> Arc<ParamRanges> {
+    pub(crate) fn ranges(&self) -> Arc<ParamRanges> {
         Arc::clone(&self.range)
     }
 
@@ -645,7 +645,7 @@ pub(crate) struct ModeState {
     /// node is bypassed.
     held_in: Vec<Held>,
     /// The mix's driven lane: the param port's step over one port, built when
-    /// a plan first drives this unit's mix ([`set_driven`](Self::set_driven))
+    /// a plan first drives this unit's mix ([`drive_with`](Self::drive_with))
     /// and kept for the unit's life, so no commit frees one on the audio
     /// thread (an idle one costs `max_block` floats and no work).
     drive: Option<ParamState>,
@@ -707,25 +707,23 @@ impl ModeState {
         }
     }
 
-    /// Say whether the plan now applied drives this unit's mix, building the
-    /// lane's state the first time it does (sized to `max` frames: the only
-    /// allocation, at apply). A lane that is no longer driven keeps its state,
-    /// which fades to the base and then idles.
-    pub(crate) fn set_driven(&mut self, driven: bool, max: usize) {
-        if driven && self.drive.is_none() {
-            self.drive = Some(ParamState::lane(
-                max,
-                self.declick,
-                self.cell.ranges(),
-                self.ran,
-            ));
+    /// A plan drives this unit's mix: take `lane`, built on the control side
+    /// from [`ModeCell::ranges`], the first time it does, and keep it for the
+    /// unit's life. A lane that is no longer driven keeps its state,
+    /// which fades to the base and then idles. A `lane` the unit has no use
+    /// for goes to `spare`, to be freed on the control side. Allocates
+    /// nothing.
+    pub(crate) fn drive_with(&mut self, mut lane: ParamState, spare: &mut Vec<ParamState>) {
+        if self.drive.is_some() {
+            spare.push(lane);
+            return;
         }
-        debug_assert!(
-            self.drive
-                .as_ref()
-                .is_none_or(|d| d.fits(max, self.declick)),
-            "a kept unit's lane serves the executor's block"
-        );
+        if self.ran {
+            // A lane built for a unit that has run is a connection to a
+            // running port (it declicks), not a first block.
+            lane.resume();
+        }
+        self.drive = Some(lane);
     }
 
     /// The mix's lane for a block: the param port's step on the driving
@@ -1096,10 +1094,11 @@ mod tests {
             node: NodeKey(1),
             port: 0,
         };
-        let (_, mut state) = at(&shape(0), 1.0);
+        let (cell, mut state) = at(&shape(0), 1.0);
         assert!(state.is_plain(), "never driven");
 
-        state.set_driven(true, 64);
+        let lane = ParamState::lane(64, DECLICK_FRAMES, cell.ranges());
+        state.drive_with(lane, &mut Vec::new());
         state.snapshot();
         assert!(!state.is_plain(), "driven");
         state.drive_step(64, Some((from, &[])));
@@ -1107,7 +1106,6 @@ mod tests {
 
         // Let go of the source: its lane fades to the base, blended, for the
         // declick and the block that sees it done.
-        state.set_driven(false, 64);
         let fade = DECLICK_FRAMES.div_ceil(64) + 1;
         for block in 0..fade {
             state.snapshot();

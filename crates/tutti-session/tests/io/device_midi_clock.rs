@@ -103,7 +103,8 @@ fn a_restart_re_rates_the_midi_clock() {
     assert!((ticks(&before) - 918.75).abs() < 0.05, "{}", ticks(&before));
 
     let (driver, new) = ManualStreamDriver::new();
-    s.restart_on(spec_at(NEW), driver, None).expect("restarts");
+    s.restart_on(spec_at(NEW), driver, None, None)
+        .expect("restarts");
     assert_eq!(
         s.midi().hardware_out_rate(),
         Some(SampleRate::of(NEW)),

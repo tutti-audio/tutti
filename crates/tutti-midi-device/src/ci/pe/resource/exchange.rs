@@ -1015,6 +1015,24 @@ fn a_set_the_entry_does_not_allow_is_refused_before_it_is_sent() {
     assert_eq!(link.wire.len(), sent);
 }
 
+// M2-103 §11.5: only an Invalidate MUID ends a Subscription without a message, so a
+// peer served again (its Discovery repeated) keeps what it subscribed to and changes
+// only its Receivable Maximum SysEx Message Size.
+#[test]
+fn serving_a_peer_again_keeps_its_subscriptions() {
+    let mut link = Link::new(store(), 256);
+    let made = link.init.subscribe(&get(PeResource::ChannelList), link.now);
+    let _ = link.call(made);
+    let peer = Muid::of(OURS);
+    assert_eq!(link.resp.subscriptions().count(), 1);
+    link.resp.accept(peer, MaxSysexSize::of(512));
+    assert_eq!(link.resp.subscriptions().count(), 1);
+    assert!(link.resp.serves(peer));
+    link.resp.forget(peer);
+    assert_eq!(link.resp.subscriptions().count(), 0);
+    assert!(!link.resp.serves(peer));
+}
+
 // M2-103 §11.1, §11.4: Start Subscription gets a `subscribeId` from the Responder, the
 // Initiator has the data, and a `full` update replaces it.
 #[test]

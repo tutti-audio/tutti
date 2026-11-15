@@ -61,7 +61,7 @@ use crate::command::{CommandId, ScheduleError, command_channel};
 use crate::compile::{CompileError, Shapes};
 use crate::event::EventKind;
 use crate::event_tap::EventTapWriter;
-use crate::exec::{DEFAULT_EVENT_CAPACITY, Executor, channels};
+use crate::exec::{DEFAULT_EVENT_CAPACITY, Executor, Stager, channels};
 use crate::fork::{ForkHealth, ForkSource};
 use crate::gain::EdgeFade;
 use crate::meter::MeterWriter;
@@ -90,6 +90,14 @@ use link::Link;
 use outlets::Outlets;
 use placements::Placements;
 use tutti_types::{Amplitude, MAX_CHANNELS};
+
+/// The host's side of a root generation: whether it has published the folds
+/// for `root` at `outputs` channels ([`Editor::set_root_gate`]).
+pub trait RootGate: Send + Sync {
+    /// Whether a plan of generation `root` with `outputs` global outputs has
+    /// its folds. A graph with no outputs has nothing to fold.
+    fn published(&self, root: crate::RootId, outputs: usize) -> bool;
+}
 
 /// What the host that runs an [`Executor`] can take, enforced by its
 /// [`Editor`] on every later commit and re-prepare, so a graph the host
@@ -225,6 +233,9 @@ pub struct Editor {
     life: Lifecycle,
     /// What the executor's host can take.
     limits: Limits,
+    /// The host that folds the root into a device, once one is attached: a
+    /// commit whose root it has no folds for is refused.
+    root_gate: Option<std::sync::Arc<dyn RootGate>>,
     /// Events per event slot per block, as the executor was built with: a
     /// fork gets the same.
     event_capacity: usize,
@@ -240,6 +251,9 @@ pub struct Editor {
     /// [`revision`](Self::revision): moved by every call that can change
     /// what a reader of the editor sees.
     revision: u64,
+    /// What the executor will hold once the commits sent are applied: the
+    /// bounds each commit's state is built from.
+    stager: Stager,
 }
 
 impl std::fmt::Debug for Editor {
@@ -292,6 +306,11 @@ impl Editor {
     pub fn with_event_capacity(prepare: Prepare, cap: usize) -> (Self, Executor) {
         let (channels, ends) = channels();
         let (commands, command_rx) = command_channel();
+        let stager = Stager::new(
+            cap,
+            Arc::clone(&channels.pool),
+            Arc::clone(&channels.rendered),
+        );
         let editor = Self {
             link: Link::new(channels, commands),
             prepare,
@@ -303,10 +322,12 @@ impl Editor {
             meters: Outlets::new(),
             life: Lifecycle::Unplanned,
             limits: Limits::NONE,
+            root_gate: None,
             event_capacity: cap,
             fork_health: Vec::new(),
             cells: LiveCells::new(),
             revision: 0,
+            stager,
         };
         (editor, Executor::new(prepare, cap, ends, command_rx))
     }
@@ -354,6 +375,16 @@ impl Editor {
         limits.block(self.prepare.max_block().get())?;
         self.limits = limits;
         Ok(())
+    }
+
+    /// Attaches the host that folds the root into a device: from now on a
+    /// commit whose [`GraphSpec::root_id`] the gate has not published folds
+    /// for, at the spec's width, is refused
+    /// ([`CommitError::RootNotPublished`]), so a root id the host never heard
+    /// of cannot reach the executor and render silence. The gate stays; a
+    /// second call replaces it.
+    pub fn set_root_gate(&mut self, gate: std::sync::Arc<dyn RootGate>) {
+        self.root_gate = Some(gate);
     }
 
     /// What this editor was bounded to with [`set_limits`](Self::set_limits).

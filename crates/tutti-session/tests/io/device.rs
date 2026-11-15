@@ -135,7 +135,7 @@ fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
     assert!(at48 > Samples(0), "a lookahead to compensate");
 
     let (driver, new) = ManualStreamDriver::new();
-    s.restart_on(spec_at(96_000.0), driver, None)
+    s.restart_on(spec_at(96_000.0), driver, None, None)
         .expect("restarts");
     assert!(!old.is_open() && new.is_open(), "on the new device");
     assert_eq!(
@@ -300,7 +300,9 @@ fn following_the_default_restarts_and_reports_the_rate() {
 
     // The host runs it (here on a device-free driver at 48 kHz).
     let (driver, new) = ManualStreamDriver::new();
-    session.restart_on(spec_at(48_000.0), driver, None).unwrap();
+    session
+        .restart_on(spec_at(48_000.0), driver, None, None)
+        .unwrap();
     assert!(new.is_open());
     let events = poll(&mut session, base, 110);
     let [SessionEvent::Device(DeviceEvent::Restarted(r))] = events.as_slice() else {
@@ -314,7 +316,9 @@ fn following_the_default_restarts_and_reports_the_rate() {
 
     // Another restart at the same rate is not a rate change.
     let (driver, _s) = ManualStreamDriver::new();
-    session.restart_on(spec_at(48_000.0), driver, None).unwrap();
+    session
+        .restart_on(spec_at(48_000.0), driver, None, None)
+        .unwrap();
     let events = poll(&mut session, base, 120);
     let [SessionEvent::Device(DeviceEvent::Restarted(r))] = events.as_slice() else {
         panic!("{events:?}");
@@ -443,6 +447,7 @@ fn a_refused_restart_keeps_the_old_spec_and_is_retried_later() {
         spec_at(96_000.0),
         driver,
         Some(MaxBlock::of(Samples(16_384))),
+        None,
     );
     assert!(err.is_err());
     assert_eq!(
@@ -571,12 +576,16 @@ fn a_fault_after_a_restart_is_reported_again() {
     let _ = session.update();
     let base = Instant::now();
     let (driver, second) = ManualStreamDriver::new();
-    session.restart_on(spec_at(48_000.0), driver, None).unwrap();
+    session
+        .restart_on(spec_at(48_000.0), driver, None, None)
+        .unwrap();
     second.fail(BackendErrorKind::DeviceGone, &"device not available");
     let events = poll(&mut session, base, 0);
     assert!(events.iter().any(|e| matches!(e, SessionEvent::Fault(_))));
     let (driver, third) = ManualStreamDriver::new();
-    session.restart_on(spec_at(48_000.0), driver, None).unwrap();
+    session
+        .restart_on(spec_at(48_000.0), driver, None, None)
+        .unwrap();
     third.fail(BackendErrorKind::DeviceGone, &"device not available");
     let events = poll(&mut session, base, 20);
     assert!(
@@ -730,7 +739,7 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
         tutti_buffers::SampleFormat::F32,
     );
     let (driver, new) = ManualStreamDriver::new();
-    s.restart_on(six, driver, None).expect("restarts");
+    s.restart_on(six, driver, None, None).expect("restarts");
     new.render_block(64).expect("open");
     assert_eq!(across.available(), Samples(0), "the old width gets nothing");
     assert_eq!(across.take_lost(), Samples(64), "and counts the block lost");
@@ -805,21 +814,88 @@ fn a_restart_onto_a_device_that_cannot_place_the_declared_root_is_refused() {
 
     let (driver, _new) = ManualStreamDriver::new();
     session
-        .restart_on(wide(44_100.0), driver, None)
+        .restart_on(wide(44_100.0), driver, None, None)
         .expect("another six-wide device takes it");
     assert_eq!(session.graph_ref().outputs(), 4, "the device is no floor");
 
     let (driver, _stereo) = ManualStreamDriver::new();
-    let refused = session.restart_on(spec_at(48_000.0), driver, None);
+    let refused = session.restart_on(spec_at(48_000.0), driver, None, None);
     assert!(
         matches!(
             &refused,
             Err(e) if matches!(
                 e.error(),
-                tutti_session::Error::Output(tutti_buffers::FoldError::Unplaced { channel: 2, .. })
+                tutti_session::Error::Unplaceable {
+                    device,
+                    source: tutti_buffers::FoldError::Unplaced { channel: 2, .. },
+                    ..
+                } if device.count() == 2
             )
         ),
         "{refused:?}"
+    );
+}
+
+/// A restart takes what its own request states about the new device: the
+/// session reads `Stated` after a restart that says how the device is wired
+/// and `Assumed` after one that does not (another device is wired another
+/// way), and a statement that is not the new device's width is refused before
+/// the graph moves.
+#[test]
+fn a_restart_states_or_assumes_the_new_devices_placement() {
+    use tutti_types::{Bed, Placement};
+    let six = OutputSpec::new(
+        SampleRate::SR_48K,
+        ChannelLayout::from(6u16),
+        tutti_buffers::SampleFormat::F32,
+    );
+    let (driver, _stream) = ManualStreamDriver::new();
+    let mut session = Session::builder()
+        .device(Default::default())
+        .build_device_on(spec_at(48_000.0), driver)
+        .unwrap();
+    assert_eq!(
+        session.output_device().map(|d| d.placement),
+        Some(Placement::Assumed)
+    );
+
+    let (driver, _new) = ManualStreamDriver::new();
+    let wired = Bed::Surround51.topology();
+    session
+        .restart_on(six.clone(), driver, None, Some(wired.clone()))
+        .unwrap();
+    let placed = session.output_device().unwrap();
+    assert_eq!(
+        (placed.placement, placed.topology),
+        (Placement::Stated, wired)
+    );
+
+    // A statement of the wrong width is refused, and the old one stands.
+    let (driver, _new) = ManualStreamDriver::new();
+    let refused = session.restart_on(six.clone(), driver, None, Some(Bed::Stereo.topology()));
+    assert!(
+        matches!(
+            &refused,
+            Err(e) if matches!(
+                e.error(),
+                tutti_session::Error::Output(tutti_buffers::FoldError::Buffer(
+                    tutti_buffers::BufferError::WidthMismatch { .. }
+                ))
+            )
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(
+        session.output_device().map(|d| d.placement),
+        Some(Placement::Stated)
+    );
+
+    // The same width again with nothing stated: assumed again.
+    let (driver, _new) = ManualStreamDriver::new();
+    session.restart_on(six, driver, None, None).unwrap();
+    assert_eq!(
+        session.output_device().map(|d| d.placement),
+        Some(Placement::Assumed)
     );
 }
 
@@ -847,7 +923,7 @@ fn a_refused_declaration_is_retried_on_a_restart() {
         tutti_buffers::SampleFormat::F32,
     );
     let (driver, _new) = ManualStreamDriver::new();
-    session.restart_on(wide, driver, None).unwrap();
+    session.restart_on(wide, driver, None, None).unwrap();
     assert_eq!(session.root_topology_status(), RootTopologyStatus::Applied);
     assert_eq!(session.root_topology(), Some(&buses));
     assert_eq!(session.graph_ref().outputs(), 4);

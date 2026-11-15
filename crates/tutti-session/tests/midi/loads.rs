@@ -1,6 +1,6 @@
-//! File loads are jobs: `Midi::load_file` and
-//! `Midi::load_soundfont` return a `MidiLoad` at once and the result lands as
-//! `MidiEvent::FileLoaded` / `SoundFontLoaded` carrying that id, in `update()`.
+//! A MIDI file load is a job: `Midi::load_file` returns a `MidiLoad` at once
+//! and the result lands as `MidiEvent::FileLoaded` carrying that id, in
+//! `update()`. A SoundFont is a pool entry, loaded the pool's way.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -121,36 +121,51 @@ fn a_dropped_job_lands_as_a_job_error() {
 #[cfg(feature = "soundfont")]
 mod soundfont {
     use super::*;
+    use tutti_session::{LoadError, PoolState, soundfont};
     use tutti_soundfont::{Settings, SoundFontUnit};
 
-    fn fonts(event: MidiEvent) -> Option<(MidiLoad, Result<Box<SoundFontUnit>, MidiError>)> {
-        match event {
-            MidiEvent::SoundFontLoaded { load, unit } => Some((load, unit)),
-            _ => None,
+    /// Updates until the entry under `key` is no longer pending.
+    fn settled(s: &mut DetachedSession, key: &'static str) -> PoolState {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            let _ = s.update();
+            match s.pool_state(&key) {
+                Some(PoolState::Loading) => {}
+                Some(state) => return state,
+                None => panic!("the entry is not declared"),
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the font never landed"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
     }
 
     #[test]
-    fn a_soundfont_lands_as_a_unit_with_its_id() {
+    fn a_soundfont_entry_loads_a_font_a_unit_is_built_from() {
         let mut s = session();
-        let id = s.midi().load_soundfont(
+        s.pool(soundfont(
+            "gm",
             tutti_fixtures::asset("soundfonts/TimGM6mb.sf2"),
-            Settings::new(),
-        );
-        let (load, unit) = land(&mut s, 1, fonts).pop().unwrap();
-        assert_eq!(load, id);
+        ))
+        .unwrap();
+        assert!(matches!(settled(&mut s, "gm"), PoolState::Loaded));
+        let font = s.soundfont(&"gm").unwrap();
+        let unit = SoundFontUnit::new(font, Settings::new());
         assert!(unit.is_ok(), "{:?}", unit.err());
     }
 
     #[test]
-    fn a_file_that_is_no_soundfont_lands_as_a_soundfont_error() {
+    fn a_file_that_is_no_soundfont_fails_its_entry_with_a_soundfont_error() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("junk.sf2");
         std::fs::write(&path, b"this is not a RIFF file at all").unwrap();
         let mut s = session();
-        let id = s.midi().load_soundfont(path, Settings::new());
-        let (load, unit) = land(&mut s, 1, fonts).pop().unwrap();
-        assert_eq!(load, id);
-        assert!(matches!(unit, Err(MidiError::SoundFont(_))));
+        s.pool(soundfont("junk", path)).unwrap();
+        assert!(matches!(
+            settled(&mut s, "junk"),
+            PoolState::Failed(LoadError::SoundFont(_))
+        ));
     }
 }

@@ -1,4 +1,4 @@
-//! Control-rate helpers: the solve interval and stream cadence, block ramps, and the
+//! Control-rate helpers: the solve interval and stream cadence, and the
 //! channel grouping the filters' held path runs in.
 
 use core::num::NonZeroU32;
@@ -42,84 +42,4 @@ pub const LANES: usize = 8;
 pub(crate) fn lane_group(remaining: usize) -> usize {
     let groups = remaining.div_ceil(LANES);
     remaining.div_ceil(groups)
-}
-
-/// A linear ramp from `from` to `to` over `n` samples.
-///
-/// Sample `i` (0-based) takes `from + step * (i + 1)` with
-/// `step = (to - from) / n`, so the first sample has already moved one step
-/// and the last is **exactly** `to` — not `from + step * n`, which can miss
-/// `to` by an ulp and would then read as a change on the next block. The one
-/// division is paid at construction, not per sample.
-#[derive(Clone, Copy, Debug)]
-pub struct Ramp {
-    from: f32,
-    step: f32,
-    to: f32,
-    n: usize,
-}
-
-impl Ramp {
-    /// A ramp over `n` samples (clamped to at least one).
-    #[inline]
-    pub fn new(from: f32, to: f32, n: usize) -> Self {
-        let n = n.max(1);
-        Self {
-            from,
-            step: (to - from) / n as f32,
-            to,
-            n,
-        }
-    }
-
-    /// Whether the ramp moves at all. A flat ramp lets a caller take its
-    /// constant-control fast path.
-    #[inline]
-    pub fn is_flat(&self) -> bool {
-        self.from == self.to
-    }
-
-    /// The value at sample `i` of the block.
-    #[inline]
-    pub fn at(&self, i: usize) -> f32 {
-        if i + 1 >= self.n {
-            self.to
-        } else {
-            self.from + self.step * (i + 1) as f32
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The last sample is the target bit-for-bit, whatever the arithmetic.
-    #[test]
-    fn a_ramp_ends_exactly_on_its_target() {
-        for (from, to, n) in [(0.7f32, 0.2f32, 64usize), (3.3, 1.1, 17), (5.0, 5.0, 3)] {
-            let r = Ramp::new(from, to, n);
-            assert_eq!(
-                r.at(n - 1).to_bits(),
-                to.to_bits(),
-                "{from} -> {to} over {n}"
-            );
-        }
-    }
-
-    /// A one-sample ramp is the new value — which keeps a block of one equal
-    /// to a per-sample read.
-    #[test]
-    fn a_one_sample_ramp_is_the_new_value() {
-        assert_eq!(Ramp::new(3.0, 9.0, 1).at(0), 9.0);
-    }
-
-    /// The ramp starts one step in, not on `from`: `from` was already the
-    /// previous block's last sample.
-    #[test]
-    fn the_first_sample_has_already_moved_one_step() {
-        let r = Ramp::new(0.0, 1.0, 4);
-        assert_eq!(r.at(0), 0.25);
-        assert_eq!(r.at(1), 0.5);
-    }
 }

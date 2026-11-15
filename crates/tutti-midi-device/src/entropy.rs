@@ -8,7 +8,7 @@ pub struct EntropyError(Cause);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 enum Cause {
-    #[error("the operating system has no random bytes: {0}")]
+    #[error("the operating system has no random bytes")]
     Os(#[source] getrandom::Error),
     #[error("the source has no random bytes to give")]
     Unavailable,

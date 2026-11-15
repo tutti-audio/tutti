@@ -192,11 +192,11 @@ pub use plugin::{
 };
 pub(crate) use pool::Pool;
 #[cfg(feature = "sampler")]
-pub use pool::{AudioFile, audio_file};
+pub use pool::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 pub use pool::{
-    Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, PoolConfig, PoolEntry,
-    PoolError, PoolEvent, PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet, PoolState,
-    RetryError, stranded_loads,
+    Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, Parking, PoolConfig, PoolEntry,
+    PoolError, PoolEvent, PoolKey, PoolOutcome, PoolReport, PoolSet, PoolState, PoolWait,
+    RefreshPool, RetryError, WhenLoadedError, stranded_loads,
 };
 #[cfg(feature = "soundfont")]
 pub use pool::{SoundFontFile, soundfont};
@@ -219,7 +219,7 @@ pub use recovery::{
     ReloadCause,
 };
 #[cfg(feature = "sampler")]
-pub use sampler::{Residency, STREAM_ABOVE_BYTES, SamplerError, SamplerEvent, SamplerLoad};
+pub use sampler::{SamplerError, SamplerEvent, SamplerLoad};
 #[cfg(feature = "midi")]
 pub use session::MidiNodes;
 #[cfg(feature = "modulation")]
@@ -234,7 +234,7 @@ pub use take::{
 pub use tutti_dsp::DitherShape;
 #[cfg(feature = "record")]
 pub use tutti_dsp::{DitherSink, DitherSpec};
-pub use tutti_engine::{HeardOpen, Playhead};
+pub use tutti_engine::{HeardOpen, OutputPlacement, Playhead};
 #[cfg(feature = "export")]
 pub use tutti_export::{
     EventLossPolicy, Normalize, Outcome, Produced, Progress, Rendered, Resample, Stage, Written,

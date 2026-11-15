@@ -20,6 +20,7 @@
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tutti_fixtures::BlockClock;
 use tutti_types::MaxBlock;
 
 use tutti_fixtures::midi;
@@ -32,38 +33,6 @@ use tutti_midi_hardware::{HardwareMidiInputs, InputProducerHandle};
 use tutti_midi_runtime::{DeviceInlets, InletChange, MidiIngestNode};
 use tutti_types::{Frame, SampleRate, Samples};
 use tutti_ump::{Message, MidiChannel, Ump, Utility};
-
-/// A block clock a test writes by hand, as the engine does each render call.
-struct BlockClock(
-    std::sync::Arc<std::sync::Mutex<Option<(std::time::Instant, tutti_types::Moment)>>>,
-);
-
-impl BlockClock {
-    fn new() -> Self {
-        let cell = Self(Default::default());
-        // On macOS std's `Mutex` boxes its pthread mutex on the first `lock`,
-        // so the first read from the driver thread (before any `write`) would
-        // allocate there. The engine's own clock is lock-free; this stand-in
-        // takes its lock once here, on the control side, as a real one is
-        // built.
-        drop(cell.0.lock().unwrap());
-        cell
-    }
-
-    fn reader(&self) -> tutti_midi_runtime::ArrivalClock {
-        let cell = std::sync::Arc::clone(&self.0);
-        std::sync::Arc::new(move || *cell.lock().unwrap())
-    }
-
-    fn write(
-        &mut self,
-        os: std::time::Instant,
-        frame: tutti_types::Frame,
-        rate: tutti_types::SampleRate,
-    ) {
-        *self.0.lock().unwrap() = Some((os, tutti_types::Moment::new(frame, rate)));
-    }
-}
 
 const RATE: f64 = 48_000.0;
 const INGEST: NodeKey = NodeKey(1);

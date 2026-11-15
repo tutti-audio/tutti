@@ -88,6 +88,18 @@ impl ResourceStore {
         Ok(())
     }
 
+    /// The store with every entry declared not subscribable, for a device that
+    /// has no way to tell its subscribers of a change: its ResourceList
+    /// advertises no Subscription and a Subscription Start is refused.
+    #[must_use]
+    pub fn without_subscriptions(&self) -> Self {
+        let mut store = self.clone();
+        for stored in &mut store.resources {
+            stored.entry = stored.entry.clone().with_can_subscribe(false);
+        }
+        store
+    }
+
     /// The entry of the ResourceList for `resource`.
     #[must_use]
     pub fn entry(&self, resource: &PeResource) -> Option<&ResourceEntry> {

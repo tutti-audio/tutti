@@ -11,6 +11,7 @@ use crate::common::track;
 use crate::support::{Division, RawEvent, build_smf, decode_smf};
 use tutti_midi_file::{
     Error, FileEvent, Meta, MidiFile, MidiFileKind, PairedNote, SmfFormat, TextKind, Tick, Track,
+    Truncated,
 };
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::{
@@ -543,11 +544,14 @@ fn no_prefix_of_a_valid_file_is_accepted() {
 fn a_chunk_cut_short_is_truncated() {
     let bytes = smf(0, &[everything()]);
     let cut = &bytes[..bytes.len() - 5];
-    assert!(matches!(MidiFile::from_bytes(cut), Err(Error::Truncated)));
+    assert!(matches!(
+        MidiFile::from_bytes(cut),
+        Err(Error::Truncated(Truncated::Chunk))
+    ));
     // Cut inside the 8-byte chunk header of the track.
     assert!(matches!(
         MidiFile::from_bytes(&bytes[..14 + 5]),
-        Err(Error::Truncated)
+        Err(Error::Truncated(Truncated::Chunk))
     ));
 }
 
@@ -564,7 +568,10 @@ fn a_file_missing_a_track_is_truncated() {
     );
     let one = smf(1, &[vec![RawEvent::note_on(0, 0, 60, 100)]]);
     let cut = &two[..one.len()];
-    assert!(matches!(MidiFile::from_bytes(cut), Err(Error::Truncated)));
+    assert!(matches!(
+        MidiFile::from_bytes(cut),
+        Err(Error::Truncated(Truncated::Tracks))
+    ));
 }
 
 /// A track whose chunk length is right but which ends mid-event is malformed:

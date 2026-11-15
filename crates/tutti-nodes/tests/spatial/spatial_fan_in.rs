@@ -6,19 +6,19 @@ use tutti_graph::{GraphBuilder, Prepare};
 use tutti_nodes::testing::{Const, vbap_mix};
 use tutti_nodes::{VbapError, VbapPannerNode};
 use tutti_types::MaxBlock;
-use tutti_types::{Azimuth, ChannelLayout, ChannelTopology, SampleRate, Samples};
+use tutti_types::{Azimuth, Bed, ChannelLayout, SampleRate, Samples};
 
 /// A panner per bearing (a DC `[1.0, 1.0]` source each), wired by
 /// [`vbap_mix`]. Renders 49 blocks of 256 frames, past the panners' ~0.05 s
 /// position smoother, and returns each output channel's energy over the last
 /// block.
-fn settled_energy(layout: ChannelLayout, bearings: &[f32]) -> Vec<f32> {
-    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, layout);
+fn settled_energy(bed: Bed, bearings: &[f32]) -> Vec<f32> {
+    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, bed.width());
     let sources: Vec<_> = bearings
         .iter()
         .map(|&az| (g.add(Const::frame(&[1.0, 1.0])), Azimuth::new(az)))
         .collect();
-    vbap_mix(&mut g, layout, &sources).expect("a preset");
+    vbap_mix(&mut g, bed, &sources).expect("a bed with speakers");
     let mut r = g
         .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))))
         .expect("builds");
@@ -34,7 +34,7 @@ fn settled_energy(layout: ChannelLayout, bearings: &[f32]) -> Vec<f32> {
 /// the front pair. Quad: ch0 FL 45, ch1 FR -45, ch2 RL 135, ch3 RR -135.
 #[test]
 fn fanned_in_panners_place_front_and_rear_sources() {
-    let energy = settled_energy(ChannelLayout::QUAD, &[45.0, 135.0]);
+    let energy = settled_energy(Bed::Quad, &[45.0, 135.0]);
     let total: f32 = energy.iter().sum();
     assert!(total > 0.0, "silent");
     assert!(
@@ -52,7 +52,7 @@ fn fanned_in_panners_place_front_and_rear_sources() {
 /// channel (3) exactly silent: the panner never writes it.
 #[test]
 fn a_centre_source_lands_in_the_centre_and_never_in_the_lfe() {
-    let energy = settled_energy(ChannelLayout::from(6u16), &[0.0]);
+    let energy = settled_energy(Bed::Surround51, &[0.0]);
     let total: f32 = energy.iter().sum();
     assert!(energy[2] > total * 0.4, "centre dominates ({energy:?})");
     assert!(
@@ -64,28 +64,23 @@ fn a_centre_source_lands_in_the_centre_and_never_in_the_lfe() {
         "the panner leaves the LFE silent ({energy:?})"
     );
 
-    let surround = settled_energy(ChannelLayout::from(6u16), &[110.0]);
+    let surround = settled_energy(Bed::Surround51, &[110.0]);
     assert!(surround[4] > 0.0, "left surround is lit ({surround:?})");
     assert_eq!(surround[3], 0.0, "the LFE stays silent ({surround:?})");
 }
 
-/// Each supported width builds a panner of that width; one with no bed is
-/// refused rather than falling back.
+/// Each bed with two or more speakers builds a panner of its width, up to the
+/// widest; the one-speaker mono bed has nothing to pan between and is refused
+/// by name rather than falling back.
 #[test]
-fn for_topology_dispatches_and_rejects_unsupported() {
-    for width in [2u16, 4, 6] {
-        let topology = ChannelTopology::assumed(ChannelLayout::from(width));
-        assert_eq!(
-            VbapPannerNode::for_topology(&topology)
-                .unwrap()
-                .channels()
-                .count() as usize,
-            usize::from(width)
-        );
+fn every_bed_builds_a_panner_of_its_width_and_mono_is_refused() {
+    for bed in Bed::ALL {
+        match VbapPannerNode::new(bed) {
+            Ok(panner) => assert_eq!(panner.channels(), bed.width(), "{bed:?}"),
+            Err(error) => {
+                assert_eq!(bed, Bed::Mono);
+                assert!(matches!(error, VbapError::Geometry(_)), "{error:?}");
+            }
+        }
     }
-    let three = ChannelTopology::assumed(ChannelLayout::from(3u16));
-    assert!(matches!(
-        VbapPannerNode::for_topology(&three),
-        Err(VbapError::NoBed(_))
-    ));
 }
