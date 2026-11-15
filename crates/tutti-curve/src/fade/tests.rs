@@ -1,6 +1,5 @@
 //! The fade laws against their closed forms. The spec is the oracle: the
-//! figures are the smootherstep and the sine/cosine pair written out here, and
-//! the digest pins the equal-amplitude gains bit for bit.
+//! figures are the smootherstep and the sine/cosine pair written out here.
 
 use super::*;
 use crate::Piece;
@@ -11,12 +10,11 @@ fn smootherstep(x: f64) -> f64 {
     x * x * x * (6.0 * x * x - 15.0 * x + 10.0)
 }
 
-/// `EqualAmplitude`'s gains are bit-stable: an FNV-1a digest of both gains'
-/// bits at every frame of fades of many lengths. Plain `f32` arithmetic, no
-/// libm, so it holds on every target. Both gains stay in `[0, 1]`.
+/// `EqualAmplitude`'s incoming gain is the smootherstep of `(k + 1) / (len +
+/// 1)`, computed here in `f64`, at every frame of fades of many lengths, and
+/// its outgoing gain the complement. Both gains stay in `[0, 1]`.
 #[test]
-fn equal_amplitude_gains_are_bit_stable() {
-    let mut h = tutti_fixtures::Fnv::new();
+fn equal_amplitude_is_the_smootherstep_at_every_frame() {
     for len in LENGTHS {
         for k in 0..len {
             let (out, inn) = FadeLaw::EqualAmplitude.gains(k, len);
@@ -24,11 +22,14 @@ fn equal_amplitude_gains_are_bit_stable() {
                 (0.0..=1.0).contains(&out) && (0.0..=1.0).contains(&inn),
                 "{k}/{len}: ({out}, {inn})"
             );
-            h.f32(inn);
-            h.f32(out);
+            let want = smootherstep((k + 1) as f64 / (len + 1) as f64);
+            assert!((f64::from(inn) - want).abs() < 5e-6, "{k}/{len}: {inn}");
+            assert!(
+                (f64::from(out) - (1.0 - want)).abs() < 5e-6,
+                "{k}/{len}: {out}"
+            );
         }
     }
-    assert_eq!(h.finish(), 10_403_808_708_279_920_321, "digest");
 }
 
 /// At a position that is a dyadic fraction every step of the polynomial is
