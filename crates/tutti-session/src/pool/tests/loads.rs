@@ -190,7 +190,10 @@ fn declare(stub: &Stub) -> Declared<&'static str, Stub> {
     Declared::new(stub.name, stub.clone())
 }
 
-fn made(session: &crate::DetachedSession, key: &'static str) -> Result<Arc<Made>, HandleError<&'static str>> {
+fn made(
+    session: &crate::DetachedSession,
+    key: &'static str,
+) -> Result<Arc<Made>, HandleError<&'static str>> {
     session
         .pool
         .handle::<_, Stub>(&key)

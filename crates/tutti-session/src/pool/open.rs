@@ -19,6 +19,7 @@ use crate::{Clock, Session};
 /// the MIDI state half changed.
 pub struct OpenCx<'a> {
     rate: SampleRate,
+    ids: &'a mut crate::peer::ResourceIds,
     #[cfg(feature = "midi")]
     midi: crate::Midi<'a>,
     _session: std::marker::PhantomData<&'a mut ()>,
@@ -28,12 +29,28 @@ impl<'a> OpenCx<'a> {
     /// What an open needs of `session`, of whatever clock: its rate and, with
     /// `midi`, its MIDI view. Nothing else of the session is reachable.
     pub(crate) fn new<C: Clock>(session: &'a mut Session<C>) -> Self {
+        let rate = session.transport.sample_rate();
+        #[cfg(feature = "midi")]
+        let (midi, ids) = session.midi_and_ids();
+        #[cfg(not(feature = "midi"))]
+        let ids = &mut session.resource_ids;
         Self {
-            rate: session.transport.sample_rate(),
+            rate,
+            ids,
             #[cfg(feature = "midi")]
-            midi: session.midi(),
+            midi,
             _session: std::marker::PhantomData,
         }
+    }
+
+    /// The id of a new resource: no other token of this session has it. The
+    /// peer a stage opens takes its id here.
+    #[expect(
+        dead_code,
+        reason = "the pool's MIDI ports mint their ids here; no stage opens a peer yet"
+    )]
+    pub(crate) fn mint_resource_id(&mut self) -> crate::ResourceId {
+        self.ids.mint()
     }
 
     /// The graph's sample rate now.

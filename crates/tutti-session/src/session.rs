@@ -1110,7 +1110,15 @@ impl<C: Clock> Session<C> {
     /// and the hardware out.
     #[cfg(feature = "midi")]
     pub fn midi(&mut self) -> crate::Midi<'_> {
-        crate::Midi {
+        self.midi_and_ids().0
+    }
+
+    /// [`midi`](Self::midi) and, beside it, the source of the ids of the
+    /// session's resources: the two borrow disjoint fields, so a stage that
+    /// opens a peer holds both.
+    #[cfg(feature = "midi")]
+    pub(crate) fn midi_and_ids(&mut self) -> (crate::Midi<'_>, &mut crate::peer::ResourceIds) {
+        let midi = crate::Midi {
             graph: &mut self.graph,
             state: &mut self.midi_state,
             nodes: self.midi.as_ref(),
@@ -1119,7 +1127,8 @@ impl<C: Clock> Session<C> {
             meter: self.click_settings.project_meter(),
             #[cfg(feature = "midi-hardware")]
             io: self.midi_io.as_mut(),
-        }
+        };
+        (midi, &mut self.resource_ids)
     }
 
     /// Reports the newest fault the stream raised since the last poll, if the
