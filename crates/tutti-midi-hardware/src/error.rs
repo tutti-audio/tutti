@@ -26,7 +26,7 @@ pub enum NotFound {
 #[non_exhaustive]
 pub enum Error {
     /// A filesystem or descriptor error surfaced from `std::io`.
-    #[error("IO error: {0}")]
+    #[error("IO error")]
     Io(#[from] std::io::Error),
 
     /// Opening, configuring or connecting a port failed, with the backend's own

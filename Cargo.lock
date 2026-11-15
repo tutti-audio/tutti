@@ -1841,7 +1841,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33d5f59e4145df5f29e84b6389394a8a3fedf7bd8c12570560ae67a917e6eae3"
 dependencies = [
  "crossbeam-utils",
- "portable-atomic",
  "portable-atomic-util",
 ]
 
@@ -2814,7 +2813,6 @@ dependencies = [
  "assert_no_alloc",
  "core-foundation",
  "coremidi",
- "ringbuf",
  "thiserror 2.0.21",
  "tracing",
  "tutti-alsa-ffi",

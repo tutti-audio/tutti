@@ -64,7 +64,7 @@ pub enum RecvTimeoutError {
     Timeout,
     /// The watch ended and every event it reported has been taken: nothing
     /// more will arrive.
-    #[error("the MIDI device watch ended: {0}")]
+    #[error("the MIDI device watch ended")]
     Ended(#[source] WatchFailure),
 }
 

@@ -34,7 +34,6 @@ tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 
-ringbuf = "0.6"
 
 
 [target.'cfg(target_os = "linux")'.dependencies]
