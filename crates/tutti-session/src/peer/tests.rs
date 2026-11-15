@@ -61,7 +61,7 @@ fn a_token_reads_its_id_info_and_presence() {
 
 #[test]
 fn only_live_is_live_and_only_a_gone_peer_has_a_cause() {
-    let readings: [(Presence<&str>, bool, Option<&str>); 4] = [
+    let readings: [(Presence<&str>, bool, Option<&str>); 5] = [
         (Presence::Live, true, None),
         (Presence::Stalled, false, None),
         (
@@ -73,6 +73,7 @@ fn only_live_is_live_and_only_a_gone_peer_has_a_cause() {
             Some("died"),
         ),
         (Presence::Lost("unplugged"), false, Some("unplugged")),
+        (Presence::Closed, false, None),
     ];
     for (presence, live, cause) in readings {
         assert_eq!(presence.is_live(), live, "{presence:?}");
@@ -86,6 +87,7 @@ fn a_refusal_keeps_the_requests_own_failure() {
     assert_eq!(refused, PeerError::Refused(404));
     assert_ne!(refused, PeerError::Disconnected);
     assert_ne!(PeerError::<u32>::TimedOut, PeerError::Disconnected);
+    assert_ne!(PeerError::<u32>::Released, PeerError::Disconnected);
     assert_eq!(refused.to_string(), "the peer refused the request: 404");
 }
 
