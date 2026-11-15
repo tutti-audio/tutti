@@ -24,6 +24,7 @@ fn least_args(name: &str) -> &'static [&'static str] {
     match name {
         "release" => &["0.1.0"],
         "conformance" => &["--results", "r"],
+        "public-api" => &["tutti-rt"],
         _ => &[],
     }
 }
@@ -420,4 +421,23 @@ fn check_no_std_builds_each_listed_crate_for_the_bare_metal_target() {
             "cargo build --locked -p tutti-ump --no-default-features --target thumbv7em-none-eabihf --features serde",
         ]
     );
+}
+
+#[test]
+fn public_api_lists_on_the_docs_nightly_or_diffs_from_a_base() {
+    assert_eq!(
+        dry("public-api", &["tutti-rt"]),
+        ["cargo +nightly-2026-10-14 public-api --package tutti-rt -ss"]
+    );
+    assert_eq!(
+        dry("public-api", &["tutti-rt", "origin/main"]),
+        ["cargo +nightly-2026-10-14 public-api --package tutti-rt -ss diff origin/main..HEAD"]
+    );
+}
+
+#[test]
+fn public_api_refuses_no_crate_and_a_third_argument() {
+    assert!(plan("public-api", &[], &ctx()).is_err());
+    let three: Vec<String> = ["a", "b", "c"].iter().map(|s| (*s).to_owned()).collect();
+    assert!(plan("public-api", &three, &ctx()).is_err());
 }

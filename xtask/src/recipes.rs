@@ -316,6 +316,12 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     ),
     ("deny", "", "RustSec advisories (needs cargo-deny)"),
     (
+        "public-api",
+        "<crate> [<base>]",
+        "a crate's public API on the docs nightly, or its diff from <base> to HEAD \
+         (needs cargo-public-api; checks <base> out in place, so commit first)",
+    ),
+    (
         "book",
         "[OUT]",
         "build the book with mdbook into book/build, or into OUT (relative to book/)",
@@ -378,6 +384,10 @@ struct Planner<'a> {
 }
 
 const TARGET: &str = "x86_64-pc-windows-msvc";
+
+/// The dated nightly CI pins for the docs.rs build; `public-api` reads rustdoc
+/// JSON from the same one.
+const DOCS_NIGHTLY: &str = "nightly-2026-10-14";
 
 impl Planner<'_> {
     fn run(&mut self, c: Cmd) {
@@ -453,6 +463,7 @@ impl Planner<'_> {
                 | "conformance-inventory"
                 | "conformance"
                 | "coverage"
+                | "public-api"
         );
         if !takes_args && !args.is_empty() {
             return Err(format!(
@@ -607,9 +618,9 @@ impl Planner<'_> {
                     r#"RUSTDOCFLAGS="-D warnings" cargo doc --locked -p tutti-plugin-types --no-deps --features contract"#,
                 ]);
                 self.out.push(Step::DocFeatures);
-                self.lines(&[
-                    r#"RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +nightly-2026-10-14 doc --locked --workspace --no-deps"#,
-                ]);
+                self.lines(&[format!(
+                    r#"RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{DOCS_NIGHTLY} doc --locked --workspace --no-deps"#
+                )]);
             }
             "check-no-std" => self.check_no_std(),
             "check-loom" => self.lines(&[
@@ -647,6 +658,21 @@ impl Planner<'_> {
                 self.out.push(Step::Release(v));
             }
             "package" => self.out.push(Step::Package),
+            "public-api" => {
+                let [krate, base] = Self::params(name, args, ["", ""])?;
+                if krate.is_empty() {
+                    return Err(
+                        "`public-api` takes a crate: `cargo xtask public-api <crate> [<base>]`"
+                            .to_owned(),
+                    );
+                }
+                let list = format!("cargo +{DOCS_NIGHTLY} public-api --package {krate} -ss");
+                if base.is_empty() {
+                    self.lines(&[list]);
+                } else {
+                    self.lines(&[format!("{list} diff {base}..HEAD")]);
+                }
+            }
             "deny" => {
                 self.out.push(Step::RequireCargoDeny);
                 self.lines(&["cargo deny --locked check advisories"]);
