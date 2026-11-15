@@ -57,7 +57,7 @@ use tutti_graph::{
 };
 use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, EventTapId, MeterId, MeterSpec, MissingSource,
-    TapAlign, Topology,
+    TapAlign, TapId, Topology,
 };
 #[cfg(feature = "plugin")]
 use tutti_types::Latency;
@@ -70,7 +70,7 @@ mod observe;
 #[cfg(feature = "testing")]
 mod testing;
 
-pub use observe::{Meters, Taps};
+pub use observe::{Meters, NotReopened, Reopened, RootReader, Taps};
 #[cfg(feature = "testing")]
 pub use testing::{AudioSide, Testing};
 
@@ -330,6 +330,14 @@ pub struct Graph {
     event_taps: BTreeMap<EventTapId, (tutti_graph::EventTapSource, TapAlign, EventCapacity)>,
     /// The master meter's reader until a host takes it.
     master_meter: Option<MeterReader>,
+    /// The master meter's id: the one meter that reads the root.
+    master_meter_id: MeterId,
+    /// Each open tap on the root ([`Taps::open_output`]) with its capacity and
+    /// the width its reader has, so a root of another width opens it again.
+    output_taps: BTreeMap<TapId, (Samples, usize)>,
+    /// The readers the root's width opened again, each held under its id until
+    /// claimed ([`Graph::take_reopened`]).
+    reopened: BTreeMap<RootReader, observe::Held>,
     /// Crossfades refused `Busy`, in request order.
     parked: VecDeque<Parked>,
     /// The wiring each re-insert dropped, by node, until the commit that
@@ -483,8 +491,9 @@ impl Graph {
         // without asking for it.
         // `Outputs` names no source, so the open cannot be refused.
         let ids = Mint::new();
+        let master_meter_id = MeterId::mint(&ids);
         let master_meter = editor
-            .open_meter(MeterId::mint(&ids), MeterSpec::Outputs)
+            .open_meter(master_meter_id, MeterSpec::Outputs)
             .expect("a master meter names no source");
         master_meter.enable();
         Self {
@@ -505,6 +514,9 @@ impl Graph {
             ids,
             event_taps: BTreeMap::new(),
             master_meter: Some(master_meter),
+            master_meter_id,
+            output_taps: BTreeMap::new(),
+            reopened: BTreeMap::new(),
             parked: VecDeque::new(),
             unwired: Vec::new(),
             removed: Vec::new(),
@@ -2957,6 +2969,16 @@ impl Graph {
     pub(crate) fn reap_taps(&mut self) -> usize {
         let reaped = self.editor.reap_taps();
         if reaped > 0 {
+            let open = &self.editor.spec().topology.taps;
+            self.output_taps.retain(|id, _| open.contains_key(id));
+            // A held reader keeps its tap alive, and a claimed one has left the map.
+            debug_assert!(
+                self.reopened.keys().all(|id| match id {
+                    RootReader::Tap(tap) => open.contains_key(tap),
+                    RootReader::Meter(_) => true,
+                }),
+                "no held reader names a reaped tap"
+            );
             self.edited = true;
         }
         reaped
@@ -2979,6 +3001,15 @@ impl Graph {
     pub(crate) fn reap_meters(&mut self) -> usize {
         let reaped = self.editor.reap_meters();
         if reaped > 0 {
+            let open = &self.editor.spec().topology.meters;
+            // A held reader keeps its meter alive, and a claimed one has left the map.
+            debug_assert!(
+                self.reopened.keys().all(|id| match id {
+                    RootReader::Meter(meter) => open.contains_key(meter),
+                    RootReader::Tap(_) => true,
+                }),
+                "no held reader names a reaped meter"
+            );
             self.edited = true;
         }
         reaped
@@ -3335,12 +3366,15 @@ impl Graph {
         }
         self.root = root;
         self.widen_refusal = None;
+        let mut resized = false;
         let outputs = &mut self.editor.spec_mut().topology.outputs;
         if outputs.len() != width {
             outputs.resize(width, Vec::new());
             self.drop_stale_gains();
             self.edited = true;
+            resized = true;
         }
+        self.reopen_root_readers(resized);
         Ok(())
     }
 
