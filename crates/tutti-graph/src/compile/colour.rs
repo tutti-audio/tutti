@@ -205,14 +205,7 @@ mod tests {
     /// the join takes the source's slot, so five slots.
     #[test]
     fn a_fan_out_fan_in_needs_width_plus_one_slots() {
-        let reads = vec![
-            vec![],
-            vec![0],
-            vec![0],
-            vec![0],
-            vec![0],
-            vec![1, 2, 3, 4],
-        ];
+        let reads = vec![vec![], vec![0], vec![0], vec![0], vec![0], vec![1, 2, 3, 4]];
         assert_eq!(slots(&reads, &BTreeMap::new()), 5);
     }
 
@@ -242,7 +235,11 @@ mod tests {
         masks
             .iter()
             .enumerate()
-            .map(|(i, &m)| (0..i as u32).filter(|&u| (m >> (u % 64)) & 1 == 1).collect())
+            .map(|(i, &m)| {
+                (0..i as u32)
+                    .filter(|&u| (m >> (u % 64)) & 1 == 1)
+                    .collect()
+            })
             .collect()
     }
 
