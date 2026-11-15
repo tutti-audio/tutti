@@ -24,7 +24,14 @@
 //! Each kind of entry is a [`PoolEntry`]; `audio_file` (feature `sampler`) and
 //! `soundfont` (feature `soundfont`) are the data kinds. A load's outcome lands
 //! in [`Session::update`] as a [`SessionEvent::Pool`](crate::SessionEvent::Pool), and
-//! [`Session::pool_state`] reads where an entry stands.
+//! [`Session::pool_state`] reads where an entry stands. A handle read by key
+//! ([`Session::audio`], [`Session::soundfont`]) is a clone that owns nothing:
+//! dropping it leaves its entry loaded. [`Session::when_loaded`] runs a
+//! closure once an entry is loaded.
+//!
+//! A file entry takes the file's stamp on the worker that loads it, and
+//! [`Session::refresh_pool`] compares stamps on a worker and loads again the
+//! entries whose file changed; the diff itself never reads metadata.
 //!
 //! # Stages
 //!
