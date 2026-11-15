@@ -159,12 +159,12 @@ pub use value::{
     Adsr, Amplitude, ArcDegrees, At, AtomicSampleRate, Azimuth, Beat, BeatDuration, BeatsPerCycle,
     BeatsPerCycleOutOfRange, Bpm, BpmOutOfRange, Cents, CentsSpan, CentsSpanOutOfRange,
     CompressionRatio, Confidence, Correlation, Db, Depth, DepthOutOfRange, Direction, Drive,
-    Elevation, Feedback, Frame, Hz, InvalidMaxBlock, Latency, MaxBlock, Mix, Moment,
+    Elevation, Feedback, Frame, Gain, Hz, InvalidMaxBlock, Latency, MaxBlock, Mix, Moment,
     NotOnMidiScale, Note, NoteNumberOutOfRange, Pan, Param, Param64, ParamAddr, ParamCell,
     ParamKey, ParamRaw, Phase, PhaseIncrement, PitchClass, PlayReading, PlaybackRate, Q, Radians,
-    ReadRate, Resonance, SamplePosition, SampleRate, SampleRateOutOfRange, Samples, Seconds,
-    Semitones, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail, Unit, UnitAddr,
-    UnitParam, UnitParamOutOfRange, Velocity,
+    ReadRate, Resonance, SamplePosition, SampleRate, SampleRateOutOfRange, SampleSpan,
+    SampleSpanOutOfRange, Samples, Seconds, Semitones, Spread, SrcRatio, StereoBalance,
+    StereoWidth, StretchFactor, Tail, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
 };
 
 // The frame is the source of truth for time: the one frame↔beat conversion,

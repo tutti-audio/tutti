@@ -8,6 +8,15 @@ use super::*;
 /// - `Db / Db` — a quotient of logarithms is not a quantity.
 /// - `Amplitude + Amplitude` — cascading gains multiply; summing is what
 ///   the *signals* do, not their gains.
+/// - `Gain * f32 -> Gain`, `Gain / f32` — `Gain * f32` is a gain applied to a
+///   sample and returns the `f32`; a second reading that scaled the gain would
+///   make one expression mean two things. Compose with `Gain * Gain`.
+/// - `Gain / Gain`, `Gain::to_db` — a quotient divides by a zero gain, and a
+///   negative gain has no logarithm. `Gain::recip` refuses zero; `magnitude`
+///   gives the `Amplitude` whose `to_db` is the level.
+/// - `From<Gain> for Amplitude` — a negative gain has no amplitude. `magnitude`
+///   drops the sign by name and `to_amplitude` refuses it. (`From<Amplitude>
+///   for Gain` is present: total and lossless.)
 /// - `From<raw> for Unit`, `From<Unit> for raw`, so `.into()` between a unit and
 ///   its bare number — a bare float must not become a unit unnamed at the call
 ///   site, and a unit must not leave as a float by an `.into()` that hides which
@@ -93,4 +102,98 @@ fn the_metering_floor_is_144_db_down() {
     assert_eq!(Db::FLOOR.get(), -144.0);
     let amp = Db::FLOOR.to_amplitude().get();
     assert!((amp - 6.31e-8).abs() < 1e-9, "{amp:e}");
+}
+
+/// Signs multiply and magnitudes multiply: two inversions cancel.
+#[test]
+fn gains_compose_by_multiplying_their_signs() {
+    assert_eq!(Gain(0.5) * Gain(4.0), Gain(2.0));
+    assert_eq!(Gain(-0.5) * Gain(4.0), Gain(-2.0));
+    assert_eq!(Gain::INVERTING * Gain::INVERTING, Gain::UNITY);
+    assert_eq!(Gain(-3.0) * Gain::SILENT, Gain::SILENT);
+    assert_eq!(Gain(-3.0) * Gain::UNITY, Gain(-3.0));
+    let mut g = Gain(-2.0);
+    g *= Gain(-0.25);
+    assert_eq!(g, Gain(0.5));
+}
+
+/// Parallel paths sum, and a path and its inversion cancel.
+#[test]
+fn gains_sum_and_negate() {
+    assert_eq!(Gain(0.75) + Gain(0.25), Gain::UNITY);
+    assert_eq!(Gain::UNITY + Gain::INVERTING, Gain::SILENT);
+    assert_eq!(Gain(0.5) - Gain(2.0), Gain(-1.5));
+    assert_eq!(-Gain(0.5), Gain(-0.5));
+    let mut g = Gain(1.0);
+    g += Gain(-3.0);
+    g -= Gain(0.5);
+    assert_eq!(g, Gain(-2.5));
+    assert!(Gain(-2.0) < Gain(-1.0));
+    assert_eq!(Gain(-2.0).clamp(Gain(-1.0), Gain(1.0)), Gain(-1.0));
+}
+
+#[test]
+fn a_gain_scales_a_sample_with_its_sign() {
+    assert_eq!(Gain(0.5) * 0.8_f32, 0.4);
+    assert_eq!(0.8_f32 * Gain(0.5), 0.4);
+    assert_eq!(0.25_f32 * Gain::INVERTING, -0.25);
+    assert_eq!(Gain::UNITY * 0.3_f32, 0.3);
+    let mut sample = 0.5_f32;
+    sample *= Gain(-2.0);
+    assert_eq!(sample, -1.0);
+}
+
+#[test]
+fn a_gain_converts_to_and_from_an_amplitude() {
+    assert_eq!(Gain::from_amplitude(Amplitude(2.0)), Gain(2.0));
+    assert_eq!(Gain::from(Amplitude(0.5)), Gain(0.5));
+    assert_eq!(Gain::from(Amplitude::UNITY), Gain::UNITY);
+
+    assert_eq!(Gain(2.0).to_amplitude(), Some(Amplitude(2.0)));
+    assert_eq!(Gain::SILENT.to_amplitude(), Some(Amplitude::SILENT));
+    assert_eq!(Gain(-0.0).to_amplitude(), Some(Amplitude::SILENT));
+    assert_eq!(Gain(-2.0).to_amplitude(), None);
+    assert_eq!(Gain(f32::NAN).to_amplitude(), None);
+
+    // The magnitude drops the sign by name: -6 dB and its inversion share it.
+    assert_eq!(Gain(-0.5).magnitude(), Amplitude(0.5));
+    assert_eq!(Gain(0.5).magnitude(), Gain(-0.5).magnitude());
+    assert_eq!(Gain(-1.0).magnitude().to_db(), Db::UNITY);
+
+    for a in [0.0_f32, 0.25, 1.0, 8.0] {
+        assert_eq!(
+            Gain::from_amplitude(Amplitude(a)).to_amplitude(),
+            Some(Amplitude(a))
+        );
+    }
+}
+
+#[test]
+fn a_gain_reciprocal_undoes_it_and_refuses_zero() {
+    assert_eq!(Gain(4.0).recip(), Some(Gain(0.25)));
+    assert_eq!(Gain(-0.5).recip(), Some(Gain(-2.0)));
+    assert_eq!(Gain::SILENT.recip(), None);
+    assert_eq!(Gain(-0.0).recip(), None);
+    assert_eq!(Gain(-4.0) * Gain(-4.0).recip().unwrap(), Gain::UNITY);
+}
+
+/// A tap, a routing weight: a driven, signed cell that reads back as written.
+#[test]
+fn a_gain_is_a_param() {
+    let tap = crate::Param::new(Gain(-0.5));
+    let on_audio_thread = tap.handle();
+    assert_eq!(on_audio_thread.load(), Gain(-0.5));
+    tap.store(Gain::INVERTING);
+    assert_eq!(on_audio_thread.load(), Gain::INVERTING);
+
+    // The width-erased cell a modulation lane writes keeps the sign.
+    tap.cell()
+        .store(0.75, core::sync::atomic::Ordering::Relaxed);
+    assert_eq!(tap.load(), Gain(0.75));
+}
+
+#[test]
+fn a_gain_has_no_range_so_a_cell_holds_any_float() {
+    assert_eq!(<Gain as Unit>::from_raw(-3.0), Gain(-3.0));
+    assert!(<Gain as Unit>::from_raw(f32::NAN).get().is_nan());
 }
