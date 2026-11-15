@@ -164,8 +164,7 @@ impl Plugin {
     /// for a blacklisted plugin,
     /// [`BridgeError::ServerNotFound`](tutti_plugin_types::BridgeError::ServerNotFound)
     /// when the `plugin-server` binary cannot be located,
-    /// [`BridgeError::LoadFailed`](tutti_plugin_types::BridgeError::LoadFailed) or
-    /// [`BridgeError::BundleResolutionFailed`](tutti_plugin_types::BridgeError::BundleResolutionFailed)
+    /// [`BridgeError::LoadFailed`](tutti_plugin_types::BridgeError::LoadFailed)
     /// when the plugin does not load, [`BridgeError::NotOutOfProcess`] for a
     /// VST2 plugin whose load asks for [`Hosting::OutOfProcess`],
     /// [`BridgeError::NotInProcess`] for a format this build has no in-process
