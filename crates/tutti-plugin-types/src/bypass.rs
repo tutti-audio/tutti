@@ -79,3 +79,32 @@ pub fn bypass_value(bypassed: bool) -> Normalized {
 pub fn is_bypassed(value: Normalized) -> bool {
     value.get() >= 0.5
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **A write's outcome maps by cause: handed over is `Sent`, a refusal of
+    /// the write policy is `Refused`, a lost or unanswering plugin is `Lost`.**
+    #[test]
+    fn of_write_maps_each_write_error_by_its_cause() {
+        let id = ParamId::new(5);
+        assert_eq!(BypassWrite::of_write(Ok(())), BypassWrite::Sent);
+        assert_eq!(
+            BypassWrite::of_write(Err(ParamWriteError::Undeclared(id))),
+            BypassWrite::Refused
+        );
+        assert_eq!(
+            BypassWrite::of_write(Err(ParamWriteError::ReadOnly(id))),
+            BypassWrite::Refused
+        );
+        assert_eq!(
+            BypassWrite::of_write(Err(ParamWriteError::Lost(id))),
+            BypassWrite::Lost
+        );
+        assert_eq!(
+            BypassWrite::of_write(Err(ParamWriteError::Unanswered(id))),
+            BypassWrite::Lost
+        );
+    }
+}

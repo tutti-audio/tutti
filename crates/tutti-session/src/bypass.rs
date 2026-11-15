@@ -13,7 +13,9 @@ use tutti_plugin_types::{BypassWrite, OwnBypass, bypass_value, is_bypassed};
 /// round trip, and writes the mode again where they differ, or where the last
 /// write never reached the plugin (no read decides that). A difference is one
 /// episode, counted once until the plugin is back in the mode, and its retries
-/// wait 1, 2, 4 ... 32 ticks.
+/// wait 1, 2, 4 ... 32 ticks. A write the plugin refuses is not retried: the
+/// refusal holds for the mode it was made for, until the mode changes or a
+/// plugin enters.
 #[derive(Debug)]
 pub(crate) struct BypassSync {
     /// Episodes: a bypass found other than the mode after a write.
@@ -22,6 +24,8 @@ pub(crate) struct BypassSync {
     episode: bool,
     /// The last write did not reach the plugin.
     lost: bool,
+    /// The mode the plugin refused to be written to, while the refusal stands.
+    refused: Option<bool>,
     /// Ticks to skip before the next comparison or retry.
     wait: u32,
     /// The wait after the next retry.
@@ -34,6 +38,7 @@ impl Default for BypassSync {
             unapplied: 0,
             episode: false,
             lost: false,
+            refused: None,
             wait: 0,
             backoff: 1,
         }
@@ -60,6 +65,7 @@ impl BypassSync {
     ) {
         self.backoff = 1;
         self.wait = 0;
+        self.refused = None;
         self.send(handle, mirror, want);
     }
 
@@ -77,6 +83,10 @@ impl BypassSync {
         let Some(site) = handle.loaded().own_bypass else {
             return;
         };
+        if self.refused == Some(want) {
+            return;
+        }
+        self.refused = None;
         if self.wait > 0 {
             self.wait -= 1;
             return;
@@ -122,9 +132,18 @@ impl BypassSync {
                     mirror.report(id, bypass_value(want));
                 }
             }
-            // A refusal is the plugin's: the retries back off like a loss and
-            // the episode is the one already counted.
-            BypassWrite::Lost | BypassWrite::Refused => self.lost = true,
+            BypassWrite::Lost => self.lost = true,
+            // A refusal is the plugin's and writing again changes nothing: the
+            // divergence is one episode (opened here when `assert_mode` is the
+            // writer), and no write follows until the mode changes.
+            BypassWrite::Refused => {
+                if !self.episode {
+                    self.episode = true;
+                    self.unapplied += 1;
+                }
+                self.lost = false;
+                self.refused = Some(want);
+            }
             BypassWrite::NoOwnBypass => {}
         }
     }
@@ -165,6 +184,8 @@ pub(crate) mod tests {
         pub(crate) held: AtomicBool,
         pub(crate) accepts: AtomicBool,
         pub(crate) delivers: AtomicBool,
+        /// The write policy refuses the bypass parameter.
+        pub(crate) refuses: AtomicBool,
         pub(crate) writes: AtomicU32,
     }
 
@@ -184,6 +205,9 @@ pub(crate) mod tests {
             }
         }
         fn set_bypassed(&self, site: OwnBypass, bypassed: bool) -> BypassWrite {
+            if self.refuses.load(SeqCst) {
+                return BypassWrite::Refused;
+            }
             if !self.delivers.load(SeqCst) {
                 return BypassWrite::Lost;
             }
@@ -239,6 +263,7 @@ pub(crate) mod tests {
             held: false.into(),
             accepts: true.into(),
             delivers: true.into(),
+            refuses: false.into(),
             writes: 0.into(),
         });
         let loaded = LoadedPlugin {
@@ -258,12 +283,12 @@ pub(crate) mod tests {
         (handle, plugin, mirror)
     }
 
-    /// **A write the plugin refuses is retried with a growing wait and counted
+    /// **A write the plugin ignores is retried with a growing wait and counted
     /// once; the count starts again after it takes.** Ticks 0, 2 and 5 write
     /// (1, 2, then 4 ticks of wait), the count stays 1; then the plugin accepts,
     /// a write confirms, and a bypass moved off afterwards is a second episode.
     #[test]
-    fn a_refused_write_is_retried_with_backoff_and_counted_once() {
+    fn an_ignored_write_is_retried_with_backoff_and_counted_once() {
         let (handle, plugin, mirror) = rig(false);
         plugin.accepts.store(false, SeqCst);
         let mut sync = BypassSync::default();
@@ -291,6 +316,52 @@ pub(crate) mod tests {
         }
         assert_eq!(handle.bypassed(), Some(true), "moved off, written again");
         assert_eq!(sync.unapplied(), 2, "a second episode");
+    }
+
+    /// **A write the write policy refuses is sent once and counted once, and a
+    /// change of mode or a plugin entering lifts the refusal.** No tick writes
+    /// again while the mode is the one refused; `assert_mode` (a new mode, or a
+    /// plugin that entered) and a different desired mode in `reconcile` each
+    /// write again. A reload replaces the whole `BypassSync`, which starts
+    /// unlatched.
+    #[test]
+    fn a_refused_write_is_sent_once_counted_once_and_lifted_by_a_new_mode() {
+        let (handle, plugin, mirror) = rig(false);
+        plugin.refuses.store(true, SeqCst);
+        let mut sync = BypassSync::default();
+        sync.assert_mode(&handle, &mirror, true);
+        assert_eq!(sync.unapplied(), 1, "the refusal is the episode");
+        for _ in 0..80 {
+            sync.reconcile(&handle, &mirror, true);
+        }
+        assert_eq!(sync.unapplied(), 1, "no second episode");
+        assert_eq!(
+            plugin.writes.load(SeqCst),
+            0,
+            "the refused write never arrived"
+        );
+        assert!(sync.refused.is_some(), "the refusal stands");
+
+        // The mode asked for changes: the refusal is lifted and tried again.
+        plugin.refuses.store(false, SeqCst);
+        sync.reconcile(&handle, &mirror, false);
+        assert!(sync.refused.is_none());
+        sync.assert_mode(&handle, &mirror, true);
+        assert_eq!(plugin.writes.load(SeqCst), 1, "written once lifted");
+        assert!(plugin.held.load(SeqCst));
+
+        // A reload starts from a fresh sync.
+        plugin.refuses.store(true, SeqCst);
+        let mut sync = BypassSync::default();
+        assert!(sync.refused.is_none());
+        sync.assert_mode(&handle, &mirror, false);
+        assert_eq!(sync.refused, Some(false));
+        sync.assert_mode(&handle, &mirror, false);
+        assert_eq!(
+            sync.unapplied(),
+            1,
+            "an entering plugin's refusal counts once"
+        );
     }
 
     /// **A served write the link drops is written again and counted once, with
