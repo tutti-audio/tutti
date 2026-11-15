@@ -4,7 +4,7 @@
 //!
 //! It only decides. The session (`plugin.rs`) feeds it what it observed and
 //! carries out the [`RecoveryAction`]: it loads the replacement through the existing
-//! [`PluginLoad`](crate::PluginLoad) job, ends a hung server, or removes the
+//! `PluginLoad` job, ends a hung server, or removes the
 //! node. The snapshot bytes stay with the session's record, so the core never
 //! holds them.
 //!

@@ -7,9 +7,10 @@
 //! its saved state); VST2 over the reference plugin in process, whose program
 //! count the environment sets.
 
+use crate::pooled::{LoadPlugin, Spec};
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_types::PresetError;
-use tutti_session::{PluginLoadRequest, PresetKind, Session};
+use tutti_session::{PresetKind, Session};
 use tutti_types::{ChannelLayout, SampleRate};
 
 #[cfg(feature = "clap")]
@@ -32,9 +33,9 @@ mod clap {
             .build()
             .expect("an offline session builds");
         let node = s
-            .add_plugin_blocking(
+            .load_plugin_blocking(
                 tutti_fixtures::main_thread(),
-                PluginLoadRequest::new(PluginRef::file(clap_probe()).expect("a plugin file")),
+                Spec::new(PluginRef::file(clap_probe()).expect("a plugin file")),
             )
             .expect("the reference CLAP plugin loads")
             .erase();
@@ -150,9 +151,9 @@ mod vst2 {
             .build_detached(SampleRate::DEFAULT)
             .expect("a detached session builds");
         let node = s
-            .add_plugin_blocking(
+            .load_plugin_blocking(
                 tutti_fixtures::main_thread(),
-                PluginLoadRequest::new(
+                Spec::new(
                     PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf())
                         .expect("a plugin file"),
                 ),

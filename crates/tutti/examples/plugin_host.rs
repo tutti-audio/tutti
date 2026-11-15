@@ -28,12 +28,12 @@
 
 use std::path::PathBuf;
 
-use tutti::plugin::catalog::{CatalogConfig, PluginDb, ScanPoll};
+use tutti::plugin::catalog::{CatalogConfig, PluginDb, PluginId, ScanPoll};
 use tutti::ump::{Address, Message, NoteNumber, U7, Ump, Voice1};
 use tutti::{
     Beat, Bounce, Catalog, Format, MaxBlock, MidiChannel, Normalized, ParamId, Pcm, PluginEvent,
-    PluginLoadRequest, PluginRef, PresetError, PresetKind, Range, Root, SampleRate, Samples,
-    Session, SessionEvent, TimedMidiEvent,
+    PluginRef, PoolEvent, PresetError, PresetKind, Range, Root, SampleRate, Samples, Session,
+    SessionEvent, TimedMidiEvent,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -81,21 +81,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let plugin = PluginRef::from(&entry);
     eprintln!("{name}: {:?} in {}", plugin.id(), plugin.path().display());
 
-    // 3. Load it into an offline session. The load is a job (a server launch
-    //    blocks); here it runs on this thread. The load names the catalog, so a
-    //    plugin it blacklisted is refused here (`BridgeError::Blacklisted`),
-    //    before any server starts. The thread that loads an in-process plugin
+    // 3. Declare it to an offline session as a pool entry, and update until it
+    //    lands. The entry names the catalog's answer for the plugin's id, so a
+    //    plugin the catalog blacklisted does not resolve and fails its load,
+    //    before any server starts. The thread that finishes an in-process load
     //    is the main thread: make the token once.
     let mut session = Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples(512)))
         .build()?;
     let main = tutti::plugin::MainThreadMarker::new().ok_or("run on the process's main thread")?;
-    let loaded = session
-        .plugin_load(PluginLoadRequest::new(plugin))
-        .with_catalog(&catalog)
-        .run();
-    let node = session.add_plugin(main, loaded)?;
+    let id = PluginId::new(entry.format, entry.descriptor.id.clone());
+    session.pool(session.plugin_entry("plugin", &id, &catalog))?;
+    let node = loop {
+        let mut landed = false;
+        for event in session.main(main).update() {
+            match event {
+                SessionEvent::Pool {
+                    event: PoolEvent::Loaded,
+                    ..
+                } => landed = true,
+                SessionEvent::Pool {
+                    event: PoolEvent::Failed(error),
+                    ..
+                } => return Err(error.into()),
+                _ => {}
+            }
+        }
+        if landed {
+            break session.add_pooled_plugin(&"plugin")?;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
 
     // 4. Wire it: the plugin's outputs feed the root's channels. `node` is a
     //    `Key<PluginNode>`: ports come from it as from any node's key

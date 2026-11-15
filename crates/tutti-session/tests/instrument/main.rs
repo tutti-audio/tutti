@@ -12,8 +12,11 @@ static ALLOC: AllocDisabler = AllocDisabler;
 #[macro_use]
 mod instrument_support;
 
+// Loading a plugin file through the pool.
 mod main_pair;
 mod plugin;
 mod polysynth;
+#[path = "../support/pooled.rs"]
+mod pooled;
 mod refusal;
 mod soundfont;

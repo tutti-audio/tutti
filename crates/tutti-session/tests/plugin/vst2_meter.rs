@@ -5,12 +5,13 @@
 //! back out of the reference VST2 probe.
 //!
 
+use crate::pooled::{LoadPlugin, Spec};
 use std::sync::Arc;
 use tutti_session::Root;
 use tutti_types::ChannelLayout;
 
 use tutti_plugin::catalog::PluginRef;
-use tutti_session::{PluginLoadRequest, Session};
+use tutti_session::Session;
 use tutti_types::{
     Beat, BeatsPerBar, Bpm, MeterChange, MeterMap, NoteValue, SampleRate, TimeSignature,
 };
@@ -61,9 +62,9 @@ fn an_in_process_vst2_plugin_is_given_the_project_meter() {
         )])));
     let main = tutti_fixtures::main_thread();
     let node = s
-        .add_plugin_blocking(
+        .load_plugin_blocking(
             main,
-            PluginLoadRequest::new(PluginRef::file(vst2_probe()).expect("a plugin file")),
+            Spec::new(PluginRef::file(vst2_probe()).expect("a plugin file")),
         )
         .expect("the in-process VST2 loads");
     s.graph().connect(node, Root).unwrap();

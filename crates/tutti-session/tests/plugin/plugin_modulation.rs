@@ -9,6 +9,7 @@
 //! without it every test here fails, naming that command. They must fail
 //! rather than skip.
 
+use crate::pooled::{LoadPlugin, Spec};
 use crate::support;
 use tutti_session::Root;
 use tutti_session::{PluginChange, PluginEvent};
@@ -22,8 +23,8 @@ use tutti_plugin::catalog::{Loadable, PluginRef};
 use tutti_plugin::handles::PluginClient;
 use tutti_plugin_types::{Normalized, ParamId};
 use tutti_session::{
-    Crossfade, EventInPort, EventOutPort, PHASES, ParamRef, PhaseCx, PluginLoadRequest, RouteSpec,
-    Session, SessionEvent,
+    Crossfade, EventInPort, EventOutPort, PHASES, ParamRef, PhaseCx, RouteSpec, Session,
+    SessionEvent,
 };
 use tutti_types::{ChannelLayout, Depth, Hz, SampleRate, Seconds};
 
@@ -57,9 +58,9 @@ fn detached() -> Session {
 /// Loads the probe into `s` and puts it on the outputs.
 fn add_probe(s: &mut Session) -> tutti_session::Key<tutti_session::PluginNode> {
     let node = s
-        .add_plugin_blocking(
+        .load_plugin_blocking(
             tutti_fixtures::main_thread(),
-            PluginLoadRequest::new(PluginRef::file(clap_probe()).expect("a plugin file")),
+            Spec::new(PluginRef::file(clap_probe()).expect("a plugin file")),
         )
         .expect("the reference CLAP plugin loads");
     s.graph().connect(node, Root).unwrap();

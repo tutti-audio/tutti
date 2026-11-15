@@ -847,7 +847,7 @@ impl Graph {
     /// Hosts a plugin the host inserted itself (an in-process plugin, a
     /// wrapper around one): `handle` gets the session's health watch,
     /// snapshots and render mode at `node`, as
-    /// [`Session::add_plugin`](crate::Session::add_plugin)'s do. Its latency
+    /// [`Session::add_pooled_plugin`](crate::Session::add_pooled_plugin)'s do. Its latency
     /// is whatever its node's shape declared at insert. Returns the node's
     /// key as a plugin's, [`Key<PluginNode>`](crate::PluginNode).
     ///

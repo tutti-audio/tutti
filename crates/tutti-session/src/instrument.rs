@@ -4,7 +4,7 @@
 //! event input into audio and names its main output pair. The session adds one
 //! ([`Session::add_instrument`]), makes one of a node already in the graph
 //! ([`Session::instrument`]), or of a hosted plugin whose format says it is one
-//! ([`Session::instrument_plugin`]), and hands back an [`InstrumentHandle`]: an
+//! (a pooled plugin's node, through [`Session::instrument`]), and hands back an [`InstrumentHandle`]: an
 //! event inlet before the event input, and a strip after the main pair (the
 //! gain no two instruments agree on).
 //!
@@ -277,26 +277,6 @@ impl Session {
         node: impl Into<NodeKey>,
     ) -> Result<InstrumentHandle, crate::Error> {
         self.instrument_at(Key::new(node.into()), [0, 1])
-    }
-
-    /// Hosts a loaded plugin as an instrument. Its format says what it is only
-    /// once it is open, so a plugin that is not one is added and removed again.
-    ///
-    /// # Errors
-    ///
-    /// The plugin's load error, or
-    /// [`Error::NotInstrument`](crate::Error::NotInstrument) with
-    /// [`NotInstrument::Plugin`].
-    #[cfg(feature = "plugin")]
-    pub fn instrument_plugin(
-        &mut self,
-        main: tutti_plugin_types::MainThreadMarker,
-        loaded: crate::PluginLoaded,
-    ) -> Result<InstrumentHandle, crate::Error> {
-        let node = self.add_plugin(main, loaded).map_err(crate::Error::from)?;
-        self.instrument(node).inspect_err(|_| {
-            let _ = self.remove(node); // added a moment ago, so it is there
-        })
     }
 
     /// Takes away what the handle added: its queue and its strip, consuming the

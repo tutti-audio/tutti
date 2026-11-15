@@ -7,12 +7,14 @@
 //! `instrument`: the shared plugin's entry points do not link into the binary that links the
 //! reference probe, and that one is `instrument`'s neighbour.
 
+#[path = "../support/pooled.rs"]
+mod pooled;
+
+use crate::pooled::{LoadPlugin, Spec};
 use std::sync::Arc;
 use tutti_export::Produced;
 use tutti_plugin::catalog::{Hosting, PluginRef, PluginState};
-use tutti_session::{
-    Bounce, BounceLatency, BounceTail, ExportClock, PluginLoadRequest, Range, Root, Session, Stem,
-};
+use tutti_session::{Bounce, BounceLatency, BounceTail, ExportClock, Range, Root, Session, Stem};
 use tutti_tempo::TempoMap;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_types::{Beat, Bpm, ChannelLayout, MaxBlock, SampleRate, Samples, Seconds};
@@ -48,13 +50,13 @@ fn an_in_process_instrument_without_a_live_render_mode_bounces_its_clip() {
     let plugin = PluginRef::file(tutti_fixtures::publish_with_extension(&real, "clap"))
         .expect("a plugin file");
     let mut session = offline_session();
-    let request = PluginLoadRequest::new(plugin.clone())
+    let request = Spec::new(plugin.clone())
         .hosting(Hosting::InProcess)
         .restoring(PluginState::new(plugin, notes_state()))
         .expect("the state is the plugin's own");
     let main = tutti_fixtures::main_thread();
     let node = session
-        .add_plugin_blocking(main, request)
+        .load_plugin_blocking(main, request)
         .expect("the shared plugin loads in process");
     session.graph().connect(node, Root).unwrap();
     let on = tutti_midi_runtime::TimedMidiEvent::new(

@@ -7,12 +7,13 @@
 //! `MainSession::update` runs them (the session's `MainWork`). The target runs on the
 //! process's main thread, where the handle's own calls run at once.
 
+use crate::pooled::{LoadPlugin, Spec};
 use std::time::Duration;
 use tutti_types::ChannelLayout;
 
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_types::{Normalized, ParamId};
-use tutti_session::{PluginLoadRequest, Session};
+use tutti_session::Session;
 use tutti_types::SampleRate;
 
 /// **A pool thread asks the handle for its state and a parameter while the
@@ -26,11 +27,9 @@ fn a_pool_thread_is_answered_while_the_main_thread_updates_the_session() {
         .build_detached(SampleRate::SR_48K)
         .expect("a detached session builds");
     let node = session
-        .add_plugin_blocking(
+        .load_plugin_blocking(
             main,
-            PluginLoadRequest::new(
-                PluginRef::file(tutti_fixtures::vst2_probe()).expect("a plugin file"),
-            ),
+            Spec::new(PluginRef::file(tutti_fixtures::vst2_probe()).expect("a plugin file")),
         )
         .expect("the in-process VST2 loads");
     let handle = session.plugin(node).expect("hosted").handle().clone();

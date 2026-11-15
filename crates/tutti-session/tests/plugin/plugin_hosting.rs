@@ -1,11 +1,11 @@
-//! What a load asks of the catalog and of the ref's `Hosting`, through the
-//! session: the reference CLAP plugin (`clap_probe`), loaded by `plugin_load`.
+//! What a load asks of the catalog and of the entry's `Hosting`, through the
+//! session: the reference CLAP plugin (`clap_probe`), declared as a pool entry.
 
+use crate::pooled::{LoadEntry, LoadPlugin, Spec, catalog_of, probe};
 use crate::support::{clap_probe, plugin_server};
-use tutti_plugin::catalog::{Catalog, CatalogConfig, Hosting, PluginRef};
-use tutti_plugin_db::PluginDb;
+use tutti_plugin::catalog::{Hosting, PluginRef};
 use tutti_plugin_types::BridgeError;
-use tutti_session::{PluginLoadRequest, Session};
+use tutti_session::{LoadError, Session};
 use tutti_types::{MaxBlock, Samples};
 
 fn session() -> Session {
@@ -15,128 +15,121 @@ fn session() -> Session {
         .expect("an offline session builds")
 }
 
-fn catalog() -> Catalog {
-    Catalog::new(
-        PluginDb::new(),
-        CatalogConfig::new("/nonexistent", tutti_plugin::catalog::NO_SCAN_DIRS),
-        |_| Ok(()),
-    )
-}
-
 fn set_server(path: impl AsRef<std::ffi::OsStr>) {
     // SAFETY: nextest runs each test in its own process, and this is set from
     // the test's own thread before anything spawns a server.
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", path) };
 }
 
-/// **A blacklisted plugin is refused at load, not at open**: the catalog opens nothing, so the
-/// refusal is the load's. A load that
-/// names a catalog that blacklists the plugin fails with the recorded reason,
-/// before any server is looked for (none can be found here, which would be
-/// `ServerNotFound`); the same ref loaded with no catalog is admitted, and so
-/// is the load once the user has unblacklisted it.
+/// **A blacklisted plugin is not in the catalog's answer, and is admitted once
+/// the user unblacklists it**: the entry of a blacklisted file fails with
+/// `Unresolved` before any server is looked for (none can be found here, which
+/// would be `ServerNotFound`), and one built after the user unblacklists loads.
 #[test]
-fn a_blacklisted_plugin_is_refused_at_load() {
+fn a_blacklisted_plugin_does_not_resolve_and_loads_once_unblacklisted() {
     let path = clap_probe();
     let plugin = PluginRef::file(&path).expect("a plugin file");
-    let mut catalog = catalog();
+    let (mut catalog, id, _dir) = catalog_of(&plugin);
     catalog.blacklist(&path, "SIGSEGV during probe");
     let mut s = session();
     let main = tutti_fixtures::main_thread();
 
     set_server("/nonexistent/plugin-server");
-    let load = s
-        .plugin_load(PluginLoadRequest::new(plugin.clone()))
-        .with_catalog(&catalog);
-    match s.add_plugin(main, load.run()) {
-        Err(BridgeError::Blacklisted {
-            path: refused,
-            reason,
-        }) => {
-            assert_eq!(refused, path);
-            assert_eq!(reason, "SIGSEGV during probe");
-        }
-        other => panic!("expected a Blacklisted refusal at load, got {other:?}"),
+    match s.load_entry_blocking(main, &catalog, &id, Hosting::Auto, None) {
+        Err(LoadError::Unresolved(_)) => {}
+        other => panic!("expected an unresolved entry, got {other:?}"),
     }
 
-    // No catalog named: no blacklist consulted, and the plugin loads.
+    // The user unblacklists it: an entry built now admits it.
     set_server(plugin_server());
-    s.add_plugin_blocking(main, PluginLoadRequest::new(plugin.clone()))
-        .expect("a load that names no catalog consults no blacklist");
-
-    // The user unblacklists it: the same catalog now admits it.
     assert!(catalog.unblacklist(&path));
-    let load = s
-        .plugin_load(PluginLoadRequest::new(plugin))
-        .with_catalog(&catalog);
-    s.add_plugin(main, load.run())
+    probe(&mut catalog, &path); // a blacklisted file keeps no descriptors
+    s.load_entry_blocking(main, &catalog, &id, Hosting::Auto, None)
         .expect("an unblacklisted plugin loads");
 }
 
-/// **The blacklist is asked when the load runs, not when it is made**: a plugin
-/// the catalog blacklists between `with_catalog` and `run` is refused, and one
-/// it unblacklists in that window is admitted.
+/// **The blacklist is asked when the load runs, not when the entry is built**: a
+/// plugin the catalog blacklists after the entry resolved it is refused, with
+/// the recorded reason and before any server starts.
 #[test]
-fn a_plugin_blacklisted_after_the_load_is_made_is_refused_when_it_runs() {
+fn a_plugin_blacklisted_after_the_entry_is_built_is_refused_when_it_loads() {
     let path = clap_probe();
     let plugin = PluginRef::file(&path).expect("a plugin file");
-    let mut catalog = catalog();
+    let (mut catalog, id, _dir) = catalog_of(&plugin);
     let mut s = session();
     let main = tutti_fixtures::main_thread();
 
     set_server("/nonexistent/plugin-server");
-    let load = s
-        .plugin_load(PluginLoadRequest::new(plugin.clone()))
-        .with_catalog(&catalog);
+    let declared = s.plugin_entry(0u64, &id, &catalog);
     catalog.blacklist(&path, "hung in its load");
-    match s.add_plugin(main, load.run()) {
-        Err(BridgeError::Blacklisted { reason, .. }) => assert_eq!(reason, "hung in its load"),
-        other => panic!("expected a Blacklisted refusal at run, got {other:?}"),
+    s.pool(declared).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let error = loop {
+        let failed = s
+            .main(main)
+            .update()
+            .into_iter()
+            .find_map(|event| match event {
+                tutti_session::SessionEvent::Pool {
+                    event: tutti_session::PoolEvent::Failed(error),
+                    ..
+                } => Some(error),
+                _ => None,
+            });
+        if let Some(error) = failed {
+            break error;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the load never failed"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    };
+    match error {
+        LoadError::Plugin(error) => match &*error {
+            BridgeError::Blacklisted { reason, .. } => assert_eq!(reason, "hung in its load"),
+            other => panic!("expected a Blacklisted refusal, got {other:?}"),
+        },
+        other => panic!("expected a Blacklisted refusal at load, got {other:?}"),
     }
-
-    let load = s
-        .plugin_load(PluginLoadRequest::new(plugin))
-        .with_catalog(&catalog);
-    assert!(catalog.unblacklist(&path));
-    let loaded = s.add_plugin(main, load.run());
-    assert!(
-        !matches!(loaded, Err(BridgeError::Blacklisted { .. })),
-        "an unblacklisted plugin was refused"
-    );
 }
 
-/// **A hosting the format cannot have is refused at load**, whether the load
-/// runs on a worker or the main thread: VST2 asked to be served is
-/// `NotOutOfProcess`, and the request is not changed to in process.
+/// **A hosting the format cannot have is refused at load**: VST2 asked to be
+/// served is `NotOutOfProcess`, and the entry is not changed to in process.
+#[cfg(feature = "vst2")]
 #[test]
 fn vst2_asked_for_out_of_process_is_refused_at_load() {
-    let plugin = PluginRef::file("Synth.vst").expect("a plugin file");
+    let plugin = PluginRef::file(tutti_fixtures::vst2_probe()).expect("a plugin file");
+    let (catalog, id, _dir) = catalog_of(&plugin);
     let mut s = session();
-    let load = s.plugin_load(PluginLoadRequest::new(plugin).hosting(Hosting::OutOfProcess));
-    assert!(
-        !load.opens_in_process(),
-        "nothing is left for the main thread"
-    );
-    match s.add_plugin(tutti_fixtures::main_thread(), load.run()) {
-        Err(BridgeError::NotOutOfProcess { format, .. }) => assert_eq!(format, "VST2"),
+    match s.load_entry_blocking(
+        tutti_fixtures::main_thread(),
+        &catalog,
+        &id,
+        Hosting::OutOfProcess,
+        None,
+    ) {
+        Err(LoadError::Plugin(error)) => match &*error {
+            BridgeError::NotOutOfProcess { format, .. } => assert_eq!(*format, "VST2"),
+            other => panic!("expected NotOutOfProcess, got {other:?}"),
+        },
         other => panic!("expected NotOutOfProcess, got {other:?}"),
     }
 }
 
 /// **`Hosting::InProcess` makes the session host a CLAP plugin in its own
-/// process**: the load is left for the main thread (`opens_in_process`), no
-/// server is started (none can be found here), and the hosted plugin is the
-/// one asked for, wired like any other.
+/// process**: no server is started (none can be found here), and the hosted
+/// plugin is the one asked for.
 #[test]
 fn a_clap_plugin_asked_in_process_is_hosted_here() {
     set_server("/nonexistent/plugin-server");
     let plugin = PluginRef::file(clap_probe()).expect("a plugin file");
     let mut s = session();
-    let load = s.plugin_load(PluginLoadRequest::new(plugin).hosting(Hosting::InProcess));
-    assert!(load.opens_in_process());
-
     let node = s
-        .add_plugin(tutti_fixtures::main_thread(), load.run())
+        .load_plugin_blocking(
+            tutti_fixtures::main_thread(),
+            Spec::new(plugin).hosting(Hosting::InProcess),
+        )
         .expect("the reference plugin loads in this process");
     let hosted = s.plugin(node).expect("it is hosted");
     assert_eq!(hosted.diagnostics().server_pid(), None);

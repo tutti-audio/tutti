@@ -4,6 +4,7 @@
 //!
 //! The plugin is the reference VST2 probe, in process.
 
+use crate::pooled::{LoadPlugin, Spec};
 use std::time::{Duration, Instant};
 use tutti_session::Root;
 
@@ -12,8 +13,7 @@ use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_types::{Normalized, ParamId};
 use tutti_session::{
-    EventInPort, Feeder, PHASES, ParamRef, PhaseCx, PluginLoadRequest, RouteSpec, Session,
-    SessionEvent,
+    EventInPort, Feeder, PHASES, ParamRef, PhaseCx, RouteSpec, Session, SessionEvent,
 };
 use tutti_types::{ChannelLayout, Depth, SampleRate};
 
@@ -31,9 +31,9 @@ fn session_with_probe() -> (Session, NodeKey) {
         .build_detached(RATE)
         .expect("a detached session builds");
     let node = s
-        .add_plugin_blocking(
+        .load_plugin_blocking(
             tutti_fixtures::main_thread(),
-            PluginLoadRequest::new(PluginRef::file(vst2_probe()).expect("a plugin file")),
+            Spec::new(PluginRef::file(vst2_probe()).expect("a plugin file")),
         )
         .expect("the in-process VST2 loads");
     s.graph().connect(node, Root).unwrap();

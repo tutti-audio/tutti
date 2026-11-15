@@ -4,10 +4,11 @@
 //! (`tutti-vst2-host`'s `IntegerRange`), so `Hz(31.75)` is position `0.25`
 //! (the figures are the range's, written here, not read from the host).
 
+use crate::pooled::{LoadPlugin, Spec};
 use tutti_graph::NodeKey;
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_types::{Normalized, ParamId, ParamUnit};
-use tutti_session::{PluginLoadRequest, PluginParamError, Root, Session};
+use tutti_session::{PluginParamError, Root, Session};
 use tutti_types::{ChannelLayout, Db, Hz, SampleRate};
 
 /// The probe's parameter that is labelled `Hz` and has an integer range.
@@ -38,9 +39,9 @@ fn session_with_probe() -> (Session, NodeKey, libloading::Library) {
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
     let node = s
-        .add_plugin_blocking(
+        .load_plugin_blocking(
             tutti_fixtures::main_thread(),
-            PluginLoadRequest::new(PluginRef::file(probe).expect("a plugin file")),
+            Spec::new(PluginRef::file(probe).expect("a plugin file")),
         )
         .expect("the in-process VST2 loads");
     s.graph().connect(node, Root).unwrap();

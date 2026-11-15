@@ -445,6 +445,13 @@ pub use tutti_modulation::{Follower, Lfo};
 pub use tutti_plugin::catalog::{Catalog, Hosting, PluginRef, PluginState};
 #[cfg(feature = "plugin")]
 pub use tutti_plugin::{Normalized, ParamId, PluginFailure, PresetError, PresetId};
+#[cfg(all(feature = "session", feature = "plugin"))]
+pub use tutti_session::{
+    AddPluginError, Diagnostics, EditorView, LoadError, MainPlugin, MainSession, Opened,
+    ParamGesture, Params, Plugin, PluginBuses, PluginChange, PluginDeclaration, PluginEvent,
+    PluginHealth, PluginInfo, PluginNode, PluginParamError, PoolEvent, PoolState, PooledPlugin,
+    PortCounts, PresetEntry, PresetKind, Presets, RecoveryFailure, ReloadCause, TypedParam,
+};
 #[cfg(all(feature = "session", feature = "midi"))]
 pub use tutti_session::{AddedInstrument, MidiEvent, MidiRouteRule};
 #[cfg(all(feature = "session", feature = "export"))]
@@ -459,13 +466,6 @@ pub use tutti_session::{
 };
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{Device, DeviceEvent, DeviceRestart, LiveSession, RestartOutcome};
-#[cfg(all(feature = "session", feature = "plugin"))]
-pub use tutti_session::{
-    Diagnostics, EditorView, MainPlugin, MainSession, Opened, ParamGesture, Params, Plugin,
-    PluginBuses, PluginChange, PluginEvent, PluginHealth, PluginLoadRequest, PluginNode,
-    PluginParamError, PortCounts, PresetEntry, PresetKind, Presets, RecoveryFailure, ReloadCause,
-    TypedParam,
-};
 #[cfg(all(feature = "session", feature = "device", feature = "audio-io"))]
 pub use tutti_session::{
     Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget, Trim,

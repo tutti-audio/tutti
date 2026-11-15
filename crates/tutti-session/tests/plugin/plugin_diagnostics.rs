@@ -7,9 +7,10 @@
 //! the reference plugin in process (a count that is the same figure in both
 //! hostings: lost MIDI).
 
+use crate::pooled::{LoadPlugin, Spec};
 use tutti_buffers::InterleavedMut;
 use tutti_plugin::catalog::PluginRef;
-use tutti_session::{PluginLoadRequest, Root, Session};
+use tutti_session::{Root, Session};
 use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -50,9 +51,9 @@ mod clap {
         }
         let mut s = offline();
         let node = s
-            .add_plugin_blocking(
+            .load_plugin_blocking(
                 tutti_fixtures::main_thread(),
-                PluginLoadRequest::new(PluginRef::file(clap_probe()).expect("a plugin file")),
+                Spec::new(PluginRef::file(clap_probe()).expect("a plugin file")),
             )
             .expect("the reference CLAP plugin loads");
         (s, node)
@@ -194,9 +195,9 @@ mod vst2 {
     fn midi_past_a_blocks_capacity_reads_as_lost() {
         let mut s = offline();
         let node = s
-            .add_plugin_blocking(
+            .load_plugin_blocking(
                 tutti_fixtures::main_thread(),
-                PluginLoadRequest::new(
+                Spec::new(
                     PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf())
                         .expect("a plugin file"),
                 ),

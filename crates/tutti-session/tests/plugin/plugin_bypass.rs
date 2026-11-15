@@ -17,6 +17,7 @@
 //! every test here fails, naming that command. They must fail rather than
 //! skip.
 
+use crate::pooled::{LoadPlugin, Spec};
 use crate::support;
 
 use std::time::{Duration, Instant};
@@ -26,7 +27,7 @@ use support::{clap_probe, plugin_server};
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_plugin::catalog::PluginRef;
-use tutti_session::{InPort, NodeMode, OutPort, PluginLoadRequest, Root, Session};
+use tutti_session::{InPort, NodeMode, OutPort, Root, Session};
 use tutti_types::{ChannelLayout, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -87,9 +88,9 @@ fn rig(mode: NodeMode) -> Rig {
         .build()
         .expect("an offline session builds");
     let plugin = s
-        .add_plugin_blocking(
+        .load_plugin_blocking(
             tutti_fixtures::main_thread(),
-            PluginLoadRequest::new(PluginRef::file(clap_probe()).expect("a plugin file")),
+            Spec::new(PluginRef::file(clap_probe()).expect("a plugin file")),
         )
         .expect("the reference CLAP plugin loads");
     let g = s.graph();

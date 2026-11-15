@@ -1,7 +1,8 @@
 //! The three instruments, as subjects.
 
+use crate::pooled::{LoadPlugin, Spec};
 use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
-use tutti_session::{AddedInstrument, PluginLoadRequest};
+use tutti_session::AddedInstrument;
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
 use tutti_types::{Adsr, Amplitude, Seconds};
@@ -77,24 +78,29 @@ impl Subject for Soundfont {
 pub struct Plugin;
 
 impl Plugin {
-    /// A session and the plugin loaded for it, not yet in the graph.
+    /// A session and the plugin loaded through its pool and in the graph.
     pub fn load(
         path: std::path::PathBuf,
         state: Option<Vec<u8>>,
-    ) -> (tutti_session::Session, tutti_session::PluginLoaded) {
+    ) -> (
+        tutti_session::Session,
+        tutti_session::Key<tutti_session::PluginNode>,
+    ) {
         // SAFETY: nextest runs every test in its own process and this runs
         // before the first server is spawned, on the test's own thread.
         unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
-        let session = offline_session();
+        let mut session = offline_session();
         let plugin = tutti_plugin::catalog::PluginRef::file(path).expect("a plugin file");
         let request = match state {
-            Some(bytes) => PluginLoadRequest::new(plugin.clone())
+            Some(bytes) => Spec::new(plugin.clone())
                 .restoring(tutti_plugin::catalog::PluginState::new(plugin, bytes))
                 .expect("the state is the plugin's own"),
-            None => PluginLoadRequest::new(plugin),
+            None => Spec::new(plugin),
         };
-        let loaded = session.plugin_load(request).run();
-        (session, loaded)
+        let node = session
+            .load_plugin_blocking(tutti_fixtures::main_thread(), request)
+            .expect("the plugin loads");
+        (session, node)
     }
 
     /// The state that puts the shared plugin in `Notes` mode: its mode
@@ -106,7 +112,10 @@ impl Plugin {
     }
 
     /// The shared plugin, state in `Notes` mode.
-    pub fn notes() -> (tutti_session::Session, tutti_session::PluginLoaded) {
+    pub fn notes() -> (
+        tutti_session::Session,
+        tutti_session::Key<tutti_session::PluginNode>,
+    ) {
         let real = tutti_fixtures::cdylib("tutti_shared_plugin", "tutti-shared-plugin");
         Self::load(
             tutti_fixtures::publish_with_extension(&real, "clap"),
@@ -115,7 +124,10 @@ impl Plugin {
     }
 
     /// The reference probe, which declares itself an effect.
-    pub fn effect() -> (tutti_session::Session, tutti_session::PluginLoaded) {
+    pub fn effect() -> (
+        tutti_session::Session,
+        tutti_session::Key<tutti_session::PluginNode>,
+    ) {
         let real = tutti_fixtures::cdylib("tutti_clap_test_plugin", "tutti-clap-test-plugin");
         Self::load(tutti_fixtures::publish_with_extension(&real, "clap"), None)
     }
@@ -148,9 +160,9 @@ impl Subject for Plugin {
     }
 
     fn rig() -> Rig {
-        let (mut session, loaded) = Self::notes();
+        let (mut session, node) = Self::notes();
         let handle = session
-            .instrument_plugin(tutti_fixtures::main_thread(), loaded)
+            .instrument(node)
             .expect("the plugin declares itself an instrument");
         let mut rig = Rig::wired(session, handle);
         rig.pace = std::time::Duration::from_millis(10);

@@ -10,6 +10,7 @@
 //! every test here fails, naming that command. They must fail rather than
 //! skip.
 
+use crate::pooled::{LoadPlugin, Spec};
 use crate::support;
 
 use std::time::Instant;
@@ -21,7 +22,7 @@ use tutti_plugin::catalog::{Loadable, PluginRef};
 use tutti_plugin::handles::PluginClient;
 use tutti_session::{
     Bounce, BounceLatency, BounceTail, BufferMaster, Crossfade, ExportClock, OutPort, PHASES,
-    Phase, PhaseCx, PluginLoadRequest, Range, Root, Session, SessionEvent,
+    Phase, PhaseCx, Range, Root, Session, SessionEvent,
 };
 use tutti_session::{PluginChange, PluginEvent};
 use tutti_types::{ChannelLayout, SampleRate, Samples};
@@ -49,9 +50,9 @@ fn offline() -> Session {
 
 fn add_probe_on_outputs(s: &mut Session) -> tutti_graph::NodeKey {
     let node = s
-        .add_plugin_blocking(
+        .load_plugin_blocking(
             tutti_fixtures::main_thread(),
-            PluginLoadRequest::new(PluginRef::file(clap_probe()).expect("a plugin file")),
+            Spec::new(PluginRef::file(clap_probe()).expect("a plugin file")),
         )
         .expect("the reference CLAP plugin loads");
     s.graph()

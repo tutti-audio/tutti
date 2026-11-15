@@ -13,6 +13,7 @@
 //! it every test here fails, naming that command. They must fail rather than
 //! skip.
 
+use crate::pooled::{LoadPlugin, Spec};
 use crate::support;
 use tutti_session::InPort;
 use tutti_session::Root;
@@ -36,7 +37,7 @@ use tutti_plugin_types::{BridgeError, TerminationReason};
 use tutti_session::BufferMaster;
 use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, ExportClock, Phase, PhaseCx, PluginHealth,
-    PluginLoadRequest, Range, Session, SessionEvent,
+    Range, Session, SessionEvent,
 };
 use tutti_session::{RecoveryFailure, ReloadCause};
 use tutti_types::{ChannelLayout, SampleRate, Samples};
@@ -85,9 +86,9 @@ fn session_built(
 
 /// Loads the probe into `s` (blocking), unwired.
 fn add_probe(s: &mut Session) -> NodeKey {
-    s.add_plugin_blocking(
+    s.load_plugin_blocking(
         tutti_fixtures::main_thread(),
-        PluginLoadRequest::new(PluginRef::file(clap_probe()).expect("a plugin file")),
+        Spec::new(PluginRef::file(clap_probe()).expect("a plugin file")),
     )
     .expect("the reference CLAP plugin loads")
     .erase()
@@ -803,9 +804,9 @@ fn a_reload_that_fails_to_load_carries_the_bridge_error_as_its_source() {
         }))
     });
     let node = s
-        .add_plugin_blocking(
+        .load_plugin_blocking(
             tutti_fixtures::main_thread(),
-            PluginLoadRequest::new(PluginRef::file(&copy).expect("a plugin file")),
+            Spec::new(PluginRef::file(&copy).expect("a plugin file")),
         )
         .expect("the copy loads");
     s.graph().connect(node, Root).unwrap();
@@ -967,6 +968,9 @@ fn a_reload_job_the_spawner_drops_is_a_failed_attempt() {
     let once = once_file("recovery-dropped.once");
     let dropped = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let counted = Arc::clone(&dropped);
+    // The spawner runs the load of the plugin and drops the reload's jobs.
+    let dropping = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let drops = Arc::clone(&dropping);
     let mut s = session_built(
         &[
             ("TUTTI_CLAP_PROBE_ONCE_FILE", &once),
@@ -978,12 +982,17 @@ fn a_reload_job_the_spawner_drops_is_a_failed_attempt() {
                 ..Default::default()
             }))
             .spawn_with(move |job| {
-                counted.fetch_add(1, Ordering::SeqCst);
-                drop(job);
+                if drops.load(Ordering::SeqCst) {
+                    counted.fetch_add(1, Ordering::SeqCst);
+                    drop(job);
+                } else {
+                    job.run();
+                }
             })
         },
     );
     let (node, _) = wired_probe(&mut s);
+    dropping.store(true, Ordering::SeqCst);
     let mut drive = Drive::new();
     drive.until(&mut s, "a second attempt", |e| {
         matches!(
