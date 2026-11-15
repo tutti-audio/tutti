@@ -253,7 +253,7 @@ mod tests {
     use tutti_dsp::{ChannelTimes, Routing};
     use tutti_graph::contract::{assert_honest_tail, assert_param_fork, drive, prepared};
     use tutti_graph::{Node, ParamNode};
-    use tutti_types::{ChannelLayout, Latency, Samples, Tail, UnitParam};
+    use tutti_types::{ChannelLayout, Gain, Latency, Samples, Tail, UnitParam};
 
     /// A rate at which a time of `n / 1024` seconds is exactly `n` frames.
     const RATE: SampleRate = SampleRate::of(1_024.0);
@@ -492,7 +492,7 @@ mod tests {
     fn a_dense_routing_at_full_feedback_stays_bounded() {
         let b = bus(4);
         let layout = DelayLayout::new(b, MaxDelay::of(Seconds(0.1)), InterpolationMode::Linear)
-            .with_routing(Routing::normalized(b, &[1.0; 16]).unwrap())
+            .with_routing(Routing::normalized(b, &[Gain::UNITY; 16]).unwrap())
             .unwrap();
         let node = DelayNode::from_layout(layout, controls(0.002, 0.99, 0.99));
         let out = frames_of(node, &impulses(4, 8_001, &[0, 1, 2, 3]), &[]);

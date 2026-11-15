@@ -30,16 +30,16 @@ fn the_first_echo_is_the_input_at_the_fixed_gain_after_the_shortest_comb() {
     assert!(left[..1116].iter().all(|&s| s == 0.0), "silent until 1116");
     assert!(right[..1139].iter().all(|&s| s == 0.0), "silent until 1139");
     assert!(
-        (left[1116] - Freeverb::FIXED_GAIN).abs() < 1e-6,
+        (left[1116] - Freeverb::FIXED_GAIN.get()).abs() < 1e-6,
         "{}",
         left[1116]
     );
     assert!(
-        (right[1139] - Freeverb::FIXED_GAIN).abs() < 1e-6,
+        (right[1139] - Freeverb::FIXED_GAIN.get()).abs() < 1e-6,
         "{}",
         right[1139]
     );
-    assert_eq!(Freeverb::FIXED_GAIN, 0.015);
+    assert_eq!(Freeverb::FIXED_GAIN.get(), 0.015);
 }
 
 /// The tunings scale with the rate: at twice 44.1 kHz the first echo is at
