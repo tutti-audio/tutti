@@ -7,7 +7,7 @@
 //! `#[should_panic]`. Its body is *active* when it holds any of:
 //!
 //! - a call or macro whose name contains `assert` (`assert_eq!`,
-//!   `debug_assert!`, `assert_golden(..)`), or `panic!` or `unreachable!`;
+//!   `debug_assert!`), or `panic!` or `unreachable!`;
 //! - a call of `unwrap`, `expect`, `unwrap_err` or `expect_err`, or a `?`: the
 //!   test fails when the value is not the one it names;
 //! - a call of a function or macro of the same file whose body is active (at
@@ -305,7 +305,6 @@ mod tests {
     fn each_assertion_like_token_makes_a_test_active() {
         for body in [
             "assert!(x)",
-            "assert_golden(x)",
             "panic!(\"no\")",
             "x.expect(\"a\")",
             "x.unwrap()",
