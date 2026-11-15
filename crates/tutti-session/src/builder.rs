@@ -115,9 +115,9 @@ struct Options {
     mpe_mode: tutti_midi_protocol::MpeMode,
     #[cfg(feature = "midi")]
     midi_ports: tutti_midi_runtime::MidiInputPorts,
-    /// How many hardware MIDI devices may be connected at once.
-    #[cfg(feature = "midi")]
-    midi_devices: NonZeroUsize,
+    /// Where the input ports' event times come from.
+    #[cfg(feature = "midi-hardware")]
+    midi_input_timing: tutti_midi_hardware::InputTiming,
     #[cfg(feature = "modulation")]
     unresolved_warning: std::time::Duration,
     #[cfg(feature = "plugin")]
@@ -162,8 +162,8 @@ impl Default for Options {
             mpe_mode: tutti_midi_protocol::MpeMode::Disabled,
             #[cfg(feature = "midi")]
             midi_ports: tutti_midi_runtime::MidiInputPorts::FIRST_GROUP,
-            #[cfg(feature = "midi")]
-            midi_devices: crate::MIDI_INPUT_DEVICES,
+            #[cfg(feature = "midi-hardware")]
+            midi_input_timing: tutti_midi_hardware::InputTiming::Arrival,
             #[cfg(feature = "modulation")]
             unresolved_warning: crate::UNRESOLVED_WARNING,
             #[cfg(feature = "plugin")]
@@ -709,8 +709,11 @@ impl<C: Clock> SessionBuilder<C> {
         self
     }
 
-    /// Open the OS MIDI layer (reached through [`Session::midi`](crate::Session::midi): `connect_input`, `connect_output`, `devices`) and feed the engine's
-    /// MIDI ingest node, an event inlet for each connected device. Default off.
+    /// Open the OS MIDI layer: its devices are listed by
+    /// [`Midi::devices`](crate::Midi::devices) and opened by the pool's
+    /// [`midi_input`](crate::midi_input) and [`midi_output`](crate::midi_output)
+    /// entries, each input feeding the graph through an ingest node and an event
+    /// inlet of its own. Default off.
     #[cfg(feature = "midi-hardware")]
     #[must_use]
     pub fn midi_hardware(mut self) -> Self {
@@ -757,15 +760,16 @@ impl<C: Clock> SessionBuilder<C> {
         self
     }
 
-    /// How many hardware MIDI devices may be connected at once: the ingest
-    /// node has one event input, and each device one event inlet and one
-    /// translator state, for each ([`MIDI_INPUT_DEVICES`](crate::MIDI_INPUT_DEVICES)
-    /// by default). Connecting one past it is refused
-    /// (`tutti_midi_hardware::Error::NoFreeSlot`).
-    #[cfg(feature = "midi")]
+    /// Where the event times of the input ports come from:
+    /// [`InputTiming::Arrival`](tutti_midi_hardware::InputTiming::Arrival), the
+    /// OS's arrival stamp (the default), or
+    /// [`JitterReduction`](tutti_midi_hardware::InputTiming::JitterReduction),
+    /// the JR Timestamps of a device that agrees to send them. Every input
+    /// port the pool opens takes it.
+    #[cfg(feature = "midi-hardware")]
     #[must_use]
-    pub fn midi_devices(mut self, devices: NonZeroUsize) -> Self {
-        self.opts.midi_devices = devices;
+    pub fn midi_input_timing(mut self, timing: tutti_midi_hardware::InputTiming) -> Self {
+        self.opts.midi_input_timing = timing;
         self
     }
 
@@ -839,11 +843,10 @@ impl<C: Clock> SessionBuilder<C> {
         let backend = self.opts.midi_backend.take();
         #[cfg(feature = "midi-hardware")]
         let midi_io = self.opts.midi_hardware.then(|| -> Result<_> {
-            // One event inlet for each device, which its thread pushes into
+            // One event inlet for each input, which its thread pushes into
             // for the frame the engine's block clock puts its arrival on: a
             // block later, so no event is late (the lead).
-            let inlets = tutti_midi_runtime::DeviceInlets::new(
-                self.opts.midi_devices,
+            let inlets = tutti_midi_runtime::InputInlets::new(
                 crate::midi::MIDI_INPUT_INLET_CAPACITY,
                 crate::midi::input_lead(quantum.unwrap_or(max_block).samples(), rate),
             );
@@ -880,27 +883,11 @@ impl<C: Clock> SessionBuilder<C> {
         // declaration, like every other node's.
         let (click, _settings) = graph.add(ClickNode::new(&transport, Arc::clone(&click_settings)));
 
-        // The engine's MIDI as graph nodes: the hardware input's ingest (translating,
-        // and ingesting MPE in the builder's mode), the clock (off until a
-        // host enables it), and the event tap on the clock that is the hardware out.
+        // The engine's MIDI as graph nodes: the clock (off until a host enables
+        // it), and the event tap on the clock that is the host's hardware out.
+        // An input port's ingest node is made when its pool entry loads.
         #[cfg(feature = "midi")]
         let midi = {
-            // One event input for each device slot; the session wires a
-            // device's inlet to its slot as the device connects.
-            let ingest = tutti_midi_runtime::MidiIngestNode::new(self.opts.midi_devices)
-                .hearing(self.opts.midi_ports)
-                .with_mpe(self.opts.mpe_mode);
-            // A slot a new device takes starts over in the node, with no call
-            // from here: it follows the inlets' epochs. Both are built from
-            // `midi_devices`, so their slot counts agree.
-            #[cfg(feature = "midi-hardware")]
-            let ingest = match &midi_io {
-                Some(io) => ingest
-                    .following(io.ports().inlets())
-                    .expect("the ingest node and the inlets are built with one slot count"),
-                None => ingest,
-            };
-            let (input, input_controls) = graph.add(ingest);
             let (clock, clock_master) = graph.add(tutti_midi_runtime::ClockNode::new(
                 tutti_ump::MidiGroup::FIRST,
                 rate,
@@ -917,10 +904,7 @@ impl<C: Clock> SessionBuilder<C> {
                 .expect("the clock node is in the graph with its event output");
             (
                 Some(crate::MidiNodes {
-                    input: input.erase(),
                     input_ports: self.opts.midi_ports,
-                    input_devices: self.opts.midi_devices,
-                    input_controls,
                     clock: clock.erase(),
                     clock_master,
                 }),
@@ -1000,7 +984,8 @@ impl<C: Clock> SessionBuilder<C> {
                 parts.device_events,
                 parts.midi_tap,
             )
-            .with_mpe(self.opts.mpe_mode),
+            .with_mpe(self.opts.mpe_mode)
+            .with_input_timing(self.opts.midi_input_timing),
             #[cfg(feature = "modulation")]
             mods: crate::modulation::ModSession::new(self.opts.unresolved_warning),
             #[cfg(feature = "midi-hardware")]

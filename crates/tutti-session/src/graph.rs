@@ -131,6 +131,9 @@ pub enum Feeder {
     Instrument,
     /// A host's declarations.
     Declared,
+    /// The session's MIDI clock, which feeds every output port
+    /// (`midi_output`, feature `midi-hardware`).
+    Clock,
 }
 
 tutti_types::id! {

@@ -49,6 +49,16 @@ pub enum Error {
     #[error("Unsupported channel count: 0 (a render needs at least one channel)")]
     UnsupportedChannels,
 
+    /// [`Normalize::gain_for_rendered`](crate::Normalize::gain_for_rendered)
+    /// was given a topology of another width than the rendered audio.
+    #[error("the topology is {topology:?} wide and the rendered audio {rendered:?}")]
+    TopologyWidth {
+        /// The topology's width.
+        topology: tutti_types::ChannelLayout,
+        /// The rendered audio's width.
+        rendered: tutti_types::ChannelLayout,
+    },
+
     /// A loudness measurement was asked for and the audio cannot be
     /// normalized by it (`reason` says why): the meter rejects it, or the
     /// reading it gives is not a measurement of the programme.
@@ -202,6 +212,14 @@ pub enum Unmeasured {
     /// The meter does not take this width or rate: EBU R128 accepts 1 to 64
     /// channels at 16 Hz to 2.8 MHz.
     Format,
+    /// [`Normalize::Lufs`](crate::Normalize::Lufs) cannot weigh the channels:
+    /// loudness is weighted by each speaker's angles (BS.1770-5 Table 4),
+    /// which an ambisonic set or speakers that are not a known bed do not have.
+    /// A file output is refused before the render
+    /// ([`TargetError::UnplacedLoudness`](crate::TargetError));
+    /// this is what [`Normalize::gain_for_rendered`](crate::Normalize::gain_for_rendered)
+    /// reports for a topology it was given.
+    Placement,
     /// [`Normalize::Lufs`](crate::Normalize::Lufs): no part of the audio
     /// passed the integrated loudness gate. It is silent, quieter than the
     /// absolute gate (-70 LUFS), or shorter than the 400 ms block the gate is
@@ -216,6 +234,7 @@ impl std::fmt::Display for Unmeasured {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::Format => "the meter does not take this width or rate",
+            Self::Placement => "the channels' speaker placement is unknown or ambisonic",
             Self::BelowGate => {
                 "nothing passed the loudness gate (silent, under -70 LUFS, or under 400 ms)"
             }

@@ -88,9 +88,7 @@ fn endpoint_wire(blocks: &[FunctionBlock]) -> Wire {
         endpoint_of(blocks),
     );
     wire.session.enable_ci(identity());
-    wire.session
-        .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+    wire.open(InputTiming::Arrival);
     // One Function Block Discovery per declared block takes a few ticks.
     let settled = (0..32).any(|ms| !wire.tick(ms).1.is_empty());
     assert!(settled, "the negotiation settled");
@@ -197,9 +195,7 @@ fn an_endpoint_with_no_blocks_or_no_answer_gets_discovery_on_group_0() {
         Endpoint::new(Capabilities::default()),
     );
     wire.session.enable_ci(identity());
-    wire.session
-        .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+    wire.open(InputTiming::Arrival);
     let step = STEP_TIMEOUT.as_millis() as u64;
     for ms in [0, step, 2 * step, 3 * step + 1, 3 * step + 2] {
         let _ = polled(&mut wire, ms);
@@ -394,7 +390,7 @@ fn nothing_midi_ci_reaches_the_sessions_output_and_the_graph_still_hears_sysex()
 
     let mut rig = Rig::over(wire.session.ports().inlets(), wire.start);
     rig.run(1);
-    rig.apply();
+    rig.attach(wire.inlet.take().expect("the wire connected its input"));
 
     let _ = polled(&mut wire, 0);
     reply_at(&wire, identity_reply(0), 1);
@@ -519,9 +515,7 @@ fn midi_ci_is_off_by_default() {
         PortDirection::Duplex,
         endpoint_of(&[ci_block(0, 2, 2)]),
     );
-    wire.session
-        .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+    wire.open(InputTiming::Arrival);
     let settled = (0..32).any(|ms| !wire.tick(ms).1.is_empty());
     assert!(settled);
     for ms in [100, 5_000, 20_000] {

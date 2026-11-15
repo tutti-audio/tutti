@@ -95,3 +95,25 @@ pub fn play(s: &Session) {
         .try_send(MotionEvent::Play)
         .expect("room");
 }
+
+/// A session over a fake OS with one device, `Keys`, declared as the input port
+/// `"input"` and loaded (hearing Groups up to `groups`, the first alone with
+/// `None`): the port's ingest node, which route rules wire from.
+#[cfg(feature = "midi-hardware")]
+pub fn with_input(groups: Option<tutti_ump::MidiGroup>) -> (Session, NodeKey) {
+    use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};
+    let (backend, _fake) =
+        FakeBackend::build_with(vec![persistent_endpoint(1, "Keys")], vec![], usize::MAX);
+    let mut builder = Session::builder().midi_hardware_over(backend);
+    if let Some(last) = groups {
+        builder = builder.midi_groups(last);
+    }
+    let mut s = builder.build().expect("builds");
+    let _ = s.update();
+    let keys = s.midi().devices().remove(0);
+    s.pool(tutti_session::midi_input("input", keys))
+        .expect("declares");
+    let _ = s.update();
+    let node = s.midi_input(&"input").expect("loaded").node();
+    (s, node)
+}

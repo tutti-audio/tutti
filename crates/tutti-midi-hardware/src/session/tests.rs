@@ -5,7 +5,6 @@ use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, NoWatch, Watch};
 use crate::test_support::FakeBackend;
-use std::num::NonZeroUsize;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_fixtures::midi;
@@ -17,10 +16,9 @@ use tutti_midi_device::EndpointId;
 /// Returned as a tuple rather than the `FakeCounters` struct so each test
 /// names only the counter it uses — `(s, _, opens)` says at a glance that
 /// this one is about opens.
-/// Inlets for four devices of 64 events, with no lead.
-fn inlets() -> Arc<DeviceInlets> {
-    DeviceInlets::new(
-        NonZeroUsize::new(4).unwrap(),
+/// Inlets of 64 events, with no lead.
+fn inlets() -> Arc<InputInlets> {
+    InputInlets::new(
         tutti_graph::EventCapacity::of(64),
         std::time::Duration::ZERO,
     )
@@ -63,7 +61,8 @@ fn enumeration_passes_the_backend_through() {
 fn connecting_an_input_makes_it_connected() {
     let (mut s, _, _) = session();
     assert!(!s.is_any_input_connected());
-    s.connect_input(&input(&s, "Keystep Pro"), InputTiming::Arrival)
+    let _ = s
+        .connect_input(&input(&s, "Keystep Pro"), InputTiming::Arrival)
         .unwrap();
     assert!(s.is_any_input_connected());
     assert_eq!(s.connected_input_names(), vec!["Keystep Pro".to_string()]);
@@ -74,9 +73,11 @@ fn connecting_an_input_makes_it_connected() {
 #[test]
 fn connecting_an_open_input_is_idempotent() {
     let (mut s, _, opens) = session();
-    s.connect_input(&input(&s, "Keystep Pro"), InputTiming::Arrival)
+    let _ = s
+        .connect_input(&input(&s, "Keystep Pro"), InputTiming::Arrival)
         .unwrap();
-    s.connect_input(&input(&s, "Keystep Pro"), InputTiming::Arrival)
+    let _ = s
+        .connect_input(&input(&s, "Keystep Pro"), InputTiming::Arrival)
         .unwrap();
     assert_eq!(opens.load(Ordering::SeqCst), 1, "the port opens once");
     assert_eq!(s.connected_input_names().len(), 1);
@@ -85,7 +86,7 @@ fn connecting_an_open_input_is_idempotent() {
 #[test]
 fn by_name_matching_is_case_insensitive_substring() {
     let (mut s, _, _) = session();
-    s.connect_input("keystep", InputTiming::Arrival).unwrap();
+    let _ = s.connect_input("keystep", InputTiming::Arrival).unwrap();
     assert_eq!(s.connected_input_names(), vec!["Keystep Pro".to_string()]);
 }
 
@@ -123,9 +124,11 @@ fn connecting_an_absent_device_is_an_error_not_a_silent_noop() {
 #[test]
 fn disconnecting_closes_only_the_named_input() {
     let (mut s, _, _) = session();
-    s.connect_input(&input(&s, "Keystep Pro"), InputTiming::Arrival)
+    let _ = s
+        .connect_input(&input(&s, "Keystep Pro"), InputTiming::Arrival)
         .unwrap();
-    s.connect_input(&input(&s, "IAC Bus 1"), InputTiming::Arrival)
+    let _ = s
+        .connect_input(&input(&s, "IAC Bus 1"), InputTiming::Arrival)
         .unwrap();
     s.disconnect_input("iac");
     assert_eq!(s.connected_input_names(), vec!["Keystep Pro".to_string()]);
@@ -141,7 +144,7 @@ fn disconnecting_closes_only_the_named_input() {
 fn a_query_by_id_and_by_name_reach_the_same_device() {
     let (mut s, _, _) = session();
     let keystep = input(&s, "Keystep Pro");
-    s.connect_input("pro", InputTiming::Arrival).unwrap();
+    let _ = s.connect_input("pro", InputTiming::Arrival).unwrap();
     assert!(s.is_input_connected(&keystep), "by name");
     assert!(s.disconnect_input(&keystep), "by id");
     assert!(!s.disconnect_input("pro"), "nothing is open to close");
@@ -149,8 +152,8 @@ fn a_query_by_id_and_by_name_reach_the_same_device() {
     // Both open inputs' names contain an "s"; the disconnect closes the
     // lowest id.
     let iac = input(&s, "IAC Bus 1");
-    s.connect_input(&keystep, InputTiming::Arrival).unwrap();
-    s.connect_input(&iac, InputTiming::Arrival).unwrap();
+    let _ = s.connect_input(&keystep, InputTiming::Arrival).unwrap();
+    let _ = s.connect_input(&iac, InputTiming::Arrival).unwrap();
     assert!(
         iac < keystep,
         "the fixture's ids: {iac:?} below {keystep:?}"
@@ -298,21 +301,23 @@ fn each_connected_output_is_its_own_value_on_its_own_device() {
 }
 
 /// Repeated connect/disconnect cycles keep the port set bounded: a
-/// disconnect retires its port, and the reconnect takes its slot back.
+/// disconnect retires its port, and the reconnect opens a new one.
 ///
-/// Device 2 stays connected throughout, so device 1's slot is an interior
-/// one on every cycle after the first.
+/// Device 2 stays connected throughout.
 #[test]
 fn hot_plug_cycles_keep_the_port_set_bounded() {
     let (mut s, _, opens) = session();
-    s.connect_input(&input(&s, "Keystep Pro"), InputTiming::Arrival)
+    let _ = s
+        .connect_input(&input(&s, "Keystep Pro"), InputTiming::Arrival)
         .unwrap();
-    s.connect_input(&input(&s, "IAC Bus 1"), InputTiming::Arrival)
+    let _ = s
+        .connect_input(&input(&s, "IAC Bus 1"), InputTiming::Arrival)
         .unwrap();
     for cycle in 0..100 {
         s.disconnect_input(&input(&s, "Keystep Pro"));
         assert_eq!(s.ports().list_input_ports().len(), 1, "cycle {cycle}");
-        s.connect_input(&input(&s, "Keystep Pro"), InputTiming::Arrival)
+        let _ = s
+            .connect_input(&input(&s, "Keystep Pro"), InputTiming::Arrival)
             .unwrap();
         assert_eq!(s.ports().list_input_ports().len(), 2, "cycle {cycle}");
         assert_eq!(s.ports().port_count(), 2, "cycle {cycle}");
@@ -401,7 +406,8 @@ fn logging_session(refuse: bool) -> (MidiSession, Arc<Mutex<Vec<&'static str>>>)
 #[test]
 fn dropping_the_session_closes_inputs_then_the_backend_and_retires_ports() {
     let (mut s, log) = logging_session(false);
-    s.connect_input(&input(&s, "Logged"), InputTiming::Arrival)
+    let _ = s
+        .connect_input(&input(&s, "Logged"), InputTiming::Arrival)
         .unwrap();
     let ports = Arc::clone(s.ports());
     assert_eq!(ports.list_input_ports().len(), 1);
@@ -438,8 +444,7 @@ fn a_session_is_send() {
         true
     }
     let (backend, _counters) = FakeBackend::build_with(vec![], vec![], usize::MAX);
-    let inlets = tutti_midi_runtime::DeviceInlets::new(
-        NonZeroUsize::new(1).unwrap(),
+    let inlets = tutti_midi_runtime::InputInlets::new(
         tutti_graph::EventCapacity::of(8),
         std::time::Duration::ZERO,
     );
