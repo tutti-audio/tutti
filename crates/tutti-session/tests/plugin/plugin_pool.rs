@@ -550,8 +550,8 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
     );
 }
 
-/// **A save of a plugin whose server was terminated lands the plugin's
-/// refusal, not a state:** the job ends as `StateJobFailed::State`, and no
+/// **A save of a plugin whose server was terminated lands the crash, not a
+/// state:** the job ends as `StateJobFailed::State(PluginCrashed)`, and no
 /// empty state is saved as the real thing.
 #[test]
 fn a_state_job_of_a_dead_plugin_lands_the_plugins_refusal() {
@@ -569,9 +569,13 @@ fn a_state_job_of_a_dead_plugin_lands_the_plugins_refusal() {
         });
     let saving = s.save_state(&"a").expect("the node is still there");
     settle_until(&mut s, "the save", |_| saving.has_landed());
+    let landed = saving.take();
     assert!(
-        matches!(saving.take(), Some(Err(StateJobFailed::State(_)))),
-        "the plugin's refusal"
+        matches!(
+            landed,
+            Some(Err(StateJobFailed::State(StateError::PluginCrashed)))
+        ),
+        "the plugin's refusal: {landed:?}"
     );
 }
 

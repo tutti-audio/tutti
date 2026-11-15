@@ -8,7 +8,8 @@
 //! it there. An in-process plugin's save runs on the **main thread**, through
 //! the session's main work: the worker waits for it, so the app must keep
 //! calling [`update`](Session::update) on the main thread, and a save the
-//! main thread does not run within the off-main deadline (two seconds) ends
+//! main thread does not run within the off-main deadline
+//! (`tutti-plugin-host`'s `OFF_MAIN_DEADLINE`) ends
 //! as [`StateJobFailed::State`] with [`StateError::Unavailable`], as it does
 //! when the session's main work was never run.
 //!
@@ -51,8 +52,9 @@ pub enum StateJobError<K: fmt::Debug> {
 #[derive(Clone, Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum StateJobFailed {
-    /// The plugin's own refusal: it is gone, busy, refused or has no state
-    /// route.
+    /// The plugin's own refusal: it is gone, busy, refused, has no state route,
+    /// or an in-process save the main thread did not run in time
+    /// ([`StateError::Unavailable`]).
     #[error(transparent)]
     State(#[from] StateError),
     /// The worker did not finish.
@@ -66,7 +68,8 @@ impl<C: crate::Clock> Session<C> {
     /// later [`update`](Self::update). An in-process plugin saves on the main
     /// thread, through the session's main work: keep calling `update` there,
     /// or the save ends as [`StateJobFailed::State`] with
-    /// [`StateError::Unavailable`] after the off-main deadline (two seconds).
+    /// [`StateError::Unavailable`] after the off-main deadline (see the module
+    /// docs).
     /// The wait never lands once the session is dropped.
     ///
     /// # Errors

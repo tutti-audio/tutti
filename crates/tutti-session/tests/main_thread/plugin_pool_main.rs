@@ -496,8 +496,10 @@ fn an_in_process_save_the_main_thread_does_not_run_is_unavailable() {
     assert!(matches!(next_event(&mut s, "verb"), PoolEvent::Loaded));
     let _node = s.add_pooled_plugin(&"verb").unwrap();
     let saving = s.save_state(&"verb").expect("a node holds the plugin");
-    // No update on the main thread meanwhile, longer than the deadline.
-    thread::sleep(Duration::from_millis(2500));
+    // No update on the main thread meanwhile, for more than the off-main
+    // deadline: the job's end only lands in an update, so the wait cannot be
+    // polled, and the worker has timed out long before the first update.
+    thread::sleep(Duration::from_secs(4));
     let deadline = Instant::now() + Duration::from_secs(30);
     while !saving.has_landed() {
         assert!(Instant::now() < deadline, "the save never landed");
