@@ -56,7 +56,7 @@ impl Spec {
 /// The probe is a process of its own and inherits the environment. A test sets
 /// `TUTTI_CLAP_PROBE_*` variables to make the plugin's server fail, render or
 /// report in a way the test pins, and the probe must not see them: it would use
-/// up a fault meant for the server (`ONCE_FILE`) or report a plugin the test did
+/// up a fault meant for the server (the plugin's "once" marker) or report a plugin the test did
 /// not mean. So the probe asserts none is set, and a test that sets one
 /// [`prime`]s the plugin's file first. Once the probe is done the catalog's
 /// writer is joined, so the helper leaves no thread of its own behind.
