@@ -658,6 +658,12 @@ fn a_swap_waits_for_the_graph_and_ends_on_the_last_identity() {
         first,
         "the graph is re-preparing: it waits"
     );
+    // The landed plugin is the node's swap: a second node is refused, and the
+    // refusal leaves the plugin for the swap.
+    assert!(matches!(
+        s.add_pooled_plugin(&"fx"),
+        Err(AddPluginError::Installed("fx"))
+    ));
     s.pool(
         s.plugin_entry("fx", &first_id(), &catalog)
             .hosting(Hosting::OutOfProcess),
@@ -669,6 +675,12 @@ fn a_swap_waits_for_the_graph_and_ends_on_the_last_identity() {
         "{events:?}"
     );
     assert_eq!(pid_of(&s, node), first, "still waiting");
+    // The plugin that landed last is the node's swap: a second node is refused,
+    // and the refusal leaves that plugin for the swap.
+    assert!(matches!(
+        s.add_pooled_plugin(&"fx"),
+        Err(AddPluginError::Installed("fx"))
+    ));
 
     let mut out = vec![Vec::new(), Vec::new()];
     settle_until(&mut s, "the swap", |s| {

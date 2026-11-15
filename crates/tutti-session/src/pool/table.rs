@@ -846,9 +846,7 @@ impl Pool {
     /// landing that was refused ([`landing_of`](Self::landing_of)): a refusal of
     /// a landing that a newer declaration or a pending load has since
     /// superseded is stale and records nothing, so it cannot clobber the load
-    /// in flight. (A pending load always has a newer generation, so the
-    /// pending check only says the same thing twice.) Returns whether the
-    /// entry failed.
+    /// in flight. Returns whether the entry failed.
     #[cfg(feature = "plugin")]
     pub(crate) fn refuse_landed(
         &mut self,
@@ -856,9 +854,11 @@ impl Pool {
         generation: u64,
         error: LoadError,
     ) -> bool {
-        let Some(slot) = self.slots.get_mut(key).filter(|slot| {
-            slot.generation == generation && !slot.pending() && slot.loaded.is_some()
-        }) else {
+        let Some(slot) = self
+            .slots
+            .get_mut(key)
+            .filter(|slot| slot.generation == generation && slot.loaded.is_some())
+        else {
             return false;
         };
         slot.loaded = None;
