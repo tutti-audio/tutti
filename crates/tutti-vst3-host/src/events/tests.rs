@@ -1888,8 +1888,7 @@ fn a_full_scale_per_note_volume_stages_at_vst3_unity() {
 fn a_per_note_reset_sends_volume_at_vst3_unity() {
     let reset = Voice2::PerNoteManagement {
         note: NoteNumber::of(60),
-        detach: false,
-        reset: true,
+        management: PerNoteManagement::Reset,
     };
     assert_eq!(volumes_after(reset), [0.25]);
 }
