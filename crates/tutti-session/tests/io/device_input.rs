@@ -129,7 +129,7 @@ fn a_restart_reopens_an_added_input_into_the_same_node() {
 
     let (driver, new) = ManualStreamDriver::new();
     session
-        .restart_on(&mut device, spec_at(44_100.0), driver, None)
+        .restart_on(&mut device, spec_at(44_100.0), driver, None, None)
         .expect("restarts");
     assert_eq!(
         record.lock().unwrap().log,
@@ -176,7 +176,7 @@ fn an_input_that_cannot_be_reopened_is_reported_with_its_error() {
 
     let (driver, _new) = ManualStreamDriver::new();
     session
-        .restart_on(&mut device, spec_at(44_100.0), driver, None)
+        .restart_on(&mut device, spec_at(44_100.0), driver, None, None)
         .expect("the output restarts whatever the input does");
 
     let events = poll(&mut session);
@@ -211,6 +211,7 @@ fn a_failed_restart_is_a_device_event_with_the_typed_error_as_its_source() {
         spec_at(96_000.0),
         driver,
         Some(tutti_types::MaxBlock::of(Samples(16_384))),
+        None,
     );
     assert!(refused.is_err());
 
@@ -265,7 +266,7 @@ fn device_latency_is_the_reported_delay_in_frames_and_none_before_a_report() {
 
     let (driver, new) = ManualStreamDriver::new();
     session
-        .restart_on(&mut device, spec_at(44_100.0), driver, None)
+        .restart_on(&mut device, spec_at(44_100.0), driver, None, None)
         .expect("restarts");
     let after = device.latency();
     assert_eq!(
@@ -305,7 +306,7 @@ fn removing_an_inputs_node_closes_the_capture_and_a_restart_does_not_reopen_it()
 
         let (driver, _new) = ManualStreamDriver::new();
         session
-            .restart_on(&mut device, spec_at(44_100.0), driver, None)
+            .restart_on(&mut device, spec_at(44_100.0), driver, None, None)
             .expect("restarts");
         let log = record.lock().unwrap().log.clone();
         assert_eq!(
