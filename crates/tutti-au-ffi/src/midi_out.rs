@@ -373,23 +373,25 @@ impl AuMidiOutput {
     /// when nothing can still read it.
     ///
     /// What can read the state is a render calling the AU's callback. Two things
-    /// must hold for that to be impossible after the free, and `withdraw` checks
-    /// both after writing the cleared callback:
+    /// must hold for that to be impossible after the free. The unit's lifecycle
+    /// is checked first, before anything is written, and the lifecycle lock
+    /// (`Unit::while_uninitialized`) is then held across the clearing write, the
+    /// render check and the free:
     ///
-    /// - **The unit is uninitialized**, checked before anything is written, and stays so until the free is done
-    ///   (`Unit::while_uninitialized` holds the lifecycle lock across it). An AU
-    ///   may take its callbacks at `AudioUnitInitialize` and keep calling the old
-    ///   pair after a later property write; an uninitialized unit renders nothing,
-    ///   and an `initialize` that waits on the lock takes the cleared callback. A
-    ///   unit whose `AudioUnitUninitialize` failed, or has not run, counts as
-    ///   initialized.
+    /// - **The unit is uninitialized**, and stays so until the free is done. An
+    ///   AU may take its callbacks at `AudioUnitInitialize` and keep calling the
+    ///   old pair after a later property write; an uninitialized unit renders
+    ///   nothing, and an `initialize` that waits on the lock takes the cleared
+    ///   callback. A unit whose `AudioUnitUninitialize` failed, or has not run,
+    ///   counts as initialized.
     /// - **No render of this crate's is in flight** (`Unit::rendering`), read
-    ///   after a `SeqCst` fence. A render that began before the unit was
-    ///   uninitialized, or while a clone uninitialized it (it must not:
-    ///   `Unit::uninitialize`), is counted; one the count does not show starts
-    ///   after the check and reads the cleared callback. A render made outside
-    ///   this crate's safe calls (`RenderUnit::get`'s `unsafe` contract) is not
-    ///   counted: its caller owes that none overlaps a withdrawal.
+    ///   after the clearing write and a `SeqCst` fence. A render that began
+    ///   before the unit was uninitialized, or while a clone uninitialized it (it
+    ///   must not: `Unit::uninitialize`), is counted; one the count does not
+    ///   show starts after the check and reads the cleared callback. A render
+    ///   made outside this crate's safe calls (`RenderUnit::get`'s `unsafe`
+    ///   contract) is not counted: its caller owes that none overlaps a
+    ///   withdrawal.
     ///
     /// A host calls it after `Unit::uninitialize` and before the next
     /// `Unit::initialize`. The lifecycle lock is control-side: no render takes
@@ -1113,10 +1115,12 @@ mod tests {
         again.withdraw().expect("freed");
     }
 
-    /// **A withdrawal on an initialized unit frees nothing**: an AU may have taken
-    /// its callback at initialization, so the withdrawal is refused and hands the
-    /// registration back; once the unit is uninitialized the same registration
-    /// withdraws and frees, and the unit takes a new one.
+    /// **A withdrawal on an initialized unit is refused**: an AU may have taken
+    /// its callback at initialization, so the withdrawal hands the registration
+    /// back with its claim; once the unit is uninitialized the same registration
+    /// withdraws, and the unit takes a new one. (That the refusal writes nothing,
+    /// and that the state stays allocated, is the documented behaviour of
+    /// `withdraw`; neither is observable here.)
     #[test]
     fn a_withdrawal_on_an_initialized_unit_is_refused_until_it_is_uninitialized() {
         let desc = coreaudio_sys::AudioComponentDescription {

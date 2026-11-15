@@ -153,9 +153,10 @@ fn per_note_controller_of_expression(expression: NoteExpressionType) -> Option<C
 
 /// The Registered Per-Note Controller #3, Pitch 7.25 (M2-104 §7.4.15.2), a
 /// plugin's Tuning of `semitones` from `note`'s key is: the absolute pitch
-/// `note + semitones` as Q7.25, which no range assumption saturates. `None` for a
-/// value that is not finite or lands outside what 7.25 holds (`0..128` notes):
-/// the caller counts it lost.
+/// `note + semitones` as Q7.25, so no bend range is assumed. A pitch just under
+/// 128 rounds past the top word and saturates at `u32::MAX`. `None` for a value
+/// that is not finite or lands outside what 7.25 holds (`0..128` notes): the
+/// caller counts it lost.
 #[must_use]
 pub fn per_note_tuning(note: NoteNumber, semitones: f64) -> Option<Voice2> {
     let pitch = f64::from(note.get()) + semitones;
@@ -165,7 +166,7 @@ pub fn per_note_tuning(note: NoteNumber, semitones: f64) -> Option<Voice2> {
     #[allow(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
-        reason = "in 0..128, so the Q7.25 word is below 2^32"
+        reason = "in 0..128, so the Q7.25 word fits 32 bits but for a rounding past the top, which saturates"
     )]
     let bits = (pitch * f64::from(1u32 << 25)).round() as u32;
     Some(Voice2::RegisteredPerNote {
