@@ -13,10 +13,8 @@
 //! # Blocks
 //!
 //! The graph renders `GRAPH_MAX_BLOCK` (1024) frames a block and every node
-//! renders whole blocks. A node whose output depends on the call partition
-//! (the VBAP panner, which ramps its gains across each call) is pinned at that
-//! partition (see `a_surround_mix_folds_to_every_width`). The durations below
-//! are deliberately *not* multiples, so the last block is short.
+//! renders whole blocks. The durations below are deliberately *not*
+//! multiples, so the last block is short.
 //!
 //! # What these do not cover
 //!
@@ -39,8 +37,8 @@ use tutti_nodes::testing::{Const, Osc, vbap_mix};
 use tutti_tempo::TempoMap;
 use tutti_transport::FrozenClock;
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
-use tutti_types::ChannelLayout;
 use tutti_types::{Amplitude, Azimuth, Beat, Bpm, Hz, SampleRate};
+use tutti_types::{Bed, ChannelLayout};
 use tutti_types::{Db, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -77,9 +75,7 @@ fn built(g: GraphBuilder) -> RenderGraph {
 /// device's block, then forked offline at the render's.
 ///
 /// A fork resets every unit it makes (each node's fork source hands a
-/// reset copy). For most units a reset one renders what a fresh one does; not for all: a reset
-/// `VbapPannerNode` starts on its commanded bearing where a fresh one glides
-/// there from front-centre.
+/// reset copy), and a reset unit renders what a fresh one does.
 fn forked(g: GraphBuilder) -> RenderGraph {
     let (live, _exec) = g
         .build(Prepare::new(RATE, MaxBlock::of(Samples(256))))
@@ -207,7 +203,7 @@ fn quad_vbap() -> GraphBuilder {
             (src, Azimuth::new(az))
         })
         .collect();
-    vbap_mix(&mut g, ChannelLayout::QUAD, &sources).expect("quad");
+    vbap_mix(&mut g, Bed::Quad, &sources).expect("quad");
     g
 }
 
@@ -404,16 +400,10 @@ fn a_dithered_export_writes_its_dithered_render() {
 /// frame by frame by the ITU matrix, written out, to the bit; the quad
 /// render puts the front-left source mostly in channel 0 and the rear-left
 /// one mostly in channel 2, with each source's energy over the speakers the
-/// unit energy of its input (`assert_vbap_energy`), in the built render once
-/// its panner's glide has settled and in the forked one from the first frame.
-///
-/// This is also the case that pins the block rule in the module docs: the
-/// VBAP panner ramps its gains across each call, so it is the unit here whose
-/// output depends on where the blocks fall.
-///
-/// The panners ramp across the render's 1024-frame blocks. A fresh panner
-/// glides in from front-centre, so the built render depends on the block
-/// partition; the forked render's panners start on their bearing.
+/// unit energy of its input (`assert_vbap_energy`), in the built render and in
+/// the forked one from the first frame: a panner's first grid point lands on its
+/// bearing whole, and its gains glide on a grid counted from the start, whatever
+/// the render's blocks.
 #[test]
 fn a_surround_mix_folds_to_every_width() {
     let quad = buffers(
@@ -426,7 +416,7 @@ fn a_surround_mix_folds_to_every_width() {
     // front-left one in channel 0.
     assert!(quad[2].iter().any(|s| s.abs() > 0.05), "no rear energy");
     assert!(quad[0].iter().any(|s| s.abs() > 0.05), "no front energy");
-    assert_vbap_energy("built", &quad, 9_600);
+    assert_vbap_energy("built", &quad, 0);
     // Each of these is the quad render folded, to the bit.
     for width in [ChannelLayout::STEREO, ChannelLayout::MONO] {
         let got = buffers(built(quad_vbap()), &config(Pcm::Float32, width)).into_planes();

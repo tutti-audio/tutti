@@ -46,10 +46,10 @@
 //! - **Mixing** — `BusStripNode` (volume / balance; a mute or bypass is the graph's `NodeMode`).
 //!   Summing is the graph's: a port or an output channel sums its sources; so is
 //!   folding between layouts (a bus edge between declared buses).
-//! - **Spatial** — `VbapPannerNode` (stereo in, one output per speaker of a 2, 4,
-//!   6, 8 or 12 channel layout) and `HrtfBinauralNode` (two outputs, by FFT
-//!   convolution against a caller-supplied HRIR sphere), both steered by their
-//!   params (bearing, height, spread and width, or the blend), de-zippered. A mix of several panned sources
+//! - **Spatial** — `VbapPannerNode` (stereo in, one output per channel of a `Bed`)
+//!   and `HrtfBinauralNode` (two outputs, by FFT convolution against a
+//!   caller-supplied HRIR sphere), both steered by their params (bearing,
+//!   height, spread and width, or the blend), glided. A mix of several panned sources
 //!   is plain fan-in: wire each panner's outputs to the same graph ports.
 //! - **Param ports** — each modulatable node declares its params once, with its
 //!   cells (`tutti_graph::declare_params!`), as param ports, filled per
