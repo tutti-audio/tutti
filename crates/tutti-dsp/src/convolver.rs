@@ -69,6 +69,8 @@
 
 use std::sync::Arc;
 
+use tutti_buffers::{Mono, Sample};
+
 use crate::Complex32;
 use crate::fft::StagedRealFft;
 
@@ -662,6 +664,13 @@ impl Convolver {
         &self.spectra
     }
 
+    /// [`new`](Self::new) over an impulse response in any sample format, converted to `f32`.
+    #[must_use]
+    pub fn from_samples<S: Sample>(ir: Mono<'_, S>, block_size: usize) -> Self {
+        let ir: Vec<f32> = ir.iter().map(|s| s.convert_to::<f32>()).collect();
+        Self::new(&ir, block_size)
+    }
+
     /// Creates a convolver with the default block size (`512`).
     #[must_use]
     pub fn with_ir(ir: &[f32]) -> Self {
@@ -779,6 +788,9 @@ impl Convolver {
         }
     }
 }
+
+mod matrix;
+pub use matrix::{MatrixConvolver, MatrixConvolverError};
 
 #[cfg(test)]
 mod tests;
