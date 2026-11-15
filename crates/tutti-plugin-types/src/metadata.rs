@@ -139,6 +139,20 @@ pub struct Layout {
     pub outputs: PluginBuses,
 }
 
+impl Layout {
+    /// The total input channel width across all buses.
+    #[must_use]
+    pub fn total_inputs(&self) -> usize {
+        width(&self.inputs)
+    }
+
+    /// The total output channel width across all buses.
+    #[must_use]
+    pub fn total_outputs(&self) -> usize {
+        width(&self.outputs)
+    }
+}
+
 use tutti_graph::MAX_NODE_TAIL;
 
 /// How long a plugin keeps producing audio after its input goes silent.

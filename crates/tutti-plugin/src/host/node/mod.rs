@@ -107,7 +107,7 @@ use std::sync::atomic::Ordering;
 use tutti_graph::{IntoNode, Node, NodeParts, Shape};
 use tutti_plugin_host::{
     InProcClient, InvalidateSink, ParameterChangeSink, PluginControls, PluginHandle, PluginNode,
-    RefreshSink, TransportSink, client_over,
+    PortLimit, Rebinder, RefreshSink, TransportSink, client_over,
 };
 use tutti_plugin_ipc::{
     BridgeConfig, BridgeEvent, Ipc, IpcController, IpcOrigin, Launched, PluginBridge,
@@ -130,6 +130,9 @@ pub struct Unbound {
     /// is tens of KiB, and the client moves several times on its way into a
     /// graph (a debug build's frames hold a copy each).
     client: Box<InProcClient<Ipc>>,
+    /// The parameters the client's delivery has a slot for, which a rebuilt
+    /// node's has too.
+    parameters: Vec<ParamId>,
 }
 
 /// The typestate of a [`PluginClient`] that holds its node and can go into a
@@ -144,6 +147,8 @@ pub struct Bound {
     /// The project's tempo map reader the node was bound to, kept so a fork
     /// clones it on the control side (its own registration on the same cell).
     tempo: tutti_transport::TempoReader,
+    /// Builds the node that replaces `node` when the plugin changes its ports.
+    rebinder: Rebinder<Ipc>,
 }
 
 impl std::fmt::Debug for Bound {
@@ -432,7 +437,7 @@ impl PluginClient<Unbound> {
             prepare,
             descriptor.clone(),
             &loaded,
-            params,
+            params.iter().copied(),
             ParameterChanges::SPARE_QUEUES,
             Some(controls.clone()),
         );
@@ -454,6 +459,7 @@ impl PluginClient<Unbound> {
             fork_watch: None,
             state: Unbound {
                 client: Box::new(client),
+                parameters: params,
             },
         })
     }
@@ -491,8 +497,16 @@ impl PluginClient<Unbound> {
             origin,
             plugin,
             fork_watch,
-            state: Unbound { client },
+            state: Unbound { client, parameters },
         } = self;
+        // The plugin's slab was laid out for the ports it had at launch, so a
+        // rebuilt node may have no others.
+        let rebinder = client.rebinder(
+            tempo.clone(),
+            parameters,
+            ParameterChanges::SPARE_QUEUES,
+            Some(PortLimit { inputs, outputs }),
+        );
         PluginClient {
             bridge,
             descriptor,
@@ -512,8 +526,24 @@ impl PluginClient<Unbound> {
             state: Bound {
                 node: Box::new((*client).bind(tempo.clone())),
                 tempo,
+                rebinder,
             },
         }
+    }
+}
+
+impl PluginClient<Bound> {
+    /// The builder of the node that replaces this one when the plugin changes
+    /// its audio ports ([`Rebinder::rebind`]). It is limited to the ports the
+    /// plugin had when it was launched: the shared-memory slab is laid out
+    /// once, and a rebuilt node over other ports is refused with
+    /// [`RebindError::OutsideSlab`](tutti_plugin_host::RebindError::OutsideSlab).
+    ///
+    /// Clone it before the client goes into a graph; it keeps the instance
+    /// the node drives alive.
+    #[must_use]
+    pub fn rebinder(&self) -> &Rebinder<Ipc> {
+        &self.state.rebinder
     }
 }
 

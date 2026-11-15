@@ -29,7 +29,7 @@ use tutti_rt::Rt;
 use arrayvec::ArrayVec;
 use parking_lot::Mutex;
 use tutti_graph::{Bus, Buses, Cx, Offset, Shape};
-use tutti_plugin_types::{LoadedPlugin, PluginBus};
+use tutti_plugin_types::{Layout, LoadedPlugin, PluginBus};
 use tutti_tempo::TempoView;
 use tutti_transport::TempoReader;
 use tutti_types::{BusTopology, ChannelLayout, SampleRate, Samples};
@@ -117,7 +117,7 @@ pub struct InProcClient<F: Loaded> {
     /// the out-of-process client gets from its command queue.
     ///
     /// Shared with the control backend, which drains it.
-    pending_sample_rate: Arc<AtomicU64>,
+    pub(super) pending_sample_rate: Arc<AtomicU64>,
     /// Blocks rendered silent because the realtime end held no Processor.
     /// Shared with the loader's handle side.
     pub(super) unlent: Arc<AtomicU64>,
@@ -204,13 +204,20 @@ pub(super) struct Declared {
 impl Declared {
     /// What the plugin reported at load.
     pub(super) fn of(loaded: &LoadedPlugin) -> Self {
+        Self::from_layout(&Layout::from(loaded), loaded.latency_samples, loaded.tail)
+    }
+
+    /// What the plugin reports now: the ports of the layout the lifecycle last
+    /// read ([`State::layout`](tutti_plugin_types::State::layout)), and the
+    /// figures `latency` and `tail`.
+    pub(super) fn from_layout(layout: &Layout, latency: Samples, tail: PluginTail) -> Self {
         Self {
-            ports: Shape::buses(buses_of(&loaded.inputs), buses_of(&loaded.outputs)).with_ports(
-                ChannelLayout::clamped(loaded.total_inputs()),
-                ChannelLayout::clamped(loaded.total_outputs()),
+            ports: Shape::buses(buses_of(&layout.inputs), buses_of(&layout.outputs)).with_ports(
+                ChannelLayout::clamped(layout.total_inputs()),
+                ChannelLayout::clamped(layout.total_outputs()),
             ),
-            latency: loaded.latency_samples,
-            tail: loaded.tail,
+            latency,
+            tail,
         }
     }
 }
@@ -453,15 +460,21 @@ impl<F: Loaded> InProcClient<F> {
         parameters: impl IntoIterator<Item = ParamId>,
         spares: usize,
         controls: Option<PluginControls>,
+        pipeline: Option<Samples>,
     ) -> Self {
         // A slot per declared parameter: every parameter can move in one
         // block. Its point room is sized in `prepare`. `spares` is how many
         // addresses the plugin did not list the delivery may learn (none:
         // the node addresses only its declared parameters).
         let mut rt = rt;
-        let pipeline = rt
-            .poll(Processor::stop)
-            .map_or(Samples(0), |processor| processor.latency());
+        // The pipeline is the Processor's own figure; a node built over an end
+        // the Processor has not reached yet is given the one its predecessor
+        // read, and keeps it until a `prepare` that retunes the Processor
+        // reads it again.
+        let pipeline = pipeline.unwrap_or_else(|| {
+            rt.poll(Processor::stop)
+                .map_or(Samples(0), |processor| processor.latency())
+        });
         if let Some(controls) = &controls {
             controls.set_pipeline(pipeline);
         }

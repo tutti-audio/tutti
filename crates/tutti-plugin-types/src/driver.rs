@@ -32,6 +32,9 @@ use crate::{
 pub struct Hand<P> {
     /// `None` for a local hand.
     end: Option<tutti_rt::Hand<P>>,
+    /// The control end of the realtime end [`rehand`](Self::rehand) made: it
+    /// replaces `end` the next time the Processor is held here.
+    successor: Option<tutti_rt::Hand<P>>,
     _processor: PhantomData<fn() -> P>,
 }
 
@@ -41,6 +44,7 @@ impl<P> Hand<P> {
     pub fn local() -> Self {
         Self {
             end: None,
+            successor: None,
             _processor: PhantomData,
         }
     }
@@ -57,10 +61,61 @@ impl<P> Hand<P> {
         (
             Self {
                 end: Some(end),
+                successor: None,
                 _processor: PhantomData,
             },
             rt,
         )
+    }
+
+    /// A new realtime end for the Processor to move to: the node that replaces
+    /// the one holding the current end, with other ports over the same plugin.
+    ///
+    /// The Processor does not move now. It stays where it is until the main
+    /// thread holds it (recalled, or returned and collected), and the next
+    /// [`Effect::Lend`] then lends it to the returned end instead of the old
+    /// one. So:
+    ///
+    /// - A Processor never drops on the realtime thread because of a
+    ///   `rehand`: the swap happens only while the main thread holds the
+    ///   Processor, and the old end is dropped then, empty, on this thread.
+    /// - Once the Processor is lent to the returned end the old [`tutti_rt::Rt`]
+    ///   holds none and renders without one; [`pending`](Self::pending) is
+    ///   `false` from the swap on.
+    /// - A second `rehand` before the swap replaces the first: the end the
+    ///   first call returned is never lent to and polls nothing, as one whose
+    ///   node was dropped does.
+    /// - The old [`tutti_rt::Rt`] dropped **before** the swap, while it still
+    ///   holds the Processor, drops the Processor with it, on the thread that
+    ///   drops it. The seat then stays lent: nothing returns the Processor, the
+    ///   restart stays parked and the plugin cannot be activated again until
+    ///   the [`Lifecycle`] is dropped. Keep the old node until
+    ///   [`pending`](Self::pending) is `false`.
+    ///
+    /// A local hand becomes a threaded one at the swap.
+    #[must_use]
+    pub fn rehand(&mut self) -> tutti_rt::Rt<P>
+    where
+        P: Send,
+    {
+        let (end, rt) = tutti_rt::handoff();
+        self.successor = Some(end);
+        rt
+    }
+
+    /// Whether a [`rehand`](Self::rehand) has not yet moved the Processor's
+    /// way to its new realtime end: the Processor may still be in the old one.
+    #[must_use]
+    pub fn pending(&self) -> bool {
+        self.successor.is_some()
+    }
+
+    /// Makes the successor the end, while the Processor is held on the main
+    /// thread: the old end is empty, and drops here.
+    fn settle(&mut self) {
+        if let Some(next) = self.successor.take() {
+            self.end = Some(next);
+        }
     }
 }
 
@@ -319,6 +374,10 @@ impl<L: Loaded> Lifecycle<L> {
         let Self::Active { seat, .. } = self else {
             return Reply::NotActive;
         };
+        // The Processor is held here, so the old end holds none.
+        if matches!(seat, Seat::Held(_)) {
+            hand.settle();
+        }
         // A local hand has no realtime thread: the seat keeps it.
         let (Some(end), Seat::Held(_)) = (hand.end.as_mut(), &seat) else {
             return Reply::Done;
@@ -356,10 +415,13 @@ impl<L: Loaded> Lifecycle<L> {
     /// (`true`, and the caller steps [`Event::Returned`]), and one a refused
     /// lend kept held is offered again.
     fn trade(&mut self, hand: &mut Hand<L::Processor>, state: &State) -> bool {
-        let Some(end) = hand.end.as_mut() else {
+        let Self::Active { seat, .. } = self else {
             return false;
         };
-        let Self::Active { seat, .. } = self else {
+        if matches!(seat, Seat::Held(_)) {
+            hand.settle();
+        }
+        let Some(end) = hand.end.as_mut() else {
             return false;
         };
         match seat {

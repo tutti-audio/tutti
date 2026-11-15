@@ -19,6 +19,7 @@ use tutti_plugin_types::{
 };
 use tutti_rt::Rt;
 
+use tutti_plugin_types::Layout;
 use tutti_plugin_types::LoadStage;
 use tutti_plugin_types::ParamEdit;
 use tutti_plugin_types::PluginTail;
@@ -211,6 +212,50 @@ impl<F: Loaded> Instance<F> {
             self.state.latency().unwrap_or_default(),
             self.state.tail().unwrap_or_default(),
         )
+    }
+
+    /// The ports the plugin last reported, with its latency and tail: what a
+    /// node rebuilt over it declares. `None` before the lifecycle has read a
+    /// layout, and once the plugin is lost.
+    pub(super) fn reading(&self) -> Option<(&Layout, Samples, PluginTail)> {
+        if self.lifecycle.is_poisoned() {
+            return None;
+        }
+        let (latency, tail) = self.figures();
+        Some((self.state.layout()?, latency, tail))
+    }
+
+    /// Points the Processor's way at a new realtime end, which this returns,
+    /// and restarts the plugin so the Processor comes back to be lent to it
+    /// ([`Hand::rehand`]). Main thread.
+    ///
+    /// The restart is a [`HostOp::Reconfigure`] at the activation the plugin
+    /// has: the end the node in the graph holds hands the Processor back at
+    /// its next poll, and the pump's tick reactivates it and lends it to the
+    /// returned end. Until then the returned end is empty and a node over it
+    /// renders silence; [`handed_over`](Self::handed_over) says when it
+    /// holds the Processor's way.
+    ///
+    /// A plugin that refuses the restart renders nothing until a restart it
+    /// takes, which lends to the returned end (the only one now): the refusal
+    /// is kept for the control side, as a rate's is
+    /// ([`take_rate_report`](Self::take_rate_report)), and the end is returned
+    /// all the same.
+    pub(super) fn rehand(&mut self, main: MainThreadMarker) -> Rt<F::Processor> {
+        let rt = self.hand.rehand();
+        if let Some(why) = self.drive(main, Event::Op(HostOp::Reconfigure(self.prepare))) {
+            self.note_refusal(why);
+        }
+        rt
+    }
+
+    /// Whether the Processor's way is to the newest realtime end
+    /// ([`Hand::pending`] is false): the end it left holds none and may be
+    /// dropped.
+    ///
+    /// A lost plugin has no Processor to move, so it is handed over too.
+    pub(super) fn handed_over(&self) -> bool {
+        !self.hand.pending() || self.lifecycle.is_poisoned()
     }
 
     /// The render mode the plugin runs in, or was last told.

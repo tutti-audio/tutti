@@ -742,6 +742,86 @@ fn a_refused_lend_is_offered_again_on_a_tick() {
     assert!(poll(&mut rt));
 }
 
+/// **A `rehand` moves the Processor to the new realtime end at the restart
+/// that follows, and leaves the old end empty.** The old end stops and returns
+/// it at its poll, the tick restarts the plugin, and the new Processor is lent
+/// to the end `rehand` made: the old end holds none, so dropping it frees
+/// nothing.
+#[test]
+fn a_rehand_lends_the_restarted_processor_to_the_new_end() {
+    let (mut rig, mut old) = Rig::threaded();
+    rig.op(HostOp::Activate(prepare(48_000.0)));
+    assert!(poll(&mut old), "the old end holds the Processor");
+
+    let mut new = rig.hand.rehand();
+    assert!(rig.hand.pending());
+    rig.op(HostOp::Reconfigure(prepare(44_100.0)));
+    assert!(rig.state.is_parked(), "waits for the old end to return it");
+    assert!(rig.hand.pending(), "the Processor has not moved yet");
+    assert!(!poll(&mut new), "nothing is lent to the new end yet");
+
+    assert!(!poll(&mut old), "the old end hands it back");
+    assert_eq!(rig.plugin.calls().last(), Some(&Call::Stop));
+    rig.tick();
+    assert!(!rig.hand.pending(), "lent through the new end");
+    assert!(old.held().is_none(), "the old end holds none");
+    assert!(!poll(&mut old), "and is lent none");
+    assert!(poll(&mut new), "the restarted Processor is in the new end");
+    assert_eq!(activations(&rig.plugin.calls()), 2);
+}
+
+/// **A second `rehand` before the Processor moves replaces the first:** the
+/// end the first call returned is never lent to, and the Processor goes to the
+/// second.
+#[test]
+fn a_second_rehand_replaces_the_first() {
+    let (mut rig, mut old) = Rig::threaded();
+    rig.op(HostOp::Activate(prepare(48_000.0)));
+    assert!(poll(&mut old));
+    let mut first = rig.hand.rehand();
+    let mut second = rig.hand.rehand();
+    rig.op(HostOp::Reconfigure(prepare(44_100.0)));
+    assert!(!poll(&mut old));
+    rig.tick();
+    rig.tick();
+    assert!(!poll(&mut first), "the replaced end is never lent to");
+    assert!(first.held().is_none());
+    assert!(poll(&mut second), "the Processor went to the last end");
+}
+
+/// **A Processor held on the main thread moves at the next lend:** a local
+/// hand, whose Processor stays in the seat, becomes a threaded one when
+/// `rehand` is called, and the next tick lends to the end it returned.
+#[test]
+fn a_rehand_of_a_held_processor_lends_to_the_new_end_on_the_next_tick() {
+    let mut rig = Rig::new();
+    rig.op(HostOp::Activate(prepare(48_000.0)));
+    assert!(rig.lifecycle.processor().is_some(), "held: a local hand");
+    let mut new = rig.hand.rehand();
+    rig.tick();
+    assert!(!rig.hand.pending());
+    assert!(rig.lifecycle.processor().is_none(), "lent");
+    assert!(poll(&mut new));
+}
+
+/// **An old end dropped while it holds the Processor takes the Processor with
+/// it:** the plan stays parked on a Processor nothing returns, and the
+/// successor is not lent to (`pending`). The caller keeps the old node until
+/// `pending` is false.
+#[test]
+fn an_old_end_dropped_before_the_swap_keeps_the_restart_parked() {
+    let (mut rig, mut old) = Rig::threaded();
+    rig.op(HostOp::Activate(prepare(48_000.0)));
+    assert!(poll(&mut old));
+    let mut new = rig.hand.rehand();
+    drop(old);
+    rig.op(HostOp::Reconfigure(prepare(44_100.0)));
+    rig.tick();
+    assert!(rig.state.is_parked(), "no Processor ever returns");
+    assert!(rig.hand.pending());
+    assert!(!poll(&mut new));
+}
+
 /// **The fake's explicit answers for the editor, render-mode, request and
 /// reported-edit entries of `Control` reach the host through
 /// [`Lifecycle::control`] in both states that hold a plugin**: no editor (and
