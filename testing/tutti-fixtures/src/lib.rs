@@ -41,6 +41,7 @@
 // `tutti_vst2_test_plugin::Vst2Probe`): depending on a plugin here would link
 // its entry point into every suite.
 #![deny(unsafe_code)]
+#![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 
 mod alloc_count;
 #[cfg(all(feature = "au", target_os = "macos"))]

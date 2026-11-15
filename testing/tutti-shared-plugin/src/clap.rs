@@ -26,8 +26,8 @@ use clap_sys::ext::note_ports::{
     clap_plugin_note_ports,
 };
 use clap_sys::ext::params::{
-    CLAP_EXT_PARAMS, CLAP_PARAM_IS_AUTOMATABLE, CLAP_PARAM_IS_READONLY, CLAP_PARAM_IS_STEPPED,
-    clap_param_info, clap_plugin_params,
+    CLAP_EXT_PARAMS, CLAP_PARAM_IS_AUTOMATABLE, CLAP_PARAM_IS_BYPASS, CLAP_PARAM_IS_READONLY,
+    CLAP_PARAM_IS_STEPPED, clap_param_info, clap_plugin_params,
 };
 use clap_sys::ext::state::{CLAP_EXT_STATE, clap_plugin_state};
 use clap_sys::ext::tail::{CLAP_EXT_TAIL, clap_plugin_tail};
@@ -79,7 +79,7 @@ unsafe extern "C" fn tail_get(p: *const clap_plugin) -> u32 {
     unsafe { inst(p) }.core.tail_samples()
 }
 unsafe extern "C" fn params_count(_p: *const clap_plugin) -> u32 {
-    core::PARAMS
+    core::LISTED
 }
 unsafe extern "C" fn factory_count(_f: *const clap_plugin_factory) -> u32 {
     1
@@ -211,6 +211,25 @@ static TAIL: clap_plugin_tail = clap_plugin_tail {
 
 // ---- params -----------------------------------------------------------------
 
+/// The plain value CLAP speaks for the core's normalized `n`: `tone`'s own
+/// curve, `mode`'s position (`0..=4`), and `n` for the rest.
+fn to_plain(id: u32, n: f64) -> f64 {
+    match id {
+        core::TONE => core::tone_plain(n),
+        core::MODE => n * f64::from(core::MODES - 1),
+        _ => n,
+    }
+}
+
+/// The inverse of [`to_plain`].
+fn to_normalized(id: u32, plain: f64) -> f64 {
+    match id {
+        core::TONE => core::tone_normalized(plain),
+        core::MODE => plain / f64::from(core::MODES - 1),
+        _ => plain,
+    }
+}
+
 static PARAMS: clap_plugin_params = clap_plugin_params {
     count: Some(params_count),
     get_info: Some(params_info),
@@ -225,9 +244,13 @@ unsafe extern "C" fn params_info(
     index: u32,
     info: *mut clap_param_info,
 ) -> bool {
-    let Some(default) = core::default_of(index) else {
+    let Some(&id) = core::LISTED_IDS.get(index as usize) else {
         return false;
     };
+    let Some(default) = core::default_of(id) else {
+        return false;
+    };
+    let index = id;
     if info.is_null() {
         return false;
     }
@@ -235,14 +258,11 @@ unsafe extern "C" fn params_info(
     let info = unsafe { &mut *info };
     info.id = index;
     // The meter is the one parameter the host may not write.
-    info.flags = if index == core::METER {
-        CLAP_PARAM_IS_READONLY
-    } else {
-        CLAP_PARAM_IS_AUTOMATABLE
-    } | if index == core::MODE {
-        CLAP_PARAM_IS_STEPPED
-    } else {
-        0
+    info.flags = match index {
+        core::METER => CLAP_PARAM_IS_READONLY,
+        core::MODE => CLAP_PARAM_IS_AUTOMATABLE | CLAP_PARAM_IS_STEPPED,
+        core::BYPASS => CLAP_PARAM_IS_AUTOMATABLE | CLAP_PARAM_IS_STEPPED | CLAP_PARAM_IS_BYPASS,
+        _ => CLAP_PARAM_IS_AUTOMATABLE,
     };
     info.cookie = ptr::null_mut();
     info.name = [0; CLAP_NAME_SIZE];
@@ -250,16 +270,23 @@ unsafe extern "C" fn params_info(
     for (d, s) in info.name.iter_mut().zip(name) {
         *d = *s as c_char;
     }
+    // `aux` is in the module `Voices/Oscillator/Filter`; the others have none.
     info.module = [0; CLAP_PATH_SIZE];
-    // CLAP speaks plain: `tone` declares its own range and default.
-    let tone = index == core::TONE;
-    info.min_value = if tone { core::TONE_PLAIN_MIN } else { 0.0 };
-    info.max_value = if tone { core::TONE_PLAIN_MAX } else { 1.0 };
-    info.default_value = if tone {
-        core::tone_plain(default)
-    } else {
-        default
+    if index == core::AUX {
+        for (d, s) in info.module.iter_mut().zip(core::AUX_MODULE.as_bytes()) {
+            *d = *s as c_char;
+        }
+    }
+    // CLAP speaks plain: `tone` declares its own range and default, and `mode`
+    // its five positions as `0..=4`.
+    let (min, max) = match index {
+        core::TONE => (core::TONE_PLAIN_MIN, core::TONE_PLAIN_MAX),
+        core::MODE => (0.0, f64::from(core::MODES - 1)),
+        _ => (0.0, 1.0),
     };
+    info.min_value = min;
+    info.max_value = max;
+    info.default_value = to_plain(index, default);
     true
 }
 
@@ -267,13 +294,7 @@ unsafe extern "C" fn params_value(p: *const clap_plugin, id: u32, out: *mut f64)
     // SAFETY, for this function's `unsafe` blocks: the host passes the plugin this file created (`plugin_data` is its `Inst`), valid until `destroy`. `out` is checked non-null.
     match unsafe { inst(p) }.core.param(id) {
         Some(v) if !out.is_null() => {
-            unsafe {
-                *out = if id == core::TONE {
-                    core::tone_plain(v)
-                } else {
-                    v
-                }
-            };
+            unsafe { *out = to_plain(id, v) };
             true
         }
         _ => false,
@@ -333,16 +354,11 @@ unsafe fn decode(h: *const clap_event_header) -> Option<Ev> {
     match hdr.type_ {
         CLAP_EVENT_PARAM_VALUE => {
             let e = unsafe { &*(h as *const clap_event_param_value) };
-            // `tone` arrives plain; the core holds normalized.
-            let value = if e.param_id == core::TONE {
-                core::tone_normalized(e.value)
-            } else {
-                e.value
-            };
+            // `tone` and `mode` arrive plain; the core holds normalized.
             Some(Ev::Param {
                 id: e.param_id,
                 offset: hdr.time,
-                value,
+                value: to_normalized(e.param_id, e.value),
             })
         }
         CLAP_EVENT_NOTE_ON => {

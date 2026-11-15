@@ -9,7 +9,7 @@ use tutti_types::Samples;
 
 use crate::Measured;
 
-use crate::{ChannelLayout, ChannelTopology, FeatureReport, Features};
+use crate::{ChannelLayout, ChannelTopology, FeatureReport, Features, MidiAssignment, OwnBypass};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -257,6 +257,21 @@ pub struct LoadedPlugin {
     // postcard payload is `PROTOCOL_VERSION`'s job, not serde's.
     #[cfg_attr(feature = "serde", serde(default))]
     pub probed: Features,
+    /// The plugin's bypass of its own, where it keeps it: VST3's `kIsBypass`
+    /// parameter, CLAP's `CLAP_PARAM_IS_BYPASS` parameter, AU's
+    /// `kAudioUnitProperty_BypassEffect`, VST2's `effSetBypass` (only where the
+    /// plugin accepts it). `None` for a plugin without one, or one that refuses.
+    /// A node over it declares
+    /// [`Shape::with_own_bypass`](tutti_graph::Shape::with_own_bypass) and the
+    /// host writes the plugin's bypass when the node's mode changes
+    /// ([`Control::set_bypassed`](crate::Control::set_bypassed)).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub own_bypass: Option<OwnBypass>,
+    /// The controller table the plugin declares (VST3 `IMidiMapping`, AU
+    /// `kAudioUnitProperty_AllParameterMIDIMappings`): empty for a format or a
+    /// plugin with none. The plugin's suggestion; nothing applies it.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub assignments: Vec<MidiAssignment>,
 }
 
 impl LoadedPlugin {
@@ -372,6 +387,12 @@ mod tests {
             tail: PluginTail::Finite(Samples(48_000)),
             features: Features::F64_AUDIO | Features::MIDI_IN,
             probed: Features::F64_AUDIO | Features::MIDI_IN | Features::EDITOR,
+            own_bypass: Some(OwnBypass::Parameter(crate::ParamId::new(4))),
+            assignments: vec![MidiAssignment {
+                channel: tutti_ump::MidiChannel::new(3),
+                source: crate::MidiSource::PitchBend,
+                param: crate::ParamId::new(9),
+            }],
         };
         let bytes = postcard::to_allocvec(&loaded).unwrap();
         let back: LoadedPlugin = postcard::from_bytes(&bytes).unwrap();

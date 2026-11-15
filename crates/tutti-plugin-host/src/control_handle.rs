@@ -9,12 +9,12 @@ use crate::{
 };
 use dpi::Size;
 use std::sync::Arc;
-use tutti_plugin_types::BlockCounts;
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, Control, EditorCapabilities, EditorError,
     Health, PluginError, PluginFailure, StateError, TerminationReason, WindowHandle,
 };
+use tutti_plugin_types::{BlockCounts, BypassWrite};
 use tutti_plugin_types::{ContentScale, KeyEvent, KeyUse};
 use tutti_plugin_types::{Delivered, TrackInfo};
 use tutti_plugin_types::{
@@ -737,6 +737,38 @@ impl PluginHandle {
     }
 
     // ---- Automation-state convenience --------------------------------------
+
+    /// Writes the plugin's own bypass, `true` bypassed and `false` processing.
+    ///
+    /// **The node's mode owns the plugin's bypass.** A node whose plugin has one
+    /// ([`LoadedPlugin::own_bypass`], claimed only where the host can read it
+    /// back) declares [`Shape::with_own_bypass`](tutti_graph::Shape::with_own_bypass),
+    /// so the executor leaves it running in
+    /// [`NodeMode::Bypassed`](tutti_graph::NodeMode::Bypassed): the session
+    /// writes the bypass when the mode changes and compares it every tick. A
+    /// plugin without one is [`NoOwnBypass`](BypassWrite::NoOwnBypass) and the
+    /// executor's bypass serves it. A write is fire-and-forget:
+    /// [`Sent`](BypassWrite::Sent) is not applied, and
+    /// [`Lost`](BypassWrite::Lost) did not reach the plugin. An in-process
+    /// plugin's bypass is written and read on the main thread only, so one is
+    /// kept only by a session ticked on it; off the main thread the write is
+    /// `Lost` and the read `None`, without waiting.
+    pub fn set_bypassed(&self, bypassed: bool) -> BypassWrite {
+        match self.loaded.own_bypass {
+            Some(site) => self.any_thread.set_bypassed(site, bypassed),
+            None => BypassWrite::NoOwnBypass,
+        }
+    }
+
+    /// Whether the plugin's own bypass is on now, read from the plugin: `None`
+    /// when it has none or did not answer, or the instance is busy (an
+    /// in-process read never waits for it). A served plugin's read is a round
+    /// trip, which the session never makes: it compares the plugin's mirrored
+    /// parameter values instead.
+    #[must_use]
+    pub fn bypassed(&self) -> Option<bool> {
+        self.any_thread.bypassed(self.loaded.own_bypass?)
+    }
 
     /// Announces the host's [`AutomationMode`] to the plugin so its editor can
     /// update UI feedback.
