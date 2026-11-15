@@ -93,6 +93,8 @@ mod midi_follow;
 mod midi_hardware;
 #[cfg(feature = "midi-hardware")]
 mod midi_port;
+#[cfg(feature = "midi")]
+mod midi_sink;
 #[cfg(feature = "modulation")]
 mod modulation;
 mod node;
@@ -171,9 +173,8 @@ pub use key::{
 pub use main_session::{EditorView, MainPlugin, MainSession, Opened};
 #[cfg(feature = "midi")]
 pub use midi::{
-    MIDI_INPUT_DROP_REPORT, MIDI_OUT_DROP_REPORT, Midi, MidiLoad, MidiOutDrops, MidiOutRouter,
-    MidiRouteId, MidiRouteRule, NoSuchMidiRoute, OutputTiming, TakePlacement, UmpOut,
-    drain_receiver_through,
+    MIDI_INPUT_DROP_REPORT, MIDI_OUT_DROP_REPORT, Midi, MidiLoad, MidiRouteId, MidiRouteRule,
+    NoSuchMidiRoute, TakePlacement,
 };
 #[cfg(feature = "midi")]
 pub use midi_event::MidiEvent;
@@ -184,6 +185,8 @@ pub use midi_port::{
     InputLoaded, MidiInput, MidiInputEntry, MidiInputInfo, MidiOutput, MidiOutputEntry,
     MidiOutputInfo, MidiPortError, OutputLoaded, OutputOptions, PortCause, midi_input, midi_output,
 };
+#[cfg(feature = "midi")]
+pub use midi_sink::{MidiSink, MidiSinkEntry, MidiSinkInfo, SinkLoaded, midi_sink};
 #[cfg(feature = "modulation")]
 pub use modulation::{
     AutomationTake, MixRef, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget, Mods,

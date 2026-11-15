@@ -1,5 +1,5 @@
-//! The session's hardware MIDI out is an event tap on the clock node's output,
-//! drained by `Phase::MidiOut` into the output a host set:
+//! A `midi_sink` is an output node an event tap on its output is read from,
+//! drained by `Phase::MidiOut` into the sink the host declared:
 //! what reaches the wire, in what order and on which frames, what a full tap
 //! drops, and the tap following the graph to another rate.
 //!
@@ -8,14 +8,20 @@
 
 use std::sync::{Arc, Mutex};
 
+use crate::common::{MF, note};
 use tutti_buffers::InterleavedMut;
-use tutti_graph::{EventCapacity, TapAlign, UmpAt};
+use tutti_graph::{EventCapacity, Losses, TapAlign, UmpAt};
 use tutti_midi_runtime::MidiOut;
 use tutti_transport::MotionEvent;
 use tutti_types::{ChannelLayout, SampleRate};
 use tutti_ump::{MidiGroup, Ump};
 
-use tutti_session::{EventOutPort, MidiEvent, Session, SessionEvent, UmpOut};
+use tutti_midi_runtime::MidiClipNode;
+use tutti_session::{
+    Declared, EventInPort, EventOutPort, MidiEvent, MidiSinkEntry, Peer, Presence, Resource,
+    Session, SessionEvent, midi_sink,
+};
+use tutti_types::{Beat, BeatDuration};
 use tutti_ump::{Message, System};
 
 const RATE: f64 = 48_000.0;
@@ -38,7 +44,7 @@ impl Wire {
     }
 }
 
-/// A session with its clock enabled and a stamping-off output on `wire`.
+/// A session with its clock enabled and a stamping-off sink on `wire`.
 fn rig(wire: &Wire) -> Session {
     let mut s = Session::builder()
         .sample_rate(SampleRate::of(RATE))
@@ -46,10 +52,9 @@ fn rig(wire: &Wire) -> Session {
         .expect("builds");
     let _ = s.update();
     s.midi_nodes().unwrap().clock_master.set_enabled(true);
-    s.midi().set_hardware_out(Some(UmpOut::new(
-        Box::new(wire.clone()),
-        SampleRate::of(RATE),
-    )));
+    s.pool(midi_sink("out", Arc::new(wire.clone())))
+        .expect("declares");
+    let _ = s.update();
     s.transport()
         .motion()
         .try_send(MotionEvent::Play)
@@ -140,30 +145,35 @@ fn a_full_tap_counts_what_it_drops() {
     );
 
     let events = s.update();
-    let delivered: usize = wire.batches().iter().map(Vec::len).sum();
-    assert_eq!(delivered, 1_024, "the tap's capacity reached the output");
+    let batches = wire.batches();
+    assert_eq!(
+        batches.len(),
+        1,
+        "one drain is one batch, whatever its chunks"
+    );
+    assert_eq!(
+        batches[0].len(),
+        1_024,
+        "the tap's capacity reached the output"
+    );
+    let gaps: Vec<u32> = ticks(&batches[0]).windows(2).map(|w| w[1] - w[0]).collect();
+    assert!(
+        gaps.iter().all(|&gap| gap == 1_000),
+        "the spacing holds across the drain's 256-event chunks"
+    );
     let dropped = s.midi().out_drops();
     assert_eq!(dropped as usize, total - 1_024, "the rest is counted");
+    assert_eq!(
+        s.midi_sink(&"out").unwrap().losses(),
+        Losses::lost(dropped),
+        "and is the sink's own: what its node's tap had no room for"
+    );
     assert!(
         events
             .iter()
             .any(|e| matches!(e, SessionEvent::Midi(MidiEvent::OutputDropped { total }) if *total == dropped)),
         "and reported: {events:?}"
     );
-}
-
-/// **A graph re-rated outside a device restart is followed at the next
-/// update.** `Graph::set_sample_rate` moves the graph's clock to another scale;
-/// the hardware out's reader, on the rate it was opened at, is reopened by the
-/// `MidiOut` phase, so its frames are on one scale again.
-#[test]
-fn a_re_rated_graph_reopens_the_hardware_tap_at_the_next_update() {
-    let wire = Wire::default();
-    let mut s = rig(&wire);
-    assert_eq!(s.midi().hardware_out_rate(), Some(SampleRate::of(RATE)));
-    s.graph().set_sample_rate(SampleRate::SR_44K1);
-    let _ = s.update();
-    assert_eq!(s.midi().hardware_out_rate(), Some(SampleRate::SR_44K1));
 }
 
 /// **Reopening one tap supersedes that tap's reader and no other's.** Two taps
@@ -215,4 +225,105 @@ fn reopening_one_tap_leaves_the_others_fed() {
     assert!(first.pop_into(&mut chunk) > 0, "the reopened tap is fed");
     assert!(second.pop_into(&mut chunk) > 0, "the other is still fed");
     assert_eq!(second.rate(), SampleRate::of(RATE), "and on its own rate");
+}
+
+/// **A clip fed to a sink's node arrives at the sink as its notes, on their
+/// frames.** At 120 BPM and 48 kHz a beat is 24 000 frames: a note from beat 1
+/// for one beat is a note-on at frame 24 000 and its note-off at 48 000, which a
+/// sink sees as offsets 0 and 24 000 of one drain.
+#[test]
+fn a_clip_fed_to_a_sinks_node_arrives_on_its_frames() {
+    let wire = Wire::default();
+    let mut s = rig(&wire);
+    s.midi_nodes().unwrap().clock_master.set_enabled(false);
+    let out = s.midi_sink(&"out").expect("loaded");
+    let (clip, _) = s.graph().add(MidiClipNode::new(note(
+        60,
+        MF,
+        Beat(1.0),
+        BeatDuration(1.0),
+    )));
+    s.graph()
+        .set_sources(EventInPort::new(out.node(), 0), [clip.events_out()])
+        .expect("the sink's node takes events");
+    let _ = s.update();
+    render(&s, 50_000);
+    let _ = s.update();
+    let sent: Vec<UmpAt> = wire.batches().concat();
+    let kinds: Vec<(u32, bool)> = sent
+        .iter()
+        .filter_map(|(at, ump)| match ump.key_event() {
+            Some(tutti_ump::KeyEvent::On(_)) => Some((at.get(), true)),
+            Some(tutti_ump::KeyEvent::Off(_)) => Some((at.get(), false)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(kinds, [(0, true), (24_000, false)], "{sent:?}");
+}
+
+/// **A sink is a pool entry**: its node is in the graph while the entry is
+/// declared, its handle reads `Live` and says whether it stamps, declaring the
+/// same sink again keeps the entry, and another sink under the key replaces it
+/// (the old handle reads `Closed` and its node leaves the graph).
+#[test]
+fn a_sink_is_a_pool_entry_that_a_new_sink_replaces() {
+    let first: Arc<dyn MidiOut> = Arc::new(Wire::default());
+    let mut s = Session::builder()
+        .sample_rate(SampleRate::of(RATE))
+        .build()
+        .expect("builds");
+    s.pool(midi_sink("out", Arc::clone(&first)))
+        .expect("declares");
+    let _ = s.update();
+    let sink = s.midi_sink(&"out").expect("loaded");
+    assert_eq!(sink.presence(), Presence::Live);
+    assert!(!sink.info().stamping);
+    assert!(s.graph_ref().contains(sink.node()), "the sink's node");
+
+    s.pool(midi_sink("out", Arc::clone(&first)))
+        .expect("declares");
+    let _ = s.update();
+    assert_eq!(
+        s.midi_sink(&"out").unwrap().id(),
+        sink.id(),
+        "the same sink keeps its entry"
+    );
+
+    let second: Arc<dyn MidiOut> = Arc::new(Wire::default());
+    s.pool(midi_sink("out", second).stamping(true))
+        .expect("declares");
+    let _ = s.update();
+    let _ = s.update();
+    assert_eq!(sink.presence(), Presence::Closed, "the old one ended");
+    assert!(!s.graph_ref().contains(sink.node()), "and its node left");
+    let now = s.midi_sink(&"out").expect("the new one loaded");
+    assert!(now.info().stamping);
+    assert_ne!(now.id(), sink.id());
+}
+
+/// **Releasing the entry ends the sink**: its handle reads `Closed`, its node
+/// leaves the graph, and a clip that was wired to it is heard by nobody.
+#[test]
+fn releasing_the_entry_ends_the_sink() {
+    let wire = Wire::default();
+    let mut s = rig(&wire);
+    let sink = s.midi_sink(&"out").expect("loaded");
+    render(&s, 4_096);
+    let _ = s.update();
+    assert!(!wire.batches().is_empty(), "the clock reached the sink");
+
+    s.pool(Vec::<Declared<&str, MidiSinkEntry>>::new())
+        .expect("declares nothing");
+    let _ = s.update();
+    let _ = s.update();
+    assert_eq!(sink.presence(), Presence::Closed);
+    assert!(!s.graph_ref().contains(sink.node()), "its node left");
+    let _ = wire.batches();
+    render(&s, 4_096);
+    let _ = s.update();
+    assert!(wire.batches().is_empty(), "nothing more reaches it");
+    assert!(matches!(
+        s.midi_sink(&"out"),
+        Err(tutti_session::HandleError::NotPooled("out"))
+    ));
 }

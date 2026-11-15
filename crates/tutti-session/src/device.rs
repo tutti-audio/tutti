@@ -925,7 +925,7 @@ impl<C: Clock> Session<C> {
         // is placed only now, so a refused restart moves nothing, and a
         // restart onto the old device places it again.
         self.graph.place_device(spec.channels, topology)?;
-        // The hardware out's tap reads frames of one rate: reopened at the
+        // The outputs' taps read frames of one rate: reopened at the
         // new one, committed with the rest below.
         #[cfg(feature = "midi")]
         if self.midi_state.follow_rate(&mut self.graph) {

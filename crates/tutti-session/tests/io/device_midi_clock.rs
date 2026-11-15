@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::UmpAt;
 use tutti_midi_runtime::MidiOut;
-use tutti_session::{LiveSession, Session, UmpOut};
+use tutti_session::{LiveSession, Session, midi_sink};
 use tutti_transport::MotionEvent;
 use tutti_types::{ChannelLayout, SampleRate};
 use tutti_ump::{Message, MidiGroup, System, Ump};
@@ -63,9 +63,8 @@ fn clock(
 /// locate: 512-frame blocks move the beat further at 44.1 kHz than at 48,
 /// which a seek check with a fixed epsilon would take for a locate).
 ///
-/// The hardware out is the tap on that clock, and it follows the restart: its
-/// frames are on the new rate from the hook on, and what it carries is the
-/// ticks' spacing on the new grid.
+/// A `midi_sink`'s tap follows the restart: its frames are on the new rate
+/// from the hook on, and what it carries is the ticks' spacing on the new grid.
 #[test]
 fn a_restart_re_rates_the_midi_clock() {
     let (driver, old) = ManualStreamDriver::new();
@@ -75,11 +74,9 @@ fn a_restart_re_rates_the_midi_clock() {
         .expect("builds with no device");
     let _ = s.update();
     let wire = Wire::default();
-    s.midi().set_hardware_out(Some(UmpOut::new(
-        Box::new(wire.clone()),
-        SampleRate::of(OLD),
-    )));
-    assert_eq!(s.midi().hardware_out_rate(), Some(SampleRate::of(OLD)));
+    s.pool(midi_sink("out", Arc::new(wire.clone())))
+        .expect("declares");
+    let _ = s.update();
     s.midi_nodes()
         .expect("the engine's MIDI nodes")
         .clock_master
@@ -106,11 +103,6 @@ fn a_restart_re_rates_the_midi_clock() {
     let (driver, new) = ManualStreamDriver::new();
     s.restart_on(spec_at(NEW), driver, None, None)
         .expect("restarts");
-    assert_eq!(
-        s.midi().hardware_out_rate(),
-        Some(SampleRate::of(NEW)),
-        "the hardware out's frames follow the graph to its new rate"
-    );
     let _ = s.update(); // what the old rate left in the tap
     let after = clock(&mut s, &wire, &new, (512, 100));
     assert!((ticks(&after) - 1_000.0).abs() < 0.05, "{}", ticks(&after));

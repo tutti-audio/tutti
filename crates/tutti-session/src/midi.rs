@@ -1,7 +1,8 @@
 //! MIDI in the session (feature `midi`): a live
 //! input per target, one clip per target, the hardware input's route rules,
-//! and the hardware out, an event tap on the clock drained by
-//! [`Phase::MidiOut`].
+//! and the outputs, each a [`MidiOutNode`](tutti_midi_runtime::MidiOutNode)
+//! whose event tap [`Phase::MidiOut`] drains to a device's output
+//! (`midi_output`) or a host's own sink ([`midi_sink`](crate::midi_sink())).
 //!
 //! Every piece is wiring. A clip is a `MidiClipNode`, a live input a
 //! an event inlet, each the session's own node fed into its target's event
@@ -19,12 +20,12 @@ use std::time::{Duration, Instant};
 use tutti_graph::UmpAt;
 
 use std::sync::Arc;
-use tutti_graph::{EventTapId, EventTapReader, NodeKey, Offset, TapEvent};
+use tutti_graph::{EventTapReader, NodeKey, Offset, TapEvent};
 use tutti_midi_protocol::MpeMode;
 use tutti_midi_runtime::{
-    ClockMap, MidiClipControls, MidiClipNode, MidiInputPorts, MidiKeys, MidiReceiver,
-    MpeTransformControls, MpeTransformNode, Outgoing, OutputLatency, OutputPlan, OutputTerms,
-    Placement, RouteRule, SendAt, TimedMidiEvent, compile_routes,
+    ClockMap, MidiClipControls, MidiClipNode, MidiInputPorts, MidiKeys, MpeTransformControls,
+    MpeTransformNode, Outgoing, OutputLatency, OutputPlan, OutputTerms, Placement, RouteRule,
+    SendAt, TimedMidiEvent, compile_routes,
 };
 use tutti_tempo::TempoMap;
 use tutti_types::{Beat, BeatDuration, Frame, MeterMap, Mint, Samples};
@@ -112,7 +113,7 @@ fn os_instant(ns: i64) -> Option<Instant> {
     }
 }
 
-/// What the session reads of the engine to time the hardware out: its block
+/// What the session reads of the engine to time the outputs: its block
 /// clock and the audio output's latency (the stream's cell, which the device's
 /// callback writes, `None` until it reports, and a restart resets in place).
 #[derive(Clone, Debug)]
@@ -166,44 +167,42 @@ impl OutputClockSource {
 /// clock, the caller's reading of that clock and every other term of the send
 /// time ([`OutputPlan`]).
 #[derive(Clone, Copy, Debug)]
-pub struct OutputTiming {
+pub(crate) struct OutputTiming {
     /// Places a frame on the OS clock; `None` before the engine's first block,
     /// when every frame is sent at once.
-    pub map: Option<ClockMap>,
+    pub(crate) map: Option<ClockMap>,
     /// The OS clock now: what a send time is compared with.
-    pub now: Instant,
+    pub(crate) now: Instant,
     /// The audio output's latency and the output's own.
-    pub terms: OutputTerms,
+    pub(crate) terms: OutputTerms,
 }
 
-/// The hardware out's tap, in events: the ring the clock's output is copied
-/// into between two updates (a note-off is kept up to
+/// An output node's tap, in events: the ring its output is copied into between
+/// two updates (a note-off is kept up to
 /// [`note_off_room`](tutti_graph::note_off_room) of it).
 pub(crate) const MIDI_OUT_TAP_CAPACITY: tutti_graph::EventCapacity =
     tutti_graph::EventCapacity::of(1024);
 
-/// A UMP MIDI output and its JR stamp stream: where the session's hardware
-/// out goes ([`Midi::set_hardware_out`]).
+/// A UMP MIDI output and its JR stamp stream: where one output node's events
+/// go, a `midi_output` entry's device or a `midi_sink` entry's [`MidiOut`](tutti_midi_runtime::MidiOut).
 ///
 /// The sink carries UMP words to the wire, so JR Timestamps and other
 /// MIDI-2-only messages survive, which is the whole reason this type exists:
 /// a device's output puts them in its device's wire form (`OpenOutput`), and
 /// stamps only when the device receives them.
 ///
-/// The sink is a value this type owns: a host's own [`MidiOut`](tutti_midi_runtime::MidiOut)
+/// The sink is a value this type holds: a host's own `MidiOut`
 /// ([`new`](Self::new)), or, with the `midi-hardware` feature, the
-/// `OpenOutput` of a device (what a `midi_output` entry's port holds). Sends
-/// take `&mut self`, so nothing shares the sink with the session.
+/// `OpenOutput` of a device. Sends take `&mut self`.
 ///
 /// The [`JrStream`](tutti_midi_runtime::JrStream) is the whole endpoint's,
-/// not one drain's: the hardware out and a host's own mailbox stamp through
-/// here, and a per-drain origin would restart each at zero and interleave
-/// stamps that walk backwards.
+/// not one drain's: a per-drain origin would restart each at zero and
+/// interleave stamps that walk backwards.
 ///
 /// A device's output is erased behind the backend (`OpenOutput`), so there is
 /// one path and no `#[cfg]` per platform: a Linux ALSA seq-UMP output stamps
 /// exactly as a CoreMIDI one does.
-pub struct UmpOut {
+pub(crate) struct UmpOut {
     sink: Sink,
     stream: tutti_midi_runtime::JrStream,
     /// Whether a host's own sink is JR-stamped. Separate from "is there an
@@ -224,14 +223,14 @@ pub struct UmpOut {
     /// Scratch for the batch as the sink takes it, with its send times.
     outgoing: Vec<Outgoing>,
     /// Scratch a drain collects its whole run of events into
-    /// ([`MidiOutRouter::route_drain`]), so one drain is one batch.
+    /// ([`route_drain`]), so one drain is one batch.
     drained: Vec<(Frame, Ump)>,
 }
 
 /// What an [`UmpOut`] sends into.
 enum Sink {
     /// A host's own sink.
-    Host(Box<dyn tutti_midi_runtime::MidiOut>),
+    Host(Arc<dyn tutti_midi_runtime::MidiOut>),
     /// A device's output, in its wire form.
     #[cfg(feature = "midi-hardware")]
     Device(Box<tutti_midi_hardware::OpenOutput>),
@@ -279,11 +278,10 @@ impl UmpOut {
     /// (§7.2.2.1). Without it the stamps this type exists to emit are inert:
     /// §7.2.2.3 has a receiver that has seen no JR Clock render messages "as
     /// soon as possible", discarding the timing entirely.
-    pub fn new(
-        sink: Box<dyn tutti_midi_runtime::MidiOut>,
-        sample_rate: impl Into<tutti_types::SampleRate>,
+    pub(crate) fn new(
+        sink: Arc<dyn tutti_midi_runtime::MidiOut>,
+        sample_rate: tutti_types::SampleRate,
     ) -> Self {
-        let sample_rate = sample_rate.into();
         Self::over(Sink::Host(sink), sample_rate)
     }
 
@@ -309,13 +307,13 @@ impl UmpOut {
     /// not delivery: with it off the events still go out, unstamped. A device's
     /// output stamps iff its configuration receives JR Timestamps, whatever this
     /// says.
-    pub fn set_stamping(&mut self, stamping: bool) {
+    pub(crate) fn set_stamping(&mut self, stamping: bool) {
         self.stamping = stamping;
     }
 
     /// Whether it JR-stamps.
     #[must_use]
-    pub fn is_stamping(&self) -> bool {
+    pub(crate) fn is_stamping(&self) -> bool {
         match &self.sink {
             Sink::Host(_) => self.stamping,
             #[cfg(feature = "midi-hardware")]
@@ -326,7 +324,7 @@ impl UmpOut {
     /// The device output this sends into, if it is one.
     #[cfg(feature = "midi-hardware")]
     #[must_use]
-    pub fn device(&self) -> Option<&tutti_midi_hardware::OpenOutput> {
+    pub(crate) fn device(&self) -> Option<&tutti_midi_hardware::OpenOutput> {
         match &self.sink {
             Sink::Device(out) => Some(out),
             Sink::Host(_) => None,
@@ -368,17 +366,6 @@ impl UmpOut {
         self.stream
     }
 
-    /// JR-stamp `events` and send each resulting UMP message (the timestamp
-    /// prefixes and the events) to the sink. The stream advances its own
-    /// origin, so successive blocks stay monotonic whichever drain called.
-    ///
-    /// The JR Clock cadence advances only by the events handed in, so a
-    /// silent stream never clocks. With stamping off the events go out
-    /// unchanged.
-    pub fn send_stamped(&mut self, events: &[UmpAt]) {
-        self.send_batch(events);
-    }
-
     /// Sends a batch of events, each on its frame on the graph's clock. The
     /// batch is one block: its first frame (the earliest) is its start, and
     /// its span runs to the last frame inclusive, so what the stamper reads
@@ -394,7 +381,11 @@ impl UmpOut {
     /// sink refused with them; a batch whose span no block on this target can
     /// hold is refused whole. The JR stamps keep the events' spacing whether or
     /// not they are scheduled.
-    pub fn send_frames(&mut self, events: &[(Frame, Ump)], timing: Option<&OutputTiming>) -> usize {
+    pub(crate) fn send_frames(
+        &mut self,
+        events: &[(Frame, Ump)],
+        timing: Option<&OutputTiming>,
+    ) -> usize {
         let (Some(first), Some(last)) = (
             events.iter().map(|e| e.0).min(),
             events.iter().map(|e| e.0).max(),
@@ -437,7 +428,8 @@ impl UmpOut {
     }
 
     /// Stamps `events` (when stamping) and sends them, each at the time
-    /// `self.sends` has for its offset, else at once.
+    /// `self.sends` has for its offset, else at once. The JR Clock cadence
+    /// advances only by the events handed in, so a silent stream never clocks.
     fn send_batch(&mut self, events: &[UmpAt]) -> usize {
         if !self.is_stamping() {
             return self.send_all(events);
@@ -474,45 +466,40 @@ impl UmpOut {
         refused
     }
 
-    /// The absolute frame the next stamp starts from. For tests and
-    /// diagnostics.
-    pub fn origin(&self) -> Frame {
+    /// The absolute frame the next stamp starts from.
+    #[cfg(test)]
+    pub(crate) fn origin(&self) -> Frame {
         self.stream.origin()
     }
 }
 
 /// How many outbound events went nowhere, and whether that has been said
-/// aloud.
-///
-/// With no output connected, a drain has nowhere to send its events, and
-/// nothing above debug level would show it: this counts what was lost and
-/// warns once.
+/// aloud: the total behind [`MidiEvent::OutputDropped`] and
+/// [`Midi::out_drops`], over every output.
 #[derive(Debug, Default)]
-pub struct MidiOutDrops {
+pub(crate) struct OutDrops {
     dropped: AtomicU64,
     warned: AtomicBool,
 }
 
-impl MidiOutDrops {
-    /// Events discarded for want of a connected output, refused by the hardware
-    /// out's tap for want of room, refused as scheduled more than
-    /// [`MAX_OUTPUT_AHEAD`](tutti_midi_runtime::MAX_OUTPUT_AHEAD) ahead, or a
-    /// Machine Control look that was never sent (a time no time code names, or
-    /// a payload that does not pack as SysEx7).
-    pub fn count(&self) -> u64 {
+impl OutDrops {
+    /// Events discarded for want of an open output, refused by an output
+    /// node's tap for want of room, refused as scheduled more than
+    /// [`MAX_OUTPUT_AHEAD`](tutti_midi_runtime::MAX_OUTPUT_AHEAD) ahead or by
+    /// the sink, or a Machine Control look that was never sent (a time no time
+    /// code names, or a payload that does not pack as SysEx7).
+    pub(crate) fn count(&self) -> u64 {
         self.dropped.load(Ordering::Relaxed)
     }
 
-    /// Record `n` events that were refused: by the hardware out's tap for want
-    /// of room, by the plan as too far ahead, a Machine Control look to a time
-    /// no time code names, or a Machine Control payload that failed to pack as
-    /// SysEx7. A count, with no warning of its own (there is an output to
-    /// blame).
-    fn record_refused(&self, n: u64) {
+    /// Record `n` events that were refused with an output to blame: a count,
+    /// with no warning of its own.
+    pub(crate) fn record_refused(&self, n: u64) {
         self.dropped.fetch_add(n, Ordering::Relaxed);
     }
 
-    /// Record `n` dropped events, warning the first time only.
+    /// Record `n` events dropped for want of an open output, warning the first
+    /// time only.
     fn record(&self, n: usize) {
         if n == 0 {
             return;
@@ -520,106 +507,63 @@ impl MidiOutDrops {
         let total = self.dropped.fetch_add(n as u64, Ordering::Relaxed) + n as u64;
         if !self.warned.swap(true, Ordering::Relaxed) {
             tracing::warn!(
-                "MIDI out has events but no output is connected; {total} dropped so far. \
-                 Connect one (`Midi::set_hardware_out`)."
+                "MIDI out has events but no output is open; {total} dropped so far. \
+                 Declare a `midi_output` or `midi_sink` entry and connect its node."
             );
         }
     }
 }
 
-/// Where drained MIDI-out events go: the open UMP output, else counted as
-/// dropped.
-///
-/// There is no `#[cfg]` here: every backend yields a `Box<dyn MidiOut>`, so
-/// a CoreMIDI port and an ALSA port are one static type, and which messages
-/// survive is not a property of where the binary was built.
-#[derive(Debug)]
-pub struct MidiOutRouter<'a> {
-    /// The open output, JR-stamping as it sends. `None` when nothing is
-    /// connected: a sink that is present but silently discarding would
-    /// leave "nothing is coming out" unanswerable.
-    pub out: Option<&'a mut UmpOut>,
-    /// Where events with nowhere to go are counted. `None` keeps the drop
-    /// silent.
-    pub drops: Option<&'a MidiOutDrops>,
-    /// What the events are timed by ([`UmpOut::send_frames`]); `None` sends
-    /// them at once. An event refused as too far ahead is counted in `drops`.
-    pub timing: Option<&'a OutputTiming>,
-}
-
-impl MidiOutRouter<'_> {
-    /// Routes one drain as one batch: `fill` hands every event of the drain
-    /// to the callback it is given, and they are then sent together
-    /// ([`UmpOut::send_frames`]), so the spacing of the whole drain, not of
-    /// a chunk of it, is what the stamps and the send times keep. With no
-    /// output the events are counted as dropped, as [`route`](Self::route)
-    /// does.
-    pub fn route_drain(&mut self, fill: impl FnOnce(&mut dyn FnMut(Frame, Ump))) {
-        match self.out.as_mut() {
-            Some(out) => {
-                let mut batch = core::mem::take(&mut out.drained);
-                batch.clear();
-                fill(&mut |frame, ump| batch.push((frame, ump)));
-                let refused = out.send_frames(&batch, self.timing);
-                out.drained = batch;
-                if let Some(drops) = self.drops {
-                    drops.record_refused(refused as u64);
-                }
-            }
-            None => {
-                let mut n = 0;
-                fill(&mut |_, _| n += 1);
-                if let Some(drops) = self.drops {
-                    drops.record(n);
-                }
-            }
+/// Routes one drain as one batch to `out`: `fill` hands every event of the
+/// drain to the callback it is given, and they are then sent together
+/// ([`UmpOut::send_frames`]), so the spacing of the whole drain, not of a
+/// chunk of it, is what the stamps and the send times keep. With no output the
+/// events are counted as dropped. Returns how many events did not go.
+fn route_drain(
+    out: Option<&mut UmpOut>,
+    drops: &OutDrops,
+    timing: Option<&OutputTiming>,
+    fill: impl FnOnce(&mut dyn FnMut(Frame, Ump)),
+) -> u64 {
+    match out {
+        Some(out) => {
+            let mut batch = core::mem::take(&mut out.drained);
+            batch.clear();
+            fill(&mut |frame, ump| batch.push((frame, ump)));
+            let refused = out.send_frames(&batch, timing) as u64;
+            out.drained = batch;
+            drops.record_refused(refused);
+            refused
         }
-    }
-
-    /// Routes a batch of drained events, each on its frame on the graph's
-    /// clock, to the open output ([`UmpOut::send_frames`]). An event with
-    /// no output is dropped (the ring must not back up), counted first.
-    pub fn route(&mut self, events: &[(Frame, Ump)]) {
-        match self.out.as_mut() {
-            Some(out) => {
-                let refused = out.send_frames(events, self.timing);
-                if let Some(drops) = self.drops {
-                    drops.record_refused(refused as u64);
-                }
-            }
-            None => {
-                if let Some(drops) = self.drops {
-                    drops.record(events.len());
-                }
-            }
+        None => {
+            let mut n = 0;
+            fill(&mut |_, _| n += 1);
+            drops.record(n);
+            n as u64
         }
     }
 }
 
-/// Drains a [`MidiReceiver`] mailbox fully and routes every event as one
-/// batch ([`MidiOutRouter::route_drain`]).
-///
-/// For a host's own outbound mailbox (a MIDI-CI reply, a track's MIDI out);
-/// the graph's hardware out is a tap and reads its frames directly. A
-/// mailbox stamp is a raw `u32` whose meaning is the host's, so the drain is
-/// read as frames from its first event (every stamp less the first's,
-/// wrapping): the spacing, which is what the router needs.
-pub fn drain_receiver_through(receiver: &MidiReceiver, router: &mut MidiOutRouter<'_>) {
-    router.route_drain(|push| {
-        // On the stack: this runs every frame.
-        let mut buf = [(0u32, Ump([0; 4])); DRAIN_CHUNK];
-        let mut base = None;
-        loop {
-            let n = receiver.poll_into(&mut buf);
-            for &(stamp, ump) in &buf[..n] {
-                let base = *base.get_or_insert(stamp);
-                push(Frame::new(u64::from(stamp.wrapping_sub(base))), ump);
-            }
-            if n < DRAIN_CHUNK {
-                break;
-            }
+/// Routes a batch of events, each on its frame on the graph's clock, to `out`
+/// ([`UmpOut::send_frames`]). An event with no output is dropped (the ring must
+/// not back up), counted first. Returns how many events did not go.
+pub(crate) fn route_batch(
+    out: Option<&mut UmpOut>,
+    drops: &OutDrops,
+    timing: Option<&OutputTiming>,
+    events: &[(Frame, Ump)],
+) -> u64 {
+    match out {
+        Some(out) => {
+            let refused = out.send_frames(events, timing) as u64;
+            drops.record_refused(refused);
+            refused
         }
-    });
+        None => {
+            drops.record(events.len());
+            events.len() as u64
+        }
+    }
 }
 
 /// What [`Midi::unroute`] found missing: the rule `id` named.
@@ -791,16 +735,14 @@ pub(crate) struct MidiState {
     /// Whether a host's last `set_routes` declared any rule or fallback:
     /// the routes are then the host's, and the session's own are refused.
     host_routes: bool,
-    pub(crate) out: Option<UmpOut>,
+    /// The sinks the pool's `midi_sink` entries opened.
+    pub(crate) sinks: crate::midi_sink::Sinks,
     /// The ports the pool's `midi_input` and `midi_output` entries opened.
     #[cfg(feature = "midi-hardware")]
     pub(crate) ports: crate::midi_port::Ports,
     /// The session's one MPE mode ([`Midi::set_mpe`]).
     mpe: MpeMode,
-    /// The hardware out's tap on the clock, which `Phase::MidiOut` drains;
-    /// `None` when the session has no engine MIDI (or the clock left).
-    hardware_tap: Option<EventTapReader>,
-    drops: MidiOutDrops,
+    drops: OutDrops,
     /// The tempo the session follows, if it does ([`Midi::follow_tempo`]).
     follow: Option<Follow>,
     /// The MIDI clock the session follows, if it does ([`Midi::follow_clock`]).
@@ -815,11 +757,11 @@ pub(crate) struct MidiState {
     /// Events [`Midi::unfollow_tempo`] and [`Midi::unfollow_clock`] queued for the next `Poll` phase, which
     /// reports them.
     follow_events: Vec<MidiEvent>,
-    /// What the engine gives the hardware out's timing: its block clock and the
+    /// What the engine gives the outputs' timing: its block clock and the
     /// audio output's latency. `None` offline, where every event
     /// is sent at once.
     output_clock: Option<OutputClockSource>,
-    /// The hardware out's own latency and offset ([`Midi::set_output_latency`]).
+    /// The outputs' own latency and offset ([`Midi::set_output_latency`]).
     output_latency: OutputLatency,
     /// The drop count the last `MidiOut` phase reported, and when.
     drops_seen: u64,
@@ -848,7 +790,6 @@ impl std::fmt::Debug for MidiState {
             .field("minted", &self.minted)
             .field("routed", &self.routed)
             .field("host_routes", &self.host_routes)
-            .field("out", &self.out)
             .field("drops", &self.drops)
             .field("drops_seen", &self.drops_seen)
             .field("reported_at", &self.reported_at)
@@ -858,7 +799,7 @@ impl std::fmt::Debug for MidiState {
 
 /// How often a rising drop count is reported at most
 /// ([`MidiEvent::OutputDropped`]):
-/// a clock running with no output drops ticks on every update.
+/// a Machine Control look with no output open drops on every update.
 pub const MIDI_OUT_DROP_REPORT: Duration = Duration::from_secs(1);
 
 /// How often a rising count of events the hardware inputs' inlets dropped is
@@ -868,24 +809,14 @@ pub const MIDI_OUT_DROP_REPORT: Duration = Duration::from_secs(1);
 pub const MIDI_INPUT_DROP_REPORT: Duration = Duration::from_secs(1);
 
 impl MidiState {
-    /// A state whose hardware out drains `tap`.
-    pub(crate) fn with_hardware_tap(tap: Option<EventTapReader>) -> Self {
-        Self {
-            hardware_tap: tap,
-            ..Self::default()
-        }
-    }
-
-    /// A state whose `Phase::Poll` reads `device_events` and whose hardware
-    /// out drains `tap`.
+    /// A state whose `Phase::Poll` reads `device_events`.
     #[cfg(feature = "midi-hardware")]
     pub(crate) fn with_device_events(
         device_events: Option<tutti_midi_hardware::DeviceEvents>,
-        tap: Option<EventTapReader>,
     ) -> Self {
         Self {
             device_events,
-            ..Self::with_hardware_tap(tap)
+            ..Self::default()
         }
     }
 
@@ -896,7 +827,7 @@ impl MidiState {
         self
     }
 
-    /// The hardware out is timed by `clock` from now on (a session with an
+    /// The outputs are timed by `clock` from now on (a session with an
     /// audio device, or the system clock's zero-latency output).
     pub(crate) fn set_output_clock(&mut self, clock: OutputClockSource) {
         self.output_clock = Some(clock);
@@ -1027,20 +958,10 @@ impl MidiState {
     }
 
     /// The timing of a drain now, from the engine's block clock: `None` offline.
-    fn output_timing(&self) -> Option<OutputTiming> {
+    pub(crate) fn output_timing(&self) -> Option<OutputTiming> {
         self.output_clock
             .as_ref()
             .map(|source| source.timing(self.output_latency))
-    }
-
-    /// Reads the hardware out's tap dry and routes what it held to the
-    /// output, each event on its frame, and counts what the tap refused for
-    /// want of room ([`EventTapReader::take_lost`]) among the drops.
-    pub(crate) fn drain_tap(&mut self) {
-        let timing = self.output_timing();
-        if let Some(tap) = self.hardware_tap.as_mut() {
-            drain_events(tap, self.out.as_mut(), &self.drops, timing.as_ref());
-        }
     }
 
     /// Whether the session follows a live tempo now.
@@ -1157,54 +1078,44 @@ impl MidiState {
         let devices = self.ports.route(&batch, &self.drops, timing.as_ref());
         #[cfg(not(feature = "midi-hardware"))]
         let devices = false;
-        if self.out.is_some() || !devices {
-            MidiOutRouter {
-                out: self.out.as_mut(),
-                drops: Some(&self.drops),
-                timing: timing.as_ref(),
-            }
-            .route(&batch);
+        let sinks = self.sinks.route(&batch, &self.drops, timing.as_ref());
+        if !devices && !sinks {
+            route_batch(None, &self.drops, timing.as_ref(), &batch);
         }
     }
 
-    /// The hardware out's tap is on one scale of frames, the rate it was
-    /// opened at: when the graph has been re-prepared at another, drains the
-    /// old reader, reopens that one tap (and no other: a caller's own are the
-    /// caller's) and takes the new reader. Whether it reopened; the graph is
-    /// then edited and the next commit compiles the new tap.
+    /// The outputs' taps are on one scale of frames, the rate they were opened
+    /// at: when the graph has been re-prepared at another, drains the old
+    /// readers and reopens those taps (and no other: a caller's own are the
+    /// caller's). Whether any reopened; the graph is then edited and the next
+    /// commit compiles the new taps.
     pub(crate) fn follow_rate(&mut self, graph: &mut Graph) -> bool {
-        let Some(tap) = &self.hardware_tap else {
-            return false;
-        };
-        if tap.rate() == graph.prepared().sample_rate() {
-            return false;
-        }
-        let id: EventTapId = tap.id();
-        self.drain_tap();
-        self.hardware_tap = graph.taps().reopen_event(id);
-        true
+        let timing = self.output_timing();
+        let sinks = self.sinks.reopen(graph, &self.drops, timing.as_ref());
+        #[cfg(feature = "midi-hardware")]
+        let ports = self.ports.reopen(graph, &self.drops, timing.as_ref());
+        #[cfg(not(feature = "midi-hardware"))]
+        let ports = false;
+        sinks || ports
     }
 
-    /// `Phase::MidiOut`: drains the hardware out to the output, and reports
-    /// the drops when their count rose, at most once per
-    /// [`MIDI_OUT_DROP_REPORT`] of `now`.
+    /// `Phase::MidiOut`: drains every output's tap to its device or sink, and
+    /// reports the drops when their count rose, at most once per
+    /// [`MIDI_OUT_DROP_REPORT`] of `now`. Whether the graph was edited.
     pub(crate) fn midi_out_phase(
         &mut self,
         graph: &mut Graph,
         playhead: &tutti_engine::Playhead,
         now: Instant,
         out: &mut Vec<crate::SessionEvent>,
-    ) {
+    ) -> bool {
         // A graph re-rated outside the device hook (`Graph::set_sample_rate`)
         // is followed here, before this update's events are read.
-        self.follow_rate(graph);
-        self.drain_tap();
+        let mut edited = self.follow_rate(graph);
+        let timing = self.output_timing();
+        edited |= self.sinks.drain(graph, &self.drops, timing.as_ref());
         #[cfg(feature = "midi-hardware")]
-        {
-            let timing = self.output_timing();
-            self.ports
-                .drain_outputs(graph, &self.drops, timing.as_ref());
-        }
+        self.ports.drain_outputs(&self.drops, timing.as_ref());
         self.send_machine_control(playhead);
         let count = self.drops.count();
         let due = self
@@ -1215,28 +1126,26 @@ impl MidiState {
             self.reported_at = Some(now);
             out.push(MidiEvent::OutputDropped { total: count }.into());
         }
+        edited
     }
 }
 
 /// Reads `tap` dry and routes what it held to `out` (with none, the events are
-/// counted as dropped), each event on its frame, and counts what the tap
-/// refused for want of room ([`EventTapReader::take_lost`]) among `drops`.
+/// counted as dropped), each event on its frame. Returns what was lost: the
+/// events the tap refused for want of room ([`EventTapReader::take_lost`]) as
+/// `lost`, and those that did not go as `refused`; both are counted in `drops`
+/// too.
 pub(crate) fn drain_events(
     tap: &mut EventTapReader,
     out: Option<&mut UmpOut>,
-    drops: &MidiOutDrops,
+    drops: &OutDrops,
     timing: Option<&OutputTiming>,
-) {
+) -> tutti_graph::Losses {
     let mut events = [TapEvent {
         frame: Frame::ZERO,
         ump: Ump([0; 4]),
     }; DRAIN_CHUNK];
-    let mut router = MidiOutRouter {
-        out,
-        drops: Some(drops),
-        timing,
-    };
-    router.route_drain(|push| {
+    let refused = route_drain(out, drops, timing, |push| {
         loop {
             let n = tap.pop_into(&mut events);
             for e in &events[..n] {
@@ -1247,7 +1156,9 @@ pub(crate) fn drain_events(
             }
         }
     });
-    drops.record_refused(tap.take_lost());
+    let lost = tap.take_lost();
+    drops.record_refused(lost);
+    tutti_graph::Losses::lost(lost) + tutti_graph::Losses::refused(refused)
 }
 
 /// Wires `inputs`' ports as `rules` route them (`tutti_midi_runtime::compile_routes`)
@@ -1307,7 +1218,7 @@ tutti_types::id! {
 }
 
 /// The session's MIDI: live inputs, clips, the hardware
-/// input's routes and the hardware out. [`Session::midi`](crate::Session::midi)
+/// input's routes and the outputs. [`Session::midi`](crate::Session::midi)
 /// hands it out; what it edits goes out with the next update's commit.
 #[derive(Debug)]
 pub struct Midi<'a> {
@@ -1891,7 +1802,7 @@ impl Midi<'_> {
     /// The tap is closed when its reader is dropped (the next
     /// [`Reclaim`](crate::Phase::Reclaim) phase) or with
     /// `Graph::taps().close_event`. A re-prepare at another rate reopens the
-    /// session's own taps only (the hardware out's); reopen this one with
+    /// session's own taps only (the outputs'); reopen this one with
     /// `Graph::taps().reopen_event`.
     ///
     /// # Errors
@@ -2176,7 +2087,7 @@ impl Midi<'_> {
     }
 
     /// Sends the transport's play, stop and locate as MIDI Machine Control
-    /// commands (RP-013) to the hardware out ([`set_hardware_out`](Self::set_hardware_out)),
+    /// commands (RP-013) to every open output (a `midi_output` or `midi_sink` entry's),
     /// for a host that drives a tape machine or another DAW. **Off by default.**
     ///
     /// Each update looks at the playhead and sends what changed since the last:
@@ -2210,70 +2121,58 @@ impl Midi<'_> {
             .ok_or(MidiError::NotSendingMachineControl)
     }
 
-    // --- Hardware out ---
+    // --- Outputs ---
 
-    /// The host's own sink: the output the hardware out (an event tap on the
-    /// clock, aligned to the graph's outputs) drains to at each update's
-    /// [`MidiOut`](crate::Phase::MidiOut) phase. `None`: its events are counted
-    /// as dropped ([`MidiEvent::OutputDropped`]).
-    ///
-    /// This is the host-sink path only. A device is reached through a
-    /// `midi_output` port of the pool (the session's clock feeds each one), whose
-    /// own stamp stream and timing it keeps; this call, [`hardware_out`](Self::hardware_out)
-    /// and [`drain_out`](Self::drain_out) leave the ports alone.
-    ///
-    /// **Whether it JR-stamps is the device's.** With the `midi-hardware`
-    /// feature, an output that is a device's (a `midi_output` port)
-    /// stamps only when the device receives JR Timestamps (`rx_jr`, which the
-    /// session asks for off, so a device that does not turn it on itself is
-    /// sent none), and the device's own output refuses a JR message otherwise.
-    /// An output that is not a device's (a host's own sink) stamps as
-    /// [`UmpOut::set_stamping`] says. There is no switch of the session's own.
-    pub fn set_hardware_out(&mut self, out: Option<UmpOut>) {
-        self.state.out = out;
-    }
-
-    /// The router onto the host's own sink ([`set_hardware_out`](Self::set_hardware_out)):
-    /// what a host writes its own outbound MIDI through (a MIDI-CI reply, a
-    /// track's MIDI out), stamped and counted as the hardware out is. It does not
-    /// reach a `midi_output` port.
-    pub fn hardware_out(&mut self) -> MidiOutRouter<'_> {
-        MidiOutRouter {
-            out: self.state.out.as_mut(),
-            drops: Some(&self.state.drops),
-            timing: None,
+    /// Adds an output node to the graph and opens its tap: the node is fed by
+    /// the session's clock (every output carries it), and the tap is aligned to
+    /// the outputs' time so MIDI leaves with the audio. What a host wires to
+    /// the node's event input is read from the tap.
+    pub(crate) fn add_output_node(&mut self) -> (NodeKey, EventTapReader) {
+        let (key, _) = self.graph.add(tutti_graph::ForkByClone(
+            tutti_midi_runtime::MidiOutNode::new(),
+        ));
+        let node = key.erase();
+        if let Some(nodes) = self.nodes {
+            self.graph
+                .set_feed(node, Feeder::Clock, vec![EventOutPort::new(nodes.clock, 0)]);
         }
+        let tap = self
+            .graph
+            .taps()
+            .open_event(
+                EventOutPort::new(node, 0),
+                tutti_graph::TapAlign::ToOutput,
+                MIDI_OUT_TAP_CAPACITY,
+            )
+            .expect("the output node is in the graph with its event output");
+        (node, tap)
     }
 
-    /// Drains a host's own outbound mailbox through
-    /// [`hardware_out`](Self::hardware_out).
-    pub fn drain_out(&mut self, receiver: &MidiReceiver) {
-        drain_receiver_through(receiver, &mut self.hardware_out());
-    }
-
-    /// Events dropped for want of an output, or refused by the hardware out's
-    /// tap for want of room (1 024 events between two updates), counted.
+    /// Events dropped over every output: for want of an open output, refused
+    /// by an output node's tap for want of room (1 024 events between two
+    /// updates), refused by a sink or as scheduled too far ahead, counted. A
+    /// `midi_sink`'s own share is [`MidiSink::losses`](crate::MidiSink::losses).
     pub fn out_drops(&self) -> u64 {
         self.state.drops.count()
     }
 
-    /// Sets the hardware out's own latency and offset: what its MIDI device
+    /// Sets the outputs' own latency and offset: what a MIDI device
     /// takes to sound an event (it is sent that much earlier) and a trim on top
     /// (positive sends later), added to the terms every event is timed by
-    /// ([`output_terms`](Self::output_terms)). Applies from the next drain, to the
-    /// host's sink and to every `midi_output` port: it is one setting of the
-    /// session, not a port's.
+    /// ([`output_terms`](Self::output_terms)). Applies from the next drain, to
+    /// every `midi_sink` and `midi_output` entry: it is one setting of the
+    /// session, not an output's.
     pub fn set_output_latency(&mut self, latency: OutputLatency) {
         self.state.output_latency = latency;
     }
 
-    /// The hardware out's own latency and offset, as set.
+    /// The outputs' own latency and offset, as set.
     #[must_use]
     pub fn output_latency(&self) -> OutputLatency {
         self.state.output_latency
     }
 
-    /// The terms the hardware out's events are timed by now: the audio
+    /// The terms every output's events are timed by now: the audio
     /// output's latency as the device reports it (zero on a system clock, which
     /// has no device), and the output's own
     /// ([`set_output_latency`](Self::set_output_latency)). `None` on an offline
@@ -2290,16 +2189,6 @@ impl Midi<'_> {
             audio_output: source.audio_output(),
             latency: self.state.output_latency,
         })
-    }
-
-    /// The sample rate the host sink's frames are on: the rate the graph was
-    /// prepared at when the clock's tap was opened, which the session reopens
-    /// when the graph is re-rated. A `midi_output` port keeps its own tap at the
-    /// graph's rate in the same way. `None` when the session has no engine
-    /// MIDI.
-    #[must_use]
-    pub fn hardware_out_rate(&self) -> Option<tutti_types::SampleRate> {
-        self.state.hardware_tap.as_ref().map(EventTapReader::rate)
     }
 }
 
@@ -2337,7 +2226,7 @@ mod tests {
 
     fn out_with_counter(stamping: bool) -> (UmpOut, Arc<AtomicUsize>) {
         let count = Arc::new(AtomicUsize::new(0));
-        let mut out = UmpOut::new(Box::new(CountingSink(count.clone())), SampleRate::SR_48K);
+        let mut out = UmpOut::new(Arc::new(CountingSink(count.clone())), SampleRate::SR_48K);
         out.set_stamping(stamping);
         (out, count)
     }
@@ -2355,10 +2244,10 @@ mod tests {
     fn both_producers_advance_one_origin() {
         let (mut out, _) = out_with_counter(true);
 
-        out.send_stamped(&[note(511)]);
+        out.send_batch(&[note(511)]);
         assert_eq!(out.origin(), Frame::new(512), "one 512-frame block");
 
-        out.send_stamped(&[note(511)]);
+        out.send_batch(&[note(511)]);
         assert_eq!(
             out.origin(),
             Frame::new(1024),
@@ -2372,7 +2261,7 @@ mod tests {
     #[test]
     fn stamping_disabled_still_delivers_events() {
         let (mut out, count) = out_with_counter(false);
-        out.send_stamped(&[note(0), note(1)]);
+        out.send_batch(&[note(0), note(1)]);
         assert_eq!(
             count.load(Ordering::SeqCst),
             2,
@@ -2390,7 +2279,7 @@ mod tests {
     #[test]
     fn stamping_enabled_adds_timestamp_messages() {
         let (mut out, count) = out_with_counter(true);
-        out.send_stamped(&[note(0)]);
+        out.send_batch(&[note(0)]);
         assert!(
             count.load(Ordering::SeqCst) > 1,
             "a stamped send carries its JR Timestamp prefix too, got {}",
@@ -2402,27 +2291,17 @@ mod tests {
     /// silently.
     #[test]
     fn routing_with_no_output_counts_the_drops() {
-        let drops = MidiOutDrops::default();
-        let mut router = MidiOutRouter {
-            out: None,
-            drops: Some(&drops),
-            timing: None,
-        };
-        router.route(&[at(0), at(1), at(2)]);
-        assert_eq!(drops.count(), 3);
+        let drops = OutDrops::default();
+        let refused = route_batch(None, &drops, None, &[at(0), at(1), at(2)]);
+        assert_eq!((refused, drops.count()), (3, 3));
     }
 
     /// And a router *with* an output does not count drops.
     #[test]
     fn routing_to_an_open_output_drops_nothing() {
         let (mut out, count) = out_with_counter(false);
-        let drops = MidiOutDrops::default();
-        let mut router = MidiOutRouter {
-            out: Some(&mut out),
-            drops: Some(&drops),
-            timing: None,
-        };
-        router.route(&[at(0), at(1)]);
+        let drops = OutDrops::default();
+        route_batch(Some(&mut out), &drops, None, &[at(0), at(1)]);
         assert_eq!(count.load(Ordering::SeqCst), 2, "both reached the sink");
         assert_eq!(drops.count(), 0, "nothing was dropped");
     }
@@ -2449,13 +2328,14 @@ mod tests {
     #[test]
     fn a_batch_of_frames_is_a_block_from_its_first_frame() {
         let log = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let mut out = UmpOut::new(Box::new(Recording(log.clone())), SampleRate::SR_48K);
-        let mut router = MidiOutRouter {
-            out: Some(&mut out),
-            drops: None,
-            timing: None,
-        };
-        router.route(&[at(1_250), at(1_000), at(1_999)]);
+        let mut out = UmpOut::new(Arc::new(Recording(log.clone())), SampleRate::SR_48K);
+        let drops = OutDrops::default();
+        route_batch(
+            Some(&mut out),
+            &drops,
+            None,
+            &[at(1_250), at(1_000), at(1_999)],
+        );
         let sent = log.lock().unwrap().remove(0);
         let span = Samples(1_000);
         let offsets: Vec<_> = sent.iter().map(|e| e.0).collect();
@@ -2466,68 +2346,13 @@ mod tests {
         );
         out.set_stamping(true);
         let before = out.origin();
-        MidiOutRouter {
-            out: Some(&mut out),
-            drops: None,
-            timing: None,
-        }
-        .route(&[at(1_250), at(1_000), at(1_999)]);
+        route_batch(
+            Some(&mut out),
+            &drops,
+            None,
+            &[at(1_250), at(1_000), at(1_999)],
+        );
         assert_eq!(out.origin().since(before), Some(Samples(1_000)), "the span");
-    }
-
-    /// **A host's mailbox is drained with its stamps' spacing kept, across
-    /// the `u32` wrap.** Stamps `u32::MAX - 4` and 5 are 10 frames apart (the
-    /// counter wrapped between them): the sink gets offsets 0 and 10.
-    #[test]
-    fn a_mailbox_drain_keeps_the_stamps_spacing() {
-        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let mut out = UmpOut::new(Box::new(Recording(log.clone())), SampleRate::SR_48K);
-        let (tx, rx) = tutti_midi_runtime::MidiMailbox::pair();
-        let _ = tx.queue_stamped(&[(u32::MAX - 4, note(0).1), (5, note(0).1)]);
-        let mut router = MidiOutRouter {
-            out: Some(&mut out),
-            drops: None,
-            timing: None,
-        };
-        drain_receiver_through(&rx, &mut router);
-        let sent = log.lock().unwrap().remove(0);
-        let span = Samples(11);
-        assert_eq!(
-            sent.iter().map(|e| e.0).collect::<Vec<_>>(),
-            [0, 10].map(|o| Offset::of(Samples(o), span))
-        );
-    }
-
-    /// **A drain is one timeline, whatever its chunks.** A mailbox of 256
-    /// events on stamps 0 to 255 and one more on stamp 1 000 (the second
-    /// chunk of the drain, a gap of 745 frames after the first) reaches the
-    /// sink with the last event at offset 1 000, and a stamping
-    /// output advances its origin by the whole span, 1 001 frames.
-    #[test]
-    fn a_drain_over_several_chunks_keeps_the_gap_between_them() {
-        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let mut out = UmpOut::new(Box::new(Recording(log.clone())), SampleRate::SR_48K);
-        out.set_stamping(true);
-        let (tx, rx) = tutti_midi_runtime::MidiMailbox::with_capacity(
-            core::num::NonZeroUsize::new(512).unwrap(),
-        );
-        let mut stamped: Vec<(u32, Ump)> = (0..256).map(|s| (s, note(0).1)).collect();
-        stamped.push((1_000, note(0).1));
-        let _ = tx.queue_stamped(&stamped);
-        let mut router = MidiOutRouter {
-            out: Some(&mut out),
-            drops: None,
-            timing: None,
-        };
-        drain_receiver_through(&rx, &mut router);
-        let log = log.lock().unwrap();
-        let last = log.iter().flatten().map(|e| e.0).max().unwrap();
-        assert_eq!(last, Offset::of(Samples(1_000), Samples(1_001)));
-        assert_eq!(
-            out.origin(),
-            Frame::new(1_001),
-            "the origin moved by the span"
-        );
     }
 
     /// **Events sharing a frame are sent at that frame's time, whichever
@@ -2581,7 +2406,7 @@ mod tests {
 
     fn timed_out() -> (UmpOut, Arc<std::sync::Mutex<Vec<Outgoing>>>) {
         let log = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let out = UmpOut::new(Box::new(Timed(log.clone())), SampleRate::SR_48K);
+        let out = UmpOut::new(Arc::new(Timed(log.clone())), SampleRate::SR_48K);
         (out, log)
     }
 
@@ -2670,16 +2495,16 @@ mod tests {
     fn an_event_beyond_the_cap_is_refused_and_counted() {
         let t0 = Instant::now() + Duration::from_secs(60);
         let (mut out, log) = timed_out();
-        let drops = MidiOutDrops::default();
+        let drops = OutDrops::default();
         let timing = timing_at(t0, OutputTerms::default());
         let beyond = 48_000 * 3;
-        MidiOutRouter {
-            out: Some(&mut out),
-            drops: Some(&drops),
-            timing: Some(&timing),
-        }
-        .route(&[at(1_000), at(beyond)]);
-        assert_eq!(drops.count(), 1);
+        let refused = route_batch(
+            Some(&mut out),
+            &drops,
+            Some(&timing),
+            &[at(1_000), at(beyond)],
+        );
+        assert_eq!((refused, drops.count()), (1, 1));
         assert_eq!(log.lock().unwrap().len(), 1, "only the one within the cap");
     }
 
