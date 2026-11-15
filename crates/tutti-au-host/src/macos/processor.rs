@@ -63,7 +63,7 @@ pub(crate) struct Rendering {
     /// is uninitialized and nothing renders.
     pub(crate) midi_out: Option<MidiOut>,
     /// The unit publishes MIDI output streams and refused the callback.
-    pub(crate) midi_out_refused: bool,
+    pub(crate) midi_out_refusal: Option<String>,
 }
 
 /// What the unit's output callback pushes inside `AudioUnitRender` and the block
@@ -115,10 +115,11 @@ impl MidiQueue {
         out.count_midi_dropped(usize::try_from(lost).unwrap_or(usize::MAX));
     }
 
-    /// Forgets what is queued, and what was lost and not yet counted.
+    /// Forgets what is queued. What was lost and not yet told stays counted in
+    /// [`lost`](Self::lost): it happened.
     pub(crate) fn clear(&mut self) {
         while self.queue.pop().is_some() {}
-        self.overflow.store(0, Ordering::Relaxed);
+        self.lost_total += self.overflow.swap(0, Ordering::Relaxed);
     }
 
     /// Events dropped for want of room in the queue, since activation.
@@ -130,9 +131,10 @@ impl MidiQueue {
 /// The MIDI a unit emits during a render: its callback's registration and the
 /// [`MidiQueue`] it fills.
 pub(crate) struct MidiOut {
-    /// Keeps the callback installed for the activation; dropping it withdraws
-    /// the callback before the state the unit points at is freed.
-    registration: AuMidiOutput,
+    /// Keeps the callback installed for the activation. Taken by `Drop`, which
+    /// withdraws it: the state is freed only there, after the unit is
+    /// uninitialized.
+    registration: Option<AuMidiOutput>,
     queue: MidiQueue,
     /// Lists for an output stream with no reader, as far as `ProcessOutput`
     /// has been told.
@@ -148,7 +150,7 @@ impl MidiOut {
     ///
     /// # Errors
     /// The unit refused the callback: it then renders without MIDI output, and
-    /// the activation records the refusal ([`AuProcessor::midi_out_refused`]).
+    /// the activation records the refusal ([`AuProcessor::midi_out_refusal`]).
     pub(crate) fn install(unit: &Unit) -> Result<Option<Self>> {
         if midi_out::midi_output_info(unit).is_none_or(|info| info.stream_count() == 0) {
             return Ok(None);
@@ -156,7 +158,7 @@ impl MidiOut {
         let queue = MidiQueue::new();
         let registration = midi_out::install(unit, queue.sink())?;
         Ok(Some(Self {
-            registration,
+            registration: Some(registration),
             queue,
             unrouted_told: 0,
         }))
@@ -166,22 +168,40 @@ impl MidiOut {
     /// with no reader since the last block, which each count as lost MIDI.
     fn take_into(&mut self, out: &mut ProcessOutput) {
         self.queue.take_into(out);
-        let unrouted = self.registration.unrouted_lists();
-        out.count_midi_dropped(
-            usize::try_from(unrouted - self.unrouted_told).unwrap_or(usize::MAX),
-        );
+        let unrouted = self
+            .registration
+            .as_ref()
+            .map_or(0, AuMidiOutput::unrouted_lists);
+        let fresh = unrouted.saturating_sub(self.unrouted_told);
+        out.count_midi_dropped(usize::try_from(fresh).unwrap_or(usize::MAX));
         self.unrouted_told = unrouted;
     }
 
     /// Forgets the streams' open SysEx and parameter runs, and what is queued.
     fn reset(&mut self) {
-        self.registration.reset();
+        if let Some(registration) = &self.registration {
+            registration.reset();
+        }
         self.queue.clear();
     }
 
     /// Events dropped for want of room in the queue, since activation.
     pub(crate) fn overflow(&self) -> u64 {
         self.queue.lost()
+    }
+}
+
+impl Drop for MidiOut {
+    fn drop(&mut self) {
+        if let Some(registration) = self.registration.take() {
+            // SAFETY: a `MidiOut` is dropped after the unit stopped rendering: in
+            // a `Rendering`, after its `guard` (a field declared before this one)
+            // uninitialized the unit, and on a failed `initialize`, on a unit that
+            // never initialized. The one thread that renders the activation is
+            // the `AuProcessor` that owns the `Rendering`, and it is being dropped
+            // here.
+            let _ = unsafe { registration.withdraw() };
+        }
     }
 }
 
@@ -222,6 +242,8 @@ pub struct AuProcessor {
     /// from consecutive blocks' snapshots.
     playhead: PlayheadWatch,
     receives_midi: bool,
+    /// The refused MIDI-output install has been counted in `midi_dropped`.
+    refusal_counted: bool,
     /// How `send_midi` delivers: UMP through `MusicDeviceMIDIEventList` for a
     /// unit that takes MIDI 2.0, legacy bytes for every other.
     midi: MidiDelivery,
@@ -352,17 +374,19 @@ impl AuProcessor {
             transport,
             playhead: PlayheadWatch::new(),
             receives_midi,
+            refusal_counted: false,
             midi: MidiDelivery::new(midi_protocol),
             block_size,
             stage,
         }
     }
 
-    /// Whether the unit refused the MIDI-output callback at activation: it
-    /// publishes output streams, and its MIDI is lost.
+    /// Why the unit refused the MIDI-output callback at activation, with the
+    /// AU's status: it publishes output streams, and its MIDI is lost. The
+    /// refusal is counted once, in the first block's `midi_dropped`.
     #[must_use]
-    pub fn midi_out_refused(&self) -> bool {
-        self.rendering.midi_out_refused
+    pub fn midi_out_refusal(&self) -> Option<&str> {
+        self.rendering.midi_out_refusal.as_deref()
     }
 
     /// MIDI events the unit emitted that the output queue had no room for,
@@ -755,6 +779,11 @@ impl AuProcessor {
         // no parameter or note-expression output through this path.
         if let Some(midi_out) = &mut self.rendering.midi_out {
             midi_out.take_into(out);
+        }
+        if self.rendering.midi_out_refusal.is_some() && !self.refusal_counted {
+            // A load-time fact with no event to carry it: counted once.
+            out.count_midi_dropped(1);
+            self.refusal_counted = true;
         }
         rendered.map_err(|e| PluginError::Block(block_reason(&e)))
     }

@@ -228,6 +228,8 @@ impl<T: Vst3Sample> Staged<T> {
                 ),
                 emitted_midi: RtMidiEvents::new(),
                 emitted_stream: OutputStream::new(),
+                lost_told: 0,
+                emitted_lost: 0,
                 emitted_param_changes,
             },
             cc: CcRoute::following(

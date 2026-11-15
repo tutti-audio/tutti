@@ -41,6 +41,11 @@ pub(crate) struct Inner {
     home: std::thread::ThreadId,
     /// Where a drop off that thread hands the disposal.
     work: MainWorkHandle,
+    /// A MIDI-output registration holds the unit
+    /// ([`install`](crate::install_midi_output) takes it, a withdrawal gives it
+    /// back): `kAudioUnitProperty_MIDIOutputCallback` cannot be read, so this is
+    /// how a second registration is refused.
+    midi_output: std::sync::atomic::AtomicBool,
 }
 
 // SAFETY: the instance is an opaque handle into AudioToolbox. Nothing in Rust
@@ -125,9 +130,25 @@ impl Unit {
                 instance,
                 home: std::thread::current().id(),
                 work: work.clone(),
+                midi_output: std::sync::atomic::AtomicBool::new(false),
             }),
             _not_sync: PhantomData,
         })
+    }
+
+    /// Takes the unit's MIDI-output claim: `true` when it was free.
+    pub(crate) fn claim_midi_output(&self) -> bool {
+        !self
+            .inner
+            .midi_output
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
+    }
+
+    /// Gives the claim back.
+    pub(crate) fn release_midi_output(&self) {
+        self.inner
+            .midi_output
+            .store(false, std::sync::atomic::Ordering::Release);
     }
 
     /// The raw `AudioUnit`, for a call this crate does not wrap. Using it is the

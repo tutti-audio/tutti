@@ -306,8 +306,9 @@ fn accepting_the_callback_write_does_not_mean_the_au_emits_midi() {
                 )
             });
         // Withdraw explicitly so the AU's status is seen rather than dropped.
-        registration
-            .remove()
+        // SAFETY: this test renders on this thread, and no render is running.
+        let withdrawn = unsafe { registration.withdraw() };
+        withdrawn
             .unwrap_or_else(|e| panic!("{}: withdrawing the callback failed: {e:?}", unit.label));
     }
 }
@@ -339,9 +340,9 @@ fn install_then_withdraw_leaves_the_au_renderable() {
         support::corpus::render(&mut au, &input, &mut output, BLOCK)
             .unwrap_or_else(|e| panic!("{}: render with callback installed: {e:?}", unit.label));
 
-        registration
-            .remove()
-            .unwrap_or_else(|e| panic!("{}: withdraw failed: {e:?}", unit.label));
+        // SAFETY: this test renders on this thread, and no render is running.
+        let withdrawn = unsafe { registration.withdraw() };
+        withdrawn.unwrap_or_else(|e| panic!("{}: withdraw failed: {e:?}", unit.label));
 
         // Renders again after the boxed state has been freed. If the withdrawal
         // had run in the wrong order, the AU would still hold a pointer into freed
@@ -418,7 +419,9 @@ fn no_delivery_arrives_after_the_callback_is_withdrawn() {
     let calls_before = calls.load(Ordering::SeqCst);
     let events_before = events.load(Ordering::SeqCst);
 
-    registration.remove().expect("withdraw succeeds");
+    // SAFETY: this test renders on this thread, and no render is running.
+    let withdrawn = unsafe { registration.withdraw() };
+    withdrawn.expect("withdraw succeeds");
 
     // Render well past the removal. Any call now would be against freed state.
     for _ in 0..32 {
@@ -499,37 +502,36 @@ fn dropping_the_registration_withdraws_the_callback() {
     assert!(peak < 1e-3, "silence in, silence out; got {peak}");
 }
 
-/// Installing twice in a row is safe: the second install supersedes the first.
-///
-/// A host re-arming a track does this. The hazard is that the first registration's
-/// `Drop` runs *after* the second install and clears the property the second one
-/// just wrote, leaving the AU with no callback and the host believing it has one.
-/// Ordering the drops explicitly is what the test checks: the first registration is
-/// dropped before the second is created, which is the sequence a host should
-/// follow — and the render afterwards proves whatever happened left the unit
-/// intact.
+/// A unit has one registration: a second install while the first is held is
+/// refused (the property cannot be read back, so the unit carries the claim), and
+/// succeeds once the first is withdrawn. Dropping a handle that was refused
+/// cannot null another's callback, because there is no other handle.
 #[test]
-fn reinstalling_the_callback_is_safe() {
+fn a_second_install_on_a_unit_is_refused_until_the_first_is_withdrawn() {
     let _g = lock();
     let mut au = DELAY.open_uninitialized(RATE, BLOCK);
 
     let first = au
         .install_midi_output(Box::new(|_, _| {}))
         .expect("first install");
-    // Withdraw before re-installing. The reverse order — install then drop the
-    // old handle — would have the old handle's `clear` remove the NEW callback,
-    // which is why a host must not do it and why the API returns a handle rather
-    // than being a fire-and-forget setter.
-    first.remove().expect("first withdraw");
+    assert!(
+        au.install_midi_output(Box::new(|_, _| {})).is_err(),
+        "a unit with a registration refuses another"
+    );
+    // SAFETY: nothing renders: the unit is not initialized.
+    let withdrawn = unsafe { first.withdraw() };
+    withdrawn.expect("first withdraw");
 
     let second = au
         .install_midi_output(Box::new(|_, _| {}))
-        .expect("second install");
+        .expect("second install, after the first was withdrawn");
     au.initialize().expect("initialize");
     let input = support::corpus::silence(2, BLOCK as usize);
     let mut output = support::corpus::silence(2, BLOCK as usize);
     support::corpus::render(&mut au, &input, &mut output, BLOCK).expect("render");
-    second.remove().expect("second withdraw");
+    // SAFETY: this test renders on this thread, and no render is running.
+    let withdrawn = unsafe { second.withdraw() };
+    withdrawn.expect("second withdraw");
     support::corpus::render(&mut au, &input, &mut output, BLOCK).expect("render after withdraw");
 
     let peak = support::corpus::peak(&output);

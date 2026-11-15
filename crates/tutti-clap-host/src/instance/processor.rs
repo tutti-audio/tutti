@@ -370,6 +370,7 @@ fn convert_transport(transport: &SharedTransport, sample_rate: f64) -> Transport
 /// `add_change` below writes into storage that already exists.
 fn copy_process_output(output: ProcessOutputRef<'_>, out: &mut tutti_plugin_types::ProcessOutput) {
     out.emit_midi(output.midi_events.iter().copied());
+    out.count_midi_dropped(output.midi_lost);
 
     for queue in &output.param_changes.queues {
         for point in &queue.points {

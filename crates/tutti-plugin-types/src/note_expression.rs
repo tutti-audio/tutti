@@ -173,7 +173,9 @@ pub fn per_note_tuning(note: NoteNumber, semitones: f64) -> Option<Voice2> {
 }
 
 /// The MIDI 2.0 per-note message a plugin's `expression` on `note` is at
-/// `unit`: Polyphonic Pressure for Pressure, the Assignable
+/// `unit`, a [`Normalized`]: checked onto `0..=1` and finite by construction (a
+/// caller with a raw float makes it with [`Normalized::clamped`], which clamps,
+/// or [`Normalized::new`], which refuses): Polyphonic Pressure for Pressure, the Assignable
 /// Per-Note Controller of its number for Volume, Pan and Brightness. `None`
 /// for a dimension with no such message: Tuning (see [`per_note_tuning`]),
 /// Vibrato, Expression and a custom id.

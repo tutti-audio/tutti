@@ -1737,10 +1737,10 @@ fn a_plugins_expression_on_its_own_note_id_is_translated() {
             },
         ))
     );
-    // Ended by channel and pitch: the id names nothing again.
+    // Ended by channel and pitch: the entry stays for the release.
     let off = Event::at(0, Payload::NoteOff(NoteOff::new(3, 62, 0.0, -1)));
     assert!(off.to_midi(&mut stream).is_some());
-    assert!(pan(own_id).to_midi(&mut stream).is_none());
+    assert!(pan(own_id).to_midi(&mut stream).is_some());
 }
 
 /// What a note's volume expressions are after `events` (a Note On on `note` 60
@@ -1868,11 +1868,11 @@ fn a_run_and_a_note_through_a_full_list_are_still_read() {
     assert_eq!((address.channel.get(), note.get(), controller), (3, 62, 10));
 }
 
-/// **An id the plugin has not started, or has ended, names no note**: a low
-/// own id is not read as the host's `channel * 128 + note` (id 5 is not channel 0
-/// key 5), after its note off or never; it is dropped and counted.
+/// **An id the plugin's output has not started names no note**: a low own id is
+/// not read as the host's `channel * 128 + note` (id 5 is not channel 0 key 5),
+/// whether never started or started with id `-1`; it is dropped and counted.
 #[test]
-fn an_expression_on_an_id_no_live_note_holds_is_dropped_and_counted() {
+fn an_expression_on_an_id_no_output_note_started_is_dropped_and_counted() {
     use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
 
     let mut stream = OutputStream::new();
@@ -1883,17 +1883,103 @@ fn an_expression_on_an_id_no_live_note_holds_is_dropped_and_counted() {
         )
     };
     assert!(pan(5).to_midi(&mut stream).is_none(), "never started");
+    let anonymous = Event::at(0, Payload::NoteOn(NoteOn::new(2, 40, 0.5, -1)));
+    assert!(anonymous.to_midi(&mut stream).is_some());
+    assert!(
+        pan(5).to_midi(&mut stream).is_none(),
+        "a note on with no id"
+    );
     let on = Event::at(0, Payload::NoteOn(NoteOn::new(2, 40, 0.5, 5)));
     assert!(on.to_midi(&mut stream).is_some());
     assert!(pan(5).to_midi(&mut stream).is_some(), "while it sounds");
-    let off = Event::at(0, Payload::NoteOff(NoteOff::new(2, 40, 0.0, 5)));
-    assert!(off.to_midi(&mut stream).is_some());
-    assert!(pan(5).to_midi(&mut stream).is_none(), "after its note off");
     assert_eq!(stream.expressions_dropped(), 2);
+    let not_a_number = Event::at(
+        0,
+        Payload::ExpressionValue(ExpressionValue::new(Ids::kPanTypeID, 5, f64::NAN)),
+    );
+    assert!(not_a_number.to_midi(&mut stream).is_none());
+    assert_eq!(stream.expressions_dropped(), 3, "a NaN is counted too");
 }
 
-/// **A full table evicts its oldest note** for a new one, and counts it: stale
-/// entries (a note off the plugin never sent) do not pin the table.
+/// **A voice in its release keeps its expressions**: the plugin's note off ends
+/// the note, but an expression on its id after it is still that note's.
+#[test]
+fn a_release_phase_expression_after_the_note_off_is_translated() {
+    use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
+
+    let mut stream = OutputStream::new();
+    let on = Event::at(0, Payload::NoteOn(NoteOn::new(2, 40, 0.5, 9_000)));
+    assert!(on.to_midi(&mut stream).is_some());
+    let off = Event::at(0, Payload::NoteOff(NoteOff::new(2, 40, 0.0, 9_000)));
+    assert!(off.to_midi(&mut stream).is_some());
+    let pan = Event::at(
+        0,
+        Payload::ExpressionValue(ExpressionValue::new(Ids::kPanTypeID, 9_000, 1.0)),
+    );
+    let got = pan
+        .to_midi(&mut stream)
+        .expect("the release is that note's");
+    assert!(matches!(
+        got.ump.decode(),
+        Ok(Message::Midi2(a, Voice2::AssignablePerNote { note, .. }))
+            if a.channel == MidiChannel::of(2) && note == NoteNumber::of(40)
+    ));
+    assert_eq!(stream.expressions_dropped(), 0);
+}
+
+/// **A MIDI effect that passes notes through** sends an output note on under the
+/// host's own id and expressions on that id: they are translated.
+#[test]
+fn a_pass_through_note_on_a_host_style_id_takes_expressions() {
+    use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
+
+    let mut stream = OutputStream::new();
+    let id = spec_note_id(5, 72);
+    let on = Event::at(0, Payload::NoteOn(NoteOn::new(5, 72, 0.5, id)));
+    assert!(on.to_midi(&mut stream).is_some());
+    let pan = Event::at(
+        0,
+        Payload::ExpressionValue(ExpressionValue::new(Ids::kPanTypeID, id, 1.0)),
+    );
+    assert!(pan.to_midi(&mut stream).is_some());
+    assert_eq!(stream.expressions_dropped(), 0);
+}
+
+/// **A full table gives up an ended note before a live one**, however old: a
+/// release that has run its course does not cost a sounding note its id.
+#[test]
+fn a_full_table_evicts_an_ended_note_before_the_oldest_live_one() {
+    use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
+
+    let mut stream = OutputStream::new();
+    for id in 0..256 {
+        let on = Event::at(0, Payload::NoteOn(NoteOn::new(0, 60, 0.5, 10_000 + id)));
+        let _ = on.to_midi(&mut stream);
+    }
+    // The newest but one ends; the oldest stays live.
+    let off = Event::at(0, Payload::NoteOff(NoteOff::new(0, 60, 0.0, 10_254)));
+    let _ = off.to_midi(&mut stream);
+    let extra = Event::at(0, Payload::NoteOn(NoteOn::new(0, 61, 0.5, 20_000)));
+    let _ = extra.to_midi(&mut stream);
+    assert_eq!(stream.notes_evicted(), 1);
+    let pan = |id| {
+        Event::at(
+            0,
+            Payload::ExpressionValue(ExpressionValue::new(Ids::kPanTypeID, id, 1.0)),
+        )
+    };
+    assert!(
+        pan(10_254).to_midi(&mut stream).is_none(),
+        "the ended note went"
+    );
+    assert!(
+        pan(10_000).to_midi(&mut stream).is_some(),
+        "the oldest live stayed"
+    );
+}
+
+/// **A full table of live notes evicts its oldest** for a new one, and counts
+/// it: stale entries (a note off the plugin never sent) do not pin the table.
 #[test]
 fn a_full_note_table_evicts_the_oldest() {
     use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
