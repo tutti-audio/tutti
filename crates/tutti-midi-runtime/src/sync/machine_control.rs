@@ -64,6 +64,7 @@ use tutti_ump::{SysexAssembler, SysexStep, Ump};
 
 /// What a Machine Control source asks of the transport.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum MachineControlEvent {
     /// Roll from where the transport stands.
     Play,
@@ -82,6 +83,7 @@ pub enum MachineControlEvent {
 /// Why a COMMAND SEGMENT was not taken in (RP-013 p.40): what a device that
 /// answers sends as a COMMAND ERROR Segmentation Error (`09`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[non_exhaustive]
 pub enum SegmentFault {
     /// The segment does not belong to its string, or the string is not whole
     /// commands (p.40 c and d).
@@ -90,8 +92,9 @@ pub enum SegmentFault {
     /// A COMMAND SEGMENT came after another command in its message (p.40 a).
     #[error("a segment is not the first command of its message")]
     NotFirst,
-    /// A COMMAND SEGMENT was followed by more commands: its byte count is not
-    /// the number of bytes remaining in the message (p.40 b).
+    /// A COMMAND SEGMENT's byte count is not the number of bytes remaining in
+    /// its message (p.40 b): more commands follow it, or the message ends
+    /// before its count does.
     #[error("a segment's byte count is not the bytes remaining in its message")]
     CountMismatch,
     /// A COMMAND SEGMENT inside a reassembled string: a segment must be the
@@ -231,6 +234,14 @@ impl MachineControlFollower {
         let Some(first) = items.next() else {
             return;
         };
+        if first == MmcCommand::TruncatedSegment {
+            // The segment's count is past the end of its message (p.40 b).
+            self.segments.cancel();
+            out(MachineControlEvent::Segmentation(
+                SegmentFault::CountMismatch,
+            ));
+            return;
+        }
         if let MmcCommand::CommandSegment(segment) = first {
             if items.next().is_some() {
                 self.segments.cancel();
@@ -242,7 +253,12 @@ impl MachineControlFollower {
             self.segment(segment, out);
             return;
         }
-        if items.any(|c| matches!(c, MmcCommand::CommandSegment(_))) {
+        if items.any(|c| {
+            matches!(
+                c,
+                MmcCommand::CommandSegment(_) | MmcCommand::TruncatedSegment
+            )
+        }) {
             self.segments.cancel();
             out(MachineControlEvent::Segmentation(SegmentFault::NotFirst));
             return;
@@ -276,7 +292,10 @@ impl MachineControlFollower {
         match self.segments.push(segment) {
             Ok(Some(string)) => {
                 for command in string {
-                    if matches!(command, MmcCommand::CommandSegment(_)) {
+                    if matches!(
+                        command,
+                        MmcCommand::CommandSegment(_) | MmcCommand::TruncatedSegment
+                    ) {
                         out(MachineControlEvent::Segmentation(SegmentFault::Nested));
                     } else {
                         self.state.act(command, out);
@@ -365,6 +384,7 @@ impl State {
             | MmcCommand::Procedure(_)
             | MmcCommand::Event(_)
             | MmcCommand::CommandSegment(_)
+            | MmcCommand::TruncatedSegment
             | MmcCommand::DeferredVariablePlay(_)
             | MmcCommand::RecordStrobeVariable(_)
             | MmcCommand::Reserved(_) => out(MachineControlEvent::Ignored(command)),

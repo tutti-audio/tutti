@@ -191,6 +191,28 @@ fn a_segment_inside_a_segmented_string_is_reported() {
     );
 }
 
+/// **A segment whose count passes the end of its message is a Segmentation
+/// Error that cancels the string (RP-013 p.40 b)**: first (two to come), then a
+/// segment 2 cut short, then segment 3, which has no string to join, so
+/// `CountMismatch` and then `MissingFirst`, not `OutOfOrder`.
+#[test]
+fn a_truncated_segment_cancels_the_string() {
+    let mut f = MachineControlFollower::new(OURS);
+    assert!(feed(&mut f, 5, &segment(0x42, &[0x02])).is_empty());
+    assert_eq!(
+        feed(&mut f, 5, &[0x53, 0x09, 0x01, 0x02]),
+        [MachineControlEvent::Segmentation(
+            SegmentFault::CountMismatch
+        )]
+    );
+    assert_eq!(
+        feed(&mut f, 5, &segment(0x00, &[0x02])),
+        [MachineControlEvent::Segmentation(SegmentFault::String(
+            MmcSegmentError::MissingFirst
+        ))]
+    );
+}
+
 /// **A message that is not a segment cancels the string, but WAIT and RESUME
 /// do not (RP-013 p.40)**; the cancelled string never acts.
 #[test]

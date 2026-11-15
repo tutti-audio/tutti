@@ -117,9 +117,10 @@ fn machine_control_sender_observe_is_allocation_free() {
 #[test]
 fn machine_control_follower_segments_are_allocation_free() {
     use tutti_midi_protocol::{
-        MMC_MAX_SEGMENTED, MmcCommand, MmcCommands, MmcSegments, Recipient, SysexDeviceId,
+        MMC_MAX_SEGMENTED, MmcCommand, MmcCommands, MmcSegmentError, MmcSegments, Recipient,
+        SysexDeviceId,
     };
-    use tutti_midi_runtime::MachineControlFollower;
+    use tutti_midi_runtime::{MachineControlEvent, MachineControlFollower, SegmentFault};
     use tutti_ump::{MidiGroup, Sysex7Packets, Ump};
 
     let to = Recipient::Device(SysexDeviceId::of(1));
@@ -173,9 +174,39 @@ fn machine_control_follower_segments_are_allocation_free() {
         }
         events
     };
-    // Warm up outside the gate, and learn what a round makes.
-    let per_round = round(&mut follower);
-    assert!(per_round > MMC_MAX_SEGMENTED, "{per_round}");
+    // Warm up outside the gate, and pin what a round makes, message by message
+    // (RP-013 p.40): the LOCATE, a stray later segment, a skipped segment, a
+    // first inside a string and the STOP of its own string, p.40 b, p.40 a, a
+    // string cut inside a command, a PLAY and a nested segment, a plain PLAY,
+    // and the 2880 PLAYs of the longest string.
+    let mut heard = Vec::new();
+    for message in &messages {
+        for &ump in message {
+            follower.step(ump, &mut |e| heard.push(e));
+        }
+    }
+    let string = |e: MmcSegmentError| MachineControlEvent::Segmentation(SegmentFault::String(e));
+    assert!(matches!(heard[0], MachineControlEvent::Locate(_)));
+    assert_eq!(
+        heard[1..10],
+        [
+            string(MmcSegmentError::MissingFirst),
+            string(MmcSegmentError::OutOfOrder {
+                expected: 1,
+                got: 0
+            }),
+            string(MmcSegmentError::FirstInsideString),
+            MachineControlEvent::Stop,
+            MachineControlEvent::Segmentation(SegmentFault::CountMismatch),
+            MachineControlEvent::Segmentation(SegmentFault::NotFirst),
+            string(MmcSegmentError::Malformed),
+            MachineControlEvent::Play,
+            MachineControlEvent::Segmentation(SegmentFault::Nested),
+        ]
+    );
+    assert!(heard[10..].iter().all(|e| *e == MachineControlEvent::Play));
+    assert_eq!(heard.len(), 11 + MMC_MAX_SEGMENTED);
+    let per_round = heard.len();
     let mut events = 0;
     assert_no_alloc::assert_no_alloc(|| {
         for _ in 0..100 {

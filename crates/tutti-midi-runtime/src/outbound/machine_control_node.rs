@@ -10,7 +10,7 @@
 //! The node owns the sender. A transport time no time code names is refused
 //! and counted ([`MachineControlControls::losses`], `refused`), never sent as
 //! another. A message goes out whole or not at all: when the port has no room
-//! for all its packets the message is counted as lost (`lost`, one per packet),
+//! for all its packets the message is counted as lost (`lost`, one per message),
 //! so a block never carries half a SysEx run.
 //!
 //! Its fork sends nothing: an offline render drives no external gear.
@@ -44,8 +44,8 @@ pub struct MachineControlControls {
 impl MachineControlControls {
     /// What the node could not send, since it was made. `refused` counts the
     /// looks at a transport that moved to a time no time code names
-    /// ([`NoTimeCode`](crate::NoTimeCode)); `lost` counts the packets of the
-    /// messages the port had no room for.
+    /// ([`NoTimeCode`](crate::NoTimeCode)); `lost` counts the messages the
+    /// port had no room for (or took only part of).
     #[must_use]
     pub fn losses(&self) -> Losses {
         Losses::lost(self.lost.load(Ordering::Relaxed))
@@ -130,16 +130,18 @@ impl Node for MachineControlNode {
             // A payload built by the sender is seven-bit and short.
             if let Ok(packets) = Sysex7Packets::from_payload(self.group, &payload) {
                 let room = MACHINE_CONTROL_EVENT_CAPACITY.saturating_sub(out.len());
+                // Both losses below are defensive: the declared capacity is nine
+                // segments of two packets, which a block never exceeds.
                 if packets.len() > room {
-                    self.controls
-                        .lost
-                        .fetch_add(packets.len() as u64, Ordering::Relaxed);
+                    self.controls.lost.fetch_add(1, Ordering::Relaxed);
                     continue;
                 }
+                let mut pushed = true;
                 for packet in packets {
-                    if out.push(Event::midi(at, packet)).is_err() {
-                        self.controls.lost.fetch_add(1, Ordering::Relaxed);
-                    }
+                    pushed &= out.push(Event::midi(at, packet)).is_ok();
+                }
+                if !pushed {
+                    self.controls.lost.fetch_add(1, Ordering::Relaxed);
                 }
             }
         }
