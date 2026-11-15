@@ -9,7 +9,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tutti_buffers::{Interleaved, Sink, SinkFailed};
-use tutti_cpal::{ManualStream, ManualStreamDriver, MicConfig, OutputSpec};
+use tutti_cpal::MicConfig;
+use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::{InletRing, TapWriter};
 use tutti_session::{
     Armed, Input, InputConfig, InputOpener, OpenedInput, Punch, Recorded, Session, SessionEvent,
@@ -27,7 +28,7 @@ struct Capture {
     /// What the opener declares as the ring's lead.
     lead: Samples,
     /// The cell the capture callback would report its delay into.
-    latency: Option<Arc<tutti_cpal::StreamLatency>>,
+    latency: Option<Arc<tutti_engine::StreamLatency>>,
 }
 
 #[derive(Debug)]
@@ -77,7 +78,7 @@ fn rig(config: InputConfig, lead: Samples) -> Rig {
     let spec = OutputSpec::new(
         SampleRate::of(RATE),
         ChannelLayout::STEREO,
-        tutti_cpal::cpal::SampleFormat::F32,
+        tutti_buffers::SampleFormat::F32,
     );
     let live = Session::builder()
         .input_opener(Opener(Arc::clone(&capture)))

@@ -127,11 +127,11 @@ pub use ci::{
 
 pub use connection::{Action, Connection, Ending, MAX_ATTEMPTS, NAME_GRACE, STEP_TIMEOUT};
 pub use endpoint::{
-    BlockError, Capabilities, Endpoint, FunctionBlock, FunctionBlockBuilder, MAX_FUNCTION_BLOCKS,
-    UMP_VERSION,
+    BlockError, Capabilities, Configuration, Endpoint, FunctionBlock, FunctionBlockBuilder,
+    MAX_FUNCTION_BLOCKS, Reply, UMP_VERSION,
 };
 pub use entropy::{EntropyError, EntropyWords, random_bytes};
-pub use id::{DeviceId, DeviceInfo, EndpointId, Identity, PortDirection};
+pub use id::{DeviceId, DeviceInfo, EndpointId, Identity, PortDirection, WinMmDevice};
 pub use inquiry::{INQUIRY_ATTEMPTS, INQUIRY_TIMEOUT, IdentityInquiry, InquiryAction};
 pub use jr::{ClockHeard, JrLock, JrReceiver, JrTime, TICK_HZ, Unmapped};
 pub use learned::{Learned, Match, SavedDevice};

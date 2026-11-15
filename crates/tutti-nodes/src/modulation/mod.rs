@@ -8,9 +8,10 @@
 //! comb notches. [`PhaserNode`] sweeps the centre of an **all-pass chain**
 //! instead, so it notches by phase cancellation and uses no delay line at all.
 //!
-//! Both are width-generic, with per-channel phase offsets, and both are a
-//! [`FamilyNode`](crate::FamilyNode): the LFO is state of the family's recurrence on the
-//! stream's clock, so what is heard does not depend on how the stream is cut into blocks.
+//! Both are width-generic, with per-channel phase offsets, and the LFO is state on the
+//! stream's clock, so what is heard does not depend on how the stream is cut into blocks:
+//! [`ModDelayNode`] is a [`FamilyNode`](crate::FamilyNode) and [`PhaserNode`] a
+//! [`KernelNode`](crate::KernelNode).
 //!
 //! Consequence worth knowing: chorus and flanger take their depth in
 //! [`Seconds`](tutti_types::Seconds) of delay sweep, while the phaser's is a
@@ -20,4 +21,4 @@ mod mod_delay;
 mod phaser;
 
 pub use mod_delay::ModDelayNode;
-pub use phaser::PhaserNode;
+pub use phaser::{PhaserKernel, PhaserNode};

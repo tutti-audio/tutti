@@ -5,10 +5,8 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use tutti_cpal::cpal::{Error as StreamError, ErrorKind};
-use tutti_cpal::{
-    DeviceId, DeviceSelector, Direction, ManualStreamDriver, OutputSpec, Snapshot, SnapshotSource,
-};
+use tutti_cpal::{DeviceId, DeviceSelector, Direction, Snapshot, SnapshotSource};
+use tutti_engine::{BackendErrorKind, ManualStreamDriver, OutputSpec};
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{LimiterControls, LimiterNode};
@@ -22,7 +20,7 @@ fn spec_at(rate: f64) -> OutputSpec {
     OutputSpec::new(
         SampleRate::of(rate),
         ChannelLayout::STEREO,
-        tutti_cpal::cpal::SampleFormat::F32,
+        tutti_buffers::SampleFormat::F32,
     )
 }
 
@@ -355,7 +353,7 @@ fn an_explicit_device_is_not_replaced_by_the_default() {
     fake.show(&["A", "B"], Some("B"));
     assert!(wants(&poll(&mut session, base, 0)).is_empty());
     fake.show(&["B"], Some("B"));
-    stream.fail(StreamError::new(ErrorKind::DeviceNotAvailable));
+    stream.fail(BackendErrorKind::DeviceGone, &"device not available");
     assert!(
         wants(&poll(&mut session, base, 5_000)).is_empty(),
         "A gone, B is not a substitute"
@@ -386,7 +384,7 @@ fn a_disconnect_fault_asks_for_a_restart_once() {
     let base = Instant::now();
     fake.show(&["A", "B"], Some("A"));
     poll(&mut session, base, 0);
-    stream.fail(StreamError::new(ErrorKind::DeviceNotAvailable));
+    stream.fail(BackendErrorKind::DeviceGone, &"device not available");
     let events = poll(&mut session, base, 10);
     assert!(
         events
@@ -422,7 +420,7 @@ fn a_flapping_device_is_not_restarted_on_every_change() {
     let mut asked = 0;
     for k in 0..100u64 {
         if k % 2 == 0 {
-            stream.fail(StreamError::new(ErrorKind::DeviceNotAvailable));
+            stream.fail(BackendErrorKind::DeviceGone, &"device not available");
             fake.show(&[], None);
         } else {
             fake.show(&["A"], Some("A"));
@@ -595,7 +593,7 @@ fn a_fault_after_a_restart_is_reported_again() {
     session
         .restart_on(&mut device, spec_at(48_000.0), driver, None)
         .unwrap();
-    second.fail(StreamError::new(ErrorKind::DeviceNotAvailable));
+    second.fail(BackendErrorKind::DeviceGone, &"device not available");
     let events = poll(&mut session, base, 0);
     assert!(
         events
@@ -606,7 +604,7 @@ fn a_fault_after_a_restart_is_reported_again() {
     session
         .restart_on(&mut device, spec_at(48_000.0), driver, None)
         .unwrap();
-    third.fail(StreamError::new(ErrorKind::DeviceNotAvailable));
+    third.fail(BackendErrorKind::DeviceGone, &"device not available");
     let events = poll(&mut session, base, 20);
     assert!(
         events
@@ -668,19 +666,19 @@ fn a_stalled_backend_run_becomes_a_lost_stream() {
     fake.show(&["A", "B"], Some("A"));
     poll(&mut session, base, 0);
 
-    let backend = || StreamError::with_message(ErrorKind::BackendError, "POLLERR");
-    stream.fail(backend());
+    let (kind, message) = (BackendErrorKind::Other, "POLLERR");
+    stream.fail(kind, &message);
     let events = poll(&mut session, base, 10);
-    assert!(events.iter().any(|e| matches!(e, SessionEvent::Device(DeviceEvent::Fault(f)) if f.kind == tutti_cpal::StreamFaultKind::Backend)));
+    assert!(events.iter().any(|e| matches!(e, SessionEvent::Device(DeviceEvent::Fault(f)) if f.kind == tutti_engine::StreamFaultKind::Backend)));
     assert!(
         wants(&events).is_empty(),
         "a backend error alone is not a loss"
     );
 
     std::thread::sleep(Duration::from_millis(600));
-    stream.fail(backend());
+    stream.fail(kind, &message);
     let events = poll(&mut session, base, 700);
-    assert!(events.iter().any(|e| matches!(e, SessionEvent::Device(DeviceEvent::Fault(f)) if f.kind == tutti_cpal::StreamFaultKind::Disconnected)), "{events:?}");
+    assert!(events.iter().any(|e| matches!(e, SessionEvent::Device(DeviceEvent::Fault(f)) if f.kind == tutti_engine::StreamFaultKind::Disconnected)), "{events:?}");
     assert_eq!(wants(&events), [DeviceSelector::Default]);
 }
 
@@ -760,7 +758,7 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
     let six = OutputSpec::new(
         SampleRate::SR_48K,
         ChannelLayout::from(6u16),
-        tutti_cpal::cpal::SampleFormat::F32,
+        tutti_buffers::SampleFormat::F32,
     );
     let (driver, new) = ManualStreamDriver::new();
     s.restart_on(&mut device, six, driver, None)
@@ -821,7 +819,7 @@ fn a_restart_onto_a_device_that_cannot_place_the_declared_root_is_refused() {
         OutputSpec::new(
             SampleRate::of(rate),
             ChannelLayout::from(6u16),
-            tutti_cpal::cpal::SampleFormat::F32,
+            tutti_buffers::SampleFormat::F32,
         )
     };
     let (driver, _stream) = ManualStreamDriver::new();
@@ -877,7 +875,7 @@ fn a_refused_declaration_is_retried_on_a_restart() {
     let wide = OutputSpec::new(
         SampleRate::SR_48K,
         ChannelLayout::from(6u16),
-        tutti_cpal::cpal::SampleFormat::F32,
+        tutti_buffers::SampleFormat::F32,
     );
     let (driver, _new) = ManualStreamDriver::new();
     session.restart_on(&mut device, wide, driver, None).unwrap();
@@ -933,7 +931,7 @@ fn a_panic_in_the_render_is_a_device_fault_event() {
             .iter()
             .filter(|e| {
                 matches!(e, SessionEvent::Device(DeviceEvent::Fault(f))
-                    if f.kind == tutti_cpal::StreamFaultKind::CallbackPanicked)
+                    if f.kind == tutti_engine::StreamFaultKind::CallbackPanicked)
             })
             .count()
     };

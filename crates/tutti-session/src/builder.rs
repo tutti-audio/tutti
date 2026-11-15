@@ -415,7 +415,7 @@ impl SessionBuilder<OnDevice> {
 
     /// [`build`](Self::build) on a stream driver of the
     /// caller's choosing, `spec` standing for the config its device reports:
-    /// the device-free build (a `tutti_cpal::ManualStreamDriver`, for a test
+    /// the device-free build (a `tutti_engine::ManualStreamDriver`, for a test
     /// that renders the callback itself). Behind `testing`: a host builds on a
     /// device.
     ///
@@ -425,12 +425,12 @@ impl SessionBuilder<OnDevice> {
     #[cfg(feature = "testing")]
     pub fn build_device_on<D>(
         self,
-        spec: tutti_cpal::OutputSpec,
+        spec: tutti_engine::OutputSpec,
         driver: D,
     ) -> Result<crate::LiveSession>
     where
-        D: tutti_cpal::StreamDriver,
-        D::Running: 'static,
+        D: tutti_engine::StreamDriver,
+        D::Error: Into<tutti_cpal::Error>,
     {
         let device = self.state.device.clone();
         self.build_on(
@@ -890,7 +890,7 @@ impl<S> SessionBuilder<S> {
         chosen: tutti_cpal::DeviceSelector,
         start: impl FnOnce(
             &mut tutti_cpal::AudioEngine,
-            Arc<tutti_cpal::AudioCallbackState>,
+            Arc<tutti_engine::AudioCallbackState>,
         ) -> tutti_cpal::Result<()>,
     ) -> Result<crate::LiveSession> {
         let spec = audio_engine.spec().clone();
@@ -916,7 +916,7 @@ impl<S> SessionBuilder<S> {
         session.clock = Some(clock);
         #[cfg(feature = "audio-io")]
         session.inputs.set_output_latency(audio_engine.latency());
-        let state = Arc::new(tutti_cpal::AudioCallbackState::new(engine));
+        let state = Arc::new(tutti_engine::AudioCallbackState::new(engine));
         start(&mut audio_engine, Arc::clone(&state))?;
         #[cfg(feature = "audio-io")]
         let input_latency = session.inputs.latency();

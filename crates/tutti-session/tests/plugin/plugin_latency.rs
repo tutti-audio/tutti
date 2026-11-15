@@ -16,7 +16,7 @@ use std::time::Instant;
 use tutti_types::MaxBlock;
 
 use support::{clap_probe, plugin_server};
-use tutti_cpal::{ManualStreamDriver, OutputSpec};
+use tutti_engine::{ManualStreamDriver, OutputSpec};
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin::handles::PluginClient;
 use tutti_session::{
@@ -271,7 +271,7 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
         OutputSpec::new(
             RATE,
             ChannelLayout::STEREO,
-            tutti_cpal::cpal::SampleFormat::F32,
+            tutti_buffers::SampleFormat::F32,
         )
         .with_quantum(MaxBlock::of(Samples(quantum)))
     }
