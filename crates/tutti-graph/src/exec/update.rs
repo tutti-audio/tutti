@@ -5,14 +5,14 @@ use ringbuf::traits::Consumer;
 use tutti_rt::RtScope;
 
 use super::commit::{Commit, Incoming, Relined, cut_fades, retire_fade, send_back};
-use super::stage::{RingFrom, Staged, sort_by_offset};
+use super::stage::{RingFrom, Route, Staged, sort_by_offset};
 use super::state::{Gone, Inject, Ring, State, Unit};
 use super::{Executor, Suspension};
 use crate::NodeKey;
 use crate::event::Event;
 use crate::gain::SumLane;
 use crate::held::Held;
-use crate::plan::{DelayKey, Plan};
+use crate::plan::Plan;
 use crate::spec::{EventIn, EventOut};
 
 impl Executor {
@@ -485,25 +485,22 @@ impl Executor {
                     let mut lost = fill(&mut shell.events, &inj.events);
                     // What was owed there is still owed: the tables move.
                     for table in inj.owed.drain(..) {
-                        if shell.owed.len() < shell.owed.capacity() {
-                            shell.owed.push(table);
-                        } else if let Some(first) = shell.owed.first_mut() {
-                            first.merge(&table);
-                        } else {
-                            debug_assert!(false, "room was made for every table owed");
-                            lost = lost.saturating_add(1);
-                        }
+                        lost = lost.saturating_add(shell.owe(table, &mut st.spare_tables));
                     }
                     self.dropped.at_node(u, lost);
                 }
             }
             for g in &st.gone_delays {
-                if let Some(Some(Ring::Event(f))) = old.rings.get(g.from as usize)
+                if let Some(Some(Ring::Event(f))) = old.rings.get_mut(g.from as usize)
                     && let Some((u, shell)) = flush_target(plan, inject, has_inject, g.at)
                 {
-                    let lost = f.flush_into(&mut shell.events);
-                    self.dropped
-                        .at_node(u, u32::try_from(lost).unwrap_or(u32::MAX));
+                    let mut lost =
+                        u32::try_from(f.flush_into(&mut shell.events)).unwrap_or(u32::MAX);
+                    // What the FIFO still owed its sink is owed on.
+                    if let Some(table) = f.take_owed() {
+                        lost = lost.saturating_add(shell.owe(table, &mut st.spare_tables));
+                    }
+                    self.dropped.at_node(u, lost);
                 }
             }
             for g in &st.gone_feedback {
@@ -572,32 +569,53 @@ impl Executor {
                 if owing.clone().next().is_none() {
                     continue;
                 }
-                // A replaced source whose edge (and its delay) goes on: the
-                // close travels the delay, behind what is in flight.
-                let delay = plan
-                    .delays
-                    .iter()
-                    .position(|d| d.key == DelayKey::Event { at, from });
-                if in_plan && let Some(Some(Ring::Event(f))) = delay.map(|i| &mut new.rings[i]) {
-                    let mut lost = 0;
-                    for h in owing {
-                        h.close_each(|e| lost += f.push(&[e]));
+                match std::mem::replace(&mut closer.route, Route::Placed) {
+                    // A source whose edge (and its delay) goes on: the close
+                    // is owed to the delay's FIFO, which pours it in behind
+                    // what is in flight.
+                    Route::Delay(i) => {
+                        let placed = match new.rings[i as usize].as_mut() {
+                            Some(Ring::Event(f)) => {
+                                let owed = owing.clone().all(|h| f.owe(h));
+                                // What fits goes in now, as the close of a
+                                // cut edge always did; the rest pours as
+                                // room frees.
+                                f.pour();
+                                owed
+                            }
+                            _ => false,
+                        };
+                        if !placed {
+                            // The FIFO was built with its table.
+                            debug_assert!(false, "a FIFO that owes closes has a table");
+                            let mut lost = 0u32;
+                            owing.for_each(|h| h.close_each(|_| lost = lost.saturating_add(1)));
+                            if let Ok(u) = plan.units.binary_search_by_key(&at.node, |u| u.key) {
+                                self.dropped.at_node(u as u32, lost);
+                            }
+                        }
                     }
-                    self.dropped.charge_source(from, lost);
-                } else if let Some((_, shell)) = flush_target(plan, inject, has_inject, at)
-                    && let Some(mut table) = closer.table.take()
-                {
-                    for h in owing {
-                        table.merge(h);
+                    // The edge ended: the table takes what the source holds
+                    // and owes. What fits goes now, after the flush; the rest
+                    // is owed to the sink.
+                    Route::Sink(mut table) => {
+                        let target = flush_target(plan, inject, has_inject, at);
+                        let Some((u, shell)) = target else {
+                            closer.route = Route::Sink(table);
+                            continue;
+                        };
+                        for h in owing {
+                            table.merge(h);
+                        }
+                        table.drain_into(&mut shell.events);
+                        if table.is_empty() {
+                            closer.route = Route::Sink(table);
+                        } else {
+                            let lost = shell.owe(table, &mut st.spare_tables);
+                            self.dropped.at_node(u, lost);
+                        }
                     }
-                    // What fits goes now, after the flush; the rest is owed.
-                    table.drain_into(&mut shell.events);
-                    if table.is_empty() {
-                        closer.table = Some(table);
-                    } else {
-                        debug_assert!(shell.owed.len() < shell.owed.capacity());
-                        shell.owed.push(table);
-                    }
+                    Route::Placed => {}
                 }
             }
             // The closes land at the end of what was flushed, after it.

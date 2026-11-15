@@ -131,6 +131,24 @@ impl Held {
         events.len() - start
     }
 
+    /// The next message that closes what is held, forgotten as it is taken:
+    /// a pedal up first, then the lowest key's note off, at offset 0. `None`
+    /// once nothing is held. Allocates nothing.
+    pub(crate) fn pop_close(&mut self) -> Option<Event> {
+        loop {
+            let Some(lane) = self.pedals.iter().next() else {
+                break;
+            };
+            self.pedals.remove(lane);
+            if let Some(up) = pedal_up(lane) {
+                return Some(Self::event(up));
+            }
+        }
+        let key = self.keys.next_from(0)?;
+        self.keys.remove(key);
+        Some(Self::event(Ump::note_off(key)))
+    }
+
     fn event(ump: Ump) -> Event {
         Event {
             offset: Offset::ZERO,

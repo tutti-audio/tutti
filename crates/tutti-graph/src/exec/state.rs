@@ -111,11 +111,45 @@ pub(crate) struct Inject {
     /// What the edges this commit cut held and `events` had no room for: one
     /// table for each edge, built with the commit. Drained into the sink's
     /// events at the end of each block, as much as the block takes, until
-    /// empty; a table never overflows, so no note off is lost.
+    /// empty; a table never overflows, so no note off is lost. With several
+    /// cut edges into one sink each table drains in turn, its pedal up
+    /// first.
     pub(super) owed: Vec<crate::held::Held>,
 }
 
 impl Inject {
+    /// Owe the sink the closes in `table`. It takes the slot made for it; a
+    /// buffer with none free merges it into the first table instead, so no
+    /// key is forgotten, and the table goes to `spare` to be freed on the
+    /// control side. Nothing allocates or frees. Returns how many closes had
+    /// nowhere to go (none: room is made for every table owed).
+    pub(super) fn owe(
+        &mut self,
+        table: crate::held::Held,
+        spare: &mut Vec<crate::held::Held>,
+    ) -> u32 {
+        let mut lost = 0u32;
+        let left_over = if self.owed.len() < self.owed.capacity() {
+            self.owed.push(table);
+            return 0;
+        } else if let Some(first) = self.owed.first_mut() {
+            first.merge(&table);
+            table
+        } else {
+            debug_assert!(false, "room was made for every table owed");
+            table.close_each(|_| lost = lost.saturating_add(1));
+            table
+        };
+        if spare.len() < spare.capacity() {
+            spare.push(left_over);
+        } else {
+            // Room for every table is made with the commit; were it short,
+            // leak the table rather than free it on the audio thread.
+            std::mem::forget(left_over);
+        }
+        lost
+    }
+
     /// Whether closes are still owed to the sink.
     pub(super) fn draining(&self) -> bool {
         self.owed.iter().any(|h| !h.is_empty())
@@ -209,5 +243,51 @@ impl State {
             overlay: Vec::new(),
             par: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::Event;
+    use crate::held::Held;
+    use crate::time::Offset;
+    use tutti_fixtures::midi;
+    use tutti_ump::{MidiChannel, U7};
+
+    fn holding(note: u8) -> Held {
+        let mut h = Held::new();
+        let on = midi::m1_note_on(MidiChannel::FIRST, note, U7::of(100));
+        h.observe(&[Event::midi(Offset::ZERO, on)]);
+        h
+    }
+
+    fn inject(room: usize) -> Inject {
+        Inject {
+            unit: 0,
+            port: 0,
+            events: Vec::new(),
+            merged: Vec::new(),
+            live: false,
+            closed_from: 0,
+            owed: Vec::with_capacity(room),
+        }
+    }
+
+    /// A table goes into the slot made for it; one with no slot free merges
+    /// into the first, so no key is forgotten and nothing allocates.
+    #[test]
+    fn a_table_with_no_slot_free_merges_into_the_first() {
+        let mut i = inject(1);
+        let mut spare = Vec::with_capacity(1);
+        assert_eq!(i.owe(holding(60), &mut spare), 0);
+        let capacity = i.owed.capacity();
+        assert_eq!(i.owe(holding(61), &mut spare), 0, "merged, not lost");
+        assert_eq!(spare.len(), 1, "the merged table goes back");
+        assert_eq!(i.owed.len(), 1);
+        assert_eq!(i.owed.capacity(), capacity, "and the Vec did not grow");
+        let mut closes = Vec::new();
+        i.owed[0].close_each(|e| closes.push(e));
+        assert_eq!(closes.len(), 2, "both keys are owed");
     }
 }

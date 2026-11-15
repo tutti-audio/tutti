@@ -65,11 +65,24 @@ pub(super) enum RingFrom {
 pub(super) struct Closer {
     pub(super) from: EventOut,
     pub(super) at: EventIn,
-    /// For an edge that does not go on through a delay: the table the source's
-    /// held and owed keys merge into, drained into the sink's injection buffer
-    /// as far as it takes and, for the rest, block by block. A table holds
-    /// every key and pedal there is, so it cannot overflow.
-    pub(super) table: Option<Held>,
+    pub(super) route: Route,
+}
+
+/// Where the close of a cut edge's held keys goes. Either way the keys go
+/// into a table that holds every key and pedal there is, so it cannot
+/// overflow and no note off is lost; the table is drained as room frees,
+/// pedal up first (with several cut edges into one sink, each table does).
+pub(super) enum Route {
+    /// The edge goes on through the delay at this index of the plan: its FIFO
+    /// was built with a table for owed closes, poured into the queue block by
+    /// block, behind what is in flight.
+    Delay(u32),
+    /// The edge ended: the table the source's held and owed keys merge into,
+    /// drained into the sink's injection buffer as far as it takes now and
+    /// block by block after.
+    Sink(Held),
+    /// The table has been placed.
+    Placed,
 }
 
 /// A delay or feedback FIFO that goes away: its queue flushes into `at`.
@@ -109,6 +122,8 @@ pub(super) struct Staged {
     /// drives and that may have none.
     pub(super) drives: Vec<(u32, ParamState)>,
     pub(super) spare_rings: Vec<Ring>,
+    /// Tables of owed closes merged away, to be freed on the control side.
+    pub(super) spare_tables: Vec<Held>,
     pub(super) spare_drives: Vec<ParamState>,
     /// The parallel state a pool set since this was staged left unused.
     pub(super) spare_par: Option<Par>,
@@ -210,6 +225,8 @@ pub(crate) struct Stager {
     fifos: BTreeMap<DelayKey, usize>,
     /// The same for event feedback.
     feedback: BTreeMap<FeedbackKey, usize>,
+    /// The event delays whose FIFO holds a table for owed closes.
+    owing: BTreeSet<DelayKey>,
     /// The injection buffers of the last commit, with the commit that made
     /// them, once it was seen applied, and the block count then.
     shells: Vec<Shell>,
@@ -251,6 +268,7 @@ impl Stager {
             rendered,
             fifos: BTreeMap::new(),
             feedback: BTreeMap::new(),
+            owing: BTreeSet::new(),
             shells: Vec::new(),
             shells_seq: 0,
             shells_seen: None,
@@ -306,12 +324,20 @@ impl Stager {
             declick: declick_frames(plan.prepare.sample_rate()).get(),
         };
         self.track(c, &cx);
-        let (rings, ring_fifo, ring_caps) = self.delays(&cx);
+        let closers = self.closers(c, &cx);
+        let to_close: BTreeSet<DelayKey> = closers
+            .iter()
+            .filter_map(|k| match k.route {
+                Route::Delay(i) => Some(plan.delays[i as usize].key),
+                _ => None,
+            })
+            .collect();
+        let (rings, ring_fifo, ring_caps, owing) = self.delays(&cx, &to_close);
         let (audio_fb, audio_fb_from, efb, efb_fifo, efb_caps) = self.feedback(&cx);
         let outlets = outlets(c, &cx);
         let (lanes, lanes_from) = lanes(c, &cx);
         let drives = drives(c, &cx, input.mix_lane);
-        let mut flush = self.flush(c, &cx);
+        let mut flush = self.flush(c, &cx, closers);
         let sizes = Sizes::of(&cx, &ring_fifo, &efb_fifo, &flush);
         let (inject, shells) = self.shells(&cx, &flush, sizes.widest);
         let slot_capacity = |i: usize| plan.event_slot_capacity[i].events(cx.cap) + sizes.extra[i];
@@ -356,6 +382,11 @@ impl Stager {
         });
         self.store_len = store_len;
         self.prepare_incoming(c, &cx);
+        let tables = flush
+            .rooms
+            .values()
+            .map(|r| r.closers + r.carried)
+            .sum::<usize>();
         let spare_drives = lanes_from.iter().flatten().count() + drives.len();
         let moved = ring_fifo
             .from
@@ -388,6 +419,7 @@ impl Stager {
             spare_drives: Vec::with_capacity(spare_drives),
             drives,
             spare_rings: Vec::with_capacity(moved),
+            spare_tables: Vec::with_capacity(tables),
             spare_par: None,
             chase: Vec::with_capacity(wanted),
             store,
@@ -395,6 +427,7 @@ impl Stager {
         }));
         // The bounds the next commit builds from.
         self.fifos = ring_caps;
+        self.owing = owing;
         self.feedback = efb_caps;
         self.shells = shells;
         self.shells_seq = c.seq;
@@ -421,7 +454,16 @@ impl Stager {
 
     /// PDC rings and FIFOs, by key: the shell of each, how it takes over the
     /// old one, and the capacity of each event FIFO for the next commit.
-    fn delays(&self, cx: &Cx<'_>) -> (Vec<Option<Ring>>, FifoPlan, BTreeMap<DelayKey, usize>) {
+    fn delays(
+        &self,
+        cx: &Cx<'_>,
+        to_close: &BTreeSet<DelayKey>,
+    ) -> (
+        Vec<Option<Ring>>,
+        FifoPlan,
+        BTreeMap<DelayKey, usize>,
+        BTreeSet<DelayKey>,
+    ) {
         let plan = cx.plan;
         let old_delays: BTreeMap<DelayKey, usize> = cx
             .old
@@ -434,6 +476,7 @@ impl Stager {
             })
             .unwrap_or_default();
         let mut caps = BTreeMap::new();
+        let mut owing = BTreeSet::new();
         let mut rings = Vec::with_capacity(plan.delays.len());
         let mut from = Vec::with_capacity(plan.delays.len());
         let mut extra = vec![0; plan.delays.len()];
@@ -444,11 +487,22 @@ impl Stager {
                     let rate = plan.event_tap_rate(src, cx.cap);
                     let want = EventFifo::bound(d.len.get(), rate, cx.max_block);
                     let have = carried.map(|j| (j as u32, self.fifo_capacity(&d.key)));
-                    let (how, cap, over) = fit_fifo(have, want, rate);
-                    rings.push(
-                        (!matches!(how, RingFrom::Keep { .. }))
-                            .then(|| Ring::Event(EventFifo::sized(d.len, rate, cx.max_block))),
-                    );
+                    let (mut how, mut cap, over) = fit_fifo(have, want, rate);
+                    // A FIFO that owes closes has a table for them: one that
+                    // has none yet is built afresh and takes the queue over.
+                    let has_table = carried.is_some() && self.owing.contains(&d.key);
+                    let table = has_table || to_close.contains(&d.key);
+                    if let (RingFrom::Keep { from: j, .. }, true, false) = (how, table, has_table) {
+                        how = RingFrom::Move { from: j };
+                        cap = cap.max(want);
+                    }
+                    rings.push((!matches!(how, RingFrom::Keep { .. })).then(|| {
+                        let f = EventFifo::sized_for(d.len, rate, cx.max_block, cap);
+                        Ring::Event(if table { f.with_owed() } else { f })
+                    }));
+                    if table {
+                        owing.insert(d.key);
+                    }
                     from.push(how);
                     extra[i] = over;
                     caps.insert(d.key, cap);
@@ -470,7 +524,7 @@ impl Stager {
                 },
             }
         }
-        (rings, FifoPlan { from, extra }, caps)
+        (rings, FifoPlan { from, extra }, caps, owing)
     }
 
     /// The capacity the executor's FIFO for `key` has, as of the last commit.
@@ -543,7 +597,7 @@ impl Stager {
     /// What disappears flushes to sinks that survive, and held keys of an
     /// edge that ended are closed at the sink that lost it: each sink gets a
     /// buffer for everything that can flow into it.
-    fn flush(&self, c: &Commit, cx: &Cx<'_>) -> Flush {
+    fn flush(&self, c: &Commit, cx: &Cx<'_>, closers: Vec<Closer>) -> Flush {
         let plan = cx.plan;
         let mut rooms: BTreeMap<(u32, u16), Room> = BTreeMap::new();
         // What replaced nodes wrote for their successors.
@@ -592,8 +646,10 @@ impl Stager {
             .filter_map(|(k, &j)| match k {
                 DelayKey::Event { at, .. } => {
                     if let Some(u) = cx.sink_of(*at) {
-                        rooms.entry((u, at.port)).or_default().flush +=
-                            self.fifos.get(k).copied().unwrap_or(0);
+                        let r = rooms.entry((u, at.port)).or_default();
+                        r.flush += self.fifos.get(k).copied().unwrap_or(0);
+                        // What the FIFO still owes moves to the sink.
+                        r.carried += usize::from(self.owing.contains(k));
                     }
                     Some(Vanished {
                         from: j as u32,
@@ -631,7 +687,11 @@ impl Stager {
                 })
             })
             .collect();
-        let closers = self.closers(c, cx, &mut rooms);
+        for k in &closers {
+            if let (Route::Sink(_), Some(u)) = (&k.route, cx.sink_of(k.at)) {
+                rooms.entry((u, k.at.port)).or_default().closers += 1;
+            }
+        }
         // A crossfade queued behind a running one holds what its predecessor
         // wrote for the unit that waits: delivered when the fade ends, into
         // the unit's first event input.
@@ -660,18 +720,11 @@ impl Stager {
 
     /// The old event edges whose held keys may need closing at the sink: an
     /// edge that ended, or one whose source may be gone, from a source that
-    /// carries notes. A close goes through the edge's delay when the edge
-    /// goes on with one, and otherwise into a table built here for the edge
-    /// (`Closer::table`): it holds every key and pedal there is, so it cannot
-    /// overflow, and it is drained into the sink's events block by block, as
-    /// the owed keys of a bypassed unit are. No close is ever refused for
-    /// room, and no note is left stuck.
-    fn closers(
-        &self,
-        c: &Commit,
-        cx: &Cx<'_>,
-        rooms: &mut BTreeMap<(u32, u16), Room>,
-    ) -> Vec<Closer> {
+    /// carries notes. Each goes into a table ([`Route`]) that holds every key and
+    /// pedal there is, so it cannot overflow, drained block by block as room
+    /// frees, as the owed keys of a bypassed unit are. No close is ever
+    /// refused for room, and no note is left stuck.
+    fn closers(&self, c: &Commit, cx: &Cx<'_>) -> Vec<Closer> {
         let Some(old) = cx.old else {
             return Vec::new();
         };
@@ -706,21 +759,19 @@ impl Stager {
             if (in_plan && !maybe_gone.contains(&from.node)) || replaced.contains(&at.node) {
                 continue;
             }
-            let Some(u) = cx.sink_of(at) else {
-                continue;
-            };
-            if !old.unit(from.node).is_some_and(|f| f.shape.note_events) {
+            if cx.sink_of(at).is_none() || !old.unit(from.node).is_some_and(|f| f.shape.note_events)
+            {
                 continue;
             }
             let delay = plan
                 .delays
                 .iter()
-                .any(|d| d.key == DelayKey::Event { at, from });
-            if !(in_plan && delay) {
-                rooms.entry((u, at.port)).or_default().closers += 1;
-            }
-            let table = (!(in_plan && delay)).then(Held::new);
-            closers.push(Closer { from, at, table });
+                .position(|d| d.key == DelayKey::Event { at, from });
+            let route = match delay {
+                Some(i) if in_plan => Route::Delay(i as u32),
+                _ => Route::Sink(Held::new()),
+            };
+            closers.push(Closer { from, at, route });
         }
         closers
     }

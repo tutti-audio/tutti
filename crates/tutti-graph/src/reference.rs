@@ -16,6 +16,11 @@
 //! passes nodes no silence or constant hints, so a node that behaves
 //! differently on a hint than without one is caught too.
 //!
+//! It closes the held keys of a cut edge all at once; the executor writes as
+//! many closes as the flush room takes and spreads the rest over the blocks
+//! that follow, a pedal up first in each table, so their streams agree only
+//! when the closes fit.
+//!
 //! It has no crossfade model: `set_graph` takes a replace as a plain swap, so
 //! the held-key behaviour of a queued fade (`held.rs`, `Keys`) is tested on the
 //! executors only.

@@ -28,6 +28,7 @@ use std::collections::VecDeque;
 use tutti_types::Samples;
 
 use crate::event::Event;
+use crate::held::Held;
 use crate::time::Offset;
 
 /// An audio delay line of fixed length.
@@ -175,6 +176,10 @@ pub(crate) struct EventFifo {
     clock: u64,
     limit: usize,
     reserve: usize,
+    /// The closes of a cut edge's held keys that the queue had no room for:
+    /// poured in, as room frees, ahead of each block's input. Present only
+    /// in a FIFO the editor built for a cut edge ([`with_owed`](Self::with_owed)).
+    owed: Option<Held>,
 }
 
 impl EventFifo {
@@ -195,6 +200,50 @@ impl EventFifo {
             clock: 0,
             limit,
             reserve,
+            owed: None,
+        }
+    }
+
+    /// This FIFO with a table for owed closes. Control side: allocates.
+    pub(crate) fn with_owed(mut self) -> Self {
+        self.owed = Some(Held::new());
+        self
+    }
+
+    /// The table of owed closes, taken out: the FIFO goes away and what it
+    /// owes moves to its sink.
+    pub(crate) fn take_owed(&mut self) -> Option<Held> {
+        if self.owed.as_ref().is_some_and(|t| !t.is_empty()) {
+            self.owed.take()
+        } else {
+            None
+        }
+    }
+
+    /// Owe the closes of `held` to the FIFO's sink: they enter the queue as
+    /// room frees, a pedal up first. Returns whether the FIFO has a table.
+    pub(crate) fn owe(&mut self, held: &Held) -> bool {
+        match &mut self.owed {
+            Some(t) => {
+                t.merge(held);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Queue what is owed, as far as the bound takes it, at the clock: behind
+    /// everything in flight, ahead of this block's input. Allocates nothing.
+    pub(crate) fn pour(&mut self) {
+        let bound = self.limit + self.reserve;
+        let Some(owed) = &mut self.owed else {
+            return;
+        };
+        while self.q.len() < bound {
+            let Some(e) = owed.pop_close() else {
+                break;
+            };
+            self.q.push_back((self.clock, e));
         }
     }
 
@@ -276,6 +325,13 @@ impl EventFifo {
             }
         }
         self.clock = old.clock;
+        // What was owed stays owed (the old table goes back with the FIFO).
+        if let Some(owed) = old.owed.as_ref().filter(|t| !t.is_empty()) {
+            if !self.owe(owed) {
+                debug_assert!(false, "a FIFO that owes is built with a table");
+                lost += 1;
+            }
+        }
         lost
     }
 
@@ -370,6 +426,7 @@ impl EventFifo {
     /// later.
     pub(crate) fn run(&mut self, input: &[Event], out: &mut Vec<Event>, frames: usize) -> u32 {
         self.pop_due(out, frames);
+        self.pour();
         let dropped = self.push(input);
         self.pop_due(out, frames);
         self.advance(frames);

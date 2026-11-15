@@ -1931,10 +1931,17 @@ fn pdc_pair(ed: &mut Editor, base: u64, latency: usize) -> NodeKey {
     sum
 }
 
-/// Writes `keys` MIDI 1.0 note-ons in its first block and holds them.
+/// Writes `keys` MIDI 1.0 note-ons, 400 a block, and holds them: key `k` is
+/// note `k % 128` on channel `k / 128`.
 struct Holder {
-    keys: u8,
-    sent: bool,
+    keys: usize,
+    sent: usize,
+}
+
+impl Holder {
+    fn new(keys: usize) -> Self {
+        Self { keys, sent: 0 }
+    }
 }
 
 impl Node for Holder {
@@ -1943,14 +1950,15 @@ impl Node for Holder {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        if !std::mem::replace(&mut self.sent, true) {
-            for k in 0..self.keys {
-                let on = midi::m1_note_on(MidiChannel::FIRST, 40 + k, U7::of(100));
-                let _ = io
-                    .event_out(0)
-                    .push(tutti_graph::Event::midi(tutti_graph::Offset::ZERO, on));
-            }
+        let next = (self.sent + 400).min(self.keys);
+        for k in self.sent..next {
+            let channel = MidiChannel::of((k / 128) as u8);
+            let on = midi::m1_note_on(channel, (k % 128) as u8, U7::of(100));
+            let _ = io
+                .event_out(0)
+                .push(tutti_graph::Event::midi(tutti_graph::Offset::ZERO, on));
         }
+        self.sent = next;
         Status::Silent
     }
     fn reset(&mut self) {}
@@ -1995,14 +2003,7 @@ fn event_pdc(ed: &mut Editor, base: u64) {
         );
     }
     for i in 4..6 {
-        ed.insert(
-            NodeKey(base + i),
-            "holder",
-            Unforkable(Holder {
-                keys: 30,
-                sent: false,
-            }),
-        );
+        ed.insert(NodeKey(base + i), "holder", Unforkable(Holder::new(30)));
     }
     let spec = ed.spec_mut();
     spec.connect_events(sink(base + 2, 0), EventEdge::Direct(ev(base + 1, 0)));
@@ -2271,16 +2272,42 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     ed.spec_mut().disconnect_events(sink(23, 2), ev(24, 0));
     ed.replace(
         NodeKey(25),
-        Unforkable(Holder {
-            keys: 30,
-            sent: true,
-        }),
+        Unforkable(Holder::new(0)),
         Fade::new(Samples(0), FadeLaw::EqualPower),
     )
     .expect("fits");
     ed.commit().expect("commits");
     applied(&mut exec);
     blocks(&mut exec, 24, 64);
+    ed.collect();
+
+    // Closes owed across commits: a holder of more keys than one block of the
+    // sink takes is cut (the apply merges its keys into a table and leaves
+    // the rest owed), a commit follows before any block (the table moves
+    // over), and the blocks drain it.
+    ed.insert(NodeKey(600), "holder", Unforkable(Holder::new(1_500)));
+    ed.insert(
+        NodeKey(601),
+        "consume",
+        Unforkable(TestNode::new(Kind::Consumer { inputs: 1 })),
+    );
+    ed.spec_mut()
+        .connect_events(sink(601, 0), EventEdge::Direct(ev(600, 0)));
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 6, 64);
+    ed.collect();
+    ed.spec_mut().disconnect_events(sink(601, 0), ev(600, 0));
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    ed.insert(
+        NodeKey(602),
+        "smooth",
+        Unforkable(TestNode::new(Kind::Smooth)),
+    );
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 12, 64);
     ed.collect();
 
     // Crossfades: a fade, one queued behind it, and a chase handed on.
