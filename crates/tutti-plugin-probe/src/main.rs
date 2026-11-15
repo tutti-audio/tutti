@@ -32,8 +32,8 @@
 
 use std::path::Path;
 use std::process::ExitCode;
-use tutti_plugin_db::PluginFormat;
 use tutti_plugin_probe::{describe, describe_measured};
+use tutti_plugin_types::PluginFormat;
 use tutti_plugin_types::{MainThreadMarker, ProbeOutcome, write_result};
 
 fn main() -> ExitCode {

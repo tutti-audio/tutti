@@ -82,11 +82,14 @@ macro_rules! served {
                         Ok((Self::$name(plugin), state_error, Box::new(end)))
                     })*
                     _ => {
-                        let served: &[PluginFormat] = &[$($(#[$cfg])* $format),*];
+                        let served: &[&str] =
+                            &[$($(#[$cfg])* $format.extension_id()),*];
                         Err(PluginError::Load {
                             stage: LoadStage::Opening,
                             reason: format!(
-                                "Unsupported plugin format: {format:?}. Supported: {served:?}.",
+                                "Unsupported plugin format: {}. Supported: {}.",
+                                format.extension_id(),
+                                served.join(", ")
                             ),
                         })
                     }

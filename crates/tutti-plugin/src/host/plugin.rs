@@ -17,17 +17,17 @@ use crate::host::node::PluginClient;
     feature = "vst3",
     all(feature = "au", target_os = "macos")
 ))]
-use tutti_plugin_db::PluginFormat;
+use tutti_plugin_host::InProcClient;
+use tutti_plugin_host::PluginHandle;
+use tutti_plugin_ipc::AudioConfig;
+use tutti_plugin_types::BridgeResult;
 #[cfg(any(
     feature = "vst2",
     feature = "clap",
     feature = "vst3",
     all(feature = "au", target_os = "macos")
 ))]
-use tutti_plugin_host::InProcClient;
-use tutti_plugin_host::PluginHandle;
-use tutti_plugin_ipc::AudioConfig;
-use tutti_plugin_types::BridgeResult;
+use tutti_plugin_types::PluginFormat;
 use tutti_plugin_types::PluginRole;
 use tutti_plugin_types::{Features, LoadedPlugin, PluginDescriptor};
 use tutti_types::SampleRate;
@@ -127,13 +127,13 @@ impl Plugin {
     ///
     /// ```no_run
     /// # fn ex() -> Result<(), Box<dyn std::error::Error>> {
-    /// use tutti_plugin::catalog::{BindPolicy, Catalog, CatalogConfig, NO_SCAN_DIRS, Plugin, PluginId};
+    /// use tutti_plugin::catalog::{Catalog, CatalogConfig, NO_SCAN_DIRS, Plugin, PluginId};
     /// use tutti_plugin_db::{PluginDb, PluginFormat};
     /// # let dir = std::path::PathBuf::from("/my/app/state");
     /// let catalog = Catalog::new(PluginDb::new(), CatalogConfig::new(dir, NO_SCAN_DIRS), |_| Ok(()));
     /// let foo = catalog
     ///     .resolve(&PluginId::new(PluginFormat::Vst3, "vst3.00112233-44556677-8899AABB-CCDDEEFF"))
-    ///     .bind(BindPolicy::ExactOnly)?;
+    ///     .bind()?;
     /// let (_collector, work) = tutti_plugin::MainWork::new();
     /// let plugin = Plugin::open(None, &work, &foo, tutti_types::SampleRate::SR_48K)?;
     /// # Ok(()) }
@@ -223,8 +223,9 @@ impl Plugin {
         state: Option<&[u8]>,
     ) -> BridgeResult<(Self, Option<std::result::Result<(), String>>)> {
         let sample_rate = sample_rate.into();
-        plugin.check()?;
         if plugin.placement()? == Hosting::InProcess {
+            // A served load asks the blacklist in `PluginClient::open`.
+            plugin.check()?;
             // An in-process plugin loads in this process, on the main thread:
             // the caller says it is there by passing the token.
             let Some(main) = main else {

@@ -7,8 +7,7 @@
 //! lives in its format's host crate.
 
 use std::path::Path;
-use tutti_plugin_db::PluginFormat;
-use tutti_plugin_types::{BridgeError, BridgeResult};
+use tutti_plugin_types::{BridgeError, BridgeResult, PluginFormat};
 use tutti_plugin_types::{Editor, MainThreadMarker, MainWorkHandle};
 use tutti_plugin_types::{Load, LoadStage};
 

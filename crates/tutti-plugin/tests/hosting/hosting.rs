@@ -20,7 +20,6 @@ fn a_vst2_plugin_asked_for_out_of_process_is_refused_at_load() {
     for name in ["Synth.vst", "Legacy.dll", "Old.so"] {
         let plugin = Loadable::uncatalogued(PluginRef::file(name).expect("a plugin file"))
             .hosting(Hosting::OutOfProcess);
-        assert_eq!(plugin.requested_hosting(), Hosting::OutOfProcess);
         match Plugin::open(
             None,
             &tutti_fixtures::detached_work(),

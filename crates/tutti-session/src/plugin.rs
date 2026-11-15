@@ -859,8 +859,9 @@ impl Gate {
 #[derive(Debug, Clone)]
 struct Origin {
     config: AudioConfig,
-    /// The hosting the load asked for.
-    hosting: Hosting,
+    /// The load as it was asked: its hosting and the catalog blacklist it ran
+    /// under, which a reload asks again.
+    loadable: Loadable,
 }
 
 /// A recovering plugin's reload, between its death and its replacement.
@@ -1329,7 +1330,7 @@ impl Session {
         // Marks the collector run: from here the session has a main thread, so an
         // off-main call on an in-process handle waits for the next update.
         self.main_work.run(main);
-        let hosting = loaded.loadable.requested_hosting();
+        let loadable = loaded.loadable.clone();
         let requested_path = loaded.loadable.plugin().path().to_path_buf();
         let config = loaded.config;
         let Open {
@@ -1350,7 +1351,7 @@ impl Session {
                 client.controls().set_meter(meter);
                 let key = self.graph.insert_plugin(client);
                 if let Some(hosted) = self.graph.plugins.get_mut(&key.erase()) {
-                    hosted.origin = Some(Origin { config, hosting });
+                    hosted.origin = Some(Origin { config, loadable });
                     hosted.recovery = self.recovery.map(Recovery::new);
                 }
                 key
@@ -1839,7 +1840,7 @@ impl Session {
         hosted.reload.due = None;
         hosted.reload.in_flight = true;
         let load = PluginLoad {
-            loadable: Loadable::uncatalogued(hosted.plugin.clone()).hosting(origin.hosting),
+            loadable: origin.loadable.retargeted(hosted.plugin.clone()),
             rate,
             config: origin.config,
             state: hosted.snapshot.clone(),
@@ -2343,11 +2344,21 @@ mod tests {
         /// whose load resolves in process (CLAP, `Hosting::InProcess`).
         #[cfg(feature = "clap")]
         fn recovering_in_process(&mut self) {
+            let plugin = PluginRef::file("fake.clap").expect("a plugin file");
+            self.recovering(
+                plugin.clone(),
+                Loadable::uncatalogued(plugin).hosting(Hosting::InProcess),
+            );
+        }
+
+        /// The node's record as `plugin` being recovered, its reload due now,
+        /// from a load that was `loadable`.
+        fn recovering(&mut self, plugin: PluginRef, loadable: Loadable) {
             let hosted = self.session.graph.plugins.get_mut(&self.node).unwrap();
-            hosted.plugin = PluginRef::file("fake.clap").expect("a plugin file");
+            hosted.plugin = plugin;
             hosted.origin = Some(Origin {
                 config: AudioConfig::default(),
-                hosting: Hosting::InProcess,
+                loadable,
             });
             let mut recovery = Recovery::new(RecoveryPolicy::default());
             let _ = recovery.step(
@@ -2878,6 +2889,49 @@ mod tests {
         assert!(
             MainThreadMarker::new().is_none(),
             "still not the main thread"
+        );
+    }
+
+    /// **A plugin blacklisted after its load is not reloaded**: the reload asks
+    /// the catalog blacklist the original load ran under, so a plugin the
+    /// catalog has since recorded as crashing the scanner fails the attempt as
+    /// the blacklist's refusal, and nothing is opened.
+    #[test]
+    fn a_reload_of_a_plugin_blacklisted_since_its_load_is_refused() {
+        use tutti_plugin::catalog::{CatalogConfig, NO_SCAN_DIRS, PluginDb};
+        let file =
+            std::env::temp_dir().join(format!("tutti-reload-bl-{}.clap", std::process::id()));
+        std::fs::write(&file, b"x").unwrap();
+        let mut catalog = Catalog::new(
+            PluginDb::new(),
+            CatalogConfig::new("/nonexistent", NO_SCAN_DIRS),
+            |_| Ok(()),
+        );
+        let plugin = PluginRef::file(&file).expect("a plugin file");
+        let loadable = Loadable::uncatalogued(plugin.clone()).under(&catalog);
+        let mut rig = rig(None);
+        rig.recovering(plugin, loadable);
+        let job = rig.plugins_at(0).pop().expect("the reload is submitted");
+
+        catalog.blacklist(&file, "crashed the scanner");
+        let events = rig.run_and_land(job);
+        std::fs::remove_file(&file).ok();
+
+        let [
+            SessionEvent::Plugin(PluginEvent {
+                change: PluginChange::Reloading { cause, .. },
+                ..
+            }),
+        ] = &events[..]
+        else {
+            panic!("the next attempt is scheduled: {events:?}");
+        };
+        let ReloadCause::Attempt(RecoveryFailure::ReloadFailed { source }) = cause else {
+            panic!("{cause:?}");
+        };
+        assert!(
+            matches!(&**source, BridgeError::Blacklisted { reason, .. } if reason == "crashed the scanner"),
+            "{source:?}"
         );
     }
 

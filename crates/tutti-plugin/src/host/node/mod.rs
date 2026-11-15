@@ -284,7 +284,7 @@ impl PluginClient<Unbound> {
         let plugin_path = plugin.path().to_path_buf();
         // A VST2 plugin is not served (its editor and audio are one object):
         // refused here, typed, before a server is started for it.
-        if format == tutti_plugin_db::PluginFormat::Vst2 {
+        if format == tutti_plugin_types::PluginFormat::Vst2 {
             return Err(BridgeError::NotOutOfProcess {
                 path: plugin_path,
                 format: "VST2",

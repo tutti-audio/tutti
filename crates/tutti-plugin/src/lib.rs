@@ -25,7 +25,7 @@
 //! use tutti_types::SampleRate;
 //! use tutti_graph::{Editor, Prepare};
 //! use tutti_plugin::catalog::{
-//!     BindPolicy, Catalog, CatalogConfig, NO_SCAN_DIRS, Plugin, PluginId,
+//!     Catalog, CatalogConfig, NO_SCAN_DIRS, Plugin, PluginId,
 //! };
 //! use tutti_plugin_db::{PluginDb, PluginFormat};
 //! use tutti_types::Samples;
@@ -43,7 +43,7 @@
 //!     |_db| Ok(()),
 //! );
 //! let id = PluginId::new(PluginFormat::Vst3, "vst3.00112233-44556677-8899AABB-CCDDEEFF");
-//! let loadable = catalog.resolve(&id).bind(BindPolicy::ExactOnly)?;
+//! let loadable = catalog.resolve(&id).bind()?;
 //! let (_collector, work) = tutti_plugin::MainWork::new();
 //! let plugin = Plugin::open(None, &work, &loadable, SampleRate::SR_48K)?;
 //! println!("{} by {}", plugin.descriptor().name, plugin.descriptor().vendor);
@@ -436,7 +436,7 @@ pub mod catalog {
     pub use tutti_plugin_types::{Helper, Locator};
     // Named in `Plugin::role` and `Catalog::iter`.
     pub use crate::host::catalog::{BlacklistView, Catalog, PersistError};
-    pub use crate::host::loadable::{BindError, BindPolicy, Hosting, Loadable, Resolved};
+    pub use crate::host::loadable::{BindError, Hosting, Loadable, Resolved};
     pub use crate::host::plugin::{BoundPlugin, Plugin};
     pub use crate::host::plugin_ref::{PluginRef, PluginState};
     pub use tutti_plugin_db::{

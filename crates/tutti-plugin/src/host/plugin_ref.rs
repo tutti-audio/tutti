@@ -8,8 +8,8 @@
 //! plugin again. A load takes a [`Loadable`](crate::host::loadable::Loadable).
 
 use std::path::{Path, PathBuf};
-use tutti_plugin_db::{PluginEntry, PluginFormat, format_from_path};
-use tutti_plugin_types::Load;
+use tutti_plugin_db::{PluginEntry, format_from_path};
+use tutti_plugin_types::{Load, PluginFormat};
 
 /// One plugin: the file it is in, its format, and its id in that file.
 ///

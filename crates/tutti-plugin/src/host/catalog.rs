@@ -506,26 +506,20 @@ impl Catalog {
         self.db.plugins()
     }
 
-    /// Returns the ref of the first non-blacklisted plugin with this display
-    /// name.
-    pub fn find(&self, name: &str) -> Option<PluginRef> {
-        self.db
-            .plugins()
-            .find(|p| p.descriptor.name == name)
-            .map(|p| PluginRef::from(&p))
-    }
-
     /// What `id` names among the non-blacklisted plugins of the catalog now:
     /// the plugin of that format with that id, wherever its file is.
     ///
-    /// A plugin blacklisted since is [`Missing`](Resolved::Missing); one
-    /// blacklisted after this call is refused by the [`Loadable`] when the load
-    /// opens it. [`Catalog::unblacklist`] and a resolve again is a host's "load
-    /// anyway".
+    /// The answer is [`Exact`](Resolved::Exact), [`Ambiguous`](Resolved::Ambiguous)
+    /// (the id in several files) or [`Missing`](Resolved::Missing). A saved
+    /// `PluginId` holds no version, so there is nothing to compare a plugin's
+    /// [`version`](PluginDescriptor::version) with, and no near match.
     ///
-    /// The catalog stores no version and no compatibility ids, so the answer is
-    /// [`Exact`](Resolved::Exact), [`Ambiguous`](Resolved::Ambiguous) (the id in
-    /// several files) or [`Missing`](Resolved::Missing).
+    /// A blacklisted file keeps no descriptors, so its plugins resolve
+    /// [`Missing`](Resolved::Missing). A plugin blacklisted after this call is
+    /// refused by the [`Loadable`] when the load opens it. To load a blacklisted
+    /// plugin anyway: [`blacklisted`](Self::blacklisted) names the file,
+    /// [`unblacklist`](Self::unblacklist) drops its row, a rescan or
+    /// [`register`](Self::register) probes it again, and then resolve.
     #[must_use]
     pub fn resolve(&self, id: &PluginId) -> Resolved {
         let mut found: Vec<PluginRef> = self
@@ -600,8 +594,9 @@ impl Catalog {
         refusal(&self.db, plugin)
     }
 
-    /// Blacklists a plugin by path, hiding it from `iter`, `entries` and `find`
-    /// and making [`check`](Self::check) refuse it.
+    /// Blacklists a plugin by path, hiding it from `iter` and `entries`,
+    /// resolving its plugins [`Missing`](Resolved::Missing) and making
+    /// [`check`](Self::check) refuse it.
     pub fn blacklist(&mut self, path: impl AsRef<Path>, reason: impl Into<String>) {
         let path = key(path.as_ref());
         let reason = reason.into();
@@ -612,8 +607,10 @@ impl Catalog {
     /// scan.
     ///
     /// The file's row is dropped, so the plugin is **absent** from
-    /// [`iter`](Self::iter), [`entries`](Self::entries) and [`find`](Self::find)
-    /// until that scan has probed it again.
+    /// [`iter`](Self::iter), [`entries`](Self::entries) and
+    /// [`resolve`](Self::resolve) until that scan has probed it again. A host's
+    /// "load anyway" is [`blacklisted`](Self::blacklisted), this, a rescan, then
+    /// `resolve`.
     ///
     /// Returns `true` if a blacklisted file was found and cleared. Offer this
     /// to users: crash recovery also blacklists after a force-quit, power loss
@@ -764,7 +761,7 @@ impl Catalog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::loadable::{BindError, BindPolicy};
+    use crate::host::loadable::BindError;
     use crate::host::plugin::Plugin;
     use tutti_plugin_db::{FileRow, PluginFormat, ScanPoll, ScanResult};
     use tutti_types::SampleRate;
@@ -819,7 +816,6 @@ mod tests {
         let ids: Vec<_> = refs.iter().map(|r| r.id().unwrap()).collect();
         assert_eq!(ids, ["one", "two"]);
         assert_eq!(plugins.info(&refs[1]).map(|d| d.id.as_str()), Some("two"));
-        assert_eq!(plugins.find("two"), Some(refs[1].clone()));
         let by_file = PluginRef::file(&path).unwrap();
         assert_eq!(plugins.info(&by_file).map(|d| d.id.as_str()), Some("one"));
         // A ref through a link names the scanned file (macOS's temp dir is
@@ -1098,7 +1094,7 @@ mod tests {
         let files: Vec<_> = candidates.iter().map(|c| c.plugin().path()).collect();
         assert_eq!(files, [key(&a), key(&b)]);
         assert!(matches!(
-            resolved.bind(BindPolicy::OrAlias),
+            resolved.bind(),
             Err(BindError::Ambiguous(c)) if c.len() == 2
         ));
     }

@@ -536,7 +536,7 @@ mod links {
     /// plugin that comes back is the row's.
     #[test]
     fn a_scanned_link_to_a_differently_named_target_loads_by_its_catalog_key() {
-        use tutti_plugin::catalog::{BindPolicy, Hosting, Plugin, PluginId};
+        use tutti_plugin::catalog::{Hosting, Plugin, PluginId};
         use tutti_plugin_db::PluginFormat;
         let dir = tempfile::TempDir::new().expect("a scratch directory");
         let target = dir.path().join("libfoo.so");
@@ -555,7 +555,7 @@ mod links {
 
         let loadable = catalog
             .resolve(&id)
-            .bind(BindPolicy::ExactOnly)
+            .bind()
             .expect("the scanned id is in the catalog")
             .hosting(Hosting::OutOfProcess);
         assert_eq!(loadable.format(), PluginFormat::Clap);
