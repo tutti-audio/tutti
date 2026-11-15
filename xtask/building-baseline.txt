@@ -88,7 +88,7 @@ tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/controls.rs::Cross
 tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/controls.rs::CrossoverControls::ordered
 tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/model.rs::CrossoverModel::designed
 tutti-dsp  ctor-result  crates/tutti-dsp/src/filter/crossover/model.rs::CrossoverModel::new
-tutti-dsp  ctor-result  crates/tutti-dsp/src/modulation/mod_delay.rs::ModDelayFamily::new
+tutti-dsp  ctor-result  crates/tutti-dsp/src/modulation/mod_delay.rs::ModDelayLayout::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/modulation/phaser.rs::SweepRange::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/modulation/sweep.rs::Stagger::each
 tutti-dsp  ctor-result  crates/tutti-dsp/src/modulation/sweep.rs::Sweep::new
@@ -411,7 +411,8 @@ tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::si
 tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::square
 tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::triangle
 tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb.rs::FamilyNode::fixed
-tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb.rs::FamilyNode::general_midi
+tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb_freeverb.rs::FreeverbNode::general_midi
+tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb_freeverb.rs::FreeverbNode::live
 tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb.rs::FamilyNode::live
 tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb_fdn.rs::FdnNode::live
 tutti-nodes  node-ctor  crates/tutti-nodes/src/signal/follower.rs::SourceNode::from_decl
