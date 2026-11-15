@@ -1145,10 +1145,11 @@ impl<'a> Plugin<'a> {
 
     /// How many times the plugin's own bypass was found other than its node's
     /// mode after a write, over this plugin instance's life (a replacement or a
-    /// reload starts the count again): a write that was lost or refused, or a
-    /// bypass its editor, a restored state or its automation moved since. One
-    /// count per episode, not per retry; `0` for a plugin with no bypass of its
-    /// own, which the executor bypasses.
+    /// reload starts the count again): a write that was lost, a write the
+    /// plugin refused while it held another bypass, or a bypass its editor, a
+    /// restored state or its automation moved since. One count per episode, not
+    /// per retry, and a refusal is latched until the node's mode changes; `0`
+    /// for a plugin with no bypass of its own, which the executor bypasses.
     #[must_use]
     pub fn bypass_writes_unapplied(&self) -> u64 {
         self.hosted.bypass.unapplied()
@@ -2920,7 +2921,7 @@ mod tests {
     }
 
     /// **A plugin that replaces another starts its own bypass episode.** The
-    /// outgoing plugin refused the node's mode (an open episode, counted once);
+    /// outgoing plugin ignored the node's mode (an open episode, counted once);
     /// the incoming one's divergence is counted as its own, from zero.
     #[test]
     fn a_replacement_counts_its_own_bypass_episode() {
@@ -2932,7 +2933,9 @@ mod tests {
             outgoing.clone(),
             PluginRef::file("fake.clap").expect("a plugin file"),
         );
-        hosted.bypass.reconcile(&outgoing, &mirror_a, true);
+        hosted
+            .bypass
+            .reconcile(&outgoing, &mirror_a, tutti_graph::NodeMode::Bypassed);
         assert_eq!(
             hosted.bypass.unapplied(),
             1,
@@ -2943,8 +2946,46 @@ mod tests {
         plugin_b.accepts.store(false, SeqCst);
         let _ = hosted.adopt(incoming.clone());
         assert_eq!(hosted.bypass.unapplied(), 0, "nothing carries over");
-        hosted.bypass.reconcile(&incoming, &hosted.mirror, true);
+        hosted
+            .bypass
+            .reconcile(&incoming, &hosted.mirror, tutti_graph::NodeMode::Bypassed);
         assert_eq!(hosted.bypass.unapplied(), 1, "the incoming plugin's own");
         assert_eq!(plugin_b.writes.load(SeqCst), 1);
+    }
+
+    /// **A plugin that enters refusing its bypass is written once and counted
+    /// once.** The outgoing plugin's refusal is latched; the incoming one, which
+    /// refuses too, starts unlatched: the node's mode is written to it and its
+    /// refusal is its own episode.
+    #[test]
+    fn a_replacement_that_refuses_is_written_and_counted_once() {
+        use crate::bypass::tests::rig;
+        use std::sync::atomic::Ordering::SeqCst;
+        use tutti_graph::NodeMode;
+        let (outgoing, plugin_a, mirror_a) = rig(false);
+        plugin_a.refuses.store(true, SeqCst);
+        let mut hosted = HostedPlugin::new(
+            outgoing.clone(),
+            PluginRef::file("fake.clap").expect("a plugin file"),
+        );
+        hosted
+            .bypass
+            .assert_mode(&outgoing, &mirror_a, NodeMode::Bypassed);
+        assert_eq!(hosted.bypass.unapplied(), 1, "the outgoing plugin's");
+
+        let (incoming, plugin_b, _) = rig(false);
+        plugin_b.refuses.store(true, SeqCst);
+        let _ = hosted.adopt(incoming.clone());
+        assert_eq!(hosted.bypass.unapplied(), 0, "nothing carries over");
+        hosted
+            .bypass
+            .assert_mode(&incoming, &hosted.mirror, NodeMode::Bypassed);
+        for _ in 0..40 {
+            hosted
+                .bypass
+                .reconcile(&incoming, &hosted.mirror, NodeMode::Bypassed);
+        }
+        assert_eq!(plugin_b.attempts.load(SeqCst), 1, "written once");
+        assert_eq!(hosted.bypass.unapplied(), 1, "counted once");
     }
 }

@@ -2601,7 +2601,7 @@ impl Graph {
         if let Some(hosted) = self.plugins.get_mut(&node) {
             hosted
                 .bypass
-                .assert_mode(&hosted.handle, &hosted.mirror, mode == NodeMode::Bypassed);
+                .assert_mode(&hosted.handle, &hosted.mirror, mode);
         }
     }
 
@@ -2612,6 +2612,9 @@ impl Graph {
     /// plugin that differs, or whose write never reached it, is written again,
     /// each episode counted once
     /// ([`Plugin::bypass_writes_unapplied`](crate::Plugin::bypass_writes_unapplied)).
+    /// A plugin that refused the mode is not written again until the node's mode
+    /// changes: the refusal is latched, and counted as an episode only when the
+    /// plugin held another bypass.
     ///
     /// Until a plugin is back in the node's mode the executor does not bypass its
     /// node, so it plays processed audio under `Bypassed` for that long: a tick
@@ -2624,10 +2627,10 @@ impl Graph {
     /// `Bypassed`.
     #[cfg(feature = "plugin")]
     pub(crate) fn reconcile_own_bypass(&mut self) {
-        let wants: Vec<(NodeKey, bool)> = self
+        let wants: Vec<(NodeKey, NodeMode)> = self
             .plugins
             .keys()
-            .filter_map(|&node| Some((node, self.mode(node).ok()? == NodeMode::Bypassed)))
+            .filter_map(|&node| Some((node, self.mode(node).ok()?)))
             .collect();
         for (node, want) in wants {
             if let Some(hosted) = self.plugins.get_mut(&node)
