@@ -114,7 +114,7 @@ impl Listener {
     /// be long enough for a loaded machine.
     pub fn hear(&mut self, count: usize, patience: Duration) -> Vec<Ump> {
         let end = Instant::now() + patience;
-        while self.seen.lock().unwrap().len() < count && Instant::now() < end {
+        while self.rig.seen.lock().unwrap().len() < count && Instant::now() < end {
             self.play();
             std::thread::sleep(Duration::from_millis(1));
         }
