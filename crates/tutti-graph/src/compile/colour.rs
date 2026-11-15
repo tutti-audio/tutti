@@ -19,7 +19,7 @@
 //! which is why it is offered only to ops that promise to (PDC delay rings,
 //! and nodes whose `Shape::in_place` is set).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use super::Val;
 
@@ -68,37 +68,8 @@ fn finished_before(u: &Val, w: u32, reach: &Reach) -> bool {
 }
 
 /// Greedy colouring in writer order. `in_place[v] = u` offers `v` the slot of
-/// `u`, taken when legal. `preds[op]` are the ops with an edge into `op`.
-///
-/// A value tries, in order, and takes the first slot whose last occupant is
-/// finished before its writer:
-///
-/// 1. the slot of the value it overwrites in place (`in_place`);
-/// 2. the slots of the values its writer's predecessors read, in predecessor
-///    then value order — buffers the writer's own neighbourhood just
-///    released, still warm in cache;
-/// 3. the lowest-numbered free slot;
-/// 4. a new slot.
-///
-/// Every candidate passes the one liveness test, so the order only chooses
-/// among legal slots and is a pure function of the graph.
-pub(crate) fn colour(
-    vals: &[Val],
-    reach: &Reach,
-    in_place: &BTreeMap<u32, u32>,
-    preds: &[BTreeSet<u32>],
-) -> Colouring {
-    // The values each op reads, ascending.
-    let mut reads: Vec<Vec<u32>> = vec![Vec::new(); preds.len()];
-    for (u, val) in vals.iter().enumerate() {
-        for &r in &val.readers {
-            let row = &mut reads[r as usize];
-            if row.last() != Some(&(u as u32)) {
-                row.push(u as u32);
-            }
-        }
-    }
-
+/// `u`, taken when legal.
+pub(crate) fn colour(vals: &[Val], reach: &Reach, in_place: &BTreeMap<u32, u32>) -> Colouring {
     let mut slot = vec![u32::MAX; vals.len()];
     // Last occupant of each slot. Values are visited in writer order, and a
     // value can only follow an occupant whose every op happens-before its
@@ -126,13 +97,9 @@ pub(crate) fn colour(
             }
         }
 
-        let free = |s: usize| finished_before(&vals[last[s] as usize], w, reach);
-        let reuse = preds[w as usize]
+        let reuse = last
             .iter()
-            .flat_map(|&p| reads[p as usize].iter())
-            .map(|&u| slot[u as usize] as usize)
-            .find(|&s| free(s))
-            .or_else(|| (0..last.len()).find(|&s| free(s)));
+            .position(|&occ| finished_before(&vals[occ as usize], w, reach));
         let s = match reuse {
             Some(s) => s,
             None => {
@@ -152,12 +119,14 @@ pub(crate) fn colour(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
     use proptest::prelude::*;
 
     /// One op per value: op `i` writes value `i` and reads the values in
-    /// `reads[i]` (all earlier). Returns the values, the reach and the preds.
-    fn dag(reads: &[Vec<u32>]) -> (Vec<Val>, Reach, Vec<BTreeSet<u32>>) {
+    /// `reads[i]` (all earlier). Returns the values and the reach.
+    fn dag(reads: &[Vec<u32>]) -> (Vec<Val>, Reach) {
         let mut vals: Vec<Val> = (0..reads.len() as u32)
             .map(|w| Val {
                 writer: w,
@@ -175,12 +144,12 @@ mod tests {
             }
         }
         let reach = Reach::new(&succ);
-        (vals, reach, preds)
+        (vals, reach)
     }
 
     fn slots(reads: &[Vec<u32>], in_place: &BTreeMap<u32, u32>) -> u32 {
-        let (vals, reach, preds) = dag(reads);
-        colour(&vals, &reach, in_place, &preds).count
+        let (vals, reach) = dag(reads);
+        colour(&vals, &reach, in_place).count
     }
 
     /// A chain `0 → 1 → 2 → 3 → 4` needs two slots: a value lives until its
@@ -217,20 +186,6 @@ mod tests {
         assert_eq!(slots(&reads, &in_place), 1);
     }
 
-    /// Two independent chains side by side need two slots each at most; the
-    /// preference for a predecessor's released slot keeps each chain on its
-    /// own pair instead of interleaving across the other chain's buffers.
-    #[test]
-    fn independent_chains_keep_to_their_own_slots() {
-        // Ops 0,1 start chains A,B; 2,3 continue; 4,5 continue.
-        let reads = vec![vec![], vec![], vec![0], vec![1], vec![2], vec![3]];
-        let (vals, reach, preds) = dag(&reads);
-        let c = colour(&vals, &reach, &BTreeMap::new(), &preds);
-        assert_eq!(c.count, 4);
-        assert_eq!(c.slot[4], c.slot[0], "chain A returns to its first slot");
-        assert_eq!(c.slot[5], c.slot[1], "chain B returns to its first slot");
-    }
-
     fn random_reads(masks: &[u64]) -> Vec<Vec<u32>> {
         masks
             .iter()
@@ -258,15 +213,15 @@ mod tests {
             offer in prop::collection::vec(any::<bool>(), 40),
         ) {
             let reads = random_reads(&masks);
-            let (vals, reach, preds) = dag(&reads);
+            let (vals, reach) = dag(&reads);
             let mut in_place = BTreeMap::new();
             for (v, rs) in reads.iter().enumerate() {
                 if offer[v] && let Some(&u) = rs.first() {
                     in_place.insert(v as u32, u);
                 }
             }
-            let c = colour(&vals, &reach, &in_place, &preds);
-            let again = colour(&vals, &reach, &in_place, &preds);
+            let c = colour(&vals, &reach, &in_place);
+            let again = colour(&vals, &reach, &in_place);
             prop_assert_eq!(&c.slot, &again.slot);
             prop_assert_eq!(c.count, again.count);
             prop_assert!(c.slot.iter().all(|&s| s < c.count));
