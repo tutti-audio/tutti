@@ -51,6 +51,7 @@ pub struct FunctionBlock {
 
 /// Why a [`FunctionBlockBuilder`] cannot build a block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum BlockError {
     /// The direction is the reserved `0b00` (M2-104 §7.1.8).
     #[error("the block's direction is the reserved 0b00")]
@@ -107,6 +108,18 @@ impl FunctionBlockBuilder {
     pub const fn ui_hint(mut self, hint: UiHint) -> Self {
         self.block.ui_hint = hint;
         self
+    }
+
+    /// The block's UI hint as read off the wire: a hint the direction rules
+    /// out is kept as [`UiHint::Unknown`], so a block a peer or an OS
+    /// describes is never refused for it.
+    pub const fn wire_ui_hint(self, hint: UiHint) -> Self {
+        let hint = if contradicts(self.block.direction, hint) {
+            UiHint::Unknown
+        } else {
+            hint
+        };
+        self.ui_hint(hint)
     }
 
     /// Whether the block is a MIDI 1.0 port (default: [`Midi1Port::No`]).
@@ -283,15 +296,9 @@ impl FunctionBlock {
             Midi1Port::Unrestricted | Midi1Port::Restricted if groups.get() == 1 => info.midi1,
             _ => Midi1Port::No,
         };
-        // A peer's hint that its direction rules out is kept as undeclared.
-        let ui_hint = if contradicts(info.direction, info.ui_hint) {
-            UiHint::Unknown
-        } else {
-            info.ui_hint
-        };
         Self::builder(id, info.direction, first_group, groups)
             .active(info.active)
-            .ui_hint(ui_hint)
+            .wire_ui_hint(info.ui_hint)
             .midi1(midi1)
             .midi_ci(info.midi_ci_version, info.max_sysex8_streams)
             .build()
