@@ -85,7 +85,7 @@ fn run(
     let mut packet = first;
     loop {
         let mut replies: Vec<Ump> = Vec::new();
-        peer.reply(msg(packet), &mut replies);
+        let _ = peer.reply(msg(packet), &mut replies);
         let mut next = None;
         for reply in replies {
             match connection.on_message(msg(reply), now) {
@@ -238,7 +238,7 @@ fn a_wanted_midi1_is_requested_of_a_midi2_peer() {
     let (mut c, first) = Connection::with_wanted(wanted, t0);
     let first = discovery_of(first);
     let mut peer = device();
-    peer.reply(
+    let _ = peer.reply(
         stream(Stream::StreamConfigurationRequest(StreamConfig {
             protocol: Protocol::Midi2,
             rx_jr: true,
@@ -264,7 +264,7 @@ fn a_peer_already_configured_is_not_asked() {
         rx_jr: true,
         tx_jr: true,
     };
-    peer.reply(
+    let _ = peer.reply(
         stream(Stream::StreamConfigurationRequest(configured)),
         &mut Vec::<Ump>::new(),
     );
@@ -288,7 +288,7 @@ fn requested(t0: Instant) -> Connection {
     let (mut c, _) = Connection::new(t0);
     let mut peer = Endpoint::new(FULL);
     let mut replies: Vec<Ump> = Vec::new();
-    peer.reply(
+    let _ = peer.reply(
         stream(Stream::EndpointDiscovery {
             version: UMP_VERSION,
             filter: tutti_ump::DiscoveryFilter {
@@ -403,7 +403,7 @@ fn a_peer_that_never_notifies_its_configuration_is_midi1() {
     let (mut c, _) = Connection::new(t0);
     let mut peer = device();
     let mut replies: Vec<Ump> = Vec::new();
-    peer.reply(
+    let _ = peer.reply(
         stream(Stream::EndpointDiscovery {
             version: UMP_VERSION,
             filter: tutti_ump::DiscoveryFilter {
@@ -576,7 +576,7 @@ fn a_reply_after_settling_is_ignored() {
     let before = *c.endpoint();
     let mut peer = device();
     let mut replies: Vec<Ump> = Vec::new();
-    peer.reply(msg(first), &mut replies);
+    let _ = peer.reply(msg(first), &mut replies);
     for r in replies {
         assert_eq!(c.on_message(msg(r), at(t0, 3100)), Action::Wait);
     }

@@ -223,6 +223,7 @@ mod clock_map;
 mod held;
 mod ledger;
 mod live;
+mod mpe_features;
 mod outbound;
 mod output_plan;
 mod schedule;
@@ -244,9 +245,11 @@ pub use live::{
     MpeTransformControls, MpeTransformNode, NoFreeSlot, RouteRule, SlotCountMismatch,
     compile_routes,
 };
+pub use mpe_features::{MpeFeaturesError, ask_mpe_features, mpe_features};
 pub use outbound::{
-    CLOCK_EVENT_CAPACITY, ClockControls, ClockMaster, ClockNode, JR_CLOCK_INTERVAL,
-    JR_CLOCK_MAX_INTERVAL, JrClock, JrClockEmitter, JrStamper, JrStream, MachineControlSender,
+    ACTIVE_SENSING_INTERVAL, ActiveSensingSender, CLOCK_EVENT_CAPACITY, ClockControls, ClockMaster,
+    ClockNode, JR_CLOCK_INTERVAL, JR_CLOCK_MAX_INTERVAL, JrClock, JrClockEmitter, JrStamper,
+    JrStream, MachineControlSender, NoTimeCode,
 };
 pub use output_plan::{
     MAX_OUTPUT_AHEAD, MAX_OUTPUT_LATENCY, OffsetOutOfRange, Outgoing, OutputLatency, OutputOffset,

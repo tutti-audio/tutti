@@ -9,7 +9,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use tutti_cpal::{ManualStream, ManualStreamDriver, OutputSpec};
+use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_midi_runtime::{MidiOut, Outgoing, OutputLatency, OutputOffset, SendAt, Taken};
 use tutti_session::{Session, UmpOut};
 use tutti_transport::MotionEvent;
@@ -53,7 +53,7 @@ fn spec() -> OutputSpec {
     OutputSpec::new(
         SampleRate::of(RATE),
         ChannelLayout::STEREO,
-        tutti_cpal::cpal::SampleFormat::F32,
+        tutti_buffers::SampleFormat::F32,
     )
 }
 

@@ -124,7 +124,7 @@ impl Wire {
             .collect();
         let mut answers = Vec::new();
         for stream in &sent {
-            self.device.reply(Message::Stream(*stream), &mut answers);
+            let _ = self.device.reply(Message::Stream(*stream), &mut answers);
         }
         for ump in answers {
             assert!(self.counters.send_input(self.raw, ump, now));

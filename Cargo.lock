@@ -2659,7 +2659,6 @@ dependencies = [
  "libm",
  "rand",
  "rustfft",
- "serde",
  "thiserror 2.0.21",
  "tutti-buffers",
  "tutti-dsp",
@@ -2674,7 +2673,6 @@ version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
  "bytemuck",
- "ringbuf",
  "thiserror 2.0.21",
  "tutti-buffers",
  "tutti-fixtures",
@@ -2741,7 +2739,6 @@ dependencies = [
  "criterion",
  "libc",
  "proptest",
- "ringbuf",
  "serde",
  "thiserror 2.0.21",
  "tutti-buffers",

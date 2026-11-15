@@ -1,19 +1,27 @@
 //! Phaser: a swept all-pass chain, of any width.
 //!
-//! [`PhaserFamily`] is the algorithm (the chain, the sweep, the LFO); this file holds the
-//! cells and how the graph reaches them. The one modulation effect here with no delay line:
-//! it notches by phase cancellation, which is why its notches are fewer and unevenly spaced
-//! compared with a flanger's.
+//! [`PhaserChain`] is the algorithm (the all-pass chain and its feedback); this file holds
+//! the sweep (the LFO and the solve of the coefficients), the cells and how the graph reaches
+//! them. The one modulation effect here with no delay line: it notches by phase
+//! cancellation, which is why its notches are fewer and unevenly spaced compared with a
+//! flanger's.
 
-use tutti_dsp::{Family, PhaserControls, PhaserFamily, Stages, Stagger, StaggerError, SweepRange};
-use tutti_types::{BusTopology, Depth, Feedback, Hz, SampleRate};
+use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_dsp::{
+    COEFF_INTERVAL, GAIN_GLIDE, Glide, MAX_PHASER_CHANNELS, MIN_RATE, PhaserChain, PhaserControls,
+    Stages, Stagger, StaggerError, Steps, SweepRange, allpass_coeff, sweep_hz,
+};
+use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_types::{
+    BusTopology, Depth, Feedback, Hz, MaxBlock, Phase, PhaseIncrement, SampleRate, Tail,
+};
 
-use crate::reverb::{FamilyNode, NodeFamily, Rings};
+use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
 /// Phaser of any width: `N` audio inputs, `N` outputs.
 ///
-/// A [`FamilyNode`] over [`PhaserFamily`]: a chain of all-pass stages whose centre
-/// frequency an internal LFO sweeps across a [`SweepRange`]. Each stage passes every
+/// A [`KernelNode`] over [`PhaserKernel`]: a chain of all-pass stages ([`PhaserChain`]) whose
+/// centre frequency an internal LFO sweeps across a [`SweepRange`]. Each stage passes every
 /// frequency at unity and shifts only phase; blending that against the dry signal (the
 /// graph's mix, `Editor::set_mix`: the node outputs the wet signal alone) turns the shift
 /// into cancellation notches, and sweeping the centre moves them. An all-pass chain alone
@@ -47,10 +55,10 @@ use crate::reverb::{FamilyNode, NodeFamily, Rings};
 ///   LFO's phase is continuous across it.
 /// - The **depth** is a fraction of the sweep range, `0..=1` (a chorus's is seconds of
 ///   delay): 1 sweeps the whole range, 0 parks the notches at its bottom. A cell that moves
-///   glides over [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE).
+///   glides over [`GAIN_GLIDE`].
 /// - The **feedback** is how much of the chain's output recirculates, clamped into
 ///   `0..=`[`Feedback::MAX_STABLE`]. A cell that moves glides over
-///   [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE).
+///   [`GAIN_GLIDE`].
 ///
 /// The sweep's top is held at 0.90 of Nyquist at the graph's rate, and the authored top is
 /// kept, so a node prepared at a higher rate restores it.
@@ -61,9 +69,9 @@ use crate::reverb::{FamilyNode, NodeFamily, Rings};
 /// Inserted, its controls are a [`ParamSet`](tutti_graph::ParamSet) over those three; a fork
 /// starts from the values last set through it, with the LFO back at the start. The graph
 /// prepares it at the device rate before its first block, and **a re-prepare restarts the
-/// sweep**. Its tail is [`Tail::Unknown`](tutti_types::Tail::Unknown) (the feedback
+/// sweep**. Its tail is [`Tail::Unknown`] (the feedback
 /// recirculates), so it is never skipped.
-pub type PhaserNode = FamilyNode<PhaserFamily>;
+pub type PhaserNode = KernelNode<PhaserKernel>;
 
 impl PhaserNode {
     /// A phaser on the bus `input`, as wide as it, with `stages` all-passes per channel
@@ -81,8 +89,9 @@ impl PhaserNode {
         stagger: Stagger,
         controls: PhaserControls,
     ) -> Result<Self, StaggerError> {
-        Ok(Self::live(
-            PhaserFamily::new(input, stages, range, stagger)?,
+        Ok(Self::with_kernel(
+            PhaserKernel::new(input, stages, range, stagger)?,
+            PhaserSet,
             controls,
         ))
     }
@@ -101,17 +110,18 @@ impl PhaserNode {
     }
 
     fn unstaggered(input: BusTopology, stages: Stages, controls: PhaserControls) -> Self {
-        Self::live(
-            PhaserFamily::new(input, stages, SweepRange::DEFAULT, Stagger::NONE)
+        Self::with_kernel(
+            PhaserKernel::new(input, stages, SweepRange::DEFAULT, Stagger::NONE)
                 .expect("a step fits any width"),
+            PhaserSet,
             controls,
         )
     }
 }
 
 /// The phaser's controls, in port order: rate, depth, feedback. Each lands whole on the
-/// stream grid (the recurrence's own glides are the depth's and the feedback's: the reader
-/// must not ramp them across the block as well).
+/// stream grid (the kernel's own glides are the depth's and the feedback's: the reader must
+/// not ramp them across the block as well).
 #[derive(Clone, Copy, Debug)]
 pub struct PhaserSet;
 
@@ -129,28 +139,241 @@ control_set! {
     }
 }
 
-/// The closed loop's ring-out has no bound a tail could be cut at, so it is declared
-/// [`Tail::Unknown`](tutti_types::Tail::Unknown) and never narrowed or parked.
-impl NodeFamily for PhaserFamily {
+/// The frames of a segment: the glide of a coefficient from its corner at the segment's start
+/// to its corner at the segment's end takes this many steps.
+const SEGMENT: u32 = 16;
+const _: () = assert!(COEFF_INTERVAL == SEGMENT as usize);
+
+/// The phaser as a [`Kernel`]: a [`PhaserChain`], the LFO that sweeps it and the solve of its
+/// coefficients.
+///
+/// **The LFO is state on the stream's clock.** Its phase is an `f32` [`Phase`] walked by the
+/// rate's increment, counted from the last reset (and so from every `prepare`: **a
+/// re-prepare restarts the sweep**). It is not anchored to the transport. The chain's
+/// coefficient is solved at the **corners** of a segment, every [`COEFF_INTERVAL`] frames
+/// of the stream (a `tan` per corner and channel): the segment's start and its end, and each
+/// channel's coefficient glides between them, so the cut of the blocks does not move it: the
+/// render is the same whatever the blocks. The chord of the sweep over a segment misses it by
+/// a few millionths at the sweep rates a phaser has (3.5e-6 for 2 Hz), and is exact at a
+/// depth of zero, where every corner is equal. The LFO steps before the frame it sounds in:
+/// frame `i` of a segment sounds the sweep `i + 1` steps on from the segment's start.
+/// A rate that moves lands whole at the next grid point and the phase is continuous across it.
+///
+/// A depth and a feedback that move glide over [`GAIN_GLIDE`]: a depth move shifts the
+/// notches, and the feedback is a loop gain. The depth is solved into a segment's end corner
+/// with the depth the glide has there.
+///
+/// The chain has **no latency**. Its tail is [`Tail::Unknown`]: the closed loop's ring-out has
+/// no closed form a tail could be cut at.
+#[derive(Clone, Debug)]
+pub struct PhaserKernel {
+    input: BusTopology,
+    chain: PhaserChain,
+    /// Each channel's LFO phase offset (channel 0's is zero), wrapped.
+    offsets: [PhaseIncrement; MAX_PHASER_CHANNELS],
+    range: SweepRange,
+    /// The sweep's bottom and top in [`Hz`]: the top is the authored one, held at 0.90 of
+    /// Nyquist at the prepared rate.
+    min: Hz,
+    max: Hz,
+    /// The sample rate narrowed once to `f32`, for the coefficient.
+    sr: f32,
+    rate: SampleRate,
+    /// The glide length of the depth and the feedback: [`GAIN_GLIDE`] at the prepared rate.
+    steps: u32,
+    /// The coefficient of each channel across the segment in flight, from its start corner.
+    coefficients: Box<[Glide<f32>]>,
+    depth: Glide<f32>,
+    feedback: Glide<f32>,
+    inc: PhaseIncrement,
+    /// The LFO's phase at the end of the segment in flight, where the corners last solved.
+    phase: Phase,
+    /// Frames since the segment began, in `0..COEFF_INTERVAL`: counted from the last reset,
+    /// so where the segments fall does not depend on how the stream is cut.
+    pos: usize,
+    /// Whether a segment has been solved since the last reset.
+    primed: bool,
+    /// Whether the first retarget after `prepare` has landed.
+    landed: bool,
+}
+
+impl PhaserKernel {
+    /// A phaser on the bus `input`, `stages` all-passes per channel sweeping `range`, its
+    /// channels' sweeps offset by `stagger`. Allocates the chain.
+    ///
+    /// # Errors
+    ///
+    /// [`StaggerError::Length`] when `stagger` names an offset for each channel
+    /// ([`Stagger::each`]) and not for the `input`'s.
+    fn new(
+        input: BusTopology,
+        stages: Stages,
+        range: SweepRange,
+        stagger: Stagger,
+    ) -> Result<Self, StaggerError> {
+        let width = usize::from(input.layout().count());
+        match stagger.channels() {
+            Some(got) if got != width => return Err(StaggerError::Length { width, got }),
+            _ => {}
+        }
+        let mut offsets = [PhaseIncrement(0.0); MAX_PHASER_CHANNELS];
+        for (c, o) in offsets.iter_mut().enumerate().take(width) {
+            *o = stagger.offset(c);
+        }
+        let d = PhaserControls::DEFAULT;
+        Ok(Self {
+            input,
+            chain: PhaserChain::new(stages, width),
+            offsets,
+            range,
+            min: range.min(),
+            max: range.max(),
+            sr: 1.0,
+            rate: SampleRate::SR_48K,
+            steps: 0,
+            coefficients: vec![Glide::landed(0.0); width].into_boxed_slice(),
+            depth: Glide::landed(d.depth.get()),
+            feedback: Glide::landed(d.feedback.get()),
+            inc: PhaseIncrement(0.0),
+            phase: Phase::START,
+            pos: 0,
+            primed: false,
+            landed: false,
+        })
+    }
+
+    /// Channel `c`'s all-pass coefficient with the LFO at `p` and the depth `depth`.
+    #[inline]
+    fn coefficient(&self, c: usize, p: Phase, depth: f32) -> f32 {
+        let lfo = p.offset_by(self.offsets[c]).to_radians().get().sin();
+        let sweep = sweep_hz(self.min, self.max, lfo, Depth::clamped(depth));
+        allpass_coeff(sweep.get(), self.sr)
+    }
+
+    /// Solves the next segment: its start corner is the last one's end (or the LFO's start
+    /// after a reset), its end corner the sweep [`COEFF_INTERVAL`] frames on at the LFO's
+    /// step and the depth the glide has there.
+    fn solve(&mut self) {
+        let start = self.phase;
+        let mut end = start;
+        for _ in 0..COEFF_INTERVAL {
+            end = end.advance(self.inc);
+        }
+        let depth_start = self.depth.now();
+        let depth_end = self.depth.at(self.depth.taken().saturating_add(SEGMENT));
+        for c in 0..self.coefficients.len() {
+            if c > 0 && self.offsets[c] == self.offsets[c - 1] {
+                self.coefficients[c] = self.coefficients[c - 1];
+                continue;
+            }
+            let from = if self.primed {
+                self.coefficients[c].target()
+            } else {
+                self.coefficient(c, start, depth_start)
+            };
+            let mut glide = Glide::landed(from);
+            glide.aim_in(self.coefficient(c, end, depth_end), SEGMENT);
+            self.coefficients[c] = glide;
+        }
+        self.phase = end;
+        self.primed = true;
+    }
+}
+
+impl Kernel for PhaserKernel {
     type Set = PhaserSet;
 
-    const SAMPLING: tutti_dsp::Cadence = <Self as Family>::CADENCE;
+    /// The corners solve on the stream's grid of 16 frames, like the filters and the chorus:
+    /// a cell that moves inside a block reaches the render within 16 frames, wherever the
+    /// blocks fall.
+    const GRID: usize = COEFF_INTERVAL;
 
-    fn rings(&self) -> Rings {
-        Rings::Unknown
+    /// The LFO moves every frame, so every grid point solves a segment.
+    const CUT_ALWAYS: bool = true;
+
+    fn shape(&self) -> Shape {
+        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
+        Shape::buses(
+            Buses::main(self.input),
+            Buses::NONE.with(output).expect("one bus"),
+        )
+        .with_cost(Cost::Moderate)
     }
 
-    fn set(&self, _: &PhaserControls) -> PhaserSet {
-        PhaserSet
+    /// Prepares for `rate`: the sweep's top is held at 0.90 of Nyquist there (the authored
+    /// top is kept, so a higher rate restores it), the glides take [`GAIN_GLIDE`] at it
+    /// (the conversion saturates: a prepare must not panic), and the sweep restarts.
+    fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
+        self.rate = rate;
+        // The sample rate narrows once, to the `f32` the coefficient is solved in.
+        self.sr = rate.get() as f32;
+        self.min = self.range.min();
+        self.max = self.range.max().min(rate.nyquist_scaled(0.90));
+        self.steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
+        self.landed = false;
+        self.reset();
     }
 
-    fn capacity(&self, _: SampleRate) {}
+    /// Back to silence with the sweep at its start: the chain empty, the glides landed on
+    /// their targets and the next segment solved from the LFO's first phase.
+    fn reset(&mut self) {
+        self.chain.reset();
+        self.depth.settle();
+        self.feedback.settle();
+        self.phase = Phase::START;
+        self.pos = 0;
+        self.primed = false;
+    }
+
+    /// Aims the depth and the feedback at `controls`, takes the rate's step, and at a
+    /// segment's start solves the segment. The rate lands whole at that grid point and the
+    /// LFO's phase is continuous across it; a retarget inside a segment is a control that
+    /// moved, and waits for the next grid point. The first retarget after a prepare lands
+    /// the depth and the feedback at once.
+    fn retarget(&mut self, controls: &PhaserControls) {
+        // A control reaches here finite (the cells' reader holds the last finite value); the
+        // rate is floored and the feedback clamped.
+        self.inc =
+            PhaseIncrement::per_sample(Hz(controls.rate.get().max(MIN_RATE.get())), self.rate);
+        let feedback = Feedback::new_clamped(controls.feedback.get()).get();
+        let steps = Steps::Fixed(self.steps);
+        self.depth.aim_by(controls.depth.get(), steps);
+        self.feedback.aim_by(feedback, steps);
+        if !self.landed {
+            self.depth.settle();
+            self.feedback.settle();
+            self.landed = true;
+        }
+        if self.pos == 0 {
+            self.solve();
+        }
+    }
+
+    fn render<S: Float>(
+        &mut self,
+        input: Planes<'_, S>,
+        _: ControlLanes<'_, S>,
+        output: PlanesMut<'_, '_, S>,
+    ) {
+        let frames = input.frames().get().min(output.frames().get());
+        self.chain
+            .process(&mut self.coefficients, &mut self.feedback, input, output);
+        self.depth
+            .advance(u32::try_from(frames).unwrap_or(u32::MAX));
+        self.pos = (self.pos + frames) % COEFF_INTERVAL;
+    }
+
+    /// The closed loop's ring-out has no bound a tail could be cut at: unknown, so the
+    /// graph never reads it as none and the node never parks.
+    fn tail(&self) -> Tail {
+        Tail::Unknown
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_graph::contract::{assert_param_fork, drive, prepared};
+    use tutti_graph::contract::{assert_honest_tail, assert_param_fork, drive, prepared};
     use tutti_graph::{Node, ParamNode};
     use tutti_types::{ChannelLayout, Latency, PhaseIncrement, Samples, Tail, UnitParam};
 
@@ -204,6 +427,8 @@ mod tests {
         assert_eq!(node.param_base(1), Some(0.5));
         assert_eq!(node.param_base(2), Some(0.5));
         assert_eq!(node.param_base(3), None, "no fourth param");
+        let mut node = node;
+        assert_honest_tail(&mut node, RATE);
     }
 
     /// A stagger that names an offset per channel must name the bus's.
@@ -224,6 +449,19 @@ mod tests {
             new(3).unwrap_err(),
             StaggerError::Length { width: 3, got: 2 }
         );
+        // A step, and no stagger, fit any width.
+        for width in [1, 2, 6, 16] {
+            for any in [Stagger::of_step(PhaseIncrement(0.25)), Stagger::NONE] {
+                let node = PhaserNode::new(
+                    bus(width),
+                    Stages::of(4),
+                    SweepRange::DEFAULT,
+                    any,
+                    PhaserControls::DEFAULT,
+                );
+                assert!(node.is_ok(), "width {width}");
+            }
+        }
     }
 
     /// The textbook phase of one stage tuned to `hz`, from `H(z) = (c + z^-1) / (1 + c z^-1)`
@@ -412,5 +650,363 @@ mod tests {
         };
         assert!(ring(0.9) > 1e-3, "feedback rings: {}", ring(0.9));
         assert!(ring(0.0) < 1e-3, "no feedback does not: {}", ring(0.0));
+    }
+
+    // ---- the kernel: segments, corners and the sweep ----------------------------------
+
+    fn controls(rate: f32, depth: f32, feedback: f32) -> PhaserControls {
+        PhaserControls {
+            rate: Hz(rate),
+            depth: Depth::of(depth),
+            feedback: Feedback(feedback),
+        }
+    }
+
+    /// A kernel on `width` channels, prepared at [`RATE`].
+    fn kernel(width: u16, stages: usize, range: SweepRange, stagger: Stagger) -> PhaserKernel {
+        let mut k = PhaserKernel::new(bus(width), Stages::of(stages), range, stagger)
+            .expect("a stagger that fits");
+        k.prepare(RATE, MaxBlock::of(Samples(64)));
+        k
+    }
+
+    /// Renders `input` (one `Vec` per channel) through `k` in one call.
+    fn render(k: &mut PhaserKernel, input: &[Vec<f32>]) -> Vec<Vec<f32>> {
+        let ins: Vec<&[f32]> = input.iter().map(Vec::as_slice).collect();
+        let mut out = vec![vec![0.0f32; input[0].len()]; input.len()];
+        let mut outs: Vec<&mut [f32]> = out.iter_mut().map(Vec::as_mut_slice).collect();
+        k.render(
+            Planes::new(&ins).unwrap(),
+            ControlLanes::<f32>::NONE,
+            PlanesMut::new(&mut outs).unwrap(),
+        );
+        out
+    }
+
+    /// What the driver does to a kernel for `frames` of `input`: a retarget at every grid
+    /// point and at every frame of `moves` (a control that moved), each at the controls in
+    /// force there (`moves` is `(frame, controls)` in order, the first at frame 0), the
+    /// frames between rendered together.
+    fn drive_kernel(
+        k: &mut PhaserKernel,
+        moves: &[(usize, PhaserControls)],
+        input: &[Vec<f32>],
+    ) -> Vec<Vec<f32>> {
+        let frames = input[0].len();
+        let mut stops: Vec<usize> = (0..frames).step_by(COEFF_INTERVAL).collect();
+        stops.extend(moves.iter().map(|m| m.0).filter(|&f| f < frames));
+        stops.sort_unstable();
+        stops.dedup();
+        stops.push(frames);
+        let mut out = vec![Vec::new(); input.len()];
+        for w in stops.windows(2) {
+            let at = moves.iter().rev().find(|m| m.0 <= w[0]).unwrap().1;
+            k.retarget(&at);
+            let piece: Vec<Vec<f32>> = input.iter().map(|c| c[w[0]..w[1]].to_vec()).collect();
+            for (o, y) in out.iter_mut().zip(render(k, &piece)) {
+                o.extend(y);
+            }
+        }
+        out
+    }
+
+    /// The coefficient the sweep's definition gives for a channel offset by `offset` cycles,
+    /// `steps` steps of the LFO on (an `f32` phase walked one frame at a time), at depth
+    /// `depth`, on `range` at `rate` Hz.
+    fn exact_coefficient(
+        range: SweepRange,
+        rate: f32,
+        depth: f32,
+        offset: f64,
+        steps: usize,
+    ) -> f32 {
+        let inc = PhaseIncrement::per_sample(Hz(rate), RATE);
+        let mut p = Phase::START;
+        for _ in 0..steps {
+            p = p.advance(inc);
+        }
+        let lfo = (std::f64::consts::TAU * (f64::from(p.get()) + offset)).sin() as f32;
+        let hz = sweep_hz(range.min(), range.max(), lfo, Depth::clamped(depth));
+        allpass_coeff(hz.get(), RATE.get() as f32)
+    }
+
+    fn silence(width: usize, frames: usize) -> Vec<Vec<f32>> {
+        vec![vec![0.0; frames]; width]
+    }
+
+    /// What a segment's corners are: the coefficient at the LFO's phase at the segment's
+    /// start and sixteen frames on, the sweep of the definition at depth 1, the second one
+    /// a little past the first.
+    #[test]
+    fn the_corners_of_a_segment_are_the_sweep_at_the_lfo_phase() {
+        let band = SweepRange::of(Hz(300.0), Hz(3_000.0));
+        let mut k = kernel(1, 4, band, Stagger::NONE);
+        k.retarget(&controls(5.0, 1.0, 0.5));
+        let start = exact_coefficient(band, 5.0, 1.0, 0.0, 0);
+        let end = exact_coefficient(band, 5.0, 1.0, 0.0, 16);
+        assert!((k.coefficients[0].now() - start).abs() < 1e-6, "the start");
+        assert!((k.coefficients[0].target() - end).abs() < 1e-6, "the end");
+        assert_ne!(start, end, "the sweep moves");
+    }
+
+    /// Channel `c`'s sweep is `c` times the step ahead (wrapped), and a stagger of a whole
+    /// cycle is none: each channel's coefficient at the first corner is the sweep at the
+    /// sine of its own offset.
+    #[test]
+    fn each_channel_is_staggered_by_its_step_and_a_full_cycle_is_none() {
+        let band = SweepRange::of(Hz(300.0), Hz(3_000.0));
+        for (stagger, offsets) in [
+            (Stagger::of_step(PhaseIncrement(0.25)), [0.0f64, 0.25, 0.5]),
+            (Stagger::of_step(PhaseIncrement(1.0)), [0.0, 0.0, 0.0]),
+            (Stagger::of_step(PhaseIncrement(1.25)), [0.0, 0.25, 0.5]),
+        ] {
+            let mut k = kernel(3, 4, band, stagger);
+            k.retarget(&controls(1.0, 1.0, 0.5));
+            for (ch, offset) in offsets.into_iter().enumerate() {
+                let want = exact_coefficient(band, 1.0, 1.0, offset, 0);
+                let got = k.coefficients[ch].now();
+                assert!(
+                    (got - want).abs() < 1e-5,
+                    "channel {ch}: {got} against {want}"
+                );
+            }
+        }
+    }
+
+    /// Between two corners the coefficient is the chord, read a step ahead: frame `16 k + j`
+    /// sounds `prev + (next - prev) (j + 1) / 16`. An impulse at frame `n` of a fresh chain
+    /// with no feedback comes out as that frame's coefficient once a stage (`out = c (in -
+    /// y1) + x1` with no history), so through two stages as its square: the render shows it
+    /// directly, on the stream's lattice from the first block.
+    #[test]
+    fn between_corners_the_coefficient_is_the_chord_read_a_step_ahead() {
+        let band = SweepRange::of(Hz(300.0), Hz(3_000.0));
+        let c = controls(5.0, 1.0, 0.0);
+        for n in [0usize, 1, 7, 15, 16, 17, 31, 32, 40, 47] {
+            let mut k = kernel(1, 2, band, Stagger::NONE);
+            let mut x = vec![0.0f32; n + 1];
+            x[n] = 1.0;
+            let y = drive_kernel(&mut k, &[(0, c)], &[x]).remove(0);
+            let (j, base) = (n % 16, n - n % 16);
+            let prev = exact_coefficient(band, 5.0, 1.0, 0.0, base);
+            let next = exact_coefficient(band, 5.0, 1.0, 0.0, base + 16);
+            let chord = prev + (next - prev) * ((j + 1) as f32 / 16.0);
+            assert!(
+                (y[n] - chord * chord).abs() < 1e-6,
+                "frame {n}: {} against the chord's square {}",
+                y[n],
+                chord * chord
+            );
+        }
+    }
+
+    /// A depth that glides is solved into a segment's end corner with the depth the glide
+    /// has **there**, sixteen steps on: a depth aimed from 0 to 1 over 240 steps at the
+    /// grid point at frame 16 has its start corner at depth 0 (the last segment's end) and
+    /// its end corner at `16 / 240`.
+    #[test]
+    fn a_gliding_depth_is_solved_with_the_depth_the_glide_has_at_the_segments_end() {
+        let band = SweepRange::of(Hz(300.0), Hz(3_000.0));
+        let mut k = kernel(1, 4, band, Stagger::NONE);
+        let moves = [(0, controls(5.0, 0.0, 0.5)), (16, controls(5.0, 1.0, 0.5))];
+        drive_kernel(&mut k, &moves, &silence(1, 17));
+        let start = exact_coefficient(band, 5.0, 0.0, 0.0, 16);
+        let end = exact_coefficient(band, 5.0, 16.0 / 240.0, 0.0, 32);
+        // The retarget at 16 solved the segment 16..32; the frame rendered since (frame 16)
+        // took one step.
+        let g = k.coefficients[0];
+        assert!(
+            (g.target() - end).abs() < 1e-6,
+            "the end: {} against {end}",
+            g.target()
+        );
+        let first = start + (end - start) / 16.0;
+        assert!(
+            (g.now() - first).abs() < 1e-6,
+            "one step on the chord from {start}"
+        );
+    }
+
+    /// The depth and the feedback glide over `GAIN_GLIDE` (240 frames at 48 kHz) from where
+    /// they were, halfway at the middle frame and landing exactly: not at the block, and not
+    /// in one step.
+    #[test]
+    fn depth_and_feedback_glide_over_the_gain_glide_and_land_exactly() {
+        let moves = [(0, controls(1.0, 0.0, 0.2)), (16, controls(1.0, 1.0, 0.8))];
+        let after = |frames: usize| {
+            let mut k = kernel(1, 4, SweepRange::DEFAULT, Stagger::NONE);
+            drive_kernel(&mut k, &moves, &silence(1, frames));
+            k
+        };
+        // The glide was aimed at frame 16: 120 frames on is half way.
+        let half = after(16 + 120);
+        assert!((half.depth.now() - 0.5).abs() < 1e-6, "depth halfway");
+        assert!((half.feedback.now() - 0.5).abs() < 1e-6, "feedback halfway");
+        let landed = after(16 + 240);
+        assert_eq!((landed.depth.now(), landed.feedback.now()), (1.0, 0.8));
+        assert!(!landed.depth.moving() && !landed.feedback.moving());
+    }
+
+    /// The rate is floored at 0.01 Hz: a rate of -3 Hz, of zero and of 0.005 Hz is the
+    /// 0.01 Hz sweep, whose LFO phase is the `f32` walk of `0.01 / sr` a frame (walked here
+    /// per frame, not read off the kernel), and a rate above the floor is not. 4801 frames
+    /// solve the segments at 0, 16, .., 4800: 301 of 16 steps.
+    #[test]
+    fn a_rate_below_the_floor_is_the_floor() {
+        let walked = |hz: f32, steps: usize| {
+            let inc = PhaseIncrement::per_sample(Hz(hz), RATE);
+            (0..steps).fold(Phase::START, |p, _| p.advance(inc))
+        };
+        for (rate, effective) in [
+            (-3.0f32, 0.01),
+            (0.0, 0.01),
+            (0.005, 0.01),
+            (0.01, 0.01),
+            (0.5, 0.5),
+        ] {
+            let mut k = kernel(1, 4, SweepRange::DEFAULT, Stagger::NONE);
+            drive_kernel(&mut k, &[(0, controls(rate, 1.0, 0.5))], &silence(1, 4_801));
+            assert_eq!(k.phase, walked(effective, 4_800 + 16), "rate {rate}");
+        }
+        assert_ne!(walked(0.5, 4_816), walked(0.01, 4_816));
+    }
+
+    /// The feedback is clamped into `0..=MAX_STABLE`, whatever is asked.
+    #[test]
+    fn a_feedback_is_clamped_into_the_stable_range() {
+        let mut k = kernel(1, 4, SweepRange::DEFAULT, Stagger::NONE);
+        k.retarget(&controls(1.0, 0.5, 5.0));
+        assert_eq!(k.feedback.target(), Feedback::MAX_STABLE.get());
+        k.retarget(&controls(1.0, 0.5, -0.5));
+        assert_eq!(k.feedback.target(), 0.0);
+        // The depth is as typed: the whole range, and inverted, the bottom and below.
+        k.retarget(&controls(1.0, 1.0, 0.5));
+        assert_eq!(k.depth.target(), Depth::FULL.get());
+        k.retarget(&controls(1.0, -1.0, 0.5));
+        assert_eq!(k.depth.target(), Depth::INVERTED.get());
+    }
+
+    /// The sweep's top is held at 0.90 of Nyquist at the rate, and the authored top is kept:
+    /// a low rate caps it, a higher rate after it restores it (a cap that ratcheted the top
+    /// down for good would stay at 3.6 kHz).
+    #[test]
+    fn the_range_is_capped_at_0_9_nyquist_and_a_rising_rate_restores_the_authored_top() {
+        let top = |range: SweepRange, sr: f64| {
+            let mut k = kernel(1, 4, range, Stagger::NONE);
+            k.prepare(SampleRate::of(sr), MaxBlock::of(Samples(64)));
+            (k.min, k.max)
+        };
+        assert_eq!(
+            top(SweepRange::DEFAULT, 8_000.0).1,
+            Hz(3_600.0),
+            "0.90 of a 4 kHz Nyquist"
+        );
+        assert_eq!(top(SweepRange::DEFAULT, 48_000.0).1, Hz(4_000.0));
+        let wide = SweepRange::of(Hz(300.0), Hz(30_000.0));
+        assert_eq!(top(wide, 48_000.0), (Hz(300.0), Hz(21_600.0)));
+        assert_eq!(top(wide, 96_000.0).1, Hz(30_000.0));
+        let mut k = kernel(1, 4, wide, Stagger::NONE);
+        k.prepare(SampleRate::of(48_000.0), MaxBlock::of(Samples(64)));
+        k.prepare(SampleRate::of(96_000.0), MaxBlock::of(Samples(64)));
+        assert_eq!(k.max, Hz(30_000.0));
+    }
+
+    /// A rate that moves lands at its **grid point** and the LFO's phase is continuous
+    /// across it: the phase is one walk, the old rate's step until the first grid point at
+    /// or after the move and the new rate's from there. A move anywhere after frame 32 up to
+    /// the point at 48 gives the same walk; at 32 itself the segment at 32 already takes the
+    /// new rate.
+    #[test]
+    fn a_rate_change_lands_at_its_grid_point_and_the_phase_stays_continuous() {
+        let (slow, fast) = (controls(2.0, 1.0, 0.5), controls(9.0, 1.0, 0.5));
+        let inc = |hz: f32| PhaseIncrement::per_sample(Hz(hz), RATE);
+        let walk = |first: usize, second: usize| {
+            let p = (0..first).fold(Phase::START, |p, _| p.advance(inc(2.0)));
+            (0..second).fold(p, |p, _| p.advance(inc(9.0)))
+        };
+        let after = |at: usize| {
+            let mut k = kernel(1, 4, SweepRange::DEFAULT, Stagger::NONE);
+            // To frame 70: the segments at 0, 16, 32, 48 and 64 are solved.
+            drive_kernel(&mut k, &[(0, slow), (at, fast)], &silence(1, 70));
+            k.phase
+        };
+        for at in [33, 40, 47, 48] {
+            assert_eq!(after(at), walk(48, 32), "moved at frame {at}");
+        }
+        assert_eq!(after(32), walk(32, 48), "moved at frame 32");
+        assert_ne!(walk(48, 32), walk(32, 48));
+    }
+
+    /// A re-prepare restarts the sweep and empties the chain (the coefficient was the old
+    /// rate's): the LFO is at its start again, no segment is solved and silence in is silence
+    /// out.
+    #[test]
+    fn a_re_prepare_restarts_the_sweep() {
+        let mut k = kernel(
+            2,
+            4,
+            SweepRange::DEFAULT,
+            Stagger::of_step(PhaseIncrement(0.25)),
+        );
+        let loud = vec![vec![1.0f32; 1_000]; 2];
+        drive_kernel(&mut k, &[(0, controls(3.0, 1.0, 0.7))], &loud);
+        assert_ne!(k.phase, Phase::START, "the sweep was running");
+        k.prepare(RATE, MaxBlock::of(Samples(64)));
+        assert_eq!((k.phase, k.pos, k.primed), (Phase::START, 0, false));
+        let y = drive_kernel(&mut k, &[(0, controls(3.0, 1.0, 0.7))], &silence(2, 200));
+        assert!(y.iter().flatten().all(|&s| s == 0.0));
+    }
+
+    /// A reset restores the sweep's start: the same stream rendered after a reset, at the
+    /// same controls, is the fresh node's bit for bit, though the reset came at a frame that
+    /// is not a grid point.
+    #[test]
+    fn a_reset_node_renders_what_a_fresh_one_does() {
+        let x: Vec<f32> = (0..400)
+            .map(|n| ((n * 13 + 5) % 100) as f32 / 50.0 - 1.0)
+            .collect();
+        let c = controls(7.0, 0.8, 0.6);
+        let blocks = |node: &mut PhaserNode, from: usize| -> Vec<f32> {
+            let mut out = Vec::new();
+            for chunk in x[from..].chunks(37) {
+                out.extend(drive(node, RATE, &[chunk, chunk], &[]).remove(0));
+            }
+            out
+        };
+        let mut used = prepared(PhaserNode::stereo(Stages::of(4), c), RATE, 64);
+        blocks(&mut used, 100);
+        used.reset();
+        let mut fresh = prepared(PhaserNode::stereo(Stages::of(4), c), RATE, 64);
+        assert_eq!(blocks(&mut used, 0), blocks(&mut fresh, 0));
+    }
+
+    /// A cell that moves **between** grid points starts its glide at the next grid point: a
+    /// rate, a depth and a feedback written 13 frames past frame 1024 and heard from the
+    /// block that begins there render the same as the same write at frame 1040, the next
+    /// grid point, and differently from the write at 1056.
+    #[test]
+    fn a_move_between_grid_points_starts_at_the_next_one() {
+        let len = 2_048;
+        let x: Vec<f32> = (0..len)
+            .map(|n| ((n * 13 + 5) % 100) as f32 / 50.0 - 1.0)
+            .collect();
+        let render = |at: usize| -> Vec<f32> {
+            let node = PhaserNode::mono(Stages::of(6), PhaserControls::DEFAULT);
+            let set = node.param_set();
+            let mut node = prepared(node, RATE, 2_048);
+            let mut out = Vec::new();
+            for (chunk, from) in [(&x[..at], 0), (&x[at..], at)] {
+                if from == at {
+                    assert!(set.set(UnitParam::Rate, 8.0));
+                    assert!(set.set(UnitParam::Depth, 0.2));
+                    assert!(set.set(UnitParam::Feedback, 0.1));
+                }
+                out.extend(drive(&mut node, RATE, &[chunk], &[]).remove(0));
+            }
+            out
+        };
+        let at_the_point = render(1_040);
+        assert_eq!(render(1_037), at_the_point);
+        assert_ne!(render(1_056), at_the_point);
     }
 }

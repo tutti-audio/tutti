@@ -353,8 +353,10 @@ fn a_plugin_handed_back_by_into_client_forks() {
     let plugin = tutti_plugin::catalog::Plugin::open(
         Some(main_thread()),
         &tutti_fixtures::pumped_work(),
-        &tutti_plugin::catalog::PluginRef::file(tutti_fixtures::vst2_probe())
-            .expect("a plugin file"),
+        &tutti_plugin::catalog::Loadable::uncatalogued(
+            tutti_plugin::catalog::PluginRef::file(tutti_fixtures::vst2_probe())
+                .expect("a plugin file"),
+        ),
         tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
     )
     .expect("the probe opens");

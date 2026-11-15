@@ -79,7 +79,7 @@ fn device() -> Endpoint {
 
 fn ask(endpoint: &mut Endpoint, stream: Stream) -> Vec<Ump> {
     let mut out = Vec::new();
-    endpoint.reply(Message::Stream(stream), &mut out);
+    let _ = endpoint.reply(Message::Stream(stream), &mut out);
     out
 }
 
@@ -413,11 +413,12 @@ fn what_an_endpoint_cannot_do_is_not_done() {
 fn a_message_that_is_not_a_request_is_not_answered() {
     let mut e = device();
     let mut out: Vec<Ump> = Vec::new();
-    e.reply(Message::Utility(tutti_ump::Utility::Noop), &mut out);
-    e.reply(
+    let noop = e.reply(Message::Utility(tutti_ump::Utility::Noop), &mut out);
+    let notification = e.reply(
         Message::Stream(Stream::StreamConfigurationNotification(e.active())),
         &mut out,
     );
+    assert_eq!((noop, notification), (Reply::Ignored, Reply::Ignored));
     assert!(out.is_empty());
 }
 
@@ -501,4 +502,99 @@ fn a_block_is_replaced_by_number_and_the_count_follows_the_highest() {
     assert_eq!(e.function_blocks().count(), 1);
     assert_eq!(e.function_block(id(5)).unwrap().first_group().get(), 2);
     assert!(e.function_block(id(0)).is_none());
+}
+
+fn replied(endpoint: &mut Endpoint, stream: Stream) -> Reply {
+    endpoint.reply(Message::Stream(stream), &mut Vec::new())
+}
+
+/// §7.1.6.1 step 3: a request the Endpoint can honour whole is `Granted` with
+/// the configuration now active; one it could only partly honour is `Reduced`
+/// and carries both what was asked and what is active.
+#[test]
+fn a_request_is_reported_as_granted_or_reduced() {
+    let mut e = Endpoint::new(Capabilities {
+        midi2: true,
+        rx_jr: true,
+        ..Capabilities::default()
+    });
+    let granted = StreamConfig {
+        protocol: Protocol::Midi2,
+        rx_jr: true,
+        tx_jr: false,
+    };
+    assert_eq!(
+        replied(&mut e, request(Protocol::Midi2, true, false)),
+        Reply::Configured(Configuration::Granted(granted))
+    );
+    let asked = StreamConfig {
+        tx_jr: true,
+        ..granted
+    };
+    let reduced = Reply::Configured(Configuration::Reduced {
+        asked,
+        active: granted,
+    });
+    assert_eq!(
+        replied(&mut e, request(Protocol::Midi2, true, true)),
+        reduced
+    );
+    let Reply::Configured(c) = reduced else {
+        unreachable!()
+    };
+    assert_eq!(c.active(), granted);
+    // A reserved Protocol is a part not done.
+    assert!(matches!(
+        replied(&mut e, request(Protocol::Reserved(7), true, false)),
+        Reply::Configured(Configuration::Reduced { .. })
+    ));
+}
+
+/// Discoveries are `Answered` even when they name a block the Endpoint lacks.
+#[test]
+fn a_discovery_is_answered_even_for_a_block_that_is_absent() {
+    let mut e = device();
+    assert_eq!(replied(&mut e, discovery(NONE)), Reply::Answered);
+    assert_eq!(
+        replied(
+            &mut e,
+            block_discovery(BlockSelect::One(id(30)), true, true)
+        ),
+        Reply::Answered
+    );
+}
+
+/// The application's Endpoint (M2-104 §7.1.2, §7.1.8): UMP 1.1, both
+/// Protocols, no JR Timestamps, one static, active, bidirectional block over
+/// the Groups, which a discovery reports in the words of the spec.
+#[test]
+fn a_local_endpoint_declares_one_static_block_over_its_groups() {
+    let mut e = Endpoint::local(GroupSpan::new(4).unwrap());
+    assert_eq!(e.version(), UMP_VERSION);
+    assert_eq!(
+        e.capabilities(),
+        Capabilities {
+            midi1: true,
+            midi2: true,
+            rx_jr: false,
+            tx_jr: false
+        }
+    );
+    // Endpoint Info: version 1.1, static, one block, M2 and M1 set, no JR.
+    let info = ask(
+        &mut e,
+        discovery(DiscoveryFilter {
+            endpoint_info: true,
+            ..NONE
+        }),
+    );
+    assert_eq!(words(&info[0]), [0xF001_0101, 0x8100_0300, 0, 0]);
+    let blocks = ask(&mut e, block_discovery(BlockSelect::All, true, false));
+    let Message::Stream(Stream::FunctionBlockInfo(b)) = blocks[0].decode().unwrap() else {
+        panic!("a Function Block Info");
+    };
+    assert!(b.active);
+    assert_eq!(b.direction, BlockDirection::Bidirectional);
+    assert_eq!((b.first_group.get(), b.groups_spanned.get()), (0, 4));
+    assert_eq!(blocks.len(), 1);
 }

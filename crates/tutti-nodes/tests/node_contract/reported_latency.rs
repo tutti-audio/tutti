@@ -13,7 +13,7 @@ use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{GraphBuilder, IntoNode, Node, Prepare};
 use tutti_nodes::testing::Through;
 use tutti_nodes::{
-    ChannelTimes, CrossoverNode, DelayControls, DelayFamily, DelayNode, InterpolationMode,
+    ChannelTimes, CrossoverNode, DelayControls, DelayLayout, DelayNode, InterpolationMode,
     MaxDelay, ModDelayNode, MultibandCompressorNode,
 };
 use tutti_types::Latency;
@@ -153,15 +153,15 @@ fn delay_line_reports_zero_latency_and_its_dry_path_is_immediate() {
 /// at its own time.
 #[test]
 fn stereo_delay_line_reports_zero_latency_and_its_dry_path_is_immediate() {
-    let family = DelayFamily::new(
+    let layout = DelayLayout::new(
         BusTopology::STEREO,
         MaxDelay::of(Seconds::new(1.0_f64)),
         InterpolationMode::Linear,
     )
     .with_times(ChannelTimes::each(&[Seconds::new(0.5_f64)]).unwrap())
     .unwrap();
-    let node = DelayNode::live(
-        family,
+    let node = DelayNode::from_layout(
+        layout,
         DelayControls {
             time: Seconds::new(0.25_f64),
             ..DelayControls::DEFAULT

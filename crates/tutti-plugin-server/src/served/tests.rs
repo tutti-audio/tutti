@@ -1,6 +1,7 @@
 //! `Served<F>` against each format's reference plugin.
 
 use super::*;
+use tutti_plugin_types::PluginFormat;
 
 #[cfg(all(feature = "au", target_os = "macos"))]
 mod au;
@@ -71,12 +72,13 @@ impl<F: ServerSide> Served<F> {
 
 use tutti_fixtures::main_thread;
 
-/// Loads `path` through the table, with everything else defaulted.
-fn load_any(path: &Path) -> PluginResult<AnyServed> {
+/// Loads `path` through the table as `format`, with everything else defaulted.
+fn load_any(path: &Path, format: PluginFormat) -> PluginResult<AnyServed> {
     AnyServed::load(
         main_thread(),
         &tutti_fixtures::detached_work(),
         path,
+        format,
         &Load::new(),
         SampleRate::SR_44K1,
         512,
@@ -103,36 +105,41 @@ fn assert_refused(result: PluginResult<AnyServed>, at: LoadStage, reason: &str) 
 #[test]
 fn load_missing_path_errors() {
     assert_refused(
-        load_any(Path::new("/nonexistent/plugin.vst3")),
+        load_any(Path::new("/nonexistent/plugin.vst3"), PluginFormat::Vst3),
         LoadStage::Scanning,
         "not found",
     );
 }
 
-/// **A file no row of the table names is refused at the opening**, and the
-/// refusal names what is served.
-#[test]
-fn load_unsupported_extension_errors() {
-    let tmp = std::env::temp_dir().join(format!("fake_plugin_{}.xyz", std::process::id()));
-    std::fs::write(&tmp, b"fake").unwrap();
-    let result = load_any(&tmp);
-    let _ = std::fs::remove_file(&tmp);
-    assert_refused(result, LoadStage::Opening, "Unsupported");
-}
-
-/// **VST2 is not served**: its `AEffect` fuses editor and audio, so a VST2
-/// file reaches no format of this server, whatever its extension (`.vst`,
-/// `.dll`, `.so`). Adding a `Vst2` row to the table is a compile error
+/// **VST2 is not served**: its `AEffect` fuses editor and audio, so a load as
+/// VST2 reaches no format of this server, whatever the file's extension
+/// (`.vst`, `.dll`, `.so`). Adding a `Vst2` row to the table is a compile error
 /// (`Vst2Loaded` is not `OutOfProcess`); this pins that the dispatch does not
 /// quietly take another route.
 #[test]
-fn a_vst2_file_is_refused() {
+fn a_vst2_load_is_refused() {
     for extension in ["vst", "dll", "so"] {
         let tmp =
             std::env::temp_dir().join(format!("fake_vst2_{}.{extension}", std::process::id()));
         std::fs::write(&tmp, b"fake").unwrap();
-        let result = load_any(&tmp);
+        let result = load_any(&tmp, PluginFormat::Vst2);
         let _ = std::fs::remove_file(&tmp);
         assert_refused(result, LoadStage::Opening, "Unsupported plugin format");
     }
+}
+
+/// **The format a load names opens the file, not the file's extension**: the
+/// reference plugin's library, whose `.so` names no row of the table, opens as
+/// CLAP when the load says CLAP.
+#[cfg(feature = "clap")]
+#[test]
+fn a_load_opens_the_file_as_the_format_it_names() {
+    let path = Path::new(crate::test_utils::clap_probe_path());
+    assert_ne!(
+        path.extension().and_then(|e| e.to_str()),
+        Some("clap"),
+        "the premise: the library does not carry the format's extension"
+    );
+    let plugin = load_any(path, PluginFormat::Clap).expect("a CLAP plugin under another name");
+    assert!(matches!(plugin, AnyServed::Clap(_)));
 }

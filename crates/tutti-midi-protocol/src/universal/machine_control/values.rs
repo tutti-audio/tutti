@@ -305,7 +305,7 @@ impl MmcPosition {
             return None;
         }
         let frame_rate = rate.frame_rate();
-        let frames = seconds.get() * frame_rate.fps();
+        let frames = frame_rate.frames_at(seconds);
         let whole = frames.floor();
         // `whole` is a finite whole number from 0 below one day of frames.
         let label = SmpteTimecode::from_frame_count(whole as u64, frame_rate);
