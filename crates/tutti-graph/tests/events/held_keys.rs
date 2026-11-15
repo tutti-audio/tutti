@@ -1349,6 +1349,36 @@ fn cutting_an_edge_around_a_promotion_closes_once() {
     );
 }
 
+/// A source holds the keys of 16 channels, 2048 in all, far more than a
+/// buffer for a handful of notes takes: cutting its edge closes every one at
+/// the sink, none is left sounding.
+#[test]
+fn cutting_an_edge_closes_every_key_of_a_full_keyboard() {
+    for mode in MODES {
+        let mut r = Rig::new(mode, &[2]);
+        r.wire(&[(1, 2)]);
+        r.block();
+        for channel in 0..16u8 {
+            for half in 0..4u8 {
+                for note in 0..32u8 {
+                    r.send(m1_on(channel, half * 32 + note));
+                }
+                r.block();
+            }
+        }
+        r.wire(&[]);
+        for _ in 0..4 {
+            r.block();
+        }
+        let offs = r
+            .words(2)
+            .iter()
+            .filter(|w| (w[0] >> 20) & 0xf == 0x8)
+            .count();
+        assert_eq!(offs, 2048, "{mode:?}: every held key is closed");
+    }
+}
+
 /// The resume commit of a re-prepare replaces the held source: the old
 /// unit's tables are closed, not handed to the new one.
 #[test]
