@@ -2659,7 +2659,6 @@ dependencies = [
  "libm",
  "rand",
  "rustfft",
- "serde",
  "thiserror 2.0.21",
  "tutti-buffers",
  "tutti-dsp",

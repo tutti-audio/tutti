@@ -17,8 +17,8 @@ use super::routing::MAX_WIDTH;
 ///
 /// A range-checked value: every time is finite and
 /// not negative, and never clamped. That they fit the delay's width and its
-/// [`MaxDelay`](crate::MaxDelay) is the family's to check, where it is built
-/// ([`DelayFamily::with_times`](crate::DelayFamily::with_times)).
+/// [`MaxDelay`](crate::MaxDelay) is the layout's to check, where it is built
+/// ([`DelayLayout::with_times`](crate::DelayLayout::with_times)).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChannelTimes {
     count: usize,

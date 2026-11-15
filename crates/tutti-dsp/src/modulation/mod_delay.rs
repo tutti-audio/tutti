@@ -43,11 +43,11 @@ use tutti_types::{
 
 use super::sweep::{Stagger, StaggerError, Sweep};
 use crate::control::COEFF_STREAM;
-use crate::delay::{delay_step, finite_or, read_taps, ring_seconds};
+use crate::delay::{delay_step, finite_or, read_taps, ring_seconds, trips};
 use crate::{
     Approach, COEFF_INTERVAL, Cadence, Capacity, Channels, Complex64, DELAY_SLEW, DelayLine,
-    DelayMember, Effort, Family, Feed, GAIN_GLIDE, Glide, Grows, InterpolationMode, Lti, MaxDelay,
-    Reach, Recurrence, Ring, Setup, Start, Steps, System,
+    Effort, Family, Feed, GAIN_GLIDE, Glide, Grows, InterpolationMode, Lti, MaxDelay, Reach,
+    Recurrence, Ring, Setup, Start, Steps, System,
 };
 
 /// The LFO's slowest rate: 0.01 Hz, a lane's value and a cell's alike. A rate below it
@@ -268,7 +268,7 @@ impl System for ModDelayMember {
         let longest = *self.delay_range().end();
         Ring::Finite(ring_seconds(
             longest.ceil() as usize,
-            DelayMember::trips(f64::from(self.feedback), floor),
+            trips(f64::from(self.feedback), floor),
             self.rate,
         ))
     }
@@ -488,7 +488,7 @@ impl Grows for ModDelayFamily {
             frames,
             tail: Ring::Finite(ring_seconds(
                 frames,
-                DelayMember::trips(f64::from(self.sweep.feedback_max().get()), reach.floor()),
+                trips(f64::from(self.sweep.feedback_max().get()), reach.floor()),
                 reach.rate(),
             )),
         }
