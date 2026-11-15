@@ -343,7 +343,7 @@ pub enum CustomClassification {
 
 impl CustomClassification {
     /// Every custom Classification, in the order of the attribute type.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: &'static [Self] = &[
         Self::C1A,
         Self::C1B,
         Self::C1C,
