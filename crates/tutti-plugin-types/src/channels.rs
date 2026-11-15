@@ -28,10 +28,24 @@
 ///
 /// 16 covers every realistic plugin layout: most are mono or stereo and
 /// surround tops out at 7.1 (8 channels), so 16 leaves room for 7.1.4 (12) and
-/// a pair of buses. A wider plugin's channels past it read silence and its
-/// outputs past it are silent. The tables are fixed arrays so a block builds
-/// them without allocating on the audio thread.
+/// a pair of buses. A wider plugin is refused ([`PluginTooWide`]) where its
+/// width is first known: a node over it is never built, and a served slab for
+/// it is never mapped. The tables are fixed arrays so a block builds them
+/// without allocating on the audio thread.
 pub const MAX_BLOCK_CHANNELS: usize = 16;
+
+/// A plugin with more than [`MAX_BLOCK_CHANNELS`] channels in a direction.
+///
+/// A width is refused, never narrowed: a node over a plugin that is handed
+/// only some of its channels would run it on another layout than it declared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("the plugin has {channels} {direction} channels, at most {MAX_BLOCK_CHANNELS} are served")]
+pub struct PluginTooWide {
+    /// `"input"` or `"output"`.
+    pub direction: &'static str,
+    /// The channels the plugin has in that direction, over all its buses.
+    pub channels: usize,
+}
 
 /// Plugin-compatible sample width (`f32` or `f64`), used as a compile-time
 /// switch by generic process code.

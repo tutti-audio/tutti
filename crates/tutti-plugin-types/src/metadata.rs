@@ -97,6 +97,20 @@ fn width(buses: &[PluginBus]) -> usize {
     buses.iter().map(|b| b.channels.count() as usize).sum()
 }
 
+/// The first direction of a plugin with `inputs` and `outputs` channels that is
+/// past what a block serves.
+fn check_widths(inputs: usize, outputs: usize) -> Result<(), crate::PluginTooWide> {
+    for (direction, channels) in [("input", inputs), ("output", outputs)] {
+        if channels > crate::MAX_BLOCK_CHANNELS {
+            return Err(crate::PluginTooWide {
+                direction,
+                channels,
+            });
+        }
+    }
+    Ok(())
+}
+
 /// The widths of `buses`, in order.
 fn widths(buses: &[PluginBus]) -> BusChannels {
     buses.iter().map(|b| b.channels).collect()
@@ -140,6 +154,16 @@ pub struct Layout {
 }
 
 impl Layout {
+    /// Whether every direction is within the width a block serves.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginTooWide`](crate::PluginTooWide) for the first direction past
+    /// [`MAX_BLOCK_CHANNELS`](crate::MAX_BLOCK_CHANNELS).
+    pub fn check_width(&self) -> Result<(), crate::PluginTooWide> {
+        check_widths(self.total_inputs(), self.total_outputs())
+    }
+
     /// The total input channel width across all buses.
     #[must_use]
     pub fn total_inputs(&self) -> usize {
@@ -274,6 +298,16 @@ pub struct LoadedPlugin {
 }
 
 impl LoadedPlugin {
+    /// Whether every direction is within the width a block serves.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginTooWide`](crate::PluginTooWide) for the first direction past
+    /// [`MAX_BLOCK_CHANNELS`](crate::MAX_BLOCK_CHANNELS).
+    pub fn check_width(&self) -> Result<(), crate::PluginTooWide> {
+        check_widths(self.total_inputs(), self.total_outputs())
+    }
+
     /// Returns the total input channel width across all buses.
     pub fn total_inputs(&self) -> usize {
         width(&self.inputs)

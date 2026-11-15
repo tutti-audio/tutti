@@ -15,7 +15,8 @@ use crate::PluginHandle;
 use crate::{ParameterChangeSink, PluginControls};
 use tutti_plugin_types::{BridgeError, BridgeResult};
 use tutti_plugin_types::{
-    Features, InProcess, Load, LoadStage, Loaded, LoadedPlugin, ParamId, PluginDescriptor, Prepare,
+    Features, InProcess, Load, LoadStage, Loaded, LoadedPlugin, ParamId, PluginDescriptor,
+    PluginTooWide, Prepare,
 };
 
 /// The maximum block size the plugin is told (`Prepare::max_block`). A graph
@@ -184,7 +185,9 @@ where
         loaded.features.insert(Features::PRESET_LIST);
         loaded.features.insert(Features::PRESET_LOAD);
     }
-    let declared = Declared::of(&loaded);
+    // A plugin wider than a block serves is refused here, so no node is built
+    // over it.
+    let declared = Declared::of(&loaded).map_err(|e| (LoadStage::Activation, e.to_string()))?;
     let inner = Arc::new(Mutex::new(inner));
     let unlent = Arc::new(AtomicU64::new(0));
     // Built here rather than inside the node so the node's producer end and the
@@ -240,6 +243,11 @@ where
 /// the hosting's. With `controls`, the node's meter, parameter counters and
 /// latency figures are those of the served plugin's [`PluginControls`], and
 /// `retune` keeps its pipeline chunk and rate current.
+///
+/// # Errors
+///
+/// [`PluginTooWide`] when `wiring` has more channels in a direction than a
+/// block serves: no node is built over it.
 pub fn client_over<H>(
     processor: H::Processor,
     controller: H::Controller,
@@ -249,14 +257,14 @@ pub fn client_over<H>(
     parameters: impl IntoIterator<Item = ParamId>,
     spares: usize,
     controls: Option<PluginControls>,
-) -> InProcClient<H>
+) -> Result<InProcClient<H>, PluginTooWide>
 where
     H: Loaded + 'static,
     H::Processor: 'static,
 {
+    let declared = Declared::of(wiring)?;
     let (inner, rt) = Instance::<H>::adopt(processor, controller, prepare, wiring);
-    let declared = Declared::of(wiring);
-    InProcClient::new(
+    Ok(InProcClient::new(
         Arc::new(Mutex::new(inner)),
         rt,
         descriptor,
@@ -270,5 +278,5 @@ where
         spares,
         controls,
         None,
-    )
+    ))
 }

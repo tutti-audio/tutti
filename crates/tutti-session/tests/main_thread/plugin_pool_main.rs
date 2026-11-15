@@ -386,6 +386,138 @@ fn an_in_process_swap_waits_for_the_main_thread() {
     s.close(tutti_fixtures::main_thread());
 }
 
+/// A value saved through `save_state`, then moved, is the value the plugin and
+/// its mirror hold after `restore_state` lands in an update on the main thread;
+/// the outcome lands in an update, never at the call.
+fn restore_round_trip(hosting: Hosting) {
+    const CUTOFF: tutti_plugin_types::ParamId = tutti_plugin_types::ParamId::new(101);
+    let (catalog, _dir) = catalog();
+    let mut s = session();
+    s.pool(s.plugin_entry("verb", &id(), &catalog).hosting(hosting))
+        .unwrap();
+    assert!(matches!(next_event(&mut s, "verb"), PoolEvent::Loaded));
+    let node = s.add_pooled_plugin(&"verb").unwrap();
+    // Wired to the output, so blocks run the plugin: an in-process plugin takes
+    // a host write at the head of its next block.
+    s.graph().connect(node, tutti_session::Root).unwrap();
+    let blocks = |s: &mut Session| {
+        for _ in 0..4 {
+            let _ = s.update();
+            let mut out = vec![0.0f32; 512 * 2];
+            s.render(
+                &mut tutti_buffers::InterleavedMut::new(
+                    &mut out,
+                    tutti_types::ChannelLayout::STEREO,
+                )
+                .unwrap(),
+            );
+        }
+    };
+    blocks(&mut s);
+    let knob = |s: &Session| {
+        s.plugin_view(node)
+            .unwrap()
+            .params()
+            .get(CUTOFF)
+            .unwrap()
+            .normalized()
+            .get()
+    };
+    let set = |s: &Session, v: f64| {
+        s.plugin_view(node)
+            .unwrap()
+            .params()
+            .get(CUTOFF)
+            .unwrap()
+            .set(tutti_plugin_types::Normalized::of(v))
+            .unwrap();
+    };
+
+    set(&s, 0.9);
+    blocks(&mut s);
+    let saving = s.save_state(&"verb").expect("a node holds the plugin");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !saving.has_landed() {
+        assert!(Instant::now() < deadline, "the save never landed");
+        let _ = s.update();
+        thread::sleep(Duration::from_millis(2));
+    }
+    let state = saving.take().expect("landed").expect("a state");
+
+    set(&s, 0.1);
+    blocks(&mut s);
+    let restoring = s.restore_state(&"verb", state).expect("its own plugin's");
+    assert!(!restoring.has_landed(), "it lands in an update");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !restoring.has_landed() {
+        assert!(Instant::now() < deadline, "the restore never landed");
+        let _ = s.update();
+        thread::sleep(Duration::from_millis(2));
+    }
+    restoring.take().expect("landed").expect("applied");
+    // The mirror is read again by a job the next updates land.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while (knob(&s) - 0.9).abs() > 1e-6 {
+        assert!(
+            Instant::now() < deadline,
+            "the saved value never came back: {}",
+            knob(&s)
+        );
+        blocks(&mut s);
+        thread::sleep(Duration::from_millis(2));
+    }
+    s.close(tutti_fixtures::main_thread());
+}
+
+/// **A restore job applies the saved state to an in-process plugin**: its
+/// writes reach the plugin at the head of a block, so the saved state holds the
+/// value the blocks delivered, and the restore moves it back.
+fn a_restore_job_applies_the_saved_state_to_an_in_process_plugin() {
+    restore_round_trip(Hosting::InProcess);
+}
+
+/// **A restore job applies the saved state to a served plugin**, in the first
+/// update on the main thread.
+fn a_restore_job_applies_the_saved_state_to_a_served_plugin() {
+    restore_round_trip(Hosting::OutOfProcess);
+}
+
+/// **An in-process save the main thread does not run answers `Unavailable`:**
+/// the worker waits the off-main deadline for the main thread's work, which no
+/// update runs, and the job ends as `StateJobFailed::State(Unavailable)`.
+fn an_in_process_save_the_main_thread_does_not_run_is_unavailable() {
+    let (catalog, _dir) = catalog();
+    let mut s = session();
+    s.pool(
+        s.plugin_entry("verb", &id(), &catalog)
+            .hosting(Hosting::InProcess),
+    )
+    .unwrap();
+    assert!(matches!(next_event(&mut s, "verb"), PoolEvent::Loaded));
+    let _node = s.add_pooled_plugin(&"verb").unwrap();
+    let saving = s.save_state(&"verb").expect("a node holds the plugin");
+    // No update on the main thread meanwhile, for more than the off-main
+    // deadline: the job's end only lands in an update, so the wait cannot be
+    // polled, and the worker has timed out long before the first update.
+    thread::sleep(Duration::from_secs(4));
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !saving.has_landed() {
+        assert!(Instant::now() < deadline, "the save never landed");
+        let _ = s.update();
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert!(
+        matches!(
+            saving.take(),
+            Some(Err(tutti_session::StateJobFailed::State(
+                tutti_plugin::error::StateError::Unavailable
+            )))
+        ),
+        "the main thread did not run it in time"
+    );
+    s.close(tutti_fixtures::main_thread());
+}
+
 /// A pooled in-process plugin at a key, in `layout`'s ports, rendering its
 /// closed-form tags (`TagOnly`: output channel `c` of port `p` holds
 /// `probe_tag(p, c)`), its stereo input fed by two constants and its first two
@@ -561,6 +693,9 @@ a_released_in_process_plugin_on_the_main_thread_is_closed_in_place,
 a_changed_identity_swaps_an_in_process_node,
 an_in_process_swap_to_other_ports_fails_the_entry,
 an_in_process_swap_waits_for_the_main_thread,
+a_restore_job_applies_the_saved_state_to_an_in_process_plugin,
+a_restore_job_applies_the_saved_state_to_a_served_plugin,
+an_in_process_save_the_main_thread_does_not_run_is_unavailable,
 a_plugin_that_widens_its_ports_is_re_inserted_wider,
 a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost,
 ];

@@ -307,6 +307,12 @@ impl PerNoteState {
             Voice2::NoteOn {
                 note, attribute, ..
             } => return self.start(address, note, attribute),
+            // A number Appendix A reserves means nothing to a receiver, so no
+            // state is kept for it.
+            Voice2::RegisteredPerNote {
+                controller: RegisteredPerNoteController::Reserved(_),
+                ..
+            } => {}
             Voice2::RegisteredPerNote {
                 note,
                 controller,
@@ -371,8 +377,10 @@ impl PerNoteState {
         self.live[at].push(id, told);
         self.out.push(NoteEvent::Started { id, address, note });
         for &(code, value) in &held.set[..held.len] {
-            if code != Held::PITCH && code != Held::BEND {
-                let control = self.resolve(code, value);
+            if code != Held::PITCH
+                && code != Held::BEND
+                && let Some(control) = self.resolve(code, value)
+            {
                 self.out.push(NoteEvent::Control { id, note, control });
             }
         }
@@ -403,11 +411,13 @@ impl PerNoteState {
 
     /// The controller a held code and word, other than the pitch and its bend,
     /// mean.
-    fn resolve(&self, code: u16, value: u32) -> NoteControl {
+    fn resolve(&self, code: u16, value: u32) -> Option<NoteControl> {
         match code {
-            Held::PRESSURE => NoteControl::Pressure(value),
-            c if c >= Held::ASSIGNABLE => NoteControl::Assignable(c as u8, value),
-            c => NoteControl::Registered(RegisteredPerNoteController::from(c as u8), value),
+            Held::PRESSURE => Some(NoteControl::Pressure(value)),
+            c if c >= Held::ASSIGNABLE => Some(NoteControl::Assignable(c as u8, value)),
+            c => RegisteredPerNoteController::try_from(c as u8)
+                .ok()
+                .map(|controller| NoteControl::Registered(controller, value)),
         }
     }
 
@@ -425,7 +435,9 @@ impl PerNoteState {
             self.sound_all(at, address);
             return;
         }
-        let control = self.resolve(code, value);
+        let Some(control) = self.resolve(code, value) else {
+            return;
+        };
         for &id in self.live[at].ids() {
             self.out.push(NoteEvent::Control { id, note, control });
         }

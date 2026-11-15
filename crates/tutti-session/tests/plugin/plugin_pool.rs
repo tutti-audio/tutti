@@ -15,8 +15,9 @@ use tutti_plugin_db::PluginFormat;
 use tutti_plugin_types::{Normalized, ParamId};
 use tutti_plugin_types::{PluginFailure, TerminationReason};
 use tutti_session::{
-    AddPluginError, CrossfadeRefused, DetachedSession, LoadError, Peer, PluginCause, PluginHealth,
-    PoolEvent, PoolState, Presence, RecoveryPolicy, Resource, RetryError, Session, SessionEvent,
+    AddPluginError, CrossfadeRefused, DetachedSession, HandleError, LoadError, Peer, PluginCause,
+    PluginHealth, PoolEvent, PoolState, Presence, RecoveryPolicy, Resource, RetryError, Session,
+    SessionEvent, StateJobError, StateJobFailed,
 };
 use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples, Tail};
 
@@ -466,6 +467,116 @@ fn an_initial_state_is_restored_and_two_keys_load_two_plugins() {
     let pid = |node| s.plugin_view(node).unwrap().diagnostics().server_pid();
     assert_ne!(pid(a), pid(b), "two plugins, two servers");
     assert_ne!(s.plugin(&"a").unwrap().id(), s.plugin(&"b").unwrap().id());
+}
+
+/// **A state saved by a job is the state of the plugin at the call, and the
+/// job's errors are named.** A value set on a served plugin and saved through
+/// `save_state` is the value another entry loads with; a key with no entry, a
+/// plugin with no node and a state of another plugin are refused at the call,
+/// and nothing is sent to the plugin.
+#[test]
+fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
+    const CUTOFF: ParamId = ParamId::new(101);
+    let (catalog, _dir) = catalog();
+    let mut s = session(true);
+    s.pool((
+        s.plugin_entry("a", &first_id(), &catalog),
+        s.plugin_entry("idle", &first_id(), &catalog),
+    ))
+    .unwrap();
+    // Both load in the same update, so a wait on events would miss the second.
+    settle_until(&mut s, "both loads", |s| {
+        s.plugin(&"a").is_ok() && s.plugin(&"idle").is_ok()
+    });
+    let a = s.add_pooled_plugin(&"a").unwrap();
+
+    assert!(matches!(
+        s.save_state(&"missing"),
+        Err(StateJobError::Entry(HandleError::NotPooled("missing")))
+    ));
+    assert!(matches!(
+        s.save_state(&"idle"),
+        Err(StateJobError::NoNode("idle"))
+    ));
+    let foreign = {
+        let entry = catalog
+            .entries()
+            .find(|entry| entry.descriptor.id == second_id().id)
+            .expect("the second plugin is listed");
+        PluginState::new(PluginRef::from(&entry), Vec::new())
+    };
+    assert!(matches!(
+        s.restore_state(&"idle", foreign.clone()),
+        Err(StateJobError::NoNode("idle"))
+    ));
+    assert!(matches!(
+        s.restore_state(&"a", foreign),
+        Err(StateJobError::OtherPlugin(StateError::OtherPlugin { .. }))
+    ));
+
+    let set = Normalized::of(0.9);
+    s.plugin_view(a)
+        .unwrap()
+        .params()
+        .get(CUTOFF)
+        .unwrap()
+        .set(set)
+        .unwrap();
+    let saving = s.save_state(&"a").expect("a node holds the plugin");
+    assert!(!saving.has_landed(), "it lands in an update");
+    settle_until(&mut s, "the save", |_| saving.has_landed());
+    let state = saving.take().expect("landed").expect("a state");
+
+    s.pool((
+        s.plugin_entry("a", &first_id(), &catalog),
+        s.plugin_entry("idle", &first_id(), &catalog),
+        s.plugin_entry("b", &first_id(), &catalog)
+            .initial_state(state)
+            .expect("its own plugin's state"),
+    ))
+    .unwrap();
+    loaded(&mut s, "b");
+    let b = s.add_pooled_plugin(&"b").unwrap();
+    let read = s
+        .plugin_view(b)
+        .unwrap()
+        .params()
+        .get(CUTOFF)
+        .unwrap()
+        .normalized();
+    assert!(
+        (read.get() - set.get()).abs() < 1e-6,
+        "the saved value, not the default: {read:?}"
+    );
+}
+
+/// **A save of a plugin whose server was terminated lands the crash, not a
+/// state:** the job ends as `StateJobFailed::State(PluginCrashed)`, and no
+/// empty state is saved as the real thing.
+#[test]
+fn a_state_job_of_a_dead_plugin_lands_the_plugins_refusal() {
+    let (catalog, _dir) = catalog();
+    let mut s = session(false);
+    s.pool(s.plugin_entry("a", &first_id(), &catalog)).unwrap();
+    loaded(&mut s, "a");
+    let node = s.add_pooled_plugin(&"a").unwrap();
+    s.plugin_view(node)
+        .unwrap()
+        .diagnostics()
+        .terminate(TerminationReason::Hung {
+            blocks: 16,
+            held: Duration::from_secs(5),
+        });
+    let saving = s.save_state(&"a").expect("the node is still there");
+    settle_until(&mut s, "the save", |_| saving.has_landed());
+    let landed = saving.take();
+    assert!(
+        matches!(
+            landed,
+            Some(Err(StateJobFailed::State(StateError::PluginCrashed)))
+        ),
+        "the plugin's refusal: {landed:?}"
+    );
 }
 
 /// **A reloaded plugin with other ports fails the entry, named, and the node

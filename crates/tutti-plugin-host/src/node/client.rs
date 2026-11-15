@@ -40,8 +40,8 @@ use crate::{ParamDelivery, PluginControls, PluginMeter, SegmentPoints};
 use tutti_plugin_types::MidiIntake;
 use tutti_plugin_types::{
     ChordChanges, ExpressiveContext, Features, MAX_BLOCK_CHANNELS, MIDI_STACK_CAPACITY,
-    MidiEventVec, ParamId, ParameterChanges, ScaleChanges, TransportChange, TransportChanges,
-    TransportInfo,
+    MidiEventVec, ParamId, ParameterChanges, PluginTooWide, ScaleChanges, TransportChange,
+    TransportChanges, TransportInfo,
 };
 
 /// A plugin running inside the host process, as a graph node, whatever its
@@ -223,22 +223,37 @@ pub(super) struct Declared {
 
 impl Declared {
     /// What the plugin reported at load.
-    pub(super) fn of(loaded: &LoadedPlugin) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// [`PluginTooWide`] when the plugin has more channels in a direction than
+    /// a block serves.
+    pub(super) fn of(loaded: &LoadedPlugin) -> Result<Self, PluginTooWide> {
         Self::from_layout(&Layout::from(loaded), loaded.latency_samples, loaded.tail)
     }
 
     /// What the plugin reports now: the ports of the layout the lifecycle last
     /// read ([`State::layout`](tutti_plugin_types::State::layout)), and the
     /// figures `latency` and `tail`.
-    pub(super) fn from_layout(layout: &Layout, latency: Samples, tail: PluginTail) -> Self {
-        Self {
+    ///
+    /// # Errors
+    ///
+    /// [`PluginTooWide`] when the layout has more channels in a direction than
+    /// a block serves.
+    pub(super) fn from_layout(
+        layout: &Layout,
+        latency: Samples,
+        tail: PluginTail,
+    ) -> Result<Self, PluginTooWide> {
+        layout.check_width()?;
+        Ok(Self {
             ports: Shape::buses(buses_of(&layout.inputs), buses_of(&layout.outputs)).with_ports(
                 ChannelLayout::clamped(layout.total_inputs()),
                 ChannelLayout::clamped(layout.total_outputs()),
             ),
             latency,
             tail,
-        }
+        })
     }
 }
 
@@ -248,8 +263,8 @@ impl Declared {
 /// A bus without a [`placement`](PluginBus::placement) (unknown, or one that
 /// does not have its width's channels) is `Unassigned` at that width: a count is
 /// not a placement. The list stops at the first bus past
-/// [`MAX_BUSES`](tutti_graph::MAX_BUSES) or wider than a bus holds; the
-/// plugin's remaining channels are ports the node still has.
+/// [`MAX_BUSES`](tutti_graph::MAX_BUSES); the plugin's remaining channels are
+/// ports the node still has.
 fn buses_of(plugin: &[PluginBus]) -> Buses {
     let mut buses = Buses::NONE;
     for bus in plugin {
@@ -835,7 +850,9 @@ pub(super) fn render_with<P: Processor>(
     // table whose borrow is this call's own. An array, not an `ArrayVec`: a
     // type with a `Drop` would need its data to outlive the borrow of the
     // table.
-    let width = outputs.len().min(MAX_BLOCK_CHANNELS);
+    // At most `MAX_BLOCK_CHANNELS`: the node is never built over a wider
+    // plugin (`Declared::of`), and the callers' tables are that wide.
+    let width = outputs.len();
     let mut rest = outputs.iter_mut();
     let mut table: [&mut [f32]; MAX_BLOCK_CHANNELS] =
         std::array::from_fn(|_| rest.next().map_or(&mut [][..], |o| &mut **o));
@@ -1313,7 +1330,7 @@ mod declared_buses {
             outputs: vec![PluginBus::main(width(2)).placed(Some(stereo()))],
             ..LoadedPlugin::default()
         };
-        let shape = Declared::of(&loaded).ports;
+        let shape = Declared::of(&loaded).unwrap().ports;
         assert_eq!(shape.audio_in(), width(6));
         let ins: Vec<_> = shape
             .buses_in()
@@ -1342,24 +1359,55 @@ mod declared_buses {
     }
 
     /// A plugin with no bus list has no buses; one with more than the node
-    /// holds, or a bus wider than a bus holds, keeps the first ones and every
-    /// channel as a port.
+    /// holds keeps the first ones and every channel as a port.
     #[test]
     fn what_does_not_fit_stays_a_port() {
-        let none = Declared::of(&LoadedPlugin::default()).ports;
+        let none = Declared::of(&LoadedPlugin::default()).unwrap().ports;
         assert!(none.buses_in().is_empty() && none.buses_out().is_empty());
 
         let many = LoadedPlugin {
             inputs: vec![PluginBus::main(width(1)); 5],
-            outputs: [2, 20, 2].map(|n| PluginBus::main(width(n))).to_vec(),
+            outputs: vec![PluginBus::main(width(2)); 5],
             ..LoadedPlugin::default()
         };
-        let shape = Declared::of(&many).ports;
+        let shape = Declared::of(&many).unwrap().ports;
         assert_eq!(shape.audio_in(), width(5));
         assert_eq!(shape.buses_in().len(), tutti_graph::MAX_BUSES);
-        // The 20-wide bus is past a bus; the one after it is not reached.
-        assert_eq!(shape.audio_out(), width(24));
-        assert_eq!(shape.buses_out().len(), 1);
-        assert_eq!(shape.buses_out().width(), 2);
+        assert_eq!(shape.audio_out(), width(10));
+        assert_eq!(shape.buses_out().len(), tutti_graph::MAX_BUSES);
+    }
+
+    /// **A plugin wider than a block serves is refused by name, never narrowed.**
+    /// A direction past `MAX_BLOCK_CHANNELS` over all its buses has no node;
+    /// the widest served plugin has one.
+    #[test]
+    fn a_plugin_wider_than_a_block_is_refused_by_name() {
+        let max = MAX_BLOCK_CHANNELS;
+        let wiring = |inputs: &[usize], outputs: &[usize]| LoadedPlugin {
+            inputs: inputs
+                .iter()
+                .map(|&n| PluginBus::main(width(n as u16)))
+                .collect(),
+            outputs: outputs
+                .iter()
+                .map(|&n| PluginBus::main(width(n as u16)))
+                .collect(),
+            ..LoadedPlugin::default()
+        };
+        assert!(Declared::of(&wiring(&[max], &[max])).is_ok());
+        assert_eq!(
+            Declared::of(&wiring(&[8, 9], &[2])).unwrap_err(),
+            PluginTooWide {
+                direction: "input",
+                channels: max + 1
+            }
+        );
+        assert_eq!(
+            Declared::of(&wiring(&[2], &[max, 1])).unwrap_err(),
+            PluginTooWide {
+                direction: "output",
+                channels: max + 1
+            }
+        );
     }
 }

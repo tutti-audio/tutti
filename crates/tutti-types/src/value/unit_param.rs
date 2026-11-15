@@ -451,8 +451,8 @@ impl From<UnitAddr> for ParamAddr {
 /// `ParamKey::<Db>::THRESHOLD`. There is deliberately **no key** yet for
 /// `DelayTime` ("beats or seconds — unit-defined"), `RoomSize` and `Damping`
 /// (bare `0..1` with no unit type of their own), `StereoSpread` (a synth's
-/// unison spread, which no unit type claims), `Pan` (the `Pan` type
-/// is a *measurement*, and a pan control needs its own), and `Bypass` (a switch,
+/// unison spread, which no unit type claims), `Pan` and `Balance` (a panner's
+/// position and a strip's balance, whose keys are not decided), and `Bypass` (a switch,
 /// not a scalar). Each needs its unit decided first; until then they stay
 /// reachable through [`UnitParam`] and cannot be ramped by key.
 ///

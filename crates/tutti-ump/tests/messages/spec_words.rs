@@ -4,17 +4,19 @@
 //! comment, then the words. Nothing here calls the codec to produce an
 //! expected value.
 
+use core::num::NonZeroU8;
 use tutti_ump::{
-    Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BlockFilter, BlockSelect,
-    CCNumber, ChordBass, ChordName, ChordPitch, ChordType, Data128, DeltaTicks, DeviceIdentity,
-    Direction, DiscoveryFilter, EndpointInfo, FirstGroup, Flex, FlexAddress, FlexTextKind, Form,
-    FunctionBlockId, FunctionBlockInfo, GroupSpan, KeySignature, Letter, MdsChunk, MdsChunkSize,
-    MdsChunks, MdsIdentity, Message, Metronome, Midi1Port, MidiChannel, MidiGroup, MixedDataHeader,
-    NoteNumber, NoteVelocity, PerNoteManagement, Protocol, RegisteredPerNoteController,
-    SharpsFlats, Stream, StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus, System,
-    TimeSignature, U4, U7, U14, UiHint, Ump, UmpVersion, Utility, Voice1, Voice2,
+    Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockFilter,
+    BlockSelect, CCNumber, ChordBass, ChordName, ChordPitch, ChordType, Data128, DeltaTicks,
+    DeviceIdentity, Direction, DiscoveryFilter, EndpointInfo, FirstGroup, Flex, FlexAddress,
+    FlexTextKind, Form, FunctionBlockId, FunctionBlockInfo, GroupSpan, KeySignature, Letter,
+    MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Message, Metronome, Midi1Port, MidiChannel,
+    MidiGroup, MixedDataHeader, NoteNumber, NoteVelocity, PerNoteManagement, Protocol,
+    RegisteredPerNoteController, SharpsFlats, Stream, StreamConfig, Sysex7Packet, Sysex8Packet,
+    SysexStatus, System, TimeSignature, U4, U7, U14, UiHint, Ump, UmpVersion, Utility, Voice1,
+    Voice2,
 };
-use tutti_ump::{BendValue, ControlValue};
+use tutti_ump::{BendValue, ControlValue, FunctionBlockCount, TicksPerQuarterNote};
 use tutti_ump::{ManufacturerId, Unknown};
 
 fn g(n: u8) -> MidiGroup {
@@ -60,7 +62,7 @@ fn utility() {
     // Delta Clockstamp Ticks Per Quarter Note: status 3, 480 = 0x01E0.
     pin(
         [0x0030_01E0, 0, 0, 0],
-        Message::Utility(Utility::TicksPerQuarterNote(480)),
+        Message::Utility(Utility::TicksPerQuarterNote(TicksPerQuarterNote::of(480))),
     );
     // Delta Clockstamp: status 4, 20 bits in 19-0.
     pin(
@@ -505,9 +507,7 @@ fn flex_setup() {
         [0xD610_0002, 0x1803_0200, 0x0200_0000, 0],
         f(Flex::SetMetronome(Metronome {
             clocks_per_click: 24,
-            accent_1: 3,
-            accent_2: 2,
-            accent_3: 0,
+            accents: BarAccents::Two(NonZeroU8::new(3).unwrap(), NonZeroU8::new(2).unwrap()),
             subdivision_1: 2,
             subdivision_2: 0,
         })),
@@ -554,11 +554,11 @@ fn flex_key_and_chord() {
             ChordName {
                 tonic_accidental: Accidental::Natural,
                 tonic: Some(Letter::C),
-                chord_type: ChordType::new(0x01).unwrap(),
+                chord_type: ChordType::new(0x01).unwrap().into(),
                 alterations: [alt(AlterationKind::Add, 9), none(), none(), none()],
                 bass: ChordBass {
                     pitch: None,
-                    chord_type: ChordType::new(0).unwrap(),
+                    chord_type: ChordType::new(0).unwrap().into(),
                     alterations: [none(), none()],
                 },
             },
@@ -573,7 +573,7 @@ fn flex_key_and_chord() {
             ChordName {
                 tonic_accidental: Accidental::Flat,
                 tonic: Some(Letter::E),
-                chord_type: ChordType::new(0x09).unwrap(),
+                chord_type: ChordType::new(0x09).unwrap().into(),
                 alterations: [
                     none(),
                     none(),
@@ -585,7 +585,7 @@ fn flex_key_and_chord() {
                         accidental: Accidental::Flat,
                         letter: Letter::B,
                     }),
-                    chord_type: ChordType::new(0x01).unwrap(),
+                    chord_type: ChordType::new(0x01).unwrap().into(),
                     alterations: [alt(AlterationKind::Subtract, 3), none()],
                 },
             },
@@ -716,7 +716,7 @@ fn stream_endpoint_info() {
         Message::Stream(Stream::EndpointInfo(EndpointInfo {
             version: UmpVersion { major: 1, minor: 1 },
             static_function_blocks: true,
-            function_blocks: U7::of(3),
+            function_blocks: FunctionBlockCount::of(3).into(),
             midi2: true,
             midi1: true,
             rx_jr: true,
@@ -729,7 +729,7 @@ fn stream_endpoint_info() {
         Message::Stream(Stream::EndpointInfo(EndpointInfo {
             version: UmpVersion { major: 1, minor: 1 },
             static_function_blocks: false,
-            function_blocks: U7::of(32),
+            function_blocks: FunctionBlockCount::of(32).into(),
             midi2: true,
             midi1: false,
             rx_jr: false,
@@ -841,12 +841,12 @@ fn stream_function_blocks() {
         [0xF011_833B, 0x0402_0110, 0, 0],
         Message::Stream(Stream::FunctionBlockInfo(FunctionBlockInfo {
             active: true,
-            id: FunctionBlockId::new(3).unwrap(),
+            id: FunctionBlockId::new(3).unwrap().into(),
             direction: Direction::Bidirectional,
             ui_hint: UiHint::Both,
             midi1: Midi1Port::Restricted,
-            first_group: FirstGroup::new(4).unwrap(),
-            groups_spanned: GroupSpan::new(2).unwrap(),
+            first_group: FirstGroup::new(4).unwrap().into(),
+            groups_spanned: GroupSpan::new(2).unwrap().into(),
             midi_ci_version: 1,
             max_sysex8_streams: 16,
         })),
@@ -855,12 +855,12 @@ fn stream_function_blocks() {
         [0xF011_0105, 0x0F10_0000, 0, 0],
         Message::Stream(Stream::FunctionBlockInfo(FunctionBlockInfo {
             active: false,
-            id: FunctionBlockId::new(1).unwrap(),
+            id: FunctionBlockId::new(1).unwrap().into(),
             direction: Direction::Input,
             ui_hint: UiHint::Unknown,
             midi1: Midi1Port::Unrestricted,
-            first_group: FirstGroup::new(15).unwrap(),
-            groups_spanned: GroupSpan::new(16).unwrap(),
+            first_group: FirstGroup::new(15).unwrap().into(),
+            groups_spanned: GroupSpan::new(16).unwrap().into(),
             midi_ci_version: 0,
             max_sysex8_streams: 0,
         })),
@@ -869,7 +869,7 @@ fn stream_function_blocks() {
     pin(
         [0xF012_0241, 0x4200_0000, 0, 0],
         Message::Stream(Stream::FunctionBlockName {
-            block: FunctionBlockId::new(2).unwrap(),
+            block: FunctionBlockId::new(2).unwrap().into(),
             form: Form::Complete,
             bytes: *b"AB\0\0\0\0\0\0\0\0\0\0\0",
         }),
@@ -890,14 +890,14 @@ fn what_the_oracle_found() {
             ChordName {
                 tonic_accidental: Accidental::Natural,
                 tonic: Some(Letter::C),
-                chord_type: ChordType::new(0x1B).unwrap(),
+                chord_type: ChordType::new(0x1B).unwrap().into(),
                 alterations: [none(), none(), none(), none()],
                 bass: ChordBass {
                     pitch: Some(ChordPitch {
                         accidental: Accidental::Natural,
                         letter: Letter::G,
                     }),
-                    chord_type: ChordType::new(0x1B).unwrap(),
+                    chord_type: ChordType::new(0x1B).unwrap().into(),
                     alterations: [none(), none()],
                 },
             },

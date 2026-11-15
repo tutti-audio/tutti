@@ -277,19 +277,13 @@ fn table_5_stroke_direction() {
         (1, Stroke::Down),
         (2, Stroke::Up),
     ] {
-        let attribute = Attribute::Reserved {
-            kind: 0x10,
-            data: bits << 6,
-        };
+        let attribute = attr(0x10, bits << 6);
         assert_eq!(
             NoteArticulation::from_attribute(attribute).unwrap().stroke,
             stroke
         );
     }
-    let reserved = Attribute::Reserved {
-        kind: 0x10,
-        data: 3 << 6,
-    };
+    let reserved = attr(0x10, 3 << 6);
     assert_eq!(
         NoteArticulation::from_attribute(reserved),
         Err(ArticulationError::ReservedStroke)
@@ -313,10 +307,7 @@ fn table_6_string_assignment_in_a_note_on() {
     ];
     for (bits, string) in rows {
         // Bit 3 is the reset flag, set here.
-        let attribute = Attribute::Reserved {
-            kind: 0x10,
-            data: bits | 0x0008,
-        };
+        let attribute = attr(0x10, bits | 0x0008);
         let read = NoteArticulation::from_attribute(attribute).unwrap();
         assert_eq!((read.string, read.reset_round_robin), (string, true));
     }
@@ -339,10 +330,7 @@ fn table_18_string_assignment_in_a_note_off() {
     ];
     for (bits, string) in rows {
         // Subclass 1 (Soft Ending) in bits 15-12.
-        let attribute = Attribute::Reserved {
-            kind: 0x10,
-            data: bits | 0x1000,
-        };
+        let attribute = attr(0x10, bits | 0x1000);
         let read = NoteOffArticulation::from_attribute(attribute).unwrap();
         assert_eq!((read.string, read.ending), (string, NoteEnding::Soft));
     }
@@ -362,10 +350,7 @@ fn table_17_note_off_subclasses() {
     for raw in 0..16u8 {
         let expected = rows.iter().find(|(n, _)| *n == raw).map(|(_, e)| *e);
         assert_eq!(NoteEnding::from_subclass(u4(raw)), expected, "{raw:#x}");
-        let attribute = Attribute::Reserved {
-            kind: 0x10,
-            data: u16::from(raw) << 12,
-        };
+        let attribute = attr(0x10, u16::from(raw) << 12);
         match expected {
             Some(ending) => {
                 assert_eq!(
@@ -477,10 +462,7 @@ fn note_off_words_follow_figure_2() {
     let voice = off.note_off(NoteNumber::of(60), ReleaseTime::DEFAULT);
     assert_eq!(word_of(voice), [0x4080_3C10, 0x8000_2503, 0, 0]);
     assert_eq!(
-        NoteOffArticulation::from_attribute(Attribute::Reserved {
-            kind: 0x10,
-            data: 0x2503
-        }),
+        NoteOffArticulation::from_attribute(attr(0x10, 0x2503)),
         Ok(off)
     );
 }
@@ -544,10 +526,7 @@ fn a_reserved_subclass_is_refused_with_its_classification() {
     ];
     for (kind, subclasses) in reserved {
         for &subclass in subclasses {
-            let attribute = Attribute::Reserved {
-                kind,
-                data: u16::from(subclass) << 12,
-            };
+            let attribute = attr(kind, u16::from(subclass) << 12);
             assert_eq!(
                 NoteArticulation::from_attribute(attribute),
                 Err(ArticulationError::ReservedSubclass {
@@ -565,7 +544,7 @@ fn a_reserved_subclass_is_refused_with_its_classification() {
 fn an_attribute_that_is_not_an_articulation_is_refused() {
     for kind in [0x18, 0x19] {
         assert_eq!(
-            NoteArticulation::from_attribute(Attribute::Reserved { kind, data: 0 }),
+            NoteArticulation::from_attribute(attr(kind, 0)),
             Err(ArticulationError::ReservedClassification(kind))
         );
     }
@@ -582,10 +561,7 @@ fn an_attribute_that_is_not_an_articulation_is_refused() {
         Err(ArticulationError::NotAnArticulation(0x03))
     );
     assert_eq!(
-        NoteArticulation::from_attribute(Attribute::Reserved {
-            kind: 0x20,
-            data: 0
-        }),
+        NoteArticulation::from_attribute(attr(0x20, 0)),
         Err(ArticulationError::NotAnArticulation(0x20))
     );
     let off = Voice2::note_off(NoteNumber::of(60), NoteVelocity::new(0));
@@ -600,10 +576,7 @@ fn an_attribute_that_is_not_an_articulation_is_refused() {
     );
     // A Note Off carries only type 0x10 of the Profile (Table 16).
     assert_eq!(
-        NoteOffArticulation::from_attribute(Attribute::Reserved {
-            kind: 0x11,
-            data: 0
-        }),
+        NoteOffArticulation::from_attribute(attr(0x11, 0)),
         Err(ArticulationError::NotAnArticulation(0x11))
     );
 }
@@ -614,20 +587,14 @@ fn a_reserved_bit_of_the_data_is_refused() {
     // Note On: bits 5 and 4 (Figure 1).
     for bit in [0x0020, 0x0010] {
         assert_eq!(
-            NoteArticulation::from_attribute(Attribute::Reserved {
-                kind: 0x10,
-                data: bit
-            }),
+            NoteArticulation::from_attribute(attr(0x10, bit)),
             Err(ArticulationError::ReservedBits(bit))
         );
     }
     // Note Off: bits 7 to 3 (Figure 2).
     for bit in [0x0080, 0x0040, 0x0020, 0x0010, 0x0008] {
         assert_eq!(
-            NoteOffArticulation::from_attribute(Attribute::Reserved {
-                kind: 0x10,
-                data: bit
-            }),
+            NoteOffArticulation::from_attribute(attr(0x10, bit)),
             Err(ArticulationError::ReservedBits(bit))
         );
     }
@@ -662,6 +629,48 @@ fn every_value_the_types_hold_round_trips_through_the_attribute() {
                     }
                 }
             }
+        }
+    }
+}
+
+/// An attribute of type `kind` as a receiver reads it from the wire: no sender
+/// can name a reserved type, so the test takes it from a Note On packet.
+fn attr(kind: u8, data: u16) -> Attribute {
+    let packet = Ump([
+        0x4090_3C00 | u32::from(kind),
+        0x8000_0000 | u32::from(data),
+        0,
+        0,
+    ]);
+    match packet.decode() {
+        Ok(Message::Midi2(_, Voice2::NoteOn { attribute, .. })) => attribute,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The articulation types `0x10` to `0x1F` (M2-123 Table 15) are their own
+/// attribute, which an articulation writes and the decoder reads for the whole
+/// range; no other type is one, and `Attribute::Reserved` holds only what
+/// neither spec defines.
+#[test]
+fn an_articulation_is_an_articulation_attribute_and_no_other_type_is() {
+    let written = NoteArticulation::new(Articulation::NORMAL).to_attribute();
+    assert!(matches!(written, Attribute::Articulation(a) if a.kind() == 0x10));
+    for kind in 0..=255u8 {
+        let read = attr(kind, 0x1234);
+        match kind {
+            0x10..=0x1F => assert!(
+                matches!(read, Attribute::Articulation(a) if a.kind() == kind && a.data() == 0x1234),
+                "{kind:#x}: {read:?}"
+            ),
+            0x04..=0x0F | 0x20..=0xFF => assert!(
+                matches!(read, Attribute::Reserved(r) if r.kind() == kind),
+                "{kind:#x}: {read:?}"
+            ),
+            _ => assert!(!matches!(
+                read,
+                Attribute::Reserved(_) | Attribute::Articulation(_)
+            )),
         }
     }
 }

@@ -13,6 +13,9 @@ use super::*;
 ///   not sum. Interpolation is a `lerp`, not a `*`. A measured balance is
 ///   [`StereoBalance`], and there is no `From` either way: a reading fed back
 ///   as a pan is `Pan(balance.get())`.
+/// - `Balance * f32`, `Balance + Balance` — a position on a segment, as `Pan`
+///   is. There is no `From` between `Balance`, `Pan` and `StereoBalance`: a
+///   balance only attenuates, a pan places a source, a reading is not a control.
 /// - `Feedback * f32` — scaling walks a coefficient across the stability
 ///   bound unchecked. `new_clamped` / `stable_pair` are the ways in.
 /// - `Drive * f32` — a shaper's response is nonlinear, so "twice the
@@ -186,4 +189,63 @@ fn pan_saturates_and_orders() {
     assert!(Pan::LEFT < Pan::CENTER);
     assert!(Pan::CENTER < Pan::RIGHT);
     assert_eq!(-Pan::LEFT, Pan::RIGHT);
+}
+
+fn balance_at(b: f32) -> (f32, f32) {
+    let (l, r) = Balance(b).gains();
+    (l.get(), r.get())
+}
+
+#[test]
+fn balance_attenuates_the_far_side_linearly_and_keeps_centre_at_unity() {
+    assert_eq!(balance_at(-1.0), (1.0, 0.0));
+    assert_eq!(balance_at(-0.5), (1.0, 0.5));
+    assert_eq!(balance_at(0.0), (1.0, 1.0));
+    assert_eq!(balance_at(0.25), (0.75, 1.0));
+    assert_eq!(balance_at(0.5), (0.5, 1.0));
+    assert_eq!(balance_at(1.0), (0.0, 1.0));
+    assert_eq!(
+        Balance::CENTER.gains(),
+        (Amplitude::UNITY, Amplitude::UNITY)
+    );
+}
+
+#[test]
+fn balance_outside_its_range_holds_the_end_and_nan_reads_unity() {
+    assert_eq!(balance_at(3.0), (0.0, 1.0));
+    assert_eq!(balance_at(-3.0), (1.0, 0.0));
+    assert_eq!(balance_at(f32::INFINITY), (0.0, 1.0));
+    assert_eq!(balance_at(f32::NAN), (1.0, 1.0));
+}
+
+#[test]
+fn balance_never_boosts_and_the_far_side_falls_monotonically() {
+    for i in 0..=40 {
+        let b = -1.0 + i as f32 * 0.05;
+        let (l, r) = balance_at(b);
+        assert!(
+            (0.0..=1.0).contains(&l) && (0.0..=1.0).contains(&r),
+            "{b}: ({l}, {r})"
+        );
+        assert!(l == 1.0 || r == 1.0, "{b}: the near side is unity");
+    }
+    for i in 1..=20 {
+        let b = i as f32 * 0.05;
+        assert!(
+            balance_at(b).0 < balance_at(b - 0.05).0,
+            "left falls as b rises past centre"
+        );
+        assert!(
+            balance_at(-b).1 < balance_at(-b + 0.05).1,
+            "right falls as b falls past centre"
+        );
+    }
+}
+
+#[test]
+fn balance_saturates_and_orders() {
+    assert_eq!(Balance::new_clamped(1.5), Balance::RIGHT);
+    assert_eq!(Balance::new_clamped(-1.5), Balance::LEFT);
+    assert!(Balance::LEFT < Balance::CENTER && Balance::CENTER < Balance::RIGHT);
+    assert_eq!(-Balance::LEFT, Balance::RIGHT);
 }

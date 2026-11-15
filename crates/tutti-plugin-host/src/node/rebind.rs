@@ -39,6 +39,9 @@ pub enum RebindError {
     /// layout read is not the one it will run with. Pump and try again.
     #[error("the plugin is restarting; its ports are not settled")]
     Restarting,
+    /// The plugin now has more channels in a direction than a block serves.
+    #[error(transparent)]
+    TooWide(#[from] tutti_plugin_types::PluginTooWide),
     /// The ports the plugin now has differ from the ones the node's slab was
     /// sized for.
     #[error(
@@ -147,6 +150,7 @@ where
     /// # Errors
     ///
     /// [`NoPorts`](RebindError::NoPorts) for a lost plugin;
+    /// [`TooWide`](RebindError::TooWide) for ports wider than a block serves;
     /// [`OutsideSlab`](RebindError::OutsideSlab) when a [`PortLimit`] is set and
     /// the plugin's channels differ from it;
     /// [`NotRunning`](RebindError::NotRunning) for a plugin that is loaded or
@@ -156,7 +160,7 @@ where
         let mut instance = self.inner.lock();
         let (layout, latency, tail) = instance.reading().ok_or(RebindError::NoPorts)?;
         self.fits(layout)?;
-        let declared = Declared::from_layout(layout, latency, tail);
+        let declared = Declared::from_layout(layout, latency, tail)?;
         let rt = instance.rehand(main)?;
         drop(instance);
         let pipeline = self
@@ -333,7 +337,8 @@ mod tests {
             [],
             0,
             None,
-        );
+        )
+        .expect("the fake is narrow");
         let rebinder = client.rebinder(tempo(), limit);
         let inner = Arc::clone(&client.inner);
         let node = contract::prepared(client.bind(tempo()), SR, BLOCK);
