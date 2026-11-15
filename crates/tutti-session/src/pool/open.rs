@@ -15,7 +15,7 @@ use crate::Session;
 ///
 /// A panic in the stage is caught and fails the entry
 /// ([`LoadError::Job`](crate::LoadError::Job)), but it unwinds through the
-/// session's own state: a panic inside a call on [`midi`](Self::midi) can leave
+/// session's own state: a panic inside a call on `midi` can leave
 /// the MIDI state half changed.
 pub struct OpenCx<'a> {
     session: &'a mut Session,

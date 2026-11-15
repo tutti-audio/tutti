@@ -239,7 +239,7 @@ impl<T: Send + 'static> Load<T> {
     /// at its next tick on the main thread when the session has one (feature
     /// `plugin`); with none, or when the collector itself ends off the main
     /// thread, `W` is leaked and counted
-    /// ([`stranded_loads`](crate::stranded_loads)).
+    /// ([`stranded_loads`]).
     pub fn on_worker_then_main<W: Send + 'static>(
         work: impl FnOnce() -> Result<W, LoadError> + Send + 'static,
         main: impl FnOnce(W, MainThreadMarker) -> Result<T, LoadError> + Send + 'static,

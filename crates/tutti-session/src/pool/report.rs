@@ -16,7 +16,7 @@ pub enum PoolOutcome {
 }
 
 /// Every declared entry's outcome, once none is pending: what
-/// [`Session::pool_loaded`] lands.
+/// [`Session::pool_loaded`](crate::Session::pool_loaded) lands.
 ///
 /// The entries are in the order the pool declared them.
 #[derive(Clone, Debug)]
@@ -88,9 +88,9 @@ fn lock<K>(cell: &Mutex<Cell<K>>) -> std::sync::MutexGuard<'_, Cell<K>> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// The wait for every declared entry's outcome: [`Session::pool_loaded`].
+/// The wait for every declared entry's outcome: [`Session::pool_loaded`](crate::Session::pool_loaded).
 ///
-/// It lands once, in an [`update`](Session::update): the app calls `update`
+/// It lands once, in an [`update`](crate::Session::update): the app calls `update`
 /// until [`has_landed`](Self::has_landed), then [`take`](Self::take)s the
 /// report. Dropping it ends the wait.
 #[must_use = "a pool_loaded wait reports nothing until it is taken"]
