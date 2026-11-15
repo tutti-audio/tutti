@@ -10,6 +10,7 @@ mod common;
 mod by_value;
 mod constructors;
 mod fields;
+mod flex_setup;
 mod key_event;
 mod mpe_zone;
 mod no_alloc;
