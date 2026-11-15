@@ -132,15 +132,13 @@
 //!   `tutti_buffers::Sink` adapter export and recording share.
 //! - **Oscillator** (`oscillator.rs`): [`Oscillator`], a sine, or a saw, square or
 //!   triangle band-limited by PolyBLEP and PolyBLAMP ([`OscillatorWave`]).
-//! - **Small kernels**: [`cubic_hermite`], [`ShapeKind`] and [`Shaper`], [`Smoother`],
-//!   [`balance_gains`].
+//! - **Small kernels**: [`cubic_hermite`], [`ShapeKind`] and [`Shaper`], [`Smoother`].
 //!
 //! ## Import paths
 //!
 //! Every public item is re-exported at the crate root; import from there
 //! (`tutti_dsp::RealFft`). No module is public.
 
-mod balance;
 mod control;
 mod convolver;
 mod delay;
@@ -164,7 +162,6 @@ mod stft;
 mod testing;
 mod xorshift;
 
-pub use balance::balance_gains;
 pub use control::{COEFF_INTERVAL, LANES};
 pub use convolver::{Convolver, IrSpectra};
 pub use delay::{

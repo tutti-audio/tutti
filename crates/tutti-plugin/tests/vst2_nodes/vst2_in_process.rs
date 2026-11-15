@@ -207,7 +207,7 @@ fn open_routes_a_vst2_to_the_in_process_backend() {
 
     // `open` routes on the *extension*, and the probe is built as a plain
     // cdylib — `.dylib` on macOS, which is not a VST2 extension anywhere and is
-    // deliberately absent from `FORMAT_BY_EXTENSION`. Real macOS VST2s are
+    // deliberately absent from `PluginFormat::from_extension`. Real macOS VST2s are
     // `.vst` bundles. So copy the image to a `.vst` name: that is the shape a
     // host actually meets, and it is what makes this test exercise the routing
     // rather than the naming.

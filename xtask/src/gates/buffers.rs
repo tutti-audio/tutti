@@ -89,7 +89,7 @@ struct Site {
 
 /// Collapses whitespace: a run between two word characters is one space, any
 /// other run vanishes (`& mut [ f32 ]` is `&mut [f32]`).
-fn squash(text: &str) -> String {
+pub(super) fn squash(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut pending = false;
     for c in text.chars() {
@@ -108,7 +108,7 @@ fn squash(text: &str) -> String {
 }
 
 /// The top-level (outside `()`, `[]`, `{}` and `<>`) comma-separated parts.
-fn split_top(text: &str) -> Vec<&str> {
+pub(super) fn split_top(text: &str) -> Vec<&str> {
     let b = text.as_bytes();
     let (mut depth, mut from) = (0i32, 0);
     let mut parts = Vec::new();
@@ -164,10 +164,10 @@ fn fixed(text: &str, generic: bool) -> Option<String> {
 }
 
 /// An `impl` or `trait` body: where it is, what owns its items.
-struct Block {
-    open: usize,
-    close: usize,
-    owner: String,
+pub(super) struct Block {
+    pub(super) open: usize,
+    pub(super) close: usize,
+    pub(super) owner: String,
     generic: bool,
     /// A `pub trait`: its methods are public.
     public_trait: bool,
@@ -211,7 +211,7 @@ fn before(code: &str, at: usize) -> &str {
 }
 
 /// The `impl` and `trait` bodies of a file.
-fn blocks(code: &str) -> Vec<Block> {
+pub(super) fn blocks(code: &str) -> Vec<Block> {
     let b = code.as_bytes();
     let mut out = Vec::new();
     for kw in ["impl", "trait"] {
@@ -272,7 +272,7 @@ fn blocks(code: &str) -> Vec<Block> {
 }
 
 /// The end of a signature or alias: the first `{` or `;` outside `()` and `[]`.
-fn item_end(code: &str, from: usize) -> usize {
+pub(super) fn item_end(code: &str, from: usize) -> usize {
     let mut depth = 0i32;
     for (i, &c) in code.as_bytes().iter().enumerate().skip(from) {
         match c {
@@ -300,7 +300,7 @@ fn header_end(code: &str, from: usize) -> usize {
     b.len()
 }
 
-fn ident_at(code: &str, from: usize) -> (&str, usize) {
+pub(super) fn ident_at(code: &str, from: usize) -> (&str, usize) {
     let rest = &code[from..];
     let start = from + (rest.len() - rest.trim_start().len());
     let len = code[start..].bytes().take_while(|&c| word(c)).count();
@@ -308,7 +308,7 @@ fn ident_at(code: &str, from: usize) -> (&str, usize) {
 }
 
 /// `text` without its leading `#[..]` attributes.
-fn strip_attrs(mut text: &str) -> &str {
+pub(super) fn strip_attrs(mut text: &str) -> &str {
     loop {
         text = text.trim_start();
         if !text.starts_with("#[") {

@@ -64,20 +64,6 @@ pub enum BridgeError {
         format: &'static str,
     },
 
-    /// A plugin bundle exists but holds no binary this architecture can load.
-    #[error(
-        "Could not resolve plugin bundle to a binary: {path}\n  \
-         Probed Contents/{{{arch_subdirs}}} — the bundle may not ship a build \
-         for this architecture."
-    )]
-    BundleResolutionFailed {
-        /// The bundle that could not be resolved.
-        path: PathBuf,
-        /// The `Contents/<arch>` subdirectories that were probed, so a
-        /// wrong-architecture bundle reads as such rather than as "corrupt".
-        arch_subdirs: String,
-    },
-
     /// The `plugin-server` executable could not be located.
     #[error(
         "plugin-server binary not found. Build it with `cargo build -p tutti-plugin-server` \

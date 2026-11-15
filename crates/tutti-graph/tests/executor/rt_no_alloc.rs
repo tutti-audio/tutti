@@ -2646,3 +2646,85 @@ fn a_pool_set_across_a_commit_in_flight_allocates_nothing() {
     assert!(!exec.is_parallel());
     ed.collect();
 }
+
+/// An output tap opened again at another width is swapped in by a commit that
+/// allocates and frees nothing on the audio side, and the blocks after it
+/// write the new tap alone. The old reader holds the frames written before
+/// the commit and ends once the executor has handed the commit back.
+#[test]
+fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
+    use tutti_buffers::{InterleavedMut, Pull, Source as _};
+    use tutti_graph::TapId;
+
+    let (mut ed, mut exec) = Editor::new(prepare(64));
+    let node = NodeKey(1);
+    ed.insert(
+        node,
+        "const",
+        Unforkable(TestNode::new(Kind::Const {
+            value: 0.25,
+            width: 3,
+        })),
+    );
+    let port = |p| Source::Node(OutPort { node, port: p });
+    ed.spec_mut()
+        .topology
+        .set_outputs(vec![port(0), port(1), port(2)]);
+    let mut wide = ed
+        .open_output_tap(TapId::of(1), 3, Samples(1024))
+        .expect("the outputs exist");
+    ed.commit().expect("commits");
+    apply(&mut exec);
+    ed.collect();
+    let (mut a, mut b, mut c) = (vec![0.0f32; 64], vec![0.0f32; 64], vec![0.0f32; 64]);
+    let mut run = |exec: &mut tutti_graph::Executor, blocks: usize| {
+        assert_no_alloc::assert_no_alloc(|| {
+            for _ in 0..blocks {
+                exec.process(
+                    64,
+                    &TransportPosition::default(),
+                    &[],
+                    &mut [&mut a[..], &mut b[..], &mut c[..]],
+                );
+            }
+        });
+    };
+    run(&mut exec, 4);
+
+    // The root narrows to one channel and its tap is opened again.
+    ed.spec_mut().topology.set_outputs(vec![port(0)]);
+    let mut narrow = ed
+        .open_output_tap(TapId::of(1), 1, Samples(1024))
+        .expect("the outputs exist");
+    ed.commit().expect("commits");
+    apply(&mut exec);
+    run(&mut exec, 4);
+    ed.collect();
+
+    assert!(
+        wide.source_gone(),
+        "the old reader ends once the commit is applied"
+    );
+    assert_eq!(
+        wide.available().get(),
+        4 * 64,
+        "what was written before the commit"
+    );
+    let mut frames = vec![0.0f32; 4 * 64 * 3];
+    assert_eq!(wide.pop_into(&mut frames).get(), 4 * 64);
+    assert!(frames.iter().all(|&x| x == 0.25));
+    let mut empty = vec![0.0f32; 3];
+    assert!(matches!(
+        wide.pull(InterleavedMut::new(&mut empty, wide.layout()).unwrap()),
+        Pull::Ended
+    ));
+    assert_eq!(
+        narrow.available().get(),
+        4 * 64,
+        "the new tap is fed from the commit's block"
+    );
+    let mut one = vec![0.0f32; 4 * 64];
+    assert_eq!(narrow.pop_into(&mut one).get(), 4 * 64);
+    assert!(one.iter().all(|&x| x == 0.25));
+    assert_eq!(wide.take_lost().get() + narrow.take_lost().get(), 0);
+}

@@ -85,11 +85,6 @@ pub(super) const ALLOW: &[(&str, usize, &str)] = &[
     ("crates/tutti-plugin-ipc/src/config/bridge.rs", 2, PLUGINS),
     ("crates/tutti-plugin-ipc/src/ipc/tests.rs", 4, PLUGINS),
     (
-        "crates/tutti-plugin-ipc/src/subprocess/bundle.rs",
-        6,
-        PLUGINS,
-    ),
-    (
         "crates/tutti-plugin-ipc/src/subprocess/launch.rs",
         10,
         PLUGINS,
@@ -164,11 +159,6 @@ pub(super) const ALLOW: &[(&str, usize, &str)] = &[
     ),
     (
         "crates/tutti-vst3-host/tests/conformance/vst3_editor.rs",
-        1,
-        PLUGINS,
-    ),
-    (
-        "crates/tutti-vst3-host/tests/host/integration_tests.rs",
         1,
         PLUGINS,
     ),

@@ -420,17 +420,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "console"
-version = "0.16.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e96a4956774c13c126a8b5af4daa79384f4d826534c95a02d76afb39e2ab64e3"
-dependencies = [
- "encode_unicode",
- "libc",
- "windows-sys",
-]
-
-[[package]]
 name = "const-oid"
 version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -765,12 +754,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
 
 [[package]]
-name = "encode_unicode"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
-
-[[package]]
 name = "equivalent"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -977,19 +960,6 @@ checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
 dependencies = [
  "equivalent",
  "hashbrown",
-]
-
-[[package]]
-name = "insta"
-version = "1.49.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b67d3d2e287e4b86c10b3f3b641033d1f89b74bdb39d05f34952e2b9a6fe21cd"
-dependencies = [
- "console",
- "once_cell",
- "serde",
- "similar",
- "tempfile",
 ]
 
 [[package]]
@@ -2013,12 +1983,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
-name = "similar"
-version = "2.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
-
-[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2481,7 +2445,6 @@ version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
  "core-foundation",
- "core-foundation-sys",
  "coreaudio-sys",
  "crossbeam-queue",
  "dpi",
@@ -2519,7 +2482,6 @@ dependencies = [
  "bitflags 2.13.2",
  "clap-sys",
  "dpi",
- "libc",
  "libloading 0.9.1",
  "log",
  "thiserror 2.0.21",
@@ -2542,7 +2504,6 @@ dependencies = [
  "libloading 0.9.1",
  "raw-window-handle",
  "rgb",
- "tempfile",
  "thiserror 2.0.21",
  "tutti-clap-ffi",
  "tutti-clap-test-plugin",
@@ -2665,7 +2626,6 @@ dependencies = [
 name = "tutti-export"
 version = "0.0.1"
 dependencies = [
- "approx",
  "criterion",
  "hound",
  "symphonia",
@@ -2978,7 +2938,6 @@ version = "0.0.1"
 dependencies = [
  "arrayvec",
  "assert_no_alloc",
- "atomic_float",
  "criterion",
  "dpi",
  "libloading 0.9.1",
@@ -3067,8 +3026,6 @@ dependencies = [
  "dpi",
  "interprocess",
  "libc",
- "memmap2",
- "serde",
  "tracing",
  "tracing-subscriber",
  "tutti-au-host",
@@ -3116,7 +3073,6 @@ dependencies = [
 name = "tutti-polysynth"
 version = "0.0.1"
 dependencies = [
- "approx",
  "assert_no_alloc",
  "criterion",
  "serde",
@@ -3155,22 +3111,16 @@ dependencies = [
 name = "tutti-sampler"
 version = "0.0.1"
 dependencies = [
- "approx",
  "assert_no_alloc",
  "atomic_float",
  "criterion",
  "crossbeam-channel",
  "hound",
- "insta",
- "parking_lot",
- "rand",
  "rayon",
  "serde",
- "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
- "tracing-subscriber",
  "tutti-buffers",
  "tutti-codec",
  "tutti-dsp",
@@ -3240,7 +3190,6 @@ name = "tutti-sf2"
 version = "0.0.1"
 dependencies = [
  "serde",
- "serde_json",
  "thiserror 2.0.21",
  "tutti-fixtures",
  "tutti-sf2",
@@ -3301,7 +3250,6 @@ dependencies = [
  "criterion",
  "libm",
  "serde",
- "serde_json",
  "thiserror 2.0.21",
  "tutti-fixtures",
  "tutti-types",
@@ -3416,7 +3364,6 @@ dependencies = [
  "dpi",
  "keyboard-types",
  "libloading 0.9.1",
- "parking_lot",
  "raw-window-handle",
  "tempfile",
  "thiserror 2.0.21",
@@ -3424,7 +3371,6 @@ dependencies = [
  "tutti-graph",
  "tutti-plugin-types",
  "tutti-rt",
- "tutti-types",
  "tutti-ump",
  "tutti-vst2-ffi",
  "tutti-vst2-test-plugin",
@@ -3482,13 +3428,11 @@ dependencies = [
  "keyboard-types",
  "parking_lot",
  "raw-window-handle",
- "tempfile",
  "thiserror 2.0.21",
  "tutti-clap-host",
  "tutti-fixtures",
  "tutti-graph",
  "tutti-midi-protocol",
- "tutti-plugin-host",
  "tutti-plugin-types",
  "tutti-rt",
  "tutti-shared-plugin",

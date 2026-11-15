@@ -1,11 +1,9 @@
 //! Subprocess lifecycle: locate, spawn and hand-shake the `plugin-server` child
 //! process.
 
-pub mod bundle;
 mod launch;
 mod reaped;
 
-pub use bundle::resolve_bundle;
 pub use launch::{LaunchedServer, launch};
 pub use reaped::Reaped;
 

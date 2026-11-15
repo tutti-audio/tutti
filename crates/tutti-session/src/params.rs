@@ -206,6 +206,7 @@ param_methods! {
     detune, detune_at => Detune;
     stereo_spread, stereo_spread_at => StereoSpread;
     pan, pan_at => Pan;
+    balance, balance_at => Balance;
     knee, knee_at => Knee;
     decay, decay_at => Decay;
     diffusion, diffusion_at => Diffusion;
