@@ -1,4 +1,4 @@
-//! [`FdnFamily`]: a feedback delay network as a [`Family`].
+//! [`FdnLayout`] and [`FdnControls`]: what a feedback delay network is built to and told.
 //!
 //! `N` delay lines of mutually unrelated lengths (a table of values near primes,
 //! scaled by the room size), each with a three-band absorption set from the
@@ -6,7 +6,7 @@
 //! that time), mixed by an orthogonal reflection `A = I - 2 v v^T`, with an
 //! input pre-delay, a slow modulation of the line lengths, a stereo output
 //! (even lines left, odd right) with a width and a wet gain, and, if the design
-//! is [`freezable`](FdnFamily::freezable), a freeze: every gain exactly one and
+//! is [`freezable`](FdnLayout::freezable), a freeze: every gain exactly one and
 //! the input gated off, so the network is lossless and its tail never ends.
 //!
 //! **Diffusion** is the vector `v`: from one axis (no line feeds another,
@@ -19,17 +19,17 @@
 //! Lengths are rounded to whole frames, so a settled network delays by whole
 //! frames and a frozen one loses nothing to interpolation; a modulated line
 //! reads between frames, and freezing turns the modulation off.
+//!
+//! The design is [`FdnLayout::design_into`]: the controls to a [`Network`], in place, since
+//! a network is too large to build on an audio thread. [`FdnBank`](crate::FdnBank) runs it.
 
-use tutti_types::{Amplitude, BusTopology, Db, Depth, Hz, Mix, SampleRate, Seconds, StereoWidth};
+use tutti_types::{Amplitude, Db, Depth, Hz, Mix, SampleRate, Seconds, StereoWidth};
 
-use core::num::NonZeroU32;
-
-use crate::reverb::fdn::recurrence::{CHUNK, FdnRecurrence};
 use crate::reverb::network::{
     Absorption, Fdn, Gains, Inline, Line, MAX_LINES, Matrix, Modulation, Network, NetworkCapacity,
     OutputMap, Stage, pre_delay_frames,
 };
-use crate::{Cadence, Capacity, Channels, Family, Grows, MaxDecay, Reach, Ring};
+use crate::{Capacity, MaxDecay, Ring, TAIL_FLOOR};
 
 /// The line lengths at 44.1 kHz for a room size of 0.5 (the scale is
 /// `0.5 + size`), values near primes, so the delays share few factors.
@@ -56,7 +56,7 @@ const SILENT_DB: f32 = -120.0;
 /// The loudest wet gain.
 const MAX_WET_DB: f32 = 24.0;
 
-/// The controls of an [`FdnFamily`], in tutti units.
+/// The controls of a feedback delay network, in tutti units.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FdnControls {
     /// The RT60 of the mid band (index 0 of [`UnitParam::Decay`](tutti_types::UnitParam)),
@@ -107,18 +107,19 @@ impl Default for FdnControls {
     }
 }
 
-/// The [`Family`] of the feedback delay network: mono in, stereo out.
+/// What a feedback delay network is built to: its lines, its longest decay and whether it
+/// can freeze. Mono in, stereo out.
 ///
 /// A control outside its range is clamped and a non-finite one takes the
 /// [`FdnControls::DEFAULT`] value, so every control gives a stable network.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FdnFamily {
+pub struct FdnLayout {
     lines: usize,
     max_decay: Seconds,
     freezable: bool,
 }
 
-impl FdnFamily {
+impl FdnLayout {
     /// The lines of the default network.
     const LINES: usize = 8;
 
@@ -156,7 +157,7 @@ impl FdnFamily {
     }
 }
 
-impl FdnFamily {
+impl FdnLayout {
     /// What `NetworkCapacity::tail` is multiplied by for the rounding of the reflection
     /// vector. Each entry of a unit `v` is rounded twice (stored as `f32`, then
     /// divided by the norm and rounded again), 2^-23 relative in all, so `|v|^2`
@@ -165,14 +166,14 @@ impl FdnFamily {
     /// is `3 / (RT60 fs)` decades a frame, so the bound reads a decay slower by
     /// `x = 2e / ln 10 * RT60 fs / 3` of itself, and the tail by `1 / (1 - x)`:
     /// 0.5% at 8 s and 44.1 kHz, 11% at 192 kHz.
-    fn rounding_margin(&self, reach: &Reach<MaxDecay>) -> f32 {
+    fn rounding_margin(&self, rate: SampleRate) -> f32 {
         let e = 2.0 * f64::from(f32::EPSILON);
-        let x = 2.0 * e / std::f64::consts::LN_10 * self.max_decay.get() * reach.rate().get() / 3.0;
+        let x = 2.0 * e / std::f64::consts::LN_10 * self.max_decay.get() * rate.get() / 3.0;
         (1.0 / (1.0 - x.min(0.5))) as f32
     }
 }
 
-impl Default for FdnFamily {
+impl Default for FdnLayout {
     /// Eight lines, RT60s up to 8 s, not freezable.
     fn default() -> Self {
         Self {
@@ -183,8 +184,8 @@ impl Default for FdnFamily {
     }
 }
 
-/// The absorption with its band gains scaled as [`FdnRecurrence`] scales them (peak at
-/// most 0.9999), so the network carries the gains the recurrence runs.
+/// The absorption with its band gains scaled as [`FdnBank`](crate::FdnBank) scales them (peak at
+/// most 0.9999), so the network carries the gains the bank runs.
 fn rescaled(a: Absorption, rate: SampleRate) -> Absorption {
     let Absorption::Bands {
         low,
@@ -198,7 +199,7 @@ fn rescaled(a: Absorption, rate: SampleRate) -> Absorption {
     let pole = crossover
         .map(|f| libm::exp(-std::f64::consts::TAU * f64::from(f.get()) / rate.get()) as f32);
     let [low, mid, high] =
-        crate::reverb::fdn::recurrence::rescale_bands([low.get(), mid.get(), high.get()], pole);
+        crate::reverb::fdn::bank::rescale_bands([low.get(), mid.get(), high.get()], pole);
     Absorption::Bands {
         low: Amplitude(low),
         mid: Amplitude(mid),
@@ -217,34 +218,12 @@ fn finite_secs(v: Seconds, default: Seconds) -> Seconds {
     if v.get().is_finite() { v } else { default }
 }
 
-impl Family for FdnFamily {
-    type Controls = FdnControls;
-    type Member = Network;
-    type Recurrence = FdnRecurrence;
-
-    // The grid the render is a function of: the recurrence ramps in whole chunks
-    // counted from the last reset. The *design* is still
-    // sampled once per block; a grid finer than that would redesign per chunk
-    // for nothing the recurrence needs, so this names the render's clock
-    // and not a schedule for `member_into`.
-    const CADENCE: Cadence = Cadence::stream(match NonZeroU32::new(CHUNK as u32) {
-        Some(n) => n,
-        None => unreachable!(),
-    });
-
-    fn channels(&self) -> Channels {
-        Channels::new(BusTopology::MONO, BusTopology::STEREO)
-    }
-
-    fn blank(&self, rate: SampleRate) -> Network {
-        Network::new(rate)
-    }
-
-    fn recurrence(&self, rate: SampleRate) -> FdnRecurrence {
-        FdnRecurrence::new(rate)
-    }
-
-    fn member_into(&self, c: &FdnControls, rate: SampleRate, out: &mut Network) {
+impl FdnLayout {
+    /// Designs `c` into `out` in place, at `rate`: the network the bank runs, and the public
+    /// entry for designing one (for its analytic queries as much as for running it). A
+    /// network is about 56 KB, so it is built where it lives and never returned by value; no
+    /// allocation.
+    pub fn design_into(&self, c: &FdnControls, rate: SampleRate, out: &mut Network) {
         let d = FdnControls::DEFAULT;
         let freeze = self.freezable && c.freeze;
         let rt60 = [
@@ -359,13 +338,11 @@ impl Family for FdnFamily {
     }
 }
 
-impl Grows for FdnFamily {
-    type Domain = MaxDecay;
-
-    /// The largest design: size 1, the longest decay in every band, the longest
-    /// pre-delay, the deepest modulation. The tail is unbounded if the design
-    /// can freeze, and the network's own at the longest decay if not.
-    fn reach(&self, reach: &Reach<MaxDecay>) -> NetworkCapacity {
+impl FdnLayout {
+    /// The worst case over every control: size 1, the longest decay in every band, the
+    /// longest pre-delay, the deepest modulation. The tail is unbounded if the layout can
+    /// freeze, and the network's own at the longest decay if not. Control side.
+    pub(crate) fn capacity(&self, rate: SampleRate) -> NetworkCapacity {
         let worst = FdnControls {
             decay: [self.max_decay; 3],
             size: Mix(1.0),
@@ -375,13 +352,13 @@ impl Grows for FdnFamily {
             freeze: false,
             ..FdnControls::DEFAULT
         };
-        let mut network = Box::new(Network::new(reach.rate()));
-        self.member_into(&worst, reach.rate(), &mut network);
-        let mut b = NetworkCapacity::need(&network, reach.floor());
+        let mut network = Box::new(Network::new(rate));
+        self.design_into(&worst, rate, &mut network);
+        let mut b = NetworkCapacity::need(&network, TAIL_FLOOR);
         b.tail = match b.tail {
             _ if self.freezable => Ring::Unbounded,
             Ring::Finite(t) => {
-                Ring::Finite(Seconds(t.get() * f64::from(self.rounding_margin(reach))))
+                Ring::Finite(Seconds(t.get() * f64::from(self.rounding_margin(rate))))
             }
             other => other,
         };

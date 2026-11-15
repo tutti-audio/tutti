@@ -1,0 +1,696 @@
+use tutti_buffers::{Planes, PlanesMut};
+use tutti_types::{Db, Depth, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
+
+use super::*;
+use crate::reverb::network::{Fdn, Network, Stage};
+
+const RATE: SampleRate = SampleRate::SR_48K;
+
+fn controls(f: impl FnOnce(&mut FdnControls)) -> FdnControls {
+    let mut c = FdnControls::DEFAULT;
+    f(&mut c);
+    c
+}
+
+/// No modulation, so every line reads at its whole length.
+fn still(f: impl FnOnce(&mut FdnControls)) -> FdnControls {
+    controls(|c| {
+        c.modulation = Depth::of(0.0);
+        f(c);
+    })
+}
+
+fn layout(lines: usize, freezable: bool) -> FdnLayout {
+    FdnLayout::new(lines, Seconds(8.0), freezable).unwrap()
+}
+
+/// A bank of `layout` at `rate`, landed on `c`.
+fn landed(layout: &FdnLayout, rate: SampleRate, c: &FdnControls) -> (FdnBank, FdnGlides) {
+    let mut bank = FdnBank::new(layout, rate);
+    let mut glides = bank.glides();
+    bank.aim(&mut glides, c);
+    glides.settle();
+    (bank, glides)
+}
+
+/// The design of `c`.
+fn design(layout: &FdnLayout, rate: SampleRate, c: &FdnControls) -> Box<Network> {
+    let mut network = Box::new(Network::new(rate));
+    layout.design_into(c, rate, &mut network);
+    network
+}
+
+fn fdn_of(n: &Network) -> &Fdn {
+    let Some(Stage::Fdn(f)) = n.stages.first() else {
+        panic!("one FDN stage")
+    };
+    f
+}
+
+/// `frames` of a deterministic noise in `-0.5..0.5`.
+fn noise(seed: u32, frames: usize) -> Vec<f32> {
+    let mut s = seed | 1;
+    (0..frames)
+        .map(|_| {
+            s ^= s << 13;
+            s ^= s >> 17;
+            s ^= s << 5;
+            (s >> 8) as f32 / (1u32 << 24) as f32 - 0.5
+        })
+        .collect()
+}
+
+/// A unit impulse followed by silence, `frames` long.
+fn impulse(frames: usize) -> Vec<f32> {
+    let mut x = vec![0.0; frames];
+    x[0] = 1.0;
+    x
+}
+
+/// `x` through the bank in calls of `block` frames; the two output channels.
+fn run(bank: &mut FdnBank, glides: &mut FdnGlides, x: &[f32], block: usize) -> [Vec<f32>; 2] {
+    let (mut l, mut r) = (vec![0.0f32; x.len()], vec![0.0f32; x.len()]);
+    let mut at = 0;
+    for piece in x.chunks(block) {
+        let end = at + piece.len();
+        bank.process(
+            glides,
+            Planes::new(&[piece]).unwrap(),
+            PlanesMut::new(&mut [&mut l[at..end], &mut r[at..end]]).unwrap(),
+        );
+        at = end;
+    }
+    [l, r]
+}
+
+/// The Schroeder backward integral of `h` squared, in dB below its total.
+fn schroeder_db(h: &[f64]) -> Vec<f64> {
+    let mut total = 0.0;
+    let mut e = vec![0.0; h.len()];
+    for (i, x) in h.iter().enumerate().rev() {
+        total += x * x;
+        e[i] = total;
+    }
+    let all = e[0];
+    e.iter().map(|x| 10.0 * (x / all).log10()).collect()
+}
+
+/// The RT60 of a decay curve in dB at `rate`, from the time it takes to fall from -20 dB to
+/// -50 dB (30 dB, past the first echoes, which a few trips make a staircase), doubled.
+fn rt60_of(curve: &[f64], rate: SampleRate) -> f64 {
+    let at = |db: f64| {
+        curve
+            .iter()
+            .position(|&x| x <= db)
+            .expect("the curve falls")
+    };
+    2.0 * (at(-50.0) - at(-20.0)) as f64 / rate.get()
+}
+
+/// The decay time of the loop of one line of `length` frames whose per-trip gain is `gain`:
+/// the time `gain^(t * rate / length)` takes to fall 60 dB.
+fn rt60_of_trip_gain(gain: f64, length: f64, rate: SampleRate) -> f64 {
+    60.0 * length / (rate.get() * -20.0 * gain.log10())
+}
+
+/// The per-trip gain of a line of `length` frames that loses 60 dB in `rt60` seconds.
+fn trip_gain(length: f64, rt60: f64, rate: SampleRate) -> f64 {
+    10f64.powf(-3.0 * length / (rate.get() * rt60))
+}
+
+/// A frequency-independent absorption gives every mode of the network the same decay, for
+/// any orthogonal mix, since scaling every line of length `L` by `g^L` moves every pole of the
+/// lossless network radially to `g`: the Schroeder integral of the impulse response falls
+/// 60 dB in the designed RT60, from parallel combs (diffusion 0) to the Householder matrix.
+#[test]
+fn the_schroeder_integral_falls_60_db_in_the_designed_rt60() {
+    let l = layout(8, false);
+    for rt60 in [0.5, 1.0, 2.0] {
+        for diffusion in [0.0, 1.0] {
+            let c = still(|c| {
+                c.decay = [Seconds(rt60); 3];
+                c.diffusion = Mix(diffusion);
+            });
+            let (mut bank, mut glides) = landed(&l, RATE, &c);
+            let frames = (2.0 * rt60 * RATE.get()) as usize;
+            let [left, right] = run(&mut bank, &mut glides, &impulse(frames), 64);
+            // The two channels' energy, summed frame for frame.
+            let h: Vec<f64> = left
+                .iter()
+                .zip(&right)
+                .map(|(&l, &r)| libm::hypot(f64::from(l), f64::from(r)))
+                .collect();
+            let measured = rt60_of(&schroeder_db(&h), RATE);
+            assert!(
+                (measured - rt60).abs() < 0.04 * rt60,
+                "RT60 {rt60} s, diffusion {diffusion}: measured {measured}"
+            );
+        }
+    }
+}
+
+/// The response of the three-band absorption of one trip at `w` rad per frame: the gains
+/// `g = [low, mid, high]` joined by two cascaded one-poles at each crossover, `g_high +
+/// (g_mid - g_high) L2 + (g_low - g_mid) L1` with `L(w) = ((1 - p) / (1 - p e^-jw))^2` and
+/// `p = exp(-2 pi fc / fs)`.
+fn absorption_at(g: [f64; 3], w: f64, rate: SampleRate) -> f64 {
+    let l = |fc: f64| {
+        let p = libm::exp(-std::f64::consts::TAU * fc / rate.get());
+        let den = (1.0 - p * libm::cos(w), p * libm::sin(w));
+        let one = ((1.0 - p) * den.0, -(1.0 - p) * den.1);
+        let norm = den.0 * den.0 + den.1 * den.1;
+        let one = (one.0 / norm, one.1 / norm);
+        (one.0 * one.0 - one.1 * one.1, 2.0 * one.0 * one.1)
+    };
+    let (l1, l2) = (l(300.0), l(4_000.0));
+    let re = g[2] + (g[1] - g[2]) * l2.0 + (g[0] - g[1]) * l1.0;
+    let im = (g[1] - g[2]) * l2.1 + (g[0] - g[1]) * l1.1;
+    libm::hypot(re, im)
+}
+
+/// The magnitude of the DTFT of `block` at `w` rad per frame.
+fn dtft(block: &[f32], w: f64) -> f64 {
+    let (mut re, mut im) = (0.0, 0.0);
+    for (n, &x) in block.iter().enumerate() {
+        re += f64::from(x) * libm::cos(w * n as f64);
+        im -= f64::from(x) * libm::sin(w * n as f64);
+    }
+    libm::hypot(re, im)
+}
+
+/// Each band decays at its own designed RT60. Two diagonal lines are two independent combs,
+/// the left channel the first line alone: its echo `k` (the `k`-th trip of its loop, `L`
+/// frames after the last) is the impulse filtered by the absorption `k` times, so the DTFT of
+/// one trip over the one before it is the absorption's magnitude at that frequency, and the
+/// RT60 that gain over `L` frames gives is the decay at the frequency. At DC the absorption is
+/// the low band's gain exactly, and the decay is the low band's RT60; at the middle of the
+/// crossovers and at Nyquist it is the three bands' response there, which the test computes
+/// from the one-poles. The decay falls with the frequency as the bands say (3 s, 1.5 s, 0.6 s).
+#[test]
+fn each_band_decays_at_its_designed_rt60() {
+    let l = layout(2, false);
+    let c = still(|c| {
+        c.decay = [Seconds(1.5), Seconds(3.0), Seconds(0.6)];
+        c.diffusion = Mix(0.0);
+        c.pre_delay = Seconds(0.0);
+        c.width = StereoWidth(1.0);
+        c.wet = Db(0.0);
+    });
+    let length = fdn_of(&design(&l, RATE, &c)).lines[0].length;
+    assert_eq!(length.fract(), 0.0, "a whole number of frames");
+    let trip = length as usize;
+    let (mut bank, mut glides) = landed(&l, RATE, &c);
+    let [left, _] = run(&mut bank, &mut glides, &impulse(8 * trip), 64);
+
+    let g = [3.0, 1.5, 0.6].map(|t| trip_gain(f64::from(length), t, RATE));
+    // The crossovers (300 Hz and 4 kHz) are the design's, restated here: the test's own copy
+    // of the figures the absorption's response is written in.
+    let mid_hz = libm::sqrt(300.0 * 4_000.0);
+    let probes = [
+        ("DC", 0.0),
+        ("the middle", std::f64::consts::TAU * mid_hz / RATE.get()),
+        ("Nyquist", std::f64::consts::PI),
+    ];
+    let mut measured = Vec::new();
+    for (name, w) in probes {
+        let expected = absorption_at(g, w, RATE);
+        let mut ratios = Vec::new();
+        for k in 0..5 {
+            let echo = |k: usize| &left[(k + 1) * trip..(k + 2) * trip];
+            let ratio = dtft(echo(k + 1), w) / dtft(echo(k), w);
+            assert!(
+                (ratio - expected).abs() < 2e-3 * expected,
+                "{name}, echo {k}: {ratio} against the absorption's {expected}"
+            );
+            ratios.push(ratio);
+        }
+        // The decay the impulse response shows, from its own echoes.
+        let mean = ratios.iter().sum::<f64>() / ratios.len() as f64;
+        measured.push(rt60_of_trip_gain(mean, f64::from(length), RATE));
+    }
+    // At DC the absorption is the low band's gain, so the decay is the designed 3 s.
+    assert!((measured[0] - 3.0).abs() < 0.005 * 3.0, "{measured:?}");
+    // At Nyquist it is the high band's, a little raised by the mid band's tail of the upper
+    // one-pole.
+    assert!((measured[2] - 0.6).abs() < 0.06 * 0.6, "{measured:?}");
+    assert!(
+        measured[0] > measured[1] && measured[1] > measured[2],
+        "{measured:?}"
+    );
+}
+
+/// A frozen network is lossless: every gain exactly 1, the input shut and the modulation off,
+/// so the lines hold their energy, `||(I - 2 v v^T) d|| = ||d||` for the unit `v` each frame.
+/// The energy the lines hold (their whole state while frozen) is the same 5 s apart to
+/// 0.01 dB; the matrix is applied once to each sample a trip, so rounding the reflection
+/// vector to `f32` moves it 1e-4 dB at most.
+#[test]
+fn a_frozen_network_keeps_its_energy() {
+    let l = layout(8, true);
+    let c = controls(|c| c.diffusion = Mix(1.0));
+    let (mut bank, mut glides) = landed(&l, RATE, &c);
+    run(&mut bank, &mut glides, &noise(1, 24_000), 64);
+    bank.aim(
+        &mut glides,
+        &controls(|c| {
+            c.diffusion = Mix(1.0);
+            c.freeze = true;
+        }),
+    );
+    // Past the ramp to the frozen gains.
+    run(&mut bank, &mut glides, &vec![0.0; 4_800], 64);
+    let before = bank.state_energy(&glides);
+    assert!(before > 0.0, "the lines hold a tail");
+    run(&mut bank, &mut glides, &vec![0.0; 240_000], 64);
+    let db = 10.0 * (bank.state_energy(&glides) / before).log10();
+    assert!(db.abs() < 0.01, "the frozen energy moved {db:.5} dB in 5 s");
+}
+
+/// A frozen tail keeps its energy through a diffusion ramp from 0 to 1: the reflection is a
+/// unit vector at every step, not a straight line between two (which dips to `|v|^2` of 0.68
+/// and is a contraction). The energy the lines hold before and after the 20 ms ramp agrees
+/// to 0.01 dB. (The output's level would not do: it is the lines' energy over their lengths,
+/// and mixing moves energy between lines of different length.)
+#[test]
+fn a_diffusion_ramp_keeps_a_frozen_tails_energy() {
+    let l = layout(8, true);
+    let at = |diffusion: f32, freeze: bool| {
+        still(|c| {
+            c.diffusion = Mix(diffusion);
+            c.freeze = freeze;
+        })
+    };
+    let (mut bank, mut glides) = landed(&l, RATE, &at(0.0, false));
+    run(&mut bank, &mut glides, &noise(5, 48_000), 64);
+    bank.aim(&mut glides, &at(0.0, true));
+    run(&mut bank, &mut glides, &vec![0.0; 24_000], 64);
+    let before = bank.state_energy(&glides);
+    bank.aim(&mut glides, &at(1.0, true));
+    run(&mut bank, &mut glides, &vec![0.0; 9_600], 64);
+    let db = 10.0 * (bank.state_energy(&glides) / before).log10();
+    assert!(
+        db.abs() < 0.01,
+        "the frozen energy moved {db:.4} dB through the ramp"
+    );
+}
+
+/// At diffusion 0 the lines do not couple: each is its own comb with a positive loop gain, so
+/// the response's sum (its value at DC) is `wet * sum_j c_j b_j / (1 - g_j)`, with `g_j` the
+/// line's DC loop gain. A sign on one line's loop would make its term `c b / (1 + g)`, a small
+/// fraction of the figure at a long decay.
+#[test]
+fn a_diagonal_network_is_the_identity_a_comb_a_line_with_a_positive_sign() {
+    let l = layout(8, true);
+    let c = still(|c| {
+        c.decay = [Seconds(2.0); 3];
+        c.diffusion = Mix(0.0);
+        c.pre_delay = Seconds(0.0);
+        c.width = StereoWidth(1.0);
+    });
+    let net = design(&l, RATE, &c);
+    let f = fdn_of(&net);
+    let expected: f64 = (0..f.lines.len())
+        .map(|j| {
+            let b = f64::from(f.input[j]);
+            let c = f64::from(f.output.rows[0][j]);
+            let g = f64::from(f.lines[j].absorption.gain(Band::Low).get());
+            b * c / (1.0 - g)
+        })
+        .sum::<f64>()
+        * f64::from(net.wet.to_amplitude().get());
+    let (mut bank, mut glides) = landed(&l, RATE, &c);
+    let [left, _] = run(&mut bank, &mut glides, &impulse(10 * 48_000), 64);
+    let sum: f64 = left.iter().map(|&v| f64::from(v)).sum();
+    assert!(
+        (sum - expected).abs() < 0.01 * expected.abs(),
+        "the response sums to {sum}, the identity's comb bank to {expected}"
+    );
+}
+
+/// The first echo is the shortest line's: the impulse through the pre-delay, the input gain
+/// `1 / sqrt(n)` and the output gain `sqrt(2 / n)` of an `n`-line network, the wet gain, and
+/// nothing before it. Width 1 leaves the line on its own ear and width 0 puts half of it on
+/// both.
+#[test]
+fn the_first_echo_follows_the_pre_delay_the_wet_gain_and_the_width() {
+    let n = 8;
+    let l = layout(n, false);
+    let echo = |wet: Db, width: f32| {
+        let c = still(|c| {
+            c.pre_delay = Seconds(0.1);
+            c.wet = wet;
+            c.width = StereoWidth(width);
+        });
+        let net = design(&l, RATE, &c);
+        let first = fdn_of(&net)
+            .lines
+            .iter()
+            .map(|line| line.length as usize)
+            .min()
+            .unwrap();
+        let at = 4_800 + first;
+        let (mut bank, mut glides) = landed(&l, RATE, &c);
+        let [left, right] = run(&mut bank, &mut glides, &impulse(at + 64), 64);
+        assert!(
+            left[..at].iter().chain(&right[..at]).all(|&x| x == 0.0),
+            "silent until the pre-delay and the shortest line have gone round"
+        );
+        (left[at], right[at])
+    };
+    let unit = (1.0 / (n as f32).sqrt()) * (2.0 / n as f32).sqrt();
+    let (l0, r0) = echo(Db(0.0), 1.0);
+    assert!(
+        (l0 - unit).abs() < 1e-6 && r0 == 0.0,
+        "{l0} {r0} against {unit}"
+    );
+    let (l6, _) = echo(Db(-6.0206), 1.0);
+    assert!((l6 - 0.5 * unit).abs() < 1e-6, "-6 dB halves it: {l6}");
+    let (lw, rw) = echo(Db(0.0), 0.0);
+    assert!(
+        lw == rw && (lw - 0.5 * unit).abs() < 1e-6,
+        "mono: {lw} {rw}"
+    );
+    let (silent, _) = echo(Db(f32::NEG_INFINITY), 1.0);
+    assert_eq!(silent, 0.0);
+}
+
+/// What is heard does not depend on how the stream is cut into calls: a retarget at a chunk's
+/// start and one inside a chunk each give the same bits whether the input goes in whole, in
+/// calls of a frame, a chunk, a chunk and one, or a prime, because the chunks are counted
+/// from the last reset and not from a call's edge.
+#[test]
+fn any_split_of_the_stream_gives_the_same_bits() {
+    let l = layout(8, true);
+    let a = controls(|_| {});
+    let b = controls(|c| {
+        c.decay = [Seconds(4.0), Seconds(5.0), Seconds(2.0)];
+        c.size = Mix(0.8);
+        c.diffusion = Mix(0.3);
+        c.pre_delay = Seconds(0.01);
+        c.rate = Hz(3.0);
+        c.width = StereoWidth(0.5);
+        c.wet = Db(-6.0);
+    });
+    let x = noise(7, 6_000);
+    for at in [1_024, 1_000] {
+        let render = |block: usize| {
+            let (mut bank, mut glides) = landed(&l, RATE, &a);
+            let mut out = run(&mut bank, &mut glides, &x[..at], block);
+            bank.aim(&mut glides, &b);
+            let tail = run(&mut bank, &mut glides, &x[at..], block);
+            for (o, t) in out.iter_mut().zip(tail) {
+                o.extend(t);
+            }
+            out
+        };
+        let whole = render(x.len());
+        assert!(whole[0].iter().any(|&s| s != 0.0), "something is heard");
+        for block in [1, 7, 31, 32, 33, 100, 1_000] {
+            assert_eq!(render(block), whole, "calls of {block}, a retarget at {at}");
+        }
+    }
+}
+
+/// A reset bank is a fresh one: after a noise burst and a reset, an impulse renders the same
+/// bits as it does on a bank that never ran (the modulation's phases and the chunk count
+/// start over with the lines).
+#[test]
+fn a_reset_bank_renders_as_a_fresh_one() {
+    let l = layout(8, false);
+    let c = controls(|c| c.modulation = Depth::of(0.8));
+    let (mut used, mut used_glides) = landed(&l, RATE, &c);
+    run(&mut used, &mut used_glides, &noise(3, 5_001), 64);
+    used.reset();
+    used_glides.settle();
+    let (mut fresh, mut fresh_glides) = landed(&l, RATE, &c);
+    let x = impulse(12_000);
+    let after = run(&mut used, &mut used_glides, &x, 64);
+    assert!(after[0].iter().any(|&s| s != 0.0));
+    assert_eq!(after, run(&mut fresh, &mut fresh_glides, &x, 64));
+}
+
+/// A clone is its own bank holding the lines, chunk count and glides as they were: both
+/// continue to the same bits, and one running on does not move the other.
+#[test]
+fn a_clone_continues_where_the_original_was_and_shares_nothing() {
+    let l = layout(8, false);
+    let c = controls(|_| {});
+    let (mut bank, mut glides) = landed(&l, RATE, &c);
+    let x = noise(9, 4_000);
+    run(&mut bank, &mut glides, &x[..1_777], 64);
+    bank.aim(&mut glides, &controls(|c| c.decay = [Seconds(0.7); 3]));
+    run(&mut bank, &mut glides, &x[1_777..2_000], 64);
+    let (mut twin, mut twin_glides) = (bank.clone(), glides.clone());
+    let rest = run(&mut bank, &mut glides, &x[2_000..], 64);
+    assert!(rest[0].iter().any(|&s| s != 0.0));
+    assert_eq!(rest, run(&mut twin, &mut twin_glides, &x[2_000..], 64));
+}
+
+/// Before its first aim a bank renders silence, and the channels of an input are averaged to
+/// one: a channel and its negation cancel, and two copies of a signal render as the signal.
+#[test]
+fn a_bank_is_silent_until_aimed_and_averages_its_input() {
+    let l = layout(8, false);
+    let mut bank = FdnBank::new(&l, RATE);
+    let mut glides = bank.glides();
+    let before = run(&mut bank, &mut glides, &noise(2, 256), 64);
+    assert!(before.iter().flatten().all(|&s| s == 0.0));
+
+    let c = still(|_| {});
+    let y = noise(4, 4_096);
+    let negated: Vec<f32> = y.iter().map(|s| -s).collect();
+    let render = |channels: &[&[f32]]| {
+        let (mut bank, mut glides) = landed(&l, RATE, &c);
+        let (mut left, mut right) = (vec![0.0f32; y.len()], vec![0.0f32; y.len()]);
+        bank.process(
+            &mut glides,
+            Planes::new(channels).unwrap(),
+            PlanesMut::new(&mut [&mut left, &mut right]).unwrap(),
+        );
+        [left, right]
+    };
+    let cancelled = render(&[&y, &negated]);
+    assert!(cancelled.iter().flatten().all(|&s| s == 0.0));
+    let one = render(&[&y]);
+    assert!(one[0].iter().any(|&s| s != 0.0));
+    assert_eq!(render(&[&y, &y]), one);
+}
+
+/// The tail a bank declares is its ceiling: the longest decay's network tail, unbounded for
+/// a layout that can freeze; the tail of controls is the
+/// network's own, no longer than the ceiling, and at least the decay in every band (the time
+/// to fall 60 dB).
+#[test]
+fn the_tail_is_the_networks_under_the_ceiling() {
+    let plain = FdnBank::new(&layout(8, false), RATE);
+    let freezable = FdnBank::new(&layout(8, true), RATE);
+    assert_eq!(freezable.tail(), Tail::Unbounded);
+    let Tail::Finite(ceiling) = plain.tail() else {
+        panic!("a finite ceiling")
+    };
+    assert!(ceiling.get() as f64 >= 8.0 * RATE.get(), "{ceiling:?}");
+    let (mut plain, mut freezable) = (plain, freezable);
+    let (glides_p, glides_f) = (plain.glides(), freezable.glides());
+    for rt60 in [0.3, 1.0, 2.5] {
+        let c = still(|c| c.decay = [Seconds(rt60); 3]);
+        let Tail::Finite(t) = plain.tail_of(&glides_p, &c) else {
+            panic!("finite")
+        };
+        assert!(
+            t <= ceiling && t.get() as f64 >= rt60 * RATE.get(),
+            "{t:?} at {rt60}"
+        );
+        assert_eq!(
+            freezable.tail_of(&glides_f, &c),
+            plain.tail_of(&glides_p, &c)
+        );
+    }
+    assert_eq!(
+        freezable.tail_of(&glides_f, &controls(|c| c.freeze = true)),
+        Tail::Unbounded
+    );
+    assert!(matches!(
+        plain.tail_of(&glides_p, &controls(|c| c.freeze = true)),
+        Tail::Finite(_)
+    ));
+}
+
+/// A size that is still moving keeps the decay it was designed with. The gains are designed
+/// for the length a line is moving to, `g = 10^(-3 L / (fs T))` a trip of `L` frames; while the
+/// line is `L'` frames long each band's gain runs raised to `L' / L`, which is the gain that
+/// loses 60 dB in the same `T` over `L'` frames, `g^(L'/L) = 10^(-3 L' / (fs T))`. After every
+/// chunk of a size drop from 1 to 0 (lines 3 times too long at first, and in flight for about
+/// 1.5 s to 7 s depending on the line), the gain each line runs in each band is read back from
+/// the chunk's constants (low is the sum of the three terms, mid the first two, high the
+/// first), and the decay `60 L' / (fs * -20 log10 g)` it gives over the line's current length
+/// is the band's designed RT60 (3 s low, 1.5 s mid, 0.6 s high) to 0.1% (15% in the 20 ms the
+/// gains ramp between the two designs). Without the exponent a line three times too long
+/// would decay three times too slowly.
+///
+/// The impulse response is not the measurement: a read between two samples is a low-pass,
+/// which costs a trip's high frequencies as much as any gain does.
+#[test]
+fn a_size_on_the_move_keeps_its_rt60_in_every_band() {
+    let l = layout(8, false);
+    let bands = |size: f32| {
+        still(|c| {
+            c.decay = [Seconds(1.5), Seconds(3.0), Seconds(0.6)];
+            c.size = Mix(size);
+        })
+    };
+    let (mut bank, mut glides) = landed(&l, RATE, &bands(1.0));
+    bank.aim(&mut glides, &bands(0.0));
+    let designed = [3.0, 1.5, 0.6];
+    let Steps::Fixed(ramp_chunks) = ramp(RATE.get()) else {
+        panic!("a fixed ramp")
+    };
+    let ramp_chunks = ramp_chunks as usize;
+    let mut in_flight = 0;
+    for chunk in 0..16_000 {
+        run(
+            &mut bank,
+            &mut glides,
+            &[0.0; FdnBank::CHUNK],
+            FdnBank::CHUNK,
+        );
+        for j in 0..glides.n {
+            // The length the chunk ran with, not where the glide has got to since.
+            let (now, to) = (bank.state.c_len[j], glides.len[j].target());
+            let [high, mid_over, low_over] = bank.state.c_gain[j].map(f64::from);
+            let gains = [high + mid_over + low_over, high + mid_over, high];
+            // While the gains ramp (a blend of two designs for two lengths) the exponent is
+            // the blend's, which is linear in the gain and not in its logarithm: a few percent off; after it, exact.
+            let tol = if chunk < ramp_chunks { 0.15 } else { 1e-3 };
+            for (g, t) in gains.iter().zip(designed) {
+                let rt60 = 60.0 * f64::from(now) / (RATE.get() * -20.0 * g.log10());
+                assert!(
+                    (rt60 - t).abs() < tol * t,
+                    "chunk {chunk}, line {j} at {now} of {to} frames: {rt60} s against {t}"
+                );
+            }
+            in_flight += usize::from(now != to);
+        }
+    }
+    assert!(
+        in_flight > 8 * 2_000,
+        "lines were in flight: {in_flight} line chunks"
+    );
+}
+
+/// The pre-delay that has not yet fallen is owed too, up to the longest one: from 0.4 s down
+/// to none, 19 200 frames more than the same controls at rest, and the tail of the longest
+/// decay with the longest pre-delay in flight still fits the ceiling.
+#[test]
+fn the_tail_owes_the_pre_delay_still_to_fall() {
+    let l = layout(8, false);
+    let (mut bank, mut glides) = landed(&l, RATE, &still(|c| c.pre_delay = Seconds(0.4)));
+    bank.aim(&mut glides, &still(|_| {}));
+    let Tail::Finite(owed) = bank.tail_of(&glides, &still(|_| {})) else {
+        panic!("finite")
+    };
+    let (mut fresh, fresh_glides) = landed(&l, RATE, &still(|_| {}));
+    let Tail::Finite(base) = fresh.tail_of(&fresh_glides, &still(|_| {})) else {
+        panic!("finite")
+    };
+    assert!(
+        owed.get().abs_diff(base.get() + 19_200) <= 1,
+        "{owed:?} against {base:?}"
+    );
+    let longest = still(|c| c.decay = [Seconds(8.0); 3]);
+    let (mut worst, mut worst_glides) = landed(
+        &l,
+        RATE,
+        &still(|c| {
+            c.decay = [Seconds(8.0); 3];
+            c.pre_delay = crate::MAX_PRE_DELAY;
+        }),
+    );
+    worst.aim(&mut worst_glides, &longest);
+    let (Tail::Finite(t), Tail::Finite(ceiling)) =
+        (worst.tail_of(&worst_glides, &longest), worst.tail())
+    else {
+        panic!("finite")
+    };
+    assert!(t <= ceiling, "{t:?} over the ceiling {ceiling:?}");
+}
+
+/// A line moves toward its target at most half a frame a chunk and is there in exactly
+/// `ceil(distance / 0.5)` chunks: a size that grows a line `delta` frames takes
+/// `ceil(delta / 0.5)` steps of the glide, one a chunk, and no step is longer than 0.5.
+#[test]
+fn a_length_moves_half_a_frame_a_chunk_and_lands_exactly() {
+    let l = layout(8, false);
+    let (a, b) = (still(|c| c.size = Mix(0.2)), still(|c| c.size = Mix(0.3)));
+    let (mut bank, mut glides) = landed(&l, RATE, &a);
+    let (from, to) = (
+        fdn_of(&design(&l, RATE, &a)).lines[3].length,
+        fdn_of(&design(&l, RATE, &b)).lines[3].length,
+    );
+    let steps = ((to - from) / 0.5).ceil() as usize;
+    assert!(steps > 100, "a long way: {steps} chunks");
+    bank.aim(&mut glides, &b);
+    let mut last = from;
+    for chunk in 1..=steps {
+        run(
+            &mut bank,
+            &mut glides,
+            &[0.0; FdnBank::CHUNK],
+            FdnBank::CHUNK,
+        );
+        let now = glides.len[3].now();
+        assert!(now - last <= 0.5 + 1e-3, "chunk {chunk}: {last} to {now}");
+        assert!(now > last);
+        last = now;
+        assert_eq!(
+            now == to,
+            chunk == steps,
+            "lands in {steps} chunks, not {chunk}"
+        );
+    }
+}
+
+/// The pre-delay moves at most 2 frames a chunk and lands exactly: 0.1 s at 48 kHz is 4800
+/// frames, 2400 chunks.
+#[test]
+fn the_pre_delay_moves_two_frames_a_chunk_and_lands_exactly() {
+    let l = layout(8, false);
+    let (mut bank, mut glides) = landed(&l, RATE, &still(|_| {}));
+    bank.aim(&mut glides, &still(|c| c.pre_delay = Seconds(0.1)));
+    let mut last = 0.0f32;
+    for chunk in 1..=2_400 {
+        run(
+            &mut bank,
+            &mut glides,
+            &[0.0; FdnBank::CHUNK],
+            FdnBank::CHUNK,
+        );
+        let now = glides.pre_len.now();
+        assert!(now - last <= 2.0 + 1e-3, "chunk {chunk}: {last} to {now}");
+        last = now;
+        assert_eq!(now == 4_800.0, chunk == 2_400, "chunk {chunk}: {now}");
+    }
+}
+
+/// A gain moves over 20 ms of whole chunks and lands exactly: at 48 kHz 960 frames is 30
+/// chunks, so the wet gain goes from 1 to a half in 30 steps and not 29, and the ramp is
+/// 30 steps.
+#[test]
+fn a_gain_ramps_over_twenty_milliseconds_of_chunks_and_lands_exactly() {
+    let wanted = (0.020 * RATE.get() / FdnBank::CHUNK as f64).ceil() as u32;
+    assert_eq!(wanted, 30);
+    assert_eq!(ramp(RATE.get()), Steps::Fixed(wanted));
+    let l = layout(8, false);
+    let (mut bank, mut glides) = landed(&l, RATE, &still(|_| {}));
+    bank.aim(&mut glides, &still(|c| c.wet = Db(-6.0206)));
+    let target = glides.wet.target();
+    assert!((target - 0.5).abs() < 1e-4);
+    for chunk in 1..=wanted {
+        run(
+            &mut bank,
+            &mut glides,
+            &[0.0; FdnBank::CHUNK],
+            FdnBank::CHUNK,
+        );
+        assert_eq!(glides.wet.now() == target, chunk == wanted, "chunk {chunk}");
+    }
+}
