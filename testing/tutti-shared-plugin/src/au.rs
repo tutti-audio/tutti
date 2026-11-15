@@ -679,9 +679,9 @@ unsafe extern "C" fn get_property(
                     )
                 }
                 x if x == sys::kAudioUnitProperty_ParametersForOverview => {
-                    // SAFETY: an all-zero `AudioUnitParameter` is valid (no unit, global scope).
-                    let mut list: [sys::AudioUnitParameter; OVERVIEW.len()] =
-                        unsafe { std::mem::zeroed() };
+                    // An all-zero `AudioUnitParameter` is valid (no unit, global scope);
+                    // the enclosing `unsafe` block covers the `zeroed` call.
+                    let mut list: [sys::AudioUnitParameter; OVERVIEW.len()] = std::mem::zeroed();
                     for (slot, id) in list.iter_mut().zip(OVERVIEW) {
                         slot.mParameterID = id;
                         slot.mScope = sys::kAudioUnitScope_Global;
