@@ -4,7 +4,7 @@ use tutti_buffers::{Planes, PlanesMut};
 use tutti_types::{ChannelLayout, Hz, SampleRate};
 
 use super::*;
-use crate::{Complex64, CrossoverControls};
+use crate::{Complex64, CrossoverControls, CrossoverModel, SOLVE_CEILING};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -13,16 +13,24 @@ fn model(freqs: &[f32]) -> CrossoverModel {
     CrossoverModel::new(&f, RATE).unwrap()
 }
 
-/// Runs `input` (one `Vec` per channel) through `bank` at `model` in blocks of the lengths
-/// in `blocks`, cycled, and returns the output planes, `bands * channels` of them.
-fn run<S: Float>(
+/// The grid the node's glide takes: a design arrives in 16 frames.
+const GLIDE: u32 = 16;
+
+/// A glide at rest on `model`.
+fn landed(model: &CrossoverModel) -> Glide<CrossoverCoefficients> {
+    Glide::landed(model.coefficients()).by(GLIDE)
+}
+
+/// Runs `input` (one `Vec` per channel) through `bank` at the glide `at` in blocks of the
+/// lengths in `blocks`, cycled, and returns the output planes, `bands * channels` of them.
+fn run_glide<S: Float>(
     bank: &mut CrossoverBank,
-    model: &CrossoverModel,
+    glide: &mut Glide<CrossoverCoefficients>,
     input: &[Vec<S>],
     blocks: &[usize],
 ) -> Vec<Vec<S>> {
     let frames = input[0].len();
-    let mut out = vec![vec![S::ZERO; frames]; input.len() * model.bands()];
+    let mut out = vec![vec![S::ZERO; frames]; input.len() * glide.target().bands()];
     let mut at = 0;
     for &len in blocks.iter().cycle() {
         if at >= frames {
@@ -32,13 +40,23 @@ fn run<S: Float>(
         let ins: Vec<&[S]> = input.iter().map(|c| &c[at..end]).collect();
         let mut outs: Vec<&mut [S]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
         bank.process(
-            model,
+            glide,
             Planes::new(&ins).expect("equal planes"),
             PlanesMut::new(&mut outs).expect("equal planes"),
         );
         at = end;
     }
     out
+}
+
+/// [`run_glide`] at `model`, held.
+fn run<S: Float>(
+    bank: &mut CrossoverBank,
+    model: &CrossoverModel,
+    input: &[Vec<S>],
+    blocks: &[usize],
+) -> Vec<Vec<S>> {
+    run_glide(bank, &mut landed(model), input, blocks)
 }
 
 /// The unit impulse response of every band of a mono tree, in `f64` audio so the output is
@@ -202,8 +220,8 @@ fn the_planes_are_band_major_and_each_channel_is_its_own_tree() {
     );
 }
 
-/// Block independence: the model changes at frame 200 and 1 000, and any other cut of the
-/// stream into calls gives the same frames bit for bit.
+/// Block independence: the design changes at frame 200 and 1 000 (a glide of 16 frames from
+/// each), and any other cut of the stream into calls gives the same frames bit for bit.
 #[test]
 fn any_split_renders_the_frames_of_the_whole() {
     let models = [
@@ -221,10 +239,15 @@ fn any_split_renders_the_frames_of_the_whole() {
         .collect();
     let render = |blocks: &[usize]| {
         let mut bank = CrossoverBank::new(ChannelLayout::STEREO);
+        let mut glide = landed(&models[0]);
         let mut out = vec![vec![0.0f32; 1_501]; 6];
         for (w, m) in cuts.windows(2).zip(&models) {
+            glide.aim(m.coefficients());
             let ins: Vec<Vec<f32>> = input.iter().map(|c| c[w[0]..w[1]].to_vec()).collect();
-            for (plane, piece) in out.iter_mut().zip(run(&mut bank, m, &ins, blocks)) {
+            for (plane, piece) in out
+                .iter_mut()
+                .zip(run_glide(&mut bank, &mut glide, &ins, blocks))
+            {
                 plane[w[0]..w[1]].copy_from_slice(&piece);
             }
         }
@@ -236,19 +259,92 @@ fn any_split_renders_the_frames_of_the_whole() {
     }
 }
 
-/// A model is whole from the next frame: after a zero input has left the state at 0, an
-/// impulse through the model comes out of band 0 as the product of the first coefficients of
-/// the band's sections (the low-pass twice, then the all-pass of the later split), the
-/// model's own and not a blend with the one before.
+/// A step in the splits is a linear glide of each split's integrator gain
+/// `g = tan(pi f / fs)` over the grid, reached exactly. After a zero input has left the state
+/// at 0, an impulse at frame `m` comes out of band 0 as the first coefficients of its
+/// sections at the gains of step `m + 1` of 16: `a3^2 (1 - 2 sqrt2 a2')` with
+/// `a3 = g^2 / (1 + g (g + sqrt2))` of split 0 (the low-pass twice) and `a2' = g' / (1 + g' (g'
+/// + sqrt2))` of split 1 (its all-pass), the gains blended linearly (`g` of 1 kHz to
+/// `g` of 4 kHz, and 5 kHz to 9 kHz). From step 16 on it is the target's, to the last bit.
 #[test]
-fn a_model_takes_effect_whole() {
-    let first = model(&[300.0, 3_000.0]);
-    let second = model(&[900.0, 5_000.0]);
-    let mut bank = CrossoverBank::new(ChannelLayout::MONO);
-    run(&mut bank, &first, &[vec![0.0f64; 40]], &[40]);
-    let out = run(&mut bank, &second, &[vec![1.0f64]], &[1]);
-    let (low, all_pass) = (second.coeffs[0].low.b0, second.coeffs[1].all_pass.b0);
-    assert_eq!(out[0][0], low * low * all_pass);
+fn a_step_in_the_splits_glides_linearly_in_the_gain_and_lands_exactly() {
+    let (from, to) = (model(&[1_000.0, 5_000.0]), model(&[4_000.0, 9_000.0]));
+    let g = |hz: f64| (PI * hz / RATE.get()).tan();
+    let at = |m: usize, a: f64, b: f64| {
+        let t = (m + 1).min(16) as f64 / 16.0;
+        let g = g(a) + (g(b) - g(a)) * t;
+        (g, g / (1.0 + g * (g + SQRT_2)))
+    };
+    for m in [0usize, 1, 7, 14, 15, 16, 25] {
+        let mut x = vec![0.0f64; m + 1];
+        x[m] = 1.0;
+        let mut glide = landed(&from);
+        glide.aim(to.coefficients());
+        let out = run_glide(
+            &mut CrossoverBank::new(ChannelLayout::MONO),
+            &mut glide,
+            &[x],
+            &[m + 1],
+        );
+        let (g0, a2_0) = at(m, 1_000.0, 4_000.0);
+        let a3 = g0 * a2_0;
+        let (_, a2_1) = at(m, 5_000.0, 9_000.0);
+        let want = a3 * a3 * (1.0 - 2.0 * SQRT_2 * a2_1);
+        assert!(
+            (out[0][m] - want).abs() < 1e-15,
+            "frame {m}: {} against {want}",
+            out[0][m]
+        );
+    }
+    let (low, all_pass) = (to.coeffs[0].low().b0, to.coeffs[1].all_pass().b0);
+    let mut glide = landed(&from);
+    glide.aim(to.coefficients());
+    let mut x = vec![0.0f64; 40];
+    x[39] = 1.0;
+    let out = run_glide(
+        &mut CrossoverBank::new(ChannelLayout::MONO),
+        &mut glide,
+        &[x],
+        &[40],
+    );
+    assert!(
+        (out[0][39] - low * low * all_pass).abs() < 1e-15,
+        "{}",
+        out[0][39]
+    );
+    assert_eq!(glide.now(), to.coefficients());
+}
+
+/// A glide through the bank keeps the sections inside the derived bound for a split that
+/// moves between 1 Hz and its cap every grid period with full-scale input: the bound of one
+/// section is `tutti_fixtures::tpt`'s, in the product of the sections of a band.
+#[test]
+fn a_split_gliding_between_the_extremes_stays_within_the_derived_bound() {
+    let (lo, hi) = (model(&[1.0]), model(&[23_952.0]));
+    // The cap's gain, with 0.1% for the `f32` rounding of the cap's frequency.
+    let section = tutti_fixtures::tpt::tpt_section_bound((PI * SOLVE_CEILING).tan() * 1.001);
+    let bound = section.tap * section.tap;
+    let frames = 200_000;
+    for (name, alternate) in [("constant", false), ("alternating", true)] {
+        let input: Vec<f32> = (0..frames)
+            .map(|i| if alternate { [1.0, -1.0][i % 2] } else { 1.0 })
+            .collect();
+        let mut bank = CrossoverBank::new(ChannelLayout::MONO);
+        let mut glide = landed(&lo);
+        let mut peak = 0.0f64;
+        for (period, chunk) in input.chunks(16).enumerate() {
+            glide.aim(if period.is_multiple_of(2) { &hi } else { &lo }.coefficients());
+            let out = run_glide(&mut bank, &mut glide, &[chunk.to_vec()], &[chunk.len()]);
+            peak = out
+                .iter()
+                .flatten()
+                .fold(peak, |p, &s| p.max(f64::from(s.abs())));
+        }
+        assert!(
+            peak.is_finite() && peak <= bound,
+            "{name}: {peak} over {bound}"
+        );
+    }
 }
 
 /// `reset` is silence: after it, a zero input gives exactly zero in every band.
@@ -289,7 +385,7 @@ fn a_narrow_view_is_filled_as_far_as_it_goes() {
     let ins: Vec<&[f32]> = input.iter().map(|c| &c[..]).collect();
     let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
     CrossoverBank::new(ChannelLayout::STEREO).process(
-        &m,
+        &mut landed(&m),
         Planes::new(&ins).unwrap(),
         PlanesMut::new(&mut outs).unwrap(),
     );
@@ -298,7 +394,7 @@ fn a_narrow_view_is_filled_as_far_as_it_goes() {
     let mut out = vec![vec![9.0f32; 300]; 6];
     let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
     CrossoverBank::new(ChannelLayout::STEREO).process(
-        &m,
+        &mut landed(&m),
         Planes::new(&ins[..1]).unwrap(),
         PlanesMut::new(&mut outs).unwrap(),
     );

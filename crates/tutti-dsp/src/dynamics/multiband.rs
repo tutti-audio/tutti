@@ -13,10 +13,10 @@
 //! metering). Both are weights of 0 or 1 that glide over [`GAIN_GLIDE`], like a makeup: a
 //! step in either multiplies the output directly, so it would click.
 //!
-//! The crossover lands whole on the stream grid ([`Family::CADENCE`]), as
-//! [`CrossoverBank`](crate::CrossoverBank)'s does, and so do the detectors; only the
-//! makeups and the two weights glide. Each band's threshold is a per-frame lane of the
-//! [`Inputs`] (lane `b` is band `b`'s).
+//! The crossover is designed on the stream grid ([`Family::CADENCE`]) and glides to each
+//! design over a grid period, as [`CrossoverBank`](crate::CrossoverBank)'s does; the
+//! detectors land whole, and the makeups and the two weights glide over [`GAIN_GLIDE`]. Each
+//! band's threshold is a per-frame lane of the [`Inputs`] (lane `b` is band `b`'s).
 //!
 //! The deepest reduction each band reached since the last read is in the state
 //! ([`BandReductions`], the recurrence's [`Readout`]): a reading for a meter, which the node publishes.
@@ -30,8 +30,9 @@ use super::compressor::{CompressorControls, CompressorMember, Detector};
 use crate::control::COEFF_STREAM;
 use crate::filter::CrossoverState;
 use crate::{
-    Approach, Cadence, Channels, CrossoverControls, CrossoverError, CrossoverModel, Effort, Family,
-    Glide, Inputs, Readout, Recurrence, Ring, Setup, Start, Steps, System,
+    Approach, COEFF_INTERVAL, Cadence, Channels, CrossoverCoefficients, CrossoverControls,
+    CrossoverError, CrossoverModel, Effort, Family, Glide, Inputs, Readout, Recurrence, Ring,
+    Setup, Start, Steps, System,
 };
 
 /// The most bands.
@@ -265,10 +266,10 @@ pub struct MultibandTarget {
 ///
 /// As for the compressor, a generic glide of the whole target would run for every frame of
 /// the glide when only a ratio moved: only what multiplies the output unsmoothed takes
-/// steps. The crossover cannot glide at all (a blend of a split's sections is not one).
+/// steps. The crossover glides over a grid period, in its integrator gains.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MultibandCoeffs {
-    crossover: CrossoverModel,
+    crossover: Glide<CrossoverCoefficients>,
     count: usize,
     detectors: [Detector; MAX_BANDS],
     makeup: [Glide<f32>; MAX_BANDS],
@@ -282,7 +283,7 @@ impl Approach for MultibandCoeffs {
     type Target = MultibandTarget;
 
     fn aim(&mut self, t: &MultibandTarget) {
-        self.crossover = t.crossover;
+        self.crossover.aim(t.crossover.coefficients());
         self.count = t.count;
         self.detectors = t.detectors;
         let steps = Steps::Fixed(self.steps);
@@ -295,7 +296,7 @@ impl Approach for MultibandCoeffs {
 
     #[inline]
     fn step(&mut self) -> bool {
-        let mut moved = false;
+        let mut moved = self.crossover.step();
         for b in 0..MAX_BANDS {
             moved |= self.makeup[b].step();
             moved |= self.bypass[b].step();
@@ -305,6 +306,7 @@ impl Approach for MultibandCoeffs {
     }
 
     fn settle(&mut self) {
+        self.crossover.settle();
         for b in 0..MAX_BANDS {
             self.makeup[b].settle();
             self.bypass[b].settle();
@@ -402,7 +404,7 @@ impl Recurrence for MultibandRecurrence {
         self.coefficients_into(member, &mut target);
         Start {
             coeffs: MultibandCoeffs {
-                crossover: target.crossover,
+                crossover: Glide::landed(target.crossover.coefficients()).by(COEFF_INTERVAL as u32),
                 count: target.count,
                 detectors: target.detectors,
                 makeup: target.makeup.map(Glide::landed),
@@ -471,9 +473,10 @@ impl Recurrence for MultibandRecurrence {
             deepest,
         } = state;
         for i in frames {
+            let crossover = coeffs.crossover.now();
             for ((filter, bands), input) in filters.iter_mut().zip(split.iter_mut()).zip(feed.audio)
             {
-                *bands = filter.tick(&coeffs.crossover, input[i]);
+                *bands = filter.tick(&crossover, input[i]);
             }
             sum.fill(0.0);
             for b in 0..bands {

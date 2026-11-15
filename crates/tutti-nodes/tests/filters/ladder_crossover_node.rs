@@ -106,6 +106,28 @@ fn a_reset_node_renders_as_a_fresh_one() {
     check_a_reset_node_renders_as_a_fresh_one::<CrossoverNode>();
 }
 
+/// A reset node is a fresh one whatever moved before it: after audio rendered at one design, a
+/// cell written to another and a `reset`, the same signal renders the same bits as on a node
+/// built with that cell, so the first design after the reset lands at once and does not glide
+/// from the one before it.
+#[test]
+fn a_reset_after_a_move_renders_as_a_fresh_node_with_the_moved_controls() {
+    let x = noise(4, 1_024);
+    let mut used = prepared(CrossoverNode::build(), SR, 64);
+    render(&mut used, &noise(8, 2_048), 64, |_| {});
+    assert!(used.set_cutoff(2_500.0));
+    used.reset();
+    let fresh = CrossoverNode::build();
+    assert!(fresh.set_cutoff(2_500.0));
+    let mut fresh = prepared(fresh, SR, 64);
+    let (a, b) = (
+        render(&mut used, &x, 64, |_| {}),
+        render(&mut fresh, &x, 64, |_| {}),
+    );
+    assert!(a.iter().flatten().any(|&s| s != 0.0));
+    assert_eq!(a, b);
+}
+
 fn check_a_move_between_grid_points_starts_at_the_next_one<N: Cutoff>() {
     let x = noise(5, 128);
     let run = |write: bool| {
