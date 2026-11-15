@@ -219,6 +219,10 @@ pub enum BridgeEvent {
         /// The edit: the parameter, its value now and the gesture it falls in.
         edit: ParamEdit,
     },
+    /// The buses the plugin has now, which the host was not last told: sent
+    /// before the [`Resync`](Self::Resync) of [`Io`](ResyncKind::Io) it goes
+    /// with.
+    IoLayout(tutti_plugin_types::Layout),
     /// The plugin asked the host to resync some aspect of its state at runtime
     /// (preset load, param-title change, IO change, full reload). Carries no
     /// payload — the host re-reads from the plugin in response.
@@ -318,6 +322,8 @@ pub(super) struct Unsolicited {
     lifecycle: Option<super::lifecycle::Lifecycle>,
     reloaded: bool,
     io: bool,
+    /// The buses the last `PluginIoChanged` carried, until drained.
+    io_layout: Option<tutti_plugin_types::Layout>,
     param_titles: bool,
     param_values: bool,
     process_requested: bool,
@@ -339,6 +345,7 @@ impl Unsolicited {
             lifecycle: None,
             reloaded: false,
             io: false,
+            io_layout: None,
             param_titles: false,
             param_values: false,
             process_requested: false,
@@ -427,6 +434,12 @@ impl Unsolicited {
         self.rate = Some(refusal);
     }
 
+    /// The buses a `PluginIoChanged` carried; a later one replaces an earlier
+    /// one not yet drained.
+    pub(super) fn io_layout(&mut self, layout: tutti_plugin_types::Layout) {
+        self.io_layout = Some(layout);
+    }
+
     /// A resync request; a second of the same kind adds nothing.
     pub(super) fn resync(&mut self, kind: ResyncKind) {
         *match kind {
@@ -443,6 +456,7 @@ impl Unsolicited {
     pub(super) fn drain(&mut self) -> impl Iterator<Item = BridgeEvent> + '_ {
         let raised =
             |flag: &mut bool, kind| std::mem::take(flag).then_some(BridgeEvent::Resync(kind));
+        let layout = self.io_layout.take().map(BridgeEvent::IoLayout);
         let structural = [
             raised(&mut self.reloaded, ResyncKind::Reloaded),
             raised(&mut self.io, ResyncKind::Io),
@@ -470,9 +484,9 @@ impl Unsolicited {
         let rate = self.rate.take().map(BridgeEvent::RateRefusal);
         let process =
             std::mem::take(&mut self.process_requested).then_some(BridgeEvent::ProcessRequested);
-        structural
+        layout
             .into_iter()
-            .flatten()
+            .chain(structural.into_iter().flatten())
             .chain(params)
             .chain(latency)
             .chain(tail)
@@ -503,6 +517,7 @@ mod tests {
                 BridgeEvent::ProcessRequested => "process".to_owned(),
                 BridgeEvent::Transport { request } => format!("transport {request:?}"),
                 BridgeEvent::Resync(kind) => format!("{kind:?}"),
+                BridgeEvent::IoLayout(_) => "io layout".to_owned(),
                 other => panic!("unexpected {other:?}"),
             })
             .collect()

@@ -146,6 +146,7 @@ mod role_wire {
 /// Two layouts are equal when every bus agrees, which is how a re-read after a
 /// restart decides the host must be told.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Layout {
     /// The input buses.
     pub inputs: PluginBuses,
@@ -162,6 +163,18 @@ impl Layout {
     /// [`MAX_BLOCK_CHANNELS`](crate::MAX_BLOCK_CHANNELS).
     pub fn check_width(&self) -> Result<(), crate::PluginTooWide> {
         check_widths(self.total_inputs(), self.total_outputs())
+    }
+
+    /// The input buses' widths, in order.
+    #[must_use]
+    pub fn input_widths(&self) -> BusChannels {
+        widths(&self.inputs)
+    }
+
+    /// The output buses' widths, in order.
+    #[must_use]
+    pub fn output_widths(&self) -> BusChannels {
+        widths(&self.outputs)
     }
 
     /// The total input channel width across all buses.

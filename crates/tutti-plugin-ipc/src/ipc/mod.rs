@@ -166,6 +166,9 @@ struct Events {
     wake: OnceLock<ProcessWake>,
     /// The parameters the plugin declares: see [`DeclaredCache`].
     declared: DeclaredCache,
+    /// The buses the plugin last announced (`PluginIoChanged`); `None` until it
+    /// announces any, when the buses it had at load stand.
+    layout: Mutex<Option<tutti_plugin_types::Layout>>,
 }
 
 /// The parameters the plugin declares and whether each is read-only, sorted by
@@ -224,6 +227,9 @@ impl Events {
             BridgeEvent::TailChanged { tail } => {
                 *self.tail.lock().unwrap_or_else(PoisonError::into_inner) = *tail;
                 self.ask(Request::TailChanged);
+            }
+            BridgeEvent::IoLayout(layout) => {
+                *self.layout.lock().unwrap_or_else(PoisonError::into_inner) = Some(layout.clone());
             }
             BridgeEvent::ProcessRequested => {
                 if let Some(wake) = self.wake.get() {
@@ -284,6 +290,27 @@ pub(crate) struct Link {
 }
 
 impl Link {
+    /// The plugin as the host knows it now: what it reported at load, with the
+    /// buses it announced since. The slab and the pipeline are laid out for
+    /// [`loaded`](Self::loaded), the buses at load.
+    pub(crate) fn current(&self) -> LoadedPlugin {
+        let mut loaded = self.loaded.clone();
+        if let Some(layout) = self.layout() {
+            loaded.inputs = layout.inputs;
+            loaded.outputs = layout.outputs;
+        }
+        loaded
+    }
+
+    /// The buses the plugin last announced, if it announced any.
+    pub(crate) fn layout(&self) -> Option<tutti_plugin_types::Layout> {
+        self.events
+            .layout
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     /// The latency the plugin reports now.
     pub(crate) fn latency(&self) -> Samples {
         Samples(self.events.latency.load(Ordering::Acquire))
@@ -452,6 +479,7 @@ impl Ipc {
             forward: Mutex::new(None),
             wake: OnceLock::new(),
             declared: DeclaredCache::default(),
+            layout: Mutex::new(None),
         });
         let listening = Arc::clone(&events);
         bridge.set_listener(Some(Arc::new(move |event| listening.on(event))));
@@ -684,6 +712,18 @@ impl std::fmt::Debug for IpcController {
 }
 
 impl IpcController {
+    /// The buses the plugin has now: those it last announced
+    /// (`PluginIoChanged`), else those it reported at load. The slab is laid
+    /// out for the ones at load ([`Ipc::loaded`]).
+    #[must_use]
+    pub fn layout(&self) -> tutti_plugin_types::Layout {
+        let loaded = self.link.current();
+        tutti_plugin_types::Layout {
+            inputs: loaded.inputs,
+            outputs: loaded.outputs,
+        }
+    }
+
     /// The bridge, for a caller that has no [`MainThreadMarker`] to hold.
     pub fn bridge(&self) -> &Arc<PluginBridge> {
         &self.link.bridge

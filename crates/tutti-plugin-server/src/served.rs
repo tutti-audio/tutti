@@ -22,11 +22,12 @@ use std::time::{Duration, Instant};
 use tutti_plugin_ipc::BridgeMessage;
 use tutti_plugin_types::{
     AudioBuffer, AudioBufferMut, AutomationMode, Control, Effect, Event, Features, Hand, HostOp,
-    Lifecycle, Load, LoadStage, LoadedPlugin, MAX_BLOCK_CHANNELS, MainThreadMarker, MainWorkHandle,
-    MaxBlock, Normalized, Notice, OutOfProcess, ParamEdit, ParamId, ParamWriteError, ParameterInfo,
-    PluginDescriptor, PluginError, PluginIo, PluginResult, Prepare, Preset, PresetId,
-    ProcessContext, ProcessOutput, ProcessWake, Processor, RenderMode, RenderModeSupport, Request,
-    Sample, SampleFormat, SampleRate, Samples, Seat, Stage, State, StateUse, TrackInfo,
+    Layout, Lifecycle, Load, LoadStage, LoadedPlugin, MAX_BLOCK_CHANNELS, MainThreadMarker,
+    MainWorkHandle, MaxBlock, Normalized, Notice, OutOfProcess, ParamEdit, ParamId,
+    ParamWriteError, ParameterInfo, PluginDescriptor, PluginError, PluginIo, PluginResult, Prepare,
+    Preset, PresetId, ProcessContext, ProcessOutput, ProcessWake, Processor, RenderMode,
+    RenderModeSupport, Request, Sample, SampleFormat, SampleRate, Samples, Seat, Stage, State,
+    StateUse, TrackInfo,
 };
 
 mod any;
@@ -200,6 +201,8 @@ pub(crate) struct Served<F: OutOfProcess> {
     hand: Hand<F::Processor>,
     descriptor: PluginDescriptor,
     wiring: LoadedPlugin,
+    /// The buses the host was last told: at load, or by `PluginIoChanged`.
+    announced: Layout,
     /// What the plugin asked of the host since the last pass, reused.
     requests: Vec<Request>,
     /// The parameter edits the plugin made since the last pass, reused.
@@ -343,6 +346,7 @@ impl<F: ServerSide> Served<F> {
             hand,
             descriptor: PluginDescriptor::default(),
             wiring: LoadedPlugin::default(),
+            announced: Layout::default(),
             requests: Vec::new(),
             edits: Vec::new(),
             events: Vec::new(),
@@ -390,6 +394,7 @@ impl<F: ServerSide> Served<F> {
             ));
         }
         this.refresh_wiring(main);
+        this.announced = Layout::from(&this.wiring);
         // Whatever the activation told the host is what the load reply carries.
         this.events.clear();
         Ok((this, state_error))
@@ -479,7 +484,8 @@ impl<F: ServerSide> Served<F> {
             }
             Notice::IoChanged => {
                 self.refresh_wiring(main);
-                self.events.push(BridgeMessage::PluginIoChanged);
+                let io = self.io_changed();
+                self.events.push(io);
             }
             Notice::ParamValuesChanged => {
                 self.events.push(BridgeMessage::PluginParamValuesChanged);
@@ -511,7 +517,8 @@ impl<F: ServerSide> Served<F> {
                 // The wire has no "lost" message, and a new one would be a
                 // protocol change. `IoChanged` is the closest signal: it makes
                 // the host re-read an instance that now renders silence.
-                self.events.push(BridgeMessage::PluginIoChanged);
+                let io = self.io_changed();
+                self.events.push(io);
                 return Some(reason);
             }
         }
@@ -522,8 +529,20 @@ impl<F: ServerSide> Served<F> {
     /// silence, so it re-reads it. A refusal a rollback undid tells nothing.
     fn finish_refusals(&mut self) {
         if std::mem::take(&mut self.refused) && !self.is_active() {
-            self.events.push(BridgeMessage::PluginIoChanged);
+            let io = self.io_changed();
+            self.events.push(io);
         }
+    }
+
+    /// The `PluginIoChanged` the host is sent now: the buses the plugin has
+    /// when they are not the ones the host was told last, and none otherwise.
+    fn io_changed(&mut self) -> BridgeMessage {
+        let now = Layout::from(&self.wiring);
+        let layout = (now != self.announced).then(|| {
+            self.announced = now.clone();
+            now
+        });
+        BridgeMessage::PluginIoChanged { layout }
     }
 
     /// Reads the plugin's wiring again into what the host is given.

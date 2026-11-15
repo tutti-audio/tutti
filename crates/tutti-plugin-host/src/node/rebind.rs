@@ -42,33 +42,33 @@ pub enum RebindError {
     /// The plugin now has more channels in a direction than a block serves.
     #[error(transparent)]
     TooWide(#[from] tutti_plugin_types::PluginTooWide),
-    /// The ports the plugin now has differ from the ones the node's slab was
-    /// sized for.
+    /// The buses the plugin now has differ from the ones the node's slab was
+    /// laid out for: the slab's size follows every bus's width.
     #[error(
-        "the plugin now has {now_inputs} input and {now_outputs} output channels, \
-         but its slab holds {inputs} and {outputs}"
+        "the plugin now has input buses {now_inputs:?} and output buses {now_outputs:?}, \
+         but its slab holds {inputs:?} and {outputs:?}"
     )]
     OutsideSlab {
-        /// The input channels the pipeline was sized for.
-        inputs: usize,
-        /// The output channels the pipeline was sized for.
-        outputs: usize,
-        /// The input channels the plugin has now.
-        now_inputs: usize,
-        /// The output channels the plugin has now.
-        now_outputs: usize,
+        /// The input buses' widths the slab was laid out for.
+        inputs: Vec<tutti_types::ChannelLayout>,
+        /// The output buses' widths the slab was laid out for.
+        outputs: Vec<tutti_types::ChannelLayout>,
+        /// The input buses' widths the plugin has now.
+        now_inputs: Vec<tutti_types::ChannelLayout>,
+        /// The output buses' widths the plugin has now.
+        now_outputs: Vec<tutti_types::ChannelLayout>,
     },
 }
 
-/// The ports a node's shared slab was sized for, which a rebuilt node must not
-/// differ from: an out-of-process plugin's shared slab is laid out once, at
-/// launch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// The buses a node's shared slab was laid out for, which a rebuilt node must
+/// not differ from: an out-of-process plugin's shared slab is laid out once,
+/// at launch, from the width of every bus.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PortLimit {
-    /// The input channels.
-    pub inputs: usize,
-    /// The output channels.
-    pub outputs: usize,
+    /// The input buses' widths.
+    pub inputs: Vec<tutti_types::ChannelLayout>,
+    /// The output buses' widths.
+    pub outputs: Vec<tutti_types::ChannelLayout>,
 }
 
 /// Builds the node that replaces a plugin node whose plugin changed its ports.
@@ -92,6 +92,9 @@ pub struct Rebinder<F: Loaded> {
     pipeline: Samples,
     tempo: TempoReader,
     limit: Option<PortLimit>,
+    /// Where the ports are read from when the plugin's lifecycle does not
+    /// follow them (a served plugin's): the plugin's own report.
+    live: Option<Arc<dyn Fn() -> tutti_plugin_types::Layout + Send + Sync>>,
 }
 
 impl<F: Loaded> Clone for Rebinder<F> {
@@ -109,7 +112,8 @@ impl<F: Loaded> Clone for Rebinder<F> {
             controls: self.controls.clone(),
             pipeline: self.pipeline,
             tempo: self.tempo.clone(),
-            limit: self.limit,
+            limit: self.limit.clone(),
+            live: self.live.clone(),
         }
     }
 }
@@ -187,11 +191,27 @@ where
         .bind(self.tempo.clone()))
     }
 
-    /// The ports the plugin has now, as its lifecycle last read them: what a
-    /// node [`rebind`](Self::rebind) builds now would declare. `None` for a
-    /// lost plugin or before a layout was read.
+    /// This rebinder, reading the ports the plugin has now from `live` instead
+    /// of from its lifecycle: for a plugin whose lifecycle does not follow its
+    /// ports, as a served plugin's does not.
+    #[must_use]
+    pub fn with_live_layout(
+        mut self,
+        live: impl Fn() -> tutti_plugin_types::Layout + Send + Sync + 'static,
+    ) -> Self {
+        self.live = Some(Arc::new(live));
+        self
+    }
+
+    /// The ports the plugin has now: its own report where this rebinder reads
+    /// one ([`with_live_layout`](Self::with_live_layout)), else as its lifecycle
+    /// last read them. What a node [`rebind`](Self::rebind) built now would
+    /// declare. `None` for a lost plugin or before a layout was read.
     #[must_use]
     pub fn layout(&self) -> Option<tutti_plugin_types::Layout> {
+        if let Some(live) = &self.live {
+            return Some(live());
+        }
         self.inner
             .lock()
             .reading()
@@ -205,18 +225,18 @@ where
     ///
     /// [`NoPorts`](RebindError::NoPorts) and [`OutsideSlab`](RebindError::OutsideSlab).
     pub fn check_ports(&self) -> Result<(), RebindError> {
-        let instance = self.inner.lock();
-        let (layout, ..) = instance.reading().ok_or(RebindError::NoPorts)?;
-        self.fits(layout)
+        let layout = self.layout().ok_or(RebindError::NoPorts)?;
+        layout.check_width()?;
+        self.fits(&layout)
     }
 
     fn fits(&self, layout: &tutti_plugin_types::Layout) -> Result<(), RebindError> {
-        if let Some(limit) = self.limit {
-            let (now_inputs, now_outputs) = (layout.total_inputs(), layout.total_outputs());
-            if (now_inputs, now_outputs) != (limit.inputs, limit.outputs) {
+        if let Some(limit) = &self.limit {
+            let (now_inputs, now_outputs) = (layout.input_widths(), layout.output_widths());
+            if now_inputs != limit.inputs || now_outputs != limit.outputs {
                 return Err(RebindError::OutsideSlab {
-                    inputs: limit.inputs,
-                    outputs: limit.outputs,
+                    inputs: limit.inputs.clone(),
+                    outputs: limit.outputs.clone(),
                     now_inputs,
                     now_outputs,
                 });
@@ -280,6 +300,7 @@ impl<F: Loaded> InProcClient<F> {
             pipeline: self.pipeline,
             tempo,
             limit,
+            live: None,
         }
     }
 }
@@ -482,9 +503,10 @@ mod tests {
     /// where it was, and the node in the graph still renders.
     #[test]
     fn a_port_limit_refuses_new_ports_by_name_and_leaves_the_plugin_alone() {
+        let two = vec![tutti_types::ChannelLayout::STEREO];
         let (fake, rebinder, mut old, inner) = rig(Some(PortLimit {
-            inputs: 2,
-            outputs: 2,
+            inputs: two.clone(),
+            outputs: two.clone(),
         }));
         change_ports(&fake, &mut old, &inner, 4);
         let refused = rebinder
@@ -493,10 +515,10 @@ mod tests {
         assert_eq!(
             refused,
             RebindError::OutsideSlab {
-                inputs: 2,
-                outputs: 2,
-                now_inputs: 2,
-                now_outputs: 4,
+                inputs: two.clone(),
+                outputs: two,
+                now_inputs: vec![tutti_types::ChannelLayout::STEREO],
+                now_outputs: vec![tutti_types::ChannelLayout::from_count(4)],
             }
         );
         assert_eq!(

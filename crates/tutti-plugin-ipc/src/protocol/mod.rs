@@ -107,7 +107,10 @@ pub(crate) mod wire;
 /// - **Version 40** added `format` to `LoadPlugin`, after `path`: the server
 ///   opens the file as that format, where it chose the format by the path's
 ///   extension and so could not open a link whose target has another one.
-pub const PROTOCOL_VERSION: u32 = 40;
+/// - **Version 42** gave `PluginIoChanged` the buses the plugin has now, when they
+///   differ from the ones the host was last told: the host's picture of a
+///   served plugin's ports followed none of its changes.
+pub const PROTOCOL_VERSION: u32 = 42;
 
 /// Largest control-socket frame body either end will allocate for, in bytes.
 ///

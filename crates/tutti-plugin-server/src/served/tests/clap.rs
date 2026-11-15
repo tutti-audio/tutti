@@ -76,7 +76,7 @@ impl Served<HostLoaded> {
     fn take_io_changed(&mut self) -> bool {
         let before = self.events.len();
         self.events
-            .retain(|e| !matches!(e, BridgeMessage::PluginIoChanged));
+            .retain(|e| !matches!(e, BridgeMessage::PluginIoChanged { .. }));
         self.events.len() != before
     }
 
@@ -290,14 +290,14 @@ fn a_rate_change_that_changes_the_layout_raises_io_changed() {
         plugin
             .poll(main_thread())
             .iter()
-            .any(|e| matches!(e, BridgeMessage::PluginIoChanged)),
+            .any(|e| matches!(e, BridgeMessage::PluginIoChanged { .. })),
         "the host is told"
     );
     assert!(
         !plugin
             .poll(main_thread())
             .iter()
-            .any(|e| matches!(e, BridgeMessage::PluginIoChanged)),
+            .any(|e| matches!(e, BridgeMessage::PluginIoChanged { .. })),
         "once"
     );
 }
@@ -467,7 +467,7 @@ fn a_served_ports_rescan_is_polled_as_io_changed() {
         plugin
             .poll(main_thread())
             .iter()
-            .any(|e| matches!(e, BridgeMessage::PluginIoChanged))
+            .any(|e| matches!(e, BridgeMessage::PluginIoChanged { .. }))
     };
     assert!(io_changed(&mut plugin), "the host is told");
     assert_eq!(plugin.loaded().total_inputs(), 3);

@@ -532,10 +532,14 @@ impl PluginClient<Bound> {
     /// The rebinder keeps the plugin instance alive until it is dropped.
     #[must_use]
     pub fn rebinder(&self) -> Rebinder<Ipc> {
-        self.state.node.rebinder(Some(PortLimit {
-            inputs: self.inputs,
-            outputs: self.outputs,
-        }))
+        let served = self.served.clone();
+        self.state
+            .node
+            .rebinder(Some(PortLimit {
+                inputs: self.loaded.input_widths(),
+                outputs: self.loaded.output_widths(),
+            }))
+            .with_live_layout(move || served.layout())
     }
 }
 

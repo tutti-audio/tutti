@@ -1003,7 +1003,12 @@ fn absorb(inbox: &mut Unsolicited, msg: BridgeMessage) -> Option<BridgeMessage> 
         BridgeMessage::ParameterChanged { edit } => inbox.param(edit),
         BridgeMessage::PluginParamValuesChanged => inbox.resync(ResyncKind::ParamValues),
         BridgeMessage::PluginParamTitlesChanged => inbox.resync(ResyncKind::ParamTitles),
-        BridgeMessage::PluginIoChanged => inbox.resync(ResyncKind::Io),
+        BridgeMessage::PluginIoChanged { layout } => {
+            if let Some(layout) = layout {
+                inbox.io_layout(layout);
+            }
+            inbox.resync(ResyncKind::Io);
+        }
         BridgeMessage::PluginReloaded => inbox.resync(ResyncKind::Reloaded),
         BridgeMessage::ProcessRequested => inbox.process_requested(),
         BridgeMessage::TransportRequested { request } => inbox.transport(request),
