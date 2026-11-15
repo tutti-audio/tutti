@@ -46,7 +46,7 @@ use crate::control::COEFF_STREAM;
 use crate::delay::{delay_step, finite_or, read_taps, ring_seconds, trips};
 use crate::{
     Approach, COEFF_INTERVAL, Cadence, Capacity, Channels, Complex64, DELAY_SLEW, DelayLine,
-    Effort, Family, Feed, GAIN_GLIDE, Glide, Grows, InterpolationMode, Lti, MaxDelay, Reach,
+    Effort, Family, GAIN_GLIDE, Glide, Grows, Inputs, InterpolationMode, Lti, MaxDelay, Reach,
     Recurrence, Ring, Setup, Start, Steps, System,
 };
 
@@ -694,7 +694,7 @@ impl Recurrence for ModDelayRecurrence {
         &self,
         coeffs: &ModDelayCoeffs,
         state: &mut ModDelayState,
-        feed: &Feed<'_>,
+        feed: &Inputs<'_>,
         output: &mut [&mut [f32]],
         frames: Range<usize>,
         _: usize,

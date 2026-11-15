@@ -6,6 +6,8 @@
 
 pub(crate) mod sink;
 
+use crate::Xorshift32;
+use std::num::NonZeroU32;
 use tutti_types::Amplitude;
 
 /// The probability density of the noise a [`DitherNoise`] adds.
@@ -19,7 +21,7 @@ pub enum DitherShape {
     Triangular,
 }
 
-/// A xorshift32 noise source that carries its state across blocks.
+/// A [`Xorshift32`] noise source that carries its state across blocks.
 ///
 /// The RNG advances once per sample, in the order the samples are handed over,
 /// so the sequence is continuous across blocks and, for interleaved audio,
@@ -27,14 +29,17 @@ pub enum DitherShape {
 /// the noise to the block grid.
 #[derive(Debug, Clone)]
 pub struct DitherNoise {
-    state: u32,
+    rng: Xorshift32,
 }
 
 impl DitherNoise {
     /// A source at the seed every export starts from.
     #[must_use]
     pub const fn new() -> Self {
-        Self { state: 0x1234_5678 }
+        const SEED: NonZeroU32 = NonZeroU32::new(0x1234_5678).expect("the seed is nonzero");
+        Self {
+            rng: Xorshift32::new(SEED),
+        }
     }
 
     /// Add noise of `shape`, scaled to `lsb` (one least significant bit of the
@@ -51,24 +56,14 @@ impl DitherNoise {
     }
 
     #[inline]
-    fn random(&mut self) -> u32 {
-        let mut x = self.state;
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        self.state = x;
-        x
-    }
-
-    #[inline]
     fn rectangular(&mut self) -> f32 {
-        (self.random() as f32 / u32::MAX as f32) - 0.5
+        Xorshift32::to_unit(self.rng.next_u32()) - 0.5
     }
 
     #[inline]
     fn triangular(&mut self) -> f32 {
-        let r1 = self.random() as f32 / u32::MAX as f32;
-        let r2 = self.random() as f32 / u32::MAX as f32;
+        let r1 = Xorshift32::to_unit(self.rng.next_u32());
+        let r2 = Xorshift32::to_unit(self.rng.next_u32());
         r1 - r2
     }
 }
@@ -85,15 +80,24 @@ mod tests {
 
     const LSB: Amplitude = Amplitude(1.0);
 
-    /// The first draws of the seeded sequence, pinned as raw states recorded
-    /// from the generator tutti-export shipped before the move (xorshift32 with
-    /// shifts 13, 17, 5 from 0x12345678, checked outside Rust), so every
-    /// export's dither stays bit-identical.
+    /// The first rectangular draw is the first xorshift32 word from the seed
+    /// 0x12345678, 2_274_908_837, scaled to `[-0.5, 0.5]`: `2274908837 / (2^32 - 1) - 0.5`.
     #[test]
-    fn the_seeded_sequence_is_pinned() {
-        let mut n = DitherNoise::new();
-        let got: Vec<u32> = (0..3).map(|_| n.random()).collect();
-        assert_eq!(got, PINNED);
+    fn the_first_draw_is_the_seeded_word_scaled() {
+        let mut s = [0.0f32; 1];
+        DitherNoise::new().apply(DitherShape::Rectangular, LSB, &mut s);
+        let want = 2_274_908_837.0_f64 / 4_294_967_295.0 - 0.5;
+        assert!((f64::from(s[0]) - want).abs() < 1e-7, "{} vs {want}", s[0]);
+    }
+
+    /// The first triangular sample is `(r1 - r2) * lsb` with `r1`, `r2` the
+    /// first two seeded words, 2274908837 and 358294691, over `2^32 - 1`.
+    #[test]
+    fn the_first_triangular_draw_is_the_difference_of_two_seeded_words() {
+        let mut s = [0.0f32; 1];
+        DitherNoise::new().apply(DitherShape::Triangular, Amplitude(0.25), &mut s);
+        let want = (2_274_908_837.0_f64 - 358_294_691.0) / 4_294_967_295.0 * 0.25;
+        assert!((f64::from(s[0]) - want).abs() < 1e-7, "{} vs {want}", s[0]);
     }
 
     #[test]
@@ -126,6 +130,4 @@ mod tests {
         n.apply(DitherShape::Triangular, LSB, b);
         assert_eq!(whole, split);
     }
-
-    const PINNED: [u32; 3] = [2_274_908_837, 358_294_691, 1_210_119_364];
 }

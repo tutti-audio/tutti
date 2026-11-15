@@ -171,3 +171,24 @@ fn windows_compare_by_their_coefficients() {
     assert_eq!(CosineWindow::new(&[0.5, 0.5]), CosineWindow::HANN);
     assert_ne!(CosineWindow::HANN, CosineWindow::HAMMING);
 }
+
+/// Blackman-Harris squared is the square of the four-term window at every
+/// phase, from the published coefficients 0.35875, 0.48829, 0.14128, 0.01168:
+/// at `n = 64` the peak (`x = 32`) is `(a + b + c + d)² = 1`, the start is
+/// `(a - b + c - d)² ≈ 3.6e-9`, and a quarter in, where the cosines at `π/2`
+/// leave `(a - c)²`, it is `0.21747² = 0.047293`.
+#[test]
+fn blackman_harris_squared_is_the_square_of_blackman_harris() {
+    let n = 64;
+    let w = CosineWindow::BLACKMAN_HARRIS_SQUARED.coefficients(n);
+    assert_eq!(CosineWindow::BLACKMAN_HARRIS_SQUARED.terms(), 7);
+    assert!((w[n / 2] - 1.0).abs() < 1e-5, "peak {}", w[n / 2]);
+    assert!(w[0] < 1e-6, "start {}", w[0]);
+    assert!((w[n / 4] - 0.047_293).abs() < 1e-5, "quarter {}", w[n / 4]);
+    for (x, &got) in w.iter().enumerate() {
+        let t = std::f64::consts::TAU * x as f64 / n as f64;
+        let bh =
+            0.35875 - 0.48829 * t.cos() + 0.14128 * (2.0 * t).cos() - 0.01168 * (3.0 * t).cos();
+        assert!((f64::from(got) - bh * bh).abs() < 1e-6, "tap {x}");
+    }
+}
