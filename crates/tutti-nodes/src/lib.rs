@@ -46,10 +46,10 @@
 //! - **Mixing** — `BusStripNode` (volume / balance; a mute or bypass is the graph's `NodeMode`).
 //!   Summing is the graph's: a port or an output channel sums its sources; so is
 //!   folding between layouts (a bus edge between declared buses).
-//! - **Spatial** — `VbapPannerNode` (stereo in, one output per speaker of a 2, 4,
-//!   6, 8 or 12 channel layout) and `HrtfBinauralNode` (two outputs, by FFT
-//!   convolution against a caller-supplied HRIR sphere), both steered by their
-//!   params (bearing, height, spread and width, or the blend), de-zippered. A mix of several panned sources
+//! - **Spatial** — `VbapPannerNode` (stereo in, one output per channel of a `Bed`)
+//!   and `HrtfBinauralNode` (two outputs, by FFT convolution against a
+//!   caller-supplied HRIR sphere), both steered by their params (bearing,
+//!   height, spread and width, or the blend), glided. A mix of several panned sources
 //!   is plain fan-in: wire each panner's outputs to the same graph ports.
 //! - **Param ports** — each modulatable node declares its params once, with its
 //!   cells (`tutti_graph::declare_params!`), as param ports, filled per
@@ -225,6 +225,7 @@ mod buses;
 #[macro_use]
 mod params;
 mod ramp;
+mod tail_clock;
 
 // Rendering helpers for the width-generic nodes' unit tests.
 #[cfg(test)]
@@ -309,12 +310,12 @@ mod reverb;
 pub use params::{At, Control, ControlRead, ControlSet, ControlValid, Params};
 pub use reverb::{FamilyNode, FreeverbNode, NodeFamily, Rings, TailCeiling, TailCeilingError};
 
-// The feedback delay network as a `FamilyNode`.
+// The feedback delay network as a `KernelNode`.
 mod reverb_fdn;
-pub use reverb_fdn::FdnNode;
+pub use reverb_fdn::{FdnKernel, FdnNode};
 
-// The families and controls that sit in a `FamilyNode<F>`'s signature.
-pub use tutti_dsp::{FdnControls, FdnFamily, FreeverbControls, FreeverbFamily};
+// The families and controls that sit in a node's signature.
+pub use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, FreeverbFamily};
 
 // The spatial panners: VBAP speaker panning and binaural HRTF rendering.
 mod spatial;

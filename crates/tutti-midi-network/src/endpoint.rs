@@ -24,11 +24,11 @@ use crate::{
 /// touches the network.
 pub trait Endpoint {
     /// Takes a datagram received from `from` at `now`.
-    fn handle_datagram(&mut self, now: Instant, from: SocketAddr, datagram: &[u8]);
+    fn on_message(&mut self, from: SocketAddr, datagram: &[u8], now: Instant);
 
     /// Does the work that is due at `now`: repeats, pings, retransmit
     /// requests, idle declarations and timeouts.
-    fn handle_timeout(&mut self, now: Instant);
+    fn on_timeout(&mut self, now: Instant);
 
     /// The next datagram to send, if one is queued.
     fn poll_transmit(&mut self) -> Option<Transmit>;
@@ -36,8 +36,8 @@ pub trait Endpoint {
     /// The next event for the application, if one is queued.
     fn poll_event(&mut self) -> Option<Event>;
 
-    /// When [`handle_timeout`](Self::handle_timeout) next has work, if ever.
-    fn poll_timeout(&self) -> Option<Instant>;
+    /// When [`on_timeout`](Self::on_timeout) next has work, if ever.
+    fn deadline(&self) -> Option<Instant>;
 }
 
 #[derive(Debug, Default)]
@@ -68,7 +68,7 @@ fn feed(session: &mut Session, now: Instant, datagram: &[u8]) {
     };
     for command in commands {
         match command {
-            Ok(command) => session.receive(now, command),
+            Ok(command) => session.on_message(command, now),
             Err(refused) => session.refuse_command(now, refused.header, refused.error),
         }
     }
@@ -143,7 +143,7 @@ impl Client {
 }
 
 impl Endpoint for Client {
-    fn handle_datagram(&mut self, now: Instant, from: SocketAddr, datagram: &[u8]) {
+    fn on_message(&mut self, from: SocketAddr, datagram: &[u8], now: Instant) {
         // A Client talks to its Host's address alone.
         if from != self.host {
             return;
@@ -152,8 +152,8 @@ impl Endpoint for Client {
         self.outbox.drain(self.host, &mut self.session);
     }
 
-    fn handle_timeout(&mut self, now: Instant) {
-        self.session.handle_timeout(now);
+    fn on_timeout(&mut self, now: Instant) {
+        self.session.on_timeout(now);
         self.outbox.drain(self.host, &mut self.session);
     }
 
@@ -165,8 +165,8 @@ impl Endpoint for Client {
         self.outbox.events.pop_front()
     }
 
-    fn poll_timeout(&self) -> Option<Instant> {
-        self.session.poll_timeout()
+    fn deadline(&self) -> Option<Instant> {
+        self.session.deadline()
     }
 }
 
@@ -315,7 +315,7 @@ impl Host {
 }
 
 impl Endpoint for Host {
-    fn handle_datagram(&mut self, now: Instant, from: SocketAddr, datagram: &[u8]) {
+    fn on_message(&mut self, from: SocketAddr, datagram: &[u8], now: Instant) {
         if let Some(session) = self.sessions.get_mut(&from) {
             feed(session, now, datagram);
             self.outbox.drain(from, session);
@@ -348,11 +348,11 @@ impl Endpoint for Host {
         }
     }
 
-    fn handle_timeout(&mut self, now: Instant) {
+    fn on_timeout(&mut self, now: Instant) {
         let peers: Vec<SocketAddr> = self.sessions.keys().copied().collect();
         for peer in peers {
             if let Some(session) = self.sessions.get_mut(&peer) {
-                session.handle_timeout(now);
+                session.on_timeout(now);
                 self.outbox.drain(peer, session);
             }
             self.forget_if_idle(peer);
@@ -367,10 +367,7 @@ impl Endpoint for Host {
         self.outbox.events.pop_front()
     }
 
-    fn poll_timeout(&self) -> Option<Instant> {
-        self.sessions
-            .values()
-            .filter_map(Session::poll_timeout)
-            .min()
+    fn deadline(&self) -> Option<Instant> {
+        self.sessions.values().filter_map(Session::deadline).min()
     }
 }

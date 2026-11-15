@@ -1,7 +1,9 @@
 use super::*;
 use tutti_graph::contract::{drive, prepared};
 use tutti_types::MaxBlock;
-use tutti_types::{ChannelTopology, UnitParam};
+use tutti_types::UnitParam;
+
+use tutti_dsp::SpeakerLayout;
 
 use crate::testing::aim;
 
@@ -34,8 +36,13 @@ fn vbap_panner_tick() {
 
     tick(&mut panner, &input, &mut output);
 
-    assert!(output[0] > 0.0);
-    assert!(output[1] > 0.0);
+    // Dead ahead at the default width: two virtual sources at +-15 degrees
+    // over the +-30 pair, whose pan law at 15 degrees is (0.939071, 0.343724),
+    // so each output is 0.939071 + 0.343724 of a unit pair.
+    let want = 0.939_071 + 0.343_724;
+    for (c, &o) in output.iter().enumerate() {
+        assert!((o - want).abs() < 1e-4, "channel {c}: {o}, want {want}");
+    }
 }
 
 /// `Node::reset` resets time, not settings.
@@ -76,31 +83,21 @@ fn reset_keeps_the_authored_placement() {
     );
 }
 
-/// The other half of the contract: the ramp *is* cleared, so the frame
+/// The other half of the contract: the glide *is* dropped, so the frame
 /// after a reset renders at the commanded position rather than sweeping in
-/// from wherever the smoother had got to.
+/// from wherever the glide had got to.
 ///
 /// Asserted against a *settled* reference panner rather than against a
-/// channel inequality: the de-zipper starts at front-centre, so a few frames
-/// into a hard-left move both channels are still near-equal and either one
-/// may lead by a hair. "Equals the settled answer" is the property a seated
-/// smoother actually has, and it is the one that fails when the ramp is
-/// left in flight.
+/// channel inequality: a glide that starts at front-centre has both channels
+/// near-equal a few frames into a hard-left move, and either one may lead by a
+/// hair. "Equals the settled answer" is the property a seated node actually
+/// has, and it is the one that fails when the glide is left in flight.
 ///
-/// # The setup deliberately does not tick before the reset
-///
-/// An aim → `tick` → `reset` sequence would pass even if `reset`
-/// left the smoother where it was, because the leading tick's 50 ms
-/// ramp would carry it most of the way. The reset must read the
-/// azimuth and elevation cells itself.
-///
-/// This test therefore resets with no intervening tick, which is the
-/// sequence a caller writes. The `-90°` half is
-/// the guard: at `+90°` a bug that seeds front-centre still leaves
-/// the left channel leading, so a one-sided assertion could pass for the
+/// The `-90°` half is the guard: at `+90°` a bug that seeds front-centre still
+/// leaves the left channel leading, so a one-sided assertion could pass for the
 /// wrong reason.
 #[test]
-fn reset_seats_the_smoother_on_the_commanded_position() {
+fn reset_seats_the_glide_on_the_commanded_position() {
     let input = [1.0f32, 1.0f32];
 
     for (bearing, lead, silent) in [(90.0f32, 0usize, 1usize), (-90.0, 1, 0)] {
@@ -117,9 +114,13 @@ fn reset_seats_the_smoother_on_the_commanded_position() {
             "the settled reference at {bearing} should be a hard pan, got {reference:?}"
         );
 
-        // No tick between the aim and `reset`: the reset must find
-        // the commanded bearing on its own.
+        // The node has rendered at front-centre, then is aimed and reset: the
+        // reset drops the glide that would carry it there.
         let mut panner = prep(VbapPannerNode::stereo());
+        let mut scratch = [0.0f32; 2];
+        for _ in 0..64 {
+            tick(&mut panner, &input, &mut scratch);
+        }
         aim(&panner.param_set(), Azimuth(bearing), Elevation::LEVEL);
         Node::reset(&mut panner);
 
@@ -133,11 +134,12 @@ fn reset_seats_the_smoother_on_the_commanded_position() {
     }
 }
 
-/// The ramp is genuinely in flight before a reset — otherwise
-/// [`reset_seats_the_smoother_on_the_commanded_position`] would hold
-/// trivially and prove nothing about the reset.
+/// The glide is genuinely in flight before a reset — otherwise
+/// [`reset_seats_the_glide_on_the_commanded_position`] would hold trivially and
+/// prove nothing about the reset. A node aimed before its first block lands on
+/// the aim whole; one aimed after is 50 ms from it.
 #[test]
-fn the_de_zipper_ramp_is_in_flight_without_a_reset() {
+fn a_bearing_written_after_the_first_block_glides() {
     let input = [1.0f32, 1.0f32];
 
     let mut settled = prep(VbapPannerNode::stereo());
@@ -148,13 +150,17 @@ fn the_de_zipper_ramp_is_in_flight_without_a_reset() {
     }
 
     let mut panner = prep(VbapPannerNode::stereo());
+    let mut scratch = [0.0f32; 2];
+    tick(&mut panner, &input, &mut scratch);
     aim(&panner.param_set(), Azimuth(90.0), Elevation::LEVEL);
-    let mut mid_ramp = [0.0f32; 2];
-    tick(&mut panner, &input, &mut mid_ramp);
+    let mut mid_glide = [0.0f32; 2];
+    for _ in 0..64 {
+        tick(&mut panner, &input, &mut mid_glide);
+    }
     assert!(
-        (mid_ramp[1] - reference[1]).abs() > 0.1,
-        "one frame in, the ramp should still be far from settled, \
-         got {mid_ramp:?} vs {reference:?}"
+        (mid_glide[1] - reference[1]).abs() > 0.1,
+        "64 frames in, the glide should still be far from settled, \
+         got {mid_glide:?} vs {reference:?}"
     );
 }
 
@@ -273,28 +279,38 @@ fn vbap_clone_shares_atomics() {
     );
 }
 
-/// A clone keeps the original's sample rate, so its de-zipper ramp runs at
-/// the same speed: two fresh nodes at 96 kHz — the original and its clone —
-/// sweep to a new bearing identically.
+/// A clone keeps the original's sample rate, so its glide runs at the same
+/// speed: the original and its clone at 96 kHz sweep to a new bearing
+/// identically, and the sweep is 50 ms long there (4 800 frames), not the 2 400
+/// of 48 kHz.
 #[test]
-fn a_clone_ramps_at_the_originals_sample_rate() {
+fn a_clone_glides_at_the_originals_sample_rate() {
     let rate = SampleRate::SR_96K;
     let mut original = prepared(VbapPannerNode::stereo(), rate, 64);
     let mut clone = original.clone();
-    aim(&original.param_set(), Azimuth(60.0), Elevation::LEVEL);
     let (mut a, mut b) = ([0.0f32; 2], [0.0f32; 2]);
-    for i in 0..2_000 {
+    tick_at(&mut original, rate, &[1.0, 1.0], &mut a);
+    tick_at(&mut clone, rate, &[1.0, 1.0], &mut b);
+    aim(&original.param_set(), Azimuth(60.0), Elevation::LEVEL);
+    let start = a;
+    let mut at_48k_length = a;
+    for i in 0..4_800 {
         tick_at(&mut original, rate, &[1.0, 1.0], &mut a);
         tick_at(&mut clone, rate, &[1.0, 1.0], &mut b);
-        assert_eq!(a, b, "frame {i}: the clone's ramp diverged");
+        assert_eq!(a, b, "frame {i}: the clone's glide diverged");
+        if i == 2_399 {
+            at_48k_length = a;
+        }
     }
+    assert_ne!(at_48k_length, a, "the glide is not over at 2 400 frames");
+    assert_ne!(start, a);
 }
 
-/// A non-finite position, spread or width never reaches the de-zipper
-/// smoother, whose state is recursive: the node keeps the last finite
-/// value, renders finite audio, and follows the next finite write.
+/// A non-finite position, spread or width never reaches the solve: the node
+/// keeps the last finite value, renders finite audio, and follows the next
+/// finite write.
 #[test]
-fn a_non_finite_control_never_reaches_the_smoother() {
+fn a_non_finite_control_reads_as_unchanged() {
     let bad = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY];
     for value in bad {
         for which in 0..4 {
@@ -344,7 +360,7 @@ fn the_inserted_params_move_the_running_node() {
         Prepare::new(RATE, MaxBlock::of(Samples(64))),
     );
     aim(solo.controls(), Azimuth(90.0), Elevation::LEVEL);
-    // 100 ms: past the 50 ms de-zipper.
+    // 100 ms: past the 50 ms glide.
     let ones = vec![1.0f32; 4_800];
     let out = solo.render_input(&[&ones, &ones]);
     let (l, r) = (out[0][4_799], out[1][4_799]);
@@ -354,73 +370,36 @@ fn the_inserted_params_move_the_running_node() {
     );
 }
 
-/// A channel's speaker is its place among the non-LFE channels of the bed's
-/// topology: the LFE (index 3 of 5.1, 7.1 and 7.1.4) feeds from no speaker and
-/// the channels after it take the next one, so the surrounds are not one slot
-/// early. The literals are the file orders worked by hand, the bed's speakers
-/// being L R C (Ls Rs) (Lrs Rrs) (TFL TFR TBL TBR) in the preset's order.
+/// A channel's speaker is its place among the placed speakers of the bed: the
+/// LFE (index 3 of every bed that has one) feeds from no speaker and the
+/// channels after it take the next one, so the surrounds are not one slot early.
+/// The literals are the beds' orders worked by hand.
 #[test]
 fn a_channels_speaker_skips_the_lfe() {
-    let rows: [(u16, &[Option<usize>]); 5] = [
-        (2, &[Some(0), Some(1)]),
-        (4, &[Some(0), Some(1), Some(2), Some(3)]),
-        (6, &[Some(0), Some(1), Some(2), None, Some(3), Some(4)]),
-        (
-            8,
-            &[
-                Some(0),
-                Some(1),
-                Some(2),
-                None,
-                Some(3),
-                Some(4),
-                Some(5),
-                Some(6),
-            ],
-        ),
-        (
-            12,
-            &[
-                Some(0),
-                Some(1),
-                Some(2),
-                None,
-                Some(3),
-                Some(4),
-                Some(5),
-                Some(6),
-                Some(7),
-                Some(8),
-                Some(9),
-                Some(10),
-            ],
-        ),
+    let n = |count: usize| (0..count).map(Some).collect::<Vec<_>>();
+    // The bed's channels with the LFE at index 3: speakers 0..3, none, then on.
+    let with_lfe = |count: usize| {
+        let mut v = n(3);
+        v.push(None);
+        v.extend((3..count - 1).map(Some));
+        v
+    };
+    let rows: [(Bed, Vec<Option<usize>>); 11] = [
+        (Bed::Mono, n(1)),
+        (Bed::Stereo, n(2)),
+        (Bed::Quad, n(4)),
+        (Bed::Surround50, n(5)),
+        (Bed::Surround51, with_lfe(6)),
+        (Bed::Surround70, n(7)),
+        (Bed::Surround71, with_lfe(8)),
+        (Bed::Surround512, with_lfe(8)),
+        (Bed::Surround514, with_lfe(10)),
+        (Bed::Surround712, with_lfe(10)),
+        (Bed::Surround714, with_lfe(12)),
     ];
-    for (count, want) in rows {
-        let topology = ChannelTopology::assumed(ChannelLayout::from(count));
-        assert_eq!(speaker_of_channel(&topology), want, "{count} channels");
+    for (bed, want) in rows {
+        assert_eq!(speaker_of_channel(bed), want, "{bed:?}");
     }
-}
-
-/// A topology is a bed only in the engine's order: the right width in another
-/// order (unassigned channels) has no angles to pan to, and the error names it.
-#[test]
-fn a_topology_that_is_not_a_bed_is_refused_by_name() {
-    for width in [4u16, 6, 12] {
-        let unassigned = ChannelTopology::unassigned(ChannelLayout::from(width));
-        assert!(
-            matches!(VbapPannerNode::for_topology(&unassigned), Err(VbapError::NoBed(t)) if t == unassigned),
-            "{width} unassigned channels"
-        );
-    }
-    let quad = tutti_types::Bed::Quad.topology();
-    assert_eq!(
-        VbapPannerNode::for_topology(&quad)
-            .unwrap()
-            .channels()
-            .count() as usize,
-        4
-    );
 }
 
 /// The ports a lane can drive are the params the node declares, each with
@@ -465,7 +444,7 @@ fn a_lane_drives_each_param_as_its_cell_would() {
         if let Some((k, _)) = lane {
             params[k] = held.as_ref().map(|v| &v[..]);
         }
-        // Ten 50 ms time constants of blocks.
+        // Ten glide lengths of blocks.
         let mut last = Vec::new();
         for _ in 0..(RATE.get() as usize / 2).div_ceil(64) {
             last = drive(node, RATE, &[&left, &right], &params);
@@ -506,10 +485,10 @@ fn a_lane_drives_each_param_as_its_cell_would() {
 }
 
 /// A lane-driven bearing that crosses the seam takes the short arc: 170 degrees
-/// driven to 190 (which is -170) glides 20 degrees through the rear, and
-/// the speakers silent at both ends (the front pair of a quad) stay silent
-/// along the way. The long way round, 340 degrees through the front, lights
-/// them.
+/// driven to 190 (which is -170) is followed to -170, and the gains chord
+/// between the two rear-pair vectors, so the speakers silent at both ends (the
+/// front pair of a quad) stay silent along the way. The long way round,
+/// 340 degrees through the front, lights them.
 ///
 /// The speakers that are silent at both ends are found by rendering both
 /// ends settled, not named, so the row follows the bed.
@@ -541,7 +520,7 @@ fn a_lane_driven_bearing_crosses_the_seam_the_short_way() {
     let lane = [190.0f32; 64];
     let mut loudest_front = 0.0f32;
     let mut last = Vec::new();
-    // Ten 50 ms time constants: the glide is over.
+    // Ten glide lengths: the glide is over.
     for _ in 0..(RATE.get() as usize / 2).div_ceil(64) {
         last = drive(&mut node, RATE, &[&ones, &ones], &[Some(&lane)]);
         for &c in &front {
@@ -560,4 +539,141 @@ fn a_lane_driven_bearing_crosses_the_seam_the_short_way() {
             end[c]
         );
     }
+}
+
+/// The gains of a source at `azimuth` on the horizon: one per placed speaker,
+/// by the layout's own solve.
+fn solve(bed: Bed, azimuth: Azimuth) -> Vec<f32> {
+    let layout = SpeakerLayout::from_bed(bed).unwrap();
+    let mut gains = vec![0.0f32; speaker_of_channel(bed).iter().flatten().count()];
+    layout.gains_into(azimuth, Elevation::LEVEL, Spread::POINT, &mut gains);
+    gains
+}
+
+/// A cell's glide is about 50 ms at every rate: its grid points, of 16 frames,
+/// are within one grid period of 50 ms.
+#[test]
+fn the_cell_glide_is_fifty_milliseconds_to_a_grid_period_at_every_rate() {
+    for rate in [22_050.0, 44_100.0, 48_000.0, 96_000.0, 192_000.0] {
+        let frames = f64::from(glide_steps(SampleRate::new(rate).unwrap())) * GRID as f64;
+        let want = 0.05 * rate;
+        assert!(
+            (frames - want).abs() <= GRID as f64,
+            "{rate} Hz: {frames} frames, want {want}"
+        );
+    }
+}
+
+/// A bearing written as a step from 170 to -170 degrees glides along the short
+/// arc: at every grid point the last frame of its segment plays the gains of
+/// the closed-form bearing `170 + 20 j / N` (through 180, wrapped), on a quad
+/// whose front pair is silent anywhere on that arc. The chord between the gains
+/// at the two ends is a different vector at the midpoint, so a glide of the
+/// gains, or the long way round through the front, fails it.
+#[test]
+fn a_bearing_step_across_the_seam_glides_along_the_short_arc() {
+    for rate in [SampleRate::SR_48K, SampleRate::SR_44K1, SampleRate::SR_96K] {
+        let mut node = prepared(VbapPannerNode::quad(), rate, GRID);
+        let params = node.param_set();
+        params.set(UnitParam::StereoWidth, 0.0);
+        params.set(UnitParam::Azimuth, 170.0);
+        let ones = [1.0f32; GRID];
+        // Seated on 170 by the first segment, then the step.
+        drive(&mut node, rate, &[&ones, &ones], &[]);
+        params.set(UnitParam::Azimuth, -170.0);
+
+        let n = glide_steps(rate);
+        let (a, b) = (
+            solve(Bed::Quad, Azimuth(170.0)),
+            solve(Bed::Quad, Azimuth(-170.0)),
+        );
+        let mut worst_chord_gap = 0.0f32;
+        for j in 1..=n + 2 {
+            let out = drive(&mut node, rate, &[&ones, &ones], &[]);
+            for front in [0, 1] {
+                assert!(out[front].iter().all(|&s| s == 0.0), "{rate:?} point {j}");
+            }
+            let bearing = Azimuth(170.0 + 20.0 * j.min(n) as f32 / n as f32).wrap();
+            let want = solve(Bed::Quad, bearing);
+            for c in 0..4 {
+                assert!(
+                    (out[c][GRID - 1] - want[c]).abs() < 1e-4,
+                    "{rate:?} point {j}, channel {c}: {} against {}",
+                    out[c][GRID - 1],
+                    want[c]
+                );
+            }
+            worst_chord_gap = worst_chord_gap.max((0.5 * (a[2] + b[2]) - want[2]).abs());
+        }
+        assert!(worst_chord_gap > 0.01, "the chord of the ends is the arc");
+    }
+}
+
+/// A control written between two grid points is read at the next one: the
+/// frames up to it hold the old gains bit for bit, and the frame after it is
+/// step 1 of 16 of the way from them to the gains solved for the bearing one
+/// grid step into the glide (`90 / N` degrees).
+#[test]
+fn a_move_between_grid_points_starts_at_the_next_one() {
+    let ones = [1.0f32; 24];
+    let mut node = prep(VbapPannerNode::surround_5_1());
+    node.param_set().set(UnitParam::StereoWidth, 0.0);
+    // Frames 0..8 of the first segment, then the write, then the rest.
+    let head = drive(&mut node, RATE, &[&ones[..8], &ones[..8]], &[]);
+    aim(&node.param_set(), Azimuth(90.0), Elevation::LEVEL);
+    let tail = drive(&mut node, RATE, &[&ones, &ones], &[]);
+    let old = solve(Bed::Surround51, Azimuth(0.0));
+    let one_step = solve(Bed::Surround51, Azimuth(90.0 / glide_steps(RATE) as f32));
+    let speakers = speaker_of_channel(Bed::Surround51);
+    for (c, speaker) in speakers.iter().enumerate() {
+        let held = head[c][0].to_bits();
+        assert!(head[c].iter().all(|s| s.to_bits() == held), "channel {c}");
+        assert!(
+            tail[c][..8].iter().all(|s| s.to_bits() == held),
+            "channel {c} moved before the next grid point"
+        );
+        let Some(s) = *speaker else { continue };
+        let want = old[s] + (one_step[s] - old[s]) / GRID as f32;
+        assert!(
+            (tail[c][8] - want).abs() < 1e-5,
+            "channel {c}: first frame {} against {want}",
+            tail[c][8]
+        );
+    }
+    assert!(one_step[0] > 0.0, "the step must move the left speaker");
+}
+
+/// A lane is followed, not smoothed: at each grid point the direction solved is
+/// the lane's value at that frame, so the last frame of the segment plays those
+/// gains however fast the lane moves, with no lag beyond the grid period. The
+/// lane runs at 0.3 degrees a frame, through the rear and across the seam, on a
+/// quad whose gains change along the way; a 50 ms smoothing would trail it by
+/// tens of degrees.
+#[test]
+fn a_lane_driven_bearing_is_followed_to_the_grid_period() {
+    let mut node = prep(VbapPannerNode::quad());
+    node.param_set().set(UnitParam::StereoWidth, 0.0);
+    let ones = [1.0f32; GRID];
+    let lane_at = |frame: usize| Azimuth(100.0 + 0.3 * frame as f32).wrap().get();
+    let mut crossed = false;
+    for j in 0..60 {
+        let lane: Vec<f32> = (0..GRID).map(|i| lane_at(j * GRID + i)).collect();
+        crossed |= lane[0] > lane[GRID - 1];
+        let out = drive(
+            &mut node,
+            RATE,
+            &[&ones, &ones],
+            &[Some(&lane), None, None, None],
+        );
+        let want = solve(Bed::Quad, Azimuth(lane[0]));
+        for c in 0..4 {
+            assert!(
+                (out[c][GRID - 1] - want[c]).abs() < 1e-4,
+                "point {j}, channel {c}: {} against {}",
+                out[c][GRID - 1],
+                want[c]
+            );
+        }
+    }
+    assert!(crossed, "the lane never crossed the seam");
 }

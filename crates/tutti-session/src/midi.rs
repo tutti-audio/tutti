@@ -1234,9 +1234,9 @@ impl MidiState {
 
 tutti_types::id! {
     /// A file load a [`Midi`] started, named so the event that lands it can be
-    /// matched to the call: [`Midi::load_file`] and `Midi::load_soundfont`
-    /// return one, and [`MidiEvent::FileLoaded`] and
-    /// `SoundFontLoaded` carry it. The session mints it; it names nothing else.
+    /// matched to the call: [`Midi::load_file`] returns one, and
+    /// [`MidiEvent::FileLoaded`] carries it. The session mints it; it names
+    /// nothing else.
     pub struct MidiLoad;
 }
 
@@ -1244,11 +1244,11 @@ tutti_types::id! {
 /// input's routes and the hardware out. [`Session::midi`](crate::Session::midi)
 /// hands it out; what it edits goes out with the next update's commit.
 #[derive(Debug)]
-pub struct Midi<'a, C: crate::Clock = crate::Offline> {
+pub struct Midi<'a> {
     pub(crate) graph: &'a mut Graph,
     pub(crate) state: &'a mut MidiState,
     pub(crate) nodes: Option<&'a MidiNodes>,
-    pub(crate) jobs: &'a mut crate::jobs::Jobs<C>,
+    pub(crate) jobs: &'a mut dyn crate::jobs::EventJobs,
     /// The transport's settings (the tempo map a follower overlays).
     pub(crate) settings: &'a tutti_transport::TransportSettings,
     /// The project meter a follower overlays.
@@ -1348,7 +1348,23 @@ fn wire_inlets(
     edited
 }
 
-impl<C: crate::Clock> Midi<'_, C> {
+impl<'a> Midi<'a> {
+    /// The same view, borrowed for a shorter time.
+    pub(crate) fn reborrow(&mut self) -> Midi<'_> {
+        Midi {
+            graph: &mut *self.graph,
+            state: &mut *self.state,
+            nodes: self.nodes,
+            jobs: &mut *self.jobs,
+            settings: self.settings,
+            meter: self.meter.clone(),
+            #[cfg(feature = "midi-hardware")]
+            io: self.io.as_deref_mut(),
+        }
+    }
+}
+
+impl Midi<'_> {
     fn next_load(&self) -> MidiLoad {
         MidiLoad::mint(&self.state.loads)
     }
@@ -1362,49 +1378,20 @@ impl<C: crate::Clock> Midi<'_, C> {
     pub fn load_file(&mut self, path: impl Into<std::path::PathBuf>) -> MidiLoad {
         let load = self.next_load();
         let path = path.into();
-        self.jobs.submit(
-            move || tutti_midi_file::MidiFile::read(path),
-            move |_, done, events| {
-                let file = match done {
-                    Ok(read) => read.map_err(MidiError::from),
-                    Err(failed) => Err(failed.into()),
-                };
-                events.push(MidiEvent::FileLoaded { load, file }.into());
-            },
-        );
-        load
-    }
-
-    /// Opens the SoundFont at `path` and builds a unit from it with
-    /// `settings`, on the session's spawner. Returns at once; the result
-    /// lands as [`MidiEvent::SoundFontLoaded`] with the returned id in a later
-    /// [`Session::update`](crate::Session::update), on the thread that calls
-    /// `update()`. The host adds the unit (`add_instrument`,
-    /// `add_general_midi`) when it lands.
-    #[must_use = "the id matches the event that lands the load"]
-    #[cfg(feature = "soundfont")]
-    pub fn load_soundfont(
-        &mut self,
-        path: impl Into<std::path::PathBuf>,
-        settings: tutti_soundfont::Settings,
-    ) -> MidiLoad {
-        let load = self.next_load();
-        let path = path.into();
-        self.jobs.submit(
-            move || -> Result<Box<tutti_soundfont::SoundFontUnit>> {
-                let font = tutti_sf2::SoundFont::open(path)?;
-                Ok(Box::new(tutti_soundfont::SoundFontUnit::new(
-                    std::sync::Arc::new(font),
-                    settings,
-                )?))
-            },
-            move |_, done, events| {
-                let unit = match done {
-                    Ok(built) => built,
-                    Err(failed) => Err(failed.into()),
-                };
-                events.push(MidiEvent::SoundFontLoaded { load, unit }.into());
-            },
+        self.jobs.submit_events(
+            Box::new(move || {
+                let read = tutti_midi_file::MidiFile::read(path);
+                Box::new(move |events: &mut Vec<crate::SessionEvent>| {
+                    let file = read.map_err(MidiError::from);
+                    events.push(MidiEvent::FileLoaded { load, file }.into());
+                })
+            }),
+            Box::new(move |failed| {
+                Box::new(move |events: &mut Vec<crate::SessionEvent>| {
+                    let file = Err(failed.into());
+                    events.push(MidiEvent::FileLoaded { load, file }.into());
+                })
+            }),
         );
         load
     }

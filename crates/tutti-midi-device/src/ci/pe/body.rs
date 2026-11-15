@@ -29,7 +29,7 @@ pub enum PeBodyError {
         at: usize,
     },
     /// The Mcoded7 layer is malformed.
-    #[error("Mcoded7: {0}")]
+    #[error("Mcoded7 data is not valid")]
     Mcoded7(#[from] Mcoded7Error),
     /// The decoded body is longer than the [`BodyLimit`].
     #[error("the decoded body is longer than {} bytes", .0.get())]

@@ -40,7 +40,7 @@ fn no_words_no_packets() {
     assert_eq!(split_stream(&[]).count(), 0);
 }
 
-/// Spec: m2-104/mt/0, m2-104/mt/1, m2-104/mt/2, m2-104/mt/3, m2-104/mt/4, m2-104/mt/5, m2-104/mt/6, m2-104/mt/7, m2-104/mt/8, m2-104/mt/9, m2-104/mt/a, m2-104/mt/b, m2-104/mt/c, m2-104/mt/d, m2-104/mt/e, m2-104/mt/f
+/// Spec: m2-104/2.1.2#1, m2-104/mt/0, m2-104/mt/1, m2-104/mt/2, m2-104/mt/3, m2-104/mt/4, m2-104/mt/5, m2-104/mt/6, m2-104/mt/7, m2-104/mt/8, m2-104/mt/9, m2-104/mt/a, m2-104/mt/b, m2-104/mt/c, m2-104/mt/d, m2-104/mt/e, m2-104/mt/f
 #[test]
 fn every_type_has_its_table_4_size() {
     // M2-104 section 2.1.4, Table 4: a stream of one packet per type, each

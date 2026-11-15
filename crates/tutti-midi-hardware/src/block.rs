@@ -98,7 +98,7 @@ impl RawBlock<'_> {
             groups,
         )
         .active(self.active)
-        .ui_hint(match self.ui_hint {
+        .wire_ui_hint(match self.ui_hint {
             1 => UiHint::Receiver,
             2 => UiHint::Sender,
             3 => UiHint::Both,

@@ -26,7 +26,7 @@ use tutti_graph::Node;
 use tutti_graph::contract::Direct;
 use tutti_nodes::{
     BrickwallLimiterNode, ChannelTimes, CompressorControls, CompressorNode, DelayControls,
-    DelayLayout, DelayNode, DistortionNode, FamilyNode, FdnControls, FreeverbNode, GateControls,
+    DelayLayout, DelayNode, DistortionNode, FdnControls, FdnNode, FreeverbNode, GateControls,
     GateNode, InterpolationMode, KeySource, LimiterControls, LimiterNode, Lookahead, MaxDelay,
     ShapeKind,
 };
@@ -426,7 +426,7 @@ fn reverb(c: &mut Criterion) {
         c,
         "reverb",
         "fdn",
-        || FamilyNode::live(tutti_nodes::FdnFamily::default(), FdnControls::DEFAULT),
+        || FdnNode::live(tutti_nodes::FdnLayout::default(), FdnControls::DEFAULT),
         None,
     );
 }

@@ -42,6 +42,7 @@ use winnow::token::any;
 use tutti_ump::{Flex, Message, Stream, SysexStatus, Ump, Utility, split_stream};
 
 use super::{CLIP_FILE_MAGIC, ClipFileError, ParsedClip, property_exchange};
+use crate::Truncated;
 
 /// Why a rule refused, carried as winnow context and mapped to
 /// [`ClipFileError`] once, in [`error_of`].
@@ -458,7 +459,7 @@ fn error_of(e: &winnow::error::ErrMode<ContextError<Fault>>, torn: bool) -> Clip
         Some(Fault::MissingDctpq | Fault::MissingStartOfClip | Fault::MissingEndOfClip) | None
             if torn =>
         {
-            ClipFileError::Truncated
+            ClipFileError::Truncated(Truncated::Message)
         }
         Some(Fault::MissingDctpq) => ClipFileError::MissingDctpq,
         Some(Fault::ZeroDctpq) => ClipFileError::ZeroDctpq,
@@ -477,7 +478,7 @@ fn error_of(e: &winnow::error::ErrMode<ContextError<Fault>>, torn: bool) -> Clip
         Some(Fault::TrailingData) => ClipFileError::TrailingData,
         // Every rule that can refuse names its fault; a refusal with none ran
         // out of packets inside a rule.
-        None => ClipFileError::Truncated,
+        None => ClipFileError::Truncated(Truncated::Clip),
     }
 }
 

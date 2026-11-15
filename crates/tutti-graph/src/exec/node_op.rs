@@ -455,6 +455,7 @@ pub(super) fn node_op_with<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots +
             for e in &mut inj.events {
                 e.offset = e.offset.clamp_to(frames);
             }
+            inj.drain_owed();
             let slot = ein[inj.port as usize];
             inj.merged.clear();
             let cap_total = inj.merged.capacity();
@@ -545,12 +546,12 @@ pub(super) fn node_op_with<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots +
         st.has_due[st.at] = false;
     }
     if injected {
+        let mut owing = false;
         for inj in st.inject.iter_mut().filter(|i| i.unit == unit) {
-            inj.events.clear();
-            inj.merged.clear();
-            inj.live = false;
+            inj.consumed();
+            owing |= inj.live;
         }
-        st.has_inject[st.at] = false;
+        st.has_inject[st.at] = owing;
     }
 
     u.last_idle = status == Status::Idle;

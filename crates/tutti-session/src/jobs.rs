@@ -221,6 +221,42 @@ impl<C: Clock> fmt::Debug for Jobs<C> {
     }
 }
 
+/// What a job reports when it ends: the events of its landing, built where the
+/// result is, so the lander needs nothing of the session.
+#[cfg(feature = "midi")]
+pub(crate) type Report = Box<dyn FnOnce(&mut Vec<SessionEvent>) + Send>;
+
+/// The jobs a handle that holds no session (the session's MIDI view) submits:
+/// jobs whose landing only reports events, so they do not name the session's
+/// clock.
+#[cfg(feature = "midi")]
+pub(crate) trait EventJobs: fmt::Debug {
+    /// Runs `work` on the spawner and reports what it returns at a later
+    /// update; a job that did not finish reports what `failed` makes of why.
+    fn submit_events(
+        &mut self,
+        work: Box<dyn FnOnce() -> Report + Send>,
+        failed: Box<dyn FnOnce(JobFailed) -> Report + Send>,
+    );
+}
+
+#[cfg(feature = "midi")]
+impl<C: Clock> EventJobs for Jobs<C> {
+    fn submit_events(
+        &mut self,
+        work: Box<dyn FnOnce() -> Report + Send>,
+        failed: Box<dyn FnOnce(JobFailed) -> Report + Send>,
+    ) {
+        self.submit(work, move |_, done, events| {
+            let report = match done {
+                Ok(report) => report,
+                Err(why) => failed(why),
+            };
+            report(events);
+        });
+    }
+}
+
 impl<C: Clock> Jobs<C> {
     pub(crate) fn new(spawn: Spawner) -> Self {
         let (tx, rx) = channel();
@@ -382,7 +418,7 @@ impl<C: Clock> Session<C> {
     }
 }
 
-fn panic_message(payload: &(dyn Any + Send)) -> String {
+pub(crate) fn panic_message(payload: &(dyn Any + Send)) -> String {
     payload
         .downcast_ref::<&str>()
         .map(|s| (*s).to_owned())

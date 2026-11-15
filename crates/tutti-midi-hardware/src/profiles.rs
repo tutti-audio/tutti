@@ -28,7 +28,7 @@ use tutti_midi_device::{
     ProfileState, ProfileTable, ProfileTarget, Request, RequestError, SpecificData,
 };
 use tutti_midi_protocol::{ChannelResponse, MpeZoneConfig, MpeZones, PitchBendSensitivity};
-use tutti_ump::{MidiChannel, MidiGroup};
+use tutti_ump::{MidiChannel, MidiGroup, MpeChannels, MpeZoneSpan};
 
 tutti_types::ranged! {
     /// The Channels a Profile is asked to use when it is enabled on a Channel: the
@@ -283,12 +283,10 @@ impl PeerProfiles {
                 .then(|| entry.channels())
                 .flatten()
                 .and_then(|count| u8::try_from(count.get()).ok())
-                .and_then(|count| {
-                    MpeZoneConfig::profile(
-                        manager,
-                        count,
-                        PitchBendSensitivity::MPE_PROFILE_DEFAULT,
-                    )
+                .and_then(MpeChannels::new)
+                .and_then(|count| MpeZoneSpan::new(manager, count))
+                .map(|span| {
+                    MpeZoneConfig::profile(span, PitchBendSensitivity::MPE_PROFILE_DEFAULT)
                 });
             let Some(zone) = zone else { continue };
             zones = match zones {
@@ -369,6 +367,12 @@ pub enum ProfilesChange {
         profile: ProfileId,
         /// Why.
         error: RequestError,
+    },
+    /// A [`ProfileSwitch`] was not sent: the peer was lost between the request
+    /// and the poll that would have sent it.
+    PeerGone {
+        /// The Profile.
+        profile: ProfileId,
     },
     /// The peer sent Profile Specific Data (M2-101 §7.12): a Profile's own
     /// message, which [`mpe_channel_response`](ProfilesChange::mpe_channel_response)

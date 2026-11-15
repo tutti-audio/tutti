@@ -43,7 +43,7 @@ fn the_forms_differ_in_their_direct_term_and_group_delay() {
     let ap = |form, gain| AllPass {
         delay: 100.0,
         gain,
-        modulation: Modulation::NONE,
+        modulation: LineModulation::NONE,
         form,
     };
     assert!(ap(AllPassForm::Lattice, 0.5).has_direct_term());

@@ -6,10 +6,15 @@ use std::sync::{Arc, Mutex};
 
 use tutti_types::SampleRate;
 
+use super::table::HoldKind;
 use super::{Declared, Life, Load, LoadError, PoolEntry, PoolError, PoolEvent, PoolKey, PoolState};
 use crate::peer::sealed;
 use crate::{HandleError, Job, Peer, PeerError, Presence, Resource, ResourceId, Session};
 use crate::{SessionEvent, jobs::JobFailed};
+
+mod holds;
+mod loads;
+mod refresh;
 
 /// The loads a session handed its spawner, held until the test runs them.
 #[derive(Clone, Default)]
@@ -18,6 +23,10 @@ struct Spawned(Arc<Mutex<Vec<Job>>>);
 impl Spawned {
     fn take(&self) -> Vec<Job> {
         std::mem::take(&mut *self.0.lock().unwrap())
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.lock().unwrap().is_empty()
     }
 
     fn run_all(&self) {
@@ -55,6 +64,7 @@ fn probe(version: u32, runs: &Arc<AtomicUsize>) -> Probe {
     }
 }
 
+#[derive(Clone)]
 struct ProbeHandle {
     id: ResourceId,
     loaded: u32,
@@ -134,6 +144,7 @@ fn events<C: crate::Clock>(session: &mut Session<C>) -> Vec<(&'static str, Strin
                     PoolEvent::Reloaded => "reloaded".to_owned(),
                     PoolEvent::Failed(error) => format!("failed: {error}"),
                     PoolEvent::Released => "released".to_owned(),
+                    PoolEvent::RunDropped => "run dropped".to_owned(),
                 },
             )),
             _ => None,
@@ -146,6 +157,8 @@ fn state<C: crate::Clock>(session: &Session<C>, key: &'static str) -> Option<Str
         PoolState::Loading => "loading".to_owned(),
         PoolState::Loaded => "loaded".to_owned(),
         PoolState::Reloading => "reloading".to_owned(),
+        PoolState::WaitingForMainThread => "waiting-for-main".to_owned(),
+        PoolState::Opening => "opening".to_owned(),
         PoolState::Failed(_) => "failed".to_owned(),
         PoolState::Held => "held".to_owned(),
     })
@@ -358,13 +371,31 @@ fn an_entry_no_one_holds_is_released_at_the_next_update_and_its_handle_closes() 
 }
 
 #[test]
+fn dropping_a_handle_leaves_its_entry_loaded() {
+    let (mut s, spawned) = session();
+    let runs = runs();
+    s.pool(entry("a", probe(1, &runs))).unwrap();
+    spawned.run_all();
+    let _ = events(&mut s);
+    let first = handle(&s, "a").unwrap();
+    let second = first.clone();
+    drop(first);
+    drop(second);
+    assert!(events(&mut s).is_empty(), "no release, no reload");
+    assert_eq!(state(&s, "a").as_deref(), Some("loaded"));
+    let again = handle(&s, "a").unwrap();
+    assert_eq!(again.presence(), Presence::Live);
+    assert_eq!(runs.load(Ordering::SeqCst), 1, "loaded once");
+}
+
+#[test]
 fn a_held_entry_is_released_at_its_last_holds_drop_not_before() {
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
     spawned.run_all();
     let _ = events(&mut s);
-    let one = s.pool.hold(&PoolKey::new(&"a")).unwrap();
+    let one = s.pool.hold(&PoolKey::new(&"a"), HoldKind::Node).unwrap();
     let two = one.clone();
     undeclare(&mut s);
     assert_eq!(state(&s, "a").as_deref(), Some("held"));
@@ -385,7 +416,7 @@ fn declaring_a_held_key_with_its_identity_adopts_it_without_a_reload() {
     spawned.run_all();
     let _ = events(&mut s);
     let held = handle(&s, "a").unwrap();
-    let hold = s.pool.hold(&PoolKey::new(&"a")).unwrap();
+    let hold = s.pool.hold(&PoolKey::new(&"a"), HoldKind::Node).unwrap();
     undeclare(&mut s);
     assert_eq!(state(&s, "a").as_deref(), Some("held"));
     s.pool(entry("a", probe(1, &runs))).unwrap();
@@ -405,7 +436,7 @@ fn declaring_a_held_key_with_another_identity_reloads_it() {
     s.pool(entry("a", probe(1, &runs))).unwrap();
     spawned.run_all();
     let _ = events(&mut s);
-    let _hold = s.pool.hold(&PoolKey::new(&"a")).unwrap();
+    let _hold = s.pool.hold(&PoolKey::new(&"a"), HoldKind::Node).unwrap();
     undeclare(&mut s);
     s.pool(entry("a", probe(2, &runs))).unwrap();
     assert_eq!(state(&s, "a").as_deref(), Some("reloading"));
@@ -560,7 +591,7 @@ fn an_outcome_that_landed_while_held_is_reported_when_the_entry_is_adopted() {
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    let hold = s.pool.hold(&PoolKey::new(&"a")).unwrap();
+    let hold = s.pool.hold(&PoolKey::new(&"a"), HoldKind::Node).unwrap();
     undeclare(&mut s);
     spawned.run_all();
     assert!(events(&mut s).is_empty(), "held: nothing to report yet");
@@ -614,7 +645,7 @@ fn a_released_slots_queued_outcome_is_not_reported_for_the_key_declared_again() 
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    let hold = s.pool.hold(&PoolKey::new(&"a")).unwrap();
+    let hold = s.pool.hold(&PoolKey::new(&"a"), HoldKind::Node).unwrap();
     undeclare(&mut s);
     spawned.run_all();
     assert!(events(&mut s).is_empty());
@@ -680,7 +711,7 @@ fn a_refused_set_applies_nothing_while_a_release_is_pending() {
 #[cfg(feature = "sampler")]
 mod audio {
     use super::*;
-    use crate::audio_file;
+    use crate::{AudioEntry, audio_file};
 
     fn write_wav(path: &std::path::Path, frames: u32) {
         let spec = hound::WavSpec {
@@ -699,7 +730,10 @@ mod audio {
     }
 
     fn wave(session: &crate::DetachedSession, key: &'static str) -> Arc<tutti_codec::Wave> {
-        session.audio(&key).unwrap()
+        match session.audio(&key).unwrap() {
+            AudioEntry::Resident(wave) => wave,
+            other => panic!("a resident entry reads as its wave, got {other:?}"),
+        }
     }
 
     #[test]
@@ -723,6 +757,74 @@ mod audio {
         assert_eq!(events(&mut s), [("kick", "reloaded".to_owned())]);
         assert_eq!(wave(&s, "kick").len().0, 250);
         assert_eq!(loaded.len().0, 100, "a reader of the old wave keeps it");
+    }
+
+    #[test]
+    fn dropping_an_audio_handle_leaves_the_entry_loaded_and_its_wave_shared() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.wav");
+        write_wav(&path, 10);
+        let (mut s, spawned) = session();
+        s.pool(audio_file("kick", &path)).unwrap();
+        spawned.run_all();
+        let _ = events(&mut s);
+        let first = wave(&s, "kick");
+        let handle = s.audio(&"kick").unwrap();
+        drop(handle);
+        drop(first.clone());
+        assert!(events(&mut s).is_empty(), "no release, no reload");
+        assert_eq!(state(&s, "kick").as_deref(), Some("loaded"));
+        assert!(Arc::ptr_eq(&first, &wave(&s, "kick")), "the one decode");
+        assert!(spawned.take().is_empty(), "nothing loads again");
+    }
+
+    #[test]
+    fn a_streamed_entry_reads_the_files_header_not_its_samples() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.wav");
+        write_wav(&path, 480);
+        let (mut s, spawned) = session();
+        s.pool(audio_file("long", &path).streamed()).unwrap();
+        spawned.run_all();
+        assert_eq!(events(&mut s), [("long", "loaded".to_owned())]);
+        let AudioEntry::Streamed(info) = s.audio(&"long").unwrap() else {
+            panic!("a streamed entry reads as its header");
+        };
+        assert_eq!(info.path(), path);
+        assert_eq!(info.facts().frames.map(|frames| frames.0), Some(480));
+        assert_eq!(info.facts().layout.count(), 2);
+        assert_eq!(info.facts().sample_rate, tutti_types::SampleRate::SR_48K);
+    }
+
+    #[test]
+    fn the_tier_is_part_of_the_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.wav");
+        write_wav(&path, 10);
+        let (mut s, spawned) = session();
+        s.pool(audio_file("a", &path)).unwrap();
+        spawned.run_all();
+        let _ = events(&mut s);
+        s.pool(audio_file("a", &path).streamed()).unwrap();
+        assert_eq!(state(&s, "a").as_deref(), Some("reloading"));
+        spawned.run_all();
+        assert_eq!(events(&mut s), [("a", "reloaded".to_owned())]);
+        assert!(matches!(s.audio(&"a"), Ok(AudioEntry::Streamed(_))));
+    }
+
+    #[test]
+    fn a_streamed_entry_of_a_file_that_is_no_audio_fails_with_a_probe_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.wav");
+        std::fs::write(&path, b"not audio").unwrap();
+        let (mut s, spawned) = session();
+        s.pool(audio_file("a", &path).streamed()).unwrap();
+        spawned.run_all();
+        let _ = s.update();
+        assert!(matches!(
+            s.pool_state(&"a"),
+            Some(PoolState::Failed(LoadError::Probe(_)))
+        ));
     }
 
     #[test]
@@ -756,6 +858,29 @@ mod audio {
             s.audio(&"kick"),
             Err(HandleError::NotPooled("kick"))
         ));
+    }
+
+    #[test]
+    fn two_keys_of_one_audio_path_share_one_decode_and_one_wave() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.wav");
+        write_wav(&path, 10);
+        let (mut s, spawned) = session();
+        s.pool((audio_file("kick", &path), audio_file("again", &path)))
+            .unwrap();
+        let jobs = spawned.take();
+        assert_eq!(jobs.len(), 1, "one decode for both keys");
+        for job in jobs {
+            job.run();
+        }
+        assert_eq!(
+            events(&mut s),
+            [
+                ("kick", "loaded".to_owned()),
+                ("again", "loaded".to_owned())
+            ]
+        );
+        assert!(Arc::ptr_eq(&wave(&s, "kick"), &wave(&s, "again")));
     }
 
     #[test]
@@ -808,6 +933,45 @@ mod font {
         assert!(Arc::ptr_eq(&font, &again), "one parsed font");
         assert!(!font.presets().is_empty());
     }
+}
+
+/// **A refusal of a landing that something newer superseded records nothing**:
+/// the kind that refuses a landed value names the landing's generation, and an
+/// entry with a load in flight (or a newer landing) is left to that load.
+#[cfg(feature = "plugin")]
+#[test]
+fn a_stale_refusal_of_a_landing_leaves_the_load_in_flight_alone() {
+    let (mut s, spawned) = session();
+    let runs = Arc::new(AtomicUsize::new(0));
+    let key = PoolKey::new(&"a");
+    s.pool(entry("a", probe(1, &runs))).unwrap();
+    spawned.run_all();
+    let _ = events(&mut s);
+    let (landing, _) = s.pool.landing_of::<Probe>(&key).expect("loaded");
+    let refusal = || LoadError::Job(JobFailed::Dropped);
+
+    // A new declaration is in flight: the refusal of the old landing is stale.
+    s.pool(entry("a", probe(2, &runs))).unwrap();
+    assert_eq!(state(&s, "a").as_deref(), Some("reloading"));
+    assert!(!s.pool.refuse_landed(&key, landing, refusal()));
+    assert_eq!(state(&s, "a").as_deref(), Some("reloading"), "untouched");
+    spawned.run_all();
+    assert_eq!(events(&mut s), [("a", "reloaded".to_owned())]);
+
+    // The newer landing is refused by its own generation, and a refusal of
+    // the old one (a second time over) still records nothing.
+    assert!(!s.pool.refuse_landed(&key, landing, refusal()));
+    let (newer, _) = s.pool.landing_of::<Probe>(&key).expect("loaded");
+    assert_ne!(newer, landing);
+    assert!(s.pool.refuse_landed(&key, newer, refusal()));
+    assert_eq!(state(&s, "a").as_deref(), Some("failed"));
+    assert!(handle(&s, "a").is_err(), "its value is gone");
+    assert_eq!(events(&mut s).len(), 1, "one failure");
+
+    // A failed entry loads again as a first landing.
+    s.retry(&"a").unwrap();
+    spawned.run_all();
+    assert_eq!(events(&mut s), [("a", "loaded".to_owned())]);
 }
 
 /// A clock switch, with loads of the session's own in flight (the pool's loads
@@ -894,5 +1058,80 @@ mod clock_switch {
             events(&mut live).is_empty(),
             "the late jobs report nothing more"
         );
+    }
+
+    /// **A run asked with `when_loaded` is run or reported dropped by a clock
+    /// switch, never silently lost**: a run is typed to the clock it was asked
+    /// of, so the one whose entry has loaded runs before the session converts,
+    /// and the one whose entry has not is reported once as
+    /// `PoolEvent::RunDropped` and does not run (its entry's load, in flight,
+    /// fails with the job).
+    #[test]
+    fn a_run_for_a_loaded_entry_runs_and_one_for_a_pending_entry_is_reported_dropped() {
+        let (mut s, spawned) = system_session();
+        let runs = runs();
+        s.pool((
+            entry("loaded", probe(1, &runs)),
+            entry("pending", probe(1, &runs)),
+        ))
+        .unwrap();
+        let mut jobs = spawned.take();
+        let held_back: Vec<_> = jobs.split_off(1);
+        for job in jobs {
+            job.run();
+        }
+        let _ = events(&mut s);
+        let ran_loaded = Arc::new(AtomicUsize::new(0));
+        let ran_pending = Arc::new(AtomicUsize::new(0));
+        let seen = Arc::clone(&ran_loaded);
+        s.when_loaded(&"loaded", move |_| {
+            seen.fetch_add(1, Ordering::SeqCst);
+        })
+        .unwrap();
+        let seen = Arc::clone(&ran_pending);
+        s.when_loaded(&"pending", move |_| {
+            seen.fetch_add(1, Ordering::SeqCst);
+        })
+        .unwrap();
+        let (driver, spec) = card();
+        let mut live = s
+            .into_device_on(spec, driver)
+            .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+        assert_eq!(ran_loaded.load(Ordering::SeqCst), 1, "ran on the old clock");
+        let after = events(&mut live);
+        let dropped: Vec<_> = after
+            .iter()
+            .filter(|(_, what)| what == "run dropped")
+            .collect();
+        assert_eq!(
+            dropped,
+            [&("pending", "run dropped".to_owned())],
+            "{after:?}"
+        );
+        assert_eq!(ran_pending.load(Ordering::SeqCst), 0, "never ran");
+        for job in held_back {
+            job.run();
+        }
+        assert!(events(&mut live).is_empty());
+        assert_eq!(ran_pending.load(Ordering::SeqCst), 0);
+    }
+
+    /// **A wait for the pool to load carries over a clock switch**: the entry
+    /// whose load was in flight fails with its job, and the wait taken before
+    /// the switch lands its report on the new clock.
+    #[test]
+    fn a_pool_wait_carries_over_a_clock_switch() {
+        let (mut s, spawned) = system_session();
+        let runs = runs();
+        s.pool(entry("a", probe(1, &runs))).unwrap();
+        let wait = s.pool_loaded::<&'static str>();
+        assert!(wait.take().is_none(), "the load is in flight");
+        let (driver, spec) = card();
+        let mut live = s
+            .into_device_on(spec, driver)
+            .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+        let _ = events(&mut live);
+        assert!(wait.take().is_some(), "the wait landed on the new clock");
+        drop(spawned);
     }
 }

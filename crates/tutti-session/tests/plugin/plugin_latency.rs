@@ -304,7 +304,8 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
     assert_eq!(s.latency(), s.graph_ref().node_latency(node).unwrap());
 
     let (driver, _new) = ManualStreamDriver::new();
-    s.restart_on(spec(256), driver, None).expect("restarts");
+    s.restart_on(spec(256), driver, None, None)
+        .expect("restarts");
     assert_eq!(
         s.graph_ref().node_latency(node).unwrap(),
         Samples(137 + 256),

@@ -10,6 +10,16 @@
 //! Inquiry), shaped as [`Connection`] is, and [`ProfileInitiator`] the Initiator of Profile
 //! Configuration with one peer, and [`ProcessInitiator`] the Initiator of Process Inquiry.
 //!
+//! What a peer declares about itself becomes values the rest of tutti shares:
+//! [`Dialect::of`] reads an [`Endpoint`] and a [`ProfileTable`] and says what
+//! to send to a Function Block (MIDI 1.0 or MIDI 2.0 channel voice, and the MPE
+//! zones enabled on it), and [`SuggestedCc`] is the table of the Default Control
+//! Change Mapping Profile, the functions it suggests for each Control Change.
+//! The Default Drum Note Map ([`DrumInstrument`]), Drawbar Organ ([`Drawbar`]) and
+//! Rotary Speaker ([`RotaryControl`]) Profiles are the same kind of table, and
+//! [`Gm2FunctionBlock`] and [`Gm2SingleChannel`] say whether a peer has General
+//! MIDI 2 enabled.
+//!
 //! A backend reports what the OS says as an [`OsChange`]; [`DeviceTable::apply`]
 //! returns the [`DeviceEvent`] that change causes, or `None` when it alters
 //! nothing. The table holds no OS handle, thread or clock, so every transition
@@ -64,6 +74,7 @@
 
 mod ci;
 mod connection;
+mod dialect;
 mod endpoint;
 mod entropy;
 mod id;
@@ -74,19 +85,24 @@ mod name;
 mod table;
 
 pub use ci::{
-    Ack, ActionError, Arrival, BodyLimit, BufferLimit, CI_SUB_ID_1, CI_UNIVERSAL_SYSEX, CI_VERSION,
-    CallError, CallId, CanSet, CcIndex, ChangeKind, ChannelControllers, ChannelsDetail, ChunkNo,
-    ChunkPosition, ChunkTotal, CiAction, CiCategories, CiDevice, CiDeviceId, CiHeader,
-    CiInstanceId, CiMessage, CiPeer, CiVersion, ClusterKind, ColumnSource, CommonState,
-    ConfirmIcon, ConfirmType, Confirmation, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind,
-    CustomResource, DISCOVERY_WINDOW, DataControl, Decoded, DefaultMapNotCc, Destination,
-    DetailsData, DiscoveryData, EndpointInfo, EndpointStatus, EntryError, GetStateError,
-    InquiryTarget, JsonPointer, LinkRole, ListTooLong, ListedTwice, MAX_LIST_ENTRIES,
-    ManufacturerProfile, MaxSysexSize, MediaType, MessageText, ModeId, Muid, Nak, NotABodyLimit,
-    NotABufferLimit, NotAChunkNo, NotADataControl, NotADeviceId, NotAMuid, NotAPeChannel,
-    NotAPriority, NotARequestId, NotASimultaneousRequests, NotAStateSize, NotAStepCount,
-    NotAStreamLimit, NotASysexSize, NotATimeoutWait, NotAVersion, NotProfileChannels,
-    NotSignificantBits, NotUnixSeconds, NotValid, NotVendorName, NoteData, OpaqueBody, Outcome,
+    Ack, ActionError, Arrival, BitmapPosition, BodyLimit, BufferLimit, CI_SUB_ID_1,
+    CI_UNIVERSAL_SYSEX, CI_VERSION, CallError, CallId, CanSet, CcFunction, CcIndex, CcPart,
+    CcReset, CcValue, ChangeKind, ChannelControllers, ChannelsDetail, ChunkNo, ChunkPosition,
+    ChunkTotal, CiAction, CiCategories, CiDevice, CiDeviceId, CiHeader, CiInstanceId, CiMessage,
+    CiPeer, CiVersion, ClusterKind, ColumnSource, CommonState, ConfirmIcon, ConfirmType,
+    Confirmation, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource,
+    DISCOVERY_WINDOW, DataControl, Decoded, DefaultCcLevel, DefaultMapNotCc, Destination,
+    DetailsData, DiscoveryData, Drawbar, DrawbarSetting, DrumControl, DrumFeatures, DrumInstrument,
+    DrumNoteMapLevel, DrumSounds, EndpointInfo, EndpointStatus, EntryError, GetStateError,
+    Gm2ChannelCount, Gm2FunctionBlock, Gm2Role, Gm2SingleChannel, InquiryTarget, JsonPointer,
+    LinkRole, ListTooLong, ListedTwice, MAX_LIST_ENTRIES, ManufacturerProfile, MaxSysexSize,
+    MediaType, MessageText, ModeId, Muid, MutuallyExclusiveSet, Nak, NotABodyLimit,
+    NotABufferLimit, NotAChunkNo, NotADataControl, NotADeviceId, NotADrawbarSetting,
+    NotAGm2ChannelCount, NotAMuid, NotAMutuallyExclusiveSet, NotAPeChannel, NotAPriority,
+    NotARequestId, NotASimultaneousRequests, NotAStateSize, NotAStepCount, NotAStreamLimit,
+    NotASysexSize, NotATimeoutWait, NotAVersion, NotProfileChannels, NotSignificantBits,
+    NotUnixSeconds, NotValid, NotVendorName, NoteData, ORGAN_HIGHEST_NOTE, ORGAN_LOWEST_NOTE,
+    ORGAN_REFERENCE_NOTE, OpaqueBody, OrganFeatures, OrganLevel, OrganOption, OrganValue, Outcome,
     PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN, PE_MAX_HEADER_LEN, PE_TIMEOUT, PEER_REPLY_TIMEOUT,
     PaginationFault, ParamPath, PartialError, PartialUpdate, PeAction, PeAllCtrlEntry,
     PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx, PeBodyError,
@@ -109,23 +125,25 @@ pub use ci::{
     RequestError, RequestRefused, ResIdUse, ResourceAction, ResourceDefaults, ResourceEntry,
     ResourceEvent, ResourceFailure, ResourceGet, ResourceId, ResourceInitiator, ResourceName,
     ResourceResponder, ResourceSet, ResourceStore, ResourceTarget, ResponderAction, ResponderEvent,
-    ResponderSettings, RestoreError, RoleName, SUB_ID2_ACK, SUB_ID2_DISCOVERY,
-    SUB_ID2_DISCOVERY_REPLY, SUB_ID2_ENDPOINT_INQUIRY, SUB_ID2_ENDPOINT_REPLY,
-    SUB_ID2_INVALIDATE_MUID, SUB_ID2_MESSAGE_REPORT_END, SUB_ID2_MESSAGE_REPORT_INQUIRY,
-    SUB_ID2_MESSAGE_REPORT_REPLY, SUB_ID2_NAK, SUB_ID2_PE_CAPABILITIES_INQUIRY,
-    SUB_ID2_PE_CAPABILITIES_REPLY, SUB_ID2_PE_NOTIFY, SUB_ID2_PROCESS_CAPABILITIES_INQUIRY,
-    SUB_ID2_PROCESS_CAPABILITIES_REPLY, SUB_ID2_PROFILE_ADDED, SUB_ID2_PROFILE_DETAILS_INQUIRY,
-    SUB_ID2_PROFILE_DETAILS_REPLY, SUB_ID2_PROFILE_DISABLED, SUB_ID2_PROFILE_ENABLED,
-    SUB_ID2_PROFILE_INQUIRY, SUB_ID2_PROFILE_REMOVED, SUB_ID2_PROFILE_REPLY,
-    SUB_ID2_PROFILE_SPECIFIC_DATA, SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SavedState,
-    SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests, SpecificData,
-    StandardProfile, StateDevice, StateId, StateRev, StateSize, StateStamp, StepCount, StoreError,
-    StreamLimit, SubscribeId, SystemMessages, TimeoutWait, TypeHint, UnixSeconds, Unread,
-    UnreadReason, UpdateKind, Verdict, WrongDevice, decode_body, encode_body, mcoded7,
-    split_message,
+    ResponderSettings, RestoreError, RoleName, RotaryControl, RotarySpeaker, RotaryValue,
+    SUB_ID2_ACK, SUB_ID2_DISCOVERY, SUB_ID2_DISCOVERY_REPLY, SUB_ID2_ENDPOINT_INQUIRY,
+    SUB_ID2_ENDPOINT_REPLY, SUB_ID2_INVALIDATE_MUID, SUB_ID2_MESSAGE_REPORT_END,
+    SUB_ID2_MESSAGE_REPORT_INQUIRY, SUB_ID2_MESSAGE_REPORT_REPLY, SUB_ID2_NAK,
+    SUB_ID2_PE_CAPABILITIES_INQUIRY, SUB_ID2_PE_CAPABILITIES_REPLY, SUB_ID2_PE_NOTIFY,
+    SUB_ID2_PROCESS_CAPABILITIES_INQUIRY, SUB_ID2_PROCESS_CAPABILITIES_REPLY,
+    SUB_ID2_PROFILE_ADDED, SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_DETAILS_REPLY,
+    SUB_ID2_PROFILE_DISABLED, SUB_ID2_PROFILE_ENABLED, SUB_ID2_PROFILE_INQUIRY,
+    SUB_ID2_PROFILE_REMOVED, SUB_ID2_PROFILE_REPLY, SUB_ID2_PROFILE_SPECIFIC_DATA,
+    SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SavedState, SelectorAction, SetBody,
+    SignificantBits, SimpleAction, SimultaneousRequests, SpecificData, StandardProfile,
+    StateDevice, StateId, StateRev, StateSize, StateStamp, StepCount, StoreError, StreamLimit,
+    SubscribeId, SuggestedCc, SwitchMeaning, SystemMessages, TimeoutWait, TwoState, TypeHint,
+    UnixSeconds, Unread, UnreadReason, UpdateKind, Verdict, VibratoChorus, WrongDevice,
+    decode_body, encode_body, mcoded7, send_level, split_message, volume_gain,
 };
 
 pub use connection::{Action, Connection, Ending, MAX_ATTEMPTS, NAME_GRACE, STEP_TIMEOUT};
+pub use dialect::{ChannelVoice, Dialect, Expression, JrTimestamps, Midi1Rate, NoDialect};
 pub use endpoint::{
     BlockError, Capabilities, Configuration, Endpoint, FunctionBlock, FunctionBlockBuilder,
     MAX_FUNCTION_BLOCKS, Reply, UMP_VERSION,

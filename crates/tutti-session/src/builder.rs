@@ -94,6 +94,9 @@ struct Options {
     inputs: ChannelLayout,
     outputs_floor: ChannelLayout,
     root: Option<ChannelTopology>,
+    /// What the output device's channels are, when the host states it
+    /// ([`device_topology`](SessionBuilder::device_topology)).
+    device_topology: Option<ChannelTopology>,
     render_workers: Workers,
     /// The platform host the output and every input the session opens use.
     #[cfg(feature = "device")]
@@ -124,6 +127,7 @@ struct Options {
     #[cfg(feature = "plugin")]
     hang: crate::HangPolicy,
     spawner: crate::jobs::Spawner,
+    pool: crate::PoolConfig,
 }
 
 /// A MIDI backend a host supplies, held until the session takes it.
@@ -143,6 +147,7 @@ impl Default for Options {
             inputs: ChannelLayout::EMPTY,
             outputs_floor: ChannelLayout::STEREO,
             root: None,
+            device_topology: None,
             render_workers: Workers::SERIAL,
             #[cfg(feature = "device")]
             host: tutti_cpal::AudioHost::Default,
@@ -168,6 +173,7 @@ impl Default for Options {
             #[cfg(feature = "plugin")]
             hang: crate::HangPolicy::default(),
             spawner: crate::jobs::Spawner::default(),
+            pool: crate::PoolConfig::default(),
         }
     }
 }
@@ -342,11 +348,13 @@ impl SessionBuilder<Offline> {
         let root = self.root_width(layout);
         self.check_placement(root, layout)?;
         let mut parts = self.parts(rate, max_block, None, root)?;
-        let engine = parts.graph.engine(&parts.transport)?;
-        Self::clock_midi(&parts, &engine);
         // The width of every block the host pulls.
-        engine.support_output(layout)?;
-        self.declare(&mut parts.graph, layout)?;
+        let engine =
+            parts
+                .graph
+                .engine(&parts.transport, layout, self.opts.device_topology.clone())?;
+        Self::clock_midi(&parts, &engine);
+        self.declare(&mut parts.graph)?;
         let heard = engine.heard_taps();
         let mut engine = engine;
         let load = engine.take_load_meter();
@@ -387,7 +395,7 @@ impl SessionBuilder<Offline> {
             transport.settings().tempo_reader(),
         );
         graph.set_render_workers(self.opts.render_workers);
-        graph.declare_root(self.opts.root.clone(), None)?;
+        graph.declare_root(self.opts.root.clone())?;
         self.session(
             Parts {
                 graph,
@@ -436,9 +444,12 @@ impl SessionBuilder<SystemClock> {
         let root = self.root_width(layout);
         self.check_placement(root, layout)?;
         let mut parts = self.parts(rate, max_block, Some(max_block), root)?;
-        let mut engine = parts.graph.engine(&parts.transport)?;
+        let mut engine =
+            parts
+                .graph
+                .engine(&parts.transport, layout, self.opts.device_topology.clone())?;
         Self::clock_midi(&parts, &engine);
-        self.declare(&mut parts.graph, layout)?;
+        self.declare(&mut parts.graph)?;
         let load = engine.take_load_meter();
         let heard = engine.heard_taps();
         let clock = engine.block_clock();
@@ -539,9 +550,13 @@ impl SessionBuilder<crate::DeviceClock> {
         let root = self.root_width(spec.channels);
         self.check_placement(root, spec.channels)?;
         let mut parts = self.parts(spec.sample_rate, LIVE_MAX_BLOCK, spec.quantum, root)?;
-        let mut engine = parts.graph.engine(&parts.transport)?;
+        let mut engine = parts.graph.engine(
+            &parts.transport,
+            spec.channels,
+            self.opts.device_topology.clone(),
+        )?;
         Self::clock_midi(&parts, &engine);
-        self.declare(&mut parts.graph, spec.channels)?;
+        self.declare(&mut parts.graph)?;
         let mut session: crate::LiveSession = self.session(
             parts,
             crate::device::DeviceHandle::vacant(self.opts.host),
@@ -622,6 +637,25 @@ impl<C: Clock> SessionBuilder<C> {
         self
     }
 
+    /// States what the output device's channels are: an interface wired as
+    /// 5.1 on its six outputs, say. The graph root is folded into it by
+    /// speaker. Without it the device is taken to be the engine's order for
+    /// its width ([`ChannelTopology::assumed`]: mono, stereo, quad, 5.1, 7.1,
+    /// 7.1.4, and independent channels at any other width) and is read back as
+    /// [`Placement::Assumed`](tutti_types::Placement::Assumed)
+    /// ([`Session::output_device`]).
+    ///
+    /// The statement is the device's width: a build whose device has another
+    /// is refused ([`Error::Output`](crate::Error::Output)), and so is a root
+    /// the statement cannot place. A restart takes the statement of its own
+    /// request (`DeviceRestart::topology`),
+    /// since another device is wired another way.
+    #[must_use]
+    pub fn device_topology(mut self, device: ChannelTopology) -> Self {
+        self.opts.device_topology = Some(device);
+        self
+    }
+
     /// Threads per block, the callback included ([`Workers`]): the callback
     /// alone by default. Each export gets its own pool of the same size.
     #[must_use]
@@ -675,6 +709,14 @@ impl<C: Clock> SessionBuilder<C> {
     #[must_use]
     pub fn spawn_with(mut self, spawn: impl Fn(crate::Job) + Send + Sync + 'static) -> Self {
         self.opts.spawner = crate::jobs::Spawner::new(spawn);
+        self
+    }
+
+    /// How the pool runs its loads ([`PoolConfig`](crate::PoolConfig)): how
+    /// many worker stages run at once. Default four.
+    #[must_use]
+    pub const fn pool_config(mut self, config: crate::PoolConfig) -> Self {
+        self.opts.pool = config;
         self
     }
 
@@ -940,11 +982,13 @@ impl<C: Clock> SessionBuilder<C> {
         let main_work = crate::session::SharedWork::new(main_work);
         Ok(Session {
             #[cfg(feature = "plugin")]
-            early_work: crate::session::EarlyWork(main_work.clone()),
+            _early_work: crate::session::EarlyWork(main_work.clone()),
             running,
             graph: parts.graph,
             resource_ids: crate::peer::ResourceIds::new(),
-            pool: crate::Pool::default(),
+            pool: crate::Pool::new(self.opts.pool),
+            #[cfg(feature = "plugin")]
+            pooled_swaps: std::collections::BTreeSet::new(),
             transport: parts.transport,
             load: None,
             heard: None,
@@ -1040,19 +1084,32 @@ impl<C: Clock> SessionBuilder<C> {
     /// device where either width has no channel order (a 6-channel project on
     /// a 5-channel interface).
     fn check_placement(&self, root: usize, device: ChannelLayout) -> Result<()> {
+        let placed = match &self.opts.device_topology {
+            Some(stated) if stated.width() != device => {
+                return Err(tutti_buffers::FoldError::from(
+                    tutti_buffers::BufferError::WidthMismatch {
+                        src: stated.width(),
+                        dst: device,
+                    },
+                )
+                .into());
+            }
+            Some(stated) => stated.clone(),
+            None => ChannelTopology::assumed(device),
+        };
         match &self.opts.root {
             // The same check `Graph::declare_root` makes a step later; made
             // here so a refused root builds nothing (no engine, no device
             // thread). Removing this arm alone changes no outcome, only
             // how much is built before the refusal.
-            Some(declared) => Graph::check_root(declared, device)?,
+            Some(declared) => Graph::check_root(declared, Some(&placed))?,
             None => {
                 let width = ChannelLayout::try_from(root).map_err(|_| {
                     tutti_buffers::FoldError::from(tutti_buffers::BufferError::TooWide {
                         channels: root,
                     })
                 })?;
-                tutti_graph::fold_to_width(&tutti_types::ChannelTopology::assumed(width), device)?;
+                tutti_graph::fold_to_topology(&ChannelTopology::assumed(width), &placed)?;
             }
         }
         Ok(())
@@ -1060,9 +1117,9 @@ impl<C: Clock> SessionBuilder<C> {
 
     /// Declares the builder's root on the graph the engine was just built
     /// over, which publishes it to the engine.
-    fn declare(&self, graph: &mut Graph, device: ChannelLayout) -> Result<()> {
+    fn declare(&self, graph: &mut Graph) -> Result<()> {
         if self.opts.root.is_some() {
-            graph.declare_root(self.opts.root.clone(), Some(device))?;
+            graph.declare_root(self.opts.root.clone())?;
         }
         Ok(())
     }

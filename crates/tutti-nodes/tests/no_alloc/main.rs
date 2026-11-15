@@ -13,4 +13,5 @@ mod rt_no_alloc_dynamics;
 mod rt_no_alloc_engine;
 mod rt_no_alloc_filter;
 mod rt_no_alloc_modulation;
+mod rt_no_alloc_reverb;
 mod spatial_rt_no_alloc;

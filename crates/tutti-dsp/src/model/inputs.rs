@@ -1,6 +1,6 @@
-//! [`Feed`]: what an effect's recurrence is given besides its coefficients.
+//! [`Inputs`]: what an effect's recurrence is given besides its coefficients.
 
-/// The most per-frame control lanes a [`Feed`] carries.
+/// The most per-frame control lanes an [`Inputs`] carries.
 ///
 /// Four serve the dynamics: a multiband's thresholds, one a band at the most, are the
 /// widest (a limiter's threshold and ceiling are two).
@@ -19,9 +19,9 @@ pub const MAX_LANES: usize = 4;
 ///
 /// Every slice is indexed by the frame of the block, like the audio, and at least as
 /// long as the frames a call renders. A family with no key and no lane (a filter, a
-/// reverb) is fed [`Feed::new`] alone.
+/// reverb) is fed [`Inputs::new`] alone.
 #[derive(Clone, Copy, Debug)]
-pub struct Feed<'a> {
+pub struct Inputs<'a> {
     /// The main audio, one slice per input channel.
     pub audio: &'a [&'a [f32]],
     /// The side-chain key, one slice per key channel; empty without a key bus.
@@ -30,7 +30,7 @@ pub struct Feed<'a> {
     pub lanes: [Option<&'a [f32]>; MAX_LANES],
 }
 
-impl<'a> Feed<'a> {
+impl<'a> Inputs<'a> {
     /// `audio` alone: no key and no lane.
     #[must_use]
     pub const fn new(audio: &'a [&'a [f32]]) -> Self {

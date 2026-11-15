@@ -37,7 +37,6 @@ use tutti_types::{ChannelLayout, SampleRate};
 
 use crate::clock::SystemEngine;
 use crate::device::DeviceHandle;
-use crate::graph::Graph;
 use crate::{
     Device, DeviceClock, Error, LiveSession, RestartError, Result, Session, SessionEvent,
     SystemClock, SystemSession,
@@ -88,9 +87,7 @@ impl<C: crate::Clock> Session<C> {
     /// has to be placeable on the new channel count, and the graph has to be
     /// able to re-prepare (not between its halves, not poisoned).
     fn check_switch(&self, channels: ChannelLayout) -> Result<()> {
-        if let Some(root) = self.graph.root_topology() {
-            Graph::check_root(root, channels)?;
-        }
+        self.check_device(channels, None)?;
         self.check_restart(None)
     }
 }
@@ -128,7 +125,7 @@ impl Session<SystemClock> {
         let previous = self.graph.prepared().sample_rate();
         let host = self.running.take_host();
         match TuttiDriver::start_resolved(host, engine, resolved, |spec, stopped| {
-            self.rerate(spec, stopped, None)
+            self.rerate(spec, stopped, None, None)
         }) {
             Ok(driver) => Ok(self.on_device(driver, device, previous)),
             Err((host, e)) => {
@@ -160,7 +157,7 @@ impl Session<SystemClock> {
         let previous = self.graph.prepared().sample_rate();
         let host = self.running.take_host();
         match TuttiDriver::start_on(host, spec, driver, |spec, stopped| {
-            self.rerate(spec, stopped, None)
+            self.rerate(spec, stopped, None, None)
         }) {
             Ok(driver) => Ok(self.on_device(driver, DeviceSelector::default(), previous)),
             Err((host, e)) => {
@@ -236,7 +233,7 @@ impl Session<DeviceClock> {
         let moved = self.with_device(|session, device| {
             device.driver.host_mut().restart_with(
                 || Ok::<_, Error>((spec, TimerDriver::new())),
-                |spec, stopped| session.rerate(spec, stopped, None),
+                |spec, stopped| session.rerate(spec, stopped, None, None),
             )
         });
         if let Err(e) = moved {

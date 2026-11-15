@@ -439,7 +439,7 @@ pub struct Session<C: Clock = Offline> {
     /// drops on it, before anything else drops (the plugins then close, and
     /// the last field collects what they hand over).
     #[cfg(feature = "plugin")]
-    pub(crate) early_work: EarlyWork,
+    pub(crate) _early_work: EarlyWork,
     /// What runs the blocks (the clock's [`Running`](Clock::Running)). First,
     /// so a stream stops before the session's own state drops.
     pub(crate) running: C::Running,
@@ -447,7 +447,10 @@ pub struct Session<C: Clock = Offline> {
     /// The source of the ids of this session's resources.
     pub(crate) resource_ids: crate::peer::ResourceIds,
     /// What the app declared loaded ([`Session::pool`]).
-    pub(crate) pool: crate::Pool,
+    pub(crate) pool: crate::Pool<C>,
+    /// The plugin entries whose node waits to swap to a reloaded plugin.
+    #[cfg(feature = "plugin")]
+    pub(crate) pooled_swaps: std::collections::BTreeSet<crate::PoolKey>,
     pub(crate) transport: Transport,
     /// The engine's load meter, offline or on a device; `None` detached.
     pub(crate) load: Option<tutti_metering::LoadMeter>,
@@ -673,13 +676,18 @@ impl<C: Clock> Session<C> {
     ) -> (Session<K>, C::Running) {
         self.land_jobs(out);
         self.fail_jobs(out);
+        // The runs whose entry has loaded run here, on the clock they were
+        // asked of; the rest cannot follow the session to the next.
+        self.pool_run_loaded();
         let Session {
             #[cfg(feature = "plugin")]
-            early_work,
+            _early_work,
             running: old_running,
             graph,
             resource_ids,
             pool,
+            #[cfg(feature = "plugin")]
+            pooled_swaps,
             transport,
             load,
             heard,
@@ -731,14 +739,21 @@ impl<C: Clock> Session<C> {
             main_work,
             carried_events,
         } = self;
+        let (pool, dropped) = pool.rebind();
+        out.extend(dropped.into_iter().map(|key| SessionEvent::Pool {
+            key,
+            event: crate::PoolEvent::RunDropped,
+        }));
         (
             Session {
                 #[cfg(feature = "plugin")]
-                early_work,
+                _early_work,
                 running,
                 graph,
                 resource_ids,
                 pool,
+                #[cfg(feature = "plugin")]
+                pooled_swaps,
                 transport,
                 load,
                 heard,
@@ -796,15 +811,6 @@ impl<C: Clock> Session<C> {
 }
 
 impl<C: Clock> Session<C> {
-    /// The id of a new resource: no other token of this session has it.
-    #[expect(
-        dead_code,
-        reason = "the tokens mint their ids here; none exists until the MIDI and plugin tokens"
-    )]
-    pub(crate) fn mint_resource_id(&mut self) -> crate::ResourceId {
-        self.resource_ids.mint()
-    }
-
     /// Ends the session on the main thread: runs the work other threads handed to
     /// it, drops the session's plugins (each closes on `main`, or hands its close
     /// to the session's collector), and runs what that handed over. Nothing a
@@ -874,15 +880,14 @@ impl<C: Clock> Session<C> {
         if root == self.root_request && self.root_refusal.is_none() {
             return Ok(());
         }
-        let device = self.heard.as_ref().map(|(_, layout)| *layout);
         self.root_request = root.clone();
-        match self.graph.declare_root(root, device) {
+        match self.graph.declare_root(root) {
             Ok(()) => {
                 self.root_refusal = None;
                 Ok(())
             }
             Err(e) => {
-                self.root_refusal = Some(e.into());
+                self.root_refusal = Some(e);
                 Err(e.into())
             }
         }
@@ -928,6 +933,20 @@ impl<C: Clock> Session<C> {
         self.graph.root_topology()
     }
 
+    /// What the output device's channels are as the session folds the root
+    /// into them, and whether that was
+    /// [`Stated`](tutti_types::Placement::Stated)
+    /// ([`SessionBuilder::device_topology`](crate::SessionBuilder::device_topology),
+    /// `DeviceRestart::topology`) or
+    /// [`Assumed`](tutti_types::Placement::Assumed) from the device's width
+    /// alone ([`ChannelTopology::assumed`]). `None` for a session with no
+    /// engine (a detached one).
+    #[must_use]
+    pub fn output_device(&self) -> Option<crate::OutputPlacement> {
+        let (_, layout) = self.heard.as_ref()?;
+        self.graph.output_placement(*layout)
+    }
+
     /// Runs every phase in [`PHASES`] order at `Instant::now()` with the
     /// session's own declarations, and returns what it found.
     ///
@@ -953,7 +972,8 @@ impl<C: Clock> Session<C> {
             Phase::Collect => {
                 // First, so what a job landed is in the graph this update commits.
                 self.land_jobs(out);
-                // What those landings and the holds' ends changed.
+                // What those landings and the holds' ends changed, and the pool's
+                // stages on this thread.
                 self.pool_events(out);
                 // What the graph's own removals left declared.
                 self.forget_removed();
@@ -1297,8 +1317,16 @@ impl<C: Clock> Session<C> {
     /// The session's MIDI: live inputs, clips, the hardware input's routes
     /// and the hardware out.
     #[cfg(feature = "midi")]
-    pub fn midi(&mut self) -> crate::Midi<'_, C> {
-        crate::Midi {
+    pub fn midi(&mut self) -> crate::Midi<'_> {
+        self.midi_and_ids().0
+    }
+
+    /// [`midi`](Self::midi) and, beside it, the source of the ids of the
+    /// session's resources: the two borrow disjoint fields, so a stage that
+    /// opens a peer holds both.
+    #[cfg(feature = "midi")]
+    pub(crate) fn midi_and_ids(&mut self) -> (crate::Midi<'_>, &mut crate::peer::ResourceIds) {
+        let midi = crate::Midi {
             graph: &mut self.graph,
             state: &mut self.midi_state,
             nodes: self.midi.as_ref(),
@@ -1307,7 +1335,8 @@ impl<C: Clock> Session<C> {
             meter: self.click_settings.project_meter(),
             #[cfg(feature = "midi-hardware")]
             io: self.midi_io.as_mut(),
-        }
+        };
+        (midi, &mut self.resource_ids)
     }
 
     /// Reports the newest fault the stream raised since the last poll, if the

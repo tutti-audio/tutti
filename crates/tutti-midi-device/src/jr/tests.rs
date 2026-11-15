@@ -83,6 +83,7 @@ impl Link {
 /// Send times are recovered over a sender clock 200 ppm fast, across five
 /// wraps of its 16 bits, with each arrival up to 2 ms late: within a quarter of
 /// the jitter, and never after the message arrived.
+/// Spec: m2-104/7.2.2.1#3, m2-104/7.2.2.2#2
 #[test]
 fn send_times_recovered_within_a_quarter_of_the_jitter_over_200_ppm_drift() {
     let jitter = 2 * MS;
@@ -229,6 +230,7 @@ fn a_late_or_repeated_clock_is_ignored() {
 /// On a link whose delay is 0 or 2 ms, both seen in the window, the render time
 /// (send time plus jitter) is never before the arrival of a message whose delay
 /// is either, and never more than the spread and a tick after it.
+/// Spec: m2-104/7.2.2.1#4
 #[test]
 fn render_time_is_after_every_arrival_within_the_observed_delays() {
     let jitter = 2 * MS;
