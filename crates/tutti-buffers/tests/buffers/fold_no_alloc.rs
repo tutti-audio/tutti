@@ -6,14 +6,18 @@
 
 use assert_no_alloc::assert_no_alloc;
 use tutti_buffers::{Fold, Interleaved, InterleavedMut, MonoMut, Planes, PlanesMut};
-use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
+use tutti_types::{
+    AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrdering, ChannelLayout,
+    ChannelTopology, Speaker,
+};
 
 fn smpte(n: u16) -> ChannelTopology {
     ChannelTopology::assumed(ChannelLayout::from(n))
 }
 
 /// 12 -> 2 is the summed group, 6 -> 1 the mono mix, the permutation and
-/// 2 -> 6 the copy and zero rows, 5.1 -> 2 plain sums. 200 frames is past the
+/// 2 -> 6 the copy and zero rows, ambisonic conversions the rescaled, reordered,
+/// dropped and zero-filled rows, 5.1 -> 2 plain sums. 200 frames is past the
 /// planar group's 64-frame chunk.
 #[test]
 fn applying_a_fold_is_allocation_free() {
@@ -33,6 +37,19 @@ fn applying_a_fold_is_allocation_free() {
         (smpte(6), dts),
         (smpte(2), smpte(6)),
         (smpte(6), smpte(2)),
+        (
+            AmbisonicFormat::ambix(AmbisonicOrder::of(3)).into(),
+            AmbisonicFormat::new(
+                AmbisonicOrder::of(2),
+                AmbisonicOrdering::FuMa,
+                AmbisonicNormalization::N3d,
+            )
+            .into(),
+        ),
+        (
+            AmbisonicFormat::fuma(AmbisonicOrder::of(1)).into(),
+            AmbisonicFormat::ambix(AmbisonicOrder::of(3)).into(),
+        ),
     ];
     const FRAMES: usize = 200;
     for (src, dst) in &pairs {

@@ -2,7 +2,9 @@
 
 use crate::convert::same_frames;
 use crate::{BufferError, Float, Interleaved, InterleavedMut, MonoMut, Planes, PlanesMut};
-use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
+use tutti_types::{AmbisonicNormalization, ChannelLayout, ChannelTopology, Speaker};
+
+mod ambisonic;
 
 /// Which end of a fold a [`FoldError`] is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -40,11 +42,31 @@ pub enum FoldError {
         /// Its channel index.
         channel: usize,
     },
-    /// An ambisonic set meets anything but itself. Speakers to ambisonic and
-    /// back need an encoder or decoder node, and a conversion between ambisonic
-    /// formats is not a fold yet.
-    #[error("an ambisonic set folds only into itself")]
-    Ambisonic,
+    /// Speakers meet an ambisonic set. An ambisonic signal is not speaker
+    /// feeds: going either way needs an encoder or a decoder node, which a
+    /// fold is not.
+    #[error("speakers and an ambisonic set need an encoder or decoder node, not a fold")]
+    NeedsCodec,
+    /// A conversion between ambisonic formats with a 2D normalization on one
+    /// side and a different normalization on the other. [`Sn2d`] and [`N2d`]
+    /// scale the horizontal harmonics alone; the AmbiX and Furse-Malham
+    /// conventions give the ratios between the full-sphere normalizations
+    /// ([`Sn3d`], [`N3d`], [`MaxN`], [`FuMa`]) and say nothing of them, so no
+    /// coefficient is guessed.
+    ///
+    /// [`Sn2d`]: AmbisonicNormalization::Sn2d
+    /// [`N2d`]: AmbisonicNormalization::N2d
+    /// [`Sn3d`]: AmbisonicNormalization::Sn3d
+    /// [`N3d`]: AmbisonicNormalization::N3d
+    /// [`MaxN`]: AmbisonicNormalization::MaxN
+    /// [`FuMa`]: AmbisonicNormalization::FuMa
+    #[error("no conversion between the {src:?} and {dst:?} normalizations is defined")]
+    PlanarNormalization {
+        /// The source normalization.
+        src: AmbisonicNormalization,
+        /// The destination normalization.
+        dst: AmbisonicNormalization,
+    },
     /// An unassigned side meets another at a different width. The only rule is a
     /// one to one relabelling of equal widths; by index is
     /// [`Fold::by_index`], asked for by name.
@@ -291,8 +313,16 @@ impl<F: Float> Row<F> {
 ///   speaker says nothing about where it goes. A caller that wants channels by
 ///   index says so: [`Fold::by_index`] widens and zero-fills, [`Fold::select`]
 ///   chooses.
-/// - **Ambisonic** sets are not speaker feeds: one folds only into an equal
-///   set (an identity) and is otherwise [`FoldError::Ambisonic`].
+/// - **Ambisonic** sets are not speaker feeds. One converts into another
+///   by harmonic, by the AmbiX and Furse-Malham conventions: FuMa channels are
+///   reordered to ACN; SN3D, N3D, MaxN and FuMa scales are rescaled (N3D is SN3D
+///   times `√(2l+1)` for degree `l`; MaxN peaks at one per harmonic; FuMa is
+///   MaxN with W at −3 dB); orders above the destination's are dropped and
+///   orders it has beyond the source's are zero-filled. A 2D normalization
+///   ([`Sn2d`](AmbisonicNormalization::Sn2d),
+///   [`N2d`](AmbisonicNormalization::N2d)) converts only to itself, otherwise
+///   [`FoldError::PlanarNormalization`]. Speakers to ambisonic or back is
+///   [`FoldError::NeedsCodec`].
 /// - **Not silent.** A source channel the destination has no place for is
 ///   [`FoldError::Unplaced`]; an [`Unknown`](Speaker::Unknown) speaker is
 ///   [`FoldError::Unnamed`] (unless the two topologies are identical, which is
@@ -538,15 +568,15 @@ impl<F: Float> Fold<F> {
         })
     }
 
-    /// An ambisonic set folds only into an equal one, as an identity.
+    /// An ambisonic set converts into another by harmonic; anything else is a
+    /// codec's.
     fn between_ambisonic(src: &ChannelTopology, dst: &ChannelTopology) -> Result<Self, FoldError> {
-        if src != dst {
-            return Err(FoldError::Ambisonic);
-        }
-        let width = src.width().count();
+        let (Some(s), Some(d)) = (src.ambisonic(), dst.ambisonic()) else {
+            return Err(FoldError::NeedsCodec);
+        };
         Ok(Self {
-            src: width,
-            rows: (0..width).map(|i| Row::One(Expr::Copy(i))).collect(),
+            src: s.width().count(),
+            rows: ambisonic::rows(s, d)?,
         })
     }
 
