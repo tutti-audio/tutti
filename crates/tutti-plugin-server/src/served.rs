@@ -531,6 +531,12 @@ impl<F: ServerSide> Served<F> {
         if let Some(control) = self.lifecycle.control() {
             self.descriptor = control.info().clone();
             self.wiring = control.wiring(main);
+            // A bypass that is a property cannot be read back across the wire
+            // (a read is a round trip), so a served plugin does not claim it: the
+            // executor's bypass serves the node.
+            if self.wiring.own_bypass == Some(tutti_plugin_types::OwnBypass::Property) {
+                self.wiring.own_bypass = None;
+            }
         }
     }
 

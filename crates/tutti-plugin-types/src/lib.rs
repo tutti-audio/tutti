@@ -174,10 +174,12 @@ mod automation;
 mod automation_mode;
 mod bridge_error;
 pub mod bundle;
+mod bypass;
 mod channels;
 mod classification;
 #[cfg(feature = "contract")]
 pub mod contract;
+mod control_role;
 mod descriptor;
 mod driver;
 mod editor;
@@ -301,6 +303,8 @@ pub use tutti_graph::BusRole;
 pub use wakeups::{Interest, Ready, Wakeups, Watch};
 // `NoteExpressionVec` is the alias the change list is built from, so a caller
 // assembling one has to name it.
+pub use bypass::{BypassWrite, OwnBypass, bypass_parameter, bypass_value, is_bypassed};
+pub use control_role::{Axis, ControlRole, MidiAssignment, MidiSource};
 pub use locate::{Helper, Locator};
 pub use note_expression::{
     NoteExpressionChanges, NoteExpressionType, NoteExpressionValue,

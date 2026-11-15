@@ -210,11 +210,19 @@ impl Declared {
     /// a block serves.
     pub(super) fn of(loaded: &LoadedPlugin) -> Result<Self, PluginTooWide> {
         loaded.check_width()?;
+        let ports = Shape::buses(buses_of(&loaded.inputs), buses_of(&loaded.outputs)).with_ports(
+            ChannelLayout::clamped(loaded.total_inputs()),
+            ChannelLayout::clamped(loaded.total_outputs()),
+        );
         Ok(Self {
-            ports: Shape::buses(buses_of(&loaded.inputs), buses_of(&loaded.outputs)).with_ports(
-                ChannelLayout::clamped(loaded.total_inputs()),
-                ChannelLayout::clamped(loaded.total_outputs()),
-            ),
+            // A plugin with a bypass of its own keeps running in
+            // `NodeMode::Bypassed`: the host writes that bypass
+            // ([`PluginHandle::set_bypassed`](crate::PluginHandle::set_bypassed)).
+            ports: if loaded.own_bypass.is_some() {
+                ports.with_own_bypass()
+            } else {
+                ports
+            },
             latency: loaded.latency_samples,
             tail: loaded.tail,
         })
@@ -1363,6 +1371,29 @@ mod declared_buses {
                 direction: "output",
                 channels: max + 1
             }
+        );
+    }
+
+    /// A plugin with a bypass of its own gives its node a shape that declares
+    /// it, so the executor leaves the node running in `Bypassed`; a plugin
+    /// without one keeps the executor's bypass.
+    #[test]
+    fn only_a_plugin_with_its_own_bypass_declares_one() {
+        let with = LoadedPlugin {
+            own_bypass: Some(tutti_plugin_types::OwnBypass::Property),
+            ..LoadedPlugin::default()
+        };
+        assert!(
+            Declared::of(&with)
+                .expect("a plugin of a few channels")
+                .ports
+                .own_bypass
+        );
+        assert!(
+            !Declared::of(&LoadedPlugin::default())
+                .expect("an empty plugin")
+                .ports
+                .own_bypass
         );
     }
 }

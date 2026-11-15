@@ -352,7 +352,6 @@ fn project_param_info(info: ClapParamInfo) -> tutti_plugin_types::ParameterInfo 
         .with_flags(KNOWN, flags)
         .with_group(info.module)
         .with_measures(declared_measures(info.flags))
-        .with_role(declared_role(info.flags))
 }
 
 /// What a CLAP parameter's flags say it measures: an enumerated choice, and
@@ -361,13 +360,6 @@ fn declared_measures(flags: ClapParamFlags) -> Option<tutti_plugin_types::ParamU
     flags
         .contains(ClapParamFlags::IS_ENUM)
         .then_some(tutti_plugin_types::ParamUnit::Choice)
-}
-
-/// The role a CLAP parameter's flags declare: the bypass switch.
-fn declared_role(flags: ClapParamFlags) -> Option<tutti_types::UnitParam> {
-    flags
-        .contains(ClapParamFlags::BYPASS)
-        .then_some(tutti_types::UnitParam::Bypass)
 }
 
 #[cfg(test)]
@@ -406,7 +398,6 @@ mod grouping_tests {
 mod measures_tests {
     use super::*;
     use tutti_plugin_types::ParamUnit;
-    use tutti_types::UnitParam;
 
     fn projected(flags: ClapParamFlags) -> tutti_plugin_types::ParameterInfo {
         let mut info = ClapParamInfo::new(1, "p");
@@ -426,15 +417,21 @@ mod measures_tests {
         assert_eq!(projected(ClapParamFlags::empty()).measures(), None);
     }
 
-    /// The bypass flag is the `Bypass` role; no other flag gives a role.
+    /// CLAP declares no role: not even the bypass flag gives one, which is the
+    /// `BYPASS` capability bit instead.
     #[test]
-    fn the_bypass_flag_gives_bypass() {
+    fn no_flag_gives_a_role() {
+        for flags in [
+            ClapParamFlags::BYPASS,
+            ClapParamFlags::AUTOMATABLE,
+            ClapParamFlags::IS_ENUM,
+        ] {
+            assert_eq!(projected(flags).role(), None, "{flags:?}");
+        }
         assert_eq!(
-            projected(ClapParamFlags::BYPASS).role(),
-            Some(UnitParam::Bypass)
+            projected(ClapParamFlags::BYPASS).flag(tutti_plugin_types::ParamFlags::BYPASS),
+            Some(true)
         );
-        assert_eq!(projected(ClapParamFlags::AUTOMATABLE).role(), None);
-        assert_eq!(projected(ClapParamFlags::IS_ENUM).role(), None);
     }
 
     /// `IS_ENUM` is the spec's bit 16 (`CLAP_PARAM_IS_ENUM`, clap/ext/params.h),

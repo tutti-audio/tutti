@@ -866,6 +866,7 @@ impl Graph {
             },
         );
         self.plugins.insert(node, hosted);
+        self.write_own_bypass(node);
         self.edited = true;
         Key::new(node)
     }
@@ -910,6 +911,7 @@ impl Graph {
         }
         self.plugins
             .insert(node, crate::plugin::HostedPlugin::new(handle, plugin));
+        self.write_own_bypass(node);
         Ok(Key::new(node))
     }
 
@@ -969,6 +971,7 @@ impl Graph {
                         );
                     }
                 }
+                self.write_own_bypass(node);
                 Ok(())
             }
             Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
@@ -2662,6 +2665,12 @@ impl Graph {
     /// A control, not an edit: the graph is not recompiled, the mode lands at
     /// the next block, and the graph is not marked edited.
     ///
+    /// A hosted plugin with a bypass of its own is not bypassed by the
+    /// executor: the host writes the plugin's bypass in this call
+    /// (`PluginHandle::set_bypassed`) and compares it on every control tick.
+    /// Off the main thread an in-process plugin's write is lost, and it is kept
+    /// only by a tick on the main thread.
+    ///
     /// # Errors
     ///
     /// [`ModeError::NoSuchNode`] when `node` is not in the graph;
@@ -2673,7 +2682,67 @@ impl Graph {
         if self.editor.is_leaving(node) {
             return Err(ModeError::NoSuchNode { node });
         }
-        self.editor.set_mode(node, mode)
+        self.editor.set_mode(node, mode)?;
+        // A plugin with a bypass of its own keeps running in `Bypassed` (its
+        // node declares it), so its bypass is written here, once per change.
+        // `set_bypassed` leaves a plugin without one alone.
+        #[cfg(feature = "plugin")]
+        self.write_own_bypass(node);
+        Ok(())
+    }
+
+    /// Writes the bypass of the plugin hosted at `node`, if any, to what the
+    /// node's mode says: on every change of mode, and when a plugin enters the
+    /// node (an insert, a host, a replacement or a reload). A plugin without a
+    /// bypass of its own is left alone. The write is not assumed applied:
+    /// [`reconcile_own_bypass`](Self::reconcile_own_bypass) compares on every
+    /// tick, and a write that never reached the plugin is written again there.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn write_own_bypass(&mut self, node: NodeKey) {
+        let Ok(mode) = self.mode(node) else { return };
+        if let Some(hosted) = self.plugins.get_mut(&node) {
+            hosted
+                .bypass
+                .assert_mode(&hosted.handle, &hosted.mirror, mode);
+        }
+    }
+
+    /// Makes every healthy hosted plugin's own bypass the node's mode, on the
+    /// control tick and with no round trip (`BypassSync::reconcile`): an
+    /// in-process plugin's bypass is read, without waiting for its instance, and
+    /// a served plugin's is compared with its mirrored parameter values. A
+    /// plugin that differs, or whose write never reached it, is written again,
+    /// each episode counted once
+    /// ([`Plugin::bypass_writes_unapplied`](crate::Plugin::bypass_writes_unapplied)).
+    /// A plugin that refused the mode is not written again until the node's mode
+    /// changes: the refusal is latched, and counted as an episode only when the
+    /// plugin held another bypass.
+    ///
+    /// Until a plugin is back in the node's mode the executor does not bypass its
+    /// node, so it plays processed audio under `Bypassed` for that long: a tick
+    /// or two for an in-process plugin; for a served one until the plugin
+    /// reports its change, or a dropped write is retried (the wait doubles up to
+    /// 32 ticks). A served plugin that refuses a delivered write is not seen. An
+    /// in-process plugin's bypass is kept only on a session ticked on the main
+    /// thread (its write and read are the main thread's); an in-process plugin on
+    /// another thread's tick is not refused, and its node stays unbypassed under
+    /// `Bypassed`.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn reconcile_own_bypass(&mut self) {
+        let wants: Vec<(NodeKey, NodeMode)> = self
+            .plugins
+            .keys()
+            .filter_map(|&node| Some((node, self.mode(node).ok()?)))
+            .collect();
+        for (node, want) in wants {
+            if let Some(hosted) = self.plugins.get_mut(&node)
+                && hosted.is_healthy()
+            {
+                hosted
+                    .bypass
+                    .reconcile(&hosted.handle, &hosted.mirror, want);
+            }
+        }
     }
 
     /// `node`'s mode, [`NodeMode::Active`] for a node never given one.
