@@ -160,7 +160,7 @@ pub use mpe::{
 };
 pub use narrow::{narrow_bend, narrow_note_on_velocity, narrow_value, narrow_velocity};
 pub use narrower::Narrower;
-pub use per_note_management::PerNoteManager;
+pub use per_note_management::{PerNoteManager, PerNotePolicy};
 pub use sensitivity::PitchBendSensitivity;
 pub use smpte::{MtcRate, SmpteFrameRate, SmpteTimecode, UnknownFrameRate};
 pub use song_position::song_position;

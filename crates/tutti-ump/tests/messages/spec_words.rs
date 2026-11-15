@@ -4,7 +4,6 @@
 //! comment, then the words. Nothing here calls the codec to produce an
 //! expected value.
 
-use tutti_ump::ManufacturerId;
 use tutti_ump::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BlockFilter, BlockSelect,
     CCNumber, ChordBass, ChordName, ChordPitch, ChordType, Data128, DeltaTicks, DeviceIdentity,
@@ -16,6 +15,7 @@ use tutti_ump::{
     TimeSignature, U4, U7, U14, UiHint, Ump, UmpVersion, Utility, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
+use tutti_ump::{ManufacturerId, Unknown};
 
 fn g(n: u8) -> MidiGroup {
     MidiGroup::of(n)
@@ -408,7 +408,8 @@ fn midi2_per_note_and_controllers() {
 // M2-104 section 7.4.5: D=0 and S=0 has no defined function, so it is no message.
 #[test]
 fn a_per_note_management_with_neither_flag_is_not_a_message() {
-    assert_eq!(Ump([0x41F2_3C00, 0, 0, 0]).decode().ok(), None);
+    let words = Ump([0x41F2_3C00, 0, 0, 0]);
+    assert_eq!(words.decode(), Err(Unknown(words)));
     assert_eq!(PerNoteManagement::from_flags(false, false), None);
     for management in [
         PerNoteManagement::Detach,

@@ -29,8 +29,8 @@ use tutti_midi_runtime::{
 };
 use tutti_types::{Beat, Bpm, Frame, SampleRate, Samples};
 use tutti_ump::{
-    Address, CCNumber, KeyEvent, Message, MidiChannel, MidiGroup, NoteNumber, System, U7, U14, Ump,
-    Voice2,
+    Address, CCNumber, KeyEvent, Message, MidiChannel, MidiGroup, MpeChannels, MpeZoneSpan,
+    NoteNumber, System, U7, U14, Ump, Voice2,
 };
 
 /// The note a channel voice message addresses, either protocol.
@@ -750,14 +750,10 @@ fn a_devices_profile_zones_switch_its_rules_alone() {
         inlets: nodes,
     };
     let (_ed, mut exec, controls, seen) = ingest(node, MIDI_INPUT_PORTS as u16, 512);
-    let zone = MpeZones::single(
-        MpeZoneConfig::profile(
-            MidiChannel::of(0),
-            4,
-            PitchBendSensitivity::MPE_PROFILE_DEFAULT,
-        )
-        .unwrap(),
-    );
+    let zone = MpeZones::single(MpeZoneConfig::profile(
+        MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(4)).unwrap(),
+        PitchBendSensitivity::MPE_PROFILE_DEFAULT,
+    ));
     let group = MidiGroup::FIRST;
     block(&mut exec, 512);
     controls.set_mpe_profile(first.slot(), group, Some(zone));
@@ -809,14 +805,10 @@ fn clearing_a_slots_profiles_returns_it_to_the_rules_it_had() {
         MIDI_INPUT_PORTS as u16,
         512,
     );
-    let zone = MpeZones::single(
-        MpeZoneConfig::profile(
-            MidiChannel::of(0),
-            4,
-            PitchBendSensitivity::MPE_PROFILE_DEFAULT,
-        )
-        .unwrap(),
-    );
+    let zone = MpeZones::single(MpeZoneConfig::profile(
+        MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(4)).unwrap(),
+        PitchBendSensitivity::MPE_PROFILE_DEFAULT,
+    ));
     // The first block takes the device's slot over; the zones come after it.
     block(&mut exec, 512);
     controls.set_mpe_profile(device.slot(), MidiGroup::FIRST, Some(zone));

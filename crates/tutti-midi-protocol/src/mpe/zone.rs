@@ -8,7 +8,10 @@
 //! place the distinction bites is the two MPE 1.1 zone anchors: the lower
 //! zone's master is `0` and the upper zone's is `15`.
 
-use tutti_ump::{Address, ControlValue, Message, MidiChannel, MidiGroup, Rpn, Ump, Voice2};
+use tutti_ump::{
+    Address, ControlValue, Message, MidiChannel, MidiGroup, MpeChannels, MpeZoneSet, MpeZoneSpan,
+    Rpn, Ump, Voice2,
+};
 
 use crate::{ChannelResponse, PitchBendSensitivity};
 
@@ -198,22 +201,21 @@ impl MpeZoneConfig {
         Self::new(MpeZone::Upper, member_count, master, member)
     }
 
-    /// A MIDI-CI MPE Profile zone (M2-120 sections 2.1 and 2.2) of `channels`
-    /// channels, the Manager Channel `manager` and the Members above it (the
-    /// Number of Channels of Set Profile On, appendix A.3), with `range` as the
-    /// one bend range of the Manager and every Member (section 3.5; the
-    /// Profile starts at [`PitchBendSensitivity::MPE_PROFILE_DEFAULT`]), and a
-    /// polyphonic response; or `None` for fewer than 2 channels or a layout
-    /// that runs past channel 16. Any channel can be a Manager.
+    /// A MIDI-CI MPE Profile zone (M2-120 sections 2.1 and 2.2) over `zone`'s
+    /// channels (the Number of Channels of Set Profile On, appendix A.3), with
+    /// `range` as the one bend range of the Manager and every Member (section
+    /// 3.5; the Profile starts at [`PitchBendSensitivity::MPE_PROFILE_DEFAULT`]),
+    /// and a polyphonic response. Any channel can be a Manager.
     #[must_use]
-    pub const fn profile(
-        manager: MidiChannel,
-        channels: u8,
-        range: PitchBendSensitivity,
-    ) -> Option<Self> {
-        match channels.checked_sub(1) {
-            Some(member_count) => Self::placed(Placement::Managed { manager, range }, member_count),
-            None => None,
+    pub const fn profile(zone: MpeZoneSpan, range: PitchBendSensitivity) -> Self {
+        Self {
+            placement: Placement::Managed {
+                manager: zone.manager(),
+                range,
+            },
+            // A span has two channels at least, so the Manager has a Member.
+            member_count: zone.channels().get() - 1,
+            response: ChannelResponse::Polyphonic,
         }
     }
 
@@ -365,8 +367,21 @@ impl MpeZoneConfig {
         )
     }
 
+    /// The channels of a Profile zone, `None` for an MPE 1.1 zone.
+    fn profile_span(&self) -> Option<MpeZoneSpan> {
+        match self.placement {
+            Placement::Managed { manager, .. } => {
+                MpeZoneSpan::new(manager, MpeChannels::new(self.member_count + 1)?)
+            }
+            Placement::Side { .. } => None,
+        }
+    }
+
     /// Whether this zone shares a channel with `other`.
     fn overlaps(&self, other: &Self) -> bool {
+        if let (Some(a), Some(b)) = (self.profile_span(), other.profile_span()) {
+            return a.overlaps(b);
+        }
         let ((a_first, a_last), (b_first, b_last)) = (self.span(), other.span());
         a_first <= b_last && b_first <= a_last
     }
@@ -481,6 +496,14 @@ impl MpeZones {
         let mut zones = [None; Self::MAX_ZONES];
         zones[0] = Some(zone);
         Self { zones }
+    }
+
+    /// The Profile zones of `set`, each at `range`, a polyphonic response.
+    #[must_use]
+    pub fn profile(set: &MpeZoneSet, range: PitchBendSensitivity) -> Self {
+        // `set` holds zones that share no channel, so the Profile zones agree
+        // and do not overlap.
+        Self::sorted(set.zones().map(|zone| MpeZoneConfig::profile(zone, range)))
     }
 
     /// The MPE 1.1 arrangement of `lower` and `upper`, or `None` when both are

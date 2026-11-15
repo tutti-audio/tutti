@@ -61,17 +61,17 @@ pub enum CcFunction {
     /// Bank Select.
     BankSelect,
     /// Modulation Wheel or Lever.
-    ModulationWheel,
+    ModWheel,
     /// Breath Controller.
-    BreathController,
+    Breath,
     /// Foot Controller.
-    FootController,
+    Foot,
     /// Portamento Time.
     PortamentoTime,
     /// Data Entry.
     DataEntry,
     /// Channel Volume.
-    ChannelVolume,
+    Volume,
     /// Balance.
     Balance,
     /// Pan.
@@ -99,7 +99,7 @@ pub enum CcFunction {
     /// General Purpose Controller 8.
     GeneralPurpose8,
     /// Damper Pedal (Sustain).
-    DamperPedal,
+    Sustain,
     /// Portamento On/Off.
     PortamentoSwitch,
     /// Sostenuto.
@@ -107,13 +107,13 @@ pub enum CcFunction {
     /// Soft Pedal.
     SoftPedal,
     /// Legato Footswitch.
-    LegatoFootswitch,
+    Legato,
     /// Hold 2.
     Hold2,
     /// Sound Controller 1: Sound Variation.
     SoundVariation,
-    /// Sound Controller 2: Timbre or Harmonic Intensity.
-    Timbre,
+    /// Sound Controller 2: Timbre or Harmonic Intensity (`CCNumber::RESONANCE`).
+    Resonance,
     /// Sound Controller 3: Release Time.
     ReleaseTime,
     /// Sound Controller 4: Attack Time.
@@ -133,13 +133,13 @@ pub enum CcFunction {
     /// Portamento Control.
     PortamentoControl,
     /// High Resolution Velocity Prefix.
-    HighResolutionVelocityPrefix,
+    VelocityPrefix,
     /// Effects 1 Depth: Reverb Send Level.
-    Effects1Depth,
+    ReverbSend,
     /// Effects 2 Depth.
     Effects2Depth,
     /// Effects 3 Depth: Chorus Send Level.
-    Effects3Depth,
+    ChorusSend,
     /// Effects 4 Depth.
     Effects4Depth,
     /// Effects 5 Depth.
@@ -155,7 +155,7 @@ pub enum CcFunction {
     /// Channel Mode: All Sound Off.
     AllSoundOff,
     /// Channel Mode: Reset All Controllers.
-    ResetAllControllers,
+    ResetAll,
     /// Channel Mode: Local Control On/Off.
     LocalControl,
     /// Channel Mode: All Notes Off.
@@ -227,27 +227,19 @@ pub struct SuggestedCc {
     reset: CcReset,
 }
 
+/// The 128 rows, in order of number.
+const TABLE: [SuggestedCc; 128] = table();
+
 impl SuggestedCc {
     /// The assignment for `controller`.
     #[must_use]
     pub const fn of(controller: CCNumber) -> Self {
-        let n = controller.get();
-        let row = match n {
-            0..=31 => msb_row(n),
-            32..=63 => {
-                let mut row = msb_row(n - 32);
-                row.part = CcPart::Lsb;
-                row
-            }
-            64..=127 => single_row(n),
-            _ => single_row(127),
-        };
-        Self { controller, ..row }
+        TABLE[controller.get() as usize]
     }
 
     /// Every number's assignment, in order of number.
     pub fn all() -> impl Iterator<Item = Self> {
-        (0..=CCNumber::LAST.get()).map(|n| Self::of(CCNumber::masked(n)))
+        TABLE.into_iter()
     }
 
     /// The Control Change number.
@@ -281,6 +273,34 @@ impl SuggestedCc {
     }
 }
 
+/// The table: numbers 0 to 63 are a fine control's MSB and LSB, whichever of
+/// the two [`CCNumber::lsb`] says, and 64 to 127 are rows of their own.
+const fn table() -> [SuggestedCc; 128] {
+    let mut rows = [single_row(0); 128];
+    let mut n = 0;
+    while n < 128 {
+        let controller = CCNumber::of(n);
+        let mut row = if n < 32 {
+            msb_row(n)
+        } else if n < 64 {
+            msb_row(n - 32)
+        } else {
+            single_row(n)
+        };
+        if n < 64 {
+            row.part = if controller.lsb().is_some() {
+                CcPart::Msb
+            } else {
+                CcPart::Lsb
+            };
+        }
+        row.controller = controller;
+        rows[n as usize] = row;
+        n += 1;
+    }
+    rows
+}
+
 const fn row(function: CcFunction, value: CcValue, part: CcPart, reset: CcReset) -> SuggestedCc {
     SuggestedCc {
         controller: CCNumber::FIRST,
@@ -301,12 +321,12 @@ const fn msb_row(n: u8) -> SuggestedCc {
     use CcFunction as F;
     let (function, reset) = match n {
         0 => (F::BankSelect, CcReset::Keep),
-        1 => (F::ModulationWheel, to(0)),
-        2 => (F::BreathController, to(0)),
-        4 => (F::FootController, to(0)),
+        1 => (F::ModWheel, to(0)),
+        2 => (F::Breath, to(0)),
+        4 => (F::Foot, to(0)),
         5 => (F::PortamentoTime, to(0)),
         6 => (F::DataEntry, CcReset::Keep),
-        7 => (F::ChannelVolume, CcReset::Keep),
+        7 => (F::Volume, CcReset::Keep),
         8 => (F::Balance, to(64)),
         10 => (F::Pan, CcReset::Keep),
         11 => (F::Expression, to(127)),
@@ -327,14 +347,14 @@ const fn single_row(n: u8) -> SuggestedCc {
     use CcPart::{Lsb, Msb, Whole};
     use CcValue as V;
     match n {
-        64 => row(F::DamperPedal, V::Switch, Whole, to(0)),
+        64 => row(F::Sustain, V::Switch, Whole, to(0)),
         65 => row(F::PortamentoSwitch, V::Switch, Whole, to(0)),
         66 => row(F::Sostenuto, V::Switch, Whole, to(0)),
         67 => row(F::SoftPedal, V::Switch, Whole, to(0)),
-        68 => row(F::LegatoFootswitch, V::LegatoSwitch, Whole, to(0)),
+        68 => row(F::Legato, V::LegatoSwitch, Whole, to(0)),
         69 => row(F::Hold2, V::Switch, Whole, to(0)),
         70 => row(F::SoundVariation, V::Range, Lsb, CcReset::Keep),
-        71 => row(F::Timbre, V::Range, Lsb, CcReset::Keep),
+        71 => row(F::Resonance, V::Range, Lsb, CcReset::Keep),
         72 => row(F::ReleaseTime, V::Range, Lsb, CcReset::Keep),
         73 => row(F::AttackTime, V::Range, Lsb, CcReset::Keep),
         74 => row(F::Brightness, V::Range, Lsb, CcReset::Keep),
@@ -348,15 +368,10 @@ const fn single_row(n: u8) -> SuggestedCc {
         82 => row(F::GeneralPurpose7, V::Range, Lsb, CcReset::DeviceSpecific),
         83 => row(F::GeneralPurpose8, V::Range, Lsb, CcReset::DeviceSpecific),
         84 => row(F::PortamentoControl, V::Range, Lsb, CcReset::Keep),
-        88 => row(
-            F::HighResolutionVelocityPrefix,
-            V::Range,
-            Lsb,
-            CcReset::Keep,
-        ),
-        91 => row(F::Effects1Depth, V::Range, Whole, CcReset::Keep),
+        88 => row(F::VelocityPrefix, V::Range, Lsb, CcReset::Keep),
+        91 => row(F::ReverbSend, V::Range, Whole, CcReset::Keep),
         92 => row(F::Effects2Depth, V::Range, Whole, CcReset::Keep),
-        93 => row(F::Effects3Depth, V::Range, Whole, CcReset::Keep),
+        93 => row(F::ChorusSend, V::Range, Whole, CcReset::Keep),
         94 => row(F::Effects4Depth, V::Range, Whole, CcReset::Keep),
         95 => row(F::Effects5Depth, V::Range, Whole, CcReset::Keep),
         96 => row(F::DataIncrement, V::Unused, Whole, CcReset::Keep),
@@ -366,7 +381,7 @@ const fn single_row(n: u8) -> SuggestedCc {
         100 => row(F::RpnSelect, V::Range, Lsb, to(127)),
         101 => row(F::RpnSelect, V::Range, Msb, to(127)),
         120 => row(F::AllSoundOff, V::Zero, Whole, CcReset::Keep),
-        121 => row(F::ResetAllControllers, V::Zero, Whole, CcReset::Keep),
+        121 => row(F::ResetAll, V::Zero, Whole, CcReset::Keep),
         122 => row(F::LocalControl, V::OnOff127, Whole, CcReset::Keep),
         123 => row(F::AllNotesOff, V::Zero, Whole, CcReset::Keep),
         124 => row(F::OmniModeOff, V::Zero, Whole, CcReset::Keep),

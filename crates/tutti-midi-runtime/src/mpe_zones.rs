@@ -6,26 +6,20 @@
 //! crate names the other.
 
 use tutti_midi_device::{Dialect, Expression};
-use tutti_midi_protocol::{MpeZoneConfig, MpeZones, PitchBendSensitivity};
+use tutti_midi_protocol::{MpeZones, PitchBendSensitivity};
 
 /// The MPE zones `dialect` enables, each at the bend range the Profile starts
-/// at (M2-120 §3.5), or `None` for a block with no MPE Profile enabled.
+/// at (M2-120 §3.5), or `None` for a block with no MPE Profile enabled: the
+/// only reason there are none.
 #[must_use]
 pub fn mpe_zones(dialect: &Dialect) -> Option<MpeZones> {
-    let Expression::Mpe(zones) = dialect.expression() else {
-        return None;
-    };
-    let mut configs = zones.as_slice().iter().map(|zone| {
-        MpeZoneConfig::profile(
-            zone.manager(),
-            zone.channels().get(),
+    match dialect.expression() {
+        Expression::Channelized => None,
+        Expression::Mpe(zones) => Some(MpeZones::profile(
+            zones,
             PitchBendSensitivity::MPE_PROFILE_DEFAULT,
-        )
-    });
-    // A span the device crate built is a zone the protocol crate accepts, and
-    // its zones do not overlap, so each step succeeds.
-    let first = configs.next()??;
-    configs.try_fold(MpeZones::single(first), |set, zone| set.with(zone?))
+        )),
+    }
 }
 
 #[cfg(test)]

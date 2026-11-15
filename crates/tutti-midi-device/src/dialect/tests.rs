@@ -194,7 +194,8 @@ fn an_mpe_profile_with_a_count_enables_a_zone_from_its_manager_channel_up() {
     let Expression::Mpe(zones) = dialect.expression() else {
         panic!("an MPE block, got {dialect:?}");
     };
-    let [zone] = zones.as_slice() else {
+    let mut all = zones.zones();
+    let (Some(zone), None) = (all.next(), all.next()) else {
         panic!("one zone, got {zones:?}");
     };
     assert_eq!(zone.manager(), ch(0));
@@ -220,7 +221,7 @@ fn two_mpe_profiles_on_separate_channels_are_two_zones_in_order() {
     let Expression::Mpe(zones) = dialect.expression() else {
         panic!("MPE");
     };
-    let managers: Vec<u8> = zones.as_slice().iter().map(|z| z.manager().get()).collect();
+    let managers: Vec<u8> = zones.zones().map(|z| z.manager().get()).collect();
     assert_eq!(managers, [0, 8]);
     assert_eq!(zones.zone_of(ch(7)).unwrap().manager(), ch(0));
     assert_eq!(zones.zone_of(ch(8)).unwrap().manager(), ch(8));
@@ -232,10 +233,10 @@ fn overlapping_mpe_profiles_are_refused() {
     let reports = table(&[(channel(0), Some(4)), (channel(3), Some(4))]);
     assert_eq!(
         of(&speaking(Protocol::Midi2), &reports),
-        Err(NoDialect::MpeOverlap {
-            first: ch(0),
-            second: ch(3)
-        })
+        Err(NoDialect::MpeOverlap(MpeOverlap {
+            held: MpeZoneSpan::new(ch(0), MpeChannels::of(4)).unwrap(),
+            added: MpeZoneSpan::new(ch(3), MpeChannels::of(4)).unwrap(),
+        }))
     );
 }
 
@@ -258,8 +259,6 @@ fn a_zone_needs_a_manager_and_a_member_and_fits_in_sixteen_channels() {
             "{count} channels from {manager}"
         );
     }
-    assert!(MpeZoneSpan::new(ch(14), MpeChannels::of(2)).is_some());
-    assert!(MpeZoneSpan::new(ch(15), MpeChannels::of(2)).is_none());
 }
 
 #[test]

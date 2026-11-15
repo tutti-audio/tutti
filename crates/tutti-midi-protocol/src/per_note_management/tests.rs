@@ -36,7 +36,11 @@ fn pan(note: u8) -> Voice2 {
 }
 
 fn manager(choice: PerNoteManagement) -> PerNoteManager {
-    PerNoteManager::new(choice)
+    PerNoteManager::new(PerNotePolicy::WhenAttached(choice))
+}
+
+fn rotating(choice: PerNoteManagement) -> PerNoteManager {
+    PerNoteManager::new(PerNotePolicy::EveryNote(choice))
 }
 
 /// What a sender sends for `script`, the management owed put in.
@@ -220,4 +224,72 @@ fn clear_forgets_what_is_attached() {
     m.before(A, &pan(60));
     m.clear();
     assert_eq!(m.before(A, &on(60)), None);
+}
+
+#[test]
+fn every_note_is_managed_before_its_setup_even_the_first() {
+    // Appendix C.3: management before every Note On, ahead of the setup
+    // controllers, on a key nothing was sent to.
+    let mut m = rotating(PerNoteManagement::DetachAndReset);
+    let sent = send(&mut m, &[pan(0), on(0), pan(0), off(0), pan(1), on(1)]);
+    assert_eq!(
+        sent,
+        [
+            management(0, PerNoteManagement::DetachAndReset),
+            pan(0),
+            on(0),
+            pan(0),
+            off(0),
+            management(1, PerNoteManagement::DetachAndReset),
+            pan(1),
+            on(1)
+        ]
+    );
+}
+
+#[test]
+fn every_note_without_setup_controllers_is_managed_at_its_note_on() {
+    let mut m = rotating(PerNoteManagement::Detach);
+    let sent = send(&mut m, &[on(5), off(5), on(5)]);
+    assert_eq!(
+        sent,
+        [
+            management(5, PerNoteManagement::Detach),
+            on(5),
+            off(5),
+            management(5, PerNoteManagement::Detach),
+            on(5)
+        ]
+    );
+}
+
+#[test]
+fn every_note_is_managed_once_and_a_sounding_notes_controllers_owe_nothing() {
+    let mut m = rotating(PerNoteManagement::DetachAndReset);
+    let sent = send(&mut m, &[pan(7), pan(7), on(7), pan(7), pan(7)]);
+    let owed = sent
+        .iter()
+        .filter(|v| matches!(v, Voice2::PerNoteManagement { .. }))
+        .count();
+    assert_eq!(owed, 1);
+}
+
+#[test]
+fn a_management_the_sender_sends_is_the_one_owed_to_every_note() {
+    let mut m = rotating(PerNoteManagement::DetachAndReset);
+    let script = [management(3, PerNoteManagement::Reset), pan(3), on(3)];
+    assert_eq!(send(&mut m, &script), script);
+}
+
+#[test]
+fn when_attached_owes_nothing_to_a_first_note_that_every_note_manages() {
+    let script = [pan(9), on(9)];
+    assert_eq!(
+        send(&mut manager(PerNoteManagement::Detach), &script),
+        script
+    );
+    assert_ne!(
+        send(&mut rotating(PerNoteManagement::Detach), &script),
+        script
+    );
 }

@@ -1,9 +1,9 @@
 //! What a peer's Function Block speaks, derived from what the peer declares.
 //!
 //! A [`Dialect`] is the one value a sender reads to know what to send to a
-//! block: the channel voice protocol the Endpoint has active (M2-104 §7.1.6)
+//! block: the channel voice protocol the Endpoint has active (M2-104 §7.1.6.3)
 //! and, for MIDI 1.0, whether the block restricts its bandwidth (§7.1.8); whether
-//! JR Timestamps are in force (§7.1.6); and whether the MPE Profile is enabled on
+//! JR Timestamps are in force (§7.1.6.3); and whether the MPE Profile is enabled on
 //! channels of the block (M2-120 §3.1), with its zones. [`Dialect::of`] derives it from an [`Endpoint`] and
 //! the [`ProfileTable`] of the block's MIDI-CI peer; it reads, it sends
 //! nothing.
@@ -19,7 +19,10 @@
 //! travel on, the first Group of the block. Several zones are several enabled
 //! Profiles on channels that do not overlap (M2-120 §3.4).
 
-use tutti_ump::{Direction, FunctionBlockId, Midi1Port, MidiChannel, Protocol};
+use tutti_ump::{
+    Direction, FunctionBlockId, Midi1Port, MidiChannel, MpeChannels, MpeOverlap, MpeZoneSet,
+    MpeZoneSpan, Protocol,
+};
 
 use crate::ci::{CiDeviceId, ProfileChannels, ProfileId, ProfileState, ProfileTable};
 use crate::endpoint::Endpoint;
@@ -37,7 +40,7 @@ pub enum Midi1Rate {
 }
 
 /// The channel voice messages a block is sent: the Protocol of the Endpoint's
-/// active stream configuration (M2-104 §7.1.6.2).
+/// active stream configuration (M2-104 §7.1.6.3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ChannelVoice {
     /// MIDI 1.0 channel voice messages, at the block's rate.
@@ -50,84 +53,13 @@ pub enum ChannelVoice {
 }
 
 /// Whether what is sent carries JR Timestamps: the receive direction of the
-/// active stream configuration (M2-104 §7.1.6.1).
+/// active stream configuration (M2-104 §7.1.6.3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum JrTimestamps {
     /// The Endpoint does not receive them.
     Off,
     /// The Endpoint receives them: the sender prepends them.
     Prepended,
-}
-
-tutti_types::ranged! {
-    /// The number of Channels of an MPE zone: its Manager Channel and one to
-    /// fifteen Member Channels, so `2..=16` (M2-120 §2.1).
-    #[derive(Eq, Hash, PartialOrd, Ord)]
-    MpeChannels(u8), NotMpeChannels, "a count of MPE channels (2 to 16)",
-    |raw| raw >= 2 && raw <= 16
-}
-
-/// The channels of one MPE zone: the Manager Channel, which is the lowest, and
-/// the Member Channels above it (M2-120 §2.1, §3.1 steps 3 and 5).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct MpeZoneSpan {
-    manager: MidiChannel,
-    channels: MpeChannels,
-}
-
-impl MpeZoneSpan {
-    /// The zone of `channels` channels from `manager` up, or `None` when it
-    /// would run past channel 16.
-    #[must_use]
-    pub fn new(manager: MidiChannel, channels: MpeChannels) -> Option<Self> {
-        (u16::from(manager.get()) + u16::from(channels.get()) <= 16)
-            .then_some(Self { manager, channels })
-    }
-
-    /// The Manager Channel.
-    #[must_use]
-    pub const fn manager(self) -> MidiChannel {
-        self.manager
-    }
-
-    /// How many channels the zone has, the Manager Channel included.
-    #[must_use]
-    pub const fn channels(self) -> MpeChannels {
-        self.channels
-    }
-
-    /// The Member Channels, in order.
-    pub fn members(self) -> impl Iterator<Item = MidiChannel> {
-        let first = self.manager.get() + 1;
-        (first..self.manager.get() + self.channels.get()).filter_map(MidiChannel::new)
-    }
-
-    /// The first channel above the zone, `16` for one that ends on channel 16.
-    const fn end(self) -> u8 {
-        self.manager.get() + self.channels.get()
-    }
-}
-
-/// The MPE zones enabled on a block: at least one, ordered by Manager Channel,
-/// no two sharing a channel (M2-120 §3.4).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MpeZoneSet(Vec<MpeZoneSpan>);
-
-impl MpeZoneSet {
-    /// The zones, lowest Manager Channel first.
-    #[must_use]
-    pub fn as_slice(&self) -> &[MpeZoneSpan] {
-        &self.0
-    }
-
-    /// The zone that has `channel`, as its Manager or as a Member.
-    #[must_use]
-    pub fn zone_of(&self, channel: MidiChannel) -> Option<MpeZoneSpan> {
-        self.0
-            .iter()
-            .copied()
-            .find(|z| channel.get() >= z.manager.get() && channel.get() < z.end())
-    }
 }
 
 /// How a block's channels are used.
@@ -183,24 +115,26 @@ pub enum NoDialect {
         channels: ProfileChannels,
     },
     /// Two enabled MPE Profiles share a channel (M2-120 §3.4).
-    #[error("the MPE zones of channels {} and {} overlap", .first.get(), .second.get())]
-    MpeOverlap {
-        /// The Manager Channel of the lower zone.
-        first: MidiChannel,
-        /// The Manager Channel of the zone that begins inside it.
-        second: MidiChannel,
-    },
+    #[error(transparent)]
+    MpeOverlap(#[from] MpeOverlap),
 }
 
 impl Dialect {
     /// The dialect of Function Block `block` of `endpoint`, with `table` the
     /// Profiles the block's MIDI-CI peer has reported.
     ///
+    /// `endpoint` is the peer's view of itself, the Endpoint its Stream
+    /// Configuration Notifications describe, so its `rx_jr` is what the peer
+    /// receives: the direction this device sends.
+    ///
     /// # Errors
     ///
     /// [`NoDialect`] for a block the Endpoint does not have, or has inactive or
     /// transmit-only; for a reserved active Protocol; and for an MPE Profile
-    /// whose report is not a zone.
+    /// whose report is not a zone. One bad MPE report refuses the whole
+    /// Dialect: the Profiles may not overlap (M2-120 §3.4), so a report that
+    /// breaks that or the zone layout means the peer's channel state is not
+    /// what the table says, and no zone of it is safe to send MPE to.
     pub fn of(
         endpoint: &Endpoint,
         block: FunctionBlockId,
@@ -222,7 +156,9 @@ impl Dialect {
             Protocol::Midi1 => ChannelVoice::Midi1 {
                 rate: match declared.midi1() {
                     Midi1Port::Restricted => Midi1Rate::Restricted,
-                    _ => Midi1Rate::Unrestricted,
+                    Midi1Port::Unrestricted | Midi1Port::No | Midi1Port::Reserved(_) => {
+                        Midi1Rate::Unrestricted
+                    }
                 },
             },
             Protocol::Midi2 => ChannelVoice::Midi2,
@@ -267,7 +203,7 @@ impl Dialect {
 
 /// The zones of the MPE Profiles `table` has enabled.
 fn expression(table: &ProfileTable) -> Result<Expression, NoDialect> {
-    let mut zones = Vec::new();
+    let mut zones: Option<MpeZoneSet> = None;
     for address in table.addresses() {
         let Some(entry) = table.get(address, ProfileId::MPE) else {
             continue;
@@ -289,22 +225,12 @@ fn expression(table: &ProfileTable) -> Result<Expression, NoDialect> {
                 manager,
                 channels: reported,
             })?;
-        zones.push(zone);
+        zones = Some(match zones {
+            None => MpeZoneSet::single(zone),
+            Some(held) => held.with(zone)?,
+        });
     }
-    // The table lists channels in order, so the zones are in order of Manager.
-    for pair in zones.windows(2) {
-        if pair[1].manager.get() < pair[0].end() {
-            return Err(NoDialect::MpeOverlap {
-                first: pair[0].manager,
-                second: pair[1].manager,
-            });
-        }
-    }
-    Ok(if zones.is_empty() {
-        Expression::Channelized
-    } else {
-        Expression::Mpe(MpeZoneSet(zones))
-    })
+    Ok(zones.map_or(Expression::Channelized, Expression::Mpe))
 }
 
 #[cfg(test)]
