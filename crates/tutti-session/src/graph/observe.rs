@@ -363,7 +363,7 @@ impl<'g> Meters<'g> {
     /// the engine's fold and declick. Declared and **on** when the graph is
     /// built, so a host that reads it needs to ask for nothing; it follows
     /// the outputs as they are re-wired or widened (up to
-    /// [`MAX_ROOT_CHANNELS`](tutti_graph::MAX_ROOT_CHANNELS)). `None` once a
+    /// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)). `None` once a
     /// host has taken it ([`take_master`](Self::take_master)). A
     /// block the engine refuses runs no op and does not touch it.
     pub fn master(self) -> Option<&'g mut MeterReader> {

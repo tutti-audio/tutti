@@ -3,7 +3,7 @@ use crate::{BufferError, InterleavedMut};
 use Speaker::*;
 
 fn smpte(n: u16) -> ChannelTopology {
-    ChannelTopology::smpte(ChannelLayout::from(n)).expect("an SMPTE width")
+    ChannelTopology::assumed(ChannelLayout::from(n))
 }
 
 fn fold(s: &ChannelTopology, d: &ChannelTopology) -> Fold {
@@ -85,7 +85,7 @@ const M: f32 = f32::MINUS_3_DB;
 fn the_stereo_fold_is_the_itu_table() {
     let cases: [(ChannelTopology, [f32; 12], [f32; 12]); 4] = [
         (
-            ChannelTopology::quad(),
+            tutti_types::Bed::Quad.topology(),
             [1.0, 0.0, M, 0.0, 0., 0., 0., 0., 0., 0., 0., 0.],
             [0.0, 1.0, 0.0, M, 0., 0., 0., 0., 0., 0., 0., 0.],
         ),
@@ -106,7 +106,7 @@ fn the_stereo_fold_is_the_itu_table() {
         ),
     ];
     for (src, left, right) in &cases {
-        let w = src.positions().len();
+        let w = usize::from(src.width().count());
         let f = fold(src, &smpte(2));
         near(&response(&f, 0), &left[..w], &format!("{w} -> L"));
         near(&response(&f, 1), &right[..w], &format!("{w} -> R"));
@@ -126,7 +126,7 @@ fn the_mono_fold_is_the_itu_table() {
         "6 -> 1",
     );
     near(
-        &response(&fold(&ChannelTopology::quad(), &mono), 0),
+        &response(&fold(&tutti_types::Bed::Quad.topology(), &mono), 0),
         &[M, M, M * M, M * M],
         "quad -> 1",
     );
@@ -134,7 +134,7 @@ fn the_mono_fold_is_the_itu_table() {
     let mut out = [0.0];
     fold(&smpte(2), &mono).frame(&[0.1, 0.2], &mut out);
     assert!((out[0] - 0.15).abs() < 1e-7);
-    let three = ChannelTopology::new([FrontLeft, FrontRight, FrontCenter]);
+    let three = ChannelTopology::new([FrontLeft, FrontRight, FrontCenter]).unwrap();
     Fold::<f32>::between(&three, &mono)
         .unwrap()
         .frame(&[0.1, 0.2, 0.0], &mut out);
@@ -341,7 +341,8 @@ fn the_same_speakers_in_another_order_is_a_bit_exact_permutation() {
         SideLeft,
         SideRight,
         LowFrequency,
-    ]);
+    ])
+    .unwrap();
     let f = fold(&film, &dts);
     assert!(f.rows.iter().all(|r| matches!(r, Row::One(Expr::Copy(_)))));
     let special = [
@@ -375,7 +376,7 @@ fn the_same_speakers_in_another_order_is_a_bit_exact_permutation() {
 /// rears and moves the surrounds across at full level.
 #[test]
 fn five_one_to_quad_places_by_position() {
-    let f = fold(&smpte(6), &ChannelTopology::quad());
+    let f = fold(&smpte(6), &tutti_types::Bed::Quad.topology());
     //                 FL   FR   C    LFE  SL   SR
     near(&response(&f, 0), &[1.0, 0.0, M, 0.0, 0.0, 0.0], "FL");
     near(&response(&f, 1), &[0.0, 1.0, M, 0.0, 0.0, 0.0], "FR");
@@ -414,8 +415,8 @@ fn narrowing_below_surround_is_by_position() {
 /// `FL FR SL SR`): a fold between them is a pure reposition at gain 1.
 #[test]
 fn quad_and_side_surround_quad_are_the_same_four_feeds() {
-    let side_quad = ChannelTopology::new([FrontLeft, FrontRight, SideLeft, SideRight]);
-    let f = fold(&ChannelTopology::quad(), &side_quad);
+    let side_quad = ChannelTopology::new([FrontLeft, FrontRight, SideLeft, SideRight]).unwrap();
+    let f = fold(&tutti_types::Bed::Quad.topology(), &side_quad);
     for o in 0..4 {
         let r = response(&f, o);
         assert_eq!(r.iter().filter(|&&g| g == 1.0).count(), 1, "{r:?}");
@@ -435,7 +436,7 @@ fn a_lone_centre_feeds_the_centre() {
     for (o, want) in [0.0, 0.0, 1.0, 0.0, 0.0, 0.0].iter().enumerate() {
         assert_eq!(response(&six, o), [*want], "5.1 channel {o}");
     }
-    let no_front = ChannelTopology::new([FrontLeft, LowFrequency]);
+    let no_front = ChannelTopology::new([FrontLeft, LowFrequency]).unwrap();
     assert_eq!(
         Fold::<f32>::between(&mono, &no_front),
         Err(FoldError::Unplaced {
@@ -462,8 +463,8 @@ fn unassigned_channels_map_one_to_one() {
         assert_eq!(
             Fold::<f32>::between(&s, &t),
             Err(FoldError::Unassigned {
-                src: s.layout(),
-                dst: t.layout()
+                src: s.width(),
+                dst: t.width()
             })
         );
     };
@@ -485,7 +486,7 @@ fn unassigned_channels_map_one_to_one() {
 /// Every refusal names what failed.
 #[test]
 fn what_cannot_be_placed_is_an_error() {
-    let empty = ChannelTopology::new([]);
+    let empty = ChannelTopology::new([]).unwrap();
     assert_eq!(
         Fold::<f32>::between(&empty, &smpte(2)),
         Err(FoldError::Buffer(BufferError::ZeroWidth))
@@ -494,7 +495,7 @@ fn what_cannot_be_placed_is_an_error() {
         Fold::<f32>::between(&smpte(2), &empty),
         Err(FoldError::Buffer(BufferError::ZeroWidth))
     );
-    let odd = ChannelTopology::new([FrontLeft, Unknown(9)]);
+    let odd = ChannelTopology::new([FrontLeft, Unknown(9)]).unwrap();
     assert_eq!(
         Fold::<f32>::between(&odd, &smpte(2)),
         Err(FoldError::Unnamed {
@@ -511,22 +512,7 @@ fn what_cannot_be_placed_is_an_error() {
     );
     // Identical topologies are an identity even when a channel is unknown.
     assert!(Fold::<f32>::between(&odd, &odd).is_ok());
-    let twice = ChannelTopology::new([FrontLeft, FrontLeft]);
-    assert_eq!(
-        Fold::<f32>::between(&twice, &smpte(2)),
-        Err(FoldError::Duplicate {
-            end: FoldEnd::Source,
-            speaker: FrontLeft
-        })
-    );
-    assert_eq!(
-        Fold::<f32>::between(&smpte(2), &twice),
-        Err(FoldError::Duplicate {
-            end: FoldEnd::Destination,
-            speaker: FrontLeft
-        })
-    );
-    let centre_lfe = ChannelTopology::new([FrontCenter, LowFrequency]);
+    let centre_lfe = ChannelTopology::new([FrontCenter, LowFrequency]).unwrap();
     assert_eq!(
         Fold::<f32>::between(&smpte(2), &centre_lfe),
         Err(FoldError::Unplaced {
@@ -573,12 +559,13 @@ fn no_source_channel_is_silently_dropped() {
         ("stereo", smpte(2)),
         (
             "lcr",
-            ChannelTopology::new([FrontLeft, FrontRight, FrontCenter]),
+            ChannelTopology::new([FrontLeft, FrontRight, FrontCenter]).unwrap(),
         ),
-        ("quad", ChannelTopology::quad()),
+        ("quad", tutti_types::Bed::Quad.topology()),
         (
             "5.0",
-            ChannelTopology::new([FrontLeft, FrontRight, FrontCenter, SideLeft, SideRight]),
+            ChannelTopology::new([FrontLeft, FrontRight, FrontCenter, SideLeft, SideRight])
+                .unwrap(),
         ),
         ("5.1", smpte(6)),
         (
@@ -591,7 +578,8 @@ fn no_source_channel_is_silently_dropped() {
                 SideLeft,
                 SideRight,
                 BackCenter,
-            ]),
+            ])
+            .unwrap(),
         ),
         ("7.1", smpte(8)),
         ("7.1.4", smpte(12)),
@@ -608,11 +596,12 @@ fn no_source_channel_is_silently_dropped() {
                 continue;
             };
             built += 1;
-            for (k, sp) in s.positions().iter().enumerate() {
+            for (k, sp) in s.positions().unwrap().iter().enumerate() {
                 if sp.is_lfe() && d.lfe_index().is_none() {
                     continue;
                 }
-                let reached = (0..d.positions().len()).any(|o| response(&f, o)[k] != 0.0);
+                let reached =
+                    (0..usize::from(d.width().count())).any(|o| response(&f, o)[k] != 0.0);
                 assert!(reached, "{sn} -> {dn}: channel {k} ({sp:?}) vanished");
             }
         }
@@ -627,7 +616,7 @@ fn planar_is_the_frame_fold() {
     let all = [
         smpte(1),
         smpte(2),
-        ChannelTopology::quad(),
+        tutti_types::Bed::Quad.topology(),
         smpte(6),
         smpte(8),
         smpte(12),
@@ -637,7 +626,10 @@ fn planar_is_the_frame_fold() {
             let Ok(f) = Fold::<f32>::between(s, d) else {
                 continue;
             };
-            let (sw, dw) = (s.positions().len(), d.positions().len());
+            let (sw, dw) = (
+                usize::from(s.width().count()),
+                usize::from(d.width().count()),
+            );
             let frames = 137;
             let data = noise(sw * frames, 11);
             let planes: Vec<Vec<f32>> = (0..sw)
@@ -655,7 +647,7 @@ fn planar_is_the_frame_fold() {
             let mut device = vec![f32::NAN; dw * frames];
             f.fold_planar_to_interleaved(
                 Planes::from_vecs(&planes).unwrap(),
-                InterleavedMut::new(&mut device, d.layout()).unwrap(),
+                InterleavedMut::new(&mut device, d.width()).unwrap(),
             )
             .unwrap();
             for (i, fr) in data.chunks_exact(sw).enumerate() {
@@ -994,8 +986,8 @@ fn every_fallback_rule_is_pinned() {
     ];
     for (name, src, dst, want) in cases {
         let f = Fold::<f32>::between(
-            &ChannelTopology::new(src.clone()),
-            &ChannelTopology::new(dst.clone()),
+            &ChannelTopology::new(src.clone()).unwrap(),
+            &ChannelTopology::new(dst.clone()).unwrap(),
         )
         .unwrap_or_else(|e| panic!("{name}: {e}"));
         for (o, speaker) in dst.iter().enumerate() {
@@ -1114,7 +1106,7 @@ fn contributions_are_the_itu_table() {
     assert_eq!(pairs(&five_one, 0), [(0, 1.0), (2, M), (4, M)]);
     assert_eq!(pairs(&five_one, 1), [(1, 1.0), (2, M), (5, M)]);
 
-    let quad = fold(&ChannelTopology::quad(), &stereo);
+    let quad = fold(&tutti_types::Bed::Quad.topology(), &stereo);
     assert_eq!(pairs(&quad, 0), [(0, 1.0), (2, M)]);
     assert_eq!(pairs(&quad, 1), [(1, 1.0), (3, M)]);
 
@@ -1155,7 +1147,10 @@ fn copies_contribute_at_exactly_unity() {
     for o in 0..6 {
         assert_eq!(id.contributions(o), [(o, 1.0)]);
     }
-    let swapped = fold(&ChannelTopology::new([FrontRight, FrontLeft]), &smpte(2));
+    let swapped = fold(
+        &ChannelTopology::new([FrontRight, FrontLeft]).unwrap(),
+        &smpte(2),
+    );
     assert_eq!(swapped.contributions(0), [(1, 1.0)]);
     assert_eq!(swapped.contributions(1), [(0, 1.0)]);
 
@@ -1183,10 +1178,10 @@ fn copies_contribute_at_exactly_unity() {
 fn contributions_are_the_fold_as_a_matrix() {
     let mut tops: Vec<ChannelTopology> = ORDERED
         .iter()
-        .filter_map(|&n| ChannelTopology::smpte(ChannelLayout::from(n)))
+        .map(|&n| ChannelTopology::assumed(ChannelLayout::from(n)))
         .collect();
-    tops.push(ChannelTopology::quad());
-    tops.push(ChannelTopology::new([FrontRight, FrontLeft, FrontCenter]));
+    tops.push(ChannelTopology::new([FrontLeft, FrontRight, SideLeft, SideRight]).unwrap());
+    tops.push(ChannelTopology::new([FrontRight, FrontLeft, FrontCenter]).unwrap());
     tops.push(ChannelTopology::unassigned(ChannelLayout::from(3u16)));
     tops.push(ChannelTopology::unassigned(ChannelLayout::from(6u16)));
     let mut checked = 0;
@@ -1218,4 +1213,29 @@ fn contributions_are_the_fold_as_a_matrix() {
 #[should_panic]
 fn contributions_past_the_destination_width_panic() {
     let _ = fold(&smpte(2), &smpte(2)).contributions(2);
+}
+
+/// An ambisonic set folds into an equal set as the identity, and into anything
+/// else (speakers, another format) is refused rather than guessed.
+#[test]
+fn an_ambisonic_set_folds_only_into_itself() {
+    use tutti_types::{AmbisonicFormat, AmbisonicOrder};
+    let first = ChannelTopology::from(AmbisonicFormat::ambix(AmbisonicOrder::of(1)));
+    let f = Fold::<f32>::between(&first, &first).unwrap();
+    assert!(f.is_identity());
+    assert_eq!(f.src_layout(), ChannelLayout::QUAD);
+    for other in [
+        ChannelTopology::from(AmbisonicFormat::fuma(AmbisonicOrder::of(1))),
+        ChannelTopology::from(AmbisonicFormat::ambix(AmbisonicOrder::of(2))),
+        tutti_types::Bed::Quad.topology(),
+    ] {
+        assert_eq!(
+            Fold::<f32>::between(&first, &other),
+            Err(FoldError::Ambisonic)
+        );
+        assert_eq!(
+            Fold::<f32>::between(&other, &first),
+            Err(FoldError::Ambisonic)
+        );
+    }
 }

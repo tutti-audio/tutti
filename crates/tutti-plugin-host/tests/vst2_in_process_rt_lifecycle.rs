@@ -711,6 +711,7 @@ fn the_shape_declares_the_plugins_buses() {
             buses.iter().all(|b| b
                 .topology
                 .positions()
+                .unwrap()
                 .iter()
                 .all(|&s| s == Speaker::Unassigned)),
             "VST2 states no placement"

@@ -1005,40 +1005,41 @@ fn a_declick_stop_stops_the_transport_on_its_frame() {
 // ---- limits, capacity, re-prepare --------------------------------------------
 
 /// A graph engine refuses what its fold scratch cannot hold: a graph with
-/// more than `MAX_ROOT_CHANNELS` global outputs at construction, and any
+/// more than `MAX_CHANNELS` global outputs at construction, and any
 /// later commit that would widen past it; and an executor that is not the
 /// editor's. Never silence.
 #[test]
 fn a_graph_engine_refuses_more_outputs_than_it_folds() {
     use tutti_engine::GraphEngineError;
     use tutti_graph::CommitError;
-    use tutti_graph::MAX_ROOT_CHANNELS;
+    use tutti_types::MAX_CHANNELS;
 
     let transport = Transport::new(SampleRate::of(SR));
     let (mut ed, exec) = Editor::new(prepare(256));
     ed.insert(NodeKey(1), "node", Unforkable(Clocked));
-    // Ten outputs off a three-channel node's ports, repeated: a legal graph,
-    // wider than the scratch.
-    ed.spec_mut().topology.set_outputs((0..10).map(|c| {
-        Source::Node(OutPort {
-            node: NodeKey(1),
-            port: c % 3,
-        })
-    }));
+    // One past the cap, off a three-channel node's ports, repeated: a legal
+    // graph, wider than the scratch.
+    let wide = MAX_CHANNELS + 1;
+    ed.spec_mut()
+        .topology
+        .set_outputs((0..wide as u16).map(|c| {
+            Source::Node(OutPort {
+                node: NodeKey(1),
+                port: c % 3,
+            })
+        }));
     ed.commit().expect("no limits yet");
     assert!(matches!(
         Engine::new(&transport, &mut ed, exec),
-        Err(GraphEngineError::Limits(CommitError::TooManyOutputs {
-            outputs: 10,
-            ..
-        }))
+        Err(GraphEngineError::Limits(CommitError::TooManyOutputs { outputs, .. }))
+            if outputs == wide
     ));
 
     let (engine, mut ed) = graph_engine(&transport, 256, Unforkable(Clocked), 3);
     render(&engine, ChannelLayout::STEREO, &[256]);
     ed.spec_mut()
         .topology
-        .set_outputs((0..MAX_ROOT_CHANNELS as u16 + 1).map(|c| {
+        .set_outputs((0..MAX_CHANNELS as u16 + 1).map(|c| {
             Source::Node(OutPort {
                 node: NodeKey(1),
                 port: c % 3,
@@ -1046,10 +1047,8 @@ fn a_graph_engine_refuses_more_outputs_than_it_folds() {
         }));
     assert!(matches!(
         ed.commit(),
-        Err(CommitError::TooManyOutputs {
-            outputs: 9,
-            limit: 8
-        })
+        Err(CommitError::TooManyOutputs { outputs, limit })
+            if outputs == MAX_CHANNELS + 1 && limit == MAX_CHANNELS
     ));
 
     let (mut ed, _exec) = Editor::new(prepare(256));

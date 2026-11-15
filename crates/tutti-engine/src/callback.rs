@@ -95,9 +95,9 @@ pub struct OutputBlock {
     state: Arc<AudioCallbackState>,
     /// The device's true channel layout. The engine folds the graph root to
     /// this width (declared with [`Engine::support_output`](crate::Engine::support_output)
-    /// when the block is built); a device wider than `MAX_ROOT_CHANNELS` (rare)
-    /// simply gets silent extra channels — the root renders ≤ 8 and the fold
-    /// zero-fills the rest.
+    /// when the block is built). A device wider than
+    /// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) is refused when its config is
+    /// read, never truncated.
     layout: ChannelLayout,
     /// The interleave stride for both the mix buffer and the device buffer,
     /// derived ONCE here — never inside the per-frame loops.

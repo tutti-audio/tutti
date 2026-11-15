@@ -1,14 +1,10 @@
 //! [`SpeakerLayout`]: the tuples of a speaker array and the gain solve.
 
-use tutti_types::{Azimuth, Direction, Elevation, Spread};
+use tutti_types::{Azimuth, Bed, Direction, Elevation, MAX_CHANNELS, Spread};
 
 use super::error::SpeakerGeometryError;
 use super::math::{Mat2, Mat3, direction, inverse2, inverse3, mul2, mul3, wrapped_deg};
 use super::select;
-
-/// The most speakers a layout holds: twelve, the 7.1.4 Atmos bed's eleven
-/// speakers and its LFE. A size of the storage, not a property of panning.
-pub const MAX_SPEAKERS: usize = 12;
 
 /// How many times [`SpeakerLayout::gains_into`] may retreat a source's elevation
 /// toward the horizontal plane before giving up.
@@ -87,6 +83,30 @@ pub struct SpeakerLayout {
 }
 
 impl SpeakerLayout {
+    /// The layout of a [`Bed`], from its BS.2051 positions
+    /// ([`Bed::direction`]).
+    ///
+    /// Gain `i` is the `i`-th placed speaker of the bed in the bed's own channel
+    /// order ([`Bed::topology`]): the LFE has no direction and is never fed, so a
+    /// bed with one has a gain slice one shorter than its width. A topology that
+    /// [`Bed::from_topology`] matched in another order maps each of its channels
+    /// through `index_of` on the bed's topology.
+    ///
+    /// # Errors
+    ///
+    /// [`SpeakerGeometryError`] when the bed's speakers cannot be panned over:
+    /// [`Bed::Mono`] has one.
+    pub fn from_bed(bed: Bed) -> Result<Self, SpeakerGeometryError> {
+        let directions: Vec<Direction> = bed
+            .topology()
+            .positions()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|&speaker| bed.direction(speaker))
+            .collect();
+        Self::new(&directions)
+    }
+
     /// A layout of speakers at the given bearings and heights.
     ///
     /// The layout pans between pairs of speakers when every speaker is within a
@@ -101,10 +121,10 @@ impl SpeakerLayout {
     /// the listener).
     pub fn new(positions: &[Direction]) -> Result<Self, SpeakerGeometryError> {
         let count = positions.len();
-        if count > MAX_SPEAKERS {
+        if count > MAX_CHANNELS {
             return Err(SpeakerGeometryError::TooManySpeakers {
                 provided: count,
-                max: MAX_SPEAKERS,
+                max: MAX_CHANNELS,
             });
         }
         if positions
@@ -295,7 +315,7 @@ impl SpeakerLayout {
         out: &mut [f32],
     ) {
         debug_assert_eq!(out.len(), self.count);
-        let mut scratch = [0.0f64; MAX_SPEAKERS];
+        let mut scratch = [0.0f64; MAX_CHANNELS];
         self.unit_power_gains(azimuth, elevation, &mut scratch[..self.count]);
         let written = out.len().min(self.count);
         for (out, &g) in out.iter_mut().zip(&scratch[..written]) {

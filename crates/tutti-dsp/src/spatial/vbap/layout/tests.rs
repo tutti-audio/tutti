@@ -4,7 +4,7 @@
 //! not a comparison with another implementation.
 
 use super::*;
-use tutti_types::{Azimuth, Direction, Elevation, Spread};
+use tutti_types::{Azimuth, Bed, Direction, Elevation, Speaker, Spread};
 
 type Position = (f32, f32);
 
@@ -472,12 +472,54 @@ fn a_layout_that_cannot_be_tiled_is_refused() {
         make(&[(f32::NAN, 0.0), (30.0, 0.0)]),
         SpeakerGeometryError::NonFinitePosition
     );
-    let many = vec![(0.0, 0.0); MAX_SPEAKERS + 1];
+    let many = vec![(0.0, 0.0); MAX_CHANNELS + 1];
     assert_eq!(
         make(&many),
         SpeakerGeometryError::TooManySpeakers {
-            provided: MAX_SPEAKERS + 1,
-            max: MAX_SPEAKERS
+            provided: MAX_CHANNELS + 1,
+            max: MAX_CHANNELS
+        }
+    );
+}
+
+/// A source at a bed's own speaker is that speaker alone, for every bed
+/// BS.2051 positions and every placed speaker in it (unit gain there, silence
+/// in the rest); the LFE has no gain; a one-speaker bed has nothing to pan
+/// between.
+#[test]
+fn a_bed_pans_to_each_of_its_speakers_at_unity() {
+    for bed in Bed::ALL {
+        let Ok(layout) = SpeakerLayout::from_bed(bed) else {
+            assert_eq!(bed, Bed::Mono, "{bed:?} must build");
+            continue;
+        };
+        let placed: Vec<Speaker> = bed
+            .topology()
+            .positions()
+            .unwrap()
+            .iter()
+            .copied()
+            .filter(|s| bed.direction(*s).is_some())
+            .collect();
+        assert_eq!(layout.speaker_count(), placed.len(), "{bed:?}");
+        for (i, &speaker) in placed.iter().enumerate() {
+            let at = bed.direction(speaker).unwrap();
+            let mut gains = vec![0.0f32; placed.len()];
+            layout.gains_into(at.azimuth, at.elevation, Spread::POINT, &mut gains);
+            for (j, &g) in gains.iter().enumerate() {
+                let want = if i == j { 1.0 } else { 0.0 };
+                assert!(
+                    (g - want).abs() < 1e-3,
+                    "{bed:?} source at {speaker:?}: gain {j} is {g}"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        SpeakerLayout::from_bed(Bed::Mono).unwrap_err(),
+        SpeakerGeometryError::InsufficientSpeakers {
+            provided: 1,
+            required: 2
         }
     );
 }

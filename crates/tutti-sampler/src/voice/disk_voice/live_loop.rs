@@ -724,10 +724,10 @@ fn a_fork_after_a_loop_edit_renders_the_edited_loop() {
 
     let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut fork = live.voice.fork_copy();
-    fork.prepare(&Prepare::new(
-        SampleRate::of(SR),
-        MaxBlock::of(Samples(BLOCK)),
-    ));
+    fork.prepare(
+        &Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(BLOCK)))
+            .with_render_mode(tutti_graph::RenderMode::Offline),
+    );
     let mut forked = Vec::new();
     for _ in 0..81 + 150 {
         forked.extend(block(&mut fork, &clock, SampleRate::of(SR), BLOCK).swap_remove(0));

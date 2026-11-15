@@ -39,8 +39,8 @@
 //!   `delays`) is `tutti-graph`'s pure pass, applied by the graph compiler.
 //! - **The worker pool and the pre-roll table.** `tutti-graph`'s.
 //! - **The metronome.** `ClickNode` is `tutti-nodes`'.
-//! - **The root width ceiling.** `MAX_ROOT_CHANNELS` is `tutti-graph`'s; the engine
-//!   bounds its editor to it.
+//! - **The root width ceiling.** `tutti_types::MAX_CHANNELS` bounds the engine's
+//!   editor, as it bounds a bus.
 //!
 //! ## Example — a graph, an engine, and a transport
 //!

@@ -1,6 +1,6 @@
 //! `Editor::set_limits`: a host's bounds, enforced where commits are made.
 //!
-//! The engine sets these to its fold scratch (`MAX_ROOT_CHANNELS` global
+//! The engine sets these to its fold scratch (`MAX_CHANNELS` global
 //! outputs, its block capacity); a graph past them must be refused on the
 //! control thread rather than reach an audio callback that cannot run it.
 

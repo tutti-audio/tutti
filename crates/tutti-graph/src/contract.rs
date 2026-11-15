@@ -2006,9 +2006,10 @@ pub fn assert_param_fork<N: ParamNode + Clone>(node: N) {
     }
 }
 
-/// The widest node [`BlockRig`] drives: its per-block slice lists live on
-/// the stack, so the rig allocates nothing per block.
-pub const RIG_MAX_CHANNELS: usize = 16;
+/// The widest node [`BlockRig`] drives: twice a bus ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)),
+/// so a test can drive a node wider than a bus. Its per-block slice lists live
+/// on the stack, so the rig allocates nothing per block.
+pub const RIG_MAX_CHANNELS: usize = 2 * tutti_types::MAX_CHANNELS;
 
 /// One node alone in a graph, driven block by block **without allocating**:
 /// the harness for a node's allocation gate (`assert_no_alloc` around
