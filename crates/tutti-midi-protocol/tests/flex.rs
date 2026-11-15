@@ -1,7 +1,7 @@
 //! Flex Set Tempo and Set Time Signature as unit values (M2-104 sections
 //! 7.5.3 and 7.5.4).
 
-use tutti_midi_protocol::{flex_tempo, flex_time_signature};
+use tutti_midi_protocol::{flex_tempo, flex_tempo_field, flex_time_signature};
 use tutti_types::{Bpm, TimeSignature};
 use tutti_ump::TimeSignature as Wire;
 
@@ -67,4 +67,21 @@ fn what_the_meter_cannot_hold_is_refused() {
         flex_time_signature(wire(64, 2)),
         Some(TimeSignature::of(64, 4))
     );
+}
+
+/// Section 7.5.3: the field written for a tempo is `6e9 / bpm` units, 120 bpm
+/// 50,000,000 and 60 bpm 100,000,000, and `flex_tempo` reads it back; the
+/// slowest and fastest the field holds are its two ends.
+#[test]
+fn a_tempo_writes_its_ten_ns_units_per_quarter() {
+    assert_eq!(flex_tempo_field(Bpm::of(120.0)), 50_000_000);
+    assert_eq!(flex_tempo_field(Bpm::of(60.0)), 100_000_000);
+    assert_eq!(flex_tempo_field(Bpm::of(1.0)), u32::MAX);
+    assert_eq!(flex_tempo_field(Bpm::of(6.0e9)), 1);
+    assert_eq!(flex_tempo_field(Bpm::of(1.0e12)), 1);
+    for bpm in [20.0, 93.7, 128.0, 300.0] {
+        let bpm = Bpm::of(bpm);
+        let back = flex_tempo(flex_tempo_field(bpm)).unwrap().get();
+        assert!((back - bpm.get()).abs() < 1e-6, "{bpm:?} -> {back}");
+    }
 }

@@ -1159,7 +1159,7 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
                             continue;
                         };
                         let mut answers: Vec<tutti_ump::Ump> = Vec::new();
-                        endpoint.reply(message, &mut answers);
+                        let _ = endpoint.reply(message, &mut answers);
                         for answer in answers {
                             device.0.send_to_subscribers(0, answer.words()).unwrap();
                         }
