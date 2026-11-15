@@ -1244,11 +1244,11 @@ tutti_types::id! {
 /// input's routes and the hardware out. [`Session::midi`](crate::Session::midi)
 /// hands it out; what it edits goes out with the next update's commit.
 #[derive(Debug)]
-pub struct Midi<'a> {
+pub struct Midi<'a, C: crate::Clock = crate::Offline> {
     pub(crate) graph: &'a mut Graph,
     pub(crate) state: &'a mut MidiState,
     pub(crate) nodes: Option<&'a MidiNodes>,
-    pub(crate) jobs: &'a mut crate::jobs::Jobs,
+    pub(crate) jobs: &'a mut crate::jobs::Jobs<C>,
     /// The transport's settings (the tempo map a follower overlays).
     pub(crate) settings: &'a tutti_transport::TransportSettings,
     /// The project meter a follower overlays.
@@ -1348,7 +1348,7 @@ fn wire_inlets(
     edited
 }
 
-impl Midi<'_> {
+impl<C: crate::Clock> Midi<'_, C> {
     fn next_load(&self) -> MidiLoad {
         MidiLoad::mint(&self.state.loads)
     }

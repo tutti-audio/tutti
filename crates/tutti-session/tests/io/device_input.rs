@@ -88,7 +88,7 @@ fn live(record: &Arc<Mutex<Record>>) -> (LiveSession, ManualStream) {
     (live, stream)
 }
 
-fn poll(session: &mut Session) -> Vec<SessionEvent> {
+fn poll(session: &mut LiveSession) -> Vec<SessionEvent> {
     let mut out = Vec::new();
     session.run_phase(
         Phase::Poll,
@@ -99,7 +99,7 @@ fn poll(session: &mut Session) -> Vec<SessionEvent> {
 }
 
 /// One block rendered, its first stereo frame.
-fn first_frame(session: &mut Session, stream: &ManualStream) -> [f32; 2] {
+fn first_frame(session: &mut LiveSession, stream: &ManualStream) -> [f32; 2] {
     let _ = session.update();
     let block = stream.render_block(16).expect("the stream is open");
     [block[0], block[1]]
@@ -114,7 +114,7 @@ fn first_frame(session: &mut Session, stream: &ManualStream) -> [f32; 2] {
 fn a_restart_reopens_an_added_input_into_the_same_node() {
     let record = Arc::new(Mutex::new(Record::default()));
     let (live, stream) = live(&record);
-    let (mut session, mut device) = live.into_parts();
+    let mut session = live;
 
     let input = session
         .add_input(InputConfig::default().channels(&[0, 1]))
@@ -129,7 +129,7 @@ fn a_restart_reopens_an_added_input_into_the_same_node() {
 
     let (driver, new) = ManualStreamDriver::new();
     session
-        .restart_on(&mut device, spec_at(44_100.0), driver, None)
+        .restart_on(spec_at(44_100.0), driver, None)
         .expect("restarts");
     assert_eq!(
         record.lock().unwrap().log,
@@ -170,13 +170,13 @@ fn a_restart_reopens_an_added_input_into_the_same_node() {
 fn an_input_that_cannot_be_reopened_is_reported_with_its_error() {
     let record = Arc::new(Mutex::new(Record::default()));
     let (live, _stream) = live(&record);
-    let (mut session, mut device) = live.into_parts();
+    let mut session = live;
     let input = session.add_input(InputConfig::default()).expect("opens");
     record.lock().unwrap().fail_from = Some(1);
 
     let (driver, _new) = ManualStreamDriver::new();
     session
-        .restart_on(&mut device, spec_at(44_100.0), driver, None)
+        .restart_on(spec_at(44_100.0), driver, None)
         .expect("the output restarts whatever the input does");
 
     let events = poll(&mut session);
@@ -204,10 +204,9 @@ fn an_input_that_cannot_be_reopened_is_reported_with_its_error() {
 fn a_failed_restart_is_a_device_event_with_the_typed_error_as_its_source() {
     let record = Arc::new(Mutex::new(Record::default()));
     let (live, _stream) = live(&record);
-    let (mut session, mut device) = live.into_parts();
+    let mut session = live;
     let (driver, _new) = ManualStreamDriver::new();
     let refused = session.restart_on(
-        &mut device,
         spec_at(96_000.0),
         driver,
         Some(tutti_types::MaxBlock::of(Samples(16_384))),
@@ -243,10 +242,10 @@ fn a_failed_restart_is_a_device_event_with_the_typed_error_as_its_source() {
 fn device_latency_is_the_reported_delay_in_frames_and_none_before_a_report() {
     let record = Arc::new(Mutex::new(Record::default()));
     let (live, stream) = live(&record);
-    let (mut session, mut device) = live.into_parts();
+    let mut session = live;
     let _input = session.add_input(InputConfig::default()).expect("opens");
 
-    let none = device.latency();
+    let none = session.device().latency();
     assert_eq!((none.input, none.output), (None, None), "nothing reported");
 
     stream
@@ -259,15 +258,15 @@ fn device_latency_is_the_reported_delay_in_frames_and_none_before_a_report() {
         .clone()
         .expect("handed a cell");
     cell.record(Some(Duration::from_millis(5)));
-    let l = device.latency();
+    let l = session.device().latency();
     assert_eq!(l.output, Some(Samples(480)));
     assert_eq!(l.input, Some(Samples(240)));
 
     let (driver, new) = ManualStreamDriver::new();
     session
-        .restart_on(&mut device, spec_at(44_100.0), driver, None)
+        .restart_on(spec_at(44_100.0), driver, None)
         .expect("restarts");
-    let after = device.latency();
+    let after = session.device().latency();
     assert_eq!(
         (after.input, after.output),
         (None, None),
@@ -275,7 +274,7 @@ fn device_latency_is_the_reported_delay_in_frames_and_none_before_a_report() {
     );
     new.render_block_delayed(64, Duration::from_millis(10))
         .expect("open");
-    assert_eq!(device.latency().output, Some(Samples(441)));
+    assert_eq!(session.device().latency().output, Some(Samples(441)));
 }
 
 /// **Removing an input's node closes its capture and forgets it**, whether
@@ -286,7 +285,7 @@ fn removing_an_inputs_node_closes_the_capture_and_a_restart_does_not_reopen_it()
     for through_graph in [false, true] {
         let record = Arc::new(Mutex::new(Record::default()));
         let (live, _stream) = live(&record);
-        let (mut session, mut device) = live.into_parts();
+        let mut session = live;
         let input = session.add_input(InputConfig::default()).expect("opens");
         if through_graph {
             session.graph().remove(input.node()).unwrap();
@@ -305,7 +304,7 @@ fn removing_an_inputs_node_closes_the_capture_and_a_restart_does_not_reopen_it()
 
         let (driver, _new) = ManualStreamDriver::new();
         session
-            .restart_on(&mut device, spec_at(44_100.0), driver, None)
+            .restart_on(spec_at(44_100.0), driver, None)
             .expect("restarts");
         let log = record.lock().unwrap().log.clone();
         assert_eq!(

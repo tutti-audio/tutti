@@ -42,7 +42,7 @@ pub enum Resolution {
     Missing,
 }
 
-impl Midi<'_> {
+impl<C: crate::Clock> Midi<'_, C> {
     fn hardware(&self) -> Result<&tutti_midi_hardware::MidiSession> {
         self.io.as_deref().ok_or(MidiError::NoHardware)
     }

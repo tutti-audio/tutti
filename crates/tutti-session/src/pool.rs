@@ -43,7 +43,7 @@ pub(crate) use table::{Pool, Start};
 #[cfg(test)]
 mod tests;
 
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// Declares what the session keeps loaded: the whole set, each time.
     ///
     /// The set is diffed against the one declared before, by key and by
@@ -110,7 +110,7 @@ impl Session {
 }
 
 #[cfg(feature = "sampler")]
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// The wave of the `audio_file` entry under `key`.
     ///
     /// # Errors
@@ -127,7 +127,7 @@ impl Session {
 }
 
 #[cfg(feature = "soundfont")]
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// The SoundFont of the `soundfont` entry under `key`, shared by its `Arc`.
     ///
     /// # Errors

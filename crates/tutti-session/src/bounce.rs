@@ -1697,7 +1697,7 @@ fn span(
     }
 }
 
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// Starts a bounce: checks what it names, derives what it does not,
     /// gathers its fork of the live graph here (what it reads of the live graph
     /// and its nodes, now; an in-process VST2 plugin's second instance is built

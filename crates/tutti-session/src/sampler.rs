@@ -124,7 +124,7 @@ pub enum SamplerError {
     Job(#[from] JobFailed),
 }
 
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// Opens `path` as a disk stream, its reader starting at `place`, on the
     /// session's spawner. Returns at once; the stream lands as
     /// [`SamplerEvent::Opened`] with the returned id in a later
@@ -181,7 +181,7 @@ enum Decided {
     Stream,
 }
 
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// Loads the file at `path` as a [`Clip`] on the session's spawner,
     /// resident or streamed as `residency` says ([`Residency::Auto`] decides
     /// by the file's size: [`STREAM_ABOVE_BYTES`]). Returns at once; the clip

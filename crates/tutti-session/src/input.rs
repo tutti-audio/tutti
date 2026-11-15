@@ -305,14 +305,14 @@ impl Inputs {
     }
 }
 
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// Opens a capture input on the session's host and puts it in the graph:
     /// the capture stream ([`tutti_cpal::MicIn`]) and the inlet node that copies
     /// it in ([`Graph::add_inlet`](crate::Graph::add_inlet)), in one call. Wire
     /// [`Input::node`] to monitor it.
     ///
     /// The session keeps the input's config and **reopens it after every
-    /// restart** ([`LiveSession::restart`](crate::LiveSession::restart)), at
+    /// restart** ([`Session::restart`](crate::Session::restart)), at
     /// the graph's new rate, into the same node: nothing to rewire. The capture
     /// delay it reports reads back as [`Device::latency`](crate::Device::latency)'s
     /// `input`.
