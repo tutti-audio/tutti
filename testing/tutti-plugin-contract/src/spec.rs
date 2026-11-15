@@ -291,6 +291,11 @@ pub struct Surface {
     /// `u32::MAX`, VST3's `kInfiniteTail`), nothing where the plugin cannot say
     /// it (VST2's tail size is a count).
     pub infinite_tail: Option<tutti_plugin_types::PluginTail>,
+    /// Whether the format reports a parameter's read-only bit: every format but
+    /// VST2, whose `effGetParameterProperties` has none. Where `true`, the
+    /// parameter list reports [`Param::Meter`] read-only and every other
+    /// parameter not.
+    pub reports_read_only: bool,
 }
 
 /// CLAP: no editor in the plugin, no `clap.render` (so no render mode), a
@@ -305,6 +310,7 @@ pub const CLAP: Surface = Surface {
     tone: TONE_LINEAR,
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
+    reports_read_only: true,
 };
 
 /// VST2: no editor in the plugin, a live render mode, an automate report.
@@ -318,6 +324,7 @@ pub const VST2: Surface = Surface {
     tone: TONE_NORMALIZED,
     selects_tail: true,
     infinite_tail: None,
+    reports_read_only: false,
 };
 
 /// VST3 from the Rust plugin: an editor once selected, the mode read at activation, an edit of `aux` to 0.75 on each state
@@ -332,6 +339,7 @@ pub const VST3: Surface = Surface {
     tone: TONE_CURVED,
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
+    reports_read_only: true,
 };
 
 /// VST3 from the C++ plugin: no editor, an edit of `aux` to 0.75 on each state
@@ -346,6 +354,7 @@ pub const VST3_CPP: Surface = Surface {
     tone: TONE_CURVED,
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
+    reports_read_only: true,
 };
 
 /// AU, from the shared plugin's Audio Unit shell: no editor (the shell offers no
@@ -363,4 +372,5 @@ pub const AU: Surface = Surface {
     tone: TONE_LINEAR,
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
+    reports_read_only: true,
 };

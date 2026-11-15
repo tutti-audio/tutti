@@ -241,7 +241,31 @@ pub fn parameters_listed<F: Format>() {
         } else {
             assert_eq!(info.default_value(), default, "{param:?} default");
         }
-        if param != Param::Meter {
+        // The access the spec gives each parameter: the meter alone is read-only
+        // and never automatable; the others are writable. A format that reports
+        // no read-only bit (VST2) reports neither answer.
+        if param == Param::Meter {
+            if F::SURFACE.reports_read_only {
+                assert_eq!(
+                    info.flag(ParamFlags::READ_ONLY),
+                    Some(true),
+                    "the meter is read-only"
+                );
+            }
+        } else {
+            assert_ne!(
+                info.flag(ParamFlags::READ_ONLY),
+                Some(true),
+                "{param:?} is not read-only"
+            );
+        }
+        if param == Param::Meter {
+            assert_ne!(
+                info.flag(ParamFlags::AUTOMATABLE),
+                Some(true),
+                "the meter is not automatable"
+            );
+        } else {
             assert_ne!(
                 info.flag(ParamFlags::AUTOMATABLE),
                 Some(false),
@@ -365,7 +389,11 @@ pub fn unlisted_parameter_is_none<F: Format>() {
 }
 
 /// A write to the parameter the plugin declares read-only (the meter) fails at
-/// the call with `ReadOnly`, loaded and active, and writes nothing.
+/// the call with `ReadOnly`, loaded and active, and does not reach the plugin:
+/// beside an accepted write of `level`, which the plugin holds afterwards, the
+/// plugin's record of what the host sent has no event for the meter. (A format
+/// that delivers a write outside a block, as AU's `AudioUnitSetParameter` does,
+/// leaves no event for either; the record is the check where one is made.)
 pub fn read_only_parameter_write_is_refused<F: Format>() {
     let main = main_thread();
     let id = Param::Meter.id();
@@ -376,7 +404,6 @@ pub fn read_only_parameter_write_is_refused<F: Format>() {
         refused,
         "read-only write refused (loaded)"
     );
-    assert_eq!(read(&loaded, Param::Meter), Some(0.0), "loaded");
     let mut a = activate(loaded, BLOCK);
     assert_eq!(
         a.controller_mut()
@@ -384,12 +411,20 @@ pub fn read_only_parameter_write_is_refused<F: Format>() {
         refused,
         "read-only write refused (active)"
     );
-    assert_eq!(read(a.controller(), Param::Meter), Some(0.0), "active");
+    write(a.controller_mut(), Param::Level, 0.75);
+    a.silent(BLOCK);
+    tutti_plugin_types::Control::flush_edits(a.controller_mut(), main_thread());
+    let t = transcript::<F, _>(a.controller_mut());
+    assert_eq!(t.level, 0.75, "the writable parameter took its write");
+    assert!(
+        t.of(Kind::Param).all(|e| e.id != id.get()),
+        "the refused write reached the plugin: {:?}",
+        t.events
+    );
 }
 
 /// A write to an id the plugin does not declare fails at the call with a named
-/// error, loaded and active, and writes nothing (`ParamWriteError`, one policy
-/// for every format).
+/// error, loaded and active (`ParamWriteError`, one policy for every format).
 pub fn undeclared_parameter_write_is_refused<F: Format>() {
     let main = main_thread();
     let refused = Err(ParamWriteError::Undeclared(spec::UNLISTED));
@@ -399,17 +434,11 @@ pub fn undeclared_parameter_write_is_refused<F: Format>() {
         refused,
         "loaded"
     );
-    assert_eq!(loaded.parameter(main, spec::UNLISTED), None, "loaded");
     let mut a = activate(loaded, BLOCK);
     assert_eq!(
         a.controller_mut()
             .set_parameter(main, spec::UNLISTED, Normalized::of(0.25)),
         refused,
-        "active"
-    );
-    assert_eq!(
-        a.controller().parameter(main, spec::UNLISTED),
-        None,
         "active"
     );
 }

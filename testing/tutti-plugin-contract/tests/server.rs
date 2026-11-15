@@ -225,6 +225,71 @@ fn a_served_value_keeps_its_f64_width<F: Format>(path: PathBuf) {
     );
 }
 
+/// **A write to the read-only parameter on the realtime route is not applied by
+/// the server**: `AnyThread::set_parameter_value` sends it as it is (the client
+/// reads no cache there), and the server's own `Control::set_parameter` refuses
+/// it. The plugin's record of what the host sent has an event for `level`, the
+/// writable write sent the same way, and none for the meter.
+fn a_read_only_write_on_the_realtime_route_is_not_applied<F: Format>(path: PathBuf) {
+    use tutti_plugin_contract::Kind;
+    use tutti_plugin_types::AnyThread;
+
+    let (mut a, _) = served::<F>(path);
+    let main = tutti_fixtures::main_thread();
+    AnyThread::set_parameter_value(a.controller(), Param::Meter.id(), Normalized::of(0.75));
+    AnyThread::set_parameter_value(a.controller(), Param::Level.id(), Normalized::of(0.75));
+    // The writes travel on the control connection and the blocks on the audio
+    // one: blocks run until the writable one has landed.
+    let mut level = a.controller().parameter(main, Param::Level.id());
+    for _ in 0..200 {
+        a.silent(BLOCK);
+        level = a.controller().parameter(main, Param::Level.id());
+        if level.map(Normalized::get) == Some(0.75) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert_eq!(
+        level.map(Normalized::get),
+        Some(0.75),
+        "{}: the positive control",
+        F::NAME
+    );
+    let state = a
+        .controller_mut()
+        .save_state(main, tutti_plugin_types::StateUse::Project)
+        .expect("saves");
+    let t = Transcript::parse(&F::extract_blob(&state));
+    assert!(
+        t.of(Kind::Param).any(|e| e.id == Param::Level.id().get()),
+        "{}: the record shows the writable write",
+        F::NAME
+    );
+    assert!(
+        t.of(Kind::Param).all(|e| e.id != Param::Meter.id().get()),
+        "{}: the server applied a read-only write: {:?}",
+        F::NAME,
+        t.events
+    );
+}
+
+#[test]
+fn clap_read_only_write_on_the_realtime_route_is_not_applied() {
+    a_read_only_write_on_the_realtime_route_is_not_applied::<Clap>(clap_path());
+}
+
+#[test]
+fn vst3_read_only_write_on_the_realtime_route_is_not_applied() {
+    a_read_only_write_on_the_realtime_route_is_not_applied::<Vst3>(bundle_of(&vst3_module()));
+}
+
+#[test]
+fn vst3_cpp_read_only_write_on_the_realtime_route_is_not_applied() {
+    a_read_only_write_on_the_realtime_route_is_not_applied::<Vst3Cpp>(
+        bundle_of(&vst3_cpp_module()),
+    );
+}
+
 #[test]
 fn clap_gesture_crosses_the_process_boundary_in_order() {
     a_served_gesture_arrives_in_order::<Clap>(clap_path());

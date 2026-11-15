@@ -35,22 +35,18 @@ macro_rules! served_control {
                 self.link.bridge.parameter(id)
             }
 
-            /// Fire-and-forget, and the realtime path: it never waits on a round
-            /// trip. A write the declared-parameter cache already knows the plugin
-            /// refuses (undeclared, read-only) is not sent; with no cache yet it is
-            /// sent, and the server's own `Control::set_parameter` refuses it
-            /// there. [`Control::set_parameter`] is the call that names the error.
+            /// Fire-and-forget, and the realtime path: the write is sent as it is.
+            /// It reads no cache, takes no lock and holds no `Arc`, so the audio
+            /// thread never waits or frees here; the server's own
+            /// `Control::set_parameter` refuses a write the plugin does not
+            /// declare or declares read-only, and writes nothing. The client-side
+            /// check, which names the error, is [`Control::set_parameter`].
             ///
             /// Stays `Normalized` to the wire, which narrows it to an `f32`.
             /// The server's decode refuses a value outside 0..=1 (NaN
             /// included): the wire is a foreign boundary and the peer is
             /// another process.
             fn set_parameter_value(&self, id: ParamId, value: Normalized) {
-                if let Some(declared) = self.link.declared_cached()
-                    && tutti_plugin_types::ParamWriteError::check_sorted(id, &declared).is_err()
-                {
-                    return;
-                }
                 let _ = self.link.bridge.set_parameter_rt(id, value);
             }
 

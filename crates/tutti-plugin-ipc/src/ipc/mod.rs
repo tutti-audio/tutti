@@ -201,15 +201,6 @@ impl DeclaredCache {
         }
     }
 
-    /// The kept list, if there is one.
-    fn kept(&self) -> Option<Arc<[(ParamId, ParamAccess)]>> {
-        self.state
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .list
-            .clone()
-    }
-
     /// Forgets the list, and makes a refill that is under way not store.
     fn forget(&self) {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
@@ -323,12 +314,6 @@ impl Link {
         let list: Arc<[(ParamId, ParamAccess)]> = sorted.into();
         self.events.declared.store(started, &list);
         Ok(list)
-    }
-
-    /// The declared parameters if the cache holds them: never asks the server.
-    /// For the realtime path, which must not wait on a round trip.
-    pub(crate) fn declared_cached(&self) -> Option<Arc<[(ParamId, ParamAccess)]>> {
-        self.events.declared.kept()
     }
 
     pub(crate) fn tail(&self) -> PluginTail {

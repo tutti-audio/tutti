@@ -7,11 +7,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tutti_fixtures::{machine_lock, main_thread};
-use tutti_plugin_types::ParamAccess;
 use tutti_plugin_types::{
-    ChannelLayout, Control, Controller, Loaded, LoadedPlugin, MaxBlock, ParamId, ParameterInfo,
-    PluginBus, PluginDescriptor, Prepare, Processor, Reopen, Request, SampleFormat, SampleRate,
-    Samples,
+    ChannelLayout, Control, Controller, Loaded, LoadedPlugin, MaxBlock, ParamAccess, ParamId,
+    ParameterInfo, PluginBus, PluginDescriptor, Prepare, Processor, Reopen, Request, SampleFormat,
+    SampleRate, Samples,
 };
 
 use super::DeclaredCache;
