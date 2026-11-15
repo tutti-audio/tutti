@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use tutti_plugin_types::MAX_CHUNK;
 use tutti_plugin_types::StateUse;
 use tutti_plugin_types::{BridgeError, BridgeResult};
-use tutti_plugin_types::{Helper, Load, Locator};
+use tutti_plugin_types::{Helper, Load, Locator, PluginFormat};
 use tutti_types::SampleRate;
 
 /// How long to keep retrying the connect while the plugin-server binds.
@@ -104,6 +104,7 @@ impl std::fmt::Debug for LaunchedServer {
 pub fn launch(
     config: &BridgeConfig,
     plugin_path: &Path,
+    format: PluginFormat,
     load: &Load,
     sample_rate: SampleRate,
     state: Option<&[u8]>,
@@ -113,6 +114,7 @@ pub fn launch(
         &Locator::Search,
         config,
         plugin_path,
+        format,
         load,
         sample_rate,
         state,
@@ -135,12 +137,14 @@ pub(super) fn launch_with(
     locator: &Locator,
     config: &BridgeConfig,
     plugin_path: &Path,
+    format: PluginFormat,
     sample_rate: SampleRate,
 ) -> BridgeResult<LaunchedServer> {
     launch_with_state(
         locator,
         config,
         plugin_path,
+        format,
         &Load::new(),
         sample_rate,
         None,
@@ -158,6 +162,7 @@ pub(super) fn launch_with_state(
     locator: &Locator,
     config: &BridgeConfig,
     plugin_path: &Path,
+    format: PluginFormat,
     load: &Load,
     sample_rate: SampleRate,
     state: Option<&[u8]>,
@@ -191,6 +196,7 @@ pub(super) fn launch_with_state(
             &mut stream,
             config,
             plugin_path,
+            format,
             load,
             sample_rate,
             &shm_name,
@@ -312,6 +318,7 @@ fn load_plugin(
     stream: &mut ControlStream,
     config: &BridgeConfig,
     plugin_path: &Path,
+    format: PluginFormat,
     load: &Load,
     sample_rate: SampleRate,
     shm_name: &str,
@@ -327,6 +334,7 @@ fn load_plugin(
         stream,
         &HostMessage::LoadPlugin {
             path: plugin_path.to_path_buf(),
+            format,
             load: load.clone(),
             sample_rate,
             block_size: config.max_buffer_size,
@@ -553,6 +561,7 @@ mod tests {
             &Locator::at(&stand_in),
             &config,
             Path::new("/nonexistent.vst3"),
+            PluginFormat::Vst3,
             SampleRate::SR_48K,
         ) {
             Err(e) => e,
@@ -617,6 +626,7 @@ mod tests {
             &Locator::at(tutti_fixtures::plugin_server()),
             &config,
             plugin,
+            PluginFormat::Clap,
             &Load::new(),
             SampleRate::SR_48K,
             Some(&[0u8; 16]),
@@ -708,12 +718,10 @@ mod tests {
     /// reason. The server answers the load; it does not exit, which the host
     /// would report as `ProcessCrashed`.
     ///
-    /// The reference CLAP plugin's cdylib, copied under a `.vst3` name, is a real
-    /// library the server reads as VST3 and the VST3 host refuses. The copy is
-    /// what gives it a format's extension on every unix: the cdylib is `.so` on
-    /// Linux but `.dylib` on macOS, an extension the server refuses before any
-    /// format runs (`Unsupported plugin format`), which is the failure this test
-    /// excludes.
+    /// The reference CLAP plugin's cdylib, loaded as VST3, is a real library the
+    /// VST3 host refuses. The failure this test excludes is the server's refusal
+    /// of a format it does not serve (`Unsupported plugin format`), which
+    /// answers before any format's loader runs.
     ///
     /// Needs `cargo build -p tutti-plugin-server` first (`CLAUDE.md`).
     #[test]
@@ -738,6 +746,7 @@ mod tests {
             &Locator::at(tutti_fixtures::plugin_server()),
             &config,
             &not_a_plugin,
+            PluginFormat::Vst3,
             SampleRate::SR_48K,
         ) {
             Err(e) => e,

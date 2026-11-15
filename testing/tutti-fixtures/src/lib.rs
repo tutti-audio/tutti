@@ -265,9 +265,9 @@ fn workspace_binary(bin: &str, package: &str) -> PathBuf {
 }
 
 /// The CLAP test plugin (`tutti-clap-test-plugin`), published under a `.clap`
-/// extension ([`publish_with_extension`]): the plugin-server dispatches a format
-/// by its file extension, and cargo's `libtutti_clap_test_plugin.so` reads as
-/// VST2 there. A host loading it directly takes the same path.
+/// extension ([`publish_with_extension`]): `PluginRef::file` takes a format
+/// from the file's extension, and cargo's `libtutti_clap_test_plugin.so` reads
+/// as VST2 there.
 ///
 /// # Panics
 ///

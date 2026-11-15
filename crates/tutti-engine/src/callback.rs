@@ -85,6 +85,13 @@ pub fn process_audio(state: &AudioCallbackState, output: &mut InterleavedMut<'_>
     with_no_denormals(|| state.engine.process(output));
 }
 
+/// [`process_audio`] for a block dated by the caller: the block clock records
+/// `os_ns` as the OS time the block began ([`Engine::process_at`]).
+#[inline]
+fn process_audio_at(state: &AudioCallbackState, output: &mut InterleavedMut<'_>, os_ns: i64) {
+    with_no_denormals(|| state.engine.process_at(output, os_ns));
+}
+
 /// The working set one output stream's callback reads, sized once.
 ///
 /// Every buffer here is allocated in [`OutputBlock::new`], on the control
@@ -240,13 +247,35 @@ impl OutputBlock {
     /// `tests/no_alloc/block_no_alloc.rs` gates.
     #[inline]
     pub fn render_with<T: Copy>(&mut self, data: &mut [T], convert: impl Fn(f32) -> T) {
+        self.render_stamped(data, None, convert);
+    }
+
+    /// [`render_delayed_with`](Self::render_delayed_with) into an `f32` buffer
+    /// for a block due at `os_ns`, a [`monotonic_ns`](tutti_rt::monotonic_ns)
+    /// reading: the block clock dates the block by it, not by the time the
+    /// render began ([`Engine::process_at`]). A driver that renders to a
+    /// schedule calls this with the block's deadline. Wait-free like
+    /// `render_with`, with the same panic latch.
+    #[inline]
+    pub(crate) fn render_at(&mut self, data: &mut [f32], os_ns: i64, delay: Option<Duration>) {
+        self.latency.record(delay);
+        self.render_stamped(data, Some(os_ns), |x| x);
+    }
+
+    #[inline]
+    fn render_stamped<T: Copy>(
+        &mut self,
+        data: &mut [T],
+        stamp: Option<i64>,
+        convert: impl Fn(f32) -> T,
+    ) {
         let silence = convert(0.0);
         if self.failed {
             data.fill(silence);
             return;
         }
         let rendered = catch_unwind(AssertUnwindSafe(|| {
-            self.render_unguarded(data, &convert, silence)
+            self.render_unguarded(data, stamp, &convert, silence)
         }));
         if let Err(payload) = rendered {
             self.failed = true;
@@ -261,6 +290,7 @@ impl OutputBlock {
     fn render_unguarded<T: Copy>(
         &mut self,
         data: &mut [T],
+        stamp: Option<i64>,
         convert: &impl Fn(f32) -> T,
         silence: T,
     ) {
@@ -280,7 +310,10 @@ impl OutputBlock {
         let Ok(mut mix) = InterleavedMut::new(mix, self.layout) else {
             return;
         };
-        process_audio(&self.state, &mut mix);
+        match stamp {
+            Some(os_ns) => process_audio_at(&self.state, &mut mix, os_ns),
+            None => process_audio(&self.state, &mut mix),
+        }
         // Back to a flat slice for the device write.
         let mix = mix.as_interleaved().samples();
 

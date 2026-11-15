@@ -483,7 +483,7 @@ impl MixRun {
         } else if self.is_static() {
             self.to
         } else {
-            Piece::ramp_at(self.from, self.to, i, self.frames)
+            Piece::ramp_at(None, self.from, self.to, i, self.frames)
         }
     }
 

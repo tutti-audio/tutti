@@ -29,7 +29,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::NodeKey;
-use ringbuf::{HeapProd, traits::Producer};
+use tutti_rt::RingWriter;
 
 use crate::plan::{FeedbackKey, Plan};
 use crate::spec::EventOut;
@@ -210,7 +210,7 @@ impl Dropped {
     pub(crate) fn flush(
         &mut self,
         plan: &Plan,
-        tx: &mut HeapProd<EventLoss>,
+        tx: &mut RingWriter<EventLoss>,
         unreported: &AtomicU64,
     ) {
         for e in self.log.drain(..) {
@@ -230,7 +230,7 @@ impl Dropped {
                 count: e.count,
                 recovered: e.recovered,
             };
-            if tx.try_push(entry).is_err() {
+            if tx.push(entry).is_err() {
                 self.unreported += u64::from(e.count.saturating_sub(e.recovered));
             }
         }

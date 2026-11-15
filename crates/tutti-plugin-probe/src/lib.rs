@@ -7,8 +7,8 @@
 #![forbid(unsafe_code)]
 
 use std::path::Path;
-use tutti_plugin_db::{PluginFormat, format_from_path};
-use tutti_plugin_types::{MainThreadMarker, PluginDescriptor};
+use tutti_plugin_db::format_from_path;
+use tutti_plugin_types::{MainThreadMarker, PluginDescriptor, PluginFormat};
 
 mod measure;
 

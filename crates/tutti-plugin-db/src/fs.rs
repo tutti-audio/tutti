@@ -10,14 +10,11 @@ use tracing::debug;
 static TMP_COUNTER: tutti_types::Mint = tutti_types::Mint::new();
 
 /// The one extension → format table: the single source of truth for which
-/// file extensions name a plugin. [`PluginFormat::EXTENSIONS`]
-/// is derived from this, so the two lists cannot drift apart. Drift is a
-/// whole-platform outage: an extension advertised but rejected here makes
-/// **no** VST2 plugin discoverable on Windows or Linux, where VST2 ships as a
-/// bare shared library.
+/// file extensions name a plugin. VST2 ships as a bare shared library on
+/// Windows and Linux, so its rows are `dll` and `so`.
 ///
 /// Entries are lowercase; candidates are lowercased before comparison.
-pub(super) const FORMAT_BY_EXTENSION: &[(&str, PluginFormat)] = &[
+const FORMAT_BY_EXTENSION: &[(&str, PluginFormat)] = &[
     ("vst3", PluginFormat::Vst3),
     ("vst", PluginFormat::Vst2),
     ("dll", PluginFormat::Vst2),
@@ -89,13 +86,8 @@ fn modified_secs(metadata: &std::fs::Metadata) -> Option<u64> {
 
 /// The module inside a bundle directory, preferring the one this target loads.
 fn module_in_bundle(bundle: &Path, format: Option<PluginFormat>) -> Option<PathBuf> {
-    use tutti_plugin_types::bundle::{ModuleKind, any_module_in_bundle, native_module_in_bundle};
-    let kind = match format? {
-        PluginFormat::Vst3 => ModuleKind::Vst3,
-        PluginFormat::Vst2 => ModuleKind::Vst2,
-        PluginFormat::Clap => ModuleKind::Clap,
-        PluginFormat::AudioUnit => ModuleKind::Au,
-    };
+    use tutti_plugin_types::bundle::{any_module_in_bundle, native_module_in_bundle};
+    let kind = format?.module_kind();
     native_module_in_bundle(bundle, kind).or_else(|| any_module_in_bundle(bundle, kind))
 }
 
@@ -281,8 +273,7 @@ mod tests {
         );
     }
 
-    /// VST2 on Windows/Linux ships as a bare `.dll` / `.so`, and
-    /// `format_from_path` must agree with `PluginFormat::EXTENSIONS` on both,
+    /// VST2 on Windows/Linux ships as a bare `.dll` / `.so`: both name VST2,
     /// or no VST2 plugin is discoverable on those platforms.
     #[test]
     fn vst2_bare_libraries_are_recognised() {
@@ -293,22 +284,6 @@ mod tests {
         assert_eq!(
             format_from_path(Path::new("Synth1.so")),
             Some(PluginFormat::Vst2)
-        );
-    }
-
-    /// The advertised list and the accepted list must be the same list.
-    #[test]
-    fn advertised_extensions_are_all_accepted() {
-        for ext in PluginFormat::EXTENSIONS {
-            assert!(
-                format_from_path(Path::new(&format!("plugin.{ext}"))).is_some(),
-                "PluginFormat::EXTENSIONS advertises {ext:?} but format_from_path rejects it"
-            );
-        }
-        assert_eq!(
-            PluginFormat::EXTENSIONS.len(),
-            FORMAT_BY_EXTENSION.len(),
-            "the advertised list must be exactly the accepted table"
         );
     }
 

@@ -86,8 +86,8 @@
 //!     play_epoch: 1,
 //!     rate,
 //! };
-//! assert_eq!(program.value_at(Some(600.0), &at(1.0), 800.0, &[]), Some(800.0));
-//! assert_eq!(program.value_at(Some(600.0), &at(3.0), 800.0, &[]), Some(400.0));
+//! assert_eq!(program.value_at(None, Some(600.0), &at(1.0), 800.0, &[]), Some(800.0));
+//! assert_eq!(program.value_at(None, Some(600.0), &at(3.0), 800.0, &[]), Some(400.0));
 //! // An LFO needs no node and no edge: only signal sources do.
 //! assert!(compiled.nodes.is_empty() && compiled.edges.is_empty());
 //! ```
