@@ -26,6 +26,9 @@ dpi.workspace = true
 thiserror.workspace = true
 # The MIDI 2.0 widening of what a plugin emits.
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
+# `RenderCount`: the renders in flight, which a MIDI-output withdrawal checks
+# before it frees what the AU's callback reads.
+tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 # `WindowHandle` (the parent window of an editor), `TransportInfo` and
 # `WireMidi`: the values the AU surface is spoken in.
 tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
