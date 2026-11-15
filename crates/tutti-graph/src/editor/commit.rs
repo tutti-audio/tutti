@@ -8,16 +8,16 @@ use tutti_curve::declick_frames;
 use super::lifecycle::Resume;
 use super::{BusLanes, CommitError, Editor, SentBank, starting};
 use crate::compile::{CompileError, Shapes, compile};
+use crate::exec::Commit;
+use crate::exec::{Opened, StageIn};
 use crate::gain::{EdgeFade, EdgeGain};
+use crate::node::Node;
+use crate::param::ParamState;
+use crate::plan::{Delta, Placement, Plan};
 use crate::spec::{GraphSpec, ValidGraph};
 use crate::{Edge, EdgeId, Sink, Source};
 use crate::{Fade, NodeKey, RootBank};
 use tutti_types::Amplitude;
-use crate::exec::Commit;
-use crate::exec::{Opened, StageIn};
-use crate::node::Node;
-use crate::param::ParamState;
-use crate::plan::{Delta, Placement, Plan};
 
 impl Editor {
     /// `Err(Poisoned)` once a re-prepare has failed with its units out.
@@ -324,8 +324,11 @@ impl Editor {
         }
         if !kept {
             now.spec.topology.outputs.truncate(base);
-            now.lanes.retain(|id, _| !matches!(id.sink, Sink::Output(c) if usize::from(c) >= base));
-            now.spec.gains.retain(|id, _| !matches!(id.sink, Sink::Output(c) if usize::from(c) >= base));
+            now.lanes
+                .retain(|id, _| !matches!(id.sink, Sink::Output(c) if usize::from(c) >= base));
+            now.spec
+                .gains
+                .retain(|id, _| !matches!(id.sink, Sink::Output(c) if usize::from(c) >= base));
         }
         let valid = now.spec.validate().map_err(CommitError::Invalid)?;
         let valid = if kept {

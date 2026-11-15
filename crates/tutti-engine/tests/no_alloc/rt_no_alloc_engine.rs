@@ -915,7 +915,11 @@ fn a_root_change_crossfaded_across_several_blocks_is_allocation_free() {
     let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
     let (left, right) = (v(0) + m * (v(2) + v(4)), v(1) + m * (v(2) + v(5)));
     for frame in out.as_chunks::<2>().0 {
-        assert!((frame[0] - left).abs() < 1e-5, "left {} vs {left}", frame[0]);
+        assert!(
+            (frame[0] - left).abs() < 1e-5,
+            "left {} vs {left}",
+            frame[0]
+        );
         assert!(
             (frame[1] - right).abs() < 1e-5,
             "right {} vs {right}",

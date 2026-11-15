@@ -56,10 +56,10 @@ use std::sync::Arc;
 use tutti_types::At;
 
 use crate::EdgeId;
+use crate::Fade;
 use crate::bus_edge::{BusError, BusFold, BusRef, BusSource, Lowering};
 use crate::command::{CommandId, ScheduleError, command_channel};
 use crate::compile::{CompileError, Shapes};
-use crate::Fade;
 use crate::event::EventKind;
 use crate::event_tap::EventTapWriter;
 use crate::exec::{DEFAULT_EVENT_CAPACITY, Executor, Stager, channels};

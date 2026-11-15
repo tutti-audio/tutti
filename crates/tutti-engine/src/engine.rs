@@ -1468,10 +1468,10 @@ mod tests {
     use tutti_graph::Prepare;
     use tutti_transport::Timeline;
     use tutti_transport::{MotionEvent, Transport};
+    use tutti_types::Bed;
     use tutti_types::Bpm;
     use tutti_types::ChannelTopology;
     use tutti_types::MaxBlock;
-    use tutti_types::Bed;
     use tutti_types::Placement;
 
     /// A graph walk's `Pieces` that stores a new tempo from "the control
@@ -2622,9 +2622,9 @@ mod tests {
             node: NodeKey(1),
             port: 0,
         });
-        ed.spec_mut().topology.set_outputs(
-            (0..width).map(|c| if c == channel { dc } else { Source::Zero }),
-        );
+        ed.spec_mut()
+            .topology
+            .set_outputs((0..width).map(|c| if c == channel { dc } else { Source::Zero }));
     }
 
     /// The smootherstep `s(x) = x³ (6x² − 15x + 10)` the equal-amplitude
@@ -2644,8 +2644,8 @@ mod tests {
         ed.insert(tutti_graph::NodeKey(1), "dc", tutti_graph::Unforkable(Dc));
         feed(&mut ed, 2, 0);
         ed.commit().expect("commits");
-        let engine = Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec)
-            .expect("within limits");
+        let engine =
+            Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within limits");
         ed.set_root_fade(Some(tutti_graph::Fade::new(
             Samples(fade),
             tutti_graph::FadeLaw::EqualAmplitude,
@@ -2683,9 +2683,7 @@ mod tests {
         let (engine, mut ed) = crossfading_engine(20);
         let control = engine.output_control();
         move_root(&mut ed, &control, None, 2, 1);
-        let heard: Vec<f32> = (0..4)
-            .flat_map(|_| block_with(&engine, 2, || {}))
-            .collect();
+        let heard: Vec<f32> = (0..4).flat_map(|_| block_with(&engine, 2, || {})).collect();
         for (k, frame) in heard.as_chunks::<2>().0.iter().enumerate() {
             let (out, new) = if k < 20 {
                 equal_amplitude(k, 20)
@@ -2708,9 +2706,7 @@ mod tests {
         let (engine, mut ed) = crossfading_engine(20);
         let control = engine.output_control();
         move_root(&mut ed, &control, Some(Bed::Surround51.topology()), 6, 2);
-        let heard: Vec<f32> = (0..3)
-            .flat_map(|_| block_with(&engine, 2, || {}))
-            .collect();
+        let heard: Vec<f32> = (0..3).flat_map(|_| block_with(&engine, 2, || {})).collect();
         let centre = std::f32::consts::FRAC_1_SQRT_2;
         for (k, frame) in heard.as_chunks::<2>().0.iter().enumerate().take(24) {
             let (out, new) = if k < 20 {
@@ -2784,7 +2780,10 @@ mod tests {
         let control = engine.output_control();
         move_root(&mut ed, &control, None, 2, 1);
         let first = block_with(&engine, 2, || {});
-        assert!(first.as_chunks::<2>().0[0][0] > 0.9, "the old root is heard");
+        assert!(
+            first.as_chunks::<2>().0[0][0] > 0.9,
+            "the old root is heard"
+        );
         // A rewire to both channels: a plan of the same root with no old
         // channels. Were the fade still running, the right would still be
         // fading in.

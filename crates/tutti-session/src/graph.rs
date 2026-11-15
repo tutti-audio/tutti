@@ -3551,10 +3551,10 @@ mod root_fade_tests {
         );
         let (node, _) = g.add(ForkByClone(Const::mono(1.0)));
         let node = NodeKey::from(node);
-        g.editor.spec_mut().topology.set_outputs([
-            Source::Node(OutPort { node, port: 0 }),
-            Source::Zero,
-        ]);
+        g.editor
+            .spec_mut()
+            .topology
+            .set_outputs([Source::Node(OutPort { node, port: 0 }), Source::Zero]);
         g.commit();
         (g, node)
     }
@@ -3574,7 +3574,11 @@ mod root_fade_tests {
         let bank = plan.root_bank().expect("the old root is carried");
         assert_eq!(bank.old, RootId::GENESIS);
         assert_eq!(bank.base, 6, "the new root's width");
-        assert_eq!(plan.rendered_outputs(), 6 + 2, "and the old root's after it");
+        assert_eq!(
+            plan.rendered_outputs(),
+            6 + 2,
+            "and the old root's after it"
+        );
         assert_eq!(plan.global_outputs(), 6);
         assert_eq!(
             (bank.fade.duration, bank.fade.law),
