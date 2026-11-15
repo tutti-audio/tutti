@@ -242,7 +242,7 @@ pub use live::{
     InputId, InputInlets, LIVE_INLET_CAPACITY, MAILBOX_CAPACITY, MIDI_INPUT_DENSITY,
     MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS, MidiIngestControls, MidiIngestNode,
     MidiInputPorts, MidiKeys, MidiMailbox, MidiReceiver, MidiSender, MpeIngest,
-    MpeTransformControls, MpeTransformNode, RouteRule, SlotCountMismatch, compile_routes,
+    MpeTransformControls, MpeTransformNode, RouteRule, compile_routes,
 };
 pub use mpe_features::{MpeFeaturesError, ask_mpe_features, mpe_features};
 pub use outbound::{

@@ -16,7 +16,6 @@
 //! region.
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
 use tutti_fixtures::midi;
@@ -51,8 +50,8 @@ fn wire() -> Vec<Ump> {
 fn rig() -> (Executor, DeviceInput) {
     let inlets = InputInlets::new(EventCapacity::of(4_096), Duration::ZERO);
     let (device, inlet) = inlets.open();
-    let epochs = DeviceEpochs::new(NonZeroUsize::MIN);
-    epochs.arrive(0);
+    let epochs = DeviceEpochs::new();
+    epochs.arrive();
     let (mut editor, exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
         MaxBlock::of(Samples(BLOCK)),
@@ -60,9 +59,7 @@ fn rig() -> (Executor, DeviceInput) {
     editor.insert(
         NodeKey(1),
         "ingest",
-        MidiIngestNode::new(NonZeroUsize::MIN)
-            .following(&epochs)
-            .expect("one input"),
+        MidiIngestNode::new().following(&epochs),
     );
     editor.insert(NodeKey(2), "inlet", inlet);
     editor.spec_mut().connect_events(
