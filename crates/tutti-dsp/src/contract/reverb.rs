@@ -1,7 +1,7 @@
 //! The `reverb` group: the cases of a [`Network`], the controls a reverb has and
 //! a filter does not.
 
-use tutti_types::{Amplitude, Db, Hz, SampleRate, Samples, Seconds};
+use tutti_types::{Amplitude, Db, Gain, Hz, SampleRate, SampleSpan, Samples, Seconds};
 
 use super::core::{check_vacuity, every};
 use super::harness::{Burst, WINDOW, built, burst, energy, noise, rate_of, render, rms, widths};
@@ -15,7 +15,10 @@ fn close(a: f32, b: f32, relative: f32) -> bool {
 /// The helpers the RT60 cases share.
 /// How many frames of burst plateau make `lines` trips of the longest line.
 pub(super) fn burst_frames(capacity: &NetworkCapacity, lines: f32) -> usize {
-    (lines * capacity.line) as usize
+    capacity
+        .line
+        .scaled(f64::from(lines))
+        .map_or(0, |span| span.to_samples_floor().get())
 }
 
 /// The RT60 of the decay after the burst: a least squares line through the
@@ -34,7 +37,11 @@ pub(super) fn measured_rt60(
     // Windows twice the longest line, stepping by `WINDOW`: a train of echoes
     // (parallel combs) puts energy in spikes a line apart, and a window shorter
     // than that measures where the spikes fall.
-    let long = ((2.0 * capacity.line) as usize).max(4 * WINDOW);
+    let long = capacity
+        .line
+        .scaled(2.0)
+        .map_or(0, |span| span.to_samples_floor().get())
+        .max(4 * WINDOW);
     let reference = energy(out, b.plateau_end - long, long);
     if reference <= 0.0 {
         return Err("nothing sounds before the input stops".into());
@@ -296,7 +303,9 @@ pub(super) mod design {
         for c in d.reachable().into_iter().step_by(17) {
             let base = d.member(&c, rate);
             for (i, stage) in base.stages.iter().enumerate() {
-                let Stage::Fdn(f) = stage else { continue };
+                if !matches!(stage, Stage::Fdn(_)) {
+                    continue;
+                }
                 for a in hostile {
                     let mut n = base.clone();
                     let Stage::Fdn(f) = &mut n.stages.as_mut_slice()[i] else {
@@ -311,18 +320,16 @@ pub(super) mod design {
                         return Err(format!("{a:?} on every line is called stable"));
                     }
                 }
-                for length in [0.0, -1.0, f32::NAN, f32::INFINITY] {
-                    let mut n = base.clone();
-                    let Stage::Fdn(f) = &mut n.stages.as_mut_slice()[i] else {
-                        unreachable!()
-                    };
-                    f.lines.as_mut_slice()[0].length = length;
-                    tried += 1;
-                    if n.is_stable() {
-                        return Err(format!("a line of length {length} is called stable"));
-                    }
+                // A negative, NaN or infinite length is not a `SampleSpan`: only a zero is left to refuse.
+                let mut n = base.clone();
+                let Stage::Fdn(f) = &mut n.stages.as_mut_slice()[i] else {
+                    unreachable!()
+                };
+                f.lines.as_mut_slice()[0].length = SampleSpan::ZERO;
+                tried += 1;
+                if n.is_stable() {
+                    return Err("a line of length 0 is called stable".into());
                 }
-                let _ = f;
             }
         }
         if tried == 0 {
@@ -342,7 +349,7 @@ pub(super) mod design {
             for c in every(d) {
                 let n = d.member(&c, rate);
                 if n.has_direct_path() {
-                    return Err(format!("direct path, shortest {} frames", n.min_delay()));
+                    return Err(format!("direct path, shortest {:?} frames", n.min_delay()));
                 }
             }
         }
@@ -510,7 +517,10 @@ pub(super) mod realization {
         for rate in d.rates() {
             for c in d.static_probes() {
                 let (mut k, network) = built(d, &c, rate);
-                let silent = network.min_delay() as usize + k.latency().get();
+                let silent = network
+                    .min_delay()
+                    .map_or(0, |d| d.to_samples_floor().get())
+                    + k.latency().get();
                 let x = noise(7, silent + 512, 1.0);
                 let out = render(&mut k, widths(d), &x, 64);
                 if let Some(n) = out
@@ -587,28 +597,31 @@ pub(super) mod realization {
             let delays: Vec<usize> = network.stages[1..]
                 .iter()
                 .flat_map(|s| match s {
-                    Stage::AllPass(a) => a.iter().map(|a| a.delay as usize).collect(),
+                    Stage::AllPass(a) => {
+                        a.iter().map(|a| a.delay.to_samples_floor().get()).collect()
+                    }
                     _ => Vec::new(),
                 })
                 .collect();
             for (i, line) in f.lines.iter().enumerate() {
                 let masked = f.lines.iter().enumerate().any(|(j, other)| {
                     j != i
-                        && delays
-                            .iter()
-                            .any(|&d| other.length as usize + d == line.length as usize)
+                        && delays.iter().any(|&d| {
+                            other.length.to_samples_floor().get() + d
+                                == line.length.to_samples_floor().get()
+                        })
                 });
                 if masked {
                     continue;
                 }
-                let at = network.pre_delay.get() + line.length as usize;
+                let at = network.pre_delay.get() + line.length.to_samples_floor().get();
                 // The rows that take this line.
                 for (r, row) in f.output.rows.iter().enumerate() {
-                    if row[i] == 0.0 {
+                    if row[i] == Gain::SILENT {
                         continue;
                     }
                     checked += 1;
-                    let want = 0.5 * (f.input[i] * row[i]).abs();
+                    let want = 0.5 * (f.input[i] * row[i]).get().abs();
                     if out[r][at].abs() < want {
                         return Err(format!(
                             "line {i} (length {}, pre {} at {at}, row {r}): output {} at its first echo, wanted {want}",

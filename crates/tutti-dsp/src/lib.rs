@@ -194,7 +194,7 @@ pub use convolver::{Convolver, IrSpectra};
 pub use delay::{
     ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayGlides, DelayLanes,
     DelayLayout, DelayLine, InterpolationMode, MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError,
-    Routing, RoutingError, delay_step, fractional_samples,
+    Routing, RoutingError, delay_step,
 };
 pub use dither::sink::{DitherSink, DitherSpec};
 pub use dither::{DitherNoise, DitherShape};

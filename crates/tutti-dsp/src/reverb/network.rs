@@ -10,17 +10,17 @@
 //! capacity and allocation-free to build.
 //!
 //! **A `Network` is a control-side value.** It holds room for [`MAX_STAGES`]
-//! stages of about 7 KB each, some 56 KB in all, which is too large to build or
+//! stages of about 8 KB each, some 67 KB in all, which is too large to build or
 //! copy on an audio thread (whose stack may be 512 KB). It is allocation-free
 //! (no heap, so building one never waits on the allocator), not small.
 //!
-//! Units: whole frames are [`Samples`] (the pre-delay); non-negative gains per
-//! trip are [`Amplitude`] (an absorption's). Plain `f32` is kept where nothing
-//! covers the quantity, one reason per kind: delays and modulation depths in
-//! *fractional* frames ([`Samples`] is whole); *signed* coefficients, which
-//! [`Amplitude`] (floored at zero) cannot hold (tap and all-pass gains, the
-//! matrix, the input and output gains of an FDN); and `Feedback`, which caps at
-//! 0.99, cannot hold a loop gain of 1. The queries ([`Network::rt60`], [`tail`](crate::System::tail),
+//! Units: whole frames are [`Samples`] (the pre-delay); delays, lengths and
+//! modulation depths in *fractional* frames are [`SampleSpan`]; non-negative
+//! gains per trip are [`Amplitude`] (an absorption's); *signed* coefficients,
+//! which [`Amplitude`] (floored at zero) cannot hold, are [`Gain`] (tap and
+//! all-pass gains, the matrix, the input and output gains of an FDN).
+//! `Feedback`, which caps at 0.99, cannot hold a loop gain of 1. The one-pole
+//! pole `damp` is a bare coefficient, not a gain on a signal. The queries ([`Network::rt60`], [`tail`](crate::System::tail),
 //! [`is_stable`](crate::Lti::is_stable), the densities) read **centre** lengths:
 //! modulation moves a line by a few frames around its centre and the queries do
 //! not model that.
@@ -35,7 +35,15 @@ pub use capacity::NetworkCapacity;
 pub use gain::{loop_gain, rt60_from_gain};
 pub use inline::{Full, Inline};
 
-use tutti_types::{Amplitude, Db, Hz, SampleRate, Samples, Seconds, StereoWidth};
+use tutti_types::{Amplitude, Db, Gain, Hz, SampleRate, SampleSpan, Samples, Seconds, StereoWidth};
+
+/// The energy of a row of gains, `sum g^2`, in `f64`.
+pub(crate) fn energy(gains: &[Gain]) -> f64 {
+    gains
+        .iter()
+        .map(|g| f64::from(g.get()) * f64::from(g.get()))
+        .sum()
+}
 
 /// The most delay lines one [`Fdn`] holds.
 pub const MAX_LINES: usize = 64;
@@ -138,7 +146,7 @@ pub fn pre_delay_frames(pre_delay: Seconds, rate: SampleRate) -> Samples {
 
 /// One stage of a [`Network`].
 // Boxing the large variant would allocate: the size is the price of a network
-// built without the heap. Every `Stage` is about 7 KB whatever its variant (an
+// built without the heap. Every `Stage` is about 8 KB whatever its variant (an
 // `Inline` array of `Stage` is as large as its largest member), so a short
 // all-pass stage costs as much as an `Fdn`.
 #[allow(clippy::large_enum_variant)]
@@ -171,9 +179,9 @@ pub struct Taps {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Tap {
     /// The delay in frames. A tap at less than one frame is a direct path.
-    pub delay: f32,
+    pub delay: SampleSpan,
     /// The gain: signed, so not an `Amplitude`.
-    pub gain: f32,
+    pub gain: Gain,
     /// The output channel it feeds.
     pub channel: u8,
 }
@@ -202,9 +210,9 @@ pub enum AllPassForm {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct AllPass {
     /// The delay in fractional frames.
-    pub delay: f32,
+    pub delay: SampleSpan,
     /// The coefficient: signed, so not an `Amplitude`.
-    pub gain: f32,
+    pub gain: Gain,
     /// How its delay is modulated.
     pub modulation: LineModulation,
     /// Which transfer function.
@@ -219,22 +227,24 @@ impl AllPass {
     #[must_use]
     fn has_direct_term(&self) -> bool {
         match self.form {
-            AllPassForm::Lattice => self.gain != 0.0,
+            AllPassForm::Lattice => self.gain != Gain::SILENT,
             AllPassForm::Freeverb => true,
         }
     }
 
     /// The group delay at DC of a [`Lattice`](AllPassForm::Lattice) all-pass,
     /// `D (1 + g) / (1 - g)`, in frames: what it adds to a loop's length at low
-    /// frequency. Infinity when `|g| >= 1`, and for the
+    /// frequency. Unbounded when `|g| >= 1`, and for the
     /// [`Freeverb`](AllPassForm::Freeverb) form, which is not unit magnitude
-    /// and whose DC gain `g / (1 - g)` the loop analysis does not model.
+    /// and whose DC gain `g / (1 - g)` the loop analysis does not model: `None`
+    /// there, since an unbounded delay is not a span.
     #[must_use]
-    fn low_frequency_delay(&self) -> f32 {
-        if self.form == AllPassForm::Lattice && self.gain.abs() < 1.0 {
-            self.delay * (1.0 + self.gain) / (1.0 - self.gain)
+    fn low_frequency_delay(&self) -> Option<SampleSpan> {
+        let g = f64::from(self.gain.get());
+        if self.form == AllPassForm::Lattice && g.abs() < 1.0 {
+            self.delay.scaled((1.0 + g) / (1.0 - g))
         } else {
-            f32::INFINITY
+            None
         }
     }
 }
@@ -243,7 +253,7 @@ impl AllPass {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LineModulation {
     /// The excursion either side of the centre, in frames.
-    pub depth: f32,
+    pub depth: SampleSpan,
     /// The rate.
     pub rate: Hz,
 }
@@ -251,7 +261,7 @@ pub struct LineModulation {
 impl LineModulation {
     /// No modulation.
     pub const NONE: LineModulation = LineModulation {
-        depth: 0.0,
+        depth: SampleSpan::ZERO,
         rate: Hz(0.0),
     };
 }
@@ -265,7 +275,7 @@ impl Default for LineModulation {
 /// One signed coefficient per delay line (or matrix row): the input and output
 /// gains of an FDN and a circulant's first row can be negative, so these are
 /// not `Amplitude`.
-pub type Gains = Inline<f32, MAX_LINES>;
+pub type Gains = Inline<Gain, MAX_LINES>;
 
 /// Delay lines with feedback: `s(n + m) = A G(s(n)) + B u(n)`,
 /// `y(n) = C s(n)`.
@@ -293,7 +303,7 @@ pub struct OutputMap {
 pub struct Line {
     /// The centre length in fractional frames. A stable line is finite and
     /// positive: a delay-free loop is not a loop a network can have.
-    pub length: f32,
+    pub length: SampleSpan,
     /// How the length is modulated.
     pub modulation: LineModulation,
     /// What the line absorbs per trip.
@@ -304,17 +314,28 @@ pub struct Line {
 
 impl Line {
     /// The length the decay formulas use: the centre length plus the nested
-    /// all-pass's group delay at DC.
+    /// all-pass's group delay at DC; `None` when that delay is unbounded.
     #[must_use]
-    fn effective_length(&self) -> f32 {
-        self.length + self.diffuser.map_or(0.0, |d| d.low_frequency_delay())
+    fn effective_length(&self) -> Option<SampleSpan> {
+        match self.diffuser {
+            None => Some(self.length),
+            Some(d) => d.low_frequency_delay().map(|nested| self.length + nested),
+        }
+    }
+
+    /// [`effective_length`](Self::effective_length) in frames: `f64::INFINITY`
+    /// for an unbounded length. The figure the decay formulas take, which accept infinity.
+    #[must_use]
+    fn effective_frames(&self) -> f64 {
+        self.effective_length()
+            .map_or(f64::INFINITY, SampleSpan::get)
     }
 }
 
 impl Default for Line {
     fn default() -> Self {
         Line {
-            length: 0.0,
+            length: SampleSpan::ZERO,
             modulation: LineModulation::NONE,
             absorption: Absorption::Gain(Amplitude::SILENT),
             diffuser: None,
@@ -345,7 +366,7 @@ pub enum Matrix {
     /// [`Fdn::is_stable`], not by construction).
     Circulant(Gains),
     /// A dense row-major `N` by `N` matrix, a control-side tool.
-    Dense(Inline<f32, MAX_DENSE>),
+    Dense(Inline<Gain, MAX_DENSE>),
 }
 
 /// What a line absorbs per trip, `G`: the gain of one trip through the loop.
@@ -417,7 +438,7 @@ impl Absorption {
     pub(crate) fn from_rt60(
         rt60: [Seconds; 3],
         crossover: [Hz; 2],
-        length: f32,
+        length: SampleSpan,
         rate: SampleRate,
     ) -> Self {
         Absorption::Bands {

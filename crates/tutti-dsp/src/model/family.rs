@@ -152,7 +152,7 @@ pub trait Family: Clone + Send {
     ///
     /// Pure and allocation-free: the same controls give the same member, with
     /// no clock, no state and no heap. It writes **in place** because a reverb
-    /// `Network` is about 56 KB, too large to build as a value on an audio
+    /// `Network` is about 67 KB, too large to build as a value on an audio
     /// thread (whose stack may be 512 KB); a node writes into a member it owns.
     /// Total: a control outside its range is clamped and a non-finite one takes the
     /// family's default, so the member is always one the family can run.
