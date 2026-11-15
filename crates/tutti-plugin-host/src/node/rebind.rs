@@ -3,22 +3,28 @@
 //!
 //! A plugin that changes its audio ports (`IoChanged`) cannot be served by a
 //! node whose shape is fixed when it is inserted. The control side builds a
-//! successor over the same instance instead, and the session swaps it in for
-//! the node it replaces. The Processor changes nodes through the instance's
-//! [`Hand::rehand`](tutti_plugin_types::Hand::rehand): the node in the graph
-//! hands it back at its next block boundary, the plugin restarts, and the
-//! restarted Processor is lent to the successor's realtime end.
+//! successor over the same instance instead, in two steps so the plugin is
+//! touched last: [`Rebinder::prepare`] builds the node and a [`Pending`] and
+//! changes nothing; the caller puts the node in its graph; and only then
+//! [`Pending::commit`] names the node's realtime end the Processor's way
+//! ([`Hand::install`](tutti_plugin_types::Hand::install)) and recalls the
+//! Processor (a [`HostOp::Relend`](tutti_plugin_types::HostOp::Relend), with no
+//! restart). The node it replaces hands the Processor back at its next block,
+//! and the instance's next pump lends it to the successor.
 //!
-//! The old node keeps rendering until the Processor has left it. The caller
-//! keeps it in the graph until [`Rebinder::settled`] says the Processor's way
-//! is the successor's: dropping a node whose end still holds the Processor
-//! drops the Processor with it.
+//! A node dropped while it holds the Processor and a recall is raised returns
+//! the Processor to the control side, so the replaced node need not stay in the
+//! graph until [`Rebinder::settled`] says [`Moved`](Settlement::Moved). When
+//! the plugin dies meanwhile ([`Lost`](Settlement::Lost)) no Processor moves,
+//! and neither node renders.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
 use parking_lot::Mutex;
-use tutti_plugin_types::{Features, Loaded, MainThreadMarker, ParamId, PluginDescriptor};
+use tutti_plugin_types::{
+    Features, Loaded, MainThreadMarker, ParamId, PluginDescriptor, Successor,
+};
 use tutti_transport::TempoReader;
 use tutti_types::Samples;
 
@@ -32,6 +38,9 @@ pub enum RebindError {
     /// The plugin is lost, or has reported no ports.
     #[error("the plugin has no ports to rebuild a node with: it is lost or has reported none")]
     NoPorts,
+    /// The plugin planned no recall for the move, so none was made.
+    #[error("the plugin planned no recall, so its Processor did not move")]
+    Unplanned,
     /// The plugin is loaded or refused: it has no Processor to move.
     #[error("the plugin is not running, so there is no Processor to move")]
     NotRunning,
@@ -127,25 +136,20 @@ impl<F: Loaded + 'static> Rebinder<F>
 where
     F::Processor: 'static,
 {
-    /// A node over the plugin with the ports it declares now, and the move
-    /// of its Processor to the node: the plugin keeps running, and the
-    /// Processor is recalled from the node it replaces and lent to this one
-    /// at the instance's next pump, with no deactivation.
+    /// A node over the plugin with the ports it declares now, and the
+    /// [`Pending`] that moves the plugin's Processor to it.
+    ///
+    /// Nothing is changed in the plugin: the node's realtime end is empty and
+    /// renders silence until [`Pending::commit`] names it the Processor's way,
+    /// after the caller has put the node in its graph. A caller that cannot
+    /// place the node drops both, and the plugin is as it was.
     ///
     /// Call it after the pump has read the plugin's new ports (the changes it
     /// returned said `io`): the node declares the layout the lifecycle holds.
-    /// Until the Processor arrives the node renders silence, counted by its own
-    /// `unlent_blocks`. It starts with a fresh meter and counters; its
-    /// parameter slots are the plugin's, and its pipeline figure is the
-    /// replaced node's until a `prepare` that retunes the Processor reads it.
-    ///
-    /// Drop the node it replaces once [`settled`](Self::settled) says
-    /// [`Moved`](Settlement::Moved), or earlier: a node dropped while it holds
-    /// the Processor hands it back to the control side if a recall is raised,
-    /// which this call raises.
-    ///
-    /// A call before the previous node's Processor has moved replaces the
-    /// earlier successor: the node it built never receives a Processor.
+    /// The node starts with a fresh meter and counters, silent blocks counted by
+    /// its own `unlent_blocks`; its parameter slots are the plugin's, and its
+    /// pipeline figure is the replaced node's until a `prepare` that retunes
+    /// the Processor reads it.
     ///
     /// # Errors
     ///
@@ -155,19 +159,20 @@ where
     /// the plugin's channels differ from it;
     /// [`NotRunning`](RebindError::NotRunning) for a plugin that is loaded or
     /// refused; [`Restarting`](RebindError::Restarting) while its own restart is
-    /// under way. The plugin is left as it was in each, and no node is built.
-    pub fn rebind(&self, main: MainThreadMarker) -> Result<PluginNode<F>, RebindError> {
-        let mut instance = self.inner.lock();
+    /// under way.
+    pub fn prepare(&self) -> Result<(PluginNode<F>, Pending<F>), RebindError> {
+        let instance = self.inner.lock();
         let (layout, latency, tail) = instance.reading().ok_or(RebindError::NoPorts)?;
         self.fits(layout)?;
         let declared = Declared::from_layout(layout, latency, tail)?;
-        let rt = instance.rehand(main)?;
+        instance.ready_to_rehand()?;
         drop(instance);
+        let (successor, rt) = Successor::new();
         let pipeline = self
             .controls
             .as_ref()
             .map_or(self.pipeline, PluginControls::pipeline);
-        Ok(InProcClient::new(
+        let node = InProcClient::new(
             Arc::clone(&self.inner),
             rt,
             self.descriptor.clone(),
@@ -184,11 +189,18 @@ where
             self.controls.clone(),
             Some(pipeline),
         )
-        .bind(self.tempo.clone()))
+        .bind(self.tempo.clone());
+        Ok((
+            node,
+            Pending {
+                inner: Arc::clone(&self.inner),
+                successor,
+            },
+        ))
     }
 
     /// The ports the plugin has now, as its lifecycle last read them: what a
-    /// node [`rebind`](Self::rebind) builds now would declare. `None` for a
+    /// node [`prepare`](Self::prepare) builds now would declare. `None` for a
     /// lost plugin or before a layout was read.
     #[must_use]
     pub fn layout(&self) -> Option<tutti_plugin_types::Layout> {
@@ -198,7 +210,7 @@ where
             .map(|(layout, ..)| layout.clone())
     }
 
-    /// What [`rebind`](Self::rebind) would refuse before it changes anything:
+    /// What [`prepare`](Self::prepare) would refuse before it changes anything:
     /// no ports, or ports outside the [`PortLimit`]. Changes nothing.
     ///
     /// # Errors
@@ -232,9 +244,52 @@ where
     }
 }
 
+/// The move of a plugin's Processor to a node [`Rebinder::prepare`] built,
+/// held until the node is in its graph.
+///
+/// Dropping it without [`commit`](Self::commit) changes nothing: the node it
+/// came with stays empty and silent.
+#[must_use = "a node renders nothing until its move is committed"]
+pub struct Pending<F: Loaded> {
+    inner: Arc<Mutex<Instance<F>>>,
+    successor: Successor<F::Processor>,
+}
+
+impl<F: Loaded> std::fmt::Debug for Pending<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pending").finish_non_exhaustive()
+    }
+}
+
+impl<F: Loaded> Pending<F> {
+    /// Names the node's realtime end the Processor's way, and recalls the
+    /// Processor from the node it replaces: the plugin keeps running, and the
+    /// Processor is lent to this node at the instance's next pump, with no
+    /// deactivation. The node it replaces hands the Processor back at its
+    /// next block, or when it is dropped (the recall is raised, so a node
+    /// dropped while it holds the Processor returns it to the control side).
+    ///
+    /// A second node's commit before the first one's Processor has moved
+    /// replaces the first: its node never receives a Processor.
+    ///
+    /// # Errors
+    ///
+    /// The plugin's state may have changed since [`Rebinder::prepare`]:
+    /// [`NotRunning`](RebindError::NotRunning),
+    /// [`Restarting`](RebindError::Restarting), and
+    /// [`Unplanned`](RebindError::Unplanned) when the plugin planned no recall.
+    /// The plugin is left as it was.
+    pub fn commit(self, main: MainThreadMarker) -> Result<(), RebindError> {
+        self.inner.lock().commit(main, self.successor)
+    }
+}
+
 /// Where the Processor is on its way to the newest node a [`Rebinder`] built.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Settlement {
+    /// Nothing was committed: the Processor's way is the node the plugin
+    /// started with.
+    Idle,
     /// The Processor has not been lent to the newest node. The node it
     /// replaces may still hold it and keeps rendering with it; it stays in
     /// the graph until the pump moves it. A plugin that is deactivated meanwhile
@@ -244,9 +299,9 @@ pub enum Settlement {
     /// none and may be dropped.
     Moved,
     /// The plugin died. No Processor will reach the newest node, and the
-    /// node it replaces may still hold one whose plugin is gone: detach that
-    /// node from the graph (the session's deferred drop) before it is dropped,
-    /// and treat both nodes as silent.
+    /// node it replaces may still hold one whose plugin is gone: the plugin
+    /// is destroyed already, so that node's drop does not run `stop` on it, and
+    /// both nodes render silence. The plugin's own death path reports it.
     Lost,
 }
 
@@ -345,6 +400,14 @@ mod tests {
         (fake, rebinder, node, inner)
     }
 
+    /// A node over the plugin's ports now, committed at once: the caller's
+    /// swap that cannot fail.
+    fn rebind(rebinder: &Rebinder<FakeLoaded>) -> Result<PluginNode<FakeLoaded>, RebindError> {
+        let (node, pending) = rebinder.prepare()?;
+        pending.commit(main_thread())?;
+        Ok(node)
+    }
+
     fn env(frame: u64) -> Env {
         Env {
             frame: Frame::new(frame),
@@ -436,7 +499,7 @@ mod tests {
 
         change_ports(&fake, &mut old, &inner, 4);
         let restarts = (activations(&fake), deactivations(&fake));
-        let mut new = rebinder.rebind(main_thread()).expect("a node");
+        let mut new = rebind(&rebinder).expect("a node");
         assert_eq!(new.shape().audio_out().count(), 4, "the plugin's ports now");
         assert_eq!(
             old.shape().audio_out().count(),
@@ -463,13 +526,36 @@ mod tests {
         );
     }
 
+    /// **A prepared node that is never committed changes nothing:** the plugin
+    /// still renders through the node it has, nothing is recalled, and the
+    /// Processor's way is as it was ([`Settlement::Idle`]).
+    #[test]
+    fn a_prepared_node_that_is_dropped_uncommitted_leaves_the_plugin_alone() {
+        let (fake, rebinder, mut old, inner) = rig(None);
+        block(&mut old, 0);
+        let (new, pending) = rebinder.prepare().expect("a node");
+        drop((new, pending));
+        assert_eq!(rebinder.settled(), Settlement::Idle);
+        for frame in 0..4 {
+            inner.lock().pump(main_thread());
+            assert!(
+                block(&mut old, frame * BLOCK as u64).audio[0]
+                    .iter()
+                    .any(|&s| s != 0.0),
+                "the old node still holds the Processor"
+            );
+        }
+        assert_eq!(activations(&fake), 1);
+        assert_eq!(deactivations(&fake), 0);
+    }
+
     /// **A rebind over unchanged ports moves the Processor with no restart:**
     /// one activation, no deactivation, in the whole run.
     #[test]
     fn a_rebind_over_unchanged_ports_moves_the_processor() {
         let (fake, rebinder, mut old, inner) = rig(None);
         block(&mut old, 0);
-        let mut new = rebinder.rebind(main_thread()).expect("a node");
+        let mut new = rebind(&rebinder).expect("a node");
         assert_eq!(new.shape().audio_out().count(), 2);
         let frame = settle(&rebinder, &mut old, &inner, BLOCK as u64);
         assert!(block(&mut new, frame).audio[0].iter().any(|&s| s != 0.0));
@@ -487,9 +573,7 @@ mod tests {
             outputs: 2,
         }));
         change_ports(&fake, &mut old, &inner, 4);
-        let refused = rebinder
-            .rebind(main_thread())
-            .expect_err("outside the slab");
+        let refused = rebind(&rebinder).expect_err("outside the slab");
         assert_eq!(
             refused,
             RebindError::OutsideSlab {
@@ -499,11 +583,7 @@ mod tests {
                 now_outputs: 4,
             }
         );
-        assert_eq!(
-            rebinder.settled(),
-            Settlement::Moved,
-            "nothing was rehanded"
-        );
+        assert_eq!(rebinder.settled(), Settlement::Idle, "nothing was rehanded");
         let mut frame = 0;
         for _ in 0..4 {
             block(&mut old, frame);
@@ -524,7 +604,7 @@ mod tests {
     fn an_old_node_dropped_with_the_processor_returns_it_to_the_new_one() {
         let (_fake, rebinder, mut old, inner) = rig(None);
         block(&mut old, 0);
-        let mut new = rebinder.rebind(main_thread()).expect("a node");
+        let mut new = rebind(&rebinder).expect("a node");
         assert_eq!(rebinder.settled(), Settlement::Pending);
         drop(old);
         inner.lock().pump(main_thread());
@@ -542,12 +622,12 @@ mod tests {
         assert!(Request::IoChanged.raise(fake.request_word()));
         inner.lock().pump(main_thread());
         assert_eq!(
-            rebinder.rebind(main_thread()).expect_err("parked"),
+            rebind(&rebinder).expect_err("parked"),
             RebindError::Restarting
         );
-        assert_eq!(rebinder.settled(), Settlement::Moved, "nothing rehanded");
+        assert_eq!(rebinder.settled(), Settlement::Idle, "nothing rehanded");
         let mut frame = 0;
-        while rebinder.rebind(main_thread()).is_err() {
+        while rebind(&rebinder).is_err() {
             block(&mut old, frame);
             inner.lock().pump(main_thread());
             frame += BLOCK as u64;
@@ -574,10 +654,10 @@ mod tests {
             assert!(frame < 16 * BLOCK as u64, "the plugin never refused");
         }
         assert_eq!(
-            rebinder.rebind(main).expect_err("refused"),
+            rebind(&rebinder).expect_err("refused"),
             RebindError::NotRunning
         );
-        assert_eq!(rebinder.settled(), Settlement::Moved);
+        assert_eq!(rebinder.settled(), Settlement::Idle);
     }
 
     /// **A plugin that dies after a rebind settles as `Lost`, not `Moved`:**
@@ -586,7 +666,7 @@ mod tests {
     fn a_plugin_that_dies_after_a_rebind_is_lost_not_moved() {
         let (fake, rebinder, mut old, inner) = rig(None);
         block(&mut old, 0);
-        let _new = rebinder.rebind(main_thread()).expect("a node");
+        let _new = rebind(&rebinder).expect("a node");
         fake.panic_in_latency(true);
         assert!(Request::LatencyChanged.raise(fake.request_word()));
         let mut frame = BLOCK as u64;

@@ -685,6 +685,13 @@ fn a_panic_in_a_transition_is_not_told_twice() {
     assert!(!notices.iter().any(|n| matches!(n, Notice::Lost { .. })));
 }
 
+/// A new realtime end, named as the Processor's way.
+fn install(rig: &mut Rig) -> tutti_rt::Rt<<FakeLoaded as Loaded>::Processor> {
+    let (successor, rt) = Successor::new();
+    rig.hand.install(successor);
+    rt
+}
+
 /// The realtime end's poll between blocks, with `stop` as its last step.
 fn poll(rt: &mut tutti_rt::Rt<<FakeLoaded as Loaded>::Processor>) -> bool {
     rt.poll(Processor::stop).is_some()
@@ -750,18 +757,18 @@ fn a_refused_lend_is_offered_again_on_a_tick() {
     assert!(poll(&mut rt));
 }
 
-/// **A `rehand` moves the Processor to the new realtime end at the restart
+/// **An `install` moves the Processor to the new realtime end at the restart
 /// that follows, and leaves the old end empty.** The old end stops and returns
 /// it at its poll, the tick restarts the plugin, and the new Processor is lent
-/// to the end `rehand` made: the old end holds none, so dropping it frees
+/// to the end `install` named: the old end holds none, so dropping it frees
 /// nothing.
 #[test]
-fn a_rehand_lends_the_restarted_processor_to_the_new_end() {
+fn an_install_lends_the_restarted_processor_to_the_new_end() {
     let (mut rig, mut old) = Rig::threaded();
     rig.op(HostOp::Activate(prepare(48_000.0)));
     assert!(poll(&mut old), "the old end holds the Processor");
 
-    let mut new = rig.hand.rehand();
+    let mut new = install(&mut rig);
     assert!(rig.hand.pending());
     rig.op(HostOp::Reconfigure(prepare(44_100.0)));
     assert!(rig.state.is_parked(), "waits for the old end to return it");
@@ -778,16 +785,16 @@ fn a_rehand_lends_the_restarted_processor_to_the_new_end() {
     assert_eq!(activations(&rig.plugin.calls()), 2);
 }
 
-/// **A second `rehand` before the Processor moves replaces the first:** the
+/// **A second `install` before the Processor moves replaces the first:** the
 /// end the first call returned is never lent to, and the Processor goes to the
 /// second.
 #[test]
-fn a_second_rehand_replaces_the_first() {
+fn a_second_install_replaces_the_first() {
     let (mut rig, mut old) = Rig::threaded();
     rig.op(HostOp::Activate(prepare(48_000.0)));
     assert!(poll(&mut old));
-    let mut first = rig.hand.rehand();
-    let mut second = rig.hand.rehand();
+    let mut first = install(&mut rig);
+    let mut second = install(&mut rig);
     rig.op(HostOp::Reconfigure(prepare(44_100.0)));
     assert!(!poll(&mut old));
     rig.tick();
@@ -799,13 +806,13 @@ fn a_second_rehand_replaces_the_first() {
 
 /// **A Processor held on the main thread moves at the next lend:** a local
 /// hand, whose Processor stays in the seat, becomes a threaded one when
-/// `rehand` is called, and the next tick lends to the end it returned.
+/// `install` is called, and the next tick lends to the end it returned.
 #[test]
-fn a_rehand_of_a_held_processor_lends_to_the_new_end_on_the_next_tick() {
+fn an_install_of_a_held_processor_lends_to_the_new_end_on_the_next_tick() {
     let mut rig = Rig::new();
     rig.op(HostOp::Activate(prepare(48_000.0)));
     assert!(rig.lifecycle.processor().is_some(), "held: a local hand");
-    let mut new = rig.hand.rehand();
+    let mut new = install(&mut rig);
     rig.tick();
     assert!(!rig.hand.pending());
     assert!(rig.lifecycle.processor().is_none(), "lent");
@@ -820,7 +827,7 @@ fn a_relend_moves_the_processor_without_restarting_the_plugin() {
     let (mut rig, mut old) = Rig::threaded();
     rig.op(HostOp::Activate(prepare(48_000.0)));
     assert!(poll(&mut old));
-    let mut new = rig.hand.rehand();
+    let mut new = install(&mut rig);
     rig.op(HostOp::Relend);
     assert!(rig.state.is_parked(), "waits for the old end to return it");
     assert!(!poll(&mut old), "the old end hands it back");
@@ -838,9 +845,13 @@ fn a_relend_moves_the_processor_without_restarting_the_plugin() {
 #[test]
 fn a_relend_of_a_plugin_that_is_not_active_does_nothing() {
     let mut rig = Rig::new();
+    let _new = install(&mut rig);
     rig.op(HostOp::Relend);
     assert!(!rig.state.is_parked());
     assert!(rig.plugin.calls().is_empty());
+    assert!(rig.hand.pending(), "the successor stays pending");
+    assert!(rig.hand.withdraw(), "and can be taken back");
+    assert!(!rig.hand.pending());
 }
 
 /// **A relend raised while an activation is in flight does not displace
@@ -850,7 +861,7 @@ fn a_relend_during_an_activation_is_left_to_the_activation() {
     let (mut rig, mut old) = Rig::threaded();
     rig.op(HostOp::Activate(prepare(48_000.0)));
     assert!(poll(&mut old));
-    let mut new = rig.hand.rehand();
+    let mut new = install(&mut rig);
     rig.op(HostOp::Reconfigure(prepare(44_100.0)));
     rig.op(HostOp::Relend);
     assert!(!poll(&mut old));

@@ -622,24 +622,59 @@ pub struct PluginRebinder {
     inner: std::sync::Arc<std::sync::Mutex<dyn Rebind>>,
 }
 
-/// A node [`PluginRebinder::rebind`] built over the plugin's new ports.
+/// A node [`PluginRebinder::prepare`] built over the plugin's new ports, and
+/// the commit that moves the plugin's Processor to it.
+///
+/// Put the node in the graph ([`into_parts`](Self::into_parts)), and commit
+/// only if that succeeded: dropping the commit changes nothing in the plugin.
 #[derive(Debug)]
+#[must_use = "a node renders nothing until its move is committed"]
 pub struct Rebuilt {
-    /// The node, to swap in for the one it replaces.
-    pub bound: BoundPlugin,
-    /// The node's controls: its meter cell and its parameter delivery's
-    /// counters.
-    pub controls: tutti_plugin_host::NodeControls,
+    bound: BoundPlugin,
+    controls: tutti_plugin_host::NodeControls,
+    commit: Commit,
+}
+
+impl Rebuilt {
+    /// The node, to swap in for the one it replaces; its controls (its meter
+    /// cell and its parameter delivery's counters); and the commit.
+    pub fn into_parts(self) -> (BoundPlugin, tutti_plugin_host::NodeControls, Commit) {
+        (self.bound, self.controls, self.commit)
+    }
+}
+
+/// The move of a plugin's Processor to a node [`PluginRebinder::prepare`]
+/// built: see [`Pending::commit`](tutti_plugin_host::Pending::commit). Dropping
+/// it changes nothing.
+#[must_use = "a node renders nothing until its move is committed"]
+pub struct Commit(Box<dyn FnOnce(MainThreadMarker) -> CommitResult + Send>);
+
+type CommitResult = std::result::Result<(), tutti_plugin_host::RebindError>;
+
+impl Commit {
+    /// Names the node the Processor's way and recalls the Processor from the
+    /// node it replaces.
+    ///
+    /// # Errors
+    ///
+    /// [`Pending::commit`](tutti_plugin_host::Pending::commit)'s: the plugin is
+    /// left as it was.
+    pub fn commit(self, main: MainThreadMarker) -> CommitResult {
+        (self.0)(main)
+    }
+}
+
+impl std::fmt::Debug for Commit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Commit").finish_non_exhaustive()
+    }
 }
 
 /// One hosting's rebinder, behind the format.
 trait Rebind: Send {
     fn layout(&self) -> Option<tutti_plugin_types::Layout>;
     fn settled(&self) -> tutti_plugin_host::Settlement;
-    fn rebind(
-        &self,
-        main: MainThreadMarker,
-    ) -> std::result::Result<Option<Rebuilt>, tutti_plugin_host::RebindError>;
+    fn prepare(&self) -> std::result::Result<Option<Rebuilt>, tutti_plugin_host::RebindError>;
 }
 
 /// An in-process format's rebinder, and the variant of [`BoundPlaced`] its
@@ -669,17 +704,15 @@ where
         self.rebinder.settled()
     }
 
-    fn rebind(
-        &self,
-        main: MainThreadMarker,
-    ) -> std::result::Result<Option<Rebuilt>, tutti_plugin_host::RebindError> {
-        let node = self.rebinder.rebind(main)?;
+    fn prepare(&self) -> std::result::Result<Option<Rebuilt>, tutti_plugin_host::RebindError> {
+        let (node, pending) = self.rebinder.prepare()?;
         let controls = node.controls();
         Ok(Some(Rebuilt {
             bound: BoundPlugin {
                 bound: (self.wrap)(Box::new(node)),
             },
             controls,
+            commit: Commit(Box::new(move |main| pending.commit(main))),
         }))
     }
 }
@@ -697,10 +730,7 @@ impl Rebind for ServedRebind {
         self.0.settled()
     }
 
-    fn rebind(
-        &self,
-        _main: MainThreadMarker,
-    ) -> std::result::Result<Option<Rebuilt>, tutti_plugin_host::RebindError> {
+    fn prepare(&self) -> std::result::Result<Option<Rebuilt>, tutti_plugin_host::RebindError> {
         self.0.check_ports().map(|()| None)
     }
 }
@@ -756,27 +786,25 @@ impl PluginRebinder {
         self.lock().layout()
     }
 
-    /// Where the Processor's way is after the last [`rebind`](Self::rebind).
+    /// Where the Processor's way is after the last commit.
     #[must_use]
     pub fn settled(&self) -> tutti_plugin_host::Settlement {
         self.lock().settled()
     }
 
-    /// A node over the plugin's ports as they are now, with its Processor on
-    /// the way to it: see [`Rebinder::rebind`](tutti_plugin_host::Rebinder::rebind).
-    /// `Ok(None)` for a served plugin whose ports still fit its slab: its node
-    /// stays.
+    /// A node over the plugin's ports as they are now: see
+    /// [`Rebinder::prepare`](tutti_plugin_host::Rebinder::prepare). Nothing is
+    /// changed in the plugin until the [`Rebuilt`]'s commit, after the node is
+    /// in the graph. `Ok(None)` for a served plugin whose ports still fit its
+    /// slab: its node stays.
     ///
     /// # Errors
     ///
-    /// The refusals of [`Rebinder::rebind`](tutti_plugin_host::Rebinder::rebind);
+    /// The refusals of [`Rebinder::prepare`](tutti_plugin_host::Rebinder::prepare);
     /// for a served plugin, [`OutsideSlab`](tutti_plugin_host::RebindError::OutsideSlab)
-    /// when its ports changed width.
-    pub fn rebind(
-        &self,
-        main: MainThreadMarker,
-    ) -> std::result::Result<Option<Rebuilt>, tutti_plugin_host::RebindError> {
-        self.lock().rebind(main)
+    /// when its buses changed width.
+    pub fn prepare(&self) -> std::result::Result<Option<Rebuilt>, tutti_plugin_host::RebindError> {
+        self.lock().prepare()
     }
 }
 

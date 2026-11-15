@@ -254,7 +254,7 @@ pub use channels::{
 };
 pub use classification::{ClapFeature, PluginRole, Vst2Category, Vst3PlugType, Vst3SubCategories};
 pub use descriptor::{AuComponentType, EditorPresence, PluginClass, PluginDescriptor};
-pub use driver::{Hand, Lifecycle, Seat};
+pub use driver::{Hand, Lifecycle, Seat, Successor};
 pub use editor::{
     AspectRatio, ContentScale, EditorCapabilities, EditorError, EditorUnit, InvalidContentScale,
     KeyEvent, KeyUse, ModifierConvention, ResizeHints, WindowHandle,

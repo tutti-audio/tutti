@@ -186,18 +186,32 @@ pub struct InProcClient<F: Loaded> {
 }
 
 /// A node dropped while its realtime end holds the Processor and a recall is
-/// raised (a [`Rebinder`](super::Rebinder) raises one) hands it back through the
-/// handoff instead of dropping it: the control side collects it at the
-/// instance's next pump. Without a raised recall the Processor drops with the
-/// end, as for any node that leaves the graph.
+/// raised (a [`Rebinder`](super::Rebinder)'s commit raises one) hands it back
+/// through the handoff instead of dropping it: the control side collects it at
+/// the instance's next pump. Without a raised recall the Processor drops with
+/// the end, as for any node that leaves the graph.
 ///
 /// The node is off the audio thread by then (a node leaves the graph before it
-/// is dropped), so this is the end's only user.
+/// is dropped), so this call is the end's only user. The handoff runs
+/// [`Processor::stop`] on the dropping thread, the control thread, as a
+/// retune's poll does between blocks: a format's `stop` is called on the
+/// thread that holds the end.
+///
+/// A plugin that is lost has no controller left to stop under, so its node
+/// hands back nothing: it only drops.
 impl<F: Loaded> Drop for InProcClient<F> {
     fn drop(&mut self) {
-        if self.rt.held().is_some() {
-            let _ = self.rt.poll(Processor::stop);
+        if self.rt.held().is_none() {
+            return;
         }
+        if self
+            .inner
+            .try_lock()
+            .is_none_or(|instance| instance.is_lost())
+        {
+            return;
+        }
+        let _ = self.rt.poll(Processor::stop);
     }
 }
 

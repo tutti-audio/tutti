@@ -555,6 +555,8 @@ fn rebound(layout: u32) -> Rebound {
     ] {
         g.connect(from, to).unwrap().hard();
     }
+    // Commits the wiring.
+    let _ = s.update();
     Rebound { s, node, a, b }
 }
 
@@ -631,12 +633,17 @@ fn a_plugin_that_widens_its_ports_is_re_inserted_wider() {
     r.until("a block", |s| s.graph_ref().node_outputs(node).is_ok());
     assert!(r.renders(), "the plugin renders through its first node");
 
+    probe().reset_activation();
     r.change_ports(1);
     let events = r.until("the wider node", |s| {
         s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
     });
     assert!(unwired_of(&events).is_empty(), "wider unwires nothing");
     assert_eq!(r.s.graph_ref().node_inputs(node).unwrap(), 3);
+    // The plugin restarted once, for its own change of ports; the move of its
+    // Processor to the new node restarts nothing.
+    let restarts = probe().activation_count();
+    assert_eq!(restarts, 1, "one activation, the plugin's own restart");
     // The Processor moves to the new node at a later tick.
     let deadline = Instant::now() + Duration::from_secs(30);
     while !r.renders() {
@@ -644,6 +651,11 @@ fn a_plugin_that_widens_its_ports_is_re_inserted_wider() {
         let _ = r.s.update();
         thread::sleep(Duration::from_millis(2));
     }
+    assert_eq!(
+        probe().activation_count(),
+        restarts,
+        "the Processor moved with no further activation"
+    );
     r.s.close(tutti_fixtures::main_thread());
 }
 
@@ -656,7 +668,6 @@ fn a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost() {
     let mut r = rebound(0);
     let node = r.node;
     let (a, b) = (r.a, r.b);
-    r.until("the first blocks", |_| true);
     assert!(r.renders());
 
     r.change_ports(2);
@@ -685,6 +696,65 @@ fn a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost() {
     r.s.close(tutti_fixtures::main_thread());
 }
 
+/// **A plugin whose new ports are wider than a block serves is refused by
+/// name, once, and its node stays.** The stereo plugin announces one bus of 17
+/// channels: the session reports [`PluginChange::PortsRefused`] with
+/// `TooWide`, the node at the key keeps its two outputs, and nothing is
+/// reported again.
+fn a_plugin_that_grows_wider_than_a_block_is_refused_by_name() {
+    use tutti_session::{PluginChange, PluginEvent, PortsRefusal};
+    let mut r = rebound(0);
+    let node = r.node;
+    probe().reset_activation();
+    r.change_ports(4);
+    let mut refusals = Vec::new();
+    let events = r.until("the refusal", |_| true);
+    let mut seen = events;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        refusals.extend(seen.drain(..).filter_map(|event| match event {
+            SessionEvent::Plugin(PluginEvent {
+                change: PluginChange::PortsRefused { why },
+                ..
+            }) => Some(why),
+            _ => None,
+        }));
+        if !refusals.is_empty() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "no refusal was reported");
+        seen = r.until("an update", |_| true);
+    }
+    assert!(
+        matches!(
+            refusals.as_slice(),
+            [PortsRefusal::Ports(
+                tutti_plugin_host::RebindError::TooWide(_)
+            )]
+        ),
+        "{refusals:?}"
+    );
+    assert_eq!(
+        r.s.graph_ref().node_outputs(node).unwrap(),
+        2,
+        "the node stays"
+    );
+    for _ in 0..8 {
+        let again = r.until("an update", |_| true);
+        assert!(
+            !again.iter().any(|event| matches!(
+                event,
+                SessionEvent::Plugin(PluginEvent {
+                    change: PluginChange::PortsRefused { .. },
+                    ..
+                })
+            )),
+            "reported once"
+        );
+    }
+    r.s.close(tutti_fixtures::main_thread());
+}
+
 pub(crate) const CASES: &[(&str, fn())] = tutti_fixtures::cases!["plugin_pool_main";
 an_in_process_plugin_lands_in_an_update_on_the_main_thread,
 an_in_process_plugin_needs_the_main_thread_and_is_refused_without_one,
@@ -698,4 +768,5 @@ a_restore_job_applies_the_saved_state_to_a_served_plugin,
 an_in_process_save_the_main_thread_does_not_run_is_unavailable,
 a_plugin_that_widens_its_ports_is_re_inserted_wider,
 a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost,
+a_plugin_that_grows_wider_than_a_block_is_refused_by_name,
 ];

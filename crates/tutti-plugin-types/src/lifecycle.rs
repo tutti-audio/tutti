@@ -230,7 +230,7 @@ pub enum HostOp {
     Deactivate,
     /// Bring the Processor back to the main thread and lend it again, with
     /// no deactivation: the plugin keeps running, and the lend goes to the
-    /// realtime end [`Hand::rehand`](crate::Hand::rehand) named. On a plugin
+    /// realtime end [`Hand::install`](crate::Hand::install) named. On a plugin
     /// that is not active, or while a plan is under way, this does nothing: an
     /// activation in flight lends at its end.
     Relend,
