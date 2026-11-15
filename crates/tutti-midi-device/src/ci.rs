@@ -35,6 +35,7 @@ mod drum_map;
 mod endpoint;
 mod escape;
 mod gm2;
+mod handshake;
 mod initiator;
 mod link;
 mod pe;

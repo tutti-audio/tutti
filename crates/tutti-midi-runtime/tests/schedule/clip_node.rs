@@ -7,15 +7,13 @@
 //! receives with its absolute frame. 120 BPM at 48 kHz: a beat is 24 000
 //! frames, so a frame is exact in beats.
 
-use std::sync::{Arc, Mutex};
-use tutti_types::MaxBlock;
-
-use crate::common::{at, beat_of, connect, off, on, rolling};
+use crate::common::{at, beat_of, off, on, rolling};
 use tutti_fixtures::midi;
 use tutti_fixtures::midi::key_of;
+use tutti_fixtures::{EventRig, Seen, heard};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, EventKind, Executor, IntoNode, Io, LoopRange, Node, Offset, Prepare, Shape, Status,
+    Cx, Editor, Executor, IntoNode, Io, LoopRange, Node, Offset, Prepare, Shape, Status,
     TransportChanges, TransportPosition, Unforkable,
 };
 use tutti_midi_runtime::{MidiClipControls, MidiClipNode, NoteLedger, TimedMidiEvent};
@@ -26,45 +24,17 @@ use tutti_ump::{CCNumber, Message, MidiChannel, MidiGroup, Rpn, U7, U14, Voice1,
 
 const RATE: f64 = 48_000.0;
 
-/// `(absolute frame, packet)` of every event the sink received.
-type Seen = Arc<Mutex<Vec<(u64, Ump)>>>;
-
-struct Sink(Seen);
-
-impl Node for Sink {
-    fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0)
-    }
-    fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
-        let mut seen = self.0.lock().unwrap();
-        for e in io.events(0) {
-            let EventKind::Midi(ump) = e.kind else {
-                panic!("a clip sends MIDI")
-            };
-            seen.push((cx.env.frame.get() + u64::from(e.offset.get()), ump));
-        }
-        Status::Silent
-    }
-    fn reset(&mut self) {}
-}
-
 /// A clip at key 1 feeding the sink at key 2, blocks of at most `max`.
 fn rig(clip: MidiClipNode, max: usize) -> (Editor, Executor, MidiClipControls, Seen) {
     rig_with(clip, max)
 }
 
 fn rig_with<N: IntoNode>(clip: N, max: usize) -> (Editor, Executor, N::Controls, Seen) {
-    let (mut ed, exec) = Editor::new(Prepare::new(
-        SampleRate::of(RATE),
-        MaxBlock::of(Samples(max)),
-    ));
-    let controls = ed.insert(NodeKey(1), "clip", clip);
-    let seen = Seen::default();
-    ed.insert(NodeKey(2), "sink", Unforkable(Sink(Arc::clone(&seen))));
-    connect(&mut ed, 1, 2);
-    ed.commit().expect("commits");
-    (ed, exec, controls, seen)
+    let mut rig = EventRig::events_only(RATE, max, 1);
+    let controls = rig.editor.insert(NodeKey(1), "clip", clip);
+    rig.feed(NodeKey(1), 0, 0);
+    rig.commit();
+    (rig.editor, rig.exec, controls, rig.seen)
 }
 
 /// Render `frames` in blocks of `block`, rolling from frame 0.
@@ -91,7 +61,7 @@ fn notes_land_on_their_frames_whatever_the_blocks() {
         );
         let (_ed, mut exec, _c, seen) = rig(clip, 256);
         roll(&mut exec, 6_000, block);
-        let got: Vec<u64> = seen.lock().unwrap().iter().map(|&(f, _)| f).collect();
+        let got: Vec<u64> = heard(&seen).iter().map(|&(f, _)| f).collect();
         assert_eq!(got, frames, "{block}-frame blocks");
     }
 }
@@ -110,7 +80,7 @@ fn a_seek_inside_a_block_plays_from_the_seek() {
         .unwrap();
     exec.process_with_changes(512, &rolling(0), &changes, &[], &mut []);
     assert_eq!(
-        *seen.lock().unwrap(),
+        heard(&seen),
         vec![(24, on(60)), (200, off(60)), (300, on(62))]
     );
 }
@@ -134,7 +104,7 @@ fn a_loop_that_wraps_inside_a_block_plays_its_start() {
     exec.process(100, &looping(23_800), &[], &mut []);
     exec.process(512, &looping(23_900), &[], &mut []);
     assert_eq!(
-        *seen.lock().unwrap(),
+        heard(&seen),
         vec![
             (50, on(60)),
             (150, on(64)),
@@ -156,7 +126,7 @@ fn stopping_ends_the_held_notes_once() {
     let stopped = TransportPosition::new(false, Bpm::of(120.0), beat_of(64), None);
     exec.process(64, &stopped, &[], &mut []);
     exec.process(64, &stopped, &[], &mut []);
-    assert_eq!(*seen.lock().unwrap(), vec![(10, on(60)), (64, off(60))]);
+    assert_eq!(heard(&seen), vec![(10, on(60)), (64, off(60))]);
 }
 
 /// **A new clip ends the old clip's notes, and plays from where playback
@@ -172,7 +142,7 @@ fn a_new_clip_ends_the_old_clips_notes() {
     assert_eq!(controls.len(), 1);
     exec.process(64, &rolling(64), &[], &mut []);
     assert_eq!(
-        *seen.lock().unwrap(),
+        heard(&seen),
         vec![(10, on(60)), (64, off(60)), (100, on(72))]
     );
 }
@@ -191,7 +161,7 @@ fn a_fork_plays_the_clip_as_it_was_at_the_fork() {
     controls.set([at(100, on(72))]);
     let (_ed, mut exec, (), seen) = rig_with(Unforkable(forked.node), 256);
     roll(&mut exec, 512, 256);
-    assert_eq!(*seen.lock().unwrap(), vec![(300, on(60))]);
+    assert_eq!(heard(&seen), vec![(300, on(60))]);
 }
 
 /// **A loop that wraps exactly at a block's end ends the notes held across
@@ -210,7 +180,7 @@ fn a_loop_that_wraps_at_a_block_edge_ends_its_held_notes() {
     exec.process(100, &looping(23_800), &[], &mut []);
     exec.process(100, &looping(23_900), &[], &mut []);
     exec.process(100, &looping(0), &[], &mut []);
-    assert_eq!(*seen.lock().unwrap(), vec![(50, on(60)), (200, off(60))]);
+    assert_eq!(heard(&seen), vec![(50, on(60)), (200, off(60))]);
 }
 
 /// **A beat that is not finite is refused at construction**, so a clip never
@@ -254,7 +224,7 @@ fn refused_note_offs_are_retried_until_none_is_held() {
     for f in [48_000u64, 48_256, 48_512] {
         exec.process(256, &rolling(f), &[], &mut []);
     }
-    let seen = seen.lock().unwrap();
+    let seen = heard(&seen);
     let offs: Vec<u64> = seen
         .iter()
         .filter(|(_, ump)| key_of(ump).is_some_and(|(_, _, on)| !on))
@@ -276,7 +246,7 @@ fn setting_the_same_events_cuts_nothing() {
     exec.process(64, &rolling(0), &[], &mut []);
     controls.set([events[1], events[0]]);
     exec.process(64, &rolling(64), &[], &mut []);
-    assert_eq!(*seen.lock().unwrap(), vec![(10, on(60))]);
+    assert_eq!(heard(&seen), vec![(10, on(60))]);
 }
 
 /// **A note lands on its frame where the beat is not a whole number of
@@ -297,10 +267,7 @@ fn a_note_lands_on_its_frame_at_ninety_bpm() {
         exec.process(64, &t, &[], &mut []);
         f += 64;
     }
-    assert_eq!(
-        *seen.lock().unwrap(),
-        vec![(32_000, on(60)), (96_000, on(62))]
-    );
+    assert_eq!(heard(&seen), vec![(32_000, on(60)), (96_000, on(62))]);
 }
 
 /// **A loop shorter than a block plays every pass the block holds.** The
@@ -324,7 +291,7 @@ fn a_loop_shorter_than_a_block_plays_every_pass() {
         .chain((0..10).map(|k| (60 + 100 * k, off(60))))
         .collect();
     want.sort_unstable_by_key(|&(f, u)| (f, u.0));
-    assert_eq!(*seen.lock().unwrap(), want);
+    assert_eq!(heard(&seen), want);
 }
 
 /// **A note started twice and ended once leaves nothing sounding.** A key is
@@ -339,7 +306,7 @@ fn a_note_started_twice_and_ended_once_leaves_nothing_sounding() {
     let (_ed, mut exec, _c, seen) = rig(clip, 64);
     exec.process(64, &rolling(0), &[], &mut []);
     exec.process(64, &rolling(48_000), &[], &mut []);
-    let seen = seen.lock().unwrap();
+    let seen = heard(&seen);
     assert_eq!(
         *seen,
         vec![(10, on(60)), (20, off(60)), (20, on(60)), (64, off(60)),]
@@ -369,7 +336,7 @@ fn overlapping_notes_of_one_key_keep_the_newer_whole() {
     let (_ed, mut exec, _c, seen) = rig(clip, 256);
     exec.process(256, &rolling(0), &[], &mut []);
     assert_eq!(
-        *seen.lock().unwrap(),
+        heard(&seen),
         vec![(0, on(60)), (50, off(60)), (50, on(60)), (150, off(60)),]
     );
 }
@@ -389,7 +356,7 @@ fn a_note_nested_in_another_of_its_key_ends_at_its_own_end() {
     let (_ed, mut exec, _c, seen) = rig(clip, 256);
     exec.process(256, &rolling(0), &[], &mut []);
     assert_eq!(
-        *seen.lock().unwrap(),
+        heard(&seen),
         vec![(0, on(60)), (20, off(60)), (20, on(60)), (50, off(60)),]
     );
 }
@@ -411,7 +378,7 @@ fn three_overlapping_notes_of_one_key_leave_the_newest_whole() {
     let (_ed, mut exec, _c, seen) = rig(clip, 256);
     exec.process(256, &rolling(0), &[], &mut []);
     assert_eq!(
-        *seen.lock().unwrap(),
+        heard(&seen),
         vec![
             (0, on(60)),
             (10, off(60)),
@@ -459,7 +426,7 @@ fn a_keys_owner_starts_over_at_a_loop_wrap() {
         })
         .filter(|&(f, _)| f < 600)
         .collect();
-    assert_eq!(*seen.lock().unwrap(), want);
+    assert_eq!(heard(&seen), want);
 }
 
 /// A loop of `[start, end)` beats under `tempo`, rolling from `beat`.
@@ -489,9 +456,7 @@ fn a_pass_ending_on_a_block_edge_ends_what_it_held() {
         &[],
         &mut [],
     );
-    let offs: Vec<u64> = seen
-        .lock()
-        .unwrap()
+    let offs: Vec<u64> = heard(&seen)
         .iter()
         .filter(|&&(_, w)| w == off(60))
         .map(|&(f, _)| f)
@@ -523,7 +488,7 @@ fn a_tempo_change_inside_a_block_re_times_the_passes() {
         &[],
         &mut [],
     );
-    let seen = seen.lock().unwrap();
+    let seen = heard(&seen);
     let frames = |w: Ump| -> Vec<u64> {
         seen.iter()
             .filter(|&&(_, x)| x == w)
@@ -605,9 +570,7 @@ fn every_pass_lands_where_the_hosts_clock_reaches_it() {
     // The clip also ends what it held at each wrap; the reference counts
     // only where each pass's note-ons land.
     let ons: Vec<Ump> = (0..notes.len()).map(|i| on(60 + i as u8)).collect();
-    let mut got: Vec<_> = seen
-        .lock()
-        .unwrap()
+    let mut got: Vec<_> = heard(&seen)
         .iter()
         .copied()
         .filter(|(_, w)| ons.contains(w))
@@ -637,7 +600,7 @@ fn sub_frame_loop(start: Beat, end: Beat) -> Option<Vec<(u64, Ump)>> {
             );
             clock.advance(Samples(64), Some(region));
         }
-        let _ = tx.send(seen.lock().unwrap().clone());
+        let _ = tx.send(heard(&seen));
     });
     rx.recv_timeout(std::time::Duration::from_secs(10)).ok()
 }
@@ -682,7 +645,7 @@ fn a_clip_ending_on_a_lone_cc_6_flushes_its_rpn_at_the_cc_6() {
     ]);
     let (_ed, mut exec, _c, seen) = rig(clip, 256);
     roll(&mut exec, 6_000, 256);
-    let seen = seen.lock().unwrap();
+    let seen = heard(&seen);
     let frames: Vec<u64> = seen.iter().map(|&(f, _)| f).collect();
     assert_eq!(frames, [300, 5_000]);
     let Ok(Message::Midi2(_, Voice2::Registered { bank, index, value })) = seen[0].1.decode()
@@ -733,7 +696,7 @@ fn stopping_lifts_the_pedals_and_centres_the_bend_after_the_note_offs() {
     let stopped = TransportPosition::new(false, Bpm::of(120.0), beat_of(64), None);
     exec.process(64, &stopped, &[], &mut []);
     exec.process(64, &stopped, &[], &mut []);
-    let seen = seen.lock().unwrap();
+    let seen = heard(&seen);
     let after: Vec<(u64, Ump)> = seen.iter().copied().filter(|&(f, _)| f == 64).collect();
     assert_eq!(
         after,
@@ -772,9 +735,7 @@ fn a_controller_at_rest_is_not_resent_at_a_stop() {
         &[],
         &mut [],
     );
-    let late: Vec<(u64, Ump)> = seen
-        .lock()
-        .unwrap()
+    let late: Vec<(u64, Ump)> = heard(&seen)
         .iter()
         .copied()
         .filter(|&(f, _)| f >= 64)
@@ -800,7 +761,7 @@ fn a_loop_wrap_lifts_the_pedal_after_the_note_off() {
     let looping = |f: u64| TransportPosition::new(true, Bpm::of(120.0), beat_of(f), lp);
     exec.process(100, &looping(23_800), &[], &mut []);
     exec.process(512, &looping(23_900), &[], &mut []);
-    let tail: Vec<(u64, Ump)> = seen.lock().unwrap().iter().copied().skip(2).collect();
+    let tail: Vec<(u64, Ump)> = heard(&seen).iter().copied().skip(2).collect();
     assert_eq!(
         tail,
         vec![(200, off(60)), (200, pedal(0, CCNumber::SUSTAIN, 0))]
@@ -829,7 +790,7 @@ fn a_seek_returns_the_controllers_where_the_jump_happens() {
     exec.process_with_changes(512, &rolling(0), &changes, &[], &mut []);
     exec.process(512, &rolling(96_312), &[], &mut []);
     assert_eq!(
-        *seen.lock().unwrap(),
+        heard(&seen),
         vec![
             (24, on(60)),
             (25, pedal(0, CCNumber::SUSTAIN, DOWN)),
@@ -863,7 +824,7 @@ fn a_refused_pedal_up_is_owed_and_follows_the_last_note_off() {
     for f in [48_000u64, 48_256, 48_512] {
         exec.process(256, &rolling(f), &[], &mut []);
     }
-    let seen = seen.lock().unwrap();
+    let seen = heard(&seen);
     let last_off = seen
         .iter()
         .rposition(|(_, u)| key_of(u).is_some_and(|(_, _, on)| !on))
@@ -930,9 +891,7 @@ fn a_midi_1_pedal_and_bend_are_returned_in_midi_1() {
     let (_ed, mut exec, _c, seen) = rig_with(Unforkable(node), 64);
     exec.process(64, &rolling(0), &[], &mut []);
     exec.process(64, &rolling(64), &[], &mut []);
-    let late: Vec<Ump> = seen
-        .lock()
-        .unwrap()
+    let late: Vec<Ump> = heard(&seen)
         .iter()
         .filter(|&&(f, _)| f >= 64)
         .map(|&(_, u)| u)
@@ -993,9 +952,9 @@ fn a_render_that_starts_mid_clip_starts_from_the_timelines_state() {
     ]);
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     exec.process(512, &rolling(96_000), &[], &mut []);
-    let got: Vec<Ump> = seen.lock().unwrap().iter().map(|&(_, u)| u).collect();
+    let got: Vec<Ump> = heard(&seen).iter().map(|&(_, u)| u).collect();
     assert!(
-        seen.lock().unwrap().iter().all(|&(f, _)| f == 0),
+        heard(&seen).iter().all(|&(f, _)| f == 0),
         "all on the first frame"
     );
     assert_eq!(
@@ -1019,10 +978,7 @@ fn a_render_from_the_start_chases_nothing() {
     let clip = MidiClipNode::new([at(0, bend(0, 0x7000_0000)), at(10, on(60))]);
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     exec.process(512, &rolling(0), &[], &mut []);
-    assert_eq!(
-        *seen.lock().unwrap(),
-        vec![(0, bend(0, 0x7000_0000)), (10, on(60))]
-    );
+    assert_eq!(heard(&seen), vec![(0, bend(0, 0x7000_0000)), (10, on(60))]);
 }
 
 /// **A chased Program Change selects the bank the timeline holds there**,
@@ -1050,9 +1006,7 @@ fn a_chased_program_carries_the_bank_in_force() {
     ]);
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     exec.process(512, &rolling(96_000), &[], &mut []);
-    let programs: Vec<(u8, Option<u8>)> = seen
-        .lock()
-        .unwrap()
+    let programs: Vec<(u8, Option<u8>)> = heard(&seen)
         .iter()
         .filter_map(|&(_, u)| match u.decode() {
             Ok(Message::Midi2(_, Voice2::ProgramChange { program, bank })) => {
@@ -1086,7 +1040,7 @@ fn channel_mode_messages_are_not_chased() {
     let (_ed, mut exec, _c, seen) = rig(clip, 512);
     exec.process(512, &rolling(96_000), &[], &mut []);
     assert_eq!(
-        *seen.lock().unwrap(),
+        heard(&seen),
         vec![(
             0,
             midi::cc(Address::new(g, c), CCNumber::VOLUME, 0x2000_0000)
@@ -1116,7 +1070,7 @@ fn a_chase_larger_than_the_port_is_cut_short_and_counted() {
     }));
     let (mut ed, mut exec, _c, seen) = rig(clip, 256);
     exec.process(256, &rolling(96_000), &[], &mut []);
-    let seen = seen.lock().unwrap();
+    let seen = heard(&seen);
     assert_eq!(seen.len(), 256);
     assert_eq!(
         seen[0].1,

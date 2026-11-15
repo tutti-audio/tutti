@@ -29,7 +29,7 @@ use tutti_types::{Latency, Tail};
 
 use crate::ramp::LastGood;
 use tutti_dsp::Convolver;
-use tutti_dsp::Ramp;
+use tutti_dsp::Glide;
 
 /// The tail of an FIR whose impulse response is `ir_length` samples long.
 ///
@@ -361,7 +361,7 @@ impl ConvolverNode {
     /// Scale channel `c`'s already-convolved block `out` by the wet gain, in
     /// place, ramped across the block (see [`begin_block`](Self::begin_block)).
     #[inline]
-    fn apply_gain(out: &mut [f32], ramp: &Ramp, held: Option<Amplitude>) {
+    fn apply_gain(out: &mut [f32], glide: &Glide<f32>, held: Option<Amplitude>) {
         if let Some(gain) = held {
             // Nothing moved: a constant in the loop.
             for o in out {
@@ -370,7 +370,7 @@ impl ConvolverNode {
             return;
         }
         for (i, o) in out.iter_mut().enumerate() {
-            *o *= ramp.at(i);
+            *o *= glide.at(u32::try_from(i + 1).unwrap_or(u32::MAX));
         }
     }
 
@@ -388,13 +388,14 @@ impl ConvolverNode {
     /// scales the output directly — a stepped gain is a click — so a change
     /// between blocks glides across the next one and lands exactly on the new
     /// value (a block of one takes it at once).
-    fn begin_block(&mut self, size: usize) -> (Ramp, Option<Amplitude>) {
+    fn begin_block(&mut self, size: usize) -> (Glide<f32>, Option<Amplitude>) {
         let gain = Amplitude(self.good.read(self.gain.load().get()));
         let from = self.last.unwrap_or(gain);
         self.last = Some(gain);
-        let ramp = Ramp::new(from.get(), gain.get(), size);
-        let held = ramp.is_flat().then_some(gain);
-        (ramp, held)
+        let mut glide = Glide::landed(from.get());
+        glide.aim_in(gain.get(), u32::try_from(size).unwrap_or(u32::MAX));
+        let held = (from.get() == gain.get()).then_some(gain);
+        (glide, held)
     }
 }
 
@@ -403,8 +404,8 @@ enum WetGain<'a> {
     /// The per-frame values on the wet-gain param port.
     Driven(&'a [f32]),
     /// The cell's value, ramped from where the previous block ended; the
-    /// value is `Some` when the ramp is flat.
-    Ramped(Ramp, Option<Amplitude>),
+    /// value is `Some` when the glide is flat.
+    Ramped(Glide<f32>, Option<Amplitude>),
 }
 
 impl ConvolverNode {
@@ -428,8 +429,8 @@ impl ConvolverNode {
                 WetGain::Driven(&lane[at..at + size])
             }
             None => {
-                let (ramp, held) = self.begin_block(size);
-                WetGain::Ramped(ramp, held)
+                let (glide, held) = self.begin_block(size);
+                WetGain::Ramped(glide, held)
             }
         };
         let n = self.width();
@@ -445,7 +446,7 @@ impl ConvolverNode {
                             self.good = good;
                             Self::apply_driven_gain(out, lane, &mut self.good);
                         }
-                        WetGain::Ramped(ramp, held) => Self::apply_gain(out, ramp, *held),
+                        WetGain::Ramped(glide, held) => Self::apply_gain(out, glide, *held),
                     }
                 }
             }
@@ -481,7 +482,7 @@ impl ConvolverNode {
                             self.good = good;
                             Self::apply_driven_gain(out, lane, &mut self.good);
                         }
-                        WetGain::Ramped(ramp, held) => Self::apply_gain(out, ramp, *held),
+                        WetGain::Ramped(glide, held) => Self::apply_gain(out, glide, *held),
                     }
                 }
             }
