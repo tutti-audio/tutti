@@ -1,29 +1,31 @@
 //! [`MultibandCompressorNode`]: a compressor per band of a Linkwitz-Riley
 //! crossover, summed.
 //!
-//! The algorithm is `tutti-dsp`'s ([`MultibandFamily`], run by [`MultibandRecurrence`]);
-//! this file holds the cells and how a block reads them. It is **hand-written** over
-//! [`Realized`] and not a [`FamilyNode`](crate::FamilyNode): a `FamilyNode` takes its cells
-//! from a [`ControlSet`](crate::ControlSet) of at most `MAX_PARAM_PORTS` (32) rows with
-//! `&'static` addresses, and this node has 27 modulatable params at four bands, the band
-//! count varies per instance and its bypass and solo cells have no port.
+//! The algorithm is `tutti-dsp`'s ([`MultibandBank`]: the crossover, a
+//! [`CompressorBank`](tutti_dsp::CompressorBank) per band and the band sum); this file holds
+//! the cells and how a block reads them. It is **hand-written** and not a
+//! [`KernelNode`](crate::KernelNode): its band count varies per instance, its bypass and
+//! solo cells have no port, and a `KernelNode`'s [`ControlSet`](crate::ControlSet) takes
+//! `&'static` addresses.
 
 use std::fmt;
 use std::ops::Range;
 use std::sync::Arc;
 
+use tutti_buffers::{Mono, Planes, PlanesMut};
 use tutti_dsp::{
-    BandSettings, CompressorControls, CrossoverControls, CrossoverError, Family, Inputs,
-    MultibandFamily, MultibandMember, MultibandRecurrence, MultibandSettings, Realized, Setup,
+    BandSettings, BankShape, COEFF_INTERVAL, CompressorControls, CrossoverControls, CrossoverError,
+    MultibandBank, MultibandLanes, MultibandSettings,
 };
 use tutti_graph::{
     Cost, Cx, IntoNode, Io, MAX_PARAM_PORTS, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape,
     Status,
 };
-use tutti_types::{AtomicF32, CompressionRatio, Db, Hz, MAX_CHANNELS, Param, SampleRate};
+use tutti_types::{AtomicF32, CompressionRatio, Db, Hz, Param, SampleRate};
 use tutti_types::{BusTopology, ChannelLayout, Seconds, Tail, UnitParam};
 
 use crate::filter::Splits;
+use crate::kernel::{Grid, slice_in, slice_out, walk_grid};
 use crate::ramp::LastGood;
 
 /// The crossover frequencies a band count starts with.
@@ -108,8 +110,8 @@ impl MultibandControls {
 
     /// Band `band`'s largest gain reduction in the last block, in [`Db`]: a
     /// **measurement**, for a reduction meter. Larger is more reduction;
-    /// [`Db::UNITY`] is none (also while the band is fully bypassed, and past
-    /// the last band).
+    /// [`Db::UNITY`] is none (also past the last band, and while the band is
+    /// bypassed for every frame of each 64-frame chunk of the block).
     ///
     /// The node writes it once per block, so reading it from any thread is
     /// wait-free.
@@ -181,7 +183,7 @@ impl Band {
 
     /// The band's settings at frame `at` of the block: the cells, or the values the
     /// graph drives on the band's ports (the threshold is read per frame by the
-    /// recurrence, so its cell is the base it falls back to). A non-finite value reads as
+    /// bank, so its cell is the base it falls back to). A non-finite value reads as
     /// the last finite one.
     fn read(&mut self, lanes: &[Option<&[f32]>; PER_BAND], at: usize) -> BandSettings {
         let driven = |k: usize| lanes[k].map(|lane| lane[at]);
@@ -191,7 +193,7 @@ impl Band {
         let attack = take(ATTACK, self.attack.load().to_f32());
         let release = take(RELEASE, self.release.load().to_f32());
         let makeup = take(MAKEUP, self.makeup.load().get());
-        // The threshold's lane is the recurrence's own; only the base is read here.
+        // The threshold's lane is the bank's own; only the base is read here.
         let threshold = self.good[THRESHOLD].read(self.threshold.load().get());
         BandSettings {
             compressor: CompressorControls {
@@ -215,38 +217,23 @@ struct Lanes<'a> {
     cutoff: [Option<&'a [f32]>; MAX_CROSSOVERS],
 }
 
-impl Lanes<'_> {
-    fn driven(&self) -> bool {
-        self.cutoff.iter().any(Option::is_some) || self.band.iter().flatten().any(Option::is_some)
-    }
-}
-
-/// A multiband compressor: a Linkwitz-Riley 4th-order crossover splits the
-/// input into 2 to 4 bands, each band is compressed on its own, and the
-/// bands are summed.
+/// A multiband compressor: a Linkwitz-Riley crossover splits the input into 2 to 4 bands,
+/// each band is compressed on its own, and the bands are summed.
 ///
-/// `channels` in, `channels` out. Detection in a band is **linked** across
-/// channels (one reduction from the loudest channel of the band, applied to
-/// all of them), as [`CompressorNode`](crate::CompressorNode)'s is. The
-/// detector is the band itself: there is no external sidechain.
-///
-/// # Crossover and phase
-///
-/// The split is IIR and **not linear-phase**: the bands share one phase
-/// response (see [`CrossoverModel`](tutti_dsp::CrossoverModel)), which rotates with frequency, and their sum
-/// is allpass (flat magnitude, phase rotating through each crossover). With every band at unity ratio and 0 dB makeup the
-/// output has the input's magnitude at every frequency. The node adds no
-/// latency.
+/// `channels` in, `channels` out; the algorithm, its crossover and phase, its grid and its
+/// glides are [`MultibandBank`]'s, which this node runs. Zero latency and
+/// [`Tail::Unknown`] (the crossover's sections ring after the input stops), so it never
+/// parks.
 ///
 /// # Params
 ///
-/// Every setting is a param on the node's [`ParamSet`], addressed by a kind
-/// and an index (the band, or the crossover):
+/// Every setting is a param on the node's [`ParamSet`], addressed by a kind and an index
+/// (the band, or the crossover):
 ///
 /// | Address | Unit | Meaning |
 /// |---|---|---|
 /// | `Threshold`, band | [`Db`] | level above which the band is reduced |
-/// | `Knee`, band | [`Db`] | knee width, floored at 0 (hard) |
+/// | `Knee`, band | [`Db`] | knee width, 0 (hard) to 400 |
 /// | `Ratio`, band | [`CompressionRatio`] | clamped to at least 1 |
 /// | `Attack`, band | [`Seconds`] | floored at 0 |
 /// | `Release`, band | [`Seconds`] | floored at 0 |
@@ -255,34 +242,27 @@ impl Lanes<'_> {
 /// | `Bypass`, band | toggle | `>= 0.5` passes the band unreduced |
 /// | `Solo`, band | toggle | `>= 0.5` solos the band |
 ///
-/// That is `bands * 6 + (bands - 1)` param ports the graph can modulate (27
-/// at 4 bands, under `MAX_PARAM_PORTS`), in the order of [`BAND_PARAMS`] band
-/// by band and then the crossovers. **The threshold is read per frame** when the
-/// graph drives it (lane `b` of the recurrence's [`Inputs`], band `b`'s; the cell is the base a
-/// frame nobody drives or a non-finite one falls back to). **Every other control is on the
-/// stream grid** (16 frames from the last reset, [`Family::CADENCE`]): a cell write or a
-/// driven port is sampled at the grid's solve frame, so it reaches the render within 16
-/// frames and the render does not depend on how the stream is cut into blocks. The
-/// detectors and the crossover land whole (the follower smooths the one, and a blend of a
-/// split's sections would not sum to an all-pass), and each make-up glides over
-/// [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE), 5 ms. A non-finite write reads as unchanged. The
-/// crossovers follow [`CrossoverNode`](crate::CrossoverNode)'s rules, with one
-/// difference: a set not strictly increasing is refused as a whole, after each frequency
-/// is fitted under the rate (so `[30000, 25000]` at 48 kHz is clamped into order and
-/// accepted), and the last good set stands.
+/// That is `bands * 6 + (bands - 1)` param ports the graph can modulate (27 at 4 bands, under
+/// `MAX_PARAM_PORTS`), in the order of [`BAND_PARAMS`] band by band and then the
+/// crossovers. The threshold is read per frame when driven; every other control is read on
+/// the stream grid, 16 frames from the last reset ([`COEFF_INTERVAL`]), so a cell write or a
+/// driven port reaches the render at the next grid point whatever the blocks. A non-finite
+/// write reads as unchanged (the last finite value stands). A crossover set that is not
+/// strictly increasing, after each frequency is fitted under the rate, is refused as a
+/// whole and the last good set stands.
 ///
-/// The toggles are cells with no port, as [`BusStripNode`](crate::BusStripNode)'s
-/// mute is: they are a block-rate on/off a lane would only flap, and with
-/// them the ports would pass the graph's 32. A bypass blends the band to
-/// unity over 5 ms and the compressor keeps running meanwhile, so
-/// releasing it resumes from a warm detector. While any band is soloed the
-/// output is the sum of the soloed bands only; the others are muted (over 5 ms) but
-/// keep metering.
+/// The toggles are cells with no port, as [`BusStripNode`](crate::BusStripNode)'s mute is:
+/// they are a block-rate on/off a lane would only flap, and with them the ports would pass
+/// the graph's 32.
+///
+/// A [`reset`](Node::reset) and a clone (a fork) start from silence, and the next aim lands
+/// whole, as a fresh node's first does.
 ///
 /// The gain reduction of each band is a measurement:
 /// [`gain_reduction_db`](Self::gain_reduction_db), or
-/// [`MultibandControls::gain_reduction_db`] once inserted: the band's deepest reduction
-/// in the last block.
+/// [`MultibandControls::gain_reduction_db`] once inserted: the band's deepest reduction in
+/// the last block. A band is left out of it only for a whole 64-frame chunk of the block on
+/// which it is bypassed (see [`BandReductions`](tutti_dsp::BandReductions)).
 pub struct MultibandCompressorNode {
     rig: Rig,
     /// What [`prepare`](Node::prepare) builds from the rate it is given: `None` until the
@@ -290,10 +270,9 @@ pub struct MultibandCompressorNode {
     tuned: Option<Tuned>,
 }
 
-/// What the node is without a rate: its cells and the family.
+/// What the node is without a rate: its cells.
 struct Rig {
-    layout: ChannelLayout,
-    family: MultibandFamily,
+    shape: BankShape,
     bands: Vec<Band>,
     splits: Splits,
     /// The last set of crossover frequencies that was valid.
@@ -302,10 +281,8 @@ struct Rig {
 
 /// The node prepared for one rate and block size.
 struct Tuned {
-    realization: Realized<MultibandRecurrence>,
-    /// The member the realization was last retargeted to: designed in place.
-    member: Box<MultibandMember>,
-    /// The settings `member` is the design of.
+    bank: MultibandBank,
+    /// The settings the bank was last aimed at.
     applied: Option<MultibandSettings>,
     rate: SampleRate,
     /// Frames rendered since the last reset: where the stream grid's points fall.
@@ -315,7 +292,7 @@ struct Tuned {
 impl fmt::Debug for MultibandCompressorNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MultibandCompressorNode")
-            .field("layout", &self.rig.layout)
+            .field("layout", &self.rig.shape.width())
             .field("bands", &self.rig.bands.len())
             .finish_non_exhaustive()
     }
@@ -323,9 +300,9 @@ impl fmt::Debug for MultibandCompressorNode {
 
 impl MultibandCompressorNode {
     /// The fewest bands.
-    pub const MIN_BANDS: usize = MultibandFamily::MIN_BANDS;
+    pub const MIN_BANDS: usize = MultibandBank::MIN_BANDS;
     /// The most bands.
-    pub const MAX_BANDS: usize = MultibandFamily::MAX_BANDS;
+    pub const MAX_BANDS: usize = MultibandBank::MAX_BANDS;
 
     /// A compressor of `bands` bands over `layout`.
     ///
@@ -342,16 +319,15 @@ impl MultibandCompressorNode {
     /// a bus holds (16).
     pub fn new(layout: ChannelLayout, bands: usize) -> Result<Self, CrossoverError> {
         let channels = usize::from(layout.count());
-        // The width is the family's input, a bus that names no speaker (as the node's
-        // shape does): a width past one bus has none.
-        let input = BusTopology::unassigned(layout).ok_or(CrossoverError::Channels { channels })?;
-        let family = MultibandFamily::new(input, bands)?;
+        // A bus that names no speaker (as the node's shape does): a width past one bus has
+        // none.
+        BusTopology::unassigned(layout).ok_or(CrossoverError::Channels { channels })?;
+        let shape = MultibandBank::check(layout, bands)?;
         let defaults = default_crossovers(bands);
         let crossover = CrossoverControls::ordered(defaults)?;
         Ok(Self {
             rig: Rig {
-                layout,
-                family,
+                shape,
                 bands: (0..bands).map(|_| Band::new()).collect(),
                 splits: Splits::new(defaults),
                 crossover,
@@ -369,7 +345,7 @@ impl MultibandCompressorNode {
     /// The channel layout, the width of both input and output.
     #[must_use]
     pub fn layout(&self) -> ChannelLayout {
-        self.rig.layout
+        self.rig.shape.width()
     }
 
     /// Band `band`'s largest gain reduction in the last block, in [`Db`] (see
@@ -413,41 +389,34 @@ impl Rig {
 }
 
 impl Tuned {
-    /// Prepares a realization for `rate` and blocks of up to `max_block`.
-    fn new(rig: &mut Rig, rate: SampleRate, max_block: tutti_types::MaxBlock) -> Self {
-        let mut realization = rig.family.realized(rate);
-        realization.prepare(&(), &Setup { rate, max_block });
-        let mut tuned = Self {
-            realization,
-            member: Box::new(rig.family.blank(rate)),
+    /// Prepares a bank for `rate`.
+    fn new(shape: BankShape, rate: SampleRate) -> Self {
+        Self {
+            bank: MultibandBank::from_shape(shape, rate),
             applied: None,
             rate,
             position: 0,
-        };
-        tuned.clear(rig);
-        tuned
+        }
     }
 
-    /// Back to silence, the meters at unity.
+    /// Back to silence, the meters at unity, the next design landing whole.
     fn clear(&mut self, rig: &mut Rig) {
-        self.realization.reset();
+        self.bank.reset();
+        self.applied = None;
         self.position = 0;
         rig.clear_meters();
     }
 
-    /// Designs `settings` into the node's member and retargets the realization.
-    fn apply(&mut self, rig: &Rig, settings: MultibandSettings) {
-        rig.family
-            .member_into(&settings, self.rate, &mut self.member);
-        self.realization.retarget(&self.member);
+    /// Aims the bank at `settings`.
+    fn apply(&mut self, settings: MultibandSettings) {
+        self.bank.aim(&settings);
         self.applied = Some(settings);
     }
 
-    /// Renders `frames` of the block through the realization, each band's threshold lane
-    /// cut to them.
+    /// Renders `frames` of the block through the bank, each band's threshold lane cut to
+    /// them.
     fn render(
         &mut self,
-        rig: &Rig,
         input: &[&[f32]],
         output: &mut [&mut [f32]],
         lanes: &Lanes<'_>,
@@ -456,30 +425,25 @@ impl Tuned {
         if frames.is_empty() {
             return;
         }
-        let mut audio: [&[f32]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
-        for (slot, ch) in audio.iter_mut().zip(input) {
-            *slot = &ch[frames.clone()];
+        let (audio, heard) = slice_in(input.iter().copied(), &frames);
+        let (mut out, written) = slice_out(output.iter_mut().map(|c| &mut **c), &frames);
+        let (Ok(input), Ok(output)) = (
+            Planes::new(&audio[..heard]),
+            PlanesMut::new(&mut out[..written]),
+        ) else {
+            return;
+        };
+        let mut thresholds = MultibandLanes::default();
+        for (slot, lane) in thresholds.thresholds.iter_mut().zip(&lanes.band) {
+            *slot = lane[THRESHOLD].map(|l| Mono::new(&l[frames.clone()]));
         }
-        let mut out: [&mut [f32]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
-        for (slot, ch) in out.iter_mut().zip(output.iter_mut()) {
-            *slot = &mut ch[frames.clone()];
-        }
-        let width = input.len();
-        let mut feed = Inputs::new(&audio[..width]);
-        for (b, lane) in lanes.band.iter().enumerate().take(rig.bands.len()) {
-            if let Some(lane) = lane[THRESHOLD] {
-                feed = feed.with_lane(b, &lane[frames.clone()]);
-            }
-        }
-        self.realization
-            .process(&feed, &mut out[..width], frames.len());
+        self.bank.process(thresholds, input, output);
     }
 
-    /// Renders the block one step of the stream grid at a time, the block beginning at
-    /// stream frame `position`: each step that begins a segment reads the controls at its
-    /// solve frame, and one that moved designs and retargets before it renders. The steps
-    /// that did not move render together, in one call, with the member held; the rest of
-    /// a segment an earlier block began is rendered with the member that block set.
+    /// Renders the block cut at the grid points of the stream, the block beginning at
+    /// stream frame `position`: each grid point reads the controls at its frame, and one
+    /// that moved aims the bank before the frames after it render. The stretches that did
+    /// not move render together, in one call.
     fn render_steps(
         &mut self,
         rig: &mut Rig,
@@ -488,22 +452,22 @@ impl Tuned {
         lanes: &Lanes<'_>,
         position: u64,
     ) {
-        let size = input[0].len();
-        let cadence = <MultibandFamily as Family>::CADENCE;
-        let mut held = 0;
-        for step in cadence
-            .steps(position, size, self.applied.is_none())
-            .filter(|step| step.grid_point)
-        {
-            let target = rig.read(self.rate, lanes, step.solve_at);
-            if self.applied.as_ref() != Some(&target) {
-                self.render(rig, input, output, lanes, held..step.frames.start);
-                self.apply(rig, target);
-                self.render(rig, input, output, lanes, step.frames.clone());
-                held = step.frames.end;
-            }
-        }
-        self.render(rig, input, output, lanes, held..size);
+        let rate = self.rate;
+        walk_grid(
+            &mut (self, rig, output),
+            Grid {
+                position,
+                size: input[0].len(),
+                period: COEFF_INTERVAL,
+            },
+            |_, _| None,
+            |(tuned, rig, _), at, _| {
+                let target = rig.read(rate, lanes, at);
+                (tuned.applied.as_ref() != Some(&target)).then_some(target)
+            },
+            |(tuned, ..), target| tuned.apply(target),
+            |(tuned, _, output), frames| tuned.render(input, output, lanes, frames),
+        );
     }
 }
 
@@ -535,14 +499,15 @@ impl Node for MultibandCompressorNode {
     /// for each, per channel. The tail is [`Tail::Unknown`], as the other IIR
     /// filters': the crossover rings after the input stops.
     fn shape(&self) -> Shape {
-        Shape::through_unassigned(self.rig.layout)
+        Shape::through_unassigned(self.rig.shape.width())
             .with_cost(Cost::Heavy)
             .with_tail(Tail::Unknown)
             .with_param_addrs(self.declared_ports().as_slice())
     }
 
     fn prepare(&mut self, p: &Prepare) {
-        self.tuned = Some(Tuned::new(&mut self.rig, p.sample_rate(), p.max_block()));
+        self.tuned = Some(Tuned::new(self.rig.shape, p.sample_rate()));
+        self.rig.clear_meters();
     }
 
     fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -567,7 +532,8 @@ impl Node for MultibandCompressorNode {
         }
         for b in 0..nb {
             let band = b as u8;
-            // In the order of `BAND_PARAMS`.
+            // In the order of `BAND_PARAMS`: `declared_param_at` takes its kind as a const
+            // generic, which a loop over the array cannot supply.
             lanes.band[b] = [
                 self.declared_param_at::<{ UnitParam::Threshold as u16 }>(&io, band)
                     .frames(),
@@ -586,37 +552,20 @@ impl Node for MultibandCompressorNode {
 
         let (inputs, mut outputs) = io.split();
         let width = inputs.len();
-        let mut input: [&[f32]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
-        for (c, slot) in input.iter_mut().enumerate().take(width) {
-            *slot = &inputs.get(c)[..n];
-        }
-        let mut output: [&mut [f32]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
-        for (slot, ch) in output.iter_mut().zip(outputs.iter_mut()) {
-            *slot = &mut ch[..n];
-        }
-        let (input, output) = (&input[..width], &mut output[..width]);
+        let (input, _) = slice_in((0..width).map(|c| inputs.get(c)), &(0..n));
+        let (mut output, written) = slice_out(outputs.iter_mut(), &(0..n));
+        let (input, output) = (&input[..width], &mut output[..written]);
 
-        // The controls at the block's last frame, and whether the member moves inside the
-        // block: a driven port, or a cell that moved (it lands at the next grid point).
         let Self { rig, tuned } = self;
         let Some(t) = tuned else {
             return Status::Silent;
         };
         let position = t.position;
         t.position += n as u64;
-        let target = rig.read(t.rate, &lanes, n - 1);
-        let moved = t.applied.as_ref().is_some_and(|a| *a != target);
-        if lanes.driven() || moved {
-            t.render_steps(rig, input, output, &lanes, position);
-        } else {
-            if t.applied.is_none() {
-                t.apply(rig, target);
-            }
-            t.render(rig, input, output, &lanes, 0..n);
-        }
+        t.render_steps(rig, input, output, &lanes, position);
 
-        // Each band's deepest reduction in the block, the recurrence's reading.
-        let reading = t.realization.take_reading();
+        // Each band's deepest reduction in the block.
+        let reading = t.bank.take_reading();
         for (band, deepest) in rig.bands.iter().zip(reading.iter()) {
             band.reduction.store(deepest);
         }
@@ -640,18 +589,20 @@ impl Clone for MultibandCompressorNode {
     fn clone(&self) -> Self {
         Self {
             rig: Rig {
-                layout: self.rig.layout,
-                family: self.rig.family,
+                shape: self.rig.shape,
                 bands: self.rig.bands.clone(),
                 splits: self.rig.splits.clone(),
                 crossover: self.rig.crossover,
             },
-            tuned: self.tuned.as_ref().map(|t| Tuned {
-                realization: t.realization.fresh(),
-                member: t.member.clone(),
-                applied: t.applied,
-                rate: t.rate,
-                position: 0,
+            tuned: self.tuned.as_ref().map(|t| {
+                let mut bank = t.bank.clone();
+                bank.reset();
+                Tuned {
+                    bank,
+                    applied: None,
+                    rate: t.rate,
+                    position: 0,
+                }
             }),
         }
     }
@@ -1717,5 +1668,143 @@ mod tests {
             let one = drive(&mut n, RATE, &[std::slice::from_ref(s)], &[]).remove(0);
             assert!(one[0].is_finite());
         }
+    }
+    /// A cell write reaches the render at the next grid point of the stream, not at the next
+    /// block: a makeup written when the stream stands 8 frames past a grid point leaves the
+    /// 8 frames to the next one as they were, and from there the makeup glides over its 240
+    /// frames, frame `k` at `12 k / 240` dB.
+    ///
+    /// Unity bands over a settled DC of 0.5, all in band 0.
+    #[test]
+    fn a_cell_write_lands_at_the_next_grid_point() {
+        let (n, c) = node(2);
+        unity(&c);
+        let mut n = prepared(n);
+        // 48 blocks of 500 frames, then 8: the stream is 24 008 frames in, 8 past a grid
+        // point (a multiple of 16).
+        for _ in 0..48 {
+            render_chunked(&mut n, &[vec![0.5f32; 500]], 500);
+        }
+        render_chunked(&mut n, &[vec![0.5f32; 8]], 8);
+        c.band(0).set_makeup(12.0);
+        let y = render_chunked(&mut n, &[vec![0.5f32; 24]], 24).remove(0);
+        for (i, &v) in y[..8].iter().enumerate() {
+            assert!(
+                (v - 0.5).abs() < 1e-6,
+                "frame {i} before the grid point: {v}"
+            );
+        }
+        for k in 1..=16 {
+            let want = 0.5 * libm::pow(10.0, 12.0 * k as f64 / GLIDE as f64 / 20.0);
+            let got = f64::from(y[7 + k]);
+            assert!((got - want).abs() < 1e-5, "step {k}: {got} vs {want}");
+        }
+    }
+
+    /// Any block size gives the same bits: cell writes at fixed stream positions (a makeup, a
+    /// ratio, a bypass, a solo), a driven makeup, threshold and crossover ramping across the
+    /// stream, on a stereo node of three bands, in blocks from 1 to 1 000 frames.
+    #[test]
+    fn any_block_size_gives_the_same_bits() {
+        let len = 4_000;
+        let x: Vec<Vec<f32>> = (0..2)
+            .map(|c| {
+                (0..len)
+                    .map(|i| {
+                        0.7 * libm::sin(0.021 * f64::from(c + 1) * i as f64) as f32
+                            + 0.2 * libm::sin(0.9 * i as f64) as f32
+                    })
+                    .collect()
+            })
+            .collect();
+        let ramp = |lo: f32, hi: f32| -> Vec<f32> {
+            (0..len)
+                .map(|i| lo + (hi - lo) * i as f32 / len as f32)
+                .collect()
+        };
+        let makeup = ramp(0.0, 9.0);
+        let threshold = ramp(-40.0, -10.0);
+        let cutoff = ramp(300.0, 900.0);
+        let render = |block: usize| {
+            let n = MultibandCompressorNode::new(ChannelLayout::STEREO, 3).unwrap();
+            let c = Ctl::new(&n);
+            let mut n = prepared(n);
+            let ports = 3 * PER_BAND + 2;
+            let mut out = vec![Vec::new(), Vec::new()];
+            // Cell writes at these stream frames, blocks cut there.
+            let writes = [1_000usize, 2_500];
+            let mut at = 0;
+            while at < len {
+                if at == writes[0] {
+                    c.band(0).set_ratio(6.0);
+                    c.band(1).set_bypass(true);
+                } else if at == writes[1] {
+                    c.band(2).set_solo(true);
+                    c.band(0).set_makeup(-3.0);
+                }
+                let stop = writes.iter().copied().find(|&w| w > at).unwrap_or(len);
+                let end = (at + block).min(stop);
+                let mut params: Vec<Option<&[f32]>> = vec![None; ports];
+                params[MAKEUP + PER_BAND] = Some(&makeup[at..end]);
+                params[THRESHOLD] = Some(&threshold[at..end]);
+                params[3 * PER_BAND] = Some(&cutoff[at..end]);
+                let inputs = [&x[0][at..end], &x[1][at..end]];
+                for (o, y) in out.iter_mut().zip(drive(&mut n, RATE, &inputs, &params)) {
+                    o.extend(y);
+                }
+                at = end;
+            }
+            out
+        };
+        let whole = render(1_000);
+        assert!(
+            whole.iter().flatten().all(|s| s.is_finite()) && whole[0].iter().any(|&s| s != 0.0),
+            "the stream is not silence"
+        );
+        for block in [1, 5, 7, 16, 17, 63, 64, 100, 333, 1_024] {
+            let got = render(block);
+            for (c, (g, w)) in got.iter().zip(&whole).enumerate() {
+                assert!(
+                    g.iter().zip(w).all(|(a, b)| a.to_bits() == b.to_bits()),
+                    "blocks of {block} differ on channel {c}"
+                );
+            }
+        }
+    }
+
+    /// A reset node renders as a fresh one, the meters at unity: after a loud run with moved
+    /// cells, a reset and a changed cell, the render is the bits of a fresh node with that
+    /// cell from the start.
+    #[test]
+    fn a_reset_node_renders_as_a_fresh_one() {
+        let x = sine(700.0, FS, 6_000);
+        let (n, c) = node(3);
+        c.band(0).set_threshold(-40.0);
+        c.band(0).set_ratio(10.0);
+        c.band(1).set_bypass(true);
+        let mut n = prepared(n);
+        render_chunked(&mut n, &[vec![0.9f32; 5_000]], 512);
+        assert!(n.gain_reduction_db(0) > Db(10.0), "the node was reducing");
+        c.band(0).set_threshold(-18.0);
+        c.band(0).set_ratio(3.0);
+        c.band(1).set_bypass(false);
+        c.band(2).set_makeup(4.0);
+        n.reset();
+        assert_eq!(n.gain_reduction_db(0), Db::UNITY);
+        let got = render_chunked(&mut n, std::slice::from_ref(&x), 512);
+
+        let (f, fc) = node(3);
+        fc.band(0).set_threshold(-18.0);
+        fc.band(0).set_ratio(3.0);
+        fc.band(2).set_makeup(4.0);
+        let mut f = prepared(f);
+        let want = render_chunked(&mut f, std::slice::from_ref(&x), 512);
+        assert!(
+            got[0]
+                .iter()
+                .zip(&want[0])
+                .all(|(a, b)| a.to_bits() == b.to_bits()),
+            "a reset node differs from a fresh one"
+        );
     }
 }

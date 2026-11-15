@@ -4,6 +4,11 @@ use crate::testing::{amplitude_at, lock_in};
 use tutti_fixtures::signal::sine;
 use tutti_types::{Amplitude, Hz, SampleRate, Samples};
 
+/// One sample through `state` at `c`, in `f32`.
+fn tick(state: &mut CrossoverState, c: &CrossoverCoefficients, x: f32) -> [f32; MAX_BANDS] {
+    state.tick_f64(c, f64::from(x)).map(|y| y as f32)
+}
+
 const RATE: f64 = 48_000.0;
 /// A whole number of periods of every tone on the 5 Hz grid.
 const WINDOW: usize = 9_600;
@@ -45,7 +50,7 @@ fn bands_at(freqs: &[f32], hz: f64) -> (Vec<(f64, f64)>, f64) {
     let mut bands = vec![Vec::with_capacity(WINDOW); nb];
     let mut sum = Vec::with_capacity(WINDOW);
     for (i, &s) in x.iter().enumerate() {
-        let out = state.tick(&c, s);
+        let out = tick(&mut state, &c, s);
         if i >= SETTLE {
             for (b, v) in bands.iter_mut().zip(out) {
                 b.push(v);

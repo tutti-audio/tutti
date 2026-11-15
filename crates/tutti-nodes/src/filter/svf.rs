@@ -657,8 +657,9 @@ mod tests {
     /// [`GAIN_GLIDE`]: tutti_dsp::GAIN_GLIDE
     #[test]
     fn a_cutoff_written_between_blocks_glides_on_the_stream() {
-        use crate::test_support::{assert_cell_glides, noise, render_change};
-        let x = noise(3, 64 + 512);
+        use crate::test_support::{assert_cell_glides, render_change, sine};
+        // 1.5 kHz: two whole periods in a 64-frame block, so a block's RMS is exact.
+        let x = sine(1_500.0, 48_000.0, 64 + 512);
         let make = || {
             SvfFilterNode::<f64>::with_channels(
                 ChannelLayout::STEREO,
@@ -671,40 +672,65 @@ mod tests {
             assert!(n.param_set().set(UnitParam::Cutoff, 6_000.0));
         };
         let (before, after) = ([&x[..64], &x[..64]], [&x[64..], &x[64..]]);
-        let node = assert_cell_glides(make, change, &before, &after, "svf cutoff");
-        assert_eq!(node.applied().map(|c| c.freq), Some(Hz(6_000.0)), "arrived");
+        let mut node = assert_cell_glides(make, change, &before, &after, "svf cutoff");
+        // Arrived: a block later the tone is at the 6 kHz low-pass's gain, about 1.
+        let arrived = rms(&drive_block(&mut node, &before)[0]);
+        let mut start = prepared(make());
+        drive_block(&mut start, &before);
+        let low = rms(&drive_block(&mut start, &before)[0]);
         let one = [&x[64..128], &x[64..128]];
-        let (mid, _) = render_change(make, change, &before, &one, 64);
-        let f = mid.applied().unwrap().freq.get();
-        assert!(400.0 < f && f < 6_000.0, "under way after 64 frames: {f}");
+        let (_, mid) = render_change(make, change, &before, &one, 64);
+        let mid = rms(&mid[0]);
+        assert!(
+            (arrived - lp_rms(1_500.0, 6_000.0, 0.707)).abs() < 0.02 * arrived,
+            "arrived {arrived}"
+        );
+        assert!(
+            (low - lp_rms(1_500.0, 400.0, 0.707)).abs() < 0.01,
+            "before {low}"
+        );
+        assert!(
+            low < mid && mid < 0.95 * arrived,
+            "under way after 64 frames: {low} < {mid} < {arrived}"
+        );
+    }
+
+    /// The RMS of a unit sine at `hz` through a low-pass at `fc` and `q`, 48 kHz: the
+    /// bilinear response `1 / sqrt((1 - u^2)^2 + (u / q)^2)`, `u = tan(pi hz / fs) / tan(pi fc / fs)`.
+    fn lp_rms(hz: f64, fc: f64, q: f64) -> f32 {
+        let u = libm::tan(core::f64::consts::PI * hz / 48_000.0)
+            / libm::tan(core::f64::consts::PI * fc / 48_000.0);
+        let gain = 1.0 / libm::sqrt((1.0 - u * u).powi(2) + (u / q).powi(2));
+        (gain * core::f64::consts::FRAC_1_SQRT_2) as f32
     }
 
     /// A clone starts with its cells landed: a clone of a node whose cutoff glide is in
-    /// flight designs its first block from the cell's value, not from where the source's
-    /// glide stands on the source's clock.
+    /// flight renders its first block at the cell's cutoff, not at where the source's glide
+    /// stands on the source's clock.
     #[test]
     fn a_clone_of_a_node_mid_glide_starts_landed() {
+        use crate::test_support::sine;
         let rate = SampleRate::SR_48K;
         let mut node = tutti_graph::contract::prepared(
             SvfFilterNode::<f64>::new(SvfType::LowPass, Hz::new(400.0), Q::new(0.707)),
             rate,
             64,
         );
-        let x = [0.25f32; 64];
-        drive(&mut node, rate, &[&x], &[]);
+        let x = sine(1_500.0, 48_000.0, 64);
+        let block = |n: &mut SvfFilterNode<f64>| rms(&drive(n, rate, &[&x], &[]).remove(0));
+        block(&mut node);
         assert!(node.param_set().set(UnitParam::Cutoff, 6_000.0));
-        drive(&mut node, rate, &[&x], &[]);
-        let source = node.applied().expect("designed").freq.get();
+        let source = block(&mut node);
+        let landed = lp_rms(1_500.0, 6_000.0, 0.707);
         assert!(
-            400.0 < source && source < 6_000.0,
-            "the source is under way: {source}"
+            source < 0.8 * landed,
+            "the source is under way: {source} vs {landed}"
         );
         let mut clone = node.clone();
-        drive(&mut clone, rate, &[&x], &[]);
-        assert_eq!(
-            clone.applied().map(|c| c.freq),
-            Some(Hz(6_000.0)),
-            "the clone landed"
+        let first = block(&mut clone);
+        assert!(
+            first > 0.85 * landed,
+            "the clone landed: {first} vs {landed}"
         );
     }
 
@@ -745,40 +771,51 @@ mod tests {
     /// running at the last good cutoff, and picks up the next finite write.
     #[test]
     fn a_nan_in_a_raw_cell_never_reaches_the_state() {
-        use crate::test_support::noise;
-        let x = noise(31, 64);
+        use crate::test_support::sine;
+        // 800 Hz: 60 frames a period, so 4 800 frames are whole periods.
+        let tone = sine(800.0, 48_000.0, 64 * 400);
+        let mut blocks = tone.chunks(64);
         let mut f = prepared(SvfFilterNode::<f64>::new(
             SvfType::LowPass,
             Hz::new(800.0),
             Q::new(0.7),
         ));
-        drive_block(&mut f, &[&x]);
+        let mut next = |f: &mut SvfFilterNode<f64>| {
+            drive_block(f, &[blocks.next().expect("a block of the tone")]).remove(0)
+        };
+        next(&mut f);
         f.param_set()
             .cell(UnitParam::Cutoff)
             .unwrap()
             .store(f32::NAN, std::sync::atomic::Ordering::Release);
-        let held = drive_block(&mut f, &[&x]);
-        assert!(held[0].iter().all(|s| s.is_finite()), "a NaN alone");
+        let held = next(&mut f);
+        assert!(held.iter().all(|s| s.is_finite()), "a NaN alone");
         assert!(f.param_set().set(UnitParam::Q, 3.0));
-        let moved = drive_block(&mut f, &[&x]);
+        let moved = next(&mut f);
         assert!(
-            moved[0].iter().all(|s| s.is_finite()),
+            moved.iter().all(|s| s.is_finite()),
             "a NaN with another control moving in the same block"
         );
-        assert_eq!(
-            f.applied().unwrap().freq,
-            Hz(800.0),
-            "held at the last good cutoff"
+        // Held at the last good 800 Hz: a tone at the cutoff comes out at Q times itself.
+        let mut level = |f: &mut SvfFilterNode<f64>| {
+            for _ in 0..25 {
+                next(f);
+            }
+            let last: Vec<f32> = (0..75).flat_map(|_| next(f)).collect();
+            rms(&last)
+        };
+        let at_cutoff = level(&mut f);
+        let want = lp_rms(800.0, 800.0, 3.0);
+        assert!(
+            (at_cutoff - want).abs() < 0.01 * want,
+            "held at the last good cutoff: {at_cutoff} vs {want}"
         );
         assert!(f.param_set().set(UnitParam::Cutoff, 2_000.0));
-        // The write glides over `GAIN_GLIDE` (240 frames at 48 kHz): four blocks of 64.
-        for _ in 0..4 {
-            drive_block(&mut f, &[&x]);
-        }
-        assert_eq!(
-            f.applied().unwrap().freq,
-            Hz(2_000.0),
-            "and back on a finite write"
+        let moved_on = level(&mut f);
+        let want = lp_rms(800.0, 2_000.0, 3.0);
+        assert!(
+            (moved_on - want).abs() < 0.01 * want,
+            "and back on a finite write: {moved_on} vs {want}"
         );
     }
 }
