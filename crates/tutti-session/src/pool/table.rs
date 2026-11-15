@@ -207,8 +207,10 @@ impl Pool {
     fn declare_one<K>(&mut self, key: &PoolKey, order: usize, item: Item<K>) -> Option<Start> {
         let generation = self.next_generation();
         let Some(slot) = self.slots.get_mut(key) else {
-            // Released and declared again before the report: the key lives.
+            // Released and declared again before the report: the key lives,
+            // and only the new slot's outcome is reported.
             self.released.retain(|released| released != key);
+            self.queued.retain(|queued| queued.key != *key);
             self.slots.insert(
                 key.clone(),
                 Slot {
@@ -320,7 +322,7 @@ impl Pool {
     }
 
     /// The events since the last call: landings in the order the current set
-    /// names them, then releases in key order.
+    /// names them, then releases by key within a key type.
     pub(crate) fn drain_events(&mut self, out: &mut Vec<SessionEvent>) {
         self.queued.sort_by_key(|queued| queued.order);
         out.extend(

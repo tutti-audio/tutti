@@ -607,6 +607,25 @@ fn a_key_released_and_declared_again_before_the_report_is_not_released() {
 }
 
 #[test]
+fn a_released_slots_queued_outcome_is_not_reported_for_the_key_declared_again() {
+    let (mut s, spawned) = session();
+    let runs = runs();
+    s.pool(entry("a", probe(1, &runs))).unwrap();
+    let hold = s.pool.hold(&PoolKey::new(&"a")).unwrap();
+    undeclare(&mut s);
+    spawned.run_all();
+    assert!(events(&mut s).is_empty());
+    // Adopting queues the held outcome; releasing and declaring again before
+    // the report leaves only the new slot's landing.
+    s.pool(entry("a", probe(1, &runs))).unwrap();
+    drop(hold);
+    undeclare(&mut s);
+    s.pool(entry("a", probe(2, &runs))).unwrap();
+    spawned.run_all();
+    assert_eq!(events(&mut s), [("a", "loaded".to_owned())]);
+}
+
+#[test]
 fn declaring_keys_of_another_type_undeclares_every_entry_of_the_first() {
     let (mut s, spawned) = session();
     let runs = runs();
