@@ -258,7 +258,8 @@ fn a_state_is_listed_fetched_and_restored_over_many_chunks() {
         .resp
         .store()
         .get(&ResourceTarget::entry(PeResource::State, state_id("buffer").resource_id()).unwrap())
-        .unwrap();
+        .unwrap()
+        .clone();
     let PeData::State(held) = held else {
         panic!("not a State");
     };
@@ -604,15 +605,16 @@ fn terminates(link: &Link, to_responder: bool) -> bool {
 
 fn stored_state(link: &Link, id: &str) -> PeState {
     let target = ResourceTarget::entry(PeResource::State, state_id(id).resource_id()).unwrap();
-    let Some(PeData::State(state)) = link.resp.store().get(&target) else {
+    let store = link.resp.store();
+    let Some(PeData::State(state)) = store.get(&target) else {
         panic!("no state");
     };
     state.clone()
 }
 
 fn listed(link: &Link, id: &str) -> PeStateEntry {
-    let Some(PeData::StateList(list)) = link.resp.store().get(&target(PeResource::StateList))
-    else {
+    let store = link.resp.store();
+    let Some(PeData::StateList(list)) = store.get(&target(PeResource::StateList)) else {
         panic!("no list");
     };
     list.entry(&state_id(id)).unwrap().clone()

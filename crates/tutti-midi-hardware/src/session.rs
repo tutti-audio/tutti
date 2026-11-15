@@ -29,7 +29,7 @@
 //! [`InputProducerHandle`]: crate::InputProducerHandle
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use tutti_graph::Losses;
@@ -82,7 +82,7 @@ pub struct MidiSession {
     ci_identity: Option<DeviceIdentity>,
     /// What the MIDI-CI devices' Property Exchange Responders serve
     /// ([`MidiSession::serve_properties`]); empty by default.
-    properties: Arc<ResourceStore>,
+    properties: Arc<Mutex<ResourceStore>>,
 }
 
 /// One open input, and the UMP Stream negotiation of its device.
@@ -591,20 +591,31 @@ impl MidiSession {
 
     /// Makes the MIDI-CI devices' Property Exchange Responders serve `store`
     /// (M2-103): on every open input and every input opened later, at the next
-    /// [`poll`](Self::poll). It replaces what was served, and the Subscriptions
-    /// the peers held end without a message. The session serves an empty store
-    /// until this is called.
+    /// [`poll`](Self::poll). It replaces what was served. The session serves an
+    /// empty store until this is called.
     ///
-    /// Each device on each input serves its own copy of the store, and a peer's
-    /// Set changes that copy only: it is reported as
-    /// [`PropertyChange::Served`], and the copy the app gave is not changed.
+    /// Every device on every input serves this one store, so a peer's Set
+    /// through one Group is seen by the others and by the app
+    /// ([`served_properties`](Self::served_properties)), and is reported as
+    /// [`PropertyChange::Served`].
     /// The session has no way to tell a subscriber of a change the app makes,
     /// so every entry is served as not subscribable: the ResourceList says so
     /// and a Subscription Start is refused with the status for a Resource that
     /// cannot be subscribed to (M2-103 §11.1). Publishing to subscribers is not
     /// offered.
     pub fn serve_properties(&mut self, store: ResourceStore) {
-        self.properties = Arc::new(store.without_subscriptions());
+        *self
+            .properties
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = store.without_subscriptions();
+    }
+
+    /// The store the devices serve: what [`serve_properties`](Self::serve_properties)
+    /// gave, as peers' Sets have changed it. Lock it for as short a time as a
+    /// read takes: the devices lock it inside [`poll`](Self::poll).
+    #[must_use]
+    pub fn served_properties(&self) -> Arc<Mutex<ResourceStore>> {
+        Arc::clone(&self.properties)
     }
 
     /// The MIDI-CI peers of the open input `id` that declared Property Exchange

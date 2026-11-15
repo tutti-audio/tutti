@@ -64,7 +64,7 @@
 //! is, and what the output sends in follows it, and where the input's event
 //! times come from follows its TXJR.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use tutti_graph::{Losses, Offset};
@@ -490,7 +490,7 @@ impl Negotiation {
         now: Instant,
         heard: &Heard<'_>,
         ci: Option<DeviceIdentity>,
-        store: &Arc<ResourceStore>,
+        store: &Arc<Mutex<ResourceStore>>,
     ) -> Stepped {
         let changes = match &mut self.out {
             Some(out) => self.ci.poll(now, heard, ci, store, out),

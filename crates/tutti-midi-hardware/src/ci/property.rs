@@ -4,6 +4,7 @@
 //! Configuration and Process Inquiry are, and what they send goes in the same
 //! batch.
 
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use tutti_midi_device::Muid;
@@ -36,9 +37,10 @@ const RESPONDER: ResponderSettings = ResponderSettings {
     body_limit: BODY,
 };
 
-/// The Responder of a device with MUID `own`, serving `store`.
-pub(super) fn responder(own: Muid, store: ResourceStore) -> ResourceResponder {
-    ResourceResponder::new(own, RESPONDER, store)
+/// The Responder of a device with MUID `own`, serving the `store` every device of
+/// the session serves.
+pub(super) fn responder(own: Muid, store: Arc<Mutex<ResourceStore>>) -> ResourceResponder {
+    ResourceResponder::sharing(own, RESPONDER, store)
 }
 
 impl Member {
@@ -104,11 +106,11 @@ impl Member {
     /// The device's MUID changed: the Responder is for the new one, over the
     /// store as the peers left it, and holds no Subscription.
     pub(super) fn renew_property(&mut self, new: Muid) {
-        self.server = responder(new, self.server.store().clone());
+        self.server = responder(new, self.server.shared_store());
     }
 
     /// The Responder serves `store`, as the peers it already serves are.
-    pub(super) fn serve(&mut self, store: ResourceStore) {
+    pub(super) fn serve(&mut self, store: Arc<Mutex<ResourceStore>>) {
         self.server = responder(self.device.muid(), store);
         let serves: Vec<_> = self
             .properties
@@ -256,11 +258,11 @@ impl Member {
 }
 
 impl Running {
-    /// Gives each member's Responder `store`.
-    pub(super) fn serve(&mut self, store: &ResourceStore) {
-        self.store = store.clone();
+    /// Gives each member's Responder `store`, the one every member serves.
+    pub(super) fn serve(&mut self, store: &Arc<Mutex<ResourceStore>>) {
+        self.store = Arc::clone(store);
         for member in &mut self.members {
-            member.serve(store.clone());
+            member.serve(Arc::clone(store));
         }
     }
 

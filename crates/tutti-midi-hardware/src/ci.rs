@@ -152,7 +152,7 @@
 //! Time is an argument: nothing here reads a clock.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use tutti_graph::{Losses, Offset};
@@ -337,7 +337,7 @@ struct Member {
 }
 
 impl Member {
-    fn new(group: MidiGroup, device: CiDevice<Entropy>, store: ResourceStore) -> Self {
+    fn new(group: MidiGroup, device: CiDevice<Entropy>, store: Arc<Mutex<ResourceStore>>) -> Self {
         let server = property::responder(device.muid(), store);
         Self {
             group,
@@ -357,7 +357,7 @@ struct Running {
     members: Vec<Member>,
     assembler: SysexAssembler<Box<[u8]>>,
     /// What the devices' Responders serve.
-    store: ResourceStore,
+    store: Arc<Mutex<ResourceStore>>,
     /// The Groups whose device could not start and was reported: reported once
     /// until it starts, tried again at every poll. A Group that leaves the
     /// Groups and returns, or MIDI-CI is disabled and enabled again, is reported
@@ -389,7 +389,7 @@ pub(crate) struct Ci {
     /// Property Exchange calls asked for, started by the next poll.
     calls: Vec<PropertyAsk>,
     /// What the devices' Responders serve.
-    store: Arc<ResourceStore>,
+    store: Arc<Mutex<ResourceStore>>,
     /// The CI messages the output has refused, over the input's life.
     refused: Losses,
 }
@@ -460,7 +460,7 @@ impl Ci {
         now: Instant,
         heard: &Heard<'_>,
         enabled: Option<DeviceIdentity>,
-        store: &Arc<ResourceStore>,
+        store: &Arc<Mutex<ResourceStore>>,
         out: &mut OpenOutput,
     ) -> CiChanges {
         let mut changes = CiChanges::default();
@@ -714,7 +714,7 @@ impl Running {
             .filter_map(|&group| match start_device(identity, entropy, now) {
                 Ok((device, first)) => {
                     firsts.push(first);
-                    Some(Member::new(group, device, ResourceStore::new()))
+                    Some(Member::new(group, device, Arc::default()))
                 }
                 Err(error) => {
                     unstarted.push(group);
@@ -731,7 +731,7 @@ impl Running {
             identity,
             members,
             assembler,
-            store: ResourceStore::new(),
+            store: Arc::default(),
             unstarted,
         };
         let mut changes = CiChanges {
@@ -785,7 +785,7 @@ impl Running {
                     started.push((group, first));
                     self.unstarted.retain(|g| *g != group);
                     self.members
-                        .push(Member::new(group, device, self.store.clone()));
+                        .push(Member::new(group, device, Arc::clone(&self.store)));
                     changed = true;
                 }
                 Err(error) => {
@@ -1342,6 +1342,7 @@ mod tests {
     use std::num::NonZeroUsize;
     use std::time::Duration;
 
+    use std::sync::{Arc, Mutex};
     use tutti_midi_device::{CiCategories, DiscoveryData, EndpointId, PortDirection};
     use tutti_ump::{ManufacturerId, U7};
 
@@ -1550,17 +1551,124 @@ mod tests {
         store.declare(
             tutti_midi_device::ResourceEntry::new(tutti_midi_device::PeResource::LocalOn).unwrap(),
         );
-        running.serve(&store);
+        let shared = Arc::new(Mutex::new(store));
+        running.serve(&shared);
         let mut changes = CiChanges::default();
         running.reconcile(&[G0, G1], &mut entropy, now, &mut out, &mut changes);
         assert_eq!(running.members.len(), 2);
+        let given = shared.lock().unwrap().resource_list();
         for member in &running.members {
             assert_eq!(
                 member.server.store().resource_list(),
-                store.resource_list(),
+                given,
                 "{:?}",
                 member.group
             );
         }
+    }
+
+    /// The initiator `init` and the Responder `server` trade messages until
+    /// neither has more to say; the initiator's events are returned.
+    fn trade(
+        init: &mut tutti_midi_device::ResourceInitiator,
+        server: &mut ResourceResponder,
+        first: Vec<tutti_midi_device::ResourceAction>,
+        now: Instant,
+    ) -> Vec<tutti_midi_device::ResourceEvent> {
+        use tutti_midi_device::{ResourceAction, ResponderAction};
+        let mut events = Vec::new();
+        let mut actions = first;
+        for _ in 0..40 {
+            let mut to_server = Vec::new();
+            for action in actions.drain(..) {
+                match action {
+                    ResourceAction::Send(message) => to_server.push(message),
+                    ResourceAction::Event(event) => events.push(*event),
+                    _ => {}
+                }
+            }
+            if to_server.is_empty() {
+                break;
+            }
+            for message in to_server {
+                let replies = server.on_message(&Decoded::Message(message), now);
+                for reply in replies {
+                    if let ResponderAction::Send(message) = reply {
+                        actions.extend(init.on_message(&Decoded::Message(message), now));
+                    }
+                }
+            }
+        }
+        events
+    }
+
+    // Every Group of an input serves the one store the app gave: a Set through
+    // one Group is read through another, and by the app.
+    #[test]
+    fn a_set_through_one_group_is_read_through_another_and_by_the_app() {
+        use tutti_midi_device::{
+            CanSet, PeCapabilities, PeData, PeLocalOn, PeReassemblyLimits, PeResource, PeSettings,
+            ResourceEntry, ResourceEvent, ResourceGet, ResourceInitiator, ResourceSet,
+            ResourceTarget, SimultaneousRequests,
+        };
+        let (mut out, _counters) = output();
+        let now = Instant::now();
+        let (mut running, _) = Running::start(&[G0, G1], identity(), &mut entropy, now, &mut out);
+        let mut store = ResourceStore::new();
+        store.declare(
+            ResourceEntry::new(PeResource::LocalOn)
+                .unwrap()
+                .with_can_set(CanSet::Full)
+                .unwrap(),
+        );
+        store
+            .put(None, PeData::LocalOn(PeLocalOn(true)))
+            .expect("declared");
+        let shared = Arc::new(Mutex::new(store));
+        running.serve(&shared);
+
+        let peer = Muid::of(0x0012_3456);
+        let settings = |max| PeSettings {
+            capabilities: PeCapabilities::new(SimultaneousRequests::of(2)),
+            peer_max_sysex: max,
+            reassembly: PeReassemblyLimits {
+                streams: tutti_midi_device::StreamLimit::of(4),
+                bytes: tutti_midi_device::BufferLimit::of(1 << 16),
+            },
+            body_limit: tutti_midi_device::BodyLimit::of(1 << 16),
+        };
+        let target = ResourceTarget::new(PeResource::LocalOn).unwrap();
+        let mut ends = Vec::new();
+        for member in &mut running.members {
+            member.server.accept(peer, MAX_SYSEX);
+            let (init, first) =
+                ResourceInitiator::new(peer, member.device.muid(), settings(MAX_SYSEX), now);
+            ends.push((init, first));
+        }
+        let [(a, first_a), (b, first_b)] = &mut ends[..] else {
+            panic!("two Groups");
+        };
+        let [ma, mb] = &mut running.members[..] else {
+            panic!("two Groups");
+        };
+        let _ = trade(a, &mut ma.server, std::mem::take(first_a), now);
+        let _ = trade(b, &mut mb.server, std::mem::take(first_b), now);
+
+        let set = ResourceSet::full(target.clone(), PeData::LocalOn(PeLocalOn(false))).unwrap();
+        let (_, actions) = a.set(&set, now).unwrap();
+        let _ = trade(a, &mut ma.server, actions, now);
+
+        let (_, actions) = b.get(&ResourceGet::new(target.clone()), now).unwrap();
+        let events = trade(b, &mut mb.server, actions, now);
+        let got = events.iter().find_map(|e| match e {
+            ResourceEvent::Got { result, .. } => Some(result.clone()),
+            _ => None,
+        });
+        assert_eq!(got, Some(Ok(PeData::LocalOn(PeLocalOn(false)))));
+        assert_eq!(
+            shared.lock().unwrap().get(&target),
+            Some(&PeData::LocalOn(PeLocalOn(false))),
+            "the app's handle sees it"
+        );
     }
 }
