@@ -1383,7 +1383,17 @@ mod declared_buses {
             own_bypass: Some(tutti_plugin_types::OwnBypass::Property),
             ..LoadedPlugin::default()
         };
-        assert!(Declared::of(&with).ports.own_bypass);
-        assert!(!Declared::of(&LoadedPlugin::default()).ports.own_bypass);
+        assert!(
+            Declared::of(&with)
+                .expect("a plugin of a few channels")
+                .ports
+                .own_bypass
+        );
+        assert!(
+            !Declared::of(&LoadedPlugin::default())
+                .expect("an empty plugin")
+                .ports
+                .own_bypass
+        );
     }
 }
