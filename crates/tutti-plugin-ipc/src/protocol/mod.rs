@@ -240,6 +240,35 @@ mod tests {
 
     use tutti_fixtures::midi;
 
+    /// **A `PluginIoChanged` carries the buses the plugin announced over the
+    /// wire**, and none when it announced none.
+    #[test]
+    fn a_plugin_io_changed_carries_its_layout_over_the_wire() {
+        let layout = tutti_plugin_types::Layout {
+            inputs: vec![tutti_plugin_types::PluginBus::main(
+                tutti_types::ChannelLayout::STEREO,
+            )],
+            outputs: vec![
+                tutti_plugin_types::PluginBus::main(tutti_types::ChannelLayout::STEREO),
+                tutti_plugin_types::PluginBus::new(
+                    tutti_types::ChannelLayout::MONO,
+                    tutti_plugin_types::BusRole::Aux,
+                ),
+            ],
+        };
+        for sent in [Some(layout), None] {
+            let bytes = postcard::to_allocvec(&BridgeMessage::PluginIoChanged {
+                layout: sent.clone(),
+            })
+            .expect("serialize");
+            let back: BridgeMessage = postcard::from_bytes(&bytes).expect("deserialize");
+            assert!(
+                matches!(back, BridgeMessage::PluginIoChanged { layout } if layout == sent),
+                "{back:?}"
+            );
+        }
+    }
+
     /// Every preset frame survives the wire in both directions.
     ///
     /// These are the frames that make presets reachable out-of-process: an id

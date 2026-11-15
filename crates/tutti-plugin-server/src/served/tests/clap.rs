@@ -286,13 +286,26 @@ fn a_rate_change_that_changes_the_layout_raises_io_changed() {
     assert_eq!(instance.loaded().inputs.len(), 2, "stereo main + mono aux");
     assert_eq!(instance.loaded().total_inputs(), 3);
     let mut plugin = instance;
-    assert!(
-        plugin
-            .poll(main_thread())
-            .iter()
-            .any(|e| matches!(e, BridgeMessage::PluginIoChanged { .. })),
-        "the host is told"
+    let told = plugin.poll(main_thread());
+    let announced: Vec<_> = told
+        .iter()
+        .filter_map(|e| match e {
+            BridgeMessage::PluginIoChanged { layout } => Some(layout.clone()),
+            _ => None,
+        })
+        .collect();
+    let [Some(layout)] = announced.as_slice() else {
+        panic!("the host is told once, with the buses it has now: {announced:?}");
+    };
+    assert_eq!(
+        (layout.input_widths(), layout.output_widths()),
+        (
+            plugin.loaded().input_widths(),
+            plugin.loaded().output_widths()
+        ),
+        "the buses sent are the plugin's now"
     );
+    assert_eq!(layout.inputs.len(), 2, "stereo main + mono aux");
     assert!(
         !plugin
             .poll(main_thread())

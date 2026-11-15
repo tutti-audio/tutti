@@ -523,6 +523,33 @@ mod tests {
             .collect()
     }
 
+    /// **The buses a `PluginIoChanged` carried are heard before its resync,
+    /// once, the latest of two.** A resync with no layout is heard with none.
+    #[test]
+    fn the_announced_layout_precedes_its_resync() {
+        let layout = |channels| tutti_plugin_types::Layout {
+            inputs: vec![tutti_plugin_types::PluginBus::main(
+                tutti_types::ChannelLayout::from_count(channels),
+            )],
+            outputs: Vec::new(),
+        };
+        let mut inbox = Unsolicited::new();
+        inbox.io_layout(layout(2));
+        inbox.io_layout(layout(4));
+        inbox.resync(ResyncKind::Io);
+        let heard: Vec<BridgeEvent> = inbox.drain().collect();
+        assert!(
+            matches!(
+                heard.as_slice(),
+                [BridgeEvent::IoLayout(l), BridgeEvent::Resync(ResyncKind::Io)]
+                    if *l == layout(4)
+            ),
+            "{heard:?}"
+        );
+        inbox.resync(ResyncKind::Io);
+        assert_eq!(labels(&mut inbox), ["Io"]);
+    }
+
     /// **A request to be processed again is heard once, after everything the
     /// host re-reads for**, so the node it wakes finds the host's view of the
     /// plugin current.
