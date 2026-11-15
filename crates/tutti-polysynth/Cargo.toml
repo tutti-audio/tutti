@@ -48,7 +48,6 @@ tutti-nodes = { path = "../tutti-nodes", default-features = false, features = ["
 # The graph contract's test harness.
 tutti-graph = { path = "../tutti-graph", features = ["contract"] }
 criterion.workspace = true
-approx = "0.5"
 # `check_range_contract`'s serde shape, for `UnisonVoices` and `GlideTime`
 # (whose raw is `Seconds`).
 serde = "1"
