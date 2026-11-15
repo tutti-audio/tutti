@@ -12,13 +12,13 @@ use tutti_types::MAX_CHANNELS;
 use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock, SampleRate, Samples};
 
 use crate::graph::{Graph, LIVE_MAX_BLOCK};
-use crate::{Result, Session};
+use crate::{Result, Session, SystemSession};
 
 /// Builds a [`Session`], declaratively: chain the options, then
 /// [`build`](SessionBuilder::build).
 ///
-/// The builder has two states, and a setter that only one of them can honour
-/// exists only on that one, so the other does not compile.
+/// The builder has three states, and a setter that only one of them can honour
+/// exists only on that one, so the others do not compile.
 ///
 /// - [`Offline`] (what [`Session::builder`] returns): the host pulls blocks
 ///   itself with [`Session::render`], from a game's or a plugin's own
@@ -27,6 +27,11 @@ use crate::{Result, Session};
 ///   48 kHz), the [`outputs`](SessionBuilder::outputs) (default stereo) and the
 ///   [`max_block`](SessionBuilder::max_block) (default
 ///   [`LIVE_MAX_BLOCK`], 1024 frames), and `build` returns a [`Session`].
+/// - [`SystemClock`] (after [`system_clock`](SessionBuilder::system_clock)): an
+///   OS timer thread steps the blocks, with no sound card, for an app that
+///   plays MIDI. It takes the same three setters as `Offline`, and its
+///   [`max_block`](SessionBuilder::max_block) is the timer's block. `build`
+///   returns a [`SystemSession`] with the timer running.
 /// - `OnDevice` (after `device`, feature `device`): the sound card sets the
 ///   rate, the width and the callback, so none of those is a setter, and
 ///   `build` returns a `LiveSession` with the stream running.
@@ -61,17 +66,16 @@ impl<S: std::fmt::Debug> std::fmt::Debug for SessionBuilder<S> {
     }
 }
 
-/// The state of a builder whose session the host pulls blocks from
-/// ([`Session::builder`]): it sets the rate, the output width and the block
-/// size itself.
+/// The size of the blocks a clock steps, which a session that is not on a
+/// device sets itself: [`Offline`] and [`SystemClock`] share it.
 #[derive(Clone, Copy, Debug)]
-pub struct Offline {
+pub struct BlockConfig {
     rate: SampleRate,
     outputs: ChannelLayout,
     max_block: MaxBlock,
 }
 
-impl Default for Offline {
+impl Default for BlockConfig {
     fn default() -> Self {
         Self {
             rate: SampleRate::SR_48K,
@@ -80,6 +84,49 @@ impl Default for Offline {
         }
     }
 }
+
+/// The state of a builder whose session the host pulls blocks from
+/// ([`Session::builder`]): it sets the rate, the output width and the block
+/// size itself.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Offline {
+    block: BlockConfig,
+}
+
+/// The state of a builder whose session an OS timer thread steps
+/// ([`SessionBuilder::system_clock`]): it sets the rate, the output width and
+/// the timer's block itself, and nothing plays.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SystemClock {
+    block: BlockConfig,
+}
+
+mod sealed {
+    use super::{BlockConfig, Offline, SystemClock};
+
+    pub trait Sealed {
+        fn block_mut(&mut self) -> &mut BlockConfig;
+    }
+
+    impl Sealed for Offline {
+        fn block_mut(&mut self) -> &mut BlockConfig {
+            &mut self.block
+        }
+    }
+
+    impl Sealed for SystemClock {
+        fn block_mut(&mut self) -> &mut BlockConfig {
+            &mut self.block
+        }
+    }
+}
+
+/// A builder state whose session sets its own [`BlockConfig`]: [`Offline`] and
+/// [`SystemClock`]. Sealed.
+pub trait HasBlockConfig: sealed::Sealed {}
+
+impl HasBlockConfig for Offline {}
+impl HasBlockConfig for SystemClock {}
 
 /// The state of a builder whose session plays on an output device
 /// ([`SessionBuilder::device`]): the device sets the rate, the output width
@@ -260,29 +307,46 @@ impl Default for SessionBuilder<Offline> {
     }
 }
 
-impl SessionBuilder<Offline> {
+impl<S: HasBlockConfig> SessionBuilder<S> {
     /// The rate the graph runs at. Default 48 kHz.
     #[must_use]
     pub fn sample_rate(mut self, rate: SampleRate) -> Self {
-        self.state.rate = rate;
+        self.state.block_mut().rate = rate;
         self
     }
 
-    /// The width of every block the host pulls with [`Session::render`]. The
-    /// graph root is [`root_width`]`(outputs_floor, outputs)` wide. Default
-    /// stereo.
+    /// The width of every block the host pulls with [`Session::render`] (or
+    /// the system clock renders). The graph root is
+    /// [`root_width`]`(outputs_floor, outputs)` wide. Default stereo.
     #[must_use]
     pub fn outputs(mut self, outputs: ChannelLayout) -> Self {
-        self.state.outputs = outputs;
+        self.state.block_mut().outputs = outputs;
         self
     }
 
     /// The most frames in one graph block: a longer block the host pulls
-    /// renders as consecutive graph blocks. Default [`LIVE_MAX_BLOCK`].
+    /// renders as consecutive graph blocks. On a [`SystemClock`] it is also
+    /// the timer's block: one timer wake-up renders this many frames.
+    /// Default [`LIVE_MAX_BLOCK`].
     #[must_use]
     pub fn max_block(mut self, max_block: MaxBlock) -> Self {
-        self.state.max_block = max_block;
+        self.state.block_mut().max_block = max_block;
         self
+    }
+}
+
+impl SessionBuilder<Offline> {
+    /// Steps the blocks with an OS timer thread instead: no sound card, for an
+    /// app that plays MIDI. The rate, the width and the block carry over, and
+    /// every other option with them.
+    #[must_use]
+    pub fn system_clock(self) -> SessionBuilder<SystemClock> {
+        SessionBuilder {
+            opts: self.opts,
+            state: SystemClock {
+                block: self.state.block,
+            },
+        }
     }
 
     /// Plays on the output device `device` selects instead: the device sets
@@ -321,11 +385,11 @@ impl SessionBuilder<Offline> {
     /// the root ([`Error::Output`](crate::Error::Output)),
     /// (`midi-hardware`) the MIDI device watch cannot start, or (`sampler`) the disk streamer cannot start.
     pub fn build(mut self) -> Result<Session> {
-        let Offline {
+        let BlockConfig {
             rate,
             outputs: layout,
             max_block,
-        } = self.state;
+        } = self.state.block;
         let root = self.root_width(layout);
         self.check_placement(root, layout)?;
         let mut parts = self.parts(rate, max_block, None, root)?;
@@ -389,6 +453,60 @@ impl SessionBuilder<Offline> {
             None,
             false,
         )
+    }
+}
+
+impl SessionBuilder<SystemClock> {
+    /// A session whose blocks an OS timer thread renders, with no sound card:
+    /// the graph runs and its MIDI leaves, and nothing plays. The thread is
+    /// running on return; the [`SystemSession`] holds it, and dropping the
+    /// session stops it.
+    ///
+    /// The timer renders block `n` one block before it would play, so the
+    /// MIDI it makes leaves with a block's lead, and the session reports no
+    /// audio output latency. Its block is [`max_block`](Self::max_block).
+    ///
+    /// # Errors
+    ///
+    /// When the engine refuses the graph, `outputs` has no channels or cannot
+    /// take the root ([`Error::Output`](crate::Error::Output)),
+    /// (`midi-hardware`) the MIDI device watch cannot start, (`sampler`) the
+    /// disk streamer cannot start, or the OS refuses the timer thread
+    /// ([`Error::Clock`](crate::Error::Clock)).
+    pub fn build(mut self) -> Result<SystemSession> {
+        let BlockConfig {
+            rate,
+            outputs: layout,
+            max_block,
+        } = self.state.block;
+        let root = self.root_width(layout);
+        self.check_placement(root, layout)?;
+        let mut parts = self.parts(rate, max_block, Some(max_block), root)?;
+        let mut engine = parts.graph.engine(&parts.transport)?;
+        Self::clock_midi(&parts, &engine);
+        self.declare(&mut parts.graph, layout)?;
+        let mut session = self.session(parts, None, true)?;
+        session.load = engine.take_load_meter();
+        session.heard = Some((engine.heard_taps(), layout));
+        let clock = engine.block_clock();
+        let spec = tutti_engine::OutputSpec::new(rate, layout, tutti_buffers::SampleFormat::F32)
+            .with_quantum(max_block);
+        let mut stream = tutti_engine::OutputStream::new(spec);
+        // The hardware out is timed by the session's one clock reader and the
+        // stream's latency, which the timer reports as zero.
+        #[cfg(feature = "midi")]
+        session
+            .midi_state
+            .set_output_clock(crate::midi::OutputClockSource::new(
+                clock.clone(),
+                stream.latency(),
+            ));
+        session.clock = Some(clock);
+        stream.start_with(
+            Arc::new(tutti_engine::AudioCallbackState::new(engine)),
+            tutti_engine::TimerDriver::new(),
+        )?;
+        Ok(SystemSession::new(session, stream))
     }
 }
 

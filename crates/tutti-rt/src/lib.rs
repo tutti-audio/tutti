@@ -32,6 +32,8 @@
 //!   where the OS says so (`!Send`, `!Sync`); what a plugin's main-thread entries take.
 //! - **`request_priority`** — asks the OS to raise the calling thread's priority and returns
 //!   what it granted (never real time on Linux), or the refusal.
+//! - **`sleep_until_ns`** — blocks a thread until an absolute `monotonic_ns` deadline, the
+//!   sleep of a thread that paces itself against deadlines.
 //! - **`ArcLend`/`Loan`/`Reader`** — the publish cell, re-exported from `arc-lend`:
 //!   a control thread publishes non-scalar state, the audio thread only borrows it.
 //!
@@ -78,6 +80,8 @@
 //!   control register with `asm!`, which has no safe spelling; its `# Soundness`
 //!   docs say what it does and does not guarantee.
 //! - `monotonic_ns` (`clock.rs`): the OS clock calls.
+//! - `sleep_until_ns` (`sleep/absolute.rs`): the `clock_nanosleep` call on Linux and
+//!   Android.
 //! - `MainThreadMarker::new` (`main_thread/`): the OS's "is this the main thread" query,
 //!   one module per OS (on Windows, a `.CRT$XCU` initializer entry), and `MainThreadMarker::new_unchecked`, whose `# Safety` names the
 //!   caller's duty (a test harness's constructor).
@@ -203,6 +207,7 @@ mod request_word;
 mod ring;
 mod scope;
 mod seq_cell;
+mod sleep;
 mod spin;
 mod split;
 mod task_graph;
@@ -233,6 +238,7 @@ pub use request_word::{REQUEST_BITS, RequestBit, RequestBitOutOfRange, RequestBi
 pub use ring::{Drain, Iter, Overflow, PushError, Returned, RingReader, RingWriter, ring};
 pub use scope::{RtScope, RtScopeGuard};
 pub use seq_cell::{Contended, SeqReader, SeqWriter};
+pub use sleep::sleep_until_ns;
 pub use spin::BlockWaits;
 pub use split::{ClaimConflict, ClaimTable, Claimed, ClaimedRun, Held, RwView, SplitMut, SplitRw};
 pub use task_graph::{Participant, TaskGraph};
