@@ -120,8 +120,8 @@ fn a_plugins_flat_channel_counts_match_its_bus_zero() {
 /// A plugin's reported version is the one its class declares, verbatim.
 ///
 /// The corpus is the in-repo `audio-probe`, which this crate builds and whose factory
-/// declares `PClassInfo2::version` as `FULL_VERSION_STR`, `"3.8.0.0"` in the generated
-/// `projectversion.h`. Neither the host's old `"1.0.0"` placeholder nor an absent version
+/// declares `PClassInfo2::version` as `FULL_VERSION_STR`, which `build.rs` writes into the
+/// generated `projectversion.h` and exports as `VST3_PROBE_FULL_VERSION`. Neither the host's old `"1.0.0"` placeholder nor an absent version
 /// is that string, so a host that invents or drops it fails here. `vendor` sits beside it,
 /// and the header calls that field an *overwrite* of the factory's (`ipluginbase.h:357`).
 #[test]
@@ -136,8 +136,8 @@ fn a_plugins_version_is_read_from_it_rather_than_assumed() {
         loaded += 1;
         assert_eq!(
             info.version,
-            tutti_plugin_types::PluginVersion::text("3.8.0.0"),
-            "{}: the class declares 3.8.0.0",
+            tutti_plugin_types::PluginVersion::text(env!("VST3_PROBE_FULL_VERSION")),
+            "{}: the class declares the probe's FULL_VERSION_STR",
             info.name
         );
     }

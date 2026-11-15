@@ -57,9 +57,12 @@ pub use component::ComponentRef;
 pub use editor::{AuEditor, leaked_editor_views};
 pub use error::{Error, OsError, Result, check};
 pub use event_list::{EventList, Pushed, Wire, event_list_available};
+#[cfg(feature = "testing")]
+#[doc(hidden)]
+pub use listener::emit_gesture;
 pub use listener::{
-    AuEvent, AuParameterListener, EventAddress, emit_gesture, notify_all_parameters,
-    notify_parameter, set_parameter_notifying,
+    AuEvent, AuParameterListener, EventAddress, notify_all_parameters, notify_parameter,
+    set_parameter_notifying,
 };
 pub use midi_out::{
     AuMidiOutput, MidiOutSink, MidiOutputInfo, install as install_midi_output, midi_output_info,

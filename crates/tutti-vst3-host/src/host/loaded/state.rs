@@ -370,7 +370,8 @@ fn length_of(len: u64, field: &'static str) -> std::result::Result<u32, StateFra
 /// [`pack_state`], with the parameter writes the component's stream cannot hold
 /// yet (`Vst3Loaded::carried`): magic, version 2, their count as a `u32`, each
 /// write, then the component's length, the component and the controller as in
-/// version 1. With nothing pending the blob is [`pack_state`]'s.
+/// version 1. With nothing pending the blob is [`pack_state`]'s, and so it is when the writes
+/// or the component are too long for a `u32` length field: the pending writes are then dropped.
 ///
 /// # Errors
 ///

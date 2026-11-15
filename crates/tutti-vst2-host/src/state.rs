@@ -115,7 +115,14 @@ pub(crate) fn parse_state_header(data: &[u8]) -> Result<StateHeader<'_>> {
             .into());
     }
     let values = reader.take_rest();
-    let expected = count as usize * 4;
+    let Some(expected) = (count as usize).checked_mul(4) else {
+        return Err(reader
+            .invalid(
+                "parameter count",
+                format!("{count} values overflow a length"),
+            )
+            .into());
+    };
     if values.len() != expected {
         return Err(reader
             .invalid(
