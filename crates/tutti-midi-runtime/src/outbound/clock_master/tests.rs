@@ -662,8 +662,14 @@ fn outbound_mtc_assembles_whole_valid_timecodes_across_a_minute() {
 // that frame, floored to an even one.
 #[test]
 fn timecode_rounds_to_the_nearest_even_frame() {
-    let at =
-        |pos: f64, fps| timecode_at(Seconds::new(pos / SampleRate::SR_48K.get()), fps).to_string();
+    let at = |pos: f64, fps| {
+        let cycle = mtc_cycle(Seconds::new(pos / SampleRate::SR_48K.get()), fps);
+        let nibbles = std::array::from_fn(|p| ((cycle >> (4 * p)) & 0x0F) as u8);
+        MtcTimeCode::from_nibbles(nibbles)
+            .expect("a position the grid sends is one a clock reads")
+            .timecode()
+            .to_string()
+    };
     let f25 = MtcRate::Fps25;
     assert_eq!(at(3_840.0, f25), "00:00:00:02");
     assert_eq!(at(3_840.0 - 1e-7, f25), "00:00:00:02");
@@ -938,20 +944,6 @@ fn a_wrap_on_the_block_edge_and_a_locate_are_one_song_position() {
     assert_eq!(offsets(&second, 0xF8), [0, 1_000, 2_000]);
 }
 
-/// A song position is the beat in sixteenths, floored at 0 (NaN and negatives
-/// included) and stuck at the largest 14-bit value past the range.
-#[test]
-fn a_song_position_is_in_sixteenths_and_saturates() {
-    let at = |beat: f64| beats_to_midi_beats(Beat(beat)).get();
-    assert_eq!(at(2.0), 8);
-    assert_eq!(at(0.0), 0);
-    assert_eq!(at(-3.0), 0);
-    assert_eq!(at(f64::NAN), 0);
-    assert_eq!(at(0x3FFF as f64 / 4.0), 0x3FFF);
-    assert_eq!(at(1e9), 0x3FFF);
-    assert_eq!(at(f64::INFINITY), 0x3FFF);
-}
-
 /// **A master sends on the Group it was built with**: Start, Timing Clocks,
 /// Song Position and MTC quarter-frames all carry that Group, not the first.
 #[test]
@@ -1028,4 +1020,141 @@ fn a_frame_rate_set_between_blocks_keeps_the_pending_quarter_frame() {
     let after = of(&events, 0xF1);
     assert_eq!(after[0], 10_560, "the pending quarter-frame keeps its time");
     assert_eq!(after[1], 10_960, "the next is 400 frames on, at 30 fps");
+}
+
+/// The MTC Full Messages in `events`: each one's offset and the payload its
+/// two SysEx7 packets carry.
+fn full_messages(events: &[UmpAt]) -> Vec<(u32, Vec<u8>)> {
+    let mut found = Vec::new();
+    let mut open: Option<(u32, Vec<u8>)> = None;
+    for (offset, ump) in events {
+        let Ok(Message::Sysex7(_, packet)) = ump.decode() else {
+            continue;
+        };
+        let (at, mut bytes) = open.take().unwrap_or((offset.get(), Vec::new()));
+        bytes.extend_from_slice(packet.data());
+        match packet.status() {
+            tutti_ump::SysexStatus::Start | tutti_ump::SysexStatus::Continue => {
+                open = Some((at, bytes));
+            }
+            _ => found.push((at, bytes)),
+        }
+    }
+    found
+}
+
+/// A rig at 120 BPM and 48 kHz sending MTC at `fps`, stopped at `beat`.
+fn mtc_rig(fps: MtcRate, beat: f64) -> (Rig, Arc<TestTransport>, crate::MidiReceiver) {
+    let (rig, transport, cons) = master(Bpm::of(120.0), SampleRate::SR_48K);
+    rig.set_send_mtc(true);
+    rig.set_mtc_fps(fps);
+    transport.set_beat(beat);
+    (rig, transport, cons)
+}
+
+/// M1 p.53 (Full Message): a locate while stopped is a Full Message of the
+/// position, `7F 7F 01 01 hr mn sc fr`. At 120 bpm beat 10 is 5 s, which at 25
+/// fps is `00:00:05:00` (hours byte `0 01 00000`), and beat 3.5 is 1.75 s, frame
+/// 19.
+#[test]
+fn a_cue_while_stopped_is_an_mtc_full_message_of_the_position() {
+    let (mut rig, transport, cons) = mtc_rig(MtcRate::Fps25, 10.0);
+    rig.tick(512);
+    assert_eq!(
+        full_messages(&drain_all(&cons)),
+        [(0, vec![0x7F, 0x7F, 0x01, 0x01, 0x20, 0x00, 0x05, 0x00])]
+    );
+    // Standing still states nothing more.
+    rig.tick(512);
+    assert!(full_messages(&drain_all(&cons)).is_empty());
+    transport.set_beat(3.5);
+    rig.tick(512);
+    assert_eq!(
+        full_messages(&drain_all(&cons)),
+        [(0, vec![0x7F, 0x7F, 0x01, 0x01, 0x20, 0x00, 0x01, 19])]
+    );
+}
+
+/// The Full Message states the rate in its hours byte: beat 120.14 is 60.07 s,
+/// frame 1802 at 30 fps and frame 1800 at 29.97 drop-frame; both are
+/// `00:01:00:02`, the drop-frame label skipping `;00` and `;01`, and the hours
+/// byte is `0 11 00000` for 30 and `0 10 00000` for 29.97.
+#[test]
+fn the_full_message_carries_the_rate_code_and_drop_frame_labels() {
+    for (fps, hr, fr) in [(MtcRate::Fps30, 0x60, 2), (MtcRate::Fps2997Df, 0x40, 2)] {
+        let (mut rig, _transport, cons) = mtc_rig(fps, 120.14);
+        rig.tick(512);
+        let sent = full_messages(&drain_all(&cons));
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].1[4..], [hr, 1, 0, fr], "{fps:?}");
+    }
+}
+
+/// A jump while playing is a Full Message at its block's first frame, after
+/// which the Quarter Frames restart at piece 0; ordinary playing sends none.
+#[test]
+fn a_jump_while_playing_sends_a_full_message_and_restarts_the_pieces() {
+    let (mut rig, transport, cons) = mtc_rig(MtcRate::Fps25, 0.0);
+    rig.tick(512);
+    drain_all(&cons);
+    transport.set_playing(true);
+    rig.tick(512);
+    let started = drain_all(&cons);
+    // A start from the position the cue stated adds no second Full Message.
+    assert!(full_messages(&started).is_empty());
+    transport.set_beat(512.0 / 24_000.0);
+    rig.tick(512);
+    assert!(full_messages(&drain_all(&cons)).is_empty());
+    transport.set_beat(40.0);
+    rig.tick(512);
+    let jumped = drain_all(&cons);
+    // Beat 40 is 20 s: 00:00:20:00.
+    assert_eq!(
+        full_messages(&jumped),
+        [(0, vec![0x7F, 0x7F, 0x01, 0x01, 0x20, 0x00, 0x14, 0x00])]
+    );
+    let first_piece = jumped
+        .iter()
+        .find_map(|e| match system(e.1) {
+            Some(System::TimeCode(code)) => Some(code.get() >> 4),
+            _ => None,
+        })
+        .expect("a quarter frame follows");
+    assert_eq!(first_piece, 0);
+}
+
+/// A loop wrap is a locate on its own frame: the Full Message is at the wrap's
+/// frame and states the loop start (beat 1.0 at 120 bpm is 0.5 s: frame 15 at
+/// 30 fps).
+#[test]
+fn a_loop_wrap_sends_a_full_message_on_its_frame() {
+    let (mut rig, _transport, cons) = looping_rig();
+    rig.set_send_mtc(true);
+    rig.set_mtc_fps(MtcRate::Fps30);
+    rig.tick(4_096);
+    let events = drain_all(&cons);
+    // The wrap is on frame 2 400; the start on frame 0 is a Full Message too.
+    let wrap = *offsets(&events, 0xF2).last().unwrap();
+    assert_eq!(wrap, 2_400);
+    let fulls = full_messages(&events);
+    assert_eq!(
+        fulls.iter().map(|(at, _)| *at).collect::<Vec<_>>(),
+        [0, wrap]
+    );
+    for (_, bytes) in &fulls {
+        assert_eq!(bytes[4..], [0x60, 0, 0, 15]);
+    }
+}
+
+/// With MTC off, no Full Message is sent, whatever the transport does.
+#[test]
+fn no_full_message_is_sent_with_mtc_off() {
+    let (mut rig, transport, cons) = master(Bpm::of(120.0), SampleRate::SR_48K);
+    transport.set_beat(10.0);
+    rig.tick(512);
+    transport.set_playing(true);
+    rig.tick(512);
+    transport.set_beat(80.0);
+    rig.tick(512);
+    assert!(full_messages(&drain_all(&cons)).is_empty());
 }

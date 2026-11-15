@@ -183,13 +183,15 @@ impl Rig {
             done += n;
             loop {
                 let got = self.out.borrow_mut().poll_into(&mut ring);
-                sent.extend(ring[..got].iter().map(|&(frame, ump)| {
-                    let Ok(Message::System(_, system)) = ump.decode() else {
-                        panic!("the clock sends System messages: {ump:?}")
-                    };
-                    Sent {
-                        system,
-                        frame: u64::from(frame),
+                sent.extend(ring[..got].iter().filter_map(|&(frame, ump)| {
+                    match ump.decode() {
+                        Ok(Message::System(_, system)) => Some(Sent {
+                            system,
+                            frame: u64::from(frame),
+                        }),
+                        // The MTC Full Message of a locate.
+                        Ok(Message::Sysex7(..)) => None,
+                        _ => panic!("the clock sends System messages and Full Messages: {ump:?}"),
                     }
                 }));
                 if got < ring.len() {

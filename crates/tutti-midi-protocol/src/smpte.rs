@@ -187,6 +187,15 @@ impl SmpteFrameRate {
         }
     }
 
+    /// The frames elapsed at `seconds` at this rate, as a fraction of a frame:
+    /// `seconds * num / den` over the exact [`ratio`](Self::ratio). The one
+    /// place a time becomes a frame count; the callers round it as they need.
+    #[must_use]
+    pub fn frames_at(&self, seconds: Seconds) -> f64 {
+        let (num, den) = self.ratio();
+        seconds.get() * num as f64 / den as f64
+    }
+
     /// Frame labels per second: the count the `FF` field wraps at (24, 25, 30,
     /// 30, 30 for the two 29.97 rates).
     pub const fn labels_per_second(&self) -> u64 {
@@ -349,6 +358,16 @@ impl SmpteTimecode {
         } else {
             labelled
         }
+    }
+
+    /// The label of the frame nearest `seconds` at `frame_rate`: rounding, not
+    /// flooring, so a time a float's width short of a frame boundary reads as
+    /// that frame. A time before zero or NaN is the origin; hours wrap at 24.
+    #[must_use]
+    pub fn from_seconds(seconds: Seconds, frame_rate: SmpteFrameRate) -> Self {
+        // `max` turns a negative and NaN into 0, and `as` saturates the rest.
+        let frames = frame_rate.frames_at(seconds).round().max(0.0);
+        Self::from_frame_count(frames as u64, frame_rate)
     }
 
     /// The label of frame number `count` since `00:00:00:00` at `frame_rate`;
