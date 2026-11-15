@@ -386,21 +386,34 @@ fn an_in_process_swap_waits_for_the_main_thread() {
     s.close(tutti_fixtures::main_thread());
 }
 
-/// **A restore job runs in the first update on the main thread, for a served
-/// plugin too, and applies the saved state.** A value saved through `save_state`, then moved, is the
-/// value the plugin and its mirror hold after `restore_state` lands; the
-/// outcome lands in an update, never at the call.
-fn a_restore_job_applies_the_saved_state_on_the_main_thread() {
+/// A value saved through `save_state`, then moved, is the value the plugin and
+/// its mirror hold after `restore_state` lands in an update on the main thread;
+/// the outcome lands in an update, never at the call.
+fn restore_round_trip(hosting: Hosting) {
     const CUTOFF: tutti_plugin_types::ParamId = tutti_plugin_types::ParamId::new(101);
     let (catalog, _dir) = catalog();
     let mut s = session();
-    s.pool(
-        s.plugin_entry("verb", &id(), &catalog)
-            .hosting(Hosting::OutOfProcess),
-    )
-    .unwrap();
+    s.pool(s.plugin_entry("verb", &id(), &catalog).hosting(hosting))
+        .unwrap();
     assert!(matches!(next_event(&mut s, "verb"), PoolEvent::Loaded));
     let node = s.add_pooled_plugin(&"verb").unwrap();
+    // Wired to the output, so blocks run the plugin: an in-process plugin takes
+    // a host write at the head of its next block.
+    s.graph().connect(node, tutti_session::Root).unwrap();
+    let blocks = |s: &mut Session| {
+        for _ in 0..4 {
+            let _ = s.update();
+            let mut out = vec![0.0f32; 512 * 2];
+            s.render(
+                &mut tutti_buffers::InterleavedMut::new(
+                    &mut out,
+                    tutti_types::ChannelLayout::STEREO,
+                )
+                .unwrap(),
+            );
+        }
+    };
+    blocks(&mut s);
     let knob = |s: &Session| {
         s.plugin_view(node)
             .unwrap()
@@ -421,6 +434,7 @@ fn a_restore_job_applies_the_saved_state_on_the_main_thread() {
     };
 
     set(&s, 0.9);
+    blocks(&mut s);
     let saving = s.save_state(&"verb").expect("a node holds the plugin");
     let deadline = Instant::now() + Duration::from_secs(30);
     while !saving.has_landed() {
@@ -431,6 +445,7 @@ fn a_restore_job_applies_the_saved_state_on_the_main_thread() {
     let state = saving.take().expect("landed").expect("a state");
 
     set(&s, 0.1);
+    blocks(&mut s);
     let restoring = s.restore_state(&"verb", state).expect("its own plugin's");
     assert!(!restoring.has_landed(), "it lands in an update");
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -448,10 +463,23 @@ fn a_restore_job_applies_the_saved_state_on_the_main_thread() {
             "the saved value never came back: {}",
             knob(&s)
         );
-        let _ = s.update();
+        blocks(&mut s);
         thread::sleep(Duration::from_millis(2));
     }
     s.close(tutti_fixtures::main_thread());
+}
+
+/// **A restore job applies the saved state to an in-process plugin**: its
+/// writes reach the plugin at the head of a block, so the saved state holds the
+/// value the blocks delivered, and the restore moves it back.
+fn a_restore_job_applies_the_saved_state_to_an_in_process_plugin() {
+    restore_round_trip(Hosting::InProcess);
+}
+
+/// **A restore job applies the saved state to a served plugin**, in the first
+/// update on the main thread.
+fn a_restore_job_applies_the_saved_state_to_a_served_plugin() {
+    restore_round_trip(Hosting::OutOfProcess);
 }
 
 pub(crate) const CASES: &[(&str, fn())] = tutti_fixtures::cases!["plugin_pool_main";
@@ -462,5 +490,6 @@ a_released_in_process_plugin_on_the_main_thread_is_closed_in_place,
 a_changed_identity_swaps_an_in_process_node,
 an_in_process_swap_to_other_ports_fails_the_entry,
 an_in_process_swap_waits_for_the_main_thread,
-a_restore_job_applies_the_saved_state_on_the_main_thread,
+a_restore_job_applies_the_saved_state_to_an_in_process_plugin,
+a_restore_job_applies_the_saved_state_to_a_served_plugin,
 ];

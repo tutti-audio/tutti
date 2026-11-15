@@ -484,8 +484,10 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
         s.plugin_entry("idle", &first_id(), &catalog),
     ))
     .unwrap();
-    loaded(&mut s, "a");
-    loaded(&mut s, "idle");
+    // Both load in the same update, so a wait on events would miss the second.
+    settle_until(&mut s, "both loads", |s| {
+        s.plugin(&"a").is_ok() && s.plugin(&"idle").is_ok()
+    });
     let a = s.add_pooled_plugin(&"a").unwrap();
 
     assert!(matches!(

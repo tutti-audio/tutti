@@ -238,16 +238,17 @@ pub unsafe fn apply_param_events_through(list: *const clap_input_events, frame: 
     }
 }
 
-/// Apply every `PARAM_VALUE` event for an **extra** parameter ([`EXTRA_PARAMS_ENV`]) in
-/// the host's list, at once: the extras take their last value of a block, and a
-/// block's events are all there is to say about them. The table's own parameters
-/// are not touched (the gain's are applied per sample, at their `time`).
+/// Apply every `PARAM_VALUE` event in the host's list, at once: a parameter
+/// takes its last value of a block, as a flush would set it, so the value
+/// `state.save` and `params.get_value` answer is the one the host delivered
+/// through `process` too. The table's own parameters are also applied per sample
+/// at their `time` by the gain; this stores the value they end the block on.
 ///
 /// # Safety
 /// `list` must be null or the live `clap_input_events` the host passed to
 /// `process`.
-pub unsafe fn apply_extra_param_events(list: *const clap_input_events) {
-    if list.is_null() || extra_count() == 0 {
+pub unsafe fn apply_param_events(list: *const clap_input_events) {
+    if list.is_null() {
         return;
     }
     let (Some(size_fn), Some(get_fn)) = (unsafe { (*list).size }, unsafe { (*list).get }) else {
@@ -264,9 +265,8 @@ pub unsafe fn apply_extra_param_events(list: *const clap_input_events) {
             continue;
         }
         let pv = unsafe { &*(hdr_ptr as *const clap_event_param_value) };
-        if pv.param_id >= EXTRA_PARAM_BASE
-            && let Some(idx) = index_of_id(pv.param_id)
-        {
+        if let Some(idx) = index_of_id(pv.param_id) {
+            ensure_values_init();
             store_value(idx, pv.value);
         }
     }
