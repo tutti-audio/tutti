@@ -977,7 +977,7 @@ fn a_write_is_answered_from_the_activations_table_not_the_live_info() {
     let loaded = Vst3Loaded::load(
         main_thread(),
         &tutti_fixtures::detached_work(),
-        &probe_path(),
+        probe_path(),
         LoadOptions::new(),
     )
     .expect("load");
