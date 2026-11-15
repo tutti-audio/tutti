@@ -126,6 +126,10 @@ impl MainSession<'_> {
     pub fn update(&mut self) -> Vec<SessionEvent> {
         let mut out = self.session.update();
         let main = self.main;
+        // The stages that wait for this thread, for a main thread the OS does not
+        // name (`update` runs them on the process's own).
+        self.session.pool_main_stages(main);
+        self.session.pool_events(&mut out);
         // Before the servicing: a plugin the update removed has no editor left
         // to service.
         self.session.graph.graveyard.exhume(main);

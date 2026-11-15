@@ -104,7 +104,6 @@ pub(crate) fn arrival_clock(
 /// The `Instant` of a reading of [`tutti_rt::monotonic_ns`]: the one pairing of
 /// the two clocks, read once per process, so the conversion is an offset.
 /// `None` where it is beyond what an `Instant` holds.
-#[cfg(any(feature = "device", feature = "midi-hardware"))]
 fn os_instant(ns: i64) -> Option<Instant> {
     use std::sync::OnceLock;
     static PAIRING: OnceLock<(Instant, i64)> = OnceLock::new();
@@ -121,14 +120,12 @@ fn os_instant(ns: i64) -> Option<Instant> {
 /// What the session reads of the engine to time the hardware out: its block
 /// clock and the audio output's latency (the stream's cell, which the device's
 /// callback writes, `None` until it reports, and a restart resets in place).
-#[cfg(feature = "device")]
 #[derive(Clone, Debug)]
 pub(crate) struct OutputClockSource {
     clock: tutti_engine::BlockClockReader,
     audio_latency: std::sync::Arc<tutti_engine::StreamLatency>,
 }
 
-#[cfg(feature = "device")]
 impl OutputClockSource {
     pub(crate) fn new(
         clock: tutti_engine::BlockClockReader,
@@ -819,9 +816,8 @@ pub(crate) struct MidiState {
     /// reports them.
     follow_events: Vec<MidiEvent>,
     /// What the engine gives the hardware out's timing: its block clock and the
-    /// audio output's latency. `None` with no audio device, where every event
+    /// audio output's latency. `None` offline, where every event
     /// is sent at once.
-    #[cfg(feature = "device")]
     output_clock: Option<OutputClockSource>,
     /// The hardware out's own latency and offset ([`Midi::set_output_latency`]).
     output_latency: OutputLatency,
@@ -898,8 +894,7 @@ impl MidiState {
     }
 
     /// The hardware out is timed by `clock` from now on (a session with an
-    /// audio device).
-    #[cfg(feature = "device")]
+    /// audio device, or the system clock's zero-latency output).
     pub(crate) fn set_output_clock(&mut self, clock: OutputClockSource) {
         self.output_clock = Some(clock);
     }
@@ -1056,13 +1051,10 @@ impl MidiState {
             frame: Frame::ZERO,
             ump: Ump([0; 4]),
         }; DRAIN_CHUNK];
-        #[cfg(feature = "device")]
         let timing = self
             .output_clock
             .as_ref()
             .map(|source| source.timing(self.output_latency));
-        #[cfg(not(feature = "device"))]
-        let timing: Option<OutputTiming> = None;
         let mut router = MidiOutRouter {
             out: self.out.as_mut(),
             drops: Some(&self.drops),
@@ -1190,13 +1182,10 @@ impl MidiState {
             return;
         };
         let batch: Vec<(Frame, Ump)> = packets.map(|ump| (frame, ump)).collect();
-        #[cfg(feature = "device")]
         let timing = self
             .output_clock
             .as_ref()
             .map(|source| source.timing(self.output_latency));
-        #[cfg(not(feature = "device"))]
-        let timing: Option<OutputTiming> = None;
         MidiOutRouter {
             out: self.out.as_mut(),
             drops: Some(&self.drops),
@@ -2366,9 +2355,10 @@ impl Midi<'_> {
     }
 
     /// The terms the hardware out's events are timed by now: the audio
-    /// output's latency as the device reports it, and the output's own
-    /// ([`set_output_latency`](Self::set_output_latency)). `None` on a session
-    /// with no audio device, which sends every event at once.
+    /// output's latency as the device reports it (zero on a system clock, which
+    /// has no device), and the output's own
+    /// ([`set_output_latency`](Self::set_output_latency)). `None` on an offline
+    /// session, which has no clock of its own and sends every event at once.
     ///
     /// **While [`is_complete`](OutputTerms::is_complete) is false the audio
     /// output's latency is not reported yet** (before the stream's first
@@ -2376,16 +2366,11 @@ impl Midi<'_> {
     /// known, so they leave early by that latency.
     #[must_use]
     pub fn output_terms(&self) -> Option<OutputTerms> {
-        #[cfg(feature = "device")]
-        {
-            let source = self.state.output_clock.as_ref()?;
-            Some(OutputTerms {
-                audio_output: source.audio_output(),
-                latency: self.state.output_latency,
-            })
-        }
-        #[cfg(not(feature = "device"))]
-        None
+        let source = self.state.output_clock.as_ref()?;
+        Some(OutputTerms {
+            audio_output: source.audio_output(),
+            latency: self.state.output_latency,
+        })
     }
 
     /// The sample rate the hardware out's frames are on: the rate the graph

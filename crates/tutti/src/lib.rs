@@ -455,7 +455,7 @@ pub use tutti_session::{
 pub use tutti_session::{
     ConnectError, Edge, EventInPort, EventOutPort, EventTapPort, HeardOpen, HeardTapError, InPort,
     Job, JobFailed, Key, NoSuchNode, OutPort, Phase, Playhead, Root, ScheduleError, Session,
-    SessionBuilder, SessionEvent, TypedParamRef, Workers,
+    SessionBuilder, SessionEvent, SystemSession, TypedParamRef, Workers,
 };
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{Device, DeviceEvent, DeviceRestart, LiveSession, RestartOutcome};

@@ -590,6 +590,24 @@ impl Engine {
     /// allocation, no locks, no I/O.
     #[inline]
     pub fn process(&self, output: &mut InterleavedMut<'_>) {
+        self.process_stamped(output, None);
+    }
+
+    /// [`process`](Self::process) for a call whose start the caller dates:
+    /// the block clock ([`block_clock`](Self::block_clock)) records `os_ns`,
+    /// a [`monotonic_ns`](tutti_rt::monotonic_ns) reading, as the time the
+    /// call began, where `process` reads the clock itself.
+    ///
+    /// A caller that renders to a schedule passes the instant the block was
+    /// due, so a reader mapping frames to the OS clock sees the schedule and
+    /// not the jitter of the wake-up that ran it.
+    #[inline]
+    pub(crate) fn process_at(&self, output: &mut InterleavedMut<'_>, os_ns: i64) {
+        self.process_stamped(output, Some(os_ns));
+    }
+
+    #[inline]
+    fn process_stamped(&self, output: &mut InterleavedMut<'_>, stamp: Option<i64>) {
         // Timed for the load meter (`load_meter`): see `process_segment`.
         let start = Instant::now();
         let out_ch = output.channels();
@@ -624,7 +642,7 @@ impl Engine {
         let mut budget = Seconds(0.0);
         while done < frames {
             let (bound, rate) = g.settle();
-            let began = (done == 0).then(tutti_rt::monotonic_ns);
+            let began = (done == 0).then(|| stamp.unwrap_or_else(tutti_rt::monotonic_ns));
             let len = (frames - done).min(bound);
             let frame0 = g.exec.frame();
             let mut pieces = GraphPieces {
