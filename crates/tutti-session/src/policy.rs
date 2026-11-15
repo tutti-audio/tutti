@@ -36,10 +36,12 @@ pub trait Policy {
 /// use tutti_session::OutputPolicy;
 /// use tutti_types::{Bed, ChannelLayout};
 ///
-/// let mut policy = OutputPolicy::default();
 /// // Hear a 5.1 mix as stereo, on outputs 3 and 4 of the interface.
-/// policy.monitor = Some(Bed::Stereo.topology());
-/// policy.map = OutputMap::channels([2, 3]).unwrap();
+/// let mut policy = OutputPolicy {
+///     monitor: Some(Bed::Stereo.topology()),
+///     map: OutputMap::channels([2, 3]).unwrap(),
+///     ..OutputPolicy::default()
+/// };
 /// policy
 ///     .outputs
 ///     .set_strip(2, OutputStrip { mute: true, ..OutputStrip::default() })

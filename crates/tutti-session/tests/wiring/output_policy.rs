@@ -54,9 +54,11 @@ fn monitoring_changes_what_is_heard_and_never_the_root() {
         .expect("the sources exist");
     assert_eq!(last_frame(&mut s, 6, 128), [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
 
-    let mut policy = OutputPolicy::default();
-    policy.monitor = Some(Bed::Stereo.topology());
-    policy.map = OutputMap::channels([2, 3]).unwrap();
+    let policy = OutputPolicy {
+        monitor: Some(Bed::Stereo.topology()),
+        map: OutputMap::channels([2, 3]).unwrap(),
+        ..OutputPolicy::default()
+    };
     s.policy::<OutputPolicy>().set(policy).unwrap();
     let m = f32::MINUS_3_DB;
     let (l, r) = (1.0 + m * 3.0 + m * 5.0, 2.0 + m * 3.0 + m * 6.0);
@@ -79,9 +81,11 @@ fn monitoring_changes_what_is_heard_and_never_the_root() {
 #[test]
 fn a_policy_that_does_not_fit_the_device_is_refused_when_set() {
     let mut s = offline(Session::builder(), 2);
-    let mut map = OutputPolicy::default();
-    map.monitor = Some(Bed::Stereo.topology());
-    map.map = OutputMap::channels([2, 3]).unwrap();
+    let map = OutputPolicy {
+        monitor: Some(Bed::Stereo.topology()),
+        map: OutputMap::channels([2, 3]).unwrap(),
+        ..OutputPolicy::default()
+    };
     assert_eq!(
         s.policy::<OutputPolicy>().set(map),
         Err(OutputPolicyError::Routing(RoutingError::MapPast {
@@ -89,8 +93,10 @@ fn a_policy_that_does_not_fit_the_device_is_refused_when_set() {
             device: ChannelLayout::STEREO
         }))
     );
-    let mut wide = OutputPolicy::default();
-    wide.map = OutputMap::channels([0, 1, 2]).unwrap();
+    let wide = OutputPolicy {
+        map: OutputMap::channels([0, 1, 2]).unwrap(),
+        ..OutputPolicy::default()
+    };
     assert_eq!(
         s.policy::<OutputPolicy>().set(wide),
         Err(OutputPolicyError::Routing(RoutingError::MapWidth {

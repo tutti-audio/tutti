@@ -1110,9 +1110,11 @@ fn a_restart_onto_a_device_the_map_does_not_fit_is_refused_and_keeps_the_map() {
         .build_device_on(spec(6), driver)
         .unwrap()
         .into_parts();
-    let mut policy = OutputPolicy::default();
-    policy.monitor = Some(Bed::Stereo.topology());
-    policy.map = OutputMap::channels([4, 5]).unwrap();
+    let policy = OutputPolicy {
+        monitor: Some(Bed::Stereo.topology()),
+        map: OutputMap::channels([4, 5]).unwrap(),
+        ..OutputPolicy::default()
+    };
     session
         .policy::<OutputPolicy>()
         .set(policy.clone())
