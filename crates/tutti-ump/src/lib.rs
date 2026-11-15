@@ -125,7 +125,7 @@ pub use mpe_zone::{MpeOverlap, MpeZoneSet, MpeZoneSpan};
 pub use note_id::NoteId;
 pub use note_velocity::NoteVelocity;
 pub use orchestral::{
-    MuteAmount, MuteMessage, MuteState, MuteType, PlayingPosition, ReservedMuteType,
+    MuteAmount, MuteError, MuteMessage, MuteState, MuteType, PlayingPosition, ReservedMuteType,
 };
 pub use rpn::{RegisteredData, Rpn};
 pub use sysex::{

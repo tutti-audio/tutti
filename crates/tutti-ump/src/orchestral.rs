@@ -8,7 +8,7 @@
 //! Amount to fully closed (§8.1.1), and the Amount alone changes it afterwards
 //! (§8.1.2).
 
-use crate::{ControlValue, NoteNumber, Rpn, U7, Voice2};
+use crate::{ControlValue, NoteNumber, Rpn, Voice2};
 
 /// A Playing Position (M2-123 §8.2, Table 20): where on the playing surface a
 /// note sounds, as the 32-bit value of the Registered Per-Note Controller
@@ -27,9 +27,6 @@ impl PlayingPosition {
     /// `0xFFFFFFFF`: at the nut for a bowed or plucked instrument, at the rim
     /// for drums and cymbals.
     pub const NUT: Self = Self(0xFFFF_FFFF);
-
-    /// The Registered Per-Note Controller number, `0x0C` (§8.2).
-    pub const CONTROLLER: u8 = 0x0C;
 
     /// A position from its 32-bit value; every value is one.
     #[must_use]
@@ -133,12 +130,28 @@ pub enum MuteType {
 /// `0x80000000..=0xCFFFFFFF`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[error("the mute type value {0:#010x} is in a reserved subrange")]
-pub struct ReservedMuteType(pub u32);
+pub struct ReservedMuteType(u32);
+
+impl ReservedMuteType {
+    /// The refused 32-bit value.
+    #[must_use]
+    pub const fn value(self) -> u32 {
+        self.0
+    }
+}
+
+/// Why a Registered Controller message is not a mute message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+pub enum MuteError {
+    /// The message is not Registered Controller `0x20/0x22` or `0x20/0x23`.
+    #[error("the message is not an Orchestral Mute Type or Mute Amount")]
+    NotAMuteMessage,
+    /// The Mute Type value is in a reserved subrange.
+    #[error(transparent)]
+    Reserved(ReservedMuteType),
+}
 
 impl MuteType {
-    /// The Registered Controller address, bank `0x20` index `0x22` (§8.1.1).
-    pub const RC: Rpn = Rpn::new(U7::of(0x20), U7::of(0x22));
-
     /// Every Mute Type, in the order of its subrange.
     pub const ALL: &'static [Self] = &[
         Self::NoMute,
@@ -236,13 +249,12 @@ impl MuteType {
 }
 
 /// An Orchestral Mute Amount: the value of Registered Controller `0x20/0x23`,
-/// from fully open to fully closed (M2-123 §8.1.2, Figure 4). A mute with one position of use is [`CLOSED`](Self::CLOSED).
+/// from fully open to fully closed (M2-123 §8.1.2, Figure 4). A mute with one
+/// position of use is [`CLOSED`](Self::CLOSED).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MuteAmount(u32);
 
 impl MuteAmount {
-    /// The Registered Controller address, bank `0x20` index `0x23` (§8.1.2).
-    pub const RC: Rpn = Rpn::new(U7::of(0x20), U7::of(0x23));
     /// `0x00000000`: fully open, off.
     pub const OPEN: Self = Self(0x0000_0000);
     /// `0xFFFFFFFF`: fully closed, muted or dampened. The default.
@@ -281,33 +293,38 @@ impl MuteMessage {
     #[must_use]
     pub const fn to_voice(self) -> Voice2 {
         let (rc, value) = match self {
-            Self::Type(kind) => (MuteType::RC, kind.value()),
-            Self::Amount(amount) => (MuteAmount::RC, amount.get()),
+            Self::Type(kind) => (Rpn::ORCHESTRAL_MUTE_TYPE, kind.value()),
+            Self::Amount(amount) => (Rpn::ORCHESTRAL_MUTE_AMOUNT, amount.get()),
         };
         Voice2::registered(rc, ControlValue::new(value))
     }
 
-    /// The mute message a Registered Controller carries: `None` for any other
-    /// message, and the error for a Mute Type in a reserved subrange.
+    /// The mute message a Registered Controller carries.
     ///
     /// # Errors
     ///
-    /// [`ReservedMuteType`] when the message is a Mute Type whose value is in a
-    /// reserved subrange.
-    pub const fn from_voice(message: &Voice2) -> Option<Result<Self, ReservedMuteType>> {
+    /// [`MuteError::NotAMuteMessage`] for any other message, and
+    /// [`MuteError::Reserved`] for a Mute Type whose value is in a reserved
+    /// subrange; a caller that applies messages to a [`MuteState`] leaves it
+    /// unchanged on either.
+    pub const fn from_voice(message: &Voice2) -> Result<Self, MuteError> {
         let Voice2::Registered { bank, index, value } = message else {
-            return None;
+            return Err(MuteError::NotAMuteMessage);
         };
-        if bank.get() != 0x20 {
-            return None;
+        if bank.get() != Rpn::ORCHESTRAL_MUTE_TYPE.bank().get() {
+            return Err(MuteError::NotAMuteMessage);
         }
         match index.get() {
-            0x22 => Some(match MuteType::from_value(value.get()) {
-                Ok(kind) => Ok(Self::Type(kind)),
-                Err(error) => Err(error),
-            }),
-            0x23 => Some(Ok(Self::Amount(MuteAmount(value.get())))),
-            _ => None,
+            i if i == Rpn::ORCHESTRAL_MUTE_TYPE.index().get() => {
+                match MuteType::from_value(value.get()) {
+                    Ok(kind) => Ok(Self::Type(kind)),
+                    Err(error) => Err(MuteError::Reserved(error)),
+                }
+            }
+            i if i == Rpn::ORCHESTRAL_MUTE_AMOUNT.index().get() => {
+                Ok(Self::Amount(MuteAmount(value.get())))
+            }
+            _ => Err(MuteError::NotAMuteMessage),
         }
     }
 }

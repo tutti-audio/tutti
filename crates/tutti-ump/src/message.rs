@@ -466,12 +466,12 @@ pub enum Attribute {
 }
 
 /// A Registered Per-Note Controller number (M2-104 Appendix A, Table 22, and
-/// M2-123 §8.2's Playing Position). A number
-/// the table leaves reserved is kept in [`Reserved`](Self::Reserved), so its
-/// message re-encodes exactly. Build one from a wire number with [`From<u8>`],
-/// which names every number the table defines and only then falls back to
-/// `Reserved`. A hand-built `Reserved(7)` encodes as 7 but does not compare
-/// equal to, or match, [`Volume`](Self::Volume).
+/// M2-123 §8.2's Playing Position). A number the table leaves reserved is kept
+/// in [`Reserved`](Self::Reserved), so its message re-encodes exactly. Build
+/// one from a wire number with [`From<u8>`], which names every number the table
+/// defines and only then falls back to `Reserved`. A hand-built `Reserved(7)`
+/// encodes as 7 but does not compare equal to, or match,
+/// [`Volume`](Self::Volume).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RegisteredPerNoteController {
     /// 1: Modulation.

@@ -3,8 +3,8 @@
 
 use MuteType::*;
 use tutti_ump::{
-    Address, ControlValue, Message, MidiChannel, MidiGroup, MuteAmount, MuteMessage, MuteState,
-    MuteType, NoteNumber, PlayingPosition, RegisteredPerNoteController, ReservedMuteType, U7, Ump,
+    Address, ControlValue, Message, MidiChannel, MidiGroup, MuteAmount, MuteError, MuteMessage,
+    MuteState, MuteType, NoteNumber, PlayingPosition, RegisteredPerNoteController, Rpn, U7, Ump,
     Voice2,
 };
 
@@ -61,7 +61,7 @@ fn table_19_mute_type_subranges() {
         for value in [first, middle, last] {
             match (MuteType::from_value(value), expected) {
                 (Ok(got), Ok(want)) => assert_eq!(got, want, "{value:#010x}"),
-                (Err(ReservedMuteType(v)), Err(())) => assert_eq!(v, value),
+                (Err(reserved), Err(())) => assert_eq!(reserved.value(), value),
                 (got, want) => panic!("{value:#010x}: {got:?} against {want:?}"),
             }
         }
@@ -86,33 +86,30 @@ fn the_mute_controls_are_registered_controllers_20_22_and_20_23() {
         words(MuteMessage::Amount(MuteAmount::CLOSED).to_voice()),
         [0x4020_2023, 0xFFFF_FFFF, 0, 0]
     );
-    assert_eq!(MuteType::RC.bank().get(), 0x20);
-    assert_eq!(MuteType::RC.index().get(), 0x22);
-    assert_eq!(MuteAmount::RC.bank().get(), 0x20);
-    assert_eq!(MuteAmount::RC.index().get(), 0x23);
+    assert_eq!(Rpn::ORCHESTRAL_MUTE_TYPE.bank().get(), 0x20);
+    assert_eq!(Rpn::ORCHESTRAL_MUTE_TYPE.index().get(), 0x22);
+    assert_eq!(Rpn::ORCHESTRAL_MUTE_AMOUNT.bank().get(), 0x20);
+    assert_eq!(Rpn::ORCHESTRAL_MUTE_AMOUNT.index().get(), 0x23);
     let Ok(Message::Midi2(_, voice)) = Ump([0x4020_2022, 0x1800_0000, 0, 0]).decode() else {
         panic!("not a Midi2 message")
     };
-    assert_eq!(
-        MuteMessage::from_voice(&voice),
-        Some(Ok(MuteMessage::Type(Cup)))
-    );
+    assert_eq!(MuteMessage::from_voice(&voice), Ok(MuteMessage::Type(Cup)));
 }
 
 #[test]
 fn a_reserved_mute_type_is_refused_and_a_mute_amount_is_any_value() {
     // M2-123 Table 19: 0x80000000 to 0xCFFFFFFF are reserved.
     for value in [0x8000_0000, 0xCFFF_FFFF] {
-        let voice = Voice2::registered(MuteType::RC, ControlValue::new(value));
-        assert_eq!(
-            MuteMessage::from_voice(&voice),
-            Some(Err(ReservedMuteType(value)))
-        );
+        let voice = Voice2::registered(Rpn::ORCHESTRAL_MUTE_TYPE, ControlValue::new(value));
+        let Err(MuteError::Reserved(reserved)) = MuteMessage::from_voice(&voice) else {
+            panic!("{value:#010x} is reserved")
+        };
+        assert_eq!(reserved.value(), value);
     }
-    let amount = Voice2::registered(MuteAmount::RC, ControlValue::new(0x1234_5678));
+    let amount = Voice2::registered(Rpn::ORCHESTRAL_MUTE_AMOUNT, ControlValue::new(0x1234_5678));
     assert_eq!(
         MuteMessage::from_voice(&amount),
-        Some(Ok(MuteMessage::Amount(MuteAmount::new(0x1234_5678))))
+        Ok(MuteMessage::Amount(MuteAmount::new(0x1234_5678)))
     );
 }
 
@@ -126,7 +123,7 @@ fn another_registered_controller_is_not_a_mute_message() {
         };
         assert_eq!(
             MuteMessage::from_voice(&voice),
-            None,
+            Err(MuteError::NotAMuteMessage),
             "{bank:#x}/{index:#x}"
         );
     }
@@ -135,7 +132,7 @@ fn another_registered_controller_is_not_a_mute_message() {
             NoteNumber::of(60),
             tutti_ump::NoteVelocity::new(0)
         )),
-        None
+        Err(MuteError::NotAMuteMessage)
     );
 }
 
@@ -165,7 +162,7 @@ fn table_20_playing_position_anchors() {
     assert_eq!(PlayingPosition::NORMAL.get(), 0x8000_0000);
     assert_eq!(PlayingPosition::NUT.get(), 0xFFFF_FFFF);
     assert_eq!(PlayingPosition::default(), PlayingPosition::NORMAL);
-    assert_eq!(PlayingPosition::CONTROLLER, 0x0C);
+    assert_eq!(RegisteredPerNoteController::PlayingPosition.number(), 0x0C);
 }
 
 #[test]
