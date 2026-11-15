@@ -14,6 +14,15 @@
 //!            = base_ramp[i], before that
 //! ```
 //!
+//! A circular param ([`UnitParam::is_circular`], `Azimuth`) is wrapped onto
+//! `-180..180`, never clamped, and its moves take the short arc. **The port's
+//! frames jump by 360 where a move crosses the seam**: a glide from 170 to
+//! -170 reads ..., 179.9, -179.9, ... a step of about 360 between neighbouring
+//! frames though the bearing moved a fraction of a degree. A consumer that
+//! smooths or interpolates the value must glide on the arc
+//! ([`UnitParam::arc`], [`Azimuth::shortest_arc_to`]) and wrap on read, not
+//! subtract frames.
+//!
 //! An event source **replaces** the base (doc 014 §5.6): a port takes at
 //! most one. Modulation (offsets, depth, LFOs) is not the graph's: a
 //! control lane sums it and sends the value (doc 014).
@@ -256,7 +265,11 @@ impl ParamRange {
         max: f32::INFINITY,
     };
 
-    /// `min..=max`.
+    /// `min..=max`. For a circular param ([`UnitParam::is_circular`]) the
+    /// bounds read as an arc, `min` to `max` counter-clockwise, and `min` must
+    /// not exceed `max` (a crossed range is refused,
+    /// [`GraphInvalid::BadParamRange`](crate::GraphInvalid::BadParamRange));
+    /// [`arc`](Self::arc) writes one by its centre.
     #[must_use]
     pub const fn new(min: f32, max: f32) -> Self {
         Self { min, max }
@@ -276,12 +289,13 @@ impl ParamRange {
     ///
     /// ```
     /// use tutti_graph::ParamRange;
-    /// use tutti_types::{ArcDegrees, Azimuth};
+    /// use tutti_types::{ArcDegrees, Azimuth, UnitParam};
     ///
     /// // 20 degrees either side of straight behind.
     /// let behind = ParamRange::arc(Azimuth(180.0), ArcDegrees(20.0));
-    /// assert!(behind.contains(true, 180.0) && behind.contains(true, -170.0));
-    /// assert!(!behind.contains(true, 0.0));
+    /// let view = behind.view(Some(UnitParam::Azimuth));
+    /// assert!(view.contains(180.0) && view.contains(-170.0));
+    /// assert!(!view.contains(0.0));
     /// ```
     #[must_use]
     pub fn arc(centre: Azimuth, half_span: ArcDegrees) -> Self {
@@ -299,46 +313,79 @@ impl ParamRange {
         (self.min.min(self.max), self.max.max(self.min))
     }
 
-    /// The arc as its centre and half-span in degrees, or `None` when it is
-    /// the whole circle (a half-span of 180° or more, or a bound that is not
-    /// finite: the unbounded range).
-    fn arc_parts(self) -> Option<(f32, f32)> {
+    /// The range as `param` reads it, resolved once: the form a per-block
+    /// loop constrains by ([`RangeView::constrain`]). `None` is a param of
+    /// no tutti unit (a plugin's), which is a line.
+    #[must_use]
+    pub fn view(self, param: Option<UnitParam>) -> RangeView {
         let (lo, hi) = self.ordered();
+        if !param.is_some_and(UnitParam::is_circular) {
+            return RangeView::Line { lo, hi };
+        }
         let half = (f64::from(hi) - f64::from(lo)) * 0.5;
         if !(lo.is_finite() && hi.is_finite()) || half >= 180.0 {
-            return None;
+            return RangeView::Circle;
         }
-        let centre = ((f64::from(lo) + f64::from(hi)) * 0.5) as f32;
-        Some((centre, half as f32))
+        RangeView::Arc {
+            centre: ((f64::from(lo) + f64::from(hi)) * 0.5) as f32,
+            half: half as f32,
+        }
     }
 
-    /// How far the range reaches: `max - min` for a line, the arc's length
-    /// for a circular param (`circular`: [`UnitParam::is_circular`]), 360 for
-    /// the whole circle and for an unbounded range. What a modulation depth
-    /// scales by; infinite for an unbounded line.
+    /// Whether `param` may hold this range: a circular param's bounds are in
+    /// order (see [`arc`](Self::arc)); a line orders them, so any range fits.
     #[must_use]
-    pub fn span(self, circular: bool) -> f64 {
-        if circular {
-            self.arc_parts().map_or(360.0, |(_, h)| f64::from(h) * 2.0)
-        } else {
-            let (lo, hi) = self.ordered();
-            f64::from(hi) - f64::from(lo)
+    pub(crate) fn fits(self, param: UnitParam) -> bool {
+        !param.is_circular() || self.min <= self.max
+    }
+}
+
+/// A [`ParamRange`] as a param reads it ([`ParamRange::view`]): the one form
+/// a block's loop constrains values by, with the arc's centre and half-span
+/// worked out once.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RangeView {
+    /// A line: values are clamped to `lo..=hi`.
+    Line {
+        /// The lowest value.
+        lo: f32,
+        /// The highest value.
+        hi: f32,
+    },
+    /// The whole circle: values are wrapped onto `-180..180`.
+    Circle,
+    /// An arc of the circle: values are wrapped, then held to the arc.
+    Arc {
+        /// The arc's middle, in degrees (not wrapped).
+        centre: f32,
+        /// Its half-span, in `0..180`.
+        half: f32,
+    },
+}
+
+impl RangeView {
+    /// How far the range reaches: `hi - lo` for a line (infinite when
+    /// unbounded), the arc's length for an arc, 360 for the whole circle. What
+    /// a modulation depth scales by.
+    #[must_use]
+    pub fn span(self) -> f64 {
+        match self {
+            Self::Line { lo, hi } => f64::from(hi) - f64::from(lo),
+            Self::Circle => 360.0,
+            Self::Arc { half, .. } => f64::from(half) * 2.0,
         }
     }
 
-    /// `value` held to the range: clamped to `min..=max` for a line, and for a
-    /// circular param wrapped onto the circle (`-180..180`) and, inside a
-    /// bounded arc, held to the nearer end of it.
+    /// `value` held to the range: clamped for a line; wrapped onto the circle
+    /// (`-180..180`) for the whole circle; wrapped and held to the nearer end
+    /// of an arc, by the short way round.
     #[inline]
     #[must_use]
-    pub fn constrain(self, circular: bool, value: f32) -> f32 {
-        if !circular {
-            let (lo, hi) = self.ordered();
-            return value.clamp(lo, hi);
-        }
-        match self.arc_parts() {
-            None => Azimuth(value).wrap().get(),
-            Some((centre, half)) => {
+    pub fn constrain(self, value: f32) -> f32 {
+        match self {
+            Self::Line { lo, hi } => value.clamp(lo, hi),
+            Self::Circle => Azimuth(value).wrap().get(),
+            Self::Arc { centre, half } => {
                 let d = Azimuth(value - centre).wrap().get();
                 Azimuth(centre + d.clamp(-half, half)).wrap().get()
             }
@@ -346,24 +393,14 @@ impl ParamRange {
     }
 
     /// Whether `value` is within the range: between the bounds for a line, on
-    /// the arc for a circular param. Every bearing is within the whole circle.
+    /// the arc for an arc, and any finite bearing for the whole circle.
     #[must_use]
-    pub fn contains(self, circular: bool, value: f32) -> bool {
-        if !circular {
-            let (lo, hi) = self.ordered();
-            return (lo..=hi).contains(&value);
+    pub fn contains(self, value: f32) -> bool {
+        match self {
+            Self::Line { lo, hi } => (lo..=hi).contains(&value),
+            Self::Circle => value.is_finite(),
+            Self::Arc { centre, half } => Azimuth(value - centre).wrap().get().abs() <= half,
         }
-        match self.arc_parts() {
-            None => value.is_finite(),
-            Some((centre, half)) => Azimuth(value - centre).wrap().get().abs() <= half,
-        }
-    }
-
-    /// Whether a circular param may hold this range: its bounds are in order
-    /// (see [`arc`](Self::arc)). Always true for a line, which orders them.
-    #[must_use]
-    pub(crate) fn fits(self, circular: bool) -> bool {
-        !circular || self.min <= self.max
     }
 }
 
@@ -405,7 +442,9 @@ pub enum ParamInput<'a> {
     /// Nothing modulates it: use the param's own control (the base), as the
     /// node would with no graph around it. The fast path.
     Base,
-    /// The param's value at each frame of the block, and its corners.
+    /// The param's value at each frame of the block, and its corners. A
+    /// circular param's values are wrapped, so they step by about 360 across
+    /// the seam (see the module docs).
     Frames {
         /// The value at each frame.
         values: &'a [f32],
@@ -587,10 +626,7 @@ impl Ramp {
     /// param.
     #[inline]
     fn at(&self, t: f32) -> f32 {
-        match self.param {
-            Some(p) => self.piece().value_of(p, t),
-            None => self.piece().value(t),
-        }
+        self.piece().value(self.param, t)
     }
 
     /// The value at this frame, after any move started on it. A ramp: its
@@ -965,8 +1001,11 @@ impl ParamState {
     /// block: its event source this plan and the source's sorted events
     /// (`None` when nothing drives it), and its base (`None` for a node that
     /// cannot say, which then reads its own control, undriven). The value
-    /// is clamped to the port's live range as it stands at this block's
-    /// start ([`ParamRanges`]).
+    /// is held to the port's live range as it stands at this block's start
+    /// ([`ParamRanges`]): clamped, or for a circular param wrapped (and held
+    /// to its arc). A circular param's frames jump by 360 across the seam
+    /// (see the module docs): a consumer smooths on the arc, not on the
+    /// frames.
     pub(crate) fn port(
         &mut self,
         k: usize,
@@ -1011,7 +1050,7 @@ impl ParamState {
                     events,
                     param,
                     out,
-                    |i| Piece::ramp_of_at(param.param, from, b1, i, frames),
+                    |i| Piece::ramp_at(Some(param.param), from, b1, i, frames),
                     &mut corners,
                 );
                 self.corner_count[k] = corners.len();
@@ -1023,14 +1062,14 @@ impl ParamState {
                     .ranges
                     .as_ref()
                     .map_or(ParamRange::UNBOUNDED, |r| r.load(k));
-                let circular = param.param.is_circular();
+                let view = range.view(Some(param.param));
                 for o in out.iter_mut() {
-                    *o = range.constrain(circular, *o);
+                    *o = view.constrain(*o);
                 }
             }
             None => {
                 for (i, o) in out.iter_mut().enumerate() {
-                    *o = Piece::ramp_of_at(param.param, from, b1, i, frames);
+                    *o = Piece::ramp_at(Some(param.param), from, b1, i, frames);
                 }
             }
         }
@@ -1079,39 +1118,38 @@ mod tests {
     use crate::time::Offset;
     use tutti_types::{Hz, ParamKey, SamplePosition, Samples};
 
+    const AZ: Option<UnitParam> = Some(UnitParam::Azimuth);
+    const EL: Option<UnitParam> = Some(UnitParam::Elevation);
+
     /// An arc across ±180 contains 180 (and its neighbours either side) and
     /// not 0, where `new(170, -170)` ordered would read the opposite arc.
     #[test]
     fn an_arc_across_180_contains_180_and_not_0() {
-        let behind = ParamRange::arc(Azimuth(180.0), ArcDegrees(20.0));
+        let behind = ParamRange::arc(Azimuth(180.0), ArcDegrees(20.0)).view(AZ);
         for v in [180.0, -180.0, 165.0, -165.0, 160.0, -160.0] {
-            assert!(behind.contains(true, v), "{v}");
+            assert!(behind.contains(v), "{v}");
         }
         for v in [0.0, 90.0, -90.0, 159.0, -159.0] {
-            assert!(!behind.contains(true, v), "{v}");
+            assert!(!behind.contains(v), "{v}");
         }
         // The same bounds as a line are the opposite, wide range: the trap.
-        let line = ParamRange::new(160.0, 200.0);
-        assert!(line.contains(false, 180.0) && !line.contains(false, -180.0));
-        assert_eq!(behind.span(true), 40.0);
+        let line = ParamRange::new(160.0, 200.0).view(EL);
+        assert!(line.contains(180.0) && !line.contains(-180.0));
+        assert_eq!(behind.span(), 40.0);
     }
 
     /// A circular range's span is its arc's length, the whole circle for an
     /// unbounded or wide one; a line's is `max - min`.
     #[test]
     fn a_circular_ranges_span_is_its_arcs_length() {
-        assert_eq!(ParamRange::UNBOUNDED.span(true), 360.0);
-        assert_eq!(ParamRange::new(-180.0, 180.0).span(true), 360.0);
-        assert_eq!(
-            ParamRange::arc(Azimuth(0.0), ArcDegrees(90.0)).span(true),
-            180.0
-        );
-        assert_eq!(
-            ParamRange::arc(Azimuth(0.0), ArcDegrees(400.0)).span(true),
-            360.0
-        );
-        assert_eq!(ParamRange::new(-90.0, 90.0).span(false), 180.0);
-        assert!(ParamRange::UNBOUNDED.span(false).is_infinite());
+        assert_eq!(ParamRange::UNBOUNDED.view(AZ).span(), 360.0);
+        assert_eq!(ParamRange::new(-180.0, 180.0).view(AZ).span(), 360.0);
+        let arc = |half| ParamRange::arc(Azimuth(0.0), ArcDegrees(half)).view(AZ);
+        assert_eq!(arc(90.0).span(), 180.0);
+        assert_eq!(arc(400.0).span(), 360.0);
+        assert_eq!(ParamRange::new(-90.0, 90.0).view(EL).span(), 180.0);
+        assert!(ParamRange::UNBOUNDED.view(EL).span().is_infinite());
+        assert!(ParamRange::UNBOUNDED.view(None).span().is_infinite());
     }
 
     /// `constrain` wraps for a circle (190 is -170, not 180) and clamps for a
@@ -1119,14 +1157,14 @@ mod tests {
     #[test]
     fn constrain_wraps_a_circle_and_clamps_a_line() {
         let r = ParamRange::new(-180.0, 180.0);
-        assert_eq!(r.constrain(true, 190.0), -170.0);
-        assert_eq!(r.constrain(false, 190.0), 180.0);
-        let arc = ParamRange::arc(Azimuth(90.0), ArcDegrees(30.0));
-        assert_eq!(arc.constrain(true, 100.0), 100.0);
-        assert_eq!(arc.constrain(true, 170.0), 120.0);
-        assert_eq!(arc.constrain(true, 10.0), 60.0);
+        assert_eq!(r.view(AZ).constrain(190.0), -170.0);
+        assert_eq!(r.view(EL).constrain(190.0), 180.0);
+        let arc = ParamRange::arc(Azimuth(90.0), ArcDegrees(30.0)).view(AZ);
+        assert_eq!(arc.constrain(100.0), 100.0);
+        assert_eq!(arc.constrain(170.0), 120.0);
+        assert_eq!(arc.constrain(10.0), 60.0);
         assert_eq!(
-            arc.constrain(true, -170.0),
+            arc.constrain(-170.0),
             120.0,
             "the near end is the short way round"
         );

@@ -8,10 +8,11 @@
 //!   and a value past the bound is clamped;
 //! - a bounded range of a circular param written crossed is refused.
 
+use tutti_graph::testing as common;
 use tutti_graph::{
-    CommitError, Cx, Editor, Event, EventOut, Executor, GraphInvalid, Io, Law, Node, NodeKey,
-    ParamIn, ParamInput, ParamRange, ParamSegment, Prepare, Shape, Status, TransportPosition,
-    Unforkable,
+    CommitError, Cx, Editor, Event, EventOut, Executor, FadeLaw, GraphInvalid, Io, Law, Node,
+    NodeKey, ParamIn, ParamInput, ParamRange, ParamSegment, Prepare, Shape, Status,
+    TransportPosition, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
 use tutti_types::{ArcDegrees, Azimuth, ChannelLayout, MaxBlock, SampleRate, Samples, UnitParam};
@@ -21,9 +22,9 @@ const PROBE: u64 = 10;
 const SENDER: u64 = 1;
 
 /// Declares `Azimuth` and `Elevation`; writes each one's value at every frame
-/// to output 0 and 1 (the base 0 where nothing drives it).
+/// to output 0 and 1 (its base, `.0`, where nothing drives it).
 #[derive(Clone)]
-struct Probe;
+struct Probe(f32);
 
 impl Node for Probe {
     fn shape(&self) -> Shape {
@@ -37,8 +38,9 @@ impl Node for Probe {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
         let spare = self.shape().spare_out().expect("one readout");
+        let base = self.0;
         let write = |out: &mut [f32], p: ParamInput<'_>| match p {
-            ParamInput::Base => out.fill(0.0),
+            ParamInput::Base => out.fill(base),
             ParamInput::Frames { values, .. } => out.copy_from_slice(values),
         };
         let (a, e) = (io.param(0), io.param(1));
@@ -48,7 +50,7 @@ impl Node for Probe {
     }
     fn reset(&mut self) {}
     fn param_base(&self, _: usize) -> Option<f32> {
-        Some(0.0)
+        Some(self.0)
     }
 }
 
@@ -87,7 +89,7 @@ fn graph(
     ranges: &[(UnitParam, ParamRange)],
 ) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples(256))));
-    ed.insert(NodeKey(PROBE), "probe", Unforkable(Probe));
+    ed.insert(NodeKey(PROBE), "probe", Unforkable(Probe(0.0)));
     ed.insert(NodeKey(SENDER), "sender", Unforkable(Sender(sends)));
     let s = ed.spec_mut();
     s.topology.set_outputs((0..2).map(|c| {
@@ -258,4 +260,88 @@ fn a_crossed_range_on_a_circular_param_is_refused() {
         .set_param_range(at(UnitParam::Elevation), crossed);
     ed.commit()
         .expect("an arc, and a line's crossed bounds, commit");
+}
+
+/// The bearing a port reads through its declick: a probe whose base is
+/// `base` runs one block alone, then a source that steps to `target` on the
+/// next block's first frame is connected, so the port fades from the base to
+/// the source over the declick. The next block's frames, on `workers`
+/// participants (1: the serial executor).
+fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
+    let (mut ed, mut exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples(256))));
+    if workers > 1 {
+        exec.set_pool(Some(common::TestPool::new(workers)));
+    }
+    ed.insert(NodeKey(PROBE), "probe", Unforkable(Probe(base)));
+    let step = ParamSegment::unit(UnitParam::Azimuth, target, target, Samples(0), Law::Linear);
+    ed.insert(
+        NodeKey(SENDER),
+        "sender",
+        Unforkable(Sender(vec![(64, step)])),
+    );
+    ed.spec_mut().topology.set_outputs([Source::Node(OutPort {
+        node: NodeKey(PROBE),
+        port: 0,
+    })]);
+    ed.commit().expect("commits");
+    let mut one = |frames: usize| {
+        let mut out = vec![0.0; frames];
+        exec.process(
+            frames,
+            &TransportPosition::default(),
+            &[],
+            &mut [&mut out[..]],
+        );
+        ed.collect();
+        out
+    };
+    assert!(
+        one(64).iter().all(|&v| v == base),
+        "undriven reads the base"
+    );
+    drop(one);
+    ed.spec_mut().connect_param(
+        at(UnitParam::Azimuth),
+        EventOut {
+            node: NodeKey(SENDER),
+            port: 0,
+        },
+    );
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    let mut out = vec![0.0; 256];
+    exec.process(256, &TransportPosition::default(), &[], &mut [&mut out[..]]);
+    out
+}
+
+/// A bearing's declick between 170 and -170 (and back) crosses at 180 along the
+/// short arc, `wrap(hold + arc · gain)`: no frame of the fade is near 0 as an
+/// equal-amplitude blend of the two bearings would be, and the pool's render
+/// is the serial one bit for bit.
+#[test]
+fn a_bearings_declick_crosses_the_seam_and_the_pool_agrees_bit_for_bit() {
+    let d = tutti_graph::declick_frames(RATE).get();
+    for (base, target) in [(170.0f32, -170.0f32), (-170.0, 170.0)] {
+        let serial = declick(base, target, 1);
+        let pooled = declick(base, target, 4);
+        assert_eq!(
+            serial.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            pooled.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            "{base} to {target}: the pool differs from the serial render"
+        );
+        let arc = UnitParam::Azimuth.arc(base, target);
+        assert_eq!(arc.abs(), 20.0);
+        for (j, &v) in serial.iter().enumerate().take(d) {
+            let (_, inn) = FadeLaw::EqualAmplitude.gains(j, d);
+            let want = UnitParam::Azimuth.wrap(base + arc * inn);
+            assert!((v - want).abs() < 1e-3, "frame {j}: {v} against {want}");
+            assert!(v.abs() > 169.0, "frame {j}: {v} went through the middle");
+        }
+        let fade = &serial[..d];
+        assert!(
+            fade.iter().any(|&v| v > 179.0) && fade.iter().any(|&v| v < -179.0),
+            "{base} to {target}: the fade crossed the seam"
+        );
+        assert_eq!(serial[d], target, "and lands on the source");
+    }
 }

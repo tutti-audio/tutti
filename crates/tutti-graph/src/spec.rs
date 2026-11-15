@@ -640,10 +640,7 @@ impl GraphSpec {
                     errs.push(GraphInvalid::UnknownParamNode { at, missing: node });
                 }
             }
-            if m.range.min.is_nan()
-                || m.range.max.is_nan()
-                || !m.range.fits(at.param.param.is_circular())
-            {
+            if m.range.min.is_nan() || m.range.max.is_nan() || !m.range.fits(at.param.param) {
                 errs.push(GraphInvalid::BadParamRange { at, range: m.range });
             }
         }

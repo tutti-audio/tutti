@@ -122,6 +122,11 @@ pub enum UnitParam {
     /// A source's bearing (`Azimuth`, degrees): 0 front, 90 left, -90 right.
     /// A bearing wraps onto the circle, so a driven value past 180 is the
     /// same bearing as its wrap, and a panner takes the short arc to it.
+    ///
+    /// A param port reads it wrapped to `-180..180`, so its per-frame value
+    /// steps by about 360 where a move crosses the seam although the bearing
+    /// moved a little: smooth it on the arc ([`UnitParam::arc`],
+    /// [`Azimuth::shortest_arc_to`]), never on the difference of two frames.
     Azimuth = 28,
     /// A source's height (`Elevation`, degrees): 0 ear level, positive up,
     /// saturating at the poles (a height does not wrap).

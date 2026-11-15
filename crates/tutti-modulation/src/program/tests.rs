@@ -78,21 +78,24 @@ fn ramp() -> Arc<dyn Curve> {
 fn automation_replaces_the_knob() {
     let p = ControlProgram::from_curve(ramp());
     assert_eq!(
-        p.value_at(Some(1000.0), &at_beat(0.0), 100.0, &[]),
+        p.value_at(None, Some(1000.0), &at_beat(0.0), 100.0, &[]),
         Some(500.0)
     );
     assert_eq!(
-        p.value_at(Some(1000.0), &at_beat(2.0), 100.0, &[]),
+        p.value_at(None, Some(1000.0), &at_beat(2.0), 100.0, &[]),
         Some(250.0)
     );
-    assert_eq!(p.value_at(None, &at_beat(2.0), 100.0, &[]), Some(250.0));
+    assert_eq!(
+        p.value_at(None, None, &at_beat(2.0), 100.0, &[]),
+        Some(250.0)
+    );
     let empty: Arc<dyn Curve> = Arc::new(Trajectory::new());
     let p = ControlProgram::from_curve(empty);
     assert_eq!(
-        p.value_at(Some(1000.0), &at_beat(2.0), 100.0, &[]),
+        p.value_at(None, Some(1000.0), &at_beat(2.0), 100.0, &[]),
         Some(1000.0)
     );
-    assert_eq!(p.value_at(None, &at_beat(2.0), 100.0, &[]), None);
+    assert_eq!(p.value_at(None, None, &at_beat(2.0), 100.0, &[]), None);
     assert!(p.is_pure_automation());
     assert!(!ControlProgram::default().is_pure_automation());
 }
@@ -104,15 +107,15 @@ fn automation_replaces_the_knob() {
 fn a_layer_offsets_by_depth_times_span() {
     let p = program(vec![layer(1, beats(4.0), LfoShape::Square, amount(0.25))]);
     assert_eq!(
-        p.value_at(Some(1000.0), &at_beat(1.0), 800.0, &[]),
+        p.value_at(None, Some(1000.0), &at_beat(1.0), 800.0, &[]),
         Some(1200.0)
     );
     assert_eq!(
-        p.value_at(Some(1000.0), &at_beat(3.0), 800.0, &[]),
+        p.value_at(None, Some(1000.0), &at_beat(3.0), 800.0, &[]),
         Some(800.0)
     );
     assert_eq!(
-        p.value_at(Some(1000.0), &at_beat(3.0), f64::INFINITY, &[]),
+        p.value_at(None, Some(1000.0), &at_beat(3.0), f64::INFINITY, &[]),
         Some(1000.0)
     );
 }
@@ -141,12 +144,18 @@ fn an_inputs_offset_is_depth_times_span_times_x() {
     let p = ControlProgram::new(None, vec![], inputs).expect("valid");
     // 0.5 × 64 × 0.75 = 24.
     assert_eq!(
-        p.value_at(Some(100.0), &at_beat(0.0), 64.0, &[Some(0.75), None]),
+        p.value_at(None, Some(100.0), &at_beat(0.0), 64.0, &[Some(0.75), None]),
         Some(124.0)
     );
     // Unipolar x = 1: 0.25 × 64 × 1 = 16.
     assert_eq!(
-        p.value_at(Some(100.0), &at_beat(0.0), 64.0, &[Some(-0.25), Some(1.0)]),
+        p.value_at(
+            None,
+            Some(100.0),
+            &at_beat(0.0),
+            64.0,
+            &[Some(-0.25), Some(1.0)]
+        ),
         Some(100.0 - 8.0 + 16.0)
     );
 }
@@ -167,7 +176,10 @@ fn layers_sum_in_id_order_in_f64() {
         (0.5f64 + f64::from(0.1f32) * span + f64::from(0.7f32) * span + f64::from(0.3f32) * span)
             as f32;
     assert_eq!(want, 11_000_001.0);
-    assert_eq!(a.value_at(Some(0.5), &at_beat(1.0), span, &[]), Some(want));
+    assert_eq!(
+        a.value_at(None, Some(0.5), &at_beat(1.0), span, &[]),
+        Some(want)
+    );
 }
 
 /// Phase is a function of time, not of the program: a depth edit (a new
@@ -188,8 +200,8 @@ fn phase_survives_a_depth_edit() {
     let b = program(vec![layer(1, clock, LfoShape::Sine, amount(0.6))]);
     for k in 0..50 {
         let t = at_play(f64::from(k) * 977.0, 5);
-        let va = f64::from(a.value_at(Some(0.0), &t, 10.0, &[]).unwrap());
-        let vb = f64::from(b.value_at(Some(0.0), &t, 10.0, &[]).unwrap());
+        let va = f64::from(a.value_at(None, Some(0.0), &t, 10.0, &[]).unwrap());
+        let vb = f64::from(b.value_at(None, Some(0.0), &t, 10.0, &[]).unwrap());
         let phase = 3.0 * f64::from(k) * 977.0 / SR + 0.125;
         let want = (phase * std::f64::consts::TAU).sin() * 3.0;
         assert!((va - want).abs() < 1e-5, "{k}: {va} vs {want}");
@@ -321,25 +333,31 @@ fn automation_and_seconds_corners_are_on_their_clocks() {
 #[test]
 fn the_left_limit_is_the_level_before_a_jump() {
     let p = program(vec![layer(1, beats(4.0), LfoShape::Square, amount(1.0))]);
-    assert_eq!(p.value_at(Some(0.0), &at_beat(2.0), 1.0, &[]), Some(-1.0));
     assert_eq!(
-        p.value_before(Some(0.0), &at_beat(2.0), 1.0, &[]),
+        p.value_at(None, Some(0.0), &at_beat(2.0), 1.0, &[]),
+        Some(-1.0)
+    );
+    assert_eq!(
+        p.value_before(None, Some(0.0), &at_beat(2.0), 1.0, &[]),
         Some(1.0)
     );
     assert_eq!(
-        p.value_before(Some(0.0), &at_beat(2.5), 1.0, &[]),
+        p.value_before(None, Some(0.0), &at_beat(2.5), 1.0, &[]),
         Some(-1.0)
     );
     let r = program(vec![layer(1, beats(1.0), LfoShape::Random, amount(1.0))]);
-    let before = r.value_before(Some(0.0), &at_beat(3.0), 1.0, &[]);
-    assert_eq!(before, r.value_at(Some(0.0), &at_beat(2.5), 1.0, &[]));
-    assert_ne!(before, r.value_at(Some(0.0), &at_beat(3.0), 1.0, &[]));
+    let before = r.value_before(None, Some(0.0), &at_beat(3.0), 1.0, &[]);
+    assert_eq!(before, r.value_at(None, Some(0.0), &at_beat(2.5), 1.0, &[]));
+    assert_ne!(before, r.value_at(None, Some(0.0), &at_beat(3.0), 1.0, &[]));
     let mut e = Trajectory::new();
     e.add_breakpoint(Breakpoint::with_law(Beat(0.0), 100.0, Law::Hold));
     e.add_breakpoint(Breakpoint::new(Beat(2.0), 300.0));
     let a = ControlProgram::from_curve(Arc::new(e));
-    assert_eq!(a.value_at(None, &at_beat(2.0), 1.0, &[]), Some(300.0));
-    assert_eq!(a.value_before(None, &at_beat(2.0), 1.0, &[]), Some(100.0));
+    assert_eq!(a.value_at(None, None, &at_beat(2.0), 1.0, &[]), Some(300.0));
+    assert_eq!(
+        a.value_before(None, None, &at_beat(2.0), 1.0, &[]),
+        Some(100.0)
+    );
 }
 
 /// `depth_by` scales a layer's offset by a second wave mapped to `[0, 1]`,
@@ -361,9 +379,18 @@ fn depth_by_scales_the_offset_and_adds_its_corners() {
         ..layer(1, beats(4.0), LfoShape::Square, amount(1.0))
     };
     let p = program(vec![scaled(beats(8.0))]);
-    assert_eq!(p.value_at(Some(0.0), &at_beat(1.0), 1.0, &[]), Some(1.0));
-    assert_eq!(p.value_at(Some(0.0), &at_beat(3.0), 1.0, &[]), Some(-1.0));
-    assert_eq!(p.value_at(Some(0.0), &at_beat(5.0), 1.0, &[]), Some(0.0));
+    assert_eq!(
+        p.value_at(None, Some(0.0), &at_beat(1.0), 1.0, &[]),
+        Some(1.0)
+    );
+    assert_eq!(
+        p.value_at(None, Some(0.0), &at_beat(3.0), 1.0, &[]),
+        Some(-1.0)
+    );
+    assert_eq!(
+        p.value_at(None, Some(0.0), &at_beat(5.0), 1.0, &[]),
+        Some(0.0)
+    );
     let p = program(vec![scaled(beats(3.0))]);
     assert_eq!(p.next_corner(&at_beat(0.5)).beat, Some(Beat(1.5)));
 }
@@ -387,9 +414,9 @@ impl Curve for Thawed {
 #[test]
 fn a_program_holds_the_frozen_curve() {
     let p = ControlProgram::new(Some(Arc::new(Thawed)), vec![], vec![]).expect("valid");
-    assert_eq!(p.value_at(None, &at_beat(1.0), 1.0, &[]), Some(2.0));
+    assert_eq!(p.value_at(None, None, &at_beat(1.0), 1.0, &[]), Some(2.0));
     let p = ControlProgram::from_curve(Arc::new(Thawed));
-    assert_eq!(p.value_at(None, &at_beat(1.0), 1.0, &[]), Some(2.0));
+    assert_eq!(p.value_at(None, None, &at_beat(1.0), 1.0, &[]), Some(2.0));
 }
 
 /// Random steps replay: the same cycle gives the same value whatever the
@@ -562,8 +589,14 @@ fn a_curved_bipolar_depth_by_kinks_at_its_zero_crossings() {
     };
     let p = program(vec![scaled(curved)]);
     assert_eq!(p.next_corner(&at_beat(1.0)).beat, Some(Beat(2.0)));
-    assert_eq!(p.value_at(Some(0.0), &at_beat(1.0), 1.0, &[]), Some(0.5));
-    assert_eq!(p.value_at(Some(0.0), &at_beat(3.0), 1.0, &[]), Some(-0.5));
+    assert_eq!(
+        p.value_at(None, Some(0.0), &at_beat(1.0), 1.0, &[]),
+        Some(0.5)
+    );
+    assert_eq!(
+        p.value_at(None, Some(0.0), &at_beat(3.0), 1.0, &[]),
+        Some(-0.5)
+    );
     let unit = program(vec![scaled(DepthBy::UNIT)]);
     assert_eq!(unit.next_corner(&at_beat(1.0)).beat, None);
     let uni = Amount {
@@ -605,7 +638,7 @@ fn the_unit_depth_by_is_half_raw_plus_one_in_f64() {
             ((f64::from(raw) + 1.0) * 0.5).to_bits(),
             "raw {raw}"
         );
-        let got = program(vec![l]).value_at(Some(100.0), &at_beat(1.0), span, &[]);
+        let got = program(vec![l]).value_at(None, Some(100.0), &at_beat(1.0), span, &[]);
         assert_eq!(got, Some(want), "raw {raw}");
     }
 }
@@ -628,7 +661,10 @@ fn a_constant_wave_needs_no_clock() {
     assert!(c.is_constant());
     let p = program(vec![c.clone()]);
     for b in [0.0, 1.5, 7.0] {
-        assert_eq!(p.value_at(Some(10.0), &at_beat(b), 8.0, &[]), Some(6.0));
+        assert_eq!(
+            p.value_at(None, Some(10.0), &at_beat(b), 8.0, &[]),
+            Some(6.0)
+        );
     }
     assert_eq!(p.next_corner(&at_beat(0.0)), Corners::default());
     let scaled = Layer {
@@ -694,18 +730,18 @@ fn a_circular_params_value_takes_the_short_arc_and_wraps_its_sum() {
     for b in [0.5f64, 1.0, 1.9, 2.0, 2.1, 3.0, 3.5] {
         let want = az.wrap((170.0 + 5.0 * b) as f32);
         let got = p
-            .value_at_for(az, None, &at_beat(b), 360.0, &[])
+            .value_at(Some(az), None, &at_beat(b), 360.0, &[])
             .expect("a value");
         assert!((got - want).abs() < 1e-3, "beat {b}: {got} against {want}");
         assert!(got.abs() > 170.0 - 1e-3, "beat {b}: {got} left the seam");
         // The left limit agrees inside a piece.
         let before = p
-            .value_before_for(az, None, &at_beat(b), 360.0, &[])
+            .value_before(Some(az), None, &at_beat(b), 360.0, &[])
             .expect("a value");
         assert!((before - want).abs() < 1e-2, "beat {b}: {before}");
         // A height over the same curve is the straight line.
         let line = p
-            .value_at_for(UnitParam::Elevation, None, &at_beat(b), 360.0, &[])
+            .value_at(Some(UnitParam::Elevation), None, &at_beat(b), 360.0, &[])
             .expect("a value");
         assert!(
             (f64::from(line) - (170.0 - 85.0 * b)).abs() < 1e-3,
@@ -720,11 +756,17 @@ fn a_circular_params_value_takes_the_short_arc_and_wraps_its_sum() {
     };
     let q = program(vec![l]);
     assert_eq!(
-        q.value_at_for(az, Some(170.0), &at_beat(1.0), 360.0, &[]),
+        q.value_at(Some(az), Some(170.0), &at_beat(1.0), 360.0, &[]),
         Some(-154.0)
     );
     assert_eq!(
-        q.value_at_for(UnitParam::Elevation, Some(170.0), &at_beat(1.0), 360.0, &[]),
+        q.value_at(
+            Some(UnitParam::Elevation),
+            Some(170.0),
+            &at_beat(1.0),
+            360.0,
+            &[]
+        ),
         Some(206.0),
         "a line's sum is not wrapped"
     );

@@ -498,9 +498,7 @@ fn value_along(seg: &ParamSegment, from: f32, to: f32, j: f64) -> f32 {
     }
     let t = ((p + j) / l) as f32;
     if t < 1.0 {
-        let piece = Piece::new(from, to, seg.shape());
-        seg.unit_param()
-            .map_or_else(|| piece.value(t), |p| piece.value_of(p, t))
+        Piece::new(from, to, seg.shape()).value(seg.unit_param(), t)
     } else {
         to
     }
@@ -580,22 +578,14 @@ impl Block<'_> {
 
     /// The program's value at `time`, for the lane's param.
     fn value_at(&self, time: &ProgramTime, ins: &[Option<f32>]) -> Option<f32> {
-        match self.unit {
-            Some(p) => self
-                .program
-                .value_at_for(p, self.knob, time, self.span, ins),
-            None => self.program.value_at(self.knob, time, self.span, ins),
-        }
+        self.program
+            .value_at(self.unit, self.knob, time, self.span, ins)
     }
 
     /// The program's left limit at `time`, for the lane's param.
     fn value_before(&self, time: &ProgramTime, ins: &[Option<f32>]) -> Option<f32> {
-        match self.unit {
-            Some(p) => self
-                .program
-                .value_before_for(p, self.knob, time, self.span, ins),
-            None => self.program.value_before(self.knob, time, self.span, ins),
-        }
+        self.program
+            .value_before(self.unit, self.knob, time, self.span, ins)
     }
 
     /// The earliest arrival of an input still moving at `at`, in frames.
@@ -997,7 +987,7 @@ impl Node for ControlLaneNode {
             .filter(|k| k.is_finite());
         let live = s.range.load();
         let range = (live.min, live.max);
-        let span = live.span(s.unit.is_some_and(UnitParam::is_circular));
+        let span = live.view(s.unit).span();
         let span = if span.is_finite() && span >= 0.0 {
             span
         } else {

@@ -322,7 +322,7 @@ fn the_offset_at_raw_unit_is_shape_times_span_for_every_source_kind() {
                 ];
                 let c = run(&sources, &routes, &targets).expect("compiles");
                 let at_unit = |t: TargetKey, inputs: &[Option<f32>]| {
-                    c.programs[&t].value_at(Some(0.0), &at, span, inputs)
+                    c.programs[&t].value_at(None, Some(0.0), &at, span, inputs)
                 };
                 let case = format!("{polarity:?} {curve:?} raw {raw}");
                 assert_eq!(at_unit(target(1), &[]), Some(want), "LFO, {case}");
@@ -397,7 +397,7 @@ fn a_macro_move_changes_exactly_the_programs_it_reaches() {
     assert_eq!(changed, [target(1), target(2)]);
     let at = time(0.0, 0.0, 1);
     assert_eq!(
-        after.programs[&target(2)].value_at(Some(0.0), &at, 2.0, &[]),
+        after.programs[&target(2)].value_at(None, Some(0.0), &at, 2.0, &[]),
         Some(
             (-0.0 + f64::from(shape(-0.75, Depth::of(0.2), Polarity::Bipolar, Law::Linear)) * 2.0)
                 as f32
@@ -453,7 +453,7 @@ fn a_rate_edit_anchors_continuously() {
     let v = |play: f64| {
         let p = &after.programs[&target(1)];
         f64::from(
-            p.value_at(Some(0.0), &time(0.0, play, 7), 1000.0, &[None])
+            p.value_at(None, Some(0.0), &time(0.0, play, 7), 1000.0, &[None])
                 .expect("a value"),
         )
     };

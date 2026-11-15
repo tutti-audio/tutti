@@ -112,7 +112,7 @@ fn exp_is_the_exponential_and_geometric_at_log_ratio() {
     let k = (to / from).ln();
     for t in [0.25f32, 0.5, 0.75] {
         let want = f64::from(from) * (f64::from(to) / f64::from(from)).powf(f64::from(t));
-        let got = f64::from(Piece::new(from, to, Law::Exp(Curvature::of(k))).value(t));
+        let got = f64::from(Piece::new(from, to, Law::Exp(Curvature::of(k))).value(None, t));
         assert!(
             (got - want).abs() < 1e-3 * want,
             "geometric at {t}: {got} vs {want}"
@@ -229,7 +229,7 @@ fn linear_is_the_identity_on_the_unit_interval() {
             assert_eq!(Law::Linear.eval(t).to_bits(), t.to_bits());
             let (from, to) = (0.3f32, -7.9f32);
             assert_eq!(
-                Piece::new(from, to, Law::Linear).value(t).to_bits(),
+                Piece::new(from, to, Law::Linear).value(None, t).to_bits(),
                 (from + (to - from) * t).to_bits()
             );
         }

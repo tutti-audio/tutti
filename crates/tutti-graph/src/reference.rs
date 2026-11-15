@@ -1991,7 +1991,7 @@ fn ref_port(st: &mut RefParam, fresh: bool, p: RefPortIn<'_>) -> Option<(Vec<f32
                 r.target
             } else {
                 let t = into as f32 / r.len as f32;
-                tutti_curve::Piece::new(r.from, r.target, r.shape).value(t)
+                tutti_curve::Piece::new(r.from, r.target, r.shape).value(None, t)
             }
         };
         st.ramp.value = value;

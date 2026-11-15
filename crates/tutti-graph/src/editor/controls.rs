@@ -54,7 +54,7 @@ impl Editor {
     /// circular param (`ParamRange::arc` writes one), and
     /// [`GraphInvalid::UnknownParamNode`] for a key with no node.
     pub fn set_param_range(&mut self, at: ParamIn, range: ParamRange) -> Result<(), GraphInvalid> {
-        if range.min.is_nan() || range.max.is_nan() || !range.fits(at.param.param.is_circular()) {
+        if range.min.is_nan() || range.max.is_nan() || !range.fits(at.param.param) {
             return Err(GraphInvalid::BadParamRange { at, range });
         }
         if !self.spec.topology.nodes.contains_key(&at.node) {

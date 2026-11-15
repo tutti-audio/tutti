@@ -150,11 +150,11 @@ fn between_moves_from_one_value_to_the_other() {
 #[test]
 fn a_ramp_lands_on_its_target_at_the_last_frame() {
     for n in [1usize, 2, 3, 7, 64, 240, 4800] {
-        assert_eq!(Piece::ramp_at(0.3, -0.7, n - 1, n), -0.7, "n = {n}");
-        assert_eq!(Piece::ramp_at(0.3, 0.3, n - 1, n), 0.3, "n = {n}");
+        assert_eq!(Piece::ramp_at(None, 0.3, -0.7, n - 1, n), -0.7, "n = {n}");
+        assert_eq!(Piece::ramp_at(None, 0.3, 0.3, n - 1, n), 0.3, "n = {n}");
     }
-    assert_eq!(Piece::ramp_at(0.0, 8.0, 0, 4), 2.0);
-    assert_eq!(Piece::ramp_at(0.0, 8.0, 1, 4), 4.0);
-    assert_eq!(Piece::ramp_at(0.0, 8.0, 2, 4), 6.0);
-    assert_eq!(Piece::ramp_at(8.0, 0.0, 0, 4), 6.0);
+    assert_eq!(Piece::ramp_at(None, 0.0, 8.0, 0, 4), 2.0);
+    assert_eq!(Piece::ramp_at(None, 0.0, 8.0, 1, 4), 4.0);
+    assert_eq!(Piece::ramp_at(None, 0.0, 8.0, 2, 4), 6.0);
+    assert_eq!(Piece::ramp_at(None, 8.0, 0.0, 0, 4), 6.0);
 }

@@ -449,16 +449,13 @@ impl ParamSegment {
 
     /// The built-in param this moves, `None` for a foreign one: what decides
     /// whether it turns the short arc ([`UnitParam::is_circular`]). The
-    /// reading of a segment between frames
-    /// (`Piece::value_of(param, t)` at its progress) takes it.
+    /// reading of a segment between frames (`Piece::value(param, t)` at its
+    /// progress) takes it; a reader of many frames takes it once.
     pub fn unit_param(&self) -> Option<UnitParam> {
         if self.foreign {
             return None;
         }
-        u16::try_from(self.id)
-            .ok()
-            .and_then(|id| UnitAddr::try_from(id).ok())
-            .map(|a| a.param)
+        UnitParam::try_from((self.id & 0xFF) as u16).ok()
     }
 
     /// The raw position and length, for the graph's own param port, which is
@@ -481,10 +478,9 @@ pub(crate) fn segment_value(
     length: f32,
     j: u32,
 ) -> f32 {
-    match (segment_progress(position, length, j), param) {
-        (Some(t), Some(p)) => piece.value_of(p, t),
-        (Some(t), None) => piece.value(t),
-        (None, _) => piece.to,
+    match segment_progress(position, length, j) {
+        Some(t) => piece.value(param, t),
+        None => piece.to,
     }
 }
 
