@@ -3055,6 +3055,12 @@ impl Graph {
     /// root, and the commit that carries it crossfades the old root's outputs
     /// into the new root's over the declick length (`Editor::set_root_fade`),
     /// unless `hard`: the new root takes over at the commit's block.
+    /// Makes the root declaration last made a cut: the commit that carries
+    /// it renders no old root.
+    pub(crate) fn harden_root(&mut self) {
+        self.editor.set_root_fade(None);
+    }
+
     pub(crate) fn declare_root(
         &mut self,
         root: Option<tutti_types::ChannelTopology>,
@@ -3334,8 +3340,6 @@ fn render(
         output.fill(0.0);
         return;
     };
-    // A root change's old channels are rendered into scratch and not heard: a
-    // render with no device takes the new root at once.
     let (ins, outs, root) = (
         plan.global_inputs() as usize,
         plan.rendered_outputs(),
@@ -3345,10 +3349,26 @@ fn render(
     let inputs: Vec<&[f32]> = (0..ins)
         .map(|c| input.get(c).map_or(&[0.0f32][..], std::slice::from_ref))
         .collect();
+    let fade = exec.root_fade();
     let mut outputs: Vec<&mut [f32]> = scratch.iter_mut().map(|c| &mut c[..1]).collect();
     exec.process(1, transport, &inputs, &mut outputs);
+    // With no device there is no fold: the root's channels are the output's
+    // by index, and a root change crossfades channel by channel, the old
+    // root's channels after the new root's.
+    let gains = fade.map(|f| f.fade.law.gains(f.done.get(), f.fade.duration.get()));
     for (c, o) in output.iter_mut().enumerate() {
-        *o = scratch.get(c).filter(|_| c < root).map_or(0.0, |s| s[0]);
+        let new = scratch.get(c).filter(|_| c < root).map_or(0.0, |s| s[0]);
+        *o = match (fade, gains) {
+            (Some(f), Some((go, gn))) => {
+                let old = if c < f.width {
+                    scratch[root + c][0]
+                } else {
+                    0.0
+                };
+                old * go + new * gn
+            }
+            _ => new,
+        };
     }
 }
 

@@ -160,7 +160,7 @@ pub use instrument::{AddedInstrument, AnyNode, InstrumentHandle, NotInstrument};
 pub use jobs::{Job, JobFailed};
 pub use key::{
     Bus, BusSink, Channel, Connection, Edge, Event, EventInPort, EventOutPort, EventTapPort, Fanin,
-    InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root, Weighted, Wire,
+    InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root, RootDeclaration, Weighted, Wire,
 };
 #[cfg(feature = "plugin")]
 pub use main_session::{EditorView, MainPlugin, MainSession, Opened};

@@ -205,11 +205,32 @@ impl AudioSide {
             let inputs: Vec<&[f32]> = (0..ins).map(|_| &zeros[..]).collect();
             let mut planes: Vec<Vec<f32>> = vec![vec![0.0; len]; outs];
             let mut slices: Vec<&mut [f32]> = planes.iter_mut().map(|p| &mut p[..]).collect();
+            let fade = exec.root_fade();
             if exec.plan().is_some() {
                 exec.process(len, &self.transport, &inputs, &mut slices);
             }
-            for (o, p) in output.iter_mut().zip(planes.iter().take(root)) {
-                o[done..done + len].copy_from_slice(p);
+            for (c, o) in output.iter_mut().enumerate() {
+                let Some(new) = planes.get(c).filter(|_| c < root) else {
+                    continue;
+                };
+                o[done..done + len].copy_from_slice(new);
+                // A root change crossfades by index, the old root's channels
+                // after the new root's.
+                if let Some(f) = fade {
+                    for (i, x) in o[done..done + len].iter_mut().enumerate() {
+                        let was = if c < f.width {
+                            planes[root + c][i]
+                        } else {
+                            0.0
+                        };
+                        let (go, gn) = if f.done.get() + i < f.fade.duration.get() {
+                            f.fade.law.gains(f.done.get() + i, f.fade.duration.get())
+                        } else {
+                            (0.0, 1.0)
+                        };
+                        *x = was * go + *x * gn;
+                    }
+                }
             }
             done += len;
         }

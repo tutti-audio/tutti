@@ -59,6 +59,11 @@ pub(super) enum RingFrom {
     /// The old ring at this index is copied into the one built for the new
     /// length, and goes back in the commit.
     Move { from: u32 },
+    /// The old ring at this index is copied into the one built for it and
+    /// stays where it is, for the ring that takes it over: an old root's
+    /// channel, kept sounding while the new root's channel of the same source
+    /// goes on with the same history.
+    Copy { from: u32 },
 }
 
 /// An old event edge whose source's held keys are closed at its sink.
@@ -508,6 +513,19 @@ impl Stager {
                     caps.insert(d.key, cap);
                 }
                 None => match carried {
+                    // An old root's channel in a root crossfade's bank starts
+                    // with the history the root's own channel had.
+                    None if bank_origin(plan, &d.key)
+                        .and_then(|key| old_delays.get(&key))
+                        .filter(|_| cx.carry)
+                        .is_some() =>
+                    {
+                        let j = bank_origin(plan, &d.key).and_then(|key| old_delays.get(&key));
+                        rings.push(Some(Ring::Audio(AudioRing::new(d.len))));
+                        from.push(RingFrom::Copy {
+                            from: j.map_or(0, |&j| j as u32),
+                        });
+                    }
                     Some(j) if cx.old.is_some_and(|p| p.delays[j].len == d.len) => {
                         rings.push(None);
                         from.push(RingFrom::Keep {
@@ -1115,5 +1133,21 @@ pub(super) fn sort_by_offset(events: &mut [Event]) {
         let key = events[i].offset;
         let at = events[..i].partition_point(|e| e.offset <= key);
         events[at..=i].rotate_right(1);
+    }
+}
+
+/// The key an old root's channel of a root crossfade's bank had in the plan
+/// before the root changed: `key` as the bank's channel `base + c` names the
+/// root's channel `c`. `None` for a key that is not a bank channel's.
+fn bank_origin(plan: &Plan, key: &DelayKey) -> Option<DelayKey> {
+    let bank = plan.root_bank()?;
+    match *key {
+        DelayKey::Output { channel, from } if usize::from(channel) >= bank.base => {
+            Some(DelayKey::Output {
+                channel: channel - u16::try_from(bank.base).ok()?,
+                from,
+            })
+        }
+        _ => None,
     }
 }
