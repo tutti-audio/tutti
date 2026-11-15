@@ -16,7 +16,9 @@
 //! its handles read closed, and the entry reads failed.
 //!
 //! Each kind of entry is a [`PoolEntry`]; `audio_file` (feature `sampler`) and
-//! `soundfont` (feature `soundfont`) are the data kinds. A load's outcome lands
+//! `soundfont` (feature `soundfont`) are the data kinds, and
+//! `Session::plugin_entry` (feature `plugin`) declares a plugin, which a node
+//! then takes (`Session::add_pooled_plugin`). A load's outcome lands
 //! in [`Session::update`] as a [`SessionEvent::Pool`](crate::SessionEvent::Pool), and
 //! [`Session::pool_state`] reads where an entry stands.
 //!
@@ -63,6 +65,8 @@ pub use entry::{Declared, IntoPool, Life, Load, LoadError, PoolEntry, PoolSet, s
 pub use key::PoolKey;
 pub use open::OpenCx;
 pub use report::{PoolLoaded, PoolOutcome, PoolReport};
+#[cfg(feature = "plugin")]
+pub(crate) use table::Hold;
 pub(crate) use table::Pool;
 pub use table::{HandleError, PoolError, PoolEvent, PoolState, RetryError};
 

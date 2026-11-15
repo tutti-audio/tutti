@@ -184,8 +184,9 @@ pub use params::{ParamError, RangeError, TypedParamRef};
 pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 #[cfg(feature = "plugin")]
 pub use plugin::{
-    Plugin, PluginChange, PluginEvent, PluginHealth, PluginLoad, PluginLoadRequest, PluginLoaded,
-    PluginNode, SNAPSHOT_INTERVAL, StateRestore, StateView,
+    AddPluginError, LoadedPlugin, Plugin, PluginCause, PluginChange, PluginDeclaration,
+    PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginLoad, PluginLoadRequest,
+    PluginLoaded, PluginNode, PooledPlugin, SNAPSHOT_INTERVAL, StateRestore, StateView,
 };
 pub(crate) use pool::Pool;
 #[cfg(feature = "sampler")]

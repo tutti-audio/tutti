@@ -118,13 +118,6 @@ pub enum HandleError<K: fmt::Debug> {
 /// pool stops naming it: a node over it, a snapshot. Dropping it is the hold's
 /// end; the entry is released at the next update that finds no hold left.
 #[derive(Clone, Debug)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "a node over an entry and a snapshot take holds; neither exists yet"
-    )
-)]
 pub(crate) struct Hold {
     _claim: Arc<()>,
 }
@@ -808,8 +801,11 @@ impl Pool {
 
     /// A hold on `key`'s entry, `None` when the pool has none.
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "a node over an entry and a snapshot take holds")
+        not(any(test, feature = "plugin")),
+        expect(
+            dead_code,
+            reason = "a node over an entry (feature `plugin`) takes holds"
+        )
     )]
     pub(crate) fn hold(&self, key: &PoolKey) -> Option<Hold> {
         self.slots.get(key).map(|slot| Hold {
@@ -819,13 +815,34 @@ impl Pool {
 
     /// `E`'s handle for the loaded entry under `key`.
     #[cfg_attr(
-        not(any(test, feature = "sampler", feature = "soundfont")),
+        not(any(test, feature = "sampler", feature = "soundfont", feature = "plugin")),
         expect(
             dead_code,
-            reason = "the readers of the data kinds (features `sampler`, `soundfont`) are its callers"
+            reason = "the readers of the kinds (features `sampler`, `soundfont`, `plugin`) are its callers"
         )
     )]
     pub(crate) fn handle<K, E>(&self, key: &K) -> Result<E::Handle, HandleError<K>>
+    where
+        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        E: PoolEntry,
+    {
+        let (loaded, life) = self.loaded_with_life::<K, E>(key)?;
+        Ok(E::handle(loaded, life))
+    }
+
+    /// `E`'s loaded value under `key`, for a reader that makes its own handle.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn loaded<K, E>(&self, key: &K) -> Result<&E::Loaded, HandleError<K>>
+    where
+        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+        E: PoolEntry,
+    {
+        self.loaded_with_life::<K, E>(key).map(|(loaded, _)| loaded)
+    }
+
+    /// `E`'s loaded value under `key` and the entry's life: what a handle is
+    /// made of.
+    fn loaded_with_life<K, E>(&self, key: &K) -> Result<(&E::Loaded, &Life), HandleError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
         E: PoolEntry,
@@ -845,6 +862,17 @@ impl Pool {
         let loaded = loaded
             .downcast_ref::<E::Loaded>()
             .ok_or_else(|| HandleError::WrongKind(key.clone()))?;
-        Ok(E::handle(loaded, &slot.life))
+        Ok((loaded, &slot.life))
+    }
+
+    /// `E`'s loaded value under `key`, wherever the entry stands in the app's
+    /// set (declared or held): what a node over the entry takes its plugin from.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn loaded_of<E: PoolEntry>(&self, key: &PoolKey) -> Option<&E::Loaded> {
+        let slot = self
+            .slots
+            .get(key)
+            .filter(|slot| slot.kind == TypeId::of::<E>())?;
+        slot.loaded.as_ref()?.downcast_ref::<E::Loaded>()
     }
 }

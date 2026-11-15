@@ -361,6 +361,14 @@ pub enum LoadError {
     #[cfg(feature = "soundfont")]
     #[error(transparent)]
     SoundFont(Arc<tutti_sf2::Error>),
+    /// A plugin did not open.
+    #[cfg(feature = "plugin")]
+    #[error(transparent)]
+    Plugin(Arc<tutti_plugin_types::BridgeError>),
+    /// The plugin's id names no plugin of the catalog, or several.
+    #[cfg(feature = "plugin")]
+    #[error(transparent)]
+    Unresolved(tutti_plugin::catalog::BindError),
     /// The load's job did not finish: it panicked, or the spawner dropped it.
     #[error(transparent)]
     Job(#[from] JobFailed),

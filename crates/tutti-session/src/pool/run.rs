@@ -108,6 +108,15 @@ impl Session {
         self.pool_openings();
         self.pool.sweep();
         self.pool.poll_waiters();
+        #[cfg(feature = "plugin")]
+        let first = out.len();
         self.pool.drain_events(out);
+        // A node over a reloaded plugin entry swaps to what the reload brought.
+        #[cfg(feature = "plugin")]
+        {
+            let landed = out.split_off(first);
+            self.swap_pooled_plugins(&landed);
+            out.extend(landed);
+        }
     }
 }
