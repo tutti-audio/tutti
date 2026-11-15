@@ -8,7 +8,6 @@ use tutti_types::MaxBlock;
 
 use tutti_buffers::InterleavedMut;
 use tutti_graph::FadeLaw;
-use tutti_graph::MAX_ROOT_CHANNELS;
 use tutti_graph::Params;
 use tutti_graph::{
     Cx, ForkByClone, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
@@ -19,6 +18,7 @@ use tutti_session::{
     Crossfade, CrossfadeRefused, EventInPort, Feeder, InPort, OutPort, RemoveError, Root, Session,
     SessionEvent, SessionNode, root_width,
 };
+use tutti_types::MAX_CHANNELS;
 use tutti_types::{ChannelLayout, Drive, Hz, SampleRate, Samples, Seconds};
 use tutti_types::{Latency, Param, UnitParam};
 
@@ -300,7 +300,7 @@ fn removing_a_stranger_changes_nothing() {
 }
 
 /// `root_width` is `max(project, device)` clamped to
-/// `1..=MAX_ROOT_CHANNELS`; each row is one way the rule is load-bearing.
+/// `1..=MAX_CHANNELS`; each row is one way the rule is load-bearing.
 #[test]
 fn root_width_takes_the_wider_side_within_the_scratch_bounds() {
     let cases: &[(ChannelLayout, ChannelLayout, usize, &str)] = &[
@@ -332,7 +332,7 @@ fn root_width_takes_the_wider_side_within_the_scratch_bounds() {
         (
             ChannelLayout::from_count(64),
             ChannelLayout::from(32u16),
-            MAX_ROOT_CHANNELS,
+            MAX_CHANNELS,
             "nothing exceeds the render scratch",
         ),
         (

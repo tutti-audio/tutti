@@ -14,7 +14,7 @@ use tutti_graph::{
     Cx, HasParam, HasParams, IntoNode, Io, Node, NodeParts, OutBus, ParamNode, ParamSet, Prepare,
     Shape, Status,
 };
-use tutti_types::{Latency, MAX_BUS_CHANNELS, MaxBlock, SampleRate, Samples, Tail};
+use tutti_types::{Latency, MAX_CHANNELS, MaxBlock, SampleRate, Samples, Tail};
 
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
 
@@ -151,19 +151,18 @@ impl<K: Kernel> KernelNode<K> {
             return;
         }
         let (ins, mut outs) = io.split();
-        let mut input: [&[f32]; MAX_BUS_CHANNELS] = [&[]; MAX_BUS_CHANNELS];
+        let mut input: [&[f32]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
         for (c, slot) in input.iter_mut().enumerate().take(self.inputs) {
             *slot = &ins.get(c)[frames.clone()];
         }
-        let mut output: [&mut [f32]; MAX_BUS_CHANNELS] =
-            core::array::from_fn(|_| Default::default());
+        let mut output: [&mut [f32]; MAX_CHANNELS] = core::array::from_fn(|_| Default::default());
         let mut width = 0;
         for (slot, ch) in output.iter_mut().zip(outs.bus(self.out).into_channels()) {
             *slot = &mut ch[frames.clone()];
             width += 1;
         }
         // Both views are whole planes of `frames.len()` frames, at most
-        // `MAX_BUS_CHANNELS` wide; a bus with no channels is the one refusal, and it has
+        // `MAX_CHANNELS` wide; a bus with no channels is the one refusal, and it has
         // nothing to render.
         if let (Ok(input), Ok(output)) = (
             Planes::new(&input[..self.inputs]),

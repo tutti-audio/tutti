@@ -49,7 +49,6 @@ use cpal::traits::{DeviceTrait, StreamTrait};
 use tutti_buffers::Fold;
 use tutti_buffers::{InterleavedMut, Pull, Source};
 use tutti_codec::{FileOut, Format, Spec};
-use tutti_graph::TapId;
 use tutti_graph::{InletRing, TapReader, TapWriter};
 use tutti_rt::Drained;
 use tutti_types::SampleRate;
@@ -270,8 +269,7 @@ impl MicIn {
         let width = select.dst_layout();
 
         let faults = Arc::new(StreamFaults::new());
-        let (reader, rec) =
-            TapReader::pair(TapId(0), usize::from(width.count()), Samples(RING_FRAMES));
+        let (reader, rec) = TapReader::pair(usize::from(width.count()), Samples(RING_FRAMES));
         let (ring, mon) = if monitor {
             // The ring carries the rate the stream runs at, so whoever takes it
             // into a graph can check it there.

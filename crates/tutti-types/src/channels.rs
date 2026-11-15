@@ -8,6 +8,12 @@
 //! `new` returning `Option`; a wider integer converts through a refusing
 //! `TryFrom`.
 
+/// The most channels one bus, the root, a sampler voice or a speaker layout holds: sixteen,
+/// which is a 7.1.4 bed with room to spare and a third-order ambisonic signal exactly.
+///
+/// A width past it is refused where it is stated, never truncated.
+pub const MAX_CHANNELS: usize = 16;
+
 /// How many audio channels a signal, node port, bus, wave, or device carries.
 ///
 /// The shared "mono vs stereo vs N" vocabulary across the whole engine, in

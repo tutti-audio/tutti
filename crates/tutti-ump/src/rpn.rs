@@ -1,6 +1,6 @@
 //! The address of a Registered Parameter Number.
 
-use crate::U7;
+use crate::{U7, U14};
 
 /// The address of a Registered Controller (RPN): a 7-bit bank and a 7-bit
 /// index (M2-104 section 7.4.7), the two halves a
@@ -85,6 +85,75 @@ impl Rpn {
     }
 }
 
+/// The data of a Registered Controller whose value is two 7-bit fields (M2-104
+/// section 7.4.7.1, M2-115 section 4.1): the MSB in the top 7 bits of the 32-bit
+/// MIDI 2.0 value, the LSB in the 7 below, and the 18 bits under them unused.
+/// The pitch bend range is whole semitones and cents, the modulation depth range
+/// semitones and 100/128 cents, the channel tuning a 14-bit value or its MSB.
+///
+/// ```
+/// use tutti_ump::{RegisteredData, U7};
+///
+/// let data = RegisteredData::new(U7::of(2), U7::of(50));
+/// assert_eq!(data.to_word(), 2 << 25 | 50 << 18);
+/// assert_eq!(RegisteredData::from_word(data.to_word()), data);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RegisteredData {
+    msb: U7,
+    lsb: U7,
+}
+
+impl RegisteredData {
+    /// The data of `msb` and `lsb`.
+    #[must_use]
+    pub const fn new(msb: U7, lsb: U7) -> Self {
+        Self { msb, lsb }
+    }
+
+    /// The two fields of a 32-bit value; the 18 bits below them are ignored.
+    #[must_use]
+    pub const fn from_word(word: u32) -> Self {
+        Self {
+            msb: U7::masked((word >> 25) as u8),
+            lsb: U7::masked((word >> 18) as u8),
+        }
+    }
+
+    /// The 32-bit value, zero-extended below the fields.
+    #[must_use]
+    pub const fn to_word(self) -> u32 {
+        (self.msb.get() as u32) << 25 | (self.lsb.get() as u32) << 18
+    }
+
+    /// The data of a 14-bit value `MSB << 7 | LSB`.
+    #[must_use]
+    pub const fn from_fourteen(value: U14) -> Self {
+        Self {
+            msb: value.msb(),
+            lsb: value.lsb(),
+        }
+    }
+
+    /// The fields as the 14-bit value `MSB << 7 | LSB`.
+    #[must_use]
+    pub const fn fourteen(self) -> U14 {
+        U14::from_halves(self.msb, self.lsb)
+    }
+
+    /// The most significant field.
+    #[must_use]
+    pub const fn msb(self) -> U7 {
+        self.msb
+    }
+
+    /// The least significant field.
+    #[must_use]
+    pub const fn lsb(self) -> U7 {
+        self.lsb
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,5 +182,19 @@ mod tests {
         let rpn = Rpn::new(U7::of(0x12), U7::of(0x34));
         assert_eq!((rpn.bank().get(), rpn.index().get()), (0x12, 0x34));
         assert_ne!(rpn, Rpn::new(U7::of(0x34), U7::of(0x12)));
+    }
+
+    /// The two fields are the top 14 bits, and the 18 bits under them are ignored.
+    /// Spec: m2-104/7.4.7.1#1
+    #[test]
+    fn registered_data_reads_the_top_fourteen_bits() {
+        let data = RegisteredData::from_word(0xFFFF_FFFF);
+        assert_eq!((data.msb().get(), data.lsb().get()), (127, 127));
+        assert_eq!(data.fourteen(), U14::MAX);
+        assert_eq!(
+            RegisteredData::from_fourteen(U14::of(0x2001)).to_word(),
+            0x2001 << 18
+        );
+        assert_eq!(RegisteredData::from_word(0x0003_FFFF).to_word(), 0);
     }
 }

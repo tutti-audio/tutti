@@ -93,7 +93,7 @@ impl std::fmt::Debug for LaunchedServer {
 /// A user retrying a failing plugin a few times accumulates them.
 ///
 /// So the fallible work is done in one closure and the result captured, with
-/// teardown unconditional afterwards — the shape `probe::probe_plugin` already
+/// teardown unconditional afterwards — the shape the probe's `run` already
 /// uses. Writing it as a sequence of `?` statements is what leaked; making the
 /// teardown structural rather than remembered is the point.
 ///

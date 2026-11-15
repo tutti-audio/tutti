@@ -49,7 +49,7 @@ fn state(outputs: usize, tap_open: bool) -> (Arc<AudioCallbackState>, Option<Tap
             .flatten()
             .copied()
             .collect();
-        ed.open_tap(TapId(0), sources, TapAlign::ToOutput, Samples(8192))
+        ed.open_tap(TapId::of(1), sources, TapAlign::ToOutput, Samples(8192))
             .expect("the sources exist")
     });
     ed.commit().expect("commits");

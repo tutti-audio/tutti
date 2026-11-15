@@ -62,15 +62,15 @@ fn topology_of_mask(channels: u16, mask: u32) -> ChannelTopology {
 #[test]
 fn a_wave_mask_names_each_channels_speaker() {
     assert_eq!(
-        topology_of_mask(4, 0x33).positions(),
+        topology_of_mask(4, 0x33).positions().unwrap(),
         [FrontLeft, FrontRight, BackLeft, BackRight]
     );
     assert_eq!(
-        topology_of_mask(4, 0x603).positions(),
+        topology_of_mask(4, 0x603).positions().unwrap(),
         [FrontLeft, FrontRight, SideLeft, SideRight]
     );
     assert_eq!(
-        topology_of_mask(6, 0x3F).positions(),
+        topology_of_mask(6, 0x3F).positions().unwrap(),
         [
             FrontLeft,
             FrontRight,
@@ -82,10 +82,10 @@ fn a_wave_mask_names_each_channels_speaker() {
     );
     assert_eq!(
         topology_of_mask(6, 0x60F),
-        ChannelTopology::smpte(ChannelLayout::from(6u16)).unwrap()
+        ChannelTopology::assumed(ChannelLayout::from(6u16))
     );
     assert_eq!(
-        topology_of_mask(3, 0x7).positions(),
+        topology_of_mask(3, 0x7).positions().unwrap(),
         [FrontLeft, FrontRight, FrontCenter]
     );
 }
@@ -138,7 +138,7 @@ fn the_fixtures_state_their_speakers() {
     ] {
         let path = asset(name);
         let wave = Wave::read(&path).expect(name);
-        assert_eq!(wave.topology().positions(), expected, "{name}");
+        assert_eq!(wave.topology().positions().unwrap(), expected, "{name}");
         assert_eq!(wave.channels(), expected.len(), "{name}");
         let stream = FileIn::open(&path).expect(name);
         assert_eq!(stream.topology(), wave.topology(), "{name}: stream");
@@ -204,7 +204,7 @@ fn a_vorbis_six_decodes_in_the_topologys_order() {
         let x = &wave.channel(c)[rate / 4..rate * 3 / 4];
         x.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count()
     };
-    for (c, &speaker) in wave.topology().positions().iter().enumerate() {
+    for (c, &speaker) in wave.topology().positions().unwrap().iter().enumerate() {
         let expected = hz(speaker) / 2;
         assert!(
             crossings(c).abs_diff(expected) <= 1,

@@ -114,7 +114,7 @@ impl MachineControlFollower {
     /// Whether the follower is in `group`.
     #[must_use]
     pub fn in_group(&self, group: SysexDeviceId) -> bool {
-        self.groups >> group.get().get() & 1 != 0
+        self.groups >> group.get() & 1 != 0
     }
 
     /// Whether a command to `to` is for this device: the all-call, its own ID
@@ -185,7 +185,7 @@ impl MachineControlFollower {
             },
             MmcCommand::Group(MmcGroup::Assign { group, devices }) => {
                 if devices.iter().any(|d| d == Recipient::Device(self.device)) {
-                    self.groups |= 1 << group.get().get();
+                    self.groups |= 1 << group.get();
                 }
             }
             MmcCommand::Group(MmcGroup::DisAssign { group, devices }) => {
@@ -195,7 +195,7 @@ impl MachineControlFollower {
                 {
                     match group {
                         Recipient::AllCall => self.groups = 0,
-                        Recipient::Device(group) => self.groups &= !(1 << group.get().get()),
+                        Recipient::Device(group) => self.groups &= !(1 << group.get()),
                     }
                 }
             }

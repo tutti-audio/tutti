@@ -256,8 +256,8 @@ pub use error::{Error, Result};
 pub use port::{HardwareMidiInputs, InputProducerHandle, PortInfo, Pushed, StreamDrain};
 pub use process::{ProcessChange, ReportAsk, ReportError, ReportPeer};
 pub use profiles::{
-    ChannelCount, ChannelProfile, ListedProfile, PeerProfiles, ProfileError, ProfileSwitch,
-    ProfilesChange, Whole, WholeProfile,
+    ChannelCount, ChannelProfile, ListedProfile, NotAChannelCount, PeerProfiles, ProfileError,
+    ProfileSwitch, ProfilesChange, Whole, WholeProfile,
 };
 pub use session::{DeviceQuery, MidiSession, Polled};
 pub use stream::{Basis, DeviceStream, InputTiming};

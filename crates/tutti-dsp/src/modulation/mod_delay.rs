@@ -37,7 +37,7 @@
 use core::ops::{Range, RangeInclusive};
 
 use tutti_types::{
-    BusTopology, Db, Feedback, Hz, MAX_BUS_CHANNELS, Phase, PhaseIncrement, SampleRate, Samples,
+    BusTopology, Db, Feedback, Hz, MAX_CHANNELS, Phase, PhaseIncrement, SampleRate, Samples,
     Seconds,
 };
 
@@ -55,7 +55,7 @@ use crate::{
 pub const MIN_RATE: Hz = Hz(0.01);
 
 /// The most channels a swept delay has: a bus's.
-pub const MAX_MOD_DELAY_CHANNELS: usize = MAX_BUS_CHANNELS;
+pub const MAX_MOD_DELAY_CHANNELS: usize = MAX_CHANNELS;
 
 /// The reads are linear: no stepping under modulation, at the cost of a little damping of
 /// the highs (the sweep's interpolation is not a control).

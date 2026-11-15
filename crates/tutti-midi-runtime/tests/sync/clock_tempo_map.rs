@@ -154,7 +154,7 @@ fn rig(map: &Arc<TempoMap>, mtc: bool) -> Rig {
     );
     master.set_enabled(true);
     master.set_send_mtc(mtc);
-    let out = std::cell::RefCell::new(common::sink(&mut ed, 0, &[(1, 0)]));
+    let out = std::cell::RefCell::new(common::sink(&mut ed, 1, &[(1, 0)]));
     ed.commit().expect("commits");
     let transport = Transport::new(SampleRate::of(SR));
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");

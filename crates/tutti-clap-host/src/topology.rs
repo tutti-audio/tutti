@@ -22,7 +22,7 @@
 //! channel after it, which is why `decode_surround_channel_map` never filters.
 //! The host never tells a plugin a layout, so there is no inverse.
 
-use tutti_types::{ChannelTopology, Speaker};
+use tutti_types::{ChannelTopology, Speaker, Speakers};
 
 use crate::types::SurroundChannel;
 
@@ -61,9 +61,10 @@ fn speaker_of(channel: SurroundChannel) -> Speaker {
 /// Converts a CLAP channel map into a [`ChannelTopology`].
 ///
 /// Total, and length-preserving: the topology has exactly one position per
-/// channel the plugin reported.
+/// channel the plugin reported. A named speaker the plugin reports twice is
+/// [`Speaker::Unassigned`] in each slot after its first.
 pub fn topology_of(map: &[SurroundChannel]) -> ChannelTopology {
-    ChannelTopology::new(map.iter().copied().map(speaker_of))
+    ChannelTopology::Speakers(Speakers::from_format(map.iter().copied().map(speaker_of)))
 }
 
 #[cfg(test)]
@@ -111,18 +112,18 @@ mod tests {
 
     /// A 5.1 map converts to the engine's own channel order.
     ///
-    /// CLAP's own 5.1 ordering — `FL FR FC LFE SL SR` — is the SMPTE order, so
-    /// this is asserted against `ChannelTopology::smpte` rather than a literal:
+    /// CLAP's own 5.1 ordering — `FL FR FC LFE SL SR` — is the engine's order, so
+    /// this is asserted against `ChannelTopology::assumed` rather than a literal:
     /// the claim is that the two agree, not that a list was copied correctly.
     #[test]
-    fn a_51_channel_map_matches_the_engines_smpte_order() {
+    fn a_51_channel_map_matches_the_engines_order() {
         let map: Vec<SurroundChannel> = [0u8, 1, 2, 3, 9, 10]
             .iter()
             .map(|&p| SurroundChannel::from_position(p))
             .collect();
         assert_eq!(
             topology_of(&map),
-            ChannelTopology::smpte(ChannelLayout::from(6u16)).expect("6 has an order"),
+            ChannelTopology::assumed(ChannelLayout::from(6u16)),
             "CLAP FL FR FC LFE SL SR is the engine's 5.1 order"
         );
     }
@@ -141,8 +142,8 @@ mod tests {
         ];
         let topology = topology_of(&map);
 
-        assert_eq!(topology.layout(), ChannelLayout::from(3u16));
-        assert_eq!(topology.positions()[1], Speaker::Unknown(200));
+        assert_eq!(topology.width(), ChannelLayout::from(3u16));
+        assert_eq!(topology.positions().unwrap()[1], Speaker::Unknown(200));
         assert_eq!(
             topology.index_of(Speaker::FrontRight),
             Some(2),
@@ -154,7 +155,7 @@ mod tests {
     #[test]
     fn an_empty_map_converts_to_an_empty_topology() {
         let topology = topology_of(&[]);
-        assert_eq!(topology.layout(), ChannelLayout::EMPTY);
+        assert_eq!(topology.width(), ChannelLayout::EMPTY);
     }
 
     /// The conversion preserves length for every map it accepts.
@@ -167,7 +168,7 @@ mod tests {
         for len in 0..=20u8 {
             let map: Vec<SurroundChannel> = (0..len).map(SurroundChannel::from_position).collect();
             assert_eq!(
-                topology_of(&map).layout().count(),
+                topology_of(&map).width().count(),
                 u16::from(len),
                 "a {len}-channel map must produce a {len}-channel topology"
             );

@@ -13,7 +13,7 @@ use tutti_buffers::SampleFormat;
 use tutti_engine::{
     MAX_FRAMES, OutputBlock, OutputSpec, RunningStream, StreamDriver, StreamFaults,
 };
-use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
+use tutti_types::{ChannelLayout, MAX_CHANNELS, MaxBlock, SampleRate, Samples};
 
 use crate::edge;
 use crate::error::{Error, Result};
@@ -52,6 +52,12 @@ fn spec_format(format: cpal::SampleFormat) -> Result<SampleFormat> {
 pub(crate) fn spec_from_supported(
     c: &cpal::SupportedStreamConfig,
 ) -> Result<(OutputSpec, cpal::SampleFormat)> {
+    if usize::from(c.channels()) > MAX_CHANNELS {
+        return Err(Error::InvalidConfig(format!(
+            "the device has {} channels; at most {MAX_CHANNELS} are supported",
+            c.channels()
+        )));
+    }
     let spec = OutputSpec::new(
         device_rate(c.sample_rate())?,
         ChannelLayout::from(c.channels().max(1)),

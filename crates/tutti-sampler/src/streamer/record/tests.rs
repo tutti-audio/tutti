@@ -47,7 +47,7 @@ fn record_with_status(
 
 fn open(streams: &mut Streams, id: u64) -> (Weak<Ring>, Arc<StatusCell>) {
     let (rec, ring, _pos, status) =
-        record_with_status(StreamId(id), PathBuf::from("t.wav"), 1024, 1u16);
+        record_with_status(StreamId::of(id), PathBuf::from("t.wav"), 1024, 1u16);
     let weak = Arc::downgrade(&ring);
     let _ = step(streams, Cmd::Open(Box::new(rec)));
     (weak, status)
@@ -55,7 +55,7 @@ fn open(streams: &mut Streams, id: u64) -> (Weak<Ring>, Arc<StatusCell>) {
 
 fn live(streams: &mut Streams, id: u64) -> (Weak<Ring>, Arc<StatusCell>) {
     let opened = open(streams, id);
-    let _ = step(streams, Cmd::Opened(StreamId(id)));
+    let _ = step(streams, Cmd::Opened(StreamId::of(id)));
     opened
 }
 
@@ -69,7 +69,7 @@ fn ask(start: u64, end: u64) -> Option<Loop> {
 fn an_open_is_opening_until_its_reader_is_delivered() {
     let mut streams = Streams::new();
     let (_ring, _status) = open(&mut streams, 1);
-    let id = StreamId(1);
+    let id = StreamId::of(1);
     assert_eq!(streams.len(), 1);
     assert_eq!(streams.get(id).unwrap().phase(), Phase::Opening);
     assert!(!streams.get(id).unwrap().is_live());
@@ -98,7 +98,7 @@ fn an_open_is_opening_until_its_reader_is_delivered() {
 fn a_close_frees_the_region_in_that_step() {
     let mut streams = Streams::new();
     let (ring, status) = live(&mut streams, 1);
-    let id = StreamId(1);
+    let id = StreamId::of(1);
     assert!(ring.upgrade().is_some(), "setup: the writer holds the ring");
     assert!(!status.closed(), "setup: the stream runs");
 
@@ -112,7 +112,7 @@ fn a_close_frees_the_region_in_that_step() {
 
     // A stream still `Opening` closes the same way (an abandoned open).
     let (ring, _status) = open(&mut streams, 2);
-    let _ = step(&mut streams, Cmd::Close(StreamId(2)));
+    let _ = step(&mut streams, Cmd::Close(StreamId::of(2)));
     assert!(ring.upgrade().is_none());
 }
 
@@ -124,28 +124,28 @@ fn a_close_frees_the_region_in_that_step() {
 fn a_command_for_an_unknown_stream_reaches_no_other() {
     let mut streams = Streams::new();
     let (ring_a, _) = live(&mut streams, 1);
-    let _ = step(&mut streams, Cmd::Close(StreamId(1)));
+    let _ = step(&mut streams, Cmd::Close(StreamId::of(1)));
     assert!(ring_a.upgrade().is_none());
     let (ring_b, _) = live(&mut streams, 2);
 
     assert!(
-        step(&mut streams, Cmd::Loop(StreamId(1), ask(0, 10))).is_empty(),
+        step(&mut streams, Cmd::Loop(StreamId::of(1), ask(0, 10))).is_empty(),
         "a loop for the closed stream is dropped"
     );
     assert!(
-        step(&mut streams, Cmd::Loop(StreamId(1), None)).is_empty(),
+        step(&mut streams, Cmd::Loop(StreamId::of(1), None)).is_empty(),
         "and so is a clear"
     );
     assert!(
-        step(&mut streams, Cmd::Close(StreamId(1))).is_empty(),
+        step(&mut streams, Cmd::Close(StreamId::of(1))).is_empty(),
         "closing twice frees nothing more"
     );
-    assert!(step(&mut streams, Cmd::Opened(StreamId(1))).is_empty());
+    assert!(step(&mut streams, Cmd::Opened(StreamId::of(1))).is_empty());
     assert_eq!(streams.len(), 1);
     assert!(ring_b.upgrade().is_some(), "the new stream is untouched");
     assert_eq!(
-        step(&mut streams, Cmd::Loop(StreamId(2), ask(5, 9))),
-        &[Effect::Loop(StreamId(2), ask(5, 9))],
+        step(&mut streams, Cmd::Loop(StreamId::of(2), ask(5, 9))),
+        &[Effect::Loop(StreamId::of(2), ask(5, 9))],
         "its own id reaches it"
     );
 }
@@ -158,16 +158,16 @@ fn streams_are_independent() {
     let mut streams = Streams::new();
     let rings: Vec<_> = (1..=3).map(|i| live(&mut streams, i).0).collect();
     assert_eq!(
-        step(&mut streams, Cmd::Loop(StreamId(2), ask(1, 2))),
-        &[Effect::Loop(StreamId(2), ask(1, 2))]
+        step(&mut streams, Cmd::Loop(StreamId::of(2), ask(1, 2))),
+        &[Effect::Loop(StreamId::of(2), ask(1, 2))]
     );
-    let _ = step(&mut streams, Cmd::Close(StreamId(1)));
+    let _ = step(&mut streams, Cmd::Close(StreamId::of(1)));
     assert!(rings[0].upgrade().is_none());
     assert!(rings[1].upgrade().is_some() && rings[2].upgrade().is_some());
-    assert!(streams.get(StreamId(3)).is_some() && streams.get(StreamId(2)).is_some());
+    assert!(streams.get(StreamId::of(3)).is_some() && streams.get(StreamId::of(2)).is_some());
     assert_eq!(
-        step(&mut streams, Cmd::Loop(StreamId(3), None)),
-        &[Effect::Loop(StreamId(3), None)]
+        step(&mut streams, Cmd::Loop(StreamId::of(3), None)),
+        &[Effect::Loop(StreamId::of(3), None)]
     );
 }
 
@@ -193,26 +193,26 @@ fn a_direction_asks_for_a_live_stream_only() {
     assert!(
         step(
             &mut streams,
-            Cmd::Direction(StreamId(1), Direction::Reverse)
+            Cmd::Direction(StreamId::of(1), Direction::Reverse)
         )
         .is_empty(),
         "a stream whose reader was not delivered takes no direction"
     );
-    let _ = step(&mut streams, Cmd::Opened(StreamId(1)));
+    let _ = step(&mut streams, Cmd::Opened(StreamId::of(1)));
     assert_eq!(
         step(
             &mut streams,
-            Cmd::Direction(StreamId(1), Direction::Reverse)
+            Cmd::Direction(StreamId::of(1), Direction::Reverse)
         ),
-        &[Effect::Direction(StreamId(1), Direction::Reverse)]
+        &[Effect::Direction(StreamId::of(1), Direction::Reverse)]
     );
 
     let _ = live(&mut streams, 2);
-    let _ = step(&mut streams, Cmd::Close(StreamId(1)));
+    let _ = step(&mut streams, Cmd::Close(StreamId::of(1)));
     assert!(
         step(
             &mut streams,
-            Cmd::Direction(StreamId(1), Direction::Reverse)
+            Cmd::Direction(StreamId::of(1), Direction::Reverse)
         )
         .is_empty(),
         "a direction for the closed stream is dropped, and reaches no other"
@@ -220,9 +220,9 @@ fn a_direction_asks_for_a_live_stream_only() {
     assert_eq!(
         step(
             &mut streams,
-            Cmd::Direction(StreamId(2), Direction::Forward)
+            Cmd::Direction(StreamId::of(2), Direction::Forward)
         ),
-        &[Effect::Direction(StreamId(2), Direction::Forward)],
+        &[Effect::Direction(StreamId::of(2), Direction::Forward)],
         "its own id reaches it"
     );
 }
@@ -239,7 +239,7 @@ fn a_rate_event_re_derives_each_streams_own_ratio() {
         .zip(1..)
         .map(|(file_rate, id)| {
             let (out, _ring, _pos) =
-                RegionBuffer::with_capacity(StreamId(id), PathBuf::new(), 1024, 1u16);
+                RegionBuffer::with_capacity(StreamId::of(id), PathBuf::new(), 1024, 1u16);
             let cache = Arc::new(LruCache::new(4, 1 << 20));
             let cells = Arc::new(Cells::new());
             let record = Record::new(

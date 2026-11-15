@@ -1285,8 +1285,8 @@ fn a_placed_fork_reads_the_renders_transport() {
 
 /// A mono wave in a node of some width goes where `Fold`'s lone-centre rule
 /// puts it: the centre of a 6, 8 or 12-wide node (and only there), both sides
-/// of a stereo one, and every channel of a width the engine has no order for
-/// (3, 4, 5, 7), as before. Free-running and placed read it through different
+/// of a stereo one, the front pair of a quad, and every channel of a width the
+/// engine has no order for (3, 5, 7). Free-running and placed read it through different
 /// paths (a frame at a time, a block of lanes); both give the same planes.
 ///
 /// The wave is `1, 2, 3, ...`, and an unlooped read at unity rate away from
@@ -1295,16 +1295,21 @@ fn a_placed_fork_reads_the_renders_transport() {
 #[test]
 fn a_mono_wave_goes_to_the_centre_of_a_node_that_has_one() {
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-    for (width, centre) in [
-        (1usize, Some(0)),
-        (2, None),
-        (3, None),
-        (4, None),
-        (5, None),
-        (6, Some(2)),
-        (7, None),
-        (8, Some(2)),
-        (12, Some(2)),
+    // Which channels carry the mono sample at each width: all of them where the
+    // assumed placement has no centre (a fan), the front pair of a quad, and the
+    // centre of 5.1, 7.1 and 7.1.4.
+    let all: fn(usize) -> bool = |_| true;
+    let centre: fn(usize) -> bool = |c| c == 2;
+    for (width, carries_at) in [
+        (1usize, all),
+        (2, all),
+        (3, all),
+        (4, (|c| c < 2) as fn(usize) -> bool),
+        (5, all),
+        (6, centre),
+        (7, all),
+        (8, centre),
+        (12, centre),
     ] {
         let mut free = MemorySource::with_channels(
             ramp_wave(64, SR),
@@ -1338,7 +1343,7 @@ fn a_mono_wave_goes_to_the_centre_of_a_node_that_has_one() {
         ] {
             assert_eq!(out.len(), width);
             for (c, plane) in out.iter().enumerate() {
-                let carries = centre.is_none() || centre == Some(c);
+                let carries = carries_at(c);
                 for (i, &s) in plane.iter().enumerate() {
                     let want = if carries { (i + 1) as f32 } else { 0.0 };
                     assert!(

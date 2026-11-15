@@ -9,7 +9,7 @@ use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
 const M: f32 = <f32 as Float>::MINUS_3_DB;
 
 fn smpte(n: u16) -> ChannelTopology {
-    ChannelTopology::smpte(ChannelLayout::from(n)).expect("an SMPTE width")
+    ChannelTopology::assumed(ChannelLayout::from(n))
 }
 
 fn width(n: u16) -> ChannelLayout {
@@ -21,7 +21,8 @@ fn width(n: u16) -> ChannelLayout {
 #[test]
 fn a_channel_no_speaker_names_is_refused_for_every_destination() {
     use Speaker::*;
-    let lfe2 = ChannelTopology::new([FrontLeft, FrontRight, FrontCenter, LowFrequency, Unknown(5)]);
+    let lfe2 = ChannelTopology::new([FrontLeft, FrontRight, FrontCenter, LowFrequency, Unknown(5)])
+        .unwrap();
     for dst in [1u16, 2, 5, 6] {
         assert_eq!(
             fold_to_width(&lfe2, width(dst)).map(|_| ()),
@@ -98,7 +99,8 @@ fn a_named_source_with_an_order_is_placed_by_speaker() {
         BackRight,
         SideLeft,
         SideRight,
-    ]);
+    ])
+    .unwrap();
     let mut out = [0.0f32; 8];
     fold_to_width(&wav71, width(8))
         .unwrap()
@@ -117,7 +119,7 @@ fn a_named_source_with_an_order_is_placed_by_speaker() {
 fn a_zero_width_at_either_end_is_refused() {
     let zero = FoldError::Buffer(tutti_buffers::BufferError::ZeroWidth);
     assert_eq!(
-        fold_to_width(&ChannelTopology::new([]), width(2)).map(|_| ()),
+        fold_to_width(&ChannelTopology::new([]).unwrap(), width(2)).map(|_| ()),
         Err(zero)
     );
     assert_eq!(
@@ -125,7 +127,7 @@ fn a_zero_width_at_either_end_is_refused() {
         Err(zero)
     );
     assert_eq!(
-        fold_to_width(&ChannelTopology::new([]), width(3)).map(|_| ()),
+        fold_to_width(&ChannelTopology::new([]).unwrap(), width(3)).map(|_| ()),
         Err(zero)
     );
 }

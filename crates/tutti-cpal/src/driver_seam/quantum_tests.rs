@@ -42,3 +42,25 @@ fn a_device_range_gives_a_fixed_quantum() {
         cpal::BufferSize::Default
     ));
 }
+
+/// A device of `channels` channels, as its supported config.
+fn device(channels: u16) -> cpal::SupportedStreamConfig {
+    cpal::SupportedStreamConfigRange::new(
+        channels,
+        48_000,
+        48_000,
+        cpal::SupportedBufferSize::Unknown,
+        cpal::SampleFormat::F32,
+    )
+    .with_sample_rate(48_000)
+}
+
+/// A device at the cap opens at its own width; one channel past it is refused
+/// by name, never truncated.
+#[test]
+fn a_device_wider_than_the_cap_is_refused() {
+    let (at, _) = spec_from_supported(&device(MAX_CHANNELS as u16)).unwrap();
+    assert_eq!(at.channels.count() as usize, MAX_CHANNELS);
+    let past = spec_from_supported(&device(MAX_CHANNELS as u16 + 1));
+    assert!(matches!(past, Err(Error::InvalidConfig(_))), "{past:?}");
+}

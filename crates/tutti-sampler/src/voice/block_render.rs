@@ -27,7 +27,9 @@ use std::sync::Arc;
 use tutti_types::MaxBlock;
 
 use tutti_codec::Wave;
-use tutti_graph::{Env, Node, Offset, Prepare, TransportChanges, TransportPosition, contract};
+use tutti_graph::{
+    Env, Node, Offset, Prepare, RenderMode, TransportChanges, TransportPosition, contract,
+};
 use tutti_types::{
     Amplitude, Beat, Bpm, Cents, ChannelLayout, Frame, FrameClock, PlaybackRate, SampleRate,
     Samples, StretchFactor,
@@ -182,7 +184,7 @@ fn the_block_read_is_the_same_at_any_block_length() {
             .take()
             .expect("each stream builds one voice");
         let mut v = crate::DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
-        v.set_render_rate(SampleRate::of(SR));
+        v.set_render(SampleRate::of(SR), RenderMode::Realtime);
         v
     };
 
@@ -194,7 +196,7 @@ fn the_block_read_is_the_same_at_any_block_length() {
             MaxBlock::of(Samples(256)),
         ));
         let mut forked = disk(first_disk + 3).fork_copy();
-        forked.set_render_rate(SampleRate::of(SR));
+        forked.set_render(SampleRate::of(SR), RenderMode::Offline);
         let voices: Vec<(VoiceSource, Playback)> = vec![
             (memory(&stereo, 0.0), Playback::default()),
             (

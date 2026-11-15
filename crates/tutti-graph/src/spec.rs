@@ -179,10 +179,9 @@ pub struct GraphSpec {
     pub bus_edges: BTreeMap<BusRef, Vec<BusFeed>>,
     /// The declared topology of the root, the graph's outputs, as a bus (doc
     /// 013, "Buses", B4): what a bus edge into the root folds to. `None` is
-    /// undeclared. Every root the engine renders
-    /// ([`MAX_ROOT_CHANNELS`](crate::MAX_ROOT_CHANNELS), 8) fits a bus
-    /// ([`MAX_BUS_CHANNELS`](tutti_types::MAX_BUS_CHANNELS), 16). The session
-    /// keeps it in step with its root declaration.
+    /// undeclared. Every root the engine renders is at most
+    /// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) wide, which is a bus's
+    /// width. The session keeps it in step with its root declaration.
     pub root: Option<BusTopology>,
     /// Bus edges into the root, in source order
     /// ([`connect_bus_to_root`](Self::connect_bus_to_root)): lowered, as

@@ -35,10 +35,10 @@ use symphonia::core::errors::{Error, SeekErrorKind};
 use symphonia::core::formats::{FormatReader, SeekMode, SeekTo};
 use symphonia::core::units::Timestamp;
 use tutti_buffers::{FiniteSource, InterleavedMut, Pull, Source};
-use tutti_types::{ChannelLayout, ChannelTopology, SampleRate, Samples};
+use tutti_types::{ChannelLayout, ChannelTopology, Placement, SampleRate, Samples};
 
 use super::error::convert;
-use super::placement::{topology_of, unstated};
+use super::placement::topology_of;
 use super::read::{PacketDecoder, first_audio_track, probe_path, sample_rate_of, total_frames_of};
 use crate::DecodeError;
 
@@ -90,6 +90,8 @@ pub struct FileIn {
     track_id: u32,
     /// Which speaker each channel feeds; its length is the interleave stride.
     topology: ChannelTopology,
+    /// Whether the container stated `topology` or only its channel count.
+    placement: Placement,
     sample_rate: SampleRate,
     total_frames: Option<u64>,
     /// Decoded-but-unconsumed frames from the last packet, interleaved at the
@@ -155,16 +157,22 @@ impl FileIn {
     }
 
     /// Which speaker each channel of the interleaved frames feeds, in channel
-    /// order: what the container names, or stereo when it names none (see
-    /// [`Wave::read`](crate::Wave::read)). Its length is
-    /// [`layout`](Source::layout)'s width.
+    /// order: what the container names, or [`ChannelTopology::assumed`] for
+    /// the count it states (see [`Wave::read`](crate::Wave::read)). Its width is
+    /// [`layout`](Source::layout)'s.
     pub fn topology(&self) -> &ChannelTopology {
         &self.topology
     }
 
+    /// Whether [`topology`](Self::topology) was stated by the container or
+    /// assumed from a channel count.
+    pub fn placement(&self) -> Placement {
+        self.placement
+    }
+
     /// The interleave stride: the file's channel count.
     fn width(&self) -> usize {
-        self.topology.positions().len()
+        usize::from(self.topology.width().count())
     }
 
     /// Returns whether [`seek`](Self::seek) can serve arbitrary positions:
@@ -195,11 +203,7 @@ impl FileIn {
         // no container this build reads yields a zero-channel track, and a
         // fixture cannot be built or stubbed (symphonia's `Channels` come from
         // the demuxer).
-        let topology = params
-            .channels
-            .as_ref()
-            .filter(|ch| ch.count() > 0)
-            .map_or_else(unstated, topology_of);
+        let (topology, placement) = topology_of(params.channels.as_ref());
 
         let decoder = PacketDecoder::new(params).map_err(convert)?;
 
@@ -218,6 +222,7 @@ impl FileIn {
             decoder,
             track_id,
             topology,
+            placement,
             sample_rate,
             total_frames,
             leftover,
@@ -285,7 +290,7 @@ impl FileIn {
             self.leftover_pos = 0;
             // A packet whose channel count disagrees with `open`'s is
             // zero-filled up to the file's width, so the stride stays constant.
-            let width = self.topology.positions().len();
+            let width = usize::from(self.topology.width().count());
             let ch = num_ch.min(width);
             self.leftover.resize(frames * width, 0.0);
             for (c, plane) in planes.iter().take(ch).enumerate() {
@@ -527,7 +532,7 @@ impl Source for FileIn {
 
     /// The file's own width, which is what [`pull`](Self::pull) produces.
     fn layout(&self) -> ChannelLayout {
-        self.topology.layout()
+        self.topology.width()
     }
 
     /// `out` holds `out.len()` frames, and the count is that many FRAMES at

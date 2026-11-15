@@ -162,10 +162,10 @@ fn fork_unprepared(node: impl IntoNode) -> Fork {
 /// prepared.
 fn fork(voice: &DiskVoice, rate: f64) -> Fork {
     let mut f = fork_unprepared(voice.clone());
-    f.node.prepare(&Prepare::new(
-        SampleRate::of(rate),
-        MaxBlock::of(Samples(BLOCK)),
-    ));
+    f.node.prepare(
+        &Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples(BLOCK)))
+            .with_render_mode(tutti_graph::RenderMode::Offline),
+    );
     f
 }
 
@@ -222,10 +222,10 @@ fn a_fork_plays_the_file_from_the_frame_its_beat_falls_on() {
     );
 
     let mut node_fork = fork_unprepared(node);
-    node_fork.node.prepare(&Prepare::new(
-        SampleRate::of(SR),
-        MaxBlock::of(Samples(BLOCK)),
-    ));
+    node_fork.node.prepare(
+        &Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(BLOCK)))
+            .with_render_mode(tutti_graph::RenderMode::Offline),
+    );
     for (what, mut copy) in [
         ("a bare voice", fork(&voice, SR)),
         ("a voice node", node_fork),

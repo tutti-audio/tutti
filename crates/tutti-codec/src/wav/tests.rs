@@ -2,7 +2,7 @@ use super::*;
 use crate::test_sink::Full;
 use crate::{FormatWriter, SpecError};
 use std::io::Cursor;
-use tutti_types::{ChannelTopology, SampleRate};
+use tutti_types::SampleRate;
 
 fn spec(channels: u16, pcm: Pcm) -> Spec {
     Spec::of_width(
@@ -71,7 +71,7 @@ fn wider_or_deeper_files_are_extensible_with_their_mask_and_subformat() {
         (6u16, Pcm::Int24, 0x60Fu32, false),
         (2, Pcm::Int24, 0x3, false),
         (1, Pcm::Float32, 0x4, true),
-        (4, Pcm::Int16, 0, false),
+        (4, Pcm::Int16, 0x33, false),
     ] {
         let bytes = write_all(&spec(channels, pcm), &ramp(channels, 3));
         let bits = pcm.bits();
@@ -136,14 +136,24 @@ fn an_independent_reader_recovers_the_samples_at_every_width() {
 fn a_topology_sets_the_mask() {
     let quad = Spec::new(
         crate::Format::Wav(Pcm::Int24),
-        ChannelTopology::quad(),
+        tutti_types::Bed::Quad.topology(),
         SampleRate::SR_48K,
     );
     assert_eq!(u32_at(&write_all(&quad, &ramp(4, 2)), 40), 0x33);
     assert_eq!(
         u32_at(&write_all(&spec(4, Pcm::Int24), &ramp(4, 2)), 40),
+        0x33,
+        "a bare 4 is the assumed quad"
+    );
+    let discrete = Spec::new(
+        crate::Format::Wav(Pcm::Int24),
+        tutti_types::ChannelTopology::unassigned(tutti_types::ChannelLayout::QUAD),
+        SampleRate::SR_48K,
+    );
+    assert_eq!(
+        u32_at(&write_all(&discrete, &ramp(4, 2)), 40),
         0,
-        "a bare 4 is unassigned"
+        "four unassigned channels state no mask"
     );
 }
 

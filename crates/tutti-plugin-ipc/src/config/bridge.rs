@@ -4,7 +4,6 @@
 use crate::protocol::SampleFormat;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 /// A socket path no other bridge will pick, and no other user can guess.
 ///
@@ -72,11 +71,11 @@ fn socket_path_in(temp: &std::path::Path, name: &str) -> PathBuf {
 ///
 /// If the operating system has no random source to read.
 pub(crate) fn unique_name(stem: &str) -> String {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
     format!(
         "{stem}-{}-{}-{}",
         std::process::id(),
-        COUNTER.fetch_add(1, Ordering::Relaxed),
+        COUNTER.mint(),
         unguessable(),
     )
 }
