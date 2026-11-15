@@ -8,10 +8,9 @@
 use tutti_buffers::Interleaved;
 use tutti_fixtures::allocations;
 use tutti_measure::{
-    WindowedLayout, WindowedLoudnessConfig, WindowedLoudnessState, WindowedRate,
-    step_windowed_loudness,
+    WindowedLoudnessConfig, WindowedLoudnessState, WindowedRate, step_windowed_loudness,
 };
-use tutti_types::{ChannelLayout, SampleRate};
+use tutti_types::{Bed, ChannelLayout, SampleRate};
 
 fn stereo(s: &[f32]) -> Interleaved<'_> {
     Interleaved::new(s, ChannelLayout::STEREO).unwrap()
@@ -24,10 +23,9 @@ fn stereo(s: &[f32]) -> Interleaved<'_> {
 /// version in `Cargo.lock`.
 #[test]
 fn a_windowed_loudness_step_does_not_allocate() {
-    let cfg = WindowedLoudnessConfig::new(
-        WindowedRate::of(SampleRate::SR_48K),
-        WindowedLayout::of(ChannelLayout::STEREO),
-    );
+    let cfg =
+        WindowedLoudnessConfig::new(WindowedRate::of(SampleRate::SR_48K), Bed::Stereo.topology())
+            .unwrap();
     let mut state = WindowedLoudnessState::new(&cfg).unwrap();
     let tone: Vec<f32> = (0..48_000 * 2)
         .map(|i| 0.1 * (std::f32::consts::TAU * 997.0 * (i / 2) as f32 / 48_000.0).sin())
