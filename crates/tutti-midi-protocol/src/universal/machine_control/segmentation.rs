@@ -111,6 +111,10 @@ impl ExactSizeIterator for MmcSegments<'_> {}
 /// The string in progress is cancelled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum MmcSegmentError {
+    /// A COMMAND SEGMENT came after another command in its message (RP-013
+    /// p.40 a). A reassembler never sees this: its caller does.
+    #[error("a segment is not the first command of its message")]
+    NotFirst,
     /// A later segment came with no first one before it.
     #[error("a later segment arrived with no first segment")]
     MissingFirst,

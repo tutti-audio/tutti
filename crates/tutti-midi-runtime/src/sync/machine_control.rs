@@ -24,16 +24,40 @@
 //! - **MOVE** between general purpose registers copies the time.
 //! - **VARIABLE PLAY** and **DEFERRED VARIABLE PLAY** at exactly play speed play.
 //! - **GROUP** and **MMC RESET** act on the follower itself.
+//! - **COMMAND SEGMENT** strings are reassembled (RP-013 p.40) and their
+//!   commands acted on as if they had arrived in one message. A segment that
+//!   does not belong is [`MachineControlEvent::Segmentation`], which a
+//!   device that answers sends as a COMMAND ERROR (`09`); the string is
+//!   cancelled. A message to this device that is not a segment cancels a
+//!   string in progress, WAIT and RESUME alone excepted (p.40). MMC RESET
+//!   cancels one (p.25).
 //! - WAIT and RESUME are handshakes for a device that answers; this one
 //!   does not, and they change nothing.
 //!
-//! Every other command is reported as [`MachineControlEvent::Ignored`]: the
-//! transport has no record, no shuttle and no tape to eject, and the follower
-//! answers no READ.
+//! # What is read and not applied
+//!
+//! Every other command is reported as [`MachineControlEvent::Ignored`], and the
+//! reason is in what the transport is: it plays at one speed, locates
+//! instantly and holds no record, no tape and no master time code.
+//!
+//! - **FAST FORWARD**, **REWIND**, **SHUTTLE** and **SEARCH** move at a speed other than play speed, which a transport that plays
+//!   at one speed does not have.
+//! - **STEP** moves by STEP LENGTH units, a video field by default: a
+//!   distance in a time code frame rate that a follower, which holds none,
+//!   cannot turn into time.
+//! - **CHASE** (p.24) follows the SELECTED MASTER CODE, a time code stream: a
+//!   follower sees no time code stream, only commands. MTC follows through
+//!   `MtcDecoder`.
+//! - **RECORD STROBE**, **RECORD EXIT**, **RECORD PAUSE** and **EJECT**: the
+//!   transport records nothing and holds no medium.
+//! - **COMMAND ERROR RESET** clears an error field that a follower, which sends
+//!   no COMMAND ERROR, does not keep.
+//! - READ and UPDATE ask for responses, and the follower answers none.
 
 use tutti_midi_protocol::{
-    Addressed, MmcCommand, MmcFields, MmcGroup, MmcInfoField, MmcLocate, MmcMove, MmcPosition,
-    MmcSign, MmcSpeed, Read, Recipient, SysexDeviceId, Universal, read,
+    Addressed, MmcCommand, MmcCommandReassembler, MmcCommands, MmcFields, MmcGroup, MmcInfoField,
+    MmcLocate, MmcMove, MmcPosition, MmcSegmentError, MmcSign, MmcSpeed, Read, Recipient,
+    SysexDeviceId, Universal, read,
 };
 use tutti_types::Seconds;
 use tutti_ump::{SysexAssembler, SysexStep, Ump};
@@ -50,6 +74,9 @@ pub enum MachineControlEvent {
     Locate(Seconds),
     /// A command this follower does not act on.
     Ignored(MmcCommand),
+    /// A COMMAND SEGMENT that did not belong, or a string that did not make
+    /// whole commands (RP-013 p.40): the string in progress is cancelled.
+    Segmentation(MmcSegmentError),
 }
 
 /// Longest message read: 3 header bytes and 48 of data.
@@ -85,12 +112,21 @@ fn seconds_of(position: MmcPosition) -> Seconds {
 /// ```
 #[derive(Debug)]
 pub struct MachineControlFollower {
+    state: State,
+    sysex: SysexAssembler<[u8; SYSEX_ROOM]>,
+    /// The COMMAND SEGMENT string in progress.
+    segments: MmcCommandReassembler,
+}
+
+/// What GROUP and WRITE set: the part of the follower that commands act on.
+#[derive(Debug)]
+struct State {
+    /// The device ID the follower answers to.
     device: SysexDeviceId,
     /// The groups this device is assigned to, a bit a device ID.
     groups: u128,
     /// The general purpose registers `08` to `0F`.
     registers: [Option<MmcPosition>; 8],
-    sysex: SysexAssembler<[u8; SYSEX_ROOM]>,
 }
 
 impl MachineControlFollower {
@@ -98,23 +134,26 @@ impl MachineControlFollower {
     #[must_use]
     pub fn new(device: SysexDeviceId) -> Self {
         Self {
-            device,
-            groups: 0,
-            registers: [None; 8],
+            state: State {
+                device,
+                groups: 0,
+                registers: [None; 8],
+            },
             sysex: SysexAssembler::new([0; SYSEX_ROOM], SYSEX_MAX, 1),
+            segments: MmcCommandReassembler::new(),
         }
     }
 
     /// The device ID the follower answers to besides the all-call.
     #[must_use]
     pub fn device(&self) -> SysexDeviceId {
-        self.device
+        self.state.device
     }
 
     /// Whether the follower is in `group`.
     #[must_use]
     pub fn in_group(&self, group: SysexDeviceId) -> bool {
-        self.groups >> group.get() & 1 != 0
+        self.state.groups >> group.get() & 1 != 0
     }
 
     /// Whether a command to `to` is for this device: the all-call, its own ID
@@ -122,14 +161,14 @@ impl MachineControlFollower {
     fn is_for_us(&self, to: Recipient) -> bool {
         match to {
             Recipient::AllCall => true,
-            Recipient::Device(id) => id == self.device || self.in_group(id),
+            Recipient::Device(id) => id == self.state.device || self.in_group(id),
         }
     }
 
     /// Forgets the groups and registers, as MMC RESET does.
     pub fn reset(&mut self) {
-        self.groups = 0;
-        self.registers = [None; 8];
+        self.state.reset();
+        self.segments.cancel();
         self.sysex.reset();
     }
 
@@ -150,9 +189,64 @@ impl MachineControlFollower {
         if !self.is_for_us(to) {
             return;
         }
-        for command in &commands {
-            self.act(command, out);
+        self.segmented_or_plain(&commands, out);
+    }
+
+    /// The commands of one message to this device: a COMMAND SEGMENT goes to
+    /// the string in progress, anything else is acted on, and cancels a string
+    /// unless it is only WAIT and RESUME (RP-013 p.40).
+    fn segmented_or_plain(
+        &mut self,
+        commands: &MmcCommands,
+        out: &mut impl FnMut(MachineControlEvent),
+    ) {
+        let mut items = commands.iter();
+        let Some(first) = items.next() else {
+            return;
+        };
+        if let MmcCommand::CommandSegment(segment) = first {
+            // It is first by construction; more commands after it are not
+            // inside its count, so they are not "bytes remaining" (p.40 b).
+            if items.next().is_some() {
+                self.segments.cancel();
+                out(MachineControlEvent::Segmentation(MmcSegmentError::NotFirst));
+                return;
+            }
+            match self.segments.push(segment) {
+                Ok(Some(string)) => {
+                    for command in string {
+                        self.state.act(command, out);
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => out(MachineControlEvent::Segmentation(error)),
+            }
+            return;
         }
+        if commands
+            .iter()
+            .any(|c| matches!(c, MmcCommand::CommandSegment(_)))
+        {
+            self.segments.cancel();
+            out(MachineControlEvent::Segmentation(MmcSegmentError::NotFirst));
+            return;
+        }
+        if commands
+            .iter()
+            .any(|c| !matches!(c, MmcCommand::Wait | MmcCommand::Resume))
+        {
+            self.segments.cancel();
+        }
+        for command in commands {
+            self.state.act(command, out);
+        }
+    }
+}
+
+impl State {
+    fn reset(&mut self) {
+        self.groups = 0;
+        self.registers = [None; 8];
     }
 
     fn act(&mut self, command: MmcCommand, out: &mut impl FnMut(MachineControlEvent)) {
@@ -199,10 +293,7 @@ impl MachineControlFollower {
                     }
                 }
             }
-            MmcCommand::MmcReset => {
-                self.groups = 0;
-                self.registers = [None; 8];
-            }
+            MmcCommand::MmcReset => self.reset(),
             MmcCommand::Wait | MmcCommand::Resume => {}
             MmcCommand::FastForward
             | MmcCommand::Rewind
