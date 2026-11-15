@@ -1025,6 +1025,8 @@ pub struct Plan {
     pub(crate) order: Vec<NodeKey>,
     pub(crate) global_inputs: u16,
     pub(crate) compensation: Vec<Samples>,
+    /// The root generation the spec carried when this plan was committed.
+    pub(crate) root_id: crate::RootId,
     pub(crate) total_latency: Latency,
     pub(crate) audio_values: Vec<Value>,
     pub(crate) event_values: Vec<Value>,
@@ -1256,6 +1258,12 @@ impl Plan {
     /// Global input width.
     pub fn global_inputs(&self) -> u16 {
         self.global_inputs
+    }
+
+    /// The generation of the root this plan renders into: what the engine
+    /// looks its output folds up by.
+    pub fn root_id(&self) -> crate::RootId {
+        self.root_id
     }
 
     /// Global output width.

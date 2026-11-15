@@ -232,7 +232,7 @@ pub use take::{
 pub use tutti_dsp::DitherShape;
 #[cfg(feature = "record")]
 pub use tutti_dsp::{DitherSink, DitherSpec};
-pub use tutti_engine::{HeardOpen, Playhead};
+pub use tutti_engine::{HeardOpen, OutputPlacement, Playhead};
 #[cfg(feature = "export")]
 pub use tutti_export::{
     EventLossPolicy, Normalize, Outcome, Produced, Progress, Rendered, Resample, Stage, Written,
