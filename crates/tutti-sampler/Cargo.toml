@@ -69,7 +69,6 @@ serde = { version = "1", optional = true, features = ["derive"] }
 
 # Lock-free
 crossbeam-channel = "0.5"
-parking_lot = "0.13"
 
 # Parallel I/O
 rayon = "1.10"
@@ -98,12 +97,7 @@ tutti-engine = { path = "../tutti-engine" }
 # (`voice_gain_survives_commit.rs`).
 tutti-modulation = { path = "../tutti-modulation", default-features = false }
 
-tracing-subscriber = "0.3"
-insta = { version = "1.41", features = ["yaml"] }
-approx = "0.5"
 tempfile = "3.8"
-rand = "0.10"
-serde_json = "1"
 assert_no_alloc = { version = "1", default-features = false }
 
 # Tests only: several fixtures write a real WAV to disk and stream it back, so

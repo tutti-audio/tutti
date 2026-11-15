@@ -45,14 +45,6 @@ tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 
-# MIDI support
-
-# Serialization for IPC
-serde = { version = "1", features = ["derive"] }
-
-# Shared memory
-memmap2 = "0.9"
-
 # Cross-platform local IPC (Unix sockets on Unix, named pipes on Windows)
 interprocess = { version = "2" }
 
