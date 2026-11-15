@@ -101,6 +101,9 @@ pub enum ProcessChange {
     /// A [`ReportAsk`] was not sent: one was already waiting, or the peer has since
     /// said it does not support MIDI Message Report.
     NotSent(ProcessError),
+    /// A [`ReportAsk`] was not sent: the peer was lost between the request and
+    /// the poll that would have sent it.
+    PeerGone,
     /// The peer is gone (lost, or MIDI-CI ended): its Initiator went with it.
     Dropped,
 }

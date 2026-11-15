@@ -1,5 +1,5 @@
 //! How a source gets to where it is aimed without zippering: the
-//! [`AngleSmoother`] both panners step.
+//! [`AngleSmoother`] the binaural panner steps.
 
 use tutti_dsp::Smoother;
 use tutti_types::{Azimuth, Direction, Elevation, SampleRate, Samples, Seconds};
@@ -21,17 +21,16 @@ const SMOOTH_TIME: Seconds = Seconds(0.05);
 pub(crate) struct AngleSmoother {
     azimuth: Smoother,
     elevation: Smoother,
-    /// Samples of audio each step stands for: 1 for a smoother stepped every
-    /// sample, the frame length for one stepped once per frame. Kept so
+    /// Samples of audio each step stands for: the frame length of a smoother
+    /// stepped once per frame. Kept so
     /// [`set_sample_rate`](Self::set_sample_rate) can re-derive the coefficient.
     stride: Samples,
 }
 
 impl AngleSmoother {
     /// A smoother with a 50 ms time constant of audio at `sample_rate`, for
-    /// a caller that steps once per `samples_per_step` samples: one for a
-    /// panner that steps every frame (VBAP), the convolution frame length for
-    /// one that steps once per frame (HRTF).
+    /// a caller that steps once per `samples_per_step` samples: the convolution
+    /// frame length for the binaural panner, which steps once per frame.
     pub(crate) fn new(sample_rate: SampleRate, samples_per_step: Samples) -> Self {
         let coeff = Self::coeff(sample_rate, samples_per_step);
         Self {
@@ -78,9 +77,8 @@ impl AngleSmoother {
     /// Where the ramp currently is: the direction the last step returned (or
     /// the seeded one), without advancing.
     ///
-    /// A block-rate consumer needs this as the *start* of a block: the VBAP
-    /// panner solves once per block and ramps from the gains here to the gains
-    /// at the block's last frame.
+    /// The binaural panner reads this as the position it renders from and
+    /// reseats on.
     #[inline]
     pub(crate) fn current(&self) -> Direction {
         Direction::new(
@@ -102,32 +100,6 @@ impl AngleSmoother {
         let next = current.rotate_by(arc * self.azimuth.coeff());
         self.azimuth.seed(next.get());
         Direction::new(next, Elevation(self.elevation.step(target.elevation.get())))
-    }
-
-    /// `step` `steps` times toward the same target, in one move:
-    /// [`Smoother::advance`], the analytic
-    /// `v + (target - v)(1 - (1 - coeff)^steps)` instead of the loop.
-    ///
-    /// Its error bound is [`Smoother::advance`]'s, `1.5 * 2^-24 * R *
-    /// min(steps, 1/coeff)` for a range `R` (0.04 degrees of bearing at
-    /// 48 kHz, where `1/coeff` is 2400 steps). The short arc to a target does
-    /// not change direction as the value closes on it, so one arc computation
-    /// stands for all the steps of the bearing.
-    #[inline]
-    pub(crate) fn advance(&mut self, target: Direction, steps: usize) -> Direction {
-        let azimuth = if steps == 0 {
-            Azimuth(self.azimuth.value())
-        } else {
-            let current = Azimuth(self.azimuth.value()).wrap();
-            let arc = current.shortest_arc_to(target.azimuth.wrap());
-            let next = current.rotate_by(arc * self.azimuth.gap_closed(steps));
-            self.azimuth.seed(next.get());
-            next
-        };
-        Direction::new(
-            azimuth,
-            Elevation(self.elevation.advance(target.elevation.get(), steps)),
-        )
     }
 }
 

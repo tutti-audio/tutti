@@ -140,12 +140,10 @@ impl Sim {
         for _ in 0..copies {
             match dir {
                 Direction::ClientToHost => {
-                    self.host
-                        .handle_datagram(self.now, client_addr(), &t.payload);
+                    self.host.on_message(client_addr(), &t.payload, self.now);
                 }
                 Direction::HostToClient => {
-                    self.client
-                        .handle_datagram(self.now, host_addr(), &t.payload);
+                    self.client.on_message(host_addr(), &t.payload, self.now);
                 }
             }
         }
@@ -156,15 +154,15 @@ impl Sim {
     pub fn advance(&mut self, by: Duration) {
         let end = self.now + by;
         for _ in 0..1_000_000 {
-            let next = [self.client.poll_timeout(), self.host.poll_timeout()]
+            let next = [self.client.deadline(), self.host.deadline()]
                 .into_iter()
                 .flatten()
                 .min()
                 .filter(|&t| t <= end);
             let Some(at) = next else { break };
             self.now = at.max(self.now);
-            self.client.handle_timeout(self.now);
-            self.host.handle_timeout(self.now);
+            self.client.on_timeout(self.now);
+            self.host.on_timeout(self.now);
             self.flush();
         }
         assert!(self.now <= end, "advance ran away");

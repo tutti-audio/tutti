@@ -1,6 +1,7 @@
 //! [`ResourceResponder`]: the Responder of Property Exchange, serving the
 //! Resources of a [`ResourceStore`] (M2-103 §5 to §12, §14, §15).
 
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
 use super::super::body::{BodyLimit, decode_body, encode_body};
@@ -105,6 +106,20 @@ pub enum ResponderEvent {
         /// The Resource.
         target: ResourceTarget,
     },
+}
+
+impl ResponderEvent {
+    /// The Initiator the event is about.
+    #[must_use]
+    pub const fn peer(&self) -> Muid {
+        match self {
+            Self::Changed { peer, .. }
+            | Self::Subscribed { peer, .. }
+            | Self::Unsubscribed { peer, .. }
+            | Self::StateRefused { peer, .. }
+            | Self::Deferred { peer, .. } => *peer,
+        }
+    }
 }
 
 /// What the driver does next.
@@ -257,7 +272,7 @@ enum Announce {
 pub struct ResourceResponder {
     own: Muid,
     settings: ResponderSettings,
-    store: ResourceStore,
+    store: Arc<Mutex<ResourceStore>>,
     device: Option<Box<dyn StateDevice>>,
     peers: Vec<Peer>,
     reassembler: PeReassembler,
@@ -305,6 +320,18 @@ impl ResourceResponder {
     /// A Responder with MUID `own` serving `store`.
     #[must_use]
     pub fn new(own: Muid, settings: ResponderSettings, store: ResourceStore) -> Self {
+        Self::sharing(own, settings, Arc::new(Mutex::new(store)))
+    }
+
+    /// A Responder with MUID `own` serving the `store` that others hold too: a
+    /// Set through this Responder is seen through every one that shares it, and
+    /// by whoever else holds the handle. The lock is held only inside a call.
+    #[must_use]
+    pub fn sharing(
+        own: Muid,
+        settings: ResponderSettings,
+        store: Arc<Mutex<ResourceStore>>,
+    ) -> Self {
         Self {
             own,
             settings,
@@ -329,10 +356,17 @@ impl ResourceResponder {
         self.device = Some(device);
     }
 
-    /// The Resources served.
+    /// The Resources served, locked while the guard lives: drop it before the
+    /// next call on this Responder.
+    pub fn store(&self) -> MutexGuard<'_, ResourceStore> {
+        self.store.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The handle the Resources are held behind, for another Responder to
+    /// [share](Self::sharing).
     #[must_use]
-    pub fn store(&self) -> &ResourceStore {
-        &self.store
+    pub fn shared_store(&self) -> Arc<Mutex<ResourceStore>> {
+        Arc::clone(&self.store)
     }
 
     /// The Subscriptions that are active: the Subscription, its Initiator and
@@ -347,15 +381,28 @@ impl ResourceResponder {
         self.queue.iter().filter(|q| q.peer == peer).count()
     }
 
-    /// Serves `peer`, whose Discovery gave `max_sysex`.
+    /// Serves `peer`, whose Discovery gave `max_sysex`. A peer already served keeps
+    /// its Subscriptions and what waits for it: a repeated Discovery changes
+    /// only its Receivable Maximum SysEx Message Size, and only an Invalidate
+    /// MUID ends a Subscription without a message ([`forget`](Self::forget),
+    /// M2-103 §11.5).
     pub fn accept(&mut self, peer: Muid, max_sysex: MaxSysexSize) {
-        self.forget(peer);
+        if let Some(served) = self.peers.iter_mut().find(|p| p.muid == peer) {
+            served.max_sysex = max_sysex;
+            return;
+        }
         self.peers.push(Peer {
             muid: peer,
             max_sysex,
             takes: SimultaneousRequests::ONE,
             ids: RequestIds::default(),
         });
+    }
+
+    /// Whether `peer` is served.
+    #[must_use]
+    pub fn serves(&self, peer: Muid) -> bool {
+        self.peer(peer).is_some()
     }
 
     /// Stops serving `peer` and drops its Subscriptions without a message: an
@@ -858,8 +905,9 @@ impl ResourceResponder {
             return Ok((target(resource)?, encoding));
         }
         let entry = self
-            .store
+            .store()
             .entry(&resource)
+            .cloned()
             .ok_or_else(|| refusal(PeStatus::NotFound, "no such Resource"))?;
         if entry.require_res_id() != request.res_id.is_some() {
             return Err(refusal(
@@ -886,9 +934,9 @@ impl ResourceResponder {
     /// The data a target names.
     fn data_of(&self, target: &ResourceTarget) -> Result<PeData, Refusal> {
         if *target.resource() == PeResource::ResourceList {
-            return Ok(PeData::ResourceList(self.store.resource_list()));
+            return Ok(PeData::ResourceList(self.store().resource_list()));
         }
-        self.store
+        self.store()
             .get(target)
             .cloned()
             .ok_or_else(|| refusal(PeStatus::NotFound, "no data for this resId"))
@@ -896,14 +944,15 @@ impl ResourceResponder {
 
     fn get(&self, request: &PeRequest) -> Result<Answer, Refusal> {
         let (target, encoding) = self.resolve(request)?;
-        let entry = self.store.entry(target.resource());
-        if let Some(entry) = entry
-            && !entry.can_get()
-        {
+        let (can_get, fc_on_get) = self
+            .store()
+            .entry(target.resource())
+            .map_or((true, false), |e| (e.can_get(), e.fc_on_get()));
+        if !can_get {
             return Err(refusal(PeStatus::NotAllowed, "the Resource cannot be got"));
         }
         let streamed = request.flow_control == PeFlowControl::On;
-        if streamed && !entry.is_some_and(|e| e.fc_on_get()) {
+        if streamed && !fc_on_get {
             return Err(refusal(
                 PeStatus::FlowControlUnsupported,
                 "the Resource has no Flow Control on Get",
@@ -950,8 +999,9 @@ impl ResourceResponder {
     ) -> Result<Answer, Refusal> {
         let (target, encoding) = self.resolve(request)?;
         let entry = self
-            .store
+            .store()
             .entry(target.resource())
+            .cloned()
             .ok_or_else(|| refusal(PeStatus::NotAllowed, "ResourceList cannot be set"))?;
         let allowed = match (entry.can_set(), request.set_scope) {
             (CanSet::None, _) | (CanSet::Full, PeSetScope::Partial) => false,
@@ -1016,7 +1066,7 @@ impl ResourceResponder {
             }
             other => other,
         };
-        self.store
+        self.store()
             .put(target.res_id().cloned(), data)
             .map_err(|e| refusal(PeStatus::InternalError, e.to_string()))?;
         out.push(ResponderAction::Event(ResponderEvent::Changed {
@@ -1057,7 +1107,7 @@ impl ResourceResponder {
             let stamp = device.stamp(&id, &state);
             state = state.stamped_with(stamp);
         }
-        self.store
+        self.store()
             .note_state(&id, &state)
             .map_err(|e| refusal(PeStatus::InternalError, e.to_string()))?;
         Ok(state)
@@ -1070,8 +1120,9 @@ impl ResourceResponder {
         update: &PartialUpdate,
     ) -> Result<PeData, PublishError> {
         let held = self
-            .store
+            .store()
             .get(target)
+            .cloned()
             .ok_or_else(|| PublishError::NoData(target.resource().as_str().to_owned()))?;
         let json = held.to_json().ok_or_else(|| {
             PeDataError::new(
@@ -1099,7 +1150,7 @@ impl ResourceResponder {
                 }
                 let (target, encoding) = self.resolve(request)?;
                 let subscribable = self
-                    .store
+                    .store()
                     .entry(target.resource())
                     .is_some_and(|e| e.can_subscribe());
                 if !subscribable {
@@ -1228,7 +1279,7 @@ impl ResourceResponder {
                 target: target.resource().as_str().to_owned(),
             });
         }
-        self.store.put(target.res_id().cloned(), data.clone())?;
+        self.store().put(target.res_id().cloned(), data.clone())?;
         let mut out = Vec::new();
         self.announce(target, Announce::Full, now, &mut out);
         Ok(out)
@@ -1248,7 +1299,7 @@ impl ResourceResponder {
         now: Instant,
     ) -> Result<Vec<ResponderAction>, PublishError> {
         let data = self.changed(target, &update)?;
-        self.store.put(target.res_id().cloned(), data)?;
+        self.store().put(target.res_id().cloned(), data)?;
         let mut out = Vec::new();
         self.announce(target, Announce::Partial(update), now, &mut out);
         Ok(out)
@@ -1386,9 +1437,12 @@ impl ResourceResponder {
                 message = one_chunk(&header, &body);
             }
         }
-        if message.is_none()
-            && let Some(data) = self.store.get(&target)
-        {
+        let held = if message.is_none() {
+            self.store().get(&target).cloned()
+        } else {
+            None
+        };
+        if let Some(data) = held {
             let (media_type, bytes) = data.to_wire();
             let header = update(PeUpdateCommand::Full, encoding, media_type);
             if let Ok(body) = encode_body(encoding, &bytes) {

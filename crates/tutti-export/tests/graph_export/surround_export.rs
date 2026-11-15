@@ -15,9 +15,9 @@ use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 
 use tutti_export::{RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
-use tutti_types::Azimuth;
 use tutti_types::ChannelLayout;
 use tutti_types::Seconds;
+use tutti_types::{Azimuth, Bed};
 
 /// The rate [`export`] renders at, and so the rate every graph is built for.
 const RATE: tutti_types::SampleRate = tutti_types::SampleRate::SR_48K;
@@ -70,7 +70,7 @@ fn stereo_net_widened_then_exports_four_channels() {
     assert_eq!(g.outputs(), 4, "graph widened to quad");
     vbap_mix(
         &mut g,
-        ChannelLayout::QUAD,
+        Bed::Quad,
         &[
             (src_front, Azimuth::new(45.0)),
             (src_rear, Azimuth::new(135.0)),
@@ -126,13 +126,8 @@ fn surround_5_1_export_places_center_and_feeds_lfe() {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::from(6u16));
     let src = g.add(Const::frame(&[1.0, 1.0]));
     // A single dead-center source.
-    vbap_mix(
-        &mut g,
-        ChannelLayout::from(6u16),
-        &[(src, Azimuth::new(0.0))],
-    )
-    .expect("build 5.1 mix");
-    bass_send(&mut g, ChannelLayout::from(6u16), &[src]);
+    vbap_mix(&mut g, Bed::Surround51, &[(src, Azimuth::new(0.0))]).expect("build 5.1 mix");
+    bass_send(&mut g, Bed::Surround51, &[src]);
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("surround51.wav");
@@ -198,11 +193,11 @@ fn surround_5_1_downmixes_center_to_both_stereo_channels() {
     let src = g.add(Const::frame(&[1.0, 1.0]));
     vbap_mix(
         &mut g,
-        ChannelLayout::from(6u16),
+        Bed::Surround51,
         &[(src, Azimuth::new(0.0))], // dead center → C channel
     )
     .expect("build 5.1 mix");
-    bass_send(&mut g, ChannelLayout::from(6u16), &[src]);
+    bass_send(&mut g, Bed::Surround51, &[src]);
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("downmix.wav");
@@ -280,11 +275,11 @@ fn surround_5_1_exports_folded_mono_keeps_center() {
     let src = g.add(Const::frame(&[1.0, 1.0]));
     vbap_mix(
         &mut g,
-        ChannelLayout::from(6u16),
+        Bed::Surround51,
         &[(src, Azimuth::new(0.0))], // dead center → C channel (2)
     )
     .expect("build 5.1 mix");
-    bass_send(&mut g, ChannelLayout::from(6u16), &[src]);
+    bass_send(&mut g, Bed::Surround51, &[src]);
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("surround_mono.wav");
@@ -320,11 +315,11 @@ fn atmos_7_1_4_exports_twelve_channels_with_rear_energy() {
     let src = g.add(Const::frame(&[1.0, 1.0]));
     vbap_mix(
         &mut g,
-        ChannelLayout::from(12u16),
+        Bed::Surround714,
         &[(src, Azimuth::new(150.0))], // hard rear-left
     )
     .expect("build 7.1.4 mix");
-    bass_send(&mut g, ChannelLayout::from(12u16), &[src]);
+    bass_send(&mut g, Bed::Surround714, &[src]);
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("atmos.wav");
@@ -363,11 +358,11 @@ fn atmos_7_1_4_downmixes_surround_into_front() {
     let src = g.add(Const::frame(&[1.0, 1.0]));
     vbap_mix(
         &mut g,
-        ChannelLayout::from(12u16),
+        Bed::Surround714,
         &[(src, Azimuth::new(150.0))], // hard rear-left → Lrs (unassigned ch 6)
     )
     .expect("build 7.1.4 mix");
-    bass_send(&mut g, ChannelLayout::from(12u16), &[src]);
+    bass_send(&mut g, Bed::Surround714, &[src]);
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("atmos_stereo.wav");
