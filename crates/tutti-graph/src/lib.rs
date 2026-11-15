@@ -659,7 +659,7 @@ pub use play::PlayClock;
 pub use pool::{WorkerPool, WorkerPoolBuilder};
 pub use preroll::PrerollTable;
 pub use render_mode::RenderMode;
-pub use root::{RootError, fold_to_width};
+pub use root::{RootError, RootId, fold_to_topology, fold_to_width};
 pub use tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};
 pub use wake::Wake;
 // The reading is a value type, `tutti-types`' (the modulation compiler

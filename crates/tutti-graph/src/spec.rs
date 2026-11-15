@@ -183,6 +183,10 @@ pub struct GraphSpec {
     /// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) wide, which is a bus's
     /// width. The session keeps it in step with its root declaration.
     pub root: Option<BusTopology>,
+    /// The root's generation: a commit that changes the root's declaration
+    /// carries the next one ([`RootId`]), and the plan it compiles to reports
+    /// it ([`Plan::root_id`](crate::Plan::root_id)).
+    pub root_id: crate::RootId,
     /// Bus edges into the root, in source order
     /// ([`connect_bus_to_root`](Self::connect_bus_to_root)): lowered, as
     /// `bus_edges` are, to lanes on the output channels.
@@ -557,6 +561,7 @@ impl GraphSpec {
             gains,
             bus_edges,
             root,
+            root_id,
             root_sources,
             // A control: the plan does not read it.
             modes: _,
@@ -569,6 +574,7 @@ impl GraphSpec {
             && *events == other.events
             && *bus_edges == other.bus_edges
             && *root == other.root
+            && *root_id == other.root_id
             && *root_sources == other.root_sources
             && *generations == other.generations
             && *required_resolution == other.required_resolution

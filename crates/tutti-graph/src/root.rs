@@ -5,6 +5,48 @@
 use tutti_buffers::{Fold, FoldEnd, FoldError};
 use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
 
+/// The generation of the graph root: each commit that changes the root's
+/// declaration carries the next one.
+///
+/// The plan carries it ([`Plan::root_id`](crate::Plan::root_id)), so what
+/// depends on the root's topology (the engine's folds into a device) is looked
+/// up by the plan being rendered and swaps with it, and no topology crosses to
+/// the audio thread. The first root, before any declaration, is
+/// [`GENESIS`](Self::GENESIS).
+///
+/// ```
+/// use tutti_graph::RootId;
+///
+/// assert!(RootId::GENESIS < RootId::GENESIS.next());
+/// assert_eq!(RootId::GENESIS.next().get(), RootId::GENESIS.get() + 1);
+/// ```
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RootId(u64);
+
+impl RootId {
+    /// The root a graph starts with: undeclared, the engine's order for its
+    /// width.
+    pub const GENESIS: Self = Self(0);
+
+    /// The generation after this one.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+
+    /// The generation as a number, for a display or a log.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+impl std::fmt::Display for RootId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Why the graph root cannot be widened or placed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
@@ -28,9 +70,18 @@ pub enum RootError {
 ///
 /// The destination is taken to be the engine's own order for its width
 /// ([`ChannelTopology::assumed`]): mono, stereo, quad, 5.1, 7.1 and 7.1.4. A
-/// mono source lands on the centre of a 6, 8 or 12-wide one and the front pair
-/// of a 2 or 4-wide one. The source is placed by speaker, except where a
-/// speaker cannot be named:
+/// destination that states its placement is [`fold_to_topology`].
+///
+/// # Errors
+///
+/// As [`fold_to_topology`].
+pub fn fold_to_width(src: &ChannelTopology, dst: ChannelLayout) -> Result<Fold, FoldError> {
+    fold_to_topology(src, &ChannelTopology::assumed(dst))
+}
+
+/// Builds the fold from `src` into `dst`. A mono source lands on the centre of
+/// a 6, 8 or 12-wide destination and the front pair of a 2 or 4-wide one. The
+/// source is placed by speaker, except where a speaker cannot be named:
 ///
 /// - a source with an [`Unknown`](Speaker::Unknown) channel (a second LFE, a
 ///   wide or high speaker) is [`FoldError::Unnamed`], whatever the
@@ -40,8 +91,8 @@ pub enum RootError {
 ///   a wider destination is zero-filled and a narrower one is an error, never
 ///   a matrix. A caller that reads a bare count in the engine's order says so
 ///   with [`ChannelTopology::assumed`] before it calls;
-/// - a destination width with no order (3, 5, 7, 9 to 11, 13 and up) names no
-///   speaker, so channels go by index there too, and a narrowing is
+/// - a destination with no named speaker (3, 5, 7, 9 to 11, 13 and up
+///   unassigned) takes channels by index too, and a narrowing is
 ///   [`FoldError::Unplaced`], never a truncation;
 /// - otherwise, [`Fold::between`].
 ///
@@ -49,7 +100,7 @@ pub enum RootError {
 ///
 /// As [`Fold::between`] and [`Fold::by_index`], and [`FoldError::Unnamed`] as
 /// above.
-pub fn fold_to_width(src: &ChannelTopology, dst: ChannelLayout) -> Result<Fold, FoldError> {
+pub fn fold_to_topology(src: &ChannelTopology, dst: &ChannelTopology) -> Result<Fold, FoldError> {
     if let Some(channel) = src
         .positions()
         .and_then(|list| list.iter().position(|p| matches!(p, Speaker::Unknown(_))))
@@ -59,11 +110,10 @@ pub fn fold_to_width(src: &ChannelTopology, dst: ChannelLayout) -> Result<Fold, 
             channel,
         });
     }
-    let to = ChannelTopology::assumed(dst);
     // An ambisonic source is as unplaced as unassigned channels: by index.
-    if src.is_unassigned() || src.ambisonic().is_some() || to.is_unassigned() {
-        Fold::by_index(src.width(), dst)
+    if src.is_unassigned() || src.ambisonic().is_some() || dst.is_unassigned() {
+        Fold::by_index(src.width(), dst.width())
     } else {
-        Fold::between(src, &to)
+        Fold::between(src, dst)
     }
 }

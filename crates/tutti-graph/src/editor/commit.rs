@@ -157,13 +157,14 @@ impl Editor {
             return Ok(());
         }
         let (valid, weights) = Self::lower_and_validate(&self.spec, &self.shapes)?;
-        let (plan, mut delta) = compile(
+        let (mut plan, mut delta) = compile(
             &valid,
             &self.shapes,
             &self.prepare,
             self.base().map(|p| &**p),
         )
         .map_err(CommitError::Compile)?;
+        plan.root_id = self.spec.root_id;
         // The crossfades `replace` asked for, for the keys this delta
         // replaces (a key removed since has none to carry).
         delta.fades = delta
