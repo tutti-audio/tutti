@@ -234,12 +234,15 @@ fn a_command_the_transport_cannot_do_is_reported() {
     assert!(!s.playhead().playing());
 }
 
-/// **A segmented command acts when its string is whole, and a segment that does
-/// not belong is reported (RP-013 p.40)**: PLAY and STOP split across two
-/// COMMAND SEGMENTs play then stop once the last arrives; a later segment with
-/// no first one is a `MachineControlSegmentation(MissingFirst)`.
+/// **A segmented string acts whole, in order, and a segment that does not belong
+/// is reported (RP-013 p.40)**: a later segment with no first is a
+/// `MachineControlSegmentation(MissingFirst)`; then, from a rolling transport, a
+/// LOCATE to beat 4.0 (`44 06 01 60 00 02 00 00`) and a STOP cut across two
+/// COMMAND SEGMENTs do nothing until the last arrives, and then both run: the
+/// transport stands at beat 4.0, stopped.
 #[test]
 fn segmented_commands_act_whole_and_a_stray_segment_is_reported() {
+    use tutti_midi_runtime::SegmentFault;
     let (mut s, fake) = rig();
     follow(&mut s);
     command(&fake, 5, &[0x53, 0x02, 0x00, 0x02]);
@@ -250,20 +253,27 @@ fn segmented_commands_act_whole_and_a_stray_segment_is_reported() {
     assert!(
         seen.iter().any(|e| matches!(
             e,
-            MidiEvent::MachineControlSegmentation(
+            MidiEvent::MachineControlSegmentation(SegmentFault::String(
                 tutti_midi_protocol::MmcSegmentError::MissingFirst
-            )
+            ))
         )),
         "{seen:?}"
     );
-    assert!(!s.playhead().playing());
-    // First (one to come) holds the PLAY, the last a second command.
-    command(&fake, 5, &[0x53, 0x02, 0x41, 0x02]);
-    command(&fake, 5, &[0x53, 0x02, 0x00, 0x7C]);
+    command(&fake, 5, &[0x02]);
+    until_rolling(&mut s, true);
+    let string = [0x44, 0x06, 0x01, 0x60, 0x00, 0x02, 0x00, 0x00, 0x01];
+    let mut first = vec![0x53, 0x05, 0x41];
+    first.extend_from_slice(&string[..4]);
+    command(&fake, 5, &first);
     for _ in 0..40 {
         pump(&mut s);
     }
-    assert!(s.playhead().playing());
+    assert!(s.playhead().playing(), "half a string does nothing");
+    let mut last = vec![0x53, 0x06, 0x00];
+    last.extend_from_slice(&string[4..]);
+    command(&fake, 5, &last);
+    until_rolling(&mut s, false);
+    until_beat(&mut s, 4.0);
 }
 
 /// **MMC follows beside a Beat Clock follower** and takes no part of the tempo
