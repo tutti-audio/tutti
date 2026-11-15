@@ -53,7 +53,7 @@ fn session_with_probe() -> (Session, NodeKey, libloading::Library) {
 /// wrong unit on the same parameter: `Db` on a parameter that measures hertz.
 fn a_typed_hertz_parameter_round_trips_through_the_formats_own_range() {
     let (s, node, _image) = session_with_probe();
-    let params = s.plugin(node).unwrap().params();
+    let params = s.hosted_plugin(node).unwrap().params();
     assert_eq!(
         params.get(HERTZ).unwrap().info().measures(),
         Some(ParamUnit::Hertz),

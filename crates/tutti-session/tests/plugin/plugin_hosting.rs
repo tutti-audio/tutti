@@ -131,7 +131,7 @@ fn a_clap_plugin_asked_in_process_is_hosted_here() {
             Spec::new(plugin).hosting(Hosting::InProcess),
         )
         .expect("the reference plugin loads in this process");
-    let hosted = s.plugin(node).expect("it is hosted");
+    let hosted = s.hosted_plugin(node).expect("it is hosted");
     assert_eq!(hosted.diagnostics().server_pid(), None);
     assert_eq!(
         hosted.descriptor().id,

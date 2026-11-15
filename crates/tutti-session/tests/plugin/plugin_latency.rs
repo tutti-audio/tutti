@@ -321,12 +321,12 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
 }
 
 fn diagnostics_of(s: &Session, node: tutti_graph::NodeKey) -> tutti_session::Diagnostics<'_> {
-    s.plugin(node).expect("hosted").diagnostics()
+    s.hosted_plugin(node).expect("hosted").diagnostics()
 }
 
 /// One control round trip to the probe's server: the server sends the
 /// `latency.changed` of a render mode after that call's reply, and the bridge
 /// thread reads it off the socket only while it waits for the next reply.
 fn round_trip(s: &Session, node: tutti_graph::NodeKey) {
-    let _ = s.plugin(node).expect("hosted").state().save();
+    let _ = s.hosted_plugin(node).expect("hosted").state().save();
 }

@@ -55,7 +55,7 @@ fn the_second_plugin_of_a_bundle_loads_by_its_entry() {
     let second = s
         .load_plugin_blocking(main, Spec::new(entry_ref(&path, second_id())))
         .expect("the second plugin loads");
-    let hosted = s.plugin(second).unwrap();
+    let hosted = s.hosted_plugin(second).unwrap();
     assert_eq!(hosted.descriptor().id, second_id());
     assert_eq!(hosted.plugin().id(), Some(second_id()));
 
@@ -65,7 +65,7 @@ fn the_second_plugin_of_a_bundle_loads_by_its_entry() {
             Spec::new(PluginRef::file(&path).expect("a plugin file")),
         )
         .expect("the file's first plugin loads");
-    let hosted = s.plugin(first).unwrap();
+    let hosted = s.hosted_plugin(first).unwrap();
     assert_eq!(hosted.descriptor().id, first_id());
     assert_eq!(
         hosted.plugin().id(),
@@ -91,7 +91,12 @@ fn a_state_is_refused_by_another_plugin() {
         .load_plugin_blocking(main, Spec::new(second_ref.clone()))
         .expect("loads");
 
-    let from_first = s.plugin(first).unwrap().state().save().expect("saves");
+    let from_first = s
+        .hosted_plugin(first)
+        .unwrap()
+        .state()
+        .save()
+        .expect("saves");
     // The catalog names a plugin by its file's canonical path.
     assert_eq!(
         from_first.plugin().id(),
@@ -103,7 +108,12 @@ fn a_state_is_refused_by_another_plugin() {
         tutti_plugin_db::canonical_path(first_ref.path()),
         "in its own file"
     );
-    let from_second = s.plugin(second).unwrap().state().save().expect("saves");
+    let from_second = s
+        .hosted_plugin(second)
+        .unwrap()
+        .state()
+        .save()
+        .expect("saves");
 
     // The request.
     let refused = Spec::new(second_ref.clone())
@@ -122,7 +132,7 @@ fn a_state_is_refused_by_another_plugin() {
     assert_eq!(request.state(), Some(&from_first));
 
     // The hosted plugin.
-    let hosted = s.plugin(second).unwrap();
+    let hosted = s.hosted_plugin(second).unwrap();
     let refused = hosted
         .state()
         .restore(main, &from_first)

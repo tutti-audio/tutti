@@ -69,7 +69,7 @@ fn an_in_process_vst2_plugin_is_given_the_project_meter() {
         .expect("the in-process VST2 loads");
     s.graph().connect(node, Root).unwrap();
 
-    let hosted = s.plugin(node).expect("hosted");
+    let hosted = s.hosted_plugin(node).expect("hosted");
     assert!(
         hosted.diagnostics().follows_project_meter(),
         "the session gave the in-process node its meter cell"

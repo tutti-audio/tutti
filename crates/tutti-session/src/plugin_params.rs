@@ -22,9 +22,9 @@
 //! # use tutti_plugin_types::ParamId;
 //! # fn rescan(session: &mut Session, node: NodeKey) {
 //! let id = ParamId::new(0);
-//! let before = session.plugin(node).unwrap().params().get(id).unwrap().normalized();
+//! let before = session.hosted_plugin(node).unwrap().params().get(id).unwrap().normalized();
 //! let _events = session.update();
-//! let after = session.plugin(node).unwrap().params().get(id).map(|p| p.normalized());
+//! let after = session.hosted_plugin(node).unwrap().params().get(id).map(|p| p.normalized());
 //! # let _ = (before, after);
 //! # }
 //! ```
@@ -36,7 +36,7 @@
 //! # use tutti_graph::NodeKey;
 //! # use tutti_plugin_types::{Normalized, ParamId};
 //! # fn rescan(session: &mut Session, node: NodeKey) {
-//! let level = session.plugin(node).unwrap().params().get(ParamId::new(0)).unwrap();
+//! let level = session.hosted_plugin(node).unwrap().params().get(ParamId::new(0)).unwrap();
 //! let _events = session.update();
 //! let _ = level.set(Normalized::of(0.5));
 //! # }

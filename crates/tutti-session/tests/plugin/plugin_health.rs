@@ -210,7 +210,7 @@ fn a_crash_is_not_declared_until_the_debounce_elapses() {
         assert!(died.is_empty(), "at {frames} observation(s): {died:?}");
         assert!(
             matches!(
-                s.plugin(node).expect("hosted").health(),
+                s.hosted_plugin(node).expect("hosted").health(),
                 PluginHealth::Died { .. }
             ),
             "at {frames} observation(s) the plugin is failing, not dead"
@@ -244,7 +244,7 @@ fn a_live_plugin_is_never_declared_dead() {
     let died = observe(&mut s, Liveness::DEATHS as usize + 5);
     assert!(died.is_empty(), "{died:?}");
     assert!(matches!(
-        s.plugin(node).expect("hosted").health(),
+        s.hosted_plugin(node).expect("hosted").health(),
         PluginHealth::Running
     ));
     assert!(s.graph_ref().contains(node), "a healthy plugin stays wired");

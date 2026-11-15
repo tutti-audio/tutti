@@ -1,6 +1,6 @@
 //! The plugin as a pool entry: [`Session::plugin_entry`] declares it, the pool
 //! loads it, [`Session::add_pooled_plugin`] puts its node in the graph, and
-//! [`Session::pooled_plugin`] is its handle.
+//! [`Session::plugin`] is its handle.
 //!
 //! The entry's identity is the [`PluginId`] and the [`Hosting`]. The id is
 //! resolved and bound against the catalog when the entry is built; the load
@@ -495,13 +495,13 @@ impl<K: Ord + Clone + fmt::Debug + Send + Sync + 'static> IntoPool<K> for Plugin
     }
 }
 
-/// A pooled plugin's handle: [`Session::pooled_plugin`].
+/// A pooled plugin's handle: [`Session::plugin`].
 ///
 /// It exists from the entry's first landing and owns nothing: the plugin lives
 /// in its node, and a handle never keeps its server alive. A handle belongs to
 /// one load of the entry: once the entry is released or reloaded (a changed
 /// identity, a [`retry`](Session::retry)) it reads [`Presence::Closed`], and
-/// [`Session::pooled_plugin`] gives the new one.
+/// [`Session::plugin`] gives the new one.
 #[derive(Clone)]
 pub struct PooledPlugin {
     id: ResourceId,
@@ -622,7 +622,7 @@ impl Session {
     /// released); [`HandleError::WrongKind`] when it is another kind of
     /// entry; [`HandleError::NotLoaded`] before the load lands, or after it
     /// failed.
-    pub fn pooled_plugin<K>(&self, key: &K) -> Result<PooledPlugin, HandleError<K>>
+    pub fn plugin<K>(&self, key: &K) -> Result<PooledPlugin, HandleError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {

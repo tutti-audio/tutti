@@ -173,13 +173,10 @@ fn a_served_plugin_lands_through_the_pool() {
     s.pool(s.plugin_entry("verb", &second_id(), &catalog))
         .expect("a served load needs no main thread");
     assert!(matches!(s.pool_state(&"verb"), Some(PoolState::Loading)));
-    assert!(
-        s.pooled_plugin(&"verb").is_err(),
-        "no handle before it lands"
-    );
+    assert!(s.plugin(&"verb").is_err(), "no handle before it lands");
     loaded(&mut s, "verb");
 
-    let handle = s.pooled_plugin(&"verb").expect("loaded");
+    let handle = s.plugin(&"verb").expect("loaded");
     assert_eq!(
         handle.info().descriptor().id,
         tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap(),
@@ -189,7 +186,7 @@ fn a_served_plugin_lands_through_the_pool() {
     assert_eq!(handle.presence(), Presence::Live);
 
     let node = s.add_pooled_plugin(&"verb").expect("the plugin enters");
-    let view = s.plugin(node).expect("hosted");
+    let view = s.hosted_plugin(node).expect("hosted");
     assert!(
         view.diagnostics().server_pid().is_some(),
         "an out-of-process plugin has its server"
@@ -250,14 +247,14 @@ fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
         .unwrap();
     loaded(&mut s, "verb");
     let node = s.add_pooled_plugin(&"verb").unwrap();
-    let before = s.pooled_plugin(&"verb").unwrap();
+    let before = s.plugin(&"verb").unwrap();
     assert_eq!(before.presence(), Presence::Live);
     assert!(matches!(
         s.retry(&"verb"),
         Err(RetryError::NotFailed("verb"))
     ));
 
-    s.plugin(node)
+    s.hosted_plugin(node)
         .unwrap()
         .diagnostics()
         .terminate(TerminationReason::Hung {
@@ -266,7 +263,9 @@ fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
         });
     pump_until(&mut s, "the death", |_| !before.presence().is_live());
     assert_eq!(before.presence(), Presence::Lost(PluginCause::Died));
-    pump_until(&mut s, "the node's removal", |s| s.plugin(node).is_err());
+    pump_until(&mut s, "the node's removal", |s| {
+        s.hosted_plugin(node).is_err()
+    });
     assert_eq!(
         before.presence(),
         Presence::Lost(PluginCause::Died),
@@ -281,7 +280,7 @@ fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
         Presence::Closed,
         "its entry was reloaded"
     );
-    assert_eq!(s.pooled_plugin(&"verb").unwrap().presence(), Presence::Live);
+    assert_eq!(s.plugin(&"verb").unwrap().presence(), Presence::Live);
     s.add_pooled_plugin(&"verb")
         .expect("the reloaded plugin is the next node's");
 }
@@ -292,7 +291,7 @@ fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
 fn recovery_keeps_a_plugin_live_until_it_gives_up() {
     let (catalog, _dir) = catalog();
     let kill = |s: &Session, node| {
-        s.plugin(node)
+        s.hosted_plugin(node)
             .unwrap()
             .diagnostics()
             .terminate(TerminationReason::Hung {
@@ -306,11 +305,11 @@ fn recovery_keeps_a_plugin_live_until_it_gives_up() {
         .unwrap();
     loaded(&mut s, "verb");
     let node = s.add_pooled_plugin(&"verb").unwrap();
-    let handle = s.pooled_plugin(&"verb").unwrap();
+    let handle = s.plugin(&"verb").unwrap();
     kill(&s, node);
     pump_until(&mut s, "the reload to start", |s| {
         matches!(
-            s.plugin(node).map(|p| p.health()),
+            s.hosted_plugin(node).map(|p| p.health()),
             Ok(PluginHealth::Reloading { .. })
         )
     });
@@ -324,7 +323,7 @@ fn recovery_keeps_a_plugin_live_until_it_gives_up() {
         .unwrap();
     loaded(&mut s, "verb");
     let node = s.add_pooled_plugin(&"verb").unwrap();
-    let handle = s.pooled_plugin(&"verb").unwrap();
+    let handle = s.plugin(&"verb").unwrap();
     kill(&s, node);
     pump_until(&mut s, "the give-up", |_| !handle.presence().is_live());
     assert_eq!(handle.presence(), Presence::Lost(PluginCause::GaveUp));
@@ -342,14 +341,14 @@ fn an_initial_state_is_restored_and_two_keys_load_two_plugins() {
     loaded(&mut s, "a");
     let a = s.add_pooled_plugin(&"a").unwrap();
     let set = Normalized::of(0.9);
-    s.plugin(a)
+    s.hosted_plugin(a)
         .unwrap()
         .params()
         .get(CUTOFF)
         .unwrap()
         .set(set)
         .unwrap();
-    let state = s.plugin(a).unwrap().state().save().expect("a state");
+    let state = s.hosted_plugin(a).unwrap().state().save().expect("a state");
 
     s.pool((
         s.plugin_entry("a", &first_id(), &catalog),
@@ -361,7 +360,7 @@ fn an_initial_state_is_restored_and_two_keys_load_two_plugins() {
     loaded(&mut s, "b");
     let b = s.add_pooled_plugin(&"b").unwrap();
     let read = s
-        .plugin(b)
+        .hosted_plugin(b)
         .unwrap()
         .params()
         .get(CUTOFF)
@@ -371,12 +370,9 @@ fn an_initial_state_is_restored_and_two_keys_load_two_plugins() {
         (read.get() - set.get()).abs() < 1e-6,
         "the state's value, not the default: {read:?}"
     );
-    let pid = |node| s.plugin(node).unwrap().diagnostics().server_pid();
+    let pid = |node| s.hosted_plugin(node).unwrap().diagnostics().server_pid();
     assert_ne!(pid(a), pid(b), "two plugins, two servers");
-    assert_ne!(
-        s.pooled_plugin(&"a").unwrap().id(),
-        s.pooled_plugin(&"b").unwrap().id()
-    );
+    assert_ne!(s.plugin(&"a").unwrap().id(), s.plugin(&"b").unwrap().id());
 }
 
 /// **A reloaded plugin with other ports fails the entry, named, and the node
@@ -411,8 +407,8 @@ fn a_swap_to_a_plugin_with_other_ports_fails_the_entry() {
         s.pool_state(&"fx"),
         Some(PoolState::Failed(LoadError::PluginPorts { .. }))
     ));
-    assert!(s.pooled_plugin(&"fx").is_err(), "the unused plugin is gone");
-    assert_eq!(s.plugin(node).unwrap().descriptor().id, first);
+    assert!(s.plugin(&"fx").is_err(), "the unused plugin is gone");
+    assert_eq!(s.hosted_plugin(node).unwrap().descriptor().id, first);
     let _ = pump(&mut s);
     assert!(
         s.update()
@@ -432,8 +428,8 @@ fn a_changed_identity_swaps_the_node() {
     s.pool(s.plugin_entry("fx", &first_id(), &catalog)).unwrap();
     loaded(&mut s, "fx");
     let node = s.add_pooled_plugin(&"fx").unwrap();
-    let first = s.pooled_plugin(&"fx").unwrap();
-    let id_of_node = |s: &Session| s.plugin(node).unwrap().descriptor().id.clone();
+    let first = s.plugin(&"fx").unwrap();
+    let id_of_node = |s: &Session| s.hosted_plugin(node).unwrap().descriptor().id.clone();
     assert_eq!(
         id_of_node(&s),
         tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap()
@@ -453,10 +449,7 @@ fn a_changed_identity_swaps_the_node() {
         std::thread::sleep(Duration::from_millis(2));
     }
     assert_eq!(first.presence(), Presence::Closed);
-    assert_eq!(
-        s.pooled_plugin(&"fx").unwrap().info().descriptor().id,
-        second
-    );
+    assert_eq!(s.plugin(&"fx").unwrap().info().descriptor().id, second);
 }
 
 /// **A node holds its entry.** The app stops declaring the key and the entry
@@ -468,7 +461,7 @@ fn a_node_holds_its_entry_until_it_is_removed() {
     s.pool(s.plugin_entry("fx", &first_id(), &catalog)).unwrap();
     loaded(&mut s, "fx");
     let node = s.add_pooled_plugin(&"fx").unwrap();
-    let handle = s.pooled_plugin(&"fx").unwrap();
+    let handle = s.plugin(&"fx").unwrap();
 
     s.pool::<&'static str>(()).unwrap();
     let _ = s.update();
@@ -525,7 +518,7 @@ fn with_node_in(
 }
 
 fn pid_of(s: &Session, node: tutti_session::Key<tutti_session::PluginNode>) -> Option<u32> {
-    s.plugin(node).unwrap().diagnostics().server_pid()
+    s.hosted_plugin(node).unwrap().diagnostics().server_pid()
 }
 
 /// Declares `id` (hosted as `hosting`) under `fx`, with the aux-bus layout
@@ -566,7 +559,7 @@ fn a_swap_to_the_same_totals_in_other_buses_fails_the_entry() {
         )
     );
     assert_eq!(
-        s.plugin(node).unwrap().descriptor().id,
+        s.hosted_plugin(node).unwrap().descriptor().id,
         tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap()
     );
 }
@@ -599,7 +592,7 @@ fn a_retry_after_a_refused_swap_swaps_the_node() {
     );
     let second = tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap();
     pump_until(&mut s, "the swap", |s| {
-        s.plugin(node).unwrap().descriptor().id == second
+        s.hosted_plugin(node).unwrap().descriptor().id == second
     });
     assert_ne!(pid_of(&s, node), first, "another server");
     assert!(matches!(
@@ -622,7 +615,7 @@ fn a_later_identity_is_the_one_the_node_ends_on() {
     declare_with_layout(&mut s, &catalog, &first_id(), Hosting::OutOfProcess, "0");
     pump_until(&mut s, "the swap", |s| pid_of(s, node) != first);
     assert_eq!(
-        s.plugin(node).unwrap().descriptor().id,
+        s.hosted_plugin(node).unwrap().descriptor().id,
         tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap()
     );
 }
@@ -687,7 +680,7 @@ fn a_swap_waits_for_the_graph_and_ends_on_the_last_identity() {
         pid_of(s, node) != first
     });
     assert_eq!(
-        s.plugin(node).unwrap().descriptor().id,
+        s.hosted_plugin(node).unwrap().descriptor().id,
         tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap(),
         "the last identity declared"
     );
@@ -719,7 +712,7 @@ fn a_node_removed_while_its_swap_waits_leaves_the_plugin_to_the_entry() {
         .add_pooled_plugin(&"fx")
         .expect("the landed plugin is the next node's");
     assert_eq!(
-        s.plugin(next).unwrap().descriptor().id,
+        s.hosted_plugin(next).unwrap().descriptor().id,
         tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap()
     );
 }
@@ -749,7 +742,7 @@ fn a_graph_that_refuses_the_swap_fails_the_entry() {
         "{refused:?}"
     );
     assert_eq!(
-        s.plugin(node).unwrap().descriptor().id,
+        s.hosted_plugin(node).unwrap().descriptor().id,
         tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap()
     );
 }
@@ -769,7 +762,7 @@ mod process {
         s.pool(s.plugin_entry("verb", &first_id(), &catalog))
             .unwrap();
         loaded(&mut s, "verb");
-        let handle = s.pooled_plugin(&"verb").unwrap();
+        let handle = s.plugin(&"verb").unwrap();
         let pid = handle.info().server_pid().expect("a served plugin");
         let killed = std::process::Command::new("kill")
             .args(["-9", &pid.to_string()])
@@ -794,9 +787,9 @@ mod process {
         s.pool(s.plugin_entry("fx", &first_id(), &catalog)).unwrap();
         loaded(&mut s, "fx");
         let node = s.add_pooled_plugin(&"fx").unwrap();
-        let handle = s.pooled_plugin(&"fx").unwrap();
+        let handle = s.plugin(&"fx").unwrap();
         let pid = s
-            .plugin(node)
+            .hosted_plugin(node)
             .unwrap()
             .diagnostics()
             .server_pid()

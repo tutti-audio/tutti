@@ -145,7 +145,7 @@ impl Subject for Plugin {
     fn transcript(rig: &Rig) -> Option<tutti_shared_plugin::transcript::Transcript> {
         let state = rig
             .session
-            .plugin(rig.node)
+            .hosted_plugin(rig.node)
             .ok()?
             .state()
             .save()

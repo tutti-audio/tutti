@@ -128,7 +128,7 @@ impl Drive {
 /// Updates until the plugin at `node` has its parameter values read.
 fn wait_for_values(drive: &mut Drive, s: &mut Session, node: impl Into<NodeKey> + Copy) {
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !s.plugin(node).is_ok_and(|p| p.params().is_ready()) {
+    while !s.hosted_plugin(node).is_ok_and(|p| p.params().is_ready()) {
         assert!(
             Instant::now() < deadline,
             "the plugin's parameter read never landed"
@@ -158,7 +158,7 @@ fn lane_of(drive: &mut Drive, s: &mut Session, target: ParamRef) -> NodeKey {
 }
 
 fn gain_value(s: &Session, node: impl Into<NodeKey> + Copy) -> Option<Normalized> {
-    s.plugin(node)
+    s.hosted_plugin(node)
         .expect("hosted")
         .handle()
         .any_thread()
@@ -293,7 +293,7 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
     assert!(matches!(landed, Crossfade::Landed(())), "nothing waits");
     // Rebuilt by the crossfade: not ready until the job is run and landed.
     assert!(
-        !s.plugin(node).is_ok_and(|p| p.params().is_ready()),
+        !s.hosted_plugin(node).is_ok_and(|p| p.params().is_ready()),
         "the incoming plugin's mirror starts unread"
     );
     wait_for_values(&mut drive, &mut s, node);
@@ -446,5 +446,5 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
 }
 
 fn diagnostics_of(s: &Session, node: NodeKey) -> tutti_session::Diagnostics<'_> {
-    s.plugin(node).expect("hosted").diagnostics()
+    s.hosted_plugin(node).expect("hosted").diagnostics()
 }
