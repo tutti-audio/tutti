@@ -1,4 +1,4 @@
-//! The hardware out is sent at the time each event's frame is heard, not when
+//! A sink is sent at the time each event's frame is heard, not when
 //! the host happens to drain it: a session on `ManualStreamDriver`s, whose
 //! callbacks report the audio output's latency as they are told to.
 //!

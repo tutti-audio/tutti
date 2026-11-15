@@ -263,3 +263,27 @@ fn stamp_block_prefixes_each_event() {
     assert_eq!(jr_timestamp_value(&out[2].1), Some(15_625));
     assert!(out[3].1.is_note_off());
 }
+
+/// **A re-rated stream keeps JR time.** One second at 48 kHz is 31 250 ticks
+/// (31.25 kHz); re-rated to 44.1 kHz the origin is the same second, 44 100
+/// frames, the next stamp continues from tick 31 250, and a half second after it
+/// is 15 625 ticks on, where the old rate would read 22 050 frames as 14 355.
+#[test]
+fn a_re_rated_stream_continues_its_jr_time_at_the_new_rate() {
+    let mut stream = JrStream::new(SampleRate::SR_48K).with_clock(SampleRate::SR_48K);
+    let mut out = Vec::new();
+    stream.stamp_span(&[], Samples(48_000), &mut out);
+    assert_eq!(stream.origin(), Frame::new(48_000));
+    let mut stream = stream.at_rate(SampleRate::SR_44K1);
+    assert_eq!(stream.origin(), Frame::new(44_100), "the same second");
+    let events = [
+        at(0, midi::note_on(MidiChannel::FIRST, 60, 0x8000)),
+        at(22_050, midi::note_off(MidiChannel::FIRST, 60, 0)),
+    ];
+    stream.stamp(&events, &mut out);
+    let stamps: Vec<u16> = out
+        .iter()
+        .filter_map(|e| jr_timestamp_value(&e.1))
+        .collect();
+    assert_eq!(stamps, [31_250, 31_250 + 15_625]);
+}

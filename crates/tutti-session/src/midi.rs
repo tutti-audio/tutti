@@ -179,9 +179,25 @@ pub(crate) struct OutputTiming {
 
 /// An output node's tap, in events: the ring its output is copied into between
 /// two updates (a note-off is kept up to
-/// [`note_off_room`](tutti_graph::note_off_room) of it).
-pub(crate) const MIDI_OUT_TAP_CAPACITY: tutti_graph::EventCapacity =
-    tutti_graph::EventCapacity::of(1024);
+/// [`note_off_room`](tutti_graph::note_off_room) of it). What a
+/// [`MidiSink`](crate::MidiSink)'s node holds before the tap refuses.
+pub const MIDI_OUT_TAP_CAPACITY: tutti_graph::EventCapacity = tutti_graph::EventCapacity::of(1024);
+
+/// Whether a host's own sink ([`midi_sink`](crate::midi_sink())) is sent JR
+/// Timestamps (M2-104-UM §7.2.2.2). It gates timestamps, not delivery: with it
+/// off the events still go out, unstamped. A device's output has no such choice:
+/// it stamps iff its negotiated configuration receives JR Timestamps.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[non_exhaustive]
+pub enum Stamping {
+    /// Events are sent as they are.
+    #[default]
+    Off,
+    /// Each event is sent with the JR Timestamp that keeps its spacing, and the
+    /// stream carries the JR Clock (§7.2.2.1) a receiver needs to use them.
+    Jr,
+}
 
 /// A UMP MIDI output and its JR stamp stream: where one output node's events
 /// go, a `midi_output` entry's device or a `midi_sink` entry's [`MidiOut`](tutti_midi_runtime::MidiOut).
@@ -210,7 +226,7 @@ pub(crate) struct UmpOut {
     /// timestamps. Folding the two together would make disabling the stamper
     /// silently mute MIDI out. A device's output says for itself
     /// ([`is_stamping`](Self::is_stamping)).
-    stamping: bool,
+    stamping: Stamping,
     /// Scratch for the stamped block, reused across sends: stamping runs
     /// once per block and the result is only borrowed, straight to
     /// `MidiOut::queue`. `JrStream::stamp` clears it on entry, so nothing
@@ -294,7 +310,7 @@ impl UmpOut {
         Self {
             sink,
             stream,
-            stamping: false,
+            stamping: Stamping::Off,
             stamped: Vec::new(),
             rebased: Vec::new(),
             sends: Vec::new(),
@@ -303,19 +319,23 @@ impl UmpOut {
         }
     }
 
-    /// Turns JR stamping on or off for a host's own sink. It gates timestamps,
-    /// not delivery: with it off the events still go out, unstamped. A device's
-    /// output stamps iff its configuration receives JR Timestamps, whatever this
-    /// says.
-    pub(crate) fn set_stamping(&mut self, stamping: bool) {
+    /// Sets whether a host's own sink is JR-stamped. A device's output stamps
+    /// iff its configuration receives JR Timestamps, whatever this says.
+    pub(crate) fn set_stamping(&mut self, stamping: Stamping) {
         self.stamping = stamping;
+    }
+
+    /// Moves the stamp stream to `rate`, the graph's after a re-prepare: JR
+    /// time carries on from where it stood ([`JrStream::at_rate`](tutti_midi_runtime::JrStream::at_rate)).
+    pub(crate) fn set_rate(&mut self, rate: tutti_types::SampleRate) {
+        self.stream = self.stream.at_rate(rate);
     }
 
     /// Whether it JR-stamps.
     #[must_use]
     pub(crate) fn is_stamping(&self) -> bool {
         match &self.sink {
-            Sink::Host(_) => self.stamping,
+            Sink::Host(_) => self.stamping == Stamping::Jr,
             #[cfg(feature = "midi-hardware")]
             Sink::Device(out) => out.config().rx_jr,
         }
@@ -2149,7 +2169,7 @@ impl Midi<'_> {
     }
 
     /// Events dropped over every output: for want of an open output, refused
-    /// by an output node's tap for want of room (1 024 events between two
+    /// by an output node's tap for want of room ([`MIDI_OUT_TAP_CAPACITY`] events between two
     /// updates), refused by a sink or as scheduled too far ahead, counted. A
     /// `midi_sink`'s own share is [`MidiSink::losses`](crate::MidiSink::losses).
     pub fn out_drops(&self) -> u64 {
@@ -2224,7 +2244,7 @@ mod tests {
         }
     }
 
-    fn out_with_counter(stamping: bool) -> (UmpOut, Arc<AtomicUsize>) {
+    fn out_with_counter(stamping: Stamping) -> (UmpOut, Arc<AtomicUsize>) {
         let count = Arc::new(AtomicUsize::new(0));
         let mut out = UmpOut::new(Arc::new(CountingSink(count.clone())), SampleRate::SR_48K);
         out.set_stamping(stamping);
@@ -2242,7 +2262,7 @@ mod tests {
     /// across them.
     #[test]
     fn both_producers_advance_one_origin() {
-        let (mut out, _) = out_with_counter(true);
+        let (mut out, _) = out_with_counter(Stamping::Jr);
 
         out.send_batch(&[note(511)]);
         assert_eq!(out.origin(), Frame::new(512), "one 512-frame block");
@@ -2260,7 +2280,7 @@ mod tests {
     /// to.
     #[test]
     fn stamping_disabled_still_delivers_events() {
-        let (mut out, count) = out_with_counter(false);
+        let (mut out, count) = out_with_counter(Stamping::Off);
         out.send_batch(&[note(0), note(1)]);
         assert_eq!(
             count.load(Ordering::SeqCst),
@@ -2278,7 +2298,7 @@ mod tests {
     /// (the JR Timestamp prefixes): what makes the test above non-vacuous.
     #[test]
     fn stamping_enabled_adds_timestamp_messages() {
-        let (mut out, count) = out_with_counter(true);
+        let (mut out, count) = out_with_counter(Stamping::Jr);
         out.send_batch(&[note(0)]);
         assert!(
             count.load(Ordering::SeqCst) > 1,
@@ -2299,7 +2319,7 @@ mod tests {
     /// And a router *with* an output does not count drops.
     #[test]
     fn routing_to_an_open_output_drops_nothing() {
-        let (mut out, count) = out_with_counter(false);
+        let (mut out, count) = out_with_counter(Stamping::Off);
         let drops = OutDrops::default();
         route_batch(Some(&mut out), &drops, None, &[at(0), at(1)]);
         assert_eq!(count.load(Ordering::SeqCst), 2, "both reached the sink");
@@ -2344,7 +2364,7 @@ mod tests {
             [250, 0, 999].map(|o| Offset::of(Samples(o), span)),
             "each event's spacing from the earliest"
         );
-        out.set_stamping(true);
+        out.set_stamping(Stamping::Jr);
         let before = out.origin();
         route_batch(
             Some(&mut out),
@@ -2364,7 +2384,7 @@ mod tests {
     fn events_on_one_frame_share_that_frames_send_time() {
         let t0 = Instant::now() + Duration::from_secs(60);
         let (mut out, log) = timed_out();
-        out.set_stamping(true);
+        out.set_stamping(Stamping::Jr);
         let timing = timing_at(t0, OutputTerms::default());
         let map = timing.map.unwrap();
         out.send_frames(&[at(1_000), at(2_000), at(1_000)], Some(&timing));
@@ -2468,7 +2488,7 @@ mod tests {
     fn a_jr_stamp_is_sent_at_its_events_time() {
         let t0 = Instant::now() + Duration::from_secs(60);
         let (mut out, log) = timed_out();
-        out.set_stamping(true);
+        out.set_stamping(Stamping::Jr);
         let timing = timing_at(t0, OutputTerms::default());
         out.send_frames(&[at(1_000), at(2_000)], Some(&timing));
         let sent = log.lock().unwrap().clone();

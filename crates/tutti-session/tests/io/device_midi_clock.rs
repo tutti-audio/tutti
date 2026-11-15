@@ -22,7 +22,7 @@ fn spec_at(rate: f64) -> OutputSpec {
     )
 }
 
-/// Every batch the hardware out sent to its output.
+/// Every batch the sink was handed.
 #[derive(Clone, Default)]
 struct Wire(Arc<Mutex<Vec<Vec<UmpAt>>>>);
 
@@ -35,7 +35,7 @@ impl MidiOut for Wire {
 }
 
 /// Render `blocks` blocks of `frames` on `stream`, then update once: the
-/// hardware out hands `wire` the events the clock sent, as one batch whose
+/// sink hands `wire` the events the clock sent, as one batch whose
 /// offsets are their frames' spacing (stamping is off).
 fn clock(
     s: &mut LiveSession,

@@ -26,7 +26,7 @@ impl MidiOut for Wire {
     }
 }
 
-/// **A system session sends its MIDI clock to the hardware out with no device.**
+/// **A system session sends its MIDI clock to a sink with no device.**
 /// The clock node is enabled, the transport rolls, and the timer's blocks
 /// carry the 24-PPQN ticks to the output through `Phase::MidiOut`, timed by
 /// terms whose audio output is exactly zero.

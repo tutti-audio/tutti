@@ -173,8 +173,8 @@ pub use key::{
 pub use main_session::{EditorView, MainPlugin, MainSession, Opened};
 #[cfg(feature = "midi")]
 pub use midi::{
-    MIDI_INPUT_DROP_REPORT, MIDI_OUT_DROP_REPORT, Midi, MidiLoad, MidiRouteId, MidiRouteRule,
-    NoSuchMidiRoute, TakePlacement,
+    MIDI_INPUT_DROP_REPORT, MIDI_OUT_DROP_REPORT, MIDI_OUT_TAP_CAPACITY, Midi, MidiLoad,
+    MidiRouteId, MidiRouteRule, NoSuchMidiRoute, Stamping, TakePlacement,
 };
 #[cfg(feature = "midi")]
 pub use midi_event::MidiEvent;
@@ -186,7 +186,7 @@ pub use midi_port::{
     MidiOutputInfo, MidiPortError, OutputLoaded, OutputOptions, PortCause, midi_input, midi_output,
 };
 #[cfg(feature = "midi")]
-pub use midi_sink::{MidiSink, MidiSinkEntry, MidiSinkInfo, SinkLoaded, midi_sink};
+pub use midi_sink::{MidiSink, MidiSinkEntry, MidiSinkInfo, SinkLoaded, SinkOptions, midi_sink};
 #[cfg(feature = "modulation")]
 pub use modulation::{
     AutomationTake, MixRef, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget, Mods,

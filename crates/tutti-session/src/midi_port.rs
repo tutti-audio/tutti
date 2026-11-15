@@ -1320,6 +1320,11 @@ impl Ports {
                 let _ = crate::midi::drain_events(&mut port.tap, port.out.as_mut(), drops, timing);
                 if let Some(tap) = graph.taps().reopen_event(port.tap.id()) {
                     port.tap = tap;
+                    let rate = graph.prepared().sample_rate();
+                    if let Some(out) = port.out.as_mut() {
+                        out.set_rate(rate);
+                    }
+                    port.parked = port.parked.map(|stream| stream.at_rate(rate));
                     edited = true;
                 }
             }

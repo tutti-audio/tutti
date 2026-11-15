@@ -288,6 +288,31 @@ impl JrStream {
         self.origin += block;
     }
 
+    /// This stream at another sample rate: the stamper and the clock count
+    /// ticks at `sample_rate`, and the origin and the last clock's frame are
+    /// converted to its frames, so JR time carries on from where it stood and
+    /// does not jump when the graph is re-rated.
+    #[must_use]
+    pub fn at_rate(self, sample_rate: impl Into<SampleRate>) -> Self {
+        let sample_rate = sample_rate.into();
+        let old = self.stamper.clock.sample_rate;
+        let convert = |frame: Frame| {
+            Frame::new((frame.get() as f64 * sample_rate.get() / old.get()).round() as u64)
+        };
+        Self {
+            stamper: JrStamper::new(sample_rate),
+            origin: convert(self.origin),
+            emitter: self.emitter.map(|emitter| JrClockEmitter {
+                clock: JrClock::new(sample_rate),
+                sample_rate,
+                interval: Samples(
+                    (emitter.interval.0 as f64 * sample_rate.get() / old.get()).round() as usize,
+                ),
+                last_emit: emitter.last_emit.map(convert),
+            }),
+        }
+    }
+
     /// The absolute frame the next [`stamp`](Self::stamp) will start from.
     /// Exposed for tests and diagnostics.
     pub fn origin(&self) -> Frame {

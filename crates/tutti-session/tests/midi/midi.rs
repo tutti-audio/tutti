@@ -513,7 +513,7 @@ fn clocked(sink: Arc<dyn tutti_midi_runtime::MidiOut>) -> Session {
 /// sink the clock's ticks whether or not it JR-stamps (stamping gates
 /// timestamps, not delivery), and none is counted lost.
 #[test]
-fn a_sink_is_drained_to_with_stamping_off() {
+fn a_sink_is_drained_to_stamping_off() {
     let count = Arc::new(AtomicUsize::new(0));
     let mut s = clocked(Arc::new(CountingSink(Arc::clone(&count))));
     let events = s.update();

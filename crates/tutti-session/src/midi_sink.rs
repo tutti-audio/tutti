@@ -17,31 +17,61 @@ use std::sync::{Arc, Weak};
 use tutti_graph::{EventTapReader, Losses, NodeKey};
 use tutti_midi_runtime::MidiOut;
 
-use crate::midi::{OutDrops, OutputTiming, UmpOut, drain_events, route_batch};
+use crate::midi::{OutDrops, OutputTiming, Stamping, UmpOut, drain_events, route_batch};
 use crate::pool::{Declared, HandleError, Life, Load, PoolEntry};
 use crate::{Peer, Presence, Resource, ResourceId, Session};
 
 // --- The entry ---
 
+/// What a sink is sent with. Part of the entry's identity: declaring the sink
+/// again with other options reopens it.
+///
+/// As `OutputOptions` is for a device's port, for the
+/// options a host's sink has and a device's does not: whether it is JR-stamped.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[non_exhaustive]
+pub struct SinkOptions {
+    /// Whether the sink is sent JR Timestamps.
+    pub stamping: Stamping,
+}
+
+impl SinkOptions {
+    /// The options of a sink opened with none: unstamped.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            stamping: Stamping::Off,
+        }
+    }
+
+    /// These options with `stamping`.
+    #[must_use]
+    pub const fn stamping(mut self, stamping: Stamping) -> Self {
+        self.stamping = stamping;
+        self
+    }
+}
+
 /// A host's own sink: [`midi_sink`]'s entry. Its identity is the sink itself (the
-/// one `Arc`) and whether it is JR-stamped.
+/// one `Arc`) and the options.
 #[derive(Clone)]
 pub struct MidiSinkEntry {
     sink: Arc<dyn MidiOut>,
-    stamping: bool,
+    options: SinkOptions,
 }
 
 impl std::fmt::Debug for MidiSinkEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MidiSinkEntry")
-            .field("stamping", &self.stamping)
+            .field("options", &self.options)
             .finish_non_exhaustive()
     }
 }
 
 /// Declares `sink` under `key` as an output: wire what it should receive to
-/// its [`node`](MidiSink::node). It is sent unstamped; `.stamping(true)` on the
-/// declared entry sets JR Timestamps on.
+/// its [`node`](MidiSink::node). It is opened with no options (`.options(..)`
+/// on the declared entry sets them).
 ///
 /// Declaring the key again with a clone of the same `Arc` keeps the entry; a
 /// different sink loads another.
@@ -50,37 +80,35 @@ pub fn midi_sink<K>(key: K, sink: Arc<dyn MidiOut>) -> Declared<K, MidiSinkEntry
         key,
         MidiSinkEntry {
             sink,
-            stamping: false,
+            options: SinkOptions::new(),
         },
     )
 }
 
 impl<K> Declared<K, MidiSinkEntry> {
-    /// This sink, JR-stamped or not: it is part of its identity. A stamped sink
-    /// is sent each event with the JR Timestamp that keeps its spacing, and the
-    /// JR Clock (M2-104-UM §7.2.2.1). It gates timestamps, not delivery.
-    pub fn stamping(mut self, stamping: bool) -> Self {
-        self.entry_mut().stamping = stamping;
+    /// This sink, opened with `options`: they are part of its identity.
+    pub fn options(mut self, options: SinkOptions) -> Self {
+        self.entry_mut().options = options;
         self
     }
 }
 
 impl PoolEntry for MidiSinkEntry {
-    /// The sink's address, and whether it stamps.
-    type Identity = (usize, bool);
+    /// The sink's address, and the options.
+    type Identity = (usize, SinkOptions);
     type Loaded = SinkLoaded;
     type Handle = MidiSink;
 
-    fn identity(&self) -> (usize, bool) {
-        (Arc::as_ptr(&self.sink).addr(), self.stamping)
+    fn identity(&self) -> (usize, SinkOptions) {
+        (Arc::as_ptr(&self.sink).addr(), self.options)
     }
 
     fn load(&self) -> Load<SinkLoaded> {
         let sink = Arc::clone(&self.sink);
-        let stamping = self.stamping;
+        let options = self.options;
         Load::on_session(move |cx| {
             let id = cx.mint_resource_id();
-            Ok(cx.midi().open_sink(id, sink, stamping))
+            Ok(cx.midi().open_sink(id, sink, options))
         })
     }
 
@@ -127,8 +155,8 @@ impl std::fmt::Debug for SinkShared {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct MidiSinkInfo {
-    /// Whether its events are sent with JR Timestamps.
-    pub stamping: bool,
+    /// What it was opened with.
+    pub options: SinkOptions,
 }
 
 // --- The handle ---
@@ -157,7 +185,7 @@ impl MidiSink {
     }
 
     /// What this sink did not get, cumulative: [`lost`](Losses::lost) are events
-    /// its node's tap had no room for (1 024 between two updates), and
+    /// its node's tap had no room for ([`MIDI_OUT_TAP_CAPACITY`](crate::MIDI_OUT_TAP_CAPACITY) between two updates), and
     /// [`refused`](Losses::refused) those the sink refused or that were
     /// scheduled more than [`MAX_OUTPUT_AHEAD`](tutti_midi_runtime::MAX_OUTPUT_AHEAD)
     /// ahead. A JR Timestamp the sink refuses is not counted: the event it
@@ -232,15 +260,15 @@ impl crate::Midi<'_> {
         &mut self,
         id: ResourceId,
         sink: Arc<dyn MidiOut>,
-        stamping: bool,
+        options: SinkOptions,
     ) -> SinkLoaded {
         let rate = self.graph.prepared().sample_rate();
         let (node, tap) = self.add_output_node();
         let mut out = UmpOut::new(sink, rate);
-        out.set_stamping(stamping);
+        out.set_stamping(options.stamping);
         let shared = Arc::new(SinkShared {
             id,
-            info: Arc::new(MidiSinkInfo { stamping }),
+            info: Arc::new(MidiSinkInfo { options }),
             lost: AtomicU64::new(0),
             refused: AtomicU64::new(0),
         });
@@ -277,6 +305,7 @@ impl Sinks {
                 port.drain(drops, timing);
                 if let Some(tap) = graph.taps().reopen_event(port.tap.id()) {
                     port.tap = tap;
+                    port.out.set_rate(graph.prepared().sample_rate());
                     edited = true;
                 }
             }
@@ -315,11 +344,15 @@ impl Sinks {
         drops: &OutDrops,
         timing: Option<&OutputTiming>,
     ) -> bool {
-        for port in &mut self.ports {
+        for port in self
+            .ports
+            .iter_mut()
+            .filter(|port| port.token.strong_count() > 0)
+        {
             let refused = route_batch(Some(&mut port.out), drops, timing, batch);
             port.shared.refused.fetch_add(refused, Ordering::Relaxed);
         }
-        !self.ports.is_empty()
+        self.ports.iter().any(|port| port.token.strong_count() > 0)
     }
 }
 
@@ -333,6 +366,3 @@ impl SinkPort {
             .fetch_add(losses.refused, Ordering::Relaxed);
     }
 }
-
-#[cfg(test)]
-mod tests;

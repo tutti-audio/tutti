@@ -19,7 +19,7 @@ use tutti_ump::{MidiGroup, Ump};
 use tutti_midi_runtime::MidiClipNode;
 use tutti_session::{
     Declared, EventInPort, EventOutPort, MidiEvent, MidiSinkEntry, Peer, Presence, Resource,
-    Session, SessionEvent, midi_sink,
+    Session, SessionEvent, SinkOptions, Stamping, midi_sink,
 };
 use tutti_types::{Beat, BeatDuration};
 use tutti_ump::{Message, System};
@@ -277,7 +277,7 @@ fn a_sink_is_a_pool_entry_that_a_new_sink_replaces() {
     let _ = s.update();
     let sink = s.midi_sink(&"out").expect("loaded");
     assert_eq!(sink.presence(), Presence::Live);
-    assert!(!sink.info().stamping);
+    assert_eq!(sink.info().options, SinkOptions::new());
     assert!(s.graph_ref().contains(sink.node()), "the sink's node");
 
     s.pool(midi_sink("out", Arc::clone(&first)))
@@ -290,14 +290,14 @@ fn a_sink_is_a_pool_entry_that_a_new_sink_replaces() {
     );
 
     let second: Arc<dyn MidiOut> = Arc::new(Wire::default());
-    s.pool(midi_sink("out", second).stamping(true))
+    s.pool(midi_sink("out", second).options(SinkOptions::new().stamping(Stamping::Jr)))
         .expect("declares");
     let _ = s.update();
     let _ = s.update();
     assert_eq!(sink.presence(), Presence::Closed, "the old one ended");
     assert!(!s.graph_ref().contains(sink.node()), "and its node left");
     let now = s.midi_sink(&"out").expect("the new one loaded");
-    assert!(now.info().stamping);
+    assert_eq!(now.info().options.stamping, Stamping::Jr);
     assert_ne!(now.id(), sink.id());
 }
 
@@ -326,4 +326,67 @@ fn releasing_the_entry_ends_the_sink() {
         s.midi_sink(&"out"),
         Err(tutti_session::HandleError::NotPooled("out"))
     ));
+}
+
+/// **A JR-stamped sink stamps at the graph's new rate after a re-rate.** At 44.1
+/// kHz a note from beat 1 for one beat (120 BPM) is 22 050 frames long, half a
+/// second, which is 15 625 JR ticks (31.25 kHz); a stream still counting at the
+/// 48 kHz it was opened at would stamp the same frames 14 355 ticks apart.
+#[test]
+fn a_stamped_sink_stamps_at_the_new_rate_after_a_re_rate() {
+    let wire = Wire::default();
+    let mut s = Session::builder()
+        .sample_rate(SampleRate::of(RATE))
+        .build()
+        .expect("builds");
+    s.pool(
+        midi_sink("out", Arc::new(wire.clone())).options(SinkOptions::new().stamping(Stamping::Jr)),
+    )
+    .expect("declares");
+    let _ = s.update();
+    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    let _ = s.update();
+    // The re-prepare's second half lands on a render, then the commit.
+    render(&s, 4_096);
+    let _ = s.update();
+    render(&s, 512);
+    let _ = s.update();
+    let _ = wire.batches();
+
+    let out = s.midi_sink(&"out").expect("loaded");
+    let (clip, _) = s.graph().add(MidiClipNode::new(note(
+        60,
+        MF,
+        Beat(1.0),
+        BeatDuration(1.0),
+    )));
+    s.graph()
+        .set_sources(EventInPort::new(out.node(), 0), [clip.events_out()])
+        .expect("the sink's node takes events");
+    let _ = s.update();
+    s.transport()
+        .motion()
+        .try_send(MotionEvent::Play)
+        .expect("room");
+    render(&s, 50_000);
+    let _ = s.update();
+
+    let mut stamp = None;
+    let mut notes = Vec::new();
+    for (_, ump) in wire.batches().concat() {
+        match ump.decode() {
+            Ok(Message::Utility(tutti_ump::Utility::JrTimestamp(t))) => stamp = Some(t),
+            _ if matches!(
+                ump.key_event(),
+                Some(tutti_ump::KeyEvent::On(_) | tutti_ump::KeyEvent::Off(_))
+            ) =>
+            {
+                notes.push(stamp.expect("every event follows its stamp"));
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(notes.len(), 2, "{notes:?}");
+    let ticks = notes[1].wrapping_sub(notes[0]);
+    assert!((15_624..=15_626).contains(&ticks), "{ticks} ticks apart");
 }

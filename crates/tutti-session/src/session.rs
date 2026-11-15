@@ -533,7 +533,7 @@ pub struct Session<C: Clock = Offline> {
     pub(crate) rolling_sent: std::sync::atomic::AtomicBool,
     #[cfg(feature = "midi")]
     pub(crate) midi: Option<MidiNodes>,
-    /// Clips, live inputs, routes and the hardware out's output.
+    /// Clips, live inputs, routes and the outputs.
     #[cfg(feature = "midi")]
     pub(crate) midi_state: crate::midi::MidiState,
     /// What modulation applied, and the session's own declarations.
@@ -1211,7 +1211,7 @@ impl<C: Clock> Session<C> {
     }
 
     /// The session's MIDI: live inputs, clips, the hardware input's routes
-    /// and the hardware out.
+    /// and the outputs.
     #[cfg(feature = "midi")]
     pub fn midi(&mut self) -> crate::Midi<'_> {
         self.midi_and_ids().0
