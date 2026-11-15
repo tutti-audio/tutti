@@ -6,7 +6,6 @@
 //! included.
 
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tutti_types::MaxBlock;
 
@@ -15,9 +14,8 @@ use tutti_graph::{Stamp, UmpAt};
 
 use tutti_fixtures::midi;
 use tutti_graph::{
-    Cx, Editor, EventCapacity, EventEdge, EventIn, EventInletNode, EventKind, EventOut, Executor,
-    ForkMode, ForkTarget, Io, Node, Offset, Prepare, Shape, Status, TransportChanges,
-    TransportPosition,
+    Editor, EventCapacity, EventEdge, EventIn, EventInletNode, EventOut, Executor, ForkMode,
+    ForkTarget, Offset, Prepare, TransportChanges, TransportPosition,
 };
 use tutti_graph::{IntoNode as _, NodeKey};
 use tutti_midi_protocol::{
@@ -42,39 +40,10 @@ const G: MidiGroup = MidiGroup::FIRST;
 
 const RATE: f64 = 48_000.0;
 
-/// `(sink port, absolute frame, event)` of every MIDI event a sink received.
-type Seen = Arc<Mutex<Vec<(usize, u64, Ump)>>>;
-
-/// Logs the MIDI on each of its `ports` event inputs; a silent mono output,
-/// so a fork has somewhere to end.
-#[derive(Clone)]
-struct Sink {
-    ports: u16,
-    seen: Seen,
-}
-
-impl Node for Sink {
-    fn shape(&self) -> Shape {
-        Shape::source_unassigned(tutti_types::ChannelLayout::MONO).with_events(self.ports, 0)
-    }
-    fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        let mut seen = self.seen.lock().unwrap();
-        for p in 0..usize::from(self.ports) {
-            for e in io.events(p) {
-                if let EventKind::Midi(Ump(data)) = e.kind {
-                    seen.push((p, cx.env.frame.get() + u64::from(e.offset.get()), Ump(data)));
-                }
-            }
-        }
-        io.output(0).fill(0.0);
-        Status::Modified
-    }
-    fn reset(&mut self) {}
-}
+use tutti_fixtures::{EventRig, Seen};
 
 /// A source at key 1 whose `ports` event outputs each feed the sink's input
-/// of the same number (key 2), blocks of at most `max`.
+/// of the same number, blocks of at most `max`.
 fn rig<N: tutti_graph::IntoNode>(
     source: N,
     ports: u16,
@@ -90,41 +59,14 @@ fn rig_with<N: tutti_graph::IntoNode>(
     max: usize,
     extra: impl FnOnce(&mut Editor),
 ) -> (Editor, Executor, N::Controls, Seen) {
-    let (mut ed, exec) = Editor::new(Prepare::new(
-        SampleRate::of(RATE),
-        MaxBlock::of(Samples(max)),
-    ));
-    let controls = ed.insert(NodeKey(1), "source", source);
-    extra(&mut ed);
-    let seen = Seen::default();
-    ed.insert(
-        NodeKey(2),
-        "sink",
-        tutti_graph::ForkByClone(Sink {
-            ports,
-            seen: Arc::clone(&seen),
-        }),
-    );
+    let mut rig = EventRig::new(RATE, max, ports);
+    let controls = rig.editor.insert(NodeKey(1), "source", source);
+    extra(&mut rig.editor);
     for p in 0..ports {
-        ed.spec_mut().connect_events(
-            EventIn {
-                node: NodeKey(2),
-                port: p,
-            },
-            EventEdge::Direct(EventOut {
-                node: NodeKey(1),
-                port: p,
-            }),
-        );
+        rig.feed(NodeKey(1), p, p);
     }
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![tutti_graph::Source::Node(tutti_graph::OutPort {
-            node: NodeKey(2),
-            port: 0,
-        })]);
-    ed.commit().expect("commits");
-    (ed, exec, controls, seen)
+    rig.commit();
+    (rig.editor, rig.exec, controls, rig.seen)
 }
 
 /// An ingest node and the device inlets that feed it (keys 3 upward), over
