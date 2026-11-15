@@ -148,12 +148,21 @@ fn accept_control(listener: &interprocess::local_socket::Listener) {
 }
 
 fn send_bridge_msg(stream: &interprocess::local_socket::Stream, msg: &BridgeMessage) {
+    try_send_bridge_msg(stream, msg).unwrap();
+}
+
+/// [`send_bridge_msg`] that reports a closed peer instead of panicking, for a
+/// reply the test no longer waits for.
+fn try_send_bridge_msg(
+    stream: &interprocess::local_socket::Stream,
+    msg: &BridgeMessage,
+) -> std::io::Result<()> {
     use std::io::Write;
     let mut stream = stream;
     let data = postcard::to_allocvec(msg).unwrap();
     let len = (data.len() as u32).to_be_bytes();
-    stream.write_all(&len).unwrap();
-    stream.write_all(&data).unwrap();
+    stream.write_all(&len)?;
+    stream.write_all(&data)
 }
 
 /// One stereo bus per direction — the common shape, and the one most easily
@@ -1844,15 +1853,18 @@ fn two_stale_blocks(
             if let HostMessage::ProcessAudio(data) = msg {
                 let midi: Vec<tutti_plugin_types::WireMidi> = data.midi_events.to_vec();
                 let _ = got_tx.send((data.seq, midi));
-                send_bridge_msg(
-                    &server_stream,
-                    &BridgeMessage::AudioProcessed {
-                        latency_us: 0,
-                        seq: data.seq,
-                        midi_out: Default::default(),
-                        status: Default::default(),
-                    },
-                );
+                // The test asserts on `got`, which is sent above: once it has
+                // block 4 it drops the bridge, so the last reply may find the
+                // peer closed. That ends the server, as a closed read does.
+                let reply = BridgeMessage::AudioProcessed {
+                    latency_us: 0,
+                    seq: data.seq,
+                    midi_out: Default::default(),
+                    status: Default::default(),
+                };
+                if try_send_bridge_msg(&server_stream, &reply).is_err() {
+                    break;
+                }
             }
         }
         let _ = std::fs::remove_file(&path);

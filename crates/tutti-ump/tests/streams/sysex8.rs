@@ -276,6 +276,27 @@ fn a_complete_inside_a_message_drops_it() {
     assert_eq!(a.dropped(), 2);
 }
 
+/// Section 7.8, Stream id: a packet belongs to the open message of its own
+/// stream id alone. A Continue or End of another id, while one stream is open,
+/// has no message of its own to join: it is dropped, and the open message
+/// ends with its own End carrying only its own bytes.
+#[test]
+fn a_packet_joins_only_the_message_of_its_stream_id() {
+    let mut a = assembler(2);
+    let done = feed(
+        &mut a,
+        [
+            pkt(START, 3, &[1]),
+            // Stream 4 has no open message: its packets are one dropped run.
+            pkt(CONTINUE, 4, &[0xAA]),
+            pkt(END, 4, &[0xBB]),
+            pkt(END, 3, &[2]),
+        ],
+    );
+    assert_eq!(done, [(0, 3, vec![1, 2])]);
+    assert_eq!(a.dropped(), 1);
+}
+
 /// Section 7.8: a message begins with a Start. A Continue or End with none
 /// open is dropped; a message's orphan packets are counted once.
 #[test]

@@ -372,7 +372,10 @@ mod tests {
             (Protocol::Midi1, Protocol::Midi2)
         );
         assert_eq!((m1.address(), m2.address()), (address, address));
-        assert_eq!(Lane::new(Protocol::Reserved(3), address), None);
+        assert_eq!(
+            Lane::new(Protocol::Reserved(crate::Reserved::wire(3)), address),
+            None
+        );
         assert_eq!(Lane::from_index(511).map(Lane::index), Some(511));
         assert_eq!(Lane::from_index(512), None);
         assert_eq!(key(Protocol::Midi2, 0x2B, 5).lane(), m2);

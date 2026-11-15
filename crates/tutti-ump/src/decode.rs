@@ -17,19 +17,21 @@
 //! SysEx 7 data), which is part of the byte being 7-bit, not a reserved bit.
 
 use crate::field::{
-    DeltaTicks, FirstGroup, FunctionBlockId, GroupSpan, NoteNumber, SharpsFlats, U4, U7, U14,
+    ChordType, DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan, NoteNumber,
+    SharpsFlats, TicksPerQuarterNote, U4, U7, U14,
 };
 use crate::message::{
-    Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BlockFilter, BlockSelect,
-    ChordBass, ChordName, ChordPitch, ChordType, Data128, DeviceIdentity, Direction,
+    Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockFilter,
+    BlockSelect, ChordBass, ChordName, ChordPitch, Data128, DeviceIdentity, Direction,
     DiscoveryFilter, EndpointInfo, Flex, FlexAddress, FlexTextKind, Form, FunctionBlockInfo,
-    KeySignature, Letter, Message, Metronome, Midi1Port, MixedDataHeader, PerNoteManagement,
-    Protocol, Stream, StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus, System, TimeSignature,
-    UiHint, UmpVersion, Unknown, Utility, Voice1, Voice2,
+    FunctionBlocks, KeySignature, Letter, Message, Metronome, Midi1Port, MixedDataHeader,
+    PerNoteManagement, Protocol, Stream, StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus,
+    System, TimeSignature, UiHint, UmpVersion, Unknown, Utility, Voice1, Voice2,
 };
 use crate::{
-    BendValue, CCNumber, ControlValue, ManufacturerId, MdsChunk, MdsChunkSize, MdsChunks,
-    MdsIdentity, MidiChannel, MidiGroup, NoteVelocity, Ump,
+    ArticulationAttribute, BendValue, CCNumber, ControlValue, Field, ManufacturerId, MdsChunk,
+    MdsChunkSize, MdsChunks, MdsIdentity, MidiChannel, MidiGroup, NoteVelocity,
+    RegisteredPerNoteController, Reserved, ReservedAttribute, Ump,
 };
 
 impl Ump {
@@ -126,7 +128,10 @@ fn utility(w0: u32) -> Option<Utility> {
         0x0 => Some(Utility::Noop),
         0x1 => Some(Utility::JrClock(low16)),
         0x2 => Some(Utility::JrTimestamp(low16)),
-        0x3 => Some(Utility::TicksPerQuarterNote(low16)),
+        0x3 => Some(match TicksPerQuarterNote::new(low16) {
+            Some(ticks) => Utility::TicksPerQuarterNote(ticks),
+            None => Utility::ReservedTicksPerQuarterNote(Reserved::wire(0)),
+        }),
         0x4 => Some(Utility::DeltaClockstamp(DeltaTicks::masked(w0 & 0xf_ffff))),
         _ => None,
     }
@@ -278,7 +283,8 @@ fn attribute(kind: u8, data: u16) -> Attribute {
         0x01 => Attribute::Manufacturer(data),
         0x02 => Attribute::Profile(data),
         0x03 => Attribute::Pitch(data),
-        _ => Attribute::Reserved { kind, data },
+        0x10..=0x1F => Attribute::Articulation(ArticulationAttribute::wire(kind, data)),
+        _ => Attribute::Reserved(ReservedAttribute::wire(kind, data)),
     }
 }
 
@@ -288,7 +294,7 @@ fn voice2(w: [u32; 4]) -> Option<Voice2> {
     match (w0 >> 20) & 0xf {
         0x0 => Some(Voice2::RegisteredPerNote {
             note: note(w0, 1),
-            controller: index.into(),
+            controller: RegisteredPerNoteController::wire(index),
             value: ControlValue::new(data),
         }),
         0x1 => Some(Voice2::AssignablePerNote {
@@ -372,7 +378,7 @@ fn letter(nibble: u32) -> Option<Letter> {
         5 => Some(Letter::E),
         6 => Some(Letter::F),
         7 => Some(Letter::G),
-        n => Some(Letter::Reserved(n as u8)),
+        n => Some(Letter::Reserved(Reserved::wire(n as u8))),
     }
 }
 
@@ -383,7 +389,7 @@ fn accidental(nibble: u32) -> Accidental {
         0x2 => Accidental::DoubleSharp,
         0xF => Accidental::Flat,
         0xE => Accidental::DoubleFlat,
-        n => Accidental::Reserved(n as u8),
+        n => Accidental::Reserved(Reserved::wire(n as u8)),
     }
 }
 
@@ -394,7 +400,7 @@ fn alteration(nibbles: u32) -> Alteration {
         2 => AlterationKind::Subtract,
         3 => AlterationKind::Raise,
         4 => AlterationKind::Lower,
-        n => AlterationKind::Reserved(n as u8),
+        n => AlterationKind::Reserved(Reserved::wire(n as u8)),
     };
     Alteration {
         kind,
@@ -433,7 +439,7 @@ fn flex(w: [u32; 4]) -> Option<Flex> {
     let address = match (w0 >> 20) & 0x3 {
         0 => FlexAddress::Channel(MidiChannel::masked(((w0 >> 16) & 0xf) as u8)),
         1 => FlexAddress::Group,
-        n => FlexAddress::Reserved(n as u8),
+        n => FlexAddress::Reserved(Reserved::wire(n as u8)),
     };
     // The setup messages are Complete, and the first three Group messages.
     let complete = form(w0, 22) == Form::Complete;
@@ -447,11 +453,10 @@ fn flex(w: [u32; 4]) -> Option<Flex> {
             }))
         }
         (0x00, 0x02) if complete && address == FlexAddress::Group => {
+            let accents = BarAccents::wire([byte(w[1], 2), byte(w[1], 1), byte(w[1], 0)]);
             Some(Flex::SetMetronome(Metronome {
                 clocks_per_click: byte(w[1], 3),
-                accent_1: byte(w[1], 2),
-                accent_2: byte(w[1], 1),
-                accent_3: byte(w[1], 0),
+                accents,
                 subdivision_1: byte(w[2], 3),
                 subdivision_2: byte(w[2], 2),
             }))
@@ -495,7 +500,7 @@ fn chord_name(w: [u32; 4]) -> ChordName {
     ChordName {
         tonic_accidental: accidental(w[1] >> 28),
         tonic: letter(w[1] >> 24),
-        chord_type: ChordType::wire(byte(w[1], 2)),
+        chord_type: Field::read(ChordType::new(byte(w[1], 2)), byte(w[1], 2)),
         alterations: [
             alteration(w[1] >> 8),
             alteration(w[1]),
@@ -504,7 +509,7 @@ fn chord_name(w: [u32; 4]) -> ChordName {
         ],
         bass: ChordBass {
             pitch: bass_pitch,
-            chord_type: ChordType::wire(byte(w[3], 2)),
+            chord_type: Field::read(ChordType::new(byte(w[3], 2)), byte(w[3], 2)),
             alterations: [alteration(w[3] >> 8), alteration(w[3])],
         },
     }
@@ -544,7 +549,10 @@ fn stream(w: [u32; 4]) -> Option<Stream> {
         0x01 if complete => Some(Stream::EndpointInfo(EndpointInfo {
             version,
             static_function_blocks: flag(w[1], 31),
-            function_blocks: u7(w[1], 3),
+            function_blocks: match FunctionBlockCount::new(byte(w[1], 3) & 0x7f) {
+                Some(count) => FunctionBlocks::Count(count),
+                None => FunctionBlocks::Reserved(Reserved::wire(byte(w[1], 3) & 0x7f)),
+            },
             midi2: flag(w[1], 9),
             midi1: flag(w[1], 8),
             rx_jr: flag(w[1], 1),
@@ -567,7 +575,10 @@ fn stream(w: [u32; 4]) -> Option<Stream> {
         0x10 if complete => Some(Stream::FunctionBlockDiscovery {
             block: match byte(w0, 1) {
                 0xFF => BlockSelect::All,
-                n => BlockSelect::One(FunctionBlockId::wire(n)),
+                n => match FunctionBlockId::new(n) {
+                    Some(id) => BlockSelect::One(id),
+                    None => BlockSelect::Reserved(Reserved::wire(n)),
+                },
             },
             filter: BlockFilter {
                 info: flag(w0, 0),
@@ -576,12 +587,12 @@ fn stream(w: [u32; 4]) -> Option<Stream> {
         }),
         0x11 if complete => Some(Stream::FunctionBlockInfo(FunctionBlockInfo {
             active: flag(w0, 15),
-            id: FunctionBlockId::wire(byte(w0, 1) & 0x7f),
+            id: Field::read(FunctionBlockId::new(byte(w0, 1) & 0x7f), byte(w0, 1) & 0x7f),
             direction: match w0 & 0x3 {
                 0b01 => Direction::Input,
                 0b10 => Direction::Output,
                 0b11 => Direction::Bidirectional,
-                n => Direction::Reserved(n as u8),
+                n => Direction::Reserved(Reserved::wire(n as u8)),
             },
             ui_hint: match (w0 >> 4) & 0x3 {
                 0 => UiHint::Unknown,
@@ -593,15 +604,15 @@ fn stream(w: [u32; 4]) -> Option<Stream> {
                 0 => Midi1Port::No,
                 1 => Midi1Port::Unrestricted,
                 2 => Midi1Port::Restricted,
-                n => Midi1Port::Reserved(n as u8),
+                n => Midi1Port::Reserved(Reserved::wire(n as u8)),
             },
-            first_group: FirstGroup::wire(byte(w[1], 3)),
-            groups_spanned: GroupSpan::wire(byte(w[1], 2)),
+            first_group: Field::read(FirstGroup::new(byte(w[1], 3)), byte(w[1], 3)),
+            groups_spanned: Field::read(GroupSpan::new(byte(w[1], 2)), byte(w[1], 2)),
             midi_ci_version: byte(w[1], 1),
             max_sysex8_streams: byte(w[1], 0),
         })),
         0x12 => Some(Stream::FunctionBlockName {
-            block: FunctionBlockId::wire(byte(w0, 1)),
+            block: Field::read(FunctionBlockId::new(byte(w0, 1)), byte(w0, 1)),
             form: form(w0, 26),
             bytes: {
                 let mut b = [0u8; 13];
@@ -623,7 +634,7 @@ fn stream_config(w0: u32) -> StreamConfig {
         protocol: match byte(w0, 1) {
             0x01 => Protocol::Midi1,
             0x02 => Protocol::Midi2,
-            n => Protocol::Reserved(n),
+            n => Protocol::Reserved(Reserved::wire(n)),
         },
         rx_jr: flag(w0, 1),
         tx_jr: flag(w0, 0),
