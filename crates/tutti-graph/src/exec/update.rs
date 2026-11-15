@@ -21,7 +21,7 @@ impl Executor {
     /// public so a caller can install a commit without rendering.
     ///
     /// Delay rings, feedback state and units carry over by key (see
-    /// [`DelayKey`] and [`FeedbackKey`](crate::FeedbackKey)). An event delay or event feedback
+    /// [`DelayKey`](crate::DelayKey) and [`FeedbackKey`](crate::FeedbackKey)). An event delay or event feedback
     /// whose key disappears flushes its pending events to its sink when the
     /// sink survives: they arrive on the sink's next call, keeping their
     /// relative spacing, with the earliest at offset 0.

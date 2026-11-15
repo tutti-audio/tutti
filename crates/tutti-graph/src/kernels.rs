@@ -326,11 +326,11 @@ impl EventFifo {
         }
         self.clock = old.clock;
         // What was owed stays owed (the old table goes back with the FIFO).
-        if let Some(owed) = old.owed.as_ref().filter(|t| !t.is_empty()) {
-            if !self.owe(owed) {
-                debug_assert!(false, "a FIFO that owes is built with a table");
-                lost += 1;
-            }
+        if let Some(owed) = old.owed.as_ref().filter(|t| !t.is_empty())
+            && !self.owe(owed)
+        {
+            debug_assert!(false, "a FIFO that owes is built with a table");
+            lost += 1;
         }
         lost
     }
