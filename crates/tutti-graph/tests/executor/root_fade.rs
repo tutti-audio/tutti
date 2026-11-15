@@ -92,16 +92,6 @@ fn rig_with(nodes: &[(u64, Kind)], outputs: &[u64]) -> Renderer {
     r
 }
 
-/// Ends the crossfade the executor reported over, as a session does each
-/// tick: settles it and, when that changed the editor, commits.
-fn settle(r: &mut Renderer) -> bool {
-    let changed = r.editor_mut().settle_fades();
-    if changed {
-        r.editor_mut().commit().expect("commits");
-    }
-    changed
-}
-
 /// Declares a new root heard from the constant at `node`, to fade in over
 /// `fade`, and commits.
 fn declare(r: &mut Renderer, node: u64, fade: Fade) {
@@ -335,10 +325,11 @@ fn root_in_force(r: &Renderer) -> tutti_graph::RootId {
     r.executor().plan().expect("plan").root_id()
 }
 
-/// Declares the root again while a fade runs: the running fade's gains do not
-/// move, frame by frame, and the plan stays on the root in force.
+/// A declaration made while a fade runs ends it at that block and begins
+/// another, from the root that was fading in (at full level) to the newest;
+/// the root that was fading out is dropped, a step of `1 - g`.
 #[test]
-fn a_redeclare_mid_fade_leaves_the_running_fades_gains_as_they_were() {
+fn a_redeclare_mid_fade_begins_a_new_fade_from_the_root_that_was_fading_in() {
     for law in LAWS {
         let mut r = rig();
         step(&mut r, BLOCK);
@@ -348,83 +339,19 @@ fn a_redeclare_mid_fade_leaves_the_running_fades_gains_as_they_were() {
         check_fade(law, n, 0, &host_mix(&step(&mut r, BLOCK)), OLD, NEW);
         check_fade(law, n, BLOCK, &host_mix(&step(&mut r, BLOCK)), OLD, NEW);
         declare(&mut r, 3, fade(law));
-        let block = step(&mut r, BLOCK);
-        let f = block.fade.expect("the same fade runs on");
-        assert_eq!(f.done.get(), 2 * BLOCK);
-        assert_eq!(root_in_force(&r), first, "the root in force is the first's");
-        assert_eq!(r.executor().plan().expect("plan").rendered_outputs(), 2);
-        check_fade(law, n, 2 * BLOCK, &host_mix(&block), OLD, NEW);
-    }
-}
-
-/// The deferred root begins its fade at the block after the running one ends,
-/// from gain (1, 0): the root in force, whole, to the newest declared.
-#[test]
-fn a_redeclared_root_fades_in_from_gain_one_at_the_block_after_the_running_fade_ends() {
-    for (blocks, law) in [(2, FadeLaw::EqualAmplitude), (3, FadeLaw::EqualPower)] {
-        let mut r = rig();
-        step(&mut r, BLOCK);
-        declare(&mut r, 2, fade(law));
-        let first = r.editor().spec().root_id;
-        for _ in 0..blocks {
-            step(&mut r, BLOCK);
-        }
-        declare(&mut r, 3, fade(law));
         let newest = r.editor().spec().root_id;
-        if blocks == 2 {
-            step(&mut r, BLOCK);
-        }
-        assert_eq!(
-            root_in_force(&r),
-            first,
-            "waiting: the plan keeps the root in force"
-        );
-        assert!(settle(&mut r), "the fade's end is reported once");
-        let n = declick();
         for b in 0..3 {
             let block = step(&mut r, BLOCK);
-            let f = block.fade.expect("the deferred fade runs");
-            assert_eq!(f.done.get(), b * BLOCK, "counted from its own block");
-            assert_eq!(f.old, first, "the root in force fades out");
+            let f = block.fade.expect("the second fade runs");
+            assert_eq!(f.done.get(), b * BLOCK, "counted from its own commit");
+            assert_eq!(f.old, first, "the root that faded in now fades out");
             assert_eq!(root_in_force(&r), newest);
-            assert_eq!(f.width, 1);
             check_fade(law, n, b * BLOCK, &host_mix(&block), NEW, THIRD);
         }
         let block = step(&mut r, BLOCK);
         assert_eq!(block.fade, None);
-        assert!(
-            host_mix(&block).iter().all(|&(_, _, mix)| mix == THIRD),
-            "the newest root alone"
-        );
+        assert!(host_mix(&block).iter().all(|&(_, _, mix)| mix == THIRD));
     }
-}
-
-/// Two declarations during one fade give one deferred fade, to the newest.
-#[test]
-fn two_redeclares_during_one_fade_give_one_deferred_fade_to_the_newest() {
-    let law = FadeLaw::EqualAmplitude;
-    let mut r = rig();
-    step(&mut r, BLOCK);
-    declare(&mut r, 2, fade(law));
-    let first = r.editor().spec().root_id;
-    step(&mut r, BLOCK);
-    declare(&mut r, 3, fade(law));
-    step(&mut r, BLOCK);
-    declare(&mut r, 1, fade(law));
-    let newest = r.editor().spec().root_id;
-    step(&mut r, BLOCK);
-    assert!(settle(&mut r));
-    let n = declick();
-    for b in 0..3 {
-        let block = step(&mut r, BLOCK);
-        let f = block.fade.expect("the deferred fade runs");
-        assert_eq!((f.done.get(), f.old), (b * BLOCK, first));
-        assert_eq!(root_in_force(&r), newest);
-        check_fade(law, n, b * BLOCK, &host_mix(&block), NEW, OLD);
-    }
-    let block = step(&mut r, BLOCK);
-    assert_eq!(block.fade, None);
-    assert!(host_mix(&block).iter().all(|&(_, _, mix)| mix == OLD));
 }
 
 /// A declaration with no fade set cuts at its block and ends the running one.
@@ -473,7 +400,7 @@ fn a_width_change_without_a_new_root_cuts_the_fade() {
 }
 
 /// The carried fade renders the serial executor's samples bit for bit on a
-/// pool, through a continuing commit, a deferred declaration and its fade.
+/// pool, through a continuing commit, a re-declaration and its fade.
 #[test]
 fn a_carried_fade_renders_bit_for_bit_the_same_on_the_parallel_executor() {
     fn trace(pooled: bool) -> Vec<u32> {
@@ -514,10 +441,7 @@ fn a_carried_fade_renders_bit_for_bit_the_same_on_the_parallel_executor() {
         r.editor_mut().commit().expect("commits");
         record(&mut r);
         declare_pair(&mut r, 5, 6, fade(law));
-        record(&mut r);
-        record(&mut r);
-        assert!(settle(&mut r));
-        for _ in 0..5 {
+        for _ in 0..6 {
             record(&mut r);
         }
         bits
@@ -771,8 +695,6 @@ mod no_alloc {
         r.editor_mut().commit().expect("commits");
         run(&mut r);
         declare(&mut r, 3, fade(law));
-        run(&mut r);
-        assert!(settle(&mut r));
         run(&mut r);
         run(&mut r);
         assert_eq!(

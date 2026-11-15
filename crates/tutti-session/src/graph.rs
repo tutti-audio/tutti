@@ -357,8 +357,13 @@ pub struct Graph {
     /// folds to publish exactly when it has a device to place them on; a
     /// graph with no engine has neither, and nothing folds its root.
     output: Option<Placed>,
-    /// The last widening [`widen_outputs`](Self::widen_outputs) refused.
+    /// The last widening [`widen_outputs`](Self::widen_outputs) refused, or
+    /// the declaration that waited for a root crossfade and could not be
+    /// applied when it ended.
     widen_refusal: Option<tutti_graph::RootError>,
+    /// A root declared while a root crossfade ran, applied when it ends:
+    /// the newest declaration (`Some(None)` takes the declaration back).
+    pending_root: Option<Option<tutti_types::ChannelTopology>>,
     /// The hosted plugins' records, by node (`plugin.rs`): kept here so a
     /// crossfade to another plugin and a removal update them where they
     /// happen.
@@ -523,6 +528,7 @@ impl Graph {
             root: None,
             output: None,
             widen_refusal: None,
+            pending_root: None,
             #[cfg(feature = "plugin")]
             plugins: BTreeMap::new(),
             #[cfg(feature = "plugin")]
@@ -3289,22 +3295,69 @@ impl Graph {
     }
 
     /// Makes the root declaration last made a cut: the commit that carries
-    /// it renders no old root.
+    /// it renders no old root. A declaration that waits for a running
+    /// crossfade is applied now instead, and is the cut.
     pub(crate) fn harden_root(&mut self) {
-        self.editor.set_root_fade(None);
+        match self.pending_root.take() {
+            Some(root) => self.apply_declared(root, true),
+            None => self.editor.set_root_fade(None),
+        }
+    }
+
+    /// Applies the declaration that waited, once the crossfade it waited for
+    /// is over: the spec, the readers and the announcement change together.
+    /// A refusal now (the device no longer places it, the roots in flight are
+    /// at their limit) is [`widen_refusal`](Self::widen_refusal)'s.
+    fn apply_pending_root(&mut self) {
+        if self.editor.root_fade_running() {
+            return;
+        }
+        if let Some(root) = self.pending_root.take() {
+            self.apply_declared(root, false);
+        }
+    }
+
+    fn apply_declared(&mut self, root: Option<tutti_types::ChannelTopology>, hard: bool) {
+        let applied = self
+            .check_declaration(&root)
+            .and_then(|width| self.apply_root(root, hard, width));
+        if let Err(e) = applied {
+            self.widen_refusal = Some(e);
+        }
     }
 
     /// Declares the root's topology. A declaration that changes it is the next
     /// root, and the commit that carries it crossfades the old root's outputs
     /// into the new root's over the declick length (`Editor::set_root_fade`),
     /// unless `hard`: the new root takes over at the commit's block.
+    ///
+    /// While a root crossfade runs, a declaration that is not `hard` is held
+    /// (checked now, applied by [`collect`](Self::collect) once the fade is
+    /// over, the newest replacing an older one): the spec, the readers and the
+    /// root in force do not change until then.
     pub(crate) fn declare_root(
         &mut self,
         root: Option<tutti_types::ChannelTopology>,
         hard: bool,
     ) -> Result<(), tutti_graph::RootError> {
+        let width = self.check_declaration(&root)?;
+        if !hard && self.editor.root_fade_running() {
+            self.pending_root = Some(root);
+            self.widen_refusal = None;
+            return Ok(());
+        }
+        self.pending_root = None;
+        self.apply_root(root, hard, width)
+    }
+
+    /// The width of the root `root` declares, if it can be placed on the
+    /// device: [`declare_root`](Self::declare_root)'s checks.
+    fn check_declaration(
+        &self,
+        root: &Option<tutti_types::ChannelTopology>,
+    ) -> Result<usize, tutti_graph::RootError> {
         let placed = self.placed_topology();
-        let width = match &root {
+        Ok(match root {
             Some(root) => {
                 Self::check_root(root, placed.as_ref())?;
                 usize::from(root.width().count())
@@ -3324,7 +3377,15 @@ impl Graph {
                 }
                 self.outputs()
             }
-        };
+        })
+    }
+
+    fn apply_root(
+        &mut self,
+        root: Option<tutti_types::ChannelTopology>,
+        hard: bool,
+        width: usize,
+    ) -> Result<(), tutti_graph::RootError> {
         // A changed declaration is the next root: its folds are published
         // first, so the commit that carries its id finds them. The engine
         // checks the device again, and a refusal there leaves the graph as it
@@ -3488,6 +3549,7 @@ impl Graph {
         if self.editor.settle_fades() {
             self.edited = true;
         }
+        self.apply_pending_root();
     }
 
     /// The output ports that lost events since the last call

@@ -83,11 +83,9 @@
 //! fade and shifts once at its end. A commit with no fade
 //! cuts at its block. A commit that installs while the fade runs and leaves
 //! the root's generation alone continues it from the frames already mixed. One
-//! that declares the root again waits: the root in force finishes its fade,
-//! and the newest declared root (several coalesce) then fades in from it at the
-//! first commit after the editor settles the running fade
-//! ([`Editor::settle_fades`]), so no gain steps. A declaration with no fade set
-//! cuts at its block.
+//! that declares the root again ends it at its block and begins another from
+//! the root that was fading in: the root that was fading out is dropped, a
+//! step the session avoids by declaring only after the running fade ends.
 //!
 //! # Limits
 //!

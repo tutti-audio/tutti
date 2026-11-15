@@ -737,9 +737,23 @@ impl<C: Clock> Session<C> {
     /// fade out and the new root's fade in over the declick length (5 ms),
     /// both rendering the same nodes, so a change of layout never steps the
     /// sound. [`.hard()`](RootDeclaration::hard) on the returned declaration
-    /// cuts at one block instead. A commit that lands while the fade runs ends
-    /// it at that block, as a hard edit ends a unit's crossfade; the new root
-    /// is heard alone from there. An export of the master
+    /// cuts at one block instead.
+    ///
+    /// A declaration made while a root crossfade runs, and not
+    /// [`hard`](RootDeclaration::hard), waits: it is checked at the call (the
+    /// errors below are named here), and held until the running fade ends. The
+    /// newest such declaration wins. The first [`update`](Self::update) after
+    /// the fade has ended applies it, and the root's width and readers
+    /// ([`RootReaderReopened`](crate::SessionEvent::RootReaderReopened)) change in
+    /// that update with the audio; until then the root in force, its taps and
+    /// [`root_topology`](Self::root_topology) are the running fade's, and
+    /// [`requested_root_topology`](Self::requested_root_topology) is the
+    /// waiting one. It is heard up to one fade length (5 ms) late. If the
+    /// device no longer places it when it is applied,
+    /// [`root_topology_status`](Self::root_topology_status) is `Refused` with
+    /// the error and the root in force stays. A
+    /// [`hard`](RootDeclaration::hard) declaration applies at once and drops
+    /// the waiting one. An export of the master
     /// places the file from the declaration (`tutti_export::Setup::with_root`, set by the export's fork).
     ///
     /// The device a declaration must place on is the one the session renders
