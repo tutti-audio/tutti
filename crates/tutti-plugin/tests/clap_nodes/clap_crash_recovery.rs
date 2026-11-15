@@ -343,7 +343,7 @@ fn rendering_through_a_dead_plugin_does_not_block() {
     // Nothing here should touch the socket at all: `Batcher::collectable`
     // checks the crash flag *first*, before it even asks the slab, precisely so
     // a dead bridge costs one relaxed atomic load. A design that waited on the
-    // dead plugin would spend its reply budget in every render.
+    // dead plugin would spend its reply timeout in every render.
     let budget = PACE * MEASURED as u32;
     assert!(
         elapsed < budget,

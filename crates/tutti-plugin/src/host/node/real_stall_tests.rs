@@ -51,7 +51,7 @@ const PERIOD: Duration = Duration::from_nanos((BLOCK as f64 / SAMPLE_RATE * 1e9)
 
 /// How long to actually wait per block. Generous for the same reason the PDC
 /// suite's is: a `sleep` bounds elapsed time, not CPU granted to another
-/// process, and nothing here is a timing assertion.
+/// process, and nothing else here is a timing assertion.
 const PACE: Duration = PERIOD.saturating_mul(20);
 
 /// Which `process()` call parks. Late enough that the pipeline is at steady
@@ -222,7 +222,7 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
     // The caller was never held: only the render calls are timed, because a
     // `sleep` bounds elapsed time from below and a loaded or timer-coalescing
     // host (macOS) stretches it without the audio path being involved. A design
-    // that waited on the socket would add its reply budget to every render.
+    // that waited on the socket would add its reply timeout to every render.
     let render_budget = PACE * STALLED_BLOCKS as u32;
     assert!(
         rendering < render_budget,
