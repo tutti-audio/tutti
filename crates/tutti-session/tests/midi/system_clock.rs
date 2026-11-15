@@ -39,7 +39,7 @@ fn the_midi_clock_reaches_the_output_on_the_timers_blocks() {
         .system_clock()
         .build()
         .expect("builds");
-    let s = system.session_mut();
+    let s = &mut system;
     let _ = s.update();
     s.midi_nodes().unwrap().clock_master.set_enabled(true);
     s.midi().set_hardware_out(Some(UmpOut::new(

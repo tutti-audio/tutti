@@ -16,6 +16,7 @@ use tutti_transport::{FadeOut, LoopEdit, MotionEvent, QueueFull, ScheduleFull, T
 use tutti_types::{At, Beat, Bpm, ChannelLayout, ChannelTopology, LoopRange, Samples};
 
 use crate::graph::{Committed, CrossfadeId, Graph, Retried};
+use crate::{Clock, Offline, RealTime};
 use crate::{HeardOpen, HeardTapError, Playhead, RemoveError, ScheduleError, TempoError};
 
 /// One step of [`Session::update`]. [`PHASES`] is their order.
@@ -64,7 +65,8 @@ pub enum Phase {
     /// The hardware out (an event tap on the clock)
     /// drained to the output (feature `midi`; `Midi::set_hardware_out`).
     MidiOut,
-    /// The device's faults, as `DeviceEvent::Fault` (feature `device`).
+    /// The stream's faults, as [`SessionEvent::Fault`] (a real-time clock),
+    /// and the device's own events (feature `device`).
     Poll,
     /// Frees, here, what the audio thread let go of in every cell the
     /// session publishes to (`ArcLend::reclaim`): the project meter and the
@@ -226,7 +228,12 @@ pub enum SessionEvent {
     /// A [`LoadMeter::reset`](tutti_metering::LoadMeter::reset) between
     /// updates restarts the count without an event.
     BlocksSilenced(u64),
-    /// The sound card or its devices: a fault, a device that came or went, a
+    /// The stream of a real-time clock reported a fault: a device unplugged
+    /// mid-session, a callback that panicked, a timer that fell behind. The
+    /// most recent one since the last poll, as
+    /// [`Session::faults`] counts them.
+    Fault(tutti_engine::StreamFault),
+    /// The sound card or its devices: a device that came or went, a
     /// restart wanted, done or failed ([`DeviceEvent`](crate::DeviceEvent)).
     #[cfg(feature = "device")]
     Device(crate::DeviceEvent),
@@ -293,6 +300,7 @@ impl std::fmt::Debug for SessionEvent {
                 .field("id", id)
                 .field("refused", refused)
                 .finish(),
+            Self::Fault(fault) => f.debug_tuple("Fault").field(fault).finish(),
             #[cfg(feature = "device")]
             Self::Device(event) => f.debug_tuple("Device").field(event).finish(),
             #[cfg(all(feature = "device", feature = "audio-io"))]
@@ -376,7 +384,7 @@ pub enum RootTopologyStatus {
 /// Built with [`SessionBuilder`](crate::SessionBuilder): offline (the host
 /// pulls blocks with [`render`](Self::render)), on a device (with a
 /// `Device`, feature `device`), or detached (the executor stays on
-/// this side: [`render_frame`](Self::render_frame)).
+/// this side: `render_frame`).
 ///
 /// `Send`, not `Sync`: one control thread owns it, whichever thread that is.
 /// Nothing the session frees needs the main thread: a plugin a removal, a
@@ -411,20 +419,21 @@ pub enum RootTopologyStatus {
 /// session.render(&mut InterleavedMut::new(&mut block, ChannelLayout::MONO).unwrap());
 /// assert!(block.iter().all(|&s| s == 0.5));
 /// ```
+#[must_use = "dropping a session ends it, and on a real-time clock stops its stream"]
 #[derive(Debug)]
-pub struct Session {
+pub struct Session<C: Clock = Offline> {
+    /// What runs the blocks (the clock's [`Running`](Clock::Running)). First,
+    /// so a stream stops before the session's own state drops.
+    pub(crate) running: C::Running,
     pub(crate) graph: Graph,
     /// The source of the ids of this session's resources.
     pub(crate) resource_ids: crate::peer::ResourceIds,
     /// What the app declared loaded ([`Session::pool`]).
-    pub(crate) pool: crate::Pool,
+    pub(crate) pool: crate::Pool<C>,
     /// The plugin entries whose node waits to swap to a reloaded plugin.
     #[cfg(feature = "plugin")]
     pub(crate) pooled_swaps: std::collections::BTreeSet<crate::PoolKey>,
     pub(crate) transport: Transport,
-    /// The engine, for an offline session (the host pulls blocks); `None` on
-    /// a device (the callback holds it) or detached.
-    pub(crate) engine: Option<tutti_engine::Engine>,
     /// The engine's load meter, offline or on a device; `None` detached.
     pub(crate) load: Option<tutti_metering::LoadMeter>,
     /// The engine's tap after the fader and the device width it was built
@@ -475,16 +484,8 @@ pub struct Session {
     /// Names the [`SamplerLoad`](crate::SamplerLoad)s.
     #[cfg(feature = "sampler")]
     pub(crate) sampler_opens: tutti_types::Mint,
-    /// The device's fault record, shared with the [`Device`](crate::Device),
-    /// and the count the last poll saw.
-    #[cfg(feature = "device")]
-    pub(crate) faults: Option<(Arc<tutti_engine::StreamFaults>, u64)>,
-    /// The device watch, and what restarts reported since the
-    /// last poll.
-    #[cfg(feature = "device")]
-    pub(crate) device_watch: Option<crate::DeviceWatch>,
-    #[cfg(feature = "device")]
-    pub(crate) device_events: Vec<SessionEvent>,
+    /// The count of the stream's faults the last poll saw.
+    pub(crate) faults_seen: u64,
     /// The one-shot listing of the output devices, until it answers.
     #[cfg(feature = "device")]
     pub(crate) output_listing: Option<crate::watch::OutputListing>,
@@ -514,7 +515,7 @@ pub struct Session {
     #[cfg(feature = "export")]
     pub(crate) bounce: crate::bounce::BounceState,
     /// The blocking work running on the spawner, landed in `Phase::Collect`.
-    pub(crate) jobs: crate::jobs::Jobs,
+    pub(crate) jobs: crate::jobs::Jobs<C>,
     /// What every plugin this session loads hands to the main thread: the closes of
     /// a drop off the main thread. The handle is cloned into each load.
     #[cfg(feature = "plugin")]
@@ -528,7 +529,7 @@ pub struct Session {
 }
 
 #[cfg(feature = "plugin")]
-impl Drop for Session {
+impl<C: Clock> Drop for Session<C> {
     /// The fallback of `Session::close`: on the main
     /// thread, runs the work other threads handed over, and the plugins then drop
     /// with the fields, their closes collected by the last field's own drop.
@@ -545,16 +546,76 @@ impl Drop for Session {
     }
 }
 
-impl Session {
-    /// The id of a new resource: no other token of this session has it.
-    #[expect(
-        dead_code,
-        reason = "the tokens mint their ids here; none exists until the MIDI and plugin tokens"
-    )]
-    pub(crate) fn mint_resource_id(&mut self) -> crate::ResourceId {
-        self.resource_ids.mint()
+impl Session<Offline> {
+    /// A builder with the defaults: offline, 48 kHz, stereo, blocks of up to
+    /// [`LIVE_MAX_BLOCK`](crate::LIVE_MAX_BLOCK) frames
+    /// ([`SessionBuilder`](crate::SessionBuilder) has the options, and the
+    /// other clocks).
+    pub fn builder() -> crate::SessionBuilder<crate::Offline> {
+        crate::SessionBuilder::default()
     }
 
+    /// An offline session at `rate` with every other option at its default:
+    /// shorthand for `Session::builder().sample_rate(rate).build()`.
+    ///
+    /// # Errors
+    ///
+    /// As [`SessionBuilder::build`](crate::SessionBuilder::build).
+    pub fn new(rate: tutti_types::SampleRate) -> crate::Result<Self> {
+        Self::builder().sample_rate(rate).build()
+    }
+
+    /// Renders one block into `output`, as a device callback would: what an
+    /// offline session's host pulls. Every update's commit lands at the
+    /// start of the next block.
+    pub fn render(&self, output: &mut tutti_buffers::InterleavedMut<'_>) {
+        self.running.engine.process(output);
+    }
+}
+
+impl<C: RealTime> Session<C> {
+    /// The stream's fault record: one entry each time the clock's stream
+    /// failed, a device unplugged, a callback that panicked, a timer that fell
+    /// more than four blocks behind and began its schedule again. The same
+    /// handle for the session's life; [`update`](Self::update) reports each new
+    /// fault as [`SessionEvent::Fault`] and takes its message from the record
+    /// ([`StreamFaults::take_last`](tutti_engine::StreamFaults::take_last)), so
+    /// [`count`](tutti_engine::StreamFaults::count) is the lasting reading.
+    #[must_use]
+    pub fn faults(&self) -> Arc<tutti_engine::StreamFaults> {
+        crate::clock::sealed::Streaming::output_stream(&self.running).faults()
+    }
+}
+
+/// A detached session: the executor stays on this side, and the caller renders.
+#[cfg(feature = "testing")]
+impl Session<crate::Detached> {
+    /// Renders one frame on the calling thread under a stopped transport:
+    /// no inputs, `output` one sample per global output. Commits any edit
+    /// first.
+    ///
+    /// # Panics
+    ///
+    /// On a session whose audio side was taken (`Graph::take_audio_side`).
+    pub fn render_frame(&mut self, output: &mut [f32]) {
+        self.render_frame_at(&tutti_graph::TransportPosition::default(), output);
+    }
+
+    /// `render_frame` with the transport at
+    /// `transport`: what plays a clip in a graph driven by hand.
+    pub fn render_frame_at(
+        &mut self,
+        transport: &tutti_graph::TransportPosition,
+        output: &mut [f32],
+    ) {
+        if self.graph.is_edited() {
+            self.commit();
+        }
+        self.graph.render_local(transport, output);
+    }
+}
+
+impl<C: Clock> Session<C> {
     /// Ends the session on the main thread: runs the work other threads handed to
     /// it, drops the session's plugins (each closes on `main`, or hands its close
     /// to the session's collector), and runs what that handed over. Nothing a
@@ -578,24 +639,6 @@ impl Session {
         let collected = std::mem::replace(&mut session.main_work, inert);
         drop(session);
         collected.run(main);
-    }
-
-    /// A builder with the defaults: offline, 48 kHz, stereo, blocks of up to
-    /// [`LIVE_MAX_BLOCK`](crate::LIVE_MAX_BLOCK) frames
-    /// ([`SessionBuilder`](crate::SessionBuilder) has the options and the
-    /// device state).
-    pub fn builder() -> crate::SessionBuilder<crate::Offline> {
-        crate::SessionBuilder::default()
-    }
-
-    /// An offline session at `rate` with every other option at its default:
-    /// shorthand for `Session::builder().sample_rate(rate).build()`.
-    ///
-    /// # Errors
-    ///
-    /// As [`SessionBuilder::build`](crate::SessionBuilder::build).
-    pub fn new(rate: tutti_types::SampleRate) -> crate::Result<Self> {
-        Self::builder().sample_rate(rate).build()
     }
 
     /// The graph, to edit. An edit marks it edited; the next
@@ -879,8 +922,10 @@ impl Session {
                         out.push(crate::MidiEvent::ClockCommandsRefused(refused).into());
                     }
                 }
+                let lost = self.fault_poll(out);
                 #[cfg(feature = "device")]
-                self.device_poll(cx.now, out)
+                self.listing_poll(cx.now, out);
+                crate::clock::sealed::Running::poll(&mut self.running, cx.now, lost, out);
             }
             Phase::Reclaim => {
                 // Any thread that owns the session: what it frees is
@@ -1100,7 +1145,15 @@ impl Session {
     /// and the hardware out.
     #[cfg(feature = "midi")]
     pub fn midi(&mut self) -> crate::Midi<'_> {
-        crate::Midi {
+        self.midi_and_ids().0
+    }
+
+    /// [`midi`](Self::midi) and, beside it, the source of the ids of the
+    /// session's resources: the two borrow disjoint fields, so a stage that
+    /// opens a peer holds both.
+    #[cfg(feature = "midi")]
+    pub(crate) fn midi_and_ids(&mut self) -> (crate::Midi<'_>, &mut crate::peer::ResourceIds) {
+        let midi = crate::Midi {
             graph: &mut self.graph,
             state: &mut self.midi_state,
             nodes: self.midi.as_ref(),
@@ -1109,48 +1162,33 @@ impl Session {
             meter: self.click_settings.project_meter(),
             #[cfg(feature = "midi-hardware")]
             io: self.midi_io.as_mut(),
+        };
+        (midi, &mut self.resource_ids)
+    }
+
+    /// Reports the newest fault the stream raised since the last poll, if the
+    /// clock has a stream. Whether the stream was lost: its device left.
+    ///
+    /// The message is *taken* from the record: a fault is reported once, by
+    /// its own kind, and a later fault that only bumps the count (an overrun
+    /// the record keeps no message for beside a latched panic) is not read as
+    /// the old message again.
+    fn fault_poll(&mut self, out: &mut Vec<SessionEvent>) -> bool {
+        let Some(stream) = crate::clock::sealed::Running::stream(&self.running) else {
+            return false;
+        };
+        let faults = stream.faults();
+        let count = faults.count();
+        if count == self.faults_seen {
+            return false;
         }
-    }
-
-    /// Renders one block into `output`, as a device callback would: what an
-    /// offline session's host pulls. Every update's commit lands at the
-    /// start of the next block.
-    ///
-    /// # Panics
-    ///
-    /// On a session not built with
-    /// [`build`](crate::SessionBuilder::build): its engine
-    /// is a device's callback, or there is none.
-    pub fn render(&self, output: &mut tutti_buffers::InterleavedMut<'_>) {
-        self.engine
-            .as_ref()
-            .expect("render needs an offline session (SessionBuilder::build)")
-            .process(output);
-    }
-
-    /// Renders one frame on the calling thread under a stopped transport:
-    /// no inputs, `output` one sample per global output. Commits any edit
-    /// first.
-    ///
-    /// # Panics
-    ///
-    /// On a session whose audio side an engine holds, or was taken
-    /// (`Graph::take_audio_side`, behind the `testing` feature).
-    pub fn render_frame(&mut self, output: &mut [f32]) {
-        self.render_frame_at(&tutti_graph::TransportPosition::default(), output);
-    }
-
-    /// [`render_frame`](Self::render_frame) with the transport at
-    /// `transport`: what plays a clip in a graph driven by hand.
-    pub fn render_frame_at(
-        &mut self,
-        transport: &tutti_graph::TransportPosition,
-        output: &mut [f32],
-    ) {
-        if self.graph.is_edited() {
-            self.commit();
-        }
-        self.graph.render_local(transport, output);
+        self.faults_seen = count;
+        let Some(fault) = faults.take_last() else {
+            return false;
+        };
+        let lost = fault.kind == tutti_engine::StreamFaultKind::Disconnected;
+        out.push(SessionEvent::Fault(fault));
+        lost
     }
 
     /// The transport: its rate follows the device's.
@@ -1461,7 +1499,7 @@ impl Session {
     /// [`Meters::master`](crate::Meters::master)), declared and on
     /// from the build, so every render feeds it: a device callback,
     /// [`render`](Self::render), and a detached session's
-    /// [`render_frame`](Self::render_frame). It reads before the engine's fold
+    /// `render_frame`. It reads before the engine's fold
     /// to the device and its declick, aligned to the outputs' time. A block
     /// the engine refuses (rendered silent because the control side held the
     /// graph for that callback) runs no op, so it does not touch the meter:

@@ -13,7 +13,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{FadeLaw, ForkByClone};
 use tutti_nodes::testing::{Osc, Through};
 use tutti_nodes::{LimiterControls, LimiterNode};
-use tutti_session::{Crossfade, Error, InPort, OutPort, Root, Session};
+use tutti_session::{Crossfade, Error, InPort, LiveSession, OutPort, Root, Session};
 use tutti_transport::{MotionEvent, Timeline};
 use tutti_types::{At, ChannelLayout, Db, Frame, Hz, MaxBlock, SampleRate, Samples, Seconds};
 
@@ -35,19 +35,12 @@ fn spec_with(rate: f64, channels: usize) -> OutputSpec {
 /// A session built at 44.1 kHz on a manual stream: a 1 kHz sine on output 0
 /// and, through a lookahead limiter, on output 1, so the dry channel
 /// pre-rolls by the limiter's latency.
-fn engine() -> (
-    Session,
-    tutti_session::Device,
-    ManualStream,
-    NodeKey,
-    NodeKey,
-) {
+fn engine() -> (LiveSession, ManualStream, NodeKey, NodeKey) {
     let (driver, stream) = ManualStreamDriver::new();
-    let (mut s, device) = Session::builder()
+    let mut s = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(OLD), driver)
-        .expect("builds with no device")
-        .into_parts();
+        .expect("builds with no device");
     let (osc, _) = s.graph().add(ForkByClone(Osc::sine(Hz(1_000.0))));
     let (lim, _) = s.graph().add(LimiterNode::mono(LimiterControls {
         threshold: Db(0.0),
@@ -64,13 +57,13 @@ fn engine() -> (
         .set_sources(Root::output(1), [OutPort::new(lim, 0)])
         .unwrap();
     let _ = s.update();
-    (s, device, stream, osc.erase(), lim.erase())
+    (s, stream, osc.erase(), lim.erase())
 }
 
 /// Render `blocks` device blocks of `frames` on `stream`, an update of the
 /// session after each (as a host's frames interleave with its callbacks): the
 /// left channel.
-fn play(s: &mut Session, stream: &ManualStream, frames: usize, blocks: usize) -> Vec<f32> {
+fn play(s: &mut LiveSession, stream: &ManualStream, frames: usize, blocks: usize) -> Vec<f32> {
     let mut left = Vec::new();
     for _ in 0..blocks {
         let block = stream.render_block(frames).expect("the stream is open");
@@ -120,7 +113,7 @@ fn period(x: &[f32]) -> f64 {
 /// on its frame, but it would also land there without the boundary.
 #[test]
 fn a_restart_at_a_new_rate_re_rates_the_graph_and_everything_on_it() {
-    let (mut s, mut device, old, _, lim) = engine();
+    let (mut s, old, _, lim) = engine();
     let t = s.transport().clone();
     t.motion().try_send(MotionEvent::Play).expect("room");
     t.motion()
@@ -136,7 +129,7 @@ fn a_restart_at_a_new_rate_re_rates_the_graph_and_everything_on_it() {
     assert_eq!(s.latency(), old_latency, "the 44.1 kHz figure is published");
 
     let (driver, new) = ManualStreamDriver::new();
-    s.restart_on(&mut device, spec_at(NEW), driver, None, None)
+    s.restart_on(spec_at(NEW), driver, None, None)
         .expect("restarts");
     assert!(!old.is_open() && new.is_open(), "on the new device");
     assert_eq!(
@@ -214,11 +207,10 @@ fn a_restart_at_a_new_rate_re_rates_the_graph_and_everything_on_it() {
 /// 8 192 frames). Within it, the same restart goes through.
 #[test]
 fn a_restart_past_the_block_capacity_is_refused_and_keeps_playing() {
-    let (mut s, mut device, old, _, _) = engine();
+    let (mut s, old, _, _) = engine();
     let (driver, new) = ManualStreamDriver::new();
     let err = s
         .restart_on(
-            &mut device,
             spec_at(NEW),
             driver,
             Some(MaxBlock::of(Samples(16_384))),
@@ -236,15 +228,14 @@ fn a_restart_past_the_block_capacity_is_refused_and_keeps_playing() {
         "{err}"
     );
     assert!(old.is_open() && !new.is_open(), "the old device plays on");
-    assert_eq!(device.spec().sample_rate, SampleRate::of(OLD));
-    assert_eq!(device.graph_rate(), SampleRate::of(OLD));
+    assert_eq!(s.device().spec().sample_rate, SampleRate::of(OLD));
+    assert_eq!(s.device().graph_rate(), SampleRate::of(OLD));
     assert!(play(&mut s, &old, 441, 10).iter().any(|&x| x != 0.0));
 
     // Within it, the same restart goes through (the widening onto the 5.1
     // device it picks is `a_restart_onto_a_wider_device_widens_the_root`'s).
     let (driver, new) = ManualStreamDriver::new();
     s.restart_on(
-        &mut device,
         spec_with(NEW, 6),
         driver,
         Some(MaxBlock::of(Samples(2_048))),
@@ -264,18 +255,18 @@ fn a_restart_past_the_block_capacity_is_refused_and_keeps_playing() {
 /// and the engine folds.
 #[test]
 fn a_restart_onto_a_wider_device_widens_the_root() {
-    let (mut s, mut device, _old, _, _) = engine();
+    let (mut s, _old, _, _) = engine();
     assert_eq!(s.graph_ref().outputs(), 2);
 
     let (driver, surround) = ManualStreamDriver::new();
-    s.restart_on(&mut device, spec_with(NEW, 6), driver, None, None)
+    s.restart_on(spec_with(NEW, 6), driver, None, None)
         .expect("restarts");
     assert_eq!(
         s.graph_ref().outputs(),
         6,
         "the root takes the device's six"
     );
-    assert_eq!(device.spec().channels, ChannelLayout::from(6u16));
+    assert_eq!(s.device().spec().channels, ChannelLayout::from(6u16));
     for _ in 0..4 {
         let block = surround.render_block(480).expect("the stream is open");
         assert_eq!(block.len(), 480 * 6);
@@ -288,10 +279,10 @@ fn a_restart_onto_a_wider_device_widens_the_root() {
     );
 
     let (driver, stereo) = ManualStreamDriver::new();
-    s.restart_on(&mut device, spec_at(NEW), driver, None, None)
+    s.restart_on(spec_at(NEW), driver, None, None)
         .expect("restarts");
     assert_eq!(s.graph_ref().outputs(), 6);
-    assert_eq!(device.spec().channels, ChannelLayout::STEREO);
+    assert_eq!(s.device().spec().channels, ChannelLayout::STEREO);
     let out = play(&mut s, &stereo, 480, 20);
     assert!(
         (period(&out[4_800..]) - 48.0).abs() < 0.01,
@@ -307,7 +298,7 @@ fn a_restart_onto_a_wider_device_widens_the_root() {
 /// nothing and renders the 1 kHz sine at 44.1 frames a cycle.
 #[test]
 fn a_restart_after_a_failed_hook_recovers_on_the_old_device() {
-    let (mut s, mut device, old, osc, lim) = engine();
+    let (mut s, old, osc, lim) = engine();
     let (loop_back, ()) = s.graph().add(ForkByClone(Through::mono()));
     s.graph()
         .set_sources(InPort::new(loop_back, 0), [OutPort::new(lim, 0)])
@@ -316,11 +307,11 @@ fn a_restart_after_a_failed_hook_recovers_on_the_old_device() {
         .set_sources(InPort::new(lim, 0), [OutPort::new(loop_back, 0)])
         .unwrap();
     let (driver, new) = ManualStreamDriver::new();
-    s.restart_on(&mut device, spec_at(NEW), driver, None, None)
+    s.restart_on(spec_at(NEW), driver, None, None)
         .expect_err("the graph no longer compiles");
     assert!(!old.is_open() && !new.is_open(), "left stopped");
-    assert_eq!(device.graph_rate(), SampleRate::of(OLD));
-    assert_eq!(device.spec().sample_rate, SampleRate::of(OLD));
+    assert_eq!(s.device().graph_rate(), SampleRate::of(OLD));
+    assert_eq!(s.device().spec().sample_rate, SampleRate::of(OLD));
 
     // The declared wiring writes the limiter's input back.
     s.graph()
@@ -329,7 +320,7 @@ fn a_restart_after_a_failed_hook_recovers_on_the_old_device() {
     s.graph().remove(loop_back).unwrap();
     let _ = s.update();
     let (driver, back) = ManualStreamDriver::new();
-    s.restart_on(&mut device, spec_at(OLD), driver, None, None)
+    s.restart_on(spec_at(OLD), driver, None, None)
         .expect("recovers");
     assert!(back.is_open());
     let out = play(&mut s, &back, 441, 20);
@@ -346,7 +337,7 @@ fn a_restart_after_a_failed_hook_recovers_on_the_old_device() {
 #[test]
 fn a_restart_the_hook_refuses_leaves_the_device_placement_as_it_was() {
     use tutti_types::{Bed, Placement};
-    let (mut s, mut device, _old, _osc, lim) = engine();
+    let (mut s, _old, _osc, lim) = engine();
     let before = s.output_device().expect("an engine renders it");
     assert_eq!(before.placement, Placement::Assumed);
     let (loop_back, ()) = s.graph().add(ForkByClone(Through::mono()));
@@ -358,7 +349,6 @@ fn a_restart_the_hook_refuses_leaves_the_device_placement_as_it_was() {
         .unwrap();
     let (driver, _new) = ManualStreamDriver::new();
     s.restart_on(
-        &mut device,
         spec_with(NEW, 6),
         driver,
         None,
@@ -382,9 +372,9 @@ fn a_restart_the_hook_refuses_leaves_the_device_placement_as_it_was() {
 /// `graph.rs`'s `a_crossfade_refused_busy_during_a_re_prepare_lands_on_a_later_update`.
 #[test]
 fn a_crossfade_after_the_restart_lands_at_once() {
-    let (mut s, mut device, _old, osc, _) = engine();
+    let (mut s, _old, osc, _) = engine();
     let (driver, new) = ManualStreamDriver::new();
-    s.restart_on(&mut device, spec_at(NEW), driver, None, None)
+    s.restart_on(spec_at(NEW), driver, None, None)
         .expect("restarts");
     let landed = s
         .graph()

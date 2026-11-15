@@ -15,8 +15,8 @@ use tutti_graph::{
 };
 use tutti_nodes::testing::{Const, Osc, Through};
 use tutti_session::{
-    Crossfade, CrossfadeRefused, EventInPort, Feeder, InPort, OutPort, RemoveError, Root, Session,
-    SessionEvent, SessionNode, root_width,
+    Crossfade, CrossfadeRefused, DetachedSession, EventInPort, Feeder, InPort, OutPort,
+    RemoveError, Root, Session, SessionEvent, SessionNode, root_width,
 };
 use tutti_types::MAX_CHANNELS;
 use tutti_types::{ChannelLayout, Drive, Hz, SampleRate, Samples, Seconds};
@@ -25,7 +25,7 @@ use tutti_types::{Latency, Param, UnitParam};
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// A detached session `outputs` wide at 48 kHz: the executor on this side.
-fn detached(outputs: usize) -> Session {
+fn detached(outputs: usize) -> DetachedSession {
     Session::builder()
         .outputs_floor(ChannelLayout::clamped(outputs))
         .build_detached(RATE)

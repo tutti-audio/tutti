@@ -7,7 +7,7 @@
 use tutti_graph::NodeKey;
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_types::{Normalized, ParamId, ParamUnit};
-use tutti_session::{PluginLoadRequest, PluginParamError, Root, Session};
+use tutti_session::{DetachedSession, PluginLoadRequest, PluginParamError, Root, Session};
 use tutti_types::{ChannelLayout, Db, Hz, SampleRate};
 
 /// The probe's parameter that is labelled `Hz` and has an integer range.
@@ -31,7 +31,7 @@ fn probe_answering_properties() -> (libloading::Library, std::path::PathBuf) {
     (lib, path.to_path_buf())
 }
 
-fn session_with_probe() -> (Session, NodeKey, libloading::Library) {
+fn session_with_probe() -> (DetachedSession, NodeKey, libloading::Library) {
     let (image, probe) = probe_answering_properties();
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)

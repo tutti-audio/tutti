@@ -15,7 +15,7 @@ use tutti_types::{ChannelLayout, ChannelTopology, Placement, SampleRate, Samples
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// The channels `values` hold, one per global output from channel 0.
-fn feed(session: &mut Session, values: &[f32]) {
+fn feed<C: tutti_session::Clock>(session: &mut Session<C>, values: &[f32]) {
     let (node, _) = session.graph().add(ForkByClone(Const::frame(values)));
     for c in 0..values.len() {
         session
@@ -251,7 +251,7 @@ fn declaring_the_same_topology_again_changes_nothing() {
 #[test]
 fn an_export_is_placed_from_the_declaration() {
     use tutti_session::{Bounce, BounceLatency, BounceTail, ExportClock, Range};
-    let planes = |s: &mut Session| {
+    let planes = |s: &mut tutti_session::DetachedSession| {
         let request = Bounce::project()
             .master_buffers()
             .channels(ChannelLayout::from(6u16))

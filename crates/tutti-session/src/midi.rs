@@ -1261,7 +1261,7 @@ pub struct Midi<'a> {
     pub(crate) graph: &'a mut Graph,
     pub(crate) state: &'a mut MidiState,
     pub(crate) nodes: Option<&'a MidiNodes>,
-    pub(crate) jobs: &'a mut crate::jobs::Jobs,
+    pub(crate) jobs: &'a mut dyn crate::jobs::EventJobs,
     /// The transport's settings (the tempo map a follower overlays).
     pub(crate) settings: &'a tutti_transport::TransportSettings,
     /// The project meter a follower overlays.
@@ -1361,6 +1361,22 @@ fn wire_inlets(
     edited
 }
 
+impl<'a> Midi<'a> {
+    /// The same view, borrowed for a shorter time.
+    pub(crate) fn reborrow(&mut self) -> Midi<'_> {
+        Midi {
+            graph: &mut *self.graph,
+            state: &mut *self.state,
+            nodes: self.nodes,
+            jobs: &mut *self.jobs,
+            settings: self.settings,
+            meter: self.meter.clone(),
+            #[cfg(feature = "midi-hardware")]
+            io: self.io.as_deref_mut(),
+        }
+    }
+}
+
 impl Midi<'_> {
     fn next_load(&self) -> MidiLoad {
         MidiLoad::mint(&self.state.loads)
@@ -1375,15 +1391,20 @@ impl Midi<'_> {
     pub fn load_file(&mut self, path: impl Into<std::path::PathBuf>) -> MidiLoad {
         let load = self.next_load();
         let path = path.into();
-        self.jobs.submit(
-            move || tutti_midi_file::MidiFile::read(path),
-            move |_, done, events| {
-                let file = match done {
-                    Ok(read) => read.map_err(MidiError::from),
-                    Err(failed) => Err(failed.into()),
-                };
-                events.push(MidiEvent::FileLoaded { load, file }.into());
-            },
+        self.jobs.submit_events(
+            Box::new(move || {
+                let read = tutti_midi_file::MidiFile::read(path);
+                Box::new(move |events: &mut Vec<crate::SessionEvent>| {
+                    let file = read.map_err(MidiError::from);
+                    events.push(MidiEvent::FileLoaded { load, file }.into());
+                })
+            }),
+            Box::new(move |failed| {
+                Box::new(move |events: &mut Vec<crate::SessionEvent>| {
+                    let file = Err(failed.into());
+                    events.push(MidiEvent::FileLoaded { load, file }.into());
+                })
+            }),
         );
         load
     }

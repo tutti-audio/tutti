@@ -107,7 +107,7 @@ impl GeneralMidi {
     }
 }
 
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// Adds `unit` with a General MIDI chorus and reverb, and a fader that
     /// sums the three.
     ///

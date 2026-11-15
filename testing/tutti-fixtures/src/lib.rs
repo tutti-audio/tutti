@@ -58,6 +58,7 @@ mod range_contract;
 mod round_trip;
 pub mod sf2;
 pub mod signal;
+pub mod tpt;
 #[cfg(feature = "vst3-cpp")]
 mod vst3_cpp;
 

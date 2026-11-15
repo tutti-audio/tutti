@@ -1702,7 +1702,7 @@ fn span(
     }
 }
 
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// Starts a bounce: checks what it names, derives what it does not,
     /// gathers its fork of the live graph here (what it reads of the live graph
     /// and its nodes, now; an in-process VST2 plugin's second instance is built
@@ -2060,7 +2060,7 @@ mod tests {
     }
 
     /// A detached session whose outputs hear a dc node: something to bounce.
-    fn session() -> Session {
+    fn session() -> crate::DetachedSession {
         let mut session = Session::builder().build_detached(RATE).unwrap();
         let (dc, _) = session
             .graph()
@@ -2261,7 +2261,10 @@ mod tests {
     #[test]
     fn a_bounce_that_misses_what_it_needs_is_refused_before_it_forks() {
         let mut session = session();
-        fn refused<M: Master>(session: &mut Session, b: Bounce<NodeKey, M>) -> BounceConfigError {
+        fn refused<M: Master>(
+            session: &mut crate::DetachedSession,
+            b: Bounce<NodeKey, M>,
+        ) -> BounceConfigError {
             match session.bounce_start(b) {
                 Err(BounceError::Config(e)) => e,
                 other => panic!("expected a config error, got {other:?}"),
@@ -2468,7 +2471,7 @@ mod tests {
     #[test]
     fn a_leaked_bounce_is_warned_about_once() {
         let mut session = session();
-        let collect = |session: &mut Session, at: Instant| {
+        let collect = |session: &mut crate::DetachedSession, at: Instant| {
             session.run_phase(Phase::Collect, PhaseCx::at(at), &mut Vec::new());
             session.bounce.stall_warnings
         };
@@ -2506,7 +2509,9 @@ mod tests {
         // Back to back, with no collect between: 50 minutes, then 59.
         let t2 = t1 + 4 * BOUNCE_STALL_WARNING;
         assert_eq!(collect(&mut session, t2), 2, "nothing in flight");
-        let start = |session: &mut Session| session.bounce_start(short()).expect("a bounce starts");
+        let start = |session: &mut crate::DetachedSession| {
+            session.bounce_start(short()).expect("a bounce starts")
+        };
         let first = start(&mut session);
         assert_eq!(collect(&mut session, t2), 2);
         assert_eq!(collect(&mut session, t2 + 50 * minute), 2);
