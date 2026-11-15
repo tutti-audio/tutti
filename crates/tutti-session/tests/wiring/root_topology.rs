@@ -398,7 +398,7 @@ fn a_declaration_past_the_pending_roots_is_refused_by_name() {
         // Alternate, so each declaration is a new root.
         let root = (i % 2 == 0).then(|| buses(4));
         match s.declare_root_topology(root) {
-            Ok(()) => {}
+            Ok(_) => {}
             Err(e) => {
                 refused = Some(e);
                 break;
