@@ -155,6 +155,17 @@ fn an_mtc_full_message_writes_the_bytes_of_t9_and_reads_back() {
     }
 }
 
+/// UMP section 7.7 (System Exclusive 7): the Full Message of 25 fps
+/// `01:02:03:04` is a Start of `7F 7F 01 01 21 02` and an End of `03 04`, in
+/// words `3616_7F7F 0101_2102` and `3632_0304 0`, on Group 6.
+#[test]
+fn an_mtc_full_message_is_a_start_and_an_end_packet() {
+    let message = MtcFullMessage::new(MtcRate::Fps25, 1, 2, 3, 4).unwrap();
+    let [start, end] = message.packets(tutti_ump::MidiGroup::of(6));
+    assert_eq!(start.0, [0x3616_7F7F, 0x0101_2102, 0, 0]);
+    assert_eq!(end.0, [0x3632_0304, 0, 0, 0]);
+}
+
 /// M1 p.53 (Quarter Frame Messages): piece `n` carries the nibbles frames
 /// low, frames high, seconds low, seconds high, minutes low, minutes high,
 /// hours low, hours high over the rate code (`0rrh`), so `19:20:21:22` at 30 fps

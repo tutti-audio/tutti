@@ -49,7 +49,8 @@ pub use machine_control::*;
 
 use tutti_types::Seconds;
 use tutti_ump::{
-    DeviceIdentity, MidiGroup, Sysex7Packets, SysexAssembler, SysexMessage, SysexStep, U7, U14, Ump,
+    DeviceIdentity, Message, MidiGroup, Sysex7Packet, SysexAssembler, SysexMessage, SysexStatus,
+    SysexStep, U7, U14, Ump,
 };
 
 /// A device's own Universal System Exclusive id: `00` to `7E`. `7F` is the
@@ -286,20 +287,21 @@ impl MtcFullMessage {
         self.0.timecode().frames()
     }
 
-    /// Gives `out` the SysEx7 packets of [`payload`](Self::payload) on `group`:
-    /// a Start of six bytes and an End of two.
-    pub fn packets(self, group: MidiGroup, out: &mut impl FnMut(Ump)) {
-        let payload = self.payload();
-        // Every byte of the payload is below 128 by construction, so it packs.
-        if let Ok(packets) = Sysex7Packets::from_payload(group, &payload) {
-            packets.for_each(out);
-        }
+    /// The two SysEx7 packets of [`payload`](Self::payload) on `group`: a
+    /// Start of six bytes and an End of two.
+    #[must_use]
+    pub fn packets(self, group: MidiGroup) -> [Ump; 2] {
+        let [a, b, c, d, e, f, g, h] = self.payload().map(U7::masked);
+        [
+            Sysex7Packet::from_bytes(SysexStatus::Start, [a, b, c, d, e, f]),
+            Sysex7Packet::from_bytes(SysexStatus::End, [g, h]),
+        ]
+        .map(|packet| Ump::from(Message::Sysex7(group, packet)))
     }
 
     /// The bytes between `F0` and `F7`: `7F 7F 01 01 hr mn sc fr` (M1 p.53),
     /// the Real Time header to all devices, then the position with `hr` as
-    /// `0rrhhhhh`. It goes out as SysEx7 through
-    /// [`Sysex7Packets::from_payload`](tutti_ump::Sysex7Packets::from_payload).
+    /// `0rrhhhhh`. [`packets`](Self::packets) carries it as SysEx7.
     #[must_use]
     pub const fn payload(self) -> [u8; 8] {
         [

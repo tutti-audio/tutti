@@ -575,8 +575,9 @@ impl ClockMaster {
     ) {
         let per_sample = tutti_types::beats_per_sample(transport.tempo, sample_rate);
         let seconds = Seconds::new(samples_at(beat, per_sample) / sample_rate.get());
-        MtcFullMessage::from(MtcTimeCode::at(seconds, self.fps))
-            .packets(self.group, &mut |packet| emit((at, packet)));
+        for packet in MtcFullMessage::from(MtcTimeCode::at(seconds, self.fps)).packets(self.group) {
+            emit((at, packet));
+        }
     }
 
     /// Emit a 0xF8 at every 1/24-beat boundary playback reaches inside `pass`,
