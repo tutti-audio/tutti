@@ -92,7 +92,7 @@ impl Parts {
         // SAFETY: `string` is a valid out-parameter of the size the ABI names.
         check(unsafe { controller.getParamStringByValue(id.get(), normalized, &mut string) })
             .ok()?;
-        Some(utf16_to_string(&string))
+        Some(read_utf16_str(&string))
     }
 
     /// The normalized value for the plugin's reading of `text`, if it parses
@@ -309,7 +309,7 @@ impl Parts {
             ctrl.getProgramName(list_id, i32::try_from(program_index).ok()?, &mut name)
         })
         .ok()?;
-        Some(utf16_to_string(&name))
+        Some(read_utf16_str(&name))
     }
 
     /// The selected unit.
@@ -415,10 +415,10 @@ impl Parts {
         let _scope = self.scoped(main);
         let ctrl = self.ext.xml_representation.as_ref()?;
         let mut info = zeroed::<RepresentationInfo>();
-        write_char8(&mut info.vendor, vendor);
-        write_char8(&mut info.name, name);
-        write_char8(&mut info.version, version);
-        write_char8(&mut info.host, host);
+        write_c_chars(&mut info.vendor, vendor);
+        write_c_chars(&mut info.name, name);
+        write_c_chars(&mut info.version, version);
+        write_c_chars(&mut info.host, host);
 
         let stream = BStream::new();
         let stream_ptr = stream.as_com_ref::<IBStream>()?;

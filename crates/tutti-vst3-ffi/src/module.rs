@@ -14,13 +14,15 @@ use vst3::Steinberg::{
 };
 use vst3::{ComPtr, ComWrapper, Interface};
 
-use tutti_plugin_types::{LoadStage, MainThreadMarker, MainWorkHandle};
+use tutti_plugin_types::{
+    LoadStage, MainThreadMarker, MainWorkHandle, read_c_chars, read_utf16_str,
+};
 
 use crate::com::{BStream, HostApplication};
 use crate::error::{Vst3Error, check};
 use crate::module_entry::ModuleEntry;
 use crate::plugin::{Component, Plugin};
-use crate::sdk::{c_str_to_string, guid_as_tuid, utf16_to_string, zeroed};
+use crate::sdk::{guid_as_tuid, zeroed};
 
 type GetPluginFactoryFn = unsafe extern "system" fn() -> *mut IPluginFactory;
 
@@ -309,8 +311,8 @@ impl Module {
         Ok(ClassInfo {
             cid: info.cid,
             cid_bytes: info.cid.map(|b| b as u8),
-            category: c_str_to_string(&info.category),
-            name: c_str_to_string(&info.name),
+            category: read_c_chars(&info.category),
+            name: read_c_chars(&info.name),
             // `PClassInfo` (the v1 struct) carries no vendor, version or
             // subcategories — their absence is what `PClassInfo2`/
             // `PClassInfoW` were added for. `None` here is the honest
@@ -327,7 +329,7 @@ impl Module {
     ///
     /// `category` stays `char8` even in the unicode struct — it is a fixed set
     /// of ASCII spec constants ("Audio Module Class", "Component Controller
-    /// Class"), so `c_str_to_string` is correct there.
+    /// Class"), so `read_c_chars` is correct there.
     fn class_info_unicode(&self, index: i32) -> Option<ClassInfo> {
         let f3 = self.parts.factory3.as_ref()?;
         let mut info: PClassInfoW = zeroed();
@@ -336,8 +338,8 @@ impl Module {
         Some(ClassInfo {
             cid: info.cid,
             cid_bytes: info.cid.map(|b| b as u8),
-            category: c_str_to_string(&info.category),
-            name: utf16_to_string(&info.name),
+            category: read_c_chars(&info.category),
+            name: read_utf16_str(&info.name),
             // `ipluginbase.h:357` documents the vendor field as "overwrite
             // vendor information from factory info", so a non-empty class
             // vendor outranks the factory's. Both are read here and the choice
@@ -347,13 +349,13 @@ impl Module {
             // and is why this is `Option` rather than a bare `String`: "the
             // class said nothing" and "the class said the empty string" would
             // otherwise be the same value, and only the first should fall back.
-            vendor: non_empty(utf16_to_string(&info.vendor)),
-            version: non_empty(utf16_to_string(&info.version)),
+            vendor: non_empty(read_utf16_str(&info.vendor)),
+            version: non_empty(read_utf16_str(&info.version)),
             // `char8` even in the unicode struct, like `category` above: the
             // subcategory vocabulary is a set of ASCII spec constants
-            // (`ivstprocesscontext.h`'s `PlugType`), so `c_str_to_string` is
+            // (`ivstprocesscontext.h`'s `PlugType`), so `read_c_chars` is
             // correct rather than a UTF-16 decode.
-            sub_categories: non_empty(c_str_to_string(&info.subCategories)),
+            sub_categories: non_empty(read_c_chars(&info.subCategories)),
         })
     }
 
@@ -466,9 +468,9 @@ impl FactoryInfo {
     /// Reads the plugin's `PFactoryInfo`, keeping every flag bit it sent.
     fn from_c(info: &PFactoryInfo) -> Self {
         Self {
-            vendor: c_str_to_string(&info.vendor),
-            url: c_str_to_string(&info.url),
-            email: c_str_to_string(&info.email),
+            vendor: read_c_chars(&info.vendor),
+            url: read_c_chars(&info.url),
+            email: read_c_chars(&info.email),
             flags: FactoryFlags::from_bits_retain(info.flags),
         }
     }

@@ -7,9 +7,8 @@ use vst3::Steinberg::Vst::NoteExpressionTypeInfo_::NoteExpressionTypeFlags_;
 use vst3::Steinberg::Vst::ParameterInfo_::ParameterFlags_;
 use vst3::Steinberg::Vst::{PhysicalUITypeIDs_, ePrefetchableSupport_};
 
-use tutti_plugin_types::AutomationMode;
+use tutti_plugin_types::{AutomationMode, read_utf16_str};
 
-use crate::sdk::utf16_to_string;
 
 /// Host-facing bus descriptor. Thin wrapper around `vst3::Steinberg::Vst::BusInfo`
 /// whose field layout is retained verbatim for FFI, but whose only public
@@ -59,7 +58,7 @@ impl BusInfo {
 
     /// Display name decoded from the UTF-16 buffer.
     pub fn name_string(&self) -> String {
-        utf16_to_string(&self.inner.name)
+        read_utf16_str(&self.inner.name)
     }
 
     /// The raw record, for the plugin to fill in.
@@ -131,17 +130,17 @@ impl Vst3ParameterInfo {
 
     /// The title as a Rust `String`.
     pub fn title_string(&self) -> String {
-        utf16_to_string(&self.title)
+        read_utf16_str(&self.title)
     }
 
     /// The short title as a Rust `String`.
     pub fn short_title_string(&self) -> String {
-        utf16_to_string(&self.short_title)
+        read_utf16_str(&self.short_title)
     }
 
     /// The units as a Rust `String`.
     pub fn units_string(&self) -> String {
-        utf16_to_string(&self.units)
+        read_utf16_str(&self.units)
     }
 
     /// True if the parameter carries the `kCanAutomate` flag.
@@ -356,17 +355,17 @@ impl Default for Vst3NoteExpressionInfo {
 impl Vst3NoteExpressionInfo {
     /// Decoded [`title`](Self::title) as a Rust `String`.
     pub fn title_string(&self) -> String {
-        utf16_to_string(&self.title)
+        read_utf16_str(&self.title)
     }
 
     /// Decoded [`short_title`](Self::short_title) as a Rust `String`.
     pub fn short_title_string(&self) -> String {
-        utf16_to_string(&self.short_title)
+        read_utf16_str(&self.short_title)
     }
 
     /// Decoded [`units`](Self::units) as a Rust `String`.
     pub fn units_string(&self) -> String {
-        utf16_to_string(&self.units)
+        read_utf16_str(&self.units)
     }
 
     /// True if the expression is bipolar (centred at 0.5, e.g. pan/tuning).
@@ -478,12 +477,12 @@ impl Default for Vst3KeyswitchInfo {
 impl Vst3KeyswitchInfo {
     /// Decoded [`title`](Self::title) as a Rust `String`.
     pub fn title_string(&self) -> String {
-        utf16_to_string(&self.title)
+        read_utf16_str(&self.title)
     }
 
     /// Decoded [`short_title`](Self::short_title) as a Rust `String`.
     pub fn short_title_string(&self) -> String {
-        utf16_to_string(&self.short_title)
+        read_utf16_str(&self.short_title)
     }
 
     /// Reads the plugin's `KeyswitchInfo` record.
@@ -555,7 +554,7 @@ impl Vst3UnitInfo {
         Self {
             id: UnitId(c.id),
             parent: (c.parentUnitId != NO_PARENT).then_some(UnitId(c.parentUnitId)),
-            name: utf16_to_string(&c.name),
+            name: read_utf16_str(&c.name),
             program_list: None,
             program_list_id_raw: c.programListId,
         }
@@ -591,7 +590,7 @@ impl Vst3ProgramListInfo {
     pub(crate) fn from_c(c: &vst3::Steinberg::Vst::ProgramListInfo) -> Self {
         Self {
             id: c.id,
-            name: utf16_to_string(&c.name),
+            name: read_utf16_str(&c.name),
             program_count: c.programCount.max(0) as u32,
         }
     }

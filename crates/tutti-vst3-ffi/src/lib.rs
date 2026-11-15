@@ -101,8 +101,7 @@ pub use error::Vst3Error;
 pub use module::{ClassInfo, CreateError, FactoryFlags, FactoryInfo, LoadError, Module};
 pub use plugin::{BusDirection, MediaType, MidiLearn, Plugin};
 pub use sdk::{
-    SdkEnum, Zeroable, c_str_to_string, cid_to_string, guid_as_tuid, sdk_enum_i32, sdk_enum_u32,
-    utf16_to_string, write_char8, zeroed,
+    SdkEnum, Zeroable, cid_to_string, guid_as_tuid, sdk_enum_i32, sdk_enum_u32, zeroed,
 };
 pub use types::*;
 pub use view::{

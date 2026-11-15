@@ -9,6 +9,8 @@
 //! Every function takes a slice, so the only `unsafe` is the caller's, where a raw pointer
 //! is first turned into one.
 
+use std::ffi::c_char;
+
 /// `bytes` up to its first NUL (or its end), lossily decoded as UTF-8.
 ///
 /// The bytes after the first NUL are never decoded.
@@ -16,6 +18,18 @@
 pub fn read_c_str(bytes: &[u8]) -> String {
     let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
     String::from_utf8_lossy(&bytes[..end]).into_owned()
+}
+
+/// A C `char` field (`i8` or `u8`, whichever the target's `c_char` is) up to its first NUL (or
+/// its end), lossily decoded as UTF-8, scanned once.
+#[must_use]
+pub fn read_c_chars(field: &[c_char]) -> String {
+    let bytes: Vec<u8> = field
+        .iter()
+        .take_while(|&&c| c != 0)
+        .map(|&c| c.to_ne_bytes()[0])
+        .collect();
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 /// `units` up to its first NUL (or its end), lossily decoded as UTF-16.
@@ -54,6 +68,39 @@ pub fn write_c_str(dst: &mut [u8], src: &str) -> usize {
     dst[..text.len()].copy_from_slice(text);
     dst[text.len()] = 0;
     text.len()
+}
+
+/// [`write_c_str`] into a C `char` buffer (`i8` or `u8`, whichever the target's `c_char` is).
+pub fn write_c_chars(dst: &mut [c_char], src: &str) -> usize {
+    if dst.is_empty() {
+        return 0;
+    }
+    let text = c_str_prefix(src, dst.len()).as_bytes();
+    for (slot, &byte) in dst.iter_mut().zip(text) {
+        *slot = c_char::from_ne_bytes([byte]);
+    }
+    dst[text.len()] = 0;
+    text.len()
+}
+
+/// Writes the UTF-16 text `src` into `dst` as a NUL-terminated string and returns the number of
+/// text units written (the NUL not counted).
+///
+/// `src` is cut at its first NUL, then to at most `dst.len() - 1` units, without splitting a
+/// surrogate pair: a high surrogate left last by the cut is dropped with its pair. Exactly
+/// the text and one NUL are written. An empty `dst` is not written and returns `0`.
+pub fn write_utf16_units(dst: &mut [u16], src: &[u16]) -> usize {
+    let Some(room) = dst.len().checked_sub(1) else {
+        return 0;
+    };
+    let text = &src[..src.iter().position(|&u| u == 0).unwrap_or(src.len())];
+    let mut len = text.len().min(room);
+    if len < text.len() && len > 0 && (0xD800..0xDC00).contains(&text[len - 1]) {
+        len -= 1;
+    }
+    dst[..len].copy_from_slice(&text[..len]);
+    dst[len] = 0;
+    len
 }
 
 /// Writes `src` into `dst` as a NUL-terminated UTF-16 string and returns the number of
@@ -163,5 +210,73 @@ mod tests {
         assert_eq!(write_utf16_str(&mut dst, "a\0b"), 1);
         assert_eq!(dst, [0x61, 0, 0xAAAA, 0xAAAA]);
         assert_eq!(write_utf16_str(&mut [], "x"), 0);
+    }
+
+    /// A four-byte UTF-8 character is cut whole at the boundary: with room for text bytes
+    /// `0..n` it is written only when all four fit.
+    #[test]
+    fn a_four_byte_character_is_written_whole_or_not_at_all() {
+        for (capacity, written) in [(5, 0), (6, 0), (7, 0), (8, 4)] {
+            let mut dst = vec![0xAAu8; capacity.max(8)];
+            let dst = &mut dst[..capacity];
+            assert_eq!(write_c_str(dst, "\u{1F3B5}"), written, "capacity {capacity}");
+            assert_eq!(dst[written], 0);
+        }
+        let mut dst = [0xAAu8; 6];
+        assert_eq!(write_c_str(&mut dst, "a\u{1F3B5}"), 1);
+        assert_eq!(&dst[..2], b"a\0");
+    }
+
+    /// A string that exactly fills the buffer less its NUL is written whole; one byte
+    /// more loses its last byte. Capacity 1 holds only the NUL.
+    #[test]
+    fn an_exact_fit_is_whole_and_capacity_one_holds_only_the_nul() {
+        let mut dst = [0xAAu8; 4];
+        assert_eq!(write_c_str(&mut dst, "abc"), 3);
+        assert_eq!(&dst, b"abc\0");
+        let mut dst = [0xAAu8; 4];
+        assert_eq!(write_c_str(&mut dst, "abcd"), 3);
+        assert_eq!(&dst, b"abc\0");
+        let mut dst = [0xAAu8; 1];
+        assert_eq!(write_c_str(&mut dst, "abc"), 0);
+        assert_eq!(dst, [0]);
+
+        let mut dst = [0xAAAAu16; 4];
+        assert_eq!(write_utf16_str(&mut dst, "abc"), 3);
+        assert_eq!(dst, [0x61, 0x62, 0x63, 0]);
+        let mut dst = [0xAAAAu16; 1];
+        assert_eq!(write_utf16_str(&mut dst, "abc"), 0);
+        assert_eq!(dst, [0]);
+    }
+
+    /// The `c_char` forms read and write the same bytes whichever signedness `c_char` has,
+    /// including a byte above 127.
+    #[test]
+    fn the_c_char_forms_round_trip_a_high_byte() {
+        let mut dst = [1 as c_char; 8];
+        assert_eq!(write_c_chars(&mut dst, "Éclat"), 6);
+        assert_eq!(read_c_chars(&dst), "Éclat");
+        assert_eq!(read_c_chars(&[0x61 as c_char, 0xFFu8 as c_char, 0]), "a\u{FFFD}");
+        assert_eq!(read_c_chars(&[0x61 as c_char, 0, 0x62 as c_char]), "a");
+        let mut dst = [1 as c_char; 3];
+        assert_eq!(write_c_chars(&mut dst, "Éa"), 2);
+        assert_eq!(read_c_chars(&dst), "É");
+    }
+
+    /// Copying UTF-16 units cuts before a surrogate pair that does not fit, at an interior
+    /// NUL, and never writes past the NUL.
+    #[test]
+    fn utf16_units_are_cut_without_splitting_a_pair() {
+        let src: Vec<u16> = "a\u{1F3B5}b".encode_utf16().collect(); // a, hi, lo, b
+        let mut dst = [0xAAAAu16; 3];
+        assert_eq!(write_utf16_units(&mut dst, &src), 1);
+        assert_eq!(dst, [0x61, 0, 0xAAAA]);
+        let mut dst = [0xAAAAu16; 4];
+        assert_eq!(write_utf16_units(&mut dst, &src), 3);
+        assert_eq!(read_utf16_str(&dst), "a\u{1F3B5}");
+        let mut dst = [0xAAAAu16; 6];
+        assert_eq!(write_utf16_units(&mut dst, &[0x61, 0, 0x62]), 1);
+        assert_eq!(dst[..2], [0x61, 0]);
+        assert_eq!(write_utf16_units(&mut [], &src), 0);
     }
 }

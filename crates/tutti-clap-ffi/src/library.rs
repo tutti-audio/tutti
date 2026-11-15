@@ -12,7 +12,7 @@ use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_fact
 use clap_sys::plugin::clap_plugin_descriptor;
 use clap_sys::version::{CLAP_VERSION_MAJOR, clap_version, clap_version_is_compatible};
 
-use tutti_plugin_types::MainWorkHandle;
+use tutti_plugin_types::{MainWorkHandle, read_c_chars};
 
 use crate::guard::lossy;
 use crate::host::Host;
@@ -162,17 +162,6 @@ pub struct DescriptorInfo {
     /// Feature tags.
     pub features: Vec<String>,
     version_of_clap: clap_version,
-}
-
-/// Copies a fixed C char field up to its first nul (or its end), lossily.
-#[must_use]
-pub fn chars_to_string(field: &[c_char]) -> String {
-    let bytes: Vec<u8> = field
-        .iter()
-        .take_while(|&&c| c != 0)
-        .map(|&c| c as u8)
-        .collect();
-    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 /// Global registry for CLAP entry init/deinit lifecycle.

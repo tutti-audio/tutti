@@ -254,7 +254,10 @@ pub use any_thread::{AnyThread, Health};
 pub use automation::{ParameterChanges, ParameterPoint, ParameterQueue};
 pub use automation_mode::{AutomationMode, AutomationModeError};
 pub use bridge_error::{BridgeError, BridgeResult, PluginForkError};
-pub use c_string::{c_str_prefix, read_c_str, read_utf16_str, write_c_str, write_utf16_str};
+pub use c_string::{
+    c_str_prefix, read_c_chars, read_c_str, read_utf16_str, write_c_chars, write_c_str,
+    write_utf16_str, write_utf16_units,
+};
 pub use channels::{
     AudioBuffer, AudioBuffer32, AudioBuffer64, AudioBufferMut, MAX_BLOCK_CHANNELS, PluginTooWide,
     Sample, sanitize,

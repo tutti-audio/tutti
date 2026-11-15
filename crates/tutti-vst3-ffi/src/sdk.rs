@@ -1,38 +1,6 @@
 //! Small conversion helpers for VST3 C buffers and raw-byte types.
 
-use tutti_plugin_types::{c_str_prefix, read_c_str, read_utf16_str};
 use vst3::Steinberg::TUID;
-
-/// A UTF-16 buffer up to its first NUL (or its end), lossily decoded.
-///
-/// The reader of every `String128` and `TChar` array a plugin fills in.
-#[must_use]
-pub fn utf16_to_string(bytes: &[u16]) -> String {
-    read_utf16_str(bytes)
-}
-
-/// A `char8` buffer up to its first NUL (or its end), lossily decoded as UTF-8.
-#[must_use]
-pub fn c_str_to_string(bytes: &[i8]) -> String {
-    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
-    // `i8 as u8` reinterprets each byte; no unsafe slice cast is needed.
-    let u8s: Vec<u8> = bytes[..end].iter().map(|&b| b as u8).collect();
-    read_c_str(&u8s)
-}
-
-/// Writes `src` into a `char8` buffer as a NUL-terminated UTF-8 string: cut at a character
-/// boundary ([`c_str_prefix`]`(src, dst.len())`), always terminated. An empty `dst` is not
-/// written.
-pub fn write_char8(dst: &mut [i8], src: &str) {
-    if dst.is_empty() {
-        return;
-    }
-    let text = c_str_prefix(src, dst.len()).as_bytes();
-    for (slot, &byte) in dst.iter_mut().zip(text) {
-        *slot = byte as i8;
-    }
-    dst[text.len()] = 0;
-}
 
 /// Formats a 16-byte class ID as four dash-separated groups of four bytes
 /// (`XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX`), upper-case hex. The catalog ids
@@ -156,57 +124,6 @@ pub fn zeroed<T: Zeroable>() -> T {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A `String128` is read up to its first NUL, whatever follows it; a
-    /// buffer with no NUL is read whole; an unpaired surrogate becomes U+FFFD
-    /// instead of failing.
-    #[test]
-    fn a_string128_is_read_to_its_nul_and_decoded_lossily() {
-        let mut buf = [0u16; 128];
-        for (slot, c) in buf.iter_mut().zip("Väst".encode_utf16()) {
-            *slot = c;
-        }
-        buf[10] = u16::from(b'x'); // after the NUL: must not appear
-        assert_eq!(utf16_to_string(&buf), "Väst");
-
-        let full: Vec<u16> = "音源".encode_utf16().collect();
-        assert_eq!(utf16_to_string(&full), "音源");
-        assert_eq!(utf16_to_string(&[0xD800, 0]), "\u{FFFD}");
-        assert_eq!(utf16_to_string(&[]), "");
-    }
-
-    /// A `char8` buffer is read to its first NUL as UTF-8, lossily, with the
-    /// high bit kept (`i8` bytes above 127 are negative).
-    #[test]
-    fn a_char8_buffer_is_read_to_its_nul_as_utf8() {
-        let mut buf = [0i8; 16];
-        for (slot, b) in buf.iter_mut().zip("Éclat".bytes()) {
-            *slot = b as i8;
-        }
-        assert_eq!(c_str_to_string(&buf), "Éclat");
-        assert_eq!(c_str_to_string(&[0x61, -1, 0]), "a\u{FFFD}");
-    }
-
-    /// A `char8[64]` field is written cut on a UTF-8 boundary and always terminated:
-    /// `é` is two bytes, so 62 `x` and an `é` leave the `é` out, and the 63rd byte is the
-    /// last text byte.
-    #[test]
-    fn a_char8_field_is_written_on_a_character_boundary_and_terminated() {
-        let mut buf = [1i8; 64];
-        write_char8(&mut buf, &format!("{}é", "x".repeat(62)));
-        assert!(buf[..62].iter().all(|&b| b == b'x' as i8));
-        assert_eq!(buf[62], 0, "the é is not split across the field's end");
-
-        let mut buf = [1i8; 64];
-        write_char8(&mut buf, &"x".repeat(100));
-        assert!(buf[..63].iter().all(|&b| b == b'x' as i8));
-        assert_eq!(buf[63], 0);
-
-        let mut buf = [1i8; 64];
-        write_char8(&mut buf, "abc");
-        assert_eq!(&buf[..4], &[b'a' as i8, b'b' as i8, b'c' as i8, 0]);
-        assert_eq!(buf[4], 1, "nothing past the NUL is written");
-    }
 
     /// A class id formats as four dashed groups of four bytes, upper-case hex.
     #[test]
