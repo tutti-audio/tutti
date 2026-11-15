@@ -14,7 +14,10 @@ use core::ops::RangeInclusive;
 
 use tutti_ump::{ControlValue, MidiChannel, Rpn, U7};
 
-use super::{CiDeviceId, InquiryTarget, ProfileId, ProfileState, ProfileTable, StandardProfile};
+use super::{
+    CiDeviceId, InquiryTarget, ProfileId, ProfileState, ProfileTable, StandardProfile,
+    SwitchMeaning,
+};
 
 /// How completely a device implements the Profile (M2-121 §4.1, Table 4, the
 /// Profile Level byte).
@@ -161,8 +164,13 @@ impl DrawbarSetting {
     /// range (§5.1.2): every value is in one of the nine.
     #[must_use]
     pub fn of_value(value: ControlValue) -> Self {
-        let at = SETTINGS.partition_point(|&(first, _)| first <= value.get());
-        Self::of(at as u8 - 1)
+        // The first row starts at 0, so at least one row starts at or below
+        // any value, and at most nine do: the setting is `0..=8`.
+        let started = SETTINGS.partition_point(|&(first, _)| first <= value.get());
+        match u8::try_from(started - 1) {
+            Ok(setting) if setting <= 8 => Self::of(setting),
+            _ => unreachable!("the nine rows of Table 6 cover every value"),
+        }
     }
 
     /// The values the setting covers.
@@ -213,6 +221,8 @@ impl VibratoChorus {
     /// The type a received value falls in.
     #[must_use]
     pub fn of_value(value: ControlValue) -> Self {
+        // The first row starts at 0, so at least one row starts at or below
+        // any value and `at` is at least 1.
         let at = VIBRATO_CHORUS.partition_point(|&(first, _)| first <= value.get());
         VIBRATO_CHORUS[at - 1].1
     }
@@ -236,7 +246,7 @@ impl VibratoChorus {
 pub enum OrganValue {
     /// One of the six [`VibratoChorus`] types.
     VibratoChorus,
-    /// A [`TwoState`](super::TwoState).
+    /// A [`TwoState`](super::TwoState), meaning [`OrganOption::switch_meaning`].
     Switch,
     /// `0x00000000` to `0xFFFFFFFF`, none to full.
     Amount,
@@ -306,6 +316,18 @@ impl OrganOption {
             Self::VibratoChorusType => OrganValue::VibratoChorus,
             Self::KeyClick | Self::Crosstalk => OrganValue::Amount,
             _ => OrganValue::Switch,
+        }
+    }
+
+    /// What the two states mean, for the switches (`None` for the others).
+    #[must_use]
+    pub const fn switch_meaning(self) -> Option<SwitchMeaning> {
+        match self {
+            Self::VibratoChorusOn | Self::PercussionOn => Some(SwitchMeaning::OffOn),
+            Self::PercussionSoft => Some(SwitchMeaning::NormalSoft),
+            Self::PercussionFast => Some(SwitchMeaning::SlowFast),
+            Self::PercussionThird => Some(SwitchMeaning::SecondThirdHarmonic),
+            Self::VibratoChorusType | Self::KeyClick | Self::Crosstalk => None,
         }
     }
 

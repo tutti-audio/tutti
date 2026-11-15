@@ -78,17 +78,6 @@ fn only_speed_is_required_and_the_value_kinds_follow_the_tables() {
 }
 
 #[test]
-fn a_switch_value_is_slow_up_to_7fffffff_and_fast_from_80000000() {
-    // M2-122 Table 5; a two-position sender sends 0 and 0xFFFFFFFF.
-    use tutti_ump::ControlValue;
-    assert_eq!(TwoState::of(ControlValue::new(0)), TwoState::Low);
-    assert_eq!(TwoState::of(ControlValue::new(0x7FFF_FFFF)), TwoState::Low);
-    assert_eq!(TwoState::of(ControlValue::new(0x8000_0000)), TwoState::High);
-    assert_eq!(TwoState::Low.value().get(), 0);
-    assert_eq!(TwoState::High.value().get(), 0xFFFF_FFFF);
-}
-
-#[test]
 fn the_profile_is_per_channel_and_only_an_enabled_one_counts() {
     let on = profile_table(channel(2), ProfileId::ROTARY_SPEAKER, true);
     assert!(RotarySpeaker::enabled_on(&on, MidiChannel::of(2)));

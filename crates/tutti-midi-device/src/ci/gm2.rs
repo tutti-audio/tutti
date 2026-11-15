@@ -41,8 +41,12 @@ tutti_types::ranged! {
 impl Gm2ChannelCount {
     /// The number of Groups the Channels span.
     #[must_use]
-    pub const fn groups(self) -> u8 {
-        (self.get() / 16) as u8
+    pub fn groups(self) -> u8 {
+        // The count is at most 256, so the Groups are at most 16.
+        match u8::try_from(self.get() / 16) {
+            Ok(groups) => groups,
+            Err(_) => unreachable!("a Channel count is at most 256"),
+        }
     }
 }
 

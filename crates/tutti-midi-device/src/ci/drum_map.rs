@@ -57,28 +57,16 @@ impl DrumNoteMapLevel {
     }
 }
 
-/// A Mutually Exclusive Set (M2-125 §4.1): when any sound of a set starts, the
-/// other sounds of the same set are muted.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MutuallyExclusiveSet(u8);
+tutti_types::ranged! {
+    /// A Mutually Exclusive Set (M2-125 §4.1), numbered `1..=7` as Table 5
+    /// numbers them: when any sound of a set starts, the other sounds of the
+    /// same set are muted.
+    #[derive(Eq, PartialOrd, Ord, Hash)]
+    MutuallyExclusiveSet(u8), NotAMutuallyExclusiveSet, "a Mutually Exclusive Set (1 to 7)",
+    |raw| raw >= 1 && raw <= 7
+}
 
 impl MutuallyExclusiveSet {
-    /// The set numbered `number` in Table 5, `1..=7`.
-    #[must_use]
-    pub const fn new(number: u8) -> Option<Self> {
-        if number >= 1 && number <= 7 {
-            Some(Self(number))
-        } else {
-            None
-        }
-    }
-
-    /// The number the specification gives the set (MES 1 to MES 7).
-    #[must_use]
-    pub const fn number(self) -> u8 {
-        self.0
-    }
-
     /// The sounds of the set, in order of Note Number.
     pub fn members(self) -> impl Iterator<Item = DrumInstrument> {
         DrumInstrument::all().filter(move |i| i.mutually_exclusive_set() == Some(self))
@@ -208,6 +196,8 @@ impl DrumInstrument {
     /// The Note Number the instrument plays on.
     #[must_use]
     pub const fn note(self) -> U7 {
+        // The discriminant is at most 61, so the note is at most 88 and
+        // `masked` leaves it unchanged.
         U7::masked(Self::FIRST_NOTE.get() + self as u8)
     }
 
@@ -233,6 +223,7 @@ impl DrumInstrument {
     /// Details Reply (Table 5, Table 11).
     #[must_use]
     pub const fn bitmap_position(self) -> BitmapPosition {
+        // The index is at most 61: the byte is at most 10 and the bit at most 6.
         let i = self.index();
         BitmapPosition {
             byte: 2 + (i / 7) as u8,
@@ -255,7 +246,7 @@ pub struct BitmapPosition {
 /// and §6.1, Table 8).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DrumControl {
-    /// Volume, CC#7 and RPNC#7.
+    /// Volume, CC#7 and RPNC#7; its curve is [`volume_gain`](super::volume_gain).
     Volume,
     /// Pan, RPNC#10 (and Key-Based Instrument Controller 10).
     Pan,
@@ -269,7 +260,8 @@ pub enum DrumControl {
     Brightness,
     /// Decay Time, controller 75.
     DecayTime,
-    /// Reverb Send Level (Effects 1 Depth), CC#91 and RPNC#91.
+    /// Reverb Send Level (Effects 1 Depth), CC#91 and RPNC#91; its curve is
+    /// [`send_level`](super::send_level).
     ReverbSend,
 }
 

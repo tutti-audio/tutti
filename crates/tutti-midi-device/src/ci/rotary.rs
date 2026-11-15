@@ -8,7 +8,7 @@
 
 use tutti_ump::{ControlValue, MidiChannel, Rpn, U7};
 
-use super::{CiDeviceId, ProfileId, ProfileState, ProfileTable};
+use super::{CiDeviceId, ProfileId, ProfileState, ProfileTable, SwitchMeaning};
 
 /// The Profile itself (M2-122 §3.1, Table 4): a single level, so a single
 /// [`ProfileId`], [`ProfileId::ROTARY_SPEAKER`].
@@ -30,8 +30,8 @@ impl RotarySpeaker {
 /// column).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RotaryValue {
-    /// A two-state switch: [`TwoState`](super::TwoState), the labels the
-    /// variant names.
+    /// A two-state switch: [`TwoState`](super::TwoState), meaning
+    /// [`RotaryControl::switch_meaning`].
     Switch,
     /// `0x00000000` to `0xFFFFFFFF`, slowest to fastest.
     Speed,
@@ -115,6 +115,17 @@ impl RotaryControl {
             Self::Speed | Self::Effect | Self::Brake => RotaryValue::Switch,
             Self::HornLevel | Self::WooferLevel | Self::Overdrive => RotaryValue::Level,
             _ => RotaryValue::Speed,
+        }
+    }
+
+    /// What the two states mean, for the switches (`None` for the others).
+    #[must_use]
+    pub const fn switch_meaning(self) -> Option<SwitchMeaning> {
+        match self {
+            Self::Speed => Some(SwitchMeaning::SlowFast),
+            Self::Effect => Some(SwitchMeaning::OffOn),
+            Self::Brake => Some(SwitchMeaning::RotateStop),
+            _ => None,
         }
     }
 

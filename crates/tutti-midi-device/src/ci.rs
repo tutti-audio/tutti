@@ -26,6 +26,7 @@ use std::vec::Vec;
 
 use tutti_ump::{MidiChannel, MidiGroup, Sysex7Packets, U7, U28, Ump};
 
+mod curve;
 mod default_cc;
 mod device;
 mod discovery;
@@ -47,6 +48,7 @@ mod text;
 mod two_state;
 mod wait;
 
+pub use curve::{send_level, volume_gain};
 pub use default_cc::{CcFunction, CcPart, CcReset, CcValue, DefaultCcLevel, SuggestedCc};
 pub use device::{CiAction, CiDevice, CiPeer, DISCOVERY_WINDOW};
 pub use discovery::{
@@ -60,7 +62,7 @@ pub use drawbar::{
 };
 pub use drum_map::{
     BitmapPosition, DrumControl, DrumFeatures, DrumInstrument, DrumNoteMapLevel, DrumSounds,
-    MutuallyExclusiveSet,
+    MutuallyExclusiveSet, NotAMutuallyExclusiveSet,
 };
 pub use endpoint::{CiInstanceId, EndpointInfo, EndpointStatus};
 pub use gm2::{Gm2ChannelCount, Gm2FunctionBlock, Gm2Role, Gm2SingleChannel, NotAGm2ChannelCount};
@@ -118,7 +120,7 @@ pub use profile::{
 pub use rotary::{RotaryControl, RotarySpeaker, RotaryValue};
 pub use status::{Ack, Nak};
 pub use text::MessageText;
-pub use two_state::TwoState;
+pub use two_state::{SwitchMeaning, TwoState};
 pub use wait::{NotATimeoutWait, PEER_REPLY_TIMEOUT, TimeoutWait};
 
 /// Universal SysEx non-real-time id, the first byte of every CI message: `0x7E`.

@@ -1,3 +1,4 @@
+use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_types::Pan;
 use tutti_ump::{CCNumber, MidiChannel, RegisteredPerNoteController, U7};
 
@@ -93,9 +94,7 @@ fn each_instrument_matches_its_row_of_table_5() {
         assert_eq!(instrument.note().get(), note, "{name}");
         assert_eq!(instrument.name(), name, "note {note}");
         assert_eq!(
-            instrument
-                .mutually_exclusive_set()
-                .map_or(0, |s| s.number()),
+            instrument.mutually_exclusive_set().map_or(0, |s| s.get()),
             mes,
             "{name}"
         );
@@ -137,12 +136,22 @@ fn the_mutually_exclusive_sets_are_the_seven_of_section_4_1() {
         (7, &[29, 30]),
     ];
     for (number, notes) in sets {
-        let set = MutuallyExclusiveSet::new(number).unwrap();
+        let set = MutuallyExclusiveSet::of(number);
         let members: Vec<u8> = set.members().map(|i| i.note().get()).collect();
         assert_eq!(members, notes, "MES {number}");
     }
-    assert_eq!(MutuallyExclusiveSet::new(0), None);
-    assert_eq!(MutuallyExclusiveSet::new(8), None);
+}
+
+#[test]
+fn a_mutually_exclusive_set_is_numbered_1_to_7() {
+    // M2-125 Table 5: MES 1 to MES 7.
+    check_range_contract(&RangeContract {
+        valid: &[1, 2, 7],
+        invalid: &[0, 8, 255],
+        new: MutuallyExclusiveSet::new,
+        get: MutuallyExclusiveSet::get,
+        of: Some(MutuallyExclusiveSet::of),
+    });
 }
 
 #[test]
