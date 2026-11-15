@@ -251,7 +251,8 @@ pub use mpe_zones::mpe_zones;
 pub use outbound::{
     ACTIVE_SENSING_INTERVAL, ActiveSensingSender, CLOCK_EVENT_CAPACITY, ClockControls, ClockMaster,
     ClockNode, JR_CLOCK_INTERVAL, JR_CLOCK_MAX_INTERVAL, JrClock, JrClockEmitter, JrStamper,
-    JrStream, MIDI_OUT_EVENT_CAPACITY, MachineControlSender, MidiOutNode, NoTimeCode,
+    JrStream, MACHINE_CONTROL_EVENT_CAPACITY, MIDI_OUT_EVENT_CAPACITY, MachineControlControls,
+    MachineControlNode, MachineControlSender, MidiOutNode, NoTimeCode,
 };
 pub use output_plan::{
     MAX_OUTPUT_AHEAD, MAX_OUTPUT_LATENCY, OffsetOutOfRange, Outgoing, OutputLatency, OutputOffset,
@@ -263,7 +264,7 @@ pub use schedule::{
 };
 pub use sync::{
     ClockEvent, ClockFollower, ClockKind, ClockPosition, ClockTransportState, MachineControlEvent,
-    MachineControlFollower, MidiClockDecoder, MtcDecoder,
+    MachineControlFollower, MidiClockDecoder, MtcDecoder, SegmentFault,
 };
 pub use taken::Taken;
 pub use tempo_follower::{Followed, TempoFollower, TempoSource};

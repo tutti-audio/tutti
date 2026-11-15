@@ -370,7 +370,7 @@ pub use tutti_plugin as plugin;
 /// `PluginHandle` control surface, the node's controls, the host policy over a
 /// handle (`Liveness`, `PluginParamValues`) and the in-process node. It is the layer
 /// the session's views are built on: a host reads and sets a hosted plugin's
-/// parameters through `Session::plugin(node)?.params()`, not through the handle. Feature
+/// parameters through `Session::plugin_view(node)?.params()`, not through the handle. Feature
 /// `plugin`.
 #[cfg(feature = "plugin")]
 pub use tutti_plugin_host as plugin_host;
@@ -448,6 +448,13 @@ pub use tutti_modulation::{Follower, Lfo};
 pub use tutti_plugin::catalog::{Catalog, Hosting, PluginRef, PluginState};
 #[cfg(feature = "plugin")]
 pub use tutti_plugin::{Normalized, ParamId, PluginFailure, PresetError, PresetId};
+#[cfg(all(feature = "session", feature = "plugin"))]
+pub use tutti_session::{
+    AddPluginError, Diagnostics, EditorView, LoadError, MainPlugin, MainSession, Opened,
+    ParamGesture, Params, Plugin, PluginBuses, PluginChange, PluginDeclaration, PluginEvent,
+    PluginHealth, PluginInfo, PluginNode, PluginParamError, PoolEvent, PoolState, PooledPlugin,
+    PortCounts, PresetEntry, PresetKind, Presets, RecoveryFailure, ReloadCause, TypedParam,
+};
 #[cfg(all(feature = "session", feature = "midi"))]
 pub use tutti_session::{AddedInstrument, MidiEvent, MidiRouteRule};
 #[cfg(all(feature = "session", feature = "export"))]
@@ -464,13 +471,6 @@ pub use tutti_session::{
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{
     Device, DeviceClock, DeviceEvent, DeviceRestart, LiveSession, RestartOutcome,
-};
-#[cfg(all(feature = "session", feature = "plugin"))]
-pub use tutti_session::{
-    Diagnostics, EditorView, MainPlugin, MainSession, Opened, ParamGesture, Params, Plugin,
-    PluginBuses, PluginChange, PluginEvent, PluginHealth, PluginLoadRequest, PluginNode,
-    PluginParamError, PortCounts, PresetEntry, PresetKind, Presets, RecoveryFailure, ReloadCause,
-    TypedParam,
 };
 #[cfg(all(feature = "session", feature = "device", feature = "audio-io"))]
 pub use tutti_session::{

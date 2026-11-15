@@ -13,7 +13,7 @@
 //! `plugin-server` built first:
 //!
 //! ```text
-//! cargo build -p tutti-plugin-server
+//! cargo build -p tutti-plugin-server -p tutti-plugin-probe
 //! cargo run -p tutti --features clap,export --example plugin_midi_export
 //! cargo run -p tutti --features clap,export --example plugin_midi_export -- \
 //!     Synth.clap song.mid song.wav
@@ -38,8 +38,8 @@ use tutti::export::Written;
 use tutti::session::Master;
 use tutti::{
     Beat, Bounce, Bpm, Format, MaxBlock, MidiChannel, MidiFile, NodeKey, NoteNumber, Pcm,
-    PluginLoadRequest, PluginRef, PluginState, Range, Root, SampleRate, Samples, Session,
-    SessionEvent, Tick, Track,
+    PluginRef, PluginState, PoolEvent, Range, Root, SampleRate, Samples, Session, SessionEvent,
+    Tick, Track,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -49,6 +49,59 @@ const RATE: SampleRate = SampleRate::SR_48K;
 fn report(events: Vec<SessionEvent>) {
     for event in events {
         eprintln!("session event: {event:?}");
+    }
+}
+
+/// Probes `plugin` into a catalog, declares it as a pool entry (its state
+/// given to the entry, restored before the plugin is activated), updates until
+/// it lands, and adds its node.
+fn load(
+    s: &mut Session,
+    main: tutti::plugin::MainThreadMarker,
+    plugin: &Path,
+    state: Option<Vec<u8>>,
+) -> Result<tutti::Key<tutti::PluginNode>, Box<dyn std::error::Error>> {
+    use tutti::plugin::catalog::{CatalogConfig, NO_SCAN_DIRS, PluginDb, PluginId, ScanPoll};
+    let dir = tempfile::TempDir::new()?;
+    let mut catalog = tutti::Catalog::new(
+        PluginDb::new(),
+        CatalogConfig::new(dir.path(), NO_SCAN_DIRS),
+        |_| Ok(()),
+    );
+    let mut probe = catalog.register(plugin)?;
+    let scanned = loop {
+        match catalog.try_apply(&mut probe) {
+            ScanPoll::Running => std::thread::sleep(std::time::Duration::from_millis(5)),
+            ScanPoll::Done(result) => break result,
+            ScanPoll::Died => return Err("the probe's worker died".into()),
+        }
+    };
+    if let Some(failure) = scanned.failures.first() {
+        return Err(format!("the plugin did not probe: {failure:?}").into());
+    }
+    let entry = catalog.entries().next().ok_or("the file lists no plugin")?;
+    let id = PluginId::new(entry.format, entry.descriptor.id.clone());
+    let plugin = PluginRef::from(&entry);
+    let mut declared = s.plugin_entry("synth", &id, &catalog);
+    if let Some(bytes) = state {
+        declared = declared.initial_state(PluginState::new(plugin, bytes))?;
+    }
+    s.pool(declared)?;
+    loop {
+        for event in s.main(main).update() {
+            match event {
+                SessionEvent::Pool {
+                    event: PoolEvent::Loaded,
+                    ..
+                } => return Ok(s.add_pooled_plugin(&"synth")?),
+                SessionEvent::Pool {
+                    event: PoolEvent::Failed(error),
+                    ..
+                } => return Err(error.into()),
+                _ => {}
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
 }
 
@@ -67,13 +120,7 @@ fn play<M: Master>(
         .max_block(MaxBlock::of(Samples(512)))
         .build()?;
 
-    let plugin = PluginRef::file(plugin).ok_or("not a plugin file")?;
-    let mut request = PluginLoadRequest::new(plugin.clone());
-    if let Some(bytes) = state {
-        request = request.restoring(PluginState::new(plugin, bytes))?;
-    }
-    let job = s.plugin_load(request);
-    let synth = s.add_plugin(main, job.run())?;
+    let synth = load(&mut s, main, plugin, state)?;
     s.graph().connect(synth, Root).unwrap();
 
     let file = MidiFile::read(midi)?; // an SMF or a Clip File

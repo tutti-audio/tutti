@@ -92,7 +92,7 @@ pub enum HostPluginError {
     #[error(transparent)]
     NoSuchNode(#[from] NoSuchNode),
     /// The node already hosts a plugin (added by
-    /// [`Session::add_plugin`](crate::Session::add_plugin),
+    /// [`Session::add_pooled_plugin`](crate::Session::add_pooled_plugin),
     /// [`Graph::insert_plugin`](crate::Graph::insert_plugin) or an earlier
     /// `host_plugin`): a plugin record is freed on the main thread, so a
     /// second one is never put over the first.
@@ -478,8 +478,8 @@ pub enum Error {
     Midi(#[from] MidiError),
 
     /// [`Session::instrument`](crate::Session::instrument) (or
-    /// `add_instrument`, `instrument_plugin`) was given a node that cannot be
-    /// played as an instrument.
+    /// `add_instrument`) was given a node that cannot be played as an
+    /// instrument.
     #[cfg(feature = "midi")]
     #[error("{node:?} is not an instrument: {why}")]
     NotInstrument {

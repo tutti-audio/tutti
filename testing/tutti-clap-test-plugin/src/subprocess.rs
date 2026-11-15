@@ -16,10 +16,13 @@
 //! see it. That is the rlib/cdylib separate-statics trap one level further out,
 //! and it fails silently in exactly the same way.
 //!
-//! Environment is the only channel that crosses a spawn. The host sets the
-//! variables, `Command::spawn` copies them into the child, and `configure`
-//! reads them once from `clap_entry.init` — before any plugin instance exists,
-//! so no `process()` call can observe a half-configured probe.
+//! Two channels cross a spawn: the environment and a file the environment
+//! names. The host sets the variables, `Command::spawn` copies them into the
+//! child, and `configure` reads them (and, for the port layout, the file
+//! `TUTTI_CLAP_PROBE_PORT_LAYOUT_FILE` names, which a test can rewrite between
+//! spawns with no environment change) once from `clap_entry.init`, before any
+//! plugin instance exists, so no `process()` call can observe a half-configured
+//! probe.
 //!
 //! # Why these and not the whole switch surface
 //!
@@ -42,9 +45,11 @@
 //!   load, its state — what a fork by state transfer must report as an error
 //!   rather than render around.
 //!
-//! The port layout, render mode and the rest stay `extern "C"`: the in-process
-//! suites set them, and adding an environment path for a switch nothing reads
-//! that way would be a second spelling of the same control.
+//! The port layout is also selectable by environment (`TUTTI_CLAP_PROBE_PORT_LAYOUT`,
+//! `..._RESTART_PORT_LAYOUT`, and the file), since a served plugin's layout has
+//! to be chosen per server. The render mode and the rest stay `extern "C"` where
+//! only the in-process suites set them: an environment path for a switch nothing
+//! reads that way would be a second spelling of the same control.
 
 use std::path::PathBuf;
 
@@ -182,6 +187,17 @@ pub(crate) fn configure() {
         crate::params_state::PRESET_LOAD_ENABLED.store(n != 0, Ordering::SeqCst);
     }
     if let Some(n) = u32_var("TUTTI_CLAP_PROBE_PORT_LAYOUT") {
+        // SAFETY: a plain atomic store; `unsafe` is on the signature only.
+        unsafe { crate::tutti_test_plugin_set_port_layout(n) };
+    }
+    // `TUTTI_CLAP_PROBE_PORT_LAYOUT_FILE=<path>`: the layout is the number the file
+    // holds when the server starts, so a test changes what the next server
+    // reports by writing the file, with no environment change after its
+    // threads exist.
+    if let Some(n) = std::env::var_os("TUTTI_CLAP_PROBE_PORT_LAYOUT_FILE")
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| text.trim().parse::<u32>().ok())
+    {
         // SAFETY: a plain atomic store; `unsafe` is on the signature only.
         unsafe { crate::tutti_test_plugin_set_port_layout(n) };
     }

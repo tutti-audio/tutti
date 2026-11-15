@@ -149,6 +149,11 @@ pub enum MidiEvent {
     /// record, shuttle, eject, a READ, a speed other than play speed and the
     /// rest the transport has no counterpart for.
     MachineControlIgnored(tutti_midi_protocol::MmcCommand),
+    /// A COMMAND SEGMENT addressed to the session that did not belong to its
+    /// string, or a string that was not whole commands (RP-013 p.40): the string
+    /// in progress was dropped and nothing of it was applied. No COMMAND ERROR
+    /// is sent.
+    MachineControlSegmentation(tutti_midi_runtime::SegmentFault),
     /// The session stopped following MIDI Machine Control
     /// ([`Midi::unfollow_machine_control`](crate::Midi::unfollow_machine_control)).
     MachineControlUnfollowed,

@@ -3,8 +3,9 @@
 //! did between two looks at it.
 //!
 //! The sender holds no clock and sends nothing: each [`observe`](MachineControlSender::observe)
-//! takes the playhead as the control side reads it and returns the commands
-//! the change since the last look calls for.
+//! takes the transport as it is at one frame and returns the message the
+//! change since the last look calls for, held inline ([`MmcPayload`]), so a look
+//! allocates nothing and can run on the audio thread.
 //!
 //! - A transport that started sends **PLAY**; one that stopped, **STOP**.
 //! - A position that is not where rolling or standing still would have left it
@@ -13,10 +14,15 @@
 //!   the device plays once it has got there.
 //! - The first look sends nothing: there is no change to report.
 //!
-//! A stop that also moved the position sends STOP alone. Commands are placed at
-//! a look, not on a frame: MMC carries no time of its own.
+//! A stop that also moved the position sends STOP alone. MMC carries no time of
+//! its own: the message belongs on the frame the look was made at.
+//! [`MachineControlNode`](crate::MachineControlNode) looks once per transport
+//! segment of a block, so a change on frame `N` of a block is a message on frame
+//! `N`.
 
-use tutti_midi_protocol::{MmcCommand, MmcCommands, MmcLocate, MmcPosition, MtcRate, Recipient};
+use tutti_midi_protocol::{
+    MmcCommand, MmcCommands, MmcLocate, MmcPayload, MmcPosition, MtcRate, Recipient,
+};
 use tutti_types::{Frame, SampleRate, Seconds};
 
 /// Why a look at the transport could not be sent as Machine Control: the
@@ -85,10 +91,17 @@ impl MachineControlSender {
         self.to
     }
 
+    /// The frame rate time codes are stated at.
+    #[must_use]
+    pub fn rate(&self) -> MtcRate {
+        self.rate
+    }
+
     /// Looks at the transport: whether it `playing`, its position in `seconds`
     /// and the graph `frame` count the look was made at, on a graph at `rate`.
     /// The payload of the message the change since the last look calls for, if
-    /// any: pack it with `Sysex7Packets::from_payload`.
+    /// any, to be sent on `frame`: pack it with `Sysex7Packets::from_payload`.
+    /// Allocates nothing.
     ///
     /// # Errors
     ///
@@ -100,7 +113,7 @@ impl MachineControlSender {
         seconds: Seconds,
         frame: Frame,
         rate: SampleRate,
-    ) -> Result<Option<Vec<u8>>, NoTimeCode> {
+    ) -> Result<Option<MmcPayload>, NoTimeCode> {
         let now = Seen {
             playing,
             seconds,

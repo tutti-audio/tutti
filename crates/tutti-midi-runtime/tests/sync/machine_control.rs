@@ -5,9 +5,9 @@
 //! p.39, the time code of pp.8 and 10 (a drop-frame minute skips two labels)
 //! and the commands of pp.20 to 28.
 
-use tutti_midi_protocol::{MtcRate, Recipient, SysexDeviceId};
+use tutti_midi_protocol::{MmcSegmentError, MtcRate, Recipient, SysexDeviceId};
 use tutti_midi_runtime::{
-    MachineControlEvent, MachineControlFollower, MachineControlSender, NoTimeCode,
+    MachineControlEvent, MachineControlFollower, MachineControlSender, NoTimeCode, SegmentFault,
 };
 use tutti_types::{Frame, SampleRate, Seconds};
 use tutti_ump::{MidiGroup, Sysex7Packets};
@@ -103,6 +103,183 @@ fn only_play_speed_is_play() {
     ));
 }
 
+/// The message `53 <count> <id> bytes` of one COMMAND SEGMENT.
+fn segment(id: u8, bytes: &[u8]) -> Vec<u8> {
+    let mut message = vec![0x53, u8::try_from(bytes.len() + 1).unwrap(), id];
+    message.extend_from_slice(bytes);
+    message
+}
+
+/// **Segments are executed as if they arrived in one sysex (RP-013 p.40)**: the
+/// LOCATE of the spec's example (`44 06 01 61 02 08 14 00`) cut across two
+/// segments (`41` first with one to come, then `00`) locates once, to
+/// `01:02:08:20` at 30 frames, on the last.
+#[test]
+fn a_segmented_locate_acts_when_its_last_segment_arrives() {
+    let mut f = MachineControlFollower::new(OURS);
+    assert!(feed(&mut f, 5, &segment(0x41, &[0x44, 0x06, 0x01, 0x61])).is_empty());
+    let heard = feed(&mut f, 5, &segment(0x00, &[0x02, 0x08, 0x14, 0x00]));
+    assert_eq!(heard.len(), 1);
+    assert!((seconds(&heard[0]) - 111_860.0 / 30.0).abs() < 1e-3);
+}
+
+/// **A missing or out-of-order segment is a Segmentation Error and cancels the
+/// string (RP-013 p.40 c and d)**: a later segment with no first, a segment
+/// that skips one, and a first inside a string.
+#[test]
+fn a_segment_that_does_not_belong_is_reported_and_cancels() {
+    let mut f = MachineControlFollower::new(OURS);
+    assert_eq!(
+        feed(&mut f, 5, &segment(0x00, &[0x02])),
+        [MachineControlEvent::Segmentation(SegmentFault::String(
+            MmcSegmentError::MissingFirst
+        ))]
+    );
+    feed(&mut f, 5, &segment(0x42, &[0x02]));
+    assert_eq!(
+        feed(&mut f, 5, &segment(0x00, &[0x02])),
+        [MachineControlEvent::Segmentation(SegmentFault::String(
+            MmcSegmentError::OutOfOrder {
+                expected: 1,
+                got: 0
+            }
+        ))]
+    );
+    // A first inside a string is reported, and then starts its own string,
+    // which here is whole (a STOP) at once.
+    feed(&mut f, 5, &segment(0x41, &[0x02]));
+    assert_eq!(
+        feed(&mut f, 5, &segment(0x40, &[0x01])),
+        [
+            MachineControlEvent::Segmentation(SegmentFault::String(
+                MmcSegmentError::FirstInsideString
+            )),
+            MachineControlEvent::Stop
+        ]
+    );
+    // A command ahead of the segment: it is not "first" (p.40 a).
+    let mut both = vec![0x02];
+    both.extend(segment(0x40, &[0x02]));
+    assert_eq!(
+        feed(&mut f, 5, &both),
+        [MachineControlEvent::Segmentation(SegmentFault::NotFirst)]
+    );
+    // A command after it: its count is not the bytes remaining (p.40 b).
+    let mut more = segment(0x40, &[0x02]);
+    more.push(0x02);
+    assert_eq!(
+        feed(&mut f, 5, &more),
+        [MachineControlEvent::Segmentation(
+            SegmentFault::CountMismatch
+        )]
+    );
+}
+
+/// **A COMMAND SEGMENT inside a reassembled string is a Segmentation Error, not
+/// an ignored command (RP-013 p.40)**: the commands around it still run.
+#[test]
+fn a_segment_inside_a_segmented_string_is_reported() {
+    let mut f = MachineControlFollower::new(OURS);
+    let mut string = vec![0x02];
+    string.extend(segment(0x40, &[0x01]));
+    assert_eq!(
+        feed(&mut f, 5, &segment(0x40, &string)),
+        [
+            MachineControlEvent::Play,
+            MachineControlEvent::Segmentation(SegmentFault::Nested)
+        ]
+    );
+}
+
+/// **A segment whose count passes the end of its message is a Segmentation
+/// Error that cancels the string (RP-013 p.40 b)**: first (two to come), then a
+/// segment 2 cut short, then segment 3, which has no string to join, so
+/// `CountMismatch` and then `MissingFirst`, not `OutOfOrder`.
+#[test]
+fn a_truncated_segment_cancels_the_string() {
+    let mut f = MachineControlFollower::new(OURS);
+    assert!(feed(&mut f, 5, &segment(0x42, &[0x02])).is_empty());
+    assert_eq!(
+        feed(&mut f, 5, &[0x53, 0x09, 0x01, 0x02]),
+        [MachineControlEvent::Segmentation(
+            SegmentFault::CountMismatch
+        )]
+    );
+    assert_eq!(
+        feed(&mut f, 5, &segment(0x00, &[0x02])),
+        [MachineControlEvent::Segmentation(SegmentFault::String(
+            MmcSegmentError::MissingFirst
+        ))]
+    );
+}
+
+/// **A message that is not a segment cancels the string, but WAIT and RESUME
+/// do not (RP-013 p.40)**; the cancelled string never acts.
+#[test]
+fn a_plain_message_cancels_a_string_and_wait_does_not() {
+    let mut f = MachineControlFollower::new(OURS);
+    feed(&mut f, 5, &segment(0x41, &[0x02]));
+    assert!(feed(&mut f, 5, &[0x7C]).is_empty(), "WAIT");
+    assert!(feed(&mut f, 5, &[0x7F]).is_empty(), "RESUME");
+    assert_eq!(
+        feed(&mut f, 5, &segment(0x00, &[0x01])),
+        [MachineControlEvent::Play, MachineControlEvent::Stop],
+        "the string is whole after them"
+    );
+    feed(&mut f, 5, &segment(0x41, &[0x02]));
+    assert_eq!(feed(&mut f, 5, &[0x01]), [MachineControlEvent::Stop]);
+    assert_eq!(
+        feed(&mut f, 5, &segment(0x00, &[0x01])),
+        [MachineControlEvent::Segmentation(SegmentFault::String(
+            MmcSegmentError::MissingFirst
+        ))]
+    );
+}
+
+/// **A string that ends inside a command is refused when it completes.**
+#[test]
+fn a_segmented_string_that_is_not_whole_commands_is_refused() {
+    let mut f = MachineControlFollower::new(OURS);
+    feed(&mut f, 5, &segment(0x41, &[0x44, 0x06]));
+    assert_eq!(
+        feed(&mut f, 5, &segment(0x00, &[0x01])),
+        [MachineControlEvent::Segmentation(SegmentFault::String(
+            MmcSegmentError::Malformed
+        ))]
+    );
+}
+
+/// **The motion and record commands are read and not applied**: each is
+/// `Ignored` with the command it was, FAST FORWARD (`04`), REWIND (`05`),
+/// RECORD STROBE (`06`), RECORD EXIT (`07`), RECORD PAUSE (`08`), EJECT (`0A`),
+/// CHASE (`0B`), COMMAND ERROR RESET (`0C`), SEARCH, SHUTTLE and STEP (RP-013
+/// pp.15 and 20 to 43).
+#[test]
+fn the_commands_a_one_speed_transport_cannot_do_are_ignored_by_name() {
+    let mut f = MachineControlFollower::new(OURS);
+    for code in [0x04, 0x05, 0x06, 0x07, 0x08, 0x0A, 0x0B, 0x0C] {
+        let heard = feed(&mut f, 5, &[code]);
+        assert!(
+            matches!(heard[..], [MachineControlEvent::Ignored(_)]),
+            "{code:02X}: {heard:?}"
+        );
+    }
+    // SEARCH, SHUTTLE at play speed forward, STEP forward by 3.
+    for data in [
+        &[0x46, 0x03, 0x01, 0x00, 0x00][..],
+        &[0x47, 0x03, 0x01, 0x00, 0x00],
+        &[0x48, 0x01, 0x03],
+    ] {
+        let heard = feed(&mut f, 5, data);
+        assert!(
+            matches!(heard[..], [MachineControlEvent::Ignored(_)]),
+            "{data:02X?}: {heard:?}"
+        );
+    }
+    // PAUSE stops (RP-013 p.15: it is "stop as soon as possible").
+    assert_eq!(feed(&mut f, 5, &[0x09]), [MachineControlEvent::Stop]);
+}
+
 const RATE: SampleRate = SampleRate::SR_48K;
 
 fn look(
@@ -114,6 +291,7 @@ fn look(
     sender
         .observe(playing, Seconds::new(seconds), Frame::new(frame), RATE)
         .expect("every look in these tests names a time code")
+        .map(|payload| payload.to_vec())
 }
 
 /// **The sender's commands are the changes**: nothing at the first look; PLAY at

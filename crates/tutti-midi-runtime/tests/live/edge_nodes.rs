@@ -17,11 +17,13 @@ use tutti_graph::{
 };
 use tutti_graph::{IntoNode as _, NodeKey};
 use tutti_midi_protocol::{
-    MpeZoneConfig, MpeZones, PitchBendSensitivity, channel_voice, widen_velocity,
+    MpeZoneConfig, MpeZones, MtcRate, PitchBendSensitivity, Recipient, channel_voice,
+    widen_velocity,
 };
 use tutti_midi_runtime::{
     CHANNELLESS_PORT, ClockNode, DeviceEpochs, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS,
-    MidiIngestNode, MidiInputPorts, MidiOutNode, MpeTransformNode,
+    MachineControlEvent, MachineControlFollower, MachineControlNode, MidiIngestNode,
+    MidiInputPorts, MidiOutNode, MpeTransformNode,
 };
 use tutti_types::{Beat, Bpm, Frame, SampleRate, Samples};
 use tutti_ump::{
@@ -1005,6 +1007,132 @@ fn a_start_inside_a_block_clocks_from_its_frame() {
             (1_100, Ump::from(Message::System(G, System::TimingClock)))
         ]
     );
+}
+
+/// What a [`MachineControlFollower`] makes of `seen`, each event on its frame.
+fn followed(seen: &Seen) -> Vec<(u64, MachineControlEvent)> {
+    let mut follower = MachineControlFollower::new(tutti_midi_protocol::SysexDeviceId::of(1));
+    let mut got = Vec::new();
+    for (frame, ump) in tutti_fixtures::heard(seen) {
+        follower.step(ump, &mut |event| got.push((frame, event)));
+    }
+    got
+}
+
+/// **A Machine Control message is on the frame its transport change happens
+/// (RP-013 pp.20 to 28)**: a start on frame 100 of a block is PLAY at offset
+/// 100, a stop on frame 300 of the next is STOP at 300, and a jump on 700 of
+/// a third is LOCATE with DEFERRED PLAY at 700 (one message, whose packets
+/// follow each other). Heard through the follower, every message is whole.
+#[test]
+fn a_machine_control_message_is_on_the_frame_of_its_transport_change() {
+    let (_ed, mut exec, _controls, seen) = rig(
+        MachineControlNode::new(G, Recipient::AllCall, MtcRate::Fps30),
+        1,
+        2048,
+    );
+    let at_beat = |frames: f64| Beat(frames / 24_000.0);
+    let stopped = |beat: Beat| TransportPosition::new(false, Bpm::of(120.0), beat, None);
+    let rolling = |beat: Beat| TransportPosition::new(true, Bpm::of(120.0), beat, None);
+    let mut out = vec![0.0f32; 2048];
+    let mut run = |exec: &mut Executor,
+                   start: &TransportPosition,
+                   change: Option<(usize, TransportPosition)>| {
+        let mut changes = TransportChanges::NONE;
+        if let Some((frame, to)) = change {
+            changes
+                .push(Offset::of(Samples(frame), Samples(2048)), to)
+                .unwrap();
+        }
+        seen.lock().unwrap().clear();
+        exec.process_with_changes(2048, start, &changes, &[], &mut [&mut out[..]]);
+    };
+    // The first block only looks.
+    run(&mut exec, &stopped(Beat(0.0)), None);
+    assert!(followed(&seen).is_empty());
+    // Start on frame 100 (at beat 0); the rest of the block rolls 1 948 frames.
+    run(
+        &mut exec,
+        &stopped(Beat(0.0)),
+        Some((100, rolling(Beat(0.0)))),
+    );
+    let block_start = |n: u64| n * 2048;
+    assert_eq!(
+        followed(&seen),
+        [(block_start(1) + 100, MachineControlEvent::Play)]
+    );
+    // The next block continues from there and stops on frame 300.
+    let resumed = at_beat(1948.0);
+    run(
+        &mut exec,
+        &rolling(resumed),
+        Some((300, stopped(at_beat(1948.0 + 300.0)))),
+    );
+    assert_eq!(
+        followed(&seen),
+        [(block_start(2) + 300, MachineControlEvent::Stop)]
+    );
+    // Stopped, it jumps to beat 2 (one second) on frame 700 and rolls from there.
+    run(
+        &mut exec,
+        &stopped(at_beat(1948.0 + 300.0)),
+        Some((700, rolling(Beat(2.0)))),
+    );
+    let got = followed(&seen);
+    assert_eq!(got.len(), 2, "a locate and a deferred play: {got:?}");
+    for (frame, _) in &got {
+        assert_eq!(*frame, block_start(3) + 700);
+    }
+    assert_eq!(
+        got[0].1,
+        MachineControlEvent::Locate(tutti_types::Seconds::new(1.0))
+    );
+    assert_eq!(got[1].1, MachineControlEvent::Play);
+}
+
+/// **A transport no time code names is counted, and sends nothing.**
+#[test]
+fn a_machine_control_locate_to_no_time_code_is_counted() {
+    let (_ed, mut exec, controls, seen) = rig(
+        MachineControlNode::new(G, Recipient::AllCall, MtcRate::Fps30),
+        1,
+        512,
+    );
+    let mut out = vec![0.0f32; 512];
+    for beat in [0.0, -4.0] {
+        exec.process(
+            512,
+            &TransportPosition::new(false, Bpm::of(120.0), Beat(beat), None),
+            &[],
+            &mut [&mut out[..]],
+        );
+    }
+    assert!(seen.lock().unwrap().is_empty());
+    assert_eq!(controls.losses().refused, 1);
+}
+
+/// **A Machine Control node's fork sends nothing.**
+#[test]
+fn a_machine_control_fork_sends_nothing() {
+    let (live, _exec, _controls, seen) = rig(
+        MachineControlNode::new(G, Recipient::AllCall, MtcRate::Fps30),
+        1,
+        512,
+    );
+    let prepare = *live.prepare();
+    let (_fork, mut fork_exec) = live
+        .fork(ForkTarget::Master, ForkMode::Live, prepare)
+        .expect("forks");
+    let mut out = vec![0.0f32; 512];
+    for playing in [false, true] {
+        fork_exec.process(
+            512,
+            &TransportPosition::new(playing, Bpm::of(120.0), Beat(0.0), None),
+            &[],
+            &mut [&mut out[..]],
+        );
+    }
+    assert!(seen.lock().unwrap().is_empty());
 }
 
 /// **A clock's fork sends nothing.**

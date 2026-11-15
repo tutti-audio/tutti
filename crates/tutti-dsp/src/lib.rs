@@ -20,12 +20,11 @@
 //!   platform's C math library.
 //! - **Dynamics** — the curves
 //!   `compute_compressor_gain_reduction`, `compute_limiter_gain` and
-//!   `LimiterCurve`; the compressor and the noise gate as families (`CompressorFamily` and
-//!   `GateFamily`, each on a typed `KeySource`, a side-chain bus or the signal itself, run by
-//!   `CompressorRecurrence` and `GateRecurrence`; the threshold a per-frame lane, the makeup
-//!   and the range gliding over `GAIN_GLIDE`); the lookahead limiter (`LimiterFamily`, run by
-//!   `LimiterRecurrence`: threshold and ceiling per-frame lanes, every coefficient landing
-//!   whole, the lookahead its member's latency); the brickwall clipper (`BrickwallFamily`); and
+//!   `LimiterCurve`; the compressor and the noise gate over buffers views (`CompressorBank` and
+//!   `GateBank`, each on a typed `KeySource`, a side-chain bus or the signal itself; the
+//!   threshold a per-frame lane, the makeup and the range `Glide`s over `GAIN_GLIDE`); the
+//!   lookahead limiter (`LimiterBank`: threshold and ceiling per-frame lanes, every coefficient
+//!   landing whole, the lookahead its latency); the brickwall clipper (`BrickwallBank`); and
 //!   the multiband compressor (`MultibandFamily`, run by `MultibandRecurrence`: a crossover tree
 //!   per channel and the compressor's one frame step per band, each band's makeup, bypass and
 //!   solo gliding over `GAIN_GLIDE`).
@@ -109,17 +108,15 @@
 //!   buffers views; [`Lanes`], the arithmetic their steps run in, and the [`Biquad`]
 //!   section they share.
 //! - **Dynamics** (`dynamics/`): the
-//!   gain curves ([`LimiterCurve`] and the `compute_*` functions); the lookahead limiter as a family ([`LimiterFamily`], run by
-//!   [`LimiterRecurrence`], its threshold and ceiling lanes of the [`Inputs`], its lookahead
-//!   the member's latency); the brickwall clipper as a family
-//!   ([`BrickwallFamily`], run by [`BrickwallRecurrence`], its ceiling a per-frame lane of
-//!   the [`Inputs`]); and the compressor ([`CompressorFamily`], run by
-//!   [`CompressorRecurrence`], keyed, its threshold a lane, its makeup gliding over
-//!   [`GAIN_GLIDE`]) and the noise gate ([`GateFamily`], run by [`GateRecurrence`], its
-//!   range gliding likewise). Both read a [`KeySource`]: a side-chain bus or the signal itself.
-//!   The multiband compressor is a family too ([`MultibandFamily`], run by
-//!   [`MultibandRecurrence`]): a crossover tree per channel and the compressor's frame step per
-//!   band, each band's makeup, bypass and solo gliding over [`GAIN_GLIDE`].
+//!   gain curves ([`LimiterCurve`] and the `compute_*` functions); the lookahead limiter over
+//!   buffers views ([`LimiterBank`], its threshold and ceiling [`LimiterLanes`], its lookahead
+//!   its latency, its delay a [`DelayLine`] read by whole frames); the brickwall clipper
+//!   ([`BrickwallBank`], its ceiling a per-frame lane); the compressor ([`CompressorBank`],
+//!   keyed, its threshold a lane, its makeup a [`Glide`] over [`GAIN_GLIDE`]) and the noise
+//!   gate ([`GateBank`], its range gliding likewise). Both read a [`KeySource`]: a side-chain
+//!   bus or the signal itself. The multiband compressor is a family ([`MultibandFamily`], run
+//!   by [`MultibandRecurrence`]): a crossover tree per channel and the compressor's frame step
+//!   per band, each band's makeup, bypass and solo gliding over [`GAIN_GLIDE`].
 //! - **Reverb** (`reverb/`): the model, a [`Network`] of [`Stage`]s with
 //!   analytic queries ([`Network::rt60`], [`tail`](System::tail),
 //!   [`is_stable`](Lti::is_stable), the densities) and a [`NetworkCapacity`] worst case;
@@ -202,13 +199,11 @@ pub use delay::{
 pub use dither::sink::{DitherSink, DitherSpec};
 pub use dither::{DitherNoise, DitherShape};
 pub use dynamics::{
-    BandReductions, BandSettings, BrickwallControls, BrickwallFamily, BrickwallMember,
-    BrickwallRecurrence, CompressorControls, CompressorFamily, CompressorMember,
-    CompressorRecurrence, GAIN_GLIDE, GateControls, GateFamily, GateMember, GateRecurrence,
-    KeySource, LimiterControls, LimiterCurve, LimiterFamily, LimiterMember, LimiterRecurrence,
-    Lookahead, LookaheadError, MultibandFamily, MultibandMember, MultibandRecurrence,
-    MultibandSettings, MultibandState, amplitude_to_db, compute_compressor_gain_reduction,
-    compute_limiter_gain,
+    BandReductions, BandSettings, BrickwallBank, BrickwallControls, BrickwallLanes, CompressorBank,
+    CompressorControls, CompressorLanes, GAIN_GLIDE, GateBank, GateControls, GateLanes, KeySource,
+    LimiterBank, LimiterControls, LimiterCurve, LimiterLanes, Lookahead, LookaheadError,
+    MultibandFamily, MultibandMember, MultibandRecurrence, MultibandSettings, MultibandState,
+    amplitude_to_db, compute_compressor_gain_reduction, compute_limiter_gain,
 };
 pub use fft::{Complex32, FftScratch, RealFft};
 pub use filter::{

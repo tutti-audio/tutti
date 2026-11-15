@@ -12,6 +12,11 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+// Loading a plugin file through the pool, as a test does where an app declares the entry.
+#[cfg(feature = "plugin")]
+#[path = "../support/pooled.rs"]
+mod pooled;
+
 // The handle of an in-process VST2 answers a pool thread while the main thread updates.
 #[cfg(feature = "vst2")]
 mod vst2_off_main_handle;

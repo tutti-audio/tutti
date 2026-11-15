@@ -5,22 +5,24 @@
 //! the brickwall clamps in place, which costs nothing and distorts. Reach for the
 //! first to limit musically, the second as a safety catch.
 
-use tutti_dsp::{BrickwallControls, BrickwallFamily};
-use tutti_types::{BusTopology, Db, SampleRate};
+use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_dsp::{BrickwallBank, BrickwallControls, BrickwallLanes, COEFF_INTERVAL};
+use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_types::{BusTopology, Db, MaxBlock, SampleRate, Tail};
 
-use crate::reverb::{FamilyNode, NodeFamily, Rings};
+use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
 /// Hard clipper at a ceiling: `channels` wide, no lookahead, zero latency, no tail.
 ///
-/// A [`FamilyNode`] over [`BrickwallFamily`], the clip being the family's recurrence;
-/// this file holds the cell and how the graph's lane reaches it.
+/// A [`KernelNode`] over [`BrickwallKernel`], the clip being [`BrickwallBank`]'s; this file
+/// holds the cell and how the graph's lane reaches it.
 ///
 /// # The ceiling
 ///
 /// The ceiling (dB) is the node's one control, modulatable by the graph. It is
-/// **read per frame**: a lane on the ceiling's port is the recurrence's own
-/// ([`Inputs`](tutti_dsp::Inputs) lane 0), a frame clamps at the amplitude of its own
-/// value, and the cell is what a frame nobody drives clamps at. Unmodulated, the node
+/// **read per frame**: a lane on the ceiling's port is the bank's own ([`BrickwallLanes`]),
+/// a frame clamps at the amplitude of its own value, and the cell is what a frame nobody
+/// drives clamps at. A cell that moves reaches the clamp within 16 frames ([`Kernel::GRID`]). Unmodulated, the node
 /// reads its cell once per block, and a render with a lane that holds the cell's value
 /// is the render with no lane.
 ///
@@ -33,7 +35,7 @@ use crate::reverb::{FamilyNode, NodeFamily, Rings};
 /// in the cell keeps the last ceiling the node clamped at, a NaN frame on the ceiling
 /// port clamps at the cell's ceiling, and a NaN given to [`new`](Self::new) starts the
 /// node at 0 dB. `+-inf` dB are ceilings: `+inf` passes everything, `-inf` mutes.
-pub type BrickwallLimiterNode = FamilyNode<BrickwallFamily>;
+pub type BrickwallLimiterNode = KernelNode<BrickwallKernel>;
 
 impl BrickwallLimiterNode {
     /// Builds a stereo brickwall limiter clamping at `ceiling_db`.
@@ -53,8 +55,9 @@ impl BrickwallLimiterNode {
     /// `with_bus(BusTopology::unassigned(n)?, ..)`, which refuses a width past one bus.
     #[must_use]
     pub fn with_bus(input: BusTopology, ceiling_db: impl Into<Db>) -> Self {
-        Self::live(
-            BrickwallFamily::new(input),
+        Self::with_kernel(
+            BrickwallKernel::new(input),
+            BrickwallSet,
             BrickwallControls {
                 ceiling: ceiling_db.into(),
             },
@@ -86,19 +89,67 @@ control_set! {
     }
 }
 
-/// A brickwall holds no ring-out and never parks: its tail is none.
-impl NodeFamily for BrickwallFamily {
+/// The hard clipper as a [`Kernel`]: a [`BrickwallBank`], memoryless, so no latency and no
+/// tail. It holds no ring-out and never parks: its tail is none.
+#[derive(Clone, Debug)]
+pub struct BrickwallKernel {
+    input: BusTopology,
+    bank: BrickwallBank,
+}
+
+impl BrickwallKernel {
+    /// A clipper on `input`, at the full scale until aimed.
+    fn new(input: BusTopology) -> Self {
+        Self {
+            input,
+            bank: BrickwallBank::new(),
+        }
+    }
+}
+
+impl Kernel for BrickwallKernel {
     type Set = BrickwallSet;
 
-    fn rings(&self) -> Rings {
-        Rings::Silent
+    /// A cell that moves reaches the clamp within 16 frames, wherever the blocks fall.
+    const GRID: usize = COEFF_INTERVAL;
+
+    fn shape(&self) -> Shape {
+        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
+        Shape::buses(
+            Buses::main(self.input),
+            Buses::NONE.with(output).expect("one bus"),
+        )
+        .with_cost(Cost::Light)
     }
 
-    fn set(&self, _: &BrickwallControls) -> BrickwallSet {
-        BrickwallSet
+    fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
+
+    fn reset(&mut self) {}
+
+    fn retarget(&mut self, controls: &BrickwallControls) {
+        self.bank.aim(controls);
     }
 
-    fn capacity(&self, _: SampleRate) {}
+    fn render<S: Float>(
+        &mut self,
+        input: Planes<'_, S>,
+        lanes: ControlLanes<'_, S>,
+        output: PlanesMut<'_, '_, S>,
+    ) {
+        let lanes = BrickwallLanes {
+            ceiling: lanes.get(BrickwallSet::CEILING_LANE),
+        };
+        self.bank.process(lanes, input, output);
+    }
+
+    fn tail(&self) -> Tail {
+        Tail::None
+    }
+}
+
+impl BrickwallSet {
+    /// The lane of the ceiling: the one [`fast`](crate::ControlRead::Fast) row.
+    const CEILING_LANE: usize = 0;
 }
 
 #[cfg(test)]
@@ -113,7 +164,7 @@ mod tests {
     /// built for.
     #[test]
     fn the_shape_declares_the_ceiling_no_latency_and_no_tail() {
-        let b = BrickwallLimiterNode::new(Db::new(-1.0));
+        let b = prepared(BrickwallLimiterNode::new(Db::new(-1.0)));
         let shape = b.shape();
         assert_eq!(shape.params.as_slice(), &[UnitParam::Ceiling][..]);
         assert_eq!(
@@ -233,7 +284,10 @@ mod tests {
         let held = Db::new(-6.0).to_amplitude().get();
         assert_eq!(out, [held, -held]);
         assert!(set.set(UnitParam::Ceiling, -12.0));
-        tick(&mut bw, &[1.0, -1.0], &mut out);
+        // The move lands on the next grid point, 16 frames from the last reset.
+        for _ in 0..16 {
+            tick(&mut bw, &[1.0, -1.0], &mut out);
+        }
         let next = Db::new(-12.0).to_amplitude().get();
         assert!((out[0] - next).abs() < 1e-6, "{}", out[0]);
 

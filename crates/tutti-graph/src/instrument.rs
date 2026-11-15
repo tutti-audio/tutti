@@ -11,7 +11,7 @@ use crate::IntoNode;
 ///
 /// A hosted plugin is an instrument only if its format says so, which is known
 /// when it is open, not when it is typed: `tutti-session` converts one fallibly
-/// (`Session::instrument_plugin`).
+/// (`Session::instrument`).
 pub trait Instrument: IntoNode {
     /// The left and right output ports of the sound a host plays. The first two
     /// by default.
