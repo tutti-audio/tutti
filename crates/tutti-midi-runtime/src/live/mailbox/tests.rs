@@ -151,8 +151,9 @@ fn clones_writing_at_once_do_not_interleave_a_messages_packets() {
     });
     let mut buf = vec![(0, Ump([0; 4])); 100_000];
     let got = receiver.poll_into(&mut buf);
-    assert!(got > 0 && got % 3 == 0);
-    for run in buf[..got].chunks(3) {
+    let len = message(1).len();
+    assert!(got > 0 && got % len == 0);
+    for run in buf[..got].chunks(len) {
         let groups: Vec<_> = run.iter().map(|(_, ump)| ump.group()).collect();
         assert!(
             groups.windows(2).all(|w| w[0] == w[1]),

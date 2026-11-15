@@ -5,15 +5,14 @@ use super::*;
 use crate::SendAt;
 
 fn packet(status: SysexStatus) -> Outgoing {
-    Outgoing {
-        join: tutti_ump::Join::Alone,
-        at: Offset::ZERO,
-        send: SendAt::Now,
-        ump: Ump::from(Message::Sysex7(
+    Outgoing::new(
+        Offset::ZERO,
+        SendAt::Now,
+        Ump::from(Message::Sysex7(
             MidiGroup::FIRST,
             Sysex7Packet::new(status, &[1]).unwrap(),
         )),
-    }
+    )
 }
 
 /// A sysex of three packets, a complete one, a sysex of two.

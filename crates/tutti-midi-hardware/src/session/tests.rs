@@ -192,18 +192,8 @@ fn a_send_time_reaches_the_sink_with_its_packet() {
     let t = std::time::Instant::now() + std::time::Duration::from_secs(1);
     let (at, ump) = note();
     let events = [
-        Outgoing {
-            at,
-            send: SendAt::Now,
-            ump,
-            join: tutti_ump::Join::Alone,
-        },
-        Outgoing {
-            at,
-            send: SendAt::At(t),
-            ump,
-            join: tutti_ump::Join::Alone,
-        },
+        Outgoing::new(at, SendAt::Now, ump),
+        Outgoing::new(at, SendAt::At(t), ump),
     ];
     assert_eq!(output.queue_timed(&events).packets(), 2);
     assert_eq!(

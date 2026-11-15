@@ -272,7 +272,9 @@ impl PeerProfiles {
     }
 
     /// The zones the peer enabled that [`mpe_zones`](Self::mpe_zones) leaves
-    /// out, each with why.
+    /// out, each with why. A zone that follows another specification than the
+    /// zones held is [`OtherSpecification`](ZoneRefusal::OtherSpecification)
+    /// even if it also shares Channels with one: that is checked first.
     #[must_use]
     pub fn refused_mpe_zones(&self) -> Vec<(MpeZoneConfig, ZoneRefusal)> {
         self.fold_mpe_zones().1

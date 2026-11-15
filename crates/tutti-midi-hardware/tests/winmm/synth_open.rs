@@ -12,12 +12,7 @@ use super::gs_synth::synth;
 const PATIENCE: Duration = Duration::from_secs(5);
 
 fn at(send: SendAt, ump: Ump) -> Outgoing {
-    Outgoing {
-        at: Offset::ZERO,
-        send,
-        ump,
-        join: tutti_ump::Join::Alone,
-    }
+    Outgoing::new(Offset::ZERO, send, ump)
 }
 
 /// Waits until the output has nothing left to send.

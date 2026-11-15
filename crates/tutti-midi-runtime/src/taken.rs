@@ -1,7 +1,7 @@
 //! [`Taken`]: how much of a batch a sink took, always a whole number of
 //! messages.
 
-use tutti_ump::{Span, Ump, spans};
+use tutti_ump::Span;
 
 use crate::Outgoing;
 
@@ -31,18 +31,6 @@ impl Taken {
                 break;
             }
             taken = taken.through(message);
-        }
-        taken
-    }
-
-    /// [`within`](Self::within) for items that carry a packet: `ump` reads it.
-    pub fn within_by<T>(items: &[T], ump: impl Fn(&T) -> Ump, room: usize) -> Self {
-        let mut taken = Self::NONE;
-        for span in spans(items, ump) {
-            if taken.0 + span.len() > room {
-                break;
-            }
-            taken = taken.through(span);
         }
         taken
     }

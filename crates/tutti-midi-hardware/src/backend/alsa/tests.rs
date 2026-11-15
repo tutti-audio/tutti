@@ -1038,12 +1038,11 @@ fn events_are_delivered_by_their_times_and_a_past_time_at_once() {
 /// taken.
 fn send(output: &super::output::AlsaOutput, word: u32, at: tutti_midi_runtime::SendAt) {
     use tutti_midi_runtime::MidiOut;
-    let packet = [tutti_midi_runtime::Outgoing {
-        at: tutti_graph::Offset::ZERO,
-        send: at,
-        ump: tutti_ump::Ump([word, 0, 0, 0]),
-        join: tutti_ump::Join::Alone,
-    }];
+    let packet = [tutti_midi_runtime::Outgoing::new(
+        tutti_graph::Offset::ZERO,
+        at,
+        tutti_ump::Ump([word, 0, 0, 0]),
+    )];
     assert!(
         output.queue_timed(&packet).is_all(&packet),
         "the send to go"
@@ -1052,12 +1051,11 @@ fn send(output: &super::output::AlsaOutput, word: u32, at: tutti_midi_runtime::S
 
 /// What an output sends: `ump`, at once.
 fn now(ump: tutti_ump::Ump) -> tutti_midi_runtime::Outgoing {
-    tutti_midi_runtime::Outgoing {
-        at: tutti_graph::Offset::ZERO,
-        send: tutti_midi_runtime::SendAt::Now,
+    tutti_midi_runtime::Outgoing::new(
+        tutti_graph::Offset::ZERO,
+        tutti_midi_runtime::SendAt::Now,
         ump,
-        join: tutti_ump::Join::Alone,
-    }
+    )
 }
 
 /// A System Exclusive message of three packets, start, continue and end.
@@ -1086,14 +1084,11 @@ fn fill(output: &super::output::AlsaOutput) -> usize {
 /// wait for the pool to drain, which takes the minute.
 #[test]
 fn an_output_with_a_full_pool_takes_what_fits_and_does_not_wait() {
-    use tutti_midi_runtime::{MidiOut, SendAt};
+    use tutti_midi_runtime::MidiOut;
     let target = plug(&unique("pool"));
     let id = super::enumerate::pack_id(target.0.id(), 0);
     let output = super::output::connect(id).expect("the output to open");
-    let held = tutti_midi_runtime::Outgoing {
-        send: SendAt::At(Instant::now() + Duration::from_secs(60)),
-        ..now(tutti_ump::Ump([0x2090_3C64, 0, 0, 0]))
-    };
+    let held = held(tutti_ump::Ump([0x2090_3C64, 0, 0, 0]));
     let batch = vec![held; 10_000];
     let started = Instant::now();
     let taken = output.queue_timed(&batch);
@@ -1108,10 +1103,11 @@ fn an_output_with_a_full_pool_takes_what_fits_and_does_not_wait() {
 
 /// A packet held by the queue for a minute.
 fn held(ump: tutti_ump::Ump) -> tutti_midi_runtime::Outgoing {
-    tutti_midi_runtime::Outgoing {
-        send: tutti_midi_runtime::SendAt::At(Instant::now() + Duration::from_secs(60)),
-        ..now(ump)
-    }
+    tutti_midi_runtime::Outgoing::new(
+        tutti_graph::Offset::ZERO,
+        tutti_midi_runtime::SendAt::At(Instant::now() + Duration::from_secs(60)),
+        ump,
+    )
 }
 
 /// **A scheduled message the output pool has no room for whole is refused

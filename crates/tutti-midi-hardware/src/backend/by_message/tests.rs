@@ -5,15 +5,14 @@ use tutti_ump::{Message, MidiGroup, Sysex7Packet, SysexStatus, Ump};
 use super::*;
 
 fn packet(status: SysexStatus) -> Outgoing {
-    Outgoing {
-        at: Offset::ZERO,
-        send: SendAt::Now,
-        ump: Ump::from(Message::Sysex7(
+    Outgoing::new(
+        Offset::ZERO,
+        SendAt::Now,
+        Ump::from(Message::Sysex7(
             MidiGroup::FIRST,
             Sysex7Packet::new(status, &[1]).unwrap(),
         )),
-        join: tutti_ump::Join::Alone,
-    }
+    )
 }
 
 /// A complete packet, then a message of three, then a complete packet.

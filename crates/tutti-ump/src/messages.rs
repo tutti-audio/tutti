@@ -104,7 +104,7 @@ fn part(ump: Ump) -> Part {
 /// marks all after the first, so that a cut does not fall between them: a
 /// receiver left with the controller selected and no value is wrong until the
 /// next one.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Join {
     /// The packet begins its own message, or is one the wire frames itself.
     #[default]
@@ -150,10 +150,6 @@ fn framed_len<T>(items: &[T], ump: &impl Fn(&T) -> Ump) -> usize {
             let mut last = 0;
             for (i, item) in items.iter().enumerate().skip(1) {
                 let packet = ump(item);
-                // Utility and System Real Time messages sit inside any run.
-                if matches!(packet.message_type(), 0 | 1) {
-                    continue;
-                }
                 match part(packet) {
                     Part::Inside(of) if open.contains(of) => last = i,
                     Part::Closes(of) if open.contains(of) => {
@@ -169,14 +165,27 @@ fn framed_len<T>(items: &[T], ump: &impl Fn(&T) -> Ump) -> usize {
                         }
                         last = i;
                     }
-                    // A packet of another Group passes through; one of a Group
-                    // with a run open is not part of it.
-                    _ if packet.group().is_some_and(|group| !open.has_group(group)) => {}
+                    // What passes through an open run: Utility messages, System
+                    // Real Time messages (not the rest of MT 1, which a run
+                    // does not hold), UMP Stream messages (groupless), and a
+                    // packet of a Group with no run open. Anything else ends
+                    // the message.
+                    _ if passes(packet, &open) => {}
                     _ => break,
                 }
             }
             last + 1
         }
+    }
+}
+
+/// Whether `packet`, which is no part of the runs `open`, sits inside them.
+fn passes(packet: Ump, open: &OpenRuns) -> bool {
+    match packet.message_type() {
+        0 | 0xF => true,
+        // System Real Time: status 0xF8 and above.
+        1 => ((packet.0[0] >> 16) & 0xFF) >= 0xF8 || !open.has_group_of(packet),
+        _ => !open.has_group_of(packet),
     }
 }
 
@@ -221,11 +230,14 @@ impl OpenRuns {
         self.runs.iter().all(Option::is_none)
     }
 
-    fn has_group(&self, group: MidiGroup) -> bool {
-        self.runs
-            .iter()
-            .flatten()
-            .any(|run| run.group() == Some(group))
+    /// Whether a run is open on the Group `packet` is on.
+    fn has_group_of(&self, packet: Ump) -> bool {
+        packet.group().is_some_and(|group| {
+            self.runs
+                .iter()
+                .flatten()
+                .any(|run| run.group() == Some(group))
+        })
     }
 }
 
@@ -275,6 +287,11 @@ impl<'a, T> Span<'a, T> {
 /// reads the packet an item carries. A message of several packets whose last
 /// the batch never reaches ends where the batch does.
 ///
+///
+/// A message holds at most 8 runs open at once (interleaved SysEx8 streams,
+/// runs on other Groups); a ninth simultaneous opener ends the message before
+/// it.
+///
 /// ```
 /// use tutti_ump::{Message, Sysex7Packet, SysexStatus, Ump, spans};
 ///
@@ -297,7 +314,8 @@ pub fn spans<T, F: Fn(&T) -> Ump>(items: &[T], ump: F) -> Spans<'_, T, F, fn(&T)
 }
 
 /// [`spans`] for items that say whether they go with the one before them
-/// ([`Join`]): `join` reads it.
+/// ([`Join`]): `join` reads it. The same limit of 8 simultaneously open runs
+/// holds: a ninth opener ends the message before it.
 pub fn spans_joined<T, F: Fn(&T) -> Ump, J: Fn(&T) -> Join>(
     items: &[T],
     ump: F,
@@ -454,6 +472,30 @@ mod tests {
         assert_eq!(lens(&batch), [3]);
         let same_group = note();
         assert_eq!(lens(&[sysex7(Start), same_group, sysex7(End)]), [1, 1, 1]);
+    }
+
+    #[test]
+    fn midi_time_code_on_the_runs_group_ends_it_but_real_time_does_not() {
+        use SysexStatus::{End, Start};
+        let mtc = Ump::from(Message::System(
+            MidiGroup::FIRST,
+            crate::System::TimeCode(crate::U7::of(0x21)),
+        ));
+        assert_eq!(lens(&[sysex7(Start), mtc, sysex7(End)]), [1, 1, 1]);
+    }
+
+    #[test]
+    fn a_ump_stream_message_inside_a_run_belongs_to_it() {
+        use SysexStatus::{End, Start};
+        let stream = Ump::from(Message::Stream(Stream::StartOfClip));
+        assert_eq!(lens(&[sysex7(Start), stream, sysex7(End)]), [3]);
+    }
+
+    #[test]
+    fn a_ninth_open_run_ends_the_message_before_it() {
+        use SysexStatus::Start;
+        let batch: Vec<_> = (0..9).map(|stream| sysex8(Start, stream)).collect();
+        assert_eq!(lens(&batch), [8, 1]);
     }
 
     #[test]

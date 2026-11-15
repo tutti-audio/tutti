@@ -243,11 +243,18 @@ enum Sink {
 }
 
 impl Sink {
-    /// Queues `events`; returns how many the host's sink refused. A device's
-    /// output counts its own refusals in its losses.
+    /// Queues `events`; returns how many events the host's sink refused, not
+    /// counting the JR stamps among them. A device's output counts its own
+    /// refusals in its losses.
     fn queue_timed(&mut self, events: &[Outgoing]) -> usize {
         match self {
-            Self::Host(sink) => sink.queue_timed(events).left_of(events),
+            Self::Host(sink) => {
+                let taken = sink.queue_timed(events).packets();
+                events[taken..]
+                    .iter()
+                    .filter(|event| !event.ump.is_jr())
+                    .count()
+            }
             #[cfg(feature = "midi-hardware")]
             Self::Device(out) => {
                 let _ = out.queue_timed(events);
@@ -385,9 +392,10 @@ impl UmpOut {
     /// latency, less the device's, plus the offset), and the sink schedules it;
     /// without, every event goes at once. An event whose time is more than
     /// [`MAX_OUTPUT_AHEAD`](tutti_midi_runtime::MAX_OUTPUT_AHEAD) ahead is not
-    /// sent, and the call returns how many were refused, a host's sink's refusals with them; a batch whose span no
-    /// block on this target can hold is refused whole. The JR stamps keep the
-    /// events' spacing whether or not they are scheduled.
+    /// sent, and the call returns how many events were refused, those a host's
+    /// sink refused with them; a batch whose span no block on this target can
+    /// hold is refused whole. The JR stamps keep the events' spacing whether or
+    /// not they are scheduled.
     pub fn send_frames(&mut self, events: &[(Frame, Ump)], timing: Option<&OutputTiming>) -> usize {
         let (Some(first), Some(last)) = (
             events.iter().map(|e| e.0).min(),
@@ -453,15 +461,13 @@ impl UmpOut {
         // the frame, so events on one offset share one send time and any
         // match of the search is the right one.
         out.extend(events.iter().map(|&(at, ump)| {
-            Outgoing {
+            Outgoing::new(
                 at,
-                send: self
-                    .sends
+                self.sends
                     .binary_search_by_key(&at, |&(o, _)| o)
                     .map_or(SendAt::Now, |i| self.sends[i].1),
                 ump,
-                join: tutti_ump::Join::Alone,
-            }
+            )
         }));
         // One `queue_timed` for the batch: a backend may pack several UMP
         // messages into one packet.

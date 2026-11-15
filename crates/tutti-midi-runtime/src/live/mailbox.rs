@@ -111,28 +111,38 @@ impl MidiSender {
             // ring and the room read below is still there when they are
             // written (the reader only adds room). A clone that finds another
             // writing refuses the message: it never waits.
-            if self
-                .slot
-                .writing
-                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-                .is_err()
-            {
+            let Some(_claim) = Claim::take(&self.slot.writing) else {
+                break;
+            };
+            if ring.capacity() - ring.len() < message.len() {
                 break;
             }
-            let fits = ring.capacity() - ring.len() >= message.len();
-            if fits {
-                for event in message.packets() {
-                    // The room was read under the claim: the push has room.
-                    let _ = ring.push(stamped(event));
-                }
-            }
-            self.slot.writing.store(false, Ordering::Release);
-            if !fits {
-                break;
+            for event in message.packets() {
+                // The room was read under the claim: the push has room.
+                let _ = ring.push(stamped(event));
             }
             taken = taken.through(message);
         }
         taken
+    }
+}
+
+/// The claim on the ring for one message, released when it drops, so nothing
+/// that unwinds through a write leaves the ring claimed.
+struct Claim<'a>(&'a AtomicBool);
+
+impl<'a> Claim<'a> {
+    /// The claim, or `None` when another clone holds it. Never waits.
+    fn take(flag: &'a AtomicBool) -> Option<Self> {
+        flag.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .ok()
+            .map(|_| Self(flag))
+    }
+}
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
     }
 }
 

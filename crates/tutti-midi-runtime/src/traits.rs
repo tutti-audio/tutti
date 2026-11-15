@@ -36,9 +36,11 @@ pub trait MidiOut: Send + Sync {
     /// nothing after it, so the stream stays in order and no receiver is left
     /// waiting for the end of a message. One case can still cut a message: the
     /// ALSA sequencer's destination fifo cannot be read, so a destination that
-    /// fills up between two packets of a message takes its head only; that
-    /// output takes the message, counts the lost tail in its losses, and does
-    /// not send the head again.
+    /// fills up between two packets of a message takes its head only. For a
+    /// direct (`Now`) send that output takes the message, counts the lost tail
+    /// in its losses, and does not send the head again. For a scheduled (`At`)
+    /// message the overflow happens later, in the sequencer's queue, after the
+    /// output has taken the whole message: the tail is lost and nothing counts it.
     ///
     /// A sink with no wire clock (a mailbox, a test's) ignores the time.
     fn queue_timed(&self, events: &[Outgoing]) -> Taken;

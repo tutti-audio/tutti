@@ -87,35 +87,36 @@ impl Wire {
         self.ends.clear();
         let narrows = self.narrows();
         let jr = self.config.rx_jr;
-        for &Outgoing {
-            at,
-            send,
-            ump,
-            join,
-        } in events
-        {
+        // Whether the event before made a packet: a packet joined to the one
+        // before it joins nothing when that event made none.
+        let mut follows_packet = false;
+        for event in events {
+            let (at, send, ump) = (event.at, event.send, event.ump);
+            let first = if follows_packet {
+                event.join()
+            } else {
+                Join::Alone
+            };
+            let made = self.out.len();
+            let packet = |ump: Ump, join: Join| {
+                let packet = Outgoing::new(at, send, ump);
+                match join {
+                    Join::Alone => packet,
+                    Join::ToPrevious => packet.joined_to_previous(),
+                }
+            };
             match ump.message_type() {
                 0 => {
                     if let Some(kept) = utility(ump, jr) {
-                        self.out.push(Outgoing {
-                            at,
-                            send,
-                            ump: kept,
-                            join,
-                        });
+                        self.out.push(packet(kept, first));
                     }
                 }
                 4 if narrows => {
                     if let Ok(message) = ump.decode() {
                         let out = &mut self.out;
-                        let mut next = join;
-                        narrow_voice(&mut self.narrower, message, |packet| {
-                            out.push(Outgoing {
-                                at,
-                                send,
-                                ump: packet,
-                                join: next,
-                            });
+                        let mut next = first;
+                        narrow_voice(&mut self.narrower, message, |narrowed| {
+                            out.push(packet(narrowed, next));
                             // The packets of one event are one message: a cut
                             // between a controller's select and its value
                             // leaves the receiver selected with no value.
@@ -123,13 +124,9 @@ impl Wire {
                         });
                     }
                 }
-                _ => self.out.push(Outgoing {
-                    at,
-                    send,
-                    ump,
-                    join,
-                }),
+                _ => self.out.push(packet(ump, first)),
             }
+            follows_packet = self.out.len() > made;
             self.ends.push(self.out.len());
         }
     }

@@ -105,8 +105,10 @@ impl MidiOut for AlsaOutput {
     /// A message goes to the sequencer a packet at a time. One that needs the
     /// output pool is refused whole when the pool lacks room for all of it. The
     /// destination's own fifo cannot be read, so a message it fills up inside
-    /// is cut: its head is out, it is taken, and its tail is counted in
-    /// [`losses`](DeviceOut::losses) ([`by_message`]).
+    /// is cut. A direct (`Now`) message is cut at the send: its head is out, it
+    /// is taken, and its tail is counted in [`losses`](DeviceOut::losses)
+    /// ([`by_message`]). A scheduled (`At`) message is cut later, in the
+    /// sequencer's queue, after it was taken whole: its tail is lost uncounted.
     fn queue_timed(&self, events: &[Outgoing]) -> Taken {
         let mut sender = self.sender();
         let mut paired = None;

@@ -296,18 +296,8 @@ fn a_change_of_protocol_makes_the_narrower_forget() {
 #[test]
 fn a_send_time_stays_with_its_event_through_the_conversion() {
     let t = std::time::Instant::now() + std::time::Duration::from_secs(1);
-    let rpn_event = Outgoing {
-        at: Offset::ZERO,
-        send: SendAt::At(t),
-        ump: rpn(0, 0, 12 << 25),
-        join: tutti_ump::Join::Alone,
-    };
-    let after = Outgoing {
-        at: Offset::ZERO,
-        send: SendAt::Now,
-        ump: rpn(0, 0, 12 << 25),
-        join: tutti_ump::Join::Alone,
-    };
+    let rpn_event = Outgoing::new(Offset::ZERO, SendAt::At(t), rpn(0, 0, 12 << 25));
+    let after = Outgoing::new(Offset::ZERO, SendAt::Now, rpn(0, 0, 12 << 25));
     let mut wire = Wire::new(MIDI1);
     wire.convert(&[rpn_event, after]);
     let sends: Vec<SendAt> = wire.batch().iter().map(|o| o.send).collect();
