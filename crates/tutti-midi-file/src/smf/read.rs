@@ -123,11 +123,12 @@ fn division(input: &mut &[u8]) -> Res<SmfDivision> {
     let raw = be_u16.parse_next(input)?;
     let [high, _] = raw.to_be_bytes();
     // With the top bit set, the high byte is the negated frame rate as an i8.
-    match (raw, i8::from_be_bytes([high])) {
-        (0, _) => refuse(SmfParseError::ZeroTicksPerBeat).parse_next(input),
+    // With the top bit clear, the only word out of range is 0.
+    match (SmfDivision::new(raw), i8::from_be_bytes([high])) {
         (_, -24 | -25 | -29 | -30) => fail.context(Fault::Timecode).parse_next(input),
         (_, ..0) => refuse(SmfParseError::InvalidFrameRate).parse_next(input),
-        (raw, _) => Ok(SmfDivision::of(raw)),
+        (Some(division), _) => Ok(division),
+        (None, _) => refuse(SmfParseError::ZeroTicksPerBeat).parse_next(input),
     }
 }
 
