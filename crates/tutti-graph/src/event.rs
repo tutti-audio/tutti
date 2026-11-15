@@ -300,7 +300,7 @@ impl ParamSegment {
         Self::unit(key.addr(), from.to_raw(), to.to_raw(), duration, shape)
     }
 
-    /// A segment of built-in parameter `param` (a [`UnitParam`](tutti_types::UnitParam),
+    /// A segment of built-in parameter `param` (a [`UnitParam`],
     /// which is its index-0 address, or a [`UnitAddr`]) in its raw `f32` domain, as
     /// [`new`](Self::new) otherwise: for a producer that is erased over the
     /// unit (a control lane built from a `ParamAddr`, doc 014 §4.1), and for
