@@ -4,7 +4,7 @@ use tutti_buffers::{Mono, Planes, PlanesMut};
 use tutti_types::Db;
 
 use super::*;
-use crate::contract::noise;
+use crate::testing::noise;
 
 fn controls(db: f32) -> BrickwallControls {
     BrickwallControls { ceiling: Db(db) }
