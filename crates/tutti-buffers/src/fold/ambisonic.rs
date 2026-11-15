@@ -77,7 +77,7 @@ impl Scale {
     }
 
     /// What multiplies an SN3D channel to give ACN harmonic `n` in this scale.
-    fn from_sn3d(self, n: u16) -> f64 {
+    fn over_sn3d(self, n: u16) -> f64 {
         let maxn = || {
             let (num, den) = MAXN_SQUARED[usize::from(n)];
             (f64::from(num) / f64::from(den)).sqrt()
@@ -141,7 +141,7 @@ pub(super) fn rows<F: Float>(
                 return Row::One(Expr::Zero);
             }
             let c = channel(src.ordering(), n);
-            let gain = scales.map_or(1.0, |(f, t)| t.from_sn3d(n) / f.from_sn3d(n));
+            let gain = scales.map_or(1.0, |(f, t)| t.over_sn3d(n) / f.over_sn3d(n));
             Row::One(if gain == 1.0 {
                 Expr::Copy(c)
             } else {
