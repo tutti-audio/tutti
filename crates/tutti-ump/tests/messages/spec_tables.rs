@@ -173,26 +173,37 @@ fn function_block_fields() {
         (0b01, Direction::Input),
         (0b10, Direction::Output),
         (0b11, Direction::Bidirectional),
-        (0b00, Direction::Reserved(0)),
     ] {
         pin(
             [0xF011_0000 | bits, word2, 0, 0],
             info(direction, UiHint::Unknown, Midi1Port::No),
         );
     }
+    // The reserved 0b00 is read, and re-encodes to the same bits.
+    let Ok(Message::Stream(Stream::FunctionBlockInfo(zero))) =
+        Ump([0xF011_0000, word2, 0, 0]).decode()
+    else {
+        panic!()
+    };
+    assert!(matches!(zero.direction, Direction::Reserved(r) if r.get() == 0));
     // MIDI 1.0: 0x00 not, 0x01 yes unrestricted, 0x02 yes restricted to
     // 31.25 kbps, 0x03 reserved.
     for (bits, port) in [
         (0x00, Midi1Port::No),
         (0x01, Midi1Port::Unrestricted),
         (0x02, Midi1Port::Restricted),
-        (0x03, Midi1Port::Reserved(3)),
     ] {
         pin(
             [0xF011_0001 | bits << 2, word2, 0, 0],
             info(Direction::Input, UiHint::Unknown, port),
         );
     }
+    let Ok(Message::Stream(Stream::FunctionBlockInfo(three))) =
+        Ump([0xF011_000D, word2, 0, 0]).decode()
+    else {
+        panic!()
+    };
+    assert!(matches!(three.midi1, Midi1Port::Reserved(r) if r.get() == 3));
 }
 
 // §7.1.6, Figures 18 and 19: the protocol is the byte in bits 15-8, 0x01 for

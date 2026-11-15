@@ -180,7 +180,7 @@ fn attribute(a: Attribute) -> (u32, u32) {
         Attribute::Manufacturer(d) => (0x01, u32::from(d)),
         Attribute::Profile(d) => (0x02, u32::from(d)),
         Attribute::Pitch(d) => (0x03, u32::from(d)),
-        Attribute::Reserved { kind, data } => (u32::from(kind), u32::from(data)),
+        Attribute::Reserved(r) => (u32::from(r.kind()), u32::from(r.data())),
     }
 }
 
@@ -271,7 +271,7 @@ fn flex_head(g: MidiGroup, f: Form, address: FlexAddress, bank: u32, status: u32
     let (addr, channel) = match address {
         FlexAddress::Channel(c) => (0, u32::from(c.get())),
         FlexAddress::Group => (1, 0),
-        FlexAddress::Reserved(a) => (u32::from(a) & 0x3, 0),
+        FlexAddress::Reserved(r) => (u32::from(r.get()) & 0x3, 0),
     };
     head(0xD, g) | (form(f) << 22) | (addr << 20) | (channel << 16) | (bank << 8) | status
 }
@@ -286,7 +286,7 @@ fn letter(l: Option<Letter>) -> u32 {
         Some(Letter::E) => 5,
         Some(Letter::F) => 6,
         Some(Letter::G) => 7,
-        Some(Letter::Reserved(n)) => u32::from(n) & 0xf,
+        Some(Letter::Reserved(r)) => u32::from(r.get()) & 0xf,
     }
 }
 
@@ -297,7 +297,7 @@ fn accidental(a: Accidental) -> u32 {
         Accidental::DoubleSharp => 0x2,
         Accidental::Flat => 0xF,
         Accidental::DoubleFlat => 0xE,
-        Accidental::Reserved(n) => u32::from(n) & 0xf,
+        Accidental::Reserved(r) => u32::from(r.get()) & 0xf,
     }
 }
 
@@ -308,7 +308,7 @@ fn alteration(a: Alteration) -> u32 {
         AlterationKind::Subtract => 2,
         AlterationKind::Raise => 3,
         AlterationKind::Lower => 4,
-        AlterationKind::Reserved(n) => u32::from(n) & 0xf,
+        AlterationKind::Reserved(r) => u32::from(r.get()) & 0xf,
     };
     (kind << 4) | u32::from(a.degree.get())
 }
@@ -415,7 +415,7 @@ fn stream_config(c: StreamConfig) -> u32 {
     let protocol = match c.protocol {
         Protocol::Midi1 => 0x01,
         Protocol::Midi2 => 0x02,
-        Protocol::Reserved(n) => u32::from(n),
+        Protocol::Reserved(r) => u32::from(r.get()),
     };
     (protocol << 8) | (u32::from(c.rx_jr) << 1) | u32::from(c.tx_jr)
 }
@@ -498,7 +498,7 @@ fn stream(s: Stream) -> [u32; 4] {
                 Direction::Input => 0b01,
                 Direction::Output => 0b10,
                 Direction::Bidirectional => 0b11,
-                Direction::Reserved(n) => u32::from(n) & 0x3,
+                Direction::Reserved(r) => u32::from(r.get()) & 0x3,
             };
             let ui_hint = match i.ui_hint {
                 UiHint::Unknown => 0,
@@ -510,7 +510,7 @@ fn stream(s: Stream) -> [u32; 4] {
                 Midi1Port::No => 0,
                 Midi1Port::Unrestricted => 1,
                 Midi1Port::Restricted => 2,
-                Midi1Port::Reserved(n) => u32::from(n) & 0x3,
+                Midi1Port::Reserved(r) => u32::from(r.get()) & 0x3,
             };
             [
                 stream_head(done, 0x11)

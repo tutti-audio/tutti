@@ -6,7 +6,7 @@ use crate::field::{
 };
 use crate::{
     BendValue, CCNumber, ControlValue, ManufacturerId, MdsChunk, MdsChunkSize, MdsChunks,
-    MdsIdentity, MidiChannel, MidiGroup, NoteVelocity, Rpn, Ump,
+    MdsIdentity, MidiChannel, MidiGroup, NoteVelocity, Reserved, ReservedAttribute, Rpn, Ump,
 };
 
 /// One UMP, decoded.
@@ -456,22 +456,17 @@ pub enum Attribute {
     Profile(u16),
     /// Type `0x03`: Q7.9 pitch in half-tone units.
     Pitch(u16),
-    /// A reserved type (`0x04` to `0xFF`), kept with its data.
-    Reserved {
-        /// The attribute type.
-        kind: u8,
-        /// The attribute data.
-        data: u16,
-    },
+    /// A type M2-104 reserves (`0x04` to `0xFF`), with its data: read from the
+    /// wire, or written by a profile's typed attribute (the articulation
+    /// types of M2-123 are `0x10` to `0x1F`).
+    Reserved(ReservedAttribute),
 }
 
 /// A Registered Per-Note Controller number (M2-104 Appendix A, Table 22, and
-/// M2-123 §8.2's Playing Position). A number the table leaves reserved is kept
-/// in [`Reserved`](Self::Reserved), so its message re-encodes exactly. Build
-/// one from a wire number with [`From<u8>`], which names every number the table
-/// defines and only then falls back to `Reserved`. A hand-built `Reserved(7)`
-/// encodes as 7 but does not compare equal to, or match,
-/// [`Volume`](Self::Volume).
+/// M2-123 §8.2's Playing Position). A number the table leaves reserved is read
+/// as [`Reserved`](Self::Reserved), which only the decoder builds, so its
+/// message re-encodes exactly and no sender names one. [`TryFrom<u8>`] names a
+/// number the table defines and refuses a reserved one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RegisteredPerNoteController {
     /// 1: Modulation.
@@ -522,7 +517,7 @@ pub enum RegisteredPerNoteController {
     /// 95: Effects 5 Depth (formerly Phaser Depth).
     Effects5Depth,
     /// A number the table reserves.
-    Reserved(u8),
+    Reserved(Reserved),
 }
 
 impl RegisteredPerNoteController {
@@ -553,13 +548,15 @@ impl RegisteredPerNoteController {
             Self::ChorusSend => 93,
             Self::Effects4Depth => 94,
             Self::Effects5Depth => 95,
-            Self::Reserved(n) => n,
+            Self::Reserved(r) => r.get(),
         }
     }
 }
 
-impl From<u8> for RegisteredPerNoteController {
-    fn from(number: u8) -> Self {
+impl RegisteredPerNoteController {
+    /// The controller of a wire number: a number the table defines is named,
+    /// any other is [`Reserved`](Self::Reserved).
+    pub(crate) const fn wire(number: u8) -> Self {
         match number {
             1 => Self::Modulation,
             2 => Self::Breath,
@@ -584,7 +581,20 @@ impl From<u8> for RegisteredPerNoteController {
             93 => Self::ChorusSend,
             94 => Self::Effects4Depth,
             95 => Self::Effects5Depth,
-            n => Self::Reserved(n),
+            n => Self::Reserved(Reserved::wire(n)),
+        }
+    }
+}
+
+impl TryFrom<u8> for RegisteredPerNoteController {
+    type Error = Reserved;
+
+    /// The controller Appendix A defines at `number`, or the reserved number
+    /// itself.
+    fn try_from(number: u8) -> Result<Self, Reserved> {
+        match Self::wire(number) {
+            Self::Reserved(r) => Err(r),
+            defined => Ok(defined),
         }
     }
 }
@@ -914,8 +924,8 @@ pub enum FlexAddress {
     Channel(MidiChannel),
     /// The Group.
     Group,
-    /// A reserved address (2 or 3), kept.
-    Reserved(u8),
+    /// A reserved address (2 or 3), as read.
+    Reserved(Reserved),
 }
 
 /// A note letter: `A` is 1 to `G` is 7. The field's `0` is `None` where a
@@ -936,8 +946,8 @@ pub enum Letter {
     F,
     /// G.
     G,
-    /// A reserved value (8 to 15), kept.
-    Reserved(u8),
+    /// A reserved value (8 to 15), as read.
+    Reserved(Reserved),
 }
 
 /// Flex Data messages (M2-104 §7.5). Set Tempo, Set Time Signature and Set
@@ -1018,8 +1028,8 @@ pub enum Accidental {
     Sharp,
     /// Two sharps.
     DoubleSharp,
-    /// A value the tables reserve, kept as the raw nibble.
-    Reserved(u8),
+    /// A value the tables reserve, as read.
+    Reserved(Reserved),
 }
 
 /// What an alteration does to a chord degree.
@@ -1035,8 +1045,8 @@ pub enum AlterationKind {
     Raise,
     /// Lower the degree, adding it if needed.
     Lower,
-    /// A reserved type (5 to 15), kept.
-    Reserved(u8),
+    /// A reserved type (5 to 15), as read.
+    Reserved(Reserved),
 }
 
 /// A chord alteration: a kind and the degree it acts on.
@@ -1234,8 +1244,8 @@ pub enum Protocol {
     Midi1,
     /// MIDI 2.0 (`0x02`).
     Midi2,
-    /// A reserved value, kept.
-    Reserved(u8),
+    /// A reserved value, as read.
+    Reserved(Reserved),
 }
 
 /// The payload of Stream Configuration Request and Notification.
@@ -1276,8 +1286,8 @@ pub enum Direction {
     Output,
     /// Both.
     Bidirectional,
-    /// The reserved `0b00`, kept.
-    Reserved(u8),
+    /// The reserved `0b00`, as read.
+    Reserved(Reserved),
 }
 
 /// The primary role a Function Block declares.
@@ -1302,8 +1312,8 @@ pub enum Midi1Port {
     Unrestricted,
     /// A MIDI 1.0 port restricted to 31.25 kbps.
     Restricted,
-    /// The reserved `0x03`, kept.
-    Reserved(u8),
+    /// The reserved `0x03`, as read.
+    Reserved(Reserved),
 }
 
 /// A Function Block Info Notification (§7.1.8).

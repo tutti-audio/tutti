@@ -186,10 +186,9 @@ fn playing_position_is_registered_per_note_controller_0c() {
             ..
         }
     ));
-    assert_eq!(RegisteredPerNoteController::from(12).number(), 12);
     assert_eq!(
-        RegisteredPerNoteController::from(12),
-        RegisteredPerNoteController::PlayingPosition
+        RegisteredPerNoteController::try_from(12),
+        Ok(RegisteredPerNoteController::PlayingPosition)
     );
     assert_eq!(
         PlayingPosition::from_voice(&Voice2::RegisteredPerNote {

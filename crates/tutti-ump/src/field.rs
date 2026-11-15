@@ -395,6 +395,9 @@ mod tests {
         );
         assert_eq!(Attribute::None.pitch(), None);
         assert_eq!(Attribute::Manufacturer(61 << 9).pitch(), None);
-        assert_eq!(Attribute::Reserved { kind: 4, data: 1 }.pitch(), None);
+        assert_eq!(
+            Attribute::Reserved(crate::ReservedAttribute::wire(4, 1)).pitch(),
+            None
+        );
     }
 }

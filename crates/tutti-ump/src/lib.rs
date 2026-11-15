@@ -31,8 +31,9 @@
 //! ```
 //!
 //! Decoding reads no reserved bit. A reserved value in an enumerated field is
-//! kept raw, so a later revision's message stays readable and re-encodes
-//! exactly; a packet that cannot be framed comes back as [`Unknown`] with its
+//! kept as a [`Reserved`], which only the decoder builds: a later revision's
+//! message stays readable and re-encodes exactly, and no sender can name a
+//! reserved value (M2-104 section 2.1.3). A packet that cannot be framed comes back as [`Unknown`] with its
 //! words, and a consumer forwards it unchanged, never drops it. A packet
 //! re-encodes to itself when it is canonical: its reserved bits are zero, and a
 //! field another field makes meaningless has its canonical value (attribute
@@ -84,6 +85,7 @@ mod mpe_zone;
 mod note_id;
 mod note_velocity;
 mod orchestral;
+mod reserved;
 mod rpn;
 mod sysex;
 mod sysex8;
@@ -130,6 +132,7 @@ pub use note_velocity::NoteVelocity;
 pub use orchestral::{
     MuteAmount, MuteError, MuteMessage, MuteState, MuteType, PlayingPosition, ReservedMuteType,
 };
+pub use reserved::{Reserved, ReservedAttribute};
 pub use rpn::{RegisteredData, Rpn};
 pub use sysex::{
     SYSEX7_MAX_PAYLOAD, Sysex7Packets, SysexAssembler, SysexError, SysexMessage, SysexRef,

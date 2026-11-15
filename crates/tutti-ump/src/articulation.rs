@@ -11,7 +11,7 @@
 //! (§7, Figure 2). Whether the Profile is enabled is a MIDI-CI matter:
 //! `tutti-midi-device` reads it.
 
-use crate::{Attribute, NoteNumber, NoteVelocity, U4, Voice2};
+use crate::{Attribute, NoteNumber, NoteVelocity, ReservedAttribute, U4, Voice2};
 
 /// Declares a Subclass table: the enum of the rows the table names, in the
 /// order of the Subclass value, and the conversions to and from the 4-bit
@@ -686,10 +686,10 @@ impl NoteArticulation {
             | (self.stroke as u16) << 6
             | (self.reset_round_robin as u16) << 3
             | self.string.bits();
-        Attribute::Reserved {
-            kind: self.articulation.classification().attribute_type(),
+        Attribute::Reserved(ReservedAttribute::wire(
+            self.articulation.classification().attribute_type(),
             data,
-        }
+        ))
     }
 
     /// The articulation a Note On attribute carries.
@@ -705,7 +705,7 @@ impl NoteArticulation {
             Attribute::Manufacturer(data) => (0x01, data),
             Attribute::Profile(data) => (0x02, data),
             Attribute::Pitch(data) => (0x03, data),
-            Attribute::Reserved { kind, data } => (kind, data),
+            Attribute::Reserved(r) => (r.kind(), r.data()),
         };
         let classification = Classification::from_attribute_type(kind)?;
         let subclass = U4::masked((data >> 12) as u8);
@@ -874,10 +874,7 @@ impl NoteOffArticulation {
         let data = (self.ending.subclass().get() as u16) << 12
             | (self.variation.get() as u16) << 8
             | self.string.bits();
-        Attribute::Reserved {
-            kind: Self::ATTRIBUTE_TYPE,
-            data,
-        }
+        Attribute::Reserved(ReservedAttribute::wire(Self::ATTRIBUTE_TYPE, data))
     }
 
     /// The articulation a Note Off attribute carries.
@@ -892,7 +889,7 @@ impl NoteOffArticulation {
             Attribute::Manufacturer(data) => (0x01, data),
             Attribute::Profile(data) => (0x02, data),
             Attribute::Pitch(data) => (0x03, data),
-            Attribute::Reserved { kind, data } => (kind, data),
+            Attribute::Reserved(r) => (r.kind(), r.data()),
         };
         if kind != Self::ATTRIBUTE_TYPE {
             return Err(ArticulationError::NotAnArticulation(kind));

@@ -8,6 +8,7 @@ use tutti_ump::{
 use super::*;
 use crate::ci::{CiHeader, CiMessage, CiVersion, Decoded, Muid, ProfileInitiator};
 use crate::endpoint::{Capabilities, FunctionBlock};
+use tutti_fixtures::midi;
 
 const OURS: u32 = 0x0100_0001;
 const PEER: u32 = 0x0200_0002;
@@ -171,8 +172,8 @@ fn the_active_protocol_is_the_channel_voice_to_send() {
 #[test]
 fn a_reserved_active_protocol_is_no_dialect() {
     assert_eq!(
-        of(&speaking(Protocol::Reserved(0x03)), &table(&[])),
-        Err(NoDialect::UnspokenProtocol(Protocol::Reserved(0x03)))
+        of(&speaking(midi::reserved_protocol(0x03)), &table(&[])),
+        Err(NoDialect::UnspokenProtocol(midi::reserved_protocol(0x03)))
     );
 }
 

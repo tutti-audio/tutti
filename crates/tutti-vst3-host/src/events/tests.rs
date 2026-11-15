@@ -1090,14 +1090,8 @@ mod message {
     #[test]
     fn a_reserved_attribute_type_does_not_stop_the_note() {
         for attribute in [
-            Attribute::Reserved {
-                kind: 0x04,
-                data: 0xABCD,
-            },
-            Attribute::Reserved {
-                kind: 0xFF,
-                data: 0,
-            },
+            midi::reserved_attribute(0x04, 0xABCD),
+            midi::reserved_attribute(0xFF, 0),
             Attribute::Pitch(0x3C00),
             Attribute::Manufacturer(0x1234),
         ] {
@@ -1365,7 +1359,7 @@ mod message {
                 Voice2::NoteOn {
                     note: note(60),
                     velocity: NoteVelocity::MAX,
-                    attribute: Attribute::Reserved { kind: 9, data: 1 },
+                    attribute: midi::reserved_attribute(9, 1),
                 },
             ),
             Message::Midi2(

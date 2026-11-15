@@ -10,6 +10,7 @@ use tutti_ump::{
 use super::*;
 use crate::endpoint::{Capabilities, Endpoint, FunctionBlock, FunctionBlockBuilder};
 use crate::name::{BlockName, EndpointName, ProductInstanceId};
+use tutti_fixtures::midi;
 
 fn at(base: Instant, ms: u64) -> Instant {
     base + Duration::from_millis(ms)
@@ -331,7 +332,7 @@ fn a_notification_of_another_protocol_is_reported_as_it_is() {
 fn a_reserved_protocol_in_a_notification_is_midi1() {
     let t0 = Instant::now();
     let mut c = requested(t0);
-    c.on_message(notification(Protocol::Reserved(9), true, true), t0);
+    c.on_message(notification(midi::reserved_protocol(9), true, true), t0);
     assert_eq!(c.endpoint().active().protocol, Protocol::Midi1);
 }
 

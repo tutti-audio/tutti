@@ -29,7 +29,8 @@ use crate::message::{
 };
 use crate::{
     BendValue, CCNumber, ControlValue, ManufacturerId, MdsChunk, MdsChunkSize, MdsChunks,
-    MdsIdentity, MidiChannel, MidiGroup, NoteVelocity, Ump,
+    MdsIdentity, MidiChannel, MidiGroup, NoteVelocity, RegisteredPerNoteController, Reserved,
+    ReservedAttribute, Ump,
 };
 
 impl Ump {
@@ -278,7 +279,7 @@ fn attribute(kind: u8, data: u16) -> Attribute {
         0x01 => Attribute::Manufacturer(data),
         0x02 => Attribute::Profile(data),
         0x03 => Attribute::Pitch(data),
-        _ => Attribute::Reserved { kind, data },
+        _ => Attribute::Reserved(ReservedAttribute::wire(kind, data)),
     }
 }
 
@@ -288,7 +289,7 @@ fn voice2(w: [u32; 4]) -> Option<Voice2> {
     match (w0 >> 20) & 0xf {
         0x0 => Some(Voice2::RegisteredPerNote {
             note: note(w0, 1),
-            controller: index.into(),
+            controller: RegisteredPerNoteController::wire(index),
             value: ControlValue::new(data),
         }),
         0x1 => Some(Voice2::AssignablePerNote {
@@ -372,7 +373,7 @@ fn letter(nibble: u32) -> Option<Letter> {
         5 => Some(Letter::E),
         6 => Some(Letter::F),
         7 => Some(Letter::G),
-        n => Some(Letter::Reserved(n as u8)),
+        n => Some(Letter::Reserved(Reserved::wire(n as u8))),
     }
 }
 
@@ -383,7 +384,7 @@ fn accidental(nibble: u32) -> Accidental {
         0x2 => Accidental::DoubleSharp,
         0xF => Accidental::Flat,
         0xE => Accidental::DoubleFlat,
-        n => Accidental::Reserved(n as u8),
+        n => Accidental::Reserved(Reserved::wire(n as u8)),
     }
 }
 
@@ -394,7 +395,7 @@ fn alteration(nibbles: u32) -> Alteration {
         2 => AlterationKind::Subtract,
         3 => AlterationKind::Raise,
         4 => AlterationKind::Lower,
-        n => AlterationKind::Reserved(n as u8),
+        n => AlterationKind::Reserved(Reserved::wire(n as u8)),
     };
     Alteration {
         kind,
@@ -433,7 +434,7 @@ fn flex(w: [u32; 4]) -> Option<Flex> {
     let address = match (w0 >> 20) & 0x3 {
         0 => FlexAddress::Channel(MidiChannel::masked(((w0 >> 16) & 0xf) as u8)),
         1 => FlexAddress::Group,
-        n => FlexAddress::Reserved(n as u8),
+        n => FlexAddress::Reserved(Reserved::wire(n as u8)),
     };
     // The setup messages are Complete, and the first three Group messages.
     let complete = form(w0, 22) == Form::Complete;
@@ -581,7 +582,7 @@ fn stream(w: [u32; 4]) -> Option<Stream> {
                 0b01 => Direction::Input,
                 0b10 => Direction::Output,
                 0b11 => Direction::Bidirectional,
-                n => Direction::Reserved(n as u8),
+                n => Direction::Reserved(Reserved::wire(n as u8)),
             },
             ui_hint: match (w0 >> 4) & 0x3 {
                 0 => UiHint::Unknown,
@@ -593,7 +594,7 @@ fn stream(w: [u32; 4]) -> Option<Stream> {
                 0 => Midi1Port::No,
                 1 => Midi1Port::Unrestricted,
                 2 => Midi1Port::Restricted,
-                n => Midi1Port::Reserved(n as u8),
+                n => Midi1Port::Reserved(Reserved::wire(n as u8)),
             },
             first_group: FirstGroup::wire(byte(w[1], 3)),
             groups_spanned: GroupSpan::wire(byte(w[1], 2)),
@@ -623,7 +624,7 @@ fn stream_config(w0: u32) -> StreamConfig {
         protocol: match byte(w0, 1) {
             0x01 => Protocol::Midi1,
             0x02 => Protocol::Midi2,
-            n => Protocol::Reserved(n),
+            n => Protocol::Reserved(Reserved::wire(n)),
         },
         rx_jr: flag(w0, 1),
         tx_jr: flag(w0, 0),

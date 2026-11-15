@@ -14,10 +14,10 @@
 use tutti_ump::ControlValue;
 use tutti_ump::{
     Accidental, Address, Alteration, AlterationKind, Attribute, BlockSelect, ChordBass, ChordName,
-    ChordPitch, ChordType, Direction, EndpointInfo, Flex, FlexAddress, FlexTextKind, Form,
-    KeySignature, Letter, Message, Midi1Port, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
-    Protocol, RegisteredPerNoteController, SharpsFlats, Stream, StreamConfig, U4, U7, Ump,
-    UmpVersion, Unknown, Utility, Voice2,
+    ChordPitch, ChordType, Direction, EndpointInfo, FirstGroup, Flex, FlexAddress, FlexTextKind,
+    FunctionBlockId, FunctionBlockInfo, GroupSpan, KeySignature, Letter, Message, Midi1Port,
+    MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Protocol, RegisteredPerNoteController,
+    SharpsFlats, Stream, StreamConfig, U4, U7, UiHint, Ump, UmpVersion, Unknown, Utility, Voice2,
 };
 
 /// `dirty` decodes to the message `clean` encodes, and re-encoding gives
@@ -216,17 +216,77 @@ fn kept(words: [u32; 4], message: Message) {
     assert_eq!(Ump::from(message), Ump(words), "encode {message:?}");
 }
 
+/// The message `words` decode to, which re-encodes to `words`.
+fn read(words: [u32; 4]) -> Message {
+    let message = Ump(words)
+        .decode()
+        .unwrap_or_else(|u| panic!("{words:08x?} is {u:?}"));
+    assert_eq!(Ump::from(message), Ump(words), "re-encode {message:?}");
+    message
+}
+
+fn flex_of(words: [u32; 4]) -> Flex {
+    match read(words) {
+        Message::Flex(_, flex) => flex,
+        other => panic!("{other:?}"),
+    }
+}
+
+fn chord_of(words: [u32; 4]) -> ChordName {
+    match flex_of(words) {
+        Flex::SetChordName(_, chord) => chord,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The raw value a reserved payload keeps, or a failure when the value is a
+/// defined one.
+trait Raw {
+    fn raw(&self) -> Option<u8>;
+}
+
+impl Raw for Letter {
+    fn raw(&self) -> Option<u8> {
+        match self {
+            Letter::Reserved(r) => Some(r.get()),
+            _ => None,
+        }
+    }
+}
+
+impl Raw for Accidental {
+    fn raw(&self) -> Option<u8> {
+        match self {
+            Accidental::Reserved(r) => Some(r.get()),
+            _ => None,
+        }
+    }
+}
+
+impl Raw for AlterationKind {
+    fn raw(&self) -> Option<u8> {
+        match self {
+            AlterationKind::Reserved(r) => Some(r.get()),
+            _ => None,
+        }
+    }
+}
+
+impl Raw for FlexAddress {
+    fn raw(&self) -> Option<u8> {
+        match self {
+            FlexAddress::Reserved(r) => Some(r.get()),
+            _ => None,
+        }
+    }
+}
+
 #[test]
 fn reserved_values_are_kept() {
     let g = MidiGroup::of;
     let ch = MidiChannel::of;
     let n = |v| NoteNumber::new(v).unwrap();
     let u7 = |v| U7::new(v).unwrap();
-    let none = Alteration {
-        kind: AlterationKind::None,
-        degree: U4::new(0).unwrap(),
-    };
-    let flex = |f| Message::Flex(g(6), f);
     let stream = Message::Stream;
 
     // A Delta Clockstamp Ticks Per Quarter Note of 0 is reserved (§7.2.3.1).
@@ -235,157 +295,83 @@ fn reserved_values_are_kept() {
         Message::Utility(Utility::TicksPerQuarterNote(0)),
     );
     // Attribute types 4 to 255 are reserved (Table 8): the data is kept too.
-    kept(
-        [0x4192_3C04, 0xABCD_1234, 0, 0],
-        Message::Midi2(
+    for (words, on, kind, data) in [
+        ([0x4192_3C04u32, 0xABCD_1234, 0, 0], true, 4u8, 0x1234u16),
+        ([0x4182_3CFF, 0x0001_FFFF, 0, 0], false, 0xFF, 0xFFFF),
+    ] {
+        let Message::Midi2(address, voice) = read(words) else {
+            panic!("{words:08x?}")
+        };
+        assert_eq!(
+            address,
             Address {
                 group: g(1),
-                channel: ch(2),
-            },
-            Voice2::NoteOn {
-                note: n(60),
-                velocity: NoteVelocity::new(0xABCD),
-                attribute: Attribute::Reserved {
-                    kind: 4,
-                    data: 0x1234,
-                },
-            },
-        ),
-    );
-    kept(
-        [0x4182_3CFF, 0x0001_FFFF, 0, 0],
-        Message::Midi2(
-            Address {
-                group: g(1),
-                channel: ch(2),
-            },
-            Voice2::NoteOff {
-                note: n(60),
-                velocity: NoteVelocity::new(1),
-                attribute: Attribute::Reserved {
-                    kind: 0xFF,
-                    data: 0xFFFF,
-                },
-            },
-        ),
-    );
+                channel: ch(2)
+            }
+        );
+        let (Voice2::NoteOn {
+            note, attribute, ..
+        }
+        | Voice2::NoteOff {
+            note, attribute, ..
+        }) = voice
+        else {
+            panic!("{voice:?}")
+        };
+        assert_eq!((note, on), (n(60), matches!(voice, Voice2::NoteOn { .. })));
+        let Attribute::Reserved(reserved) = attribute else {
+            panic!("{attribute:?}")
+        };
+        assert_eq!((reserved.kind(), reserved.data()), (kind, data));
+    }
     // A Registered Per-Note Controller number is an index, read as one whether
     // or not Appendix A defines it, like an RPN, an NRPN or a CC index.
     for controller in [0u32, 4, 9, 13, 69, 80, 96, 255] {
-        kept(
-            [0x4102_3C00 | controller, 7, 0, 0],
-            Message::Midi2(
-                Address {
-                    group: g(1),
-                    channel: ch(2),
-                },
-                Voice2::RegisteredPerNote {
-                    note: n(60),
-                    controller: RegisteredPerNoteController::Reserved(controller as u8),
-                    value: ControlValue::new(7),
-                },
-            ),
-        );
+        let Message::Midi2(
+            _,
+            Voice2::RegisteredPerNote {
+                controller: read_as,
+                ..
+            },
+        ) = read([0x4102_3C00 | controller, 7, 0, 0])
+        else {
+            panic!("{controller}")
+        };
+        let RegisteredPerNoteController::Reserved(reserved) = read_as else {
+            panic!("{controller} is held as {read_as:?}")
+        };
+        assert_eq!(u32::from(reserved.get()), controller);
+        assert_eq!(read_as.number(), reserved.get());
     }
     // Flex Address 2 and 3 are reserved (Table 10).
-    kept(
-        [0xD620_0005, 0x5400_0000, 0, 0],
-        flex(Flex::SetKeySignature(
-            FlexAddress::Reserved(2),
-            KeySignature {
-                sharps_flats: SharpsFlats::new(5),
-                tonic: Some(Letter::D),
-            },
-        )),
-    );
-    kept(
-        [0xD630_0101, 0x4800_0000, 0, 0],
-        flex(Flex::Text {
-            address: FlexAddress::Reserved(3),
-            kind: FlexTextKind::ProjectName,
-            form: Form::Complete,
-            bytes: *b"H\0\0\0\0\0\0\0\0\0\0\0",
-        }),
-    );
+    let Flex::SetKeySignature(address, key) = flex_of([0xD620_0005, 0x5400_0000, 0, 0]) else {
+        panic!()
+    };
+    assert_eq!((address.raw(), key.tonic), (Some(2), Some(Letter::D)));
+    let Flex::Text { address, kind, .. } = flex_of([0xD630_0101, 0x4800_0000, 0, 0]) else {
+        panic!()
+    };
+    assert_eq!((address.raw(), kind), (Some(3), FlexTextKind::ProjectName));
     // Key Signature tonic 8 to 15 is reserved.
-    kept(
-        [0xD610_0005, 0x5800_0000, 0, 0],
-        flex(Flex::SetKeySignature(
-            FlexAddress::Group,
-            KeySignature {
-                sharps_flats: SharpsFlats::new(5),
-                tonic: Some(Letter::Reserved(8)),
-            },
-        )),
-    );
+    let Flex::SetKeySignature(_, key) = flex_of([0xD610_0005, 0x5800_0000, 0, 0]) else {
+        panic!()
+    };
+    assert_eq!(key.tonic.and_then(|t| t.raw()), Some(8));
     // Chord Name: an accidental outside Tables 13 and 15, a tonic of 8 and up,
-    // a chord type past 0x1B, an alteration type of 5 and up, a bass note with
-    // the same-as-tonic accidental, a bass chord type past 0x1B.
-    kept(
-        [0xD610_0006, 0x3801_0000, 0, 0x8000_0000],
-        flex(Flex::SetChordName(
-            FlexAddress::Group,
-            ChordName {
-                tonic_accidental: Accidental::Reserved(3),
-                tonic: Some(Letter::Reserved(8)),
-                chord_type: ChordType::new(1).unwrap(),
-                alterations: [none; 4],
-                bass: ChordBass {
-                    pitch: None,
-                    chord_type: ChordType::new(0).unwrap(),
-                    alterations: [none; 2],
-                },
-            },
-        )),
+    // an alteration type of 5 and up, a bass note with a reserved accidental.
+    let chord = chord_of([0xD610_0006, 0x3801_0000, 0, 0x8000_0000]);
+    assert_eq!(chord.tonic_accidental.raw(), Some(3));
+    assert_eq!(chord.tonic.and_then(|t| t.raw()), Some(8));
+    let chord = chord_of([0xD610_0006, 0x0301_5000, 0x5000_0000, 0x8000_0000]);
+    assert_eq!(
+        [
+            chord.alterations[0].kind.raw(),
+            chord.alterations[2].kind.raw()
+        ],
+        [Some(5), Some(5)]
     );
-    kept(
-        [0xD610_0006, 0x0301_5000, 0x5000_0000, 0x8000_0000],
-        flex(Flex::SetChordName(
-            FlexAddress::Group,
-            ChordName {
-                tonic_accidental: Accidental::Natural,
-                tonic: Some(Letter::C),
-                chord_type: ChordType::new(1).unwrap(),
-                alterations: [
-                    Alteration {
-                        kind: AlterationKind::Reserved(5),
-                        degree: U4::new(0).unwrap(),
-                    },
-                    none,
-                    Alteration {
-                        kind: AlterationKind::Reserved(5),
-                        degree: U4::new(0).unwrap(),
-                    },
-                    none,
-                ],
-                bass: ChordBass {
-                    pitch: None,
-                    chord_type: ChordType::new(0).unwrap(),
-                    alterations: [none; 2],
-                },
-            },
-        )),
-    );
-    kept(
-        [0xD610_0006, 0x0301_0000, 0, 0x8100_0000],
-        flex(Flex::SetChordName(
-            FlexAddress::Group,
-            ChordName {
-                tonic_accidental: Accidental::Natural,
-                tonic: Some(Letter::C),
-                chord_type: ChordType::new(1).unwrap(),
-                alterations: [none; 4],
-                bass: ChordBass {
-                    pitch: Some(ChordPitch {
-                        accidental: Accidental::Reserved(8),
-                        letter: Letter::A,
-                    }),
-                    chord_type: ChordType::new(0).unwrap(),
-                    alterations: [none; 2],
-                },
-            },
-        )),
-    );
+    let chord = chord_of([0xD610_0006, 0x0301_0000, 0, 0x8100_0000]);
+    assert_eq!(chord.bass.pitch.and_then(|p| p.accidental.raw()), Some(8));
     // Endpoint Info: 33 to 127 Function Blocks are reserved (§7.1.2).
     for count in [33u8, 127] {
         kept(
@@ -403,41 +389,36 @@ fn reserved_values_are_kept() {
     }
     // Stream Configuration: protocols other than 1 and 2.
     for protocol in [0u8, 3, 0xFF] {
-        kept(
-            [0xF005_0000 | u32::from(protocol) << 8, 0, 0, 0],
-            stream(Stream::StreamConfigurationRequest(StreamConfig {
-                protocol: Protocol::Reserved(protocol),
-                rx_jr: false,
-                tx_jr: false,
-            })),
-        );
+        let Message::Stream(Stream::StreamConfigurationRequest(config)) =
+            read([0xF005_0000 | u32::from(protocol) << 8, 0, 0, 0])
+        else {
+            panic!("{protocol}")
+        };
+        let Protocol::Reserved(reserved) = config.protocol else {
+            panic!("{:?}", config.protocol)
+        };
+        assert_eq!(reserved.get(), protocol);
     }
     // Function Block Discovery: a block number above 31 that is not 0xFF is
     // kept as the number it is.
     for block in [32u8, 0xFE] {
         let words = [0xF010_0003 | u32::from(block) << 8, 0, 0, 0];
-        let Ok(
-            message @ Message::Stream(Stream::FunctionBlockDiscovery {
-                block: BlockSelect::One(id),
-                ..
-            }),
-        ) = Ump(words).decode()
+        let Message::Stream(Stream::FunctionBlockDiscovery {
+            block: BlockSelect::One(id),
+            ..
+        }) = read(words)
         else {
             panic!("{words:08x?}");
         };
         assert_eq!(id.get(), block);
-        assert_eq!(Ump::from(message), Ump(words));
     }
     // A chord type past 0x1B, as a type and as a bass type.
     for words in [
         [0xD610_0006u32, 0x031C_0000, 0, 0x8000_0000],
         [0xD610_0006, 0x0301_0000, 0, 0x801C_0000],
     ] {
-        let Ok(message @ Message::Flex(_, Flex::SetChordName(_, c))) = Ump(words).decode() else {
-            panic!()
-        };
+        let c = chord_of(words);
         assert!(c.chord_type.get() == 0x1C || c.bass.chord_type.get() == 0x1C);
-        assert_eq!(Ump::from(message), Ump(words));
     }
 }
 
@@ -451,7 +432,7 @@ fn an_inactive_function_block_with_zeroed_fields_is_still_read() {
     };
     assert!(!info.active);
     assert_eq!(info.id.get(), 5);
-    assert_eq!(info.direction, Direction::Reserved(0));
+    assert!(matches!(info.direction, Direction::Reserved(r) if r.get() == 0));
     assert_eq!(info.groups_spanned.get(), 0);
     assert_eq!(
         Ump::from(Message::Stream(Stream::FunctionBlockInfo(info))),
@@ -481,8 +462,8 @@ fn a_later_revisions_reserved_codes_leave_the_message_readable() {
             words
         );
         match check {
-            0 => assert_eq!(info.direction, Direction::Reserved(0)),
-            1 => assert_eq!(info.midi1, Midi1Port::Reserved(3)),
+            0 => assert!(matches!(info.direction, Direction::Reserved(r) if r.get() == 0)),
+            1 => assert!(matches!(info.midi1, Midi1Port::Reserved(r) if r.get() == 3)),
             2 => assert_eq!(info.id.get(), 0x23),
             3 => assert_eq!(info.first_group.get(), 0x10),
             4 => assert_eq!(info.groups_spanned.get(), 0),
@@ -548,23 +529,182 @@ fn a_defined_message_has_no_unknown_form() {
     }
 }
 
-/// Every one of the 256 numbers round-trips through the controller type, and a
-/// number Appendix A defines is never held as `Reserved`, so equal numbers are
-/// equal values.
+/// Every one of the 256 numbers round-trips through the controller type: a
+/// number Appendix A defines is named and never held as `Reserved`, so equal
+/// numbers are equal values, and a reserved one is refused by `TryFrom`.
 #[test]
 fn a_registered_per_note_controller_number_round_trips() {
+    let defined = |n: u8| {
+        [
+            1, 2, 3, 7, 8, 10, 11, 12, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79,
+        ]
+        .contains(&n)
+            || (91..=95).contains(&n)
+    };
     for n in 0..=255u8 {
-        let c = RegisteredPerNoteController::from(n);
-        assert_eq!(c.number(), n);
-        assert_eq!(u8::from(c), n);
-        if let RegisteredPerNoteController::Reserved(r) = c {
-            assert_eq!(r, n);
-            let defined = [
-                1, 2, 3, 7, 8, 10, 11, 12, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79,
-            ]
-            .contains(&n)
-                || (91..=95).contains(&n);
-            assert!(!defined, "{n} is defined but held as Reserved");
+        match RegisteredPerNoteController::try_from(n) {
+            Ok(c) => {
+                assert!(defined(n), "{n} is reserved but named {c:?}");
+                assert_eq!(c.number(), n);
+                assert_eq!(u8::from(c), n);
+            }
+            Err(reserved) => {
+                assert!(!defined(n), "{n} is defined but refused");
+                assert_eq!(reserved.get(), n);
+            }
         }
+    }
+}
+
+/// Every message a caller can construct encodes a value its table defines: the
+/// defined variants of every enum that can also hold a reserved value (which
+/// only the decoder builds, see `Reserved`) encode to packets that read back as
+/// the same defined variants, in every message that carries one.
+/// Spec: m2-104/2.1.3#1, m2-104/7.4.4#1
+#[test]
+fn a_constructed_message_encodes_no_reserved_value() {
+    let g = MidiGroup::of;
+    let address = Address {
+        group: g(1),
+        channel: MidiChannel::of(2),
+    };
+    let round_trip = |message: Message| {
+        let ump = Ump::from(message);
+        assert_eq!(ump.decode(), Ok(message), "{message:?} as {:08x?}", ump.0);
+    };
+    for attribute in [
+        Attribute::None,
+        Attribute::Manufacturer(0xABCD),
+        Attribute::Profile(0x1234),
+        Attribute::Pitch(0x3C00),
+    ] {
+        round_trip(Message::Midi2(
+            address,
+            Voice2::NoteOn {
+                note: NoteNumber::of(60),
+                velocity: NoteVelocity::new(0x8000),
+                attribute,
+            },
+        ));
+    }
+    // Every controller number Appendix A names, and no other.
+    let mut named = 0;
+    for number in 0..=255u8 {
+        let Ok(controller) = RegisteredPerNoteController::try_from(number) else {
+            continue;
+        };
+        named += 1;
+        round_trip(Message::Midi2(
+            address,
+            Voice2::RegisteredPerNote {
+                note: NoteNumber::of(60),
+                controller,
+                value: ControlValue::new(7),
+            },
+        ));
+    }
+    assert_eq!(named, 23, "Table 22 names 23 controllers");
+    let none = Alteration {
+        kind: AlterationKind::None,
+        degree: U4::of(0),
+    };
+    let flex = |f| Message::Flex(g(6), f);
+    let letters = [
+        None,
+        Some(Letter::A),
+        Some(Letter::B),
+        Some(Letter::C),
+        Some(Letter::D),
+        Some(Letter::E),
+        Some(Letter::F),
+        Some(Letter::G),
+    ];
+    for address in [FlexAddress::Channel(MidiChannel::of(9)), FlexAddress::Group] {
+        for tonic in letters {
+            round_trip(flex(Flex::SetKeySignature(
+                address,
+                KeySignature {
+                    sharps_flats: SharpsFlats::new(-3),
+                    tonic,
+                },
+            )));
+        }
+    }
+    let accidentals = [
+        Accidental::DoubleFlat,
+        Accidental::Flat,
+        Accidental::Natural,
+        Accidental::Sharp,
+        Accidental::DoubleSharp,
+    ];
+    let kinds = [
+        AlterationKind::None,
+        AlterationKind::Add,
+        AlterationKind::Subtract,
+        AlterationKind::Raise,
+        AlterationKind::Lower,
+    ];
+    for tonic_accidental in accidentals {
+        for kind in kinds {
+            round_trip(flex(Flex::SetChordName(
+                FlexAddress::Group,
+                ChordName {
+                    tonic_accidental,
+                    tonic: Some(Letter::C),
+                    chord_type: ChordType::new(1).unwrap(),
+                    alterations: [
+                        Alteration {
+                            kind,
+                            degree: U4::of(3),
+                        },
+                        none,
+                        none,
+                        none,
+                    ],
+                    bass: ChordBass {
+                        pitch: Some(ChordPitch {
+                            accidental: tonic_accidental,
+                            letter: Letter::G,
+                        }),
+                        chord_type: ChordType::new(0).unwrap(),
+                        alterations: [none; 2],
+                    },
+                },
+            )));
+        }
+    }
+    for direction in [
+        Direction::Input,
+        Direction::Output,
+        Direction::Bidirectional,
+    ] {
+        for midi1 in [
+            Midi1Port::No,
+            Midi1Port::Unrestricted,
+            Midi1Port::Restricted,
+        ] {
+            round_trip(Message::Stream(Stream::FunctionBlockInfo(
+                FunctionBlockInfo {
+                    active: true,
+                    id: FunctionBlockId::of(3),
+                    direction,
+                    ui_hint: UiHint::Both,
+                    midi1,
+                    first_group: FirstGroup::of(0),
+                    groups_spanned: GroupSpan::of(1),
+                    midi_ci_version: 0,
+                    max_sysex8_streams: 0,
+                },
+            )));
+        }
+    }
+    for protocol in [Protocol::Midi1, Protocol::Midi2] {
+        round_trip(Message::Stream(Stream::StreamConfigurationRequest(
+            StreamConfig {
+                protocol,
+                rx_jr: true,
+                tx_jr: false,
+            },
+        )));
     }
 }
