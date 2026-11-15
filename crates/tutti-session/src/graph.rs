@@ -131,6 +131,9 @@ pub enum Feeder {
     Instrument,
     /// A host's declarations.
     Declared,
+    /// The session's MIDI clock, which feeds every output port
+    /// (`midi_output`, feature `midi-hardware`).
+    Clock,
 }
 
 tutti_types::id! {
@@ -851,7 +854,7 @@ impl Graph {
     /// Hosts a plugin the host inserted itself (an in-process plugin, a
     /// wrapper around one): `handle` gets the session's health watch,
     /// snapshots and render mode at `node`, as
-    /// [`Session::add_plugin`](crate::Session::add_plugin)'s do. Its latency
+    /// [`Session::add_pooled_plugin`](crate::Session::add_pooled_plugin)'s do. Its latency
     /// is whatever its node's shape declared at insert. Returns the node's
     /// key as a plugin's, [`Key<PluginNode>`](crate::PluginNode).
     ///
@@ -1000,6 +1003,38 @@ impl Graph {
                 Ok(())
             }
             Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
+            Err(ReplaceRefused::Busy(_)) => unreachable!("checked above"),
+        }
+    }
+
+    /// Puts the silent stand-in of a plugin that is gone at `node`
+    /// ([`Lost`](crate::plugin::Lost)), the plugin's record kept: the node keeps
+    /// its key, its ports, its wiring and its latency, renders silence and has
+    /// no tail, and the plugin's node is retired to the control thread. Returns
+    /// whether the swap was made: not while the graph re-prepares. A swap parked
+    /// for the same node (a crossfade waiting for the re-prepare) lands after the
+    /// stand-in and wins.
+    ///
+    /// # Errors
+    ///
+    /// A poisoned graph, or a `node` not in it.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn silence_plugin(&mut self, node: NodeKey) -> Result<bool, CrossfadeRefused> {
+        if let Some(cause) = self.editor.poison_cause() {
+            return Err(CrossfadeRefused::Poisoned(cause.to_owned()));
+        }
+        let Some(shape) = self.shape(node).filter(|_| self.nodes.contains_key(&node)) else {
+            return Err(CrossfadeRefused::NoSuchNode(node));
+        };
+        if self.editor.is_repreparing() {
+            return Ok(false);
+        }
+        let stand_in = tutti_graph::ForkByClone(crate::plugin::Lost::of(shape));
+        match self.swap_unit(node, stand_in, tutti_graph::DECLICK, FadeLaw::default()) {
+            Ok(_) => Ok(true),
+            Err(ReplaceRefused::Failed(refused)) => Err(refused),
+            // A re-prepare is `swap_unit`'s only cause for `Busy`, and it was
+            // checked above on this thread.
             Err(ReplaceRefused::Busy(_)) => unreachable!("checked above"),
         }
     }

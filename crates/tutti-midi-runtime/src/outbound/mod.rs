@@ -3,10 +3,13 @@
 //! - [`ClockMaster`] (and its [`ClockControls`]) generates outbound Beat Clock and MTC from the
 //!   transport; [`ClockNode`] ticks it in the graph and sends it out of an
 //!   event port.
+//! - [`MidiOutNode`] is the graph's end of a device output: what is wired to it
+//!   is what the session's output port sends.
 //! - [`ActiveSensingSender`] schedules Active Sensing for an output that goes
 //!   quiet.
 //! - [`MachineControlSender`] turns what the transport did into MIDI Machine
-//!   Control commands.
+//!   Control commands, each on its frame; [`MachineControlNode`] ticks it in the
+//!   graph and sends them out of an event port.
 //! - [`jr_timestamp`] stamps outbound packets with JR Timestamps (M2-104 §7.6),
 //!   so a receiver can reconstruct the sender's timing rather than inherit the
 //!   transport's jitter.
@@ -15,7 +18,9 @@ pub mod active_sensing;
 pub mod clock_master;
 pub mod clock_node;
 pub mod jr_timestamp;
+pub mod machine_control_node;
 pub mod machine_control_out;
+pub mod out_node;
 
 pub use active_sensing::{ACTIVE_SENSING_INTERVAL, ActiveSensingSender};
 pub use clock_master::{ClockControls, ClockMaster};
@@ -23,4 +28,8 @@ pub use clock_node::{CLOCK_EVENT_CAPACITY, ClockNode};
 pub use jr_timestamp::{
     JR_CLOCK_INTERVAL, JR_CLOCK_MAX_INTERVAL, JrClock, JrClockEmitter, JrStamper, JrStream,
 };
+pub use machine_control_node::{
+    MACHINE_CONTROL_EVENT_CAPACITY, MachineControlControls, MachineControlNode,
+};
 pub use machine_control_out::{MachineControlSender, NoTimeCode};
+pub use out_node::{MIDI_OUT_EVENT_CAPACITY, MidiOutNode};

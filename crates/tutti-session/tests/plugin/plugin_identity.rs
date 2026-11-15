@@ -3,12 +3,13 @@
 //! the hosted plugin. The reference CLAP bundle exports two plugins, in a real
 //! `plugin-server`.
 
+use crate::pooled::{LoadPlugin, Spec, catalog_of};
 use crate::support::{clap_probe, plugin_server};
-use tutti_plugin::catalog::{PluginRef, PluginState};
+use tutti_plugin::catalog::{PluginId, PluginRef, PluginState};
 use tutti_plugin::error::StateError;
 use tutti_plugin_db::{PluginEntry, PluginFormat};
 use tutti_plugin_types::{PluginClass, PluginDescriptor};
-use tutti_session::{PluginLoadRequest, Session};
+use tutti_session::Session;
 use tutti_types::{MaxBlock, Samples};
 
 fn first_id() -> &'static str {
@@ -52,19 +53,19 @@ fn the_second_plugin_of_a_bundle_loads_by_its_entry() {
     let main = tutti_fixtures::main_thread();
 
     let second = s
-        .add_plugin_blocking(main, PluginLoadRequest::new(entry_ref(&path, second_id())))
+        .load_plugin_blocking(main, Spec::new(entry_ref(&path, second_id())))
         .expect("the second plugin loads");
-    let hosted = s.plugin(second).unwrap();
+    let hosted = s.plugin_view(second).unwrap();
     assert_eq!(hosted.descriptor().id, second_id());
     assert_eq!(hosted.plugin().id(), Some(second_id()));
 
     let first = s
-        .add_plugin_blocking(
+        .load_plugin_blocking(
             main,
-            PluginLoadRequest::new(PluginRef::file(&path).expect("a plugin file")),
+            Spec::new(PluginRef::file(&path).expect("a plugin file")),
         )
         .expect("the file's first plugin loads");
-    let hosted = s.plugin(first).unwrap();
+    let hosted = s.plugin_view(first).unwrap();
     assert_eq!(hosted.descriptor().id, first_id());
     assert_eq!(
         hosted.plugin().id(),
@@ -73,7 +74,7 @@ fn the_second_plugin_of_a_bundle_loads_by_its_entry() {
     );
 }
 
-/// **A state saved from one plugin is refused by a request for the other, and
+/// **A state saved from one plugin is refused by an entry for the other, and
 /// by the other's hosted plugin; its own takes it.** The refusal comes before
 /// the plugin is asked: `OtherPlugin` names both.
 #[test]
@@ -84,19 +85,39 @@ fn a_state_is_refused_by_another_plugin() {
     let mut s = session();
     let main = tutti_fixtures::main_thread();
     let first = s
-        .add_plugin_blocking(main, PluginLoadRequest::new(first_ref.clone()))
+        .load_plugin_blocking(main, Spec::new(first_ref.clone()))
         .expect("loads");
     let second = s
-        .add_plugin_blocking(main, PluginLoadRequest::new(second_ref.clone()))
+        .load_plugin_blocking(main, Spec::new(second_ref.clone()))
         .expect("loads");
 
-    let from_first = s.plugin(first).unwrap().state().save().expect("saves");
-    assert_eq!(from_first.plugin(), &first_ref, "the state names its owner");
-    let from_second = s.plugin(second).unwrap().state().save().expect("saves");
+    let from_first = s.plugin_view(first).unwrap().state().save().expect("saves");
+    // The catalog names a plugin by its file's canonical path.
+    assert_eq!(
+        from_first.plugin().id(),
+        first_ref.id(),
+        "the state names its owner"
+    );
+    assert_eq!(
+        tutti_plugin_db::canonical_path(from_first.plugin().path()),
+        tutti_plugin_db::canonical_path(first_ref.path()),
+        "in its own file"
+    );
+    let from_second = s
+        .plugin_view(second)
+        .unwrap()
+        .state()
+        .save()
+        .expect("saves");
 
-    // The request.
-    let refused = PluginLoadRequest::new(second_ref.clone())
-        .restoring(from_first.clone())
+    // The entry's declaration. The key an entry is declared under is never
+    // pooled here: the declaration is built and its state checked, nothing more.
+    const UNPOOLED: u8 = 0;
+    let (catalog, _id, _dir) = catalog_of(&PluginRef::file(&path).expect("a plugin file"));
+    let id_of = |id: &str| PluginId::new(PluginFormat::Clap, id);
+    let refused = s
+        .plugin_entry(UNPOOLED, &id_of(second_id()), &catalog)
+        .initial_state(from_first.clone())
         .expect_err("the first plugin's state is not the second's");
     assert_eq!(
         refused,
@@ -105,13 +126,15 @@ fn a_state_is_refused_by_another_plugin() {
             found: first_id().into(),
         }
     );
-    let request = PluginLoadRequest::new(first_ref)
-        .restoring(from_first.clone())
-        .expect("its own state is accepted");
-    assert_eq!(request.state(), Some(&from_first));
+    assert!(
+        s.plugin_entry(UNPOOLED, &id_of(first_id()), &catalog)
+            .initial_state(from_first.clone())
+            .is_ok(),
+        "its own state is accepted"
+    );
 
     // The hosted plugin.
-    let hosted = s.plugin(second).unwrap();
+    let hosted = s.plugin_view(second).unwrap();
     let refused = hosted
         .state()
         .restore(main, &from_first)

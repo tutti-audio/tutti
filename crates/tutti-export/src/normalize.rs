@@ -14,8 +14,11 @@
 
 use tutti_buffers::{Interleaved, InterleavedMut, Planes, interleave};
 use tutti_dsp::DitherShape;
-use tutti_measure::{Loudness, LoudnessConfig, LoudnessState, finish_loudness, step_loudness};
-use tutti_types::{Amplitude, ChannelLayout, Db, SampleRate, Samples};
+use tutti_measure::{
+    Loudness, LoudnessConfig, LoudnessState, TruePeakState, finish_loudness, finish_true_peak,
+    step_loudness, step_true_peak,
+};
+use tutti_types::{Amplitude, ChannelLayout, ChannelTopology, Db, SampleRate, Samples};
 
 use crate::Result;
 use crate::Unmeasured;
@@ -33,21 +36,22 @@ use crate::output::FileTarget;
 /// consumer DAC after resampling. The meter oversamples 4× below 96 kHz and 2×
 /// from 96 kHz to below 192 kHz; at 192 kHz and above it reads the sample peak.
 ///
-/// # Above six channels
+/// # Placement
 ///
-/// [`Lufs`](Self::Lufs) is measured through R128's standard channel map. For
-/// six or more channels it weights L, R, C, Ls and Rs (slots 0, 1, 2, 4, 5),
-/// ignores the LFE (slot 3) and leaves any channel beyond the sixth unweighted;
-/// four channels read as L, R, Ls, Rs and five as L, R, C, Ls, Rs. A 5.1 mix
-/// with only the LFE active reads -70 LUFS. A 7.1 or 7.1.4 export is therefore
-/// normalized on five of its first six channels: content that lives only in
-/// the rear surrounds or the height layer does not raise the reading, so the
-/// gain lands higher than that mix's
-/// true loudness warrants — the ceiling is what stops it.
+/// [`Lufs`](Self::Lufs) weights each channel by where its speaker stands
+/// (BS.1770-5 Table 4): 1.41 for the side speakers, 1.0 for the rest, and the
+/// LFE adds no loudness (its peak still counts). A 5.1 mix with only the LFE
+/// active reads -70 LUFS.
 ///
-/// [`Peak`](Self::Peak) has no such limit; true peak folds over every channel.
-/// Prefer it when normalizing wide layouts whose energy is not concentrated in
-/// the front six.
+/// The placement is the file's [`topology`](crate::FileTarget::topology). A
+/// file that states none is taken to be [`ChannelTopology::assumed`] for its
+/// width (1, 2, 4, 6, 8 or 12 channels) and its [`Written`] reports
+/// [`Placement::Assumed`](tutti_types::Placement::Assumed). Any other width
+/// has no assumed placement, so a `Lufs` output of it is refused when the
+/// render starts ([`TargetError::UnplacedLoudness`](crate::TargetError)):
+/// state a topology. [`Peak`](Self::Peak) needs no placement; true peak folds
+/// over every channel, and a `Peak` file with no placement reports no loudness
+/// ([`Written::measured`] is `None`).
 ///
 /// # Measured at the output rate
 ///
@@ -125,23 +129,9 @@ impl Normalize {
         Self::Peak { target }
     }
 
-    /// The gain this mode asks for, given a reading.
-    ///
-    /// Split out so it is testable without rendering, and so the two arms sit
-    /// next to each other: both are "move a measured dB figure to a target",
-    /// and only the loudness arm has a ceiling to respect (which
-    /// [`Loudness::gain_to`](tutti_measure::Loudness::gain_to) already
-    /// applies).
-    pub(crate) fn gain_for(&self, measured: &tutti_measure::Loudness) -> Db {
-        match *self {
-            // `Db - Db` is a gain difference, which is why `Db` implements
-            // `Sub` — see the `Additive` note on `Db` in `units/level.rs`.
-            Self::Peak { target } => target - measured.true_peak,
-            Self::Lufs { target, ceiling } => measured.gain_to(target, ceiling),
-        }
-    }
-
-    /// The gain that normalizes `rendered`.
+    /// The gain that normalizes `rendered`, whose channels feed the speakers of
+    /// `topology`: loudness is weighted by where each stands (BS.1770-5 Table 4)
+    /// and the LFE adds no loudness (its peak still counts).
     ///
     /// For a caller that already holds a [`Rendered`](crate::Rendered) and is
     /// not writing it with a normalizing output — handing the PCM to
@@ -154,11 +144,17 @@ impl Normalize {
     ///
     /// # Errors
     ///
+    /// [`Error::TopologyWidth`](crate::Error::TopologyWidth) when `topology`
+    /// is not as wide as `rendered`.
+    ///
     /// [`Error::Unmeasurable`](crate::Error::Unmeasurable) when the audio has
     /// no usable reading, and `reason` says which:
     ///
     /// - [`Unmeasured::Format`]: the meter will not
     ///   read this signal (EBU R128 accepts 1–64 channels at 16 Hz–2.8 MHz);
+    /// - [`Unmeasured::Placement`], for [`Lufs`](Self::Lufs): `topology` has
+    ///   no speaker angles to weigh by (ambisonic, or speakers that are not a
+    ///   known bed). [`Peak`](Self::Peak) needs no placement;
     /// - [`Unmeasured::BelowGate`], for
     ///   [`Lufs`](Self::Lufs): nothing passed the integrated loudness gate
     ///   (silence, under -70 LUFS, or under 400 ms), so the reading is the
@@ -170,12 +166,22 @@ impl Normalize {
     /// up from the floor (+47 dB for a LUFS target of -23, up to +99 dB for a
     /// peak one): writing a hiss at full scale, or the file un-normalized, and
     /// reporting success is silent — nothing in [`Written`] records it.
-    pub fn gain_for_rendered(&self, rendered: &crate::Rendered) -> Result<Db> {
+    pub fn gain_for_rendered(
+        &self,
+        rendered: &crate::Rendered,
+        topology: &ChannelTopology,
+    ) -> Result<Db> {
+        if topology.width() != rendered.layout() {
+            return Err(crate::Error::TopologyWidth {
+                topology: topology.width(),
+                rendered: rendered.layout(),
+            });
+        }
         let mut control = Control::none();
         control.weigh(Weights::Normalized);
         let total = rendered.frames();
-        let outcome = self.measure(rendered, Samples(0), total, &mut control)?;
-        Ok(self.gain_for(&finished(outcome)))
+        let outcome = self.measure(rendered, topology, Samples(0), total, &mut control)?;
+        Ok(finished(outcome).gain())
     }
 
     /// The reading [`gain_for_rendered`](Self::gain_for_rendered) takes its
@@ -192,18 +198,19 @@ impl Normalize {
     fn measure(
         &self,
         rendered: &crate::Rendered,
+        topology: &ChannelTopology,
         done: Samples,
         total: Samples,
         control: &mut Control<'_>,
-    ) -> Result<Outcome<Loudness>> {
+    ) -> Result<Outcome<Reading>> {
         let unmeasurable = |reason| crate::Error::Unmeasurable {
             output: None,
             channels: rendered.layout(),
             sample_rate: rendered.sample_rate(),
             reason,
         };
-        let mut measurer = Measurer::new(rendered.sample_rate(), rendered.layout())
-            .ok_or_else(|| unmeasurable(Unmeasured::Format))?;
+        let mut measurer =
+            Measurer::new(rendered.sample_rate(), topology, *self).map_err(unmeasurable)?;
         let planes = rendered.planes();
         let frames = rendered.frames().get();
         let chunk = chunk_frames(rendered.sample_rate());
@@ -221,28 +228,8 @@ impl Normalize {
             return Ok(Outcome::Cancelled);
         }
         let reading = measurer.finish();
-        self.check(&reading).map_err(unmeasurable)?;
+        reading.check().map_err(unmeasurable)?;
         Ok(Outcome::Finished(reading))
-    }
-
-    /// Whether `reading` measures the programme, for what this mode aims at.
-    ///
-    /// The loudness meter reports its absolute gate (-70 LUFS) when nothing
-    /// passed it, and the true-peak floor for silence: those are the readings
-    /// of "no signal", not of a quiet one, and a gain from either is invented.
-    pub(crate) fn check(
-        &self,
-        reading: &tutti_measure::Loudness,
-    ) -> std::result::Result<(), Unmeasured> {
-        match self {
-            // An integrated loudness is always above the gate when it was
-            // measured, so the gate itself is the "passed nothing" sentinel.
-            Self::Lufs { .. } if reading.lufs.get() <= ABSOLUTE_GATE_LUFS => {
-                Err(Unmeasured::BelowGate)
-            }
-            Self::Peak { .. } if reading.true_peak <= Db::FLOOR => Err(Unmeasured::Silent),
-            _ => Ok(()),
-        }
     }
 
     /// This mode with its peak target (`Peak`) or ceiling (`Lufs`) pulled down
@@ -301,7 +288,133 @@ pub(crate) fn chunk_frames(rate: SampleRate) -> usize {
     (rate.get().round() as usize).max(1)
 }
 
-/// A loudness reading taken a chunk at a time, over planes.
+/// What a peak-normalizing [`Measurer`] read: a placement-weighted loudness,
+/// or the true peak alone for channels with no placement.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PeakReading {
+    /// Loudness, range and true peak, weighted by the channels' placement.
+    Placed(Loudness),
+    /// The true peak, in dBTP, and nothing else.
+    TruePeak(Db),
+}
+
+impl PeakReading {
+    fn true_peak(&self) -> Db {
+        match self {
+            Self::Placed(loudness) => loudness.true_peak,
+            Self::TruePeak(peak) => *peak,
+        }
+    }
+}
+
+/// What a [`Measurer`] read, with the mode it read for: a `Lufs` reading is
+/// always a placed [`Loudness`], and carries the target and ceiling its gain
+/// is chosen against.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Reading {
+    /// An integrated loudness, to bring to `target` under `ceiling`.
+    Lufs {
+        loudness: Loudness,
+        target: Db,
+        ceiling: Db,
+    },
+    /// A true peak, to bring to `target`.
+    Peak { measured: PeakReading, target: Db },
+}
+
+impl Reading {
+    /// The gain the mode asks for.
+    ///
+    /// Both arms move a measured dB figure to a target, and only the loudness
+    /// arm has a ceiling to respect (which
+    /// [`Loudness::gain_to`](tutti_measure::Loudness::gain_to) applies).
+    pub(crate) fn gain(&self) -> Db {
+        match *self {
+            Self::Lufs {
+                loudness,
+                target,
+                ceiling,
+            } => loudness.gain_to(target, ceiling),
+            // `Db - Db` is a gain difference, which is why `Db` implements
+            // `Sub` — see the `Additive` note on `Db` in `units/level.rs`.
+            Self::Peak { measured, target } => target - measured.true_peak(),
+        }
+    }
+
+    /// The loudness, when the channels had a placement to weigh it by.
+    pub(crate) fn loudness(&self) -> Option<Loudness> {
+        match *self {
+            Self::Lufs { loudness, .. } => Some(loudness),
+            Self::Peak { measured, .. } => match measured {
+                PeakReading::Placed(loudness) => Some(loudness),
+                PeakReading::TruePeak(_) => None,
+            },
+        }
+    }
+
+    /// Whether this measures the programme, for what the mode aims at.
+    ///
+    /// The loudness meter reports its absolute gate (-70 LUFS) when nothing
+    /// passed it, and the true-peak floor for silence: those are the readings
+    /// of "no signal", not of a quiet one, and a gain from either is invented.
+    pub(crate) fn check(&self) -> std::result::Result<(), Unmeasured> {
+        match self {
+            // An integrated loudness is always above the gate when it was
+            // measured, so the gate itself is the "passed nothing" sentinel.
+            Self::Lufs { loudness, .. } if loudness.lufs.get() <= ABSOLUTE_GATE_LUFS => {
+                Err(Unmeasured::BelowGate)
+            }
+            Self::Peak { measured, .. } if measured.true_peak() <= Db::FLOOR => {
+                Err(Unmeasured::Silent)
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+/// A loudness meter over channels with a placement.
+struct PlacedMeter {
+    cfg: LoudnessConfig,
+    state: LoudnessState,
+}
+
+impl PlacedMeter {
+    fn new(cfg: LoudnessConfig) -> std::result::Result<Self, Unmeasured> {
+        Ok(Self {
+            state: LoudnessState::new(&cfg).ok_or(Unmeasured::Format)?,
+            cfg,
+        })
+    }
+}
+
+/// A true-peak meter over channels with no placement.
+struct TruePeakMeter {
+    layout: ChannelLayout,
+    state: TruePeakState,
+}
+
+/// What a peak-normalizing output measures with: loudness when its channels
+/// have a placement, the true peak alone when they have none.
+enum PeakMeter {
+    Placed(PlacedMeter),
+    TruePeak(TruePeakMeter),
+}
+
+/// The meter of one mode, which fixes what it can read: a `Lufs` meter is
+/// always placed, so its reading is always a loudness.
+enum Meter {
+    Lufs {
+        meter: PlacedMeter,
+        target: Db,
+        ceiling: Db,
+    },
+    Peak {
+        meter: PeakMeter,
+        target: Db,
+    },
+}
+
+/// A reading taken a chunk at a time, over planes.
 ///
 /// The smallest thing normalize needs to be stoppable: `tutti-measure`'s
 /// `LoudnessState` already accumulates (and is what `measure_loudness` folds),
@@ -311,46 +424,138 @@ pub(crate) fn chunk_frames(rate: SampleRate) -> usize {
 /// frame boundaries, where the reading does not depend on where the stream is
 /// cut.
 pub(crate) struct Measurer {
-    cfg: LoudnessConfig,
-    state: LoudnessState,
+    meter: Meter,
     /// One chunk, interleaved: reused, so a measurement allocates once.
     scratch: Vec<f32>,
 }
 
 impl Measurer {
-    /// A meter for frames at `rate` in `layout`; `None` for a width or rate
+    /// A meter for frames at `rate` in `topology`, for `normalize`.
+    ///
+    /// Loudness is weighted by placement, so a topology with angles reads a
+    /// loudness. One without reads the true peak alone under
+    /// [`Peak`](Normalize::Peak), and is [`Unmeasured::Placement`] under
+    /// [`Lufs`](Normalize::Lufs). [`Unmeasured::Format`] for a rate or width
     /// EBU R128 does not take.
-    pub(crate) fn new(rate: SampleRate, layout: ChannelLayout) -> Option<Self> {
-        let cfg = LoudnessConfig::new(rate, layout);
-        Some(Self {
-            state: LoudnessState::new(&cfg)?,
-            cfg,
+    pub(crate) fn new(
+        rate: SampleRate,
+        topology: &ChannelTopology,
+        normalize: Normalize,
+    ) -> std::result::Result<Self, Unmeasured> {
+        let placed = LoudnessConfig::new(rate, topology.clone());
+        let meter = match (normalize, placed) {
+            (Normalize::Lufs { target, ceiling }, Ok(cfg)) => Meter::Lufs {
+                meter: PlacedMeter::new(cfg)?,
+                target,
+                ceiling,
+            },
+            (Normalize::Peak { target }, Ok(cfg)) => Meter::Peak {
+                meter: PeakMeter::Placed(PlacedMeter::new(cfg)?),
+                target,
+            },
+            (
+                Normalize::Peak { target },
+                Err(
+                    tutti_measure::Error::AmbisonicLoudness
+                    | tutti_measure::Error::UnplacedLoudnessChannels { .. },
+                ),
+            ) => Meter::Peak {
+                meter: PeakMeter::TruePeak(TruePeakMeter {
+                    layout: topology.width(),
+                    state: TruePeakState::new(rate, topology.width()).ok_or(Unmeasured::Format)?,
+                }),
+                target,
+            },
+            (
+                Normalize::Lufs { .. },
+                Err(
+                    tutti_measure::Error::AmbisonicLoudness
+                    | tutti_measure::Error::UnplacedLoudnessChannels { .. },
+                ),
+            ) => return Err(Unmeasured::Placement),
+            // `tutti_measure::Error` is non-exhaustive, so this arm is
+            // required; it is unreachable today: nothing else builds a
+            // config.
+            (_, Err(_)) => return Err(Unmeasured::Format),
+        };
+        Ok(Self {
+            meter,
             scratch: Vec::new(),
         })
     }
 
+    /// The width of the frames fed.
+    fn layout(&self) -> ChannelLayout {
+        match &self.meter {
+            Meter::Lufs { meter, .. }
+            | Meter::Peak {
+                meter: PeakMeter::Placed(meter),
+                ..
+            } => meter.cfg.topology().width(),
+            Meter::Peak {
+                meter: PeakMeter::TruePeak(meter),
+                ..
+            } => meter.layout,
+        }
+    }
+
     /// Feeds the frames `span` of `planes`.
     fn feed(&mut self, planes: &[Vec<f32>], span: std::ops::Range<usize>) -> crate::Result<()> {
-        let layout = self.cfg.layout;
-        let frames = span.len();
-        self.scratch.clear();
-        self.scratch
-            .resize(Samples(frames).interleaved_len(layout), 0.0);
-        let mut scratch = InterleavedMut::new(&mut self.scratch, layout)?;
-        let span = Samples(span.start)..Samples(span.end);
-        interleave(Planes::from_vecs(planes)?.slice(span), scratch.reborrow())?;
-        step_loudness(&self.cfg, &mut self.state, scratch.as_interleaved());
-        Ok(())
+        let layout = self.layout();
+        // The scratch is taken out so the meter and the chunk borrow apart.
+        let mut buf = std::mem::take(&mut self.scratch);
+        buf.clear();
+        buf.resize(Samples(span.len()).interleaved_len(layout), 0.0);
+        let fed = (|| -> crate::Result<()> {
+            let mut chunk = InterleavedMut::new(&mut buf, layout)?;
+            let span = Samples(span.start)..Samples(span.end);
+            interleave(Planes::from_vecs(planes)?.slice(span), chunk.reborrow())?;
+            self.feed_interleaved(chunk.as_interleaved());
+            Ok(())
+        })();
+        self.scratch = buf;
+        fed
     }
 
     /// Feeds `frames`, already interleaved in this meter's layout.
     pub(crate) fn feed_interleaved(&mut self, frames: Interleaved<'_>) {
-        step_loudness(&self.cfg, &mut self.state, frames);
+        match &mut self.meter {
+            Meter::Lufs { meter, .. }
+            | Meter::Peak {
+                meter: PeakMeter::Placed(meter),
+                ..
+            } => {
+                step_loudness(&meter.cfg, &mut meter.state, frames);
+            }
+            Meter::Peak {
+                meter: PeakMeter::TruePeak(meter),
+                ..
+            } => step_true_peak(&mut meter.state, frames),
+        }
     }
 
     /// The reading of everything fed.
-    pub(crate) fn finish(self) -> Loudness {
-        finish_loudness(self.state)
+    pub(crate) fn finish(self) -> Reading {
+        match self.meter {
+            Meter::Lufs {
+                meter,
+                target,
+                ceiling,
+            } => Reading::Lufs {
+                loudness: finish_loudness(meter.state),
+                target,
+                ceiling,
+            },
+            Meter::Peak { meter, target } => Reading::Peak {
+                measured: match meter {
+                    PeakMeter::Placed(meter) => PeakReading::Placed(finish_loudness(meter.state)),
+                    PeakMeter::TruePeak(meter) => {
+                        PeakReading::TruePeak(finish_true_peak(meter.state))
+                    }
+                },
+                target,
+            },
+        }
     }
 }
 

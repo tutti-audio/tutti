@@ -309,8 +309,8 @@ pub use tutti_midi_file as midi_file;
 /// that play an instrument or a live input (`MidiKeys`, sent with a `Stamp`) and a take read with (`TapEvent`, `EventTapReader`),
 /// the session's route rule, events and errors (`MidiRouteRule`, `MidiEvent`,
 /// `midi::Error`), and under `midi-hardware` a device (`DeviceId`,
-/// `DeviceInfo`), what a saved one resolves to (`Resolution`) and what an
-/// open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
+/// `DeviceInfo`), the ports the pool opens for them (`midi_input`, `midi_output`,
+/// `MidiInput`, `MidiOutput`) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
 /// its MIDI-CI peers support and how to switch one (`PeerProfiles`,
 /// `ListedProfile`, `ProfileSwitch`, `ProfilesChange`). The
 /// lower layers (`Translator`, `Narrower`, `SysexAssembler`, `ClockMap`) are
@@ -342,7 +342,10 @@ pub mod midi {
         ProfilesChange, SavedDevice, Whole, WholeProfile,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
-    pub use tutti_session::Resolution;
+    pub use tutti_session::{
+        MidiInput, MidiInputInfo, MidiOutput, MidiOutputInfo, MidiPortError, OutputOptions,
+        PortCause, midi_input, midi_output,
+    };
 }
 
 /// OS MIDI I/O (`tutti-midi-hardware`): CoreMIDI, ALSA seq-UMP. Feature
@@ -367,7 +370,7 @@ pub use tutti_plugin as plugin;
 /// `PluginHandle` control surface, the node's controls, the host policy over a
 /// handle (`Liveness`, `PluginParamValues`) and the in-process node. It is the layer
 /// the session's views are built on: a host reads and sets a hosted plugin's
-/// parameters through `Session::plugin(node)?.params()`, not through the handle. Feature
+/// parameters through `Session::plugin_view(node)?.params()`, not through the handle. Feature
 /// `plugin`.
 #[cfg(feature = "plugin")]
 pub use tutti_plugin_host as plugin_host;
@@ -445,6 +448,13 @@ pub use tutti_modulation::{Follower, Lfo};
 pub use tutti_plugin::catalog::{Catalog, Hosting, PluginRef, PluginState};
 #[cfg(feature = "plugin")]
 pub use tutti_plugin::{Normalized, ParamId, PluginFailure, PresetError, PresetId};
+#[cfg(all(feature = "session", feature = "plugin"))]
+pub use tutti_session::{
+    AddPluginError, Diagnostics, EditorView, LoadError, MainPlugin, MainSession, Opened,
+    ParamGesture, Params, Plugin, PluginBuses, PluginChange, PluginDeclaration, PluginEvent,
+    PluginHealth, PluginInfo, PluginNode, PluginParamError, PoolEvent, PoolState, PooledPlugin,
+    PortCounts, PresetEntry, PresetKind, Presets, RecoveryFailure, ReloadCause, TypedParam,
+};
 #[cfg(all(feature = "session", feature = "midi"))]
 pub use tutti_session::{AddedInstrument, MidiEvent, MidiRouteRule};
 #[cfg(all(feature = "session", feature = "export"))]
@@ -461,13 +471,6 @@ pub use tutti_session::{
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{
     Device, DeviceClock, DeviceEvent, DeviceRestart, LiveSession, RestartOutcome,
-};
-#[cfg(all(feature = "session", feature = "plugin"))]
-pub use tutti_session::{
-    Diagnostics, EditorView, MainPlugin, MainSession, Opened, ParamGesture, Params, Plugin,
-    PluginBuses, PluginChange, PluginEvent, PluginHealth, PluginLoadRequest, PluginNode,
-    PluginParamError, PortCounts, PresetEntry, PresetKind, Presets, RecoveryFailure, ReloadCause,
-    TypedParam,
 };
 #[cfg(all(feature = "session", feature = "device", feature = "audio-io"))]
 pub use tutti_session::{

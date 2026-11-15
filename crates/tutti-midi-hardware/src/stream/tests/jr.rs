@@ -21,13 +21,17 @@ fn jr(utility: Utility) -> Ump {
 /// A connected, settled wire and a graph reading its inlets.
 fn settled(timing: InputTiming, device: Endpoint) -> (Wire, Rig, DeviceStream) {
     let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
-    wire.session
+    let crate::Connected::Opened(inlet) = wire
+        .session
         .connect_input(&wire.id.clone(), timing)
-        .unwrap();
+        .unwrap()
+    else {
+        panic!("the wire's input was not open");
+    };
     let stream = settle(&mut wire);
     let mut rig = Rig::over(wire.session.ports().inlets(), wire.start);
     rig.run(1);
-    rig.apply();
+    rig.attach(inlet);
     (wire, rig, stream)
 }
 
@@ -85,7 +89,8 @@ fn txjr_is_asked_for_only_by_an_input_opened_for_jr() {
             PortDirection::Duplex,
             offering_both(),
         );
-        wire.session
+        let _ = wire
+            .session
             .connect_input(&wire.id.clone(), timing)
             .unwrap();
         let mut asked = Vec::new();
@@ -229,7 +234,8 @@ fn changing_an_open_inputs_timing_keeps_its_queued_events() {
         );
     }
     let id = wire.id.clone();
-    wire.session
+    let _ = wire
+        .session
         .connect_input(&id, InputTiming::JitterReduction)
         .unwrap();
     assert_eq!(wire.counters.opens(), 1, "the port is not reopened");

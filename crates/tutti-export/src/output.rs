@@ -134,7 +134,8 @@ impl FileTarget {
     /// Which speaker each file channel feeds: for the WAV speaker mask, Ogg
     /// Vorbis's channel order and the fold onto the file. It replaces the
     /// width [`new`](Self::new) was given: the file is as wide as the
-    /// topology, and without one it has the engine's order for the width.
+    /// topology, and without one it has the engine's order for the width
+    /// ([`Written::placement`] reports which).
     #[must_use]
     pub fn with_topology(mut self, topology: ChannelTopology) -> Self {
         self.width = Width::Placed(topology);
@@ -157,6 +158,15 @@ impl FileTarget {
     }
 
     /// Normalizes this output ([`NormalizeSpec`]); `None` writes it as rendered.
+    ///
+    /// [`Normalize::Lufs`] weights loudness by where each channel's speaker
+    /// stands, so it needs a placement: the topology stated by
+    /// [`with_topology`](Self::with_topology), or, for a file that states none,
+    /// [`ChannelTopology::assumed`] for its width, which
+    /// [`Written::placement`] reports as `Assumed`. A width with no assumed
+    /// placement (3, 5, 7 or 9 channels, say) is refused when the render
+    /// starts ([`TargetError::UnplacedLoudness`]), before any frame is
+    /// rendered.
     #[must_use]
     pub fn with_normalize(mut self, normalize: Option<NormalizeSpec>) -> Self {
         self.normalize = normalize;
@@ -179,6 +189,26 @@ impl FileTarget {
     #[must_use]
     pub fn channels(&self) -> ChannelLayout {
         self.width.layout()
+    }
+
+    /// Whether the file's speakers are stated ([`with_topology`](Self::with_topology))
+    /// or assumed from its width ([`ChannelTopology::assumed`]).
+    #[must_use]
+    pub fn placement(&self) -> tutti_types::Placement {
+        match self.width {
+            Width::Placed(_) => tutti_types::Placement::Stated,
+            Width::Count(_) => tutti_types::Placement::Assumed,
+        }
+    }
+
+    /// The speakers the file's channels feed: the stated topology, or
+    /// [`ChannelTopology::assumed`] for its width ([`placement`](Self::placement)
+    /// says which).
+    pub(crate) fn effective_topology(&self) -> ChannelTopology {
+        match &self.width {
+            Width::Placed(topology) => topology.clone(),
+            Width::Count(layout) => ChannelTopology::assumed(*layout),
+        }
     }
 
     /// The speakers the file's channels feed, if stated.
@@ -449,6 +479,20 @@ pub enum TargetError {
     /// ([`Rendered::apply_gain`](crate::Rendered::apply_gain)).
     #[error("planes are written as they are: apply the gain first, and ask no normalize")]
     NormalizeOfPlanes,
+    /// A [`Normalize::Lufs`] output whose channels name no speakers: loudness
+    /// is weighted by each speaker's placement, and a file with no stated
+    /// topology is taken to be [`ChannelTopology::assumed`] for its width, which
+    /// has a placement at 1, 2, 4, 6, 8 and 12 channels only. State a topology
+    /// ([`FileTarget::with_topology`]) that is a known bed, or normalize by
+    /// [`Normalize::Peak`].
+    #[error(
+        "a Lufs output of {channels:?} has no speaker placement to weigh loudness by: \
+         state a known topology with `with_topology`, or normalize by peak"
+    )]
+    UnplacedLoudness {
+        /// The output's width.
+        channels: ChannelLayout,
+    },
     /// Another output writes the same path.
     #[error("output {other} writes the same path")]
     SamePath {

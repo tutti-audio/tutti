@@ -4,6 +4,7 @@
 //!
 //! The plugin is the reference VST2 probe, in process.
 
+use crate::pooled::{LoadPlugin, Spec};
 use std::time::{Duration, Instant};
 use tutti_session::Root;
 
@@ -12,8 +13,8 @@ use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_types::{Normalized, ParamId};
 use tutti_session::{
-    DetachedSession, EventInPort, Feeder, PHASES, ParamRef, PhaseCx, PluginLoadRequest, RouteSpec,
-    Session, SessionEvent,
+    DetachedSession, EventInPort, Feeder, PHASES, ParamRef, PhaseCx, RouteSpec, Session,
+    SessionEvent,
 };
 use tutti_types::{ChannelLayout, Depth, SampleRate};
 
@@ -31,15 +32,15 @@ fn session_with_probe() -> (DetachedSession, NodeKey) {
         .build_detached(RATE)
         .expect("a detached session builds");
     let node = s
-        .add_plugin_blocking(
+        .load_plugin_blocking(
             tutti_fixtures::main_thread(),
-            PluginLoadRequest::new(PluginRef::file(vst2_probe()).expect("a plugin file")),
+            Spec::new(PluginRef::file(vst2_probe()).expect("a plugin file")),
         )
         .expect("the in-process VST2 loads");
     s.graph().connect(node, Root).unwrap();
     let _ = s.update();
     assert!(
-        s.plugin(node).is_ok_and(|p| p.params().is_ready()),
+        s.plugin_view(node).is_ok_and(|p| p.params().is_ready()),
         "an in-process plugin's values are read as it opens"
     );
     (s, node.erase())
@@ -122,7 +123,7 @@ fn a_plugin_gui_edit_becomes_the_knob() {
         &mut out,
     );
     probe_switch::<u32>(b"tutti_vst2_probe_set_automate_burst\0", 0);
-    s.plugin(node)
+    s.plugin_view(node)
         .expect("the plugin's handle")
         .handle()
         .editor_idle(tutti_fixtures::main_thread());
@@ -135,7 +136,7 @@ fn a_plugin_gui_edit_becomes_the_knob() {
         Some(1.0 / 16.0)
     );
     assert_eq!(
-        s.plugin(node)
+        s.plugin_view(node)
             .expect("hosted")
             .params()
             .get(ParamId::new(0))
@@ -186,7 +187,7 @@ fn a_plugins_midi_rewiring_keeps_its_lanes() {
     let _ = s.update();
     let mut side = s.graph().take_audio_side();
     let value = |s: &DetachedSession| {
-        s.plugin(node)
+        s.plugin_view(node)
             .expect("the handle")
             .handle()
             .any_thread()
@@ -251,7 +252,7 @@ fn a_plugin_echoing_the_lane_keeps_its_knob() {
     for round in 0..4 {
         side.render(1_024, 128, &mut out);
         let handle = s
-            .plugin(node)
+            .plugin_view(node)
             .expect("the plugin's handle")
             .handle()
             .clone();

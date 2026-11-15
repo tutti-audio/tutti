@@ -1,8 +1,8 @@
 //! The instrument contract.
 //!
 //! The same cases against every instrument, through a session: the node is
-//! added, made an instrument (`Session::add_instrument`, `Session::instrument`,
-//! `Session::instrument_plugin`), played by its handle and rendered by an
+//! added, made an instrument (`Session::add_instrument`, `Session::instrument`),
+//! played by its handle and rendered by an
 //! offline session. A case a subject cannot pass is a [`Gap`]: it runs, and
 //! must fail with the text the gap names, so a stale gap fails (the plugin
 //! contract's rule). `gaps = N` in the test file is the ratchet.

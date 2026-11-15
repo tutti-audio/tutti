@@ -1,4 +1,3 @@
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -42,8 +41,7 @@ fn id_of(devices: &Devices, name: &str) -> DeviceId {
 
 fn ports() -> Arc<HardwareMidiInputs> {
     Arc::new(HardwareMidiInputs::new(
-        tutti_midi_runtime::DeviceInlets::new(
-            NonZeroUsize::new(4).unwrap(),
+        tutti_midi_runtime::InputInlets::new(
             tutti_graph::EventCapacity::of(16),
             std::time::Duration::ZERO,
         ),
@@ -221,7 +219,7 @@ fn a_dropped_input_retires_its_port() {
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     wake(&events);
     let ports = ports();
-    let input = devices
+    let (input, _inlet) = devices
         .open_input(&id_of(&devices, "Keys"), &ports)
         .unwrap();
     assert_eq!(ports.list_input_ports().len(), 1);

@@ -6,12 +6,12 @@
 
 use serde::{Deserialize, Serialize};
 use tutti_fixtures::{RangeContract, check_range_contract};
-use tutti_types::{Cents, ChannelLayout, Db, SampleRate, Seconds};
+use tutti_types::{Cents, Db, SampleRate, Seconds};
 
 use crate::{
     BandCount, BandsPerOctave, HarmonicDecay, Harmonics, NoteSpan, PeakDecay, PeakFloor,
     PitchSplit, PriorSpread, SelfTransition, Sharpness, SpectrumFloor, SpectrumTime, Tightness,
-    TuningOffset, WindowedLayout, WindowedRate,
+    TuningOffset, WindowedRate,
 };
 
 macro_rules! serde_through_try_from {
@@ -47,7 +47,6 @@ serde_through_try_from! {
     SelfTransition: f32,
     Sharpness: f32,
     WindowedRate: SampleRate,
-    WindowedLayout: ChannelLayout,
 }
 
 const NAN: f32 = f32::NAN;
@@ -255,21 +254,5 @@ fn windowed_rate_keeps_the_range_checked_shape() {
         of: Some(WindowedRate::of),
         valid: &[SampleRate::SR_8K, SampleRate::SR_48K, SampleRate::SR_192K],
         invalid: &[SampleRate::of(7_999.0), SampleRate::of(192_001.0)],
-    });
-}
-
-/// 1..=16 channels.
-#[test]
-fn windowed_layout_keeps_the_range_checked_shape() {
-    check_range_contract(&RangeContract {
-        new: WindowedLayout::new,
-        get: WindowedLayout::get,
-        of: Some(WindowedLayout::of),
-        valid: &[
-            ChannelLayout::MONO,
-            ChannelLayout::STEREO,
-            ChannelLayout::from(16u16),
-        ],
-        invalid: &[ChannelLayout::from(0u16), ChannelLayout::from(17u16)],
     });
 }

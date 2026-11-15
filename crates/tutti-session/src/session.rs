@@ -2,8 +2,6 @@
 //! run in ([`PHASES`]).
 
 use std::any::Any;
-#[cfg(feature = "midi")]
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
@@ -36,7 +34,8 @@ pub enum Phase {
     /// main thread) and, mid re-prepare, sends the resumed plan.
     Collect,
     /// Hosted plugins' health, latency, parameter edits and state
-    /// snapshots (feature `plugin`): a dead plugin's node is removed
+    /// snapshots (feature `plugin`): a dead pooled plugin's node stays at its
+    /// key, silent, and a host-inserted plugin's is removed
     /// (`PluginChange::Died`), a moved latency handed to the graph
     /// (`PluginChange::LatencyChanged`), a due snapshot, a parameter
     /// read and a reload submitted to the session's spawner (their results land in
@@ -358,24 +357,19 @@ impl std::fmt::Debug for SessionEvent {
     }
 }
 
-/// The engine's MIDI, as graph nodes the builder inserts: the hardware
-/// input's ingest and the clock (Beat Clock and MTC, off until a host enables it),
-/// with their controls. The hardware out is not a node: the session reads an
-/// event tap on the clock's output ([`Midi::set_hardware_out`](crate::Midi::set_hardware_out)).
+/// The engine's MIDI, as graph nodes the builder inserts: the clock (Beat Clock
+/// and MTC, off until a host enables it), with its controls. An input port's
+/// ingest node is not here: each `midi_input` entry makes its own
+/// (`MidiInput::node`). The host's hardware out is
+/// not a node: the session reads an event tap on the clock's output
+/// ([`Midi::set_hardware_out`](crate::Midi::set_hardware_out)), and a
+/// `midi_output` port's node is fed by the clock.
 #[cfg(feature = "midi")]
 #[derive(Clone, Debug)]
 pub struct MidiNodes {
-    /// The hardware input's ingest node: its ports feed what a route rule names.
-    pub input: NodeKey,
-    /// Which of its event outputs carries which Group and channel
+    /// Which of an input port's event outputs carries which Group and channel
     /// ([`SessionBuilder::midi_groups`](crate::SessionBuilder::midi_groups)).
     pub input_ports: tutti_midi_runtime::MidiInputPorts,
-    /// How many hardware devices the input takes at once: it has that many
-    /// event inputs, one for each
-    /// ([`SessionBuilder::midi_devices`](crate::SessionBuilder::midi_devices)).
-    pub input_devices: NonZeroUsize,
-    /// Its controls (the MPE mode).
-    pub input_controls: tutti_midi_runtime::MidiIngestControls,
     /// The clock's node.
     pub clock: NodeKey,
     /// The clock master: enable it, pick MTC and its frame rate.
@@ -517,7 +511,8 @@ pub struct Session<C: Clock = Offline> {
     /// How often a healthy plugin's state is captured.
     #[cfg(feature = "plugin")]
     pub(crate) snapshot_interval: std::time::Duration,
-    /// What a hosted plugin's death or hang does; `None`: it is removed.
+    /// What a hosted plugin's death or hang does; `None`: a pooled plugin's
+    /// node stays silent at its key, a host-inserted plugin's is removed.
     #[cfg(feature = "plugin")]
     pub(crate) recovery: Option<crate::RecoveryPolicy>,
     /// When a hosted plugin's unanswered blocks are a hang.
@@ -1726,7 +1721,7 @@ impl<C: Clock> Session<C> {
     /// ([`SessionBuilder::midi_hardware`](crate::SessionBuilder::midi_hardware)):
     /// for a test that drives the layer under the session (a fake backend's
     /// hot-plug, a device's ports and negotiation). A host reaches devices
-    /// through [`Midi`](crate::Midi) (`s.midi().connect_input(..)`) and the
+    /// through the pool's `midi_input` and `midi_output` entries and the
     /// events of `Session::update`.
     #[cfg(all(feature = "midi-hardware", feature = "testing"))]
     pub fn testing_midi_io(&self) -> Option<&tutti_midi_hardware::MidiSession> {

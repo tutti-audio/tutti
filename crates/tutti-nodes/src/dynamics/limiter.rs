@@ -4,16 +4,18 @@
 //! latency and sounds transparent. For a hard clip that costs nothing and distorts,
 //! a safety catch, see [`BrickwallLimiterNode`](super::BrickwallLimiterNode).
 
-use tutti_dsp::{LimiterControls, LimiterFamily, Lookahead};
-use tutti_types::{BusTopology, Db, SampleRate, Seconds};
+use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_dsp::{COEFF_INTERVAL, LimiterBank, LimiterControls, LimiterLanes, Lookahead};
+use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_types::{BusTopology, Db, MaxBlock, SampleRate, Samples, Seconds, Tail};
 
-use crate::reverb::{FamilyNode, NodeFamily, Rings};
+use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
 /// A lookahead limiter: `N` audio inputs and `N` outputs, with gain reduction **linked**
 /// across all channels.
 ///
-/// A [`FamilyNode`] over [`LimiterFamily`], the delay and the gain being the family's
-/// recurrence; this file holds the cells and how the graph reaches them.
+/// A [`KernelNode`] over [`LimiterKernel`], the delay and the gain being [`LimiterBank`]'s;
+/// this file holds the cells and how the graph reaches them.
 ///
 /// - [`mono`](Self::mono) and [`stereo`](Self::stereo): one and two channels, at the
 ///   default lookahead of 5 ms ([`Lookahead::DEFAULT`]).
@@ -21,8 +23,8 @@ use crate::reverb::{FamilyNode, NodeFamily, Rings};
 ///   [`BusTopology`], at a lookahead of your own.
 ///
 /// A limiter is a compressor at an effectively infinite ratio: nothing is allowed past
-/// the ceiling: the output is bounded by it (a gain divide and a product can in principle
-/// round one ulp past).
+/// the ceiling: the output is bounded by it (the curve's roundings can put a sample a few
+/// ulps past).
 ///
 /// # The curve
 ///
@@ -39,10 +41,11 @@ use crate::reverb::{FamilyNode, NodeFamily, Rings};
 /// ahead of it, so the reduction is already in place when a peak arrives rather than
 /// chasing it.
 ///
-/// That delay is real latency: the node declares it in its [`Shape`](tutti_graph::Shape),
+/// That delay is real latency: the node declares it in its [`Shape`],
 /// and the graph's PDC compensates a dry path mixed against it. It declares no tail: a tail
-/// excludes latency, and what the delay holds when the input stops comes out within it.
-/// The release shapes gain, and gain applied to silence is silence.
+/// excludes latency, and what the delay holds when the input stops comes out within it (the
+/// output is exactly silent that many frames after the input is), and gain applied to silence
+/// is silence. It never parks, so its release keeps running across a gap of silence.
 ///
 /// The first audio after a prepare or a reset is limited from its first sample: the
 /// envelope has no history then, and the first frame takes its target at once.
@@ -54,20 +57,19 @@ use crate::reverb::{FamilyNode, NodeFamily, Rings};
 /// (a release under 1 ms reads as 1 ms, and a NaN threshold or ceiling is ignored).
 ///
 /// **The threshold and the ceiling are read per frame** when the graph drives them: a lane
-/// on their ports is the recurrence's own ([`Inputs`](tutti_dsp::Inputs) lanes 0 and 1), and
-/// the cell is the base a frame nobody drives (or a non-finite one) is read at. **The
-/// release is on the stream grid** (16 frames from the last reset,
-/// [`Family::CADENCE`](tutti_dsp::Family::CADENCE)): a cell write or a driven port is
-/// sampled at the grid's solve frame, so it reaches the render within 16 frames and the
-/// render does not depend on how the stream is cut into blocks. Every coefficient lands
-/// whole: a glided ceiling would let a sample past the new one.
+/// on their ports is the bank's own ([`LimiterLanes`]), and the cell is the base a frame
+/// nobody drives (or a non-finite one) is read at. **The release is on the stream grid** (16
+/// frames from the last reset, [`Kernel::GRID`]): a cell write or a driven port is sampled
+/// at the grid's solve frame, so it reaches the render within 16 frames and the render does
+/// not depend on how the stream is cut into blocks. Every coefficient lands whole: a glided
+/// ceiling would let a sample past the new one.
 ///
 /// # In a graph
 ///
 /// A graph node ([`IntoNode`](tutti_graph::IntoNode)): inserted, a fork of it starts from
 /// the values last set through its [`ParamSet`](tutti_graph::ParamSet). The graph prepares
 /// it at the device rate before its first block, which sizes the delay.
-pub type LimiterNode = FamilyNode<LimiterFamily>;
+pub type LimiterNode = KernelNode<LimiterKernel>;
 
 impl LimiterNode {
     /// A limiter on the bus `input`, as wide as it, delaying by `lookahead` (at least one
@@ -87,7 +89,7 @@ impl LimiterNode {
     /// `new(BusTopology::assumed(n)?, ..)`, which refuses a width past one bus.
     #[must_use]
     pub fn new(input: BusTopology, lookahead: Lookahead, controls: LimiterControls) -> Self {
-        Self::live(LimiterFamily::new(input, lookahead), controls)
+        Self::with_kernel(LimiterKernel::new(input, lookahead), LimiterSet, controls)
     }
 
     /// A mono limiter at the default lookahead: 1 input, 1 output.
@@ -122,21 +124,93 @@ control_set! {
     }
 }
 
-/// A limiter rings on only as a gain (it scales its delayed input), and a tail excludes
-/// the latency the delay is, so it declares no tail and never parks.
-impl NodeFamily for LimiterFamily {
+/// The lookahead limiter as a [`Kernel`]: a [`LimiterBank`] sized at the prepared rate.
+///
+/// The lookahead is its latency, and what the delay holds comes out within it: it declares
+/// no tail and never parks, so its release keeps running across a gap of silence.
+#[derive(Clone, Debug)]
+pub struct LimiterKernel {
+    input: BusTopology,
+    lookahead: Lookahead,
+    /// `None` until [`prepare`](Kernel::prepare).
+    bank: Option<LimiterBank>,
+}
+
+impl LimiterKernel {
+    /// A limiter on `input` looking `lookahead` ahead.
+    fn new(input: BusTopology, lookahead: Lookahead) -> Self {
+        Self {
+            input,
+            lookahead,
+            bank: None,
+        }
+    }
+}
+
+impl Kernel for LimiterKernel {
     type Set = LimiterSet;
 
-    fn rings(&self) -> Rings {
-        Rings::Silent
-    }
-    const SAMPLING: tutti_dsp::Cadence = <Self as tutti_dsp::Family>::CADENCE;
+    /// A cell that moves reaches the render within 16 frames, wherever the blocks fall.
+    const GRID: usize = COEFF_INTERVAL;
 
-    fn set(&self, _: &LimiterControls) -> LimiterSet {
-        LimiterSet
+    fn shape(&self) -> Shape {
+        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
+        Shape::buses(
+            Buses::main(self.input),
+            Buses::NONE.with(output).expect("one bus"),
+        )
+        .with_cost(Cost::Moderate)
     }
 
-    fn capacity(&self, _: SampleRate) {}
+    /// Sizes the delay from the lookahead at `rate`: a re-prepare empties it.
+    fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
+        self.bank = Some(LimiterBank::new(self.input.layout(), self.lookahead, rate));
+    }
+
+    fn reset(&mut self) {
+        if let Some(bank) = &mut self.bank {
+            bank.reset();
+        }
+    }
+
+    fn retarget(&mut self, controls: &LimiterControls) {
+        if let Some(bank) = &mut self.bank {
+            bank.aim(controls);
+        }
+    }
+
+    fn render<S: Float>(
+        &mut self,
+        input: Planes<'_, S>,
+        lanes: ControlLanes<'_, S>,
+        output: PlanesMut<'_, '_, S>,
+    ) {
+        let lanes = LimiterLanes {
+            threshold: lanes.get(LimiterSet::THRESHOLD_LANE),
+            ceiling: lanes.get(LimiterSet::CEILING_LANE),
+        };
+        if let Some(bank) = &mut self.bank {
+            bank.process(lanes, input, output);
+        }
+    }
+
+    fn latency(&self) -> Samples {
+        self.bank
+            .as_ref()
+            .map_or(Samples::ZERO, LimiterBank::latency)
+    }
+
+    /// No ring-out past the latency.
+    fn tail(&self) -> Tail {
+        Tail::None
+    }
+}
+
+impl LimiterSet {
+    /// The lane of the threshold: the first [`fast`](crate::ControlRead::Fast) row.
+    const THRESHOLD_LANE: usize = 0;
+    /// The lane of the ceiling: the second.
+    const CEILING_LANE: usize = 1;
 }
 
 #[cfg(test)]

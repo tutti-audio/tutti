@@ -108,9 +108,10 @@ fn the_response_is_what_the_crossover_runs() {
     let freqs = [Hz(300.0), Hz(3_000.0)];
     let m = CrossoverModel::new(&freqs, RATE).unwrap();
     let mut xo = CrossoverState::default();
+    let c = m.coefficients();
     let mut bands = vec![vec![0.0f32; N]; 3];
     for n in 0..N {
-        let out = xo.tick(&m, if n == 0 { 1.0 } else { 0.0 });
+        let out = xo.tick(&c, if n == 0 { 1.0 } else { 0.0 });
         for (b, v) in bands.iter_mut().zip(out) {
             b[n] = v;
         }
@@ -155,8 +156,9 @@ fn the_tail_covers_the_measured_ring_and_the_norms_bound_the_output() {
     let freqs = [Hz(80.0), Hz(2_000.0)];
     let m = CrossoverModel::new(&freqs, RATE).unwrap();
     let mut xo = CrossoverState::default();
+    let c = m.coefficients();
     let ir: Vec<f32> = (0..N)
-        .map(|n| xo.tick(&m, if n == 0 { 1.0 } else { 0.0 })[0])
+        .map(|n| xo.tick(&c, if n == 0 { 1.0 } else { 0.0 })[0])
         .collect();
     let win = 256;
     let env: Vec<f64> = ir
@@ -186,7 +188,7 @@ fn the_tail_covers_the_measured_ring_and_the_norms_bound_the_output() {
     for _ in 0..(60 * 48_000) {
         state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         let x = (state >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
-        let out = xo.tick(&m, x);
+        let out = xo.tick(&c, x);
         worst = out[..3]
             .iter()
             .fold(worst, |m, &s| m.max(f64::from(s.abs())));

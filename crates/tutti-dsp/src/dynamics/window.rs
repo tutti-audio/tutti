@@ -1,43 +1,6 @@
-//! The lookahead limiter's two windows: the fixed delay each channel's audio
-//! takes, and the minimum of the gains over the lookahead.
+//! The lookahead limiter's window: the minimum of the gains over the lookahead.
 
 use std::collections::VecDeque;
-
-/// A fixed delay of `len` frames: each sample written comes back `len`
-/// writes later, zeros before that. One allocation, made by
-/// [`new`](Self::new).
-#[derive(Clone, Debug)]
-pub(crate) struct FixedDelay {
-    buf: Vec<f32>,
-    write: usize,
-}
-
-impl FixedDelay {
-    /// A delay of `len` frames (at least 1), holding silence. Allocates.
-    pub(crate) fn new(len: usize) -> Self {
-        Self {
-            buf: vec![0.0; len.max(1)],
-            write: 0,
-        }
-    }
-
-    /// Writes `x` and returns the sample written `len` calls earlier.
-    #[inline]
-    pub(crate) fn step(&mut self, x: f32) -> f32 {
-        let out = core::mem::replace(&mut self.buf[self.write], x);
-        self.write += 1;
-        if self.write == self.buf.len() {
-            self.write = 0;
-        }
-        out
-    }
-
-    /// Back to silence, without reallocating.
-    pub(crate) fn clear(&mut self) {
-        self.buf.fill(0.0);
-        self.write = 0;
-    }
-}
 
 /// Sliding-window minimum via a monotonic deque. O(1) amortized per push.
 ///

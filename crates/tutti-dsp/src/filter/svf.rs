@@ -8,4 +8,5 @@ mod model;
 
 pub use bank::SvfBank;
 pub use kernel::{SvfCoefficients, SvfCoeffs, SvfType, svf_step};
+pub(crate) use kernel::{integrator_gains, svf_taps};
 pub use model::{SvfControls, SvfModel};

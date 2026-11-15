@@ -263,7 +263,21 @@ pub struct Written {
     /// resample, which moves the true peak), measured once. `None` where
     /// `gain` is, and for an output that took another's gain: it measured
     /// nothing, and the reading is of the output it followed.
+    ///
+    /// `Some` only when a placement-weighted loudness was measured: for a
+    /// `Peak` or `Lufs` output whose channels have a placement (stated, or
+    /// assumed for a width that has a bed). A `Peak` output with none (an
+    /// unplaced width such as 3 channels) measured the true peak alone, and
+    /// reports `None` rather than a loudness no placement stands behind;
+    /// [`gain`](Self::gain) is still its peak normalization.
     pub measured: Option<Loudness>,
+    /// Whether the file's channels were placed by the output
+    /// ([`FileTarget::with_topology`]: [`Stated`](tutti_types::Placement::Stated))
+    /// or taken to be the engine's order for the width
+    /// ([`ChannelTopology::assumed`](tutti_types::ChannelTopology::assumed):
+    /// [`Assumed`](tutti_types::Placement::Assumed)). A `Lufs` normalize
+    /// weighted the file's loudness by that placement.
+    pub placement: tutti_types::Placement,
 }
 
 /// The frame width an export config asks for, as the interleave stride.
@@ -441,5 +455,10 @@ pub fn write_buffers(
         unreachable!("a control with no token is never cancelled");
     };
     let (_, path, file) = landed.remove(0);
-    Ok(encode::written(&path, file, rendered.dropped_events()))
+    Ok(encode::written(
+        &path,
+        file,
+        rendered.dropped_events(),
+        target.placement(),
+    ))
 }

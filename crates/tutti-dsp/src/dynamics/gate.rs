@@ -1,36 +1,37 @@
-//! [`GateFamily`]: the noise gate as a [`Family`].
+//! [`GateBank`]: the noise gate over buffers views.
 //!
 //! A gate reads a **key**: the side-chain as wide as the signal (an unwired one is
-//! silence and holds the gate closed) or the signal itself, as the family's [`KeySource`] says.
-//! It finds the key's level (the loudest channel at each frame), decides *open* when the
-//! level is at or over the threshold, and runs a follower on that decision: an attack
-//! toward 1 while open, a hold of whole frames after the level falls, then a release toward
-//! 0. The signal is multiplied, on **every** channel, by one gain between the closed floor
-//! (the `range`) and 1: `range + open * (1 - range)`. The gain is linked, so the stereo
-//! image does not move when one side is louder.
+//! silence and holds the gate closed) or the signal itself, as the caller hands the bank
+//! its [`KeySource`](super::KeySource). It finds the key's level (the loudest channel at
+//! each frame), decides *open* when the level is at or over the threshold, and runs a
+//! follower on that decision: an attack toward 1 while open, a hold of whole frames after
+//! the level falls, then a release toward 0. The signal is multiplied, on **every**
+//! channel, by one gain between the closed floor (the `range`) and 1:
+//! `range + open * (1 - range)`. The gain is linked, so the stereo image does not move when
+//! one side is louder.
 //!
-//! The threshold is the one control read **per frame** when the graph drives it (lane 0 of
-//! the [`Inputs`]): it is a level to compare
-//! against, not a coefficient. Every other control lands on the stream grid
-//! ([`Family::CADENCE`]), the range over [`GAIN_GLIDE`] (it multiplies the output
-//! directly, so a step in it is a click) and the rest whole: the times only move what the
-//! follower is smoothing toward, and the follower is the smoother.
+//! The decision has no hysteresis of its own: the hold is what stops a gate chattering on a
+//! key that hovers at the threshold.
+//!
+//! The threshold is the one control read **per frame** when the graph drives it
+//! ([`GateLanes`]): it is a level to compare against, not a coefficient. The range multiplies
+//! the output directly, so a step in it is a click: it is a ramp, a control moving to a
+//! target, and glides over [`GAIN_GLIDE`] as a [`Glide`]. The times only move what the
+//! follower is smoothing toward, and the follower is the smoother: they land whole.
+//!
+//! The gate has no latency (the detector is on the key, never ahead of it) and no tail (the
+//! gain only scales, so a silent signal is a silent output whatever the follower is doing).
 
-use core::ops::Range;
+use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
+use tutti_types::{Amplitude, Db, SampleRate, Seconds};
 
-use tutti_types::{Amplitude, BusTopology, Db, SampleRate, Samples, Seconds};
-
-use super::compressor::GAIN_GLIDE;
 use super::curves::{amplitude_to_db, gate_gain_at};
-use super::key_source::KeySource;
-use crate::control::COEFF_STREAM;
+use super::shared::{CHUNK, GAIN_GLIDE, key_levels};
+use crate::delay::finite_or;
 use crate::smoother::Smoother;
-use crate::{
-    Approach, Cadence, Channels, Effort, Family, Glide, Inputs, Recurrence, Ring, Setup, Start,
-    Steps, System,
-};
+use crate::{Glide, Steps};
 
-/// The controls of a [`GateFamily`].
+/// The controls of a [`GateBank`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GateControls {
     /// The key level, in dB, at or above which the gate opens.
@@ -69,35 +70,29 @@ impl Default for GateControls {
     }
 }
 
-/// `x` if it is finite, else `default`.
-fn finite_or(x: f32, default: f32) -> f32 {
-    if x.is_finite() { x } else { default }
-}
-
-/// A gate at one set of controls and one rate: the comparison, the hold in frames and the
-/// closed floor. Memoryless in the sense that matters to the graph: no latency (the
-/// detector is on the key, never ahead of it) and no tail (the gain only scales, so a
-/// silent signal is a silent output whatever the follower is doing).
+/// The figures the detector runs on, which land whole: the comparison, the times as
+/// one-pole coefficients at the rate, the hold in frames and the closed gain.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct GateMember {
-    threshold: Db,
-    attack: Seconds,
-    hold: Seconds,
-    release: Seconds,
-    range: Db,
-    rate: SampleRate,
+struct Design {
     /// The threshold as a linear level: the detector compares in the linear domain, so no
     /// `log10` runs per frame.
     threshold_linear: f32,
     /// Whether a silent key (pinned at [`Db::FLOOR`]) is at or above the threshold. Only
     /// a threshold at or under the floor opens on silence.
     silence_opens: bool,
+    /// The one-pole coefficient while the gate opens.
+    attack: f32,
+    /// The one-pole coefficient while it closes.
+    release: f32,
     /// `floor(hold * rate)`.
     hold_samples: usize,
+    /// The closed gain's level in dB, at most 0.
+    range: Db,
 }
 
-impl GateMember {
-    /// The member of `c` at `rate`, the controls made runnable.
+impl Design {
+    /// The design of `c` at `rate`: a non-finite control is the default's, the times are
+    /// floored at 0 and the range is capped at 0 dB.
     fn of(c: &GateControls, rate: SampleRate) -> Self {
         let d = GateControls::DEFAULT;
         let threshold = Db(finite_or(c.threshold.get(), d.threshold.get()));
@@ -106,46 +101,13 @@ impl GateMember {
         // hold, saturates to the longest count.
         let hold = Seconds(c.hold.get().max(0.0));
         Self {
-            threshold,
-            attack: Seconds(c.attack.get().max(0.0)),
-            hold,
-            release: Seconds(c.release.get().max(0.0)),
-            range: Db(finite_or(c.range.get(), d.range.get()).min(0.0)),
-            rate,
             threshold_linear: threshold.to_amplitude().get(),
             silence_opens: Db::FLOOR >= threshold,
+            attack: Seconds(c.attack.get().max(0.0)).one_pole_coeff(rate),
+            release: Seconds(c.release.get().max(0.0)).one_pole_coeff(rate),
             hold_samples: hold.to_samples_floor(rate).get(),
+            range: Db(finite_or(c.range.get(), d.range.get()).min(0.0)),
         }
-    }
-
-    /// The threshold, in dB.
-    #[must_use]
-    pub fn threshold(&self) -> Db {
-        self.threshold
-    }
-
-    /// The attack time constant, at least 0.
-    #[must_use]
-    pub fn attack(&self) -> Seconds {
-        self.attack
-    }
-
-    /// The hold time, at least 0.
-    #[must_use]
-    pub fn hold(&self) -> Seconds {
-        self.hold
-    }
-
-    /// The release time constant, at least 0.
-    #[must_use]
-    pub fn release(&self) -> Seconds {
-        self.release
-    }
-
-    /// The range, in dB and at most 0: the closed gain.
-    #[must_use]
-    pub fn range(&self) -> Db {
-        self.range
     }
 }
 
@@ -158,262 +120,150 @@ fn opens(level: f32, threshold_linear: f32, silence_opens: bool) -> bool {
     level >= threshold_linear || (level <= 0.0 && silence_opens)
 }
 
-impl System for GateMember {
-    fn latency(&self) -> Samples {
-        Samples::ZERO
-    }
-
-    fn tail(&self, _: Db) -> Ring {
-        Ring::Finite(Seconds(0.0))
-    }
+/// The per-frame lane a gate reads beside its audio, in the audio's sample format, `None`
+/// where nothing drives it. A lane is at least as long as the frames a call renders; a frame
+/// past its end is not driven.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GateLanes<'a, S: Float = f32> {
+    /// The threshold in dB. A frame that is not finite is the aimed threshold.
+    pub threshold: Option<Mono<'a, S>>,
 }
 
-/// The [`Family`] of the noise gate, `input` wide, its detector on the [`KeySource`] it is
-/// given. One open/closed decision is made from the loudest key channel and one gain is
-/// applied to every channel.
-#[derive(Clone, Copy, Debug)]
-pub struct GateFamily {
-    input: BusTopology,
-    key: KeySource,
-}
-
-impl GateFamily {
-    /// A gate on the bus `input` whose detector reads `key`, and one output bus where the
-    /// input is. A [`KeySource::Sidechain`] is a second bus as wide as the input.
-    #[must_use]
-    pub const fn new(input: BusTopology, key: KeySource) -> Self {
-        Self { input, key }
-    }
-}
-
-impl Family for GateFamily {
-    type Controls = GateControls;
-    type Member = GateMember;
-    type Recurrence = GateRecurrence;
-
-    /// Solved on the stream's grid of 16 frames, like the filters: a control that moves
-    /// inside a block reaches the render within 16 frames, wherever the blocks fall.
-    const CADENCE: Cadence = COEFF_STREAM;
-
-    fn channels(&self) -> Channels {
-        self.key.channels(self.input)
-    }
-
-    fn blank(&self, rate: SampleRate) -> GateMember {
-        GateMember::of(&GateControls::DEFAULT, rate)
-    }
-
-    /// The controls, made runnable: a non-finite one is the default's, the times are
-    /// floored at 0 and the range is capped at 0 dB.
-    fn member_into(&self, c: &GateControls, rate: SampleRate, out: &mut GateMember) {
-        *out = GateMember::of(c, rate);
-    }
-
-    fn recurrence(&self, _: SampleRate) -> GateRecurrence {
-        GateRecurrence { key: self.key }
-    }
-}
-
-/// The figures the detector runs on, which land whole: the comparison, the times as
-/// one-pole coefficients at the rate, and the hold in frames.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct GateDetector {
-    threshold_linear: f32,
-    silence_opens: bool,
-    /// The one-pole coefficient while the gate opens.
-    attack: f32,
-    /// The one-pole coefficient while it closes.
-    release: f32,
-    hold_samples: usize,
-}
-
-/// The coefficient point of a gate: the [`GateDetector`], which lands whole, and the
-/// range, which glides.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct GateTarget {
-    detector: GateDetector,
-    range: Db,
-}
-
-/// The coefficients in flight: the detector's, landed, and a range gliding over
-/// [`GAIN_GLIDE`].
+/// A noise gate of any width: one open/closed decision from the loudest key channel, one
+/// gain applied to every channel, with the follower and the hold that smooth it and the
+/// range that glides.
 ///
-/// A generic glide of the whole target would run for every frame of the glide when only
-/// a time moved; the detector lands at once (the follower is its own smoother) and only
-/// the range, which has nothing smoothing it, takes steps.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct GateCoeffs {
-    detector: GateDetector,
-    /// The range in dB.
-    range: Glide<f32>,
-    /// The steps a range glide takes: [`GAIN_GLIDE`] at the prepared rate.
-    steps: u32,
-}
-
-impl Approach for GateCoeffs {
-    type Target = GateTarget;
-
-    fn aim(&mut self, target: &GateTarget) {
-        self.detector = target.detector;
-        self.range
-            .aim_by(target.range.get(), Steps::Fixed(self.steps));
-    }
-
-    #[inline]
-    fn step(&mut self) -> bool {
-        self.range.step()
-    }
-
-    fn settle(&mut self) {
-        self.range.settle();
-    }
-}
-
-/// What a block changes: the follower, the hold, and the gain of each frame of the block.
+/// Built on the control side for one rate; the state is `f32`, and a view of another sample
+/// format is converted at the edges. Nothing it holds grows.
 #[derive(Clone, Debug)]
-pub struct GateState {
+pub struct GateBank {
+    design: Design,
+    /// The closed gain in dB, gliding over [`GAIN_GLIDE`].
+    range: Glide<f32>,
+    /// The steps a range glide takes: [`GAIN_GLIDE`] at the rate.
+    steps: u32,
+    rate: SampleRate,
     /// The smoothed open fraction, 0 closed to 1 open.
     follower: f32,
     /// The frames of hold left.
     hold_counter: usize,
-    /// The linked gain of each frame of the block being run, sized to the longest block
-    /// in `prepare`.
-    gains: Vec<f32>,
 }
 
-/// The [`Recurrence`] of a [`GateFamily`].
-///
-/// K, per frame: the key's level (the loudest channel of the [`KeySource`]'s source, the
-/// side-chain or the signal; a NaN reads as quiet), the decision *open* (against the
-/// member's linear threshold, or, when lane 0 of the [`Inputs`] is finite at the frame,
-/// against that threshold in dB: the level in dB, floored at [`Db::FLOOR`], at or over
-/// it), the follower (the attack coefficient toward 1 and the hold counter reloaded while
-/// open; the counter counting down while closed, the follower still; then the release
-/// coefficient toward 0), and the gain `range + follower * (1 - range)` of the range as
-/// an amplitude. The gain of every frame is written first, and the channels are then
-/// multiplied by it, a multiply that vectorizes.
-///
-/// **Lane 0 is the threshold in dB, per frame.** A frame that is not finite falls back to
-/// the member's threshold.
-#[derive(Clone, Copy, Debug)]
-pub struct GateRecurrence {
-    key: KeySource,
-}
-
-impl Recurrence for GateRecurrence {
-    type Member = GateMember;
-    type Capacity = ();
-    type Target = GateTarget;
-    type Coeffs = GateCoeffs;
-    type State = GateState;
-
-    const STEP: usize = 1;
-
-    fn start(&self, member: &GateMember) -> Start<Self> {
-        let mut target = GateTarget {
-            detector: GateDetector {
-                threshold_linear: 0.0,
-                silence_opens: false,
-                attack: 0.0,
-                release: 0.0,
-                hold_samples: 0,
-            },
-            range: Db(0.0),
-        };
-        self.coefficients_into(member, &mut target);
-        Start {
-            coeffs: GateCoeffs {
-                detector: target.detector,
-                range: Glide::landed(target.range.get()),
-                steps: 0,
-            },
-            state: GateState {
-                follower: 0.0,
-                hold_counter: 0,
-                gains: Vec::new(),
-            },
-            target,
+impl GateBank {
+    /// A gate that passes everything at `rate`, to be aimed.
+    #[must_use]
+    pub fn new(rate: SampleRate) -> Self {
+        // 5 ms is a few hundred frames at any real rate; an absurd rate saturates rather
+        // than panic, since a prepare must not.
+        let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
+        let design = Design::of(&GateControls::DEFAULT, rate);
+        Self {
+            range: Glide::landed(design.range.get()),
+            design,
+            steps,
+            rate,
+            follower: 0.0,
+            hold_counter: 0,
         }
     }
 
-    fn prepare(
+    /// Back to silence: the gate closed and no hold left, and the range landed on its
+    /// target. No allocation.
+    pub fn reset(&mut self) {
+        self.follower = 0.0;
+        self.hold_counter = 0;
+        self.range.settle();
+    }
+
+    /// Lands the range on its target now.
+    pub fn settle(&mut self) {
+        self.range.settle();
+    }
+
+    /// Aims at `controls`: the detector's figures land whole (the follower smooths them) and
+    /// the range glides over [`GAIN_GLIDE`]. No allocation.
+    pub fn aim(&mut self, controls: &GateControls) {
+        self.design = Design::of(controls, self.rate);
+        self.range
+            .aim_by(self.design.range.get(), Steps::Fixed(self.steps));
+    }
+
+    /// Runs `input` into `output`, scaled by one gain decided from the loudest channel of
+    /// `key`.
+    ///
+    /// `key` is the signal the detector listens to: the side-chain bus, or `input` itself
+    /// for a gate on its own signal. Channel `c` of `input` feeds channel `c` of `output`;
+    /// a channel past the narrower of the two views is not touched, and the frames rendered
+    /// are the fewest of the three views'. A NaN key sample reads as quiet and an infinite one
+    /// as the largest finite level. Frame `i` reads the range at the glide's step
+    /// `taken + 1 + i`, then the block's steps are taken. No allocation.
+    pub fn process<S: Float>(
         &mut self,
-        _: &(),
-        setup: &Setup,
-        coeffs: &mut GateCoeffs,
-        state: &mut GateState,
-        _: &mut GateTarget,
+        lanes: GateLanes<'_, S>,
+        key: Planes<'_, S>,
+        input: Planes<'_, S>,
+        mut output: PlanesMut<'_, '_, S>,
     ) {
-        // 5 ms is a few hundred frames at any real rate; an absurd rate saturates
-        // rather than panic, since a prepare must not.
-        coeffs.steps =
-            u32::try_from(GAIN_GLIDE.to_samples_ceil(setup.rate).get()).unwrap_or(u32::MAX);
-        state.gains = vec![0.0; setup.max_block.get()];
-    }
-
-    fn coefficients_into(&self, m: &GateMember, target: &mut GateTarget) -> bool {
-        target.detector = GateDetector {
-            threshold_linear: m.threshold_linear,
-            silence_opens: m.silence_opens,
-            attack: m.attack.one_pole_coeff(m.rate),
-            release: m.release.one_pole_coeff(m.rate),
-            hold_samples: m.hold_samples,
-        };
-        target.range = m.range;
-        true
-    }
-
-    fn clear(&self, state: &mut GateState) {
-        state.follower = 0.0;
-        state.hold_counter = 0;
-    }
-
-    fn run(
-        &self,
-        coeffs: &GateCoeffs,
-        state: &mut GateState,
-        feed: &Inputs<'_>,
-        output: &mut [&mut [f32]],
-        frames: Range<usize>,
-        _: usize,
-    ) {
-        let d = &coeffs.detector;
-        let range = Db(coeffs.range.now()).to_amplitude().get();
-        let detected = self.key.detected(feed);
-        let gains = &mut state.gains[frames.clone()];
-        for (g, i) in gains.iter_mut().zip(frames.clone()) {
-            let level = detected.iter().fold(0.0f32, |m, ch| m.max(ch[i].abs()));
-            let open = match feed.lanes[0]
-                .map(|lane| Db(lane[i]))
-                .filter(|t| t.get().is_finite())
-            {
-                Some(t) => amplitude_to_db(Amplitude::new(level)) >= t,
-                None => opens(level, d.threshold_linear, d.silence_opens),
-            };
-            if open {
-                state.hold_counter = d.hold_samples;
-                state.follower = Smoother::toward(state.follower, 1.0, d.attack);
-            } else if state.hold_counter > 0 {
-                state.hold_counter -= 1;
-            } else {
-                state.follower = Smoother::toward(state.follower, 0.0, d.release);
+        let frames = input
+            .frames()
+            .get()
+            .min(output.frames().get())
+            .min(key.frames().get());
+        let width = input.channels().min(output.channels());
+        let d = self.design;
+        let blended = self.range.blended(frames);
+        let taken = self.range.taken();
+        let held = Db(self.range.target()).to_amplitude().get();
+        let mut gains = [0.0f32; CHUNK];
+        let mut start = 0;
+        while start < frames {
+            let n = (frames - start).min(CHUNK);
+            let end = start + n;
+            let gains = &mut gains[..n];
+            // The key's level: the loudest channel at each frame.
+            key_levels(&key, start..end, gains);
+            for (k, g) in gains.iter_mut().enumerate() {
+                let i = start + k;
+                let level = *g;
+                let open = match lanes
+                    .threshold
+                    .and_then(|l| l.samples().get(i))
+                    .map(|x| Db(x.convert_to::<f32>()))
+                    .filter(|t| t.get().is_finite())
+                {
+                    Some(t) => amplitude_to_db(Amplitude::new(level)) >= t,
+                    None => opens(level, d.threshold_linear, d.silence_opens),
+                };
+                if open {
+                    self.hold_counter = d.hold_samples;
+                    self.follower = Smoother::toward(self.follower, 1.0, d.attack);
+                } else if self.hold_counter > 0 {
+                    self.hold_counter -= 1;
+                } else {
+                    self.follower = Smoother::toward(self.follower, 0.0, d.release);
+                }
+                let range = if i < blended {
+                    let db = self
+                        .range
+                        .at(taken.saturating_add(1).saturating_add(i as u32));
+                    Db(db).to_amplitude().get()
+                } else {
+                    held
+                };
+                *g = gate_gain_at(self.follower, range).get();
             }
-            *g = gate_gain_at(state.follower, range).get();
-        }
-        let gains = &state.gains[frames.clone()];
-        for (out, input) in output.iter_mut().zip(feed.audio) {
-            for ((o, &x), &g) in out[frames.clone()]
-                .iter_mut()
-                .zip(&input[frames.clone()])
-                .zip(gains)
-            {
-                *o = x * g;
+            for c in 0..width {
+                let xs = &input.plane(c).samples()[start..end];
+                let mut plane = output.plane_mut(c);
+                let ys = &mut plane.samples_mut()[start..end];
+                for ((y, x), &g) in ys.iter_mut().zip(xs).zip(gains.iter()) {
+                    *y = (x.convert_to::<f32>() * g).convert_to::<S>();
+                }
             }
+            start = end;
         }
-    }
-
-    fn effort(&self) -> Effort {
-        Effort::Moderate
+        self.range
+            .advance(u32::try_from(frames).unwrap_or(u32::MAX));
     }
 }
 

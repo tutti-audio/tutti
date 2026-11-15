@@ -76,12 +76,13 @@ fn graph_errors_are_boxable() {
     err::<VerifyError>();
 }
 
+#[cfg(feature = "session")]
 fn session_errors_are_boxable() {
     err::<tutti::Error>();
     err::<tutti::session::TempoError>();
 }
 
-#[cfg(feature = "device")]
+#[cfg(all(feature = "session", feature = "device"))]
 fn device_errors_are_boxable() {
     err::<tutti::session::RestartError>();
 }
@@ -90,6 +91,10 @@ fn device_errors_are_boxable() {
 fn modulation_errors_are_boxable() {
     err::<tutti::modulation::CompileError>();
     err::<tutti::modulation::ProgramError>();
+}
+
+#[cfg(all(feature = "session", feature = "modulation"))]
+fn session_modulation_errors_are_boxable() {
     err::<tutti::session::ModRefusal>();
     err::<tutti::session::Problem>();
 }
@@ -100,7 +105,7 @@ fn sampler_errors_are_boxable() {
     err::<tutti::sampler::StreamingAddError>();
 }
 
-#[cfg(feature = "plugin")]
+#[cfg(all(feature = "session", feature = "plugin"))]
 fn recovery_errors_are_boxable() {
     err::<tutti::session::RecoveryFailure>();
     err::<tutti::session::ReloadCause>();
