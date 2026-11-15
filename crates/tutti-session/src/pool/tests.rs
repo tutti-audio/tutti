@@ -837,6 +837,7 @@ mod font {
 /// **A refusal of a landing that something newer superseded records nothing**:
 /// the kind that refuses a landed value names the landing's generation, and an
 /// entry with a load in flight (or a newer landing) is left to that load.
+#[cfg(feature = "plugin")]
 #[test]
 fn a_stale_refusal_of_a_landing_leaves_the_load_in_flight_alone() {
     let (mut s, spawned) = session();

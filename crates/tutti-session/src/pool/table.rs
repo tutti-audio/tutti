@@ -47,7 +47,8 @@ pub enum PoolState {
     /// does. A failed reload leaves no value: the old one is dropped. A kind
     /// whose holder refuses a value that landed (a node over a plugin with
     /// other ports) reads failed too, with its own error, after the landing's
-    /// [`PoolEvent::Loaded`] or [`PoolEvent::Reloaded`] in the same update.
+    /// [`PoolEvent::Loaded`] or [`PoolEvent::Reloaded`] in the same update, or a
+    /// later one when the swap waits for the main thread or a re-prepare.
     Failed(LoadError),
     /// No longer declared, and kept by a node or a snapshot until their last
     /// hold is dropped.
@@ -58,13 +59,15 @@ pub enum PoolState {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum PoolEvent {
-    /// The entry's first load landed.
+    /// The entry's load landed with no value before it: the first load, or the
+    /// first after a failed or refused one (a `retry`, a new identity).
     Loaded,
     /// A reload landed: the entry's identity changed and the new value
     /// replaced the old one. It does not promise that whatever holds the old
     /// value (a node over a plugin) took the new one: a kind whose holder can
     /// refuse the landed value fails the entry, as [`Failed`](Self::Failed),
-    /// after this event in the same update.
+    /// after this event in the same update, or in a later one when the
+    /// holder's refusal waits for the main thread or a re-prepare.
     Reloaded,
     /// The load failed.
     Failed(LoadError),
@@ -688,8 +691,10 @@ impl Pool {
     /// landing that was refused ([`landing_of`](Self::landing_of)): a refusal of
     /// a landing that a newer declaration or a pending load has since
     /// superseded is stale and records nothing, so it cannot clobber the load
-    /// in flight. Returns whether the entry failed.
-    #[cfg(any(test, feature = "plugin"))]
+    /// in flight. (A pending load always has a newer generation, so the
+    /// pending check only says the same thing twice.) Returns whether the
+    /// entry failed.
+    #[cfg(feature = "plugin")]
     pub(crate) fn refuse_landed(
         &mut self,
         key: &PoolKey,
@@ -919,7 +924,7 @@ impl Pool {
 
     /// `E`'s loaded value under `key` and the generation of the landing that
     /// made it, wherever the entry stands in the app's set (declared or held).
-    #[cfg(any(test, feature = "plugin"))]
+    #[cfg(feature = "plugin")]
     pub(crate) fn landing_of<E: PoolEntry>(&self, key: &PoolKey) -> Option<(u64, &E::Loaded)> {
         let slot = self
             .slots

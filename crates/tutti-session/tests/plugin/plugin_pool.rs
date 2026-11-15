@@ -560,7 +560,10 @@ fn a_swap_to_the_same_totals_in_other_buses_fails_the_entry() {
     };
     assert_eq!(
         (got.inputs.clone(), was.inputs.clone()),
-        (vec![1, 1], vec![2])
+        (
+            vec![ChannelLayout::MONO, ChannelLayout::MONO],
+            vec![ChannelLayout::STEREO]
+        )
     );
     assert_eq!(
         s.plugin(node).unwrap().descriptor().id,
@@ -605,9 +608,8 @@ fn a_retry_after_a_refused_swap_swaps_the_node() {
     ));
 }
 
-/// **A third identity after a refused swap is the node's last**, and one
-/// declared while a swap waits for the graph replaces the one waiting: the node
-/// ends on the last identity declared.
+/// **A new identity after a refused swap reaches the node**: the entry that
+/// failed loads the next identity declared, and the node ends on it.
 #[test]
 fn a_later_identity_is_the_one_the_node_ends_on() {
     let (catalog, _dir) = catalog();
@@ -718,6 +720,8 @@ fn a_graph_that_refuses_the_swap_fails_the_entry() {
     let (catalog, _dir) = catalog();
     let (mut s, node) = with_node(&catalog);
     s.graph().add(Unforkable(Grenade));
+    // The session's executor is local, so both halves of the re-prepare run
+    // here and the grenade's panic has poisoned the editor when this returns.
     s.graph().set_sample_rate(SampleRate::SR_96K);
     s.pool(s.plugin_entry("fx", &second_id(), &catalog))
         .unwrap();

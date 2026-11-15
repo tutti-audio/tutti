@@ -15,12 +15,15 @@
 //! entry reloads (a changed identity, or [`retry`](Session::retry) on a lost
 //! one), and the new plugin is the next node's.
 //!
-//! A changed identity under the key loads the new plugin. When it lands, a
-//! node over the key swaps to it if its audio ports and MIDI output match the
-//! node's (a crossfade when the shapes fit the graph's check, else a plain
-//! swap), waiting for a graph that is re-preparing. A plugin whose ports differ
-//! fails the entry with [`LoadError::PluginPorts`] and the node keeps the
-//! plugin it has: re-inserting a node with new ports is a later change.
+//! Whatever lands under a key a node is over (a changed identity, a
+//! [`retry`](Session::retry) after a refusal) is swapped into the node, if its
+//! audio buses and MIDI output match the node's (a crossfade when the shapes
+//! fit the graph's check, else a plain swap). The swap waits for a graph that
+//! is re-preparing and, for an in-process plugin, for an update on the main
+//! thread: a session never updated there does not swap one, and the entry keeps
+//! the landed plugin until it is. A plugin whose ports differ fails the entry
+//! with [`LoadError::PluginPorts`] and the node keeps the plugin it has:
+//! re-inserting a node with new ports is a later change.
 
 use std::cell::RefCell;
 use std::fmt;
@@ -34,7 +37,7 @@ use tutti_plugin::catalog::{
 use tutti_plugin::error::StateError;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{BridgeError, Features, MainThreadMarker, MainWorkHandle};
-use tutti_types::SampleRate;
+use tutti_types::{ChannelLayout, SampleRate};
 
 use super::{HostPlugin, Mirror, Open, Origin, PluginLoad, PluginLoaded, PluginNode};
 use crate::peer::{ResourceIds, sealed};
@@ -340,10 +343,10 @@ impl Drop for LoadedPlugin {
 /// (a main bus of 4 against a main of 2 and a sidechain of 2) differ.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PluginPorts {
-    /// The channel count of each input bus.
-    pub inputs: Vec<u16>,
-    /// The channel count of each output bus.
-    pub outputs: Vec<u16>,
+    /// The width of each input bus.
+    pub inputs: Vec<ChannelLayout>,
+    /// The width of each output bus.
+    pub outputs: Vec<ChannelLayout>,
     /// Whether the plugin has a MIDI output.
     pub midi_out: bool,
 }
@@ -365,8 +368,8 @@ impl fmt::Display for PluginPorts {
 fn ports_of(handle: &PluginHandle) -> PluginPorts {
     let loaded = handle.loaded();
     PluginPorts {
-        inputs: loaded.input_widths().iter().map(|w| w.count()).collect(),
-        outputs: loaded.output_widths().iter().map(|w| w.count()).collect(),
+        inputs: loaded.input_widths(),
+        outputs: loaded.output_widths(),
         midi_out: loaded.features.contains(Features::MIDI_OUT),
     }
 }
@@ -640,7 +643,9 @@ impl Session {
     /// # Errors
     ///
     /// [`AddPluginError::Entry`] when the key has no loaded plugin entry;
-    /// [`AddPluginError::Installed`] when a node took its plugin already;
+    /// [`AddPluginError::Installed`] when a node took its plugin already or a
+    /// node links the key (the landed plugin is the node's swap, which this
+    /// call leaves alone);
     /// [`AddPluginError::Lost`] when the plugin is lost (it stays so until
     /// [`retry`](Self::retry)).
     pub fn add_pooled_plugin<K>(&mut self, key: &K) -> Result<Key<PluginNode>, AddPluginError<K>>
@@ -663,7 +668,10 @@ impl Session {
                 .as_ref()
                 .is_some_and(|link| link.key == pool_key)
         });
-        let Some(install) = loaded.take_install().filter(|_| !linked) else {
+        if linked {
+            return Err(AddPluginError::Installed(key.clone()));
+        }
+        let Some(install) = loaded.take_install() else {
             return Err(AddPluginError::Installed(key.clone()));
         };
         let standing = Arc::clone(&loaded.standing);
