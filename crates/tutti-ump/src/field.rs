@@ -4,6 +4,8 @@
 //! The public constructor refuses a value out of range. The codec builds one
 //! from bits it has just masked, through the private `wire`.
 
+use crate::ControlValue;
+
 /// A raw number above the largest the type holds, from `TryFrom` on an
 /// address type or a bit-width field.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
@@ -272,6 +274,49 @@ bounded!(
     /// to fifteen Member Channels: `2..=16` (M2-120 §2.1).
     MpeChannels, u8, 2, 16
 );
+bounded!(
+    /// The channel count M of Mono Mode On, Control Change 126 (MIDI 1.0
+    /// Detailed Specification, Channel Mode Messages, Omni-Off/Mono): `1..=16`
+    /// channels from the Basic Channel, or `0`, which assigns every voice the
+    /// receiver has one channel each, up to Channel 16. The MIDI 2.0 Protocol
+    /// carries it in the top 7 bits of the Control Change's 32-bit value
+    /// (M2-104 §7.4.6.1).
+    MonoChannels, u8, 0, 16
+);
+
+impl MonoChannels {
+    /// `0`: one channel for each voice of the receiver.
+    pub const ALL_VOICES: Self = Self(0);
+
+    /// The count in a MIDI 2.0 Control Change 126's value: its top 7 bits,
+    /// the other 25 ignored (M2-104 §7.4.6.1). `None` for a count past 16,
+    /// which the MIDI 1.0 specification does not define.
+    #[must_use]
+    pub const fn from_value(value: ControlValue) -> Option<Self> {
+        Self::new((value.get() >> 25) as u8)
+    }
+
+    /// The value that carries this count: the count in the top 7 bits, the
+    /// other 25 zero.
+    #[must_use]
+    pub const fn to_value(self) -> ControlValue {
+        ControlValue::new((self.0 as u32) << 25)
+    }
+
+    /// The count in a MIDI 1.0 Control Change 126's data byte, or `None` for a
+    /// count past 16.
+    #[must_use]
+    pub const fn from_data_byte(byte: U7) -> Option<Self> {
+        Self::new(byte.get())
+    }
+
+    /// The data byte of a MIDI 1.0 Control Change 126 that carries this count.
+    #[must_use]
+    pub const fn to_data_byte(self) -> U7 {
+        U7::masked(self.0)
+    }
+}
+
 bounded!(
     /// Sharps (positive) or flats (negative) in a key signature, `-7..=7`.
     SharpsFlats, i8, -7, 7

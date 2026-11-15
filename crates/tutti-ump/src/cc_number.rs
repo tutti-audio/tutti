@@ -128,6 +128,9 @@ impl CCNumber {
     pub const RESET_ALL: CCNumber = CCNumber(121);
     /// CC 123.
     pub const ALL_NOTES_OFF: CCNumber = CCNumber(123);
+    /// CC 126 — Mono Mode On (Omni-Off/Mono): its value is a
+    /// [`MonoChannels`](crate::MonoChannels) count.
+    pub const MONO_MODE_ON: CCNumber = CCNumber(126);
 
     // Effects depths.
     /// CC 91 — Effects 1 Depth (reverb send level).
