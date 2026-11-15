@@ -79,7 +79,7 @@ pub struct NoteExpressionValue {
     /// Which dimension is being driven.
     pub expression_type: NoteExpressionType,
     /// The value, in the dimension's own convention — **not** uniformly
-    /// normalized, and not a [`Normalized`](crate::Normalized). VST3 scales most
+    /// normalized, and not a [`Normalized`]. VST3 scales most
     /// dimensions `0..=1` but tuning in semitones; each host crate converts at
     /// its own boundary.
     pub value: f64,
@@ -132,7 +132,8 @@ const PER_NOTE_EXPRESSIONS: [(CCNumber, NoteExpressionType); 3] = [
     (CCNumber::BRIGHTNESS, NoteExpressionType::Brightness),
 ];
 
-/// The expression the per-note controller `number` is ([`PER_NOTE_EXPRESSIONS`]),
+/// The expression the per-note controller `number` is (volume 7, pan 10 and
+/// brightness 74, the usual CC assignments),
 /// or `None` for a number with no counterpart.
 #[must_use]
 pub fn expression_of_per_note_controller(number: u8) -> Option<NoteExpressionType> {
