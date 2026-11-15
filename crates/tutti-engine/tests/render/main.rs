@@ -9,5 +9,6 @@ mod env_beat;
 mod graph_contract;
 mod loop_region;
 mod root_channel_layouts;
+mod root_crossfade;
 mod tempo_ramps;
 mod tempo_steps;

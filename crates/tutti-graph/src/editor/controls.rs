@@ -241,6 +241,13 @@ impl Editor {
                 changed = true;
             }
         }
+        // A root change's crossfade the executor has rendered through: the
+        // commit that follows compiles the old root's channels away.
+        let ended = self.link.root_fade_ended();
+        if let Some(bank) = self.bank.as_mut().filter(|b| !b.ended && b.seq <= ended) {
+            bank.ended = true;
+            changed = true;
+        }
         if changed {
             self.touch();
         }

@@ -819,6 +819,28 @@ impl Inlet<Bus> for Root {
     }
 }
 
+/// A root declaration just made ([`Session::declare_root_topology`](crate::Session::declare_root_topology)),
+/// borrowing the graph so it can be made a cut:
+/// `session.declare_root_topology(root)?.hard()`.
+///
+/// Dropping it keeps the declaration as made, which crossfades the old root
+/// into the new over [`DECLICK`](tutti_graph::DECLICK).
+#[derive(Debug)]
+pub struct RootDeclaration<'g> {
+    pub(crate) graph: &'g mut Graph,
+}
+
+impl RootDeclaration<'_> {
+    /// Takes the new root at one block, a cut: no old root is rendered beside
+    /// it. The default is a crossfade over [`DECLICK`](tutti_graph::DECLICK)
+    /// (5 ms), so a change of layout never steps the sound; `hard` is for a
+    /// test, an analysis graph or a root changed before anything is listening.
+    pub fn hard(self) -> Self {
+        self.graph.harden_root();
+        self
+    }
+}
+
 /// The edges a [`Graph::connect`] just made, borrowing the graph so a gain
 /// can be set on them: `g.connect(a.out(0), b.input(0))?.gain(half)?`.
 ///
