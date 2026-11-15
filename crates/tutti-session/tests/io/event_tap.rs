@@ -11,7 +11,7 @@ use tutti_graph::{
     Cx, Event, EventCapacity, Io, MissingSource, Node, Op, Prepare, Shape, Status, TapAlign,
     TapEvent, Unforkable,
 };
-use tutti_session::{CloseError, EventInPort, EventOutPort, Session};
+use tutti_session::{CloseError, DetachedSession, EventInPort, EventOutPort, Session};
 use tutti_types::ChannelLayout;
 use tutti_types::{Frame, SampleRate};
 use tutti_ump::Ump;
@@ -38,7 +38,7 @@ impl Node for Every4 {
     fn reset(&mut self) {}
 }
 
-fn session() -> (Session, EventOutPort) {
+fn session() -> (DetachedSession, EventOutPort) {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::SR_48K)
@@ -47,7 +47,7 @@ fn session() -> (Session, EventOutPort) {
     (s, key.events_out())
 }
 
-fn frames(n: usize, s: &mut Session) {
+fn frames(n: usize, s: &mut DetachedSession) {
     let mut out = [0.0f32];
     for _ in 0..n {
         s.render_frame(&mut out);
@@ -73,7 +73,7 @@ fn drain(tap: &mut tutti_graph::EventTapReader) -> Vec<u64> {
         .collect()
 }
 
-fn tap_ops(s: &Session) -> usize {
+fn tap_ops(s: &DetachedSession) -> usize {
     s.graph_ref()
         .testing()
         .sent_plan()

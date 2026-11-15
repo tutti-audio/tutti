@@ -8,12 +8,12 @@ use std::sync::Arc;
 use tutti_codec::Wave;
 use tutti_graph::ForkError;
 use tutti_sampler::{Clip, Loop, MemorySource, Playback, SlotId, VoicePool};
-use tutti_session::{Bounce, BounceError, BounceTail, Range, Root, Session};
+use tutti_session::{Bounce, BounceError, BounceTail, DetachedSession, Range, Root, Session};
 use tutti_types::{Beat, ChannelLayout, PlaybackRate, SampleRate, Samples, Seconds};
 
 const RATE: f64 = 48_000.0;
 
-fn session() -> Session {
+fn session() -> DetachedSession {
     let mut session = Session::builder()
         .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)
@@ -34,7 +34,7 @@ fn constant(frames: usize, level: f32) -> Arc<Wave> {
 
 /// The master's frame count of a bounce of the first `seconds`, with the
 /// tail the bounce picks without being asked.
-fn length_of(session: &mut Session, seconds: f64) -> usize {
+fn length_of(session: &mut DetachedSession, seconds: f64) -> usize {
     let bounce = Bounce::project()
         .master_buffers()
         .range(Range::Seconds(Seconds(0.0), Seconds(seconds)))

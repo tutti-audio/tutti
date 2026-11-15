@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, MainWork};
-use tutti_session::Session;
+use tutti_session::{DetachedSession, Session};
 use tutti_types::{ChannelLayout, SampleRate};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -36,7 +36,7 @@ fn closes() -> u32 {
     count
 }
 
-fn session() -> Session {
+fn session() -> DetachedSession {
     Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
@@ -45,7 +45,7 @@ fn session() -> Session {
 
 /// A probe plugin loaded in `session`, then removed from it and let go of by the session:
 /// what is left of it is the returned handle, so dropping that is the last release.
-fn loaded_and_released(session: &mut Session, main: MainThreadMarker) -> PluginHandle {
+fn loaded_and_released(session: &mut DetachedSession, main: MainThreadMarker) -> PluginHandle {
     let node = session
         .load_plugin_blocking(
             main,

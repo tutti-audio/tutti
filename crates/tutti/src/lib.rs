@@ -53,8 +53,8 @@
 //!
 //! To play through a sound card, turn on `device` and let the session (the
 //! `session` feature, on by default) open it and build the graph at the rate it
-//! reports: `SessionBuilder::<OnDevice>::build` hands back a `LiveSession`, the
-//! `Session` and its `Device` (dropping it stops the stream), and `examples/headless_engine.rs` plays a tone in under twenty
+//! reports: `SessionBuilder::<DeviceClock>::build` hands back a `LiveSession`, the
+//! `Session` on the sound card's clock (dropping it stops the stream), and `examples/headless_engine.rs` plays a tone in under twenty
 //! lines. To write a file
 //! instead, turn on `export` (it brings the `codec` module with it) and bounce the
 //! session: a `Bounce` names a range and a master, and optionally stems, and
@@ -460,12 +460,15 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    ConnectError, Edge, EventInPort, EventOutPort, EventTapPort, HeardOpen, HeardTapError, InPort,
-    Job, JobFailed, Key, NoSuchNode, OutPort, Phase, Playhead, Root, ScheduleError, Session,
-    SessionBuilder, SessionEvent, SystemSession, TypedParamRef, Workers,
+    Clock, ConnectError, Edge, EventInPort, EventOutPort, EventTapPort, HeardOpen, HeardTapError,
+    InPort, Job, JobFailed, Key, NoSuchNode, Offline, OfflineSession, OutPort, Phase, Playhead,
+    RealTime, Root, ScheduleError, Session, SessionBuilder, SessionEvent, SystemClock,
+    SystemSession, TypedParamRef, Workers,
 };
 #[cfg(all(feature = "session", feature = "device"))]
-pub use tutti_session::{Device, DeviceEvent, DeviceRestart, LiveSession, RestartOutcome};
+pub use tutti_session::{
+    Device, DeviceClock, DeviceEvent, DeviceRestart, LiveSession, RestartOutcome,
+};
 #[cfg(all(feature = "session", feature = "device", feature = "audio-io"))]
 pub use tutti_session::{
     Input, InputConfig, Punch, Recorded, Take, TakeError, TakeEvent, TakeTarget, Trim,

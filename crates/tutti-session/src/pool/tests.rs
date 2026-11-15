@@ -36,7 +36,7 @@ impl Spawned {
     }
 }
 
-fn session() -> (Session, Spawned) {
+fn session() -> (crate::DetachedSession, Spawned) {
     let spawned = Spawned::default();
     let held = spawned.clone();
     let session = Session::builder()
@@ -132,7 +132,7 @@ fn entry(key: &'static str, probe: Probe) -> Declared<&'static str, Probe> {
 }
 
 /// The pool events of one update, as `(key, what)`.
-fn events(session: &mut Session) -> Vec<(&'static str, String)> {
+fn events(session: &mut crate::DetachedSession) -> Vec<(&'static str, String)> {
     session
         .update()
         .into_iter()
@@ -151,7 +151,7 @@ fn events(session: &mut Session) -> Vec<(&'static str, String)> {
         .collect()
 }
 
-fn state(session: &Session, key: &'static str) -> Option<String> {
+fn state(session: &crate::DetachedSession, key: &'static str) -> Option<String> {
     session.pool_state(&key).map(|state| match state {
         PoolState::Loading => "loading".to_owned(),
         PoolState::Loaded => "loaded".to_owned(),
@@ -163,11 +163,14 @@ fn state(session: &Session, key: &'static str) -> Option<String> {
     })
 }
 
-fn handle(session: &Session, key: &'static str) -> Result<ProbeHandle, HandleError<&'static str>> {
+fn handle(
+    session: &crate::DetachedSession,
+    key: &'static str,
+) -> Result<ProbeHandle, HandleError<&'static str>> {
     session.pool.handle::<_, Probe>(&key)
 }
 
-fn undeclare(session: &mut Session) {
+fn undeclare(session: &mut crate::DetachedSession) {
     session.pool::<&'static str>(()).unwrap();
 }
 
@@ -725,7 +728,7 @@ mod audio {
         writer.finalize().unwrap();
     }
 
-    fn wave(session: &Session, key: &'static str) -> Arc<tutti_codec::Wave> {
+    fn wave(session: &crate::DetachedSession, key: &'static str) -> Arc<tutti_codec::Wave> {
         match session.audio(&key).unwrap() {
             AudioEntry::Resident(wave) => wave,
             other => panic!("a resident entry reads as its wave, got {other:?}"),

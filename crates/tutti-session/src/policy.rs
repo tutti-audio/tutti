@@ -10,7 +10,8 @@ use tutti_buffers::FoldLevels;
 use tutti_engine::{OutputLevels, OutputMap, Routing, RoutingError};
 use tutti_types::{ChannelLayout, ChannelTopology};
 
-use crate::Session;
+use crate::graph::Graph;
+use crate::{Clock, Session};
 
 /// A session setting reached through a typed handle.
 pub trait Policy {
@@ -18,7 +19,7 @@ pub trait Policy {
     type Handle<'a>;
 
     /// The handle on `session`'s setting.
-    fn handle(session: &mut Session) -> Self::Handle<'_>;
+    fn handle<C: Clock>(session: &mut Session<C>) -> Self::Handle<'_>;
 }
 
 /// Where the mix lands: the format the root is heard in, the root's channels to
@@ -101,20 +102,26 @@ pub enum OutputPolicyError {
 impl Policy for OutputPolicy {
     type Handle<'a> = OutputPolicyHandle<'a>;
 
-    fn handle(session: &mut Session) -> OutputPolicyHandle<'_> {
-        OutputPolicyHandle { session }
+    fn handle<C: Clock>(session: &mut Session<C>) -> OutputPolicyHandle<'_> {
+        OutputPolicyHandle {
+            graph: &session.graph,
+            policy: &mut session.output_policy,
+            staged: &mut session.output_policy_staged,
+        }
     }
 }
 
 /// Reads and changes a session's [`OutputPolicy`].
 pub struct OutputPolicyHandle<'a> {
-    session: &'a mut Session,
+    graph: &'a Graph,
+    policy: &'a mut OutputPolicy,
+    staged: &'a mut bool,
 }
 
 impl std::fmt::Debug for OutputPolicyHandle<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OutputPolicyHandle")
-            .field("policy", &self.session.output_policy)
+            .field("policy", &*self.policy)
             .finish()
     }
 }
@@ -123,7 +130,7 @@ impl OutputPolicyHandle<'_> {
     /// The policy in force, or the one set and not yet applied.
     #[must_use]
     pub fn get(&self) -> &OutputPolicy {
-        &self.session.output_policy
+        self.policy
     }
 
     /// Sets the policy. It is checked against the device and the root now, and
@@ -136,17 +143,6 @@ impl OutputPolicyHandle<'_> {
     /// [`OutputPolicyError`] naming what has no place; the policy in force is
     /// kept.
     pub fn set(&mut self, policy: OutputPolicy) -> Result<(), OutputPolicyError> {
-        self.session.set_output_policy(policy)
-    }
-}
-
-impl Session {
-    /// The setting `P`, to read and change: `session.policy::<OutputPolicy>()`.
-    pub fn policy<P: Policy>(&mut self) -> P::Handle<'_> {
-        P::handle(self)
-    }
-
-    fn set_output_policy(&mut self, policy: OutputPolicy) -> Result<(), OutputPolicyError> {
         let (device, placed) = self
             .graph
             .placed_device()
@@ -161,9 +157,16 @@ impl Session {
         policy.levels.check().map_err(RoutingError::Fold)?;
         let root = self.graph.root_in_force();
         policy.routing().fold(&root, &placed)?;
-        self.output_policy = policy;
-        self.output_policy_staged = true;
+        *self.policy = policy;
+        *self.staged = true;
         Ok(())
+    }
+}
+
+impl<C: Clock> Session<C> {
+    /// The setting `P`, to read and change: `session.policy::<OutputPolicy>()`.
+    pub fn policy<P: Policy>(&mut self) -> P::Handle<'_> {
+        P::handle(self)
     }
 
     /// Applies a staged policy to the engine, in [`Phase::Commit`](crate::Phase::Commit).

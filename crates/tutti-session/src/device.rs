@@ -1,5 +1,5 @@
 //! [`Device`]: the sound card, and restarting it at whatever rate it comes
-//! back with ([`LiveSession::restart`]).
+//! back with ([`Session::restart`]).
 //!
 //! The driver owns the stream and the graph's *audio* side only, so on its
 //! own it can re-open a device and nothing more: a device that comes back at
@@ -43,30 +43,97 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tutti_cpal::{DeviceId, DeviceSelector, SnapshotSource, TuttiDriver};
-use tutti_engine::{
-    OutputSpec, Stopped, StreamDriver, StreamFault, StreamFaultKind, StreamFaults, StreamLatency,
-};
+use tutti_engine::{OutputSpec, Stopped, StreamDriver, StreamFaults, StreamLatency};
 use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock, SampleRate, Samples, Seconds};
 
-use crate::{DevicePolicy, DeviceWatch, Error, FollowEvent, Result, Session, SessionEvent};
+use crate::{
+    Clock, DeviceClock, DevicePolicy, DeviceWatch, Error, FollowEvent, RealTime, Result, Session,
+    SessionEvent,
+};
 
-/// A session and the [`Device`] that drives it, as
-/// [`SessionBuilder::build`](crate::SessionBuilder::build) on a device returns them.
+/// What a session on the device clock holds to run its blocks: the
+/// [`Device`], the sound card's stream, and the device watch with what its
+/// restarts reported. `!Send`, as the device is, so the session stays on the
+/// thread that opened it.
 ///
-/// **The device is the stream.** Dropping a [`Device`] stops the callback, so
-/// a build that returned `(Session, Device)` was silenced by
-/// `let (session, _) = ..`: a `_` pattern drops its value at once, and
-/// `#[must_use]` does not fire on a destructure. Here the fields are private,
-/// the session and the device are read through accessors that borrow, and the
-/// only way to take them apart is [`into_parts`](Self::into_parts), which is
-/// `#[must_use]` too and names what it hands back. Keep the `LiveSession`
-/// itself for as long as the sound should play.
+/// The device is out of its slot only while a restart runs, because the
+/// restart's hook needs the whole session; a panic in the hook puts it back
+/// before it unwinds on.
+#[derive(Debug)]
+pub struct DeviceHandle {
+    device: Option<Device>,
+    /// The device watch, and what restarts reported since the last poll.
+    pub(crate) watch: Option<DeviceWatch>,
+    pub(crate) events: Vec<SessionEvent>,
+}
+
+impl DeviceHandle {
+    /// A handle whose device is yet to be started: the builder's, until the
+    /// stream is up.
+    pub(crate) fn vacant() -> Self {
+        Self {
+            device: None,
+            watch: None,
+            events: Vec::new(),
+        }
+    }
+
+    /// Puts the started device in its slot.
+    pub(crate) fn fill(&mut self, device: Device) {
+        self.device = Some(device);
+    }
+
+    pub(crate) fn device(&self) -> &Device {
+        self.device
+            .as_ref()
+            .expect("the device is in its slot except while a restart runs")
+    }
+
+    pub(crate) fn device_mut(&mut self) -> &mut Device {
+        self.device
+            .as_mut()
+            .expect("the device is in its slot except while a restart runs")
+    }
+
+    /// Takes the device out for a restart; [`fill`](Self::fill) puts it back.
+    fn take(&mut self) -> Device {
+        self.device
+            .take()
+            .expect("the device is in its slot except while a restart runs")
+    }
+
+    /// The device clock's share of `Phase::Poll`: what restarts reported,
+    /// then the watch, told first if the stream was lost.
+    pub(crate) fn poll_device(
+        &mut self,
+        now: std::time::Instant,
+        lost: bool,
+        out: &mut Vec<SessionEvent>,
+    ) {
+        out.append(&mut self.events);
+        if let Some(watch) = &mut self.watch {
+            // The loss is taken in first and decided on with the devices this
+            // poll finds: a stream lost as its device left must not be sent
+            // back to the device the last look still listed.
+            if lost {
+                watch.observe(FollowEvent::Lost);
+            }
+            watch.poll(now, out);
+        }
+    }
+}
+
+/// A session on the sound card's clock
+/// ([`SessionBuilder::device`](crate::SessionBuilder::device)): the device
+/// sets the rate, the width and the callback, and a callback of the card's
+/// steps the blocks.
 ///
-/// Reach the session through [`session`](Self::session) and
-/// [`session_mut`](Self::session_mut): it does not dereference to it.
+/// **The device is the stream.** Dropping the session stops the callback, so
+/// a build that is discarded is a warning: `let _ = build()` would drop the
+/// session at once and silence it. Keep the session for as long as the sound
+/// should play.
 ///
-/// A discarded build, or a discarded `into_parts`, is a warning (an error
-/// under `deny(unused_must_use)`):
+/// A discarded build is a warning (an error under `deny(unused_must_use)`):
 ///
 /// ```compile_fail
 /// #![deny(unused_must_use)]
@@ -76,63 +143,29 @@ use crate::{DevicePolicy, DeviceWatch, Error, FollowEvent, Result, Session, Sess
 /// }
 /// ```
 ///
+/// It is `!Send`: the device stays on the thread that opened it.
+///
 /// ```compile_fail
-/// #![deny(unused_must_use)]
-/// fn f(live: tutti_session::LiveSession) {
-///     live.into_parts();
-/// }
+/// fn is_send<T: Send>() {}
+/// is_send::<tutti_session::LiveSession>();
 /// ```
-#[must_use = "dropping a LiveSession stops the stream; keep it while the sound should play"]
-pub struct LiveSession {
-    session: Session,
-    device: Device,
-}
+pub type LiveSession = Session<DeviceClock>;
 
-impl std::fmt::Debug for LiveSession {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LiveSession")
-            .field("session", &self.session)
-            .field("device", &self.device)
-            .finish_non_exhaustive()
-    }
-}
-
-impl LiveSession {
-    pub(crate) fn new(session: Session, device: Device) -> Self {
-        Self { session, device }
-    }
-
-    /// The session.
-    pub fn session(&self) -> &Session {
-        &self.session
-    }
-
-    /// The session, mutably.
-    pub fn session_mut(&mut self) -> &mut Session {
-        &mut self.session
-    }
-
-    /// What the output device's channels are, stated or assumed
-    /// ([`Session::output_device`]).
-    #[must_use]
-    pub fn output_device(&self) -> Option<crate::OutputPlacement> {
-        self.session.output_device()
-    }
-
+impl Session<DeviceClock> {
     /// The device that drives the session.
     pub fn device(&self) -> &Device {
-        &self.device
+        self.running.device()
     }
 
-    /// The session and the device, taken apart. The caller keeps both
-    /// halves alive: the device stops the stream when it drops.
-    ///
-    /// Apart, a restart is no longer the pair's: [`restart`](Self::restart)
-    /// and [`watch_devices`](Self::watch_devices) are `LiveSession`'s, so that
-    /// no device but the session's own can be restarted under it.
-    #[must_use = "the Device is the stream; dropping it stops the sound"]
-    pub fn into_parts(self) -> (Session, Device) {
-        (self.session, self.device)
+    /// The device, mutably: [`Device::stop`] and [`Device::start_with`].
+    pub fn device_mut(&mut self) -> &mut Device {
+        self.running.device_mut()
+    }
+
+    /// What the device adds in each direction ([`Device::latency`]).
+    #[must_use]
+    pub fn device_latency(&self) -> DeviceLatency {
+        self.device().latency()
     }
 
     /// Restarts the stream on the device `request` selects and moves the
@@ -170,20 +203,18 @@ impl LiveSession {
     ) -> std::result::Result<RestartOutcome, RestartError> {
         if request.wanted {
             let current = self
-                .session
-                .device_watch
+                .running
+                .watch
                 .as_ref()
                 .is_some_and(|w| *w.follow().want() == request.device);
             if !current {
                 return Ok(RestartOutcome::Stale);
             }
         } else {
-            self.device.chosen = request.device.clone();
-            self.session.note_chosen(request.device.clone());
+            self.device_mut().chosen = request.device.clone();
+            self.note_chosen(request.device.clone());
         }
-        self.session
-            .run_restart(&mut self.device, request)
-            .map(RestartOutcome::Restarted)
+        self.run_restart(request).map(RestartOutcome::Restarted)
     }
 
     /// Starts watching the host's devices: `source` is polled on
@@ -200,9 +231,178 @@ impl LiveSession {
         source: impl SnapshotSource + Send + 'static,
         policy: DevicePolicy,
     ) {
-        let want = self.device.chosen.clone();
-        let running_on = self.device.opened_id(&want);
-        self.session.start_watch(source, policy, want, running_on);
+        let want = self.device().chosen.clone();
+        let running_on = self.device().opened_id(&want);
+        self.start_watch(source, policy, want, running_on);
+    }
+
+    /// Runs a restart on the session's device.
+    pub(crate) fn run_restart(
+        &mut self,
+        request: DeviceRestart,
+    ) -> std::result::Result<DeviceRestarted, RestartError> {
+        let selector = request.device.clone();
+        let max_block = request.max_block;
+        let topology = request.topology.clone();
+        let outcome = self.check_restart(max_block).and_then(|()| {
+            let previous = self.device().graph_rate();
+            self.with_device(|session, device| {
+                device.driver.restart_with(request.device, |spec, stopped| {
+                    session.rerate(spec, stopped, max_block, topology)
+                })
+            })
+            .map(|()| previous)
+        });
+        self.note_restart(Some(&selector), outcome)
+    }
+
+    /// Runs `f` with the device out of its slot and the session beside it: the
+    /// restart's hook moves the whole session while the device's driver runs.
+    /// The device goes back before `f`'s panic, if it has one, unwinds on.
+    fn with_device<R>(&mut self, f: impl FnOnce(&mut Self, &mut Device) -> R) -> R {
+        let mut device = self.running.take();
+        let outcome =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self, &mut device)));
+        self.running.fill(device);
+        outcome.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    }
+
+    /// A restart on a driver of the caller's choosing, `spec` standing for the
+    /// config the new device reports: the device-free restart, for a test.
+    /// `topology` states what the new device's channels are
+    /// ([`DeviceRestart::topology`]); `None` takes the engine's order for its
+    /// width. Behind `testing`.
+    ///
+    /// # Errors
+    ///
+    /// As [`restart`](Self::restart), without the device's own.
+    #[cfg(feature = "testing")]
+    pub fn restart_on<D: StreamDriver>(
+        &mut self,
+        spec: OutputSpec,
+        driver: D,
+        max_block: Option<MaxBlock>,
+        topology: Option<ChannelTopology>,
+    ) -> std::result::Result<DeviceRestarted, RestartError>
+    where
+        D::Error: Into<tutti_cpal::Error>,
+    {
+        let outcome = self.check_restart(max_block).and_then(|()| {
+            let previous = self.device().graph_rate();
+            self.with_device(|session, device| {
+                device.driver.restart_on(spec, driver, |spec, stopped| {
+                    session.rerate(spec, stopped, max_block, topology)
+                })
+            })
+            .map(|()| previous)
+        });
+        self.note_restart(None, outcome)
+    }
+
+    /// Records a restart's outcome: the policy is told, and the next poll
+    /// reports it ([`DeviceEvent::Restarted`] or [`DeviceEvent::RestartFailed`]).
+    /// A failure that left the stream stopped keeps the old spec and graph
+    /// rate, as the module docs say. After a restart that moved the stream
+    /// the added inputs are reopened.
+    fn note_restart(
+        &mut self,
+        selector: Option<&DeviceSelector>,
+        outcome: Result<SampleRate>,
+    ) -> std::result::Result<DeviceRestarted, RestartError> {
+        let now = std::time::Instant::now();
+        match outcome {
+            Ok(previous_rate) => {
+                // A custom driver (`restart_on`) names no device: unknown.
+                let name = selector.and_then(|s| self.device().opened_id(s));
+                // The restart cleared the fault record; its count restarts.
+                self.faults_seen = self.device().faults().count();
+                let restarted = DeviceRestarted {
+                    previous_rate,
+                    rate: self.device().graph_rate(),
+                };
+                self.running
+                    .events
+                    .push(SessionEvent::Device(DeviceEvent::Restarted(restarted)));
+                self.note_device(FollowEvent::Opened(name), now);
+                #[cfg(feature = "audio-io")]
+                self.reopen_inputs();
+                Ok(restarted)
+            }
+            Err(e) => {
+                let failed = RestartError::new(e);
+                self.running
+                    .events
+                    .push(SessionEvent::Device(DeviceEvent::RestartFailed(
+                        failed.clone(),
+                    )));
+                self.note_device(
+                    FollowEvent::RestartFailed {
+                        running: self.device().is_running(),
+                    },
+                    now,
+                );
+                Err(failed)
+            }
+        }
+    }
+
+    /// While held, the device policy asks for no restart (the watch still
+    /// reports devices). For a host that must not have the stream moved
+    /// under it, a take being recorded: a restart can change the rate.
+    pub fn hold_device_restarts(&mut self, held: bool) {
+        if let Some(watch) = &mut self.running.watch {
+            watch.hold(held);
+        }
+    }
+
+    /// The selector the device policy follows, if a watch runs.
+    #[must_use]
+    pub fn watch_devices_want(&self) -> Option<DeviceSelector> {
+        self.running
+            .watch
+            .as_ref()
+            .map(|w| w.follow().want().clone())
+    }
+
+    pub(crate) fn note_chosen(&mut self, selector: DeviceSelector) {
+        self.note_device(FollowEvent::Chose(selector), std::time::Instant::now());
+    }
+
+    /// Feeds the policy and queues a restart it asks for.
+    fn note_device(&mut self, event: FollowEvent, now: std::time::Instant) {
+        if let Some(watch) = &mut self.running.watch
+            && let Some(request) = watch.note(event, now)
+        {
+            self.running
+                .events
+                .push(SessionEvent::Device(DeviceEvent::RestartWanted(request)));
+        }
+    }
+
+    /// Starts the watch: [`Session::watch_devices`]'s, with the selector
+    /// and the device it opened told.
+    fn start_watch(
+        &mut self,
+        source: impl SnapshotSource + Send + 'static,
+        policy: DevicePolicy,
+        want: DeviceSelector,
+        running_on: Option<DeviceId>,
+    ) {
+        self.running.watch = Some(DeviceWatch::new(source, policy, want, running_on));
+    }
+
+    /// [`Session::watch_devices`] over a session on its own, `want` the
+    /// selector the stream was started with and `running_on` the device it
+    /// opened (`None`: unknown): for a test that holds the pair apart.
+    #[cfg(feature = "testing")]
+    pub fn watch_devices_on(
+        &mut self,
+        source: impl SnapshotSource + Send + 'static,
+        policy: DevicePolicy,
+        want: DeviceSelector,
+        running_on: Option<DeviceId>,
+    ) {
+        self.start_watch(source, policy, want, running_on);
     }
 }
 
@@ -289,9 +489,13 @@ impl Device {
         Ok(self.driver.opened_name()?)
     }
 
+    pub(crate) fn output_stream(&self) -> &tutti_engine::OutputStream {
+        self.driver.stream()
+    }
+
     /// The backend fault record, which survives stop and restart.
     /// [`Session::update`] reports each new fault as
-    /// [`DeviceEvent::Fault`].
+    /// [`SessionEvent::Fault`].
     pub fn faults(&self) -> Arc<StreamFaults> {
         self.driver.stream().faults()
     }
@@ -368,7 +572,7 @@ impl Device {
     }
 }
 
-/// What [`LiveSession::restart`] did.
+/// What [`Session::restart`] did.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[must_use = "a stale request restarted nothing"]
 pub enum RestartOutcome {
@@ -398,7 +602,7 @@ impl DeviceRestarted {
     }
 }
 
-/// What a restart asks for ([`LiveSession::restart`]): the output device, and
+/// What a restart asks for ([`Session::restart`]): the output device, and
 /// at most how large a block the graph is prepared for from then on.
 ///
 /// ```
@@ -461,7 +665,7 @@ impl DeviceRestart {
     }
 
     /// What the device policy asks for: a restart onto `device`, which the
-    /// host runs through [`LiveSession::restart`] like any other.
+    /// host runs through [`Session::restart`] like any other.
     pub(crate) fn wanted(device: DeviceSelector) -> Self {
         Self {
             device,
@@ -472,7 +676,7 @@ impl DeviceRestart {
     }
 }
 
-/// What a restart is refused or fails with ([`LiveSession::restart`],
+/// What a restart is refused or fails with ([`Session::restart`],
 /// [`DeviceEvent::RestartFailed`]): the session's [`Error`], shared, so the
 /// caller and the next [`Session::update`] both hold it. It is the error's
 /// [`source`](std::error::Error::source) and
@@ -528,11 +732,8 @@ pub struct DeviceLatency {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum DeviceEvent {
-    /// The audio backend reported a fault (a device unplugged mid-session):
-    /// the most recent one since the last poll.
-    Fault(StreamFault),
     /// A device is no longer listed by the host (a [`DeviceWatch`] is
-    /// running). The stream's own loss is [`Fault`](Self::Fault).
+    /// running). The stream's own loss is [`SessionEvent::Fault`].
     Lost {
         /// Which way it played or captured.
         direction: tutti_cpal::Direction,
@@ -554,7 +755,7 @@ pub enum DeviceEvent {
         id: Option<DeviceId>,
     },
     /// The device policy wants the stream restarted: run it with
-    /// [`LiveSession::restart`]. The outcome is reported by the next update
+    /// [`Session::restart`]. The outcome is reported by the next update
     /// ([`Restarted`](Self::Restarted) or [`RestartFailed`](Self::RestartFailed)),
     /// and tells the policy, which waits out its backoff before it asks again.
     RestartWanted(DeviceRestart),
@@ -563,7 +764,7 @@ pub enum DeviceEvent {
     /// holds itself at the graph's rate is its own to reopen when
     /// [`rate_changed`](DeviceRestarted::rate_changed).
     Restarted(DeviceRestarted),
-    /// A restart was refused or failed. See [`LiveSession::restart`] for the
+    /// A restart was refused or failed. See [`Session::restart`] for the
     /// stream's state.
     RestartFailed(RestartError),
     /// An input the session added could not be reopened by a restart: it
@@ -594,168 +795,7 @@ impl From<DeviceEvent> for SessionEvent {
     }
 }
 
-impl Session {
-    /// Runs a restart on `device`, the one this session's [`LiveSession`]
-    /// pairs it with.
-    pub(crate) fn run_restart(
-        &mut self,
-        device: &mut Device,
-        request: DeviceRestart,
-    ) -> std::result::Result<DeviceRestarted, RestartError> {
-        let selector = request.device.clone();
-        let max_block = request.max_block;
-        let topology = request.topology.clone();
-        let outcome = self.check_restart(max_block).and_then(|()| {
-            let previous = device.graph_rate();
-            device
-                .driver
-                .restart_with(request.device, |spec, stopped| {
-                    self.rerate(spec, stopped, max_block, topology)
-                })
-                .map(|()| previous)
-        });
-        self.note_restart(device, Some(&selector), outcome)
-    }
-
-    /// A restart on a driver of the caller's choosing, `spec` standing for the
-    /// config the new device reports: the device-free restart, for a test.
-    /// It takes any `Device`, which a [`LiveSession`] does not allow, so it is
-    /// behind `testing`. `topology` states what the new device's channels are
-    /// ([`DeviceRestart::topology`]); `None` takes the engine's order for its
-    /// width.
-    ///
-    /// # Errors
-    ///
-    /// As [`LiveSession::restart`], without the device's own.
-    #[cfg(feature = "testing")]
-    pub fn restart_on<D: StreamDriver>(
-        &mut self,
-        device: &mut Device,
-        spec: OutputSpec,
-        driver: D,
-        max_block: Option<MaxBlock>,
-        topology: Option<ChannelTopology>,
-    ) -> std::result::Result<DeviceRestarted, RestartError>
-    where
-        D::Error: Into<tutti_cpal::Error>,
-    {
-        let outcome = self.check_restart(max_block).and_then(|()| {
-            let previous = device.graph_rate();
-            device
-                .driver
-                .restart_on(spec, driver, |spec, stopped| {
-                    self.rerate(spec, stopped, max_block, topology)
-                })
-                .map(|()| previous)
-        });
-        self.note_restart(device, None, outcome)
-    }
-
-    /// While held, the device policy asks for no restart (the watch still
-    /// reports devices). For a host that must not have the stream moved
-    /// under it, a take being recorded: a restart can change the rate.
-    pub fn hold_device_restarts(&mut self, held: bool) {
-        if let Some(watch) = &mut self.device_watch {
-            watch.hold(held);
-        }
-    }
-
-    /// The selector the device policy follows, if a watch runs.
-    #[must_use]
-    pub fn watch_devices_want(&self) -> Option<DeviceSelector> {
-        self.device_watch
-            .as_ref()
-            .map(|w| w.follow().want().clone())
-    }
-
-    /// Records a restart's outcome: the policy is told, and the next poll
-    /// reports it ([`DeviceEvent::Restarted`] or [`DeviceEvent::RestartFailed`]).
-    /// A failure that left the stream stopped keeps the old spec and graph
-    /// rate, as the module docs say. After a restart that moved the stream
-    /// the added inputs are reopened.
-    fn note_restart(
-        &mut self,
-        device: &Device,
-        selector: Option<&DeviceSelector>,
-        outcome: Result<SampleRate>,
-    ) -> std::result::Result<DeviceRestarted, RestartError> {
-        let now = std::time::Instant::now();
-        match outcome {
-            Ok(previous_rate) => {
-                // A custom driver (`restart_on`) names no device: unknown.
-                let name = selector.and_then(|s| device.opened_id(s));
-                // The restart cleared the fault record; its count restarts.
-                if let Some((faults, seen)) = &mut self.faults {
-                    *seen = faults.count();
-                }
-                let restarted = DeviceRestarted {
-                    previous_rate,
-                    rate: device.graph_rate(),
-                };
-                self.device_events
-                    .push(SessionEvent::Device(DeviceEvent::Restarted(restarted)));
-                self.note_device(FollowEvent::Opened(name), now);
-                #[cfg(feature = "audio-io")]
-                self.reopen_inputs();
-                Ok(restarted)
-            }
-            Err(e) => {
-                let failed = RestartError::new(e);
-                self.device_events
-                    .push(SessionEvent::Device(DeviceEvent::RestartFailed(
-                        failed.clone(),
-                    )));
-                self.note_device(
-                    FollowEvent::RestartFailed {
-                        running: device.is_running(),
-                    },
-                    now,
-                );
-                Err(failed)
-            }
-        }
-    }
-
-    pub(crate) fn note_chosen(&mut self, selector: DeviceSelector) {
-        self.note_device(FollowEvent::Chose(selector), std::time::Instant::now());
-    }
-
-    /// Feeds the policy and queues a restart it asks for.
-    fn note_device(&mut self, event: FollowEvent, now: std::time::Instant) {
-        if let Some(watch) = &mut self.device_watch
-            && let Some(request) = watch.note(event, now)
-        {
-            self.device_events
-                .push(SessionEvent::Device(DeviceEvent::RestartWanted(request)));
-        }
-    }
-
-    /// Starts the watch: [`LiveSession::watch_devices`]'s, with the selector
-    /// and the device it opened told.
-    pub(crate) fn start_watch(
-        &mut self,
-        source: impl SnapshotSource + Send + 'static,
-        policy: DevicePolicy,
-        want: DeviceSelector,
-        running_on: Option<DeviceId>,
-    ) {
-        self.device_watch = Some(DeviceWatch::new(source, policy, want, running_on));
-    }
-
-    /// [`LiveSession::watch_devices`] over a session on its own, `want` the
-    /// selector the stream was started with and `running_on` the device it
-    /// opened (`None`: unknown): for a test that holds the pair apart.
-    #[cfg(feature = "testing")]
-    pub fn watch_devices(
-        &mut self,
-        source: impl SnapshotSource + Send + 'static,
-        policy: DevicePolicy,
-        want: DeviceSelector,
-        running_on: Option<DeviceId>,
-    ) {
-        self.start_watch(source, policy, want, running_on);
-    }
-
+impl<C: RealTime> Session<C> {
     /// Starts listing the host's output devices on a thread of its own:
     /// enumeration can block for good, so it never runs here.
     /// The answer is taken without blocking by a later
@@ -787,37 +827,18 @@ impl Session {
         self.outputs_listed = true;
         Ok(())
     }
+}
 
-    /// The [`Phase::Poll`](crate::Phase::Poll) body: what restarts reported, the stream's own
-    /// faults, then the watch.
-    pub(crate) fn device_poll(&mut self, now: std::time::Instant, out: &mut Vec<SessionEvent>) {
-        out.append(&mut self.device_events);
-        let mut lost = false;
-        if let Some((faults, seen)) = &mut self.faults {
-            let count = faults.count();
-            if count != *seen {
-                *seen = count;
-                if let Some(fault) = faults.last() {
-                    lost = fault.kind == StreamFaultKind::Disconnected;
-                    out.push(SessionEvent::Device(DeviceEvent::Fault(fault)));
-                }
-            }
-        }
+impl<C: Clock> Session<C> {
+    /// The listing's share of [`Phase::Poll`](crate::Phase::Poll): the answer of
+    /// the output-device listing, if one is running.
+    pub(crate) fn listing_poll(&mut self, now: std::time::Instant, out: &mut Vec<SessionEvent>) {
         if let Some(listing) = &mut self.output_listing {
             let (event, finished) = listing.poll(now);
             out.extend(event);
             if finished {
                 self.output_listing = None;
             }
-        }
-        if let Some(watch) = &mut self.device_watch {
-            // The loss is taken in first and decided on with the devices this
-            // poll finds: a stream lost as its device left must not be sent
-            // back to the device the last look still listed.
-            if lost {
-                watch.observe(FollowEvent::Lost);
-            }
-            watch.poll(now, out);
         }
     }
 
@@ -963,5 +984,38 @@ impl Session {
             *layout = spec.channels;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use tutti_engine::{ManualStreamDriver, OutputSpec};
+    use tutti_types::{ChannelLayout, SampleRate};
+
+    use crate::Session;
+
+    /// **A panic inside a restart's hook leaves the device in its slot**: the
+    /// device is out of the session while the hook runs, and the guard puts it
+    /// back before the panic unwinds on, so the session still has its device
+    /// (and its stream's rate) afterwards.
+    #[test]
+    fn a_panic_in_a_restart_hook_puts_the_device_back_in_its_slot() {
+        let (driver, _stream) = ManualStreamDriver::new();
+        let spec = OutputSpec::new(
+            SampleRate::SR_48K,
+            ChannelLayout::STEREO,
+            tutti_buffers::SampleFormat::F32,
+        );
+        let mut session = Session::builder()
+            .device(Default::default())
+            .build_device_on(spec, driver)
+            .expect("builds with no device");
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            session.with_device(|_, _| panic!("a hook that fails"))
+        }));
+        assert!(outcome.is_err(), "the panic unwinds on");
+        assert_eq!(session.device().graph_rate(), SampleRate::SR_48K);
     }
 }
