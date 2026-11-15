@@ -88,14 +88,14 @@ pub struct Load<T> {
 /// What a load's stages are, by the thread the first one runs on.
 pub(crate) enum Step<T> {
     Ready(T),
-    Worker(Box<dyn FnOnce() -> Result<Staged<T>, LoadError> + Send>),
+    Worker(Box<dyn FnOnce() -> Result<Staged, LoadError> + Send>),
     Session(Box<dyn FnOnce(&mut OpenCx<'_>) -> Result<T, LoadError> + Send>),
 }
 
 /// What a worker stage hands on: the finished value, or the main-thread stage
 /// that finishes it.
-pub(crate) enum Staged<T> {
-    Done(T),
+pub(crate) enum Staged {
+    Done(Value),
     Main(MainStage),
 }
 
@@ -193,14 +193,7 @@ impl Drop for MainStage {
     }
 }
 
-impl<T: Send + 'static> Staged<T> {
-    fn map<U: Send + 'static>(self, map: impl FnOnce(T) -> U + Send + 'static) -> Staged<U> {
-        match self {
-            Self::Done(done) => Staged::Done(map(done)),
-            Self::Main(stage) => Staged::Main(stage),
-        }
-    }
-
+impl Staged {
     /// This output, its main stage (if it has one) handing its discard to
     /// `defer` when dropped off the main thread.
     pub(crate) fn deferring(self, defer: Option<Defer>) -> Self {
@@ -216,7 +209,9 @@ impl<T: Send + 'static> Load<T> {
     /// spawner.
     pub fn on_worker(work: impl FnOnce() -> Result<T, LoadError> + Send + 'static) -> Self {
         Self {
-            step: Step::Worker(Box::new(move || work().map(Staged::Done))),
+            step: Step::Worker(Box::new(move || {
+                work().map(|done| Staged::Done(Box::new(done) as Value))
+            })),
             main: false,
         }
     }
@@ -283,9 +278,7 @@ impl<T: Send + 'static> Load<T> {
     pub(crate) fn erase(self) -> Load<Value> {
         let step = match self.step {
             Step::Ready(value) => Step::Ready(Box::new(value) as Value),
-            Step::Worker(work) => Step::Worker(Box::new(move || {
-                work().map(|staged| staged.map(|done| Box::new(done) as Value))
-            })),
+            Step::Worker(work) => Step::Worker(work),
             Step::Session(open) => Step::Session(Box::new(move |cx| {
                 open(cx).map(|done| Box::new(done) as Value)
             })),
@@ -456,6 +449,10 @@ impl<K, E: PoolEntry> Declared<K, E> {
     /// `soundfont`) are declared this way; a kind with
     /// something live behind it (a plugin client, a capture) uses
     /// [`new`](Self::new).
+    ///
+    /// Every key's handle reads a clone of the loaded value, and the clones drop
+    /// on whatever thread releases their key: a kind whose loaded value must
+    /// drop on the main thread must not be shared.
     pub const fn shared(key: K, entry: E) -> Self
     where
         E::Loaded: Clone,

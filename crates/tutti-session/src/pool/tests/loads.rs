@@ -919,6 +919,8 @@ fn stage(log: &Log, defer: Option<crate::pool::entry::Defer>) -> crate::pool::en
     .deferring(defer)
 }
 
+/// The count is process-wide and read as a difference: nextest runs each test in a
+/// process of its own, which keeps the difference this test's.
 #[test]
 fn a_stage_dropped_off_the_main_thread_with_no_collector_leaks_its_output_and_counts_it() {
     let log = Log::default();
@@ -961,6 +963,8 @@ fn session_with_pending_output(queued: bool, log: &Log) -> Session {
     s
 }
 
+/// The count is process-wide and read as a difference: nextest runs each test in a
+/// process of its own, which keeps the difference this test's.
 #[test]
 fn a_session_dropped_off_the_main_thread_leaks_the_output_waiting_in_the_pool_and_in_the_jobs_channel()
  {
@@ -972,4 +976,31 @@ fn a_session_dropped_off_the_main_thread_leaks_the_output_waiting_in_the_pool_an
         assert_eq!(stranded_total(), before + 1, "queued: {queued}");
         assert_eq!(log.count("drop output a"), 0, "queued: {queued}");
     }
+}
+
+#[test]
+fn a_pending_entry_that_starts_to_share_does_not_leave_a_shared_flight_without_a_share() {
+    let (mut s, spawned) = session();
+    let log = Log::default();
+    let entry = stub("a", How::Worker, &log);
+    let sharer = Stub {
+        name: "b",
+        ..entry.clone()
+    };
+    s.pool(Declared::new("a", entry.clone())).unwrap();
+    // The same identity again, now sharing, while its load is pending; then a
+    // sibling joins it.
+    s.pool(Declared::shared("a", entry.clone())).unwrap();
+    s.pool((Declared::shared("a", entry), Declared::shared("b", sharer)))
+        .unwrap();
+    spawned.run_all();
+    assert_eq!(
+        events(&mut s),
+        [("a", "loaded".to_owned()), ("b", "loaded".to_owned())],
+        "a lands for the load it now waits on, and b with it"
+    );
+    assert!(Arc::ptr_eq(
+        &made(&s, "a").unwrap(),
+        &made(&s, "b").unwrap()
+    ));
 }

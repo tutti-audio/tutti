@@ -92,6 +92,11 @@ pub enum RetryError<K: fmt::Debug> {
     /// The pool does not declare the key: never declared, or released.
     #[error("key {0:?} is not in the pool")]
     NotPooled(K),
+    /// The entry's load has a stage on the main thread, and no update has run on
+    /// the main thread (and this call is not on it): the load would wait for one
+    /// that may never come.
+    #[error("key {0:?} needs a main-thread stage, and no update has run on the main thread")]
+    NeedsMainThread(K),
 }
 
 /// Why a key's reader (`Session::audio`, `Session::soundfont`) found nothing.
@@ -217,13 +222,18 @@ pub(crate) struct Start {
 struct Flight {
     targets: Vec<PoolKey>,
     stage: Stage,
+    /// Set when the flight's entries share: every entry on a flight of several
+    /// shares, since an entry whose sharing changes while its load is pending
+    /// starts a flight of its own.
     share: Option<Cloner>,
+    /// The load has a stage on the main thread.
+    needs_main: bool,
 }
 
 /// A worker stage waiting for a free worker.
 struct Queued {
     flight: u64,
-    work: Box<dyn FnOnce() -> Result<Staged<Value>, LoadError> + Send>,
+    work: Box<dyn FnOnce() -> Result<Staged, LoadError> + Send>,
 }
 
 /// A stage on the session's thread, waiting for the next update.
@@ -388,12 +398,19 @@ impl Pool {
         };
         slot.declared = true;
         slot.order = order;
+        let reshared = slot.share.is_some() != share.is_some();
         // What a retry loads, and how the kind reads and shares it, is the
         // latest declaration's.
         slot.reload = reload;
         slot.lost = lost;
         slot.share = share;
         if slot.kind == kind && slot.identity.same(&*identity) {
+            if reshared && slot.pending() {
+                // A load pending for an entry that shared is not one for an entry
+                // that does not, nor the other way: it starts its own.
+                slot.unreported = None;
+                return self.begin(key, load);
+            }
             if let Some(event) = slot.unreported.take() {
                 self.queued.push(Pending {
                     order,
@@ -414,6 +431,7 @@ impl Pool {
     /// of its own otherwise. The slot's old flight, if any, is superseded.
     fn begin(&mut self, key: &PoolKey, load: Load<Value>) -> Option<Start> {
         let generation = self.next_generation();
+        let needs_main = load.needs_main();
         let stage = if matches!(load.step, Step::Session(_)) {
             Stage::Opening
         } else {
@@ -448,6 +466,7 @@ impl Pool {
                 targets: vec![key.clone()],
                 stage,
                 share: slot.share,
+                needs_main,
             },
         );
         Some(Start {
@@ -478,15 +497,21 @@ impl Pool {
         })
     }
 
-    /// The flight another key's entry of `key`'s kind and identity waits on.
+    /// The flight another key's entry of `key`'s kind and identity waits on. A
+    /// flight with a stage on the main thread is not one to join with no main
+    /// thread: the entry's own load may not need it.
     fn sibling_flight(&self, key: &PoolKey) -> Option<u64> {
         let own = &self.slots[key];
+        let main = self.has_main_thread();
         self.slots.iter().find_map(|(other, slot)| {
             let alike = other != key
                 && slot.kind == own.kind
                 && slot.share.is_some()
                 && slot.pending()
-                && self.flights.contains_key(&slot.generation)
+                && self
+                    .flights
+                    .get(&slot.generation)
+                    .is_some_and(|flight| main || !flight.needs_main)
                 && slot.identity.same(&*own.identity);
             alike.then_some(slot.generation)
         })
@@ -528,7 +553,7 @@ impl Pool {
     pub(crate) fn enqueue(
         &mut self,
         flight: u64,
-        work: Box<dyn FnOnce() -> Result<Staged<Value>, LoadError> + Send>,
+        work: Box<dyn FnOnce() -> Result<Staged, LoadError> + Send>,
     ) {
         self.queue.push_back(Queued { flight, work });
     }
@@ -538,10 +563,7 @@ impl Pool {
     /// never started.
     pub(crate) fn next_worker(
         &mut self,
-    ) -> Option<(
-        u64,
-        Box<dyn FnOnce() -> Result<Staged<Value>, LoadError> + Send>,
-    )> {
+    ) -> Option<(u64, Box<dyn FnOnce() -> Result<Staged, LoadError> + Send>)> {
         while self.running < self.config.parallel_loads.get() {
             let Queued { flight, work } = self.queue.pop_front()?;
             if self.live(flight) {
@@ -683,8 +705,12 @@ impl Pool {
         if !lost && !matches!(slot.state, PoolState::Failed(_)) {
             return Err(RetryError::NotFailed(key.clone()));
         }
-        slot.unreported = None;
         let load = (slot.reload)();
+        if load.needs_main() && !self.has_main_thread() {
+            return Err(RetryError::NeedsMainThread(key.clone()));
+        }
+        let slot = self.slots.get_mut(&erased).expect("the slot is declared");
+        slot.unreported = None;
         Ok(self.begin(&erased, load))
     }
 

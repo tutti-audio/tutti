@@ -124,7 +124,9 @@ impl Session {
     /// # Errors
     ///
     /// [`RetryError::NotFailed`] for a declared key whose entry is neither;
-    /// [`RetryError::NotPooled`] for a key the pool does not declare.
+    /// [`RetryError::NotPooled`] for a key the pool does not declare;
+    /// [`RetryError::NeedsMainThread`] for an entry whose load has a stage on
+    /// the main thread when no update has run on it and this call is not on it.
     pub fn retry<K>(&mut self, key: &K) -> Result<(), RetryError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
