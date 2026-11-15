@@ -175,7 +175,7 @@ fn a_root_the_device_cannot_place_is_refused_before_the_timer_stops() {
         .into_device_on(stereo(SampleRate::SR_48K), driver)
         .expect_err("a six-wide unassigned root has no place on two channels");
     assert!(
-        matches!(err.error().error(), Error::Output(_)),
+        matches!(err.error().error(), Error::Unplaceable { .. }),
         "{}",
         err.error()
     );

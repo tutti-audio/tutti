@@ -101,7 +101,7 @@ impl Session<SystemClock> {
     /// # Errors
     ///
     /// A [`ClockError`] whose error is [`Error::Device`] when the device cannot
-    /// be found or opened, [`Error::Output`] or [`Error::Reprepare`] when the
+    /// be found or opened, [`Error::Unplaceable`] or [`Error::Reprepare`] when the
     /// graph cannot take the device (a declared root it cannot place, a
     /// re-prepare already between its halves) **before the timer stops**, and
     /// otherwise the re-prepare's own failure with the session stopped (see the

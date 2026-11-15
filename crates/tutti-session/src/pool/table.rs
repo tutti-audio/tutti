@@ -402,6 +402,7 @@ impl<C: Clock> Pool<C> {
     /// ([`when_loaded`](Self::when_loaded)) do not: each is typed to the
     /// session it was asked of. Their keys are returned, in the order asked,
     /// for the caller to report; no run is dropped unreported.
+    #[cfg(feature = "device")]
     pub(crate) fn rebind<K: Clock>(self) -> (Pool<K>, Vec<PoolKey>) {
         let dropped = self.when_loaded.iter().map(|run| run.key.clone()).collect();
         (
