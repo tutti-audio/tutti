@@ -6,7 +6,7 @@ use tutti_rt::RtScope;
 use super::commit::{Commit, Incoming, Relined, cut_fades, retire_fade, send_back};
 use super::stage::{RingFrom, Route, Staged, sort_by_offset};
 use super::state::{Gone, Inject, Ring, State, Unit};
-use super::{Executor, Suspension};
+use super::{Executor, RootFadeRun, Suspension};
 use crate::NodeKey;
 use crate::event::Event;
 use crate::gain::SumLane;
@@ -350,6 +350,12 @@ impl Executor {
             std::mem::swap(&mut self.parked, &mut c.parked);
         }
         c.staged = Some(st);
+        // A root crossfade starts with the plan that carries it; a plan that
+        // carries none (a later commit) ends one running.
+        self.root_fade = plan.root_bank().map(|_| RootFadeRun {
+            seq: c.seq,
+            done: 0,
+        });
         self.plan = Some(plan);
         c.plan = old_plan;
     }

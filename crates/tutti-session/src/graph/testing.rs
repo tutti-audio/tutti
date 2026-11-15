@@ -194,9 +194,13 @@ impl AudioSide {
         while done < frames {
             let len = (frames - done).min(block);
             exec.apply_pending();
-            let (ins, outs) = exec
-                .plan()
-                .map_or((0, 0), |p| (p.global_inputs() as usize, p.global_outputs()));
+            let (ins, outs, root) = exec.plan().map_or((0, 0, 0), |p| {
+                (
+                    p.global_inputs() as usize,
+                    p.rendered_outputs(),
+                    p.global_outputs(),
+                )
+            });
             let zeros = vec![0.0f32; len];
             let inputs: Vec<&[f32]> = (0..ins).map(|_| &zeros[..]).collect();
             let mut planes: Vec<Vec<f32>> = vec![vec![0.0; len]; outs];
@@ -204,7 +208,7 @@ impl AudioSide {
             if exec.plan().is_some() {
                 exec.process(len, &self.transport, &inputs, &mut slices);
             }
-            for (o, p) in output.iter_mut().zip(&planes) {
+            for (o, p) in output.iter_mut().zip(planes.iter().take(root)) {
                 o[done..done + len].copy_from_slice(p);
             }
             done += len;

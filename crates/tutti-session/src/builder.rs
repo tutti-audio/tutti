@@ -441,7 +441,7 @@ impl SessionBuilder<Offline> {
             transport.settings().tempo_reader(),
         );
         graph.set_render_workers(self.opts.render_workers);
-        graph.declare_root(self.opts.root.clone())?;
+        graph.declare_root(self.opts.root.clone(), true)?;
         self.session(
             Parts {
                 graph,
@@ -1155,7 +1155,7 @@ impl<S> SessionBuilder<S> {
     /// over, which publishes it to the engine.
     fn declare(&self, graph: &mut Graph) -> Result<()> {
         if self.opts.root.is_some() {
-            graph.declare_root(self.opts.root.clone())?;
+            graph.declare_root(self.opts.root.clone(), true)?;
         }
         Ok(())
     }

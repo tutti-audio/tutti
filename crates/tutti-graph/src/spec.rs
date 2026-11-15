@@ -706,6 +706,7 @@ impl GraphSpec {
                 gains: self.gains.clone(),
                 modes: self.modes.clone(),
                 mixes: self.mixes.clone(),
+                root_bank: None,
             }),
             _ => Err(errs),
         }
@@ -834,9 +835,27 @@ pub struct ValidGraph {
     gains: BTreeMap<EdgeId, EdgeGain>,
     modes: BTreeMap<NodeKey, NodeMode>,
     mixes: BTreeMap<NodeKey, NodeMix>,
+    root_bank: Option<crate::RootBank>,
 }
 
 impl ValidGraph {
+    /// This graph with the outputs from `bank.base` on being the old root's:
+    /// the channels a plan renders beside the root's own while a root change
+    /// crossfades ([`RootBank`](crate::RootBank)). The editor's commit makes
+    /// them; the compiler gives them no meter, tap or compensation.
+    #[must_use]
+    pub(crate) fn with_root_bank(mut self, bank: crate::RootBank) -> Self {
+        debug_assert!(bank.base <= self.valid.get().outputs.len());
+        self.root_bank = Some(bank);
+        self
+    }
+
+    /// The old root's outputs the topology's channels end with, if a root
+    /// change is crossfading.
+    pub fn root_bank(&self) -> Option<crate::RootBank> {
+        self.root_bank
+    }
+
     /// The checked topology.
     pub fn topology(&self) -> &Topology {
         self.valid.get()

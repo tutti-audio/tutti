@@ -860,3 +860,66 @@ fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
         }
     }
 }
+
+/// A root change that crossfades over several blocks is applied without
+/// allocating: a 7.1.4 root fades out as a 5.1 root fades in over the 240-frame
+/// declick, which 64-frame blocks cross in four, and every block (the one that
+/// installs the plan with the old root's channels, the ones that fold both
+/// roots, and the one that ends the fade) is guarded. The blocks after the
+/// fade are the new root's fold alone, by its own rule.
+#[test]
+fn a_root_change_crossfaded_across_several_blocks_is_allocation_free() {
+    use tutti_graph::{Editor, Fade, FadeLaw, NodeKey, OutPort, Prepare, Source, Unforkable};
+    use tutti_types::{Bed, MaxBlock, Samples, Seconds};
+
+    let transport = Transport::new(SampleRate::of(48_000.0));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::of(48_000.0),
+        MaxBlock::of(Samples(64)),
+    ));
+    ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
+    let wire = |ed: &mut Editor, width: u16| {
+        ed.spec_mut().topology.set_outputs((0..width).map(|port| {
+            Source::Node(OutPort {
+                node: NodeKey(1),
+                port,
+            })
+        }));
+    };
+    wire(&mut ed, 12);
+    ed.commit().expect("commits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
+    ed.set_root_fade(Some(Fade::seconds(
+        Seconds(0.005),
+        SampleRate::of(48_000.0),
+        FadeLaw::EqualAmplitude,
+    )));
+    let mut out = vec![0.0f32; 64 * 2];
+    // The first block adopts the 7.1.4 plan.
+    engine.process(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
+
+    let control = engine.output_control();
+    let id = ed.spec().root_id.next();
+    control
+        .publish_root(id, Some(Bed::Surround51.topology()), ChannelLayout::STEREO)
+        .expect("places");
+    ed.spec_mut().root_id = id;
+    wire(&mut ed, 6);
+    ed.commit().expect("commits");
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..8 {
+            engine.process(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
+        }
+    });
+    let v = |c: usize| (c + 1) as f32 / 16.0;
+    let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
+    let (left, right) = (v(0) + m * (v(2) + v(4)), v(1) + m * (v(2) + v(5)));
+    for frame in out.as_chunks::<2>().0 {
+        assert!((frame[0] - left).abs() < 1e-5, "left {} vs {left}", frame[0]);
+        assert!(
+            (frame[1] - right).abs() < 1e-5,
+            "right {} vs {right}",
+            frame[1]
+        );
+    }
+}

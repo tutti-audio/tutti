@@ -666,7 +666,11 @@ pub fn compile(
         .collect();
     let departure = |n: usize| departures[n];
     let total = Latency::new(solved.compensation().total());
-    let compensation: Vec<Samples> = (0..topology.outputs.len())
+    // The root's channels: a root change's old channels, after them, are
+    // aligned like any output and report nothing outward.
+    let rendered_outputs = topology.outputs.len();
+    let root_width = graph.root_bank().map_or(rendered_outputs, |b| b.base);
+    let compensation: Vec<Samples> = (0..root_width)
         .map(|ch| solved.compensation().for_channel(ch))
         .collect();
 
@@ -1040,7 +1044,7 @@ pub fn compile(
             Source::Global(ch) => ARef::Val(global_val[&ch]),
             Source::Zero => ARef::Zero,
         };
-        let d = compensation[channel as usize];
+        let d = solved.compensation().for_channel(usize::from(channel));
         // Delaying silence is silence: a zero channel reports its
         // compensation (as `latency::plan` does) but gets no ring.
         let mut delay = (!d.is_zero() && src != ARef::Zero).then(|| {
@@ -1091,7 +1095,13 @@ pub fn compile(
                 // What each output channel carries, post-sum and aligned
                 // (above); a lane past the output count is silence.
                 let srcs: Vec<ARef> = (0..*width)
-                    .map(|c| output_refs.get(c).copied().unwrap_or(ARef::Zero))
+                    .map(|c| {
+                        output_refs
+                            .get(c)
+                            .filter(|_| c < root_width)
+                            .copied()
+                            .unwrap_or(ARef::Zero)
+                    })
                     .collect();
                 let op = em.push(Pre::Tap {
                     tap: tap_ids.len() as u32,
@@ -1231,7 +1241,7 @@ pub fn compile(
     let mut meter_ids: Vec<(crate::MeterId, usize)> = Vec::new();
     for (&meter, spec) in &topology.meters {
         let srcs: Vec<ARef> = match spec {
-            crate::MeterSpec::Outputs => output_refs.clone(),
+            crate::MeterSpec::Outputs => output_refs[..root_width].to_vec(),
             crate::MeterSpec::Ports { sources, align } => {
                 let mut srcs = Vec::with_capacity(sources.len());
                 for (lane, source) in sources.iter().enumerate() {
@@ -1732,6 +1742,8 @@ pub fn compile(
         global_inputs: topology.inputs.count(),
         compensation,
         root_id: crate::RootId::GENESIS,
+        root_bank: graph.root_bank(),
+        rendered_outputs,
         total_latency: total,
         audio_values,
         event_values,
