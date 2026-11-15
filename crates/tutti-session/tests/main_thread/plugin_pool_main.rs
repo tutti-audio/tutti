@@ -118,7 +118,7 @@ fn an_in_process_plugin_lands_in_an_update_on_the_main_thread() {
     assert_eq!(handle.presence(), Presence::Live);
     let node = s.add_pooled_plugin(&"verb").expect("the plugin enters");
     assert!(
-        s.hosted_plugin(node)
+        s.plugin_view(node)
             .unwrap()
             .diagnostics()
             .server_pid()
@@ -258,7 +258,7 @@ fn a_changed_identity_swaps_an_in_process_node() {
     let node = s.add_pooled_plugin(&"fx").unwrap();
     let first = s.plugin(&"fx").unwrap();
     let second = tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap();
-    assert_ne!(s.hosted_plugin(node).unwrap().descriptor().id, second);
+    assert_ne!(s.plugin_view(node).unwrap().descriptor().id, second);
 
     s.pool(
         s.plugin_entry("fx", &second_id(), &catalog)
@@ -267,7 +267,7 @@ fn a_changed_identity_swaps_an_in_process_node() {
     .unwrap();
     assert!(matches!(next_event(&mut s, "fx"), PoolEvent::Reloaded));
     let deadline = Instant::now() + Duration::from_secs(10);
-    while s.hosted_plugin(node).unwrap().descriptor().id != second {
+    while s.plugin_view(node).unwrap().descriptor().id != second {
         assert!(Instant::now() < deadline, "the node never swapped");
         let _ = s.update();
         thread::sleep(Duration::from_millis(2));
@@ -289,7 +289,7 @@ fn an_in_process_swap_to_other_ports_fails_the_entry() {
     .unwrap();
     assert!(matches!(next_event(&mut s, "fx"), PoolEvent::Loaded));
     let node = s.add_pooled_plugin(&"fx").unwrap();
-    let before = s.hosted_plugin(node).unwrap().descriptor().id.clone();
+    let before = s.plugin_view(node).unwrap().descriptor().id.clone();
 
     // The next plugin opened has the probe's aux-bus layout.
     probe().set(ClapSwitch::PortLayout, 1);
@@ -316,7 +316,7 @@ fn an_in_process_swap_to_other_ports_fails_the_entry() {
         ),
         "{events:?}"
     );
-    assert_eq!(s.hosted_plugin(node).unwrap().descriptor().id, before);
+    assert_eq!(s.plugin_view(node).unwrap().descriptor().id, before);
     // The unused plugin was closed where the refusal ran, on the main thread,
     // and the graph still commits.
     let closed = deactivation();
@@ -359,7 +359,7 @@ fn an_in_process_swap_waits_for_the_main_thread() {
     )
     .unwrap();
     assert!(matches!(next_event(&mut s, "fx"), PoolEvent::Reloaded));
-    assert_ne!(s.hosted_plugin(node).unwrap().descriptor().id, second);
+    assert_ne!(s.plugin_view(node).unwrap().descriptor().id, second);
 
     // Off the main thread the re-prepare resumes, and the swap still waits.
     let mut s = thread::spawn(move || {
@@ -373,7 +373,7 @@ fn an_in_process_swap_waits_for_the_main_thread() {
         }
         let _ = s.update();
         assert_ne!(
-            s.hosted_plugin(node).unwrap().descriptor().id,
+            s.plugin_view(node).unwrap().descriptor().id,
             second,
             "an update off the main thread does not swap an in-process plugin"
         );
@@ -382,7 +382,7 @@ fn an_in_process_swap_waits_for_the_main_thread() {
     .join()
     .unwrap();
     let _ = s.update();
-    assert_eq!(s.hosted_plugin(node).unwrap().descriptor().id, second);
+    assert_eq!(s.plugin_view(node).unwrap().descriptor().id, second);
     s.close(tutti_fixtures::main_thread());
 }
 

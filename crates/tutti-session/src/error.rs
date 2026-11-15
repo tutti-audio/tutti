@@ -485,8 +485,8 @@ pub enum Error {
     Midi(#[from] MidiError),
 
     /// [`Session::instrument`](crate::Session::instrument) (or
-    /// `add_instrument`, `instrument_plugin`) was given a node that cannot be
-    /// played as an instrument.
+    /// `add_instrument`) was given a node that cannot be played as an
+    /// instrument.
     #[cfg(feature = "midi")]
     #[error("{node:?} is not an instrument: {why}")]
     NotInstrument {

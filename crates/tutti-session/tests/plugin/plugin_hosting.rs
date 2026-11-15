@@ -94,6 +94,55 @@ fn a_plugin_blacklisted_after_the_entry_is_built_is_refused_when_it_loads() {
     }
 }
 
+/// **A plugin unblacklisted before the load runs is admitted**: the entry asks
+/// the catalog's blacklist when the load opens the plugin, so a plugin the
+/// catalog blacklists and then clears between building the entry and the load
+/// is not refused.
+#[test]
+fn a_plugin_unblacklisted_before_the_load_runs_is_admitted() {
+    let path = clap_probe();
+    let plugin = PluginRef::file(&path).expect("a plugin file");
+    let (mut catalog, id, _dir) = catalog_of(&plugin);
+    let mut s = session();
+    let main = tutti_fixtures::main_thread();
+
+    set_server(plugin_server());
+    let declared = s.plugin_entry(0u64, &id, &catalog);
+    catalog.blacklist(&path, "hung in its load");
+    assert!(catalog.unblacklist(&path));
+    s.pool(declared).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let events = s.main(main).update();
+        assert!(
+            !events.iter().any(|event| matches!(
+                event,
+                tutti_session::SessionEvent::Pool {
+                    event: tutti_session::PoolEvent::Failed(_),
+                    ..
+                }
+            )),
+            "an unblacklisted plugin was refused"
+        );
+        if events.iter().any(|event| {
+            matches!(
+                event,
+                tutti_session::SessionEvent::Pool {
+                    event: tutti_session::PoolEvent::Loaded,
+                    ..
+                }
+            )
+        }) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the load never landed"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
 /// **A hosting the format cannot have is refused at load**: VST2 asked to be
 /// served is `NotOutOfProcess`, and the entry is not changed to in process.
 #[cfg(feature = "vst2")]
@@ -131,7 +180,7 @@ fn a_clap_plugin_asked_in_process_is_hosted_here() {
             Spec::new(plugin).hosting(Hosting::InProcess),
         )
         .expect("the reference plugin loads in this process");
-    let hosted = s.hosted_plugin(node).expect("it is hosted");
+    let hosted = s.plugin_view(node).expect("it is hosted");
     assert_eq!(hosted.diagnostics().server_pid(), None);
     assert_eq!(
         hosted.descriptor().id,

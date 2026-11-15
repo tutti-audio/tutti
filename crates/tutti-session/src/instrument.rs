@@ -271,7 +271,9 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// [`Error::NotInstrument`](crate::Error::NotInstrument).
+    /// [`Error::NotInstrument`](crate::Error::NotInstrument). The node stays in
+    /// the graph, as the caller had it: [`remove`](Self::remove) it if it is
+    /// not wanted.
     pub fn instrument(
         &mut self,
         node: impl Into<NodeKey>,
@@ -331,7 +333,7 @@ impl Session {
             }
         }
         #[cfg(feature = "plugin")]
-        if let Ok(plugin) = self.hosted_plugin(node) {
+        if let Ok(plugin) = self.plugin_view(node) {
             let role = plugin.descriptor().class.role();
             if role != tutti_plugin_types::PluginRole::Instrument {
                 return Err(why(NotInstrument::Plugin(role)));

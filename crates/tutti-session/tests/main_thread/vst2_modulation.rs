@@ -39,7 +39,7 @@ fn session_with_probe() -> (Session, NodeKey) {
     s.graph().connect(node, Root).unwrap();
     let _ = s.update();
     assert!(
-        s.hosted_plugin(node).is_ok_and(|p| p.params().is_ready()),
+        s.plugin_view(node).is_ok_and(|p| p.params().is_ready()),
         "an in-process plugin's values are read as it opens"
     );
     (s, node.erase())
@@ -122,7 +122,7 @@ fn a_plugin_gui_edit_becomes_the_knob() {
         &mut out,
     );
     probe_switch::<u32>(b"tutti_vst2_probe_set_automate_burst\0", 0);
-    s.hosted_plugin(node)
+    s.plugin_view(node)
         .expect("the plugin's handle")
         .handle()
         .editor_idle(tutti_fixtures::main_thread());
@@ -135,7 +135,7 @@ fn a_plugin_gui_edit_becomes_the_knob() {
         Some(1.0 / 16.0)
     );
     assert_eq!(
-        s.hosted_plugin(node)
+        s.plugin_view(node)
             .expect("hosted")
             .params()
             .get(ParamId::new(0))
@@ -186,7 +186,7 @@ fn a_plugins_midi_rewiring_keeps_its_lanes() {
     let _ = s.update();
     let mut side = s.graph().take_audio_side();
     let value = |s: &Session| {
-        s.hosted_plugin(node)
+        s.plugin_view(node)
             .expect("the handle")
             .handle()
             .any_thread()
@@ -251,7 +251,7 @@ fn a_plugin_echoing_the_lane_keeps_its_knob() {
     for round in 0..4 {
         side.render(1_024, 128, &mut out);
         let handle = s
-            .hosted_plugin(node)
+            .plugin_view(node)
             .expect("the plugin's handle")
             .handle()
             .clone();

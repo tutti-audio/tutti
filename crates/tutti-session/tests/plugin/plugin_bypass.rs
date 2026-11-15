@@ -123,7 +123,7 @@ impl Rig {
     /// The blocks the plugin's server has answered.
     fn replies(&self) -> u64 {
         self.s
-            .hosted_plugin(self.plugin)
+            .plugin_view(self.plugin)
             .expect("hosted")
             .diagnostics()
             .block_counts()

@@ -93,8 +93,7 @@ impl Plugin {
         let plugin = tutti_plugin::catalog::PluginRef::file(path).expect("a plugin file");
         let request = match state {
             Some(bytes) => Spec::new(plugin.clone())
-                .restoring(tutti_plugin::catalog::PluginState::new(plugin, bytes))
-                .expect("the state is the plugin's own"),
+                .restoring(tutti_plugin::catalog::PluginState::new(plugin, bytes)),
             None => Spec::new(plugin),
         };
         let node = session
@@ -145,7 +144,7 @@ impl Subject for Plugin {
     fn transcript(rig: &Rig) -> Option<tutti_shared_plugin::transcript::Transcript> {
         let state = rig
             .session
-            .hosted_plugin(rig.node)
+            .plugin_view(rig.node)
             .ok()?
             .state()
             .save()

@@ -52,11 +52,7 @@ fn loaded_and_released(session: &mut Session, main: MainThreadMarker) -> PluginH
             Spec::new(PluginRef::file(probe()).expect("a plugin file")),
         )
         .expect("the in-process VST2 loads");
-    let handle = session
-        .hosted_plugin(node)
-        .expect("hosted")
-        .handle()
-        .clone();
+    let handle = session.plugin_view(node).expect("hosted").handle().clone();
     session.remove(node).expect("the plugin is removed");
     let mut frame = [0.0f32; 2];
     for _ in 0..4 {

@@ -16,7 +16,7 @@
 //!
 //! Each plugin the graph holds (`Graph::insert_plugin`,
 //! [`Session::add_pooled_plugin`], [`Graph::host_plugin`](crate::Graph::host_plugin)) has a record,
-//! keyed by its [`NodeKey`] and lent as a [`Plugin`] ([`Session::hosted_plugin`]): the [`PluginRef`] it is, its handle, its
+//! keyed by its [`NodeKey`] and lent as a [`Plugin`] ([`Session::plugin_view`]): the [`PluginRef`] it is, its handle, its
 //! controls (an out-of-process plugin's latency and meter cells), its
 //! liveness, whether it was told the render mode, its last good state
 //! ([`state`](Plugin::state)), and its parameter mirror
@@ -1033,7 +1033,7 @@ impl Key<PluginNode> {
     }
 }
 
-/// A hosted plugin, lent by [`Session::hosted_plugin`]: its identity, and the
+/// A hosted plugin, lent by [`Session::plugin_view`]: its identity, and the
 /// surfaces the session holds for it.
 ///
 /// A view borrows the session, so it cannot outlive the plugin it names: a
@@ -1243,12 +1243,15 @@ impl Session {
         key
     }
 
-    /// The plugin hosted at `node`.
+    /// The view of the plugin hosted at `node`: its params, state, diagnostics,
+    /// buses, health and presets. A transitional door, the per-node view whose
+    /// parts move onto the plugin's handle ([`plugin`](Self::plugin)); the
+    /// handle is the way to the plugin, and this goes with the last of them.
     ///
     /// # Errors
     ///
     /// [`NoSuchNode`](crate::NoSuchNode) when no plugin is hosted at `node`.
-    pub fn hosted_plugin(&self, node: impl Into<NodeKey>) -> Result<Plugin<'_>, crate::NoSuchNode> {
+    pub fn plugin_view(&self, node: impl Into<NodeKey>) -> Result<Plugin<'_>, crate::NoSuchNode> {
         let node = node.into();
         self.graph
             .plugins
@@ -2277,7 +2280,7 @@ mod tests {
         rig.run_and_land(job);
         assert_eq!(
             rig.session
-                .hosted_plugin(rig.node)
+                .plugin_view(rig.node)
                 .unwrap()
                 .state()
                 .last_good()
@@ -2310,7 +2313,7 @@ mod tests {
         rig.run_and_land(job);
         assert_eq!(
             rig.session
-                .hosted_plugin(rig.node)
+                .plugin_view(rig.node)
                 .unwrap()
                 .state()
                 .last_good()
@@ -2383,7 +2386,7 @@ mod tests {
         rig.dead.store(true, Ordering::SeqCst);
         assert!(rig.plugins_at(1_000).is_empty(), "failing: no snapshot");
         assert!(matches!(
-            rig.session.hosted_plugin(rig.node).unwrap().health(),
+            rig.session.plugin_view(rig.node).unwrap().health(),
             PluginHealth::Died { .. }
         ));
     }
@@ -2416,7 +2419,7 @@ mod tests {
                 );
             }
             assert!(
-                rig.session.hosted_plugin(rig.node).is_err(),
+                rig.session.plugin_view(rig.node).is_err(),
                 "the record went"
             );
             // The outgoing plugin dies, past the debounce's count and window.
@@ -2524,7 +2527,7 @@ mod tests {
             .param_read = None;
         assert_eq!(
             rig.session
-                .hosted_plugin(rig.node)
+                .plugin_view(rig.node)
                 .unwrap()
                 .state()
                 .last_good()
@@ -2535,7 +2538,7 @@ mod tests {
         rig.run_and_land(in_flight);
         assert_eq!(
             rig.session
-                .hosted_plugin(rig.node)
+                .plugin_view(rig.node)
                 .unwrap()
                 .state()
                 .last_good()
@@ -2549,7 +2552,7 @@ mod tests {
         rig.run_and_land(own);
         assert_eq!(
             rig.session
-                .hosted_plugin(rig.node)
+                .plugin_view(rig.node)
                 .unwrap()
                 .state()
                 .last_good()
@@ -2827,7 +2830,7 @@ mod tests {
         let job = rig.plugins_at(0).pop().expect("the reload is submitted");
         rig.session.remove(rig.node).expect("the node is removed");
         assert!(
-            rig.session.hosted_plugin(rig.node).is_err(),
+            rig.session.plugin_view(rig.node).is_err(),
             "its record is gone"
         );
         let events = rig.run_and_land(job);

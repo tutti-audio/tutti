@@ -39,7 +39,7 @@
 //! # use tutti_session::Session;
 //! # use tutti_graph::NodeKey;
 //! # fn open(session: &Session, node: NodeKey) {
-//! let _ = session.hosted_plugin(node).unwrap().editor();
+//! let _ = session.plugin_view(node).unwrap().editor();
 //! # }
 //! ```
 //!

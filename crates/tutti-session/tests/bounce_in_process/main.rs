@@ -52,8 +52,7 @@ fn an_in_process_instrument_without_a_live_render_mode_bounces_its_clip() {
     let mut session = offline_session();
     let request = Spec::new(plugin.clone())
         .hosting(Hosting::InProcess)
-        .restoring(PluginState::new(plugin, notes_state()))
-        .expect("the state is the plugin's own");
+        .restoring(PluginState::new(plugin, notes_state()));
     let main = tutti_fixtures::main_thread();
     let node = session
         .load_plugin_blocking(main, request)

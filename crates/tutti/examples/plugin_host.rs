@@ -15,7 +15,7 @@
 //! note; the plugin's first parameter is set and dragged (`params()`); its state is saved with
 //! `state().save()` and written beside the WAV.
 //!
-//! The plugin is a [`Plugin`](tutti::Plugin) view (`session.hosted_plugin(node)`), and what happens to
+//! The plugin is a [`Plugin`](tutti::Plugin) view (`session.plugin_view(node)`), and what happens to
 //! it is a [`PluginEvent`] in `update()`'s events. The host makes the token on its
 //! main thread and calls `session.main(main).update()`, which services the
 //! editors it opened (`ui.plugin(node)?.editor().open(&window, scale)`, with a
@@ -147,7 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    it, each `set` is a change, and dropping the guard ends it, so the
     //    session reports the host's begin, changes and end in `update()`'s
     //    events as it reports the plugin's own.
-    let hosted = session.hosted_plugin(node)?;
+    let hosted = session.plugin_view(node)?;
     let params = hosted.params();
     let first: Option<ParamId> = params.iter().next().map(|p| p.id());
     if let Some(id) = first {

@@ -367,7 +367,7 @@ pub use tutti_plugin as plugin;
 /// `PluginHandle` control surface, the node's controls, the host policy over a
 /// handle (`Liveness`, `PluginParamValues`) and the in-process node. It is the layer
 /// the session's views are built on: a host reads and sets a hosted plugin's
-/// parameters through `Session::hosted_plugin(node)?.params()`, not through the handle. Feature
+/// parameters through `Session::plugin_view(node)?.params()`, not through the handle. Feature
 /// `plugin`.
 #[cfg(feature = "plugin")]
 pub use tutti_plugin_host as plugin_host;

@@ -43,7 +43,7 @@ mod clap {
     }
 
     fn saved(s: &Session, node: NodeKey) -> Vec<u8> {
-        s.hosted_plugin(node)
+        s.plugin_view(node)
             .unwrap()
             .state()
             .save()
@@ -92,7 +92,7 @@ mod clap {
 
     /// The mirror's value of the plugin's first parameter (Cutoff).
     fn cutoff(s: &Session, node: NodeKey) -> Option<f64> {
-        let plugin = s.hosted_plugin(node).unwrap();
+        let plugin = s.plugin_view(node).unwrap();
         let params = plugin.params();
         let first = params.iter().next()?.id();
         params.get(first).ok().map(|p| p.normalized().get())
@@ -107,7 +107,7 @@ mod clap {
     fn a_loaded_preset_file_moves_the_mirror() {
         let (mut s, node) = loaded();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while !s.hosted_plugin(node).is_ok_and(|p| p.params().is_ready()) {
+        while !s.plugin_view(node).is_ok_and(|p| p.params().is_ready()) {
             assert!(
                 std::time::Instant::now() < deadline,
                 "the read never landed"

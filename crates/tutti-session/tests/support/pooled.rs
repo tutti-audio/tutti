@@ -7,13 +7,14 @@
 
 #![allow(dead_code)]
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use tutti_plugin::catalog::{
     Catalog, CatalogConfig, Hosting, Locator, NO_SCAN_DIRS, PluginId, PluginRef, PluginState,
 };
-use tutti_plugin::error::StateError;
 use tutti_plugin_db::{PluginDb, ScanPoll};
 use tutti_plugin_types::MainThreadMarker;
 use tutti_session::{Key, LoadError, PluginNode, PoolEvent, Session, SessionEvent};
@@ -35,44 +36,32 @@ impl Spec {
         }
     }
 
-    /// The state the plugin starts from, if one was given.
-    pub fn state(&self) -> Option<&PluginState> {
-        self.state.as_ref()
-    }
-
     #[must_use]
     pub fn hosting(mut self, hosting: Hosting) -> Self {
         self.hosting = hosting;
         self
     }
 
-    /// With `state` restored before the plugin is activated.
-    ///
-    /// # Errors
-    ///
-    /// `StateError::OtherPlugin` when the state was saved from another plugin.
-    pub fn restoring(mut self, state: PluginState) -> Result<Self, StateError> {
-        state.check_for(&self.plugin)?;
+    /// With `state` restored before the plugin is activated (the entry checks
+    /// that it is the plugin's own).
+    #[must_use]
+    pub fn restoring(mut self, state: PluginState) -> Self {
         self.state = Some(state);
-        Ok(self)
+        self
     }
 }
 
 /// Probes the plugin file at `path` into `catalog`, waiting for the probe.
 ///
-/// The probe is a process of its own and inherits the environment, which a test
-/// uses to inject faults into the plugin's server (`TUTTI_CLAP_PROBE_*`): those
-/// are taken out for the probe's life, so the probe does not use up a fault
-/// meant for the server.
+/// The probe is a process of its own and inherits the environment. A test that
+/// injects a fault into the plugin's server sets `TUTTI_CLAP_PROBE_ONCE_FILE`,
+/// which the first process to load the plugin uses up: a probe that ran after
+/// it would take the fault meant for the server. [`prime`] probes first.
 pub fn probe(catalog: &mut Catalog, path: &std::path::Path) {
-    let faults: Vec<(std::ffi::OsString, std::ffi::OsString)> = std::env::vars_os()
-        .filter(|(key, _)| key.to_string_lossy().starts_with("TUTTI_CLAP_PROBE_"))
-        .collect();
-    for (key, _) in &faults {
-        // SAFETY: nextest runs each test in its own process, and this runs on the
-        // test's own thread while no load of its own is running.
-        unsafe { std::env::remove_var(key) };
-    }
+    assert!(
+        std::env::var_os("TUTTI_CLAP_PROBE_ONCE_FILE").is_none(),
+        "probe before the fault is set (`prime`): the probe would use it up"
+    );
     let mut task = catalog.register(path).expect("a plugin file");
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
@@ -87,10 +76,6 @@ pub fn probe(catalog: &mut Catalog, path: &std::path::Path) {
             }
             ScanPoll::Died => panic!("the probe's worker died"),
         }
-    }
-    for (key, value) in faults {
-        // SAFETY: as above.
-        unsafe { std::env::set_var(key, value) };
     }
 }
 
@@ -129,14 +114,48 @@ pub trait LoadPlugin {
 
 static KEYS: AtomicU64 = AtomicU64::new(0);
 
+/// The catalogs `load_plugin_blocking` loads from, by the file and the id the
+/// ref names: probed once per process.
+static PRIMED: Mutex<
+    Vec<(
+        PathBuf,
+        Option<String>,
+        Catalog,
+        PluginId,
+        tempfile::TempDir,
+    )>,
+> = Mutex::new(Vec::new());
+
+/// Probes `plugin`'s file for the loads of this process. A test that sets a
+/// fault variable of the plugin's server calls it first, before the variable.
+pub fn prime(plugin: &PluginRef) {
+    let mut primed = PRIMED.lock().unwrap_or_else(PoisonError::into_inner);
+    let file = tutti_plugin_db::canonical_path(plugin.path());
+    let id = plugin.id().map(str::to_owned);
+    if !primed.iter().any(|(f, i, ..)| *f == file && *i == id) {
+        let (catalog, plugin_id, dir) = catalog_of(plugin);
+        primed.push((file, id, catalog, plugin_id, dir));
+    }
+}
+
 impl LoadPlugin for Session {
     fn load_plugin_blocking(
         &mut self,
         main: MainThreadMarker,
         spec: Spec,
     ) -> Result<Key<PluginNode>, LoadError> {
-        let (catalog, id, _dir) = catalog_of(&spec.plugin);
-        self.load_entry_blocking(main, &catalog, &id, spec.hosting, spec.state)
+        prime(&spec.plugin);
+        let key = {
+            let primed = PRIMED.lock().unwrap_or_else(PoisonError::into_inner);
+            let file = tutti_plugin_db::canonical_path(spec.plugin.path());
+            let id = spec.plugin.id().map(str::to_owned);
+            let (_, _, catalog, plugin_id, _) = primed
+                .iter()
+                .find(|(f, i, ..)| *f == file && *i == id)
+                .expect("primed above");
+            self.declare_entry(main, catalog, plugin_id, spec.hosting, spec.state)
+        };
+        self.await_entry(main, key)
     }
 }
 
@@ -156,21 +175,44 @@ pub trait LoadEntry {
         id: &PluginId,
         hosting: Hosting,
         state: Option<PluginState>,
-    ) -> Result<Key<PluginNode>, LoadError>;
-}
+    ) -> Result<Key<PluginNode>, LoadError> {
+        let key = self.declare_entry(main, catalog, id, hosting, state);
+        self.await_entry(main, key)
+    }
 
-impl LoadEntry for Session {
-    fn load_entry_blocking(
+    /// Declares the entry under a key of its own, after an update on the main
+    /// thread (an in-process load's main stage waits for one).
+    fn declare_entry(
         &mut self,
         main: MainThreadMarker,
         catalog: &Catalog,
         id: &PluginId,
         hosting: Hosting,
         state: Option<PluginState>,
-    ) -> Result<Key<PluginNode>, LoadError> {
+    ) -> u64;
+
+    /// Updates until the entry under `key` lands, and adds its node.
+    ///
+    /// # Errors
+    ///
+    /// Why the load failed.
+    fn await_entry(
+        &mut self,
+        main: MainThreadMarker,
+        key: u64,
+    ) -> Result<Key<PluginNode>, LoadError>;
+}
+
+impl LoadEntry for Session {
+    fn declare_entry(
+        &mut self,
+        main: MainThreadMarker,
+        catalog: &Catalog,
+        id: &PluginId,
+        hosting: Hosting,
+        state: Option<PluginState>,
+    ) -> u64 {
         let key = KEYS.fetch_add(1, Ordering::Relaxed);
-        // An update on the main thread first: an in-process load's main stage
-        // waits for one.
         let _ = self.main(main).update();
         let mut declared = self.plugin_entry(key, id, catalog).hosting(hosting);
         if let Some(state) = state {
@@ -179,6 +221,14 @@ impl LoadEntry for Session {
                 .expect("a state of the plugin");
         }
         self.pool(declared).expect("a pool the session takes");
+        key
+    }
+
+    fn await_entry(
+        &mut self,
+        main: MainThreadMarker,
+        key: u64,
+    ) -> Result<Key<PluginNode>, LoadError> {
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
             for event in self.main(main).update() {

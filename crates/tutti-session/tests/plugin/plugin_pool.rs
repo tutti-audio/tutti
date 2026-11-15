@@ -186,7 +186,7 @@ fn a_served_plugin_lands_through_the_pool() {
     assert_eq!(handle.presence(), Presence::Live);
 
     let node = s.add_pooled_plugin(&"verb").expect("the plugin enters");
-    let view = s.hosted_plugin(node).expect("hosted");
+    let view = s.plugin_view(node).expect("hosted");
     assert!(
         view.diagnostics().server_pid().is_some(),
         "an out-of-process plugin has its server"
@@ -254,7 +254,7 @@ fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
         Err(RetryError::NotFailed("verb"))
     ));
 
-    s.hosted_plugin(node)
+    s.plugin_view(node)
         .unwrap()
         .diagnostics()
         .terminate(TerminationReason::Hung {
@@ -264,7 +264,7 @@ fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
     pump_until(&mut s, "the death", |_| !before.presence().is_live());
     assert_eq!(before.presence(), Presence::Lost(PluginCause::Died));
     pump_until(&mut s, "the node's removal", |s| {
-        s.hosted_plugin(node).is_err()
+        s.plugin_view(node).is_err()
     });
     assert_eq!(
         before.presence(),
@@ -291,7 +291,7 @@ fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
 fn recovery_keeps_a_plugin_live_until_it_gives_up() {
     let (catalog, _dir) = catalog();
     let kill = |s: &Session, node| {
-        s.hosted_plugin(node)
+        s.plugin_view(node)
             .unwrap()
             .diagnostics()
             .terminate(TerminationReason::Hung {
@@ -309,7 +309,7 @@ fn recovery_keeps_a_plugin_live_until_it_gives_up() {
     kill(&s, node);
     pump_until(&mut s, "the reload to start", |s| {
         matches!(
-            s.hosted_plugin(node).map(|p| p.health()),
+            s.plugin_view(node).map(|p| p.health()),
             Ok(PluginHealth::Reloading { .. })
         )
     });
@@ -341,14 +341,14 @@ fn an_initial_state_is_restored_and_two_keys_load_two_plugins() {
     loaded(&mut s, "a");
     let a = s.add_pooled_plugin(&"a").unwrap();
     let set = Normalized::of(0.9);
-    s.hosted_plugin(a)
+    s.plugin_view(a)
         .unwrap()
         .params()
         .get(CUTOFF)
         .unwrap()
         .set(set)
         .unwrap();
-    let state = s.hosted_plugin(a).unwrap().state().save().expect("a state");
+    let state = s.plugin_view(a).unwrap().state().save().expect("a state");
 
     s.pool((
         s.plugin_entry("a", &first_id(), &catalog),
@@ -360,7 +360,7 @@ fn an_initial_state_is_restored_and_two_keys_load_two_plugins() {
     loaded(&mut s, "b");
     let b = s.add_pooled_plugin(&"b").unwrap();
     let read = s
-        .hosted_plugin(b)
+        .plugin_view(b)
         .unwrap()
         .params()
         .get(CUTOFF)
@@ -370,7 +370,7 @@ fn an_initial_state_is_restored_and_two_keys_load_two_plugins() {
         (read.get() - set.get()).abs() < 1e-6,
         "the state's value, not the default: {read:?}"
     );
-    let pid = |node| s.hosted_plugin(node).unwrap().diagnostics().server_pid();
+    let pid = |node| s.plugin_view(node).unwrap().diagnostics().server_pid();
     assert_ne!(pid(a), pid(b), "two plugins, two servers");
     assert_ne!(s.plugin(&"a").unwrap().id(), s.plugin(&"b").unwrap().id());
 }
@@ -408,7 +408,7 @@ fn a_swap_to_a_plugin_with_other_ports_fails_the_entry() {
         Some(PoolState::Failed(LoadError::PluginPorts { .. }))
     ));
     assert!(s.plugin(&"fx").is_err(), "the unused plugin is gone");
-    assert_eq!(s.hosted_plugin(node).unwrap().descriptor().id, first);
+    assert_eq!(s.plugin_view(node).unwrap().descriptor().id, first);
     let _ = pump(&mut s);
     assert!(
         s.update()
@@ -429,7 +429,7 @@ fn a_changed_identity_swaps_the_node() {
     loaded(&mut s, "fx");
     let node = s.add_pooled_plugin(&"fx").unwrap();
     let first = s.plugin(&"fx").unwrap();
-    let id_of_node = |s: &Session| s.hosted_plugin(node).unwrap().descriptor().id.clone();
+    let id_of_node = |s: &Session| s.plugin_view(node).unwrap().descriptor().id.clone();
     assert_eq!(
         id_of_node(&s),
         tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap()
@@ -518,7 +518,7 @@ fn with_node_in(
 }
 
 fn pid_of(s: &Session, node: tutti_session::Key<tutti_session::PluginNode>) -> Option<u32> {
-    s.hosted_plugin(node).unwrap().diagnostics().server_pid()
+    s.plugin_view(node).unwrap().diagnostics().server_pid()
 }
 
 /// Declares `id` (hosted as `hosting`) under `fx`, with the aux-bus layout
@@ -559,7 +559,7 @@ fn a_swap_to_the_same_totals_in_other_buses_fails_the_entry() {
         )
     );
     assert_eq!(
-        s.hosted_plugin(node).unwrap().descriptor().id,
+        s.plugin_view(node).unwrap().descriptor().id,
         tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap()
     );
 }
@@ -592,7 +592,7 @@ fn a_retry_after_a_refused_swap_swaps_the_node() {
     );
     let second = tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap();
     pump_until(&mut s, "the swap", |s| {
-        s.hosted_plugin(node).unwrap().descriptor().id == second
+        s.plugin_view(node).unwrap().descriptor().id == second
     });
     assert_ne!(pid_of(&s, node), first, "another server");
     assert!(matches!(
@@ -615,7 +615,7 @@ fn a_later_identity_is_the_one_the_node_ends_on() {
     declare_with_layout(&mut s, &catalog, &first_id(), Hosting::OutOfProcess, "0");
     pump_until(&mut s, "the swap", |s| pid_of(s, node) != first);
     assert_eq!(
-        s.hosted_plugin(node).unwrap().descriptor().id,
+        s.plugin_view(node).unwrap().descriptor().id,
         tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap()
     );
 }
@@ -680,7 +680,7 @@ fn a_swap_waits_for_the_graph_and_ends_on_the_last_identity() {
         pid_of(s, node) != first
     });
     assert_eq!(
-        s.hosted_plugin(node).unwrap().descriptor().id,
+        s.plugin_view(node).unwrap().descriptor().id,
         tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap(),
         "the last identity declared"
     );
@@ -712,7 +712,7 @@ fn a_node_removed_while_its_swap_waits_leaves_the_plugin_to_the_entry() {
         .add_pooled_plugin(&"fx")
         .expect("the landed plugin is the next node's");
     assert_eq!(
-        s.hosted_plugin(next).unwrap().descriptor().id,
+        s.plugin_view(next).unwrap().descriptor().id,
         tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap()
     );
 }
@@ -742,7 +742,7 @@ fn a_graph_that_refuses_the_swap_fails_the_entry() {
         "{refused:?}"
     );
     assert_eq!(
-        s.hosted_plugin(node).unwrap().descriptor().id,
+        s.plugin_view(node).unwrap().descriptor().id,
         tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap()
     );
 }
@@ -789,7 +789,7 @@ mod process {
         let node = s.add_pooled_plugin(&"fx").unwrap();
         let handle = s.plugin(&"fx").unwrap();
         let pid = s
-            .hosted_plugin(node)
+            .plugin_view(node)
             .unwrap()
             .diagnostics()
             .server_pid()

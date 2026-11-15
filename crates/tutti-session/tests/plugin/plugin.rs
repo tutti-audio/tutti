@@ -66,6 +66,8 @@ fn session_built(
     extra: &[(&str, &str)],
     build: impl FnOnce(tutti_session::SessionBuilder) -> tutti_session::SessionBuilder,
 ) -> Session {
+    // The probe of the plugin's file runs before any fault variable is set.
+    crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
     set_env("TUTTI_PLUGIN_SERVER", plugin_server());
     set_env(
         "TUTTI_CLAP_PROBE_OFFLINE_EXTRA_LATENCY",
@@ -97,7 +99,7 @@ fn add_probe(s: &mut Session) -> NodeKey {
 /// The probe's own latency (without the pipeline's chunk), as its node's
 /// latency cell holds it.
 fn latency(s: &Session, node: NodeKey) -> Samples {
-    s.hosted_plugin(node)
+    s.plugin_view(node)
         .expect("hosted")
         .diagnostics()
         .reported_latency()
@@ -109,7 +111,7 @@ fn latency(s: &Session, node: NodeKey) -> Samples {
 /// reply; live, any later control call (a snapshot, a parameter read) carries
 /// it, and here this one does.
 fn round_trip(s: &Session, node: NodeKey) {
-    let _ = s.hosted_plugin(node).expect("hosted").state().save();
+    let _ = s.plugin_view(node).expect("hosted").state().save();
 }
 
 /// Waits (up to 10 s) for the probe's latency to read `want`: the
@@ -283,10 +285,7 @@ fn a_plugin_dead_for_the_window_is_removed_and_reported_once() {
     // first block; the bridge notices on a later one).
     let mut out = vec![0.0f32; BLOCK * 2];
     let deadline = Instant::now() + Duration::from_secs(10);
-    while matches!(
-        s.hosted_plugin(node).unwrap().health(),
-        PluginHealth::Running
-    ) {
+    while matches!(s.plugin_view(node).unwrap().health(), PluginHealth::Running) {
         assert!(Instant::now() < deadline, "the probe never died");
         s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
         std::thread::sleep(Duration::from_millis(5));
@@ -315,11 +314,11 @@ fn a_plugin_dead_for_the_window_is_removed_and_reported_once() {
         assert!(plugins_at(&mut s, ms).is_empty(), "inside the window");
         assert!(
             matches!(
-                s.hosted_plugin(node).unwrap().health(),
+                s.plugin_view(node).unwrap().health(),
                 PluginHealth::Died { .. }
             ),
             "{:?}",
-            s.hosted_plugin(node).unwrap().health()
+            s.plugin_view(node).unwrap().health()
         );
         assert!(s.graph_ref().contains(node), "a failing plugin stays");
     }
@@ -335,7 +334,7 @@ fn a_plugin_dead_for_the_window_is_removed_and_reported_once() {
         !s.graph_ref().contains(node),
         "the dead plugin's node is removed"
     );
-    assert!(s.hosted_plugin(node).is_err(), "and its record");
+    assert!(s.plugin_view(node).is_err(), "and its record");
 
     assert!(plugins_at(&mut s, 200).is_empty(), "reported once");
     let again = s
@@ -429,7 +428,7 @@ fn gain_param(_s: &Session, _node: NodeKey) -> tutti_plugin_types::ParamId {
 }
 
 fn param(s: &Session, node: NodeKey, id: tutti_plugin_types::ParamId) -> Option<f64> {
-    s.hosted_plugin(node)
+    s.plugin_view(node)
         .expect("hosted")
         .handle()
         .any_thread()
@@ -564,7 +563,7 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
     let id = gain_param(&s, node);
 
     // A value worth restoring, and a snapshot of it.
-    s.hosted_plugin(node)
+    s.plugin_view(node)
         .unwrap()
         .params()
         .get(id)
@@ -589,7 +588,7 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
         s.run_phase(Phase::Plugins, cx, &mut Vec::new());
         s.run_phase(Phase::Collect, cx, &mut Vec::new());
     }
-    assert!(s.hosted_plugin(node).unwrap().state().last_good().is_some());
+    assert!(s.plugin_view(node).unwrap().state().last_good().is_some());
     let total_before = s.latency();
 
     // Render into the crash, then through the recovery.
@@ -667,12 +666,12 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
     );
     assert!(s.graph_ref().contains(node));
     assert!(matches!(
-        s.hosted_plugin(node).unwrap().health(),
+        s.plugin_view(node).unwrap().health(),
         PluginHealth::Running
     ));
     // The snapshot is still the node's recovery point: a second failure
     // restores it again.
-    assert!(s.hosted_plugin(node).unwrap().state().last_good().is_some());
+    assert!(s.plugin_view(node).unwrap().state().last_good().is_some());
 
     // The state came back.
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -786,7 +785,7 @@ fn a_plugin_that_crashes_every_time_is_given_up_on() {
         why.last
     );
     assert!(!s.graph_ref().contains(node), "the node is removed");
-    assert!(s.hosted_plugin(node).is_err(), "and its record");
+    assert!(s.plugin_view(node).is_err(), "and its record");
 }
 
 /// **A reload that fails to load reports the `BridgeError` as the cause's
@@ -954,7 +953,7 @@ fn a_reload_completes_with_no_host_code_but_update() {
         "the death was reported before the recovery: {events:?}"
     );
     assert!(matches!(
-        s.hosted_plugin(node).unwrap().health(),
+        s.plugin_view(node).unwrap().health(),
         PluginHealth::Running
     ));
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -1014,7 +1013,7 @@ fn a_reload_job_the_spawner_drops_is_a_failed_attempt() {
     });
     assert!(dropped.load(Ordering::SeqCst) >= 1, "the spawner was asked");
     assert!(matches!(
-        s.hosted_plugin(node).unwrap().health(),
+        s.plugin_view(node).unwrap().health(),
         PluginHealth::Reloading { .. }
     ));
 }
@@ -1037,24 +1036,18 @@ fn a_killed_server_reads_died_then_reloading() {
     );
     let (node, _) = wired_probe(&mut s);
     assert!(
-        matches!(
-            s.hosted_plugin(node).unwrap().health(),
-            PluginHealth::Running
-        ),
+        matches!(s.plugin_view(node).unwrap().health(), PluginHealth::Running),
         "a plugin that has not died is running"
     );
 
     let mut out = vec![0.0f32; BLOCK * 2];
     let deadline = Instant::now() + Duration::from_secs(10);
-    while matches!(
-        s.hosted_plugin(node).unwrap().health(),
-        PluginHealth::Running
-    ) {
+    while matches!(s.plugin_view(node).unwrap().health(), PluginHealth::Running) {
         assert!(Instant::now() < deadline, "the probe never died");
         s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
         std::thread::sleep(Duration::from_millis(5));
     }
-    let PluginHealth::Died { cause } = s.hosted_plugin(node).unwrap().health() else {
+    let PluginHealth::Died { cause } = s.plugin_view(node).unwrap().health() else {
         panic!("a latched death reads Died before the session writes it off");
     };
 
@@ -1084,14 +1077,14 @@ fn a_killed_server_reads_died_then_reloading() {
     );
     assert!(
         matches!(
-            s.hosted_plugin(node).unwrap().health(),
+            s.plugin_view(node).unwrap().health(),
             PluginHealth::Reloading {
                 attempt: 1,
                 cause: ReloadCause::Died(_)
             }
         ),
         "{:?}",
-        s.hosted_plugin(node).unwrap().health()
+        s.plugin_view(node).unwrap().health()
     );
 }
 
@@ -1164,7 +1157,7 @@ fn a_plugin_that_stops_answering_is_ended_and_replaced() {
     );
     let (node, _) = wired_probe(&mut s);
     let pid = s
-        .hosted_plugin(node)
+        .plugin_view(node)
         .unwrap()
         .diagnostics()
         .server_pid()
@@ -1305,7 +1298,7 @@ fn a_slow_plugin_that_still_answers_is_not_declared_hung() {
     while Instant::now() < until {
         drive.step(&mut s);
     }
-    let counts = s.hosted_plugin(node).unwrap().diagnostics().block_counts();
+    let counts = s.plugin_view(node).unwrap().diagnostics().block_counts();
     assert!(
         counts.abandoned > 16,
         "{counts:?}: the plugin is not slow enough"
@@ -1325,11 +1318,11 @@ fn a_slow_plugin_that_still_answers_is_not_declared_hung() {
     // what it must not be is dead or being replaced.
     assert!(
         matches!(
-            s.hosted_plugin(node).unwrap().health(),
+            s.plugin_view(node).unwrap().health(),
             PluginHealth::Running | PluginHealth::Stalled
         ),
         "{:?}",
-        s.hosted_plugin(node).unwrap().health()
+        s.plugin_view(node).unwrap().health()
     );
 }
 
@@ -1362,7 +1355,7 @@ fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
     let (node, _) = wired_probe(&mut s);
     snapshot_now(&mut s, node);
     let kept = s
-        .hosted_plugin(node)
+        .plugin_view(node)
         .unwrap()
         .state()
         .last_good()
@@ -1456,7 +1449,7 @@ fn snapshot_now(s: &mut Session, node: NodeKey) {
         s.run_phase(Phase::Plugins, cx, &mut Vec::new());
         s.run_phase(Phase::Collect, cx, &mut Vec::new());
     }
-    assert!(s.hosted_plugin(node).unwrap().state().last_good().is_some());
+    assert!(s.plugin_view(node).unwrap().state().last_good().is_some());
 }
 
 fn recovered_state(drive: &Drive) -> Vec<tutti_session::StateRestore> {
@@ -1501,7 +1494,7 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
     let (node, _) = wired_probe(&mut s);
     let id = gain_param(&s, node);
     // A state that is not the plugin's default.
-    s.hosted_plugin(node)
+    s.plugin_view(node)
         .unwrap()
         .params()
         .get(id)
@@ -1516,7 +1509,7 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
     }
     snapshot_now(&mut s, node);
     let users = s
-        .hosted_plugin(node)
+        .plugin_view(node)
         .unwrap()
         .state()
         .last_good()
@@ -1553,14 +1546,14 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
         2,
         "the attempt with the snapshot failed first"
     );
-    assert!(s.hosted_plugin(node).unwrap().state().last_good().is_none());
+    assert!(s.plugin_view(node).unwrap().state().last_good().is_none());
     assert!(matches!(
-        s.hosted_plugin(node).unwrap().health(),
+        s.plugin_view(node).unwrap().health(),
         PluginHealth::Running
     ));
     // The user's state is kept for the host, not thrown away...
     assert_eq!(
-        s.hosted_plugin(node)
+        s.plugin_view(node)
             .unwrap()
             .state()
             .withheld()
@@ -1571,7 +1564,7 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
     // replace it.
     snapshot_now(&mut s, node);
     let fresh = s
-        .hosted_plugin(node)
+        .plugin_view(node)
         .unwrap()
         .state()
         .last_good()
@@ -1579,7 +1572,7 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
         .bytes();
     assert_ne!(fresh, users.as_slice(), "the plugin is at its defaults");
     assert_eq!(
-        s.hosted_plugin(node)
+        s.plugin_view(node)
             .unwrap()
             .state()
             .withheld()
@@ -1666,7 +1659,7 @@ fn an_export_during_the_recovery_window_is_refused() {
         )
     });
     assert!(matches!(
-        s.hosted_plugin(node).unwrap().health(),
+        s.plugin_view(node).unwrap().health(),
         PluginHealth::Reloading { .. }
     ));
     let refused = s.bounce_start(request());
@@ -1843,6 +1836,6 @@ fn a_death_after_a_refused_restore_does_not_withhold_the_snapshot() {
             .all(|s| matches!(s, tutti_session::StateRestore::Refused { .. })),
         "{states:?}"
     );
-    assert!(s.hosted_plugin(node).unwrap().state().withheld().is_none());
-    assert!(s.hosted_plugin(node).unwrap().state().last_good().is_some());
+    assert!(s.plugin_view(node).unwrap().state().withheld().is_none());
+    assert!(s.plugin_view(node).unwrap().state().last_good().is_some());
 }
