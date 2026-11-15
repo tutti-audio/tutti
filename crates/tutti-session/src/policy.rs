@@ -12,7 +12,7 @@ use tutti_types::{ChannelLayout, ChannelTopology};
 
 use crate::Session;
 
-/// A setting a session holds, read and changed through [`Session::policy`].
+/// A session setting reached through a typed handle.
 pub trait Policy {
     /// What reads and changes the setting, borrowing the session.
     type Handle<'a>;
@@ -56,7 +56,9 @@ pub struct OutputPolicy {
     /// The format the root is heard in (a 7.1.4 mix checked as 5.1, stereo or
     /// mono); `None` is the root's own.
     pub monitor: Option<ChannelTopology>,
-    /// The downmix levels of the fold into [`monitor`](Self::monitor).
+    /// The downmix levels of the fold into [`monitor`](Self::monitor), and of
+    /// that fold alone: with no monitor the root reaches the device by speaker
+    /// at the default levels (BS.775), whatever these say.
     pub levels: FoldLevels,
     /// A gain, mute and solo per device output, and the dim over all.
     pub outputs: OutputLevels,
@@ -155,6 +157,8 @@ impl Session {
                 device,
             });
         }
+        // A level that is not a gain is refused even where no monitor uses it.
+        policy.levels.check().map_err(RoutingError::Fold)?;
         let root = self.graph.root_in_force();
         policy.routing().fold(&root, &placed)?;
         self.output_policy = policy;

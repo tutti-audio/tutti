@@ -1,5 +1,5 @@
-//! Folds built from folds: composition, a scale per output and a routing of
-//! channels to channels. Each is a matrix operation on the coefficients
+//! Folds built from folds: composition and a routing of channels to
+//! channels. Each is a matrix operation on the coefficients
 //! ([`Fold::contributions`]), so what they build is the product, not the two
 //! folds run in turn.
 
@@ -49,41 +49,6 @@ impl<F: Float> Fold<F> {
                 }
                 acc.sort_unstable_by_key(|&(i, _)| i);
                 Row::One(expr_of_coefficients(acc))
-            })
-            .collect();
-        Ok(Self {
-            src: self.src,
-            rows,
-        })
-    }
-
-    /// This fold with output `o` scaled by `scales[o]`: each coefficient of
-    /// the row is multiplied, so the fold stays one fold. A scale of exactly
-    /// unity leaves its row as it was. Control side: it allocates.
-    ///
-    /// # Errors
-    ///
-    /// [`BufferError::WidthMismatch`] when there is not one scale per output.
-    pub fn scaled(&self, scales: &[F]) -> Result<Self, BufferError> {
-        if scales.len() != self.rows.len() {
-            return Err(BufferError::WidthMismatch {
-                src: ChannelLayout::from_count(narrow(scales.len())),
-                dst: self.dst_layout(),
-            });
-        }
-        let rows = self
-            .rows
-            .iter()
-            .zip(scales)
-            .map(|(row, &scale)| {
-                if scale == F::ONE {
-                    return row.clone();
-                }
-                let mut acc = row_coefficients(row);
-                acc.sort_unstable_by_key(|&(i, _)| i);
-                Row::One(expr_of_coefficients(
-                    acc.into_iter().map(|(i, g)| (i, g * scale)).collect(),
-                ))
             })
             .collect();
         Ok(Self {

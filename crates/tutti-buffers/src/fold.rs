@@ -8,7 +8,7 @@ mod ambisonic;
 mod compose;
 mod levels;
 
-pub use levels::{FoldLevels, FoldSpec};
+pub use levels::{FoldLevel, FoldLevels, FoldSpec};
 
 /// Which end of a fold a [`FoldError`] is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -75,6 +75,12 @@ pub enum FoldError {
         src: ChannelLayout,
         /// The destination width.
         dst: ChannelLayout,
+    },
+    /// A downmix level is not a gain: NaN, infinite or negative.
+    #[error("the {level:?} level is not a gain (NaN, infinite or negative)")]
+    NotAGain {
+        /// Which level.
+        level: FoldLevel,
     },
     /// [`Fold::select`] named a channel the source does not have.
     #[error("channel {channel} is not in a {width:?} source")]
@@ -655,6 +661,7 @@ impl<F: Float> Fold<F> {
         dst: &ChannelTopology,
         levels: FoldLevels,
     ) -> Result<Self, FoldError> {
+        levels.check()?;
         // The default -3 dB is the float's own, so a `Fold<f64>` keeps the
         // double-precision figure and not the single's widened.
         let level = |a: tutti_types::Amplitude| {

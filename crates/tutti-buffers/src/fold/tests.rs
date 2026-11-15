@@ -1643,26 +1643,61 @@ fn a_2d_normalization_converts_only_to_itself() {
     }
 }
 
-/// The BS.775 defaults are what `between` builds, bit for bit, on every pair
-/// of beds; stating the same levels changes nothing.
+/// The default levels are ITU-R BS.775's, written out: 5.1 into stereo takes the
+/// centre and each surround at -3 dB and omits the LFE, and `between` is that
+/// fold.
 #[test]
-fn the_default_spec_is_between() {
-    use tutti_types::Bed;
-    let beds = [
-        Bed::Mono,
-        Bed::Stereo,
-        Bed::Quad,
-        Bed::Surround51,
-        Bed::Surround71,
-        Bed::Surround714,
-    ];
-    for s in beds {
-        for d in beds {
-            let (s, d) = (s.topology(), d.topology());
-            let spec = Fold::<f32>::spec(&s, &d).levels(FoldLevels::default());
-            assert_eq!(spec.build().ok(), Fold::<f32>::between(&s, &d).ok());
-        }
+fn the_default_levels_are_bs775_minus_3_db() {
+    use tutti_types::{Amplitude, Bed};
+    let m = f32::MINUS_3_DB;
+    let levels = FoldLevels::default();
+    assert_eq!(
+        (levels.centre, levels.surround, levels.height, levels.lfe),
+        (Amplitude(m), Amplitude(m), Amplitude(m), None)
+    );
+    let f = fold(&Bed::Surround51.topology(), &Bed::Stereo.topology());
+    assert_eq!(f.contributions(0), [(0, 1.0), (2, m), (4, m)]);
+    assert_eq!(f.contributions(1), [(1, 1.0), (2, m), (5, m)]);
+}
+
+/// A level that is not a gain (NaN, infinite or negative) is refused by name
+/// when the fold is built, so it never reaches a signal.
+#[test]
+fn a_level_that_is_not_a_gain_is_refused() {
+    use tutti_types::{Amplitude, Bed};
+    let (five_one, stereo) = (Bed::Surround51.topology(), Bed::Stereo.topology());
+    for bad in [f32::NAN, f32::INFINITY, -0.5] {
+        let spec = |levels| Fold::<f32>::spec(&five_one, &stereo).levels(levels).build();
+        let base = FoldLevels::default();
+        assert_eq!(
+            spec(FoldLevels {
+                centre: Amplitude(bad),
+                ..base
+            }),
+            Err(FoldError::NotAGain {
+                level: FoldLevel::Centre
+            })
+        );
+        assert_eq!(
+            spec(FoldLevels {
+                lfe: Some(Amplitude(bad)),
+                ..base
+            }),
+            Err(FoldError::NotAGain {
+                level: FoldLevel::Lfe
+            })
+        );
     }
+    assert!(
+        Fold::<f32>::spec(&five_one, &stereo)
+            .levels(FoldLevels {
+                height: Amplitude(0.0),
+                ..FoldLevels::default()
+            })
+            .build()
+            .is_ok(),
+        "silence is a gain"
+    );
 }
 
 /// Stated levels are the coefficients of the fold, per class of speaker: the
@@ -1814,25 +1849,6 @@ fn then_with_an_identity_is_the_other_fold_and_widths_must_meet() {
         Err(BufferError::WidthMismatch {
             src: ChannelLayout::STEREO,
             dst: ChannelLayout::from(6u16),
-        })
-    );
-}
-
-/// Each output's coefficients are multiplied by its scale; unity leaves the
-/// row alone, and a count that is not the width is refused.
-#[test]
-fn scaled_multiplies_each_outputs_coefficients() {
-    use tutti_types::Bed;
-    let m = f32::MINUS_3_DB;
-    let a = fold(&Bed::Surround51.topology(), &Bed::Stereo.topology());
-    let s = a.scaled(&[0.5, 1.0]).unwrap();
-    assert_eq!(s.contributions(0), [(0, 0.5), (2, 0.5 * m), (4, 0.5 * m)]);
-    assert_eq!(s.contributions(1), a.contributions(1));
-    assert_eq!(
-        a.scaled(&[1.0]),
-        Err(BufferError::WidthMismatch {
-            src: ChannelLayout::MONO,
-            dst: ChannelLayout::STEREO,
         })
     );
 }

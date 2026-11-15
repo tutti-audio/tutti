@@ -1088,7 +1088,7 @@ fn a_listed_device_starts_nothing_with_retry_startup_off() {
     assert!(start_when_listed(false).is_empty());
 }
 
-/// **A restart onto a device the map does not fit is refused (G11), and the map
+/// **A restart onto a device the map does not fit is refused, and the map
 /// is kept**, never reset to the identity: the error names the map and the
 /// device, the old device is as it was, and once the host sets a map the new
 /// device has places for, the same restart goes through.

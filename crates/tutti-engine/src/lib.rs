@@ -144,8 +144,7 @@ pub use manual::{ManualRunning, ManualStream, ManualStreamDriver};
 pub use output::{MAX_PENDING_ROOTS, OutputControl, OutputPlacement};
 pub use restart::{Stopped, StreamHost};
 pub use routing::{
-    OutputLevels, OutputMap, OutputMapError, OutputPast, OutputStrip, Routing, RoutingError,
-    StageTargets,
+    OutputLevelError, OutputLevels, OutputMap, OutputMapError, OutputStrip, Routing, RoutingError,
 };
 pub use stream::{OutputSpec, OutputStream, RunningStream, StartError, StreamDriver};
 pub use timer::{DEFAULT_BLOCK, TimerDriver, TimerError, TimerRunning};

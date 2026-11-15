@@ -59,6 +59,45 @@ impl Default for FoldLevels {
     }
 }
 
+/// One of the [`FoldLevels`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum FoldLevel {
+    /// [`FoldLevels::centre`].
+    Centre,
+    /// [`FoldLevels::surround`].
+    Surround,
+    /// [`FoldLevels::height`].
+    Height,
+    /// [`FoldLevels::lfe`].
+    Lfe,
+}
+
+impl FoldLevels {
+    /// Whether every level is a gain.
+    ///
+    /// # Errors
+    ///
+    /// [`FoldError::NotAGain`] naming the first level that is NaN, infinite or
+    /// negative.
+    pub fn check(&self) -> Result<(), FoldError> {
+        let gain = |a: Amplitude| a.get().is_finite() && a.get() >= 0.0;
+        let levels = [
+            (FoldLevel::Centre, Some(self.centre)),
+            (FoldLevel::Surround, Some(self.surround)),
+            (FoldLevel::Height, Some(self.height)),
+            (FoldLevel::Lfe, self.lfe),
+        ];
+        match levels
+            .into_iter()
+            .find(|&(_, a)| a.is_some_and(|a| !gain(a)))
+        {
+            Some((level, _)) => Err(FoldError::NotAGain { level }),
+            None => Ok(()),
+        }
+    }
+}
+
 /// A fold from one topology into another, with its levels stated and not yet
 /// built ([`Fold::spec`]).
 #[derive(Debug, Clone, Copy)]
@@ -90,7 +129,8 @@ impl<'a, F: Float> FoldSpec<'a, F> {
     ///
     /// # Errors
     ///
-    /// As [`Fold::between`].
+    /// As [`Fold::between`], and [`FoldError::NotAGain`] for a level that is
+    /// NaN, infinite or negative.
     pub fn build(self) -> Result<Fold<F>, FoldError> {
         Fold::build(self.src, self.dst, self.levels)
     }

@@ -145,7 +145,9 @@ fn a_mute_and_a_dim_ramp_and_settle() {
             },
         )
         .unwrap();
-    policy.outputs = std::mem::take(&mut policy.outputs).with_dim(Some(Amplitude(0.5)));
+    policy.outputs = std::mem::take(&mut policy.outputs)
+        .with_dim(Some(Amplitude(0.5)))
+        .unwrap();
     s.policy::<OutputPolicy>().set(policy).unwrap();
     let _ = s.update();
     let n = tutti_graph::declick_frames(RATE).get();
@@ -163,4 +165,28 @@ fn a_mute_and_a_dim_ramp_and_settle() {
         assert_eq!(out[2 * k + 1], right, "right, frame {k}");
     }
     assert_eq!(&out[2 * n..2 * n + 2], [0.0, 0.5]);
+}
+
+/// A level that is not a gain is refused when the policy is set, even with no
+/// monitor to use it, and the policy in force is kept.
+#[test]
+fn a_level_that_is_not_a_gain_is_refused_when_set() {
+    use tutti_buffers::{FoldError, FoldLevel, FoldLevels};
+    let mut s = offline(Session::builder(), 2);
+    let policy = OutputPolicy {
+        levels: FoldLevels {
+            surround: Amplitude(f32::NAN),
+            ..FoldLevels::default()
+        },
+        ..OutputPolicy::default()
+    };
+    assert_eq!(
+        s.policy::<OutputPolicy>().set(policy),
+        Err(OutputPolicyError::Routing(RoutingError::Fold(
+            FoldError::NotAGain {
+                level: FoldLevel::Surround
+            }
+        )))
+    );
+    assert_eq!(*s.policy::<OutputPolicy>().get(), OutputPolicy::default());
 }

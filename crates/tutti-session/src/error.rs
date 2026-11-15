@@ -445,7 +445,7 @@ pub enum Error {
 
     /// The output policy's map has no place on the device a restart opened: it
     /// names a channel the device does not have, or no longer fits what is
-    /// heard (G11). Nothing moved, and the map is kept, never reset to the
+    /// heard. Nothing moved, and the map is kept, never reset to the
     /// identity: set a new one ([`Session::policy`](crate::Session::policy)).
     #[error("the output map {map:?} has no place on a {device:?} device: {source}")]
     MapUnplaceable {

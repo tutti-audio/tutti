@@ -2353,7 +2353,7 @@ mod tests {
                 },
             )
             .unwrap();
-        control.set_levels(&levels.with_dim(Some(Amplitude(0.5))));
+        control.set_levels(&levels.with_dim(Some(Amplitude(0.5))).unwrap());
         let mut out = vec![0.0f32; frames * 2];
         engine.process_segment(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
         assert_eq!(out[2 * (frames - 1)], 0.0);

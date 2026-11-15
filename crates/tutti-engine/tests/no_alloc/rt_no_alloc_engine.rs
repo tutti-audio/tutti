@@ -781,8 +781,10 @@ fn a_declared_root_into_a_stated_device_is_allocation_free() {
 }
 
 /// A routing set live (a stereo monitor on outputs 3 and 4) and output gains
-/// ramping (a mute and a dim) are applied without allocating: the blocks
-/// through the ramp and after it are guarded, and carry the folded figures.
+/// ramping (a mute and a dim, retargeted in mid-ramp) are applied without
+/// allocating: the 64-frame blocks through both ramps and after them are
+/// guarded, each `set_levels` (which publishes on the control side) runs
+/// between guarded calls, and the settled figures are checked.
 #[test]
 fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
     use tutti_engine::{OutputLevels, OutputMap, OutputStrip, Routing};
@@ -806,46 +808,53 @@ fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
     let twelve = ChannelLayout::from(12u16);
     engine.support_output(twelve).expect("a width");
     let control = engine.output_control();
-    let mut out = vec![0.0f32; 512 * 12];
-    // The first block adopts the plan.
-    engine.process(&mut InterleavedMut::new(&mut out, twelve).unwrap());
+    // Blocks of 64 frames: the 240-frame declick crosses four of them.
+    let mut out = vec![0.0f32; 64 * 12];
+    let mut block = |engine: &Engine| {
+        assert_no_alloc::assert_no_alloc(|| {
+            engine.process(&mut InterleavedMut::new(&mut out, twelve).unwrap());
+        });
+    };
+    // The first block adopts the plan (the commit apply is guarded elsewhere).
+    engine.process(&mut InterleavedMut::new(&mut vec![0.0f32; 64 * 12], twelve).unwrap());
 
     control.set_routing(Routing {
         monitor: Some(Bed::Stereo.topology()),
         map: OutputMap::channels([2, 3]).unwrap(),
         ..Routing::default()
     });
+    let strip = |mute| OutputStrip {
+        mute,
+        ..OutputStrip::default()
+    };
     let mut levels = OutputLevels::new();
-    levels
-        .set_strip(
-            2,
-            OutputStrip {
-                mute: true,
-                ..OutputStrip::default()
-            },
-        )
-        .unwrap();
-    control.set_levels(&levels.with_dim(Some(Amplitude(0.5))));
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..8 {
-            engine.process(&mut InterleavedMut::new(&mut out, twelve).unwrap());
-        }
-    });
-    // Settled: output 3 (muted) is silent, output 4 is the stereo fold's right
-    // channel at the dim, and the rest are silent.
+    levels.set_strip(2, strip(true)).unwrap();
+    control.set_levels(&levels.clone().with_dim(Some(Amplitude(0.5))).unwrap());
+    // Two blocks into the first ramp...
+    block(&engine);
+    block(&engine);
+    // ...the targets turn: output 2 is heard again and output 3 is muted, at
+    // another dim.
+    levels.set_strip(2, strip(false)).unwrap();
+    levels.set_strip(3, strip(true)).unwrap();
+    control.set_levels(&levels.with_dim(Some(Amplitude(0.25))).unwrap());
+    for _ in 0..8 {
+        block(&engine);
+    }
+    // Settled: output 3 is silent, output 4 is the stereo fold's left channel
+    // at the dim, the rest are silent.
     let v = |c: usize| (c + 1) as f32 / 16.0;
     let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
-    let right = v(1) + m * (v(2) + v(5) + v(7) + v(9) + v(11));
+    let left = v(0) + m * (v(2) + v(4) + v(6) + v(8) + v(10));
     for frame in out.as_chunks::<12>().0 {
-        assert_eq!(frame[2], 0.0);
         assert!(
-            (frame[3] - right * 0.5).abs() < 1e-5,
+            (frame[2] - left * 0.25).abs() < 1e-5,
             "{} vs {}",
-            frame[3],
-            right * 0.5
+            frame[2],
+            left * 0.25
         );
         for (c, &s) in frame.iter().enumerate() {
-            if c != 3 {
+            if c != 2 {
                 assert_eq!(s, 0.0, "output {c}");
             }
         }

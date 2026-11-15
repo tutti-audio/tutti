@@ -204,10 +204,28 @@ impl Default for OutputStrip {
 
 /// Why an output level was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("output {output} is past the {MAX_CHANNELS} channels the engine renders")]
-pub struct OutputPast {
-    /// The refused output.
-    pub output: usize,
+#[non_exhaustive]
+pub enum OutputLevelError {
+    /// An output the engine has no channel for.
+    #[error("output {output} is past the {MAX_CHANNELS} channels the engine renders")]
+    Past {
+        /// The refused output.
+        output: usize,
+    },
+    /// An output's gain is NaN, infinite or negative.
+    #[error("the gain of output {output} is not a gain (NaN, infinite or negative)")]
+    OutputGain {
+        /// The output.
+        output: usize,
+    },
+    /// The dim gain is NaN, infinite or negative.
+    #[error("the dim gain is not a gain (NaN, infinite or negative)")]
+    DimGain,
+}
+
+/// Whether `a` can scale a signal: finite and not negative.
+fn is_gain(a: Amplitude) -> bool {
+    a.get().is_finite() && a.get() >= 0.0
 }
 
 /// The gains of the device outputs: a strip each, and a dim over all.
@@ -250,10 +268,15 @@ impl OutputLevels {
     ///
     /// # Errors
     ///
-    /// [`OutputPast`] for an output the engine has no channel for.
-    pub fn set_strip(&mut self, output: usize, strip: OutputStrip) -> Result<(), OutputPast> {
+    /// [`OutputLevelError::Past`] for an output the engine has no channel for,
+    /// [`OutputLevelError::OutputGain`] for a gain that is NaN, infinite or
+    /// negative.
+    pub fn set_strip(&mut self, output: usize, strip: OutputStrip) -> Result<(), OutputLevelError> {
         if output >= MAX_CHANNELS {
-            return Err(OutputPast { output });
+            return Err(OutputLevelError::Past { output });
+        }
+        if !is_gain(strip.gain) {
+            return Err(OutputLevelError::OutputGain { output });
         }
         if self.strips.len() <= output {
             self.strips.resize(output + 1, OutputStrip::default());
@@ -263,10 +286,17 @@ impl OutputLevels {
     }
 
     /// This with the dim engaged at `gain`, or released for `None`.
-    #[must_use]
-    pub fn with_dim(mut self, gain: Option<Amplitude>) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// [`OutputLevelError::DimGain`] for a gain that is NaN, infinite or
+    /// negative.
+    pub fn with_dim(mut self, gain: Option<Amplitude>) -> Result<Self, OutputLevelError> {
+        if gain.is_some_and(|g| !is_gain(g)) {
+            return Err(OutputLevelError::DimGain);
+        }
         self.dim = gain;
-        self
+        Ok(self)
     }
 
     /// The dim gain, if engaged.
@@ -277,8 +307,7 @@ impl OutputLevels {
 
     /// The gain each output is heard at: its strip's, silent when muted or when
     /// another is soloed and it is not, times the dim.
-    #[must_use]
-    pub fn targets(&self) -> StageTargets {
+    pub(crate) fn targets(&self) -> StageTargets {
         let any_solo = self.strips.iter().any(|s| s.solo);
         let dim = self.dim.unwrap_or(Amplitude::UNITY);
         let mut gains = [Amplitude::UNITY; MAX_CHANNELS];
@@ -288,7 +317,9 @@ impl OutputLevels {
             *gain = if silent {
                 Amplitude::SILENT
             } else {
-                Amplitude(strip.gain.get() * dim.get())
+                // Two finite gains, so the product is finite unless it
+                // overflows: kept at the largest finite gain.
+                (strip.gain * dim.get()).min(Amplitude(f32::MAX))
             };
         }
         StageTargets(gains)
@@ -297,15 +328,14 @@ impl OutputLevels {
 
 /// The gain each device output is ramped to: what the callback lends.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct StageTargets(pub(crate) [Amplitude; MAX_CHANNELS]);
+pub(crate) struct StageTargets(pub(crate) [Amplitude; MAX_CHANNELS]);
 
 impl StageTargets {
     /// Every output at unity.
     pub(crate) const UNITY: Self = Self([Amplitude::UNITY; MAX_CHANNELS]);
 
     /// The gain `output` is ramped to.
-    #[must_use]
-    pub fn gain(&self, output: usize) -> Amplitude {
+    pub(crate) fn gain(&self, output: usize) -> Amplitude {
         self.0.get(output).copied().unwrap_or(Amplitude::UNITY)
     }
 }
@@ -352,7 +382,7 @@ mod tests {
             .set_strip(2, OutputStrip { mute: true, ..solo })
             .unwrap();
         assert_eq!(gains(&levels), [0.0, 0.0, 0.0, 0.0], "mute wins over solo");
-        let levels = OutputLevels::new().with_dim(Some(Amplitude(0.1)));
+        let levels = OutputLevels::new().with_dim(Some(Amplitude(0.1))).unwrap();
         assert_eq!(gains(&levels), [0.1, 0.1, 0.1, 0.1]);
     }
 
@@ -361,10 +391,40 @@ mod tests {
     fn a_strip_past_the_engine_is_refused() {
         assert_eq!(
             OutputLevels::new().set_strip(MAX_CHANNELS, OutputStrip::default()),
-            Err(OutputPast {
+            Err(OutputLevelError::Past {
                 output: MAX_CHANNELS
             })
         );
+    }
+
+    /// A gain that is NaN, infinite or negative is refused by name, for a strip
+    /// and for the dim, so none reaches the device; silence is a gain.
+    #[test]
+    fn a_gain_that_is_not_a_gain_is_refused() {
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.0] {
+            let strip = OutputStrip {
+                gain: Amplitude(bad),
+                ..OutputStrip::default()
+            };
+            assert_eq!(
+                OutputLevels::new().set_strip(3, strip),
+                Err(OutputLevelError::OutputGain { output: 3 })
+            );
+            assert_eq!(
+                OutputLevels::new().with_dim(Some(Amplitude(bad))),
+                Err(OutputLevelError::DimGain)
+            );
+        }
+        assert!(OutputLevels::new().with_dim(Some(Amplitude(0.0))).is_ok());
+        // Two finite gains never make a non-finite target.
+        let mut huge = OutputLevels::new();
+        let big = OutputStrip {
+            gain: Amplitude(f32::MAX),
+            ..OutputStrip::default()
+        };
+        huge.set_strip(0, big).unwrap();
+        let t = huge.with_dim(Some(Amplitude(f32::MAX))).unwrap().targets();
+        assert!(t.gain(0).get().is_finite());
     }
 
     /// A map is a list of distinct outputs.
