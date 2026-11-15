@@ -2902,6 +2902,10 @@ impl Graph {
         if reaped > 0 {
             let open = &self.editor.spec().topology.taps;
             self.output_taps.retain(|id, _| open.contains_key(id));
+            self.reopened.retain(|id, _| match id {
+                RootReader::Tap(tap) => open.contains_key(tap),
+                RootReader::Meter(_) => true,
+            });
             self.edited = true;
         }
         reaped
@@ -2924,6 +2928,11 @@ impl Graph {
     pub(crate) fn reap_meters(&mut self) -> usize {
         let reaped = self.editor.reap_meters();
         if reaped > 0 {
+            let open = &self.editor.spec().topology.meters;
+            self.reopened.retain(|id, _| match id {
+                RootReader::Meter(meter) => open.contains_key(meter),
+                RootReader::Tap(_) => true,
+            });
             self.edited = true;
         }
         reaped

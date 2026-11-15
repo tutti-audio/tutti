@@ -195,6 +195,7 @@ impl Taps<'_> {
     pub fn close(&mut self, id: TapId) -> Result<(), CloseError> {
         self.graph.editor.close_tap(id)?;
         self.graph.output_taps.remove(&id);
+        self.graph.reopened.remove(&RootReader::Tap(id));
         self.graph.edited = true;
         Ok(())
     }
@@ -408,6 +409,7 @@ impl Meters<'_> {
     /// [`CloseError::Meter`] when no meter `id` is open; nothing changes.
     pub fn close(&mut self, id: MeterId) -> Result<(), CloseError> {
         self.graph.editor.close_meter(id)?;
+        self.graph.reopened.remove(&RootReader::Meter(id));
         self.graph.edited = true;
         Ok(())
     }
@@ -470,11 +472,13 @@ impl Graph {
                 // Closed since: no reader is left to end.
                 Err(_) => {
                     self.output_taps.remove(&id);
+                    self.reopened.remove(&RootReader::Tap(id));
                 }
             }
         }
         let id = self.master_meter_id;
         if resized && self.editor.spec().topology.meters.contains_key(&id) {
+            // `Outputs` names no source, so the open cannot be refused.
             let reader = self
                 .editor
                 .open_meter(id, MeterSpec::Outputs)
