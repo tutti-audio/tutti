@@ -200,7 +200,7 @@ fn a_served_plugin_lands_through_the_pool() {
         "the plugin the id names, not the file's first"
     );
     assert_eq!(handle.info().hosting(), Hosting::OutOfProcess);
-    assert_eq!(handle.presence(), Presence::Live);
+    assert!(matches!(handle.presence(), Presence::Live));
 
     let node = s.add_pooled_plugin(&"verb").expect("the plugin enters");
     let view = s.plugin_view(node).expect("hosted");
@@ -265,12 +265,22 @@ fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
     loaded(&mut s, "verb");
     let node = s.add_pooled_plugin(&"verb").unwrap();
     let before = s.plugin(&"verb").unwrap();
-    assert_eq!(before.presence(), Presence::Live);
+    assert!(matches!(before.presence(), Presence::Live));
     assert!(matches!(
         s.retry(&"verb"),
         Err(RetryError::NotFailed("verb"))
     ));
 
+    let latency = s
+        .graph_ref()
+        .node_latency(node)
+        .expect("the node is in the graph");
+    let dead_pid = s
+        .plugin_view(node)
+        .unwrap()
+        .diagnostics()
+        .server_pid()
+        .expect("served");
     s.plugin_view(node)
         .unwrap()
         .diagnostics()
@@ -279,27 +289,55 @@ fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
             held: Duration::from_secs(5),
         });
     pump_until(&mut s, "the death", |_| !before.presence().is_live());
-    assert_eq!(before.presence(), Presence::Lost(PluginCause::Died));
-    pump_until(&mut s, "the node's removal", |s| {
-        s.plugin_view(node).is_err()
-    });
-    assert_eq!(
+    assert!(matches!(
         before.presence(),
-        Presence::Lost(PluginCause::Died),
-        "removing the node does not revive the entry"
+        Presence::Lost(PluginCause::Died(_))
+    ));
+    // The node stays at its key, silent, in the plugin's place: its latency is
+    // the plugin's last, its plugin is released, and the entry still holds it.
+    pump_until(&mut s, "the death to be declared", |s| {
+        matches!(
+            s.plugin_view(node).map(|view| view.health()),
+            Ok(PluginHealth::Died { .. })
+        )
+    });
+    for _ in 0..10 {
+        let _ = pump(&mut s);
+    }
+    assert_eq!(
+        s.graph_ref().node_latency(node),
+        Ok(latency),
+        "the node stays at its key, with the plugin's last latency"
     );
+    assert!(
+        matches!(before.presence(), Presence::Lost(PluginCause::Died(_))),
+        "the node does not revive the entry"
+    );
+    assert!(matches!(
+        s.add_pooled_plugin(&"verb"),
+        Err(AddPluginError::Lost("verb"))
+    ));
 
     s.retry(&"verb").expect("a lost entry reloads");
     let event = until(&mut s, "the reload", |k, _| *k == "verb");
     assert!(matches!(event, PoolEvent::Reloaded), "{event:?}");
-    assert_eq!(
-        before.presence(),
-        Presence::Closed,
+    assert!(
+        matches!(before.presence(), Presence::Closed),
         "its entry was reloaded"
     );
-    assert_eq!(s.plugin(&"verb").unwrap().presence(), Presence::Live);
-    s.add_pooled_plugin(&"verb")
-        .expect("the reloaded plugin is the next node's");
+    assert!(matches!(
+        s.plugin(&"verb").unwrap().presence(),
+        Presence::Live
+    ));
+    // The reloaded plugin is the node's: it swaps in at the same key.
+    pump_until(&mut s, "the node's new plugin", |s| {
+        s.plugin_view(node)
+            .is_ok_and(|view| view.diagnostics().server_pid() != Some(dead_pid))
+    });
+    assert!(matches!(
+        s.add_pooled_plugin(&"verb"),
+        Err(AddPluginError::Installed("verb"))
+    ));
 }
 
 /// **With recovery on, a dead server reads live while the session reloads it
@@ -330,7 +368,10 @@ fn recovery_keeps_a_plugin_live_until_it_gives_up() {
             Ok(PluginHealth::Reloading { .. })
         )
     });
-    assert_eq!(handle.presence(), Presence::Live, "recovering reads live");
+    assert!(
+        matches!(handle.presence(), Presence::Live),
+        "recovering reads live"
+    );
 
     let mut s = session_with(Some(RecoveryPolicy {
         max_failures: 0,
@@ -343,7 +384,10 @@ fn recovery_keeps_a_plugin_live_until_it_gives_up() {
     let handle = s.plugin(&"verb").unwrap();
     kill(&s, node);
     pump_until(&mut s, "the give-up", |_| !handle.presence().is_live());
-    assert_eq!(handle.presence(), Presence::Lost(PluginCause::GaveUp));
+    assert!(matches!(
+        handle.presence(),
+        Presence::Lost(PluginCause::GaveUp(_))
+    ));
 }
 
 /// **An initial state is restored before the plugin is read, and two keys
@@ -465,7 +509,7 @@ fn a_changed_identity_swaps_the_node() {
         let _ = s.update();
         std::thread::sleep(Duration::from_millis(2));
     }
-    assert_eq!(first.presence(), Presence::Closed);
+    assert!(matches!(first.presence(), Presence::Closed));
     assert_eq!(s.plugin(&"fx").unwrap().info().descriptor().id, second);
 }
 
@@ -483,12 +527,12 @@ fn a_node_holds_its_entry_until_it_is_removed() {
     s.pool::<&'static str>(()).unwrap();
     let _ = s.update();
     assert!(matches!(s.pool_state(&"fx"), Some(PoolState::Held)));
-    assert_eq!(handle.presence(), Presence::Live);
+    assert!(matches!(handle.presence(), Presence::Live));
 
     s.remove(node).unwrap();
     let event = until(&mut s, "the release", |k, _| *k == "fx");
     assert!(matches!(event, PoolEvent::Released), "{event:?}");
-    assert_eq!(handle.presence(), Presence::Closed);
+    assert!(matches!(handle.presence(), Presence::Closed));
 }
 
 /// A node that cannot run above 90 kHz: its `prepare` panics there, which
@@ -787,7 +831,10 @@ mod process {
             .expect("kill runs");
         assert!(killed.success());
         pump_until(&mut s, "the loss", |_| !handle.presence().is_live());
-        assert_eq!(handle.presence(), Presence::Lost(PluginCause::Died));
+        assert!(matches!(
+            handle.presence(),
+            Presence::Lost(PluginCause::Died(_))
+        ));
         assert!(matches!(
             s.add_pooled_plugin(&"verb"),
             Err(AddPluginError::Lost("verb"))
@@ -819,9 +866,8 @@ mod process {
             let _ = s.main(tutti_fixtures::main_thread()).update();
             !alive()
         });
-        assert_eq!(
-            handle.presence(),
-            Presence::Live,
+        assert!(
+            matches!(handle.presence(), Presence::Live),
             "the entry is still loaded"
         );
         assert!(matches!(s.pool_state(&"fx"), Some(PoolState::Loaded)));
