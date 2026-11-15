@@ -18,6 +18,7 @@ use tutti_graph::{
 use tutti_types::{Latency, MAX_CHANNELS, MaxBlock, SampleRate, Samples, Tail};
 
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
+use crate::tail_clock::{Heard, TailClock, tail_frames};
 
 /// The per-frame lanes of a block's [`ControlRead::Fast`](crate::ControlRead::Fast)
 /// controls, in the order of their rows: the frames a port carries, in the port's own unit
@@ -88,8 +89,18 @@ pub trait Kernel: Clone + Send + 'static {
         Samples::ZERO
     }
 
-    /// How long it rings after its input stops, once prepared.
+    /// How long it rings after its input stops, once prepared: the most it can, over every
+    /// control. A finite or unbounded tail is a ceiling the node enforces (see
+    /// [`KernelNode`]); [`Tail::Unknown`] and [`Tail::None`] are only declared.
     fn tail(&self) -> Tail;
+
+    /// How long it rings at `controls`, at most [`tail`](Self::tail), erring long: what the
+    /// node narrows its tail to. A kernel whose ring-out does not follow its controls leaves
+    /// the ceiling. It may design into the kernel's own scratch, and must not change the
+    /// audio state: lines, glides and phase are as they were. Audio thread: no allocation.
+    fn tail_of(&mut self, _controls: &<Self::Set as ControlSet>::Controls) -> Tail {
+        self.tail()
+    }
 }
 
 /// An effect of any [`Kernel`] as a graph node.
@@ -104,6 +115,17 @@ pub trait Kernel: Clone + Send + 'static {
 /// it render. Otherwise the block renders in one call. A kernel that cuts at every grid
 /// point ([`Kernel::CUT_ALWAYS`]) is cut and retargeted at each of them whether or not a
 /// control moved.
+///
+/// # The tail
+///
+/// A kernel that declares a finite or unbounded [`tail`](Kernel::tail) rings for at most
+/// that long, and the node holds it to it. Each block it narrows the declared ceiling to
+/// what the controls in force ring ([`Kernel::tail_of`], the longest of what a driven port
+/// takes in the block), held at the longer figure until a shorter decay has been heard
+/// out, and reports it ([`Io::report_tail`]). Once the input has been silent for the
+/// reported tail plus the latency, the node cuts the output off, resets the kernel and parks
+/// ([`Status::Idle`]): what rings is below the kernel's floor, and a parked node is a fresh
+/// one when it wakes (its stream clock restarts with it).
 ///
 /// # In a graph
 ///
@@ -128,6 +150,13 @@ struct Tuned<C> {
     applied: Option<C>,
     /// Frames rendered since the last reset: where the grid points fall.
     position: u64,
+    /// The ring-out owed, or `None` when the kernel's tail is only declared and the node
+    /// neither narrows nor parks.
+    clock: Option<TailClock>,
+    /// The tail of the controls last designed (read at a block's last frame), in frames.
+    current: u64,
+    /// Whether the kernel has rendered since its last reset: what a park must undo.
+    dirty: bool,
 }
 
 impl<K: Kernel> std::fmt::Debug for KernelNode<K> {
@@ -171,19 +200,60 @@ impl<K: Kernel> KernelNode<K> {
         self.tuned.as_ref().and_then(|t| t.applied)
     }
 
-    /// Back to silence, the grid counted from here.
+    /// Back to silence: the grid counted from here, no ring-out owed, no input heard.
     fn clear(&mut self) {
         self.kernel.reset();
         if let Some(t) = &mut self.tuned {
             t.position = 0;
+            t.dirty = false;
+            if let Some(clock) = &mut t.clock {
+                clock.clear();
+            }
         }
         self.params.land();
+    }
+
+    /// How many frames of the block may still sound, for a kernel that declares a finite or
+    /// unbounded tail; reports the tail it owes. `target` is the controls at the block's last
+    /// frame, `moved` whether they differ from the last design.
+    fn cut(
+        &mut self,
+        io: &mut Io<'_>,
+        target: &<K::Set as ControlSet>::Controls,
+        moved: bool,
+    ) -> usize {
+        let size = io.frames();
+        let inputs = self.inputs;
+        let Some(t) = &mut self.tuned else {
+            return size;
+        };
+        let Some(clock) = &mut t.clock else {
+            return size;
+        };
+        if moved {
+            t.current = tail_frames(self.kernel.tail_of(target));
+        }
+        let mut current = t.current;
+        if let Some(longest) = self.params.longest(io)
+            && Some(longest) != t.applied
+        {
+            current = current.max(tail_frames(self.kernel.tail_of(&longest)));
+        }
+        let last_input = (0..inputs)
+            .filter_map(|c| io.input(c)[..size].iter().rposition(|&s| s != 0.0))
+            .max();
+        let owed = clock.advance(current, Heard { size, last_input });
+        io.report_tail(owed.tail);
+        owed.live
     }
 
     /// Renders `frames` of the block through the kernel.
     fn render(&mut self, io: &mut Io<'_>, frames: Range<usize>) {
         if frames.is_empty() {
             return;
+        }
+        if let Some(t) = &mut self.tuned {
+            t.dirty = true;
         }
         let driven = self.params.lanes(io);
         let (ins, mut outs) = io.split();
@@ -258,6 +328,17 @@ impl<K: Kernel> KernelNode<K> {
         self.render(io, held..size);
     }
 
+    /// Parks: the kernel silent and the grid counted from here, as a fresh node, unless
+    /// nothing has rendered since it last was.
+    fn park(&mut self) {
+        if self.tuned.as_ref().is_some_and(|t| t.dirty) {
+            self.clear();
+        } else if let Some(t) = &mut self.tuned {
+            t.position = 0;
+            self.params.land();
+        }
+    }
+
     fn apply(&mut self, controls: <K::Set as ControlSet>::Controls) {
         self.kernel.retarget(&controls);
         if let Some(t) = &mut self.tuned {
@@ -282,10 +363,14 @@ impl<K: Kernel> Node for KernelNode<K> {
     fn prepare(&mut self, p: &Prepare) {
         self.kernel.prepare(p.sample_rate(), p.max_block());
         self.params.retune(p.sample_rate(), true);
+        let latency = self.kernel.latency().get() as u64;
         self.tuned = Some(Tuned {
             rate: p.sample_rate(),
             applied: None,
             position: 0,
+            clock: TailClock::of(self.kernel.tail(), latency),
+            current: 0,
+            dirty: false,
         });
         self.clear();
     }
@@ -314,6 +399,14 @@ impl<K: Kernel> Node for KernelNode<K> {
             .as_ref()
             .is_none_or(|a| self.params.moved(a, &target));
         let stepped = K::CUT_ALWAYS || self.params.driven(&io) || (applied.is_some() && moved);
+
+        // Past its tail the kernel is cut off and parked: what rings is below its floor, and
+        // the input has been silent for longer than the latency, so the output is silent.
+        let live = self.cut(&mut io, &target, moved);
+        if live == 0 {
+            self.park();
+            return Status::Idle;
+        }
         if stepped {
             self.render_steps(&mut io, position, rate);
         } else {
@@ -321,6 +414,13 @@ impl<K: Kernel> Node for KernelNode<K> {
                 self.apply(target);
             }
             self.render(&mut io, 0..size);
+        }
+        if live < size {
+            let (_, mut outs) = io.split();
+            for ch in outs.bus(self.out).into_channels() {
+                ch[live..size].fill(0.0);
+            }
+            self.park();
         }
         Status::Modified
     }
@@ -346,7 +446,15 @@ impl<K: Kernel> Clone for KernelNode<K> {
             params,
             out: self.out,
             inputs: self.inputs,
-            tuned: self.tuned.map(|t| Tuned { position: 0, ..t }),
+            tuned: self.tuned.map(|t| Tuned {
+                position: 0,
+                clock: t.clock.map(|mut clock| {
+                    clock.clear();
+                    clock
+                }),
+                dirty: false,
+                ..t
+            }),
         }
     }
 }
@@ -382,5 +490,53 @@ impl<K: Kernel> IntoNode for KernelNode<K> {
 
     fn into_parts(self) -> NodeParts<ParamSet> {
         tutti_graph::param_parts(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tutti_dsp::{DelayControls, MaxDelay};
+    use tutti_graph::contract::{drive_input, prepared};
+    use tutti_graph::{Env, PlayClock, Status, TransportChanges, TransportPosition};
+    use tutti_types::{Frame, Seconds};
+
+    use super::*;
+    use crate::DelayNode;
+
+    /// A kernel whose tail is only declared is left alone: a delay (tail unknown) that has
+    /// heard one impulse and then nothing for 4 000 blocks is never parked, never cut and
+    /// never narrows its tail, and keeps its echoes.
+    #[test]
+    fn a_kernel_with_an_unknown_tail_is_never_narrowed_cut_or_parked() {
+        let rate = SampleRate::SR_48K;
+        let mut node = prepared(
+            DelayNode::mono(
+                MaxDelay::of(Seconds(0.01)),
+                DelayControls {
+                    feedback: tutti_types::Feedback(0.5),
+                    ..DelayControls::DEFAULT
+                },
+            ),
+            rate,
+            64,
+        );
+        let mut x = vec![0.0f32; 64];
+        let mut heard = false;
+        for block in 0..4_000u64 {
+            let env = Env {
+                frame: Frame::new(block * 64),
+                sample_rate: rate,
+                block_len: Samples(64),
+                transport: TransportPosition::default(),
+                changes: TransportChanges::NONE,
+                play: PlayClock::ZERO,
+            };
+            x[0] = if block == 0 { 1.0 } else { 0.0 };
+            let d = drive_input(&mut node, &env, &[&x], &[], &[]);
+            assert_eq!(d.status, Some(Status::Modified), "block {block}");
+            assert_eq!(d.reported_tail, None, "block {block}");
+            heard |= d.audio[0].iter().any(|&s| s != 0.0);
+        }
+        assert!(heard);
     }
 }

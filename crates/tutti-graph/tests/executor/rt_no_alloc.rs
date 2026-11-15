@@ -12,16 +12,16 @@
 //! own idle loop between jobs (the test pool spins; `tutti_graph::WorkerPool`'s
 //! park and wake are covered by `tutti-engine`'s `rt_no_alloc_engine`).
 //!
-//! What this cannot cover, stated rather than implied: applying a commit
-//! allocates (see `exec.rs`), so it runs outside the gate; and a node
-//! that allocates is the node's bug, which this test catches only for the
-//! nodes it runs.
+//! Applying a commit is inside the gate too (`applying_*`): it moves and
+//! swaps what the editor built with the commit. What this cannot cover,
+//! stated rather than implied: a node that allocates is the node's bug,
+//! which this test catches only for the nodes it runs.
 
 use tutti_graph::testing as common;
 use tutti_graph::{Curvature, Exponent};
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use common::{Kind, TestNode, prepare};
 
@@ -44,6 +44,11 @@ fn use_pool(exec: &mut tutti_graph::Executor, workers: usize) {
     if workers > 1 {
         exec.set_pool(Some(common::TestPool::no_alloc(workers)));
     }
+}
+
+/// Applies every queued commit under the gate: applying allocates nothing.
+fn apply(exec: &mut tutti_graph::Executor) {
+    assert_no_alloc::assert_no_alloc(|| exec.apply_pending());
 }
 
 fn at(node: u64, port: u16) -> InPort {
@@ -182,7 +187,7 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
         }),
     ]);
     ed.commit().expect("commits");
-    exec.apply_pending();
+    apply(&mut exec);
     ed.collect();
     let plan = exec.plan().expect("applied");
     assert!(
@@ -273,8 +278,7 @@ fn parallel_process_is_allocation_free_in_steady_state() {
 /// blend, a fade's end (the crossfade and its outgoing unit onto the
 /// fade-return ring) and the start of the fade waiting behind it —
 /// on an in-place stereo gain and on an event consumer (the general form).
-/// The commits are applied before the gate, since applying allocates by
-/// design; everything a fade does after that runs inside it.
+/// Everything a fade does runs inside the gate.
 fn crossfades_are_allocation_free_on(workers: usize) {
     let (mut ed, mut exec) = Editor::new(prepare(256));
     use_pool(&mut exec, workers);
@@ -413,9 +417,8 @@ impl Node for HeldChaser {
 }
 
 /// **A chase held behind a running fade is delivered without allocating**:
-/// A fades to B, C waits behind B (the commit that queued it applied before
-/// the gate, since applying allocates by design), and inside the gate B's
-/// fade ends, C takes over and its first block carries B's three messages.
+/// A fades to B, C waits behind B, and inside the gate B's fade ends, C takes
+/// over and its first block carries B's three messages.
 /// The count of what C received proves the delivery ran inside the gate.
 fn a_held_chase_is_delivered_allocation_free_on(workers: usize) {
     const KEYS: u64 = 6;
@@ -616,7 +619,7 @@ fn declared_event_capacities_are_allocation_free_on(workers: usize) {
     }
     spec.connect_events(tally(1), EventEdge::feedback(ev(1), Samples(300)));
     ed.commit().expect("commits");
-    exec.apply_pending();
+    apply(&mut exec);
     ed.collect();
     let plan = exec.plan().expect("applied");
     assert!(
@@ -684,7 +687,7 @@ fn losses_past_the_log_and_the_ring_are_allocation_free_on(workers: usize) {
         );
     }
     ed.commit().expect("commits");
-    exec.apply_pending();
+    apply(&mut exec);
     ed.collect();
     assert_eq!(exec.is_parallel(), workers > 1);
     let transport = TransportPosition::default();
@@ -801,9 +804,8 @@ impl Node for RampEvery {
 /// sibling), an event source of ramps and curve segments (every shape
 /// class) and LUT shapings, the declick of a connection
 /// made and one broken, blocks of every length, and ranges moved between
-/// blocks without a commit. The commits are applied before the gate
-/// (applying allocates by design); the declicks they start, and every block
-/// that reads a moved range, run inside it.
+/// blocks without a commit. The declicks the commits start, and every block
+/// that reads a moved range, run inside the gate.
 fn modulated_params_are_allocation_free_on(workers: usize) {
     use tutti_graph::ParamIn;
     let (mut ed, mut exec) = Editor::new(prepare(256));
@@ -853,7 +855,7 @@ fn modulated_params_are_allocation_free_on(workers: usize) {
             exec.process(n, &transport, &[&input[..n]], &mut [&mut out[..n]]);
         }
     };
-    exec.apply_pending();
+    apply(&mut exec);
     assert_eq!(
         exec.is_parallel(),
         workers > 1,
@@ -867,7 +869,7 @@ fn modulated_params_are_allocation_free_on(workers: usize) {
     ed.spec_mut().connect_param(q, ramps);
     ed.spec_mut().disconnect_param(cut, ramps);
     ed.commit().expect("commits");
-    exec.apply_pending();
+    apply(&mut exec);
     assert_eq!(
         exec.is_parallel(),
         workers > 1,
@@ -1090,7 +1092,7 @@ fn reporting_nodes_are_allocation_free_on(workers: usize) {
     }
     ed.spec_mut().topology.set_outputs(outputs);
     ed.commit().expect("commits");
-    exec.apply_pending();
+    apply(&mut exec);
     ed.collect();
     assert_eq!(exec.is_parallel(), workers > 1);
     let [mut a, mut b, mut c, mut d] = std::array::from_fn(|_| vec![0.0f32; 64]);
@@ -1187,7 +1189,7 @@ fn fan_in_is_allocation_free_on(workers: usize) {
                     ];
                 }
                 ed.commit().expect("commits");
-                exec.apply_pending();
+                apply(&mut exec);
                 ed.collect();
                 assert_eq!(exec.is_parallel(), workers > 1);
                 let mut out = vec![0.0f32; 128];
@@ -1316,7 +1318,7 @@ fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
                 }
             }
             ed.commit().expect("commits");
-            exec.apply_pending();
+            apply(&mut exec);
             ed.collect();
             assert_eq!(exec.is_parallel(), workers > 1);
             let mut out = vec![0.0f32; 128];
@@ -1499,7 +1501,7 @@ fn mode_graph(workers: usize) -> (Editor, tutti_graph::Executor) {
         port: 0,
     })]);
     ed.commit().expect("commits");
-    exec.apply_pending();
+    apply(&mut exec);
     ed.collect();
     assert_eq!(exec.is_parallel(), workers > 1);
     (ed, exec)
@@ -1701,7 +1703,7 @@ fn driven_mixes_are_allocation_free_on(workers: usize) {
         ed.spec_mut().connect_param(port(k), lane(k));
     }
     ed.commit().expect("commits");
-    exec.apply_pending();
+    apply(&mut exec);
     ed.collect();
     let input: Vec<f32> = (0..256).map(|i| ((i % 19) as f32 - 9.0) * 0.1).collect();
     let mut out = vec![0.0f32; 256];
@@ -1716,7 +1718,7 @@ fn driven_mixes_are_allocation_free_on(workers: usize) {
                 ed.spec_mut().disconnect_param(port(k), lane(k));
             }
             ed.commit().expect("commits");
-            exec.apply_pending();
+            apply(&mut exec);
             ed.collect();
         }
         for k in 1..=9u64 {
@@ -1799,7 +1801,7 @@ fn fading_edges_are_allocation_free_on(workers: usize) {
             .set_edge_gain(edge(k), EdgeGain::new(tutti_types::Amplitude::new(0.5)));
     }
     ed.commit().expect("commits");
-    exec.apply_pending();
+    apply(&mut exec);
     ed.collect();
     for k in 1..=8u64 {
         let fade = if k % 2 == 0 {
@@ -1929,7 +1931,7 @@ fn a_swap_is_allocation_free_on(workers: usize) {
         .expect("fits");
     }
     ed.commit().expect("commits");
-    exec.apply_pending();
+    apply(&mut exec);
     assert_eq!(
         exec.is_parallel(),
         workers > 1,
@@ -1990,7 +1992,7 @@ fn edge_fades_are_allocation_free() {
         .set_edge_gain(id(2), EdgeGain::new(Amplitude::new(0.25)));
     ed.set_edge_fade(id(1), EdgeFade::In).expect("the edge");
     ed.commit().expect("commits");
-    exec.apply_pending();
+    apply(&mut exec);
     ed.collect();
     let mut out = vec![0.0f32; BLOCK];
     let mut heard = false;
@@ -2015,4 +2017,632 @@ fn edge_fades_are_allocation_free() {
         ed.collect();
     }
     assert!(heard);
+}
+
+/// Adds a chain `lag -> sum <- smooth` fed by the global input: the sum's
+/// second path is delayed by a PDC ring of the lag's latency. Keys start at
+/// `base`; returns the sum's key.
+fn pdc_pair(ed: &mut Editor, base: u64, latency: usize) -> NodeKey {
+    let (lag, smooth, sum) = (NodeKey(base), NodeKey(base + 1), NodeKey(base + 2));
+    ed.insert(lag, "lag", Unforkable(TestNode::new(Kind::Lag { latency })));
+    ed.insert(smooth, "smooth", Unforkable(TestNode::new(Kind::Smooth)));
+    ed.insert(
+        sum,
+        "sum",
+        Unforkable(TestNode::new(Kind::Sum { inputs: 2 })),
+    );
+    let t = &mut ed.spec_mut().topology;
+    t.edges
+        .insert(at(base, 0), vec![Edge::Direct(Source::Global(0))]);
+    t.edges
+        .insert(at(base + 1, 0), vec![Edge::Direct(Source::Global(0))]);
+    t.edges.insert(at(base + 2, 0), vec![from(base, 0)]);
+    t.edges.insert(at(base + 2, 1), vec![from(base + 1, 0)]);
+    sum
+}
+
+/// Writes `keys` MIDI 1.0 note-ons, 400 a block, and holds them: key `k` is
+/// note `k % 128` on channel `k / 128`.
+struct Holder {
+    keys: usize,
+    sent: usize,
+    per_block: usize,
+}
+
+impl Holder {
+    fn new(keys: usize) -> Self {
+        Self::paced(keys, 400)
+    }
+
+    /// `per_block` keys a block, the most its port takes.
+    fn paced(keys: usize, per_block: usize) -> Self {
+        Self {
+            keys,
+            sent: 0,
+            per_block,
+        }
+    }
+}
+
+/// Counts the MIDI 1.0 note offs sent to its event inputs.
+struct OffCount {
+    offs: Arc<AtomicUsize>,
+    inputs: u16,
+}
+
+impl Node for OffCount {
+    fn shape(&self) -> Shape {
+        Shape::EMPTY.with_events(self.inputs, 0)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
+        for port in 0..self.inputs {
+            for e in io.events(usize::from(port)) {
+                if let EventKind::Midi(Ump(w)) = e.kind
+                    && w[0] >> 28 == 2
+                    && (w[0] >> 20) & 0xf == 8
+                {
+                    self.offs.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+impl Node for Holder {
+    fn shape(&self) -> Shape {
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(self.per_block.max(1) as u32)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        let next = (self.sent + self.per_block).min(self.keys);
+        for k in self.sent..next {
+            let channel = MidiChannel::of((k / 128) as u8);
+            let on = midi::m1_note_on(channel, (k % 128) as u8, U7::of(100));
+            let _ = io
+                .event_out(0)
+                .push(tutti_graph::Event::midi(tutti_graph::Offset::ZERO, on));
+        }
+        self.sent = next;
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+fn ev(node: u64, port: u16) -> EventOut {
+    EventOut {
+        node: NodeKey(node),
+        port,
+    }
+}
+
+fn sink(node: u64, port: u16) -> EventIn {
+    EventIn {
+        node: NodeKey(node),
+        port,
+    }
+}
+
+/// An event consumer `base + 3` with four inputs: a lagging emitter's, an
+/// emitter's direct (which gets an event PDC FIFO), and two note holders'.
+/// Keys start at `base` (emitters at `base`, `base + 1`; the lag at
+/// `base + 2`; holders at `base + 4`, `base + 5`).
+fn event_pdc(ed: &mut Editor, base: u64) {
+    let nodes = [
+        Kind::Emitter {
+            period: 5,
+            phase: 0,
+        },
+        Kind::Emitter {
+            period: 7,
+            phase: 3,
+        },
+        Kind::EventLag { latency: 11 },
+        Kind::Consumer { inputs: 4 },
+    ];
+    for (i, kind) in nodes.into_iter().enumerate() {
+        ed.insert(
+            NodeKey(base + i as u64),
+            "n",
+            Unforkable(TestNode::new(kind)),
+        );
+    }
+    for i in 4..6 {
+        ed.insert(NodeKey(base + i), "holder", Unforkable(Holder::new(30)));
+    }
+    let spec = ed.spec_mut();
+    spec.connect_events(sink(base + 2, 0), EventEdge::Direct(ev(base + 1, 0)));
+    spec.connect_events(sink(base + 3, 0), EventEdge::Direct(ev(base + 2, 0)));
+    spec.connect_events(sink(base + 3, 1), EventEdge::Direct(ev(base, 0)));
+    spec.connect_events(sink(base + 3, 2), EventEdge::Direct(ev(base + 4, 0)));
+    spec.connect_events(sink(base + 3, 3), EventEdge::Direct(ev(base + 5, 0)));
+}
+
+/// **Applying a commit allocates and frees nothing**: the new arena, every
+/// ring and FIFO, and the state they carry across are built with the commit
+/// (`exec/stage.rs`), and applying moves them. Each commit below is applied
+/// inside the gate, then blocks render inside it. Together they cover every
+/// path the claim names:
+///
+/// - nodes with an audio PDC ring and an event FIFO join; the arena grows
+///   and the store with it;
+/// - an event FIFO whose bound grows (it moves into one built for it) and
+///   one whose bound shrinks (it is retuned in place and its slot widened);
+/// - audio and event feedback, then a feedback edge whose delay changes (the
+///   old FIFO flushes);
+/// - held keys closed on a cut edge, and on a hard replace whose edge stays
+///   behind a delay;
+/// - a tap, an event tap and a meter carried across commits, and a tap
+///   opened again, which wins over the carried one;
+/// - weighted lanes, then one a source drives, carried across a commit;
+/// - crossfades, a fade queued behind another, and a chase handed on;
+/// - a re-prepare's suspend and resume, at the same rate and at another.
+fn applying_a_commit_allocates_nothing_on(workers: usize) {
+    use tutti_graph::{
+        EdgeGain, EdgeId, EventCapacity, EventTapId, MeterId, MeterSpec, PortKind, Sink, TapAlign,
+        TapId,
+    };
+    use tutti_types::{Amplitude, MaxBlock, SampleRate};
+
+    let (mut ed, mut exec) = Editor::new(prepare(64));
+    use_pool(&mut exec, workers);
+    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    let first = pdc_pair(&mut ed, 1, 40);
+    let out_of = |node: NodeKey| Source::Node(OutPort { node, port: 0 });
+    ed.spec_mut().topology.set_outputs(vec![out_of(first)]);
+    let cap = Samples(1 << 16);
+    let mut tap = ed
+        .open_tap(TapId::of(1), vec![out_of(first)], TapAlign::ToOutput, cap)
+        .expect("the source exists");
+    let meter = ed
+        .open_meter(MeterId::of(1), MeterSpec::Outputs)
+        .expect("opens");
+    meter.enable();
+
+    let input = vec![0.25f32; 64];
+    let mut outs = vec![vec![0.0f32; 64]; 4];
+    let transport = TransportPosition::default();
+    let mut blocks = |exec: &mut tutti_graph::Executor, n: usize, frames: usize| {
+        for _ in 0..n {
+            let wide = exec.plan().map_or(1, |p| p.global_outputs()).min(4);
+            let mut slices: Vec<&mut [f32]> = Vec::new();
+            slices.extend(outs.iter_mut().take(wide).map(|o| &mut o[..]));
+            // The slices of a block are made before the gate.
+            assert_no_alloc::assert_no_alloc(|| {
+                exec.process(frames, &transport, &[&input[..frames]], &mut slices);
+            });
+        }
+    };
+    let slots = |exec: &tutti_graph::Executor| exec.plan().expect("applied").slots(PortKind::Audio);
+    // From the wide plan on, every apply leaves the executor in the mode the
+    // pool names.
+    let applied = |exec: &mut tutti_graph::Executor| {
+        apply(exec);
+        assert_eq!(
+            exec.is_parallel(),
+            workers > 1,
+            "the gate runs the mode it names"
+        );
+    };
+
+    // The first plan: the empty state gives way to a staged one.
+    ed.commit().expect("commits");
+    apply(&mut exec);
+    ed.collect();
+    blocks(&mut exec, 8, 64);
+
+    // Nodes with an audio PDC ring and an event FIFO join; a second tap, an
+    // event tap and the held keys are in them.
+    let second = pdc_pair(&mut ed, 10, 25);
+    event_pdc(&mut ed, 20);
+    ed.spec_mut()
+        .topology
+        .set_outputs(vec![out_of(first), out_of(second)]);
+    let events = ed
+        .open_event_tap(
+            EventTapId::of(1),
+            ev(20, 0),
+            TapAlign::Raw,
+            EventCapacity::of(256),
+        )
+        .expect("the port exists");
+    ed.commit().expect("commits");
+    let delays = exec.plan().expect("applied").delays().len();
+    apply(&mut exec);
+    assert!(exec.plan().expect("applied").delays().len() > delays);
+    blocks(&mut exec, 16, 64);
+    ed.collect();
+
+    // The arena and the store grow: eight chains feed one wide sum.
+    let (before, units) = (slots(&exec), exec.plan().expect("applied").units().len());
+    let sums: Vec<NodeKey> = (0..8)
+        .map(|i| pdc_pair(&mut ed, 100 + 3 * i, 8 + i as usize))
+        .collect();
+    let wide = NodeKey(200);
+    ed.insert(
+        wide,
+        "sum",
+        Unforkable(TestNode::new(Kind::Sum { inputs: 8 })),
+    );
+    for (i, sum) in sums.iter().enumerate() {
+        ed.spec_mut()
+            .topology
+            .edges
+            .insert(at(200, i as u16), vec![from(sum.0, 0)]);
+    }
+    ed.spec_mut()
+        .topology
+        .set_outputs(vec![out_of(first), out_of(second), out_of(wide)]);
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    assert!(slots(&exec) > before, "the arena grew");
+    assert!(exec.plan().expect("applied").units().len() > 2 * units);
+    blocks(&mut exec, 16, 64);
+    ed.collect();
+
+    // An event FIFO whose bound grows, and one whose bound shrinks; a tap
+    // opened again wins over the one carried.
+    let lag = NodeKey(22);
+    ed.set_latency(lag, Latency::new(Samples(400)))
+        .expect("fits");
+    let reopened = ed
+        .open_tap(TapId::of(1), vec![out_of(first)], TapAlign::ToOutput, cap)
+        .expect("the source exists");
+    drop(std::mem::replace(&mut tap, reopened));
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 24, 64);
+    ed.collect();
+    ed.set_latency(lag, Latency::new(Samples(3))).expect("fits");
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 24, 64);
+    ed.collect();
+
+    // Audio and event feedback.
+    let (smooth, gain, mix) = (NodeKey(300), NodeKey(301), NodeKey(302));
+    ed.insert(smooth, "smooth", Unforkable(TestNode::new(Kind::Smooth)));
+    ed.insert(
+        gain,
+        "gain",
+        Unforkable(TestNode::new(Kind::Gain {
+            gain: 0.5,
+            width: 1,
+        })),
+    );
+    ed.insert(
+        mix,
+        "sum",
+        Unforkable(TestNode::new(Kind::Sum { inputs: 2 })),
+    );
+    let feedback = |delay: usize| {
+        vec![Edge::Feedback(FeedbackFrom::one_block(
+            OutPort {
+                node: gain,
+                port: 0,
+            },
+            Samples(delay),
+        ))]
+    };
+    {
+        let t = &mut ed.spec_mut().topology;
+        t.edges
+            .insert(at(300, 0), vec![Edge::Direct(Source::Global(0))]);
+        t.edges.insert(at(302, 0), vec![from(300, 0)]);
+        t.edges.insert(at(302, 1), feedback(128));
+        t.edges.insert(at(301, 0), vec![from(302, 0)]);
+    }
+    for (k, kind) in [
+        Kind::Emitter {
+            period: 5,
+            phase: 0,
+        },
+        Kind::EventLag { latency: 11 },
+        Kind::Consumer { inputs: 2 },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        ed.insert(
+            NodeKey(310 + k as u64),
+            "n",
+            Unforkable(TestNode::new(kind)),
+        );
+    }
+    let efb = |delay: usize| EventEdge::feedback(ev(311, 0), Samples(delay));
+    ed.spec_mut()
+        .connect_events(sink(311, 0), EventEdge::Direct(ev(310, 0)));
+    ed.spec_mut()
+        .connect_events(sink(312, 0), EventEdge::Direct(ev(311, 0)));
+    ed.spec_mut().connect_events(sink(312, 1), efb(128));
+    ed.spec_mut().topology.set_outputs(vec![
+        out_of(first),
+        out_of(second),
+        out_of(wide),
+        out_of(gain),
+    ]);
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 24, 64);
+    ed.collect();
+    // The feedback delays change: new keys, and the old FIFOs flush.
+    ed.spec_mut()
+        .topology
+        .edges
+        .insert(at(302, 1), feedback(192));
+    ed.spec_mut().disconnect_events(sink(312, 1), ev(311, 0));
+    ed.spec_mut().connect_events(sink(312, 1), efb(192));
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 24, 64);
+    ed.collect();
+
+    // Weighted lanes on the output edges, then one a source drives.
+    let edge = |node: NodeKey| EdgeId {
+        sink: Sink::Output(0),
+        from: from(node.0, 0),
+    };
+    ed.spec_mut()
+        .set_edge_gain(edge(first), EdgeGain::new(Amplitude::new(0.5)));
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 8, 64);
+    ed.collect();
+    ed.insert(
+        NodeKey(400),
+        "lane",
+        Unforkable(TestNode::new(Kind::GainDriver {
+            period: 8,
+            latency: 0,
+        })),
+    );
+    ed.spec_mut().connect_edge_gain(edge(first), ev(400, 0));
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 24, 64);
+    ed.collect();
+    // The driven lane and the tap, event tap and meter ride a plain commit.
+    ed.insert(
+        NodeKey(401),
+        "smooth",
+        Unforkable(TestNode::new(Kind::Smooth)),
+    );
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 8, 64);
+    ed.collect();
+
+    // Held keys close: the edge from one holder is cut, and the other holder
+    // is replaced hard while its edge stays behind its delay.
+    ed.spec_mut().disconnect_events(sink(23, 2), ev(24, 0));
+    ed.replace(
+        NodeKey(25),
+        Unforkable(Holder::new(0)),
+        Fade::new(Samples(0), FadeLaw::EqualPower),
+    )
+    .expect("fits");
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 24, 64);
+    ed.collect();
+
+    // Closes owed across commits: a holder of more keys than one block of the
+    // sink takes is cut (the apply merges its keys into a table and leaves
+    // the rest owed), a commit follows before any block (the table moves
+    // over), and the blocks drain it.
+    ed.insert(NodeKey(600), "holder", Unforkable(Holder::new(1_500)));
+    ed.insert(
+        NodeKey(601),
+        "consume",
+        Unforkable(TestNode::new(Kind::Consumer { inputs: 1 })),
+    );
+    ed.spec_mut()
+        .connect_events(sink(601, 0), EventEdge::Direct(ev(600, 0)));
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 6, 64);
+    ed.collect();
+    ed.spec_mut().disconnect_events(sink(601, 0), ev(600, 0));
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    ed.insert(
+        NodeKey(602),
+        "smooth",
+        Unforkable(TestNode::new(Kind::Smooth)),
+    );
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 12, 64);
+    ed.collect();
+
+    // A FIFO that owes closes. A holder behind an event delay is replaced
+    // hard: what the FIFO has no room for stays owed and pours in block by
+    // block (the tally shows the drain is still going after the apply). Then
+    // its edge is cut while the table is not empty: the FIFO vanishes, and
+    // what it owes moves to its sink.
+    let offs = Arc::new(AtomicUsize::new(0));
+    let tally = |offs: &Arc<AtomicUsize>, inputs| OffCount {
+        offs: Arc::clone(offs),
+        inputs,
+    };
+    ed.insert(NodeKey(700), "holder", Unforkable(Holder::paced(1_024, 64)));
+    ed.insert(NodeKey(701), "tally", Unforkable(tally(&offs, 2)));
+    ed.insert(
+        NodeKey(702),
+        "lag",
+        Unforkable(TestNode::new(Kind::EventLag { latency: 11 })),
+    );
+    ed.insert(
+        NodeKey(703),
+        "emit",
+        Unforkable(TestNode::new(Kind::Emitter {
+            period: 5,
+            phase: 0,
+        })),
+    );
+    {
+        let spec = ed.spec_mut();
+        spec.connect_events(sink(702, 0), EventEdge::Direct(ev(703, 0)));
+        spec.connect_events(sink(701, 0), EventEdge::Direct(ev(700, 0)));
+        spec.connect_events(sink(701, 1), EventEdge::Direct(ev(702, 0)));
+    }
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 20, 64);
+    ed.collect();
+    assert_eq!(offs.load(Ordering::Relaxed), 0, "nothing closed yet");
+    ed.replace(
+        NodeKey(700),
+        Unforkable(Holder::paced(0, 64)),
+        Fade::new(Samples(0), FadeLaw::EqualPower),
+    )
+    .expect("fits");
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 2, 64);
+    let mid = offs.load(Ordering::Relaxed);
+    assert!(
+        0 < mid && mid < 1_024,
+        "the FIFO's table is still draining: {mid} of 1024 closed"
+    );
+    ed.collect();
+    ed.spec_mut().disconnect_events(sink(701, 0), ev(700, 0));
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 40, 64);
+    ed.collect();
+    assert_eq!(
+        offs.load(Ordering::Relaxed),
+        1_024,
+        "every key closed, once, whether the FIFO poured it or handed it on"
+    );
+    // Two holders cut from one sink port in one commit: two tables owed to
+    // it, each more than the sink's block takes.
+    let both = Arc::new(AtomicUsize::new(0));
+    for k in [710, 711] {
+        ed.insert(NodeKey(k), "holder", Unforkable(Holder::paced(700, 64)));
+    }
+    ed.insert(NodeKey(712), "tally", Unforkable(tally(&both, 1)));
+    for k in [710, 711] {
+        ed.spec_mut()
+            .connect_events(sink(712, 0), EventEdge::Direct(ev(k, 0)));
+    }
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 14, 64);
+    ed.collect();
+    for k in [710, 711] {
+        ed.spec_mut().disconnect_events(sink(712, 0), ev(k, 0));
+    }
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 30, 64);
+    ed.collect();
+    assert_eq!(
+        both.load(Ordering::Relaxed),
+        1_400,
+        "each cut edge's keys close, once each"
+    );
+
+    // Crossfades: a fade, one queued behind it, and a chase handed on.
+    let chaser = |n: u64| HeldChaser(Arc::new(AtomicU64::new(n)));
+    ed.insert(NodeKey(500), "chaser", Unforkable(chaser(0)));
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 4, 64);
+    ed.collect();
+    let fade = |n| Fade::new(Samples(n), FadeLaw::EqualPower);
+    ed.replace(NodeKey(500), Unforkable(chaser(1)), fade(1_000))
+        .expect("fits");
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 2, 64);
+    ed.replace(NodeKey(500), Unforkable(chaser(2)), fade(1_000))
+        .expect("fits");
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 40, 64);
+    ed.collect();
+
+    // A re-prepare: suspend and resume, at the same rate and at another.
+    for next in [
+        prepare(64),
+        tutti_graph::Prepare::new(SampleRate::SR_44K1, MaxBlock::of(Samples(64))),
+    ] {
+        ed.reprepare(next).expect("accepted");
+        applied(&mut exec);
+        blocks(&mut exec, 2, 64);
+        ed.collect();
+        applied(&mut exec);
+        blocks(&mut exec, 24, 64);
+        ed.collect();
+    }
+
+    assert_eq!(exec.dropped_event_count(), 0);
+    drop((tap, events, meter));
+}
+
+#[test]
+fn applying_a_commit_allocates_nothing() {
+    applying_a_commit_allocates_nothing_on(1);
+}
+
+/// The same with a pool of four: the parallel state is built with the commit
+/// too.
+#[test]
+fn applying_a_commit_allocates_nothing_in_parallel() {
+    applying_a_commit_allocates_nothing_on(4);
+}
+
+/// **A pool set while a commit is in flight**: the commit was staged for no
+/// pool, `set_pool` re-stages it with the parallel state for this one, and
+/// applying it allocates and frees nothing; then the pool goes and the commit
+/// is re-staged serial. This covers the re-staged path. The race, a commit
+/// staged for the old pool by another thread while `set_pool` runs, cannot be
+/// reproduced deterministically; its answer (the unused parallel state goes
+/// back in the commit box) is the same hand-back.
+#[test]
+fn a_pool_set_across_a_commit_in_flight_allocates_nothing() {
+    let (mut ed, mut exec) = Editor::new(prepare(64));
+    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    let sums: Vec<NodeKey> = (0..8)
+        .map(|i| pdc_pair(&mut ed, 100 + 3 * i, 8 + i as usize))
+        .collect();
+    ed.insert(
+        NodeKey(200),
+        "sum",
+        Unforkable(TestNode::new(Kind::Sum { inputs: 8 })),
+    );
+    for (i, sum) in sums.iter().enumerate() {
+        ed.spec_mut()
+            .topology
+            .edges
+            .insert(at(200, i as u16), vec![from(sum.0, 0)]);
+    }
+    ed.spec_mut()
+        .topology
+        .set_outputs(vec![Source::Node(OutPort {
+            node: NodeKey(200),
+            port: 0,
+        })]);
+    ed.commit().expect("commits");
+    use_pool(&mut exec, 4);
+    apply(&mut exec);
+    assert!(exec.is_parallel(), "the commit in flight met the pool");
+    ed.collect();
+    // And back: the commit staged for a pool meets none.
+    ed.insert(
+        NodeKey(900),
+        "smooth",
+        Unforkable(TestNode::new(Kind::Smooth)),
+    );
+    ed.commit().expect("commits");
+    exec.set_pool(None);
+    apply(&mut exec);
+    assert!(!exec.is_parallel());
+    ed.collect();
 }

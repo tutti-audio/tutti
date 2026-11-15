@@ -375,7 +375,7 @@ pub(super) mod design {
     /// Every absorption of every reachable design peaks at or under 1: the kernel
     /// rescales a band set whose response exceeds 1 anywhere (to peak at 0.9999),
     /// so a model that carried such gains would describe a loop the kernel does not
-    /// run. The design applies that scaling itself (`FdnFamily` writes the scaled
+    /// run. The design applies that scaling itself (`FdnLayout` writes the scaled
     /// gains into its network), so the network is what runs.
     pub fn no_rescale<D: ReverbCase>(d: &D) -> Result<(), String> {
         let mut checked = 0;

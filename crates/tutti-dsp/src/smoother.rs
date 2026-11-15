@@ -46,34 +46,6 @@ impl Smoother {
         self.value
     }
 
-    /// The fraction of the gap `steps` consecutive steps close:
-    /// `1 - (1 - coeff)^steps`, in `f64` so the power does not lose a small
-    /// coefficient. `steps == 0` closes none and an instant smoother
-    /// (`coeff == 1`) all of it.
-    #[inline]
-    pub fn gap_closed(&self, steps: usize) -> f32 {
-        let retained = 1.0 - f64::from(self.coeff);
-        let steps = i32::try_from(steps).unwrap_or(i32::MAX);
-        (1.0 - retained.powi(steps)) as f32
-    }
-
-    /// [`step`](Self::step) `steps` times toward the same target in one
-    /// move: `v + (target - v) * gap_closed(steps)` instead of the loop.
-    ///
-    /// The loop injects an `f32` rounding error of about 1.5 ulp of the range
-    /// per step that the next steps then shrink by `1 - coeff`, so it sits
-    /// within `1.5 * 2^-24 * R * min(steps, 1/coeff)` of the exact recurrence
-    /// (`R` the range of the quantity). This form carries one rounding of its
-    /// own, so it is the closer of the two to the exact answer; the two
-    /// differ by at most that bound.
-    #[inline]
-    pub fn advance(&mut self, target: f32, steps: usize) -> f32 {
-        if steps > 0 {
-            self.value += self.gap_closed(steps) * (target - self.value);
-        }
-        self.value
-    }
-
     /// The running value.
     #[inline]
     pub fn value(&self) -> f32 {
