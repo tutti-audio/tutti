@@ -6,11 +6,10 @@ use tutti_types::{Db, SampleSpan, Samples};
 use super::{Network, Stage};
 use crate::{Ring, System};
 
-/// The size of a [`Network`], or the worst case over a family's controls: every
+/// The size of a [`Network`], or the worst case over a layout's controls: every
 /// figure a runner allocates from.
 ///
-/// [`need`](Self::need) measures one network; [`dominates`](Self::dominates) says one capacity
-/// holds another.
+/// [`need`](Self::need) measures one network.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NetworkCapacity {
     /// Delay lines in all.
@@ -31,7 +30,7 @@ pub struct NetworkCapacity {
     pub ir: Samples,
     /// The longest pre-delay.
     pub pre_delay: Samples,
-    /// The longest [`tail`](System::tail) at the reach's floor.
+    /// The longest [`tail`](System::tail) at the floor it was measured to.
     pub tail: Ring,
 }
 
@@ -82,19 +81,5 @@ impl NetworkCapacity {
             }
         }
         b
-    }
-
-    /// Whether these sizes hold `other` in every figure.
-    #[must_use]
-    pub fn dominates(&self, other: &NetworkCapacity) -> bool {
-        self.lines >= other.lines
-            && self.stages >= other.stages
-            && self.taps >= other.taps
-            && self.outputs >= other.outputs
-            && self.line >= other.line
-            && self.delay >= other.delay
-            && self.ir >= other.ir
-            && self.pre_delay >= other.pre_delay
-            && self.tail.covers(other.tail)
     }
 }

@@ -415,9 +415,9 @@ fn the_shortest_path_decides_the_direct_path() {
     );
 }
 
-/// `NetworkCapacity::dominates` needs every figure, and `of` measures them.
+/// `NetworkCapacity::need` measures every figure of a network.
 #[test]
-fn a_bound_dominates_only_when_every_figure_does() {
+fn a_capacity_measures_every_figure_of_its_network() {
     let g = Absorption::Gain(Amplitude(0.5));
     let mut f = fdn(
         &[
@@ -444,32 +444,6 @@ fn a_bound_dominates_only_when_every_figure_does() {
         (b.line, b.delay, b.pre_delay),
         (SampleSpan::of(202.0), SampleSpan::of(302.0), Samples(10))
     );
-    assert!(b.dominates(&b));
-    let smaller: [fn(&mut NetworkCapacity); 8] = [
-        |b| b.lines -= 1,
-        |b| b.stages -= 1,
-        |b| b.outputs -= 1,
-        |b| b.line = b.line.saturating_sub(SampleSpan::of(1.0)),
-        |b| b.delay = b.delay.saturating_sub(SampleSpan::of(1.0)),
-        |b| b.pre_delay = Samples(b.pre_delay.get() - 1),
-        |b| b.tail = Ring::Finite(Seconds(0.0)),
-        |b| b.ir = Samples::ZERO,
-    ];
-    let mut with_taps_and_ir = b;
-    with_taps_and_ir.taps = 1;
-    with_taps_and_ir.ir = Samples(5);
-    for (i, shrink) in smaller.iter().enumerate() {
-        let mut s = if i == 7 { with_taps_and_ir } else { b };
-        shrink(&mut s);
-        let (big, small) = if i == 7 {
-            (&with_taps_and_ir, &s)
-        } else {
-            (&b, &s)
-        };
-        assert!(big.dominates(small), "row {i} the other way round");
-        assert!(!small.dominates(big), "row {i}");
-    }
-    assert!(!b.dominates(&with_taps_and_ir), "taps");
 }
 
 fn one_pole(gain: f32, damp: f32) -> Absorption {

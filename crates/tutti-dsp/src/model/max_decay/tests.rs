@@ -9,7 +9,7 @@ fn a_max_decay_keeps_the_range_checked_shape() {
     check_range_contract(&RangeContract {
         new: MaxDecay::new,
         get: MaxDecay::get,
-        of: None,
+        of: Some(MaxDecay::of),
         valid: &[Seconds::new(0.001), Seconds::new(8.0), MaxDecay::CAP],
         invalid: &[
             Seconds::new(0.0),

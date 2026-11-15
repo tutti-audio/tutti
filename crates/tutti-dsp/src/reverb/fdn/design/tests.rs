@@ -205,10 +205,11 @@ fn the_capacity_dominates_where_rounding_matters() {
             ..FdnControls::DEFAULT
         };
         let tail = design_at(&d, &c, rate).tail(TAIL_FLOOR);
-        assert!(
-            bound.tail.covers(tail),
-            "diffusion {k}%: {tail:?} over {:?}",
-            bound.tail
-        );
+        let covered = match (bound.tail, tail) {
+            (Ring::Unbounded, _) => true,
+            (Ring::Finite(_), Ring::Unbounded) => false,
+            (Ring::Finite(a), Ring::Finite(b)) => a.get() >= b.get(),
+        };
+        assert!(covered, "diffusion {k}%: {tail:?} over {:?}", bound.tail);
     }
 }

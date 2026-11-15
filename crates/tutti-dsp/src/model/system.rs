@@ -17,16 +17,6 @@ pub enum Ring {
 }
 
 impl Ring {
-    /// Whether this ring lasts at least as long as `other`.
-    #[must_use]
-    pub fn covers(self, other: Ring) -> bool {
-        match (self, other) {
-            (Ring::Unbounded, _) => true,
-            (Ring::Finite(_), Ring::Unbounded) => false,
-            (Ring::Finite(a), Ring::Finite(b)) => a.get() >= b.get(),
-        }
-    }
-
     /// The finite figure, or `None` for [`Unbounded`](Self::Unbounded).
     #[must_use]
     pub fn seconds(self) -> Option<Seconds> {

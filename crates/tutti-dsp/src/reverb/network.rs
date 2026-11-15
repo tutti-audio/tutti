@@ -126,9 +126,9 @@ impl Network {
         }
     }
 
-    /// Makes this an empty network at `rate`, in place: what a
-    /// design written in place ([`FdnLayout::design_into`](crate::FdnLayout::design_into)) starts from. Unlike [`new`](Self::new) it builds
-    /// no value of the network's size.
+    /// Makes this an empty network at `rate`, in place: what a design written in place
+    /// ([`FdnLayout::design_into`](crate::FdnLayout::design_into)) starts from. Unlike
+    /// [`new`](Self::new) it builds no value of the network's size.
     pub fn clear(&mut self, rate: SampleRate) {
         self.rate = rate;
         self.pre_delay = Samples::ZERO;

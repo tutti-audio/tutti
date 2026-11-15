@@ -6,8 +6,8 @@
 //! interpreted every [`Network`](network::Network) would fix one loop and one float order
 //! for all of them, where each realization keeps its own (Freeverb's is the classic
 //! comb and all-pass order). The banks' tests hold a render's measured RT60, pre-delay,
-//! wet-only silence, freeze and line lengths to the network's analytic queries. Algorithms not built here fit
-//! the model too: a Schroeder all-pass is a one-line network, early reflections are a
+//! wet-only silence, freeze and line lengths to the network's analytic queries.
+//! Algorithms not built here fit the model too: a Schroeder all-pass is a one-line network, early reflections are a
 //! [`Taps`](network::Taps) stage, and a convolution is the [`Fir`](network::Stage::Fir)
 //! stage's summary.
 

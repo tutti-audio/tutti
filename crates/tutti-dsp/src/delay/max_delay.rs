@@ -3,8 +3,8 @@
 use tutti_types::{SampleRate, Seconds};
 
 tutti_types::ranged! {
-    /// The longest delay a delay's time control may ask for, and the size of the line a [`DelayBank`](crate::DelayBank)
-    /// allocates.
+    /// The longest delay a delay's time control may ask for, and the size of the line a
+    /// [`DelayBank`](crate::DelayBank) allocates.
     ///
     /// A range-checked value: finite, above zero and at
     /// most [`CAP`](Self::CAP). [`new`](Self::new) refuses anything else and never clamps: the
