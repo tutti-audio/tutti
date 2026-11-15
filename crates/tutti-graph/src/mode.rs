@@ -686,8 +686,9 @@ impl ModeState {
         }
     }
 
-    /// A plan drives this unit's mix: take `lane` (built on the control side from [`ModeCell::ranges`]) the first time it does, and keep it
-    /// for the unit's life. A lane that is no longer driven keeps its state,
+    /// A plan drives this unit's mix: take `lane`, built on the control side
+    /// from [`ModeCell::ranges`], the first time it does, and keep it for the
+    /// unit's life. A lane that is no longer driven keeps its state,
     /// which fades to the base and then idles. A `lane` the unit has no use
     /// for goes to `spare`, to be freed on the control side. Allocates
     /// nothing.

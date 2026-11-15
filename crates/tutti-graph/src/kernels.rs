@@ -228,8 +228,9 @@ impl EventFifo {
     /// blocks fit in the same delay, so more events may be in flight), or a
     /// source that now declares a different rate (`Shape::event_capacity`,
     /// a unit hard-replaced by one with another declaration). Keeps every
-    /// queued event; grows the queue when the new bounds need it, never
-    /// shrinks it. Control side: may allocate.
+    /// queued event. Never allocates: the FIFO was built with room for the
+    /// new bound (`exec/stage.rs`), and a bound past the room it has is
+    /// clamped to it.
     ///
     /// The limit is the new bound, not the new bound plus what is queued:
     /// while the backlog is at or past the new limit, a new non-note-off is
@@ -238,29 +239,39 @@ impl EventFifo {
     /// [`push`](Self::push) does at any full FIFO. Queued events past a smaller
     /// new bound are kept, and the output slot is widened by the most they
     /// can be, so they still go out on their frames even if they all fall
-    /// due at once. On the audio thread this never grows the queue: the
-    /// FIFO was built with room for the new bound.
+    /// due at once.
     pub(crate) fn resize(&mut self, cap: usize, max_block: usize) {
         let (limit, reserve) = Self::bounds(self.len as usize, cap, max_block);
-        self.limit = limit;
-        self.reserve = reserve;
-        let want = limit + reserve;
-        if self.q.capacity() < want {
-            self.q.reserve_exact(want - self.q.len());
-        }
+        let room = self.q.capacity();
+        self.limit = limit.min(room);
+        self.reserve = reserve.min(room - self.limit);
     }
 
     /// Take over `old`'s queue and clock into this FIFO, which was built on
     /// the control side for the new length and rate with room for all of
-    /// it: what [`retune`](Self::retune) and [`resize`](Self::resize) leave.
-    /// Allocates nothing.
-    pub(crate) fn transfer_from(&mut self, old: &mut EventFifo) {
-        debug_assert!(
-            self.q.capacity() - self.q.len() >= old.q.len(),
-            "the FIFO built for a carry holds the queue it takes"
-        );
-        self.q.extend(old.q.drain(..));
+    /// it: what a retune and a [`resize`](Self::resize) leave. Allocates
+    /// nothing. Should the room fall short, what does not fit is lost,
+    /// non-note-offs first (a note-off evicts the oldest of them, as
+    /// [`push`](Self::push) does): returns how many were lost, for the
+    /// caller to count.
+    pub(crate) fn transfer_from(&mut self, old: &mut EventFifo) -> usize {
+        let room = self.q.capacity();
+        let mut lost = 0;
+        while let Some(item) = old.q.pop_front() {
+            if self.q.len() < room {
+                self.q.push_back(item);
+            } else if item.1.is_note_off()
+                && let Some(i) = self.q.iter().position(|(_, x)| !x.is_note_off())
+            {
+                self.q.remove(i);
+                self.q.push_back(item);
+                lost += 1;
+            } else {
+                lost += 1;
+            }
+        }
         self.clock = old.clock;
+        lost
     }
 
     /// Every event still queued, oldest first.
@@ -394,6 +405,31 @@ mod tests {
         let mut out = vec![0.0; 4];
         longer.run(&[0.0; 4], &mut out, false);
         assert_eq!(out, vec![0.0, 0.0, 0.0, 0.0]);
+    }
+
+    /// A FIFO built with too little room takes what fits, evicts a
+    /// non-note-off for a note-off, counts every event it cannot keep and
+    /// never grows its queue.
+    #[test]
+    fn a_transfer_into_too_small_a_fifo_counts_its_loss_and_never_grows() {
+        let mut old = EventFifo::sized(Samples(64), 4, 8);
+        let queued: Vec<Event> = (0..4).map(|i| note(0, false, i)).collect();
+        old.push(&queued);
+        old.push(&[note(0, true, 10)]);
+        let mut new = EventFifo::sized(Samples(64), 4, 8);
+        // Room for three: shrink it by building one that holds three.
+        new.q = VecDeque::with_capacity(3);
+        let room = new.q.capacity();
+        assert!(room < 5);
+        let lost = new.transfer_from(&mut old);
+        assert_eq!(new.q.capacity(), room, "the queue did not grow");
+        assert_eq!(lost, 5 - room);
+        assert_eq!(new.q.len(), room);
+        assert!(old.q.is_empty());
+        assert!(
+            new.pending().any(|e| e.is_note_off()),
+            "the note-off evicted a note-on"
+        );
     }
 
     /// An event is delivered `len` frames later, in whichever block that is.

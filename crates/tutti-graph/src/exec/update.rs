@@ -43,7 +43,7 @@ impl Executor {
         }
     }
 
-    fn apply(&mut self, c: &mut Commit) {
+    pub(super) fn apply(&mut self, c: &mut Commit) {
         self.inbox.applied = c.seq;
         if let Some(prepare) = c.suspend {
             // Check every unit out, into the box, for the editor to
@@ -387,7 +387,8 @@ impl Executor {
                 }
                 RingFrom::Move { from } => {
                     let carried = old.rings.get_mut(from as usize).and_then(Option::take);
-                    move_ring(new.rings[i].as_mut(), carried, &mut st.spare_rings);
+                    let lost = move_ring(new.rings[i].as_mut(), carried, &mut st.spare_rings);
+                    self.dropped.charge_delay(plan, i as u32, lost as u64);
                 }
             }
         }
@@ -407,11 +408,21 @@ impl Executor {
                     new.event_fb[i] = fifo;
                 }
                 RingFrom::Move { from } => {
-                    let carried = old.event_fb.get_mut(from as usize).and_then(Option::take);
-                    if let (Some(n), Some(mut o)) = (new.event_fb[i].as_mut(), carried) {
-                        n.transfer_from(&mut o);
-                        st.spare_rings.push(Ring::Event(o));
-                    }
+                    let carried = old
+                        .event_fb
+                        .get_mut(from as usize)
+                        .and_then(Option::take)
+                        .map(Ring::Event);
+                    let mut target = new.event_fb[i].take().map(Ring::Event);
+                    let lost = move_ring(target.as_mut(), carried, &mut st.spare_rings);
+                    new.event_fb[i] = match target {
+                        Some(Ring::Event(f)) => Some(f),
+                        other => {
+                            debug_assert!(other.is_none(), "a feedback FIFO is an event FIFO");
+                            None
+                        }
+                    };
+                    self.dropped.charge_feedback(plan, i as u32, lost as u64);
                 }
             }
         }
@@ -619,7 +630,7 @@ impl Executor {
         // set since runs the serial walk until the next commit, which is
         // bit for bit the same render.
         if st.participants != self.pool.as_ref().map_or(0, |p| p.participants()) {
-            new.par = None;
+            st.spare_par = new.par.take();
         }
         new
     }
@@ -655,18 +666,25 @@ fn fill(to: &mut Vec<Event>, events: &[Event]) -> u32 {
 }
 
 /// `carried`, copied into `target`, the ring built for its new length: both
-/// go on, the old one to `spare`.
-fn move_ring(target: Option<&mut Ring>, carried: Option<Ring>, spare: &mut Vec<Ring>) {
+/// go on, the old one to `spare`. Returns how many events a FIFO that was
+/// built too small could not keep.
+fn move_ring(target: Option<&mut Ring>, carried: Option<Ring>, spare: &mut Vec<Ring>) -> usize {
     match (target, carried) {
         (Some(Ring::Audio(n)), Some(Ring::Audio(o))) => {
             n.transfer_from(&o);
             spare.push(Ring::Audio(o));
+            0
         }
         (Some(Ring::Event(n)), Some(Ring::Event(mut o))) => {
-            n.transfer_from(&mut o);
+            let lost = n.transfer_from(&mut o);
             spare.push(Ring::Event(o));
+            lost
         }
-        (_, Some(o)) => spare.push(o),
-        (_, None) => {}
+        (_, Some(o)) => {
+            debug_assert!(false, "a carried ring has a ring built for it");
+            spare.push(o);
+            0
+        }
+        (_, None) => 0,
     }
 }

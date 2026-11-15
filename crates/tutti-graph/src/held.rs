@@ -22,6 +22,12 @@ use tutti_ump::{Address, KeyBitset, KeyEvent, Lane, LaneSet, Protocol, Ump};
 use crate::event::{Event, EventKind};
 use crate::time::Offset;
 
+/// The most events closing one [`Held`] can take: a note off for each of the
+/// 2^16 keys a [`Key`](tutti_ump::Key) packs into and a pedal up for each
+/// [`Lane`]. The set is bounded by its type, so a buffer of this size takes
+/// any close whole.
+pub(crate) const MAX_CLOSES: usize = (u16::MAX as usize + 1) + Lane::COUNT;
+
 #[derive(Clone, Debug)]
 pub(crate) struct Held {
     keys: Box<KeyBitset>,
