@@ -16,7 +16,7 @@
 //! - **Filters** — `SvfFilterNode`, `LadderFilterNode` (both any width, one
 //!   coefficient solve shared across the channels) and `EqBandNode`.
 //! - **Crossover** — `CrossoverNode`, which makes `bands × channels` outputs from
-//!   `tutti_dsp::CrossoverFamily`, a 2 to 6 band Linkwitz-Riley 4th-order split (the
+//!   `tutti_dsp::CrossoverBank`, a 2 to 6 band Linkwitz-Riley 4th-order split (the
 //!   bands sum to flat magnitude; IIR, so not linear-phase and no latency). Each
 //!   crossover is an indexed `Cutoff` param (`UnitAddr::new(UnitParam::Cutoff, i)`).
 //! - **Delay** — `DelayNode` (any width, with a checked cross-feedback `Routing`),
@@ -67,8 +67,8 @@
 //! A `*Node` is the graph-facing node; the inner object some are built from,
 //! `Modulator`, carries no suffix, because it is not a node and
 //! can be used on its own. The algorithms are `tutti-dsp`'s (`tutti_dsp::DelayLine`,
-//! `tutti_dsp::CrossoverFamily`, …); this crate re-exports only the types in a node's
-//! signature: `SvfType`, `LadderType`, `Real`, `CrossoverError`,
+//! `tutti_dsp::CrossoverBank`, …); this crate re-exports only the types in a node's
+//! signature: `SvfType`, `LadderType`, `Lanes`, `CrossoverError`,
 //! `InterpolationMode` and `ShapeKind`.
 //!
 //! Nothing in this crate can fail: there is no `Error` type, and a node is ready
@@ -184,9 +184,9 @@
 //! - Filters: [`SvfFilterNode`] ([`SvfType`]), [`LadderFilterNode`]
 //!   ([`LadderType`]), [`EqBandNode`]; the coefficient solvers
 //!   [`SvfCoeffs::new`](tutti_dsp::SvfCoeffs::new) and
-//!   [`LadderCoeffs::new`](tutti_dsp::LadderCoeffs::new); [`Real`], the
-//!   `f32`/`f64` state type.
-//! - Crossover: [`CrossoverNode`], over `tutti_dsp::CrossoverFamily`, a 2 to 6 band
+//!   [`LadderCoeffs::new`](tutti_dsp::LadderCoeffs::new); the `f32`/`f64` state type
+//!   is `tutti_buffers::Float` with [`Lanes`].
+//! - Crossover: [`CrossoverNode`], over `tutti_dsp::CrossoverBank`, a 2 to 6 band
 //!   Linkwitz-Riley 4th-order split (`f64` state, solved on the stream's 16-frame grid), each
 //!   crossover frequency an indexed [`Cutoff`](tutti_types::UnitParam::Cutoff) param, with
 //!   [`CrossoverError`].
@@ -276,13 +276,14 @@ pub use tutti_dsp::ShapeKind;
 
 mod filter;
 pub use filter::{
-    CrossoverNode, EqBandNode, LadderFilterNode, NodeRecurrence, SvfFilterNode, SvfKernel,
+    CrossoverKernel, CrossoverNode, EqBandNode, LadderFilterNode, LadderKernel, SvfFilterNode,
+    SvfKernel,
 };
 // The types in the filter nodes' signatures stay reachable from here; the
 // algorithms behind them (`SvfCoeffs`, `LadderCoeffs`, `CrossoverModel`) are
 // `tutti-dsp`'s only.
 pub use tutti_dsp::{
-    CrossoverControls, CrossoverError, LadderControls, LadderType, Real, SvfControls, SvfType,
+    CrossoverControls, CrossoverError, LadderControls, LadderType, Lanes, SvfControls, SvfType,
 };
 
 mod dynamics;

@@ -133,7 +133,7 @@
 //!     Address::first(MidiChannel::FIRST),
 //!     Voice2::note_on(NoteNumber::of(60), NoteVelocity::new(0xC800)),
 //! ));
-//! assert_eq!(tx.queue(&[(Offset::ZERO, on)]), 1);
+//! assert_eq!(tx.queue(&[(Offset::ZERO, on)]).packets(), 1);
 //!
 //! let mut block = [(0, Ump([0; 4])); 8];
 //! assert_eq!(rx.poll_into(&mut block), 1);
@@ -229,6 +229,7 @@ mod outbound;
 mod output_plan;
 mod schedule;
 mod sync;
+mod taken;
 mod tempo_follower;
 #[cfg(test)]
 mod test_support;
@@ -265,6 +266,7 @@ pub use sync::{
     ClockEvent, ClockFollower, ClockKind, ClockPosition, ClockTransportState, MachineControlEvent,
     MachineControlFollower, MidiClockDecoder, MtcDecoder, SegmentFault,
 };
+pub use taken::Taken;
 pub use tempo_follower::{Followed, TempoFollower, TempoSource};
 pub use traits::MidiOut;
 // The counts a device's inlet keeps, as `DeviceInput::counts` returns them.

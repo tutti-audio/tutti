@@ -63,6 +63,14 @@ impl Rpn {
     /// note number on the channel.
     pub const PER_NOTE_PITCH_BEND_SENSITIVITY: Self = Self::new(U7::of(0), U7::of(7));
 
+    /// Registered Controller `0x20/0x22`, **Orchestral Mute Type** (M2-123
+    /// §8.1.1): the subrange of the value selects the mute.
+    pub const ORCHESTRAL_MUTE_TYPE: Self = Self::new(U7::of(0x20), U7::of(0x22));
+
+    /// Registered Controller `0x20/0x23`, **Orchestral Mute Amount** (M2-123
+    /// §8.1.2): from fully open to fully closed.
+    pub const ORCHESTRAL_MUTE_AMOUNT: Self = Self::new(U7::of(0x20), U7::of(0x23));
+
     /// The address of `bank` and `index`.
     #[inline]
     #[must_use]

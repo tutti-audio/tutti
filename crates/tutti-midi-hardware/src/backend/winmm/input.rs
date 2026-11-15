@@ -29,7 +29,7 @@ impl InputConnection for WinMmInput {
 ///
 /// # Errors
 ///
-/// [`Error::WinMm`](crate::Error::WinMm) from the port's opening, such as
+/// [`Error::Os`](crate::Error::Os) from the port's opening, such as
 /// `MMSYSERR_ALLOCATED` when another application holds it.
 pub(super) fn open(index: u32, mut producer: InputProducerHandle) -> Result<WinMmInput> {
     let died = Arc::new(AtomicBool::new(false));

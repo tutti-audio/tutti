@@ -2,7 +2,7 @@
 //! topology, so how a root of known or bare channels reaches a device or a
 //! file of which only the width is known lives here, once.
 
-use tutti_buffers::{Fold, FoldEnd, FoldError};
+use tutti_buffers::{Fold, FoldEnd, FoldError, FoldLevels};
 use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
 
 /// The generation of the graph root: each commit that changes the root's
@@ -119,6 +119,21 @@ pub fn fold_to_width(src: &ChannelTopology, dst: ChannelLayout) -> Result<Fold, 
 /// As [`Fold::between`] and [`Fold::by_index`], and [`FoldError::Unnamed`] as
 /// above.
 pub fn fold_to_topology(src: &ChannelTopology, dst: &ChannelTopology) -> Result<Fold, FoldError> {
+    fold_to_topology_with(src, dst, FoldLevels::default())
+}
+
+/// [`fold_to_topology`] with the downmix levels stated: where [`Fold::between`]
+/// is the fold, `levels` are its gains ([`Fold::spec`]). Channels placed by
+/// index have no levels.
+///
+/// # Errors
+///
+/// As [`fold_to_topology`].
+pub fn fold_to_topology_with(
+    src: &ChannelTopology,
+    dst: &ChannelTopology,
+    levels: FoldLevels,
+) -> Result<Fold, FoldError> {
     if let Some(channel) = src
         .positions()
         .and_then(|list| list.iter().position(|p| matches!(p, Speaker::Unknown(_))))
@@ -132,6 +147,6 @@ pub fn fold_to_topology(src: &ChannelTopology, dst: &ChannelTopology) -> Result<
     if src.is_unassigned() || src.ambisonic().is_some() || dst.is_unassigned() {
         Fold::by_index(src.width(), dst.width())
     } else {
-        Fold::between(src, dst)
+        Fold::spec(src, dst).levels(levels).build()
     }
 }

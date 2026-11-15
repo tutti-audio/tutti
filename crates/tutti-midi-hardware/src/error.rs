@@ -1,18 +1,32 @@
 //! The crate's [`Error`](enum@Error) and [`Result`].
 //!
-//! One enum for every OS edge. The platform arms ([`Error::CoreMidi`],
-//! [`Error::Alsa`], [`Error::WinMm`]) carry the raw OS status alongside the call that produced it,
-//! because that pair is what makes a driver failure diagnosable — a bare string
-//! loses the code a caller may want to match on.
+//! One enum for every OS edge. [`Error::Os`] carries the platform's own FFI
+//! error (the call that failed and the status it returned), because that pair
+//! is what makes a driver failure diagnosable — a bare string loses the code a
+//! caller may want to match on.
 
 use thiserror::Error;
+
+/// What a lookup did not find.
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[non_exhaustive]
+pub enum NotFound {
+    /// No device is present under this id: what a stale id resolves to.
+    #[error("no MIDI device {0}")]
+    Device(tutti_midi_device::DeviceId),
+
+    /// No endpoint answers to this id: a handle the OS has since retired, or
+    /// one this platform's backend never minted.
+    #[error("no MIDI endpoint {}", .0.raw())]
+    Endpoint(tutti_midi_device::EndpointId),
+}
 
 /// What can go wrong opening or driving an OS MIDI endpoint.
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
     /// A filesystem or descriptor error surfaced from `std::io`.
-    #[error("IO error: {0}")]
+    #[error("IO error")]
     Io(#[from] std::io::Error),
 
     /// Opening, configuring or connecting a port failed, with the backend's own
@@ -28,9 +42,9 @@ pub enum Error {
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
 
-    /// No device is present under this id: what a stale id resolves to.
-    #[error("no MIDI device {0}")]
-    NoDevice(tutti_midi_device::DeviceId),
+    /// What was asked for is not there: a stale or foreign id.
+    #[error(transparent)]
+    NotFound(#[from] NotFound),
 
     /// The device is present but does not go the way asked: an output opened
     /// as an input, or the reverse.
@@ -67,37 +81,12 @@ pub enum Error {
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
 
-    /// A CoreMIDI call returned a non-zero `OSStatus`.
-    #[error("CoreMIDI error: {operation} ({status})")]
-    CoreMidi {
-        /// The CoreMIDI call that failed, as a static label
-        /// (`"create input port"`, `"send event list"`).
-        operation: &'static str,
-        /// The `OSStatus` CoreMIDI returned. `-1` is the crate's own stand-in
-        /// for "the client was never created".
-        status: i32,
-    },
-
-    /// An alsa-lib call returned a negative error code.
-    #[error("ALSA error: {operation} ({code})")]
-    Alsa {
-        /// The alsa-lib function that failed, as a static label
-        /// (`"snd_seq_open"`, `"snd_seq_connect_to"`).
-        operation: &'static str,
-        /// alsa-lib's negative return, which is a negated `errno`. Rendered for
-        /// humans by `snd_strerror`.
-        code: i32,
-    },
-
-    /// A Windows Multimedia call returned a non-zero `MMRESULT`.
-    #[error("winmm error: {operation} ({code})")]
-    WinMm {
-        /// The winmm call that failed, as a static label
-        /// (`"midiInOpen"`, `"midiOutLongMsg"`).
-        operation: &'static str,
-        /// The `MMRESULT` winmm returned: an `MMSYSERR_*` or `MIDIERR_*` value.
-        code: u32,
-    },
+    /// A call into the platform's MIDI API failed: ALSA's, CoreMIDI's or
+    /// winmm's own error, with the call that failed and the status it
+    /// returned. Where the platform has no backend this is
+    /// [`Infallible`](std::convert::Infallible).
+    #[error(transparent)]
+    Os(#[from] crate::backend::OsError),
 
     /// Every slot for an input device is taken: a device is an event input of
     /// the graph's ingest node, and it has as many as the session was built

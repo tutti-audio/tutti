@@ -338,12 +338,13 @@ fn a_group_the_input_does_not_hear_is_refused() {
 struct Wire(Arc<Mutex<Vec<Ump>>>);
 
 impl MidiOut for Wire {
-    fn queue(&self, events: &[tutti_graph::UmpAt]) -> usize {
+    fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
+        let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
         self.0
             .lock()
             .unwrap()
             .extend(events.iter().map(|(_, ump)| *ump));
-        events.len()
+        tutti_midi_runtime::Taken::within(batch, batch.len())
     }
 }
 
