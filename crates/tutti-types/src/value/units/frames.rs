@@ -23,9 +23,9 @@ crate::ranged! {
     /// use tutti_types::{SamplePosition, SampleRate, SampleSpan, Seconds};
     ///
     /// let rate = SampleRate::of(48_000.0);
-    /// let delay = SampleSpan::from_seconds(Seconds(0.0105), rate).unwrap();
-    /// assert_eq!(delay.get(), 504.0);
-    /// assert_eq!(SamplePosition(1_000.0) - delay, SamplePosition(496.0));
+    /// let delay = SampleSpan::from_seconds(Seconds(0.25), rate).unwrap();
+    /// assert_eq!(delay.get(), 12_000.0);
+    /// assert_eq!(SamplePosition(20_000.0) - delay, SamplePosition(8_000.0));
     /// assert_eq!(SampleSpan::new(-1.0), None);
     /// ```
     #[repr(transparent)]
