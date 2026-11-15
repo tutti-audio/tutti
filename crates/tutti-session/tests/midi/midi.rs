@@ -762,12 +762,19 @@ fn two_devices_are_two_ports_and_one_leaving_takes_only_its_own() {
         "an ingest node and an inlet each"
     );
     roll(&s, 1_024);
-    assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), Instant::now()));
-    assert!(fake.send_input(EndpointId::from_raw(2), key(0, 64), Instant::now()));
+    // Both arrive at one instant, the second device's first: the merged order
+    // is the graph's `(offset, source)` and not the order of arrival.
+    let at = Instant::now();
+    assert!(fake.send_input(EndpointId::from_raw(2), key(0, 64), at));
+    assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), at));
     roll(&s, 8_192);
-    let mut notes: Vec<u8> = note_ons(&seen).iter().map(|n| n.1).collect();
-    notes.sort_unstable();
-    assert_eq!(notes, vec![60, 64], "both devices are heard");
+    let heard = note_ons(&seen);
+    assert_eq!(
+        heard.iter().map(|n| n.1).collect::<Vec<_>>(),
+        vec![60, 64],
+        "both devices are heard, on one frame, in the order their ports were declared"
+    );
+    assert_eq!(heard[0].0, heard[1].0, "one frame: {heard:?}");
 
     connect(&mut s, &["pads"]);
     blocks(&s, 2);
