@@ -35,9 +35,7 @@
 //!   ([`Error::Reprepare`]).
 
 use tutti_cpal::{AudioEngine, DeviceHost, DeviceSelector, TuttiDriver};
-use tutti_engine::TimerDriver;
-#[cfg(feature = "testing")]
-use tutti_engine::{OutputSpec, StreamDriver};
+use tutti_engine::{OutputSpec, StreamDriver, TimerDriver};
 use tutti_types::{ChannelLayout, SampleRate};
 
 use crate::clock::SystemEngine;
