@@ -234,6 +234,38 @@ fn a_command_the_transport_cannot_do_is_reported() {
     assert!(!s.playhead().playing());
 }
 
+/// **A segmented command acts when its string is whole, and a segment that does
+/// not belong is reported (RP-013 p.40)**: PLAY and STOP split across two
+/// COMMAND SEGMENTs play then stop once the last arrives; a later segment with
+/// no first one is a `MachineControlSegmentation(MissingFirst)`.
+#[test]
+fn segmented_commands_act_whole_and_a_stray_segment_is_reported() {
+    let (mut s, fake) = rig();
+    follow(&mut s);
+    command(&fake, 5, &[0x53, 0x02, 0x00, 0x02]);
+    let mut seen = Vec::new();
+    for _ in 0..40 {
+        seen.extend(pump(&mut s));
+    }
+    assert!(
+        seen.iter().any(|e| matches!(
+            e,
+            MidiEvent::MachineControlSegmentation(
+                tutti_midi_protocol::MmcSegmentError::MissingFirst
+            )
+        )),
+        "{seen:?}"
+    );
+    assert!(!s.playhead().playing());
+    // First (one to come) holds the PLAY, the last a second command.
+    command(&fake, 5, &[0x53, 0x02, 0x41, 0x02]);
+    command(&fake, 5, &[0x53, 0x02, 0x00, 0x7C]);
+    for _ in 0..40 {
+        pump(&mut s);
+    }
+    assert!(s.playhead().playing());
+}
+
 /// **MMC follows beside a Beat Clock follower** and takes no part of the tempo
 /// map: following both is allowed, the Beat Clock still owns the tempo, and a
 /// PLAY still plays.

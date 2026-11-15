@@ -530,6 +530,9 @@ impl MachineFollow {
                 MachineControlEvent::Ignored(command) => {
                     out.push(MidiEvent::MachineControlIgnored(command).into());
                 }
+                MachineControlEvent::Segmentation(error) => {
+                    out.push(MidiEvent::MachineControlSegmentation(error).into());
+                }
             }
         }
         actions
