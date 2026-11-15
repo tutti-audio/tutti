@@ -858,3 +858,30 @@ fn a_device_that_declares_property_exchange_does_not_nak_its_inquiries() {
         assert!(device.on_message(&pe_message(kind), now).is_empty());
     }
 }
+
+// A device that declares Property Exchange refuses, through its caller, what its
+// Responder does not serve: a Get, a Set or a Subscription Start is a message not
+// supported (M2-101 §5.11), and a reply is not an inquiry.
+#[test]
+fn an_inquiry_a_responder_did_not_accept_is_refused_with_a_nak() {
+    let (device, _, _) = device([OURS]);
+    for (kind, sub_id2) in [
+        (PeMessageKind::GET_INQUIRY, 0x34),
+        (PeMessageKind::SET_INQUIRY, 0x36),
+        (PeMessageKind::SUBSCRIPTION_INQUIRY, 0x38),
+    ] {
+        let Some(CiMessage::Nak { to, nak, .. }) =
+            device.refuse_property_exchange(&pe_message(kind))
+        else {
+            panic!("{kind:?} is NAKed");
+        };
+        assert_eq!(to, Muid::of(PEER));
+        assert_eq!(nak.nak_sub_id2.get(), sub_id2);
+        assert_eq!(nak.status_code, Nak::STATUS_MESSAGE_NOT_SUPPORTED);
+    }
+    assert!(
+        device
+            .refuse_property_exchange(&pe_message(PeMessageKind::GET_REPLY))
+            .is_none()
+    );
+}

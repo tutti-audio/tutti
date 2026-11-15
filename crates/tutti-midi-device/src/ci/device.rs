@@ -569,7 +569,7 @@ impl<R: FnMut() -> u32> CiDevice<R> {
     /// the caller's Responder does not serve its sender (M2-101 §5.11, Table 16),
     /// or `None` for any other message. A device that declares Property
     /// Exchange leaves its inquiries to a Responder: the caller sends this for
-    /// the ones the Responder did not accept.
+    /// the ones the Responder did not accept, a Subscription Start among them.
     #[must_use]
     pub fn refuse_property_exchange(&self, decoded: &Decoded) -> Option<CiMessage> {
         let Decoded::Message(CiMessage::PropertyExchange {
@@ -580,7 +580,14 @@ impl<R: FnMut() -> u32> CiDevice<R> {
         else {
             return None;
         };
-        (*to == self.muid && is_property_inquiry(message)).then(|| {
+        let subscription = matches!(
+            message,
+            PeCiMessage::Chunk {
+                kind: PeMessageKind::SUBSCRIPTION_INQUIRY,
+                ..
+            }
+        );
+        (*to == self.muid && (is_property_inquiry(message) || subscription)).then(|| {
             self.nak_message(
                 header.source,
                 message.sub_id2(),

@@ -429,11 +429,12 @@ impl ProfileInitiator {
     }
 
     /// Whether an inquiry has ended with the final Reply, so the table is the peer's
-    /// whole declaration (and the Reports since). A new inquiry keeps it until
-    /// the new final Reply, or drops it when the wait times out or is refused.
+    /// whole declaration (and the Reports since). It is not while an inquiry
+    /// waits: its Replies replace the table address by address, so the table is
+    /// then partly the new declaration and partly the old.
     #[must_use]
     pub fn is_known(&self) -> bool {
-        self.inquiry.answer().is_some()
+        matches!(self.inquiry, Handshake::Answered(()))
     }
 
     /// Asks again, to the Function Block: a new inquiry starts (one already waiting

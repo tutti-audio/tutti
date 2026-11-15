@@ -1340,9 +1340,9 @@ fn send(out: &mut OpenOutput, sends: &[(MidiGroup, CiMessage)]) -> Losses {
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroUsize;
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use std::sync::{Arc, Mutex};
     use tutti_midi_device::{CiCategories, DiscoveryData, EndpointId, PortDirection};
     use tutti_ump::{ManufacturerId, U7};
 
@@ -1670,5 +1670,106 @@ mod tests {
             Some(&PeData::LocalOn(PeLocalOn(false))),
             "the app's handle sees it"
         );
+    }
+
+    /// The id of a fake device.
+    fn device_id() -> DeviceId {
+        let (backend, counters) = FakeBackend::build_with(vec![], vec![], usize::MAX);
+        let inlets = tutti_midi_runtime::DeviceInlets::new(
+            NonZeroUsize::new(4).unwrap(),
+            tutti_graph::EventCapacity::of(64),
+            Duration::ZERO,
+        );
+        let session = MidiSession::open_over(backend, inlets).unwrap();
+        counters.plug(endpoint(7, "Wire"), PortDirection::Duplex);
+        session.outputs().first().expect("the device").id.clone()
+    }
+
+    // A request whose peer is gone when the poll would send it is reported with
+    // the reason, never dropped: for a Group with no device and for a peer the
+    // device no longer has, and for each of Profile, Process and Property Exchange.
+    #[test]
+    fn a_request_for_a_peer_that_is_gone_is_reported_not_dropped() {
+        use crate::properties::PropertyCall;
+        use tutti_midi_device::{
+            CiDeviceId, DataControl, ProfileId, ReportRequest, ReportScope, ResourceGet,
+            ResourceTarget,
+        };
+        let device = device_id();
+        let (mut out, _counters) = output();
+        let now = Instant::now();
+        let (mut running, _) = Running::start(&[G0], identity(), &mut entropy, now, &mut out);
+        let muid = Muid::of(0x0012_3456);
+        let profile = ProfileId::from_bytes([0x7E, 1, 0, 1, 1]).unwrap();
+        for group in [G1, G0] {
+            let id = PeerId { group, muid };
+            let mut changes = CiChanges::default();
+            running.start_switches(
+                &mut vec![ProfileSwitch {
+                    device: device.clone(),
+                    group,
+                    muid,
+                    profile,
+                    switch: Switch::Off(CiDeviceId::Group),
+                }],
+                now,
+                &mut out,
+                &mut changes,
+            );
+            assert_eq!(
+                changes.profiles,
+                [(id, ProfilesChange::PeerGone { profile })],
+                "{group:?}"
+            );
+            let peer = ReportPeer {
+                device: device.clone(),
+                group,
+                muid,
+            };
+            let request = ReportRequest::new(
+                DataControl::Full,
+                ReportScope::Group {
+                    controllers: tutti_midi_device::ChannelControllers::all(),
+                    notes: tutti_midi_device::NoteData::all(),
+                },
+            );
+            running.start_reports(
+                &mut vec![ReportAsk { peer, request }],
+                now,
+                &mut out,
+                &mut changes,
+            );
+            assert_eq!(
+                changes.process,
+                [(id, ProcessChange::PeerGone)],
+                "{group:?}"
+            );
+            let call = PropertyCall::Get(ResourceGet::new(
+                ResourceTarget::new(tutti_midi_device::PeResource::LocalOn).unwrap(),
+            ));
+            running.start_properties(
+                &mut vec![PropertyAsk {
+                    peer: PropertyPeer {
+                        device: device.clone(),
+                        group,
+                        muid,
+                    },
+                    call: call.clone(),
+                }],
+                now,
+                &mut out,
+                &mut changes,
+            );
+            assert_eq!(
+                changes.properties,
+                [(
+                    id,
+                    PropertyChange::PeerGone {
+                        call: Box::new(call)
+                    }
+                )],
+                "{group:?}"
+            );
+        }
     }
 }

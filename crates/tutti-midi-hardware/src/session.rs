@@ -175,11 +175,6 @@ impl DeviceQuery {
     }
 }
 
-const _: fn(MidiSession) = |session| {
-    fn is_send<T: Send>(_: T) {}
-    is_send(session);
-};
-
 /// What one [`MidiSession::poll`] found, for the device it names.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
@@ -612,7 +607,8 @@ impl MidiSession {
 
     /// The store the devices serve: what [`serve_properties`](Self::serve_properties)
     /// gave, as peers' Sets have changed it. Lock it for as short a time as a
-    /// read takes: the devices lock it inside [`poll`](Self::poll).
+    /// read takes: the devices lock it inside [`poll`](Self::poll), so a guard held on
+    /// the thread that calls `poll` deadlocks it.
     #[must_use]
     pub fn served_properties(&self) -> Arc<Mutex<ResourceStore>> {
         Arc::clone(&self.properties)

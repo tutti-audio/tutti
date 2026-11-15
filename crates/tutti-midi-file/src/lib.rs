@@ -124,7 +124,7 @@ use thiserror::Error;
 pub enum Error {
     /// The file could not be read or written at all — missing, unreadable, or
     /// the write failed.
-    #[error("IO error: {0}")]
+    #[error("IO error")]
     Io(#[from] std::io::Error),
 
     /// A write found something at its path (a file, a directory or a symlink)
@@ -158,7 +158,7 @@ pub enum Error {
     /// The tracks cannot make a file of the container asked for: an empty
     /// track list, a zero division, events out of order, an event the
     /// container cannot hold. The [`ConfigError`] says which and where.
-    #[error("invalid tracks: {0}")]
+    #[error("invalid tracks")]
     Config(#[from] ConfigError),
 
     /// An event pushed before the last of its track
@@ -167,7 +167,7 @@ pub enum Error {
     OutOfOrder(#[from] OutOfOrder),
 
     /// The file's tempo events do not make a tempo map.
-    #[error("the file's tempo events: {0}")]
+    #[error("the file's tempo events do not make a tempo map")]
     Tempo(#[from] tutti_tempo::TempoError),
 
     /// A Clip File that did not parse, read from bytes by

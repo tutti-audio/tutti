@@ -450,11 +450,6 @@ pub enum Verdict {
     Refuse,
 }
 
-const _: fn(Box<dyn StateDevice>) = |device| {
-    fn is_send<T: Send>(_: T) {}
-    is_send(device);
-};
-
 /// The device's say over the states its Responder is sent (M2-111 §3.3): whether a
 /// body is its own, and what revision and time an accepted one gets. It is `Send`:
 /// the Responder that holds it moves with the session that drives it.

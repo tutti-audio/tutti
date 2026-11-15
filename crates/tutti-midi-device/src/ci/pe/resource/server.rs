@@ -944,14 +944,15 @@ impl ResourceResponder {
 
     fn get(&self, request: &PeRequest) -> Result<Answer, Refusal> {
         let (target, encoding) = self.resolve(request)?;
-        let entry = self.store().entry(target.resource()).cloned();
-        if let Some(entry) = &entry
-            && !entry.can_get()
-        {
+        let (can_get, fc_on_get) = self
+            .store()
+            .entry(target.resource())
+            .map_or((true, false), |e| (e.can_get(), e.fc_on_get()));
+        if !can_get {
             return Err(refusal(PeStatus::NotAllowed, "the Resource cannot be got"));
         }
         let streamed = request.flow_control == PeFlowControl::On;
-        if streamed && !entry.as_ref().is_some_and(|e| e.fc_on_get()) {
+        if streamed && !fc_on_get {
             return Err(refusal(
                 PeStatus::FlowControlUnsupported,
                 "the Resource has no Flow Control on Get",
@@ -1436,9 +1437,12 @@ impl ResourceResponder {
                 message = one_chunk(&header, &body);
             }
         }
-        if message.is_none()
-            && let Some(data) = self.store().get(&target).cloned()
-        {
+        let held = if message.is_none() {
+            self.store().get(&target).cloned()
+        } else {
+            None
+        };
+        if let Some(data) = held {
             let (media_type, bytes) = data.to_wire();
             let header = update(PeUpdateCommand::Full, encoding, media_type);
             if let Ok(body) = encode_body(encoding, &bytes) {

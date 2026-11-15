@@ -2611,3 +2611,71 @@ fn a_new_muid_renews_the_responder() {
         .collect();
     assert_eq!(replies, [new]);
 }
+
+/// A session that serves a store whose entry says it can be subscribed to
+/// lists it as not subscribable (the session cannot tell a subscriber of a
+/// change), and refuses a Subscription Start with the status for a Resource that
+/// is not subscribable (status 405).
+#[test]
+fn a_served_resource_is_not_subscribable_and_a_subscription_start_is_refused() {
+    use tutti_midi_device::{PeAction, PeCall, PeGet, PeInitiator, PeOutcome, PeStatus};
+    let (mut wire, ours, _) = property_peer();
+    wire.session.serve_properties(subscribable());
+    let _ = polled(&mut wire, 55);
+
+    // The ResourceList the peer reads says canSubscribe is false.
+    let (mut far, first) = Far::new(ours, ResourceStore::new(), Some(wire.at(60)));
+    let _ = pump(&mut wire, &mut far, first, 60);
+    let list = far.events.iter().find_map(|e| match e {
+        ResourceEvent::ResourceList(list) => Some(list.clone()),
+        _ => None,
+    });
+    let list = list.expect("the ResourceList came");
+    let entry = list.entry(&PeResource::LocalOn).expect("LocalOn is listed");
+    assert!(!entry.can_subscribe());
+
+    // A Start sent anyway, past the Initiator's own check, gets the refusal.
+    let (mut init, actions) = PeInitiator::new(
+        peer(),
+        ours,
+        PeSettings {
+            capabilities: PeCapabilities::new(SimultaneousRequests::of(4)),
+            peer_max_sysex: MaxSysexSize::of(512),
+            reassembly: pe_limits(),
+            body_limit: BodyLimit::of(1 << 16),
+        },
+        wire.at(300),
+    );
+    let mut pending = actions;
+    let mut status = None;
+    let mut started = false;
+    for round in 0..40 {
+        let ms = 300 + 2 * round;
+        for action in std::mem::take(&mut pending) {
+            match action {
+                PeAction::Send(message) => say(&wire, GROUP_0, &message, ms),
+                PeAction::Capabilities(_) if !started => {
+                    started = true;
+                    let name = PeResource::LocalOn.name();
+                    let (_, sends) = init
+                        .start(PeCall::Subscribe(PeGet::new(name)), wire.at(ms))
+                        .unwrap();
+                    pending.extend(sends);
+                }
+                PeAction::Finished {
+                    outcome: PeOutcome::Failed(response),
+                    ..
+                } => status = Some(response.status()),
+                _ => {}
+            }
+        }
+        let _ = polled(&mut wire, ms + 1);
+        for (_, message) in ci_sent(&wire) {
+            pending.extend(init.on_message(&Decoded::Message(message), wire.at(ms + 1)));
+        }
+        if status.is_some() {
+            break;
+        }
+    }
+    assert_eq!(status, Some(PeStatus::NotAllowed));
+}
