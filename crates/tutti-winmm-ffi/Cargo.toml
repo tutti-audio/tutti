@@ -24,6 +24,11 @@ windows-sys = { version = "0.61", features = [
   "Win32_System_Threading",
 ] }
 
+[features]
+# The suites that open Windows' GS Wavetable Synth, which needs an audio
+# endpoint.
+synth-tests = []
+
 [target.'cfg(windows)'.dev-dependencies]
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 

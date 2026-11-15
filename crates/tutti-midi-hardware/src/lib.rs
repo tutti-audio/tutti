@@ -186,6 +186,9 @@
 //! - `sequencer-tests`: the suites that run `Devices` against the real ALSA
 //!   sequencer, with user-space clients as the devices. Linux only; needs the
 //!   `snd-seq` module and a readable `/dev/snd/seq`. Off by default.
+//! - `synth-tests`: the suites that open Windows' GS Wavetable Synth through
+//!   the winmm backend. Windows only; needs an audio endpoint, which a hosted
+//!   CI runner lacks. Off by default.
 //!
 //! ## Where it sits
 //!

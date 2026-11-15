@@ -717,6 +717,7 @@ impl Planner<'_> {
             "-p tutti-plugin-db --features serde --all-targets",
             "-p tutti-vst2-host --all-targets",
             "-p tutti-vst3-host -p tutti-plugin-server -p tutti-plugin-probe --lib --bins",
+            "-p tutti-winmm-ffi -p tutti-midi-hardware --features tutti-winmm-ffi/synth-tests,tutti-midi-hardware/synth-tests --all-targets",
         ] {
             win(a);
         }

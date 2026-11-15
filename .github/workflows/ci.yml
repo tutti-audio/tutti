@@ -159,13 +159,6 @@ jobs:
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.full == 'true'
     runs-on: windows-latest
     steps:
-      - name: DIAG audio
-        shell: powershell
-        run: |
-          Get-Service audiosrv, AudioEndpointBuilder | Format-Table -AutoSize
-          Get-CimInstance Win32_SoundDevice | Format-Table Name, Status -AutoSize
-          Get-PnpDevice -Class AudioEndpoint -ErrorAction SilentlyContinue | Format-Table FriendlyName, Status -AutoSize
-          exit 1
       - uses: actions/checkout@v7
         with:
           submodules: recursive
@@ -187,8 +180,12 @@ jobs:
       - name: Device features
         run: cargo clippy --locked -p tutti-cpal --features capture --all-targets -- -D warnings
       # The winmm MIDI backend against the runner's own winmm: no MIDI input,
-      # and the built-in GS Wavetable Synth output. Only these two crates, so
+      # and the built-in GS Wavetable Synth listed. Only these two crates, so
       # the build is the two and their dependencies.
+      # Opening the synth needs an audio endpoint, which the runner lacks:
+      # `synth-tests` is linted here and run on a Windows machine with sound.
+      - name: MIDI synth tests (lint)
+        run: cargo clippy --locked -p tutti-winmm-ffi -p tutti-midi-hardware --features tutti-winmm-ffi/synth-tests,tutti-midi-hardware/synth-tests --all-targets -- -D warnings
       - uses: taiki-e/install-action@nextest
       - name: MIDI backend tests
         run: cargo nextest run --locked -p tutti-winmm-ffi -p tutti-midi-hardware

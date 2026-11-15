@@ -15,6 +15,9 @@ categories = ["multimedia::audio", "hardware-support"]
 testing = []
 # The suites that need a real ALSA sequencer (`/dev/snd/seq`); Linux only.
 sequencer-tests = []
+# The suites that open Windows' GS Wavetable Synth, which needs an audio
+# endpoint; Windows only.
+synth-tests = []
 
 [lints]
 workspace = true

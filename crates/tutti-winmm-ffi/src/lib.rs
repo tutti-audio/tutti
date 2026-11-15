@@ -18,6 +18,11 @@
 //!
 //! Each `unsafe` block carries one `// SAFETY:` argument where it is introduced;
 //! `undocumented_unsafe_blocks` and `missing_safety_doc` are denied.
+//!
+//! ## Features
+//!
+//! - `synth-tests`: the suite that opens the GS Wavetable Synth. It needs an
+//!   audio endpoint, which a hosted CI runner lacks. Off by default.
 #![cfg(windows)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 // Every `unsafe` block says why it is sound, and every `unsafe fn` what it
