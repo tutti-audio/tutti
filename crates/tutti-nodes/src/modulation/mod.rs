@@ -10,8 +10,7 @@
 //!
 //! Both are width-generic, with per-channel phase offsets, and the LFO is state on the
 //! stream's clock, so what is heard does not depend on how the stream is cut into blocks:
-//! [`ModDelayNode`] is a [`FamilyNode`](crate::FamilyNode) and [`PhaserNode`] a
-//! [`KernelNode`](crate::KernelNode).
+//! [`ModDelayNode`] and [`PhaserNode`] are each a [`KernelNode`](crate::KernelNode).
 //!
 //! Consequence worth knowing: chorus and flanger take their depth in
 //! [`Seconds`](tutti_types::Seconds) of delay sweep, while the phaser's is a
@@ -19,6 +18,7 @@
 
 mod mod_delay;
 mod phaser;
+mod sweep_clock;
 
-pub use mod_delay::ModDelayNode;
+pub use mod_delay::{ModDelayKernel, ModDelayNode};
 pub use phaser::{PhaserKernel, PhaserNode};

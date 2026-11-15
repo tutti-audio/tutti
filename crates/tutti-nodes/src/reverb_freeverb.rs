@@ -1,0 +1,198 @@
+//! Freeverb, [`FreeverbNode`].
+//!
+//! [`FreeverbBank`] is the combs and all-passes over buffers views (the lines, the glides);
+//! this file holds the kernel that aims it, the cells and how the graph reaches them.
+
+use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_dsp::{FreeverbBank, FreeverbControls, FreeverbGlides};
+use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
+use tutti_types::{BusTopology, MaxBlock, Mix, SampleRate, Tail};
+
+use crate::kernel::{ControlLanes, Kernel, KernelNode};
+
+/// Freeverb as a graph node: mono in, stereo out, wet only.
+///
+/// A [`KernelNode`] over [`FreeverbKernel`], the combs and all-passes being
+/// [`FreeverbBank`]'s. Its blend with its input, for use as an insert, is the graph's mix
+/// (`Editor::set_mix`); it declares no latency. [`general_midi`](Self::general_midi) is the
+/// General MIDI reverb send of the SoundFont player.
+///
+/// # The controls
+///
+/// The ports are the room size and the damping, each a position on `0..1`
+/// ([`FreeverbControls`]). A cell that moves lands whole on the 32-frame grid and glides in
+/// the bank over 20 ms. The send declares no ports: its controls are the General MIDI
+/// figures.
+///
+/// # The tail
+///
+/// The declared tail is the ceiling: the room at its largest, whatever the damping (the
+/// loop's DC gain is the comb's feedback alone), and for the send the exact figure of its one
+/// room. The node narrows it each block to what the controls in force ring, and once the
+/// input has been silent for that long it cuts the room off and parks ([`KernelNode`]).
+pub type FreeverbNode = KernelNode<FreeverbKernel>;
+
+impl FreeverbNode {
+    /// A reverb whose room size and damping are cells, starting at `controls`. It has no rate
+    /// until the graph's `prepare` gives it one: it declares no latency and an unknown tail
+    /// before, and renders silence. Allocates: build it before the node goes live.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn live(controls: FreeverbControls) -> Self {
+        Self::with_kernel(
+            FreeverbKernel::new(None),
+            FreeverbSet { cells: true },
+            controls,
+        )
+    }
+
+    /// The General MIDI reverb send: room 0.5 and damping 0.5, mono in and stereo out, wet
+    /// only. Its controls are fixed, so its tail is the exact figure of that one room, and it
+    /// declares no cells.
+    #[must_use]
+    pub fn general_midi() -> Self {
+        let controls = FreeverbControls::GENERAL_MIDI;
+        Self::with_kernel(
+            FreeverbKernel::new(Some(controls)),
+            FreeverbSet { cells: false },
+            controls,
+        )
+    }
+}
+
+impl Default for FreeverbNode {
+    fn default() -> Self {
+        Self::general_midi()
+    }
+}
+
+/// Freeverb's controls: the room size and the damping, as positions on `0..1`; none for the
+/// General MIDI send.
+#[derive(Clone, Copy, Debug)]
+pub struct FreeverbSet {
+    cells: bool,
+}
+
+// Each lands whole: the bank's glides are the ramp.
+control_set! {
+    FreeverbSet(s): FreeverbControls = FreeverbControls::GENERAL_MIDI;
+    live: (if s.cells { 2 } else { 0 });
+    RoomSize => Mix = room { whole },
+    Damping => Mix = damp { whole };
+
+    fn defaults(&self) -> FreeverbControls {
+        FreeverbControls::GENERAL_MIDI
+    }
+}
+
+/// A [`FreeverbBank`] and its glides, once the rate is known.
+#[derive(Clone, Debug)]
+struct Running {
+    bank: FreeverbBank,
+    glides: FreeverbGlides,
+}
+
+/// Freeverb as a [`Kernel`]: a [`FreeverbBank`] sized at the prepared rate and the glides its
+/// controls are aimed through.
+///
+/// The bank's state is `f32`; the graph's blocks are too, and another sample format is
+/// converted at the edges.
+#[derive(Clone, Debug)]
+pub struct FreeverbKernel {
+    /// The one room of a send that has no cells: its tail is this room's exactly.
+    fixed: Option<FreeverbControls>,
+    /// `None` until [`prepare`](Kernel::prepare).
+    running: Option<Running>,
+    /// Whether the first retarget after `prepare` has landed.
+    landed: bool,
+}
+
+impl FreeverbKernel {
+    /// A reverb with no lines until `prepare` gives it a rate; `fixed` is the room of a send
+    /// whose controls never change.
+    fn new(fixed: Option<FreeverbControls>) -> Self {
+        Self {
+            fixed,
+            running: None,
+            landed: false,
+        }
+    }
+}
+
+impl Kernel for FreeverbKernel {
+    type Set = FreeverbSet;
+
+    /// A cell that moves reaches the render at a chunk's start, wherever the blocks fall.
+    const GRID: usize = FreeverbBank::CHUNK;
+
+    fn shape(&self) -> Shape {
+        let output = Bus::banded(BusTopology::STEREO, BusRole::Main, 1).expect("one band is a bus");
+        Shape::buses(
+            Buses::main(BusTopology::MONO),
+            Buses::NONE.with(output).expect("one bus"),
+        )
+        .with_cost(Cost::Moderate)
+    }
+
+    /// Sizes the lines at `rate` (Freeverb's tunings scaled to it): a re-prepare empties them.
+    fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
+        let bank = FreeverbBank::new(rate);
+        let glides = bank.glides();
+        self.running = Some(Running { bank, glides });
+        self.landed = false;
+    }
+
+    /// Silence, and the next design lands at once, as a fresh node's first does.
+    fn reset(&mut self) {
+        if let Some(r) = &mut self.running {
+            r.bank.reset();
+            r.glides.settle();
+        }
+        self.landed = false;
+    }
+
+    fn retarget(&mut self, controls: &FreeverbControls) {
+        let Some(r) = &mut self.running else { return };
+        r.bank.aim(&mut r.glides, controls);
+        if !self.landed {
+            r.glides.settle();
+            self.landed = true;
+        }
+    }
+
+    fn render<S: Float>(
+        &mut self,
+        input: Planes<'_, S>,
+        _: ControlLanes<'_, S>,
+        output: PlanesMut<'_, '_, S>,
+    ) {
+        if let Some(r) = &mut self.running {
+            r.bank.process(&mut r.glides, input, output);
+        }
+        // A design after a render is a move, which glides.
+        self.landed = true;
+    }
+
+    /// The bank's ceiling (the room at its largest), or the room's own for a send, or
+    /// [`Tail::Unbounded`] when that is past what a graph takes as a finite figure
+    /// ([`MAX_NODE_TAIL`]).
+    fn tail(&self) -> Tail {
+        let Some(r) = &self.running else {
+            return Tail::Unknown;
+        };
+        let tail = self
+            .fixed
+            .as_ref()
+            .map_or_else(|| r.bank.tail(), |c| r.bank.tail_of(c));
+        match tail {
+            Tail::Finite(n) if n > MAX_NODE_TAIL => Tail::Unbounded,
+            tail => tail,
+        }
+    }
+
+    fn tail_of(&mut self, controls: &FreeverbControls) -> Tail {
+        self.running
+            .as_ref()
+            .map_or(Tail::Unknown, |r| r.bank.tail_of(controls))
+    }
+}

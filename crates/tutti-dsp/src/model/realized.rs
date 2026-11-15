@@ -208,12 +208,6 @@ impl<R: Recurrence> Realized<R> {
         }
     }
 
-    /// The recurrence, its coefficients and its state, for the tests.
-    #[cfg(test)]
-    pub(crate) fn parts_mut(&mut self) -> (&R, &mut R::Coeffs, &mut R::State) {
-        (&self.recurrence, &mut self.coeffs, &mut self.state)
-    }
-
     /// Sizes the runner for `setup`, from the worst case `capacity`. Control side;
     /// allocates. A runner never inspects a member to allocate.
     pub fn prepare(&mut self, capacity: &R::Capacity, setup: &Setup) {
