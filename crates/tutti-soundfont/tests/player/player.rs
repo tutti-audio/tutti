@@ -910,11 +910,10 @@ fn per_note_pitch(note: u8, hcu: u32) -> Voice2 {
     }
 }
 
-fn management(note: u8, detach: bool, reset: bool) -> Voice2 {
+fn management(note: u8, management: tutti_ump::PerNoteManagement) -> Voice2 {
     Voice2::PerNoteManagement {
         note: tutti_ump::NoteNumber::of(note),
-        detach,
-        reset,
+        management,
     }
 }
 
@@ -956,7 +955,7 @@ fn a_detached_note_no_longer_follows_its_per_note_pitch() {
         "{followed}/{plain}"
     );
     let detached = crossings_after(|s| {
-        s.voice2(0, management(69, true, false));
+        s.voice2(0, management(69, tutti_ump::PerNoteManagement::Detach));
         s.voice2(0, per_note_pitch(69, 81));
     });
     assert!(
@@ -1004,7 +1003,7 @@ fn a_reset_per_note_pitch_is_forgotten_by_the_next_note() {
     let reset = crossings(
         |s| {
             s.voice2(0, per_note_pitch(69, 81));
-            s.voice2(0, management(69, false, true));
+            s.voice2(0, management(69, tutti_ump::PerNoteManagement::Reset));
         },
         8192,
     ) as f64;
@@ -1014,7 +1013,7 @@ fn a_reset_per_note_pitch_is_forgotten_by_the_next_note() {
     let plain = crossings_after(|_| {});
     let playing = crossings_after(|s| {
         s.voice2(0, per_note_pitch(69, 81));
-        s.voice2(0, management(69, false, true));
+        s.voice2(0, management(69, tutti_ump::PerNoteManagement::Reset));
     });
     assert!(
         (0.95..1.05).contains(&(playing / plain)),

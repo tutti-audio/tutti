@@ -34,8 +34,8 @@ use tutti_soundfont::{Polyphony, Settings, SoundFontUnit};
 use tutti_types::Samples;
 use tutti_ump::{
     Address, Attribute, Bank, CCNumber, Data128, Flex, Message, MidiChannel, MidiGroup, NoteNumber,
-    NoteVelocity, RegisteredPerNoteController, Stream, Sysex7Packet, SysexStatus, System, U7, U14,
-    Ump, Utility, Voice1, Voice2,
+    NoteVelocity, PerNoteManagement, RegisteredPerNoteController, Stream, Sysex7Packet,
+    SysexStatus, System, U7, U14, Ump, Utility, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
 
@@ -273,8 +273,7 @@ fn soundfont_every_decoded_message_is_allocation_free() {
         }),
         m2(Voice2::PerNoteManagement {
             note,
-            detach: false,
-            reset: true,
+            management: PerNoteManagement::Reset,
         }),
         m2(Voice2::Registered {
             bank: U7::of(0),

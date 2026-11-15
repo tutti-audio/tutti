@@ -6,10 +6,10 @@
 //! consumes.
 //!
 //! `vbap_static` holds the source still, warmed up for two seconds of audio
-//! first so the 50 ms de-zipper has reached its fixed point (a shorter warmup
-//! measures the tail of the initial glide instead); `vbap_moving` writes a new
-//! bearing every block, which keeps the ramp permanently in flight — the case
-//! where the gain vector genuinely changes inside a block. Both feed a stereo
+//! first so the 50 ms bearing glide has landed (a shorter warmup measures the
+//! tail of the initial glide instead); `vbap_moving` writes a new bearing every
+//! block, which keeps the glide permanently in flight — the case where the
+//! gain vector genuinely changes between grid points. Both feed a stereo
 //! pair at the default width, the branch that solves two virtual sources.
 //!
 //! The panner is a graph node, called by hand through
@@ -23,10 +23,10 @@ use tutti_graph::ParamNode;
 use tutti_graph::contract::Direct;
 use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
-use tutti_types::{Azimuth, ChannelLayout, ChannelTopology, Elevation, SampleRate};
+use tutti_types::{Azimuth, Bed, Elevation, SampleRate};
 
-/// Warmup before measuring, in frames: two seconds at 48 kHz, 40 time
-/// constants of the de-zipper, so a held source is settled bit for bit.
+/// Warmup before measuring, in frames: two seconds at 48 kHz, 40 glide
+/// lengths, so a held source has landed.
 const WARMUP_FRAMES: usize = 96_000;
 
 /// Deterministic broadband input: a cheap LCG, so the bench needs no `rand`.
@@ -44,12 +44,14 @@ fn bench(c: &mut Criterion) {
     for moving in [false, true] {
         let name = if moving { "vbap_moving" } else { "vbap_static" };
         let mut g = c.benchmark_group(name);
-        for (speakers, block) in [(2u16, 64usize), (6, 64), (2, 1024), (6, 1024)] {
+        for (bed, speakers, block) in [
+            (Bed::Stereo, 2u16, 64usize),
+            (Bed::Surround51, 6, 64),
+            (Bed::Stereo, 2, 1024),
+            (Bed::Surround51, 6, 1024),
+        ] {
             g.throughput(Throughput::Elements(block as u64));
-            let node = VbapPannerNode::for_topology(&ChannelTopology::assumed(
-                ChannelLayout::from(speakers),
-            ))
-            .unwrap();
+            let node = VbapPannerNode::new(bed).unwrap();
             let params = node.param_set();
             aim(&params, Azimuth(20.0), Elevation::LEVEL);
             let mut d = Direct::new(node, SampleRate::SR_48K, block);
