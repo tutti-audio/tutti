@@ -17,6 +17,14 @@
 //! taps stay within 4, 16, 9 and 81 (`2^n` per stage, the binomial weights of the taps); the
 //! resonance and the drive move freely there, since they act only through `u`. The state is
 //! `f32` in one of the two, so a rounding factor of 1.001.
+//!
+//! **The crossover's bound.** A section is a trapezoidal state-variable filter, and for a
+//! gain that moves anywhere in `[0, G]`, `G = tan(0.499 pi)`, at every sample, its taps are within
+//! `T` times its input's bound (`tutti_fixtures::tpt::tpt_section_bound`, derived in the docs
+//! of `tutti-dsp`'s crossover state). A band of `n` splits is at most `2 n` sections in series,
+//! so each band stays within `T^(2 n)` of the input's peak, 0.5 here (with the `f32` factor
+//! 1.001). The sweep covers the whole range: a split at 1 Hz, at the cap, a square between
+//! them on every grid point, and values the node holds or clamps.
 
 use tutti_graph::contract::Direct;
 use tutti_graph::{Node, ParamNode, Prepare};
@@ -289,28 +297,50 @@ fn a_forked_ladder_and_crossover_are_allocation_free() {
     assert!(peak.is_some(), "finite");
 }
 
-/// The splits a moving crossover visits: from 50 Hz to 12 kHz, and values the node holds at
-/// the last good one (not a number, an infinity).
-const SPLITS: [f32; 9] = [
-    50.0, 100.0, 400.0, 1_000.0, 3_000.0, 6_000.0, 12_000.0, NAN, INF,
+/// The splits a moving crossover visits: from the 1 Hz floor to the cap, and values the node
+/// holds at the last good one (not a number, an infinity) or clamps (zero, negative, far over
+/// Nyquist).
+const SPLITS: [f32; 12] = [
+    1.0, 50.0, 400.0, 1_000.0, 12_000.0, 23_999.0, 1.0e9, 0.0, -5.0, NAN, INF, 24_000.0,
 ];
 
+/// The frames a design takes to arrive, and so the grid a square lane switches on.
+const GRID: usize = 16;
+
+/// The crossover's lanes: the shapes of [`lane`], and a square that switches between the floor
+/// and the cap at every grid point (`SHAPES`).
+fn crossover_lane(shape: usize) -> Vec<f32> {
+    if shape == SHAPES {
+        (0..FRAMES)
+            .map(|i| {
+                if (i / GRID).is_multiple_of(2) {
+                    1.0
+                } else {
+                    23_952.0
+                }
+            })
+            .collect()
+    } else {
+        lane(shape, 1.0, 23_952.0, 1.0e9)
+    }
+}
+
 /// The crossover at every band count and widths 1, 2 and 5 (30 of the 32 channels a rig
-/// drives at 6 bands), every split cell moving across 50 Hz to 12 kHz out of order each
-/// block, every lane shape on every split, with `reset`, `prepare` and blocks of every odd
-/// length. The bands are finite.
-///
-/// No bound on the peak is asserted: a band's l1 bound (the next test) covers a design held,
-/// and the transposed direct form II state is not bounded under coefficient switching
-/// between distant splits.
+/// drives at 6 bands), every split cell moving across 1 Hz to the cap (and the hostile values)
+/// out of order each block, every lane shape on every split, a square between the ends on every
+/// grid point among them, with `reset`, `prepare` and blocks of every odd length. The bands are
+/// finite and within the bound derived above.
 #[test]
 fn the_crossover_corners_are_allocation_free_with_every_split_moving() {
+    let section =
+        tutti_fixtures::tpt::tpt_section_bound((core::f64::consts::PI * 0.499).tan() * 1.001);
     for bands in 2..=6usize {
+        let bound = 0.5 * 1.001 * section.tap.powi(2 * (bands as i32 - 1));
         for width in [1u16, 2, 5] {
             if usize::from(width) * bands > tutti_graph::contract::RIG_MAX_CHANNELS {
                 continue;
             }
-            for shape in 0..SHAPES {
+            for shape in 0..=SHAPES {
                 let initial: Vec<Hz> = (0..bands - 1)
                     .map(|i| Hz(150.0 * 3f32.powi(i as i32)))
                     .collect();
@@ -319,7 +349,7 @@ fn the_crossover_corners_are_allocation_free_with_every_split_moving() {
                 let mut rig = Direct::new(node, SR, FRAMES);
                 fill(&mut rig);
                 for k in 0..bands - 1 {
-                    rig.feed(k, Some(&lane(shape, 50.0, 12_000.0, 6_000.0)));
+                    rig.feed(k, Some(&crossover_lane(shape)));
                 }
                 let outs = usize::from(width) * bands;
                 let peak = walk(&mut rig, SR, 240, outs, |i| {
@@ -327,10 +357,11 @@ fn the_crossover_corners_are_allocation_free_with_every_split_moving() {
                         let hz = SPLITS[(i + 3 * k) % SPLITS.len()];
                         set.set(UnitAddr::new(UnitParam::Cutoff, k as u8), hz);
                     }
-                });
+                })
+                .unwrap_or_else(|| panic!("{bands} bands width {width} lanes {shape}: not finite"));
                 assert!(
-                    peak.is_some(),
-                    "{bands} bands width {width} lanes {shape}: not finite"
+                    f64::from(peak) <= bound,
+                    "{bands} bands width {width} lanes {shape}: {peak} over {bound}"
                 );
             }
         }
