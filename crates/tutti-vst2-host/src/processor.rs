@@ -130,7 +130,9 @@ impl Vst2Processor {
     }
 
     /// What the rejoin keeps of the audio side, and drops the rest of.
-    pub(crate) fn into_audio(self) -> AudioSide {
+    pub(crate) fn into_audio(mut self) -> AudioSide {
+        // A deactivation is a discontinuity of the plugin's output.
+        self.midi.reset_out();
         AudioSide {
             time_info: self.time_info,
             midi: self.midi,
@@ -520,6 +522,7 @@ impl Processor for Vst2Processor {
     /// had selected are sent in full again.
     fn reset(&mut self) {
         self.midi.send.reset_midi();
+        self.midi.reset_out();
         self.render.stop_process();
     }
 }

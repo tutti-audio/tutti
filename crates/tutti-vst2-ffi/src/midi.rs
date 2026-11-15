@@ -19,9 +19,9 @@
 
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
-use tutti_midi_protocol::{Narrower, widen_bytes};
+use tutti_midi_protocol::{Narrower, Translator};
 use tutti_plugin_types::WireMidi;
-use tutti_ump::{Message, MidiGroup, Ump};
+use tutti_ump::{Message, MidiGroup, Ump, parse_exact};
 
 /// A block's plugin-to-host MIDI, reserved once and reused.
 pub type MidiEventVec = Vec<WireMidi>;
@@ -51,6 +51,10 @@ pub struct MidiIo {
     room: usize,
     /// Events dropped because `out` was full, since load.
     out_overflow: u64,
+    /// Translates the plugin's MIDI 1.0 output into UMP, keeping its
+    /// parameter-number and bank runs across blocks: VST2 has one output
+    /// stream, so one translator.
+    translator: Translator,
 }
 
 impl std::fmt::Debug for MidiIo {
@@ -77,6 +81,7 @@ impl MidiIo {
             out_rx,
             out,
             out_overflow: 0,
+            translator: Translator::new(),
         }
     }
 
@@ -88,14 +93,30 @@ impl MidiIo {
 }
 
 impl MidiIo {
+    /// Forgets the output's parameter-number and bank runs, sending nothing: the
+    /// plugin's output has a discontinuity (a reset, a deactivation).
+    pub fn reset_out(&mut self) {
+        self.translator.reset();
+    }
+
     /// Moves everything in the plugin→host inbox into [`out`](Self::out), in
-    /// order, for the piece of a block that starts `start` frames into it: the
+    /// order, each MIDI 1.0 message through the output's translator (a message
+    /// that ends no run is absorbed), for the piece of a block that starts `start` frames into it: the
     /// plugin's offsets are relative to its call, the returned ones to the
     /// block. Allocation-free: `out` is reserved for the inbox's whole
-    /// capacity at construction, so draining a full inbox cannot grow it.
+    /// capacity at construction, so draining a full inbox cannot grow it. A
+    /// parameter run (select, Data Entry MSB) with no LSB waits for one: the
+    /// translator never flushes a live output, which has no end (M2-104
+    /// Appendix D.3.3).
     pub fn drain_from(&mut self, start: usize) {
         let start = u32::try_from(start).unwrap_or(u32::MAX);
         while let Some(ev) = self.out_rx.pop() {
+            // Translated before the room check: the translator sees every packet
+            // of the stream, so a run whose data entry arrives while the list is
+            // full still assembles for the block after.
+            let Some(ump) = self.translator.translate(ev.ump) else {
+                continue;
+            };
             // Never past the reservation: a split block drains once a piece,
             // and growing here would allocate on the audio thread.
             if self.out.len() >= self.room {
@@ -104,20 +125,22 @@ impl MidiIo {
             }
             self.out.push(WireMidi {
                 offset: ev.offset.saturating_add(start),
-                ..ev
+                ump,
             });
         }
     }
 }
 
-/// Parses a VST2 `crate::api::MidiEvent` (MIDI 1.0 wire bytes) into a Tutti
-/// UMP [`WireMidi`]. Tags the event with the original `delta_frames`.
+/// Parses a VST2 `crate::api::MidiEvent` (MIDI 1.0 wire bytes) into a MIDI 1.0
+/// [`WireMidi`], tagged with the original `delta_frames`. The packet stays
+/// MIDI 1.0: [`MidiIo::drain_from`] runs it through the output's translator,
+/// which needs the stream in order (RPN, NRPN and Bank Select span messages).
 pub fn to_midi(event: &crate::api::MidiEvent) -> Option<WireMidi> {
     let frame = event.delta_frames.max(0) as u32;
-    // Widen the MIDI-1 message to Channel Voice 2 at this edge, so the engine
-    // sees one vocabulary regardless of source (a Note On at velocity 0 is a
-    // Note Off). System messages pass through unchanged.
-    widen_bytes(MidiGroup::FIRST, &event.midi_data).map(|ump| WireMidi { offset: frame, ump })
+    parse_exact(MidiGroup::FIRST, &event.midi_data).map(|message| WireMidi {
+        offset: frame,
+        ump: Ump::from(message),
+    })
 }
 
 /// Serializes a Tutti UMP [`WireMidi`] to a VST2 `crate::api::MidiEvent`.
@@ -635,6 +658,50 @@ mod tests {
             assert_eq!(io.out[255].offset, 255, "in order");
         }
     }
+    /// **The translator sees every packet, whether or not the list has room for
+    /// what it makes**: an RPN run whose data entry arrives while the list is
+    /// full is counted as lost, and the selection it made still holds for the
+    /// run after (M2-104 Appendix D.3.3, a selected parameter stays selected).
+    #[test]
+    fn a_run_through_a_full_list_still_assembles() {
+        let cc =
+            |controller: u32, value: u32| Ump([0x20B0_0000 | controller << 8 | value, 0, 0, 0]);
+        let inbox = Arc::new(ArrayQueue::new(4));
+        let mut io = MidiIo::new(Arc::clone(&inbox));
+        // The list is full of notes, then the run (select, MSB, LSB) arrives.
+        for i in 0..4 {
+            inbox
+                .push(wire(Ump([0x2090_3C40, 0, 0, 0]), i))
+                .expect("room");
+        }
+        io.drain_from(0);
+        assert_eq!(io.out.len(), 4);
+        for packet in [cc(101, 0), cc(100, 0), cc(6, 12), cc(38, 0)] {
+            inbox.push(wire(packet, 0)).expect("room");
+        }
+        io.drain_from(0);
+        assert_eq!(io.out.len(), 4, "no room for the controller");
+        assert_eq!(io.out_overflow(), 1, "which is counted");
+        // The next block: RPN 0/0 is still selected, so a new value is one
+        // Registered Controller (7 semitones, zero-extended, M2-115 4.1).
+        io.out.clear();
+        for packet in [cc(6, 7), cc(38, 0)] {
+            inbox.push(wire(packet, 0)).expect("room");
+        }
+        io.drain_from(0);
+        let [event] = io.out[..] else {
+            panic!("expected one controller, got {:?}", io.out);
+        };
+        let Ok(Message::Midi2(_, tutti_ump::Voice2::Registered { value, .. })) = event.ump.decode()
+        else {
+            panic!(
+                "expected a Registered Controller, got {:?}",
+                event.ump.decode()
+            );
+        };
+        assert_eq!(value.get(), 7 << 25);
+    }
+
     /// **A split block's pieces cannot grow the MIDI-out list**: each piece
     /// drains a full inbox, the list holds one inbox's worth, and what does not
     /// fit is counted, not pushed. Inside the no-alloc gate.
@@ -845,16 +912,19 @@ mod tests {
         }
     }
 
-    /// A plugin-emitted MIDI-1 CC must arrive as MIDI-2 Channel Voice 2, not
-    /// CV1: the engine sees one vocabulary regardless of source (as the
-    /// hardware input path's widening does).
+    /// A plugin-emitted MIDI-1 CC arrives as MIDI-2 Channel Voice 2, not
+    /// CV1, once the output's translator has it: the engine sees one
+    /// vocabulary regardless of source (as the hardware input path's does).
     #[test]
     fn inbound_cc_promotes_to_cv2() {
         use tutti_ump::{Message, Voice2};
 
         // 0xB1 = CC on channel 1, controller 74, value 100.
         let midi = to_midi(&api_from_bytes([0xB1, 74, 100])).expect("CC decodes");
-        match midi.ump.decode().expect("valid UMP") {
+        let ump = Translator::new()
+            .translate(midi.ump)
+            .expect("a CC outside a run is sent");
+        match ump.decode().expect("valid UMP") {
             Message::Midi2(address, Voice2::ControlChange { controller, value }) => {
                 assert_eq!(address.channel, MidiChannel::of(1));
                 assert_eq!(controller, CCNumber::of(74));

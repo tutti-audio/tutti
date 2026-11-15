@@ -1,6 +1,6 @@
 //! [`Routing`]: which channel's delayed tap recirculates into which channel's line.
 
-use tutti_types::BusTopology;
+use tutti_types::{Amplitude, BusTopology, Gain};
 
 /// The widest routing: a bus's channel count.
 pub(crate) const MAX_WIDTH: usize = tutti_types::MAX_CHANNELS;
@@ -26,7 +26,7 @@ pub(crate) const MAX_WIDTH: usize = tutti_types::MAX_CHANNELS;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Routing {
     input: BusTopology,
-    weights: [[f32; MAX_WIDTH]; MAX_WIDTH],
+    weights: [[Gain; MAX_WIDTH]; MAX_WIDTH],
 }
 
 /// A refused routing.
@@ -51,7 +51,7 @@ pub enum RoutingError {
         /// The column, the channel the tap is of.
         column: usize,
         /// The refused weight.
-        weight: f32,
+        weight: Gain,
     },
     /// A row's absolute weights sum past 1 ([`Routing::normalized`] scales it down).
     #[error("row {row} sums to {sum}, past 1")]
@@ -59,7 +59,7 @@ pub enum RoutingError {
         /// The row.
         row: usize,
         /// The sum of its absolute weights.
-        sum: f32,
+        sum: Amplitude,
     },
     /// The routing is for another bus than the delay's.
     #[error("a routing for {routing} channels on a {family}-channel delay")]
@@ -78,7 +78,7 @@ impl Routing {
     pub const fn none(input: BusTopology) -> Self {
         Self {
             input,
-            weights: [[0.0; MAX_WIDTH]; MAX_WIDTH],
+            weights: [[Gain::SILENT; MAX_WIDTH]; MAX_WIDTH],
         }
     }
 
@@ -86,8 +86,8 @@ impl Routing {
     #[must_use]
     pub const fn swap() -> Self {
         let mut r = Self::none(BusTopology::STEREO);
-        r.weights[0][1] = 1.0;
-        r.weights[1][0] = 1.0;
+        r.weights[0][1] = Gain::UNITY;
+        r.weights[1][0] = Gain::UNITY;
         r
     }
 
@@ -100,7 +100,7 @@ impl Routing {
         let n = r.width();
         if n > 1 {
             for c in 0..n {
-                r.weights[c][(c + n - 1) % n] = 1.0;
+                r.weights[c][(c + n - 1) % n] = Gain::UNITY;
             }
         }
         r
@@ -114,13 +114,16 @@ impl Routing {
     ///
     /// [`RoutingError::Length`], [`NotFinite`](RoutingError::NotFinite) or
     /// [`Row`](RoutingError::Row), the first found.
-    pub fn new(input: BusTopology, matrix: &[f32]) -> Result<Self, RoutingError> {
+    pub fn new(input: BusTopology, matrix: &[Gain]) -> Result<Self, RoutingError> {
         let mut r = Self::checked(input, matrix)?;
         let n = r.width();
         for (c, row) in matrix.chunks(n).enumerate() {
-            let sum: f32 = row.iter().map(|w| w.abs()).sum();
+            let sum: f32 = row.iter().map(|w| w.get().abs()).sum();
             if sum > 1.0 {
-                return Err(RoutingError::Row { row: c, sum });
+                return Err(RoutingError::Row {
+                    row: c,
+                    sum: Amplitude(sum),
+                });
             }
             r.weights[c][..n].copy_from_slice(row);
         }
@@ -134,12 +137,12 @@ impl Routing {
     /// # Errors
     ///
     /// [`RoutingError::Length`] or [`NotFinite`](RoutingError::NotFinite).
-    pub fn normalized(input: BusTopology, matrix: &[f32]) -> Result<Self, RoutingError> {
+    pub fn normalized(input: BusTopology, matrix: &[Gain]) -> Result<Self, RoutingError> {
         let mut r = Self::checked(input, matrix)?;
         let n = r.width();
         for (c, row) in matrix.chunks(n).enumerate() {
-            let sum: f32 = row.iter().map(|w| w.abs()).sum();
-            let scale = if sum > 1.0 { 1.0 / sum } else { 1.0 };
+            let sum: f32 = row.iter().map(|w| w.get().abs()).sum();
+            let scale = Gain::new(if sum > 1.0 { 1.0 / sum } else { 1.0 });
             for (j, &w) in row.iter().enumerate() {
                 r.weights[c][j] = w * scale;
             }
@@ -148,7 +151,7 @@ impl Routing {
     }
 
     /// `none(input)` after the length and finiteness of `matrix` are checked.
-    fn checked(input: BusTopology, matrix: &[f32]) -> Result<Self, RoutingError> {
+    fn checked(input: BusTopology, matrix: &[Gain]) -> Result<Self, RoutingError> {
         let r = Self::none(input);
         let width = r.width();
         if matrix.len() != width * width {
@@ -158,7 +161,7 @@ impl Routing {
                 got: matrix.len(),
             });
         }
-        if let Some(i) = matrix.iter().position(|w| !w.is_finite()) {
+        if let Some(i) = matrix.iter().position(|w| !w.get().is_finite()) {
             return Err(RoutingError::NotFinite {
                 row: i / width,
                 column: i % width,
@@ -183,17 +186,17 @@ impl Routing {
     /// How much of channel `from`'s tap feeds channel `to`'s line: 0 for a channel
     /// that is not on the bus.
     #[must_use]
-    pub fn weight(&self, to: usize, from: usize) -> f32 {
+    pub fn weight(&self, to: usize, from: usize) -> Gain {
         if to < MAX_WIDTH && from < MAX_WIDTH {
             self.weights[to][from]
         } else {
-            0.0
+            Gain::SILENT
         }
     }
 
     /// Whether channel `to` is fed by no tap.
     #[must_use]
     pub fn is_none(&self) -> bool {
-        self.weights.iter().flatten().all(|&w| w == 0.0)
+        self.weights.iter().flatten().all(|&w| w == Gain::SILENT)
     }
 }

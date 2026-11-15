@@ -292,14 +292,19 @@ pub use measured::{
 pub use metadata::{
     BusChannels, Layout, LoadedPlugin, PluginBus, PluginBuses, PluginTail, Processing,
 };
-pub use midi::{MIDI_STACK_CAPACITY, MidiEventVec, RT_MIDI_CAPACITY, RtMidiEvents, WireMidi};
+pub use midi::{
+    MIDI_STACK_CAPACITY, MidiEventVec, RT_MIDI_CAPACITY, RtMidiEvents, WireMidi, group_of_port,
+};
 pub use midi_intake::MidiIntake;
 pub use tutti_graph::BusRole;
 pub use wakeups::{Interest, Ready, Wakeups, Watch};
 // `NoteExpressionVec` is the alias the change list is built from, so a caller
 // assembling one has to name it.
 pub use locate::{Helper, Locator};
-pub use note_expression::{NoteExpressionChanges, NoteExpressionType, NoteExpressionValue};
+pub use note_expression::{
+    NoteExpressionChanges, NoteExpressionType, NoteExpressionValue,
+    expression_of_per_note_controller, per_note_message, per_note_tuning,
+};
 pub use note_id::{note_id_to_channel_note, plugin_note_id};
 pub use param_edit::ParamEdit;
 pub use param_mapping::ParamMapping;
