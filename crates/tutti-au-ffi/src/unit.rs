@@ -46,6 +46,9 @@ pub(crate) struct Inner {
     /// back): `kAudioUnitProperty_MIDIOutputCallback` cannot be read, so this is
     /// how a second registration is refused.
     midi_output: std::sync::atomic::AtomicBool,
+    /// `AudioUnitInitialize` has succeeded and `AudioUnitUninitialize` has not
+    /// since: what [`Unit::uninitialized`] proves the opposite of.
+    initialized: std::sync::atomic::AtomicBool,
 }
 
 // SAFETY: the instance is an opaque handle into AudioToolbox. Nothing in Rust
@@ -109,6 +112,29 @@ impl std::fmt::Debug for Unit {
     }
 }
 
+/// The proof that a [`Unit`] is not initialized, which only this crate can
+/// make ([`Unit::uninitialize`], [`Unit::uninitialized`]): an AU calls its
+/// callbacks only from inside a render, and a unit that is not initialized does
+/// not render. What needs "no render is in flight" asks for one
+/// ([`AuMidiOutput::withdraw`](crate::AuMidiOutput::withdraw)). It is issued for
+/// the moment it is asked for and checked again where it is used.
+#[derive(Debug)]
+pub struct Uninitialized<'a> {
+    unit: &'a Unit,
+}
+
+impl Uninitialized<'_> {
+    /// Whether the proof is of `unit`, and the unit is still not initialized.
+    pub(crate) fn holds_for(&self, unit: &Unit) -> bool {
+        self.unit.same_unit(unit)
+            && !self
+                .unit
+                .inner
+                .initialized
+                .load(std::sync::atomic::Ordering::Acquire)
+    }
+}
+
 impl Unit {
     /// Instantiates `component` synchronously (`AudioComponentInstanceNew`). The
     /// calling thread is the unit's home: a last drop on another thread hands the
@@ -131,6 +157,7 @@ impl Unit {
                 home: std::thread::current().id(),
                 work: work.clone(),
                 midi_output: std::sync::atomic::AtomicBool::new(false),
+                initialized: std::sync::atomic::AtomicBool::new(false),
             }),
             _not_sync: PhantomData,
         })
@@ -186,18 +213,39 @@ impl Unit {
         // SAFETY: `raw()` is a live instance.
         check("AudioUnitInitialize", unsafe {
             sys::AudioUnitInitialize(self.raw())
-        })
+        })?;
+        self.inner
+            .initialized
+            .store(true, std::sync::atomic::Ordering::Release);
+        Ok(())
     }
 
-    /// `AudioUnitUninitialize`.
+    /// `AudioUnitUninitialize`. On success the unit renders no more, and the
+    /// answer is the proof of it: an [`Uninitialized`].
     ///
     /// # Errors
     /// The `OSStatus` of the call.
-    pub fn uninitialize(&self) -> std::result::Result<(), OsError> {
+    pub fn uninitialize(&self) -> std::result::Result<Uninitialized<'_>, OsError> {
         // SAFETY: `raw()` is a live instance.
         check("AudioUnitUninitialize", unsafe {
             sys::AudioUnitUninitialize(self.raw())
-        })
+        })?;
+        self.inner
+            .initialized
+            .store(false, std::sync::atomic::Ordering::Release);
+        Ok(Uninitialized { unit: self })
+    }
+
+    /// The proof that the unit is not initialized, so nothing renders: `None`
+    /// while it is initialized (every `initialize` that succeeded and has not
+    /// been undone by an `uninitialize`). A unit that was never initialized
+    /// is not.
+    pub fn uninitialized(&self) -> Option<Uninitialized<'_>> {
+        (!self
+            .inner
+            .initialized
+            .load(std::sync::atomic::Ordering::Acquire))
+        .then_some(Uninitialized { unit: self })
     }
 
     /// `AudioUnitReset` on `scope` and `element`.

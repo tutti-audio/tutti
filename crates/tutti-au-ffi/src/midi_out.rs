@@ -24,7 +24,7 @@ use crate::callback::with_state_mut;
 use crate::error::{Error, Result};
 use crate::property::{Element, MidiOutputCallbackInfo, MidiOutputCallbackProperty, Scope};
 use crate::status::{CANNOT_DO_IN_CURRENT_CONTEXT, NO_ERR};
-use crate::unit::Unit;
+use crate::unit::{Uninitialized, Unit};
 
 /// The answer to a call with no state or no packet list behind it.
 const NOT_INSTALLED: OSStatus = -1;
@@ -368,23 +368,30 @@ impl AuMidiOutput {
     /// Withdraws the callback and frees the state the AU's `userData` pointed at,
     /// returning any error the AU reported.
     ///
-    /// # Errors
-    /// `Error::Os` if the AU refuses the clearing write; the state is then not
-    /// freed (the unit may still call into it), and the unit's claim stays.
-    ///
-    /// # Safety
-    /// The unit is uninitialized, or its renderer is the caller's and not
-    /// running, so no render is in flight: the AU calls the callback only from
+    /// `proof` says no render is in flight: the AU calls the callback only from
     /// inside a render, and a render that began before the withdrawing write may
-    /// still be reading the state when it returns.
-    pub unsafe fn withdraw(mut self) -> Result<()> {
+    /// still be reading the state when it returns. A unit that is not
+    /// initialized does not render.
+    ///
+    /// # Errors
+    /// `Error::Invalid` when `proof` is of another unit, or the unit has been
+    /// initialized since it was issued; `Error::Os` if the AU refuses the
+    /// clearing write. The state is then not freed (the unit may still call into
+    /// it), and the unit's claim stays.
+    pub fn withdraw(mut self, proof: &Uninitialized<'_>) -> Result<()> {
+        if !proof.holds_for(&self.unit) {
+            return Err(Error::Invalid(
+                "the proof is not of this unit, or the unit was initialized since".into(),
+            ));
+        }
         let result = self.unhook();
         if result.is_ok()
             && let Some(state) = self.state.take()
         {
-            // SAFETY: made by `Box::into_raw` in `install`; the withdrawing write
-            // succeeded and, by the caller's contract, no render is in flight, so
-            // the AU holds no pointer it will use and nothing else frees it.
+            // SAFETY: made by `Box::into_raw` in `install`. The withdrawing write
+            // succeeded, and `proof` says the unit is not initialized, so no
+            // render is in flight and the AU holds no pointer it will use;
+            // nothing else frees it.
             drop(unsafe { Box::from_raw(state.as_ptr()) });
         }
         result
