@@ -1542,7 +1542,7 @@ impl MpePeer {
 /// channels' Reset All Controllers and Pitch Bend Sensitivities of 48 reach
 /// the synth, and Omni Off on a Member Channel, which the Profile prohibits
 /// and which passes with no zone, is dropped. Disabling is the same stop,
-/// and Omni Off passes again. Closing the input clears the zones with its slot.
+/// and Omni Off passes again. Closing the input clears its zones.
 #[cfg(feature = "midi-hardware")]
 #[test]
 fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {

@@ -563,7 +563,7 @@ impl MidiIngestControls {
 }
 
 impl Node for MidiIngestNode {
-    /// No audio; one event input per device slot, [`MidiInputPorts::count`]
+    /// No audio; one event input per attached input, [`MidiInputPorts::count`]
     /// event outputs ([`MIDI_INPUT_PORTS`] for the first Group alone) of the
     /// prepared capacity ([`MIDI_INPUT_EVENT_CAPACITY`] at least, and
     /// [`MIDI_INPUT_DENSITY`] per frame of a long block).
