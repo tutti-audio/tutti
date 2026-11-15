@@ -306,7 +306,7 @@ impl Recipient {
     pub const fn device_byte(self) -> u8 {
         match self {
             Self::AllCall => 0x7F,
-            Self::Device(device) => device.get().get(),
+            Self::Device(device) => device.get(),
         }
     }
 
