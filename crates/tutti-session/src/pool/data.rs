@@ -122,6 +122,10 @@ impl PoolEntry for AudioFile {
         }
     }
 
+    fn file(&self) -> Option<&std::path::Path> {
+        Some(&self.path)
+    }
+
     fn handle(loaded: &Self::Loaded, _: &Life) -> Self::Handle {
         loaded.clone()
     }
@@ -160,6 +164,10 @@ impl PoolEntry for SoundFontFile {
                 .map(Arc::new)
                 .map_err(|error| LoadError::SoundFont(Arc::new(error)))
         })
+    }
+
+    fn file(&self) -> Option<&std::path::Path> {
+        Some(&self.path)
     }
 
     fn handle(loaded: &Self::Loaded, _: &Life) -> Self::Handle {

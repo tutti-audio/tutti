@@ -2,6 +2,7 @@
 
 use std::any::{Any, TypeId};
 use std::fmt;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -47,6 +48,17 @@ pub trait PoolEntry: Send + 'static {
 
     /// The job that loads the entry, described and not started.
     fn load(&self) -> Load<Self::Loaded>;
+
+    /// The file the load reads, for a kind whose value comes from one.
+    ///
+    /// The worker that runs the load takes the file's stamp (its length and
+    /// modification time) before the load reads it, and
+    /// [`Session::refresh_pool`](crate::Session::refresh_pool) compares it
+    /// with the file's now and loads the entry again when they differ. The
+    /// pool's diff never reads the file. The default is a kind with no file.
+    fn file(&self) -> Option<&Path> {
+        None
+    }
 
     /// The handle for a loaded value. `life` is the entry's: it reads closed
     /// once the entry is released or swapped to another identity.
@@ -435,6 +447,8 @@ pub(crate) struct Item<K> {
     pub(crate) reload: Reload,
     pub(crate) lost: fn(&Value) -> bool,
     pub(crate) park: fn(Value) -> Option<Value>,
+    /// The file the load reads, as the entry declared it.
+    pub(crate) file: Option<PathBuf>,
     pub(crate) share: Option<Cloner>,
 }
 
@@ -544,6 +558,7 @@ impl<K, E: PoolEntry> IntoPool<K> for Declared<K, E> {
             load: entry.load().erase(),
             lost: lost::<E>,
             park: park::<E>,
+            file: entry.file().map(Path::to_path_buf),
             share,
             reload: Box::new(move || entry.load().erase()),
         });

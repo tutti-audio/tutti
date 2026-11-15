@@ -14,6 +14,7 @@ use crate::{SessionEvent, jobs::JobFailed};
 
 mod holds;
 mod loads;
+mod refresh;
 
 /// The loads a session handed its spawner, held until the test runs them.
 #[derive(Clone, Default)]

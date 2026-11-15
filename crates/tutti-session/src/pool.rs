@@ -56,8 +56,10 @@ mod data;
 mod entry;
 mod key;
 mod open;
+mod refresh;
 mod report;
 mod run;
+mod stamp;
 mod table;
 mod wait;
 
@@ -71,6 +73,7 @@ pub use entry::{
 };
 pub use key::PoolKey;
 pub use open::OpenCx;
+pub use refresh::RefreshPool;
 pub use report::{PoolLoaded, PoolOutcome, PoolReport};
 pub(crate) use table::Pool;
 pub use table::{HandleError, PoolError, PoolEvent, PoolState, RetryError, WhenLoadedError};
@@ -188,6 +191,37 @@ impl Session {
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         self.pool.when_loaded(key, Box::new(then))
+    }
+
+    /// Checks the files the pool's entries read, on a worker, and loads again
+    /// the entries whose file changed.
+    ///
+    /// Each file entry took the file's stamp (length and modification time)
+    /// when it loaded. The check takes each stamp again and compares: an entry
+    /// whose stamp differs reloads as it does for a changed identity (the old
+    /// value stays until the new one lands, as a [`PoolEvent::Reloaded`]), and
+    /// two keys that share a load reload with one. An entry whose file can no
+    /// longer be read keeps what it has, and is named as unreadable.
+    ///
+    /// This is the one place the pool reads file metadata: [`pool`](Self::pool)
+    /// never does, so a key declared after its file changed shares the loaded
+    /// entry until the next refresh, and a plugin binary that changed on disk
+    /// or a provided asset is never detected. The result lands in a later
+    /// [`update`](Self::update) as a [`RefreshPool`], or as the job's failure.
+    pub fn refresh_pool(&mut self) -> PoolWait<Result<RefreshPool, crate::JobFailed>> {
+        let (wait, landing) = PoolWait::new();
+        let files = self.pool.stamped_files();
+        self.jobs.submit(
+            move || refresh::check(files),
+            move |session, done, _| {
+                landing.land(done.map(|checked| {
+                    let (starts, refreshed) = session.pool.reload_changed(checked);
+                    session.pool_start(starts);
+                    refreshed
+                }));
+            },
+        );
+        wait
     }
 
     /// Where the entry under `key` stands, `None` when the pool has none: never
