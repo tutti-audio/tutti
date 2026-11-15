@@ -251,6 +251,15 @@ impl Phase {
         self.advance(offset)
     }
 
+    /// `sin(2·pi·phase)`: the one sine of a phase. The turn is multiplied by
+    /// `2·pi` in f64 and the sine is `libm`'s, so the value is the same on
+    /// every target and `Phase(0.25).sin()` is exactly `1.0`.
+    #[inline]
+    #[must_use]
+    pub fn sin(self) -> f32 {
+        libm::sin(f64::from(self.0) * core::f64::consts::TAU) as f32
+    }
+
     /// This phase in radians, `[0, 2·pi)` — for the `sin`/`cos` call.
     #[inline]
     #[must_use]
@@ -306,14 +315,14 @@ impl Radians {
     #[inline]
     #[must_use]
     pub fn sin(self) -> f32 {
-        self.0.sin()
+        libm::sinf(self.0)
     }
 
     /// `cos` of this angle.
     #[inline]
     #[must_use]
     pub fn cos(self) -> f32 {
-        self.0.cos()
+        libm::cosf(self.0)
     }
 
     /// The equivalent [`Phase`] in turns, wrapped into `[0, 1)`.
