@@ -54,7 +54,10 @@ pub fn describe(
         Some(PluginFormat::Vst2) => vst2(main, path),
         #[cfg(all(feature = "au", target_os = "macos"))]
         Some(PluginFormat::AudioUnit) => au(path),
-        Some(format) => Err(format!("Unsupported format: {}", format.extension_id())),
+        Some(format) => Err(format!(
+            "format {} is not compiled into this plugin-probe",
+            format.extension_id()
+        )),
         None => Err(format!("Unsupported format: {}", path.display())),
     }
 }

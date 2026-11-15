@@ -27,6 +27,9 @@ pub enum PluginFormat {
 }
 
 impl PluginFormat {
+    /// Every format.
+    pub const ALL: [Self; 4] = [Self::Vst3, Self::Vst2, Self::Clap, Self::AudioUnit];
+
     /// The plugin file extensions (without the dot) a scan recognizes.
     pub const EXTENSIONS: &'static [&'static str] = &EXTENSION_NAMES;
 
@@ -44,9 +47,7 @@ impl PluginFormat {
     /// The format whose [`extension_id`](Self::extension_id) is `id`.
     #[must_use]
     pub fn from_extension_id(id: &str) -> Option<Self> {
-        [Self::Vst3, Self::Vst2, Self::Clap, Self::AudioUnit]
-            .into_iter()
-            .find(|f| f.extension_id() == id)
+        Self::ALL.into_iter().find(|f| f.extension_id() == id)
     }
 }
 
@@ -80,17 +81,14 @@ mod tests {
     /// name a caller sends to `plugin-probe --as` is the one it reads back.
     #[test]
     fn every_extension_id_names_its_own_format() {
-        for format in [
-            PluginFormat::Vst3,
-            PluginFormat::Vst2,
-            PluginFormat::Clap,
-            PluginFormat::AudioUnit,
-        ] {
+        for format in PluginFormat::ALL {
             assert_eq!(
                 PluginFormat::from_extension_id(format.extension_id()),
                 Some(format)
             );
         }
-        assert_eq!(PluginFormat::from_extension_id("vst"), None);
+        for unknown in ["vst", "component", "CLAP", ""] {
+            assert_eq!(PluginFormat::from_extension_id(unknown), None);
+        }
     }
 }
