@@ -122,8 +122,8 @@ fn render(to: &[(UnitAddr, f32)]) -> [Vec<f32>; 4] {
         cutoff: Param::new(Hz(1_000.0)),
         bands: [Param::new(Db(-10.0)), Param::new(Db(-20.0))],
     };
-    let _ = ed.insert(NODE, "declared", node);
-    let _ = ed.insert(
+    ed.insert(NODE, "declared", node);
+    ed.insert(
         SRC,
         "steps",
         tutti_graph::ForkByClone(Steps { to: to.to_vec() }),

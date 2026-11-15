@@ -128,7 +128,7 @@ fn the_inlet_refuses_to_fork() {
     let (node, _prod) = ring_with(&[[1.0, 2.0]]);
     let prepare = Prepare::new(RATE, MaxBlock::of(Samples(64)));
     let (mut editor, _exec) = Editor::new(prepare);
-    let _ = editor.insert(NodeKey(7), "inlet", node);
+    editor.insert(NodeKey(7), "inlet", node);
     editor.spec_mut().topology.set_outputs((0..2).map(|port| {
         Source::Node(OutPort {
             node: NodeKey(7),

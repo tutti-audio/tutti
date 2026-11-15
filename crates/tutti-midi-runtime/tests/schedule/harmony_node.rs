@@ -54,7 +54,7 @@ fn rig(node: HarmonyNode, max: usize) -> (Editor, Executor, HarmonyControls, See
     ));
     let controls = ed.insert(NodeKey(1), "harmony", node).controls;
     let seen = Seen::default();
-    let _ = ed.insert(
+    ed.insert(
         NodeKey(2),
         "sink",
         tutti_graph::ForkByClone(Sink(Arc::clone(&seen))),

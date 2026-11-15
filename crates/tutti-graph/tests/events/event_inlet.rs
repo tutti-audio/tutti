@@ -520,10 +520,10 @@ fn graph(
     let mut writers = Vec::new();
     for k in 1..=u64::from(n) {
         let (node, writer) = EventInletNode::pair(EventCapacity::of(256));
-        let _ = ed.insert(NodeKey(k), "inlet", node);
+        ed.insert(NodeKey(k), "inlet", node);
         writers.push(writer);
     }
-    let _ = ed.insert(
+    ed.insert(
         NodeKey(10),
         "consumer",
         Forkable(Kind::Consumer { inputs: n }),
@@ -544,7 +544,7 @@ fn graph(
     // a thread: the plan is spread on a pool only when that pays.
     for c in (0..4u64).filter(|_| heavy) {
         let base = 100 + c * 10;
-        let _ = ed.insert(
+        ed.insert(
             NodeKey(base),
             "const",
             Forkable(Kind::Const {
@@ -553,7 +553,7 @@ fn graph(
             }),
         );
         for g in 1..4u64 {
-            let _ = ed.insert(
+            ed.insert(
                 NodeKey(base + g),
                 "gain",
                 Forkable(Kind::Gain {
@@ -571,7 +571,7 @@ fn graph(
         }
     }
     let sum = if heavy { 5 } else { 1 };
-    let _ = ed.insert(NodeKey(30), "sum", Forkable(Kind::Sum { inputs: sum }));
+    ed.insert(NodeKey(30), "sum", Forkable(Kind::Sum { inputs: sum }));
     let topology = &mut ed.spec_mut().topology;
     topology.connect(
         InPort {

@@ -30,8 +30,8 @@ fn build_callback_state(sample_rate: f64) -> (Transport, AudioCallbackState) {
         MaxBlock::of(Samples(512)),
     ));
     let (source, filter) = (NodeKey(1), NodeKey(2));
-    let _ = ed.insert(source, "sine", Osc::sine(Hz(220.0)));
-    let _ = ed.insert(
+    ed.insert(source, "sine", Osc::sine(Hz(220.0)));
+    ed.insert(
         filter,
         "filter",
         SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(2_000.0), Q(0.7)),

@@ -96,7 +96,7 @@ fn render_with_knob(synth: PolySynth, drive: Option<Drive>) -> ([Vec<f32>; 2], O
         ),
     )
     .unwrap();
-    let _ = ed.insert(NodeKey(1), "clip", MidiClipNode::new([note]));
+    ed.insert(NodeKey(1), "clip", MidiClipNode::new([note]));
     let params = ed.insert(SYNTH, "synth", synth).controls;
     ed.spec_mut().connect_events(
         EventIn {
@@ -129,7 +129,7 @@ fn render_with_knob(synth: PolySynth, drive: Option<Drive>) -> ([Vec<f32>; 2], O
             params.cell(d.param),
             Some(range),
         );
-        let _ = ed.insert(LANE, "lane", lane);
+        ed.insert(LANE, "lane", lane);
         ed.spec_mut().connect_param(
             at,
             EventOut {

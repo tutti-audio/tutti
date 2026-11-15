@@ -30,6 +30,8 @@ use tutti_midi_device::{
 use tutti_midi_protocol::{ChannelResponse, MpeZones, PitchBendSensitivity};
 use tutti_ump::{MidiChannel, MidiGroup, MpeChannels, MpeOverlap, MpeZoneSet, MpeZoneSpan};
 
+use crate::ci::PeerId;
+
 tutti_types::ranged! {
     /// The Channels a Profile is asked to use when it is enabled on a Channel: the
     /// Manager and its Members, at least 1 and at most 14 bits (M2-101 §7.8).
@@ -104,6 +106,45 @@ pub struct ProfileSwitch {
     pub(crate) muid: Muid,
     pub(crate) profile: ProfileId,
     pub(crate) switch: Switch,
+}
+
+impl ProfileSwitch {
+    /// The input device the switch was made from.
+    #[must_use]
+    pub const fn device(&self) -> &DeviceId {
+        &self.device
+    }
+
+    /// The peer the switch is for.
+    #[must_use]
+    pub const fn peer(&self) -> PeerId {
+        PeerId {
+            group: self.group,
+            muid: self.muid,
+        }
+    }
+
+    /// Whether `peers`, the Profiles an input's peers list now, still hold the
+    /// peer and the Profile at the address the switch names.
+    ///
+    /// # Errors
+    ///
+    /// [`ProfileError::NoSuchPeer`] when no peer of `peers` is the switch's,
+    /// [`ProfileError::NotListed`] when it no longer lists the Profile there.
+    pub fn check(&self, peers: &[PeerProfiles]) -> Result<(), ProfileError> {
+        let peer = peers
+            .iter()
+            .find(|p| p.group() == self.group && p.muid() == self.muid)
+            .ok_or(ProfileError::NoSuchPeer)?;
+        let address = match self.switch {
+            Switch::On(target) => target.address(),
+            Switch::Off(address) => address,
+        };
+        if peer.table().get(address, self.profile).is_none() {
+            return Err(ProfileError::NotListed);
+        }
+        Ok(())
+    }
 }
 
 impl Listed {
@@ -349,7 +390,7 @@ impl PeerProfiles {
 pub(crate) type Snapshot = Arc<[PeerProfiles]>;
 
 /// A change of one peer's Profiles, once each from
-/// [`MidiSession::poll`](crate::MidiSession::poll); the [`PeerId`](crate::PeerId)
+/// [`MidiSession::poll`](crate::MidiSession::poll); the [`PeerId`]
 /// beside it in [`Polled::Profile`](crate::Polled::Profile) names the peer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -379,6 +420,10 @@ pub enum ProfilesChange {
         /// How it ended.
         outcome: Outcome,
     },
+    /// A [`ProfileSwitch`] a call accepted was not queued: the peer or the
+    /// Profile went between the call and the next poll. A call that is refused
+    /// at once (`ProfileSwitch::check`) never gets here.
+    NotQueued(ProfileError),
     /// A [`ProfileSwitch`] was not sent: one for that Profile at that address
     /// was already waiting.
     NotSent {

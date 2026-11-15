@@ -81,7 +81,7 @@ fn constants(r: &mut Rig, values: &[f32]) {
     let mut outputs = Vec::new();
     for (k, &value) in values.iter().enumerate() {
         let key = 1 + k as u64;
-        let _ = r.ed.insert(
+        r.ed.insert(
             NodeKey(key),
             "const",
             Forkable(Kind::Const { value, width: 1 }),
@@ -212,7 +212,7 @@ impl Node for Spike {
 #[test]
 fn a_spike_is_held_until_read_and_read_once() {
     let mut r = rig(1, false);
-    let _ = r.ed.insert(
+    r.ed.insert(
         NodeKey(1),
         "spike",
         Unforkable(Spike {
@@ -427,7 +427,7 @@ fn a_reused_key_is_not_read_by_the_old_meter() {
     assert_eq!(level(&mut m), vec![(0.25, 0.25, 32)]);
 
     r.ed.remove(NodeKey(2));
-    let _ = r.ed.insert(
+    r.ed.insert(
         NodeKey(2),
         "again",
         Forkable(Kind::Const {
@@ -456,7 +456,7 @@ fn output_bits(workers: usize, master: bool, track: bool) -> Vec<u32> {
         let (lag, gain) = (10 + k as u64, 20 + k as u64);
         let _ =
             r.ed.insert(NodeKey(lag), "lag", Forkable(Kind::Lag { latency }));
-        let _ = r.ed.insert(
+        r.ed.insert(
             NodeKey(gain),
             "gain",
             Forkable(Kind::Gain {
@@ -553,7 +553,7 @@ fn a_meter_changes_no_output_bit() {
 #[test]
 fn a_narrowed_node_silences_the_lanes_past_its_width_and_commits() {
     let mut r = rig(1, false);
-    let _ = r.ed.insert(
+    r.ed.insert(
         NodeKey(1),
         "wide",
         Forkable(Kind::Const {
@@ -578,7 +578,7 @@ fn a_narrowed_node_silences_the_lanes_past_its_width_and_commits() {
 
     // The same key, now one output wide: the meter's second lane names a port
     // that no longer exists.
-    let _ = r.ed.insert(
+    r.ed.insert(
         NodeKey(1),
         "narrow",
         Forkable(Kind::Const {

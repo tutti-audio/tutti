@@ -158,7 +158,7 @@ fn a_command_reaches_a_node_across_a_commit() {
     );
 
     // A graph edit: another node, committed.
-    let _ = ed.insert(NodeKey(2), "other", Unforkable(node_at(0.0)));
+    ed.insert(NodeKey(2), "other", Unforkable(node_at(0.0)));
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

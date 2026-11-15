@@ -135,8 +135,8 @@ fn graph(fake_ring: usize) -> (Editor, Executor, tutti_graph::EventInletWriter, 
     let (mut ed, mut exec) = Editor::new(GraphPrepare::new(SR, MaxBlock::of(Samples(BLOCK))));
     let (inlet, writer) = EventInletNode::pair(EventCapacity::of(64));
     let (inlet_key, plugin) = (NodeKey(1), NodeKey(2));
-    let _ = ed.insert(inlet_key, "inlet", inlet);
-    let _ = ed.insert(plugin, "fake", Unforkable(node));
+    ed.insert(inlet_key, "inlet", inlet);
+    ed.insert(plugin, "fake", Unforkable(node));
     ed.spec_mut().connect_events(
         EventIn {
             node: plugin,

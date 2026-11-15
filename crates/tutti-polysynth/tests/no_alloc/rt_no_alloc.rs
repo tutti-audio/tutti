@@ -471,8 +471,8 @@ fn a_clip_into_a_synth_is_allocation_free() {
         SampleRate::SR_48K,
         MaxBlock::of(Samples(BLOCK)),
     ));
-    let _ = ed.insert(NodeKey(1), "clip", clip);
-    let _ = ed.insert(
+    ed.insert(NodeKey(1), "clip", clip);
+    ed.insert(
         NodeKey(2),
         "synth",
         PolySynth::new(SynthConfig {

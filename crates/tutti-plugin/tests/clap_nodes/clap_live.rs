@@ -156,7 +156,7 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
         .with_quantum(MaxBlock::of(Samples(quantum)));
     let (mut ed, exec) = Editor::new(prepare);
     let (src, key) = (NodeKey(1), NodeKey(2));
-    let _ = ed.insert(src, "ramp", Unforkable(RampSource));
+    ed.insert(src, "ramp", Unforkable(RampSource));
     let _controls = ed.insert(
         key,
         "plugin",

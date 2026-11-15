@@ -738,7 +738,7 @@ fn a_chunked_processors_lost_midi_reaches_the_graphs_event_losses() {
     .expect("the recording plugin loads");
     let (mut editor, mut exec) = Editor::new(Prepare::new(SR, MaxBlock::of(Samples(100))));
     let key = NodeKey(1);
-    let _ = editor.insert(key, "rec", client.bind(tempo(None)));
+    editor.insert(key, "rec", client.bind(tempo(None)));
     editor.commit().expect("commits");
     exec.apply_pending();
     editor.collect();

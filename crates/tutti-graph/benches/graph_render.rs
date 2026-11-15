@@ -222,11 +222,11 @@ fn executor_for(shape: &Topo) -> Executor {
     let last = match *shape {
         Topo::Chain(depth) => {
             let src = NodeKey(0);
-            let _ = ed.insert(src, "sine", Unforkable(sine()));
+            ed.insert(src, "sine", Unforkable(sine()));
             let mut last = src;
             for i in 0..depth {
                 let k = NodeKey(1 + i as u64);
-                let _ = ed.insert(k, "lowpass", Unforkable(lowpass(i)));
+                ed.insert(k, "lowpass", Unforkable(lowpass(i)));
                 wire(&mut ed, k, 0, node(last));
                 last = k;
             }
@@ -234,13 +234,13 @@ fn executor_for(shape: &Topo) -> Executor {
         }
         Topo::Fan(width) => {
             let src = NodeKey(0);
-            let _ = ed.insert(src, "sine", Unforkable(sine()));
+            ed.insert(src, "sine", Unforkable(sine()));
             let sum = NodeKey(u64::MAX);
             let s: Box<dyn Node> = Box::new(Sum(width));
-            let _ = ed.insert(sum, "sum", Unforkable(s));
+            ed.insert(sum, "sum", Unforkable(s));
             for i in 0..width {
                 let k = NodeKey(1 + i as u64);
-                let _ = ed.insert(k, "lowpass", Unforkable(lowpass(i)));
+                ed.insert(k, "lowpass", Unforkable(lowpass(i)));
                 wire(&mut ed, k, 0, node(src));
                 wire(&mut ed, sum, i as u16, node(k));
             }
@@ -253,7 +253,7 @@ fn executor_for(shape: &Topo) -> Executor {
             for i in 0..n {
                 let k = NodeKey(i as u64);
                 let nop: Box<dyn Node> = Box::new(Nop);
-                let _ = ed.insert(k, "nop", Unforkable(nop));
+                ed.insert(k, "nop", Unforkable(nop));
                 wire(&mut ed, k, 0, from);
                 from = node(k);
                 last = k;
@@ -377,7 +377,7 @@ fn form_executor(n: usize, nop: impl Fn() -> FormNop) -> Executor {
     ed.spec_mut().topology.inputs = ChannelLayout::from_count(width);
     for i in 0..n {
         let k = NodeKey(i as u64);
-        let _ = ed.insert(k, "nop", Unforkable(Box::new(nop()) as Box<dyn Node>));
+        ed.insert(k, "nop", Unforkable(Box::new(nop()) as Box<dyn Node>));
         for c in 0..width {
             let from = if i == 0 {
                 Source::Global(c)

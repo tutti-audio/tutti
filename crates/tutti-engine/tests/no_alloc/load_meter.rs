@@ -52,7 +52,7 @@ fn engine(spin: Duration, max_block: usize) -> (Engine, Transport, Editor) {
         SampleRate::of(RATE),
         MaxBlock::of(Samples(max_block)),
     ));
-    let _ = ed.insert(NodeKey(1), "spin", Unforkable(Spin { spin }));
+    ed.insert(NodeKey(1), "spin", Unforkable(Spin { spin }));
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort {
@@ -174,7 +174,7 @@ fn events_past_a_ports_capacity_reach_the_meter() {
         MaxBlock::of(Samples(64)),
     ));
     let per_block = tutti_graph::DEFAULT_EVENT_CAPACITY + 100;
-    let _ = ed.insert(NodeKey(1), "burst", Unforkable(Burst { per_block }));
+    ed.insert(NodeKey(1), "burst", Unforkable(Burst { per_block }));
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort {

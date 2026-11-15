@@ -794,7 +794,7 @@ fn feed_chord(live: &mut Editor, plugin: NodeKey, n: u8, on: usize, off: usize) 
         ]
     });
     let clip = NodeKey(1);
-    let _ = live.insert(clip, "clip", MidiClipNode::new(events));
+    live.insert(clip, "clip", MidiClipNode::new(events));
     live.spec_mut().connect_events(
         EventIn {
             node: plugin,
@@ -879,7 +879,7 @@ fn feed_note(live: &mut Editor, plugin: NodeKey, frame: usize) {
     use tutti_ump::MidiChannel;
 
     let clip = NodeKey(1);
-    let _ = live.insert(
+    live.insert(
         clip,
         "clip",
         MidiClipNode::new([TimedMidiEvent::new(
@@ -991,7 +991,7 @@ fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
     let prepare = Prepare::new(SampleRate::of(SAMPLE_RATE), MaxBlock::of(Samples(CHUNK)));
     let (mut live, _exec) = Editor::new(prepare);
     let (clip, key) = (NodeKey(1), NodeKey(9));
-    let _ = live.insert(
+    live.insert(
         clip,
         "clip",
         MidiClipNode::new([TimedMidiEvent::new(
@@ -1095,7 +1095,7 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
         let (mut live, _exec) = Editor::new(prepare);
         let (clip, key, sink) = (NodeKey(1), NodeKey(9), NodeKey(3));
         let on = midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
-        let _ = live.insert(
+        live.insert(
             clip,
             "clip",
             MidiClipNode::new([
@@ -1111,7 +1111,7 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
             ),
         );
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let _ = live.insert(
+        live.insert(
             sink,
             "sink",
             tutti_graph::ForkByClone(MidiSink(Arc::clone(&seen))),
@@ -1222,7 +1222,7 @@ fn an_export_is_aligned_when_the_plugin_latency_moves_offline() {
     let rate = SampleRate::of(SAMPLE_RATE);
     let (mut live, _exec) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples(BLOCK))));
     let (src, key) = (NodeKey(1), NodeKey(2));
-    let _ = live.insert(src, "ramp", tutti_graph::ForkByClone(RampSource));
+    live.insert(src, "ramp", tutti_graph::ForkByClone(RampSource));
     let _controls = live.insert(
         key,
         "plugin",

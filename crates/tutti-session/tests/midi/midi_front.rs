@@ -410,7 +410,9 @@ mod hardware {
     use super::*;
     use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
     use tutti_midi_hardware::{EndpointId, Identity, PortDirection};
-    use tutti_session::Resolution;
+    use tutti_session::{
+        LoadError, MidiPortError, Peer, PoolState, PortCause, Presence, midi_input, midi_output,
+    };
 
     fn session() -> (Session, FakeCounters) {
         let (backend, fake) = FakeBackend::build_with(vec![], vec![], usize::MAX);
@@ -429,90 +431,78 @@ mod hardware {
         e
     }
 
-    /// **The view lists the devices and opens and closes them**: an input by
-    /// name, an output by id; the output gives the hardware out its sink; a
-    /// disconnect says whether one was open.
+    /// **The view lists the devices, and the pool opens and closes them as
+    /// ports**: an input and an output are declared and open; the output's node
+    /// is in the graph; undeclaring them closes the input's connection.
     #[test]
-    fn the_view_lists_connects_and_disconnects_devices() {
+    fn the_view_lists_devices_and_the_pool_opens_and_closes_ports() {
         let (mut s, fake) = session();
         fake.plug(endpoint(1, "Keys"), PortDirection::Input);
         fake.plug(endpoint(10, "Synth"), PortDirection::Output);
         let _ = s.update();
 
-        let names: Vec<String> = s.midi().devices().into_iter().map(|d| d.name).collect();
+        let all = s.midi().devices();
+        let names: Vec<&str> = all.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(names, ["Keys", "Synth"], "inputs and outputs, by id");
 
-        s.midi().connect_input("keys").expect("connects");
+        s.pool((
+            midi_input("keys", all[0].clone()),
+            midi_output("synth", all[1].clone()),
+        ))
+        .expect("declares");
+        let _ = s.update();
         assert_eq!(
             s.testing_midi_io().unwrap().connected_input_names(),
             ["Keys"]
         );
-        assert!(s.midi().hardware_out().out.is_none(), "no output yet");
-        let synth = s
-            .midi()
-            .devices()
-            .into_iter()
-            .find(|d| d.name == "Synth")
-            .unwrap();
-        s.midi().connect_output(&synth.id).expect("connects");
-        assert!(
-            s.midi().hardware_out().out.is_some(),
-            "the output has a sink to drain to"
-        );
+        let out = s.midi_output(&"synth").expect("loaded");
+        assert_eq!(out.presence(), Presence::Live);
+        assert!(s.graph_ref().contains(out.node()), "the output's node");
+        assert_eq!(out.info().device(), &all[1]);
 
-        s.midi().disconnect_input("keys").expect("it was open");
+        s.pool(Vec::<
+            tutti_session::Declared<&str, tutti_session::MidiOutputEntry>,
+        >::new())
+            .expect("declares nothing");
+        let _ = s.update();
         assert!(
-            matches!(
-                s.midi().disconnect_input("keys"),
-                Err(MidiError::InputNotOpen(_))
-            ),
-            "not open any more"
+            s.testing_midi_io()
+                .unwrap()
+                .connected_input_names()
+                .is_empty(),
+            "the input's connection closed with its entry"
         );
-        s.midi().disconnect_output().expect("it was open");
-        assert!(matches!(
-            s.midi().disconnect_output(),
-            Err(MidiError::OutputNotOpen)
-        ));
+        assert_eq!(out.presence(), Presence::Closed);
     }
 
-    /// **A name that matches nothing is the hardware's error, carried as the
-    /// source**, and a session with no OS layer refuses with its own.
+    /// **A session with no OS layer lists nothing and refuses by name**: the
+    /// MIDI-CI call fails with its own error, and an entry fails to load.
     #[test]
-    fn refusals_are_one_error_with_the_cause_as_its_source() {
-        use std::error::Error as _;
-        let (mut s, _fake) = session();
-        let err = s.midi().connect_input("nothing").unwrap_err();
-        assert!(matches!(
-            err,
-            MidiError::Hardware(tutti_midi_hardware::Error::NoDeviceNamed { .. })
-        ));
-        assert!(err.source().is_some(), "the hardware error is the source");
-        let session_error: tutti_session::Error = err.into();
-        assert!(matches!(session_error, tutti_session::Error::Midi(_)));
-
+    fn a_session_with_no_os_layer_refuses_by_name() {
         let mut bare = offline();
-        assert!(matches!(
-            bare.midi().connect_input("keys"),
-            Err(MidiError::NoHardware)
-        ));
         assert!(bare.midi().devices().is_empty());
+        let identity = tutti_ump::DeviceIdentity {
+            manufacturer: tutti_ump::ManufacturerId::NON_COMMERCIAL,
+            family: [tutti_ump::U7::of(1); 2],
+            model: [tutti_ump::U7::of(2); 2],
+            revision: [tutti_ump::U7::of(3); 4],
+        };
+        let refused = bare.midi().enable_ci(identity).unwrap_err();
         assert!(matches!(
-            bare.midi().disconnect_input("keys"),
-            Err(MidiError::NoHardware)
+            refused,
+            MidiError::Port(tutti_session::MidiPortError::NoHardware)
         ));
-        assert!(matches!(
-            bare.midi().disconnect_output(),
-            Err(MidiError::NoHardware)
-        ));
+        let session_error: tutti_session::Error = refused.into();
+        assert!(matches!(session_error, tutti_session::Error::Midi(_)));
     }
 
-    /// **Only a device that is surely the saved one is connected unasked.** A
-    /// device named by its unit comes back `Connected` (in the directions it was
-    /// saved with); one that only has the saved name (an ALSA identity) is
-    /// returned to ask about and nothing is opened; two of one name are
-    /// candidates; none is `Missing`.
+    /// **A saved device is bound at load when it is the one, and fails with its
+    /// candidates when it could be several.** A device named by its unit binds; a
+    /// saved output of a unit whose port went, with another port of the unit
+    /// present, is ambiguous with that port as the one candidate; none present
+    /// loads absent.
     #[test]
-    fn a_saved_device_is_bound_only_when_it_is_exact() {
+    fn a_saved_device_binds_when_it_is_the_one_and_asks_when_it_is_not() {
         let (mut s, fake) = session();
         fake.plug(unit(1, "Pad In", "unit-1"), PortDirection::Input);
         fake.plug(unit(2, "Pad Out", "unit-1"), PortDirection::Output);
@@ -522,45 +512,52 @@ mod hardware {
         let saved = |name: &str| all.iter().find(|d| d.name == name).cloned().unwrap();
         let (pad_out, keys) = (saved("Pad Out"), saved("Keys"));
 
+        s.pool((
+            midi_output("pad out", pad_out.clone()),
+            midi_input("keys", keys.clone()),
+        ))
+        .expect("declares");
+        let _ = s.update();
         assert_eq!(
-            s.midi().reconnect_saved(&pad_out).unwrap(),
-            Resolution::Connected(pad_out.id.clone())
+            s.midi_output(&"pad out").unwrap().presence(),
+            Presence::Live,
+            "named by its unit"
         );
-        assert!(s.midi().hardware_out().out.is_some(), "saved as an output");
-
         assert_eq!(
-            s.midi().reconnect_saved(&keys).unwrap(),
-            Resolution::SameName(keys.clone())
-        );
-        assert!(
-            s.testing_midi_io()
-                .unwrap()
-                .connected_input_names()
-                .is_empty(),
-            "a same-name device is not opened unasked"
+            s.midi_input(&"keys").unwrap().presence(),
+            Presence::Live,
+            "the only device of its name"
         );
 
-        // The unit's input is gone: the saved output now names a port of a unit
+        // The unit's output is gone: the saved output now names a port of a unit
         // with one other present device, so it can no longer be told for sure.
         fake.unplug(EndpointId::from_raw(2));
         let _ = s.update();
+        s.pool(midi_output("again", pad_out.clone()))
+            .expect("declares");
+        let _ = s.update();
+        let Some(PoolState::Failed(LoadError::Midi(error))) = s.pool_state(&"again") else {
+            panic!("ambiguous: {:?}", s.pool_state(&"again"));
+        };
         assert!(matches!(
-            s.midi().reconnect_saved(&pad_out).unwrap(),
-            Resolution::Ambiguous(c) if c.len() == 1 && c[0].name == "Pad In"
+            &*error,
+            MidiPortError::Ambiguous(c) if c.len() == 1 && c[0].name == "Pad In"
         ));
+
         fake.unplug(EndpointId::from_raw(1));
         fake.unplug(EndpointId::from_raw(3));
         let _ = s.update();
+        s.pool(midi_output("gone", pad_out)).expect("declares");
+        let _ = s.update();
         assert_eq!(
-            s.midi().reconnect_saved(&pad_out).unwrap(),
-            Resolution::Missing
+            s.midi_output(&"gone").unwrap().presence(),
+            Presence::Lost(PortCause::Unplugged)
         );
     }
 
-    /// **What a device says of itself is read through the session's front**:
-    /// nothing for a device that is not open, and a saved device of an open one
-    /// that has said nothing knows nothing, so it confirms as `Unknown` (never
-    /// as the same unit).
+    /// **What a device says of itself is its port's info**: a device that has
+    /// said nothing knows nothing, so its saved form has nothing learned and
+    /// confirms as `Unknown` (never as the same unit).
     #[test]
     fn a_device_that_has_said_nothing_is_unknown() {
         use tutti_midi_hardware::{Learned, Match};
@@ -568,13 +565,14 @@ mod hardware {
         fake.plug(endpoint(3, "Keys"), PortDirection::Input);
         let _ = s.update();
         let keys = s.midi().devices().into_iter().next().unwrap();
-        assert!(s.midi().learned(&keys.id).is_empty());
-        assert!(s.midi().saved(&keys.id).is_none(), "not open");
 
-        s.midi().connect_input(&keys.id).unwrap();
-        let saved = s.midi().saved(&keys.id).expect("open");
+        s.pool(midi_input("keys", keys.clone())).expect("declares");
+        let _ = s.update();
+        let info = s.midi_input(&"keys").unwrap().info();
+        assert!(info.learned().is_empty());
+        let saved = info.saved();
         assert_eq!(saved.info(), &keys);
         assert_eq!(saved.learned(), &Learned::new());
-        assert_eq!(s.midi().confirm(&keys.id, &saved), Match::Unknown);
+        assert_eq!(info.confirm(&saved), Match::Unknown);
     }
 }

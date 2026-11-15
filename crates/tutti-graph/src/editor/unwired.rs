@@ -15,7 +15,6 @@ use crate::{Edge, EdgeId, FeedbackFrom, NodeKey, Sink, Source};
 /// Returned by [`Editor::insert`] and [`Editor::replace_or_swap`]: the
 /// node's typed controls, and the wiring the new unit's shape cannot carry.
 #[derive(Debug)]
-#[must_use = "the placement may have unwired edges: read `unwired`, or take `controls`"]
 pub struct Placed<C> {
     /// The node's typed controls.
     pub controls: C,

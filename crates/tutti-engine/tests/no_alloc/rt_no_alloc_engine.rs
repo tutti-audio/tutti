@@ -87,7 +87,7 @@ fn graph_engine_with_timed_transport_is_allocation_free() {
         SampleRate::of(sample_rate),
         tutti_types::MaxBlock::of(tutti_types::Samples(512)),
     ));
-    let _ = ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
+    ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
         Source::Node(OutPort {
             node: NodeKey(1),
@@ -174,7 +174,7 @@ fn a_published_tempo_map_is_taken_without_allocating() {
         SampleRate::SR_48K,
         tutti_types::MaxBlock::of(tutti_types::Samples(512)),
     ));
-    let _ = ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
+    ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
         Source::Node(OutPort {
             node: NodeKey(1),
@@ -242,7 +242,7 @@ fn a_step_map_is_followed_without_allocating() {
         SampleRate::SR_48K,
         tutti_types::MaxBlock::of(tutti_types::Samples(512)),
     ));
-    let _ = ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
+    ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
         Source::Node(OutPort {
             node: NodeKey(1),
@@ -307,7 +307,7 @@ fn a_step_map_is_followed_without_allocating() {
         SampleRate::SR_48K,
         tutti_types::MaxBlock::of(tutti_types::Samples(4_096)),
     ));
-    let _ = ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
+    ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
         Source::Node(OutPort {
             node: NodeKey(1),
@@ -378,7 +378,7 @@ fn the_heard_tap_is_allocation_free() {
         SampleRate::SR_48K,
         tutti_types::MaxBlock::of(tutti_types::Samples(512)),
     ));
-    let _ = ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
+    ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
         Source::Node(OutPort {
             node: NodeKey(1),
@@ -485,7 +485,7 @@ fn graph_engine_with_env_clock_and_metronome_is_allocation_free() {
         tutti_types::MaxBlock::of(tutti_types::Samples(512)),
     ));
     let (clock, sink) = (NodeKey(1), NodeKey(2));
-    let _ = ed.insert(clock, "clock", Unforkable(BeatWalk));
+    ed.insert(clock, "clock", Unforkable(BeatWalk));
     let _ = ed.insert(sink, "click", click);
     let topology = &mut ed.spec_mut().topology;
     topology.set_outputs(
@@ -580,14 +580,14 @@ fn graph_engine_on_a_worker_pool_is_allocation_free() {
         .expect("a worker pool");
     exec.set_pool(Some(Arc::new(GatedPool(pool))));
     for k in 0..6u64 {
-        let _ = ed.insert(
+        ed.insert(
             NodeKey(k + 1),
             "sine",
             ForkByClone(crate::support::Sine::new(tutti_types::Hz(
                 220.0 * (k + 1) as f32,
             ))),
         );
-        let _ = ed.insert(
+        ed.insert(
             NodeKey(k + 11),
             "gain",
             ForkByClone(crate::support::Gain(0.1 * (k + 1) as f32)),
@@ -671,7 +671,7 @@ fn a_714_root_block_is_allocation_free() {
         SampleRate::of(48_000.0),
         tutti_types::MaxBlock::of(tutti_types::Samples(512)),
     ));
-    let _ = ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
+    ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
     ed.spec_mut().topology.set_outputs((0..12).map(|port| {
         Source::Node(OutPort {
             node: NodeKey(1),
@@ -738,7 +738,7 @@ fn a_declared_root_into_a_stated_device_is_allocation_free() {
         SampleRate::of(48_000.0),
         tutti_types::MaxBlock::of(tutti_types::Samples(512)),
     ));
-    let _ = ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
+    ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
     ed.spec_mut().topology.set_outputs((0..12).map(|port| {
         Source::Node(OutPort {
             node: NodeKey(1),
@@ -796,7 +796,7 @@ fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
         SampleRate::of(48_000.0),
         tutti_types::MaxBlock::of(tutti_types::Samples(512)),
     ));
-    let _ = ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
+    ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
     ed.spec_mut().topology.set_outputs((0..12).map(|port| {
         Source::Node(OutPort {
             node: NodeKey(1),

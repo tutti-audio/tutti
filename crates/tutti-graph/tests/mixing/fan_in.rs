@@ -521,7 +521,7 @@ fn flags(n: u64) -> Flags {
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
     let switches: Vec<_> = (0..n).map(|_| Arc::new(AtomicBool::new(false))).collect();
     for (i, s) in switches.iter().enumerate() {
-        let _ = ed.insert(
+        ed.insert(
             key(i as u64 + 1),
             "switch",
             Unforkable(Switch(Arc::clone(s))),
@@ -529,7 +529,7 @@ fn flags(n: u64) -> Flags {
     }
     let calls = Arc::new(AtomicU64::new(0));
     let constant = Arc::new(AtomicU64::new(0));
-    let _ = ed.insert(
+    ed.insert(
         key(n + 1),
         "probe",
         Unforkable(Probe {
@@ -600,12 +600,12 @@ fn a_sum_is_constant_when_its_live_addends_are() {
     let constant_calls = |kinds: &[Kind]| {
         let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
         for (i, k) in kinds.iter().enumerate() {
-            let _ = ed.insert(key(i as u64 + 1), "n", Unforkable(TestNode::new(k.clone())));
+            ed.insert(key(i as u64 + 1), "n", Unforkable(TestNode::new(k.clone())));
         }
         let n = kinds.len() as u64;
         let calls = Arc::new(AtomicU64::new(0));
         let constant = Arc::new(AtomicU64::new(0));
-        let _ = ed.insert(
+        ed.insert(
             key(n + 1),
             "probe",
             Unforkable(Probe {

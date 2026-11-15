@@ -167,7 +167,7 @@ fn rig(workers: usize, no_alloc: bool, m: usize) -> Rig {
             common::test_pool(workers)
         }));
     }
-    let _ = ed.insert(
+    ed.insert(
         NodeKey(90),
         "const",
         Forkable(Kind::Const {
@@ -175,7 +175,7 @@ fn rig(workers: usize, no_alloc: bool, m: usize) -> Rig {
             width: 1,
         }),
     );
-    let _ = ed.insert(NodeKey(91), "lag", Forkable(Kind::Lag { latency: m }));
+    ed.insert(NodeKey(91), "lag", Forkable(Kind::Lag { latency: m }));
     let t = &mut ed.spec_mut().topology;
     t.connect(
         InPort {
@@ -193,7 +193,7 @@ fn rig(workers: usize, no_alloc: bool, m: usize) -> Rig {
 }
 
 fn script(r: &mut Rig, key: u64, s: Script) {
-    let _ = r.ed.insert(NodeKey(key), "script", ForkByClone(s));
+    r.ed.insert(NodeKey(key), "script", ForkByClone(s));
 }
 
 fn commit(r: &mut Rig) {
@@ -765,7 +765,7 @@ fn fan_in(r: &mut Rig, probe_ports: usize) -> Arc<Mutex<Vec<TapEvent>>> {
     script(r, 1, Script::new(shared.clone()));
     script(r, 2, Script::new(shared).latency(15));
     let heard = Arc::new(Mutex::new(Vec::new()));
-    let _ = r.ed.insert(
+    r.ed.insert(
         NodeKey(3),
         "probe",
         ForkByClone(Probe {
@@ -895,7 +895,7 @@ fn an_aligned_input_tap_is_sized_for_every_source_of_the_input() {
         script(&mut r, key, s);
     }
     let heard = Arc::new(Mutex::new(Vec::new()));
-    let _ = r.ed.insert(
+    r.ed.insert(
         NodeKey(3),
         "probe",
         ForkByClone(Probe {

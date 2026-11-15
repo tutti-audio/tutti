@@ -22,7 +22,7 @@ use std::time::Instant;
 
 use tutti_graph::Losses;
 use tutti_midi_device::{ClockHeard, JrReceiver};
-use tutti_midi_runtime::{DeviceInput, DeviceSlot, InletCounts};
+use tutti_midi_runtime::{DeviceInput, InletCounts, InputId};
 use tutti_rt::{Overflow, RingReader, RingWriter, ring};
 use tutti_ump::{Message, Ump, Utility};
 
@@ -180,7 +180,7 @@ const SYSEX7: u8 = 0x3;
 impl core::fmt::Debug for InputProducerHandle {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("InputProducerHandle")
-            .field("slot", &self.input.slot())
+            .field("port", &self.input.id())
             .finish_non_exhaustive()
     }
 }
@@ -188,7 +188,7 @@ impl core::fmt::Debug for InputProducerHandle {
 impl InputProducerHandle {
     /// Pushes one event the OS delivered at `timestamp`: it is placed on the
     /// frame the engine's clock puts that time on, plus the inlets' lead
-    /// ([`DeviceInlets`](tutti_midi_runtime::DeviceInlets)), so the order and
+    /// ([`InputInlets`](tutti_midi_runtime::InputInlets)), so the order and
     /// spacing of the device's events are kept to the clock map's accuracy.
     ///
     /// A **UMP Stream message** (type `0xF`, M2-104 §7.1) is the device's talk
@@ -255,13 +255,12 @@ impl InputProducerHandle {
         }
     }
 
-    /// The identity of the port this handle feeds, and the slot it holds
-    /// until it drops: the key to pass to
+    /// The identity of the port this handle feeds: the key to pass to
     /// [`HardwareMidiInputs`](super::HardwareMidiInputs)' `set_port_active` or
     /// `remove_input_port`.
     #[must_use]
-    pub fn slot(&self) -> DeviceSlot {
-        self.input.slot()
+    pub fn port(&self) -> InputId {
+        self.input.id()
     }
 }
 

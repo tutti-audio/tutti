@@ -645,12 +645,12 @@ mod tests {
         let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64)));
         let (mut ed, mut exec) = crate::Editor::new(prepare);
         let seen = Arc::new(AtomicUsize::new(0));
-        let _ = ed.insert(NodeKey(1), "a", crate::Unforkable(Count(Arc::clone(&seen))));
+        ed.insert(NodeKey(1), "a", crate::Unforkable(Count(Arc::clone(&seen))));
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
 
-        let _ = ed.insert(NodeKey(2), "b", crate::Unforkable(Count(Arc::clone(&seen))));
+        ed.insert(NodeKey(2), "b", crate::Unforkable(Count(Arc::clone(&seen))));
         ed.commit().expect("queued, not applied");
         let to = crate::EventIn {
             node: NodeKey(2),
@@ -705,16 +705,16 @@ mod tests {
             built
         };
         for k in 1..=4 {
-            let _ = ed.insert(NodeKey(k), "a", crate::Unforkable(Count(Arc::clone(&seen))));
+            ed.insert(NodeKey(k), "a", crate::Unforkable(Count(Arc::clone(&seen))));
         }
         assert!(
             staged_store(&mut ed, &mut exec),
             "the first units outgrow nothing"
         );
-        let _ = ed.insert(NodeKey(5), "a", crate::Unforkable(Count(Arc::clone(&seen))));
+        ed.insert(NodeKey(5), "a", crate::Unforkable(Count(Arc::clone(&seen))));
         assert!(staged_store(&mut ed, &mut exec), "five outgrow four");
         for k in 6..=8 {
-            let _ = ed.insert(NodeKey(k), "a", crate::Unforkable(Count(Arc::clone(&seen))));
+            ed.insert(NodeKey(k), "a", crate::Unforkable(Count(Arc::clone(&seen))));
         }
         assert!(
             !staged_store(&mut ed, &mut exec),

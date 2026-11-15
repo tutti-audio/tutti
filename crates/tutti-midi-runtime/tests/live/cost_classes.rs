@@ -2,7 +2,6 @@
 //! clip-to-output lanes pack into fewer tasks than undeclared ones, and on a
 //! pool every event leaves on the frame the serial walk sends it on.
 
-use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use tutti_types::MaxBlock;
 
@@ -106,19 +105,19 @@ fn graph(workers: usize, declared: bool) -> (Executor, Vec<common::Sink>, Vec<Se
     for k in 0..LANES + HEAVY {
         let (source, sink) = (NodeKey(100 + k), NodeKey(k + 1));
         if k >= LANES {
-            let _ = ed.insert(source, "clip", clip(k));
+            ed.insert(source, "clip", clip(k));
             let log = Seen::default();
-            let _ = ed.insert(sink, "recorder", ForkByClone(Recorder(Arc::clone(&log))));
+            ed.insert(sink, "recorder", ForkByClone(Recorder(Arc::clone(&log))));
             seen.push(log);
             outputs.push(Source::Node(OutPort {
                 node: sink,
                 port: 0,
             }));
         } else if declared {
-            let _ = ed.insert(source, "clip", clip(k));
+            ed.insert(source, "clip", clip(k));
             outs.push(common::sink(&mut ed, k + 1, &[(source.0, 0)]));
         } else {
-            let _ = ed.insert(source, "clip", Unforkable(Undeclared(clip(k))));
+            ed.insert(source, "clip", Unforkable(Undeclared(clip(k))));
             outs.push(common::sink(&mut ed, k + 1, &[(source.0, 0)]));
         }
         if k >= LANES {
@@ -180,10 +179,7 @@ fn every_midi_node_is_light() {
         EventInletNode::pair(EventCapacity::of(8)).0.shape().cost,
         Cost::Light
     );
-    assert_eq!(
-        MidiIngestNode::new(NonZeroUsize::MIN).shape().cost,
-        Cost::Light
-    );
+    assert_eq!(MidiIngestNode::new().shape().cost, Cost::Light);
 }
 
 /// Sixteen light clip → out lanes beside two heavy ones: the light lanes

@@ -245,7 +245,7 @@ fn dry_is_the_aligned_input_bit_for_bit_and_the_node_keeps_running() {
     let resets = Arc::new(AtomicUsize::new(0));
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
-    let _ = ed.insert(
+    ed.insert(
         key(1),
         "probe",
         Unforkable(Counter {
@@ -544,7 +544,7 @@ fn a_mix_stored_mid_block_lands_on_the_next_block() {
         {
             let mut e = ed.lock().unwrap();
             let (hook_ed, hook_blocks) = (Arc::clone(&ed), Arc::clone(&blocks));
-            let _ = e.insert(
+            e.insert(
                 key(1),
                 "hook",
                 Unforkable(Hook {
@@ -560,7 +560,7 @@ fn a_mix_stored_mid_block_lands_on_the_next_block() {
                     }),
                 }),
             );
-            let _ = e.insert(key(2), "gain", Unforkable(TestNode::new(plain())));
+            e.insert(key(2), "gain", Unforkable(TestNode::new(plain())));
             e.spec_mut()
                 .topology
                 .connect(at(2, 0), Edge::Direct(out(1, 0)));
@@ -614,7 +614,7 @@ impl Node for Triple {
 fn solo(mix: Option<Mix>) -> (Editor, tutti_graph::Executor) {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
-    let _ = ed.insert(key(1), "gain", tutti_graph::ForkByClone(Triple));
+    ed.insert(key(1), "gain", tutti_graph::ForkByClone(Triple));
     ed.spec_mut()
         .topology
         .connect(at(1, 0), Edge::Direct(Source::Global(0)));
@@ -771,7 +771,7 @@ fn a_fork_copies_the_mix() {
 fn a_mix_of_a_node_with_no_pass_is_refused() {
     let (mut ed, _exec) = Editor::new(prepare(MAX_BLOCK));
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
-    let _ = ed.insert(
+    ed.insert(
         key(1),
         "split",
         Unforkable(TestNode::new(Kind::Spec {
@@ -782,7 +782,7 @@ fn a_mix_of_a_node_with_no_pass_is_refused() {
             tail: Tail::None,
         })),
     );
-    let _ = ed.insert(
+    ed.insert(
         key(2),
         "driver",
         Unforkable(TestNode::new(Kind::MixDriver {

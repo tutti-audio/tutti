@@ -451,7 +451,7 @@ fn a_bus_edge_sums_with_a_plain_source_on_the_same_channel() {
 fn editor(kinds: &[(u64, Kind)], inputs: usize) -> (Editor, tutti_graph::Executor) {
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
     for (n, kind) in kinds {
-        let _ = ed.insert(key(*n), "test", Unforkable(TestNode::new(kind.clone())));
+        ed.insert(key(*n), "test", Unforkable(TestNode::new(kind.clone())));
     }
     ed.spec_mut().topology.inputs = ChannelLayout::from_count(inputs as u16);
     (ed, exec)
@@ -629,7 +629,7 @@ fn a_replaced_node_whose_bus_no_longer_folds_fails_the_commit() {
     exec.apply_pending();
     ed.collect();
     // A source of three unassigned channels: no place in a named stereo bus.
-    let _ = ed.insert(
+    ed.insert(
         key(1),
         "test",
         Unforkable(TestNode::new(source(3, unassigned(3)))),
@@ -926,8 +926,8 @@ fn a_fork_of_a_bus_edge_renders_the_fold() {
     }
 
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
-    let _ = ed.insert(key(1), "stereo", ForkByClone(Stereo));
-    let _ = ed.insert(key(2), "mono", ForkByClone(Mono));
+    ed.insert(key(1), "stereo", ForkByClone(Stereo));
+    ed.insert(key(2), "mono", ForkByClone(Mono));
     ed.connect_bus(from(1, 0), bus_ref(2, 0)).unwrap();
     ed.spec_mut().topology.set_outputs(vec![out_port(2, 0)]);
     ed.commit().expect("commits");
@@ -1194,7 +1194,7 @@ fn a_fork_of_a_root_edge_renders_the_fold() {
     }
 
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
-    let _ = ed.insert(key(1), "stereo", ForkByClone(Stereo));
+    ed.insert(key(1), "stereo", ForkByClone(Stereo));
     ed.spec_mut().root = Some(smpte(1).topology);
     ed.spec_mut().topology.outputs = vec![Vec::new()];
     ed.connect_bus_to_root(from(1, 0)).unwrap();

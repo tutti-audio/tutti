@@ -47,7 +47,7 @@ const LIMITS: Limits = Limits {
 fn commits_and_re_prepares_past_the_limits_are_refused() {
     let (mut ed, mut exec) = Editor::new(prep(512));
     ed.set_limits(LIMITS).expect("nothing sent yet");
-    let _ = ed.insert(NodeKey(1), "wide", Unforkable(Wide(10)));
+    ed.insert(NodeKey(1), "wide", Unforkable(Wide(10)));
     wire(&mut ed, 10);
     assert_eq!(
         ed.commit(),
@@ -86,7 +86,7 @@ fn commits_and_re_prepares_past_the_limits_are_refused() {
 #[test]
 fn limits_below_what_was_sent_are_refused() {
     let (mut ed, _exec) = Editor::new(prep(1024));
-    let _ = ed.insert(NodeKey(1), "wide", Unforkable(Wide(10)));
+    ed.insert(NodeKey(1), "wide", Unforkable(Wide(10)));
     wire(&mut ed, 10);
     ed.commit().expect("no limits yet");
     assert!(matches!(
@@ -134,7 +134,7 @@ fn limits_only_tighten() {
             max_block: 1024
         }
     );
-    let _ = ed.insert(NodeKey(1), "wide", Unforkable(Wide(10)));
+    ed.insert(NodeKey(1), "wide", Unforkable(Wide(10)));
     wire(&mut ed, 10);
     assert!(matches!(
         ed.commit(),
@@ -148,7 +148,7 @@ fn limits_only_tighten() {
 fn validate_refuses_what_commit_refuses_and_sends_nothing() {
     let (mut ed, _exec) = Editor::new(prep(512));
     ed.set_limits(LIMITS).expect("nothing sent yet");
-    let _ = ed.insert(NodeKey(1), "wide", Unforkable(Wide(10)));
+    ed.insert(NodeKey(1), "wide", Unforkable(Wide(10)));
     wire(&mut ed, 10);
     let refused = CommitError::TooManyOutputs {
         outputs: 10,

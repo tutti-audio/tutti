@@ -1758,7 +1758,7 @@ impl EditorPair {
             exec.set_pool(Some(common::test_pool(workers)));
         }
         for (&k, kind) in &desc.kinds {
-            let _ = editor.insert(k, "test", Unforkable(common::TestNode::new(kind.clone())));
+            editor.insert(k, "test", Unforkable(common::TestNode::new(kind.clone())));
         }
         let spec = editor.spec_mut();
         spec.topology.edges = desc.spec.topology.edges.clone();

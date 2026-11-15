@@ -95,11 +95,11 @@ fn wide(lanes: usize, depth: usize, workers: usize) -> Executor {
     for lane in 0..lanes {
         let base = 1_000 * (lane as u64 + 1);
         let osc = NodeKey(base);
-        let _ = ed.insert(osc, "osc", Osc::sine(Hz(110.0 + lane as f32)));
+        ed.insert(osc, "osc", Osc::sine(Hz(110.0 + lane as f32)));
         let mut last = osc;
         for i in 0..depth {
             let k = NodeKey(base + 1 + i as u64);
-            let _ = ed.insert(
+            ed.insert(
                 k,
                 "svf",
                 SvfFilterNode::<f64>::new(
@@ -154,7 +154,7 @@ impl tutti_graph::Node for Gain {
 }
 
 fn gain(ed: &mut Editor, k: NodeKey, i: usize, light: bool) {
-    let _ = ed.insert(
+    ed.insert(
         k,
         "gain",
         Unforkable(Gain {
@@ -224,11 +224,11 @@ fn mixed(lanes: usize, depth: usize, fan: usize, light: bool, workers: usize) ->
     for lane in 0..lanes {
         let base = 1_000 * (lane as u64 + 1);
         let osc = NodeKey(base);
-        let _ = ed.insert(osc, "osc", Osc::sine(Hz(110.0 + lane as f32)));
+        ed.insert(osc, "osc", Osc::sine(Hz(110.0 + lane as f32)));
         let mut last = osc;
         for i in 0..depth {
             let k = NodeKey(base + 1 + i as u64);
-            let _ = ed.insert(
+            ed.insert(
                 k,
                 "svf",
                 SvfFilterNode::<f64>::new(

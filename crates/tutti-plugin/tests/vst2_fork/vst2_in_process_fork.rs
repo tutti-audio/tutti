@@ -255,7 +255,7 @@ fn a_plugin_without_chunks_forks_with_its_program_and_parameters() {
         .expect("the probe forks");
     let key = NodeKey(2);
     let (mut editor, exec) = Editor::new(prepare_at(SAMPLE_RATE));
-    let _ = editor.insert(key, "fork", tutti_graph::Unforkable(fork));
+    editor.insert(key, "fork", tutti_graph::Unforkable(fork));
     editor
         .spec_mut()
         .topology
@@ -469,7 +469,7 @@ fn a_live_fork_keeps_the_live_render_mode() {
             .expect("forks");
         let key = NodeKey(7);
         let (mut editor, exec) = Editor::new(prepare_at(SAMPLE_RATE));
-        let _ = editor.insert(key, "fork", tutti_graph::Unforkable(fork));
+        editor.insert(key, "fork", tutti_graph::Unforkable(fork));
         editor
             .spec_mut()
             .topology

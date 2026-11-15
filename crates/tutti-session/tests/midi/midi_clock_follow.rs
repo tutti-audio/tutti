@@ -36,14 +36,26 @@ fn rig() -> (Session, FakeCounters) {
         .build()
         .expect("builds");
     let _ = s.update();
-    s.midi().connect_input("keys").expect("connects");
+    let keys = s.midi().devices().remove(0);
+    s.pool(tutti_session::midi_input("keys", keys))
+        .expect("declares");
     let _ = s.update();
     (s, fake)
 }
 
+/// The ingest node of the input port `"keys"`, which a follower reads.
+fn input(s: &Session) -> tutti_graph::NodeKey {
+    s.midi_input(&"keys").expect("loaded").node()
+}
+
 fn follow(s: &mut Session, kind: ClockKind) {
+    let input = input(s);
     s.midi()
-        .follow_clock(FollowClock { group: G, kind })
+        .follow_clock(FollowClock {
+            input,
+            group: G,
+            kind,
+        })
         .expect("follows");
     let _ = s.update();
 }
@@ -264,8 +276,10 @@ fn a_beat_clock_follower_owns_the_tempo_and_mtc_does_not() {
     let (mut s, _fake) = rig();
     follow(&mut s, ClockKind::Mtc);
     assert!(s.set_tempo(Bpm::of(100.0)).is_ok());
+    let node = input(&s);
     s.midi()
         .follow_tempo(FollowTempo {
+            input: node,
             group: G,
             meter: false,
         })
@@ -278,6 +292,7 @@ fn a_beat_clock_follower_owns_the_tempo_and_mtc_does_not() {
         Err(TempoError::Following)
     ));
     let taken = s.midi().follow_tempo(FollowTempo {
+        input: node,
         group: G,
         meter: false,
     });

@@ -58,14 +58,14 @@ fn build(ed: &mut Editor) -> Vec<Source> {
     let mut gains = Vec::new();
     for k in 0..CHAINS {
         let (lag, gain) = (10 + k, 20 + k);
-        let _ = ed.insert(
+        ed.insert(
             NodeKey(lag),
             "lag",
             Forkable(Kind::Lag {
                 latency: 5 * k as usize,
             }),
         );
-        let _ = ed.insert(
+        ed.insert(
             NodeKey(gain),
             "gain",
             Forkable(Kind::Gain {

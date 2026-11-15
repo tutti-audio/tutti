@@ -1064,7 +1064,7 @@ fn nodes_default_to_sample_resolution() {
 #[test]
 fn removing_a_node_removes_its_resolution_marks() {
     let (mut ed, _exec) = tutti_graph::Editor::new(common::prepare(PREP));
-    let _ = ed.insert(
+    ed.insert(
         A,
         "emit",
         Unforkable(common::TestNode::new(Kind::Emitter {
@@ -1072,7 +1072,7 @@ fn removing_a_node_removes_its_resolution_marks() {
             phase: 0,
         })),
     );
-    let _ = ed.insert(
+    ed.insert(
         B,
         "consume",
         Unforkable(common::TestNode::new(Kind::Consumer { inputs: 1 })),
@@ -1093,7 +1093,7 @@ fn removing_a_node_removes_its_resolution_marks() {
 #[test]
 fn disconnecting_an_edge_drops_its_resolution_mark() {
     let (mut ed, _exec) = tutti_graph::Editor::new(common::prepare(PREP));
-    let _ = ed.insert(
+    ed.insert(
         A,
         "emit",
         Unforkable(common::TestNode::new(Kind::Emitter {
@@ -1101,7 +1101,7 @@ fn disconnecting_an_edge_drops_its_resolution_mark() {
             phase: 0,
         })),
     );
-    let _ = ed.insert(
+    ed.insert(
         B,
         "consume",
         Unforkable(common::TestNode::new(Kind::Consumer { inputs: 1 })),

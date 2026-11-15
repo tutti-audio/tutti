@@ -482,7 +482,7 @@ fn a_bypass_with_no_pass_is_refused() {
     };
     let stereo = [Speaker::FrontLeft, Speaker::FrontRight];
     let centre_lfe = [Speaker::FrontCenter, Speaker::LowFrequency];
-    let _ = ed.insert(
+    ed.insert(
         key(1),
         "no fold",
         Unforkable(TestNode::new(bused(
@@ -493,13 +493,13 @@ fn a_bypass_with_no_pass_is_refused() {
             named(&centre_lfe),
         ))),
     );
-    let _ = ed.insert(key(2), "widths", widths(6, 2));
-    let _ = ed.insert(
+    ed.insert(key(2), "widths", widths(6, 2));
+    ed.insert(
         key(3),
         "unplaced into named",
         Unforkable(TestNode::new(bused(6, 2, 0, unassigned(6), smpte(2)))),
     );
-    let _ = ed.insert(key(4), "one width", widths(2, 2));
+    ed.insert(key(4), "one width", widths(2, 2));
     let refused = ed.set_mode(key(1), NodeMode::Bypassed);
     assert!(
         matches!(
@@ -922,7 +922,7 @@ impl Solo {
     }
 
     fn add(&mut self, n: u64, node: impl Node + 'static) {
-        let _ = self.ed.insert(key(n), "probe", Unforkable(node));
+        self.ed.insert(key(n), "probe", Unforkable(node));
     }
 
     fn wire(&mut self, f: impl FnOnce(&mut Topology)) {
@@ -1317,7 +1317,7 @@ fn a_mode_stored_mid_block_lands_on_the_next_block() {
         {
             let mut e = ed.lock().unwrap();
             let (hook_ed, hook_blocks) = (Arc::clone(&ed), Arc::clone(&blocks));
-            let _ = e.insert(
+            e.insert(
                 key(1),
                 "hook",
                 Unforkable(Hook {
@@ -1333,7 +1333,7 @@ fn a_mode_stored_mid_block_lands_on_the_next_block() {
                     }),
                 }),
             );
-            let _ = e.insert(
+            e.insert(
                 key(2),
                 "gain",
                 Unforkable(TestNode::new(Kind::Gain {
@@ -1427,7 +1427,7 @@ fn modes_name_nodes() {
 fn a_fork_copies_the_mode_and_starts_steady() {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
-    let _ = ed.insert(key(1), "probe", ForkByClone(Probe::new(3.0)));
+    ed.insert(key(1), "probe", ForkByClone(Probe::new(3.0)));
     ed.spec_mut()
         .topology
         .connect(at(1, 0), Edge::Direct(Source::Global(0)));
@@ -1525,8 +1525,8 @@ fn an_own_bypass_node_needs_no_pass() {
     wide.outs = 2;
     let mut own = wide.clone();
     own.own_bypass = true;
-    let _ = ed.insert(key(1), "plain", Unforkable(wide));
-    let _ = ed.insert(key(2), "own", Unforkable(own));
+    ed.insert(key(1), "plain", Unforkable(wide));
+    ed.insert(key(2), "own", Unforkable(own));
     assert!(matches!(
         ed.set_mode(key(1), NodeMode::Bypassed),
         Err(ModeError::Unplaced { .. })

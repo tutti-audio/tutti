@@ -72,8 +72,8 @@ fn rig(source: Source) -> Executor {
         SampleRate::SR_48K,
         MaxBlock::of(Samples(BLOCK)),
     ));
-    let _ = ed.insert(NodeKey(1), "source", Unforkable(source));
-    let _ = ed.insert(NodeKey(2), "sink", Unforkable(Sink));
+    ed.insert(NodeKey(1), "source", Unforkable(source));
+    ed.insert(NodeKey(2), "sink", Unforkable(Sink));
     ed.spec_mut().connect_events(
         EventIn {
             node: NodeKey(2),
@@ -116,7 +116,7 @@ fn bench(c: &mut Criterion) {
             MaxBlock::of(Samples(BLOCK)),
         ));
         for i in 0..k {
-            let _ = ed.insert(
+            ed.insert(
                 NodeKey(i + 1),
                 "source",
                 Unforkable(Source {

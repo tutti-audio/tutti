@@ -112,7 +112,7 @@ fn rig(
     }
     let ports: u16 = writers.iter().map(|w| w.len() as u16).sum();
     let seen = Arc::new(Mutex::new(vec![(0, 0); ports as usize]));
-    let _ = ed.insert(
+    ed.insert(
         NodeKey(100),
         "counter",
         tutti_graph::Unforkable(Counter {
@@ -123,7 +123,7 @@ fn rig(
     let mut next = 0;
     for (i, scripts) in writers.iter().enumerate() {
         let key = NodeKey(1 + i as u64);
-        let _ = ed.insert(
+        ed.insert(
             key,
             "writer",
             tutti_graph::Unforkable(Writer {

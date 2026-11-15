@@ -381,7 +381,7 @@ fn probe(ed: &mut Editor, host: &mut Host, id: u64, knob: f32) {
 
 fn probe_of(ed: &mut Editor, host: &mut Host, id: u64, p: Probe) {
     host.targets.insert(id, (key(id), Arc::clone(&p.knob)));
-    let _ = ed.insert(key(id), "probe", ForkByClone(p));
+    ed.insert(key(id), "probe", ForkByClone(p));
     ed.spec_mut()
         .topology
         .outputs
@@ -482,7 +482,7 @@ fn rig(max: usize) -> Rig {
     let mut host = Host::default();
     probe(&mut ed, &mut host, 1, 500.0);
     probe(&mut ed, &mut host, 2, 0.8);
-    let _ = ed.insert(
+    ed.insert(
         key(10),
         "kick",
         ForkByClone(Pulse {
@@ -615,7 +615,7 @@ fn range_and_depth_edits_need_no_commit_and_a_follower_route_one() {
     let (mut ed, mut exec) = editor(128);
     let mut host = Host::default();
     probe(&mut ed, &mut host, 1, 500.0);
-    let _ = ed.insert(
+    ed.insert(
         key(10),
         "kick",
         ForkByClone(Pulse {
@@ -752,7 +752,7 @@ fn resync_rig() -> (Rig, SourceKey) {
     let mut host = Host::default();
     probe(&mut ed, &mut host, 1, 0.2);
     probe(&mut ed, &mut host, 2, 0.1);
-    let _ = ed.insert(key(10), "clip", ForkByClone(Held { on: 10 }));
+    ed.insert(key(10), "clip", ForkByClone(Held { on: 10 }));
     ed.commit().expect("commits");
     let mut decl = Decl::default();
     decl.target(cutoff_of(1), 0.0, 1.0);
@@ -893,7 +893,7 @@ fn a_host_key_is_never_taken() {
     let mut host = Host::default();
     let p = Probe::new(0.8);
     host.targets.insert(1, (NodeKey(1), Arc::clone(&p.knob)));
-    let _ = ed.insert(NodeKey(1), "probe", ForkByClone(p));
+    ed.insert(NodeKey(1), "probe", ForkByClone(p));
     ed.spec_mut()
         .topology
         .outputs
@@ -901,7 +901,7 @@ fn a_host_key_is_never_taken() {
             node: NodeKey(1),
             port: 0,
         })]);
-    let _ = ed.insert(
+    ed.insert(
         NodeKey(2),
         "pulse",
         ForkByClone(Pulse {
@@ -943,7 +943,7 @@ fn a_foreign_target_takes_a_lane_on_its_event_input() {
     let (mut ed, mut exec) = editor(128);
     let mut host = Host::default();
     let log = Arc::new(Mutex::new(Vec::new()));
-    let _ = ed.insert(key(50), "plugin", ForkByClone(Capture(Arc::clone(&log))));
+    ed.insert(key(50), "plugin", ForkByClone(Capture(Arc::clone(&log))));
     ed.commit().expect("commits");
     host.foreign.insert(50, key(50));
     let param = TargetKey::param(50, ParamAddr::Id(7));
@@ -999,7 +999,7 @@ fn a_rebind_to_another_param_list_waits_for_its_commit() {
     assert_eq!(got[0][1_023], 250.0);
 
     let knob = Arc::clone(&host.targets[&1].1);
-    let _ = ed.insert(
+    ed.insert(
         key(1),
         "probe",
         ForkByClone(Probe {
@@ -1066,7 +1066,7 @@ fn a_port_with_another_event_source_is_refused() {
     let mut r = rig(128);
     render(&mut r.ed, &mut r.exec, 128, 128);
     probe(&mut r.ed, &mut r.host, 3, 0.5);
-    let _ = r.ed.insert(key(30), "clip", ForkByClone(Held { on: 10 }));
+    r.ed.insert(key(30), "clip", ForkByClone(Held { on: 10 }));
     r.ed.spec_mut().connect_param(
         ParamIn {
             node: key(3),
@@ -1104,8 +1104,8 @@ fn a_key_the_host_takes_is_followed() {
     let mut all = render(&mut r.ed, &mut r.exec, 128, 128);
     let lane = r.m.lane(cutoff_of(1)).expect("a lane").0;
     let follower = r.m.source(SourceKey(2)).expect("a follower");
-    let _ = r.ed.insert(lane, "probe", ForkByClone(Probe::new(1.0)));
-    let _ = r.ed.insert(
+    r.ed.insert(lane, "probe", ForkByClone(Probe::new(1.0)));
+    r.ed.insert(
         follower,
         "pulse",
         ForkByClone(Pulse {
@@ -1229,7 +1229,7 @@ fn a_replace_with_the_same_params_keeps_modulating() {
     render(&mut ed, &mut exec, 128, 1_024);
 
     let knob = Arc::clone(&host.targets[&1].1);
-    let _ = ed.insert(
+    ed.insert(
         key(1),
         "probe",
         ForkByClone(Probe {
@@ -1261,7 +1261,7 @@ fn a_taken_lanes_unwiring_keeps_the_hosts_edges() {
     let (mut ed, mut exec) = editor(128);
     let mut host = Host::default();
     let log = Arc::new(Mutex::new(Vec::new()));
-    let _ = ed.insert(key(50), "plugin", ForkByClone(Capture(Arc::clone(&log))));
+    ed.insert(key(50), "plugin", ForkByClone(Capture(Arc::clone(&log))));
     ed.commit().expect("commits");
     host.foreign.insert(50, key(50));
     let param = TargetKey::param(50, ParamAddr::Id(7));
@@ -1275,7 +1275,7 @@ fn a_taken_lanes_unwiring_keeps_the_hosts_edges() {
     render(&mut ed, &mut exec, 128, 256);
 
     let lane = m.lane(param).expect("a lane").0;
-    let _ = ed.insert(lane, "clip", ForkByClone(Held { on: 10 }));
+    ed.insert(lane, "clip", ForkByClone(Held { on: 10 }));
     let to = EventIn {
         node: key(50),
         port: 0,
@@ -1327,7 +1327,7 @@ fn state(ed: &Editor, m: &Modulation, targets: &[TargetKey], sources: &[SourceKe
 fn a_follower_downstream_of_its_target_is_refused_by_route() {
     let mut r = rig(128);
     render(&mut r.ed, &mut r.exec, 128, 128);
-    let _ = r.ed.insert(
+    r.ed.insert(
         key(20),
         "bus",
         ForkByClone(Through::new(ChannelLayout::MONO)),
@@ -1396,7 +1396,7 @@ fn an_export_is_the_live_render_on_a_native_param() {
     let mut host = Host::default();
     probe(&mut ed, &mut host, 1, 500.0);
     probe(&mut ed, &mut host, 2, 0.8);
-    let _ = ed.insert(key(10), "kick", ForkByClone(Kick { bleed: 0.8 }));
+    ed.insert(key(10), "kick", ForkByClone(Kick { bleed: 0.8 }));
     ed.commit().expect("commits");
     let mut decl = Decl::default();
     decl.target(cutoff_of(1), 0.0, 1000.0);
@@ -1656,7 +1656,7 @@ fn a_target_no_longer_resolved_after_a_steady_state_loses_its_lane() {
 fn a_feed_moved_after_a_steady_state_is_rewired() {
     let mut r = rig(128);
     render(&mut r.ed, &mut r.exec, 128, 128);
-    let _ = r.ed.insert(
+    r.ed.insert(
         key(11),
         "kick",
         ForkByClone(Pulse {
@@ -1720,8 +1720,8 @@ fn foreign_rig() -> (Editor, Host, Decl, Modulation, TargetKey) {
     let (mut ed, _exec) = editor(128);
     let mut host = Host::default();
     let log = Arc::new(Mutex::new(Vec::new()));
-    let _ = ed.insert(key(50), "plugin", ForkByClone(Capture(log)));
-    let _ = ed.insert(key(51), "plugin", ForkByClone(Capture2));
+    ed.insert(key(50), "plugin", ForkByClone(Capture(log)));
+    ed.insert(key(51), "plugin", ForkByClone(Capture2));
     ed.commit().expect("commits");
     host.foreign.insert(50, key(50));
     let param = TargetKey::param(50, ParamAddr::Id(7));

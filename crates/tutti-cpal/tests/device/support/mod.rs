@@ -24,7 +24,7 @@ pub fn dc_state(level: f32, outputs: usize) -> Arc<AudioCallbackState> {
         SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples(512)),
     ));
-    let _ = ed.insert(NodeKey(1), "dc", Const::mono(level));
+    ed.insert(NodeKey(1), "dc", Const::mono(level));
     ed.spec_mut().topology.set_outputs(vec![
         Source::Node(OutPort {
             node: NodeKey(1),

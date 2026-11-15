@@ -44,12 +44,12 @@ fn graph(unit: SoundFontUnit, rate: f64, frame: u64) -> (Editor, Executor) {
     let beat = Beat(frame as f64 / (rate / 2.0));
     let velocity = widen_velocity(U7::of(100)).get(); // 7-bit 100, widened (M2-115)
     let on = midi::note_on(MidiChannel::FIRST, 60, velocity);
-    let _ = ed.insert(
+    ed.insert(
         NodeKey(1),
         "clip",
         MidiClipNode::new([TimedMidiEvent::new(beat, on).unwrap()]),
     );
-    let _ = ed.insert(NodeKey(2), "font", unit);
+    ed.insert(NodeKey(2), "font", unit);
     ed.spec_mut().connect_events(
         EventIn {
             node: NodeKey(2),

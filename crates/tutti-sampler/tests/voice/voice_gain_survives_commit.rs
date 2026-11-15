@@ -283,7 +283,7 @@ fn drive_volume(
     };
     let program = ControlProgram::new(None, vec![layer], vec![]).expect("valid");
     let lane = ControlLaneNode::for_unit(UnitParam::Volume, program, Some(knob), Some(range));
-    let _ = ed.insert(NodeKey(9_000), "lane", lane);
+    ed.insert(NodeKey(9_000), "lane", lane);
     ed.spec_mut().connect_param(
         at,
         EventOut {

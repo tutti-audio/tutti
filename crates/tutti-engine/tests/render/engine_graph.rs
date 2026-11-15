@@ -190,7 +190,7 @@ fn graph_engine(
     width: u16,
 ) -> (Engine, Editor) {
     let (mut ed, exec) = Editor::new(prepare(max_block));
-    let _ = ed.insert(NodeKey(1), "node", node);
+    ed.insert(NodeKey(1), "node", node);
     outputs(&mut ed, NodeKey(1), width);
     ed.commit().expect("commits");
     let engine = Engine::new(transport, &mut ed, exec).expect("within the limits");
@@ -212,7 +212,7 @@ fn graph_engine_render_is_bit_identical_to_the_executor() {
     let got = render(&engine, ChannelLayout::from_count(3), &blocks);
 
     let (mut ed, mut exec): (Editor, Executor) = Editor::new(prepare(512));
-    let _ = ed.insert(NodeKey(1), "node", Unforkable(Clocked));
+    ed.insert(NodeKey(1), "node", Unforkable(Clocked));
     outputs(&mut ed, NodeKey(1), 3);
     ed.commit().expect("commits");
     let mut want = Vec::new();
@@ -634,7 +634,7 @@ fn a_declick_lasts_five_milliseconds_at_any_rate() {
             MaxBlock::of(Samples(256)),
         ));
         let log = Arc::new(Mutex::new(Vec::new()));
-        let _ = ed.insert(NodeKey(1), "node", Unforkable(DcLog(log)));
+        ed.insert(NodeKey(1), "node", Unforkable(DcLog(log)));
         outputs(&mut ed, NodeKey(1), 1);
         ed.commit().expect("commits");
         let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
@@ -1016,7 +1016,7 @@ fn a_graph_engine_refuses_more_outputs_than_it_folds() {
 
     let transport = Transport::new(SampleRate::of(SR));
     let (mut ed, exec) = Editor::new(prepare(256));
-    let _ = ed.insert(NodeKey(1), "node", Unforkable(Clocked));
+    ed.insert(NodeKey(1), "node", Unforkable(Clocked));
     // One past the cap, off a three-channel node's ports, repeated: a legal
     // graph, wider than the scratch.
     let wide = MAX_CHANNELS + 1;
@@ -1071,7 +1071,7 @@ fn re_preparing_under_the_engine_adopts_the_new_block_at_once() {
     for segment in [false, true] {
         let transport = Transport::new(SampleRate::of(SR));
         let (mut ed, exec) = Editor::new(prepare(512));
-        let _ = ed.insert(NodeKey(1), "node", Unforkable(Clocked));
+        ed.insert(NodeKey(1), "node", Unforkable(Clocked));
         outputs(&mut ed, NodeKey(1), 3);
         ed.commit().expect("commits");
         let engine = Engine::with_capacity(&transport, &mut ed, exec, Samples(2048)).expect("fits");
@@ -1347,7 +1347,7 @@ fn a_re_prepare_keeps_the_beat_and_a_frame_command_on_wall_clock_time() {
         SampleRate::of(OLD_SR),
         MaxBlock::of(Samples(512)),
     ));
-    let _ = ed.insert(
+    ed.insert(
         NodeKey(1),
         "node",
         Unforkable(Gate {

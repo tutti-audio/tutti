@@ -169,7 +169,7 @@ fn disconnect(ed: &mut Editor, from: u64, to: u64) {
 
 fn sink(ed: &mut Editor, key: u64) -> Shared {
     let tally = Shared::default();
-    let _ = ed.insert(NodeKey(key), "sink", Unforkable(Sink::new(&tally)));
+    ed.insert(NodeKey(key), "sink", Unforkable(Sink::new(&tally)));
     tally
 }
 
@@ -301,7 +301,7 @@ fn ump_cc(v: u32) -> Ump {
 fn through(script: Vec<Vec<Ump>>, relay: Relay, blocks: u64) -> (Shared, Executor) {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
-    let _ = ed.insert(
+    ed.insert(
         NodeKey(1),
         "script",
         Unforkable(Script {
@@ -309,7 +309,7 @@ fn through(script: Vec<Vec<Ump>>, relay: Relay, blocks: u64) -> (Shared, Executo
             k: 0,
         }),
     );
-    let _ = ed.insert(NodeKey(2), "relay", Unforkable(relay));
+    ed.insert(NodeKey(2), "relay", Unforkable(relay));
     let tally = sink(&mut ed, 3);
     connect(&mut ed, 1, 2);
     connect(&mut ed, 2, 3);
@@ -429,7 +429,7 @@ fn a_ledger_relay_strands_no_note_under_random_refusal() {
 /// A clip into a sink in 64-frame blocks (a port of 256 events).
 fn clip_rig(events: Vec<TimedMidiEvent>) -> (Editor, Executor, Shared) {
     let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
-    let _ = ed.insert(NodeKey(1), "clip", MidiClipNode::new(events));
+    ed.insert(NodeKey(1), "clip", MidiClipNode::new(events));
     let tally = sink(&mut ed, 2);
     connect(&mut ed, 1, 2);
     ed.commit().unwrap();
@@ -595,14 +595,14 @@ fn a_rewire_ends_the_held_note_at_the_old_sink() {
 fn the_close_reaches_a_sink_behind_a_delayed_edge() {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))));
-    let _ = ed.insert(
+    ed.insert(
         NodeKey(1),
         "clip",
         MidiClipNode::new([at(0, on(60)), at(100_000, off(60))]),
     );
-    let _ = ed.insert(NodeKey(4), "latent", Unforkable(Latent(1_024)));
+    ed.insert(NodeKey(4), "latent", Unforkable(Latent(1_024)));
     let a = Shared::default();
-    let _ = ed.insert(
+    ed.insert(
         NodeKey(2),
         "sink",
         Unforkable(Sink {
@@ -656,7 +656,7 @@ fn forkable_rig() -> (
         .controls;
     let tally = Shared::default();
     let forks = Arc::default();
-    let _ = ed.insert(
+    ed.insert(
         NodeKey(2),
         "sink",
         ForkableSink {
@@ -783,7 +783,7 @@ fn probe(capacity: usize, blocks: Vec<Vec<Act>>) -> (Shared, u64, u64) {
     let n = blocks.len() as u64 + 1;
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
-    let _ = ed.insert(
+    ed.insert(
         NodeKey(1),
         "probe",
         Unforkable(Probe {

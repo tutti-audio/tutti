@@ -365,15 +365,15 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
                 let k = NodeKey(m as u64 + 1);
                 match kind {
                     Kind::Strip => {
-                        let _ = ed.insert(k, "strip", ForkByClone(StripNode(Ramp::member(m))));
+                        ed.insert(k, "strip", ForkByClone(StripNode(Ramp::member(m))));
                     }
                     Kind::BusStrip => {
                         let s = BusStripNode::stereo();
                         s.set_volume(Amplitude::new(0.5 + m as f32 * 1e-3));
-                        let _ = ed.insert(k, "bus strip", s);
+                        ed.insert(k, "bus strip", s);
                     }
                     Kind::Biquad => {
-                        let _ = ed.insert(k, "biquad", ForkByClone(BiquadNode(Biquad::member(m))));
+                        ed.insert(k, "biquad", ForkByClone(BiquadNode(Biquad::member(m))));
                     }
                 }
                 for c in 0..w {
@@ -388,7 +388,7 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
         Variant::Batched | Variant::Soa => {
             let k = NodeKey(1);
             let soa = variant == Variant::Soa;
-            let _ = match kind {
+            match kind {
                 Kind::Strip => {
                     let r: Vec<_> = (0..members).map(Ramp::member).collect();
                     match soa {

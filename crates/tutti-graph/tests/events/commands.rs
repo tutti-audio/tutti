@@ -89,7 +89,7 @@ struct Rig {
 fn rig() -> Rig {
     let (exec_log, ref_log) = (Log::default(), Log::default());
     let (mut ed, mut exec) = Editor::new(prepare(MAX));
-    let _ = ed.insert(
+    ed.insert(
         PROBE,
         "probe",
         Unforkable(Probe {
@@ -332,7 +332,7 @@ fn a_command_needs_a_port_and_an_orphan_is_counted() {
         .schedule(At::Frame(Frame::new(3000)), to(), tag(10))
         .expect("the port exists now");
     // Same key, a unit with no event inputs at all.
-    let _ = rig.ed.insert(
+    rig.ed.insert(
         PROBE,
         "const",
         Unforkable(common::TestNode::new(common::Kind::Const {
@@ -428,7 +428,7 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
     let (exec_log, ref_log) = (Arc::default(), Arc::default());
     let (mut ed, mut exec) = Editor::new(prepare(MAX));
     for (k, u) in units(&exec_log) {
-        let _ = ed.insert(k, "n", Unforkable(u));
+        ed.insert(k, "n", Unforkable(u));
     }
     let t = &mut ed.spec_mut().topology;
     t.inputs = ChannelLayout::MONO;
@@ -531,7 +531,7 @@ fn a_command_waits_for_the_commit_it_was_checked_against() {
     const ROUNDS: u32 = 3_000;
     let log: Log = Arc::default();
     let (mut ed, mut exec) = Editor::new(prepare(MAX));
-    let _ = ed.insert(
+    ed.insert(
         NodeKey(0),
         "probe",
         Unforkable(Probe {
@@ -553,7 +553,7 @@ fn a_command_waits_for_the_commit_it_was_checked_against() {
     });
     for round in 1..=ROUNDS {
         let key = NodeKey(u64::from(round));
-        let _ = ed.insert(
+        ed.insert(
             key,
             "probe",
             Unforkable(Probe {
@@ -661,7 +661,7 @@ fn a_ramp_into_a_coarse_node_is_refused() {
         fn reset(&mut self) {}
     }
     let (mut ed, mut exec) = Editor::new(prepare(MAX));
-    let _ = ed.insert(PROBE, "coarse", Unforkable(Coarse));
+    ed.insert(PROBE, "coarse", Unforkable(Coarse));
     ed.commit().expect("commits");
     exec.apply_pending();
     let ramp = EventKind::Ramp(ParamRamp::foreign(0, 1.0, Samples(0)));
@@ -950,14 +950,14 @@ fn beat_resolution_matches_a_hand_computed_table() {
         let (mut ed, mut exec) = Editor::new(prepare(500));
         let mut reference = Reference::new(prepare(500));
         let build = |ed: &mut Editor, log: &Arc<Mutex<Vec<(u64, u32)>>>| {
-            let _ = ed.insert(
+            ed.insert(
                 lat,
                 "lag",
                 Unforkable(common::TestNode::new(common::Kind::Lag {
                     latency: case.arrival,
                 })),
             );
-            let _ = ed.insert(sink, "impulse", Unforkable(Impulse(Arc::clone(log))));
+            ed.insert(sink, "impulse", Unforkable(Impulse(Arc::clone(log))));
         };
         build(&mut ed, &log);
         let t = &mut ed.spec_mut().topology;
@@ -1020,12 +1020,12 @@ fn an_unroutable_command_is_timed_by_its_nodes_arrival() {
     let (lat, sink) = (NodeKey(1), NodeKey(2));
     let log: Arc<Mutex<Vec<(u64, u32)>>> = Arc::default();
     let (mut ed, mut exec) = Editor::new(prepare(MAX));
-    let _ = ed.insert(
+    ed.insert(
         lat,
         "lag",
         Unforkable(common::TestNode::new(common::Kind::Lag { latency: 20 })),
     );
-    let _ = ed.insert(sink, "impulse", Unforkable(Impulse(Arc::clone(&log))));
+    ed.insert(sink, "impulse", Unforkable(Impulse(Arc::clone(&log))));
     let t = &mut ed.spec_mut().topology;
     t.inputs = ChannelLayout::MONO;
     t.edges.insert(
@@ -1068,7 +1068,7 @@ fn an_unroutable_command_is_timed_by_its_nodes_arrival() {
             width: 1,
         })
     };
-    let _ = ed.insert(sink, "gain", Unforkable(gain()));
+    ed.insert(sink, "gain", Unforkable(gain()));
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

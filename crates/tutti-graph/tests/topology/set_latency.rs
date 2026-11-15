@@ -79,8 +79,8 @@ const DRY: NodeKey = NodeKey(2);
 fn graph(plugin: Plugin) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(prepare(64));
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
-    let _ = ed.insert(PLUGIN, "plugin", Unforkable(plugin));
-    let _ = ed.insert(
+    ed.insert(PLUGIN, "plugin", Unforkable(plugin));
+    ed.insert(
         DRY,
         "gain",
         Unforkable(TestNode::new(Kind::Gain {
