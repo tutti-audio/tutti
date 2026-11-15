@@ -57,7 +57,7 @@ use tutti_graph::{
 };
 use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, EventTapId, MeterId, MeterSpec, MissingSource,
-    TapAlign, Topology,
+    TapAlign, TapId, Topology,
 };
 #[cfg(feature = "plugin")]
 use tutti_types::Latency;
@@ -70,7 +70,7 @@ mod observe;
 #[cfg(feature = "testing")]
 mod testing;
 
-pub use observe::{Meters, Taps};
+pub use observe::{Meters, Reopened, Taps};
 #[cfg(feature = "testing")]
 pub use testing::{AudioSide, Testing};
 
@@ -330,6 +330,16 @@ pub struct Graph {
     event_taps: BTreeMap<EventTapId, (tutti_graph::EventTapSource, TapAlign, EventCapacity)>,
     /// The master meter's reader until a host takes it.
     master_meter: Option<MeterReader>,
+    /// The master meter's id: the one meter that reads the root.
+    master_meter_id: MeterId,
+    /// Each open tap on the root ([`Taps::open_output`]) with its capacity,
+    /// so a change of the root's width ([`Session::declare_root_topology`](crate::Session::declare_root_topology))
+    /// can open it again.
+    output_taps: BTreeMap<TapId, Samples>,
+    /// The readers the root's last width change opened again, held until the
+    /// session's next commit phase reports them
+    /// ([`SessionEvent::TapReopened`](crate::SessionEvent::TapReopened)).
+    reopened: Vec<(Reopened, tutti_types::ChannelTopology)>,
     /// Crossfades refused `Busy`, in request order.
     parked: VecDeque<Parked>,
     /// The nodes [`remove`](Self::remove) took out since the session last
@@ -470,8 +480,9 @@ impl Graph {
         // without asking for it.
         // `Outputs` names no source, so the open cannot be refused.
         let ids = Mint::new();
+        let master_meter_id = MeterId::mint(&ids);
         let master_meter = editor
-            .open_meter(MeterId::mint(&ids), MeterSpec::Outputs)
+            .open_meter(master_meter_id, MeterSpec::Outputs)
             .expect("a master meter names no source");
         master_meter.enable();
         Self {
@@ -492,6 +503,9 @@ impl Graph {
             ids,
             event_taps: BTreeMap::new(),
             master_meter: Some(master_meter),
+            master_meter_id,
+            output_taps: BTreeMap::new(),
+            reopened: Vec::new(),
             parked: VecDeque::new(),
             removed: Vec::new(),
             root: None,
@@ -2786,6 +2800,8 @@ impl Graph {
     pub(crate) fn reap_taps(&mut self) -> usize {
         let reaped = self.editor.reap_taps();
         if reaped > 0 {
+            let open = &self.editor.spec().topology.taps;
+            self.output_taps.retain(|id, _| open.contains_key(id));
             self.edited = true;
         }
         reaped
@@ -3169,6 +3185,7 @@ impl Graph {
             outputs.resize(width, Vec::new());
             self.drop_stale_gains();
             self.edited = true;
+            self.reopen_root_readers();
         }
         Ok(())
     }

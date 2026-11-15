@@ -3,6 +3,7 @@
 
 use tutti_types::Samples;
 
+use super::outlets::Closed;
 use super::{CloseError, CommitError, Editor, MAX_CHANNELS, MissingSource, TapOpened};
 use crate::Source;
 use crate::event_tap::EventTapReader;
@@ -23,7 +24,8 @@ impl Editor {
     /// ([`TapReader::take_lost`]).
     ///
     /// Opening an id again replaces it: the new reader is fed from the next
-    /// commit and the old one gets nothing more. A tap the topology does not
+    /// commit, and the old one is fed nothing more: it reads the frames its
+    /// rings hold and then ends ([`TapReader::source_gone`]). A tap the topology does not
     /// name compiles to nothing, so a closed tap costs the audio thread
     /// nothing.
     ///
@@ -53,6 +55,7 @@ impl Editor {
         capacity: Samples,
     ) -> Result<TapReader, MissingSource> {
         self.check_sources(&sources)?;
+        self.end_replaced_tap(id);
         let (reader, writer) = TapReader::named(id, sources.len(), capacity);
         let opened = TapOpened {
             width: reader.width(),
@@ -95,6 +98,7 @@ impl Editor {
             .copied()
             .collect();
         self.check_sources(&named)?;
+        self.end_replaced_tap(id);
         let (reader, writer) = TapReader::named(id, width, capacity);
         let opened = TapOpened {
             width: reader.width(),
@@ -106,6 +110,21 @@ impl Editor {
             .taps
             .insert(id, TapSpec::Outputs { width });
         Ok(reader)
+    }
+
+    /// Ends the reader of `id` when `id` is opened again: the commit that
+    /// carries the new writer leaves the old one out, and once the executor
+    /// has applied it the old reader reads what its rings hold and then ends
+    /// ([`TapReader::source_gone`]). A writer the executor never held ends its
+    /// reader at once.
+    fn end_replaced_tap(&mut self, id: TapId) {
+        if let Some(Closed { meta, unsent }) = self.taps.close(id) {
+            if unsent {
+                meta.end.raise();
+            } else {
+                self.link.end_tap(meta.end);
+            }
+        }
     }
 
     /// Refuses a source that is not in the spec now, uncommitted edits

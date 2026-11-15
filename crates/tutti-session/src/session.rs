@@ -274,6 +274,28 @@ pub enum SessionEvent {
         /// Which of its readings changed.
         fact: crate::ResourceFact,
     },
+    /// The root changed width, and a reader of it was opened again at the new
+    /// one: a tap from [`Taps::open_output`](crate::Taps::open_output), or the
+    /// master meter once a host took it
+    /// ([`Session::take_master_meter`]). `reader` is the new reader, with the
+    /// id of the one it supersedes; `topology` is the root's now. The old reader
+    /// reads closed, so no reader takes twelve channels for two: a tap's reads
+    /// what its rings held when the commit that changed the root was applied
+    /// and then ends ([`Pull::Ended`](tutti_buffers::Pull::Ended)), a meter's
+    /// reads [`is_closed`](tutti_graph::MeterReader::is_closed).
+    ///
+    /// The new tap is fed from the first block of the plan that carries the
+    /// change, and what the old one holds ends on the block before it: a root
+    /// crossfade fades the engine's output, never what a tap reads, so the
+    /// tap switches to the new root at the commit and never reads the old
+    /// root's channels. A reader of a port whose width did not change is not
+    /// reopened. The event comes in the update that sends the commit.
+    TapReopened {
+        /// The new reader.
+        reader: crate::Reopened,
+        /// The root's topology the reader was opened for.
+        topology: ChannelTopology,
+    },
     /// A pool entry's change: its load landed or failed, a reload landed, or it
     /// was released. See [`PoolEvent`](crate::PoolEvent); `key` is the key the
     /// app declared it under ([`PoolKey::get`](crate::PoolKey::get)).
@@ -334,6 +356,11 @@ impl std::fmt::Debug for SessionEvent {
                 .debug_struct("ResourceChanged")
                 .field("id", id)
                 .field("fact", fact)
+                .finish(),
+            Self::TapReopened { reader, topology } => f
+                .debug_struct("TapReopened")
+                .field("reader", reader)
+                .field("topology", topology)
                 .finish(),
             Self::Pool { key, event } => f
                 .debug_struct("Pool")
@@ -827,6 +854,12 @@ impl<C: Clock> Session<C> {
             Phase::Commit => {
                 self.apply_output_policy();
                 let sent = self.graph.is_edited() && self.commit_reporting(out);
+                out.extend(
+                    self.graph
+                        .take_reopened()
+                        .into_iter()
+                        .map(|(reader, topology)| SessionEvent::TapReopened { reader, topology }),
+                );
                 if !sent && self.resumed {
                     self.publish_sent();
                 }
