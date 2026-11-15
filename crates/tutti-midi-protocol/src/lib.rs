@@ -107,9 +107,10 @@
 //! [`flex_tempo`] and [`flex_time_signature`] read a Flex Set Tempo and Set Time
 //! Signature as a `Bpm` and a project meter (`None` for a field the type cannot
 //! hold, never clamped), and [`flex_tempo_field`] writes the tempo back;
-//! [`song_position`](fn@song_position) and [`song_position_beat`] convert a Song Position Pointer
-//! and a beat; [`SmpteTimecode::from_seconds`] and [`MtcTimeCode::nibbles`] are
-//! the timecode of a time and its Quarter Frame pieces; [`MpeZoneConfig`], [`MpeZones`] and [`MpeMode`] are the
+//! [`song_position`](fn@song_position) and [`song_position_beat`] convert a Song
+//! Position Pointer and a beat; [`SmpteTimecode::from_seconds`] and
+//! [`MtcTimeCode::nibbles`] are the timecode of a time and its Quarter Frame
+//! pieces; [`MpeZoneConfig`], [`MpeZones`] and [`MpeMode`] are the
 //! MPE zone layout (RP-053, and the MIDI-CI MPE Profile's, M2-120), checked
 //! at construction; and [`TuningMessage`] and
 //! its types are the MIDI Tuning Standard's wire values.

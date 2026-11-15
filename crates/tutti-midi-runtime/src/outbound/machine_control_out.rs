@@ -16,22 +16,23 @@
 //! A stop that also moved the position sends STOP alone. Commands are placed at
 //! a look, not on a frame: MMC carries no time of its own.
 
-use tutti_midi_protocol::{
-    MmcCommand, MmcCommands, MmcLocate, MmcPosition, MmcTooLong, MtcRate, Recipient,
-};
+use tutti_midi_protocol::{MmcCommand, MmcCommands, MmcLocate, MmcPosition, MtcRate, Recipient};
 use tutti_types::{Frame, SampleRate, Seconds};
 
-/// Why a look at the transport could not be sent as Machine Control. The
-/// look is taken (the next one compares against it), and nothing is sent.
+/// Why a look at the transport could not be sent as Machine Control: the
+/// transport moved to a time no time code names (before zero, NaN, or a day
+/// or more). The look is taken (the next one compares against it), and nothing
+/// is sent.
 #[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
-pub enum MachineControlError {
-    /// The commands the change calls for do not fit one message.
-    #[error("the commands for the change do not fit one Machine Control message")]
-    TooLong(#[from] MmcTooLong),
-    /// The transport moved to a time no time code names: before zero, NaN, or
-    /// a day or more.
-    #[error("{0:?} has no time code")]
-    NoTimeCode(Seconds),
+#[error("{0:?} has no time code")]
+pub struct NoTimeCode(pub Seconds);
+
+/// Adds `command` to `commands`. A look sends at most a Locate (11 bytes) and a
+/// Deferred Play (1), far inside the 48 bytes a message holds.
+fn put(commands: &mut MmcCommands, command: &MmcCommand) {
+    commands
+        .push(command)
+        .expect("at most two commands of a dozen bytes fit 48 bytes");
 }
 
 /// What the transport was at a look.
@@ -91,16 +92,15 @@ impl MachineControlSender {
     ///
     /// # Errors
     ///
-    /// [`MachineControlError::NoTimeCode`] when the transport moved to a time
-    /// no time code names, and [`MachineControlError::TooLong`] when the
-    /// commands overfill a message. Neither is sent.
+    /// [`NoTimeCode`] when the transport moved to a time no time code names;
+    /// nothing is sent.
     pub fn observe(
         &mut self,
         playing: bool,
         seconds: Seconds,
         frame: Frame,
         rate: SampleRate,
-    ) -> Result<Option<Vec<u8>>, MachineControlError> {
+    ) -> Result<Option<Vec<u8>>, NoTimeCode> {
         let now = Seen {
             playing,
             seconds,
@@ -111,7 +111,7 @@ impl MachineControlSender {
         };
         let mut commands = MmcCommands::new();
         if before.playing && !playing {
-            commands.push(&MmcCommand::Stop)?;
+            put(&mut commands, &MmcCommand::Stop);
             return Ok(Some(commands.payload(self.to)));
         }
         let expected = if before.playing {
@@ -122,14 +122,17 @@ impl MachineControlSender {
         };
         let moved = (now.seconds - expected).get().abs() > Self::LOCATE_TOLERANCE.get();
         if moved {
-            let target = MmcPosition::from_seconds(now.seconds, self.rate)
-                .ok_or(MachineControlError::NoTimeCode(now.seconds))?;
-            commands.push(&MmcCommand::Locate(MmcLocate::Target(target)))?;
+            let target =
+                MmcPosition::from_seconds(now.seconds, self.rate).ok_or(NoTimeCode(now.seconds))?;
+            put(
+                &mut commands,
+                &MmcCommand::Locate(MmcLocate::Target(target)),
+            );
             if playing {
-                commands.push(&MmcCommand::DeferredPlay)?;
+                put(&mut commands, &MmcCommand::DeferredPlay);
             }
         } else if playing && !before.playing {
-            commands.push(&MmcCommand::Play)?;
+            put(&mut commands, &MmcCommand::Play);
         }
         Ok((!commands.is_empty()).then(|| commands.payload(self.to)))
     }

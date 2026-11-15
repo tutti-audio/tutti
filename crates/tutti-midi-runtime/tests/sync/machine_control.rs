@@ -7,7 +7,7 @@
 
 use tutti_midi_protocol::{MtcRate, Recipient, SysexDeviceId};
 use tutti_midi_runtime::{
-    MachineControlError, MachineControlEvent, MachineControlFollower, MachineControlSender,
+    MachineControlEvent, MachineControlFollower, MachineControlSender, NoTimeCode,
 };
 use tutti_types::{Frame, SampleRate, Seconds};
 use tutti_ump::{MidiGroup, Sysex7Packets};
@@ -193,7 +193,7 @@ fn a_locate_to_no_time_code_is_a_typed_refusal() {
     for seconds in [-1.0, 86_400.0] {
         assert_eq!(
             s.observe(false, Seconds::new(seconds), Frame::new(480), RATE),
-            Err(MachineControlError::NoTimeCode(Seconds::new(seconds)))
+            Err(NoTimeCode(Seconds::new(seconds)))
         );
         // Standing where it was left, the next look is no change.
         assert_eq!(

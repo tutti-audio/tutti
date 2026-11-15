@@ -286,24 +286,14 @@ impl MtcFullMessage {
         self.0.timecode().frames()
     }
 
-    /// The two SysEx7 packets of [`payload`](Self::payload) on `group`: a
-    /// Start of six bytes and an End of two.
-    ///
-    /// # Panics
-    ///
-    /// Never: the payload is eight bytes, each below 128, which is two packets.
-    #[must_use]
-    pub fn packets(self, group: MidiGroup) -> [Ump; 2] {
+    /// Gives `out` the SysEx7 packets of [`payload`](Self::payload) on `group`:
+    /// a Start of six bytes and an End of two.
+    pub fn packets(self, group: MidiGroup, out: &mut impl FnMut(Ump)) {
         let payload = self.payload();
-        // Every byte of the payload is below 128 by construction, and eight
-        // bytes are two packets.
-        let mut packets = Sysex7Packets::from_payload(group, &payload)
-            .expect("a Full Message payload is seven-bit");
-        let first = packets.next().expect("eight bytes start a message");
-        let last = packets
-            .next()
-            .expect("eight bytes end it in a second packet");
-        [first, last]
+        // Every byte of the payload is below 128 by construction, so it packs.
+        if let Ok(packets) = Sysex7Packets::from_payload(group, &payload) {
+            packets.for_each(out);
+        }
     }
 
     /// The bytes between `F0` and `F7`: `7F 7F 01 01 hr mn sc fr` (M1 p.53),
@@ -313,8 +303,8 @@ impl MtcFullMessage {
     #[must_use]
     pub const fn payload(self) -> [u8; 8] {
         [
-            0x7F,
-            0x7F,
+            read::REAL_TIME,
+            Recipient::AllCall.device_byte(),
             0x01,
             0x01,
             (self.rate().code() << 5) | self.hours(),
@@ -352,6 +342,16 @@ pub enum Recipient {
 }
 
 impl Recipient {
+    /// The Device ID byte a message to this recipient carries: `7F` for the
+    /// all-call.
+    #[must_use]
+    pub const fn device_byte(self) -> u8 {
+        match self {
+            Self::AllCall => 0x7F,
+            Self::Device(device) => device.get().get(),
+        }
+    }
+
     /// The recipient a header byte names.
     #[must_use]
     pub const fn of_byte(id: U7) -> Self {

@@ -317,11 +317,7 @@ impl MmcCommands {
     /// as SysEx7 through [`Sysex7Packets::from_payload`](tutti_ump::Sysex7Packets::from_payload).
     #[must_use]
     pub fn payload(&self, to: Recipient) -> Vec<u8> {
-        let device = match to {
-            Recipient::AllCall => 0x7F,
-            Recipient::Device(device) => device.get().get(),
-        };
-        framed(device, 0x06, self.as_bytes())
+        framed(to.device_byte(), 0x06, self.as_bytes())
     }
 }
 

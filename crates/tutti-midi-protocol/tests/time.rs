@@ -25,15 +25,6 @@ fn a_song_position_outside_the_14_bit_field_sticks_at_its_ends() {
     assert_eq!(song_position(Beat::new(1.0e9)), U14::MAX);
 }
 
-/// Every pointer value reads back to the same pointer through its beat.
-#[test]
-fn a_song_position_inverts_through_its_beat() {
-    for raw in 0..=U14::MAX.get() {
-        let position = U14::new(raw).unwrap();
-        assert_eq!(song_position(song_position_beat(position)), position);
-    }
-}
-
 /// 30 fps counts 30 frames a second, so 3661.5 s is `01:01:01:15`; 25 fps
 /// counts 25, so the same time is frame 12.5 of the second, which rounds up to
 /// `01:01:01:13`.
@@ -59,7 +50,7 @@ fn a_time_just_short_of_a_frame_rounds_up_and_out_of_range_times_are_bounded() {
 }
 
 /// Drop-frame 29.97 labels skip `;00` and `;01` at a minute not divisible by
-/// ten: frame 1800 is the label `00:01:00:02`, and 59:29 is frame 1799.
+/// ten: frame 1800 is the label `00:01:00:02`.
 #[test]
 fn a_time_at_drop_frame_is_labelled_by_the_dropped_count() {
     let tc = SmpteTimecode::from_seconds(

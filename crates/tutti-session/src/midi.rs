@@ -1157,19 +1157,23 @@ impl MidiState {
         let Some((group, sender)) = self.machine_out.as_mut() else {
             return;
         };
-        // A refused look (`MachineControlError`) sends nothing; its typed
-        // report waits for the session's MIDI handles.
-        let Ok(Some(message)) = sender.observe(
+        let message = match sender.observe(
             playhead.playing(),
             playhead.seconds(),
             playhead.frame(),
             playhead.rate(),
-        ) else {
-            return;
+        ) {
+            Ok(Some(message)) => message,
+            Ok(None) => return,
+            // A refused look sends nothing and is counted as a lost event.
+            Err(_) => {
+                self.drops.record_refused(1);
+                return;
+            }
         };
         let frame = playhead.frame();
-        // The payload is seven-bit by construction, so it always packs.
         let Ok(packets) = tutti_ump::Sysex7Packets::from_payload(*group, &message) else {
+            self.drops.record_refused(1);
             return;
         };
         let batch: Vec<(Frame, Ump)> = packets.map(|ump| (frame, ump)).collect();

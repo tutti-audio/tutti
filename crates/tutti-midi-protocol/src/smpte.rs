@@ -5,7 +5,7 @@
 //! arriving, and the MTC Full Message and the runtime's decoders read it rather
 //! than owning it.
 
-use tutti_types::Seconds;
+use tutti_types::{SampleRate, Seconds};
 
 /// SMPTE frame rate for MTC/LTC.
 ///
@@ -187,13 +187,29 @@ impl SmpteFrameRate {
         }
     }
 
-    /// The frames elapsed at `seconds` at this rate, as a fraction of a frame:
-    /// `seconds * num / den` over the exact [`ratio`](Self::ratio). The one
-    /// place a time becomes a frame count; the callers round it as they need.
+    /// The frames elapsed at `seconds` at this rate: `seconds * num / den`
+    /// over the exact [`ratio`](Self::ratio), unrounded, so the fraction of a
+    /// frame is kept. The one place a time becomes a frame count; each caller
+    /// rounds it as its message needs: [`SmpteTimecode::from_seconds`] to the
+    /// nearest frame, `MmcPosition::from_seconds` down, with the fraction as
+    /// its subframes.
+    ///
+    /// The count is an `f64` and not a unit: no `tutti_types` unit counts
+    /// timecode frames (a `Frame` is a graph sample frame).
+    ///
+    /// [`SmpteTimecode::from_seconds`]: SmpteTimecode::from_seconds
     #[must_use]
     pub fn frames_at(&self, seconds: Seconds) -> f64 {
         let (num, den) = self.ratio();
         seconds.get() * num as f64 / den as f64
+    }
+
+    /// The samples in one frame at `sample_rate`: the exact ratio's
+    /// `rate * den / num`.
+    #[must_use]
+    pub fn samples_per_frame(&self, sample_rate: SampleRate) -> f64 {
+        let (num, den) = self.ratio();
+        sample_rate.get() * den as f64 / num as f64
     }
 
     /// Frame labels per second: the count the `FF` field wraps at (24, 25, 30,

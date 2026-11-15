@@ -278,6 +278,7 @@ impl FunctionBlock {
 
 /// What [`Endpoint::reply`] did with one message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
 pub enum Reply {
     /// The message is not one an Endpoint answers: nothing was sent and
     /// nothing changed.

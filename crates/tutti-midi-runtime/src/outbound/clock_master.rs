@@ -53,9 +53,7 @@ use tutti_types::{
 };
 use tutti_ump::{Message, MidiGroup, System, U7, Ump};
 
-use tutti_midi_protocol::{
-    MtcFullMessage, MtcRate, MtcTimeCode, SmpteFrameRate, SmpteTimecode, song_position,
-};
+use tutti_midi_protocol::{MtcFullMessage, MtcRate, MtcTimeCode, SmpteTimecode, song_position};
 
 /// Below this beat, a play edge is treated as "from the top" → Start (0xFA)
 /// rather than Continue (0xFB). Wide enough to absorb float jitter at beat 0.
@@ -383,8 +381,8 @@ impl ClockMaster {
     /// at `rate` and `fps`: closed form, never accumulated.
     fn mtc_due(&self, k: u64, rate: SampleRate, fps: MtcRate) -> f64 {
         self.mtc.lead
-            + (k.saturating_sub(self.mtc.base) as f64 * rate.get())
-                / (SmpteFrameRate::from(fps).fps() * 4.0)
+            + k.saturating_sub(self.mtc.base) as f64 * fps.frame_rate().samples_per_frame(rate)
+                / 4.0
     }
 
     /// Start a new MTC grid segment at the next quarter-frame due, the
@@ -576,15 +574,9 @@ impl ClockMaster {
         emit: &mut impl FnMut(UmpAt),
     ) {
         let per_sample = tutti_types::beats_per_sample(transport.tempo, sample_rate);
-        let seconds = if per_sample > BeatDuration(0.0) {
-            Seconds::new(beat.get().max(0.0) / per_sample.get() / sample_rate.get())
-        } else {
-            Seconds::new(0.0)
-        };
-        let message = MtcFullMessage::from(MtcTimeCode::at(seconds, self.fps));
-        for packet in message.packets(self.group) {
-            emit((at, packet));
-        }
+        let seconds = Seconds::new(samples_at(beat, per_sample) / sample_rate.get());
+        MtcFullMessage::from(MtcTimeCode::at(seconds, self.fps))
+            .packets(self.group, &mut |packet| emit((at, packet)));
     }
 
     /// Emit a 0xF8 at every 1/24-beat boundary playback reaches inside `pass`,
@@ -664,11 +656,7 @@ impl ClockMaster {
         let mut next = self.mtc.next;
 
         // The sample position of the block's first frame, from beat 0.
-        let block_pos = if beats_per_sample > BeatDuration(0.0) {
-            (beat.get() / beats_per_sample.get()).max(0.0)
-        } else {
-            0.0
-        };
+        let block_pos = samples_at(beat, beats_per_sample);
         // A restarted grid puts its first piece 0 on the next even-frame
         // boundary of the timeline (a multiple of two frames' samples from
         // beat 0), so the label is the frame it goes out on. The grid then
@@ -676,8 +664,7 @@ impl ClockMaster {
         // change moves the timeline under a grid fixed in samples, and the
         // label (read from the beat at each piece 0) follows within a frame.
         if std::mem::take(&mut self.mtc.align) {
-            let (num, den) = SmpteFrameRate::from(fps).ratio();
-            let period = 2.0 * rate.get() * den as f64 / num as f64;
+            let period = 2.0 * fps.frame_rate().samples_per_frame(rate);
             let cycles = block_pos / period;
             let k = if (cycles - cycles.round()).abs() < 1e-6 {
                 cycles.round()
@@ -731,6 +718,17 @@ fn frame_offset(frames: usize, block_size: usize) -> Offset {
         Samples(block_size),
     )
     .unwrap_or(Offset::ZERO)
+}
+
+/// The sample position of `beat` from beat 0 at a steady `beats_per_sample`:
+/// the timeline the MTC grid and the Full Message share. Before zero, or at a
+/// tempo that does not advance, it is 0.
+fn samples_at(beat: Beat, beats_per_sample: BeatDuration) -> f64 {
+    if beats_per_sample > BeatDuration(0.0) {
+        (beat.get() / beats_per_sample.get()).max(0.0)
+    } else {
+        0.0
+    }
 }
 
 /// The eight nibbles of the cycle that starts at `position` from transport

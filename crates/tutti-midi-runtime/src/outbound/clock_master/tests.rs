@@ -6,6 +6,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool as StdAtomicBool;
 use tutti_graph::UmpAt;
+use tutti_midi_protocol::SmpteFrameRate;
 use tutti_types::{Bpm, Seconds};
 use tutti_ump::{Message, MidiGroup, System};
 

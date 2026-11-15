@@ -1,5 +1,5 @@
 //! Asking a peer which optional features its MPE Profile supports, and reading
-//! the answer as [`MpeFeatures`] (M2-120 section 3.7; M2-102 section 7.6).
+//! the answer as [`MpeFeatures`] (M2-120 section 3.7, Table 6; M2-102 sections 2.5 and 3.3).
 //!
 //! The question is a Profile Details Inquiry for the MPE Profile
 //! ([`ProfileId::MPE`]) with the Optional Features Inquiry Target
@@ -16,7 +16,7 @@ use tutti_midi_device::{
     ProfileInitiator, RequestError,
 };
 use tutti_midi_protocol::MpeFeatures;
-use tutti_ump::U7;
+use tutti_ump::{MidiChannel, U7};
 
 /// How an answer to the Optional Features inquiry is not a feature set.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -36,17 +36,24 @@ pub enum MpeFeaturesError {
     NotDetails,
 }
 
-/// Asks the peer at `address` for the optional features of its MPE Profile.
+/// Asks the peer for the optional features of its MPE Profile on `channel`:
+/// the Profile is enabled on Channels, so the inquiry names no Group or
+/// Function Block (M2-120 Table 6).
 ///
 /// # Errors
 ///
 /// [`RequestError::InFlight`] when the same inquiry is waiting.
 pub fn ask_mpe_features(
     initiator: &mut ProfileInitiator,
-    address: CiDeviceId,
+    channel: MidiChannel,
     now: Instant,
 ) -> Result<Vec<ProfileAction>, RequestError> {
-    initiator.details(address, ProfileId::MPE, features_target(), now)
+    initiator.details(
+        CiDeviceId::Channel(channel),
+        ProfileId::MPE,
+        features_target(),
+        now,
+    )
 }
 
 /// The features an [`Outcome`] of [`ask_mpe_features`] declares.

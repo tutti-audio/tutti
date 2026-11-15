@@ -23,4 +23,4 @@ pub use clock_node::{CLOCK_EVENT_CAPACITY, ClockNode};
 pub use jr_timestamp::{
     JR_CLOCK_INTERVAL, JR_CLOCK_MAX_INTERVAL, JrClock, JrClockEmitter, JrStamper, JrStream,
 };
-pub use machine_control_out::{MachineControlError, MachineControlSender};
+pub use machine_control_out::{MachineControlSender, NoTimeCode};
