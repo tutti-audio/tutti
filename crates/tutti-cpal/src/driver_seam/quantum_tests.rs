@@ -59,8 +59,8 @@ fn device(channels: u16) -> cpal::SupportedStreamConfig {
 /// by name, never truncated.
 #[test]
 fn a_device_wider_than_the_cap_is_refused() {
-    let at = OutputSpec::from_supported(&device(MAX_CHANNELS as u16)).unwrap();
+    let (at, _) = spec_from_supported(&device(MAX_CHANNELS as u16)).unwrap();
     assert_eq!(at.channels.count() as usize, MAX_CHANNELS);
-    let past = OutputSpec::from_supported(&device(MAX_CHANNELS as u16 + 1));
+    let past = spec_from_supported(&device(MAX_CHANNELS as u16 + 1));
     assert!(matches!(past, Err(Error::InvalidConfig(_))), "{past:?}");
 }
