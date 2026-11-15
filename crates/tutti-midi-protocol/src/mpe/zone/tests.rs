@@ -1,5 +1,5 @@
 use super::*;
-use tutti_ump::{NoteNumber, NoteVelocity, U7, Voice2};
+use tutti_ump::{MpeChannels, NoteNumber, NoteVelocity, U7, Voice2};
 
 const MASTER: PitchBendSensitivity = PitchBendSensitivity::MPE_MASTER_DEFAULT;
 const MEMBER: PitchBendSensitivity = PitchBendSensitivity::MPE_MEMBER_DEFAULT;

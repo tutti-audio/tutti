@@ -76,7 +76,7 @@ pub struct MpeOverlap {
 /// The MPE Profile zones of one Group: at least one, in order of Manager
 /// Channel, no two sharing a channel (M2-120 §3.4). Sixteen channels hold at
 /// most [`MAX`](Self::MAX) zones of two.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MpeZoneSet {
     zones: [Option<MpeZoneSpan>; Self::MAX],
 }
@@ -105,6 +105,7 @@ impl MpeZoneSet {
         }
         let mut zones = [None; Self::MAX];
         let mut count = 0;
+        // The zones share no channel and each has two, so at most 7 are held here.
         for z in self.zones().chain([zone]) {
             zones[count] = Some(z);
             count += 1;

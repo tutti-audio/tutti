@@ -9,8 +9,8 @@
 //! zone's master is `0` and the upper zone's is `15`.
 
 use tutti_ump::{
-    Address, ControlValue, Message, MidiChannel, MidiGroup, MpeChannels, MpeZoneSet, MpeZoneSpan,
-    Rpn, Ump, Voice2,
+    Address, ControlValue, Message, MidiChannel, MidiGroup, MpeZoneSet, MpeZoneSpan, Rpn, Ump,
+    Voice2,
 };
 
 use crate::{ChannelResponse, PitchBendSensitivity};
@@ -367,21 +367,8 @@ impl MpeZoneConfig {
         )
     }
 
-    /// The channels of a Profile zone, `None` for an MPE 1.1 zone.
-    fn profile_span(&self) -> Option<MpeZoneSpan> {
-        match self.placement {
-            Placement::Managed { manager, .. } => {
-                MpeZoneSpan::new(manager, MpeChannels::new(self.member_count + 1)?)
-            }
-            Placement::Side { .. } => None,
-        }
-    }
-
     /// Whether this zone shares a channel with `other`.
     fn overlaps(&self, other: &Self) -> bool {
-        if let (Some(a), Some(b)) = (self.profile_span(), other.profile_span()) {
-            return a.overlaps(b);
-        }
         let ((a_first, a_last), (b_first, b_last)) = (self.span(), other.span());
         a_first <= b_last && b_first <= a_last
     }
