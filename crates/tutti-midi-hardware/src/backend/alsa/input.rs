@@ -11,6 +11,7 @@ use super::poll::ErrorRun;
 use crate::endpoints::InputConnection;
 use crate::error::Result;
 use crate::guard::Guard;
+use crate::stamp::Paired;
 use crate::{InputProducerHandle, Pushed};
 use tutti_alsa_ffi::{
     Blocking, CAP_WRITE, Client, Poller, QueueClock, Read, TYPE_APPLICATION, TYPE_MIDI_GENERIC,
@@ -94,11 +95,6 @@ impl Drop for AlsaInput {
     }
 }
 
-/// The error for an id [`unpack_id`] refuses.
-pub(super) fn not_minted(id: EndpointId) -> crate::error::Error {
-    crate::error::Error::port(format!("{id:?} is not an ALSA endpoint id"))
-}
-
 /// The UMP version an input on a source with this UMP Endpoint record (`None`
 /// for a legacy client) is opened at.
 ///
@@ -123,12 +119,12 @@ pub(super) fn version_for(endpoint: Option<&tutti_alsa_ffi::UmpEndpoint>) -> Ump
 ///
 /// # Errors
 ///
-/// [`Error::Alsa`](crate::Error::Alsa) if the sequencer cannot be opened, the
+/// [`Error::Os`](crate::Error::Os) if the sequencer cannot be opened, the
 /// port created, or the subscription made, and
 /// [`Error::MidiDevice`](crate::Error::MidiDevice) if the pump thread cannot be
 /// spawned.
 pub fn open(id: EndpointId, producer: InputProducerHandle) -> Result<Box<dyn InputConnection>> {
-    let (src_client, src_port) = unpack_id(id).ok_or_else(|| not_minted(id))?;
+    let (src_client, src_port) = unpack_id(id).ok_or(crate::error::NotFound::Endpoint(id))?;
 
     // Non-blocking, so the pump reads until the queue is empty and then waits in
     // `poll`, which the stop descriptor can interrupt. One client per connection
@@ -163,7 +159,7 @@ pub fn open(id: EndpointId, producer: InputProducerHandle) -> Result<Box<dyn Inp
 ///
 /// # Errors
 ///
-/// [`Error::Alsa`](crate::Error::Alsa) if the client's descriptors cannot be
+/// [`Error::Os`](crate::Error::Os) if the client's descriptors cannot be
 /// polled, and [`Error::MidiDevice`](crate::Error::MidiDevice) if the stop pair
 /// or the pump thread cannot be made.
 pub(super) fn start(
@@ -223,12 +219,13 @@ fn pump(
     let mut arrivals = Arrivals {
         clock,
         pairing: None,
+        latest: None,
     };
     loop {
         let read = seq.read_event();
         #[cfg(test)]
         let read = if INJECT_READ_ERROR.load(Ordering::SeqCst) {
-            Err(tutti_alsa_ffi::Error {
+            Err(tutti_alsa_ffi::Error::Call {
                 operation: "snd_seq_ump_event_input",
                 code: EIO,
             })
@@ -299,12 +296,15 @@ fn pump(
 }
 
 /// A queue time as an OS instant: the queue's clock and the OS's read together
-/// once (`pairing`), then each event's age is the queue's time then, subtracted
-/// from the pairing's ([`crate::stamp::arrival`]).
+/// (`pairing`), then each event's age is the queue's time then, subtracted from
+/// the pairing's ([`Paired::arrival`]).
 struct Arrivals {
     clock: QueueClock,
-    /// `(OS instant, queue time)` read at the same moment.
-    pairing: Option<(Instant, Duration)>,
+    /// The pairing, and when it was read.
+    pairing: Option<(Paired, Instant)>,
+    /// The instant given to the event before: the port delivers its events in
+    /// order, so none arrives before the one ahead of it.
+    latest: Option<Instant>,
 }
 
 impl Arrivals {
@@ -314,13 +314,32 @@ impl Arrivals {
     fn at(&mut self, seq: &Client, stamped: Duration) -> Instant {
         let stale = self
             .pairing
-            .is_none_or(|(os, queue)| stamped > queue || os.elapsed() > PAIRING_AGE);
+            .is_none_or(|(paired, read)| stamped > paired.clock() || read.elapsed() > PAIRING_AGE);
         if stale {
-            self.pairing = self.clock.now(seq).map(|queue| (Instant::now(), queue));
+            self.pairing = Paired::read(|| self.clock.now(seq))
+                .ok()
+                .map(|paired| (paired, Instant::now()));
         }
-        match self.pairing {
-            Some((os, queue)) => crate::stamp::arrival(os, queue, stamped),
+        let placed = match self.pairing {
+            Some((paired, _)) => paired.arrival(stamped),
             None => Instant::now(),
-        }
+        };
+        // Two pairings place events by readings of two clocks that were not
+        // taken at one instant, so an event read after a refresh can land
+        // before one placed by the pairing before it. The port's order is the
+        // arrival order.
+        in_order(&mut self.latest, placed)
     }
 }
+
+/// `placed`, or the instant of the event before it, `latest`, when that is
+/// later: an event never arrives before the one ahead of it. `latest` becomes
+/// the instant returned.
+fn in_order(latest: &mut Option<Instant>, placed: Instant) -> Instant {
+    let at = latest.map_or(placed, |latest| latest.max(placed));
+    *latest = Some(at);
+    at
+}
+
+#[cfg(test)]
+mod tests;

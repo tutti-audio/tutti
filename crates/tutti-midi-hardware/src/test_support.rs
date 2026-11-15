@@ -23,7 +23,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
-use tutti_graph::UmpAt;
 
 use crate::capability::{EndpointInfo, UmpCapability};
 use crate::devices::ChangeSink;
@@ -32,7 +31,7 @@ use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{Error, Result};
 use crate::{InputProducerHandle, Pushed};
 use tutti_midi_device::{EndpointId, Identity, OsChange, PortDirection};
-use tutti_midi_runtime::MidiOut;
+use tutti_midi_runtime::{MidiOut, Taken};
 
 /// A backend with a fixed device list and no OS behind it.
 ///
@@ -306,17 +305,18 @@ struct FakeSink {
 impl DeviceOut for FakeSink {}
 
 impl MidiOut for FakeSink {
-    fn queue(&self, events: &[UmpAt]) -> usize {
-        self.queue_timed(&tutti_midi_runtime::Outgoing::now_batch(events))
-    }
-
-    fn queue_timed(&self, events: &[tutti_midi_runtime::Outgoing]) -> usize {
+    fn queue_timed(&self, events: &[tutti_midi_runtime::Outgoing]) -> Taken {
         self.sent.fetch_add(events.len(), Ordering::SeqCst);
-        let taken = self.accepts.min(events.len());
+        let taken = Taken::within(events, self.accepts);
         self.log
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .extend(events.iter().take(taken).map(|e| (self.id, e.ump, e.send)));
+            .extend(
+                events
+                    .iter()
+                    .take(taken.packets())
+                    .map(|e| (self.id, e.ump, e.send)),
+            );
         taken
     }
 }

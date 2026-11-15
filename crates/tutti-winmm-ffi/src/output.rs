@@ -63,12 +63,12 @@ impl MidiOut {
     ///
     /// The failing call. Two failures leave the header and the bytes
     /// allocated for good, because the driver may still read them: the send
-    /// outlasting its timeout (code [`Error::NOT_RETURNED`]), and an unprepare
+    /// outlasting its timeout ([`Error::NotReturned`]), and an unprepare
     /// that returns any code but `MIDIERR_STILLPLAYING` or success.
     pub fn long(&mut self, message: &[u8]) -> Result<(), Error> {
-        let length = u32::try_from(message.len()).map_err(|_| Error {
-            operation: "midiOutLongMsg",
-            code: windows_sys::Win32::Media::MMSYSERR_INVALPARAM,
+        let length = u32::try_from(message.len()).map_err(|source| Error::TooLong {
+            len: message.len(),
+            source,
         })?;
         // The bytes and the header are raw allocations while the driver may own
         // them; they are rebuilt as boxes, and freed, only once it is done.
@@ -107,9 +107,8 @@ impl MidiOut {
             if started.elapsed() >= bound {
                 // The driver may still read the header and the bytes: they
                 // are never freed.
-                return Err(Error {
+                return Err(Error::NotReturned {
                     operation: "midiOutLongMsg",
-                    code: Error::NOT_RETURNED,
                 });
             }
             std::thread::sleep(Duration::from_millis(1));

@@ -2,7 +2,7 @@
 
 use crate::InputProducerHandle;
 use crate::endpoints::{InputConnection, MidiEndpoints};
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::virtual_endpoint::{SourceBackend, VirtualProtocol, VirtualSpec};
 
 /// Returns this platform's MIDI backend.
@@ -27,11 +27,5 @@ pub(crate) fn open_virtual_destination(
     Ok((Box::new(destination), protocol))
 }
 
-impl From<tutti_alsa_ffi::Error> for Error {
-    fn from(e: tutti_alsa_ffi::Error) -> Self {
-        Self::Alsa {
-            operation: e.operation,
-            code: e.code,
-        }
-    }
-}
+/// The platform's own error, as [`Error::Os`](crate::Error::Os) carries it.
+pub(crate) type OsError = tutti_alsa_ffi::Error;

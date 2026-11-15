@@ -53,6 +53,10 @@ pub enum snd_seq_port_info_t {}
 #[derive(Debug)]
 pub enum snd_seq_queue_status_t {}
 
+/// Opaque `snd_seq_client_pool_t`.
+#[derive(Debug)]
+pub enum snd_seq_client_pool_t {}
+
 /// `snd_seq_real_time_t`: a time on a queue's real-time clock.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -415,6 +419,14 @@ unsafe extern "C" {
     /// Send what `snd_seq_control_queue` and other buffered output left in the
     /// client's output buffer; the count still buffered, or negative.
     pub fn snd_seq_drain_output(seq: *mut snd_seq_t) -> c_int;
+    /// Allocate a client-pool record; free it with `snd_seq_client_pool_free`.
+    pub fn snd_seq_client_pool_malloc(ptr: *mut *mut snd_seq_client_pool_t) -> c_int;
+    /// Free a record from `snd_seq_client_pool_malloc`.
+    pub fn snd_seq_client_pool_free(ptr: *mut snd_seq_client_pool_t);
+    /// Fill `info` with this client's pool sizes and free cells now.
+    pub fn snd_seq_get_client_pool(seq: *mut snd_seq_t, info: *mut snd_seq_client_pool_t) -> c_int;
+    /// The free cells of the output pool in `info`.
+    pub fn snd_seq_client_pool_get_output_free(info: *const snd_seq_client_pool_t) -> usize;
     /// Allocate a queue-status record; free it with `snd_seq_queue_status_free`.
     pub fn snd_seq_queue_status_malloc(ptr: *mut *mut snd_seq_queue_status_t) -> c_int;
     /// Free a record from `snd_seq_queue_status_malloc`.

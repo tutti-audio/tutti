@@ -75,6 +75,7 @@ mod flex_text;
 mod held_keys;
 mod manufacturer;
 mod message;
+mod messages;
 mod midi1;
 mod midi_channel;
 mod midi_group;
@@ -115,6 +116,7 @@ pub use message::{
     Protocol, RegisteredPerNoteController, Stream, StreamConfig, Sysex7Packet, Sysex8Packet,
     SysexStatus, System, TimeSignature, UiHint, UmpVersion, Unknown, Utility, Voice1, Voice2,
 };
+pub use messages::{Join, Span, Spans, spans, spans_joined};
 pub use midi_channel::MidiChannel;
 pub use midi_group::MidiGroup;
 pub use midi1::{Framed, Midi1Bytes, Midi1Parser, frame, parse_exact};
