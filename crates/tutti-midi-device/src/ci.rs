@@ -33,6 +33,7 @@ mod drawbar;
 mod drum_map;
 mod endpoint;
 mod escape;
+mod gm2;
 mod initiator;
 mod link;
 mod pe;
@@ -62,6 +63,7 @@ pub use drum_map::{
     MutuallyExclusiveSet,
 };
 pub use endpoint::{CiInstanceId, EndpointInfo, EndpointStatus};
+pub use gm2::{Gm2ChannelCount, Gm2FunctionBlock, Gm2Role, Gm2SingleChannel, NotAGm2ChannelCount};
 pub use initiator::{
     Outcome, ProfileAction, ProfileChange, ProfileEntry, ProfileInitiator, ProfileTable,
     ProfileTarget, Request, RequestError,
