@@ -1283,6 +1283,20 @@ mod machine_control {
         assert_eq!(segment_message(full).len(), 3 + MMC_MAX_DATA);
     }
 
+    /// RP-013 p.40 (b): a COMMAND SEGMENT whose count is more than the bytes left
+    /// in its message is a segment cut short, read as such and not as an
+    /// unreadable message; it is not written.
+    #[test]
+    fn a_segment_whose_count_passes_the_message_is_truncated() {
+        assert_eq!(
+            one_command(&[0x53, 0x09, 0x01, 0x02]),
+            MmcCommand::TruncatedSegment
+        );
+        let mut list = MmcCommands::new();
+        assert!(list.push(&MmcCommand::TruncatedSegment).is_err());
+        assert!(list.is_empty());
+    }
+
     /// RP-013 p.40: a non-segmented message when a later segment was due
     /// cancels the string.
     #[test]

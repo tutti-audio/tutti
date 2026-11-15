@@ -78,9 +78,10 @@ pub(crate) use read::{commands, fields};
 /// The most bytes a message holds after its sub-ID (RP-013 p.2).
 pub const MMC_MAX_DATA: usize = 48;
 
-/// More bytes than a Machine Control message holds ([`MMC_MAX_DATA`]).
+/// More bytes than a Machine Control message holds ([`MMC_MAX_DATA`]), or a
+/// command that is only read ([`MmcCommand::TruncatedSegment`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("a Machine Control message holds at most 48 bytes")]
+#[error("a Machine Control message holds at most 48 bytes of whole commands")]
 pub struct MmcTooLong;
 
 /// Up to [`MMC_MAX_DATA`] data bytes, each below 128.

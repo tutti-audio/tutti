@@ -704,6 +704,16 @@ pub(crate) fn command(input: &mut &[u8]) -> Res<MmcCommand> {
         })
     };
     if let Shape::Counted = shape(code) {
+        if base && code == 0x53 {
+            // A count past the end of the message (p.40 b) is a segment cut
+            // short, not an unreadable message.
+            let mut ahead = *input;
+            let count = u7.parse_next(&mut ahead)?;
+            if usize::from(count.get()) > ahead.len() {
+                *input = &[];
+                return Ok(MmcCommand::TruncatedSegment);
+            }
+        }
         let data = counted.parse_next(input)?;
         if base && (0x40..=0x55).contains(&code) {
             return counted_command(code, data).map_or_else(bad, Ok);

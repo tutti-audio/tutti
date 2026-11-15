@@ -369,6 +369,8 @@ pub(crate) fn command(command: &MmcCommand, out: Out<'_>) -> Done {
             }
         }),
         MmcCommand::CommandSegment(s) => counted(0x53, out, |b| segment(s, b)),
+        // Read only: it has no count to write.
+        MmcCommand::TruncatedSegment => Err(MmcTooLong),
         MmcCommand::DeferredVariablePlay(s) => speed(0x54, s, out),
         MmcCommand::RecordStrobeVariable(s) => speed(0x55, s, out),
         MmcCommand::Wait => unit(0x7C, out),
