@@ -887,6 +887,7 @@ impl<C: Clock> Session<C> {
                     }
                 }
                 let lost = self.fault_poll(out);
+                #[cfg(feature = "device")]
                 self.listing_poll(cx.now, out);
                 crate::clock::sealed::Running::poll(&mut self.running, cx.now, lost, out);
             }
