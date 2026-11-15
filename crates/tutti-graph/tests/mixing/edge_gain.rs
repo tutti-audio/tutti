@@ -874,11 +874,15 @@ impl Mixer {
 
 fn switch(flag: &Arc<AtomicBool>) -> Box<dyn FnOnce(&mut Editor, NodeKey)> {
     let flag = Arc::clone(flag);
-    Box::new(move |ed, k| ed.insert(k, "switch", Unforkable(Switch(flag))))
+    Box::new(move |ed, k| {
+        ed.insert(k, "switch", Unforkable(Switch(flag)));
+    })
 }
 
 fn constant(v: f32) -> Box<dyn FnOnce(&mut Editor, NodeKey)> {
-    Box::new(move |ed, k| ed.insert(k, "dc", Unforkable(TestNode::new(dc(v)))))
+    Box::new(move |ed, k| {
+        ed.insert(k, "dc", Unforkable(TestNode::new(dc(v))));
+    })
 }
 
 /// A silent addend is skipped whatever its weight: all-silent sources, with

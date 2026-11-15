@@ -67,11 +67,13 @@ fn the_border_nodes_process_without_allocating() {
     let (inlet, writer) = EventInletNode::pair(LIVE_INLET_CAPACITY);
     ed.insert(NodeKey(2), "keys", inlet);
     let mut keys = MidiKeys::new(writer, MidiGroup::FIRST);
-    let clock = ed.insert(
-        NodeKey(3),
-        "clock",
-        ClockNode::new(tutti_ump::MidiGroup::FIRST, tutti_types::SampleRate::SR_48K),
-    );
+    let clock = ed
+        .insert(
+            NodeKey(3),
+            "clock",
+            ClockNode::new(tutti_ump::MidiGroup::FIRST, tutti_types::SampleRate::SR_48K),
+        )
+        .controls;
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (1, 3), (2, 0), (3, 0)]);
     clock.set_enabled(true);
     ed.commit().unwrap();
@@ -319,7 +321,7 @@ fn mcm(device: &mut EventInletWriter, block: u64, upper: bool) {
 fn an_mpe_mode_change_and_an_mcm_process_without_allocating() {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-    let controls = ed.insert(NodeKey(1), "in", MidiIngestNode::new());
+    let controls = ed.insert(NodeKey(1), "in", MidiIngestNode::new()).controls;
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 15)]);
     ed.commit().unwrap();
@@ -665,11 +667,13 @@ fn the_event_inlet_with_a_full_list_processes_without_allocating() {
 fn the_mpe_transform_node_processes_without_allocating() {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-    let controls = ed.insert(
-        NodeKey(1),
-        "mpe",
-        MpeTransformNode::new(tutti_fixtures::midi::lower_zone(15)),
-    );
+    let controls = ed
+        .insert(
+            NodeKey(1),
+            "mpe",
+            MpeTransformNode::new(tutti_fixtures::midi::lower_zone(15)),
+        )
+        .controls;
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
@@ -722,11 +726,13 @@ fn the_machine_control_node_processes_without_allocating() {
 
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-    let controls = ed.insert(
-        NodeKey(1),
-        "mmc",
-        MachineControlNode::new(MidiGroup::FIRST, Recipient::AllCall, MtcRate::Fps30),
-    );
+    let controls = ed
+        .insert(
+            NodeKey(1),
+            "mmc",
+            MachineControlNode::new(MidiGroup::FIRST, Recipient::AllCall, MtcRate::Fps30),
+        )
+        .controls;
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
     let at = |playing: bool, beat: f64| {

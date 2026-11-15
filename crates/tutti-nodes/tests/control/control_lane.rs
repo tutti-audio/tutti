@@ -181,7 +181,7 @@ fn native(ed: &Editor, probe: u64, program: ControlProgram, knob: Option<f32>) -
 
 /// Inserts `lane` at `key`, wired to `probe`'s cutoff; returns its controls.
 fn wire(ed: &mut Editor, key: u64, lane: ControlLaneNode, probe: u64) -> LaneControls {
-    let controls = ed.insert(NodeKey(key), "lane", lane);
+    let controls = ed.insert(NodeKey(key), "lane", lane).controls;
     ed.spec_mut().connect_param(
         cutoff(probe),
         EventOut {
@@ -195,7 +195,7 @@ fn wire(ed: &mut Editor, key: u64, lane: ControlLaneNode, probe: u64) -> LaneCon
 /// Inserts a `SegSink` at `sink` fed by `lane` at `key`, its two outputs
 /// appended to the graph's.
 fn wire_sink(ed: &mut Editor, key: u64, lane: ControlLaneNode, sink: u64) -> LaneControls {
-    let controls = ed.insert(NodeKey(key), "lane", lane);
+    let controls = ed.insert(NodeKey(key), "lane", lane).controls;
     ed.insert(NodeKey(sink), "sink", ForkByClone(SegSink::default()));
     let s = ed.spec_mut();
     s.connect_events(

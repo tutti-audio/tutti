@@ -147,11 +147,13 @@ fn rig(map: &Arc<TempoMap>, mtc: bool) -> Rig {
         SampleRate::of(SR),
         MaxBlock::of(Samples(MAX_BLOCK)),
     ));
-    let master = ed.insert(
-        NodeKey(1),
-        "clock",
-        ClockNode::new(tutti_ump::MidiGroup::FIRST, tutti_types::SampleRate::SR_48K),
-    );
+    let master = ed
+        .insert(
+            NodeKey(1),
+            "clock",
+            ClockNode::new(tutti_ump::MidiGroup::FIRST, tutti_types::SampleRate::SR_48K),
+        )
+        .controls;
     master.set_enabled(true);
     master.set_send_mtc(mtc);
     let out = std::cell::RefCell::new(common::sink(&mut ed, 1, &[(1, 0)]));
