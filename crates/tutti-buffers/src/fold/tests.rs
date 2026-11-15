@@ -1332,8 +1332,9 @@ fn close(got: f32, want: f64, what: &str) {
 }
 
 /// `got` within a relative `tol` of `want`: for figures measured on a grid. The
-/// midpoint rule is near-exact for these polynomials and the peaks sit on grid
-/// nodes, so the measured scales hold to 1e-4, far under the gaps between scales.
+/// midpoint rule's error on the mean square stays near 5e-5 after the root, and
+/// the grid resolves each peak to about 1e-5, so the measured scales hold to
+/// 1e-4, far under the gaps between scales.
 fn near_rel(got: f32, want: f64, tol: f64, what: &str) {
     assert!(
         (f64::from(got) - want).abs() <= tol * want.abs().max(1.0),

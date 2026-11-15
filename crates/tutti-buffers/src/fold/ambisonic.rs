@@ -55,7 +55,7 @@ fn degree(n: u16) -> u16 {
 
 /// A full-sphere normalization: the four whose scales over SN3D are defined
 /// for every harmonic.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy)]
 enum Scale {
     Sn3d,
     N3d,
