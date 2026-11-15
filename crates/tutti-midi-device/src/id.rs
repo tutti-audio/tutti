@@ -33,6 +33,7 @@ impl EndpointId {
 /// breaks saved files.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[non_exhaustive]
 pub enum Identity {
     /// The UMP Product Instance Id: the device's own, the same across restarts
     /// and across ports.
@@ -47,6 +48,13 @@ pub enum Identity {
         /// The port's name.
         port: String,
     },
+    /// A Windows Multimedia (WinMM) input port. The direction is part of the
+    /// identity because an input and an output of one unit share what names
+    /// the device.
+    WinMmInput(WinMmDevice),
+    /// A Windows Multimedia (WinMM) output port; see
+    /// [`WinMmInput`](Self::WinMmInput).
+    WinMmOutput(WinMmDevice),
 }
 
 impl Identity {
@@ -56,6 +64,54 @@ impl Identity {
         Self::Alsa {
             client: client.into(),
             port: port.into(),
+        }
+    }
+
+    /// A WinMM input port.
+    #[must_use]
+    pub fn winmm_input(device: WinMmDevice) -> Self {
+        Self::WinMmInput(device)
+    }
+
+    /// A WinMM output port.
+    #[must_use]
+    pub fn winmm_output(device: WinMmDevice) -> Self {
+        Self::WinMmOutput(device)
+    }
+}
+
+/// What names a WinMM port: the best the driver gives.
+///
+/// WinMM numbers ports by position in a list that shifts when a device comes or
+/// goes. A driver that reports a device interface path gives a name that
+/// survives a replug; one that does not leaves the product name (cut to 31
+/// characters) and the driver's ids.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[non_exhaustive]
+pub enum WinMmDevice {
+    /// The device interface path the driver reports.
+    Interface(String),
+    /// The product name and ids, for a driver that reports no path.
+    Named {
+        /// The product name the driver reports.
+        name: String,
+        /// The manufacturer id the driver reports.
+        manufacturer: u16,
+        /// The product id the driver reports.
+        product: u16,
+    },
+}
+
+impl fmt::Display for WinMmDevice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Interface(path) => f.write_str(path),
+            Self::Named {
+                name,
+                manufacturer,
+                product,
+            } => write!(f, "{name}/{manufacturer:04x}:{product:04x}"),
         }
     }
 }
@@ -112,6 +168,8 @@ impl fmt::Display for DeviceId {
             Identity::Product(id) => write!(f, "product:{id}")?,
             Identity::CoreMidi(id) => write!(f, "coremidi:{id}")?,
             Identity::Alsa { client, port } => write!(f, "alsa:{client}/{port}")?,
+            Identity::WinMmInput(device) => write!(f, "winmm-in:{device}")?,
+            Identity::WinMmOutput(device) => write!(f, "winmm-out:{device}")?,
         }
         write!(f, "#{}", self.ordinal)
     }

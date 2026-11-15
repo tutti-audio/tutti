@@ -99,6 +99,7 @@ mod plugin_diagnostics;
 mod plugin_params;
 #[cfg(feature = "plugin")]
 mod plugin_presets;
+mod pool;
 #[cfg(feature = "record")]
 mod recorder;
 #[cfg(feature = "plugin")]
@@ -183,6 +184,15 @@ pub use plugin::{
     Plugin, PluginChange, PluginEvent, PluginHealth, PluginLoad, PluginLoadRequest, PluginLoaded,
     PluginNode, SNAPSHOT_INTERVAL, StateRestore, StateView,
 };
+pub(crate) use pool::Pool;
+#[cfg(feature = "sampler")]
+pub use pool::{AudioFile, audio_file};
+pub use pool::{
+    Declared, HandleError, IntoPool, Life, Load, LoadError, PoolEntry, PoolError, PoolEvent,
+    PoolKey, PoolSet, PoolState,
+};
+#[cfg(feature = "soundfont")]
+pub use pool::{SoundFontFile, soundfont};
 
 #[cfg(feature = "plugin")]
 use hang::HangDetector;

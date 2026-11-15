@@ -470,12 +470,36 @@ fn the_zones_one_note_starts_do_not_end_each_other() {
 
 // ---- 8.4.1 and 9.1.7: what a note does ---------------------------------------
 
-/// 8.4.1: a harder key is louder. (The scale is the player's.)
+/// 8.4.1: the default velocity modulator attenuates by 960 cB on the concave curve,
+/// read as 40 log10(v / 127) dB: a note at velocity 64 is (64 / 127)^2 of the level at
+/// 127. Both notes are the same voice and velocity enters only as a gain, so the ratio of
+/// their levels is that gain's ratio.
 /// Spec: sf2.mod.default.1
 #[test]
-fn a_harder_key_is_louder() {
+fn the_velocity_attenuation_is_the_concave_960_cb_curve() {
     let font = one_preset(vec![vec![]]);
-    assert!(level(&font, 60, 120) > level(&font, 60, 60) * 1.5);
+    let ratio = level(&font, 60, 64) / level(&font, 60, 127);
+    let want = (64.0f32 / 127.0).powi(2);
+    assert!(
+        (ratio / want - 1.0).abs() < 1e-3,
+        "velocity 64 against 127: {ratio}, want {want}"
+    );
+}
+
+/// 8.1.2, generator 48: the attenuation is applied whole, in centibels: a zone of
+/// 60 cB plays 6 dB below the same zone of 0. The zones differ only in that gain, so the
+/// ratio of their levels is the gain's ratio.
+/// Spec: sf2.gen.initialAttenuation, sf2.units.centibel
+#[test]
+fn an_initial_attenuation_of_60_cb_is_6_db_down() {
+    let full = one_preset(vec![vec![]]);
+    let down = one_preset(vec![vec![(generator::INITIAL_ATTENUATION, 60)]]);
+    let ratio = level(&down, 60, 100) / level(&full, 60, 100);
+    let want = 10f32.powf(-6.0 / 20.0);
+    assert!(
+        (ratio / want - 1.0).abs() < 1e-3,
+        "60 cB: {ratio}, want {want}"
+    );
 }
 
 /// 9.1.7: a key-off makes the envelope fall to zero in its release phase: the

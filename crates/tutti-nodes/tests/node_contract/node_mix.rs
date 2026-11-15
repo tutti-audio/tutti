@@ -21,7 +21,7 @@ use tutti_fixtures::signal::bits;
 use tutti_graph::contract::drive;
 use tutti_graph::{IntoNode, Prepare, Solo};
 use tutti_nodes::{
-    ChannelTimes, CompressorControls, CompressorNode, CrossoverNode, DelayControls, DelayFamily,
+    ChannelTimes, CompressorControls, CompressorNode, CrossoverNode, DelayControls, DelayLayout,
     DelayNode, FamilyNode, GateControls, GateNode, InterpolationMode, KeySource, MaxDelay,
     ModDelayNode, PhaserControls, PhaserNode, Stages,
 };
@@ -187,15 +187,15 @@ fn the_delay_is_blended_by_the_graph() {
     check(
         "delay (stereo, cross-fed)",
         &|| {
-            let family = DelayFamily::new(
+            let layout = DelayLayout::new(
                 BusTopology::STEREO,
                 MaxDelay::of(Seconds(0.1)),
                 InterpolationMode::Linear,
             )
             .with_times(ChannelTimes::each(&[Seconds(0.021)]).unwrap())
             .unwrap();
-            DelayNode::live(
-                family,
+            DelayNode::from_layout(
+                layout,
                 DelayControls {
                     time: Seconds(0.013),
                     feedback: Feedback::new(0.5),

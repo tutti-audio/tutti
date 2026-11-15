@@ -5,7 +5,7 @@
 //! arriving, and the MTC Full Message and the runtime's decoders read it rather
 //! than owning it.
 
-use tutti_types::Seconds;
+use tutti_types::{SampleRate, Seconds};
 
 /// SMPTE frame rate for MTC/LTC.
 ///
@@ -187,6 +187,31 @@ impl SmpteFrameRate {
         }
     }
 
+    /// The frames elapsed at `seconds` at this rate: `seconds * num / den`
+    /// over the exact [`ratio`](Self::ratio), unrounded, so the fraction of a
+    /// frame is kept. The one place a time becomes a frame count; each caller
+    /// rounds it as its message needs: [`SmpteTimecode::from_seconds`] to the
+    /// nearest frame, `MmcPosition::from_seconds` down, with the fraction as
+    /// its subframes.
+    ///
+    /// The count is an `f64` and not a unit: no `tutti_types` unit counts
+    /// timecode frames (a `Frame` is a graph sample frame).
+    ///
+    /// [`SmpteTimecode::from_seconds`]: SmpteTimecode::from_seconds
+    #[must_use]
+    pub fn frames_at(&self, seconds: Seconds) -> f64 {
+        let (num, den) = self.ratio();
+        seconds.get() * num as f64 / den as f64
+    }
+
+    /// The samples in one frame at `sample_rate`: the exact ratio's
+    /// `rate * den / num`.
+    #[must_use]
+    pub fn samples_per_frame(&self, sample_rate: SampleRate) -> f64 {
+        let (num, den) = self.ratio();
+        sample_rate.get() * den as f64 / num as f64
+    }
+
     /// Frame labels per second: the count the `FF` field wraps at (24, 25, 30,
     /// 30, 30 for the two 29.97 rates).
     pub const fn labels_per_second(&self) -> u64 {
@@ -349,6 +374,16 @@ impl SmpteTimecode {
         } else {
             labelled
         }
+    }
+
+    /// The label of the frame nearest `seconds` at `frame_rate`: rounding, not
+    /// flooring, so a time a float's width short of a frame boundary reads as
+    /// that frame. A time before zero or NaN is the origin; hours wrap at 24.
+    #[must_use]
+    pub fn from_seconds(seconds: Seconds, frame_rate: SmpteFrameRate) -> Self {
+        // `max` turns a negative and NaN into 0, and `as` saturates the rest.
+        let frames = frame_rate.frames_at(seconds).round().max(0.0);
+        Self::from_frame_count(frames as u64, frame_rate)
     }
 
     /// The label of frame number `count` since `00:00:00:00` at `frame_rate`;

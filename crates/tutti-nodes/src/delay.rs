@@ -1,37 +1,40 @@
 //! The feedback delay, [`DelayNode`].
 //!
 //! [`DelayLine`](tutti_dsp::DelayLine) is the bare fractional-read ring;
-//! [`DelayFamily`] is the delay as a family (the loop, the routing, the glides), and
-//! this file holds the cells and how the graph reaches them. The read is fractional: a
-//! delay whose time is modulated must interpolate between taps or it steps audibly.
+//! [`DelayBank`] is the delay over buffers views (the loop, the routing, the glides), and
+//! this file holds the kernel that aims it, the cells and how the graph reaches them. The
+//! read is fractional: a delay whose time is modulated must interpolate between taps or it
+//! steps audibly.
 
+use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    DelayCapacity, DelayControls, DelayFamily, Family, Grows, InterpolationMode, MaxDelay, Reach,
-    TAIL_FLOOR,
+    COEFF_INTERVAL, DelayBank, DelayControls, DelayGlides, DelayLanes, DelayLayout, GAIN_GLIDE,
+    InterpolationMode, MaxDelay,
 };
-use tutti_types::{BusTopology, Feedback, SampleRate, Seconds};
+use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_types::{BusTopology, Feedback, MaxBlock, SampleRate, Seconds, Tail};
 
-use crate::reverb::{FamilyNode, NodeFamily, Rings};
+use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
 /// A feedback delay of any width: `N` audio inputs, `N` outputs, one delay line per
 /// channel.
 ///
-/// A [`FamilyNode`] over [`DelayFamily`], the loop being the family's recurrence; this
-/// file holds the cells and how the graph reaches them.
+/// A [`KernelNode`] over [`DelayKernel`], the loop being [`DelayBank`]'s; this file holds the
+/// cells and how the graph reaches them.
 ///
 /// - [`mono`](Self::mono) and [`stereo`](Self::stereo): one and two channels, read with
 ///   [`Linear`](InterpolationMode::Linear) interpolation.
 /// - [`new`](Self::new): any width up to one bus (16 channels), on a checked
 ///   [`BusTopology`], with the [`MaxDelay`] and the [`InterpolationMode`] of your own.
 ///   A cross-feedback [`Routing`](tutti_dsp::Routing) or times of the channels past the
-///   first ([`ChannelTimes`](tutti_dsp::ChannelTimes)) are the family's:
-///   [`DelayNode::live`] over a [`DelayFamily::with_routing`] and
-///   [`with_times`](DelayFamily::with_times).
+///   first ([`ChannelTimes`](tutti_dsp::ChannelTimes)) are the layout's:
+///   [`DelayNode::from_layout`] over a [`DelayLayout::with_routing`] and
+///   [`with_times`](DelayLayout::with_times).
 ///
 /// # The loop
 ///
 /// Each channel recirculates its own delayed tap, scaled by the **feedback**, and, when
-/// the family has a routing, the taps of the other channels, scaled by the
+/// the layout has a routing, the taps of the other channels, scaled by the
 /// **cross-feedback**. Width 2 defaults to the swap routing `[[0, 1], [1, 0]]` (a stereo
 /// ping-pong) and every other width to none, where the cross-feedback is inert. The
 /// feedback and cross-feedback are bounded as a **pair**
@@ -56,7 +59,7 @@ use crate::reverb::{FamilyNode, NodeFamily, Rings};
 ///   [`DELAY_SLEW`](tutti_dsp::DELAY_SLEW) frames of delay per frame: a moving delay is a
 ///   pitch bend, so it is its speed that is bounded, whatever the distance.
 /// - The **feedback** is per frame too when driven, clamped into the stable range; a cell
-///   that moves glides over [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE).
+///   that moves glides over [`GAIN_GLIDE`].
 /// - The **cross-feedback** is a cell the stream's 16-frame grid reads, and glides like the
 ///   feedback.
 ///
@@ -66,16 +69,16 @@ use crate::reverb::{FamilyNode, NodeFamily, Rings};
 /// [`ParamSet`](tutti_graph::ParamSet) over those three, and a fork of it starts from the
 /// values last set through it. The graph prepares it at the device rate, which sizes the
 /// lines (`ceil(max_delay * rate)` frames each), before its first block; a re-prepare
-/// empties them. Its tail is [`Tail::Unknown`](tutti_types::Tail::Unknown): a recirculating
+/// empties them. Its tail is [`Tail::Unknown`]: a recirculating
 /// line rings for as long as its feedback says, so the executor never skips it.
-pub type DelayNode = FamilyNode<DelayFamily>;
+pub type DelayNode = KernelNode<DelayKernel>;
 
 impl DelayNode {
     /// A delay on the bus `input`, as wide as it, holding up to `max_delay`, reading with
     /// `interpolation` and running at `controls`.
     ///
     /// The channels are linked in time and routed by the default for the width
-    /// ([`DelayFamily::new`]). The lines are sized at the rate
+    /// ([`DelayLayout::new`]). The lines are sized at the rate
     /// [`Node::prepare`](tutti_graph::Node::prepare) hands it, which is what makes
     /// `max_delay` hold at whatever rate the graph runs at. `new(BusTopology::STEREO, ..)`
     /// is [`stereo`](Self::stereo); an `n`-channel one on the engine's order for that width
@@ -87,7 +90,14 @@ impl DelayNode {
         interpolation: InterpolationMode,
         controls: DelayControls,
     ) -> Self {
-        Self::live(DelayFamily::new(input, max_delay, interpolation), controls)
+        Self::from_layout(DelayLayout::new(input, max_delay, interpolation), controls)
+    }
+
+    /// A delay built to `layout` (its routing and the times of its channels) and running at
+    /// `controls`. Allocates.
+    #[must_use]
+    pub fn from_layout(layout: DelayLayout, controls: DelayControls) -> Self {
+        Self::with_kernel(DelayKernel::new(layout), DelaySet, controls)
     }
 
     /// A mono delay (1 in, 1 out) with linear interpolation.
@@ -103,8 +113,8 @@ impl DelayNode {
 
     /// A stereo delay (2 in, 2 out) with linear interpolation and the L-R swap routing
     /// (a ping-pong, once the cross-feedback is above zero). Channel 1 follows the time;
-    /// a ping-pong spread is [`DelayNode::live`] over a [`DelayFamily`]
-    /// [`with_times`](DelayFamily::with_times).
+    /// a ping-pong spread is [`DelayNode::from_layout`] over a [`DelayLayout`]
+    /// [`with_times`](DelayLayout::with_times).
     #[must_use]
     pub fn stereo(max_delay: MaxDelay, controls: DelayControls) -> Self {
         Self::new(
@@ -135,27 +145,105 @@ control_set! {
     }
 }
 
+impl DelaySet {
+    /// The lane of the time, in seconds: the first [`fast`](crate::ControlRead::Fast) row.
+    const TIME_LANE: usize = 0;
+    /// The lane of the feedback: the second fast row. The cross-feedback is not a lane: it
+    /// is read on the stream grid.
+    const FEEDBACK_LANE: usize = 1;
+}
+
+/// The feedback delay as a [`Kernel`]: a [`DelayBank`] sized at the prepared rate and the
+/// glides of the delay and the feedbacks it reads.
+///
+/// The time and the feedback are read per frame when the graph drives them
+/// ([`ControlLanes`]); a cell that moves lands whole on the stream grid and glides here.
 /// A recirculating line rings for as long as its feedback says, which is a ceiling the
-/// graph's bounce would have to render: it is declared [`Tail::Unknown`](tutti_types::Tail::Unknown)
-/// and never narrowed, so the executor never skips it.
-impl NodeFamily for DelayFamily {
+/// graph's bounce would have to render: the tail is [`Tail::Unknown`] and never narrowed, so
+/// the executor never skips it.
+#[derive(Clone, Debug)]
+pub struct DelayKernel {
+    layout: DelayLayout,
+    /// The lines, sized when the rate is known: `None` until [`prepare`](Kernel::prepare).
+    bank: Option<DelayBank>,
+    glides: DelayGlides,
+    /// Whether the first retarget after `prepare` has landed.
+    landed: bool,
+}
+
+impl DelayKernel {
+    /// A delay built to `layout`. It has no lines until `prepare` gives it a rate.
+    fn new(layout: DelayLayout) -> Self {
+        Self {
+            layout,
+            bank: None,
+            glides: DelayGlides::landed(0),
+            landed: false,
+        }
+    }
+}
+
+impl Kernel for DelayKernel {
     type Set = DelaySet;
 
-    fn rings(&self) -> Rings {
-        Rings::Unknown
-    }
-    const SAMPLING: tutti_dsp::Cadence = <Self as Family>::CADENCE;
+    /// A cell that moves reaches the render within 16 frames, wherever the blocks fall.
+    const GRID: usize = COEFF_INTERVAL;
 
-    fn set(&self, _: &DelayControls) -> DelaySet {
-        DelaySet
+    fn shape(&self) -> Shape {
+        let input = self.layout.input();
+        let output = Bus::banded(input, BusRole::Main, 1).expect("one band is a bus");
+        Shape::buses(
+            Buses::main(input),
+            Buses::NONE.with(output).expect("one bus"),
+        )
+        .with_cost(Cost::Moderate)
     }
 
-    /// The lines of the family's own longest delay ([`DelayFamily::max_delay`], the
-    /// [`Domain`](tutti_dsp::Domain) it is built to) at `rate`.
-    fn capacity(&self, rate: SampleRate) -> DelayCapacity {
-        let reach =
-            Reach::new(rate, self.max_delay(), TAIL_FLOOR).expect("TAIL_FLOOR is a valid floor");
-        self.reach(&reach)
+    /// Sizes a line per channel at `rate` (`ceil(max_delay * rate)` frames: a re-prepare
+    /// empties them, the delays in frames having been the old rate's) and the feedback
+    /// glides from [`GAIN_GLIDE`] at it, the conversion saturating: a prepare must not panic.
+    fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
+        let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
+        self.bank = Some(DelayBank::new(&self.layout, rate));
+        self.glides = DelayGlides::landed(steps);
+        self.landed = false;
+    }
+
+    fn reset(&mut self) {
+        if let Some(bank) = &mut self.bank {
+            bank.reset();
+        }
+        self.glides.settle();
+    }
+
+    fn retarget(&mut self, controls: &DelayControls) {
+        let Some(bank) = &self.bank else { return };
+        bank.aim(&mut self.glides, controls);
+        if !self.landed {
+            self.glides.settle();
+            self.landed = true;
+        }
+    }
+
+    fn render<S: Float>(
+        &mut self,
+        input: Planes<'_, S>,
+        lanes: ControlLanes<'_, S>,
+        output: PlanesMut<'_, '_, S>,
+    ) {
+        let lanes = DelayLanes {
+            time: lanes.get(DelaySet::TIME_LANE),
+            feedback: lanes.get(DelaySet::FEEDBACK_LANE),
+        };
+        if let Some(bank) = &mut self.bank {
+            bank.process(&mut self.glides, lanes, input, output);
+        }
+    }
+
+    /// A recirculating line rings for as long as its feedback says: unknown, so the graph
+    /// never reads it as none.
+    fn tail(&self) -> Tail {
+        Tail::Unknown
     }
 }
 
@@ -163,7 +251,7 @@ impl NodeFamily for DelayFamily {
 mod tests {
     use super::*;
     use tutti_dsp::{ChannelTimes, Routing};
-    use tutti_graph::contract::{assert_param_fork, drive, prepared};
+    use tutti_graph::contract::{assert_honest_tail, assert_param_fork, drive, prepared};
     use tutti_graph::{Node, ParamNode};
     use tutti_types::{ChannelLayout, Latency, Samples, Tail, UnitParam};
 
@@ -222,7 +310,7 @@ mod tests {
     }
 
     /// A fork starts from the values last set through the node's `ParamSet` and shares no
-    /// cell with it, and the set has the three controls in the family's order.
+    /// cell with it, and the set has the three controls in the layout's order.
     #[test]
     fn a_fork_starts_from_the_authored_values_and_shares_nothing() {
         let node = DelayNode::stereo(MAX, controls(0.05, 0.4, 0.2));
@@ -293,13 +381,13 @@ mod tests {
     }
 
     /// The echo is heard at the delay, and the stereo channels have times of their own when
-    /// the family gives the right one (here 5 and 10 frames).
+    /// the layout gives the right one (here 5 and 10 frames).
     #[test]
     fn the_stereo_channels_echo_at_their_own_times() {
-        let family = DelayFamily::new(BusTopology::STEREO, MAX, InterpolationMode::Linear)
+        let layout = DelayLayout::new(BusTopology::STEREO, MAX, InterpolationMode::Linear)
             .with_times(ChannelTimes::each(&[Seconds(frames(10.0))]).unwrap())
             .unwrap();
-        let node = DelayNode::live(family, controls(frames(5.0), 0.0, 0.0));
+        let node = DelayNode::from_layout(layout, controls(frames(5.0), 0.0, 0.0));
         let out = frames_of(node, &impulses(2, 12, &[0, 1]), &[]);
         let heard = |c: &[f32]| c.iter().position(|&s| s != 0.0);
         assert_eq!((heard(&out[0]), heard(&out[1])), (Some(5), Some(10)));
@@ -385,10 +473,10 @@ mod tests {
     #[test]
     fn a_ring_routing_feeds_each_channel_into_the_next() {
         let b = bus(6);
-        let family = DelayFamily::new(b, MAX, InterpolationMode::Linear)
+        let layout = DelayLayout::new(b, MAX, InterpolationMode::Linear)
             .with_routing(Routing::ring(b))
             .unwrap();
-        let node = DelayNode::live(family, controls(frames(10.0), 0.0, 0.8));
+        let node = DelayNode::from_layout(layout, controls(frames(10.0), 0.0, 0.8));
         let out = frames_of(node, &impulses(6, 26, &[0]), &[]);
         let energy: Vec<f32> = out
             .iter()
@@ -403,10 +491,10 @@ mod tests {
     #[test]
     fn a_dense_routing_at_full_feedback_stays_bounded() {
         let b = bus(4);
-        let family = DelayFamily::new(b, MaxDelay::of(Seconds(0.1)), InterpolationMode::Linear)
+        let layout = DelayLayout::new(b, MaxDelay::of(Seconds(0.1)), InterpolationMode::Linear)
             .with_routing(Routing::normalized(b, &[1.0; 16]).unwrap())
             .unwrap();
-        let node = DelayNode::live(family, controls(0.002, 0.99, 0.99));
+        let node = DelayNode::from_layout(layout, controls(0.002, 0.99, 0.99));
         let out = frames_of(node, &impulses(4, 8_001, &[0, 1, 2, 3]), &[]);
         let peak = out
             .iter()
@@ -478,5 +566,97 @@ mod tests {
         for block in [1, 16, 64, 128] {
             assert_eq!(render(block, true), whole, "blocks of {block}");
         }
+    }
+
+    /// The lane constants are the fast rows of the control set, in order: reordering its
+    /// rows moves a lane and fails here.
+    #[test]
+    fn the_lane_constants_are_the_fast_rows_of_the_control_set() {
+        use crate::{ControlRead, ControlSet};
+        use tutti_types::UnitAddr;
+        let set = DelaySet;
+        let fast: Vec<UnitAddr> = (0..set.addrs().len())
+            .filter(|&k| set.control(k).read == ControlRead::Fast)
+            .map(|k| set.addrs()[k])
+            .collect();
+        assert_eq!(fast.len(), 2);
+        assert_eq!(
+            fast[DelaySet::TIME_LANE],
+            UnitAddr::first(UnitParam::DelayTime)
+        );
+        assert_eq!(
+            fast[DelaySet::FEEDBACK_LANE],
+            UnitAddr::first(UnitParam::Feedback)
+        );
+    }
+
+    /// A reset empties the lines and restarts the grid: the same stream rendered after a
+    /// reset, at a frame that is not a grid point, is the fresh node's bit for bit, with the
+    /// feedback ringing and the cross-feedback glide in flight.
+    #[test]
+    fn a_reset_node_renders_what_a_fresh_one_does() {
+        let x: Vec<f32> = (0..400)
+            .map(|n| ((n * 13 + 5) % 100) as f32 / 50.0 - 1.0)
+            .collect();
+        let make = || {
+            prepared(
+                DelayNode::stereo(MAX, controls(frames(20.0), 0.7, 0.4)),
+                RATE,
+                64,
+            )
+        };
+        let blocks = |node: &mut DelayNode, from: usize| -> Vec<Vec<f32>> {
+            let mut out = vec![Vec::new(), Vec::new()];
+            for chunk in x[from..].chunks(37) {
+                for (o, y) in out.iter_mut().zip(drive(node, RATE, &[chunk, chunk], &[])) {
+                    o.extend(y);
+                }
+            }
+            out
+        };
+        let mut used = make();
+        blocks(&mut used, 100);
+        used.reset();
+        assert_eq!(blocks(&mut used, 0), blocks(&mut make(), 0));
+    }
+
+    /// A cell that moves **between** grid points starts at the next grid point: the
+    /// cross-feedback written 13 frames past frame 1024 renders the same as the write at
+    /// frame 1040, and differently from the write at 1056.
+    #[test]
+    fn a_move_between_grid_points_starts_at_the_next_one() {
+        let len = 2_048;
+        let x: Vec<f32> = (0..len)
+            .map(|n| ((n * 13 + 5) % 100) as f32 / 50.0 - 1.0)
+            .collect();
+        let render = |at: usize| -> Vec<f32> {
+            let node = DelayNode::stereo(MAX, controls(frames(10.0), 0.3, 0.0));
+            let set = node.param_set();
+            let mut node = prepared(node, RATE, 2_048);
+            let mut out = Vec::new();
+            for (chunk, from) in [(&x[..at], 0), (&x[at..], at)] {
+                if from == at {
+                    assert!(set.set(UnitParam::CrossFeedback, 0.6));
+                }
+                out.extend(drive(&mut node, RATE, &[chunk, chunk], &[]).remove(0));
+            }
+            out
+        };
+        let at_the_point = render(1_040);
+        assert_eq!(render(1_037), at_the_point);
+        assert_ne!(render(1_056), at_the_point);
+    }
+
+    /// The tail is declared unknown and holds: sound goes on after the delay and its
+    /// echoes, and the contract's honest-tail check passes.
+    #[test]
+    fn the_tail_is_unknown_and_honest() {
+        let mut node = prepared(
+            DelayNode::stereo(MAX, controls(frames(10.0), 0.5, 0.3)),
+            RATE,
+            64,
+        );
+        assert_eq!(node.shape().tail, Tail::Unknown);
+        assert_honest_tail(&mut node, RATE);
     }
 }

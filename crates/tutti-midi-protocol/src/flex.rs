@@ -30,6 +30,26 @@ pub fn flex_tempo(field: u32) -> Option<Bpm> {
         .flatten()
 }
 
+/// The Set Tempo field that declares `bpm`: 10 ns units per quarter note,
+/// `6e9 / bpm` rounded to the nearest unit, the inverse of [`flex_tempo`]. A
+/// tempo too slow for the 32-bit field (under 1.39698 bpm) is the slowest the
+/// field holds, and one too fast for a unit (over 6e9 bpm) is one unit.
+///
+/// ```
+/// use tutti_midi_protocol::{flex_tempo, flex_tempo_field};
+/// use tutti_types::Bpm;
+///
+/// let bpm = Bpm::new(120.0).unwrap();
+/// assert_eq!(flex_tempo_field(bpm), 50_000_000);
+/// assert_eq!(flex_tempo(flex_tempo_field(bpm)), Some(bpm));
+/// ```
+#[must_use]
+pub fn flex_tempo_field(bpm: Bpm) -> u32 {
+    // `as` saturates the float into the field; `max(1)` keeps a field that
+    // `flex_tempo` reads as a tempo.
+    ((TEN_NS_UNITS_PER_MINUTE / bpm.get()).round() as u32).max(1)
+}
+
 /// The meter a Set Time Signature message declares: the numerator field is the
 /// beats per bar, the denominator field a negative power of 2 (2 is a quarter
 /// note, 3 an eighth). `None` for what the project's meter cannot hold: a

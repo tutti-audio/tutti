@@ -1336,7 +1336,7 @@ fn a_connected_ump_endpoint_is_negotiated_by_the_session_tick() {
         let mut answers: Vec<Ump> = Vec::new();
         for ump in fake.take_sent(raw) {
             if let Ok(message) = ump.decode() {
-                device.reply(message, &mut answers);
+                let _ = device.reply(message, &mut answers);
             }
         }
         for ump in answers {
@@ -1436,7 +1436,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_a_session_event() {
         let mut answers: Vec<Ump> = Vec::new();
         for ump in fake.take_sent(raw) {
             if let Ok(message @ tutti_ump::Message::Stream(_)) = ump.decode() {
-                device.reply(message, &mut answers);
+                let _ = device.reply(message, &mut answers);
                 continue;
             }
             assembler.begin_block();
@@ -1583,7 +1583,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
         let mut answers: Vec<Ump> = Vec::new();
         for ump in fake.take_sent(raw) {
             if let Ok(message @ tutti_ump::Message::Stream(_)) = ump.decode() {
-                device.reply(message, &mut answers);
+                let _ = device.reply(message, &mut answers);
                 continue;
             }
             assembler.begin_block();
@@ -1724,7 +1724,7 @@ impl MpePeer {
         let mut answers: Vec<Ump> = Vec::new();
         for ump in fake.take_sent(EndpointId::from_raw(Self::RAW)) {
             if let Ok(message @ tutti_ump::Message::Stream(_)) = ump.decode() {
-                self.device.reply(message, &mut answers);
+                let _ = self.device.reply(message, &mut answers);
                 continue;
             }
             self.assembler.begin_block();
@@ -2048,7 +2048,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
         let mut answers: Vec<Ump> = Vec::new();
         for ump in fake.take_sent(raw) {
             if let Ok(message @ tutti_ump::Message::Stream(_)) = ump.decode() {
-                device.reply(message, &mut answers);
+                let _ = device.reply(message, &mut answers);
                 continue;
             }
             assembler.begin_block();
@@ -2156,7 +2156,7 @@ fn settle(
         let mut answers = Vec::new();
         for ump in fake.take_sent(raw) {
             if let Ok(message @ Message::Stream(_)) = ump.decode() {
-                device.reply(message, &mut answers);
+                let _ = device.reply(message, &mut answers);
             }
         }
         for ump in answers {

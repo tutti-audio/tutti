@@ -13,7 +13,7 @@ use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_types::{BusTopology, ChannelLayout, Db, Hz, MaxBlock, Q, SampleRate, Tail};
 
 use super::filter_bus;
-use crate::kernel::{Kernel, KernelNode};
+use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
 /// A state-variable filter of any width: `N` audio inputs, `N` outputs, one
 /// coefficient set shared across the channels and one integrator pair per
@@ -206,7 +206,12 @@ impl<F: Float + Lanes> Kernel for SvfKernel<F> {
         }
     }
 
-    fn render<S: Float>(&mut self, input: Planes<'_, S>, output: PlanesMut<'_, '_, S>) {
+    fn render<S: Float>(
+        &mut self,
+        input: Planes<'_, S>,
+        _: ControlLanes<'_, S>,
+        output: PlanesMut<'_, '_, S>,
+    ) {
         self.bank.process(&mut self.coefficients, input, output);
     }
 

@@ -6,7 +6,7 @@ use super::*;
 fn record_while_last_is_locked_counts_and_returns() {
     let faults = StreamFaults::new();
     let held = faults.last_guard();
-    faults.record(&cpal::Error::new(cpal::ErrorKind::DeviceNotAvailable));
+    faults.record(BackendErrorKind::DeviceGone, &"device not available");
     drop(held);
     assert_eq!(faults.count(), 1);
     assert!(faults.is_disconnected());
@@ -15,7 +15,7 @@ fn record_while_last_is_locked_counts_and_returns() {
         "the message was dropped, not waited for"
     );
 
-    faults.record(&cpal::Error::new(cpal::ErrorKind::DeviceNotAvailable));
+    faults.record(BackendErrorKind::DeviceGone, &"device not available");
     assert_eq!(faults.count(), 2);
     assert_eq!(
         faults.last().map(|f| f.kind),
@@ -23,18 +23,15 @@ fn record_while_last_is_locked_counts_and_returns() {
     );
 }
 
-fn pollerr() -> cpal::Error {
-    cpal::Error::with_message(
-        cpal::ErrorKind::BackendError,
-        "`alsa::poll()` returned POLLERR",
-    )
+fn pollerr() -> &'static str {
+    "`alsa::poll()` returned POLLERR"
 }
 
-/// **A device lost on ALSA is detected though cpal never says
-/// `DeviceNotAvailable` there.**
+/// **A device lost on ALSA is detected though the backend never says the
+/// device is gone there.**
 ///
-/// cpal's ALSA worker reports a lost device as `cpal::StreamError::BackendSpecific`
-/// "returned POLLERR", repeated at spin rate with no data. This feeds that
+/// ALSA's worker reports a lost device as a backend error "returned POLLERR",
+/// repeated at spin rate with no data. This feeds that
 /// stream of errors, one per millisecond, and expects a disconnect once
 /// `STALL_GRACE` has passed, counted once at the start of the run and once at
 /// the promotion rather than once per error.
@@ -45,14 +42,14 @@ fn a_spinning_backend_error_with_no_audio_becomes_a_disconnect() {
     let err = pollerr();
     let ms = Duration::from_millis;
 
-    faults.record_at(&err, t0 + ms(1));
+    faults.record_at(BackendErrorKind::Other, &err, t0 + ms(1));
     assert!(!faults.is_disconnected());
     for i in 2..400 {
-        faults.record_at(&err, t0 + ms(i));
+        faults.record_at(BackendErrorKind::Other, &err, t0 + ms(i));
     }
     assert!(!faults.is_disconnected(), "inside the grace period");
     for i in 400..700 {
-        faults.record_at(&err, t0 + ms(i));
+        faults.record_at(BackendErrorKind::Other, &err, t0 + ms(i));
     }
     assert!(faults.is_disconnected());
     assert_eq!(faults.count(), 2);
@@ -63,7 +60,7 @@ fn a_spinning_backend_error_with_no_audio_becomes_a_disconnect() {
     assert!(faults.last().unwrap().message.contains("POLLERR"));
 
     // Further errors are ignored outright.
-    faults.record_at(&err, t0 + ms(900));
+    faults.record_at(BackendErrorKind::Other, &err, t0 + ms(900));
     assert_eq!(faults.count(), 2);
 }
 
@@ -78,7 +75,7 @@ fn xruns_between_delivered_blocks_never_disconnect() {
     for burst in 0..20u64 {
         let base = burst * 300;
         for i in 0..5 {
-            faults.record_at(&pollerr(), t0 + ms(base + i));
+            faults.record_at(BackendErrorKind::Other, &pollerr(), t0 + ms(base + i));
         }
         faults.delivered();
     }
@@ -91,9 +88,17 @@ fn xruns_between_delivered_blocks_never_disconnect() {
 fn clear_forgets_a_run_in_progress() {
     let faults = StreamFaults::new();
     let t0 = faults.epoch;
-    faults.record_at(&pollerr(), t0 + Duration::from_millis(1));
+    faults.record_at(
+        BackendErrorKind::Other,
+        &pollerr(),
+        t0 + Duration::from_millis(1),
+    );
     faults.clear();
-    faults.record_at(&pollerr(), t0 + Duration::from_millis(900));
+    faults.record_at(
+        BackendErrorKind::Other,
+        &pollerr(),
+        t0 + Duration::from_millis(900),
+    );
     assert!(!faults.is_disconnected(), "a fresh run starts at 900 ms");
     assert_eq!(faults.count(), 1);
 }
@@ -103,8 +108,8 @@ fn clear_forgets_a_run_in_progress() {
 #[test]
 fn a_route_change_and_a_refused_promotion_record_nothing() {
     let faults = StreamFaults::new();
-    faults.record(&cpal::Error::new(cpal::ErrorKind::DeviceChanged));
-    faults.record(&cpal::Error::new(cpal::ErrorKind::RealtimeDenied));
+    faults.record(BackendErrorKind::Survivable, &"device changed");
+    faults.record(BackendErrorKind::Survivable, &"real-time promotion denied");
     assert!(!faults.is_faulted());
     assert_eq!(faults.count(), 0);
 }

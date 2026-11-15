@@ -9,5 +9,6 @@ static ALLOC: AllocDisabler = AllocDisabler;
 #[path = "../support/mod.rs"]
 mod support;
 
+mod block_no_alloc;
 mod load_meter;
 mod rt_no_alloc_engine;

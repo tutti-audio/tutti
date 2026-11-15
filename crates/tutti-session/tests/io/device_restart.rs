@@ -8,7 +8,7 @@
 //! The plugin half is `plugin_latency.rs`'s, the MIDI clock's is
 //! `device_midi_clock.rs`'s.
 
-use tutti_cpal::{ManualStream, ManualStreamDriver, OutputSpec};
+use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::NodeKey;
 use tutti_graph::{FadeLaw, ForkByClone};
 use tutti_nodes::testing::{Osc, Through};
@@ -28,7 +28,7 @@ fn spec_with(rate: f64, channels: usize) -> OutputSpec {
     OutputSpec::new(
         SampleRate::of(rate),
         ChannelLayout::try_from(channels).expect("a test width is small"),
-        tutti_cpal::cpal::SampleFormat::F32,
+        tutti_buffers::SampleFormat::F32,
     )
 }
 
