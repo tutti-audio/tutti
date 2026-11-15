@@ -465,7 +465,8 @@ pub enum Attribute {
     },
 }
 
-/// A Registered Per-Note Controller number (Appendix A, Table 22). A number
+/// A Registered Per-Note Controller number (M2-104 Appendix A, Table 22, and
+/// M2-123 §8.2's Playing Position). A number
 /// the table leaves reserved is kept in [`Reserved`](Self::Reserved), so its
 /// message re-encodes exactly. Build one from a wire number with [`From<u8>`],
 /// which names every number the table defines and only then falls back to
@@ -487,6 +488,9 @@ pub enum RegisteredPerNoteController {
     Pan,
     /// 11: Expression.
     Expression,
+    /// 12: Playing Position (M2-123 §8.2); the value is a
+    /// [`PlayingPosition`](crate::PlayingPosition).
+    PlayingPosition,
     /// 70: Sound Controller 1, Sound Variation.
     SoundVariation,
     /// 71: Sound Controller 2, Timbre / Harmonic Intensity.
@@ -533,6 +537,7 @@ impl RegisteredPerNoteController {
             Self::Balance => 8,
             Self::Pan => 10,
             Self::Expression => 11,
+            Self::PlayingPosition => 12,
             Self::SoundVariation => 70,
             Self::Timbre => 71,
             Self::ReleaseTime => 72,
@@ -563,6 +568,7 @@ impl From<u8> for RegisteredPerNoteController {
             8 => Self::Balance,
             10 => Self::Pan,
             11 => Self::Expression,
+            12 => Self::PlayingPosition,
             70 => Self::SoundVariation,
             71 => Self::Timbre,
             72 => Self::ReleaseTime,

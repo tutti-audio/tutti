@@ -82,6 +82,7 @@ mod mixed_data;
 mod mpe_zone;
 mod note_id;
 mod note_velocity;
+mod orchestral;
 mod rpn;
 mod sysex;
 mod sysex8;
@@ -123,6 +124,9 @@ pub use mixed_data::{
 pub use mpe_zone::{MpeOverlap, MpeZoneSet, MpeZoneSpan};
 pub use note_id::NoteId;
 pub use note_velocity::NoteVelocity;
+pub use orchestral::{
+    MuteAmount, MuteMessage, MuteState, MuteType, PlayingPosition, ReservedMuteType,
+};
 pub use rpn::{RegisteredData, Rpn};
 pub use sysex::{
     SYSEX7_MAX_PAYLOAD, Sysex7Packets, SysexAssembler, SysexError, SysexMessage, SysexRef,
