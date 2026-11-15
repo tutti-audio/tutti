@@ -138,6 +138,8 @@ impl ClapProcessor {
         // The plugin forgot its input: a SysEx open across the reset must not
         // complete on the far side of it.
         self.scratch.input_events.reset_midi();
+        // Nor does the plugin's output carry a parameter run across it.
+        self.scratch.out_translator.reset();
     }
 
     /// Takes the parameter edits the Controller queued that no block has
@@ -368,6 +370,7 @@ fn convert_transport(transport: &SharedTransport, sample_rate: f64) -> Transport
 /// `add_change` below writes into storage that already exists.
 fn copy_process_output(output: ProcessOutputRef<'_>, out: &mut tutti_plugin_types::ProcessOutput) {
     out.emit_midi(output.midi_events.iter().copied());
+    out.count_midi_dropped(output.midi_lost);
 
     for queue in &output.param_changes.queues {
         for point in &queue.points {

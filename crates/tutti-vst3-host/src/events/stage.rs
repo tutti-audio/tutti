@@ -1,8 +1,11 @@
 //! Staging a block's input events into a plugin's `IEventList`, and reading
 //! back what the plugin wrote.
 
+use super::OutputStream;
 use tutti_graph::UmpAt;
-use tutti_plugin_types::{NoteExpressionIntValue, NoteExpressionValue, RtMidiEvents, push_sysex};
+use tutti_plugin_types::{
+    NoteExpressionIntValue, NoteExpressionValue, RtMidiEvents, group_of_port, push_sysex,
+};
 use tutti_ump::SysexStep;
 use tutti_vst3_ffi::{EventList, NOTE_EXPRESSION_ROOM, Staging};
 
@@ -176,31 +179,51 @@ fn stage_with_text(stage: &mut Staging<'_>, make: impl FnOnce(&mut Staging<'_>) 
     }
 }
 
-/// Drains the plugin's emitted MIDI from its output `list` into `out`. Clears
+/// Drains the plugin's emitted MIDI from its output `list` into `out`, each
+/// event on the Group of its event bus, MIDI 1.0 through `stream`. Clears
 /// `out` first and never grows it: events past its cap are dropped
 /// (`out.is_overflowed()` reports it), a SysEx that does not fit is dropped
-/// whole and counted in the list's [`dropped`](EventList::dropped).
-pub fn drain_midi(list: &EventList, out: &mut RtMidiEvents) {
+/// whole and counted on the stream ([`OutputStream::sysex_dropped`]). Every event
+/// is read through `stream` whether or not `out` has room, so its translator and
+/// note table see the whole output; an event on a bus past the sixteen Groups is
+/// counted on the stream ([`OutputStream::buses_dropped`]).
+///
+/// A parameter run (select, Data Entry MSB) with no Data Entry LSB waits for
+/// one: the stream's translator never flushes a live output, which has no end
+/// (M2-104 Appendix D.3.3).
+pub fn drain_midi(list: &EventList, stream: &mut OutputStream, out: &mut RtMidiEvents) {
     out.clear();
-    let Some(refused) = list.try_with_events(|staged| {
-        let mut refused = 0;
+    let read = list.try_with_events(|staged| {
         for event in staged.events {
+            // A bus past the sixteen Groups names none: the event is dropped and
+            // counted on the stream, SysEx included.
+            let Some(group) = u16::try_from(event.header.bus_index)
+                .ok()
+                .and_then(group_of_port)
+            else {
+                stream.count_bus_dropped();
+                continue;
+            };
             if let Payload::SysEx(message) = event.payload {
                 let frame = u32::try_from(event.sample_offset()).unwrap_or(0);
-                if !push_sysex(out, frame, &staged.sysex[message.range()]) {
-                    refused += 1;
+                if !push_sysex(out, group, frame, &staged.sysex[message.range()]) {
+                    stream.count_sysex_dropped();
                 }
-            } else if let Some(midi) = event.to_midi()
-                && !out.push(midi)
-            {
-                break;
+            } else if let Some(midi) = event.to_midi(stream) {
+                // Every event goes through the stream whether or not `out` has
+                // room, so its translator and note table see the whole output;
+                // what does not fit is dropped and latches `out`'s overflow.
+                if !out.push(midi) {
+                    stream.count_full_dropped();
+                }
             }
         }
-        refused
-    }) else {
-        return;
-    };
-    list.add_dropped(refused);
+    });
+    if read.is_none() {
+        // A plugin thread holds the list (counted in the list's `busy`): what it
+        // wrote this block is unreadable, at least one event.
+        stream.count_list_busy();
+    }
 }
 
 /// Tests build SDK structs and counts by hand, so they repeat the bounded

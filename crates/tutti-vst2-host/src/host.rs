@@ -59,6 +59,7 @@ use tutti_plugin_types::{
     AutomationMode, MainThreadMarker, Request, RescanScope, WireMidi, sysex_packets,
 };
 use tutti_rt::RequestWord;
+use tutti_ump::MidiGroup;
 use vst::api::{AutomationState, ProcessLevel, Supported};
 use vst::host::Host;
 
@@ -326,7 +327,7 @@ impl HostState {
             return;
         }
         // A payload byte of 128 or more is a malformed message: dropped, counted.
-        let Some(packets) = sysex_packets(bytes) else {
+        let Some(packets) = sysex_packets(MidiGroup::FIRST, bytes) else {
             self.dropped_midi_out.fetch_add(1, Ordering::Relaxed);
             return;
         };

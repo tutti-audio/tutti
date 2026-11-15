@@ -486,7 +486,7 @@ fn test_output_events_push_sysex_with_data() {
     }
     // Sysex is its own event kind, not a generic MIDI byte triple, and it
     // drains as UMP SysEx7 packets at the plugin's frame offset.
-    let drained = midi_events(&output);
+    let drained = midi_events(&mut output);
     assert_eq!(drained.len(), 1, "a 4-byte payload is one packet");
     assert_eq!(drained[0].offset, 25);
     let Ok(tutti_ump::Message::Sysex7(_, packet)) = drained[0].ump.decode() else {
@@ -535,9 +535,9 @@ fn a_long_sysex_from_the_plugin_drains_whole() {
         }
         done
     };
-    assert_eq!(reassemble(&midi_events(&output)), vec![message.clone()]);
+    assert_eq!(reassemble(&midi_events(&mut output)), vec![message.clone()]);
     let mut pool = RtMidiEvents::new();
-    output.fill_midi_events(&mut pool);
+    output.fill_midi_events(&mut tutti_midi_protocol::Translator::new(), &mut pool);
     assert!(!pool.is_overflowed());
     assert_eq!(reassemble(pool.as_slice()), vec![message]);
 }
