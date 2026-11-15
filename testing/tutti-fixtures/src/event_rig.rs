@@ -199,8 +199,19 @@ impl EventRig {
 type Reading = Option<(Instant, Moment)>;
 
 /// A block clock a test writes by hand, as the engine does each render call.
-#[derive(Default)]
 pub struct BlockClock(Arc<Mutex<Reading>>);
+
+impl Default for BlockClock {
+    fn default() -> Self {
+        let clock = Self(Arc::default());
+        // On macOS std's `Mutex` boxes its pthread mutex on the first `lock`,
+        // so a first read from the driver thread would allocate there. The
+        // engine's own clock is lock-free; this stand-in takes its lock once
+        // here, on the control side, where a real one is built.
+        drop(clock.0.lock().expect("the clock is not poisoned"));
+        clock
+    }
+}
 
 impl BlockClock {
     /// A clock that has not been written.
