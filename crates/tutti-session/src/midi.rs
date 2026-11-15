@@ -487,15 +487,19 @@ pub struct MidiOutDrops {
 
 impl MidiOutDrops {
     /// Events discarded for want of a connected output, refused by the hardware
-    /// out's tap for want of room, or refused as scheduled more than
-    /// [`MAX_OUTPUT_AHEAD`](tutti_midi_runtime::MAX_OUTPUT_AHEAD) ahead.
+    /// out's tap for want of room, refused as scheduled more than
+    /// [`MAX_OUTPUT_AHEAD`](tutti_midi_runtime::MAX_OUTPUT_AHEAD) ahead, or a
+    /// Machine Control look that was never sent (a time no time code names, or
+    /// a payload that does not pack as SysEx7).
     pub fn count(&self) -> u64 {
         self.dropped.load(Ordering::Relaxed)
     }
 
-    /// Record `n` events the hardware out's tap refused for want of room, or
-    /// the plan refused as too far ahead: a count, with no warning of its own
-    /// (there is an output to blame).
+    /// Record `n` events that were refused: by the hardware out's tap for want
+    /// of room, by the plan as too far ahead, a Machine Control look to a time
+    /// no time code names, or a Machine Control payload that failed to pack as
+    /// SysEx7. A count, with no warning of its own (there is an output to
+    /// blame).
     fn record_refused(&self, n: u64) {
         self.dropped.fetch_add(n, Ordering::Relaxed);
     }

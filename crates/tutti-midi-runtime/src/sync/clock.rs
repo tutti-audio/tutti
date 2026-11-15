@@ -8,7 +8,6 @@
 //! demultiplexed the stream, call [`tick`](MidiClockDecoder::tick) /
 //! [`start_msg`](MidiClockDecoder::start_msg) etc. directly.
 
-use tutti_midi_protocol::song_position_beat;
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::{Message, System, U14, Ump};
 
@@ -164,10 +163,9 @@ impl MidiClockDecoder {
     /// Handles Song Position Pointer (0xF2): the position in sixteenth notes
     /// (14 bits). The next Continue resumes there; a Start still begins at 0.
     pub fn song_position_msg(&mut self, position: U14) {
-        let ticks =
-            song_position_beat(position).get() * f64::from(System::TIMING_CLOCKS_PER_QUARTER);
-        // A pointer is a whole count of sixteenths, so the ticks are whole.
-        self.tick_count = ticks.round() as u64;
+        // A pointer counts sixteenths, a quarter of a beat each.
+        let clocks_per_sixteenth = u64::from(System::TIMING_CLOCKS_PER_QUARTER / 4);
+        self.tick_count = u64::from(position.get()) * clocks_per_sixteenth;
     }
 
     /// Handles MIDI Stop (0xFC).

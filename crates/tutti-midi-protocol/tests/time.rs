@@ -1,6 +1,6 @@
 //! Song Position Pointer and timecode as values of time (M1 pp.30 and 53).
 
-use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode, song_position, song_position_beat};
+use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode, song_position};
 use tutti_types::{Beat, Seconds};
 use tutti_ump::U14;
 
@@ -12,7 +12,6 @@ fn a_song_position_counts_sixteenths_rounded_to_the_nearest() {
     assert_eq!(song_position(Beat::new(2.0)).get(), 8);
     assert_eq!(song_position(Beat::new(0.37)).get(), 1);
     assert_eq!(song_position(Beat::new(0.38)).get(), 2);
-    assert_eq!(song_position_beat(U14::new(10).unwrap()), Beat::new(2.5));
 }
 
 /// The pointer is 14 bits: a position before the start or NaN is the start,
