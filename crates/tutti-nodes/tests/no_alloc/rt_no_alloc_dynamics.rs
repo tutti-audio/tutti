@@ -438,18 +438,18 @@ fn a_limiter_cloned_mid_release_processes_allocation_free() {
 /// What a corner sweep drives: the controls a node has at their two ends (a write each block
 /// from one end to the other, so a design is in flight on all of them), the ports a lane
 /// can drive, and the bound its output keeps.
-struct Corners {
+pub(crate) struct Corners {
     /// Each control and its two ends.
-    cells: &'static [(tutti_types::UnitAddr, f32, f32)],
+    pub(crate) cells: &'static [(tutti_types::UnitAddr, f32, f32)],
     /// The param ports that read a lane per frame.
-    lanes: &'static [usize],
+    pub(crate) lanes: &'static [usize],
     /// The lane values: a lane cycles through them, so every frame is a corner or hostile.
-    lane_values: &'static [&'static [f32]],
+    pub(crate) lane_values: &'static [&'static [f32]],
     /// The most a sample may reach: the largest ceiling or gain the corners ask for, times
     /// the input.
-    bound: f32,
+    pub(crate) bound: f32,
     /// The frames a window renders, at least: enough to fill and wrap the longest ring.
-    frames: usize,
+    pub(crate) frames: usize,
 }
 
 /// `node` at every corner of `corners`, in blocks of 1, 7, 33 and 64 frames, with the lanes
@@ -460,7 +460,7 @@ struct Corners {
 /// and a `reset` inside the window at 90 and 99 percent of it (after a ring of
 /// `corners.frames` has wrapped); between windows the node is prepared again and forked. Every output sample is
 /// finite and within the bound.
-fn sweep<N: tutti_graph::Node + tutti_graph::ParamNode>(
+pub(crate) fn sweep<N: tutti_graph::Node + tutti_graph::ParamNode>(
     make: impl Fn() -> N,
     corners: &Corners,
     amplitude: f32,
@@ -565,7 +565,7 @@ fn sweep<N: tutti_graph::Node + tutti_graph::ParamNode>(
 }
 
 /// The address of param `kind` at `index` (0 for a node with one of each).
-const fn addr(kind: tutti_types::UnitParam, index: u8) -> tutti_types::UnitAddr {
+pub(crate) const fn addr(kind: tutti_types::UnitParam, index: u8) -> tutti_types::UnitAddr {
     tutti_types::UnitAddr::new(kind, index)
 }
 

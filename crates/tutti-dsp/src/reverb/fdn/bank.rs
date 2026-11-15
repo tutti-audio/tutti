@@ -57,21 +57,13 @@ use tutti_types::{MAX_CHANNELS, SampleRate, Seconds, Tail};
 
 use super::design::{CROSSOVER, FdnControls, FdnLayout};
 use crate::reverb::network::{Absorption, Band, Matrix, Network, Stage};
+use crate::reverb::{CHUNK, ramp};
 use crate::{Glide, Ring, Steps, System, TAIL_FLOOR};
 
-/// The frames between glide steps: [`FdnBank::CHUNK`].
-pub(crate) const CHUNK: usize = 32;
-/// The longest ramp of a gain, in seconds.
-const RAMP: f64 = 0.020;
 /// How far a line's length moves in a chunk, in frames.
 const LENGTH_STEP: f32 = 0.5;
 /// How far the pre-delay moves in a chunk, in frames.
 const PRE_STEP: f32 = 2.0;
-
-/// A 20 ms ramp at `rate`, in whole chunks (at least one).
-pub(crate) fn ramp(rate: f64) -> Steps {
-    Steps::Fixed(((RAMP * rate / CHUNK as f64).ceil() as u32).max(1))
-}
 
 /// The coefficient point a design asks for, as [`FdnBank::aim`] writes it: the values
 /// [`FdnGlides`] glide to, before any rate is applied. Sized for the most lines the bank was

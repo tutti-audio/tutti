@@ -12,7 +12,7 @@ pub use bank::{DelayBank, DelayGlides, DelayLanes};
 pub use layout::{DELAY_SLEW, DelayControls, DelayLayout, MAX_DELAY_CHANNELS};
 pub use max_delay::{MaxDelay, MaxDelayError};
 pub use routing::{Routing, RoutingError};
-pub(crate) use taps::{finite_or, read_taps, ring_seconds, trips};
+pub(crate) use taps::{finite_or, ring_seconds, trips};
 pub use times::{ChannelTimes, ChannelTimesError};
 
 /// How a fractional delay position is turned into a sample.
@@ -108,8 +108,8 @@ impl DelayLine {
     /// request shortens silently rather than panicking. Does not allocate.
     #[inline]
     pub fn read_sample(&self, delay_samples: f32, mode: InterpolationMode) -> f32 {
-        // Defensive only: a family's `reach_covers_need` proves no member's read leaves the
-        // line, so this clamp is reached by a caller outside the model alone.
+        // Defensive only: a caller holds its delay inside the line, so this clamp is
+        // reached by a caller that does not.
         let delay = delay_samples.clamp(0.0, self.max_delay_samples as f32);
         match mode {
             InterpolationMode::None => {
@@ -160,6 +160,12 @@ impl DelayLine {
 
 /// One sample of one uncoupled channel: read the feedback tap, write the line,
 /// read the output tap (the wet sample).
+///
+/// The delay `d` and the feedback `fb` are the raw `f32` of a
+/// [`SampleSpan`](tutti_types::SampleSpan) of frames and a
+/// [`Feedback`](tutti_types::Feedback): this is the per-frame read, called once per sample
+/// per channel, and its caller lowers its span to the position once per frame after the
+/// clamp that makes it a span (a delay glide's value is already an `f32` of frames).
 #[inline(always)]
 pub fn delay_step(line: &mut DelayLine, x: f32, d: f32, fb: f32, interp: InterpolationMode) -> f32 {
     let tap = line.read_sample((d.max(1.0) - 1.0).max(0.0), interp);

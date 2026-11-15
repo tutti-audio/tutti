@@ -33,16 +33,17 @@
 //! - **Delay** — `DelayLine`, a fractional-read ring with an `InterpolationMode`;
 //!   `DelayBank`, the feedback delay over buffers views (a `DelayLayout` of a checked
 //!   `MaxDelay`, `Routing` and `ChannelTimes`; its time and feedback `Glide`s and per-frame
-//!   `DelayLanes`); and `ModDelayFamily`, the chorus and flanger (a checked `Sweep` and `Stagger`, a `Grows`
-//!   family over a `MaxDelay`; the LFO's phase is state of its recurrence on the stream's clock,
-//!   its sine solved every `COEFF_INTERVAL` frames of the stream and interpolated between); and
+//!   `DelayLanes`); `ModDelayBank`, the chorus and flanger over buffers views (a
+//!   `ModDelayLayout` of a checked `Sweep` and `Stagger`; one `Glide` per channel's delay and one
+//!   for the feedback, the LFO's corners solved by the caller every `COEFF_INTERVAL` frames of
+//!   the stream and interpolated between); and
 //!   `PhaserChain`, the phaser's swept all-pass chain over buffers views (a checked `Stages`,
 //!   `SweepRange` and `Stagger`; one `Glide` per channel's coefficient and one for the
 //!   feedback).
 //! - **Waveshaping** — `ShapeKind`, six memoryless curves with block kernels.
 //! - **Reverb** — the reverb model, a `Network` with analytic queries
-//!   (RT60, tail, stability, densities), `FreeverbFamily` over it, and `FdnBank`, the
-//!   feedback delay network over buffers views.
+//!   (RT60, tail, stability, densities), `FreeverbBank`, Freeverb's combs and
+//!   all-passes over buffers views, and `FdnBank`, the feedback delay network.
 //! - **Spatial** — vector base amplitude panning (`SpeakerLayout`, `VbapKernel`) and the
 //!   HRTF binaural convolver (`HrtfBinaural`).
 //! - **Resampling and dither** — `FftResampler` and `StreamingResampler` for export, and
@@ -120,15 +121,16 @@
 //! - **Reverb** (`reverb/`): the model, a [`Network`] of [`Stage`]s with
 //!   analytic queries ([`Network::rt60`], [`tail`](System::tail),
 //!   [`is_stable`](Lti::is_stable), the densities) and a [`NetworkCapacity`] worst case;
-//!   [`FreeverbFamily`] (run by [`FreeverbRecurrence`]) and the feedback delay network over
-//!   buffers views ([`FdnBank`] over an [`FdnLayout`], its parameters [`Glide`]s in
-//!   [`FdnGlides`]). [`loop_gain`] and [`rt60_from_gain`] are the RT60 formula both ways.
+//!   [`FreeverbBank`] (its comb feedback and damping [`Glide`]s in [`FreeverbGlides`]) and the
+//!   feedback delay network over buffers views ([`FdnBank`] over an [`FdnLayout`], its
+//!   parameters [`Glide`]s in [`FdnGlides`]). [`loop_gain`] and [`rt60_from_gain`] are the RT60 formula both ways.
 //! - **Convolution**: [`Convolver`] over a shared [`IrSpectra`].
 //! - **Delay and modulation** (`delay.rs`, `modulation/`): [`DelayLine`] with an
 //!   [`InterpolationMode`]; the feedback delay ([`DelayBank`] over a [`DelayLayout`]: a
 //!   [`MaxDelay`], its cross-feedback a checked [`Routing`], its time and feedback
-//!   [`Glide`]s and the per-frame [`DelayLanes`]); the chorus and flanger as a family ([`ModDelayFamily`], run by [`ModDelayRecurrence`], a [`Grows`] family over a
-//!   [`MaxDelay`], its [`Sweep`] and [`Stagger`] checked, its LFO state on the stream's clock); the phaser
+//!   [`Glide`]s and the per-frame [`DelayLanes`]); the chorus and flanger over buffers views ([`ModDelayBank`] over a [`ModDelayLayout`]: its
+//!   [`Sweep`] and [`Stagger`] checked, a [`Glide`] per channel's delay, the LFO the caller's on
+//!   the stream's clock); the phaser
 //!   ([`PhaserChain`]: its [`Stages`] and [`SweepRange`] checked, a [`Glide`] per channel's
 //!   coefficient, [`sweep_hz`] and [`allpass_coeff`] the pure pieces the sweep is solved from).
 //! - **Spatial** (`spatial/`): VBAP ([`SpeakerLayout`], Pulkki's pairs and triplets and
@@ -221,8 +223,7 @@ pub use model::{
 };
 pub use modulation::allpass::{allpass_coeff, sweep_hz};
 pub use modulation::mod_delay::{
-    MAX_MOD_DELAY_CHANNELS, MIN_RATE, ModDelayCapacity, ModDelayControls, ModDelayFamily,
-    ModDelayMember, ModDelayRecurrence,
+    MAX_MOD_DELAY_CHANNELS, MIN_RATE, ModDelayBank, ModDelayControls, ModDelayLayout, SweepDesign,
 };
 pub use modulation::phaser::{
     MAX_PHASER_CHANNELS, PhaserChain, PhaserControls, Stages, StagesError, SweepRange,
@@ -233,8 +234,8 @@ pub use oscillator::{Oscillator, OscillatorWave};
 pub use resample::{ChunkSize, FftResampler, ResampleError, StreamingResampler, WindowedSinc};
 pub use reverb::fdn::bank::{FdnBank, FdnGlides};
 pub use reverb::fdn::design::{FdnControls, FdnLayout, MAX_PRE_DELAY, MIN_DECAY};
-pub use reverb::freeverb::design::{FreeverbControls, FreeverbFamily};
-pub use reverb::freeverb::recurrence::{Freeverb, FreeverbRecurrence};
+pub use reverb::freeverb::bank::{FreeverbBank, FreeverbGlides};
+pub use reverb::freeverb::design::FreeverbControls;
 pub use reverb::network::{
     Absorption, AllPass, AllPassForm, Band, Fdn, FirSummary, Full, Gains, Inline, Line,
     LineModulation, MAX_CHANNELS, MAX_DENSE, MAX_LINES, MAX_STAGES, MAX_TAPS, Matrix, Network,

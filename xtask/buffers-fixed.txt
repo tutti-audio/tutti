@@ -48,7 +48,6 @@ crates/tutti-dsp/src/model/realized.rs::Recurrence::run  pending
 crates/tutti-dsp/src/resample/fft.rs::FftResampler::process_into_buffer  pending
 crates/tutti-dsp/src/resample/streaming.rs::StreamingResampler::finish  pending
 crates/tutti-dsp/src/resample/streaming.rs::StreamingResampler::push  pending
-crates/tutti-dsp/src/reverb/freeverb/recurrence.rs::Freeverb::process  pending
 crates/tutti-dsp/src/spatial/hrtf.rs::HrtfBinaural::process  pending
 crates/tutti-dsp/src/spatial/vbap.rs::VbapGains::render_channel  pending
 crates/tutti-dsp/src/spatial/vbap/layout.rs::SpeakerLayout::gains_into  pending

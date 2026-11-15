@@ -11,19 +11,18 @@
 //! The node is wet only: its blend with its input, for use as an insert, is the
 //! graph's mix (`Editor::set_mix`), which aligns the input by the
 //! realization's latency (never its pre-delay, which is part of the wet sound).
-//! [`FreeverbNode`] is the General MIDI send of the SoundFont player.
 
 use core::ops::Range as Frames;
 
 use tutti_dsp::{
-    Cadence, Capacity, Channels, Effort, Family, FreeverbControls, FreeverbFamily, Grows, Inputs,
-    NetworkCapacity, Reach, Realized, Recurrence, Ring, Setup, System, TAIL_FLOOR,
+    Cadence, Capacity, Channels, Effort, Family, Grows, Inputs, Reach, Realized, Recurrence, Ring,
+    Setup, System, TAIL_FLOOR,
 };
 use tutti_graph::{
     Bus, BusRole, Buses, Cost, Cx, HasParam, HasParams, InBus, IntoNode, Io, Node, NodeParts,
     OutBus, ParamNode, ParamSet, Prepare, Shape, Status,
 };
-use tutti_types::{Latency, MAX_CHANNELS, MaxBlock, Mix, SampleRate, Samples, Seconds, Tail};
+use tutti_types::{Latency, MAX_CHANNELS, MaxBlock, SampleRate, Samples, Seconds, Tail};
 
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
 use crate::tail_clock::{Heard, TailClock, UNBOUNDED, frames_tail};
@@ -177,44 +176,6 @@ pub trait NodeFamily: Family + 'static {
         self.reach(&reach)
     }
 }
-
-/// Freeverb's controls: the room size and the damping, as positions on `0..1`.
-#[derive(Clone, Copy, Debug)]
-pub struct FreeverbSet;
-
-control_set! {
-    FreeverbSet(_s): FreeverbControls = FreeverbControls::GENERAL_MIDI;
-    live: (all);
-    RoomSize => Mix = room,
-    Damping => Mix = damp;
-
-    fn defaults(&self) -> FreeverbControls {
-        FreeverbControls::GENERAL_MIDI
-    }
-
-    /// A bigger room and less damping ring longer.
-    fn longest(&self, lowest: &FreeverbControls, highest: &FreeverbControls) -> FreeverbControls {
-        FreeverbControls {
-            room: highest.room,
-            damp: lowest.damp,
-        }
-    }
-}
-
-impl NodeFamily for FreeverbFamily {
-    type Set = FreeverbSet;
-
-    fn set(&self, _: &FreeverbControls) -> FreeverbSet {
-        FreeverbSet
-    }
-
-    fn capacity(&self, rate: SampleRate) -> NetworkCapacity {
-        self.grown(rate)
-    }
-}
-
-/// The Freeverb as a graph node: mono in, stereo out.
-pub type FreeverbNode = FamilyNode<FreeverbFamily>;
 
 /// Whether a node's controls can change.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -530,22 +491,6 @@ impl<F: NodeFamily> Tuned<F> {
             }
         }
         self.render(rig, io, held..size);
-    }
-}
-
-impl FamilyNode<FreeverbFamily> {
-    /// The General MIDI reverb send: Freeverb at room 0.5 and damping 0.5, mono
-    /// in and stereo out, wet only. Its controls are fixed, so its tail is the
-    /// exact figure of that one network, and it declares no cells.
-    #[must_use]
-    pub fn general_midi() -> Self {
-        Self::fixed(FreeverbFamily, FreeverbControls::GENERAL_MIDI)
-    }
-}
-
-impl Default for FamilyNode<FreeverbFamily> {
-    fn default() -> Self {
-        Self::general_midi()
     }
 }
 
