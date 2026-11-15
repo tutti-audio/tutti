@@ -11,8 +11,8 @@ use tutti_midi_protocol::{
 };
 use tutti_types::{Amplitude, Semitones};
 use tutti_ump::{
-    Attribute, CCNumber, MidiChannel, NoteNumber, NoteVelocity, RegisteredPerNoteController, Rpn,
-    U7, U14, Voice2,
+    Attribute, CCNumber, MidiChannel, NoteNumber, NoteVelocity, PerNoteManagement,
+    RegisteredPerNoteController, Rpn, U7, U14, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
 use tutti_voicing::{
@@ -99,8 +99,11 @@ fn step_is_allocation_free_in_every_mode() {
                     },
                     Voice2::PerNoteManagement {
                         note: NoteNumber::of(k),
-                        detach: round % 2 == 0,
-                        reset: round % 3 == 0,
+                        management: [
+                            PerNoteManagement::Detach,
+                            PerNoteManagement::Reset,
+                            PerNoteManagement::DetachAndReset,
+                        ][(round % 3) as usize],
                     },
                     Voice2::NoteOn {
                         note: NoteNumber::of(k),
@@ -201,8 +204,11 @@ fn per_note_state_is_allocation_free() {
                 },
                 Voice2::PerNoteManagement {
                     note,
-                    detach: round % 2 == 0,
-                    reset: round % 3 == 0,
+                    management: [
+                        PerNoteManagement::Detach,
+                        PerNoteManagement::Reset,
+                        PerNoteManagement::DetachAndReset,
+                    ][(round % 3) as usize],
                 },
                 Voice2::Registered {
                     bank: U7::of(0),

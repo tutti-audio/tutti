@@ -610,6 +610,56 @@ pub struct Bank {
     pub lsb: U7,
 }
 
+/// What a Per-Note Management message does (M2-104 §7.4.5, the D and S option
+/// flags). A message that does neither has no defined function, so it is not a
+/// value of this type, and the decoder refuses it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PerNoteManagement {
+    /// D: the controllers are detached from the notes that sound, which keep
+    /// their values until they end.
+    Detach,
+    /// S: the controllers are set back to their defaults.
+    Reset,
+    /// D and S: detach first, then reset, so the sounding notes keep their
+    /// values and the defaults apply to future notes only.
+    DetachAndReset,
+}
+
+impl PerNoteManagement {
+    /// The management a message with these flags asks for, or `None` for D=0
+    /// and S=0, which has no defined function.
+    #[must_use]
+    pub const fn from_flags(detach: bool, reset: bool) -> Option<Self> {
+        match (detach, reset) {
+            (true, false) => Some(Self::Detach),
+            (false, true) => Some(Self::Reset),
+            (true, true) => Some(Self::DetachAndReset),
+            (false, false) => None,
+        }
+    }
+
+    /// Whether it detaches (the D flag).
+    #[must_use]
+    pub const fn detaches(self) -> bool {
+        matches!(self, Self::Detach | Self::DetachAndReset)
+    }
+
+    /// Whether it resets (the S flag).
+    #[must_use]
+    pub const fn resets(self) -> bool {
+        matches!(self, Self::Reset | Self::DetachAndReset)
+    }
+
+    /// The Per-Note Management message for `note`.
+    #[must_use]
+    pub const fn voice(self, note: NoteNumber) -> Voice2 {
+        Voice2::PerNoteManagement {
+            note,
+            management: self,
+        }
+    }
+}
+
 /// MIDI 2.0 Channel Voice messages (M2-104 §7.4). Values are the wire's
 /// integers; M2-115 scaling is translation's.
 ///
@@ -727,10 +777,8 @@ pub enum Voice2 {
     PerNoteManagement {
         /// The note.
         note: NoteNumber,
-        /// Detach controllers from notes already playing (the D flag).
-        detach: bool,
-        /// Reset controllers to their defaults (the S flag).
-        reset: bool,
+        /// What it does.
+        management: PerNoteManagement,
     },
 }
 

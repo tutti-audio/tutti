@@ -24,7 +24,7 @@ use super::store::{ResourceStore, StoreError};
 
 tutti_types::ranged! {
     /// A time as Unix seconds: seconds since 1 January 1970 UTC, leap seconds not
-    /// counted, as the `timestamp` of a state is (M2-111 §2.3, Table 4). The
+    /// counted, as the `timestamp` of a state is (M2-111 §2.3). The
     /// largest value is the largest JSON integer the crate reads.
     #[derive(Eq, Hash, PartialOrd, Ord)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -130,7 +130,7 @@ impl CommonState {
     }
 }
 
-/// One state a device lists (M2-111 Table 3).
+/// One state a device lists (M2-111 §2.3).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PeStateEntry {
     /// The id the State Resource takes as `resId`.

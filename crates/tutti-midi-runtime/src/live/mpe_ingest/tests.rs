@@ -3,7 +3,7 @@ use crate::test_support::at;
 use tutti_fixtures::midi;
 use tutti_graph::UmpAt;
 use tutti_midi_protocol::{MpeZoneConfig, MpeZones, widen_bend, widen_value, widen_velocity};
-use tutti_ump::{Address, CCNumber, KeyEvent, Message, U7, U14, Voice2};
+use tutti_ump::{Address, CCNumber, KeyEvent, Message, MpeChannels, MpeZoneSpan, U7, U14, Voice2};
 
 /// What the ingest sends, collected: the tests read it as a list.
 trait Collected {
@@ -1010,11 +1010,10 @@ fn the_mode_in_force_stops_nothing() {
 
 fn zone(manager: u8, channels: u8) -> MpeZoneConfig {
     MpeZoneConfig::profile(
-        MidiChannel::of(manager),
-        channels,
+        MpeZoneSpan::new(MidiChannel::of(manager), MpeChannels::of(channels))
+            .expect("a zone that fits"),
         PitchBendSensitivity::MPE_PROFILE_DEFAULT,
     )
-    .expect("a zone that fits")
 }
 
 fn enable(ingest: &mut MpeIngest, zones: MpeZones) -> Vec<UmpAt> {
@@ -1556,7 +1555,10 @@ fn a_manager_range_in_cents_is_the_same_range_per_note() {
 #[test]
 fn a_zone_starting_at_a_fractional_range_sends_it_in_each_controllers_form() {
     let range = PitchBendSensitivity::from_channel_data(RegisteredData::new(U7::of(2), U7::of(50)));
-    let config = MpeZoneConfig::profile(MidiChannel::of(0), 3, range).expect("a zone");
+    let config = MpeZoneConfig::profile(
+        MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(3)).expect("a zone"),
+        range,
+    );
     let mut ingest = MpeIngest::new(MpeMode::Disabled);
     let out = enable(&mut ingest, MpeZones::single(config));
     let word = RegisteredData::new(U7::of(2), U7::of(50)).to_word();

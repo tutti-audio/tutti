@@ -8,7 +8,7 @@ use tutti_midi_device::{
     CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DiscoveryData,
     INQUIRY_TIMEOUT, MaxSysexSize, Muid,
 };
-use tutti_ump::{MidiGroup, U7};
+use tutti_ump::{MidiGroup, MpeChannels, MpeZoneSpan, U7};
 
 const GROUP_0: MidiGroup = MidiGroup::of(0);
 
@@ -1292,20 +1292,18 @@ fn an_enabled_mpe_profile_is_a_zone_of_the_channels_its_report_gave() {
     for (channels, zone) in [
         (
             5,
-            MpeZoneConfig::profile(
-                MidiChannel::of(0),
-                5,
+            Some(MpeZoneConfig::profile(
+                MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(5)).unwrap(),
                 PitchBendSensitivity::MPE_PROFILE_DEFAULT,
-            ),
+            )),
         ),
         (1, None),
         (
             16,
-            MpeZoneConfig::profile(
-                MidiChannel::of(0),
-                16,
+            Some(MpeZoneConfig::profile(
+                MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(16)).unwrap(),
                 PitchBendSensitivity::MPE_PROFILE_DEFAULT,
-            ),
+            )),
         ),
     ] {
         say(
