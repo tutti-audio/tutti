@@ -513,8 +513,9 @@ fn connect_edge_gain_refusals() {
 #[test]
 fn a_source_is_structural_and_a_range_is_a_control() {
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
-    ed.insert(key(1), "dc", Unforkable(common::TestNode::new(dc(1.0))));
-    ed.insert(key(2), "driver", Forkable(driver(0)));
+    ed.insert(key(1), "dc", Unforkable(common::TestNode::new(dc(1.0))))
+        .controls;
+    ed.insert(key(2), "driver", Forkable(driver(0))).controls;
     ed.spec_mut().topology.outputs = vec![vec![out(1)]];
     let id = EdgeId {
         sink: Sink::Output(0),
@@ -577,8 +578,8 @@ fn a_source_is_structural_and_a_range_is_a_control() {
 fn a_fork_carries_the_driven_lane() {
     use tutti_graph::ForkTarget;
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
-    ed.insert(key(1), "dc", Forkable(dc(1.0)));
-    ed.insert(key(2), "driver", Forkable(driver(0)));
+    ed.insert(key(1), "dc", Forkable(dc(1.0))).controls;
+    ed.insert(key(2), "driver", Forkable(driver(0))).controls;
     ed.spec_mut().topology.outputs = vec![vec![out(1)]];
     let id = EdgeId {
         sink: Sink::Output(0),

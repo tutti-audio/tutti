@@ -158,7 +158,8 @@ fn graph(to: &[(UnitAddr, f32)]) -> (Editor, tutti_graph::Executor, ParamSet) {
         SRC,
         "steps",
         tutti_graph::ForkByClone(Steps { to: to.to_vec() }),
-    );
+    )
+    .controls;
     ed.spec_mut()
         .topology
         .set_outputs(vec![out(BANDS, 0), out(BANDS, 1)]);
@@ -390,14 +391,16 @@ fn a_node_declares_up_to_the_cap_and_no_more() {
         BANDS,
         "wide",
         tutti_graph::ForkByClone(Wide(addrs[..32].to_vec())),
-    );
+    )
+    .controls;
     ed.insert(
         SRC,
         "steps",
         tutti_graph::ForkByClone(Steps {
             to: vec![(last, -7.0)],
         }),
-    );
+    )
+    .controls;
     ed.spec_mut()
         .topology
         .set_outputs(vec![out(BANDS, 0), out(BANDS, 1)]);

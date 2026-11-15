@@ -82,8 +82,8 @@ fn graph(lane: ControlLaneNode) -> (Editor, Executor) {
         SampleRate::of(RATE),
         MaxBlock::of(Samples(MAX)),
     ));
-    ed.insert(NodeKey(1), "lane", lane);
-    ed.insert(NodeKey(2), "probe", Unforkable(Probe));
+    ed.insert(NodeKey(1), "lane", lane).controls;
+    ed.insert(NodeKey(2), "probe", Unforkable(Probe)).controls;
     let s = ed.spec_mut();
     s.topology.set_outputs(vec![Source::Node(OutPort {
         node: NodeKey(2),

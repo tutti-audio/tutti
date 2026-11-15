@@ -110,7 +110,8 @@ fn a_by_value_change_reaches_the_audio_by_replacing_the_node() {
     let editor = s.renderer_mut().editor_mut();
     editor
         .replace(key, high_pass, Fade::new(Samples(1), FadeLaw::default()))
-        .expect("same shape");
+        .expect("same shape")
+        .controls;
     editor.commit().expect("commits");
     let replaced = energy(&mut s);
     assert!(

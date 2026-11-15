@@ -794,7 +794,8 @@ fn feed_chord(live: &mut Editor, plugin: NodeKey, n: u8, on: usize, off: usize) 
         ]
     });
     let clip = NodeKey(1);
-    live.insert(clip, "clip", MidiClipNode::new(events));
+    live.insert(clip, "clip", MidiClipNode::new(events))
+        .controls;
     live.spec_mut().connect_events(
         EventIn {
             node: plugin,
@@ -890,7 +891,8 @@ fn feed_note(live: &mut Editor, plugin: NodeKey, frame: usize) {
             ),
         )
         .unwrap()]),
-    );
+    )
+    .controls;
     live.spec_mut().connect_events(
         EventIn {
             node: plugin,
@@ -1002,7 +1004,8 @@ fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
             ),
         )
         .unwrap()]),
-    );
+    )
+    .controls;
     let _controls = live.insert(
         key,
         "plugin",
@@ -1101,7 +1104,8 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
             MidiClipNode::new([
                 TimedMidiEvent::new(Beat(NOTE_FRAME as f64 / 24_000.0), on).unwrap()
             ]),
-        );
+        )
+        .controls;
         let _controls = live.insert(
             key,
             "plugin",
@@ -1115,7 +1119,8 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
             sink,
             "sink",
             tutti_graph::ForkByClone(MidiSink(Arc::clone(&seen))),
-        );
+        )
+        .controls;
         live.spec_mut().connect_events(
             EventIn { node: key, port: 0 },
             EventEdge::Direct(EventOut {
@@ -1222,7 +1227,8 @@ fn an_export_is_aligned_when_the_plugin_latency_moves_offline() {
     let rate = SampleRate::of(SAMPLE_RATE);
     let (mut live, _exec) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples(BLOCK))));
     let (src, key) = (NodeKey(1), NodeKey(2));
-    live.insert(src, "ramp", tutti_graph::ForkByClone(RampSource));
+    live.insert(src, "ramp", tutti_graph::ForkByClone(RampSource))
+        .controls;
     let _controls = live.insert(
         key,
         "plugin",

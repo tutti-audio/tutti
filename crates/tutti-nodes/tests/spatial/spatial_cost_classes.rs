@@ -86,9 +86,10 @@ fn graph(workers: usize, declared: bool) -> Executor {
     for k in 0..sources {
         let key = NodeKey(k + 1);
         if declared && k < PANNERS {
-            ed.insert(key, "vbap", panner(k));
+            ed.insert(key, "vbap", panner(k)).controls;
         } else {
-            ed.insert(key, "vbap", Unforkable(Undeclared(panner(k))));
+            ed.insert(key, "vbap", Unforkable(Undeclared(panner(k))))
+                .controls;
         }
         for c in 0..2u16 {
             wire(&mut ed, key, c, Source::Global(c));

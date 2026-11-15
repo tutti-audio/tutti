@@ -89,8 +89,10 @@ fn graph(
     ranges: &[(UnitParam, ParamRange)],
 ) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples(256))));
-    ed.insert(NodeKey(PROBE), "probe", Unforkable(Probe(0.0)));
-    ed.insert(NodeKey(SENDER), "sender", Unforkable(Sender(sends)));
+    ed.insert(NodeKey(PROBE), "probe", Unforkable(Probe(0.0)))
+        .controls;
+    ed.insert(NodeKey(SENDER), "sender", Unforkable(Sender(sends)))
+        .controls;
     let s = ed.spec_mut();
     s.topology.set_outputs((0..2).map(|c| {
         Source::Node(OutPort {
@@ -304,14 +306,16 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
     }
     let probe = |k: u64| NodeKey(PROBE + k);
     for k in 0..WIDTH {
-        ed.insert(probe(k), "probe", Unforkable(Heavy(Probe(base))));
+        ed.insert(probe(k), "probe", Unforkable(Heavy(Probe(base))))
+            .controls;
     }
     let step = ParamSegment::unit(UnitParam::Azimuth, target, target, Samples(0), Law::Linear);
     ed.insert(
         NodeKey(SENDER),
         "sender",
         Unforkable(Sender(vec![(64, step)])),
-    );
+    )
+    .controls;
     ed.spec_mut().topology.set_outputs((0..WIDTH).map(|k| {
         Source::Node(OutPort {
             node: probe(k),

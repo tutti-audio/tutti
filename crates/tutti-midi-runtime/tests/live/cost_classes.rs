@@ -106,19 +106,21 @@ fn graph(workers: usize, declared: bool) -> (Executor, Vec<common::Sink>, Vec<Se
     for k in 0..LANES + HEAVY {
         let (source, sink) = (NodeKey(100 + k), NodeKey(k + 1));
         if k >= LANES {
-            ed.insert(source, "clip", clip(k));
+            ed.insert(source, "clip", clip(k)).controls;
             let log = Seen::default();
-            ed.insert(sink, "recorder", ForkByClone(Recorder(Arc::clone(&log))));
+            ed.insert(sink, "recorder", ForkByClone(Recorder(Arc::clone(&log))))
+                .controls;
             seen.push(log);
             outputs.push(Source::Node(OutPort {
                 node: sink,
                 port: 0,
             }));
         } else if declared {
-            ed.insert(source, "clip", clip(k));
+            ed.insert(source, "clip", clip(k)).controls;
             outs.push(common::sink(&mut ed, k + 1, &[(source.0, 0)]));
         } else {
-            ed.insert(source, "clip", Unforkable(Undeclared(clip(k))));
+            ed.insert(source, "clip", Unforkable(Undeclared(clip(k))))
+                .controls;
             outs.push(common::sink(&mut ed, k + 1, &[(source.0, 0)]));
         }
         if k >= LANES {

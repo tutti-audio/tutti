@@ -15,6 +15,7 @@ use crate::{Edge, EdgeId, FeedbackFrom, NodeKey, Sink, Source};
 /// Returned by [`Editor::insert`] and [`Editor::replace_or_swap`]: the
 /// node's typed controls, and the wiring the new unit's shape cannot carry.
 #[derive(Debug)]
+#[must_use = "the placement may have unwired edges: read `unwired`, or take `controls`"]
 pub struct Placed<C> {
     /// The node's typed controls.
     pub controls: C,
@@ -32,6 +33,7 @@ pub struct Placed<C> {
 /// placement. An edge whose declick fade was already ending it (the caller
 /// disconnected it) is not listed.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[must_use = "the edges a placement removed are the caller's to report"]
 pub struct Unwired {
     /// Audio edges, direct and feedback, into an input port or out of an
     /// output port the shape lacks. A global output channel an edge fed is
@@ -39,9 +41,9 @@ pub struct Unwired {
     pub edges: Vec<EdgeId>,
     /// Event edges, direct and feedback, into an event input or out of an
     /// event output the shape lacks, by the sink port they fed.
-    pub events: Vec<(EventIn, EventEdge)>,
+    pub event_edges: Vec<(EventIn, EventEdge)>,
     /// Bus edges into a bus the shape lacks or out of one, by the sink bus.
-    pub buses: Vec<(BusRef, BusFeed)>,
+    pub bus_edges: Vec<(BusRef, BusFeed)>,
     /// Bus edges into the root out of an output bus the shape lacks.
     pub root_buses: Vec<BusFeed>,
     /// Param ports a source drove that no longer exists or whose source
@@ -126,7 +128,7 @@ impl Editor {
                 let from = e.from();
                 let gone = sink_gone || (from.node == key && from.port >= eout);
                 if gone {
-                    out.events.push((at, *e));
+                    out.event_edges.push((at, *e));
                     gone_marks.push((at, from));
                 }
                 !gone
@@ -148,7 +150,7 @@ impl Editor {
             feeds.retain(|f| {
                 let gone = sink_gone || feed_gone(f);
                 if gone && f.fade != EdgeFade::Out {
-                    out.buses.push((*to, *f));
+                    out.bus_edges.push((*to, *f));
                 }
                 !gone
             });

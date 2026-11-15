@@ -157,7 +157,7 @@ fn probes(max: usize, probes: &[u64], range: (f32, f32)) -> (Editor, Executor) {
         MaxBlock::of(Samples(max)),
     ));
     for &p in probes {
-        ed.insert(NodeKey(p), "probe", ForkByClone(Probe));
+        ed.insert(NodeKey(p), "probe", ForkByClone(Probe)).controls;
         ed.spec_mut().topology.outputs.push(vec![out(p, 0)]);
     }
     for &p in probes {
@@ -196,7 +196,8 @@ fn wire(ed: &mut Editor, key: u64, lane: ControlLaneNode, probe: u64) -> LaneCon
 /// appended to the graph's.
 fn wire_sink(ed: &mut Editor, key: u64, lane: ControlLaneNode, sink: u64) -> LaneControls {
     let controls = ed.insert(NodeKey(key), "lane", lane).controls;
-    ed.insert(NodeKey(sink), "sink", ForkByClone(SegSink::default()));
+    ed.insert(NodeKey(sink), "sink", ForkByClone(SegSink::default()))
+        .controls;
     let s = ed.spec_mut();
     s.connect_events(
         EventIn {
@@ -1012,7 +1013,8 @@ fn an_input_offset_is_exact_from_its_frame() {
         ForkByClone(Feed {
             plan: vec![(0, step(0.5)), (300, step(0.25)), (600, ramp)],
         }),
-    );
+    )
+    .controls;
     feed_into(&mut ed, 5, 1);
     ed.commit().expect("commits");
     let stopped = TransportPosition::new(false, TEMPO, Beat(0.0), None);
@@ -1068,7 +1070,8 @@ fn a_republished_program_reads_a_new_source() {
     let step = |src: u32, v: f32| ParamSegment::foreign(src, v, v, Samples(0), Law::Linear);
     let mut plan: Vec<(u64, ParamSegment)> = (1..=8).map(|k| (0, step(k, 0.0))).collect();
     plan.push((640, step(9, 0.5)));
-    ed.insert(NodeKey(5), "feed", ForkByClone(Feed { plan }));
+    ed.insert(NodeKey(5), "feed", ForkByClone(Feed { plan }))
+        .controls;
     feed_into(&mut ed, 5, 1);
     ed.commit().expect("commits");
     let stopped = TransportPosition::new(false, TEMPO, Beat(0.0), None);
@@ -1108,7 +1111,8 @@ fn a_reused_source_id_starts_from_nothing() {
     let controls = wire(&mut ed, 1, lane, 2);
     let step = |v| ParamSegment::foreign(3, v, v, Samples(0), Law::Linear);
     let plan = vec![(0, step(0.5)), (1_000, step(0.25))];
-    ed.insert(NodeKey(5), "feed", ForkByClone(Feed { plan }));
+    ed.insert(NodeKey(5), "feed", ForkByClone(Feed { plan }))
+        .controls;
     feed_into(&mut ed, 5, 1);
     ed.commit().expect("commits");
     let stopped = TransportPosition::new(false, TEMPO, Beat(0.0), None);
@@ -1156,7 +1160,8 @@ fn an_unread_source_is_no_point() {
     wire_sink(&mut ed, 1, lane, 2);
     let step = |v| ParamSegment::foreign(99, v, v, Samples(0), Law::Linear);
     let plan = (1..60).map(|k| (k * 10, step(k as f32 / 100.0))).collect();
-    ed.insert(NodeKey(5), "feed", ForkByClone(Feed { plan }));
+    ed.insert(NodeKey(5), "feed", ForkByClone(Feed { plan }))
+        .controls;
     feed_into(&mut ed, 5, 1);
     ed.commit().expect("commits");
     let stopped = TransportPosition::new(false, TEMPO, Beat(0.0), None);

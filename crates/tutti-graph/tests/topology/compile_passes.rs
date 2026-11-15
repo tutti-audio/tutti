@@ -1071,12 +1071,14 @@ fn removing_a_node_removes_its_resolution_marks() {
             period: 4,
             phase: 0,
         })),
-    );
+    )
+    .controls;
     ed.insert(
         B,
         "consume",
         Unforkable(common::TestNode::new(Kind::Consumer { inputs: 1 })),
-    );
+    )
+    .controls;
     let (from, at) = (EventOut { node: A, port: 0 }, EventIn { node: B, port: 0 });
     ed.spec_mut().connect_events(at, EventEdge::Direct(from));
     ed.spec_mut()
@@ -1100,12 +1102,14 @@ fn disconnecting_an_edge_drops_its_resolution_mark() {
             period: 4,
             phase: 0,
         })),
-    );
+    )
+    .controls;
     ed.insert(
         B,
         "consume",
         Unforkable(common::TestNode::new(Kind::Consumer { inputs: 1 })),
-    );
+    )
+    .controls;
     let (from, at) = (EventOut { node: A, port: 0 }, EventIn { node: B, port: 0 });
     ed.spec_mut().connect_events(at, EventEdge::Direct(from));
     ed.spec_mut()

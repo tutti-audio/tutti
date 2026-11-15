@@ -372,6 +372,7 @@ pub(crate) struct Unwiring {
     pub(crate) node: NodeKey,
     pub(crate) edges: Vec<Edge>,
     pub(crate) event_edges: Vec<crate::EventEdge>,
+    pub(crate) bus_edges: Vec<(BusSource, BusSink)>,
 }
 
 /// A hook each live render helper runs once on its own thread, with its
@@ -850,7 +851,10 @@ impl Graph {
             .with_controls(client.controls());
         let tempo = self.tempo.clone();
         // A fresh key has no wiring recorded, so nothing is unwired.
-        let _controls = self.editor.insert(node, PLUGIN_KIND, client.bind(tempo));
+        let _controls = self
+            .editor
+            .insert(node, PLUGIN_KIND, client.bind(tempo))
+            .controls;
         self.nodes.insert(
             node,
             Entry {
@@ -1193,6 +1197,7 @@ impl Graph {
                 RawEdge::Direct(source) => source,
                 RawEdge::Feedback(f) => Source::Node(f.from),
             };
+            // Explicit silence is no wire an app made: nothing to report.
             let Some(from) = OutPort::of_source(source) else {
                 continue;
             };
@@ -1202,7 +1207,7 @@ impl Graph {
             }
         }
         let mut event_edges: Vec<crate::EventEdge> = Vec::new();
-        for (at, edge) in &unwired.events {
+        for (at, edge) in &unwired.event_edges {
             let (from, to) = (EventOutPort::of_raw(edge.from()), EventInPort::of_raw(*at));
             if at.port == 0
                 && let Some(fed) = self.fed_edges.get_mut(&at.node)
@@ -1214,18 +1219,36 @@ impl Graph {
                 event_edges.push(edge);
             }
         }
-        if edges.is_empty() && event_edges.is_empty() {
+        let mut bus_edges: Vec<(BusSource, BusSink)> = Vec::new();
+        let named = unwired
+            .bus_edges
+            .iter()
+            .map(|(to, feed)| (feed.source, BusSink::Node(*to)))
+            .chain(
+                unwired
+                    .root_buses
+                    .iter()
+                    .map(|feed| (feed.source, BusSink::Root)),
+            );
+        for wire in named {
+            if !bus_edges.contains(&wire) {
+                bus_edges.push(wire);
+            }
+        }
+        if edges.is_empty() && event_edges.is_empty() && bus_edges.is_empty() {
             return;
         }
         match self.unwired.iter_mut().find(|u| u.node == node) {
             Some(held) => {
                 held.edges.extend(edges);
                 held.event_edges.extend(event_edges);
+                held.bus_edges.extend(bus_edges);
             }
             None => self.unwired.push(Unwiring {
                 node,
                 edges,
                 event_edges,
+                bus_edges,
             }),
         }
     }
@@ -1675,11 +1698,13 @@ impl Graph {
         self.write_event_sources(sink, 0, &all);
     }
 
-    /// Every source any feeder feeds `sink` that is in the graph.
+    /// Every source any feeder feeds `sink` that is an event output the graph
+    /// has: a source re-inserted without that port is not fed until it has it
+    /// again.
     fn fed_in_graph(&self, sink: NodeKey) -> Vec<EventOutPort> {
         self.fed(sink)
             .into_iter()
-            .filter(|s| self.contains(s.node()))
+            .filter(|s| self.check_event_out(*s).is_ok())
             .collect()
     }
 

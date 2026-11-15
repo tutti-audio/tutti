@@ -67,7 +67,7 @@ impl Rig {
                 InletChange::Attach { slot, node } => {
                     let slot = slot.index();
                     let key = NodeKey(100 + slot as u64);
-                    self.rig.editor.insert(key, "inlet", node);
+                    self.rig.editor.insert(key, "inlet", node).controls;
                     self.rig.feed(key, 0, slot as u16);
                     self.inlet_keys[slot] = Some(key);
                 }

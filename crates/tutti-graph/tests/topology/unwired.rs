@@ -7,13 +7,14 @@ use std::collections::BTreeSet;
 
 use tutti_graph::testing as common;
 
-use common::prepare;
+use common::{Kind, TestNode, prepare};
 use tutti_graph::{
     Bus, BusRef, BusRole, BusSource, Buses, Cx, Edge, EdgeFade, EdgeGain, EdgeId, Editor,
     EventEdge, EventIn, EventOut, Executor, FeedbackFrom, InPort, Io, Node, NodeKey, OutPort,
-    Prepare, Shape, Sink, Source, Status, Unforkable, Unwired,
+    Prepare, Shape, Sink, Source, Status, TapAlign, TapId, TapSpec, TransportPosition, Unforkable,
+    Unwired,
 };
-use tutti_types::{Amplitude, BusTopology, ChannelLayout, Samples, Speaker};
+use tutti_types::{Amplitude, BusTopology, ChannelLayout, Samples, Speaker, UnitAddr, UnitParam};
 
 /// A node of a given shape that writes silence: the editor's view of it is
 /// its ports.
@@ -80,7 +81,7 @@ fn ein(node: NodeKey, port: u16) -> EventIn {
 fn rig() -> (Editor, Executor) {
     let (mut ed, mut exec) = Editor::new(prepare(128));
     for key in [A, X, B] {
-        ed.insert(key, "ported", Unforkable(ported(3, 3)));
+        ed.insert(key, "ported", Unforkable(ported(3, 3))).controls;
     }
     let spec = ed.spec_mut();
     for (at, from) in [
@@ -178,7 +179,8 @@ fn a_narrower_shape_drops_exactly_the_edges_to_missing_ports() {
 fn a_narrower_shape_drops_exactly_the_event_edges_to_missing_ports() {
     let (mut ed, _exec) = rig();
     let placed = ed.insert(X, "ported", Unforkable(narrow()));
-    let dropped: BTreeSet<(EventIn, EventEdge)> = placed.unwired.events.iter().copied().collect();
+    let dropped: BTreeSet<(EventIn, EventEdge)> =
+        placed.unwired.event_edges.iter().copied().collect();
     let expected: BTreeSet<(EventIn, EventEdge)> = [
         (ein(X, 2), EventEdge::Direct(eout(A, 2))),
         (ein(B, 2), EventEdge::Direct(eout(X, 2))),
@@ -186,7 +188,7 @@ fn a_narrower_shape_drops_exactly_the_event_edges_to_missing_ports() {
     ]
     .into();
     assert_eq!(dropped, expected);
-    assert_eq!(placed.unwired.events.len(), expected.len());
+    assert_eq!(placed.unwired.event_edges.len(), expected.len());
 
     let events = &ed.spec().events;
     assert_eq!(events[&ein(X, 0)], vec![EventEdge::Direct(eout(A, 0))]);
@@ -202,7 +204,7 @@ fn a_narrower_shape_drops_exactly_the_event_edges_to_missing_ports() {
 #[test]
 fn a_surviving_edge_keeps_its_gain_and_its_fade() {
     let (mut ed, _exec) = rig();
-    ed.insert(X, "ported", Unforkable(narrow()));
+    ed.insert(X, "ported", Unforkable(narrow())).controls;
     let kept = ed.spec().gains[&id(inp(X, 0), direct(A, 0))];
     assert_eq!(kept.base, Amplitude::new(0.25));
     assert_eq!(kept.fade, EdgeFade::In);
@@ -218,7 +220,7 @@ fn a_surviving_edge_keeps_its_gain_and_its_fade() {
 #[test]
 fn the_commit_after_a_narrower_shape_goes_through() {
     let (mut ed, mut exec) = rig();
-    ed.insert(X, "ported", Unforkable(narrow()));
+    ed.insert(X, "ported", Unforkable(narrow())).controls;
     ed.commit().expect("nothing names a port X lacks");
     exec.apply_pending();
     ed.collect();
@@ -303,9 +305,9 @@ fn bused(with_aux: bool) -> Ported {
 fn bus_edges_to_a_missing_bus_are_dropped() {
     let (mut ed, _exec) = Editor::new(prepare(128));
     let (s, y, t) = (NodeKey(1), NodeKey(2), NodeKey(3));
-    ed.insert(s, "bused", Unforkable(bused(true)));
-    ed.insert(y, "bused", Unforkable(bused(true)));
-    ed.insert(t, "bused", Unforkable(bused(true)));
+    ed.insert(s, "bused", Unforkable(bused(true))).controls;
+    ed.insert(y, "bused", Unforkable(bused(true))).controls;
+    ed.insert(t, "bused", Unforkable(bused(true))).controls;
     let feeds = [
         (BusSource::Node(BusRef::new(s, 0)), BusRef::new(y, 0)),
         (BusSource::Node(BusRef::new(s, 1)), BusRef::new(y, 1)),
@@ -318,7 +320,7 @@ fn bus_edges_to_a_missing_bus_are_dropped() {
     let placed = ed.insert(y, "bused", Unforkable(bused(false)));
     let dropped: BTreeSet<(BusRef, BusSource)> = placed
         .unwired
-        .buses
+        .bus_edges
         .iter()
         .map(|(to, feed)| (*to, feed.source))
         .collect();
@@ -327,7 +329,7 @@ fn bus_edges_to_a_missing_bus_are_dropped() {
         .map(|(from, to)| (to, from))
         .collect();
     assert_eq!(dropped, expected);
-    assert_eq!(placed.unwired.buses.len(), 2);
+    assert_eq!(placed.unwired.bus_edges.len(), 2);
     assert!(placed.unwired.edges.is_empty());
 
     let kept: BTreeSet<(BusRef, BusSource)> = ed
@@ -345,4 +347,155 @@ fn bus_edges_to_a_missing_bus_are_dropped() {
     );
     ed.commit()
         .expect("the lowering names only buses that exist");
+}
+
+/// A feedback edge from a lost output into a lost input of the same key is one
+/// edge, listed once.
+#[test]
+fn a_feedback_self_loop_on_a_lost_port_is_listed_once() {
+    let (mut ed, _exec) = rig();
+    let looped = id(
+        inp(X, 2),
+        Edge::Feedback(FeedbackFrom::new(out(X, 2), DELAY)),
+    );
+    ed.spec_mut().connect(inp(X, 2), looped.from);
+    let placed = ed.insert(X, "ported", Unforkable(narrow()));
+    assert_eq!(
+        placed
+            .unwired
+            .edges
+            .iter()
+            .filter(|e| **e == looped)
+            .count(),
+        1
+    );
+    assert!(!ed.spec().has_edge(looped));
+    ed.commit().expect("commits");
+}
+
+/// A param port the shape does not declare, and a param port driven from an
+/// event output it lost, are released and listed with the output that drove
+/// them.
+#[test]
+fn param_drivers_on_lost_ports_are_released_and_listed() {
+    let (mut ed, _exec) = rig();
+    let undeclared = tutti_graph::ParamIn {
+        node: X,
+        param: UnitAddr::first(UnitParam::Volume),
+    };
+    let mix = tutti_graph::ParamIn {
+        node: B,
+        param: tutti_graph::NodeMix::ADDR,
+    };
+    ed.spec_mut().connect_param(undeclared, eout(A, 0));
+    ed.spec_mut().connect_param(mix, eout(X, 2));
+    let placed = ed.insert(X, "ported", Unforkable(narrow()));
+    let mut listed = placed.unwired.params.clone();
+    listed.sort();
+    let mut want = vec![(undeclared, eout(A, 0)), (mix, eout(X, 2))];
+    want.sort();
+    assert_eq!(listed, want);
+    assert!(!ed.spec().params.contains_key(&undeclared));
+    assert_eq!(ed.spec().params[&mix].source, None);
+    ed.commit().expect("nothing names a port X lacks");
+}
+
+fn stereo_bus_node(aux: Option<Bus>) -> Ported {
+    let buses = |role| {
+        let main = Buses::NONE.with(Bus::main(stereo())).expect("one bus");
+        match aux {
+            Some(_) => main
+                .with(Bus::banded(stereo(), role, 2).expect("two bands"))
+                .expect("two buses"),
+            None => main,
+        }
+    };
+    Ported(Shape::buses(buses(BusRole::Sidechain), buses(BusRole::Aux)))
+}
+
+/// A banded output bus the new shape lacks drops the feeds of every band into
+/// the root and into another node's bus; the main bus's feeds stay.
+#[test]
+fn a_lost_banded_output_bus_drops_its_feeds_by_band_and_to_the_root() {
+    let (mut ed, _exec) = Editor::new(prepare(128));
+    let (y, t) = (NodeKey(2), NodeKey(3));
+    let banded = Some(Bus::new(stereo(), BusRole::Aux));
+    ed.insert(y, "bused", Unforkable(stereo_bus_node(banded)))
+        .controls;
+    ed.insert(t, "bused", Unforkable(stereo_bus_node(banded)))
+        .controls;
+    ed.spec_mut().root = Some(stereo());
+    let main_to_root = BusSource::Node(BusRef::new(y, 0));
+    let band0 = BusSource::Node(BusRef::band(y, 1, 0));
+    let band1 = BusSource::Node(BusRef::band(y, 1, 1));
+    ed.connect_bus_to_root(main_to_root).expect("declared");
+    ed.connect_bus_to_root(band1)
+        .expect("a band folds to the root");
+    ed.connect_bus(band0, BusRef::new(t, 1)).expect("declared");
+    let placed = ed.insert(y, "bused", Unforkable(stereo_bus_node(None)));
+    assert_eq!(
+        placed
+            .unwired
+            .root_buses
+            .iter()
+            .map(|f| f.source)
+            .collect::<Vec<_>>(),
+        vec![band1]
+    );
+    assert_eq!(
+        placed
+            .unwired
+            .bus_edges
+            .iter()
+            .map(|(to, f)| (*to, f.source))
+            .collect::<Vec<_>>(),
+        vec![(BusRef::new(t, 1), band0)]
+    );
+    assert_eq!(
+        ed.spec()
+            .root_sources
+            .iter()
+            .map(|f| f.source)
+            .collect::<Vec<_>>(),
+        vec![main_to_root]
+    );
+    ed.commit()
+        .expect("the lowering names only buses that exist");
+}
+
+/// A tap lane on a port the new shape lacks reads silence and the tap goes on
+/// delivering its other lanes; the commit is not refused.
+#[test]
+fn a_tap_lane_on_a_lost_port_reads_silence() {
+    let (mut ed, mut exec) = Editor::new(prepare(64));
+    let konst = |width| Unforkable(TestNode::new(Kind::Const { value: 0.5, width }));
+    ed.insert(X, "const", konst(2)).controls;
+    ed.spec_mut()
+        .topology
+        .set_outputs(vec![Source::Node(out(X, 0))]);
+    let mut tap = ed
+        .open_tap(
+            TapId::of(1),
+            vec![Source::Node(out(X, 0)), Source::Node(out(X, 1))],
+            TapAlign::Raw,
+            Samples(256),
+        )
+        .expect("the sources exist");
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    ed.collect();
+    let placed = ed.insert(X, "const", konst(1));
+    assert!(placed.unwired.is_empty(), "a tap is no edge");
+    assert!(matches!(
+        ed.spec().topology.taps[&TapId::of(1)],
+        TapSpec::Ports { .. }
+    ));
+    ed.commit().expect("a tap on a lost port does not refuse");
+    exec.apply_pending();
+    ed.collect();
+    let mut out0 = vec![0.0f32; 64];
+    exec.process(64, &TransportPosition::default(), &[], &mut [&mut out0[..]]);
+    let mut buf = vec![f32::NAN; 2 * 64];
+    assert_eq!(tap.pop_into(&mut buf).get(), 64);
+    assert!(buf.chunks(2).all(|f| f[0] == 0.5 && f[1] == 0.0));
 }

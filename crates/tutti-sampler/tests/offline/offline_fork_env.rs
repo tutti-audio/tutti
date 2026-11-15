@@ -225,8 +225,9 @@ fn a_voice_behind_another_node_is_forked_too() {
         NodeKey(1),
         "voice",
         VoiceNode::with_channels(voice(), ChannelLayout::MONO),
-    );
-    ed.insert(NodeKey(2), "pass", ForkByClone(Pass));
+    )
+    .controls;
+    ed.insert(NodeKey(2), "pass", ForkByClone(Pass)).controls;
     ed.spec_mut().topology.edges.insert(
         tutti_graph::InPort {
             node: NodeKey(2),

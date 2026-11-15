@@ -85,7 +85,8 @@ fn constants(r: &mut Rig, values: &[f32]) {
             NodeKey(key),
             "const",
             Forkable(Kind::Const { value, width: 1 }),
-        );
+        )
+        .controls;
         outputs.push(out(key));
     }
     r.ed.spec_mut().topology.set_outputs(outputs);
@@ -219,7 +220,8 @@ fn a_spike_is_held_until_read_and_read_once() {
             at: 777,
             done: false,
         }),
-    );
+    )
+    .controls;
     r.ed.spec_mut().topology.set_outputs(vec![out(1)]);
     let mut m =
         r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
@@ -434,7 +436,8 @@ fn a_reused_key_is_not_read_by_the_old_meter() {
             value: 0.125,
             width: 1,
         }),
-    );
+    )
+    .controls;
     commit(&mut r);
     block(&mut r, 32);
     assert_eq!(
@@ -454,7 +457,8 @@ fn output_bits(workers: usize, master: bool, track: bool) -> Vec<u32> {
     let mut outputs = Vec::new();
     for (k, latency) in [30usize, 11, 0].into_iter().enumerate() {
         let (lag, gain) = (10 + k as u64, 20 + k as u64);
-        r.ed.insert(NodeKey(lag), "lag", Forkable(Kind::Lag { latency }));
+        r.ed.insert(NodeKey(lag), "lag", Forkable(Kind::Lag { latency }))
+            .controls;
         r.ed.insert(
             NodeKey(gain),
             "gain",
@@ -462,7 +466,8 @@ fn output_bits(workers: usize, master: bool, track: bool) -> Vec<u32> {
                 gain: 0.5 + k as f32 / 10.0,
                 width: 1,
             }),
-        );
+        )
+        .controls;
         let t = &mut r.ed.spec_mut().topology;
         t.edges.insert(
             InPort {
@@ -559,7 +564,8 @@ fn a_narrowed_node_silences_the_lanes_past_its_width_and_commits() {
             value: 0.5,
             width: 2,
         }),
-    );
+    )
+    .controls;
     let port = |p| {
         Source::Node(OutPort {
             node: NodeKey(1),
@@ -584,7 +590,8 @@ fn a_narrowed_node_silences_the_lanes_past_its_width_and_commits() {
             value: 0.25,
             width: 1,
         }),
-    );
+    )
+    .controls;
     commit(&mut r);
     block(&mut r, 32);
     assert_eq!(level(&mut m), vec![(0.25, 0.25, 32), (0.0, 0.0, 32)]);
@@ -624,9 +631,12 @@ impl Node for Pulse {
 #[test]
 fn the_master_reads_at_the_outputs_time() {
     let mut r = rig(1, false);
-    r.ed.insert(NodeKey(1), "pulse", Unforkable(Pulse { len: 50, done: 0 }));
-    r.ed.insert(NodeKey(2), "pulse", Unforkable(Pulse { len: 50, done: 0 }));
-    r.ed.insert(NodeKey(3), "lag", Forkable(Kind::Lag { latency: 30 }));
+    r.ed.insert(NodeKey(1), "pulse", Unforkable(Pulse { len: 50, done: 0 }))
+        .controls;
+    r.ed.insert(NodeKey(2), "pulse", Unforkable(Pulse { len: 50, done: 0 }))
+        .controls;
+    r.ed.insert(NodeKey(3), "lag", Forkable(Kind::Lag { latency: 30 }))
+        .controls;
     r.ed.spec_mut().topology.edges.insert(
         InPort {
             node: NodeKey(3),
@@ -812,7 +822,8 @@ fn run(r: &mut Rig, blocks: usize) -> Vec<Vec<Level>> {
     let values: Vec<f32> = (0..6).map(|k| 0.1 + 0.13 * k as f32).collect();
     constants(r, &values);
     // A chain with latency so the compiler aligns the outputs.
-    r.ed.insert(NodeKey(20), "lag", Forkable(Kind::Lag { latency: 7 }));
+    r.ed.insert(NodeKey(20), "lag", Forkable(Kind::Lag { latency: 7 }))
+        .controls;
     r.ed.spec_mut().topology.edges.insert(
         InPort {
             node: NodeKey(20),

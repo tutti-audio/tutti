@@ -471,7 +471,7 @@ fn a_clip_into_a_synth_is_allocation_free() {
         SampleRate::SR_48K,
         MaxBlock::of(Samples(BLOCK)),
     ));
-    ed.insert(NodeKey(1), "clip", clip);
+    ed.insert(NodeKey(1), "clip", clip).controls;
     ed.insert(
         NodeKey(2),
         "synth",
@@ -480,7 +480,8 @@ fn a_clip_into_a_synth_is_allocation_free() {
             oscillator: OscillatorType::Saw,
             ..Default::default()
         }),
-    );
+    )
+    .controls;
     ed.spec_mut().connect_events(
         EventIn {
             node: NodeKey(2),

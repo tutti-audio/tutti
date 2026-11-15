@@ -8,10 +8,15 @@
 //! a known gain.
 
 use tutti_buffers::InterleavedMut;
-use tutti_graph::{Cx, FadeLaw, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
+use tutti_graph::{
+    Bus, BusRole, BusSource, Buses, Cx, FadeLaw, ForkByClone, Io, Node, NodeKey, Prepare, Shape,
+    Status,
+};
 use tutti_nodes::testing::Const;
-use tutti_session::{Edge, EventEdge, InPort, OutPort, Root, Session, SessionEvent};
-use tutti_types::{Amplitude, ChannelLayout, Seconds};
+use tutti_session::{
+    BusSink, Edge, EventEdge, Feeder, InPort, OutPort, Root, Session, SessionEvent,
+};
+use tutti_types::{Amplitude, BusTopology, ChannelLayout, Seconds, Speaker};
 
 const BLOCK: usize = 64;
 /// The sources' levels, and the gain of the wire that survives.
@@ -72,6 +77,7 @@ fn unwired(events: &[SessionEvent]) -> Vec<(NodeKey, Vec<Edge>, Vec<EventEdge>)>
                 node,
                 edges,
                 event_edges,
+                ..
             } => Some((*node, edges.clone(), event_edges.clone())),
             _ => None,
         })
@@ -216,4 +222,124 @@ fn a_wider_reinsert_reports_nothing() {
     assert!(unwired(&events).is_empty(), "wider");
     assert!(!refused(&events));
     assert!(channel(&mut s, 0).iter().all(|&v| v == A));
+}
+
+/// **A feed naming a lost event output is not written back.** Two feeders feed
+/// one sink from two outputs of one source. The source is re-inserted with
+/// one output: the lost output's edge is reported, and a later `set_feed` by
+/// a third feeder on the same sink commits (the lost source is not rewritten
+/// from the first feeder's entry) and leaves exactly the edges whose ports
+/// exist.
+#[test]
+fn a_feed_naming_a_lost_event_output_is_not_written_back() {
+    let mut s = Session::builder().build().expect("builds");
+    let g = s.graph();
+    let (src, _) = g.add(ForkByClone(Ports::<0, 2>));
+    let (other, _) = g.add(ForkByClone(Ports::<0, 1>));
+    let (sink, _) = g.add(ForkByClone(Ports::<1, 0>));
+    g.set_feed(sink, Feeder::Sequencer, vec![src.events_out_at(0)]);
+    g.set_feed(sink, Feeder::Routes, vec![src.events_out_at(1)]);
+    let events = s.update();
+    assert!(!refused(&events));
+
+    s.graph()
+        .replace(
+            src,
+            ForkByClone(Ports::<0, 1>),
+            Seconds(0.0),
+            FadeLaw::EqualAmplitude,
+        )
+        .expect("the node is there");
+    let events = s.update();
+    assert!(!refused(&events));
+    let [(_, _, event_edges)] = <[_; 1]>::try_from(unwired(&events)).expect("one Unwired");
+    assert_eq!(
+        event_edges,
+        [EventEdge::new(src.events_out_at(1), sink.events_in())]
+    );
+
+    s.graph()
+        .set_feed(sink, Feeder::LiveInput, vec![other.events_out_at(0)]);
+    let events = s.update();
+    assert!(
+        !refused(&events),
+        "the lost output is not written back: {events:?}"
+    );
+    assert_eq!(
+        s.graph().sources(sink.events_in()).unwrap(),
+        [src.events_out_at(0), other.events_out_at(0)],
+        "the feeds whose ports exist still deliver"
+    );
+}
+
+/// A node with a main stereo bus, and with `aux` a mono aux bus, on each side.
+#[derive(Clone)]
+struct Bused {
+    aux: bool,
+}
+
+impl Node for Bused {
+    fn shape(&self) -> Shape {
+        let stereo = BusTopology::new([Speaker::FrontLeft, Speaker::FrontRight]).unwrap();
+        let mono = BusTopology::unassigned(ChannelLayout::MONO).unwrap();
+        let side = |role| {
+            let main = Buses::NONE.with(Bus::main(stereo)).unwrap();
+            if self.aux {
+                main.with(Bus::new(mono, role)).unwrap()
+            } else {
+                main
+            }
+        };
+        Shape::buses(side(BusRole::Sidechain), side(BusRole::Aux))
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+/// **A bus edge into or out of a lost bus is reported as the app wired it.**
+#[test]
+fn a_narrower_reinsert_reports_the_bus_edges_it_dropped() {
+    let mut s = Session::builder().build().expect("builds");
+    let g = s.graph();
+    let (a, _) = g.add(ForkByClone(Bused { aux: true }));
+    let (y, _) = g.add(ForkByClone(Bused { aux: true }));
+    let (t, _) = g.add(ForkByClone(Bused { aux: true }));
+    g.connect(a.bus_out(0), y.bus_in(0)).unwrap().hard();
+    g.connect(a.bus_out(1), y.bus_in(1)).unwrap().hard();
+    g.connect(y.bus_out(0), t.bus_in(0)).unwrap().hard();
+    g.connect(y.bus_out(1), t.bus_in(1)).unwrap().hard();
+    let events = s.update();
+    assert!(!refused(&events), "{events:?}");
+
+    s.graph()
+        .replace(
+            y,
+            ForkByClone(Bused { aux: false }),
+            Seconds(0.0),
+            FadeLaw::EqualAmplitude,
+        )
+        .expect("the node is there");
+    let events = s.update();
+    assert!(!refused(&events), "{events:?}");
+    let [bus_edges] = <[_; 1]>::try_from(
+        events
+            .iter()
+            .filter_map(|e| match e {
+                SessionEvent::Unwired { bus_edges, .. } => Some(bus_edges.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+    )
+    .expect("one Unwired");
+    let mut want: Vec<(BusSource, BusSink)> = vec![
+        (a.bus_out(1), BusSink::Node(y.bus_in(1))),
+        (y.bus_out(1), BusSink::Node(t.bus_in(1))),
+    ];
+    assert_eq!(bus_edges.len(), want.len());
+    for w in want.drain(..) {
+        assert!(bus_edges.contains(&w), "{w:?} in {bus_edges:?}");
+    }
 }

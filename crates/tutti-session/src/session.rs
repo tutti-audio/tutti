@@ -184,8 +184,14 @@ pub enum SessionEvent {
     /// longer has. Reported once, by the update that commits the re-insert,
     /// per node: the audio edges and the event edges that were dropped, by the
     /// ports the app named them with. Edges to the ports the node still has
-    /// are kept, gains included, and a modulation route onto a dropped edge
-    /// stays declared and reads unresolved until the edge is wired again.
+    /// are kept, gains included.
+    ///
+    /// A feedback edge is listed as the pair of ports it joined (its delay
+    /// is not part of an [`Edge`](crate::Edge)). A modulation route onto a
+    /// dropped edge, or a param or edge-gain lane the node's lost event
+    /// outputs drove, is not listed: the route stays declared and reads
+    /// unresolved (`Problem::Unresolved`, feature `modulation`) until its target
+    /// is wired again.
     Unwired {
         /// The node whose re-insert dropped the wiring.
         node: NodeKey,
@@ -194,6 +200,10 @@ pub enum SessionEvent {
         edges: Vec<crate::Edge>,
         /// The event edges dropped, into or out of the node.
         event_edges: Vec<crate::EventEdge>,
+        /// The bus edges dropped, into or out of the node, as the app wired
+        /// them: the source bus and the sink, a node's input bus or the
+        /// root.
+        bus_edges: Vec<(tutti_graph::BusSource, crate::BusSink)>,
     },
     /// A node's event output port lost events since the last update: they
     /// were past its capacity (a note-off only past the room set aside for
@@ -320,11 +330,13 @@ impl std::fmt::Debug for SessionEvent {
                 node,
                 edges,
                 event_edges,
+                bus_edges,
             } => f
                 .debug_struct("Unwired")
                 .field("node", node)
                 .field("edges", edges)
                 .field("event_edges", event_edges)
+                .field("bus_edges", bus_edges)
                 .finish(),
             Self::Fault(fault) => f.debug_tuple("Fault").field(fault).finish(),
             #[cfg(feature = "device")]
@@ -852,6 +864,7 @@ impl<C: Clock> Session<C> {
                         node: u.node,
                         edges: u.edges,
                         event_edges: u.event_edges,
+                        bus_edges: u.bus_edges,
                     });
                 }
                 if !sent && self.resumed {

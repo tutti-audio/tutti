@@ -102,13 +102,15 @@ fn graph(workers: usize, declared: bool) -> Executor {
     }
     const SUM: NodeKey = NodeKey(1_000);
     let sources = CLICKS + HEAVY;
-    ed.insert(SUM, "sum", Unforkable(Sum(sources as usize)));
+    ed.insert(SUM, "sum", Unforkable(Sum(sources as usize)))
+        .controls;
     for k in 0..sources {
         let key = NodeKey(k + 1);
         if declared && k < CLICKS {
-            ed.insert(key, "click", click(&transport));
+            ed.insert(key, "click", click(&transport)).controls;
         } else {
-            ed.insert(key, "click", Unforkable(Undeclared(click(&transport))));
+            ed.insert(key, "click", Unforkable(Undeclared(click(&transport))))
+                .controls;
         }
         for c in 0..2u16 {
             let port = InPort {

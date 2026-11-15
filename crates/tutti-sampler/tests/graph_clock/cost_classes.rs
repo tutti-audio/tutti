@@ -97,12 +97,13 @@ fn graph(wave: &Arc<Wave>, workers: usize, declared: bool, bus: bool) -> Executo
                 MemorySource::placed(Arc::clone(wave), VoiceWindow::from(Beat(k as f64 * 0.001)))
                     .expect("a placeable wave");
             if declared {
-                ed.insert(key, "read", read);
+                ed.insert(key, "read", read).controls;
             } else {
-                ed.insert(key, "read", Unforkable(Undeclared(read)));
+                ed.insert(key, "read", Unforkable(Undeclared(read)))
+                    .controls;
             }
         } else {
-            ed.insert(key, "stretched", stretched(wave));
+            ed.insert(key, "stretched", stretched(wave)).controls;
         }
         for c in 0..2u16 {
             let from = Source::Node(OutPort { node: key, port: c });

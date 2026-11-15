@@ -58,7 +58,8 @@ impl Node for BeatLog {
 
 fn graph(log: &Log) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(512))));
-    ed.insert(NodeKey(1), "beats", Unforkable(BeatLog(Arc::clone(log))));
+    ed.insert(NodeKey(1), "beats", Unforkable(BeatLog(Arc::clone(log))))
+        .controls;
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort {

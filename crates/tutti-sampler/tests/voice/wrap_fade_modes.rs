@@ -68,10 +68,10 @@ fn graph(wave: &Arc<Wave>, workers: usize, host: Host) -> Executor {
             Host::Pool => {
                 let mut pool = VoicePool::new();
                 pool.insert(SlotId(1), source, Playback::default());
-                ed.insert(key, "pool", pool);
+                ed.insert(key, "pool", pool).controls;
             }
             Host::Node => {
-                ed.insert(key, "source", source);
+                ed.insert(key, "source", source).controls;
             }
         }
         for port in 0..2u16 {

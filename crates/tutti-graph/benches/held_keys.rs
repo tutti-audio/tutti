@@ -63,10 +63,11 @@ fn rig(k: u32, sinks: u64) -> Executor {
         Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(BLOCK))),
         1024,
     );
-    ed.insert(NodeKey(1), "source", Unforkable(Source { k, flip: false }));
+    ed.insert(NodeKey(1), "source", Unforkable(Source { k, flip: false }))
+        .controls;
     for s in 0..sinks {
         let n = NodeKey(2 + s);
-        ed.insert(n, "sink", Unforkable(Sink));
+        ed.insert(n, "sink", Unforkable(Sink)).controls;
         ed.spec_mut().connect_events(
             EventIn { node: n, port: 0 },
             EventEdge::Direct(EventOut {

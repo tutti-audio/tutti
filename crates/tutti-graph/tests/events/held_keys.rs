@@ -221,9 +221,10 @@ impl Rig {
                 Unforkable(Src {
                     mail: r.mail.clone(),
                 }),
-            );
+            )
+            .controls;
             if lag {
-                ed.insert(NodeKey(LAG), "lag", Unforkable(Lag));
+                ed.insert(NodeKey(LAG), "lag", Unforkable(Lag)).controls;
             }
             for &s in sinks {
                 ed.insert(
@@ -234,7 +235,8 @@ impl Rig {
                         log: r.log.clone(),
                         audio: lag,
                     }),
-                );
+                )
+                .controls;
                 if lag {
                     ed.spec_mut().topology.edges.insert(
                         tutti_graph::InPort {
@@ -837,7 +839,8 @@ fn fan_in_closes_the_cut_sources_keys_only() {
             Unforkable(Src {
                 mail: mail2.clone(),
             }),
-        );
+        )
+        .controls;
     }
     let both = |r: &mut Rig, edges: &[(u64, u64)]| {
         let ed = r.ed.as_mut().unwrap();
@@ -881,7 +884,8 @@ fn a_crossfaded_source_closes_its_sinks() {
             }),
             Fade::new(Samples(MAX * 3), Default::default()),
         )
-        .expect("replace");
+        .expect("replace")
+        .controls;
         ed.commit().unwrap();
         r.exec.as_mut().unwrap().apply_pending();
         ed.collect();
@@ -901,13 +905,16 @@ fn a_crossfaded_source_closes_its_sinks() {
 fn fan_in_on_one_key_is_closed_by_either_source() {
     let mut r = Rig::new(Mode::Serial, &[2]);
     let mail2: Mail = Arc::default();
-    r.ed.as_mut().unwrap().insert(
-        NodeKey(5),
-        "src2",
-        Unforkable(Src {
-            mail: mail2.clone(),
-        }),
-    );
+    r.ed.as_mut()
+        .unwrap()
+        .insert(
+            NodeKey(5),
+            "src2",
+            Unforkable(Src {
+                mail: mail2.clone(),
+            }),
+        )
+        .controls;
     let wire = |r: &mut Rig, edges: &[(u64, u64)]| {
         let ed = r.ed.as_mut().unwrap();
         ed.spec_mut().events.clear();
@@ -985,7 +992,8 @@ fn a_second_fade_closes_the_first_replacements_keys_when_it_takes_over() {
         let swap = |r: &mut Rig, mail: &Mail| {
             let ed = r.ed.as_mut().unwrap();
             ed.replace(NodeKey(1), Unforkable(Src { mail: mail.clone() }), fade)
-                .expect("replaces");
+                .expect("replaces")
+                .controls;
             ed.commit().unwrap();
             r.exec.as_mut().unwrap().apply_pending();
             ed.collect();
@@ -1039,7 +1047,8 @@ fn a_third_fade_supersedes_the_waiting_one() {
         let swap = |r: &mut Rig, mail: &Mail| {
             let ed = r.ed.as_mut().unwrap();
             ed.replace(NodeKey(1), Unforkable(Src { mail: mail.clone() }), fade)
-                .expect("replaces");
+                .expect("replaces")
+                .controls;
             ed.commit().unwrap();
             r.exec.as_mut().unwrap().apply_pending();
             ed.collect();
@@ -1074,7 +1083,8 @@ fn swap_with_fade(r: &mut Rig, mail: &Mail, frames: usize) {
         Unforkable(Src { mail: mail.clone() }),
         Fade::new(Samples(frames), Default::default()),
     )
-    .expect("replaces");
+    .expect("replaces")
+    .controls;
     ed.commit().unwrap();
     r.exec.as_mut().unwrap().apply_pending();
     ed.collect();
@@ -1222,7 +1232,8 @@ fn a_hard_replace_during_a_fade_closes_the_running_units_keys() {
             Unforkable(Src { mail: m2.clone() }),
             Fade::new(Samples(MAX * 6), Default::default()),
         )
-        .unwrap();
+        .unwrap()
+        .controls;
         ed.commit().unwrap();
         r.exec.as_mut().unwrap().apply_pending();
         ed.collect();
@@ -1236,7 +1247,8 @@ fn a_hard_replace_during_a_fade_closes_the_running_units_keys() {
             Unforkable(Src { mail: m3.clone() }),
             Fade::new(Samples(0), Default::default()),
         )
-        .unwrap();
+        .unwrap()
+        .controls;
         ed.commit().unwrap();
         r.exec.as_mut().unwrap().apply_pending();
         ed.collect();
@@ -1318,7 +1330,8 @@ fn a_hard_replace_around_a_promotion_closes_once() {
                 }),
                 Fade::new(Samples(0), Default::default()),
             )
-            .unwrap();
+            .unwrap()
+            .controls;
             ed.commit().unwrap();
             r.exec.as_mut().unwrap().apply_pending();
             ed.collect();
@@ -1509,7 +1522,8 @@ fn a_source_replaced_by_the_resume_commit_is_closed() {
         }),
         Fade::new(Samples(0), Default::default()),
     )
-    .unwrap();
+    .unwrap()
+    .controls;
     ed.reprepare(common::prepare(MAX * 2)).expect("reprepares");
     exec.apply_pending();
     ed.collect();
@@ -1539,7 +1553,8 @@ fn a_replaced_sink_is_not_sent_a_close() {
             }),
             Fade::new(Samples(0), Default::default()),
         )
-        .unwrap();
+        .unwrap()
+        .controls;
         ed.spec_mut().events.clear();
         ed.commit().unwrap();
         r.exec.as_mut().unwrap().apply_pending();
@@ -1660,7 +1675,7 @@ fn a_source_without_note_events_closes_nothing() {
     let edit = |r: &mut Rig, wired: bool| {
         let ed = r.ed.as_mut().unwrap();
         if wired {
-            ed.insert(NodeKey(6), "clock", Unforkable(Clock));
+            ed.insert(NodeKey(6), "clock", Unforkable(Clock)).controls;
             ed.spec_mut()
                 .connect_events(at(2), EventEdge::Direct(out(6)));
         } else {
@@ -1696,7 +1711,7 @@ fn a_note_from_a_source_that_declared_none_is_caught() {
         fn reset(&mut self) {}
     }
     let (mut ed, mut exec) = Editor::new(common::prepare(MAX));
-    ed.insert(NodeKey(1), "liar", Unforkable(Liar));
+    ed.insert(NodeKey(1), "liar", Unforkable(Liar)).controls;
     ed.commit().unwrap();
     exec.apply_pending();
     exec.process(MAX, &TransportPosition::default(), &[], &mut []);
@@ -1760,8 +1775,10 @@ impl Node for Hear {
 fn forked(log: &Log, blocks: usize, mid_note: bool) -> (Editor, Executor) {
     let prep = common::prepare(MAX);
     let (mut ed, mut exec) = Editor::new(prep);
-    ed.insert(NodeKey(1), "once", ForkByClone(Once(false, mid_note)));
-    ed.insert(NodeKey(2), "hear", ForkByClone(Hear(log.clone(), 2)));
+    ed.insert(NodeKey(1), "once", ForkByClone(Once(false, mid_note)))
+        .controls;
+    ed.insert(NodeKey(2), "hear", ForkByClone(Hear(log.clone(), 2)))
+        .controls;
     ed.spec_mut()
         .connect_events(at(2), EventEdge::Direct(out(1)));
     ed.spec_mut()
@@ -2051,9 +2068,11 @@ mod no_alloc {
         // once here, since the pool gates the warm-up blocks too.
         drop(mail.lock().unwrap());
         let n = Arc::new(AtomicU64::new(0));
-        ed.insert(NodeKey(1), "src", Unforkable(Src { mail: mail.clone() }));
+        ed.insert(NodeKey(1), "src", Unforkable(Src { mail: mail.clone() }))
+            .controls;
         for s in [2u64, 3] {
-            ed.insert(NodeKey(s), "c", Unforkable(Count(n.clone())));
+            ed.insert(NodeKey(s), "c", Unforkable(Count(n.clone())))
+                .controls;
             ed.spec_mut()
                 .connect_events(at(s), EventEdge::Direct(out(1)));
         }

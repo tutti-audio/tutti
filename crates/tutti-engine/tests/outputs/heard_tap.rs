@@ -45,7 +45,8 @@ fn engine(width: u16) -> Engine {
         SampleRate::of(RATE),
         MaxBlock::of(Samples(512)),
     ));
-    ed.insert(NodeKey(1), "ramp", Unforkable(Ramp { width, at: 0 }));
+    ed.insert(NodeKey(1), "ramp", Unforkable(Ramp { width, at: 0 }))
+        .controls;
     ed.spec_mut().topology.set_outputs((0..width).map(|port| {
         Source::Node(OutPort {
             node: NodeKey(1),

@@ -525,7 +525,8 @@ fn flags(n: u64) -> Flags {
             key(i as u64 + 1),
             "switch",
             Unforkable(Switch(Arc::clone(s))),
-        );
+        )
+        .controls;
     }
     let calls = Arc::new(AtomicU64::new(0));
     let constant = Arc::new(AtomicU64::new(0));
@@ -536,7 +537,8 @@ fn flags(n: u64) -> Flags {
             calls: Arc::clone(&calls),
             constant: Arc::clone(&constant),
         }),
-    );
+    )
+    .controls;
     for k in 1..=n {
         ed.spec_mut().topology.connect(at(n + 1, 0), direct(k));
     }
@@ -600,7 +602,8 @@ fn a_sum_is_constant_when_its_live_addends_are() {
     let constant_calls = |kinds: &[Kind]| {
         let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
         for (i, k) in kinds.iter().enumerate() {
-            ed.insert(key(i as u64 + 1), "n", Unforkable(TestNode::new(k.clone())));
+            ed.insert(key(i as u64 + 1), "n", Unforkable(TestNode::new(k.clone())))
+                .controls;
         }
         let n = kinds.len() as u64;
         let calls = Arc::new(AtomicU64::new(0));
@@ -612,7 +615,8 @@ fn a_sum_is_constant_when_its_live_addends_are() {
                 calls: Arc::clone(&calls),
                 constant: Arc::clone(&constant),
             }),
-        );
+        )
+        .controls;
         for k in 1..=n {
             ed.spec_mut().topology.connect(at(n + 1, 0), direct(k));
         }

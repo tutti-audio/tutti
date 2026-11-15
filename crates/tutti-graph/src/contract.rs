@@ -1116,11 +1116,13 @@ impl Rig {
             Edit::Unrelated => {
                 // A node on no path: it touches neither the node under test
                 // nor anything feeding it, so the recompile must not either.
-                self.ed.insert(
-                    UNRELATED,
-                    "unrelated",
-                    Unforkable(Latent::new(Latency::new(Samples(7)))),
-                );
+                self.ed
+                    .insert(
+                        UNRELATED,
+                        "unrelated",
+                        Unforkable(Latent::new(Latency::new(Samples(7)))),
+                    )
+                    .controls;
             }
             Edit::Regenerate => {
                 let (key, kind) = self
@@ -1128,18 +1130,21 @@ impl Rig {
                     .unwrap_or_else(|| panic!("{}: no upstream node to regenerate", row.name));
                 match kind {
                     FeederKind::Sum => {
-                        self.ed.insert(key, "sum", Unforkable(Sum));
+                        self.ed.insert(key, "sum", Unforkable(Sum)).controls;
                     }
                     // Armed for a frame already past, so it sends nothing
                     // more: the one event in flight is the old unit's.
                     FeederKind::Emitter(at, kind) => {
                         self.ed
-                            .insert(key, "emitter", Unforkable(Emitter::new(at, kind)));
+                            .insert(key, "emitter", Unforkable(Emitter::new(at, kind)))
+                            .controls;
                     }
                     // Armed as the old one was: it sends only the steps
                     // still ahead of it, so none is sent twice or lost.
                     FeederKind::ParamPulse(pulse) => {
-                        self.ed.insert(key, "param pulse", Unforkable(pulse));
+                        self.ed
+                            .insert(key, "param pulse", Unforkable(pulse))
+                            .controls;
                     }
                 }
             }

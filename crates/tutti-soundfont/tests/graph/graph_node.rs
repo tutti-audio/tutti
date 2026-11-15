@@ -48,8 +48,9 @@ fn graph(unit: SoundFontUnit, rate: f64, frame: u64) -> (Editor, Executor) {
         NodeKey(1),
         "clip",
         MidiClipNode::new([TimedMidiEvent::new(beat, on).unwrap()]),
-    );
-    ed.insert(NodeKey(2), "font", unit);
+    )
+    .controls;
+    ed.insert(NodeKey(2), "font", unit).controls;
     ed.spec_mut().connect_events(
         EventIn {
             node: NodeKey(2),

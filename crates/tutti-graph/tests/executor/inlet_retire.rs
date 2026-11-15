@@ -38,7 +38,7 @@ fn replacing_and_removing_an_inlet_drops_it_on_the_control_side() {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
     let (first, mut w1) = inlet();
-    ed.insert(KEY, "inlet", first);
+    ed.insert(KEY, "inlet", first).controls;
     outputs(&mut ed);
     ed.commit().expect("compiles");
     exec.apply_pending();
@@ -52,7 +52,7 @@ fn replacing_and_removing_an_inlet_drops_it_on_the_control_side() {
         Fade::new(Samples(96), FadeLaw::default()),
     ] {
         let (next, mut w) = inlet();
-        ed.replace(KEY, next, fade).expect("replaces");
+        ed.replace(KEY, next, fade).expect("replaces").controls;
         ed.commit().expect("compiles");
         exec.apply_pending();
         w.push_interleaved(&[0.25; 128]);
@@ -107,7 +107,7 @@ fn a_reader_dropped_in_a_block_panics() {
     let (reader, _writer) = TapReader::pair(2, Samples(8));
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
-    ed.insert(KEY, "drops", DropsInBlock(Some(reader)));
+    ed.insert(KEY, "drops", DropsInBlock(Some(reader))).controls;
     outputs(&mut ed);
     ed.commit().expect("compiles");
     exec.apply_pending();

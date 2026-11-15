@@ -64,8 +64,8 @@ impl Rig {
     fn new(instrument: impl tutti_graph::IntoNode) -> Self {
         let (mut ed, exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples(BLOCK))));
         let (inlet, tx) = EventInletNode::pair(EventCapacity::of(256));
-        ed.insert(NodeKey(1), "inlet", Unforkable(inlet));
-        ed.insert(NodeKey(2), "instrument", instrument);
+        ed.insert(NodeKey(1), "inlet", Unforkable(inlet)).controls;
+        ed.insert(NodeKey(2), "instrument", instrument).controls;
         ed.spec_mut().connect_events(
             EventIn {
                 node: NodeKey(2),
@@ -105,7 +105,9 @@ impl Rig {
     }
 
     fn swap(&mut self, instrument: impl tutti_graph::IntoNode) {
-        self.ed.insert(NodeKey(2), "instrument", instrument);
+        self.ed
+            .insert(NodeKey(2), "instrument", instrument)
+            .controls;
         self.ed.commit().expect("commits");
     }
 }
@@ -237,7 +239,8 @@ fn a_crossfade_between_fonts_chases_the_incoming_unit() {
             Unforkable(unit()),
             Fade::new(Samples(2 * BLOCK), FadeLaw::EqualPower),
         )
-        .expect("fits");
+        .expect("fits")
+        .controls;
     rig.ed.commit().expect("commits");
     rig.send(&[note_on()]);
     // The outgoing unit hears nothing during the fade, and the incoming one

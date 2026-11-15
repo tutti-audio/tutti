@@ -85,7 +85,7 @@ fn ingest(
     rig_with(node, ports, max, |ed| {
         for (slot, inlet) in inlets.into_iter().enumerate() {
             let key = NodeKey(3 + slot as u64);
-            ed.insert(key, "inlet", inlet);
+            ed.insert(key, "inlet", inlet).controls;
             ed.spec_mut().connect_events(
                 EventIn {
                     node: NodeKey(1),
@@ -948,7 +948,7 @@ fn an_event_tap_hands_midi_back_and_counts_drops() {
         MaxBlock::of(Samples(512)),
     ));
     let (inlet, mut keys) = EventInletNode::pair(EventCapacity::of(256));
-    ed.insert(NodeKey(1), "keys", inlet);
+    ed.insert(NodeKey(1), "keys", inlet).controls;
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
     for k in 0..5u64 {
@@ -1209,7 +1209,7 @@ fn transform(
         }
     }
     rig_with(MpeTransformNode::new(mode), 1, 512, |ed| {
-        ed.insert(NodeKey(3), "inlet", inlet);
+        ed.insert(NodeKey(3), "inlet", inlet).controls;
         ed.spec_mut().connect_events(
             EventIn {
                 node: NodeKey(1),

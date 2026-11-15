@@ -23,16 +23,17 @@ impl Editor {
     /// Returns the node's typed controls with what the placement unwired.
     ///
     /// The node is prepared now, and its [`NodeSpec`] is written from its
-    /// shape. Edges and params already recorded for `key` are kept, but for
+    /// shape. Edges and params already recorded for `key` are kept, except
     /// the wiring to a port the new shape lacks: that is removed from the
-    /// spec and returned in [`Placed::unwired`] (audio, event and feedback
-    /// edges, and bus edges, whether `key` is their source or their sink),
-    /// and nothing fails on a narrower shape. A port is the same port by its
-    /// index within its kind, and a bus by its index and band; wiring to a
-    /// port the shape still has stays exactly as it was, gains and declick
-    /// state included. Every
-    /// insert at a key takes a fresh generation, even after a
-    /// [`remove`](Self::remove) — so a unit can never be mistaken for the one
+    /// spec and returned in [`Placed::unwired`] (audio, event, feedback and
+    /// bus edges, whether `key` is their source or their sink), and nothing
+    /// fails on a narrower shape. A port is the same port by its index
+    /// within its kind, and a bus by its index and band; wiring to a port
+    /// the shape still has stays exactly as it was, gains and declick state
+    /// included.
+    ///
+    /// Every insert at a key takes a fresh generation, even after a
+    /// [`remove`](Self::remove), so a unit can never be mistaken for the one
     /// that used to live at its key.
     ///
     /// A node that hands over a [`ForkSource`] ([`IntoNode::into_parts`]) is
@@ -75,7 +76,8 @@ impl Editor {
     /// Replaces the unit running at `key` with `node`, crossfading from one
     /// to the other over `fade` once the next [`commit`](Self::commit) lands
     /// — a new generation, like [`insert`](Self::insert), but heard as a
-    /// fade rather than a swap. Returns the new unit's typed controls. The
+    /// fade rather than a swap. Returns the new unit's typed controls and what it
+    /// unwired ([`insert`](Self::insert)). The
     /// rules:
     ///
     /// - Both units run on the node's inputs for `fade.duration` frames and
@@ -118,7 +120,7 @@ impl Editor {
         key: NodeKey,
         node: N,
         fade: Fade,
-    ) -> Result<N::Controls, CommitError> {
+    ) -> Result<Placed<N::Controls>, CommitError> {
         self.check_poisoned()?;
         if self.is_repreparing() {
             return Err(CommitError::Repreparing);
@@ -171,11 +173,11 @@ impl Editor {
         // As `insert`: the new unit's fork source, or none — a replace with
         // an unforkable unit makes the key unforkable. Only past the checks,
         // so a refused replace changes nothing.
-        // Same ports and buses as the running unit: nothing is unwired.
+        // Edges recorded since the running plan was committed can name ports
+        // the incoming shape lacks, as at an insert: they are unwired.
         let unwired = self.place(key, kind, unit, wake, shape, fork);
-        debug_assert!(unwired.is_empty(), "a fitting replace unwires nothing");
         self.placements.set_fade(key, fade);
-        Ok(controls)
+        Ok(Placed { controls, unwired })
     }
 
     /// [`replace`](Self::replace) where it can fade, and a plain placement at
@@ -186,9 +188,10 @@ impl Editor {
     /// unit under a node wants: the fade when there is one to have, never a
     /// refusal for want of it.
     ///
-    /// A swap unwires what the new shape lacks, as [`insert`](Self::insert)
-    /// does, and returns it in [`Placed::unwired`]; a fade runs only for a
-    /// shape that fits, which unwires nothing.
+    /// Either way the placement unwires what the new shape lacks, as
+    /// [`insert`](Self::insert) does, and returns it in [`Placed::unwired`].
+    /// A shape that fits the running unit's ports and buses has none to
+    /// unwire but edges recorded since the last commit.
     ///
     /// Refused, changing nothing, only when the editor is poisoned or
     /// re-preparing (check [`is_repreparing`](Self::is_repreparing) first to
@@ -235,6 +238,8 @@ impl Editor {
                 shape.event_in,
                 shape.event_out,
             ) == (r.audio_in(), r.audio_out(), r.event_in, r.event_out)
+                && shape.buses_in() == r.buses_in()
+                && shape.buses_out() == r.buses_out()
                 && shape.latency == r.latency
                 && shape.in_place == r.in_place
                 && shape.event_resolution == r.event_resolution

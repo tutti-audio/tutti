@@ -62,7 +62,8 @@ fn counted_after_silence_with(
             value: 0.0,
             width: 1,
         })),
-    );
+    )
+    .controls;
     let calls = Arc::new(AtomicUsize::new(0));
     ed.insert(
         FX,
@@ -72,7 +73,8 @@ fn counted_after_silence_with(
             tail,
             calls: Arc::clone(&calls),
         }),
-    );
+    )
+    .controls;
     wire(&mut ed, FX, SRC);
     ed.spec_mut()
         .topology
@@ -193,7 +195,7 @@ fn status_silent_zeroes_and_flags() {
         fn reset(&mut self) {}
     }
     let (mut ed, mut exec) = Editor::new(prepare(32));
-    ed.insert(SRC, "liar", Unforkable(Liar));
+    ed.insert(SRC, "liar", Unforkable(Liar)).controls;
     let calls = Arc::new(AtomicUsize::new(0));
     ed.insert(
         FX,
@@ -203,7 +205,8 @@ fn status_silent_zeroes_and_flags() {
             tail: Tail::None,
             calls: Arc::clone(&calls),
         }),
-    );
+    )
+    .controls;
     wire(&mut ed, FX, SRC);
     ed.spec_mut().topology.set_outputs(vec![
         Source::Node(OutPort { node: SRC, port: 0 }),
@@ -262,8 +265,9 @@ fn masked_status_reaches_the_next_nodes_mask() {
     }
     let seen = Arc::new(AtomicUsize::new(99));
     let (mut ed, mut exec) = Editor::new(prepare(16));
-    ed.insert(SRC, "half", Unforkable(HalfSilent));
-    ed.insert(FX, "observer", Unforkable(Observer(Arc::clone(&seen))));
+    ed.insert(SRC, "half", Unforkable(HalfSilent)).controls;
+    ed.insert(FX, "observer", Unforkable(Observer(Arc::clone(&seen))))
+        .controls;
     for port in 0..2 {
         ed.spec_mut().topology.edges.insert(
             InPort { node: FX, port },
@@ -313,7 +317,8 @@ fn freeing_a_control_freed_value_inside_process_panics_in_debug() {
         SRC,
         "freer",
         Unforkable(Freer(Some(ControlFreed(vec![0.0; 8])))),
-    );
+    )
+    .controls;
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort { node: SRC, port: 0 })]);
@@ -338,8 +343,8 @@ fn a_block_past_max_block_is_refused() {
 /// Two const outputs (`0.5`, `0.25`) at the globals, committed and queued
 /// without a block run.
 fn queue_two_outputs(ed: &mut Editor) {
-    ed.insert(SRC, "a", Unforkable(const_node(0.5)));
-    ed.insert(FX, "b", Unforkable(const_node(0.25)));
+    ed.insert(SRC, "a", Unforkable(const_node(0.5))).controls;
+    ed.insert(FX, "b", Unforkable(const_node(0.25))).controls;
     ed.spec_mut().topology.set_outputs(vec![
         Source::Node(OutPort { node: SRC, port: 0 }),
         Source::Node(OutPort { node: FX, port: 0 }),
@@ -432,7 +437,8 @@ fn insert_returns_typed_controls() {
             value: 2.0,
             width: 1,
         })),
-    );
+    )
+    .controls;
     let gain = ed.insert(FX, "gain", GainBuilder).controls;
     wire(&mut ed, FX, SRC);
     ed.spec_mut()
@@ -461,12 +467,13 @@ fn commits_queue_up_to_capacity_then_backpressure_without_advancing() {
         .topology
         .set_outputs(vec![Source::Node(OutPort { node: SRC, port: 0 })]);
     for i in 0..QUEUE_CAPACITY {
-        ed.insert(SRC, "c", Unforkable(const_node(i as f32 + 1.0)));
+        ed.insert(SRC, "c", Unforkable(const_node(i as f32 + 1.0)))
+            .controls;
         ed.commit().expect("room in the queue");
     }
     assert_eq!(ed.in_flight(), QUEUE_CAPACITY);
     let base = std::sync::Arc::clone(ed.base().unwrap());
-    ed.insert(SRC, "c", Unforkable(const_node(99.0)));
+    ed.insert(SRC, "c", Unforkable(const_node(99.0))).controls;
     assert_eq!(ed.commit(), Err(CommitError::Backpressure));
     assert!(
         std::sync::Arc::ptr_eq(ed.base().unwrap(), &base),
@@ -495,7 +502,7 @@ fn commits_queue_up_to_capacity_then_backpressure_without_advancing() {
 #[test]
 fn queued_commits_apply_in_fifo_order() {
     let (mut ed, mut exec) = Editor::new(prepare(8));
-    ed.insert(SRC, "c", Unforkable(const_node(1.0)));
+    ed.insert(SRC, "c", Unforkable(const_node(1.0))).controls;
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort { node: SRC, port: 0 })]);
@@ -509,7 +516,8 @@ fn queued_commits_apply_in_fifo_order() {
             gain: 0.5,
             width: 1,
         })),
-    );
+    )
+    .controls;
     wire(&mut ed, FX, SRC);
     ed.spec_mut()
         .topology
@@ -522,7 +530,8 @@ fn queued_commits_apply_in_fifo_order() {
             gain: 0.25,
             width: 1,
         })),
-    );
+    )
+    .controls;
     ed.commit().unwrap();
     assert_eq!(render(&mut exec, 8, 1)[0][0], 0.25);
     assert_eq!(ed.collect(), vec![FX], "only the first gain was retired");
@@ -536,15 +545,15 @@ fn queued_commits_apply_in_fifo_order() {
 fn probe_d_can_no_longer_be_expressed_and_its_interleaving_works() {
     let (a, b, c) = (NodeKey(1), NodeKey(2), NodeKey(3));
     let (mut ed, mut exec) = Editor::new(prepare(8));
-    ed.insert(a, "a", Unforkable(const_node(1.0)));
+    ed.insert(a, "a", Unforkable(const_node(1.0))).controls;
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort { node: a, port: 0 })]);
     ed.commit().unwrap(); // c1
     render(&mut exec, 8, 1); // applied
-    ed.insert(b, "b", Unforkable(const_node(2.0)));
+    ed.insert(b, "b", Unforkable(const_node(2.0))).controls;
     ed.commit().unwrap(); // c2, in flight
-    ed.insert(c, "c", Unforkable(const_node(3.0)));
+    ed.insert(c, "c", Unforkable(const_node(3.0))).controls;
     ed.commit().unwrap(); // c3, in flight behind it
     ed.spec_mut().topology.set_outputs(vec![
         Source::Node(OutPort { node: a, port: 0 }),
@@ -556,7 +565,7 @@ fn probe_d_can_no_longer_be_expressed_and_its_interleaving_works() {
     let out = render(&mut exec, 8, 3);
     assert_eq!([out[0][0], out[1][0], out[2][0]], [1.0, 2.0, 3.0]);
     ed.collect();
-    ed.insert(a, "a", Unforkable(const_node(4.0)));
+    ed.insert(a, "a", Unforkable(const_node(4.0))).controls;
     ed.commit().expect("and later commits keep working");
     assert_eq!(render(&mut exec, 8, 3)[0][0], 4.0);
 }
@@ -567,8 +576,8 @@ fn probe_d_can_no_longer_be_expressed_and_its_interleaving_works() {
 #[test]
 fn applying_frees_nothing_on_the_audio_thread() {
     let (mut ed, mut exec) = Editor::new(prepare(8));
-    ed.insert(SRC, "c", Unforkable(const_node(1.0)));
-    ed.insert(FX, "f", Unforkable(const_node(0.0)));
+    ed.insert(SRC, "c", Unforkable(const_node(1.0))).controls;
+    ed.insert(FX, "f", Unforkable(const_node(0.0))).controls;
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort { node: SRC, port: 0 })]);
@@ -579,7 +588,8 @@ fn applying_frees_nothing_on_the_audio_thread() {
         back.extend(ed.collect());
         // Every commit replaces SRC; the first also removes FX outright, so
         // both the replace path and the retire path run under the marker.
-        ed.insert(SRC, "c", Unforkable(const_node(v as f32)));
+        ed.insert(SRC, "c", Unforkable(const_node(v as f32)))
+            .controls;
         if v == 2 {
             ed.remove(FX);
         }
@@ -609,7 +619,8 @@ fn reinserting_a_key_replaces_its_unit() {
             value: 1.0,
             width: 1,
         })),
-    );
+    )
+    .controls;
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort { node: SRC, port: 0 })]);
@@ -625,7 +636,8 @@ fn reinserting_a_key_replaces_its_unit() {
             value: 3.0,
             width: 1,
         })),
-    );
+    )
+    .controls;
     ed.commit().unwrap();
     exec.apply_pending();
     assert_eq!(ed.collect(), vec![SRC], "the old unit came back");
@@ -639,7 +651,8 @@ fn reinserting_a_key_replaces_its_unit() {
             value: 5.0,
             width: 1,
         })),
-    );
+    )
+    .controls;
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort { node: SRC, port: 0 })]);
@@ -796,7 +809,8 @@ fn run_synth(synth: Synth, on_at: u64, off_at: u64, blocks: usize) -> Vec<f32> {
             at: on_at,
             words: midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100)).0,
         }),
-    );
+    )
+    .controls;
     ed.insert(
         off,
         "off",
@@ -804,8 +818,9 @@ fn run_synth(synth: Synth, on_at: u64, off_at: u64, blocks: usize) -> Vec<f32> {
             at: off_at,
             words: midi::m1_note_off(MidiChannel::FIRST, 60, U7::of(0)).0,
         }),
-    );
-    ed.insert(key, "synth", Unforkable(synth));
+    )
+    .controls;
+    ed.insert(key, "synth", Unforkable(synth)).controls;
     let spec = ed.spec_mut();
     for from in [on, off] {
         spec.connect_events(
@@ -834,7 +849,7 @@ fn run_synth(synth: Synth, on_at: u64, off_at: u64, blocks: usize) -> Vec<f32> {
 #[should_panic(expected = "another Prepare")]
 fn applying_refuses_a_plan_for_another_prepare() {
     let (mut ed, mut exec) = Editor::new(prepare(64));
-    ed.insert(SRC, "c", Unforkable(const_node(1.0)));
+    ed.insert(SRC, "c", Unforkable(const_node(1.0))).controls;
     let valid = ed.spec().validate().unwrap();
     let (plan, delta) = tutti_graph::compile(&valid, ed.shapes(), &prepare(128), None).unwrap();
     let units = common::units_for(
@@ -895,9 +910,10 @@ fn a_merge_holds_all_its_inputs_so_no_note_off_is_lost() {
     }
     let seen = Arc::new(AtomicUsize::new(0));
     let (mut ed, mut exec) = Editor::with_event_capacity(prepare(8), 32);
-    ed.insert(NodeKey(1), "a", Unforkable(Offs));
-    ed.insert(NodeKey(2), "b", Unforkable(Offs));
-    ed.insert(NodeKey(3), "count", Unforkable(Count(Arc::clone(&seen))));
+    ed.insert(NodeKey(1), "a", Unforkable(Offs)).controls;
+    ed.insert(NodeKey(2), "b", Unforkable(Offs)).controls;
+    ed.insert(NodeKey(3), "count", Unforkable(Count(Arc::clone(&seen))))
+        .controls;
     for from in [1, 2] {
         ed.spec_mut().connect_events(
             tutti_graph::EventIn {
@@ -990,7 +1006,7 @@ fn out_of_band_graph(node: OutOfBand) -> Executor {
     let (mut ed, mut exec) = Editor::new(prepare(64));
     let key = NodeKey(1);
     let (inputs, outputs) = (node.inputs, node.outputs);
-    ed.insert(key, "oob", Unforkable(node));
+    ed.insert(key, "oob", Unforkable(node)).controls;
     // The inputs are left unwired: an unwired port reads silence.
     let _ = inputs;
     if outputs > 0 {
@@ -1075,7 +1091,7 @@ fn a_sink_is_never_parked() {
 #[test]
 fn an_unchanged_commit_sends_nothing_and_a_change_still_sends() {
     let (mut ed, mut exec) = Editor::new(prepare(8));
-    ed.insert(SRC, "c", Unforkable(const_node(1.0)));
+    ed.insert(SRC, "c", Unforkable(const_node(1.0))).controls;
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort { node: SRC, port: 0 })]);
@@ -1103,7 +1119,7 @@ fn an_unchanged_commit_sends_nothing_and_a_change_still_sends() {
     assert_eq!(ed.in_flight(), 1, "a spec edit sends");
 
     // A new unit at the same key sends.
-    ed.insert(SRC, "c", Unforkable(const_node(2.0)));
+    ed.insert(SRC, "c", Unforkable(const_node(2.0))).controls;
     ed.commit().expect("commits");
     assert_eq!(ed.in_flight(), 2, "a pending unit sends");
 
@@ -1123,7 +1139,7 @@ fn an_unchanged_commit_sends_nothing_and_a_change_still_sends() {
 #[should_panic(expected = "for a plan with 1 global inputs and 1 outputs")]
 fn too_few_input_slices_assert_in_debug() {
     let (mut ed, mut exec) = Editor::new(prepare(64));
-    ed.insert(SRC, "a", Unforkable(const_node(0.5)));
+    ed.insert(SRC, "a", Unforkable(const_node(0.5))).controls;
     ed.spec_mut().topology.inputs = tutti_types::ChannelLayout::MONO;
     ed.spec_mut().topology.set_outputs(vec![Source::Global(0)]);
     ed.commit().expect("commits");
@@ -1160,8 +1176,9 @@ fn ringer_after_silence(
         SRC,
         "const",
         Unforkable(TestNode::new(Kind::Const { value: 0.0, width })),
-    );
-    ed.insert(FX, "ringer", Unforkable(ringer));
+    )
+    .controls;
+    ed.insert(FX, "ringer", Unforkable(ringer)).controls;
     for port in 0..width as u16 {
         ed.spec_mut().topology.edges.insert(
             InPort { node: FX, port },
@@ -1277,7 +1294,7 @@ fn a_new_unit_starts_at_its_ceiling() {
     }
     let fresh = Ringer::new(Tail::Finite(Samples(100)), 5, NO_REPORT);
     let calls = Arc::clone(&fresh.calls);
-    ed.insert(FX, "ringer", Unforkable(fresh));
+    ed.insert(FX, "ringer", Unforkable(fresh)).controls;
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

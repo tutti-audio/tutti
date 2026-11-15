@@ -356,7 +356,8 @@ fn panicking_state(calls: &Arc<AtomicUsize>, panic_at: usize) -> Arc<AudioCallba
                 calls: Arc::clone(calls),
                 panic_at,
             }),
-        );
+        )
+        .controls;
         fan(ed, NodeKey(1), 2);
     });
     Arc::new(AudioCallbackState::new(engine))

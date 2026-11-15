@@ -58,7 +58,8 @@ fn rig(node: HarmonyNode, max: usize) -> (Editor, Executor, HarmonyControls, See
         NodeKey(2),
         "sink",
         tutti_graph::ForkByClone(Sink(Arc::clone(&seen))),
-    );
+    )
+    .controls;
     connect(&mut ed, 1, 2);
     ed.spec_mut()
         .topology

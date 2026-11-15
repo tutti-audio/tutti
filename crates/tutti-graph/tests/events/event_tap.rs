@@ -174,8 +174,10 @@ fn rig(workers: usize, no_alloc: bool, m: usize) -> Rig {
             value: 1.0,
             width: 1,
         }),
-    );
-    ed.insert(NodeKey(91), "lag", Forkable(Kind::Lag { latency: m }));
+    )
+    .controls;
+    ed.insert(NodeKey(91), "lag", Forkable(Kind::Lag { latency: m }))
+        .controls;
     let t = &mut ed.spec_mut().topology;
     t.connect(
         InPort {
@@ -193,7 +195,7 @@ fn rig(workers: usize, no_alloc: bool, m: usize) -> Rig {
 }
 
 fn script(r: &mut Rig, key: u64, s: Script) {
-    r.ed.insert(NodeKey(key), "script", ForkByClone(s));
+    r.ed.insert(NodeKey(key), "script", ForkByClone(s)).controls;
 }
 
 fn commit(r: &mut Rig) {
@@ -773,7 +775,8 @@ fn fan_in(r: &mut Rig, probe_ports: usize) -> Arc<Mutex<Vec<TapEvent>>> {
             ports: probe_ports,
             capacity: 0,
         }),
-    );
+    )
+    .controls;
     for from in [1, 2] {
         r.ed.spec_mut().connect_events(
             EventIn {
@@ -903,7 +906,8 @@ fn an_aligned_input_tap_is_sized_for_every_source_of_the_input() {
             ports: 1,
             capacity: 1,
         }),
-    );
+    )
+    .controls;
     for from in [1, 2] {
         r.ed.spec_mut().connect_events(
             EventIn {

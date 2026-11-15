@@ -365,15 +365,17 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
                 let k = NodeKey(m as u64 + 1);
                 match kind {
                     Kind::Strip => {
-                        ed.insert(k, "strip", ForkByClone(StripNode(Ramp::member(m))));
+                        ed.insert(k, "strip", ForkByClone(StripNode(Ramp::member(m))))
+                            .controls;
                     }
                     Kind::BusStrip => {
                         let s = BusStripNode::stereo();
                         s.set_volume(Amplitude::new(0.5 + m as f32 * 1e-3));
-                        ed.insert(k, "bus strip", s);
+                        ed.insert(k, "bus strip", s).controls;
                     }
                     Kind::Biquad => {
-                        ed.insert(k, "biquad", ForkByClone(BiquadNode(Biquad::member(m))));
+                        ed.insert(k, "biquad", ForkByClone(BiquadNode(Biquad::member(m))))
+                            .controls;
                     }
                 }
                 for c in 0..w {
@@ -404,7 +406,8 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
                     }
                 }
                 Kind::BusStrip => unreachable!("the production strip is measured as nodes only"),
-            };
+            }
+            .controls;
             for m in 0..members {
                 for c in 0..w {
                     let port = (m * w + c) as u16;

@@ -92,10 +92,13 @@ fn rig(workers: usize) -> (Editor, Executor) {
         (2, bused(Kind::Thru { width: 2 }, smpte(2), smpte(2))),
     ];
     for (n, kind) in kinds {
-        ed.insert(key(n), "test", Unforkable(TestNode::new(kind)));
+        ed.insert(key(n), "test", Unforkable(TestNode::new(kind)))
+            .controls;
     }
-    ed.insert(key(3), "down", Unforkable(Downmixer { latency: 40 }));
-    ed.insert(key(4), "down", Unforkable(Downmixer { latency: 0 }));
+    ed.insert(key(3), "down", Unforkable(Downmixer { latency: 40 }))
+        .controls;
+    ed.insert(key(4), "down", Unforkable(Downmixer { latency: 0 }))
+        .controls;
     for n in [1, 3, 4] {
         for c in 0..6 {
             ed.spec_mut().topology.connect(

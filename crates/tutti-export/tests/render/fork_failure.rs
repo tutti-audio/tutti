@@ -92,7 +92,8 @@ impl IntoNode for Watched {
 fn fork() -> (RenderGraph, Arc<Crashed>, Editor) {
     let probe = Arc::new(Crashed(AtomicBool::new(false)));
     let (mut live, _exec) = Editor::new(RenderGraph::prepare(RATE));
-    live.insert(NodeKey(1), "watched", Watched(Arc::clone(&probe)));
+    live.insert(NodeKey(1), "watched", Watched(Arc::clone(&probe)))
+        .controls;
     live.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort {

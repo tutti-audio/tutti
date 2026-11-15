@@ -453,7 +453,7 @@ fn a_lane_driving_the_room_changes_how_long_it_rings() {
         );
         let key = tutti_graph::NodeKey(9_000);
         let editor = r.editor_mut();
-        editor.insert(key, "lane", lane);
+        editor.insert(key, "lane", lane).controls;
         editor
             .spec_mut()
             .connect_param(at, tutti_graph::EventOut { node: key, port: 0 });

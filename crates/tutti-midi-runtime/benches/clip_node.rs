@@ -77,7 +77,9 @@ fn rig(events: Vec<TimedMidiEvent>) -> Executor {
         SampleRate::SR_48K,
         MaxBlock::of(Samples(BLOCK)),
     ));
-    editor.insert(NodeKey(1), "clip", MidiClipNode::new(events));
+    editor
+        .insert(NodeKey(1), "clip", MidiClipNode::new(events))
+        .controls;
     editor.commit().expect("commits");
     exec
 }

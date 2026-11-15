@@ -121,8 +121,9 @@ fn graph_with(pool: VoicePool, probe: Arc<Mutex<Option<Beat>>>) -> (Editor, tutt
         SampleRate::of(SR),
         MaxBlock::of(Samples(1024)),
     ));
-    ed.insert(NodeKey(1), "voice", pool);
-    ed.insert(NodeKey(2), "probe", tutti_graph::Unforkable(Probe(probe)));
+    ed.insert(NodeKey(1), "voice", pool).controls;
+    ed.insert(NodeKey(2), "probe", tutti_graph::Unforkable(Probe(probe)))
+        .controls;
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {
         Source::Node(OutPort {
             node: NodeKey(1),

@@ -95,7 +95,8 @@ fn wide(lanes: usize, depth: usize, workers: usize) -> Executor {
     for lane in 0..lanes {
         let base = 1_000 * (lane as u64 + 1);
         let osc = NodeKey(base);
-        ed.insert(osc, "osc", Osc::sine(Hz(110.0 + lane as f32)));
+        ed.insert(osc, "osc", Osc::sine(Hz(110.0 + lane as f32)))
+            .controls;
         let mut last = osc;
         for i in 0..depth {
             let k = NodeKey(base + 1 + i as u64);
@@ -107,7 +108,8 @@ fn wide(lanes: usize, depth: usize, workers: usize) -> Executor {
                     Hz(500.0 + (lane * depth + i) as f32 * 3.0),
                     Q(0.7),
                 ),
-            );
+            )
+            .controls;
             wire(&mut ed, k, 0, last);
             last = k;
         }
@@ -161,7 +163,8 @@ fn gain(ed: &mut Editor, k: NodeKey, i: usize, light: bool) {
             gain: 0.5 + i as f32 * 1e-3,
             light,
         }),
-    );
+    )
+    .controls;
 }
 
 /// `lanes` single gains off one input, summed.
@@ -224,7 +227,8 @@ fn mixed(lanes: usize, depth: usize, fan: usize, light: bool, workers: usize) ->
     for lane in 0..lanes {
         let base = 1_000 * (lane as u64 + 1);
         let osc = NodeKey(base);
-        ed.insert(osc, "osc", Osc::sine(Hz(110.0 + lane as f32)));
+        ed.insert(osc, "osc", Osc::sine(Hz(110.0 + lane as f32)))
+            .controls;
         let mut last = osc;
         for i in 0..depth {
             let k = NodeKey(base + 1 + i as u64);
@@ -236,7 +240,8 @@ fn mixed(lanes: usize, depth: usize, fan: usize, light: bool, workers: usize) ->
                     Hz(500.0 + (lane * depth + i) as f32 * 3.0),
                     Q(0.7),
                 ),
-            );
+            )
+            .controls;
             wire(&mut ed, k, 0, last);
             last = k;
         }

@@ -76,7 +76,8 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
             period: 5,
             phase: 0,
         })),
-    );
+    )
+    .controls;
     ed.insert(
         NodeKey(2),
         "emit",
@@ -84,37 +85,44 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
             period: 7,
             phase: 3,
         })),
-    );
+    )
+    .controls;
     ed.insert(
         NodeKey(3),
         "evlag",
         Unforkable(TestNode::new(Kind::EventLag { latency: 11 })),
-    );
+    )
+    .controls;
     ed.insert(
         NodeKey(4),
         "consume",
         Unforkable(TestNode::new(Kind::Consumer { inputs: 2 })),
-    );
+    )
+    .controls;
     ed.insert(
         NodeKey(5),
         "lag",
         Unforkable(TestNode::new(Kind::Lag { latency: 40 })),
-    );
+    )
+    .controls;
     ed.insert(
         NodeKey(6),
         "smooth",
         Unforkable(TestNode::new(Kind::Smooth)),
-    );
+    )
+    .controls;
     ed.insert(
         NodeKey(7),
         "sum",
         Unforkable(TestNode::new(Kind::Sum { inputs: 3 })),
-    );
+    )
+    .controls;
     ed.insert(
         NodeKey(8),
         "smooth",
         Unforkable(TestNode::new(Kind::Smooth)),
-    );
+    )
+    .controls;
     ed.insert(
         NodeKey(9),
         "gain",
@@ -122,7 +130,8 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
             gain: 0.5,
             width: 1,
         })),
-    );
+    )
+    .controls;
 
     let spec = ed.spec_mut();
     let ev = |node, port| EventOut {
@@ -284,7 +293,8 @@ fn crossfades_are_allocation_free_on(workers: usize) {
     use_pool(&mut exec, workers);
     ed.spec_mut().topology.inputs = ChannelLayout::STEREO;
     let gain = |g| TestNode::new(Kind::Gain { gain: g, width: 2 });
-    ed.insert(NodeKey(1), "gain", Unforkable(gain(1.0)));
+    ed.insert(NodeKey(1), "gain", Unforkable(gain(1.0)))
+        .controls;
     ed.insert(
         NodeKey(2),
         "emit",
@@ -292,12 +302,14 @@ fn crossfades_are_allocation_free_on(workers: usize) {
             period: 9,
             phase: 0,
         })),
-    );
+    )
+    .controls;
     ed.insert(
         NodeKey(3),
         "consume",
         Unforkable(TestNode::new(Kind::Consumer { inputs: 1 })),
-    );
+    )
+    .controls;
     let consumer = EventIn {
         node: NodeKey(3),
         port: 0,
@@ -344,17 +356,20 @@ fn crossfades_are_allocation_free_on(workers: usize) {
     // A long fade, one queued behind it, and one on the event node.
     let fade = |n| Fade::new(Samples(n), FadeLaw::EqualPower);
     ed.replace(NodeKey(1), Unforkable(gain(2.0)), fade(3_000))
-        .expect("fits");
+        .expect("fits")
+        .controls;
     ed.commit().expect("commits");
     block(&mut exec, 64);
     ed.replace(NodeKey(1), Unforkable(gain(4.0)), fade(2_000))
-        .expect("fits");
+        .expect("fits")
+        .controls;
     ed.replace(
         NodeKey(3),
         Unforkable(TestNode::new(Kind::Consumer { inputs: 1 })),
         fade(500),
     )
-    .expect("fits");
+    .expect("fits")
+    .controls;
     ed.commit().expect("commits");
     block(&mut exec, 64);
     assert!(ed.collect().is_empty(), "nothing has retired yet");
@@ -435,7 +450,8 @@ fn a_held_chase_is_delivered_allocation_free_on(workers: usize) {
             NodeKey(k + 1),
             "chaser",
             Unforkable(HeldChaser(Arc::clone(&a[k as usize]))),
-        );
+        )
+        .controls;
     }
     ed.spec_mut().topology.set_outputs((1..=KEYS).map(|k| {
         Source::Node(OutPort {
@@ -461,7 +477,8 @@ fn a_held_chase_is_delivered_allocation_free_on(workers: usize) {
             Unforkable(HeldChaser(Arc::clone(&b[k as usize]))),
             fade(256),
         )
-        .expect("fits");
+        .expect("fits")
+        .controls;
     }
     ed.commit().expect("commits");
     block(&mut exec);
@@ -471,7 +488,8 @@ fn a_held_chase_is_delivered_allocation_free_on(workers: usize) {
             Unforkable(HeldChaser(Arc::clone(&c[k as usize]))),
             fade(256),
         )
-        .expect("fits");
+        .expect("fits")
+        .controls;
     }
     ed.commit().expect("commits");
     // The commit queuing the third is applied here, outside the gate.
@@ -601,10 +619,13 @@ fn declared_event_capacities_are_allocation_free_on(workers: usize) {
                 burst: 6,
                 refused: Arc::clone(&refused),
             }),
-        );
+        )
+        .controls;
     }
-    ed.insert(NodeKey(3), "late", Unforkable(LateEvents));
-    ed.insert(NodeKey(4), "tally", Unforkable(Tally(seen.clone())));
+    ed.insert(NodeKey(3), "late", Unforkable(LateEvents))
+        .controls;
+    ed.insert(NodeKey(4), "tally", Unforkable(Tally(seen.clone())))
+        .controls;
     let ev = |node| EventOut {
         node: NodeKey(node),
         port: 0,
@@ -684,7 +705,8 @@ fn losses_past_the_log_and_the_ring_are_allocation_free_on(workers: usize) {
                 burst: 6,
                 refused: Arc::clone(&refused),
             }),
-        );
+        )
+        .controls;
     }
     ed.commit().expect("commits");
     apply(&mut exec);
@@ -811,13 +833,16 @@ fn modulated_params_are_allocation_free_on(workers: usize) {
     let (mut ed, mut exec) = Editor::new(prepare(256));
     use_pool(&mut exec, workers);
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
-    ed.insert(NodeKey(1), "sink", Unforkable(ParamSink));
+    ed.insert(NodeKey(1), "sink", Unforkable(ParamSink))
+        .controls;
     ed.insert(
         NodeKey(2),
         "lag",
         Unforkable(TestNode::new(Kind::Lag { latency: 31 })),
-    );
-    ed.insert(NodeKey(4), "ramps", Unforkable(RampEvery));
+    )
+    .controls;
+    ed.insert(NodeKey(4), "ramps", Unforkable(RampEvery))
+        .controls;
     {
         let t = &mut ed.spec_mut().topology;
         t.edges
@@ -982,8 +1007,10 @@ fn an_azimuth_param_port_is_allocation_free() {
     use tutti_graph::{ParamIn, ParamRange};
     use tutti_types::{ArcDegrees, Azimuth};
     let (mut ed, mut exec) = Editor::new(prepare(256));
-    ed.insert(NodeKey(1), "sink", Unforkable(AzimuthSink));
-    ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
+    ed.insert(NodeKey(1), "sink", Unforkable(AzimuthSink))
+        .controls;
+    ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery))
+        .controls;
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort {
@@ -1078,12 +1105,14 @@ fn reporting_nodes_are_allocation_free_on(workers: usize) {
     let mut outputs = Vec::new();
     for i in 0..4u64 {
         let (src, fx) = (NodeKey(10 + i), NodeKey(20 + i));
-        ed.insert(src, "pulse", Unforkable(Pulse::new(100 + 40 * i as usize)));
+        ed.insert(src, "pulse", Unforkable(Pulse::new(100 + 40 * i as usize)))
+            .controls;
         ed.insert(
             fx,
             "ringer",
             Unforkable(Ringer::new(Tail::Finite(Samples(4_000)), 200, 200)),
-        );
+        )
+        .controls;
         ed.spec_mut()
             .topology
             .edges
@@ -1158,7 +1187,8 @@ fn fan_in_is_allocation_free_on(workers: usize) {
                             name,
                             Unforkable(Pulse::new(300 + 17 * k as usize)),
                         ),
-                    };
+                    }
+                    .controls;
                 }
                 let sink = NodeKey(n + 1);
                 if at_port {
@@ -1166,7 +1196,8 @@ fn fan_in_is_allocation_free_on(workers: usize) {
                         sink,
                         "thru",
                         Unforkable(TestNode::new(Kind::Thru { width: 1 })),
-                    );
+                    )
+                    .controls;
                     for k in 1..=n {
                         ed.spec_mut().topology.connect(at(sink.0, 0), from(k, 0));
                     }
@@ -1247,13 +1278,15 @@ fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
                             value: 0.01 * k as f32,
                             width: 1,
                         })),
-                    );
+                    )
+                    .controls;
                 } else {
                     ed.insert(
                         NodeKey(k),
                         "pulse",
                         Unforkable(Pulse::new(300 + 17 * k as usize)),
-                    );
+                    )
+                    .controls;
                 }
             }
             let sink = NodeKey(n + 1);
@@ -1270,7 +1303,8 @@ fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
                     sink,
                     "thru",
                     Unforkable(TestNode::new(Kind::Thru { width: 1 })),
-                );
+                )
+                .controls;
                 for k in 1..=n {
                     ed.spec_mut().topology.connect(at(sink.0, 0), from(k, 0));
                 }
@@ -1305,7 +1339,8 @@ fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
                             period: 8 + 9 * i as u64,
                             latency,
                         })),
-                    );
+                    )
+                    .controls;
                 }
                 for k in 1..=n {
                     ed.spec_mut().connect_edge_gain(
@@ -1457,7 +1492,7 @@ fn mode_graph(workers: usize) -> (Editor, tutti_graph::Executor) {
     use_pool(&mut exec, workers);
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     let node = |ed: &mut Editor, k: u64, n: Wire| {
-        ed.insert(NodeKey(k), "node", Unforkable(n));
+        ed.insert(NodeKey(k), "node", Unforkable(n)).controls;
     };
     // (The test nodes of `common` allocate in `reset`, which this gate runs
     // on every un-bypass: a node that allocates is the node's bug.)
@@ -1574,7 +1609,8 @@ fn own_bypass_toggling_is_allocation_free_on(workers: usize) {
         NodeKey(1),
         "own",
         Unforkable(TestNode::counted(kind, Arc::clone(&calls))),
-    );
+    )
+    .controls;
     ed.spec_mut().topology.inputs = ChannelLayout::from_count(1);
     let t = &mut ed.spec_mut().topology;
     t.connect(at(1, 0), Edge::Direct(Source::Global(0)));
@@ -1689,7 +1725,8 @@ fn driven_mixes_are_allocation_free_on(workers: usize) {
                 period: 8 + 9 * i as u64,
                 latency,
             })),
-        );
+        )
+        .controls;
     }
     let port = |k: u64| ParamIn {
         node: NodeKey(k),
@@ -1780,7 +1817,8 @@ fn fading_edges_are_allocation_free_on(workers: usize) {
                 value: k as f32,
                 width: 1,
             })),
-        );
+        )
+        .controls;
     }
     let edge = |k: u64| EdgeId {
         sink: Sink::Output(0),
@@ -1899,7 +1937,8 @@ fn a_swap_is_allocation_free_on(workers: usize) {
             Unforkable(Chaser {
                 seen: Arc::clone(first),
             }),
-        );
+        )
+        .controls;
     }
     ed.spec_mut().topology.set_outputs((1..=NODES).map(|k| {
         Source::Node(OutPort {
@@ -1928,7 +1967,8 @@ fn a_swap_is_allocation_free_on(workers: usize) {
             }),
             Fade::new(Samples(0), FadeLaw::EqualPower),
         )
-        .expect("fits");
+        .expect("fits")
+        .controls;
     }
     ed.commit().expect("commits");
     apply(&mut exec);
@@ -1973,7 +2013,8 @@ fn edge_fades_are_allocation_free() {
             value: n as f32,
             width: 1,
         };
-        ed.insert(NodeKey(n), "const", Unforkable(TestNode::new(k)));
+        ed.insert(NodeKey(n), "const", Unforkable(TestNode::new(k)))
+            .controls;
     }
     let src = |n: u64| {
         Source::Node(OutPort {
@@ -2024,13 +2065,16 @@ fn edge_fades_are_allocation_free() {
 /// `base`; returns the sum's key.
 fn pdc_pair(ed: &mut Editor, base: u64, latency: usize) -> NodeKey {
     let (lag, smooth, sum) = (NodeKey(base), NodeKey(base + 1), NodeKey(base + 2));
-    ed.insert(lag, "lag", Unforkable(TestNode::new(Kind::Lag { latency })));
-    ed.insert(smooth, "smooth", Unforkable(TestNode::new(Kind::Smooth)));
+    ed.insert(lag, "lag", Unforkable(TestNode::new(Kind::Lag { latency })))
+        .controls;
+    ed.insert(smooth, "smooth", Unforkable(TestNode::new(Kind::Smooth)))
+        .controls;
     ed.insert(
         sum,
         "sum",
         Unforkable(TestNode::new(Kind::Sum { inputs: 2 })),
-    );
+    )
+    .controls;
     let t = &mut ed.spec_mut().topology;
     t.edges
         .insert(at(base, 0), vec![Edge::Direct(Source::Global(0))]);
@@ -2149,10 +2193,12 @@ fn event_pdc(ed: &mut Editor, base: u64) {
             NodeKey(base + i as u64),
             "n",
             Unforkable(TestNode::new(kind)),
-        );
+        )
+        .controls;
     }
     for i in 4..6 {
-        ed.insert(NodeKey(base + i), "holder", Unforkable(Holder::new(30)));
+        ed.insert(NodeKey(base + i), "holder", Unforkable(Holder::new(30)))
+            .controls;
     }
     let spec = ed.spec_mut();
     spec.connect_events(sink(base + 2, 0), EventEdge::Direct(ev(base + 1, 0)));
@@ -2267,7 +2313,8 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         wide,
         "sum",
         Unforkable(TestNode::new(Kind::Sum { inputs: 8 })),
-    );
+    )
+    .controls;
     for (i, sum) in sums.iter().enumerate() {
         ed.spec_mut()
             .topology
@@ -2305,7 +2352,8 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
 
     // Audio and event feedback.
     let (smooth, gain, mix) = (NodeKey(300), NodeKey(301), NodeKey(302));
-    ed.insert(smooth, "smooth", Unforkable(TestNode::new(Kind::Smooth)));
+    ed.insert(smooth, "smooth", Unforkable(TestNode::new(Kind::Smooth)))
+        .controls;
     ed.insert(
         gain,
         "gain",
@@ -2313,12 +2361,14 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
             gain: 0.5,
             width: 1,
         })),
-    );
+    )
+    .controls;
     ed.insert(
         mix,
         "sum",
         Unforkable(TestNode::new(Kind::Sum { inputs: 2 })),
-    );
+    )
+    .controls;
     let feedback = |delay: usize| {
         vec![Edge::Feedback(FeedbackFrom::one_block(
             OutPort {
@@ -2351,7 +2401,8 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
             NodeKey(310 + k as u64),
             "n",
             Unforkable(TestNode::new(kind)),
-        );
+        )
+        .controls;
     }
     let efb = |delay: usize| EventEdge::feedback(ev(311, 0), Samples(delay));
     ed.spec_mut()
@@ -2399,7 +2450,8 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
             period: 8,
             latency: 0,
         })),
-    );
+    )
+    .controls;
     ed.spec_mut().connect_edge_gain(edge(first), ev(400, 0));
     ed.commit().expect("commits");
     applied(&mut exec);
@@ -2410,7 +2462,8 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         NodeKey(401),
         "smooth",
         Unforkable(TestNode::new(Kind::Smooth)),
-    );
+    )
+    .controls;
     ed.commit().expect("commits");
     applied(&mut exec);
     blocks(&mut exec, 8, 64);
@@ -2424,7 +2477,8 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         Unforkable(Holder::new(0)),
         Fade::new(Samples(0), FadeLaw::EqualPower),
     )
-    .expect("fits");
+    .expect("fits")
+    .controls;
     ed.commit().expect("commits");
     applied(&mut exec);
     blocks(&mut exec, 24, 64);
@@ -2434,12 +2488,14 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     // sink takes is cut (the apply merges its keys into a table and leaves
     // the rest owed), a commit follows before any block (the table moves
     // over), and the blocks drain it.
-    ed.insert(NodeKey(600), "holder", Unforkable(Holder::new(1_500)));
+    ed.insert(NodeKey(600), "holder", Unforkable(Holder::new(1_500)))
+        .controls;
     ed.insert(
         NodeKey(601),
         "consume",
         Unforkable(TestNode::new(Kind::Consumer { inputs: 1 })),
-    );
+    )
+    .controls;
     ed.spec_mut()
         .connect_events(sink(601, 0), EventEdge::Direct(ev(600, 0)));
     ed.commit().expect("commits");
@@ -2453,7 +2509,8 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         NodeKey(602),
         "smooth",
         Unforkable(TestNode::new(Kind::Smooth)),
-    );
+    )
+    .controls;
     ed.commit().expect("commits");
     applied(&mut exec);
     blocks(&mut exec, 12, 64);
@@ -2469,13 +2526,16 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         offs: Arc::clone(offs),
         inputs,
     };
-    ed.insert(NodeKey(700), "holder", Unforkable(Holder::paced(1_024, 64)));
-    ed.insert(NodeKey(701), "tally", Unforkable(tally(&offs, 2)));
+    ed.insert(NodeKey(700), "holder", Unforkable(Holder::paced(1_024, 64)))
+        .controls;
+    ed.insert(NodeKey(701), "tally", Unforkable(tally(&offs, 2)))
+        .controls;
     ed.insert(
         NodeKey(702),
         "lag",
         Unforkable(TestNode::new(Kind::EventLag { latency: 11 })),
-    );
+    )
+    .controls;
     ed.insert(
         NodeKey(703),
         "emit",
@@ -2483,7 +2543,8 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
             period: 5,
             phase: 0,
         })),
-    );
+    )
+    .controls;
     {
         let spec = ed.spec_mut();
         spec.connect_events(sink(702, 0), EventEdge::Direct(ev(703, 0)));
@@ -2500,7 +2561,8 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         Unforkable(Holder::paced(0, 64)),
         Fade::new(Samples(0), FadeLaw::EqualPower),
     )
-    .expect("fits");
+    .expect("fits")
+    .controls;
     ed.commit().expect("commits");
     applied(&mut exec);
     blocks(&mut exec, 2, 64);
@@ -2524,9 +2586,11 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     // it, each more than the sink's block takes.
     let both = Arc::new(AtomicUsize::new(0));
     for k in [710, 711] {
-        ed.insert(NodeKey(k), "holder", Unforkable(Holder::paced(700, 64)));
+        ed.insert(NodeKey(k), "holder", Unforkable(Holder::paced(700, 64)))
+            .controls;
     }
-    ed.insert(NodeKey(712), "tally", Unforkable(tally(&both, 1)));
+    ed.insert(NodeKey(712), "tally", Unforkable(tally(&both, 1)))
+        .controls;
     for k in [710, 711] {
         ed.spec_mut()
             .connect_events(sink(712, 0), EventEdge::Direct(ev(k, 0)));
@@ -2550,19 +2614,22 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
 
     // Crossfades: a fade, one queued behind it, and a chase handed on.
     let chaser = |n: u64| HeldChaser(Arc::new(AtomicU64::new(n)));
-    ed.insert(NodeKey(500), "chaser", Unforkable(chaser(0)));
+    ed.insert(NodeKey(500), "chaser", Unforkable(chaser(0)))
+        .controls;
     ed.commit().expect("commits");
     applied(&mut exec);
     blocks(&mut exec, 4, 64);
     ed.collect();
     let fade = |n| Fade::new(Samples(n), FadeLaw::EqualPower);
     ed.replace(NodeKey(500), Unforkable(chaser(1)), fade(1_000))
-        .expect("fits");
+        .expect("fits")
+        .controls;
     ed.commit().expect("commits");
     applied(&mut exec);
     blocks(&mut exec, 2, 64);
     ed.replace(NodeKey(500), Unforkable(chaser(2)), fade(1_000))
-        .expect("fits");
+        .expect("fits")
+        .controls;
     ed.commit().expect("commits");
     applied(&mut exec);
     blocks(&mut exec, 40, 64);
@@ -2616,7 +2683,8 @@ fn a_pool_set_across_a_commit_in_flight_allocates_nothing() {
         NodeKey(200),
         "sum",
         Unforkable(TestNode::new(Kind::Sum { inputs: 8 })),
-    );
+    )
+    .controls;
     for (i, sum) in sums.iter().enumerate() {
         ed.spec_mut()
             .topology
@@ -2639,7 +2707,8 @@ fn a_pool_set_across_a_commit_in_flight_allocates_nothing() {
         NodeKey(900),
         "smooth",
         Unforkable(TestNode::new(Kind::Smooth)),
-    );
+    )
+    .controls;
     ed.commit().expect("commits");
     exec.set_pool(None);
     apply(&mut exec);

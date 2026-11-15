@@ -127,8 +127,9 @@ struct Rig {
 impl Rig {
     fn new(lat: usize) -> Self {
         let (mut ed, exec) = Editor::new(prepare(MAX));
-        ed.insert(LATENT, "latent", Unforkable(Latent(lat)));
-        ed.insert(PROBE, "probe", Unforkable(Probe));
+        ed.insert(LATENT, "latent", Unforkable(Latent(lat)))
+            .controls;
+        ed.insert(PROBE, "probe", Unforkable(Probe)).controls;
         topology(&mut ed);
         ed.commit().expect("commits");
         let mut reference = Reference::new(prepare(MAX));
@@ -453,8 +454,9 @@ fn wide(workers: usize) -> (Editor, Executor) {
     let mut outputs = Vec::new();
     for (i, &lat) in LATS.iter().enumerate() {
         let (latent, probe) = (NodeKey(10 + i as u64), NodeKey(20 + i as u64));
-        ed.insert(latent, "latent", Unforkable(Latent(lat)));
-        ed.insert(probe, "probe", Unforkable(Probe));
+        ed.insert(latent, "latent", Unforkable(Latent(lat)))
+            .controls;
+        ed.insert(probe, "probe", Unforkable(Probe)).controls;
         ed.spec_mut().topology.edges.insert(
             InPort {
                 node: probe,

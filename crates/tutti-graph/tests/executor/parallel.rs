@@ -205,14 +205,20 @@ fn consumer_in(port: u16) -> EventIn {
 fn build(ed: &mut Editor) {
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     let gain = |g| Forkable(Kind::Gain { gain: g, width: 1 });
-    ed.insert(NodeKey(2), "lag5", Forkable(Kind::Lag { latency: 5 }));
-    ed.insert(NodeKey(3), "lag17", Forkable(Kind::Lag { latency: 17 }));
-    ed.insert(NodeKey(4), "gain", gain(0.5));
-    ed.insert(NodeKey(5), "smooth", Forkable(Kind::Smooth));
-    ed.insert(NodeKey(6), "lag3", Forkable(Kind::Lag { latency: 3 }));
-    ed.insert(NodeKey(7), "gain", gain(0.75));
-    ed.insert(NodeKey(8), "sum3", Forkable(Kind::Sum { inputs: 3 }));
-    ed.insert(NodeKey(9), "sum3", Forkable(Kind::Sum { inputs: 3 }));
+    ed.insert(NodeKey(2), "lag5", Forkable(Kind::Lag { latency: 5 }))
+        .controls;
+    ed.insert(NodeKey(3), "lag17", Forkable(Kind::Lag { latency: 17 }))
+        .controls;
+    ed.insert(NodeKey(4), "gain", gain(0.5)).controls;
+    ed.insert(NodeKey(5), "smooth", Forkable(Kind::Smooth))
+        .controls;
+    ed.insert(NodeKey(6), "lag3", Forkable(Kind::Lag { latency: 3 }))
+        .controls;
+    ed.insert(NodeKey(7), "gain", gain(0.75)).controls;
+    ed.insert(NodeKey(8), "sum3", Forkable(Kind::Sum { inputs: 3 }))
+        .controls;
+    ed.insert(NodeKey(9), "sum3", Forkable(Kind::Sum { inputs: 3 }))
+        .controls;
     ed.insert(
         NodeKey(20),
         "emit",
@@ -220,7 +226,8 @@ fn build(ed: &mut Editor) {
             period: 5,
             phase: 0,
         }),
-    );
+    )
+    .controls;
     ed.insert(
         NodeKey(21),
         "emit",
@@ -228,13 +235,16 @@ fn build(ed: &mut Editor) {
             period: 7,
             phase: 3,
         }),
-    );
-    ed.insert(NodeKey(22), "elag", Forkable(Kind::EventLag { latency: 9 }));
+    )
+    .controls;
+    ed.insert(NodeKey(22), "elag", Forkable(Kind::EventLag { latency: 9 }))
+        .controls;
     ed.insert(
         NodeKey(40),
         "consumer",
         Forkable(Kind::Consumer { inputs: 2 }),
-    );
+    )
+    .controls;
     ed.insert(
         NodeKey(41),
         "mixed",
@@ -243,8 +253,10 @@ fn build(ed: &mut Editor) {
             events_in: 1,
             events_out: 1,
         }),
-    );
-    ed.insert(NodeKey(30), "psink", tutti_graph::ForkByClone(ParamSink));
+    )
+    .controls;
+    ed.insert(NodeKey(30), "psink", tutti_graph::ForkByClone(ParamSink))
+        .controls;
     ed.insert(
         NodeKey(31),
         "ramps",
@@ -252,7 +264,8 @@ fn build(ed: &mut Editor) {
             param: UnitParam::Cutoff,
             latency: 0,
         }),
-    );
+    )
+    .controls;
     ed.insert(
         NodeKey(32),
         "ramps",
@@ -260,9 +273,12 @@ fn build(ed: &mut Editor) {
             param: UnitParam::Q,
             latency: 17,
         }),
-    );
-    ed.insert(NodeKey(50), "fbsum", Forkable(Kind::Sum { inputs: 2 }));
-    ed.insert(NodeKey(51), "fbsmooth", Forkable(Kind::Smooth));
+    )
+    .controls;
+    ed.insert(NodeKey(50), "fbsum", Forkable(Kind::Sum { inputs: 2 }))
+        .controls;
+    ed.insert(NodeKey(51), "fbsmooth", Forkable(Kind::Smooth))
+        .controls;
     let spec = ed.spec_mut();
     let t = &mut spec.topology;
     let g = Edge::Direct(Source::Global(0));
@@ -600,7 +616,8 @@ fn a_panic_on_a_worker_reaches_the_caller() {
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     // One node panics; the other five are fine, so every participant but
     // the one that caught the panic would keep waiting for its task.
-    ed.insert(NodeKey(1), "boom", tutti_graph::Unforkable(Boom));
+    ed.insert(NodeKey(1), "boom", tutti_graph::Unforkable(Boom))
+        .controls;
     for k in 2..=6 {
         ed.insert(
             NodeKey(k),
@@ -609,7 +626,8 @@ fn a_panic_on_a_worker_reaches_the_caller() {
                 gain: 0.5,
                 width: 1,
             })),
-        );
+        )
+        .controls;
     }
     for k in 1..=6 {
         ed.spec_mut()
@@ -718,7 +736,8 @@ fn the_executor_waits_by_its_pools_budget() {
         NodeKey(1),
         "slow",
         tutti_graph::Unforkable(Slow(Arc::clone(&times))),
-    );
+    )
+    .controls;
     for k in 2..=3 {
         ed.insert(
             NodeKey(k),
@@ -727,7 +746,8 @@ fn the_executor_waits_by_its_pools_budget() {
                 gain: 0.5,
                 width: 1,
             })),
-        );
+        )
+        .controls;
     }
     let edges = &mut ed.spec_mut().topology.edges;
     edges.insert(at(1, 0), vec![Edge::Direct(Source::Global(0))]);
@@ -803,8 +823,9 @@ fn reporting_nodes_render_bit_identically_on_a_pool() {
             let (src, fx) = (NodeKey(10 + i as u64), NodeKey(20 + i as u64));
             let ringer = Ringer::new(ceiling, ring, report);
             calls.push(Arc::clone(&ringer.calls));
-            ed.insert(src, "pulse", Unforkable(Pulse::new(pulse)));
-            ed.insert(fx, "ringer", Unforkable(ringer));
+            ed.insert(src, "pulse", Unforkable(Pulse::new(pulse)))
+                .controls;
+            ed.insert(fx, "ringer", Unforkable(ringer)).controls;
             ed.spec_mut()
                 .topology
                 .edges

@@ -551,8 +551,10 @@ struct Rig {
 impl Rig {
     fn new(base: f32) -> Self {
         let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
-        ed.insert(key(1), "one", Unforkable(TestNode::new(dc(1.0))));
-        ed.insert(key(2), "two", Unforkable(TestNode::new(dc(2.0))));
+        ed.insert(key(1), "one", Unforkable(TestNode::new(dc(1.0))))
+            .controls;
+        ed.insert(key(2), "two", Unforkable(TestNode::new(dc(2.0))))
+            .controls;
         ed.spec_mut().topology.outputs = vec![vec![out(1), out(2)]];
         ed.spec_mut()
             .set_edge_gain(output_edge(1), EdgeGain::new(amp(base)));
@@ -832,7 +834,8 @@ impl Mixer {
                 calls: Arc::clone(&calls),
                 constant: Arc::clone(&constant),
             }),
-        );
+        )
+        .controls;
         for k in 1..=n {
             ed.spec_mut().topology.connect(at(n + 1, 0), direct(k));
             ed.spec_mut().set_edge_gain(
@@ -875,13 +878,14 @@ impl Mixer {
 fn switch(flag: &Arc<AtomicBool>) -> Box<dyn FnOnce(&mut Editor, NodeKey)> {
     let flag = Arc::clone(flag);
     Box::new(move |ed, k| {
-        ed.insert(k, "switch", Unforkable(Switch(flag)));
+        ed.insert(k, "switch", Unforkable(Switch(flag))).controls;
     })
 }
 
 fn constant(v: f32) -> Box<dyn FnOnce(&mut Editor, NodeKey)> {
     Box::new(move |ed, k| {
-        ed.insert(k, "dc", Unforkable(TestNode::new(dc(v))));
+        ed.insert(k, "dc", Unforkable(TestNode::new(dc(v))))
+            .controls;
     })
 }
 
@@ -1015,8 +1019,8 @@ fn a_fork_carries_the_edge_gains() {
         fn reset(&mut self) {}
     }
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
-    ed.insert(key(1), "a", ForkByClone(Level(1.0)));
-    ed.insert(key(2), "b", ForkByClone(Level(2.0)));
+    ed.insert(key(1), "a", ForkByClone(Level(1.0))).controls;
+    ed.insert(key(2), "b", ForkByClone(Level(2.0))).controls;
     ed.spec_mut().topology.outputs = vec![vec![out(1), out(2)]];
     ed.spec_mut()
         .set_edge_gain(output_edge(1), EdgeGain::new(amp(0.5)));
@@ -1055,7 +1059,7 @@ fn a_fork_starts_at_the_base_the_knob_wrote() {
         fn reset(&mut self) {}
     }
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
-    ed.insert(key(1), "a", ForkByClone(Level(1.0)));
+    ed.insert(key(1), "a", ForkByClone(Level(1.0))).controls;
     ed.spec_mut().topology.outputs = vec![vec![out(1)]];
     ed.spec_mut()
         .set_edge_gain(output_edge(1), EdgeGain::new(amp(0.5)));

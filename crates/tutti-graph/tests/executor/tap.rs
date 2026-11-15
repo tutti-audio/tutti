@@ -64,7 +64,8 @@ fn build(ed: &mut Editor) -> Vec<Source> {
             Forkable(Kind::Lag {
                 latency: 5 * k as usize,
             }),
-        );
+        )
+        .controls;
         ed.insert(
             NodeKey(gain),
             "gain",
@@ -72,7 +73,8 @@ fn build(ed: &mut Editor) -> Vec<Source> {
                 gain: 0.5 + k as f32 / 10.0,
                 width: 1,
             }),
-        );
+        )
+        .controls;
         let t = &mut ed.spec_mut().topology;
         t.edges.insert(
             InPort {
@@ -945,7 +947,8 @@ fn pop_planes_reads_whole_frames_and_keeps_the_lanes_level() {
 
 /// A wide `Const` node (key 1, two outputs of `value`) outside the outputs.
 fn wide(r: &mut Rig, value: f32, width: usize) {
-    r.ed.insert(NodeKey(1), "const", Forkable(Kind::Const { value, width }));
+    r.ed.insert(NodeKey(1), "const", Forkable(Kind::Const { value, width }))
+        .controls;
 }
 
 fn port(node: u64, port: u16) -> Source {

@@ -288,12 +288,14 @@ fn builder_builds_what_a_hand_written_spec_builds() {
         NodeKey(0),
         test_node,
         Unforkable(TestNode::new(Kind::Sum { inputs: 2 })),
-    );
+    )
+    .controls;
     ed.insert(
         NodeKey(1),
         test_node,
         Unforkable(TestNode::new(Kind::Smooth)),
-    );
+    )
+    .controls;
     ed.insert(
         NodeKey(2),
         test_node,
@@ -301,12 +303,14 @@ fn builder_builds_what_a_hand_written_spec_builds() {
             period: 50,
             phase: 7,
         })),
-    );
+    )
+    .controls;
     ed.insert(
         NodeKey(3),
         test_node,
         Unforkable(TestNode::new(Kind::Consumer { inputs: 1 })),
-    );
+    )
+    .controls;
     let spec = ed.spec_mut();
     spec.topology.inputs = ChannelLayout::MONO;
     let at = |node: u64, port: u16| InPort {
@@ -639,7 +643,7 @@ fn every_writer_normalises_silence_to_the_empty_set() {
 
     // `Editor::remove` leaves an emptied channel empty.
     let (mut ed, _exec) = Editor::new(prepare(64));
-    ed.insert(NodeKey(1), "w", node(0, 1));
+    ed.insert(NodeKey(1), "w", node(0, 1)).controls;
     ed.spec_mut().topology.set_outputs([Source::Node(OutPort {
         node: NodeKey(1),
         port: 0,

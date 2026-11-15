@@ -492,14 +492,16 @@ fn a_bypass_with_no_pass_is_refused() {
             named(&stereo),
             named(&centre_lfe),
         ))),
-    );
-    ed.insert(key(2), "widths", widths(6, 2));
+    )
+    .controls;
+    ed.insert(key(2), "widths", widths(6, 2)).controls;
     ed.insert(
         key(3),
         "unplaced into named",
         Unforkable(TestNode::new(bused(6, 2, 0, unassigned(6), smpte(2)))),
-    );
-    ed.insert(key(4), "one width", widths(2, 2));
+    )
+    .controls;
+    ed.insert(key(4), "one width", widths(2, 2)).controls;
     let refused = ed.set_mode(key(1), NodeMode::Bypassed);
     assert!(
         matches!(
@@ -922,7 +924,7 @@ impl Solo {
     }
 
     fn add(&mut self, n: u64, node: impl Node + 'static) {
-        self.ed.insert(key(n), "probe", Unforkable(node));
+        self.ed.insert(key(n), "probe", Unforkable(node)).controls;
     }
 
     fn wire(&mut self, f: impl FnOnce(&mut Topology)) {
@@ -1332,7 +1334,8 @@ fn a_mode_stored_mid_block_lands_on_the_next_block() {
                         }
                     }),
                 }),
-            );
+            )
+            .controls;
             e.insert(
                 key(2),
                 "gain",
@@ -1340,7 +1343,8 @@ fn a_mode_stored_mid_block_lands_on_the_next_block() {
                     gain: 3.0,
                     width: 1,
                 })),
-            );
+            )
+            .controls;
             e.spec_mut().topology.connect(at(2, 0), direct(1));
             e.spec_mut().topology.set_outputs(vec![out(2, 0)]);
             e.commit().expect("commits");
@@ -1427,7 +1431,8 @@ fn modes_name_nodes() {
 fn a_fork_copies_the_mode_and_starts_steady() {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
-    ed.insert(key(1), "probe", ForkByClone(Probe::new(3.0)));
+    ed.insert(key(1), "probe", ForkByClone(Probe::new(3.0)))
+        .controls;
     ed.spec_mut()
         .topology
         .connect(at(1, 0), Edge::Direct(Source::Global(0)));
@@ -1525,8 +1530,8 @@ fn an_own_bypass_node_needs_no_pass() {
     wide.outs = 2;
     let mut own = wide.clone();
     own.own_bypass = true;
-    ed.insert(key(1), "plain", Unforkable(wide));
-    ed.insert(key(2), "own", Unforkable(own));
+    ed.insert(key(1), "plain", Unforkable(wide)).controls;
+    ed.insert(key(2), "own", Unforkable(own)).controls;
     assert!(matches!(
         ed.set_mode(key(1), NodeMode::Bypassed),
         Err(ModeError::Unplaced { .. })

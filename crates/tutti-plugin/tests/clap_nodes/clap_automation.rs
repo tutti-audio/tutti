@@ -142,7 +142,7 @@ fn render_gain(
         ),
     );
     if let Some(lane) = feeder {
-        live.insert(NodeKey(1), "lane", lane);
+        live.insert(NodeKey(1), "lane", lane).controls;
         live.spec_mut().connect_events(
             EventIn {
                 node: PLUGIN,

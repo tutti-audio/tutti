@@ -59,7 +59,8 @@ impl Listener {
         let mut rig = EventRig::new(RATE, BLOCK, slots.get() as u16);
         if ingest {
             rig.editor
-                .insert(INGEST, "ingest", MidiIngestNode::new(inlets.slots()));
+                .insert(INGEST, "ingest", MidiIngestNode::new(inlets.slots()))
+                .controls;
             for port in 0..ports as u16 {
                 rig.feed(INGEST, port, port);
             }
@@ -83,7 +84,7 @@ impl Listener {
             if let InletChange::Attach { slot, node } = change {
                 let slot = slot.index();
                 let key = NodeKey(100 + slot as u64);
-                self.rig.editor.insert(key, "inlet", node);
+                self.rig.editor.insert(key, "inlet", node).controls;
                 self.rig.editor.spec_mut().connect_events(
                     EventIn {
                         node: self.entry,

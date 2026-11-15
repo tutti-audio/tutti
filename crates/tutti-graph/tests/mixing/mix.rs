@@ -252,7 +252,8 @@ fn dry_is_the_aligned_input_bit_for_bit_and_the_node_keeps_running() {
             calls: Arc::clone(&calls),
             resets: Arc::clone(&resets),
         }),
-    );
+    )
+    .controls;
     ed.spec_mut()
         .topology
         .connect(at(1, 0), Edge::Direct(Source::Global(0)));
@@ -559,8 +560,10 @@ fn a_mix_stored_mid_block_lands_on_the_next_block() {
                         }
                     }),
                 }),
-            );
-            e.insert(key(2), "gain", Unforkable(TestNode::new(plain())));
+            )
+            .controls;
+            e.insert(key(2), "gain", Unforkable(TestNode::new(plain())))
+                .controls;
             e.spec_mut()
                 .topology
                 .connect(at(2, 0), Edge::Direct(out(1, 0)));
@@ -614,7 +617,8 @@ impl Node for Triple {
 fn solo(mix: Option<Mix>) -> (Editor, tutti_graph::Executor) {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
-    ed.insert(key(1), "gain", tutti_graph::ForkByClone(Triple));
+    ed.insert(key(1), "gain", tutti_graph::ForkByClone(Triple))
+        .controls;
     ed.spec_mut()
         .topology
         .connect(at(1, 0), Edge::Direct(Source::Global(0)));
@@ -781,7 +785,8 @@ fn a_mix_of_a_node_with_no_pass_is_refused() {
             latency: 0,
             tail: Tail::None,
         })),
-    );
+    )
+    .controls;
     ed.insert(
         key(2),
         "driver",
@@ -789,7 +794,8 @@ fn a_mix_of_a_node_with_no_pass_is_refused() {
             period: 64,
             latency: 0,
         })),
-    );
+    )
+    .controls;
     ed.spec_mut()
         .topology
         .connect(at(1, 0), Edge::Direct(Source::Global(0)));

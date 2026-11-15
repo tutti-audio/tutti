@@ -113,12 +113,14 @@ fn measure<T>(f: impl FnOnce() -> T) -> (usize, usize, T) {
 /// renders.
 fn graph(nodes: usize) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))));
-    ed.insert(NodeKey(0), "sine", ForkByClone(Sine::new(Hz(440.0))));
+    ed.insert(NodeKey(0), "sine", ForkByClone(Sine::new(Hz(440.0))))
+        .controls;
     for i in 1..=nodes as u64 {
         // Which node is chained does not matter to a budget on the graph
         // itself; it has to be one that takes an input, and `tutti-nodes`'
         // filters are out of reach from here (see `support`).
-        ed.insert(NodeKey(i), "gain", ForkByClone(Gain(0.5 + i as f32 * 1e-3)));
+        ed.insert(NodeKey(i), "gain", ForkByClone(Gain(0.5 + i as f32 * 1e-3)))
+            .controls;
         ed.spec_mut().topology.edges.insert(
             InPort {
                 node: NodeKey(i),
@@ -232,9 +234,11 @@ fn fan(nodes: usize, pooled: bool) -> (Editor, Executor) {
                 .expect("a worker pool"),
         )));
     }
-    ed.insert(NodeKey(0), "sine", ForkByClone(Sine::new(Hz(440.0))));
+    ed.insert(NodeKey(0), "sine", ForkByClone(Sine::new(Hz(440.0))))
+        .controls;
     for i in 1..=nodes as u64 {
-        ed.insert(NodeKey(i), "gain", ForkByClone(Gain(0.5 + i as f32 * 1e-3)));
+        ed.insert(NodeKey(i), "gain", ForkByClone(Gain(0.5 + i as f32 * 1e-3)))
+            .controls;
         ed.spec_mut().topology.edges.insert(
             InPort {
                 node: NodeKey(i),

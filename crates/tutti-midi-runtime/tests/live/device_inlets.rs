@@ -35,7 +35,7 @@ impl Rig {
             panic!("an open queues its inlet");
         };
         let mut rig = EventRig::new(RATE, BLOCK, 1);
-        rig.editor.insert(NodeKey(1), "inlet", node);
+        rig.editor.insert(NodeKey(1), "inlet", node).controls;
         rig.feed(NodeKey(1), 0, 0);
         rig.commit();
         Self { rig, input }

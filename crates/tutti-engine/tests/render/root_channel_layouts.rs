@@ -24,7 +24,8 @@ use tutti_types::{ChannelLayout, Hz, SampleRate, Samples};
 /// the channels `wire` picks (the rest explicitly silent).
 fn root(outputs: usize, wire: &[usize]) -> (Editor, tutti_graph::Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))));
-    ed.insert(NodeKey(1), "sine", ForkByClone(Sine::new(Hz(440.0))));
+    ed.insert(NodeKey(1), "sine", ForkByClone(Sine::new(Hz(440.0))))
+        .controls;
     ed.spec_mut().topology.set_outputs((0..outputs).map(|ch| {
         if wire.contains(&ch) {
             Source::Node(OutPort {

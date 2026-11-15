@@ -422,8 +422,8 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     let mut outputs = Vec::new();
     for (k, lane) in lanes.into_iter().enumerate() {
         let (l, p) = (NodeKey(10 + k as u64), NodeKey(20 + k as u64));
-        ed.insert(l, "lane", lane);
-        ed.insert(p, "probe", Unforkable(ParamProbe));
+        ed.insert(l, "lane", lane).controls;
+        ed.insert(p, "probe", Unforkable(ParamProbe)).controls;
         ed.spec_mut().connect_param(
             ParamIn {
                 node: p,
@@ -739,7 +739,8 @@ fn lanes_200(
         param: PROBE8[k % 8].into(),
     };
     for j in 0..25u64 {
-        ed.insert(NodeKey(1000 + j), "probe", Unforkable(Probe8));
+        ed.insert(NodeKey(1000 + j), "probe", Unforkable(Probe8))
+            .controls;
         for p in 0..8 {
             ed.spec_mut()
                 .topology
@@ -1019,7 +1020,8 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
         param: UnitParam::Cutoff.into(),
     };
     for k in 0..2 * CHAINS {
-        ed.insert(probe(k), "probe", ForkByClone(ParamProbe));
+        ed.insert(probe(k), "probe", ForkByClone(ParamProbe))
+            .controls;
         ed.spec_mut()
             .topology
             .outputs
@@ -1042,14 +1044,15 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
                     period: 1_500 + 97 * k as u64,
                     width: 300 + 11 * k as u64,
                 }),
-            );
+            )
+            .controls;
             let follower = EnvelopeFollowerNode::new(
                 id,
                 Seconds::from_f32(0.001 + 0.0005 * k as f32),
                 Seconds(0.03),
                 ChannelLayout::STEREO,
             );
-            ed.insert(node, "follower", ForkByClone(follower));
+            ed.insert(node, "follower", ForkByClone(follower)).controls;
             for port in 0..2 {
                 ed.spec_mut().topology.edges.insert(
                     InPort { node, port },
@@ -1063,7 +1066,8 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
                 ForkByClone(Notes {
                     period: 2_000 + 64 * k as u64,
                 }),
-            );
+            )
+            .controls;
             let adsr = Adsr {
                 attack: Seconds(0.002),
                 decay: Seconds(0.004),
@@ -1074,7 +1078,8 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
                 node,
                 "envelope",
                 ForkByClone(NoteEnvelopeNode::new(id, adsr)),
-            );
+            )
+            .controls;
             ed.spec_mut().connect_events(
                 EventIn { node, port: 0 },
                 EventEdge::Direct(EventOut { node: src, port: 0 }),
@@ -1096,7 +1101,7 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
             Some(ed.param_range_cell(cutoff(k)).expect("committed")),
         );
         let lane_key = NodeKey(6000 + k as u64);
-        ed.insert(lane_key, "lane", lane);
+        ed.insert(lane_key, "lane", lane).controls;
         ed.spec_mut().connect_events(
             EventIn {
                 node: lane_key,
@@ -1328,7 +1333,8 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(128))));
     let (saw, filter) = (NodeKey(1 << 48), NodeKey((1 << 48) + 1));
-    ed.insert(saw, "saw", ForkByClone(Osc::saw(Hz(110.0))));
+    ed.insert(saw, "saw", ForkByClone(Osc::saw(Hz(110.0))))
+        .controls;
     let params = ed
         .insert(
             filter,

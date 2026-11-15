@@ -81,13 +81,14 @@ fn chain_engine(outputs: usize) -> Engine {
     let transport = Transport::new(SampleRate::of(SR));
     let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(512))));
     let [osc, eq, strip] = [1, 2, 3].map(NodeKey);
-    ed.insert(osc, "osc", Osc::sine(Hz(440.0)));
+    ed.insert(osc, "osc", Osc::sine(Hz(440.0))).controls;
     ed.insert(
         eq,
         "eq",
         EqBandNode::<f64>::new(SvfType::Bell, Hz(1_000.0), Q(1.0), Db(6.0)),
-    );
-    ed.insert(strip, "strip", BusStripNode::stereo());
+    )
+    .controls;
+    ed.insert(strip, "strip", BusStripNode::stereo()).controls;
     wire(&mut ed, eq, 0, osc, 0);
     wire(&mut ed, strip, 0, eq, 0);
     wire(&mut ed, strip, 1, eq, 0);
@@ -330,7 +331,7 @@ fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
             dt: 0.0,
         })
     };
-    ed.insert(NodeKey(0), "sine", Unforkable(src));
+    ed.insert(NodeKey(0), "sine", Unforkable(src)).controls;
     let mut last = NodeKey(0);
     for i in 0..depth {
         let cutoff = 500.0 + (i as f32) * 7.0;
@@ -345,7 +346,7 @@ fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
             Box::new(Lowpass::new(cutoff, 0.7))
         };
         let k = NodeKey(1 + i as u64);
-        ed.insert(k, "lowpass", Unforkable(f));
+        ed.insert(k, "lowpass", Unforkable(f)).controls;
         ed.spec_mut().topology.edges.insert(
             InPort { node: k, port: 0 },
             vec![Edge::Direct(Source::Node(OutPort {

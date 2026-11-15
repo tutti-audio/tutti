@@ -59,12 +59,14 @@ impl Rig {
             SampleRate::of(RATE),
             MaxBlock::of(Samples(1024)),
         ));
-        editor.insert(INGEST, "in", MidiIngestNode::new(inlets.slots()));
+        editor
+            .insert(INGEST, "in", MidiIngestNode::new(inlets.slots()))
+            .controls;
         for change in inlets.take_changes() {
             if let InletChange::Attach { slot, node } = change {
                 let slot = slot.index();
                 let key = NodeKey(100 + slot as u64);
-                editor.insert(key, "inlet", node);
+                editor.insert(key, "inlet", node).controls;
                 editor.spec_mut().connect_events(
                     EventIn {
                         node: INGEST,

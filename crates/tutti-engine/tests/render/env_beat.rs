@@ -123,8 +123,8 @@ impl Node for GraphBeats {
 fn wire_clock(ed: &mut Editor, sink: impl IntoNode<Controls = ()>, width: u16) {
     const CLOCK: NodeKey = NodeKey(1);
     const SINK: NodeKey = NodeKey(2);
-    ed.insert(CLOCK, "clock", Unforkable(BeatPorts));
-    ed.insert(SINK, "sink", sink);
+    ed.insert(CLOCK, "clock", Unforkable(BeatPorts)).controls;
+    ed.insert(SINK, "sink", sink).controls;
     let topology = &mut ed.spec_mut().topology;
     for port in 0..2 {
         topology.edges.insert(
@@ -328,7 +328,7 @@ fn click_clicks_on_the_model_beats() {
     let click = ClickNode::new(&transport, settings);
     let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples(512))));
     const CLICK: NodeKey = NodeKey(1);
-    ed.insert(CLICK, "click", click);
+    ed.insert(CLICK, "click", click).controls;
     ed.spec_mut()
         .topology
         .set_outputs((0..2).map(|port| Source::Node(OutPort { node: CLICK, port })));
@@ -408,7 +408,8 @@ fn env_graph(max_block: usize, log: &Arc<Mutex<Vec<Env>>>) -> (Editor, Executor)
         SampleRate::of(SR),
         MaxBlock::of(Samples(max_block)),
     ));
-    ed.insert(NodeKey(1), "env", Unforkable(EnvLog(Arc::clone(log))));
+    ed.insert(NodeKey(1), "env", Unforkable(EnvLog(Arc::clone(log))))
+        .controls;
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort {

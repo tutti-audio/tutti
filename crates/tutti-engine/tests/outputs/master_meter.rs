@@ -48,7 +48,8 @@ fn engine(
         SampleRate::of(RATE),
         MaxBlock::of(Samples(512)),
     ));
-    ed.insert(NodeKey(1), "dc", tutti_graph::Unforkable(Dc(level)));
+    ed.insert(NodeKey(1), "dc", tutti_graph::Unforkable(Dc(level)))
+        .controls;
     ed.spec_mut().topology.set_outputs((0..outputs).map(|c| {
         if channel.is_none_or(|only| only == c) {
             Source::Node(OutPort {
@@ -189,7 +190,8 @@ fn the_master_reads_before_the_declick() {
         SampleRate::of(RATE),
         MaxBlock::of(Samples(512)),
     ));
-    ed.insert(NodeKey(1), "dc", tutti_graph::Unforkable(Dc(0.5)));
+    ed.insert(NodeKey(1), "dc", tutti_graph::Unforkable(Dc(0.5)))
+        .controls;
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort {
@@ -265,7 +267,8 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
         NodeKey(1),
         "step",
         tutti_graph::Unforkable(Step { loud: 100, at: 0 }),
-    );
+    )
+    .controls;
     ed.spec_mut().topology.set_outputs((0..6).map(|c| {
         if c == 2 {
             Source::Node(OutPort {

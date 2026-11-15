@@ -121,7 +121,7 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
     let (lo, hi) = (500.0, 1500.0);
     let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
     let probe = NodeKey(1);
-    ed.insert(probe, "probe", Unforkable(Probe));
+    ed.insert(probe, "probe", Unforkable(Probe)).controls;
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort {
@@ -161,7 +161,7 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
         .expect("addressed");
     let range = ed.param_range_cell(at).expect("committed");
     let lane = ControlLaneNode::for_unit(UnitParam::Cutoff, program, Some(knob), Some(range));
-    ed.insert(NodeKey(2), "lane", lane);
+    ed.insert(NodeKey(2), "lane", lane).controls;
     ed.spec_mut().connect_param(
         at,
         EventOut {
@@ -240,7 +240,7 @@ fn render_chorus(
         let knob = params.cell(UnitParam::Rate).expect("the chorus has a rate");
         let range = ed.param_range_cell(at).expect("committed");
         let lane = ControlLaneNode::for_unit(UnitParam::Rate, program, Some(knob), Some(range));
-        ed.insert(NodeKey(9_000), "lane", lane);
+        ed.insert(NodeKey(9_000), "lane", lane).controls;
         ed.spec_mut().connect_param(
             at,
             EventOut {
@@ -399,7 +399,7 @@ fn render_lfo(param: UnitParam, range: ParamRange, depth: f32) -> (Vec<f32>, f32
         .param_range_cell(at)
         .expect("the LFO declares it as a port");
     let lane = ControlLaneNode::for_unit(param, program, Some(knob.clone()), Some(range));
-    ed.insert(NodeKey(9_000), "lane", lane);
+    ed.insert(NodeKey(9_000), "lane", lane).controls;
     ed.spec_mut().connect_param(
         at,
         EventOut {
@@ -500,7 +500,7 @@ where
         .param_range_cell(at)
         .expect("the node declares it as a port");
     let lane = ControlLaneNode::for_unit(param, program, Some(knob), Some(range));
-    ed.insert(NodeKey(9_000), "lane", lane);
+    ed.insert(NodeKey(9_000), "lane", lane).controls;
     ed.spec_mut().connect_param(
         at,
         EventOut {
@@ -761,7 +761,7 @@ fn shelf_handed_back(block: usize) -> Vec<f32> {
         node: NodeKey(9_000),
         port: 0,
     };
-    ed.insert(NodeKey(9_000), "lane", lane);
+    ed.insert(NodeKey(9_000), "lane", lane).controls;
     ed.spec_mut().connect_param(at, lane_out);
     ed.commit().expect("the lane commits");
     let dc = vec![1.0; 512];

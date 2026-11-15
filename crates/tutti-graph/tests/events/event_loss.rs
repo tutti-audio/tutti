@@ -119,7 +119,8 @@ fn rig(
             ports,
             seen: Arc::clone(&seen),
         }),
-    );
+    )
+    .controls;
     let mut next = 0;
     for (i, scripts) in writers.iter().enumerate() {
         let key = NodeKey(1 + i as u64);
@@ -130,7 +131,8 @@ fn rig(
                 cap,
                 scripts: scripts.clone(),
             }),
-        );
+        )
+        .controls;
         for p in 0..scripts.len() {
             ed.spec_mut().connect_events(
                 EventIn {

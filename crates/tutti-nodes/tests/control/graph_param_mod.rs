@@ -109,7 +109,7 @@ fn drive(ed: &mut Editor, at: ParamIn, knob: Arc<AtomicF32>, layers: Vec<Layer>)
     let range = (!layers.is_empty()).then(|| ed.param_range_cell(at).expect("committed"));
     let program = ControlProgram::new(None, layers, vec![]).expect("a valid program");
     let lane = ControlLaneNode::for_unit(at.param, program, Some(knob.into()), range);
-    ed.insert(LANE, "lane", lane);
+    ed.insert(LANE, "lane", lane).controls;
     ed.spec_mut().connect_param(
         at,
         EventOut {
