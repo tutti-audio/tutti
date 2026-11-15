@@ -65,6 +65,33 @@ pub trait PoolEntry: Send + 'static {
     fn is_lost(_loaded: &Self::Loaded) -> bool {
         false
     }
+
+    /// What the pool does with a loaded value that only snapshots hold, past
+    /// the depth ([`PoolConfig::live_holds`](crate::PoolConfig::live_holds)):
+    /// [`Parking::Keep`] it, as a data kind does (a shared `Arc` costs
+    /// memory, not a process or a device), or [`Parking::Release`] it, as a
+    /// kind with something live behind it does (a plugin's process, a capture's
+    /// device). The default keeps.
+    ///
+    /// A released value is dropped here, on the control thread, and the entry
+    /// stays held with its handles reading [`Presence::Closed`]. Declaring the
+    /// key again with the same identity loads it afresh, by
+    /// [`load`](Self::load): the recall of a parked hold reloads. A kind that
+    /// saves state before it releases and restores it on that load does so
+    /// through its own load.
+    fn park(loaded: Self::Loaded) -> Parking<Self::Loaded> {
+        Parking::Keep(loaded)
+    }
+}
+
+/// What [`PoolEntry::park`] decides for a loaded value.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum Parking<T> {
+    /// The value stays loaded, held.
+    Keep(T),
+    /// The value is dropped; the entry stays held, unloaded.
+    Release,
 }
 
 /// The description of a load: the stages that end in the loaded value or a
@@ -407,6 +434,7 @@ pub(crate) struct Item<K> {
     pub(crate) load: Load<Value>,
     pub(crate) reload: Reload,
     pub(crate) lost: fn(&Value) -> bool,
+    pub(crate) park: fn(Value) -> Option<Value>,
     pub(crate) share: Option<Cloner>,
 }
 
@@ -483,6 +511,18 @@ where
         .map(|loaded| Box::new(loaded.clone()) as Value)
 }
 
+/// `E`'s [`park`](PoolEntry::park) over an erased value: the value back when the
+/// kind keeps it.
+fn park<E: PoolEntry>(value: Value) -> Option<Value> {
+    match value.downcast::<E::Loaded>() {
+        Ok(loaded) => match E::park(*loaded) {
+            Parking::Keep(loaded) => Some(Box::new(loaded) as Value),
+            Parking::Release => None,
+        },
+        Err(value) => Some(value),
+    }
+}
+
 fn lost<E: PoolEntry>(value: &Value) -> bool {
     value.downcast_ref::<E::Loaded>().is_some_and(E::is_lost)
 }
@@ -503,6 +543,7 @@ impl<K, E: PoolEntry> IntoPool<K> for Declared<K, E> {
             identity: Box::new(entry.identity()),
             load: entry.load().erase(),
             lost: lost::<E>,
+            park: park::<E>,
             share,
             reload: Box::new(move || entry.load().erase()),
         });

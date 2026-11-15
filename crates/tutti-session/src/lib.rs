@@ -191,9 +191,9 @@ pub(crate) use pool::Pool;
 #[cfg(feature = "sampler")]
 pub use pool::{AudioEntry, AudioFile, StreamInfo, audio_file};
 pub use pool::{
-    Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, PoolConfig, PoolEntry,
+    Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, Parking, PoolConfig, PoolEntry,
     PoolError, PoolEvent, PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet, PoolState,
-    RetryError, WhenLoadedError, stranded_loads,
+    PoolWait, RetryError, WhenLoadedError, stranded_loads,
 };
 #[cfg(feature = "soundfont")]
 pub use pool::{SoundFontFile, soundfont};

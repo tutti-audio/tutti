@@ -9,6 +9,12 @@
 //! holds it, and **released** at the last hold's drop; declaring a held key
 //! again with the same identity adopts it with no reload.
 //!
+//! Holds have a depth ([`PoolConfig::live_holds`]): the newest snapshot holds
+//! keep their entries live, and an entry only older holds keep is **parked**
+//! when its kind says so ([`PoolEntry::park`]): its value is released and its
+//! handles read closed, and declaring the key again loads it afresh. A node's
+//! hold never parks.
+//!
 //! A key declared again with the same identity keeps what it has, a failed
 //! load included: [`Session::retry`] loads it again, and also reopens a loaded
 //! entry its kind reads as lost. When an identity changes, the old value
@@ -53,18 +59,22 @@ mod open;
 mod report;
 mod run;
 mod table;
+mod wait;
 
 pub use config::PoolConfig;
 #[cfg(feature = "sampler")]
 pub use data::{AudioEntry, AudioFile, StreamInfo, audio_file};
 #[cfg(feature = "soundfont")]
 pub use data::{SoundFontFile, soundfont};
-pub use entry::{Declared, IntoPool, Life, Load, LoadError, PoolEntry, PoolSet, stranded_loads};
+pub use entry::{
+    Declared, IntoPool, Life, Load, LoadError, Parking, PoolEntry, PoolSet, stranded_loads,
+};
 pub use key::PoolKey;
 pub use open::OpenCx;
 pub use report::{PoolLoaded, PoolOutcome, PoolReport};
 pub(crate) use table::Pool;
 pub use table::{HandleError, PoolError, PoolEvent, PoolState, RetryError, WhenLoadedError};
+pub use wait::PoolWait;
 
 #[cfg(test)]
 mod tests;
@@ -139,8 +149,8 @@ impl Session {
     /// The wait for every declared entry's outcome: it lands once no declared
     /// entry is pending, as a [`PoolReport`] of each key's outcome. Entries
     /// that failed are in it, as [`PoolOutcome::Failed`]. An offline session
-    /// calls [`update`](Self::update) until [`PoolLoaded::has_landed`] before
-    /// it renders. Dropping the [`PoolLoaded`] ends the wait.
+    /// calls [`update`](Self::update) until [`PoolWait::has_landed`] before
+    /// it renders. Dropping the [`PoolWait`] ends the wait.
     ///
     /// `K` is the type of the keys the pool was declared with; keys of another
     /// type are not in the report.
@@ -148,7 +158,7 @@ impl Session {
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
-        let (loaded, landing) = PoolLoaded::new();
+        let (loaded, landing) = PoolWait::new();
         self.pool.wait_loaded(landing);
         loaded
     }

@@ -4,7 +4,7 @@
 use std::any::TypeId;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use tutti_rt::MainThreadMarker;
 
@@ -15,7 +15,8 @@ use crate::pool::entry::{
     Staged, Step, Value,
 };
 use crate::pool::key::PoolKey;
-use crate::pool::report::{Landing, PoolOutcome, PoolReport};
+use crate::pool::report::{PoolOutcome, PoolReport};
+use crate::pool::wait::Landing;
 
 /// Where a pool entry stands.
 ///
@@ -123,6 +124,22 @@ pub enum WhenLoadedError<K: fmt::Debug> {
     NotPooled(K),
 }
 
+/// What a [`Hold`] is for: whether the entry parks when the hold is old.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "a node over an entry and a snapshot take holds; neither exists yet"
+    )
+)]
+pub(crate) enum HoldKind {
+    /// A live node reads the entry: it stays loaded while the hold lasts.
+    Node,
+    /// A snapshot recorded the entry: past the depth it parks.
+    Snapshot,
+}
+
 /// A claim on a pool entry that keeps it held, not released, after the app's
 /// pool stops naming it: a node over it, a snapshot. Dropping it is the hold's
 /// end; the entry is released at the next update that finds no hold left.
@@ -136,6 +153,16 @@ pub enum WhenLoadedError<K: fmt::Debug> {
 )]
 pub(crate) struct Hold {
     _claim: Arc<()>,
+    _pin: Option<Arc<()>>,
+    _rank: Option<Arc<()>>,
+}
+
+/// A snapshot hold's place among the newest: held weakly, so the hold's drop
+/// ends it.
+struct Rank {
+    seq: u64,
+    key: PoolKey,
+    tag: Weak<()>,
 }
 
 /// Where a load that has not landed stands.
@@ -166,6 +193,13 @@ struct Slot {
     order: usize,
     /// One strong count for the slot, one for each [`Hold`].
     holds: Arc<()>,
+    /// One strong count for the slot, one for each node [`Hold`].
+    pins: Arc<()>,
+    /// The value was released by the kind's [`park`](PoolEntry::park); the
+    /// next declaration loads it again.
+    parked: bool,
+    /// What the kind does with the value when the entry parks.
+    park: fn(Value) -> Option<Value>,
     life: Life,
     loaded: Option<Value>,
     state: PoolState,
@@ -194,6 +228,11 @@ impl Slot {
     /// No hold but the slot's own.
     fn unheld(&self) -> bool {
         Arc::strong_count(&self.holds) == 1
+    }
+
+    /// No node holds it.
+    fn unpinned(&self) -> bool {
+        Arc::strong_count(&self.pins) == 1
     }
 
     /// A load of this entry has not landed.
@@ -290,6 +329,9 @@ pub(crate) struct Pool {
     queued: Vec<Pending>,
     /// Released since the last report.
     released: Vec<PoolKey>,
+    /// The snapshot holds, with their order.
+    ranks: Vec<Rank>,
+    last_rank: u64,
     waiters: Vec<Box<dyn FnMut(&Pool) -> bool + Send>>,
     /// Runs waiting for an entry to load, in the order they were asked.
     when_loaded: Vec<WhenLoaded>,
@@ -317,6 +359,8 @@ impl Pool {
             main_seen: false,
             queued: Vec::new(),
             released: Vec::new(),
+            ranks: Vec::new(),
+            last_rank: 0,
             waiters: Vec::new(),
             when_loaded: Vec::new(),
         }
@@ -386,6 +430,7 @@ impl Pool {
             load,
             reload,
             lost,
+            park,
             share,
             ..
         } = item;
@@ -402,6 +447,9 @@ impl Pool {
                     declared: true,
                     order,
                     holds: Arc::new(()),
+                    pins: Arc::new(()),
+                    parked: false,
+                    park,
                     life: Life::new(),
                     loaded: None,
                     state: PoolState::Loading,
@@ -421,7 +469,16 @@ impl Pool {
         // latest declaration's.
         slot.reload = reload;
         slot.lost = lost;
+        slot.park = park;
         slot.share = share;
+        if slot.parked {
+            // Its value was released: the recall loads it again.
+            slot.parked = false;
+            slot.unreported = None;
+            slot.kind = kind;
+            slot.identity = identity;
+            return self.begin(key, load);
+        }
         if slot.kind == kind && slot.identity.same(&*identity) {
             if reshared && slot.pending() {
                 // A load pending for an entry that shared is not one for an entry
@@ -552,6 +609,39 @@ impl Pool {
             if let Some(slot) = self.slots.remove(&key) {
                 slot.life.close();
                 self.released.push(key);
+            }
+        }
+        self.park_overflow();
+    }
+
+    /// Parks the loaded, undeclared entries that no node holds and that only
+    /// snapshot holds outside the newest [`PoolConfig::live_holds`] keep. A
+    /// kind that keeps its value keeps it.
+    fn park_overflow(&mut self) {
+        self.ranks.retain(|rank| rank.tag.strong_count() > 0);
+        let mut newest: Vec<&Rank> = self.ranks.iter().collect();
+        newest.sort_by_key(|rank| std::cmp::Reverse(rank.seq));
+        let live: BTreeSet<&PoolKey> = newest
+            .iter()
+            .take(self.config.live_holds)
+            .map(|rank| &rank.key)
+            .collect();
+        for (key, slot) in &mut self.slots {
+            let parkable = !slot.declared
+                && !live.contains(key)
+                && slot.unpinned()
+                && matches!(slot.state, PoolState::Loaded);
+            if !parkable {
+                continue;
+            }
+            let Some(value) = slot.loaded.take() else {
+                continue;
+            };
+            slot.loaded = (slot.park)(value);
+            if slot.loaded.is_none() {
+                slot.life.close();
+                slot.life = Life::new();
+                slot.parked = true;
             }
         }
     }
@@ -791,8 +881,11 @@ impl Pool {
     }
 
     /// A report of `K` keys that lands, once, when no declared entry is pending.
-    /// The wait ends when its [`PoolLoaded`](crate::PoolLoaded) is dropped.
-    pub(crate) fn wait_loaded<K: Clone + Send + 'static>(&mut self, landing: Landing<K>) {
+    /// The wait ends when its [`PoolWait`](crate::PoolWait) is dropped.
+    pub(crate) fn wait_loaded<K: Clone + Send + 'static>(
+        &mut self,
+        landing: Landing<PoolReport<K>>,
+    ) {
         let waiter = move |pool: &Pool| {
             if landing.orphaned() {
                 return true;
@@ -862,14 +955,29 @@ impl Pool {
         self.waiters.len()
     }
 
-    /// A hold on `key`'s entry, `None` when the pool has none.
+    /// A hold of `kind` on `key`'s entry, `None` when the pool has none.
     #[cfg_attr(
         not(test),
         expect(dead_code, reason = "a node over an entry and a snapshot take holds")
     )]
-    pub(crate) fn hold(&self, key: &PoolKey) -> Option<Hold> {
-        self.slots.get(key).map(|slot| Hold {
-            _claim: Arc::clone(&slot.holds),
+    pub(crate) fn hold(&mut self, key: &PoolKey, kind: HoldKind) -> Option<Hold> {
+        let slot = self.slots.get(key)?;
+        let claim = Arc::clone(&slot.holds);
+        let pin = (kind == HoldKind::Node).then(|| Arc::clone(&slot.pins));
+        let rank = (kind == HoldKind::Snapshot).then(|| {
+            let tag = Arc::new(());
+            self.last_rank += 1;
+            self.ranks.push(Rank {
+                seq: self.last_rank,
+                key: key.clone(),
+                tag: Arc::downgrade(&tag),
+            });
+            tag
+        });
+        Some(Hold {
+            _claim: claim,
+            _pin: pin,
+            _rank: rank,
         })
     }
 

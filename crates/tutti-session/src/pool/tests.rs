@@ -6,11 +6,13 @@ use std::sync::{Arc, Mutex};
 
 use tutti_types::SampleRate;
 
+use super::table::HoldKind;
 use super::{Declared, Life, Load, LoadError, PoolEntry, PoolError, PoolEvent, PoolKey, PoolState};
 use crate::peer::sealed;
 use crate::{HandleError, Job, Peer, PeerError, Presence, Resource, ResourceId, Session};
 use crate::{SessionEvent, jobs::JobFailed};
 
+mod holds;
 mod loads;
 
 /// The loads a session handed its spawner, held until the test runs them.
@@ -20,6 +22,10 @@ struct Spawned(Arc<Mutex<Vec<Job>>>);
 impl Spawned {
     fn take(&self) -> Vec<Job> {
         std::mem::take(&mut *self.0.lock().unwrap())
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.lock().unwrap().is_empty()
     }
 
     fn run_all(&self) {
@@ -384,7 +390,7 @@ fn a_held_entry_is_released_at_its_last_holds_drop_not_before() {
     s.pool(entry("a", probe(1, &runs))).unwrap();
     spawned.run_all();
     let _ = events(&mut s);
-    let one = s.pool.hold(&PoolKey::new(&"a")).unwrap();
+    let one = s.pool.hold(&PoolKey::new(&"a"), HoldKind::Node).unwrap();
     let two = one.clone();
     undeclare(&mut s);
     assert_eq!(state(&s, "a").as_deref(), Some("held"));
@@ -405,7 +411,7 @@ fn declaring_a_held_key_with_its_identity_adopts_it_without_a_reload() {
     spawned.run_all();
     let _ = events(&mut s);
     let held = handle(&s, "a").unwrap();
-    let hold = s.pool.hold(&PoolKey::new(&"a")).unwrap();
+    let hold = s.pool.hold(&PoolKey::new(&"a"), HoldKind::Node).unwrap();
     undeclare(&mut s);
     assert_eq!(state(&s, "a").as_deref(), Some("held"));
     s.pool(entry("a", probe(1, &runs))).unwrap();
@@ -425,7 +431,7 @@ fn declaring_a_held_key_with_another_identity_reloads_it() {
     s.pool(entry("a", probe(1, &runs))).unwrap();
     spawned.run_all();
     let _ = events(&mut s);
-    let _hold = s.pool.hold(&PoolKey::new(&"a")).unwrap();
+    let _hold = s.pool.hold(&PoolKey::new(&"a"), HoldKind::Node).unwrap();
     undeclare(&mut s);
     s.pool(entry("a", probe(2, &runs))).unwrap();
     assert_eq!(state(&s, "a").as_deref(), Some("reloading"));
@@ -580,7 +586,7 @@ fn an_outcome_that_landed_while_held_is_reported_when_the_entry_is_adopted() {
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    let hold = s.pool.hold(&PoolKey::new(&"a")).unwrap();
+    let hold = s.pool.hold(&PoolKey::new(&"a"), HoldKind::Node).unwrap();
     undeclare(&mut s);
     spawned.run_all();
     assert!(events(&mut s).is_empty(), "held: nothing to report yet");
@@ -634,7 +640,7 @@ fn a_released_slots_queued_outcome_is_not_reported_for_the_key_declared_again() 
     let (mut s, spawned) = session();
     let runs = runs();
     s.pool(entry("a", probe(1, &runs))).unwrap();
-    let hold = s.pool.hold(&PoolKey::new(&"a")).unwrap();
+    let hold = s.pool.hold(&PoolKey::new(&"a"), HoldKind::Node).unwrap();
     undeclare(&mut s);
     spawned.run_all();
     assert!(events(&mut s).is_empty());
