@@ -23,16 +23,9 @@ pub(crate) struct FaultLatch {
 }
 
 /// A `'static` error read as an owned one.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
 struct Fixed(&'static (dyn Error + Send + Sync));
-
-impl core::fmt::Display for Fixed {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        core::fmt::Display::fmt(self.0, f)
-    }
-}
-
-impl Error for Fixed {}
 
 impl FaultLatch {
     /// Keep `error` unless an earlier one is already kept.
