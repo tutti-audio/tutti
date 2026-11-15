@@ -802,6 +802,7 @@ impl<S> SessionBuilder<S> {
         Ok(Session {
             graph: parts.graph,
             resource_ids: crate::peer::ResourceIds::new(),
+            pool: crate::Pool::default(),
             transport: parts.transport,
             load,
             heard: None,
