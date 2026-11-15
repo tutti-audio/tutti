@@ -13,7 +13,7 @@ use core::ops::Range;
 
 use tutti_types::Samples;
 
-use super::{Capacity, Effort, Feed, Setup};
+use super::{Capacity, Effort, Inputs, Setup};
 use crate::glide::{Glide, Lerp};
 
 /// γ: a coefficient set that approaches the point κ asked for, a step at a time.
@@ -113,7 +113,7 @@ pub trait Recurrence: Clone + core::fmt::Debug + Send + 'static {
 
     /// Renders `frames` of `feed` into `output` with the coefficients as they
     /// stand: one step's worth while they move, the rest of a block once landed.
-    /// `feed` is the effect's whole input ([`Feed`]): the audio, the side-chain key
+    /// `feed` is the effect's whole input ([`Inputs`]): the audio, the side-chain key
     /// and the per-frame lanes, each indexed by the frame of the block.
     /// `into` is how many frames of the current step came before `frames.start`
     /// (always 0 for a `STEP` of 1), so a recurrence that works once a step knows
@@ -122,7 +122,7 @@ pub trait Recurrence: Clone + core::fmt::Debug + Send + 'static {
         &self,
         coeffs: &Self::Coeffs,
         state: &mut Self::State,
-        feed: &Feed<'_>,
+        feed: &Inputs<'_>,
         output: &mut [&mut [f32]],
         frames: Range<usize>,
         into: usize,
@@ -300,7 +300,7 @@ impl<R: Recurrence> Realized<R> {
     ///
     /// Runs a step at a time while the coefficients move, so a glide cut by the end
     /// of a call goes on in the next, and the rest of the block in one run.
-    pub fn process(&mut self, feed: &Feed<'_>, output: &mut [&mut [f32]], frames: usize) {
+    pub fn process(&mut self, feed: &Inputs<'_>, output: &mut [&mut [f32]], frames: usize) {
         let step = R::STEP;
         let mut at = 0;
         while at < frames {
@@ -317,7 +317,7 @@ impl<R: Recurrence> Realized<R> {
     }
 
     /// Runs `frames` and moves the step count on by them.
-    fn run(&mut self, feed: &Feed<'_>, output: &mut [&mut [f32]], frames: Range<usize>) {
+    fn run(&mut self, feed: &Inputs<'_>, output: &mut [&mut [f32]], frames: Range<usize>) {
         let n = frames.len();
         self.recurrence.run(
             &self.coeffs,

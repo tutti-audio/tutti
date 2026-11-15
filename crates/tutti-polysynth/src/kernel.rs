@@ -135,7 +135,8 @@ pub(crate) fn triangle(p: V, dt: V, inv_dt: V) -> V {
     naive + scale * (poly_blamp(q, dt, inv_dt) - poly_blamp(wrap_once(q + half), dt, inv_dt))
 }
 
-/// Advance eight xorshift32 generators and return white noise in `-1.0..1.0`.
+/// Advance eight [`Xorshift32`](tutti_dsp::Xorshift32) generators (its recurrence on
+/// eight lanes at once) and return white noise in `-1.0..1.0`.
 ///
 /// The top 23 bits become the mantissa of a float in `1.0..2.0`, which maps
 /// linearly onto the output range with no division and no bias toward zero.

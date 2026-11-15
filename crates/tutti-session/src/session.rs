@@ -637,15 +637,14 @@ impl Session {
         if root == self.root_request && self.root_refusal.is_none() {
             return Ok(());
         }
-        let device = self.heard.as_ref().map(|(_, layout)| *layout);
         self.root_request = root.clone();
-        match self.graph.declare_root(root, device) {
+        match self.graph.declare_root(root) {
             Ok(()) => {
                 self.root_refusal = None;
                 Ok(())
             }
             Err(e) => {
-                self.root_refusal = Some(e.into());
+                self.root_refusal = Some(e);
                 Err(e.into())
             }
         }
@@ -689,6 +688,20 @@ impl Session {
     /// ([`declare_root_topology`](Self::declare_root_topology)), if one was.
     pub fn root_topology(&self) -> Option<&ChannelTopology> {
         self.graph.root_topology()
+    }
+
+    /// What the output device's channels are as the session folds the root
+    /// into them, and whether that was
+    /// [`Stated`](tutti_types::Placement::Stated)
+    /// ([`SessionBuilder::device_topology`](crate::SessionBuilder::device_topology),
+    /// `DeviceRestart::topology`) or
+    /// [`Assumed`](tutti_types::Placement::Assumed) from the device's width
+    /// alone ([`ChannelTopology::assumed`]). `None` for a session with no
+    /// engine (a detached one).
+    #[must_use]
+    pub fn output_device(&self) -> Option<crate::OutputPlacement> {
+        let (_, layout) = self.heard.as_ref()?;
+        self.graph.output_placement(*layout)
     }
 
     /// Runs every phase in [`PHASES`] order at `Instant::now()` with the

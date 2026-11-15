@@ -3,7 +3,7 @@
 //! A brickwall clamps every sample to `+-c` and has nothing else: no state, no
 //! envelope, no lookahead and so no latency and no tail. It is the one family whose
 //! only control is a **fast lane**: the ceiling is read per frame from the
-//! [`Feed`] when the graph drives it,
+//! [`Inputs`] when the graph drives it,
 //! and the member's ceiling is the base for a frame nobody drives.
 //!
 //! The ceiling is in dB and the clamp bound is its amplitude. `+inf` dB passes
@@ -15,7 +15,7 @@ use core::ops::Range;
 
 use tutti_types::{BusTopology, Db, SampleRate, Samples, Seconds};
 
-use crate::{Channels, Effort, Family, Feed, Glide, Recurrence, Ring, Start, System};
+use crate::{Channels, Effort, Family, Glide, Inputs, Recurrence, Ring, Start, System};
 
 /// The controls of a [`BrickwallFamily`]: the ceiling.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -119,7 +119,7 @@ impl Family for BrickwallFamily {
 }
 
 /// The [`Recurrence`] of a [`BrickwallFamily`]: the clamp at the ceiling the member
-/// asks for, or at each frame's own when lane 0 of the [`Feed`] drives it.
+/// asks for, or at each frame's own when lane 0 of the [`Inputs`] drives it.
 ///
 /// **Lane 0 is the ceiling in dB, per frame.** A NaN frame clamps at the member's
 /// ceiling. The ceiling lands whole (a glided bound would let a sample past the new
@@ -156,7 +156,7 @@ impl Recurrence for BrickwallRecurrence {
         &self,
         coeffs: &Glide<f32>,
         _: &mut (),
-        feed: &Feed<'_>,
+        feed: &Inputs<'_>,
         output: &mut [&mut [f32]],
         frames: Range<usize>,
         _: usize,

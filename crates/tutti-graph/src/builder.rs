@@ -654,6 +654,7 @@ impl GraphBuilder {
             mixes,
             bus_edges,
             root,
+            root_id,
             root_sources,
         } = self.spec;
         let live = editor.spec_mut();
@@ -668,6 +669,7 @@ impl GraphBuilder {
         live.mixes = mixes;
         live.bus_edges = bus_edges;
         live.root = root;
+        live.root_id = root_id;
         live.root_sources = root_sources;
         editor.commit()?;
         executor.apply_pending();
