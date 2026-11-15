@@ -397,7 +397,7 @@ fn a_file_with_no_tempo_or_signature_gets_the_smf_defaults() {
             (0, sig),
             (0, metronome),
             (0, note(0, 60)),
-            // The later tempo stays where it was: not moved to a clock grid.
+            // The later tempo is on a 1/24-quarter position (960 is a multiple of 20), so it stays.
             (960, flex(Flex::SetTempo(25_000_000))),
         ]
     );
@@ -720,4 +720,139 @@ fn the_clip_round_trips_through_its_bytes() {
     let clip = smf.to_clip().unwrap().clip;
     let again = MidiFile::from_bytes(&clip.to_bytes().unwrap()).unwrap();
     assert_eq!(again, clip);
+}
+
+fn tempo_event(micros: u32) -> FileEvent {
+    meta(Meta::Tempo {
+        micros_per_quarter: micros,
+        extra: Box::default(),
+    })
+}
+
+fn signature_meta(numerator: u8, power: u8) -> FileEvent {
+    meta(Meta::TimeSignature {
+        numerator,
+        denominator_power: power,
+        clocks_per_click: 24,
+        thirty_seconds_per_quarter: 8,
+        extra: Box::default(),
+    })
+}
+
+fn at_ticks(clip: &MidiFile, wanted: fn(&FileEvent) -> bool) -> Vec<u64> {
+    events_of(clip)
+        .iter()
+        .filter(|(_, e)| wanted(e))
+        .map(|(t, _)| t.0)
+        .collect()
+}
+
+fn is_tempo(e: &FileEvent) -> bool {
+    matches!(e, FileEvent::Message(Message::Flex(_, Flex::SetTempo(_))))
+}
+
+fn is_signature(e: &FileEvent) -> bool {
+    matches!(
+        e,
+        FileEvent::Message(Message::Flex(_, Flex::SetTimeSignature(_)))
+    )
+}
+
+/// M2-104 section 7.5.3: in a file a Set Tempo sits on a 1/24-quarter-note
+/// position. At 480 ticks per quarter that is every 20 ticks; 29 is nearer 20
+/// than 40, 30 is the tie (taken later), and 40 is on the grid already.
+/// Spec: m2-104/7.5.3#4, m2-116/7.1.1#4
+#[test]
+fn a_tempo_off_the_clock_grid_moves_to_the_nearest_position() {
+    let smf = format0(vec![
+        (29, tempo_event(400_000)),
+        (30, tempo_event(300_000)),
+        (40, tempo_event(200_000)),
+        (50, note(0, 60)),
+    ]);
+    let done = smf.to_clip().unwrap();
+    assert_eq!(at_ticks(&done.clip, is_tempo), [0, 20, 40, 40]);
+    let moves: Vec<_> = done.moved.iter().map(|m| (m.from.0, m.to.0)).collect();
+    assert_eq!(moves, [(29, 20), (30, 40)]);
+}
+
+/// The same rule at a division where 1/24 quarter is not a whole tick: at 100
+/// ticks per quarter the whole-tick clock positions are every 25 ticks.
+/// Spec: m2-104/7.5.3#4
+#[test]
+fn the_clock_grid_of_an_odd_division_is_its_whole_tick_positions() {
+    let smf = MidiFile::smf(
+        SmfFormat::SingleTrack,
+        100,
+        vec![track(vec![(30, tempo_event(400_000)), (60, note(0, 60))])],
+    )
+    .unwrap();
+    let clip = smf.to_clip().unwrap().clip;
+    assert_eq!(at_ticks(&clip, is_tempo), [0, 25]);
+}
+
+/// A tempo whose nearest grid position is past the end of the clip goes to
+/// the one before it, so the clip keeps its length: 96 ticks per quarter has
+/// a grid of 4 ticks, 90 rounds to 92, past an end of 90, so 88.
+/// Spec: m2-104/7.5.3#4
+#[test]
+fn a_tempo_does_not_move_past_the_end_of_the_clip() {
+    let smf = MidiFile::smf(
+        SmfFormat::SingleTrack,
+        96,
+        vec![Track {
+            header: vec![],
+            header_end: Tick(0),
+            events: vec![(Tick(90), tempo_event(400_000))],
+            end: Tick(90),
+        }],
+    )
+    .unwrap();
+    let clip = smf.to_clip().unwrap().clip;
+    assert_eq!(at_ticks(&clip, is_tempo), [0, 88]);
+}
+
+/// M2-104 section 7.5.4: in a file a Set Time Signature sits at a bar
+/// boundary. 3/4 at 480 ticks per quarter is 1440 ticks a bar, so a signature
+/// at 1500 goes to 1440; 6/8 is 1440 ticks a bar too (six eighths), counted
+/// from that moved signature at 1440, so a signature at 4160 goes to 4320, the
+/// bar line nearer than 2880.
+/// Spec: m2-104/7.5.4#3, m2-116/6.1.2#5, m2-116/7.1.2#3
+#[test]
+fn a_time_signature_off_a_bar_line_moves_to_the_nearest_bar_boundary() {
+    let smf = format0(vec![
+        (0, signature_meta(3, 2)),
+        (1500, signature_meta(6, 3)),
+        (4160, signature_meta(2, 2)),
+        (4400, note(0, 60)),
+    ]);
+    let done = smf.to_clip().unwrap();
+    assert_eq!(at_ticks(&done.clip, is_signature), [0, 1440, 4320]);
+    let moves: Vec<_> = done.moved.iter().map(|m| (m.from.0, m.to.0)).collect();
+    assert_eq!(moves, [(1500, 1440), (4160, 4320)]);
+}
+
+/// Before any signature the bars are 4/4, 1920 ticks at 480 per quarter, so a
+/// first signature at 1000 goes to 1920.
+/// Spec: m2-104/7.5.4#3
+#[test]
+fn bars_before_the_first_time_signature_are_four_four() {
+    let smf = format0(vec![(1000, signature_meta(3, 2)), (2000, note(0, 60))]);
+    let done = smf.to_clip().unwrap();
+    // The default 4/4 at tick 0 leads, then the file's own at the next bar.
+    assert_eq!(at_ticks(&done.clip, is_signature), [0, 1920]);
+}
+
+/// An event already on its grid is not moved, and nothing is reported.
+/// Spec: m2-104/7.5.3#4, m2-104/7.5.4#3
+#[test]
+fn events_on_their_grids_are_not_moved() {
+    let smf = format0(vec![
+        (960, tempo_event(250_000)),
+        (1920, signature_meta(3, 2)),
+        (1920 + 1440, tempo_event(300_000)),
+    ]);
+    let done = smf.to_clip().unwrap();
+    assert!(done.moved.is_empty());
+    assert_eq!(at_ticks(&done.clip, is_tempo), [0, 960, 3360]);
 }

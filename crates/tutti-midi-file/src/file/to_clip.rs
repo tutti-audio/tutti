@@ -95,6 +95,21 @@ pub struct Dropped {
     pub reason: DropReason,
 }
 
+/// A Set Tempo or Time Signature that conversion moved onto the grid the
+/// Clip File requires (M2-104 sections 7.5.3 and 7.5.4: a Set Tempo sits on a
+/// 1/24-quarter-note position and a Set Time Signature on a bar boundary).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Moved {
+    /// The track the event was in.
+    pub track: usize,
+    /// Where the SMF had it.
+    pub from: Tick,
+    /// Where the clip has it.
+    pub to: Tick,
+    /// The event.
+    pub event: FileEvent,
+}
+
 /// The result of [`MidiFile::to_clip`]: the clip and what it left out.
 ///
 /// A conversion that returned the clip alone would lose events without a word
@@ -110,6 +125,38 @@ pub struct Converted {
     pub clip: MidiFile,
     /// What has no UMP form.
     pub dropped: Vec<Dropped>,
+    /// The tempo and time signature events that were off their grid and sit
+    /// on the nearest grid position in the clip, in the order of `from`.
+    pub moved: Vec<Moved>,
+}
+
+/// The distance in ticks between the positions of a grid of `numerator /
+/// denominator` ticks that fall on a whole tick: the grid's step cannot
+/// divide a tick, so the grid is every position that is one.
+fn whole_tick_step(numerator: u64, denominator: u64) -> u64 {
+    fn gcd(a: u64, b: u64) -> u64 {
+        if b == 0 { a } else { gcd(b, a % b) }
+    }
+    numerator / gcd(numerator, denominator)
+}
+
+/// The grid position nearest `tick` (a tie goes later), no earlier than
+/// `origin`, and no later than `end` when a position at or before it exists.
+fn snap(tick: u64, origin: u64, step: u64, end: u64) -> u64 {
+    let steps = (tick - origin + step / 2) / step;
+    let mut at = origin + steps * step;
+    if at > end && steps > 0 {
+        at -= step;
+    }
+    at
+}
+
+/// The step in ticks between bar boundaries of a bar of `numerator` notes of
+/// `2^power` per whole note: `4 * numerator * tpq / 2^power` ticks, reduced to
+/// the whole-tick boundaries.
+fn bar_step(ticks_per_quarter: u16, numerator: u8, power: u8) -> u64 {
+    let bar = 4 * u64::from(numerator) * u64::from(ticks_per_quarter);
+    bar >> bar.trailing_zeros().min(u32::from(power))
 }
 
 /// 10 ns units in a microsecond.
@@ -334,10 +381,17 @@ impl MidiFile {
     /// tempo, 120 beats per minute is assumed), and one with no
     /// Time Signature 4/4, 24 clocks per click, 8 32nds per quarter, so the
     /// clip says what a SMF reader assumed. A later tempo or time signature
-    /// stays on its own tick: the spec's advice to place them on MIDI clocks and
-    /// bar lines is a wish about the author's grid, and moving an event
-    /// would change the music. The [header](Track::header) is empty: the
-    /// sequence data carries the tempo, which the spec's section 7.1.1 asks.
+    /// stays on its own tick when that is on the grid. A Set Tempo sits on a
+    /// 1/24-quarter-note position and a Set Time Signature on a bar boundary
+    /// (M2-104 sections 7.5.3 and 7.5.4, required in a file; M2-116 sections
+    /// 6.1.1, 6.1.2 and 7.1), so an event off its grid moves to the nearest
+    /// position (a tie later; earlier if that is past the clip's end) and is
+    /// listed in [`Converted::moved`]. A bar is counted from the previous Time
+    /// Signature (as moved), the first from tick 0 in 4/4. When the division
+    /// does not make a grid position of every 1/24 quarter or every bar line a
+    /// whole tick, the grid is the positions that are. The
+    /// [header](Track::header) is empty: the sequence data carries the tempo,
+    /// which the spec's section 7.1.1 asks.
     ///
     /// # Errors
     ///
@@ -378,9 +432,49 @@ impl MidiFile {
             }
         }
         let mut dropped = Vec::new();
+        let mut moved = Vec::new();
+        let end = self
+            .tracks()
+            .iter()
+            .map(|t| t.end)
+            .max()
+            .unwrap_or_default();
+        let tpq = self.ticks_per_quarter();
+        let tempo_step = whole_tick_step(u64::from(tpq), 24);
+        // The current bar grid: where the last Time Signature sits and the
+        // step between its bar lines; 4/4 from tick 0 until one.
+        let mut bars = (0, bar_step(tpq, 4, 2));
         for (tick, track, ev) in all {
             match convert(track, format, ev) {
                 Ok((rank, events)) => {
+                    let grid = match ev {
+                        FileEvent::Meta(Meta::Tempo { .. }) => Some((0, tempo_step)),
+                        FileEvent::Meta(Meta::TimeSignature { .. }) => Some(bars),
+                        _ => None,
+                    };
+                    let tick = match grid {
+                        Some((origin, step)) => {
+                            let to = Tick(snap(tick.0, origin, step, end.0));
+                            if to != tick {
+                                moved.push(Moved {
+                                    track,
+                                    from: tick,
+                                    to,
+                                    event: ev.clone(),
+                                });
+                            }
+                            to
+                        }
+                        None => tick,
+                    };
+                    if let FileEvent::Meta(Meta::TimeSignature {
+                        numerator,
+                        denominator_power,
+                        ..
+                    }) = ev
+                    {
+                        bars = (tick.0, bar_step(tpq, *numerator, *denominator_power));
+                    }
                     // Only tick 0 is ordered by rank; a later tempo is where it was.
                     let rank = if tick == Tick(0) { rank } else { Rank::Other };
                     placed.extend(events.into_iter().map(|e| (tick, rank, e)));
@@ -396,12 +490,6 @@ impl MidiFile {
         // Stable: within a tick and rank, the merge order.
         placed.sort_by_key(|&(tick, rank, _)| (tick, rank));
 
-        let end = self
-            .tracks()
-            .iter()
-            .map(|t| t.end)
-            .max()
-            .unwrap_or_default();
         let sequence = Track {
             header: Vec::new(),
             header_end: Tick(0),
@@ -409,6 +497,10 @@ impl MidiFile {
             end,
         };
         let clip = MidiFile::clip(self.ticks_per_quarter(), sequence)?;
-        Ok(Converted { clip, dropped })
+        Ok(Converted {
+            clip,
+            dropped,
+            moved,
+        })
     }
 }

@@ -34,7 +34,7 @@ use crate::{ConfigError, Error, OutOfOrder, Refusal, Result, clip_file, smf};
 
 mod to_clip;
 
-pub use to_clip::{Converted, DropReason, Dropped, ToClipError};
+pub use to_clip::{Converted, DropReason, Dropped, Moved, ToClipError};
 use tutti_ump::Voice1;
 
 /// A position in a file, in ticks of its division: whole numbers, so a file
