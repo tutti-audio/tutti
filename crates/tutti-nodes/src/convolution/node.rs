@@ -892,7 +892,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod golden {
+mod direct_sum {
     use super::super::ir::generate_test_ir;
     use super::*;
     use tutti_graph::contract::{drive, prepared};

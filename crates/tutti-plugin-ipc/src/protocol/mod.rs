@@ -29,8 +29,8 @@ pub(crate) mod wire;
 /// - **Version 24** appended `ParameterInfo::measures` (an `Option<ParamUnit>`, a
 ///   variant index) and `role` (an `Option<u16>`, a `UnitParam` discriminant)
 ///   to every entry of a `ParameterList`: two
-///   `0x00` bytes after `group` when both are `None`. No recorded golden holds
-///   a `ParameterInfo`, so none needed re-recording.
+///   `0x00` bytes after `group` when both are `None`. No recorded wire figure
+///   holds a `ParameterInfo`.
 /// - An **enum variant** is a varint discriminant over declaration order, so a
 ///   peer receiving a tag it has no arm for fails the decode mid-stream rather
 ///   than at a message boundary. Removing one renumbers every variant after it:

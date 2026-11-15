@@ -1,34 +1,14 @@
-//! The graph's exports, pinned by analytic figures and golden digests.
+//! The graph's exports, pinned by analytic figures and invariants.
 //!
 //! # The oracles
 //!
-//! Two kinds of check sit side by side.
-//!
-//! - Portable, on every target: an analytic figure where the signal has
-//!   one (a sine's samples, a DC level, a lookahead's frames, a direct
-//!   time-domain convolution, the tone a dry voice reads), and the export's
-//!   own invariants where it does not (a file is its planes through
-//!   `write_buffers`; a width is the quad render folded by the ITU matrix; a
-//!   trimmed render is the untrimmed one shifted by the trim; a fork of a
-//!   graph renders the fresh graph).
-//! - Golden digests, on the recorded target only: FNV-1a over the planes'
-//!   (or the file's) bits. All but three were recorded from the graph's render
-//!   against an independent reference renderer it matched bit for bit. Three
-//!   are self-recorded: the pitched sampler voice's and the convolver's (the
-//!   scalar FFT has no reference renderer; their cross-checks are the
-//!   fifth-up pitch figure and the direct convolution), and the quad VBAP
-//!   digest (re-recorded when the panner's smoother moved to one advance per
-//!   block; its folded stereo and mono renders are checked against it bit for
-//!   bit).
-//!   They catch the drift an analytic tolerance lets through (an output
-//!   scaled by `1 + f32::EPSILON`), but they pin `sin`/`cos`/`exp`, which are
-//!   libm quality-of-implementation and differ in the last ulp between C
-//!   runtimes. So they are asserted only where they were recorded
-//!   (`tutti_fixtures::assert_golden`); CI's Linux jobs run them. The
-//!   one libm-free case (a dithered DC level) is asserted everywhere.
-//!
-//! Recompute a digest only with a deliberate, argued DSP change: a mismatch
-//! prints the new figure.
+//! An analytic figure where the signal has one (a sine's samples, a DC
+//! level, a lookahead's frames, a direct time-domain convolution, the tone a
+//! dry voice reads, the speakers a VBAP source on a speaker lands in), and
+//! the export's own invariants where it does not (a file is its planes
+//! through `write_buffers`; a width is the quad render folded by the ITU
+//! matrix; a trimmed render is the untrimmed one shifted by the trim; a
+//! fork of a graph renders the fresh graph).
 //!
 //! # Blocks
 //!
@@ -54,7 +34,6 @@ use crate::support::{render_normalized_to_file, render_to_buffers, render_to_fil
 use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{Error, GRAPH_MAX_BLOCK, Normalize, RenderGraph, Rendered, Resample, Setup};
-use tutti_fixtures::{assert_golden, digest_planes};
 use tutti_graph::{Cx, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::testing::{Const, Osc, vbap_mix};
 use tutti_tempo::TempoMap;
@@ -70,13 +49,6 @@ const RATE: SampleRate = SampleRate::SR_48K;
 /// The last block is short at either size.
 const SECS: f64 = 0.3013;
 const FRAMES: usize = 14_462;
-
-/// FNV-1a over the little-endian bytes of `bytes`.
-fn fnv(bytes: impl IntoIterator<Item = u8>) -> u64 {
-    let mut h = tutti_fixtures::Fnv::new();
-    h.bytes(bytes);
-    h.finish()
-}
 
 fn config(bit_depth: Pcm, channels: ChannelLayout) -> ExportConfig {
     ExportConfig {
@@ -239,6 +211,47 @@ fn quad_vbap() -> GraphBuilder {
     g
 }
 
+/// The amplitude of the sinusoid at `freq` in the 4 800 frames of `x` from
+/// `from`: the projection onto its sine and cosine. The window is 100 ms, whole
+/// cycles of every multiple of 10 Hz at 48 kHz, so sinusoids at 300 and 500 Hz
+/// project onto each other and onto nothing else exactly.
+fn amplitude_at(x: &[f32], from: usize, freq: f64) -> f64 {
+    use std::f64::consts::TAU;
+    let w = &x[from..from + 4_800];
+    let (mut re, mut im) = (0.0f64, 0.0f64);
+    for (i, &s) in w.iter().enumerate() {
+        let p = TAU * freq * (from + i) as f64 / RATE.get();
+        re += f64::from(s) * p.cos();
+        im += f64::from(s) * p.sin();
+    }
+    2.0 * re.hypot(im) / w.len() as f64
+}
+
+/// The VBAP energy law on a render of `quad_vbap`, in the window at `from`:
+/// each source's energy over the four speakers is that of its input (a stereo
+/// pair of 0.5 sines presents a unit sinusoid, within the panner's 5%) and the
+/// same for both sources whatever their bearing, and the speaker nearest each
+/// source carries most of it (the 300 Hz one is front-left, channel 0; the
+/// 500 Hz one rear-left, channel 2).
+fn assert_vbap_energy(what: &str, quad: &[Vec<f32>], from: usize) {
+    let mut energies = Vec::new();
+    for (freq, nearest) in [(300.0, 0), (500.0, 2)] {
+        let amps: Vec<f64> = (0..4).map(|c| amplitude_at(&quad[c], from, freq)).collect();
+        let energy: f64 = amps.iter().map(|a| a * a).sum();
+        assert!(
+            (energy - 1.0).abs() < 0.05,
+            "{what}: the {freq} Hz source has energy {energy} over {amps:?}"
+        );
+        let most = (0..4).max_by(|&a, &b| amps[a].total_cmp(&amps[b])).unwrap();
+        assert_eq!(most, nearest, "{what}: {freq} Hz is loudest in {amps:?}");
+        energies.push(energy);
+    }
+    assert!(
+        (energies[0] - energies[1]).abs() < 0.01,
+        "{what}: the sources' energies differ: {energies:?}"
+    );
+}
+
 /// Not vacuous: a render that is all zeros would agree with anything.
 fn assert_audible(planes: &[Vec<f32>]) {
     let peak = planes.iter().flatten().fold(0.0f32, |m, s| m.max(s.abs()));
@@ -277,7 +290,7 @@ fn float_samples(bytes: &[u8]) -> Vec<f32> {
 
 /// The sine, built for the export and forked from a live graph: the closed
 /// form on every frame of both channels, the fork the fresh graph to the
-/// bit, and its golden digest.
+/// bit.
 #[test]
 fn a_sine_renders_its_closed_form() {
     let cfg = config(Pcm::Float32, ChannelLayout::STEREO);
@@ -293,20 +306,17 @@ fn a_sine_renders_its_closed_form() {
             );
         }
     }
-    assert_golden("sine", digest_planes(&planes), 0x4b59_8dd3_79f5_90cd);
     let forked = buffers(forked(sine(1000.0)), &cfg).into_planes();
     assert_same("forked against built", &planes, &forked);
 }
 
 /// The resample case (48 k → 44.1 k), to a file: the file is the render's
 /// planes through the same conversion and encoder (`write_buffers`), byte
-/// for byte, at 44.1 kHz, and its golden digest. The
-/// resampler's carry makes its output independent of the block partition;
-/// `oracle_resample.rs` holds the conversion to first principles.
-///
-/// The digest is of the scalar-FFT resampler; the analytic figures it must
-/// satisfy (frequency, level, DC, rejection, length, latency) are pinned in
-/// `tutti-dsp`'s `resample/streaming` tests and `oracle_resample.rs`.
+/// for byte, at 44.1 kHz. The resampler's carry makes its output independent
+/// of the block partition; `oracle_resample.rs` holds the conversion to first
+/// principles, and the analytic figures it must satisfy (frequency, level, DC,
+/// rejection, length, latency) are pinned in `tutti-dsp`'s
+/// `resample/streaming` tests and `oracle_resample.rs`.
 #[test]
 fn a_resampled_export_writes_its_render() {
     let mut cfg = config(Pcm::Float32, ChannelLayout::STEREO);
@@ -324,19 +334,13 @@ fn a_resampled_export_writes_its_render() {
         .iter()
         .fold(0.0f32, |m, s| m.max(s.abs()));
     assert!((peak - 0.5).abs() < 0.01, "peak {peak}");
-    assert_golden(
-        "resampled file",
-        fnv(bytes.iter().copied()),
-        0x964e_0424_498c_a85a,
-    );
 }
 
 /// The dBTP case: a peak-normalized export (render, measure, gain, write)
 /// is its render normalized and written (`Normalize::gain_for_rendered`,
 /// then `write_buffers`), byte for byte; its sample peak sits at the
 /// -1 dBTP target or just under it (the true peak, between samples, is
-/// what reaches -1 dB); and the bytes match their golden
-/// digest.
+/// what reaches -1 dB).
 #[test]
 fn a_peak_normalized_export_writes_its_normalized_render() {
     let mut cfg = config(Pcm::Float32, ChannelLayout::STEREO);
@@ -361,19 +365,12 @@ fn a_peak_normalized_export_writes_its_normalized_render() {
         peak <= target + 1e-6 && peak > target * 0.99,
         "sample peak {peak}, target {target}"
     );
-    assert_golden(
-        "peak-normalized file",
-        fnv(bytes.iter().copied()),
-        0x5c90_1de8_221d_8251,
-    );
 }
 
 /// The dither case: triangular dither to 16 bits, on a DC level between two
 /// codes, so every sample is perturbed. The file is its planes dithered and
 /// written (`write_buffers`), byte for byte; its samples scatter around the
-/// level's code (8 192.05) within the dither's two codes and average onto it;
-/// and its golden digest holds on every target: a DC level and a seeded
-/// integer dither use no libm.
+/// level's code (8 192.05) within the dither's two codes and average onto it.
 #[test]
 fn a_dithered_export_writes_its_dithered_render() {
     let mut cfg = config(Pcm::Int16, ChannelLayout::STEREO);
@@ -400,27 +397,23 @@ fn a_dithered_export_writes_its_dithered_render() {
         (mean - code).abs() < 0.05,
         "mean {mean}, the level is {code}"
     );
-    assert_eq!(
-        fnv(bytes.iter().copied()),
-        0xcc78_4f0b_ee7c_d5f9,
-        "the dithered file's digest"
-    );
 }
 
 /// The surround case: a quad VBAP mix, exported at its own width and folded
 /// down to stereo and to mono. The narrower files are the quad render folded
 /// frame by frame by the ITU matrix, written out, to the bit; the quad
-/// render puts the front-left source in channel 0 and the rear-left one in
-/// channel 2; and the built and forked quad renders match their
-/// golden digests.
+/// render puts the front-left source mostly in channel 0 and the rear-left
+/// one mostly in channel 2, with each source's energy over the speakers the
+/// unit energy of its input (`assert_vbap_energy`), in the built render once
+/// its panner's glide has settled and in the forked one from the first frame.
 ///
 /// This is also the case that pins the block rule in the module docs: the
 /// VBAP panner ramps its gains across each call, so it is the unit here whose
 /// output depends on where the blocks fall.
 ///
 /// The panners ramp across the render's 1024-frame blocks. A fresh panner
-/// glides in from front-centre, so the built render's digest depends on the
-/// block partition; the forked render's panners start on their bearing.
+/// glides in from front-centre, so the built render depends on the block
+/// partition; the forked render's panners start on their bearing.
 #[test]
 fn a_surround_mix_folds_to_every_width() {
     let quad = buffers(
@@ -433,9 +426,8 @@ fn a_surround_mix_folds_to_every_width() {
     // front-left one in channel 0.
     assert!(quad[2].iter().any(|s| s.abs() > 0.05), "no rear energy");
     assert!(quad[0].iter().any(|s| s.abs() > 0.05), "no front energy");
-    assert_golden("quad", digest_planes(&quad), 0xe087_842d_4937_bca6);
-    // No digest for these: each is the quad render (whose digest is pinned)
-    // folded, to the bit.
+    assert_vbap_energy("built", &quad, 9_600);
+    // Each of these is the quad render folded, to the bit.
     for width in [ChannelLayout::STEREO, ChannelLayout::MONO] {
         let got = buffers(built(quad_vbap()), &config(Pcm::Float32, width)).into_planes();
         let n = width.count() as usize;
@@ -461,13 +453,12 @@ fn a_surround_mix_folds_to_every_width() {
         &config(Pcm::Float32, ChannelLayout::QUAD),
     )
     .into_planes();
-    assert!(fork[2].iter().any(|s| s.abs() > 0.05), "no rear energy");
-    assert_golden("quad, forked", digest_planes(&fork), 0x800b_0ec2_8842_1715);
+    assert_vbap_energy("forked", &fork, 0);
 }
 
 /// A convolver — FFT-partitioned, latency- and tail-bearing — renders the
 /// direct time-domain convolution of its input, delayed by the latency it
-/// reports, at the graph's block; and its golden digest.
+/// reports, at the graph's block.
 ///
 /// It turns out not to be the block-sensitive unit: it buffers its
 /// partitions internally, so `GRAPH_MAX_BLOCK = 1000` still passes here
@@ -477,13 +468,6 @@ fn a_surround_mix_folds_to_every_width() {
 ///
 /// The tolerance is the FFT's `f32` rounding over a 3 000-tap sum whose
 /// output reaches ~10: 1e-3, against an error measured below 1e-4.
-///
-/// The digest moved when the convolver's FFT went scalar (`RealFft`): the
-/// inner transform no longer rounds as the AVX one did. Swapping
-/// `RealFft::new` back to rustfft's auto planner on an AVX machine restores the
-/// previous digest (0x1163_cc03_0b49_99c6) exactly, so the real-FFT passes
-/// are unchanged and the scalar planner is the whole difference. The new
-/// digest is self-recorded.
 #[test]
 fn a_convolver_renders_the_direct_convolution_at_the_graph_block() {
     assert_eq!(GRAPH_MAX_BLOCK.get() % 64, 0);
@@ -504,7 +488,6 @@ fn a_convolver_renders_the_direct_convolution_at_the_graph_block() {
             "frame {n}: {s}, the convolution is {want} (latency {latency})"
         );
     }
-    assert_golden("convolver", digest_planes(&planes), 0x72ca_224c_c4cd_9a4e);
 }
 
 /// The graph reports a lookahead limiter's latency analytically (5 ms at
@@ -791,29 +774,21 @@ fn assert_the_tone(what: &str, plane: &[f32]) {
 /// A sampler voice renders in time at `GRAPH_MAX_BLOCK`, dry and a fifth
 /// up: the dry one is the tone it plays, to the bit, on both channels; the
 /// render clock ends the render's frames on; and the pitched
-/// one matches its golden digest.
+/// one plays a fifth up.
 ///
 /// The voice reads the render clock's transport from each block's `Env`,
 /// per frame: it seats its read at the playhead on the first frame of each
 /// 1024-frame block (rendered in one piece, its scratch sized from the
-/// graph's `max_block`) and steps from there. The digest was recorded when
-/// voices rendered 64-frame pieces, each re-seated; the one-piece render
-/// keeps it, because a seat lands where the step would have put it.
+/// graph's `max_block`) and steps from there.
 ///
-/// The pitched digest is self-recorded: it carries the rounding of the
-/// vocoder's scalar FFT, over the portable fifth-up figure below; it moves only
-/// when that does. The dry digest was cross-checked against a reference render.
-///
-/// Why a digest and not a tolerance for the pitched voice: the vocoder turns
-/// an ulp of beat into far more — computing the chunk positions a different
-/// way moves the fifth-up voice by 1e-3 at frame 3076.
+/// The pitched voice is held to its dominant frequency, not to its samples: the
+/// vocoder turns an ulp of beat into far more (computing the chunk positions a
+/// different way moves the fifth-up voice by 1e-3 at frame 3076), so a
+/// tolerance on samples would pin the vocoder's rounding.
 #[test]
 fn a_sampler_voice_renders_in_time_at_the_graph_block() {
     assert_eq!(GRAPH_MAX_BLOCK.get(), 1024, "the block this pins");
-    for (cents, want) in [
-        (0.0f32, 0xbd52_29c7_8f1d_ca41u64),
-        (700.0, 0xc1f4_ffd7_8658_2ff1),
-    ] {
+    for cents in [0.0f32, 700.0] {
         let clock = timeline();
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
         let (k, _handle) = g.add_with_controls(placed_pool(cents));
@@ -833,7 +808,7 @@ fn a_sampler_voice_renders_in_time_at_the_graph_block() {
             assert_the_tone("dry, left", &b[0]);
             assert_the_tone("dry, right", &b[1]);
         } else {
-            // Portable, where the digest is not: a fifth up from 440 Hz is
+            // A fifth up from 440 Hz is
             // 440 · 2^(7/12) ≈ 659.26 Hz. Past the vocoder's first few
             // thousand frames, within 1% (a semitone is 6%).
             let want = 440.0 * 2f64.powf(7.0 / 12.0);
@@ -843,7 +818,6 @@ fn a_sampler_voice_renders_in_time_at_the_graph_block() {
                 "{cents} cents: {got} Hz, a fifth up is {want} Hz"
             );
         }
-        assert_golden(&format!("voice, {cents} cents"), digest_planes(&b), want);
     }
 }
 

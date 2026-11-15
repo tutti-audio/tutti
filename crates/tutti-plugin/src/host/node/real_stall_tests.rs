@@ -51,7 +51,7 @@ const PERIOD: Duration = Duration::from_nanos((BLOCK as f64 / SAMPLE_RATE * 1e9)
 
 /// How long to actually wait per block. Generous for the same reason the PDC
 /// suite's is: a `sleep` bounds elapsed time, not CPU granted to another
-/// process, and nothing here is a timing assertion.
+/// process, and nothing else here is a timing assertion.
 const PACE: Duration = PERIOD.saturating_mul(20);
 
 /// Which `process()` call parks. Late enough that the pipeline is at steady
@@ -213,21 +213,24 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
     // server never answered read back as silence rather than stalling the
     // caller. That is the property the whole pipelined design exists for.
     const STALLED_BLOCKS: usize = 6;
-    let start = Instant::now();
+    let mut rendering = Duration::ZERO;
     for _ in 0..STALLED_BLOCKS {
+        let start = Instant::now();
         let _ = drive_block(&mut client, &mut midi_out);
+        rendering += start.elapsed();
         std::thread::sleep(PACE);
     }
-    let stalled_elapsed = start.elapsed();
 
-    // The caller was never held: only the paces it chose to take. A design that
-    // waited on the socket would add its full reply budget per block on top.
-    let pace_budget = PACE * STALLED_BLOCKS as u32 * 3;
+    // The caller was never held: only the render calls are timed, because a
+    // `sleep` bounds elapsed time from below and a loaded or timer-coalescing
+    // host (macOS) stretches it without the audio path being involved. A design
+    // that waited on the socket would add its reply timeout to every render.
+    let render_budget = PACE * STALLED_BLOCKS as u32;
     assert!(
-        stalled_elapsed < pace_budget,
-        "{STALLED_BLOCKS} blocks against a parked plugin took \
-         {stalled_elapsed:?}, over the {pace_budget:?} budget — the audio path \
-         appears to be waiting for a reply that is not coming"
+        rendering < render_budget,
+        "{STALLED_BLOCKS} blocks against a parked plugin spent {rendering:?} in \
+         render, over the {render_budget:?} budget — the audio path appears to \
+         be waiting for a reply that is not coming"
     );
 
     // --- The session survived. A missed budget is not a death.

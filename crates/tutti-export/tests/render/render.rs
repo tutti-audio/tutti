@@ -9,7 +9,7 @@
 //! `tutti-codec` turns every encoder on). `hound` decodes the results back.
 //!
 //! Every graph here is built with `tutti_graph::GraphBuilder` and rendered
-//! as a `RenderGraph`; the golden-digest pins live in `graph_source.rs`.
+//! as a `RenderGraph`.
 
 use crate::support;
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig};

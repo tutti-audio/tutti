@@ -1,8 +1,8 @@
 //! Decoding a file into a [`Wave`], and reading its header without decoding.
 //!
 //! The entry points are [`Wave::read`], [`Wave::read_metadata`] and
-//! [`Wave::from_bytes`]. Decoded samples are pinned bit-for-bit by
-//! `tests/decode_golden.rs` against committed fixtures.
+//! [`Wave::from_bytes`]. Decoded samples are held to the
+//! generator of the committed fixtures by `tests/decode_fixtures.rs`.
 
 use std::fs::File;
 use std::path::Path;
