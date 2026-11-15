@@ -1004,3 +1004,156 @@ fn a_pending_entry_that_starts_to_share_does_not_leave_a_shared_flight_without_a
         &made(&s, "b").unwrap()
     ));
 }
+
+/// What `when_loaded` runs saw: the entry's state and its pool events' order.
+fn recorder() -> (
+    Arc<Mutex<Vec<String>>>,
+    impl Fn(&'static str) -> Box<dyn FnOnce(&mut Session) + Send>,
+) {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let into = Arc::clone(&seen);
+    let make = move |what: &'static str| -> Box<dyn FnOnce(&mut Session) + Send> {
+        let seen = Arc::clone(&into);
+        Box::new(move |session: &mut Session| {
+            let stood = state(session, "a").unwrap_or_default();
+            seen.lock().unwrap().push(format!("{what} while {stood}"));
+        })
+    };
+    (seen, make)
+}
+
+#[test]
+fn when_loaded_runs_once_in_the_update_the_entry_lands_in_the_order_asked() {
+    let (mut s, spawned) = session();
+    let log = Log::default();
+    s.pool(declare(&stub("a", How::Worker, &log))).unwrap();
+    let (seen, run) = recorder();
+    s.when_loaded(&"a", run("first")).unwrap();
+    s.when_loaded(&"a", run("second")).unwrap();
+    let _ = s.update();
+    assert!(seen.lock().unwrap().is_empty(), "the load has not landed");
+    spawned.run_all();
+    assert_eq!(events(&mut s), [("a", "loaded".to_owned())]);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        ["first while loaded", "second while loaded"],
+        "in the landing's update, over the loaded entry, in the order asked"
+    );
+    let _ = s.update();
+    assert_eq!(seen.lock().unwrap().len(), 2, "each ran once");
+}
+
+#[test]
+fn when_loaded_over_a_loaded_entry_runs_in_the_next_update() {
+    let (mut s, spawned) = session();
+    let log = Log::default();
+    s.pool(declare(&stub("a", How::Worker, &log))).unwrap();
+    spawned.run_all();
+    let _ = s.update();
+    let (seen, run) = recorder();
+    s.when_loaded(&"a", run("late")).unwrap();
+    assert!(seen.lock().unwrap().is_empty(), "never inside the call");
+    let _ = s.update();
+    assert_eq!(*seen.lock().unwrap(), ["late while loaded"]);
+}
+
+#[test]
+fn when_loaded_waits_through_a_failure_and_runs_when_a_retry_lands() {
+    let (mut s, spawned) = session();
+    let log = Log::default();
+    let entry = stub("a", How::Worker, &log);
+    entry.fail.store(true, Ordering::SeqCst);
+    s.pool(declare(&entry)).unwrap();
+    let (seen, run) = recorder();
+    s.when_loaded(&"a", run("run")).unwrap();
+    spawned.run_all();
+    let _ = s.update();
+    assert_eq!(state(&s, "a").as_deref(), Some("failed"));
+    assert!(
+        seen.lock().unwrap().is_empty(),
+        "a failed entry runs nothing"
+    );
+    entry.fail.store(false, Ordering::SeqCst);
+    s.retry(&"a").unwrap();
+    spawned.run_all();
+    let _ = s.update();
+    assert_eq!(*seen.lock().unwrap(), ["run while loaded"]);
+}
+
+#[test]
+fn when_loaded_is_dropped_when_its_entry_is_released() {
+    let (mut s, spawned) = session();
+    let log = Log::default();
+    s.pool(declare(&stub("a", How::Worker, &log))).unwrap();
+    let (seen, run) = recorder();
+    s.when_loaded(&"a", run("run")).unwrap();
+    s.pool::<&'static str>(()).unwrap();
+    spawned.run_all();
+    let _ = s.update();
+    s.pool(declare(&stub("a", How::Worker, &log))).unwrap();
+    spawned.run_all();
+    let _ = s.update();
+    assert!(
+        seen.lock().unwrap().is_empty(),
+        "the run belonged to the entry released, not to the key declared after"
+    );
+}
+
+#[test]
+fn when_loaded_names_a_key_the_pool_does_not_declare_at_the_call() {
+    let (mut s, _spawned) = session();
+    let (_, run) = recorder();
+    assert_eq!(
+        s.when_loaded(&"a", run("run")),
+        Err(crate::WhenLoadedError::NotPooled("a"))
+    );
+}
+
+#[test]
+fn a_when_loaded_run_whose_entry_an_earlier_run_released_is_dropped() {
+    let (mut s, spawned) = session();
+    let log = Log::default();
+    s.pool((
+        declare(&stub("a", How::Worker, &log)),
+        declare(&stub("b", How::Worker, &log)),
+    ))
+    .unwrap();
+    spawned.run_all();
+    let _ = s.update();
+    let ran = Arc::new(Mutex::new(Vec::new()));
+    let (first, second) = (Arc::clone(&ran), Arc::clone(&ran));
+    s.when_loaded(&"a", move |session: &mut Session| {
+        first.lock().unwrap().push("a");
+        session.pool::<&'static str>(()).unwrap();
+    })
+    .unwrap();
+    s.when_loaded(&"b", move |_: &mut Session| {
+        second.lock().unwrap().push("b")
+    })
+    .unwrap();
+    let _ = s.update();
+    assert_eq!(*ran.lock().unwrap(), ["a"], "b was released by a's run");
+}
+
+#[test]
+fn a_when_loaded_run_asked_inside_a_run_waits_for_the_next_update() {
+    let (mut s, spawned) = session();
+    let log = Log::default();
+    s.pool(declare(&stub("a", How::Worker, &log))).unwrap();
+    spawned.run_all();
+    let _ = s.update();
+    let count = Arc::new(Mutex::new(0));
+    let inner = Arc::clone(&count);
+    s.when_loaded(&"a", move |session: &mut Session| {
+        *inner.lock().unwrap() += 1;
+        let again = Arc::clone(&inner);
+        session
+            .when_loaded(&"a", move |_: &mut Session| *again.lock().unwrap() += 10)
+            .unwrap();
+    })
+    .unwrap();
+    let _ = s.update();
+    assert_eq!(*count.lock().unwrap(), 1);
+    let _ = s.update();
+    assert_eq!(*count.lock().unwrap(), 11);
+}
