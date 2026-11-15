@@ -24,7 +24,7 @@ use crate::callback::with_state_mut;
 use crate::error::{Error, Result};
 use crate::property::{Element, MidiOutputCallbackInfo, MidiOutputCallbackProperty, Scope};
 use crate::status::{CANNOT_DO_IN_CURRENT_CONTEXT, NO_ERR};
-use crate::unit::{Uninitialized, Unit};
+use crate::unit::Unit;
 
 /// The answer to a call with no state or no packet list behind it.
 const NOT_INSTALLED: OSStatus = -1;
@@ -77,10 +77,10 @@ struct MidiOutState {
     /// its own parameter-number and bank runs. Fixed at install, so the render
     /// thread never grows it.
     decoders: Box<[Decoder]>,
-    /// Lists the AU delivered for a stream with no decoder (it published
-    /// fewer streams than it calls with, or more than the sixteen Groups):
-    /// dropped and counted here, read through
-    /// [`AuMidiOutput::unrouted_lists`].
+    /// Packets of the lists the AU delivered for a stream with no decoder (it
+    /// published fewer streams than it calls with, or more than the sixteen
+    /// Groups): dropped and counted here, read through
+    /// [`AuMidiOutput::unrouted_packets`].
     unrouted: Arc<AtomicU64>,
     /// Set by [`AuMidiOutput::reset`]: the next list finds every reader forgotten
     /// before it is read.
@@ -184,7 +184,7 @@ impl Decoder {
 /// null callback, so the AU stops calling, and **leaks** the state the AU's
 /// `userData` pointed at: a render may be running on another thread, and nothing
 /// in a `Drop` can know it is not. Freeing is [`withdraw`](Self::withdraw), which
-/// says what it needs.
+/// frees it when no render is in flight.
 #[must_use = "dropping it uninstalls the output and leaks its state; `withdraw` frees it"]
 pub struct AuMidiOutput {
     unit: Unit,
@@ -202,11 +202,12 @@ pub struct AuMidiOutput {
 }
 
 impl AuMidiOutput {
-    /// How many lists the AU delivered for an output stream this registration
-    /// has no reader for, since it was installed: dropped, never routed to
-    /// another stream's Group.
+    /// How many packets the AU delivered, in lists for an output stream this
+    /// registration has no reader for, since it was installed: dropped, never
+    /// routed to another stream's Group. A packet carries one or more messages,
+    /// so this is the least the events lost came to.
     #[must_use]
-    pub fn unrouted_lists(&self) -> u64 {
+    pub fn unrouted_packets(&self) -> u64 {
         self.unrouted.load(Ordering::Relaxed)
     }
 
@@ -301,14 +302,17 @@ pub fn midi_output_info(unit: &Unit) -> Option<MidiOutputInfo> {
 ///
 /// # Errors
 ///
-/// [`Error::Invalid`] when the unit already has a registration; the AU's own
+/// [`Error::Invalid`] when the unit already has a registration (or an earlier
+/// one's withdrawal was refused by the AU, which leaves the claim); the AU's own
 /// status when it refuses the property (the claim is then released).
 ///
 /// The registration holds a share of the unit, so the unit outlives it.
 pub fn install(unit: &Unit, sink: MidiOutSink) -> Result<AuMidiOutput> {
     if !unit.claim_midi_output() {
         return Err(Error::Invalid(
-            "the unit already has a MIDI-output registration".into(),
+            "the unit already has a MIDI-output registration, or the AU refused \
+             the withdrawal of an earlier one and keeps the claim"
+                .into(),
         ));
     }
     // Boxed once, here, on the control thread — the only allocation in the whole
@@ -365,45 +369,53 @@ pub fn install(unit: &Unit, sink: MidiOutSink) -> Result<AuMidiOutput> {
 }
 
 impl AuMidiOutput {
-    /// Withdraws the callback and frees the state the AU's `userData` pointed at,
-    /// returning any error the AU reported.
+    /// Withdraws the callback and frees the state the AU's `userData` pointed at.
     ///
-    /// `proof` says no render is in flight: the AU calls the callback only from
-    /// inside a render, and a render that began before the withdrawing write may
-    /// still be reading the state when it returns. A unit that is not
-    /// initialized does not render.
+    /// The callback runs only inside a render, and a render that began before
+    /// the withdrawing write may still be reading the state when it returns. So
+    /// the write comes first, then the count of renders this crate has in flight
+    /// on the unit ([`Unit::rendering`]), read after a fence: a render the count
+    /// does not show starts after the write and reads the cleared callback, and
+    /// one it shows is waited for by leaving the state allocated. No lock is
+    /// taken here or by a render. A render started outside this crate's safe
+    /// calls (`RenderUnit::get`'s `unsafe` contract) is not counted: its caller
+    /// owes that no such render overlaps a withdrawal.
     ///
     /// # Errors
-    /// `Error::Invalid` when `proof` is of another unit, or the unit has been
-    /// initialized since it was issued; `Error::Os` if the AU refuses the
-    /// clearing write. The state is then not freed (the unit may still call into
-    /// it), and the unit's claim stays.
-    pub fn withdraw(mut self, proof: &Uninitialized<'_>) -> Result<()> {
-        if !proof.holds_for(&self.unit) {
+    /// `Error::Os` if the AU refuses the clearing write: the state is not freed
+    /// (the unit may still call into it) and the unit's claim stays, so the unit
+    /// cannot register again. `Error::Invalid` if a render is in flight: the AU
+    /// no longer calls the callback for a later render, and the state is left
+    /// allocated because the render that is running may still read it.
+    pub fn withdraw(mut self) -> Result<()> {
+        self.unhook()?;
+        if !self.unit.no_render_in_flight() {
+            // The state is leaked on purpose; the claim was released with the
+            // write, and the next registration has a state of its own.
+            self.state = None;
             return Err(Error::Invalid(
-                "the proof is not of this unit, or the unit was initialized since".into(),
+                "a render of the unit is in flight: the callback is withdrawn \
+                 and its state is left allocated"
+                    .into(),
             ));
         }
-        let result = self.unhook();
-        if result.is_ok()
-            && let Some(state) = self.state.take()
-        {
+        if let Some(state) = self.state.take() {
             // SAFETY: made by `Box::into_raw` in `install`. The withdrawing write
-            // succeeded, and `proof` says the unit is not initialized, so no
-            // render is in flight and the AU holds no pointer it will use;
-            // nothing else frees it.
+            // succeeded and no render was in flight after it (the fence in
+            // `no_render_in_flight` orders the two), so the AU holds no pointer
+            // it will use and no render reads the state; nothing else frees it.
             drop(unsafe { Box::from_raw(state.as_ptr()) });
         }
-        result
+        Ok(())
     }
 
     /// Writes the callback away, so the AU calls no more, and releases the unit's
     /// claim on success. The state is not touched.
     ///
-    /// # How the withdrawal is spelled, and why a null proc is NOT it
+    /// # How the withdrawal is spelled
     ///
-    /// A REAL proc with a null `userData`: a null proc is refused with -4 on
-    /// every unit (measured on macOS 15.6), so the callback written is
+    /// Not a null proc, which every unit refuses with -4 (measured on macOS
+    /// 15.6): a real proc with a null `userData`, so the callback written is
     /// `au_midi_output_callback` with nothing to point at, which answers
     /// `NOT_INSTALLED`.
     fn unhook(&mut self) -> Result<()> {
@@ -438,7 +450,7 @@ impl Drop for AuMidiOutput {
     /// is `Send` and public), and the callback reads the state during one: freeing
     /// here could be a use-after-free inside `AudioUnitRender`. The state is a
     /// few kilobytes per registration; a host that wants it back calls
-    /// [`withdraw`](Self::withdraw) under its contract.
+    /// [`withdraw`](Self::withdraw), which frees it when no render is in flight.
     ///
     /// The status is ignored because a `Drop` has nowhere to report one.
     fn drop(&mut self) {
@@ -526,7 +538,12 @@ unsafe fn dispatch(
         .ok()
         .and_then(|stream| decoders.get_mut(stream))
     else {
-        unrouted.fetch_add(1, Ordering::Relaxed);
+        // SAFETY: `pktlist` is non-null and well formed, per this function's
+        // contract.
+        unrouted.fetch_add(
+            u64::from(unsafe { packet_count(pktlist) }),
+            Ordering::Relaxed,
+        );
         return NO_ERR;
     };
     // A list cut short by a panic last time leaves events staged; they belong
@@ -544,6 +561,28 @@ unsafe fn dispatch(
     // note-off held back is a stuck voice.
     decoder.flush(&mut flush);
     NO_ERR
+}
+
+/// The packets a `MIDIPacketList` says it holds, capped at what fits.
+///
+/// The list is at most `MAX_LIST_BYTES` (`MIDIServices.h`: a `MIDIPacketList` is
+/// never larger than 65536 bytes), and a packet takes at least its header, so a
+/// count past what fits is a lie: it is capped here, and the walk stops at the
+/// byte bound whatever the count says.
+///
+/// # Safety
+/// `pktlist` must be a non-null, well-formed `MIDIPacketList`, whose
+/// `numPackets` header field lies within it.
+unsafe fn packet_count(pktlist: *const MIDIPacketList) -> u32 {
+    // SAFETY: the field lies within the list (unaligned read, as the list may be
+    // packed).
+    let num_packets = unsafe {
+        std::ptr::read_unaligned(
+            (pktlist as *const u8).add(std::mem::offset_of!(MIDIPacketList, numPackets))
+                as *const u32,
+        )
+    };
+    num_packets.min(MAX_PACKETS)
 }
 
 /// Walks a `MIDIPacketList`, calling `f(frame_offset, packet_bytes)` once per
@@ -567,18 +606,8 @@ unsafe fn dispatch(
 /// packets laid out per `MIDIPacketNext`, each `length` bytes of `data` within the
 /// allocation.
 unsafe fn for_each_packet(pktlist: *const MIDIPacketList, mut f: impl FnMut(u32, &[u8])) {
-    // SAFETY: `pktlist` is a valid packet list: its `numPackets` header field lies within it (unaligned read, as the list may be packed).
-    let num_packets = unsafe {
-        std::ptr::read_unaligned(
-            (pktlist as *const u8).add(std::mem::offset_of!(MIDIPacketList, numPackets))
-                as *const u32,
-        )
-    };
-    // The list is at most `MAX_LIST_BYTES` (`MIDIServices.h`: a `MIDIPacketList`
-    // is never larger than 65536 bytes), and a packet takes at least its header,
-    // so a count past what fits is a lie: it is capped, and the walk below stops
-    // at the bound whatever the count says.
-    let num_packets = num_packets.min(MAX_PACKETS);
+    // SAFETY: `pktlist` is a valid packet list, which is `packet_count`'s contract.
+    let num_packets = unsafe { packet_count(pktlist) };
     // The first packet begins at the `packet` field's offset — 4, immediately
     // after `numPackets`.
     let first = std::mem::offset_of!(MIDIPacketList, packet);
@@ -943,6 +972,83 @@ mod tests {
         assert!(events[1].ump.is_note_off());
         assert_eq!(note_on(&events[4]), Some(64));
         assert_eq!(events[4].offset, 384);
+    }
+
+    /// **A list for a stream with no reader counts its packets**, each of which
+    /// carries at least one lost message, not one for the list: three packets
+    /// to stream 5 of a unit that published one stream read as 3, and the list
+    /// reaches no sink.
+    #[test]
+    fn an_unrouted_list_counts_its_packets() {
+        let mut storage = vec![0u8; 4096];
+        let packets = storage.as_mut_ptr() as *mut MIDIPacketList;
+        // SAFETY: `packets` is a buffer sized for the three small packets added.
+        unsafe {
+            let mut pkt = coreaudio_sys::MIDIPacketListInit(packets);
+            for (n, bytes) in [[0x90, 60, 100], [0x80, 60, 0], [0xB0, 7, 64]]
+                .iter()
+                .enumerate()
+            {
+                pkt = coreaudio_sys::MIDIPacketListAdd(
+                    packets,
+                    storage.len() as u64,
+                    pkt,
+                    n as u64,
+                    bytes.len() as u64,
+                    bytes.as_ptr(),
+                );
+                assert!(!pkt.is_null());
+            }
+        }
+        let delivered = Arc::new(AtomicU64::new(0));
+        let seen = Arc::clone(&delivered);
+        let unrouted = Arc::new(AtomicU64::new(0));
+        let mut state = MidiOutState {
+            sink: Box::new(move |_, events| {
+                seen.fetch_add(events.len() as u64, Ordering::Relaxed);
+            }),
+            decoders: Box::new([Decoder::new(MidiGroup::FIRST)]),
+            unrouted: Arc::clone(&unrouted),
+            reset: Arc::new(AtomicBool::new(false)),
+        };
+        // SAFETY: `state` is the only reference, and `packets` is the list built
+        // above.
+        let status = unsafe { dispatch(&mut state, 5, packets) };
+        assert_eq!(status, NO_ERR);
+        assert_eq!(unrouted.load(Ordering::Relaxed), 3);
+        assert_eq!(delivered.load(Ordering::Relaxed), 0);
+    }
+
+    /// **A withdrawal with a render in flight frees nothing**: the callback is
+    /// written away (a later render calls nothing) and the claim released, but the
+    /// state a running render may read is left allocated and the refusal says so.
+    /// Once the render ends a new registration withdraws and frees.
+    #[test]
+    fn a_withdrawal_during_a_render_leaves_the_state_allocated() {
+        let desc = coreaudio_sys::AudioComponentDescription {
+            componentType: coreaudio_sys::kAudioUnitType_Effect,
+            componentSubType: u32::from_be_bytes(*b"dely"),
+            componentManufacturer: u32::from_be_bytes(*b"appl"),
+            componentFlags: 0,
+            componentFlagsMask: 0,
+        };
+        let comp = crate::ComponentRef::first_matching(&desc).expect("AUDelay ships with macOS");
+        let (_work, handle) = tutti_plugin_types::MainWork::new();
+        let unit = Unit::new(comp, &handle).expect("instantiate");
+        assert!(unit.no_render_in_flight());
+
+        let registration = install(&unit, Box::new(|_, _| {})).expect("install");
+        let in_flight = unit.rendering();
+        assert!(!unit.no_render_in_flight());
+        assert!(matches!(registration.withdraw(), Err(Error::Invalid(_))));
+        drop(in_flight);
+        assert!(
+            unit.no_render_in_flight(),
+            "the guard's drop ends the render"
+        );
+
+        let again = install(&unit, Box::new(|_, _| {})).expect("the claim was released");
+        again.withdraw().expect("no render in flight: freed");
     }
 
     /// What `decoder` makes of `bytes` as one list at `offset`.

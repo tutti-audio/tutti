@@ -46,9 +46,10 @@ pub(crate) struct Inner {
     /// back): `kAudioUnitProperty_MIDIOutputCallback` cannot be read, so this is
     /// how a second registration is refused.
     midi_output: std::sync::atomic::AtomicBool,
-    /// `AudioUnitInitialize` has succeeded and `AudioUnitUninitialize` has not
-    /// since: what [`Unit::uninitialized`] proves the opposite of.
-    initialized: std::sync::atomic::AtomicBool,
+    /// The safe render calls of this crate in flight on the unit
+    /// ([`Unit::rendering`]): what a withdrawal checks, after its write, before
+    /// it frees what the AU's callback reads.
+    renders: std::sync::atomic::AtomicUsize,
 }
 
 // SAFETY: the instance is an opaque handle into AudioToolbox. Nothing in Rust
@@ -112,26 +113,14 @@ impl std::fmt::Debug for Unit {
     }
 }
 
-/// The proof that a [`Unit`] is not initialized, which only this crate can
-/// make ([`Unit::uninitialize`], [`Unit::uninitialized`]): an AU calls its
-/// callbacks only from inside a render, and a unit that is not initialized does
-/// not render. What needs "no render is in flight" asks for one
-/// ([`AuMidiOutput::withdraw`](crate::AuMidiOutput::withdraw)). It is issued for
-/// the moment it is asked for and checked again where it is used.
-#[derive(Debug)]
-pub struct Uninitialized<'a> {
-    unit: &'a Unit,
-}
+/// A render of the unit in flight, counted until dropped ([`Unit::rendering`]).
+pub(crate) struct RenderInFlight<'a>(&'a Inner);
 
-impl Uninitialized<'_> {
-    /// Whether the proof is of `unit`, and the unit is still not initialized.
-    pub(crate) fn holds_for(&self, unit: &Unit) -> bool {
-        self.unit.same_unit(unit)
-            && !self
-                .unit
-                .inner
-                .initialized
-                .load(std::sync::atomic::Ordering::Acquire)
+impl Drop for RenderInFlight<'_> {
+    fn drop(&mut self) {
+        self.0
+            .renders
+            .fetch_sub(1, std::sync::atomic::Ordering::Release);
     }
 }
 
@@ -157,7 +146,7 @@ impl Unit {
                 home: std::thread::current().id(),
                 work: work.clone(),
                 midi_output: std::sync::atomic::AtomicBool::new(false),
-                initialized: std::sync::atomic::AtomicBool::new(false),
+                renders: std::sync::atomic::AtomicUsize::new(0),
             }),
             _not_sync: PhantomData,
         })
@@ -213,39 +202,46 @@ impl Unit {
         // SAFETY: `raw()` is a live instance.
         check("AudioUnitInitialize", unsafe {
             sys::AudioUnitInitialize(self.raw())
-        })?;
-        self.inner
-            .initialized
-            .store(true, std::sync::atomic::Ordering::Release);
-        Ok(())
+        })
     }
 
-    /// `AudioUnitUninitialize`. On success the unit renders no more, and the
-    /// answer is the proof of it: an [`Uninitialized`].
+    /// `AudioUnitUninitialize`.
     ///
     /// # Errors
     /// The `OSStatus` of the call.
-    pub fn uninitialize(&self) -> std::result::Result<Uninitialized<'_>, OsError> {
+    pub fn uninitialize(&self) -> std::result::Result<(), OsError> {
         // SAFETY: `raw()` is a live instance.
         check("AudioUnitUninitialize", unsafe {
             sys::AudioUnitUninitialize(self.raw())
-        })?;
-        self.inner
-            .initialized
-            .store(false, std::sync::atomic::Ordering::Release);
-        Ok(Uninitialized { unit: self })
+        })
     }
 
-    /// The proof that the unit is not initialized, so nothing renders: `None`
-    /// while it is initialized (every `initialize` that succeeded and has not
-    /// been undone by an `uninitialize`). A unit that was never initialized
-    /// is not.
-    pub fn uninitialized(&self) -> Option<Uninitialized<'_>> {
-        (!self
-            .inner
-            .initialized
-            .load(std::sync::atomic::Ordering::Acquire))
-        .then_some(Uninitialized { unit: self })
+    /// Counts a render of the unit as in flight until the guard drops. Every
+    /// call this crate makes that can run the unit's MIDI-output callback
+    /// (`AudioUnitRender`, `AudioUnitProcess`, `AudioUnitProcessMultiple`) holds
+    /// one across it. Two atomic operations and a fence: no lock, so the render
+    /// thread may call it.
+    ///
+    /// The fence orders the count before the render reads anything the AU holds,
+    /// against [`Unit::no_render_in_flight`]'s, which orders a withdrawing write
+    /// before it reads the count: a withdrawal that reads zero has its write seen
+    /// by every render that starts after.
+    pub(crate) fn rendering(&self) -> RenderInFlight<'_> {
+        self.inner
+            .renders
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
+        RenderInFlight(&self.inner)
+    }
+
+    /// Whether no render of this crate's is in flight on the unit, as of a
+    /// fence after the caller's last write to the unit.
+    pub(crate) fn no_render_in_flight(&self) -> bool {
+        std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
+        self.inner
+            .renders
+            .load(std::sync::atomic::Ordering::Acquire)
+            == 0
     }
 
     /// `AudioUnitReset` on `scope` and `element`.

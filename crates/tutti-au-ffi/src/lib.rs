@@ -77,5 +77,4 @@ pub use render_notify::{
 };
 pub use status::Status;
 pub use transport::{HostCallbacks, TransportState};
-pub use unit::Uninitialized;
 pub use unit::{PropertyInfo, RenderUnit, Unit};
