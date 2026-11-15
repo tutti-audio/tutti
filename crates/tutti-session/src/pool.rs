@@ -215,8 +215,9 @@ impl Session {
     /// value stays until the new one lands, as a [`PoolEvent::Reloaded`]), and
     /// two keys that share a load reload with one. An entry whose file can no
     /// longer be read keeps what it has, and is named as unreadable. An entry
-    /// with no stamp (its stat failed when it loaded, or its load had no worker
-    /// stage) is stamped by this check, and loads again once the file reads.
+    /// with no stamp (its stat failed when it loaded) loads again once its file
+    /// reads, and that load's worker stage stamps it; a kind whose load has no
+    /// worker stage takes no stamp, so it loads again at every refresh.
     ///
     /// This is the one place the pool reads file metadata: [`pool`](Self::pool)
     /// never does, so a key declared after its file changed shares the loaded

@@ -17,10 +17,10 @@ pub struct PoolConfig {
     pub parallel_loads: NonZeroUsize,
     /// How many of the newest snapshot holds keep their entries live: a count
     /// of holds, not of distinct entries, so several holds on one entry count
-    /// several. A
-    /// released entry kept only by older holds is parked: a kind with
-    /// something live behind it releases it ([`PoolEntry::park`](crate::PoolEntry::park)),
-    /// and recalling it loads again. A node's hold never parks. Default 8.
+    /// several. A released entry kept only by older holds is parked: a kind
+    /// with something live behind it releases it
+    /// ([`PoolEntry::park`](crate::PoolEntry::park)), and recalling it loads
+    /// again. A node's hold never parks. Default 8.
     pub live_holds: usize,
 }
 
