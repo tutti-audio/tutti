@@ -1,4 +1,4 @@
-use tutti_types::{BusTopology, SampleRate, Seconds};
+use tutti_types::{Amplitude, BusTopology, Gain, SampleRate, Seconds};
 
 use super::*;
 use crate::MaxDelayError;
@@ -59,6 +59,11 @@ fn a_max_delay_is_a_line_of_the_exact_ceiling_of_its_frames() {
     );
 }
 
+/// `v` as signed gains.
+fn gains(v: &[f32]) -> Vec<Gain> {
+    v.iter().map(|&x| Gain::new(x)).collect()
+}
+
 /// A routing refuses what it cannot hold: a matrix of the wrong length, a weight that is
 /// not finite (it would survive the scaling, `inf / inf` being NaN, and poison the loop
 /// for good) and a row that sums past 1; and it keeps what it is given.
@@ -66,7 +71,7 @@ fn a_max_delay_is_a_line_of_the_exact_ceiling_of_its_frames() {
 fn a_routing_refuses_what_it_cannot_hold() {
     let two = BusTopology::STEREO;
     assert_eq!(
-        Routing::new(two, &[0.0, 1.0, 1.0]),
+        Routing::new(two, &gains(&[0.0, 1.0, 1.0])),
         Err(RoutingError::Length {
             width: 2,
             expected: 4,
@@ -74,7 +79,7 @@ fn a_routing_refuses_what_it_cannot_hold() {
         })
     );
     for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-        let e = Routing::new(two, &[0.0, bad, 1.0, 0.0]).unwrap_err();
+        let e = Routing::new(two, &gains(&[0.0, bad, 1.0, 0.0])).unwrap_err();
         assert!(
             matches!(
                 e,
@@ -86,14 +91,17 @@ fn a_routing_refuses_what_it_cannot_hold() {
             ),
             "{e:?}"
         );
-        assert!(Routing::normalized(two, &[0.0, bad, 1.0, 0.0]).is_err());
+        assert!(Routing::normalized(two, &gains(&[0.0, bad, 1.0, 0.0])).is_err());
     }
     assert_eq!(
-        Routing::new(two, &[0.0, 1.0, 0.7, 0.4]),
-        Err(RoutingError::Row { row: 1, sum: 1.1 })
+        Routing::new(two, &gains(&[0.0, 1.0, 0.7, 0.4])),
+        Err(RoutingError::Row {
+            row: 1,
+            sum: Amplitude(1.1)
+        })
     );
     // A row that sums to exactly 1, and a negative weight, are held.
-    let r = Routing::new(two, &[0.5, -0.5, 1.0, 0.0]).unwrap();
+    let r = Routing::new(two, &gains(&[0.5, -0.5, 1.0, 0.0])).unwrap();
     assert_eq!(
         [
             r.weight(0, 0),
@@ -101,9 +109,13 @@ fn a_routing_refuses_what_it_cannot_hold() {
             r.weight(1, 0),
             r.weight(1, 1)
         ],
-        [0.5, -0.5, 1.0, 0.0]
+        [0.5, -0.5, 1.0, 0.0].map(Gain::new)
     );
-    assert_eq!(r.weight(9, 9), 0.0, "a channel off the bus has no weight");
+    assert_eq!(
+        r.weight(9, 9),
+        Gain::SILENT,
+        "a channel off the bus has no weight"
+    );
 }
 
 /// `normalized` is the one saturation: a row past 1 is scaled down to sum to 1 with its
@@ -111,17 +123,20 @@ fn a_routing_refuses_what_it_cannot_hold() {
 #[test]
 fn a_normalized_routing_scales_a_row_past_one_and_no_other() {
     let four = bus(4);
-    let r = Routing::normalized(four, &[1.0; 16]).unwrap();
+    let r = Routing::normalized(four, &gains(&[1.0; 16])).unwrap();
     for row in 0..4 {
-        let sum: f32 = (0..4).map(|c| r.weight(row, c).abs()).sum();
+        let sum: f32 = (0..4).map(|c| r.weight(row, c).get().abs()).sum();
         assert!((sum - 1.0).abs() < 1e-6, "row {row}: {sum}");
-        assert!((0..4).all(|c| r.weight(row, c) == 0.25));
+        assert!((0..4).all(|c| r.weight(row, c) == Gain::new(0.25)));
     }
     let mut m = [0.0; 16];
     m[1] = 0.6;
     m[2] = -0.2;
-    let r = Routing::normalized(four, &m).unwrap();
-    assert_eq!((r.weight(0, 1), r.weight(0, 2)), (0.6, -0.2));
+    let r = Routing::normalized(four, &gains(&m)).unwrap();
+    assert_eq!(
+        (r.weight(0, 1), r.weight(0, 2)),
+        (Gain::new(0.6), Gain::new(-0.2))
+    );
 }
 
 /// The presets: the swap crosses left and right, a ring feeds each channel from the one
@@ -137,12 +152,16 @@ fn the_routing_presets_are_what_their_names_say() {
             swap.weight(0, 0),
             swap.weight(1, 1)
         ],
-        [1.0, 1.0, 0.0, 0.0]
+        [1.0, 1.0, 0.0, 0.0].map(Gain::new)
     );
     let ring = Routing::ring(bus(4));
     for c in 0..4 {
         for j in 0..4 {
-            assert_eq!(ring.weight(c, j), f32::from(j == (c + 3) % 4), "({c}, {j})");
+            assert_eq!(
+                ring.weight(c, j),
+                Gain::new(f32::from(u8::from(j == (c + 3) % 4))),
+                "({c}, {j})"
+            );
         }
     }
     assert!(Routing::none(bus(3)).is_none() && !ring.is_none());

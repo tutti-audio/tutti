@@ -309,8 +309,8 @@ pub use tutti_midi_file as midi_file;
 /// that play an instrument or a live input (`MidiKeys`, sent with a `Stamp`) and a take read with (`TapEvent`, `EventTapReader`),
 /// the session's route rule, events and errors (`MidiRouteRule`, `MidiEvent`,
 /// `midi::Error`), and under `midi-hardware` a device (`DeviceId`,
-/// `DeviceInfo`), what a saved one resolves to (`Resolution`) and what an
-/// open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
+/// `DeviceInfo`), the ports the pool opens for them (`midi_input`, `midi_output`,
+/// `MidiInput`, `MidiOutput`) and what an open one said of itself (`Learned`, `SavedDevice`, `Match`), and the Profiles
 /// its MIDI-CI peers support and how to switch one (`PeerProfiles`,
 /// `ListedProfile`, `ProfileSwitch`, `ProfilesChange`). The
 /// lower layers (`Translator`, `Narrower`, `SysexAssembler`, `ClockMap`) are
@@ -342,7 +342,10 @@ pub mod midi {
         ProfilesChange, SavedDevice, Whole, WholeProfile,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
-    pub use tutti_session::Resolution;
+    pub use tutti_session::{
+        MidiInput, MidiInputInfo, MidiOutput, MidiOutputInfo, MidiPortError, OutputOptions,
+        PortCause, midi_input, midi_output,
+    };
 }
 
 /// OS MIDI I/O (`tutti-midi-hardware`): CoreMIDI, ALSA seq-UMP. Feature

@@ -266,16 +266,16 @@ fn a_plugin_added_mid_export_is_told_offline() {
     await_latency(&s, late, base, "told Realtime once the export ends");
 }
 
-/// **With recovery off, a plugin dead for the window is removed, and reported
-/// once.** The probe
+/// **With recovery off, a plugin dead for the window stays silent at its node,
+/// and is reported once.** The probe
 /// aborts on its first block; once the engine latches the death, the
 /// debounce counts unhealthy observations at the `now`s the test passes:
 /// `Liveness::DEATHS` of them inside the window (50 ms) are still Failing,
-/// with the node in place; the first past the window is Dead, the node is
-/// removed and `PluginChange::Died` names it, with the engine's cause; no update
+/// with the node in place; the first past the window is Dead, the node stays
+/// at its key, silent, and `PluginChange::Died` names it, with the engine's cause; no update
 /// after reports it again.
 #[test]
-fn a_plugin_dead_for_the_window_is_removed_and_reported_once() {
+fn a_plugin_dead_for_the_window_stays_silent_at_its_node_and_is_reported_once() {
     let mut s = session_built(&[("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "1")], |b| {
         b.plugin_recovery(None)
     });
@@ -331,10 +331,10 @@ fn a_plugin_dead_for_the_window_is_removed_and_reported_once() {
         died[0].1
     );
     assert!(
-        !s.graph_ref().contains(node),
-        "the dead plugin's node is removed"
+        s.graph_ref().contains(node),
+        "the dead plugin's node stays at its key, silent"
     );
-    assert!(s.plugin_view(node).is_err(), "and its record");
+    assert!(s.plugin_view(node).is_ok(), "and its record");
 
     assert!(plugins_at(&mut s, 200).is_empty(), "reported once");
     let again = s
@@ -715,10 +715,10 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
     }
 }
 
-/// **A plugin that fails every load is given up on, and its node removed.**
+/// **A plugin that fails every load is given up on, and its node stays silent.**
 /// Every server aborts on its first block, so each reload comes up and dies:
 /// two reloads (the policy's budget), then `PluginChange::GaveUp` naming the failures,
-/// the node and its record gone, and no `PluginChange::Died`.
+/// the node and its record kept, and no `PluginChange::Died`.
 #[test]
 fn a_plugin_that_crashes_every_time_is_given_up_on() {
     let mut s = session_built(&[("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "1")], |b| {
@@ -784,8 +784,8 @@ fn a_plugin_that_crashes_every_time_is_given_up_on() {
         "a replacement that aborts on its first block closed its stream: {:?}",
         why.last
     );
-    assert!(!s.graph_ref().contains(node), "the node is removed");
-    assert!(s.plugin_view(node).is_err(), "and its record");
+    assert!(s.graph_ref().contains(node), "the node stays at its key");
+    assert!(s.plugin_view(node).is_ok(), "and its record");
 }
 
 /// **A reload that fails to load reports the `BridgeError` as the cause's
@@ -1221,10 +1221,10 @@ fn a_plugin_that_stops_answering_is_ended_and_replaced() {
 }
 
 /// **With recovery off, a plugin that stops answering is declared hung and
-/// removed.** The same probe as above parks in `process()` for good; no policy
+/// silenced.** The same probe as above parks in `process()` for good; no policy
 /// reloads it, yet the hang is detected: the session ends its server, the death
-/// reads "stopped answering", and `PluginChange::Died` names it and removes the
-/// node, as for any dead plugin with recovery off.
+/// reads "stopped answering", and `PluginChange::Died` names it and the node
+/// stays at its key, as for any dead plugin with recovery off.
 #[test]
 fn a_plugin_that_stops_answering_is_declared_hung_with_recovery_off() {
     let once = once_file("recovery-off-hang.once");
@@ -1274,7 +1274,10 @@ fn a_plugin_that_stops_answering_is_declared_hung_with_recovery_off() {
         ),
         "{cause:?}"
     );
-    assert!(!s.graph_ref().contains(node), "the hung plugin is removed");
+    assert!(
+        s.graph_ref().contains(node),
+        "the hung plugin's node stays at its key"
+    );
 }
 
 /// **A slow plugin that still answers is not declared hung.** Every block
@@ -1436,7 +1439,7 @@ fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
         Some(kept.as_slice()),
         "the user's last state goes out with the event"
     );
-    assert!(!s.graph_ref().contains(node));
+    assert!(s.graph_ref().contains(node), "the node stays at its key");
     let _ = s.update();
     assert!(!s.graph_ref().is_edited());
 }

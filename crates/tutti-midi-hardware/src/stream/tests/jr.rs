@@ -21,13 +21,17 @@ fn jr(utility: Utility) -> Ump {
 /// A connected, settled wire and a graph reading its inlets.
 fn settled(timing: InputTiming, device: Endpoint) -> (Wire, Rig, DeviceStream) {
     let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
-    wire.session
+    let crate::Connected::Opened(inlet) = wire
+        .session
         .connect_input(&wire.id.clone(), timing)
-        .unwrap();
+        .unwrap()
+    else {
+        panic!("the wire's input was not open");
+    };
     let stream = settle(&mut wire);
     let mut rig = Rig::over(wire.session.ports().inlets(), wire.start);
     rig.run(1);
-    rig.apply();
+    rig.attach(inlet);
     (wire, rig, stream)
 }
 
@@ -85,7 +89,8 @@ fn txjr_is_asked_for_only_by_an_input_opened_for_jr() {
             PortDirection::Duplex,
             offering_both(),
         );
-        wire.session
+        let _ = wire
+            .session
             .connect_input(&wire.id.clone(), timing)
             .unwrap();
         let mut asked = Vec::new();
@@ -125,7 +130,13 @@ fn a_jr_input_places_an_event_at_its_timestamp_not_its_arrival() {
 
 /// With TXJR off (the input was opened for arrival), the same traffic leaves the
 /// event at its arrival stamp, and the JR messages are still not heard. Also
-/// where the device turns TXJR on by itself: the input did not ask for it.
+/// where the device turns TXJR on by itself: the input did not ask for it, so
+/// the event is rendered at once (M2-104 §7.2.2.3) and the device is asked to
+/// stop: one Stream Configuration Request with TXJR off, which it grants, and
+/// nothing is asked after. An input opened for arrival is, for this rule, a
+/// receiver without JR support: it places every event at its arrival and
+/// never reads a JR message.
+/// Spec: m2-104/7.2.2.3#2
 #[test]
 fn an_arrival_input_keeps_the_arrival_stamp_though_the_device_sends_jr() {
     let (mut wire, mut rig, stream) = settled(InputTiming::Arrival, offering_both());
@@ -136,23 +147,149 @@ fn an_arrival_input_keeps_the_arrival_stamp_though_the_device_sends_jr() {
         tx_jr: true,
     });
     send_ump(&wire, on, 20);
-    assert_eq!(streams(wire.poll(30)).len(), 1);
-    assert!(wire.session.stream(&wire.id).unwrap().config().tx_jr);
+    let (sent, reported) = wire.tick(30);
+    assert_eq!(reported.len(), 1);
+    assert_eq!(
+        sent,
+        [Stream::StreamConfigurationRequest(StreamConfig {
+            protocol: Protocol::Midi2,
+            rx_jr: false,
+            tx_jr: false,
+        })]
+    );
     let (frame, heard) = note_delayed_by_10ms(&wire, &mut rig);
     assert_near(frame, frame_at(1_000 + 312 + LATENCY + 10));
     assert_eq!(heard.len(), 1);
+    // The device granted it, and is not asked again.
+    assert_eq!(wire.tick(1_400).1.len(), 1);
+    assert!(!wire.session.stream(&wire.id).unwrap().config().tx_jr);
+    assert!(wire.tick(1_410).0.is_empty());
+}
+
+/// M2-104 §7.1.6.2: an input that asked for TXJR expects no JR Timestamps until
+/// the Stream Configuration Notification arrives. A JR Clock and a JR Timestamp
+/// that come before it are not heard, and the event is placed at its arrival.
+/// Spec: m2-104/7.1.6.2#5
+#[test]
+fn no_jr_is_expected_before_the_notification() {
+    let mut wire = session_over(
+        UmpCapability::midi2(),
+        PortDirection::Duplex,
+        offering_both(),
+    );
+    let crate::Connected::Opened(inlet) = wire
+        .session
+        .connect_input(&wire.id.clone(), InputTiming::JitterReduction)
+        .unwrap()
+    else {
+        panic!("the wire's input was not open");
+    };
+    let mut rig = Rig::over(wire.session.ports().inlets(), wire.start);
+    rig.run(1);
+    rig.attach(inlet);
+    let (frame, heard) = note_delayed_by_10ms(&wire, &mut rig);
+    assert_near(frame, frame_at(1_000 + 312 + LATENCY + 10));
+    assert_eq!(heard.len(), 1, "the JR messages are not heard");
+    assert!(settle(&mut wire).config().tx_jr);
+}
+
+/// The request to stop JR Timestamps goes once an episode, an episode being
+/// the time the device's TXJR is on against an input that wants it off
+/// (M2-104 §7.2.2.3): a device that keeps TXJR on is not asked again when a
+/// Function Block name changes, and is asked again after it has turned TXJR
+/// off and on. A refused request is retried until the output takes it.
+/// Spec: m2-104/7.2.2.3#2
+#[test]
+fn the_request_to_stop_jr_is_made_once_per_episode() {
+    let (mut wire, _rig, _) = settled(InputTiming::Arrival, offering_both());
+    let on = |tx_jr| {
+        Stream::StreamConfigurationNotification(StreamConfig {
+            protocol: Protocol::Midi2,
+            rx_jr: false,
+            tx_jr,
+        })
+    };
+    let requests = |wire: &Wire| {
+        wire.counters
+            .take_sent(wire.raw)
+            .into_iter()
+            .filter(|u| {
+                matches!(
+                    u.decode(),
+                    Ok(Message::Stream(Stream::StreamConfigurationRequest(_)))
+                )
+            })
+            .count()
+    };
+    wire.counters.take_sent(wire.raw);
+    // The device turns TXJR on and keeps it on when asked.
+    send_ump(&wire, on(true), 20);
+    wire.poll(30);
+    assert_eq!(requests(&wire), 1);
+    send_ump(&wire, on(true), 40);
+    wire.poll(50);
+    assert_eq!(requests(&wire), 0, "a refusal changes nothing");
+    // A block's name changes: the stream changes and the device is not asked.
+    let renamed = Stream::FunctionBlockName {
+        block: tutti_ump::FunctionBlockId::new(0).unwrap().into(),
+        form: tutti_ump::Form::Complete,
+        bytes: *b"Other\0\0\0\0\0\0\0\0",
+    };
+    send_ump(&wire, renamed, 60);
+    assert_eq!(streams(wire.poll(70)).len(), 1, "the name changed");
+    assert_eq!(requests(&wire), 0);
+    // TXJR goes off, which ends the episode, and on again: asked again.
+    send_ump(&wire, on(false), 80);
+    wire.poll(90);
+    assert_eq!(requests(&wire), 0);
+    send_ump(&wire, on(true), 100);
+    wire.poll(110);
+    assert_eq!(requests(&wire), 1);
+}
+
+/// A reconnected input negotiates afresh: the request to stop JR goes again
+/// for the new connection even though the device kept TXJR on the last time.
+/// Spec: m2-104/7.2.2.3#2
+#[test]
+fn a_reconnected_input_asks_again_to_stop_jr() {
+    let (mut wire, _rig, _) = settled(InputTiming::Arrival, offering_both());
+    let on = Stream::StreamConfigurationNotification(StreamConfig {
+        protocol: Protocol::Midi2,
+        rx_jr: false,
+        tx_jr: true,
+    });
+    send_ump(&wire, on, 20);
+    wire.poll(30);
+    assert!(wire.session.disconnect_input(&wire.id.clone()));
+    let _ = wire
+        .session
+        .connect_input(&wire.id.clone(), InputTiming::Arrival)
+        .unwrap();
+    wire.counters.take_sent(wire.raw);
+    // A new device state answers the new negotiation, and turns TXJR on again.
+    let settled = settle(&mut wire);
+    assert!(!settled.config().tx_jr);
+    send_ump(&wire, on, 200);
+    wire.poll(210);
+    let asked = wire.counters.take_sent(wire.raw).into_iter().any(|u| {
+        matches!(
+            u.decode(),
+            Ok(Message::Stream(Stream::StreamConfigurationRequest(c))) if !c.tx_jr
+        )
+    });
+    assert!(asked);
 }
 
 /// A device that does not offer TXJR settles with it off, so an input opened for
 /// JR is placed by arrival as any other.
 #[test]
 fn a_jr_input_of_a_device_without_txjr_is_timed_by_arrival() {
-    let device = Endpoint::new(Capabilities {
+    let device = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         rx_jr: true,
         tx_jr: false,
-    })
+    }))
     .with_function_block(block());
     let (wire, mut rig, stream) = settled(InputTiming::JitterReduction, device);
     assert!(!stream.config().tx_jr);
@@ -184,7 +321,7 @@ fn a_timestamp_before_any_clock_places_the_event_at_its_arrival() {
 
 /// Events keep the order they arrived in (M2-104 §7.2.2.2): a second note whose
 /// timestamp maps earlier than the first's is not placed before it.
-/// Spec: m2-104/7.2.2.2#3
+/// Spec: m2-104/7.2.2.2#3, m2-104/7.2.2.2#5
 #[test]
 fn events_are_placed_in_the_order_they_arrive() {
     let (wire, mut rig, _) = settled(InputTiming::JitterReduction, offering_both());
@@ -229,7 +366,8 @@ fn changing_an_open_inputs_timing_keeps_its_queued_events() {
         );
     }
     let id = wire.id.clone();
-    wire.session
+    let _ = wire
+        .session
         .connect_input(&id, InputTiming::JitterReduction)
         .unwrap();
     assert_eq!(wire.counters.opens(), 1, "the port is not reopened");

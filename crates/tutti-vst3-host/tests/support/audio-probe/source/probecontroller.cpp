@@ -14,6 +14,11 @@ namespace Vst {
 tresult PLUGIN_API AudioProbeController::setParamNormalized (ParamID id, ParamValue value)
 {
 	const tresult r = EditController::setParamNormalized (id, value);
+	if (id == kParamRequestIoChanged && value != 0.0 && probeMisbehaviour () == kMisbehaveObservedWritableLate)
+	{
+		if (Parameter* observed = getParameterObject (kParamObservedProcessMode))
+			observed->getInfo ().flags &= ~ParameterInfo::kIsReadOnly;
+	}
 	if (id == kParamRequestIoChanged && value != 0.0 && componentHandler)
 		componentHandler->restartComponent (kIoChanged);
 	return r;

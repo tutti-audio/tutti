@@ -3,10 +3,9 @@
 //! It builds a session, adds a synth as an instrument, sets MPE once, builds a
 //! MIDI file and plays it as a clip, sends live notes, routes the hardware
 //! input by Group, records a take from the live input and drains it, reads the
-//! session's MIDI events, lists the devices, and handles the one MIDI error.
-//! It needs no hardware: a session with no OS MIDI layer lists no devices and
-//! refuses a connection with [`midi::Error::NoHardware`](tutti::midi::Error),
-//! which the program prints and goes on.
+//! session's MIDI events, lists the devices, and declares an input port for the
+//! first one listed. It needs no hardware: a session with no OS MIDI layer
+//! lists no devices, and the program goes on without a port.
 //!
 //! ```text
 //! cargo run -p tutti --features midi-hardware,synth --example midi_all
@@ -15,8 +14,8 @@
 //! CI runs it as a test (`test = true`).
 //!
 //! **Not covered here:** MIDI Time Code out, and the MIDI-CI session
-//! ([`Midi::enable_ci`](tutti::Midi::enable_ci) and
-//! [`Midi::ci_peers`](tutti::Midi::ci_peers)), which needs a peer device.
+//! ([`Midi::enable_ci`](tutti::Midi::enable_ci) and the peers a
+//! [`MidiInput`](tutti::midi::MidiInput) lists), which needs a peer device.
 
 use tutti::midi::{self, MidiRouteRule, TakePlacement};
 use tutti::midi_file::{FileEvent, SmfFormat};
@@ -42,10 +41,10 @@ struct Outcome {
     take: Vec<(Frame, Frame)>,
     /// The session's MIDI events, as their debug text.
     events: Vec<String>,
-    /// The devices listed, and whether connecting an absent one was refused as
-    /// the session has no OS layer or no such device.
+    /// The devices listed, and whether an input port was declared for the first
+    /// of them.
     devices: usize,
-    refused: bool,
+    declared: bool,
 }
 
 /// A session for the program: the hardware's OS layer if it opens, else none.
@@ -143,30 +142,25 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
         .to(synth.node());
     let route = s.midi().route(rule)?;
 
-    // Devices, behind a check that there are any. Connecting one that is not
-    // there is the one MIDI error, with its cause as the source.
-    let devices = list_devices(&mut s);
-    let refused = match s.midi().connect_input("No Such Keyboard") {
-        Err(midi::Error::NoHardware) => {
-            println!("no OS MIDI layer: a connection is refused");
-            true
-        }
-        Err(midi::Error::Hardware(e)) => {
-            println!("no such device: {e}");
-            true
-        }
-        Err(e) => return Err(e.into()), // any other MIDI failure is the session's `Error::Midi`
-        Ok(()) => false,
-    };
-    // A device saved by an earlier run comes back through its `DeviceInfo`; only
-    // an exact match is connected, the rest are for the app to ask about:
+    // Devices, behind a check that there are any. A saved device, a `DeviceInfo`
+    // listed or kept from an earlier run, is declared as an input port of the
+    // pool: it loads with the port reading `Lost` if the device is away, opens
+    // when it arrives and is surely the same one, and fails to load, with the
+    // candidates, only when several present devices could be it.
     //
-    //     match s.midi().reconnect_saved(&saved)? {
-    //         Resolution::Connected(id) => ..,
-    //         Resolution::SameName(info) => ask(info),
-    //         Resolution::Ambiguous(candidates) => ask_among(candidates),
-    //         Resolution::Missing => ..,
-    //     }
+    //     s.pool(midi_input("keys", saved))?;
+    //     let keys = s.midi_input(&"keys")?;   // after the entry has loaded
+    //     keys.presence();                     // Live, Lost(PortCause::Unplugged), ...
+    let devices = list_devices(&mut s);
+    let first = s
+        .midi()
+        .devices()
+        .into_iter()
+        .find(|device| device.direction.is_input());
+    let declared = first.is_some();
+    if let Some(device) = first {
+        s.pool(midi::midi_input("keys", device))?;
+    }
     s.midi().unroute(route)?;
 
     // Play, render, and read what the session reports.
@@ -201,7 +195,7 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
         take,
         events,
         devices,
-        refused,
+        declared,
     })
 }
 
@@ -225,7 +219,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for e in &o.events {
         println!("session event: {e}");
     }
-    let _ = (o.devices, o.refused);
+    let _ = (o.devices, o.declared);
     Ok(())
 }
 
@@ -235,10 +229,9 @@ mod tests {
 
     /// **The program runs offline and hears what it played**: the clip and the
     /// live notes sound (a peak), the take holds the two live notes on their
-    /// frames and each is placed 480 frames later (the trim), a connection to a
-    /// device that is not there is refused, and no device is listed on a runner
-    /// with none (a runner that has some lists them, so only the count of what
-    /// the session saw is held to its own list).
+    /// frames and each is placed 480 frames later (the trim), and a port is
+    /// declared exactly when the runner lists an input (a runner that has some
+    /// lists them, so only what the session saw is held to its own list).
     #[test]
     fn the_program_runs_and_hears_what_it_played() {
         let o = run().expect("the program runs");
@@ -247,7 +240,10 @@ mod tests {
         for (frame, placed) in &o.take {
             assert_eq!(placed.get(), frame.get() + 480, "the trim moves it later");
         }
-        assert!(o.refused, "a keyboard that is not there is refused");
+        assert!(
+            !o.declared || o.devices > 0,
+            "a port is declared only for a listed device"
+        );
         assert!(
             o.events.iter().all(|e| !e.contains("EventsDropped")),
             "nothing dropped: {:?}",

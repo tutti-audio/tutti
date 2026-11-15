@@ -131,6 +131,9 @@ pub enum Feeder {
     Instrument,
     /// A host's declarations.
     Declared,
+    /// The session's MIDI clock, which feeds every output port
+    /// (`midi_output`, feature `midi-hardware`).
+    Clock,
 }
 
 tutti_types::id! {
@@ -1000,6 +1003,38 @@ impl Graph {
                 Ok(())
             }
             Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
+            Err(ReplaceRefused::Busy(_)) => unreachable!("checked above"),
+        }
+    }
+
+    /// Puts the silent stand-in of a plugin that is gone at `node`
+    /// ([`Lost`](crate::plugin::Lost)), the plugin's record kept: the node keeps
+    /// its key, its ports, its wiring and its latency, renders silence and has
+    /// no tail, and the plugin's node is retired to the control thread. Returns
+    /// whether the swap was made: not while the graph re-prepares. A swap parked
+    /// for the same node (a crossfade waiting for the re-prepare) lands after the
+    /// stand-in and wins.
+    ///
+    /// # Errors
+    ///
+    /// A poisoned graph, or a `node` not in it.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn silence_plugin(&mut self, node: NodeKey) -> Result<bool, CrossfadeRefused> {
+        if let Some(cause) = self.editor.poison_cause() {
+            return Err(CrossfadeRefused::Poisoned(cause.to_owned()));
+        }
+        let Some(shape) = self.shape(node).filter(|_| self.nodes.contains_key(&node)) else {
+            return Err(CrossfadeRefused::NoSuchNode(node));
+        };
+        if self.editor.is_repreparing() {
+            return Ok(false);
+        }
+        let stand_in = tutti_graph::ForkByClone(crate::plugin::Lost::of(shape));
+        match self.swap_unit(node, stand_in, tutti_graph::DECLICK, FadeLaw::default()) {
+            Ok(_) => Ok(true),
+            Err(ReplaceRefused::Failed(refused)) => Err(refused),
+            // A re-prepare is `swap_unit`'s only cause for `Busy`, and it was
+            // checked above on this thread.
             Err(ReplaceRefused::Busy(_)) => unreachable!("checked above"),
         }
     }
@@ -3051,9 +3086,20 @@ impl Graph {
         Ok(())
     }
 
+    /// Makes the root declaration last made a cut: the commit that carries
+    /// it renders no old root.
+    pub(crate) fn harden_root(&mut self) {
+        self.editor.set_root_fade(None);
+    }
+
+    /// Declares the root's topology. A declaration that changes it is the next
+    /// root, and the commit that carries it crossfades the old root's outputs
+    /// into the new root's over the declick length (`Editor::set_root_fade`),
+    /// unless `hard`: the new root takes over at the commit's block.
     pub(crate) fn declare_root(
         &mut self,
         root: Option<tutti_types::ChannelTopology>,
+        hard: bool,
     ) -> Result<(), tutti_graph::RootError> {
         let placed = self.placed_topology();
         let width = match &root {
@@ -3097,6 +3143,14 @@ impl Graph {
         let bus = root
             .as_ref()
             .map(|r| tutti_types::BusTopology::try_from(r).expect("a checked root fits a bus"));
+        // Both roots render the same nodes, in phase.
+        self.editor.set_root_fade((!hard).then(|| {
+            tutti_graph::Fade::seconds(
+                tutti_graph::DECLICK,
+                self.editor.prepare().sample_rate(),
+                tutti_graph::FadeLaw::EqualAmplitude,
+            )
+        }));
         let spec = self.editor.spec_mut();
         if spec.root != bus {
             spec.root = bus;
@@ -3321,15 +3375,35 @@ fn render(
         output.fill(0.0);
         return;
     };
-    let (ins, outs) = (plan.global_inputs() as usize, plan.global_outputs());
+    let (ins, outs, root) = (
+        plan.global_inputs() as usize,
+        plan.rendered_outputs(),
+        plan.global_outputs(),
+    );
     scratch.resize_with(outs, || vec![0.0]);
     let inputs: Vec<&[f32]> = (0..ins)
         .map(|c| input.get(c).map_or(&[0.0f32][..], std::slice::from_ref))
         .collect();
+    let fade = exec.root_fade();
     let mut outputs: Vec<&mut [f32]> = scratch.iter_mut().map(|c| &mut c[..1]).collect();
     exec.process(1, transport, &inputs, &mut outputs);
+    // With no device there is no fold: the root's channels are the output's
+    // by index, and a root change crossfades channel by channel, the old
+    // root's channels after the new root's.
+    let gains = fade.map(|f| f.fade.law.gains(f.done.get(), f.fade.duration.get()));
     for (c, o) in output.iter_mut().enumerate() {
-        *o = scratch.get(c).map_or(0.0, |s| s[0]);
+        let new = scratch.get(c).filter(|_| c < root).map_or(0.0, |s| s[0]);
+        *o = match (fade, gains) {
+            (Some(f), Some((go, gn))) => {
+                let old = if c < f.width {
+                    scratch[root + c][0]
+                } else {
+                    0.0
+                };
+                old * go + new * gn
+            }
+            _ => new,
+        };
     }
 }
 
@@ -3508,5 +3582,69 @@ mod tail_tests {
             !g.refresh_node_tail(NodeKey(9_999), Tail::None),
             "no such node"
         );
+    }
+}
+
+#[cfg(test)]
+mod root_fade_tests {
+    use super::*;
+    use std::sync::Arc;
+    use tutti_graph::{FadeLaw, ForkByClone, OutPort, RootId, Source};
+    use tutti_nodes::testing::Const;
+    use tutti_tempo::TempoMap;
+    use tutti_types::{Bed, Bpm};
+
+    fn graph() -> (Graph, NodeKey) {
+        let map = TempoMap::constant(Bpm::of(120.0)).expect("a tempo");
+        let mut g = Graph::new(
+            ChannelLayout::STEREO,
+            2,
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples(64)),
+            None,
+            tutti_transport::TempoReader::fixed(Arc::new(map)),
+        );
+        let (node, _) = g.add(ForkByClone(Const::mono(1.0)));
+        let node = NodeKey::from(node);
+        g.editor
+            .spec_mut()
+            .topology
+            .set_outputs([Source::Node(OutPort { node, port: 0 }), Source::Zero]);
+        g.commit();
+        (g, node)
+    }
+
+    /// **A root declaration crossfades by the declick unless it is hard**: the
+    /// plan of the commit that carries the next root also renders the old
+    /// root's outputs, the old root's id and the root's width naming where
+    /// they begin, over the declick length (5 ms, 240 frames at 48 kHz) along
+    /// the equal-amplitude law; a hard declaration carries none.
+    #[test]
+    fn a_root_declaration_crossfades_for_the_declick_unless_hard() {
+        let (mut g, _) = graph();
+        g.declare_root(Some(Bed::Surround51.topology()), false)
+            .expect("declares");
+        assert!(matches!(g.commit(), Committed::Sent));
+        let plan = g.editor.base().expect("a plan");
+        let bank = plan.root_bank().expect("the old root is carried");
+        assert_eq!(bank.old, RootId::GENESIS);
+        assert_eq!(bank.base, 6, "the new root's width");
+        assert_eq!(
+            plan.rendered_outputs(),
+            6 + 2,
+            "and the old root's after it"
+        );
+        assert_eq!(plan.global_outputs(), 6);
+        assert_eq!(
+            (bank.fade.duration, bank.fade.law),
+            (Samples(240), FadeLaw::EqualAmplitude)
+        );
+
+        g.declare_root(Some(Bed::Stereo.topology()), true)
+            .expect("declares");
+        assert!(matches!(g.commit(), Committed::Sent));
+        let plan = g.editor.base().expect("a plan");
+        assert_eq!(plan.root_bank(), None, "a hard declaration cuts");
+        assert_eq!(plan.rendered_outputs(), 2);
     }
 }

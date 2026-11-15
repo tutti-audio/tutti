@@ -20,7 +20,7 @@ use tutti_plugin_types::{PointPool, RtMidiEvents};
 use tutti_types::{ChannelLayout, ChannelTopology, SampleRate};
 
 use crate::error::{LoadStage, Result, Vst3Error};
-use crate::events::Stager;
+use crate::events::{OutputStream, Stager};
 use crate::types::{ParameterChanges, ProcessMode, Vst3Sample};
 use tutti_vst3_ffi::{
     BusBuffers, BusDirection, EventList, MIN_POINT_ROOM, MediaType, ParameterChangesImpl,
@@ -227,6 +227,9 @@ impl<T: Vst3Sample> Staged<T> {
                     PointPool::default(),
                 ),
                 emitted_midi: RtMidiEvents::new(),
+                emitted_stream: OutputStream::new(),
+                lost_told: 0,
+                emitted_lost: 0,
                 emitted_param_changes,
             },
             cc: CcRoute::following(

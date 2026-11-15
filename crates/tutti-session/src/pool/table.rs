@@ -1144,10 +1144,16 @@ impl<C: Clock> Pool<C> {
 
     /// `E`'s handle for the loaded entry under `key`.
     #[cfg_attr(
-        not(any(test, feature = "sampler", feature = "soundfont", feature = "plugin")),
+        not(any(
+            test,
+            feature = "sampler",
+            feature = "soundfont",
+            feature = "plugin",
+            feature = "midi-hardware"
+        )),
         expect(
             dead_code,
-            reason = "the readers of the kinds (features `sampler`, `soundfont`, `plugin`) are its callers"
+            reason = "the readers of the kinds (features `sampler`, `soundfont`, `plugin`, `midi-hardware`) are its callers"
         )
     )]
     pub(crate) fn handle<K, E>(&self, key: &K) -> Result<E::Handle, HandleError<K>>

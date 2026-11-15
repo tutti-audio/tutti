@@ -2,8 +2,7 @@
 
 /// The most per-frame control lanes an [`Inputs`] carries.
 ///
-/// Four serve the dynamics: a multiband's thresholds, one a band at the most, are the
-/// widest (a limiter's threshold and ceiling are two).
+/// Four serve every effect that reads lanes (a limiter's threshold and ceiling are two).
 pub const MAX_LANES: usize = 4;
 
 /// The input of an effect's [`Recurrence::run`](crate::Recurrence::run) and of

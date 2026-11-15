@@ -55,7 +55,9 @@ fn test_note_on_roundtrip() {
     let event = (at(10), midi::note_on(MidiChannel::of(3), 60, 0x8000));
     let clap = first(&event).expect("NoteOn should convert");
     assert!(matches!(clap, ClapEvent::NoteOn(_)));
-    let back = clap.to_midi().expect("round-trip should succeed");
+    let back = clap
+        .to_midi(&mut tutti_midi_protocol::Translator::new())
+        .expect("round-trip should succeed");
     assert_eq!(back.offset, 10);
     assert!(matches!(
         channel_voice(back.ump),
@@ -69,7 +71,9 @@ fn test_note_off_roundtrip() {
     let event = (at(20), midi::note_off(MidiChannel::of(5), 72, 0x4000));
     let clap = first(&event).expect("NoteOff should convert");
     assert!(matches!(clap, ClapEvent::NoteOff(_)));
-    let back = clap.to_midi().expect("round-trip should succeed");
+    let back = clap
+        .to_midi(&mut tutti_midi_protocol::Translator::new())
+        .expect("round-trip should succeed");
     assert_eq!(back.offset, 20);
     assert!(matches!(
         channel_voice(back.ump),
@@ -189,7 +193,7 @@ fn test_output_event_list_push_note_on() {
     }
 
     assert_eq!(list.len(), 1);
-    let midi_out = midi_events(&list);
+    let midi_out = midi_events(&mut list);
     assert_eq!(midi_out.len(), 1);
     let event = &midi_out[0];
     assert!(matches!(
@@ -244,7 +248,7 @@ fn a_wildcard_note_off_resolves_by_note_id_not_by_masking() {
         assert!(push_fn(raw as *const _, &note.header as *const _));
     }
 
-    let midi_out = midi_events(&list);
+    let midi_out = midi_events(&mut list);
     assert_eq!(midi_out.len(), 1, "the note-off must survive conversion");
     let event = &midi_out[0];
     assert!(event.ump.is_note_off());
@@ -299,7 +303,7 @@ fn a_wildcard_note_off_with_an_opaque_note_id_is_dropped() {
     }
 
     assert!(
-        midi_events(&list).is_empty(),
+        midi_events(&mut list).is_empty(),
         "an unaddressable wildcard must be dropped, not bound to a phantom voice"
     );
 }
@@ -328,7 +332,7 @@ fn test_output_event_list_push_midi_cc() {
         assert!(push_fn(raw as *const _, &midi.header as *const _));
     }
 
-    let midi_out = midi_events(&list);
+    let midi_out = midi_events(&mut list);
     assert_eq!(midi_out.len(), 1);
     let event = &midi_out[0];
     assert_eq!(event.offset, 33);

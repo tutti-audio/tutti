@@ -148,7 +148,7 @@
 //!
 //! // The write takes the id and a normalized `0..=1` value.
 //! if let Some(&id) = plugin.parameter_ids(main).first() {
-//!     plugin.set_parameter(main, id, Normalized::of(0.75));
+//!     plugin.set_parameter(main, id, Normalized::of(0.75))?;
 //! }
 //!
 //! // State save/restore is legal before any buffer exists — a project load
@@ -310,8 +310,8 @@ pub use error::{LoadCause, LoadStage, Result, Vst3Error};
 pub use events::{
     Chord, Data, Event, EventExt, EventHeader, EventKind, ExpressionInt, ExpressionText,
     ExpressionValue, InputEvents, K_DATA_TYPE_MIDI_SYSEX, LegacyCcOut, MidiEncoder, NoteOff,
-    NoteOn, Payload, PolyPressure, Scale, Stager, TextRef, ToEvent, Utf16Chord, Utf16Scale,
-    Utf16Text, drain_midi, expression_type_from_id, expression_type_id,
+    NoteOn, OutputStream, Payload, PolyPressure, Scale, Stager, TextRef, ToEvent, Utf16Chord,
+    Utf16Scale, Utf16Text, drain_midi, expression_type_from_id, expression_type_id,
 };
 pub use host::{
     ControllerMapping, FactoryFlags, FactoryInfo, Library, LoadOptions, ProcessFailed,

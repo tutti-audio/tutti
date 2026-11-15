@@ -10,22 +10,24 @@
 
 use std::mem::align_of;
 use std::os::raw::c_void;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use coreaudio_sys::{AudioTimeStamp, MIDIPacket, MIDIPacketList, OSStatus};
+use tutti_midi_protocol::Translator;
 #[cfg(feature = "testing")]
 use tutti_midi_protocol::midi1;
-use tutti_midi_protocol::widen_message;
-use tutti_plugin_types::{MidiEventVec, WireMidi};
-use tutti_ump::{Message, Midi1Parser, MidiGroup};
+use tutti_plugin_types::{MidiEventVec, WireMidi, group_of_port};
+use tutti_ump::{Message, Midi1Parser, MidiGroup, Ump};
 
 use crate::callback::with_state_mut;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::property::{Element, MidiOutputCallbackInfo, MidiOutputCallbackProperty, Scope};
 use crate::status::{CANNOT_DO_IN_CURRENT_CONTEXT, NO_ERR};
+use crate::unit::Unit;
 
 /// The answer to a call with no state or no packet list behind it.
 const NOT_INSTALLED: OSStatus = -1;
-use crate::unit::Unit;
 
 /// The `AUMIDIOutputCallbackStruct` from `AudioUnitProperties.h`.
 ///
@@ -70,8 +72,19 @@ pub type MidiOutSink = Box<dyn FnMut(u32, &[WireMidi]) + Send>;
 /// removal ordering protects.
 struct MidiOutState {
     sink: MidiOutSink,
-    /// Reads the packets' bytes into events.
-    decoder: Decoder,
+    /// One reader per output stream the AU published, by the `midi_out_num` the
+    /// AU calls with: a stream is a Group of its own number, and each keeps
+    /// its own parameter-number and bank runs. Fixed at install, so the render
+    /// thread never grows it.
+    decoders: Box<[Decoder]>,
+    /// Packets of the lists the AU delivered for a stream with no decoder (it
+    /// published fewer streams than it calls with, or more than the sixteen
+    /// Groups): dropped and counted here, read through
+    /// [`AuMidiOutput::unrouted_packets`].
+    unrouted: Arc<AtomicU64>,
+    /// Set by [`AuMidiOutput::reset`]: the next list finds every reader forgotten
+    /// before it is read.
+    reset: Arc<AtomicBool>,
 }
 
 /// A plugin's MIDI 1.0 byte stream as engine events.
@@ -82,24 +95,42 @@ struct MidiOutState {
 /// a packet's end ends a short message (`end_of_message`), and a SysEx goes on
 /// as SysEx7 packets in the order the parser completes them, each at the
 /// offset of the packet that held its `0xF0` (offset 0 for one opened in an
-/// earlier list). A channel voice message is widened to MIDI 2.0, as every
-/// plugin's output is. Events are handed to the sink in batches of a
-/// [`MidiEventVec`]; nothing allocates.
+/// earlier list). A channel voice message goes through the stream's
+/// [`Translator`] to MIDI 2.0 (M2-104 Appendix D.3), as every plugin's output
+/// does: its RPN, NRPN and Bank Select runs are assembled across messages and
+/// lists. A run (select, Data Entry MSB) with no LSB waits for one: the translator
+/// never flushes a live output, which has no end (M2-104 Appendix D.3.3). Events are handed to the sink in batches of a [`MidiEventVec`];
+/// nothing allocates (the parser holds one SysEx7 packet's payload inline, and
+/// the batch and the translator are fixed-size).
 #[derive(Debug)]
 struct Decoder {
+    group: MidiGroup,
     parser: Midi1Parser,
+    translator: Translator,
     batch: MidiEventVec,
     /// The offset of the SysEx being read.
     sysex_at: u32,
 }
 
 impl Decoder {
-    fn new() -> Self {
+    /// A reader of the stream that is `group`.
+    fn new(group: MidiGroup) -> Self {
         Self {
-            parser: Midi1Parser::new(MidiGroup::FIRST),
+            group,
+            parser: Midi1Parser::new(group),
+            translator: Translator::new(),
             batch: MidiEventVec::new(),
             sysex_at: 0,
         }
+    }
+
+    /// Forgets the stream: the open SysEx, the running status and every
+    /// parameter-number and bank run. Nothing pending is sent.
+    fn reset(&mut self) {
+        self.parser = Midi1Parser::new(self.group);
+        self.translator.reset();
+        self.batch.clear();
+        self.sysex_at = 0;
     }
 
     /// A new list: events staged and not flushed (a list cut short by a
@@ -127,11 +158,12 @@ impl Decoder {
             if self.batch.is_full() {
                 self.flush(flush);
             }
+            // A message that ends no run (a select, a Data Entry MSB) is absorbed.
+            let Some(ump) = self.translator.translate(Ump::from(message)) else {
+                continue;
+            };
             // Room: the batch is not full, or was just flushed.
-            let _ = self.batch.try_push(WireMidi {
-                offset,
-                ump: widen_message(message).into(),
-            });
+            let _ = self.batch.try_push(WireMidi { offset, ump });
         }
         self.parser.end_of_message();
     }
@@ -147,22 +179,46 @@ impl Decoder {
 
 /// A host's registration of a MIDI-output callback on one AU.
 ///
-/// Holding this is what keeps the callback installed. Dropping it withdraws the
-/// callback from the AU **before** the state the AU points at is freed — see
-/// [`Drop for AuMidiOutput`](AuMidiOutput::drop) for why that order is the whole
-/// point of the type existing rather than `install` returning `()`.
-#[must_use = "dropping it uninstalls the output"]
+/// Holding this is what keeps the callback installed. A unit has at most one
+/// registration at a time ([`install`] refuses a second). Dropping it writes the
+/// null callback, so the AU stops calling, and **leaks** the state the AU's
+/// `userData` pointed at: a render may be running on another thread, and nothing
+/// in a `Drop` can know it is not. Freeing is [`withdraw`](Self::withdraw), which
+/// frees it when no render is in flight.
+#[must_use = "dropping it uninstalls the output and leaks its state; `withdraw` frees it"]
 pub struct AuMidiOutput {
     unit: Unit,
-    /// Heap-pinned so its address is stable: the AU retains a `userData` derived
-    /// from `&*state`, and this struct may be moved by its owner. Moving the
-    /// `Box` moves only its 8-byte pointer, so the address the AU holds stays
-    /// valid — the same reasoning the `Renderer` scratch and `HostCallbacks`
-    /// are documented with.
-    ///
-    /// `Option` so [`Self::remove`] can take the box out *after* the property has
-    /// been cleared, giving `Drop` nothing left to free.
-    state: Option<Box<MidiOutState>>,
+    /// The state, owned through the raw pointer `Box::into_raw` made of it: the
+    /// AU retains a `userData` that *is* this pointer, so no `Box` (whose moves
+    /// assert uniqueness) or reference is ever formed from it while the AU may
+    /// call. It is freed by `Box::from_raw` only in [`withdraw`](Self::withdraw),
+    /// or before the AU ever held it; never by `Drop`.
+    state: Option<std::ptr::NonNull<MidiOutState>>,
+    /// [`MidiOutState::unrouted`], shared so the handle reads it without
+    /// touching the state the render thread holds.
+    unrouted: Arc<AtomicU64>,
+    /// [`MidiOutState::reset`], shared for the same reason.
+    reset: Arc<AtomicBool>,
+}
+
+impl AuMidiOutput {
+    /// How many packets the AU delivered, in lists for an output stream this
+    /// registration has no reader for, since it was installed: dropped, never
+    /// routed to another stream's Group. A packet carries one or more messages,
+    /// so this is the least the events lost came to.
+    #[must_use]
+    pub fn unrouted_packets(&self) -> u64 {
+        self.unrouted.load(Ordering::Relaxed)
+    }
+
+    /// Forgets what the output streams have read: a SysEx open across a
+    /// discontinuity (a reset, a locate) must not complete on the far side of
+    /// it, nor an RPN, NRPN or Bank Select run. Nothing pending is sent. Takes
+    /// effect at the next list the AU delivers; call it between blocks, from
+    /// the thread that renders.
+    pub fn reset(&self) {
+        self.reset.store(true, Ordering::Relaxed);
+    }
 }
 
 impl std::fmt::Debug for AuMidiOutput {
@@ -235,20 +291,51 @@ pub fn midi_output_info(unit: &Unit) -> Option<MidiOutputInfo> {
 
 /// Installs `sink` as this AU's MIDI-output destination.
 ///
-/// # Deliberately not gated on [`midi_output_info`]
+/// One registration per unit: `kAudioUnitProperty_MIDIOutputCallback` is write
+/// only (`AudioUnitProperties.h`), so a callback already installed cannot be read
+/// back, and the unit carries a claim instead that its registration holds until
+/// it is withdrawn or dropped. A second install on a unit that holds one is
+/// refused, which keeps a dropped handle from nulling another's callback.
+///
+/// Not gated on [`midi_output_info`]: whether the unit publishes streams is the
+/// caller's question, and 45 units accept the property while publishing none.
 ///
 /// # Errors
 ///
+/// [`Error::Invalid`] when the unit already has a registration (or an earlier
+/// one's withdrawal was refused by the AU, which leaves the claim); the AU's own
+/// status when it refuses the property (the claim is then released).
+///
 /// The registration holds a share of the unit, so the unit outlives it.
 pub fn install(unit: &Unit, sink: MidiOutSink) -> Result<AuMidiOutput> {
+    if !unit.claim_midi_output() {
+        return Err(Error::Invalid(
+            "the unit already has a MIDI-output registration, or the AU refused \
+             the withdrawal of an earlier one and keeps the claim"
+                .into(),
+        ));
+    }
     // Boxed once, here, on the control thread — the only allocation in the whole
-    // path. `MidiOutState` is heap-pinned so the `userData` the AU retains stays
-    // valid across moves of the returned handle.
-    let state = Box::new(MidiOutState {
+    // path. The state stays at its address until the registration is withdrawn
+    // (and is never freed by a drop), so the `userData` the AU retains stays
+    // valid however the returned handle is moved.
+    // One reader for each stream the AU publishes (one when it publishes
+    // none, which every AU that accepts the callback does not), at most one
+    // for each of the sixteen Groups.
+    let streams = midi_output_info(unit).map_or(1, |info| info.stream_count().max(1));
+    let decoders: Box<[Decoder]> = (0..streams)
+        .map_while(|stream| group_of_port(u16::try_from(stream).ok()?))
+        .map(Decoder::new)
+        .collect();
+    let unrouted = Arc::new(AtomicU64::new(0));
+    let reset = Arc::new(AtomicBool::new(false));
+    let state = Box::into_raw(Box::new(MidiOutState {
         sink,
-        decoder: Decoder::new(),
-    });
-    let user_data: *mut c_void = &*state as *const MidiOutState as *mut c_void;
+        decoders,
+        unrouted: Arc::clone(&unrouted),
+        reset: Arc::clone(&reset),
+    }));
+    let user_data: *mut c_void = state.cast();
 
     let callback = AuMidiOutputCallbackStruct {
         midi_output_callback: Some(au_midi_output_callback),
@@ -259,89 +346,162 @@ pub fn install(unit: &Unit, sink: MidiOutSink) -> Result<AuMidiOutput> {
     // callback. There is nothing after it today; the ordering is written this way
     // so adding something later cannot leave the AU holding a pointer no handle
     // owns.
-    let handle = AuMidiOutput {
+    let mut handle = AuMidiOutput {
         unit: unit.clone(),
-        state: Some(state),
+        // SAFETY: `Box::into_raw` never returns null.
+        state: Some(unsafe { std::ptr::NonNull::new_unchecked(state) }),
+        unrouted,
+        reset,
     };
-    unit.set::<MidiOutputCallbackProperty>(Scope::GLOBAL, Element::ZERO, &callback)?;
+    if let Err(refused) =
+        unit.set::<MidiOutputCallbackProperty>(Scope::GLOBAL, Element::ZERO, &callback)
+    {
+        // The AU refused the property, so it never held the pointer: the state
+        // is the host's to free, and the unit's claim is released.
+        handle.unit.release_midi_output();
+        if let Some(state) = handle.state.take() {
+            // SAFETY: made by `Box::into_raw` above and never shared with the AU.
+            drop(unsafe { Box::from_raw(state.as_ptr()) });
+        }
+        return Err(refused);
+    }
     Ok(handle)
 }
 
 impl AuMidiOutput {
-    /// Withdraw the callback, returning any error the AU reported.
+    /// Withdraws the callback and frees the state the AU's `userData` pointed at,
+    /// when nothing can still read it.
     ///
-    /// Equivalent to dropping the handle, except that the AU's status reaches the
-    /// caller. Use this when a failed withdrawal is something the host wants to
-    /// know about; `Drop` cannot report one.
+    /// What can read the state is a render calling the AU's callback. Two things
+    /// must hold for that to be impossible after the free. The unit's lifecycle
+    /// is checked first, before anything is written, and the lifecycle lock
+    /// (`Unit::while_uninitialized`) is then held across the clearing write, the
+    /// render check and the free:
+    ///
+    /// - **The unit is uninitialized**, and stays so until the free is done. An
+    ///   AU may take its callbacks at `AudioUnitInitialize` and keep calling the
+    ///   old pair after a later property write; an uninitialized unit renders
+    ///   nothing, and an `initialize` that waits on the lock takes the cleared
+    ///   callback. A unit whose `AudioUnitUninitialize` failed, or has not run,
+    ///   counts as initialized.
+    /// - **No render of this crate's is in flight** (`Unit::rendering`), read
+    ///   after the clearing write and a `SeqCst` fence. A render that began
+    ///   before the unit was uninitialized, or while a clone uninitialized it (it
+    ///   must not: `Unit::uninitialize`), is counted; one the count does not
+    ///   show starts after the check and reads the cleared callback. A render
+    ///   made outside this crate's safe calls (`RenderUnit::get`'s `unsafe`
+    ///   contract) is not counted: its caller owes that none overlaps a
+    ///   withdrawal.
+    ///
+    /// A host calls it after `Unit::uninitialize` and before the next
+    /// `Unit::initialize`. The lifecycle lock is control-side: no render takes
+    /// it.
     ///
     /// # Errors
-    /// `Error::Os` if the AU refuses the clearing write; the boxed state is then
-    /// leaked, since the unit may still call into it.
-    pub fn remove(mut self) -> Result<()> {
-        let result = self.clear();
-        // `state` is now `None`; `Drop` will find nothing to do.
-        result
+    /// The handle comes back with the error, still holding the unit's claim and
+    /// the state, so the caller can call `withdraw` again; dropping it instead
+    /// withdraws the callback and leaks the state.
+    /// - `Error::Os` if the AU refuses the clearing write: the unit may still
+    ///   call into the state.
+    /// - `Error::Invalid` if the unit is initialized (nothing was written), or a
+    ///   render is in flight (the callback is cleared, and the state stays
+    ///   allocated because that render may still call it).
+    ///
+    /// An AU that refuses the clearing write of a handle that is then dropped
+    /// keeps the unit's claim for good, so the unit cannot register again.
+    #[must_use = "a refused withdrawal hands the registration back, with its state"]
+    pub fn withdraw(mut self) -> std::result::Result<(), (Self, Error)> {
+        let unit = self.unit.clone();
+        // The lifecycle is checked before anything is written: a refusal on an
+        // initialized unit changes nothing.
+        let freed = unit.while_uninitialized(|| {
+            self.clear_callback()?;
+            if !unit.no_render_in_flight() {
+                return Err(Self::left_allocated("a render of the unit is in flight"));
+            }
+            if let Some(state) = self.state.take() {
+                // SAFETY: made by `Box::into_raw` in `install`. The withdrawing
+                // write succeeded, the unit is uninitialized and `initialize`
+                // waits on the lock this runs under, and no render was in flight
+                // after the write (the fence in `no_render_in_flight` orders the
+                // two), so the AU holds no pointer it will use and no render
+                // reads the state; nothing else frees it.
+                drop(unsafe { Box::from_raw(state.as_ptr()) });
+            }
+            Ok(())
+        });
+        match freed {
+            Some(Ok(())) => {
+                self.unit.release_midi_output();
+                Ok(())
+            }
+            Some(Err(refused)) => Err((self, refused)),
+            None => Err((
+                self,
+                Error::Invalid(
+                    "the unit is initialized: nothing is withdrawn; uninitialize the \
+                     unit, then withdraw"
+                        .into(),
+                ),
+            )),
+        }
     }
 
-    /// The withdrawal, in one place so both [`Self::remove`] and `Drop` obey the
-    /// same rule.
-    ///
-    /// # How the withdrawal is spelled, and why a null proc is NOT it
-    ///
-    /// # ORDERING INVARIANT
-    ///
-    /// The property write **MUST** complete before the boxed state is freed. This
-    /// is the MIDI-output twin of the invariant
-    /// `uninitialize` documents (there:
-    /// `AudioUnitUninitialize` before the boxed `RenderScratch` is dropped) and of
-    /// the one `Drop for HostCallbacks` documents for `HostCallbackInfo`. All three are
-    /// the same hazard: while the property holds the live `userData` the AU may
-    /// dereference it **on its render thread**, and freeing the box first leaves a
-    /// use-after-free a host would experience as a random crash inside
-    /// `AudioUnitRender`.
-    ///
-    /// # Safety
-    /// `self.unit` must still be a live `AudioUnit`.
-    fn clear(&mut self) -> Result<()> {
-        // Nothing installed (already removed): nothing to withdraw.
+    fn left_allocated(why: &str) -> Error {
+        Error::Invalid(format!(
+            "{why}: the callback is withdrawn and its state is left allocated"
+        ))
+    }
+
+    /// Writes the callback away, so the AU calls no more, and releases the unit's
+    /// claim on success. The state is not touched.
+    fn unhook(&mut self) -> Result<()> {
+        // Nothing installed (already withdrawn): nothing to write.
         if self.state.is_none() {
             return Ok(());
         }
-        // A REAL proc with a null `userData` — see this method's docs for the
-        // measured reason a null proc is refused with -4 on every unit.
+        self.clear_callback()?;
+        self.unit.release_midi_output();
+        Ok(())
+    }
+
+    /// Writes the withdrawn callback, keeping the claim.
+    ///
+    /// # How the withdrawal is spelled
+    ///
+    /// Not a null proc, which every unit refuses with -4 (measured on macOS
+    /// 15.6): a real proc with a null `userData`, so the callback written is
+    /// `au_midi_output_callback` with nothing to point at, which answers
+    /// `NOT_INSTALLED`.
+    fn clear_callback(&mut self) -> Result<()> {
         let withdrawn = AuMidiOutputCallbackStruct {
             midi_output_callback: Some(au_midi_output_callback),
             user_data: std::ptr::null_mut(),
         };
-        let result =
-            self.unit
-                .set::<MidiOutputCallbackProperty>(Scope::GLOBAL, Element::ZERO, &withdrawn);
-        let state = self.state.take();
-        if result.is_ok() {
-            drop(state);
-        } else {
-            // The unit may still hold the pointer, and other `Unit` clones can
-            // keep it alive and calling: leak the state rather than free memory
-            // the callback could read.
-            std::mem::forget(state);
-        }
-        result
+        self.unit
+            .set::<MidiOutputCallbackProperty>(Scope::GLOBAL, Element::ZERO, &withdrawn)
     }
 }
 
+// SAFETY: the pointer owns a `MidiOutState` (a `MidiOutSink`, which is `Send`,
+// decoders and atomics, all `Send`) that only the AU's render thread and
+// `withdraw` reach, never at once (see `au_midi_output_callback`); moving the
+// handle to another thread moves that ownership.
+unsafe impl Send for AuMidiOutput {}
+
 impl Drop for AuMidiOutput {
-    /// Withdraw the callback before freeing the state the AU points at.
+    /// Writes the null callback, so the AU calls no more, and leaks the state.
     ///
-    /// Unlike `Drop for HostCallbacks`, which can lean on Rust's field drop order
-    /// happening to be correct, this type has no such luck: the AU is not owned
-    /// here, so nothing else will stop it calling back. The explicit clear is the
-    /// only thing standing between a dropped registration and a use-after-free on
-    /// the render thread.
+    /// A `Drop` cannot know a render is not running on another thread (this type
+    /// is `Send` and public), and the callback reads the state during one: freeing
+    /// here could be a use-after-free inside `AudioUnitRender`. The state is a
+    /// few kilobytes per registration; a host that wants it back calls
+    /// [`withdraw`](Self::withdraw), which frees it when no render is in flight.
     ///
-    /// The status is ignored because a `Drop` has nowhere to report one; a host
-    /// that needs it calls [`Self::remove`] instead.
+    /// The status is ignored because a `Drop` has nowhere to report one.
     fn drop(&mut self) {
-        let _ = self.clear();
+        let _ = self.unhook();
+        self.state = None;
     }
 }
 
@@ -360,11 +520,20 @@ impl Drop for AuMidiOutput {
 /// a live `MidiOutState` box, which the withdrawing property write outlives —
 /// that write is what makes the pointer unreachable before the box is freed.
 ///
-/// The body forms a `&mut MidiOutState` from it, so no other reference to that
-/// box may exist for the duration of the call. That holds because the AU invokes
-/// this only from inside its own render, one call at a time, and the host side
-/// touches the box only before installing and after the withdrawing write
-/// returns.
+/// The body forms a `&mut MidiOutState` from it, so no other reference to the
+/// state may exist for the duration of the call. That holds because the AU
+/// invokes this only from inside its own render, one call at a time (an
+/// assumption about AudioToolbox: Apple's header says the callback is called
+/// from the render, and documents no concurrent calls), and the host side
+/// touches the state only before installing and in [`AuMidiOutput::withdraw`],
+/// which frees it only after the withdrawing write and with no render in flight.
+///
+/// That last step rests on a second assumption about AudioToolbox: once
+/// `AudioUnitSetProperty(MIDIOutputCallback)` returns, a render that starts
+/// after it reads the new `{proc, userData}`, even on an initialized unit. A
+/// render already in flight may still read the old pair; it is counted
+/// (`Unit::rendering`), and the withdrawal leaves the state allocated while it
+/// is. Neither is documented by Apple; both hold for every unit measured.
 ///
 /// `pktlist` must be null or a well-formed `MIDIPacketList` valid for the
 /// duration of the call.
@@ -374,10 +543,18 @@ unsafe extern "C" fn au_midi_output_callback(
     midi_out_num: u32,
     pktlist: *const MIDIPacketList,
 ) -> OSStatus {
-    // SAFETY: `user_data` is the `MidiOutState` box `install` registered, which
-    // the withdrawing property write outlives; the AU calls only from inside its
-    // own render, one call at a time, and the host touches the box only before
-    // installing and after withdrawing, so this is the only reference.
+    // SAFETY: `user_data` is the raw pointer `install` made of the `MidiOutState`
+    // box, which the withdrawing property write outlives. This `&mut MidiOutState` is the
+    // only reference to it because of one invariant: the AU calls this only from
+    // inside its own render (a render-time callback, never from another thread
+    // or between renders), one call at a time, and the host touches the box only
+    // before installing and after withdrawing. A render that starts after the
+    // withdrawing `AudioUnitSetProperty` returns reads the cleared pair (the
+    // second AudioToolbox assumption, in this function's `# Safety`); one that
+    // began before is counted, and the box is left allocated for it.
+    // The one `unsafe` block also covers the `dispatch` call in the closure:
+    // `state` is the only reference (the callback's invariant above) and
+    // `pktlist` is non-null (checked) and the AU's, valid for the call.
     unsafe {
         with_state_mut::<MidiOutState, _>(
             user_data,
@@ -397,17 +574,37 @@ unsafe extern "C" fn au_midi_output_callback(
 /// [`au_midi_output_callback`] is nothing but the panic guard around it.
 ///
 /// # Safety
-/// `user_data` must be null or point at a live `MidiOutState`; `pktlist` must be
-/// null or a well-formed `MIDIPacketList`.
-fn dispatch(
+/// `state` must be the only reference to the state for the call, and `pktlist` must
+/// be a well-formed `MIDIPacketList` valid for it.
+unsafe fn dispatch(
     state: &mut MidiOutState,
     midi_out_num: u32,
     pktlist: *const MIDIPacketList,
 ) -> OSStatus {
+    let MidiOutState {
+        sink,
+        decoders,
+        unrouted,
+        reset,
+    } = &mut *state;
+    if reset.swap(false, Ordering::Relaxed) {
+        decoders.iter_mut().for_each(Decoder::reset);
+    }
+    let Some(decoder) = usize::try_from(midi_out_num)
+        .ok()
+        .and_then(|stream| decoders.get_mut(stream))
+    else {
+        // SAFETY: `pktlist` is non-null and well formed, per this function's
+        // contract.
+        unrouted.fetch_add(
+            u64::from(unsafe { packet_count(pktlist) }),
+            Ordering::Relaxed,
+        );
+        return NO_ERR;
+    };
     // A list cut short by a panic last time leaves events staged; they belong
     // to a block that is gone.
-    state.decoder.begin_list();
-    let MidiOutState { sink, decoder, .. } = &mut *state;
+    decoder.begin_list();
     let mut flush = |events: &[WireMidi]| (*sink)(midi_out_num, events);
     // SAFETY: `pktlist` is non-null (checked) and a valid packet list for the
     // call, which is `for_each_packet`'s contract.
@@ -422,31 +619,65 @@ fn dispatch(
     NO_ERR
 }
 
-/// Walks a `MIDIPacketList`, calling `f(frame_offset, packet_bytes)` once per
-/// packet. A packet's bytes are a stream, not a message: [`Decoder`] reads
-/// them (see below).
+/// The packets a `MIDIPacketList` says it holds, capped at what fits.
 ///
-/// # Why the walk is by byte offset rather than by struct read
+/// The list is at most `MAX_LIST_BYTES` (`MIDIServices.h`: a `MIDIPacketList` is
+/// never larger than 65536 bytes), and a packet takes at least its header, so a
+/// count past what fits is a lie: it is capped here, and the walk stops at the
+/// byte bound whatever the count says.
 ///
 /// # Safety
-/// `pktlist` must be a well-formed, non-null `MIDIPacketList`: `numPackets`
-/// packets laid out per `MIDIPacketNext`, each `length` bytes of `data` within the
-/// allocation.
-unsafe fn for_each_packet(pktlist: *const MIDIPacketList, mut f: impl FnMut(u32, &[u8])) {
-    // SAFETY: `pktlist` is a valid packet list: its `numPackets` header field lies within it (unaligned read, as the list may be packed).
+/// `pktlist` must be a non-null, well-formed `MIDIPacketList`, whose
+/// `numPackets` header field lies within it.
+unsafe fn packet_count(pktlist: *const MIDIPacketList) -> u32 {
+    // SAFETY: the field lies within the list (unaligned read, as the list may be
+    // packed).
     let num_packets = unsafe {
         std::ptr::read_unaligned(
             (pktlist as *const u8).add(std::mem::offset_of!(MIDIPacketList, numPackets))
                 as *const u32,
         )
     };
+    num_packets.min(MAX_PACKETS)
+}
+
+/// Walks a `MIDIPacketList`, calling `f(frame_offset, packet_bytes)` once per
+/// packet. A packet's bytes are a stream, not a message: [`Decoder`] reads
+/// them (see below).
+///
+/// # Why the walk is by byte offset rather than by struct read
+///
+/// The binding's `MIDIPacket` declares its `data[256]` inline, so a by-value read
+/// would run past the end of a real list, whose packets are as short as their
+/// payload. Each field is read at its offset instead.
+///
+/// # Safety
+/// The OS gives no byte size of the list, so the bound this walk keeps is the
+/// nominal 64 KiB `MAX_LIST_BYTES`: a list the AU built smaller, with a
+/// `numPackets` or lengths that run past what it allocated, is read to that
+/// bound regardless. That risk is the AU's to not take (a well-formed list
+/// satisfies it); the bound limits it, and the walk never reads past 64 KiB.
+///
+/// `pktlist` must be a well-formed, non-null `MIDIPacketList`: `numPackets`
+/// packets laid out per `MIDIPacketNext`, each `length` bytes of `data` within the
+/// allocation.
+unsafe fn for_each_packet(pktlist: *const MIDIPacketList, mut f: impl FnMut(u32, &[u8])) {
+    // SAFETY: `pktlist` is a valid packet list, which is `packet_count`'s contract.
+    let num_packets = unsafe { packet_count(pktlist) };
     // The first packet begins at the `packet` field's offset — 4, immediately
     // after `numPackets`.
+    let first = std::mem::offset_of!(MIDIPacketList, packet);
     // SAFETY: the first packet starts at `offset_of!(MIDIPacketList, packet)`, within the list.
-    let mut p = unsafe { (pktlist as *const u8).add(std::mem::offset_of!(MIDIPacketList, packet)) };
+    let mut p = unsafe { (pktlist as *const u8).add(first) };
+    // Bytes of the list walked so far, from its start.
+    let mut walked = first;
 
     for _ in 0..num_packets {
-        // SAFETY: `p` points at a packet header inside the list: the walk advances only by each packet's own length.
+        // A packet's header must lie within the list's documented size.
+        if walked + PACKET_HEADER_SIZE > MAX_LIST_BYTES {
+            break;
+        }
+        // SAFETY: `p` points at a packet header inside the list: the walk advances only by each packet's own length, and stops at the documented size.
         let time_stamp = unsafe {
             std::ptr::read_unaligned(
                 p.add(std::mem::offset_of!(MIDIPacket, timeStamp)) as *const u64
@@ -456,45 +687,50 @@ unsafe fn for_each_packet(pktlist: *const MIDIPacketList, mut f: impl FnMut(u32,
         let length = unsafe {
             std::ptr::read_unaligned(p.add(std::mem::offset_of!(MIDIPacket, length)) as *const u16)
         };
-        // Clamp the plugin-supplied length to Apple's own documented maximum.
-        // `MIDIServices.h` declares `Byte data[256]`, so a packet claiming more
-        // than that is malformed by the framework's own definition, and honouring
-        // the claim would read past the end of the list. This is the packet-level
-        // twin of `render_input`'s "never trust the buffer the AU handed over": a
-        // `u16` length can say 65535, which is 255 packets' worth of memory the AU
-        // never wrote.
-        //
-        // It cannot catch a *legal* over-claim — a packet declaring 64 bytes and
-        // meaning 3 is indistinguishable from one that really carries 64, and those
-        // bytes are inside the allocation the AU sized. What that produces is
-        // garbage messages from the AU's own slack, which is the plugin's bug; what
-        // this prevents is a read outside the allocation entirely, which would be
-        // ours.
-        let length = length.min(MAX_PACKET_PAYLOAD);
+        // A packet claiming more than Apple's own documented maximum (`Byte
+        // data[256]`) is malformed, and where the next one starts cannot be
+        // told from it: the walk ends here rather than read on from a length
+        // it cannot trust. (A *legal* over-claim, a packet declaring 64 bytes
+        // and meaning 3, is indistinguishable from an honest one, and the
+        // bytes are inside the allocation the AU sized.)
+        if length > MAX_PACKET_PAYLOAD
+            || walked + PACKET_HEADER_SIZE + usize::from(length) > MAX_LIST_BYTES
+        {
+            break;
+        }
         // SAFETY: the data follows the packet header, within the packet.
         let data = unsafe { p.add(PACKET_HEADER_SIZE) };
 
         // Apple's header: "The time stamp values contained within the MIDIPackets
         // in this list are **sample offsets** from the AudioTimeStamp provided."
         // So the value is already the frame offset this host wants — no host-time
-        // conversion, and no clock to consult. It is a `u64` at the ABI and a
-        // `u32` in `WireMidi`; a value past `u32::MAX` would be nonsense from a
-        // render block, and saturating is the honest narrowing (the alternative,
-        // wrapping, would place a late event at the start of the block).
+        // conversion. It is a `u64` at the ABI and a `u32` in `WireMidi`; a value
+        // past `u32::MAX` saturates (wrapping would place a late event at the
+        // start of the block), and the consumer clamps any offset into its block.
         let frame_offset = u32::try_from(time_stamp).unwrap_or(u32::MAX);
 
-        // SAFETY: `length` bytes follow the header (clamped to the maximum packet size), within the list the AU built.
-        let bytes = unsafe { std::slice::from_raw_parts(data, length as usize) };
+        // SAFETY: `length` bytes follow the header (at most the maximum packet size), within the list the AU built.
+        let bytes = unsafe { std::slice::from_raw_parts(data, usize::from(length)) };
         f(frame_offset, bytes);
 
         // `MIDIPacketNext`: advance past the header and payload, then align. On
         // arm64 Apple rounds up to 4; on x86_64 it does not round at all, and
         // rounding there would skip bytes of the next packet.
         // SAFETY: the end of this packet, from which the next header starts (rounded on ARM by `next_packet`).
-        let raw_next = unsafe { p.add(PACKET_HEADER_SIZE + length as usize) };
-        p = next_packet(raw_next);
+        let raw_next = unsafe { p.add(PACKET_HEADER_SIZE + usize::from(length)) };
+        let next = next_packet(raw_next);
+        walked += next as usize - p as usize;
+        p = next;
     }
 }
+
+/// The most bytes a `MIDIPacketList` holds: `MIDIServices.h` caps one at
+/// 65536 bytes.
+const MAX_LIST_BYTES: usize = 65_536;
+
+/// The most packets such a list can hold: its count field, then a header each.
+#[allow(clippy::cast_possible_truncation, reason = "65532 / 10 fits a u32")]
+const MAX_PACKETS: u32 = ((MAX_LIST_BYTES - 4) / PACKET_HEADER_SIZE) as u32;
 
 /// The `MIDIPacket` header size — `timeStamp` (8) + `length` (2) = 10 bytes,
 /// with `data` starting immediately after.
@@ -552,7 +788,7 @@ fn next_packet(raw_next: *const u8) -> *const u8 {
 #[cfg(feature = "testing")]
 pub unsafe fn decode_packet_list_for_test(pktlist: *const MIDIPacketList) -> Vec<WireMidi> {
     let mut out = Vec::new();
-    let mut decoder = Decoder::new();
+    let mut decoder = Decoder::new(MidiGroup::FIRST);
     let mut flush = |events: &[WireMidi]| out.extend_from_slice(events);
     // SAFETY: the test passes a packet list it built; see `for_each_packet`.
     unsafe {
@@ -685,20 +921,18 @@ mod tests {
         const { assert!(MAX_PACKET_PAYLOAD < u16::MAX) };
     }
 
-    /// A packet claiming more than Apple's 256-byte maximum is clamped, not
-    /// honoured.
+    /// A packet claiming more than Apple's 256-byte maximum ends the walk.
     ///
-    /// A `u16` length can say 65535. Reading that many bytes from a packet the AU
-    /// sized for three is a read far outside the list allocation — the one failure
-    /// in this walk that is the *host's* bug rather than the plugin's, since a
-    /// legal-but-inflated length is indistinguishable from an honest one.
+    /// A `u16` length can say 65535, and where the next packet starts cannot be
+    /// told from a length that is a lie: reading on from a clamped one would read
+    /// whatever lies there as packets. Nothing of the list after it is read.
     #[test]
-    fn a_length_beyond_apples_maximum_is_clamped() {
-        // Hand-built: `numPackets = 1`, one packet declaring u16::MAX with three
-        // real bytes, then 4 KiB of slack so a failure to clamp lands inside this
-        // allocation and fails an assertion rather than segfaulting.
+    fn a_length_beyond_apples_maximum_ends_the_walk() {
+        // `numPackets = 2`: a packet declaring u16::MAX, then a real one that
+        // must not be reached; 4 KiB of slack so a failure fails an assertion
+        // rather than faulting.
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(&1u32.to_ne_bytes());
+        bytes.extend_from_slice(&2u32.to_ne_bytes());
         bytes.extend_from_slice(&0u64.to_ne_bytes());
         bytes.extend_from_slice(&u16::MAX.to_ne_bytes());
         bytes.extend_from_slice(&[0x90, 60, 100]);
@@ -708,22 +942,29 @@ mod tests {
         // declared length is the thing under test and the slack bounds any
         // over-read.
         let found = unsafe { split_packet_list_for_test(bytes.as_ptr() as *const MIDIPacketList) };
-
-        // The real message is found, and the clamp bounds how much slack can be
-        // misread. 256 bytes yields 1 explicit message plus running-status
-        // continuations at TWO bytes each (the status byte is reused), so ~128 —
-        // not ~85, which is the answer if one forgets running status. Without the
-        // clamp the walk would consume 65535 bytes and run 61 KiB past the
-        // allocation.
-        assert!(!found.is_empty(), "the real message must still be decoded");
-        assert_eq!(found[0], (0, vec![0x90, 60, 100]));
         assert!(
-            found.len() <= 129,
-            "a 65535-byte claim must be clamped to Apple's 256-byte maximum, \
-             which bounds the walk at ~128 messages; {} means the claim was \
-             honoured and the walk left the allocation",
-            found.len()
+            found.is_empty(),
+            "nothing is read past a lying length: {found:?}"
         );
+    }
+
+    /// A packet count the list's documented size cannot hold is capped, and the
+    /// walk ends at that size: a list of `MAX_LIST_BYTES` zero bytes claiming
+    /// `u32::MAX` packets visits at most as many as fit, and never reads past it.
+    #[test]
+    fn a_packet_count_past_the_documented_size_is_bounded() {
+        let mut bytes = vec![0u8; MAX_LIST_BYTES];
+        bytes[..4].copy_from_slice(&u32::MAX.to_ne_bytes());
+        let mut visited = 0u32;
+        // SAFETY: a `MAX_LIST_BYTES` allocation, the largest a list is; the
+        // header's count is the thing under test.
+        unsafe {
+            for_each_packet(bytes.as_ptr() as *const MIDIPacketList, |_, payload| {
+                assert!(payload.is_empty());
+                visited += 1;
+            });
+        }
+        assert!(visited > 0 && visited <= MAX_PACKETS, "visited {visited}");
     }
 
     /// Builds a list with Apple's OWN `MIDIPacketListInit`/`MIDIPacketListAdd` and
@@ -787,6 +1028,209 @@ mod tests {
         assert!(events[1].ump.is_note_off());
         assert_eq!(note_on(&events[4]), Some(64));
         assert_eq!(events[4].offset, 384);
+    }
+
+    /// **A list for a stream with no reader counts its packets**, each of which
+    /// carries at least one lost message, not one for the list: three packets
+    /// to stream 5 of a unit that published one stream read as 3, and the list
+    /// reaches no sink.
+    #[test]
+    fn an_unrouted_list_counts_its_packets() {
+        let mut storage = vec![0u8; 4096];
+        let packets = storage.as_mut_ptr() as *mut MIDIPacketList;
+        // SAFETY: `packets` is a buffer sized for the three small packets added.
+        unsafe {
+            let mut pkt = coreaudio_sys::MIDIPacketListInit(packets);
+            for (n, bytes) in [[0x90, 60, 100], [0x80, 60, 0], [0xB0, 7, 64]]
+                .iter()
+                .enumerate()
+            {
+                pkt = coreaudio_sys::MIDIPacketListAdd(
+                    packets,
+                    storage.len() as u64,
+                    pkt,
+                    n as u64,
+                    bytes.len() as u64,
+                    bytes.as_ptr(),
+                );
+                assert!(!pkt.is_null());
+            }
+        }
+        let delivered = Arc::new(AtomicU64::new(0));
+        let seen = Arc::clone(&delivered);
+        let unrouted = Arc::new(AtomicU64::new(0));
+        let mut state = MidiOutState {
+            sink: Box::new(move |_, events| {
+                seen.fetch_add(events.len() as u64, Ordering::Relaxed);
+            }),
+            decoders: Box::new([Decoder::new(MidiGroup::FIRST)]),
+            unrouted: Arc::clone(&unrouted),
+            reset: Arc::new(AtomicBool::new(false)),
+        };
+        // SAFETY: `state` is the only reference, and `packets` is the list built
+        // above.
+        let status = unsafe { dispatch(&mut state, 5, packets) };
+        assert_eq!(status, NO_ERR);
+        assert_eq!(unrouted.load(Ordering::Relaxed), 3);
+        assert_eq!(delivered.load(Ordering::Relaxed), 0);
+    }
+
+    /// **A withdrawal with a render in flight frees nothing, and can be retried**:
+    /// it is refused and hands the registration back with the claim and the state
+    /// a running render may read; a unit with a registration still refuses
+    /// another. Once the render ends the same registration withdraws and frees,
+    /// and the unit takes a new one.
+    #[test]
+    fn a_withdrawal_during_a_render_is_refused_and_retried() {
+        let desc = coreaudio_sys::AudioComponentDescription {
+            componentType: coreaudio_sys::kAudioUnitType_Effect,
+            componentSubType: u32::from_be_bytes(*b"dely"),
+            componentManufacturer: u32::from_be_bytes(*b"appl"),
+            componentFlags: 0,
+            componentFlagsMask: 0,
+        };
+        let comp = crate::ComponentRef::first_matching(&desc).expect("AUDelay ships with macOS");
+        let (_work, handle) = tutti_plugin_types::MainWork::new();
+        let unit = Unit::new(comp, &handle).expect("instantiate");
+        assert!(unit.no_render_in_flight());
+
+        let registration = install(&unit, Box::new(|_, _| {})).expect("install");
+        let in_flight = unit.rendering();
+        assert!(!unit.no_render_in_flight());
+        let Err((registration, Error::Invalid(_))) = registration.withdraw() else {
+            panic!("a withdrawal with a render in flight is refused");
+        };
+        assert!(
+            install(&unit, Box::new(|_, _| {})).is_err(),
+            "the refused registration keeps the claim"
+        );
+        drop(in_flight);
+        assert!(
+            unit.no_render_in_flight(),
+            "the guard's drop ends the render"
+        );
+
+        registration.withdraw().expect("no render in flight: freed");
+        let again = install(&unit, Box::new(|_, _| {})).expect("the claim was released");
+        again.withdraw().expect("freed");
+    }
+
+    /// **A withdrawal on an initialized unit is refused**: an AU may have taken
+    /// its callback at initialization, so the withdrawal hands the registration
+    /// back with its claim; once the unit is uninitialized the same registration
+    /// withdraws, and the unit takes a new one. (That the refusal writes nothing,
+    /// and that the state stays allocated, is the documented behaviour of
+    /// `withdraw`; neither is observable here.)
+    #[test]
+    fn a_withdrawal_on_an_initialized_unit_is_refused_until_it_is_uninitialized() {
+        let desc = coreaudio_sys::AudioComponentDescription {
+            componentType: coreaudio_sys::kAudioUnitType_Effect,
+            componentSubType: u32::from_be_bytes(*b"dely"),
+            componentManufacturer: u32::from_be_bytes(*b"appl"),
+            componentFlags: 0,
+            componentFlagsMask: 0,
+        };
+        let comp = crate::ComponentRef::first_matching(&desc).expect("AUDelay ships with macOS");
+        let (_work, handle) = tutti_plugin_types::MainWork::new();
+        let unit = Unit::new(comp, &handle).expect("instantiate");
+        let registration = install(&unit, Box::new(|_, _| {})).expect("install");
+        unit.initialize().expect("initialize");
+        let Err((registration, Error::Invalid(_))) = registration.withdraw() else {
+            panic!("a withdrawal on an initialized unit is refused");
+        };
+        assert!(
+            install(&unit, Box::new(|_, _| {})).is_err(),
+            "the refused registration keeps the claim"
+        );
+        unit.uninitialize().expect("uninitialize");
+        registration.withdraw().expect("uninitialized: freed");
+        install(&unit, Box::new(|_, _| {}))
+            .expect("the claim was released")
+            .withdraw()
+            .expect("freed");
+    }
+
+    /// What `decoder` makes of `bytes` as one list at `offset`.
+    fn list(decoder: &mut Decoder, bytes: &[u8], offset: u32) -> Vec<WireMidi> {
+        let mut out = Vec::new();
+        decoder.begin_list();
+        decoder.decode(bytes, offset, &mut |events| out.extend_from_slice(events));
+        decoder.flush(&mut |events| out.extend_from_slice(events));
+        out
+    }
+
+    /// **A parameter run assembles across lists**: the Data Entry LSB that ends
+    /// a Registered Parameter run arrives in a later list than the select and
+    /// the MSB (M2-104 Appendix D.3.3), and the run is one controller (pitch
+    /// bend sensitivity of 12 semitones, zero-extended, M2-115 section 4.1).
+    /// A decoder that widened each message alone would send three Control
+    /// Changes and then a fourth.
+    #[test]
+    fn a_parameter_run_assembles_across_lists() {
+        let mut decoder = Decoder::new(MidiGroup::FIRST);
+        let first = list(&mut decoder, &[0xB0, 101, 0, 0xB0, 100, 0, 0xB0, 6, 12], 0);
+        assert!(first.is_empty(), "a select and an MSB end no run");
+        let second = list(&mut decoder, &[0xB0, 38, 0], 5);
+        let [event] = second[..] else {
+            panic!("expected one Registered Controller, got {second:?}");
+        };
+        assert_eq!(event.offset, 5);
+        let Ok(Message::Midi2(_, tutti_ump::Voice2::Registered { bank, index, value })) =
+            event.ump.decode()
+        else {
+            panic!(
+                "expected a Registered Controller, got {:?}",
+                event.ump.decode()
+            );
+        };
+        assert_eq!((bank.get(), index.get(), value.get()), (0, 0, 12 << 25));
+
+        // After a reset the run is forgotten: with nothing selected, the same
+        // Data Entry LSB is dropped (it would otherwise complete the held run
+        // into a Registered Controller).
+        list(&mut decoder, &[0xB0, 101, 0, 0xB0, 100, 0, 0xB0, 6, 12], 0);
+        decoder.reset();
+        let after = list(&mut decoder, &[0xB0, 38, 0], 0);
+        assert!(after.is_empty(), "got {after:?}");
+    }
+
+    /// **An output stream is the Group of its number**: its messages, SysEx
+    /// included, carry that Group.
+    #[test]
+    fn a_stream_is_the_group_of_its_number() {
+        let mut decoder = Decoder::new(MidiGroup::of(3));
+        let events = list(&mut decoder, &[0x90, 60, 100, 0xF0, 1, 2, 3, 0xF7], 0);
+        assert_eq!(events.len(), 2);
+        for event in events {
+            match event.ump.decode() {
+                Ok(Message::Midi2(address, _)) => assert_eq!(address.group, MidiGroup::of(3)),
+                Ok(Message::Sysex7(group, _)) => assert_eq!(group, MidiGroup::of(3)),
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+    }
+
+    /// **Decoding a list allocates nothing**, a SysEx of several packets and a
+    /// parameter run included: the parser holds a packet's payload inline, the
+    /// batch and the translator are fixed-size.
+    #[test]
+    fn decoding_allocates_nothing() {
+        let mut decoder = Decoder::new(MidiGroup::FIRST);
+        let mut bytes = vec![0xF0];
+        bytes.extend((1..=40).map(|b| b % 0x7F));
+        bytes.push(0xF7);
+        bytes.extend([
+            0xB0, 101, 0, 0xB0, 100, 0, 0xB0, 6, 12, 0xB0, 38, 0, 0x90, 60, 100,
+        ]);
+        let mut seen = 0usize;
+        assert_no_alloc::assert_no_alloc(|| {
+            decoder.begin_list();
+            decoder.decode(&bytes, 0, &mut |events| seen += events.len());
+            decoder.flush(&mut |events| seen += events.len());
+        });
+        // The SysEx (7 packets of at most 6 bytes), the run's one controller
+        // and the note.
+        assert_eq!(seen, 7 + 1 + 1);
     }
 
     /// `next_packet` must reproduce `MIDIPacketNext` for this architecture.

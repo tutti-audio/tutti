@@ -81,6 +81,11 @@ pub(super) struct Channels {
     /// read the lane dry. The bridge's doorbell is rung with it, so a bridge
     /// parked with no command queued reads the lane when news arrives.
     news: Arc<std::sync::atomic::AtomicBool>,
+    /// A watch on the control connection, kept while the watcher thread runs:
+    /// [`bytes_waiting`](Self::bytes_waiting) asks it whether bytes the bridge
+    /// has not read are there, which `news` alone misses between the bridge's
+    /// clearing it and the watcher's setting it again.
+    probe: Arc<std::sync::Mutex<Option<Arc<crate::transport::control::Watch>>>>,
 }
 
 impl Channels {
@@ -97,6 +102,7 @@ impl Channels {
             dropped_param_events: Arc::new(AtomicU64::new(0)),
             dropped_midi: Arc::new(AtomicU64::new(0)),
             news: Arc::default(),
+            probe: Arc::default(),
         }
     }
 
@@ -129,6 +135,32 @@ impl Channels {
     /// [`clear_news`](Self::clear_news).
     pub(super) fn news_pending(&self) -> bool {
         self.news.load(Ordering::Acquire)
+    }
+
+    /// Keeps `watch` as the probe [`bytes_waiting`](Self::bytes_waiting) asks.
+    pub(super) fn set_probe(&self, watch: Arc<crate::transport::control::Watch>) {
+        *self
+            .probe
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(watch);
+    }
+
+    /// Lets the connection's duplicate go once nothing watches it.
+    pub(super) fn clear_probe(&self) {
+        *self
+            .probe
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+
+    /// Whether the control connection has bytes the bridge thread has not read
+    /// (one `poll`, no wait). `false` with no probe.
+    pub(super) fn bytes_waiting(&self) -> bool {
+        self.probe
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|watch| watch.wait_readable(std::time::Duration::ZERO))
     }
 
     /// The bridge thread has read the control connection dry. Cleared *after*

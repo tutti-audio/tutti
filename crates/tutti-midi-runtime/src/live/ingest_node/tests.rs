@@ -1,5 +1,4 @@
 use super::*;
-use std::num::NonZeroUsize;
 use tutti_fixtures::midi;
 use tutti_midi_protocol::widen_velocity;
 use tutti_ump::{U7, Utility};
@@ -7,7 +6,7 @@ use tutti_ump::{U7, Utility};
 /// The node adopts the mode last asked for on its next block.
 #[test]
 fn the_node_adopts_the_mode_last_asked_for() {
-    let parts = MidiIngestNode::new(NonZeroUsize::MIN).into_parts();
+    let parts = MidiIngestNode::new().into_parts();
     let controls = parts.controls;
     let lower = tutti_fixtures::midi::lower_zone(15);
     let upper = tutti_fixtures::midi::upper_zone(7);
@@ -18,7 +17,7 @@ fn the_node_adopts_the_mode_last_asked_for() {
     // own, as the inserted one is.
     let mut node = MidiIngestNode {
         mpe_request: controls.request.reader(),
-        ..MidiIngestNode::new(NonZeroUsize::MIN)
+        ..MidiIngestNode::new()
     };
     node.adopt_mpe_request();
     assert_eq!(node.mpe_mode, upper, "the node adopts it");
@@ -28,7 +27,7 @@ fn the_node_adopts_the_mode_last_asked_for() {
 /// the next `reclaim`**, with no further publish.
 #[test]
 fn reclaim_frees_a_request_a_block_held_across_the_next() {
-    let mut node = MidiIngestNode::new(NonZeroUsize::MIN);
+    let mut node = MidiIngestNode::new();
     let controls = MidiIngestControls {
         request: Arc::clone(node.mpe_request.cell()),
         dropped: Arc::clone(&node.dropped),

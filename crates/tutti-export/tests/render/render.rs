@@ -20,9 +20,9 @@ use tutti_export::{RenderGraph, Resample, Setup};
 use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::{Const, Osc};
 use tutti_transport::{FrozenClock, RenderClock};
-use tutti_types::ChannelLayout;
 use tutti_types::Seconds;
 use tutti_types::{Amplitude, ChannelTopology, Drive, Hz, SampleRate};
+use tutti_types::{Bed, ChannelLayout};
 
 /// The rate [`config`] renders at.
 const RATE: SampleRate = SampleRate::SR_44K1;
@@ -461,7 +461,7 @@ fn a_caller_can_compose_normalization() {
     long.render.duration_seconds = Seconds(2.0);
     let mut out = render_to_buffers(dc(RATE), &long, &FrozenClock).unwrap();
 
-    let cfg = LoudnessConfig::new(out.sample_rate(), ChannelLayout::STEREO);
+    let cfg = LoudnessConfig::new(out.sample_rate(), Bed::Stereo.topology()).unwrap();
     let flat = out.interleaved();
     let before = measure_loudness(
         &cfg,
@@ -743,7 +743,7 @@ fn peak_normalization_lands_on_the_requested_dbtp() {
         .into_samples::<f32>()
         .map(|s| s.unwrap())
         .collect();
-    let meter = LoudnessConfig::new(cfg.render.sample_rate, ChannelLayout::STEREO);
+    let meter = LoudnessConfig::new(cfg.render.sample_rate, Bed::Stereo.topology()).unwrap();
     let measured = measure_loudness(
         &meter,
         Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),
@@ -784,8 +784,9 @@ fn file_true_peak(path: &std::path::Path) -> f32 {
     };
     let meter = LoudnessConfig::new(
         SampleRate::of(f64::from(spec.sample_rate)),
-        ChannelLayout::STEREO,
-    );
+        Bed::Stereo.topology(),
+    )
+    .unwrap();
     measure_loudness(
         &meter,
         Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),
@@ -1072,8 +1073,9 @@ fn a_resampled_normalized_export_still_lands_on_its_dbtp_target() {
 
     let meter = LoudnessConfig::new(
         tutti_types::SampleRate::of(rate as f64),
-        ChannelLayout::STEREO,
-    );
+        Bed::Stereo.topology(),
+    )
+    .unwrap();
     let measured = measure_loudness(
         &meter,
         Interleaved::new(&samples, ChannelLayout::STEREO).unwrap(),

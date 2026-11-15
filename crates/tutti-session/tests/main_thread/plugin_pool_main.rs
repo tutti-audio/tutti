@@ -115,7 +115,7 @@ fn an_in_process_plugin_lands_in_an_update_on_the_main_thread() {
 
     let handle = s.plugin(&"verb").expect("loaded");
     assert_eq!(handle.info().hosting(), Hosting::InProcess);
-    assert_eq!(handle.presence(), Presence::Live);
+    assert!(matches!(handle.presence(), Presence::Live));
     let node = s.add_pooled_plugin(&"verb").expect("the plugin enters");
     assert!(
         s.plugin_view(node)
@@ -272,7 +272,7 @@ fn a_changed_identity_swaps_an_in_process_node() {
         let _ = s.update();
         thread::sleep(Duration::from_millis(2));
     }
-    assert_eq!(first.presence(), Presence::Closed);
+    assert!(matches!(first.presence(), Presence::Closed));
     assert!(matches!(s.pool_state(&"fx"), Some(PoolState::Loaded)));
     s.close(tutti_fixtures::main_thread());
 }

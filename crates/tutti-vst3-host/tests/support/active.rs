@@ -331,7 +331,8 @@ impl ParamExt for Vst3Loaded {
             main_thread(),
             ParamId::new(id),
             Normalized::clamped(value),
-        );
+        )
+        .expect("a declared, writable parameter");
     }
 }
 
@@ -346,7 +347,8 @@ impl ParamExt for Vst3Controller {
             main_thread(),
             ParamId::new(id),
             Normalized::clamped(value),
-        );
+        )
+        .expect("a declared, writable parameter");
     }
 }
 

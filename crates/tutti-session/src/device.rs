@@ -934,7 +934,7 @@ impl<C: Clock> Session<C> {
         // A declaration a device refused is asked again of this one: if it
         // places, it is in force, committed and settled below with the rest.
         if self.root_refusal.is_some() {
-            match self.graph.declare_root(self.root_request.clone()) {
+            match self.graph.declare_root(self.root_request.clone(), true) {
                 Ok(()) => {
                     self.root_refusal = None;
                     self.commit();

@@ -44,7 +44,7 @@
 
 use vst::api;
 
-use tutti_plugin_types::{MainThreadMarker, Normalized, ParamId, ParamMapping};
+use tutti_plugin_types::{LinearRange, MainThreadMarker, Normalized, ParamId, ParamMapping};
 
 use crate::loaded::Vst2Loaded;
 
@@ -150,22 +150,18 @@ impl IntegerRange {
 /// `0.0`.
 impl ParamMapping for IntegerRange {
     fn plain(&self, value: Normalized) -> f64 {
-        let (min, max) = (f64::from(self.min), f64::from(self.max));
-        if max == min {
-            min
-        } else {
-            min + value.get() * (max - min)
-        }
+        self.line().plain(value)
     }
 
-    /// `plain` clamped into the range, as a position. NaN is `0.0`.
     fn normalized(&self, plain: f64) -> Normalized {
-        let (min, max) = (f64::from(self.min), f64::from(self.max));
-        if max == min || plain.is_nan() {
-            return Normalized::of(0.0);
-        }
-        let plain = plain.clamp(min.min(max), min.max(max));
-        Normalized::clamped((plain - min) / (max - min))
+        self.line().normalized(plain)
+    }
+}
+
+impl IntegerRange {
+    /// The line between the ends, backwards for an inverted range.
+    fn line(&self) -> LinearRange {
+        LinearRange::new(f64::from(self.min), f64::from(self.max))
     }
 }
 

@@ -8,13 +8,13 @@ use tutti_graph::UmpAt;
 use vst3::Steinberg::Vst::ProcessSetup;
 
 use tutti_plugin_types::{
-    AudioBufferMut, Edit, EditDrain, EditSink, Normalized, ParamId, PluginError, PluginIo,
-    PluginResult, Processor, RtMidiEvents,
+    AudioBufferMut, Edit, EditDrain, EditSink, Normalized, ParamAccess, ParamId, ParamWriteError,
+    PluginError, PluginIo, PluginResult, Processor, RtMidiEvents,
 };
 use tutti_rt::DrainBeat;
 use tutti_types::{ChannelLayout, SampleRate};
 
-use crate::events::{InputEvents, Stager, drain_midi};
+use crate::events::{InputEvents, OutputStream, Stager, drain_midi};
 use crate::types::{
     AudioBuffer, ParameterChanges, ProcessContextRequirements, ProcessMode, ProcessOutputRef,
     TransportInfo, Vst3Sample, to_process_context,
@@ -90,6 +90,15 @@ pub(super) struct OutputStaging {
     /// Capped: the plugin decides how many events it emits, so an unbounded
     /// pool would let it provoke a `malloc` in the audio callback.
     pub(super) emitted_midi: RtMidiEvents,
+    /// Translates the plugin's MIDI 1.0 output into UMP, keeping its
+    /// parameter-number and bank runs across blocks (one event bus is one
+    /// Group of its state). Built with the activation, so a deactivation drops
+    /// it; [`Vst3Processor::stop`] forgets the runs without sending them.
+    pub(super) emitted_stream: OutputStream,
+    /// What `emitted_stream` had lost as of the last block, and what it lost in
+    /// the block in hand (the change): the events the host reports as lost MIDI.
+    pub(super) lost_told: u64,
+    pub(super) emitted_lost: usize,
     pub(super) emitted_param_changes: ParameterChanges,
 }
 
@@ -101,6 +110,7 @@ impl OutputStaging {
     /// param queues go back to the set's spares with their point storage.
     pub(super) fn clear_emitted(&mut self) {
         self.emitted_midi.clear();
+        self.emitted_lost = 0;
         self.emitted_param_changes.clear();
     }
 
@@ -108,6 +118,7 @@ impl OutputStaging {
     pub(super) fn emitted_ref(&self) -> ProcessOutputRef<'_> {
         ProcessOutputRef {
             midi_events: &self.emitted_midi,
+            midi_lost: self.emitted_lost,
             parameter_changes: &self.emitted_param_changes,
         }
     }
@@ -116,7 +127,15 @@ impl OutputStaging {
     /// return pools. Both `fill_*` clear their destination first and reuse its
     /// heap capacity, so this is allocation-free after warmup.
     pub(super) fn drain_emitted(&mut self) {
-        drain_midi(&self.events, &mut self.emitted_midi);
+        drain_midi(
+            &self.events,
+            &mut self.emitted_stream,
+            &mut self.emitted_midi,
+        );
+        let lost = self.emitted_stream.lost_total();
+        self.emitted_lost =
+            usize::try_from(lost.saturating_sub(self.lost_told)).unwrap_or(usize::MAX);
+        self.lost_told = lost;
         // A refusal is counted in `lists_busy` and leaves the pool empty.
         if !self
             .param_changes
@@ -195,8 +214,17 @@ pub struct Vst3Processor<T: Vst3Sample> {
     /// a rejoin carried over from the last activation before the first block.
     /// Reserved for the ring's room, so no block grows it.
     pending: Vec<(ParamId, Normalized)>,
-    /// Edits the block could not hold, since activation.
+    /// Edits the block could not hold, and writes to a read-only parameter, since
+    /// activation.
     edits_dropped: u64,
+    /// The parameters the plugin declared at activation and what each declares
+    /// of its writability, sorted by id: the write policy
+    /// ([`ParamWriteError::check_sorted`]) reads it, so a Controller write or
+    /// automation for an undeclared or read-only parameter is not sent. Taken
+    /// per activation, and shared with the Controller (which answers writes from
+    /// it): a plugin that changes its parameters later is read again at the next
+    /// activation.
+    declared: Arc<[(ParamId, ParamAccess)]>,
     /// Whether `setProcessing(1)` is the plugin's last word.
     processing: bool,
     /// Last: the plugin outlives everything above, and a last holder retires
@@ -223,6 +251,7 @@ pub(super) struct ProcessorParts {
     pub reports: EditSink,
     pub beat: DrainBeat,
     pub carried: Vec<(ParamId, Normalized)>,
+    pub declared: Arc<[(ParamId, ParamAccess)]>,
 }
 
 impl<T: Vst3Sample> Vst3Processor<T> {
@@ -236,6 +265,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             reports,
             beat,
             mut carried,
+            declared,
         } = parts;
         carried.reserve(EDIT_CAPACITY);
         Self {
@@ -249,6 +279,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             beat,
             pending: carried,
             edits_dropped: 0,
+            declared,
             processing: true,
             shell: Hold::new(shell),
         }
@@ -282,6 +313,8 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     fn reset_midi_state(&mut self) {
         self.audio.input.events.reset_sysex();
         self.audio.input.stager.reset();
+        // Nor does the plugin's output carry a parameter run across it.
+        self.audio.output.emitted_stream.reset();
     }
 
     /// Takes the parameter writes the Controller queued that no block has
@@ -293,8 +326,17 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         out.append(&mut self.pending);
     }
 
+    /// What the plugin's output stream has dropped or evicted since activation:
+    /// its note-id table's evictions, expressions on ids no note holds, and
+    /// events on a bus past the sixteen Groups.
+    #[must_use]
+    pub fn output_stream(&self) -> &OutputStream {
+        &self.audio.output.emitted_stream
+    }
+
     /// Writes the ring held that no block took, since activation, for want of
-    /// room in the block in hand.
+    /// room in the block in hand, and those to a parameter the plugin did not
+    /// declare or declared read-only (which no write reaches).
     #[must_use]
     pub fn edits_dropped(&self) -> u64 {
         self.edits_dropped
@@ -307,10 +349,15 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             drain,
             pending,
             edits_dropped,
+            declared,
             ..
         } = self;
         drain.drain(|edit| {
             let (id, value) = match edit {
+                Edit::Param { id, .. } if ParamWriteError::check_sorted(id, declared).is_err() => {
+                    *edits_dropped += 1;
+                    return;
+                }
                 Edit::Param { id, value } => (id, value),
                 // What came before is stale; what came after is not.
                 Edit::Reset => {
@@ -422,7 +469,12 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         let staged = (|| {
             let mut staging = self.audio.input.param_changes.try_begin().ok_or(Busy)?;
             if let Some(changes) = input_params {
-                staging.refill(changes)?;
+                // Automation never writes a parameter the plugin did not
+                // declare or declared read-only: its points are counted with
+                // the dropped ones.
+                staging.refill_where(changes, |id| {
+                    ParamWriteError::check_sorted(id, &self.declared).is_ok()
+                })?;
             }
             for &(id, value) in &self.pending {
                 staging.prepend(id, value)?;
@@ -907,6 +959,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
 /// carries it inbound only), so `out`'s stays empty.
 fn copy_process_output(output: ProcessOutputRef<'_>, out: &mut tutti_plugin_types::ProcessOutput) {
     out.emit_midi(output.midi_events.iter().copied());
+    out.count_midi_dropped(output.midi_lost);
     for queue in &output.parameter_changes.queues {
         for point in &queue.points {
             // `emit_param_point`, not `ParameterChanges::add_change`: the former

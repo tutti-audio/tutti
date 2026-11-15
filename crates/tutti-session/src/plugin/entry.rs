@@ -36,14 +36,14 @@ use tutti_plugin::catalog::{
 };
 use tutti_plugin::error::StateError;
 use tutti_plugin_host::PluginHandle;
-use tutti_plugin_types::{BridgeError, Features, MainThreadMarker, MainWorkHandle};
+use tutti_plugin_types::{BridgeError, Features, MainThreadMarker, MainWorkHandle, PluginFailure};
 use tutti_types::{ChannelLayout, SampleRate};
 
 use super::{HostPlugin, Mirror, Open, Origin, PluginLoad, PluginLoaded, PluginNode};
 use crate::peer::{ResourceIds, sealed};
 use crate::{
-    Declared, HandleError, Hold, HoldKind, IntoPool, Key, Life, Load, LoadError, Peer, PoolEntry,
-    PoolKey, PoolSet, Presence, ReplaceRefused, Resource, ResourceId, Session,
+    Declared, GiveUp, HandleError, Hold, HoldKind, IntoPool, Key, Life, Load, LoadError, Peer,
+    PoolEntry, PoolKey, PoolSet, Presence, ReplaceRefused, Resource, ResourceId, Session,
 };
 
 /// What a pooled plugin's load needs of the session that declared it.
@@ -61,6 +61,10 @@ struct Install {
     plugin: HostPlugin,
     mirror: Option<Mirror>,
     origin: Origin,
+}
+
+fn locked<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// A value that drops on the main thread when it must.
@@ -120,21 +124,18 @@ struct Standing {
     recovery: bool,
     /// A node hosts the plugin (and so recovery can act on it).
     hosted: AtomicBool,
-    /// The session saw the bridge dead (once a node hosts the plugin).
-    dead: AtomicBool,
-    /// Recovery gave up on it.
-    gave_up: AtomicBool,
+    /// The session saw the bridge dead (once a node hosts the plugin), and why.
+    dead: Mutex<Option<PluginFailure>>,
+    /// Recovery gave up on it, and why.
+    gave_up: Mutex<Option<GiveUp>>,
 }
 
 impl Standing {
     /// The bridge is dead: seen by the session at the node, or by the handle
     /// while the plugin is still in the entry.
     fn crashed(&self) -> bool {
-        self.dead.load(Ordering::Acquire)
-            || self
-                .handle
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
+        locked(&self.dead).is_some()
+            || locked(&self.handle)
                 .as_ref()
                 .is_some_and(|handle| handle.get().is_crashed())
     }
@@ -144,25 +145,27 @@ impl Standing {
     /// plugin for recovery to act on). A plugin that recovery reloads in place
     /// reads live throughout.
     fn lost(&self) -> bool {
-        self.gave_up.load(Ordering::Acquire)
+        locked(&self.gave_up).is_some()
             || (self.crashed() && !(self.recovery && self.hosted.load(Ordering::Acquire)))
     }
 
+    /// Why the plugin is not live: that recovery gave up, else the failure of
+    /// the bridge the session or the entry's handle saw.
     fn cause(&self) -> PluginCause {
-        if self.gave_up.load(Ordering::Acquire) {
-            PluginCause::GaveUp
-        } else {
-            PluginCause::Died
+        if let Some(why) = locked(&self.gave_up).clone() {
+            return PluginCause::GaveUp(why);
         }
+        let failure = locked(&self.dead).clone().or_else(|| {
+            locked(&self.handle)
+                .as_ref()
+                .and_then(|handle| handle.get().status().cause().cloned())
+        });
+        PluginCause::Died(failure.unwrap_or(PluginFailure::Unreported))
     }
 
     /// The node has the plugin: its death is seen there from now on.
     fn release_handle(&self) {
-        let released = self
-            .handle
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
+        let released = locked(&self.handle).take();
         drop(released);
     }
 }
@@ -178,13 +181,13 @@ pub(crate) struct PooledLink {
 
 impl PooledLink {
     /// Recovery gave up on the plugin.
-    pub(crate) fn gave_up(&self) {
-        self.standing.gave_up.store(true, Ordering::Release);
+    pub(crate) fn gave_up(&self, why: GiveUp) {
+        *locked(&self.standing.gave_up) = Some(why);
     }
 
-    /// The session saw the plugin's bridge dead.
-    pub(crate) fn died(&self) {
-        self.standing.dead.store(true, Ordering::Release);
+    /// The session saw the plugin's bridge dead, for `failure`.
+    pub(crate) fn died(&self, failure: PluginFailure) {
+        locked(&self.standing.dead).get_or_insert(failure);
     }
 }
 
@@ -232,14 +235,14 @@ impl PluginInfo {
 }
 
 /// Why a pooled plugin is not live.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum PluginCause {
     /// The plugin's server died and nothing brought it back: recovery is off,
-    /// or no node hosts the plugin.
-    Died,
+    /// or no node hosts the plugin. The failure is the bridge's latched cause.
+    Died(PluginFailure),
     /// Recovery spent its budget and gave up.
-    GaveUp,
+    GaveUp(GiveUp),
 }
 
 /// A plugin the pool loaded: [`PoolEntry::Loaded`] of [`PluginEntry`].
@@ -300,8 +303,8 @@ impl LoadedPlugin {
                 handle: Mutex::new(Some(Affine::new(handle, &cx.work, main_only))),
                 recovery: cx.recovery,
                 hosted: AtomicBool::new(false),
-                dead: AtomicBool::new(false),
-                gave_up: AtomicBool::new(false),
+                dead: Mutex::new(None),
+                gave_up: Mutex::new(None),
             }),
             ports,
             in_process: !served,

@@ -406,12 +406,13 @@ fn the_all_call_is_no_devices_own_id() {
 mod machine_control {
     use super::*;
     use tutti_midi_protocol::{
-        MMC_MAX_DATA, McpSuccess, McsSuccess, MmcCodeStatus, MmcCommand, MmcCommands, MmcDirection,
-        MmcErrorCode, MmcErrorKind, MmcEventDirection, MmcEventFlags, MmcFields, MmcGroup,
-        MmcInfoField, MmcLocate, MmcName, MmcPosition, MmcProcedure, MmcSegmentPlace, MmcSelection,
-        MmcShortTimeCode, MmcSign, MmcSlot, MmcSpeed, MmcStep, MmcSubframes, MmcTimeCode,
-        MmcTimeCodeName, MmcTimeLabel, MmcTimeTail, MmcUpdate, MotionControlTally, MotionProcess,
-        MotionState, MtcRate, MtcTimeCode,
+        MMC_MAX_DATA, McpSuccess, McsSuccess, MmcCodeStatus, MmcCommand, MmcCommandReassembler,
+        MmcCommands, MmcDirection, MmcErrorCode, MmcErrorKind, MmcEventDirection, MmcEventFlags,
+        MmcFields, MmcGroup, MmcInfoField, MmcLocate, MmcName, MmcPosition, MmcProcedure,
+        MmcResponseReassembler, MmcSegment, MmcSegmentBytes, MmcSegmentError, MmcSegmentPlace,
+        MmcSegments, MmcSegmentsRefused, MmcSelection, MmcShortTimeCode, MmcSign, MmcSlot,
+        MmcSpeed, MmcStep, MmcSubframes, MmcTimeCode, MmcTimeCodeName, MmcTimeLabel, MmcTimeTail,
+        MmcUpdate, MotionControlTally, MotionProcess, MotionState, MtcRate, MtcTimeCode,
     };
 
     fn framed(device: u8, sub_id: u8, data: &[u8]) -> Vec<u8> {
@@ -1123,6 +1124,295 @@ mod machine_control {
         assert_eq!((short.frames(), short.sign()), (5, MmcSign::Negative));
         let short = MmcShortTimeCode::new(5, MmcSign::Positive, short.tail()).unwrap();
         assert_eq!(short.sign(), MmcSign::Positive);
+    }
+
+    /// The segment `place`, `remaining`, `bytes` as the command that carries it.
+    fn segment(place: MmcSegmentPlace, remaining: u8, bytes: &[u8]) -> MmcSegment {
+        MmcSegment::new(place, remaining, MmcSegmentBytes::new(bytes).unwrap()).unwrap()
+    }
+
+    /// The wire bytes of `segment` as a COMMAND SEGMENT message to all.
+    fn segment_message(segment: MmcSegment) -> Vec<u8> {
+        let mut commands = MmcCommands::new();
+        commands.push(&MmcCommand::CommandSegment(segment)).unwrap();
+        commands.payload(Recipient::AllCall).to_vec()
+    }
+
+    /// RP-013 p.5: the string `aa .. mm` goes as three segments whose counts
+    /// are the segment byte count plus one (`05`, `05`, `04`) and whose
+    /// identification bytes are `42`, `01`, `00`.
+    #[test]
+    fn the_specs_three_segment_example_has_its_counts_and_identifications() {
+        use MmcSegmentPlace::{First, Later};
+        let a = segment_message(segment(First, 2, &[1, 2, 3, 4]));
+        let b = segment_message(segment(Later, 1, &[5, 6, 7, 8]));
+        let c = segment_message(segment(Later, 0, &[9, 10, 11]));
+        assert_eq!(a, [0x7F, 0x7F, 0x06, 0x53, 0x05, 0x42, 1, 2, 3, 4]);
+        assert_eq!(b, [0x7F, 0x7F, 0x06, 0x53, 0x05, 0x01, 5, 6, 7, 8]);
+        assert_eq!(c, [0x7F, 0x7F, 0x06, 0x53, 0x04, 0x00, 9, 10, 11]);
+    }
+
+    /// Takes in the segment messages of `bytes` and returns what the last
+    /// completed, or the first refusal.
+    fn reassemble(
+        reassembler: &mut MmcCommandReassembler,
+        segments: &[MmcSegment],
+    ) -> Result<Option<Vec<MmcCommand>>, MmcSegmentError> {
+        let mut done = None;
+        for &segment in segments {
+            done = reassembler.push(segment)?.map(|s| s.iter().collect());
+        }
+        Ok(done)
+    }
+
+    /// RP-013 p.40: the segments are executed as if they had arrived in one
+    /// sysex, and a division need not fall on a command boundary: a LOCATE
+    /// (`44 06 01 hr mn sc fr ff`) cut after its fourth byte is still one LOCATE.
+    #[test]
+    fn segments_make_the_commands_of_one_string_across_a_command() {
+        use MmcSegmentPlace::{First, Later};
+        let locate = [0x44, 0x06, 0x01, 0x61, 0x02, 0x08, 0x14, 0x00];
+        let mut string = vec![0x02];
+        string.extend(locate);
+        string.push(0x01);
+        let [a, b, c] = [&string[..4], &string[4..8], &string[8..]];
+        let mut r = MmcCommandReassembler::new();
+        let done = reassemble(
+            &mut r,
+            &[
+                segment(First, 2, a),
+                segment(Later, 1, b),
+                segment(Later, 0, c),
+            ],
+        );
+        let commands = done.unwrap().unwrap();
+        assert_eq!(commands.len(), 3);
+        assert_eq!(commands[0], MmcCommand::Play);
+        assert!(matches!(
+            commands[1],
+            MmcCommand::Locate(MmcLocate::Target(_))
+        ));
+        assert_eq!(commands[2], MmcCommand::Stop);
+        assert!(!r.in_progress());
+    }
+
+    /// A one-segment string is first and last, and the reassembler takes the
+    /// next string after it.
+    #[test]
+    fn a_string_of_one_segment_completes_and_the_next_starts_clean() {
+        use MmcSegmentPlace::First;
+        let mut r = MmcCommandReassembler::new();
+        for _ in 0..2 {
+            let done = reassemble(&mut r, &[segment(First, 0, &[0x02, 0x01])]);
+            assert_eq!(
+                done.unwrap().unwrap(),
+                [MmcCommand::Play, MmcCommand::Stop],
+                "the first string's bytes do not stay"
+            );
+        }
+    }
+
+    /// RP-013 p.40 (d): segments out of order, and a segment missing, are
+    /// Segmentation Errors (`09`), and cancel the string.
+    #[test]
+    fn a_missing_or_out_of_order_segment_is_refused_and_cancels() {
+        use MmcSegmentPlace::{First, Later};
+        let mut r = MmcCommandReassembler::new();
+        let first = segment(First, 2, &[1, 2]);
+        let second = segment(Later, 1, &[3, 4]);
+        let third = segment(Later, 0, &[5]);
+        // The middle one is missing.
+        assert_eq!(
+            reassemble(&mut r, &[first, third]),
+            Err(MmcSegmentError::OutOfOrder {
+                expected: 1,
+                got: 0
+            })
+        );
+        assert!(!r.in_progress());
+        // Out of order: the third before the second.
+        r.push(first).unwrap();
+        assert_eq!(
+            r.push(third).unwrap_err(),
+            MmcSegmentError::OutOfOrder {
+                expected: 1,
+                got: 0
+            }
+        );
+        // The string was cancelled, so the second now has no first.
+        assert_eq!(r.push(second).unwrap_err(), MmcSegmentError::MissingFirst);
+        assert_eq!(MmcErrorKind::Segmentation.wire(), 0x09);
+    }
+
+    /// RP-013 p.40 (c): a later segment with no first one is refused; and a first
+    /// inside a string is out of order, which cancels the string and is not taken
+    /// in, so pushing it again starts its string.
+    #[test]
+    fn a_later_segment_needs_a_first_and_a_first_restarts_after_its_refusal() {
+        use MmcSegmentPlace::{First, Later};
+        let mut r = MmcCommandReassembler::new();
+        assert_eq!(
+            r.push(segment(Later, 0, &[1])).unwrap_err(),
+            MmcSegmentError::MissingFirst
+        );
+        r.push(segment(First, 1, &[0x02])).unwrap();
+        assert!(r.in_progress());
+        let restart = segment(First, 1, &[0x01]);
+        assert_eq!(
+            r.push(restart).unwrap_err(),
+            MmcSegmentError::FirstInsideString
+        );
+        assert!(!r.in_progress());
+        // The new string is whole from the refused first, with none of the old.
+        assert!(r.push(restart).unwrap().is_none());
+        let done = r.push(segment(Later, 0, &[0x02])).unwrap().unwrap();
+        assert_eq!(
+            done.iter().collect::<Vec<_>>(),
+            [MmcCommand::Stop, MmcCommand::Play]
+        );
+    }
+
+    /// A segment holds at most 45 string bytes: a message holds 48 and the
+    /// segment command takes three, so 46 cannot be written.
+    #[test]
+    fn a_segment_holds_at_most_forty_five_bytes() {
+        assert!(MmcSegmentBytes::new(&[0x02; 45]).is_some());
+        assert!(MmcSegmentBytes::new(&[0x02; 46]).is_none());
+        assert!(MmcSegmentBytes::new(&[0x80]).is_none());
+        let full = segment(MmcSegmentPlace::First, 0, &[0x02; 45]);
+        assert_eq!(segment_message(full).len(), 3 + MMC_MAX_DATA);
+    }
+
+    /// RP-013 p.40 (b): a COMMAND SEGMENT whose count is more than the bytes left
+    /// in its message is a segment cut short, read as such (with the commands
+    /// before it) and not as an unreadable message. No writer can name it: it is
+    /// a `Universal`, not an `MmcCommand`.
+    #[test]
+    fn a_segment_whose_count_passes_the_message_is_truncated() {
+        let truncated = |data: &[u8]| match heard(&framed(0x7F, 0x06, data)).message {
+            Universal::MachineControlTruncated(before) => before.iter().collect::<Vec<_>>(),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(truncated(&[0x53, 0x09, 0x01, 0x02]), []);
+        assert_eq!(
+            truncated(&[0x02, 0x01, 0x53, 0x09, 0x01]),
+            [MmcCommand::Play, MmcCommand::Stop]
+        );
+        // A whole segment, and a cut-short command that is not a segment, are
+        // not this.
+        assert!(matches!(
+            heard(&framed(0x7F, 0x06, &[0x53, 0x02, 0x00, 0x02])).message,
+            Universal::MachineControl(_)
+        ));
+        assert!(!matches!(
+            parse(&framed(0x7F, 0x06, &[0x44, 0x09, 0x01])),
+            Read::Universal(Addressed {
+                message: Universal::MachineControlTruncated(_),
+                ..
+            })
+        ));
+    }
+
+    /// RP-013 p.40: a non-segmented message when a later segment was due
+    /// cancels the string.
+    #[test]
+    fn cancel_drops_the_string_in_progress() {
+        use MmcSegmentPlace::{First, Later};
+        let mut r = MmcCommandReassembler::new();
+        r.push(segment(First, 1, &[0x02])).unwrap();
+        r.cancel();
+        assert_eq!(
+            r.push(segment(Later, 0, &[0x01])).unwrap_err(),
+            MmcSegmentError::MissingFirst
+        );
+    }
+
+    /// A string that ends inside a command is not a whole number of commands
+    /// (RP-013 p.6): `44 06 01` is a LOCATE without its time.
+    #[test]
+    fn a_string_that_ends_inside_a_command_is_malformed() {
+        use MmcSegmentPlace::{First, Later};
+        let mut r = MmcCommandReassembler::new();
+        assert_eq!(
+            reassemble(
+                &mut r,
+                &[segment(First, 1, &[0x44, 0x06]), segment(Later, 0, &[0x01])]
+            ),
+            Err(MmcSegmentError::Malformed)
+        );
+        assert!(!r.in_progress());
+    }
+
+    /// RESPONSE SEGMENT (RP-013 p.73) strings are fields: a Motion Control
+    /// Tally (`48 03 05 44 01`) cut across two segments reads as one field.
+    #[test]
+    fn response_segments_reassemble_fields() {
+        use MmcSegmentPlace::{First, Later};
+        let mut r = MmcResponseReassembler::new();
+        assert!(
+            r.push(segment(First, 1, &[0x48, 0x03, 0x05]))
+                .unwrap()
+                .is_none()
+        );
+        let done = r.push(segment(Later, 0, &[0x44, 0x01])).unwrap().unwrap();
+        let [MmcInfoField::MotionControlTally(tally)] = done.iter().collect::<Vec<_>>()[..] else {
+            panic!()
+        };
+        assert_eq!(tally.state, MotionState::Rewind);
+    }
+
+    /// A string splits into 45-byte segments (a message holds 48 bytes, and
+    /// COMMAND SEGMENT takes its code, count and identification), counting down
+    /// from the first, and the pieces join back to the string.
+    #[test]
+    fn a_long_string_splits_into_counted_segments_that_join_back() {
+        let string: Vec<u8> = (0..100u8).map(|i| i & 0x7F).collect();
+        let segments: Vec<MmcSegment> = MmcSegments::new(&string).unwrap().collect();
+        let shape: Vec<_> = segments
+            .iter()
+            .map(|s| (s.place(), s.remaining(), s.bytes().as_bytes().len()))
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                (MmcSegmentPlace::First, 2, 45),
+                (MmcSegmentPlace::Later, 1, 45),
+                (MmcSegmentPlace::Later, 0, 10)
+            ]
+        );
+        let joined: Vec<u8> = segments
+            .iter()
+            .flat_map(|s| s.bytes().as_bytes().to_vec())
+            .collect();
+        assert_eq!(joined, string);
+        // Each is a message of at most 48 data bytes.
+        for s in segments {
+            assert!(segment_message(s).len() <= 3 + MMC_MAX_DATA);
+        }
+        assert_eq!(MmcSegments::new(&string).unwrap().len(), 3);
+    }
+
+    /// The identification byte counts down from 63, so 64 segments of 45 bytes
+    /// are the most; one byte more, or a byte above 127, is refused.
+    #[test]
+    fn the_longest_segmented_string_is_sixty_four_segments() {
+        let longest = vec![0x02; 2880];
+        let segments: Vec<MmcSegment> = MmcSegments::new(&longest).unwrap().collect();
+        assert_eq!(segments.len(), 64);
+        assert_eq!(segments[0].remaining(), 63);
+        assert_eq!(segments[63].remaining(), 0);
+        let mut r = MmcCommandReassembler::new();
+        let done = reassemble(&mut r, &segments).unwrap().unwrap();
+        assert_eq!(done.len(), 2880);
+        assert_eq!(
+            MmcSegments::new(&[0x02; 2881]).unwrap_err(),
+            MmcSegmentsRefused::TooLong
+        );
+        assert_eq!(
+            MmcSegments::new(&[0x80]).unwrap_err(),
+            MmcSegmentsRefused::NotSevenBit
+        );
+        assert_eq!(MmcSegments::new(&[]).unwrap().count(), 0);
     }
 
     /// RP-013 p.5: the first segment of a string carries bit 6.

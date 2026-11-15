@@ -126,18 +126,8 @@ pub struct CrossoverState {
 }
 
 impl CrossoverState {
-    /// One sample through the tree `coefficients` describe: its bands, lowest first, in
-    /// the first entries of the result (the rest are 0).
-    #[inline]
-    pub(crate) fn tick(
-        &mut self,
-        coefficients: &CrossoverCoefficients,
-        x: f32,
-    ) -> [f32; MAX_BANDS] {
-        self.tick_f64(coefficients, f64::from(x)).map(|y| y as f32)
-    }
-
-    /// [`tick`](Self::tick) in the state's own precision.
+    /// One sample through the tree `coefficients` describe, in the state's own precision:
+    /// its bands, lowest first, in the first entries of the result (the rest are 0).
     #[inline]
     pub(super) fn tick_f64(
         &mut self,

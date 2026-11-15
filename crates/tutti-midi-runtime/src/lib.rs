@@ -10,15 +10,16 @@
 //! `tutti-midi-hardware`. This crate owns the runtime state that connects them:
 //!
 //! - **MIDI as graph nodes**, sending on `tutti-graph` event ports:
-//!   [`MidiIngestNode`] (the device inlets in, one port per Group and channel), [`MidiClipNode`] and
+//!   [`MidiIngestNode`] (a device's inlet in, one port per Group and channel), [`MidiClipNode`] and
 //!   [`HarmonyNode`] (a timeline), [`ClockNode`] (Beat Clock and MTC). MIDI leaves the graph
 //!   through an event tap (`tutti-graph`'s `EventTapReader`).
 //! - [`ClockMap`]: the pure OS-time to graph-frame map (and back), built from
 //!   readings of the OS `Instant` and the graph's `Frame`; it holds no clock.
-//! - [`DeviceInlets`] and [`DeviceInput`]: one event inlet per hardware MIDI
-//!   device. The device's thread places each arrival on a frame with a `ClockMap`
+//! - [`InputInlets`] and [`DeviceInput`]: one event inlet per hardware MIDI
+//!   input. The device's thread places each arrival on a frame with a `ClockMap`
 //!   fed the engine's block clock and pushes it into its inlet, so the audio thread
-//!   converts no time; the ingest node has one event input per device slot.
+//!   converts no time; an input's ingest node follows its device through
+//!   [`DeviceEpochs`].
 //! - [`TempoFollower`]: what a transport that follows an outside tempo applies, as a pure
 //!   value (a Group's Flex Set Tempo and Set Time Signature, M2-104 §7.5.3, §7.5.4); the
 //!   session places the change.
@@ -239,19 +240,19 @@ pub use clock_map::{ClockMap, ClockReading, GAIN, Observed, RESYNC};
 pub use held::HeldState;
 pub use ledger::{NoteLedger, Sending};
 pub use live::{
-    ACTIVE_SENSING_JUDGE, ActiveSensing, ArrivalClock, CHANNELLESS_PORT, Changes, DeviceInlets,
-    DeviceInput, DeviceSlot, InletChange, LIVE_INLET_CAPACITY, MAILBOX_CAPACITY,
-    MIDI_INPUT_DENSITY, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS, MidiIngestControls,
-    MidiIngestNode, MidiInputPorts, MidiKeys, MidiMailbox, MidiReceiver, MidiSender, MpeIngest,
-    MpeTransformControls, MpeTransformNode, NoFreeSlot, RouteRule, SlotCountMismatch,
-    compile_routes,
+    ACTIVE_SENSING_JUDGE, ActiveSensing, ArrivalClock, CHANNELLESS_PORT, DeviceEpochs, DeviceInput,
+    InputId, InputInlets, LIVE_INLET_CAPACITY, MAILBOX_CAPACITY, MIDI_INPUT_DENSITY,
+    MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS, MidiIngestControls, MidiIngestNode,
+    MidiInputPorts, MidiKeys, MidiMailbox, MidiReceiver, MidiSender, MpeIngest,
+    MpeTransformControls, MpeTransformNode, RouteRule, compile_routes,
 };
 pub use mpe_features::{MpeFeaturesError, ask_mpe_features, mpe_features};
 pub use mpe_zones::mpe_zones;
 pub use outbound::{
     ACTIVE_SENSING_INTERVAL, ActiveSensingSender, CLOCK_EVENT_CAPACITY, ClockControls, ClockMaster,
     ClockNode, JR_CLOCK_INTERVAL, JR_CLOCK_MAX_INTERVAL, JrClock, JrClockEmitter, JrStamper,
-    JrStream, MachineControlSender, NoTimeCode,
+    JrStream, MACHINE_CONTROL_EVENT_CAPACITY, MIDI_OUT_EVENT_CAPACITY, MachineControlControls,
+    MachineControlNode, MachineControlSender, MidiOutNode, NoTimeCode,
 };
 pub use output_plan::{
     MAX_OUTPUT_AHEAD, MAX_OUTPUT_LATENCY, OffsetOutOfRange, Outgoing, OutputLatency, OutputOffset,
@@ -263,7 +264,7 @@ pub use schedule::{
 };
 pub use sync::{
     ClockEvent, ClockFollower, ClockKind, ClockPosition, ClockTransportState, MachineControlEvent,
-    MachineControlFollower, MidiClockDecoder, MtcDecoder,
+    MachineControlFollower, MidiClockDecoder, MtcDecoder, SegmentFault,
 };
 pub use taken::Taken;
 pub use tempo_follower::{Followed, TempoFollower, TempoSource};

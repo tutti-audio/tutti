@@ -7,7 +7,7 @@ use tutti_ump::{
 
 use super::*;
 use crate::ci::{CiHeader, CiMessage, CiVersion, Decoded, Muid, ProfileInitiator};
-use crate::endpoint::{Capabilities, FunctionBlock};
+use crate::endpoint::{Capabilities, FunctionBlock, Supports};
 use tutti_fixtures::midi;
 
 const OURS: u32 = 0x0100_0001;
@@ -22,12 +22,12 @@ fn block_id() -> FunctionBlockId {
 }
 
 fn endpoint(protocol: Protocol, direction: Direction, active: bool) -> Endpoint {
-    Endpoint::new(Capabilities {
+    Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         rx_jr: false,
         tx_jr: false,
-    })
+    }))
     .with_active(StreamConfig {
         protocol,
         rx_jr: false,
@@ -47,12 +47,12 @@ fn endpoint(protocol: Protocol, direction: Direction, active: bool) -> Endpoint 
 }
 
 fn endpoint_with(protocol: Protocol, port: Midi1Port, rx_jr: bool) -> Endpoint {
-    Endpoint::new(Capabilities {
+    Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         rx_jr: true,
         tx_jr: true,
-    })
+    }))
     .with_active(StreamConfig {
         protocol,
         rx_jr,

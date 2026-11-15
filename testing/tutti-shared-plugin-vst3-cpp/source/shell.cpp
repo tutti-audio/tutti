@@ -303,6 +303,7 @@ public:
 		parameters.addParameter (STR16 ("aux"), nullptr, 0, 0.25, ParameterInfo::kCanAutomate, shared::kAux);
 		parameters.addParameter (STR16 ("mode"), nullptr, shared::kModes - 1, 0.0, ParameterInfo::kCanAutomate, shared::kMode);
 		parameters.addParameter (STR16 ("tone"), nullptr, 0, 0.5, ParameterInfo::kCanAutomate, shared::kTone);
+		parameters.addParameter (STR16 ("meter"), nullptr, 0, 0.0, ParameterInfo::kIsReadOnly, shared::kMeter);
 		return kResultOk;
 	}
 	// `tone` is the one parameter with a plain domain of its own (core.rs, "Spec").
