@@ -9,7 +9,7 @@
 use std::fmt::Display;
 
 use tutti_midi_runtime::{Outgoing, Taken};
-use tutti_ump::{Span, spans};
+use tutti_ump::Span;
 
 /// Why the OS did not take a message, and how much of it went first.
 #[derive(Debug)]
@@ -42,7 +42,7 @@ pub(super) fn by_message<E: Display>(
     mut send: impl FnMut(Span<'_, Outgoing>) -> Result<(), Refused<E>>,
 ) -> Sent {
     let mut taken = Taken::NONE;
-    for message in spans(events, |event| event.ump) {
+    for message in Outgoing::messages(events) {
         match send(message) {
             Ok(()) => taken = taken.through(message),
             Err(Refused { error, sent }) => {

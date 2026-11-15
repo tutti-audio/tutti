@@ -31,7 +31,7 @@ fn note_off(note: u8) -> UmpAt {
 #[test]
 fn sender_pushes_to_receiver() {
     let (sender, receiver) = MidiMailbox::pair();
-    sender.queue(&[note_on(60, 100), note_off(60)]);
+    let _ = sender.queue(&[note_on(60, 100), note_off(60)]);
     let mut buf = [(0, Ump([0; 4])); 16];
     assert_eq!(receiver.poll_into(&mut buf), 2);
     assert_eq!(buf[..2], [raw(note_on(60, 100)), raw(note_off(60))]);
@@ -41,8 +41,8 @@ fn sender_pushes_to_receiver() {
 fn cloned_sender_pushes_to_same_receiver() {
     let (sender, receiver) = MidiMailbox::pair();
     let s2 = sender.clone();
-    sender.queue(&[note_on(60, 100)]);
-    s2.queue(&[note_on(64, 100)]);
+    let _ = sender.queue(&[note_on(60, 100)]);
+    let _ = s2.queue(&[note_on(64, 100)]);
     let mut buf = [(0, Ump([0; 4])); 16];
     assert_eq!(receiver.poll_into(&mut buf), 2);
 }
@@ -95,7 +95,7 @@ fn sysex() -> [UmpAt; 3] {
 #[test]
 fn a_message_that_does_not_fit_whole_is_not_taken_and_nothing_after_it() {
     let (sender, receiver) = MidiMailbox::with_capacity(NonZeroUsize::new(4).unwrap());
-    sender.queue(&[note_on(60, 100), note_on(61, 100)]);
+    let _ = sender.queue(&[note_on(60, 100), note_on(61, 100)]);
     let batch = [sysex().to_vec(), vec![note_on(62, 100)]].concat();
     assert_eq!(sender.queue(&batch), Taken::NONE);
     let mut buf = [(0, Ump([0; 4])); 16];
@@ -119,4 +119,44 @@ fn a_message_that_fits_lands_whole() {
     );
     let mut buf = [(0, Ump([0; 4])); 16];
     assert_eq!(receiver.poll_into(&mut buf), 4);
+}
+
+/// Two clones writing at once never put a packet between another's: every
+/// System Exclusive message reaches the ring as its packets in a row, whatever
+/// a contended write refused.
+#[test]
+fn clones_writing_at_once_do_not_interleave_a_messages_packets() {
+    use tutti_ump::{Message, MidiGroup, Sysex7Packet, SysexStatus};
+    let (sender, receiver) = MidiMailbox::with_capacity(NonZeroUsize::new(100_000).unwrap());
+    let message = |group| {
+        [SysexStatus::Start, SysexStatus::Continue, SysexStatus::End].map(|status| {
+            (
+                Offset::ZERO,
+                Ump::from(Message::Sysex7(
+                    MidiGroup::of(group),
+                    Sysex7Packet::new(status, &[1]).unwrap(),
+                )),
+            )
+        })
+    };
+    std::thread::scope(|scope| {
+        for group in [1, 2] {
+            let sender = sender.clone();
+            scope.spawn(move || {
+                for _ in 0..5_000 {
+                    let _ = sender.queue(&message(group));
+                }
+            });
+        }
+    });
+    let mut buf = vec![(0, Ump([0; 4])); 100_000];
+    let got = receiver.poll_into(&mut buf);
+    assert!(got > 0 && got % 3 == 0);
+    for run in buf[..got].chunks(3) {
+        let groups: Vec<_> = run.iter().map(|(_, ump)| ump.group()).collect();
+        assert!(
+            groups.windows(2).all(|w| w[0] == w[1]),
+            "interleaved: {groups:?}"
+        );
+    }
 }

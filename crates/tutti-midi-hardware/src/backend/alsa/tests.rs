@@ -1042,6 +1042,7 @@ fn send(output: &super::output::AlsaOutput, word: u32, at: tutti_midi_runtime::S
         at: tutti_graph::Offset::ZERO,
         send: at,
         ump: tutti_ump::Ump([word, 0, 0, 0]),
+        join: tutti_ump::Join::Alone,
     }];
     assert!(
         output.queue_timed(&packet).is_all(&packet),
@@ -1055,6 +1056,7 @@ fn now(ump: tutti_ump::Ump) -> tutti_midi_runtime::Outgoing {
         at: tutti_graph::Offset::ZERO,
         send: tutti_midi_runtime::SendAt::Now,
         ump,
+        join: tutti_ump::Join::Alone,
     }
 }
 
@@ -1102,6 +1104,40 @@ fn an_output_with_a_full_pool_takes_what_fits_and_does_not_wait() {
     );
     assert!(!taken.is_none(), "an empty pool takes some");
     assert!(!taken.is_all(&batch), "the pool holds fewer than 10 000");
+}
+
+/// A packet held by the queue for a minute.
+fn held(ump: tutti_ump::Ump) -> tutti_midi_runtime::Outgoing {
+    tutti_midi_runtime::Outgoing {
+        send: tutti_midi_runtime::SendAt::At(Instant::now() + Duration::from_secs(60)),
+        ..now(ump)
+    }
+}
+
+/// **A scheduled message the output pool has no room for whole is refused
+/// whole.** With room for two of a message's three packets, none of it is
+/// queued, and the output has lost nothing.
+#[test]
+fn a_scheduled_message_the_pool_cannot_hold_whole_is_refused_whole() {
+    use tutti_midi_runtime::MidiOut;
+    let note = held(tutti_ump::Ump([0x2090_3C64, 0, 0, 0]));
+    let pool = {
+        let target = plug(&unique("pool-size"));
+        let id = super::enumerate::pack_id(target.0.id(), 0);
+        let output = super::output::connect(id).expect("the output to open");
+        (0..10_000)
+            .take_while(|_| !output.queue_timed(&[note]).is_none())
+            .count()
+    };
+    let target = plug(&unique("pool-room"));
+    let id = super::enumerate::pack_id(target.0.id(), 0);
+    let output = super::output::connect(id).expect("the output to open");
+    let notes = vec![note; pool - 2];
+    assert!(output.queue_timed(&notes).is_all(&notes));
+    let message = sysex().map(|packet| held(packet.ump));
+    assert!(output.queue_timed(&message).is_none());
+    assert_eq!(output.losses(), Losses::NONE);
+    assert_eq!(output.output_free(), 2, "none of it was queued");
 }
 
 /// **A full destination refuses a note at once**, and the destination is not

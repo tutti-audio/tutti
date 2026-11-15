@@ -16,6 +16,7 @@ fn at(send: SendAt, ump: Ump) -> Outgoing {
         at: Offset::ZERO,
         send,
         ump,
+        join: tutti_ump::Join::Alone,
     }
 }
 

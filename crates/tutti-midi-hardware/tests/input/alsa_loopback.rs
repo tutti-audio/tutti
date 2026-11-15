@@ -88,7 +88,8 @@ fn midi_through_returns_a_note_on_a_note_off_and_a_burst_of_ten_note_ons() {
     assert!(heard[0].is_note_off(), "the event is a note off");
 
     for n in 60..70u8 {
-        lb.sink
+        let _ = lb
+            .sink
             .queue(&[(Offset::ZERO, note_on(MidiChannel::FIRST, n, 0xA000))]);
     }
     let heard = lb.graph.listen(Duration::from_millis(250));

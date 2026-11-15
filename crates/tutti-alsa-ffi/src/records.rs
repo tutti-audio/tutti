@@ -145,3 +145,29 @@ impl Drop for StatusRecord {
         unsafe { sys::snd_seq_queue_status_free(self.0.as_ptr()) };
     }
 }
+
+/// A `snd_seq_client_pool_t`.
+pub(crate) struct PoolRecord(NonNull<sys::snd_seq_client_pool_t>);
+
+impl PoolRecord {
+    pub(crate) fn new() -> Result<Self> {
+        let mut ptr: *mut sys::snd_seq_client_pool_t = std::ptr::null_mut();
+        // SAFETY: `ptr` is a valid out-pointer.
+        let rc = unsafe { sys::snd_seq_client_pool_malloc(&mut ptr) };
+        check(rc, "snd_seq_client_pool_malloc")?;
+        NonNull::new(ptr).map(Self).ok_or(crate::Error::NoRecord {
+            operation: "snd_seq_client_pool_malloc",
+        })
+    }
+
+    pub(crate) fn as_ptr(&self) -> *mut sys::snd_seq_client_pool_t {
+        self.0.as_ptr()
+    }
+}
+
+impl Drop for PoolRecord {
+    fn drop(&mut self) {
+        // SAFETY: allocated by `new` and freed here, once.
+        unsafe { sys::snd_seq_client_pool_free(self.0.as_ptr()) };
+    }
+}

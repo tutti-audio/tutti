@@ -38,7 +38,7 @@ use std::time::{Duration, Instant};
 
 use tutti_graph::Offset;
 use tutti_types::{Frame, Seconds};
-use tutti_ump::Ump;
+use tutti_ump::{Join, Spans, Ump, spans_joined};
 
 use crate::ClockMap;
 
@@ -71,9 +71,18 @@ pub struct Outgoing {
     pub send: SendAt,
     /// The packet.
     pub ump: Ump,
+    /// Whether the packet is a message of its own or goes with the one before
+    /// it ([`Join`]).
+    pub join: Join,
 }
 
 impl Outgoing {
+    /// The messages of `events`, in order: what a cut keeps together
+    /// ([`spans_joined`]).
+    pub fn messages(events: &[Self]) -> Spans<'_, Self, fn(&Self) -> Ump, fn(&Self) -> Join> {
+        spans_joined(events, |event| event.ump, |event| event.join)
+    }
+
     /// `events`, each sent at once.
     #[must_use]
     pub fn now_batch(events: &[tutti_graph::UmpAt]) -> Vec<Self> {
@@ -83,6 +92,7 @@ impl Outgoing {
                 at,
                 send: SendAt::Now,
                 ump,
+                join: Join::Alone,
             })
             .collect()
     }

@@ -269,7 +269,7 @@ pub use port::{HardwareMidiInputs, InputProducerHandle, PortInfo, Pushed, Stream
 pub use process::{ProcessChange, ReportAsk, ReportError, ReportPeer};
 pub use profiles::{
     ChannelCount, ChannelProfile, ListedProfile, NotAChannelCount, PeerProfiles, ProfileError,
-    ProfileSwitch, ProfilesChange, Whole, WholeProfile,
+    ProfileSwitch, ProfilesChange, Whole, WholeProfile, ZoneRefusal,
 };
 pub use session::{DeviceQuery, MidiSession, Polled};
 pub use stream::{Basis, DeviceStream, InputTiming};

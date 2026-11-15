@@ -10,7 +10,7 @@
 use tutti_alsa_ffi::{
     BLOCK_IS_LOWSPEED, BLOCK_IS_MIDI1, Blocking, CAP_READ, CAP_SUBS_READ, CAP_SUBS_WRITE,
     CAP_WRITE, Client, DIR_BIDIRECTION, DIR_INPUT, DIR_OUTPUT, PROTO_MIDI1, PROTO_MIDI2,
-    TYPE_APPLICATION, TYPE_MIDI_GENERIC, UmpBlock, UmpEndpoint, UmpVersion, address_byte,
+    TYPE_APPLICATION, TYPE_MIDI_GENERIC, UmpBlock, UmpEndpoint, UmpVersion,
 };
 use tutti_midi_device::FunctionBlock;
 use tutti_ump::Direction;
@@ -125,7 +125,6 @@ pub(crate) fn source(spec: &VirtualSpec) -> Result<(AlsaVirtualSource, VirtualPr
         TYPE_MIDI_GENERIC | TYPE_APPLICATION,
     )?;
     publish(&client, spec, protocol)?;
-    let port = address_byte("port", port)?;
     Ok((
         AlsaVirtualSource {
             inner: std::sync::Mutex::new((client, port)),

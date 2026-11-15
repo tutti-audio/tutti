@@ -34,7 +34,11 @@ pub trait MidiOut: Send + Sync {
     /// subset and not a cut inside one: a sink that cannot take a message of
     /// several packets (a System Exclusive message) whole takes none of it, and
     /// nothing after it, so the stream stays in order and no receiver is left
-    /// waiting for the end of a message.
+    /// waiting for the end of a message. One case can still cut a message: the
+    /// ALSA sequencer's destination fifo cannot be read, so a destination that
+    /// fills up between two packets of a message takes its head only; that
+    /// output takes the message, counts the lost tail in its losses, and does
+    /// not send the head again.
     ///
     /// A sink with no wire clock (a mailbox, a test's) ignores the time.
     fn queue_timed(&self, events: &[Outgoing]) -> Taken;

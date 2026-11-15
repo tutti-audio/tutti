@@ -43,12 +43,12 @@ fn find(peer: &Client, spec: &VirtualSpec) -> Option<PortEntry> {
         .find(|p| p.client_name == spec.name().as_str())
 }
 
-fn peer(caps: u32) -> (Client, i32) {
+fn peer(caps: u32) -> (Client, u8) {
     peer_in(caps, UmpVersion::Midi2)
 }
 
 /// A peer client delivered `version`.
-fn peer_in(caps: u32, version: UmpVersion) -> (Client, i32) {
+fn peer_in(caps: u32, version: UmpVersion) -> (Client, u8) {
     let client = Client::open("tutti-virt-peer", Blocking::NonBlock, version).expect("a sequencer");
     let port = client
         .open_port("peer", caps, TYPE_MIDI_GENERIC | TYPE_APPLICATION)
@@ -115,8 +115,7 @@ fn a_virtual_destination_delivers_what_a_client_sends_to_the_graph_in_order() {
 
     let sent = notes(5);
     for ump in &sent {
-        peer.send_to_subscribers(u8::try_from(port).unwrap(), ump.words())
-            .expect("sends");
+        peer.send_to_subscribers(port, ump.words()).expect("sends");
     }
     let heard = listener.hear(sent.len(), PATIENCE);
     assert_eq!(heard, sent);
@@ -144,8 +143,7 @@ fn jr_messages_a_client_sends_are_not_heard_by_an_arrival_port() {
     let stamp = Ump::from(Message::Utility(Utility::JrTimestamp(0x1300)));
     let note = note_on(MidiChannel::of(2), 60, 0x8000);
     for ump in [clock, stamp, note] {
-        peer.send_to_subscribers(u8::try_from(port).unwrap(), ump.words())
-            .expect("sends");
+        peer.send_to_subscribers(port, ump.words()).expect("sends");
     }
     assert_eq!(listener.hear(1, PATIENCE), [note]);
     assert_eq!(ports.losses().dropped(), 0);
@@ -223,8 +221,7 @@ fn a_midi1_destination_reports_midi1_and_its_messages_arrive_widened() {
     peer.connect_to(port, found.client, found.port)
         .expect("subscribes");
     let note = m1_note_on(MidiChannel::of(2), 60, U7::of(0x40));
-    peer.send_to_subscribers(u8::try_from(port).unwrap(), note.words())
-        .expect("sends");
+    peer.send_to_subscribers(port, note.words()).expect("sends");
     let heard = listener.hear(1, PATIENCE);
     assert_eq!(heard, [note_on(MidiChannel::of(2), 60, 0x8000)]);
 }

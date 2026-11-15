@@ -41,6 +41,7 @@ use crate::error::{Error, Result};
 use crate::process::{ProcessChange, ReportAsk, ReportError, ReportPeer};
 use crate::profiles::{PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange};
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
+use tutti_midi_device::ProfileId;
 use tutti_midi_device::{DeviceId, DeviceInfo, EntropyError, Learned, SavedDevice};
 use tutti_midi_runtime::{DeviceInlets, DeviceSlot};
 use tutti_ump::{DeviceIdentity, MidiGroup};
@@ -487,10 +488,12 @@ impl MidiSession {
                     .into_iter()
                     .map(|(peer, change)| Polled::Ci(id.clone(), peer, change)),
             );
+            let refusals = mpe_zone_refusals(&stepped.profiles, &held.stream.profiles());
             polled.extend(
                 stepped
                     .profiles
                     .into_iter()
+                    .chain(refusals)
                     .map(|(peer, change)| Polled::Profile(id.clone(), peer, change)),
             );
             polled.extend(
@@ -710,3 +713,35 @@ fn sync_hearing(ports: &HardwareMidiInputs, held: &mut Held, ci: bool) {
 
 #[cfg(test)]
 mod tests;
+
+/// The zones the peers `changes` touched enabled that their zones leave out, as
+/// the changes that say so: one per zone, after the change that enabled it.
+fn mpe_zone_refusals(
+    changes: &[(PeerId, ProfilesChange)],
+    peers: &[PeerProfiles],
+) -> Vec<(PeerId, ProfilesChange)> {
+    let mut asked = Vec::new();
+    for (peer, change) in changes {
+        let enabled = matches!(
+            change,
+            ProfilesChange::Known
+                | ProfilesChange::Changed {
+                    profile: ProfileId::MPE,
+                    ..
+                }
+        );
+        if enabled && !asked.contains(peer) {
+            asked.push(*peer);
+        }
+    }
+    asked
+        .into_iter()
+        .flat_map(|peer| {
+            peers
+                .iter()
+                .filter(move |p| p.group() == peer.group && p.muid() == peer.muid)
+                .flat_map(PeerProfiles::refused_mpe_zones)
+                .map(move |(zone, why)| (peer, ProfilesChange::MpeZoneRefused { zone, why }))
+        })
+        .collect()
+}

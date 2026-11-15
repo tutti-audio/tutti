@@ -164,11 +164,13 @@ fn a_scheduled_packet_is_held_until_its_time_and_now_goes_at_once() {
             at: tutti_graph::Offset::ZERO,
             send: SendAt::At(due),
             ump: note(60),
+            join: tutti_ump::Join::Alone,
         },
         Outgoing {
             at: tutti_graph::Offset::ZERO,
             send: SendAt::Now,
             ump: note(61),
+            join: tutti_ump::Join::Alone,
         },
     ]);
     assert_eq!(sent.packets(), 2);

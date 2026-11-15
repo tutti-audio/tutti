@@ -35,6 +35,14 @@ pub enum Error {
         /// The alsa-lib function that returned the null.
         operation: &'static str,
     },
+    /// The output pool has fewer free cells than a message needs.
+    #[error("ALSA output pool has {free} free cells, and the message needs {needed}")]
+    PoolFull {
+        /// Free cells now.
+        free: usize,
+        /// Cells the message needs.
+        needed: usize,
+    },
     /// The sequencer did not give a queue's real time.
     #[error("ALSA error: the queue's status has no real time")]
     NoQueueTime,
@@ -61,7 +69,7 @@ impl Error {
 /// # Errors
 ///
 /// [`Error::Address`] when `id` does not fit a byte.
-pub fn address_byte(what: &'static str, id: i32) -> Result<u8> {
+pub(crate) fn address_byte(what: &'static str, id: i32) -> Result<u8> {
     u8::try_from(id).map_err(|source| Error::Address { what, id, source })
 }
 

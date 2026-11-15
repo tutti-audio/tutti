@@ -264,10 +264,24 @@ impl PeerProfiles {
     /// Number of Channels its Enabled Report gave. A Profile enabled without
     /// a count (a Version 1 peer sends none), or with one that makes no zone
     /// (fewer than two Channels, or past Channel 16), is not a zone, and a
-    /// zone sharing a Channel with a lower one is left out (section 3.4).
+    /// zone sharing a Channel with a lower one is left out (section 3.4);
+    /// [`refused_mpe_zones`](Self::refused_mpe_zones) lists those.
     #[must_use]
     pub fn mpe_zones(&self) -> Option<MpeZones> {
+        self.fold_mpe_zones().0
+    }
+
+    /// The zones the peer enabled that [`mpe_zones`](Self::mpe_zones) leaves
+    /// out, each with why.
+    #[must_use]
+    pub fn refused_mpe_zones(&self) -> Vec<(MpeZoneConfig, ZoneRefusal)> {
+        self.fold_mpe_zones().1
+    }
+
+    /// The zones held together, and the ones that did not join them.
+    fn fold_mpe_zones(&self) -> (Option<MpeZones>, Vec<(MpeZoneConfig, ZoneRefusal)>) {
         let mut zones: Option<MpeZones> = None;
+        let mut refused = Vec::new();
         for address in self.table.addresses() {
             let CiDeviceId::Channel(manager) = address else {
                 continue;
@@ -293,10 +307,21 @@ impl PeerProfiles {
             let Some(zone) = zone else { continue };
             zones = match zones {
                 None => Some(MpeZones::single(zone)),
-                Some(held) => Some(held.with(zone).unwrap_or(held)),
+                Some(held) => match held.with(zone) {
+                    Some(joined) => Some(joined),
+                    None => {
+                        let why = if held.zones().any(|held| held.spec() != zone.spec()) {
+                            ZoneRefusal::OtherSpecification
+                        } else {
+                            ZoneRefusal::SharesChannels
+                        };
+                        refused.push((zone, why));
+                        Some(held)
+                    }
+                },
             };
         }
-        zones
+        (zones, refused)
     }
 
     /// Every Profile the peer lists, as handles to switch them from.
@@ -330,6 +355,16 @@ impl PeerProfiles {
 
 /// A snapshot of every peer's Profiles on one input.
 pub(crate) type Snapshot = Arc<[PeerProfiles]>;
+
+/// Why an enabled MPE zone is not one the peer's zones hold.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ZoneRefusal {
+    /// It shares a Channel with a lower zone (M2-120 section 3.4).
+    SharesChannels,
+    /// It follows another specification than the zones held.
+    OtherSpecification,
+}
 
 /// A change of one peer's Profiles, once each from
 /// [`MidiSession::poll`](crate::MidiSession::poll); the [`PeerId`](crate::PeerId)
@@ -380,6 +415,15 @@ pub enum ProfilesChange {
         profile: ProfileId,
         /// The data, uninterpreted.
         data: SpecificData,
+    },
+    /// A zone the peer enabled is not one of its
+    /// [`mpe_zones`](PeerProfiles::mpe_zones): it is left out, and this says why.
+    /// Sent after the change that enabled it.
+    MpeZoneRefused {
+        /// The zone.
+        zone: MpeZoneConfig,
+        /// Why it is left out.
+        why: ZoneRefusal,
     },
     /// The peer is gone (lost, or MIDI-CI ended): its Profiles and the
     /// Initiator that kept them went with it.

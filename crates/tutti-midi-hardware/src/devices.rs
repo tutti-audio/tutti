@@ -672,7 +672,8 @@ impl OpenOutput {
     /// Timestamp the device does not take, a per-note controller for MIDI 1.0)
     /// counts as taken. What is taken ends between two messages, so a System
     /// Exclusive message goes whole or not at all; what is not taken is
-    /// counted in [`losses`](Self::losses). Never blocks.
+    /// counted in [`losses`](Self::losses). For a control thread: it allocates
+    /// the batch it converts, and never blocks.
     pub fn queue(&mut self, events: &[UmpAt]) -> Taken {
         self.queue_timed(&Outgoing::now_batch(events))
     }

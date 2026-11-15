@@ -12,6 +12,7 @@ fn packet(status: SysexStatus) -> Outgoing {
             MidiGroup::FIRST,
             Sysex7Packet::new(status, &[1]).unwrap(),
         )),
+        join: tutti_ump::Join::Alone,
     }
 }
 

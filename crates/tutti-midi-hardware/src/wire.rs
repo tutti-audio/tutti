@@ -34,7 +34,7 @@
 
 use tutti_midi_protocol::Narrower;
 use tutti_midi_runtime::{Outgoing, Taken};
-use tutti_ump::{Message, Protocol, StreamConfig, Ump, Utility, parse_exact};
+use tutti_ump::{Join, Message, Protocol, StreamConfig, Ump, Utility, parse_exact};
 
 /// One device output's wire form: its configuration, the [`Narrower`] that
 /// serves it for as long as it is in MIDI 1.0, and the buffers one batch is
@@ -87,7 +87,13 @@ impl Wire {
         self.ends.clear();
         let narrows = self.narrows();
         let jr = self.config.rx_jr;
-        for &Outgoing { at, send, ump } in events {
+        for &Outgoing {
+            at,
+            send,
+            ump,
+            join,
+        } in events
+        {
             match ump.message_type() {
                 0 => {
                     if let Some(kept) = utility(ump, jr) {
@@ -95,22 +101,34 @@ impl Wire {
                             at,
                             send,
                             ump: kept,
+                            join,
                         });
                     }
                 }
                 4 if narrows => {
                     if let Ok(message) = ump.decode() {
                         let out = &mut self.out;
+                        let mut next = join;
                         narrow_voice(&mut self.narrower, message, |packet| {
                             out.push(Outgoing {
                                 at,
                                 send,
                                 ump: packet,
+                                join: next,
                             });
+                            // The packets of one event are one message: a cut
+                            // between a controller's select and its value
+                            // leaves the receiver selected with no value.
+                            next = Join::ToPrevious;
                         });
                     }
                 }
-                _ => self.out.push(Outgoing { at, send, ump }),
+                _ => self.out.push(Outgoing {
+                    at,
+                    send,
+                    ump,
+                    join,
+                }),
             }
             self.ends.push(self.out.len());
         }

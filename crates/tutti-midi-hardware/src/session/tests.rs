@@ -196,11 +196,13 @@ fn a_send_time_reaches_the_sink_with_its_packet() {
             at,
             send: SendAt::Now,
             ump,
+            join: tutti_ump::Join::Alone,
         },
         Outgoing {
             at,
             send: SendAt::At(t),
             ump,
+            join: tutti_ump::Join::Alone,
         },
     ];
     assert_eq!(output.queue_timed(&events).packets(), 2);

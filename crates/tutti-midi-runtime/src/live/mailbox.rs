@@ -9,10 +9,11 @@
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_graph::UmpAt;
 
 use crossbeam_queue::ArrayQueue;
-use tutti_ump::{Ump, spans};
+use tutti_ump::{Span, Ump, spans};
 
 use crate::traits::MidiOut;
 use crate::{Outgoing, Taken};
@@ -28,6 +29,9 @@ pub struct MidiMailbox {
     /// (a host's own events carry a block offset). The types stop here; a
     /// stamp becomes an `Offset` where a block is known.
     events: ArrayQueue<(u32, Ump)>,
+    /// Held by the clone that is writing a message, so no other clone puts a
+    /// packet between its packets.
+    writing: AtomicBool,
 }
 
 impl std::fmt::Debug for MidiMailbox {
@@ -49,6 +53,7 @@ impl MidiMailbox {
     pub fn with_capacity(capacity: NonZeroUsize) -> (MidiSender, MidiReceiver) {
         let slot = Arc::new(Self {
             events: ArrayQueue::new(capacity.get()),
+            writing: AtomicBool::new(false),
         });
         (
             MidiSender {
@@ -76,33 +81,53 @@ impl MidiSender {
     /// whose note-on landed is what leaves a note stuck, so a caller with
     /// anywhere to report it must. Never blocks.
     ///
-    /// A message goes in whole only against the room the ring has when it
-    /// starts: another clone pushing at the same time can take that room, and
-    /// then the packets of the message that did not fit stay out.
+    /// A message of several packets is written by one clone at a time: a clone
+    /// that finds another writing refuses its message and takes nothing, so
+    /// two clones never interleave their packets in the ring, and none waits.
     pub fn queue(&self, events: &[UmpAt]) -> Taken {
-        self.push(events, |&(offset, ump)| (offset.get(), ump))
+        self.push(spans(events, |event| event.1), |&(offset, ump)| {
+            (offset.get(), ump)
+        })
     }
 
     /// [`queue`](Self::queue) for events stamped with a raw `u32` that is not
     /// an offset into a block (the out node's graph-clock frame, wrapped at
     /// 2^32). Same prefix semantics: what is taken, never a gap.
     pub fn queue_stamped(&self, events: &[(u32, Ump)]) -> Taken {
-        self.push(events, |&event| event)
+        self.push(spans(events, |event| event.1), |&event| event)
     }
 
-    /// Pushes the messages of `events` while the ring has room for each.
-    fn push<T>(&self, events: &[T], stamped: impl Fn(&T) -> (u32, Ump)) -> Taken {
+    /// Pushes the messages of `events` while the ring has room for each and no
+    /// other clone is writing.
+    fn push<'a, T: 'a>(
+        &self,
+        messages: impl Iterator<Item = Span<'a, T>>,
+        stamped: impl Fn(&T) -> (u32, Ump),
+    ) -> Taken {
         let ring = &self.slot.events;
         let mut taken = Taken::NONE;
-        for message in spans(events, |event| stamped(event).1) {
-            if ring.capacity() - ring.len() < message.len() {
+        for message in messages {
+            // One writer at a time, so a message's packets are together in the
+            // ring and the room read below is still there when they are
+            // written (the reader only adds room). A clone that finds another
+            // writing refuses the message: it never waits.
+            if self
+                .slot
+                .writing
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_err()
+            {
                 break;
             }
-            if message
-                .packets()
-                .iter()
-                .any(|event| ring.push(stamped(event)).is_err())
-            {
+            let fits = ring.capacity() - ring.len() >= message.len();
+            if fits {
+                for event in message.packets() {
+                    // The room was read under the claim: the push has room.
+                    let _ = ring.push(stamped(event));
+                }
+            }
+            self.slot.writing.store(false, Ordering::Release);
+            if !fits {
                 break;
             }
             taken = taken.through(message);
@@ -113,7 +138,9 @@ impl MidiSender {
 
 impl MidiOut for MidiSender {
     fn queue_timed(&self, events: &[Outgoing]) -> Taken {
-        self.push(events, |event| (event.at.get(), event.ump))
+        self.push(Outgoing::messages(events), |event| {
+            (event.at.get(), event.ump)
+        })
     }
 
     fn queue(&self, events: &[UmpAt]) -> Taken {

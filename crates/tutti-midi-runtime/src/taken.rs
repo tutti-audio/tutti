@@ -14,6 +14,7 @@ use crate::Outgoing;
 /// boundary ([`within`](Self::within)), so a count that falls inside a message
 /// cannot be written. What the sink did not take, the caller counts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[must_use = "what a sink did not take is the caller's to count"]
 pub struct Taken(usize);
 
 impl Taken {
@@ -23,13 +24,18 @@ impl Taken {
     /// The longest prefix of `events` of at most `room` packets that ends
     /// between two messages. A message that does not fit whole is not taken,
     /// nor is anything after it.
-    #[must_use]
     pub fn within(events: &[Outgoing], room: usize) -> Self {
-        Self::within_by(events, |event| event.ump, room)
+        let mut taken = Self::NONE;
+        for message in Outgoing::messages(events) {
+            if taken.0 + message.len() > room {
+                break;
+            }
+            taken = taken.through(message);
+        }
+        taken
     }
 
     /// [`within`](Self::within) for items that carry a packet: `ump` reads it.
-    #[must_use]
     pub fn within_by<T>(items: &[T], ump: impl Fn(&T) -> Ump, room: usize) -> Self {
         let mut taken = Self::NONE;
         for span in spans(items, ump) {
@@ -44,7 +50,6 @@ impl Taken {
     /// This and the packets of `message`, the next message of the batch after
     /// what is taken. A sink that sends one message at a time adds each as it
     /// goes and stops at the first it cannot send.
-    #[must_use]
     pub const fn through<T>(self, message: Span<'_, T>) -> Self {
         Self(self.0 + message.len())
     }

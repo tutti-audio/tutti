@@ -16,7 +16,6 @@ use crate::error::{NotFound, Result};
 use crate::stamp::Paired;
 use tutti_alsa_ffi::{
     Blocking, CAP_READ, Client, QueueClock, TYPE_APPLICATION, TYPE_MIDI_GENERIC, UmpVersion,
-    address_byte,
 };
 use tutti_midi_device::EndpointId;
 use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
@@ -78,6 +77,14 @@ impl AlsaOutput {
 
 #[cfg(all(test, feature = "sequencer-tests"))]
 impl AlsaOutput {
+    /// The free cells of the client's output pool.
+    pub(super) fn output_free(&self) -> usize {
+        self.sender()
+            .seq
+            .output_free()
+            .expect("the pool to be readable")
+    }
+
     /// Poisons the send lock, as a panic inside a send would.
     pub(super) fn poison(&self) {
         std::thread::scope(|scope| {
@@ -95,14 +102,36 @@ impl MidiOut for AlsaOutput {
     /// Each packet is held by the sequencer's queue until its time (an `At`),
     /// or sent directly (`Now`).
     ///
-    /// A message goes to the sequencer a packet at a time, so one the
-    /// destination fills up inside is cut: its head is out, it is taken, and
-    /// its tail is counted in [`losses`](DeviceOut::losses)
-    /// ([`by_message`]).
+    /// A message goes to the sequencer a packet at a time. One that needs the
+    /// output pool is refused whole when the pool lacks room for all of it. The
+    /// destination's own fifo cannot be read, so a message it fills up inside
+    /// is cut: its head is out, it is taken, and its tail is counted in
+    /// [`losses`](DeviceOut::losses) ([`by_message`]).
     fn queue_timed(&self, events: &[Outgoing]) -> Taken {
         let mut sender = self.sender();
         let mut paired = None;
         let sent = by_message(events, "ALSA", |message| {
+            // A message of several packets that need cells of this client's
+            // output pool goes only if the pool has room for all of them: it
+            // can be read, where the destination's fifo cannot.
+            let needed = message
+                .packets()
+                .iter()
+                .filter(|event| matches!(event.send, SendAt::At(_)))
+                .count();
+            if message.len() > 1 && needed > 0 {
+                let free = sender.seq.output_free().map_err(|e| Refused {
+                    error: e.into(),
+                    sent: 0,
+                })?;
+                if free < needed {
+                    let error = tutti_alsa_ffi::Error::PoolFull { free, needed };
+                    return Err(Refused {
+                        error: error.into(),
+                        sent: 0,
+                    });
+                }
+            }
             for (sent, event) in message.packets().iter().enumerate() {
                 if let Err(error) = sender.send(event.ump.words(), event.send, &mut paired) {
                     return Err(Refused { error, sent });
@@ -146,7 +175,6 @@ pub(super) fn connect(id: EndpointId) -> Result<AlsaOutput> {
         CAP_READ,
         TYPE_MIDI_GENERIC | TYPE_APPLICATION,
     )?;
-    let own_port = address_byte("port", port)?;
 
     seq.connect_to(port, dest_client, dest_port)?;
 
@@ -161,7 +189,7 @@ pub(super) fn connect(id: EndpointId) -> Result<AlsaOutput> {
     Ok(AlsaOutput {
         inner: Mutex::new(Sender {
             seq,
-            port: own_port,
+            port,
             queue,
             lost: 0,
         }),

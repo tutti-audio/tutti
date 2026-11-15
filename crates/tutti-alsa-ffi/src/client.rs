@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use crate::error::{Error, Result, address_byte, check};
 use crate::event::Received;
-use crate::records::{PortRecord, StatusRecord};
+use crate::records::{PoolRecord, PortRecord, StatusRecord};
 use crate::sys;
 
 /// `-EAGAIN`: nothing queued yet on a non-blocking client.
@@ -163,16 +163,17 @@ impl Client {
     }
 
     /// Creates a port on this client with `caps` (`CAP_*`) and `kind`
-    /// (`TYPE_*`), and returns its number.
+    /// (`TYPE_*`), and returns its number as an address byte.
     ///
     /// # Errors
     ///
-    /// `snd_seq_create_simple_port`'s code.
-    pub fn open_port(&self, name: &str, caps: u32, kind: u32) -> Result<i32> {
+    /// `snd_seq_create_simple_port`'s code, or [`Error::Address`] for a number
+    /// that is no address byte.
+    pub fn open_port(&self, name: &str, caps: u32, kind: u32) -> Result<u8> {
         let cname = c_name(name);
         // SAFETY: `self.seq` is open; `cname` outlives the call.
         let rc = unsafe { sys::snd_seq_create_simple_port(self.seq, cname.as_ptr(), caps, kind) };
-        check(rc, "snd_seq_create_simple_port")
+        address_byte("port", check(rc, "snd_seq_create_simple_port")?)
     }
 
     /// Subscribes `port` to what `src_client:src_port` sends.
@@ -180,10 +181,11 @@ impl Client {
     /// # Errors
     ///
     /// `snd_seq_connect_from`'s code: the address is not one that exists.
-    pub fn connect_from(&self, port: i32, src_client: i32, src_port: i32) -> Result<()> {
+    pub fn connect_from(&self, port: u8, src_client: i32, src_port: i32) -> Result<()> {
         // SAFETY: `self.seq` is open; the arguments are plain integers the
         // sequencer validates.
-        let rc = unsafe { sys::snd_seq_connect_from(self.seq, port, src_client, src_port) };
+        let rc =
+            unsafe { sys::snd_seq_connect_from(self.seq, i32::from(port), src_client, src_port) };
         check(rc, "snd_seq_connect_from").map(drop)
     }
 
@@ -192,10 +194,11 @@ impl Client {
     /// # Errors
     ///
     /// `snd_seq_connect_to`'s code: the address is not one that exists.
-    pub fn connect_to(&self, port: i32, dest_client: i32, dest_port: i32) -> Result<()> {
+    pub fn connect_to(&self, port: u8, dest_client: i32, dest_port: i32) -> Result<()> {
         // SAFETY: `self.seq` is open; the arguments are plain integers the
         // sequencer validates.
-        let rc = unsafe { sys::snd_seq_connect_to(self.seq, port, dest_client, dest_port) };
+        let rc =
+            unsafe { sys::snd_seq_connect_to(self.seq, i32::from(port), dest_client, dest_port) };
         check(rc, "snd_seq_connect_to").map(drop)
     }
 
@@ -205,7 +208,7 @@ impl Client {
     /// # Errors
     ///
     /// `snd_seq_connect_from`'s code.
-    pub fn connect_from_announce(&self, port: i32) -> Result<()> {
+    pub fn connect_from_announce(&self, port: u8) -> Result<()> {
         self.connect_from(
             port,
             sys::SND_SEQ_CLIENT_SYSTEM,
@@ -325,6 +328,22 @@ impl Client {
         check(rc, operation).map(drop)
     }
 
+    /// How many more events this client can hold in its own output pool: what
+    /// a scheduled send needs a cell of, until the queue delivers it. A send
+    /// that finds the pool full is refused on a [`Blocking::NonBlock`] client.
+    ///
+    /// # Errors
+    ///
+    /// `snd_seq_get_client_pool`'s code.
+    pub fn output_free(&self) -> Result<usize> {
+        let pool = PoolRecord::new()?;
+        // SAFETY: `self.seq` is open and `pool` is a live record.
+        let rc = unsafe { sys::snd_seq_get_client_pool(self.seq, pool.as_ptr()) };
+        check(rc, "snd_seq_get_client_pool")?;
+        // SAFETY: `pool` was just filled and is live.
+        Ok(unsafe { sys::snd_seq_client_pool_get_output_free(pool.as_ptr()) })
+    }
+
     /// Allocates and starts a queue of this client's own: a real-time clock
     /// that counts from zero now, read with [`QueueClock::now`] and used to
     /// schedule sends ([`send_to_subscribers_at`](Self::send_to_subscribers_at)).
@@ -367,7 +386,7 @@ impl Client {
     /// # Errors
     ///
     /// The code of the call that failed.
-    pub fn stamp_port(&self, port: i32) -> Result<QueueClock> {
+    pub fn stamp_port(&self, port: u8) -> Result<QueueClock> {
         let clock = self.start_queue()?;
         let queue = clock.queue;
         self.edit_port(port, |info| {
@@ -383,14 +402,14 @@ impl Client {
 
     /// Reads one of this client's ports into a record, lets `edit` change it,
     /// and writes it back; the sequencer announces the change.
-    fn edit_port(&self, port: i32, edit: impl FnOnce(*mut sys::snd_seq_port_info_t)) -> Result<()> {
+    fn edit_port(&self, port: u8, edit: impl FnOnce(*mut sys::snd_seq_port_info_t)) -> Result<()> {
         let info = PortRecord::new()?;
         // SAFETY: `self.seq` is open and `info` is a live record.
-        let rc = unsafe { sys::snd_seq_get_port_info(self.seq, port, info.as_ptr()) };
+        let rc = unsafe { sys::snd_seq_get_port_info(self.seq, i32::from(port), info.as_ptr()) };
         check(rc, "snd_seq_get_port_info")?;
         edit(info.as_ptr());
         // SAFETY: `self.seq` is open and `info` is a live record.
-        let rc = unsafe { sys::snd_seq_set_port_info(self.seq, port, info.as_ptr()) };
+        let rc = unsafe { sys::snd_seq_set_port_info(self.seq, i32::from(port), info.as_ptr()) };
         check(rc, "snd_seq_set_port_info").map(drop)
     }
 
@@ -479,7 +498,7 @@ impl Client {
     ///
     /// The code of the call that failed.
     #[cfg(feature = "testing")]
-    pub fn set_port_caps(&self, port: i32, caps: u32) -> Result<()> {
+    pub fn set_port_caps(&self, port: u8, caps: u32) -> Result<()> {
         self.edit_port(port, |info| {
             // SAFETY: `info` is a live record, filled from this client's port.
             unsafe { sys::snd_seq_port_info_set_capability(info, caps) };

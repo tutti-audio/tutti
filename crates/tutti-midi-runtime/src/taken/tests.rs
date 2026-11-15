@@ -6,6 +6,7 @@ use crate::SendAt;
 
 fn packet(status: SysexStatus) -> Outgoing {
     Outgoing {
+        join: tutti_ump::Join::Alone,
         at: Offset::ZERO,
         send: SendAt::Now,
         ump: Ump::from(Message::Sysex7(
@@ -43,7 +44,7 @@ fn room_inside_a_message_takes_the_messages_before_it() {
 fn a_sink_that_sends_message_by_message_takes_what_it_sent() {
     let batch = batch();
     let mut taken = Taken::NONE;
-    for message in spans(&batch, |e| e.ump).take(2) {
+    for message in Outgoing::messages(&batch).take(2) {
         taken = taken.through(message);
     }
     assert_eq!(taken.packets(), 4);
