@@ -9,11 +9,11 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, BusRole, ChannelLayout, ClapFeature, ContentScale, Control, Delivered,
-    EditorPresence, EditorWindow, FdId, Features, Layout, LoadedPlugin, Normalized, ParamAccess,
-    ParamEdit, ParamFlags, ParamId, ParamMapping, ParamWriteError, ParameterInfo, PluginBus,
-    PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, PresetId,
-    ProcessWake, RenderMode, RenderModeSupport, Request, RescanScope, Samples, StateUse, TimerId,
-    TrackInfo, WindowHandle, Wraps,
+    EditorPresence, EditorWindow, FdId, Features, Layout, LoadedPlugin, Normalized, OwnBypass,
+    ParamAccess, ParamEdit, ParamFlags, ParamId, ParamMapping, ParamWriteError, ParameterInfo,
+    PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail,
+    PresetId, ProcessWake, RenderMode, RenderModeSupport, Request, RescanScope, Samples, StateUse,
+    TimerId, TrackInfo, WindowHandle, Wraps, bypass_parameter,
 };
 
 use super::ClapLoaded;
@@ -279,6 +279,8 @@ impl Control for ClapLoaded {
             tail: self.tail_figure(main),
             features: self.features(main),
             probed: probed::CLAP,
+            own_bypass: bypass_parameter(&self.parameter_list(main)).map(OwnBypass::Parameter),
+            assignments: Vec::new(),
         }
     }
 

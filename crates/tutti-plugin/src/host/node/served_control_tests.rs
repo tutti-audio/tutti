@@ -189,3 +189,48 @@ fn a_client_with_no_editor_loader_asks_the_real_server_for_its_editor() {
         .expect_err("no editor is open");
     assert!(resize.to_string().contains("not open"), "{resize}");
 }
+
+/// **A served write of the plugin's own bypass says whether it reached the
+/// plugin.** On a live link the command is queued and the write is `Sent`; once
+/// the link is dead (the server ended) nothing is queued and it is `Lost`, so
+/// the session writes it again rather than assuming it applied.
+#[test]
+fn a_served_bypass_write_is_lost_when_the_link_is_dead() {
+    let _lock = machine_lock();
+    let mut env = tutti_fixtures::ScopedEnv::new();
+    env.set("TUTTI_PLUGIN_SERVER", plugin_server_path());
+    let Launched { ipc, .. } = Ipc::launch(
+        BridgeConfig::default(),
+        tutti_fixtures::clap_probe().to_path_buf(),
+        tutti_plugin_types::PluginFormat::Clap,
+        tutti_plugin_types::Load::new(),
+        SampleRate::SR_48K,
+        None,
+        tutti_plugin_types::StateUse::Project,
+        Some(tutti_plugin_ipc::EditorLoader::new(
+            crate::format::gui::load_gui_instance,
+            tutti_fixtures::detached_work(),
+        )),
+    )
+    .expect("the probe launches in a real plugin-server");
+    let any = ipc.controller();
+    let site = tutti_plugin_types::OwnBypass::Parameter(GAIN);
+    assert_eq!(
+        AnyThread::set_bypassed(&any, site, true),
+        tutti_plugin_types::BypassWrite::Sent,
+        "a live link takes the write"
+    );
+    Health::terminate(
+        &any,
+        tutti_plugin_types::TerminationReason::Hung {
+            blocks: 1,
+            held: std::time::Duration::from_secs(1),
+        },
+    );
+    assert!(Health::is_crashed(&any), "the server is ended");
+    assert_eq!(
+        AnyThread::set_bypassed(&any, site, true),
+        tutti_plugin_types::BypassWrite::Lost,
+        "a dead link takes nothing"
+    );
+}
