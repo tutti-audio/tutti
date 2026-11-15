@@ -9,11 +9,9 @@ use std::time::{Duration, Instant};
 
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
-use tutti_plugin::catalog::{
-    Catalog, CatalogConfig, Hosting, Locator, NO_SCAN_DIRS, PluginId, PluginRef, PluginState,
-};
+use tutti_plugin::catalog::{Catalog, Hosting, PluginId, PluginRef, PluginState};
 use tutti_plugin::error::StateError;
-use tutti_plugin_db::{PluginDb, PluginFormat, ScanPoll};
+use tutti_plugin_db::PluginFormat;
 use tutti_plugin_types::TerminationReason;
 use tutti_plugin_types::{Normalized, ParamId};
 use tutti_session::{
@@ -42,39 +40,49 @@ fn second_id() -> PluginId {
     )
 }
 
-/// A catalog that scanned the reference bundle (both of its plugins).
+/// A catalog that scanned the reference bundle (both of its plugins). It is
+/// probed first thing in a test, before the plugin's variables are set.
 fn catalog() -> (Catalog, tempfile::TempDir) {
-    let dir = tempfile::TempDir::new().expect("a scratch directory");
-    let config = CatalogConfig::new(dir.path(), NO_SCAN_DIRS)
-        .probe_locator(Locator::at(tutti_fixtures::plugin_probe()));
-    let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
-    let mut task = catalog.register(clap_probe()).expect("a plugin file");
-    let deadline = Instant::now() + Duration::from_secs(120);
-    loop {
-        match catalog.try_apply(&mut task) {
-            ScanPoll::Running => {
-                assert!(Instant::now() < deadline, "the probe never ended");
-                std::thread::sleep(Duration::from_millis(2));
-            }
-            ScanPoll::Done(result) => {
-                assert!(result.failures.is_empty(), "{:?}", result.failures);
-                break;
-            }
-            ScanPoll::Died => panic!("the probe's worker died"),
-        }
-    }
+    let (catalog, _id, dir) =
+        crate::pooled::catalog_of(&PluginRef::file(clap_probe()).expect("a plugin file"));
     (catalog, dir)
 }
 
-fn set_env(key: &str, value: impl AsRef<std::ffi::OsStr>) {
-    // SAFETY: nextest runs each test in its own process, and every variable is
-    // set from the test's own thread while no load is running.
-    unsafe { std::env::set_var(key, value) };
+/// The file that holds the port layout the plugin's next server reports.
+fn layout_file() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("plugin-pool-layout.{}", std::process::id()))
+}
+
+/// Sets what the plugin's servers read from the environment: the server's path
+/// and the file of the port layout. Once, when the first session is built (the
+/// test's catalog is probed before that, with none of the plugin's variables
+/// set, and its writer is joined): the only threads then are Rust's, which read
+/// the environment through `std::env`, and no plugin code runs in this process,
+/// since the plugin is served. Later changes are of the file, not the
+/// environment.
+fn servers() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        layout("0");
+        // SAFETY: nextest runs each test in its own process; see above.
+        unsafe {
+            std::env::set_var("TUTTI_PLUGIN_SERVER", plugin_server());
+            std::env::set_var("TUTTI_CLAP_PROBE_PORT_LAYOUT_FILE", layout_file());
+        }
+    });
+}
+
+/// What the plugin's next server reports as its port layout: the probe's
+/// `PortLayoutMode` as a number (`0` stereo, `1` stereo and an aux bus, `3` two
+/// mono buses).
+fn layout(mode: &str) {
+    std::fs::write(layout_file(), mode).expect("the layout file is written");
 }
 
 /// An offline session with `recovery` as its policy (`None`: recovery off).
 fn session_with(recovery: Option<RecoveryPolicy>) -> Session {
-    set_env("TUTTI_PLUGIN_SERVER", plugin_server());
+    servers();
     Session::builder()
         .max_block(MaxBlock::of(Samples(BLOCK)))
         .plugin_recovery(recovery)
@@ -389,7 +397,7 @@ fn a_swap_to_a_plugin_with_other_ports_fails_the_entry() {
     let first = tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap();
 
     // The next server starts with the probe's aux-bus layout.
-    set_env("TUTTI_CLAP_PROBE_PORT_LAYOUT", "1");
+    layout("1");
     s.pool(s.plugin_entry("fx", &second_id(), &catalog))
         .unwrap();
     let events = until_all(&mut s, "the failure", "fx");
@@ -495,7 +503,7 @@ impl Node for Grenade {
 /// A session with no output, whose audio side a test can take (a re-prepare
 /// then waits for it).
 fn detached() -> Session {
-    set_env("TUTTI_PLUGIN_SERVER", plugin_server());
+    servers();
     Session::builder()
         .max_block(MaxBlock::of(Samples(BLOCK)))
         .build_detached(SampleRate::SR_48K)
@@ -522,15 +530,15 @@ fn pid_of(s: &Session, node: tutti_session::Key<tutti_session::PluginNode>) -> O
 }
 
 /// Declares `id` (hosted as `hosting`) under `fx`, with the aux-bus layout
-/// `layout` for the plugin it loads.
+/// `mode` for the plugin it loads.
 fn declare_with_layout(
     s: &mut Session,
     catalog: &Catalog,
     id: &PluginId,
     hosting: Hosting,
-    layout: &str,
+    mode: &str,
 ) {
-    set_env("TUTTI_CLAP_PROBE_PORT_LAYOUT", layout);
+    layout(mode);
     s.pool(s.plugin_entry("fx", id, catalog).hosting(hosting))
         .unwrap();
 }
@@ -583,7 +591,7 @@ fn a_retry_after_a_refused_swap_swaps_the_node() {
     ));
 
     // The next server has the node's layout.
-    set_env("TUTTI_CLAP_PROBE_PORT_LAYOUT", "0");
+    layout("0");
     s.retry(&"fx").expect("a failed entry loads again");
     let events = until_all(&mut s, "the retry", "fx");
     assert!(

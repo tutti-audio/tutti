@@ -41,6 +41,8 @@ const FIRE: usize = 100;
 /// SAFETY: nextest runs each test in its own process, and both are set before
 /// the first server is spawned, from the test's own thread.
 fn set_server() {
+    // The plugin's file is probed before its variables are set.
+    crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
     unsafe {
         std::env::set_var("TUTTI_PLUGIN_SERVER", plugin_server());
         std::env::set_var("TUTTI_CLAP_PROBE_RENDER_MODE", "1");

@@ -801,6 +801,8 @@ fn a_reload_that_fails_to_load_carries_the_bridge_error_as_its_source() {
     use std::error::Error;
     let copy = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("vanishing-probe.clap");
     std::fs::copy(clap_probe(), &copy).expect("a copy of the reference plugin");
+    // The copy is probed before the session's variables are set.
+    crate::pooled::prime(&PluginRef::file(&copy).expect("a plugin file"));
     let mut s = session_built(&[("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "40")], |b| {
         b.plugin_recovery(Some(tutti_session::RecoveryPolicy {
             max_failures: 2,

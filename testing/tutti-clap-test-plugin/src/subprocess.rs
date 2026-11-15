@@ -185,6 +185,17 @@ pub(crate) fn configure() {
         // SAFETY: a plain atomic store; `unsafe` is on the signature only.
         unsafe { crate::tutti_test_plugin_set_port_layout(n) };
     }
+    // `TUTTI_CLAP_PROBE_PORT_LAYOUT_FILE=<path>`: the layout is the number the file
+    // holds when the server starts, so a test changes what the next server
+    // reports by writing the file, with no environment change after its
+    // threads exist.
+    if let Some(n) = std::env::var_os("TUTTI_CLAP_PROBE_PORT_LAYOUT_FILE")
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| text.trim().parse::<u32>().ok())
+    {
+        // SAFETY: a plain atomic store; `unsafe` is on the signature only.
+        unsafe { crate::tutti_test_plugin_set_port_layout(n) };
+    }
     if replacement && let Some(n) = u32_var("TUTTI_CLAP_PROBE_RESTART_LATENCY") {
         RESTART_LATENCY.store(n, Ordering::SeqCst);
     }

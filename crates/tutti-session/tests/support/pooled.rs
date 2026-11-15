@@ -53,14 +53,21 @@ impl Spec {
 
 /// Probes the plugin file at `path` into `catalog`, waiting for the probe.
 ///
-/// The probe is a process of its own and inherits the environment. A test that
-/// injects a fault into the plugin's server sets `TUTTI_CLAP_PROBE_ONCE_FILE`,
-/// which the first process to load the plugin uses up: a probe that ran after
-/// it would take the fault meant for the server. [`prime`] probes first.
+/// The probe is a process of its own and inherits the environment. A test sets
+/// `TUTTI_CLAP_PROBE_*` variables to make the plugin's server fail, render or
+/// report in a way the test pins, and the probe must not see them: it would use
+/// up a fault meant for the server (`ONCE_FILE`) or report a plugin the test did
+/// not mean. So the probe asserts none is set, and a test that sets one
+/// [`prime`]s the plugin's file first. Once the probe is done the catalog's
+/// writer is joined, so the helper leaves no thread of its own behind.
 pub fn probe(catalog: &mut Catalog, path: &std::path::Path) {
+    let set: Vec<_> = std::env::vars_os()
+        .filter_map(|(key, _)| key.into_string().ok())
+        .filter(|key| key.starts_with("TUTTI_CLAP_PROBE_"))
+        .collect();
     assert!(
-        std::env::var_os("TUTTI_CLAP_PROBE_ONCE_FILE").is_none(),
-        "probe before the fault is set (`prime`): the probe would use it up"
+        set.is_empty(),
+        "probe before the plugin's variables are set (`prime`): {set:?}"
     );
     let mut task = catalog.register(path).expect("a plugin file");
     let deadline = Instant::now() + Duration::from_secs(120);
@@ -77,6 +84,10 @@ pub fn probe(catalog: &mut Catalog, path: &std::path::Path) {
             ScanPoll::Died => panic!("the probe's worker died"),
         }
     }
+    drop(task);
+    // The catalog writes its table on a thread of its own when a probe ends;
+    // `save` waits for it.
+    catalog.save().expect("the catalog's table saves");
 }
 
 /// A catalog that probed `plugin`'s file, and the id the ref names in it (the
@@ -114,27 +125,33 @@ pub trait LoadPlugin {
 
 static KEYS: AtomicU64 = AtomicU64::new(0);
 
-/// The catalogs `load_plugin_blocking` loads from, by the file and the id the
-/// ref names: probed once per process.
-static PRIMED: Mutex<
-    Vec<(
-        PathBuf,
-        Option<String>,
-        Catalog,
-        PluginId,
-        tempfile::TempDir,
-    )>,
-> = Mutex::new(Vec::new());
+/// A catalog `load_plugin_blocking` loads from: probed once per process, for the
+/// file and the id a ref names.
+struct Primed {
+    file: PathBuf,
+    id: Option<String>,
+    catalog: Catalog,
+    plugin_id: PluginId,
+    _dir: tempfile::TempDir,
+}
+
+static PRIMED: Mutex<Vec<Primed>> = Mutex::new(Vec::new());
 
 /// Probes `plugin`'s file for the loads of this process. A test that sets a
-/// fault variable of the plugin's server calls it first, before the variable.
+/// `TUTTI_CLAP_PROBE_*` variable calls it first, before the variable.
 pub fn prime(plugin: &PluginRef) {
     let mut primed = PRIMED.lock().unwrap_or_else(PoisonError::into_inner);
     let file = tutti_plugin_db::canonical_path(plugin.path());
     let id = plugin.id().map(str::to_owned);
-    if !primed.iter().any(|(f, i, ..)| *f == file && *i == id) {
+    if !primed.iter().any(|p| p.file == file && p.id == id) {
         let (catalog, plugin_id, dir) = catalog_of(plugin);
-        primed.push((file, id, catalog, plugin_id, dir));
+        primed.push(Primed {
+            file,
+            id,
+            catalog,
+            plugin_id,
+            _dir: dir,
+        });
     }
 }
 
@@ -149,11 +166,17 @@ impl LoadPlugin for Session {
             let primed = PRIMED.lock().unwrap_or_else(PoisonError::into_inner);
             let file = tutti_plugin_db::canonical_path(spec.plugin.path());
             let id = spec.plugin.id().map(str::to_owned);
-            let (_, _, catalog, plugin_id, _) = primed
+            let found = primed
                 .iter()
-                .find(|(f, i, ..)| *f == file && *i == id)
+                .find(|p| p.file == file && p.id == id)
                 .expect("primed above");
-            self.declare_entry(main, catalog, plugin_id, spec.hosting, spec.state)
+            self.declare_entry(
+                main,
+                &found.catalog,
+                &found.plugin_id,
+                spec.hosting,
+                spec.state,
+            )
         };
         self.await_entry(main, key)
     }

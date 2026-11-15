@@ -3,9 +3,12 @@
 
 use crate::pooled::{LoadEntry, LoadPlugin, Spec, catalog_of, probe};
 use crate::support::{clap_probe, plugin_server};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tutti_plugin::catalog::{Hosting, PluginRef};
 use tutti_plugin_types::BridgeError;
-use tutti_session::{LoadError, Session};
+
+use tutti_session::{Job, LoadError, PoolEvent, Session, SessionEvent};
 use tutti_types::{MaxBlock, Samples};
 
 fn session() -> Session {
@@ -15,18 +18,22 @@ fn session() -> Session {
         .expect("an offline session builds")
 }
 
+/// Names the server the test's plugin is served by. It is the first thing a
+/// test does: nextest runs each test in its own process, and nothing of the
+/// test (no catalog, no session) has started a thread yet.
 fn set_server(path: impl AsRef<std::ffi::OsStr>) {
-    // SAFETY: nextest runs each test in its own process, and this is set from
-    // the test's own thread before anything spawns a server.
+    // SAFETY: as above, no other thread exists.
     unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", path) };
 }
 
 /// **A blacklisted plugin is not in the catalog's answer, and is admitted once
 /// the user unblacklists it**: the entry of a blacklisted file fails with
-/// `Unresolved` before any server is looked for (none can be found here, which
-/// would be `ServerNotFound`), and one built after the user unblacklists loads.
+/// `Unresolved` (a blacklisted file keeps no descriptors, so its plugins resolve
+/// missing), and one built after the user unblacklists and the file is probed
+/// again loads.
 #[test]
 fn a_blacklisted_plugin_does_not_resolve_and_loads_once_unblacklisted() {
+    set_server(plugin_server());
     let path = clap_probe();
     let plugin = PluginRef::file(&path).expect("a plugin file");
     let (mut catalog, id, _dir) = catalog_of(&plugin);
@@ -34,113 +41,96 @@ fn a_blacklisted_plugin_does_not_resolve_and_loads_once_unblacklisted() {
     let mut s = session();
     let main = tutti_fixtures::main_thread();
 
-    set_server("/nonexistent/plugin-server");
     match s.load_entry_blocking(main, &catalog, &id, Hosting::Auto, None) {
         Err(LoadError::Unresolved(_)) => {}
         other => panic!("expected an unresolved entry, got {other:?}"),
     }
 
-    // The user unblacklists it: an entry built now admits it.
-    set_server(plugin_server());
     assert!(catalog.unblacklist(&path));
-    probe(&mut catalog, &path); // a blacklisted file keeps no descriptors
+    probe(&mut catalog, &path);
     s.load_entry_blocking(main, &catalog, &id, Hosting::Auto, None)
         .expect("an unblacklisted plugin loads");
 }
 
-/// **The blacklist is asked when the load runs, not when the entry is built**: a
-/// plugin the catalog blacklists after the entry resolved it is refused, with
-/// the recorded reason and before any server starts.
+/// The first pool event of `key` that is an outcome, on this thread.
+fn outcome(s: &mut Session, main: tutti_plugin_types::MainThreadMarker) -> PoolEvent {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        for event in s.main(main).update() {
+            if let SessionEvent::Pool {
+                event: event @ (PoolEvent::Loaded | PoolEvent::Failed(_)),
+                ..
+            } = event
+            {
+                return event;
+            }
+        }
+        assert!(Instant::now() < deadline, "the load never landed");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// A session whose spawner holds the jobs it is handed, and the jobs.
+fn holding() -> (Session, Arc<Mutex<Vec<Job>>>) {
+    let held: Arc<Mutex<Vec<Job>>> = Arc::default();
+    let spawned = Arc::clone(&held);
+    let s = Session::builder()
+        .max_block(MaxBlock::of(Samples(512)))
+        .spawn_with(move |job| spawned.lock().unwrap().push(job))
+        .build()
+        .expect("an offline session builds");
+    (s, held)
+}
+
+fn run_held(held: &Arc<Mutex<Vec<Job>>>) {
+    let jobs: Vec<Job> = held.lock().unwrap().drain(..).collect();
+    for job in jobs {
+        job.run();
+    }
+}
+
+/// **The blacklist is asked when the load runs, not when the entry is built**:
+/// a plugin the catalog blacklists after the entry resolved it is refused with
+/// the recorded reason, and one it blacklists and then clears before the load
+/// runs is admitted. The entry is built while the plugin is admitted (a
+/// blacklisted one resolves missing); the load is held between the entry and
+/// its run.
 #[test]
-fn a_plugin_blacklisted_after_the_entry_is_built_is_refused_when_it_loads() {
+fn the_blacklist_is_asked_when_the_load_runs() {
+    set_server(plugin_server());
     let path = clap_probe();
     let plugin = PluginRef::file(&path).expect("a plugin file");
     let (mut catalog, id, _dir) = catalog_of(&plugin);
-    let mut s = session();
     let main = tutti_fixtures::main_thread();
 
-    set_server("/nonexistent/plugin-server");
-    let declared = s.plugin_entry(0u64, &id, &catalog);
+    // Blacklisted before the load runs, and still: refused.
+    let (mut s, held) = holding();
+    let _ = s.main(main).update();
+    s.pool(s.plugin_entry(0u64, &id, &catalog)).unwrap();
     catalog.blacklist(&path, "hung in its load");
-    s.pool(declared).unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    let error = loop {
-        let failed = s
-            .main(main)
-            .update()
-            .into_iter()
-            .find_map(|event| match event {
-                tutti_session::SessionEvent::Pool {
-                    event: tutti_session::PoolEvent::Failed(error),
-                    ..
-                } => Some(error),
-                _ => None,
-            });
-        if let Some(error) = failed {
-            break error;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the load never failed"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    };
-    match error {
-        LoadError::Plugin(error) => match &*error {
+    run_held(&held);
+    match outcome(&mut s, main) {
+        PoolEvent::Failed(LoadError::Plugin(error)) => match &*error {
             BridgeError::Blacklisted { reason, .. } => assert_eq!(reason, "hung in its load"),
             other => panic!("expected a Blacklisted refusal, got {other:?}"),
         },
         other => panic!("expected a Blacklisted refusal at load, got {other:?}"),
     }
-}
 
-/// **A plugin unblacklisted before the load runs is admitted**: the entry asks
-/// the catalog's blacklist when the load opens the plugin, so a plugin the
-/// catalog blacklists and then clears between building the entry and the load
-/// is not refused.
-#[test]
-fn a_plugin_unblacklisted_before_the_load_runs_is_admitted() {
-    let path = clap_probe();
-    let plugin = PluginRef::file(&path).expect("a plugin file");
-    let (mut catalog, id, _dir) = catalog_of(&plugin);
-    let mut s = session();
-    let main = tutti_fixtures::main_thread();
-
-    set_server(plugin_server());
-    let declared = s.plugin_entry(0u64, &id, &catalog);
+    // Blacklisted and cleared before the load runs: admitted. The cleared file
+    // keeps no descriptors, so its entry is built before the blacklist.
+    assert!(catalog.unblacklist(&path));
+    probe(&mut catalog, &path);
+    let (mut s, held) = holding();
+    let _ = s.main(main).update();
+    s.pool(s.plugin_entry(0u64, &id, &catalog)).unwrap();
     catalog.blacklist(&path, "hung in its load");
     assert!(catalog.unblacklist(&path));
-    s.pool(declared).unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    loop {
-        let events = s.main(main).update();
-        assert!(
-            !events.iter().any(|event| matches!(
-                event,
-                tutti_session::SessionEvent::Pool {
-                    event: tutti_session::PoolEvent::Failed(_),
-                    ..
-                }
-            )),
-            "an unblacklisted plugin was refused"
-        );
-        if events.iter().any(|event| {
-            matches!(
-                event,
-                tutti_session::SessionEvent::Pool {
-                    event: tutti_session::PoolEvent::Loaded,
-                    ..
-                }
-            )
-        }) {
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the load never landed"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
+    run_held(&held);
+    assert!(
+        matches!(outcome(&mut s, main), PoolEvent::Loaded),
+        "an unblacklisted plugin was refused"
+    );
 }
 
 /// **A hosting the format cannot have is refused at load**: VST2 asked to be

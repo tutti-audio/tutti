@@ -110,14 +110,13 @@ fn a_state_is_refused_by_another_plugin() {
         .save()
         .expect("saves");
 
-    // The entry's declaration.
-    let (catalog, _dir) = {
-        let (catalog, _id, dir) = catalog_of(&PluginRef::file(&path).expect("a plugin file"));
-        (catalog, dir)
-    };
+    // The entry's declaration. The key an entry is declared under is never
+    // pooled here: the declaration is built and its state checked, nothing more.
+    const UNPOOLED: u8 = 0;
+    let (catalog, _id, _dir) = catalog_of(&PluginRef::file(&path).expect("a plugin file"));
     let id_of = |id: &str| PluginId::new(PluginFormat::Clap, id);
     let refused = s
-        .plugin_entry(0u8, &id_of(second_id()), &catalog)
+        .plugin_entry(UNPOOLED, &id_of(second_id()), &catalog)
         .initial_state(from_first.clone())
         .expect_err("the first plugin's state is not the second's");
     assert_eq!(
@@ -128,7 +127,7 @@ fn a_state_is_refused_by_another_plugin() {
         }
     );
     assert!(
-        s.plugin_entry(0u8, &id_of(first_id()), &catalog)
+        s.plugin_entry(UNPOOLED, &id_of(first_id()), &catalog)
             .initial_state(from_first.clone())
             .is_ok(),
         "its own state is accepted"

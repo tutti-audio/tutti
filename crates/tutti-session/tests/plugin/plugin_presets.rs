@@ -21,6 +21,8 @@ mod clap {
     use tutti_types::{MaxBlock, Samples};
 
     fn loaded() -> (Session, NodeKey) {
+        // The plugin's file is probed before its variables are set.
+        crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
         // SAFETY: nextest runs each test in its own process, and this is set
         // before the first server is spawned, from the test's own thread.
         unsafe {

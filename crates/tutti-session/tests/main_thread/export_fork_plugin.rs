@@ -106,6 +106,8 @@ fn session_with_probe_at(
     path: std::path::PathBuf,
     hosting: Hosting,
 ) -> (Session, NodeKey) {
+    // The plugin's file is probed before its variables are set.
+    crate::pooled::prime(&PluginRef::file(&path).expect("a plugin file"));
     probe_env("TUTTI_PLUGIN_SERVER", plugin_server().display());
     probe_env("TUTTI_CLAP_PROBE_RENDER_MODE", mode);
     let mut session = Session::builder()

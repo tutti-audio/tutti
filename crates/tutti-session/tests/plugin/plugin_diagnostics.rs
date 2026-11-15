@@ -45,6 +45,8 @@ mod clap {
     }
 
     fn loaded(layout: Option<&str>) -> (Session, Key<PluginNode>) {
+        // The plugin's file is probed before its variables are set.
+        crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
         set_env("TUTTI_PLUGIN_SERVER", plugin_server());
         if let Some(layout) = layout {
             set_env("TUTTI_CLAP_PROBE_PORT_LAYOUT", layout);

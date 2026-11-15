@@ -1243,10 +1243,10 @@ impl Session {
         key
     }
 
-    /// The view of the plugin hosted at `node`: its params, state, diagnostics,
-    /// buses, health and presets. A transitional door, the per-node view whose
-    /// parts move onto the plugin's handle ([`plugin`](Self::plugin)); the
-    /// handle is the way to the plugin, and this goes with the last of them.
+    /// The view of the plugin hosted at `node`, a borrow of its record: its
+    /// params, state, diagnostics, buses, health and presets. It reads the
+    /// node's plugin; the entry's handle ([`plugin`](Self::plugin)) is the
+    /// plugin's, whether or not a node has it.
     ///
     /// # Errors
     ///

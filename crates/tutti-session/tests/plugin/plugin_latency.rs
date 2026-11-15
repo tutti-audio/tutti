@@ -163,6 +163,8 @@ fn request() -> Bounce<tutti_graph::NodeKey, BufferMaster> {
 /// the next update, with a `LatencyChanged`.
 #[test]
 fn a_latency_the_plugin_reports_reaches_the_graph() {
+    // The plugin's file is probed before its variables are set.
+    crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
     // SAFETY: as `set_server`: before the first server, from the test's thread.
     unsafe { std::env::set_var("TUTTI_CLAP_PROBE_OFFLINE_EXTRA_LATENCY", "300") };
     let mut s = offline();

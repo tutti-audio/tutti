@@ -339,6 +339,8 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     const BLOCK: usize = 1_024;
     const BLOCKS: usize = 24;
 
+    // The plugin's file is probed before its variables are set.
+    crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
     set_env("TUTTI_CLAP_PROBE_RENDER_MODE", "2");
     set_env("TUTTI_CLAP_PROBE_APPLY_GAIN", "1");
     let mut s = detached();
