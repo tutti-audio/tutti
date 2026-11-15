@@ -84,6 +84,9 @@ use tutti_au_ffi::property::{
 };
 use tutti_au_ffi::{Element, Property, Scope};
 
+use tutti_plugin_types::{MidiAssignment, MidiSource};
+use tutti_ump::{MidiChannel, U7};
+
 use crate::error::Result;
 use crate::types::*;
 use tutti_au_ffi::Unit;
@@ -475,6 +478,37 @@ impl AuMidiMapping {
     }
 }
 
+/// The mappings of `table` that drive a global-scope parameter from a Control
+/// Change, channel pressure or pitch bend, as the assignments a plugin declares
+/// ([`MidiAssignment`]). A mapping on another scope or element, or one a note,
+/// program change or system message triggers, names no [`MidiSource`] and is
+/// left out.
+pub(crate) fn declared(table: &[AuMidiMapping]) -> Vec<MidiAssignment> {
+    table
+        .iter()
+        .filter(|m| m.scope == Scope::GLOBAL && m.element == Element::ZERO)
+        .filter_map(|m| {
+            let source = match m.trigger {
+                MidiTrigger::ControlChange { controller } => {
+                    MidiSource::ControlChange(U7::new(controller)?)
+                }
+                MidiTrigger::ChannelPressure => MidiSource::ChannelPressure,
+                MidiTrigger::PitchBend => MidiSource::PitchBend,
+                _ => return None,
+            };
+            Some(MidiAssignment {
+                channel: if m.any_channel {
+                    None
+                } else {
+                    MidiChannel::new(m.channel)
+                },
+                source,
+                param: m.parameter_id.into(),
+            })
+        })
+        .collect()
+}
+
 /// Reads the AU's whole mapping table.
 ///
 /// Returns an empty `Vec` when the AU has no mappings installed, which is what a
@@ -678,6 +712,47 @@ pub fn supports_parameter_midi_mapping(unit: &Unit) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A Control Change mapping is an assignment on its channel, or on any
+    /// channel when the flag is set; a note or program trigger is none, and a
+    /// mapping that drives another scope is left out.
+    #[test]
+    fn declared_keeps_the_control_surface_mappings_only() {
+        let on_channel = AuMidiMapping::control_change(900, 3, 74);
+        let any = AuMidiMapping::control_change_any_channel(901, 1);
+        let note = AuMidiMapping {
+            trigger: MidiTrigger::NoteOn { note: 60 },
+            ..AuMidiMapping::control_change(902, 0, 0)
+        };
+        let input_scope = AuMidiMapping {
+            scope: Scope::INPUT,
+            ..AuMidiMapping::control_change(903, 0, 7)
+        };
+        let bend = AuMidiMapping {
+            trigger: MidiTrigger::PitchBend,
+            ..AuMidiMapping::control_change(904, 0, 0)
+        };
+        assert_eq!(
+            declared(&[on_channel, any, note, input_scope, bend]),
+            [
+                MidiAssignment {
+                    channel: MidiChannel::new(3),
+                    source: MidiSource::ControlChange(U7::of(74)),
+                    param: 900.into(),
+                },
+                MidiAssignment {
+                    channel: None,
+                    source: MidiSource::ControlChange(U7::of(1)),
+                    param: 901.into(),
+                },
+                MidiAssignment {
+                    channel: MidiChannel::new(0),
+                    source: MidiSource::PitchBend,
+                    param: 904.into(),
+                },
+            ]
+        );
+    }
 
     /// The C ABI, pinned against values printed by a C program compiled against
     /// Apple's own `AudioUnitProperties.h` on macOS 15.6:

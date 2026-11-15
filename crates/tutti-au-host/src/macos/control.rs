@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use dpi::{LogicalSize, Size};
-use tutti_au_ffi::AuEditor;
+use tutti_au_ffi::{AuEditor, Scope};
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AuComponentType, AutomationMode, ContentScale, Control, EditorCapabilities, EditorError,
@@ -287,6 +287,15 @@ impl Control for AuLoaded {
             tail: self.tail_figure(),
             features: self.features(),
             probed: probed::AU,
+            // A unit without `kAudioUnitProperty_BypassEffect` (every
+            // instrument) refuses the read.
+            own_bypass: self.is_bypassed().is_ok(),
+            // A unit that does not implement the mapping family (most effects)
+            // refuses the read and declares none.
+            assignments: self
+                .parameter_midi_mappings()
+                .map(|table| crate::midi_map::declared(&table))
+                .unwrap_or_default(),
         }
     }
 
@@ -304,6 +313,18 @@ impl Control for AuLoaded {
                 .entry(clump)
                 .or_insert_with(|| parameters::clump_name(unit, clump).unwrap_or_default());
         }
+
+        // `ParametersForOverview` is the unit's own shortlist; a unit that does
+        // not implement it marks none.
+        let overview: Vec<u32> = self
+            .parameters_for_overview()
+            .map(|list| {
+                list.into_iter()
+                    .filter(|o| o.scope == Scope::GLOBAL.raw())
+                    .map(|o| o.id)
+                    .collect()
+            })
+            .unwrap_or_default();
 
         params
             .into_iter()
@@ -348,9 +369,15 @@ impl Control for AuLoaded {
                     // The unit code is a closed enumeration, so it types the
                     // parameter exactly.
                     .with_measures(crate::unit_measures(p.unit_code))
-                    .with_role(crate::unit_role(p.unit_code))
+                    .with_overview(overview.contains(&p.id))
             })
             .collect()
+    }
+
+    /// Writes `kAudioUnitProperty_BypassEffect`: an AU's bypass is a unit
+    /// property, never a parameter. `false` for a unit without one.
+    fn set_bypassed(&mut self, _main: MainThreadMarker, bypassed: bool) -> bool {
+        self.set_bypass(bypassed).is_ok()
     }
 
     /// Plain, in the AU's own units: `ParamBounds`'s [`ParamMapping`] over the

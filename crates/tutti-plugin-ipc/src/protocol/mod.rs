@@ -104,7 +104,10 @@ pub(crate) mod wire;
 /// - **Version 39** removed three messages nothing sent (the server's
 ///   instance-destroyed notice, the host's single-parameter declaration query
 ///   and its reply); the variants after them renumber.
-pub const PROTOCOL_VERSION: u32 = 39;
+/// - **Version 40** adds to a plugin's wiring whether it has a bypass of its own
+///   and the controller table it declares, and to a parameter its role (now a
+///   `ControlRole`) and its overview mark.
+pub const PROTOCOL_VERSION: u32 = 40;
 
 /// Largest control-socket frame body either end will allocate for, in bytes.
 ///
@@ -887,17 +890,17 @@ mod tests {
         assert_eq!(back.expr_ints.changes[0].value, -42);
     }
 
-    /// **A parameter's typed unit and role cross the wire**, in a `ParameterList`,
-    /// and an untyped one stays untyped.
+    /// **A parameter's typed unit, role and overview mark cross the wire**, in a
+    /// `ParameterList`, and an untyped one stays untyped.
     #[test]
-    fn a_parameters_unit_and_role_cross_the_wire() {
-        use tutti_plugin_types::ParamUnit;
-        use tutti_types::UnitParam;
+    fn a_parameters_unit_role_and_overview_cross_the_wire() {
+        use tutti_plugin_types::{Axis, ControlRole, ParamUnit};
 
         let typed = ParameterInfo::new(ParamId::new(2), "Pan")
             .with_plain_range(-1.0, 1.0, 0.0)
             .with_measures(Some(ParamUnit::Pan))
-            .with_role(Some(UnitParam::Pan));
+            .with_role(Some(ControlRole::Pan(Axis::Y)))
+            .with_overview(true);
         let untyped = ParameterInfo::new(ParamId::new(3), "Other");
 
         let list = BridgeMessage::ParameterList {
@@ -909,10 +912,15 @@ mod tests {
             panic!("a ParameterList decodes as one");
         };
         assert_eq!(parameters[0].measures(), Some(ParamUnit::Pan));
-        assert_eq!(parameters[0].role(), Some(UnitParam::Pan));
+        assert_eq!(parameters[0].role(), Some(ControlRole::Pan(Axis::Y)));
+        assert!(parameters[0].overview());
         assert_eq!(
-            (parameters[1].measures(), parameters[1].role()),
-            (None, None)
+            (
+                parameters[1].measures(),
+                parameters[1].role(),
+                parameters[1].overview()
+            ),
+            (None, None, false)
         );
     }
 }

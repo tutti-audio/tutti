@@ -25,12 +25,14 @@ use vst3::Steinberg::Vst::{
 };
 
 use tutti_midi_protocol::channel_voice;
-use tutti_ump::{Address, MidiChannel, MidiGroup, Ump, Voice2};
+use tutti_ump::{Address, MidiChannel, MidiGroup, U7, Ump, Voice2};
 
 use crate::events::{InputEvents, Stager};
 use crate::types::ParameterChanges;
 use tutti_graph::UmpAt;
-use tutti_plugin_types::{MIDI_STACK_CAPACITY, MainThreadMarker, Normalized};
+use tutti_plugin_types::{
+    MIDI_STACK_CAPACITY, MainThreadMarker, MidiAssignment, MidiSource, Normalized,
+};
 use tutti_rt::{Reader, RtVec};
 use tutti_vst3_ffi::{EventList, Plugin};
 
@@ -115,6 +117,34 @@ impl MidiCcMapping {
             // Nothing mapped — drop the allocation, behave as empty.
             Self::empty()
         }
+    }
+
+    /// The table as the plugin's declared assignments: one per mapped channel
+    /// and message. Controller numbers past pitch bend (program change, poly
+    /// pressure and the system messages `ControllerNumbers` also lists) name no
+    /// [`MidiSource`] and are left out.
+    pub(crate) fn declared(&self) -> Vec<MidiAssignment> {
+        let mut out = Vec::new();
+        for (slot, &id) in self.table.iter().enumerate() {
+            if id == NO_PARAM_ID {
+                continue;
+            }
+            let (channel, controller) = (slot / NUM_CONTROLLERS, slot % NUM_CONTROLLERS);
+            let source = match controller {
+                CTRL_AFTERTOUCH => MidiSource::ChannelPressure,
+                CTRL_PITCH_BEND => MidiSource::PitchBend,
+                cc => match u8::try_from(cc).ok().and_then(U7::new) {
+                    Some(cc) => MidiSource::ControlChange(cc),
+                    None => continue,
+                },
+            };
+            out.push(MidiAssignment {
+                channel: u8::try_from(channel).ok().and_then(MidiChannel::new),
+                source,
+                param: id.into(),
+            });
+        }
+        out
     }
 
     /// True if no controller on any channel maps to a parameter. The audio

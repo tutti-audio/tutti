@@ -93,6 +93,10 @@ impl Control for Vst2Loaded {
             tail: self.tail(main),
             features: self.features(),
             probed: probed::VST2,
+            // VST2's `effSetBypass` is a soft bypass the host never writes,
+            // and it has no controller table.
+            own_bypass: false,
+            assignments: Vec::new(),
         }
     }
 

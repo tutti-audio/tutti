@@ -160,6 +160,19 @@ where
         });
     }
 
+    /// The plugin's own bypass, as [`Control::set_bypassed`] writes it (a
+    /// parameter for VST3 and CLAP, a unit property for AU). Run on the main
+    /// thread: off it, by its next tick, and `false` if that does not come
+    /// within the deadline.
+    fn set_bypassed(&self, bypassed: bool) -> bool {
+        self.on_main(move |main, instance| {
+            instance
+                .control()
+                .is_some_and(|control| control.set_bypassed(main, bypassed))
+        })
+        .unwrap_or(false)
+    }
+
     /// The format's own conversion ([`Control::parameter_plain`]).
     fn parameter_plain(&self, id: ParamId, value: Normalized) -> Option<f64> {
         self.on_main(move |main, instance| instance.control()?.parameter_plain(main, id, value))?
@@ -496,6 +509,17 @@ mod off_main_tests {
         let (_client, handle, _pump) = loaded();
         assert!(handle.any_thread().set_render_mode(RenderMode::Offline));
         assert!(handle.any_thread().set_render_mode(RenderMode::Realtime));
+    }
+
+    /// **A VST2 plugin has no bypass of its own** (the host never writes
+    /// `effSetBypass`): the write through the backend and through the handle
+    /// both say so, and the node's shape leaves bypass to the executor.
+    #[test]
+    fn a_plugin_without_its_own_bypass_takes_no_bypass_write() {
+        let (_client, handle, _pump) = loaded();
+        assert!(!handle.loaded().own_bypass);
+        assert!(!handle.any_thread().set_bypassed(true));
+        assert!(!handle.set_bypassed(true));
     }
 
     /// **No in-process format carries the automation advisory**, and says so

@@ -17,6 +17,7 @@ use crate::types::PluginInfo;
 
 use super::keys::view_key_of;
 use super::loaded::Vst3Loaded;
+use super::midi_mapping::MidiCcMapping;
 use crate::BusDirection;
 use keyboard_types::KeyState;
 
@@ -239,6 +240,8 @@ impl Control for Vst3Loaded {
             tail: self.tail_figure(main),
             features: self.features(main),
             probed: probed::VST3,
+            own_bypass: self.has_bypass_parameter(main),
+            assignments: MidiCcMapping::query(main, &self.plugin).declared(),
         }
     }
 

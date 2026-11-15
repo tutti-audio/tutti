@@ -946,6 +946,7 @@ mod tests {
             // and no speaker placement either.
             features: Features::empty(),
             probed: Features::empty(),
+            ..LoadedPlugin::default()
         }
     }
 

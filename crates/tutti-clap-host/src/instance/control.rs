@@ -286,6 +286,11 @@ impl Control for ClapLoaded {
             tail: self.tail_figure(main),
             features: self.features(main),
             probed: probed::CLAP,
+            own_bypass: self
+                .parameter_list(main)
+                .iter()
+                .any(|p| p.flag(ParamFlags::BYPASS) == Some(true)),
+            assignments: Vec::new(),
         }
     }
 

@@ -99,6 +99,28 @@ pub trait AnyThread: Send + Sync {
     /// [`Features::RENDER_MODE`](crate::Features).
     fn set_render_mode(&self, mode: RenderMode) -> bool;
 
+    /// Writes the plugin's own bypass, `true` bypassed and `false` processing
+    /// ([`Control::set_bypassed`](crate::Control::set_bypassed)), and returns
+    /// whether the plugin has one. Fire-and-forget like
+    /// [`set_parameter_value`](Self::set_parameter_value); the host calls it
+    /// when the node's mode changes.
+    ///
+    /// The default writes the parameter flagged
+    /// [`BYPASS`](crate::ParamFlags::BYPASS) through
+    /// [`set_parameter_value`](Self::set_parameter_value); a backend whose
+    /// bypass is not a parameter (AU's unit property) overrides it.
+    fn set_bypassed(&self, bypassed: bool) -> bool {
+        let Some(id) = self.parameter_descriptors().and_then(|list| {
+            list.iter()
+                .find(|p| p.flag(crate::ParamFlags::BYPASS) == Some(true))
+                .map(ParameterInfo::id)
+        }) else {
+            return false;
+        };
+        self.set_parameter_value(id, Normalized::clamped(if bypassed { 1.0 } else { 0.0 }));
+        true
+    }
+
     /// Announces the host's automation mode, for the editor's UI feedback
     /// (VST3 `IAutomationState`). Applies to the whole plugin. `Ok(())` means
     /// delivered, not that the plugin visibly reacted.
@@ -142,4 +164,87 @@ pub trait Health: Send + Sync {
     /// (unless it already died of something else). An in-process
     /// plugin has no process to end.
     fn terminate(&self, reason: TerminationReason);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::*;
+    use crate::{AutomationMode, ParamFlags, StateError};
+
+    /// A plugin that lists `params` and records every parameter write.
+    struct Listed {
+        params: Vec<ParameterInfo>,
+        written: Mutex<Vec<(ParamId, f64)>>,
+    }
+
+    impl AnyThread for Listed {
+        fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
+            Some(self.params.clone())
+        }
+        fn parameter_value(&self, _: ParamId) -> Option<Normalized> {
+            None
+        }
+        fn set_parameter_value(&self, id: ParamId, value: Normalized) {
+            self.written.lock().unwrap().push((id, value.get()));
+        }
+        fn parameter_plain(&self, _: ParamId, _: Normalized) -> Option<f64> {
+            None
+        }
+        fn parameter_normalized(&self, _: ParamId, _: f64) -> Option<Normalized> {
+            None
+        }
+        fn parameter_text(&self, _: ParamId, _: Normalized) -> Option<String> {
+            None
+        }
+        fn parameter_value_from_text(&self, _: ParamId, _: &str) -> Option<Normalized> {
+            None
+        }
+        fn save_state(&self) -> Result<Vec<u8>, StateError> {
+            Ok(Vec::new())
+        }
+        fn set_render_mode(&self, _: RenderMode) -> bool {
+            false
+        }
+        fn set_automation_mode(&self, _: AutomationMode) -> Result<(), AutomationModeError> {
+            Ok(())
+        }
+    }
+
+    fn param(id: u32, bypass: bool) -> ParameterInfo {
+        let reported = if bypass {
+            ParamFlags::BYPASS
+        } else {
+            ParamFlags::empty()
+        };
+        ParameterInfo::new(ParamId::new(id), "p").with_flags(ParamFlags::BYPASS, reported)
+    }
+
+    /// A write of the bypass reaches the parameter the plugin flags as its
+    /// bypass, `1` for bypassed and `0` for processing, and no other.
+    #[test]
+    fn a_bypass_write_reaches_the_flagged_parameter_only() {
+        let plugin = Listed {
+            params: vec![param(1, false), param(9, true), param(2, false)],
+            written: Mutex::new(Vec::new()),
+        };
+        assert!(plugin.set_bypassed(true));
+        assert!(plugin.set_bypassed(false));
+        assert_eq!(
+            *plugin.written.lock().unwrap(),
+            [(ParamId::new(9), 1.0), (ParamId::new(9), 0.0)]
+        );
+    }
+
+    /// A plugin with no bypass parameter takes no write and says so.
+    #[test]
+    fn a_plugin_without_a_bypass_parameter_is_left_alone() {
+        let plugin = Listed {
+            params: vec![param(1, false), param(2, false)],
+            written: Mutex::new(Vec::new()),
+        };
+        assert!(!plugin.set_bypassed(true));
+        assert!(plugin.written.lock().unwrap().is_empty());
+    }
 }

@@ -200,6 +200,7 @@ fn handle_with_mock_server(
         tail: PluginTail::Unknown,
         features: Features::EDITOR,
         probed: Features::EDITOR,
+        ..LoadedPlugin::default()
     };
     let plugin_handle = handle_over(bridge, slab, descriptor, loaded);
 
@@ -289,6 +290,7 @@ fn handle_with_multi_reply_server(
         tail: PluginTail::Unknown,
         features: Features::EDITOR,
         probed: Features::EDITOR,
+        ..LoadedPlugin::default()
     };
     let plugin_handle = handle_over(Arc::clone(&bridge), slab, descriptor, loaded);
 

@@ -204,11 +204,19 @@ pub(super) struct Declared {
 impl Declared {
     /// What the plugin reported at load.
     pub(super) fn of(loaded: &LoadedPlugin) -> Self {
+        let ports = Shape::buses(buses_of(&loaded.inputs), buses_of(&loaded.outputs)).with_ports(
+            ChannelLayout::clamped(loaded.total_inputs()),
+            ChannelLayout::clamped(loaded.total_outputs()),
+        );
         Self {
-            ports: Shape::buses(buses_of(&loaded.inputs), buses_of(&loaded.outputs)).with_ports(
-                ChannelLayout::clamped(loaded.total_inputs()),
-                ChannelLayout::clamped(loaded.total_outputs()),
-            ),
+            // A plugin with a bypass of its own keeps running in
+            // `NodeMode::Bypassed`: the host writes that bypass
+            // ([`PluginHandle::set_bypassed`](crate::PluginHandle::set_bypassed)).
+            ports: if loaded.own_bypass {
+                ports.with_own_bypass()
+            } else {
+                ports
+            },
             latency: loaded.latency_samples,
             tail: loaded.tail,
         }
@@ -1325,5 +1333,18 @@ mod declared_buses {
         assert_eq!(shape.audio_out(), width(24));
         assert_eq!(shape.buses_out().len(), 1);
         assert_eq!(shape.buses_out().width(), 2);
+    }
+
+    /// A plugin with a bypass of its own gives its node a shape that declares
+    /// it, so the executor leaves the node running in `Bypassed`; a plugin
+    /// without one keeps the executor's bypass.
+    #[test]
+    fn only_a_plugin_with_its_own_bypass_declares_one() {
+        let with = LoadedPlugin {
+            own_bypass: true,
+            ..LoadedPlugin::default()
+        };
+        assert!(Declared::of(&with).ports.own_bypass);
+        assert!(!Declared::of(&LoadedPlugin::default()).ports.own_bypass);
     }
 }

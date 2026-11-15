@@ -29,15 +29,27 @@ use dpi::Size;
 
 use crate::{
     AudioBufferMut, AutomationMode, ContentScale, EditorCapabilities, EditorWindow, KeyEvent,
-    KeyUse, LoadedPlugin, Normalized, ParamId, ParameterInfo, PluginDescriptor, PluginError,
-    PluginResult, PluginTail, Preset, PresetId, ProcessContext, ProcessOutput, ProcessWake,
-    SampleRate, Samples, WindowHandle,
+    KeyUse, LoadedPlugin, Normalized, ParamFlags, ParamId, ParameterInfo, PluginDescriptor,
+    PluginError, PluginResult, PluginTail, Preset, PresetId, ProcessContext, ProcessOutput,
+    ProcessWake, SampleRate, Samples, WindowHandle,
 };
 use crate::{Delivered, ParamEdit};
 use crate::{
     FdId, MainThreadMarker, Prepare, Ready, RenderMode, RenderModeSupport, Request, RescanScope,
     RestartRules, StateUse, TimerId, TrackInfo, Wakeups,
 };
+
+/// The parameter a plugin flags as its own bypass, if it lists one.
+fn bypass_parameter(list: &[ParameterInfo]) -> Option<ParamId> {
+    list.iter()
+        .find(|p| p.flag(ParamFlags::BYPASS) == Some(true))
+        .map(ParameterInfo::id)
+}
+
+/// A bypass parameter's value: `1` bypassed, `0` processing.
+fn bypass_value(bypassed: bool) -> Normalized {
+    Normalized::clamped(if bypassed { 1.0 } else { 0.0 })
+}
 
 /// What the main thread asks of a plugin, in any state that has one.
 ///
@@ -52,6 +64,32 @@ pub trait Control: EditorWindow {
 
     /// Every parameter the plugin declares.
     fn parameters(&self, main: MainThreadMarker) -> Vec<ParameterInfo>;
+
+    /// The parameters a control surface lists: [`parameters`](Self::parameters)
+    /// without the plugin's bypass parameter (VST3 `kIsBypass`, CLAP
+    /// `CLAP_PARAM_IS_BYPASS`), which is the node's mode and is written through
+    /// [`set_bypassed`](Self::set_bypassed).
+    fn controls(&self, main: MainThreadMarker) -> Vec<ParameterInfo> {
+        let mut list = self.parameters(main);
+        list.retain(|p| p.flag(ParamFlags::BYPASS) != Some(true));
+        list
+    }
+
+    /// Writes the plugin's own bypass (`true` bypassed, `false` processing) and
+    /// returns whether the plugin has one
+    /// ([`LoadedPlugin::own_bypass`]): a plugin without one is left alone.
+    ///
+    /// The default writes the parameter flagged
+    /// [`BYPASS`](ParamFlags::BYPASS) (VST3, CLAP) to its maximum or its
+    /// minimum; AU, whose bypass is a unit property, overrides it. The host calls it
+    /// when the node's mode changes, never per block.
+    fn set_bypassed(&mut self, main: MainThreadMarker, bypassed: bool) -> bool {
+        let Some(id) = bypass_parameter(&self.parameters(main)) else {
+            return false;
+        };
+        self.set_parameter(main, id, bypass_value(bypassed));
+        true
+    }
 
     /// How many parameters the plugin declares: at least `parameters().len()`
     /// (a format whose list skips a parameter it declines to describe still
@@ -515,6 +553,23 @@ impl<W: Wraps> Control for W {
 
     fn parameters(&self, main: MainThreadMarker) -> Vec<ParameterInfo> {
         self.plugin().parameters(main)
+    }
+
+    fn controls(&self, main: MainThreadMarker) -> Vec<ParameterInfo> {
+        self.plugin().controls(main)
+    }
+
+    /// A bypass that is a parameter is written as every parameter is, so an
+    /// active plugin's reaches its Processor ([`queue_write`](Wraps::queue_write));
+    /// one that is not (AU's unit property) is the plugin's own to write.
+    fn set_bypassed(&mut self, main: MainThreadMarker, bypassed: bool) -> bool {
+        match bypass_parameter(&self.parameters(main)) {
+            Some(id) => {
+                self.set_parameter(main, id, bypass_value(bypassed));
+                true
+            }
+            None => self.plugin_mut().set_bypassed(main, bypassed),
+        }
     }
 
     fn parameter_count(&self, main: MainThreadMarker) -> usize {

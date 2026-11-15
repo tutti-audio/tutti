@@ -738,6 +738,22 @@ impl PluginHandle {
 
     // ---- Automation-state convenience --------------------------------------
 
+    /// Writes the plugin's own bypass, `true` bypassed and `false` processing,
+    /// and returns whether it has one ([`LoadedPlugin::own_bypass`]).
+    ///
+    /// **The host writes the plugin's bypass.** A node whose plugin has one
+    /// declares [`Shape::with_own_bypass`](tutti_graph::Shape::with_own_bypass),
+    /// so the executor leaves it running in
+    /// [`NodeMode::Bypassed`](tutti_graph::NodeMode::Bypassed) and nothing in the
+    /// plugin follows the mode on its own: whoever changes the node's mode calls
+    /// this once for the change, on the control side, never per block. A plugin
+    /// without a bypass of its own is left alone, and the executor's bypass
+    /// serves it. The write is fire-and-forget like
+    /// [`AnyThread::set_parameter_value`].
+    pub fn set_bypassed(&self, bypassed: bool) -> bool {
+        self.loaded.own_bypass && self.any_thread.set_bypassed(bypassed)
+    }
+
     /// Announces the host's [`AutomationMode`] to the plugin so its editor can
     /// update UI feedback.
     ///

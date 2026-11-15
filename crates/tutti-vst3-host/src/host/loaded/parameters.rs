@@ -6,7 +6,7 @@ use crate::types::{PlainRange, ProcessContextRequirements, UnitId};
 use tutti_plugin_types::AutomationMode;
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::ParamUnit;
-use tutti_types::UnitParam;
+use tutti_plugin_types::{Axis, ControlRole};
 
 impl Vst3Loaded {
     // VST3 enumerates parameters by index (`getParameterInfo`) and addresses
@@ -95,12 +95,26 @@ impl Vst3Loaded {
                 Some(build_param_info(info, plain.zip(default), &groups))
             })
             .collect::<Vec<_>>();
-        // `IParameterFunctionName` is read once per unit with the function the
-        // spec names a mix by: the one role VST3 declares itself.
-        let wet = std::iter::once(UnitId::ROOT)
+        // `IParameterFunctionName` is asked per unit, once for each function
+        // name that is a control (`FUNCTION_ROLES`): the roles VST3 declares.
+        let roles = std::iter::once(UnitId::ROOT)
             .chain(units.iter().map(|u| u.id))
-            .find_map(|unit| self.param_id_for_function_name(main, unit, DRY_WET_MIX));
-        apply_function_roles(list, wet)
+            .flat_map(|unit| {
+                FUNCTION_ROLES.iter().filter_map(move |&(name, role)| {
+                    self.param_id_for_function_name(main, unit, name)
+                        .map(|id| (id, role))
+                })
+            })
+            .collect::<Vec<_>>();
+        apply_function_roles(list, &roles)
+    }
+
+    /// Whether a parameter is flagged `kIsBypass`: the plugin has a bypass of
+    /// its own.
+    pub(crate) fn has_bypass_parameter(&self, main: MainThreadMarker) -> bool {
+        (0..self.parameter_count(main))
+            .filter_map(|i| self.parameter_info_at(main, i))
+            .any(|info| info.is_bypass())
     }
 
     /// The plugin's own `[min, max]` for a parameter, recovered by asking its
@@ -366,19 +380,30 @@ pub(super) fn unit_names(units: &[Vst3UnitInfo]) -> HashMap<UnitId, &str> {
         .collect()
 }
 
-/// `FunctionNameType::kDryWetMix`: the function name a plugin gives its
-/// dry/wet mix parameter (`ivstparameterfunctionname.h`).
-const DRY_WET_MIX: &str = "DryWetMix";
+/// The function names of `ivstparameterfunctionname.h` that name a control,
+/// and the role each gives. The header's others (`Comp:GainReduction`,
+/// `Comp:GainReductionMax`, `Comp:GainReductionPeakHold`) are readings, and
+/// `Randomize` and `Comp:ResetGainReductionMax` are one-shot actions: none is a
+/// control, so none has a role.
+const FUNCTION_ROLES: [(&str, ControlRole); 5] = [
+    ("DryWetMix", ControlRole::Mix),
+    ("PanPosCenterX", ControlRole::Pan(Axis::X)),
+    ("PanPosCenterY", ControlRole::Pan(Axis::Y)),
+    ("PanPosCenterZ", ControlRole::Pan(Axis::Z)),
+    ("LowLatencyMode", ControlRole::LowLatency),
+];
 
-/// Gives the parameter the plugin names as its dry/wet mix the role
-/// [`UnitParam::Wet`]. `wet` is what `IParameterFunctionName` answered for
-/// [`DRY_WET_MIX`]; `None` (no such interface, or no such function) leaves every
-/// role alone.
-fn apply_function_roles(list: Vec<ParameterInfo>, wet: Option<ParamId>) -> Vec<ParameterInfo> {
+/// Gives each parameter `IParameterFunctionName` pointed at the role of the
+/// function it answered for; a parameter no function names keeps none. A
+/// parameter two functions point at keeps the first.
+fn apply_function_roles(
+    list: Vec<ParameterInfo>,
+    roles: &[(ParamId, ControlRole)],
+) -> Vec<ParameterInfo> {
     list.into_iter()
-        .map(|p| match wet {
-            Some(wet) if p.id() == wet => p.with_role(Some(UnitParam::Wet)),
-            _ => p,
+        .map(|p| match roles.iter().find(|(id, _)| *id == p.id()) {
+            Some(&(_, role)) => p.with_role(Some(role)),
+            None => p,
         })
         .collect()
 }
@@ -398,11 +423,6 @@ fn declared_measures(units: &str, is_list: bool, step_count: i32) -> Option<Para
     } else {
         ParamUnit::from_label(units)
     }
-}
-
-/// The role a VST3 parameter's flags declare: the bypass switch.
-fn declared_role(is_bypass: bool) -> Option<UnitParam> {
-    is_bypass.then_some(UnitParam::Bypass)
 }
 
 /// Builds a shared [`ParameterInfo`] from a VST3 parameter descriptor and the
@@ -455,7 +475,6 @@ pub(super) fn build_param_info(
     };
 
     let measures = declared_measures(&info.units_string(), info.is_list(), info.step_count());
-    let role = declared_role(info.is_bypass());
 
     // VST3 `ParamID` is opaque and plugin-chosen, not a list position; see the
     // ParamID-vs-index note above.
@@ -477,7 +496,6 @@ pub(super) fn build_param_info(
         .with_flags(KNOWN, reported)
         .with_group(group)
         .with_measures(measures)
-        .with_role(role)
 }
 
 #[cfg(test)]
@@ -671,28 +689,29 @@ mod measures_tests {
         assert_eq!(measures("", false, 5, n()), None, "stepped, not a list");
     }
 
-    /// The bypass flag is the `Bypass` role, and nothing else gives one.
+    /// Each function a plugin answers for gives its parameter that function's
+    /// role; a parameter no function names has none, and no answer leaves every
+    /// role alone.
     #[test]
-    fn the_bypass_flag_gives_bypass() {
-        assert_eq!(declared_role(true), Some(UnitParam::Bypass));
-        assert_eq!(declared_role(false), None);
-    }
-
-    /// `IParameterFunctionName`'s answer for the dry/wet mix gives that one
-    /// parameter `Wet`; no answer leaves every role alone.
-    #[test]
-    fn the_dry_wet_function_name_gives_wet() {
+    fn a_function_name_gives_its_parameter_the_matching_role() {
         let list = || {
             vec![
                 ParameterInfo::new(ParamId::new(1), "Cutoff"),
                 ParameterInfo::new(ParamId::new(2), "Mix"),
+                ParameterInfo::new(ParamId::new(3), "Pan"),
             ]
         };
-        let got = apply_function_roles(list(), Some(ParamId::new(2)));
+        let got = apply_function_roles(
+            list(),
+            &[
+                (ParamId::new(2), ControlRole::Mix),
+                (ParamId::new(3), ControlRole::Pan(Axis::Y)),
+            ],
+        );
         assert_eq!(got[0].role(), None);
-        assert_eq!(got[1].role(), Some(UnitParam::Wet));
-        let none = apply_function_roles(list(), None);
+        assert_eq!(got[1].role(), Some(ControlRole::Mix));
+        assert_eq!(got[2].role(), Some(ControlRole::Pan(Axis::Y)));
+        let none = apply_function_roles(list(), &[]);
         assert!(none.iter().all(|p| p.role().is_none()));
-        assert_eq!(DRY_WET_MIX, "DryWetMix");
     }
 }
