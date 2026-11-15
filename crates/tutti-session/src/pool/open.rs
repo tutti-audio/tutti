@@ -22,7 +22,6 @@ pub struct OpenCx<'a> {
     ids: &'a mut crate::peer::ResourceIds,
     #[cfg(feature = "midi")]
     midi: crate::Midi<'a>,
-    _session: std::marker::PhantomData<&'a mut ()>,
 }
 
 impl<'a> OpenCx<'a> {
@@ -39,7 +38,6 @@ impl<'a> OpenCx<'a> {
             ids,
             #[cfg(feature = "midi")]
             midi,
-            _session: std::marker::PhantomData,
         }
     }
 

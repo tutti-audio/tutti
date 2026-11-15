@@ -608,15 +608,6 @@ impl Session<crate::Detached> {
 }
 
 impl<C: Clock> Session<C> {
-    /// The id of a new resource: no other token of this session has it.
-    #[expect(
-        dead_code,
-        reason = "the tokens mint their ids here; none exists until the MIDI and plugin tokens"
-    )]
-    pub(crate) fn mint_resource_id(&mut self) -> crate::ResourceId {
-        self.resource_ids.mint()
-    }
-
     /// Ends the session on the main thread: runs the work other threads handed to
     /// it, drops the session's plugins (each closes on `main`, or hands its close
     /// to the session's collector), and runs what that handed over. Nothing a
