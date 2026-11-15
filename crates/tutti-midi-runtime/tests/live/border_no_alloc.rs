@@ -640,3 +640,72 @@ fn the_mpe_transform_node_processes_without_allocating() {
     assert!(reached > 50 * 16, "the fan-out reached the port: {reached}");
     assert_eq!(out.dropped(), 0);
 }
+
+/// **The Machine Control node processes a block without allocating**, a
+/// transport change inside it included: a start on frame 100, a stop on
+/// frame 300 and a jump with deferred play on frame 400 each send a message.
+#[test]
+fn the_machine_control_node_processes_without_allocating() {
+    use tutti_graph::{Offset, TransportChanges};
+    use tutti_midi_protocol::{MtcRate, Recipient};
+    use tutti_midi_runtime::MachineControlNode;
+
+    let (mut ed, mut exec) =
+        Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+    let controls = ed.insert(
+        NodeKey(1),
+        "mmc",
+        MachineControlNode::new(MidiGroup::FIRST, Recipient::AllCall, MtcRate::Fps30),
+    );
+    let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
+    ed.commit().unwrap();
+    let at = |playing: bool, beat: f64| {
+        TransportPosition::new(playing, Bpm::of(120.0), Beat(beat), None)
+    };
+    let mut changes = TransportChanges::NONE;
+    for (frame, to) in [
+        (100, at(true, 0.0)),
+        (300, at(false, 0.01)),
+        (400, at(true, 9.0)),
+    ] {
+        changes
+            .push(Offset::of(Samples(frame), Samples(512)), to)
+            .unwrap();
+    }
+    let mut drain = [(0, Ump([0; 4])); 256];
+    // Warm up outside the gate: the first block only looks.
+    exec.process(512, &at(false, 0.0), &[], &mut []);
+    let mut sent = 0;
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..200 {
+            exec.process_with_changes(512, &at(false, 0.0), &changes, &[], &mut []);
+            sent += out.poll_into(&mut drain);
+            // The next block starts away from where the last left off.
+            exec.process_with_changes(512, &at(true, 3.0), &TransportChanges::NONE, &[], &mut []);
+            sent += out.poll_into(&mut drain);
+            // A stop, and then a transport before zero standing elsewhere: it names
+            // no time code, so it is refused and counted.
+            for beat in [-4.0, -8.0] {
+                exec.process_with_changes(
+                    512,
+                    &at(false, beat),
+                    &TransportChanges::NONE,
+                    &[],
+                    &mut [],
+                );
+                sent += out.poll_into(&mut drain);
+            }
+        }
+    });
+    assert!(
+        sent >= 200 * 4,
+        "play, stop, locate and deferred play: {sent}"
+    );
+    assert!(
+        controls.losses().refused >= 200,
+        "a refusal each round: {:?}",
+        controls.losses()
+    );
+    assert_eq!(controls.losses().lost, 0);
+    assert_eq!(out.dropped(), 0);
+}
