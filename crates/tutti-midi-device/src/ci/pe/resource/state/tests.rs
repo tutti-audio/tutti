@@ -87,7 +87,7 @@ fn page() -> NonZeroU32 {
     NonZeroU32::new(8).unwrap()
 }
 
-// M2-111 §2.3, Table 3 and its example: the list's properties read, and written back
+// M2-111 §2.3 and its example: the list's properties read, and written back
 // as they came.
 #[test]
 fn a_state_list_entry_has_the_properties_of_table_3() {
@@ -106,7 +106,7 @@ fn a_state_list_entry_has_the_properties_of_table_3() {
     assert_eq!(PeData::StateList(list).to_json(), Some(json(&lower)));
 }
 
-// M2-111 §2.3, Table 3: `title` and `stateId` are required, the rest optional.
+// M2-111 §2.3: `title` and `stateId` are required, the rest optional.
 #[test]
 fn a_state_list_entry_requires_title_and_state_id() {
     let decode = |t: &str| PeData::decode(&PeResource::StateList, &json(t));

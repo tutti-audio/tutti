@@ -15,10 +15,11 @@ pub struct AudioFile {
     path: PathBuf,
 }
 
-/// Declares the wave file at `path` under `key`.
+/// Declares the wave file at `path` under `key`. Another key declared with the
+/// same path shares the one decode, and every handle is the same `Arc`.
 #[cfg(feature = "sampler")]
 pub fn audio_file<K>(key: K, path: impl Into<PathBuf>) -> Declared<K, AudioFile> {
-    Declared::new(key, AudioFile { path: path.into() })
+    Declared::shared(key, AudioFile { path: path.into() })
 }
 
 #[cfg(feature = "sampler")]
@@ -54,10 +55,11 @@ pub struct SoundFontFile {
     path: PathBuf,
 }
 
-/// Declares the SoundFont at `path` under `key`.
+/// Declares the SoundFont at `path` under `key`. Another key declared with the
+/// same path shares the one parse, and every handle is the same `Arc`.
 #[cfg(feature = "soundfont")]
 pub fn soundfont<K>(key: K, path: impl Into<PathBuf>) -> Declared<K, SoundFontFile> {
-    Declared::new(key, SoundFontFile { path: path.into() })
+    Declared::shared(key, SoundFontFile { path: path.into() })
 }
 
 #[cfg(feature = "soundfont")]

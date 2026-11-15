@@ -58,8 +58,8 @@ use tutti_midi_protocol::{PitchBendSensitivity, bend_to_signed_f32};
 use tutti_types::Semitones;
 use tutti_ump::BendValue;
 use tutti_ump::{
-    Address, Attribute, MidiChannel, NoteId, NoteNumber, Pitch, RegisteredPerNoteController, Rpn,
-    Voice2,
+    Address, Attribute, MidiChannel, NoteId, NoteNumber, PerNoteManagement, Pitch,
+    RegisteredPerNoteController, Rpn, Voice2,
 };
 
 const CHANNELS: usize = MidiChannel::COUNT as usize;
@@ -328,11 +328,9 @@ impl PerNoteState {
             Voice2::PolyPressure { note, value } => {
                 self.control(address, note, Held::PRESSURE, value.get());
             }
-            Voice2::PerNoteManagement {
-                note,
-                detach,
-                reset,
-            } => self.management(address, note, detach, reset),
+            Voice2::PerNoteManagement { note, management } => {
+                self.management(address, note, management);
+            }
             Voice2::Registered { bank, index, value }
                 if Rpn::new(bank, index) == Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY =>
             {
@@ -442,14 +440,14 @@ impl PerNoteState {
         }
     }
 
-    fn management(&mut self, address: Address, note: NoteNumber, detach: bool, reset: bool) {
+    fn management(&mut self, address: Address, note: NoteNumber, management: PerNoteManagement) {
         let Some(at) = self.slot(address, note) else {
             return;
         };
-        if detach {
+        if management.detaches() {
             self.live[at] = Live::NONE;
         }
-        if reset {
+        if management.resets() {
             self.held[at] = Held::NONE;
             self.live[at].tell_all(None);
             for &id in self.live[at].ids() {
@@ -543,15 +541,13 @@ mod tests {
         s: &mut PerNoteState,
         a: Address,
         n: u8,
-        detach: bool,
-        reset: bool,
+        management: PerNoteManagement,
     ) -> Vec<NoteEvent> {
         s.step(
             a,
             Voice2::PerNoteManagement {
                 note: NoteNumber::of(n),
-                detach,
-                reset,
+                management,
             },
         )
         .to_vec()
@@ -621,7 +617,7 @@ mod tests {
         let mut s = state();
         let a = at(0, 0);
         let old = started(&start(&mut s, a, 5));
-        assert_eq!(management(&mut s, a, 5, true, false), vec![]);
+        assert_eq!(management(&mut s, a, 5, PerNoteManagement::Detach), vec![]);
         assert_eq!(
             pitch_of(&mut s, a, 5, PITCH_60),
             vec![],
@@ -660,13 +656,13 @@ mod tests {
         assert_eq!(ids, vec![first, second]);
         // A Reset reaches both, too, and the Detach after it none.
         assert_eq!(
-            management(&mut s, a, 5, false, true),
+            management(&mut s, a, 5, PerNoteManagement::Reset),
             vec![
                 NoteEvent::Reset { id: first },
                 NoteEvent::Reset { id: second }
             ]
         );
-        management(&mut s, a, 5, true, false);
+        management(&mut s, a, 5, PerNoteManagement::Detach);
         assert_eq!(bend(&mut s, a, 5, 0xC000_0000), vec![]);
     }
 
@@ -722,7 +718,10 @@ mod tests {
         let a = at(0, 0);
         start(&mut s, a, 5);
         bend(&mut s, a, 5, 0xC000_0000);
-        assert_eq!(management(&mut s, a, 5, true, true), vec![]);
+        assert_eq!(
+            management(&mut s, a, 5, PerNoteManagement::DetachAndReset),
+            vec![]
+        );
         assert_eq!(start(&mut s, a, 5).len(), 1, "the next note is at its key");
     }
 
@@ -736,7 +735,7 @@ mod tests {
         let id = started(&start(&mut s, a, 5));
         bend(&mut s, a, 5, 0xC000_0000);
         assert_eq!(
-            management(&mut s, a, 5, false, true),
+            management(&mut s, a, 5, PerNoteManagement::Reset),
             vec![NoteEvent::Reset { id }]
         );
         assert_eq!(start(&mut s, a, 5).len(), 1);
@@ -823,7 +822,7 @@ mod tests {
         // A Detach in Group 1 leaves Group 0's note answering.
         let g0 = started(&start(&mut s, at(0, 0), 7));
         start(&mut s, at(1, 0), 7);
-        management(&mut s, at(1, 0), 7, true, false);
+        management(&mut s, at(1, 0), 7, PerNoteManagement::Detach);
         let e = bend(&mut s, at(0, 0), 7, 0xC000_0000);
         assert!(
             matches!(e[..], [NoteEvent::Control { id, .. }] if id == g0),
@@ -971,7 +970,7 @@ mod tests {
         pitch_of(&mut s, a, 5, PITCH_60);
         bend(&mut s, a, 5, 0xC000_0000);
         assert_eq!(
-            management(&mut s, a, 5, false, true),
+            management(&mut s, a, 5, PerNoteManagement::Reset),
             vec![NoteEvent::Reset { id }]
         );
         let e = bend(&mut s, a, 5, 0xC000_0000);
@@ -989,7 +988,7 @@ mod tests {
         let mut s = state();
         let a = at(0, 0);
         start(&mut s, a, 5);
-        management(&mut s, a, 5, true, false);
+        management(&mut s, a, 5, PerNoteManagement::Detach);
         assert_eq!(pitch_of(&mut s, a, 5, PITCH_60), vec![]);
         assert_eq!(bend(&mut s, a, 5, 0xC000_0000), vec![]);
         assert_eq!(sensitivity(&mut s, a, 12), vec![]);

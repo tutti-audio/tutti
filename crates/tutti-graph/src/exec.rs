@@ -40,14 +40,17 @@
 //! returns afterwards wait in the return ring until the executor is dropped.
 //!
 //! Applying runs under the [`RtScope::enter`](tutti_rt::RtScope::enter) marker, so a unit or a
-//! commit dropped there panics in a debug build. The marker's coverage of
-//! applying is **partial**: applying *allocates* (it builds the new arena and
-//! delay state) and frees transient allocations of its own — the key maps it
-//! builds to carry state across, a ring's previous buffer on a retune, the
-//! flush lists — which are plain `Vec`s and `BTreeMap`s the marker does not
-//! see. Moving that work to the control side, so applying only swaps
-//! pointers, is not done yet. Every type crossing
-//! the queue is already `Send` (units, commits) or `Send + Sync` (the plan).
+//! commit dropped there panics in a debug build, and it neither allocates
+//! nor frees. Everything a plan needs that is a function of the plan — the
+//! zeroed arena, the event slots, every ring and FIFO, the lanes, the
+//! injection buffers, the parallel state, a store with room — is built by the
+//! editor when it packages the plan (`stage.rs`) and travels in the commit.
+//! Applying moves what carries across (a ring that keeps its length, a
+//! retuned ring's samples into the one built for its new length, a FIFO's
+//! queue, a lane's last weight, the taps' writers), flushes what disappeared
+//! into buffers built for it, and swaps the new state in. The state it
+//! replaces goes back in the commit, and the editor frees it. Every type
+//! crossing the queue is `Send` (units, commits) or `Send + Sync` (the plan).
 //!
 //! # The serial executor
 //!
@@ -184,7 +187,7 @@
 //! of the next block's events on the unit's own output.
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use tutti_rt::{RingReader, RingWriter};
 use tutti_types::PlayReading;
@@ -209,6 +212,7 @@ mod mode_op;
 mod node_op;
 mod ops;
 mod render;
+mod stage;
 mod state;
 mod update;
 
@@ -219,6 +223,7 @@ pub(crate) use ops::{
     audio_ring, capture_op, delay_op, event_delay_op, event_merge_op, event_ring, global_in,
     output_op, sum_op,
 };
+pub(crate) use stage::{StageIn, Stager};
 
 use state::State;
 pub(crate) use state::{Inject, Ring, Unit};
@@ -264,9 +269,9 @@ const EDGE_FADE_CAPACITY: usize = 1024;
 /// at the start of each block. It owns every running unit; the editor never
 /// touches one.
 ///
-/// Call [`process`](Self::process) from the audio callback. With no commit
-/// queued it does not allocate, lock or block; applying a commit does
-/// allocate (it builds the new arena and delay state), and everything a
+/// Call [`process`](Self::process) from the audio callback. It does not
+/// allocate, free, lock or block, applying a commit included: the editor
+/// built the new arena and delay state with the commit, and everything a
 /// commit replaces is sent back to the editor to be freed on the control
 /// thread. The executor walks the plan's ops (serially, or as tasks on a
 /// pool), hands every node the
@@ -297,6 +302,14 @@ pub struct Executor {
     chase: Vec<Event>,
     /// The pool blocks run on, if any (see [`set_pool`](Self::set_pool)).
     pool: Option<Arc<dyn Pool>>,
+    /// The pool's participants, for the editor, which builds the parallel
+    /// state of a plan with it (0: none).
+    pool_participants: Arc<AtomicUsize>,
+    /// Blocks rendered with a plan, for the editor's bounds (`Stager`).
+    rendered: Arc<AtomicU64>,
+    /// Commits taken off the queue by [`set_pool`](Self::set_pool), to apply
+    /// first: room for every commit the queue holds.
+    stash: std::collections::VecDeque<Box<Commit>>,
 }
 
 /// The executor's end of the rings to its editor, and the commands it
@@ -372,12 +385,12 @@ impl std::fmt::Debug for Executor {
 /// than one participant, and more than one task).
 fn par_for(
     plan: &Plan,
-    pool: Option<&Arc<dyn Pool>>,
+    participants: Option<usize>,
     store_len: usize,
-    inject: &[Inject],
+    inject_units: impl Iterator<Item = u32>,
     overlay: usize,
 ) -> Option<Par> {
-    let participants = pool?.participants();
+    let participants = participants?;
     match plan.schedule(participants) {
         Schedule::Serial => None,
         Schedule::Parallel { wake, from } => Some(Par::new(
@@ -385,7 +398,7 @@ fn par_for(
             participants,
             (wake, from.0),
             store_len,
-            inject.iter().map(|i| i.unit),
+            inject_units,
             overlay,
         )),
     }
@@ -434,6 +447,9 @@ impl Executor {
             parked: Vec::new(),
             chase: Vec::new(),
             pool: None,
+            pool_participants: ends.pool,
+            rendered: ends.rendered,
+            stash: std::collections::VecDeque::with_capacity(QUEUE_CAPACITY),
         }
     }
 
@@ -441,9 +457,15 @@ impl Executor {
     /// `par` module docs, `src/par.rs`) — or, with `None`, on the calling
     /// thread alone. Returns the pool it replaces.
     ///
-    /// **Control thread**: it builds the parallel state for the running
-    /// plan, which allocates. Set it before the executor goes to the audio
-    /// thread (before `Engine::new`, or before an export renders).
+    /// **Control thread, never alongside [`process`](Self::process)**: it
+    /// builds the parallel state for the running plan and for every commit
+    /// already queued, which allocates, so it takes `&mut self` and belongs
+    /// before the executor goes to the audio thread (before `Engine::new`,
+    /// or before an export renders). The editor builds the parallel state of
+    /// each plan it sends for the pool the executor has when it sends it. A
+    /// commit sent on another thread while this runs may still be staged for
+    /// the pool before it: it runs the serial walk, which renders the same
+    /// samples, and its unused parallel state goes back in the commit.
     ///
     /// Whether a block spreads is the cost model's call
     /// ([`Plan::schedule`]), made for each plan when it meets the pool: a
@@ -453,12 +475,26 @@ impl Executor {
     /// one-worker case, and both render the same samples.
     pub fn set_pool(&mut self, pool: Option<Arc<dyn Pool>>) -> Option<Arc<dyn Pool>> {
         let old = std::mem::replace(&mut self.pool, pool);
+        let participants = self.pool.as_ref().map(|p| p.participants());
+        // Commits staged from here on are built for this pool.
+        self.pool_participants
+            .store(participants.unwrap_or(0), Ordering::Release);
+        // A commit already sent was staged for the pool before this one: it
+        // gets the parallel state for this pool, and is applied first.
+        while let Some(commit) = self.inbox.queue.pop() {
+            self.stash.push_back(commit);
+        }
+        for commit in &mut self.stash {
+            if let (Some(plan), Some(staged)) = (&commit.plan, &mut commit.staged) {
+                staged.set_participants(plan, participants);
+            }
+        }
         self.state.par = self.plan.as_deref().and_then(|plan| {
             par_for(
                 plan,
-                self.pool.as_ref(),
+                participants,
                 self.store.len(),
-                &self.state.inject,
+                self.state.inject.iter().map(|i| i.unit),
                 self.state.overlay.capacity(),
             )
         });
@@ -649,5 +685,40 @@ mod tests {
         assert_eq!(seen.load(Ordering::Relaxed), 1);
         assert_eq!(ed.commands_outstanding(), 0);
         assert_eq!(exec.unrouted_command_count(), 0);
+    }
+
+    /// A commit that outgrows the store carries one built for it (the
+    /// executor's moves into it), one that fits carries none, and a store
+    /// that has room is not built again.
+    #[test]
+    fn a_commit_past_the_stores_room_carries_a_store_built_for_it() {
+        let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64)));
+        let (mut ed, mut exec) = crate::Editor::new(prepare);
+        let seen = Arc::new(AtomicUsize::new(0));
+        let staged_store = |ed: &mut crate::Editor, exec: &mut Executor| {
+            ed.commit().expect("commits");
+            let mut c = exec.inbox.queue.pop().expect("queued");
+            let built = c.staged.as_ref().expect("staged").store.is_some();
+            exec.apply(&mut c);
+            commit::send_back(&mut exec.inbox.back, c);
+            ed.collect();
+            built
+        };
+        for k in 1..=4 {
+            ed.insert(NodeKey(k), "a", crate::Unforkable(Count(Arc::clone(&seen))));
+        }
+        assert!(
+            staged_store(&mut ed, &mut exec),
+            "the first units outgrow nothing"
+        );
+        ed.insert(NodeKey(5), "a", crate::Unforkable(Count(Arc::clone(&seen))));
+        assert!(staged_store(&mut ed, &mut exec), "five outgrow four");
+        for k in 6..=8 {
+            ed.insert(NodeKey(k), "a", crate::Unforkable(Count(Arc::clone(&seen))));
+        }
+        assert!(
+            !staged_store(&mut ed, &mut exec),
+            "eight fit the doubled store"
+        );
     }
 }

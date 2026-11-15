@@ -1,13 +1,16 @@
-//! The VBAP block kernel: one block's speaker gains at the two ends of a
-//! ramp, and one output channel rendered between them.
+//! The VBAP block kernel: the speaker gains of one direction, and one output
+//! channel rendered along a glide between two of them.
 //!
-//! The caller smooths the position and reads its controls; it hands
-//! [`VbapKernel::gains`] the bearing, height, width and spread of the block's
-//! last frame, keeps the result of the previous block, and renders each
-//! speaker's channel with [`VbapGains::render_channel`].
+//! The caller reads its controls on the grid ([`COEFF_INTERVAL`](crate::COEFF_INTERVAL) frames, counted
+//! from its last reset), hands [`VbapKernel::gains`] the bearing, height, width
+//! and spread of the grid point, glides from the previous grid point's gains to
+//! these ([`Glide`]), and renders each speaker's channel with
+//! [`VbapGains::render_channel`].
 
 use tutti_buffers::Fold;
 use tutti_types::{ArcDegrees, Azimuth, Elevation, MAX_CHANNELS, Spread, StereoWidth};
+
+use crate::{Glide, Lerp};
 
 mod error;
 mod layout;
@@ -23,7 +26,12 @@ const MONO_WIDTH: f32 = 0.001;
 /// How far each virtual source sits from the bearing at width 1.
 const WIDTH_HALF_ANGLE: f32 = 15.0;
 
-/// One frame's speaker gains, as the start or end point of a block's ramp.
+/// The width that puts the two virtual sources at the antipode of the bearing
+/// (an offset of half a turn). The solve saturates the width here by convention,
+/// so a huge one cannot overflow the offset.
+const MAX_WIDTH: f32 = 180.0 / WIDTH_HALF_ANGLE;
+
+/// One direction's speaker gains, as an end of a glide between two grid points.
 ///
 /// `mono` records which branch produced them: a mono set is one gain vector
 /// (`a`) applied to the folded pair, a stereo set is two: `a` for the left
@@ -39,7 +47,7 @@ impl VbapGains {
     /// Speaker `s`'s gains as a (left, right) pair, whatever the branch.
     ///
     /// A mono set weighs each channel by half its gain (`fold(l, r) * g` is
-    /// `l * g/2 + r * g/2` up to rounding), which is what lets a ramp cross
+    /// `l * g/2 + r * g/2` up to rounding), which is what lets a glide cross
     /// from one branch to the other without a step.
     #[inline]
     pub fn pair(&self, s: usize) -> (f32, f32) {
@@ -51,27 +59,27 @@ impl VbapGains {
         }
     }
 
-    /// Render one output channel for one block: speaker `speaker`'s gain
-    /// ramped linearly from `from` to `to`, applied to the stereo pair
-    /// (`left`, `right`) into `out`. No speaker (the LFE) is silence.
+    /// Render one output channel along `glide`: speaker `speaker`'s gain, read
+    /// at step `first` for the first frame of `out` and one step on for each
+    /// frame after, applied to the stereo pair (`left`, `right`) into `out`. No
+    /// speaker (the LFE) is silence.
     ///
-    /// Frame `i` of `n` uses `to - (to - from) * (n - 1 - i) / n`, so the ramp
-    /// starts one step past `from` (which the previous block already played)
-    /// and its last frame is exactly `to`: written as a subtraction of a
-    /// zero term, which is exact for any `from`, rather than
-    /// `from + (to - from) * 1.0`, which is exact only when the two are
-    /// within a factor of two. That is what makes a one-frame block the
-    /// per-frame solve bit for bit, and a block edge the exact solve.
+    /// A frame reads `glide.at(step)` in closed form (the target from its last
+    /// step on), so a segment of frames that starts at step `first` renders the
+    /// same bits however it is cut into calls. `first` is one past the steps the
+    /// frames before it have used: the first frame after an aim reads step 1,
+    /// and the last step of a grid segment is exactly the gains of the grid
+    /// point.
     ///
     /// When both ends came from the mono-fold branch the pair is folded
     /// (`mono * g`, `mono` the stereo-to-mono `fold` of each frame);
     /// otherwise each end is expressed as a (left, right) gain pair, so a
-    /// width crossing the mono-fold threshold between blocks crossfades
+    /// width crossing the mono-fold threshold between grid points crossfades
     /// instead of stepping.
     #[inline]
     pub fn render_channel(
-        from: &VbapGains,
-        to: &VbapGains,
+        glide: &Glide<VbapGains>,
+        first: u32,
         speaker: Option<usize>,
         fold: &Fold,
         left: &[f32],
@@ -82,45 +90,86 @@ impl VbapGains {
             out.fill(0.0);
             return;
         };
-        let n = out.len();
-        let inv_n = 1.0 / n as f32;
-        let remaining = |i: usize| (n - 1 - i) as f32 * inv_n;
-        // A delta of exactly `+0.0` makes every ramp gain `g_to - (+0.0 * t)`,
-        // which is `g_to` bit for bit (`t` is finite and non-negative; `-0.0`
-        // is excluded because `-0.0 - -0.0` is `+0.0`), so a held gain skips
-        // the ramp arithmetic with the same bits.
+        let (from, to, n) = (&glide.from, &glide.to, glide.n);
+        // The gain at step `k`, `Glide::at`'s rule (the target from the last step on)
+        // for one speaker's pair: `at` would blend all of the set for each frame.
+        let blend = |from: f32, to: f32, k: u32| {
+            if k >= n { to } else { from.lerp(&to, k, n) }
+        };
+        let steps = first..;
+        // A pair of ends that are the same bits is a held gain, which skips the
+        // blend (`-0.0` and `+0.0` differ in bits, so a sign change is a glide).
         if from.mono && to.mono {
             let (g_from, g_to) = (from.a[s], to.a[s]);
-            let delta = g_to - g_from;
             let mono = |l: f32, r: f32| {
                 let mut m = [0.0];
                 fold.frame(&[l, r], &mut m);
                 m[0]
             };
-            if delta.to_bits() == 0 {
+            if g_from.to_bits() == g_to.to_bits() {
                 for ((o, &l), &r) in out.iter_mut().zip(left).zip(right) {
                     *o = mono(l, r) * g_to;
                 }
                 return;
             }
-            for (i, ((o, &l), &r)) in out.iter_mut().zip(left).zip(right).enumerate() {
-                *o = mono(l, r) * (g_to - delta * remaining(i));
+            for (((o, &l), &r), k) in out.iter_mut().zip(left).zip(right).zip(steps) {
+                *o = mono(l, r) * blend(g_from, g_to, k);
             }
         } else {
             let (a_from, b_from) = from.pair(s);
             let (a_to, b_to) = to.pair(s);
-            let (da, db) = (a_to - a_from, b_to - b_from);
-            if da.to_bits() == 0 && db.to_bits() == 0 {
+            if a_from.to_bits() == a_to.to_bits() && b_from.to_bits() == b_to.to_bits() {
                 for ((o, &l), &r) in out.iter_mut().zip(left).zip(right) {
                     *o = l * a_to + r * b_to;
                 }
                 return;
             }
-            for (i, ((o, &l), &r)) in out.iter_mut().zip(left).zip(right).enumerate() {
-                let t = remaining(i);
-                *o = l * (a_to - da * t) + r * (b_to - db * t);
+            for (((o, &l), &r), k) in out.iter_mut().zip(left).zip(right).zip(steps) {
+                *o = l * blend(a_from, a_to, k) + r * blend(b_from, b_to, k);
             }
         }
+    }
+}
+
+/// A glide between two gain sets: each speaker's (left, right) pair blended
+/// linearly, so the glide is a chord between two unit-power vectors and a
+/// mono set crosses to a stereo one without a step. Two mono sets stay mono.
+impl Lerp for VbapGains {
+    fn lerp(&self, to: &Self, k: u32, n: u32) -> Self {
+        if self.mono && to.mono {
+            let mut a = [0.0; MAX_CHANNELS];
+            for (g, (from, to)) in a.iter_mut().zip(self.a.iter().zip(&to.a)) {
+                *g = from.lerp(to, k, n);
+            }
+            return Self {
+                mono: true,
+                a,
+                b: [0.0; MAX_CHANNELS],
+            };
+        }
+        let (mut a, mut b) = ([0.0; MAX_CHANNELS], [0.0; MAX_CHANNELS]);
+        for s in 0..MAX_CHANNELS {
+            let (from, to) = (self.pair(s), to.pair(s));
+            a[s] = from.0.lerp(&to.0, k, n);
+            b[s] = from.1.lerp(&to.1, k, n);
+        }
+        Self { mono: false, a, b }
+    }
+}
+
+/// A glide of a bearing is a glide along the short arc
+/// ([`Azimuth::lerp_shortest`]): from 170 to -170 it passes through 180, never
+/// through the front.
+impl Lerp for Azimuth {
+    fn lerp(&self, to: &Self, k: u32, n: u32) -> Self {
+        self.lerp_shortest(*to, k as f32 / n as f32)
+    }
+}
+
+/// A glide of a height is a line.
+impl Lerp for Elevation {
+    fn lerp(&self, to: &Self, k: u32, n: u32) -> Self {
+        Elevation(self.get().lerp(&to.get(), k, n))
     }
 }
 
@@ -161,6 +210,9 @@ impl VbapKernel {
     /// [`SpeakerLayout::gains_into`], which also gives each virtual source
     /// unit energy on its own; without that, the width branch would
     /// reintroduce the rear-arc silence the mono branch avoids.
+    ///
+    /// A direction that is not finite gives silence: every gain zero
+    /// ([`SpeakerLayout::gains_into`]).
     pub fn gains(
         &mut self,
         azimuth: Azimuth,
@@ -193,7 +245,13 @@ impl VbapKernel {
         spread: Spread,
     ) -> VbapGains {
         // Unwrapped once: the angle offset below scales the scalar.
-        let width = width.get().max(0.0);
+        let width = width.get();
+        // A NaN reads as no width.
+        let width = if width.is_nan() {
+            0.0
+        } else {
+            width.clamp(0.0, MAX_WIDTH)
+        };
         let count = self.layout.speaker_count();
         if width < MONO_WIDTH {
             let mut a = [0.0; MAX_CHANNELS];

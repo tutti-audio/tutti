@@ -1,38 +1,47 @@
-//! `FamilyNode<FdnFamily>` as the graph runs it: its ports
-//! (the freeze only where the design can freeze), its tail (the network's own,
-//! unbounded while frozen), the freeze itself and a modulated decay. Every figure is from the network's own queries or the
-//! definition of a freeze, not from another reverb's render.
+//! `FdnNode` as the graph runs it: its ports (the freeze only where the layout can freeze),
+//! its tail (the network's own, unbounded while frozen, held to by the node), the freeze
+//! itself, a driven decay, and what the node is across blocks, resets, parks and clones.
+//! Every figure is from the network's own queries or the definition of a freeze, not from
+//! another reverb's render.
 
 use std::sync::Arc;
 use tutti_types::MaxBlock;
 
-use tutti_dsp::{Family, FdnControls, FdnFamily, FreeverbControls, FreeverbFamily, System};
-use tutti_graph::contract::{Driven, assert_honest_tail, assert_param_fork, drive_input, prepared};
+use tutti_dsp::{
+    FdnControls, FdnLayout, FreeverbControls, FreeverbFamily, MaxDecay, Network, System,
+};
+use tutti_graph::contract::{
+    Driven, assert_honest_tail, assert_param_fork, drive, drive_input, prepared,
+};
 use tutti_graph::{
-    Env, GraphBuilder, Node, ParamIn, ParamNode, PlayClock, Prepare, Status, TransportChanges,
-    TransportPosition,
+    Env, GraphBuilder, MAX_NODE_TAIL, Node, ParamIn, ParamNode, PlayClock, Prepare, Status,
+    TransportChanges, TransportPosition,
 };
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::ControlLaneNode;
 use tutti_nodes::{FamilyNode, FdnNode};
 use tutti_types::{
-    AtomicF32, ChannelLayout, Db, Frame, Mix, SampleRate, Samples, Seconds, Tail, UnitAddr,
-    UnitParam,
+    AtomicF32, ChannelLayout, Db, Depth, Frame, Latency, Mix, SampleRate, Samples, Seconds, Tail,
+    UnitAddr, UnitParam,
 };
 
 const SR: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;
 
-fn plain() -> FdnFamily {
-    FdnFamily::default()
+fn plain() -> FdnLayout {
+    FdnLayout::default()
 }
 
-fn freezable() -> FdnFamily {
-    FdnFamily::new(8, Seconds(8.0), true).unwrap()
+fn freezable() -> FdnLayout {
+    FdnLayout::new(8, Seconds(8.0), true).unwrap()
 }
 
-fn node(design: FdnFamily, c: FdnControls) -> FdnNode {
-    prepared(FamilyNode::live(design, c), SR, BLOCK)
+fn live(layout: FdnLayout, c: FdnControls) -> FdnNode {
+    FdnNode::live(layout, c)
+}
+
+fn node(layout: FdnLayout, c: FdnControls) -> FdnNode {
+    prepared(live(layout, c), SR, BLOCK)
 }
 
 struct Rig {
@@ -82,8 +91,10 @@ fn finite(d: &Driven) -> usize {
 }
 
 /// The network's own tail at -60 dB in frames at 48 kHz.
-fn tail_of(design: &FdnFamily, c: &FdnControls) -> usize {
-    let tutti_dsp::Ring::Finite(s) = design.member(c, SR).tail(Db(-60.0)) else {
+fn tail_of(layout: &FdnLayout, c: &FdnControls) -> usize {
+    let mut network = Box::new(Network::new(SR));
+    layout.design_into(c, SR, &mut network);
+    let tutti_dsp::Ring::Finite(s) = network.tail(Db(-60.0)) else {
         panic!("finite")
     };
     (s.get() * SR.get()).ceil() as usize
@@ -97,12 +108,12 @@ fn energy(blocks: &[Driven]) -> f64 {
         .sum()
 }
 
-/// A design that cannot freeze offers ten params and a finite tail
-/// ceiling; one that can offers an eleventh, the freeze, and an unbounded
-/// ceiling (so an export spends its cap: freeze is opt-in for that reason). The
-/// addresses are the doc's: three decays at indices 0 (mid), 1 (low), 2 (high).
+/// A layout that cannot freeze offers ten params and a finite tail ceiling; one that can
+/// offers an eleventh, the freeze, and an unbounded ceiling (so an export spends its cap:
+/// freeze is opt-in for that reason). The addresses are the doc's: three decays at indices 0
+/// (mid), 1 (low), 2 (high).
 #[test]
-fn the_freeze_is_a_port_only_where_the_design_can_freeze() {
+fn the_freeze_is_a_port_only_where_the_layout_can_freeze() {
     let (p, f) = (
         node(plain(), FdnControls::DEFAULT),
         node(freezable(), FdnControls::DEFAULT),
@@ -132,11 +143,16 @@ fn the_freeze_is_a_port_only_where_the_design_can_freeze() {
         ceiling.get() as f64 / SR.get() > 8.0,
         "the room at its longest decay"
     );
+    assert_eq!(
+        p.shape().latency,
+        Latency::new(Samples(0)),
+        "a pre-delay is not latency"
+    );
 }
 
-/// The reported tail is the network's own `tail(-60 dB)` at the controls in
-/// force, and past it the output is exactly silent, at a short and a long decay
-/// (the harness's check, which also looks past the ceiling).
+/// The reported tail is the network's own `tail(-60 dB)` at the controls in force, and past
+/// it the output is exactly silent, at a short and a long decay (the harness's check, which
+/// also looks past the ceiling): the node cuts the room off where it says it rings out.
 #[test]
 fn the_reported_tail_is_the_networks_and_honest() {
     for decay in [0.3, 1.0, 2.5] {
@@ -150,10 +166,9 @@ fn the_reported_tail_is_the_networks_and_honest() {
     }
 }
 
-/// A freeze reports an unbounded tail and holds: with the input silent the level
-/// a second after the freeze and four seconds later differ by under half a dB,
-/// and the node is never parked. Thawed, it reports a finite tail again, decays
-/// and is eventually idle.
+/// A freeze reports an unbounded tail and holds: with the input silent the level a second
+/// after the freeze and four seconds later differ by under half a dB, and the node is never
+/// parked. Thawed, it reports a finite tail again, decays and is eventually idle.
 #[test]
 fn a_freeze_holds_and_a_thaw_lets_go() {
     let mut rig = Rig::new(node(freezable(), FdnControls::DEFAULT));
@@ -197,34 +212,16 @@ fn a_freeze_holds_and_a_thaw_lets_go() {
     );
 }
 
-/// A modulated decay port is read at the block's last frame, as the cell is, and
-/// the tail is reported from the longest decay the port takes in the block, so a
-/// decay that falls through the block is not reported short.
+/// The tail is reported from the longest decay a driven port takes in the block, so a decay
+/// that falls through the block is not reported short; the size and the pre-delay lengthen
+/// the tail the same way: a room that is large early in the block and small at its end, a
+/// pre-delay likewise.
 #[test]
-fn a_modulated_decay_is_read_at_the_end_and_its_peak_sets_the_tail() {
-    let x = noise(3, 4_096);
+fn the_peak_of_a_driven_control_sets_the_tail() {
     let rising: Vec<f32> = (0..BLOCK)
         .map(|i| 0.5 + 2.0 * i as f32 / (BLOCK - 1) as f32)
         .collect();
-    let mut by_port = Rig::new(node(plain(), FdnControls::DEFAULT));
-    let mut by_cell = Rig::new(node(
-        plain(),
-        FdnControls {
-            decay: [
-                Seconds(2.5),
-                FdnControls::DEFAULT.decay[1],
-                FdnControls::DEFAULT.decay[2],
-            ],
-            ..FdnControls::DEFAULT
-        },
-    ));
     let none: Option<&[f32]> = None;
-    // Port 0 is the mid decay.
-    for chunk in x.chunks(BLOCK) {
-        let a = by_port.block(chunk, &[Some(&rising)]).audio;
-        let b = by_cell.block(chunk, &[]).audio;
-        assert_eq!(a, b);
-    }
     let falling: Vec<f32> = rising.iter().rev().copied().collect();
     let mut rig = Rig::new(node(plain(), FdnControls::DEFAULT));
     let d = rig.block(
@@ -240,8 +237,6 @@ fn a_modulated_decay_is_read_at_the_end_and_its_peak_sets_the_tail() {
         "{} against the peak's",
         finite(&d)
     );
-    // The size and the pre-delay lengthen the tail the same way: a room that is
-    // large early in the block and small at its end, a pre-delay likewise.
     let big = FdnControls {
         size: Mix(1.0),
         pre_delay: Seconds(0.2),
@@ -264,13 +259,13 @@ fn a_modulated_decay_is_read_at_the_end_and_its_peak_sets_the_tail() {
     );
 }
 
-/// A real control lane in a real graph reaches the decay: with the cell at its
-/// default, a lane holding the mid decay at 6 s makes a noise burst ring far
-/// longer than one holding it at 0.3 s.
+/// A real control lane in a real graph reaches the decay: with the cell at its default, a
+/// lane holding the mid decay at 6 s makes a noise burst ring far longer than one holding it
+/// at 0.3 s.
 #[test]
 fn a_lane_driving_the_decay_changes_how_long_it_rings() {
     let ring = |decay: f32| -> f64 {
-        let node = FamilyNode::live(plain(), FdnControls::DEFAULT);
+        let node = live(plain(), FdnControls::DEFAULT);
         let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::STEREO);
         let (n, _) = g.add_with_controls(node);
         g.connect_input(0, n, 0).connect_output(n, 0, 0);
@@ -315,16 +310,16 @@ fn a_lane_driving_the_decay_changes_how_long_it_rings() {
     );
 }
 
-/// A fork starts from the values set, shares no cell and rings nothing: the
-/// harness's fork checks over every cell of both designs.
+/// A fork starts from the values set, shares no cell and rings nothing: the harness's fork
+/// checks over every cell of both layouts.
 #[test]
 fn a_fork_shares_no_cell() {
-    assert_param_fork(FamilyNode::live(plain(), FdnControls::DEFAULT));
-    assert_param_fork(FamilyNode::live(freezable(), FdnControls::DEFAULT));
+    assert_param_fork(live(plain(), FdnControls::DEFAULT));
+    assert_param_fork(live(freezable(), FdnControls::DEFAULT));
 }
 
-/// A non-finite write to any cell reads as unchanged: the render equals one that
-/// never saw it.
+/// A non-finite write to any cell reads as unchanged: the render equals one that never saw
+/// it.
 #[test]
 fn a_non_finite_write_is_ignored() {
     let c = FdnControls {
@@ -346,13 +341,286 @@ fn a_non_finite_write_is_ignored() {
     }
 }
 
-/// A live Freeverb node has the room and the damping as params, a live FDN node
-/// its eleven controls, and the FDN is stereo out.
+/// A live Freeverb node has the room and the damping as params, a live FDN node its eleven
+/// controls, and the FDN is stereo out.
 #[test]
-fn a_live_node_has_its_designs_params() {
+fn a_live_node_has_its_layouts_params() {
     let f = FamilyNode::live(FreeverbFamily, FreeverbControls::GENERAL_MIDI);
     assert_eq!(f.param_set().params().count(), 2, "the room, the damping");
-    let n = FamilyNode::live(freezable(), FdnControls::DEFAULT);
+    let n = live(freezable(), FdnControls::DEFAULT);
     assert_eq!(n.param_set().params().count(), 11);
     assert_eq!(n.shape().audio_out(), ChannelLayout::STEREO);
+}
+
+/// A cell that moves lands on the stream's grid, whatever the blocks: the decay, the size and
+/// the diffusion written between two blocks at frame 1024 (a multiple of every block below)
+/// give the same render in blocks of 1, 16, 64, 128 and 1024 (the node against itself under
+/// cuts), because the reader takes each whole at the grid and the bank's glides are on the
+/// stream's chunks, not a block's. And the move is heard.
+#[test]
+fn a_moved_cell_lands_on_the_grid_whatever_the_blocks() {
+    let x = noise(11, 4_096);
+    let render = |block: usize, moved: bool| -> Vec<Vec<f32>> {
+        let n = live(plain(), FdnControls::DEFAULT);
+        let set = n.param_set();
+        let mut n = prepared(n, SR, 1_024);
+        let mut out = vec![Vec::new(), Vec::new()];
+        for (i, chunk) in x.chunks(block).enumerate() {
+            if moved && i * block == 1_024 {
+                assert!(set.set(UnitAddr::new(UnitParam::Decay, 0), 5.0));
+                assert!(set.set(UnitParam::RoomSize, 0.9));
+                assert!(set.set(UnitParam::Diffusion, 0.2));
+            }
+            for (o, y) in out.iter_mut().zip(drive(&mut n, SR, &[chunk], &[])) {
+                o.extend(y);
+            }
+        }
+        out
+    };
+    let whole = render(1_024, true);
+    assert_ne!(whole, render(1_024, false), "the move is heard");
+    for block in [1, 16, 64, 128] {
+        assert_eq!(render(block, true), whole, "blocks of {block}");
+    }
+}
+
+/// A control the graph drives is read on the stream's 32-frame grid and at the corners of its
+/// lane, not at the block's last frame, so what is heard does not depend on how the stream is
+/// cut into blocks (the node against itself under cuts); and the lane is heard, since the
+/// cell it overrides is a different decay.
+#[test]
+fn a_driven_slow_control_is_sampled_on_the_grid_whatever_the_blocks() {
+    let len = 4_096;
+    let lane: Vec<f32> = (0..len)
+        .map(|n| 0.4 + 5.0 * n as f32 / len as f32)
+        .collect();
+    let x = noise(12, len);
+    let render = |block: usize, driven: bool| -> Vec<Vec<f32>> {
+        let mut n = prepared(live(plain(), FdnControls::DEFAULT), SR, 1_024);
+        let mut out = vec![Vec::new(), Vec::new()];
+        for (i, chunk) in x.chunks(block).enumerate() {
+            let at = i * block;
+            let l = &lane[at..at + chunk.len()];
+            let params = [driven.then_some(l)];
+            for (o, y) in out.iter_mut().zip(drive(&mut n, SR, &[chunk], &params)) {
+                o.extend(y);
+            }
+        }
+        out
+    };
+    let whole = render(1_024, true);
+    assert_ne!(whole, render(1_024, false), "the lane is heard");
+    for block in [1, 16, 64, 128] {
+        assert_eq!(render(block, true), whole, "blocks of {block}");
+    }
+}
+
+/// A reset node is a fresh one: after a noise burst and a `reset`, an impulse renders the
+/// same bits as it does on a node that never ran.
+#[test]
+fn a_reset_node_renders_as_a_fresh_one() {
+    let c = FdnControls {
+        modulation: Depth::of(0.8),
+        ..FdnControls::DEFAULT
+    };
+    let mut used = node(plain(), c);
+    for chunk in noise(5, 5_000).chunks(BLOCK) {
+        drive(&mut used, SR, &[chunk], &[]);
+    }
+    used.reset();
+    let mut fresh = node(plain(), c);
+    // Past the shortest line, so the echo is heard.
+    let mut x = vec![0.0f32; 40 * BLOCK];
+    x[0] = 1.0;
+    let (mut a, mut b) = (Vec::new(), Vec::new());
+    for chunk in x.chunks(BLOCK) {
+        a.push(drive(&mut used, SR, &[chunk], &[]));
+        b.push(drive(&mut fresh, SR, &[chunk], &[]));
+    }
+    assert_eq!(a, b);
+    assert!(a.iter().flatten().flatten().any(|&s| s != 0.0));
+}
+
+/// A node that parked on its tail wakes as a fresh one at the start of its stream: the same
+/// impulse renders the same bits the second time as the first, with the room's lines, its
+/// modulation phases and its grid all started over.
+#[test]
+fn a_parked_node_wakes_as_a_fresh_one() {
+    let c = FdnControls {
+        decay: [Seconds(0.3); 3],
+        ..FdnControls::DEFAULT
+    };
+    let mut rig = Rig::new(node(plain(), c));
+    let take = |rig: &mut Rig| -> Vec<Vec<Vec<f32>>> {
+        let mut out = vec![rig.block(&impulse(), &[]).audio];
+        out.extend((0..39).map(|_| rig.silent().audio));
+        out
+    };
+    let first = take(&mut rig);
+    let mut parked = false;
+    for _ in 0..2_000 {
+        if rig.silent().status == Some(Status::Idle) {
+            parked = true;
+            break;
+        }
+    }
+    assert!(parked, "it parks past its tail");
+    // A few blocks into the park: the wake lands at a stream position that is not 0.
+    for _ in 0..7 {
+        assert_eq!(rig.silent().status, Some(Status::Idle));
+    }
+    let second = take(&mut rig);
+    assert_eq!(first, second);
+    assert!(first.iter().flatten().flatten().any(|&s| s != 0.0));
+}
+
+/// A clone shares the cells and starts silent: it renders an impulse as a fresh node does,
+/// whatever the original had rung, and a write through the original's `ParamSet` is the
+/// clone's too.
+#[test]
+fn a_clone_starts_silent_and_shares_the_cells() {
+    let mut used = node(plain(), FdnControls::DEFAULT);
+    for chunk in noise(6, 6_000).chunks(BLOCK) {
+        drive(&mut used, SR, &[chunk], &[]);
+    }
+    let mut clone = used.clone();
+    let mut fresh = node(plain(), FdnControls::DEFAULT);
+    // Past the shortest line, so the echo is heard.
+    let mut x = vec![0.0f32; 40 * BLOCK];
+    x[0] = 1.0;
+    let mut heard = false;
+    for chunk in x.chunks(BLOCK) {
+        let (a, b) = (
+            drive(&mut clone, SR, &[chunk], &[]),
+            drive(&mut fresh, SR, &[chunk], &[]),
+        );
+        heard |= a.iter().flatten().any(|&s| s != 0.0);
+        assert_eq!(a, b);
+    }
+    assert!(heard);
+    assert!(used.param_set().set(UnitParam::RoomSize, 0.9));
+    assert_eq!(clone.param_set().get(UnitParam::RoomSize), Some(0.9));
+}
+
+/// A size on the move does not stretch the decay: the gains follow the length the lines have
+/// while they shrink half a frame a chunk (about 7 s from size 1 to 0), so the size-0
+/// network's tail is the tail. A node whose lines kept the gains designed for the target, 3
+/// times too long a trip at first, would ring 3 times as long as it reports and be cut off
+/// about 30 dB under the burst. Here a 1 s room at size 1 hears a burst, the size drops to 0
+/// and the input is silent; the node parks (it is idle in the end), and every one of the last
+/// 8 blocks it renders before parking is under 60 dB below the burst (it measures -72 dB; with
+/// the lines' gains left as designed for the target it parks at -32 dB): what it cuts
+/// off is under the floor.
+#[test]
+fn a_size_on_the_move_is_not_parked_while_it_still_rings() {
+    let c = FdnControls {
+        decay: [Seconds(1.0); 3],
+        size: Mix(1.0),
+        modulation: Depth::of(0.0),
+        ..FdnControls::DEFAULT
+    };
+    let mut rig = Rig::new(node(plain(), c));
+    let cells = rig.node.param_set();
+    let rms = |d: &Driven| -> f64 {
+        let n: usize = d.audio.iter().map(Vec::len).sum();
+        (energy(std::slice::from_ref(d)) / n as f64).sqrt()
+    };
+    let mut burst = Vec::new();
+    for chunk in noise(21, 24_000).chunks(BLOCK) {
+        burst.push(rms(&rig.block(chunk, &[])));
+    }
+    let reference = burst[burst.len() - 8..].iter().sum::<f64>() / 8.0;
+    assert!(reference > 0.0);
+    assert!(cells.set(UnitParam::RoomSize, 0.0));
+    let mut levels = Vec::new();
+    let mut parked = false;
+    for _ in 0..(20.0 * SR.get() / BLOCK as f64) as usize {
+        let d = rig.silent();
+        if d.status == Some(Status::Idle) {
+            parked = true;
+            break;
+        }
+        levels.push(rms(&d));
+    }
+    assert!(parked, "it parks in the end");
+    assert!(levels.len() >= 8, "it rang for {} blocks", levels.len());
+    let last = levels[levels.len() - 8..]
+        .iter()
+        .copied()
+        .fold(0.0, f64::max);
+    let db = 20.0 * (last / reference).log10();
+    assert!(db < -60.0, "{db} dB under the burst when it parked");
+}
+
+/// A node frozen from the start with no input, then thawed, renders its ring-out in silence
+/// and parks: and what wakes is a fresh node, bit for bit. The kernel has rendered all along
+/// without hearing a sample, so a park that resets only a node that heard input leaves its
+/// grid, its modulation phases and its glides where the thaw left them.
+#[test]
+fn a_node_frozen_without_input_wakes_fresh_after_the_thaw_parks() {
+    let frozen = FdnControls {
+        freeze: true,
+        ..FdnControls::DEFAULT
+    };
+    let mut rig = Rig::new(node(freezable(), frozen));
+    let cells = rig.node.param_set();
+    for _ in 0..500 {
+        assert_eq!(
+            rig.silent().status,
+            Some(Status::Modified),
+            "frozen: never parked"
+        );
+    }
+    assert!(cells.set(UnitParam::Freeze, 0.0));
+    let mut parked = false;
+    for _ in 0..(20.0 * SR.get() / BLOCK as f64) as usize {
+        if rig.silent().status == Some(Status::Idle) {
+            parked = true;
+            break;
+        }
+    }
+    assert!(parked, "it parks past the thawed tail");
+    let take = |rig: &mut Rig| -> Vec<Vec<Vec<f32>>> {
+        let mut out = vec![rig.block(&impulse(), &[]).audio];
+        out.extend((0..39).map(|_| rig.silent().audio));
+        out
+    };
+    let mut fresh = Rig::new(node(freezable(), FdnControls::DEFAULT));
+    let woken = take(&mut rig);
+    assert_eq!(woken, take(&mut fresh));
+    assert!(woken.iter().flatten().flatten().any(|&s| s != 0.0));
+}
+
+/// The declared tail is a figure the graph takes or it is unbounded: the default 8 s room at
+/// 192 kHz declares a finite ceiling within `MAX_NODE_TAIL` (and under 2 million frames:
+/// nothing stretches it), a 19 s room at 48 kHz too, and the longest layout
+/// the type allows (60 s at 192 kHz, 11.5 million frames and more) declares `Tail::Unbounded`
+/// and not a finite figure the graph would refuse or count as never decaying. The node still
+/// narrows an unbounded ceiling to what rings: a thawed room reports and parks on its own.
+#[test]
+fn the_declared_tail_is_within_the_graphs_bound_or_unbounded() {
+    let at = |layout: FdnLayout, rate: SampleRate| {
+        prepared(live(layout, FdnControls::DEFAULT), rate, BLOCK)
+            .shape()
+            .tail
+    };
+    let Tail::Finite(default) = at(plain(), SampleRate::SR_192K) else {
+        panic!("a finite ceiling")
+    };
+    assert!(default <= MAX_NODE_TAIL, "{default:?}");
+    assert!(default.get() as f64 > 8.0 * 192_000.0);
+    assert!(
+        default.get() < 2_000_000,
+        "nothing stretches the ceiling: {default:?}"
+    );
+    let nineteen = FdnLayout::new(8, Seconds(19.0), false).unwrap();
+    let Tail::Finite(long) = at(nineteen, SampleRate::SR_48K) else {
+        panic!("a finite ceiling")
+    };
+    assert!(
+        long <= MAX_NODE_TAIL && long.get() as f64 > 19.0 * 48_000.0,
+        "{long:?}"
+    );
+    let cap = FdnLayout::new(16, MaxDecay::CAP, false).unwrap();
+    assert_eq!(at(cap, SampleRate::SR_192K), Tail::Unbounded);
 }

@@ -939,21 +939,15 @@ impl ParamState {
 
     /// State for **one** port at blocks of up to `max` frames, clamping to
     /// `ranges`: an edge gain's lane (doc 013, "Edge gain"), which runs the
-    /// param port's step on its own. `resumed` is for a lane that has
-    /// already run a block undriven: it is not on its first block, so a
-    /// source connected now fades in as a connection to a running port does,
-    /// rather than starting at its value.
-    pub(crate) fn lane(
-        max: usize,
-        declick: usize,
-        ranges: Arc<ParamRanges>,
-        resumed: bool,
-    ) -> Self {
-        let mut state = Self::new(1, max, declick, Some(ranges));
-        if resumed {
-            state.ports[0].fresh = false;
-        }
-        state
+    /// param port's step on its own.
+    pub(crate) fn lane(max: usize, declick: usize, ranges: Arc<ParamRanges>) -> Self {
+        Self::new(1, max, declick, Some(ranges))
+    }
+
+    /// The lane has run a block undriven: its first block under a source is
+    /// a connection to a running port, not a first block.
+    pub(crate) fn resume(&mut self) {
+        self.ports[0].fresh = false;
     }
 
     /// Whether the state can serve blocks of up to `max` frames, declicking

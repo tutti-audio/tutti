@@ -142,6 +142,16 @@ pub(super) struct Reprepare {
     spec: GraphSpec,
     shapes: Shapes,
     pending: BTreeMap<NodeKey, Box<dyn Node>>,
+    /// Whether the sample rate changes: the resume carries no time-based
+    /// state.
+    rate_changed: bool,
+}
+
+/// What a re-prepare's resume commit tells the stager.
+#[derive(Clone, Copy)]
+pub(super) struct Resume {
+    /// Whether time-based state carries (the rate stands).
+    pub(super) carry: bool,
 }
 
 /// Write `shape`'s latency and tail into `key`'s spec and shape entry — the
@@ -276,6 +286,7 @@ impl Editor {
             };
             return Err(CommitError::Poisoned { cause });
         }
+        let rate_changed = self.prepare.sample_rate() != prepare.sample_rate();
         let units = self.life.plan().map_or(0, |p| p.units().len());
         let suspend = Commit::suspend(self.link.next_seq(), prepare, units);
         self.link.send_suspend(suspend);
@@ -286,6 +297,7 @@ impl Editor {
                 spec: self.spec.clone(),
                 shapes: self.shapes.clone(),
                 pending,
+                rate_changed,
             }),
         };
         Ok(())
@@ -310,11 +322,16 @@ impl Editor {
         self.life = Lifecycle::idle(sent);
         self.life.clear_committed();
         let rep = *reprepare;
+        let resume = Resume {
+            carry: !rep.rate_changed,
+        };
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.finish_reprepare(returned, rep)
         }));
         match outcome {
-            Ok(Ok((plan, resume, units, weights))) => self.send(plan, resume, units, &weights),
+            Ok(Ok((plan, delta, units, weights))) => {
+                self.send(plan, delta, units, &weights, Some(resume));
+            }
             Ok(Err(e)) => {
                 self.life = Lifecycle::Poisoned {
                     cause: format!(
@@ -344,6 +361,7 @@ impl Editor {
             mut spec,
             mut shapes,
             pending,
+            rate_changed: _,
         } = rep;
         let base = self.life.plan().cloned();
         let prepare = self.prepare;
