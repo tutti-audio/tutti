@@ -4,10 +4,10 @@
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
-    AutomationMode, BypassWrite, ContentScale, Control, EditorPresence, EditorWindow, Features,
-    KeyEvent, KeyUse, LoadedPlugin, ModifierConvention, Normalized, OwnBypass, ParamEdit, ParamId,
-    ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginError, PluginResult, Preset,
-    PresetId, RenderMode, RenderModeSupport, Request, StateUse, WindowHandle,
+    AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
+    KeyUse, LoadedPlugin, ModifierConvention, Normalized, ParamEdit, ParamId, ParameterInfo,
+    PluginBus, PluginClass, PluginDescriptor, PluginError, PluginResult, Preset, PresetId,
+    RenderMode, RenderModeSupport, Request, StateUse, WindowHandle,
 };
 
 use crate::error::Vst2Error;
@@ -93,22 +93,10 @@ impl Control for Vst2Loaded {
             tail: self.tail(main),
             features: self.features(),
             probed: probed::VST2,
-            // A plugin that answers `canDo("bypass")` has the soft bypass the
-            // host writes with `effSetBypass`; VST2 has no controller table.
-            own_bypass: self.soft_bypass.then_some(OwnBypass::Unlisted),
+            // VST2 has no opcode that reads the bypass back, so the host cannot
+            // confirm a write of `effSetBypass`: the executor's bypass serves it.
+            own_bypass: None,
             assignments: Vec::new(),
-        }
-    }
-
-    /// `effSetBypass`: VST2's bypass is an opcode, not a parameter. A plugin that
-    /// does not claim it is left alone; one that refuses a write loses it.
-    fn set_bypassed(&mut self, main: MainThreadMarker, bypassed: bool) -> BypassWrite {
-        if !self.soft_bypass {
-            BypassWrite::NoOwnBypass
-        } else if self.set_bypass(main, bypassed) {
-            BypassWrite::Sent
-        } else {
-            BypassWrite::Lost
         }
     }
 

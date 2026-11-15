@@ -33,7 +33,7 @@ use crate::{
     PluginError, PluginResult, PluginTail, Preset, PresetId, ProcessContext, ProcessOutput,
     ProcessWake, SampleRate, Samples, WindowHandle,
 };
-use crate::{Delivered, ParamEdit, bypass_parameter, bypass_value};
+use crate::{Delivered, ParamEdit, bypass_parameter, bypass_value, is_bypassed};
 use crate::{
     FdId, MainThreadMarker, Prepare, Ready, RenderMode, RenderModeSupport, Request, RescanScope,
     RestartRules, StateUse, TimerId, TrackInfo, Wakeups,
@@ -88,6 +88,14 @@ pub trait Control: EditorWindow {
     /// it. The host calls it when the node's mode changes, never per block.
     fn set_bypassed(&mut self, main: MainThreadMarker, bypassed: bool) -> BypassWrite {
         write_bypass_parameter(self, main, bypassed).unwrap_or(BypassWrite::NoOwnBypass)
+    }
+
+    /// Whether the plugin's own bypass is on now, read from the plugin: `None`
+    /// when it has none. The default reads the bypass parameter; AU's property
+    /// overrides it.
+    fn bypassed(&self, main: MainThreadMarker) -> Option<bool> {
+        let id = bypass_parameter(&self.parameters(main))?;
+        self.parameter(main, id).map(is_bypassed)
     }
 
     /// How many parameters the plugin declares: at least `parameters().len()`
@@ -565,6 +573,10 @@ impl<W: Wraps> Control for W {
     fn set_bypassed(&mut self, main: MainThreadMarker, bypassed: bool) -> BypassWrite {
         write_bypass_parameter(self, main, bypassed)
             .unwrap_or_else(|| self.plugin_mut().set_bypassed(main, bypassed))
+    }
+
+    fn bypassed(&self, main: MainThreadMarker) -> Option<bool> {
+        self.plugin().bypassed(main)
     }
 
     fn parameter_count(&self, main: MainThreadMarker) -> usize {

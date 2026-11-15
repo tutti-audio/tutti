@@ -41,7 +41,7 @@ use crate::MainThreadControl;
 use crate::ParameterChangeSink;
 use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health, InProcess,
-    OwnBypass, StateError,
+    OwnBypass, StateError, bypass_value, is_bypassed,
 };
 use tutti_plugin_types::{
     Normalized, ParamId, ParameterInfo, PluginFailure, RenderMode, TerminationReason,
@@ -161,17 +161,36 @@ where
         });
     }
 
-    /// The plugin's own bypass, as [`Control::set_bypassed`] writes it (a
-    /// parameter for VST3 and CLAP, a unit property for AU). Run on the main
-    /// thread: off it, by its next tick, and `false` if that does not come
-    /// within the deadline.
-    fn set_bypassed(&self, _site: OwnBypass, bypassed: bool) -> BypassWrite {
-        self.on_main(move |main, instance| {
-            instance.control().map_or(BypassWrite::Lost, |control| {
-                control.set_bypassed(main, bypassed)
-            })
-        })
-        .unwrap_or(BypassWrite::Lost)
+    /// The plugin's own bypass at `site`: a parameter like any other (so it is
+    /// skipped while the instance is locked, and the read back finds out), a
+    /// property through [`Control::set_bypassed`], run on the main thread (off
+    /// it, by its next tick, and lost if that does not come within the
+    /// deadline).
+    fn set_bypassed(&self, site: OwnBypass, bypassed: bool) -> BypassWrite {
+        match site {
+            OwnBypass::Parameter(id) => {
+                self.set_parameter_value(id, bypass_value(bypassed));
+                BypassWrite::Sent
+            }
+            OwnBypass::Property => self
+                .on_main(move |main, instance| {
+                    instance.control().map_or(BypassWrite::Lost, |control| {
+                        control.set_bypassed(main, bypassed)
+                    })
+                })
+                .unwrap_or(BypassWrite::Lost),
+        }
+    }
+
+    /// The bypass the plugin holds now: its parameter's value, or the property
+    /// ([`Control::bypassed`]).
+    fn bypassed(&self, site: OwnBypass) -> Option<bool> {
+        match site {
+            OwnBypass::Parameter(id) => self.parameter_value(id).map(is_bypassed),
+            OwnBypass::Property => self
+                .on_main(|main, instance| instance.control()?.bypassed(main))
+                .flatten(),
+        }
     }
 
     /// The format's own conversion ([`Control::parameter_plain`]).

@@ -184,9 +184,6 @@ pub struct Vst2Loaded {
     /// session restore. Sampling later reports the *live* value as the default,
     /// which makes "default" follow the user's last knob move.
     pub(crate) initial_values: Vec<f32>,
-    /// The plugin advertises the soft bypass and took `effSetBypass`, probed once
-    /// at load.
-    pub(crate) soft_bypass: bool,
     /// The host's end of the plugin's callbacks, shared with the plugin through
     /// the `Host` it was loaded with.
     pub(crate) host: Arc<HostState>,
@@ -455,13 +452,6 @@ impl Vst2Loaded {
         let initial_values: Vec<f32> = (0..instance.read_num_params().max(0))
             .map(|i| instance.get_parameter(i).unwrap_or(0.0))
             .collect();
-        // Soft bypass is claimed only by a plugin that advertises it and takes a
-        // write: a harmless `effSetBypass(false)` before anything else reaches it,
-        // so a plugin that advertises and refuses keeps the host's bypass.
-        let soft_bypass = matches!(
-            instance.can_do(main, vst::plugin::CanDo::Bypass),
-            vst::api::Supported::Yes
-        ) && instance.set_bypass(main, false);
         metadata.has_editor = instance.has_editor();
         let descriptor = crate::control::descriptor_of(&metadata);
         if let Some(id) = chosen
@@ -484,7 +474,6 @@ impl Vst2Loaded {
         Ok(Self {
             instance,
             initial_values,
-            soft_bypass,
             host,
             param_rx: param_q,
             audio: Some(AudioSide {
@@ -633,15 +622,16 @@ impl Vst2Loaded {
     }
 
     /// Returns `true` if the plugin advertises its own soft bypass via
-    /// `effCanDo("bypass")` and took the `effSetBypass(false)` the load probed it
-    /// with.
+    /// `effCanDo("bypass")`.
     ///
     /// Ask before [`set_bypass`](Self::set_bypass): `Maybe` is the common
     /// answer and is not a yes. A plugin that does not advertise one has to be
     /// bypassed by the host instead, by not routing audio through it.
     #[must_use]
-    pub fn supports_soft_bypass(&self, _main: MainThreadMarker) -> bool {
-        self.soft_bypass
+    pub fn supports_soft_bypass(&self, main: MainThreadMarker) -> bool {
+        use vst::api::Supported;
+        use vst::plugin::CanDo;
+        matches!(self.instance.can_do(main, CanDo::Bypass), Supported::Yes)
     }
 
     /// Asks the plugin to enter or leave its own soft bypass.

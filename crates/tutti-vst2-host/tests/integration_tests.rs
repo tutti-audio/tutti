@@ -1065,25 +1065,12 @@ fn soft_bypass_support_is_advertised_not_assumed() {
 
     reset_switches(&path);
     set_can_do(&path, can_do::YES, 0);
-    set_accept_soft_bypass(&path, true);
     let advertising = Active::load(&path, SAMPLE_RATE, BLOCK).expect("probe should load");
     assert!(
         advertising.loaded().supports_soft_bypass(main_thread()),
-        "the probe answered effCanDo(bypass) = 1 and took effSetBypass, and the host ignored it"
+        "the probe answered effCanDo(bypass) = 1 and the host ignored it"
     );
     drop(advertising);
-
-    // Advertising is not enough: the load probes the opcode, and a plugin that
-    // refuses it keeps the host's own bypass.
-    reset_switches(&path);
-    set_can_do(&path, can_do::YES, 0);
-    set_accept_soft_bypass(&path, false);
-    let refusing = Active::load(&path, SAMPLE_RATE, BLOCK).expect("probe should load");
-    assert!(
-        !refusing.loaded().supports_soft_bypass(main_thread()),
-        "the probe advertises the soft bypass and refuses it; the host relied on it"
-    );
-    drop(refusing);
 
     reset_switches(&path);
     set_can_do(&path, can_do::MAYBE, 0);

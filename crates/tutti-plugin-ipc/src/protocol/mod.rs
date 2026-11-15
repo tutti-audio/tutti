@@ -109,8 +109,7 @@ pub(crate) mod wire;
 ///   extension and so could not open a link whose target has another one.
 /// - **Version 41** adds to a plugin's wiring whether it has a bypass of its own
 ///   and the controller table it declares, to a parameter its role (now a
-///   `ControlRole`) and its overview mark, and the host's `SetBypassed` write,
-///   appended after the last host message.
+///   `ControlRole`) and its overview mark.
 pub const PROTOCOL_VERSION: u32 = 41;
 
 /// Largest control-socket frame body either end will allocate for, in bytes.

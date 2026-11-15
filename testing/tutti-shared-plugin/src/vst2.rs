@@ -150,17 +150,9 @@ impl Plugin for Shared {
     }
     fn can_do(&self, can_do: CanDo) -> api::Supported {
         match can_do {
-            CanDo::ReceiveMidiEvent | CanDo::Bypass => api::Supported::Yes,
+            CanDo::ReceiveMidiEvent => api::Supported::Yes,
             _ => api::Supported::Maybe,
         }
-    }
-    /// `effSetBypass`: the host's write of the bypass, told to the transcript as
-    /// `core::BYPASS`'s point (core, "Control metadata").
-    fn set_bypass(&mut self, bypass: bool) -> bool {
-        let value = if bypass { 1.0 } else { 0.0 };
-        self.core.log_set_param(core::BYPASS, value);
-        self.core.set_param(core::BYPASS, value);
-        true
     }
     fn get_tail_size(&self) -> isize {
         self.core.tail_samples() as isize

@@ -6,16 +6,21 @@ use crate::{Normalized, ParamFlags, ParamId, ParameterInfo};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Where a plugin keeps a bypass of its own.
+/// Where a plugin keeps a bypass of its own: only a bypass the host can read
+/// back is claimed, so a write is never assumed applied. VST2's `effSetBypass`
+/// has no read, so a VST2 plugin claims none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum OwnBypass {
     /// A parameter the plugin flags as its bypass (VST3 `kIsBypass`, CLAP
     /// `CLAP_PARAM_IS_BYPASS`): `1` bypassed, `0` processing. Readable.
     Parameter(ParamId),
-    /// Not a parameter: AU's `kAudioUnitProperty_BypassEffect`, VST2's
-    /// `effSetBypass`. Written by the format's host, not read back.
-    Unlisted,
+    /// A property of the plugin that is not a parameter: AU's
+    /// `kAudioUnitProperty_BypassEffect`. The format's host writes and reads it
+    /// ([`Control::set_bypassed`](crate::Control::set_bypassed),
+    /// [`Control::bypassed`](crate::Control::bypassed)), so it is claimed only
+    /// where the host reaches the plugin on the main thread (not served).
+    Property,
 }
 
 /// What a write of the plugin's own bypass came to.

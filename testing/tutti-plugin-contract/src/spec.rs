@@ -65,9 +65,10 @@ pub enum Bypass {
     /// A listed parameter flagged as the bypass: VST3 `kIsBypass`, CLAP
     /// `CLAP_PARAM_IS_BYPASS`.
     Parameter,
-    /// No parameter: AU `kAudioUnitProperty_BypassEffect`, VST2 `effSetBypass`.
-    /// The plugin tells the host's write as [`BYPASS_ID`]'s point.
-    Unlisted,
+    /// No parameter: AU `kAudioUnitProperty_BypassEffect`, which the host reads
+    /// back. The plugin tells the host's write as [`BYPASS_ID`]'s point. VST2's
+    /// `effSetBypass` has no read, so a VST2 plugin claims no bypass of its own.
+    Property,
 }
 
 /// The controller the plugin maps to a parameter, in the formats that carry a
@@ -386,7 +387,7 @@ pub const VST2: Surface = Surface {
     tone: TONE_NORMALIZED,
     selects_tail: true,
     infinite_tail: None,
-    bypass: Bypass::Unlisted,
+    bypass: Bypass::Property,
     aux_group: "",
     roles: &[],
     overview: &[],
@@ -452,7 +453,7 @@ pub const AU: Surface = Surface {
     tone: TONE_LINEAR,
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
-    bypass: Bypass::Unlisted,
+    bypass: Bypass::Property,
     aux_group: "Filter",
     roles: &[],
     overview: &[Param::Level, Param::Tone],

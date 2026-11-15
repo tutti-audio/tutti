@@ -8,7 +8,7 @@
 
 use dpi::Size;
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, ContentScale,
+    AnyThread, AutomationMode, AutomationModeError, BlockCounts, ContentScale,
     Control, Delivered, EditorCapabilities, EditorPresence, EditorWindow, Features, Health,
     LoadedPlugin, MainThreadMarker, Normalized, OwnBypass, ParamId, ParameterInfo,
     PluginDescriptor, PluginError, PluginFailure, PluginResult, Preset, PresetId, ProcessWake,
@@ -75,15 +75,6 @@ macro_rules! served_control {
             /// `Features::RENDER_MODE` says), and never needs a restart.
             fn set_render_mode(&self, mode: RenderMode) -> bool {
                 !self.link.bridge.is_crashed() && self.link.bridge.set_render_mode_rt(mode)
-            }
-
-            /// The plugin's own bypass, written by the server as its format does
-            /// ([`HostMessage::SetBypassed`](crate::HostMessage::SetBypassed)).
-            fn set_bypassed(&self, _site: OwnBypass, bypassed: bool) -> BypassWrite {
-                match self.link.bridge.set_bypassed_rt(bypassed) {
-                    Delivered::Yes => BypassWrite::Sent,
-                    _ => BypassWrite::Lost,
-                }
             }
 
             /// Delivered to both the audio subprocess and the in-process GUI
@@ -252,13 +243,6 @@ macro_rules! served_control {
 
             fn current_preset(&mut self, _main: MainThreadMarker) -> Option<PresetId> {
                 self.link.bridge.current_preset()
-            }
-
-            fn set_bypassed(&mut self, _main: MainThreadMarker, bypassed: bool) -> BypassWrite {
-                match self.link.loaded.own_bypass {
-                    Some(site) => AnyThread::set_bypassed(self, site, bypassed),
-                    None => BypassWrite::NoOwnBypass,
-                }
             }
 
             /// Advisory only: the outcome `AnyThread::set_automation_mode`

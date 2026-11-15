@@ -2476,72 +2476,61 @@ impl Graph {
 
     /// Writes the bypass of the plugin hosted at `node`, if any, to what the
     /// node's mode says: on every change of mode, and when a plugin enters the
-    /// node (an insert, a host, a replacement or a reload), so a plugin never
-    /// plays unbypassed under a `Bypassed` node. A plugin without a bypass of
-    /// its own is left alone. The write is not assumed applied:
-    /// [`reconcile_own_bypass`](Self::reconcile_own_bypass) reads it back.
+    /// node (an insert, a host, a replacement or a reload). A plugin without a
+    /// bypass of its own is left alone. The write is not assumed applied:
+    /// [`reconcile_own_bypass`](Self::reconcile_own_bypass) compares on every
+    /// tick, and a write that was lost is written again there.
     #[cfg(feature = "plugin")]
     pub(crate) fn write_own_bypass(&self, node: NodeKey) {
-        if let (Some(hosted), Ok(mode)) = (self.plugins.get(&node), self.mode(node)) {
-            hosted.bypass_check.store(
-                crate::plugin::JUST_WRITTEN,
-                std::sync::atomic::Ordering::Relaxed,
-            );
-            let _ = hosted.handle.set_bypassed(mode == NodeMode::Bypassed);
+        let (Some(hosted), Ok(mode)) = (self.plugins.get(&node), self.mode(node)) else {
+            return;
+        };
+        let bypassed = mode == NodeMode::Bypassed;
+        let _ = hosted.handle.set_bypassed(bypassed);
+        // A served plugin is compared with its mirror, which learns what the host
+        // wrote here as the plugin does of its own accord (it reports a change).
+        if let Some(tutti_plugin_types::OwnBypass::Parameter(id)) =
+            hosted.handle.loaded().own_bypass
+        {
+            hosted
+                .mirror
+                .report(id, tutti_plugin_types::bypass_value(bypassed));
         }
     }
 
     /// Makes every hosted plugin's own bypass the node's mode, on the control
-    /// tick: reads the bypass back and writes the mode again where the plugin
-    /// differs (a write that was lost or refused, a restored state, automation
-    /// or the plugin's editor), counting each
-    /// ([`PluginHandle::bypass_writes_unapplied`](tutti_plugin_host::PluginHandle::bypass_writes_unapplied)).
-    /// An in-process plugin is read every tick; a served one's read is a round
-    /// trip, so it is read only after a write, a restore or an install, and not
-    /// on the tick right after a write (the command may not have landed). A
-    /// bypass that cannot be read (AU's, VST2's) stands as written.
+    /// tick, with no round trip: an in-process plugin's bypass is read (a write is
+    /// given one tick, for a plugin that applies it at its next block) and a served plugin's is read from its mirrored parameter
+    /// values. Where the plugin differs the mode is written again
+    /// ([`PluginHandle::reconcile_bypass`](tutti_plugin_host::PluginHandle::reconcile_bypass)),
+    /// which covers a write that was lost, a restored state, automation and the
+    /// plugin's editor, and counts each episode once. A plugin that is not
+    /// healthy is left alone.
     ///
     /// Until a plugin is back in the node's mode the executor does not bypass
-    /// its node, so it can play processed audio under `Bypassed` for the ticks
-    /// that take; a plugin that never takes the write keeps being re-asserted
-    /// and counted.
+    /// its node, so it can play processed audio under `Bypassed` for that long:
+    /// a tick or two for an in-process plugin, until the plugin's report
+    /// reaches the mirror for a served one. A plugin that never takes the write
+    /// keeps its node unbypassed and is retried at a growing interval.
     #[cfg(feature = "plugin")]
     pub(crate) fn reconcile_own_bypass(&self) {
-        use crate::plugin::{CLEAN, DUE, JUST_WRITTEN};
         for (&node, hosted) in &self.plugins {
             let handle = &hosted.handle;
-            if handle.loaded().own_bypass.is_none() {
+            let Some(site) = handle.loaded().own_bypass else {
                 continue;
-            }
-            let state = hosted
-                .bypass_check
-                .load(std::sync::atomic::Ordering::Relaxed);
-            if handle.server_pid().is_some() && state == CLEAN {
+            };
+            if !hosted.is_healthy() {
                 continue;
             }
             let Ok(mode) = self.mode(node) else { continue };
-            let want = mode == NodeMode::Bypassed;
-            if state == JUST_WRITTEN {
-                hosted
-                    .bypass_check
-                    .store(DUE, std::sync::atomic::Ordering::Relaxed);
-                continue;
-            }
-            match handle.bypassed() {
-                Some(now) if now == want => hosted
-                    .bypass_check
-                    .store(CLEAN, std::sync::atomic::Ordering::Relaxed),
-                Some(_) => {
-                    handle.count_unapplied_bypass();
-                    hosted
-                        .bypass_check
-                        .store(JUST_WRITTEN, std::sync::atomic::Ordering::Relaxed);
-                    let _ = handle.set_bypassed(want);
-                }
-                None => hosted
-                    .bypass_check
-                    .store(CLEAN, std::sync::atomic::Ordering::Relaxed),
-            }
+            let mirrored = match site {
+                tutti_plugin_types::OwnBypass::Parameter(id) if hosted.mirror.is_ready() => hosted
+                    .mirror
+                    .position(id)
+                    .map(|at| tutti_plugin_types::is_bypassed(hosted.mirror.value_at(at))),
+                _ => None,
+            };
+            handle.reconcile_bypass(mode == NodeMode::Bypassed, mirrored);
         }
     }
 

@@ -255,7 +255,9 @@ pub fn parameters_listed<F: Format>() {
 /// `set_bypassed(false)` tells it `0`, each in the next block, loaded or not
 /// (the plugin's own transcript is the witness). Where the format keeps the
 /// bypass in a parameter (VST3, CLAP) it is that parameter's point; an AU's is
-/// its `BypassEffect` property, which the plugin tells as the same point.
+/// its `BypassEffect` property, which the plugin tells as the same point. The
+/// host reads the bypass back (a bypass it cannot read is not claimed), so every
+/// write is confirmed against the plugin.
 /// Spec: clap.ext.params.get_info, vst3.IEditController.getParameterInfo, vst2.eff.SetBypass, au.prop.BypassEffect
 pub fn own_bypass_is_declared_and_written<F: Format>() {
     let main = main_thread();
@@ -264,12 +266,12 @@ pub fn own_bypass_is_declared_and_written<F: Format>() {
             .own_bypass
             .unwrap_or_else(|| panic!("{}: the {when} plugin has its own bypass", F::NAME));
         // The bypass lives where the format keeps it: a parameter the spec lists
-        // (VST3, CLAP), or not a parameter at all (AU, VST2).
+        // (VST3, CLAP), or not a parameter at all (AU).
         match (F::SURFACE.bypass, site) {
             (spec::Bypass::Parameter, OwnBypass::Parameter(id)) => {
                 assert_eq!(id, spec::BYPASS_ID, "{}: the bypass parameter", F::NAME);
             }
-            (spec::Bypass::Unlisted, OwnBypass::Unlisted) => {}
+            (spec::Bypass::Property, OwnBypass::Property) => {}
             (want, got) => panic!("{}: the bypass is {got:?}, the spec says {want:?}", F::NAME),
         }
     };
@@ -284,6 +286,12 @@ pub fn own_bypass_is_declared_and_written<F: Format>() {
             F::NAME
         );
         a.silent(BLOCK);
+        assert_eq!(
+            a.controller().bypassed(main),
+            Some(bypassed),
+            "{}: the plugin reads its bypass back as written",
+            F::NAME
+        );
         let told = transcript::<F, _>(a.controller_mut());
         let last = told
             .events
@@ -317,7 +325,7 @@ pub fn the_bypass_parameter_is_not_a_listed_control<F: Format>() {
             "{}: the plugin lists its bypass parameter, flagged",
             F::NAME
         ),
-        spec::Bypass::Unlisted => assert_eq!(
+        spec::Bypass::Property => assert_eq!(
             flagged,
             [],
             "{}: the plugin lists no bypass parameter",

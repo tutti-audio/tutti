@@ -108,7 +108,6 @@
 //! mode, or if it was never told.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 use tutti_plugin_types::MainThreadMarker;
@@ -766,13 +765,6 @@ impl Graveyard {
     }
 }
 
-/// The plugin's own bypass is the node's mode, as far as the host knows.
-pub(crate) const CLEAN: u8 = 0;
-/// The plugin's own bypass is to be read back and made the node's mode.
-pub(crate) const DUE: u8 = 1;
-/// The bypass was written on this tick: its read waits for the next.
-pub(crate) const JUST_WRITTEN: u8 = 2;
-
 /// What the session keeps for one hosted plugin. See the module docs.
 pub(crate) struct HostedPlugin {
     /// Whether the editor was opened through the view and not closed since:
@@ -791,9 +783,6 @@ pub(crate) struct HostedPlugin {
     status: PluginLiveness,
     /// Told a render mode since it was added (or crossfaded in).
     pub(crate) told: bool,
-    /// Whether the plugin's own bypass is to be read back and made the node's
-    /// mode ([`CLEAN`], [`DUE`], [`JUST_WRITTEN`]).
-    pub(crate) bypass_check: AtomicU8,
     snapshot: Option<PluginState>,
     /// When the snapshot's capture was asked for.
     snapshot_from: Option<Instant>,
@@ -935,7 +924,6 @@ impl HostedPlugin {
             hang: HangDetector::default(),
             status: PluginLiveness::Healthy,
             told: false,
-            bypass_check: AtomicU8::new(DUE),
             snapshot: None,
             snapshot_from: None,
             withheld: None,
@@ -952,6 +940,11 @@ impl HostedPlugin {
             param_read: Some(read),
             mirror_token: Arc::new(()),
         }
+    }
+
+    /// Whether the plugin answers normally: its own bypass is compared only then.
+    pub(crate) fn is_healthy(&self) -> bool {
+        matches!(self.status, PluginLiveness::Healthy)
     }
 
     pub(crate) fn with_controls(mut self, controls: PluginControls) -> Self {
@@ -1075,8 +1068,6 @@ impl HostedPlugin {
     /// plugin's own would arrive: a load the host made moves values the plugin
     /// may not report, and the next `Phase::Plugins` reads them again.
     pub(crate) fn refresh_values(&self) {
-        // A load may have moved the bypass too.
-        self.bypass_check.store(DUE, Ordering::Relaxed);
         queue(&self.notices, Notice::Refresh(PluginRefresh::ParamValues));
     }
 

@@ -290,7 +290,7 @@ impl Control for AuLoaded {
             probed: probed::AU,
             // A unit without `kAudioUnitProperty_BypassEffect` (every
             // instrument) refuses the read.
-            own_bypass: self.is_bypassed().is_ok().then_some(OwnBypass::Unlisted),
+            own_bypass: self.is_bypassed().is_ok().then_some(OwnBypass::Property),
             // A unit that does not implement the mapping family (most effects)
             // refuses the read and declares none.
             assignments: self
@@ -375,12 +375,17 @@ impl Control for AuLoaded {
             .collect()
     }
 
+    /// What `kAudioUnitProperty_BypassEffect` holds now.
+    fn bypassed(&self, _main: MainThreadMarker) -> Option<bool> {
+        self.is_bypassed().ok()
+    }
+
     /// Writes `kAudioUnitProperty_BypassEffect`: an AU's bypass is a unit
-    /// property, never a parameter. `false` for a unit without one.
+    /// property, never a parameter. A unit that refuses the write loses it.
     fn set_bypassed(&mut self, _main: MainThreadMarker, bypassed: bool) -> BypassWrite {
         match self.set_bypass(bypassed) {
             Ok(()) => BypassWrite::Sent,
-            Err(_) => BypassWrite::NoOwnBypass,
+            Err(_) => BypassWrite::Lost,
         }
     }
 

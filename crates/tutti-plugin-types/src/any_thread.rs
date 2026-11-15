@@ -108,26 +108,28 @@ pub trait AnyThread: Send + Sync {
     /// [`bypassed`](Self::bypassed) reads the result back.
     ///
     /// The default writes a [`Parameter`](OwnBypass::Parameter) through
-    /// [`set_parameter_value`](Self::set_parameter_value) and loses an
-    /// [`Unlisted`](OwnBypass::Unlisted) one, which a backend that can reach the
-    /// format overrides.
+    /// [`set_parameter_value`](Self::set_parameter_value) and loses a
+    /// [`Property`](OwnBypass::Property) one, which only a backend that reaches
+    /// the plugin on the main thread (in-process) overrides.
     fn set_bypassed(&self, site: OwnBypass, bypassed: bool) -> BypassWrite {
         match site {
             OwnBypass::Parameter(id) => {
                 self.set_parameter_value(id, bypass_value(bypassed));
                 BypassWrite::Sent
             }
-            OwnBypass::Unlisted => BypassWrite::Lost,
+            OwnBypass::Property => BypassWrite::Lost,
         }
     }
 
     /// Whether the plugin's own bypass is on now, read back from the plugin:
-    /// `None` when it cannot be read (an [`Unlisted`](OwnBypass::Unlisted)
-    /// bypass, or the plugin did not answer).
+    /// `None` when the plugin did not answer, or (a
+    /// [`Property`](OwnBypass::Property)) the backend cannot reach it. A served
+    /// plugin's read is a round trip, so the session compares such a plugin
+    /// with its mirrored parameter values instead.
     fn bypassed(&self, site: OwnBypass) -> Option<bool> {
         match site {
             OwnBypass::Parameter(id) => self.parameter_value(id).map(is_bypassed),
-            OwnBypass::Unlisted => None,
+            OwnBypass::Property => None,
         }
     }
 
@@ -257,10 +259,10 @@ mod tests {
             written: Mutex::new(Vec::new()),
         };
         assert_eq!(
-            plugin.set_bypassed(OwnBypass::Unlisted, true),
+            plugin.set_bypassed(OwnBypass::Property, true),
             BypassWrite::Lost
         );
         assert!(plugin.written.lock().unwrap().is_empty());
-        assert_eq!(plugin.bypassed(OwnBypass::Unlisted), None);
+        assert_eq!(plugin.bypassed(OwnBypass::Property), None);
     }
 }

@@ -1341,7 +1341,7 @@ mod declared_buses {
     #[test]
     fn only_a_plugin_with_its_own_bypass_declares_one() {
         let with = LoadedPlugin {
-            own_bypass: Some(tutti_plugin_types::OwnBypass::Unlisted),
+            own_bypass: Some(tutti_plugin_types::OwnBypass::Property),
             ..LoadedPlugin::default()
         };
         assert!(Declared::of(&with).ports.own_bypass);
