@@ -93,6 +93,10 @@ impl Control for Vst2Loaded {
             tail: self.tail(main),
             features: self.features(),
             probed: probed::VST2,
+            // VST2 has no opcode that reads the bypass back, so the host cannot
+            // confirm a write of `effSetBypass`: the executor's bypass serves it.
+            own_bypass: None,
+            assignments: Vec::new(),
         }
     }
 

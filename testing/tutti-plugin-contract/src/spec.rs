@@ -3,7 +3,11 @@
 //! the plugin what to expect could not fail when the plugin is wrong. The
 //! plugin's own copy is the spec in `tutti-shared-plugin`'s `core` module.
 
-use tutti_plugin_types::{ChannelLayout, Normalized, ParamId, Samples};
+use tutti_plugin_types::{
+    Axis, ChannelLayout, ControlRole, MidiAssignment, MidiSource, Normalized, ParamId, ParamSteps,
+    Samples,
+};
+use tutti_ump::{MidiChannel, U7};
 
 /// A parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,6 +57,31 @@ impl Param {
         }
     }
 }
+
+/// The parameter that holds the plugin's own bypass where the format lists one
+/// (CLAP and VST3): `0` processing, `1` bypassed. It is listed after the five
+/// of [`Param::ALL`], flagged as the format's bypass, and a write to it reaches
+/// the plugin as this parameter's point in the next block.
+pub const BYPASS_ID: ParamId = ParamId::new(5);
+
+/// Where a format keeps the plugin's own bypass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Bypass {
+    /// A listed parameter flagged as the bypass: VST3 `kIsBypass`, CLAP
+    /// `CLAP_PARAM_IS_BYPASS`.
+    Parameter,
+    /// No parameter: AU `kAudioUnitProperty_BypassEffect`, which the host reads
+    /// back. The plugin tells the host's write as [`BYPASS_ID`]'s point.
+    Property,
+    /// None claimed. VST2's `effSetBypass` writes a bypass but nothing reads it
+    /// back, so the host cannot confirm a write and claims no bypass of its own.
+    None,
+}
+
+/// The controller the plugin maps to a parameter, in the formats that carry a
+/// table (VST3 `IMidiMapping`, AU's mapping table): Control Change
+/// 74 on channel 0 drives `level`.
+pub const MAPPED_CONTROLLER: u8 = 74;
 
 /// The normalized value the write cases send: `level` takes it where a write is
 /// allowed, and the meter is refused it.
@@ -295,6 +324,28 @@ pub struct Surface {
     /// `u32::MAX`, VST3's `kInfiniteTail`), nothing where the plugin cannot say
     /// it (VST2's tail size is a count).
     pub infinite_tail: Option<tutti_plugin_types::PluginTail>,
+    /// Where the format keeps the plugin's own bypass.
+    pub bypass: Bypass,
+    /// What the format says `aux`'s group is: the plugin puts it in the
+    /// `Filter` unit, at the end of the path `Voices/Oscillator/Filter`, where
+    /// the format has groups. VST3 names the unit, CLAP the whole module path,
+    /// AU the clump, VST2 has none (and the plugin declares none). The other
+    /// parameters have no group.
+    pub aux_group: &'static str,
+    /// The roles the plugin declares, by parameter: VST3's function names, per
+    /// unit. No other format declares one.
+    pub roles: &'static [(Param, ControlRole)],
+    /// The parameters the plugin puts in its overview, the shortlist of its
+    /// headline controls: AU's `ParametersForOverview`. No other format has one.
+    pub overview: &'static [Param],
+    /// The step information of `mode`, the plugin's five-position selector.
+    pub mode_steps: ParamSteps,
+    /// The step information of `level`, `aux` and `tone`, which are continuous
+    /// where the format says so at all (VST2 does not).
+    pub continuous_steps: ParamSteps,
+    /// The controller table the plugin declares. Empty where the format has no
+    /// such table: CLAP and VST2.
+    pub assignments: &'static [MidiAssignment],
     /// Whether the format reports a parameter's read-only bit: every format but
     /// VST2, whose `effGetParameterProperties` has none. Where `true`, the
     /// parameter list reports [`Param::Meter`] read-only and every other
@@ -306,6 +357,24 @@ pub struct Surface {
     /// parameter. Where `true`, the meter is not automatable and every other
     /// parameter is.
     pub reports_automatable: bool,
+}
+
+/// The role every VST3 plugin of ours declares, by parameter (function names
+/// asked per unit: `aux` is in the `Filter` unit, the others in the root).
+pub const VST3_ROLES: [(Param, ControlRole); 4] = [
+    (Param::Level, ControlRole::Mix),
+    (Param::Aux, ControlRole::Pan(Axis::X)),
+    (Param::Mode, ControlRole::LowLatency),
+    (Param::Tone, ControlRole::Pan(Axis::Z)),
+];
+
+/// CC 74 on channel 0 drives `level`, on the channel the table says.
+const fn assignment(channel: Option<MidiChannel>) -> MidiAssignment {
+    MidiAssignment {
+        channel,
+        source: MidiSource::ControlChange(U7::of(MAPPED_CONTROLLER)),
+        param: Param::Level.id(),
+    }
 }
 
 /// CLAP: no editor in the plugin, no `clap.render` (so no render mode), a
@@ -320,6 +389,13 @@ pub const CLAP: Surface = Surface {
     tone: TONE_LINEAR,
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
+    bypass: Bypass::Parameter,
+    aux_group: "Voices/Oscillator/Filter",
+    roles: &[],
+    overview: &[],
+    mode_steps: ParamSteps::Enumerated(5),
+    continuous_steps: ParamSteps::Continuous,
+    assignments: &[],
     reports_access: true,
     reports_automatable: true,
 };
@@ -335,6 +411,13 @@ pub const VST2: Surface = Surface {
     tone: TONE_NORMALIZED,
     selects_tail: true,
     infinite_tail: None,
+    bypass: Bypass::None,
+    aux_group: "",
+    roles: &[],
+    overview: &[],
+    mode_steps: ParamSteps::Unknown,
+    continuous_steps: ParamSteps::Unknown,
+    assignments: &[],
     reports_access: false,
     reports_automatable: false,
 };
@@ -351,6 +434,13 @@ pub const VST3: Surface = Surface {
     tone: TONE_CURVED,
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
+    bypass: Bypass::Parameter,
+    aux_group: "Filter",
+    roles: &VST3_ROLES,
+    overview: &[],
+    mode_steps: ParamSteps::Enumerated(5),
+    continuous_steps: ParamSteps::Continuous,
+    assignments: &[assignment(Some(MidiChannel::of(0)))],
     reports_access: true,
     reports_automatable: true,
 };
@@ -367,6 +457,13 @@ pub const VST3_CPP: Surface = Surface {
     tone: TONE_CURVED,
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
+    bypass: Bypass::Parameter,
+    aux_group: "Filter",
+    roles: &VST3_ROLES,
+    overview: &[],
+    mode_steps: ParamSteps::Enumerated(5),
+    continuous_steps: ParamSteps::Continuous,
+    assignments: &[assignment(Some(MidiChannel::of(0)))],
     reports_access: true,
     reports_automatable: true,
 };
@@ -386,6 +483,13 @@ pub const AU: Surface = Surface {
     tone: TONE_LINEAR,
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
+    bypass: Bypass::Property,
+    aux_group: "Filter",
+    roles: &[],
+    overview: &[Param::Level, Param::Tone],
+    mode_steps: ParamSteps::Enumerated(5),
+    continuous_steps: ParamSteps::Continuous,
+    assignments: &[assignment(Some(MidiChannel::of(0)))],
     reports_access: true,
     reports_automatable: false,
 };

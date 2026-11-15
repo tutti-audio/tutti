@@ -7,9 +7,7 @@
 use std::sync::Arc;
 use tutti_types::MaxBlock;
 
-use tutti_dsp::{
-    FdnControls, FdnLayout, FreeverbControls, FreeverbFamily, MaxDecay, Network, System,
-};
+use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, MaxDecay, Network, System};
 use tutti_graph::contract::{
     Driven, assert_honest_tail, assert_param_fork, drive, drive_input, prepared,
 };
@@ -19,7 +17,7 @@ use tutti_graph::{
 };
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::ControlLaneNode;
-use tutti_nodes::{FamilyNode, FdnNode};
+use tutti_nodes::{FdnNode, FreeverbNode};
 use tutti_types::{
     AtomicF32, ChannelLayout, Db, Depth, Frame, Latency, Mix, SampleRate, Samples, Seconds, Tail,
     UnitAddr, UnitParam,
@@ -345,7 +343,7 @@ fn a_non_finite_write_is_ignored() {
 /// controls, and the FDN is stereo out.
 #[test]
 fn a_live_node_has_its_layouts_params() {
-    let f = FamilyNode::live(FreeverbFamily, FreeverbControls::GENERAL_MIDI);
+    let f = FreeverbNode::live(FreeverbControls::GENERAL_MIDI);
     assert_eq!(f.param_set().params().count(), 2, "the room, the damping");
     let n = live(freezable(), FdnControls::DEFAULT);
     assert_eq!(n.param_set().params().count(), 11);

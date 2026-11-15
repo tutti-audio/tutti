@@ -13,9 +13,8 @@ use crate::MaxDelay;
 /// moves the notches.
 ///
 /// A range-checked value: [`new`](Self::new) refuses
-/// what the line could not hold, and never clamps. It states the **domain** the family is
-/// grown over ([`Grows`](crate::Grows), the `MaxDelay`): the longest delay the sweep reaches
-/// is `base + depth_max`, which must fit in `max_delay`.
+/// what the line could not hold, and never clamps. The longest delay the sweep reaches is
+/// `base + depth_max`, which must fit in `max_delay`, the size of the lines.
 ///
 /// The durations are [`Seconds`], and none is a control but the depth the sweep is told
 /// ([`ModDelayControls::depth`](crate::ModDelayControls::depth)), which the sweep clamps
@@ -165,7 +164,7 @@ impl Sweep {
         self.base
     }
 
-    /// The line's longest delay: the [`Domain`](crate::Domain) the sweep is grown over.
+    /// The line's longest delay: the size of the lines the sweep is run in.
     #[must_use]
     pub const fn max_delay(&self) -> MaxDelay {
         self.max_delay
@@ -200,7 +199,7 @@ impl Sweep {
 /// for [`each`](Self::each), and in [`offset`](Self::offset) for a [`step`](Self::step), whose
 /// channel `c` is `c` times it. A stagger that names
 /// one offset per channel ([`each`](Self::each)) is checked against the bus it is built for
-/// by [`ModDelayFamily::new`](crate::ModDelayFamily::new).
+/// by [`ModDelayLayout::new`](crate::ModDelayLayout::new).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Stagger {
     kind: Kind,
@@ -332,3 +331,6 @@ impl Stagger {
 fn wrap(x: PhaseIncrement) -> PhaseIncrement {
     PhaseIncrement(Phase::START.advance(x).get())
 }
+
+#[cfg(test)]
+mod tests;

@@ -302,6 +302,30 @@ pub enum SessionEvent {
         /// Which of its readings changed.
         fact: crate::ResourceFact,
     },
+    /// A reader of the root was opened again, because the root's width is no
+    /// longer the one the reader has: a tap from
+    /// [`Taps::open_output`](crate::Taps::open_output), or the master meter
+    /// once a host took it ([`Session::take_master_meter`]). `id` names the new
+    /// reader, which the session holds until
+    /// [`Session::take_reopened`] claims it (an event left unread loses
+    /// nothing); `topology` is the root's now. The old reader reads closed, so
+    /// no reader takes twelve channels for two: a tap's reads what its rings
+    /// held when the commit that changed the root was applied and then ends
+    /// ([`Pull::Ended`](tutti_buffers::Pull::Ended)), a meter's reads
+    /// [`is_closed`](tutti_graph::MeterReader::is_closed). A second reopen
+    /// before the claim replaces the held reader, and the earlier one ends.
+    ///
+    /// The new tap is fed from the first block of the plan that carries the
+    /// change, and what the old one holds ends on the block before it: a root
+    /// crossfade fades the engine's output, never what a tap reads, so the
+    /// tap switches to the new root at the commit and never reads the old
+    /// root's channels. The event comes in the update that sends the commit.
+    RootReaderReopened {
+        /// The reader to claim.
+        id: crate::RootReader,
+        /// The root's topology the reader was opened for.
+        topology: ChannelTopology,
+    },
     /// A pool entry's change: its load landed or failed, a reload landed, or it
     /// was released. See [`PoolEvent`](crate::PoolEvent); `key` is the key the
     /// app declared it under ([`PoolKey::get`](crate::PoolKey::get)).
@@ -374,6 +398,11 @@ impl std::fmt::Debug for SessionEvent {
                 .debug_struct("ResourceChanged")
                 .field("id", id)
                 .field("fact", fact)
+                .finish(),
+            Self::RootReaderReopened { id, topology } => f
+                .debug_struct("RootReaderReopened")
+                .field("id", id)
+                .field("topology", topology)
                 .finish(),
             Self::Pool { key, event } => f
                 .debug_struct("Pool")
@@ -867,6 +896,12 @@ impl<C: Clock> Session<C> {
             Phase::Commit => {
                 self.apply_output_policy();
                 let sent = self.graph.is_edited() && self.commit_reporting(out);
+                out.extend(
+                    self.graph
+                        .announce_reopened()
+                        .into_iter()
+                        .map(|(id, topology)| SessionEvent::RootReaderReopened { id, topology }),
+                );
                 for u in self.graph.take_unwired() {
                     out.push(SessionEvent::Unwired {
                         node: u.node,
@@ -1541,6 +1576,19 @@ impl<C: Clock> Session<C> {
     /// a host has taken it.
     pub fn master_meter(&mut self) -> Option<&mut tutti_graph::MeterReader> {
         self.graph.meters().master()
+    }
+
+    /// Claims the reader reopened under `id`
+    /// ([`SessionEvent::RootReaderReopened`]): held until then.
+    ///
+    /// # Errors
+    ///
+    /// [`NotReopened`](crate::NotReopened) when none is held under `id`.
+    pub fn take_reopened(
+        &mut self,
+        id: crate::RootReader,
+    ) -> Result<crate::Reopened, crate::NotReopened> {
+        self.graph.take_reopened(id)
     }
 
     /// Hands the master meter's reader to its one consumer; see

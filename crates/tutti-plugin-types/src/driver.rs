@@ -32,8 +32,8 @@ use crate::{
 pub struct Hand<P> {
     /// `None` for a local hand.
     end: Option<tutti_rt::Hand<P>>,
-    /// The control end of the realtime end [`rehand`](Self::rehand) made: it
-    /// replaces `end` the next time the Processor is held here.
+    /// The control end [`install`](Self::install) named: it replaces `end` the
+    /// next time the Processor is held here.
     successor: Option<tutti_rt::Hand<P>>,
     _processor: PhantomData<fn() -> P>,
 }
@@ -68,23 +68,24 @@ impl<P> Hand<P> {
         )
     }
 
-    /// A new realtime end for the Processor to move to: the node that replaces
-    /// the one holding the current end, with other ports over the same plugin.
+    /// Names `successor` as the realtime end the Processor moves to: the end of
+    /// the node that replaces the one holding the current end, with other
+    /// ports over the same plugin. [`HostOp::Relend`] then moves the Processor
+    /// without restarting the plugin.
     ///
-    /// [`HostOp::Relend`] moves the Processor without restarting the plugin.
     /// The Processor does not move at this call. It stays where it is until the main
     /// thread holds it (recalled, or returned and collected), and the next
-    /// [`Effect::Lend`] then lends it to the returned end instead of the old
-    /// one. So:
+    /// [`Effect::Lend`] then lends it to `successor` instead of the old
+    /// end. So:
     ///
-    /// - A Processor never drops on the realtime thread because of a
-    ///   `rehand`: the swap happens only while the main thread holds the
+    /// - A Processor never drops on the realtime thread because of an
+    ///   `install`: the swap happens only while the main thread holds the
     ///   Processor, and the old end is dropped then, empty, on this thread.
-    /// - Once the Processor is lent to the returned end the old [`tutti_rt::Rt`]
+    /// - Once the Processor is lent to the successor the old [`tutti_rt::Rt`]
     ///   holds none and renders without one; [`pending`](Self::pending) is
     ///   `false` from the swap on.
-    /// - A second `rehand` before the swap replaces the first: the end the
-    ///   first call returned is never lent to and polls nothing, as one whose
+    /// - A second `install` before the swap replaces the first: the end of
+    ///   the replaced successor is never lent to and polls nothing, as one whose
     ///   node was dropped does.
     /// - The old [`tutti_rt::Rt`] dropped **before** the swap, while it still
     ///   holds the Processor, drops the Processor with it, on the thread that
@@ -95,17 +96,17 @@ impl<P> Hand<P> {
     ///   in its `Drop`).
     ///
     /// A local hand becomes a threaded one at the swap.
-    #[must_use]
-    pub fn rehand(&mut self) -> tutti_rt::Rt<P>
-    where
-        P: Send,
-    {
-        let (end, rt) = tutti_rt::handoff();
-        self.successor = Some(end);
-        rt
+    pub fn install(&mut self, successor: Successor<P>) {
+        self.successor = Some(successor.0);
     }
 
-    /// Whether a [`rehand`](Self::rehand) has not yet moved the Processor's
+    /// Takes the successor back, when the Processor has not moved to it:
+    /// whether there was one to take.
+    pub fn withdraw(&mut self) -> bool {
+        self.successor.take().is_some()
+    }
+
+    /// Whether an [`install`](Self::install) has not yet moved the Processor's
     /// way to its new realtime end: the Processor may still be in the old one.
     #[must_use]
     pub fn pending(&self) -> bool {
@@ -118,6 +119,23 @@ impl<P> Hand<P> {
         if let Some(next) = self.successor.take() {
             self.end = Some(next);
         }
+    }
+}
+
+/// The control end of a new realtime end, made with that end by
+/// [`Successor::new`] and named to a [`Hand`] by [`Hand::install`].
+///
+/// Dropping one nobody installed does nothing: the realtime end it was made
+/// with is empty and polls nothing.
+#[derive(Debug)]
+pub struct Successor<P>(tutti_rt::Hand<P>);
+
+impl<P: Send> Successor<P> {
+    /// A new realtime end, and the control end that lends to it.
+    #[must_use]
+    pub fn new() -> (Self, tutti_rt::Rt<P>) {
+        let (end, rt) = tutti_rt::handoff();
+        (Self(end), rt)
     }
 }
 

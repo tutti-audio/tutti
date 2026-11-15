@@ -1,15 +1,13 @@
-//! `FamilyNode` over Freeverb, as the graph runs it: its
+//! `FreeverbNode` as the graph runs it: its
 //! ports, its tail (a ceiling it narrows and honours), its controls (a cell, or
 //! a port the graph modulates), and its fork. Every figure is from the
-//! definition (the network's own analytic tail, an impulse's first echo, a
-//! decay measured on a real lane), not from another reverb's render.
+//! definition (the Schroeder RT60 of the comb and the all-pass chain's echoes, an
+//! impulse's first echo, a decay measured on a real lane), not from another reverb's
+//! render.
 
 use std::sync::Arc;
 
-use tutti_dsp::{
-    Family, FdnControls, FdnLayout, Freeverb, FreeverbControls, FreeverbFamily, Grows, Inputs,
-    Reach, Setup, System,
-};
+use tutti_dsp::{FdnControls, FdnLayout, FreeverbBank, FreeverbControls};
 use tutti_fixtures::Noise;
 use tutti_graph::contract::{assert_honest_tail, assert_param_fork, drive_input, prepared};
 use tutti_graph::{
@@ -18,10 +16,9 @@ use tutti_graph::{
 };
 use tutti_modulation::ControlProgram;
 use tutti_nodes::automation::ControlLaneNode;
-use tutti_nodes::{FamilyNode, FdnNode, FreeverbNode};
+use tutti_nodes::{FdnNode, FreeverbNode};
 use tutti_types::{
-    AtomicF32, ChannelLayout, Db, Frame, MaxBlock, Mix, SampleRate, Samples, Tail, UnitAddr,
-    UnitParam,
+    AtomicF32, ChannelLayout, Frame, MaxBlock, Mix, SampleRate, Samples, Tail, UnitAddr, UnitParam,
 };
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -40,7 +37,7 @@ fn controls(room: f32, damp: f32) -> FreeverbControls {
 
 /// A live (modulatable) Freeverb node at `c`, prepared at 48 kHz.
 fn live(c: FreeverbControls) -> FreeverbNode {
-    prepared(FamilyNode::live(FreeverbFamily, c), SR, BLOCK)
+    prepared(FreeverbNode::live(c), SR, BLOCK)
 }
 
 /// A node driven block by block, at its own running frame.
@@ -87,14 +84,40 @@ fn reported(d: &tutti_graph::contract::Driven) -> usize {
     }
 }
 
-/// The network's own tail at -60 dB, in frames at 48 kHz: the figure the node
-/// reports for `c`, from the network's analytic query.
+/// The tail node reports for `c`, in frames at 48 kHz: what the first block of an impulse
+/// reports. [`the_tail_is_the_schroeder_figure`] holds it to the definition.
 fn tail_of(c: FreeverbControls) -> usize {
-    let ring = FreeverbFamily.member(&c, SR).tail(Db(-60.0));
-    let tutti_dsp::Ring::Finite(s) = ring else {
-        panic!("finite")
-    };
-    (s.get() * SR.get()).ceil() as usize
+    reported(&Rig::new(live(c)).block(&impulse(), &[]))
+}
+
+/// The tail the definition gives for a room, in frames at 48 kHz: the longest comb (1640
+/// frames at 44.1 kHz, scaled to the rate) rings for the Schroeder trips `ln(1e-3) / ln g` of
+/// its loop gain `g = room * 0.28 + 0.7`, each a period and the interpolation's two frames,
+/// and the four all-passes add their own echoes, `a^(k-1)` at `kD` for `a = 0.5`: ten trips
+/// to -60 dB, eleven periods. The figure errs long.
+fn schroeder_tail(room: f32) -> i64 {
+    let scale = |t: usize| (SR.get() / 44_100.0 * t as f64).round();
+    let trips = |q: f64| (libm::log(1e-3) / libm::log(q)).ceil();
+    let chain: f64 = [556usize, 441, 341, 225]
+        .iter()
+        .map(|&d| (1.0 + trips(0.5)) * (scale(d + 23) + 2.0))
+        .sum();
+    let g = f64::from(room * 0.28 + 0.7);
+    let comb = (1.0 + trips(g)) * (scale(1617 + 23) + 2.0);
+    (comb + chain).ceil() as i64
+}
+
+/// The node's tail is the definition's, to the frame the arithmetic rounds to, whatever the
+/// damping (it only shortens the ring).
+#[test]
+fn the_tail_is_the_schroeder_figure() {
+    for room in [0.0f32, 0.1, 0.5, 0.9, 1.0] {
+        for damp in [0.0f32, 0.5, 1.0] {
+            let got = tail_of(controls(room, damp)) as i64;
+            let want = schroeder_tail(room);
+            assert!((got - want).abs() <= 1, "room {room}: {got} against {want}");
+        }
+    }
 }
 
 /// The General MIDI send takes a mono input and gives a stereo one, with no
@@ -109,6 +132,7 @@ fn the_ports_and_the_ceiling() {
     assert_eq!(shape.latency.samples(), Samples::ZERO);
     assert_eq!(shape.params.len(), 0, "no cells");
     assert_eq!(shape.tail, Tail::Finite(Samples(tail_of(gm()))));
+    assert_eq!(fixed.param_set().params().count(), 0);
 
     let live = live(gm());
     let shape = live.shape();
@@ -181,7 +205,10 @@ fn a_live_node_reports_the_tail_of_its_current_network() {
         let mut rig = Rig::new(live(controls(room, 0.5)));
         let first = rig.block(&impulse(), &[]);
         let got = reported(&first);
-        assert_eq!(got, tail_of(controls(room, 0.5)), "room {room}");
+        assert!(
+            (got as i64 - schroeder_tail(room)).abs() <= 1,
+            "room {room}: {got}"
+        );
         assert!(got > last && got < ceiling, "room {room}: {got}");
         last = got;
     }
@@ -197,29 +224,28 @@ fn the_reported_tail_is_honest() {
     assert_honest_tail(&mut live(controls(0.9, 0.2)), SR);
 }
 
-/// What the node cuts off at the tail is under the floor: the realization alone,
-/// left to ring, is below -60 dB of its first echo (the loudest frame of an
-/// impulse's answer) at every frame past the tail the node reports, so parking
-/// the room there takes nothing audible. (The realization's own render, held to the
-/// network's figure; no other reverb's.)
+/// What the node cuts off at the tail is under the floor: the bank alone, left to ring, is
+/// below -60 dB of its loudest frame (an impulse's answer) at every frame past the tail the
+/// node reports, so parking the room there takes nothing audible.
 #[test]
 fn the_cut_discards_only_what_is_below_the_floor() {
     for c in [gm(), controls(0.9, 0.2), controls(0.1, 0.9)] {
         let tail = tail_of(c);
-        let mut tuned = FreeverbFamily.realized(SR);
-        tuned.prepare(
-            &FreeverbFamily.reach(&Reach::at(SR)),
-            &Setup {
-                rate: SR,
-                max_block: MaxBlock::of(Samples(BLOCK)),
-            },
-        );
-        tuned.retarget(&FreeverbFamily.member(&c, SR));
+        let mut bank = FreeverbBank::new(SR);
+        let mut glides = bank.glides();
+        bank.aim(&mut glides, &c);
+        glides.settle();
         let frames = tail + 20_000;
         let mut x = vec![0.0f32; frames];
         x[0] = 1.0;
         let (mut l, mut r) = (vec![0.0f32; frames], vec![0.0f32; frames]);
-        tuned.process(&Inputs::new(&[&x]), &mut [&mut l, &mut r], frames);
+        let ins = [x.as_slice()];
+        let mut outs: [&mut [f32]; 2] = [&mut l, &mut r];
+        bank.process(
+            &mut glides,
+            tutti_buffers::Planes::new(&ins).unwrap(),
+            tutti_buffers::PlanesMut::new(&mut outs).unwrap(),
+        );
         let peak = l.iter().chain(&r).fold(0.0f32, |m, s| m.max(s.abs()));
         let after = l[tail + 1..]
             .iter()
@@ -322,29 +348,50 @@ fn an_idle_reverb_wakes_as_a_fresh_one() {
     }
 }
 
-/// A port the graph modulates is read at the block's last frame, as the cell is
-/// read: a block whose room port ends at 0.9 renders as one whose cell is 0.9.
-/// And the tail is reported from the *longest* room the port takes in the
-/// block, so a decay that falls through the block is not reported short.
+/// A port the graph drives is read on the stream's 32-frame grid, as the FDN's is: a lane
+/// held at 0.9 renders as a cell at 0.9, whatever the blocks, and a lane that rises through
+/// the stream renders the same cut into blocks of 32, 64 and 100 frames. And the tail is
+/// reported from the *longest* room the port takes in the block, so a decay that falls
+/// through the block is not reported short.
 #[test]
-fn a_modulated_port_is_read_at_the_blocks_end_and_its_peak_sets_the_tail() {
+fn a_modulated_port_is_read_on_the_grid_and_its_peak_sets_the_tail() {
     // Long enough for the combs to come round, where the room is heard.
     let x = noise(3, 4_096);
-    let rising: Vec<f32> = (0..BLOCK)
-        .map(|i| 0.1 + 0.8 * i as f32 / (BLOCK - 1) as f32)
-        .collect();
+    let held = vec![0.9f32; BLOCK];
     let mut by_port = Rig::new(live(controls(0.5, 0.5)));
     let mut by_cell = Rig::new(live(controls(0.9, 0.5)));
     let none: Option<&[f32]> = None;
     for chunk in x.chunks(BLOCK) {
         assert_eq!(
-            by_port.block(chunk, &[Some(&rising), none]).audio,
+            by_port.block(chunk, &[Some(&held), none]).audio,
             by_cell.block(chunk, &[]).audio
         );
     }
+    let rising: Vec<f32> = (0..x.len())
+        .map(|i| 0.1 + 0.8 * i as f32 / (x.len() - 1) as f32)
+        .collect();
+    let render = |block: usize, driven: bool| -> Vec<Vec<f32>> {
+        let mut rig = Rig::new(live(controls(0.5, 0.5)));
+        let mut out = vec![Vec::new(), Vec::new()];
+        for (k, chunk) in x.chunks(block).enumerate() {
+            let lane = &rising[k * block..k * block + chunk.len()];
+            let params = [driven.then_some(lane), none];
+            for (all, more) in out.iter_mut().zip(rig.block(chunk, &params).audio) {
+                all.extend(more);
+            }
+        }
+        out
+    };
+    let whole = render(32, true);
+    assert_ne!(whole, render(32, false), "the lane is heard");
+    for block in [64, 100] {
+        assert_eq!(render(block, true), whole, "blocks of {block}");
+    }
 
     // Falling through the block: 0.9 at the start, 0.1 at the end.
-    let falling: Vec<f32> = rising.iter().rev().copied().collect();
+    let falling: Vec<f32> = (0..BLOCK)
+        .map(|i| 0.9 - 0.8 * i as f32 / (BLOCK - 1) as f32)
+        .collect();
     let mut rig = Rig::new(live(controls(0.5, 0.5)));
     let d = rig.block(&impulse(), &[Some(&falling), none]);
     assert!(
@@ -391,7 +438,7 @@ fn the_node_is_the_room_alone() {
         }
     }
     assert!(out.iter().all(|c| c[0] == 0.0), "nothing at once");
-    assert!((out[0][1_215] - Freeverb::FIXED_GAIN.get()).abs() < 1e-6);
+    assert!((out[0][1_215] - FreeverbBank::FIXED_GAIN.get()).abs() < 1e-6);
 }
 
 /// A fork of the node starts from silence with the values set, and shares nothing
@@ -399,7 +446,7 @@ fn the_node_is_the_room_alone() {
 /// does not carry the ring (a fork is `fresh()` plus the graph's preroll).
 #[test]
 fn a_fork_starts_silent_with_the_values_set() {
-    assert_param_fork(FamilyNode::live(FreeverbFamily, gm()));
+    assert_param_fork(FreeverbNode::live(gm()));
 
     let mut rig = Rig::new(live(controls(0.9, 0.5)));
     rig.block(&noise(5, BLOCK), &[]);
@@ -432,7 +479,7 @@ fn a_fork_starts_silent_with_the_values_set() {
 #[test]
 fn a_lane_driving_the_room_changes_how_long_it_rings() {
     let ring = |room: f32| -> f64 {
-        let node = FamilyNode::live(FreeverbFamily, gm());
+        let node = FreeverbNode::live(gm());
         let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::STEREO);
         let (n, _) = g.add_with_controls(node);
         g.connect_input(0, n, 0).connect_output(n, 0, 0);
@@ -477,11 +524,11 @@ fn a_lane_driving_the_room_changes_how_long_it_rings() {
     );
 }
 
-/// A `FamilyNode` is an `IntoNode` whose controls are its
+/// A `FreeverbNode` is an `IntoNode` whose controls are its
 /// `ParamSet`, so the session can address the room by `UnitParam`.
 #[test]
 fn it_is_inserted_with_a_param_set() {
-    let (_, set) = FamilyNode::live(FreeverbFamily, gm()).into_node();
+    let (_, set) = FreeverbNode::live(gm()).into_node();
     assert!(set.set(UnitParam::RoomSize, 0.7));
     assert_eq!(set.get(UnitParam::RoomSize), Some(0.7));
     assert!(
@@ -509,4 +556,95 @@ fn an_unprepared_node_declares_nothing_derived_from_a_rate() {
     };
     let (low, high) = (tail_at(SampleRate::SR_44K1), tail_at(SampleRate::SR_96K));
     assert!(high > low, "{high} frames at 96 kHz, {low} at 44.1 kHz");
+}
+
+/// A cell that moves lands on the stream's 32-frame grid, whatever the blocks: the room and
+/// the damping written between two blocks at frame 1024 (a multiple of every block below)
+/// give the same render in blocks of 1, 16, 64, 128 and 1024 (the node against itself under
+/// cuts), because the reader takes each whole at the grid and the bank's glides are on the
+/// stream's chunks, not a block's. And the move is heard.
+#[test]
+fn a_moved_cell_lands_on_the_grid_whatever_the_blocks() {
+    let x = noise(11, 4_096);
+    let render = |block: usize, moved: bool| -> Vec<Vec<f32>> {
+        let node = live(gm());
+        let set = node.param_set();
+        let mut rig = Rig::new(node);
+        let mut out = vec![Vec::new(), Vec::new()];
+        for (i, chunk) in x.chunks(block).enumerate() {
+            if moved && i * block == 1_024 {
+                assert!(set.set(UnitParam::RoomSize, 0.9));
+                assert!(set.set(UnitParam::Damping, 0.2));
+            }
+            for (all, more) in out.iter_mut().zip(rig.block(chunk, &[]).audio) {
+                all.extend(more);
+            }
+        }
+        out
+    };
+    let whole = render(1_024, true);
+    assert_ne!(whole, render(1_024, false), "the move is heard");
+    for block in [1, 16, 64, 128] {
+        assert_eq!(render(block, true), whole, "blocks of {block}");
+    }
+}
+
+/// A cell that moves **between** grid points starts its glide at the next one: a room and a
+/// damping written 13 frames past frame 1024 and heard from the block that begins there
+/// render the same as the same write at frame 1056, the next grid point of 32, and
+/// differently from the write at 1088.
+#[test]
+fn a_move_between_grid_points_starts_at_the_next_one() {
+    let x = noise(13, 3_072);
+    let render = |at: usize| -> Vec<Vec<f32>> {
+        let node = live(gm());
+        let set = node.param_set();
+        let mut rig = Rig::new(node);
+        let mut out = vec![Vec::new(), Vec::new()];
+        for (chunk, from) in [(&x[..at], 0), (&x[at..], at)] {
+            if from == at {
+                assert!(set.set(UnitParam::RoomSize, 0.95));
+                assert!(set.set(UnitParam::Damping, 0.05));
+            }
+            for (all, more) in out.iter_mut().zip(rig.block(chunk, &[]).audio) {
+                all.extend(more);
+            }
+        }
+        out
+    };
+    let at_the_point = render(1_056);
+    assert_eq!(render(1_037), at_the_point);
+    assert_ne!(render(1_088), at_the_point);
+}
+
+/// A reset node equals a fresh one that has the cell: render, move the room and the damping,
+/// reset, and the render is the fresh node's with those cells (the move lands at once, it does
+/// not glide from the old room).
+#[test]
+fn a_cell_moved_before_a_reset_lands_at_once_as_on_a_fresh_node() {
+    let x = noise(21, 4_096);
+    let moved = |node: &FreeverbNode| {
+        let set = node.param_set();
+        assert!(set.set(UnitParam::RoomSize, 0.95));
+        assert!(set.set(UnitParam::Damping, 0.05));
+    };
+    let blocks = |rig: &mut Rig<FreeverbNode>| -> Vec<Vec<f32>> {
+        let mut out = vec![Vec::new(), Vec::new()];
+        for chunk in x.chunks(BLOCK) {
+            for (all, more) in out.iter_mut().zip(rig.block(chunk, &[]).audio) {
+                all.extend(more);
+            }
+        }
+        out
+    };
+    let mut used = Rig::new(live(gm()));
+    blocks(&mut used);
+    moved(&used.node);
+    used.node.reset();
+    let fresh = FreeverbNode::live(gm());
+    moved(&fresh);
+    let mut fresh = Rig::new(prepared(fresh, SR, BLOCK));
+    let (a, b) = (blocks(&mut used), blocks(&mut fresh));
+    assert!(a.iter().flatten().any(|&s| s != 0.0));
+    assert_eq!(a, b);
 }

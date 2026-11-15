@@ -2,34 +2,53 @@
 //!
 //! `Phase::Plugins` compares the ports a pooled plugin has now with the ones
 //! its node declares. When they differ it asks the plugin's
-//! [`PluginRebinder`](tutti_plugin::catalog::PluginRebinder) for a node over the
-//! same plugin and swaps it in at the same key
-//! (`Graph::replace_rebound`): the wiring to ports the new shape keeps stays,
-//! and the wiring to ports it lacks is reported as
-//! [`SessionEvent::Unwired`] by the update that
-//! commits the swap. The plugin keeps running; its Processor moves to the new
-//! node at a later tick.
+//! [`PluginRebinder`](tutti_plugin::catalog::PluginRebinder) to **prepare** a
+//! node over the same plugin, which changes nothing in the plugin, swaps it in
+//! at the same key (`Graph::replace_rebound`), and only when the swap was made
+//! **commits** the move of the plugin's Processor to it. A swap that is refused
+//! leaves the plugin as it was and is reported
+//! ([`PluginChange::PortsRefused`]), once: the ports count as handled.
 //!
-//! The node the swap retires may still hold the Processor. The rebuild raised a
-//! recall, and a node dropped while it holds the Processor and a recall is
-//! raised hands it back to the control side (`InProcClient`'s `Drop`), so the
-//! retirement loses nothing. The record keeps the rebuild `settling` until the
-//! rebinder says [`Moved`](tutti_plugin_host::Settlement::Moved), or
+//! The wiring to the ports the new shape keeps stays, and the wiring to the
+//! ports it lacks is reported as [`SessionEvent::Unwired`] by the update that
+//! commits the swap. The plugin keeps running. Its Processor is recalled at the
+//! commit, returned by the node it replaces at that node's next block (or when
+//! the node is dropped, since the recall is raised), and lent to the new node at
+//! the next update's pump: the plugin is silent from the swap to then, at least
+//! one block and one update.
+//!
+//! The record is `Settling` until the rebinder says
+//! [`Moved`](tutti_plugin_host::Settlement::Moved), or
 //! [`Lost`](tutti_plugin_host::Settlement::Lost) when the plugin died (which the
-//! plugin's own path reports), and starts no second rebuild before.
+//! plugin's own path reports, and both nodes then render silence); no second
+//! rebuild starts before.
 //!
 //! An in-process plugin changes its ports on the main thread and is ticked
-//! there, so the rebuild runs in an update that runs on it. A served
-//! plugin's ports are fixed by its slab: a change of width is
-//! [`PluginChange::PortsRefused`] and its node stays.
+//! there, so the rebuild runs in an update that runs on it: `plugins_phase` does
+//! not tick an in-process plugin (only `MainSession::update` does, for an open
+//! editor), so this phase does, for the pooled plugins it re-inserts. A served
+//! plugin's ports are fixed by its slab: a change of buses is refused.
 
-use tutti_plugin::catalog::Rebuilt;
+use thiserror::Error;
 use tutti_plugin_host::{RebindError, Settlement};
 use tutti_plugin_types::MainThreadMarker;
 
-use super::{PluginChange, PluginEvent};
-use crate::{Clock, Session, SessionEvent};
+use super::{PluginChange, PluginEvent, RebindState};
+use crate::{Clock, CrossfadeRefused, ReplaceRefused, Session, SessionEvent};
 use tutti_graph::NodeKey;
+
+/// Why a plugin's ports were not re-inserted ([`PluginChange::PortsRefused`]).
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
+pub enum PortsRefusal {
+    /// The plugin's ports cannot be a node: too wide for a block, or outside a
+    /// served plugin's slab.
+    #[error(transparent)]
+    Ports(#[from] RebindError),
+    /// The graph refused the swap; the plugin is as it was.
+    #[error("the graph refused the node over the new ports: {0}")]
+    Swap(CrossfadeRefused),
+}
 
 impl<C: Clock> Session<C> {
     /// Ticks the in-process pooled plugins (their pump is what reads a change
@@ -41,87 +60,99 @@ impl<C: Clock> Session<C> {
             .graph
             .plugins
             .iter()
-            .filter(|(_, hosted)| {
-                hosted.pooled.is_some() && hosted.rebind.is_some() && !hosted.silenced
-            })
+            .filter(|(_, hosted)| hosted.rebind.is_some() && !hosted.silenced)
             .map(|(node, _)| *node)
             .collect();
         for node in nodes {
             let Some(hosted) = self.graph.plugins.get_mut(&node) else {
                 continue;
             };
-            // The pump reads what the plugin changed about itself, and runs the
-            // restart that follows; nothing else ticks an in-process plugin.
             if let (Some(main), None) = (main, hosted.handle.server_pid()) {
                 hosted.handle.editor_idle(main);
             }
-            let Some(state) = hosted.rebind.as_mut() else {
+            let Some(state) = hosted.rebind.take() else {
                 continue;
             };
-            if state.settling {
-                match state.rebinder.settled() {
-                    Settlement::Pending => continue,
-                    // Moved: the Processor is in the new node. Lost: the plugin
-                    // died, which its own path reports; the nodes stay silent.
-                    Settlement::Moved | Settlement::Lost => state.settling = false,
+            let state = self.rebind_step(node, state, main, out);
+            if let Some(hosted) = self.graph.plugins.get_mut(&node) {
+                hosted.rebind = Some(state);
+            }
+        }
+    }
+
+    /// One update of one pooled plugin's rebuild: the record it keeps next.
+    fn rebind_step(
+        &mut self,
+        node: NodeKey,
+        state: RebindState,
+        main: Option<MainThreadMarker>,
+        out: &mut Vec<SessionEvent>,
+    ) -> RebindState {
+        let (rebinder, laid_out) = match &state {
+            RebindState::Settling { rebinder, .. } => match rebinder.settled() {
+                Settlement::Pending => return state,
+                // Moved: the Processor is in the new node. Lost: the plugin
+                // died. Idle: nothing was moved.
+                Settlement::Idle | Settlement::Moved | Settlement::Lost => {
+                    let laid_out = state.laid_out().clone();
+                    (rebinder.clone(), laid_out)
                 }
-            }
-            let Some(now) = state.rebinder.layout() else {
-                continue;
-            };
-            if state.laid_out.as_ref() == Some(&now) {
-                continue;
-            }
-            let rebinder = state.rebinder.clone();
-            let Some(main) = main else {
-                continue;
-            };
-            // Nothing refuses the swap once the Processor is on its way to the
-            // node, so it is asked first.
-            if !self.graph.can_swap(node) {
-                continue;
-            }
-            let done = match rebinder.rebind(main) {
-                Ok(Some(Rebuilt { bound, controls })) => {
-                    controls.set_meter(self.click_settings.project_meter());
-                    if let Err(refused) = self.graph.replace_rebound(node, bound) {
-                        tracing::error!("the rebuilt node of {node:?} was refused: {refused}");
-                        continue;
+            },
+            RebindState::Idle { rebinder, laid_out } => (rebinder.clone(), laid_out.clone()),
+        };
+        let Some(now) = rebinder.layout() else {
+            return state.with(laid_out, false);
+        };
+        if now == laid_out {
+            return state.with(laid_out, false);
+        }
+        let Some(main) = main else {
+            return state.with(laid_out, false);
+        };
+        match rebinder.prepare() {
+            // A served plugin whose buses still fit its slab: its node stays.
+            Ok(None) => state.with(now, false),
+            Ok(Some(rebuilt)) => {
+                let (bound, controls, commit) = rebuilt.into_parts();
+                controls.set_meter(self.click_settings.project_meter());
+                match self.graph.replace_rebound(node, bound) {
+                    Ok(()) => {
+                        if let Err(why) = commit.commit(main) {
+                            // The plugin is as it was and the new node renders
+                            // silence: the plugin's own path retries nothing,
+                            // and the app hears why.
+                            tracing::error!("the move of {node:?}'s Processor failed: {why}");
+                            out.push(refused(node, PortsRefusal::Ports(why)));
+                            return state.with(now, false);
+                        }
+                        if let Some(hosted) = self.graph.plugins.get_mut(&node) {
+                            hosted.node = Some(controls);
+                        }
+                        state.with(now, true)
                     }
-                    Done::Rebuilt(controls)
+                    // Between a re-prepare's two commits: asked again next update.
+                    Err(ReplaceRefused::Busy(_)) => state.with(laid_out, false),
+                    Err(ReplaceRefused::Failed(why)) => {
+                        out.push(refused(node, PortsRefusal::Swap(why)));
+                        state.with(now, false)
+                    }
                 }
-                // A served plugin whose ports still fit its slab: its node stays.
-                Ok(None) => Done::Kept,
-                // Its own restart is not over: asked again at the next update.
-                Err(RebindError::Restarting | RebindError::NotRunning | RebindError::NoPorts) => {
-                    continue;
-                }
-                Err(why @ (RebindError::OutsideSlab { .. } | RebindError::TooWide(_))) => {
-                    out.push(SessionEvent::Plugin(PluginEvent {
-                        node,
-                        change: PluginChange::PortsRefused { why },
-                    }));
-                    Done::Kept
-                }
-            };
-            let Some(hosted) = self.graph.plugins.get_mut(&node) else {
-                continue;
-            };
-            if let Some(state) = hosted.rebind.as_mut() {
-                state.laid_out = Some(now);
-                state.settling = matches!(done, Done::Rebuilt(_));
             }
-            if let Done::Rebuilt(controls) = done {
-                hosted.node = Some(controls);
+            // Its own restart is not over: asked again at the next update.
+            Err(RebindError::Restarting | RebindError::NotRunning | RebindError::NoPorts) => {
+                state.with(laid_out, false)
+            }
+            Err(why) => {
+                out.push(refused(node, PortsRefusal::Ports(why)));
+                state.with(now, false)
             }
         }
     }
 }
 
-/// What a rebind did.
-enum Done {
-    /// A node over the new ports was swapped in, with its controls.
-    Rebuilt(tutti_plugin_host::NodeControls),
-    /// The node stays.
-    Kept,
+fn refused(node: NodeKey, why: PortsRefusal) -> SessionEvent {
+    SessionEvent::Plugin(PluginEvent {
+        node,
+        change: PluginChange::PortsRefused { why },
+    })
 }

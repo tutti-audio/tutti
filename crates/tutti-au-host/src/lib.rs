@@ -219,7 +219,7 @@ pub use platform::*;
 
 pub use component::{AuComponentInfo, AuType};
 pub use error::{AuError, LoadFailure, LoadStage, PresetFileFailure, PresetMismatch, Result};
-pub use unit_code::{unit_measures, unit_role};
+pub use unit_code::unit_measures;
 
 // Shared host vocabulary re-exported so consumers can stay format-agnostic.
 // `WindowHandle` is consumed by the GUI bridge; `TransportInfo` is the input type of

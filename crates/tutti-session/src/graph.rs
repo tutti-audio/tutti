@@ -57,7 +57,7 @@ use tutti_graph::{
 };
 use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, EventTapId, MeterId, MeterSpec, MissingSource,
-    TapAlign, Topology,
+    TapAlign, TapId, Topology,
 };
 #[cfg(feature = "plugin")]
 use tutti_types::Latency;
@@ -70,7 +70,7 @@ mod observe;
 #[cfg(feature = "testing")]
 mod testing;
 
-pub use observe::{Meters, Taps};
+pub use observe::{Meters, NotReopened, Reopened, RootReader, Taps};
 #[cfg(feature = "testing")]
 pub use testing::{AudioSide, Testing};
 
@@ -330,6 +330,14 @@ pub struct Graph {
     event_taps: BTreeMap<EventTapId, (tutti_graph::EventTapSource, TapAlign, EventCapacity)>,
     /// The master meter's reader until a host takes it.
     master_meter: Option<MeterReader>,
+    /// The master meter's id: the one meter that reads the root.
+    master_meter_id: MeterId,
+    /// Each open tap on the root ([`Taps::open_output`]) with its capacity and
+    /// the width its reader has, so a root of another width opens it again.
+    output_taps: BTreeMap<TapId, (Samples, usize)>,
+    /// The readers the root's width opened again, each held under its id until
+    /// claimed ([`Graph::take_reopened`]).
+    reopened: BTreeMap<RootReader, observe::Held>,
     /// Crossfades refused `Busy`, in request order.
     parked: VecDeque<Parked>,
     /// The wiring each re-insert dropped, by node, until the commit that
@@ -483,8 +491,9 @@ impl Graph {
         // without asking for it.
         // `Outputs` names no source, so the open cannot be refused.
         let ids = Mint::new();
+        let master_meter_id = MeterId::mint(&ids);
         let master_meter = editor
-            .open_meter(MeterId::mint(&ids), MeterSpec::Outputs)
+            .open_meter(master_meter_id, MeterSpec::Outputs)
             .expect("a master meter names no source");
         master_meter.enable();
         Self {
@@ -505,6 +514,9 @@ impl Graph {
             ids,
             event_taps: BTreeMap::new(),
             master_meter: Some(master_meter),
+            master_meter_id,
+            output_taps: BTreeMap::new(),
+            reopened: BTreeMap::new(),
             parked: VecDeque::new(),
             unwired: Vec::new(),
             removed: Vec::new(),
@@ -849,14 +861,25 @@ impl Graph {
         &mut self,
         client: Box<tutti_plugin::handles::PluginClient>,
     ) -> Key<crate::PluginNode> {
+        self.insert_plugin_with_rebinder(client).0
+    }
+
+    /// [`insert_plugin`](Self::insert_plugin), and the builder of the node
+    /// that replaces this one when the plugin changes its audio ports.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn insert_plugin_with_rebinder(
+        &mut self,
+        client: Box<tutti_plugin::handles::PluginClient>,
+    ) -> (
+        Key<crate::PluginNode>,
+        tutti_plugin::catalog::PluginRebinder,
+    ) {
         let node = NodeKey::fresh();
         let hosted = crate::plugin::HostedPlugin::new(client.handle(), client.plugin().clone())
             .with_controls(client.controls());
         let tempo = self.tempo.clone();
         let bound = client.bind(tempo);
         let rebinder = tutti_plugin::catalog::PluginRebinder::served(bound.rebinder());
-        let mut hosted = hosted;
-        hosted.rebind = Some(crate::plugin::RebindState::of(rebinder));
         // A fresh key has no wiring recorded, so nothing is unwired.
         let _controls = self.editor.insert(node, PLUGIN_KIND, bound).controls;
         self.nodes.insert(
@@ -867,8 +890,9 @@ impl Graph {
             },
         );
         self.plugins.insert(node, hosted);
+        self.write_own_bypass(node);
         self.edited = true;
-        Key::new(node)
+        (Key::new(node), rebinder)
     }
 
     /// Hosts a plugin the host inserted itself (an in-process plugin, a
@@ -911,6 +935,7 @@ impl Graph {
         }
         self.plugins
             .insert(node, crate::plugin::HostedPlugin::new(handle, plugin));
+        self.write_own_bypass(node);
         Ok(Key::new(node))
     }
 
@@ -932,6 +957,27 @@ impl Graph {
         fade: Seconds,
         law: FadeLaw,
     ) -> Result<(), ReplaceRefused<Box<tutti_plugin::handles::PluginClient>>> {
+        self.replace_plugin_with_rebinder(node, client, fade, law)
+            .map(|_| ())
+    }
+
+    /// [`replace_plugin`](Self::replace_plugin), and the builder of the node
+    /// that replaces the incoming one when the plugin changes its audio ports.
+    ///
+    /// # Errors
+    ///
+    /// As [`replace_plugin`](Self::replace_plugin).
+    #[cfg(feature = "plugin")]
+    pub(crate) fn replace_plugin_with_rebinder(
+        &mut self,
+        node: impl Into<NodeKey>,
+        client: Box<tutti_plugin::handles::PluginClient>,
+        fade: Seconds,
+        law: FadeLaw,
+    ) -> Result<
+        tutti_plugin::catalog::PluginRebinder,
+        ReplaceRefused<Box<tutti_plugin::handles::PluginClient>>,
+    > {
         let node = node.into();
         // Asked here, before binding: `replace` hands back what it refuses,
         // and a bound plugin cannot be unbound.
@@ -962,17 +1008,18 @@ impl Graph {
                 match self.plugins.get_mut(&node) {
                     Some(hosted) => {
                         let outgoing = hosted.replace(handle, controls, plugin);
-                        hosted.rebind = Some(crate::plugin::RebindState::of(rebinder));
                         self.graveyard.bury_handle(outgoing);
                     }
                     None => {
-                        let mut hosted = crate::plugin::HostedPlugin::new(handle, plugin)
-                            .with_controls(controls);
-                        hosted.rebind = Some(crate::plugin::RebindState::of(rebinder));
-                        self.plugins.insert(node, hosted);
+                        self.plugins.insert(
+                            node,
+                            crate::plugin::HostedPlugin::new(handle, plugin)
+                                .with_controls(controls),
+                        );
                     }
                 }
-                Ok(())
+                self.write_own_bypass(node);
+                Ok(rebinder)
             }
             Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
             Err(ReplaceRefused::Busy(_)) => unreachable!("checked above"),
@@ -993,7 +1040,10 @@ impl Graph {
         plugin: Box<tutti_plugin::catalog::Plugin>,
         fade: Seconds,
         law: FadeLaw,
-    ) -> Result<(), ReplaceRefused<Box<tutti_plugin::catalog::Plugin>>> {
+    ) -> Result<
+        tutti_plugin::catalog::PluginRebinder,
+        ReplaceRefused<Box<tutti_plugin::catalog::Plugin>>,
+    > {
         if let Some(cause) = self.editor.poison_cause() {
             return Err(ReplaceRefused::Failed(CrossfadeRefused::Poisoned(
                 cause.to_owned(),
@@ -1014,36 +1064,23 @@ impl Graph {
                 match self.plugins.get_mut(&node) {
                     Some(hosted) => {
                         let outgoing = hosted.replace_hosted(handle, controls, plugin_ref);
-                        hosted.rebind = Some(crate::plugin::RebindState::of(rebinder));
                         self.graveyard.bury_handle(outgoing);
                     }
                     None => {
                         let mut hosted = crate::plugin::HostedPlugin::new(handle, plugin_ref);
                         hosted.node = Some(controls);
-                        hosted.rebind = Some(crate::plugin::RebindState::of(rebinder));
                         self.plugins.insert(node, hosted);
                     }
                 }
-                Ok(())
+                Ok(rebinder)
             }
             Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
             Err(ReplaceRefused::Busy(_)) => unreachable!("checked above"),
         }
     }
 
-    /// Whether a node over the plugin at `node` can be swapped in now:
-    /// the graph is not poisoned or re-preparing, and `node` is in it. Asked
-    /// before a rebind moves the plugin's Processor to the new node, which
-    /// nothing may then refuse.
-    #[cfg(feature = "plugin")]
-    pub(crate) fn can_swap(&self, node: NodeKey) -> bool {
-        self.editor.poison_cause().is_none()
-            && self.nodes.contains_key(&node)
-            && !self.editor.is_repreparing()
-    }
-
     /// Swaps the node of the plugin at `node` for `bound`, the node
-    /// [`PluginRebinder::rebind`](tutti_plugin::catalog::PluginRebinder::rebind)
+    /// [`PluginRebinder::prepare`](tutti_plugin::catalog::PluginRebinder::prepare)
     /// built over the same plugin with the ports it has now: the key, and the
     /// wiring to the ports the new node keeps, stay, and the wiring to the ports
     /// it lacks is dropped and reported
@@ -1052,19 +1089,17 @@ impl Graph {
     ///
     /// # Errors
     ///
-    /// A poisoned graph, or a `node` not in it; a graph that re-prepares is
-    /// refused ([`can_swap`](Self::can_swap) first).
+    /// [`ReplaceRefused::Busy`] while the graph re-prepares, handing `bound`
+    /// back unplaced; [`ReplaceRefused::Failed`] on a poisoned graph, a `node`
+    /// not in it, or an editor that refuses the swap.
     #[cfg(feature = "plugin")]
     pub(crate) fn replace_rebound(
         &mut self,
         node: NodeKey,
         bound: tutti_plugin::catalog::BoundPlugin,
-    ) -> Result<(), CrossfadeRefused> {
-        match self.swap_unit(node, bound, tutti_graph::DECLICK, FadeLaw::default()) {
-            Ok(_) => Ok(()),
-            Err(ReplaceRefused::Failed(refused)) => Err(refused),
-            Err(ReplaceRefused::Busy(_)) => Err(CrossfadeRefused::NoSuchNode(node)),
-        }
+    ) -> Result<(), ReplaceRefused<tutti_plugin::catalog::BoundPlugin>> {
+        self.swap_unit(node, bound, tutti_graph::DECLICK, FadeLaw::default())
+            .map(|_| ())
     }
 
     /// Puts the silent stand-in of a plugin that is gone at `node`
@@ -2703,6 +2738,12 @@ impl Graph {
     /// A control, not an edit: the graph is not recompiled, the mode lands at
     /// the next block, and the graph is not marked edited.
     ///
+    /// A hosted plugin with a bypass of its own is not bypassed by the
+    /// executor: the host writes the plugin's bypass in this call
+    /// (`PluginHandle::set_bypassed`) and compares it on every control tick.
+    /// Off the main thread an in-process plugin's write is lost, and it is kept
+    /// only by a tick on the main thread.
+    ///
     /// # Errors
     ///
     /// [`ModeError::NoSuchNode`] when `node` is not in the graph;
@@ -2714,7 +2755,67 @@ impl Graph {
         if self.editor.is_leaving(node) {
             return Err(ModeError::NoSuchNode { node });
         }
-        self.editor.set_mode(node, mode)
+        self.editor.set_mode(node, mode)?;
+        // A plugin with a bypass of its own keeps running in `Bypassed` (its
+        // node declares it), so its bypass is written here, once per change.
+        // `set_bypassed` leaves a plugin without one alone.
+        #[cfg(feature = "plugin")]
+        self.write_own_bypass(node);
+        Ok(())
+    }
+
+    /// Writes the bypass of the plugin hosted at `node`, if any, to what the
+    /// node's mode says: on every change of mode, and when a plugin enters the
+    /// node (an insert, a host, a replacement or a reload). A plugin without a
+    /// bypass of its own is left alone. The write is not assumed applied:
+    /// [`reconcile_own_bypass`](Self::reconcile_own_bypass) compares on every
+    /// tick, and a write that never reached the plugin is written again there.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn write_own_bypass(&mut self, node: NodeKey) {
+        let Ok(mode) = self.mode(node) else { return };
+        if let Some(hosted) = self.plugins.get_mut(&node) {
+            hosted
+                .bypass
+                .assert_mode(&hosted.handle, &hosted.mirror, mode);
+        }
+    }
+
+    /// Makes every healthy hosted plugin's own bypass the node's mode, on the
+    /// control tick and with no round trip (`BypassSync::reconcile`): an
+    /// in-process plugin's bypass is read, without waiting for its instance, and
+    /// a served plugin's is compared with its mirrored parameter values. A
+    /// plugin that differs, or whose write never reached it, is written again,
+    /// each episode counted once
+    /// ([`Plugin::bypass_writes_unapplied`](crate::Plugin::bypass_writes_unapplied)).
+    /// A plugin that refused the mode is not written again until the node's mode
+    /// changes: the refusal is latched, and counted as an episode only when the
+    /// plugin held another bypass.
+    ///
+    /// Until a plugin is back in the node's mode the executor does not bypass its
+    /// node, so it plays processed audio under `Bypassed` for that long: a tick
+    /// or two for an in-process plugin; for a served one until the plugin
+    /// reports its change, or a dropped write is retried (the wait doubles up to
+    /// 32 ticks). A served plugin that refuses a delivered write is not seen. An
+    /// in-process plugin's bypass is kept only on a session ticked on the main
+    /// thread (its write and read are the main thread's); an in-process plugin on
+    /// another thread's tick is not refused, and its node stays unbypassed under
+    /// `Bypassed`.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn reconcile_own_bypass(&mut self) {
+        let wants: Vec<(NodeKey, NodeMode)> = self
+            .plugins
+            .keys()
+            .filter_map(|&node| Some((node, self.mode(node).ok()?)))
+            .collect();
+        for (node, want) in wants {
+            if let Some(hosted) = self.plugins.get_mut(&node)
+                && hosted.is_healthy()
+            {
+                hosted
+                    .bypass
+                    .reconcile(&hosted.handle, &hosted.mirror, want);
+            }
+        }
     }
 
     /// `node`'s mode, [`NodeMode::Active`] for a node never given one.
@@ -2929,6 +3030,16 @@ impl Graph {
     pub(crate) fn reap_taps(&mut self) -> usize {
         let reaped = self.editor.reap_taps();
         if reaped > 0 {
+            let open = &self.editor.spec().topology.taps;
+            self.output_taps.retain(|id, _| open.contains_key(id));
+            // A held reader keeps its tap alive, and a claimed one has left the map.
+            debug_assert!(
+                self.reopened.keys().all(|id| match id {
+                    RootReader::Tap(tap) => open.contains_key(tap),
+                    RootReader::Meter(_) => true,
+                }),
+                "no held reader names a reaped tap"
+            );
             self.edited = true;
         }
         reaped
@@ -2951,6 +3062,15 @@ impl Graph {
     pub(crate) fn reap_meters(&mut self) -> usize {
         let reaped = self.editor.reap_meters();
         if reaped > 0 {
+            let open = &self.editor.spec().topology.meters;
+            // A held reader keeps its meter alive, and a claimed one has left the map.
+            debug_assert!(
+                self.reopened.keys().all(|id| match id {
+                    RootReader::Meter(meter) => open.contains_key(meter),
+                    RootReader::Tap(_) => true,
+                }),
+                "no held reader names a reaped meter"
+            );
             self.edited = true;
         }
         reaped
@@ -3307,12 +3427,15 @@ impl Graph {
         }
         self.root = root;
         self.widen_refusal = None;
+        let mut resized = false;
         let outputs = &mut self.editor.spec_mut().topology.outputs;
         if outputs.len() != width {
             outputs.resize(width, Vec::new());
             self.drop_stale_gains();
             self.edited = true;
+            resized = true;
         }
+        self.reopen_root_readers(resized);
         Ok(())
     }
 

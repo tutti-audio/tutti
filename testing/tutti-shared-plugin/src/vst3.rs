@@ -152,6 +152,8 @@ impl Class for Plugin {
         IProcessContextRequirements,
         IEditController,
         IMidiMapping,
+        IUnitInfo,
+        IParameterFunctionName,
     );
 }
 
@@ -550,6 +552,101 @@ impl IMidiMappingTrait for Plugin {
     }
 }
 
+impl IUnitInfoTrait for Plugin {
+    unsafe fn getUnitCount(&self) -> i32 {
+        core::UNITS.len() as i32
+    }
+    unsafe fn getUnitInfo(&self, index: i32, info: *mut UnitInfo) -> tresult {
+        let Some(&(id, parent, name)) =
+            usize::try_from(index).ok().and_then(|i| core::UNITS.get(i))
+        else {
+            return kInvalidArgument;
+        };
+        // SAFETY: `info` is an out-pointer the host owns for the call.
+        let info = unsafe { &mut *info };
+        info.id = id;
+        info.parentUnitId = parent;
+        put_wstring(name, &mut info.name);
+        info.programListId = kNoProgramListId;
+        kResultOk
+    }
+    unsafe fn getProgramListCount(&self) -> i32 {
+        0
+    }
+    unsafe fn getProgramListInfo(&self, _index: i32, _info: *mut ProgramListInfo) -> tresult {
+        kInvalidArgument
+    }
+    unsafe fn getProgramName(&self, _list: i32, _index: i32, _name: *mut String128) -> tresult {
+        kInvalidArgument
+    }
+    unsafe fn getProgramInfo(
+        &self,
+        _list: i32,
+        _index: i32,
+        _attribute: *const c_char,
+        _value: *mut String128,
+    ) -> tresult {
+        kInvalidArgument
+    }
+    unsafe fn hasProgramPitchNames(&self, _list: i32, _index: i32) -> tresult {
+        kResultFalse
+    }
+    unsafe fn getProgramPitchName(
+        &self,
+        _list: i32,
+        _index: i32,
+        _pitch: i16,
+        _name: *mut String128,
+    ) -> tresult {
+        kInvalidArgument
+    }
+    unsafe fn getSelectedUnit(&self) -> i32 {
+        0
+    }
+    unsafe fn selectUnit(&self, _unit: i32) -> tresult {
+        kResultFalse
+    }
+    unsafe fn getUnitByBus(
+        &self,
+        _type: MediaType,
+        _dir: BusDirection,
+        _bus: i32,
+        _channel: i32,
+        _unit: *mut i32,
+    ) -> tresult {
+        kResultFalse
+    }
+    unsafe fn setUnitProgramData(&self, _list: i32, _index: i32, _data: *mut IBStream) -> tresult {
+        kResultFalse
+    }
+}
+
+impl IParameterFunctionNameTrait for Plugin {
+    unsafe fn getParameterIDFromFunctionName(
+        &self,
+        unit: i32,
+        name: FIDString,
+        id: *mut ParamID,
+    ) -> tresult {
+        if name.is_null() {
+            return kInvalidArgument;
+        }
+        // SAFETY: `name` is a NUL-terminated string the host owns for the call (null-checked above).
+        let name = unsafe { std::ffi::CStr::from_ptr(name) };
+        let found = core::FUNCTION_NAMES
+            .iter()
+            .find(|&&(u, n, _)| u == unit && n.as_bytes() == name.to_bytes());
+        match found {
+            Some(&(_, _, param)) => {
+                // SAFETY: `id` is an out-pointer the host owns for the call.
+                unsafe { *id = param };
+                kResultTrue
+            }
+            None => kResultFalse,
+        }
+    }
+}
+
 impl IEditControllerTrait for Plugin {
     unsafe fn setComponentState(&self, state: *mut IBStream) -> tresult {
         // The same object holds the state; nothing to mirror.
@@ -563,29 +660,44 @@ impl IEditControllerTrait for Plugin {
         kResultOk
     }
     unsafe fn getParameterCount(&self) -> i32 {
-        core::PARAMS as i32
+        core::LISTED as i32
     }
     unsafe fn getParameterInfo(&self, index: i32, info: *mut ParameterInfo) -> tresult {
-        let Some(default) = core::default_of(index as u32).filter(|_| index >= 0) else {
+        let Some(&id) = usize::try_from(index)
+            .ok()
+            .and_then(|i| core::LISTED_IDS.get(i))
+        else {
             return kInvalidArgument;
         };
+        let Some(default) = core::default_of(id) else {
+            return kInvalidArgument;
+        };
+        // The id is the parameter's, not its position in the list.
+        let index = id as i32;
         // SAFETY, for this function's `unsafe` blocks: `info` is an out-pointer the host owns for the call.
         let info = unsafe { &mut *info };
         info.id = index as u32;
         put_wstring(core::NAMES[index as usize], &mut info.title);
         put_wstring(core::NAMES[index as usize], &mut info.shortTitle);
         put_wstring("", &mut info.units);
-        info.stepCount = if index as u32 == core::MODE {
-            (core::MODES - 1) as i32
+        info.stepCount = match index as u32 {
+            core::MODE => (core::MODES - 1) as i32,
+            // A switch: two positions.
+            core::BYPASS => 1,
+            _ => 0,
+        };
+        info.defaultNormalizedValue = default;
+        info.unitId = if index as u32 == core::AUX {
+            core::AUX_UNIT
         } else {
             0
         };
-        info.defaultNormalizedValue = default;
-        info.unitId = 0;
-        info.flags = if index as u32 == core::METER {
-            sdk(ParameterInfo_::ParameterFlags_::kIsReadOnly)
-        } else {
-            sdk(ParameterInfo_::ParameterFlags_::kCanAutomate)
+        let can_automate: i32 = sdk(ParameterInfo_::ParameterFlags_::kCanAutomate);
+        let is_bypass: i32 = sdk(ParameterInfo_::ParameterFlags_::kIsBypass);
+        info.flags = match index as u32 {
+            core::METER => sdk(ParameterInfo_::ParameterFlags_::kIsReadOnly),
+            core::BYPASS => can_automate | is_bypass,
+            _ => can_automate,
         };
         kResultOk
     }

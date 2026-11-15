@@ -16,7 +16,7 @@ use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 use tutti_plugin_types::{
     Event, Hand, HostOp, InProcess, Layout, Lifecycle, Load, Loaded, MaxBlock, Notice, Origin,
     PluginError, Prepare, Processor, RenderMode, RenderModeSupport, SampleRate, Samples, State,
-    standing,
+    Successor, standing,
 };
 use tutti_rt::Rt;
 
@@ -63,6 +63,8 @@ pub(super) struct Instance<F: Loaded> {
     rate_report: Option<Option<(SampleRate, String)>>,
     /// The last rate change was refused (the report above says so once).
     rate_refused: bool,
+    /// A successor was committed ([`commit`](Self::commit)).
+    committed: bool,
 }
 
 impl<F: InProcess> Instance<F> {
@@ -131,6 +133,7 @@ impl<F: Loaded> Instance<F> {
             changes: Changes::default(),
             rate_report: None,
             rate_refused: false,
+            committed: false,
         };
         let refused = this.drive(main, Event::Op(HostOp::Activate(prepare)));
         if let Some(reason) = refused {
@@ -165,6 +168,7 @@ impl<F: Loaded> Instance<F> {
             changes: Changes::default(),
             rate_report: None,
             rate_refused: false,
+            committed: false,
         };
         (this, rt)
     }
@@ -199,14 +203,6 @@ impl<F: Loaded> Instance<F> {
         self.lifecycle.control()
     }
 
-    /// Whether the plugin is gone (a call into it panicked): it renders
-    /// silence and the pump skips it.
-    #[cfg(test)]
-    #[must_use]
-    pub(super) fn is_lost(&self) -> bool {
-        self.lifecycle.is_poisoned()
-    }
-
     /// The latency and tail as the control side last read them. Dispatches
     /// nothing, so the graph compile may call it.
     pub(super) fn figures(&self) -> (Samples, PluginTail) {
@@ -227,51 +223,81 @@ impl<F: Loaded> Instance<F> {
         Some((self.state.layout()?, latency, tail))
     }
 
-    /// Points the Processor's way at a new realtime end, which this returns,
-    /// and brings the Processor back to be lent to it ([`Hand::rehand`]): a
-    /// [`HostOp::Relend`], so the plugin keeps running and is neither
-    /// deactivated nor activated. Main thread.
-    ///
-    /// The end the node in the graph holds hands the Processor back at its
-    /// next poll (or when that node is dropped), and the pump's tick lends it
-    /// to the returned end. Until then the returned end is empty and a node
-    /// over it renders silence; [`settlement`](Self::settlement) says when the
-    /// way is the new end's.
+    /// Whether the plugin can take a successor realtime end now.
     ///
     /// # Errors
     ///
     /// [`RebindError::NotRunning`] for a plugin that is not active (loaded,
-    /// refused or lost): there is no Processor to move, and nothing is
-    /// changed. [`RebindError::Restarting`] while the plugin's own restart or
-    /// a request still to be read is under way: the layout the lifecycle
-    /// holds is not the one the plugin will run with, so the caller pumps and
-    /// tries again.
-    pub(super) fn rehand(
-        &mut self,
-        main: MainThreadMarker,
-    ) -> Result<Rt<F::Processor>, RebindError> {
+    /// refused or lost): there is no Processor to move.
+    /// [`RebindError::Restarting`] while the plugin's own restart or a request
+    /// still to be read is under way: the layout the lifecycle holds is not the
+    /// one the plugin will run with, so the caller pumps and tries again.
+    pub(super) fn ready_to_rehand(&self) -> Result<(), RebindError> {
         if !self.state.renders() {
             return Err(RebindError::NotRunning);
         }
         if !self.state.is_quiet() || self.state.is_parked() {
             return Err(RebindError::Restarting);
         }
-        let rt = self.hand.rehand();
+        Ok(())
+    }
+
+    /// Names `successor` as the Processor's way and brings the Processor back to
+    /// be lent to it: a [`HostOp::Relend`], so the plugin keeps running and is
+    /// neither deactivated nor activated ([`Hand::install`]). Main thread.
+    ///
+    /// The end the node in the graph holds hands the Processor back at its
+    /// next poll (or when that node is dropped), and the pump's tick lends it
+    /// to the successor. Until then the successor's end is empty and a node
+    /// over it renders silence; [`settlement`](Self::settlement) says when the
+    /// way is the successor's.
+    ///
+    /// A plugin that refuses the restart renders nothing until a restart it
+    /// takes, which lends to the successor (the only end now): the refusal is
+    /// kept for the control side, as a rate's is
+    /// ([`take_rate_report`](Self::take_rate_report)).
+    ///
+    /// # Errors
+    ///
+    /// [`ready_to_rehand`](Self::ready_to_rehand)'s, and
+    /// [`RebindError::Unplanned`] when the op planned no recall and moved
+    /// nothing: the successor is then taken back, never left set with no
+    /// recall behind it.
+    pub(super) fn commit(
+        &mut self,
+        main: MainThreadMarker,
+        successor: Successor<F::Processor>,
+    ) -> Result<(), RebindError> {
+        self.ready_to_rehand()?;
+        self.hand.install(successor);
         if let Some(why) = self.drive(main, Event::Op(HostOp::Relend)) {
             self.note_refusal(why);
         }
-        Ok(rt)
+        // Moved at once (the Processor was held), or parked on the recall.
+        if self.hand.pending() && !self.state.is_parked() {
+            self.hand.withdraw();
+            return Err(RebindError::Unplanned);
+        }
+        self.committed = true;
+        Ok(())
     }
 
-    /// Where the Processor's way is, after a [`rehand`](Self::rehand).
+    /// Where the Processor's way is, after a [`commit`](Self::commit).
     pub(super) fn settlement(&self) -> Settlement {
         if self.lifecycle.is_poisoned() {
             Settlement::Lost
         } else if self.hand.pending() {
             Settlement::Pending
-        } else {
+        } else if self.committed {
             Settlement::Moved
+        } else {
+            Settlement::Idle
         }
+    }
+
+    /// Whether the plugin is gone (a call into it panicked).
+    pub(super) fn is_lost(&self) -> bool {
+        self.lifecycle.is_poisoned()
     }
 
     /// The render mode the plugin runs in, or was last told.
