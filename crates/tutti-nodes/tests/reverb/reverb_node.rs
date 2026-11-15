@@ -7,8 +7,8 @@
 use std::sync::Arc;
 
 use tutti_dsp::{
-    Family, FdnControls, FdnLayout, Feed, Freeverb, FreeverbControls, FreeverbFamily, Grows, Reach,
-    Setup, System,
+    Family, FdnControls, FdnLayout, Freeverb, FreeverbControls, FreeverbFamily, Grows, Inputs,
+    Reach, Setup, System,
 };
 use tutti_fixtures::Noise;
 use tutti_graph::contract::{assert_honest_tail, assert_param_fork, drive_input, prepared};
@@ -219,7 +219,7 @@ fn the_cut_discards_only_what_is_below_the_floor() {
         let mut x = vec![0.0f32; frames];
         x[0] = 1.0;
         let (mut l, mut r) = (vec![0.0f32; frames], vec![0.0f32; frames]);
-        tuned.process(&Feed::new(&[&x]), &mut [&mut l, &mut r], frames);
+        tuned.process(&Inputs::new(&[&x]), &mut [&mut l, &mut r], frames);
         let peak = l.iter().chain(&r).fold(0.0f32, |m, s| m.max(s.abs()));
         let after = l[tail + 1..]
             .iter()

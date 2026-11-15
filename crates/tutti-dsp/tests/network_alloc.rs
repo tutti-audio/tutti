@@ -75,7 +75,7 @@ fn freeverb_retargets_and_renders_without_allocating() {
             design.member_into(&c, rate, &mut network);
             realization.retarget(&network);
             realization.process(
-                &tutti_dsp::Feed::new(&[&input]),
+                &tutti_dsp::Inputs::new(&[&input]),
                 &mut [&mut left, &mut right],
                 64,
             );

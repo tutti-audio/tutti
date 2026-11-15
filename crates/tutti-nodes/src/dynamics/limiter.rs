@@ -54,7 +54,7 @@ use crate::reverb::{FamilyNode, NodeFamily, Rings};
 /// (a release under 1 ms reads as 1 ms, and a NaN threshold or ceiling is ignored).
 ///
 /// **The threshold and the ceiling are read per frame** when the graph drives them: a lane
-/// on their ports is the recurrence's own ([`Feed`](tutti_dsp::Feed) lanes 0 and 1), and
+/// on their ports is the recurrence's own ([`Inputs`](tutti_dsp::Inputs) lanes 0 and 1), and
 /// the cell is the base a frame nobody drives (or a non-finite one) is read at. **The
 /// release is on the stream grid** (16 frames from the last reset,
 /// [`Family::CADENCE`](tutti_dsp::Family::CADENCE)): a cell write or a driven port is

@@ -38,7 +38,7 @@ use crate::reverb::{FamilyNode, NodeFamily, Rings};
 /// graph's `set_param` (a time under 0 reads as 0 and a range over 0 dB as 0 dB).
 ///
 /// **The threshold is read per frame** when the graph drives it: a lane on its port is the
-/// recurrence's own ([`Feed`](tutti_dsp::Feed) lane 0), and the cell is the base a frame
+/// recurrence's own ([`Inputs`](tutti_dsp::Inputs) lane 0), and the cell is the base a frame
 /// nobody drives (or a non-finite one) is compared against. **Every other control is on
 /// the stream grid** (16 frames from the last reset,
 /// [`Family::CADENCE`](tutti_dsp::Family::CADENCE)): a cell write or a driven port is

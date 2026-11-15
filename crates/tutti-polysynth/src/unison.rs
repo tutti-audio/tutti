@@ -6,6 +6,8 @@
 //! and spread are recomputed only when they change, so the audio thread does an
 //! array index rather than the trigonometry.
 
+use std::num::NonZeroU32;
+use tutti_dsp::Xorshift32;
 use tutti_types::{Amplitude, CentsSpan, Pan, Param, Phase, Spread};
 
 pub(crate) const MAX_UNISON_VOICES: usize = UnisonVoices::MAX as usize;
@@ -143,11 +145,14 @@ pub struct UnisonVoiceParams {
     pub amplitude: Amplitude,
 }
 
+/// The seed of the phase scatter, so a render is reproducible.
+const PHASE_SEED: NonZeroU32 = NonZeroU32::new(12345).expect("the seed is nonzero");
+
 #[derive(Debug, Clone)]
 pub struct UnisonEngine {
     config: UnisonConfig,
     voices: [UnisonVoiceParams; MAX_UNISON_VOICES],
-    rng_state: u32,
+    rng: Xorshift32,
     /// Control-rate-modulatable mirrors of `config.detune_cents` /
     /// `config.stereo_spread`. A modulator writes these (through the
     /// synth's `ParamSet`); [`sync_from_atomics`](Self::sync_from_atomics),
@@ -165,7 +170,7 @@ impl UnisonEngine {
         let mut engine = Self {
             config,
             voices: [UnisonVoiceParams::default(); MAX_UNISON_VOICES],
-            rng_state: 12345,
+            rng: Xorshift32::new(PHASE_SEED),
             detune,
             spread,
         };
@@ -267,11 +272,7 @@ impl UnisonEngine {
         let count = usize::from(self.config.voice_count.get());
 
         for i in 0..count {
-            self.rng_state ^= self.rng_state << 13;
-            self.rng_state ^= self.rng_state >> 17;
-            self.rng_state ^= self.rng_state << 5;
-
-            self.voices[i].phase_offset = Phase((self.rng_state as f32) / (u32::MAX as f32));
+            self.voices[i].phase_offset = Phase::new(Xorshift32::to_unit(self.rng.next_u32()));
         }
         self.all_params()
     }
