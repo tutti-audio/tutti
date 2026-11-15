@@ -58,6 +58,45 @@ pub(crate) const CTRL_AFTERTOUCH: usize = kAfterTouch as usize;
 /// Synthetic controller index VST3 uses for pitch bend.
 pub(crate) const CTRL_PITCH_BEND: usize = kPitchBend as usize;
 
+/// The controller number of a program change, which `IMidiMapping` may name
+/// beside `ControllerNumbers`' own (`kCtrlProgramChange`).
+const CTRL_PROGRAM_CHANGE: i16 = 130;
+/// The controller number of a polyphonic key pressure (`kCtrlPolyPressure`).
+const CTRL_POLY_PRESSURE: i16 = 131;
+
+/// The plugin's controller table as declared assignments: one per mapped
+/// channel and message, scanned over every controller number the SDK gives a
+/// [`MidiSource`] (Control Change, channel pressure, pitch bend, program change
+/// and polyphonic pressure). The numbers past those are system messages, not
+/// controllers a parameter follows. Empty without an `IMidiMapping`. One
+/// scan, so a caller keeps the result; main thread.
+pub(crate) fn declared_assignments(main: MainThreadMarker, plugin: &Plugin) -> Vec<MidiAssignment> {
+    let mut out = Vec::new();
+    plugin.midi_controller_assignments(
+        main,
+        0..NUM_CHANNELS as i16,
+        0..CTRL_POLY_PRESSURE + 1,
+        |channel, controller, id| {
+            let source = match controller {
+                c if c == CTRL_AFTERTOUCH as i16 => MidiSource::ChannelPressure,
+                c if c == CTRL_PITCH_BEND as i16 => MidiSource::PitchBend,
+                CTRL_PROGRAM_CHANGE => MidiSource::ProgramChange,
+                CTRL_POLY_PRESSURE => MidiSource::PolyPressure,
+                cc => match u8::try_from(cc).ok().and_then(U7::new) {
+                    Some(cc) => MidiSource::ControlChange(cc),
+                    None => return,
+                },
+            };
+            out.push(MidiAssignment {
+                channel: u8::try_from(channel).ok().and_then(MidiChannel::new),
+                source,
+                param: id.into(),
+            });
+        },
+    );
+    out
+}
+
 /// A [`MidiCcMapping`] as the control thread publishes it to the Processor.
 pub(crate) struct MidiCcCell(pub(crate) MidiCcMapping);
 
@@ -117,34 +156,6 @@ impl MidiCcMapping {
             // Nothing mapped — drop the allocation, behave as empty.
             Self::empty()
         }
-    }
-
-    /// The table as the plugin's declared assignments: one per mapped channel
-    /// and message. Controller numbers past pitch bend (program change, poly
-    /// pressure and the system messages the controller numbers also list) name no
-    /// [`MidiSource`] and are left out.
-    pub(crate) fn declared(&self) -> Vec<MidiAssignment> {
-        let mut out = Vec::new();
-        for (slot, &id) in self.table.iter().enumerate() {
-            if id == NO_PARAM_ID {
-                continue;
-            }
-            let (channel, controller) = (slot / NUM_CONTROLLERS, slot % NUM_CONTROLLERS);
-            let source = match controller {
-                CTRL_AFTERTOUCH => MidiSource::ChannelPressure,
-                CTRL_PITCH_BEND => MidiSource::PitchBend,
-                cc => match u8::try_from(cc).ok().and_then(U7::new) {
-                    Some(cc) => MidiSource::ControlChange(cc),
-                    None => continue,
-                },
-            };
-            out.push(MidiAssignment {
-                channel: u8::try_from(channel).ok().and_then(MidiChannel::new),
-                source,
-                param: id.into(),
-            });
-        }
-        out
     }
 
     /// True if no controller on any channel maps to a parameter. The audio

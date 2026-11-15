@@ -93,11 +93,17 @@ impl Control for Vst2Loaded {
             tail: self.tail(main),
             features: self.features(),
             probed: probed::VST2,
-            // VST2's `effSetBypass` is a soft bypass the host never writes,
-            // and it has no controller table.
-            own_bypass: false,
+            // A plugin that answers `canDo("bypass")` has the soft bypass the
+            // host writes with `effSetBypass`; VST2 has no controller table.
+            own_bypass: self.supports_soft_bypass(main),
             assignments: Vec::new(),
         }
+    }
+
+    /// `effSetBypass`: VST2's bypass is an opcode, not a parameter. `false` for
+    /// a plugin that does not advertise it or refuses it.
+    fn set_bypassed(&mut self, main: MainThreadMarker, bypassed: bool) -> bool {
+        self.supports_soft_bypass(main) && self.set_bypass(main, bypassed)
     }
 
     fn parameters(&self, _main: MainThreadMarker) -> Vec<ParameterInfo> {

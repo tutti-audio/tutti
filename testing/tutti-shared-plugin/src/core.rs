@@ -51,7 +51,7 @@
 //!   others are continuous.
 //! - **Bypass.** `bypass` ([`BYPASS`]) is the plugin's own bypass: a listed
 //!   parameter flagged as the bypass in VST3 and CLAP, `kAudioUnitProperty_BypassEffect`
-//!   in AU (no parameter), and none in VST2. A write reaches the transcript as
+//!   in AU and `effSetBypass` in VST2 (neither a parameter). A write reaches the transcript as
 //!   `bypass`'s point, `1` bypassed. The plugin renders the same either way.
 //! - **Controller table.** VST3's `IMidiMapping` and AU's
 //!   mapping table each declare one mapping: Control Change 74 on
@@ -218,9 +218,9 @@ pub const MODE: u32 = 2;
 pub const TONE: u32 = 3;
 /// The bypass parameter: `0` processing, `1` bypassed. Only CLAP and VST3 list
 /// it, flagged as the format's bypass; an AU's bypass is its
-/// `kAudioUnitProperty_BypassEffect` property and VST2 has none, and a write to
-/// the property reaches the plugin as this parameter's point in the next block.
-pub const BYPASS: u32 = 4;
+/// `kAudioUnitProperty_BypassEffect` property and VST2's `effSetBypass`, and a
+/// write to either reaches the plugin as this parameter's point.
+pub const BYPASS: u32 = 5;
 /// The module CLAP puts `aux` in: the path of the `Filter` unit VST3 puts it in
 /// (`Voices` > `Oscillator` > `Filter`).
 pub const AUX_MODULE: &str = "Voices/Oscillator/Filter";
@@ -240,10 +240,12 @@ pub const FUNCTION_NAMES: [(i32, &str, u32); 4] = [
 ];
 /// Number of parameters VST2 and AU list: the four above.
 pub const PARAMS: u32 = 4;
-/// Number of parameters CLAP and VST3 list: the four above and [`BYPASS`].
-pub const LISTED: u32 = 5;
-/// Parameter names, by id.
-pub const NAMES: [&str; LISTED as usize] = ["level", "aux", "mode", "tone", "bypass"];
+/// The ids CLAP and VST3 list, in list order: the four above and [`BYPASS`].
+pub const LISTED_IDS: [u32; 5] = [LEVEL, AUX, MODE, TONE, BYPASS];
+/// Number of parameters CLAP and VST3 list.
+pub const LISTED: u32 = LISTED_IDS.len() as u32;
+/// Parameter names, by id; a slot no parameter has holds "".
+pub const NAMES: [&str; 6] = ["level", "aux", "mode", "tone", "", "bypass"];
 /// The plain value of `TONE` at its normalized minimum, its largest.
 pub const TONE_PLAIN_MAX: f64 = 20_000.0;
 /// The plain value of `TONE` at its normalized maximum, its smallest.

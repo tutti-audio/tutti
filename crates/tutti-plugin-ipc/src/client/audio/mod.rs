@@ -353,6 +353,22 @@ impl AudioBridge {
         }
     }
 
+    /// Queues a write of the plugin's own bypass, saying why if it did not go,
+    /// as [`set_automation_state_rt`](Self::set_automation_state_rt) does.
+    pub fn set_bypassed_rt(&self, bypassed: bool) -> Delivered {
+        if self.lifecycle.is_crashed() {
+            return Delivered::PluginDead;
+        }
+        if self
+            .channels
+            .push_command(Command::SetBypassed { bypassed })
+        {
+            Delivered::Yes
+        } else {
+            Delivered::Dropped
+        }
+    }
+
     /// Queues what the host says of the plugin's track, saying **why** if it
     /// did not go. Main thread: the value is boxed here, off the audio thread.
     pub fn set_track_info(&self, info: &tutti_plugin_types::TrackInfo) -> Delivered {

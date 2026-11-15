@@ -479,9 +479,9 @@ impl AuMidiMapping {
 }
 
 /// The mappings of `table` that drive a global-scope parameter from a Control
-/// Change, channel pressure or pitch bend, as the assignments a plugin declares
-/// ([`MidiAssignment`]). A mapping on another scope or element, or one a note,
-/// program change or system message triggers, names no [`MidiSource`] and is
+/// Change, channel or key pressure, pitch bend or program change, as the assignments a plugin declares
+/// ([`MidiAssignment`]). A mapping on another scope or element, or one a note
+/// or system message triggers, names no [`MidiSource`] and is
 /// left out.
 pub(crate) fn declared(table: &[AuMidiMapping]) -> Vec<MidiAssignment> {
     table
@@ -494,6 +494,8 @@ pub(crate) fn declared(table: &[AuMidiMapping]) -> Vec<MidiAssignment> {
                 }
                 MidiTrigger::ChannelPressure => MidiSource::ChannelPressure,
                 MidiTrigger::PitchBend => MidiSource::PitchBend,
+                MidiTrigger::ProgramChange { .. } => MidiSource::ProgramChange,
+                MidiTrigger::KeyPressure { .. } => MidiSource::PolyPressure,
                 _ => return None,
             };
             Some(MidiAssignment {

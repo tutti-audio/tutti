@@ -35,26 +35,6 @@ const NO_TRANSPORT_EVENT: (&str, Gap) = (
     },
 );
 
-/// VST2's bypass is `effSetBypass`, a soft bypass the host never writes, and the
-/// plugin lists no bypass parameter: two cases fail.
-const VST2_NO_BYPASS: [(&str, Gap); 2] = [
-    (
-        "own_bypass_is_declared_and_written",
-        Gap {
-            why: "the host writes no VST2 bypass (effSetBypass), so a VST2 plugin has no own bypass",
-            fails_with: "the plugin has its own bypass",
-        },
-    ),
-    (
-        "the_bypass_parameter_is_not_a_listed_control",
-        Gap {
-            why: "VST2 keeps its bypass in effSetBypass, which is no parameter, and the host reads no \
-                  bypass from it",
-            fails_with: "the plugin lists its bypass parameter",
-        },
-    ),
-];
-
 /// VST2.
 pub struct Vst2;
 
@@ -65,8 +45,7 @@ impl Format for Vst2 {
     /// VST2 has no sample offset on a parameter: the host's changes land at the
     /// block head.
     const PARAM_TIMING: ParamTiming = ParamTiming::BlockHead;
-    const GAPS: &'static [(&'static str, Gap)] =
-        &[NO_TRANSPORT_EVENT, VST2_NO_BYPASS[0], VST2_NO_BYPASS[1]];
+    const GAPS: &'static [(&'static str, Gap)] = &[NO_TRANSPORT_EVENT];
 
     fn load() -> Self::L {
         tutti_vst2_host::Vst2Loaded::load(

@@ -2447,6 +2447,10 @@ impl Graph {
     /// A control, not an edit: the graph is not recompiled, the mode lands at
     /// the next block, and the graph is not marked edited.
     ///
+    /// A hosted plugin with a bypass of its own is not bypassed by the
+    /// executor: the host writes the plugin's bypass in this call
+    /// (`PluginHandle::set_bypassed`).
+    ///
     /// # Errors
     ///
     /// [`ModeError::NoSuchNode`] when `node` is not in the graph;
@@ -2458,7 +2462,15 @@ impl Graph {
         if self.editor.is_leaving(node) {
             return Err(ModeError::NoSuchNode { node });
         }
-        self.editor.set_mode(node, mode)
+        self.editor.set_mode(node, mode)?;
+        // A plugin with a bypass of its own keeps running in `Bypassed` (its
+        // node declares it), so its bypass is written here, once per change.
+        // `set_bypassed` leaves a plugin without one alone.
+        #[cfg(feature = "plugin")]
+        if let Some(hosted) = self.plugins.get(&node) {
+            let _ = hosted.handle.set_bypassed(mode == NodeMode::Bypassed);
+        }
+        Ok(())
     }
 
     /// `node`'s mode, [`NodeMode::Active`] for a node never given one.

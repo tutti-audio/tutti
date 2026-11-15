@@ -82,6 +82,59 @@ fn through_server<F: Format>(path: PathBuf) {
     }
 }
 
+/// The host's write of the plugin's own bypass crosses the process boundary:
+/// the handle says the plugin has one, and the server's plugin is told `1` for
+/// bypassed and `0` for processing (its transcript is the witness, read as
+/// state). A plugin without one is left alone.
+fn a_served_bypass_reaches_the_plugin<F: Format>(path: PathBuf) {
+    // SAFETY: set before any thread of this test reads it.
+    unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
+    let client = PluginClient::new(
+        BridgeConfig::default(),
+        &tutti_fixtures::detached_work(),
+        &tutti_plugin::catalog::PluginRef::file(path).expect("a plugin file"),
+        tutti_plugin_types::SampleRate::SR_48K,
+    )
+    .unwrap_or_else(|e| panic!("{}: the server loads the plugin: {e:?}", F::NAME));
+    let handle = client.handle();
+    assert!(
+        handle.loaded().own_bypass,
+        "{}: the plugin has its own bypass",
+        F::NAME
+    );
+    let told = |want: f64| {
+        for _ in 0..200 {
+            let state = handle.any_thread().save_state().expect("saves");
+            let transcript = Transcript::parse(&F::extract_blob(&state));
+            let last = transcript.events.iter().rev().find(|e| {
+                e.kind == tutti_plugin_contract::Kind::Param && e.id == spec::BYPASS_ID.get()
+            });
+            if last.is_some_and(|e| e.value == want) {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        false
+    };
+    assert!(handle.set_bypassed(true));
+    assert!(
+        told(1.0),
+        "{}: the served plugin was told bypassed",
+        F::NAME
+    );
+    assert!(handle.set_bypassed(false));
+    assert!(
+        told(0.0),
+        "{}: the served plugin was told processing",
+        F::NAME
+    );
+}
+
+#[test]
+fn clap_bypass_crosses_the_process_boundary() {
+    a_served_bypass_reaches_the_plugin::<Clap>(clap_path());
+}
+
 #[test]
 fn clap_mode_and_transcript_cross_the_process_boundary() {
     through_server::<Clap>(clap_path());

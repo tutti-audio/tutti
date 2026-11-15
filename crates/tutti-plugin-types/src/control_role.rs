@@ -51,6 +51,10 @@ pub enum MidiSource {
     ChannelPressure,
     /// Pitch bend.
     PitchBend,
+    /// A program change (VST3 `kCtrlProgramChange`).
+    ProgramChange,
+    /// Polyphonic key pressure (VST3 `kCtrlPolyPressure`).
+    PolyPressure,
 }
 
 /// One entry of the controller table a plugin declares: a MIDI message and

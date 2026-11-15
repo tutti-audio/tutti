@@ -13,7 +13,7 @@
 
 namespace shared {
 
-constexpr uint32_t kLevel = 0, kAux = 1, kMode = 2, kTone = 3, kBypass = 4, kParams = 4, kListed = 5, kModes = 5;
+constexpr uint32_t kLevel = 0, kAux = 1, kMode = 2, kTone = 3, kBypass = 5, kParams = 4, kListed = 5, kModes = 5;
 // kBypass is core.rs's BYPASS: listed by the VST3 shells beside the four, flagged as the bypass parameter.
 // `tone`'s plain domain (core.rs, "Spec"): a decreasing exponential, 20000 * 1000^(-n).
 constexpr double kTonePlainMax = 20000.0, kTonePlainMin = 20.0;

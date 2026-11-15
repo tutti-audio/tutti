@@ -289,6 +289,13 @@ impl Session {
                 }
                 Ok(Reaction::None)
             }
+            M::SetBypassed { bypassed } => {
+                self.write_pending = true;
+                if let Some(plugin) = self.plugin.as_mut() {
+                    plugin.plugin_mut().set_bypassed(main, bypassed);
+                }
+                Ok(Reaction::None)
+            }
             M::SetTrackInfo { info } => {
                 if let Some(plugin) = self.plugin.as_mut() {
                     plugin.plugin_mut().set_track_info(main, &info);

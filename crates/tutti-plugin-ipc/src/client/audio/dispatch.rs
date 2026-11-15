@@ -553,6 +553,9 @@ pub(super) fn handle(
         Command::SetAutomationState { mode } => {
             ipc::send(stream, &HostMessage::SetAutomationState { mode })?;
         }
+        Command::SetBypassed { bypassed } => {
+            ipc::send(stream, &HostMessage::SetBypassed { bypassed })?;
+        }
         Command::SetTrackInfo { info } => {
             ipc::send(stream, &HostMessage::SetTrackInfo { info: *info })?;
         }

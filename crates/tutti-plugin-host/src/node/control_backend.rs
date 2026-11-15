@@ -511,13 +511,13 @@ mod off_main_tests {
         assert!(handle.any_thread().set_render_mode(RenderMode::Realtime));
     }
 
-    /// **A VST2 plugin has no bypass of its own** (the host never writes
-    /// `effSetBypass`): the write through the backend and through the handle
-    /// both say so, and the node's shape leaves bypass to the executor.
+    /// **A VST2 plugin that refuses `effSetBypass` is not written**: the
+    /// reference plugin advertises the soft bypass and declines it, so the
+    /// write through the backend and through the handle both say `false`.
     #[test]
-    fn a_plugin_without_its_own_bypass_takes_no_bypass_write() {
+    fn a_plugin_that_refuses_its_soft_bypass_takes_no_bypass_write() {
         let (_client, handle, _pump) = loaded();
-        assert!(!handle.loaded().own_bypass);
+        assert!(handle.loaded().own_bypass, "it advertises canDo(bypass)");
         assert!(!handle.any_thread().set_bypassed(true));
         assert!(!handle.set_bypassed(true));
     }

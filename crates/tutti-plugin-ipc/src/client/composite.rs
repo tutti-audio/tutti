@@ -353,6 +353,12 @@ impl PluginBridge {
         self.audio.set_automation_state_rt(mode)
     }
 
+    /// See `AudioBridge::set_bypassed_rt`. The audio instance only: the
+    /// bypass is part of what renders.
+    pub fn set_bypassed_rt(&self, bypassed: bool) -> Delivered {
+        self.audio.set_bypassed_rt(bypassed)
+    }
+
     /// See `AudioBridge::set_track_info`. The audio instance only: the
     /// editor's instance has no track.
     pub fn set_track_info(&self, info: &tutti_plugin_types::TrackInfo) -> Delivered {

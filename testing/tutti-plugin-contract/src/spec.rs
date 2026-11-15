@@ -57,7 +57,7 @@ impl Param {
 /// (CLAP and VST3): `0` processing, `1` bypassed. It is listed after the four
 /// of [`Param::ALL`], flagged as the format's bypass, and a write to it reaches
 /// the plugin as this parameter's point in the next block.
-pub const BYPASS_ID: ParamId = ParamId::new(4);
+pub const BYPASS_ID: ParamId = ParamId::new(5);
 
 /// Where a format keeps the plugin's own bypass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,9 +65,9 @@ pub enum Bypass {
     /// A listed parameter flagged as the bypass: VST3 `kIsBypass`, CLAP
     /// `CLAP_PARAM_IS_BYPASS`.
     Parameter,
-    /// A unit property, no parameter: AU `kAudioUnitProperty_BypassEffect`. The
-    /// plugin tells the host the property's write as [`BYPASS_ID`]'s point.
-    Property,
+    /// No parameter: AU `kAudioUnitProperty_BypassEffect`, VST2 `effSetBypass`.
+    /// The plugin tells the host's write as [`BYPASS_ID`]'s point.
+    Unlisted,
 }
 
 /// The controller the plugin maps to a parameter, in the formats that carry a
@@ -386,7 +386,7 @@ pub const VST2: Surface = Surface {
     tone: TONE_NORMALIZED,
     selects_tail: true,
     infinite_tail: None,
-    bypass: Bypass::Parameter,
+    bypass: Bypass::Unlisted,
     aux_group: "",
     roles: &[],
     overview: &[],
@@ -452,7 +452,7 @@ pub const AU: Surface = Surface {
     tone: TONE_LINEAR,
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
-    bypass: Bypass::Property,
+    bypass: Bypass::Unlisted,
     aux_group: "Filter",
     roles: &[],
     overview: &[Param::Level, Param::Tone],

@@ -104,10 +104,11 @@ pub(crate) mod wire;
 /// - **Version 39** removed three messages nothing sent (the server's
 ///   instance-destroyed notice, the host's single-parameter declaration query
 ///   and its reply); the variants after them renumber.
-/// - **Version 40** adds to a plugin's wiring whether it has a bypass of its own
-///   and the controller table it declares, and to a parameter its role (now a
-///   `ControlRole`) and its overview mark.
-pub const PROTOCOL_VERSION: u32 = 40;
+/// - **Version 41** adds to a plugin's wiring whether it has a bypass of its own
+///   and the controller table it declares, to a parameter its role (now a
+///   `ControlRole`) and its overview mark, and the host's `SetBypassed` write,
+///   appended after the last host message.
+pub const PROTOCOL_VERSION: u32 = 41;
 
 /// Largest control-socket frame body either end will allocate for, in bytes.
 ///

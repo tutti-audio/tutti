@@ -244,9 +244,13 @@ unsafe extern "C" fn params_info(
     index: u32,
     info: *mut clap_param_info,
 ) -> bool {
-    let Some(default) = core::default_of(index) else {
+    let Some(&id) = core::LISTED_IDS.get(index as usize) else {
         return false;
     };
+    let Some(default) = core::default_of(id) else {
+        return false;
+    };
+    let index = id;
     if info.is_null() {
         return false;
     }

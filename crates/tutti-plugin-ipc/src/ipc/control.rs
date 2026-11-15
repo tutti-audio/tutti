@@ -80,6 +80,13 @@ macro_rules! served_control {
             /// (the knob-glow lives in the GUI). [`Delivered`] says whether
             /// the command was *queued*; no format confirms the plugin
             /// visibly reacted.
+            /// The plugin's own bypass, written by the server as its format does
+            /// ([`HostMessage::SetBypassed`](crate::HostMessage::SetBypassed)).
+            fn set_bypassed(&self, bypassed: bool) -> bool {
+                self.link.loaded.own_bypass
+                    && self.link.bridge.set_bypassed_rt(bypassed) == Delivered::Yes
+            }
+
             fn set_automation_mode(&self, mode: AutomationMode) -> Result<(), AutomationModeError> {
                 if self.link.bridge.is_crashed() {
                     return Err(AutomationModeError::PluginDead);
@@ -246,6 +253,10 @@ macro_rules! served_control {
 
             /// Advisory only: the outcome `AnyThread::set_automation_mode`
             /// reports has no `Control` form.
+            fn set_bypassed(&mut self, _main: MainThreadMarker, bypassed: bool) -> bool {
+                AnyThread::set_bypassed(self, bypassed)
+            }
+
             fn set_automation_state(&mut self, _main: MainThreadMarker, mode: AutomationMode) {
                 let _ = AnyThread::set_automation_mode(self, mode);
             }

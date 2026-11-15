@@ -70,6 +70,9 @@ pub(super) enum Command {
         /// NOT carry a format-specific bitmask — see [`AutomationMode`](crate::protocol::AutomationMode).
         mode: crate::protocol::AutomationMode,
     },
+    SetBypassed {
+        bypassed: bool,
+    },
     /// What the host says of the plugin's track; boxed to keep the queue's
     /// slots small.
     SetTrackInfo {

@@ -256,7 +256,7 @@ pub fn parameters_listed<F: Format>() {
 /// (the plugin's own transcript is the witness). Where the format keeps the
 /// bypass in a parameter (VST3, CLAP) it is that parameter's point; an AU's is
 /// its `BypassEffect` property, which the plugin tells as the same point.
-/// Spec: clap.ext.params.get_info, vst3.IEditController.getParameterInfo, au.prop.BypassEffect
+/// Spec: clap.ext.params.get_info, vst3.IEditController.getParameterInfo, vst2.eff.SetBypass, au.prop.BypassEffect
 pub fn own_bypass_is_declared_and_written<F: Format>() {
     let main = main_thread();
     assert!(
@@ -292,7 +292,7 @@ pub fn own_bypass_is_declared_and_written<F: Format>() {
 /// format keeps it in a parameter the parameter is listed, flagged as the
 /// bypass, and left out of `controls`; where it is a property (AU) there is no
 /// parameter to leave out. The four other parameters are controls either way.
-/// Spec: clap.ext.params.get_info, vst3.IEditController.getParameterInfo, au.prop.BypassEffect
+/// Spec: clap.ext.params.get_info, vst3.IEditController.getParameterInfo, vst2.eff.SetBypass, au.prop.BypassEffect
 pub fn the_bypass_parameter_is_not_a_listed_control<F: Format>() {
     let main = main_thread();
     let loaded = F::load();
@@ -310,7 +310,7 @@ pub fn the_bypass_parameter_is_not_a_listed_control<F: Format>() {
             "{}: the plugin lists its bypass parameter, flagged",
             F::NAME
         ),
-        spec::Bypass::Property => assert_eq!(
+        spec::Bypass::Unlisted => assert_eq!(
             flagged,
             [],
             "{}: the plugin lists no bypass parameter",

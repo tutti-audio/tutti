@@ -663,9 +663,17 @@ impl IEditControllerTrait for Plugin {
         core::LISTED as i32
     }
     unsafe fn getParameterInfo(&self, index: i32, info: *mut ParameterInfo) -> tresult {
-        let Some(default) = core::default_of(index as u32).filter(|_| index >= 0) else {
+        let Some(&id) = usize::try_from(index)
+            .ok()
+            .and_then(|i| core::LISTED_IDS.get(i))
+        else {
             return kInvalidArgument;
         };
+        let Some(default) = core::default_of(id) else {
+            return kInvalidArgument;
+        };
+        // The id is the parameter's, not its position in the list.
+        let index = id as i32;
         // SAFETY, for this function's `unsafe` blocks: `info` is an out-pointer the host owns for the call.
         let info = unsafe { &mut *info };
         info.id = index as u32;
