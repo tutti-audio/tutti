@@ -17,8 +17,8 @@
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use tutti_midi_protocol::{PitchBendSensitivity, signed_f32_to_bend, unit_f32_to_value};
-use tutti_ump::{CCNumber, NoteNumber, Voice2};
+use tutti_midi_protocol::unit_f32_to_value;
+use tutti_ump::{CCNumber, ControlValue, NoteNumber, RegisteredPerNoteController, Voice2};
 
 use crate::Normalized;
 
@@ -122,10 +122,9 @@ impl NoteExpressionChanges {
     }
 }
 
-/// The per-note controllers a plugin's note expression stands for, and the
-/// expression each is: Volume is controller 7, Pan 10 and Brightness 74, the
-/// usual CC assignments. The one table both directions of every format read
-/// (an assignable and a registered per-note controller share the number).
+/// The Registered Per-Note Controllers a plugin's note expression stands for
+/// (M2-104 Appendix A): Volume is controller 7, Pan 10 and Brightness 74 (Sound
+/// Controller 5). The one table both directions of every format read.
 const PER_NOTE_EXPRESSIONS: [(CCNumber, NoteExpressionType); 3] = [
     (CCNumber::VOLUME, NoteExpressionType::Volume),
     (CCNumber::PAN, NoteExpressionType::Pan),
@@ -133,8 +132,7 @@ const PER_NOTE_EXPRESSIONS: [(CCNumber, NoteExpressionType); 3] = [
 ];
 
 /// The expression the per-note controller `number` is (volume 7, pan 10 and
-/// brightness 74, the usual CC assignments),
-/// or `None` for a number with no counterpart.
+/// brightness 74), or `None` for a number with no counterpart.
 #[must_use]
 pub fn expression_of_per_note_controller(number: u8) -> Option<NoteExpressionType> {
     PER_NOTE_EXPRESSIONS
@@ -153,29 +151,34 @@ fn per_note_controller_of_expression(expression: NoteExpressionType) -> Option<C
         .map(|&(controller, _)| controller)
 }
 
-/// The Per-Note Pitch Bend a plugin's Tuning of `semitones` from `note`'s key
-/// is, over the MPE default range of ±48 semitones (RP-053): the range a
-/// receiver assumes until a stream sets another with RPN 0/7, and the host
-/// sends none alongside. `None` for a value that is not finite: a plugin's
-/// tuning that is NaN or infinite is no bend.
+/// The Registered Per-Note Controller #3, Pitch 7.25 (M2-104 §7.4.15.2), a
+/// plugin's Tuning of `semitones` from `note`'s key is: the absolute pitch
+/// `note + semitones` as Q7.25, which no range assumption saturates. `None` for a
+/// value that is not finite or lands outside what 7.25 holds (`0..128` notes):
+/// the caller counts it lost.
 #[must_use]
 pub fn per_note_tuning(note: NoteNumber, semitones: f64) -> Option<Voice2> {
-    if !semitones.is_finite() {
+    let pitch = f64::from(note.get()) + semitones;
+    if !pitch.is_finite() || !(0.0..128.0).contains(&pitch) {
         return None;
     }
-    let range = f64::from(PitchBendSensitivity::MPE_MEMBER_DEFAULT.semitones().get());
-    #[allow(clippy::cast_possible_truncation, reason = "a bend position is f32")]
-    let signed = (semitones / range) as f32;
-    Some(Voice2::PerNotePitchBend {
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "in 0..128, so the Q7.25 word is below 2^32"
+    )]
+    let bits = (pitch * f64::from(1u32 << 25)).round() as u32;
+    Some(Voice2::RegisteredPerNote {
         note,
-        value: signed_f32_to_bend(signed),
+        controller: RegisteredPerNoteController::Pitch,
+        value: ControlValue::new(bits),
     })
 }
 
 /// The MIDI 2.0 per-note message a plugin's `expression` on `note` is at
-/// `unit`, a [`Normalized`]: checked onto `0..=1` and finite by construction (a
-/// caller with a raw float makes it with [`Normalized::clamped`], which clamps,
-/// or [`Normalized::new`], which refuses): Polyphonic Pressure for Pressure, the Assignable
+/// `unit`, a [`Normalized`] (checked onto `0..=1` and finite by construction; a
+/// caller with a raw float makes it with [`Normalized::clamped`] or
+/// [`Normalized::new`]): Polyphonic Pressure for Pressure, the Registered
 /// Per-Note Controller of its number for Volume, Pan and Brightness. `None`
 /// for a dimension with no such message: Tuning (see [`per_note_tuning`]),
 /// Vibrato, Expression and a custom id.
@@ -193,9 +196,11 @@ pub fn per_note_message(
     if expression == NoteExpressionType::Pressure {
         return Some(Voice2::PolyPressure { note, value });
     }
-    Some(Voice2::AssignablePerNote {
+    Some(Voice2::RegisteredPerNote {
         note,
-        controller: per_note_controller_of_expression(expression)?.get(),
+        controller: RegisteredPerNoteController::from(
+            per_note_controller_of_expression(expression)?.get(),
+        ),
         value,
     })
 }
@@ -203,7 +208,6 @@ pub fn per_note_message(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_ump::ControlValue;
 
     /// Volume, Pan and Brightness are the per-note controllers 7, 10 and 74, and
     /// the two lookups are one table read both ways; nothing else is in it.
@@ -232,26 +236,33 @@ mod tests {
         }
     }
 
-    /// A tuning of 12 semitones is a quarter of the MPE default range of ±48
-    /// (RP-053): a bend a quarter of the way from the centre `0x8000_0000` to
-    /// the top (M2-115 section 3, min-centre-max), and a tuning of 0 is the
-    /// centre.
+    /// A tuning is the absolute pitch `note + semitones` as Q7.25 (M2-104
+    /// §7.4.15.2): 12 semitones above key 60 is 72.0, a quarter tone below is
+    /// 59.75, and no range is assumed. A value that is not finite, or leaves
+    /// `0..128`, has no message.
     #[test]
-    fn a_tuning_is_a_bend_over_the_mpe_default_range() {
+    fn a_tuning_is_an_absolute_pitch_in_q7_25() {
         let note = NoteNumber::of(60);
-        let bend = |semitones| match per_note_tuning(note, semitones) {
-            Some(Voice2::PerNotePitchBend { value, .. }) => value.get(),
-            other => panic!("not a per-note bend: {other:?}"),
+        let bits = |semitones| match per_note_tuning(note, semitones) {
+            Some(Voice2::RegisteredPerNote {
+                controller: RegisteredPerNoteController::Pitch,
+                value,
+                ..
+            }) => value.get(),
+            other => panic!("not Registered Pitch 7.25: {other:?}"),
         };
-        assert_eq!(bend(0.0), 0x8000_0000);
-        assert_eq!(bend(12.0), 0xA000_0000);
-        assert_eq!(bend(-48.0), 0);
+        assert_eq!(bits(0.0), 60 << 25);
+        assert_eq!(bits(12.0), 72 << 25);
+        assert_eq!(bits(-0.25), (59 << 25) | (3 << 23));
+        assert_eq!(bits(-60.0), 0);
+        assert_eq!(per_note_tuning(note, 68.0), None, "128 is past the range");
+        assert_eq!(per_note_tuning(note, -61.0), None, "below note 0");
         assert_eq!(per_note_tuning(note, f64::NAN), None);
         assert_eq!(per_note_tuning(note, f64::INFINITY), None);
     }
 
     /// Pressure is Polyphonic Pressure, the table's expressions are the
-    /// Assignable Per-Note Controller of their number, over the 32 bits of the
+    /// Registered Per-Note Controller of their number, over the 32 bits of the
     /// unit, clamped; the rest have no message.
     #[test]
     fn the_message_of_an_expression_is_its_per_note_message() {
@@ -265,17 +276,17 @@ mod tests {
         );
         assert_eq!(
             per_note_message(NoteExpressionType::Pan, note, Normalized::of(0.5)),
-            Some(Voice2::AssignablePerNote {
+            Some(Voice2::RegisteredPerNote {
                 note,
-                controller: 10,
+                controller: RegisteredPerNoteController::Pan,
                 value: ControlValue::new(0x8000_0000)
             })
         );
         assert_eq!(
             per_note_message(NoteExpressionType::Volume, note, Normalized::clamped(7.0)),
-            Some(Voice2::AssignablePerNote {
+            Some(Voice2::RegisteredPerNote {
                 note,
-                controller: 7,
+                controller: RegisteredPerNoteController::Volume,
                 value: ControlValue::new(u32::MAX)
             })
         );

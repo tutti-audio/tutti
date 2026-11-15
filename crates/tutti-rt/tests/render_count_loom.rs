@@ -19,7 +19,11 @@
 //!   it does not free, and the render's use is ordered before any later free
 //!   (the first test);
 //! - **the model can fail**: a clearer that frees without asking is a data race
-//!   loom reports (the second test).
+//!   loom reports (the second test);
+//! - **the fences are necessary**: the same protocol with no `SeqCst` fence, in
+//!   a local copy of the counter, is a data race loom reports (the third test),
+//!   and a clearer that checks again after the render's guard drops may free
+//!   (the fourth).
 
 #![cfg(loom)]
 
@@ -92,5 +96,77 @@ fn a_clearer_that_frees_without_asking_is_a_race() {
         slot.store(0, Ordering::Relaxed);
         state.free();
         renderer.join().unwrap();
+    });
+}
+
+/// The counter without its fences: a local copy of the protocol with every
+/// ordering weakened to what it would be if the `SeqCst` fences were left out,
+/// the counterexample [`RenderCount`] is written against.
+struct Unfenced(AtomicUsize);
+
+impl Unfenced {
+    fn enter(&self) {
+        self.0.fetch_add(1, Ordering::Relaxed);
+    }
+    fn leave(&self) {
+        self.0.fetch_sub(1, Ordering::Release);
+    }
+    fn quiescent(&self) -> bool {
+        self.0.load(Ordering::Acquire) == 0
+    }
+}
+
+#[test]
+#[should_panic(expected = "Causality violation")]
+fn the_protocol_without_its_fences_is_a_race() {
+    loom::model(|| {
+        let count = Arc::new(Unfenced(AtomicUsize::new(0)));
+        let slot = Arc::new(AtomicUsize::new(1));
+        let state = Arc::new(State(UnsafeCell::new(5)));
+
+        let renderer = {
+            let (count, slot, state) = (count.clone(), slot.clone(), state.clone());
+            thread::spawn(move || {
+                count.enter();
+                if slot.load(Ordering::Relaxed) == 1 {
+                    assert_eq!(state.used(), 5);
+                }
+                count.leave();
+            })
+        };
+
+        slot.store(0, Ordering::Relaxed);
+        if count.quiescent() {
+            state.free();
+        }
+        renderer.join().unwrap();
+    });
+}
+
+#[test]
+fn a_clearer_that_checks_again_after_the_render_ends_may_free() {
+    loom::model(|| {
+        let count = Arc::new(RenderCount::new());
+        let slot = Arc::new(AtomicUsize::new(1));
+        let state = Arc::new(State(UnsafeCell::new(5)));
+
+        let renderer = {
+            let (count, slot, state) = (count.clone(), slot.clone(), state.clone());
+            thread::spawn(move || render(&count, &slot, &state))
+        };
+
+        slot.store(0, Ordering::Relaxed);
+        // The render may still be running: the clearer asks again once it has
+        // ended (here, after the join, as a retry after the guard's drop is) and
+        // then frees what it left allocated.
+        let freed = count.quiescent();
+        if freed {
+            state.free();
+        }
+        renderer.join().unwrap();
+        if !freed {
+            assert!(count.quiescent(), "the render's guard dropped");
+            state.free();
+        }
     });
 }

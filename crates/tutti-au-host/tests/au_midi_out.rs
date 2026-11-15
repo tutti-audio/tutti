@@ -340,11 +340,13 @@ fn install_then_withdraw_leaves_the_au_renderable() {
         support::corpus::render(&mut au, &input, &mut output, BLOCK)
             .unwrap_or_else(|e| panic!("{}: render with callback installed: {e:?}", unit.label));
 
-        // Withdrawn with the unit initialized and between renders: the state is
-        // freed, and the unit renders again.
+        // The unit stops rendering before the state is freed, and renders again
+        // after.
+        au.uninitialize().expect("uninitialize");
         registration
             .withdraw()
             .unwrap_or_else(|e| panic!("{}: withdraw failed: {e:?}", unit.label));
+        au.initialize().expect("initialize again");
 
         // Renders again after the boxed state has been freed. If the withdrawal
         // had run in the wrong order, the AU would still hold a pointer into freed
@@ -421,7 +423,9 @@ fn no_delivery_arrives_after_the_callback_is_withdrawn() {
     let calls_before = calls.load(Ordering::SeqCst);
     let events_before = events.load(Ordering::SeqCst);
 
+    au.uninitialize().expect("uninitialize");
     registration.withdraw().expect("withdraw succeeds");
+    au.initialize().expect("initialize again");
 
     // Render well past the removal. Any call now would be against freed state.
     for _ in 0..32 {
@@ -527,7 +531,9 @@ fn a_second_install_on_a_unit_is_refused_until_the_first_is_withdrawn() {
     let input = support::corpus::silence(2, BLOCK as usize);
     let mut output = support::corpus::silence(2, BLOCK as usize);
     support::corpus::render(&mut au, &input, &mut output, BLOCK).expect("render");
+    au.uninitialize().expect("uninitialize");
     second.withdraw().expect("second withdraw");
+    au.initialize().expect("initialize again");
     support::corpus::render(&mut au, &input, &mut output, BLOCK).expect("render after withdraw");
 
     let peak = support::corpus::peak(&output);

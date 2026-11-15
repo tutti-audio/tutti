@@ -1,6 +1,5 @@
 //! The legacy MIDI CC a plugin sends to the host, as a [`WireMidi`].
 
-use tutti_midi_protocol::Translator;
 use tutti_ump::{
     Address, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, System, U7, U14, Ump, Voice1,
 };
@@ -28,12 +27,12 @@ fn data_byte(raw: i8) -> U7 {
 /// program change, poly-pressure and the System messages, with `value2`
 /// supplying the second data byte for pitch bend, poly-pressure and song
 /// position. Cable Select (135) has no MIDI message, and a number past 140 is
-/// none: both are `None`.
+/// none: both are `None`, counted on `stream` as untranslatable.
 pub(super) fn decode(
     e: &LegacyCcOut,
     frame: u32,
     group: MidiGroup,
-    translator: &mut Translator,
+    stream: &mut super::OutputStream,
 ) -> Option<WireMidi> {
     let address = Address::new(group, MidiChannel::masked(e.channel as u8));
     let v1 = data_byte(e.value);
@@ -82,13 +81,19 @@ pub(super) fn decode(
     } else {
         // 0-127 only: Cable Select (135) and the numbers above 140 have no
         // message, and `CCNumber` refuses them.
+        let Some(controller) = CCNumber::new(e.controlNumber) else {
+            stream.count_untranslated();
+            return None;
+        };
         Voice1::ControlChange {
-            controller: CCNumber::new(e.controlNumber)?,
+            controller,
             value: v1,
         }
     };
     // A MIDI 1.0 message through the output's translator, which assembles the
     // stream's RPN and Bank Select runs (M2-104 Appendix D.3).
-    let ump = translator.translate(Message::Midi1(address, voice))?;
+    let ump = stream
+        .translator
+        .translate(Message::Midi1(address, voice))?;
     Some(WireMidi { offset: frame, ump })
 }
