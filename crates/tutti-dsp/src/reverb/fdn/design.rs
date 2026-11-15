@@ -23,7 +23,9 @@
 //! The design is [`FdnLayout::design_into`]: the controls to a [`Network`], in place, since
 //! a network is too large to build on an audio thread. [`FdnBank`](crate::FdnBank) runs it.
 
-use tutti_types::{Amplitude, Db, Depth, Hz, Mix, SampleRate, Seconds, StereoWidth};
+use tutti_types::{
+    Amplitude, Db, Depth, Gain, Hz, Mix, SampleRate, SampleSpan, Seconds, StereoWidth,
+};
 
 use crate::reverb::network::{
     Absorption, Fdn, Gains, Inline, Line, LineModulation, MAX_LINES, Matrix, Network,
@@ -33,9 +35,23 @@ use crate::{Capacity, MaxDecay, Ring, TAIL_FLOOR};
 
 /// The line lengths at 44.1 kHz for a room size of 0.5 (the scale is
 /// `0.5 + size`), values near primes, so the delays share few factors.
-const LENGTHS: [f32; 16] = [
-    1031.0, 1327.0, 1523.0, 1801.0, 2053.0, 2287.0, 2621.0, 2999.0, 3331.0, 3571.0, 3911.0, 4241.0,
-    4549.0, 4793.0, 5099.0, 5393.0,
+const LENGTHS: [SampleSpan; 16] = [
+    SampleSpan::of(1031.0),
+    SampleSpan::of(1327.0),
+    SampleSpan::of(1523.0),
+    SampleSpan::of(1801.0),
+    SampleSpan::of(2053.0),
+    SampleSpan::of(2287.0),
+    SampleSpan::of(2621.0),
+    SampleSpan::of(2999.0),
+    SampleSpan::of(3331.0),
+    SampleSpan::of(3571.0),
+    SampleSpan::of(3911.0),
+    SampleSpan::of(4241.0),
+    SampleSpan::of(4549.0),
+    SampleSpan::of(4793.0),
+    SampleSpan::of(5099.0),
+    SampleSpan::of(5393.0),
 ];
 
 /// The crossovers of the three bands.
@@ -44,7 +60,7 @@ pub(crate) const CROSSOVER: [Hz; 2] = [Hz(300.0), Hz(4_000.0)];
 /// The longest pre-delay, in seconds.
 pub const MAX_PRE_DELAY: Seconds = Seconds(0.5);
 /// The deepest modulation, in frames at 44.1 kHz, at a depth of 1.
-const MAX_MODULATION: f32 = 8.0;
+const MAX_MODULATION: SampleSpan = SampleSpan::of(8.0);
 /// The modulation rates a control may ask for.
 const RATES: (f32, f32) = (0.05, 5.0);
 /// The shortest RT60 a control may ask for.
@@ -221,7 +237,7 @@ fn finite_secs(v: Seconds, default: Seconds) -> Seconds {
 impl FdnLayout {
     /// Designs `c` into `out` in place, at `rate`: the network the bank runs, and the public
     /// entry for designing one (for its analytic queries as much as for running it). A
-    /// network is about 56 KB, so it is built where it lives and never returned by value; no
+    /// network is about 67 KB, so it is built where it lives and never returned by value; no
     /// allocation.
     pub fn design_into(&self, c: &FdnControls, rate: SampleRate, out: &mut Network) {
         let d = FdnControls::DEFAULT;
@@ -260,13 +276,17 @@ impl FdnLayout {
         let n = self.lines;
         let scale = (0.5 + size) * (rate.get() / 44_100.0) as f32;
         let depth_frames = if freeze {
-            0.0
+            SampleSpan::ZERO
         } else {
-            depth * MAX_MODULATION * (rate.get() / 44_100.0) as f32
+            // `depth` is in `0..=1` and the rate finite and positive: the product is a
+            // finite span, and `clamped` saturates where a span could not hold it.
+            SampleSpan::clamped(MAX_MODULATION.get() * (f64::from(depth) * rate.get() / 44_100.0))
         };
         let mut lines: Inline<Line, MAX_LINES> = Inline::new();
         for &base in &LENGTHS[..n] {
-            let length = (base * scale).round().max(1.0);
+            // The lengths are whole frames: the `f32` product rounds to one.
+            let length =
+                SampleSpan::clamped(f64::from((base.get() as f32 * scale).round().max(1.0)));
             let _ = lines.push(Line {
                 length,
                 modulation: LineModulation {
@@ -280,18 +300,18 @@ impl FdnLayout {
 
         // The reflection vector: one axis at diffusion 0, the flat vector at 1.
         let flat = 1.0 / (n as f64).sqrt();
-        let mut v = Gains::filled(0.0, n).unwrap_or_default();
+        let mut v = Gains::filled(Gain::SILENT, n).unwrap_or_default();
         {
             let mut norm = 0.0f64;
             for (i, x) in v.as_mut_slice().iter_mut().enumerate() {
                 let axis = if i == 0 { 1.0 } else { 0.0 };
                 let y = f64::from(1.0 - diffusion) * axis + f64::from(diffusion) * flat;
-                *x = y as f32;
+                *x = Gain::new(y as f32);
                 norm += y * y;
             }
             let norm = norm.sqrt();
             for x in v.as_mut_slice() {
-                *x = (f64::from(*x) / norm) as f32;
+                *x = Gain::new((f64::from(x.get()) / norm) as f32);
             }
         }
         let matrix = if diffusion <= 0.0 {
@@ -305,10 +325,11 @@ impl FdnLayout {
         // One mono input into every line, none when frozen; even lines to the
         // left ear, odd to the right.
         let gain = (1.0 / (n as f32).sqrt()).min(1.0);
-        let input = Gains::filled(if freeze { 0.0 } else { gain }, n).unwrap_or_default();
+        let input =
+            Gains::filled(Gain::new(if freeze { 0.0 } else { gain }), n).unwrap_or_default();
         let ear = (2.0 / n as f32).sqrt();
-        let mut left = Gains::filled(0.0, n).unwrap_or_default();
-        let mut right = Gains::filled(0.0, n).unwrap_or_default();
+        let mut left = Gains::filled(Gain::SILENT, n).unwrap_or_default();
+        let mut right = Gains::filled(Gain::SILENT, n).unwrap_or_default();
         for (i, (l, r)) in left
             .as_mut_slice()
             .iter_mut()
@@ -316,9 +337,9 @@ impl FdnLayout {
             .enumerate()
         {
             if i % 2 == 0 {
-                *l = ear;
+                *l = Gain::new(ear);
             } else {
-                *r = ear;
+                *r = Gain::new(ear);
             }
         }
         let mut rows = Inline::new();
