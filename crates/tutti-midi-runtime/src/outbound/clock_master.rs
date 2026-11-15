@@ -38,6 +38,10 @@
 //! not on an even frame leaves up to two frames with no quarter-frames.
 //! - **MTC quarter-frames** (0xF1) at frame-rate×4, cycling the 8 SMPTE nibbles
 //!   (when `send_mtc` is set).
+//! - **MTC Full Messages** (Real Time `01 01`, when `send_mtc` is set) on every
+//!   locate: a cue while stopped, the start from a position no cue stated, a
+//!   jump while playing and a loop wrap. The quarter-frame cycle restarts at
+//!   piece 0 after it.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -47,9 +51,9 @@ use tutti_types::{
     AtomicSampleRate, Beat, BeatDuration, LoopRange, Pass, PassEnd, SampleRate, Samples, Seconds,
     first_frame_at_or_after,
 };
-use tutti_ump::{Message, MidiGroup, System, U7, U14, Ump};
+use tutti_ump::{Message, MidiGroup, System, U7, Ump};
 
-use tutti_midi_protocol::{MtcRate, SmpteFrameRate, SmpteTimecode};
+use tutti_midi_protocol::{MtcFullMessage, MtcRate, MtcTimeCode, SmpteTimecode, song_position};
 
 /// Below this beat, a play edge is treated as "from the top" → Start (0xFA)
 /// rather than Continue (0xFB). Wide enough to absorb float jitter at beat 0.
@@ -254,6 +258,11 @@ struct PrevTick {
     /// stands on the wrapped beat, so the wrap shows in no pass of its own
     /// and `end` equals the start. The next tick sends its Song Position.
     wrapped: bool,
+    /// The beat a Full Message last stated while the transport stood still
+    /// (or where it stopped): what a stopped transport's position is compared
+    /// with to tell a cue from standing still. `None` while rolling, and
+    /// before the first look, so the first stopped tick states its position.
+    cued: Option<Beat>,
 }
 
 /// The MTC quarter-frame grid.
@@ -324,6 +333,7 @@ impl ClockMaster {
                 playing: false,
                 end: Beat(0.0),
                 wrapped: false,
+                cued: None,
             },
             mtc: MtcGrid::RESTARTED,
         };
@@ -371,8 +381,8 @@ impl ClockMaster {
     /// at `rate` and `fps`: closed form, never accumulated.
     fn mtc_due(&self, k: u64, rate: SampleRate, fps: MtcRate) -> f64 {
         self.mtc.lead
-            + (k.saturating_sub(self.mtc.base) as f64 * rate.get())
-                / (SmpteFrameRate::from(fps).fps() * 4.0)
+            + k.saturating_sub(self.mtc.base) as f64 * fps.frame_rate().samples_per_frame(rate)
+                / 4.0
     }
 
     /// Start a new MTC grid segment at the next quarter-frame due, the
@@ -448,20 +458,32 @@ impl ClockMaster {
             } else {
                 emit((
                     Offset::ZERO,
-                    self.system(System::SongPosition(beats_to_midi_beats(beat))),
+                    self.system(System::SongPosition(song_position(beat))),
                 ));
                 emit((Offset::ZERO, self.system(System::Continue)));
             }
-            // Realign the MTC grid to the (possibly non-zero) start beat.
+            // The receiver is told where it starts from, unless a cue already
+            // did; then the grid realigns to the (possibly non-zero) start beat.
+            if settings.send_mtc && !self.is_cued_at(beat) {
+                self.send_full_message(beat, transport, sample_rate, Offset::ZERO, emit);
+            }
+            self.prev.cued = None;
             self.restart_mtc();
         } else if !playing && was_playing {
             emit((Offset::ZERO, self.system(System::Stop)));
             self.prev.wrapped = false;
+            self.prev.cued = Some(beat);
             return;
         }
 
         if !playing {
             self.prev.wrapped = false;
+            // A locate while stopped is a cue: the receiver is told where the
+            // transport stands by a Full Message, as no Quarter Frame runs.
+            if settings.send_mtc && !self.is_cued_at(beat) {
+                self.send_full_message(beat, transport, sample_rate, Offset::ZERO, emit);
+                self.prev.cued = Some(beat);
+            }
             return;
         }
 
@@ -485,8 +507,11 @@ impl ClockMaster {
         if !is_edge && (located || wrapped) {
             emit((
                 Offset::ZERO,
-                self.system(System::SongPosition(beats_to_midi_beats(beat))),
+                self.system(System::SongPosition(song_position(beat))),
             ));
+            if settings.send_mtc {
+                self.send_full_message(beat, transport, sample_rate, Offset::ZERO, emit);
+            }
             self.restart_mtc();
         }
 
@@ -506,8 +531,17 @@ impl ClockMaster {
             if !pass.start.is_zero() {
                 emit((
                     frame_offset(pass.start.get(), block_size),
-                    self.system(System::SongPosition(beats_to_midi_beats(pass.beat))),
+                    self.system(System::SongPosition(song_position(pass.beat))),
                 ));
+                if settings.send_mtc {
+                    self.send_full_message(
+                        pass.beat,
+                        transport,
+                        sample_rate,
+                        frame_offset(pass.start.get(), block_size),
+                        emit,
+                    );
+                }
                 self.restart_mtc();
             }
             self.tick_clock(&pass, block_size, beats_per_sample, emit);
@@ -517,6 +551,33 @@ impl ClockMaster {
         }
         self.prev.end = clock.beat();
         self.prev.wrapped = ends_on_wrap;
+    }
+
+    /// Whether a Full Message already stated `beat` (within a seek's width).
+    fn is_cued_at(&self, beat: Beat) -> bool {
+        self.prev
+            .cued
+            .is_some_and(|cued| (beat - cued).abs() <= BeatDuration(SEEK_EPSILON_BEATS))
+    }
+
+    /// Emit the MTC Full Message (Real Time `01 01`) for the frame nearest
+    /// `beat` at the clock's MTC rate, on `at`: the form a generator uses to
+    /// locate or cue, where Quarter Frames only describe a position that runs.
+    /// The position is `beat` at the transport's tempo from beat 0, the grid's
+    /// own timeline.
+    fn send_full_message(
+        &self,
+        beat: Beat,
+        transport: &TransportPosition,
+        sample_rate: SampleRate,
+        at: Offset,
+        emit: &mut impl FnMut(UmpAt),
+    ) {
+        let per_sample = tutti_types::beats_per_sample(transport.tempo, sample_rate);
+        let seconds = Seconds::new(samples_at(beat, per_sample) / sample_rate.get());
+        for packet in MtcFullMessage::from(MtcTimeCode::at(seconds, self.fps)).packets(self.group) {
+            emit((at, packet));
+        }
     }
 
     /// Emit a 0xF8 at every 1/24-beat boundary playback reaches inside `pass`,
@@ -596,11 +657,7 @@ impl ClockMaster {
         let mut next = self.mtc.next;
 
         // The sample position of the block's first frame, from beat 0.
-        let block_pos = if beats_per_sample > BeatDuration(0.0) {
-            (beat.get() / beats_per_sample.get()).max(0.0)
-        } else {
-            0.0
-        };
+        let block_pos = samples_at(beat, beats_per_sample);
         // A restarted grid puts its first piece 0 on the next even-frame
         // boundary of the timeline (a multiple of two frames' samples from
         // beat 0), so the label is the frame it goes out on. The grid then
@@ -608,8 +665,7 @@ impl ClockMaster {
         // change moves the timeline under a grid fixed in samples, and the
         // label (read from the beat at each piece 0) follows within a frame.
         if std::mem::take(&mut self.mtc.align) {
-            let (num, den) = SmpteFrameRate::from(fps).ratio();
-            let period = 2.0 * rate.get() * den as f64 / num as f64;
+            let period = 2.0 * fps.frame_rate().samples_per_frame(rate);
             let cycles = block_pos / period;
             let k = if (cycles - cycles.round()).abs() < 1e-6 {
                 cycles.round()
@@ -634,11 +690,10 @@ impl ClockMaster {
             // A cycle's timecode is that of the sample piece 0 goes out on;
             // the receiver adds the two frames the cycle takes.
             if piece == 0 {
-                let tc = timecode_at(
+                cycle = mtc_cycle(
                     Seconds::new((block_pos + qf_sample as f64) / rate.get()),
                     fps,
                 );
-                cycle = mtc_cycle_nibbles(&tc, fps);
             }
             let nibble = (piece << 4) | ((cycle >> (4 * u32::from(piece))) & 0x0F) as u8;
             emit((
@@ -666,48 +721,29 @@ fn frame_offset(frames: usize, block_size: usize) -> Offset {
     .unwrap_or(Offset::ZERO)
 }
 
-/// Convert a beat position to MIDI beats (1/16 notes) for Song Position, which
-/// counts sixteenth-notes from the start (M2-104 §7.6, 0xF2). Clamped to the
-/// 14-bit field; the constructor masks, but clamping keeps semantics sane.
-#[inline]
-fn beats_to_midi_beats(beat: Beat) -> U14 {
-    let sixteenths = (beat.get().max(0.0) * 4.0).round();
-    // `as u16` saturates, and `max(0.0)` above turned NaN and negatives into 0;
-    // a song position past the 14-bit range sticks at the largest.
-    U14::new(sixteenths as u16).unwrap_or(U14::MAX)
+/// The sample position of `beat` from beat 0 at a steady `beats_per_sample`:
+/// the timeline the MTC grid and the Full Message share. Before zero, or at a
+/// tempo that does not advance, it is 0.
+fn samples_at(beat: Beat, beats_per_sample: BeatDuration) -> f64 {
+    if beats_per_sample > BeatDuration(0.0) {
+        (beat.get() / beats_per_sample.get()).max(0.0)
+    } else {
+        0.0
+    }
 }
 
-/// The timecode at `position` from transport beat 0: the
-/// nearest frame, on an even one (a cycle's eight pieces span two frames).
-/// Rounding, not flooring, so a position a float's width short of a frame
-/// boundary still reads as that frame.
-fn timecode_at(position: Seconds, fps: MtcRate) -> SmpteTimecode {
-    let fps = SmpteFrameRate::from(fps);
-    let (num, den) = fps.ratio();
-    let frames = (position.get() * num as f64 / den as f64).round().max(0.0) as u64;
-    SmpteTimecode::from_frame_count(frames & !1, fps)
-}
-
-/// The eight MTC nibbles of `tc`, piece `p` in bits `4p..4p+4`: the inverse of
-/// the assembly in [`MtcDecoder`](crate::MtcDecoder).
-///
-fn mtc_cycle_nibbles(tc: &SmpteTimecode, fps: MtcRate) -> u32 {
-    let rate2 = fps.code();
-    let (h, m, s, f) = (tc.hours(), tc.minutes(), tc.seconds(), tc.frames());
-    let nibbles = [
-        f & 0x0F,
-        f >> 4,
-        s & 0x0F,
-        s >> 4,
-        m & 0x0F,
-        m >> 4,
-        h & 0x0F,
-        ((h >> 4) & 0x01) | (rate2 << 1),
-    ];
-    nibbles
+/// The eight nibbles of the cycle that starts at `position` from transport
+/// beat 0, piece `p` in bits `4p..4p+4`: the label of the nearest frame, on an
+/// even one (a cycle's eight pieces span two frames). Rounding, not flooring,
+/// so a position a float's width short of a frame boundary still reads as that
+/// frame.
+fn mtc_cycle(position: Seconds, fps: MtcRate) -> u32 {
+    let nearest = SmpteTimecode::from_seconds(position, fps.frame_rate());
+    MtcTimeCode::from_frame_count(nearest.frame_count() & !1, fps)
+        .nibbles()
         .iter()
         .enumerate()
-        .fold(0, |acc, (p, &n)| acc | (u32::from(n & 0x0F) << (4 * p)))
+        .fold(0, |acc, (p, &n)| acc | (u32::from(n) << (4 * p)))
 }
 
 #[cfg(test)]

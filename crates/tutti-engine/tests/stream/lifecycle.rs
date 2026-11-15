@@ -1,36 +1,41 @@
-//! `AudioEngine` and `TuttiDriver` lifecycle, and the backend fault path —
-//! neither of which had a single test.
+//! `OutputStream` and `StreamHost` lifecycle, and the backend fault path,
+//! with no sound card.
 //!
-//! `driver.rs` had **zero** `#[test]`, and every `AudioEngine` method funnelled
-//! through `cpal::default_host()`, so opening a sound card was the price of
-//! testing any of it. `AudioEngine::from_spec` plus
-//! [`ManualStreamDriver`](tutti_cpal::ManualStreamDriver) removes that: the
-//! spec, the fault sink and the stop are the shipped ones, and a driver
-//! decides only *where* the callback runs. An engine over a manual driver is
-//! the same engine.
+//! [`ManualStreamDriver`] decides only *where* the callback runs: the spec, the
+//! fault sink and the stop are the shipped ones. A stream over a manual driver
+//! is the same stream.
 
-use crate::support::{SAMPLE_RATE, fan, graph_engine, rolling_state, spec};
+use crate::fixtures::{SAMPLE_RATE, fan, graph_engine, rolling_state, spec};
+use std::convert::Infallible;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tutti_cpal::{
-    AudioCallbackState, AudioEngine, ManualStreamDriver, StreamFaultKind, TuttiDriver,
+use tutti_buffers::SampleFormat;
+use tutti_engine::{
+    AudioCallbackState, BackendErrorKind, ManualStreamDriver, OutputSpec, OutputStream, StartError,
+    StreamFaultKind, StreamHost,
 };
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_transport::Transport;
 use tutti_types::{ChannelLayout, SampleRate};
 
-fn engine_and_state() -> (AudioEngine, Arc<AudioCallbackState>) {
+fn engine_and_state() -> (OutputStream, Arc<AudioCallbackState>) {
     let (_transport, state) = rolling_state(2);
-    (
-        AudioEngine::from_spec(spec(2, cpal::SampleFormat::F32)),
-        state,
-    )
+    (OutputStream::new(spec(2, SampleFormat::F32)), state)
+}
+
+/// A restart's error: the hook's own refusal, or the stream's.
+#[derive(Debug, thiserror::Error)]
+enum Restart {
+    #[error("the hook refused")]
+    Refused,
+    #[error(transparent)]
+    Start(#[from] StartError<Infallible>),
 }
 
 /// **A device-free engine runs the shipped lifecycle.**
 ///
 /// The baseline the rest of this file rests on: start, render, stop, restart,
-/// with no sound card and no CPAL stream, through the same `AudioEngine`
+/// with no sound card and no backend stream, through the same `OutputStream`
 /// methods a host calls.
 #[test]
 fn an_engine_over_a_manual_driver_starts_renders_and_stops() {
@@ -79,7 +84,7 @@ fn a_second_start_is_refused_and_stop_is_repeatable() {
     let err = engine
         .start_with(Arc::clone(&state), driver2)
         .expect_err("a running engine refuses a second start");
-    assert!(matches!(err, tutti_cpal::Error::AlreadyRunning), "{err}");
+    assert!(matches!(err, StartError::AlreadyRunning), "{err}");
     assert!(
         !stream2.is_open(),
         "starting a running engine must not open a second stream"
@@ -92,13 +97,13 @@ fn a_second_start_is_refused_and_stop_is_repeatable() {
 
 /// **A started engine reports the spec it actually opened.**
 ///
-/// `AudioEngine::start` re-reads the device config so `channels()` describes
+/// A device driver's start re-reads the device config so `channels()` describes
 /// the device that is playing; a reader sizing a buffer from a stale value
-/// would get the wrong width with nothing to warn it. A bare-spec engine
+/// would get the wrong width with nothing to warn it. A bare-spec stream
 /// makes that checkable without two sound cards.
 #[test]
 fn the_engine_reports_the_spec_it_was_opened_at() {
-    let mut engine = AudioEngine::from_spec(spec(6, cpal::SampleFormat::I16));
+    let mut engine = OutputStream::new(spec(6, SampleFormat::I16));
     let (_t, state) = rolling_state(6);
     let (driver, stream) = ManualStreamDriver::new();
 
@@ -114,7 +119,7 @@ fn the_engine_reports_the_spec_it_was_opened_at() {
 /// **A restart moves the callback to a new thread, and rendering keeps
 /// working.**
 ///
-/// This is the property a host actually depends on: CPAL gives a restarted
+/// This is the property a host actually depends on: a backend gives a restarted
 /// stream a *different* backend thread, and the RT cells must tolerate that.
 ///
 /// There is nothing to reset between the two threads: the engine's cells
@@ -124,8 +129,8 @@ fn the_engine_reports_the_spec_it_was_opened_at() {
 #[test]
 fn a_restarted_stream_renders_from_a_different_thread() {
     let (_t, state) = rolling_state(2);
-    let engine = AudioEngine::from_spec(spec(2, cpal::SampleFormat::F32));
-    let mut driver = TuttiDriver::new(engine, state);
+    let engine = OutputStream::new(spec(2, SampleFormat::F32));
+    let mut driver = StreamHost::new(engine, state);
 
     let (d1, s1) = ManualStreamDriver::new();
     driver.start_with(d1).unwrap();
@@ -156,8 +161,8 @@ fn a_restarted_stream_renders_from_a_different_thread() {
 
 /// **A backend fault reaches a handle taken before it happened.**
 ///
-/// CPAL's error callback returns nothing, and both of this crate's were
-/// literally `|_err| {}`. A fault surfaced nowhere at all.
+/// A backend's error callback returns nothing, so a fault surfaced nowhere
+/// unless it is recorded.
 #[test]
 fn a_backend_fault_reaches_the_handle_taken_before_it() {
     let (mut engine, state) = engine_and_state();
@@ -166,7 +171,7 @@ fn a_backend_fault_reaches_the_handle_taken_before_it() {
     engine.start_with(state, driver).unwrap();
 
     assert!(!faults.is_faulted());
-    stream.fail(cpal::Error::with_message(cpal::ErrorKind::Xrun, "xrun"));
+    stream.fail(BackendErrorKind::Other, &"xrun");
 
     assert_eq!(faults.count(), 1);
     let fault = faults.last().expect("a recorded fault");
@@ -195,7 +200,7 @@ fn a_disconnect_stops_the_engine_reporting_healthy() {
     engine.start_with(state, driver).unwrap();
     assert!(engine.is_running());
 
-    stream.fail(cpal::Error::new(cpal::ErrorKind::DeviceNotAvailable));
+    stream.fail(BackendErrorKind::DeviceGone, &"device not available");
 
     assert!(faults.is_disconnected());
     assert_eq!(
@@ -218,7 +223,7 @@ fn a_restart_clears_the_fault_state() {
     let faults = engine.faults();
     let (driver, stream) = ManualStreamDriver::new();
     engine.start_with(Arc::clone(&state), driver).unwrap();
-    stream.fail(cpal::Error::new(cpal::ErrorKind::DeviceNotAvailable));
+    stream.fail(BackendErrorKind::DeviceGone, &"device not available");
     assert!(!engine.is_running());
 
     engine.stop();
@@ -251,7 +256,7 @@ fn the_fault_handle_survives_a_restart() {
 
     let (d2, s2) = ManualStreamDriver::new();
     engine.start_with(state, d2).unwrap();
-    s2.fail(cpal::Error::new(cpal::ErrorKind::DeviceNotAvailable));
+    s2.fail(BackendErrorKind::DeviceGone, &"device not available");
 
     assert!(
         faults.is_disconnected(),
@@ -266,29 +271,32 @@ fn the_fault_handle_survives_a_restart() {
 #[test]
 fn a_restart_runs_its_hook_between_the_stop_and_the_start() {
     let (_t, state) = rolling_state(2);
-    let engine = AudioEngine::from_spec(spec(2, cpal::SampleFormat::F32));
-    let mut driver = TuttiDriver::new(engine, state);
+    let engine = OutputStream::new(spec(2, SampleFormat::F32));
+    let mut driver = StreamHost::new(engine, state);
     let (d1, s1) = ManualStreamDriver::new();
     driver.start_with(d1).unwrap();
 
     let (d2, s2) = ManualStreamDriver::new();
-    let new = tutti_cpal::OutputSpec::new(
+    let new = OutputSpec::new(
         tutti_types::SampleRate::SR_96K,
         tutti_types::ChannelLayout::from(6u16),
-        cpal::SampleFormat::F32,
+        SampleFormat::F32,
     );
     let mut seen = None;
     driver
-        .restart_on(new.clone(), d2, |spec, _| {
-            assert!(!s1.is_open(), "the old stream is stopped before the hook");
-            assert!(!s2.is_open(), "the new one starts after it");
-            seen = Some(spec.clone());
-            Ok::<(), tutti_cpal::Error>(())
-        })
+        .restart_with(
+            || Ok((new.clone(), d2)),
+            |spec, _| {
+                assert!(!s1.is_open(), "the old stream is stopped before the hook");
+                assert!(!s2.is_open(), "the new one starts after it");
+                seen = Some(spec.clone());
+                Ok::<(), Restart>(())
+            },
+        )
         .expect("restarts");
     assert_eq!(seen, Some(new.clone()), "the hook saw the new config");
-    assert_eq!(driver.engine().spec(), &new, "and the driver reports it");
-    assert!(s2.is_open() && driver.engine().is_running());
+    assert_eq!(driver.stream().spec(), &new, "and the driver reports it");
+    assert!(s2.is_open() && driver.stream().is_running());
     assert_eq!(s2.channels(), Some(6), "opened at the new width");
 }
 
@@ -298,19 +306,20 @@ fn a_restart_runs_its_hook_between_the_stop_and_the_start() {
 #[test]
 fn a_restart_whose_hook_fails_stays_stopped() {
     let (_t, state) = rolling_state(2);
-    let engine = AudioEngine::from_spec(spec(2, cpal::SampleFormat::F32));
-    let mut driver = TuttiDriver::new(engine, state);
+    let engine = OutputStream::new(spec(2, SampleFormat::F32));
+    let mut driver = StreamHost::new(engine, state);
     let (d1, _s1) = ManualStreamDriver::new();
     driver.start_with(d1).unwrap();
 
     let (d2, s2) = ManualStreamDriver::new();
     let err = driver
-        .restart_on(spec(2, cpal::SampleFormat::F32), d2, |_, _| {
-            Err(tutti_cpal::Error::InvalidConfig("no".into()))
-        })
+        .restart_with(
+            || Ok((spec(2, SampleFormat::F32), d2)),
+            |_, _| Err(Restart::Refused),
+        )
         .expect_err("the hook's error");
-    assert!(matches!(err, tutti_cpal::Error::InvalidConfig(_)));
-    assert!(!driver.engine().is_running());
+    assert!(matches!(err, Restart::Refused));
+    assert!(!driver.stream().is_running());
     assert!(!s2.is_open());
 }
 
@@ -364,7 +373,7 @@ fn panicking_state(calls: &Arc<AtomicUsize>, panic_at: usize) -> Arc<AudioCallba
 fn a_panic_in_the_render_is_caught_latched_and_cleared_by_a_restart() {
     let calls = Arc::new(AtomicUsize::new(0));
     let state = panicking_state(&calls, 2);
-    let mut engine = AudioEngine::from_spec(spec(2, cpal::SampleFormat::F32));
+    let mut engine = OutputStream::new(spec(2, SampleFormat::F32));
     let faults = engine.faults();
     let (driver, stream) = ManualStreamDriver::new();
     engine.start_with(Arc::clone(&state), driver).unwrap();

@@ -7,7 +7,7 @@
 
 use tutti_fixtures::signal::{impulse, sine};
 use tutti_graph::contract::{drive, prepared};
-use tutti_nodes::{DelayControls, DelayFamily, DelayNode, InterpolationMode, MaxDelay, Routing};
+use tutti_nodes::{DelayControls, DelayLayout, DelayNode, InterpolationMode, MaxDelay, Routing};
 use tutti_types::{Amplitude, BusTopology, Feedback, Hz, SampleRate, Samples, Seconds};
 
 const SR: SampleRate = SampleRate::of(1_024.0);
@@ -113,10 +113,10 @@ fn a_ring_routed_echo_steps_to_the_next_channel_scaled_by_the_cross_feedback() {
     let (n, d, amount) = (6usize, 8usize, 0.5f32);
     let bus = BusTopology::assumed(6u16.into()).expect("six channels are one bus");
     // Channel c is fed by channel c - 1.
-    let family = DelayFamily::new(bus, MAX, InterpolationMode::Linear)
+    let layout = DelayLayout::new(bus, MAX, InterpolationMode::Linear)
         .with_routing(Routing::ring(bus))
-        .expect("a routing for the family's bus");
-    let node = DelayNode::live(family, controls(frames(d as f64), 0.0, amount));
+        .expect("a routing for the layout's bus");
+    let node = DelayNode::from_layout(layout, controls(frames(d as f64), 0.0, amount));
     // Stops before the echo wraps round to channel 0.
     let mut inputs = vec![vec![0.0; d * (n + 1)]; n];
     inputs[0][0] = 1.0;

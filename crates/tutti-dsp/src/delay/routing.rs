@@ -196,12 +196,4 @@ impl Routing {
     pub fn is_none(&self) -> bool {
         self.weights.iter().flatten().all(|&w| w == 0.0)
     }
-
-    /// The sum of the absolute weights of row `to`: at most 1.
-    #[must_use]
-    pub(crate) fn row_sum(&self, to: usize) -> f32 {
-        self.weights
-            .get(to)
-            .map_or(0.0, |row| row[..self.width()].iter().map(|w| w.abs()).sum())
-    }
 }

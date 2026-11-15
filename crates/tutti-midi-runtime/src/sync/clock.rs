@@ -9,7 +9,7 @@
 //! [`start_msg`](MidiClockDecoder::start_msg) etc. directly.
 
 use tutti_types::{Beat, Bpm, Seconds};
-use tutti_ump::{Message, System, Ump};
+use tutti_ump::{Message, System, U14, Ump};
 
 use super::period::PeriodFit;
 
@@ -119,7 +119,7 @@ impl MidiClockDecoder {
         };
         match system {
             System::TimingClock => self.tick(at),
-            System::SongPosition(position) => self.song_position_msg(position.get()),
+            System::SongPosition(position) => self.song_position_msg(position),
             System::Start => self.start_msg(),
             System::Continue => self.continue_msg(),
             System::Stop => self.stop_msg(),
@@ -160,11 +160,12 @@ impl MidiClockDecoder {
         self.transport = ClockTransportState::Playing;
     }
 
-    /// Handles Song Position Pointer (0xF2): `midi_beats` is the position in
-    /// sixteenth notes (14 bits), six clock ticks each. The next Continue
-    /// resumes there; a Start still begins at 0.
-    pub fn song_position_msg(&mut self, midi_beats: u16) {
-        self.tick_count = u64::from(midi_beats & 0x3FFF) * 6;
+    /// Handles Song Position Pointer (0xF2): the position in sixteenth notes
+    /// (14 bits). The next Continue resumes there; a Start still begins at 0.
+    pub fn song_position_msg(&mut self, position: U14) {
+        // A pointer counts sixteenths, a quarter of a beat each.
+        let clocks_per_sixteenth = u64::from(System::TIMING_CLOCKS_PER_QUARTER / 4);
+        self.tick_count = u64::from(position.get()) * clocks_per_sixteenth;
     }
 
     /// Handles MIDI Stop (0xFC).

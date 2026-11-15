@@ -1,139 +1,29 @@
 use super::*;
-use tutti_engine::Engine;
-use tutti_graph::NodeKey;
-use tutti_graph::{Edge, InPort, OutPort, Source};
+use std::sync::Arc;
+use tutti_buffers::SampleFormat;
+use tutti_engine::{AudioCallbackState, Engine, ManualStreamDriver};
 use tutti_graph::{Editor, Prepare};
-use tutti_nodes::testing::Osc;
-use tutti_nodes::{SvfFilterNode, SvfType};
-use tutti_transport::{MotionEvent, Timeline, Transport};
-use tutti_types::MaxBlock;
-use tutti_types::{Beat, BeatDuration};
-use tutti_types::{Hz, Q};
-use tutti_types::{SampleRate, Samples};
-
-/// Build an engine + transport pair whose graph actually renders.
-///
-/// An empty graph renders silence without running a node — which would
-/// leave the transport assertions below reading a playhead nothing
-/// exercised. A sine through a filter into the output gives the render
-/// path real nodes to run, buffers to hand between them, and a fold to
-/// the device width. The playhead is the engine's own clock; there is no
-/// clock node in the graph.
-///
-/// `tests/device/rt_no_alloc.rs` mirrors this fixture, because the allocation
-/// gates need a `#[global_allocator]` that only a test binary root can
-/// declare.
-fn build_callback_state(sample_rate: f64) -> (Transport, AudioCallbackState) {
-    let transport = Transport::new(SampleRate::of(sample_rate));
-
-    let (mut ed, exec) = Editor::new(Prepare::new(
-        SampleRate::of(sample_rate),
-        MaxBlock::of(Samples(512)),
-    ));
-    let (source, filter) = (NodeKey(1), NodeKey(2));
-    ed.insert(source, "sine", Osc::sine(Hz(220.0)));
-    ed.insert(
-        filter,
-        "filter",
-        SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(2_000.0), Q(0.7)),
-    );
-    ed.spec_mut().topology.edges.insert(
-        InPort {
-            node: filter,
-            port: 0,
-        },
-        vec![Edge::Direct(Source::Node(OutPort {
-            node: source,
-            port: 0,
-        }))],
-    );
-    // The filter's single output on both device channels.
-    ed.spec_mut().topology.set_outputs(vec![
-        Source::Node(OutPort {
-            node: filter,
-            port: 0,
-        });
-        2
-    ]);
-    ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
-    let state = AudioCallbackState::new(engine);
-    (transport, state)
-}
-
-#[test]
-fn test_transport_advances_with_graph() {
-    let sample_rate = 44100.0;
-    let (transport, state) = build_callback_state(sample_rate);
-
-    transport.settings().set_tempo(tutti_types::Bpm::of(120.0));
-    let _ = transport.motion().try_send(MotionEvent::Play);
-
-    let frames = 256;
-    let mut output = vec![0.0f32; frames * 2];
-    process_audio(
-        &state,
-        &mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap(),
-    );
-
-    let expected_beat = Beat(256.0 * (120.0 / 60.0) / 44100.0);
-    let actual_beat = transport.beat();
-    assert!(
-        (actual_beat - expected_beat).abs() < BeatDuration(1e-6),
-        "expected {expected_beat:?}, got {actual_beat:?}"
-    );
-}
-
-#[test]
-fn test_transport_loop_wrapping() {
-    let sample_rate = 44100.0;
-    let (transport, state) = build_callback_state(sample_rate);
-
-    transport.settings().set_tempo(tutti_types::Bpm::of(120.0));
-    transport
-        .motion()
-        .schedule(
-            tutti_types::At::NextBlock,
-            tutti_transport::LoopEdit::over(
-                tutti_types::LoopRange::new(Beat::new(0.0), Beat::new(4.0)).expect("ordered"),
-            ),
-        )
-        .expect("room");
-    let _ = transport.motion().try_send(MotionEvent::Play);
-    let _ = transport.motion().try_send(MotionEvent::locate(Beat(3.99)));
-
-    let frames = 1024;
-    let mut output = vec![0.0f32; frames * 2];
-    process_audio(
-        &state,
-        &mut InterleavedMut::new(&mut output, ChannelLayout::STEREO).unwrap(),
-    );
-
-    // Seeked to 3.99 at the first frame, rolling at 2 beats a second: one
-    // wrap past 4.0, so the beat is 3.99 plus the block, less the loop's
-    // length. No seek would leave it at the block's own length, and a wrap
-    // counted twice or not at all would miss it.
-    let beat = transport.beat();
-    let expected = Beat(3.99 + 1024.0 * (120.0 / 60.0) / 44100.0 - 4.0);
-    assert!(
-        (beat - expected).abs() < BeatDuration(1e-6),
-        "expected {expected:?} after one wrap, got {beat:?}"
-    );
-}
+use tutti_transport::Transport;
+use tutti_types::{MaxBlock, SampleRate, Samples};
 
 fn manual_spec() -> OutputSpec {
     OutputSpec::new(
         SampleRate::SR_48K,
         tutti_types::ChannelLayout::STEREO,
-        cpal::SampleFormat::F32,
+        SampleFormat::F32,
     )
 }
 
-fn driver_over(engine: AudioEngine) -> crate::TuttiDriver {
-    let transport = Transport::new(SampleRate::SR_48K);
-    let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+/// The state over an empty graph at `rate`.
+fn empty_state(rate: SampleRate) -> Arc<AudioCallbackState> {
+    let transport = Transport::new(rate);
+    let (mut ed, exec) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples(512))));
     let graph = Engine::new(&transport, &mut ed, exec).expect("an empty graph");
-    crate::TuttiDriver::new(engine, Arc::new(AudioCallbackState::new(graph)))
+    Arc::new(AudioCallbackState::new(graph))
+}
+
+fn driver_over(engine: AudioEngine) -> crate::TuttiDriver {
+    crate::TuttiDriver::new(engine, empty_state(SampleRate::SR_48K))
 }
 
 /// **Naming the opened device asks the host nothing, and tells a supplied
@@ -153,11 +43,11 @@ fn the_opened_name_tells_a_supplied_driver_from_an_unnamed_device() {
     engine.opened = Opened::Named("Card".into());
 
     let mut driver = driver_over(engine);
-    let (manual, _stream) = crate::ManualStreamDriver::new();
+    let (manual, _stream) = ManualStreamDriver::new();
     driver
         .restart_on(manual_spec(), manual, |_, _| Ok::<(), crate::Error>(()))
         .unwrap();
-    assert_eq!(driver.engine().opened_name().unwrap(), None);
+    assert_eq!(driver.opened_name().unwrap(), None);
 }
 
 /// **A restart that fails leaves the name of the device still open.** The
@@ -168,16 +58,13 @@ fn a_failed_restart_keeps_the_opened_name() {
     let mut engine = AudioEngine::from_spec(manual_spec());
     engine.opened = Opened::Named("Card".into());
     let mut driver = driver_over(engine);
-    let (manual, _stream) = crate::ManualStreamDriver::new();
+    let (manual, _stream) = ManualStreamDriver::new();
     driver
         .restart_on(manual_spec(), manual, |_, _| {
             Err(crate::Error::InvalidConfig("refused".into()))
         })
         .expect_err("the hook refuses");
-    assert_eq!(
-        driver.engine().opened_name().unwrap().as_deref(),
-        Some("Card")
-    );
+    assert_eq!(driver.opened_name().unwrap().as_deref(), Some("Card"));
 }
 
 /// **Starting an engine whose stream runs is an error, and the running
@@ -187,20 +74,19 @@ fn a_failed_restart_keeps_the_opened_name() {
 /// start succeeds again.
 #[test]
 fn starting_a_running_engine_is_an_error() {
-    let (_transport, state) = build_callback_state(44_100.0);
-    let state = Arc::new(state);
+    let state = empty_state(SampleRate::SR_44K1);
     let mut engine = AudioEngine::from_spec(OutputSpec::new(
         SampleRate::SR_44K1,
         tutti_types::ChannelLayout::STEREO,
-        cpal::SampleFormat::F32,
+        SampleFormat::F32,
     ));
-    let (first, first_stream) = crate::ManualStreamDriver::new();
+    let (first, first_stream) = ManualStreamDriver::new();
     engine
         .start_with(Arc::clone(&state), first)
         .expect("starts");
     assert!(engine.is_running() && first_stream.is_open());
 
-    let (second, second_stream) = crate::ManualStreamDriver::new();
+    let (second, second_stream) = ManualStreamDriver::new();
     let err = engine
         .start_with(Arc::clone(&state), second)
         .expect_err("a running engine refuses a second start");
@@ -209,7 +95,7 @@ fn starting_a_running_engine_is_an_error() {
     assert!(!second_stream.is_open(), "the refused driver never opened");
 
     engine.stop();
-    let (third, third_stream) = crate::ManualStreamDriver::new();
+    let (third, third_stream) = ManualStreamDriver::new();
     engine.start_with(state, third).expect("starts after stop");
     assert!(third_stream.is_open());
 }

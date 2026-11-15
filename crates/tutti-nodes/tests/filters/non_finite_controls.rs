@@ -19,7 +19,7 @@ use tutti_fixtures::Noise;
 use tutti_graph::contract::drive;
 use tutti_graph::{Node, ParamNode, Prepare};
 use tutti_nodes::{
-    ChannelTimes, CompressorControls, CompressorNode, DelayControls, DelayFamily, DelayNode,
+    ChannelTimes, CompressorControls, CompressorNode, DelayControls, DelayLayout, DelayNode,
     GateControls, GateNode, InterpolationMode, KeySource, LadderFilterNode, LadderType, MaxDelay,
     ModDelayNode, PhaserControls, PhaserNode, Stages, SvfFilterNode, SvfType,
 };
@@ -153,15 +153,15 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     survives_node(
         "delay",
         || {
-            let family = DelayFamily::new(
+            let layout = DelayLayout::new(
                 BusTopology::STEREO,
                 MaxDelay::of(Seconds::new(0.1)),
                 InterpolationMode::Linear,
             )
             .with_times(ChannelTimes::each(&[Seconds::new(0.013)]).unwrap())
             .unwrap();
-            DelayNode::live(
-                family,
+            DelayNode::from_layout(
+                layout,
                 DelayControls {
                     time: Seconds::new(0.01),
                     feedback: Feedback::new(0.5),

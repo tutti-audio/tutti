@@ -17,7 +17,7 @@ use tutti_graph::ParamNode;
 use tutti_graph::contract::IsolateRow;
 use tutti_nodes::{
     BrickwallLimiterNode, BusStripNode, ChannelTimes, CompressorControls, CompressorNode,
-    DelayControls, DelayFamily, DelayNode, DistortionNode, EqBandNode, GateControls, GateNode,
+    DelayControls, DelayLayout, DelayNode, DistortionNode, EqBandNode, GateControls, GateNode,
     InterpolationMode, KeySource, LadderFilterNode, LadderType, LfoNode, LfoShape, LimiterControls,
     LimiterNode, MaxDelay, ModDelayNode, PhaserControls, PhaserNode, ShapeKind, Stages,
     SvfControls, SvfFilterNode, SvfType,
@@ -132,15 +132,15 @@ fn brickwall_limiter() {
 #[test]
 fn delay_line() {
     IsolateRow::new("DelayNode (stereo, ping-pong)", || {
-        let family = DelayFamily::new(
+        let layout = DelayLayout::new(
             BusTopology::STEREO,
             MaxDelay::of(Seconds(1.0)),
             InterpolationMode::Linear,
         )
         .with_times(ChannelTimes::each(&[Seconds(0.07)]).unwrap())
         .unwrap();
-        DelayNode::live(
-            family,
+        DelayNode::from_layout(
+            layout,
             DelayControls {
                 time: Seconds(0.05),
                 feedback: Feedback::new(0.5_f32),
