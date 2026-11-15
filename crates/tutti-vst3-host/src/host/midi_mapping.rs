@@ -59,7 +59,7 @@ pub(crate) const CTRL_AFTERTOUCH: usize = kAfterTouch as usize;
 pub(crate) const CTRL_PITCH_BEND: usize = kPitchBend as usize;
 
 /// The controller number of a program change, which `IMidiMapping` may name
-/// beside `ControllerNumbers`' own (`kCtrlProgramChange`).
+/// beside the SDK's own controller numbers (`kCtrlProgramChange`).
 const CTRL_PROGRAM_CHANGE: i16 = 130;
 /// The controller number of a polyphonic key pressure (`kCtrlPolyPressure`).
 const CTRL_POLY_PRESSURE: i16 = 131;
