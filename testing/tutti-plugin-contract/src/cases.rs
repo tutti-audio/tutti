@@ -456,9 +456,13 @@ pub fn automation_to_a_read_only_parameter_is_not_applied<F: Format>() {
 
 /// Automation for an id the plugin does not declare is not applied: a block
 /// whose automation names it and the level moves the level and sends the plugin
-/// no event for the undeclared id, whichever route carries the points. (A format
-/// that delivers a point directly leaves no event for either, so the transcript
-/// half is vacuous there.)
+/// no event for the undeclared id, whichever route carries the points. (AU and
+/// VST2 deliver a point directly and leave no event for either id, so the
+/// transcript half is vacuous there. AU's refusal is pinned by its own unit test,
+/// `automation_for_an_undeclared_parameter_is_counted_not_written` in
+/// `tutti-au-host`'s processor; VST2's is `Vst2Processor::write_automation`, which
+/// turns an id outside `numParams` into a refusal before `setParameter` and
+/// counts it.)
 pub fn automation_to_an_undeclared_parameter_is_not_applied<F: Format>() {
     let mut a = active_in::<F>(Mode::Level);
     let mut points = ParameterChanges::reserved(2, 4);

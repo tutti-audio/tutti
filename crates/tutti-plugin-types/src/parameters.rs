@@ -759,16 +759,6 @@ pub enum ParamWriteError {
     Unanswered(ParamId),
 }
 
-impl ParamWriteError {
-    /// The parameter the refused write named.
-    #[must_use]
-    pub const fn id(self) -> ParamId {
-        match self {
-            Self::Undeclared(id) | Self::ReadOnly(id) | Self::Lost(id) | Self::Unanswered(id) => id,
-        }
-    }
-}
-
 /// What a format reports of a declared parameter's writability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParamAccess {
@@ -804,6 +794,14 @@ impl ParamAccess {
 }
 
 impl ParamWriteError {
+    /// The parameter the refused write named.
+    #[must_use]
+    pub const fn id(self) -> ParamId {
+        match self {
+            Self::Undeclared(id) | Self::ReadOnly(id) | Self::Lost(id) | Self::Unanswered(id) => id,
+        }
+    }
+
     /// The policy: `Ok` for a write to a declared parameter that is not
     /// declared read-only.
     ///

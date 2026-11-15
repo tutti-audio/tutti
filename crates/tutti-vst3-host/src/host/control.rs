@@ -287,12 +287,17 @@ impl Control for Vst3Loaded {
         Ok(())
     }
 
-    /// From the plugin's own parameter info, which carries `kIsReadOnly`.
+    /// While active, from the activation's table (what the Processor drops
+    /// against, so `Ok` is a write that is applied); otherwise from the
+    /// plugin's own parameter info, which carries `kIsReadOnly`.
     fn parameter_writable(
         &self,
         main: MainThreadMarker,
         id: ParamId,
     ) -> Result<(), ParamWriteError> {
+        if let Some(declared) = &self.declared {
+            return ParamWriteError::check_sorted(id, declared);
+        }
         let info = self.parameter_info(main, id);
         ParamWriteError::check(
             id,

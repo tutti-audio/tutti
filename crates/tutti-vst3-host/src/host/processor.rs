@@ -221,9 +221,10 @@ pub struct Vst3Processor<T: Vst3Sample> {
     /// of its writability, sorted by id: the write policy
     /// ([`ParamWriteError::check_sorted`]) reads it, so a Controller write or
     /// automation for an undeclared or read-only parameter is not sent. Taken
-    /// per activation: a plugin that changes its parameters later is read again
-    /// at the next one.
-    declared: Box<[(ParamId, ParamAccess)]>,
+    /// per activation, and shared with the Controller (which answers writes from
+    /// it): a plugin that changes its parameters later is read again at the next
+    /// activation.
+    declared: Arc<[(ParamId, ParamAccess)]>,
     /// Whether `setProcessing(1)` is the plugin's last word.
     processing: bool,
     /// Last: the plugin outlives everything above, and a last holder retires
@@ -250,7 +251,7 @@ pub(super) struct ProcessorParts {
     pub reports: EditSink,
     pub beat: DrainBeat,
     pub carried: Vec<(ParamId, Normalized)>,
-    pub declared: Box<[(ParamId, ParamAccess)]>,
+    pub declared: Arc<[(ParamId, ParamAccess)]>,
 }
 
 impl<T: Vst3Sample> Vst3Processor<T> {
