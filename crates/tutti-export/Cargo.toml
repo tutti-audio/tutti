@@ -45,7 +45,6 @@ criterion.workspace = true
 # An independent reader for the WAV files the tests export.
 hound = "3.5"
 tempfile = "3.10"
-approx = "0.5"
 # The packets a test stimulus emits (`Event::midi` takes an `Ump`).
 tutti-ump = { path = "../tutti-ump", default-features = false }
 # `signal::sine`, the stimulus of the normalize tests.
