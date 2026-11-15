@@ -70,6 +70,8 @@ pub struct InProcClient<F: Loaded> {
     pub(super) inner: Arc<Mutex<Instance<F>>>,
     /// The realtime end the plugin's Processor is lent to.
     pub(super) rt: Rt<F::Processor>,
+    /// Whether the plugin is lost, read with no lock ([`Instance::lost_flag`]).
+    lost: Arc<std::sync::atomic::AtomicBool>,
     pub(super) descriptor: PluginDescriptor,
     /// Where the plugin came from, for an in-process one: what a fork loads
     /// again. `None` for a hosting that reopens another way.
@@ -186,7 +188,7 @@ pub struct InProcClient<F: Loaded> {
 }
 
 /// A node dropped while its realtime end holds the Processor and a recall is
-/// raised (a [`Rebinder`](super::Rebinder)'s commit raises one) hands it back
+/// raised (a [`Pending`](super::Pending) commit raises one) hands it back
 /// through the handoff instead of dropping it: the control side collects it at
 /// the instance's next pump. Without a raised recall the Processor drops with
 /// the end, as for any node that leaves the graph.
@@ -194,21 +196,16 @@ pub struct InProcClient<F: Loaded> {
 /// The node is off the audio thread by then (a node leaves the graph before it
 /// is dropped), so this call is the end's only user. The handoff runs
 /// [`Processor::stop`] on the dropping thread, the control thread, as a
-/// retune's poll does between blocks: a format's `stop` is called on the
-/// thread that holds the end.
+/// retune's poll does between blocks.
 ///
-/// A plugin that is lost has no controller left to stop under, so its node
-/// hands back nothing: it only drops.
+/// It reads no lock: the instance may be held by the control thread that
+/// drops the node. A plugin that is lost (its flag, set when its lifecycle
+/// poisons) has no controller left to stop under, so its node does not run
+/// `stop`: the Processor drops with the end, as the Processor of a lost plugin
+/// does when the session retires its node.
 impl<F: Loaded> Drop for InProcClient<F> {
     fn drop(&mut self) {
-        if self.rt.held().is_none() {
-            return;
-        }
-        if self
-            .inner
-            .try_lock()
-            .is_none_or(|instance| instance.is_lost())
-        {
+        if self.lost.load(std::sync::atomic::Ordering::Acquire) || self.rt.held().is_none() {
             return;
         }
         let _ = self.rt.poll(Processor::stop);
@@ -546,9 +543,11 @@ impl<F: Loaded> InProcClient<F> {
             .map_or_else(TransportFeed::new, |c| TransportFeed::over(c.meter()));
         let mut segments = SegmentPoints::default();
         segments.prepare(params.room());
+        let lost = inner.lock().lost_flag();
         Self {
             inner,
             rt,
+            lost,
             descriptor,
             reload,
             pipeline,

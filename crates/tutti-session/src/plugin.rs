@@ -513,9 +513,10 @@ pub enum PluginChange {
     /// Processor reaches the new node: the old node returns it at its next block
     /// and the next update's pump lends it on.
     IoChanged,
-    /// The plugin's ports changed to a width its node cannot take, and the
-    /// node stays as it is: a served plugin's shared-memory slab is laid out
-    /// at launch.
+    /// The plugin's new ports were not made a node, and the node stays as it
+    /// is: they are wider than a block serves, or outside a served plugin's
+    /// shared-memory slab (laid out at launch), or the graph refused the swap
+    /// ([`PortsRefusal`]). Reported once for the ports: they count as handled.
     PortsRefused {
         /// Why the ports were refused.
         why: PortsRefusal,

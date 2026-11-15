@@ -164,8 +164,7 @@ impl Plugin {
     /// for a blacklisted plugin,
     /// [`BridgeError::ServerNotFound`](tutti_plugin_types::BridgeError::ServerNotFound)
     /// when the `plugin-server` binary cannot be located,
-    /// [`BridgeError::LoadFailed`](tutti_plugin_types::BridgeError::LoadFailed) or
-    /// [`BridgeError::BundleResolutionFailed`](tutti_plugin_types::BridgeError::BundleResolutionFailed)
+    /// [`BridgeError::LoadFailed`](tutti_plugin_types::BridgeError::LoadFailed)
     /// when the plugin does not load, [`BridgeError::NotOutOfProcess`] for a
     /// VST2 plugin whose load asks for [`Hosting::OutOfProcess`],
     /// [`BridgeError::NotInProcess`] for a format this build has no in-process
@@ -647,20 +646,14 @@ impl Rebuilt {
 /// built: see [`Pending::commit`](tutti_plugin_host::Pending::commit). Dropping
 /// it changes nothing.
 #[must_use = "a node renders nothing until its move is committed"]
-pub struct Commit(Box<dyn FnOnce(MainThreadMarker) -> CommitResult + Send>);
-
-type CommitResult = std::result::Result<(), tutti_plugin_host::RebindError>;
+pub struct Commit(Box<dyn FnOnce(MainThreadMarker) + Send>);
 
 impl Commit {
     /// Names the node the Processor's way and recalls the Processor from the
-    /// node it replaces.
-    ///
-    /// # Errors
-    ///
-    /// [`Pending::commit`](tutti_plugin_host::Pending::commit)'s: the plugin is
-    /// left as it was.
-    pub fn commit(self, main: MainThreadMarker) -> CommitResult {
-        (self.0)(main)
+    /// node it replaces; see [`Pending::commit`](tutti_plugin_host::Pending::commit).
+    /// Call it once the node is in the graph: it does not fail.
+    pub fn commit(self, main: MainThreadMarker) {
+        (self.0)(main);
     }
 }
 

@@ -38,9 +38,6 @@ pub enum RebindError {
     /// The plugin is lost, or has reported no ports.
     #[error("the plugin has no ports to rebuild a node with: it is lost or has reported none")]
     NoPorts,
-    /// The plugin planned no recall for the move, so none was made.
-    #[error("the plugin planned no recall, so its Processor did not move")]
-    Unplanned,
     /// The plugin is loaded or refused: it has no Processor to move.
     #[error("the plugin is not running, so there is no Processor to move")]
     NotRunning,
@@ -293,18 +290,16 @@ impl<F: Loaded> Pending<F> {
     /// next block, or when it is dropped (the recall is raised, so a node
     /// dropped while it holds the Processor returns it to the control side).
     ///
+    /// Call it once the node is in the graph. It does not fail, whatever the
+    /// plugin's state is by then (it may have changed since
+    /// [`Rebinder::prepare`]): the Processor goes to this node at its next
+    /// lend, and a plugin that is not active has none lent. See
+    /// [`Rebinder::settled`] for when it has.
+    ///
     /// A second node's commit before the first one's Processor has moved
     /// replaces the first: its node never receives a Processor.
-    ///
-    /// # Errors
-    ///
-    /// The plugin's state may have changed since [`Rebinder::prepare`]:
-    /// [`NotRunning`](RebindError::NotRunning),
-    /// [`Restarting`](RebindError::Restarting), and
-    /// [`Unplanned`](RebindError::Unplanned) when the plugin planned no recall.
-    /// The plugin is left as it was.
-    pub fn commit(self, main: MainThreadMarker) -> Result<(), RebindError> {
-        self.inner.lock().commit(main, self.successor)
+    pub fn commit(self, main: MainThreadMarker) {
+        self.inner.lock().commit(main, self.successor);
     }
 }
 
@@ -399,11 +394,29 @@ mod tests {
         PluginNode<FakeLoaded>,
         Arc<Mutex<Instance<FakeLoaded>>>,
     ) {
+        rig_with(limit, false)
+    }
+
+    /// [`rig`], the plugin declaring a bypass of its own when `own_bypass`.
+    fn rig_with(
+        limit: Option<PortLimit>,
+        own_bypass: bool,
+    ) -> (
+        FakePlugin,
+        Rebinder<FakeLoaded>,
+        PluginNode<FakeLoaded>,
+        Arc<Mutex<Instance<FakeLoaded>>>,
+    ) {
         let (fake, loaded) = FakePlugin::new();
         // A voice that sounds for a block after each impulse.
         fake.ring_out(100);
         let main = main_thread();
-        let wiring = loaded.wiring(main);
+        let mut wiring = loaded.wiring(main);
+        if own_bypass {
+            wiring.own_bypass = Some(tutti_plugin_types::OwnBypass::Parameter(
+                tutti_plugin_types::ParamId::new(4),
+            ));
+        }
         let descriptor = loaded.info().clone();
         let prepare = Prepare::new(SR, MaxBlock::new(Samples(BLOCK)).expect("a block"));
         let Ok((processor, controller)) = loaded.activate(main, prepare) else {
@@ -430,7 +443,7 @@ mod tests {
     /// swap that cannot fail.
     fn rebind(rebinder: &Rebinder<FakeLoaded>) -> Result<PluginNode<FakeLoaded>, RebindError> {
         let (node, pending) = rebinder.prepare()?;
-        pending.commit(main_thread())?;
+        pending.commit(main_thread());
         Ok(node)
     }
 
@@ -550,6 +563,21 @@ mod tests {
             silent.audio.iter().flatten().all(|&s| s == 0.0),
             "the old node holds no Processor"
         );
+    }
+
+    /// **A rebuilt node declares the bypass of the plugin's own that the node
+    /// it replaces declared.** A layout carries no bypass, so the rebinder keeps
+    /// what the first node declared.
+    #[test]
+    fn a_rebuilt_node_keeps_the_own_bypass_of_the_original() {
+        let (_fake, rebinder, old, _inner) = rig_with(None, true);
+        assert!(old.shape().own_bypass, "the original declares one");
+        let (new, _pending) = rebinder.prepare().expect("a node");
+        assert!(new.shape().own_bypass, "and so does its successor");
+        let (_fake, rebinder, old, _inner) = rig_with(None, false);
+        assert!(!old.shape().own_bypass);
+        let (new, _pending) = rebinder.prepare().expect("a node");
+        assert!(!new.shape().own_bypass, "none where there was none");
     }
 
     /// **A prepared node that is never committed changes nothing:** the plugin

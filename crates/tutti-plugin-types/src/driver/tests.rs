@@ -850,8 +850,6 @@ fn a_relend_of_a_plugin_that_is_not_active_does_nothing() {
     assert!(!rig.state.is_parked());
     assert!(rig.plugin.calls().is_empty());
     assert!(rig.hand.pending(), "the successor stays pending");
-    assert!(rig.hand.withdraw(), "and can be taken back");
-    assert!(!rig.hand.pending());
 }
 
 /// **A relend raised while an activation is in flight does not displace

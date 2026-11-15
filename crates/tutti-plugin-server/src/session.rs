@@ -2622,11 +2622,12 @@ mod tests {
     /// loads it, with a slab sized to what the plugin declared.
     #[cfg(feature = "vst3")]
     fn load_vst3_probe(name: &str) -> (Rig, SlabWriter) {
-        let bundle = std::path::Path::new(crate::test_utils::vst3_probe_path())
-            .ancestors()
-            .find(|p| p.extension().is_some_and(|e| e == "vst3"))
-            .expect("the probe module is inside its bundle")
-            .to_path_buf();
+        let bundle = tutti_plugin_types::bundle::bundle_dir_of(
+            std::path::Path::new(crate::test_utils::vst3_probe_path()),
+            tutti_plugin_types::bundle::ModuleKind::Vst3,
+        )
+        .expect("the probe module is inside its bundle")
+        .to_path_buf();
         let mut s = Rig::new();
         s.handle(
             main_thread(),
@@ -2789,11 +2790,12 @@ mod tests {
         let _lock = crate::test_utils::plugin_load_lock();
         // The load names the `.vst3` bundle, not the module inside it that
         // `vst3_probe_path` names.
-        let bundle = std::path::Path::new(crate::test_utils::vst3_probe_path())
-            .ancestors()
-            .find(|p| p.extension().is_some_and(|e| e == "vst3"))
-            .expect("the probe module is inside its bundle")
-            .to_path_buf();
+        let bundle = tutti_plugin_types::bundle::bundle_dir_of(
+            std::path::Path::new(crate::test_utils::vst3_probe_path()),
+            tutti_plugin_types::bundle::ModuleKind::Vst3,
+        )
+        .expect("the probe module is inside its bundle")
+        .to_path_buf();
         let mut s = Rig::new();
         s.handle(
             main_thread(),

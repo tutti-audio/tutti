@@ -41,11 +41,16 @@ use tutti_graph::NodeKey;
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum PortsRefusal {
-    /// The plugin's ports cannot be a node: too wide for a block, or outside a
-    /// served plugin's slab.
+    /// The plugin's ports cannot be a node: too wide for a block
+    /// ([`TooWide`](RebindError::TooWide)), or outside a served plugin's slab
+    /// ([`OutsideSlab`](RebindError::OutsideSlab)). The plugin is untouched.
+    /// (A plugin that is not running or restarting is asked again at the next
+    /// update, not refused.)
     #[error(transparent)]
     Ports(#[from] RebindError),
-    /// The graph refused the swap; the plugin is as it was.
+    /// The graph refused the swap (a poisoned graph, a node that is gone, an
+    /// editor that refuses it); the plugin is untouched, since it is touched only
+    /// once the node is in.
     #[error("the graph refused the node over the new ports: {0}")]
     Swap(CrossfadeRefused),
 }
@@ -117,14 +122,8 @@ impl<C: Clock> Session<C> {
                 controls.set_meter(self.click_settings.project_meter());
                 match self.graph.replace_rebound(node, bound) {
                     Ok(()) => {
-                        if let Err(why) = commit.commit(main) {
-                            // The plugin is as it was and the new node renders
-                            // silence: the plugin's own path retries nothing,
-                            // and the app hears why.
-                            tracing::error!("the move of {node:?}'s Processor failed: {why}");
-                            out.push(refused(node, PortsRefusal::Ports(why)));
-                            return state.with(now, false);
-                        }
+                        // The plugin is touched only now the node is in place.
+                        commit.commit(main);
                         if let Some(hosted) = self.graph.plugins.get_mut(&node) {
                             hosted.node = Some(controls);
                         }
