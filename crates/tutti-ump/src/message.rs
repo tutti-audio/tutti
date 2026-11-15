@@ -1235,12 +1235,34 @@ pub enum Form {
 }
 
 /// A UMP version (Table 5).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// Versions are ordered by major, then minor: a device that receives an
+/// Endpoint Discovery compares the version it carries with its own to choose
+/// how much of the message it reads (§7.1.1).
+///
+/// ```
+/// use tutti_ump::UmpVersion;
+///
+/// assert!(UmpVersion::new(1, 0) < UmpVersion::V1_1);
+/// assert!(UmpVersion::new(1, 255) < UmpVersion::new(2, 0));
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UmpVersion {
-    /// Major.
+    /// Major. Declared first, so it orders before the minor.
     pub major: u8,
     /// Minor.
     pub minor: u8,
+}
+
+impl UmpVersion {
+    /// UMP 1.1, the version of M2-104 v1.1 (Table 5).
+    pub const V1_1: Self = Self::new(1, 1);
+
+    /// The version `major.minor`.
+    #[must_use]
+    pub const fn new(major: u8, minor: u8) -> Self {
+        Self { major, minor }
+    }
 }
 
 /// Which notifications an Endpoint Discovery asks for (§7.1.1).
