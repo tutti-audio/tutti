@@ -100,6 +100,10 @@ fn render(pooled: bool) -> (Vec<f32>, usize) {
             ed.spec_mut().root_id = id;
             wire(&mut ed, [15, 16]);
             ed.commit().expect("commits");
+            assert!(
+                ed.base().is_some_and(|p| p.root_bank().is_some()),
+                "the plan carries the old root's channels"
+            );
         }
         engine.process(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
         ed.collect();

@@ -957,8 +957,11 @@ impl LatencyGraph for ValidGraph {
         output_gain_sources(&self.gains)
     }
 
+    /// The root's channels: an old root's channels beside them take their
+    /// delays from the plan they were heard in, not from this solve.
     fn outputs(&self) -> impl Iterator<Item = ChannelFeed<NodeKey>> {
-        LatencyGraph::outputs(self.topology())
+        let root = self.root_bank.map_or(usize::MAX, |bank| bank.base);
+        LatencyGraph::outputs(self.topology()).filter(move |feed| feed.channel < root)
     }
 }
 

@@ -3051,16 +3051,16 @@ impl Graph {
         Ok(())
     }
 
-    /// Declares the root's topology. A declaration that changes it is the next
-    /// root, and the commit that carries it crossfades the old root's outputs
-    /// into the new root's over the declick length (`Editor::set_root_fade`),
-    /// unless `hard`: the new root takes over at the commit's block.
     /// Makes the root declaration last made a cut: the commit that carries
     /// it renders no old root.
     pub(crate) fn harden_root(&mut self) {
         self.editor.set_root_fade(None);
     }
 
+    /// Declares the root's topology. A declaration that changes it is the next
+    /// root, and the commit that carries it crossfades the old root's outputs
+    /// into the new root's over the declick length (`Editor::set_root_fade`),
+    /// unless `hard`: the new root takes over at the commit's block.
     pub(crate) fn declare_root(
         &mut self,
         root: Option<tutti_types::ChannelTopology>,

@@ -480,6 +480,20 @@ impl Stager {
                     .collect()
             })
             .unwrap_or_default();
+        // The first old ring that aligns each source to an output, whichever
+        // channel it fed: what a source on a new channel starts from.
+        let mut old_by_source: BTreeMap<crate::Source, usize> = BTreeMap::new();
+        for (i, d) in cx
+            .old
+            .map(|p| p.delays.as_slice())
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+        {
+            if let DelayKey::Output { from, .. } = d.key {
+                old_by_source.entry(from).or_insert(i);
+            }
+        }
         let mut caps = BTreeMap::new();
         let mut owing = BTreeSet::new();
         let mut rings = Vec::with_capacity(plan.delays.len());
@@ -515,15 +529,14 @@ impl Stager {
                 None => match carried {
                     // An old root's channel in a root crossfade's bank starts
                     // with the history the root's own channel had.
-                    None if bank_origin(plan, &d.key)
-                        .and_then(|key| old_delays.get(&key))
+                    None if copy_origin(plan, &d.key, &old_delays, &old_by_source)
                         .filter(|_| cx.carry)
                         .is_some() =>
                     {
-                        let j = bank_origin(plan, &d.key).and_then(|key| old_delays.get(&key));
+                        let j = copy_origin(plan, &d.key, &old_delays, &old_by_source);
                         rings.push(Some(Ring::Audio(AudioRing::new(d.len))));
                         from.push(RingFrom::Copy {
-                            from: j.map_or(0, |&j| j as u32),
+                            from: j.map_or(0, |j| j as u32),
                         });
                     }
                     Some(j) if cx.old.is_some_and(|p| p.delays[j].len == d.len) => {
@@ -1136,18 +1149,27 @@ pub(super) fn sort_by_offset(events: &mut [Event]) {
     }
 }
 
-/// The key an old root's channel of a root crossfade's bank had in the plan
-/// before the root changed: `key` as the bank's channel `base + c` names the
-/// root's channel `c`. `None` for a key that is not a bank channel's.
-fn bank_origin(plan: &Plan, key: &DelayKey) -> Option<DelayKey> {
-    let bank = plan.root_bank()?;
-    match *key {
-        DelayKey::Output { channel, from } if usize::from(channel) >= bank.base => {
-            Some(DelayKey::Output {
-                channel: channel - u16::try_from(bank.base).ok()?,
-                from,
-            })
+/// The old ring an output channel's ring of this plan starts from when no old
+/// ring has its own key: the old root's channel `c` for the bank's channel
+/// `base + c`, and, in a root change, for a root channel of a source the old
+/// plan aligned on another channel, that channel's ring (a source's delayed signal does not
+/// depend on the channel it feeds).
+fn copy_origin(
+    plan: &Plan,
+    key: &DelayKey,
+    old: &BTreeMap<DelayKey, usize>,
+    by_source: &BTreeMap<crate::Source, usize>,
+) -> Option<usize> {
+    let DelayKey::Output { channel, from } = *key else {
+        return None;
+    };
+    match plan.root_bank() {
+        Some(bank) if usize::from(channel) >= bank.base => {
+            let was = channel - u16::try_from(bank.base).ok()?;
+            old.get(&DelayKey::Output { channel: was, from }).copied()
         }
+        // Only in a root change: any other recompile keeps a ring by its key.
+        Some(_) if !old.contains_key(key) => by_source.get(&from).copied(),
         _ => None,
     }
 }

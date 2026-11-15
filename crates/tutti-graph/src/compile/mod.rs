@@ -669,6 +669,14 @@ pub fn compile(
     // The root's channels: a root change's old channels, after them, are
     // aligned like any output and report nothing outward.
     let rendered_outputs = topology.outputs.len();
+    // An old root's channels are aligned to the output time they were heard
+    // at, the plan before this one's, so the new root's alignment does not
+    // move for the length of the fade and back after it.
+    let bank_total = prev.map_or(total, |p| p.total_latency);
+    let output_time = |channel: u16| match graph.root_bank() {
+        Some(bank) if usize::from(channel) >= bank.base => bank_total,
+        _ => total,
+    };
     let root_width = graph.root_bank().map_or(rendered_outputs, |b| b.base);
     let compensation: Vec<Samples> = (0..root_width)
         .map(|ch| solved.compensation().for_channel(ch))
@@ -1006,7 +1014,7 @@ pub fn compile(
                     let r = align_audio(
                         &mut em,
                         v,
-                        dep.gap_to(total),
+                        dep.gap_to(output_time(channel)),
                         DelayKey::Output {
                             channel,
                             from: source,
@@ -1021,7 +1029,7 @@ pub fn compile(
                             value: align_event(
                                 &mut em,
                                 event_out_val[&from],
-                                departure(dense[&from.node]).gap_to(total),
+                                departure(dense[&from.node]).gap_to(output_time(channel)),
                                 DelayKey::EdgeGain { id, from },
                             ),
                         });
@@ -1044,7 +1052,14 @@ pub fn compile(
             Source::Global(ch) => ARef::Val(global_val[&ch]),
             Source::Zero => ARef::Zero,
         };
-        let d = solved.compensation().for_channel(usize::from(channel));
+        let d = match (graph.root_bank(), source) {
+            (Some(bank), _) if usize::from(channel) >= bank.base => match source {
+                Source::Node(p) => departure(dense[&p.node]).gap_to(bank_total),
+                Source::Global(_) => Latency::ZERO.gap_to(bank_total),
+                Source::Zero => Samples::ZERO,
+            },
+            _ => solved.compensation().for_channel(usize::from(channel)),
+        };
         // Delaying silence is silence: a zero channel reports its
         // compensation (as `latency::plan` does) but gets no ring.
         let mut delay = (!d.is_zero() && src != ARef::Zero).then(|| {

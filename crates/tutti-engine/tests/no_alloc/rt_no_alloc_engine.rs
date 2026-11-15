@@ -861,8 +861,31 @@ fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
     }
 }
 
+/// Silence that reports 16 frames of latency, so the graph delays every other
+/// output of a root it is in by 16 with a ring.
+struct Latent;
+
+impl tutti_graph::Node for Latent {
+    fn shape(&self) -> tutti_graph::Shape {
+        tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
+            .with_latency(tutti_types::Latency::new(tutti_types::Samples(16)))
+            .with_tail(tutti_types::Tail::Unbounded)
+    }
+    fn prepare(&mut self, _: &tutti_graph::Prepare) {}
+    fn process(
+        &mut self,
+        _: &tutti_graph::Cx<'_>,
+        mut io: tutti_graph::Io<'_>,
+    ) -> tutti_graph::Status {
+        io.output(0).fill(0.0);
+        tutti_graph::Status::Modified
+    }
+    fn reset(&mut self) {}
+}
+
 /// A root change that crossfades over several blocks is applied without
-/// allocating: a 7.1.4 root fades out as a 5.1 root fades in over the 240-frame
+/// allocating, a latent source in the old root included, whose delay rings
+/// the install block copies into the old root's channels: a 7.1.4 root fades out as a 5.1 root fades in over the 240-frame
 /// declick, which 64-frame blocks cross in four, and every block (the one that
 /// installs the plan with the old root's channels, the ones that fold both
 /// roots, and the one that ends the fade) is guarded. The blocks after the
@@ -878,11 +901,15 @@ fn a_root_change_crossfaded_across_several_blocks_is_allocation_free() {
         MaxBlock::of(Samples(64)),
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
+    ed.insert(NodeKey(2), "latent", Unforkable(Latent));
     let wire = |ed: &mut Editor, width: u16| {
         ed.spec_mut().topology.set_outputs((0..width).map(|port| {
+            // The old root's last channel is the latent source's, so every
+            // other channel of it is aligned by a ring; the new root has none.
+            let node = if width == 12 && port == 11 { 2 } else { 1 };
             Source::Node(OutPort {
-                node: NodeKey(1),
-                port,
+                node: NodeKey(node),
+                port: if node == 2 { 0 } else { port },
             })
         }));
     };

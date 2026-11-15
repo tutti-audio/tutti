@@ -2857,8 +2857,8 @@ mod tests {
     /// is delayed by 16 frames to the output time, and its history crosses
     /// into the old root's channel of the bank, so frame `t` of the fade is
     /// the counter's value 16 frames before, times the outgoing gain, with no
-    /// dip to silence. The new root, which has no history for that source,
-    /// is silent for its first 16 frames, then the counter's delayed value.
+    /// dip to silence. The new root, which has the same source on its right,
+    /// starts from the same history, so it has no gap either.
     #[test]
     fn a_compensated_old_root_crossfades_out_with_its_history() {
         use tutti_graph::{NodeKey, OutPort, Source};
@@ -2906,10 +2906,84 @@ mod tests {
                 (0.0, 1.0)
             };
             let left = out * delayed(t);
-            let right = new * if k >= 16 { delayed(t) } else { 0.0 };
+            // The counter's history crosses to the right too: the source's
+            // delayed signal does not depend on the channel it feeds.
+            let right = new * delayed(t);
             assert!(
                 (frame[0] - left).abs() < 1e-3 && (frame[1] - right).abs() < 1e-3,
                 "frame {k}: {frame:?} against ({left}, {right})"
+            );
+        }
+    }
+
+    /// An old root's latent source the new root lacks does not move the new
+    /// root: the old root has the counter and a 16-frame latent source, the
+    /// new root the counter alone on the left. The new root's counter is
+    /// undelayed from its first frame, through the fade and after the commit
+    /// that compiles the old channels away, and the plan's reported latency is
+    /// the new root's (none), not the old root's 16.
+    #[test]
+    fn a_latent_source_the_new_root_lacks_does_not_move_the_new_root() {
+        use tutti_graph::{NodeKey, OutPort, Source};
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(8))));
+        ed.insert(NodeKey(1), "count", tutti_graph::Unforkable(Count(0.0)));
+        ed.insert(NodeKey(2), "late", tutti_graph::Unforkable(Late));
+        let count = Source::Node(OutPort {
+            node: NodeKey(1),
+            port: 0,
+        });
+        let late = Source::Node(OutPort {
+            node: NodeKey(2),
+            port: 0,
+        });
+        ed.spec_mut().topology.set_outputs([count, late]);
+        ed.commit().expect("commits");
+        let engine =
+            Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within limits");
+        ed.set_root_fade(Some(tutti_graph::Fade::new(
+            Samples(20),
+            tutti_graph::FadeLaw::EqualAmplitude,
+        )));
+        let control = engine.output_control();
+        for _ in 0..2 {
+            let _ = block_with(&engine, 2, || {});
+        }
+        assert_eq!(
+            ed.base().map(|p| p.total_latency().samples()),
+            Some(Samples(16))
+        );
+        let id = ed.spec().root_id.next();
+        control
+            .publish_root(id, None, ChannelLayout::STEREO)
+            .unwrap();
+        ed.spec_mut().root_id = id;
+        ed.spec_mut().topology.set_outputs([count, Source::Zero]);
+        ed.commit().expect("commits");
+        assert_eq!(
+            ed.base().map(|p| p.total_latency().samples()),
+            Some(Samples(0)),
+            "the reported latency is the new root's"
+        );
+        let mut heard: Vec<f32> = (0..3).flat_map(|_| block_with(&engine, 2, || {})).collect();
+        // The fade is over: compile the old channels away and keep rendering.
+        let _ = ed.collect();
+        assert!(ed.settle_fades());
+        ed.commit().expect("commits");
+        heard.extend((0..2).flat_map(|_| block_with(&engine, 2, || {})));
+        // The counter at absolute frame `t` is `t + 1`; the old root's copy is
+        // 16 behind from frame 16 on.
+        for (k, frame) in heard.as_chunks::<2>().0.iter().enumerate() {
+            let t = 16 + k;
+            let (out, new) = if k < 20 {
+                equal_amplitude(k, 20)
+            } else {
+                (0.0, 1.0)
+            };
+            let left = out * (t as f32 - 15.0) + new * (t as f32 + 1.0);
+            assert!(
+                (frame[0] - left).abs() < 1e-3 && frame[1].abs() < 1e-6,
+                "frame {k}: {frame:?} against ({left}, 0)"
             );
         }
     }
