@@ -12,10 +12,9 @@ use tutti_dsp::{
     Stages, Stagger, StaggerError, Steps, SweepRange, allpass_coeff, sweep_hz,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_types::{
-    BusTopology, Depth, Feedback, Hz, MaxBlock, Phase, PhaseIncrement, SampleRate, Tail,
-};
+use tutti_types::{BusTopology, Depth, Feedback, Hz, MaxBlock, PhaseIncrement, SampleRate, Tail};
 
+use super::sweep_clock::{SEGMENT, SweepClock};
 use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
 /// Phaser of any width: `N` audio inputs, `N` outputs.
@@ -139,15 +138,10 @@ control_set! {
     }
 }
 
-/// The frames of a segment: the glide of a coefficient from its corner at the segment's start
-/// to its corner at the segment's end takes this many steps.
-const SEGMENT: u32 = 16;
-const _: () = assert!(COEFF_INTERVAL == SEGMENT as usize);
-
 /// The phaser as a [`Kernel`]: a [`PhaserChain`], the LFO that sweeps it and the solve of its
 /// coefficients.
 ///
-/// **The LFO is state on the stream's clock.** Its phase is an `f32` [`Phase`] walked by the
+/// **The LFO is state on the stream's clock.** Its phase is an `f32` `Phase` walked by the
 /// rate's increment, counted from the last reset (and so from every `prepare`: **a
 /// re-prepare restarts the sweep**). It is not anchored to the transport. The chain's
 /// coefficient is solved at the **corners** of a segment, every [`COEFF_INTERVAL`] frames
@@ -169,8 +163,6 @@ const _: () = assert!(COEFF_INTERVAL == SEGMENT as usize);
 pub struct PhaserKernel {
     input: BusTopology,
     chain: PhaserChain,
-    /// Each channel's LFO phase offset (channel 0's is zero), wrapped.
-    offsets: [PhaseIncrement; MAX_PHASER_CHANNELS],
     range: SweepRange,
     /// The sweep's bottom and top in [`Hz`]: the top is the authored one, held at 0.90 of
     /// Nyquist at the prepared rate.
@@ -185,16 +177,8 @@ pub struct PhaserKernel {
     coefficients: Box<[Glide<f32>]>,
     depth: Glide<f32>,
     feedback: Glide<f32>,
-    inc: PhaseIncrement,
-    /// The LFO's phase at the end of the segment in flight, where the corners last solved.
-    phase: Phase,
-    /// Frames since the segment began, in `0..COEFF_INTERVAL`: counted from the last reset,
-    /// so where the segments fall does not depend on how the stream is cut.
-    pos: usize,
-    /// Whether a segment has been solved since the last reset.
-    primed: bool,
-    /// Whether the first retarget after `prepare` has landed.
-    landed: bool,
+    /// The LFO and the segments.
+    clock: SweepClock,
 }
 
 impl PhaserKernel {
@@ -224,7 +208,6 @@ impl PhaserKernel {
         Ok(Self {
             input,
             chain: PhaserChain::new(stages, width),
-            offsets,
             range,
             min: range.min(),
             max: range.max(),
@@ -234,49 +217,22 @@ impl PhaserKernel {
             coefficients: vec![Glide::landed(0.0); width].into_boxed_slice(),
             depth: Glide::landed(d.depth.get()),
             feedback: Glide::landed(d.feedback.get()),
-            inc: PhaseIncrement(0.0),
-            phase: Phase::START,
-            pos: 0,
-            primed: false,
-            landed: false,
+            clock: SweepClock::new(offsets),
         })
-    }
-
-    /// Channel `c`'s all-pass coefficient with the LFO at `p` and the depth `depth`.
-    #[inline]
-    fn coefficient(&self, c: usize, p: Phase, depth: f32) -> f32 {
-        let lfo = p.offset_by(self.offsets[c]).to_radians().get().sin();
-        let sweep = sweep_hz(self.min, self.max, lfo, Depth::clamped(depth));
-        allpass_coeff(sweep.get(), self.sr)
     }
 
     /// Solves the next segment: its start corner is the last one's end (or the LFO's start
     /// after a reset), its end corner the sweep [`COEFF_INTERVAL`] frames on at the LFO's
     /// step and the depth the glide has there.
     fn solve(&mut self) {
-        let start = self.phase;
-        let mut end = start;
-        for _ in 0..COEFF_INTERVAL {
-            end = end.advance(self.inc);
-        }
         let depth_start = self.depth.now();
         let depth_end = self.depth.at(self.depth.taken().saturating_add(SEGMENT));
-        for c in 0..self.coefficients.len() {
-            if c > 0 && self.offsets[c] == self.offsets[c - 1] {
-                self.coefficients[c] = self.coefficients[c - 1];
-                continue;
-            }
-            let from = if self.primed {
-                self.coefficients[c].target()
-            } else {
-                self.coefficient(c, start, depth_start)
-            };
-            let mut glide = Glide::landed(from);
-            glide.aim_in(self.coefficient(c, end, depth_end), SEGMENT);
-            self.coefficients[c] = glide;
-        }
-        self.phase = end;
-        self.primed = true;
+        let (min, max, sr) = (self.min, self.max, self.sr);
+        self.clock.solve(&mut self.coefficients, |lfo, end| {
+            let depth = if end { depth_end } else { depth_start };
+            let sweep = sweep_hz(min, max, lfo, Depth::clamped(depth));
+            allpass_coeff(sweep.get(), sr)
+        });
     }
 }
 
@@ -310,19 +266,18 @@ impl Kernel for PhaserKernel {
         self.min = self.range.min();
         self.max = self.range.max().min(rate.nyquist_scaled(0.90));
         self.steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
-        self.landed = false;
         self.reset();
     }
 
     /// Back to silence with the sweep at its start: the chain empty, the glides landed on
-    /// their targets and the next segment solved from the LFO's first phase.
+    /// their targets, the next segment solved from the LFO's first phase and the next design
+    /// landing at once, as a fresh node's first does.
     fn reset(&mut self) {
         self.chain.reset();
         self.depth.settle();
         self.feedback.settle();
-        self.phase = Phase::START;
-        self.pos = 0;
-        self.primed = false;
+        self.clock.reset();
+        self.clock.unland();
     }
 
     /// Aims the depth and the feedback at `controls`, takes the rate's step, and at a
@@ -333,18 +288,19 @@ impl Kernel for PhaserKernel {
     fn retarget(&mut self, controls: &PhaserControls) {
         // A control reaches here finite (the cells' reader holds the last finite value); the
         // rate is floored and the feedback clamped.
-        self.inc =
-            PhaseIncrement::per_sample(Hz(controls.rate.get().max(MIN_RATE.get())), self.rate);
+        self.clock.set_inc(PhaseIncrement::per_sample(
+            Hz(controls.rate.get().max(MIN_RATE.get())),
+            self.rate,
+        ));
         let feedback = Feedback::new_clamped(controls.feedback.get()).get();
         let steps = Steps::Fixed(self.steps);
         self.depth.aim_by(controls.depth.get(), steps);
         self.feedback.aim_by(feedback, steps);
-        if !self.landed {
+        if self.clock.lands() {
             self.depth.settle();
             self.feedback.settle();
-            self.landed = true;
         }
-        if self.pos == 0 {
+        if self.clock.at_corner() {
             self.solve();
         }
     }
@@ -360,7 +316,7 @@ impl Kernel for PhaserKernel {
             .process(&mut self.coefficients, &mut self.feedback, input, output);
         self.depth
             .advance(u32::try_from(frames).unwrap_or(u32::MAX));
-        self.pos = (self.pos + frames) % COEFF_INTERVAL;
+        self.clock.advance(frames);
     }
 
     /// The closed loop's ring-out has no bound a tail could be cut at: unknown, so the
@@ -373,8 +329,10 @@ impl Kernel for PhaserKernel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::drive_kernel;
     use tutti_graph::contract::{assert_honest_tail, assert_param_fork, drive, prepared};
     use tutti_graph::{Node, ParamNode};
+    use tutti_types::Phase;
     use tutti_types::{ChannelLayout, Latency, PhaseIncrement, Samples, Tail, UnitParam};
 
     const RATE: SampleRate = SampleRate::SR_48K;
@@ -670,46 +628,6 @@ mod tests {
         k
     }
 
-    /// Renders `input` (one `Vec` per channel) through `k` in one call.
-    fn render(k: &mut PhaserKernel, input: &[Vec<f32>]) -> Vec<Vec<f32>> {
-        let ins: Vec<&[f32]> = input.iter().map(Vec::as_slice).collect();
-        let mut out = vec![vec![0.0f32; input[0].len()]; input.len()];
-        let mut outs: Vec<&mut [f32]> = out.iter_mut().map(Vec::as_mut_slice).collect();
-        k.render(
-            Planes::new(&ins).unwrap(),
-            ControlLanes::<f32>::NONE,
-            PlanesMut::new(&mut outs).unwrap(),
-        );
-        out
-    }
-
-    /// What the driver does to a kernel for `frames` of `input`: a retarget at every grid
-    /// point and at every frame of `moves` (a control that moved), each at the controls in
-    /// force there (`moves` is `(frame, controls)` in order, the first at frame 0), the
-    /// frames between rendered together.
-    fn drive_kernel(
-        k: &mut PhaserKernel,
-        moves: &[(usize, PhaserControls)],
-        input: &[Vec<f32>],
-    ) -> Vec<Vec<f32>> {
-        let frames = input[0].len();
-        let mut stops: Vec<usize> = (0..frames).step_by(COEFF_INTERVAL).collect();
-        stops.extend(moves.iter().map(|m| m.0).filter(|&f| f < frames));
-        stops.sort_unstable();
-        stops.dedup();
-        stops.push(frames);
-        let mut out = vec![Vec::new(); input.len()];
-        for w in stops.windows(2) {
-            let at = moves.iter().rev().find(|m| m.0 <= w[0]).unwrap().1;
-            k.retarget(&at);
-            let piece: Vec<Vec<f32>> = input.iter().map(|c| c[w[0]..w[1]].to_vec()).collect();
-            for (o, y) in out.iter_mut().zip(render(k, &piece)) {
-                o.extend(y);
-            }
-        }
-        out
-    }
-
     /// The coefficient the sweep's definition gives for a channel offset by `offset` cycles,
     /// `steps` steps of the LFO on (an `f32` phase walked one frame at a time), at depth
     /// `depth`, on `range` at `rate` Hz.
@@ -866,7 +784,11 @@ mod tests {
         ] {
             let mut k = kernel(1, 4, SweepRange::DEFAULT, Stagger::NONE);
             drive_kernel(&mut k, &[(0, controls(rate, 1.0, 0.5))], &silence(1, 4_801));
-            assert_eq!(k.phase, walked(effective, 4_800 + 16), "rate {rate}");
+            assert_eq!(
+                k.clock.state().0,
+                walked(effective, 4_800 + 16),
+                "rate {rate}"
+            );
         }
         assert_ne!(walked(0.5, 4_816), walked(0.01, 4_816));
     }
@@ -928,7 +850,7 @@ mod tests {
             let mut k = kernel(1, 4, SweepRange::DEFAULT, Stagger::NONE);
             // To frame 70: the segments at 0, 16, 32, 48 and 64 are solved.
             drive_kernel(&mut k, &[(0, slow), (at, fast)], &silence(1, 70));
-            k.phase
+            k.clock.state().0
         };
         for at in [33, 40, 47, 48] {
             assert_eq!(after(at), walk(48, 32), "moved at frame {at}");
@@ -950,9 +872,9 @@ mod tests {
         );
         let loud = vec![vec![1.0f32; 1_000]; 2];
         drive_kernel(&mut k, &[(0, controls(3.0, 1.0, 0.7))], &loud);
-        assert_ne!(k.phase, Phase::START, "the sweep was running");
+        assert_ne!(k.clock.state().0, Phase::START, "the sweep was running");
         k.prepare(RATE, MaxBlock::of(Samples(64)));
-        assert_eq!((k.phase, k.pos, k.primed), (Phase::START, 0, false));
+        assert_eq!(k.clock.state(), (Phase::START, 0, false));
         let y = drive_kernel(&mut k, &[(0, controls(3.0, 1.0, 0.7))], &silence(2, 200));
         assert!(y.iter().flatten().all(|&s| s == 0.0));
     }
@@ -1008,5 +930,37 @@ mod tests {
         let at_the_point = render(1_040);
         assert_eq!(render(1_037), at_the_point);
         assert_ne!(render(1_056), at_the_point);
+    }
+
+    /// A reset node equals a fresh one that has the cell: render, move the depth and the
+    /// feedback, reset, and the render is the fresh node's with those cells (the move lands at
+    /// once, it does not glide from the old value).
+    #[test]
+    fn a_cell_moved_before_a_reset_lands_at_once_as_on_a_fresh_node() {
+        let x: Vec<f32> = (0..1_000)
+            .map(|n| ((n * 13 + 5) % 100) as f32 / 50.0 - 1.0)
+            .collect();
+        let moved = |node: &PhaserNode| {
+            let set = node.param_set();
+            assert!(set.set(UnitParam::Depth, 0.9));
+            assert!(set.set(UnitParam::Feedback, 0.8));
+        };
+        let blocks = |node: &mut PhaserNode| -> Vec<f32> {
+            x.chunks(64)
+                .flat_map(|c| drive(node, RATE, &[c], &[]).remove(0))
+                .collect()
+        };
+        let mut used = prepared(
+            PhaserNode::mono(Stages::of(4), PhaserControls::DEFAULT),
+            RATE,
+            64,
+        );
+        blocks(&mut used);
+        moved(&used);
+        used.reset();
+        let fresh = PhaserNode::mono(Stages::of(4), PhaserControls::DEFAULT);
+        moved(&fresh);
+        let mut fresh = prepared(fresh, RATE, 64);
+        assert_eq!(blocks(&mut used), blocks(&mut fresh));
     }
 }
