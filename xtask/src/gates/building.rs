@@ -16,7 +16,7 @@
 //! (a trait impl's methods carry no `pub`), outside the body of a `macro_rules!`. Its
 //! *receiver* is by value (`self`, `mut self`), by reference (`&self`, `&mut self`,
 //! `&'a self`) or absent. Its *owner* is the last path segment of the `impl`'s type.
-//! Its *built type* is the return type with one `Result<..>` or `Option<..>` wrapper
+//! Its *built type* is the return type with one `Result<..>` or `Option<..>` wrapper (any path to it, as `io::Result<..>`)
 //! peeled, generics dropped, when that is `Self` or the owner's name; a return type
 //! that is anything else (`Param<U>`, a tuple, a trait object) has none.
 //!
@@ -27,10 +27,13 @@
 //!   `Result<Owner, ..>`. A terminal `build(self) -> Result<Product>` is not one: its
 //!   built type is not its owner.
 //! - `setter`: a receiver by reference and a name that starts with `set_`, on any
-//!   owner.
+//!   owner: wider than the design's node, source or spec, and the difference is carried
+//!   by named rows of [`ALLOW`].
 //! - `node-ctor`: no receiver, a built type, on a `*Node` owner (a `Result` or
 //!   `Option` wrapper counts).
-//! - `config-width`: no receiver, return type `Self` or the owner (no wrapper), on a
+//! - `config-width`: no receiver, return type `Self` or the owner (no wrapper: an
+//!   `Option` or `Result` return is not rule 2's "returning `Self`", and `ctor-result`
+//!   counts the `Result`), on a
 //!   `*Config` owner, whose first parameter is not a `ChannelLayout` or `BusTopology`
 //!   (the last path segment of a type, or of an `impl Into<_>` or a `T: Into<_>` bound
 //!   named in the generics or the `where` clause). A function with no parameter has no
@@ -89,7 +92,8 @@ const RULES: [(Rule, &str); 7] = [
 
 impl Rule {
     fn name(self) -> &'static str {
-        RULES.iter().find(|(r, _)| *r == self).map_or("", |r| r.1)
+        // `RULES` lists the variants in declaration order.
+        RULES[self as usize].1
     }
 
     fn parse(name: &str) -> Option<Rule> {
@@ -193,13 +197,19 @@ pub(super) const ALLOW: &[Allow] = &[
     },
     Allow {
         path: "crates/tutti-midi-hardware/src/virtual_endpoint.rs",
-        owner: "VirtualSource",
+        owner: "VirtualSource::open",
         rules: &[Rule::CtorResult],
         reason: "opening an OS endpoint: the OS refuses, not a value a type could forbid",
     },
     ty(
         "crates/tutti-vst2-host/",
-        "Vst2Loaded",
+        "Vst2Loaded::load",
+        CTOR,
+        "loading a VST2 library the OS refuses: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-vst2-host/",
+        "Vst2Loaded::load_plugin",
         CTOR,
         "loading a VST2 library the OS refuses: the failure is the OS's, not a value's",
     ),
@@ -216,20 +226,44 @@ pub(super) const ALLOW: &[Allow] = &[
         "opening a SoundFont file: the failure is the file's, not a value's",
     ),
     ty(
+        "crates/tutti-midi-network/src/udp.rs",
+        "UdpDriver::bind",
+        CTOR,
+        "binding a UDP socket: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-plugin-ipc/src/transport/sys/unix.rs",
+        "Watch::of",
+        CTOR,
+        "duplicating a descriptor: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-plugin-ipc/src/transport/sys/windows.rs",
+        "Watch::of",
+        CTOR,
+        "duplicating a handle: the failure is the OS's, not a value's",
+    ),
+    ty(
         "crates/tutti-au-host/",
-        "AuHandle",
+        "AuHandle::new",
         CTOR,
         "loading an AU component the OS refuses: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-au-host/",
-        "AuLoaded",
+        "AuLoaded::new",
+        CTOR,
+        "instantiating an AU component the OS refuses: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-au-host/",
+        "AuLoaded::new_with_config",
         CTOR,
         "instantiating an AU component the OS refuses: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-clap-host/",
-        "ClapLoaded",
+        "ClapLoaded::load",
         CTOR,
         "loading a CLAP bundle the OS refuses: the failure is the OS's, not a value's",
     ),
@@ -241,79 +275,109 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-codec/",
-        "FileIn",
+        "FileIn::open",
         CTOR,
         "opening a file for decoding: the failure is the file's, not a value's",
     ),
     ty(
         "crates/tutti-cpal/",
-        "DeviceHost",
+        "DeviceHost::open",
         CTOR,
         "opening an audio host: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-cpal/",
-        "DeviceListing",
+        "DeviceListing::outputs",
         CTOR,
         "enumerating devices on a thread the OS lends: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-cpal/",
-        "AudioEngine",
+        "DeviceListing::spawn_with",
+        CTOR,
+        "enumerating devices on a thread the OS lends: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-cpal/",
+        "AudioEngine::new",
         CTOR,
         "opening an output device: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-cpal/",
-        "DevicePoller",
+        "AudioEngine::open",
+        CTOR,
+        "opening an output device: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-cpal/",
+        "DevicePoller::spawn",
         CTOR,
         "spawning the device poller and reading the host: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-midi-hardware/",
-        "Devices",
+        "Devices::open",
         CTOR,
         "opening the OS MIDI endpoints: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-midi-hardware/",
-        "MidiSession",
+        "Devices::open_over",
+        CTOR,
+        "opening the OS MIDI endpoints: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-midi-hardware/",
+        "MidiSession::open",
         CTOR,
         "opening the OS MIDI ports: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-midi-hardware/",
-        "VirtualDestination",
+        "MidiSession::open_over",
+        CTOR,
+        "opening the OS MIDI ports: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-midi-hardware/",
+        "VirtualDestination::open",
         CTOR,
         "opening an OS endpoint: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-midi-network/",
-        "Browser",
+        "Browser::start",
         CTOR,
         "binding the mDNS browser: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-midi-network/",
-        "Nonce",
+        "Nonce::random",
         CTOR,
         "reading OS entropy: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-midi-device/",
-        "EntropyWords",
+        "EntropyWords::from_os",
         CTOR,
         "reading OS entropy: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-sampler/",
-        "DiskStreamer",
+        "DiskStreamer::new",
+        CTOR,
+        "starting the streamer thread: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-sampler/",
+        "DiskStreamer::manual",
         CTOR,
         "starting the streamer thread: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-plugin-types/",
-        "WindowHandle",
+        "WindowHandle::from_window",
         CTOR,
         "reading the platform window handle: the failure is the OS's, not a value's",
     ),
@@ -452,13 +516,16 @@ fn bare(ty: &str) -> &str {
 /// The wrapper of a return type and whether what it wraps is `Self` or `owner`.
 fn built(ret: &str, owner: &str) -> Option<Wrap> {
     let r = squash(ret);
-    let (wrap, inner) = if let Some(a) = r.strip_prefix("Result<") {
-        (Wrap::Result, a)
-    } else if let Some(a) = r.strip_prefix("Option<") {
-        (Wrap::Option, a)
-    } else {
-        (Wrap::Plain, r.as_str())
-    };
+    // A wrapper is named by its last path segment: `io::Result<Self>` is a `Result`.
+    let wrapper = r.find('<').and_then(|lt| {
+        let seg = r[..lt].rsplit("::").next().unwrap_or("");
+        match seg {
+            "Result" => Some((Wrap::Result, &r[lt + 1..])),
+            "Option" => Some((Wrap::Option, &r[lt + 1..])),
+            _ => None,
+        }
+    });
+    let (wrap, inner) = wrapper.unwrap_or((Wrap::Plain, r.as_str()));
     let ty = bare(split_top(inner)[0]).trim_end_matches('>');
     (ty == "Self" || ty == owner).then_some(wrap)
 }
@@ -1072,6 +1139,22 @@ mod tests {
             )
             .passed()
         );
+    }
+
+    #[test]
+    fn a_path_qualified_result_or_option_is_peeled_like_a_bare_one() {
+        for ret in [
+            "io::Result<Self>",
+            "crate::Result<Self>",
+            "std::io::Result<Foo>",
+        ] {
+            let src = format!("impl Foo {{ pub fn open() -> {ret} {{ todo!() }} }}");
+            assert_eq!(rules(&src), one("open", "ctor-result"), "{ret}");
+        }
+        let node = "impl GainNode { pub fn new() -> std::option::Option<Self> { todo!() } }";
+        assert_eq!(rules(node), one("new", "node-ctor"));
+        let chain = "impl Foo { pub fn depth(self) -> io::Result<Self> { todo!() } }";
+        assert_eq!(rules(chain), one("depth", "chain-result"));
     }
 
     #[test]

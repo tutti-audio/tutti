@@ -278,6 +278,7 @@ tutti-midi-device  range-macro  crates/tutti-midi-device/src/ci/pe/limits.rs::te
 tutti-midi-device  range-macro  crates/tutti-midi-device/src/ci/pe/resource/fields.rs::text_enum
 
 # tutti-midi-file
+tutti-midi-file  chain-result  crates/tutti-midi-file/src/file.rs::Track::push
 tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::clip
 tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::from_bytes
 tutti-midi-file  ctor-result  crates/tutti-midi-file/src/file.rs::MidiFile::read
@@ -616,6 +617,7 @@ tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::star
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_finite
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_finite_with_capacity
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_with_capacity
+tutti-session  ctor-result  crates/tutti-session/src/session.rs::Session::new
 
 # tutti-sf2
 tutti-sf2  ctor-result  crates/tutti-sf2/src/soundfont.rs::SoundFont::from_reader
