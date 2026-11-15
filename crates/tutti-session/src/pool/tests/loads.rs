@@ -190,7 +190,7 @@ fn declare(stub: &Stub) -> Declared<&'static str, Stub> {
     Declared::new(stub.name, stub.clone())
 }
 
-fn made(session: &Session, key: &'static str) -> Result<Arc<Made>, HandleError<&'static str>> {
+fn made(session: &crate::DetachedSession, key: &'static str) -> Result<Arc<Made>, HandleError<&'static str>> {
     session
         .pool
         .handle::<_, Stub>(&key)
@@ -200,9 +200,9 @@ fn made(session: &Session, key: &'static str) -> Result<Arc<Made>, HandleError<&
 /// Runs `f` on a thread that holds the main-thread proof, and hands the
 /// session back with what `f` returned and the thread's id.
 fn on_main<R: Send + 'static>(
-    mut session: Session,
-    f: impl FnOnce(&mut Session, MainThreadMarker) -> R + Send + 'static,
-) -> (Session, R, ThreadId) {
+    mut session: crate::DetachedSession,
+    f: impl FnOnce(&mut crate::DetachedSession, MainThreadMarker) -> R + Send + 'static,
+) -> (crate::DetachedSession, R, ThreadId) {
     thread::spawn(move || {
         let marker = tutti_fixtures::main_thread();
         let result = f(&mut session, marker);
@@ -213,7 +213,7 @@ fn on_main<R: Send + 'static>(
 }
 
 /// An update on a main thread has run: the session has one.
-fn with_main_thread(session: Session) -> Session {
+fn with_main_thread(session: crate::DetachedSession) -> crate::DetachedSession {
     on_main(session, |session, main| session.pool_main_stages(main)).0
 }
 
@@ -952,7 +952,7 @@ fn a_stage_dropped_off_the_main_thread_hands_its_output_to_the_collector_which_d
     assert_eq!(log.thread_of("drop output a"), main);
 }
 
-fn session_with_pending_output(queued: bool, log: &Log) -> Session {
+fn session_with_pending_output(queued: bool, log: &Log) -> crate::DetachedSession {
     let (s, spawned) = session();
     let mut s = with_main_thread(s);
     s.pool(declare(&stub("a", How::Main, log))).unwrap();

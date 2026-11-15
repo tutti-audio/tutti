@@ -18,7 +18,7 @@ fn panicked(payload: &(dyn std::any::Any + Send)) -> LoadError {
     })
 }
 
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// Hands what the diff started to the stage it begins with.
     pub(crate) fn pool_start(&mut self, starts: Vec<Start>) {
         for Start { flight, load } in starts {

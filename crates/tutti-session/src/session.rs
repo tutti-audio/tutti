@@ -1109,7 +1109,7 @@ impl<C: Clock> Session<C> {
     /// The session's MIDI: live inputs, clips, the hardware input's routes
     /// and the hardware out.
     #[cfg(feature = "midi")]
-    pub fn midi(&mut self) -> crate::Midi<'_, C> {
+    pub fn midi(&mut self) -> crate::Midi<'_> {
         crate::Midi {
             graph: &mut self.graph,
             state: &mut self.midi_state,
