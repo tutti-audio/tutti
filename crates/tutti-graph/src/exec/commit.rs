@@ -6,10 +6,9 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize};
 
-use ringbuf::traits::{Producer, Split};
-use ringbuf::{HeapCons, HeapProd, HeapRb};
 use tutti_curve::FadeLaw;
 use tutti_rt::RtScope;
+use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
 
 use super::stage::Staged;
 use super::state::{Gone, State, Unit};
@@ -392,24 +391,30 @@ impl Commit {
 }
 
 /// Send an applied box back to the editor. The push cannot fail by the
-/// credit count (module docs); were it ever full, leak rather than free on
-/// the audio thread.
-pub(super) fn send_back(back: &mut HeapProd<Box<Commit>>, commit: Box<Commit>) {
-    if let Err(full) = back.try_push(commit) {
-        debug_assert!(false, "the return ring is full");
-        std::mem::forget(full);
+/// credit count (module docs); were it ever full, or the editor gone (nothing
+/// will collect it), leak rather than free on the audio thread.
+pub(super) fn send_back(back: &mut RingWriter<Box<Commit>>, commit: Box<Commit>) {
+    if let Err(refused) = back.push(commit) {
+        debug_assert!(
+            refused.error == PushError::Disconnected,
+            "the return ring is full"
+        );
+        std::mem::forget(refused);
     }
 }
 
 /// Send a crossfade that ended, or was cut, superseded or never started,
 /// back to the editor on the fade-return ring, with the units it carries.
 /// The push cannot fail: the editor reserved this crossfade's slot before
-/// sending the commit that built it (module docs). Were it ever full, leak
-/// rather than free on the audio thread.
-pub(super) fn retire_fade(fade_back: &mut HeapProd<Box<Crossfade>>, x: Box<Crossfade>) {
-    if let Err(full) = fade_back.try_push(x) {
-        debug_assert!(false, "the fade-return ring is full");
-        std::mem::forget(full);
+/// sending the commit that built it (module docs). Were it ever full, or the
+/// editor gone, leak rather than free on the audio thread.
+pub(super) fn retire_fade(fade_back: &mut RingWriter<Box<Crossfade>>, x: Box<Crossfade>) {
+    if let Err(refused) = fade_back.push(x) {
+        debug_assert!(
+            refused.error == PushError::Disconnected,
+            "the fade-return ring is full"
+        );
+        std::mem::forget(refused);
     }
 }
 
@@ -419,7 +424,10 @@ pub(super) fn retire_fade(fade_back: &mut HeapProd<Box<Crossfade>>, x: Box<Cross
 ///
 /// Returns the keys of the unit that stopped writing, if the cut displaced
 /// one (`Keys::displace`).
-pub(super) fn cut_fades(u: &mut Unit, fade_back: &mut HeapProd<Box<Crossfade>>) -> Option<Tables> {
+pub(super) fn cut_fades(
+    u: &mut Unit,
+    fade_back: &mut RingWriter<Box<Crossfade>>,
+) -> Option<Tables> {
     let mut stale = None;
     if let Some(mut q) = u.queued.take() {
         let newest = q.waiting.take().expect("a queued fade holds its unit");
@@ -440,18 +448,18 @@ pub(super) fn cut_fades(u: &mut Unit, fade_back: &mut HeapProd<Box<Crossfade>>) 
 
 /// The queue pair between an editor and its executor.
 pub(crate) struct Channels {
-    pub(crate) to_executor: HeapProd<Box<Commit>>,
-    pub(crate) returned: HeapCons<Box<Commit>>,
+    pub(crate) to_executor: RingWriter<Box<Commit>>,
+    pub(crate) returned: RingReader<Box<Commit>>,
     /// Crossfades coming back (see the module docs, "Crossfades").
-    pub(crate) faded: HeapCons<Box<Crossfade>>,
+    pub(crate) faded: RingReader<Box<Crossfade>>,
     /// The executor's play clock, as it last published it.
     pub(crate) play: PlayReader,
     /// Where the executor says which ports lost events.
-    pub(crate) losses: HeapCons<EventLoss>,
+    pub(crate) losses: RingReader<EventLoss>,
     /// Refusals the log and the ring could not name.
     pub(crate) unreported: Arc<AtomicU64>,
     /// The edges whose declick fade ended (`EdgeFade`), by the kind that did.
-    pub(crate) edge_fades: HeapCons<(EdgeId, EdgeFade)>,
+    pub(crate) edge_fades: RingReader<(EdgeId, EdgeFade)>,
     /// The executor's pool participants, and the blocks it has rendered
     /// (`Stager`).
     pub(crate) pool: Arc<AtomicUsize>,
@@ -460,26 +468,27 @@ pub(crate) struct Channels {
 
 /// The executor's ends of the rings.
 pub(crate) struct ExecutorEnds {
-    pub(super) queue: HeapCons<Box<Commit>>,
-    pub(super) back: HeapProd<Box<Commit>>,
-    pub(super) fade_back: HeapProd<Box<Crossfade>>,
+    pub(super) queue: RingReader<Box<Commit>>,
+    pub(super) back: RingWriter<Box<Commit>>,
+    pub(super) fade_back: RingWriter<Box<Crossfade>>,
     pub(super) play: Arc<AtomicU64>,
-    pub(super) losses: HeapProd<EventLoss>,
+    pub(super) losses: RingWriter<EventLoss>,
     pub(super) unreported: Arc<AtomicU64>,
-    pub(super) edge_fades: HeapProd<(EdgeId, EdgeFade)>,
+    pub(super) edge_fades: RingWriter<(EdgeId, EdgeFade)>,
     pub(super) pool: Arc<AtomicUsize>,
     pub(super) rendered: Arc<AtomicU64>,
 }
 
 /// Build the rings: the editor's ends and the executor's.
 pub(crate) fn channels() -> (Channels, ExecutorEnds) {
-    let (tx, rx) = HeapRb::<Box<Commit>>::new(QUEUE_CAPACITY).split();
-    let (back_tx, back_rx) = HeapRb::<Box<Commit>>::new(QUEUE_CAPACITY + 1).split();
-    let (fade_tx, fade_rx) = HeapRb::<Box<Crossfade>>::new(FADE_CAPACITY).split();
+    let (tx, rx) = ring::<Box<Commit>>(QUEUE_CAPACITY, Overflow::Refuse);
+    let (back_tx, back_rx) = ring::<Box<Commit>>(QUEUE_CAPACITY + 1, Overflow::Refuse);
+    let (fade_tx, fade_rx) = ring::<Box<Crossfade>>(FADE_CAPACITY, Overflow::Refuse);
     let play = Arc::new(AtomicU64::new(0));
     let unreported = Arc::new(AtomicU64::new(0));
-    let (loss_tx, loss_rx) = HeapRb::<EventLoss>::new(crate::loss::RING_CAPACITY).split();
-    let (fade_end_tx, fade_end_rx) = HeapRb::<(EdgeId, EdgeFade)>::new(EDGE_FADE_CAPACITY).split();
+    let (loss_tx, loss_rx) = ring::<EventLoss>(crate::loss::RING_CAPACITY, Overflow::Refuse);
+    let (fade_end_tx, fade_end_rx) =
+        ring::<(EdgeId, EdgeFade)>(EDGE_FADE_CAPACITY, Overflow::Refuse);
     let pool = Arc::new(AtomicUsize::new(0));
     let rendered = Arc::new(AtomicU64::new(0));
     (

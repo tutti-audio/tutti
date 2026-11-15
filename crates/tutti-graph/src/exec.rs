@@ -189,8 +189,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
-use ringbuf::traits::Consumer;
-use ringbuf::{HeapCons, HeapProd};
+use tutti_rt::{RingReader, RingWriter};
 use tutti_types::PlayReading;
 use tutti_types::{Frame, Tail};
 
@@ -315,17 +314,21 @@ pub struct Executor {
 
 /// The executor's end of the rings to its editor, and the commands it
 /// delivers.
+///
+/// The rings hold boxes, so this end is dropped with the executor on the
+/// control side (`tutti_rt::ring`'s contract): a commit still queued, or one
+/// pushed as the editor dropped, is freed there.
 struct Inbox {
-    queue: HeapCons<Box<Commit>>,
-    back: HeapProd<Box<Commit>>,
+    queue: RingReader<Box<Commit>>,
+    back: RingWriter<Box<Commit>>,
     /// Where crossfades go back (see the module docs, "Crossfades").
-    fade_back: HeapProd<Box<Crossfade>>,
+    fade_back: RingWriter<Box<Crossfade>>,
     /// Where each block's log of dropped events goes, for the editor to
     /// drain.
-    losses: HeapProd<EventLoss>,
+    losses: RingWriter<EventLoss>,
     unreported: Arc<AtomicU64>,
     /// Where an edge whose declick fade ended is reported.
-    edge_fades: HeapProd<(EdgeId, EdgeFade)>,
+    edge_fades: RingWriter<(EdgeId, EdgeFade)>,
     commands: CommandRx,
     /// `seq` of the last commit applied.
     applied: u64,
@@ -478,7 +481,7 @@ impl Executor {
             .store(participants.unwrap_or(0), Ordering::Release);
         // A commit already sent was staged for the pool before this one: it
         // gets the parallel state for this pool, and is applied first.
-        while let Some(commit) = self.inbox.queue.try_pop() {
+        while let Some(commit) = self.inbox.queue.pop() {
             self.stash.push_back(commit);
         }
         for commit in &mut self.stash {
@@ -694,7 +697,7 @@ mod tests {
         let seen = Arc::new(AtomicUsize::new(0));
         let staged_store = |ed: &mut crate::Editor, exec: &mut Executor| {
             ed.commit().expect("commits");
-            let mut c = exec.inbox.queue.try_pop().expect("queued");
+            let mut c = exec.inbox.queue.pop().expect("queued");
             let built = c.staged.as_ref().expect("staged").store.is_some();
             exec.apply(&mut c);
             commit::send_back(&mut exec.inbox.back, c);

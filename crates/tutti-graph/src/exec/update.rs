@@ -1,7 +1,6 @@
 //! Applying a commit: installing its plan, units and state, or checking
 //! every unit out for a re-prepare.
 
-use ringbuf::traits::Consumer;
 use tutti_rt::RtScope;
 
 use super::commit::{Commit, Incoming, Relined, cut_fades, retire_fade, send_back};
@@ -37,7 +36,7 @@ impl Executor {
             self.apply(&mut commit);
             send_back(&mut self.inbox.back, commit);
         }
-        while let Some(mut commit) = self.inbox.queue.try_pop() {
+        while let Some(mut commit) = self.inbox.queue.pop() {
             self.apply(&mut commit);
             send_back(&mut self.inbox.back, commit);
         }

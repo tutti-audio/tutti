@@ -199,7 +199,8 @@ const TICK: Duration = Duration::from_millis(10);
 
 fn load_message() -> HostMessage {
     HostMessage::LoadPlugin {
-        path: std::path::PathBuf::from(crate::test_utils::clap_probe_path_dot_clap()),
+        path: std::path::PathBuf::from(crate::test_utils::clap_probe_path()),
+        format: tutti_plugin_types::PluginFormat::Clap,
         load: Load::new(),
         sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
         block_size: 512,

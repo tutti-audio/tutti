@@ -95,7 +95,9 @@
 //!   graph's, unless [`set_param_range`](Reference::set_param_range) moved
 //!   it since the last [`set_graph`](Reference::set_graph) —
 //!   `Editor::set_param_range`'s contract, taking effect on the next block,
-//!   without a new graph.
+//!   without a new graph. Every param is a line here: the reference neither
+//!   wraps nor takes the short arc of a circular one (`Azimuth`), which
+//!   `tests/mixing/azimuth_arc.rs` holds against closed forms.
 //!
 //! [`FeedbackKey`]: crate::FeedbackKey
 
@@ -1987,14 +1989,14 @@ fn ref_port(st: &mut RefParam, fresh: bool, p: RefPortIn<'_>) -> Option<(Vec<f32
             // Frames since its event, `0` on the event's own.
             let j = u32::try_from(now - r.at).unwrap_or(u32::MAX);
             let piece = tutti_curve::Piece::new(r.from, r.target, r.shape);
-            crate::event::segment_value(piece, position, length, j)
+            crate::event::segment_value(None, piece, position, length, j)
         } else {
             let into = now - r.at + 1;
             if into >= r.len {
                 r.target
             } else {
                 let t = into as f32 / r.len as f32;
-                tutti_curve::Piece::new(r.from, r.target, r.shape).value(t)
+                tutti_curve::Piece::new(r.from, r.target, r.shape).value(None, t)
             }
         };
         st.ramp.value = value;
