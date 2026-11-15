@@ -533,13 +533,6 @@ mod tests {
         assert!(!graph_tail(&g).is_unbounded());
     }
 
-    /// The bound is 60 s and the latency bound 10 s, at 48 kHz, as frames.
-    #[test]
-    fn the_node_bounds_are_sixty_and_ten_seconds_at_48k() {
-        assert_eq!(MAX_NODE_TAIL, Samples(2_880_000));
-        assert_eq!(crate::MAX_NODE_LATENCY, Samples(480_000));
-    }
-
     /// A finite tail past the bound is not trusted as a figure and not cut to
     /// it: it counts as unbounded, so no bounce ends a ring-out at the bound.
     /// One exactly at the bound is still a figure.

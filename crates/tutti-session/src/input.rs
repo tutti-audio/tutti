@@ -55,9 +55,10 @@ pub struct InputConfig {
     /// chosen with [`Fold::select`](tutti_buffers::Fold::select)). `None`: the
     /// first two.
     pub channels: Option<Vec<usize>>,
-    /// The depth of the ring into the graph, in time at the input's rate: shallow on purpose, so a
-    /// monitored input is heard now and not late. A longer one rides out a
-    /// longer stall of the graph's callback at that much latency.
+    /// The depth of the ring into the graph, in time at the input's rate:
+    /// shallow on purpose, so a monitored input is heard now and not late. A
+    /// longer one rides out a longer stall of the graph's callback at that
+    /// much latency.
     pub capacity: Seconds,
     /// The manual trim of a take's placement, for a device that misreports its
     /// latency: set once per input and kept across restarts, so it is on the
@@ -300,7 +301,7 @@ impl Inputs {
             device: config.device.clone(),
             inputs: config.channels.clone(),
             latency: Some(Arc::clone(&self.latency)),
-            monitor: config.capacity,
+            monitor_depth: config.capacity,
         }
     }
 }

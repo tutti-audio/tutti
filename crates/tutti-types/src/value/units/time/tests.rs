@@ -276,7 +276,7 @@ fn frame_offset_keeps_the_sign_where_to_samples_clamps() {
 }
 
 #[test]
-fn frame_offset_rounding_is_named_for_a_third_of_a_frame_each_way() {
+fn frame_offset_rounding_modes_agree_with_their_names() {
     // At 3 Hz, 1/9 s is a third of a frame.
     let rate = SampleRate::of(3.0);
     let third = Seconds(1.0 / 9.0);
@@ -295,6 +295,11 @@ fn frame_offset_rounding_is_named_for_a_third_of_a_frame_each_way() {
 #[test]
 fn frame_offset_of_nonsense_is_zero_and_huge_saturates() {
     assert_eq!(Seconds(f64::NAN).to_frame_offset(SampleRate::SR_48K), 0);
+    assert_eq!(Seconds(1e300).to_frame_offset(SampleRate::SR_48K), i64::MAX);
+    assert_eq!(
+        Seconds(-1e300).to_frame_offset(SampleRate::SR_48K),
+        i64::MIN
+    );
     assert_eq!(
         Seconds(f64::INFINITY).to_frame_offset(SampleRate::SR_48K),
         i64::MAX

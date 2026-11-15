@@ -50,7 +50,7 @@
 
 use std::time::{Duration, Instant};
 
-use tutti_types::{Frame, Moment, SampleRate};
+use tutti_types::{Frame, Moment, SampleRate, Seconds};
 
 /// How far the anchor moves toward a reading, as `1 / GAIN`.
 pub const GAIN: u32 = 8;
@@ -134,8 +134,12 @@ impl ClockMap {
             Some(after) => after.as_secs_f64(),
             None => -self.anchor.os.duration_since(os).as_secs_f64(),
         };
-        let frames = (self.anchor.frame.get() as f64 + seconds * self.rate.get()).round();
-        (frames >= 0.0).then_some(Frame::new(frames as u64))
+        let offset = Seconds::new(seconds).to_frame_offset(self.rate);
+        self.anchor
+            .frame
+            .get()
+            .checked_add_signed(offset)
+            .map(Frame::new)
     }
 
     /// [`frame_at`](Self::frame_at) with the rate it is counted at: what the

@@ -431,7 +431,7 @@ fn finish(
             };
             chain.set_gain(chosen[i].expect("chosen above").gain);
             let block = if waiting.target.resample().is_some() {
-                chunk_frames(rate)
+                chunk_frames(rate).get()
             } else {
                 REPLAY_BLOCK
             };
@@ -529,7 +529,7 @@ fn measure(
     let mut resampler: Option<Resampler> = resampler_for(&waiting.target, rate, ch)?;
     let mut staging: Vec<f32> = Vec::new();
     let mut replay = waiting.spill.replay()?;
-    let chunk = chunk_frames(rate);
+    let chunk = chunk_frames(rate).get();
     let mut block = vec![0.0f32; chunk * ch];
     let mut block = InterleavedMut::new(&mut block, layout)?;
     loop {

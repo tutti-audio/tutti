@@ -179,11 +179,11 @@ mod measurer {
     /// The chunk is one second of audio, at least a frame.
     #[test]
     fn a_chunk_is_at_most_a_second() {
-        assert_eq!(chunk_frames(RATE), 48_000);
-        assert_eq!(chunk_frames(SampleRate::SR_44K1), 44_100);
-        assert_eq!(chunk_frames(SampleRate::of(0.2)), 1);
+        assert_eq!(chunk_frames(RATE), Samples(48_000));
+        assert_eq!(chunk_frames(SampleRate::SR_44K1), Samples(44_100));
+        assert_eq!(chunk_frames(SampleRate::of(0.2)), Samples(1));
         // A fractional rate rounds up: the second is held whole.
-        assert_eq!(chunk_frames(SampleRate::of(44_100.5)), 44_101);
+        assert_eq!(chunk_frames(SampleRate::of(44_100.5)), Samples(44_101));
     }
 
     /// The chunked reading of a known sine is its analytic loudness, and the

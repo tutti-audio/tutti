@@ -36,8 +36,8 @@ use crate::program::{
 };
 use crate::shape::Polarity;
 
-/// The largest block the executor renders in one call, in frames: the export's
-/// cap. A frame count (a buffer size), not a duration.
+/// The largest block a rate edit allows for, in frames: a block cap of 4096
+/// frames. A frame count (a buffer size), not a duration.
 const LARGEST_BLOCK_FRAMES: usize = 4096;
 
 /// How far ahead of the executor's play reading a rate edit takes effect,

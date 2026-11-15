@@ -82,7 +82,9 @@ impl Seconds {
     /// position can be negative (a device that reports too much latency, a
     /// peer's clock ahead of ours), and `to_samples` clamps a negative span to
     /// zero. A NaN or non-finite product gives 0, and a span too large for
-    /// `i64` saturates. [`std::time::Duration`] is unsigned: a caller holding one
+    /// `i64` saturates. It returns a bare `i64` because tutti has no signed
+    /// frame unit: [`Frame`](crate::Frame) is a `u64` position.
+    /// [`std::time::Duration`] is unsigned: a caller holding one
     /// builds a `Seconds` from it and signs it by direction.
     ///
     /// ```
@@ -91,21 +93,21 @@ impl Seconds {
     /// ```
     #[inline]
     pub fn to_frame_offset(self, sample_rate: impl Into<SampleRate>) -> i64 {
-        Self::offset(self.0 * sample_rate.into().get(), f64::round)
+        Self::signed_frames(self.0 * sample_rate.into().get(), f64::round)
     }
 
     /// Signed frames in this span at `sample_rate`, rounded toward negative
     /// infinity: the offset form of [`to_samples_floor`](Self::to_samples_floor).
     #[inline]
     pub fn to_frame_offset_floor(self, sample_rate: impl Into<SampleRate>) -> i64 {
-        Self::offset(self.0 * sample_rate.into().get(), f64::floor)
+        Self::signed_frames(self.0 * sample_rate.into().get(), f64::floor)
     }
 
     /// Signed frames in this span at `sample_rate`, rounded toward positive
     /// infinity: the offset form of [`to_samples_ceil`](Self::to_samples_ceil).
     #[inline]
     pub fn to_frame_offset_ceil(self, sample_rate: impl Into<SampleRate>) -> i64 {
-        Self::offset(self.0 * sample_rate.into().get(), f64::ceil)
+        Self::signed_frames(self.0 * sample_rate.into().get(), f64::ceil)
     }
 
     /// The per-sample coefficient of a one-pole smoother with this time
@@ -166,7 +168,7 @@ impl Seconds {
     /// Shared tail of the offset forms: apply `round`, then saturate into
     /// `i64`; a NaN is 0.
     #[inline]
-    fn offset(raw: f64, round: fn(f64) -> f64) -> i64 {
+    fn signed_frames(raw: f64, round: fn(f64) -> f64) -> i64 {
         if raw.is_nan() { 0 } else { round(raw) as i64 }
     }
 
@@ -347,7 +349,7 @@ impl SampleRate {
     pub const DEFAULT: Self = Self::SR_44K1;
 
     /// The frames in one second at this rate, rounded up: what a buffer holding
-    /// a second of audio needs, and at least one.
+    /// a second of audio needs. A rate is above zero, so at least one frame.
     #[inline]
     #[must_use]
     pub fn one_second(self) -> Samples {

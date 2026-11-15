@@ -68,7 +68,7 @@ use tutti_engine::{StreamFaults, StreamLatency};
 /// to bound latency/RAM. This is the *recording* ring; the pump thread drains
 /// it, so a deep buffer trades latency (irrelevant to a file) for dropout
 /// resistance.
-const RING: Seconds = Seconds::new(1.0);
+const CAPTURE_RING: Seconds = Seconds::new(1.0);
 
 /// Monitor-ring depth, 10 ms, at the stream's rate. The audio callback
 /// drains this one *per block*, so it needs only enough slack to bridge one
@@ -172,7 +172,7 @@ pub struct MicConfig {
     /// The depth of the monitor ring [`MicIn::open_with_monitor`] makes, at the
     /// stream's rate: shallow on purpose, so a monitored input is heard now and
     /// not late. [`MONITOR_RING`] (10 ms) by default.
-    pub monitor: Seconds,
+    pub monitor_depth: Seconds,
 }
 
 impl Default for MicConfig {
@@ -182,7 +182,7 @@ impl Default for MicConfig {
             device: DeviceSelector::default(),
             inputs: None,
             latency: None,
-            monitor: MONITOR_RING,
+            monitor_depth: MONITOR_RING,
         }
     }
 }
@@ -272,13 +272,16 @@ impl MicIn {
         let faults = Arc::new(StreamFaults::new());
         let (reader, rec) = TapReader::pair(
             usize::from(width.count()),
-            RING.to_samples_ceil(sample_rate),
+            CAPTURE_RING.to_samples_ceil(sample_rate),
         );
         let (ring, mon) = if monitor {
             // The ring carries the rate the stream runs at, so whoever takes it
             // into a graph can check it there.
-            let (ring, writer) =
-                InletRing::pair(width, mic.monitor.to_samples_ceil(sample_rate), sample_rate);
+            let (ring, writer) = InletRing::pair(
+                width,
+                mic.monitor_depth.to_samples_ceil(sample_rate),
+                sample_rate,
+            );
             (Some(ring), Some(writer))
         } else {
             (None, None)

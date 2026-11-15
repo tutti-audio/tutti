@@ -392,6 +392,6 @@ fn ring_depths_follow_the_stream_rate() {
         (SampleRate::SR_44K1, 441, 44_100),
     ] {
         assert_eq!(MONITOR_RING.to_samples_ceil(rate), Samples(monitor));
-        assert_eq!(RING.to_samples_ceil(rate), Samples(capture));
+        assert_eq!(CAPTURE_RING.to_samples_ceil(rate), Samples(capture));
     }
 }

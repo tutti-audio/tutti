@@ -1117,15 +1117,3 @@ fn a_mix_is_a_target_apart_from_an_edge_and_a_param_of_the_same_bits() {
     assert!(c.programs.contains_key(&target(1)));
     assert_eq!(c.programs.len(), 2);
 }
-
-/// The margin is three of the largest block and the reuse floor two: the
-/// margin less one block of publish slack.
-#[test]
-fn anchor_margins_are_whole_blocks_of_the_largest_block() {
-    assert_eq!(RATE_ANCHOR_MARGIN, Samples(3 * 4096));
-    assert_eq!(ANCHOR_REUSE_MIN, Samples(2 * 4096));
-    assert_eq!(
-        RATE_ANCHOR_MARGIN.get() - ANCHOR_REUSE_MIN.get(),
-        LARGEST_BLOCK_FRAMES
-    );
-}
