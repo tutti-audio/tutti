@@ -593,6 +593,39 @@ fn releases_are_reported_after_the_sets_landings_in_key_order() {
 }
 
 #[test]
+fn a_key_released_and_declared_again_before_the_report_is_not_released() {
+    let (mut s, spawned) = session();
+    let runs = runs();
+    s.pool(entry("a", probe(1, &runs))).unwrap();
+    spawned.run_all();
+    let _ = events(&mut s);
+    undeclare(&mut s);
+    s.pool(entry("a", probe(1, &runs))).unwrap();
+    spawned.run_all();
+    assert_eq!(events(&mut s), [("a", "loaded".to_owned())]);
+    assert_eq!(state(&s, "a").as_deref(), Some("loaded"));
+}
+
+#[test]
+fn declaring_keys_of_another_type_undeclares_every_entry_of_the_first() {
+    let (mut s, spawned) = session();
+    let runs = runs();
+    s.pool(entry("a", probe(1, &runs))).unwrap();
+    spawned.run_all();
+    let _ = events(&mut s);
+    s.pool(Declared::new(1_u32, probe(1, &runs))).unwrap();
+    assert_eq!(state(&s, "a"), None);
+    assert!(s.pool_state(&1_u32).is_some());
+    spawned.run_all();
+    let landed = s
+        .update()
+        .into_iter()
+        .filter(|event| matches!(event, SessionEvent::Pool { .. }))
+        .count();
+    assert_eq!(landed, 2, "a is released, 1 loaded");
+}
+
+#[test]
 fn a_refused_set_applies_nothing_while_a_release_is_pending() {
     let (mut s, spawned) = session();
     let runs = runs();

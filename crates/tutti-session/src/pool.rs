@@ -20,6 +20,8 @@
 //! [`Session::pool_state`] reads where an entry stands.
 
 use std::fmt;
+#[cfg(any(feature = "sampler", feature = "soundfont"))]
+use std::sync::Arc;
 
 use crate::{Session, SessionEvent};
 
@@ -59,7 +61,7 @@ impl Session {
     ///
     /// Returns at once. Each load's outcome lands as a
     /// [`SessionEvent::Pool`] in a later [`update`](Self::update), those of one
-    /// update in the order the set names them, then the releases in key order.
+    /// update in the order the set names them, then the releases, by key within a key type.
     /// An outcome that landed while its entry was held is reported when the
     /// pool declares the entry again.
     ///
@@ -116,7 +118,7 @@ impl Session {
     /// [`HandleError::NotPooled`] when the key is not declared (never, or
     /// released); [`HandleError::WrongKind`] when it is another kind of entry;
     /// [`HandleError::NotLoaded`] before the load lands, or after it failed.
-    pub fn audio<K>(&self, key: &K) -> Result<std::sync::Arc<tutti_codec::Wave>, HandleError<K>>
+    pub fn audio<K>(&self, key: &K) -> Result<Arc<tutti_codec::Wave>, HandleError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + 'static,
     {
@@ -130,11 +132,10 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// As `Session::audio`, for a `soundfont` entry.
-    pub fn soundfont<K>(
-        &self,
-        key: &K,
-    ) -> Result<std::sync::Arc<tutti_sf2::SoundFont>, HandleError<K>>
+    /// [`HandleError::NotPooled`] when the key is not declared (never, or
+    /// released); [`HandleError::WrongKind`] when it is another kind of entry;
+    /// [`HandleError::NotLoaded`] before the load lands, or after it failed.
+    pub fn soundfont<K>(&self, key: &K) -> Result<Arc<tutti_sf2::SoundFont>, HandleError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + 'static,
     {

@@ -27,8 +27,8 @@ pub enum Phase {
     /// What the session's jobs sent lands first (`SessionBuilder::spawn_with`:
     /// each message, then each end, in arrival order). Then the pool's
     /// landings are reported ([`SessionEvent::Pool`], in the order the app's
-    /// set names the entries), then its releases (in key order), then crossfades that
-    /// waited out a re-prepare are retried, what bounces
+    /// set names the entries), then its releases (by key), then crossfades
+    /// that waited out a re-prepare are retried, what bounces
     /// sent back is dropped (feature `export`; and a bounce in flight for
     /// `BOUNCE_STALL_WARNING` of `PhaseCx::now` warned about, once), then
     /// `Editor::collect` frees what the audio thread retired (here, on the

@@ -66,8 +66,7 @@ pub enum PoolError<K: fmt::Debug> {
 #[derive(Clone, Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum HandleError<K: fmt::Debug> {
-    /// The key was never declared, or its entry was released or is no longer
-    /// declared.
+    /// The pool does not declare the key: never declared, or released.
     #[error("key {0:?} is not in the pool")]
     NotPooled(K),
     /// The key is declared as another kind of entry than the reader's.
@@ -208,6 +207,8 @@ impl Pool {
     fn declare_one<K>(&mut self, key: &PoolKey, order: usize, item: Item<K>) -> Option<Start> {
         let generation = self.next_generation();
         let Some(slot) = self.slots.get_mut(key) else {
+            // Released and declared again before the report: the key lives.
+            self.released.retain(|released| released != key);
             self.slots.insert(
                 key.clone(),
                 Slot {
