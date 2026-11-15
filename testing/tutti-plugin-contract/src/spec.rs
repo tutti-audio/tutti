@@ -301,7 +301,7 @@ pub struct Surface {
     /// parameter not.
     pub reports_access: bool,
     /// Whether the format reports a parameter's automatable bit: CLAP and VST3.
-    /// An AUv2 unit advertises only `IsWritable`, and VST2 says nothing per
+    /// An AUv2 unit advertises only `kAudioUnitParameterFlag_IsWritable`, and VST2 says nothing per
     /// parameter. Where `true`, the meter is not automatable and every other
     /// parameter is.
     pub reports_automatable: bool,
