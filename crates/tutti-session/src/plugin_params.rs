@@ -312,12 +312,17 @@ impl<'a> Param<'a> {
         crate::Key::<crate::PluginNode>::new(self.params.node).param(self.id())
     }
 
+    /// The write policy every format answers
+    /// ([`ParamWriteError`](tutti_plugin_types::ParamWriteError)), on what the
+    /// mirror holds of this parameter's declaration.
     fn writable(&self) -> Result<(), PluginParamError> {
-        if self.info().flag(tutti_plugin_types::ParamFlags::READ_ONLY) == Some(true) {
-            Err(PluginParamError::ReadOnly(self.id()))
-        } else {
-            Ok(())
-        }
+        use tutti_plugin_types::ParamWriteError as Refused;
+        Refused::check_info(self.id(), Some(self.info())).map_err(|refused| match refused {
+            Refused::ReadOnly(id) => PluginParamError::ReadOnly(id),
+            Refused::Undeclared(id) | Refused::Lost(id) | Refused::Unanswered(id) => {
+                PluginParamError::Unknown(id)
+            }
+        })
     }
 
     /// Sends `value` to the plugin and reads it back at once.

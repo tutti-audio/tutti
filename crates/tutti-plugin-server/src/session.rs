@@ -278,8 +278,9 @@ impl Session {
                     // The wire's decode refuses an out-of-range or NaN value
                     // (`Normalized::new`), so one from the peer fails the frame
                     // and never reaches a live plugin.
-                    // The wire has no reply for a write: the client's session
-                    // names a refused one (undeclared, read-only) at its own call.
+                    // A write the plugin refuses (undeclared, read-only) is
+                    // refused here and not written; the wire has no reply to
+                    // carry the error.
                     let _ = plugin.plugin_mut().set_parameter(main, param_id, value);
                 }
                 Ok(Reaction::None)

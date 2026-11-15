@@ -187,11 +187,9 @@ impl Vst3Controller {
         });
         for (id, value) in reported {
             // The plugin made the value, so a read-only parameter (a meter) is
-            // still the plugin's to report: the host's write policy does not
-            // apply, and the controller takes the value as it was told.
-            if Control::set_parameter(self.loaded_mut(), main, id, value).is_err() {
-                self.loaded_mut().write_normalized(main, id, value);
-            }
+            // still the plugin's to report: the host's write policy is for
+            // host writes, and the controller takes the value as it was told.
+            self.loaded_mut().write_normalized(main, id, value);
             // Kept for `take_reported_edits`, up to a bound: nobody may be
             // asking, and then the oldest go and are counted.
             if self.processor_edits.len() == PROCESSOR_EDITS_ROOM {

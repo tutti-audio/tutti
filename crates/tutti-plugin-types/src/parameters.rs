@@ -749,6 +749,14 @@ pub enum ParamWriteError {
     /// The parameter is declared read-only: the host may not write it.
     #[error("parameter {0:?} is read-only")]
     ReadOnly(ParamId),
+    /// The plugin is lost (crashed, or gone), so there is nothing to write
+    /// parameter `0` to and no declaration to check it against.
+    #[error("the plugin is lost: parameter {0:?} was not written")]
+    Lost(ParamId),
+    /// The plugin did not answer in time, so the write could not be checked
+    /// against what it declares and was not made.
+    #[error("the plugin did not answer in time: parameter {0:?} was not written")]
+    Unanswered(ParamId),
 }
 
 /// What a format reports of a declared parameter's writability.
@@ -764,6 +772,16 @@ pub enum ParamAccess {
 }
 
 impl ParamAccess {
+    /// The access `info` declares: its [`ParamFlags::READ_ONLY`] bit as
+    /// [`ParameterInfo::flag`] reads it.
+    #[must_use]
+    pub fn of(info: &ParameterInfo) -> Self {
+        match info.flag(ParamFlags::READ_ONLY) {
+            Some(read_only) => Self::reported(read_only),
+            None => Self::Unreported,
+        }
+    }
+
     /// The access of a parameter whose read-only bit the format reports.
     #[must_use]
     pub fn reported(read_only: bool) -> Self {
@@ -795,6 +813,20 @@ impl ParamWriteError {
         }
     }
 
+    /// [`check`](Self::check) on the declared parameters of a plugin, sorted by id
+    /// (a binary search, for a plugin with thousands).
+    ///
+    /// # Errors
+    ///
+    /// As [`check`](Self::check).
+    pub fn check_sorted(id: ParamId, declared: &[(ParamId, ParamAccess)]) -> Result<(), Self> {
+        let found = declared
+            .binary_search_by_key(&id, |&(known, _)| known)
+            .ok()
+            .map(|i| declared[i].1);
+        Self::check(id, found)
+    }
+
     /// [`check`](Self::check) on the info the plugin declared for `id`, or
     /// `None` for an id it does not declare.
     ///
@@ -802,13 +834,7 @@ impl ParamWriteError {
     ///
     /// As [`check`](Self::check).
     pub fn check_info(id: ParamId, info: Option<&ParameterInfo>) -> Result<(), Self> {
-        Self::check(
-            id,
-            info.map(|info| match info.flag(ParamFlags::READ_ONLY) {
-                Some(read_only) => ParamAccess::reported(read_only),
-                None => ParamAccess::Unreported,
-            }),
-        )
+        Self::check(id, info.map(ParamAccess::of))
     }
 }
 

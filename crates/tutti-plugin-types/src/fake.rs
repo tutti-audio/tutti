@@ -238,14 +238,15 @@ struct Shared {
     /// The mode the fake was last told live: `0` none, `1` realtime, `2`
     /// offline.
     told_mode: AtomicU8,
-    /// The parameters the fake declares and which of them are read-only; `None`
-    /// declares none, and the fake then takes a write to any id.
-    declared: Mutex<Option<Vec<(ParamId, bool)>>>,
+    /// The parameters the fake declares and whether each is read-only. None
+    /// until [`FakePlugin::declare`]: the fake refuses a write to an id it does
+    /// not declare, as every format does.
+    declared: Mutex<Vec<(ParamId, bool)>>,
 }
 
 impl Shared {
     /// The declared parameters, if the fake declares any.
-    fn declared(&self) -> Option<Vec<(ParamId, bool)>> {
+    fn declared(&self) -> Vec<(ParamId, bool)> {
         self.declared
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -314,7 +315,7 @@ impl FakePlugin {
             resize_request: AtomicU64::new(0),
             render_mode_support: AtomicU8::new(0),
             told_mode: AtomicU8::new(0),
-            declared: Mutex::new(None),
+            declared: Mutex::new(Vec::new()),
         });
         (
             Self(shared.clone()),
@@ -440,18 +441,17 @@ impl FakePlugin {
         self.0.outputs.store(u32::from(channels), Ordering::Relaxed);
     }
 
-    /// Declares the fake's parameters: each `(id, read_only)`. The fake then
-    /// follows the write policy of every format: a write to an id it does not
-    /// declare is [`Undeclared`](crate::ParamWriteError::Undeclared), and one to a read-only
-    /// parameter is [`ReadOnly`](crate::ParamWriteError::ReadOnly). Until this is called it
-    /// declares none and takes every write, adding the parameter, as a test
-    /// arranges its values by writing them.
+    /// Declares the fake's parameters: each `(id, read_only)`. The fake follows
+    /// the write policy of every format: a write to an id it does not declare is
+    /// [`Undeclared`](crate::ParamWriteError::Undeclared), and one to a read-only
+    /// parameter is [`ReadOnly`](crate::ParamWriteError::ReadOnly). It declares
+    /// nothing until this is called.
     pub fn declare(&self, parameters: &[(ParamId, bool)]) {
         *self
             .0
             .declared
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(parameters.to_vec());
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = parameters.to_vec();
     }
 
     /// Gives the fake an editor: `open_editor` answers 640 by 480 and the
@@ -538,25 +538,18 @@ macro_rules! fake_control {
             }
 
             fn parameters(&self, _main: MainThreadMarker) -> Vec<ParameterInfo> {
-                let declared = self.shared.declared();
-                match declared {
-                    Some(declared) => declared
-                        .into_iter()
-                        .map(|(id, read_only)| {
-                            let flags = if read_only {
-                                ParamFlags::READ_ONLY
-                            } else {
-                                ParamFlags::empty()
-                            };
-                            ParameterInfo::new(id, "p").with_flags(ParamFlags::READ_ONLY, flags)
-                        })
-                        .collect(),
-                    None => self
-                        .values
-                        .iter()
-                        .map(|&(id, _)| ParameterInfo::new(id, "p"))
-                        .collect(),
-                }
+                self.shared
+                    .declared()
+                    .into_iter()
+                    .map(|(id, read_only)| {
+                        let flags = if read_only {
+                            ParamFlags::READ_ONLY
+                        } else {
+                            ParamFlags::empty()
+                        };
+                        ParameterInfo::new(id, "p").with_flags(ParamFlags::READ_ONLY, flags)
+                    })
+                    .collect()
             }
 
             fn parameter(&self, _main: MainThreadMarker, id: ParamId) -> Option<Normalized> {
@@ -581,19 +574,15 @@ macro_rules! fake_control {
                 Normalized::new(plain)
             }
 
-            /// The double takes every write: a parameter it was never given is
-            /// added, as a test arranges its values by writing them.
+            /// Follows the write policy: only a parameter the fake declares
+            /// ([`FakePlugin::declare`]) is written.
             fn set_parameter(
                 &mut self,
-                _main: MainThreadMarker,
+                main: MainThreadMarker,
                 id: ParamId,
                 value: Normalized,
             ) -> Result<(), $crate::ParamWriteError> {
-                // A fake that declares parameters follows the policy; one that
-                // declares none takes every write.
-                if self.shared.declared().is_some() {
-                    self.parameter_writable(_main, id)?;
-                }
+                self.parameter_writable(main, id)?;
                 self.shared.log.push(Call::SetParameter(id));
                 set_value(&mut self.values, id, value);
                 let set: fn(&mut Self, ParamId, Normalized) = $set;

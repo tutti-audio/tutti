@@ -838,8 +838,9 @@ impl<F: ServerSide> ServedPlugin for Served<F> {
     ) -> Result<(), ParamWriteError> {
         match self.lifecycle.control() {
             Some(control) => control.set_parameter(main, id, value),
-            // A lost plugin has no parameters to refuse a write for.
-            None => Ok(()),
+            // A lost plugin has nothing to write to: the write is refused, as
+            // a client's is.
+            None => Err(ParamWriteError::Lost(id)),
         }
     }
 

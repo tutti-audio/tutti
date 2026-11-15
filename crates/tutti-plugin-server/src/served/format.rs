@@ -192,8 +192,8 @@ pub(in crate::served) mod clap {
                 };
                 if flush_out_of_band(requires, processing) {
                     if let Lifecycle::Active { controller, .. } = lifecycle {
-                        // A refused write has no reply on the wire: the
-                        // client's session named it at its own call.
+                        // A write the plugin refuses is refused here and not
+                        // written; the wire has no reply to carry the error.
                         let _ = Control::set_parameter(controller.loaded_mut(), main, id, value);
                     }
                 } else if let Some(control) = lifecycle.control() {

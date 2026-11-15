@@ -35,11 +35,22 @@ macro_rules! served_control {
                 self.link.bridge.parameter(id)
             }
 
+            /// Fire-and-forget, and the realtime path: it never waits on a round
+            /// trip. A write the declared-parameter cache already knows the plugin
+            /// refuses (undeclared, read-only) is not sent; with no cache yet it is
+            /// sent, and the server's own `Control::set_parameter` refuses it
+            /// there. [`Control::set_parameter`] is the call that names the error.
+            ///
             /// Stays `Normalized` to the wire, which narrows it to an `f32`.
             /// The server's decode refuses a value outside 0..=1 (NaN
             /// included): the wire is a foreign boundary and the peer is
             /// another process.
             fn set_parameter_value(&self, id: ParamId, value: Normalized) {
+                if let Some(declared) = self.link.declared_cached()
+                    && tutti_plugin_types::ParamWriteError::check_sorted(id, &declared).is_err()
+                {
+                    return;
+                }
                 let _ = self.link.bridge.set_parameter_rt(id, value);
             }
 
@@ -184,24 +195,16 @@ macro_rules! served_control {
             }
 
             /// From the declared parameters the client keeps, not a round trip
-            /// per write. A plugin that cannot be asked (lost) has none to
-            /// refuse a write for, and the write is then a no-op, so both
-            /// answer `Ok`.
+            /// per write ([`Link::declared`]): a lost plugin is
+            /// [`Lost`](tutti_plugin_types::ParamWriteError::Lost), one that does
+            /// not answer in time [`Unanswered`](tutti_plugin_types::ParamWriteError::Unanswered).
             fn parameter_writable(
                 &self,
                 _main: MainThreadMarker,
                 id: ParamId,
             ) -> Result<(), tutti_plugin_types::ParamWriteError> {
-                let Some(declared) = self.link.declared() else {
-                    return Ok(());
-                };
-                tutti_plugin_types::ParamWriteError::check(
-                    id,
-                    declared
-                        .iter()
-                        .find(|(known, _)| *known == id)
-                        .map(|&(_, access)| access),
-                )
+                let declared = self.link.declared(id)?;
+                tutti_plugin_types::ParamWriteError::check_sorted(id, &declared)
             }
 
             fn parameter_plain(

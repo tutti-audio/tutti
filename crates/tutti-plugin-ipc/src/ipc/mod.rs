@@ -160,11 +160,24 @@ struct Events {
     /// What the plugin's request to be processed again raises, from the
     /// bridge's thread ([`Control::bind_wake`](tutti_plugin_types::Control::bind_wake)).
     wake: OnceLock<ProcessWake>,
-    /// The parameters the plugin declares and whether each is read-only: asked
-    /// of the server once, then kept, and forgotten when the plugin says its
-    /// parameters changed ([`BridgeEvent::Resync`]). The write policy reads
-    /// it, so a write does not cost a round trip.
-    declared: Mutex<Option<Arc<[(ParamId, ParamAccess)]>>>,
+    /// The parameters the plugin declares and whether each is read-only, sorted
+    /// by id: asked of the server once, then kept, and forgotten when the plugin
+    /// says its parameters changed ([`BridgeEvent::Resync`]) or dies. The write
+    /// policy reads it, so a write does not cost a round trip.
+    ///
+    /// `generation` counts the times it was forgotten, both changed under this
+    /// lock: a refill that began before a forgetting does not store its (older)
+    /// answer. A change the plugin makes before its notice reaches the client
+    /// is not seen until the notice arrives; that window is inherent to
+    /// asking once.
+    declared: Mutex<Declared>,
+}
+
+/// The cache of [`Events::declared`] and the count of its forgettings.
+#[derive(Default)]
+struct Declared {
+    list: Option<Arc<[(ParamId, ParamAccess)]>>,
+    generation: u64,
 }
 
 impl Events {
@@ -183,15 +196,13 @@ impl Events {
                     wake.raise();
                 }
             }
+            // Whatever the plugin says went stale, its parameter list may have:
+            // the next write asks again. A dead plugin has none.
+            BridgeEvent::Resync(_) | BridgeEvent::Crashed { .. } => self.forget_declared(),
             // A transport request reaches the application through the
             // listener, in order. Nothing is queued for `take_requests`, which
             // a served plugin's host does not drain: a request kept here would
             // only pile up.
-            // Whatever the plugin says went stale, its parameter list may have:
-            // the next write asks again.
-            BridgeEvent::Resync(_) => {
-                *self.declared.lock().unwrap_or_else(PoisonError::into_inner) = None;
-            }
             _ => {}
         }
         let forward = self
@@ -202,6 +213,14 @@ impl Events {
         if let Some(forward) = forward {
             forward(event);
         }
+    }
+
+    /// Forgets the declared parameters, and makes a refill that is under way
+    /// not store what it read before this.
+    fn forget_declared(&self) {
+        let mut declared = self.declared.lock().unwrap_or_else(PoisonError::into_inner);
+        declared.list = None;
+        declared.generation += 1;
     }
 
     fn ask(&self, request: Request) {
@@ -238,38 +257,69 @@ impl Link {
         Samples(self.events.latency.load(Ordering::Acquire))
     }
 
-    /// What the write policy needs of the plugin's parameters, from the cache the
-    /// server's last answer filled; asks the server only when there is none (the
-    /// first write, or the first after a resync). `None` when the plugin cannot
-    /// be asked (lost): the policy then has nothing to refuse a write for.
-    pub(crate) fn declared(&self) -> Option<Arc<[(ParamId, ParamAccess)]>> {
-        if let Some(kept) = self
+    /// The plugin's declared parameters, sorted by id, from the cache the server's
+    /// last answer filled; asks the server only when there is none (the first
+    /// write, or the first after a resync). Checked in this order: a crashed
+    /// plugin is [`Lost`](ParamWriteError::Lost) (and its cache is forgotten); one
+    /// that does not answer in time is [`Unanswered`](ParamWriteError::Unanswered).
+    ///
+    /// # Errors
+    ///
+    /// As above, naming `id`, the parameter the caller was writing.
+    pub(crate) fn declared(
+        &self,
+        id: ParamId,
+    ) -> Result<Arc<[(ParamId, ParamAccess)]>, ParamWriteError> {
+        if self.bridge.is_crashed() {
+            self.events.forget_declared();
+            return Err(ParamWriteError::Lost(id));
+        }
+        let started = {
+            let declared = self
+                .events
+                .declared
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if let Some(kept) = &declared.list {
+                return Ok(Arc::clone(kept));
+            }
+            declared.generation
+        };
+        let Some(infos) = self.bridge.parameters() else {
+            return Err(if self.bridge.is_crashed() {
+                ParamWriteError::Lost(id)
+            } else {
+                ParamWriteError::Unanswered(id)
+            });
+        };
+        let mut sorted: Vec<(ParamId, ParamAccess)> = infos
+            .iter()
+            .map(|info| (info.id(), ParamAccess::of(info)))
+            .collect();
+        sorted.sort_unstable_by_key(|&(id, _)| id);
+        let list: Arc<[(ParamId, ParamAccess)]> = sorted.into();
+        let mut declared = self
             .events
+            .declared
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        // A forgetting since this read began made it older than the plugin's
+        // word: it answers this write and is not kept.
+        if declared.generation == started {
+            declared.list = Some(Arc::clone(&list));
+        }
+        Ok(list)
+    }
+
+    /// The declared parameters if the cache holds them: never asks the server.
+    /// For the realtime path, which must not wait on a round trip.
+    pub(crate) fn declared_cached(&self) -> Option<Arc<[(ParamId, ParamAccess)]>> {
+        self.events
             .declared
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
+            .list
             .clone()
-        {
-            return Some(kept);
-        }
-        let list: Arc<[(ParamId, ParamAccess)]> = self
-            .bridge
-            .parameters()?
-            .iter()
-            .map(|info| {
-                let access = match info.flag(ParamFlags::READ_ONLY) {
-                    Some(read_only) => ParamAccess::reported(read_only),
-                    None => ParamAccess::Unreported,
-                };
-                (info.id(), access)
-            })
-            .collect();
-        *self
-            .events
-            .declared
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(Arc::clone(&list));
-        Some(list)
     }
 
     pub(crate) fn tail(&self) -> PluginTail {
@@ -377,7 +427,7 @@ impl Ipc {
             requests: Mutex::new(Vec::new()),
             forward: Mutex::new(None),
             wake: OnceLock::new(),
-            declared: Mutex::new(None),
+            declared: Mutex::new(Declared::default()),
         });
         let listening = Arc::clone(&events);
         bridge.set_listener(Some(Arc::new(move |event| listening.on(event))));

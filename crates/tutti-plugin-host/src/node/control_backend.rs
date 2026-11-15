@@ -155,8 +155,10 @@ where
     fn set_parameter_value(&self, id: ParamId, value: Normalized) {
         self.post(move |main, instance| {
             if let Some(control) = instance.control() {
-                // Fire-and-forget: the session names a write the plugin
-                // refuses (undeclared, read-only) at its own call, before this.
+                // Fire-and-forget: a write the plugin refuses (undeclared,
+                // read-only) is refused by `Control::set_parameter` here and
+                // not written; this route has no reply to carry the error. The
+                // session checks the same policy before it hands a write over.
                 let _ = control.set_parameter(main, id, value);
             }
         });
