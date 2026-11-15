@@ -331,6 +331,39 @@ pub enum Reply {
     Configured(Configuration),
 }
 
+/// A change to what an [`Endpoint`] declares, applied by
+/// [`Endpoint::change`], which sends the notification the spec asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EndpointChange {
+    /// The protocols and JR Timestamps it supports: an Endpoint Info
+    /// Notification (§7.1.2).
+    Capabilities(Capabilities),
+    /// A new Device Identity: a Device Identity Notification (§7.1.3).
+    Identity(DeviceIdentity),
+    /// A new name: an Endpoint Name Notification (§7.1.4).
+    Name(EndpointName),
+    /// A new Product Instance Id: a Product Instance Id Notification
+    /// (§7.1.5).
+    InstanceId(ProductInstanceId),
+    /// A Function Block added, or replaced by the one of that number: an
+    /// Endpoint Info Notification when the declared count grows (§7.1.2), a
+    /// Function Block Info Notification when its properties change (§7.1.8,
+    /// §6.1.2) and a Function Block Name Notification when its name does
+    /// (§7.1.9).
+    Block(FunctionBlock),
+}
+
+/// Why [`Endpoint::change`] refused a change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[non_exhaustive]
+pub enum ChangeError {
+    /// The Endpoint declared its Function Blocks static, so it never changes
+    /// a property or a name of one after discovery (§7.1.2, §7.1.9).
+    #[error("the Endpoint declared its Function Blocks static")]
+    StaticBlocks,
+}
+
 /// How an Endpoint took a Stream Configuration Request (M2-104 §7.1.6.1 step
 /// 3): the Protocol and JR Timestamps in use afterwards, and whether that is
 /// what was asked.
@@ -653,35 +686,113 @@ impl Endpoint {
 
     fn answer_discovery(&self, filter: DiscoveryFilter, out: &mut impl Extend<Ump>) {
         if filter.endpoint_info {
-            send(
-                out,
-                Stream::EndpointInfo(tutti_ump::EndpointInfo {
-                    version: self.version,
-                    static_function_blocks: self.static_function_blocks,
-                    function_blocks: U7::masked(self.declared_blocks),
-                    midi2: self.capabilities.midi2,
-                    midi1: self.capabilities.midi1,
-                    rx_jr: self.capabilities.rx_jr,
-                    tx_jr: self.capabilities.tx_jr,
-                }),
-            );
+            self.send_info(out);
         }
         if let (true, Some(identity)) = (filter.device_identity, self.identity) {
             send(out, Stream::DeviceIdentity(identity));
         }
         if let (true, Some(name)) = (filter.endpoint_name, &self.name) {
-            for (form, b) in text_packets::<14>(name.as_bytes()) {
-                send(out, Stream::EndpointName(form, b));
-            }
+            send_name(out, name);
         }
         if let (true, Some(id)) = (filter.product_instance_id, &self.instance_id) {
-            for (form, b) in text_packets::<14>(id.as_str().as_bytes()) {
-                send(out, Stream::ProductInstanceId(form, b));
-            }
+            send_instance_id(out, id);
         }
         if filter.stream_configuration {
             send(out, Stream::StreamConfigurationNotification(self.active));
         }
+    }
+
+    fn send_info(&self, out: &mut impl Extend<Ump>) {
+        send(
+            out,
+            Stream::EndpointInfo(tutti_ump::EndpointInfo {
+                version: self.version,
+                static_function_blocks: self.static_function_blocks,
+                function_blocks: U7::masked(self.declared_blocks),
+                midi2: self.capabilities.midi2,
+                midi1: self.capabilities.midi1,
+                rx_jr: self.capabilities.rx_jr,
+                tx_jr: self.capabilities.tx_jr,
+            }),
+        );
+    }
+
+    /// Applies `change` and sends into `out` the notifications it calls for,
+    /// in the order Endpoint Info, then the part that changed. A change that
+    /// leaves the Endpoint as it was sends nothing.
+    ///
+    /// A block replaced by one with no name sends one Complete Function
+    /// Block Name of zeros, as an empty name is sent (§7.1.1), so a peer
+    /// drops the old one.
+    ///
+    /// # Errors
+    ///
+    /// [`ChangeError::StaticBlocks`] for a [`EndpointChange::Block`] that
+    /// differs from the block held, when the Endpoint declared its blocks
+    /// static (§7.1.2): nothing is changed or sent.
+    pub fn change(
+        &mut self,
+        change: EndpointChange,
+        out: &mut impl Extend<Ump>,
+    ) -> Result<(), ChangeError> {
+        match change {
+            EndpointChange::Capabilities(capabilities) => {
+                if capabilities != self.capabilities {
+                    self.capabilities = capabilities;
+                    self.send_info(out);
+                }
+            }
+            EndpointChange::Identity(identity) => {
+                if self.identity != Some(identity) {
+                    self.identity = Some(identity);
+                    send(out, Stream::DeviceIdentity(identity));
+                }
+            }
+            EndpointChange::Name(name) => {
+                if self.name.as_ref() != Some(&name) {
+                    send_name(out, &name);
+                    self.name = Some(name);
+                }
+            }
+            EndpointChange::InstanceId(id) => {
+                if self.instance_id.as_ref() != Some(&id) {
+                    send_instance_id(out, &id);
+                    self.instance_id = Some(id);
+                }
+            }
+            EndpointChange::Block(block) => {
+                let old = self.blocks[usize::from(block.id.get())];
+                if old == Some(block) {
+                    return Ok(());
+                }
+                if self.static_function_blocks {
+                    return Err(ChangeError::StaticBlocks);
+                }
+                let declared = self.declared_blocks;
+                self.insert_block(block);
+                if self.declared_blocks != declared {
+                    self.send_info(out);
+                }
+                if old.map(|b| b.info()) != Some(block.info()) {
+                    send(out, Stream::FunctionBlockInfo(block.info()));
+                }
+                let old_name = old.and_then(|b| b.name);
+                if old_name != block.name && (block.name.is_some() || old_name.is_some()) {
+                    let bytes = block.name.as_ref().map_or(&[][..], BlockName::as_bytes);
+                    for (form, bytes) in text_packets::<13>(bytes) {
+                        send(
+                            out,
+                            Stream::FunctionBlockName {
+                                block: block.id,
+                                form,
+                                bytes,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn answer_block_discovery(
@@ -789,6 +900,18 @@ impl Endpoint {
             self.declared_blocks = 0;
             self.insert_inferred_block();
         }
+    }
+}
+
+fn send_name(out: &mut impl Extend<Ump>, name: &EndpointName) {
+    for (form, b) in text_packets::<14>(name.as_bytes()) {
+        send(out, Stream::EndpointName(form, b));
+    }
+}
+
+fn send_instance_id(out: &mut impl Extend<Ump>, id: &ProductInstanceId) {
+    for (form, b) in text_packets::<14>(id.as_str().as_bytes()) {
+        send(out, Stream::ProductInstanceId(form, b));
     }
 }
 

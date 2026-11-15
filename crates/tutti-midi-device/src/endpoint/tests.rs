@@ -724,3 +724,150 @@ fn blocks_may_share_and_overlap_groups() {
         ]
     );
 }
+
+/// A device whose blocks may change: not static, one named block 0 over Group 0.
+fn changeable() -> Endpoint {
+    Endpoint::new(FULL).with_function_block(
+        block(0, 0, 1)
+            .name(BlockName::new("Keys").unwrap())
+            .build()
+            .unwrap(),
+    )
+}
+
+fn changed(endpoint: &mut Endpoint, change: EndpointChange) -> Vec<[u32; 4]> {
+    let mut out = Vec::new();
+    endpoint.change(change, &mut out).unwrap();
+    out.iter().map(words).collect()
+}
+
+/// §7.1.2: an Endpoint Info Notification goes out when a property of it
+/// changes. Word 1 is the static bit, the block count (1 here), M2, M1, RXJR
+/// and TXJR: 1 << 24 | 1 << 8 for MIDI 1.0 alone. A change to the same value
+/// changes nothing and sends nothing.
+/// Spec: m2-104/7.1.2#2
+#[test]
+fn a_changed_capability_sends_endpoint_info() {
+    let mut e = changeable();
+    let m1_only = Capabilities {
+        midi1: true,
+        ..Capabilities::default()
+    };
+    assert_eq!(
+        changed(&mut e, EndpointChange::Capabilities(m1_only)),
+        [[0xF001_0101, 0x0100_0100, 0, 0]]
+    );
+    assert_eq!(e.capabilities(), m1_only);
+    assert!(changed(&mut e, EndpointChange::Capabilities(m1_only)).is_empty());
+}
+
+/// §7.1.2 and §7.1.8: a block added raises the declared count, so Endpoint
+/// Info (count 3) comes first, then the block's Function Block Info: active,
+/// block 2, no hint, bidirectional is 0x8000 | 0x0200 | 0b11, then first
+/// Group 4, two Groups, no MIDI-CI, no streams. §7.1.9: a block with no name
+/// has no name notification.
+/// Spec: m2-104/7.1.2#2, m2-104/7.1.8#3
+#[test]
+fn a_block_added_sends_endpoint_info_then_its_block_info() {
+    let mut e = changeable();
+    let added = block(2, 4, 2).build().unwrap();
+    assert_eq!(
+        changed(&mut e, EndpointChange::Block(added)),
+        [
+            [0xF001_0101, 0x0300_0303, 0, 0],
+            [0xF011_8203, 0x0402_0000, 0, 0],
+        ]
+    );
+    assert_eq!(e.function_block(id(2)), Some(&added));
+}
+
+/// §7.1.8: a changed property of a block sends Function Block Info alone,
+/// with the count unchanged: the active bit of word 0 goes low. §7.1.9: the
+/// same block with a new name sends the name alone, a Complete message with
+/// the block number then the text; a name removed is one Complete message of
+/// zeros.
+/// Spec: m2-104/7.1.8#3, m2-104/7.1.9#3
+#[test]
+fn a_changed_block_sends_the_part_that_changed() {
+    let mut e = changeable();
+    let keys = || block(0, 0, 1).name(BlockName::new("Keys").unwrap());
+    assert_eq!(
+        changed(
+            &mut e,
+            EndpointChange::Block(keys().active(false).build().unwrap())
+        ),
+        [[0xF011_0003, 0x0001_0000, 0, 0]]
+    );
+    let organ = block(0, 0, 1).name(BlockName::new("Organ").unwrap());
+    assert_eq!(
+        changed(&mut e, EndpointChange::Block(organ.build().unwrap())),
+        [
+            [0xF011_8003, 0x0001_0000, 0, 0],
+            [0xF012_004F, 0x7267_616E, 0, 0],
+        ]
+    );
+    assert_eq!(
+        changed(
+            &mut e,
+            EndpointChange::Block(block(0, 0, 1).build().unwrap())
+        ),
+        [[0xF012_0000, 0, 0, 0]]
+    );
+    assert!(
+        changed(
+            &mut e,
+            EndpointChange::Block(block(0, 0, 1).build().unwrap())
+        )
+        .is_empty()
+    );
+}
+
+/// §7.1.2: with static blocks declared the Endpoint never changes a block
+/// property or name, so the change is refused and nothing is sent or kept; a
+/// replacement equal to the block held is no change.
+/// Spec: m2-104/7.1.2#3, m2-104/7.1.9#3
+#[test]
+fn a_static_endpoint_refuses_a_block_change() {
+    let mut e = device();
+    let before = e;
+    let mut out = Vec::new();
+    let renamed = block(0, 0, 1)
+        .name(BlockName::new("Organ").unwrap())
+        .build()
+        .unwrap();
+    assert_eq!(
+        e.change(EndpointChange::Block(renamed), &mut out),
+        Err(ChangeError::StaticBlocks)
+    );
+    assert!(out.is_empty());
+    assert_eq!(e, before);
+    let same = *before.function_block(id(0)).unwrap();
+    assert_eq!(e.change(EndpointChange::Block(same), &mut out), Ok(()));
+    assert!(out.is_empty());
+}
+
+/// §7.1.3 to §7.1.5: an identity, name or Product Instance Id may be sent at
+/// any time, and a change of one sends it: the same words a discovery
+/// answers with (Figure 14; a Complete name; "SN-0002" as ASCII).
+/// Spec: m2-104/7.1.3#1, m2-104/7.1.4#1, m2-104/7.1.5#3
+#[test]
+fn a_changed_identity_name_or_instance_id_is_sent() {
+    let mut e = changeable();
+    assert_eq!(
+        changed(&mut e, EndpointChange::Identity(identity())),
+        [[0xF002_0000, 0x0000_2109, 0x0102_0304, 0x0506_0708]]
+    );
+    assert!(changed(&mut e, EndpointChange::Identity(identity())).is_empty());
+    let name = EndpointName::new("Hi").unwrap();
+    assert_eq!(
+        changed(&mut e, EndpointChange::Name(name)),
+        [[0xF003_4869, 0, 0, 0]]
+    );
+    assert_eq!(e.name(), Some(&name));
+    assert!(changed(&mut e, EndpointChange::Name(name)).is_empty());
+    let id = ProductInstanceId::new("SN-0002").unwrap();
+    assert_eq!(
+        changed(&mut e, EndpointChange::InstanceId(id)),
+        [[0xF004_534E, 0x2D30_3030, 0x3200_0000, 0]]
+    );
+}
