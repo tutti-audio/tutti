@@ -627,8 +627,11 @@ impl<F: Loaded> InProcClient<F> {
     pub(super) fn set_render_mode_from(&mut self, p: &tutti_graph::Prepare) {
         let mode = p.render_mode();
         // Temporary: the guard keeps a mode the handle or `Phase::RenderMode`
-        // set from being undone by a re-prepare at the same mode. When
-        // `Prepare` is the only source of a plugin's mode, it goes.
+        // set from being undone by a re-prepare at the same mode, and from
+        // being undone by a first prepare in realtime (`prepared_mode` starts
+        // there). So a plugin set offline on its handle stays offline through
+        // a realtime prepare until a prepare carries a change. When `Prepare`
+        // is the only source of a plugin's mode, it goes.
         if self.prepared_mode == mode {
             return;
         }
@@ -639,7 +642,7 @@ impl<F: Loaded> InProcClient<F> {
             let Some(main) = MainThreadMarker::new() else {
                 // Not recorded, so the next prepare on the main thread tells it.
                 tracing::error!(
-                    "a plugin was prepared off the main thread in {mode:?}; it keeps its render mode"
+                    "a plugin was prepared off the main thread in {mode:?}; it keeps its render mode until a prepare on the main thread"
                 );
                 return;
             };

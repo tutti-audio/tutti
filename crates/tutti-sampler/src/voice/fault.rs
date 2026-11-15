@@ -18,8 +18,14 @@ use std::sync::{Arc, OnceLock};
 /// [`fault`](Self::fault), on the control side, boxes it.
 #[derive(Default)]
 pub(crate) struct FaultLatch {
-    boxed: OnceLock<Arc<dyn Error + Send + Sync>>,
-    fixed: OnceLock<&'static (dyn Error + Send + Sync)>,
+    first: OnceLock<Kept>,
+}
+
+/// The kept error: boxed by [`FaultLatch::latch`], or a `'static` reference
+/// from [`FaultLatch::latch_static`]. One cell, so the first of either wins.
+enum Kept {
+    Boxed(Arc<dyn Error + Send + Sync>),
+    Static(&'static (dyn Error + Send + Sync)),
 }
 
 /// A `'static` error read as an owned one.
@@ -30,24 +36,23 @@ struct Fixed(&'static (dyn Error + Send + Sync));
 impl FaultLatch {
     /// Keep `error` unless an earlier one is already kept.
     pub(crate) fn latch(&self, error: impl Error + Send + Sync + 'static) {
-        if self.boxed.get().is_none() {
-            let _ = self.boxed.set(Arc::new(error));
+        if self.first.get().is_none() {
+            let _ = self.first.set(Kept::Boxed(Arc::new(error)));
         }
     }
 
     /// Keep `error` unless an earlier one is already kept. Allocates nothing:
     /// any thread, the audio thread included.
     pub(crate) fn latch_static(&self, error: &'static (dyn Error + Send + Sync)) {
-        let _ = self.fixed.set(error);
+        let _ = self.first.set(Kept::Static(error));
     }
 
     /// `None` while the voice renders what it describes; the first failure
     /// otherwise. Once failed, it stays failed.
     pub(crate) fn fault(&self) -> Option<Arc<dyn Error + Send + Sync>> {
-        self.boxed.get().cloned().or_else(|| {
-            self.fixed
-                .get()
-                .map(|e| Arc::new(Fixed(*e)) as Arc<dyn Error + Send + Sync>)
+        self.first.get().map(|kept| match kept {
+            Kept::Boxed(e) => Arc::clone(e),
+            Kept::Static(e) => Arc::new(Fixed(*e)) as Arc<dyn Error + Send + Sync>,
         })
     }
 }
@@ -92,5 +97,20 @@ mod tests {
         let l = FaultLatch::default();
         l.latch_static(&E_STATIC);
         assert_eq!(l.fault().expect("latched").to_string(), "fixed");
+    }
+
+    /// The first error wins across both paths: a boxed error after a static
+    /// one does not replace it, nor a static one after a boxed one.
+    #[test]
+    fn the_first_error_wins_across_both_paths() {
+        static E_STATIC: E = E("static");
+        let l = FaultLatch::default();
+        l.latch_static(&E_STATIC);
+        l.latch(E("boxed"));
+        assert_eq!(l.fault().expect("latched").to_string(), "static");
+        let l = FaultLatch::default();
+        l.latch(E("boxed"));
+        l.latch_static(&E_STATIC);
+        assert_eq!(l.fault().expect("latched").to_string(), "boxed");
     }
 }
