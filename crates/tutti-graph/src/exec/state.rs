@@ -128,6 +128,11 @@ impl Inject {
         table: crate::held::Held,
         spare: &mut Vec<crate::held::Held>,
     ) -> u32 {
+        // A table placed here always has a slot: staging counted every cut
+        // edge into this sink port and every table that moves to it
+        // (`Room::closers`, `Room::carried`), so the buffer has a table to
+        // merge into whenever its slots are taken, and `owed.capacity() == 0`
+        // is never reached with a table in hand.
         let mut lost = 0u32;
         let left_over = if self.owed.len() < self.owed.capacity() {
             self.owed.push(table);
@@ -145,6 +150,7 @@ impl Inject {
         } else {
             // Room for every table is made with the commit; were it short,
             // leak the table rather than free it on the audio thread.
+            debug_assert!(false, "room was made for every table merged away");
             std::mem::forget(left_over);
         }
         lost

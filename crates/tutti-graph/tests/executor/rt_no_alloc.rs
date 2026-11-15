@@ -21,7 +21,7 @@ use tutti_graph::testing as common;
 use tutti_graph::{Curvature, Exponent};
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use common::{Kind, TestNode, prepare};
 
@@ -2046,21 +2046,60 @@ fn pdc_pair(ed: &mut Editor, base: u64, latency: usize) -> NodeKey {
 struct Holder {
     keys: usize,
     sent: usize,
+    per_block: usize,
 }
 
 impl Holder {
     fn new(keys: usize) -> Self {
-        Self { keys, sent: 0 }
+        Self::paced(keys, 400)
     }
+
+    /// `per_block` keys a block, the most its port takes.
+    fn paced(keys: usize, per_block: usize) -> Self {
+        Self {
+            keys,
+            sent: 0,
+            per_block,
+        }
+    }
+}
+
+/// Counts the MIDI 1.0 note offs sent to its event inputs.
+struct OffCount {
+    offs: Arc<AtomicUsize>,
+    inputs: u16,
+}
+
+impl Node for OffCount {
+    fn shape(&self) -> Shape {
+        Shape::EMPTY.with_events(self.inputs, 0)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
+        for port in 0..self.inputs {
+            for e in io.events(usize::from(port)) {
+                if let EventKind::Midi(Ump(w)) = e.kind
+                    && w[0] >> 28 == 2
+                    && (w[0] >> 20) & 0xf == 8
+                {
+                    self.offs.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+        Status::Silent
+    }
+    fn reset(&mut self) {}
 }
 
 impl Node for Holder {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(0, 1)
+        Shape::EMPTY
+            .with_events(0, 1)
+            .with_event_capacity(self.per_block.max(1) as u32)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-        let next = (self.sent + 400).min(self.keys);
+        let next = (self.sent + self.per_block).min(self.keys);
         for k in self.sent..next {
             let channel = MidiChannel::of((k / 128) as u8);
             let on = midi::m1_note_on(channel, (k % 128) as u8, U7::of(100));
@@ -2419,6 +2458,95 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     applied(&mut exec);
     blocks(&mut exec, 12, 64);
     ed.collect();
+
+    // A FIFO that owes closes. A holder behind an event delay is replaced
+    // hard: what the FIFO has no room for stays owed and pours in block by
+    // block (the tally shows the drain is still going after the apply). Then
+    // its edge is cut while the table is not empty: the FIFO vanishes, and
+    // what it owes moves to its sink.
+    let offs = Arc::new(AtomicUsize::new(0));
+    let tally = |offs: &Arc<AtomicUsize>, inputs| OffCount {
+        offs: Arc::clone(offs),
+        inputs,
+    };
+    ed.insert(NodeKey(700), "holder", Unforkable(Holder::paced(1_024, 64)));
+    ed.insert(NodeKey(701), "tally", Unforkable(tally(&offs, 2)));
+    ed.insert(
+        NodeKey(702),
+        "lag",
+        Unforkable(TestNode::new(Kind::EventLag { latency: 11 })),
+    );
+    ed.insert(
+        NodeKey(703),
+        "emit",
+        Unforkable(TestNode::new(Kind::Emitter {
+            period: 5,
+            phase: 0,
+        })),
+    );
+    {
+        let spec = ed.spec_mut();
+        spec.connect_events(sink(702, 0), EventEdge::Direct(ev(703, 0)));
+        spec.connect_events(sink(701, 0), EventEdge::Direct(ev(700, 0)));
+        spec.connect_events(sink(701, 1), EventEdge::Direct(ev(702, 0)));
+    }
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 20, 64);
+    ed.collect();
+    assert_eq!(offs.load(Ordering::Relaxed), 0, "nothing closed yet");
+    ed.replace(
+        NodeKey(700),
+        Unforkable(Holder::paced(0, 64)),
+        Fade::new(Samples(0), FadeLaw::EqualPower),
+    )
+    .expect("fits");
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 2, 64);
+    let mid = offs.load(Ordering::Relaxed);
+    assert!(
+        0 < mid && mid < 1_024,
+        "the FIFO's table is still draining: {mid} of 1024 closed"
+    );
+    ed.collect();
+    ed.spec_mut().disconnect_events(sink(701, 0), ev(700, 0));
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 40, 64);
+    ed.collect();
+    assert_eq!(
+        offs.load(Ordering::Relaxed),
+        1_024,
+        "every key closed, once, whether the FIFO poured it or handed it on"
+    );
+    // Two holders cut from one sink port in one commit: two tables owed to
+    // it, each more than the sink's block takes.
+    let both = Arc::new(AtomicUsize::new(0));
+    for k in [710, 711] {
+        ed.insert(NodeKey(k), "holder", Unforkable(Holder::paced(700, 64)));
+    }
+    ed.insert(NodeKey(712), "tally", Unforkable(tally(&both, 1)));
+    for k in [710, 711] {
+        ed.spec_mut()
+            .connect_events(sink(712, 0), EventEdge::Direct(ev(k, 0)));
+    }
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 14, 64);
+    ed.collect();
+    for k in [710, 711] {
+        ed.spec_mut().disconnect_events(sink(712, 0), ev(k, 0));
+    }
+    ed.commit().expect("commits");
+    applied(&mut exec);
+    blocks(&mut exec, 30, 64);
+    ed.collect();
+    assert_eq!(
+        both.load(Ordering::Relaxed),
+        1_400,
+        "each cut edge's keys close, once each"
+    );
 
     // Crossfades: a fade, one queued behind it, and a chase handed on.
     let chaser = |n: u64| HeldChaser(Arc::new(AtomicU64::new(n)));

@@ -1576,12 +1576,66 @@ fn closes_the_delay_cannot_hold_stay_owed_until_it_can() {
         0,
         "nothing the FIFO could not hold is lost"
     );
-    let offs = r
+    let offs: std::collections::BTreeSet<(u32, u32)> = r
         .words(2)
         .iter()
         .filter(|w| (w[0] >> 20) & 0xf == 0x8)
-        .count();
-    assert_eq!(offs, 512, "every held key is closed");
+        .map(|w| ((w[0] >> 16) & 0xf, (w[0] >> 8) & 0x7f))
+        .collect();
+    assert_eq!(offs.len(), 512, "every held key is closed, once");
+    assert!(
+        (0..8).all(|c| (0..64).all(|n| offs.contains(&(c, n)))),
+        "and they are the keys that were held"
+    );
+}
+
+/// A set larger than the delay's FIFO drains over many blocks while the
+/// replacement source plays a note of its own and ends it: the owed closes
+/// never use the FIFO's note-off reserve nor take the room of the source's
+/// block, so the live note and its note off both reach the sink, in order, and
+/// every owed key still closes once.
+#[test]
+fn a_live_note_during_a_long_drain_is_neither_refused_nor_left_sounding() {
+    let run = |mode: Mode| {
+        let mut r = Rig::with_lag(mode, &[2], true);
+        r.wire(&[(1, 2)]);
+        full_keyboard(&mut r);
+        r.replace_source();
+        r.block();
+        r.send(m2_on(0, 0));
+        r.block();
+        for _ in 0..3 {
+            r.block();
+        }
+        r.send(m2_off(0, 0));
+        for _ in 0..300 {
+            r.block();
+        }
+        assert_eq!(
+            r.exec.as_ref().unwrap().dropped_event_count(),
+            0,
+            "{mode:?}: nothing live was refused"
+        );
+        let words = r.words(2);
+        let live: Vec<usize> = [m2_on(0, 0), m2_off(0, 0)]
+            .iter()
+            .map(|w| {
+                words
+                    .iter()
+                    .position(|x| x == w)
+                    .unwrap_or_else(|| panic!("{mode:?}: the live note's {w:?} never arrived"))
+            })
+            .collect();
+        assert!(live[0] < live[1], "{mode:?}: on, then off");
+        let m1: Vec<Words> = words.into_iter().filter(|w| w[0] >> 28 == 2).collect();
+        let (keys, _) = closes(&m1);
+        assert!(
+            every_key_once(&keys),
+            "{mode:?}: every owed key closed once"
+        );
+        r.got(2)
+    };
+    assert_eq!(run(Mode::Serial), run(Mode::Parallel));
 }
 
 /// A source that declares no note events keeps no table and closes nothing.

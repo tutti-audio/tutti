@@ -159,6 +159,13 @@ impl AudioRing {
 /// even that is full it evicts the oldest non-note-off instead. A note-off is
 /// dropped only when the whole FIFO is note-offs.
 ///
+/// **A table of owed closes** (a cut edge's held keys that did not fit when
+/// it was cut) is poured into the queue as room frees, never past the limit
+/// less one block's input: the closes can neither displace a live note-off
+/// (the reserve stays free) nor make a live event of the source refused
+/// (a block's input always fits), so nothing live is dropped while a table
+/// drains, and a table never overflows: no close is lost.
+///
 /// The queue never grows past `limit + reserve` ([`bound`](Self::bound)),
 /// and the compiler prices the delay's output slot at that same bound
 /// (`EventSlotCapacity::fifo`), so everything that falls due in a block —
@@ -176,6 +183,9 @@ pub(crate) struct EventFifo {
     clock: u64,
     limit: usize,
     reserve: usize,
+    /// The declared events per block of the port it carries: what one block's
+    /// input needs room for.
+    rate: usize,
     /// The closes of a cut edge's held keys that the queue had no room for:
     /// poured in, as room frees, ahead of each block's input. Present only
     /// in a FIFO the editor built for a cut edge ([`with_owed`](Self::with_owed)).
@@ -200,6 +210,7 @@ impl EventFifo {
             clock: 0,
             limit,
             reserve,
+            rate: cap.max(1),
             owed: None,
         }
     }
@@ -232,14 +243,18 @@ impl EventFifo {
         }
     }
 
-    /// Queue what is owed, as far as the bound takes it, at the clock: behind
-    /// everything in flight, ahead of this block's input. Allocates nothing.
+    /// Queue what is owed, at the clock: behind everything in flight, ahead
+    /// of this block's input, as far as the queue stays a block's input short
+    /// of its limit. The room left holds the live input of the block (so a
+    /// table draining never makes a source's own events refused) and the
+    /// note-off reserve stays free, so a live note-off always finds room.
+    /// Allocates nothing.
     pub(crate) fn pour(&mut self) {
-        let bound = self.limit + self.reserve;
+        let room = self.limit.saturating_sub(self.rate);
         let Some(owed) = &mut self.owed else {
             return;
         };
-        while self.q.len() < bound {
+        while self.q.len() < room {
             let Some(e) = owed.pop_close() else {
                 break;
             };
@@ -294,6 +309,7 @@ impl EventFifo {
         let room = self.q.capacity();
         self.limit = limit.min(room);
         self.reserve = reserve.min(room - self.limit);
+        self.rate = cap.max(1);
     }
 
     /// How many events are queued.
