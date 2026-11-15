@@ -8,12 +8,11 @@
 
 use dpi::Size;
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, BlockCounts, ContentScale,
-    Control, Delivered, EditorCapabilities, EditorPresence, EditorWindow, Features, Health,
-    LoadedPlugin, MainThreadMarker, Normalized, OwnBypass, ParamId, ParameterInfo,
-    PluginDescriptor, PluginError, PluginFailure, PluginResult, Preset, PresetId, ProcessWake,
-    RenderMode, RenderModeSupport, Request, SampleRate, StateError, StateUse, TerminationReason,
-    TrackInfo, WindowHandle,
+    AnyThread, AutomationMode, AutomationModeError, BlockCounts, ContentScale, Control, Delivered,
+    EditorCapabilities, EditorPresence, EditorWindow, Features, Health, LoadedPlugin,
+    MainThreadMarker, Normalized, OwnBypass, ParamId, ParameterInfo, PluginDescriptor, PluginError,
+    PluginFailure, PluginResult, Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport,
+    Request, SampleRate, StateError, StateUse, TerminationReason, TrackInfo, WindowHandle,
 };
 
 use super::{Ipc, IpcController};
