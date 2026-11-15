@@ -93,6 +93,12 @@ pub enum PoolWaitError {
     Taken,
 }
 
+/// The cell, whatever a panicking holder left: it only ever holds a whole value.
+fn lock<K>(cell: &Mutex<Cell<K>>) -> std::sync::MutexGuard<'_, Cell<K>> {
+    cell.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Where the report is.
 enum Cell<K> {
     Pending,
@@ -124,7 +130,7 @@ impl<K> PoolLoaded<K> {
     /// The report if it has landed and was not taken, `None` before it lands.
     /// A later call answers `None` too.
     pub fn take(&self) -> Option<PoolReport<K>> {
-        let mut cell = self.cell.lock().expect("the report's lock is not poisoned");
+        let mut cell = lock(&self.cell);
         match std::mem::replace(&mut *cell, Cell::Taken) {
             Cell::Landed(report) => Some(report),
             Cell::Pending => {
@@ -138,10 +144,7 @@ impl<K> PoolLoaded<K> {
     /// Whether the report landed and was not taken yet.
     #[must_use]
     pub fn has_landed(&self) -> bool {
-        matches!(
-            *self.cell.lock().expect("the report's lock is not poisoned"),
-            Cell::Landed(_)
-        )
+        matches!(*lock(&self.cell), Cell::Landed(_))
     }
 
     /// Calls [`Session::update`] until the report lands, and returns it. The
@@ -161,10 +164,7 @@ impl<K> PoolLoaded<K> {
             if let Some(report) = self.take() {
                 return Ok(report);
             }
-            if matches!(
-                *self.cell.lock().expect("the report's lock is not poisoned"),
-                Cell::Taken
-            ) {
+            if matches!(*lock(&self.cell), Cell::Taken) {
                 return Err(PoolWaitError::Taken);
             }
             let events = session.update();
@@ -193,6 +193,6 @@ pub(crate) struct Landing<K> {
 
 impl<K> Landing<K> {
     pub(crate) fn land(&self, report: PoolReport<K>) {
-        *self.cell.lock().expect("the report's lock is not poisoned") = Cell::Landed(report);
+        *lock(&self.cell) = Cell::Landed(report);
     }
 }
