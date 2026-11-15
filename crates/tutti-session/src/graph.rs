@@ -2963,6 +2963,7 @@ impl Graph {
     ///
     /// The [`FoldError`](tutti_buffers::FoldError) when the device has no
     /// channels or `topology` is not its width. Nothing is changed.
+    #[cfg(feature = "device")]
     pub(crate) fn place_device(
         &mut self,
         device: ChannelLayout,
