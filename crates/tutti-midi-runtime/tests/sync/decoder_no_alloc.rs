@@ -109,41 +109,78 @@ fn machine_control_sender_observe_is_allocation_free() {
     assert!(sent >= 3_000, "locates and stops were sent: {sent}");
 }
 
-/// **The follower steps a segmented string without allocating**: the segments
-/// of a LOCATE across messages, a segment that does not belong, and a plain
-/// message are each one `step`.
+/// **The follower steps segmented strings without allocating**, the hostile
+/// paths included: a segmented LOCATE, a stray segment, a skipped segment, a
+/// first inside a string, a segment followed by a command (RP-013 p.40 b), a
+/// segment after a command, a string that ends inside a command, a segment
+/// inside a string, and a full 64-segment string of 2880 commands.
 #[test]
 fn machine_control_follower_segments_are_allocation_free() {
-    use tutti_midi_protocol::SysexDeviceId;
+    use tutti_midi_protocol::{
+        MMC_MAX_SEGMENTED, MmcCommand, MmcCommands, MmcSegments, Recipient, SysexDeviceId,
+    };
     use tutti_midi_runtime::MachineControlFollower;
-    use tutti_ump::{MidiGroup, Sysex7Packets};
+    use tutti_ump::{MidiGroup, Sysex7Packets, Ump};
 
+    let to = Recipient::Device(SysexDeviceId::of(1));
+    let raw = |commands: &[u8]| {
+        let mut payload = vec![0x7F, 0x01, 0x06];
+        payload.extend_from_slice(commands);
+        payload
+    };
+    let mut payloads = vec![
+        // A LOCATE in two segments, then a stray last segment.
+        raw(&[0x53, 0x05, 0x41, 0x44, 0x06, 0x01, 0x61]),
+        raw(&[0x53, 0x05, 0x00, 0x02, 0x08, 0x14, 0x00]),
+        raw(&[0x53, 0x02, 0x00, 0x02]),
+        // A segment skipped: first with two to come, then the last.
+        raw(&[0x53, 0x02, 0x42, 0x02]),
+        raw(&[0x53, 0x02, 0x00, 0x02]),
+        // A first inside a string, which starts its own (a STOP).
+        raw(&[0x53, 0x02, 0x41, 0x02]),
+        raw(&[0x53, 0x02, 0x40, 0x01]),
+        // A segment followed by a command, and one after a command.
+        raw(&[0x53, 0x02, 0x40, 0x02, 0x02]),
+        raw(&[0x02, 0x53, 0x02, 0x40, 0x02]),
+        // A string that ends inside a command.
+        raw(&[0x53, 0x03, 0x41, 0x44, 0x06]),
+        raw(&[0x53, 0x02, 0x00, 0x01]),
+        // A segment inside a string, and a plain PLAY.
+        raw(&[0x53, 0x06, 0x40, 0x02, 0x53, 0x02, 0x40, 0x02]),
+        raw(&[0x02]),
+    ];
+    // The longest string: 64 segments, 2880 PLAYs.
+    for segment in MmcSegments::new(&[0x02; MMC_MAX_SEGMENTED]).unwrap() {
+        let mut commands = MmcCommands::new();
+        commands.push(&MmcCommand::CommandSegment(segment)).unwrap();
+        payloads.push(commands.payload(to).to_vec());
+    }
+    let messages: Vec<Vec<Ump>> = payloads
+        .iter()
+        .map(|payload| {
+            Sysex7Packets::from_payload(MidiGroup::FIRST, payload)
+                .unwrap()
+                .collect()
+        })
+        .collect();
     let mut follower = MachineControlFollower::new(SysexDeviceId::of(1));
-    let messages: Vec<Vec<tutti_ump::Ump>> = [
-        vec![0x7F, 0x01, 0x06, 0x53, 0x05, 0x41, 0x44, 0x06, 0x01, 0x61],
-        vec![0x7F, 0x01, 0x06, 0x53, 0x05, 0x00, 0x02, 0x08, 0x14, 0x00],
-        vec![0x7F, 0x01, 0x06, 0x53, 0x02, 0x00, 0x02],
-        vec![0x7F, 0x01, 0x06, 0x02],
-    ]
-    .iter()
-    .map(|payload| {
-        Sysex7Packets::from_payload(MidiGroup::FIRST, payload)
-            .unwrap()
-            .collect()
-    })
-    .collect();
-    let mut events = 0;
-    assert_no_alloc::assert_no_alloc(|| {
-        for _ in 0..1_000 {
-            for message in &messages {
-                for &ump in message {
-                    follower.step(ump, &mut |_| events += 1);
-                }
+    let round = |follower: &mut MachineControlFollower| {
+        let mut events = 0;
+        for message in &messages {
+            for &ump in message {
+                follower.step(ump, &mut |_| events += 1);
             }
         }
+        events
+    };
+    // Warm up outside the gate, and learn what a round makes.
+    let per_round = round(&mut follower);
+    assert!(per_round > MMC_MAX_SEGMENTED, "{per_round}");
+    let mut events = 0;
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..100 {
+            events += round(&mut follower);
+        }
     });
-    assert_eq!(
-        events, 3_000,
-        "a locate, a segmentation error and a play each round"
-    );
+    assert_eq!(events, 100 * per_round);
 }

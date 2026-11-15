@@ -8,7 +8,10 @@
 //! for a hardware pump to drain.
 //!
 //! The node owns the sender. A transport time no time code names is refused
-//! and counted ([`MachineControlControls::losses`]), never sent as another.
+//! and counted ([`MachineControlControls::losses`], `refused`), never sent as
+//! another. A message goes out whole or not at all: when the port has no room
+//! for all its packets the message is counted as lost (`lost`, one per packet),
+//! so a block never carries half a SysEx run.
 //!
 //! Its fork sends nothing: an offline render drives no external gear.
 
@@ -20,7 +23,7 @@ use tutti_graph::{
     Offset, Prepare, Shape, Status,
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
-use tutti_types::Seconds;
+use tutti_types::Beat;
 use tutti_ump::{MidiGroup, Sysex7Packets};
 
 use super::machine_control_out::MachineControlSender;
@@ -35,14 +38,18 @@ pub const MACHINE_CONTROL_EVENT_CAPACITY: usize = 18;
 #[derive(Clone, Debug, Default)]
 pub struct MachineControlControls {
     refused: Arc<AtomicU64>,
+    lost: Arc<AtomicU64>,
 }
 
 impl MachineControlControls {
-    /// The messages the node could not send, all of them `refused`: a transport
-    /// that moved to a time no time code names ([`NoTimeCode`](crate::NoTimeCode)).
+    /// What the node could not send, since it was made. `refused` counts the
+    /// looks at a transport that moved to a time no time code names
+    /// ([`NoTimeCode`](crate::NoTimeCode)); `lost` counts the packets of the
+    /// messages the port had no room for.
     #[must_use]
     pub fn losses(&self) -> Losses {
-        Losses::refused(self.refused.load(Ordering::Relaxed))
+        Losses::lost(self.lost.load(Ordering::Relaxed))
+            + Losses::refused(self.refused.load(Ordering::Relaxed))
     }
 }
 
@@ -105,7 +112,7 @@ impl Node for MachineControlNode {
             let transport = &segment.transport;
             // The transport's time is its beat at its tempo from beat 0, the
             // timeline the clock's MTC runs on.
-            let seconds = Seconds::new(transport.beat().get() * 60.0 / transport.tempo.get());
+            let seconds = (transport.beat() - Beat(0.0)).to_seconds(transport.tempo);
             let payload = match self.sender.observe(
                 transport.playing,
                 seconds,
@@ -122,8 +129,17 @@ impl Node for MachineControlNode {
             let at = Offset::clamped(base, block_len);
             // A payload built by the sender is seven-bit and short.
             if let Ok(packets) = Sysex7Packets::from_payload(self.group, &payload) {
+                let room = MACHINE_CONTROL_EVENT_CAPACITY.saturating_sub(out.len());
+                if packets.len() > room {
+                    self.controls
+                        .lost
+                        .fetch_add(packets.len() as u64, Ordering::Relaxed);
+                    continue;
+                }
                 for packet in packets {
-                    let _ = out.push(Event::midi(at, packet));
+                    if out.push(Event::midi(at, packet)).is_err() {
+                        self.controls.lost.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
             }
         }

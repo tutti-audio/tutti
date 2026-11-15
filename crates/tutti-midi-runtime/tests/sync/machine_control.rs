@@ -7,7 +7,7 @@
 
 use tutti_midi_protocol::{MmcSegmentError, MtcRate, Recipient, SysexDeviceId};
 use tutti_midi_runtime::{
-    MachineControlEvent, MachineControlFollower, MachineControlSender, NoTimeCode,
+    MachineControlEvent, MachineControlFollower, MachineControlSender, NoTimeCode, SegmentFault,
 };
 use tutti_types::{Frame, SampleRate, Seconds};
 use tutti_ump::{MidiGroup, Sysex7Packets};
@@ -131,33 +131,63 @@ fn a_segment_that_does_not_belong_is_reported_and_cancels() {
     let mut f = MachineControlFollower::new(OURS);
     assert_eq!(
         feed(&mut f, 5, &segment(0x00, &[0x02])),
-        [MachineControlEvent::Segmentation(
+        [MachineControlEvent::Segmentation(SegmentFault::String(
             MmcSegmentError::MissingFirst
-        )]
+        ))]
     );
     feed(&mut f, 5, &segment(0x42, &[0x02]));
     assert_eq!(
         feed(&mut f, 5, &segment(0x00, &[0x02])),
-        [MachineControlEvent::Segmentation(
+        [MachineControlEvent::Segmentation(SegmentFault::String(
             MmcSegmentError::OutOfOrder {
                 expected: 1,
                 got: 0
             }
-        )]
+        ))]
     );
+    // A first inside a string is reported, and then starts its own string,
+    // which here is whole (a STOP) at once.
     feed(&mut f, 5, &segment(0x41, &[0x02]));
     assert_eq!(
-        feed(&mut f, 5, &segment(0x40, &[0x02])),
-        [MachineControlEvent::Segmentation(
-            MmcSegmentError::FirstInsideString
-        )]
+        feed(&mut f, 5, &segment(0x40, &[0x01])),
+        [
+            MachineControlEvent::Segmentation(SegmentFault::String(
+                MmcSegmentError::FirstInsideString
+            )),
+            MachineControlEvent::Stop
+        ]
     );
-    // A command ahead of the segment is not "first".
+    // A command ahead of the segment: it is not "first" (p.40 a).
     let mut both = vec![0x02];
     both.extend(segment(0x40, &[0x02]));
     assert_eq!(
         feed(&mut f, 5, &both),
-        [MachineControlEvent::Segmentation(MmcSegmentError::NotFirst)]
+        [MachineControlEvent::Segmentation(SegmentFault::NotFirst)]
+    );
+    // A command after it: its count is not the bytes remaining (p.40 b).
+    let mut more = segment(0x40, &[0x02]);
+    more.push(0x02);
+    assert_eq!(
+        feed(&mut f, 5, &more),
+        [MachineControlEvent::Segmentation(
+            SegmentFault::CountMismatch
+        )]
+    );
+}
+
+/// **A COMMAND SEGMENT inside a reassembled string is a Segmentation Error, not
+/// an ignored command (RP-013 p.40)**: the commands around it still run.
+#[test]
+fn a_segment_inside_a_segmented_string_is_reported() {
+    let mut f = MachineControlFollower::new(OURS);
+    let mut string = vec![0x02];
+    string.extend(segment(0x40, &[0x01]));
+    assert_eq!(
+        feed(&mut f, 5, &segment(0x40, &string)),
+        [
+            MachineControlEvent::Play,
+            MachineControlEvent::Segmentation(SegmentFault::Nested)
+        ]
     );
 }
 
@@ -178,9 +208,9 @@ fn a_plain_message_cancels_a_string_and_wait_does_not() {
     assert_eq!(feed(&mut f, 5, &[0x01]), [MachineControlEvent::Stop]);
     assert_eq!(
         feed(&mut f, 5, &segment(0x00, &[0x01])),
-        [MachineControlEvent::Segmentation(
+        [MachineControlEvent::Segmentation(SegmentFault::String(
             MmcSegmentError::MissingFirst
-        )]
+        ))]
     );
 }
 
@@ -191,9 +221,9 @@ fn a_segmented_string_that_is_not_whole_commands_is_refused() {
     feed(&mut f, 5, &segment(0x41, &[0x44, 0x06]));
     assert_eq!(
         feed(&mut f, 5, &segment(0x00, &[0x01])),
-        [MachineControlEvent::Segmentation(
+        [MachineControlEvent::Segmentation(SegmentFault::String(
             MmcSegmentError::Malformed
-        )]
+        ))]
     );
 }
 

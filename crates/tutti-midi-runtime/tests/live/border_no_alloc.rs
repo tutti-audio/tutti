@@ -652,7 +652,7 @@ fn the_machine_control_node_processes_without_allocating() {
 
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-    ed.insert(
+    let controls = ed.insert(
         NodeKey(1),
         "mmc",
         MachineControlNode::new(MidiGroup::FIRST, Recipient::AllCall, MtcRate::Fps30),
@@ -683,11 +683,29 @@ fn the_machine_control_node_processes_without_allocating() {
             // The next block starts away from where the last left off.
             exec.process_with_changes(512, &at(true, 3.0), &TransportChanges::NONE, &[], &mut []);
             sent += out.poll_into(&mut drain);
+            // A stop, and then a transport before zero standing elsewhere: it names
+            // no time code, so it is refused and counted.
+            for beat in [-4.0, -8.0] {
+                exec.process_with_changes(
+                    512,
+                    &at(false, beat),
+                    &TransportChanges::NONE,
+                    &[],
+                    &mut [],
+                );
+                sent += out.poll_into(&mut drain);
+            }
         }
     });
     assert!(
         sent >= 200 * 4,
         "play, stop, locate and deferred play: {sent}"
     );
+    assert!(
+        controls.losses().refused >= 200,
+        "a refusal each round: {:?}",
+        controls.losses()
+    );
+    assert_eq!(controls.losses().lost, 0);
     assert_eq!(out.dropped(), 0);
 }

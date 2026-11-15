@@ -56,8 +56,8 @@
 
 use tutti_midi_protocol::{
     Addressed, MmcCommand, MmcCommandReassembler, MmcCommands, MmcFields, MmcGroup, MmcInfoField,
-    MmcLocate, MmcMove, MmcPosition, MmcSegmentError, MmcSign, MmcSpeed, Read, Recipient,
-    SysexDeviceId, Universal, read,
+    MmcLocate, MmcMove, MmcPosition, MmcSegment, MmcSegmentError, MmcSegmentPlace, MmcSign,
+    MmcSpeed, Read, Recipient, SysexDeviceId, Universal, read,
 };
 use tutti_types::Seconds;
 use tutti_ump::{SysexAssembler, SysexStep, Ump};
@@ -76,7 +76,28 @@ pub enum MachineControlEvent {
     Ignored(MmcCommand),
     /// A COMMAND SEGMENT that did not belong, or a string that did not make
     /// whole commands (RP-013 p.40): the string in progress is cancelled.
-    Segmentation(MmcSegmentError),
+    Segmentation(SegmentFault),
+}
+
+/// Why a COMMAND SEGMENT was not taken in (RP-013 p.40): what a device that
+/// answers sends as a COMMAND ERROR Segmentation Error (`09`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+pub enum SegmentFault {
+    /// The segment does not belong to its string, or the string is not whole
+    /// commands (p.40 c and d).
+    #[error(transparent)]
+    String(#[from] MmcSegmentError),
+    /// A COMMAND SEGMENT came after another command in its message (p.40 a).
+    #[error("a segment is not the first command of its message")]
+    NotFirst,
+    /// A COMMAND SEGMENT was followed by more commands: its byte count is not
+    /// the number of bytes remaining in the message (p.40 b).
+    #[error("a segment's byte count is not the bytes remaining in its message")]
+    CountMismatch,
+    /// A COMMAND SEGMENT inside a reassembled string: a segment must be the
+    /// only command of its message (p.40).
+    #[error("a segment inside a segmented string")]
+    Nested,
 }
 
 /// Longest message read: 3 header bytes and 48 of data.
@@ -173,7 +194,13 @@ impl MachineControlFollower {
     }
 
     /// Takes in one UMP of the source's stream and passes each event it makes
-    /// to `out`, in order. Allocates nothing.
+    /// to `out`, in order. Allocates nothing itself.
+    ///
+    /// A message that completes a segmented string makes an event for each of
+    /// its commands: up to [`MMC_MAX_SEGMENTED`](tutti_midi_protocol::MMC_MAX_SEGMENTED) of them (2880 one-byte
+    /// commands) in one call. `out` runs on the calling thread, and a follower
+    /// is driven from a control thread (never a graph node), so a collector that
+    /// grows a `Vec` may allocate.
     pub fn step(&mut self, ump: Ump, out: &mut impl FnMut(MachineControlEvent)) {
         self.sysex.begin_block();
         let SysexStep::Complete(done) = self.sysex.push(ump) else {
@@ -205,30 +232,19 @@ impl MachineControlFollower {
             return;
         };
         if let MmcCommand::CommandSegment(segment) = first {
-            // It is first by construction; more commands after it are not
-            // inside its count, so they are not "bytes remaining" (p.40 b).
             if items.next().is_some() {
                 self.segments.cancel();
-                out(MachineControlEvent::Segmentation(MmcSegmentError::NotFirst));
+                out(MachineControlEvent::Segmentation(
+                    SegmentFault::CountMismatch,
+                ));
                 return;
             }
-            match self.segments.push(segment) {
-                Ok(Some(string)) => {
-                    for command in string {
-                        self.state.act(command, out);
-                    }
-                }
-                Ok(None) => {}
-                Err(error) => out(MachineControlEvent::Segmentation(error)),
-            }
+            self.segment(segment, out);
             return;
         }
-        if commands
-            .iter()
-            .any(|c| matches!(c, MmcCommand::CommandSegment(_)))
-        {
+        if items.any(|c| matches!(c, MmcCommand::CommandSegment(_))) {
             self.segments.cancel();
-            out(MachineControlEvent::Segmentation(MmcSegmentError::NotFirst));
+            out(MachineControlEvent::Segmentation(SegmentFault::NotFirst));
             return;
         }
         if commands
@@ -239,6 +255,36 @@ impl MachineControlFollower {
         }
         for command in commands {
             self.state.act(command, out);
+        }
+    }
+}
+
+impl MachineControlFollower {
+    /// Takes one COMMAND SEGMENT in. A first segment inside a string is
+    /// reported, and then starts its own string. A finished string's commands
+    /// are acted on in order; a segment inside it is reported, and skipped.
+    fn segment(&mut self, segment: MmcSegment, out: &mut impl FnMut(MachineControlEvent)) {
+        if segment.place() == MmcSegmentPlace::First && self.segments.in_progress() {
+            // The reassembler refuses a first inside a string, and takes it in
+            // again once the string is cancelled.
+            let refused = self.segments.push(segment).err();
+            debug_assert_eq!(refused, Some(MmcSegmentError::FirstInsideString));
+            out(MachineControlEvent::Segmentation(
+                MmcSegmentError::FirstInsideString.into(),
+            ));
+        }
+        match self.segments.push(segment) {
+            Ok(Some(string)) => {
+                for command in string {
+                    if matches!(command, MmcCommand::CommandSegment(_)) {
+                        out(MachineControlEvent::Segmentation(SegmentFault::Nested));
+                    } else {
+                        self.state.act(command, out);
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(error) => out(MachineControlEvent::Segmentation(error.into())),
         }
     }
 }

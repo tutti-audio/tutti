@@ -263,7 +263,7 @@ pub use schedule::{
 };
 pub use sync::{
     ClockEvent, ClockFollower, ClockKind, ClockPosition, ClockTransportState, MachineControlEvent,
-    MachineControlFollower, MidiClockDecoder, MtcDecoder,
+    MachineControlFollower, MidiClockDecoder, MtcDecoder, SegmentFault,
 };
 pub use tempo_follower::{Followed, TempoFollower, TempoSource};
 pub use traits::MidiOut;
