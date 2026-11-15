@@ -310,6 +310,13 @@ impl EventFifo {
         self.limit = limit.min(room);
         self.reserve = reserve.min(room - self.limit);
         self.rate = cap.max(1);
+        // A table pours up to `limit - rate`: staging sizes the room for the
+        // new bound, so the clamp above never leaves a FIFO that carries
+        // events no room to pour into.
+        debug_assert!(
+            cap == 0 || self.limit > self.rate,
+            "an event FIFO's limit leaves a pour no room"
+        );
     }
 
     /// How many events are queued.
