@@ -1359,8 +1359,8 @@ pub fn compile(
 
     let audio_fixed = 1 + audio_fb.len() as u32;
     let event_fixed = 1 + event_fb.len() as u32;
-    let audio_colour = colour::colour(&em.audio, &reach, &in_place);
-    let event_colour = colour::colour(&em.event, &reach, &BTreeMap::new());
+    let audio_colour = colour::colour(&em.audio, &reach, &in_place, &em.preds);
+    let event_colour = colour::colour(&em.event, &reach, &BTreeMap::new(), &em.preds);
     let aslot = |v: u32| audio_fixed + audio_colour.slot[v as usize];
     let eslot = |v: u32| event_fixed + event_colour.slot[v as usize];
 

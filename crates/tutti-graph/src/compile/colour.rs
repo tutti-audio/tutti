@@ -19,7 +19,7 @@
 //! which is why it is offered only to ops that promise to (PDC delay rings,
 //! and nodes whose `Shape::in_place` is set).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::Val;
 
@@ -68,8 +68,37 @@ fn finished_before(u: &Val, w: u32, reach: &Reach) -> bool {
 }
 
 /// Greedy colouring in writer order. `in_place[v] = u` offers `v` the slot of
-/// `u`, taken when legal.
-pub(crate) fn colour(vals: &[Val], reach: &Reach, in_place: &BTreeMap<u32, u32>) -> Colouring {
+/// `u`, taken when legal. `preds[op]` are the ops with an edge into `op`.
+///
+/// A value tries, in order, and takes the first slot whose last occupant is
+/// finished before its writer:
+///
+/// 1. the slot of the value it overwrites in place (`in_place`);
+/// 2. the slots of the values its writer's predecessors read, in predecessor
+///    then value order — buffers the writer's own neighbourhood just
+///    released, still warm in cache;
+/// 3. the lowest-numbered free slot;
+/// 4. a new slot.
+///
+/// Every candidate passes the one liveness test, so the order only chooses
+/// among legal slots and is a pure function of the graph.
+pub(crate) fn colour(
+    vals: &[Val],
+    reach: &Reach,
+    in_place: &BTreeMap<u32, u32>,
+    preds: &[BTreeSet<u32>],
+) -> Colouring {
+    // The values each op reads, ascending.
+    let mut reads: Vec<Vec<u32>> = vec![Vec::new(); preds.len()];
+    for (u, val) in vals.iter().enumerate() {
+        for &r in &val.readers {
+            let row = &mut reads[r as usize];
+            if row.last() != Some(&(u as u32)) {
+                row.push(u as u32);
+            }
+        }
+    }
+
     let mut slot = vec![u32::MAX; vals.len()];
     // Last occupant of each slot. Values are visited in writer order, and a
     // value can only follow an occupant whose every op happens-before its
@@ -97,9 +126,13 @@ pub(crate) fn colour(vals: &[Val], reach: &Reach, in_place: &BTreeMap<u32, u32>)
             }
         }
 
-        let reuse = last
+        let free = |s: usize| finished_before(&vals[last[s] as usize], w, reach);
+        let reuse = preds[w as usize]
             .iter()
-            .position(|&occ| finished_before(&vals[occ as usize], w, reach));
+            .flat_map(|&p| reads[p as usize].iter())
+            .map(|&u| slot[u as usize] as usize)
+            .find(|&s| free(s))
+            .or_else(|| (0..last.len()).find(|&s| free(s)));
         let s = match reuse {
             Some(s) => s,
             None => {
@@ -114,5 +147,147 @@ pub(crate) fn colour(vals: &[Val], reach: &Reach, in_place: &BTreeMap<u32, u32>)
     Colouring {
         count: last.len() as u32,
         slot,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// One op per value: op `i` writes value `i` and reads the values in
+    /// `reads[i]` (all earlier). Returns the values, the reach and the preds.
+    fn dag(reads: &[Vec<u32>]) -> (Vec<Val>, Reach, Vec<BTreeSet<u32>>) {
+        let mut vals: Vec<Val> = (0..reads.len() as u32)
+            .map(|w| Val {
+                writer: w,
+                readers: Vec::new(),
+            })
+            .collect();
+        let mut preds = vec![BTreeSet::new(); reads.len()];
+        let mut succ = vec![Vec::new(); reads.len()];
+        for (op, rs) in reads.iter().enumerate() {
+            for &u in rs {
+                vals[u as usize].readers.push(op as u32);
+                if preds[op].insert(u) {
+                    succ[u as usize].push(op as u32);
+                }
+            }
+        }
+        let reach = Reach::new(&succ);
+        (vals, reach, preds)
+    }
+
+    fn slots(reads: &[Vec<u32>], in_place: &BTreeMap<u32, u32>) -> u32 {
+        let (vals, reach, preds) = dag(reads);
+        colour(&vals, &reach, in_place, &preds).count
+    }
+
+    /// A chain `0 → 1 → 2 → 3 → 4` needs two slots: a value lives until its
+    /// successor has written, so neighbours never share and every third value
+    /// reuses the first slot.
+    #[test]
+    fn a_chain_needs_two_slots() {
+        let reads = vec![vec![], vec![0], vec![1], vec![2], vec![3]];
+        assert_eq!(slots(&reads, &BTreeMap::new()), 2);
+    }
+
+    /// A diamond `0 → {1, 2} → 3`: the two arms are unordered, so three
+    /// values are live at once; the join reuses the source's slot.
+    #[test]
+    fn a_diamond_needs_three_slots() {
+        let reads = vec![vec![], vec![0], vec![0], vec![1, 2]];
+        assert_eq!(slots(&reads, &BTreeMap::new()), 3);
+    }
+
+    /// A source fanning out to four unordered ops that fan in: the source and
+    /// the four arms are live together at the join's inputs (the arms), and
+    /// the join takes the source's slot, so five slots.
+    #[test]
+    fn a_fan_out_fan_in_needs_width_plus_one_slots() {
+        let reads = vec![
+            vec![],
+            vec![0],
+            vec![0],
+            vec![0],
+            vec![0],
+            vec![1, 2, 3, 4],
+        ];
+        assert_eq!(slots(&reads, &BTreeMap::new()), 5);
+    }
+
+    /// A chain whose every op overwrites its input in place lives in one slot.
+    #[test]
+    fn an_in_place_chain_needs_one_slot() {
+        let reads = vec![vec![], vec![0], vec![1], vec![2], vec![3]];
+        let in_place: BTreeMap<u32, u32> = (1..5).map(|v| (v, v - 1)).collect();
+        assert_eq!(slots(&reads, &in_place), 1);
+    }
+
+    /// Two independent chains side by side need two slots each at most; the
+    /// preference for a predecessor's released slot keeps each chain on its
+    /// own pair instead of interleaving across the other chain's buffers.
+    #[test]
+    fn independent_chains_keep_to_their_own_slots() {
+        // Ops 0,1 start chains A,B; 2,3 continue; 4,5 continue.
+        let reads = vec![vec![], vec![], vec![0], vec![1], vec![2], vec![3]];
+        let (vals, reach, preds) = dag(&reads);
+        let c = colour(&vals, &reach, &BTreeMap::new(), &preds);
+        assert_eq!(c.count, 4);
+        assert_eq!(c.slot[4], c.slot[0], "chain A returns to its first slot");
+        assert_eq!(c.slot[5], c.slot[1], "chain B returns to its first slot");
+    }
+
+    fn random_reads(masks: &[u64]) -> Vec<Vec<u32>> {
+        masks
+            .iter()
+            .enumerate()
+            .map(|(i, &m)| (0..i as u32).filter(|&u| (m >> (u % 64)) & 1 == 1).collect())
+            .collect()
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(256), ..ProptestConfig::default() })]
+
+        /// No two values with overlapping lifetimes per `Reach` share a slot:
+        /// for two values in one slot, every op touching the earlier one
+        /// happens-before the later one's writer, except the declared in-place
+        /// hand-over (the writer is a reader of the earlier value and every
+        /// other reader precedes it). The same graph colours identically
+        /// twice.
+        #[test]
+        fn no_two_overlapping_values_share_a_slot(
+            masks in prop::collection::vec(any::<u64>(), 2..40),
+            offer in prop::collection::vec(any::<bool>(), 40),
+        ) {
+            let reads = random_reads(&masks);
+            let (vals, reach, preds) = dag(&reads);
+            let mut in_place = BTreeMap::new();
+            for (v, rs) in reads.iter().enumerate() {
+                if offer[v] && let Some(&u) = rs.first() {
+                    in_place.insert(v as u32, u);
+                }
+            }
+            let c = colour(&vals, &reach, &in_place, &preds);
+            let again = colour(&vals, &reach, &in_place, &preds);
+            prop_assert_eq!(&c.slot, &again.slot);
+            prop_assert_eq!(c.count, again.count);
+            prop_assert!(c.slot.iter().all(|&s| s < c.count));
+            for v in 0..vals.len() {
+                for u in 0..v {
+                    if c.slot[u] != c.slot[v] {
+                        continue;
+                    }
+                    let w = vals[v].writer;
+                    let src = &vals[u];
+                    let clear = finished_before(src, w, &reach);
+                    let hand_over = in_place.get(&(v as u32)) == Some(&(u as u32))
+                        && src.readers.contains(&w)
+                        && reach.before(src.writer, w)
+                        && src.readers.iter().all(|&r| r == w || reach.before(r, w));
+                    prop_assert!(clear || hand_over, "values {u} and {v} overlap in slot {}", c.slot[u]);
+                }
+            }
+        }
     }
 }
