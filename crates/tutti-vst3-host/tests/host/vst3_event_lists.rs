@@ -171,10 +171,10 @@ fn a_sysex_is_detected_by_its_data_type() {
 }
 
 /// **A SysEx the host's MIDI pool has no room for is dropped whole and
-/// counted in `dropped`** (and latches the pool's `is_overflowed`); the
-/// message before it arrives intact.
+/// counted lost on the output stream** (and latches the pool's `is_overflowed`);
+/// the message before it arrives intact.
 #[test]
-fn a_sysex_past_the_midi_pool_is_counted_in_dropped() {
+fn a_sysex_past_the_midi_pool_is_counted_lost() {
     let list = EventList::output();
     let ptr = list.to_com_ptr::<IEventList>().unwrap();
     // The first takes all but one of the pool's packets, the second
@@ -189,9 +189,10 @@ fn a_sysex_past_the_midi_pool_is_counted_in_dropped() {
     }
     assert_eq!(list.dropped(), 0);
     let mut pool = RtMidiEvents::new();
-    drain_midi(&list, &mut tutti_vst3_host::OutputStream::new(), &mut pool);
+    let mut stream = tutti_vst3_host::OutputStream::new();
+    drain_midi(&list, &mut stream, &mut pool);
     assert!(pool.is_overflowed());
-    assert_eq!(list.dropped(), 1);
+    assert_eq!((stream.sysex_dropped(), stream.lost_total()), (1, 1));
     assert_eq!(reassembled(pool.as_slice()), vec![framed(&first)]);
 }
 
