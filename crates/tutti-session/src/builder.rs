@@ -96,6 +96,9 @@ struct Options {
     inputs: ChannelLayout,
     outputs_floor: ChannelLayout,
     root: Option<ChannelTopology>,
+    /// What the output device's channels are, when the host states it
+    /// ([`device_topology`](SessionBuilder::device_topology)).
+    device_topology: Option<ChannelTopology>,
     render_workers: Workers,
     /// The platform host the output and every input the session opens use.
     #[cfg(feature = "device")]
@@ -145,6 +148,7 @@ impl Default for Options {
             inputs: ChannelLayout::EMPTY,
             outputs_floor: ChannelLayout::STEREO,
             root: None,
+            device_topology: None,
             render_workers: Workers::SERIAL,
             #[cfg(feature = "device")]
             host: tutti_cpal::AudioHost::Default,
@@ -332,7 +336,9 @@ impl SessionBuilder<Offline> {
         let engine = parts.graph.engine(&parts.transport)?;
         Self::clock_midi(&parts, &engine);
         // The width of every block the host pulls.
-        engine.support_output(layout)?;
+        parts
+            .graph
+            .place_device(layout, self.opts.device_topology.clone())?;
         self.declare(&mut parts.graph, layout)?;
         let heard = engine.heard_taps();
         let mut session = self.session(parts, Some(engine), true)?;
@@ -479,6 +485,25 @@ impl<S> SessionBuilder<S> {
     #[must_use]
     pub fn root_topology(mut self, root: ChannelTopology) -> Self {
         self.opts.root = Some(root);
+        self
+    }
+
+    /// States what the output device's channels are: an interface wired as
+    /// 5.1 on its six outputs, say. The graph root is folded into it by
+    /// speaker. Without it the device is taken to be the engine's order for
+    /// its width ([`ChannelTopology::assumed`]: mono, stereo, quad, 5.1, 7.1,
+    /// 7.1.4, and independent channels at any other width) and is read back as
+    /// [`Placement::Assumed`](tutti_types::Placement::Assumed)
+    /// ([`Session::output_device`]).
+    ///
+    /// The statement is the device's width: a build whose device has another
+    /// is refused ([`Error::Output`](crate::Error::Output)), and so is a root
+    /// the statement cannot place. A restart takes the statement of its own
+    /// request ([`DeviceRestart::topology`](crate::DeviceRestart::topology)),
+    /// since another device is wired another way.
+    #[must_use]
+    pub fn device_topology(mut self, device: ChannelTopology) -> Self {
+        self.opts.device_topology = Some(device);
         self
     }
 
@@ -889,6 +914,9 @@ impl<S> SessionBuilder<S> {
         let mut parts = self.parts(spec.sample_rate, LIVE_MAX_BLOCK, spec.quantum, root)?;
         let mut engine = parts.graph.engine(&parts.transport)?;
         Self::clock_midi(&parts, &engine);
+        parts
+            .graph
+            .place_device(spec.channels, self.opts.device_topology.clone())?;
         self.declare(&mut parts.graph, spec.channels)?;
         let mut session = self.session(parts, None, true)?;
         session.load = engine.take_load_meter();
@@ -956,19 +984,32 @@ impl<S> SessionBuilder<S> {
     /// device where either width has no channel order (a 6-channel project on
     /// a 5-channel interface).
     fn check_placement(&self, root: usize, device: ChannelLayout) -> Result<()> {
+        let placed = match &self.opts.device_topology {
+            Some(stated) if stated.width() != device => {
+                return Err(tutti_buffers::FoldError::from(
+                    tutti_buffers::BufferError::WidthMismatch {
+                        src: stated.width(),
+                        dst: device,
+                    },
+                )
+                .into());
+            }
+            Some(stated) => stated.clone(),
+            None => ChannelTopology::assumed(device),
+        };
         match &self.opts.root {
             // The same check `Graph::declare_root` makes a step later; made
             // here so a refused root builds nothing (no engine, no device
             // thread). Removing this arm alone changes no outcome, only
             // how much is built before the refusal.
-            Some(declared) => Graph::check_root(declared, device)?,
+            Some(declared) => Graph::check_root(declared, Some(&placed))?,
             None => {
                 let width = ChannelLayout::try_from(root).map_err(|_| {
                     tutti_buffers::FoldError::from(tutti_buffers::BufferError::TooWide {
                         channels: root,
                     })
                 })?;
-                tutti_graph::fold_to_width(&tutti_types::ChannelTopology::assumed(width), device)?;
+                tutti_graph::fold_to_topology(&ChannelTopology::assumed(width), &placed)?;
             }
         }
         Ok(())

@@ -330,6 +330,10 @@ pub struct Graph {
     /// The control side of the engine's output folds, once an engine was built
     /// over this graph: a declaration is published through it.
     output: Option<tutti_engine::OutputControl>,
+    /// The width of the device the engine renders into, once one is placed
+    /// ([`place_device`](Self::place_device)): the pair a commit must be able
+    /// to fold.
+    device: Option<ChannelLayout>,
     /// The last widening [`widen_outputs`](Self::widen_outputs) refused.
     widen_refusal: Option<tutti_graph::RootError>,
     /// The hosted plugins' records, by node (`plugin.rs`): kept here so a
@@ -480,6 +484,7 @@ impl Graph {
             removed: Vec::new(),
             root: None,
             output: None,
+            device: None,
             widen_refusal: None,
             #[cfg(feature = "plugin")]
             plugins: BTreeMap::new(),
@@ -2853,6 +2858,12 @@ impl Graph {
         &self.editor.spec().topology
     }
 
+    /// The generation of the root the next commit carries
+    /// ([`RootId`](tutti_graph::RootId)).
+    pub(crate) fn root_id(&self) -> tutti_graph::RootId {
+        self.editor.spec().root_id
+    }
+
     /// The topology the root was declared with, if one was.
     pub fn root_topology(&self) -> Option<&tutti_types::ChannelTopology> {
         self.root.as_ref()
@@ -2880,7 +2891,7 @@ impl Graph {
     /// has a place on the device ([`fold_to_width`](tutti_graph::fold_to_width)).
     pub(crate) fn check_root(
         root: &tutti_types::ChannelTopology,
-        device: impl Into<Option<ChannelLayout>>,
+        device: Option<&tutti_types::ChannelTopology>,
     ) -> Result<(), tutti_buffers::FoldError> {
         use tutti_buffers::{BufferError, FoldError};
         let width = usize::from(root.width().count());
@@ -2897,9 +2908,53 @@ impl Graph {
                     .unwrap_or(tutti_types::Speaker::Unassigned),
             });
         }
-        if let Some(device) = device.into() {
-            tutti_graph::fold_to_width(root, device)?;
+        if let Some(device) = device {
+            tutti_graph::fold_to_topology(root, device)?;
         }
+        Ok(())
+    }
+
+    /// What the engine takes the device of `device` channels to be, and
+    /// whether that was stated ([`place_device`](Self::place_device)). `None`
+    /// before an engine is built over this graph.
+    pub(crate) fn output_placement(
+        &self,
+        device: ChannelLayout,
+    ) -> Option<tutti_engine::OutputPlacement> {
+        self.output.as_ref()?.device(device)
+    }
+
+    /// What the device of `device` channels is for a fold: what was stated for
+    /// it, else the engine's order for its width.
+    pub(crate) fn device_topology(&self, device: ChannelLayout) -> tutti_types::ChannelTopology {
+        self.output
+            .as_ref()
+            .and_then(|o| o.device(device))
+            .map_or_else(
+                || tutti_types::ChannelTopology::assumed(device),
+                |placed| placed.topology,
+            )
+    }
+
+    /// Places the output device the engine renders into: `device` channels,
+    /// stated as `topology` when the caller knows its wiring and otherwise the
+    /// engine's order for the width. The roots published so far are folded into
+    /// it. A graph with no engine has no device to place.
+    ///
+    /// # Errors
+    ///
+    /// The [`FoldError`](tutti_buffers::FoldError) when the device has no
+    /// channels or `topology` is not its width. Nothing is changed.
+    pub(crate) fn place_device(
+        &mut self,
+        device: ChannelLayout,
+        topology: Option<tutti_types::ChannelTopology>,
+    ) -> Result<(), tutti_buffers::FoldError> {
+        if let Some(output) = &self.output {
+            output.support(device)?;
+            output.state_device(device, topology)?;
+        }
+        self.device = Some(device);
         Ok(())
     }
 
@@ -2908,32 +2963,41 @@ impl Graph {
         root: Option<tutti_types::ChannelTopology>,
         device: Option<ChannelLayout>,
     ) -> Result<(), tutti_buffers::FoldError> {
+        let placed = device.map(|d| self.device_topology(d));
         let width = match &root {
             Some(root) => {
-                Self::check_root(root, device)?;
+                Self::check_root(root, placed.as_ref())?;
                 usize::from(root.width().count())
             }
             None => {
-                if let Some(device) = device {
+                if let Some(placed) = &placed {
                     let outputs = self.outputs();
                     let width = ChannelLayout::try_from(outputs).map_err(|_| {
                         tutti_buffers::FoldError::from(tutti_buffers::BufferError::TooWide {
                             channels: outputs,
                         })
                     })?;
-                    tutti_graph::fold_to_width(
+                    tutti_graph::fold_to_topology(
                         &tutti_types::ChannelTopology::assumed(width),
-                        device,
+                        placed,
                     )?;
                 }
                 self.outputs()
             }
         };
-        // The engine first: it checks the device again, and a refusal there
-        // leaves the graph as it was.
-        if let (Some(output), Some(device)) = (&self.output, device) {
-            output.declare_root(root.clone(), device)?;
-        }
+        // A changed declaration is the next root: its folds are published
+        // first, so the commit that carries its id finds them. The engine
+        // checks the device again, and a refusal there leaves the graph as it
+        // was.
+        let next = if root == self.root {
+            None
+        } else {
+            let id = self.editor.spec().root_id.next();
+            if let (Some(output), Some(device)) = (&self.output, device) {
+                output.publish_root(id, root.clone(), device)?;
+            }
+            Some(id)
+        };
         // The bus form of the declaration; `check_root` held it to
         // `MAX_CHANNELS`, which is a bus's width.
         let bus = root
@@ -2945,6 +3009,10 @@ impl Graph {
             // The root's bus edges fold to the new topology at the next
             // commit.
             self.edited |= !spec.root_sources.is_empty();
+        }
+        if let Some(id) = next {
+            spec.root_id = id;
+            self.edited = true;
         }
         self.root = root;
         self.widen_refusal = None;
@@ -3084,6 +3152,9 @@ impl Graph {
 
     /// `Editor::commit`. `Sent` clears the edit flag; `Refused` and `Retry` keep it.
     pub(crate) fn commit(&mut self) -> Committed {
+        if let Some(refused) = self.unplaceable() {
+            return Committed::Refused(refused);
+        }
         match self.editor.commit() {
             Ok(()) => {
                 self.edited = false;
@@ -3097,6 +3168,22 @@ impl Graph {
             // make the same spec compile.
             Err(e) => Committed::Refused(e),
         }
+    }
+
+    /// The refusal for a spec whose root has no fold into the device: the
+    /// engine would render that plan as a silent, counted block. A commit
+    /// names the pair, and nothing is sent.
+    fn unplaceable(&self) -> Option<CommitError> {
+        let (output, device) = (self.output.as_ref()?, self.device?);
+        let spec = self.editor.spec();
+        let width = spec.topology.outputs.len();
+        (width > 0 && !output.has_fold(spec.root_id, width, device)).then_some(
+            CommitError::Unplaceable {
+                root: spec.root_id,
+                width,
+                device,
+            },
+        )
     }
 
     /// Whether `e` differs from the refusal reported last since a commit was

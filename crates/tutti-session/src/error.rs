@@ -428,6 +428,24 @@ pub enum Error {
     #[error("the graph root cannot be placed on the output: {0}")]
     Output(#[from] tutti_buffers::FoldError),
 
+    /// The graph root has no place on the output device a restart opened: the
+    /// root in force at `width` channels has no fold into the device's
+    /// `device` channels as they are stated or assumed (a root with a channel
+    /// no speaker names, or one wider than a device where either width has no
+    /// order). Nothing moved, and the stream is left stopped
+    /// ([`LiveSession::restart`](crate::LiveSession::restart)).
+    #[error("root {root} ({width:?} wide) has no place on a {device:?} device: {source}")]
+    Unplaceable {
+        /// The root generation in force.
+        root: tutti_graph::RootId,
+        /// The root's channels.
+        width: tutti_types::ChannelLayout,
+        /// The device's channels.
+        device: tutti_types::ChannelLayout,
+        /// Why the fold is refused.
+        source: tutti_buffers::FoldError,
+    },
+
     /// An inlet refused its producer's ring ([`Graph::add_inlet`](crate::Graph::add_inlet)).
     #[error(transparent)]
     Inlet(#[from] InletError),

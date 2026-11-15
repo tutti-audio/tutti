@@ -688,6 +688,20 @@ impl Session {
         self.graph.root_topology()
     }
 
+    /// What the output device's channels are as the session folds the root
+    /// into them, and whether that was
+    /// [`Stated`](tutti_types::Placement::Stated)
+    /// ([`SessionBuilder::device_topology`](crate::SessionBuilder::device_topology),
+    /// [`DeviceRestart::topology`](crate::DeviceRestart::topology)) or
+    /// [`Assumed`](tutti_types::Placement::Assumed) from the device's width
+    /// alone ([`ChannelTopology::assumed`]). `None` for a session with no
+    /// engine (a detached one).
+    #[must_use]
+    pub fn output_device(&self) -> Option<crate::OutputPlacement> {
+        let (_, layout) = self.heard.as_ref()?;
+        self.graph.output_placement(*layout)
+    }
+
     /// Runs every phase in [`PHASES`] order at `Instant::now()` with the
     /// session's own declarations, and returns what it found.
     ///

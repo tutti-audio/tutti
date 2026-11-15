@@ -846,10 +846,84 @@ fn a_restart_onto_a_device_that_cannot_place_the_declared_root_is_refused() {
             &refused,
             Err(e) if matches!(
                 e.error(),
-                tutti_session::Error::Output(tutti_buffers::FoldError::Unplaced { channel: 2, .. })
+                tutti_session::Error::Unplaceable {
+                    device,
+                    source: tutti_buffers::FoldError::Unplaced { channel: 2, .. },
+                    ..
+                } if device.count() == 2
             )
         ),
         "{refused:?}"
+    );
+}
+
+/// A restart takes what its own request states about the new device: the
+/// session reads `Stated` after a restart that says how the device is wired
+/// and `Assumed` after one that does not (another device is wired another
+/// way), and a statement that is not the new device's width is refused before
+/// the graph moves.
+#[test]
+fn a_restart_states_or_assumes_the_new_devices_placement() {
+    use tutti_types::{Bed, Placement};
+    let six = OutputSpec::new(
+        SampleRate::SR_48K,
+        ChannelLayout::from(6u16),
+        tutti_buffers::SampleFormat::F32,
+    );
+    let (driver, _stream) = ManualStreamDriver::new();
+    let (mut session, mut device) = Session::builder()
+        .device(Default::default())
+        .build_device_on(spec_at(48_000.0), driver)
+        .unwrap()
+        .into_parts();
+    assert_eq!(
+        session.output_device().map(|d| d.placement),
+        Some(Placement::Assumed)
+    );
+
+    let (driver, _new) = ManualStreamDriver::new();
+    let wired = Bed::Surround51.topology();
+    session
+        .restart_on_placed(&mut device, six.clone(), driver, None, Some(wired.clone()))
+        .unwrap();
+    let placed = session.output_device().unwrap();
+    assert_eq!(
+        (placed.placement, placed.topology),
+        (Placement::Stated, wired)
+    );
+
+    // A statement of the wrong width is refused, and the old one stands.
+    let (driver, _new) = ManualStreamDriver::new();
+    let refused = session.restart_on_placed(
+        &mut device,
+        six.clone(),
+        driver,
+        None,
+        Some(Bed::Stereo.topology()),
+    );
+    assert!(
+        matches!(
+            &refused,
+            Err(e) if matches!(
+                e.error(),
+                tutti_session::Error::Output(tutti_buffers::FoldError::Buffer(
+                    tutti_buffers::BufferError::WidthMismatch { .. }
+                ))
+            )
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(
+        session.output_device().map(|d| d.placement),
+        Some(Placement::Stated)
+    );
+
+    // The same width again with nothing stated: assumed again.
+    let (driver, _new) = ManualStreamDriver::new();
+    session.restart_on(&mut device, six, driver, None).unwrap();
+    assert_eq!(
+        session.output_device().map(|d| d.placement),
+        Some(Placement::Assumed)
     );
 }
 
