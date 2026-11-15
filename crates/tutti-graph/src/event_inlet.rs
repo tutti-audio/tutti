@@ -62,9 +62,9 @@
 //!
 //! # One producer
 //!
-//! The ring is `tutti_rt::Ring`, single-producer and single-consumer, so the writer
-//! is `Send` and is not `Clone`; two producers are two inlets, and the graph's
-//! event fan-in merges them in source order:
+//! The ring is `tutti_rt::ring`, single-producer and single-consumer, so the
+//! writer is `Send` and is not `Clone`; two producers are two inlets, and the
+//! graph's event fan-in merges them in source order:
 //!
 //! ```compile_fail
 //! fn second_producer(writer: &tutti_graph::EventInletWriter) -> tutti_graph::EventInletWriter {
@@ -94,7 +94,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytemuck::{Pod, Zeroable};
-use tutti_rt::{Counter, Overflow, Ring, RingReader, RingWriter, SeqReader, SeqWriter};
+use tutti_rt::{Counter, Overflow, PushError, RingReader, RingWriter, SeqReader, SeqWriter, ring};
 use tutti_types::{At, Frame, Moment, SampleRate};
 use tutti_ump::Ump;
 
@@ -108,15 +108,18 @@ use crate::time::Due;
 
 /// Why [`EventInletWriter::push`] did not queue.
 ///
-/// One variant: a stamp cannot name a beat any more, so the ring being full is
-/// the only way left. It stays an enum so the reason reads at the call site
-/// (`Err(Refused::Full)`).
+/// A stamp cannot name a beat any more, so a full ring, or a node that is gone,
+/// are the only ways left.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum Refused {
     /// The ring is full: the event was dropped and counted
     /// ([`Losses::lost`]).
     #[error("the event inlet's ring is full")]
     Full,
+    /// The node was dropped: the event was dropped and nothing counts it,
+    /// and every later push fails the same way.
+    #[error("the event inlet's node is gone")]
+    Disconnected,
 }
 
 /// When a pushed event is due, as the producer names it.
@@ -261,7 +264,9 @@ impl EventInletWriter {
     ///
     /// [`Refused::Full`] when the ring is full (the event is dropped and
     /// counted in [`Losses::lost`]; dropping a note-off whose note-on landed
-    /// leaves a note stuck, so a caller must report it).
+    /// leaves a note stuck, so a caller must report it);
+    /// [`Refused::Disconnected`] once the node is dropped (not counted: the
+    /// event had nowhere to go, now or later).
     pub fn push(&mut self, at: impl Into<Stamp>, ump: impl Into<Ump>) -> Result<(), Refused> {
         let ump = ump.into();
         let when = match at.into() {
@@ -272,10 +277,13 @@ impl EventInletWriter {
                 rate: m.rate().get(),
             },
         };
-        // The ring counts a full refusal; a node that is gone refuses too, uncounted.
+        // The ring counts a full refusal; a node that is gone refuses uncounted.
         self.ring
             .push(Pushed { when, ump })
-            .map_err(|_| Refused::Full)
+            .map_err(|refused| match refused.error {
+                PushError::Full => Refused::Full,
+                PushError::Disconnected => Refused::Disconnected,
+            })
     }
 
     /// Queues every `(stamp, ump)` in order, each as [`push`](Self::push)
@@ -424,7 +432,7 @@ impl EventInletNode {
     /// capacity are all `capacity` events. Allocates; control side.
     #[must_use = "the writer is the only way to fill the ring"]
     pub fn pair(capacity: EventCapacity) -> (Self, EventInletWriter) {
-        let (producer, consumer) = Ring::<Pushed>::pair(capacity.slots(), Overflow::DropNewest);
+        let (producer, consumer) = ring::<Pushed>(capacity.slots(), Overflow::DropNewest);
         let counts = Arc::new(Counts::default());
         let clock = SeqWriter::new();
         let writer = EventInletWriter {

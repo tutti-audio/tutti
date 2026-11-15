@@ -28,11 +28,12 @@
 //! (`tutti-session`'s `Graph::reopen_event_taps`), and one reader's frames are
 //! always on one scale.
 //!
-//! The ring is `tutti_rt::Ring`, the one single-producer, single-consumer
-//! queue, as the editor-to-executor queue is. The producer is owned by the executor (it rides a commit in, as
-//! an audio tap's does), the consumer by the caller, so the audio thread takes
-//! no lock and frees nothing: a producer left behind by a plan that no longer
-//! names it is retired with the old state, on the control side.
+//! The ring is `tutti_rt::ring`, the one single-producer, single-consumer
+//! queue, as the editor-to-executor queue is. The producer is owned by the
+//! executor (it rides a commit in, as an audio tap's does), the consumer by the
+//! caller, so the audio thread takes no lock and frees nothing: a producer left
+//! behind by a plan that no longer names it is retired with the old state, on
+//! the control side.
 //!
 //! Dropping the [`EventTapReader`] first is safe. The tap then finds no reader
 //! and writes nothing, and the ring is freed with the writer when the tap is
@@ -45,7 +46,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use tutti_rt::RtScope;
-use tutti_rt::{Overflow, Ring, RingReader, RingWriter};
+use tutti_rt::{Overflow, RingReader, RingWriter, ring};
 use tutti_types::{Frame, SampleRate};
 use tutti_ump::Ump;
 
@@ -193,7 +194,7 @@ impl EventTapReader {
     ) -> (Self, EventTapWriter) {
         let capacity = capacity.slots();
         let lost = Arc::new(AtomicU64::new(0));
-        let (prod, cons) = Ring::<TapEvent>::pair(note_off_room(capacity), Overflow::Refuse);
+        let (prod, cons) = ring::<TapEvent>(note_off_room(capacity), Overflow::Refuse);
         let reader = Self {
             id,
             ring: cons,

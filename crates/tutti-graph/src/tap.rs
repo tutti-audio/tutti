@@ -15,11 +15,12 @@
 //! once the plan without it is the one running, its [`FaultLatch`] is raised
 //! ([`TapReader::source_gone`], [`Pull::Ended`] after the ring is drained).
 //!
-//! The ring each lane writes is `tutti_rt::Ring`, the one single-producer,
-//! single-consumer queue, as the editor-to-executor queue is. The producer is owned by the executor (it rides
-//! a commit in, like a unit), the consumer by the caller, so the audio thread
-//! takes no lock and frees nothing: a producer left behind by a plan that no
-//! longer names it is retired with the old state, on the control side.
+//! The ring each lane writes is `tutti_rt::ring`, the one single-producer,
+//! single-consumer queue, as the editor-to-executor queue is. The producer is
+//! owned by the executor (it rides a commit in, like a unit), the consumer by
+//! the caller, so the audio thread takes no lock and frees nothing: a producer
+//! left behind by a plan that no longer names it is retired with the old
+//! state, on the control side.
 //!
 //! The lanes of a tap are written together by one op and read by whole
 //! frames, so they cannot tear: frame `n` of every lane is the same frame,
@@ -37,7 +38,7 @@ use std::sync::{Arc, Weak};
 use crate::TapId;
 use tutti_buffers::{InterleavedMut, Pull, Source};
 use tutti_rt::{FaultLatch, RtScope};
-use tutti_rt::{Overflow, Ring, RingReader, RingWriter};
+use tutti_rt::{Overflow, RingReader, RingWriter, ring};
 use tutti_types::{ChannelLayout, Frame, Samples};
 
 use crate::slots::AudioSlots;
@@ -124,13 +125,14 @@ impl TapWriter {
             self.note(start, take);
         }
         for (channel, lane) in self.lanes.iter_mut().enumerate() {
-            let pushed = block
-                .iter()
-                .skip(channel)
-                .step_by(width)
-                .take(take)
-                .filter(|&&sample| lane.push(sample).is_ok())
-                .count();
+            let pushed = lane.push_iter(
+                block
+                    .iter()
+                    .skip(channel)
+                    .step_by(width)
+                    .copied()
+                    .take(take),
+            );
             // A reader dropped since the check above refuses its pushes.
             debug_assert!(
                 pushed == take || lane.is_disconnected(),
@@ -258,10 +260,9 @@ impl TapReader {
     pub fn pair(id: TapId, width: usize, capacity: Samples) -> (Self, TapWriter) {
         let lost = Arc::new(AtomicU64::new(0));
         let end = Arc::new(FaultLatch::new());
-        let (run_prod, run_cons) =
-            Ring::<Run>::pair(capacity.get().clamp(1, MAX_RUNS), Overflow::Refuse);
+        let (run_prod, run_cons) = ring::<Run>(capacity.get().clamp(1, MAX_RUNS), Overflow::Refuse);
         let (cons, prods): (Vec<_>, Vec<_>) = (0..width)
-            .map(|_| Ring::<f32>::pair(capacity.get().max(1), Overflow::Refuse))
+            .map(|_| ring::<f32>(capacity.get().max(1), Overflow::Refuse))
             .map(|(prod, cons)| (cons, prod))
             .unzip();
         let reader = Self {
@@ -345,13 +346,12 @@ impl TapReader {
         }
         let frames = self.available().get().min(out.len() / width);
         for (channel, lane) in self.lanes.iter_mut().enumerate() {
-            let slots = out[..frames * width]
-                .iter_mut()
-                .skip(channel)
-                .step_by(width);
-            for (slot, sample) in slots.zip(lane.drain()) {
-                *slot = sample;
-            }
+            let plane = &mut out[..frames * width];
+            let mut at = channel;
+            lane.pop_each(frames, |sample| {
+                plane[at] = sample;
+                at += width;
+            });
         }
         self.consume(frames);
         Samples(frames)

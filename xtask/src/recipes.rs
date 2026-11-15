@@ -833,6 +833,7 @@ const LOOM: &[&str] = &[
 const BENCH: &[&str] = &[
     r#"cargo bench --locked -p tutti-nodes     --bench engine_render"#,
     r#"cargo bench --locked -p tutti-graph     --bench graph_render"#,
+    r#"cargo bench --locked -p tutti-graph     --bench tap_lanes"#,
     r#"cargo bench --locked -p tutti-cpal      --bench audio_callback"#,
     r#"cargo bench --locked -p tutti-export    --bench offline_render"#,
     r#"cargo bench --locked -p tutti-polysynth --bench polysynth"#,

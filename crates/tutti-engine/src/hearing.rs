@@ -12,7 +12,7 @@
 //!
 //! # The hand-over
 //!
-//! The writer reaches the audio thread over a bounded `tutti_rt::Ring` of boxed
+//! The writer reaches the audio thread over a bounded `tutti_rt::ring` of boxed
 //! writers (the editor-to-executor pattern). The audio thread pops installs
 //! at the start of each call, and the writer it replaces goes back over a
 //! second queue to be freed on the control side: the audio thread never
@@ -34,7 +34,7 @@ use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use tutti_graph::TapId;
 use tutti_graph::{TapReader, TapWriter};
-use tutti_rt::{Overflow, PushError, Ring, RingReader, RingWriter};
+use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
 use tutti_types::{ChannelLayout, Samples};
 
 /// Opens that can be in flight at once. The install queue holds one more: a
@@ -141,10 +141,10 @@ pub(crate) struct Hearing {
 
 /// A linked pair, built with the engine.
 pub(crate) fn link() -> (HeardTaps, Hearing) {
-    let (install_tx, install_rx) = Ring::<Install>::pair(INSTALLS + 1, Overflow::Refuse);
+    let (install_tx, install_rx) = ring::<Install>(INSTALLS + 1, Overflow::Refuse);
     // A retired writer waits here for the control side; this holds every
     // install that can be in flight and the live one.
-    let (retire_tx, retire_rx) = Ring::<Box<TapWriter>>::pair(INSTALLS + 3, Overflow::Refuse);
+    let (retire_tx, retire_rx) = ring::<Box<TapWriter>>(INSTALLS + 3, Overflow::Refuse);
     (
         HeardTaps(Arc::new(Mutex::new(Control {
             install: install_tx,
@@ -248,7 +248,10 @@ impl Hearing {
             if let Some(old) = std::mem::replace(&mut self.writer, install)
                 && let Err(old) = self.retire.push(old)
             {
-                // Unreachable: the vacancy was checked above.
+                // Full cannot happen (the vacancy was checked above). The
+                // retire ring's reader is the control side's `HeardTaps`: if
+                // it was dropped, nothing will free the writer, and it is
+                // leaked rather than freed on the audio thread.
                 std::mem::forget(old);
             }
         }

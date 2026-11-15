@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
 use tutti_rt::RtScope;
-use tutti_rt::{Overflow, PushError, Ring, RingReader, RingWriter};
+use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
 
 use super::state::{State, Unit};
 use super::{EDGE_FADE_CAPACITY, FADE_CAPACITY, QUEUE_CAPACITY};
@@ -451,14 +451,14 @@ pub(crate) struct ExecutorEnds {
 
 /// Build the rings: the editor's ends and the executor's.
 pub(crate) fn channels() -> (Channels, ExecutorEnds) {
-    let (tx, rx) = Ring::<Box<Commit>>::pair(QUEUE_CAPACITY, Overflow::Refuse);
-    let (back_tx, back_rx) = Ring::<Box<Commit>>::pair(QUEUE_CAPACITY + 1, Overflow::Refuse);
-    let (fade_tx, fade_rx) = Ring::<Box<Crossfade>>::pair(FADE_CAPACITY, Overflow::Refuse);
+    let (tx, rx) = ring::<Box<Commit>>(QUEUE_CAPACITY, Overflow::Refuse);
+    let (back_tx, back_rx) = ring::<Box<Commit>>(QUEUE_CAPACITY + 1, Overflow::Refuse);
+    let (fade_tx, fade_rx) = ring::<Box<Crossfade>>(FADE_CAPACITY, Overflow::Refuse);
     let play = Arc::new(AtomicU64::new(0));
     let unreported = Arc::new(AtomicU64::new(0));
-    let (loss_tx, loss_rx) = Ring::<EventLoss>::pair(crate::loss::RING_CAPACITY, Overflow::Refuse);
+    let (loss_tx, loss_rx) = ring::<EventLoss>(crate::loss::RING_CAPACITY, Overflow::Refuse);
     let (fade_end_tx, fade_end_rx) =
-        Ring::<(EdgeId, EdgeFade)>::pair(EDGE_FADE_CAPACITY, Overflow::Refuse);
+        ring::<(EdgeId, EdgeFade)>(EDGE_FADE_CAPACITY, Overflow::Refuse);
     (
         Channels {
             to_executor: tx,

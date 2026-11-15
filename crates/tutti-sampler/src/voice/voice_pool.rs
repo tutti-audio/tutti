@@ -2390,12 +2390,10 @@ fn send_builds_the_stretch_filter_not_the_drain() {
     // is the only observation that can: after draining, a filter is present
     // either way.
     let peeked = {
-        let (probe_tx, mut probe_rx) = tutti_rt::Ring::pair(4, tutti_rt::Overflow::Refuse);
+        let (probe_tx, mut probe_rx) = tutti_rt::ring(4, tutti_rt::Overflow::Refuse);
         let probe = VoicePoolHandle {
             tx: Arc::new(Mutex::new(probe_tx)),
-            retired: Arc::new(Mutex::new(
-                tutti_rt::Ring::pair(0, tutti_rt::Overflow::Refuse).1,
-            )),
+            retired: Arc::new(Mutex::new(tutti_rt::ring(0, tutti_rt::Overflow::Refuse).1)),
             channels: ChannelLayout::from(6u16),
             rate: SharedRate::new(SampleRate::SR_44K1),
             counters: Default::default(),

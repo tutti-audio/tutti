@@ -87,7 +87,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use tutti_rt::{Overflow, PushError, Ring, RingReader, RingWriter};
+use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
 use tutti_types::{At, Latency};
 
 use crate::event::{Event, EventKind, merge_into};
@@ -258,8 +258,8 @@ impl CommandTx {
 
 /// Build the command ring pair.
 pub(crate) fn command_channel() -> (CommandTx, CommandRx) {
-    let (tx, rx) = Ring::<Scheduled>::pair(COMMAND_CAPACITY, Overflow::Refuse);
-    let (cancel_tx, cancel_rx) = Ring::<Cancel>::pair(CANCEL_CAPACITY, Overflow::Refuse);
+    let (tx, rx) = ring::<Scheduled>(COMMAND_CAPACITY, Overflow::Refuse);
+    let (cancel_tx, cancel_rx) = ring::<Cancel>(CANCEL_CAPACITY, Overflow::Refuse);
     let done = Arc::new(AtomicU64::new(0));
     (
         CommandTx {
