@@ -203,6 +203,46 @@ impl TryFrom<u16> for UnitParam {
     }
 }
 
+impl UnitParam {
+    /// Whether the param's value lives on a circle rather than a line:
+    /// only [`Azimuth`](Self::Azimuth) is. A circular param is wrapped, never
+    /// clamped, and a move between two of its values takes the short arc
+    /// ([`arc`](Self::arc)); the other params, [`Elevation`](Self::Elevation)
+    /// included, are a line.
+    #[inline]
+    #[must_use]
+    pub const fn is_circular(self) -> bool {
+        matches!(self, Self::Azimuth)
+    }
+
+    /// `value` as this param holds it: wrapped onto the circle
+    /// ([`Azimuth::wrap`]'s `-180..180`) for a circular param, `value`
+    /// itself for a line.
+    #[inline]
+    #[must_use]
+    pub fn wrap(self, value: f32) -> f32 {
+        if self.is_circular() {
+            Azimuth(value).wrap().0
+        } else {
+            value
+        }
+    }
+
+    /// The signed move from `from` to `to`: the short arc
+    /// ([`Azimuth::shortest_arc_to`]) for a circular param, `to - from` for
+    /// a line. `wrap(from + arc(from, to) * t)` is the value `t` of the way
+    /// along a move between them.
+    #[inline]
+    #[must_use]
+    pub fn arc(self, from: f32, to: f32) -> f32 {
+        if self.is_circular() {
+            Azimuth(from).shortest_arc_to(Azimuth(to)).0
+        } else {
+            to - from
+        }
+    }
+}
+
 impl From<UnitParam> for u16 {
     #[inline]
     fn from(p: UnitParam) -> u16 {
@@ -642,6 +682,32 @@ mod tests {
         let before = ids.len();
         ids.dedup();
         assert_eq!(ids.len(), before, "a UnitParam is keyed twice: {reg:?}");
+    }
+
+    /// Only the bearing is circular; the height and the other widths are a line.
+    #[test]
+    fn only_azimuth_is_circular() {
+        for id in (0..=35u16).filter(|&id| id != 21) {
+            let p = UnitParam::try_from(id).expect("known id");
+            assert_eq!(p.is_circular(), p == UnitParam::Azimuth, "{p:?}");
+        }
+    }
+
+    /// A circular param's arc from 170 to -170 is +20, through the seam, and
+    /// wraps a move's value onto `-180..180`; a line's is the plain difference.
+    #[test]
+    fn a_circular_params_arc_crosses_the_seam_and_a_lines_does_not() {
+        let az = UnitParam::Azimuth;
+        assert_eq!(az.arc(170.0, -170.0), 20.0);
+        assert_eq!(az.arc(-170.0, 170.0), -20.0);
+        assert_eq!(az.wrap(190.0), -170.0);
+        assert_eq!(
+            az.wrap(az.wrap(170.0) + az.arc(170.0, -170.0) * 0.5),
+            -180.0
+        );
+        let el = UnitParam::Elevation;
+        assert_eq!(el.arc(170.0, -170.0), -340.0);
+        assert_eq!(el.wrap(190.0), 190.0);
     }
 
     #[test]
