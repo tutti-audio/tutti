@@ -711,7 +711,7 @@ mod tests {
 
     /// M2-104 section 7.4.5: with D and S the Detach is first, so the current
     /// note is not reset (it keeps its values) and the next starts at defaults.
-    /// Spec: m2-104/7.4.5#2, m2-104/7.4.5#4, m2-104/7.4.5#5
+    /// Spec: m2-104/7.4.5#2, m2-104/7.4.5#4, m2-104/7.4.5#5, m2-104/c.3#2
     #[test]
     fn detach_and_reset_together_leave_the_note_and_default_the_next() {
         let mut s = state();
@@ -772,7 +772,9 @@ mod tests {
     }
 
     /// M2-104 section 7.4.15.3: Attribute Pitch 7.9 is that note's pitch, and
-    /// is not valid for any subsequent Notes.
+    /// is not valid for any subsequent Notes. The note number is an index: the
+    /// pitch is the attribute's whole, an integer part on the semitone scale.
+    /// Spec: m2-104/7.4.14#11, m2-104/7.4.15.3#1, m2-104/7.4.15.3#2
     #[test]
     fn an_attribute_pitch_is_for_that_note_alone() {
         let mut s = state();
@@ -783,6 +785,21 @@ mod tests {
         let id = started(&e);
         assert_eq!(e.last(), Some(&pitch_event(id, 0, 60)));
         assert_eq!(start(&mut s, a, 0).len(), 1, "the key's");
+    }
+
+    /// M2-104 section 7.4.14: the data of a Profile Specific attribute is the
+    /// Profile's, and a device that does not know the Profile ignores it: a
+    /// note with one is at its key, with no pitch of the attribute's.
+    /// Spec: m2-104/7.4.14#6
+    #[test]
+    fn a_profile_attribute_is_ignored() {
+        let mut s = state();
+        let a = at(0, 0);
+        let e = s
+            .start(a, NoteNumber::of(5), Attribute::Profile(60 << 9))
+            .to_vec();
+        assert_eq!(e.len(), 1, "a start and no pitch: {e:?}");
+        started(&e);
     }
 
     /// M2-104 section 7.4.5: a controller addresses the Note Number on the
@@ -895,6 +912,7 @@ mod tests {
     /// M2-104 section 7.4.15.2: Per-Note Pitch Bend acts as an offset from the
     /// pitch set by Registered Per-Note Controller #3. A pitch told to a live
     /// note and then a bend sounds as their sum.
+    /// Spec: m2-104/7.4.15.2#1
     #[test]
     fn a_pitch_then_a_bend_sounds_as_the_sum() {
         let mut s = state();
@@ -907,6 +925,21 @@ mod tests {
         let e = bend(&mut s, a, 5, 0xC000_0000);
         assert!(matches!(e[..], [NoteEvent::Control { id: i, .. }] if i == id));
         assert!((sounding(&e[0]) - 84.5).abs() < 1e-4, "{e:?}");
+    }
+
+    /// A Pitch 7.25 keeps at least nine fractional bits: each of the 512
+    /// steps of a semitone's fraction sounds as itself.
+    /// Spec: m2-104/7.4.15.2#2
+    #[test]
+    fn a_pitch_keeps_nine_fractional_bits() {
+        let mut s = state();
+        let a = at(0, 0);
+        start(&mut s, a, 5);
+        for step in (1..512u32).step_by(7) {
+            let e = pitch_of(&mut s, a, 5, PITCH_60 + (step << 16));
+            let want = 60.0 + step as f32 / 512.0;
+            assert!((sounding(&e[0]) - want).abs() < 1e-5, "{step}: {e:?}");
+        }
     }
 
     /// The same two messages in the other order sound the same: the sum does
@@ -927,6 +960,7 @@ mod tests {
 
     /// M2-104 section 7.4.15.3: Per-Note Pitch Bend offsets from the Attribute
     /// Pitch, and the attribute wins over the number's held Pitch 7.25.
+    /// Spec: m2-104/c.3#1
     #[test]
     fn an_attribute_pitch_plus_a_later_bend() {
         let mut s = state();
