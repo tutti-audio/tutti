@@ -418,7 +418,7 @@ pub enum RootTopologyStatus {
 /// session.render(&mut InterleavedMut::new(&mut block, ChannelLayout::MONO).unwrap());
 /// assert!(block.iter().all(|&s| s == 0.5));
 /// ```
-#[must_use = "dropping a session on a real-time clock stops its stream"]
+#[must_use = "dropping a session ends it, and on a real-time clock stops its stream"]
 #[derive(Debug)]
 pub struct Session<C: Clock = Offline> {
     /// What runs the blocks (the clock's [`Running`](Clock::Running)). First,
@@ -478,12 +478,6 @@ pub struct Session<C: Clock = Offline> {
     pub(crate) sampler_opens: tutti_types::Mint,
     /// The count of the stream's faults the last poll saw.
     pub(crate) faults_seen: u64,
-    /// The device watch, and what restarts reported since the
-    /// last poll.
-    #[cfg(feature = "device")]
-    pub(crate) device_watch: Option<crate::DeviceWatch>,
-    #[cfg(feature = "device")]
-    pub(crate) device_events: Vec<SessionEvent>,
     /// The one-shot listing of the output devices, until it answers.
     #[cfg(feature = "device")]
     pub(crate) output_listing: Option<crate::watch::OutputListing>,
@@ -547,8 +541,8 @@ impl<C: Clock> Drop for Session<C> {
 impl Session<Offline> {
     /// A builder with the defaults: offline, 48 kHz, stereo, blocks of up to
     /// [`LIVE_MAX_BLOCK`](crate::LIVE_MAX_BLOCK) frames
-    /// ([`SessionBuilder`](crate::SessionBuilder) has the options and the
-    /// device state).
+    /// ([`SessionBuilder`](crate::SessionBuilder) has the options, and the
+    /// other clocks).
     pub fn builder() -> crate::SessionBuilder<crate::Offline> {
         crate::SessionBuilder::default()
     }
@@ -610,10 +604,12 @@ impl<C: RealTime> Session<C> {
     /// failed, a device unplugged, a callback that panicked, a timer that fell
     /// more than four blocks behind and began its schedule again. The same
     /// handle for the session's life; [`update`](Self::update) reports each new
-    /// fault as [`SessionEvent::Fault`].
+    /// fault as [`SessionEvent::Fault`] and takes its message from the record
+    /// ([`StreamFaults::take_last`](tutti_engine::StreamFaults::take_last)), so
+    /// [`count`](tutti_engine::StreamFaults::count) is the lasting reading.
     #[must_use]
     pub fn faults(&self) -> Arc<tutti_engine::StreamFaults> {
-        C::output_stream(&self.running).faults()
+        crate::clock::sealed::Streaming::output_stream(&self.running).faults()
     }
 }
 
@@ -897,10 +893,8 @@ impl<C: Clock> Session<C> {
                     }
                 }
                 let lost = self.fault_poll(out);
-                #[cfg(feature = "device")]
-                self.device_poll(cx.now, lost, out);
-                #[cfg(not(feature = "device"))]
-                let _ = lost;
+                self.listing_poll(cx.now, out);
+                crate::clock::sealed::Running::poll(&mut self.running, cx.now, lost, out);
             }
             Phase::Reclaim => {
                 // Any thread that owns the session: what it frees is
@@ -1134,8 +1128,13 @@ impl<C: Clock> Session<C> {
 
     /// Reports the newest fault the stream raised since the last poll, if the
     /// clock has a stream. Whether the stream was lost: its device left.
+    ///
+    /// The message is *taken* from the record: a fault is reported once, by
+    /// its own kind, and a later fault that only bumps the count (an overrun
+    /// the record keeps no message for beside a latched panic) is not read as
+    /// the old message again.
     fn fault_poll(&mut self, out: &mut Vec<SessionEvent>) -> bool {
-        let Some(stream) = C::stream(&self.running) else {
+        let Some(stream) = crate::clock::sealed::Running::stream(&self.running) else {
             return false;
         };
         let faults = stream.faults();
@@ -1144,7 +1143,7 @@ impl<C: Clock> Session<C> {
             return false;
         }
         self.faults_seen = count;
-        let Some(fault) = faults.last() else {
+        let Some(fault) = faults.take_last() else {
             return false;
         };
         let lost = fault.kind == tutti_engine::StreamFaultKind::Disconnected;

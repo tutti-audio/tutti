@@ -353,7 +353,7 @@ impl SessionBuilder<Offline> {
         let clock = engine.block_clock();
         let mut session = self.session(
             parts,
-            crate::OfflineEngine {
+            crate::clock::OfflineEngine {
                 engine: Some(engine),
             },
             true,
@@ -410,7 +410,7 @@ impl SessionBuilder<Offline> {
                 #[cfg(feature = "midi-hardware")]
                 device_events: None,
             },
-            crate::OfflineEngine { engine: None },
+            crate::clock::OfflineEngine { engine: None },
             false,
         )
     }
@@ -456,7 +456,7 @@ impl SessionBuilder<SystemClock> {
             Arc::new(tutti_engine::AudioCallbackState::new(engine)),
             tutti_engine::TimerDriver::new(),
         )?;
-        let mut session = self.session(parts, crate::SystemEngine { stream }, true)?;
+        let mut session = self.session(parts, crate::clock::SystemEngine { stream }, true)?;
         session.load = load;
         session.heard = Some((heard, layout));
         // The hardware out is timed by the session's one clock reader and the
@@ -540,7 +540,7 @@ impl SessionBuilder<crate::DeviceClock> {
         let mut engine = parts.graph.engine(&parts.transport)?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph, spec.channels)?;
-        let mut session = self.session(parts, crate::DeviceHandle::vacant(), true)?;
+        let mut session = self.session(parts, crate::device::DeviceHandle::vacant(), true)?;
         session.load = engine.take_load_meter();
         session.heard = Some((engine.heard_taps(), spec.channels));
         let clock = engine.block_clock();
@@ -963,10 +963,6 @@ impl<C: Clock> SessionBuilder<C> {
             #[cfg(feature = "sampler")]
             sampler_opens: tutti_types::Mint::new(),
             faults_seen: 0,
-            #[cfg(feature = "device")]
-            device_watch: None,
-            #[cfg(feature = "device")]
-            device_events: Vec::new(),
             #[cfg(feature = "device")]
             output_listing: None,
             #[cfg(feature = "device")]

@@ -36,28 +36,47 @@ use tutti_engine::{Engine, OutputStream};
 
 use crate::BlockConfig;
 
-mod sealed {
+pub(crate) mod sealed {
+    use std::time::Instant;
+
+    use tutti_engine::OutputStream;
+
+    use crate::SessionEvent;
+
     pub trait Sealed {}
+
+    /// What a clock's session holds to run its blocks, read by the session.
+    pub trait Running: std::fmt::Debug {
+        /// The stream that renders the blocks, if one does.
+        fn stream(&self) -> Option<&OutputStream> {
+            None
+        }
+
+        /// The clock's own share of `Phase::Poll`, after the stream's faults
+        /// were read (`lost`: the stream's device left).
+        fn poll(&mut self, _now: Instant, _lost: bool, _out: &mut Vec<SessionEvent>) {}
+    }
+
+    /// A [`Running`] with a stream, which a real-time clock holds.
+    pub trait Streaming: Running {
+        fn output_stream(&self) -> &OutputStream;
+    }
 }
 
 /// What runs a session's blocks: [`Offline`], `DeviceClock` (feature
 /// `device`) or [`SystemClock`]. Sealed.
 ///
 /// A clock is a zero-sized marker; its data is [`Config`](Self::Config) while
-/// the session is being built and [`Running`](Self::Running) once it is.
+/// the session is being built and `Running` once it is: the engine the app
+/// pulls, the device, or the timer's stream.
 pub trait Clock: sealed::Sealed + Sized + 'static {
     /// What a [`SessionBuilder`](crate::SessionBuilder) on this clock holds:
     /// the block sizes for a clock the session sets, the device selector for
     /// the sound card, which sets them itself.
     type Config: std::fmt::Debug;
-    /// What the built session holds to run its blocks: the engine the app
-    /// pulls, the device, or the timer's stream.
-    type Running: std::fmt::Debug;
-
-    /// The stream that renders this clock's blocks, if one does: its fault
-    /// record is the session's ([`RealTime`]).
+    /// What the built session holds to run its blocks.
     #[doc(hidden)]
-    fn stream(running: &Self::Running) -> Option<&OutputStream>;
+    type Running: sealed::Running;
 }
 
 /// A clock that runs blocks on its own: `DeviceClock` and [`SystemClock`].
@@ -65,12 +84,9 @@ pub trait Clock: sealed::Sealed + Sized + 'static {
 ///
 /// What both share is on `Session<C: RealTime>`: the stream's
 /// [`faults`](crate::Session::faults), which `Session::update` reports as
-/// [`SessionEvent::Fault`](crate::SessionEvent::Fault).
-pub trait RealTime: Clock {
-    /// The stream that renders this clock's blocks.
-    #[doc(hidden)]
-    fn output_stream(running: &Self::Running) -> &OutputStream;
-}
+/// [`SessionEvent::Fault`](crate::SessionEvent::Fault), and the listing of
+/// the host's output devices.
+pub trait RealTime: Clock<Running: sealed::Streaming> {}
 
 /// The clock of a session the app steps: the host pulls each block with
 /// [`Session::render`](crate::Session::render), from a game's or a plugin's own
@@ -114,40 +130,52 @@ pub struct SystemEngine {
 impl Clock for Offline {
     type Config = BlockConfig;
     type Running = OfflineEngine;
-
-    fn stream(_: &OfflineEngine) -> Option<&OutputStream> {
-        None
-    }
 }
+
+impl sealed::Running for OfflineEngine {}
 
 impl Clock for SystemClock {
     type Config = BlockConfig;
     type Running = SystemEngine;
+}
 
-    fn stream(running: &SystemEngine) -> Option<&OutputStream> {
-        Some(<Self as RealTime>::output_stream(running))
+impl RealTime for SystemClock {}
+
+impl sealed::Running for SystemEngine {
+    fn stream(&self) -> Option<&OutputStream> {
+        Some(&self.stream)
     }
 }
 
-impl RealTime for SystemClock {
-    fn output_stream(running: &SystemEngine) -> &OutputStream {
-        &running.stream
+impl sealed::Streaming for SystemEngine {
+    fn output_stream(&self) -> &OutputStream {
+        &self.stream
     }
 }
 
 #[cfg(feature = "device")]
 impl Clock for DeviceClock {
     type Config = tutti_cpal::DeviceSelector;
-    type Running = crate::DeviceHandle;
+    type Running = crate::device::DeviceHandle;
+}
 
-    fn stream(running: &crate::DeviceHandle) -> Option<&OutputStream> {
-        Some(<Self as RealTime>::output_stream(running))
+#[cfg(feature = "device")]
+impl RealTime for DeviceClock {}
+
+#[cfg(feature = "device")]
+impl sealed::Running for crate::device::DeviceHandle {
+    fn stream(&self) -> Option<&OutputStream> {
+        Some(self.device().output_stream())
+    }
+
+    fn poll(&mut self, now: std::time::Instant, lost: bool, out: &mut Vec<crate::SessionEvent>) {
+        self.poll_device(now, lost, out);
     }
 }
 
 #[cfg(feature = "device")]
-impl RealTime for DeviceClock {
-    fn output_stream(running: &crate::DeviceHandle) -> &OutputStream {
-        running.device().output_stream()
+impl sealed::Streaming for crate::device::DeviceHandle {
+    fn output_stream(&self) -> &OutputStream {
+        self.device().output_stream()
     }
 }

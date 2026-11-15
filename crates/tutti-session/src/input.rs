@@ -305,7 +305,7 @@ impl Inputs {
     }
 }
 
-impl<C: crate::Clock> Session<C> {
+impl Session<crate::DeviceClock> {
     /// Opens a capture input on the session's host and puts it in the graph:
     /// the capture stream ([`tutti_cpal::MicIn`]) and the inlet node that copies
     /// it in ([`Graph::add_inlet`](crate::Graph::add_inlet)), in one call. Wire
@@ -348,7 +348,8 @@ impl<C: crate::Clock> Session<C> {
             // The host removed the node: there is no input to keep.
             Err(Error::Crossfade(CrossfadeRefused::NoSuchNode(_))) => false,
             Err(error) => {
-                self.device_events
+                self.running
+                    .events
                     .push(SessionEvent::Device(DeviceEvent::InputReopenFailed {
                         input: Input { node: input.node },
                         error,

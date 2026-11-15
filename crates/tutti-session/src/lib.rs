@@ -8,8 +8,7 @@
 //! [`Session::render`]), `DeviceClock` (`device`: a sound card's callback; the
 //! `!Send` `Device` stays on the thread that opened it) or [`SystemClock`] (an
 //! OS timer thread, for an app that plays MIDI); a call a clock cannot serve
-//! is not a method of its session. A session built for a test can also be
-//! detached (the executor stays on this side). One call, [`Session::update`], runs the
+//! is not a method of its session. One call, [`Session::update`], runs the
 //! steps of a frame in [`PHASES`] order.
 //!
 //! ```
@@ -125,14 +124,11 @@ pub use bounce::{
 pub use builder::{BlockConfig, SessionBuilder, Workers, root_width};
 #[cfg(feature = "device")]
 pub use clock::DeviceClock;
-pub use clock::{
-    Clock, Offline, OfflineEngine, OfflineSession, RealTime, SystemClock, SystemEngine,
-    SystemSession,
-};
+pub use clock::{Clock, Offline, OfflineSession, RealTime, SystemClock, SystemSession};
 #[cfg(feature = "device")]
 pub use device::{
-    Device, DeviceEvent, DeviceHandle, DeviceLatency, DeviceRestart, DeviceRestarted, LiveSession,
-    RestartError, RestartOutcome,
+    Device, DeviceEvent, DeviceLatency, DeviceRestart, DeviceRestarted, LiveSession, RestartError,
+    RestartOutcome,
 };
 pub use edge::EdgeGainError;
 #[cfg(feature = "plugin")]

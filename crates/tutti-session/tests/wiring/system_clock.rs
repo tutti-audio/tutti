@@ -96,40 +96,75 @@ impl Node for AlwaysPanics {
 
 /// **A fault of the timer's stream reaches the app as a session event, as a
 /// device's does**: a node that panics on the timer thread is contained, and
-/// the next updates report `SessionEvent::Fault` of kind `CallbackPanicked`
-/// exactly once, the count `faults()` holds.
+/// the updates report `SessionEvent::Fault` of kind `CallbackPanicked`
+/// exactly once. Counted by kind: the timer may record `Overrun` faults of its
+/// own on a loaded machine, which are other events.
 #[test]
-fn a_panic_on_the_timer_thread_is_a_fault_event() {
+fn a_panic_on_the_timer_thread_is_reported_once_as_a_fault_event() {
     let mut system = system();
     let (node, _) = system.graph().add(ForkByClone(AlwaysPanics));
     system
         .graph()
         .set_sources_hard(Root::output(0), [OutPort::new(node, 0)])
         .unwrap();
-    let limit = Instant::now() + Duration::from_secs(10);
-    let mut panics = 0;
-    while panics == 0 {
-        panics += system
-            .update()
+    let panics = |events: &[SessionEvent]| {
+        events
             .iter()
             .filter(|e| {
                 matches!(e, SessionEvent::Fault(f) if f.kind == StreamFaultKind::CallbackPanicked)
             })
-            .count();
+            .count()
+    };
+    let limit = Instant::now() + Duration::from_secs(10);
+    let mut reported = 0;
+    while reported == 0 {
+        reported += panics(&system.update());
         assert!(Instant::now() < limit, "the panic was never reported");
         std::thread::sleep(Duration::from_millis(2));
     }
-    assert_eq!(panics, 1);
-    assert_eq!(system.faults().count(), 1, "the record the event came from");
     for _ in 0..20 {
-        let again = system
-            .update()
-            .iter()
-            .filter(|e| matches!(e, SessionEvent::Fault(_)))
-            .count();
-        assert_eq!(again, 0, "reported once");
+        reported += panics(&system.update());
         std::thread::sleep(Duration::from_millis(2));
     }
+    assert_eq!(reported, 1, "the panic is one event");
+    assert!(system.faults().count() >= 1);
+}
+
+/// **A fault that only bumps the count is not the last fault again**: after a
+/// panic was reported, an overrun is reported as an `Overrun` and the panic is
+/// not reported a second time. (The record keeps no message for an overrun
+/// beside a latched panic; reading the record's last message on every count
+/// bump re-reported the panic.)
+#[test]
+fn an_overrun_after_a_reported_panic_is_its_own_event_and_not_the_panic_again() {
+    let mut system = system();
+    let faults = system.faults();
+    let kinds = |events: &[SessionEvent]| -> Vec<StreamFaultKind> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                SessionEvent::Fault(f) => Some(f.kind),
+                _ => None,
+            })
+            .collect()
+    };
+    faults.record_panic("a callback panicked");
+    let first = kinds(&system.update());
+    assert_eq!(
+        first
+            .iter()
+            .filter(|k| **k == StreamFaultKind::CallbackPanicked)
+            .count(),
+        1,
+        "{first:?}"
+    );
+    faults.record_overrun("the timer fell behind");
+    let second = kinds(&system.update());
+    assert!(
+        !second.contains(&StreamFaultKind::CallbackPanicked),
+        "the panic is not reported again: {second:?}"
+    );
+    assert!(second.contains(&StreamFaultKind::Overrun), "{second:?}");
 }
 
 /// **A fresh session on any real-time clock reports no fault event**: the
