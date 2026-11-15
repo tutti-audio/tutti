@@ -16,8 +16,8 @@ use super::*;
 ///   negative gain has no logarithm. `Gain::recip` refuses a non-finite
 ///   reciprocal; `to_amplitude` gives the `Amplitude` whose `to_db` is the level.
 /// - `From<Gain> for Amplitude` — a negative gain has no amplitude. `to_amplitude`
-///   refuses it. (`From<Amplitude>
-///   for Gain` is present: total and lossless.)
+///   refuses it; `magnitude` names dropping the sign. (`From<Amplitude> for Gain`
+///   is present: total and lossless.)
 /// - `From<raw> for Unit`, `From<Unit> for raw`, so `.into()` between a unit and
 ///   its bare number — a bare float must not become a unit unnamed at the call
 ///   site, and a unit must not leave as a float by an `.into()` that hides which
