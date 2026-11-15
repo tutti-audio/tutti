@@ -50,26 +50,46 @@ const MAXN_SQUARED: [(u32, u32); 16] = [
 
 /// The degree `l` of ACN harmonic `n`: `⌊√n⌋`.
 fn degree(n: u16) -> u16 {
-    (0..).take_while(|l| l * l <= n).last().unwrap_or(0)
+    n.isqrt()
 }
 
-/// What multiplies an SN3D channel to give the same harmonic in a full-sphere
-/// `normalization`. The 2D normalizations scale the horizontal harmonics alone
-/// and are not here.
-fn from_sn3d(normalization: AmbisonicNormalization, n: u16) -> f64 {
-    use AmbisonicNormalization::*;
-    let maxn = || {
-        let (num, den) = MAXN_SQUARED[usize::from(n)];
-        (f64::from(num) / f64::from(den)).sqrt()
-    };
-    match normalization {
-        Sn3d => 1.0,
-        N3d => f64::from(2 * degree(n) + 1).sqrt(),
-        MaxN => maxn(),
-        // FuMa is MaxN with W at -3 dB.
-        FuMa if n == 0 => maxn() * 0.5f64.sqrt(),
-        FuMa => maxn(),
-        Sn2d | N2d => unreachable!("a 2D normalization is converted only to itself"),
+/// A full-sphere normalization: the four whose scales over SN3D are defined
+/// for every harmonic.
+#[derive(Clone, Copy, PartialEq)]
+enum Scale {
+    Sn3d,
+    N3d,
+    MaxN,
+    FuMa,
+}
+
+impl Scale {
+    /// The full-sphere scale of `normalization`, or `None` for a 2D one.
+    fn of(normalization: AmbisonicNormalization) -> Option<Self> {
+        use AmbisonicNormalization as N;
+        match normalization {
+            N::Sn3d => Some(Self::Sn3d),
+            N::N3d => Some(Self::N3d),
+            N::MaxN => Some(Self::MaxN),
+            N::FuMa => Some(Self::FuMa),
+            N::Sn2d | N::N2d => None,
+        }
+    }
+
+    /// What multiplies an SN3D channel to give ACN harmonic `n` in this scale.
+    fn from_sn3d(self, n: u16) -> f64 {
+        let maxn = || {
+            let (num, den) = MAXN_SQUARED[usize::from(n)];
+            (f64::from(num) / f64::from(den)).sqrt()
+        };
+        match self {
+            Self::Sn3d => 1.0,
+            Self::N3d => f64::from(2 * degree(n) + 1).sqrt(),
+            Self::MaxN => maxn(),
+            // FuMa is MaxN with W at -3 dB.
+            Self::FuMa if n == 0 => maxn() * 0.5f64.sqrt(),
+            Self::FuMa => maxn(),
+        }
     }
 }
 
@@ -93,20 +113,26 @@ fn channel(ordering: AmbisonicOrdering, n: u16) -> u16 {
 /// scaled by the ratio of the two normalizations, or zero past the source's
 /// order. Orders above the destination's are not read.
 ///
-/// A 2D normalization converts only to itself (a reorder, drop or zero-fill):
-/// the AmbiX and FuMa conventions relate the full-sphere normalizations and say
-/// nothing of the horizontal-only ones, so any other pairing with one is
-/// [`FoldError::PlanarNormalization`].
+/// A 2D normalization ([`Sn2d`](AmbisonicNormalization::Sn2d),
+/// [`N2d`](AmbisonicNormalization::N2d)) is defined for the horizontal
+/// harmonics only, while the set holds every channel of its order; it converts
+/// to itself (a reorder, drop or zero-fill) and to nothing else, and any other
+/// pairing is [`FoldError::PlanarNormalization`].
 pub(super) fn rows<F: Float>(
     src: AmbisonicFormat,
     dst: AmbisonicFormat,
 ) -> Result<Box<[Row<F>]>, FoldError> {
-    use AmbisonicNormalization::{N2d, Sn2d};
     let (from, to) = (src.normalization(), dst.normalization());
-    let planar = |n| matches!(n, Sn2d | N2d);
-    if from != to && (planar(from) || planar(to)) {
-        return Err(FoldError::PlanarNormalization { src: from, dst: to });
-    }
+    // `None` is one scale on both sides, a plain reorder; `Some` holds both
+    // full-sphere scales.
+    let scales = if from == to {
+        None
+    } else {
+        match (Scale::of(from), Scale::of(to)) {
+            (Some(f), Some(t)) => Some((f, t)),
+            _ => return Err(FoldError::PlanarNormalization { src: from, dst: to }),
+        }
+    };
     let src_width = src.width().count();
     Ok((0..dst.width().count())
         .map(|j| {
@@ -115,11 +141,7 @@ pub(super) fn rows<F: Float>(
                 return Row::One(Expr::Zero);
             }
             let c = channel(src.ordering(), n);
-            let gain = if from == to {
-                1.0
-            } else {
-                from_sn3d(to, n) / from_sn3d(from, n)
-            };
+            let gain = scales.map_or(1.0, |(f, t)| t.from_sn3d(n) / f.from_sn3d(n));
             Row::One(if gain == 1.0 {
                 Expr::Copy(c)
             } else {

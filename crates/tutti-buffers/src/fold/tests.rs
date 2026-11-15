@@ -1331,7 +1331,9 @@ fn close(got: f32, want: f64, what: &str) {
     near_rel(got, want, 4.0 * f64::from(f32::EPSILON), what);
 }
 
-/// `got` within a relative `tol` of `want`: for figures measured on a grid.
+/// `got` within a relative `tol` of `want`: for figures measured on a grid. The
+/// midpoint rule is near-exact for these polynomials and the peaks sit on grid
+/// nodes, so the measured scales hold to 1e-4, far under the gaps between scales.
 fn near_rel(got: f32, want: f64, tol: f64, what: &str) {
     assert!(
         (f64::from(got) - want).abs() <= tol * want.abs().max(1.0),
@@ -1387,7 +1389,7 @@ fn each_normalization_pair_converts_by_the_ratio_of_the_measured_scales() {
                     near_rel(
                         r[n],
                         scales[di][n] / scales[si][n],
-                        2e-3,
+                        1e-4,
                         &format!("{s:?} -> {d:?}, order {order}, ACN {n}"),
                     );
                     assert!(r.iter().enumerate().all(|(i, &v)| i == n || v == 0.0));
@@ -1519,7 +1521,7 @@ fn fuma_to_ambix_reorders_and_undoes_the_fuma_gains() {
             near_rel(
                 from_source(&f, i)[acn],
                 want,
-                2e-3,
+                1e-4,
                 &format!("order {order}, FuMa {i}"),
             );
         }
@@ -1596,8 +1598,9 @@ fn an_ambisonic_set_folds_into_itself_as_the_identity() {
 }
 
 /// The horizontal-only normalizations convert to themselves, a pure reorder or
-/// order change, and to nothing else: no reference relates them to the
-/// full-sphere ones, so no ratio is invented.
+/// order change, and to nothing else: a 2D scale is defined for the horizontal
+/// harmonics alone, so 2D to 3D has no coefficient for the rest, and the other
+/// 2D scale is not converted.
 #[test]
 fn a_2d_normalization_converts_only_to_itself() {
     use AmbisonicNormalization::*;

@@ -47,19 +47,14 @@ pub enum FoldError {
     /// fold is not.
     #[error("speakers and an ambisonic set need an encoder or decoder node, not a fold")]
     NeedsCodec,
-    /// A conversion between ambisonic formats with a 2D normalization on one
-    /// side and a different normalization on the other. [`Sn2d`] and [`N2d`]
-    /// scale the horizontal harmonics alone; the AmbiX and Furse-Malham
-    /// conventions give the ratios between the full-sphere normalizations
-    /// ([`Sn3d`], [`N3d`], [`MaxN`], [`FuMa`]) and say nothing of them, so no
-    /// coefficient is guessed.
+    /// A conversion between ambisonic formats where one normalization is 2D
+    /// ([`Sn2d`] or [`N2d`]) and the other differs. A 2D scale is defined for the
+    /// horizontal harmonics alone, while the set holds every channel of its
+    /// order, so 2D to 3D (or 3D to 2D) has no coefficient for the rest. 2D to
+    /// the other 2D scale is not converted either.
     ///
     /// [`Sn2d`]: AmbisonicNormalization::Sn2d
     /// [`N2d`]: AmbisonicNormalization::N2d
-    /// [`Sn3d`]: AmbisonicNormalization::Sn3d
-    /// [`N3d`]: AmbisonicNormalization::N3d
-    /// [`MaxN`]: AmbisonicNormalization::MaxN
-    /// [`FuMa`]: AmbisonicNormalization::FuMa
     #[error("no conversion between the {src:?} and {dst:?} normalizations is defined")]
     PlanarNormalization {
         /// The source normalization.
