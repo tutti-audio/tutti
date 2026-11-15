@@ -166,7 +166,7 @@ impl Wave {
         sample_rate: SampleRate,
         duration: impl Into<tutti_types::Seconds>,
     ) -> Self {
-        let length = (duration.into().get() * sample_rate.get()).round() as usize;
+        let length = duration.into().to_samples(sample_rate).get();
         assert!(channels > 0 || length == 0);
         let (topology, placement) = assumed(channels);
         Self {

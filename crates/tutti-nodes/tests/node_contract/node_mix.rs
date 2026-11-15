@@ -159,12 +159,27 @@ fn check_io<N: IntoNode>(
 }
 #[test]
 fn the_convolver_is_blended_by_the_graph() {
+    use tutti_buffers::Mono;
     use tutti_nodes::{ConvolverNode, generate_room_ir};
     let ir = generate_room_ir(0.5, Seconds(0.05), RATE);
     let ir2 = generate_room_ir(0.8, Seconds(0.08), RATE);
     check(
-        "convolver (stereo, 64-frame block)",
-        &|| ConvolverNode::stereo(&ir, &ir2, 64),
+        "convolver (dual mono, 64-frame block)",
+        &|| ConvolverNode::per_channel(&[&ir, &ir2], 64).unwrap(),
+        2,
+        64,
+    );
+    check(
+        "convolver (true stereo, 64-frame block)",
+        &|| {
+            ConvolverNode::true_stereo(
+                Mono::new(&ir),
+                Mono::new(&ir2),
+                Mono::new(&ir2),
+                Mono::new(&ir),
+                64,
+            )
+        },
         2,
         64,
     );

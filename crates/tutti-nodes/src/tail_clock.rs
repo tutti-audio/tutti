@@ -98,6 +98,13 @@ impl TailClock {
         self.since = UNBOUNDED;
     }
 
+    /// Frames since the last non-silent input frame, up to the end of the previous block
+    /// ([`UNBOUNDED`] when there never was one). Blocks the graph skipped while the node was
+    /// parked are not counted, so across parking this is a lower bound.
+    pub(crate) fn silent_for(&self) -> u64 {
+        self.since
+    }
+
     /// The ceiling, in frames.
     pub(crate) fn ceiling(&self) -> u64 {
         self.ceiling

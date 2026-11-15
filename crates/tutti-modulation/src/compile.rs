@@ -36,20 +36,24 @@ use crate::program::{
 };
 use crate::shape::Polarity;
 
+/// The largest block a rate edit allows for, in frames: a block cap of 4096
+/// frames. A frame count (a buffer size), not a duration.
+const LARGEST_BLOCK_FRAMES: usize = 4096;
+
 /// How far ahead of the executor's play reading a rate edit takes effect,
-/// in frames: at least two of the largest block (4096
-/// frames, the export's cap) plus slack for the publish to land, so every
-/// lane reads the new program before its anchor and switches on the same
-/// frame. About a quarter of a second at 48 kHz.
-pub const RATE_ANCHOR_MARGIN: Samples = Samples(12_288);
+/// in frames: three of the largest block, that is two blocks plus one block
+/// of slack for the publish to land, so every lane reads the new program
+/// before its anchor and switches on the same frame. A frame count, so its
+/// length in time follows the rate.
+pub const RATE_ANCHOR_MARGIN: Samples = Samples(3 * LARGEST_BLOCK_FRAMES);
 
 /// How far ahead of the play reading a pending anchor must still be for a
-/// second rate edit to reuse its frame: two of the largest block (4096
-/// frames), the margin less its publish slack. Nearer than that, a publish
+/// second rate edit to reuse its frame: two of the largest block, the margin
+/// less its publish slack. Nearer than that, a publish
 /// that lands late would reach the lanes after the anchor, and they would
 /// jump by the difference of the two new rates times the lag; the edit
 /// re-anchors at [`RATE_ANCHOR_MARGIN`] instead (see `anchored`).
-const ANCHOR_REUSE_MIN: Samples = Samples(8_192);
+const ANCHOR_REUSE_MIN: Samples = Samples(2 * LARGEST_BLOCK_FRAMES);
 
 /// A source's key: the host's identity for it. Only compared. The session's own
 /// declarations name a source with a
