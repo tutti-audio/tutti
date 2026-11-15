@@ -417,6 +417,9 @@ pub struct Session {
     pub(crate) resource_ids: crate::peer::ResourceIds,
     /// What the app declared loaded ([`Session::pool`]).
     pub(crate) pool: crate::Pool,
+    /// The plugin entries whose node waits to swap to a reloaded plugin.
+    #[cfg(feature = "plugin")]
+    pub(crate) pooled_swaps: std::collections::BTreeSet<crate::PoolKey>,
     pub(crate) transport: Transport,
     /// The engine, for an offline session (the host pulls blocks); `None` on
     /// a device (the callback holds it) or detached.
