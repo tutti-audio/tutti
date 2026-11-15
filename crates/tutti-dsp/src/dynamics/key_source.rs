@@ -2,7 +2,7 @@
 
 use tutti_types::BusTopology;
 
-use crate::{Channels, Feed};
+use crate::{Channels, Inputs};
 
 /// The signal a compressor's or a gate's detector reads: a type of the family, so a
 /// graph's port layout and its sound say the same thing.
@@ -36,7 +36,7 @@ impl KeySource {
 
     /// The channels a detector reads in `feed`: its key, or its audio.
     #[inline]
-    pub(crate) fn detected<'a>(self, feed: &Feed<'a>) -> &'a [&'a [f32]] {
+    pub(crate) fn detected<'a>(self, feed: &Inputs<'a>) -> &'a [&'a [f32]] {
         match self {
             Self::Sidechain => feed.key,
             Self::Own => feed.audio,

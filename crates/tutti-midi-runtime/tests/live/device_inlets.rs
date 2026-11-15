@@ -5,43 +5,15 @@
 //! plus the lead.
 
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tutti_types::MaxBlock;
 
 use tutti_fixtures::midi;
-use tutti_graph::{
-    Cx, Editor, EventEdge, EventIn, EventKind, EventOut, Executor, Io, Node, NodeKey, OutPort,
-    Prepare, Shape, Source, Status, TransportPosition, Unforkable,
-};
+use tutti_fixtures::{BlockClock, EventRig};
+use tutti_graph::NodeKey;
 use tutti_midi_runtime::{DeviceInlets, DeviceInput, InletChange, NoFreeSlot};
-use tutti_types::{ChannelLayout, Frame, SampleRate, Samples};
+use tutti_types::{Frame, SampleRate};
 use tutti_ump::{MidiChannel, Ump};
-
-/// A block clock a test writes by hand, as the engine does each render call.
-struct BlockClock(
-    std::sync::Arc<std::sync::Mutex<Option<(std::time::Instant, tutti_types::Moment)>>>,
-);
-
-impl BlockClock {
-    fn new() -> Self {
-        Self(Default::default())
-    }
-
-    fn reader(&self) -> tutti_midi_runtime::ArrivalClock {
-        let cell = std::sync::Arc::clone(&self.0);
-        std::sync::Arc::new(move || *cell.lock().unwrap())
-    }
-
-    fn write(
-        &mut self,
-        os: std::time::Instant,
-        frame: tutti_types::Frame,
-        rate: tutti_types::SampleRate,
-    ) {
-        *self.0.lock().unwrap() = Some((os, tutti_types::Moment::new(frame, rate)));
-    }
-}
 
 const RATE: f64 = 48_000.0;
 const BLOCK: usize = 512;
@@ -50,35 +22,9 @@ fn note(n: u8) -> Ump {
     midi::note_on(MidiChannel::FIRST, n, 0x8000)
 }
 
-type Seen = Arc<Mutex<Vec<(u64, Ump)>>>;
-
-struct Sink(Seen);
-
-impl Node for Sink {
-    fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_events(1, 0)
-    }
-    fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        for e in io.events(0) {
-            if let EventKind::Midi(ump) = e.kind {
-                self.0
-                    .lock()
-                    .unwrap()
-                    .push((cx.env.frame.get() + u64::from(e.offset.get()), ump));
-            }
-        }
-        io.output(0).fill(0.0);
-        Status::Modified
-    }
-    fn reset(&mut self) {}
-}
-
 /// One device's inlet in a graph that logs what it emits, played in blocks.
 struct Rig {
-    exec: Executor,
-    _editor: Editor,
-    seen: Seen,
+    rig: EventRig,
     input: DeviceInput,
 }
 
@@ -88,53 +34,25 @@ impl Rig {
         let Some(InletChange::Attach { node, .. }) = inlets.take_changes().last() else {
             panic!("an open queues its inlet");
         };
-        let (mut editor, exec) = Editor::new(Prepare::new(
-            SampleRate::of(RATE),
-            MaxBlock::of(Samples(BLOCK)),
-        ));
-        let seen = Seen::default();
-        editor.insert(NodeKey(1), "inlet", node);
-        editor.insert(NodeKey(2), "sink", Unforkable(Sink(Arc::clone(&seen))));
-        editor.spec_mut().connect_events(
-            EventIn {
-                node: NodeKey(2),
-                port: 0,
-            },
-            EventEdge::Direct(EventOut {
-                node: NodeKey(1),
-                port: 0,
-            }),
-        );
-        editor
-            .spec_mut()
-            .topology
-            .set_outputs(vec![Source::Node(OutPort {
-                node: NodeKey(2),
-                port: 0,
-            })]);
-        editor.commit().expect("commits");
-        Self {
-            exec,
-            _editor: editor,
-            seen,
-            input,
-        }
+        let mut rig = EventRig::new(RATE, BLOCK, 1);
+        rig.editor.insert(NodeKey(1), "inlet", node);
+        rig.feed(NodeKey(1), 0, 0);
+        rig.commit();
+        Self { rig, input }
     }
 
     fn run(&mut self, blocks: usize) {
         for _ in 0..blocks {
-            let mut out = vec![0.0f32; BLOCK];
-            self.exec.process(
-                BLOCK,
-                &TransportPosition::default(),
-                &[],
-                &mut [&mut out[..]],
-            );
+            self.rig.block(BLOCK);
         }
     }
 
     fn take(&self) -> Vec<(u64, Ump)> {
-        std::mem::take(&mut *self.seen.lock().unwrap())
+        self.rig
+            .take()
+            .into_iter()
+            .map(|(_, frame, ump)| (frame, ump))
+            .collect()
     }
 }
 

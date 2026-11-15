@@ -26,8 +26,8 @@
 use tutti_types::{Amplitude, Db, Depth, Hz, Mix, SampleRate, Seconds, StereoWidth};
 
 use crate::reverb::network::{
-    Absorption, Fdn, Gains, Inline, Line, MAX_LINES, Matrix, Modulation, Network, NetworkCapacity,
-    OutputMap, Stage, pre_delay_frames,
+    Absorption, Fdn, Gains, Inline, Line, LineModulation, MAX_LINES, Matrix, Network,
+    NetworkCapacity, OutputMap, Stage, pre_delay_frames,
 };
 use crate::{Capacity, MaxDecay, Ring, TAIL_FLOOR};
 
@@ -269,7 +269,7 @@ impl FdnLayout {
             let length = (base * scale).round().max(1.0);
             let _ = lines.push(Line {
                 length,
-                modulation: Modulation {
+                modulation: LineModulation {
                     depth: depth_frames,
                     rate: Hz(mod_rate),
                 },

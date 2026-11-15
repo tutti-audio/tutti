@@ -47,6 +47,27 @@ fn white_noise_is_in_range_and_centred() {
     );
 }
 
+/// Every lane of the eight-lane generator steps as the scalar generator does
+/// from its seed: the state after each call is the scalar's next word, and the
+/// output is that word's top 23 bits as the mantissa of a float in 1..2, mapped
+/// onto -1..1 by `2m - 3`.
+#[test]
+fn each_noise_lane_is_the_scalar_xorshift32() {
+    let seeds: [u32; 8] = core::array::from_fn(|k| 0x9E37_79B9 ^ (k as u32 + 1));
+    let mut state = u32x8::new(seeds);
+    let mut scalar =
+        seeds.map(|s| tutti_dsp::Xorshift32::new(core::num::NonZeroU32::new(s).unwrap()));
+    for _ in 0..64 {
+        let out = white(&mut state).to_array();
+        for (k, g) in scalar.iter_mut().enumerate() {
+            let word = g.next_u32();
+            assert_eq!(state.to_array()[k], word, "lane {k} state");
+            let mantissa = f32::from_bits((word >> 9) | 0x3F80_0000);
+            assert_eq!(out[k], 2.0 * mantissa - 3.0, "lane {k} output");
+        }
+    }
+}
+
 /// Sample rate and pitch for the aliasing measurements: 2990 Hz is exactly
 /// 299 cycles in 4410 samples, so every harmonic *and every alias* lands on
 /// an integer DFT bin — and since 4410 is not a multiple of 299, no alias

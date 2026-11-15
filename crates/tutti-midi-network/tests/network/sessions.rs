@@ -174,7 +174,7 @@ fn a_repeated_invitation_in_an_established_session_is_accepted_again() {
         methods: AuthMethods::NONE,
         identity: identity("Laptop", "CLIENT-1"),
     }));
-    sim.host.handle_datagram(sim.now, client_addr(), &again);
+    sim.host.on_message(client_addr(), &again, sim.now);
     sim.flush();
     assert!(matches!(
         sim.commands(Direction::HostToClient)[..],
@@ -189,7 +189,7 @@ fn a_malformed_invitation_is_a_protocol_error_bye() {
     // Name only: no Product Instance Id.
     let mut bytes = b"MIDI".to_vec();
     bytes.extend_from_slice(&[0x01, 0x01, 0x01, 0x00, b'a', 0, 0, 0]);
-    sim.host.handle_datagram(sim.now, client_addr(), &bytes);
+    sim.host.on_message(client_addr(), &bytes, sim.now);
     sim.flush();
     assert_eq!(
         sim.commands(Direction::HostToClient),
@@ -208,7 +208,7 @@ fn a_host_at_its_limit_turns_a_newcomer_away_with_too_many_sessions() {
         methods: AuthMethods::NONE,
         identity: identity("Other", "OTHER-1"),
     }));
-    sim.host.handle_datagram(sim.now, other, &inv);
+    sim.host.on_message(other, &inv, sim.now);
     let reply = sim.host.poll_transmit().unwrap();
     assert_eq!(reply.to, other);
     let commands: Vec<_> = tutti_midi_network::parse(&reply.payload)
@@ -226,7 +226,7 @@ fn a_host_at_its_limit_turns_a_newcomer_away_with_too_many_sessions() {
 fn an_accepted_reply_with_no_invitation_gets_a_bye_for_no_pending_invitation() {
     let mut sim = Sim::open();
     let accepted = datagram(&Command::Accepted(identity("Studio", "HOST-1")));
-    sim.client.handle_datagram(sim.now, host_addr(), &accepted);
+    sim.client.on_message(host_addr(), &accepted, sim.now);
     sim.flush();
     assert_eq!(
         sim.commands(Direction::ClientToHost),
@@ -241,8 +241,7 @@ fn a_client_without_a_host_naks_an_invitation_as_not_expected() {
         methods: AuthMethods::NONE,
         identity: identity("X", "Y"),
     });
-    sim.client
-        .handle_datagram(sim.now, host_addr(), &datagram(&inv));
+    sim.client.on_message(host_addr(), &datagram(&inv), sim.now);
     sim.flush();
     let [Command::Nak(nak)] = &sim.commands(Direction::ClientToHost)[..] else {
         panic!("expected a NAK")
@@ -335,20 +334,20 @@ fn the_delay_after_each_failed_digest_doubles() {
         n
     };
     let start = sim.now;
-    sim.host.handle_datagram(start, guesser, &inv);
+    sim.host.on_message(guesser, &inv, start);
     assert_eq!(drain(&mut sim), 1, "the challenge");
     // First failure: 100 ms.
-    sim.host.handle_datagram(start, guesser, &wrong);
-    sim.host.handle_timeout(start + ms(99));
+    sim.host.on_message(guesser, &wrong, start);
+    sim.host.on_timeout(start + ms(99));
     assert_eq!(drain(&mut sim), 0);
-    sim.host.handle_timeout(start + ms(100));
+    sim.host.on_timeout(start + ms(100));
     assert_eq!(drain(&mut sim), 1);
     // Second failure: 200 ms.
     let second = start + ms(100);
-    sim.host.handle_datagram(second, guesser, &wrong);
-    sim.host.handle_timeout(second + ms(199));
+    sim.host.on_message(guesser, &wrong, second);
+    sim.host.on_timeout(second + ms(199));
     assert_eq!(drain(&mut sim), 0);
-    sim.host.handle_timeout(second + ms(200));
+    sim.host.on_timeout(second + ms(200));
     assert_eq!(drain(&mut sim), 1);
 }
 
@@ -366,9 +365,9 @@ fn five_failed_digests_end_the_invitation_with_authentication_failed() {
         identity: identity("Guess", "G-1"),
     }));
     let wrong = datagram(&Command::InvitationWithAuth(Digest::new([0; 32])));
-    sim.host.handle_datagram(sim.now, guesser, &inv);
+    sim.host.on_message(guesser, &inv, sim.now);
     for _ in 0..5 {
-        sim.host.handle_datagram(sim.now, guesser, &wrong);
+        sim.host.on_message(guesser, &wrong, sim.now);
     }
     let mut saw_bye = false;
     while let Some(t) = sim.host.poll_transmit() {
@@ -473,7 +472,7 @@ fn a_repeated_invitation_gets_the_same_nonce_and_a_new_session_a_new_one() {
     );
     again.connect(sim.now);
     let t = again.poll_transmit().unwrap();
-    sim.host.handle_datagram(sim.now, client_addr(), &t.payload);
+    sim.host.on_message(client_addr(), &t.payload, sim.now);
     sim.flush();
     let fresh = sim.commands(Direction::HostToClient);
     assert!(matches!(
@@ -486,7 +485,7 @@ fn a_repeated_invitation_gets_the_same_nonce_and_a_new_session_a_new_one() {
 fn an_authenticated_invitation_without_an_invitation_is_rejected_for_no_prior_invitation() {
     let mut sim = secret_sim("5483");
     let auth = datagram(&Command::InvitationWithAuth(Digest::new([0; 32])));
-    sim.host.handle_datagram(sim.now, client_addr(), &auth);
+    sim.host.on_message(client_addr(), &auth, sim.now);
     sim.flush();
     assert_eq!(
         sim.commands(Direction::HostToClient),
@@ -806,7 +805,7 @@ fn commands_arriving_out_of_order_are_delivered_in_order() {
     }
     for i in [2, 0, 1] {
         sim.host
-            .handle_datagram(sim.now, client_addr(), &datagrams[i].payload);
+            .on_message(client_addr(), &datagrams[i].payload, sim.now);
     }
     sim.flush();
     assert_eq!(Sim::umps(&sim.host_events), notes);
@@ -991,10 +990,10 @@ fn quiet_peers_ping_each_other_and_keep_the_session_alive() {
 #[test]
 fn a_ping_gets_a_reply_with_the_same_id_in_any_state() {
     let mut sim = Sim::open();
-    sim.host.handle_datagram(
-        sim.now,
+    sim.host.on_message(
         client_addr(),
         &datagram(&Command::Ping(PingId::new(0xCAFE))),
+        sim.now,
     );
     sim.flush();
     assert_eq!(
@@ -1006,10 +1005,10 @@ fn a_ping_gets_a_reply_with_the_same_id_in_any_state() {
 #[test]
 fn a_ping_reply_nobody_asked_for_gets_a_bad_ping_reply_nak() {
     let mut sim = established();
-    sim.host.handle_datagram(
-        sim.now,
+    sim.host.on_message(
         client_addr(),
         &datagram(&Command::PingReply(PingId::new(77))),
+        sim.now,
     );
     sim.flush();
     assert!(
@@ -1091,10 +1090,10 @@ fn a_bye_is_answered_once_and_both_ends_return_to_idle() {
 #[test]
 fn a_bye_from_a_peer_in_no_session_is_still_answered() {
     let mut sim = Sim::open();
-    sim.host.handle_datagram(
-        sim.now,
+    sim.host.on_message(
         client_addr(),
         &datagram(&Command::Bye(Bye::new(ByeReason::UserTerminated))),
+        sim.now,
     );
     sim.flush();
     assert_eq!(
@@ -1121,7 +1120,7 @@ fn data_outside_a_session_gets_a_bye_for_session_not_established() {
     let mut sim = Sim::open();
     let data = Command::UmpData(UmpData::new(SequenceNumber::ZERO, &[note_on(60)]).unwrap());
     sim.host
-        .handle_datagram(sim.now, client_addr(), &datagram(&data));
+        .on_message(client_addr(), &datagram(&data), sim.now);
     sim.flush();
     assert_eq!(
         sim.commands(Direction::HostToClient),
@@ -1213,7 +1212,7 @@ fn an_unanswered_reset_ends_the_session_with_a_timeout_bye() {
 fn a_reset_outside_a_session_gets_a_bye_for_session_not_established() {
     let mut sim = Sim::open();
     sim.host
-        .handle_datagram(sim.now, client_addr(), &datagram(&Command::SessionReset));
+        .on_message(client_addr(), &datagram(&Command::SessionReset), sim.now);
     sim.flush();
     assert_eq!(
         sim.commands(Direction::HostToClient),
@@ -1228,7 +1227,7 @@ fn an_unknown_command_gets_a_nak_for_command_not_supported() {
     let mut sim = established();
     let mut bytes = b"MIDI".to_vec();
     bytes.extend_from_slice(&[0x55, 0x00, 0x00, 0x00]);
-    sim.host.handle_datagram(sim.now, client_addr(), &bytes);
+    sim.host.on_message(client_addr(), &bytes, sim.now);
     sim.flush();
     let [Command::Nak(nak)] = &sim.commands(Direction::HostToClient)[..] else {
         panic!()
@@ -1247,7 +1246,7 @@ fn a_malformed_command_gets_a_nak_for_command_malformed() {
     let mut sim = established();
     let mut bytes = b"MIDI".to_vec();
     bytes.extend_from_slice(&[0x20, 0x00, 0x00, 0x00]);
-    sim.host.handle_datagram(sim.now, client_addr(), &bytes);
+    sim.host.on_message(client_addr(), &bytes, sim.now);
     sim.flush();
     assert!(matches!(
         &sim.commands(Direction::HostToClient)[..],
@@ -1259,7 +1258,7 @@ fn a_malformed_command_gets_a_nak_for_command_malformed() {
 fn a_datagram_without_the_signature_changes_nothing() {
     let mut sim = established();
     sim.host
-        .handle_datagram(sim.now, client_addr(), b"XXXX\xF0\x00\x01\x00");
+        .on_message(client_addr(), b"XXXX\xF0\x00\x01\x00", sim.now);
     sim.flush();
     assert!(sim.log.is_empty());
     assert_eq!(sim.host.state(client_addr()), SessionState::Established);
@@ -1269,10 +1268,10 @@ fn a_datagram_without_the_signature_changes_nothing() {
 fn a_client_ignores_datagrams_from_any_address_but_its_host() {
     let mut sim = established();
     let stranger = "10.0.0.77:1".parse().unwrap();
-    sim.client.handle_datagram(
-        sim.now,
+    sim.client.on_message(
         stranger,
         &datagram(&Command::Bye(Bye::new(ByeReason::UserTerminated))),
+        sim.now,
     );
     sim.flush();
     assert_eq!(sim.client.state(), SessionState::Established);
@@ -1283,7 +1282,7 @@ fn a_stranger_that_is_not_inviting_is_answered_statelessly_and_costs_the_host_no
     let mut sim = Sim::open();
     let stranger = "10.0.0.50:9000".parse().unwrap();
     let replies = |sim: &mut Sim, bytes: &[u8]| {
-        sim.host.handle_datagram(sim.now, stranger, bytes);
+        sim.host.on_message(stranger, bytes, sim.now);
         let mut out = Vec::new();
         while let Some(t) = sim.host.poll_transmit() {
             assert_eq!(t.to, stranger);
@@ -1336,7 +1335,7 @@ fn a_receiver_that_never_requests_gives_a_gap_up_without_asking() {
     }
     for i in [0, 2] {
         sim.host
-            .handle_datagram(sim.now, client_addr(), &datagrams[i].payload);
+            .on_message(client_addr(), &datagrams[i].payload, sim.now);
     }
     sim.advance(ms(10));
     assert!(sim.host_events.contains(&Event::DataLost {

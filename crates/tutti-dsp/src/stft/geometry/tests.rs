@@ -8,11 +8,11 @@ fn geo(window: usize, hop: usize) -> StftGeometry {
 fn rejects_a_zero_window_a_zero_hop_and_a_non_positive_rate() {
     assert_eq!(
         StftGeometry::new(SampleRate::SR_44K1, Samples(0), Samples(512)),
-        Err(Error::ZeroWindow)
+        Err(StftError::ZeroWindow)
     );
     assert_eq!(
         StftGeometry::new(SampleRate::SR_44K1, Samples(2048), Samples(0)),
-        Err(Error::ZeroHop)
+        Err(StftError::ZeroHop)
     );
 }
 
@@ -25,7 +25,7 @@ fn a_hop_wider_than_the_window_analyses_but_does_not_invert() {
 
     assert_eq!(
         StftGeometry::cola(SampleRate::SR_44K1, Samples(2048), Samples(8192)),
-        Err(Error::HopExceedsWindow {
+        Err(StftError::HopExceedsWindow {
             window: Samples(2048),
             hop: Samples(8192),
         })
@@ -43,7 +43,7 @@ fn cola_refuses_what_new_accepts() {
     assert!(StftGeometry::new(SampleRate::SR_44K1, Samples(2048), Samples(1024)).is_ok());
     assert_eq!(
         StftGeometry::cola(SampleRate::SR_44K1, Samples(2048), Samples(1024)),
-        Err(Error::NotColaCompliant {
+        Err(StftError::NotColaCompliant {
             window: Samples(2048),
             hop: Samples(1024),
             window_fn: CosineWindow::HANN,
@@ -73,7 +73,7 @@ fn a_hann_cola_grid_may_not_be_cola_for_another_window() {
             hop,
             CosineWindow::BLACKMAN
         ),
-        Err(Error::NotColaCompliant {
+        Err(StftError::NotColaCompliant {
             window: Samples(2048),
             hop,
             window_fn: CosineWindow::BLACKMAN,

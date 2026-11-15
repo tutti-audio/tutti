@@ -170,7 +170,7 @@ fn render_blocks(
     while start < x.len() {
         let end = (start + block).min(x.len());
         let ins = [&x[start..end]; 2];
-        let mut feed = Feed::new(&ins);
+        let mut feed = Inputs::new(&ins);
         if let Some(lane) = lane {
             feed = feed.with_lane(0, &lane[start..end]);
         }

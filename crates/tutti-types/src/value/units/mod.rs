@@ -62,6 +62,7 @@ mod macros;
 
 mod amounts;
 mod angles;
+mod frames;
 mod level;
 mod measures;
 mod ratios;
@@ -74,7 +75,8 @@ use super::samples::Samples;
 
 pub use amounts::{Depth, DepthOutOfRange, Drive, Feedback, Mix, Pan, Spread, StereoWidth};
 pub use angles::{ArcDegrees, Azimuth, Direction, Elevation, Phase, PhaseIncrement, Radians};
-pub use level::{Amplitude, Db};
+pub use frames::{SampleSpan, SampleSpanOutOfRange};
+pub use level::{Amplitude, Db, Gain};
 pub use measures::{Confidence, Correlation, StereoBalance, Velocity};
 pub use ratios::{
     Cents, CentsSpan, CentsSpanOutOfRange, CompressionRatio, Q, Resonance, Semitones,

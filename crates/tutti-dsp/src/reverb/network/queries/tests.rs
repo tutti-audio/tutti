@@ -1,8 +1,8 @@
 use tutti_types::{Amplitude, SampleRate};
 
 use super::super::{
-    Absorption, AllPass, AllPassForm, Band, Fdn, FirSummary, Gains, Inline, Line, Matrix,
-    Modulation, Network, NetworkCapacity, OutputMap, Stage, Tap, Taps, loop_gain,
+    Absorption, AllPass, AllPassForm, Band, Fdn, FirSummary, Gains, Inline, Line, LineModulation,
+    Matrix, Network, NetworkCapacity, OutputMap, Stage, Tap, Taps, loop_gain,
 };
 use super::*;
 use crate::{Capacity as _, Lti as _};
@@ -12,7 +12,7 @@ const RATE: SampleRate = SampleRate::SR_48K;
 fn line(length: f32, absorption: Absorption) -> Line {
     Line {
         length,
-        modulation: Modulation::NONE,
+        modulation: LineModulation::NONE,
         absorption,
         diffuser: None,
     }
@@ -61,7 +61,7 @@ fn a_series_all_pass_rings_for_its_geometric_train() {
     let ap = AllPass {
         delay: 100.0,
         gain: 0.5,
-        modulation: Modulation::NONE,
+        modulation: LineModulation::NONE,
         form: AllPassForm::Lattice,
     };
     let n = network(&[Stage::AllPass(Inline::from_slice(&[ap, ap]).unwrap())]);
@@ -139,7 +139,7 @@ fn a_nested_all_pass_lengthens_the_loop_by_its_low_frequency_delay() {
     let ap = AllPass {
         delay: 100.0,
         gain: 0.5,
-        modulation: Modulation::NONE,
+        modulation: LineModulation::NONE,
         form: AllPassForm::Lattice,
     };
     assert_eq!(ap.low_frequency_delay(), 300.0);
@@ -223,7 +223,7 @@ fn stability_follows_the_gains_and_the_matrix() {
             Inline::from_slice(&[AllPass {
                 delay: 10.0,
                 gain,
-                modulation: Modulation::NONE,
+                modulation: LineModulation::NONE,
                 form: AllPassForm::Lattice,
             }])
             .unwrap(),
@@ -343,7 +343,7 @@ fn the_shortest_path_decides_the_direct_path() {
         Inline::from_slice(&[AllPass {
             delay: 100.0,
             gain: 0.5,
-            modulation: Modulation::NONE,
+            modulation: LineModulation::NONE,
             form: AllPassForm::Lattice,
         }])
         .unwrap(),
@@ -365,7 +365,7 @@ fn the_shortest_path_decides_the_direct_path() {
             Inline::from_slice(&[AllPass {
                 delay: 100.0,
                 gain: 0.0,
-                modulation: Modulation::NONE,
+                modulation: LineModulation::NONE,
                 form,
             }])
             .unwrap(),
@@ -402,7 +402,7 @@ fn a_bound_dominates_only_when_every_figure_does() {
         &[
             line(100.0, g),
             Line {
-                modulation: Modulation {
+                modulation: LineModulation {
                     depth: 2.0,
                     rate: tutti_types::Hz(1.0),
                 },
@@ -670,7 +670,7 @@ fn only_a_lattice_diffuser_is_inside_the_analysis() {
         diffuser: Some(AllPass {
             delay: 20.0,
             gain,
-            modulation: Modulation::NONE,
+            modulation: LineModulation::NONE,
             form,
         }),
         ..line(100.0, Absorption::Gain(Amplitude(1.0)))

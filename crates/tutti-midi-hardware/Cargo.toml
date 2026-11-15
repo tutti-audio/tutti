@@ -55,7 +55,7 @@ tutti-alsa-ffi = { path = "../tutti-alsa-ffi", features = ["testing"] }
 tutti-midi-hardware = { path = ".", features = ["testing"] }
 
 assert_no_alloc = { version = "1", default-features = false }
-tutti-fixtures = { path = "../../testing/tutti-fixtures" }
+tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["graph"] }
 
 [package.metadata.docs.rs]
 all-features = true

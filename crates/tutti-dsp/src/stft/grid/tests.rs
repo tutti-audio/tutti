@@ -33,7 +33,7 @@ fn grid() -> Grid<i32> {
 fn a_length_that_disagrees_with_the_shape_is_rejected() {
     assert_eq!(
         Grid::new(vec![0u8; 10], FrameCount(3), BinCount(4)),
-        Err(Error::GridShapeMismatch {
+        Err(StftError::GridShapeMismatch {
             len: 10,
             rows: 3,
             cols: 4,

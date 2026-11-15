@@ -64,7 +64,7 @@
 mod cadence;
 mod capacity;
 mod family;
-mod feed;
+mod inputs;
 mod lti;
 mod reach;
 mod realized;
@@ -74,7 +74,7 @@ mod system;
 pub use cadence::{Cadence, Step};
 pub use capacity::Capacity;
 pub use family::{Channels, Family, Grows};
-pub use feed::{Feed, MAX_LANES};
+pub use inputs::{Inputs, MAX_LANES};
 pub use lti::Lti;
 pub use reach::{Domain, MaxDecay, MaxDecayError, Reach, TAIL_FLOOR};
 pub use realized::{Approach, Readout, Realized, Recurrence, Start};

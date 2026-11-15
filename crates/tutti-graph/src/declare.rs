@@ -13,8 +13,8 @@ use std::sync::atomic::Ordering;
 
 use tutti_types::{
     Amplitude, AtomicF32, Azimuth, CentsSpan, CompressionRatio, Db, Depth, Drive, Elevation,
-    Feedback, Hz, Mix, Pan, Param, ParamCell, ParamRaw, Q, Resonance, Seconds, Spread, StereoWidth,
-    Unit, UnitAddr,
+    Feedback, Gain, Hz, Mix, Pan, Param, ParamCell, ParamRaw, Q, Resonance, SampleSpan, Seconds,
+    Spread, StereoWidth, Unit, UnitAddr,
 };
 
 use crate::controls::{ParamSet, Params};
@@ -67,11 +67,13 @@ scalar_units!(
     Drive,
     Elevation,
     Feedback,
+    Gain,
     Hz,
     Mix,
     Pan,
     Q,
     Resonance,
+    SampleSpan,
     Seconds,
     Spread,
     StereoWidth,

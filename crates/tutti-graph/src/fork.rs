@@ -1023,6 +1023,7 @@ impl Editor {
             // lanes.
             bus_edges: BTreeMap::new(),
             root: None,
+            root_id: crate::RootId::GENESIS,
             root_sources: Vec::new(),
         };
         // The edge gains whose edge the fork kept (an output channel the
