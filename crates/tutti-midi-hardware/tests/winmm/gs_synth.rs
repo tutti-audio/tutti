@@ -75,8 +75,10 @@ fn the_synth_is_sent_every_event_at_its_time_and_opens_again_after_a_close() {
         .unwrap()
         .packets(MidiGroup::FIRST)
         .collect();
-    for _ in 0..2 {
-        let mut out = devices.open_output(&id).expect("the synth opens");
+    for round in 0..2 {
+        let mut out = devices
+            .open_output(&id)
+            .unwrap_or_else(|e| panic!("the synth opens in round {round}: {e:?}"));
         let now = Instant::now();
         let later = now + Duration::from_millis(90);
         let mut batch = vec![

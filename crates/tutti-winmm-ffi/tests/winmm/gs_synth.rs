@@ -50,8 +50,9 @@ fn an_interface_path_is_a_device_path_or_absent() {
 #[test]
 fn the_synth_takes_short_messages_and_a_sysex_and_opens_again_after_a_close() {
     let index = synth();
-    for _ in 0..2 {
-        let mut out = MidiOut::open(index).expect("the synth opens");
+    for round in 0..2 {
+        let mut out = MidiOut::open(index)
+            .unwrap_or_else(|e| panic!("the synth opens in round {round}: {e:?}"));
         out.short(0x0064_3C90).expect("note on");
         out.short(0x0000_3C80).expect("note off");
         out.long(&GS_RESET).expect("the GS reset is sent whole");
