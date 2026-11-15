@@ -53,8 +53,8 @@
 //! # Measurements are not controls
 //!
 //! [`Correlation`], [`StereoBalance`] and [`Confidence`] are values the engine
-//! *reports*; [`Depth`], [`Pan`], [`Balance`] and [`Mix`] are values a user *sets*. The ranges coincide and the
-//! meanings do not, so they are distinct types — swapping a reading for a
+//! *reports*; [`Depth`], [`Pan`], [`Balance`] and [`Mix`] are values a user
+//! *sets*. The ranges coincide and the meanings do not, so they are distinct types — swapping a reading for a
 //! control is otherwise silent. [`Q`] and [`Resonance`] split on the same line.
 
 #[macro_use]
