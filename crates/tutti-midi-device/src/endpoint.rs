@@ -276,6 +276,48 @@ impl FunctionBlock {
     }
 }
 
+/// What [`Endpoint::reply`] did with one message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reply {
+    /// The message is not one an Endpoint answers: nothing was sent and
+    /// nothing changed.
+    Ignored,
+    /// A discovery was answered, with as many messages as the Endpoint has
+    /// parts to report (none for a Function Block it does not have).
+    Answered,
+    /// A Stream Configuration Request was answered with a Notification, and
+    /// the Endpoint's active configuration is now this.
+    Configured(Configuration),
+}
+
+/// How an Endpoint took a Stream Configuration Request (M2-104 §7.1.6.1 step
+/// 3): the Protocol and JR Timestamps in use afterwards, and whether that is
+/// what was asked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Configuration {
+    /// Every part asked for is now active.
+    Granted(StreamConfig),
+    /// The Endpoint could not do some part (a Protocol or a JR direction it
+    /// does not support, or a reserved Protocol): that part keeps its value,
+    /// and the Notification reported it.
+    Reduced {
+        /// The configuration the request named.
+        asked: StreamConfig,
+        /// The configuration active now.
+        active: StreamConfig,
+    },
+}
+
+impl Configuration {
+    /// The configuration active now, as the Notification reports it.
+    #[must_use]
+    pub const fn active(self) -> StreamConfig {
+        match self {
+            Self::Granted(active) | Self::Reduced { active, .. } => active,
+        }
+    }
+}
+
 /// What one UMP Endpoint declares and has active (M2-104 §7.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Endpoint {
@@ -361,6 +403,29 @@ impl Endpoint {
         if let Ok(block) = block {
             self.insert_block(block);
         }
+    }
+
+    /// The Endpoint a MIDI application presents for a port over `groups` from
+    /// Group 1: UMP version 1.1, the MIDI 1.0 and MIDI 2.0 Protocols, no JR
+    /// Timestamps either way, and one static, active, bidirectional Function
+    /// Block, number 0, over those Groups. Its identity and names are the
+    /// application's ([`with_identity`](Self::with_identity),
+    /// [`with_name`](Self::with_name)).
+    #[must_use]
+    pub fn local(groups: GroupSpan) -> Self {
+        let mut endpoint = Self::new(Capabilities {
+            midi1: true,
+            midi2: true,
+            ..Capabilities::default()
+        })
+        .with_static_function_blocks(true);
+        if let (Some(id), Some(first)) = (FunctionBlockId::new(0), FirstGroup::new(0))
+            && let Ok(block) =
+                FunctionBlock::builder(id, BlockDirection::Bidirectional, first, groups).build()
+        {
+            endpoint.insert_block(block);
+        }
+        endpoint
     }
 
     /// An Endpoint with nothing known, for a discoverer to fill.
@@ -504,27 +569,42 @@ impl Endpoint {
     ///   active, which is the current configuration for a part it could not
     ///   change (§7.1.6.1 step 3).
     ///
-    /// Any other message answers nothing.
+    /// Any other message answers nothing ([`Reply::Ignored`]). A Stream
+    /// Configuration Request's [`Reply::Configured`] says whether the request was
+    /// granted whole, so the owner of the port can switch to the Protocol and JR
+    /// Timestamps now active.
     ///
     /// The requester's UMP version (§7.1.1) changes no answer, and that is the
     /// rule applied: Table 5 gives 1.1 as the first version, and every field
     /// this reads (the five filter bits) is defined in it, so a higher version
     /// is answered with the fields of 1.1 (its appended fields and reserved
     /// bits are not read), and the spec defines no lower one to answer in.
-    pub fn reply(&mut self, message: Message, out: &mut impl Extend<Ump>) {
+    pub fn reply(&mut self, message: Message, out: &mut impl Extend<Ump>) -> Reply {
         let Message::Stream(stream) = message else {
-            return;
+            return Reply::Ignored;
         };
         match stream {
-            Stream::EndpointDiscovery { filter, .. } => self.answer_discovery(filter, out),
+            Stream::EndpointDiscovery { filter, .. } => {
+                self.answer_discovery(filter, out);
+                Reply::Answered
+            }
             Stream::FunctionBlockDiscovery { block, filter } => {
                 self.answer_block_discovery(block, filter, out);
+                Reply::Answered
             }
             Stream::StreamConfigurationRequest(request) => {
                 self.configure(request);
                 send(out, Stream::StreamConfigurationNotification(self.active));
+                Reply::Configured(if self.active == request {
+                    Configuration::Granted(self.active)
+                } else {
+                    Configuration::Reduced {
+                        asked: request,
+                        active: self.active,
+                    }
+                })
             }
-            _ => {}
+            _ => Reply::Ignored,
         }
     }
 
