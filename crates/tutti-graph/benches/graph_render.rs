@@ -63,7 +63,7 @@ impl Node for Sine {
     fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let mut phase = self.phase;
         for o in io.output(0) {
-            *o = (phase * std::f32::consts::TAU).sin();
+            *o = libm::sinf(phase * std::f32::consts::TAU);
             phase += self.hz * self.dt;
             phase -= phase.floor();
         }

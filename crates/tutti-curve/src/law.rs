@@ -13,11 +13,10 @@ use crate::{Curvature, Exponent};
 /// audio thread never computes a NaN from one.
 ///
 /// **Platform figures.** `Linear`, `Hold`, `Smootherstep` and the power laws at exponents 0.5
-/// and 1–5 evaluate with IEEE-exact operations (multiplication, `sqrt`), so
-/// they give the same bits on every target. Other exponents (`powf`) and
-/// [`Exp`](Self::Exp) (`exp_m1`) go through the platform's libm and may differ
-/// in the last ulp between targets; within one target they are deterministic,
-/// so a parallel render still equals the serial one.
+/// and 1–5 evaluate with IEEE-exact operations (multiplication, `sqrt`). Other
+/// exponents (`powf`) and [`Exp`](Self::Exp) (`exp_m1`) are `libm`'s pure-Rust
+/// `powf` and `expm1f`, not the platform's C math library, so every law gives
+/// the same bits on every target.
 ///
 /// ```
 /// use tutti_curve::Law;
@@ -97,7 +96,7 @@ impl Law {
                 if k.abs() < 1e-4 {
                     t
                 } else {
-                    (k * t).exp_m1() / k.exp_m1()
+                    libm::expm1f(k * t) / libm::expm1f(k)
                 }
             }
         }
@@ -105,7 +104,7 @@ impl Law {
 }
 
 /// `x^p` for `x` in `[0, 1]`: the integer exponents up to 5 and the square
-/// root by IEEE-exact operations, anything else through `powf`.
+/// root by IEEE-exact operations, anything else through `libm::powf`.
 #[inline]
 fn pow(x: f32, p: f32) -> f32 {
     if p == 1.0 {
@@ -123,7 +122,7 @@ fn pow(x: f32, p: f32) -> f32 {
     } else if p == 0.5 {
         x.sqrt()
     } else {
-        x.powf(p)
+        libm::powf(x, p)
     }
 }
 

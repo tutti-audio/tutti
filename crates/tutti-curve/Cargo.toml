@@ -19,6 +19,10 @@ workspace = true
 [dependencies]
 # `Beat`, the position of an automation point.
 tutti-types = { version = "0.0.1", path = "../tutti-types" }
+# `Law`'s `powf` and `expm1f` and the equal-power fade's `cosf` and `sinf` are
+# `libm`'s pure-Rust ones, so a value does not depend on the platform's C math
+# library.
+libm = "0.2.15"
 # The `Error` derive of the crate's error types.
 thiserror = { workspace = true }
 
