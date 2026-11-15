@@ -81,9 +81,10 @@
 //! channels align to the previous plan's total latency, so when the two totals
 //! differ a source present in both roots is heard at two delays during the
 //! fade and shifts once at its end. A commit with no fade
-//! cuts at its block. A commit that installs while the fade runs replaces the
-//! plan that carries the old root, so it ends the fade at that block, as a
-//! hard edit ends a unit's crossfade.
+//! cuts at its block. A commit that installs while the fade runs and leaves
+//! the root's generation alone continues it from the frames already mixed. One
+//! that declares the root again begins a new fade at its block, from the root
+//! that was fading in to the newest: the root that was fading out is dropped.
 //!
 //! # Limits
 //!
@@ -2787,28 +2788,37 @@ mod tests {
         assert!(!ed.settle_fades(), "and once only");
     }
 
-    /// A commit that lands while the fade runs replaces the plan that carries
-    /// the old root: the fade ends at that block, the new root alone after.
+    /// A commit that lands while the fade runs, and leaves the root alone,
+    /// continues it: the rewire to both channels brings the right in by the
+    /// fade's gains from frame 8 on, not at once, while the left stays the sum
+    /// of the old root going out and the new coming in, which is one.
     #[test]
-    fn a_commit_that_lands_mid_fade_ends_it() {
+    fn a_commit_that_lands_mid_fade_continues_it() {
         let (engine, mut ed) = crossfading_engine(20);
         let control = engine.output_control();
         move_root(&mut ed, &control, None, 2, 1);
-        let first = block_with(&engine, 2, || {});
-        assert!(
-            first.as_chunks::<2>().0[0][0] > 0.9,
-            "the old root is heard"
-        );
-        // A rewire to both channels: a plan of the same root with no old
-        // channels. Were the fade still running, the right would still be
-        // fading in.
+        let mut heard: Vec<f32> = block_with(&engine, 2, || {});
         let dc = tutti_graph::Source::Node(tutti_graph::OutPort {
             node: tutti_graph::NodeKey(1),
             port: 0,
         });
         ed.spec_mut().topology.set_outputs([dc, dc]);
         ed.commit().expect("commits");
-        assert_eq!(block_with(&engine, 2, || {}), [1.0, 1.0].repeat(8));
+        heard.extend((0..3).flat_map(|_| block_with(&engine, 2, || {})));
+        for (k, frame) in heard.as_chunks::<2>().0.iter().enumerate() {
+            let (out, new) = if k < 20 {
+                equal_amplitude(k, 20)
+            } else {
+                (0.0, 1.0)
+            };
+            // The old root is the constant on the left; the new root, from
+            // frame 8, the constant on both sides.
+            let (left, right) = if k < 8 { (out, new) } else { (out + new, new) };
+            assert!(
+                (frame[0] - left).abs() < 1e-6 && (frame[1] - right).abs() < 1e-6,
+                "frame {k}: {frame:?} against ({left}, {right})"
+            );
+        }
     }
 
     /// Counts 1, 2, 3 ... one per frame, on one channel.

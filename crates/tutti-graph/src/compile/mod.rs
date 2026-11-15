@@ -675,7 +675,12 @@ pub fn compile(
     // An old root's channels are aligned to the output time they were heard
     // at, the plan before this one's, so the new root's alignment does not
     // move for the length of the fade and back after it.
-    let bank_total = prev.map_or(total, |p| p.total_latency);
+    // A plan that continues the crossfade of the one before keeps its alignment.
+    let bank_total = match (graph.root_bank(), prev) {
+        (Some(bank), Some(p)) if p.root_bank.is_some_and(|b| b.old == bank.old) => p.bank_total,
+        (_, Some(p)) => p.total_latency,
+        (_, None) => total,
+    };
     let output_time = |channel: u16| match graph.root_bank() {
         Some(bank) if usize::from(channel) >= bank.base => bank_total,
         _ => total,
@@ -1763,6 +1768,7 @@ pub fn compile(
         root_bank: graph.root_bank(),
         rendered_outputs,
         total_latency: total,
+        bank_total,
         audio_values,
         event_values,
         value_readers,
