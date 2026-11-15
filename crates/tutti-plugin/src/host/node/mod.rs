@@ -394,6 +394,8 @@ impl PluginClient<Unbound> {
             // The wake it raises is bound through `Control::bind_wake` and
             // raised by `Ipc` before this listener runs.
             BridgeEvent::ProcessRequested => {}
+            // The layout is read from the link when the `Io` resync that follows it lands.
+            BridgeEvent::IoLayout(_) => {}
             BridgeEvent::Transport { request } => listener_transport_sink.fire(request),
         })));
 

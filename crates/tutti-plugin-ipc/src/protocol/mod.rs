@@ -263,7 +263,7 @@ mod tests {
             .expect("serialize");
             let back: BridgeMessage = postcard::from_bytes(&bytes).expect("deserialize");
             assert!(
-                matches!(back, BridgeMessage::PluginIoChanged { layout } if layout == sent),
+                matches!(&back, BridgeMessage::PluginIoChanged { layout } if *layout == sent),
                 "{back:?}"
             );
         }
