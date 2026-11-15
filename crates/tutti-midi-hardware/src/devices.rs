@@ -680,10 +680,25 @@ impl OpenOutput {
     /// [`SendAt`](tutti_midi_runtime::SendAt), which the conversion keeps with
     /// the event it came from.
     pub fn queue_timed(&mut self, events: &[Outgoing]) -> Taken {
+        let (taken, refused) = self.offer(events);
+        self.refused += refused;
+        taken
+    }
+
+    /// Offers `events` as [`queue_timed`](Self::queue_timed) does, without
+    /// counting what the device had no room for: that is returned, for a
+    /// caller that offers the same events again until they are taken and
+    /// counts the first refusal itself.
+    pub(crate) fn offer(&mut self, events: &[Outgoing]) -> (Taken, u64) {
         self.wire.convert(events);
         let taken = self.sink.queue_timed(self.wire.batch());
-        self.refused += taken.left_of(self.wire.batch()) as u64;
-        self.wire.accepted(taken, events)
+        let refused = taken.left_of(self.wire.batch()) as u64;
+        (self.wire.accepted(taken, events), refused)
+    }
+
+    /// Counts `packets` the device had no room for ([`offer`](Self::offer)).
+    pub(crate) fn count_refused(&mut self, packets: u64) {
+        self.refused += packets;
     }
 }
 

@@ -12,7 +12,7 @@
 //! [`Protocol`] is the MIDI 2.0 spec's own noun from `tutti-ump`, reused
 //! here rather than restated; the blocks are `tutti-midi-device`'s `FunctionBlock`.
 
-use tutti_midi_device::{Capabilities, Endpoint, EndpointId, FunctionBlock, Identity};
+use tutti_midi_device::{Capabilities, Endpoint, EndpointId, FunctionBlock, Identity, Supports};
 use tutti_ump::{Protocol, StreamConfig};
 
 /// What an endpoint can carry, and the blocks it declares.
@@ -106,12 +106,12 @@ impl UmpCapability {
         let mut endpoint = if protocol == Protocol::Midi1 && self.blocks.is_empty() {
             Endpoint::midi1_device(None)
         } else {
-            Endpoint::new(Capabilities {
+            Endpoint::new(Supports::of(Capabilities {
                 midi1: protocol == Protocol::Midi1,
                 midi2: protocol == Protocol::Midi2,
                 rx_jr: false,
                 tx_jr: false,
-            })
+            }))
         };
         endpoint = endpoint.with_active(StreamConfig {
             protocol,
