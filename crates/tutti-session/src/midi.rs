@@ -1157,7 +1157,9 @@ impl MidiState {
         let Some((group, sender)) = self.machine_out.as_mut() else {
             return;
         };
-        let Some(message) = sender.observe(
+        // A refused look (`MachineControlError`) sends nothing; its typed
+        // report waits for the session's MIDI handles.
+        let Ok(Some(message)) = sender.observe(
             playhead.playing(),
             playhead.seconds(),
             playhead.frame(),

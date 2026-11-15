@@ -16,8 +16,23 @@
 //! A stop that also moved the position sends STOP alone. Commands are placed at
 //! a look, not on a frame: MMC carries no time of its own.
 
-use tutti_midi_protocol::{MmcCommand, MmcCommands, MmcLocate, MmcPosition, MtcRate, Recipient};
+use tutti_midi_protocol::{
+    MmcCommand, MmcCommands, MmcLocate, MmcPosition, MmcTooLong, MtcRate, Recipient,
+};
 use tutti_types::{Frame, SampleRate, Seconds};
+
+/// Why a look at the transport could not be sent as Machine Control. The
+/// look is taken (the next one compares against it), and nothing is sent.
+#[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
+pub enum MachineControlError {
+    /// The commands the change calls for do not fit one message.
+    #[error("the commands for the change do not fit one Machine Control message")]
+    TooLong(#[from] MmcTooLong),
+    /// The transport moved to a time no time code names: before zero, NaN, or
+    /// a day or more.
+    #[error("{0:?} has no time code")]
+    NoTimeCode(Seconds),
+}
 
 /// What the transport was at a look.
 #[derive(Clone, Copy, Debug)]
@@ -36,8 +51,8 @@ struct Seen {
 ///
 /// let mut sender = MachineControlSender::new(Recipient::AllCall, MtcRate::Fps30);
 /// let rate = SampleRate::SR_48K;
-/// assert!(sender.observe(false, Seconds::new(0.0), Frame::new(0), rate).is_none());
-/// let started = sender.observe(true, Seconds::new(0.0), Frame::new(512), rate).unwrap();
+/// assert_eq!(sender.observe(false, Seconds::new(0.0), Frame::new(0), rate), Ok(None));
+/// let started = sender.observe(true, Seconds::new(0.0), Frame::new(512), rate).unwrap().unwrap();
 /// assert_eq!(started, [0x7F, 0x7F, 0x06, 0x02]);
 /// ```
 #[derive(Clone, Copy, Debug)]
@@ -73,23 +88,31 @@ impl MachineControlSender {
     /// and the graph `frame` count the look was made at, on a graph at `rate`.
     /// The payload of the message the change since the last look calls for, if
     /// any: pack it with `Sysex7Packets::from_payload`.
+    ///
+    /// # Errors
+    ///
+    /// [`MachineControlError::NoTimeCode`] when the transport moved to a time
+    /// no time code names, and [`MachineControlError::TooLong`] when the
+    /// commands overfill a message. Neither is sent.
     pub fn observe(
         &mut self,
         playing: bool,
         seconds: Seconds,
         frame: Frame,
         rate: SampleRate,
-    ) -> Option<Vec<u8>> {
+    ) -> Result<Option<Vec<u8>>, MachineControlError> {
         let now = Seen {
             playing,
             seconds,
             frame,
         };
-        let before = self.last.replace(now)?;
+        let Some(before) = self.last.replace(now) else {
+            return Ok(None);
+        };
         let mut commands = MmcCommands::new();
         if before.playing && !playing {
-            commands.push(&MmcCommand::Stop).ok()?;
-            return Some(commands.payload(self.to));
+            commands.push(&MmcCommand::Stop)?;
+            return Ok(Some(commands.payload(self.to)));
         }
         let expected = if before.playing {
             before.seconds
@@ -98,16 +121,16 @@ impl MachineControlSender {
             before.seconds
         };
         let moved = (now.seconds - expected).get().abs() > Self::LOCATE_TOLERANCE.get();
-        if moved && let Some(target) = MmcPosition::from_seconds(now.seconds, self.rate) {
-            commands
-                .push(&MmcCommand::Locate(MmcLocate::Target(target)))
-                .ok()?;
+        if moved {
+            let target = MmcPosition::from_seconds(now.seconds, self.rate)
+                .ok_or(MachineControlError::NoTimeCode(now.seconds))?;
+            commands.push(&MmcCommand::Locate(MmcLocate::Target(target)))?;
             if playing {
-                commands.push(&MmcCommand::DeferredPlay).ok()?;
+                commands.push(&MmcCommand::DeferredPlay)?;
             }
         } else if playing && !before.playing {
-            commands.push(&MmcCommand::Play).ok()?;
+            commands.push(&MmcCommand::Play)?;
         }
-        (!commands.is_empty()).then(|| commands.payload(self.to))
+        Ok((!commands.is_empty()).then(|| commands.payload(self.to)))
     }
 }
