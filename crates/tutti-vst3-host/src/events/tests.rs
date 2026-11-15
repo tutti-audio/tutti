@@ -1571,6 +1571,24 @@ mod message {
         assert_eq!((emitted, lost, sysex), (0, 1, 1), "65 packets do not");
     }
 
+    /// **A list the plugin holds is lost, counted once**: a block whose output
+    /// list a plugin thread holds is not read, and the stream counts one lost
+    /// event for it (the least it holds), which is what `midi_dropped` reports.
+    #[test]
+    fn an_output_list_the_plugin_holds_is_counted_lost() {
+        let list = EventList::input();
+        let mut stream = OutputStream::new();
+        let mut out = tutti_plugin_types::RtMidiEvents::new();
+        {
+            let _plugin_writing = list.begin();
+            drain_midi(&list, &mut stream, &mut out);
+        }
+        assert!(out.is_empty());
+        assert_eq!((stream.lists_busy(), stream.lost_total()), (1, 1));
+        drain_midi(&list, &mut stream, &mut out);
+        assert_eq!(stream.lost_total(), 1, "a free list costs nothing");
+    }
+
     /// A chord at one frame stages as three Note Ons, in order, each at the
     /// velocity it was sent at.
     #[test]

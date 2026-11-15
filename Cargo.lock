@@ -2496,6 +2496,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tutti-midi-protocol",
  "tutti-plugin-types",
+ "tutti-rt",
  "tutti-types",
  "tutti-ump",
 ]

@@ -374,7 +374,7 @@ impl AuMidiOutput {
     /// The callback runs only inside a render, and a render that began before
     /// the withdrawing write may still be reading the state when it returns. So
     /// the write comes first, then the count of renders this crate has in flight
-    /// on the unit ([`Unit::rendering`]), read after a fence: a render the count
+    /// on the unit (`Unit::rendering`), read after a fence: a render the count
     /// does not show starts after the write and reads the cleared callback, and
     /// one it shows is waited for by leaving the state allocated. No lock is
     /// taken here or by a render. A render started outside this crate's safe
@@ -382,21 +382,29 @@ impl AuMidiOutput {
     /// owes that no such render overlaps a withdrawal.
     ///
     /// # Errors
-    /// `Error::Os` if the AU refuses the clearing write: the state is not freed
-    /// (the unit may still call into it) and the unit's claim stays, so the unit
-    /// cannot register again. `Error::Invalid` if a render is in flight: the AU
-    /// no longer calls the callback for a later render, and the state is left
-    /// allocated because the render that is running may still read it.
-    pub fn withdraw(mut self) -> Result<()> {
-        self.unhook()?;
+    /// The handle comes back with the error, still holding the unit's claim and
+    /// the state, so the caller can call `withdraw` again; dropping it instead
+    /// withdraws the callback and leaks the state.
+    /// - `Error::Os` if the AU refuses the clearing write: the unit may still
+    ///   call into the state.
+    /// - `Error::Invalid` if a render is in flight: the AU calls nothing for a
+    ///   later render, and the state stays allocated because the running one may
+    ///   still read it.
+    ///
+    /// An AU that refuses the clearing write of a handle that is then dropped
+    /// keeps the unit's claim for good, so the unit cannot register again.
+    pub fn withdraw(mut self) -> std::result::Result<(), (Self, Error)> {
+        if let Err(refused) = self.clear_callback() {
+            return Err((self, refused));
+        }
         if !self.unit.no_render_in_flight() {
-            // The state is leaked on purpose; the claim was released with the
-            // write, and the next registration has a state of its own.
-            self.state = None;
-            return Err(Error::Invalid(
-                "a render of the unit is in flight: the callback is withdrawn \
-                 and its state is left allocated"
-                    .into(),
+            return Err((
+                self,
+                Error::Invalid(
+                    "a render of the unit is in flight: the callback is withdrawn \
+                     and its state is left allocated"
+                        .into(),
+                ),
             ));
         }
         if let Some(state) = self.state.take() {
@@ -406,11 +414,23 @@ impl AuMidiOutput {
             // it will use and no render reads the state; nothing else frees it.
             drop(unsafe { Box::from_raw(state.as_ptr()) });
         }
+        self.unit.release_midi_output();
         Ok(())
     }
 
     /// Writes the callback away, so the AU calls no more, and releases the unit's
     /// claim on success. The state is not touched.
+    fn unhook(&mut self) -> Result<()> {
+        // Nothing installed (already withdrawn): nothing to write.
+        if self.state.is_none() {
+            return Ok(());
+        }
+        self.clear_callback()?;
+        self.unit.release_midi_output();
+        Ok(())
+    }
+
+    /// Writes the withdrawn callback, keeping the claim.
     ///
     /// # How the withdrawal is spelled
     ///
@@ -418,22 +438,13 @@ impl AuMidiOutput {
     /// 15.6): a real proc with a null `userData`, so the callback written is
     /// `au_midi_output_callback` with nothing to point at, which answers
     /// `NOT_INSTALLED`.
-    fn unhook(&mut self) -> Result<()> {
-        // Nothing installed (already withdrawn): nothing to write.
-        if self.state.is_none() {
-            return Ok(());
-        }
+    fn clear_callback(&mut self) -> Result<()> {
         let withdrawn = AuMidiOutputCallbackStruct {
             midi_output_callback: Some(au_midi_output_callback),
             user_data: std::ptr::null_mut(),
         };
-        let result =
-            self.unit
-                .set::<MidiOutputCallbackProperty>(Scope::GLOBAL, Element::ZERO, &withdrawn);
-        if result.is_ok() {
-            self.unit.release_midi_output();
-        }
-        result
+        self.unit
+            .set::<MidiOutputCallbackProperty>(Scope::GLOBAL, Element::ZERO, &withdrawn)
     }
 }
 
@@ -482,6 +493,13 @@ impl Drop for AuMidiOutput {
 /// touches the state only before installing and in [`AuMidiOutput::withdraw`],
 /// which frees it only after the withdrawing write and with no render in flight.
 ///
+/// That last step rests on a second assumption about AudioToolbox: once
+/// `AudioUnitSetProperty(MIDIOutputCallback)` returns, a render that starts
+/// after it reads the new `{proc, userData}`, even on an initialized unit. A
+/// render already in flight may still read the old pair; it is counted
+/// (`Unit::rendering`), and the withdrawal leaves the state allocated while it
+/// is. Neither is documented by Apple; both hold for every unit measured.
+///
 /// `pktlist` must be null or a well-formed `MIDIPacketList` valid for the
 /// duration of the call.
 unsafe extern "C" fn au_midi_output_callback(
@@ -495,7 +513,10 @@ unsafe extern "C" fn au_midi_output_callback(
     // only reference to it because of one invariant: the AU calls this only from
     // inside its own render (a render-time callback, never from another thread
     // or between renders), one call at a time, and the host touches the box only
-    // before installing and after withdrawing.
+    // before installing and after withdrawing. A render that starts after the
+    // withdrawing `AudioUnitSetProperty` returns reads the cleared pair (the
+    // second AudioToolbox assumption, in this function's `# Safety`); one that
+    // began before is counted, and the box is left allocated for it.
     // The one `unsafe` block also covers the `dispatch` call in the closure:
     // `state` is the only reference (the callback's invariant above) and
     // `pktlist` is non-null (checked) and the AU's, valid for the call.
@@ -1019,12 +1040,13 @@ mod tests {
         assert_eq!(delivered.load(Ordering::Relaxed), 0);
     }
 
-    /// **A withdrawal with a render in flight frees nothing**: the callback is
-    /// written away (a later render calls nothing) and the claim released, but the
-    /// state a running render may read is left allocated and the refusal says so.
-    /// Once the render ends a new registration withdraws and frees.
+    /// **A withdrawal with a render in flight frees nothing, and can be retried**:
+    /// it is refused and hands the registration back with the claim and the state
+    /// a running render may read; a unit with a registration still refuses
+    /// another. Once the render ends the same registration withdraws and frees,
+    /// and the unit takes a new one.
     #[test]
-    fn a_withdrawal_during_a_render_leaves_the_state_allocated() {
+    fn a_withdrawal_during_a_render_is_refused_and_retried() {
         let desc = coreaudio_sys::AudioComponentDescription {
             componentType: coreaudio_sys::kAudioUnitType_Effect,
             componentSubType: u32::from_be_bytes(*b"dely"),
@@ -1040,15 +1062,22 @@ mod tests {
         let registration = install(&unit, Box::new(|_, _| {})).expect("install");
         let in_flight = unit.rendering();
         assert!(!unit.no_render_in_flight());
-        assert!(matches!(registration.withdraw(), Err(Error::Invalid(_))));
+        let Err((registration, Error::Invalid(_))) = registration.withdraw() else {
+            panic!("a withdrawal with a render in flight is refused");
+        };
+        assert!(
+            install(&unit, Box::new(|_, _| {})).is_err(),
+            "the refused registration keeps the claim"
+        );
         drop(in_flight);
         assert!(
             unit.no_render_in_flight(),
             "the guard's drop ends the render"
         );
 
+        registration.withdraw().expect("no render in flight: freed");
         let again = install(&unit, Box::new(|_, _| {})).expect("the claim was released");
-        again.withdraw().expect("no render in flight: freed");
+        again.withdraw().expect("freed");
     }
 
     /// What `decoder` makes of `bytes` as one list at `offset`.

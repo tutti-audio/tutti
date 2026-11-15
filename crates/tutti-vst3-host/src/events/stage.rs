@@ -193,7 +193,7 @@ fn stage_with_text(stage: &mut Staging<'_>, make: impl FnOnce(&mut Staging<'_>) 
 /// (M2-104 Appendix D.3.3).
 pub fn drain_midi(list: &EventList, stream: &mut OutputStream, out: &mut RtMidiEvents) {
     out.clear();
-    list.try_with_events(|staged| {
+    let read = list.try_with_events(|staged| {
         for event in staged.events {
             // A bus past the sixteen Groups names none: the event is dropped and
             // counted on the stream, SysEx included.
@@ -219,6 +219,11 @@ pub fn drain_midi(list: &EventList, stream: &mut OutputStream, out: &mut RtMidiE
             }
         }
     });
+    if read.is_none() {
+        // A plugin thread holds the list (counted in the list's `busy`): what it
+        // wrote this block is unreadable, at least one event.
+        stream.count_list_busy();
+    }
 }
 
 /// Tests build SDK structs and counts by hand, so they repeat the bounded
