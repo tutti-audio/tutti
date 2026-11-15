@@ -151,7 +151,8 @@ jobs:
   # Lints what the Linux job cannot see: `#[cfg(windows)]` blocks, and casts that differ by platform (the vst3
   # bindings type SDK enum constants `c_uint` on unix and `c_int` on Windows). A native runner, because
   # `cargo xtask check-windows` cannot reach `ogg_next_sys` or `tutti-vst3-host`'s `conformance` build, which need
-  # real MSVC headers. Nothing runs tests here.
+  # real MSVC headers. The job also runs the tests of the two MIDI crates (`tutti-winmm-ffi`, `tutti-midi-hardware`)
+  # against the runner's own winmm; no other suite runs here.
   clippy-windows:
     name: clippy (windows)
     needs: changes
@@ -178,6 +179,16 @@ jobs:
       # WASAPI capture, which the `features` job lints only on Linux.
       - name: Device features
         run: cargo clippy --locked -p tutti-cpal --features capture --all-targets -- -D warnings
+      # The winmm MIDI backend against the runner's own winmm: no MIDI input,
+      # and the built-in GS Wavetable Synth listed. Only these two crates, so
+      # the build is the two and their dependencies.
+      # Opening the synth needs an audio endpoint, which the runner lacks:
+      # `synth-tests` is linted here and run on a Windows machine with sound.
+      - name: MIDI synth tests (lint)
+        run: cargo clippy --locked -p tutti-winmm-ffi -p tutti-midi-hardware --features tutti-winmm-ffi/synth-tests,tutti-midi-hardware/synth-tests --all-targets -- -D warnings
+      - uses: taiki-e/install-action@nextest
+      - name: MIDI backend tests
+        run: cargo nextest run --locked -p tutti-winmm-ffi -p tutti-midi-hardware
 
   # Every AU crate is macOS-only, so the Linux and Windows jobs compile it to nothing. Lints only: the AU
   # suites need installed audio units and run locally.

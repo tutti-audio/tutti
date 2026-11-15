@@ -398,6 +398,25 @@ fn a_locate_while_stopped_sends_a_locate_and_no_play() {
     );
 }
 
+/// **A locate to a time no time code names sends nothing and is counted**
+/// (RP-013 p.8: hours are 0 to 23): a day of beats out is refused by the
+/// sender, and the output's drop count rises by exactly the one look; standing
+/// there afterwards adds nothing.
+#[test]
+fn a_locate_no_time_code_names_is_counted_and_sends_nothing() {
+    let wire = Wire::default();
+    let mut s = sender(&wire, Recipient::AllCall);
+    let before = s.midi().out_drops();
+    s.locate(Beat(4_000_000.0)).unwrap();
+    blocks(&s, 1);
+    let _ = s.update();
+    assert!(wire.messages().is_empty());
+    assert_eq!(s.midi().out_drops(), before + 1);
+    blocks(&s, 1);
+    let _ = s.update();
+    assert_eq!(s.midi().out_drops(), before + 1);
+}
+
 /// **Off by default and stoppable**: with no call nothing is sent; after
 /// `stop_sending_machine_control` the transport's motion is not sent, and
 /// stopping twice is refused by name.

@@ -321,6 +321,20 @@ impl Sysex7Packet {
         })
     }
 
+    /// The packet of exactly these bytes. `N` is at most 6, checked when the
+    /// call is compiled, and each byte is a `U7`, so nothing can fail.
+    #[must_use]
+    pub fn from_bytes<const N: usize>(status: SysexStatus, data: [U7; N]) -> Self {
+        const { assert!(N <= 6, "a SysEx7 packet holds at most six bytes") };
+        let mut bytes = [U7::default(); 6];
+        bytes[..N].copy_from_slice(&data);
+        Self {
+            status,
+            len: N as u8,
+            bytes,
+        }
+    }
+
     /// The packet's role.
     #[must_use]
     pub const fn status(&self) -> SysexStatus {

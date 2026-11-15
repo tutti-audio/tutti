@@ -47,7 +47,11 @@ use crate::tuning::TuningMessage;
 
 pub use machine_control::*;
 
-use tutti_ump::{DeviceIdentity, MidiGroup, SysexAssembler, SysexMessage, SysexStep, U7, U14, Ump};
+use tutti_types::Seconds;
+use tutti_ump::{
+    DeviceIdentity, Message, MidiGroup, Sysex7Packet, SysexAssembler, SysexMessage, SysexStatus,
+    SysexStep, U7, U14, Ump,
+};
 
 tutti_types::ranged! {
     /// A device's own Universal System Exclusive id: `00` to `7E`. `7F` is the
@@ -102,6 +106,26 @@ impl MtcTimeCode {
         }
     }
 
+    /// The position of the frame nearest `seconds` at `rate`
+    /// ([`SmpteTimecode::from_seconds`]).
+    #[must_use]
+    pub fn at(seconds: Seconds, rate: MtcRate) -> Self {
+        Self {
+            rate,
+            timecode: SmpteTimecode::from_seconds(seconds, rate.frame_rate()),
+        }
+    }
+
+    /// The position of frame number `count` since `00:00:00:00` at `rate`
+    /// ([`SmpteTimecode::from_frame_count`]); hours wrap at 24.
+    #[must_use]
+    pub fn from_frame_count(count: u64, rate: MtcRate) -> Self {
+        Self {
+            rate,
+            timecode: SmpteTimecode::from_frame_count(count, rate.frame_rate()),
+        }
+    }
+
     /// The frame rate.
     #[must_use]
     pub const fn rate(self) -> MtcRate {
@@ -112,6 +136,52 @@ impl MtcTimeCode {
     #[must_use]
     pub const fn timecode(self) -> SmpteTimecode {
         self.timecode
+    }
+
+    /// The eight Quarter Frame nibbles that state this position (M1 p.53,
+    /// T-9), in piece order: frames low and high, seconds low and high,
+    /// minutes low and high, hours low, and hours high over the rate code.
+    #[must_use]
+    pub const fn nibbles(self) -> [u8; 8] {
+        let t = self.timecode;
+        let (h, m, s, f) = (t.hours(), t.minutes(), t.seconds(), t.frames());
+        [
+            f & 0x0F,
+            f >> 4,
+            s & 0x0F,
+            s >> 4,
+            m & 0x0F,
+            m >> 4,
+            h & 0x0F,
+            ((h >> 4) & 0x01) | (self.rate.code() << 1),
+        ]
+    }
+
+    /// The Quarter Frame data bytes (`0nnn dddd`, piece number over nibble) a
+    /// generator sends for this position, in the order of the pieces.
+    #[must_use]
+    pub const fn quarter_frames(self) -> [U7; 8] {
+        let nibbles = self.nibbles();
+        let mut bytes = [U7::masked(0); 8];
+        let mut piece = 0;
+        while piece < 8 {
+            bytes[piece] = U7::masked(((piece as u8) << 4) | nibbles[piece]);
+            piece += 1;
+        }
+        bytes
+    }
+
+    /// The position the eight nibbles of a completed cycle state, the inverse
+    /// of [`nibbles`](Self::nibbles). The bits the spec reserves are not read:
+    /// the top bits of each field, and the top bit of the last piece above its
+    /// rate code. `None` for a position no clock reads (hour 24, frame 31).
+    #[must_use]
+    pub const fn from_nibbles(n: [u8; 8]) -> Option<Self> {
+        let frames = (n[0] & 0x0F) | ((n[1] & 0x01) << 4);
+        let seconds = (n[2] & 0x0F) | ((n[3] & 0x03) << 4);
+        let minutes = (n[4] & 0x0F) | ((n[5] & 0x03) << 4);
+        let hours = (n[6] & 0x0F) | ((n[7] & 0x01) << 4);
+        Self::new(MtcRate::masked(n[7] >> 1), hours, minutes, seconds, frames)
     }
 }
 
@@ -173,6 +243,35 @@ impl MtcFullMessage {
         self.0.timecode().frames()
     }
 
+    /// The two SysEx7 packets of [`payload`](Self::payload) on `group`: a
+    /// Start of six bytes and an End of two.
+    #[must_use]
+    pub fn packets(self, group: MidiGroup) -> [Ump; 2] {
+        let [a, b, c, d, e, f, g, h] = self.payload().map(U7::masked);
+        [
+            Sysex7Packet::from_bytes(SysexStatus::Start, [a, b, c, d, e, f]),
+            Sysex7Packet::from_bytes(SysexStatus::End, [g, h]),
+        ]
+        .map(|packet| Ump::from(Message::Sysex7(group, packet)))
+    }
+
+    /// The bytes between `F0` and `F7`: `7F 7F 01 01 hr mn sc fr` (M1 p.53),
+    /// the Real Time header to all devices, then the position with `hr` as
+    /// `0rrhhhhh`. [`packets`](Self::packets) carries it as SysEx7.
+    #[must_use]
+    pub const fn payload(self) -> [u8; 8] {
+        [
+            read::REAL_TIME,
+            Recipient::AllCall.device_byte(),
+            0x01,
+            0x01,
+            (self.rate().code() << 5) | self.hours(),
+            self.minutes(),
+            self.seconds(),
+            self.frames(),
+        ]
+    }
+
     /// The message of the four data bytes `hr mn sc fr` that follow `01 01`:
     /// `hr` is `0rrhhhhh`, the rate code over the hours. `None` for a byte
     /// that is not a data byte or a field out of range.
@@ -182,6 +281,12 @@ impl MtcFullMessage {
             return None;
         }
         Self::new(MtcRate::masked(hr >> 5), hr & 0x1F, mn, sc, fr)
+    }
+}
+
+impl From<MtcTimeCode> for MtcFullMessage {
+    fn from(time: MtcTimeCode) -> Self {
+        Self(time)
     }
 }
 
@@ -195,6 +300,16 @@ pub enum Recipient {
 }
 
 impl Recipient {
+    /// The Device ID byte a message to this recipient carries: `7F` for the
+    /// all-call.
+    #[must_use]
+    pub const fn device_byte(self) -> u8 {
+        match self {
+            Self::AllCall => 0x7F,
+            Self::Device(device) => device.get(),
+        }
+    }
+
     /// The recipient a header byte names.
     #[must_use]
     pub const fn of_byte(id: U7) -> Self {

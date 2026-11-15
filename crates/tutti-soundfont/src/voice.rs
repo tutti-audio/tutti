@@ -237,9 +237,11 @@ impl Voice {
         self.note = NoteControls::DEFAULT;
 
         if velocity > 0 {
-            // According to the Polyphone's implementation, the initial attenuation should be reduced to 40%.
-            // I'm not sure why, but this indeed improves the loudness variability.
-            let sample_attenuation = 0.4_f32 * region.initial_attenuation();
+            // The note's level in dB: the default velocity modulator (SF2 8.4.1, 960 cB on
+            // the concave curve, read as 40 log10(v / 127) dB; at v = 1 this gives 84 dB, not
+            // the curve's 127/128 of 960 cB), less generator 48's attenuation whole (8.1.2),
+            // less half of generator 9's resonance, the DC cut the filter's Q brings (8.1.2).
+            let sample_attenuation = region.initial_attenuation();
             let filter_attenuation = 0.5_f32 * region.initial_filter_q();
             let decibels = 2_f32 * SoundFontMath::linear_to_decibels(velocity as f32 / 127_f32)
                 - sample_attenuation

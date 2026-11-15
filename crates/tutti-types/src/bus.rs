@@ -23,7 +23,7 @@ enum Repr {
 ///
 /// The same set a [`ChannelTopology`] is, bounded by [`MAX_CHANNELS`] and
 /// `Copy`. It may be empty (a bus the plugin declares with no channels), and
-/// then a fold from or to it is `tutti_buffers::FoldError::Empty`,
+/// then a fold from or to it is a `tutti_buffers::FoldError::Buffer` of a zero width,
 /// as for any empty topology.
 ///
 /// `new` refuses a list wider than a bus can hold, and a repeated named
