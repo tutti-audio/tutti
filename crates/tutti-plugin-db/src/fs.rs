@@ -9,34 +9,14 @@ use tracing::debug;
 /// Disambiguates concurrent temp files within one process.
 static TMP_COUNTER: tutti_types::Mint = tutti_types::Mint::new();
 
-/// The one extension → format table: the single source of truth for which
-/// file extensions name a plugin. VST2 ships as a bare shared library on
-/// Windows and Linux, so its rows are `dll` and `so`.
-///
-/// Entries are lowercase; candidates are lowercased before comparison.
-const FORMAT_BY_EXTENSION: &[(&str, PluginFormat)] = &[
-    ("vst3", PluginFormat::Vst3),
-    ("vst", PluginFormat::Vst2),
-    ("dll", PluginFormat::Vst2),
-    ("so", PluginFormat::Vst2),
-    ("clap", PluginFormat::Clap),
-    ("component", PluginFormat::AudioUnit),
-];
-
 /// Infers the [`PluginFormat`] from a path's extension.
 ///
-/// Matching is **case-insensitive**. macOS (APFS/HFS+ by default) and Windows
-/// (NTFS) are case-insensitive volumes, so a vendor shipping `Reverb.VST3` is
-/// a real and common case. Matching case-sensitively would make those bundles
-/// invisible — and since a `.VST3` bundle *is* a directory, the scanner would
-/// recurse *into* it and silently find nothing.
+/// The extension decides through [`PluginFormat::from_extension`]
+/// (case-insensitive); a path with no extension, or one no format claims, is
+/// `None`.
 pub fn format_from_path(path: impl AsRef<Path>) -> Option<PluginFormat> {
     let ext = path.as_ref().extension().and_then(|s| s.to_str())?;
-    let ext = ext.to_ascii_lowercase();
-    FORMAT_BY_EXTENSION
-        .iter()
-        .find(|(known, _)| *known == ext)
-        .map(|(_, format)| *format)
+    PluginFormat::from_extension(ext).ok()
 }
 
 impl FileFacts {

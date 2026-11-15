@@ -7,22 +7,14 @@ use tutti_fixtures::main_thread;
 use crate::active;
 use active::{Active, ActiveExt};
 
-/// Resolve a macOS `.vst3` bundle directory to its inner binary so
-/// `Vst3Active::load` can `dlopen` it. Mirrors the helper in
-/// `vst3_process_no_alloc.rs`.
+/// The loadable binary inside a `.vst3` bundle directory; a file or a path
+/// that is no bundle stays as it is.
 fn resolve_bundle(path: &Path) -> PathBuf {
-    if path.is_file() || !path.is_dir() {
-        return path.to_path_buf();
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        let candidate = path.join("Contents").join("MacOS").join(stem);
-        if candidate.is_file() {
-            return candidate;
-        }
-    }
-    path.to_path_buf()
+    tutti_plugin_types::bundle::native_module_path(
+        path,
+        tutti_plugin_types::bundle::ModuleKind::Vst3,
+    )
+    .unwrap_or_else(|e| panic!("{e}"))
 }
 
 /// Every VST3 bundle these tests load: the in-repo `audio-probe`, which the
