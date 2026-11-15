@@ -44,7 +44,7 @@ pub const DEFAULT_BLOCK: MaxBlock = MaxBlock::of(Samples(256));
 ///   re-anchors the schedule at the present, and records one
 ///   [`StreamFaultKind::Overrun`](crate::StreamFaultKind::Overrun).
 /// - The block clock reads each block's *deadline* as the block's OS time,
-///   never the wake-up that ran it ([`OutputBlock::render_at`]), so a reader
+///   never the wake-up that ran it (`OutputBlock::render_at`), so a reader
 ///   that maps frames to the OS clock sees no one-sided jitter.
 ///
 /// The block is the stream's [`quantum`](OutputSpec::quantum), or
