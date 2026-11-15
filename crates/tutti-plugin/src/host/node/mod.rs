@@ -435,7 +435,8 @@ impl PluginClient<Unbound> {
             params,
             ParameterChanges::SPARE_QUEUES,
             Some(controls.clone()),
-        );
+        )
+        .map_err(|e| failed(e.to_string()))?;
         Ok(Self {
             bridge,
             descriptor,
