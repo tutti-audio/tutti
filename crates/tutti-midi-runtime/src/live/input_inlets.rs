@@ -134,7 +134,7 @@ impl InputInlets {
         let id = self.last.fetch_add(1, Ordering::Relaxed) + 1;
         let (node, writer) = EventInletNode::pair(self.capacity);
         let input = DeviceInput {
-            id: InputId(NonZeroU64::new(id).expect("an id after the first add is above zero")),
+            id: InputId(NonZeroU64::new(id).unwrap_or(NonZeroU64::MAX)),
             counts: writer.counts(),
             writer,
             clock: self.clock.reader(),

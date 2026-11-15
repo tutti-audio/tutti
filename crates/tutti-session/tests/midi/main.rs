@@ -12,7 +12,7 @@ mod midi;
 #[cfg(feature = "midi-hardware")]
 mod midi_ports;
 // Route rules: the union of two on one target, and a disabled one.
-#[cfg(feature = "midi")]
+#[cfg(feature = "midi-hardware")]
 mod midi_routes;
 // A clip's velocity keeps its 16 bits to the event input.
 #[cfg(feature = "midi")]

@@ -66,7 +66,7 @@ impl DeviceEpochs {
         let cell = &self.cells[input];
         // Even (no device): one step to odd. Odd (a device that never left):
         // two, so the node still sees a change.
-        let step = if cell.epoch.load(Ordering::Relaxed) % 2 == 0 {
+        let step = if cell.epoch.load(Ordering::Relaxed).is_multiple_of(2) {
             1
         } else {
             2

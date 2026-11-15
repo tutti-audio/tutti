@@ -3,28 +3,38 @@
 //! renders. A [`Tap`] stands in for a synth: it logs every MIDI event its
 //! event input receives with its absolute frame.
 
-use crate::common::{MF, Seen, blocks, note, offline, play, tap, with_input};
+#[cfg(feature = "midi-hardware")]
+use crate::common::with_input;
+use crate::common::{MF, Seen, blocks, note, offline, play, tap};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_graph::UmpAt;
 use tutti_session::Stamp;
 
 use std::time::{Duration, Instant};
+#[cfg(feature = "midi-hardware")]
 use tutti_graph::NodeKey;
 use tutti_graph::Refused;
 #[cfg(feature = "midi-hardware")]
 use tutti_midi_hardware::{EndpointId, PortDirection};
-use tutti_midi_runtime::{CHANNELLESS_PORT, LIVE_INLET_CAPACITY, MIDI_INPUT_PORTS, TimedMidiEvent};
+#[cfg(feature = "midi-hardware")]
+use tutti_midi_runtime::{CHANNELLESS_PORT, MIDI_INPUT_PORTS};
+use tutti_midi_runtime::{LIVE_INLET_CAPACITY, TimedMidiEvent};
 use tutti_types::{Beat, BeatDuration, Frame, SampleRate};
 #[cfg(feature = "midi-hardware")]
+use tutti_ump::MidiGroup;
+#[cfg(feature = "midi-hardware")]
 use tutti_ump::Ump;
-use tutti_ump::{KeyEvent, MidiChannel, MidiGroup, NoteNumber, NoteVelocity};
+use tutti_ump::{KeyEvent, MidiChannel, NoteNumber, NoteVelocity};
 
 use tutti_fixtures::midi;
 use tutti_session::{
-    EventInPort, EventOutPort, Feeder, MIDI_OUT_DROP_REPORT, MidiError, MidiEvent, MidiRouteRule,
-    NoSuchMidiRoute, PHASES, PhaseCx, RouteDeclarer, Session, SessionEvent, UmpOut,
+    EventInPort, EventOutPort, Feeder, MIDI_OUT_DROP_REPORT, MidiError, MidiEvent, PHASES, PhaseCx,
+    Session, SessionEvent, UmpOut,
 };
+#[cfg(feature = "midi-hardware")]
+use tutti_session::{MidiRouteRule, NoSuchMidiRoute, RouteDeclarer};
+#[cfg(feature = "midi-hardware")]
 use tutti_session::{Peer as _, Resource as _};
 use tutti_ump::{Message, Voice2};
 
@@ -323,6 +333,7 @@ fn a_live_inputs_keys_send_in_order_and_are_handed_out_once() {
 /// any-channel rule all of them, a channel rule its channel's and the
 /// channelless one; the fallback the ports no rule covers; unrouting
 /// unwires.
+#[cfg(feature = "midi-hardware")]
 #[test]
 fn route_rules_wire_the_hardware_input() {
     let (mut s, input) = with_input(None);
@@ -375,6 +386,7 @@ fn route_rules_wire_the_hardware_input() {
 /// builder asks for** (M2-104 Appendix B.1): channel 2 of Group 2 reaches its
 /// own listener through Group 2's ports, not Group 1's channel 2, and a rule
 /// for a Group the input does not hear wires nothing.
+#[cfg(feature = "midi-hardware")]
 #[test]
 fn a_route_rule_names_a_group() {
     let (mut s, input) = with_input(Some(MidiGroup::of(1)));
@@ -426,6 +438,7 @@ fn a_route_rule_names_a_group() {
 /// they are unrouted it applies, and then the session's own `route` and
 /// `set_route_fallback` are refused, until a `set_routes` with no rule and
 /// no fallback hands the routes back.
+#[cfg(feature = "midi-hardware")]
 #[test]
 fn the_routes_have_one_declarer() {
     let (mut s, input) = with_input(None);
@@ -577,6 +590,7 @@ fn dropped_ticks_are_reported_at_most_once_a_second() {
 /// and an input port's ingest node (its MPE mode). What each reclaimer frees is
 /// pinned in `tutti-midi-runtime` with a held loan, and the sweep of the
 /// graph's reclaimers in `tests/wiring/graph.rs`.
+#[cfg(feature = "midi-hardware")]
 #[test]
 fn the_sessions_midi_nodes_keep_their_reclaimers() {
     let (mut s, input) = with_input(None);

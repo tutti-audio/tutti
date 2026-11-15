@@ -437,6 +437,7 @@ pub struct Declared<K, E> {
 
 impl<K, E> Declared<K, E> {
     /// The entry, for a kind's builder to set its options on.
+    #[cfg(feature = "midi-hardware")]
     pub(crate) fn entry_mut(&mut self) -> &mut E {
         &mut self.entry
     }

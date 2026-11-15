@@ -82,13 +82,13 @@ pub(crate) const FOLLOW_TAP_CAPACITY: tutti_graph::EventCapacity =
 /// What [`Midi::follow_tempo`](crate::Midi::follow_tempo) follows.
 ///
 /// The source is a Group's Flex Data Set Tempo (and Set Time Signature) on an
-/// input port's ingest node ([`MidiInput::node`](crate::MidiInput::node)).
+/// input port's ingest node (`MidiInput::node`).
 /// MIDI Beat Clock and MIDI Time Code are followed with
 /// [`Midi::follow_clock`](crate::Midi::follow_clock) and [`FollowClock`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FollowTempo {
     /// The input port followed: its ingest node
-    /// ([`MidiInput::node`](crate::MidiInput::node)).
+    /// (`MidiInput::node`).
     pub input: tutti_graph::NodeKey,
     /// The Group followed. A Group is a cable of its own (M2-104 §2.1.2,
     /// Appendix B.1); the Group must be one the input hears
@@ -107,13 +107,13 @@ pub(crate) const CLOCK_TAP_CAPACITY: tutti_graph::EventCapacity =
 /// What [`Midi::follow_clock`](crate::Midi::follow_clock) follows.
 ///
 /// One Group of an input port
-/// ([`MidiInput::node`](crate::MidiInput::node)) is read for one kind of
+/// (`MidiInput::node`) is read for one kind of
 /// clock. A device that sends both Beat Clock and MTC is followed for one: the
 /// session has one transport and one authority for its position.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FollowClock {
     /// The input port followed: its ingest node
-    /// ([`MidiInput::node`](crate::MidiInput::node)).
+    /// (`MidiInput::node`).
     pub input: tutti_graph::NodeKey,
     /// The Group followed. A Group is a cable of its own (M2-104 §2.1.2,
     /// Appendix B.1); the Group must be one the input hears
@@ -131,14 +131,14 @@ pub(crate) const MACHINE_TAP_CAPACITY: tutti_graph::EventCapacity =
 
 /// What [`Midi::follow_machine_control`](crate::Midi::follow_machine_control)
 /// follows: MIDI Machine Control commands (RP-013) on one Group of an input port
-/// ([`MidiInput::node`](crate::MidiInput::node)).
+/// (`MidiInput::node`).
 ///
 /// MMC carries no clock and no tempo, so it follows beside a
 /// [`FollowClock`] and never contends with it for the tempo map.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FollowMachineControl {
     /// The input port followed: its ingest node
-    /// ([`MidiInput::node`](crate::MidiInput::node)).
+    /// (`MidiInput::node`).
     pub input: tutti_graph::NodeKey,
     /// The Group followed. A Group is a cable of its own (M2-104 §2.1.2,
     /// Appendix B.1); the Group must be one the input hears

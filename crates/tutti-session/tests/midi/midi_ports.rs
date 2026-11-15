@@ -17,7 +17,7 @@ use tutti_session::{
     midi_input, midi_output,
 };
 use tutti_types::{Beat, BeatDuration, SampleRate};
-use tutti_ump::{KeyEvent, MidiChannel};
+use tutti_ump::{Address, CCNumber, KeyEvent, Message, MidiChannel, MidiGroup, U7, Voice2};
 
 const RATE: f64 = 48_000.0;
 
@@ -312,9 +312,42 @@ fn a_released_handle_reads_closed_and_the_port_goes() {
     assert!(!s.graph_ref().contains(node), "the ingest node went");
 }
 
-/// **The notes a device holds are released when its port goes**: a key down on
-/// the device sounds on the synth the route feeds, and the entry's removal ends
-/// it with a note off, before the ingest node is taken out.
+/// How many times the sustain pedal went up (a controller 64 of value 0) in what
+/// the synth heard.
+fn pedal_ups(seen: &Seen) -> usize {
+    seen.lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, e)| {
+            matches!(
+                e.decode(),
+                Ok(Message::Midi2(_, Voice2::ControlChange { controller, value }))
+                    if controller == CCNumber::SUSTAIN && value.get() == 0
+            )
+        })
+        .count()
+}
+
+/// How many times a pitch bend returned to centre in what the synth heard.
+fn centred_bends(seen: &Seen) -> usize {
+    seen.lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, e)| {
+            matches!(
+                e.decode(),
+                Ok(Message::Midi2(_, Voice2::PitchBend(v))) if v.get() == 0x8000_0000
+            )
+        })
+        .count()
+}
+
+/// **What a device holds is released when its port goes**: a key, the sustain
+/// pedal and a bend off centre on the device sound on the synth the route feeds,
+/// and the entry's removal ends them with a note off, a pedal up and a centred
+/// bend, before the ingest node is taken out. (The executor's close of the
+/// inlet's edge ends the keys and the pedal; the bend is the ingest node's own
+/// release alone.)
 #[test]
 fn held_notes_are_released_when_the_port_is_removed() {
     let (mut s, fake) = session();
@@ -329,14 +362,27 @@ fn held_notes_are_released_when_the_port_is_removed() {
     let _ = s.update();
     roll(&s, 1_024);
     assert!(fake.send_input(EndpointId::from_raw(1), key(2, 60), Instant::now()));
+    let pedal = midi::m1_cc(MidiChannel::of(2), CCNumber::SUSTAIN, U7::of(127));
+    assert!(fake.send_input(EndpointId::from_raw(1), pedal, Instant::now()));
+    let bend = midi::pitch_bend(
+        Address::new(MidiGroup::FIRST, MidiChannel::of(2)),
+        0xC000_0000,
+    );
+    assert!(fake.send_input(EndpointId::from_raw(1), bend, Instant::now()));
     roll(&s, 8_192);
     assert_eq!(note_ons(&seen), [60]);
     assert!(note_offs(&seen).is_empty(), "the key is still down");
+    assert_eq!(pedal_ups(&seen), 0, "the pedal is still down");
+    assert_eq!(centred_bends(&seen), 0, "the bend is still off centre");
     let node = s.midi_input(&"keys").expect("loaded").node();
 
     s.pool(Vec::<Declared<Keys, MidiInputEntry>>::new())
         .expect("declares nothing");
     let _ = s.update();
+    assert!(
+        s.graph_ref().contains(node),
+        "the node stays until its release has gone out"
+    );
     blocks(&s, 2);
     assert_eq!(
         note_offs(&seen),

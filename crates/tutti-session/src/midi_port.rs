@@ -312,7 +312,7 @@ pub struct MidiOutputEntry {
 }
 
 /// Declares the output port of the saved device `saved` under `key`, opened
-/// with no options ([`MidiOutputEntry::options`] sets them).
+/// with no options (`.options(..)` on the declared entry sets them).
 pub fn midi_output<K>(key: K, saved: DeviceInfo) -> Declared<K, MidiOutputEntry> {
     Declared::new(
         key,

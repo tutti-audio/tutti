@@ -269,7 +269,7 @@ pub enum MidiError {
     NoEventInput(tutti_graph::NodeKey),
 
     /// A follower named a node that is not the ingest node of an input port
-    /// ([`MidiInput::node`](crate::MidiInput::node)).
+    /// (`MidiInput::node`).
     #[error("{0:?} is not the ingest node of a MIDI input port")]
     NotAnInput(tutti_graph::NodeKey),
 

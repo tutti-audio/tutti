@@ -336,7 +336,7 @@ impl std::fmt::Debug for SessionEvent {
 /// The engine's MIDI, as graph nodes the builder inserts: the clock (Beat Clock
 /// and MTC, off until a host enables it), with its controls. An input port's
 /// ingest node is not here: each `midi_input` entry makes its own
-/// ([`MidiInput::node`](crate::MidiInput::node)). The host's hardware out is
+/// (`MidiInput::node`). The host's hardware out is
 /// not a node: the session reads an event tap on the clock's output
 /// ([`Midi::set_hardware_out`](crate::Midi::set_hardware_out)), and a
 /// `midi_output` port's node is fed by the clock.
