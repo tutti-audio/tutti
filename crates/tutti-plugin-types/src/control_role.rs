@@ -8,7 +8,7 @@ use crate::ParamId;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// An axis of VST3's panner functions (`PanPosCenterX`, `Y`, `Z`).
+/// An axis of VST3's panner functions (PanPosCenterX, Y and Z).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Axis {
@@ -31,12 +31,12 @@ pub enum Axis {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
 pub enum ControlRole {
-    /// The plugin's own dry/wet blend (`DryWetMix`): `0` dry, `1` wet.
+    /// The plugin's own dry/wet blend (the DryWetMix function): `0` dry, `1` wet.
     Mix,
-    /// The pan position on an axis (`PanPosCenterX`, `PanPosCenterY`,
-    /// `PanPosCenterZ`).
+    /// The pan position on an axis (the PanPosCenterX, PanPosCenterY and
+    /// PanPosCenterZ functions).
     Pan(Axis),
-    /// The switch for low-latency operation (`LowLatencyMode`).
+    /// The switch for low-latency operation (the LowLatencyMode function).
     LowLatency,
 }
 

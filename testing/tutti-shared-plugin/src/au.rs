@@ -73,7 +73,7 @@ pub const AU_ID: &str = "au.aumf.Tshp.Tutt";
 /// The parameters of `ParametersForOverview`: the unit's headline controls.
 const OVERVIEW: [u32; 2] = [core::LEVEL, core::TONE];
 
-/// The controller `AllParameterMIDIMappings` maps to `level`, Control Change on
+/// The controller the unit's mapping table maps to `level`, Control Change on
 /// channel 0 (core, "VST3 controllers and flushes", as the VST3 shells map it).
 const MAPPED_CONTROLLER: u8 = 74;
 

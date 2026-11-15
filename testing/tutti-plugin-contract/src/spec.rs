@@ -71,7 +71,7 @@ pub enum Bypass {
 }
 
 /// The controller the plugin maps to a parameter, in the formats that carry a
-/// table (VST3 `IMidiMapping`, AU `AllParameterMIDIMappings`): Control Change
+/// table (VST3 `IMidiMapping`, AU's mapping table): Control Change
 /// 74 on channel 0 drives `level`.
 pub const MAPPED_CONTROLLER: u8 = 74;
 

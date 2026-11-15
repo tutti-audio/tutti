@@ -41,10 +41,10 @@
 //!   innermost of `Voices` > `Oscillator` > `Filter` (the units are declared and
 //!   hold nothing else), CLAP's module `Voices/Oscillator/Filter`, AU's clump 3
 //!   named `Filter`. The others have none; VST2 declares none.
-//! - **Roles** (VST3's `IParameterFunctionName`, asked per unit): `DryWetMix` is
-//!   `level` and `LowLatencyMode` is `mode` in the root unit, `PanPosCenterZ` is
-//!   `tone` in the root unit, `PanPosCenterX` is `aux` in the `Filter` unit. No other
-//!   format declares one.
+//! - **Roles** (VST3's `IParameterFunctionName`, asked per unit): the dry/wet mix
+//!   is `level` and the low-latency switch is `mode`, the Z pan position is `tone`,
+//!   all in the root unit, and the X pan position is `aux` in the `Filter` unit
+//!   (`FUNCTION_NAMES`). No other format declares one.
 //! - **Overview** (AU's `ParametersForOverview`): `level` and `tone`.
 //! - **Shape.** `mode` is a five-position selector: VST3 `stepCount` 4, CLAP
 //!   stepped over `0..=4`, AU indexed over `0..=4`, VST2 says nothing. The
@@ -54,7 +54,7 @@
 //!   in AU (no parameter), and none in VST2. A write reaches the transcript as
 //!   `bypass`'s point, `1` bypassed. The plugin renders the same either way.
 //! - **Controller table.** VST3's `IMidiMapping` and AU's
-//!   `AllParameterMIDIMappings` each declare one mapping: Control Change 74 on
+//!   mapping table each declare one mapping: Control Change 74 on
 //!   channel 0 drives `level`.
 //!
 //! # Faults

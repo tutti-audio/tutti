@@ -121,7 +121,7 @@ impl MidiCcMapping {
 
     /// The table as the plugin's declared assignments: one per mapped channel
     /// and message. Controller numbers past pitch bend (program change, poly
-    /// pressure and the system messages `ControllerNumbers` also lists) name no
+    /// pressure and the system messages the controller numbers also list) name no
     /// [`MidiSource`] and are left out.
     pub(crate) fn declared(&self) -> Vec<MidiAssignment> {
         let mut out = Vec::new();
