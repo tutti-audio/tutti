@@ -3,18 +3,18 @@
 
 use tutti_types::{SampleRate, Seconds};
 
-mod family;
+mod bank;
+mod layout;
 mod max_delay;
 mod routing;
+mod taps;
 mod times;
 
-pub use family::{
-    DELAY_SLEW, DelayCapacity, DelayControls, DelayFamily, DelayMember, DelayRecurrence,
-    MAX_DELAY_CHANNELS,
-};
-pub(crate) use family::{finite_or, read_taps, ring_seconds};
+pub use bank::{DelayBank, DelayGlides, DelayLanes};
+pub use layout::{DELAY_SLEW, DelayControls, DelayLayout, MAX_DELAY_CHANNELS};
 pub use max_delay::{MaxDelay, MaxDelayError};
 pub use routing::{Routing, RoutingError};
+pub(crate) use taps::{finite_or, read_taps, ring_seconds, trips};
 pub use times::{ChannelTimes, ChannelTimesError};
 
 /// How a fractional delay position is turned into a sample.

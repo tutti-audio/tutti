@@ -26,7 +26,7 @@ use tutti_graph::Node;
 use tutti_graph::contract::Direct;
 use tutti_nodes::{
     BrickwallLimiterNode, ChannelTimes, CompressorControls, CompressorNode, DelayControls,
-    DelayFamily, DelayNode, DistortionNode, FamilyNode, FdnControls, FreeverbNode, GateControls,
+    DelayLayout, DelayNode, DistortionNode, FamilyNode, FdnControls, FreeverbNode, GateControls,
     GateNode, InterpolationMode, KeySource, LimiterControls, LimiterNode, Lookahead, MaxDelay,
     ShapeKind,
 };
@@ -259,15 +259,15 @@ fn delay(c: &mut Criterion) {
         "delay",
         "2_cross",
         || {
-            let family = DelayFamily::new(
+            let layout = DelayLayout::new(
                 BusTopology::STEREO,
                 MaxDelay::of(Seconds::new(1.0)),
                 InterpolationMode::Linear,
             )
             .with_times(ChannelTimes::each(&[Seconds::new(0.3)]).expect("a time"))
             .expect("one time for the right channel");
-            DelayNode::live(
-                family,
+            DelayNode::from_layout(
+                layout,
                 DelayControls {
                     cross_feedback: Feedback::new(0.3),
                     ..delay_at_quarter()

@@ -20,9 +20,6 @@ crates/tutti-codec/src/wave.rs::Wave::channel_mut  pending
 crates/tutti-codec/src/wave.rs::Wave::from_samples  pending
 crates/tutti-codec/src/wave.rs::Wave::push_frame  pending
 crates/tutti-codec/src/writer.rs::FormatWriter::write  pending
-crates/tutti-cpal/src/driver_seam.rs::ManualStream::render_block  pending
-crates/tutti-cpal/src/driver_seam.rs::ManualStream::render_block_delayed  pending
-crates/tutti-cpal/src/output.rs::process_audio  pending
 crates/tutti-dsp/src/contract/harness.rs::Burst.signal  pending
 crates/tutti-dsp/src/contract/harness.rs::energy  pending
 crates/tutti-dsp/src/contract/harness.rs::noise  pending
@@ -50,7 +47,6 @@ crates/tutti-dsp/src/model/feed.rs::Feed::with_key  pending
 crates/tutti-dsp/src/model/feed.rs::Feed::with_lane  pending
 crates/tutti-dsp/src/model/realized.rs::Realized::process  pending
 crates/tutti-dsp/src/model/realized.rs::Recurrence::run  pending
-crates/tutti-dsp/src/modulation/allpass.rs::allpass_chain  pending
 crates/tutti-dsp/src/resample/fft.rs::FftResampler::process_into_buffer  pending
 crates/tutti-dsp/src/resample/streaming.rs::StreamingResampler::finish  pending
 crates/tutti-dsp/src/resample/streaming.rs::StreamingResampler::push  pending
@@ -64,8 +60,13 @@ crates/tutti-dsp/src/stft/window.rs::Window::coefficients  pending
 crates/tutti-dsp/src/waveshape.rs::ShapeKind::shape_block  pending
 crates/tutti-dsp/src/waveshape.rs::ShapeKind::shape_block_in_place  pending
 crates/tutti-dsp/src/waveshape.rs::ShapeKind::shape_block_per_frame  pending
+crates/tutti-engine/src/callback.rs::OutputBlock::render  engine-f32
+crates/tutti-engine/src/callback.rs::process_audio  pending
 crates/tutti-engine/src/engine.rs::Engine::process  pending
 crates/tutti-engine/src/engine.rs::Engine::process_segment  pending
+crates/tutti-engine/src/manual.rs::ManualStream::callback_once  engine-f32
+crates/tutti-engine/src/manual.rs::ManualStream::render_block  pending
+crates/tutti-engine/src/manual.rs::ManualStream::render_block_delayed  pending
 crates/tutti-export/src/rendered.rs::Rendered::interleaved  pending
 crates/tutti-export/src/rendered.rs::Rendered::interleaved_into  pending
 crates/tutti-export/src/rendered.rs::Rendered::into_planes  pending

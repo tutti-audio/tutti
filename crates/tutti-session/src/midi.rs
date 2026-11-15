@@ -125,14 +125,14 @@ fn os_instant(ns: i64) -> Option<Instant> {
 #[derive(Clone, Debug)]
 pub(crate) struct OutputClockSource {
     clock: tutti_engine::BlockClockReader,
-    audio_latency: std::sync::Arc<tutti_cpal::StreamLatency>,
+    audio_latency: std::sync::Arc<tutti_engine::StreamLatency>,
 }
 
 #[cfg(feature = "device")]
 impl OutputClockSource {
     pub(crate) fn new(
         clock: tutti_engine::BlockClockReader,
-        audio_latency: std::sync::Arc<tutti_cpal::StreamLatency>,
+        audio_latency: std::sync::Arc<tutti_engine::StreamLatency>,
     ) -> Self {
         Self {
             clock,
