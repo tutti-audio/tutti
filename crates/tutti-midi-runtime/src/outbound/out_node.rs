@@ -6,7 +6,8 @@
 //! node copies them to its event output, which the session's output port taps
 //! (`Graph::taps().open_event`) and drains to the device. It keeps no state
 //! between blocks, so its fork is a copy of it and sends nothing: a fork has no
-//! tap, and an offline render drives no external gear.
+//! tap, and an offline render drives no external gear. An event past
+//! [`MIDI_OUT_EVENT_CAPACITY`] in a block is not passed and is counted as lost.
 
 use tutti_graph::{Cx, Event, EventKind, Io, Node, Prepare, Shape, Status, UmpAt};
 
@@ -65,6 +66,7 @@ impl Node for MidiOutNode {
 
     fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let mut kept = 0;
+        let mut lost = 0;
         for event in io.events(0) {
             let EventKind::Midi(raw) = event.kind else {
                 continue;
@@ -72,7 +74,13 @@ impl Node for MidiOutNode {
             if let Some(slot) = self.staged.get_mut(kept) {
                 *slot = (event.offset, raw);
                 kept += 1;
+            } else {
+                lost += 1;
             }
+        }
+        if lost > 0 {
+            // Past the node's room: counted by the executor, as a refused push is.
+            io.count_lost(lost);
         }
         for (offset, raw) in &self.staged[..kept] {
             // Refused past the capacity: counted by the executor.

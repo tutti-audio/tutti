@@ -730,9 +730,15 @@ impl Ports {
         }
     }
 
-    /// The ingest nodes of the ports, for the routes to read.
+    /// The ingest nodes of the ports, and of those going, for the routes to read.
     pub(crate) fn input_nodes(&self) -> Vec<NodeKey> {
-        self.inputs.iter().map(|port| port.node).collect()
+        // A node going keeps its routes until it is taken out: its release goes
+        // out through them.
+        self.inputs
+            .iter()
+            .map(|port| port.node)
+            .chain(self.retiring.iter().map(|going| going.node))
+            .collect()
     }
 
     /// Whether `node` is the ingest node of an input port.

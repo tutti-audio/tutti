@@ -23,7 +23,7 @@ use tutti_midi_protocol::{
 };
 use tutti_midi_runtime::{
     CHANNELLESS_PORT, ClockNode, DeviceEpochs, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS,
-    MidiIngestNode, MidiInputPorts, MpeTransformNode,
+    MidiIngestNode, MidiInputPorts, MidiOutNode, MpeTransformNode,
 };
 use tutti_types::{Beat, Bpm, Frame, SampleRate, Samples};
 use tutti_ump::{
@@ -378,6 +378,92 @@ fn a_departed_devices_epoch_settles_only_after_a_block_has_run() {
     block(&mut exec, 512);
     assert!(epochs.is_settled(), "the block released and said so");
     assert_eq!(heard(&seen)[1], (512, "off 60".to_string()));
+}
+
+/// **A release that does not fit the block is owed, and the epoch settles only
+/// when it has gone**: a device holds 800 keys, more than the port's note-off
+/// room (584 at 512 events). Its departure's block sends what fits and the
+/// epoch stays unsettled; the next block's first frame sends the rest, and only
+/// then is the epoch settled.
+#[test]
+fn a_release_that_does_not_fit_is_owed_and_settles_when_it_has_gone() {
+    let keys = |first: u8| -> Vec<UmpAt> {
+        (0..400usize)
+            .map(|i| note(first + (i / 100) as u8, (i % 100) as u8, i))
+            .collect()
+    };
+    let epochs = DeviceEpochs::new();
+    epochs.arrive();
+    let wire = Script::new(vec![keys(0), keys(4), vec![], vec![]]);
+    let (_ed, mut exec, _c, seen) = ingest(following(wire, &epochs), MIDI_INPUT_PORTS as u16, 512);
+    let offs = |from: u64, to: u64| {
+        heard(&seen)
+            .iter()
+            .filter(|(frame, what)| (from..to).contains(frame) && what.starts_with("off"))
+            .count()
+    };
+    block(&mut exec, 512);
+    block(&mut exec, 512);
+    assert_eq!(heard(&seen).len(), 800, "every key is down");
+
+    epochs.depart();
+    block(&mut exec, 512);
+    assert_eq!(offs(1024, 1536), 584, "what the port has room for");
+    assert!(!epochs.is_settled(), "216 are still owed");
+    block(&mut exec, 512);
+    assert_eq!(
+        offs(1536, 2048),
+        216,
+        "the rest, at the next block's first frame"
+    );
+    assert!(
+        heard(&seen)
+            .iter()
+            .filter(|(frame, what)| *frame >= 1536 && what.starts_with("off"))
+            .all(|(frame, _)| *frame == 1536),
+        "on its first frame"
+    );
+    assert!(epochs.is_settled(), "now the release has gone");
+}
+
+/// **The output node counts what it cannot pass**: two sources feed it 1,200
+/// events in one block, past its room of `MIDI_OUT_EVENT_CAPACITY`; the ones it
+/// cannot pass are counted as lost.
+#[test]
+fn the_midi_out_node_counts_the_events_it_cannot_pass() {
+    let (_ed, mut exec, (), seen) =
+        rig_with(tutti_graph::ForkByClone(MidiOutNode::new()), 1, 512, |ed| {
+            for source in 0..2u64 {
+                let (inlet, mut writer) = EventInletNode::pair(EventCapacity::of(4096));
+                for i in 0..600u64 {
+                    writer
+                        .push(Stamp::Frame(Frame::new(i % 512)), note_on_ump(i))
+                        .expect("room");
+                }
+                let key = NodeKey(3 + source);
+                ed.insert(key, "source", inlet);
+                ed.spec_mut().connect_events(
+                    EventIn {
+                        node: NodeKey(1),
+                        port: 0,
+                    },
+                    EventEdge::Direct(EventOut { node: key, port: 0 }),
+                );
+            }
+        });
+    block(&mut exec, 512);
+    let passed = seen.lock().unwrap().len() as u64;
+    let lost = exec.dropped_event_count();
+    assert_eq!(
+        passed + lost,
+        1_200,
+        "every event passed or counted: {passed} + {lost}"
+    );
+    assert!(lost >= 1_200 - tutti_midi_runtime::MIDI_OUT_EVENT_CAPACITY as u64);
+}
+
+fn note_on_ump(i: u64) -> Ump {
+    midi::note_on(MidiChannel::of((i % 16) as u8), (i % 100) as u8, 0x8000)
 }
 
 /// **An input a new device takes starts empty**: device 0 selects an RPN in

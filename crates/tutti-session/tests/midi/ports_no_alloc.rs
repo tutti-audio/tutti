@@ -2,6 +2,8 @@
 //! allocating, events flowing: a device's notes through its ingest node to a
 //! routed synth, and the session's clock through the output port's node.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use crate::common::{MF, play};
@@ -14,17 +16,18 @@ use tutti_session::{MidiRouteRule, Session, midi_input, midi_output};
 use tutti_types::ChannelLayout;
 use tutti_ump::MidiChannel;
 
-/// A stand-in synth that takes events and keeps none (the common `Tap` logs
-/// them, which allocates).
+/// A stand-in synth that counts the events it takes and keeps none (the common
+/// `Tap` logs them, which allocates).
 #[derive(Clone)]
-struct Sink;
+struct Sink(Arc<AtomicUsize>);
 
 impl Node for Sink {
     fn shape(&self) -> Shape {
         Shape::EMPTY.with_events(1, 0)
     }
     fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
+    fn process(&mut self, _: &Cx<'_>, io: Io<'_>) -> Status {
+        self.0.fetch_add(io.events(0).len(), Ordering::Relaxed);
         Status::Modified
     }
     fn reset(&mut self) {}
@@ -42,7 +45,8 @@ fn an_input_and_an_output_port_render_without_allocating() {
         .build()
         .expect("builds");
     let _ = s.update();
-    let (synth, _) = s.graph().add(ForkByClone(Sink));
+    let heard = Arc::new(AtomicUsize::new(0));
+    let (synth, _) = s.graph().add(ForkByClone(Sink(Arc::clone(&heard))));
     let synth = synth.erase();
     s.midi()
         .route(MidiRouteRule::any_channel().to(synth))
@@ -79,5 +83,14 @@ fn an_input_and_an_output_port_render_without_allocating() {
         }
     });
     let _ = s.update();
+    assert!(
+        heard.load(Ordering::Relaxed) >= 200,
+        "the device's notes reached the routed synth through the ingest node: {}",
+        heard.load(Ordering::Relaxed)
+    );
+    assert!(
+        !fake.take_sent(EndpointId::from_raw(10)).is_empty(),
+        "the output node forwarded the clock to the device"
+    );
     assert!(s.midi_input(&"keys").unwrap().node() != s.midi_output(&"synth").unwrap().node());
 }

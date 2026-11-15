@@ -578,6 +578,8 @@ fn held_notes_are_released_when_the_port_is_removed() {
         [60],
         "the port's removal released the key"
     );
+    assert_eq!(pedal_ups(&seen), 1, "and the pedal");
+    assert_eq!(centred_bends(&seen), 1, "and the bend");
     let _ = s.update();
     assert!(!s.graph_ref().contains(node), "and the node went after");
 }

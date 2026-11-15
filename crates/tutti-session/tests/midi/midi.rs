@@ -1154,9 +1154,11 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
 
     let (mut s, fake) = hot_plug_session();
     plug(&fake, 7, "Wire", PortDirection::Duplex);
+    plug(&fake, 8, "Other", PortDirection::Input);
     let _ = s.update();
-    connect(&mut s, &["wire"]);
+    connect(&mut s, &["wire", "other"]);
     let port = s.midi_input(&"wire").expect("loaded");
+    let other = s.midi_input(&"other").expect("loaded");
     let identity = |manufacturer| DeviceIdentity {
         manufacturer,
         family: [U7::of(1); 2],
@@ -1309,6 +1311,56 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     let [ListedProfile::Channel(c)] = listed.as_slice() else {
         panic!("one Profile on a Channel: {listed:?}");
     };
+    // A switch made from this input names a peer another input does not have.
+    assert!(matches!(
+        other.set_profile(c.disable()),
+        Err(tutti_session::PeerError::Refused(
+            tutti_midi_hardware::ProfileError::NotOpen
+        ))
+    ));
+    // The peer lists a second Profile and then takes it off: a switch made while
+    // it was listed is refused at the call as no longer listed.
+    let second = ProfileId::Standard(StandardProfile::new(
+        U7::of(0x21),
+        U7::of(3),
+        U7::of(1),
+        U7::of(1),
+    ));
+    let say = |s: &mut Session, message: CiMessage| {
+        let now = Instant::now();
+        for ump in message.packets(MidiGroup::FIRST) {
+            assert!(fake.send_input(raw, ump, now));
+        }
+        for ms in 0..4 {
+            let _ = update_at(s, now + Duration::from_millis(ms));
+        }
+    };
+    let header = at(CiDeviceId::Channel(c.channel()));
+    say(
+        &mut s,
+        CiMessage::ProfileAdded {
+            header,
+            profile: second,
+        },
+    );
+    let info = port.info();
+    let stale = info.profiles()[0]
+        .listed()
+        .find(|listed| listed.profile() == second)
+        .expect("the second Profile is listed");
+    say(
+        &mut s,
+        CiMessage::ProfileRemoved {
+            header,
+            profile: second,
+        },
+    );
+    assert!(matches!(
+        port.set_profile(stale.disable()),
+        Err(tutti_session::PeerError::Refused(
+            tutti_midi_hardware::ProfileError::NotListed
+        ))
+    ));
     // A request the call accepts and the device then leaves before the next
     // update ends as an event with its reason.
     port.set_profile(c.disable()).expect("the peer lists it");
@@ -1660,9 +1712,11 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
 
     let (mut s, fake) = hot_plug_session();
     plug(&fake, 7, "Wire", PortDirection::Duplex);
+    plug(&fake, 8, "Other", PortDirection::Input);
     let _ = s.update();
-    connect(&mut s, &["wire"]);
+    connect(&mut s, &["wire", "other"]);
     let port = s.midi_input(&"wire").expect("loaded");
+    let other = s.midi_input(&"other").expect("loaded");
     let identity = |manufacturer| DeviceIdentity {
         manufacturer,
         family: [U7::of(1); 2],
@@ -1812,6 +1866,13 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
     // once the device is back with no peers found, a request made from the old
     // listing is refused at the call.
     let ask = port.info().report_peers()[0].ask(ReportRequest::new(DataControl::Full, asked));
+    // A request made from this input names a peer another input does not have.
+    assert!(matches!(
+        other.report(ask.clone()),
+        Err(tutti_session::PeerError::Refused(
+            tutti_midi_hardware::ReportError::NotOpen
+        ))
+    ));
     port.report(ask.clone()).expect("the peer supports it");
     fake.unplug(raw);
     let events = s.update();

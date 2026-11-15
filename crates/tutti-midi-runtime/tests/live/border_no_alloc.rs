@@ -18,7 +18,7 @@ use tutti_ump::{MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7, Ump};
 
 use crate::common;
 use tutti_fixtures::midi;
-use tutti_ump::{Address, BendValue, ControlValue, Message, Voice2};
+use tutti_ump::{Address, BendValue, ControlValue, KeyEvent, Message, Voice2};
 fn note_on(ch: u8, note: u8) -> Ump {
     midi::note_on(MidiChannel::of(ch), note, 0x8000)
 }
@@ -129,6 +129,7 @@ fn an_epoch_change_processes_without_allocating() {
     exec.process(512, &t, &[], &mut []);
     let _ = out.poll_into(&mut drain);
 
+    let mut offs = 0;
     assert_no_alloc::assert_no_alloc(|| {
         for b in 1..200u32 {
             busy(&mut dev, u64::from(b));
@@ -140,9 +141,14 @@ fn an_epoch_change_processes_without_allocating() {
                 _ => {}
             }
             exec.process(512, &t, &[], &mut []);
-            let _ = out.poll_into(&mut drain);
+            let n = out.poll_into(&mut drain);
+            offs += drain[..n]
+                .iter()
+                .filter(|(_, ump)| matches!(ump.key_event(), Some(KeyEvent::Off(_))))
+                .count();
         }
     });
+    assert!(offs > 0, "the departures released the keys they held");
     epochs.depart();
     exec.process(512, &t, &[], &mut []);
     assert!(epochs.is_settled(), "the last departure was handled");
