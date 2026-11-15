@@ -1,33 +1,27 @@
 use super::*;
 use crate::Param;
 
-/// What is deliberately *absent* is as load-bearing as what is present.
-/// These must not compile; the ledger is here so a future contributor does
-/// not "helpfully" add them.
-///
-/// - `SampleSpan - SampleSpan` — a difference of two spans can be negative,
-///   which is outside the range. `checked_sub` refuses it and `saturating_sub`
-///   floors it at zero.
-/// - `SampleSpan * f64`, `SampleSpan / f64`, `-SampleSpan` — a negative or NaN
-///   factor leaves the range. `scaled` refuses it.
-/// - `SampleSpan * SampleSpan` — frames squared is not a quantity.
-/// - `SampleSpan + Samples`, `From<Samples> for SampleSpan` — the count is
-///   exact only to 2^53 frames, and a bare `+` would add an integer count and a
-///   fractional span unnamed. `SampleSpan::from_samples` is the one spelling.
-/// - `From<SampleSpan> for Samples` — the conversion has a rounding choice, so
-///   it is `to_samples_floor` (an index) or `to_samples_ceil` (a buffer size).
-/// - `SamplePosition - SamplePosition -> SampleSpan` — the earlier minus the
-///   later is negative, and an operator cannot refuse. `span_since` returns
-///   `None` for it. (`SamplePosition - SamplePosition` stays a `SamplePosition`.)
-/// - `SamplePosition + SampleSpan` and `-` are present: moving a position by a
-///   span is always a position.
-/// - `From<f64> for SampleSpan` — a bare float must not become a span unnamed
-///   at the call site. Build with `new` (or `of`, `clamped`, `from_seconds`);
-///   `From<SampleSpan> for f64` is the range-checked shape's, beside `TryFrom`.
-///
-/// The body is empty and this test cannot fail; see the note in `units/tests.rs`.
-#[test]
-fn omitted_operators_are_documented() {}
+// The omission ledger. What is deliberately *absent* is as load-bearing as
+// what is present: these must not compile, and are written here so a future
+// contributor does not "helpfully" add them.
+//
+// - `SampleSpan - SampleSpan` — a difference of two spans can be negative,
+//   which is outside the range. `checked_sub` refuses it and `saturating_sub`
+//   floors it at zero.
+// - `SampleSpan * f64`, `SampleSpan / f64`, `-SampleSpan` — a negative or NaN
+//   factor leaves the range. `scaled` refuses it.
+// - `SampleSpan * SampleSpan` — frames squared is not a quantity.
+// - `SampleSpan + Samples`, `From<Samples> for SampleSpan` — the count is
+//   exact only to 2^53 frames, and a bare `+` would add an integer count and a
+//   fractional span unnamed. `SampleSpan::from_samples` is the one spelling.
+// - `From<SampleSpan> for Samples` — the conversion has a rounding choice, so
+//   it is `to_samples_floor` (an index) or `to_samples_ceil` (a buffer size).
+// - `SamplePosition - SamplePosition -> SampleSpan` — the earlier minus the
+//   later is negative, and an operator cannot refuse. `span_since` returns
+//   `None` for it. (`SamplePosition - SamplePosition` stays a `SamplePosition`.)
+// - `From<f64> for SampleSpan` — a bare float must not become a span unnamed
+//   at the call site. Build with `new` (or `of`, `clamped`, `from_seconds`);
+//   `From<SampleSpan> for f64` is the range-checked shape's, beside `TryFrom`.
 
 /// A span is finite and not below zero: `new`, `TryFrom`, `of` and serde
 /// agree, and NaN, the infinities and every negative are refused.
