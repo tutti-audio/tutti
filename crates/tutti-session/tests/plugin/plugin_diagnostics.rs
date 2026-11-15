@@ -7,9 +7,10 @@
 //! the reference plugin in process (a count that is the same figure in both
 //! hostings: lost MIDI).
 
+use crate::pooled::{LoadPlugin, Spec};
 use tutti_buffers::InterleavedMut;
 use tutti_plugin::catalog::PluginRef;
-use tutti_session::{PluginLoadRequest, Root, Session};
+use tutti_session::{Root, Session};
 use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -44,15 +45,17 @@ mod clap {
     }
 
     fn loaded(layout: Option<&str>) -> (Session, Key<PluginNode>) {
+        // The plugin's file is probed before its variables are set.
+        crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
         set_env("TUTTI_PLUGIN_SERVER", plugin_server());
         if let Some(layout) = layout {
             set_env("TUTTI_CLAP_PROBE_PORT_LAYOUT", layout);
         }
         let mut s = offline();
         let node = s
-            .add_plugin_blocking(
+            .load_plugin_blocking(
                 tutti_fixtures::main_thread(),
-                PluginLoadRequest::new(PluginRef::file(clap_probe()).expect("a plugin file")),
+                Spec::new(PluginRef::file(clap_probe()).expect("a plugin file")),
             )
             .expect("the reference CLAP plugin loads");
         (s, node)
@@ -69,7 +72,7 @@ mod clap {
     fn an_aux_input_wires_through_the_buses_handle() {
         let (mut s, node) = loaded(Some("1"));
         let key = node;
-        let buses = s.plugin(node).unwrap().buses();
+        let buses = s.plugin_view(node).unwrap().buses();
         assert_eq!(buses.main_input(), Some(key.bus_in(0)));
         assert_eq!(buses.input(1), Some(key.bus_in(1)));
         assert_eq!(buses.output(0), Some(key.bus_out(0)));
@@ -98,7 +101,7 @@ mod clap {
     #[test]
     fn a_plugin_with_one_input_bus_has_no_second_input() {
         let (s, node) = loaded(None);
-        let buses = s.plugin(node).unwrap().buses();
+        let buses = s.plugin_view(node).unwrap().buses();
         assert!(buses.input(1).is_none());
         assert!(buses.main_input().is_some());
         assert_eq!(buses.input_count(), 1);
@@ -117,7 +120,7 @@ mod clap {
         s.graph().connect(node, Root).unwrap();
         let _ = s.update();
         let pid = s
-            .plugin(node)
+            .plugin_view(node)
             .unwrap()
             .diagnostics()
             .server_pid()
@@ -127,7 +130,7 @@ mod clap {
             "the server is a live process"
         );
 
-        s.plugin(node)
+        s.plugin_view(node)
             .unwrap()
             .diagnostics()
             .terminate(TerminationReason::Hung {
@@ -137,7 +140,7 @@ mod clap {
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let cause = loop {
-            if let PluginHealth::Died { cause } = s.plugin(node).unwrap().health() {
+            if let PluginHealth::Died { cause } = s.plugin_view(node).unwrap().health() {
                 break cause;
             }
             assert!(std::time::Instant::now() < deadline, "it never read Died");
@@ -164,7 +167,7 @@ mod clap {
         let (mut s, node) = loaded(None);
         s.graph().connect(node, Root).unwrap();
         let _ = s.update();
-        let diag = s.plugin(node).unwrap().diagnostics();
+        let diag = s.plugin_view(node).unwrap().diagnostics();
         let own = tutti_clap_test_plugin::REPORTED_LATENCY_SAMPLES as usize;
         assert_eq!(diag.reported_latency(), Samples(own));
         assert_eq!(diag.latency(), Samples(own + BLOCK));
@@ -194,9 +197,9 @@ mod vst2 {
     fn midi_past_a_blocks_capacity_reads_as_lost() {
         let mut s = offline();
         let node = s
-            .add_plugin_blocking(
+            .load_plugin_blocking(
                 tutti_fixtures::main_thread(),
-                PluginLoadRequest::new(
+                Spec::new(
                     PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf())
                         .expect("a plugin file"),
                 ),
@@ -209,7 +212,7 @@ mod vst2 {
             .unwrap();
         let _ = s.update();
 
-        let diag = || s.plugin(node).unwrap().diagnostics();
+        let diag = || s.plugin_view(node).unwrap().diagnostics();
         assert_eq!(diag().midi_in(), Losses::NONE, "nothing sent yet");
         assert_eq!(diag().server_pid(), None, "no server in process");
         assert_eq!(diag().missed_chunks(), 0, "no pipeline in process");

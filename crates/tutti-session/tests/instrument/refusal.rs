@@ -1,4 +1,4 @@
-//! An effect plugin is not an instrument: `Session::instrument_plugin` refuses it,
+//! An effect plugin is not an instrument: `Session::instrument` refuses it,
 //! naming the role the plugin declared. (The reference probe declares itself an
 //! effect; the shared plugin's descriptor lists both.)
 
@@ -8,8 +8,8 @@ use tutti_session::{Error, NotInstrument};
 
 #[test]
 fn an_effect_plugin_is_refused() {
-    let (mut session, loaded) = Plugin::effect();
-    match session.instrument_plugin(tutti_fixtures::main_thread(), loaded) {
+    let (mut session, node) = Plugin::effect();
+    match session.instrument(node) {
         Err(Error::NotInstrument {
             why: NotInstrument::Plugin(PluginRole::Effect),
             ..

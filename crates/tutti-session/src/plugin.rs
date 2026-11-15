@@ -1,5 +1,6 @@
 //! Hosted plugins in the session (feature `plugin`; design 015 §4.2-§4.4):
-//! the load as a job ([`PluginLoad`]), the add ([`Session::add_plugin`]),
+//! the pool entry that loads one ([`Session::plugin_entry`]), the add
+//! ([`Session::add_pooled_plugin`]),
 //! the view of the record the session keeps for each one ([`Plugin`]), and the
 //! work of [`Phase::Plugins`](crate::Phase::Plugins) and
 //! [`Phase::RenderMode`](crate::Phase::RenderMode).
@@ -8,14 +9,14 @@
 //!
 //! A plugin may also be a pool entry ([`Session::plugin_entry`]): the pool
 //! loads it, [`Session::add_pooled_plugin`] puts its node in the graph through
-//! the install [`Session::add_plugin`] shares, and the node's record holds the
-//! entry until the record retires.
+//! the one install, and the node's record holds the entry until the record
+//! retires.
 //!
 //! # The record
 //!
 //! Each plugin the graph holds (`Graph::insert_plugin`,
-//! [`Session::add_plugin`], [`Graph::host_plugin`](crate::Graph::host_plugin)) has a record,
-//! keyed by its [`NodeKey`] and lent as a [`Plugin`] ([`Session::plugin`]): the [`PluginRef`] it is, its handle, its
+//! [`Session::add_pooled_plugin`], [`Graph::host_plugin`](crate::Graph::host_plugin)) has a record,
+//! keyed by its [`NodeKey`] and lent as a [`Plugin`] ([`Session::plugin_view`]): the [`PluginRef`] it is, its handle, its
 //! controls (an out-of-process plugin's latency and meter cells), its
 //! liveness, whether it was told the render mode, its last good state
 //! ([`state`](Plugin::state)), and its parameter mirror
@@ -91,7 +92,7 @@
 //!
 //! - **Death.** The node stays in the graph, silent, with its wiring and
 //!   every lane fed to it; [`PluginChange::Reloading`].
-//! - **Load.** When the backoff passes, the existing [`PluginLoad`] (with
+//! - **Load.** When the backoff passes, the existing `PluginLoad` (with
 //!   the last good state as its state) is submitted to the spawner as a job.
 //!   Its landing, in a later `Session::update` and on whatever thread runs it
 //!   (no main-thread proof: a served replacement opens off the main thread,
@@ -114,7 +115,6 @@
 //! plugin is told per `tutti_plugin_host::needs_announcement`: on a change of
 //! mode, or if it was never told.
 
-use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 use tutti_plugin_types::MainThreadMarker;
@@ -122,7 +122,7 @@ use tutti_plugin_types::MainThreadMarker;
 use dpi::Size;
 use tutti_graph::NodeKey;
 use tutti_plugin::catalog::{
-    AudioConfig, Catalog, Hosting, Loadable, Plugin as HostPlugin, PluginRef, PluginState,
+    AudioConfig, Hosting, Loadable, Plugin as HostPlugin, PluginRef, PluginState,
 };
 use tutti_plugin::error::StateError;
 use tutti_plugin_host::{Liveness, Verdict};
@@ -154,70 +154,13 @@ use crate::{
 /// sets another.
 pub const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(8);
 
-/// Which plugin to load, and the state to restore into it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PluginLoadRequest {
-    plugin: PluginRef,
-    hosting: Hosting,
-    state: Option<PluginState>,
-}
-
-impl PluginLoadRequest {
-    /// A load of `plugin`: a scanned one (`PluginRef::from(&entry)`, which
-    /// picks the plugin in a bundle that exports several) or a file's first
-    /// ([`PluginRef::file`]).
-    pub fn new(plugin: PluginRef) -> Self {
-        Self {
-            plugin,
-            hosting: Hosting::Auto,
-            state: None,
-        }
-    }
-
-    /// Hosted as `hosting` ([`Hosting::Auto`] until this says otherwise).
-    /// Whether the format can be hosted that way is decided at the load.
-    #[must_use]
-    pub fn hosting(mut self, hosting: Hosting) -> Self {
-        self.hosting = hosting;
-        self
-    }
-
-    /// With a saved state restored once the plugin loads
-    /// ([`StateView::save`] or [`StateView::last_good`], or a project's). A
-    /// refusal by the plugin is logged, and the plugin loads at its defaults.
-    ///
-    /// # Errors
-    ///
-    /// [`StateError::OtherPlugin`] when `state` was saved from another plugin
-    /// than the request's.
-    pub fn restoring(mut self, state: PluginState) -> Result<Self, StateError> {
-        state.check_for(&self.plugin)?;
-        self.state = Some(state);
-        Ok(self)
-    }
-
-    /// The plugin to load.
-    pub fn plugin(&self) -> &PluginRef {
-        &self.plugin
-    }
-
-    /// The state to restore into it, if one was given.
-    pub fn state(&self) -> Option<&PluginState> {
-        self.state.as_ref()
-    }
-}
-
-/// A plugin load, as a job (design 015 §4.2): `Send`, and
-/// [`run`](Self::run) blocks (a `plugin-server` launch, half a second to
-/// fifteen), so the host runs it off its control thread and hands the
-/// result to [`Session::add_plugin`].
-///
-/// Made by [`Session::plugin_load`], at the session's rate.
-#[must_use = "a load does nothing until it is run and added"]
-pub struct PluginLoad {
-    /// The plugin, under the blacklist of the catalog it was given
-    /// ([`with_catalog`](Self::with_catalog)), asked by [`run`](Self::run) as
-    /// the load opens.
+/// A plugin load: what the pool's plugin entry runs, and what a recovery reload
+/// runs again. [`run`](Self::run) blocks (a `plugin-server` launch, half a
+/// second to fifteen), so it runs on a worker, never on the control thread.
+#[must_use = "a load does nothing until it is run"]
+pub(crate) struct PluginLoad {
+    /// The plugin, under the blacklist of the catalog that resolved it, asked
+    /// by [`run`](Self::run) as the load opens.
     loadable: Loadable,
     rate: SampleRate,
     config: AudioConfig,
@@ -237,66 +180,19 @@ impl std::fmt::Debug for PluginLoad {
 }
 
 impl PluginLoad {
-    /// Bridge settings other than the defaults.
-    pub fn with_config(mut self, config: AudioConfig) -> Self {
-        self.config = config;
-        self
-    }
-
-    /// This load under `catalog`'s blacklist ([`Catalog::blacklist_view`]),
-    /// asked by [`run`](Self::run) when the load opens, so a plugin
-    /// blacklisted after this call is refused too. The refusal is the load's
-    /// failure ([`add_plugin`](Session::add_plugin)),
-    /// [`BridgeError::Blacklisted`] with the recorded reason, before any
-    /// server starts or library loads. The catalog is not borrowed past this
-    /// call, so the load stays `Send`; a load that does not name a catalog
-    /// consults no blacklist (a host offering to load a plugin anyway).
-    pub fn with_catalog(mut self, catalog: &Catalog) -> Self {
-        self.loadable = self.loadable.under(catalog);
-        self
-    }
-
-    /// Instantiates at `rate` instead of the session's.
-    pub fn at_rate(mut self, rate: SampleRate) -> Self {
-        self.rate = rate;
-        self
-    }
-
-    /// The plugin being loaded.
-    pub fn plugin(&self) -> &PluginRef {
-        self.loadable.plugin()
-    }
-
-    /// The plugin's file.
-    pub fn path(&self) -> &Path {
-        self.loadable.plugin().path()
-    }
-
-    /// Whether the plugin is hosted in process (its [`Hosting`]
-    /// resolved by the format, `Loadable::placement`: VST2 by default, any
-    /// format built in on request): [`run`](Self::run) leaves it unopened, and
-    /// [`Session::add_plugin`] opens it on the main thread, stalling that call
-    /// for the library's init, the state restore and the parameter read. A
-    /// hosting the format refuses is `false` here and the refusal is
-    /// [`run`](Self::run)'s.
-    pub fn opens_in_process(&self) -> bool {
-        matches!(self.loadable.placement(), Ok(Hosting::InProcess))
-    }
-
     /// Opens the plugin, restores the request's state, and (`modulation`)
     /// reads its parameter values, after the state: those are what a
     /// modulation lane's knob starts at. Any thread; it blocks.
     ///
-    /// A plugin hosted in process ([`opens_in_process`](Self::opens_in_process))
-    /// is not opened here: an in-process load is confined to the main thread,
-    /// so the job returns it unopened and [`Session::add_plugin`] opens it
-    /// there (a library load and an instance's init, with no subprocess to
-    /// wait for).
+    /// A plugin hosted in process is not opened here: an in-process load is
+    /// confined to the main thread, so the job returns it unopened and the
+    /// pool's main-thread stage opens it there (a library load and an
+    /// instance's init, with no subprocess to wait for).
     ///
     /// A load the catalog refuses, or whose hosting the format cannot have
     /// ([`BridgeError::NotOutOfProcess`] for VST2 asked to be served), is
     /// refused here, before anything is opened.
-    pub fn run(self) -> PluginLoaded {
+    pub(crate) fn run(self) -> PluginLoaded {
         let loadable = self.loadable.clone();
         let config = self.config.clone();
         let refused = self
@@ -306,7 +202,7 @@ impl PluginLoad {
             .or_else(|| self.loadable.placement().err());
         let opened = if let Some(refusal) = refused {
             Opened::Done(Box::new(Open::refused(refusal)))
-        } else if self.opens_in_process() {
+        } else if matches!(self.loadable.placement(), Ok(Hosting::InProcess)) {
             Opened::OnMain(Box::new(self))
         } else {
             Opened::Done(Box::new(self.open(None)))
@@ -406,12 +302,12 @@ impl Open {
 /// again (the plugin's list was unavailable).
 type ParamValues = Result<tutti_plugin_host::ParamSnapshot, Box<tutti_plugin_host::ParamRead>>;
 
-/// What a [`PluginLoad`]'s run did.
+/// What a `PluginLoad`'s run did.
 enum Opened {
     /// Opened (or failed to) on the job's thread. Boxed: a plugin is far
     /// larger than an unopened load.
     Done(Box<Open>),
-    /// Hosted in process: opened by `add_plugin`, on the main thread.
+    /// Hosted in process: opened on the main thread.
     OnMain(Box<PluginLoad>),
 }
 
@@ -444,10 +340,9 @@ pub enum StateRestore {
     },
 }
 
-/// A finished [`PluginLoad`]: the plugin, or why it did not load. `Send`;
-/// [`Session::add_plugin`] takes it on the control thread.
-#[must_use = "a loaded plugin goes into the graph with `Session::add_plugin`"]
-pub struct PluginLoaded {
+/// A finished `PluginLoad`: the plugin, or why it did not load. `Send`.
+#[must_use = "a loaded plugin goes into the graph"]
+pub(crate) struct PluginLoaded {
     loadable: Loadable,
     config: AudioConfig,
     opened: Opened,
@@ -462,16 +357,6 @@ impl std::fmt::Debug for PluginLoaded {
 }
 
 impl PluginLoaded {
-    /// The plugin that was loaded.
-    pub fn plugin(&self) -> &PluginRef {
-        self.loadable.plugin()
-    }
-
-    /// The plugin's file.
-    pub fn path(&self) -> &Path {
-        self.loadable.plugin().path()
-    }
-
     /// Opens what the run left: nothing for a plugin opened on the job's
     /// thread, the plugin itself for one hosted in process, which opens on
     /// `main` (without it the open is refused).
@@ -481,16 +366,6 @@ impl PluginLoaded {
             Opened::OnMain(load) => (*load).open(main),
         };
         (self.loadable, self.config, open)
-    }
-
-    /// Why the load failed, if it did. `None` for a plugin hosted in
-    /// process too, which [`Session::add_plugin`] opens: its error is
-    /// `add_plugin`'s.
-    pub fn error(&self) -> Option<&BridgeError> {
-        match &self.opened {
-            Opened::Done(open) => open.plugin.as_ref().err(),
-            Opened::OnMain(_) => None,
-        }
     }
 }
 
@@ -1124,7 +999,7 @@ impl HostedPlugin {
     }
 }
 
-/// The type of a hosted plugin's [`Key`]: what [`Session::add_plugin`],
+/// The type of a hosted plugin's [`Key`]: what [`Session::add_pooled_plugin`],
 /// [`Graph::insert_plugin`](crate::Graph::insert_plugin) and
 /// [`Graph::host_plugin`](crate::Graph::host_plugin) return, so a plugin's
 /// ports and parameters are methods of its key as a native node's are.
@@ -1158,7 +1033,7 @@ impl Key<PluginNode> {
     }
 }
 
-/// A hosted plugin, lent by [`Session::plugin`]: its identity, and the
+/// A hosted plugin, lent by [`Session::plugin_view`]: its identity, and the
 /// surfaces the session holds for it.
 ///
 /// A view borrows the session, so it cannot outlive the plugin it names: a
@@ -1323,81 +1198,9 @@ impl Default for RenderModeState {
 }
 
 impl<C: crate::Clock> Session<C> {
-    /// A load of `request`'s plugin at the session's rate, as a job:
-    /// [`run`](PluginLoad::run) it on any thread (it blocks), then hand the
-    /// result to [`add_plugin`](Self::add_plugin).
-    pub fn plugin_load(&self, request: PluginLoadRequest) -> PluginLoad {
-        PluginLoad {
-            loadable: Loadable::uncatalogued(request.plugin).hosting(request.hosting),
-            rate: self.graph.prepared().sample_rate(),
-            config: AudioConfig::default(),
-            state: request.state.map(Arc::new),
-            work: self.work.clone(),
-        }
-    }
-
-    /// [`plugin_load`](Self::plugin_load) and its run, on this thread: it
-    /// blocks for the whole launch.
-    ///
-    /// # Errors
-    ///
-    /// As [`add_plugin`](Self::add_plugin).
-    pub fn add_plugin_blocking(
-        &mut self,
-        main: MainThreadMarker,
-        request: PluginLoadRequest,
-    ) -> Result<Key<PluginNode>, BridgeError> {
-        let done = self.plugin_load(request).run();
-        self.add_plugin(main, done)
-    }
-
-    /// Inserts a loaded plugin into the graph (unwired) and hosts it: its
-    /// controls and meter are captured as it goes in, the meter is the
-    /// metronome's (time signature and bar), and its health, latency,
-    /// parameter mirror and render mode are the session's from here
-    /// ([`Plugin`]). An out-of-process plugin is bound as it goes in
-    /// (`PluginClient::bind`); an in-process VST2 plugin is opened here (its
-    /// job left it unopened: VST2 confines the load to the main thread) and
-    /// goes in as its own node. That open blocks this call for the
-    /// library's init, the state restore and (`modulation`) the parameter
-    /// read: a frame-driven host opens at most one per frame.
-    ///
-    /// A main-thread call (design 015 §4.2). It runs the session's main-thread
-    /// work first, so from here an in-process plugin's handle, called off the
-    /// main thread, waits for the next update rather than answering
-    /// "unavailable" at once.
-    ///
-    /// # Errors
-    ///
-    /// Why the load failed.
-    pub fn add_plugin(
-        &mut self,
-        main: MainThreadMarker,
-        loaded: PluginLoaded,
-    ) -> Result<Key<PluginNode>, BridgeError> {
-        // Marks the collector run: from here the session has a main thread, so an
-        // off-main call on an in-process handle waits for the next update.
-        self.main_work.run(main);
-        let requested_path = loaded.loadable.plugin().path().to_path_buf();
-        // A plugin hosted in process opens here, on the main thread.
-        let (
-            loadable,
-            config,
-            Open {
-                plugin,
-                restore: _,
-                mirror,
-            },
-        ) = loaded.finish(Some(main));
-        let key = self.install_plugin(plugin?, mirror, Origin { config, loadable });
-        let node = key.erase();
-        tracing::info!("plugin '{}' added as {node:?}", requested_path.display());
-        Ok(key)
-    }
-
     /// Puts an opened plugin in the graph, unwired, and hosts it: the one
-    /// place a plugin enters the session, whether [`add_plugin`](Self::add_plugin)
-    /// or the pool ([`add_pooled_plugin`](Self::add_pooled_plugin)) brought it.
+    /// place a plugin enters the session, through
+    /// [`add_pooled_plugin`](Self::add_pooled_plugin).
     /// Its meter is the metronome's, an out-of-process plugin keeps how it
     /// was loaded for a reload (`origin`) and the session's recovery, and a
     /// parameter read that finished at the load is its mirror.
@@ -1440,12 +1243,15 @@ impl<C: crate::Clock> Session<C> {
         key
     }
 
-    /// The plugin hosted at `node`.
+    /// The view of the plugin hosted at `node`, a borrow of its record: its
+    /// params, state, diagnostics, buses, health and presets. It reads the
+    /// node's plugin; the entry's handle ([`plugin`](Self::plugin)) is the
+    /// plugin's, whether or not a node has it.
     ///
     /// # Errors
     ///
     /// [`NoSuchNode`](crate::NoSuchNode) when no plugin is hosted at `node`.
-    pub fn plugin(&self, node: impl Into<NodeKey>) -> Result<Plugin<'_>, crate::NoSuchNode> {
+    pub fn plugin_view(&self, node: impl Into<NodeKey>) -> Result<Plugin<'_>, crate::NoSuchNode> {
         let node = node.into();
         self.graph
             .plugins
@@ -2474,7 +2280,7 @@ mod tests {
         rig.run_and_land(job);
         assert_eq!(
             rig.session
-                .plugin(rig.node)
+                .plugin_view(rig.node)
                 .unwrap()
                 .state()
                 .last_good()
@@ -2507,7 +2313,7 @@ mod tests {
         rig.run_and_land(job);
         assert_eq!(
             rig.session
-                .plugin(rig.node)
+                .plugin_view(rig.node)
                 .unwrap()
                 .state()
                 .last_good()
@@ -2580,7 +2386,7 @@ mod tests {
         rig.dead.store(true, Ordering::SeqCst);
         assert!(rig.plugins_at(1_000).is_empty(), "failing: no snapshot");
         assert!(matches!(
-            rig.session.plugin(rig.node).unwrap().health(),
+            rig.session.plugin_view(rig.node).unwrap().health(),
             PluginHealth::Died { .. }
         ));
     }
@@ -2612,7 +2418,10 @@ mod tests {
                         .is_ok()
                 );
             }
-            assert!(rig.session.plugin(rig.node).is_err(), "the record went");
+            assert!(
+                rig.session.plugin_view(rig.node).is_err(),
+                "the record went"
+            );
             // The outgoing plugin dies, past the debounce's count and window.
             rig.dead.store(true, Ordering::SeqCst);
             for ms in [0, 100, 200, 300, 400] {
@@ -2718,7 +2527,7 @@ mod tests {
             .param_read = None;
         assert_eq!(
             rig.session
-                .plugin(rig.node)
+                .plugin_view(rig.node)
                 .unwrap()
                 .state()
                 .last_good()
@@ -2729,7 +2538,7 @@ mod tests {
         rig.run_and_land(in_flight);
         assert_eq!(
             rig.session
-                .plugin(rig.node)
+                .plugin_view(rig.node)
                 .unwrap()
                 .state()
                 .last_good()
@@ -2743,7 +2552,7 @@ mod tests {
         rig.run_and_land(own);
         assert_eq!(
             rig.session
-                .plugin(rig.node)
+                .plugin_view(rig.node)
                 .unwrap()
                 .state()
                 .last_good()
@@ -2973,7 +2782,7 @@ mod tests {
     /// the blacklist's refusal, and nothing is opened.
     #[test]
     fn a_reload_of_a_plugin_blacklisted_since_its_load_is_refused() {
-        use tutti_plugin::catalog::{CatalogConfig, NO_SCAN_DIRS, PluginDb};
+        use tutti_plugin::catalog::{Catalog, CatalogConfig, NO_SCAN_DIRS, PluginDb};
         let file =
             std::env::temp_dir().join(format!("tutti-reload-bl-{}.clap", std::process::id()));
         std::fs::write(&file, b"x").unwrap();
@@ -3020,7 +2829,10 @@ mod tests {
         rig.recovering_in_process();
         let job = rig.plugins_at(0).pop().expect("the reload is submitted");
         rig.session.remove(rig.node).expect("the node is removed");
-        assert!(rig.session.plugin(rig.node).is_err(), "its record is gone");
+        assert!(
+            rig.session.plugin_view(rig.node).is_err(),
+            "its record is gone"
+        );
         let events = rig.run_and_land(job);
         assert!(events.is_empty(), "nothing is reported: {events:?}");
     }

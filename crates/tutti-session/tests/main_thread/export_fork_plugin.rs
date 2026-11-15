@@ -8,6 +8,7 @@
 //! not a dev-dependency (a cycle through `tutti-plugin`), and without it every
 //! test here fails, naming that command. They must fail rather than skip.
 
+use crate::pooled::{LoadPlugin, Spec};
 use crate::support;
 use tutti_session::Root;
 
@@ -27,7 +28,7 @@ use tutti_plugin_types::PluginForkError;
 use tutti_session::BufferMaster;
 use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, DetachedSession, ExportClock, InPort, OutPort,
-    PluginLoadRequest, Range, Session, Stem,
+    Range, Session, Stem,
 };
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_types::ChannelLayout;
@@ -94,10 +95,11 @@ fn probe_env(key: &str, value: impl ToString) {
     // IPC threads and a live server exist by the time a later switch is set,
     // so this is not single-threaded. What makes it sound: the threads in this
     // process are Rust threads, which read the environment only through
-    // `std::env` (behind std's environment lock), and no plugin code runs in
-    // it. The server reads a switch only at spawn, and `Command::spawn` takes
-    // that same lock to read `environ`; the already-running server never
-    // re-reads it.
+    // `std::env` (behind std's environment lock), and, for a served plugin (the
+    // crash case, which is why this is sound there), no plugin code runs in it.
+    // An in-process plugin sets its variables before any session exists. The
+    // server reads a switch only at spawn, and `Command::spawn` takes that same
+    // lock to read `environ`; the already-running server never re-reads it.
     unsafe { std::env::set_var(key, value.to_string()) };
 }
 
@@ -108,6 +110,8 @@ fn session_with_probe_at(
     path: std::path::PathBuf,
     hosting: Hosting,
 ) -> (DetachedSession, NodeKey) {
+    // The plugin's file is probed before its variables are set.
+    crate::pooled::prime(&PluginRef::file(&path).expect("a plugin file"));
     probe_env("TUTTI_PLUGIN_SERVER", plugin_server().display());
     probe_env("TUTTI_CLAP_PROBE_RENDER_MODE", mode);
     let mut session = Session::builder()
@@ -117,9 +121,9 @@ fn session_with_probe_at(
         .expect("a detached session builds");
     session.graph().set_sample_rate(SampleRate::of(RATE));
     let probe = session
-        .add_plugin_blocking(
+        .load_plugin_blocking(
             tutti_fixtures::main_thread(),
-            PluginLoadRequest::new(PluginRef::file(path).expect("a plugin file")).hosting(hosting),
+            Spec::new(PluginRef::file(path).expect("a plugin file")).hosting(hosting),
         )
         .expect("the reference CLAP plugin loads");
     session.graph().connect(probe, Root).unwrap();
@@ -204,15 +208,13 @@ fn a_plugin_effect_exports_through_its_fork() {
 /// the plugin's own reason: the plugin's file is gone since it loaded, so no
 /// fresh instance loads (`PluginForkError::Load`).
 fn a_plugin_fork_that_cannot_be_built_is_a_named_failure() {
-    // A link of our own to the plugin, so removing it touches no other
-    // test's (the suites publish one shared `.clap` link).
+    // A copy of our own of the plugin, so removing it touches no other test's
+    // (the suites publish one shared `.clap` link); a copy, not a link, since
+    // the catalog names a plugin by its canonical path.
     let shared = clap_probe();
     let own = shared.with_extension(format!("{}.clap", std::process::id()));
     let _ = std::fs::remove_file(&own);
     let real = std::fs::canonicalize(&shared).expect("the reference plugin");
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(&real, &own).expect("link the plugin");
-    #[cfg(windows)]
     std::fs::copy(&real, &own).expect("copy the plugin");
     let (mut session, probe) =
         session_with_probe_at(TAG_PASSTHROUGH, own.clone(), Hosting::OutOfProcess);
