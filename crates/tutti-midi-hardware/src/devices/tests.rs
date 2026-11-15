@@ -402,7 +402,7 @@ fn open_input_refuses_a_device_that_was_unplugged() {
     wake(&events);
     assert!(matches!(
         devices.open_input(&keys, &ports()),
-        Err(Error::NoDevice(_))
+        Err(Error::NotFound(NotFound::Device(_)))
     ));
 }
 
@@ -607,8 +607,8 @@ struct Tagging(Arc<std::sync::Mutex<Vec<tutti_ump::Protocol>>>);
 struct TaggedSink(Arc<std::sync::Mutex<Vec<tutti_ump::Protocol>>>);
 
 impl tutti_midi_runtime::MidiOut for TaggedSink {
-    fn queue(&self, events: &[tutti_graph::UmpAt]) -> usize {
-        events.len()
+    fn queue_timed(&self, events: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
+        tutti_midi_runtime::Taken::within(events, events.len())
     }
 }
 

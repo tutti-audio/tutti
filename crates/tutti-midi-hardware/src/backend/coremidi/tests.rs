@@ -171,7 +171,7 @@ fn a_scheduled_packet_is_held_until_its_time_and_now_goes_at_once() {
             ump: note(61),
         },
     ]);
-    assert_eq!(sent, 2);
+    assert_eq!(sent.packets(), 2);
 
     let wait = Duration::from_secs(2);
     let (first_at, first) = rx.recv_timeout(wait).expect("the note sent now");

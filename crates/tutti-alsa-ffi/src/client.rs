@@ -3,15 +3,13 @@
 use std::ffi::CString;
 use std::time::Duration;
 
-use crate::error::{Error, Result, check};
+use crate::error::{Error, Result, address_byte, check};
 use crate::event::Received;
 use crate::records::{PortRecord, StatusRecord};
 use crate::sys;
 
 /// `-EAGAIN`: nothing queued yet on a non-blocking client.
 const EAGAIN: i32 = -11;
-/// `-EINVAL`.
-const EINVAL: i32 = -22;
 
 /// A name as a C string; one with an interior NUL is called `tutti` instead.
 fn c_name(name: &str) -> CString {
@@ -73,7 +71,8 @@ impl UmpVersion {
 #[derive(Debug)]
 pub struct Client {
     seq: *mut sys::snd_seq_t,
-    id: i32,
+    /// The id as an address byte: what a sent event names as its source.
+    id: u8,
 }
 
 // SAFETY: `snd_seq_t` is an opaque handle whose operations alsa-lib
@@ -145,7 +144,7 @@ impl Client {
             unsafe { sys::snd_seq_open(&mut seq, device.as_ptr(), sys::SND_SEQ_OPEN_DUPLEX, mode) };
         check(rc, "snd_seq_open")?;
         // Owned from here: any failure below closes it by `Drop`.
-        let mut client = Self { seq, id: -1 };
+        let mut client = Self { seq, id: 0 };
 
         let cname = c_name(name);
         // SAFETY: `client.seq` is open; `cname` outlives the call.
@@ -153,14 +152,14 @@ impl Client {
 
         // SAFETY: `client.seq` is open.
         let rc = unsafe { sys::snd_seq_client_id(client.seq) };
-        client.id = check(rc, "snd_seq_client_id")?;
+        client.id = address_byte("client", check(rc, "snd_seq_client_id")?)?;
         Ok(client)
     }
 
     /// This client's sequencer id, for addressing events back to it.
     #[must_use]
     pub fn id(&self) -> i32 {
-        self.id
+        i32::from(self.id)
     }
 
     /// Creates a port on this client with `caps` (`CAP_*`) and `kind`
@@ -248,8 +247,8 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// `snd_seq_ump_event_output_direct`'s code, or `-EINVAL` when this
-    /// client's id is not an address byte.
+    /// `snd_seq_ump_event_output_direct`'s code; `-EAGAIN` on a
+    /// [`Blocking::NonBlock`] client whose destination has no room.
     pub fn send_to_subscribers(&self, port: u8, words: &[u32]) -> Result<()> {
         self.send_ump_event(port, words, None)
     }
@@ -258,12 +257,12 @@ impl Client {
     /// `queue` until the queue's real time reaches `at` (a time since the
     /// queue started: [`QueueClock::now`]); an `at` already past is delivered
     /// at once. The queue must be this client's own ([`start_queue`](Self::start_queue)):
-    /// another client's gives `-EINVAL`.
+    /// another client's is refused by the sequencer.
     ///
     /// # Errors
     ///
-    /// `snd_seq_ump_event_output_direct`'s code, or `-EINVAL` when this
-    /// client's id or the queue's is not an address byte.
+    /// `snd_seq_ump_event_output_direct`'s code; `-EAGAIN` on a
+    /// [`Blocking::NonBlock`] client whose destination has no room.
     pub fn send_to_subscribers_at(
         &self,
         port: u8,
@@ -275,25 +274,24 @@ impl Client {
     }
 
     /// The one send: direct, or scheduled on a queue of this client's.
-    fn send_ump_event(&self, port: u8, words: &[u32], on: Option<(i32, Duration)>) -> Result<()> {
+    fn send_ump_event(&self, port: u8, words: &[u32], on: Option<(u8, Duration)>) -> Result<()> {
         if words.is_empty() {
             return Ok(());
         }
         let operation = "snd_seq_ump_event_output_direct";
-        let client = u8::try_from(self.id).map_err(|_| Error {
-            operation,
-            code: EINVAL,
-        })?;
         let mut ev = sys::snd_seq_ump_event_t {
             // `SND_SEQ_EVENT_NONE`. For a UMP event the type field is unused:
             // the message type lives in the first word's top nibble.
             type_: 0,
-            source: sys::snd_seq_addr_t { client, port },
+            source: sys::snd_seq_addr_t {
+                client: self.id,
+                port,
+            },
             // **Not** the destination's own address, even though it is known.
             //
             // The port is already subscribed (`connect_to`), and an explicit
             // `dest` on top of a subscription is rejected outright:
-            // `snd_seq_ump_event_output_direct` returns `-EINVAL`, not a partial
+            // `snd_seq_ump_event_output_direct` returns an error, not a partial
             // send. `SUBSCRIBERS` means "everyone connected to my port", which
             // is exactly the set `connect_to` established.
             dest: sys::snd_seq_addr_t {
@@ -307,10 +305,7 @@ impl Client {
             ..Default::default()
         };
         if let Some((queue, at)) = on {
-            ev.queue = u8::try_from(queue).map_err(|_| Error {
-                operation,
-                code: EINVAL,
-            })?;
+            ev.queue = queue;
             // Absolute (`SND_SEQ_TIME_MODE_ABS` is the clear bit), real time.
             ev.flags = sys::SND_SEQ_TIME_STAMP_REAL;
             // A queue's real time counts seconds in a `c_uint`: saturate at
@@ -341,13 +336,13 @@ impl Client {
     pub fn start_queue(&self) -> Result<QueueClock> {
         // SAFETY: `self.seq` is open.
         let rc = unsafe { sys::snd_seq_alloc_queue(self.seq) };
-        let queue = check(rc, "snd_seq_alloc_queue")?;
+        let queue = address_byte("queue", check(rc, "snd_seq_alloc_queue")?)?;
         // SAFETY: `self.seq` is open; a NULL event is the call's documented
         // "send directly".
         let rc = unsafe {
             sys::snd_seq_control_queue(
                 self.seq,
-                queue,
+                i32::from(queue),
                 sys::SND_SEQ_EVENT_START,
                 0,
                 std::ptr::null_mut(),
@@ -380,7 +375,7 @@ impl Client {
             unsafe {
                 sys::snd_seq_port_info_set_timestamping(info, 1);
                 sys::snd_seq_port_info_set_timestamp_real(info, 1);
-                sys::snd_seq_port_info_set_timestamp_queue(info, queue);
+                sys::snd_seq_port_info_set_timestamp_queue(info, i32::from(queue));
             }
         })?;
         Ok(clock)
@@ -422,22 +417,20 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// `snd_seq_event_output_direct`'s code, or `-EINVAL` when this client's id
-    /// is not an address byte.
+    /// `snd_seq_event_output_direct`'s code.
     #[cfg(feature = "testing")]
     pub fn send_legacy_to_subscribers(&self, port: u8, event: LegacyEvent) -> Result<()> {
         let operation = "snd_seq_event_output_direct";
-        let client = u8::try_from(self.id).map_err(|_| Error {
-            operation,
-            code: EINVAL,
-        })?;
         let mut ev = sys::snd_seq_event_t {
             type_: 0,
             flags: 0,
             tag: 0,
             queue: sys::SND_SEQ_QUEUE_DIRECT,
             time: [0; 8],
-            source: sys::snd_seq_addr_t { client, port },
+            source: sys::snd_seq_addr_t {
+                client: self.id,
+                port,
+            },
             dest: sys::snd_seq_addr_t {
                 client: sys::SND_SEQ_ADDRESS_SUBSCRIBERS,
                 port: 0,
@@ -537,26 +530,30 @@ impl Drop for Client {
 /// purpose. Made by [`Client::stamp_port`].
 #[derive(Debug)]
 pub struct QueueClock {
-    queue: i32,
+    queue: u8,
     status: StatusRecord,
 }
 
 impl QueueClock {
-    /// The queue's real time now, as the time since it started; `None` if the
+    /// The queue's real time now, as the time since it started.
+    ///
+    /// # Errors
+    ///
+    /// `snd_seq_get_queue_status`'s code, or [`Error::NoQueueTime`] when the
     /// sequencer will not say. `client` is the one that made the queue: another
-    /// client has no such queue and reads `None`.
-    pub fn now(&mut self, client: &Client) -> Option<Duration> {
+    /// client has no such queue, and the call fails.
+    pub fn now(&mut self, client: &Client) -> Result<Duration> {
         // SAFETY: `client.seq` is open and `status` is a live record.
-        let rc =
-            unsafe { sys::snd_seq_get_queue_status(client.seq, self.queue, self.status.as_ptr()) };
-        if rc < 0 {
-            return None;
-        }
+        let rc = unsafe {
+            sys::snd_seq_get_queue_status(client.seq, i32::from(self.queue), self.status.as_ptr())
+        };
+        check(rc, "snd_seq_get_queue_status")?;
         // SAFETY: `status` was just filled; the pointer is into it and read at
         // once, before the record is used again.
         let time =
-            unsafe { sys::snd_seq_queue_status_get_real_time(self.status.as_ptr()).as_ref() }?;
-        Some(Duration::new(u64::from(time.tv_sec), time.tv_nsec))
+            unsafe { sys::snd_seq_queue_status_get_real_time(self.status.as_ptr()).as_ref() }
+                .ok_or(Error::NoQueueTime)?;
+        Ok(Duration::new(u64::from(time.tv_sec), time.tv_nsec))
     }
 }
 

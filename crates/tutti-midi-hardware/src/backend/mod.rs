@@ -48,6 +48,17 @@ mod winmm;
 )]
 mod legacy_port;
 
+// The loop of a backend that sends one message at a time: always compiled so
+// its tests run everywhere; only `alsa` and `coremidi` use it.
+#[cfg_attr(
+    not(any(midi_backend = "alsa", midi_backend = "coremidi")),
+    allow(
+        dead_code,
+        reason = "the backend that sends message by message is not this platform's, so only the tests use it"
+    )
+)]
+mod by_message;
+
 // Always compiled so its tests run everywhere; only the `none` platform uses
 // it as the backend.
 #[cfg_attr(

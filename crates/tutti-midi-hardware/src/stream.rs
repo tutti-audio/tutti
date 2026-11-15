@@ -537,7 +537,7 @@ impl Negotiation {
 
     fn send(&mut self, ump: Ump) {
         if let Some(out) = &mut self.out
-            && out.queue(&[(Offset::ZERO, ump)]) == 0
+            && out.queue(&[(Offset::ZERO, ump)]).is_none()
         {
             // The step is sent again when it times out.
             tracing::debug!("a UMP Stream message was refused by {}", out.name());

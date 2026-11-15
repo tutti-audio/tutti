@@ -174,7 +174,7 @@ fn an_output_reaches_its_device() {
         .unwrap()
         .id;
     assert_eq!(output.id(), &synth_a);
-    assert_eq!(output.queue(&[note(), note()]), 2);
+    assert_eq!(output.queue(&[note(), note()]).packets(), 2);
     assert_eq!(sent.load(Ordering::SeqCst), 2);
 }
 
@@ -203,12 +203,12 @@ fn a_send_time_reaches_the_sink_with_its_packet() {
             ump,
         },
     ];
-    assert_eq!(output.queue_timed(&events), 2);
+    assert_eq!(output.queue_timed(&events).packets(), 2);
     assert_eq!(
         counters.take_sent_timed(raw),
         [(ump, SendAt::Now), (ump, SendAt::At(t))]
     );
-    assert_eq!(output.queue(&[note()]), 1);
+    assert_eq!(output.queue(&[note()]).packets(), 1);
     assert_eq!(counters.take_sent_timed(raw), [(ump, SendAt::Now)]);
 }
 
@@ -227,7 +227,7 @@ fn a_refusing_output_reports_zero_accepted() {
     let mut output = s.connect_output("synth a").unwrap();
 
     assert_eq!(
-        output.queue(&[note(), note()]),
+        output.queue(&[note(), note()]).packets(),
         0,
         "the device accepted none"
     );
@@ -245,7 +245,44 @@ fn a_partial_accept_reports_what_landed() {
     let s = MidiSession::open_over(backend, inlets()).unwrap();
     let mut output = s.connect_output("synth a").unwrap();
 
-    assert_eq!(output.queue(&[note(), note(), note()]), 1);
+    assert_eq!(output.queue(&[note(), note(), note()]).packets(), 1);
+}
+
+/// A System Exclusive message of three packets, start, continue and end.
+fn sysex() -> [UmpAt; 3] {
+    use tutti_ump::{Message, MidiGroup, Sysex7Packet, SysexStatus};
+    [SysexStatus::Start, SysexStatus::Continue, SysexStatus::End].map(|status| {
+        (
+            Offset::ZERO,
+            tutti_ump::Ump::from(Message::Sysex7(
+                MidiGroup::FIRST,
+                Sysex7Packet::new(status, &[1, 2]).unwrap(),
+            )),
+        )
+    })
+}
+
+/// **A device that has room for two of a message's three packets takes none of
+/// it**, nor anything after it, and the output counts what was left. A count
+/// cut inside a System Exclusive message would leave the device waiting for an
+/// end that never comes.
+#[test]
+fn a_message_the_device_cannot_take_whole_is_refused_whole_and_counted() {
+    let (backend, counters) = FakeBackend::build_accepting(2);
+    let s = MidiSession::open_over(backend, inlets()).unwrap();
+    let mut output = s.connect_output("synth a").unwrap();
+    let raw = EndpointId::from_raw(10);
+    let [start, middle, end] = sysex();
+    let batch = [note(), start, middle, end, note()];
+
+    let taken = output.queue(&batch);
+    assert_eq!(
+        taken.packets(),
+        1,
+        "the note before the message, and no more"
+    );
+    assert_eq!(counters.take_sent(raw), [note().1]);
+    assert_eq!(output.losses(), tutti_graph::Losses::refused(4));
 }
 
 /// An output is the caller's value, not the session's: each connect returns
@@ -262,8 +299,8 @@ fn each_connected_output_is_its_own_value_on_its_own_device() {
     assert_eq!(synth.id(), &id("Synth A"));
     assert_eq!(iac.name(), "IAC Bus 1");
 
-    assert_eq!(synth.queue(&[note()]), 1);
-    assert_eq!(iac.queue(&[note(), note()]), 2);
+    assert_eq!(synth.queue(&[note()]).packets(), 1);
+    assert_eq!(iac.queue(&[note(), note()]).packets(), 2);
     assert_eq!(counters.take_sent(EndpointId::from_raw(10)).len(), 1);
     assert_eq!(counters.take_sent(EndpointId::from_raw(11)).len(), 2);
 }

@@ -10,7 +10,7 @@
 use tutti_alsa_ffi::{
     BLOCK_IS_LOWSPEED, BLOCK_IS_MIDI1, Blocking, CAP_READ, CAP_SUBS_READ, CAP_SUBS_WRITE,
     CAP_WRITE, Client, DIR_BIDIRECTION, DIR_INPUT, DIR_OUTPUT, PROTO_MIDI1, PROTO_MIDI2,
-    TYPE_APPLICATION, TYPE_MIDI_GENERIC, UmpBlock, UmpEndpoint, UmpVersion,
+    TYPE_APPLICATION, TYPE_MIDI_GENERIC, UmpBlock, UmpEndpoint, UmpVersion, address_byte,
 };
 use tutti_midi_device::FunctionBlock;
 use tutti_ump::Direction;
@@ -38,10 +38,10 @@ fn open_client(spec: &VirtualSpec, blocking: Blocking) -> Result<(Client, Virtua
     let name = spec.name().as_str();
     match super::client::open(name, blocking, version_of(spec.protocol())) {
         Ok(client) => Ok((client, spec.protocol())),
-        Err(Error::Alsa {
+        Err(Error::Os(tutti_alsa_ffi::Error::Call {
             operation: SET_VERSION,
             code,
-        }) if spec.protocol() == VirtualProtocol::Midi2 => {
+        })) if spec.protocol() == VirtualProtocol::Midi2 => {
             tracing::debug!("virtual MIDI endpoint falls back to MIDI 1.0 ({code})");
             Ok((
                 super::client::open(name, blocking, UmpVersion::Midi1)?,
@@ -125,7 +125,7 @@ pub(crate) fn source(spec: &VirtualSpec) -> Result<(AlsaVirtualSource, VirtualPr
         TYPE_MIDI_GENERIC | TYPE_APPLICATION,
     )?;
     publish(&client, spec, protocol)?;
-    let port = super::output::seq_addr_byte(port, "snd_seq_create_simple_port")?;
+    let port = address_byte("port", port)?;
     Ok((
         AlsaVirtualSource {
             inner: std::sync::Mutex::new((client, port)),

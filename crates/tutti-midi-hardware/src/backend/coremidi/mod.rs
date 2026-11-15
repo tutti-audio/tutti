@@ -40,19 +40,18 @@ use coremidi::{
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use tutti_graph::UmpAt;
-
 use crate::InputProducerHandle;
+use crate::backend::by_message::{Refused, by_message};
 use crate::block::RawBlock;
 use crate::capability::{EndpointInfo, UmpCapability};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
-use crate::error::{Error, Result};
+use crate::error::{Error, NotFound, Result};
 use crate::guard::Guard;
 use tutti_coremidi_ffi::{UmpEndpointInfo, ump_endpoints};
 use tutti_midi_device::{EndpointId, Identity, OsDevice};
-use tutti_midi_runtime::{MidiOut, Outgoing, SendAt};
+use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
 use tutti_ump::{Protocol, split_stream};
 
 mod host_time;
@@ -218,9 +217,9 @@ fn unique_id(object: &coremidi::Object) -> Option<i32> {
 
 /// The macOS [`MidiEndpoints`] implementation.
 pub struct CoreMidiEndpoints {
-    /// The process-wide client ([`shared_client`]); `None` when CoreMIDI refused
-    /// it.
-    client: Option<&'static Client>,
+    /// The process-wide client ([`shared_client`]), or the status CoreMIDI
+    /// refused it with.
+    client: std::result::Result<&'static Client, coremidi::OSStatus>,
 }
 
 impl core::fmt::Debug for CoreMidiEndpoints {
@@ -238,19 +237,22 @@ impl Default for CoreMidiEndpoints {
 impl CoreMidiEndpoints {
     /// Creates the backend on the process-wide CoreMIDI client.
     ///
-    /// A failed client is kept as `None` rather than panicking: enumeration then
-    /// reports nothing and opening reports an error, which is what a headless
-    /// machine or a sandbox without MIDI access should look like.
+    /// A failed client is kept rather than panicking: enumeration then
+    /// reports nothing and opening reports the status it failed with, which is
+    /// what a headless machine or a sandbox without MIDI access should look
+    /// like.
     pub fn new() -> Self {
         Self {
-            client: shared_client().ok(),
+            client: shared_client(),
         }
     }
 
     fn client(&self) -> Result<&'static Client> {
-        self.client.ok_or(Error::CoreMidi {
-            operation: "create client",
-            status: -1,
+        self.client.map_err(|status| {
+            Error::from(tutti_coremidi_ffi::Error {
+                operation: "create client",
+                status,
+            })
         })
     }
 
@@ -271,9 +273,41 @@ impl CoreMidiEndpoints {
     /// Every device now. Run by the hub thread: it must not create a client
     /// (`hub_first`).
     fn devices() -> Vec<OsDevice> {
-        let this = Self { client: None };
-        os_devices(&this.inputs(), &this.outputs())
+        os_devices(&list_inputs(), &list_outputs())
     }
+}
+
+/// The sources now, as endpoints.
+fn list_inputs() -> Vec<EndpointInfo> {
+    let umps = ump_endpoints().unwrap_or_default();
+    (0..Sources::count())
+        .filter_map(Source::from_index)
+        .enumerate()
+        .filter_map(|(index, source)| {
+            Some(EndpointInfo {
+                id: endpoint_id(&source)?,
+                identity: Identity::CoreMidi(unique_id(&source)?),
+                name: endpoint_name(&source, index),
+                capability: endpoint_capability(&source, ump_of(&umps, &source, true)),
+            })
+        })
+        .collect()
+}
+
+fn list_outputs() -> Vec<EndpointInfo> {
+    let umps = ump_endpoints().unwrap_or_default();
+    (0..Destinations::count())
+        .filter_map(coremidi::Destination::from_index)
+        .enumerate()
+        .filter_map(|(index, dest)| {
+            Some(EndpointInfo {
+                id: endpoint_id(&dest)?,
+                identity: Identity::CoreMidi(unique_id(&dest)?),
+                name: endpoint_name(&dest, index),
+                capability: endpoint_capability(&dest, ump_of(&umps, &dest, false)),
+            })
+        })
+        .collect()
 }
 
 impl MidiEndpoints for CoreMidiEndpoints {
@@ -282,35 +316,11 @@ impl MidiEndpoints for CoreMidiEndpoints {
     }
 
     fn inputs(&self) -> Vec<EndpointInfo> {
-        let umps = ump_endpoints().unwrap_or_default();
-        (0..Sources::count())
-            .filter_map(Source::from_index)
-            .enumerate()
-            .filter_map(|(index, source)| {
-                Some(EndpointInfo {
-                    id: endpoint_id(&source)?,
-                    identity: Identity::CoreMidi(unique_id(&source)?),
-                    name: endpoint_name(&source, index),
-                    capability: endpoint_capability(&source, ump_of(&umps, &source, true)),
-                })
-            })
-            .collect()
+        list_inputs()
     }
 
     fn outputs(&self) -> Vec<EndpointInfo> {
-        let umps = ump_endpoints().unwrap_or_default();
-        (0..Destinations::count())
-            .filter_map(coremidi::Destination::from_index)
-            .enumerate()
-            .filter_map(|(index, dest)| {
-                Some(EndpointInfo {
-                    id: endpoint_id(&dest)?,
-                    identity: Identity::CoreMidi(unique_id(&dest)?),
-                    name: endpoint_name(&dest, index),
-                    capability: endpoint_capability(&dest, ump_of(&umps, &dest, false)),
-                })
-            })
-            .collect()
+        list_outputs()
     }
 
     fn open_input(
@@ -319,8 +329,7 @@ impl MidiEndpoints for CoreMidiEndpoints {
         mut producer: InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
         let client = self.client()?;
-        let source = Self::find_source(id)
-            .ok_or_else(|| Error::device(format!("no MIDI source with id {}", id.raw())))?;
+        let source = Self::find_source(id).ok_or(NotFound::Endpoint(id))?;
 
         // The port speaks the source's protocol: a MIDI 1.0 source is delivered
         // as MIDI 1.0 UMP (type 2), which the ingest node's `Translator`
@@ -356,13 +365,13 @@ impl MidiEndpoints for CoreMidiEndpoints {
                     }
                 });
             })
-            .map_err(|status| Error::CoreMidi {
+            .map_err(|status| tutti_coremidi_ffi::Error {
                 operation: "create input port",
                 status,
             })?;
 
         port.connect_source(&source, ())
-            .map_err(|status| Error::CoreMidi {
+            .map_err(|status| tutti_coremidi_ffi::Error {
                 operation: "connect source",
                 status,
             })?;
@@ -372,12 +381,11 @@ impl MidiEndpoints for CoreMidiEndpoints {
 
     fn open_output(&self, id: EndpointId) -> Result<Box<dyn DeviceOut>> {
         let client = self.client()?;
-        let destination = Self::find_destination(id)
-            .ok_or_else(|| Error::device(format!("no MIDI destination with id {}", id.raw())))?;
+        let destination = Self::find_destination(id).ok_or(NotFound::Endpoint(id))?;
 
         let port = client
             .output_port("tutti-out")
-            .map_err(|status| Error::CoreMidi {
+            .map_err(|status| tutti_coremidi_ffi::Error {
                 operation: "create output port",
                 status,
             })?;
@@ -423,32 +431,35 @@ struct CoreMidiOutput {
 }
 
 impl CoreMidiOutput {
-    /// Send one UMP message, surfacing the real error.
-    ///
-    /// The inherent-method-plus-thin-trait-impl idiom `MidiSender` already uses:
-    /// a caller holding the concrete type gets the `OSStatus`, while the erased
-    /// [`MidiOut`] stays the ring-shaped `queue`.
-    fn send_ump(&self, words: &[u32], at: SendAt) -> Result<()> {
-        if words.is_empty() {
-            return Ok(());
-        }
-        // CoreMIDI holds a packet stamped in the future until then; 0 is now.
-        // The host clock is read afresh with each send, so the pairing neither
-        // drifts nor spans a sleep (`Instant` and `mach_absolute_time` differ
-        // there).
-        let time = match at {
-            SendAt::Now => 0,
-            SendAt::At(instant) => host_time::Pairing::now().host_time_of(instant),
-        };
+    /// Sends one message as one event list, so the OS takes all its packets or
+    /// none: each packet is stamped with the host time of its [`SendAt`], which
+    /// CoreMIDI holds it until (0 is now). `pairing` is the batch's reading of
+    /// the host clock against `Instant`, taken at its first scheduled packet:
+    /// read afresh for each batch, so it neither drifts nor spans a sleep
+    /// (`Instant` and `mach_absolute_time` differ there).
+    fn send(
+        &self,
+        message: &[Outgoing],
+        pairing: &mut Option<host_time::Pairing>,
+    ) -> std::result::Result<(), tutti_coremidi_ffi::Error> {
         let cm_protocol = if self.midi2.load(Ordering::Relaxed) {
             CmProtocol::Midi20
         } else {
             CmProtocol::Midi10
         };
-        let buffer = EventBuffer::new(cm_protocol).with_packet(time, words);
+        let mut buffer = EventBuffer::new(cm_protocol);
+        for event in message {
+            let time = match event.send {
+                SendAt::Now => 0,
+                SendAt::At(instant) => pairing
+                    .get_or_insert_with(host_time::Pairing::now)
+                    .host_time_of(instant),
+            };
+            buffer = buffer.with_packet(time, event.ump.words());
+        }
         self.port
             .send(&self.destination, &buffer)
-            .map_err(|status| Error::CoreMidi {
+            .map_err(|status| tutti_coremidi_ffi::Error {
                 operation: "send event list",
                 status,
             })
@@ -465,28 +476,16 @@ impl DeviceOut for CoreMidiOutput {
 }
 
 impl MidiOut for CoreMidiOutput {
-    /// Returns how many events reached the endpoint.
-    ///
-    /// Stops at the first failure rather than skipping it, so the count names an
-    /// unbroken **prefix** of `events`. Skipping would report a number no
-    /// contiguous run matches, and would deliver a note-off whose note-on never
-    /// left. The ALSA backend's `queue` behaves identically.
-    fn queue(&self, events: &[UmpAt]) -> usize {
-        self.queue_timed(&Outgoing::now_batch(events))
-    }
-
-    /// Each packet is stamped with the host time of its [`SendAt`] and CoreMIDI
-    /// schedules it.
-    fn queue_timed(&self, events: &[Outgoing]) -> usize {
-        let mut accepted = 0;
-        for event in events {
-            if let Err(e) = self.send_ump(event.ump.words(), event.send) {
-                tracing::debug!("CoreMIDI send: {e}");
-                break;
-            }
-            accepted += 1;
-        }
-        accepted
+    /// Each message goes to CoreMIDI as one event list, its packets stamped
+    /// with the host time of their [`SendAt`]; CoreMIDI schedules them, and
+    /// takes a message whole or not at all ([`by_message`]).
+    fn queue_timed(&self, events: &[Outgoing]) -> Taken {
+        let mut pairing = None;
+        by_message(events, "CoreMIDI", |message| {
+            self.send(message.packets(), &mut pairing)
+                .map_err(|error| Refused { error, sent: 0 })
+        })
+        .taken
     }
 }
 

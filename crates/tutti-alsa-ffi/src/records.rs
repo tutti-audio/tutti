@@ -15,9 +15,8 @@ impl PortRecord {
         // SAFETY: `ptr` is a valid out-pointer.
         let rc = unsafe { sys::snd_seq_port_info_malloc(&mut ptr) };
         check(rc, "snd_seq_port_info_malloc")?;
-        NonNull::new(ptr).map(Self).ok_or(crate::Error {
+        NonNull::new(ptr).map(Self).ok_or(crate::Error::NoRecord {
             operation: "snd_seq_port_info_malloc",
-            code: -12,
         })
     }
 
@@ -42,9 +41,8 @@ impl ClientRecord {
         // SAFETY: `ptr` is a valid out-pointer.
         let rc = unsafe { sys::snd_seq_client_info_malloc(&mut ptr) };
         check(rc, "snd_seq_client_info_malloc")?;
-        NonNull::new(ptr).map(Self).ok_or(crate::Error {
+        NonNull::new(ptr).map(Self).ok_or(crate::Error::NoRecord {
             operation: "snd_seq_client_info_malloc",
-            code: -12,
         })
     }
 
@@ -69,9 +67,8 @@ impl BlockRecord {
         // SAFETY: `ptr` is a valid out-pointer.
         let rc = unsafe { sys::snd_ump_block_info_malloc(&mut ptr) };
         check(rc, "snd_ump_block_info_malloc")?;
-        NonNull::new(ptr).map(Self).ok_or(crate::Error {
+        NonNull::new(ptr).map(Self).ok_or(crate::Error::NoRecord {
             operation: "snd_ump_block_info_malloc",
-            code: -12,
         })
     }
 
@@ -96,9 +93,8 @@ impl EndpointRecord {
         // SAFETY: `ptr` is a valid out-pointer.
         let rc = unsafe { sys::snd_ump_endpoint_info_malloc(&mut ptr) };
         check(rc, "snd_ump_endpoint_info_malloc")?;
-        NonNull::new(ptr).map(Self).ok_or(crate::Error {
+        NonNull::new(ptr).map(Self).ok_or(crate::Error::NoRecord {
             operation: "snd_ump_endpoint_info_malloc",
-            code: -12,
         })
     }
 
@@ -133,9 +129,8 @@ impl StatusRecord {
         // SAFETY: `ptr` is a valid out-pointer.
         let rc = unsafe { sys::snd_seq_queue_status_malloc(&mut ptr) };
         check(rc, "snd_seq_queue_status_malloc")?;
-        NonNull::new(ptr).map(Self).ok_or(crate::Error {
+        NonNull::new(ptr).map(Self).ok_or(crate::Error::NoRecord {
             operation: "snd_seq_queue_status_malloc",
-            code: -12,
         })
     }
 

@@ -6,7 +6,6 @@
 use crate::common::{MF, Seen, blocks, note, offline, play, tap};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tutti_graph::UmpAt;
 use tutti_session::Stamp;
 
 use std::time::{Duration, Instant};
@@ -472,9 +471,10 @@ fn the_routes_have_one_declarer() {
 /// Counts what reached the wire.
 struct CountingSink(Arc<AtomicUsize>);
 impl tutti_midi_runtime::MidiOut for CountingSink {
-    fn queue(&self, events: &[UmpAt]) -> usize {
+    fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
+        let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
         self.0.fetch_add(events.len(), Ordering::SeqCst);
-        events.len()
+        tutti_midi_runtime::Taken::within(batch, batch.len())
     }
 }
 

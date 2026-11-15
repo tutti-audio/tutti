@@ -118,7 +118,7 @@ fn a_virtual_destination_delivers_what_a_client_sends_to_the_graph_in_order() {
         peer.send_to_subscribers(u8::try_from(port).unwrap(), ump.words())
             .expect("sends");
     }
-    let heard = listener.listen(Duration::from_millis(300));
+    let heard = listener.hear(sent.len(), PATIENCE);
     assert_eq!(heard, sent);
     assert!(destination.is_alive());
 }
@@ -147,7 +147,7 @@ fn jr_messages_a_client_sends_are_not_heard_by_an_arrival_port() {
         peer.send_to_subscribers(u8::try_from(port).unwrap(), ump.words())
             .expect("sends");
     }
-    assert_eq!(listener.listen(Duration::from_millis(300)), [note]);
+    assert_eq!(listener.hear(1, PATIENCE), [note]);
     assert_eq!(ports.losses().dropped(), 0);
 }
 
@@ -225,7 +225,7 @@ fn a_midi1_destination_reports_midi1_and_its_messages_arrive_widened() {
     let note = m1_note_on(MidiChannel::of(2), 60, U7::of(0x40));
     peer.send_to_subscribers(u8::try_from(port).unwrap(), note.words())
         .expect("sends");
-    let heard = listener.listen(Duration::from_millis(300));
+    let heard = listener.hear(1, PATIENCE);
     assert_eq!(heard, [note_on(MidiChannel::of(2), 60, 0x8000)]);
 }
 

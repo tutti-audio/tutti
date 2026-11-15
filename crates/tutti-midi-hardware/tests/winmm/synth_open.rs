@@ -53,7 +53,7 @@ fn the_synth_is_sent_every_event_at_its_time_and_opens_again_after_a_close() {
             at(SendAt::At(now + Duration::from_millis(60)), note_off),
         ];
         batch.extend(reset.iter().map(|&ump| at(SendAt::At(later), ump)));
-        assert_eq!(out.queue_timed(&batch), batch.len());
+        assert_eq!(out.queue_timed(&batch).packets(), batch.len());
         drained(&out);
         assert_eq!(out.losses(), Losses::NONE);
         assert!(out.is_alive());

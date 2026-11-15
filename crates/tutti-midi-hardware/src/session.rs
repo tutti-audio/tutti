@@ -287,7 +287,7 @@ impl MidiSession {
     ///
     /// [`Error::NoDeviceNamed`] when a name matches no input (listing the
     /// inputs it searched; an absent device is an error, never a silent
-    /// no-op). [`Error::NoDevice`] when an id names no present device — the
+    /// no-op). [`Error::NotFound`] when an id names no present device — the
     /// shape a stale id takes after a hot-plug — and [`Error::WrongDirection`]
     /// when it is not an input. Otherwise whatever the backend raises while
     /// opening the port.
@@ -412,7 +412,7 @@ impl MidiSession {
     /// # Errors
     ///
     /// [`Error::NoDeviceNamed`] when a name matches no output,
-    /// [`Error::NoDevice`] when an id names no present device,
+    /// [`Error::NotFound`] when an id names no present device,
     /// [`Error::WrongDirection`] when it is not an output, plus whatever the
     /// backend raises while opening.
     pub fn connect_output(&self, device: impl Into<DeviceQuery>) -> Result<OpenOutput> {

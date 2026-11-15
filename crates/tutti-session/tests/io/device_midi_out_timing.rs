@@ -10,8 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tutti_cpal::{ManualStream, ManualStreamDriver, OutputSpec};
-use tutti_graph::UmpAt;
-use tutti_midi_runtime::{MidiOut, Outgoing, OutputLatency, OutputOffset, SendAt};
+use tutti_midi_runtime::{MidiOut, Outgoing, OutputLatency, OutputOffset, SendAt, Taken};
 use tutti_session::{Session, UmpOut};
 use tutti_transport::MotionEvent;
 use tutti_types::{ChannelLayout, SampleRate, Seconds};
@@ -25,13 +24,9 @@ const BLOCK: usize = 512;
 struct Wire(Arc<Mutex<Vec<Outgoing>>>);
 
 impl MidiOut for Wire {
-    fn queue(&self, events: &[UmpAt]) -> usize {
-        events.len()
-    }
-
-    fn queue_timed(&self, events: &[Outgoing]) -> usize {
+    fn queue_timed(&self, events: &[Outgoing]) -> Taken {
         self.0.lock().unwrap().extend_from_slice(events);
-        events.len()
+        Taken::within(events, events.len())
     }
 }
 

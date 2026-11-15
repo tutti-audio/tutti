@@ -258,10 +258,16 @@ fn the_accepted_count_is_in_the_callers_events() {
     let jr = Ump::from(Message::Utility(Utility::JrClock(1)));
     let note = midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
     let events: Vec<UmpAt> = [jr, rpn(0, 0, 0), note].into_iter().map(at).collect();
-    wire.convert(&Outgoing::now_batch(&events));
+    let events = Outgoing::now_batch(&events);
+    wire.convert(&events);
     assert_eq!(wire.batch().len(), 5, "no JR, four for the RPN, one note");
     // The device took n of the five packets.
-    let counts: Vec<usize> = (0..=5).map(|n| wire.accepted(n)).collect();
+    let counts: Vec<usize> = (0..=5)
+        .map(|n| {
+            wire.accepted(tutti_midi_runtime::Taken::within(wire.batch(), n), &events)
+                .packets()
+        })
+        .collect();
     // The JR is nothing, so it is taken with nothing taken.
     assert_eq!(counts, [1, 1, 1, 1, 2, 3]);
 }

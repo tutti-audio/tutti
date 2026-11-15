@@ -246,7 +246,7 @@ enum Sink {
 }
 
 impl Sink {
-    fn queue_timed(&mut self, events: &[Outgoing]) -> usize {
+    fn queue_timed(&mut self, events: &[Outgoing]) -> tutti_midi_runtime::Taken {
         match self {
             Self::Host(sink) => sink.queue_timed(events),
             #[cfg(feature = "midi-hardware")]
@@ -2406,9 +2406,10 @@ mod tests {
     /// these tests run on every platform.
     struct CountingSink(Arc<AtomicUsize>);
     impl tutti_midi_runtime::MidiOut for CountingSink {
-        fn queue(&self, events: &[UmpAt]) -> usize {
+        fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
+            let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
             self.0.fetch_add(events.len(), Ordering::SeqCst);
-            events.len()
+            tutti_midi_runtime::Taken::within(batch, batch.len())
         }
     }
 
@@ -2512,9 +2513,10 @@ mod tests {
     /// Keeps every batch it is handed.
     struct Recording(Arc<std::sync::Mutex<Vec<Vec<UmpAt>>>>);
     impl tutti_midi_runtime::MidiOut for Recording {
-        fn queue(&self, events: &[UmpAt]) -> usize {
+        fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
+            let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
             self.0.lock().unwrap().push(events.to_vec());
-            events.len()
+            tutti_midi_runtime::Taken::within(batch, batch.len())
         }
     }
 
@@ -2634,12 +2636,9 @@ mod tests {
     /// Keeps every batch's events with the time each was sent at.
     struct Timed(Arc<std::sync::Mutex<Vec<Outgoing>>>);
     impl tutti_midi_runtime::MidiOut for Timed {
-        fn queue(&self, events: &[UmpAt]) -> usize {
-            events.len()
-        }
-        fn queue_timed(&self, events: &[Outgoing]) -> usize {
+        fn queue_timed(&self, events: &[Outgoing]) -> tutti_midi_runtime::Taken {
             self.0.lock().unwrap().extend_from_slice(events);
-            events.len()
+            tutti_midi_runtime::Taken::within(events, events.len())
         }
     }
 

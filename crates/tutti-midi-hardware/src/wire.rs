@@ -33,7 +33,7 @@
 //! (`MidiSession::poll`) after it.
 
 use tutti_midi_protocol::Narrower;
-use tutti_midi_runtime::Outgoing;
+use tutti_midi_runtime::{Outgoing, Taken};
 use tutti_ump::{Message, Protocol, StreamConfig, Ump, Utility, parse_exact};
 
 /// One device output's wire form: its configuration, the [`Narrower`] that
@@ -121,11 +121,15 @@ impl Wire {
         &self.out
     }
 
-    /// How many of the events [`convert`](Self::convert) was given the device
-    /// has taken, when it took the first `taken` of the batch: the events whose
-    /// packets all went, so an event that became nothing counts as taken.
-    pub(crate) fn accepted(&self, taken: usize) -> usize {
-        self.ends.partition_point(|&end| end <= taken)
+    /// How much of `events`, the batch [`convert`](Self::convert) was given,
+    /// the device has taken, when it took `taken` of the batch it was sent: the
+    /// events whose packets all went, so an event that became nothing counts as
+    /// taken. A message of several packets is one event per packet and goes
+    /// through the conversion as it is, so the count still ends between
+    /// messages.
+    pub(crate) fn accepted(&self, taken: Taken, events: &[Outgoing]) -> Taken {
+        let events_taken = self.ends.partition_point(|&end| end <= taken.packets());
+        Taken::within(events, events_taken)
     }
 }
 

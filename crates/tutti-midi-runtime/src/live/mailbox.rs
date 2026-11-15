@@ -12,9 +12,10 @@ use std::sync::Arc;
 use tutti_graph::UmpAt;
 
 use crossbeam_queue::ArrayQueue;
-use tutti_ump::Ump;
+use tutti_ump::{Ump, spans};
 
 use crate::traits::MidiOut;
+use crate::{Outgoing, Taken};
 
 /// The ring's default capacity, in events.
 pub const MAILBOX_CAPACITY: NonZeroUsize = NonZeroUsize::new(256).unwrap();
@@ -68,39 +69,54 @@ pub struct MidiSender {
 }
 
 impl MidiSender {
-    /// Pushes `events` and returns how many were accepted. `< events.len()` means
-    /// the ring was full and the rest were dropped (a prefix is accepted, so
-    /// the stream stays in order). Dropping a note-off whose note-on landed is
-    /// what leaves a note stuck, so a caller with anywhere to report it must.
-    /// Never blocks.
-    pub fn queue(&self, events: &[UmpAt]) -> usize {
-        let mut accepted = 0;
-        for &(offset, ump) in events {
-            if self.slot.events.push((offset.get(), ump)).is_err() {
-                break;
-            }
-            accepted += 1;
-        }
-        accepted
+    /// Pushes `events` and returns what the ring [`Taken`]. Less than all means
+    /// the ring was full and the rest were dropped: a prefix that ends between
+    /// two messages is taken, so the stream stays in order and a message of
+    /// several packets is in the ring whole or not at all. Dropping a note-off
+    /// whose note-on landed is what leaves a note stuck, so a caller with
+    /// anywhere to report it must. Never blocks.
+    ///
+    /// A message goes in whole only against the room the ring has when it
+    /// starts: another clone pushing at the same time can take that room, and
+    /// then the packets of the message that did not fit stay out.
+    pub fn queue(&self, events: &[UmpAt]) -> Taken {
+        self.push(events, |&(offset, ump)| (offset.get(), ump))
     }
 
     /// [`queue`](Self::queue) for events stamped with a raw `u32` that is not
     /// an offset into a block (the out node's graph-clock frame, wrapped at
-    /// 2^32). Same prefix semantics: the count accepted, never a gap.
-    pub fn queue_stamped(&self, events: &[(u32, Ump)]) -> usize {
-        let mut accepted = 0;
-        for &event in events {
-            if self.slot.events.push(event).is_err() {
+    /// 2^32). Same prefix semantics: what is taken, never a gap.
+    pub fn queue_stamped(&self, events: &[(u32, Ump)]) -> Taken {
+        self.push(events, |&event| event)
+    }
+
+    /// Pushes the messages of `events` while the ring has room for each.
+    fn push<T>(&self, events: &[T], stamped: impl Fn(&T) -> (u32, Ump)) -> Taken {
+        let ring = &self.slot.events;
+        let mut taken = Taken::NONE;
+        for message in spans(events, |event| stamped(event).1) {
+            if ring.capacity() - ring.len() < message.len() {
                 break;
             }
-            accepted += 1;
+            if message
+                .packets()
+                .iter()
+                .any(|event| ring.push(stamped(event)).is_err())
+            {
+                break;
+            }
+            taken = taken.through(message);
         }
-        accepted
+        taken
     }
 }
 
 impl MidiOut for MidiSender {
-    fn queue(&self, events: &[UmpAt]) -> usize {
+    fn queue_timed(&self, events: &[Outgoing]) -> Taken {
+        self.push(events, |event| (event.at.get(), event.ump))
+    }
+
+    fn queue(&self, events: &[UmpAt]) -> Taken {
         self.queue(events)
     }
 }
