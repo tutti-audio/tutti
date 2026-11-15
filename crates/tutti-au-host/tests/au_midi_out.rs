@@ -307,7 +307,7 @@ fn accepting_the_callback_write_does_not_mean_the_au_emits_midi() {
             });
         // Withdraw explicitly so the AU's status is seen rather than dropped.
         // The unit was never initialized, so nothing renders.
-        let proof = au.uninitialized().expect("never initialized");
+        let proof = au.unit().uninitialized().expect("never initialized");
         registration
             .withdraw(&proof)
             .unwrap_or_else(|e| panic!("{}: withdrawing the callback failed: {e:?}", unit.label));
@@ -344,7 +344,8 @@ fn install_then_withdraw_leaves_the_au_renderable() {
         // The unit stops rendering before the state is freed, and renders again
         // after.
         {
-            let proof = au.uninitialize().expect("uninitialize");
+            au.uninitialize().expect("uninitialize");
+            let proof = au.unit().uninitialized().expect("uninitialized");
             registration
                 .withdraw(&proof)
                 .unwrap_or_else(|e| panic!("{}: withdraw failed: {e:?}", unit.label));
@@ -427,7 +428,8 @@ fn no_delivery_arrives_after_the_callback_is_withdrawn() {
     let events_before = events.load(Ordering::SeqCst);
 
     {
-        let proof = au.uninitialize().expect("uninitialize");
+        au.uninitialize().expect("uninitialize");
+        let proof = au.unit().uninitialized().expect("uninitialized");
         registration.withdraw(&proof).expect("withdraw succeeds");
     }
     au.initialize().expect("initialize again");
@@ -528,7 +530,7 @@ fn a_second_install_on_a_unit_is_refused_until_the_first_is_withdrawn() {
         "a unit with a registration refuses another"
     );
     {
-        let proof = au.uninitialized().expect("never initialized");
+        let proof = au.unit().uninitialized().expect("never initialized");
         first.withdraw(&proof).expect("first withdraw");
     }
 
@@ -540,7 +542,8 @@ fn a_second_install_on_a_unit_is_refused_until_the_first_is_withdrawn() {
     let mut output = support::corpus::silence(2, BLOCK as usize);
     support::corpus::render(&mut au, &input, &mut output, BLOCK).expect("render");
     {
-        let proof = au.uninitialize().expect("uninitialize");
+        au.uninitialize().expect("uninitialize");
+        let proof = au.unit().uninitialized().expect("uninitialized");
         second.withdraw(&proof).expect("second withdraw");
     }
     au.initialize().expect("initialize again");
