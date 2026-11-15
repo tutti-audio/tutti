@@ -84,10 +84,25 @@ impl Editor {
         Self::lower_and_validate(&self.spec, &self.shapes).map(|_| ())
     }
 
+    /// Refuses a root generation the attached host has no folds for.
+    fn check_root_published(&self) -> Result<(), CommitError> {
+        let outputs = self.spec.topology.outputs.len();
+        match &self.root_gate {
+            Some(gate) if outputs > 0 && !gate.published(self.spec.root_id, outputs) => {
+                Err(CommitError::RootNotPublished {
+                    root: self.spec.root_id,
+                    outputs,
+                })
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// The cheap checks of [`validate`](Self::validate), before the spec is
     /// lowered: what [`commit`](Self::commit) asks even when nothing changed.
     fn check_spec(&self) -> Result<(), CommitError> {
         self.limits.outputs(self.spec.topology.outputs.len())?;
+        self.check_root_published()?;
         self.check_tap_widths()?;
         self.check_meter_widths()?;
         self.check_passes()

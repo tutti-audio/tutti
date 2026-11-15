@@ -138,6 +138,6 @@ pub use faults::{BackendErrorKind, STALL_GRACE, StreamFault, StreamFaultKind, St
 pub use hearing::{HeardOpen, HeardTapError, HeardTaps};
 pub use latency::StreamLatency;
 pub use manual::{ManualRunning, ManualStream, ManualStreamDriver};
-pub use output::{OutputControl, OutputPlacement};
+pub use output::{MAX_PENDING_ROOTS, OutputControl, OutputPlacement};
 pub use restart::{Stopped, StreamHost};
 pub use stream::{OutputSpec, OutputStream, RunningStream, StartError, StreamDriver};

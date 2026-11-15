@@ -619,36 +619,16 @@ impl Session {
 
     /// A restart on a driver of the caller's choosing, `spec` standing for the
     /// config the new device reports: the device-free restart, for a test.
-    /// The device is the engine's order for its width
-    /// ([`restart_on_placed`](Self::restart_on_placed) states it).
+    /// It takes any `Device`, which a [`LiveSession`] does not allow, so it is
+    /// behind `testing`. `topology` states what the new device's channels are
+    /// ([`DeviceRestart::topology`]); `None` takes the engine's order for its
+    /// width.
     ///
     /// # Errors
     ///
     /// As [`LiveSession::restart`], without the device's own.
     #[cfg(feature = "testing")]
     pub fn restart_on<D: StreamDriver>(
-        &mut self,
-        device: &mut Device,
-        spec: OutputSpec,
-        driver: D,
-        max_block: Option<MaxBlock>,
-    ) -> std::result::Result<DeviceRestarted, RestartError>
-    where
-        D::Error: Into<tutti_cpal::Error>,
-    {
-        self.restart_on_placed(device, spec, driver, max_block, None)
-    }
-
-    /// A restart on a driver of the caller's choosing, `spec` standing for the
-    /// config the new device reports: the device-free restart, for a test.
-    /// It takes any `Device`, which a [`LiveSession`] does not allow, so it is
-    /// behind `testing`.
-    ///
-    /// # Errors
-    ///
-    /// As [`LiveSession::restart`], without the device's own.
-    #[cfg(feature = "testing")]
-    pub fn restart_on_placed<D: StreamDriver>(
         &mut self,
         device: &mut Device,
         spec: OutputSpec,
@@ -885,7 +865,6 @@ impl Session {
             device: spec.channels,
             source,
         })?;
-        self.graph.place_device(spec.channels, topology)?;
         // The new device's callback size too: a hosted plugin's pipeline
         // follows it, and its declared latency with it.
         self.graph.reprepare(rate, max_block, spec.quantum)?;
@@ -901,6 +880,10 @@ impl Session {
         // A unit that panicked in `prepare`, or shapes that no longer
         // compile, poison the editor here: refuse, the stream still stopped.
         self.graph.check_reprepare(None)?;
+        // Every refusal above left the engine's device as it was: the new one
+        // is placed only now, so a refused restart moves nothing, and a
+        // restart onto the old device places it again.
+        self.graph.place_device(spec.channels, topology)?;
         // The hardware out's tap reads frames of one rate: reopened at the
         // new one, committed with the rest below.
         #[cfg(feature = "midi")]
@@ -910,15 +893,12 @@ impl Session {
         // A declaration a device refused is asked again of this one: if it
         // places, it is in force, committed and settled below with the rest.
         if self.root_refusal.is_some() {
-            match self
-                .graph
-                .declare_root(self.root_request.clone(), Some(spec.channels))
-            {
+            match self.graph.declare_root(self.root_request.clone()) {
                 Ok(()) => {
                     self.root_refusal = None;
                     self.commit();
                 }
-                Err(e) => self.root_refusal = Some(e.into()),
+                Err(e) => self.root_refusal = Some(e),
             }
         }
         // A wider device widens the root, by the build's rule; a narrower one

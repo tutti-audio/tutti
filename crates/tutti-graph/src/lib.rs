@@ -602,7 +602,7 @@ pub use compile::{CompileError, CycleEdge, Shapes, VerifyError, compile};
 pub use controls::{ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts};
 pub use cost::{Cost, Schedule, Work};
 pub use declare::{HasParam, HasParams, ParamUnit, Scalar};
-pub use editor::{CloseError, CommitError, Editor, Limits, MissingSource};
+pub use editor::{CloseError, CommitError, Editor, Limits, MissingSource, RootGate};
 pub use event::{
     Event, EventDensity, EventKind, EventOrderError, EventRejected, EventWriter, Harmony,
     HarmonyKind, MAX_EVENT_PORT_CAPACITY, MIN_EVENT_PORT_CAPACITY, ParamRamp, ParamSegment,

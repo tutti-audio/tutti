@@ -349,6 +349,7 @@ impl Engine {
         // Every bare root width places into every bare device width up to
         // `DEFAULT_DEVICE_WIDTHS` (`every_root_width_places_into_any_device`).
         let output = OutputControl::new(OutputFolds::up_to(DEFAULT_DEVICE_WIDTHS));
+        editor.set_root_gate(Arc::new(output.clone()));
         let folds = AudioThreadCell::new(output.cell().reader());
         Ok(Self {
             graph: AudioThreadCell::new(GraphRender {
@@ -522,15 +523,15 @@ impl Engine {
         // sends what it replaces back to the control side.
         let _rt = RtScope::enter();
         self.hearing.borrow_mut().swap();
-        // The folds to the device, lent for the call. Refused: a buffer of
-        // a width the engine has no folds for (`support_output`), a caller's
-        // bug that must not index past the fold.
+        // Refused: a buffer of a width the engine has no folds for
+        // (`support_output`), a caller's bug that must not index past the
+        // fold. The loan lasts this statement; each segment lends again after
+        // its `settle`, below.
         let mut reader = self.folds.borrow_mut();
-        let folds = reader.lend();
+        let declared = reader.lend().has_device(out_ch);
         // Refused only while the control side holds the graph
         // (`apply_pending` racing a callback): this block is silent.
         let graph = self.graph.try_borrow_mut();
-        let declared = folds.has_device(out_ch);
         let (true, Some(mut graph)) = (declared, graph) else {
             output.fill(0.0);
             self.hearing.borrow_mut().write(output, out_ch);
@@ -570,6 +571,11 @@ impl Engine {
                 play: tutti_graph::PlayClock::ZERO,
             });
             g.transport.advance(len, &t);
+            // Lent after `settle` installed the plan this segment renders:
+            // the root's folds were published before the commit that
+            // carries its id, so a snapshot taken now holds them. The loan
+            // ends with the segment.
+            let folds = reader.lend();
             unplaced |= !g.render(output, &folds, out_ch, done, len, &t, &ahead.changes);
             self.hearing
                 .borrow_mut()
@@ -614,9 +620,8 @@ impl Engine {
         // the fader is private to this method, and the pending list is
         // reached only under the graph borrow (here, or `apply_pending`'s).
         let mut reader = self.folds.borrow_mut();
-        let folds = reader.lend();
+        let declared = reader.lend().has_device(out_ch);
         let graph = self.graph.try_borrow_mut();
-        let declared = folds.has_device(out_ch);
         let (true, Some(mut graph)) = (declared, graph) else {
             output.fill(0.0);
             self.hearing.borrow_mut().write(output, out_ch);
@@ -657,6 +662,9 @@ impl Engine {
             // its changes; the rest is the next iteration's block.
             let len = walk.frames;
             budget += Samples(len).to_seconds(rate);
+            // Lent after `settle` installed the plan this segment renders
+            // (see `process_segment`).
+            let folds = reader.lend();
             unplaced |= !g.render(output, &folds, out_ch, done, len, &walk.start, &changes);
             let mut fader = self.fader.borrow_mut();
             fader.fade = fade_frames(rate);
@@ -1676,7 +1684,7 @@ mod tests {
         control: &OutputControl,
         root: Option<ChannelTopology>,
         device: ChannelLayout,
-    ) -> Result<RootId, FoldError> {
+    ) -> Result<RootId, tutti_graph::RootError> {
         let id = ed.spec().root_id.next();
         control.publish_root(id, root, device)?;
         ed.spec_mut().root_id = id;
@@ -1697,12 +1705,14 @@ mod tests {
         let (bound, _) = g.settle();
         assert!(bound >= want);
         let len = want;
+        // Lent right after `settle`, as `process_segment` does: a publish in
+        // the gap is not in this snapshot, and its plan is not installed.
+        let mut reader = engine.folds.borrow_mut();
+        let folds = reader.lend();
         between();
         let t = g.transport.begin_block();
         g.transport.advance(len, &t);
         let mut out = vec![-9.0f32; len * out_ch];
-        let mut reader = engine.folds.borrow_mut();
-        let folds = reader.lend();
         g.render(
             &mut out,
             &folds,
@@ -1979,6 +1989,191 @@ mod tests {
         assert_eq!(block_with(&engine, 6, || {}), frames(buses));
     }
 
+    /// The first block of a root committed right after its publish is
+    /// rendered with its own fold, and nothing is counted unplaced.
+    #[test]
+    fn a_root_committed_after_its_publish_renders_its_first_block_folded() {
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        rewire(&mut ed, 4);
+        let six = ChannelLayout::from(6u16);
+        let _ = first_frame(&engine, 6);
+        let control = engine.output_control();
+        let buses = Some(ChannelTopology::unassigned(ChannelLayout::QUAD));
+        declare(&mut ed, &control, buses, six).unwrap();
+        let before = engine.load_meter().expect("not taken").peek().silenced;
+        assert_eq!(first_frame(&engine, 6), [41.0, 42.0, 43.0, 44.0, 0.0, 0.0]);
+        assert_eq!(
+            engine.load_meter().expect("not taken").peek().silenced,
+            before,
+            "the first block of the new root is not silenced"
+        );
+    }
+
+    /// The fold set is lent after the plan is installed, not before: with the
+    /// control side publishing and committing a new root generation while the
+    /// audio side renders (on another thread, as in production) calls of many
+    /// segments, no block is counted unplaced. A set lent at the callback's entry misses a root
+    /// published after it whose plan `settle` then installs, and that block is
+    /// silent.
+    #[test]
+    fn a_root_published_while_blocks_render_is_never_unplaced() {
+        use std::sync::atomic::AtomicBool;
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        rewire(&mut ed, 4);
+        let control = engine.output_control();
+        let six = ChannelLayout::from(6u16);
+        let done = AtomicBool::new(false);
+        let silenced = std::thread::scope(|scope| {
+            let audio = scope.spawn(|| {
+                // Many graph segments per call: a commit sent mid-call is installed by a
+                // later segment's `settle`.
+                let mut out = vec![0.0f32; 6 * 64 * 256];
+                let mut blocks = 0u32;
+                while !done.load(Ordering::Acquire) || blocks < 64 {
+                    engine.process_segment(&mut InterleavedMut::new(&mut out, six).unwrap());
+                    blocks += 1;
+                }
+                engine.load_meter().expect("not taken").peek().silenced
+            });
+            for i in 0..2_000 {
+                let root = (i % 2 == 0).then(|| ChannelTopology::unassigned(ChannelLayout::QUAD));
+                let id = ed.spec().root_id.next();
+                match control.publish_root(id, root, six) {
+                    Ok(()) => {
+                        ed.spec_mut().root_id = id;
+                        // The queue can be full while the callback lags.
+                        while ed.commit().is_err() {
+                            std::thread::yield_now();
+                        }
+                    }
+                    // Too many roots await a plan: let a block render.
+                    Err(tutti_graph::RootError::TooManyPending { .. }) => {
+                        std::thread::yield_now();
+                    }
+                    Err(e) => panic!("{e}"),
+                }
+                let _ = control.reclaim();
+            }
+            done.store(true, Ordering::Release);
+            audio.join().unwrap()
+        });
+        assert_eq!(
+            silenced, 0,
+            "no block met a plan whose fold it did not hold"
+        );
+    }
+
+    /// A root id that is not past every published one is refused by name, at
+    /// the call, and publishes nothing.
+    #[test]
+    fn a_root_id_not_past_the_published_ones_is_refused() {
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        let control = engine.output_control();
+        let stereo = ChannelLayout::STEREO;
+        let first = RootId::GENESIS.next();
+        control.publish_root(first, None, stereo).unwrap();
+        for stale in [RootId::GENESIS, first] {
+            assert_eq!(
+                control.publish_root(stale, None, stereo),
+                Err(tutti_graph::RootError::NotPast {
+                    id: stale,
+                    last: first
+                })
+            );
+        }
+    }
+
+    /// With no plan rendering (a stopped stream) the published roots are
+    /// bounded: past `MAX_PENDING_ROOTS` a publish is refused by name and the
+    /// table stops growing, and one rendered block (which advances the root in
+    /// force) frees the room.
+    #[test]
+    fn roots_published_while_nothing_renders_are_bounded() {
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        rewire(&mut ed, 2);
+        let _ = first_frame(&engine, 2);
+        let control = engine.output_control();
+        let stereo = ChannelLayout::STEREO;
+        let mut id = RootId::GENESIS;
+        for _ in 0..crate::MAX_PENDING_ROOTS {
+            id = id.next();
+            control.publish_root(id, None, stereo).unwrap();
+        }
+        assert_eq!(
+            control.publish_root(id.next(), None, stereo),
+            Err(tutti_graph::RootError::TooManyPending {
+                limit: crate::MAX_PENDING_ROOTS
+            })
+        );
+        assert!(
+            !control.has_fold(id.next(), 2, stereo),
+            "nothing was published"
+        );
+        // The newest pending root is committed and rendered: the older ones
+        // are retired and the room is back.
+        ed.spec_mut().root_id = id;
+        ed.commit().unwrap();
+        let _ = first_frame(&engine, 2);
+        let _ = control.reclaim();
+        control.publish_root(id.next(), None, stereo).unwrap();
+    }
+
+    /// An idle `reclaim` (no root to retire) neither clones nor republishes
+    /// the fold table: the set the callback lends is the same allocation.
+    #[test]
+    fn an_idle_reclaim_leaves_the_published_set_alone() {
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        let control = engine.output_control();
+        let before = control.cell().current();
+        for _ in 0..4 {
+            let _ = control.reclaim();
+        }
+        assert!(Arc::ptr_eq(&before, &control.cell().current()));
+    }
+
+    /// An editor attached to an engine refuses a commit whose root id no fold
+    /// was published for, by name: the plan is not sent and the last one goes
+    /// on sounding.
+    #[test]
+    fn a_commit_of_an_unpublished_root_is_refused() {
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        rewire(&mut ed, 2);
+        let _ = first_frame(&engine, 2);
+        let unheard = RootId::GENESIS.next();
+        ed.spec_mut().root_id = unheard;
+        assert_eq!(
+            ed.commit(),
+            Err(CommitError::RootNotPublished {
+                root: unheard,
+                outputs: 2
+            })
+        );
+        assert_eq!(first_frame(&engine, 2), [21.0, 22.0]);
+        engine
+            .output_control()
+            .publish_root(unheard, None, ChannelLayout::STEREO)
+            .unwrap();
+        ed.commit().expect("published, so it commits");
+    }
+
     /// A root with no fold into the device (five buses into three) is
     /// reported by `has_fold` before any block runs, so the session can
     /// refuse the commit that would make it; a width a declared root does not
@@ -2131,10 +2326,10 @@ mod tests {
                 Some(ChannelTopology::unassigned(ChannelLayout::QUAD)),
                 ChannelLayout::STEREO
             ),
-            Err(FoldError::Unplaced {
+            Err(tutti_graph::RootError::Fold(FoldError::Unplaced {
                 channel: 2,
                 speaker: tutti_types::Speaker::Unassigned
-            })
+            }))
         );
         let lfe2 = ChannelTopology::new([
             tutti_types::Speaker::FrontLeft,
@@ -2145,7 +2340,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             control.publish_root(next, Some(lfe2), ChannelLayout::STEREO),
-            Err(FoldError::Unnamed { .. })
+            Err(tutti_graph::RootError::Fold(FoldError::Unnamed { .. }))
         ));
         assert!(!control.has_fold(next, 4, ChannelLayout::STEREO));
         assert_eq!(first_frame(&engine, 2), before);

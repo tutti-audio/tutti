@@ -63,6 +63,24 @@ pub enum RootError {
     /// The root's channels cannot be placed.
     #[error(transparent)]
     Fold(#[from] FoldError),
+    /// A root was published under an id that is not past every root already
+    /// published: ids are minted in order by the one graph that declares them.
+    #[error("root {id} is not past the last published root {last}")]
+    NotPast {
+        /// The id that was published.
+        id: RootId,
+        /// The newest id already published.
+        last: RootId,
+    },
+    /// Too many published roots are waiting for a plan to carry them: the
+    /// stream is not rendering (or not fast enough), so the engine holds the
+    /// roots in flight and takes no more until a plan of a later root has
+    /// rendered.
+    #[error("{limit} roots are published and none has rendered; wait for a block")]
+    TooManyPending {
+        /// The most roots that may be pending.
+        limit: usize,
+    },
 }
 
 /// Builds the fold from `src` into a destination of which only the width is

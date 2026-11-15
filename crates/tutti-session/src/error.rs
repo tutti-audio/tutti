@@ -421,6 +421,13 @@ pub enum Error {
     #[error("graph engine: {0}")]
     Graph(#[from] tutti_engine::GraphEngineError),
 
+    /// The root's declaration was refused by the engine's fold table, other
+    /// than for a fold: its id is not past the published roots, or too many
+    /// published roots are waiting for a plan to carry them (the stream is not
+    /// rendering). Wraps `tutti_graph::RootError`.
+    #[error(transparent)]
+    Root(tutti_graph::RootError),
+
     /// The graph root cannot be placed on the output: the device has no
     /// channels, or the root is wider than a device at least one of whose
     /// widths has no channel order (a 6-wide root on a 5-channel device would
@@ -564,3 +571,13 @@ pub enum Error {
 
 /// `Result<T, `[`enum@Error`]`>`.
 pub type Result<T> = core::result::Result<T, Error>;
+
+impl From<tutti_graph::RootError> for Error {
+    /// A fold refusal is [`Error::Output`]; the rest are [`Error::Root`].
+    fn from(e: tutti_graph::RootError) -> Self {
+        match e {
+            tutti_graph::RootError::Fold(fold) => Self::Output(fold),
+            other => Self::Root(other),
+        }
+    }
+}

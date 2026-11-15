@@ -275,6 +275,12 @@ pub(crate) enum Retried {
     },
 }
 
+/// The engine's output folds and the device it renders into.
+struct Placed {
+    control: tutti_engine::OutputControl,
+    device: ChannelLayout,
+}
+
 /// The editable audio graph. See the module docs.
 ///
 /// Every method runs on the control side, never on the audio thread; they
@@ -327,13 +333,12 @@ pub struct Graph {
     /// ([`Session::declare_root_topology`](crate::Session::declare_root_topology));
     /// `None` is the engine's order for the root's width.
     root: Option<tutti_types::ChannelTopology>,
-    /// The control side of the engine's output folds, once an engine was built
-    /// over this graph: a declaration is published through it.
-    output: Option<tutti_engine::OutputControl>,
-    /// The width of the device the engine renders into, once one is placed
-    /// ([`place_device`](Self::place_device)): the pair a commit must be able
-    /// to fold.
-    device: Option<ChannelLayout>,
+    /// The engine's output folds and the device it renders into, once an
+    /// engine was built over this graph: a declaration is published through
+    /// it, and a commit must fold into the device. One value, so a graph has
+    /// folds to publish exactly when it has a device to place them on; a
+    /// graph with no engine has neither, and nothing folds its root.
+    output: Option<Placed>,
     /// The last widening [`widen_outputs`](Self::widen_outputs) refused.
     widen_refusal: Option<tutti_graph::RootError>,
     /// The hosted plugins' records, by node (`plugin.rs`): kept here so a
@@ -484,7 +489,6 @@ impl Graph {
             removed: Vec::new(),
             root: None,
             output: None,
-            device: None,
             widen_refusal: None,
             #[cfg(feature = "plugin")]
             plugins: BTreeMap::new(),
@@ -555,14 +559,31 @@ impl Graph {
     /// Build the engine over this graph's audio side, which it takes:
     /// `Engine::new` over the editor and its executor, which bounds the
     /// editor to what the engine can render.
+    ///
+    /// The engine renders into `device` channels, stated as `topology` when
+    /// the caller knows its wiring and otherwise the engine's order for the
+    /// width.
+    ///
+    /// # Errors
+    ///
+    /// The engine's refusal of the graph, or the
+    /// [`FoldError`](tutti_buffers::FoldError) when the device has no channels
+    /// or `topology` is not its width.
     pub(crate) fn engine(
         &mut self,
         transport: &tutti_transport::Transport,
-    ) -> Result<tutti_engine::Engine, tutti_engine::GraphEngineError> {
+        device: ChannelLayout,
+        topology: Option<tutti_types::ChannelTopology>,
+    ) -> crate::Result<tutti_engine::Engine> {
         let mut exec = self.take_executor();
         exec.set_pool(self.render_pool("tutti-worker", self.render_worker_start.as_ref()));
         let engine = tutti_engine::Engine::new(transport, &mut self.editor, exec)?;
-        self.output = Some(engine.output_control());
+        let control = engine.output_control();
+        control
+            .support(device)
+            .map_err(tutti_buffers::FoldError::from)?;
+        control.state_device(device, topology)?;
+        self.output = Some(Placed { control, device });
         Ok(engine)
     }
 
@@ -993,7 +1014,7 @@ impl Graph {
             + self
                 .output
                 .as_ref()
-                .map_or(0, tutti_engine::OutputControl::reclaim);
+                .map_or(0, |placed| placed.control.reclaim());
         #[cfg(feature = "plugin")]
         let pinned = pinned
             + self
@@ -2916,31 +2937,29 @@ impl Graph {
     }
 
     /// What the engine takes the device of `device` channels to be, and
-    /// whether that was stated ([`place_device`](Self::place_device)). `None`
-    /// before an engine is built over this graph.
+    /// whether that was stated. `None` before an engine is built over this
+    /// graph.
     pub(crate) fn output_placement(
         &self,
         device: ChannelLayout,
     ) -> Option<tutti_engine::OutputPlacement> {
-        self.output.as_ref()?.device(device)
+        self.output.as_ref()?.control.device(device)
     }
 
-    /// What the device of `device` channels is for a fold: what was stated for
-    /// it, else the engine's order for its width.
-    pub(crate) fn device_topology(&self, device: ChannelLayout) -> tutti_types::ChannelTopology {
-        self.output
-            .as_ref()
-            .and_then(|o| o.device(device))
-            .map_or_else(
-                || tutti_types::ChannelTopology::assumed(device),
-                |placed| placed.topology,
-            )
+    /// What the device the engine renders into is for a fold: what was stated
+    /// for it, else the engine's order for its width. `None` with no engine.
+    fn placed_topology(&self) -> Option<tutti_types::ChannelTopology> {
+        let placed = self.output.as_ref()?;
+        Some(placed.control.device(placed.device).map_or_else(
+            || tutti_types::ChannelTopology::assumed(placed.device),
+            |p| p.topology,
+        ))
     }
 
-    /// Places the output device the engine renders into: `device` channels,
-    /// stated as `topology` when the caller knows its wiring and otherwise the
-    /// engine's order for the width. The roots published so far are folded into
-    /// it. A graph with no engine has no device to place.
+    /// Moves the engine to a new output device of `device` channels, stated
+    /// as `topology` or the engine's order for the width, folding every root
+    /// published into it. A restart's step; a graph with no engine has no
+    /// device to move.
     ///
     /// # Errors
     ///
@@ -2951,20 +2970,19 @@ impl Graph {
         device: ChannelLayout,
         topology: Option<tutti_types::ChannelTopology>,
     ) -> Result<(), tutti_buffers::FoldError> {
-        if let Some(output) = &self.output {
-            output.support(device)?;
-            output.state_device(device, topology)?;
+        if let Some(placed) = &mut self.output {
+            placed.control.support(device)?;
+            placed.control.state_device(device, topology)?;
+            placed.device = device;
         }
-        self.device = Some(device);
         Ok(())
     }
 
     pub(crate) fn declare_root(
         &mut self,
         root: Option<tutti_types::ChannelTopology>,
-        device: Option<ChannelLayout>,
-    ) -> Result<(), tutti_buffers::FoldError> {
-        let placed = device.map(|d| self.device_topology(d));
+    ) -> Result<(), tutti_graph::RootError> {
+        let placed = self.placed_topology();
         let width = match &root {
             Some(root) => {
                 Self::check_root(root, placed.as_ref())?;
@@ -2994,8 +3012,10 @@ impl Graph {
             None
         } else {
             let id = self.editor.spec().root_id.next();
-            if let (Some(output), Some(device)) = (&self.output, device) {
-                output.publish_root(id, root.clone(), device)?;
+            if let Some(placed) = &self.output {
+                placed
+                    .control
+                    .publish_root(id, root.clone(), placed.device)?;
             }
             Some(id)
         };
@@ -3175,10 +3195,12 @@ impl Graph {
     /// engine would render that plan as a silent, counted block. A commit
     /// names the pair, and nothing is sent.
     fn unplaceable(&self) -> Option<CommitError> {
-        let (output, device) = (self.output.as_ref()?, self.device?);
+        // No engine, no folds: a graph rendered locally places nothing.
+        let Placed { control, device } = self.output.as_ref()?;
+        let device = *device;
         let spec = self.editor.spec();
         let width = spec.topology.outputs.len();
-        (width > 0 && !output.has_fold(spec.root_id, width, device)).then_some(
+        (width > 0 && !control.has_fold(spec.root_id, width, device)).then_some(
             CommitError::Unplaceable {
                 root: spec.root_id,
                 width,

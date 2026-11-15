@@ -634,15 +634,14 @@ impl Session {
         if root == self.root_request && self.root_refusal.is_none() {
             return Ok(());
         }
-        let device = self.heard.as_ref().map(|(_, layout)| *layout);
         self.root_request = root.clone();
-        match self.graph.declare_root(root, device) {
+        match self.graph.declare_root(root) {
             Ok(()) => {
                 self.root_refusal = None;
                 Ok(())
             }
             Err(e) => {
-                self.root_refusal = Some(e.into());
+                self.root_refusal = Some(e);
                 Err(e.into())
             }
         }

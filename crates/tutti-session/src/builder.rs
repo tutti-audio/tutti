@@ -333,13 +333,13 @@ impl SessionBuilder<Offline> {
         let root = self.root_width(layout);
         self.check_placement(root, layout)?;
         let mut parts = self.parts(rate, max_block, None, root)?;
-        let engine = parts.graph.engine(&parts.transport)?;
-        Self::clock_midi(&parts, &engine);
         // The width of every block the host pulls.
-        parts
-            .graph
-            .place_device(layout, self.opts.device_topology.clone())?;
-        self.declare(&mut parts.graph, layout)?;
+        let engine =
+            parts
+                .graph
+                .engine(&parts.transport, layout, self.opts.device_topology.clone())?;
+        Self::clock_midi(&parts, &engine);
+        self.declare(&mut parts.graph)?;
         let heard = engine.heard_taps();
         let mut session = self.session(parts, Some(engine), true)?;
         session.heard = Some((heard, layout));
@@ -375,7 +375,7 @@ impl SessionBuilder<Offline> {
             transport.settings().tempo_reader(),
         );
         graph.set_render_workers(self.opts.render_workers);
-        graph.declare_root(self.opts.root.clone(), None)?;
+        graph.declare_root(self.opts.root.clone())?;
         self.session(
             Parts {
                 graph,
@@ -912,12 +912,13 @@ impl<S> SessionBuilder<S> {
         let root = self.root_width(spec.channels);
         self.check_placement(root, spec.channels)?;
         let mut parts = self.parts(spec.sample_rate, LIVE_MAX_BLOCK, spec.quantum, root)?;
-        let mut engine = parts.graph.engine(&parts.transport)?;
+        let mut engine = parts.graph.engine(
+            &parts.transport,
+            spec.channels,
+            self.opts.device_topology.clone(),
+        )?;
         Self::clock_midi(&parts, &engine);
-        parts
-            .graph
-            .place_device(spec.channels, self.opts.device_topology.clone())?;
-        self.declare(&mut parts.graph, spec.channels)?;
+        self.declare(&mut parts.graph)?;
         let mut session = self.session(parts, None, true)?;
         session.load = engine.take_load_meter();
         session.heard = Some((engine.heard_taps(), spec.channels));
@@ -1017,9 +1018,9 @@ impl<S> SessionBuilder<S> {
 
     /// Declares the builder's root on the graph the engine was just built
     /// over, which publishes it to the engine.
-    fn declare(&self, graph: &mut Graph, device: ChannelLayout) -> Result<()> {
+    fn declare(&self, graph: &mut Graph) -> Result<()> {
         if self.opts.root.is_some() {
-            graph.declare_root(self.opts.root.clone(), Some(device))?;
+            graph.declare_root(self.opts.root.clone())?;
         }
         Ok(())
     }

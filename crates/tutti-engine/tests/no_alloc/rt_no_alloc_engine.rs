@@ -763,7 +763,9 @@ fn a_declared_root_into_a_stated_device_is_allocation_free() {
     ed.commit().expect("commits");
 
     let mut out = vec![0.0f32; 512 * 12];
-    // The commit applies on this block, which may allocate.
+    // The commit applies on this block: adopting a plan allocates (an existing
+    // property of the executor), and this block also lends the new root's
+    // folds. Every block after it is guarded.
     engine.process(&mut InterleavedMut::new(&mut out, twelve).unwrap());
     assert_no_alloc::assert_no_alloc(|| {
         for _ in 0..16 {

@@ -22,7 +22,10 @@
 //! ([`ChannelTopology::assumed`](tutti_types::ChannelTopology::assumed)), at
 //! every width. A root's folds stay published until a plan of a later root has
 //! rendered a block ([`OutputControl::reclaim`]): the root change is a cut at
-//! the commit, so that block is where the older root's last plan ended.
+//! the commit, so that block is where the older root's last plan ended. At most
+//! [`MAX_PENDING_ROOTS`] are published ahead of the plan in force, and the
+//! editor refuses a commit whose root was never published
+//! ([`CommitError::RootNotPublished`](tutti_graph::CommitError::RootNotPublished)).
 //!
 //! # What the device is
 //!
@@ -43,13 +46,19 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use tutti_buffers::{BufferError, Fold, FoldError};
-use tutti_graph::{RootId, fold_to_topology};
+use tutti_graph::{RootError, RootId, fold_to_topology};
 use tutti_rt::ArcLend;
 use tutti_types::{ChannelLayout, ChannelTopology, MAX_CHANNELS, Placement};
 
 /// The widest device an engine can render into without being told
 /// ([`Engine::support_output`](crate::Engine::support_output)).
 pub(crate) const DEFAULT_DEVICE_WIDTHS: usize = 16;
+
+/// The most root generations that may be published and not yet rendered: a
+/// stream that is not running never advances the rendered root, so without a
+/// bound each publish would clone a longer table. Past it
+/// [`OutputControl::publish_root`] refuses with [`RootError::TooManyPending`].
+pub const MAX_PENDING_ROOTS: usize = 8;
 
 /// What a device's channels are, and whether that was stated or guessed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,6 +107,7 @@ impl RootFolds {
         self.topology
             .as_ref()
             .is_none_or(|root| usize::from(root.width().count()) == width)
+            && (1..=MAX_CHANNELS).contains(&width)
     }
 }
 
@@ -244,10 +254,7 @@ impl OutputControl {
 
     /// Publishes the current set as `edit` leaves it, unless `edit` finds
     /// nothing to do (`Ok(false)`). Nothing is published on an error.
-    fn update(
-        &self,
-        edit: impl FnOnce(&mut OutputFolds) -> Result<bool, FoldError>,
-    ) -> Result<(), FoldError> {
+    fn update<E>(&self, edit: impl FnOnce(&mut OutputFolds) -> Result<bool, E>) -> Result<(), E> {
         let _writer = self.writer.lock().unwrap_or_else(PoisonError::into_inner);
         let mut folds = (*self.cell.current()).clone();
         if edit(&mut folds)? {
@@ -349,21 +356,22 @@ impl OutputControl {
     ///
     /// # Errors
     ///
-    /// The [`FoldError`] when the declaration cannot be placed on `device`
-    /// (an unassigned root wider than it, or an unnamed channel); nothing is
-    /// published. A device the engine holds that cannot take it has no fold
-    /// ([`has_fold`](Self::has_fold)).
+    /// Nothing is published on an error.
     ///
-    /// # Panics
-    ///
-    /// When `id` is not past every root published: a root's id is minted in
-    /// order by the one graph that declares it.
+    /// - [`RootError::Fold`] when the declaration cannot be placed on `device`
+    ///   (an unassigned root wider than it, or an unnamed channel). A device
+    ///   the engine holds that cannot take it has no fold
+    ///   ([`has_fold`](Self::has_fold)).
+    /// - [`RootError::NotPast`] when `id` is not past every root published.
+    /// - [`RootError::TooManyPending`] when [`MAX_PENDING_ROOTS`] roots are
+    ///   published and none a plan has rendered: a stream that is not running
+    ///   advances no root, so the table is bounded rather than grown.
     pub fn publish_root(
         &self,
         id: RootId,
         root: Option<ChannelTopology>,
         device: ChannelLayout,
-    ) -> Result<(), FoldError> {
+    ) -> Result<(), RootError> {
         if let Some(root) = &root {
             let placed = self.device(device).map(|d| d.topology);
             fold_to_topology(
@@ -371,11 +379,21 @@ impl OutputControl {
                 &placed.unwrap_or_else(|| ChannelTopology::assumed(device)),
             )?;
         }
+        let installed = self.installed.load(Ordering::Acquire);
         self.update(|folds| {
-            assert!(
-                folds.roots.last().is_none_or(|last| last.id < id),
-                "root {id} is not past the published roots"
-            );
+            if let Some(last) = folds.roots.last().map(|r| r.id).filter(|last| *last >= id) {
+                return Err(RootError::NotPast { id, last });
+            }
+            let pending = folds
+                .roots
+                .iter()
+                .filter(|r| r.id.get() > installed)
+                .count();
+            if pending >= MAX_PENDING_ROOTS {
+                return Err(RootError::TooManyPending {
+                    limit: MAX_PENDING_ROOTS,
+                });
+            }
             let mut entry = RootFolds {
                 id,
                 topology: root,
@@ -420,11 +438,26 @@ impl OutputControl {
     /// block holds it.
     pub fn reclaim(&self) -> usize {
         let installed = self.installed.load(Ordering::Acquire);
-        let _ = self.update(|folds| {
-            let before = folds.roots.len();
-            folds.roots.retain(|r| r.id.get() >= installed);
-            Ok(folds.roots.len() != before)
-        });
+        // The table is cloned only when a root drops; an idle tick reads.
+        let retired = self
+            .cell
+            .current()
+            .roots
+            .iter()
+            .any(|r| r.id.get() < installed);
+        if retired {
+            let _ = self.update(|folds| {
+                let before = folds.roots.len();
+                folds.roots.retain(|r| r.id.get() >= installed);
+                Ok::<_, std::convert::Infallible>(folds.roots.len() != before)
+            });
+        }
         self.cell.reclaim()
+    }
+}
+
+impl tutti_graph::RootGate for OutputControl {
+    fn published(&self, root: RootId, outputs: usize) -> bool {
+        self.has_width(root, outputs)
     }
 }

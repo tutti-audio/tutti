@@ -375,3 +375,46 @@ fn a_root_declared_after_the_build_folds_from_the_plan_that_carries_it() {
     s.declare_root_topology(None).unwrap();
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.0, 0.0, 0.3, 0.4]);
 }
+
+/// A session with no engine places nothing: with no device to fold into, a
+/// commit of any width is sent, since no block is ever folded.
+#[test]
+fn a_session_with_no_engine_commits_every_width() {
+    let mut s = Session::builder().build_detached(RATE).unwrap();
+    s.graph().widen_outputs(5).unwrap();
+    assert_eq!(s.commit(), Committed::Sent);
+    assert_eq!(s.graph_ref().outputs(), 5);
+}
+
+/// A root declared under a stream that is not rendering is bounded: the
+/// engine holds a few roots ahead of the plan in force, and past them a
+/// declaration is refused by name (`Error::Root`) with the root unchanged;
+/// one block frees the room.
+#[test]
+fn a_declaration_past_the_pending_roots_is_refused_by_name() {
+    let mut s = offline(Session::builder(), 6).unwrap();
+    let mut refused = None;
+    for i in 0..(tutti_engine::MAX_PENDING_ROOTS + 2) {
+        // Alternate, so each declaration is a new root.
+        let root = (i % 2 == 0).then(|| buses(4));
+        match s.declare_root_topology(root) {
+            Ok(()) => {}
+            Err(e) => {
+                refused = Some(e);
+                break;
+            }
+        }
+    }
+    assert!(
+        matches!(
+            refused,
+            Some(Error::Root(RootError::TooManyPending { limit }))
+                if limit == tutti_engine::MAX_PENDING_ROOTS
+        ),
+        "{refused:?}"
+    );
+    // A block renders the newest committed plan and the room is back.
+    let _ = heard(&mut s, 6);
+    let _ = s.update();
+    s.declare_root_topology(Some(buses(4))).unwrap();
+}
