@@ -355,10 +355,15 @@ pub(super) fn pack_state(
 
 /// `len` as a container length field.
 fn length_field(len: usize, field: &'static str) -> std::result::Result<u32, StateFrameError> {
+    length_of(len as u64, field)
+}
+
+/// `len` bytes as a container length field.
+fn length_of(len: u64, field: &'static str) -> std::result::Result<u32, StateFrameError> {
     u32::try_from(len).map_err(|_| StateFrameError::TooLarge {
         format: FRAME.format(),
         field,
-        len: len as u64,
+        len,
     })
 }
 
@@ -494,7 +499,7 @@ pub(super) fn unpack_full(data: &[u8]) -> std::result::Result<Unpacked<'_>, Stat
 mod state_container_tests {
     use super::{
         Normalized, ParamId, STATE_MAGIC, STATE_VERSION, STATE_VERSION_PENDING, StateFrameError,
-        Unpacked, latest_listed, length_field, pack_state as try_pack_state,
+        Unpacked, latest_listed, length_of, pack_state as try_pack_state,
         pack_state_with_pending as try_pack_pending, unpack_full,
     };
 
@@ -752,12 +757,11 @@ mod state_container_tests {
     }
 
     /// A length no `u32` holds is refused by name, with its size; one that fits is the field.
-    #[cfg(target_pointer_width = "64")]
     #[test]
     fn a_length_past_four_gibibytes_is_too_large_to_frame() {
-        assert_eq!(length_field(7, "component"), Ok(7));
+        assert_eq!(length_of(7, "component"), Ok(7));
         assert_eq!(
-            length_field(u32::MAX as usize + 1, "component"),
+            length_of(u64::from(u32::MAX) + 1, "component"),
             Err(StateFrameError::TooLarge {
                 format: "VST3",
                 field: "component",

@@ -212,23 +212,26 @@ mod tests {
         assert_eq!(write_utf16_str(&mut [], "x"), 0);
     }
 
-    /// A four-byte UTF-8 character is cut whole at the boundary: with room for text bytes
-    /// `0..n` it is written only when all four fit.
+    /// A four-byte UTF-8 character is written whole or not at all: it needs a capacity of five
+    /// (its bytes and the NUL), and with fewer the cut goes before it.
     #[test]
     fn a_four_byte_character_is_written_whole_or_not_at_all() {
-        for (capacity, written) in [(5, 0), (6, 0), (7, 0), (8, 4)] {
-            let mut dst = vec![0xAAu8; capacity.max(8)];
-            let dst = &mut dst[..capacity];
+        for (capacity, written) in [(2, 0), (3, 0), (4, 0), (5, 4), (8, 4)] {
+            let mut dst = vec![0xAAu8; capacity];
             assert_eq!(
-                write_c_str(dst, "\u{1F3B5}"),
+                write_c_str(&mut dst, "\u{1F3B5}"),
                 written,
                 "capacity {capacity}"
             );
             assert_eq!(dst[written], 0);
         }
-        let mut dst = [0xAAu8; 6];
+        // After a one-byte character: capacity 5 holds `a` and cuts before the pair, 6 holds both.
+        let mut dst = [0xAAu8; 5];
         assert_eq!(write_c_str(&mut dst, "a\u{1F3B5}"), 1);
         assert_eq!(&dst[..2], b"a\0");
+        let mut dst = [0xAAu8; 6];
+        assert_eq!(write_c_str(&mut dst, "a\u{1F3B5}"), 5);
+        assert_eq!(dst[5], 0);
     }
 
     /// A string that exactly fills the buffer less its NUL is written whole; one byte
