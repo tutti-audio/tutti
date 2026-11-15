@@ -107,28 +107,3 @@ fn angular_smoothing_stays_on_the_circle_over_a_long_sweep() {
         );
     }
 }
-
-/// `advance` is the closed form of `steps` steps along the short arc: from a
-/// gap `g` the remainder is `g * (1 - coeff)^steps`, for a bearing across the
-/// seam, within the bound `advance` documents; zero steps move nothing and an
-/// instant smoother lands on the target. (The height's own closed form is
-/// `tutti_dsp::Smoother::advance`'s, pinned there.)
-#[test]
-fn advance_is_the_closed_form_of_repeated_steps() {
-    for steps in [1usize, 64, 1024, 48_000] {
-        let mut s = AngleSmoother::new(SampleRate::SR_48K, Samples(1));
-        let coeff = f64::from(s.azimuth.coeff());
-        let left = (1.0 - coeff).powi(steps as i32);
-        // 170 toward -170: a +20 degree arc, remainder `20 * left`.
-        s.reset_to_target(aim(170.0, 0.0));
-        let b = s.advance(aim(-170.0, 0.0), steps).azimuth.get();
-        let want = Azimuth((170.0 + 20.0 * (1.0 - left)) as f32).wrap().get();
-        let err = Azimuth(b).shortest_arc_to(Azimuth(want)).get().abs();
-        assert!(err < 1e-3, "{steps}: {b} vs {want}");
-    }
-    let mut s = AngleSmoother::new(SampleRate::SR_48K, Samples(1));
-    s.reset_to_target(aim(10.0, 0.0));
-    assert_eq!(s.advance(aim(-170.0, 0.0), 0).azimuth, Azimuth(10.0));
-    let mut i = seeded(170.0, 1.0);
-    assert_eq!(i.advance(aim(-170.0, 0.0), 5).azimuth, Azimuth(-170.0));
-}

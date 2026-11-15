@@ -136,7 +136,7 @@
 //!   coefficient, [`sweep_hz`] and [`allpass_coeff`] the pure pieces the sweep is solved from).
 //! - **Spatial** (`spatial/`): VBAP ([`SpeakerLayout`], Pulkki's pairs and triplets and
 //!   the gain solve over them, [`SpeakerGeometryError`]; [`VbapKernel`] and
-//!   [`VbapGains`], a block's gains and one channel ramped between two) and the HRTF
+//!   [`VbapGains`], one direction's gains and one channel rendered along a glide between two) and the HRTF
 //!   convolver ([`HrtfBinaural`]).
 //! - **FFT** (`fft/`): [`RealFft`], a real-input FFT whose arithmetic does not depend on
 //!   the CPU (the convolver also runs it in steps); [`FftScratch`], reusable
