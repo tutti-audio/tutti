@@ -67,7 +67,9 @@ use std::ops::Range;
 
 use tutti_graph::{Env, TransportPosition, declick_frames};
 use tutti_tempo::TempoMap;
-use tutti_types::{Beat, BeatDuration, Bpm, FrameClock, LoopRange, SampleRate, Samples};
+use tutti_types::{
+    Beat, BeatDuration, Bpm, FrameClock, LoopRange, SampleRate, Samples, first_frame_at_or_after,
+};
 
 /// How far from where the playhead would have been, in frames, a run may
 /// start and still continue it. Far below anything audible (a thousandth of
@@ -246,8 +248,8 @@ fn wrap_offset(clock: &FrameClock, end: Beat, limit: usize) -> Option<usize> {
         return None;
     }
     let fpb = clock.sample_rate().get() * 60.0 / clock.tempo().get();
-    let est = ((end - clock.beat()).get() * fpb).ceil();
-    let mut k = if est.is_finite() && est >= 1.0 {
+    let est = first_frame_at_or_after((end - clock.beat()).get() * fpb);
+    let mut k = if est >= 1 {
         (est as usize).min(limit - 1)
     } else {
         1

@@ -34,6 +34,34 @@ fn step_is_beats_over_rate() {
     }
 }
 
+/// One beat at 120 BPM is 0.5 s, 24 000 frames at 48 kHz, and the distance is
+/// signed. Across a step to 240 at beat 4, beats 2 to 6 are 2 beats at 0.5 s
+/// plus 2 at 0.25 s, 1.5 s, 72 000 frames: the tempo is integrated over the
+/// span, not read at an end (which would say 48 000 or 96 000).
+#[test]
+fn frames_between_integrates_the_tempo_over_the_span() {
+    let m = TempoMap::constant(Bpm::of(120.0)).unwrap();
+    assert_eq!(m.view(R).frames_between(Beat(0.0), Beat(1.0)), 24_000);
+    assert_eq!(m.view(R).frames_between(Beat(1.0), Beat(0.0)), -24_000);
+    assert_eq!(m.view(R).frames_between(Beat(3.0), Beat(3.0)), 0);
+    let m = TempoMap::new([
+        pt(0.0, 120.0, Transition::Step),
+        pt(4.0, 240.0, Transition::Step),
+    ])
+    .unwrap();
+    assert_eq!(m.view(R).frames_between(Beat(2.0), Beat(6.0)), 72_000);
+}
+
+/// A span a hair past a whole frame (the float noise of the seconds
+/// difference) is that frame, and one a fifth of a frame past is the next.
+#[test]
+fn frames_between_lands_on_a_frame_within_the_tolerance() {
+    let m = TempoMap::constant(Bpm::of(120.0)).unwrap();
+    let frame = Beat(1.0 / 24_000.0);
+    assert_eq!(m.view(R).frames_between(Beat(0.0), frame), 1);
+    assert_eq!(m.view(R).frames_between(Beat(0.0), Beat(1.2 / 24_000.0)), 2);
+}
+
 /// 120 -> 180 over 4 beats, tempo linear in time. `T = 2*4/(2+3) = 1.6 s`
 /// exactly = 76 800 frames; `a = (3-2)/1.6`; `beats(0.8 s) = 2*0.8 + a*0.32 = 1.8`.
 #[test]

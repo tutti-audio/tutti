@@ -443,14 +443,14 @@ impl Reference {
         if old != new {
             self.history.clear();
             let ratio = new / old;
-            self.frame = Frame::new((self.frame.get() as f64 * ratio).round() as u64);
-            self.play.play = Frame::new((self.play.play.get() as f64 * ratio).round() as u64);
+            self.frame = self.frame.scaled(ratio);
+            self.play.play = self.play.play.scaled(ratio);
             for c in &mut self.scheduled {
                 if let At::Frame(_) = c.at {
                     // Rounded for landing; the unrounded position keeps the
                     // order of two frames that round to one.
                     c.pos *= ratio;
-                    c.at = At::Frame(Frame::new(c.pos.round() as u64));
+                    c.at = At::Frame(Frame::nearest(c.pos));
                 }
             }
         }

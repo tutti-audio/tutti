@@ -415,13 +415,11 @@ impl Snapshot {
         if !beat.get().is_finite() {
             return beat;
         }
-        let rate = view.rate().get();
         let points = view.map().points();
-        let from = view.seconds_at(beat).get();
+        let start = beat;
         let mut next = points.partition_point(|p| p.beat.get() <= beat.get());
         while let Some(p) = points.get(next) {
-            let ahead = (view.seconds_at(p.beat).get() - from) * rate;
-            if tutti_types::first_frame_at_or_after(ahead) > 0 {
+            if view.frames_between(start, p.beat) > 0 {
                 break;
             }
             beat = p.beat;

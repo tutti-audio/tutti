@@ -109,11 +109,38 @@ impl Frame {
     #[inline]
     #[must_use]
     pub fn scaled(self, ratio: f64) -> Frame {
-        Frame::new((self.0 as f64 * ratio).round() as u64)
+        Frame::nearest(self.0 as f64 * ratio)
+    }
+
+    /// The frame nearest a fractional `position`, half away from zero:
+    /// saturating, so a negative or NaN position is [`Frame::ZERO`]. Where a
+    /// position keeps its fraction (an order key that survives a rate change)
+    /// and the frame it lands on is rounded from it.
+    ///
+    /// ```
+    /// use tutti_types::Frame;
+    /// assert_eq!(Frame::nearest(2.5), Frame::new(3));
+    /// assert_eq!(Frame::nearest(2.49), Frame::new(2));
+    /// assert_eq!(Frame::nearest(-3.0), Frame::ZERO);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn nearest(position: f64) -> Frame {
+        Frame::new(position.round() as u64)
     }
 
     /// The frame at the same wall-clock time at rate `to`, this one being a
     /// position at rate `from`: [`scaled`](Self::scaled) by `to / from`.
+    ///
+    /// ```
+    /// use tutti_types::{Frame, SampleRate};
+    /// let (cd, dat) = (SampleRate::of(44_100.0), SampleRate::of(48_000.0));
+    /// assert_eq!(Frame::new(44_100).rescaled(cd, dat), Frame::new(48_000));
+    /// // 7 frames at 44.1 kHz are 7.619 at 48 kHz: the nearest is 8.
+    /// assert_eq!(Frame::new(7).rescaled(cd, dat), Frame::new(8));
+    /// // 5 are 5.442: the nearest is 5.
+    /// assert_eq!(Frame::new(5).rescaled(cd, dat), Frame::new(5));
+    /// ```
     #[inline]
     #[must_use]
     pub fn rescaled(self, from: super::SampleRate, to: super::SampleRate) -> Frame {

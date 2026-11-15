@@ -129,6 +129,20 @@ impl<'a> TempoView<'a> {
             .frame_at_or_after_from(beat, self.rate, &mut self.hint)
     }
 
+    /// The frames from `from` to `to`: the first frame at or after the span
+    /// the map's time between the two beats covers at the view's rate, by the
+    /// engine's one placement rule
+    /// ([`first_frame_at_or_after`](tutti_types::first_frame_at_or_after)).
+    /// Signed: negative when `to` is before `from`, and `0` when it is within
+    /// `FRAME_TOLERANCE` of a frame after it. The tempo may change anywhere in
+    /// the span; it is integrated, not read at an end.
+    #[must_use]
+    #[inline]
+    pub fn frames_between(&mut self, from: Beat, to: Beat) -> i64 {
+        let ahead = (self.seconds_at(to).get() - self.seconds_at(from).get()) * self.rate.get();
+        tutti_types::first_frame_at_or_after(ahead)
+    }
+
     /// The first frame at or after `frame` on which a point of the map starts
     /// (a step, or the start or end of a ramp), or `None` when there is none
     /// left. The first point, at beat 0, is not a change.
