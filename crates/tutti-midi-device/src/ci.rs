@@ -26,6 +26,7 @@ use std::vec::Vec;
 
 use tutti_ump::{MidiChannel, MidiGroup, Sysex7Packets, U7, U28, Ump};
 
+mod default_cc;
 mod device;
 mod discovery;
 mod endpoint;
@@ -41,6 +42,7 @@ mod status;
 mod text;
 mod wait;
 
+pub use default_cc::{CcFunction, CcPart, CcReset, CcValue, DefaultCcLevel, SuggestedCc};
 pub use device::{CiAction, CiDevice, CiPeer, DISCOVERY_WINDOW};
 pub use discovery::{
     CiCategories, DiscoveryData, MaxSysexSize, NotASysexSize, SUB_ID2_ACK, SUB_ID2_DISCOVERY,

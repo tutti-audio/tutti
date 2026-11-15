@@ -225,6 +225,7 @@ mod buses;
 #[macro_use]
 mod params;
 mod ramp;
+mod tail_clock;
 
 // Rendering helpers for the width-generic nodes' unit tests.
 #[cfg(test)]
@@ -309,12 +310,12 @@ mod reverb;
 pub use params::{At, Control, ControlRead, ControlSet, ControlValid, Params};
 pub use reverb::{FamilyNode, FreeverbNode, NodeFamily, Rings, TailCeiling, TailCeilingError};
 
-// The feedback delay network as a `FamilyNode`.
+// The feedback delay network as a `KernelNode`.
 mod reverb_fdn;
-pub use reverb_fdn::FdnNode;
+pub use reverb_fdn::{FdnKernel, FdnNode};
 
-// The families and controls that sit in a `FamilyNode<F>`'s signature.
-pub use tutti_dsp::{FdnControls, FdnFamily, FreeverbControls, FreeverbFamily};
+// The families and controls that sit in a node's signature.
+pub use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, FreeverbFamily};
 
 // The spatial panners: VBAP speaker panning and binaural HRTF rendering.
 mod spatial;

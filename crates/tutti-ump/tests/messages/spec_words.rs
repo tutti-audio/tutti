@@ -4,18 +4,18 @@
 //! comment, then the words. Nothing here calls the codec to produce an
 //! expected value.
 
-use tutti_ump::ManufacturerId;
 use tutti_ump::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BlockFilter, BlockSelect,
     CCNumber, ChordBass, ChordName, ChordPitch, ChordType, Data128, DeltaTicks, DeviceIdentity,
     Direction, DiscoveryFilter, EndpointInfo, FirstGroup, Flex, FlexAddress, FlexTextKind, Form,
     FunctionBlockId, FunctionBlockInfo, GroupSpan, KeySignature, Letter, MdsChunk, MdsChunkSize,
     MdsChunks, MdsIdentity, Message, Metronome, Midi1Port, MidiChannel, MidiGroup, MixedDataHeader,
-    NoteNumber, NoteVelocity, Protocol, RegisteredPerNoteController, SharpsFlats, Stream,
-    StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus, System, TimeSignature, U4, U7, U14,
-    UiHint, Ump, UmpVersion, Utility, Voice1, Voice2,
+    NoteNumber, NoteVelocity, PerNoteManagement, Protocol, RegisteredPerNoteController,
+    SharpsFlats, Stream, StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus, System,
+    TimeSignature, U4, U7, U14, UiHint, Ump, UmpVersion, Utility, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
+use tutti_ump::{ManufacturerId, Unknown};
 
 fn g(n: u8) -> MidiGroup {
     MidiGroup::of(n)
@@ -386,26 +386,41 @@ fn midi2_per_note_and_controllers() {
         [0x41F2_3C03, 0, 0, 0],
         v(Voice2::PerNoteManagement {
             note: NoteNumber::of(60),
-            detach: true,
-            reset: true,
+            management: PerNoteManagement::DetachAndReset,
         }),
     );
     pin(
         [0x41F2_3C02, 0, 0, 0],
         v(Voice2::PerNoteManagement {
             note: NoteNumber::of(60),
-            detach: true,
-            reset: false,
+            management: PerNoteManagement::Detach,
         }),
     );
     pin(
         [0x41F2_3C01, 0, 0, 0],
         v(Voice2::PerNoteManagement {
             note: NoteNumber::of(60),
-            detach: false,
-            reset: true,
+            management: PerNoteManagement::Reset,
         }),
     );
+}
+
+// M2-104 section 7.4.5: D=0 and S=0 has no defined function, so it is no message.
+#[test]
+fn a_per_note_management_with_neither_flag_is_not_a_message() {
+    let words = Ump([0x41F2_3C00, 0, 0, 0]);
+    assert_eq!(words.decode(), Err(Unknown(words)));
+    assert_eq!(PerNoteManagement::from_flags(false, false), None);
+    for management in [
+        PerNoteManagement::Detach,
+        PerNoteManagement::Reset,
+        PerNoteManagement::DetachAndReset,
+    ] {
+        assert_eq!(
+            PerNoteManagement::from_flags(management.detaches(), management.resets()),
+            Some(management)
+        );
+    }
 }
 
 // M2-104 section 7.4: the messages that address a note (statuses 0x0, 0x1, 0x6,
@@ -414,7 +429,16 @@ fn midi2_per_note_and_controllers() {
 // their byte 3 holds.
 #[test]
 fn the_note_a_message_addresses() {
-    let words = |status: u32| [0x4100_0000 | status << 20 | 0x2_0000 | 60 << 8, 0, 0, 0];
+    // Status 0xF needs an option flag: D=0 and S=0 is no message.
+    let words = |status: u32| {
+        let flags = u32::from(status == 0xF);
+        [
+            0x4100_0000 | status << 20 | 0x2_0000 | 60 << 8 | flags,
+            0,
+            0,
+            0,
+        ]
+    };
     // Status 0x7 is undefined (Table 30).
     for status in (0x0..=0xF).filter(|&status| status != 0x7) {
         let voice = match Ump(words(status)).decode() {

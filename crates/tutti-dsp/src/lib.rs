@@ -42,8 +42,8 @@
 //!   feedback).
 //! - **Waveshaping** — `ShapeKind`, six memoryless curves with block kernels.
 //! - **Reverb** — the reverb model, a `Network` with analytic queries
-//!   (RT60, tail, stability, densities), and two families over it: `FreeverbFamily` and
-//!   `FdnFamily`, the feedback delay network.
+//!   (RT60, tail, stability, densities), `FreeverbFamily` over it, and `FdnBank`, the
+//!   feedback delay network over buffers views.
 //! - **Spatial** — vector base amplitude panning (`SpeakerLayout`, `VbapKernel`) and the
 //!   HRTF binaural convolver (`HrtfBinaural`).
 //! - **Resampling and dither** — `FftResampler` and `StreamingResampler` for export, and
@@ -122,10 +122,10 @@
 //!   band, each band's makeup, bypass and solo gliding over [`GAIN_GLIDE`].
 //! - **Reverb** (`reverb/`): the model, a [`Network`] of [`Stage`]s with
 //!   analytic queries ([`Network::rt60`], [`tail`](System::tail),
-//!   [`is_stable`](Lti::is_stable), the densities) and a [`NetworkCapacity`] worst case; and two
-//!   families over it, [`FreeverbFamily`] (run by [`FreeverbRecurrence`]) and [`FdnFamily`]
-//!   (run by [`FdnRecurrence`]). [`loop_gain`] and [`rt60_from_gain`] are the RT60 formula
-//!   both ways.
+//!   [`is_stable`](Lti::is_stable), the densities) and a [`NetworkCapacity`] worst case;
+//!   [`FreeverbFamily`] (run by [`FreeverbRecurrence`]) and the feedback delay network over
+//!   buffers views ([`FdnBank`] over an [`FdnLayout`], its parameters [`Glide`]s in
+//!   [`FdnGlides`]). [`loop_gain`] and [`rt60_from_gain`] are the RT60 formula both ways.
 //! - **Convolution**: [`Convolver`] over a shared [`IrSpectra`].
 //! - **Delay and modulation** (`delay.rs`, `modulation/`): [`DelayLine`] with an
 //!   [`InterpolationMode`]; the feedback delay ([`DelayBank`] over a [`DelayLayout`]: a
@@ -236,8 +236,8 @@ pub use modulation::phaser::{
 pub use modulation::sweep::{Stagger, StaggerError, Sweep, SweepError};
 pub use oscillator::{Oscillator, OscillatorWave};
 pub use resample::{ChunkSize, FftResampler, ResampleError, StreamingResampler, WindowedSinc};
-pub use reverb::fdn::design::{FdnControls, FdnFamily, MAX_PRE_DELAY, MIN_DECAY};
-pub use reverb::fdn::recurrence::FdnRecurrence;
+pub use reverb::fdn::bank::{FdnBank, FdnGlides};
+pub use reverb::fdn::design::{FdnControls, FdnLayout, MAX_PRE_DELAY, MIN_DECAY};
 pub use reverb::freeverb::design::{FreeverbControls, FreeverbFamily};
 pub use reverb::freeverb::recurrence::{Freeverb, FreeverbRecurrence};
 pub use reverb::network::{

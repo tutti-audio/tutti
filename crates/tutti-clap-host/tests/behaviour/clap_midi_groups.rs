@@ -13,7 +13,8 @@ use tutti_graph::Offset;
 use tutti_midi_protocol::{PitchBendSensitivity, widen_value};
 use tutti_types::Samples;
 use tutti_ump::{
-    Address, Attribute, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity, Rpn, Ump, Voice2,
+    Address, Attribute, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity,
+    PerNoteManagement, Rpn, Ump, Voice2,
 };
 use tutti_ump::{Bank, ControlValue, Message, RegisteredPerNoteController, System, U7};
 
@@ -181,8 +182,7 @@ fn a_detach_then_a_note_on_is_a_new_note_that_alone_hears_the_controller() {
             Address::new(group(0), ch(0)),
             Voice2::PerNoteManagement {
                 note: NoteNumber::of(60),
-                detach: true,
-                reset: false,
+                management: PerNoteManagement::Detach,
             },
         )),
     );
@@ -479,8 +479,7 @@ fn a_reset_returns_the_notes_expressions_to_their_defaults() {
             Address::new(group(0), ch(0)),
             Voice2::PerNoteManagement {
                 note: NoteNumber::of(60),
-                detach: false,
-                reset: true,
+                management: PerNoteManagement::Reset,
             },
         )),
     );

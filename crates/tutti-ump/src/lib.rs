@@ -79,6 +79,7 @@ mod midi1;
 mod midi_channel;
 mod midi_group;
 mod mixed_data;
+mod mpe_zone;
 mod note_id;
 mod note_velocity;
 mod rpn;
@@ -91,8 +92,8 @@ pub use bend_value::BendValue;
 pub use cc_number::CCNumber;
 pub use control_value::ControlValue;
 pub use field::{
-    DeltaTicks, FirstGroup, FunctionBlockId, GroupSpan, NoteNumber, OutOfRange, Pitch, SharpsFlats,
-    U4, U7, U14, U28, first_non_seven_bit,
+    DeltaTicks, FirstGroup, FunctionBlockId, GroupSpan, MpeChannels, NoteNumber, OutOfRange, Pitch,
+    SharpsFlats, U4, U7, U14, U28, first_non_seven_bit,
 };
 pub use flex_text::{
     FlexText, FlexTextAssembler, FlexTextPackets, FlexTextStep, flex_text_packets,
@@ -103,9 +104,9 @@ pub use message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BlockFilter, BlockSelect,
     ChordBass, ChordName, ChordPitch, ChordType, Data128, DeviceIdentity, Direction,
     DiscoveryFilter, EndpointInfo, Flex, FlexAddress, FlexTextKind, Form, FunctionBlockInfo,
-    KeySignature, Letter, Message, Metronome, Midi1Port, MixedDataHeader, Protocol,
-    RegisteredPerNoteController, Stream, StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus,
-    System, TimeSignature, UiHint, UmpVersion, Unknown, Utility, Voice1, Voice2,
+    KeySignature, Letter, Message, Metronome, Midi1Port, MixedDataHeader, PerNoteManagement,
+    Protocol, RegisteredPerNoteController, Stream, StreamConfig, Sysex7Packet, Sysex8Packet,
+    SysexStatus, System, TimeSignature, UiHint, UmpVersion, Unknown, Utility, Voice1, Voice2,
 };
 pub use messages::{Join, Span, Spans, spans, spans_joined};
 pub use midi_channel::MidiChannel;
@@ -115,6 +116,7 @@ pub use mixed_data::{
     MdsChunk, MdsChunkSize, MdsChunkUmps, MdsChunks, MdsIdentity, MixedDataAssembler,
     MixedDataPackets, MixedDataSet, MixedDataStep, NotChunkSize,
 };
+pub use mpe_zone::{MpeOverlap, MpeZoneSet, MpeZoneSpan};
 pub use note_id::NoteId;
 pub use note_velocity::NoteVelocity;
 pub use rpn::{RegisteredData, Rpn};

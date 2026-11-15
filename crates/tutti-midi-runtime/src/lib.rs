@@ -224,6 +224,7 @@ mod held;
 mod ledger;
 mod live;
 mod mpe_features;
+mod mpe_zones;
 mod outbound;
 mod output_plan;
 mod schedule;
@@ -246,6 +247,7 @@ pub use live::{
     compile_routes,
 };
 pub use mpe_features::{MpeFeaturesError, ask_mpe_features, mpe_features};
+pub use mpe_zones::mpe_zones;
 pub use outbound::{
     ACTIVE_SENSING_INTERVAL, ActiveSensingSender, CLOCK_EVENT_CAPACITY, ClockControls, ClockMaster,
     ClockNode, JR_CLOCK_INTERVAL, JR_CLOCK_MAX_INTERVAL, JrClock, JrClockEmitter, JrStamper,
