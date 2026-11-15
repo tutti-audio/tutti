@@ -9,9 +9,9 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_rt::{DrainMark, DrainWatch};
 
 use tutti_plugin_types::{
-    Control, Controller, Edit, EditDrain, EditQueue, EditSink, Loaded, Normalized, ParamEdit,
-    ParamId, PluginError, PluginResult, PluginTail, Prepare, Processor, Refused, Request,
-    RestartRules, SampleFormat, Samples, Stuck, Wraps,
+    Control, Controller, Edit, EditDrain, EditQueue, EditSink, Loaded, Normalized, ParamAccess,
+    ParamEdit, ParamId, PluginError, PluginResult, PluginTail, Prepare, Processor, Refused,
+    Request, RestartRules, SampleFormat, Samples, Stuck, Wraps,
 };
 
 use crate::types::{ProcessMode, Vst3Sample};
@@ -186,7 +186,12 @@ impl Vst3Controller {
             }
         });
         for (id, value) in reported {
-            Control::set_parameter(self.loaded_mut(), main, id, value);
+            // The plugin made the value, so a read-only parameter (a meter) is
+            // still the plugin's to report: the host's write policy is for
+            // host writes, and the controller takes the value as it was told.
+            // Not `set_parameter`, so no `carried` entry: that holds the host's
+            // own writes a reactivation must deliver, and this is not one.
+            self.loaded_mut().write_normalized(main, id, value);
             // Kept for `take_reported_edits`, up to a bound: nobody may be
             // asking, and then the oldest go and are counted.
             if self.processor_edits.len() == PROCESSOR_EDITS_ROOM {
@@ -395,7 +400,9 @@ impl Vst3Loaded {
                     });
                 }
             };
-        let Staged { loaded, audio, .. } = staged;
+        let Staged {
+            mut loaded, audio, ..
+        } = staged;
         // The plugin may announce its latency from inside `setActive`; the
         // figure is read right after every activation, so the announcement is
         // answered. Everything else raised meanwhile is kept.
@@ -413,6 +420,17 @@ impl Vst3Loaded {
             });
         };
         let context_requirements = loaded.context_requirements();
+        // What the plugin declares now, for the write policy on every route while
+        // this activation lasts: the Controller answers writes from it and the
+        // Processor drops against it.
+        let mut declared: Vec<(ParamId, ParamAccess)> = loaded
+            .parameter_list(main)
+            .iter()
+            .map(|info| (info.id(), ParamAccess::of(info)))
+            .collect();
+        declared.sort_unstable_by_key(|&(id, _)| id);
+        let declared: Arc<[(ParamId, ParamAccess)]> = declared.into();
+        loaded.declared = Some(Arc::clone(&declared));
         let shell = Arc::new(Shell::new());
         let (sink, drain) = tutti_plugin_types::edits(EDIT_CAPACITY);
         let (reports_in, reports_out) = tutti_plugin_types::edits(EDIT_CAPACITY);
@@ -434,6 +452,7 @@ impl Vst3Loaded {
             reports: reports_in,
             beat,
             carried,
+            declared: Arc::clone(&declared),
         });
         Ok((
             processor,
@@ -521,6 +540,7 @@ impl Vst3Loaded {
         // failure.)
         let _ = self.plugin.set_active(main, false);
         self.active = Activation::default();
+        self.declared = None;
     }
 }
 

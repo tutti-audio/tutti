@@ -71,7 +71,9 @@ impl Editor for AuEditorInstance {
     /// **plain** units, and the host denormalizes against the one range table
     /// the audio path reads too, so the editor's knob and what is heard agree.
     fn set_parameter(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
-        Control::set_parameter(&mut self.inner, main, id, value);
+        // The mirror follows the host's write policy: a write the unit refuses
+        // (undeclared or read-only) is not mirrored either.
+        let _ = Control::set_parameter(&mut self.inner, main, id, value);
     }
 
     fn set_state(&mut self, _main: MainThreadMarker, data: &[u8]) -> PluginResult<()> {

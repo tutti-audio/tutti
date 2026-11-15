@@ -295,8 +295,11 @@ fn parameter_info(id: u32) -> sys::AudioUnitParameterInfo {
     for (dst, &src) in info.name.iter_mut().zip(name.as_bytes()) {
         *dst = src as std::os::raw::c_char;
     }
-    info.flags = sys::kAudioUnitParameterFlag_IsReadable | sys::kAudioUnitParameterFlag_IsWritable;
-    if id != core::TONE {
+    info.flags = sys::kAudioUnitParameterFlag_IsReadable;
+    if id != core::METER {
+        info.flags |= sys::kAudioUnitParameterFlag_IsWritable;
+    }
+    if id != core::TONE && id != core::METER {
         // `level` and `aux` take a ramp; `tone`'s value is not linear in its
         // plain units, so it takes none.
         info.flags |= sys::kAudioUnitParameterFlag_CanRamp;

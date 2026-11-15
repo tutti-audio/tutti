@@ -18,15 +18,19 @@ pub enum Param {
     /// exponential, `20000 * 1000^(-n)` for the normalized `n`. It changes
     /// nothing a block renders.
     Tone,
+    /// The read-only parameter: a meter the host never writes, always 0.
+    /// Every format that has the flag declares it read-only; VST2 has none.
+    Meter,
 }
 
 impl Param {
     /// Every parameter the plugin lists, with its default.
-    pub const ALL: [(Param, f64); 4] = [
+    pub const ALL: [(Param, f64); 5] = [
         (Param::Level, 0.5),
         (Param::Aux, 0.25),
         (Param::Mode, 0.0),
         (Param::Tone, 0.5),
+        (Param::Meter, 0.0),
     ];
 
     /// The id every format lists it under.
@@ -45,9 +49,14 @@ impl Param {
             Param::Aux => "aux",
             Param::Mode => "mode",
             Param::Tone => "tone",
+            Param::Meter => "meter",
         }
     }
 }
+
+/// The normalized value the write cases send: `level` takes it where a write is
+/// allowed, and the meter is refused it.
+pub const WRITE: f64 = 0.75;
 
 /// The normalized values the conversion cases ask about.
 pub const TONE_AT: [f64; 4] = [0.0, 0.25, 0.5, 1.0];
@@ -286,6 +295,17 @@ pub struct Surface {
     /// `u32::MAX`, VST3's `kInfiniteTail`), nothing where the plugin cannot say
     /// it (VST2's tail size is a count).
     pub infinite_tail: Option<tutti_plugin_types::PluginTail>,
+    /// Whether the format reports a parameter's read-only bit: every format but
+    /// VST2, whose `effGetParameterProperties` has none. Where `true`, the
+    /// parameter list reports [`Param::Meter`] read-only and every other
+    /// parameter not. Where `false` the format has no read-only parameter, and
+    /// the cases about one do not apply.
+    pub reports_access: bool,
+    /// Whether the format reports a parameter's automatable bit: CLAP and VST3.
+    /// An AUv2 unit advertises only `kAudioUnitParameterFlag_IsWritable`, and VST2 says nothing per
+    /// parameter. Where `true`, the meter is not automatable and every other
+    /// parameter is.
+    pub reports_automatable: bool,
 }
 
 /// CLAP: no editor in the plugin, no `clap.render` (so no render mode), a
@@ -300,6 +320,8 @@ pub const CLAP: Surface = Surface {
     tone: TONE_LINEAR,
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
+    reports_access: true,
+    reports_automatable: true,
 };
 
 /// VST2: no editor in the plugin, a live render mode, an automate report.
@@ -313,6 +335,8 @@ pub const VST2: Surface = Surface {
     tone: TONE_NORMALIZED,
     selects_tail: true,
     infinite_tail: None,
+    reports_access: false,
+    reports_automatable: false,
 };
 
 /// VST3 from the Rust plugin: an editor once selected, the mode read at activation, an edit of `aux` to 0.75 on each state
@@ -327,6 +351,8 @@ pub const VST3: Surface = Surface {
     tone: TONE_CURVED,
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
+    reports_access: true,
+    reports_automatable: true,
 };
 
 /// VST3 from the C++ plugin: no editor, an edit of `aux` to 0.75 on each state
@@ -341,6 +367,8 @@ pub const VST3_CPP: Surface = Surface {
     tone: TONE_CURVED,
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
+    reports_access: true,
+    reports_automatable: true,
 };
 
 /// AU, from the shared plugin's Audio Unit shell: no editor (the shell offers no
@@ -358,4 +386,6 @@ pub const AU: Surface = Surface {
     tone: TONE_LINEAR,
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
+    reports_access: true,
+    reports_automatable: false,
 };

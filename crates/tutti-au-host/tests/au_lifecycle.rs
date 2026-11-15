@@ -514,7 +514,8 @@ mod halves {
             .find(|p| p.bounds().is_some_and(|(_, max)| max > 2.0))
             .expect("a wide-range parameter")
             .id();
-        Control::set_parameter(&mut controller, main, id, Normalized::of(0.25));
+        Control::set_parameter(&mut controller, main, id, Normalized::of(0.25))
+            .expect("a declared, writable parameter");
         let read = Control::parameter(&controller, main, id).unwrap();
         assert!((read.get() - 0.25).abs() < 1e-3, "{read:?}");
         let _ = ParamId::new(id.get());

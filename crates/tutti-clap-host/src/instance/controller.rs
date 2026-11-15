@@ -237,7 +237,9 @@ impl ClapLoaded {
         // An inactive plugin takes a `params.flush` on the main thread, so the
         // writes land now and the next activation starts from them.
         for (id, value) in pending {
-            Control::set_parameter(&mut loaded, main, id, value);
+            // A write the plugin refuses (a parameter it no longer declares)
+            // was refused at the call that queued it too, so none is owed.
+            let _ = Control::set_parameter(&mut loaded, main, id, value);
         }
         Ok(loaded)
     }

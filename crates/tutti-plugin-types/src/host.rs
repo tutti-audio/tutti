@@ -29,9 +29,9 @@ use dpi::Size;
 
 use crate::{
     AudioBufferMut, AutomationMode, ContentScale, EditorCapabilities, EditorWindow, KeyEvent,
-    KeyUse, LoadedPlugin, Normalized, ParamId, ParameterInfo, PluginDescriptor, PluginError,
-    PluginResult, PluginTail, Preset, PresetId, ProcessContext, ProcessOutput, ProcessWake,
-    SampleRate, Samples, WindowHandle,
+    KeyUse, LoadedPlugin, Normalized, ParamId, ParamWriteError, ParameterInfo, PluginDescriptor,
+    PluginError, PluginResult, PluginTail, Preset, PresetId, ProcessContext, ProcessOutput,
+    ProcessWake, SampleRate, Samples, WindowHandle,
 };
 use crate::{Delivered, ParamEdit};
 use crate::{
@@ -66,10 +66,38 @@ pub trait Control: EditorWindow {
     /// parameter.
     fn parameter(&self, main: MainThreadMarker, id: ParamId) -> Option<Normalized>;
 
+    /// Whether the host may write the parameter `id`: [`ParamWriteError::check`]
+    /// on what the plugin declares of it. The default reads
+    /// [`parameters`](Self::parameters); a format that finds one parameter
+    /// without building the list overrides it, and keeps the policy by
+    /// calling [`ParamWriteError::check`].
+    ///
+    /// # Errors
+    ///
+    /// As [`ParamWriteError::check`].
+    fn parameter_writable(
+        &self,
+        main: MainThreadMarker,
+        id: ParamId,
+    ) -> Result<(), ParamWriteError> {
+        ParamWriteError::check_info(id, self.parameters(main).iter().find(|p| p.id() == id))
+    }
+
     /// Sets a parameter. Loaded: applied now. Active: an edit queued to the
     /// Processor, applied at the head of its next block
     /// ([`Edit`](crate::Edit)).
-    fn set_parameter(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized);
+    ///
+    /// # Errors
+    ///
+    /// [`ParamWriteError`], with nothing written, for an id the plugin does
+    /// not declare and for a parameter it declares read-only: one policy for
+    /// every format ([`parameter_writable`](Self::parameter_writable)).
+    fn set_parameter(
+        &mut self,
+        main: MainThreadMarker,
+        id: ParamId,
+        value: Normalized,
+    ) -> Result<(), ParamWriteError>;
 
     /// The plain value `value` stands for, in the unit
     /// [`ParameterInfo::unit`](crate::ParameterInfo::unit) names: the
@@ -525,11 +553,30 @@ impl<W: Wraps> Control for W {
         self.plugin().parameter(main, id)
     }
 
-    fn set_parameter(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
+    fn parameter_writable(
+        &self,
+        main: MainThreadMarker,
+        id: ParamId,
+    ) -> Result<(), ParamWriteError> {
+        self.plugin().parameter_writable(main, id)
+    }
+
+    fn set_parameter(
+        &mut self,
+        main: MainThreadMarker,
+        id: ParamId,
+        value: Normalized,
+    ) -> Result<(), ParamWriteError> {
         if W::WRITES_PLUGIN {
-            self.plugin_mut().set_parameter(main, id, value);
+            self.plugin_mut().set_parameter(main, id, value)?;
+        } else {
+            // The plugin is not written from here, but the policy still
+            // answers at this call: a write the plugin would refuse is not
+            // queued to the Processor either.
+            self.plugin().parameter_writable(main, id)?;
         }
         self.queue_write(main, id, value);
+        Ok(())
     }
 
     fn parameter_plain(

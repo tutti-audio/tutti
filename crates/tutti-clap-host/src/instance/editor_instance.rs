@@ -10,12 +10,11 @@ use std::path::Path;
 use dpi::Size;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow,
-    InProcess, Load, MainThreadMarker, MainWorkHandle, Normalized, ParamEdit, ParamId, PluginError,
-    PluginResult, Request, RescanScope, WindowHandle,
+    InProcess, Load, MainThreadMarker, MainWorkHandle, Normalized, ParamEdit, ParamId,
+    ParamMapping, PluginError, PluginResult, Request, RescanScope, WindowHandle,
 };
 
 use super::ClapLoaded;
-use super::control::denormalize;
 use crate::ParamBounds;
 use crate::types::ClapParamFlags;
 
@@ -115,16 +114,16 @@ impl Editor for ClapEditor {
         // Without it, a mirrored write moved the editor to the wrong position
         // while the audio path went where it was asked.
         //
-        // A parameter that declared no bounds is written through unconverted,
-        // matching the loader: `ParamRange::Normalized` means there is nothing
-        // to convert against, and inventing `0..=1` would rescale a parameter
-        // the plugin never described.
-        let bounds = lookup_range(&self.param_ranges, id.get());
-        if bounds.is_some_and(|b| b.read_only) {
+        // The mirror follows the host's write policy: the write the host
+        // refused (an undeclared or a read-only parameter) is not mirrored.
+        let Some(bounds) = lookup_range(&self.param_ranges, id.get()) else {
+            return;
+        };
+        if bounds.read_only {
             return;
         }
-        let plain = denormalize(bounds.copied(), value);
-        self.inner.set_plain_value(main, id.get(), plain);
+        self.inner
+            .set_plain_value(main, id.get(), bounds.plain(value));
     }
 
     fn set_state(&mut self, main: MainThreadMarker, data: &[u8]) -> PluginResult<()> {
@@ -368,7 +367,7 @@ mod tests {
 
         for host_value in [0.0_f64, 0.25, 0.5, 0.75, 1.0] {
             // What `set_parameter` would hand the plugin...
-            let plain = denormalize(Some(CUTOFF), Normalized::of(host_value));
+            let plain = CUTOFF.plain(Normalized::of(host_value));
             // ...and what the editor reporting that same position comes back as.
             let heard = ClapEvent::param_value(0, id, plain)
                 .heard(&ranges)
