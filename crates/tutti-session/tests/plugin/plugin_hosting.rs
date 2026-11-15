@@ -110,11 +110,9 @@ fn a_plugin_blacklisted_after_the_load_is_made_is_refused_when_it_runs() {
 /// `NotOutOfProcess`, and the request is not changed to in process.
 #[test]
 fn vst2_asked_for_out_of_process_is_refused_at_load() {
-    let plugin = PluginRef::file("Synth.vst")
-        .expect("a plugin file")
-        .with_hosting(Hosting::OutOfProcess);
+    let plugin = PluginRef::file("Synth.vst").expect("a plugin file");
     let mut s = session();
-    let load = s.plugin_load(PluginLoadRequest::new(plugin));
+    let load = s.plugin_load(PluginLoadRequest::new(plugin).hosting(Hosting::OutOfProcess));
     assert!(
         !load.opens_in_process(),
         "nothing is left for the main thread"
@@ -132,11 +130,9 @@ fn vst2_asked_for_out_of_process_is_refused_at_load() {
 #[test]
 fn a_clap_plugin_asked_in_process_is_hosted_here() {
     set_server("/nonexistent/plugin-server");
-    let plugin = PluginRef::file(clap_probe())
-        .expect("a plugin file")
-        .with_hosting(Hosting::InProcess);
+    let plugin = PluginRef::file(clap_probe()).expect("a plugin file");
     let mut s = session();
-    let load = s.plugin_load(PluginLoadRequest::new(plugin));
+    let load = s.plugin_load(PluginLoadRequest::new(plugin).hosting(Hosting::InProcess));
     assert!(load.opens_in_process());
 
     let node = s

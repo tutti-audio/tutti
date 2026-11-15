@@ -102,6 +102,7 @@ fn no_editor(
     _: MainThreadMarker,
     _: &tutti_plugin_types::MainWorkHandle,
     path: &std::path::Path,
+    _: tutti_plugin_types::PluginFormat,
     _: &Load,
 ) -> BridgeResult<Box<dyn Editor>> {
     Err(BridgeError::LoadFailed {
@@ -124,6 +125,7 @@ fn served<F: Format>(
     let Launched { ipc, .. } = Ipc::launch(
         IpcConfig::default(),
         path,
+        F::FORMAT,
         Load::new(),
         SampleRate::of(RATE),
         None,

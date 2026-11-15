@@ -64,6 +64,7 @@ fn no_editor(
     _: tutti_plugin_types::MainThreadMarker,
     _: &tutti_plugin_types::MainWorkHandle,
     path: &std::path::Path,
+    _: tutti_plugin_types::PluginFormat,
     _: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     Err(tutti_plugin_types::BridgeError::LoadFailed {
@@ -76,6 +77,7 @@ fn no_editor(
 fn mock() -> (Ipc, Mock) {
     mock_loading(
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginFormat::Vst3,
         crate::EditorLoader::new(no_editor, tutti_fixtures::detached_work()),
     )
 }
@@ -84,21 +86,24 @@ fn mock() -> (Ipc, Mock) {
 /// `load_editor`.
 fn mock_loading(
     origin: tutti_plugin_types::Origin,
+    format: tutti_plugin_types::PluginFormat,
     load_editor: crate::EditorLoader,
 ) -> (Ipc, Mock) {
-    mock_with(origin, Some(load_editor))
+    mock_with(origin, format, Some(load_editor))
 }
 
 /// [`mock`] whose bridge has no editor loader: its editor lives in the server.
 fn mock_remote() -> (Ipc, Mock) {
     mock_with(
         tutti_plugin_types::Origin::new("test.clap", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginFormat::Clap,
         None,
     )
 }
 
 fn mock_with(
     origin: tutti_plugin_types::Origin,
+    format: tutti_plugin_types::PluginFormat,
     load_editor: Option<crate::EditorLoader>,
 ) -> (Ipc, Mock) {
     use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
@@ -128,6 +133,7 @@ fn mock_with(
         path.clone(),
         Arc::clone(slab.slab()),
         origin,
+        format,
         load_editor,
         RATE,
     )
@@ -396,16 +402,18 @@ fn a_plugin_with_no_origin_is_not_reopened() {
     assert!(ipc.reopen(main_thread()).is_err());
 }
 
-/// The `Load` the last [`recording_editor`] was given.
-static EDITOR_LOAD: Mutex<Option<tutti_plugin_types::Load>> = Mutex::new(None);
+/// The format and `Load` the last [`recording_editor`] was given.
+static EDITOR_LOAD: Mutex<Option<(tutti_plugin_types::PluginFormat, tutti_plugin_types::Load)>> =
+    Mutex::new(None);
 
 fn recording_editor(
     _: tutti_plugin_types::MainThreadMarker,
     _: &tutti_plugin_types::MainWorkHandle,
     path: &std::path::Path,
+    format: tutti_plugin_types::PluginFormat,
     load: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
-    *EDITOR_LOAD.lock().unwrap() = Some(load.clone());
+    *EDITOR_LOAD.lock().unwrap() = Some((format, load.clone()));
     Err(tutti_plugin_types::BridgeError::LoadFailed {
         path: path.to_path_buf(),
         stage: tutti_plugin_types::LoadStage::Opening,
@@ -414,7 +422,9 @@ fn recording_editor(
 }
 
 /// **The editor-only instance loads the plugin the audio instance is**, not
-/// the file's first: the bridge hands its loader the `Load` it was made for.
+/// the file's first, and as the format the audio instance was launched as,
+/// whatever the file's extension: the bridge hands its loader the format and
+/// `Load` it was made for.
 /// It needs no display (the floating open takes no window), because the loader
 /// is asked before any editor exists; a real editor's identity cannot be read
 /// without one, so the choice is pinned where it is made.
@@ -423,12 +433,16 @@ fn the_editor_instance_is_loaded_with_the_choice_the_bridge_was_made_for() {
     let _machine = machine_lock();
     let chosen = tutti_plugin_types::Load::new().plugin("the.second.plugin");
     let (ipc, _peer) = mock_loading(
-        tutti_plugin_types::Origin::new("bundle.clap", chosen.clone()),
+        tutti_plugin_types::Origin::new("libbundle.so", chosen.clone()),
+        tutti_plugin_types::PluginFormat::Clap,
         crate::EditorLoader::new(recording_editor, tutti_fixtures::detached_work()),
     );
     let refused = ipc.bridge().open_floating_editor(main_thread());
     assert!(refused.is_err(), "the recording loader loads no editor");
-    assert_eq!(*EDITOR_LOAD.lock().unwrap(), Some(chosen));
+    assert_eq!(
+        *EDITOR_LOAD.lock().unwrap(),
+        Some((tutti_plugin_types::PluginFormat::Clap, chosen))
+    );
 }
 
 /// A window number the mock's X11-style server takes.

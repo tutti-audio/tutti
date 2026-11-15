@@ -6,7 +6,8 @@
 //! more than its node: it also takes per-block MIDI, chord/scale context and
 //! note expression, reached here through capability accessors.
 
-use crate::host::plugin_ref::{Hosting, PluginRef};
+use crate::host::loadable::{Hosting, Loadable};
+use crate::host::plugin_ref::PluginRef;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 
 use crate::host::node::PluginClient;
@@ -76,9 +77,9 @@ macro_rules! placed {
 /// inputs it can accept.
 ///
 /// Created by [`Plugin::open`] or `PluginLoad::run`.
-/// Where a plugin runs is its ref's [`Hosting`]: by default VST3, CLAP and AU
+/// Where a plugin runs is its load's [`Hosting`]: by default VST3, CLAP and AU
 /// plugins run in a `plugin-server` subprocess and VST2 (with the `vst2`
-/// feature) in the host process; [`PluginRef::with_hosting`] asks for the other
+/// feature) in the host process; [`Loadable::hosting`] asks for the other
 /// where the format allows it. Which one a plugin landed in does not change
 /// this API ([`hosting`](Self::hosting) says).
 ///
@@ -91,13 +92,11 @@ macro_rules! placed {
 ///
 /// ```no_run
 /// use tutti_types::SampleRate;
-/// use tutti_plugin::catalog::Plugin;
-///
-/// use tutti_plugin::catalog::PluginRef;
+/// use tutti_plugin::catalog::{Loadable, Plugin, PluginRef};
 ///
 /// let file = PluginRef::file("/usr/lib/vst3/MyPlugin.vst3").expect("a plugin file");
 /// let (_collector, work) = tutti_plugin::MainWork::new();
-/// let plugin = Plugin::open(None, &work, &file, SampleRate::SR_48K)?;
+/// let plugin = Plugin::open(None, &work, &Loadable::uncatalogued(file), SampleRate::SR_48K)?;
 /// println!("{} ({:?})", plugin.descriptor().name, plugin.role());
 /// if plugin.takes_midi() {
 ///     // wire a MIDI source to the node's event input
@@ -124,13 +123,17 @@ impl std::fmt::Debug for Plugin {
 }
 
 impl Plugin {
-    /// Opens a plugin file with the default bridge settings.
+    /// Opens a plugin with the default bridge settings.
     ///
-    /// No catalog is needed: discovery through [`Plugins`] is optional.
     /// ```no_run
-    /// # fn ex() -> tutti_plugin_types::BridgeResult<()> {
-    /// use tutti_plugin::catalog::{Plugin, PluginRef};
-    /// let foo = PluginRef::file("/Library/Audio/Plug-Ins/VST3/Foo.vst3").expect("a plugin file");
+    /// # fn ex() -> Result<(), Box<dyn std::error::Error>> {
+    /// use tutti_plugin::catalog::{BindPolicy, Catalog, CatalogConfig, NO_SCAN_DIRS, Plugin, PluginId};
+    /// use tutti_plugin_db::{PluginDb, PluginFormat};
+    /// # let dir = std::path::PathBuf::from("/my/app/state");
+    /// let catalog = Catalog::new(PluginDb::new(), CatalogConfig::new(dir, NO_SCAN_DIRS), |_| Ok(()));
+    /// let foo = catalog
+    ///     .resolve(&PluginId::new(PluginFormat::Vst3, "vst3.00112233-44556677-8899AABB-CCDDEEFF"))
+    ///     .bind(BindPolicy::ExactOnly)?;
     /// let (_collector, work) = tutti_plugin::MainWork::new();
     /// let plugin = Plugin::open(None, &work, &foo, tutti_types::SampleRate::SR_48K)?;
     /// # Ok(()) }
@@ -139,10 +142,9 @@ impl Plugin {
     /// `sample_rate` takes anything convertible to [`SampleRate`] — `f64` and
     /// `u32` (which widens exactly), but deliberately not `f32`.
     ///
-    /// `plugin` names the plugin: its file, and (from a scan,
-    /// `PluginRef::from(&entry)`) which plugin of the file: a bundle that
-    /// exports several opens the one the ref's id names, not the first.
-    /// The format and the [`Hosting`] are the ref's. `Auto` runs VST2 (with
+    /// `plugin` names the plugin: its file, the format that opens it and which
+    /// plugin of the file: a bundle that exports several opens the one its id
+    /// names, not the first. The [`Hosting`] is the load's. `Auto` runs VST2 (with
     /// the `vst2` feature) in the host process, since its `AEffect` fuses
     /// editor and audio processor into one instance, and every other format in
     /// a `plugin-server` subprocess with an IPC bridge. This call blocks while
@@ -154,18 +156,19 @@ impl Plugin {
     /// served from a subprocess loads from any thread, so a caller that is not
     /// on the main thread passes `None`.
     ///
-    /// **The blacklist is not consulted** — that is catalog state, and this
-    /// path does not have one. A host that wants the scanner's crash history
-    /// honoured should check [`Plugins::is_blacklisted`] before calling.
+    /// The load asks `plugin`'s blacklist where it opens the plugin, so a plugin
+    /// blacklisted since it was resolved is refused.
     ///
     /// # Errors
     ///
-    /// Returns [`BridgeError::ServerNotFound`](tutti_plugin_types::BridgeError::ServerNotFound)
+    /// Returns [`BridgeError::Blacklisted`](tutti_plugin_types::BridgeError::Blacklisted)
+    /// for a blacklisted plugin,
+    /// [`BridgeError::ServerNotFound`](tutti_plugin_types::BridgeError::ServerNotFound)
     /// when the `plugin-server` binary cannot be located,
     /// [`BridgeError::LoadFailed`](tutti_plugin_types::BridgeError::LoadFailed) or
     /// [`BridgeError::BundleResolutionFailed`](tutti_plugin_types::BridgeError::BundleResolutionFailed)
     /// when the plugin does not load, [`BridgeError::NotOutOfProcess`] for a
-    /// VST2 plugin whose ref asks for [`Hosting::OutOfProcess`],
+    /// VST2 plugin whose load asks for [`Hosting::OutOfProcess`],
     /// [`BridgeError::NotInProcess`] for a format this build has no in-process
     /// host for, and a connection, protocol or timeout variant when the
     /// subprocess cannot be reached.
@@ -173,13 +176,11 @@ impl Plugin {
     /// [`BridgeError::NotOutOfProcess`]: tutti_plugin_types::BridgeError::NotOutOfProcess
     /// [`BridgeError::NotInProcess`]: tutti_plugin_types::BridgeError::NotInProcess
     ///
-    /// [`Plugins`]: super::catalog::Catalog
-    /// [`Plugins::is_blacklisted`]: super::catalog::Catalog::is_blacklisted
     /// [`AudioConfig`]: crate::BridgeConfig
     pub fn open(
         main: Option<MainThreadMarker>,
         work: &MainWorkHandle,
-        plugin: &PluginRef,
+        plugin: &Loadable,
         sample_rate: impl Into<SampleRate>,
     ) -> BridgeResult<Self> {
         Self::open_with(main, work, &AudioConfig::default(), plugin, sample_rate)
@@ -196,7 +197,7 @@ impl Plugin {
         main: Option<MainThreadMarker>,
         work: &MainWorkHandle,
         audio: &AudioConfig,
-        plugin: &PluginRef,
+        plugin: &Loadable,
         sample_rate: impl Into<SampleRate>,
     ) -> BridgeResult<Self> {
         Self::open_with_state(main, work, audio, plugin, sample_rate, None)
@@ -217,25 +218,25 @@ impl Plugin {
         main: Option<MainThreadMarker>,
         work: &MainWorkHandle,
         audio: &AudioConfig,
-        plugin: &PluginRef,
+        plugin: &Loadable,
         sample_rate: impl Into<SampleRate>,
         state: Option<&[u8]>,
     ) -> BridgeResult<(Self, Option<std::result::Result<(), String>>)> {
         let sample_rate = sample_rate.into();
-        let hosting = Self::hosting_of(plugin)?;
-        if hosting == Hosting::InProcess {
+        plugin.check()?;
+        if plugin.placement()? == Hosting::InProcess {
             // An in-process plugin loads in this process, on the main thread:
             // the caller says it is there by passing the token.
             let Some(main) = main else {
                 return Err(tutti_plugin_types::BridgeError::LoadFailed {
-                    path: plugin.path().to_path_buf(),
+                    path: plugin.plugin().path().to_path_buf(),
                     stage: tutti_plugin_types::LoadStage::Opening,
                     reason: "a plugin hosted in the host process loads on the main thread \
                              and needs it"
                         .into(),
                 });
             };
-            return Self::open_in_process(main, work, plugin, sample_rate, state);
+            return Self::open_in_process(main, work, plugin.plugin(), sample_rate, state);
         }
 
         let ((client, restored), handle) =
@@ -246,23 +247,6 @@ impl Plugin {
                 },
             )?;
         Ok((Self::from_subprocess(client, handle), restored))
-    }
-
-    /// Where a load of `plugin` runs: [`Hosting::InProcess`] or
-    /// [`Hosting::OutOfProcess`], never `Auto`. An in-process load (and the
-    /// instance's drop) is confined to the main thread; an out-of-process one
-    /// loads from any thread.
-    ///
-    /// # Errors
-    ///
-    /// [`BridgeError::NotOutOfProcess`](tutti_plugin_types::BridgeError::NotOutOfProcess)
-    /// for a VST2 plugin asked to be served,
-    /// [`BridgeError::NotInProcess`](tutti_plugin_types::BridgeError::NotInProcess)
-    /// for a format this build cannot host in process: the answer is the
-    /// format's and the build's, so it comes before a server or a file is
-    /// looked for.
-    pub fn hosting_of(plugin: &PluginRef) -> BridgeResult<Hosting> {
-        plugin.hosting().resolve(plugin.path(), plugin.format())
     }
 
     /// The in-process load, by format.
@@ -311,7 +295,7 @@ impl Plugin {
                 state,
                 Placed::Au,
             ),
-            // `hosting_of` refused every format with no host built in; this
+            // `Loadable::placement` refused every format with no host built in; this
             // arm is the same refusal, for a caller that skipped it.
             _ => Err(tutti_plugin_types::BridgeError::NotInProcess {
                 path: plugin.path().to_path_buf(),

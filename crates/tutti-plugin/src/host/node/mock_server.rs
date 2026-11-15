@@ -79,6 +79,7 @@ fn no_editor(
     _: tutti_plugin_types::MainThreadMarker,
     _: &tutti_plugin_types::MainWorkHandle,
     path: &std::path::Path,
+    _: tutti_plugin_types::PluginFormat,
     _: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     Err(tutti_plugin_types::BridgeError::LoadFailed {
@@ -175,6 +176,7 @@ pub(super) fn rig(label: &str) -> Rig {
         path.clone(),
         Arc::clone(slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginFormat::Vst3,
         Some(tutti_plugin_ipc::EditorLoader::new(
             no_editor,
             tutti_fixtures::detached_work(),

@@ -158,6 +158,7 @@ fn handle_with_mock_server(
         path.clone(),
         buffer,
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginFormat::Vst3,
         Some(tutti_plugin_ipc::EditorLoader::new(
             crate::format::gui::load_gui_instance,
             tutti_fixtures::detached_work(),
@@ -247,6 +248,7 @@ fn handle_with_multi_reply_server(
         path.clone(),
         buffer,
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginFormat::Vst3,
         Some(tutti_plugin_ipc::EditorLoader::new(
             crate::format::gui::load_gui_instance,
             tutti_fixtures::detached_work(),

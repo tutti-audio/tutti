@@ -41,6 +41,8 @@ pub struct Gap {
 pub trait Format {
     /// For failure messages.
     const NAME: &'static str;
+    /// The format a load of its plugin names.
+    const FORMAT: tutti_plugin_types::PluginFormat;
     /// The loaded type.
     type L: Loaded;
     /// Where a parameter point lands.

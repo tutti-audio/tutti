@@ -3,7 +3,7 @@
 //! ones need `cargo build -p tutti-plugin-server` first, as `CLAUDE.md` says),
 //! and a VST2 file refused for `OutOfProcess` with no server looked for.
 
-use tutti_plugin::catalog::{Hosting, Plugin, PluginRef};
+use tutti_plugin::catalog::{Hosting, Loadable, Plugin, PluginRef};
 use tutti_plugin_types::{BridgeError, SampleRate};
 
 const RATE: f64 = 48_000.0;
@@ -18,10 +18,9 @@ fn a_vst2_plugin_asked_for_out_of_process_is_refused_at_load() {
     let mut env = tutti_fixtures::ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", "/nonexistent/plugin-server");
     for name in ["Synth.vst", "Legacy.dll", "Old.so"] {
-        let plugin = PluginRef::file(name)
-            .expect("a plugin file")
-            .with_hosting(Hosting::OutOfProcess);
-        assert_eq!(plugin.hosting(), Hosting::OutOfProcess);
+        let plugin = Loadable::uncatalogued(PluginRef::file(name).expect("a plugin file"))
+            .hosting(Hosting::OutOfProcess);
+        assert_eq!(plugin.requested_hosting(), Hosting::OutOfProcess);
         match Plugin::open(
             None,
             &tutti_fixtures::detached_work(),
@@ -39,10 +38,11 @@ fn a_vst2_plugin_asked_for_out_of_process_is_refused_at_load() {
 mod clap {
     use super::*;
 
-    fn clap(hosting: Hosting) -> PluginRef {
-        PluginRef::file(tutti_fixtures::clap_probe())
-            .expect("a plugin file")
-            .with_hosting(hosting)
+    fn clap(hosting: Hosting) -> Loadable {
+        Loadable::uncatalogued(
+            PluginRef::file(tutti_fixtures::clap_probe()).expect("a plugin file"),
+        )
+        .hosting(hosting)
     }
 
     fn with_server() -> tutti_fixtures::ScopedEnv {
@@ -132,7 +132,7 @@ fn auto_hosts_a_vst2_plugin_in_process() {
     let plugin = Plugin::open(
         Some(main),
         &tutti_fixtures::detached_work(),
-        &PluginRef::file(&staged).expect("a plugin file"),
+        &Loadable::uncatalogued(PluginRef::file(&staged).expect("a plugin file")),
         SampleRate::of(RATE),
     )
     .expect("the reference VST2 plugin loads in this process");

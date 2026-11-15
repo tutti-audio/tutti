@@ -1,7 +1,7 @@
 //! The [`Catalog`]: scans plugin directories, keeps what it found and says what
-//! is blacklisted. It does not open a plugin: the session loads one, and a load asks the catalog
-//! whether it may ([`Catalog::check`],
-//! `PluginLoad::with_catalog`).
+//! is blacklisted. It does not open a plugin: [`Catalog::resolve`] names the
+//! plugin an id stands for as a [`Loadable`], the only thing a load takes, and
+//! the load asks the catalog's blacklist where it opens the plugin.
 //!
 //! The caller supplies the persistence and which directories to scan: this
 //! crate has no opinion on OS conventions, app names or file formats. The
@@ -52,6 +52,7 @@
 //! the audio thread.
 
 use crate::host::db_probe::{Probing, probe_fn};
+use crate::host::loadable::{Loadable, Resolved};
 use crate::host::plugin_ref::PluginRef;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -61,8 +62,8 @@ use tutti_plugin_db::{
     ScanBusy, ScanPoll, Scanner, format_from_path,
 };
 use tutti_plugin_ipc::CatalogConfig;
-use tutti_plugin_types::PluginDescriptor;
 use tutti_plugin_types::{BridgeError, BridgeResult};
+use tutti_plugin_types::{PluginDescriptor, PluginId};
 
 /// Why the persistence a catalog was given could not store the database.
 ///
@@ -197,6 +198,14 @@ pub struct BlacklistView {
 }
 
 impl BlacklistView {
+    /// A blacklist that holds nothing: what a plugin no catalog resolved
+    /// ([`Loadable::uncatalogued`]) is checked against.
+    pub(crate) fn empty() -> Self {
+        Self {
+            rows: Arc::new(RwLock::new(PluginDb::new())),
+        }
+    }
+
     /// As [`Catalog::check`], against the catalog's blacklist now.
     ///
     /// # Errors
@@ -365,9 +374,8 @@ impl Catalog {
     /// `plugin-probe` does not record the file under its name: it is a failure.
     ///
     /// A link whose target has another extension (`Foo.clap` to `libfoo.so`) is
-    /// probed as named and recorded under its target, as CLAP. A load picks the
-    /// format by the file's extension, so loading that key does not read it as
-    /// CLAP.
+    /// probed as named and recorded under its target, as CLAP; a load of that
+    /// row opens the target as CLAP ([`Loadable::format`]).
     ///
     /// # Errors
     ///
@@ -505,6 +513,38 @@ impl Catalog {
             .plugins()
             .find(|p| p.descriptor.name == name)
             .map(|p| PluginRef::from(&p))
+    }
+
+    /// What `id` names among the non-blacklisted plugins of the catalog now:
+    /// the plugin of that format with that id, wherever its file is.
+    ///
+    /// A plugin blacklisted since is [`Missing`](Resolved::Missing); one
+    /// blacklisted after this call is refused by the [`Loadable`] when the load
+    /// opens it. [`Catalog::unblacklist`] and a resolve again is a host's "load
+    /// anyway".
+    ///
+    /// The catalog stores no version and no compatibility ids, so the answer is
+    /// [`Exact`](Resolved::Exact), [`Ambiguous`](Resolved::Ambiguous) (the id in
+    /// several files) or [`Missing`](Resolved::Missing).
+    #[must_use]
+    pub fn resolve(&self, id: &PluginId) -> Resolved {
+        let mut found: Vec<PluginRef> = self
+            .db
+            .plugins()
+            .filter(|p| p.format == id.format && p.descriptor.id == id.id)
+            .map(|p| PluginRef::from(&p))
+            .collect();
+        found.sort_by(|a, b| a.path().cmp(b.path()));
+        let mut loadables = found
+            .into_iter()
+            .map(|plugin| Loadable::new(plugin, self.blacklist_view()));
+        match (loadables.next(), loadables.next()) {
+            (None, _) => Resolved::Missing,
+            (Some(only), None) => Resolved::Exact(only),
+            (Some(first), Some(second)) => {
+                Resolved::Ambiguous([first, second].into_iter().chain(loadables).collect())
+            }
+        }
     }
 
     /// Returns the descriptor of a non-blacklisted plugin: the one in the
@@ -724,6 +764,7 @@ impl Catalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::loadable::{BindError, BindPolicy};
     use crate::host::plugin::Plugin;
     use tutti_plugin_db::{FileRow, PluginFormat, ScanPoll, ScanResult};
     use tutti_types::SampleRate;
@@ -899,11 +940,11 @@ mod tests {
         std::fs::remove_file(&path).ok();
     }
 
-    /// The plain door has no catalog, so it has no blacklist to consult.
-    ///
-    /// This is the opt-in boundary: `Plugin::open` is a file API and stays one.
+    /// A plugin no catalog resolved consults no blacklist: the load of a file
+    /// the host holds a [`PluginRef`] to, and no catalog, is not refused for
+    /// what a catalog recorded of it.
     #[test]
-    fn the_unguarded_door_does_not_consult_a_blacklist() {
+    fn an_uncatalogued_plugin_does_not_consult_a_blacklist() {
         let dir = std::env::temp_dir().join("tutti-bl-unguarded");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("Crasher.vst3");
@@ -915,16 +956,151 @@ mod tests {
         let err = Plugin::open(
             None,
             &tutti_fixtures::detached_work(),
-            &PluginRef::file(&path).unwrap(),
+            &Loadable::uncatalogued(PluginRef::file(&path).unwrap()),
             SampleRate::SR_48K,
         )
         .expect_err("the fixture is not a loadable plugin");
         assert!(
             !matches!(err, BridgeError::Blacklisted { .. }),
-            "Plugin::open has no catalog and cannot refuse on one, got {err:?}"
+            "an uncatalogued plugin has no blacklist to be refused by, got {err:?}"
         );
 
         std::fs::remove_file(&path).ok();
+    }
+
+    /// A catalog of one file holding the plugins `ids` of `format`.
+    fn catalog_of(path: &Path, format: PluginFormat, ids: &[&str]) -> Catalog {
+        use tutti_plugin_types::{PluginClass, PluginDescriptor};
+        std::fs::write(path, b"x").unwrap();
+        let plugins = ids
+            .iter()
+            .map(|id| PluginDescriptor::new(*id, *id, PluginClass::Unknown))
+            .collect();
+        catalog_with(
+            path,
+            FileRow::probed(format, &FileFacts::read(path), plugins),
+        )
+    }
+
+    /// **A load refuses a plugin blacklisted after it was resolved**: the
+    /// `Loadable` asks the catalog's blacklist where the load opens the plugin,
+    /// so a scan that blacklists the file between the resolve and the load is
+    /// not raced.
+    #[test]
+    fn a_plugin_blacklisted_after_its_resolve_is_refused_at_the_load() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("Late.clap");
+        let mut plugins = catalog_of(&path, PluginFormat::Clap, &["late"]);
+        let Resolved::Exact(loadable) = plugins.resolve(&PluginId::new(PluginFormat::Clap, "late"))
+        else {
+            panic!("the id is in the catalog");
+        };
+        assert!(loadable.check().is_ok(), "admitted when resolved");
+
+        plugins.blacklist(&path, "crashed while scanning");
+
+        let err = Plugin::open(
+            None,
+            &tutti_fixtures::detached_work(),
+            &loadable,
+            SampleRate::SR_48K,
+        )
+        .expect_err("the plugin is blacklisted now");
+        assert!(
+            matches!(&err, BridgeError::Blacklisted { reason, .. } if reason == "crashed while scanning"),
+            "{err:?}"
+        );
+    }
+
+    /// **An id resolves to the one plugin that has it, wherever its file is**: the
+    /// loadable names that file, the format that opens it and the id.
+    #[test]
+    fn an_id_resolves_to_the_plugin_that_has_it() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("Bundle.clap");
+        let plugins = catalog_of(&path, PluginFormat::Clap, &["one", "two"]);
+
+        let Resolved::Exact(two) = plugins.resolve(&PluginId::new(PluginFormat::Clap, "two"))
+        else {
+            panic!("the id is in the catalog");
+        };
+
+        assert_eq!(two.format(), PluginFormat::Clap);
+        assert_eq!(two.plugin().id(), Some("two"));
+        assert_eq!(two.plugin().path(), key(&path));
+    }
+
+    /// **The format is part of the identity**: the id of a CLAP plugin names
+    /// nothing among VST3 plugins.
+    #[test]
+    fn an_id_in_another_format_is_missing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("Synth.clap");
+        let plugins = catalog_of(&path, PluginFormat::Clap, &["synth"]);
+
+        assert!(matches!(
+            plugins.resolve(&PluginId::new(PluginFormat::Vst3, "synth")),
+            Resolved::Missing
+        ));
+        assert!(matches!(
+            plugins.resolve(&PluginId::new(PluginFormat::Clap, "other")),
+            Resolved::Missing
+        ));
+    }
+
+    /// **A plugin blacklisted at the resolve is missing**, not bound to a file
+    /// the load would refuse.
+    #[test]
+    fn a_blacklisted_plugin_resolves_missing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("Crasher.clap");
+        let mut plugins = catalog_of(&path, PluginFormat::Clap, &["crasher"]);
+        let id = PluginId::new(PluginFormat::Clap, "crasher");
+
+        plugins.blacklist(&path, "hung");
+        assert!(matches!(plugins.resolve(&id), Resolved::Missing));
+    }
+
+    /// **An id held by several files is ambiguous, ordered by file**: the app
+    /// asks which one, and neither is bound unasked.
+    #[test]
+    fn an_id_in_two_files_is_ambiguous_ordered_by_file() {
+        use tutti_plugin_types::{PluginClass, PluginDescriptor};
+        let dir = tempfile::TempDir::new().unwrap();
+        let (a, b) = (dir.path().join("A.clap"), dir.path().join("B.clap"));
+        let mut db = PluginDb::new();
+        for path in [&b, &a] {
+            std::fs::write(path, b"x").unwrap();
+            db.apply(Delta::put(
+                key(path),
+                FileRow::probed(
+                    PluginFormat::Clap,
+                    &FileFacts::read(path),
+                    vec![PluginDescriptor::new(
+                        "twice",
+                        "twice",
+                        PluginClass::Unknown,
+                    )],
+                ),
+            ));
+        }
+        let plugins = Catalog::new(
+            db,
+            CatalogConfig::new("/nonexistent", crate::catalog::NO_SCAN_DIRS),
+            |_| Ok(()),
+        );
+
+        let resolved = plugins.resolve(&PluginId::new(PluginFormat::Clap, "twice"));
+
+        let Resolved::Ambiguous(candidates) = resolved.clone() else {
+            panic!("{resolved:?}");
+        };
+        let files: Vec<_> = candidates.iter().map(|c| c.plugin().path()).collect();
+        assert_eq!(files, [key(&a), key(&b)]);
+        assert!(matches!(
+            resolved.bind(BindPolicy::OrAlias),
+            Err(BindError::Ambiguous(c)) if c.len() == 2
+        ));
     }
 
     /// The real edge: `prune_missing` stats each row's path and removes only

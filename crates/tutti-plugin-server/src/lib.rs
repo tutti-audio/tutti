@@ -293,30 +293,6 @@ pub(crate) mod test_utils {
         .map(|p| p.to_string_lossy().into_owned())
     }
 
-    /// The reference plugin under a `.clap` extension.
-    ///
-    /// `AnyServed::load` dispatches on the file extension, and the cdylib cargo
-    /// builds is `libtutti_clap_test_plugin.so`, which no row of the `served!`
-    /// table names. Tests that go through `HostMessage::LoadPlugin` (rather
-    /// than loading a `Served<ClapLoaded>` directly) need a path that ends in
-    /// `.clap`.
-    ///
-    /// A symlink beside the artifact rather than a copy, so it cannot go
-    /// stale against a rebuilt plugin. The link path is shared by every test
-    /// process; `tutti_fixtures::publish_with_extension` says how it is
-    /// published without a reader ever missing it.
-    #[cfg(feature = "clap")]
-    pub fn clap_probe_path_dot_clap() -> &'static str {
-        static LINKED: OnceLock<String> = OnceLock::new();
-        LINKED
-            .get_or_init(|| {
-                tutti_fixtures::publish_with_extension(Path::new(clap_probe_path()), "clap")
-                    .to_string_lossy()
-                    .into_owned()
-            })
-            .as_str()
-    }
-
     /// [`RenderMode::TagOnly`] on the reference plugin: every output sample is
     /// a nonzero per-`(port, channel)` tag, independent of input.
     ///

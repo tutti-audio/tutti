@@ -7,6 +7,7 @@
 //! lives in its format's host crate.
 
 use std::path::Path;
+use tutti_plugin_db::PluginFormat;
 use tutti_plugin_types::{BridgeError, BridgeResult};
 use tutti_plugin_types::{Editor, MainThreadMarker, MainWorkHandle};
 use tutti_plugin_types::{Load, LoadStage};
@@ -16,18 +17,11 @@ pub(crate) fn load_gui_instance(
     main: MainThreadMarker,
     work: &MainWorkHandle,
     path: &Path,
+    format: PluginFormat,
     load: &Load,
 ) -> BridgeResult<Box<dyn Editor>> {
-    use tutti_plugin_db::{PluginFormat, format_from_path};
-
     // A build whose only format here is AU off macOS has no arm that reads them.
     let _ = (main, work, load);
-    let format = format_from_path(path).ok_or_else(|| BridgeError::LoadFailed {
-        path: path.to_path_buf(),
-        stage: LoadStage::Scanning,
-        reason: format!("Unknown plugin format for: {}", path.display()),
-    })?;
-
     match format {
         #[cfg(feature = "vst3")]
         PluginFormat::Vst3 => editor::<tutti_vst3_host::Vst3Loaded>(main, work, path, load, "VST3"),
@@ -83,6 +77,7 @@ pub(crate) fn load_gui_instance(
     _main: MainThreadMarker,
     _work: &MainWorkHandle,
     path: &Path,
+    _format: PluginFormat,
     _load: &Load,
 ) -> BridgeResult<Box<dyn Editor>> {
     Err(BridgeError::LoadFailed {
