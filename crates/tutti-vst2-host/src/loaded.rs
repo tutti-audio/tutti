@@ -660,17 +660,15 @@ impl Vst2Loaded {
 /// [`Vst2Error::LoadFailed`] at the opening stage when `path` is a bundle
 /// directory holding no module this target can load.
 fn resolve_module(path: &Path) -> Result<PathBuf> {
-    native_module_path(path, ModuleKind::Vst2).map_err(|e| match e {
-        PluginError::Load { stage, reason } => Vst2Error::LoadFailed {
+    native_module_path(path, ModuleKind::Vst2).map_err(|e| {
+        let PluginError::Load { stage, reason } = e else {
+            unreachable!("native_module_path fails only with PluginError::Load")
+        };
+        Vst2Error::LoadFailed {
             path: path.to_path_buf(),
             stage,
             reason,
-        },
-        other => Vst2Error::LoadFailed {
-            path: path.to_path_buf(),
-            stage: LoadStage::Opening,
-            reason: other.to_string(),
-        },
+        }
     })
 }
 

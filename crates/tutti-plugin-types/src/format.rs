@@ -52,13 +52,17 @@ impl PluginFormat {
         }
     }
 
-    /// The format whose [`extension_id`](Self::extension_id) is `id`.
+    /// The format whose [`extension_id`](Self::extension_id) is `id`: the
+    /// stable id string (`"vst3"`, `"au"`) a plugin id and the wire carry, not a
+    /// file extension; [`from_extension`](Self::from_extension) reads a file's.
     #[must_use]
     pub fn from_extension_id(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|f| f.extension_id() == id)
     }
 
-    /// The format a file extension (without the dot) names, matched without
+    /// The format a file extension (without the dot) names, not an id string
+    /// (`"au"` is an id, `"component"` the extension;
+    /// [`from_extension_id`](Self::from_extension_id) reads ids), matched without
     /// regard to case: `vst3`, `vst`/`dll`/`so` (VST2 ships as a bare shared
     /// library off macOS), `clap` and `component`.
     ///
@@ -82,14 +86,19 @@ impl PluginFormat {
             .iter()
             .find(|(known, _)| known.eq_ignore_ascii_case(ext))
             .map(|(_, format)| *format)
-            .ok_or_else(|| UnknownExtension(ext.to_owned()))
+            .ok_or_else(|| UnknownExtension {
+                extension: ext.to_owned(),
+            })
     }
 }
 
 /// A file extension no plugin format claims.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("`.{0}` is not a plugin extension (vst3, vst, dll, so, clap, component)")]
-pub struct UnknownExtension(pub String);
+#[error("`.{extension}` is not a plugin extension")]
+pub struct UnknownExtension {
+    /// The extension as given, without the dot.
+    pub extension: String,
+}
 
 /// Which plugin a saved reference names: its format and the format's own id
 /// for it ([`PluginDescriptor::id`](crate::PluginDescriptor): a CLAP plugin id,
@@ -175,7 +184,12 @@ mod tests {
     fn an_unknown_extension_is_refused_by_name() {
         for unknown in ["txt", "wasm", "vst4", "au", ""] {
             let err = PluginFormat::from_extension(unknown).unwrap_err();
-            assert_eq!(err, super::UnknownExtension(unknown.to_owned()));
+            assert_eq!(
+                err,
+                super::UnknownExtension {
+                    extension: unknown.to_owned()
+                }
+            );
             assert!(err.to_string().contains(&format!("`.{unknown}`")), "{err}");
         }
     }

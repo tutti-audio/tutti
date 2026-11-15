@@ -7,16 +7,6 @@ use tutti_fixtures::main_thread;
 use crate::active;
 use active::{Active, ActiveExt};
 
-/// The loadable binary inside a `.vst3` bundle directory; a file or a path
-/// that is no bundle stays as it is.
-fn resolve_bundle(path: &Path) -> PathBuf {
-    tutti_plugin_types::bundle::native_module_path(
-        path,
-        tutti_plugin_types::bundle::ModuleKind::Vst3,
-    )
-    .unwrap_or_else(|e| panic!("{e}"))
-}
-
 /// Every VST3 bundle these tests load: the in-repo `audio-probe`, which the
 /// build script compiles from the SDK submodules.
 fn corpus() -> Vec<PathBuf> {
@@ -83,8 +73,8 @@ fn binary_in_bundle(bundle: &Path) -> Option<PathBuf> {
 fn a_plugins_flat_channel_counts_match_its_bus_zero() {
     let mut checked = 0;
     for path in corpus_or_fail() {
-        let library = resolve_bundle(&path);
-        let Ok(plugin) = Active::<f32>::load(&library, 48_000.0, 64) else {
+        let library = &path;
+        let Ok(plugin) = Active::<f32>::load(library, 48_000.0, 64) else {
             eprintln!("skipping {} (failed to load)", path.display());
             continue;
         };
@@ -144,8 +134,8 @@ fn a_plugins_version_is_read_from_it_rather_than_assumed() {
     let mut non_placeholder = 0;
 
     for path in corpus_or_fail() {
-        let library = resolve_bundle(&path);
-        let Ok(plugin) = Active::<f32>::load(&library, 48_000.0, 64) else {
+        let library = &path;
+        let Ok(plugin) = Active::<f32>::load(library, 48_000.0, 64) else {
             continue;
         };
         let info = plugin.loaded().plugin_info();
@@ -193,8 +183,8 @@ fn a_plugins_subcategories_are_read_from_it_rather_than_left_blank() {
     let mut declared = 0;
 
     for path in corpus_or_fail() {
-        let library = resolve_bundle(&path);
-        let Ok(plugin) = Active::<f32>::load(&library, 48_000.0, 64) else {
+        let library = &path;
+        let Ok(plugin) = Active::<f32>::load(library, 48_000.0, 64) else {
             continue;
         };
         let info = plugin.loaded().plugin_info();
@@ -234,8 +224,8 @@ fn corpus_subcategories_parse_into_named_facets() {
     let mut parsed = 0;
 
     for path in corpus_or_fail() {
-        let library = resolve_bundle(&path);
-        let Ok(plugin) = Active::<f32>::load(&library, 48_000.0, 64) else {
+        let library = &path;
+        let Ok(plugin) = Active::<f32>::load(library, 48_000.0, 64) else {
             continue;
         };
         let info = plugin.loaded().plugin_info();
@@ -299,11 +289,10 @@ fn plain_range_probe_recovers_real_ranges() {
     let mut total_non_unit = 0usize;
 
     for path in &corpus {
-        let resolved = resolve_bundle(path);
         let Ok(loaded) = tutti_vst3_host::Vst3Loaded::load(
             main_thread(),
             &tutti_fixtures::detached_work(),
-            &resolved,
+            path,
             tutti_vst3_host::LoadOptions::new(),
         ) else {
             eprintln!("  {}: failed to load, skipping", path.display());
