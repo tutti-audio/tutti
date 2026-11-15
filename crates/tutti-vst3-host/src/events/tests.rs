@@ -1598,14 +1598,19 @@ fn a_plugins_note_expression_is_the_per_note_message_of_its_dimension() {
     use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
 
     let note_id = spec_note_id(2, 60);
-    let decode = |type_id: u32, id: i32, value: f64| {
+    // The note the plugin started under this id: an expression names a note only
+    // through an id the plugin started.
+    let mut stream = OutputStream::new();
+    let started = Event::at(0, Payload::NoteOn(NoteOn::new(2, 60, 0.5, note_id)));
+    assert!(started.to_midi(&mut stream).is_some());
+    let mut decode = |type_id: u32, id: i32, value: f64| {
         let mut event = Event::at(
             4,
             Payload::ExpressionValue(ExpressionValue::new(type_id, id, value)),
         );
         event.header.bus_index = 5;
         event
-            .to_midi(&mut OutputStream::new())
+            .to_midi(&mut stream)
             .map(|m| (m.offset, m.ump.decode()))
     };
     let per_note = |voice| {
@@ -1736,10 +1741,181 @@ fn a_plugins_expression_on_its_own_note_id_is_translated() {
     let off = Event::at(0, Payload::NoteOff(NoteOff::new(3, 62, 0.0, -1)));
     assert!(off.to_midi(&mut stream).is_some());
     assert!(pan(own_id).to_midi(&mut stream).is_none());
-    // A table of 256 notes counts the next one and does not grow.
-    for id in 0..300 {
+}
+
+/// What a note's volume expressions are after `events` (a Note On on `note` 60
+/// first), by `kVolumeTypeID` (0).
+fn volumes_after(follow: Voice2) -> Vec<f64> {
+    let mut encoder = MidiEncoder::default();
+    let on = Message::Midi2(
+        Address {
+            group: MidiGroup::FIRST,
+            channel: MidiChannel::of(0),
+        },
+        Voice2::note_on(NoteNumber::of(60), NoteVelocity::CENTER),
+    );
+    encoder.encode(&(Offset::ZERO, Ump::from(on)));
+    encoder
+        .encode(&(
+            Offset::ZERO,
+            Ump::from(Message::Midi2(
+                Address {
+                    group: MidiGroup::FIRST,
+                    channel: MidiChannel::of(0),
+                },
+                follow,
+            )),
+        ))
+        .iter()
+        .filter_map(|event| match event.payload {
+            Payload::ExpressionValue(e) if e.typeId == 0 => Some(e.value),
+            _ => None,
+        })
+        .collect()
+}
+
+/// **A Per-Note volume stages on VST3's scale**: `kVolumeTypeID` is `0` for
+/// silence, `0.25` for 0 dB and `1` for +12 dB (`ivstnoteexpression.h`), and a
+/// per-note controller's full scale is unity, so full scale is `0.25` and half
+/// of it `0.125`.
+#[test]
+fn a_full_scale_per_note_volume_stages_at_vst3_unity() {
+    let volume = |value: u32| Voice2::AssignablePerNote {
+        note: NoteNumber::of(60),
+        controller: 7,
+        value: ControlValue::new(value),
+    };
+    assert_eq!(volumes_after(volume(u32::MAX)), [0.25]);
+    let half = volumes_after(volume(0x8000_0000));
+    assert!((half[0] - 0.125).abs() < 1e-6, "{half:?}");
+    assert_eq!(volumes_after(volume(0)), [0.0]);
+}
+
+/// **A Per-Note Management Reset puts a note's volume back to unity**, which on
+/// VST3's scale is `0.25`, not `1` (+12 dB).
+#[test]
+fn a_per_note_reset_sends_volume_at_vst3_unity() {
+    let reset = Voice2::PerNoteManagement {
+        note: NoteNumber::of(60),
+        detach: false,
+        reset: true,
+    };
+    assert_eq!(volumes_after(reset), [0.25]);
+}
+
+/// **Every event of the plugin's output reaches the stream, whether or not the
+/// block's list has room**: a run's Data Entry LSB and a note's start that
+/// arrive after the list is full are read, so the run is one controller in the
+/// block after and the note's expression is that note's.
+#[test]
+fn a_run_and_a_note_through_a_full_list_are_still_read() {
+    use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
+
+    let drain = |stream: &mut OutputStream, events: Vec<Event>| {
+        let list = EventList::input();
+        let mut staging = list.begin();
+        for event in events {
+            assert!(staging.push(event));
+        }
+        staging.finish();
+        let mut out = tutti_plugin_types::RtMidiEvents::new();
+        drain_midi(&list, stream, &mut out);
+        (
+            out.iter().map(|m| m.ump.decode()).collect::<Vec<_>>(),
+            out.is_overflowed(),
+        )
+    };
+    let cc = |control: u8, value: i8| {
+        Event::at(0, Payload::LegacyCcOut(legacy_cc(control, 0, value, 0)))
+    };
+    let mut stream = OutputStream::new();
+    // Block 1: the list fills with notes, then a run and an own-id note arrive.
+    let mut first: Vec<Event> = (0..tutti_plugin_types::RT_MIDI_CAPACITY)
+        .map(|_| Event::at(0, Payload::NoteOn(NoteOn::new(0, 60, 0.5, -1))))
+        .collect();
+    first.extend([cc(101, 0), cc(100, 0), cc(6, 12), cc(38, 0)]);
+    first.push(Event::at(
+        0,
+        Payload::NoteOn(NoteOn::new(3, 62, 0.5, 9_000)),
+    ));
+    let (got, overflowed) = drain(&mut stream, first);
+    assert!(overflowed);
+    assert_eq!(
+        got.len(),
+        tutti_plugin_types::RT_MIDI_CAPACITY,
+        "no room for the rest"
+    );
+    // Block 2: RPN 0/0 is still selected, so one more value is one controller,
+    // and the note under id 9000 takes an expression.
+    let pan = Event::at(
+        0,
+        Payload::ExpressionValue(ExpressionValue::new(Ids::kPanTypeID, 9_000, 1.0)),
+    );
+    let (got, _) = drain(&mut stream, vec![cc(6, 7), cc(38, 0), pan]);
+    let [
+        Ok(Message::Midi2(_, Voice2::Registered { value, .. })),
+        Ok(Message::Midi2(
+            address,
+            Voice2::AssignablePerNote {
+                note, controller, ..
+            },
+        )),
+    ] = got[..]
+    else {
+        panic!("expected a controller and an expression, got {got:?}");
+    };
+    assert_eq!(value.get(), 7 << 25);
+    assert_eq!((address.channel.get(), note.get(), controller), (3, 62, 10));
+}
+
+/// **An id the plugin has not started, or has ended, names no note**: a low
+/// own id is not read as the host's `channel * 128 + note` (id 5 is not channel 0
+/// key 5), after its note off or never; it is dropped and counted.
+#[test]
+fn an_expression_on_an_id_no_live_note_holds_is_dropped_and_counted() {
+    use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
+
+    let mut stream = OutputStream::new();
+    let pan = |id| {
+        Event::at(
+            0,
+            Payload::ExpressionValue(ExpressionValue::new(Ids::kPanTypeID, id, 1.0)),
+        )
+    };
+    assert!(pan(5).to_midi(&mut stream).is_none(), "never started");
+    let on = Event::at(0, Payload::NoteOn(NoteOn::new(2, 40, 0.5, 5)));
+    assert!(on.to_midi(&mut stream).is_some());
+    assert!(pan(5).to_midi(&mut stream).is_some(), "while it sounds");
+    let off = Event::at(0, Payload::NoteOff(NoteOff::new(2, 40, 0.0, 5)));
+    assert!(off.to_midi(&mut stream).is_some());
+    assert!(pan(5).to_midi(&mut stream).is_none(), "after its note off");
+    assert_eq!(stream.expressions_dropped(), 2);
+}
+
+/// **A full table evicts its oldest note** for a new one, and counts it: stale
+/// entries (a note off the plugin never sent) do not pin the table.
+#[test]
+fn a_full_note_table_evicts_the_oldest() {
+    use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
+
+    let mut stream = OutputStream::new();
+    for id in 0..257 {
         let on = Event::at(0, Payload::NoteOn(NoteOn::new(0, 60, 0.5, 10_000 + id)));
         let _ = on.to_midi(&mut stream);
     }
-    assert_eq!(stream.notes_dropped(), 300 - 256);
+    assert_eq!(stream.notes_evicted(), 1);
+    let pan = |id| {
+        Event::at(
+            0,
+            Payload::ExpressionValue(ExpressionValue::new(Ids::kPanTypeID, id, 1.0)),
+        )
+    };
+    assert!(
+        pan(10_000).to_midi(&mut stream).is_none(),
+        "the oldest went"
+    );
+    assert!(
+        pan(10_256).to_midi(&mut stream).is_some(),
+        "the newest is held"
+    );
 }

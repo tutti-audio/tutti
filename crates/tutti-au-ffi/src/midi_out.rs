@@ -24,10 +24,10 @@ use crate::callback::with_state_mut;
 use crate::error::Result;
 use crate::property::{Element, MidiOutputCallbackInfo, MidiOutputCallbackProperty, Scope};
 use crate::status::{CANNOT_DO_IN_CURRENT_CONTEXT, NO_ERR};
+use crate::unit::Unit;
 
 /// The answer to a call with no state or no packet list behind it.
 const NOT_INSTALLED: OSStatus = -1;
-use crate::unit::Unit;
 
 /// The `AUMIDIOutputCallbackStruct` from `AudioUnitProperties.h`.
 ///
@@ -98,7 +98,8 @@ struct MidiOutState {
 /// earlier list). A channel voice message goes through the stream's
 /// [`Translator`] to MIDI 2.0 (M2-104 Appendix D.3), as every plugin's output
 /// does: its RPN, NRPN and Bank Select runs are assembled across messages and
-/// lists. Events are handed to the sink in batches of a [`MidiEventVec`];
+/// lists. A run (select, Data Entry MSB) with no LSB waits for one: the translator
+/// never flushes a live output, which has no end (M2-104 Appendix D.3.3). Events are handed to the sink in batches of a [`MidiEventVec`];
 /// nothing allocates (the parser holds one SysEx7 packet's payload inline, and
 /// the batch and the translator are fixed-size).
 #[derive(Debug)]
@@ -185,15 +186,16 @@ impl Decoder {
 #[must_use = "dropping it uninstalls the output"]
 pub struct AuMidiOutput {
     unit: Unit,
-    /// Heap-pinned so its address is stable: the AU retains a `userData` derived
-    /// from `&*state`, and this struct may be moved by its owner. Moving the
-    /// `Box` moves only its 8-byte pointer, so the address the AU holds stays
-    /// valid — the same reasoning the `Renderer` scratch and `HostCallbacks`
-    /// are documented with.
+    /// The heap-pinned state, owned through the raw pointer `Box::into_raw` made
+    /// of it: the AU retains a `userData` that *is* this pointer, so no `Box`
+    /// (whose moves assert uniqueness) or reference is ever formed from it
+    /// while the AU may call. It is freed by `Box::from_raw` only after the
+    /// property write that withdraws the callback has succeeded, or before the
+    /// AU ever held it.
     ///
-    /// `Option` so [`Self::remove`] can take the box out *after* the property has
+    /// `Option` so [`Self::remove`] can take it out *after* the property has
     /// been cleared, giving `Drop` nothing left to free.
-    state: Option<Box<MidiOutState>>,
+    state: Option<std::ptr::NonNull<MidiOutState>>,
     /// [`MidiOutState::unrouted`], shared so the handle reads it without
     /// touching the state the render thread holds.
     unrouted: Arc<AtomicU64>,
@@ -309,13 +311,13 @@ pub fn install(unit: &Unit, sink: MidiOutSink) -> Result<AuMidiOutput> {
         .collect();
     let unrouted = Arc::new(AtomicU64::new(0));
     let reset = Arc::new(AtomicBool::new(false));
-    let state = Box::new(MidiOutState {
+    let state = Box::into_raw(Box::new(MidiOutState {
         sink,
         decoders,
         unrouted: Arc::clone(&unrouted),
         reset: Arc::clone(&reset),
-    });
-    let user_data: *mut c_void = &*state as *const MidiOutState as *mut c_void;
+    }));
+    let user_data: *mut c_void = state.cast();
 
     let callback = AuMidiOutputCallbackStruct {
         midi_output_callback: Some(au_midi_output_callback),
@@ -326,20 +328,23 @@ pub fn install(unit: &Unit, sink: MidiOutSink) -> Result<AuMidiOutput> {
     // callback. There is nothing after it today; the ordering is written this way
     // so adding something later cannot leave the AU holding a pointer no handle
     // owns.
-    let handle = AuMidiOutput {
+    let mut handle = AuMidiOutput {
         unit: unit.clone(),
-        state: Some(state),
+        // SAFETY: `Box::into_raw` never returns null.
+        state: Some(unsafe { std::ptr::NonNull::new_unchecked(state) }),
         unrouted,
         reset,
     };
-    let mut handle = handle;
     if let Err(refused) =
         unit.set::<MidiOutputCallbackProperty>(Scope::GLOBAL, Element::ZERO, &callback)
     {
         // The AU refused the property, so it never held the pointer: the state
         // is the host's to free, not one to leak against a withdrawal that
         // cannot be needed.
-        drop(handle.state.take());
+        if let Some(state) = handle.state.take() {
+            // SAFETY: made by `Box::into_raw` above and never shared with the AU.
+            drop(unsafe { Box::from_raw(state.as_ptr()) });
+        }
         return Err(refused);
     }
     Ok(handle)
@@ -396,16 +401,28 @@ impl AuMidiOutput {
                 .set::<MidiOutputCallbackProperty>(Scope::GLOBAL, Element::ZERO, &withdrawn);
         let state = self.state.take();
         if result.is_ok() {
-            drop(state);
+            if let Some(state) = state {
+                // SAFETY: made by `Box::into_raw` in `install`; the property
+                // write that withdrew the callback succeeded, so the AU holds
+                // no pointer to it and nothing else frees it.
+                drop(unsafe { Box::from_raw(state.as_ptr()) });
+            }
         } else {
             // The unit may still hold the pointer, and other `Unit` clones can
             // keep it alive and calling: leak the state rather than free memory
             // the callback could read.
-            std::mem::forget(state);
+            // (The pointer is simply not freed.)
+            let _ = state;
         }
         result
     }
 }
+
+// SAFETY: the pointer owns a `MidiOutState` (a `Send` sink, decoders and
+// atomics) that only the AU's render thread and this handle's withdrawal reach,
+// never at once (see `au_midi_output_callback`); moving the handle to another
+// thread moves that ownership.
+unsafe impl Send for AuMidiOutput {}
 
 impl Drop for AuMidiOutput {
     /// Withdraw the callback before freeing the state the AU points at.
@@ -452,8 +469,8 @@ unsafe extern "C" fn au_midi_output_callback(
     midi_out_num: u32,
     pktlist: *const MIDIPacketList,
 ) -> OSStatus {
-    // SAFETY: `user_data` is the `MidiOutState` box `install` registered, which
-    // the withdrawing property write outlives. This `&mut MidiOutState` is the
+    // SAFETY: `user_data` is the raw pointer `install` made of the `MidiOutState`
+    // box, which the withdrawing property write outlives. This `&mut MidiOutState` is the
     // only reference to it because of one invariant: the AU calls this only from
     // inside its own render (a render-time callback, never from another thread
     // or between renders), one call at a time, and the host touches the box only
@@ -467,7 +484,9 @@ unsafe extern "C" fn au_midi_output_callback(
                 if pktlist.is_null() {
                     return NOT_INSTALLED;
                 }
-                dispatch(state, midi_out_num, pktlist)
+                // SAFETY: `state` is the only reference (the callback's invariant
+                // above) and `pktlist` is non-null and the AU's, valid for the call.
+                unsafe { dispatch(state, midi_out_num, pktlist) }
             },
         )
     }
@@ -477,9 +496,9 @@ unsafe extern "C" fn au_midi_output_callback(
 /// [`au_midi_output_callback`] is nothing but the panic guard around it.
 ///
 /// # Safety
-/// `user_data` must be null or point at a live `MidiOutState`; `pktlist` must be
-/// null or a well-formed `MIDIPacketList`.
-fn dispatch(
+/// `state` must be the only reference to the state for the call, and `pktlist` must
+/// be a well-formed `MIDIPacketList` valid for it.
+unsafe fn dispatch(
     state: &mut MidiOutState,
     midi_out_num: u32,
     pktlist: *const MIDIPacketList,
@@ -524,6 +543,12 @@ fn dispatch(
 /// # Why the walk is by byte offset rather than by struct read
 ///
 /// # Safety
+/// The OS gives no byte size of the list, so the bound this walk keeps is the
+/// nominal 64 KiB `MAX_LIST_BYTES`: a list the AU built smaller, with a
+/// `numPackets` or lengths that run past what it allocated, is read to that
+/// bound regardless. That risk is the AU's to not take (a well-formed list
+/// satisfies it); the bound limits it, and the walk never reads past 64 KiB.
+///
 /// `pktlist` must be a well-formed, non-null `MIDIPacketList`: `numPackets`
 /// packets laid out per `MIDIPacketNext`, each `length` bytes of `data` within the
 /// allocation.

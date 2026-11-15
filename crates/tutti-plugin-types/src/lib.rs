@@ -292,7 +292,6 @@ pub use metadata::{
 };
 pub use midi::{
     MIDI_STACK_CAPACITY, MidiEventVec, RT_MIDI_CAPACITY, RtMidiEvents, WireMidi, group_of_port,
-    port_of_group,
 };
 pub use midi_intake::MidiIntake;
 pub use tutti_graph::BusRole;
@@ -301,9 +300,8 @@ pub use wakeups::{Interest, Ready, Wakeups, Watch};
 // assembling one has to name it.
 pub use locate::{Helper, Locator};
 pub use note_expression::{
-    NoteExpressionChanges, NoteExpressionType, NoteExpressionValue, PER_NOTE_EXPRESSIONS,
-    expression_of_per_note_controller, per_note_controller_of_expression, per_note_message,
-    per_note_tuning,
+    NoteExpressionChanges, NoteExpressionType, NoteExpressionValue,
+    expression_of_per_note_controller, per_note_message, per_note_tuning,
 };
 pub use note_id::{note_id_to_channel_note, plugin_note_id};
 pub use param_edit::ParamEdit;

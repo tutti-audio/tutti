@@ -13,7 +13,9 @@ pub mod active;
 pub mod raw;
 
 /// The MIDI events an output list holds, as the processor drains them.
-pub fn midi_events(list: &tutti_clap_host::OutputEventList) -> Vec<tutti_plugin_types::WireMidi> {
+pub fn midi_events(
+    list: &mut tutti_clap_host::OutputEventList,
+) -> Vec<tutti_plugin_types::WireMidi> {
     let mut out = tutti_plugin_types::RtMidiEvents::new();
     list.fill_midi_events(&mut tutti_midi_protocol::Translator::new(), &mut out);
     out.iter().copied().collect()

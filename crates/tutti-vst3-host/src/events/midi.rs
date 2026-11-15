@@ -6,9 +6,9 @@ use tutti_midi_protocol::{
     velocity_to_unit_f32, widen,
 };
 use tutti_plugin_types::{
-    NoteExpressionType, NoteExpressionValue, WireMidi, expression_of_per_note_controller,
-    group_of_port, note_id_to_channel_note, per_note_message, per_note_tuning, plugin_note_id,
-    port_of_group,
+    Normalized, NoteExpressionType, NoteExpressionValue, WireMidi,
+    expression_of_per_note_controller, group_of_port, per_note_message, per_note_tuning,
+    plugin_note_id,
 };
 use tutti_ump::{
     Address, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity, Rpn, SysexMessage,
@@ -232,7 +232,7 @@ impl MidiEncoder {
     /// The event bus of `address`'s Group, or `None` (counted) when the plugin
     /// has none.
     fn bus_of(&mut self, address: Address) -> Option<i32> {
-        let bus = port_of_group(address.group);
+        let bus = u16::from(address.group.get());
         if usize::from(bus) < self.buses {
             Some(i32::from(bus))
         } else {
@@ -551,13 +551,13 @@ pub(super) fn decode(event: &Event, stream: &mut OutputStream) -> Option<WireMid
 
 /// The per-note message a plugin's note expression (`typeId`, `value` normalized
 /// on `[0, 1]`, tuning `0.5` at the key and `1/240` per semitone) of the note
-/// `note_id` is, on `group`: the note the plugin started under that id, else the
-/// host's `channel * 128 + note` id. `None` for a dimension with no per-note message
+/// `note_id` is, on `group`: the note the plugin started under that id, which is
+/// the only way an id names a note (the plugin's id space is its own). `None` for a dimension with no per-note message
 /// (vibrato, expression, a custom id), a non-finite value, and a `note_id` that
 /// is not the host's `channel * 128 + note`: a plugin's own id space cannot be
 /// decoded, and binding it to a phantom voice would be worse than dropping it.
 fn expression(
-    stream: &OutputStream,
+    stream: &mut OutputStream,
     type_id: u32,
     note_id: i32,
     value: f64,
@@ -567,29 +567,21 @@ fn expression(
     if !value.is_finite() {
         return None;
     }
-    let (channel, note) = stream
-        .note_of(note_id)
-        .or_else(|| note_id_to_channel_note(note_id))?;
+    let Some((channel, note)) = stream.note_of(note_id) else {
+        stream.count_expression_dropped();
+        return None;
+    };
     let voice = match expression_type_from_id(type_id)? {
-        NoteExpressionType::Tuning => per_note_tuning(note, tuning_semitones(value)),
+        NoteExpressionType::Tuning => per_note_tuning(note, tuning_semitones(value))?,
         NoteExpressionType::Volume => per_note_message(
             NoteExpressionType::Volume,
             note,
-            unit_f32(volume_unit(value)),
+            Normalized::clamped(volume_unit(value)),
         )?,
-        other => per_note_message(other, note, unit_f32(value))?,
+        other => per_note_message(other, note, Normalized::clamped(value))?,
     };
     Some(WireMidi {
         offset: frame,
         ump: Message::Midi2(Address { group, channel }, voice).into(),
     })
-}
-
-/// `value` as the `f32` the per-note messages take, clamped onto `[0, 1]`.
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "clamped to 0..=1, and a normalized expression value is f32-precise"
-)]
-fn unit_f32(value: f64) -> f32 {
-    value.clamp(0.0, 1.0) as f32
 }

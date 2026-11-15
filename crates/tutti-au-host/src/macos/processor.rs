@@ -62,21 +62,16 @@ pub(crate) struct Rendering {
     /// output streams. Last, so the callback is withdrawn only after the unit
     /// is uninitialized and nothing renders.
     pub(crate) midi_out: Option<MidiOut>,
+    /// The unit publishes MIDI output streams and refused the callback.
+    pub(crate) midi_out_refused: bool,
 }
 
-/// The MIDI a unit emits during a render: its callback's registration, and the
-/// queue the callback fills inside `AudioUnitRender` for the block's
-/// [`ProcessOutput`] to take once the render returns.
-///
-/// The callback runs on the render thread and holds no reference to the
-/// block's output, so it pushes into a bounded lock-free queue allocated here,
-/// at activation, on the main thread: a block that emits more than the queue
-/// holds drops the rest and counts it ([`overflow`](Self::overflow)), and
-/// nothing grows.
-pub(crate) struct MidiOut {
-    /// Keeps the callback installed for the activation; dropping it withdraws
-    /// the callback before the state the unit points at is freed.
-    registration: AuMidiOutput,
+/// What the unit's output callback pushes inside `AudioUnitRender` and the block
+/// takes once the render returns: a bounded lock-free queue allocated at
+/// activation, on the main thread, since the callback runs on the render thread
+/// and holds no reference to the block's output. A block that emits more than
+/// the queue holds drops the rest and counts it, and nothing grows.
+pub(crate) struct MidiQueue {
     /// What the callback has pushed since the last block took it, in order.
     queue: Arc<ArrayQueue<WireMidi>>,
     /// Events the callback dropped for want of room in `queue` since the last
@@ -86,57 +81,107 @@ pub(crate) struct MidiOut {
     lost_total: u64,
 }
 
-impl MidiOut {
-    /// Installs the output callback on `unit` if it publishes MIDI output
-    /// streams, and reads each stream through its own translator
-    /// ([`tutti_au_ffi`]'s decoder). `None` for a unit that publishes none (an
-    /// AU that accepts the callback without publishing a stream is not a MIDI
-    /// source) and for one that refuses the callback: it then renders without
-    /// MIDI output. Main thread.
-    pub(crate) fn install(unit: &Unit) -> Option<Self> {
-        midi_out::midi_output_info(unit).filter(|info| info.stream_count() > 0)?;
-        let queue = Arc::new(ArrayQueue::new(MIDI_STACK_CAPACITY));
-        let overflow = Arc::new(AtomicU64::new(0));
-        let sink: MidiOutSink = {
-            let (queue, overflow) = (Arc::clone(&queue), Arc::clone(&overflow));
-            Box::new(move |_stream, events| {
-                for &event in events {
-                    if queue.push(event).is_err() {
-                        overflow.fetch_add(1, Ordering::Relaxed);
-                    }
-                }
-            })
-        };
-        let registration = midi_out::install(unit, sink).ok()?;
-        Some(Self {
-            registration,
-            queue,
-            overflow,
+impl MidiQueue {
+    /// A queue of the block's MIDI-out capacity, so a block loses events only
+    /// when the unit emits more than [`MIDI_STACK_CAPACITY`] in it.
+    pub(crate) fn new() -> Self {
+        Self {
+            queue: Arc::new(ArrayQueue::new(MIDI_STACK_CAPACITY)),
+            overflow: Arc::new(AtomicU64::new(0)),
             lost_total: 0,
+        }
+    }
+
+    /// The callback's sink: pushes each event, or counts it when there is no room.
+    pub(crate) fn sink(&self) -> MidiOutSink {
+        let (queue, overflow) = (Arc::clone(&self.queue), Arc::clone(&self.overflow));
+        Box::new(move |_stream, events| {
+            for &event in events {
+                if queue.push(event).is_err() {
+                    overflow.fetch_add(1, Ordering::Relaxed);
+                }
+            }
         })
     }
 
-    /// Moves what the render's callback queued into `out` in one pass, in
-    /// order. What `out` has no room for, and what the queue had none for, is
-    /// counted in `out`'s `midi_dropped`, which is how every Processor reports
-    /// MIDI it lost. The queue and `out` hold [`MIDI_STACK_CAPACITY`] each, so a
-    /// block loses events only when the unit emits more than that.
-    fn take_into(&mut self, out: &mut ProcessOutput) {
+    /// Moves what the callback queued into `out` in one pass, in order. What
+    /// `out` has no room for, and what the queue had none for, is counted once
+    /// in `out`'s `midi_dropped`, which is how every Processor reports MIDI it
+    /// lost.
+    pub(crate) fn take_into(&mut self, out: &mut ProcessOutput) {
         out.emit_midi(std::iter::from_fn(|| self.queue.pop()));
         let lost = self.overflow.swap(0, Ordering::Relaxed);
         self.lost_total += lost;
         out.count_midi_dropped(usize::try_from(lost).unwrap_or(usize::MAX));
     }
 
-    /// Forgets the streams' open SysEx and parameter runs, and what is queued.
-    fn reset(&self) {
-        self.registration.reset();
+    /// Forgets what is queued, and what was lost and not yet counted.
+    pub(crate) fn clear(&mut self) {
         while self.queue.pop().is_some() {}
+        self.overflow.store(0, Ordering::Relaxed);
+    }
+
+    /// Events dropped for want of room in the queue, since activation.
+    pub(crate) fn lost(&self) -> u64 {
+        self.lost_total + self.overflow.load(Ordering::Relaxed)
+    }
+}
+
+/// The MIDI a unit emits during a render: its callback's registration and the
+/// [`MidiQueue`] it fills.
+pub(crate) struct MidiOut {
+    /// Keeps the callback installed for the activation; dropping it withdraws
+    /// the callback before the state the unit points at is freed.
+    registration: AuMidiOutput,
+    queue: MidiQueue,
+    /// Lists for an output stream with no reader, as far as `ProcessOutput`
+    /// has been told.
+    unrouted_told: u64,
+}
+
+impl MidiOut {
+    /// Installs the output callback on `unit` if it publishes MIDI output
+    /// streams, and reads each stream through its own translator
+    /// ([`tutti_au_ffi`]'s decoder). `Ok(None)` for a unit that publishes none
+    /// (an AU that accepts the callback without publishing a stream is not a
+    /// MIDI source). Main thread.
+    ///
+    /// # Errors
+    /// The unit refused the callback: it then renders without MIDI output, and
+    /// the activation records the refusal ([`AuProcessor::midi_out_refused`]).
+    pub(crate) fn install(unit: &Unit) -> Result<Option<Self>> {
+        if midi_out::midi_output_info(unit).is_none_or(|info| info.stream_count() == 0) {
+            return Ok(None);
+        }
+        let queue = MidiQueue::new();
+        let registration = midi_out::install(unit, queue.sink())?;
+        Ok(Some(Self {
+            registration,
+            queue,
+            unrouted_told: 0,
+        }))
+    }
+
+    /// [`MidiQueue::take_into`], and the lists the unit delivered for a stream
+    /// with no reader since the last block, which each count as lost MIDI.
+    fn take_into(&mut self, out: &mut ProcessOutput) {
+        self.queue.take_into(out);
+        let unrouted = self.registration.unrouted_lists();
+        out.count_midi_dropped(
+            usize::try_from(unrouted - self.unrouted_told).unwrap_or(usize::MAX),
+        );
+        self.unrouted_told = unrouted;
+    }
+
+    /// Forgets the streams' open SysEx and parameter runs, and what is queued.
+    fn reset(&mut self) {
+        self.registration.reset();
+        self.queue.clear();
     }
 
     /// Events dropped for want of room in the queue, since activation.
     pub(crate) fn overflow(&self) -> u64 {
-        self.lost_total + self.overflow.load(Ordering::Relaxed)
+        self.queue.lost()
     }
 }
 
@@ -311,6 +356,13 @@ impl AuProcessor {
             block_size,
             stage,
         }
+    }
+
+    /// Whether the unit refused the MIDI-output callback at activation: it
+    /// publishes output streams, and its MIDI is lost.
+    #[must_use]
+    pub fn midi_out_refused(&self) -> bool {
+        self.rendering.midi_out_refused
     }
 
     /// MIDI events the unit emitted that the output queue had no room for,
@@ -735,7 +787,7 @@ impl Processor for AuProcessor {
         // A refusal leaves the AU holding the history it had and the cursor
         // where it was (see `flush`); `Processor::reset` has nowhere to put it.
         let _ = self.flush();
-        if let Some(midi_out) = &self.rendering.midi_out {
+        if let Some(midi_out) = &mut self.rendering.midi_out {
             midi_out.reset();
         }
     }
@@ -923,5 +975,72 @@ mod ump_staging {
         let jr_clock = Ump([0x0010_0000, 0, 0, 0]);
         let stream = Ump([0xF000_0000, 0, 0, 0]);
         assert!(staged(&mut list, &[at(0, jr_clock), at(0, stream)]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod midi_queue {
+    use super::*;
+    use tutti_ump::Ump;
+
+    fn event(offset: u32) -> WireMidi {
+        WireMidi {
+            offset,
+            ump: Ump([0x4090_3C00, 0xFFFF_0000, 0, 0]),
+        }
+    }
+
+    /// **What the callback queues is the block's MIDI-out, in order**: events
+    /// pushed through the sink in two lists come out of `take_into` as they went
+    /// in, and a second take is empty.
+    #[test]
+    fn the_sink_fills_the_queue_and_the_block_takes_it() {
+        let mut queue = MidiQueue::new();
+        let sink = &mut queue.sink();
+        sink(0, &[event(1), event(2)]);
+        sink(0, &[event(3)]);
+        let mut out = ProcessOutput::default();
+        queue.take_into(&mut out);
+        let offsets: Vec<u32> = out.midi_events.iter().map(|e| e.offset).collect();
+        assert_eq!(offsets, [1, 2, 3]);
+        assert_eq!(out.midi_dropped(), 0);
+        let mut again = ProcessOutput::default();
+        queue.take_into(&mut again);
+        assert!(again.midi_events.is_empty());
+    }
+
+    /// **A loss is counted once**: a unit that emits more than the block's
+    /// MIDI-out holds loses the rest, `midi_dropped` says how many, and a later
+    /// block does not count them again.
+    #[test]
+    fn overflow_is_counted_once() {
+        let mut queue = MidiQueue::new();
+        let sink = &mut queue.sink();
+        let emitted = MIDI_STACK_CAPACITY + 44;
+        let events: Vec<WireMidi> = (0..emitted as u32).map(event).collect();
+        sink(0, &events);
+        let mut out = ProcessOutput::default();
+        queue.take_into(&mut out);
+        assert_eq!(out.midi_events.len(), MIDI_STACK_CAPACITY);
+        assert_eq!(out.midi_dropped(), 44);
+        assert_eq!(queue.lost(), 44);
+        let mut next = ProcessOutput::default();
+        queue.take_into(&mut next);
+        assert_eq!(next.midi_dropped(), 0, "not told twice");
+        assert_eq!(queue.lost(), 44);
+    }
+
+    /// **A reset forgets what is queued** and what was lost and not yet told.
+    #[test]
+    fn clear_forgets_the_queue() {
+        let mut queue = MidiQueue::new();
+        let sink = &mut queue.sink();
+        let events: Vec<WireMidi> = (0..MIDI_STACK_CAPACITY as u32 + 5).map(event).collect();
+        sink(0, &events);
+        queue.clear();
+        let mut out = ProcessOutput::default();
+        queue.take_into(&mut out);
+        assert!(out.midi_events.is_empty());
+        assert_eq!(out.midi_dropped(), 0);
     }
 }
