@@ -4,7 +4,7 @@ use tutti_ump::{MidiChannel, U7};
 
 use super::{
     Ack, CiAction, CiDeviceId, CiHeader, CiMessage, Decoded, Muid, Nak, ProcessAction,
-    ProfileAction, Unread,
+    ProfileAction, ProfileChannels, ProfileId, ProfileInitiator, ProfileTable, Unread,
 };
 
 /// The source of the messages a test decodes.
@@ -131,4 +131,27 @@ action!(CiAction, ProcessAction, ProfileAction);
 /// The messages among `actions`, in order.
 pub(super) fn sent<A: Action>(actions: &[A]) -> Vec<&CiMessage> {
     actions.iter().filter_map(Action::message).collect()
+}
+
+/// A Profile table that has heard `profile` enabled (`enabled`) or disabled at
+/// `address` from the peer.
+pub(super) fn table_with(address: CiDeviceId, profile: ProfileId, enabled: bool) -> ProfileTable {
+    let now = std::time::Instant::now();
+    let (mut peer, _) = ProfileInitiator::new(Muid::of(OURS), Muid::of(PEER), now);
+    let header = header_from(PEER, address);
+    let channels = ProfileChannels::of(1);
+    peer.on_message(&Decoded::Message(if enabled {
+        CiMessage::ProfileEnabled {
+            header,
+            profile,
+            channels,
+        }
+    } else {
+        CiMessage::ProfileDisabled {
+            header,
+            profile,
+            channels,
+        }
+    }));
+    peer.table().clone()
 }

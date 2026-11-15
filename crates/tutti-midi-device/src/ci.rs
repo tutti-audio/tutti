@@ -26,6 +26,7 @@ use std::vec::Vec;
 
 use tutti_ump::{MidiChannel, MidiGroup, Sysex7Packets, U7, U28, Ump};
 
+mod articulation;
 mod default_cc;
 mod device;
 mod discovery;
@@ -43,6 +44,10 @@ mod status;
 mod text;
 mod wait;
 
+pub use articulation::{
+    ArticulationDetails, ArticulationDetailsError, ArticulationFeatures, ArticulationLevel,
+    CustomSounds, NotVariationCount, Sound, SoundSet, SubclassCounts, VariationCount,
+};
 pub use default_cc::{CcFunction, CcPart, CcReset, CcValue, DefaultCcLevel, SuggestedCc};
 pub use device::{CiAction, CiDevice, CiPeer, DISCOVERY_WINDOW};
 pub use discovery::{
