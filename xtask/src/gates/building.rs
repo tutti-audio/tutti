@@ -18,8 +18,7 @@
 //! `&'a self`) or absent. Its *owner* is the last path segment of the `impl`'s type.
 //! Its *built type* is the return type with one `Result<..>` or `Option<..>` wrapper
 //! peeled, generics dropped, when that is `Self` or the owner's name; a return type
-//! that is anything else (`Param<U>`, a tuple, a trait object) has none. A *building
-//! owner* is an owner named `*Node`, `*Source`, `*Spec`, `*Config` or `*Options`.
+//! that is anything else (`Param<U>`, a tuple, a trait object) has none.
 //!
 //! **The rules** (a row's rule names one):
 //!
@@ -27,8 +26,8 @@
 //! - `chain-result`: a receiver by value and a return type `Result<Self, ..>` or
 //!   `Result<Owner, ..>`. A terminal `build(self) -> Result<Product>` is not one: its
 //!   built type is not its owner.
-//! - `setter`: a receiver by reference and a name that starts with `set_`, on a
-//!   building owner.
+//! - `setter`: a receiver by reference and a name that starts with `set_`, on any
+//!   owner.
 //! - `node-ctor`: no receiver, a built type, on a `*Node` owner (a `Result` or
 //!   `Option` wrapper counts).
 //! - `config-width`: no receiver, return type `Self` or the owner (no wrapper), on a
@@ -36,7 +35,7 @@
 //!   (the last path segment of a type, or of an `impl Into<_>` or a `T: Into<_>` bound
 //!   named in the generics or the `where` clause). A function with no parameter has no
 //!   first one.
-//! - `ctor-result`: no receiver, a built type wrapped in `Result`, on a building owner.
+//! - `ctor-result`: no receiver, a built type wrapped in `Result`, on any owner.
 //! - `range-macro`: a `macro_rules!` outside `tutti-types` whose body holds a
 //!   `fn new` of one parameter returning `Option<..>`, the `new(raw) -> Option`
 //!   signature of a range-checked type.
@@ -44,8 +43,7 @@
 //! **Blind spots.** The scan is lexical: it does not see an item a macro writes (the
 //! `with-prefix` of a macro-made method), an owner reached through a type alias, a
 //! re-export, whether a `pub` type is reachable from the crate root, or what a type
-//! is beyond its name's suffix. A `set_*` or a constructor on an owner with another
-//! suffix is outside the rules.
+//! is beyond its name's suffix (`node-ctor` and `config-width` read the suffix).
 //!
 //! **Keys.** `<file>::<Owner>::<fn>`, or `<file>::<macro>` for `range-macro`. No line
 //! numbers; items that share a key and a rule (an `impl Foo<f32>` and an
@@ -53,8 +51,9 @@
 //!
 //! **Lists.** [`LIST`] holds `<crate>  <rule>  <key>` lines (`#` lines and blank lines
 //! aside), today's violations by crate; its crate must be the key's. [`ALLOW`] holds
-//! the builders of another kind, each with its reason; those are permanent, a
-//! violation they cover is not counted, and a row that covers none stays.
+//! the types of another kind, one row per type (a whole-module row only for an FFI
+//! crate or a `testing.rs`), each with its reason; a violation a row covers is not
+//! counted, and a row that covers no violation fails like a stale baseline row.
 
 use super::buffers::{blocks, ident_at, item_end, split_top, squash, strip_attrs};
 use super::lex::{blank, find_word_from, matching, test_ranges};
@@ -98,8 +97,9 @@ impl Rule {
     }
 }
 
-/// A builder of another kind: the violations of `rules` (all when empty) of items
-/// under `path`, owned by `owner` (any when empty), are not counted.
+/// A type of another kind: the violations of `rules` (all when empty) of items
+/// under `path`, owned by `owner` (any when empty), are not counted. A row that covers
+/// no violation fails the gate.
 pub(super) struct Allow {
     /// A repo path prefix: a crate's directory, or a file.
     pub(super) path: &'static str,
@@ -116,7 +116,28 @@ const GRAPH: &str = "crates/tutti-graph/";
 const NODE_AUTHOR: &str = "tutti-graph's node-author API: what a node declares and what a \
     node is prepared with, not what an app configures";
 
-const NOT_A_NODE: &str = "not a node's config: it holds no width to choose";
+const CTOR: &[Rule] = &[Rule::CtorResult];
+const SETTER: &[Rule] = &[Rule::Setter];
+const WIDTH: &[Rule] = &[Rule::ConfigWidth];
+
+/// An allow row for one type `owner` under `path`, for `rules`.
+const fn ty(
+    path: &'static str,
+    owner: &'static str,
+    rules: &'static [Rule],
+    reason: &'static str,
+) -> Allow {
+    Allow {
+        path,
+        owner,
+        rules,
+        reason,
+    }
+}
+
+const NOT_A_NODE: &str = "an analysis or transport config: it holds no width to choose";
+const TEST_SUPPORT: &str =
+    "test support behind the `testing` or `contract` feature, not an app's type";
 
 /// The allow-list. A row is permanent policy: it covers the violations it names and
 /// stays when none exist.
@@ -164,12 +185,6 @@ pub(super) const ALLOW: &[Allow] = &[
         reason: "tutti-nodes' test oscillator, for node authors' tests",
     },
     Allow {
-        path: "crates/tutti-graph/src/pool.rs",
-        owner: "WorkerPoolBuilder",
-        rules: &[],
-        reason: "the pool follows rayon: rayon's names, builder shape and fallible build",
-    },
-    Allow {
         path: FFI,
         owner: "",
         rules: &[],
@@ -181,42 +196,197 @@ pub(super) const ALLOW: &[Allow] = &[
         rules: &[Rule::CtorResult],
         reason: "opening an OS endpoint: the OS refuses, not a value a type could forbid",
     },
-    Allow {
-        path: "crates/tutti-measure/",
-        owner: "",
-        rules: &[Rule::ConfigWidth],
-        reason: NOT_A_NODE,
-    },
-    Allow {
-        path: "crates/tutti-au-host/",
-        owner: "",
-        rules: &[Rule::ConfigWidth],
-        reason: NOT_A_NODE,
-    },
-    Allow {
-        path: "crates/tutti-midi-network/",
-        owner: "",
-        rules: &[Rule::ConfigWidth],
-        reason: NOT_A_NODE,
-    },
-    Allow {
-        path: "crates/tutti-midi-protocol/",
-        owner: "",
-        rules: &[Rule::ConfigWidth],
-        reason: NOT_A_NODE,
-    },
-    Allow {
-        path: "crates/tutti-plugin-ipc/",
-        owner: "",
-        rules: &[Rule::ConfigWidth],
-        reason: NOT_A_NODE,
-    },
-    Allow {
-        path: "crates/tutti-session/src/pool/",
-        owner: "",
-        rules: &[Rule::ConfigWidth],
-        reason: NOT_A_NODE,
-    },
+    ty(
+        "crates/tutti-vst2-host/",
+        "Vst2Loaded",
+        CTOR,
+        "loading a VST2 library the OS refuses: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-vst3-host/",
+        "Vst3Loaded",
+        CTOR,
+        "loading a VST3 module the OS refuses: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-sf2/",
+        "SoundFont",
+        CTOR,
+        "reading a SoundFont from a file or a stream: the failure is the file's, not a value's",
+    ),
+    ty(
+        "crates/tutti-au-host/",
+        "AuHandle",
+        CTOR,
+        "loading an AU component the OS refuses: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-au-host/",
+        "AuLoaded",
+        CTOR,
+        "instantiating an AU component the OS refuses: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-clap-host/",
+        "ClapLoaded",
+        CTOR,
+        "loading a CLAP bundle the OS refuses: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-codec/",
+        "Wave",
+        CTOR,
+        "reading and decoding a file, whose failure is the file's: the failure is the file's, not a value's",
+    ),
+    ty(
+        "crates/tutti-codec/",
+        "FileIn",
+        CTOR,
+        "opening a file for decoding: the failure is the file's, not a value's",
+    ),
+    ty(
+        "crates/tutti-codec/",
+        "FileOut",
+        CTOR,
+        "creating the output file: the failure is the file system's, not a value's",
+    ),
+    ty(
+        "crates/tutti-cpal/",
+        "DeviceHost",
+        CTOR,
+        "opening an audio host: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-cpal/",
+        "DeviceListing",
+        CTOR,
+        "enumerating devices on a thread the OS lends: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-cpal/",
+        "MicIn",
+        CTOR,
+        "opening an input device: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-cpal/",
+        "AudioEngine",
+        CTOR,
+        "opening an output device: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-cpal/",
+        "DevicePoller",
+        CTOR,
+        "spawning the device poller and reading the host: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-midi-hardware/",
+        "Devices",
+        CTOR,
+        "opening the OS MIDI endpoints: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-midi-hardware/",
+        "MidiSession",
+        CTOR,
+        "opening the OS MIDI ports: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-midi-hardware/",
+        "VirtualDestination",
+        CTOR,
+        "opening an OS endpoint: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-midi-network/",
+        "Advertisement",
+        CTOR,
+        "binding the mDNS advertisement: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-midi-network/",
+        "Browser",
+        CTOR,
+        "binding the mDNS browser: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-midi-network/",
+        "Nonce",
+        CTOR,
+        "reading OS entropy: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-midi-device/",
+        "EntropyWords",
+        CTOR,
+        "reading OS entropy: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-sampler/",
+        "DiskStreamer",
+        CTOR,
+        "starting the streamer thread: the failure is the OS's, not a value's",
+    ),
+    ty(
+        "crates/tutti-plugin-types/",
+        "WindowHandle",
+        CTOR,
+        "reading the platform window handle: the failure is the OS's, not a value's",
+    ),
+    ty("crates/tutti-au-host/", "StreamConfig", WIDTH, NOT_A_NODE),
+    ty("crates/tutti-measure/", "AlignConfig", WIDTH, NOT_A_NODE),
+    ty("crates/tutti-measure/", "ChordConfig", WIDTH, NOT_A_NODE),
+    ty("crates/tutti-measure/", "OnsetConfig", WIDTH, NOT_A_NODE),
+    ty("crates/tutti-measure/", "PeakConfig", WIDTH, NOT_A_NODE),
+    ty("crates/tutti-measure/", "TempoConfig", WIDTH, NOT_A_NODE),
+    ty(
+        "crates/tutti-midi-network/",
+        "HostConfig",
+        WIDTH,
+        NOT_A_NODE,
+    ),
+    ty(
+        "crates/tutti-midi-protocol/",
+        "MpeZoneConfig",
+        WIDTH,
+        NOT_A_NODE,
+    ),
+    ty("crates/tutti-plugin-ipc/", "AudioConfig", WIDTH, NOT_A_NODE),
+    ty(
+        "crates/tutti-plugin-ipc/",
+        "CatalogConfig",
+        WIDTH,
+        NOT_A_NODE,
+    ),
+    ty("crates/tutti-session/", "PoolConfig", WIDTH, NOT_A_NODE),
+    ty("crates/tutti-graph/", "Direct", SETTER, TEST_SUPPORT),
+    ty("crates/tutti-graph/", "Reference", SETTER, TEST_SUPPORT),
+    ty("crates/tutti-session/", "AudioSide", SETTER, TEST_SUPPORT),
+    ty(
+        "crates/tutti-sampler/",
+        "MockTransport",
+        SETTER,
+        TEST_SUPPORT,
+    ),
+    ty(
+        "crates/tutti-plugin-types/",
+        "FakePlugin",
+        SETTER,
+        TEST_SUPPORT,
+    ),
+    ty(
+        "crates/tutti-plugin-host/",
+        "PluginMeter",
+        SETTER,
+        "a meter slot handle: it installs a project meter into the node's cell, it is not a node, source, spec or config",
+    ),
+    ty(
+        "crates/tutti-rt/",
+        "PosWriter",
+        SETTER,
+        "the one writer of a position ring: a writer handle, not a node, source, spec or config",
+    ),
 ];
 
 /// A violation: its key and rule.
@@ -242,14 +412,6 @@ fn source_files(tree: &dyn Tree) -> Vec<String> {
                 && !parts.contains(&"tests")
         })
         .collect()
-}
-
-const BUILDING: [&str; 5] = ["Node", "Source", "Spec", "Config", "Options"];
-
-fn building_owner(owner: &str) -> bool {
-    BUILDING
-        .iter()
-        .any(|s| owner.ends_with(s) && owner.len() > s.len())
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -516,7 +678,7 @@ pub(super) fn scan(path: &str, src: &str) -> Vec<Site> {
                 }
             }
             Recv::Ref => {
-                if name.starts_with("set_") && building_owner(owner) {
+                if name.starts_with("set_") {
                     hit(Rule::Setter);
                 }
             }
@@ -532,7 +694,7 @@ pub(super) fn scan(path: &str, src: &str) -> Vec<Site> {
                     {
                         hit(Rule::ConfigWidth);
                     }
-                    if wrap == Wrap::Result && building_owner(owner) {
+                    if wrap == Wrap::Result {
                         hit(Rule::CtorResult);
                     }
                 }
@@ -596,19 +758,24 @@ fn parse(text: &str) -> Result<BTreeSet<Row>, Vec<String>> {
 }
 
 /// The violations of the tree that `allow` does not cover.
-fn found(tree: &dyn Tree, allow: &[Allow]) -> BTreeSet<Row> {
+fn found(tree: &dyn Tree, allow: &[Allow]) -> (BTreeSet<Row>, BTreeSet<usize>) {
     let mut sites = BTreeSet::new();
+    let mut used = BTreeSet::new();
     for path in source_files(tree) {
         let Some(src) = tree.read(&path) else {
             continue;
         };
         for s in scan(&path, &src) {
-            if !allow.iter().any(|a| allowed(&path, &s, a)) {
+            let covered: Vec<usize> = (0..allow.len())
+                .filter(|&i| allowed(&path, &s, &allow[i]))
+                .collect();
+            if covered.is_empty() {
                 sites.insert((crate_of(&path).to_owned(), s.rule, s.key));
             }
+            used.extend(covered);
         }
     }
-    sites
+    (sites, used)
 }
 
 pub(super) fn check(tree: &dyn Tree, allow: &[Allow], min_sites: usize) -> Report {
@@ -625,7 +792,7 @@ pub(super) fn check(tree: &dyn Tree, allow: &[Allow], min_sites: usize) -> Repor
             return r;
         }
     };
-    let sites = found(tree, allow);
+    let (sites, used) = found(tree, allow);
     if sites.len() < min_sites {
         r.fail(format!(
             "check-building: FAIL: {} violations found, at least {min_sites} expected; the walk is broken",
@@ -658,6 +825,15 @@ pub(super) fn check(tree: &dyn Tree, allow: &[Allow], min_sites: usize) -> Repor
         stale
             .into_iter()
             .for_each(|row| r.fail(format!("  {}", fmt(row))));
+    }
+    let idle: Vec<_> = (0..allow.len()).filter(|i| !used.contains(i)).collect();
+    if !idle.is_empty() {
+        r.fail("check-building: FAIL (a row of ALLOW covers no violation; delete it):");
+        for i in idle {
+            let a = &allow[i];
+            let owner = if a.owner.is_empty() { "*" } else { a.owner };
+            r.fail(format!("  {} {owner}: {}", a.path, a.reason));
+        }
     }
     if r.passed() {
         r.say("check-building: OK");
@@ -720,7 +896,7 @@ mod tests {
     }
 
     #[test]
-    fn a_setter_on_a_node_source_or_spec_is_a_violation_and_a_setter_on_a_handle_is_not() {
+    fn a_setter_on_a_building_owner_is_a_violation_and_a_by_value_or_private_one_is_not() {
         for owner in [
             "GainNode",
             "FileSource",
@@ -741,10 +917,18 @@ mod tests {
                 "{owner}"
             );
         }
-        let ok = "impl GainHandle { pub fn set_gain(&self, g: f32) {} }\n\
-                  impl Node { pub fn set_gain(&self, g: f32) {} }\n\
-                  impl GainNode { pub fn set_gain(self, g: f32) -> Self { self } }";
+        let ok = "impl GainNode { pub fn set_gain(self, g: f32) -> Self { self } }\n\
+                  impl GainNode { pub fn gain(&self) -> f32 { 0.0 } }\n\
+                  impl GainNode { pub(crate) fn set_gain(&self, g: f32) {} }";
         assert!(rules(ok).is_empty());
+    }
+
+    #[test]
+    fn a_setter_on_an_owner_that_is_not_a_node_source_or_spec_is_a_violation() {
+        for owner in ["GainHandle", "Transport", "Meter", "Node"] {
+            let src = format!("impl {owner} {{ pub fn set_gain(&self, g: f32) {{}} }}");
+            assert_eq!(rules(&src), one("set_gain", "setter"), "{owner}");
+        }
     }
 
     #[test]
@@ -785,9 +969,22 @@ mod tests {
     fn a_result_constructor_on_a_building_owner_is_a_violation_and_a_plain_one_is_not() {
         let bad = "impl PhaserConfig { pub fn new(r: f32) -> Result<Self, E> { todo!() } }";
         assert!(rules(bad).contains(&("new".to_owned(), "ctor-result")));
-        let ok = "impl Wave { pub fn open(p: &str) -> Result<Self, E> { todo!() } }\n\
-                  impl XSource { pub fn probe(p: &str) -> Result<Report, E> { todo!() } }";
+        let ok = "impl XSource { pub fn probe(p: &str) -> Result<Report, E> { todo!() } }\n\
+                  impl Wave { pub fn plain(p: &str) -> Self { todo!() } }\n\
+                  impl Wave { pub fn load(&self) -> Result<Self, E> { todo!() } }";
         assert!(rules(ok).is_empty());
+    }
+
+    #[test]
+    fn a_result_constructor_on_an_owner_that_is_not_a_building_one_is_a_violation() {
+        for owner in ["Wave", "Session", "Fold"] {
+            let src = format!(
+                "impl {owner} {{ pub fn open(p: &str) -> Result<{owner}, E> {{ todo!() }} }}"
+            );
+            assert_eq!(rules(&src), one("open", "ctor-result"), "{owner}");
+        }
+        let src = "impl Wave { pub fn read(p: &str) -> Result<Self> { todo!() } }";
+        assert_eq!(rules(src), one("read", "ctor-result"));
     }
 
     #[test]
@@ -868,6 +1065,44 @@ mod tests {
         assert!(!r.passed());
         let other = "impl Other { pub fn with_cost(self, c: u8) -> Self { self } }";
         assert!(!run("", other, &allow).passed());
+    }
+
+    #[test]
+    fn a_config_width_allow_row_covers_its_type_and_not_another_config_of_the_crate() {
+        let src = "impl AlignConfig { pub fn new(r: u8) -> Self { todo!() } }\n\
+                   impl OtherConfig { pub fn new(r: u8) -> Self { todo!() } }";
+        let allow = [ty("crates/a/", "AlignConfig", WIDTH, "r")];
+        let r = run("", src, &allow);
+        assert!(!r.passed());
+        assert_eq!(
+            r.findings[1],
+            "  a  config-width  crates/a/src/lib.rs::OtherConfig::new"
+        );
+        assert!(
+            run(
+                "a  config-width  crates/a/src/lib.rs::OtherConfig::new\n",
+                src,
+                &allow
+            )
+            .passed()
+        );
+    }
+
+    #[test]
+    fn an_allow_row_that_covers_no_violation_fails() {
+        let src = "impl T { pub fn x(self) -> Self { self } }";
+        let idle = [ty("crates/a/", "Gone", CTOR, "r")];
+        let r = run("", src, &idle);
+        assert!(!r.passed());
+        assert!(r.findings[0].contains("ALLOW covers no violation"));
+        assert_eq!(r.findings[1], "  crates/a/ Gone: r");
+        let wrong_rule = "impl Gone { pub fn with_x(self) -> Self { self } }";
+        let r = run(
+            "a  with-prefix  crates/a/src/lib.rs::Gone::with_x\n",
+            wrong_rule,
+            &idle,
+        );
+        assert!(!r.passed(), "{:?}", r.findings);
     }
 
     #[test]
