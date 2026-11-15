@@ -35,19 +35,11 @@
 mod controllers;
 
 pub(crate) use controllers::Controllers;
-use tutti_ump::{KeyEvent, MidiGroup, Ump};
-
-use tutti_ump::Key;
-
-/// The packed key is 16 bits.
-const WORDS: usize = 1 << 10;
+use tutti_ump::{KeyBitset, KeyEvent, MidiGroup, Ump};
 
 /// The notes and controllers a source has started and not ended.
 pub struct HeldState {
-    /// One bit per [`Key`] (protocol, Group, Channel, Note).
-    keys: Box<[u64; WORDS]>,
-    /// How many bits are set.
-    notes: u32,
+    keys: Box<KeyBitset>,
     controllers: Controllers,
 }
 
@@ -60,7 +52,7 @@ impl Default for HeldState {
 impl std::fmt::Debug for HeldState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HeldState")
-            .field("notes", &self.notes)
+            .field("notes", &self.keys.len())
             .finish_non_exhaustive()
     }
 }
@@ -70,8 +62,7 @@ impl HeldState {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            keys: Box::new([0; WORDS]),
-            notes: 0,
+            keys: Box::default(),
             controllers: Controllers::new(),
         }
     }
@@ -79,13 +70,12 @@ impl HeldState {
     /// Whether nothing is held: no note, no pedal down, no bend off centre.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.notes == 0 && !self.controllers.any()
+        self.keys.is_empty() && !self.controllers.any()
     }
 
     /// Forgets everything held, sending nothing.
     pub fn forget(&mut self) {
-        self.keys.fill(0);
-        self.notes = 0;
+        self.keys.clear();
         self.controllers.forget();
     }
 
@@ -96,29 +86,15 @@ impl HeldState {
     pub fn observe(&mut self, ump: impl Into<Ump>) {
         let ump = ump.into();
         match ump.key_event() {
-            Some(KeyEvent::On(key)) => self.set(key, true),
-            Some(KeyEvent::Off(key)) => self.set(key, false),
+            Some(KeyEvent::On(key)) => {
+                self.keys.insert(key);
+            }
+            Some(KeyEvent::Off(key)) => {
+                self.keys.remove(key);
+            }
             Some(KeyEvent::Sustain { .. }) | None => {}
         }
         self.controllers.observe(ump);
-    }
-
-    fn set(&mut self, key: Key, on: bool) {
-        let i = usize::from(key.index());
-        let bit = 1u64 << (i & 63);
-        let word = &mut self.keys[i >> 6];
-        let was = *word & bit != 0;
-        match (on, was) {
-            (true, false) => {
-                *word |= bit;
-                self.notes += 1;
-            }
-            (false, true) => {
-                *word &= !bit;
-                self.notes -= 1;
-            }
-            _ => {}
-        }
     }
 
     /// Hands `accept` the message that ends each thing held (all of `group`'s
@@ -133,21 +109,16 @@ impl HeldState {
         group: Option<MidiGroup>,
         mut accept: impl FnMut(Ump) -> bool,
     ) -> bool {
-        for w in 0..WORDS {
-            let mut bits = self.keys[w];
-            while bits != 0 {
-                let b = bits.trailing_zeros() as usize;
-                bits &= bits - 1;
-                let key = Key::from_index((w * 64 + b) as u16);
-                if group.is_some_and(|g| key.address().group != g) {
-                    continue;
-                }
-                if !accept(Ump::note_off(key)) {
-                    return false;
-                }
-                self.keys[w] &= !(1u64 << b);
-                self.notes -= 1;
+        let mut next = 0;
+        while let Some(key) = self.keys.next_from(next) {
+            next = u32::from(key.index()) + 1;
+            if group.is_some_and(|g| key.address().group != g) {
+                continue;
             }
+            if !accept(Ump::note_off(key)) {
+                return false;
+            }
+            self.keys.remove(key);
         }
         self.controllers.lift_while(group, accept)
     }

@@ -89,9 +89,8 @@ impl Taps<'_> {
         capacity: Samples,
     ) -> Result<TapReader, MissingSource> {
         let sources = self.graph.raw_sources(sources)?;
-        let id = TapId(self.graph.next_tap);
+        let id = TapId::mint(&self.graph.ids);
         let reader = self.graph.editor.open_tap(id, sources, align, capacity)?;
-        self.graph.next_tap += 1;
         self.graph.edited = true;
         Ok(reader)
     }
@@ -123,10 +122,9 @@ impl Taps<'_> {
     /// [`MissingSource`] for the first output source that is not in the graph
     /// now.
     pub fn open_output(&mut self, capacity: Samples) -> Result<TapReader, MissingSource> {
-        let id = TapId(self.graph.next_tap);
+        let id = TapId::mint(&self.graph.ids);
         let width = self.graph.outputs();
         let reader = self.graph.editor.open_output_tap(id, width, capacity)?;
-        self.graph.next_tap += 1;
         self.graph.edited = true;
         Ok(reader)
     }
@@ -191,7 +189,7 @@ impl Taps<'_> {
         align: TapAlign,
         capacity: EventCapacity,
     ) -> Result<EventTapReader, MissingSource> {
-        let id = EventTapId(self.graph.next_event_tap);
+        let id = EventTapId::mint(&self.graph.ids);
         let source = source.into();
         let node = source.node();
         let raw = match source {
@@ -214,7 +212,6 @@ impl Taps<'_> {
             }
         })?;
         let reader = self.graph.editor.open_event_tap(id, raw, align, capacity)?;
-        self.graph.next_event_tap += 1;
         self.graph.event_taps.insert(id, (raw, align, capacity));
         self.graph.edited = true;
         Ok(reader)
@@ -340,9 +337,8 @@ impl Meters<'_> {
     }
 
     fn declare_meter(&mut self, spec: MeterSpec) -> Result<MeterReader, MissingSource> {
-        let id = MeterId(self.graph.next_meter);
+        let id = MeterId::mint(&self.graph.ids);
         let reader = self.graph.editor.open_meter(id, spec)?;
-        self.graph.next_meter += 1;
         self.graph.edited = true;
         Ok(reader)
     }

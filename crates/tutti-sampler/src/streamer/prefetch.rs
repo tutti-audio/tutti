@@ -496,7 +496,7 @@ mod tests {
 
     fn ring(capacity: usize, channels: usize) -> (RegionOut, SharedReader, PosReader) {
         RegionBuffer::with_capacity(
-            StreamId(1),
+            StreamId::of(1),
             PathBuf::new(),
             capacity,
             ChannelLayout::try_from(channels).expect("a test width is small"),

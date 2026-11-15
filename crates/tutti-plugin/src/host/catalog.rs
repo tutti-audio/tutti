@@ -12,7 +12,7 @@
 //! ```no_run
 //! # fn ex() -> Result<(), tutti_plugin_db::ScanBusy> {
 //! use tutti_plugin::catalog::{Catalog, CatalogConfig, PersistError};
-//! use tutti_plugin_db::PluginDb;
+//! use tutti_plugin_db::{PluginDb, ScanPoll};
 //! use std::path::PathBuf;
 //!
 //! let mut catalog = Catalog::new(
@@ -27,28 +27,38 @@
 //!         Ok::<(), PersistError>(())
 //!     },
 //! );
-//! let scanned = catalog.scan()?;
-//! println!("{} new", scanned.new);
+//! let mut scan = catalog.scan()?;
+//! loop {
+//!     match catalog.try_apply(&mut scan) {
+//!         ScanPoll::Running => std::thread::sleep(std::time::Duration::from_millis(10)),
+//!         ScanPoll::Done(result) => break println!("{} new", result.new),
+//!         ScanPoll::Died => break,
+//!     }
+//! }
 //! # Ok(())
 //! # }
 //! ```
 //!
 //! # Threads
 //!
-//! A [`Catalog`] is owned by one thread, the one that calls its methods. A
-//! rescan ([`spawn_scan`](Catalog::spawn_scan)) works on a snapshot on its
-//! own thread and sends deltas back; [`poll_scan`](Catalog::poll_scan)
-//! applies them on the owner. The catalog is readable throughout, and nothing
-//! here runs on or reaches the audio thread.
+//! A [`Catalog`] is owned by one thread, the one that calls its methods. Its
+//! three discovery operations, [`scan`](Catalog::scan),
+//! [`register`](Catalog::register) and [`measure`](Catalog::measure), each
+//! return a task ([`Scan`]) that works on a snapshot on its own thread and sends
+//! [`Delta`]s back; [`try_apply`](Catalog::try_apply) applies them on the owner
+//! and never blocks. The catalog is readable throughout. Dropping a task
+//! cancels it: the probe process in flight is killed and the drop returns
+//! without waiting for the probe's deadline. Nothing here runs on or reaches
+//! the audio thread.
 
-use crate::host::db_probe::{measure_record, probe_plugin, probe_plugin_measured};
+use crate::host::db_probe::{Probing, probe_fn};
 use crate::host::plugin_ref::PluginRef;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use tutti_plugin_db::{
-    BlacklistedFile, Delta, FileFacts, PluginDb, PluginEntry, Scan, ScanBusy, ScanPoll, ScanResult,
-    Scanner,
+    BlacklistedFile, Delta, FileFacts, FilesError, PluginDb, PluginEntry, PluginFormat, Scan,
+    ScanBusy, ScanPoll, Scanner, format_from_path,
 };
 use tutti_plugin_ipc::CatalogConfig;
 use tutti_plugin_types::PluginDescriptor;
@@ -92,7 +102,8 @@ pub struct Catalog {
     /// The blacklisted rows of `db`, republished by every method that changes
     /// the table: what a [`BlacklistView`] reads.
     blacklist: Arc<RwLock<PluginDb>>,
-    scanner: Scanner,
+    /// Whether scans and registrations measure ([`with_measuring`](Self::with_measuring)).
+    measuring: bool,
     config: CatalogConfig,
     persist: Persist,
     unreported: Unreported,
@@ -205,12 +216,33 @@ impl Catalog {
     /// the configuration, then republishes the blacklisted rows to the views,
     /// so no change leaves a [`BlacklistView`] behind.
     fn change<R>(&mut self, f: impl FnOnce(&mut PluginDb, &Scanner, &CatalogConfig) -> R) -> R {
-        let out = f(&mut self.db, &self.scanner, &self.config);
+        let scanner = self.scanner(self.scanning());
+        self.change_with(|db, config| f(db, &scanner, config))
+    }
+
+    /// [`change`](Self::change) for a caller that brings its own scanner.
+    fn change_with<R>(&mut self, f: impl FnOnce(&mut PluginDb, &CatalogConfig) -> R) -> R {
+        let out = f(&mut self.db, &self.config);
         *self
             .blacklist
             .write()
             .unwrap_or_else(PoisonError::into_inner) = blacklisted_rows(&self.db);
         out
+    }
+
+    /// What a scan's probe does: measures if the catalog was told to, and lists
+    /// a file by its name when `plugin-probe` is missing.
+    fn scanning(&self) -> Probing {
+        Probing {
+            measure: self.measuring,
+            state: None,
+            fallback: true,
+        }
+    }
+
+    /// A scanner on this catalog's pedal whose probe does what `how` says.
+    fn scanner(&self, how: Probing) -> Scanner {
+        Scanner::new(self.config.pedal_path(), probe_fn(&self.config, how))
     }
 
     /// The blacklist as a handle that outlives this borrow and is `Send`: what
@@ -235,12 +267,11 @@ impl Catalog {
         config: CatalogConfig,
         persist: impl Fn(&PluginDb) -> Result<(), PersistError> + Send + Sync + 'static,
     ) -> Self {
-        let scanner = Scanner::new(config.pedal_path(), probe_plugin);
         let blacklist = Arc::new(RwLock::new(blacklisted_rows(&db)));
         Self {
             db,
             blacklist,
-            scanner,
+            measuring: false,
             config,
             persist: Arc::new(persist),
             unreported: Unreported::default(),
@@ -258,7 +289,7 @@ impl Catalog {
     /// already probed: [`measure`](Self::measure) does.
     #[must_use]
     pub fn with_measuring(mut self) -> Self {
-        self.scanner = Scanner::new(self.config.pedal_path(), probe_plugin_measured);
+        self.measuring = true;
         self
     }
 
@@ -284,13 +315,13 @@ impl Catalog {
     ///
     /// Recovers a crashed previous scan first, then hands the scanner a
     /// snapshot. This catalog stays whole and usable while the scan runs; call
-    /// [`poll_scan`](Self::poll_scan) on the owning thread (a frame tick, a
-    /// UI loop) to apply what the scan found. See [`rescan`](Self::scan) for
-    /// the blocking form.
+    /// [`try_apply`](Self::try_apply) on the owning thread (a frame tick, a UI
+    /// loop) to apply what the scan found. Dropping the task cancels the scan:
+    /// the probe in flight is killed and the drop returns promptly.
     ///
     /// # Errors
     ///
-    /// [`ScanBusy`] while a rescan, or a recovery, is already using this
+    /// [`ScanBusy`] while a task, or a recovery, is already using this
     /// catalog's pedal: its worker has not exited yet.
     ///
     /// # Panics
@@ -303,13 +334,13 @@ impl Catalog {
     /// # use tutti_plugin::catalog::Catalog;
     /// # use tutti_plugin_db::ScanPoll;
     /// # fn ex(mut plugins: Catalog) -> Result<(), tutti_plugin_db::ScanBusy> {
-    /// let scan = plugins.spawn_scan()?;
+    /// let mut scan = plugins.scan()?;
     /// loop {
     ///     while let Ok(progress) = scan.progress_rx.try_recv() {
     ///         println!("{}/{}", progress.current, progress.total);
     ///     }
-    ///     match plugins.poll_scan(&scan) {
-    ///         ScanPoll::Running => std::thread::yield_now(),
+    ///     match plugins.try_apply(&mut scan) {
+    ///         ScanPoll::Running => std::thread::sleep(std::time::Duration::from_millis(10)),
     ///         ScanPoll::Done(result) => break println!("{} new", result.new),
     ///         ScanPoll::Died => break,
     ///     }
@@ -317,47 +348,84 @@ impl Catalog {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn spawn_scan(&mut self) -> std::result::Result<Scan, ScanBusy> {
+    pub fn scan(&mut self) -> std::result::Result<Scan, ScanBusy> {
         self.finish_pending_save();
         let save = self.autosave();
         self.change(|db, scanner, config| scanner.spawn(db, &config.scan_dirs, save))
     }
 
-    /// Applies what a rescan has found so far and reports where it stands.
+    /// Probes the file at `path` on a background thread, whether or not the
+    /// catalog holds a current row for it, and records what it holds, as a scan
+    /// would; the task is the one [`scan`](Self::scan) returns, so
+    /// [`try_apply`](Self::try_apply) applies its delta. The way to add a plugin
+    /// outside the scanned directories. The file is probed as a scan probes it,
+    /// and a plugin that crashes, hangs or will not load is **blacklisted**, as in
+    /// a scan; a failure that says nothing about the plugin (the probe binary is
+    /// missing, an I/O error) leaves the row as it was. Unlike a scan, a missing
+    /// `plugin-probe` does not record the file under its name: it is a failure.
+    ///
+    /// A link whose target has another extension (`Foo.clap` to `libfoo.so`) is
+    /// probed as named and recorded under its target, as CLAP. A load picks the
+    /// format by the file's extension, so loading that key does not read it as
+    /// CLAP.
+    ///
+    /// # Errors
+    ///
+    /// [`FilesError::Missing`] when `path` is not a file (checked first),
+    /// [`FilesError::UnrecognizedFormat`] when its extension names no plugin
+    /// format, and [`FilesError::Busy`] as for [`scan`](Self::scan). A file the
+    /// probe fails on is not an error of the call: the result's
+    /// [`failures`](tutti_plugin_db::ScanResult::failures) name it and say why
+    /// ([`ProbeFailureKind`](tutti_plugin_db::ProbeFailureKind)), a missing
+    /// `plugin-probe` among them.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the operating system cannot spawn the scanner thread.
+    pub fn register(&mut self, path: impl AsRef<Path>) -> std::result::Result<Scan, FilesError> {
+        let path = path.as_ref();
+        if !path.exists() {
+            return Err(FilesError::Missing(path.to_path_buf()));
+        }
+        let format = format_from_path(path)
+            .ok_or_else(|| FilesError::UnrecognizedFormat(path.to_path_buf()))?;
+        let probing = Probing {
+            fallback: false,
+            ..self.scanning()
+        };
+        self.spawn_file(probing, path, format)
+    }
+
+    /// Starts a task probing the one file `path`, read as `format`, as `probing`
+    /// says, on one scanner of this catalog's pedal.
+    fn spawn_file(
+        &mut self,
+        probing: Probing,
+        path: &Path,
+        format: PluginFormat,
+    ) -> std::result::Result<Scan, FilesError> {
+        self.finish_pending_save();
+        let save = self.autosave();
+        let scanner = self.scanner(probing);
+        self.change_with(|db, _| scanner.spawn_files(db, [(path, format)], save))
+    }
+
+    /// Applies what a task ([`scan`](Self::scan), [`register`](Self::register) or
+    /// [`measure`](Self::measure)) has sent so far and reports where it stands.
     /// Never blocks.
     ///
-    /// A finished scan is saved when this returns [`ScanPoll::Done`]: the table
+    /// A finished task is saved when this returns [`ScanPoll::Done`]: the table
     /// is copied here and written on a short-lived thread, so the fsync is not
     /// on the owner's thread. A failed save is logged and kept for
     /// [`take_persist_error`](Self::take_persist_error). The write is finished
-    /// before the next scan, `save` or drop. Drop the
-    /// [`Scan`] once it reports `Done` or `Died`.
-    pub fn poll_scan(&mut self, scan: &Scan) -> ScanPoll {
-        let poll = self.change(|db, _, _| scan.poll(db));
+    /// before the next task, `save` or drop. Drop the task once it reports
+    /// `Done` or `Died`.
+    pub fn try_apply(&mut self, task: &mut Scan) -> ScanPoll {
+        let poll = self.change(|db, _, _| task.poll(db));
         if matches!(poll, ScanPoll::Done(_)) {
             self.save_in_background();
         }
         poll
-    }
-
-    /// Scans the plugin directories on the calling thread and returns the
-    /// summary.
-    ///
-    /// Blocks while each new or changed plugin is probed in a subprocess. The
-    /// in-memory catalog is updated, and saved, before this returns; a failed
-    /// save is kept for [`take_persist_error`](Self::take_persist_error).
-    ///
-    /// # Errors
-    ///
-    /// [`ScanBusy`], as for [`spawn_scan`](Self::spawn_scan).
-    pub fn scan(&mut self) -> std::result::Result<ScanResult, ScanBusy> {
-        self.finish_pending_save();
-        let save = self.autosave();
-        let result =
-            self.change(|db, scanner, config| scanner.scan(db, &config.scan_dirs, save))?;
-        // A failure stays for `take_persist_error`; the scan's result is the table.
-        let _ = persist_unattended(&self.persist, &self.unreported, &self.db);
-        Ok(result)
     }
 
     /// Writes a copy of the table on its own thread. The clone is the only cost
@@ -402,8 +470,8 @@ impl Catalog {
     }
 
     /// The failure of the last save this catalog started itself (after
-    /// [`scan`](Self::scan), after a rescan's [`poll_scan`](Self::poll_scan), or
-    /// in a [`recover_crash`](Self::recover_crash)), or `None` if it succeeded or
+    /// a task's [`try_apply`](Self::try_apply), or in a
+    /// [`recover_crash`](Self::recover_crash)), or `None` if it succeeded or
     /// the failure was already taken. A later successful save clears an older
     /// failure: the table it stored is newer. Waits for a rescan's write still in
     /// flight.
@@ -522,7 +590,7 @@ impl Catalog {
     }
 
     fn forget_in_pedal(&self, file: &Path) {
-        if self.scanner.forget(file).is_err() {
+        if self.scanner(self.scanning()).forget(file).is_err() {
             tracing::warn!("a rescan is running; not touching its crash sentinel for {file:?}");
         }
     }
@@ -542,31 +610,50 @@ impl Catalog {
         self.change(|db, _, _| db.apply(Delta::remove(path)));
     }
 
-    /// Measures the file `plugin` names and records the result: the tail and
-    /// latency each of its plugins reports, against what it renders, in each descriptor's
-    /// [`measured`](PluginDescriptor::measured).
-    /// The row is replaced, so the file is probed again too.
+    /// Measures the file `plugin` names, as the format `plugin` has, on a
+    /// background thread and records the result: the tail and latency each of its
+    /// plugins reports, against what it renders, in each descriptor's
+    /// [`measured`](PluginDescriptor::measured). The row is replaced, so the file
+    /// is probed again too. The task is the one [`scan`](Self::scan) returns:
+    /// [`try_apply`](Self::try_apply) applies its delta.
     ///
-    /// **Blocking**: the probe renders each plugin at two configurations, up to
-    /// [`DEFAULT_MEASURE_TIMEOUT`](crate::catalog::DEFAULT_MEASURE_TIMEOUT). A
-    /// frame-driven host runs [`measure_record`] on a worker and passes the
-    /// result to [`apply`](Self::apply).
+    /// `state` is a file of the bytes the plugin's own `save_state` wrote: the
+    /// plugin is put in that state before it is measured, so the figure is of that
+    /// patch (for a file of one plugin; the row records a hash of it). It belongs
+    /// to this call alone: another `measure` without one measures its plugin as
+    /// it loads.
+    ///
+    /// The probe renders each plugin at two configurations, up to
+    /// [`DEFAULT_MEASURE_TIMEOUT`](crate::catalog::DEFAULT_MEASURE_TIMEOUT).
+    /// As in a measuring scan, a plugin that crashes, hangs or will not load while
+    /// being measured is **blacklisted**. Dropping the task kills the probe. A
+    /// missing `plugin-probe` is a failure in the result, as for
+    /// [`register`](Self::register).
     ///
     /// # Errors
     ///
-    /// Any error of [`measure_record`]: the probe cannot be found or spawned, the
-    /// plugin would not load, or it crashed or hung while rendering.
-    pub fn measure(&mut self, plugin: &PluginRef) -> BridgeResult<()> {
-        let delta = measure_record(plugin.path())?;
-        self.apply(delta);
-        Ok(())
+    /// [`FilesError`] as for [`register`](Self::register), the format being the
+    /// ref's.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the operating system cannot spawn the scanner thread.
+    pub fn measure(
+        &mut self,
+        plugin: &PluginRef,
+        state: Option<&Path>,
+    ) -> std::result::Result<Scan, FilesError> {
+        let probing = Probing {
+            measure: true,
+            state: state.map(Path::to_path_buf),
+            fallback: false,
+        };
+        self.spawn_file(probing, plugin.path(), plugin.format())
     }
 
-    /// Applies a delta to the catalog, such as the one `probe_record`
-    /// returns.
-    ///
-    /// Run `probe_record` on any thread (it needs no catalog) and pass the
-    /// result here. Call [`save`](Self::save) to persist.
+    /// Applies a delta the caller built to the catalog, such as a
+    /// [`Delta::put`] of a row from its own source. A task's deltas go through
+    /// [`try_apply`](Self::try_apply). Call [`save`](Self::save) to persist.
     pub fn apply(&mut self, delta: Delta) {
         self.change(|db, _, _| db.apply(delta));
     }
@@ -638,8 +725,20 @@ impl Catalog {
 mod tests {
     use super::*;
     use crate::host::plugin::Plugin;
-    use tutti_plugin_db::{FileRow, PluginFormat, ScanPoll};
+    use tutti_plugin_db::{FileRow, PluginFormat, ScanPoll, ScanResult};
     use tutti_types::SampleRate;
+
+    /// Runs a scan to its end on the calling thread, applying as it goes.
+    fn rescan(plugins: &mut Catalog) -> ScanResult {
+        let mut scan = plugins.scan().unwrap();
+        loop {
+            match plugins.try_apply(&mut scan) {
+                ScanPoll::Running => std::thread::yield_now(),
+                ScanPoll::Done(result) => break result,
+                ScanPoll::Died => panic!("the scan's worker died"),
+            }
+        }
+    }
 
     /// A blacklisted row whose `mtime` matches what the file system reports,
     /// i.e. the file has not changed since it was recorded.
@@ -905,7 +1004,7 @@ mod tests {
         assert!(recovery.to_string().contains("disk full"), "{recovery}");
         assert_eq!(plugins.take_persist_error().map(|_| ()), None, "taken once");
         // A rescan recovers first; it must not delete what it could not save.
-        plugins.scan().unwrap();
+        rescan(&mut plugins);
         let scan = plugins
             .take_persist_error()
             .expect("the scan's save failed");
@@ -918,7 +1017,7 @@ mod tests {
         assert!(std::error::Error::source(&saved).is_some());
     }
 
-    /// The save after a rescan is off the owner's thread: `poll_scan` reports
+    /// The save after a rescan is off the owner's thread: `try_apply` reports
     /// `Done` while the persistence is still running, and the next `save` waits for
     /// it, and dropping the catalog waits for it.
     #[test]
@@ -937,9 +1036,9 @@ mod tests {
         });
 
         let began = std::time::Instant::now();
-        let scan = plugins.spawn_scan().unwrap();
+        let mut scan = plugins.scan().unwrap();
         let end = loop {
-            match plugins.poll_scan(&scan) {
+            match plugins.try_apply(&mut scan) {
                 ScanPoll::Running => std::thread::yield_now(),
                 other => break other,
             }
@@ -975,12 +1074,12 @@ mod tests {
         assert!(config.pedal_path().exists(), "kept: the save failed");
 
         assert!(plugins.unblacklist(&a));
-        plugins.scan().unwrap();
+        rescan(&mut plugins);
         assert!(!plugins.is_blacklisted(&a), "the user's unblacklist held");
         assert!(plugins.is_blacklisted(&b), "the other entry is still kept");
 
         plugins.remove(&b);
-        plugins.scan().unwrap();
+        rescan(&mut plugins);
         assert!(plugins.db().row(&key(&b)).is_none(), "the removal held");
         assert!(!config.pedal_path().exists());
     }

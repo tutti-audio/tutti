@@ -107,7 +107,7 @@ impl Rig {
         }
         let out = editor
             .open_event_tap(
-                EventTapId(0),
+                EventTapId::of(1),
                 EventOut {
                     node: INGEST,
                     port: 0,

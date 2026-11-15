@@ -1,12 +1,10 @@
-//! What a digest test is made of: a seeded noise generator and an FNV-1a hash
-//! over the bits of a render.
+//! A seeded noise generator and an FNV-1a hash over bits.
 //!
-//! A digest test pins a render bit for bit (a tolerance would let a changed
-//! coefficient through): it feeds a node [`noise`], hashes every output sample
-//! with [`Fnv`], and compares the figure with one recorded earlier. Both are
-//! plain `f32`, `u32` and `u64` code with no workspace type in a signature, so
-//! a crate at any layer can dev-depend on this one for them. Where the render
-//! reaches `libm` the comparison goes through `tutti_fixtures::assert_golden`.
+//! [`noise`] is a deterministic broadband stimulus for a test; [`Fnv`] folds
+//! bytes or the bits of numbers into a 64-bit figure, e.g. to tell two byte
+//! streams apart. Both are plain `f32`, `u32` and `u64` code with no workspace
+//! type in a signature, so a crate at any layer can dev-depend on this one for
+//! them.
 
 /// Deterministic broadband noise: an endless stream of `f32` in `[-1, 1)` from
 /// a linear congruential generator (Numerical Recipes' constants, the top 24
@@ -40,27 +38,9 @@ impl Iterator for Noise {
 
 /// `len` samples of [`Noise::seeded`]`(seed)`, in `[-1, 1)`.
 ///
-/// Scale it with a `map` (`0.5 * x`): a gain applied after the draw is what
-/// every digest test that wants a level does.
+/// Scale it with a `map` (`0.5 * x`) for a stimulus at a level.
 pub fn noise(seed: u32, len: usize) -> Vec<f32> {
     Noise::seeded(seed).take(len).collect()
-}
-
-/// The [`Fnv`] digest of `samples`' little-endian bits, in order.
-pub fn digest(samples: &[f32]) -> u64 {
-    let mut h = Fnv::new();
-    h.f32s(samples);
-    h.finish()
-}
-
-/// The [`Fnv`] digest of a planar render: every plane's samples in turn,
-/// channel 0 first (the same figure as [`digest`] of the planes joined).
-pub fn digest_planes(planes: &[Vec<f32>]) -> u64 {
-    let mut h = Fnv::new();
-    for plane in planes {
-        h.f32s(plane);
-    }
-    h.finish()
 }
 
 /// A 64-bit FNV-1a hash, fed bytes or the little-endian bits of a number.
@@ -166,14 +146,17 @@ mod tests {
         assert_eq!(h.finish(), g.finish());
     }
 
-    /// The generator is pinned by a digest of 4096 draws and stays in `[-1, 1)`.
+    /// The stream is Numerical Recipes' LCG (`s' = 1664525 s + 1013904223` mod 2^32)
+    /// from the scrambled seed (`747796405 seed + 2891336453`), each draw the top 24
+    /// bits `k` as `k / 2^23 - 1`: seed 5's first three `k` under those constants
+    /// are 4275643, 7789527 and 15995530, exact in `f32`. Every draw stays in
+    /// `[-1, 1)`.
     #[test]
-    fn noise_is_the_recorded_stream() {
+    fn noise_is_the_numerical_recipes_lcg() {
         let x = noise(5, 4096);
         assert!(x.iter().all(|s| (-1.0..1.0).contains(s)));
-        let mut h = Fnv::new();
-        h.f32s(&x);
-        assert_eq!(h.finish(), 0x7d57_5a34_8383_94fa);
+        let draw = |k: u32| k as f32 / 8_388_608.0 - 1.0;
+        assert_eq!(x[..3], [draw(4_275_643), draw(7_789_527), draw(15_995_530)]);
         assert_eq!(noise(5, 8), x[..8], "a longer draw extends a shorter one");
         assert_ne!(noise(6, 8), x[..8], "neighbouring seeds differ");
     }

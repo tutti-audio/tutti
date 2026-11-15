@@ -570,8 +570,8 @@ proptest! {
             let summed: Vec<bool> = desc.spec.topology.outputs.iter().map(|s| s.len() > 1).collect();
             let channels = outputs.len();
             let mut spec = desc.spec.clone();
-            spec.topology.taps.insert(TapId(1), TapSpec::aligned(outputs.clone()));
-            spec.topology.taps.insert(TapId(2), TapSpec::Outputs { width: channels });
+            spec.topology.taps.insert(TapId::of(1), TapSpec::aligned(outputs.clone()));
+            spec.topology.taps.insert(TapId::of(2), TapSpec::Outputs { width: channels });
             let valid = spec.validate().expect("generated graphs are valid");
             let mut pair = Pair::with_workers(MAX_BLOCK, workers);
             // The harness compiles the spec itself; the readers' lanes ride the
@@ -580,8 +580,8 @@ proptest! {
             // harness compiles `spec` itself: give the editor the same nodes.
             pair.editor.spec_mut().topology.nodes = spec.topology.nodes.clone();
             pair.editor.spec_mut().topology.inputs = spec.topology.inputs;
-            let mut tap = pair.editor.open_tap(TapId(1), outputs, TapAlign::ToOutput, Samples(1 << 16)).expect("the sources exist");
-            let mut heard = pair.editor.open_output_tap(TapId(2), channels, Samples(1 << 16)).expect("the sources exist");
+            let mut tap = pair.editor.open_tap(TapId::of(1), outputs, TapAlign::ToOutput, Samples(1 << 16)).expect("the sources exist");
+            let mut heard = pair.editor.open_output_tap(TapId::of(2), channels, Samples(1 << 16)).expect("the sources exist");
             pair.switch(&valid, &desc.kinds);
             let width = tap.width();
             prop_assert_eq!(heard.width(), channels);
@@ -2556,6 +2556,41 @@ proptest! {
                     pair.switch(&edited.spec.validate().expect("valid"), &edited.kinds);
                     desc = edited;
                 }
+                if modes.chance(20)
+                    && let Some((key, mode)) = pick_mode(&desc, &mut modes)
+                {
+                    pair.set_mode(key, mode);
+                    note_mode(&mut desc, key, mode);
+                }
+                let input = input_signal(frame, n);
+                let (a, b) = pair.block(n, &input);
+                prop_assert_eq!(bits(&a), bits(&b), "diverged at frame {} ({} frames)", frame, n);
+                frame += n as u64;
+            }
+        }
+    }
+
+    /// The modes property with a third of the nodes declaring their own
+    /// bypass: the executor and the reference both read `Bypassed` as `Active`
+    /// for them (called every block, no blend, no park), bit for bit, while
+    /// `Muted` and a toggle back stay the executor's.
+    #[test]
+    fn own_bypass_nodes_are_bit_identical_to_the_reference(seed in any::<u64>(), which in 0usize..5) {
+        for workers in modes(seed) {
+            let mut modes = Rng::new(seed ^ 0x40DE_5EED);
+            let mut own = Rng::new(seed ^ 0x0B79_A55E);
+            let mut desc = random_graph(seed);
+            for key in desc.order.clone() {
+                if own.chance(34) {
+                    let inner = desc.kinds.remove(&key).expect("a kind");
+                    desc.kinds.insert(key, Kind::OwnBypass { inner: Box::new(inner) });
+                }
+            }
+            let mut pair = Pair::with_workers(MAX_BLOCK, workers);
+            pair.switch(&desc.spec.validate().expect("generated graphs are valid"), &desc.kinds);
+            let blocks = schedule(which, seed, 1400);
+            let mut frame = 0u64;
+            for &n in &blocks {
                 if modes.chance(20)
                     && let Some((key, mode)) = pick_mode(&desc, &mut modes)
                 {

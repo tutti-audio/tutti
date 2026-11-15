@@ -720,7 +720,7 @@ fn a_stretched_disk_voice_consumes_its_source_at_the_stretched_rate() {
             })
             .collect();
         let (mut writer, reader, pos) =
-            RegionBuffer::with_capacity(StreamId(1), PathBuf::new(), 8192 + 64, 2u16);
+            RegionBuffer::with_capacity(StreamId::of(1), PathBuf::new(), 8192 + 64, 2u16);
         writer.push_interleaved(&flat);
         let ring = std::sync::Arc::clone(&reader);
         // ONE `Cells`, shared by the source and the gate — `DiskVoice::new`
@@ -780,6 +780,14 @@ fn a_stretched_disk_voice_consumes_its_source_at_the_stretched_rate() {
              reached the disk tier's ring, so the factor acts as varispeed"
     );
 }
+
+/// Stream ids for the patterns that match a command's stream.
+#[cfg(test)]
+const STREAM_1: crate::streamer::StreamId = crate::streamer::StreamId::of(1);
+#[cfg(test)]
+const STREAM_2: crate::streamer::StreamId = crate::streamer::StreamId::of(2);
+#[cfg(test)]
+const STREAM_9: crate::streamer::StreamId = crate::streamer::StreamId::of(9);
 
 /// Dominant frequency by Hann-windowed DFT scan — a test helper, not
 /// production code. Coarse (2 Hz) because the assertion tolerance is 2%.
@@ -1366,7 +1374,7 @@ fn loop_on_a_streamerless_streaming_voice_is_not_recorded() {
 
     // Build a Disk voice with no streamer channel.
     let (writer, reader, pos) =
-        RegionBuffer::with_capacity(StreamId(1), std::path::PathBuf::new(), 128, 2u16);
+        RegionBuffer::with_capacity(StreamId::of(1), std::path::PathBuf::new(), 128, 2u16);
     drop(writer);
     let state = std::sync::Arc::new(Cells::new());
     let inner = DiskSource::new(reader, pos, state.clone());
@@ -1417,13 +1425,13 @@ fn streaming_voice() -> Voice {
     streaming_voice_of(1)
 }
 
-/// [`streaming_voice`] over stream `StreamId(region)`.
+/// [`streaming_voice`] over stream `StreamId::of(region)`.
 fn streaming_voice_of(region: u64) -> Voice {
     use crate::streamer::{Cells, RegionBuffer, StreamId};
     use crate::voice::disk_voice::{DiskSource, DiskVoice, DiskVoiceConfig};
 
     let (writer, reader, pos) =
-        RegionBuffer::with_capacity(StreamId(region), std::path::PathBuf::new(), 128, 2u16);
+        RegionBuffer::with_capacity(StreamId::of(region), std::path::PathBuf::new(), 128, 2u16);
     drop(writer);
     let state = Arc::new(Cells::new());
     let inner = DiskSource::new(reader, pos, state.clone());
@@ -1645,9 +1653,7 @@ fn a_handle_send_waits_for_the_streamer() {
     add_with_stream(&handle, id, streaming_voice(), &commands);
     // The streamer's one slot is taken; it catches up a moment later.
     commands
-        .send(crate::streamer::StreamerCommand::Close {
-            stream: StreamId(9),
-        })
+        .send(crate::streamer::StreamerCommand::Close { stream: STREAM_9 })
         .expect("room for one");
     let drainer = std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -1673,9 +1679,7 @@ fn a_handle_send_waits_for_the_streamer() {
 fn an_add_waits_for_the_streamer() {
     let (commands, streamer) = test_streamer(1);
     commands
-        .send(crate::streamer::StreamerCommand::Close {
-            stream: StreamId(9),
-        })
+        .send(crate::streamer::StreamerCommand::Close { stream: STREAM_9 })
         .expect("room for one");
     let (mut pool, handle) = VoicePool::new().with_handle();
     // The streamer catches up a moment later.
@@ -1725,7 +1729,7 @@ fn a_direction_set_through_the_handle_reaches_the_stream() {
             [
                 C::SetDirection { stream: a, direction: Direction::Reverse },
                 C::SetDirection { stream: b, direction: Direction::Forward },
-            ] if *a == StreamId(1) && *b == StreamId(1)
+            ] if *a == StreamId::of(1) && *b == StreamId::of(1)
         ),
         "the add's direction, then the update's: {sent:?}"
     );
@@ -1785,9 +1789,7 @@ fn a_stream_ends_when_its_voice_is_removed_or_replaced() {
     handle.send(VoiceCommand::Remove(id)).expect("room");
     assert!(matches!(
         streamer.try_iter().collect::<Vec<_>>().as_slice(),
-        [C::Close {
-            stream: StreamId(1)
-        }]
+        [C::Close { stream: STREAM_1 }]
     ));
 
     add_with_stream(&handle, id, streaming_voice_of(2), &commands);
@@ -1795,9 +1797,7 @@ fn a_stream_ends_when_its_voice_is_removed_or_replaced() {
     assert!(
         matches!(
             streamer.try_iter().collect::<Vec<_>>().as_slice(),
-            [C::Close {
-                stream: StreamId(2)
-            }]
+            [C::Close { stream: STREAM_2 }]
         ),
         "the replaced voice's stream ended, the replacing one's did not"
     );
@@ -2022,9 +2022,7 @@ fn an_add_crowded_out_of_the_queue_puts_the_stream_back() {
     let (commands, streamer) = test_streamer(1);
     let (_pool, handle) = VoicePool::new().with_handle();
     commands
-        .send(crate::streamer::StreamerCommand::Close {
-            stream: StreamId(9),
-        })
+        .send(crate::streamer::StreamerCommand::Close { stream: STREAM_9 })
         .expect("room for one");
     let racer = handle.clone();
     let port = commands.clone();
@@ -2051,7 +2049,7 @@ fn an_add_crowded_out_of_the_queue_puts_the_stream_back() {
     assert!(matches!(refused.error, SendError::Full));
     assert_eq!(refused.stream.loop_(), None);
     assert_ne!(
-        last_loop(&sent, StreamId(1)),
+        last_loop(&sent, StreamId::of(1)),
         Some(Some(loop_frames(0, 64, 0))),
         "the streamer is left on the refused loop: {sent:?}"
     );
@@ -2070,9 +2068,7 @@ fn a_remove_never_waits_on_another_threads_forward() {
     let id = SlotId(2);
     add_with_stream(&handle, id, streaming_voice(), &commands);
     commands
-        .send(crate::streamer::StreamerCommand::Close {
-            stream: StreamId(9),
-        })
+        .send(crate::streamer::StreamerCommand::Close { stream: STREAM_9 })
         .expect("room for one");
     assert_eq!(streamer.len(), 1, "the streamer's queue is full");
     let looper = handle.clone();
@@ -2101,13 +2097,9 @@ fn a_remove_never_waits_on_another_threads_forward() {
         matches!(
             sent.as_slice(),
             [
-                crate::streamer::StreamerCommand::Close {
-                    stream: StreamId(9)
-                },
+                crate::streamer::StreamerCommand::Close { stream: STREAM_9 },
                 crate::streamer::StreamerCommand::SetStreamLoop { .. },
-                crate::streamer::StreamerCommand::Close {
-                    stream: StreamId(1)
-                },
+                crate::streamer::StreamerCommand::Close { stream: STREAM_1 },
             ]
         ),
         "the prefill, the loop, and the removed voice's stream ending: {sent:?}"

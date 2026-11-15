@@ -6,99 +6,35 @@
 //! a chunk arrived, [`PeReassembler::expire`] the time now, and what the spec
 //! says to send comes back as a [`PeSignal`].
 
-use std::num::{NonZeroU8, NonZeroUsize};
 use std::time::Instant;
 
 use super::chunk::{ChunkNo, ChunkPosition, ChunkTotal, PeChunk, PeRequestId};
 use super::flow::{PE_TIMEOUT, PeMessageKind, PeSignal, PeTerminator};
 use super::header::{PeHeader, PeHeaderError, PeSubscription};
-use super::limits::NotInRange;
 use crate::Muid;
 use crate::TimeoutWait;
 
-/// The most messages received at once from all peers: 1 to 128, the Request IDs
-/// there are (M2-103 §5.3). A message past it is refused.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
-pub struct StreamLimit(NonZeroU8);
+tutti_types::ranged! {
+    /// The most messages received at once from all peers: 1 to 128, the Request IDs
+    /// there are (M2-103 §5.3). A message past it is refused.
+    #[derive(Eq, Hash, PartialOrd, Ord)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    StreamLimit(u8), NotAStreamLimit, "a stream limit (1 to 128)", |raw| raw >= 1 && raw <= 128
+}
 
 impl StreamLimit {
     /// The most there can be, 128.
     pub const MAX: u8 = 128;
-
-    /// The limit, or `None` for 0 or past 128.
-    #[must_use]
-    pub const fn new(raw: u8) -> Option<Self> {
-        match NonZeroU8::new(raw) {
-            Some(n) if raw <= Self::MAX => Some(Self(n)),
-            _ => None,
-        }
-    }
-
-    /// The limit.
-    #[must_use]
-    pub const fn get(self) -> u8 {
-        self.0.get()
-    }
 }
 
-/// The most bytes buffered across all the messages being received, Header Data
-/// and Property Data together.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "usize", into = "usize"))]
-pub struct BufferLimit(NonZeroUsize);
-
-impl BufferLimit {
-    /// The limit, or `None` for 0.
-    #[must_use]
-    pub const fn new(bytes: usize) -> Option<Self> {
-        match NonZeroUsize::new(bytes) {
-            Some(n) => Some(Self(n)),
-            None => None,
-        }
-    }
-
-    /// The limit in bytes.
-    #[must_use]
-    pub const fn get(self) -> usize {
-        self.0.get()
-    }
-}
-
-impl TryFrom<u8> for StreamLimit {
-    type Error = NotInRange<u8>;
-
-    fn try_from(raw: u8) -> Result<Self, NotInRange<u8>> {
-        Self::new(raw).ok_or(NotInRange {
-            what: "stream limit",
-            raw,
-        })
-    }
-}
-
-impl From<StreamLimit> for u8 {
-    fn from(limit: StreamLimit) -> u8 {
-        limit.get()
-    }
-}
-
-impl TryFrom<usize> for BufferLimit {
-    type Error = NotInRange<usize>;
-
-    fn try_from(raw: usize) -> Result<Self, NotInRange<usize>> {
-        Self::new(raw).ok_or(NotInRange {
-            what: "buffer limit",
-            raw,
-        })
-    }
-}
-
-impl From<BufferLimit> for usize {
-    fn from(limit: BufferLimit) -> usize {
-        limit.get()
-    }
+tutti_types::ranged! {
+    /// The most bytes buffered across all the messages being received, Header Data
+    /// and Property Data together.
+    #[derive(Eq, Hash, PartialOrd, Ord)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "usize", into = "usize"))]
+    BufferLimit(usize), NotABufferLimit, "a buffer limit (at least 1)", |raw| raw >= 1
 }
 
 /// What a [`PeReassembler`] holds at most.

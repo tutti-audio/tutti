@@ -24,8 +24,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_codec::Wave;
 use tutti_graph::{
-    Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare, Shape,
-    Status,
+    Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare,
+    RenderMode, Shape, Status,
 };
 use tutti_transport::TempoReader;
 use tutti_types::{ChannelLayout, SampleRate, Tail};
@@ -295,6 +295,9 @@ pub struct VoicePool {
     /// `prepare` and forwarded to each of them, so a device-rate change
     /// cannot leave a filter tuned to the old one.
     pub(crate) sample_rate: SampleRate,
+    /// The render mode the pool was last prepared in, given to every source
+    /// (a fork's file read waits only when it is offline).
+    render_mode: RenderMode,
     /// The rate, shared with the handle, so a filter the handle builds for a
     /// command is built at the rate the pool runs at.
     pub(crate) rate: SharedRate,
@@ -365,6 +368,7 @@ impl VoicePool {
             voices: Vec::with_capacity(MAX_RESIDENT_VOICES),
             rx: bounded(0).1,
             sample_rate,
+            render_mode: RenderMode::Realtime,
             rate: SharedRate::new(sample_rate),
             channels,
             clock: Clock::new(),
@@ -675,7 +679,9 @@ impl VoicePool {
         // The source runs at the pool's rate (the memory tier's conversion,
         // the disk tier's step), as `prepare` sets every resident slot's.
         // Allocation-free: a rate and a ratio.
-        slot.voice.source.prepare_rate(self.sample_rate);
+        slot.voice
+            .source
+            .set_render(self.sample_rate, self.render_mode);
         self.voices.push(slot);
 
         // Realise the remaining intent through the same appliers the update
@@ -854,6 +860,7 @@ impl Clone for VoicePool {
             },
             rx: bounded(0).1,
             sample_rate: self.sample_rate,
+            render_mode: self.render_mode,
             rate: SharedRate::new(self.sample_rate),
             clock: Clock::new(),
             tempo: self.tempo.clone(),
@@ -889,11 +896,12 @@ impl Node for VoicePool {
     fn prepare(&mut self, p: &Prepare) {
         let sample_rate = p.sample_rate();
         self.sample_rate = sample_rate;
+        self.render_mode = p.render_mode();
         self.rate.store(sample_rate);
         self.scratch
             .resize(p.max_block().get(), self.channels.count() as usize);
         for slot in &mut self.voices {
-            slot.voice.source.prepare_rate(sample_rate);
+            slot.voice.source.set_render(sample_rate, self.render_mode);
             slot.sample_rate = sample_rate;
             if let Some(unit) = &mut slot.stretch {
                 unit.set_sample_rate(sample_rate);

@@ -140,10 +140,10 @@ fn a_constant_reads_exactly_per_channel() {
     let values: Vec<f32> = (1..=6).map(|k| 0.5f32.powi(k)).collect();
     constants(&mut r, &values);
     let mut master =
-        r.ed.open_meter(MeterId(1), MeterSpec::Outputs)
+        r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
     let mut track =
-        r.ed.open_meter(MeterId(2), MeterSpec::raw(vec![out(3), out(1)]))
+        r.ed.open_meter(MeterId::of(2), MeterSpec::raw(vec![out(3), out(1)]))
             .expect("the sources exist");
     master.enable();
     track.enable();
@@ -172,7 +172,7 @@ fn measuring_is_allocation_free_with_the_meter_enabled() {
     let mut r = rig(1, true);
     constants(&mut r, &[0.5, 0.25]);
     let mut m =
-        r.ed.open_meter(MeterId(1), MeterSpec::Outputs)
+        r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
     m.enable();
     commit(&mut r);
@@ -222,7 +222,7 @@ fn a_spike_is_held_until_read_and_read_once() {
     );
     r.ed.spec_mut().topology.set_outputs(vec![out(1)]);
     let mut m =
-        r.ed.open_meter(MeterId(1), MeterSpec::Outputs)
+        r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
     m.enable();
     commit(&mut r);
@@ -256,7 +256,7 @@ fn an_enabled_meter_reads_the_block() {
     let mut r = rig(1, false);
     constants(&mut r, &[0.5, 0.5]);
     let mut m =
-        r.ed.open_meter(MeterId(1), MeterSpec::Outputs)
+        r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
     commit(&mut r);
     block(&mut r, 64);
@@ -281,7 +281,7 @@ fn the_master_follows_the_outputs() {
     let mut r = rig(1, false);
     constants(&mut r, &[0.5, 0.25]);
     let mut m =
-        r.ed.open_meter(MeterId(1), MeterSpec::Outputs)
+        r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
     m.enable();
     commit(&mut r);
@@ -306,7 +306,7 @@ fn read_into_takes_only_what_it_writes() {
     let mut r = rig(1, false);
     constants(&mut r, &[0.5, 0.25]);
     let mut m =
-        r.ed.open_meter(MeterId(1), MeterSpec::Outputs)
+        r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
     m.enable();
     commit(&mut r);
@@ -332,10 +332,10 @@ fn a_closed_meter_leaves_no_op() {
     assert_eq!(none, 0);
 
     let a =
-        r.ed.open_meter(MeterId(1), MeterSpec::Outputs)
+        r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
     let _b =
-        r.ed.open_meter(MeterId(2), MeterSpec::raw(vec![out(1), out(2), out(3)]))
+        r.ed.open_meter(MeterId::of(2), MeterSpec::raw(vec![out(1), out(2), out(3)]))
             .expect("the sources exist");
     commit(&mut r);
     assert_eq!(meter_ops(&r), (never + 2, 2), "one op a meter, any width");
@@ -348,7 +348,7 @@ fn a_closed_meter_leaves_no_op() {
     );
     commit(&mut r);
     assert_eq!(meter_ops(&r), (never + 1, 1));
-    r.ed.close_meter(MeterId(2)).unwrap();
+    r.ed.close_meter(MeterId::of(2)).unwrap();
     commit(&mut r);
     assert_eq!(meter_ops(&r), (never, 0));
     assert!(a.is_closed(), "the writer was freed with the old plan");
@@ -363,7 +363,7 @@ fn a_reader_dropped_is_reaped_and_its_cells_freed_off_the_audio_thread() {
     let mut r = rig(1, true);
     constants(&mut r, &[0.5]);
     let m =
-        r.ed.open_meter(MeterId(1), MeterSpec::Outputs)
+        r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
     m.enable();
     commit(&mut r);
@@ -386,7 +386,7 @@ fn a_reader_dropped_is_reaped_and_its_cells_freed_off_the_audio_thread() {
 fn a_reader_dropped_on_the_audio_thread_panics() {
     let mut r = rig(1, false);
     let m =
-        r.ed.open_meter(MeterId(1), MeterSpec::raw(vec![Source::Zero]))
+        r.ed.open_meter(MeterId::of(1), MeterSpec::raw(vec![Source::Zero]))
             .expect("the sources exist");
     let _inside = tutti_rt::RtScope::enter();
     drop(m);
@@ -399,7 +399,7 @@ fn removing_a_metered_node_silences_its_lane() {
     let mut r = rig(1, false);
     constants(&mut r, &[0.5, 0.25]);
     let mut m =
-        r.ed.open_meter(MeterId(1), MeterSpec::raw(vec![out(1), out(2)]))
+        r.ed.open_meter(MeterId::of(1), MeterSpec::raw(vec![out(1), out(2)]))
             .expect("the sources exist");
     m.enable();
     commit(&mut r);
@@ -419,7 +419,7 @@ fn a_reused_key_is_not_read_by_the_old_meter() {
     let mut r = rig(1, false);
     constants(&mut r, &[0.5, 0.25]);
     let mut m =
-        r.ed.open_meter(MeterId(1), MeterSpec::raw(vec![out(2)]))
+        r.ed.open_meter(MeterId::of(1), MeterSpec::raw(vec![out(2)]))
             .expect("the sources exist");
     m.enable();
     commit(&mut r);
@@ -484,13 +484,13 @@ fn output_bits(workers: usize, master: bool, track: bool) -> Vec<u32> {
     let mut readers = Vec::new();
     if master {
         readers.push(
-            r.ed.open_meter(MeterId(1), MeterSpec::Outputs)
+            r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
                 .expect("the sources exist"),
         );
     }
     if track {
         readers.push(
-            r.ed.open_meter(MeterId(2), MeterSpec::aligned(outputs))
+            r.ed.open_meter(MeterId::of(2), MeterSpec::aligned(outputs))
                 .expect("the sources exist"),
         );
     }
@@ -568,7 +568,7 @@ fn a_narrowed_node_silences_the_lanes_past_its_width_and_commits() {
     };
     r.ed.spec_mut().topology.set_outputs(vec![port(0)]);
     let mut m =
-        r.ed.open_meter(MeterId(1), MeterSpec::raw(vec![port(0), port(1)]))
+        r.ed.open_meter(MeterId::of(1), MeterSpec::raw(vec![port(0), port(1)]))
             .expect("the sources exist");
     m.enable();
     commit(&mut r);
@@ -637,13 +637,13 @@ fn the_master_reads_at_the_outputs_time() {
     // Output 0 is the latent path, output 1 the bare pulse (delayed to meet it).
     r.ed.spec_mut().topology.set_outputs(vec![out(3), out(1)]);
     let mut master =
-        r.ed.open_meter(MeterId(1), MeterSpec::Outputs)
+        r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
     let mut raw =
-        r.ed.open_meter(MeterId(2), MeterSpec::raw(vec![out(1)]))
+        r.ed.open_meter(MeterId::of(2), MeterSpec::raw(vec![out(1)]))
             .expect("the sources exist");
     let mut aligned =
-        r.ed.open_meter(MeterId(3), MeterSpec::aligned(vec![out(1)]))
+        r.ed.open_meter(MeterId::of(3), MeterSpec::aligned(vec![out(1)]))
             .expect("the sources exist");
     for m in [&master, &raw, &aligned] {
         m.enable();
@@ -690,14 +690,14 @@ fn a_meter_can_be_redeclared() {
     let mut r = rig(1, false);
     constants(&mut r, &[0.5]);
     let mut first =
-        r.ed.open_meter(MeterId(1), MeterSpec::Outputs)
+        r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
     first.enable();
     commit(&mut r);
     block(&mut r, 32);
 
     let mut second =
-        r.ed.open_meter(MeterId(1), MeterSpec::Outputs)
+        r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
     second.enable();
     commit(&mut r);
@@ -709,10 +709,10 @@ fn a_meter_can_be_redeclared() {
     );
     assert_eq!(level(&mut second), vec![(0.5, 0.5, 32)], "the second block");
 
-    r.ed.close_meter(MeterId(1)).unwrap();
+    r.ed.close_meter(MeterId::of(1)).unwrap();
     commit(&mut r);
     let mut third =
-        r.ed.open_meter(MeterId(1), MeterSpec::raw(vec![out(1)]))
+        r.ed.open_meter(MeterId::of(1), MeterSpec::raw(vec![out(1)]))
             .expect("the sources exist");
     third.enable();
     commit(&mut r);
@@ -729,11 +729,11 @@ fn a_meter_cannot_change_its_width_under_its_cells() {
     let mut r = rig(1, false);
     constants(&mut r, &[0.5, 0.25]);
     let _ports =
-        r.ed.open_meter(MeterId(1), MeterSpec::raw(vec![out(1), out(2)]))
+        r.ed.open_meter(MeterId::of(1), MeterSpec::raw(vec![out(1), out(2)]))
             .expect("the sources exist");
     commit(&mut r);
     let Some(MeterSpec::Ports { sources, .. }) =
-        r.ed.spec_mut().topology.meters.get_mut(&MeterId(1))
+        r.ed.spec_mut().topology.meters.get_mut(&MeterId::of(1))
     else {
         panic!("open");
     };
@@ -741,25 +741,22 @@ fn a_meter_cannot_change_its_width_under_its_cells() {
     assert_eq!(
         r.ed.commit(),
         Err(CommitError::MeterWidth {
-            meter: MeterId(1),
+            meter: MeterId::of(1),
             sources: 3,
             capacity: 2
         })
     );
-    r.ed.close_meter(MeterId(1)).unwrap();
+    r.ed.close_meter(MeterId::of(1)).unwrap();
 
     let _master =
-        r.ed.open_meter(MeterId(2), MeterSpec::Outputs)
+        r.ed.open_meter(MeterId::of(2), MeterSpec::Outputs)
             .expect("the sources exist");
     r.ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Zero; tutti_types::MAX_CHANNELS + 1]);
     assert!(matches!(
         r.ed.commit(),
-        Err(CommitError::MeterWidth {
-            meter: MeterId(2),
-            ..
-        })
+        Err(CommitError::MeterWidth { meter, .. }) if meter == MeterId::of(2)
     ));
 }
 
@@ -773,7 +770,7 @@ fn a_fork_meters_its_own_render_and_leaves_the_live_meter_alone() {
     let mut r = rig(1, false);
     constants(&mut r, &[0.5]);
     let mut live =
-        r.ed.open_meter(MeterId(1), MeterSpec::Outputs)
+        r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
     live.enable();
     commit(&mut r);
@@ -788,7 +785,7 @@ fn a_fork_meters_its_own_render_and_leaves_the_live_meter_alone() {
         "the live meter is not in the fork"
     );
     let mut mine = fed
-        .open_meter(MeterId(1), MeterSpec::Outputs)
+        .open_meter(MeterId::of(1), MeterSpec::Outputs)
         .expect("the sources exist");
     mine.enable();
     let mut f = Rig {
@@ -825,10 +822,10 @@ fn run(r: &mut Rig, blocks: usize) -> Vec<Vec<Level>> {
     );
     r.ed.spec_mut().topology.outputs[5] = vec![out(20)];
     let mut master =
-        r.ed.open_meter(MeterId(1), MeterSpec::Outputs)
+        r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
     let mut track =
-        r.ed.open_meter(MeterId(2), MeterSpec::raw(vec![out(2), out(20)]))
+        r.ed.open_meter(MeterId::of(2), MeterSpec::raw(vec![out(2), out(20)]))
             .expect("the sources exist");
     master.enable();
     track.enable();

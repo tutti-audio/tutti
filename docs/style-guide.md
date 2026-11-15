@@ -249,8 +249,8 @@ until it is un-parked. `vendor/` is third-party and never restyled.
 
 The policy is `CLAUDE.md`'s "Testing policy" and "Testing": a test asserts a
 property from a spec, an analytic figure or an invariant; it can fail; no
-reference-render comparison, no migration test, no golden sprawl. In audit
-terms:
+reference-render comparison, no migration test, no recorded digest of tutti's own
+output. In audit terms:
 
 - **X1. A test that cannot fail** (`M-TAUTOLOGICAL-TESTS`) (always true, asserts only no panic,
   compares a function with itself) is deleted.

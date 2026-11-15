@@ -12,9 +12,10 @@
 //! a planner, so the real-FFT passes are written out here over
 //! [`FftPlannerScalar`]. Everything else is plain `f32` Rust, which the compiler
 //! does not contract into FMAs. The transform's arithmetic is therefore
-//! CPU-independent. Its twiddles come from the C library's `sin` and `cos`, so
-//! the output is bit-identical across CPUs on the same OS, libm and rustfft
-//! version, not across libms.
+//! CPU-independent by construction. Its twiddles come from the C library's `sin`
+//! and `cos`, so the output is the same bits across CPUs on the same OS, libm
+//! and rustfft version, not across libms. The tests hold the transform to the
+//! DFT's closed forms, not to those bits.
 //!
 //! **Licence.** The `RealToComplexEven` and `ComplexToRealEven` passes and the
 //! twiddle construction are adapted from realfft 3.5.0 by Henrik Enquist (MIT);

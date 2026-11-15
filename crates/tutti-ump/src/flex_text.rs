@@ -4,7 +4,9 @@
 
 use core::iter::FusedIterator;
 
-use crate::{Flex, FlexAddress, FlexTextKind, Form, Message, MidiGroup, Ump};
+use crate::{
+    Flex, FlexAddress, FlexTextKind, Form, Message, MidiGroup, TextPackets, Ump, text_packets,
+};
 
 /// The bytes one Flex text packet carries.
 const BYTES_PER_PACKET: usize = 12;
@@ -14,10 +16,9 @@ const BYTES_PER_PACKET: usize = 12;
 /// A text of up to 12 bytes is one `Complete` packet (an empty one is a
 /// `Complete` of zeros). A longer one is a `Start`, any number of `Continue`,
 /// then an `End`, each carrying 12 bytes but the last, which carries one to 12
-/// and is padded with zeros. A packet may end inside a multi-byte character:
-/// the reader joins the bytes before it decodes them. A NUL is refused
-/// because zero is the padding: a reader cannot tell it from the end of the
-/// text. Nothing is allocated, and the packets carry no timing.
+/// and is padded with zeros (see [`text_packets`]). A NUL
+/// is refused because zero is the padding: a reader cannot tell it from the end
+/// of the text. Nothing is allocated, and the packets carry no timing.
 ///
 /// ```
 /// use tutti_ump::{
@@ -44,8 +45,7 @@ pub fn flex_text_packets(
         group,
         address,
         kind,
-        rest: text.as_bytes(),
-        started: false,
+        packets: text_packets(text.as_bytes()),
     })
 }
 
@@ -55,29 +55,14 @@ pub struct FlexTextPackets<'a> {
     group: MidiGroup,
     address: FlexAddress,
     kind: FlexTextKind,
-    rest: &'a [u8],
-    /// Whether a packet has been yielded, so an empty text is one packet.
-    started: bool,
+    packets: TextPackets<'a, BYTES_PER_PACKET>,
 }
 
 impl Iterator for FlexTextPackets<'_> {
     type Item = Ump;
 
     fn next(&mut self) -> Option<Ump> {
-        if self.started && self.rest.is_empty() {
-            return None;
-        }
-        let form = match (self.started, self.rest.len() > BYTES_PER_PACKET) {
-            (false, false) => Form::Complete,
-            (false, true) => Form::Start,
-            (true, true) => Form::Continue,
-            (true, false) => Form::End,
-        };
-        let (chunk, rest) = self.rest.split_at(self.rest.len().min(BYTES_PER_PACKET));
-        self.rest = rest;
-        self.started = true;
-        let mut bytes = [0u8; BYTES_PER_PACKET];
-        bytes[..chunk.len()].copy_from_slice(chunk);
+        let (form, bytes) = self.packets.next()?;
         Some(Ump::from(Message::Flex(
             self.group,
             Flex::Text {
@@ -90,11 +75,7 @@ impl Iterator for FlexTextPackets<'_> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let n = match (self.started, self.rest.len()) {
-            (true, 0) => 0,
-            (_, len) => len.div_ceil(BYTES_PER_PACKET).max(1),
-        };
-        (n, Some(n))
+        self.packets.size_hint()
     }
 }
 

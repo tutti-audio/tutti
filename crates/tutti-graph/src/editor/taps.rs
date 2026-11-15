@@ -53,7 +53,7 @@ impl Editor {
         capacity: Samples,
     ) -> Result<TapReader, MissingSource> {
         self.check_sources(&sources)?;
-        let (reader, writer) = TapReader::pair(id, sources.len(), capacity);
+        let (reader, writer) = TapReader::named(id, sources.len(), capacity);
         let opened = TapOpened {
             width: reader.width(),
             end: reader.end_latch(),
@@ -95,7 +95,7 @@ impl Editor {
             .copied()
             .collect();
         self.check_sources(&named)?;
-        let (reader, writer) = TapReader::pair(id, width, capacity);
+        let (reader, writer) = TapReader::named(id, width, capacity);
         let opened = TapOpened {
             width: reader.width(),
             end: reader.end_latch(),
