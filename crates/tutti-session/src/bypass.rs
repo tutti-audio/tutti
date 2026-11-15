@@ -49,7 +49,8 @@ impl BypassSync {
     }
 
     /// Writes `want` now: the node's mode changed or a plugin entered the node.
-    /// An open episode's wait starts over, so a change of mode is never held back.
+    /// The wait and the backoff start over, so a change of mode is never held
+    /// back, and a write that is lost is tried again on the next tick.
     pub(crate) fn assert_mode(
         &mut self,
         handle: &PluginHandle,
@@ -57,6 +58,7 @@ impl BypassSync {
         want: bool,
     ) {
         self.backoff = 1;
+        self.wait = 0;
         self.send(handle, mirror, want);
     }
 
@@ -139,7 +141,7 @@ fn mirrored(site: OwnBypass, mirror: &PluginParamValues) -> Option<bool> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::SeqCst};
 
@@ -152,15 +154,15 @@ mod tests {
 
     use super::BypassSync;
 
-    const ID: ParamId = ParamId::new(5);
+    pub(crate) const ID: ParamId = ParamId::new(5);
 
     /// A plugin that holds a bypass; it takes a write only if it `accepts`, and
     /// the write reaches it only if the link `delivers`.
-    struct Plugin {
-        held: AtomicBool,
-        accepts: AtomicBool,
-        delivers: AtomicBool,
-        writes: AtomicU32,
+    pub(crate) struct Plugin {
+        pub(crate) held: AtomicBool,
+        pub(crate) accepts: AtomicBool,
+        pub(crate) delivers: AtomicBool,
+        pub(crate) writes: AtomicU32,
     }
 
     impl AnyThread for Plugin {
@@ -229,7 +231,7 @@ mod tests {
 
     /// A handle over a plugin that holds a bypass, in process or served, with the
     /// mirror of its parameters read.
-    fn rig(served: bool) -> (PluginHandle, Arc<Plugin>, PluginParamValues) {
+    pub(crate) fn rig(served: bool) -> (PluginHandle, Arc<Plugin>, PluginParamValues) {
         let plugin = Arc::new(Plugin {
             held: false.into(),
             accepts: true.into(),
@@ -335,18 +337,37 @@ mod tests {
         assert_eq!(sync.unapplied(), 1);
     }
 
-    /// **A change of mode is written at once, whatever the wait.**
+    /// **A change of mode is written at once, whatever the wait, and again on
+    /// the next tick when that write is lost too.** The retries have backed off
+    /// to a long wait when the mode changes; the write still goes out, and when
+    /// the link drops it the very next tick tries again.
     #[test]
     fn a_change_of_mode_is_never_held_back() {
-        let (handle, plugin, mirror) = rig(false);
-        plugin.accepts.store(false, SeqCst);
+        let (handle, plugin, mirror) = rig(true);
+        plugin.delivers.store(false, SeqCst);
         let mut sync = BypassSync::default();
-        for _ in 0..3 {
+        sync.assert_mode(&handle, &mirror, true);
+        for _ in 0..40 {
             sync.reconcile(&handle, &mirror, true);
         }
-        let before = plugin.writes.load(SeqCst);
+        // The backoff is at its longest now. The mode changes, and the link is
+        // back: the write goes at once.
+        plugin.delivers.store(true, SeqCst);
         sync.assert_mode(&handle, &mirror, false);
-        assert_eq!(plugin.writes.load(SeqCst), before + 1);
+        assert_eq!(plugin.writes.load(SeqCst), 1, "written at once");
+
+        // The same change lost: the retry is on the next tick, not 32 ticks on.
+        let (handle, plugin, mirror) = rig(true);
+        plugin.delivers.store(false, SeqCst);
+        let mut sync = BypassSync::default();
+        sync.assert_mode(&handle, &mirror, true);
+        for _ in 0..40 {
+            sync.reconcile(&handle, &mirror, true);
+        }
+        sync.assert_mode(&handle, &mirror, false);
+        plugin.delivers.store(true, SeqCst);
+        sync.reconcile(&handle, &mirror, false);
+        assert_eq!(plugin.writes.load(SeqCst), 1, "retried on the next tick");
     }
 
     /// A plugin that holds the mode is left alone.

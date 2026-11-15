@@ -749,7 +749,10 @@ impl PluginHandle {
     /// plugin without one is [`NoOwnBypass`](BypassWrite::NoOwnBypass) and the
     /// executor's bypass serves it. A write is fire-and-forget:
     /// [`Sent`](BypassWrite::Sent) is not applied, and
-    /// [`Lost`](BypassWrite::Lost) did not reach the plugin.
+    /// [`Lost`](BypassWrite::Lost) did not reach the plugin. An in-process
+    /// plugin's bypass is written and read on the main thread only, so one is
+    /// kept only by a session ticked on it; off the main thread the write is
+    /// `Lost` and the read `None`, without waiting.
     pub fn set_bypassed(&self, bypassed: bool) -> BypassWrite {
         match self.loaded.own_bypass {
             Some(site) => self.any_thread.set_bypassed(site, bypassed),

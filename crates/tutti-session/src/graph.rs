@@ -2502,7 +2502,11 @@ impl Graph {
     /// node, so it plays processed audio under `Bypassed` for that long: a tick
     /// or two for an in-process plugin; for a served one until the plugin
     /// reports its change, or a dropped write is retried (the wait doubles up to
-    /// 32 ticks). A served plugin that refuses a delivered write is not seen.
+    /// 32 ticks). A served plugin that refuses a delivered write is not seen. An
+    /// in-process plugin's bypass is kept only on a session ticked on the main
+    /// thread (its write and read are the main thread's); nothing in the session
+    /// refuses an in-process plugin on another thread's tick, where its node
+    /// stays unbypassed under `Bypassed`.
     #[cfg(feature = "plugin")]
     pub(crate) fn reconcile_own_bypass(&mut self) {
         let wants: Vec<(NodeKey, bool)> = self

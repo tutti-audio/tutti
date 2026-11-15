@@ -1012,6 +1012,9 @@ impl HostedPlugin {
         self.probation_until = None;
         self.recovery = self.recovery.as_ref().map(|r| Recovery::new(r.policy()));
         self.reload = Reload::default();
+        // The incoming plugin's bypass is its own: nothing of the outgoing one's
+        // episode, waits or count carries over.
+        self.bypass = crate::bypass::BypassSync::default();
         self.snapshot_token = Arc::new(());
         self.snapshot_at = None;
         outgoing
@@ -1201,7 +1204,8 @@ impl<'a> Plugin<'a> {
     }
 
     /// How many times the plugin's own bypass was found other than its node's
-    /// mode after a write, over its life: a write that was lost or refused, or a
+    /// mode after a write, over this plugin instance's life (a replacement or a
+    /// reload starts the count again): a write that was lost or refused, or a
     /// bypass its editor, a restored state or its automation moved since. One
     /// count per episode, not per retry; `0` for a plugin with no bypass of its
     /// own, which the executor bypasses.
@@ -2968,5 +2972,34 @@ mod tests {
         assert!(rig.session.plugin(rig.node).is_err(), "its record is gone");
         let events = rig.run_and_land(job);
         assert!(events.is_empty(), "nothing is reported: {events:?}");
+    }
+
+    /// **A plugin that replaces another starts its own bypass episode.** The
+    /// outgoing plugin refused the node's mode (an open episode, counted once);
+    /// the incoming one's divergence is counted as its own, from zero.
+    #[test]
+    fn a_replacement_counts_its_own_bypass_episode() {
+        use crate::bypass::tests::rig;
+        use std::sync::atomic::Ordering::SeqCst;
+        let (outgoing, plugin_a, mirror_a) = rig(false);
+        plugin_a.accepts.store(false, SeqCst);
+        let mut hosted = HostedPlugin::new(
+            outgoing.clone(),
+            PluginRef::file("fake.clap").expect("a plugin file"),
+        );
+        hosted.bypass.reconcile(&outgoing, &mirror_a, true);
+        assert_eq!(
+            hosted.bypass.unapplied(),
+            1,
+            "the outgoing plugin's episode"
+        );
+
+        let (incoming, plugin_b, _) = rig(false);
+        plugin_b.accepts.store(false, SeqCst);
+        let _ = hosted.adopt(incoming.clone());
+        assert_eq!(hosted.bypass.unapplied(), 0, "nothing carries over");
+        hosted.bypass.reconcile(&incoming, &hosted.mirror, true);
+        assert_eq!(hosted.bypass.unapplied(), 1, "the incoming plugin's own");
+        assert_eq!(plugin_b.writes.load(SeqCst), 1);
     }
 }
