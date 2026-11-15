@@ -1043,10 +1043,10 @@ pub enum BounceError {
     #[error("another bounce is in flight")]
     InFlight,
     /// A declared pool entry has not landed: a bounce never forks a pending
-    /// entry silently. These are the pending entries' keys, in declaration
-    /// order; wait with [`Session::pool_loaded`] first.
+    /// entry silently. These are the pending entries' keys, as `Debug` shows
+    /// them, in declaration order; wait with [`Session::pool_loaded`] first.
     #[error("{} pool entries are still loading", .0.len())]
-    PoolPending(Vec<crate::PoolKey>),
+    PoolPending(Vec<String>),
     /// The bounce asks for something no render could give.
     #[error("bounce: {0}")]
     Config(#[from] BounceConfigError),
@@ -2073,7 +2073,7 @@ mod tests {
     /// and renders once it landed.
     #[test]
     fn a_bounce_is_refused_while_a_declared_pool_entry_is_pending() {
-        use crate::{Declared, Life, Load, PoolEntry, PoolKey};
+        use crate::{Declared, Life, Load, PoolEntry};
         use std::sync::Mutex;
 
         struct Slow;
@@ -2100,7 +2100,7 @@ mod tests {
         session.pool(Declared::new("slow", Slow)).unwrap();
         match session.bounce(short()) {
             Err(BounceError::PoolPending(keys)) => {
-                assert_eq!(keys, [PoolKey::new(&"slow")]);
+                assert_eq!(keys, ["\"slow\""]);
             }
             other => panic!("refused naming the pending entry, got {other:?}"),
         }

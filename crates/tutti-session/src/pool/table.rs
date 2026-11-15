@@ -734,14 +734,8 @@ impl Pool {
     }
 
     /// The declared entries whose load has not landed, in declaration order.
-    #[cfg_attr(
-        not(any(test, feature = "export")),
-        expect(
-            dead_code,
-            reason = "a bounce (feature `export`) refuses while any is pending"
-        )
-    )]
-    pub(crate) fn pending(&self) -> Vec<PoolKey> {
+    #[cfg(feature = "export")]
+    pub(crate) fn pending(&self) -> Vec<String> {
         let mut pending: Vec<(usize, &PoolKey)> = self
             .slots
             .iter()
@@ -749,7 +743,10 @@ impl Pool {
             .map(|(key, slot)| (slot.order, key))
             .collect();
         pending.sort_by_key(|&(order, _)| order);
-        pending.into_iter().map(|(_, key)| key.clone()).collect()
+        pending
+            .into_iter()
+            .map(|(_, key)| format!("{key:?}"))
+            .collect()
     }
 
     /// Every declared entry's outcome as a report of `K` keys, `None` while any
