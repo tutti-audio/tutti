@@ -18,6 +18,8 @@
 //!   **`edit_ring`**, **`DirtySet`** — a value in one atomic word, a sequence lock, a request
 //!   bitset, a bounded single-producer single-consumer queue, and a sized set of
 //!   dirty flags (an atomic bit per index) with no capacity to overflow.
+//! - **`ring()`** — a bounded single-producer single-consumer queue of any
+//!   `Send` value, its full-ring policy chosen at construction and its losses counted by the ring.
 //! - **`RtScope`** — a per-thread "inside a block" marker that a `Drop` impl checks.
 //! - **`SplitMut`/`SplitRw`**, **`TaskGraph`**, **`JobGate`**, **`BlockWaits`** — the
 //!   parallel executor's claims, task list, job lending and wait settings.
@@ -68,6 +70,10 @@
 //! - `JobGate` (`job_gate.rs`): erases a borrowed job's lifetime for a pool's
 //!   helpers; `run` neither returns nor unwinds until no helper is inside the job
 //!   (a store-load pair with `SeqCst` fences).
+//! - `ring()` (`ring/plain.rs`): packed `UnsafeCell<MaybeUninit<T>>` slots under a head and a
+//!   tail index; the one writer writes a slot only after the reader's `Release` store of `tail`
+//!   freed it, and the one reader reads it only after the writer's `Release` store of `head`
+//!   published it.
 //! - `handoff` (`handoff.rs`): one `MaybeUninit` slot moved between the two ends
 //!   under a state word.
 //! - `with_no_denormals` (`denormals.rs`): saves, sets and restores the FPU
@@ -148,6 +154,11 @@
 //!   outside the block.
 //! - [`edit_ring()`] — a bounded single-producer single-consumer queue of small
 //!   `Copy` values, for edits the control thread hands the audio thread.
+//! - [`ring()`] — the same shape for any `Send` value, with the full-ring policy chosen at
+//!   construction ([`Overflow`]: refuse and count, or refuse and leave the count to the caller)
+//!   and the losses counted by the ring ([`RingWriter::take_lost`], [`RingWriter::lost`]); its
+//!   values can be borrowed in place, and a run of values moves with one publish. What the
+//!   engine's command, event and tap queues are.
 //! - [`drain_clock()`] — counts the drains the audio side begins, so the control
 //!   side can tell which of its writes a block has surely taken.
 //! - [`FaultLatch`] — a flag a producer raises when it stops for good, read
@@ -193,6 +204,7 @@ mod pos_ring;
 mod priority;
 mod reclaim;
 mod request_word;
+mod ring;
 mod scope;
 mod seq_cell;
 mod sleep;
@@ -223,6 +235,7 @@ pub use pos_ring::{
 pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priority};
 pub use reclaim::Reclaim;
 pub use request_word::{REQUEST_BITS, RequestBit, RequestBitOutOfRange, RequestBits, RequestWord};
+pub use ring::{Drain, Iter, Overflow, PushError, Returned, RingReader, RingWriter, ring};
 pub use scope::{RtScope, RtScopeGuard};
 pub use seq_cell::{Contended, SeqReader, SeqWriter};
 pub use sleep::sleep_until_ns;

@@ -17,7 +17,7 @@ use super::pool::*;
 use super::types::*;
 use crate::streamer::StreamId;
 use crossbeam_channel::bounded;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tutti_codec::Wave;
 use tutti_graph::{IntoNode, Node, NodeParts, Prepare};
 use tutti_types::MaxBlock;
@@ -2382,10 +2382,10 @@ fn send_builds_the_stretch_filter_not_the_drain() {
     // is the only observation that can: after draining, a filter is present
     // either way.
     let peeked = {
-        let (probe_tx, probe_rx) = bounded(4);
+        let (probe_tx, mut probe_rx) = tutti_rt::ring(4, tutti_rt::Overflow::Refuse);
         let probe = VoicePoolHandle {
-            tx: probe_tx,
-            retired: bounded(0).1,
+            tx: Arc::new(Mutex::new(probe_tx)),
+            retired: Arc::new(Mutex::new(tutti_rt::ring(0, tutti_rt::Overflow::Refuse).1)),
             channels: ChannelLayout::from(6u16),
             rate: SharedRate::new(SampleRate::SR_44K1),
             counters: Default::default(),
@@ -2398,8 +2398,8 @@ fn send_builds_the_stretch_filter_not_the_drain() {
                 stretch: None,
             })
             .expect("the command queue has room in a test");
-        match probe_rx.try_recv().map(|q| q.cmd) {
-            Ok(VoiceCommand::AddVoice { stretch, .. }) => stretch,
+        match probe_rx.pop().map(|q| q.cmd) {
+            Some(VoiceCommand::AddVoice { stretch, .. }) => stretch,
             other => panic!("expected a queued AddVoice, got {other:?}"),
         }
     };

@@ -119,11 +119,7 @@ fn session_with_probe_at(
     let probe = session
         .add_plugin_blocking(
             tutti_fixtures::main_thread(),
-            PluginLoadRequest::new(
-                PluginRef::file(path)
-                    .expect("a plugin file")
-                    .with_hosting(hosting),
-            ),
+            PluginLoadRequest::new(PluginRef::file(path).expect("a plugin file")).hosting(hosting),
         )
         .expect("the reference CLAP plugin loads");
     session.graph().connect(probe, Root).unwrap();

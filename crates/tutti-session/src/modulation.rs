@@ -373,6 +373,7 @@ impl ModRefusal {
                 | ReconcileError::Compile(
                     C::DuplicateTarget(t)
                     | C::NanRange(t)
+                    | C::CrossedArc(t)
                     | C::LiveCurve(t)
                     | C::LayerIdCollision(t)
                     | C::TooManyLayers { target: t, .. }

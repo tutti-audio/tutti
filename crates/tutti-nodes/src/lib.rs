@@ -20,8 +20,8 @@
 //!   bands sum to flat magnitude; IIR, so not linear-phase and no latency). Each
 //!   crossover is an indexed `Cutoff` param (`UnitAddr::new(UnitParam::Cutoff, i)`).
 //! - **Delay** — `DelayNode` (any width, with a checked cross-feedback `Routing`),
-//!   a `FamilyNode` over `tutti_dsp::DelayFamily`; the time and feedback are read
-//!   per frame when driven.
+//!   a `KernelNode` over `DelayKernel` (`tutti_dsp::DelayBank`); the time and feedback are
+//!   read per frame when driven.
 //! - **Dynamics** — `CompressorNode`, `GateNode`, `BrickwallLimiterNode`,
 //!   `LimiterNode`, and `MultibandCompressorNode` (2 to 4 bands, a linked
 //!   compressor per band of a Linkwitz-Riley crossover, a hand-written node over
@@ -32,7 +32,7 @@
 //!   per-band gain reduction meters are readings on `MultibandControls`.
 //! - **Modulation effects** — `ModDelayNode` (chorus and flanger are
 //!   its two `Sweep` presets, over `tutti_dsp::ModDelayFamily`; the General MIDI chorus a third,
-//!   with no feedback and a finite tail) and `PhaserNode` (over `tutti_dsp::PhaserFamily`, its `Stages`
+//!   with no feedback and a finite tail) and `PhaserNode` (a `KernelNode` over `PhaserKernel`, its `Stages`
 //!   and `SweepRange` checked; the rate is floored at 0.01 Hz, a lane's value and a cell's alike), both any width.
 //! - **Distortion** — `DistortionNode` and its `ShapeKind` waveshapers.
 //! - **Modulation sources** — `ModulatorNode<M>` (aliased `LfoNode`), the per-sample
@@ -190,14 +190,14 @@
 //!   Linkwitz-Riley 4th-order split (`f64` state, solved on the stream's 16-frame grid), each
 //!   crossover frequency an indexed [`Cutoff`](tutti_types::UnitParam::Cutoff) param, with
 //!   [`CrossoverError`].
-//! - Delay: [`DelayNode`] over `tutti_dsp::DelayFamily`, with [`InterpolationMode`] and
-//!   [`MaxDelay`].
+//! - Delay: [`DelayNode`] over `tutti_dsp::DelayBank`, built to a [`DelayLayout`], with
+//!   [`InterpolationMode`] and [`MaxDelay`].
 //! - Dynamics: [`CompressorNode`], [`GateNode`], [`LimiterNode`],
 //!   [`BrickwallLimiterNode`], and [`MultibandCompressorNode`] (2 to 4
 //!   bands over a Linkwitz-Riley crossover, every setting an indexed param: see
 //!   [`BAND_PARAMS`]) with its [`MultibandControls`].
 //! - Modulation effects: [`ModDelayNode`] (over `tutti_dsp::ModDelayFamily`, its [`Sweep`] and
-//!   [`Stagger`] checked) and [`PhaserNode`] (over `tutti_dsp::PhaserFamily`, its [`Stages`] and
+//!   [`Stagger`] checked) and [`PhaserNode`] (over `tutti_dsp::PhaserChain`, its [`Stages`] and
 //!   [`SweepRange`] checked); [`DistortionNode`] with [`ShapeKind`].
 //! - Modulation sources: [`LfoNode`] and [`ModulatorNode`], over a
 //!   [`Modulator`] (an LFO's is `tutti-modulation`'s [`Waveform`]).
@@ -259,11 +259,11 @@ mod oscillator;
 pub use oscillator::OscillatorNode;
 
 mod delay;
-pub use delay::DelayNode;
+pub use delay::{DelayKernel, DelayNode};
 // `InterpolationMode` and the delay's controls are in `DelayNode::new`'s signature;
 // the ring itself (`DelayLine`) is `tutti-dsp`'s only.
 pub use tutti_dsp::{
-    ChannelTimes, ChannelTimesError, DelayControls, DelayFamily, InterpolationMode, MaxDelay,
+    ChannelTimes, ChannelTimesError, DelayControls, DelayLayout, InterpolationMode, MaxDelay,
     MaxDelayError, Routing, RoutingError,
 };
 
@@ -301,7 +301,7 @@ pub use strip::BusStripNode;
 // The one node over an effect's algorithm and state: the driver and the trait an
 // algorithm implements to run in it.
 mod kernel;
-pub use kernel::{Kernel, KernelNode};
+pub use kernel::{ControlLanes, Kernel, KernelNode};
 
 // The reverb: any `tutti_dsp::Family` as a node, and the Freeverb send (mono in,
 // stereo wet out) the SoundFont player's General MIDI setup uses.
@@ -321,12 +321,12 @@ mod spatial;
 pub use spatial::{HrtfBinauralNode, VbapError, VbapPannerNode};
 
 mod modulation;
-pub use modulation::{ModDelayNode, PhaserNode};
+pub use modulation::{ModDelayNode, PhaserKernel, PhaserNode};
 // The sweep, its stagger and the controls are in `ModDelayNode::new`'s and `PhaserNode::new`'s
 // signatures.
 pub use tutti_dsp::{
-    ModDelayControls, ModDelayFamily, PhaserControls, PhaserFamily, Stages, StagesError, Stagger,
-    StaggerError, Sweep, SweepError, SweepRange, SweepRangeError,
+    ModDelayControls, ModDelayFamily, PhaserControls, Stages, StagesError, Stagger, StaggerError,
+    Sweep, SweepError, SweepRange, SweepRangeError,
 };
 
 // The control sources' node (`SourceNode<S: ControlSource>`) and the

@@ -49,7 +49,7 @@
 //! allocates after that and nothing blocks. What does not fit is counted, as
 //! [`Losses`], read from [`InletCounts::losses`]:
 //!
-//! - `lost`: refused at the ring because it was full (the writer counts it and
+//! - `lost`: refused at the ring because it was full (the ring counts it and
 //!   `push` answers [`Refused::Full`]);
 //! - `evicted`: dropped from the waiting list because more events wait than it
 //!   holds. The latest-due event that may be lost goes; a note-off or a panic
@@ -62,9 +62,9 @@
 //!
 //! # One producer
 //!
-//! The ring is `ringbuf`'s single-producer, single-consumer ring, so the writer
-//! is `Send` and is not `Clone`; two producers are two inlets, and the graph's
-//! event fan-in merges them in source order:
+//! The ring is `tutti_rt::ring`, single-producer and single-consumer, so the
+//! writer is `Send` and is not `Clone`; two producers are two inlets, and the
+//! graph's event fan-in merges them in source order:
 //!
 //! ```compile_fail
 //! fn second_producer(writer: &tutti_graph::EventInletWriter) -> tutti_graph::EventInletWriter {
@@ -94,9 +94,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytemuck::{Pod, Zeroable};
-use ringbuf::traits::{Consumer, Producer, Split};
-use ringbuf::{HeapCons, HeapProd, HeapRb};
-use tutti_rt::{SeqReader, SeqWriter};
+use tutti_rt::{Counter, Overflow, PushError, RingReader, RingWriter, SeqReader, SeqWriter, ring};
 use tutti_types::{At, Frame, Moment, SampleRate};
 use tutti_ump::Ump;
 
@@ -110,15 +108,19 @@ use crate::time::Due;
 
 /// Why [`EventInletWriter::push`] did not queue.
 ///
-/// One variant: a stamp cannot name a beat any more, so the ring being full is
-/// the only way left. It stays an enum so the reason reads at the call site
-/// (`Err(Refused::Full)`).
+/// A stamp cannot name a beat any more, so a full ring, or a node that is gone,
+/// are the only ways left.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[non_exhaustive]
 pub enum Refused {
     /// The ring is full: the event was dropped and counted
     /// ([`Losses::lost`]).
     #[error("the event inlet's ring is full")]
     Full,
+    /// The node was dropped: the event was dropped and nothing counts it,
+    /// and every later push fails the same way.
+    #[error("the event inlet's node is gone")]
+    Disconnected,
 }
 
 /// When a pushed event is due, as the producer names it.
@@ -186,7 +188,6 @@ struct Waiting {
 /// The counts the node and the writer share.
 #[derive(Debug, Default)]
 struct Counts {
-    lost: AtomicU64,
     late: AtomicU64,
     evicted: AtomicU64,
     refused: AtomicU64,
@@ -195,7 +196,10 @@ struct Counts {
 /// A cloneable view of an inlet's counts, for a thread that does not hold the
 /// writer (the control side, while a driver thread pushes).
 #[derive(Clone, Debug)]
-pub struct InletCounts(Arc<Counts>);
+pub struct InletCounts {
+    counts: Arc<Counts>,
+    lost: Counter<u64>,
+}
 
 impl InletCounts {
     /// Everything the inlet has lost, cumulative, in events.
@@ -205,9 +209,9 @@ impl InletCounts {
     /// refused; `late`: events emitted at offset 0 for being past their frame.
     #[must_use]
     pub fn losses(&self) -> Losses {
-        let c = &*self.0;
+        let c = &*self.counts;
         Losses {
-            lost: c.lost.load(Ordering::Relaxed),
+            lost: self.lost.get(),
             evicted: c.evicted.load(Ordering::Relaxed),
             refused: c.refused.load(Ordering::Relaxed),
             late: c.late.load(Ordering::Relaxed),
@@ -221,7 +225,7 @@ impl InletCounts {
 /// `Send`, not `Clone`, and `push` takes `&mut self`: see the module docs.
 /// Nothing here blocks, locks or allocates.
 pub struct EventInletWriter {
-    ring: HeapProd<Pushed>,
+    ring: RingWriter<Pushed>,
     clock: SeqReader<Reading>,
     counts: Arc<Counts>,
 }
@@ -261,7 +265,9 @@ impl EventInletWriter {
     ///
     /// [`Refused::Full`] when the ring is full (the event is dropped and
     /// counted in [`Losses::lost`]; dropping a note-off whose note-on landed
-    /// leaves a note stuck, so a caller must report it).
+    /// leaves a note stuck, so a caller must report it);
+    /// [`Refused::Disconnected`] once the node is dropped (not counted: the
+    /// event had nowhere to go, now or later).
     pub fn push(&mut self, at: impl Into<Stamp>, ump: impl Into<Ump>) -> Result<(), Refused> {
         let ump = ump.into();
         let when = match at.into() {
@@ -272,10 +278,13 @@ impl EventInletWriter {
                 rate: m.rate().get(),
             },
         };
-        self.ring.try_push(Pushed { when, ump }).map_err(|_| {
-            self.counts.lost.fetch_add(1, Ordering::Relaxed);
-            Refused::Full
-        })
+        // The ring counts a full refusal; a node that is gone refuses uncounted.
+        self.ring
+            .push(Pushed { when, ump })
+            .map_err(|refused| match refused.error {
+                PushError::Full => Refused::Full,
+                PushError::Disconnected => Refused::Disconnected,
+            })
     }
 
     /// Queues every `(stamp, ump)` in order, each as [`push`](Self::push)
@@ -299,7 +308,10 @@ impl EventInletWriter {
     /// of its own: the view is the one place that answers.
     #[must_use]
     pub fn counts(&self) -> InletCounts {
-        InletCounts(Arc::clone(&self.counts))
+        InletCounts {
+            counts: Arc::clone(&self.counts),
+            lost: self.ring.losses(),
+        }
     }
 }
 
@@ -394,7 +406,7 @@ impl From<EventCapacity> for u32 {
 /// assert_eq!(node.capacity(), EventCapacity::of(256));
 /// ```
 pub struct EventInletNode {
-    ring: HeapCons<Pushed>,
+    ring: RingReader<Pushed>,
     counts: Arc<Counts>,
     clock: SeqWriter<Reading>,
     capacity: EventCapacity,
@@ -421,7 +433,7 @@ impl EventInletNode {
     /// capacity are all `capacity` events. Allocates; control side.
     #[must_use = "the writer is the only way to fill the ring"]
     pub fn pair(capacity: EventCapacity) -> (Self, EventInletWriter) {
-        let (producer, consumer) = HeapRb::<Pushed>::new(capacity.slots()).split();
+        let (producer, consumer) = ring::<Pushed>(capacity.slots(), Overflow::DropNewest);
         let counts = Arc::new(Counts::default());
         let clock = SeqWriter::new();
         let writer = EventInletWriter {
@@ -544,7 +556,7 @@ impl Node for EventInletNode {
         // equal one last. At most a ring's worth, so a producer cannot hold the
         // block here.
         for _ in 0..self.capacity.slots() {
-            let Some(pushed) = self.ring.try_pop() else {
+            let Some(pushed) = self.ring.pop() else {
                 break;
             };
             let frame = match pushed.when {

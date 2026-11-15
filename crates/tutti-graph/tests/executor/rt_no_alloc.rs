@@ -914,6 +914,116 @@ fn parallel_modulated_params_are_allocation_free() {
     modulated_params_are_allocation_free_on(4);
 }
 
+/// Declares `Azimuth` (base 0) and writes what it reads.
+struct AzimuthSink;
+
+impl Node for AzimuthSink {
+    fn shape(&self) -> Shape {
+        Shape::through_unassigned(ChannelLayout::MONO)
+            .with_params(&[tutti_types::UnitParam::Azimuth])
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        for i in 0..io.frames() {
+            io.output(0)[i] = io.param(0).frames().map_or(0.0, |v| v[i]);
+        }
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+    fn param_base(&self, port: usize) -> Option<f32> {
+        (port == 0).then_some(0.0)
+    }
+}
+
+/// An `Azimuth` segment every 29 frames across the seam, both ways, over
+/// every shape class.
+struct SeamEvery;
+
+impl Node for SeamEvery {
+    fn shape(&self) -> Shape {
+        Shape::EMPTY.with_events(0, 1).with_event_capacity(16)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+        let start = cx.env.frame.get();
+        for i in 0..io.frames() {
+            let f = start + i as u64;
+            if f.is_multiple_of(29) {
+                let o = io.offset(i).expect("inside");
+                let (from, to) = if (f / 29).is_multiple_of(2) {
+                    (170.0, -170.0)
+                } else {
+                    (-175.0, 175.0)
+                };
+                let shape = [Law::Linear, Law::PowerIn(Exponent::of(2.0)), Law::Hold]
+                    [(f / 87) as usize % 3];
+                let seg = ParamSegment::unit(
+                    tutti_types::UnitParam::Azimuth,
+                    from,
+                    to,
+                    Samples(40),
+                    shape,
+                );
+                let _ = io.event_out(0).push(tutti_graph::Event::segment(o, seg));
+            }
+        }
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+/// A bearing's port, wrapping and short-arc interpolating, with its range
+/// moved between blocks (an arc across ±180, the whole circle, unbounded),
+/// allocates nothing.
+#[test]
+fn an_azimuth_param_port_is_allocation_free() {
+    use tutti_graph::{ParamIn, ParamRange};
+    use tutti_types::{ArcDegrees, Azimuth};
+    let (mut ed, mut exec) = Editor::new(prepare(256));
+    ed.insert(NodeKey(1), "sink", Unforkable(AzimuthSink));
+    ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
+    ed.spec_mut()
+        .topology
+        .set_outputs(vec![Source::Node(OutPort {
+            node: NodeKey(1),
+            port: 0,
+        })]);
+    let azimuth = ParamIn {
+        node: NodeKey(1),
+        param: tutti_types::UnitParam::Azimuth.into(),
+    };
+    ed.spec_mut().connect_param(
+        azimuth,
+        EventOut {
+            node: NodeKey(4),
+            port: 0,
+        },
+    );
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    let transport = TransportPosition::default();
+    let mut out = vec![0.0f32; 256];
+    let ranges = [
+        ParamRange::arc(Azimuth(180.0), ArcDegrees(30.0)),
+        ParamRange::new(-180.0, 180.0),
+        ParamRange::UNBOUNDED,
+    ];
+    let sizes = [256usize, 1, 7, 64, 100, 255, 33];
+    for i in 0..60 {
+        ed.set_param_range(azimuth, ranges[i % ranges.len()])
+            .expect("a bearing's range");
+        for &n in &sizes {
+            assert_no_alloc::assert_no_alloc(|| {
+                exec.process(n, &transport, &[], &mut [&mut out[..n]]);
+            });
+        }
+    }
+    assert!(
+        out.iter().all(|v| (-180.0..180.0).contains(v)),
+        "the bearings are wrapped"
+    );
+}
+
 /// `contract::Direct`, the by-hand driver an instrument's allocation gate
 /// runs its node through, allocates nothing per block while it plays a full
 /// block of events into a node's event input, and while it collects a

@@ -19,6 +19,7 @@ use std::sync::Arc;
 use tutti_curve::{Law, Piece};
 use tutti_types::{
     Beat, BeatsPerCycle, Depth, Frame, Hz, Phase, PhaseIncrement, SamplePosition, SampleRate,
+    UnitParam,
 };
 
 use crate::curve::{Curve, CurveSegment};
@@ -329,8 +330,8 @@ pub enum ProgramError {
 ///     rate: SampleRate::SR_48K,
 /// };
 /// // Range 0..800: a span of 800, so the offset is ±200.
-/// assert_eq!(program.value_at(Some(1000.0), &at(1.0), 800.0, &[]), Some(1200.0));
-/// assert_eq!(program.value_at(Some(1000.0), &at(3.0), 800.0, &[]), Some(800.0));
+/// assert_eq!(program.value_at(None, Some(1000.0), &at(1.0), 800.0, &[]), Some(1200.0));
+/// assert_eq!(program.value_at(None, Some(1000.0), &at(3.0), 800.0, &[]), Some(800.0));
 /// ```
 #[derive(Clone, Default)]
 pub struct ControlProgram {
@@ -465,7 +466,8 @@ impl ControlProgram {
         self.automation.is_some() && self.layers.is_empty() && self.inputs.is_empty()
     }
 
-    /// The value at `at`, before any clamp: the automation's value where it
+    /// The value at `at` of the program driving `param` (`None`: a target of
+    /// no tutti unit, a line), before any clamp: the automation's value where it
     /// has one (and it is finite), else `knob`, plus every layer's offset
     /// and every input's (`inputs[k]` is the raw value of
     /// [`inputs()`](Self::inputs)`[k]`'s source, `None` while it has not
@@ -479,14 +481,21 @@ impl ControlProgram {
     /// Pure and allocation-free. Offsets are summed in `f64` from `-0.0`, in
     /// id order (layers, then inputs), and rounded to `f32` once, so a base
     /// with no offsets passes through to the bit.
+    ///
+    /// A circular `param` ([`UnitParam::is_circular`], `Azimuth`) moves along
+    /// the short arc between an automation curve's breakpoints and takes its
+    /// offsets as `wrap(base + offsets)`, never a clamp; `span` is then the
+    /// arc's length (`ParamRange::span`). A line is unchanged,
+    /// to the bit.
     pub fn value_at(
         &self,
+        param: Option<UnitParam>,
         knob: Option<f32>,
         at: &ProgramTime,
         span: f64,
         inputs: &[Option<f32>],
     ) -> Option<f32> {
-        self.evaluate(knob, at, span, inputs, Limit::At)
+        self.evaluate(param, knob, at, span, inputs, Limit::At)
     }
 
     /// The left limit at `at`: [`value_at`](Self::value_at) just before it,
@@ -495,26 +504,29 @@ impl ControlProgram {
     /// pair): what a piece ending at a corner aims at.
     pub fn value_before(
         &self,
+        param: Option<UnitParam>,
         knob: Option<f32>,
         at: &ProgramTime,
         span: f64,
         inputs: &[Option<f32>],
     ) -> Option<f32> {
-        self.evaluate(knob, at, span, inputs, Limit::Before)
+        self.evaluate(param, knob, at, span, inputs, Limit::Before)
     }
 
     fn evaluate(
         &self,
+        param: Option<UnitParam>,
         knob: Option<f32>,
         at: &ProgramTime,
         span: f64,
         inputs: &[Option<f32>],
         limit: Limit,
     ) -> Option<f32> {
+        let circular = param.filter(|p| p.is_circular());
         let base = self
             .automation
             .as_ref()
-            .and_then(|c| automation_at(c.as_ref(), at.beat.get(), limit))
+            .and_then(|c| automation_at(c.as_ref(), at.beat.get(), limit, circular))
             .filter(|v| v.is_finite())
             .or(knob)?;
         if !span.is_finite() {
@@ -531,7 +543,8 @@ impl ControlProgram {
                 acc += l.amount.offset(x, span);
             }
         }
-        Some((f64::from(base) + acc) as f32)
+        let sum = (f64::from(base) + acc) as f32;
+        Some(circular.map_or(sum, |p| p.wrap(sum)))
     }
 
     /// The next corner strictly after `at` on each clock: the earliest of
@@ -596,8 +609,28 @@ enum Limit {
 /// the piece, its position rounded *down* to `f32`: a trajectory rounds the
 /// position up to 1.0 a nanobeat before a breakpoint, which on a stepped
 /// piece reads the level after the step.
-fn automation_at(curve: &dyn Curve, b: f64, limit: Limit) -> Option<f32> {
+fn automation_at(
+    curve: &dyn Curve,
+    b: f64,
+    limit: Limit,
+    circular: Option<UnitParam>,
+) -> Option<f32> {
     if limit == Limit::At {
+        // A circular param's move is the short arc, which the curve's own
+        // `value_at` (a straight line between values) does not know.
+        if let Some(p) = circular
+            && let Some(CurveSegment::Move {
+                start,
+                end,
+                from,
+                to,
+                shape,
+            }) = curve.segment_at(Beat(b))
+            && end.get() > start.get()
+        {
+            let t = ((b - start.get()) / (end.get() - start.get())) as f32;
+            return Some(Piece::new(from, to, shape).value(Some(p), t));
+        }
         return curve.value_at(Beat(b));
     }
     let x = b - tol(b);
@@ -616,7 +649,7 @@ fn automation_at(curve: &dyn Curve, b: f64, limit: Limit) -> Option<f32> {
             if f64::from(t32) > t {
                 t32 = t32.next_down();
             }
-            return Some(Piece::new(from, to, shape).value(t32));
+            return Some(Piece::new(from, to, shape).value(circular, t32));
         }
     }
     curve.value_at(Beat(x))
@@ -946,7 +979,7 @@ fn drawn_value(points: &[PeriodPoint], frac: f64) -> f32 {
         (p, f64::from(p.at.get()), q, f64::from(q.at.get()))
     };
     let t = ((frac - start) / (end - start)) as f32;
-    Piece::new(p.value, q.value, p.curve).value(t)
+    Piece::new(p.value, q.value, p.curve).value(None, t)
 }
 
 /// Where in `(0, 1)` a `curve` piece from `a` to `b` crosses zero, if its
@@ -963,7 +996,7 @@ fn crossing(curve: Law, a: f32, b: f32) -> Option<f64> {
     let below = a < 0.0;
     for _ in 0..30 {
         let mid = 0.5 * (lo + hi);
-        let v = Piece::new(a, b, curve).value(mid);
+        let v = Piece::new(a, b, curve).value(None, mid);
         if (v < 0.0) == below {
             lo = mid;
         } else {

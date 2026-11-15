@@ -581,13 +581,13 @@ pub(crate) fn first(out: &mut [f32], a: Option<&[f32]>, w: Weight<'_>) {
         (Some(a), Weight::Ramp { from, to }) => {
             let (from, to) = (from.get(), to.get());
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o = 0.0 + Piece::ramp_at(from, to, i, frames) * x;
+                *o = 0.0 + Piece::ramp_at(None, from, to, i, frames) * x;
             }
         }
         (None, Weight::Ramp { from, to }) => {
             let (from, to) = (from.get(), to.get());
             for (i, o) in out.iter_mut().enumerate() {
-                *o = 0.0 + Piece::ramp_at(from, to, i, frames) * *o;
+                *o = 0.0 + Piece::ramp_at(None, from, to, i, frames) * *o;
             }
         }
         (
@@ -651,7 +651,7 @@ pub(crate) fn add(out: &mut [f32], a: &[f32], w: Weight<'_>) {
         Weight::Ramp { from, to } => {
             let (from, to) = (from.get(), to.get());
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o += Piece::ramp_at(from, to, i, frames) * x;
+                *o += Piece::ramp_at(None, from, to, i, frames) * x;
             }
         }
         Weight::Fade {

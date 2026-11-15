@@ -181,6 +181,7 @@ fn no_editor(
     _: MainThreadMarker,
     _: &tutti_plugin_types::MainWorkHandle,
     path: &Path,
+    _: tutti_plugin_types::PluginFormat,
     _: &Load,
 ) -> BridgeResult<Box<dyn Editor>> {
     Err(BridgeError::LoadFailed {
@@ -198,6 +199,7 @@ fn served_id(plugin: &PluginRef) -> String {
     let Launched { ipc, .. } = Ipc::launch(
         IpcConfig::default(),
         plugin.path().to_path_buf(),
+        plugin.format(),
         plugin.load(),
         SampleRate::SR_48K,
         None,
