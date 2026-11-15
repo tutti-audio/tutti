@@ -521,7 +521,7 @@ impl PluginClient<Unbound> {
 
 impl PluginClient<Bound> {
     /// The builder of the node that replaces this one when the plugin changes
-    /// its audio ports ([`Rebinder::rebind`]). Made on the call from what the
+    /// its audio ports ([`Rebinder::prepare`]). Made on the call from what the
     /// bound node holds, so take it before the client goes into a graph
     /// (`into_parts` consumes the client) and keep it beside the node's
     /// controls. It is limited to the ports the plugin had when it was

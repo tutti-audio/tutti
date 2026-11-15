@@ -83,7 +83,7 @@ pub struct PortLimit {
 /// Builds the node that replaces a plugin node whose plugin changed its ports.
 ///
 /// Made from the node it replaces ([`InProcClient::rebinder`]) and kept on the
-/// control side. [`rebind`](Self::rebind) takes the instance lock, so never the
+/// control side. [`prepare`](Self::prepare) takes the instance lock, so never the
 /// audio thread.
 pub struct Rebinder<F: Loaded> {
     inner: Arc<Mutex<Instance<F>>>,
