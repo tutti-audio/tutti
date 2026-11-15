@@ -2902,10 +2902,14 @@ impl Graph {
         if reaped > 0 {
             let open = &self.editor.spec().topology.taps;
             self.output_taps.retain(|id, _| open.contains_key(id));
-            self.reopened.retain(|id, _| match id {
-                RootReader::Tap(tap) => open.contains_key(tap),
-                RootReader::Meter(_) => true,
-            });
+            // A held reader keeps its tap alive, and a claimed one has left the map.
+            debug_assert!(
+                self.reopened.keys().all(|id| match id {
+                    RootReader::Tap(tap) => open.contains_key(tap),
+                    RootReader::Meter(_) => true,
+                }),
+                "no held reader names a reaped tap"
+            );
             self.edited = true;
         }
         reaped
@@ -2929,10 +2933,14 @@ impl Graph {
         let reaped = self.editor.reap_meters();
         if reaped > 0 {
             let open = &self.editor.spec().topology.meters;
-            self.reopened.retain(|id, _| match id {
-                RootReader::Meter(meter) => open.contains_key(meter),
-                RootReader::Tap(_) => true,
-            });
+            // A held reader keeps its meter alive, and a claimed one has left the map.
+            debug_assert!(
+                self.reopened.keys().all(|id| match id {
+                    RootReader::Meter(meter) => open.contains_key(meter),
+                    RootReader::Tap(_) => true,
+                }),
+                "no held reader names a reaped meter"
+            );
             self.edited = true;
         }
         reaped

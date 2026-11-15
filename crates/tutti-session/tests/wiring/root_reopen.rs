@@ -357,26 +357,23 @@ fn closing_a_tap_drops_the_reader_held_for_it() {
     assert!(drain(&mut old).1, "the superseded reader ends");
 }
 
-/// **A reaped tap leaves nothing held**: the claimed reader is dropped, the
-/// reclaim phase reaps its tap, and the id is not claimable again.
+/// **Closing the master meter drops the reader held for it**: the claim is
+/// refused, and the superseded handle reads closed.
 #[test]
-fn a_reaped_tap_leaves_no_reader_held() {
+fn closing_the_master_meter_drops_the_reader_held_for_it() {
     let mut s = session();
-    let old = s.graph().taps().open_output(Samples(4096)).expect("opens");
-    let id = RootReader::Tap(old.id().expect("named"));
+    let old = s.take_master_meter().expect("held");
+    let id = old.id();
+    let _ = block(&mut s);
     s.declare_root_topology(Some(mono())).expect("mono").hard();
     assert_eq!(reopened(block(&mut s)).len(), 1);
-    drop(claim_tap(&mut s, id));
-    drop(old);
-    for _ in 0..3 {
+    s.graph().meters().close(id).expect("open");
+    for _ in 0..2 {
         let _ = block(&mut s);
     }
-    assert_eq!(s.take_reopened(id).unwrap_err(), NotReopened(id));
-    s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::STEREO)))
-        .expect("stereo")
-        .hard();
-    assert!(
-        reopened(block(&mut s)).is_empty(),
-        "the reaped tap is not reopened"
+    assert_eq!(
+        s.take_reopened(RootReader::Meter(id)).unwrap_err(),
+        NotReopened(RootReader::Meter(id))
     );
+    assert!(old.is_closed());
 }
