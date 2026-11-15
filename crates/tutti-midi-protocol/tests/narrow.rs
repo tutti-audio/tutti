@@ -2,7 +2,9 @@
 //! M2-115 section 3.4, the bit-level statement of the rule at the other widths,
 //! and the round trip through `widen` for every 7-bit and 14-bit value.
 
-use tutti_midi_protocol::{narrow_bend, narrow_value, narrow_velocity, widen};
+use tutti_midi_protocol::{
+    narrow_bend, narrow_note_on_velocity, narrow_value, narrow_velocity, widen,
+};
 use tutti_ump::{BendValue, ControlValue};
 use tutti_ump::{CCNumber, NoteNumber, NoteVelocity, U7, U14, Voice1, Voice2};
 
@@ -102,5 +104,27 @@ fn widen_then_narrow_returns_every_fourteen_bit_bend() {
             panic!("{v}")
         };
         assert_eq!(narrow_bend(wide), bend, "bend {v}");
+    }
+}
+
+/// M2-104 section 7.4.2: a MIDI 1.0 Note On at velocity 0 is a Note Off, so a
+/// nonzero 16-bit Note On velocity never narrows to 0. Velocity 0 itself and the
+/// range at and above `0x0200` are the plain shift's.
+#[test]
+fn a_note_on_velocity_never_narrows_to_a_note_off() {
+    for v in 1..0x0200 {
+        assert_eq!(narrow_velocity(NoteVelocity::new(v)).get(), 0, "{v:#x}");
+        assert_eq!(
+            narrow_note_on_velocity(NoteVelocity::new(v)).get(),
+            1,
+            "{v:#x}"
+        );
+    }
+    for v in [0x0200, 0x8000, 0xFFFF] {
+        assert_eq!(
+            narrow_note_on_velocity(NoteVelocity::new(v)),
+            narrow_velocity(NoteVelocity::new(v)),
+            "{v:#x}"
+        );
     }
 }

@@ -7,6 +7,11 @@
 //! thread carries one without an `Arc<dyn _>`. The graph's parameter ports, the
 //! modulation shaping and the automation lanes all evaluate the same `Law`.
 //!
+//! A [`FadeLaw`] is the gain pair of a fade between two signals, and
+//! [`DECLICK`] its length in time: one law and one length for every fade of the
+//! engine. A ramp, continuous interpolation chained block after block, is a
+//! linear [`Piece`] ([`Piece::ramp_at`]).
+//!
 //! A [`Piece`] is a value moving from one endpoint to another along a `Law`, read at
 //! a progress: the one formula every consumer evaluates.
 //!
@@ -18,7 +23,7 @@
 //! use tutti_curve::{Breakpoint, Exponent, Law, Piece, Trajectory};
 //! use tutti_types::Beat;
 //!
-//! assert_eq!(Piece::new(0.0, 8.0, Law::PowerIn(Exponent::of(2.0))).value(0.5), 2.0);
+//! assert_eq!(Piece::new(0.0, 8.0, Law::PowerIn(Exponent::of(2.0))).value(None, 0.5), 2.0);
 //!
 //! let mut lane = Trajectory::new();
 //! lane.add_breakpoint(Breakpoint::with_law(Beat(0.0), 0.0, Law::PowerIn(Exponent::of(2.0))));
@@ -27,11 +32,13 @@
 //! ```
 #![forbid(unsafe_code)]
 
+mod fade;
 mod law;
 mod parameter;
 mod piece;
 mod trajectory;
 
+pub use fade::{DECLICK, FadeLaw, declick_frames};
 pub use law::Law;
 pub use parameter::{Curvature, CurvatureError, Exponent, ExponentError};
 pub use piece::Piece;

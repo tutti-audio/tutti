@@ -168,7 +168,7 @@ fn an_event_edge_is_cut_with_one_commit_and_not_faded() {
     let _ = s.update();
     let cut = s.graph().testing().commits_sent();
     // Past the span an audio edge would fade over.
-    for _ in 0..(2 * tutti_graph::EDGE_DECLICK.get()) {
+    for _ in 0..(2 * tutti_graph::declick_frames(SampleRate::SR_48K).get()) {
         s.render_frame(&mut out);
     }
     let _ = s.update();

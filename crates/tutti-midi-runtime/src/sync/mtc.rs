@@ -8,7 +8,7 @@
 //! and inferred tempo) is [`MidiClockDecoder`](crate::MidiClockDecoder). A device sends one or the
 //! other, and which you decode is decided by the source, not by preference.
 
-use tutti_midi_protocol::{MtcRate, SmpteFrameRate, SmpteTimecode};
+use tutti_midi_protocol::{MtcTimeCode, SmpteTimecode};
 use tutti_ump::{Message, System, Ump};
 
 /// Frames the eight pieces of a cycle take to send, and so how old the
@@ -94,33 +94,17 @@ impl MtcDecoder {
     }
 
     fn assemble(&mut self) {
-        let n = &self.nibbles;
-
-        // The bits the spec reserves are not read: a transmitter sets them to 0
-        // and a receiver ignores them (MTC, Quarter Frame Messages): the top three bits of the
-        // frame field, the top two of seconds and of minutes, and the top bit
-        // of the hours nibble pair (bit 3 of piece 7, above the rate code).
-        let frames = n[0] | ((n[1] & 0x01) << 4);
-        let seconds = n[2] | ((n[3] & 0x03) << 4);
-        let minutes = n[4] | ((n[5] & 0x03) << 4);
-        let hours_low = n[6];
-        let hours_high_and_rate = n[7];
-
-        let hours = hours_low | ((hours_high_and_rate & 0x01) << 4);
-        let rate_bits = (hours_high_and_rate >> 1) & 0x03;
-
-        let frame_rate = SmpteFrameRate::from(MtcRate::masked(rate_bits));
-
         // A position the wire framed but no clock reads (hour 28, frame 31) is
         // a corrupt frame: it is dropped, and `timecode` keeps its last value.
-        if let Some(timecode) = SmpteTimecode::new(hours, minutes, seconds, frames, frame_rate) {
+        if let Some(position) = MtcTimeCode::from_nibbles(self.nibbles) {
+            let timecode = position.timecode();
             // The eight pieces took two frames to send, so the position they
             // describe is two frames old when the last arrives, so the MTC spec has a
             // receiver keep an internal offset of +2 frames. The decoder keeps it, so `timecode` is the time of
             // the last piece.
             self.timecode = Some(SmpteTimecode::from_frame_count(
                 timecode.frame_count() + CYCLE_FRAMES,
-                frame_rate,
+                timecode.frame_rate(),
             ));
         }
     }

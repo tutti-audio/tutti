@@ -29,4 +29,5 @@ thiserror = { workspace = true }
 [dev-dependencies]
 serde_json = "1"
 tutti-midi-protocol = { path = ".", features = ["serde"] }
+tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 

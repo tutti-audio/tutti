@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use support::{clap_probe, plugin_server};
 use tutti_graph::NodeKey;
 use tutti_modulation::Lfo;
-use tutti_plugin::catalog::PluginRef;
+use tutti_plugin::catalog::{Loadable, PluginRef};
 use tutti_plugin::handles::PluginClient;
 use tutti_plugin_types::{Normalized, ParamId};
 use tutti_session::{
@@ -276,7 +276,7 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
     let incoming = PluginClient::new(
         tutti_plugin::BridgeConfig::default(),
         &tutti_fixtures::detached_work(),
-        &PluginRef::file(clap_probe()).expect("a plugin file"),
+        &Loadable::uncatalogued(PluginRef::file(clap_probe()).expect("a plugin file")),
         RATE,
     )
     .expect("load a second instance of the reference plugin");
@@ -286,7 +286,7 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
             node,
             Box::new(incoming),
             Seconds(0.005),
-            tutti_graph::CrossfadeCurve::EqualAmplitude,
+            tutti_graph::FadeLaw::EqualAmplitude,
         )
         .expect("the crossfade is accepted");
     assert!(matches!(landed, Crossfade::Landed(())), "nothing waits");

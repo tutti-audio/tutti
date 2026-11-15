@@ -11,9 +11,10 @@
 use std::sync::Arc;
 
 use crate::lanes::{BlockScratch, UNPREPARED_FRAMES};
+use crate::nonempty;
 use crate::streamer::Stream;
 use crate::stretch;
-use crate::{MAX_SAMPLER_CHANNELS, nonempty};
+use tutti_types::MAX_CHANNELS;
 
 use super::clock::{BlockClock, Clock};
 use super::command::{Steering, SteeringCell, VoiceNodeHandle};
@@ -353,7 +354,10 @@ impl Node for VoiceNode {
         self.scratch
             .resize(p.max_block().get(), self.channels.count() as usize);
         let sample_rate = p.sample_rate();
-        self.slot.voice.source.prepare_rate(sample_rate);
+        self.slot
+            .voice
+            .source
+            .set_render(sample_rate, p.render_mode());
         self.slot.sample_rate = sample_rate;
         if let Some(unit) = &mut self.slot.stretch {
             unit.set_sample_rate(sample_rate);
@@ -373,16 +377,15 @@ impl Node for VoiceNode {
         let frames = io.frames();
         let (_, mut outs) = io.split();
         // Every output this node declares, not only the `n` the read writes:
-        // a node wider than `MAX_SAMPLER_CHANNELS` leaves the rest silent
+        // a node wider than `MAX_CHANNELS` leaves the rest silent
         // rather than holding whatever the buffer held.
         for ch in outs.iter_mut() {
             ch.fill(0.0);
         }
         let n = (self.channels.count() as usize)
             .min(outs.len())
-            .min(MAX_SAMPLER_CHANNELS);
-        let mut refs: [&mut [f32]; MAX_SAMPLER_CHANNELS] =
-            std::array::from_fn(|_| Default::default());
+            .min(MAX_CHANNELS);
+        let mut refs: [&mut [f32]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
         for (slot, ch) in refs.iter_mut().zip(outs.iter_mut()) {
             *slot = ch;
         }

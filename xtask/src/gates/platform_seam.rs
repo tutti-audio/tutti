@@ -68,7 +68,6 @@ pub(super) const ALLOW: &[(&str, usize, &str)] = &[
         1,
         CORE,
     ),
-    ("testing/tutti-fixtures/src/glibc.rs", 5, CORE),
     ("testing/tutti-fixtures/src/lib.rs", 9, CORE),
     ("testing/tutti-fixtures/src/plugin.rs", 2, CORE),
     ("testing/tutti-fixtures/src/vst3_cpp.rs", 2, CORE),
@@ -125,13 +124,14 @@ pub(super) const ALLOW: &[(&str, usize, &str)] = &[
     ("crates/tutti-plugin-types/src/probe_wire.rs", 1, PLUGINS),
     ("crates/tutti-plugin/src/format/gui/mod.rs", 4, PLUGINS),
     ("crates/tutti-plugin/src/host/catalog.rs", 1, PLUGINS),
+    ("crates/tutti-plugin/src/host/loadable.rs", 1, PLUGINS),
     (
         "crates/tutti-plugin/src/host/node/real_stall_tests.rs",
         1,
         PLUGINS,
     ),
     ("crates/tutti-plugin/src/host/plugin.rs", 10, PLUGINS),
-    ("crates/tutti-plugin/src/host/plugin_ref.rs", 3, PLUGINS),
+    ("crates/tutti-plugin/src/host/plugin_ref.rs", 2, PLUGINS),
     (
         "crates/tutti-plugin/tests/clap_nodes/clap_fork.rs",
         2,

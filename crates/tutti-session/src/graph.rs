@@ -43,12 +43,12 @@ use std::sync::Arc;
 use crate::fork::PendingExport;
 
 use tutti_graph::Compensation;
-use tutti_graph::CrossfadeCurve;
+use tutti_graph::FadeLaw;
 use tutti_graph::{BusRef, BusSource, Buses, EdgeFade, EdgeGain};
 use tutti_graph::{
     CommitError, Editor, EventEdge, EventIn, EventOut, Executor, Fade, GraphInvalid, InletNode,
     InletRing, IntoNode, MeterReader, MixError, ModeError, NodeMode, ParamIn, ParamMod, ParamRange,
-    ParamSet, Prepare, TapWriter, TransportPosition,
+    ParamSet, Prepare, RenderMode, TapWriter, TransportPosition,
 };
 use tutti_graph::{
     Edge as RawEdge, EdgeId, InPort as RawIn, NodeKey, OutPort as RawOut, Sink, Source,
@@ -60,6 +60,7 @@ use tutti_graph::{
 #[cfg(feature = "plugin")]
 use tutti_types::Latency;
 use tutti_types::MaxBlock;
+use tutti_types::Mint;
 use tutti_types::{Amplitude, ChannelLayout, Mix, SampleRate, Seconds, UnitAddr};
 use tutti_types::{Samples, Tail};
 
@@ -130,10 +131,11 @@ pub enum Feeder {
     Declared,
 }
 
-/// A crossfade waiting for a re-prepare, named so its landing can be told
-/// from another's ([`SessionEvent::CrossfadeLanded`](crate::SessionEvent)).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct CrossfadeId(u64);
+tutti_types::id! {
+    /// A crossfade waiting for a re-prepare, named so its landing can be told
+    /// from another's ([`SessionEvent::CrossfadeLanded`](crate::SessionEvent)).
+    pub struct CrossfadeId;
+}
 
 /// What [`Graph::crossfade`] came to, when the graph did not refuse it.
 #[derive(Debug)]
@@ -190,7 +192,7 @@ trait ErasedSwap: Send {
         graph: &mut Graph,
         node: NodeKey,
         fade: Seconds,
-        curve: CrossfadeCurve,
+        law: FadeLaw,
     ) -> Result<Box<dyn Any + Send>, ReplaceRefused<Box<dyn ErasedSwap>>>;
 }
 
@@ -206,9 +208,9 @@ where
         graph: &mut Graph,
         node: NodeKey,
         fade: Seconds,
-        curve: CrossfadeCurve,
+        law: FadeLaw,
     ) -> Result<Box<dyn Any + Send>, ReplaceRefused<Box<dyn ErasedSwap>>> {
-        match graph.swap_node(node, self.0, fade, curve) {
+        match graph.swap_node(node, self.0, fade, law) {
             Ok(controls) => {
                 graph.address::<N>(node, &controls);
                 Ok(Box::new(controls))
@@ -229,9 +231,9 @@ impl ErasedSwap for PluginSwap {
         graph: &mut Graph,
         node: NodeKey,
         fade: Seconds,
-        curve: CrossfadeCurve,
+        law: FadeLaw,
     ) -> Result<Box<dyn Any + Send>, ReplaceRefused<Box<dyn ErasedSwap>>> {
-        match graph.replace_plugin(node, self.0, fade, curve) {
+        match graph.replace_plugin(node, self.0, fade, law) {
             Ok(()) => Ok(Box::new(())),
             Err(ReplaceRefused::Busy(c)) => Err(ReplaceRefused::Busy(Box::new(PluginSwap(c)))),
             Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
@@ -245,7 +247,7 @@ struct Parked {
     node: NodeKey,
     swap: Box<dyn ErasedSwap>,
     fade: Seconds,
-    curve: CrossfadeCurve,
+    law: FadeLaw,
 }
 
 impl std::fmt::Debug for Parked {
@@ -254,7 +256,7 @@ impl std::fmt::Debug for Parked {
             .field("id", &self.id)
             .field("node", &self.node)
             .field("fade", &self.fade)
-            .field("curve", &self.curve)
+            .field("law", &self.law)
             .finish_non_exhaustive()
     }
 }
@@ -308,16 +310,12 @@ pub struct Graph {
     /// there and the host did not wire itself, which are all a change of the
     /// feeds may take away. Every other edge on the input is the host's.
     fed_edges: BTreeMap<NodeKey, Vec<EventOutPort>>,
-    /// The id the next tap takes.
-    next_tap: u32,
-    /// The id the next event tap takes.
-    next_event_tap: u32,
+    /// Names every tap, event tap, meter and crossfade of this graph.
+    ids: Mint,
     /// Each open event tap as it was opened (its port, alignment and
     /// capacity), so [`Taps::reopen_events`] can open it
     /// again.
     event_taps: BTreeMap<EventTapId, (tutti_graph::EventTapSource, TapAlign, EventCapacity)>,
-    /// The id the next meter takes (`MASTER_METER` is taken at construction).
-    next_meter: u32,
     /// The master meter's reader until a host takes it.
     master_meter: Option<MeterReader>,
     /// Crossfades refused `Busy`, in request order.
@@ -325,7 +323,6 @@ pub struct Graph {
     /// The nodes [`remove`](Self::remove) took out since the session last
     /// forgot what it declared on them ([`Graph::take_removed`]).
     removed: Vec<NodeKey>,
-    next_crossfade: u64,
     /// What the root's channels are, when a host declared it
     /// ([`Session::declare_root_topology`](crate::Session::declare_root_topology));
     /// `None` is the engine's order for the root's width.
@@ -386,8 +383,7 @@ impl std::fmt::Debug for Graph {
             .field("render_workers", &self.render_workers)
             .field("feeds", &self.feeds)
             .field("fed_edges", &self.fed_edges)
-            .field("parked", &self.parked)
-            .field("next_crossfade", &self.next_crossfade);
+            .field("parked", &self.parked);
         #[cfg(feature = "plugin")]
         d.field("plugins", &self.plugins);
         d.finish_non_exhaustive()
@@ -410,23 +406,22 @@ pub enum Committed {
     Retry,
 }
 
-/// The master meter's id; every other meter takes the ids after it.
-const MASTER_METER: MeterId = MeterId(0);
-
 fn compensation_of(plan: &tutti_graph::Plan) -> Compensation {
     Compensation::new(plan.compensation().to_vec(), plan.total_latency().samples())
 }
 
 /// The graph's `Prepare`: `rate`, `max_block`, and the device's callback
-/// `quantum` when the host knows it (`tutti_cpal::OutputSpec::quantum`). A
+/// `quantum` when the host knows it (`tutti_engine::OutputSpec::quantum`). A
 /// hosted out-of-process plugin ships one quantum per callback to its server,
-/// so the quantum is what keeps its pipeline in step with the device.
+/// so the quantum is what keeps its pipeline in step with the device. The
+/// session's own graph is live: [`RenderMode::Realtime`]. An offline render or
+/// a bounce prepares its fork with `RenderGraph::prepare`, which is offline.
 pub(crate) fn prepare_for(
     rate: SampleRate,
     max_block: MaxBlock,
     quantum: Option<MaxBlock>,
 ) -> Prepare {
-    let p = Prepare::new(rate, max_block);
+    let p = Prepare::new(rate, max_block).with_render_mode(RenderMode::Realtime);
     match quantum {
         Some(q) => p.with_quantum(q),
         None => p,
@@ -459,8 +454,9 @@ impl Graph {
         // Declared and on from the start: a host reads the master level
         // without asking for it.
         // `Outputs` names no source, so the open cannot be refused.
+        let ids = Mint::new();
         let master_meter = editor
-            .open_meter(MASTER_METER, MeterSpec::Outputs)
+            .open_meter(MeterId::mint(&ids), MeterSpec::Outputs)
             .expect("a master meter names no source");
         master_meter.enable();
         Self {
@@ -477,14 +473,11 @@ impl Graph {
             render_worker_start: None,
             feeds: BTreeMap::new(),
             fed_edges: BTreeMap::new(),
-            next_tap: 0,
-            next_event_tap: 0,
+            ids,
             event_taps: BTreeMap::new(),
-            next_meter: 1,
             master_meter: Some(master_meter),
             parked: VecDeque::new(),
             removed: Vec::new(),
-            next_crossfade: 0,
             root: None,
             output: None,
             widen_refusal: None,
@@ -886,7 +879,7 @@ impl Graph {
         node: impl Into<NodeKey>,
         client: Box<tutti_plugin::handles::PluginClient>,
         fade: Seconds,
-        curve: CrossfadeCurve,
+        law: FadeLaw,
     ) -> Result<(), ReplaceRefused<Box<tutti_plugin::handles::PluginClient>>> {
         let node = node.into();
         // Asked here, before binding: `replace` hands back what it refuses,
@@ -906,7 +899,7 @@ impl Graph {
         let controls = client.controls();
         let plugin = client.plugin().clone();
         let tempo = self.tempo.clone();
-        match self.swap_unit(node, client.bind(tempo), fade, curve) {
+        match self.swap_unit(node, client.bind(tempo), fade, law) {
             Ok(_controls) => {
                 // The record is carried over to the incoming plugin (unlike
                 // `replace`, which takes it out): its handle is what the
@@ -1008,7 +1001,7 @@ impl Graph {
     }
 
     /// Swaps the unit behind `node` for `incoming` under a `fade` along
-    /// `curve` when its shape fits the running unit's, else as a plain swap
+    /// `law` when its shape fits the running unit's, else as a plain swap
     /// on the next commit (`Editor::replace_or_swap`), and hands back its
     /// controls. The incoming node goes in as [`add`](Self::add) puts one in:
     /// its params are addressed and its reclaimer kept, and the outgoing
@@ -1031,11 +1024,11 @@ impl Graph {
         node: impl Into<NodeKey>,
         incoming: N,
         fade: Seconds,
-        curve: CrossfadeCurve,
+        law: FadeLaw,
     ) -> Result<N::Controls, ReplaceRefused<N>> {
         let node = node.into();
         let incoming = incoming.bind_tempo(&self.tempo);
-        let controls = self.swap_node(node, incoming, fade, curve)?;
+        let controls = self.swap_node(node, incoming, fade, law)?;
         self.address::<N>(node, &controls);
         Ok(controls)
     }
@@ -1047,9 +1040,9 @@ impl Graph {
         node: NodeKey,
         incoming: N,
         fade: Seconds,
-        curve: CrossfadeCurve,
+        law: FadeLaw,
     ) -> Result<N::Controls, ReplaceRefused<N>> {
-        let controls = self.swap_unit(node, incoming, fade, curve)?;
+        let controls = self.swap_unit(node, incoming, fade, law)?;
         #[cfg(feature = "plugin")]
         if let Some(record) = self.plugins.remove(&node) {
             self.graveyard.bury(record);
@@ -1063,7 +1056,7 @@ impl Graph {
         node: NodeKey,
         incoming: N,
         fade: Seconds,
-        curve: CrossfadeCurve,
+        law: FadeLaw,
     ) -> Result<N::Controls, ReplaceRefused<N>> {
         if let Some(cause) = self.editor.poison_cause() {
             return Err(ReplaceRefused::Failed(CrossfadeRefused::Poisoned(
@@ -1081,7 +1074,7 @@ impl Graph {
         let rate = self.editor.prepare().sample_rate();
         let controls = self
             .editor
-            .replace_or_swap(node, incoming, Fade::seconds(fade, rate, curve))
+            .replace_or_swap(node, incoming, Fade::seconds(fade, rate, law))
             .map_err(|e| ReplaceRefused::Failed(CrossfadeRefused::Editor(e)))?;
         if let Some(entry) = self.nodes.get_mut(&node) {
             entry.params = None;
@@ -1092,7 +1085,7 @@ impl Graph {
     }
 
     /// Swaps the node behind `node` for `incoming` under `fade` along
-    /// `curve`, as [`replace`](Self::replace) does, addressing the incoming
+    /// `law`, as [`replace`](Self::replace) does, addressing the incoming
     /// node's params ([`SessionNode::params`]) — and, while the graph
     /// re-prepares, keeps it waiting instead of handing it back: the first
     /// update that finds the graph resumed swaps it in
@@ -1107,7 +1100,7 @@ impl Graph {
         node: impl Into<NodeKey>,
         incoming: N,
         fade: Seconds,
-        curve: CrossfadeCurve,
+        law: FadeLaw,
     ) -> Result<Crossfade<N::Controls>, CrossfadeRefused>
     where
         N: SessionNode,
@@ -1120,10 +1113,10 @@ impl Graph {
                 node,
                 Box::new(Swap(incoming)),
                 fade,
-                curve,
+                law,
             )));
         }
-        match self.swap_node(node, incoming, fade, curve) {
+        match self.swap_node(node, incoming, fade, law) {
             Ok(controls) => {
                 self.address::<N>(node, &controls);
                 Ok(Crossfade::Landed(controls))
@@ -1132,7 +1125,7 @@ impl Graph {
                 node,
                 Box::new(Swap(n)),
                 fade,
-                curve,
+                law,
             ))),
             Err(ReplaceRefused::Failed(refused)) => Err(refused),
         }
@@ -1151,7 +1144,7 @@ impl Graph {
         node: impl Into<NodeKey>,
         client: Box<tutti_plugin::handles::PluginClient>,
         fade: Seconds,
-        curve: CrossfadeCurve,
+        law: FadeLaw,
     ) -> Result<Crossfade<()>, CrossfadeRefused> {
         let node = node.into();
         if self.parked.iter().any(|p| p.node == node) {
@@ -1159,16 +1152,16 @@ impl Graph {
                 node,
                 Box::new(PluginSwap(client)),
                 fade,
-                curve,
+                law,
             )));
         }
-        match self.replace_plugin(node, client, fade, curve) {
+        match self.replace_plugin(node, client, fade, law) {
             Ok(()) => Ok(Crossfade::Landed(())),
             Err(ReplaceRefused::Busy(c)) => Ok(Crossfade::Waiting(self.park(
                 node,
                 Box::new(PluginSwap(c)),
                 fade,
-                curve,
+                law,
             ))),
             Err(ReplaceRefused::Failed(refused)) => Err(refused),
         }
@@ -1179,16 +1172,15 @@ impl Graph {
         node: NodeKey,
         swap: Box<dyn ErasedSwap>,
         fade: Seconds,
-        curve: CrossfadeCurve,
+        law: FadeLaw,
     ) -> CrossfadeId {
-        let id = CrossfadeId(self.next_crossfade);
-        self.next_crossfade += 1;
+        let id = CrossfadeId::mint(&self.ids);
         self.parked.push_back(Parked {
             id,
             node,
             swap,
             fade,
-            curve,
+            law,
         });
         id
     }
@@ -1202,7 +1194,7 @@ impl Graph {
             node,
             swap,
             fade,
-            curve,
+            law,
         } in std::mem::take(&mut self.parked)
         {
             if self.parked.iter().any(|p| p.node == node) {
@@ -1212,18 +1204,18 @@ impl Graph {
                     node,
                     swap,
                     fade,
-                    curve,
+                    law,
                 });
                 continue;
             }
-            match swap.swap(self, node, fade, curve) {
+            match swap.swap(self, node, fade, law) {
                 Ok(controls) => out.push(Retried::Landed { node, id, controls }),
                 Err(ReplaceRefused::Busy(swap)) => self.parked.push_back(Parked {
                     id,
                     node,
                     swap,
                     fade,
-                    curve,
+                    law,
                 }),
                 Err(ReplaceRefused::Failed(refused)) => {
                     tracing::error!("graph: crossfade of {node:?} refused: {refused}");
@@ -1813,7 +1805,7 @@ impl Graph {
 
     /// Adds the edge `from -> to`: whether it was new (the graph is marked
     /// edited only then). A new edge **fades in** over
-    /// [`EDGE_DECLICK`](tutti_graph::EDGE_DECLICK) frames, and an edge that
+    /// [`DECLICK`](tutti_graph::DECLICK), and an edge that
     /// is fading out is brought back (and counts as new): see
     /// [`Connection::hard`](crate::Connection::hard).
     pub(crate) fn add_edge(&mut self, from: OutPort, to: InPort) -> Result<bool, ConnectError> {
@@ -2127,8 +2119,8 @@ impl Graph {
     /// whether it was connected, and marks the graph edited when it was. For a
     /// main bus it takes out the edges [`connect`](Self::connect) adds.
     ///
-    /// **The edge fades out** over [`EDGE_DECLICK`](tutti_graph::EDGE_DECLICK)
-    /// frames, from the weight it has, and leaves the graph when the fade
+    /// **The edge fades out** over [`DECLICK`](tutti_graph::DECLICK),
+    /// from the weight it has, and leaves the graph when the fade
     /// ends (the next [`update`](crate::Session::update) after that drops it
     /// from the spec). It is already not a source of its sink
     /// ([`sources`](Self::sources)), and connecting it again brings it back
@@ -2329,7 +2321,7 @@ impl Graph {
                 // its width.
                 let source = tutti_types::ChannelTopology::from(out_topology);
                 let placed = if source.is_unassigned() {
-                    tutti_types::ChannelTopology::assumed(source.layout())
+                    tutti_types::ChannelTopology::assumed(source.width())
                 } else {
                     source
                 };
@@ -2795,7 +2787,7 @@ impl Graph {
     ///   ([`Session::declare_root_topology`](crate::Session::declare_root_topology)),
     ///   anything wider than the declaration: the root is not widened under
     ///   it ([`RootError::Width`](tutti_graph::RootError::Width));
-    /// - past [`MAX_ROOT_CHANNELS`](tutti_graph::MAX_ROOT_CHANNELS): the root
+    /// - past [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS): the root
     ///   is widened to that and the excess is not rendered
     ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), the first
     ///   channel with no place).
@@ -2809,19 +2801,19 @@ impl Graph {
         let refused = if let Some(root) = self
             .root
             .as_ref()
-            .filter(|r| channels > r.positions().len())
+            .filter(|r| channels > usize::from(r.width().count()))
         {
             Some(tutti_graph::RootError::Width {
-                declared: root.layout(),
+                declared: root.width(),
                 // Only the report names the request; one past `u16::MAX` is
-                // refused either way (it is past `MAX_ROOT_CHANNELS`), so the
+                // refused either way (it is past `MAX_CHANNELS`), so the
                 // saturated figure loses nothing.
                 requested: ChannelLayout::clamped(channels),
             })
-        } else if channels > tutti_graph::MAX_ROOT_CHANNELS {
+        } else if channels > tutti_types::MAX_CHANNELS {
             Some(tutti_graph::RootError::Fold(
                 tutti_buffers::FoldError::Unplaced {
-                    channel: tutti_graph::MAX_ROOT_CHANNELS,
+                    channel: tutti_types::MAX_CHANNELS,
                     speaker: tutti_types::Speaker::Unassigned,
                 },
             ))
@@ -2833,7 +2825,7 @@ impl Graph {
         // request widens as far as the engine renders.
         let target = match refused {
             Some(tutti_graph::RootError::Width { .. }) => 0,
-            _ => channels.min(tutti_graph::MAX_ROOT_CHANNELS),
+            _ => channels.min(tutti_types::MAX_CHANNELS),
         };
         let outputs = &mut self.editor.spec_mut().topology.outputs;
         if outputs.len() < target {
@@ -2880,7 +2872,7 @@ impl Graph {
     /// # Errors
     ///
     /// The [`FoldError`](tutti_buffers::FoldError) when the declaration is empty, wider than the engine
-    /// renders ([`MAX_ROOT_CHANNELS`](tutti_graph::MAX_ROOT_CHANNELS),
+    /// renders ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS),
     /// [`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced)), or cannot be placed on `device`. Nothing is
     /// changed.
     /// Whether `root` can be a root, and be placed on `device` when there is
@@ -2891,14 +2883,18 @@ impl Graph {
         device: impl Into<Option<ChannelLayout>>,
     ) -> Result<(), tutti_buffers::FoldError> {
         use tutti_buffers::{BufferError, FoldError};
-        let width = root.positions().len();
+        let width = usize::from(root.width().count());
         if width == 0 {
             return Err(BufferError::ZeroWidth.into());
         }
-        if width > tutti_graph::MAX_ROOT_CHANNELS {
+        if width > tutti_types::MAX_CHANNELS {
             return Err(FoldError::Unplaced {
-                channel: tutti_graph::MAX_ROOT_CHANNELS,
-                speaker: root.positions()[tutti_graph::MAX_ROOT_CHANNELS],
+                channel: tutti_types::MAX_CHANNELS,
+                speaker: root
+                    .positions()
+                    .and_then(|list| list.get(tutti_types::MAX_CHANNELS))
+                    .copied()
+                    .unwrap_or(tutti_types::Speaker::Unassigned),
             });
         }
         if let Some(device) = device.into() {
@@ -2915,7 +2911,7 @@ impl Graph {
         let width = match &root {
             Some(root) => {
                 Self::check_root(root, device)?;
-                root.positions().len()
+                usize::from(root.width().count())
             }
             None => {
                 if let Some(device) = device {
@@ -2938,9 +2934,8 @@ impl Graph {
         if let (Some(output), Some(device)) = (&self.output, device) {
             output.declare_root(root.clone(), device)?;
         }
-        // The bus form of the declaration; `check_root` held it to the
-        // engine's `MAX_ROOT_CHANNELS`, which fit a bus (asserted at build).
-        const _: () = assert!(tutti_graph::MAX_ROOT_CHANNELS <= tutti_types::MAX_BUS_CHANNELS);
+        // The bus form of the declaration; `check_root` held it to
+        // `MAX_CHANNELS`, which is a bus's width.
         let bus = root
             .as_ref()
             .map(|r| tutti_types::BusTopology::try_from(r).expect("a checked root fits a bus"));

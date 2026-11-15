@@ -298,7 +298,7 @@ impl BeatClockFollower {
                 out(ClockEvent::Stop);
             }
             System::SongPosition(position) => {
-                self.decoder.song_position_msg(position.get());
+                self.decoder.song_position_msg(position);
                 out(here(self.decoder.beat_position()));
             }
             _ => {}

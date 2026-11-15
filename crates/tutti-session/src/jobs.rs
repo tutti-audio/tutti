@@ -11,15 +11,10 @@
 //! when the session is gone, so it stops writing what no one will land.
 
 #![cfg_attr(
-    not(any(
-        test,
-        feature = "midi",
-        feature = "sampler",
-        all(feature = "device", feature = "audio-io")
-    )),
+    not(any(test, all(feature = "device", feature = "audio-io"))),
     expect(
         dead_code,
-        reason = "the MIDI file and SoundFont loads (feature `midi`), the sampler's opens (feature `sampler`) and the take's pump (features `device` and `audio-io`) are the spawner's users"
+        reason = "the take's pump (features `device` and `audio-io`) is the streaming half's user"
     )
 )]
 
@@ -214,7 +209,7 @@ pub(crate) struct Jobs {
     tx: Sender<Arrival>,
     rx: Receiver<Arrival>,
     landers: HashMap<JobId, Lander>,
-    next: u64,
+    next: tutti_types::Mint,
     closed: Arc<AtomicBool>,
 }
 
@@ -234,7 +229,7 @@ impl Jobs {
             tx,
             rx,
             landers: HashMap::new(),
-            next: 0,
+            next: tutti_types::Mint::new(),
             closed: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -255,13 +250,6 @@ impl Jobs {
     /// thread: a landing takes no main-thread proof (the plugin reload's does
     /// not), and what must be done on the main
     /// thread is posted to the session's `MainWork` (`tutti_plugin_types`).
-    #[cfg_attr(
-        not(any(test, feature = "midi", feature = "sampler")),
-        expect(
-            dead_code,
-            reason = "the MIDI loads (feature `midi`) and the sampler's opens (feature `sampler`) are the one-result jobs' users"
-        )
-    )]
     pub(crate) fn submit<R, W, L>(&mut self, work: W, land: L)
     where
         R: Send + 'static,
@@ -297,8 +285,7 @@ impl Jobs {
         L: FnMut(&mut Session, Landed<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
     {
         let jobs = &mut *self;
-        let id = JobId(jobs.next);
-        jobs.next += 1;
+        let id = JobId(jobs.next.mint().get());
         let landings = Landings {
             tx: jobs.tx.clone(),
             id,

@@ -124,7 +124,8 @@ macro_rules! rec_control {
                 RenderModeSupport::OnActivation
             }
             fn wiring(&self, _: MainThreadMarker) -> LoadedPlugin {
-                let stereo = ChannelTopology::new([Speaker::FrontLeft, Speaker::FrontRight]);
+                let stereo =
+                    ChannelTopology::new([Speaker::FrontLeft, Speaker::FrontRight]).unwrap();
                 let mut wiring = LoadedPlugin {
                     inputs: vec![
                         PluginBus::main(ChannelLayout::STEREO).placed(Some(stereo.clone())),
@@ -136,7 +137,7 @@ macro_rules! rec_control {
                 if self.rig.key_bus.load(Ordering::Relaxed) {
                     wiring.inputs.push(
                         PluginBus::new(ChannelLayout::MONO, BusRole::Aux)
-                            .placed(Some(ChannelTopology::new([Speaker::FrontCenter]))),
+                            .placed(Some(ChannelTopology::new([Speaker::FrontCenter]).unwrap())),
                     );
                 }
                 wiring
@@ -914,11 +915,23 @@ fn the_shape_declares_the_plugins_buses_with_their_placement() {
     let plain = shape(false);
     assert_eq!(plain.buses_in().len(), 1);
     assert_eq!(
-        plain.buses_in().get(0).unwrap().topology.positions(),
+        plain
+            .buses_in()
+            .get(0)
+            .unwrap()
+            .topology
+            .positions()
+            .unwrap(),
         &stereo
     );
     assert_eq!(
-        plain.buses_out().get(0).unwrap().topology.positions(),
+        plain
+            .buses_out()
+            .get(0)
+            .unwrap()
+            .topology
+            .positions()
+            .unwrap(),
         &stereo
     );
 
@@ -927,7 +940,13 @@ fn the_shape_declares_the_plugins_buses_with_their_placement() {
     assert_eq!(keyed.buses_in().len(), 2);
     assert_eq!(keyed.buses_in().first_port(1), Some(2));
     assert_eq!(
-        keyed.buses_in().get(1).unwrap().topology.positions(),
+        keyed
+            .buses_in()
+            .get(1)
+            .unwrap()
+            .topology
+            .positions()
+            .unwrap(),
         &[Speaker::FrontCenter]
     );
 }

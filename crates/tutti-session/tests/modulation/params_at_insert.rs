@@ -15,7 +15,7 @@ use crate::common;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tutti_graph::CrossfadeCurve;
+use tutti_graph::FadeLaw;
 use tutti_graph::NodeKey;
 use tutti_nodes::{DistortionNode, ShapeKind};
 use tutti_session::{OutPort, ParamRef, Root, RouteSpec, Session};
@@ -106,12 +106,7 @@ fn a_crossfade_hands_the_lane_the_incoming_nodes_cell() {
     let incoming = ProbeUnit::of(UnitParam::Drive, 3.0);
     let new = incoming.knob();
     s.graph()
-        .crossfade(
-            node,
-            incoming,
-            Seconds(0.005),
-            CrossfadeCurve::EqualAmplitude,
-        )
+        .crossfade(node, incoming, Seconds(0.005), FadeLaw::EqualAmplitude)
         .expect("the crossfade starts");
     settle(&mut s);
     old.store(9.0, Ordering::Release);

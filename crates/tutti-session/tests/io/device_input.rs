@@ -7,7 +7,8 @@ use std::any::Any;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tutti_cpal::{ManualStream, ManualStreamDriver, MicConfig, OutputSpec, StreamLatency};
+use tutti_cpal::MicConfig;
+use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec, StreamLatency};
 use tutti_graph::{InletRing, TapWriter};
 use tutti_session::{
     DeviceEvent, Error, InputConfig, InputOpener, LiveSession, OpenedInput, Phase, PhaseCx, Root,
@@ -19,7 +20,7 @@ fn spec_at(rate: f64) -> OutputSpec {
     OutputSpec::new(
         SampleRate::of(rate),
         ChannelLayout::STEREO,
-        tutti_cpal::cpal::SampleFormat::F32,
+        tutti_buffers::SampleFormat::F32,
     )
 }
 

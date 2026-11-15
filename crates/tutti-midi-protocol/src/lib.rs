@@ -68,8 +68,8 @@
 //! - [`midi1()`](fn@midi1) for the bytes of the wire, a Program Change with a
 //!   bank as its three messages.
 //!
-//! The float scaling is here too: [`u7_to_unit_f32`], [`velocity_to_unit_f32`],
-//! [`value_to_unit_f32`], [`bend_u14_to_signed_f32`], [`bend_to_signed_f32`]
+//! The float scaling is here too: [`velocity_to_unit_f32`],
+//! [`value_to_unit_f32`], [`bend_to_signed_f32`]
 //! and the inverses [`unit_f32_to_velocity`], [`unit_f32_to_value`] and
 //! [`signed_f32_to_bend`], a native value as the `[0, 1]` or `[-1, 1]`
 //! float a DSP node wants. Lossy by design; not the MIDI 1.0 to 2.0 path. A
@@ -106,13 +106,19 @@
 //! The crate also holds the values the translation and the instruments share:
 //! [`flex_tempo`] and [`flex_time_signature`] read a Flex Set Tempo and Set Time
 //! Signature as a `Bpm` and a project meter (`None` for a field the type cannot
-//! hold, never clamped); [`MpeZoneConfig`], [`MpeZones`] and [`MpeMode`] are the
+//! hold, never clamped), and [`flex_tempo_field`] writes the tempo back;
+//! [`song_position`](fn@song_position) converts a beat to a Song Position
+//! Pointer; [`SmpteTimecode::from_seconds`] and
+//! [`MtcTimeCode::nibbles`] are the timecode of a time and its Quarter Frame
+//! pieces; [`MpeZoneConfig`], [`MpeZones`] and [`MpeMode`] are the
 //! MPE zone layout (RP-053, and the MIDI-CI MPE Profile's, M2-120), checked
 //! at construction; and [`TuningMessage`] and
 //! its types are the MIDI Tuning Standard's wire values.
 //!
 //! [`PitchBendSensitivity`] is the 7.25 fixed-point range of RPN #00/07 (M2-104
-//! section 7.4.13), the one value type here that is not a function.
+//! section 7.4.13), and also the range of RPN #00/00, whose data is whole
+//! semitones and cents ([`RegisteredData`](tutti_ump::RegisteredData), M2-104 section 7.4.7.1): the one
+//! value type here that is not a function converts between the two.
 //!
 //! **One input type at the edge:** a packet is a [`Ump`](tutti_ump::Ump), and
 //! [`Translator::translate`], [`Narrower::feed`], [`midi1()`](fn@midi1) and
@@ -138,30 +144,32 @@ mod narrower;
 mod scale;
 mod sensitivity;
 mod smpte;
+mod song_position;
 mod translator;
 mod tuning;
 mod unit;
 mod universal;
 mod voice;
 
-pub use flex::{flex_tempo, flex_time_signature};
+pub use flex::{flex_tempo, flex_tempo_field, flex_time_signature};
 pub use midi1::{NoMidi1Form, midi1, narrow, narrow_message};
 pub use mpe::{
     ChannelResponse, ControllerSupport, MpeFeatures, MpeMode, MpeSpec, MpeZone, MpeZoneConfig,
     MpeZones, PitchBendSupport,
 };
-pub use narrow::{narrow_bend, narrow_value, narrow_velocity};
+pub use narrow::{narrow_bend, narrow_note_on_velocity, narrow_value, narrow_velocity};
 pub use narrower::Narrower;
 pub use sensitivity::PitchBendSensitivity;
 pub use smpte::{MtcRate, SmpteFrameRate, SmpteTimecode, UnknownFrameRate};
+pub use song_position::song_position;
 pub use translator::Translator;
 pub use tuning::{
     ChannelMask, KeyChange, KeyChanges, KeyTable, MAX_KEY_CHANGES, NotFrequencyData, OctaveOffsets,
     Timing, TuningFrequency, TuningMessage, TuningName,
 };
 pub use unit::{
-    bend_to_signed_f32, bend_u14_to_signed_f32, signed_f32_to_bend, u7_to_unit_f32,
-    unit_f32_to_value, unit_f32_to_velocity, value_to_unit_f32, velocity_to_unit_f32,
+    bend_to_signed_f32, signed_f32_to_bend, unit_f32_to_value, unit_f32_to_velocity,
+    value_to_unit_f32, velocity_to_unit_f32,
 };
 pub use universal::*;
 pub use voice::{

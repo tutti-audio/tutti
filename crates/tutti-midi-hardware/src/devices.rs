@@ -12,7 +12,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
-use tutti_graph::UmpAt;
+use tutti_graph::{Losses, UmpAt};
 
 use tutti_midi_device::{
     DeviceEvent, DeviceId, DeviceInfo, DeviceTable, EndpointId, OsChange, OsDevice, PortDirection,
@@ -603,6 +603,27 @@ impl core::fmt::Debug for OpenOutput {
 }
 
 impl OpenOutput {
+    /// Whether the output can still send; see
+    /// [`DeviceOut::is_alive`].
+    #[must_use]
+    pub fn is_alive(&self) -> bool {
+        self.sink.is_alive()
+    }
+
+    /// What the output took and then could not send; see
+    /// [`DeviceOut::losses`].
+    #[must_use]
+    pub fn losses(&self) -> Losses {
+        self.sink.losses()
+    }
+
+    /// How many events the output has taken and not yet sent; see
+    /// [`DeviceOut::pending`].
+    #[must_use]
+    pub fn pending(&self) -> usize {
+        self.sink.pending()
+    }
+
     /// The device this output is open on.
     #[must_use]
     pub fn id(&self) -> &DeviceId {

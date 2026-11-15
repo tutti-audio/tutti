@@ -32,7 +32,7 @@ fn id(unique: i32) -> String {
 fn the_probe_lists_every_sub_plugin_of_a_shell() {
     let dir = tempfile::tempdir().unwrap();
     let main = tutti_fixtures::main_thread();
-    let plugins = describe(main, &shell(&dir)).expect("probes");
+    let plugins = describe(main, &shell(&dir), None).expect("probes");
 
     let ids: Vec<_> = plugins.iter().map(|p| p.id.clone()).collect();
     assert_eq!(ids, [id(ALPHA_ID), id(BETA_ID)], "{plugins:?}");

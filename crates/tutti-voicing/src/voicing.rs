@@ -59,8 +59,8 @@ use tutti_midi_protocol::{
 };
 use tutti_types::{Amplitude, Seconds, Semitones};
 use tutti_ump::{
-    Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, Rpn, U7,
-    Ump, Voice2,
+    Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteId, NoteNumber,
+    RegisteredData, Rpn, U7, Ump, Voice2,
 };
 
 use crate::channel::{Bend, ChannelState};
@@ -77,9 +77,8 @@ const CHANNELS: usize = MidiChannel::COUNT as usize;
 /// cents (0 to 99) in the 7 below, the rest unused. It is not the Q7.25 of the
 /// per-note sensitivity (RPN 0/7), whose fraction is binary.
 fn bend_sensitivity(value: u32) -> Semitones {
-    let semitones = (value >> 25) as f32;
-    let cents = ((value >> 18) & 0x7F) as f32;
-    Semitones(semitones + cents / 100.0)
+    let data = RegisteredData::from_word(value);
+    Semitones(f32::from(data.msb().get()) + f32::from(data.lsb().get()) / 100.0)
 }
 
 /// What a pitch wheel spans after General MIDI System On: the default
@@ -1072,12 +1071,15 @@ impl Voicing {
             }
             Rpn::CHANNEL_FINE_TUNING => {
                 // 14 bits centred at 0x2000, a semitone over the half range.
-                let fine = Semitones((value >> 18) as f32 / 8192.0 - 1.0);
+                let fine = Semitones(
+                    f32::from(RegisteredData::from_word(value).fourteen().get()) / 8192.0 - 1.0,
+                );
                 self.bend(channel, |b| b.fine = fine);
             }
             Rpn::CHANNEL_COARSE_TUNING => {
                 // The MSB, centred at 64, in semitones.
-                let coarse = Semitones((value >> 25) as f32 - 64.0);
+                let coarse =
+                    Semitones(f32::from(RegisteredData::from_word(value).msb().get()) - 64.0);
                 self.bend(channel, |b| b.coarse = coarse);
             }
             Rpn::MODULATION_DEPTH_RANGE => {
@@ -1087,7 +1089,7 @@ impl Voicing {
             // tuning, effective at once on its sounding notes. A number the core
             // holds nothing for is ignored.
             Rpn::TUNING_PROGRAM_SELECT | Rpn::TUNING_BANK_SELECT => {
-                let chosen = U7::masked((value >> 25) as u8);
+                let chosen = RegisteredData::from_word(value).msb();
                 let state = &mut self.channels[channel.index()];
                 if rpn == Rpn::TUNING_PROGRAM_SELECT && self.tuning.has_program(chosen) {
                     state.tuning_program = chosen;

@@ -15,12 +15,12 @@
 //! once the plan without it is the one running, its [`FaultLatch`] is raised
 //! ([`TapReader::source_gone`], [`Pull::Ended`] after the ring is drained).
 //!
-//! The ring each lane writes is `ringbuf`'s single-producer, single-consumer
-//! heap ring, already this crate's dependency for the editor-to-executor queue;
-//! no new lock-free structure. The producer is owned by the executor (it rides
-//! a commit in, like a unit), the consumer by the caller, so the audio thread
-//! takes no lock and frees nothing: a producer left behind by a plan that no
-//! longer names it is retired with the old state, on the control side.
+//! The ring each lane writes is `tutti_rt::ring`, the one single-producer,
+//! single-consumer queue, as the editor-to-executor queue is. The producer is
+//! owned by the executor (it rides a commit in, like a unit), the consumer by
+//! the caller, so the audio thread takes no lock and frees nothing: a producer
+//! left behind by a plan that no longer names it is retired with the old
+//! state, on the control side.
 //!
 //! The lanes of a tap are written together by one op and read by whole
 //! frames, so they cannot tear: frame `n` of every lane is the same frame,
@@ -36,10 +36,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use crate::TapId;
-use ringbuf::traits::{Consumer, Observer, Producer, Split};
-use ringbuf::{HeapCons, HeapProd, HeapRb};
 use tutti_buffers::{InterleavedMut, Pull, Source};
 use tutti_rt::{FaultLatch, RtScope};
+use tutti_rt::{Overflow, RingReader, RingWriter, ring};
 use tutti_types::{ChannelLayout, Frame, Samples};
 
 use crate::slots::AudioSlots;
@@ -53,14 +52,20 @@ use crate::slots::AudioSlots;
 /// vacancy only grows under the reader and its occupancy only grows under the
 /// writer, so a count taken before a push can only be an underestimate.
 pub struct TapWriter {
-    lanes: Vec<HeapProd<f32>>,
+    lanes: Vec<RingWriter<f32>>,
     /// One [`Run`] for each block written, pushed before its samples.
-    runs: HeapProd<Run>,
+    runs: RingWriter<Run>,
     /// The frame the next block of a writer that is not an op of a plan
     /// starts at: the frames offered so far, written or lost.
     next: Frame,
-    /// Frames the rings refused, shared with the reader.
+    /// Frames refused, counted per frame (the rings take whole blocks or none:
+    /// they are `Refuse` and count nothing), shared with the reader.
     lost: Arc<AtomicU64>,
+}
+
+/// Whether a lane's reader is still held.
+fn is_open(lane: &RingWriter<f32>) -> bool {
+    !lane.is_disconnected()
 }
 
 /// The graph frame a block's samples start at, and how many of them the rings
@@ -108,7 +113,7 @@ impl TapWriter {
     #[inline]
     pub fn push_interleaved(&mut self, block: &[f32]) {
         let width = self.lanes.len();
-        if width == 0 || !self.lanes.first().is_some_and(Observer::read_is_held) {
+        if width == 0 || !self.lanes.first().is_some_and(is_open) {
             return;
         }
         let frames = block.len() / width;
@@ -128,7 +133,11 @@ impl TapWriter {
                     .copied()
                     .take(take),
             );
-            debug_assert_eq!(pushed, take, "room was counted across every lane");
+            // A reader dropped since the check above refuses its pushes.
+            debug_assert!(
+                pushed == take || lane.is_disconnected(),
+                "room was counted across every lane"
+            );
         }
         self.count_lost(frames - take);
     }
@@ -137,7 +146,7 @@ impl TapWriter {
     /// could not take (a device of another width).
     #[inline]
     pub fn skip(&mut self, frames: usize) {
-        if self.lanes.first().is_some_and(Observer::read_is_held) {
+        if self.lanes.first().is_some_and(is_open) {
             self.next += Samples(frames);
             self.count_lost(frames);
         }
@@ -149,19 +158,18 @@ impl TapWriter {
         if self.runs.is_full() || frames == 0 {
             return 0;
         }
-        self.lanes
-            .iter()
-            .map(Observer::vacant_len)
-            .min()
-            .unwrap_or(0)
+        self.lanes.iter().map(RingWriter::vacant).min().unwrap_or(0)
     }
 
     /// Records that `frames` frames starting at `start` are about to be
     /// pushed. Before the samples, so a reader that sees a sample sees its run.
     #[inline]
     fn note(&mut self, start: Frame, frames: usize) {
-        let pushed = self.runs.try_push(Run { start, frames });
-        debug_assert!(pushed.is_ok(), "room() counted the run ring");
+        let pushed = self.runs.push(Run { start, frames });
+        debug_assert!(
+            pushed.is_ok() || self.runs.is_disconnected(),
+            "room() counted the run ring"
+        );
     }
 
     #[inline]
@@ -185,7 +193,7 @@ pub(crate) fn tap_op<A: AudioSlots>(
     start: Frame,
     frames: usize,
 ) {
-    if !tap.lanes.first().is_some_and(Observer::read_is_held) {
+    if !tap.lanes.first().is_some_and(is_open) {
         return;
     }
     let take = tap.room(frames).min(frames);
@@ -194,7 +202,11 @@ pub(crate) fn tap_op<A: AudioSlots>(
     }
     for (lane, &src) in tap.lanes.iter_mut().zip(srcs) {
         let pushed = lane.push_slice(&arena.slot(src, frames)[..take]);
-        debug_assert_eq!(pushed, take, "room was counted across every lane");
+        // A reader dropped since the check above refuses its pushes.
+        debug_assert!(
+            pushed == take || lane.is_disconnected(),
+            "room was counted across every lane"
+        );
     }
     if take < frames {
         tap.lost
@@ -208,11 +220,12 @@ pub(crate) fn tap_op<A: AudioSlots>(
 /// the editor closes or reaps it; the audio thread then writes nothing for it.
 /// It must not be dropped on the audio thread (debug builds panic there).
 pub struct TapReader {
-    id: TapId,
-    lanes: Vec<HeapCons<f32>>,
+    /// The tap's id in a topology; `None` for a reader outside any.
+    id: Option<TapId>,
+    lanes: Vec<RingReader<f32>>,
     lost: Arc<AtomicU64>,
     /// The writer's [`Run`]s not yet read through.
-    runs: HeapCons<Run>,
+    runs: RingReader<Run>,
     /// The graph frame of the next frame to hand out, while `left` is not
     /// zero; once a run is read through, the frame after it.
     at: Frame,
@@ -240,17 +253,27 @@ impl Drop for TapReader {
 }
 
 impl TapReader {
-    /// A reader and the writer that fills it: `width` lanes, each holding
-    /// `capacity` frames (at least one). A plan's tap gets one from the editor;
-    /// a writer that is not an op of a plan (the engine's, after the fader; an
-    /// inlet's producer) takes one here.
+    /// A reader outside any topology and the writer that fills it: `width`
+    /// lanes, each holding `capacity` frames (at least one). A plan's tap gets
+    /// its reader from the editor, which names it; a writer that is not an op
+    /// of a plan (the engine's, after the fader; an inlet's producer) takes
+    /// one here, and its reader has no [`id`](Self::id).
     #[must_use]
-    pub fn pair(id: TapId, width: usize, capacity: Samples) -> (Self, TapWriter) {
+    pub fn pair(width: usize, capacity: Samples) -> (Self, TapWriter) {
+        Self::build(None, width, capacity)
+    }
+
+    /// The reader of the tap `id` names, and its writer.
+    pub(crate) fn named(id: TapId, width: usize, capacity: Samples) -> (Self, TapWriter) {
+        Self::build(Some(id), width, capacity)
+    }
+
+    fn build(id: Option<TapId>, width: usize, capacity: Samples) -> (Self, TapWriter) {
         let lost = Arc::new(AtomicU64::new(0));
         let end = Arc::new(FaultLatch::new());
-        let (run_prod, run_cons) = HeapRb::<Run>::new(capacity.get().clamp(1, MAX_RUNS)).split();
+        let (run_prod, run_cons) = ring::<Run>(capacity.get().clamp(1, MAX_RUNS), Overflow::Refuse);
         let (cons, prods): (Vec<_>, Vec<_>) = (0..width)
-            .map(|_| HeapRb::<f32>::new(capacity.get().max(1)).split())
+            .map(|_| ring::<f32>(capacity.get().max(1), Overflow::Refuse))
             .map(|(prod, cons)| (cons, prod))
             .unzip();
         let reader = Self {
@@ -298,9 +321,10 @@ impl TapReader {
         self.end.is_raised()
     }
 
-    /// The tap's id, the one [`Editor::close_tap`](crate::Editor::close_tap) takes.
+    /// The tap's id, the one [`Editor::close_tap`](crate::Editor::close_tap)
+    /// takes; `None` for a reader [`pair`](Self::pair) made outside any topology.
     #[must_use]
-    pub fn id(&self) -> TapId {
+    pub fn id(&self) -> Option<TapId> {
         self.id
     }
 
@@ -321,13 +345,7 @@ impl TapReader {
     /// others mid-block, and a read never goes past the shortest.
     #[must_use]
     pub fn available(&self) -> Samples {
-        Samples(
-            self.lanes
-                .iter()
-                .map(Observer::occupied_len)
-                .min()
-                .unwrap_or(0),
-        )
+        Samples(self.lanes.iter().map(RingReader::len).min().unwrap_or(0))
     }
 
     /// Pops whole frames into `out`, interleaved `width` samples a frame, as
@@ -340,13 +358,12 @@ impl TapReader {
         }
         let frames = self.available().get().min(out.len() / width);
         for (channel, lane) in self.lanes.iter_mut().enumerate() {
-            let slots = out[..frames * width]
-                .iter_mut()
-                .skip(channel)
-                .step_by(width);
-            for (slot, sample) in slots.zip(lane.pop_iter()) {
-                *slot = sample;
-            }
+            let plane = &mut out[..frames * width];
+            let mut at = channel;
+            lane.pop_each(frames, |sample| {
+                plane[at] = sample;
+                at += width;
+            });
         }
         self.consume(frames);
         Samples(frames)
@@ -408,7 +425,7 @@ impl TapReader {
         if self.left > 0 {
             return self.at;
         }
-        self.runs.try_peek().map_or(self.at, |run| run.start)
+        self.runs.peek().map_or(self.at, |run| run.start)
     }
 
     /// Frames readable now before the first gap (a block the rings refused):
@@ -435,7 +452,7 @@ impl TapReader {
             if self.left == 0 {
                 // A run is written before its samples, so every sample read
                 // has its run.
-                let Some(run) = self.runs.try_pop() else {
+                let Some(run) = self.runs.pop() else {
                     debug_assert!(false, "a sample was read with no run to place it");
                     return;
                 };

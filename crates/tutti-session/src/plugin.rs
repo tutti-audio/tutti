@@ -115,7 +115,7 @@ use tutti_plugin_types::MainThreadMarker;
 use dpi::Size;
 use tutti_graph::NodeKey;
 use tutti_plugin::catalog::{
-    AudioConfig, BlacklistView, Catalog, Hosting, Plugin as HostPlugin, PluginRef, PluginState,
+    AudioConfig, Catalog, Hosting, Loadable, Plugin as HostPlugin, PluginRef, PluginState,
 };
 use tutti_plugin::error::StateError;
 use tutti_plugin_host::{Liveness, Verdict};
@@ -126,7 +126,7 @@ use tutti_plugin_types::{
     BridgeError, Normalized, ParamEdit, ParamId, PluginFailure, PluginInvalidation, PluginRefresh,
     PluginTail,
 };
-use tutti_types::{SampleRate, Samples, Seconds};
+use tutti_types::{SampleRate, Samples};
 
 use crate::plugin_diagnostics::Figures;
 use crate::{
@@ -143,6 +143,7 @@ pub const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(8);
 #[derive(Debug, Clone, PartialEq)]
 pub struct PluginLoadRequest {
     plugin: PluginRef,
+    hosting: Hosting,
     state: Option<PluginState>,
 }
 
@@ -153,8 +154,17 @@ impl PluginLoadRequest {
     pub fn new(plugin: PluginRef) -> Self {
         Self {
             plugin,
+            hosting: Hosting::Auto,
             state: None,
         }
+    }
+
+    /// Hosted as `hosting` ([`Hosting::Auto`] until this says otherwise).
+    /// Whether the format can be hosted that way is decided at the load.
+    #[must_use]
+    pub fn hosting(mut self, hosting: Hosting) -> Self {
+        self.hosting = hosting;
+        self
     }
 
     /// With a saved state restored once the plugin loads
@@ -190,13 +200,13 @@ impl PluginLoadRequest {
 /// Made by [`Session::plugin_load`], at the session's rate.
 #[must_use = "a load does nothing until it is run and added"]
 pub struct PluginLoad {
-    plugin: PluginRef,
+    /// The plugin, under the blacklist of the catalog it was given
+    /// ([`with_catalog`](Self::with_catalog)), asked by [`run`](Self::run) as
+    /// the load opens.
+    loadable: Loadable,
     rate: SampleRate,
     config: AudioConfig,
     state: Option<PluginState>,
-    /// A catalog's blacklist ([`with_catalog`](Self::with_catalog)), asked by
-    /// [`run`](Self::run) as the load opens.
-    blacklist: Option<BlacklistView>,
     /// The session's collector of main-thread work, which the plugin's handles hold.
     work: tutti_plugin_types::MainWorkHandle,
 }
@@ -204,7 +214,7 @@ pub struct PluginLoad {
 impl std::fmt::Debug for PluginLoad {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PluginLoad")
-            .field("plugin", &self.plugin)
+            .field("plugin", self.loadable.plugin())
             .field("rate", &self.rate)
             .field("config", &self.config)
             .finish_non_exhaustive()
@@ -227,7 +237,7 @@ impl PluginLoad {
     /// call, so the load stays `Send`; a load that does not name a catalog
     /// consults no blacklist (a host offering to load a plugin anyway).
     pub fn with_catalog(mut self, catalog: &Catalog) -> Self {
-        self.blacklist = Some(catalog.blacklist_view());
+        self.loadable = self.loadable.under(catalog);
         self
     }
 
@@ -239,23 +249,23 @@ impl PluginLoad {
 
     /// The plugin being loaded.
     pub fn plugin(&self) -> &PluginRef {
-        &self.plugin
+        self.loadable.plugin()
     }
 
     /// The plugin's file.
     pub fn path(&self) -> &Path {
-        self.plugin.path()
+        self.loadable.plugin().path()
     }
 
-    /// Whether the plugin is hosted in process (its ref's [`Hosting`]
-    /// resolved by the format, `HostPlugin::hosting_of`: VST2 by default, any
+    /// Whether the plugin is hosted in process (its [`Hosting`]
+    /// resolved by the format, `Loadable::placement`: VST2 by default, any
     /// format built in on request): [`run`](Self::run) leaves it unopened, and
     /// [`Session::add_plugin`] opens it on the main thread, stalling that call
     /// for the library's init, the state restore and the parameter read. A
     /// hosting the format refuses is `false` here and the refusal is
     /// [`run`](Self::run)'s.
     pub fn opens_in_process(&self) -> bool {
-        matches!(HostPlugin::hosting_of(&self.plugin), Ok(Hosting::InProcess))
+        matches!(self.loadable.placement(), Ok(Hosting::InProcess))
     }
 
     /// Opens the plugin, restores the request's state, and (`modulation`)
@@ -272,22 +282,22 @@ impl PluginLoad {
     /// ([`BridgeError::NotOutOfProcess`] for VST2 asked to be served), is
     /// refused here, before anything is opened.
     pub fn run(self) -> PluginLoaded {
-        let plugin = self.plugin.clone();
+        let loadable = self.loadable.clone();
         let config = self.config.clone();
         let refused = self
-            .blacklist
-            .as_ref()
-            .and_then(|blacklist| blacklist.check(&self.plugin).err())
-            .or_else(|| HostPlugin::hosting_of(&self.plugin).err());
+            .loadable
+            .check()
+            .err()
+            .or_else(|| self.loadable.placement().err());
         let opened = if let Some(refusal) = refused {
             Opened::Done(Box::new(Open::refused(refusal)))
         } else if self.opens_in_process() {
-            Opened::OnMain(self)
+            Opened::OnMain(Box::new(self))
         } else {
             Opened::Done(Box::new(self.open(None)))
         };
         PluginLoaded {
-            plugin,
+            loadable,
             config,
             opened,
         }
@@ -304,7 +314,7 @@ impl PluginLoad {
             main,
             &self.work,
             &self.config,
-            &self.plugin,
+            &self.loadable,
             self.rate,
             self.state.as_ref().map(PluginState::bytes),
         ) {
@@ -387,7 +397,7 @@ enum Opened {
     /// larger than an unopened load.
     Done(Box<Open>),
     /// Hosted in process: opened by `add_plugin`, on the main thread.
-    OnMain(PluginLoad),
+    OnMain(Box<PluginLoad>),
 }
 
 /// What became of the state a reload was to restore.
@@ -423,7 +433,7 @@ pub enum StateRestore {
 /// [`Session::add_plugin`] takes it on the control thread.
 #[must_use = "a loaded plugin goes into the graph with `Session::add_plugin`"]
 pub struct PluginLoaded {
-    plugin: PluginRef,
+    loadable: Loadable,
     config: AudioConfig,
     opened: Opened,
 }
@@ -431,7 +441,7 @@ pub struct PluginLoaded {
 impl std::fmt::Debug for PluginLoaded {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PluginLoaded")
-            .field("plugin", &self.plugin)
+            .field("plugin", self.loadable.plugin())
             .finish_non_exhaustive()
     }
 }
@@ -439,12 +449,12 @@ impl std::fmt::Debug for PluginLoaded {
 impl PluginLoaded {
     /// The plugin that was loaded.
     pub fn plugin(&self) -> &PluginRef {
-        &self.plugin
+        self.loadable.plugin()
     }
 
     /// The plugin's file.
     pub fn path(&self) -> &Path {
-        self.plugin.path()
+        self.loadable.plugin().path()
     }
 
     /// Why the load failed, if it did. `None` for a plugin hosted in
@@ -849,6 +859,9 @@ impl Gate {
 #[derive(Debug, Clone)]
 struct Origin {
     config: AudioConfig,
+    /// The load as it was asked: its hosting and the catalog blacklist it ran
+    /// under, which a reload asks again.
+    loadable: Loadable,
 }
 
 /// A recovering plugin's reload, between its death and its replacement.
@@ -1267,11 +1280,10 @@ impl Session {
     /// result to [`add_plugin`](Self::add_plugin).
     pub fn plugin_load(&self, request: PluginLoadRequest) -> PluginLoad {
         PluginLoad {
-            plugin: request.plugin,
+            loadable: Loadable::uncatalogued(request.plugin).hosting(request.hosting),
             rate: self.graph.prepared().sample_rate(),
             config: AudioConfig::default(),
             state: request.state,
-            blacklist: None,
             work: self.work.clone(),
         }
     }
@@ -1318,7 +1330,8 @@ impl Session {
         // Marks the collector run: from here the session has a main thread, so an
         // off-main call on an in-process handle waits for the next update.
         self.main_work.run(main);
-        let requested = loaded.plugin;
+        let loadable = loaded.loadable.clone();
+        let requested_path = loaded.loadable.plugin().path().to_path_buf();
         let config = loaded.config;
         let Open {
             plugin,
@@ -1327,7 +1340,7 @@ impl Session {
         } = match loaded.opened {
             Opened::Done(open) => *open,
             // A plugin hosted in process opens here, on the main thread.
-            Opened::OnMain(load) => load.open(Some(main)),
+            Opened::OnMain(load) => (*load).open(Some(main)),
         };
         let plugin = plugin?;
         let handle = plugin.handle().clone();
@@ -1338,7 +1351,7 @@ impl Session {
                 client.controls().set_meter(meter);
                 let key = self.graph.insert_plugin(client);
                 if let Some(hosted) = self.graph.plugins.get_mut(&key.erase()) {
-                    hosted.origin = Some(Origin { config });
+                    hosted.origin = Some(Origin { config, loadable });
                     hosted.recovery = self.recovery.map(Recovery::new);
                 }
                 key
@@ -1361,7 +1374,7 @@ impl Session {
             hosted.param_read = unread;
             hosted.gate.declare(&hosted.mirror);
         }
-        tracing::info!("plugin '{}' added as {node:?}", requested.path().display());
+        tracing::info!("plugin '{}' added as {node:?}", requested_path.display());
         Ok(key)
     }
 
@@ -1640,8 +1653,8 @@ impl Session {
         match self.graph.replace_plugin(
             node,
             client,
-            Seconds(0.01),
-            tutti_graph::CrossfadeCurve::default(),
+            tutti_graph::DECLICK,
+            tutti_graph::FadeLaw::default(),
         ) {
             Ok(()) => {}
             Err(crate::ReplaceRefused::Busy(client)) => {
@@ -1827,11 +1840,10 @@ impl Session {
         hosted.reload.due = None;
         hosted.reload.in_flight = true;
         let load = PluginLoad {
-            plugin: hosted.plugin.clone(),
+            loadable: origin.loadable.retargeted(hosted.plugin.clone()),
             rate,
             config: origin.config,
             state: hosted.snapshot.clone(),
-            blacklist: None,
             work: self.work.clone(),
         };
         let token = Arc::clone(&hosted.reload.token);
@@ -2329,15 +2341,24 @@ mod tests {
         }
 
         /// The node's record as a plugin being recovered, its reload due now,
-        /// whose ref resolves in process (CLAP, `Hosting::InProcess`).
+        /// whose load resolves in process (CLAP, `Hosting::InProcess`).
         #[cfg(feature = "clap")]
         fn recovering_in_process(&mut self) {
+            let plugin = PluginRef::file("fake.clap").expect("a plugin file");
+            self.recovering(
+                plugin.clone(),
+                Loadable::uncatalogued(plugin).hosting(Hosting::InProcess),
+            );
+        }
+
+        /// The node's record as `plugin` being recovered, its reload due now,
+        /// from a load that was `loadable`.
+        fn recovering(&mut self, plugin: PluginRef, loadable: Loadable) {
             let hosted = self.session.graph.plugins.get_mut(&self.node).unwrap();
-            hosted.plugin = PluginRef::file("fake.clap")
-                .expect("a plugin file")
-                .with_hosting(Hosting::InProcess);
+            hosted.plugin = plugin;
             hosted.origin = Some(Origin {
                 config: AudioConfig::default(),
+                loadable,
             });
             let mut recovery = Recovery::new(RecoveryPolicy::default());
             let _ = recovery.step(
@@ -2500,19 +2521,19 @@ mod tests {
             let mut rig = rig(None);
             let replacement = tutti_graph::ForkByClone(tutti_nodes::testing::Const::mono(1.0));
             let fade = tutti_types::Seconds(0.0);
-            let curve = tutti_graph::CrossfadeCurve::EqualAmplitude;
+            let law = tutti_graph::FadeLaw::EqualAmplitude;
             if crossfade {
                 assert!(matches!(
                     rig.session
                         .graph()
-                        .crossfade(rig.node, replacement, fade, curve),
+                        .crossfade(rig.node, replacement, fade, law),
                     Ok(crate::Crossfade::Landed(_))
                 ));
             } else {
                 assert!(
                     rig.session
                         .graph()
-                        .replace(rig.node, replacement, fade, curve)
+                        .replace(rig.node, replacement, fade, law)
                         .is_ok()
                 );
             }
@@ -2832,9 +2853,9 @@ mod tests {
         }
     }
 
-    /// **A reload of a plugin whose ref resolves in process is refused as
+    /// **A reload of a plugin whose load resolves in process is refused as
     /// `ReplacementInProcess`, with no main thread and nothing opened.** The
-    /// decision is `Plugin::hosting_of` over the ref (a pure resolve, no module
+    /// decision is `Loadable::placement` (a pure resolve, no module
     /// read): `PluginLoad::run` returns such a load unopened (`Opened::OnMain`),
     /// and the landing does not open it. No thread of this process claimed the
     /// main thread, so an open (which takes the token) could not have happened.
@@ -2868,6 +2889,49 @@ mod tests {
         assert!(
             MainThreadMarker::new().is_none(),
             "still not the main thread"
+        );
+    }
+
+    /// **A plugin blacklisted after its load is not reloaded**: the reload asks
+    /// the catalog blacklist the original load ran under, so a plugin the
+    /// catalog has since recorded as crashing the scanner fails the attempt as
+    /// the blacklist's refusal, and nothing is opened.
+    #[test]
+    fn a_reload_of_a_plugin_blacklisted_since_its_load_is_refused() {
+        use tutti_plugin::catalog::{CatalogConfig, NO_SCAN_DIRS, PluginDb};
+        let file =
+            std::env::temp_dir().join(format!("tutti-reload-bl-{}.clap", std::process::id()));
+        std::fs::write(&file, b"x").unwrap();
+        let mut catalog = Catalog::new(
+            PluginDb::new(),
+            CatalogConfig::new("/nonexistent", NO_SCAN_DIRS),
+            |_| Ok(()),
+        );
+        let plugin = PluginRef::file(&file).expect("a plugin file");
+        let loadable = Loadable::uncatalogued(plugin.clone()).under(&catalog);
+        let mut rig = rig(None);
+        rig.recovering(plugin, loadable);
+        let job = rig.plugins_at(0).pop().expect("the reload is submitted");
+
+        catalog.blacklist(&file, "crashed the scanner");
+        let events = rig.run_and_land(job);
+        std::fs::remove_file(&file).ok();
+
+        let [
+            SessionEvent::Plugin(PluginEvent {
+                change: PluginChange::Reloading { cause, .. },
+                ..
+            }),
+        ] = &events[..]
+        else {
+            panic!("the next attempt is scheduled: {events:?}");
+        };
+        let ReloadCause::Attempt(RecoveryFailure::ReloadFailed { source }) = cause else {
+            panic!("{cause:?}");
+        };
+        assert!(
+            matches!(&**source, BridgeError::Blacklisted { reason, .. } if reason == "crashed the scanner"),
+            "{source:?}"
         );
     }
 

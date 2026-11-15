@@ -3,7 +3,7 @@
 use tutti_types::BusTopology;
 
 /// The widest routing: a bus's channel count.
-pub(crate) const MAX_WIDTH: usize = tutti_types::MAX_BUS_CHANNELS;
+pub(crate) const MAX_WIDTH: usize = tutti_types::MAX_CHANNELS;
 
 /// The cross-feedback routing of a delay: entry `(c, j)` is how much of channel `j`'s
 /// delayed tap recirculates into channel `c`'s line, before the cross-feedback amount
@@ -195,13 +195,5 @@ impl Routing {
     #[must_use]
     pub fn is_none(&self) -> bool {
         self.weights.iter().flatten().all(|&w| w == 0.0)
-    }
-
-    /// The sum of the absolute weights of row `to`: at most 1.
-    #[must_use]
-    pub(crate) fn row_sum(&self, to: usize) -> f32 {
-        self.weights
-            .get(to)
-            .map_or(0.0, |row| row[..self.width()].iter().map(|w| w.abs()).sum())
     }
 }

@@ -52,8 +52,7 @@ pub enum RootError {
 pub fn fold_to_width(src: &ChannelTopology, dst: ChannelLayout) -> Result<Fold, FoldError> {
     if let Some(channel) = src
         .positions()
-        .iter()
-        .position(|p| matches!(p, Speaker::Unknown(_)))
+        .and_then(|list| list.iter().position(|p| matches!(p, Speaker::Unknown(_))))
     {
         return Err(FoldError::Unnamed {
             end: FoldEnd::Source,
@@ -61,8 +60,9 @@ pub fn fold_to_width(src: &ChannelTopology, dst: ChannelLayout) -> Result<Fold, 
         });
     }
     let to = ChannelTopology::assumed(dst);
-    if src.is_unassigned() || to.is_unassigned() {
-        Fold::by_index(src.layout(), dst)
+    // An ambisonic source is as unplaced as unassigned channels: by index.
+    if src.is_unassigned() || src.ambisonic().is_some() || to.is_unassigned() {
+        Fold::by_index(src.width(), dst)
     } else {
         Fold::between(src, &to)
     }

@@ -52,8 +52,8 @@ use std::time::Duration;
 use tutti_plugin_types::{
     BridgeError, BridgeResult, ChunkCounters, Controller, Load, LoadStage, Loaded, LoadedPlugin,
     MainThreadMarker, ParamAccess, ParamId, ParamWriteError, ParameterChanges, ParameterQueue,
-    PluginDescriptor, PluginError, PluginResult, PluginTail, Prepare, ProcessWake, Refused, Reopen,
-    Request, RestartRules, SampleFormat, SampleRate, Samples, StateUse, Stuck,
+    PluginDescriptor, PluginError, PluginFormat, PluginResult, PluginTail, Prepare, ProcessWake,
+    Refused, Reopen, Request, RestartRules, SampleFormat, SampleRate, Samples, StateUse, Stuck,
 };
 use tutti_types::AtomicSampleRate;
 
@@ -70,6 +70,8 @@ pub struct IpcOrigin {
     pub config: BridgeConfig,
     /// The plugin file.
     pub path: PathBuf,
+    /// The format that opens it, as the first launch named it.
+    pub format: PluginFormat,
     /// Which plugin of the file, as the first launch chose it.
     pub load: Load,
     /// Loads the editor-only instance, as the first launch's did; `None`
@@ -96,6 +98,7 @@ impl IpcOrigin {
         Ipc::launch(
             config,
             self.path.clone(),
+            self.format,
             self.load.clone(),
             rate,
             state,
@@ -446,8 +449,8 @@ impl Ipc {
         }
     }
 
-    /// Launches a `plugin-server` for the plugin `load` chooses in `path` at
-    /// `rate` and returns the plugin loaded in it, with what became of `state` if one was given: it is
+    /// Launches a `plugin-server` for the plugin `load` chooses in `path`, opened
+    /// as `format`, at `rate` and returns the plugin loaded in it, with what became of `state` if one was given: it is
     /// restored **before the plugin is activated**, the order every format
     /// allows and a plugin that takes its mode from the state at activation
     /// needs. `state_use` is what that state was saved for.
@@ -465,13 +468,14 @@ impl Ipc {
     pub fn launch(
         config: BridgeConfig,
         path: PathBuf,
+        format: PluginFormat,
         load: Load,
         rate: SampleRate,
         state: Option<&[u8]>,
         state_use: StateUse,
         load_editor: Option<EditorLoader>,
     ) -> BridgeResult<Launched> {
-        let server = launch(&config, &path, &load, rate, state, state_use)?;
+        let server = launch(&config, &path, format, &load, rate, state, state_use)?;
         let restored = server.state_restore.clone();
         // Guarded before the first fallible step below: an `Err` from
         // `PluginBridge::new` would otherwise drop a bare child process.
@@ -480,6 +484,7 @@ impl Ipc {
             config.socket_path.clone(),
             Arc::clone(server.slab.slab()),
             tutti_plugin_types::Origin::new(path.clone(), load.clone()),
+            format,
             load_editor.clone(),
             rate,
         )?;
@@ -503,6 +508,7 @@ impl Ipc {
             origin: Some(IpcOrigin {
                 config,
                 path,
+                format,
                 load,
                 load_editor,
             }),

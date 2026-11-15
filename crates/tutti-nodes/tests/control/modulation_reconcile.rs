@@ -36,7 +36,7 @@ const STEP: usize = tutti_modulation::CONTROL_GRID.stride() as usize;
 const DECLICK: usize = 256;
 
 /// Graph keys of the rig, far from `NodeKey::fresh`'s, which the reconciler
-/// mints from 0.
+/// mints from 1.
 const fn key(n: u64) -> NodeKey {
     NodeKey((1 << 48) + n)
 }
@@ -883,8 +883,8 @@ fn a_follower_takes_no_resync() {
 }
 
 /// **A host's own key is never taken.** The host keys its nodes with
-/// literals from 0, where `NodeKey::fresh`'s counter also starts (each
-/// nextest test is a fresh process): a probe at 0, a pulse at 1. The lane
+/// literals from 1, where `NodeKey::fresh`'s counter also starts (each
+/// nextest test is a fresh process): a probe at 1, a pulse at 2. The lane
 /// and the follower the reconciler builds land on other keys, the host's
 /// nodes keep their kinds, and the pad still dips with the pulse.
 #[test]
@@ -892,17 +892,17 @@ fn a_host_key_is_never_taken() {
     let (mut ed, mut exec) = editor(128);
     let mut host = Host::default();
     let p = Probe::new(0.8);
-    host.targets.insert(1, (NodeKey(0), Arc::clone(&p.knob)));
-    ed.insert(NodeKey(0), "probe", ForkByClone(p));
+    host.targets.insert(1, (NodeKey(1), Arc::clone(&p.knob)));
+    ed.insert(NodeKey(1), "probe", ForkByClone(p));
     ed.spec_mut()
         .topology
         .outputs
         .push(vec![Source::Node(OutPort {
-            node: NodeKey(0),
+            node: NodeKey(1),
             port: 0,
         })]);
     ed.insert(
-        NodeKey(1),
+        NodeKey(2),
         "pulse",
         ForkByClone(Pulse {
             from: 0,
@@ -915,7 +915,7 @@ fn a_host_key_is_never_taken() {
     let mut decl = Decl::default();
     decl.target(cutoff_of(1), 0.0, 1.0);
     let pulse = decl.source(1, follower());
-    host.feeds.insert(pulse, Feed::Audio(NodeKey(1)));
+    host.feeds.insert(pulse, Feed::Audio(NodeKey(2)));
     decl.route(1, pulse, cutoff_of(1), -0.6);
     let mut m = Modulation::new();
     m.apply(&decl.get(), &mut ed, &host).expect("applies");
@@ -923,11 +923,11 @@ fn a_host_key_is_never_taken() {
     let lane = m.lane(cutoff_of(1)).expect("a lane").0;
     let source = m.source(pulse).expect("a follower");
     for k in [lane, source] {
-        assert!(k != NodeKey(0) && k != NodeKey(1), "{k:?}");
+        assert!(k != NodeKey(1) && k != NodeKey(2), "{k:?}");
     }
     let nodes = &ed.spec().topology.nodes;
-    assert_eq!(nodes[&NodeKey(0)].kind, "probe");
-    assert_eq!(nodes[&NodeKey(1)].kind, "pulse");
+    assert_eq!(nodes[&NodeKey(1)].kind, "probe");
+    assert_eq!(nodes[&NodeKey(2)].kind, "pulse");
     let got = render(&mut ed, &mut exec, 128, 2_048);
     assert!(got[0][2_047] < 0.5, "ducked: {}", got[0][2_047]);
 }

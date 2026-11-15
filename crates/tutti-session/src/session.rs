@@ -25,8 +25,10 @@ use crate::{HeardOpen, HeardTapError, Playhead, RemoveError, ScheduleError, Temp
 #[non_exhaustive]
 pub enum Phase {
     /// What the session's jobs sent lands first (`SessionBuilder::spawn_with`:
-    /// each message, then each end, in arrival order). Then crossfades that
-    /// waited out a re-prepare are retried, what bounces
+    /// each message, then each end, in arrival order). Then the pool's
+    /// landings are reported ([`SessionEvent::Pool`], in the order the app's
+    /// set names the entries), then its releases (by key), then crossfades
+    /// that waited out a re-prepare are retried, what bounces
     /// sent back is dropped (feature `export`; and a bounce in flight for
     /// `BOUNCE_STALL_WARNING` of `PhaseCx::now` warned about, once), then
     /// `Editor::collect` frees what the audio thread retired (here, on the
@@ -264,6 +266,15 @@ pub enum SessionEvent {
         /// Which of its readings changed.
         fact: crate::ResourceFact,
     },
+    /// A pool entry's change: its load landed or failed, a reload landed, or it
+    /// was released. See [`PoolEvent`](crate::PoolEvent); `key` is the key the
+    /// app declared it under ([`PoolKey::get`](crate::PoolKey::get)).
+    Pool {
+        /// The entry's key.
+        key: crate::PoolKey,
+        /// What changed.
+        event: crate::PoolEvent,
+    },
 }
 
 impl std::fmt::Debug for SessionEvent {
@@ -314,6 +325,11 @@ impl std::fmt::Debug for SessionEvent {
                 .debug_struct("ResourceChanged")
                 .field("id", id)
                 .field("fact", fact)
+                .finish(),
+            Self::Pool { key, event } => f
+                .debug_struct("Pool")
+                .field("key", key)
+                .field("event", event)
                 .finish(),
         }
     }
@@ -399,6 +415,8 @@ pub struct Session {
     pub(crate) graph: Graph,
     /// The source of the ids of this session's resources.
     pub(crate) resource_ids: crate::peer::ResourceIds,
+    /// What the app declared loaded ([`Session::pool`]).
+    pub(crate) pool: crate::Pool,
     pub(crate) transport: Transport,
     /// The engine, for an offline session (the host pulls blocks); `None` on
     /// a device (the callback holds it) or detached.
@@ -446,13 +464,13 @@ pub struct Session {
     pub(crate) midi_io: Option<tutti_midi_hardware::MidiSession>,
     #[cfg(feature = "sampler")]
     pub(crate) disk_streamer: Option<tutti_sampler::DiskStreamer>,
-    /// The last [`SamplerLoad`](crate::SamplerLoad) minted.
+    /// Names the [`SamplerLoad`](crate::SamplerLoad)s.
     #[cfg(feature = "sampler")]
-    pub(crate) sampler_opens: u64,
+    pub(crate) sampler_opens: tutti_types::Mint,
     /// The device's fault record, shared with the [`Device`](crate::Device),
     /// and the count the last poll saw.
     #[cfg(feature = "device")]
-    pub(crate) faults: Option<(Arc<tutti_cpal::StreamFaults>, u64)>,
+    pub(crate) faults: Option<(Arc<tutti_engine::StreamFaults>, u64)>,
     /// The device watch, and what restarts reported since the
     /// last poll.
     #[cfg(feature = "device")]
@@ -608,7 +626,7 @@ impl Session {
     /// # Errors
     ///
     /// [`Error::Output`](crate::Error::Output) when the declaration is empty, wider than the engine
-    /// renders ([`MAX_ROOT_CHANNELS`](tutti_graph::MAX_ROOT_CHANNELS)), or the
+    /// renders ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)), or the
     /// device cannot place it (an unassigned root wider than the device, a channel
     /// no speaker names). Nothing is changed.
     pub fn declare_root_topology(&mut self, root: Option<ChannelTopology>) -> crate::Result<()> {
@@ -652,7 +670,7 @@ impl Session {
     /// - Otherwise `Refused` with [`Graph::widen_outputs`]'s last refusal: a
     ///   widening the declared root could not take
     ///   ([`RootError::Width`](tutti_graph::RootError::Width)), or
-    ///   channels past `MAX_ROOT_CHANNELS`
+    ///   channels past `MAX_CHANNELS`
     ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), as a
     ///   [`RootError::Fold`](tutti_graph::RootError::Fold)); that
     ///   is what a host's `MasterSources` longer than the root comes to.
@@ -695,6 +713,8 @@ impl Session {
             Phase::Collect => {
                 // First, so what a job landed is in the graph this update commits.
                 self.land_jobs(out);
+                // What those landings and the holds' ends changed.
+                self.pool_events(out);
                 // What the graph's own removals left declared.
                 self.forget_removed();
                 // Before the collect, as a frame's spawns run before its

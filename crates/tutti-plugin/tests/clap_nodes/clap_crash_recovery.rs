@@ -302,9 +302,9 @@ fn a_plugin_that_aborts_mid_render_leaves_the_host_alive_and_silent() {
 /// be asserted on at all, so the suite would report a harness timeout rather
 /// than a diagnosis.
 ///
-/// The bound is deliberately loose — each block already sleeps [`PACE`], so this
-/// measures only that no block waited on the socket. A synchronous design would
-/// spend its full reply budget per block on top of that.
+/// The bound is deliberately loose — it is [`PACE`] per render, and a render of a
+/// dead plugin touches no socket. A synchronous design would spend its full reply
+/// timeout in every render.
 #[test]
 fn rendering_through_a_dead_plugin_does_not_block() {
     let _lock = machine_lock();
@@ -330,19 +330,24 @@ fn rendering_through_a_dead_plugin_does_not_block() {
     );
 
     const MEASURED: usize = 8;
-    let start = Instant::now();
+    // Only the render calls are timed: a `sleep` is stretched by a loaded or
+    // timer-coalescing host (macOS) without the audio path being involved.
+    let mut elapsed = Duration::ZERO;
     for _ in 0..MEASURED {
-        let _ = drive_block(&mut unit);
+        let start = Instant::now();
+        let _ = unit.run(BLOCK, |_, _| INPUT_DC);
+        elapsed += start.elapsed();
+        std::thread::sleep(PACE);
     }
-    let elapsed = start.elapsed();
 
-    // Only the sleeps, plus slack. Nothing here should touch the socket at all:
-    // `Batcher::collectable` checks the crash flag *first*, before it even asks
-    // the slab, precisely so a dead bridge costs one relaxed atomic load.
-    let budget = PACE * MEASURED as u32 * 3;
+    // Nothing here should touch the socket at all: `Batcher::collectable`
+    // checks the crash flag *first*, before it even asks the slab, precisely so
+    // a dead bridge costs one relaxed atomic load. A design that waited on the
+    // dead plugin would spend its reply timeout in every render.
+    let budget = PACE * MEASURED as u32;
     assert!(
         elapsed < budget,
-        "{MEASURED} post-crash blocks took {elapsed:?}, over the {budget:?} \
+        "{MEASURED} post-crash renders took {elapsed:?}, over the {budget:?} \
          budget — the audio path appears to be waiting on a plugin that is gone"
     );
 }

@@ -99,6 +99,7 @@ mod tests;
 pub use capability_view::TransportView;
 pub(crate) use capability_view::is_declined;
 
+use crate::host::loadable::Loadable;
 use crate::host::plugin_ref::PluginRef;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -232,9 +233,10 @@ impl PluginClient<Unbound> {
     /// Spawns the plugin-server, loads `plugin` and returns the loaded
     /// plugin, [`Unbound`].
     ///
-    /// `plugin` names the plugin in its file ([`PluginRef::load`]): a scanned
-    /// plugin's ref picks it in a bundle that exports several, and
-    /// [`PluginRef::file`] is the explicit "the file's first".
+    /// `plugin` names the plugin in its file ([`PluginRef::load`]) and the
+    /// format that opens it: a scanned plugin's id picks it in a bundle that
+    /// exports several, and [`PluginRef::file`] is the explicit "the file's
+    /// first". The server opens the file as that format, whatever its extension.
     ///
     /// Blocks while the subprocess launches and completes its handshake. The
     /// `work` is the collector of the plugin's owner, which the editor instance
@@ -253,7 +255,7 @@ impl PluginClient<Unbound> {
     pub fn new(
         config: BridgeConfig,
         work: &MainWorkHandle,
-        plugin: &PluginRef,
+        plugin: &Loadable,
         sample_rate: impl Into<SampleRate>,
     ) -> BridgeResult<Self> {
         Self::open(config, work, plugin, sample_rate, None).map(|(client, _)| client)
@@ -272,14 +274,17 @@ impl PluginClient<Unbound> {
     pub fn open(
         config: BridgeConfig,
         work: &MainWorkHandle,
-        plugin: &PluginRef,
+        plugin: &Loadable,
         sample_rate: impl Into<SampleRate>,
         state: Option<&[u8]>,
     ) -> BridgeResult<(Self, Option<std::result::Result<(), String>>)> {
+        plugin.check()?;
+        let format = plugin.format();
+        let plugin = plugin.plugin();
         let plugin_path = plugin.path().to_path_buf();
         // A VST2 plugin is not served (its editor and audio are one object):
         // refused here, typed, before a server is started for it.
-        if plugin.format() == tutti_plugin_db::PluginFormat::Vst2 {
+        if format == tutti_plugin_types::PluginFormat::Vst2 {
             return Err(BridgeError::NotOutOfProcess {
                 path: plugin_path,
                 format: "VST2",
@@ -288,6 +293,7 @@ impl PluginClient<Unbound> {
         let Launched { ipc, restored } = Ipc::launch(
             config,
             plugin_path,
+            format,
             plugin.load(),
             sample_rate.into(),
             state,
@@ -410,8 +416,8 @@ impl PluginClient<Unbound> {
         // hand-inserted node name it as a scan would.
         let plugin = origin
             .as_ref()
-            .and_then(|o| PluginRef::loaded(&o.path, &descriptor.id))
-            .ok_or_else(|| failed("the served plugin has no file of a plugin format".into()))?;
+            .map(|o| PluginRef::loaded(&o.path, o.format, &descriptor.id))
+            .ok_or_else(|| failed("the served plugin has no origin".into()))?;
         let format = ipc.format();
         let served = ipc.controller();
         // Report the FULL input width (main + sidechain/aux input buses) so a

@@ -1673,13 +1673,14 @@ fn a_request_while_one_for_that_profile_waits_is_not_sent() {
 /// A count of Channels is at least 1 and fits 14 bits (M2-101 section 7.8).
 #[test]
 fn a_channel_count_is_at_least_one_and_fits_fourteen_bits() {
-    assert_eq!(ChannelCount::new(0), None);
+    tutti_fixtures::check_range_contract(&tutti_fixtures::RangeContract {
+        new: ChannelCount::new,
+        get: ChannelCount::get,
+        of: Some(ChannelCount::of),
+        valid: &[1, 3, 16_383],
+        invalid: &[0, 16_384, u16::MAX],
+    });
     assert_eq!(ChannelCount::new(1), Some(ChannelCount::ONE));
-    assert_eq!(
-        ChannelCount::new(16_383).map(ChannelCount::get),
-        Some(16_383)
-    );
-    assert_eq!(ChannelCount::new(16_384), None);
 }
 
 use crate::{ProcessChange, ReportError};

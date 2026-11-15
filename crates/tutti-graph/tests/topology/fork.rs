@@ -10,10 +10,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use common::{Kind, TestNode, bits, prepare};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    CrossfadeCurve, Cx, Editor, EventEdge, EventIn, EventOut, Fade, ForkBuild, ForkByClone,
-    ForkCause, ForkError, ForkFault, ForkFaultKind, ForkHealth, ForkMode, ForkRemains, ForkSource,
-    ForkTarget, Forked, GraphBuilder, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet,
-    PendingFork, Prepare, Renderer, Shape, Status, Unforkable, param_parts,
+    Cx, Editor, EventEdge, EventIn, EventOut, Fade, FadeLaw, ForkBuild, ForkByClone, ForkCause,
+    ForkError, ForkFault, ForkFaultKind, ForkHealth, ForkMode, ForkRemains, ForkSource, ForkTarget,
+    Forked, GraphBuilder, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, PendingFork, Prepare,
+    Renderer, Shape, Status, Unforkable, param_parts,
 };
 use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
 use tutti_types::{Amplitude, ChannelLayout, Param, Samples, Tail, UnitParam};
@@ -787,7 +787,7 @@ fn the_live_graph_is_unaffected_while_a_fork_renders() {
 /// replace (a different width) changes nothing.
 #[test]
 fn a_replace_moves_forking_to_the_new_unit() {
-    let fade = Fade::new(Samples(64), CrossfadeCurve::EqualPower);
+    let fade = Fade::new(Samples(64), FadeLaw::EqualPower);
     let key = NodeKey(1);
     let (mut ed, mut exec) = Editor::new(prepare(64));
     ed.insert(key, "consts", consts(1, 0.5));

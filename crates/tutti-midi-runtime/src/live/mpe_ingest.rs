@@ -123,7 +123,10 @@ use tutti_graph::UmpAt;
 use tutti_midi_protocol::{
     ChannelResponse, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones, PitchBendSensitivity,
 };
-use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, Rpn, Ump, Voice2};
+use tutti_ump::{
+    Address, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, RegisteredData, Rpn, Ump,
+    Voice2,
+};
 use tutti_ump::{BendValue, ControlValue};
 
 /// The Registered Controller `rpn` carrying `data` on each channel of `channels`, on `group`
@@ -169,7 +172,7 @@ fn send_zone_defaults(
         offset,
         core::iter::once(zone.manager),
         Rpn::PITCH_BEND_SENSITIVITY,
-        zone.manager_range.to_rpn_bits(),
+        zone.manager_range.to_channel_data().to_word(),
         out,
     );
     send_rpns(
@@ -177,7 +180,7 @@ fn send_zone_defaults(
         offset,
         zone.member_channels(),
         Rpn::PITCH_BEND_SENSITIVITY,
-        zone.manager_range.to_rpn_bits(),
+        zone.manager_range.to_channel_data().to_word(),
         out,
     );
     send_rpns(
@@ -840,7 +843,8 @@ impl MpeIngest {
                 event.0,
                 zone.member_channels(),
                 Rpn::PER_NOTE_PITCH_BEND_SENSITIVITY,
-                value.get(),
+                PitchBendSensitivity::from_channel_data(RegisteredData::from_word(value.get()))
+                    .to_rpn_bits(),
                 out,
             );
         }

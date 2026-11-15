@@ -206,6 +206,19 @@ fn equal_frames_leave_in_push_order() {
     );
 }
 
+/// A push to a dropped node answers `Disconnected` and counts nothing: the
+/// event had nowhere to go, which is not a ring that was full.
+#[test]
+fn a_push_to_a_dropped_node_is_disconnected_and_uncounted() {
+    let (d, mut tx) = rig(8);
+    drop(d);
+    assert_eq!(
+        tx.push(Stamp::NextBlock, note(1)),
+        Err(Refused::Disconnected)
+    );
+    assert_eq!(tx.counts().losses().lost, 0);
+}
+
 /// A producer faster than the graph: the ring of 8 takes 8, refuses the rest
 /// with `Full`, never blocks, and `lost()` equals the refusals; what it held
 /// is emitted, and room returns once the node has drained.
@@ -579,7 +592,7 @@ fn graph(
     ed.spec_mut().topology.set_outputs([out(30)]);
     let tap = tap.then(|| {
         ed.open_event_tap(
-            EventTapId(1),
+            EventTapId::of(1),
             EventOut {
                 node: NodeKey(1),
                 port: 0,

@@ -73,6 +73,7 @@ fn no_editor(
     _: tutti_plugin_types::MainThreadMarker,
     _: &tutti_plugin_types::MainWorkHandle,
     path: &std::path::Path,
+    _: tutti_plugin_types::PluginFormat,
     _: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     Err(tutti_plugin_types::BridgeError::LoadFailed {
@@ -94,12 +95,12 @@ fn wait_until(mut cond: impl FnMut() -> bool) -> bool {
 }
 
 fn unique_shm_name(label: &str) -> String {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
     format!(
         "hostile_{}_{}_{}",
         label,
         std::process::id(),
-        COUNTER.fetch_add(1, Ordering::Relaxed)
+        COUNTER.mint()
     )
 }
 
@@ -357,6 +358,7 @@ impl MockServer {
             path.clone(),
             slab,
             tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+            tutti_plugin_types::PluginFormat::Vst3,
             Some(crate::EditorLoader::new(
                 no_editor,
                 tutti_fixtures::detached_work(),

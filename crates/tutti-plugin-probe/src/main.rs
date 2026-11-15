@@ -1,4 +1,4 @@
-//! `plugin-probe <path> <result-file> [--measure [--state <file>]]`: load a plugin file just far
+//! `plugin-probe <path> <result-file> [--as <format>] [--measure [--state <file>]]`: load a plugin file just far
 //! enough to read the descriptor of every plugin it holds, write the outcome to
 //! the result file and exit.
 //!
@@ -10,6 +10,9 @@
 //! puts the plugin in the state the file holds (what the plugin's own
 //! `save_state` wrote) before it is measured, so the figure is of that patch:
 //! the record carries a hash of it.
+//!
+//! `--as <format>` (`clap`, `vst3`, `vst2`, `au`) names the format the path is read
+//! as, for a file whose own extension does not (a link `Foo.clap` to `libfoo.so`).
 //!
 //! The result file is the only wire (`tutti_plugin_types::write_result`: a
 //! staging file renamed into place). Plugins print from their init code, so
@@ -30,17 +33,30 @@
 use std::path::Path;
 use std::process::ExitCode;
 use tutti_plugin_probe::{describe, describe_measured};
-use tutti_plugin_types::{MainThreadMarker, ProbeOutcome, write_result};
+use tutti_plugin_types::{MainThreadMarker, PluginFormat, ProbeOutcome, write_result};
 
 fn main() -> ExitCode {
-    const USAGE: &str =
-        "usage: plugin-probe <plugin-path> <result-file> [--measure [--state <file>]]";
+    const USAGE: &str = "usage: plugin-probe <plugin-path> <result-file> [--as <format>] \
+                         [--measure [--state <file>]]";
     let mut args = std::env::args_os().skip(1);
     let (Some(path), Some(result)) = (args.next(), args.next()) else {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
     };
-    let rest: Vec<_> = args.collect();
+    let mut rest: Vec<_> = args.collect();
+    let format = match rest.as_slice() {
+        [a, f, ..] if a == "--as" => match f.to_str().and_then(PluginFormat::from_extension_id) {
+            Some(format) => Some(format),
+            None => {
+                eprintln!("{USAGE}");
+                return ExitCode::from(2);
+            }
+        },
+        _ => None,
+    };
+    if format.is_some() {
+        rest.drain(..2);
+    }
     let (measure, state) = match rest.as_slice() {
         [] => (false, None),
         [m] if m == "--measure" => (true, None),
@@ -66,9 +82,9 @@ fn main() -> ExitCode {
         return ExitCode::from(3);
     };
     let described = if measure {
-        describe_measured(main, Path::new(&path), state.as_deref())
+        describe_measured(main, Path::new(&path), format, state.as_deref())
     } else {
-        describe(main, Path::new(&path))
+        describe(main, Path::new(&path), format)
     };
     let outcome = match described {
         Ok(plugins) if plugins.is_empty() => {

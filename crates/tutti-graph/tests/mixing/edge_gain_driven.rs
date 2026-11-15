@@ -16,8 +16,8 @@ use std::collections::BTreeMap;
 use common::{Kind, Pair, SpecBehaviour, bits, driver_value, input_signal, prepare};
 use tutti_graph::{
     CompileError, Edge, EdgeId, Editor, EventOut, ForkCause, ForkMode, ForkSource, Forked,
-    GraphInvalid, GraphSpec, InPort, IntoNode, Node, NodeKey, NodeParts, OutPort, PARAM_DECLICK,
-    ParamRange, Sink, Source, Topology, Unforkable, ValidGraph, compile,
+    GraphInvalid, GraphSpec, InPort, IntoNode, Node, NodeKey, NodeParts, OutPort, ParamRange, Sink,
+    Source, Topology, Unforkable, ValidGraph, compile,
 };
 use tutti_types::{Amplitude, Samples, Tail};
 
@@ -248,10 +248,10 @@ fn a_driven_lane_is_clamped_to_its_range() {
 }
 
 /// Before its first event a driven lane reads its base, and a source that
-/// goes crossfades from where it was to the base over `PARAM_DECLICK` frames
+/// goes crossfades from where it was to the base over `DECLICK`
 /// (the param port's rule, one copy). One constant step, then a commit that
 /// disconnects the source: frame `j` after it is
-/// `base + (held - base) * (1 - (j + 1) / PARAM_DECLICK)`.
+/// `held * (1 - s) + base * s`, `s` the smootherstep at `(j + 1) / (DECLICK + 1)`.
 #[test]
 fn a_source_that_goes_is_declicked_to_the_base() {
     let base = 0.75f32;
@@ -274,15 +274,19 @@ fn a_source_that_goes_is_declicked_to_the_base() {
     assert!(got.iter().all(|&x| x == held), "held at the step: {held}");
     rig.spec.disconnect_edge_gain(id, lane_out(2));
     pair.switch(&rig.graph(), &rig.kinds);
-    let got = run(&mut pair, PARAM_DECLICK.get() / BLOCK + 2);
-    let d = PARAM_DECLICK.get();
+    let d = common::declick();
+    let got = run(&mut pair, d / BLOCK + 2);
     for (j, &g) in got.iter().enumerate() {
         let w = if j < d {
-            base + (held - base) * (1.0 - (j + 1) as f32 / d as f32)
+            let (out, inn) = common::smooth_gains(j, d);
+            f64::from(held) * out + f64::from(base) * inn
         } else {
-            base
+            f64::from(base)
         };
-        assert_eq!(g.to_bits(), (0.0 + w * 1.0).to_bits(), "frame {j}");
+        assert!(
+            (f64::from(g) - w).abs() < 1e-6,
+            "frame {j}: {g}, smootherstep {w}"
+        );
     }
 }
 

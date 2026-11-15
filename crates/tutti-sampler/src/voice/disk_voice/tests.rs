@@ -3,6 +3,7 @@ use crate::VoiceWindow;
 use crate::streamer::{RegionBuffer, StreamId};
 use crate::testing::{MockTransport, block, play};
 use std::path::PathBuf;
+use tutti_graph::RenderMode;
 use tutti_graph::contract::Direct;
 use tutti_types::MaxBlock;
 use tutti_types::{Beat, BeatDuration, Bpm, Samples};
@@ -42,7 +43,7 @@ fn make_reader_with_samples(samples: &[(f32, f32)]) -> (SharedReader, tutti_rt::
 /// `start..` (where a placed voice reads them).
 fn make_reader_at(samples: &[(f32, f32)], start: u64) -> (SharedReader, tutti_rt::PosReader) {
     let (mut writer, reader, pos) =
-        RegionBuffer::with_capacity(StreamId(1), PathBuf::new(), samples.len() + 64, 2u16);
+        RegionBuffer::with_capacity(StreamId::of(1), PathBuf::new(), samples.len() + 64, 2u16);
     writer.reset(start);
     writer.set_play(start);
     let flat: Vec<f32> = samples.iter().flat_map(|&(l, r)| [l, r]).collect();
@@ -172,7 +173,7 @@ fn placement_gate_applies_src_ratio_exactly_once() {
 
     // Two seconds in at 120 BPM = beat 4.0.
     transport.set_beat(Beat::new(4.0));
-    reader.set_render_rate(SampleRate::SR_44K1);
+    reader.set_render(SampleRate::SR_44K1, RenderMode::Realtime);
     under(&mut reader, &transport, SR, 1);
     let offset = ring.play() as f64;
 
@@ -252,7 +253,7 @@ fn a_fork_closes_its_file_once_past_its_window() {
 
     let render = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut copy = voice.fork_copy();
-    copy.set_render_rate(SampleRate::SR_48K);
+    copy.set_render(SampleRate::SR_48K, RenderMode::Offline);
     let is_open = |copy: &DiskVoice| {
         copy.offline
             .as_ref()
@@ -269,6 +270,58 @@ fn a_fork_closes_its_file_once_past_its_window() {
         }
     }
     assert!(!is_open(&copy), "the file is still open past the window");
+}
+
+/// A fork prepared for a realtime render renders silence and latches a fault
+/// without allocating, rather than block the audio thread on its file read; prepared offline, the
+/// same fork plays the file.
+#[test]
+fn a_fork_prepared_realtime_latches_instead_of_reading_its_file() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("ramp.wav");
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: 48_000,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut w = hound::WavWriter::create(&path, spec).expect("writes");
+    for i in 0..20_000 {
+        w.write_sample((i + 1) as f32 * 1e-5).expect("writes");
+        w.write_sample((i + 1) as f32 * 1e-5).expect("writes");
+    }
+    w.finalize().expect("writes");
+    let mut streamer =
+        crate::DiskStreamer::manual(SampleRate::SR_48K, Default::default()).expect("builds");
+    let opening = streamer.open(&path, crate::Placement::HEAD);
+    let (_stream, reader) = crate::testing::settle(&mut streamer, opening).expect("the file opens");
+    let voice = crate::DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
+    let clock = MockTransport::rolling(Beat::new(0.25), Bpm::of(120.0));
+
+    let mut offline = voice.fork_copy();
+    offline.set_render(SampleRate::SR_48K, RenderMode::Offline);
+    assert!(
+        under(&mut offline, &clock, 48_000.0, 64)[0]
+            .iter()
+            .all(|&s| s != 0.0)
+    );
+    assert!(offline.fault().expect("a fork").fault().is_none());
+
+    // Prepared realtime by `Direct`: the audio thread finds the fault, so it
+    // is latched without allocating.
+    let mut realtime = Direct::new(voice.fork_copy(), SampleRate::SR_48K, 64);
+    let health = realtime.node.fault().expect("a fork");
+    assert!(health.fault().is_none());
+    assert_no_alloc::assert_no_alloc(|| {
+        realtime.block_in(&clock.env(64, SampleRate::SR_48K));
+    });
+    assert!(
+        realtime
+            .outputs_mut()
+            .iter()
+            .all(|c| c.iter().all(|&s| s == 0.0))
+    );
+    assert!(health.fault().is_some());
 }
 
 /// A stopped clock silences a fork mid-clip, in a 64-frame block and
@@ -300,7 +353,7 @@ fn a_stopped_clock_silences_a_fork() {
 
     for single in [false, true] {
         let mut copy = voice.fork_copy();
-        copy.set_render_rate(SampleRate::SR_48K);
+        copy.set_render(SampleRate::SR_48K, RenderMode::Offline);
         let clock = MockTransport::rolling(Beat::new(0.25), Bpm::of(120.0));
         let blk = |copy: &mut DiskVoice| -> Vec<f32> {
             if single {
@@ -333,7 +386,7 @@ fn a_stopped_clock_silences_a_fork() {
 #[test]
 fn a_severed_copy_holds_no_live_reader() {
     let (mut writer, ring, pos) =
-        RegionBuffer::with_capacity(StreamId(1), PathBuf::new(), 4_096, 2u16);
+        RegionBuffer::with_capacity(StreamId::of(1), PathBuf::new(), 4_096, 2u16);
     writer.push_interleaved(&[0.5; 2 * 1_000]);
     let state = Arc::new(Cells::new());
     let mut live = DiskVoice::new(
@@ -536,6 +589,29 @@ fn clip_reader_jump_edge_is_allocation_free() {
     });
 }
 
+/// The underrun path: the playhead alternates between the ring's frames and
+/// a place inside the window the ring does not hold, so the read underruns
+/// (the old side runs out over `DECLICK` and the voice goes silent) and the
+/// ring comes back (the recovery fade-in), every few blocks, with the jump
+/// fades between.
+#[test]
+fn clip_reader_underrun_and_recovery_are_allocation_free() {
+    let transport = MockTransport::rolling(Beat::new(5.0), Bpm::of(120.0)); // in the ring
+    let mut direct = warm_clip_reader(&transport, 64);
+    assert_no_alloc::assert_no_alloc(|| {
+        for i in 0..3_000 {
+            // Beat 7.0 is inside the window [4, 8) and past the ring's end.
+            let beat = if (i / 7) % 2 == 0 { 5.0 } else { 7.0 };
+            transport.set_beat(Beat::new(beat));
+            direct.block_in(&transport.env(64, SampleRate::SR_48K));
+        }
+    });
+    assert!(
+        direct.node.shared_state.take_underruns() > 0,
+        "the ring was starved: the run reached the underrun path"
+    );
+}
+
 /// One-frame blocks, the shortest a node is handed: the per-block work
 /// (the clock's runs, the ring's claim) allocates nothing either, with the
 /// transport moving a frame a block (so the reader keeps its continuation:
@@ -628,7 +704,7 @@ fn wide_value(k: u64, c: usize) -> f32 {
 fn wide_clip(width: usize) -> DiskVoice {
     const AT: u64 = 22_000;
     let (mut writer, reader, pos) = RegionBuffer::with_capacity(
-        StreamId(1),
+        StreamId::of(1),
         PathBuf::new(),
         4096,
         ChannelLayout::try_from(width).expect("a test width is small"),
@@ -719,9 +795,12 @@ fn a_steady_lane_read_writes_the_callers_lanes_as_put_does() {
 /// topology's), so the voice places the ring's channels by it.
 fn placed_clip(topology: tutti_types::ChannelTopology) -> DiskVoice {
     const AT: u64 = 22_000;
-    let width = topology.positions().len();
+    let width = usize::from(topology.width().count());
+    // The frame the ring is placed into: the file's own width, or the 7.1's
+    // eight where the file is wider (a fold).
+    let frame = ChannelLayout::from(topology.width().count().min(8));
     let (mut writer, reader, pos) = RegionBuffer::for_file(
-        StreamId(1),
+        StreamId::of(1),
         PathBuf::new(),
         4096,
         topology,
@@ -735,7 +814,15 @@ fn placed_clip(topology: tutti_types::ChannelTopology) -> DiskVoice {
         .collect();
     writer.push_interleaved(&flat);
     let state = Arc::new(Cells::new());
-    let inner = DiskSource::new(reader, pos, Arc::clone(&state));
+    let place = Place::for_topology(reader.topology(), frame).expect("a test ring places");
+    let control = reader.control_reader();
+    let inner = DiskSource::with_reader(
+        reader,
+        Some(crate::streamer::RingReader::new(pos, control)),
+        Arc::clone(&state),
+        frame,
+        place,
+    );
     DiskVoice::new(
         inner,
         state,
@@ -759,6 +846,7 @@ fn wav_seven_one() -> tutti_types::ChannelTopology {
         SideLeft,
         SideRight,
     ])
+    .unwrap()
 }
 
 /// A 10-channel file with no mask, as the decoder names it: WAVE's first
@@ -777,6 +865,7 @@ fn named_ten() -> tutti_types::ChannelTopology {
         BackCenter,
         SideLeft,
     ])
+    .unwrap()
 }
 
 /// The eight channels a placed 10-channel file ([`named_ten`]) plays in the
@@ -1017,7 +1106,7 @@ fn reset_clears_state() {
 /// Build a `channels`-wide ring pre-filled with `frames` interleaved frames.
 fn make_wide_reader(frames: &[f32], channels: usize) -> (SharedReader, tutti_rt::PosReader) {
     let (mut writer, reader, pos) = RegionBuffer::with_capacity(
-        StreamId(1),
+        StreamId::of(1),
         PathBuf::new(),
         frames.len() / channels + 64,
         ChannelLayout::try_from(channels).expect("a test width is small"),
@@ -1388,8 +1477,13 @@ fn a_block_with_no_position_leaves_the_lanes_alone() {
 fn a_skipped_block_forgets_the_fade_and_the_last_position() {
     const BLOCK: usize = 64;
     const AT: u64 = 22_000;
-    let (mut writer, reader, pos) =
-        RegionBuffer::with_fade(StreamId(1), PathBuf::new(), 4096, 1u16, Samples::new(256));
+    let (mut writer, reader, pos) = RegionBuffer::with_fade(
+        StreamId::of(1),
+        PathBuf::new(),
+        4096,
+        1u16,
+        Samples::new(256),
+    );
     RegionBuffer::place(&mut writer, AT);
     let from = writer.window().0;
     let flat: Vec<f32> = (from..from + 2_000).map(|k| k as f32).collect();
@@ -1441,7 +1535,7 @@ fn a_skipped_block_releases_the_ring_to_the_writer() {
     const BLOCK: usize = 64;
     const AT: u64 = 22_000;
     let (mut writer, reader, pos) =
-        RegionBuffer::with_capacity(StreamId(1), PathBuf::new(), 4096, 1u16);
+        RegionBuffer::with_capacity(StreamId::of(1), PathBuf::new(), 4096, 1u16);
     writer.reset(AT);
     writer.set_play(AT);
     let flat: Vec<f32> = (AT..AT + 2_000).map(|k| k as f32).collect();
@@ -1520,7 +1614,7 @@ fn streamer_fed(script: &Script, no_skip: bool) -> (Vec<Vec<u32>>, u64, usize) {
         }
     }
     let mut voice = crate::DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
-    voice.set_render_rate(SampleRate::of(SR));
+    voice.set_render(SampleRate::of(SR), RenderMode::Realtime);
     let mut scratch = crate::lanes::BlockScratch::new(BLOCK, 1);
     let mut clock = crate::voice::clock::Clock::new();
     let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));

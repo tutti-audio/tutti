@@ -2,7 +2,7 @@
 //! lent to the audio thread.
 //!
 //! The root renders at the width of its plan (at most
-//! [`MAX_ROOT_CHANNELS`]) and the device
+//! [`MAX_CHANNELS`]) and the device
 //! callback hands over a buffer of its own width. [`Fold`]
 //! allocates when built, and a plan arrives on the audio thread (a commit
 //! installed at a block's start), so the folds are built for *every* root width
@@ -13,7 +13,7 @@
 //!
 //! # What the widths mean
 //!
-//! A device states its channel count and nothing else (`cpal` has no channel
+//! A device states its channel count and nothing else (a backend has no channel
 //! map), and so does the graph root. Each is the engine's order for its width
 //! where it has one ([`ChannelTopology::assumed`](tutti_types::ChannelTopology::assumed):
 //! mono, stereo, quad, 5.1, 7.1, 7.1.4), so a 5.1 root plays folded on a stereo
@@ -25,15 +25,15 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 use tutti_buffers::{BufferError, Fold, FoldError};
-use tutti_graph::{MAX_ROOT_CHANNELS, fold_to_width};
+use tutti_graph::fold_to_width;
 use tutti_rt::ArcLend;
-use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_types::{ChannelLayout, ChannelTopology, MAX_CHANNELS};
 
 /// The widest device an engine can render into without being told
 /// ([`Engine::support_output`](crate::Engine::support_output)).
 pub(crate) const DEFAULT_DEVICE_WIDTHS: usize = 16;
 
-/// The folds from each root width, `1..=MAX_ROOT_CHANNELS`, to each device
+/// The folds from each root width, `1..=MAX_CHANNELS`, to each device
 /// width supported.
 #[derive(Debug, Clone)]
 pub(crate) struct OutputFolds {
@@ -107,7 +107,7 @@ impl OutputFolds {
             // into this device. The builders refuse such a pair up front
             // (`SessionBuilder`), so only a plan that changes the root width
             // later meets it.
-            let by_root = (1..=MAX_ROOT_CHANNELS)
+            let by_root = (1..=MAX_CHANNELS)
                 .map(|w| self.root_fold(w, device).ok())
                 .collect();
             self.by_device[slot] = Some(by_root);
@@ -122,13 +122,12 @@ impl OutputFolds {
         let declared = self
             .roots
             .iter()
-            .find(|root| usize::from(root.layout().count()) == width);
+            .find(|root| usize::from(root.width().count()) == width);
         match declared {
             Some(root) => fold_to_width(root, device),
             None => fold_to_width(
                 &ChannelTopology::assumed(
-                    ChannelLayout::try_from(width)
-                        .expect("a root width is within MAX_ROOT_CHANNELS"),
+                    ChannelLayout::try_from(width).expect("a root width is within MAX_CHANNELS"),
                 ),
                 device,
             ),
@@ -239,9 +238,9 @@ impl OutputControl {
             let mut next = folds.roots.clone();
             match &root {
                 Some(new) => {
-                    next.retain(|old| old.layout() != new.layout());
+                    next.retain(|old| old.width() != new.width());
                     next.push(new.clone());
-                    next.sort_by_key(|t| t.layout().count());
+                    next.sort_by_key(|t| t.width().count());
                 }
                 None => next.clear(),
             }
