@@ -42,9 +42,9 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tutti_cpal::{
-    DeviceId, DeviceSelector, OutputSpec, SnapshotSource, StreamDriver, StreamFault, StreamFaults,
-    StreamLatency, TuttiDriver,
+use tutti_cpal::{DeviceId, DeviceSelector, SnapshotSource, TuttiDriver};
+use tutti_engine::{
+    OutputSpec, Stopped, StreamDriver, StreamFault, StreamFaultKind, StreamFaults, StreamLatency,
 };
 use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples, Seconds};
 
@@ -250,7 +250,7 @@ impl Device {
     /// Whether the stream is open and its device has not been reported gone.
     #[must_use]
     pub fn is_running(&self) -> bool {
-        self.driver.engine().is_running()
+        self.driver.stream().is_running()
     }
 
     /// The identity of the device `selector` opened: the id it names, or for
@@ -280,14 +280,14 @@ impl Device {
     ///
     /// When the device opened but the host could not name it.
     pub fn device_name(&self) -> Result<Option<String>> {
-        Ok(self.driver.engine().opened_name()?)
+        Ok(self.driver.opened_name()?)
     }
 
     /// The backend fault record, which survives stop and restart.
     /// [`Session::update`] reports each new fault as
     /// [`DeviceEvent::Fault`].
     pub fn faults(&self) -> Arc<StreamFaults> {
-        self.driver.engine().faults()
+        self.driver.stream().faults()
     }
 
     /// What the device adds in each direction, in frames at the graph's rate,
@@ -309,13 +309,13 @@ impl Device {
         let frames = |delay: Duration| Seconds(delay.as_secs_f64()).to_samples(rate);
         DeviceLatency {
             input: self.input_latency.get().map(frames),
-            output: self.driver.engine().latency().get().map(frames),
+            output: self.driver.stream().latency().get().map(frames),
         }
     }
 
     /// The configuration of the stream that is playing, or that would be.
     pub fn spec(&self) -> &OutputSpec {
-        self.driver.engine().spec()
+        self.driver.stream().spec()
     }
 
     /// The rate the graph runs at, as far as the device knows: the build's,
@@ -337,7 +337,7 @@ impl Device {
     /// What the driver's `open` reports.
     pub fn start_with<D: StreamDriver>(&mut self, driver: D) -> Result<()>
     where
-        D::Running: 'static,
+        D::Error: Into<tutti_cpal::Error>,
     {
         Ok(self.driver.start_with(driver)?)
     }
@@ -610,7 +610,7 @@ impl Session {
         max_block: Option<MaxBlock>,
     ) -> std::result::Result<DeviceRestarted, RestartError>
     where
-        D::Running: 'static,
+        D::Error: Into<tutti_cpal::Error>,
     {
         let outcome = self.check_restart(max_block).and_then(|()| {
             let previous = device.graph_rate();
@@ -771,7 +771,7 @@ impl Session {
             if count != *seen {
                 *seen = count;
                 if let Some(fault) = faults.last() {
-                    lost = fault.kind == tutti_cpal::StreamFaultKind::Disconnected;
+                    lost = fault.kind == StreamFaultKind::Disconnected;
                     out.push(SessionEvent::Device(DeviceEvent::Fault(fault)));
                 }
             }
@@ -805,7 +805,7 @@ impl Session {
     fn rerate(
         &mut self,
         spec: &OutputSpec,
-        stopped: &tutti_cpal::Stopped<'_>,
+        stopped: &Stopped<'_>,
         max_block: Option<MaxBlock>,
     ) -> Result<()> {
         let rate = spec.sample_rate;

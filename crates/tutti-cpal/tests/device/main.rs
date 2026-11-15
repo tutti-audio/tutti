@@ -1,5 +1,5 @@
-//! The device layer without a sound card: the output callback, the driver
-//! lifecycle and the callback's allocation gate. The binary installs
+//! The device layer without a sound card: the sample-format matrix the output
+//! driver converts through, and its allocation gate. The binary installs
 //! `AllocDisabler`, so an allocation inside an `assert_no_alloc` closure aborts.
 
 use assert_no_alloc::AllocDisabler;
@@ -9,6 +9,5 @@ static ALLOC: AllocDisabler = AllocDisabler;
 
 mod support;
 
-mod driver_lifecycle;
+mod callback_no_alloc;
 mod output_block;
-mod rt_no_alloc;
