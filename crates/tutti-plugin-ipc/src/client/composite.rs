@@ -18,7 +18,7 @@ use tutti_plugin_types::{ContentScale, EditorCapabilities, WindowHandle};
 use tutti_plugin_types::{
     Edit, EditDrain, EditSink, MainThreadMarker, MainWorkHandle, ParamEdit, edits,
 };
-use tutti_plugin_types::{Editor, EditorWindow, Load, Origin};
+use tutti_plugin_types::{Editor, EditorWindow, Load, Origin, PluginFormat};
 use tutti_types::SampleRate;
 
 /// Gives the audio instance the editor instance's state when the user changed
@@ -67,6 +67,8 @@ pub struct PluginBridge {
     /// The file and the plugin in it, which the editor-only instance loads
     /// (the one the audio instance is).
     origin: Origin,
+    /// The format that opens `origin`'s file.
+    format: PluginFormat,
     /// Loads the in-process editor instance on the first open: the host's
     /// table of formats, which this crate does not depend on. `None`: the
     /// editor lives in the server, and `remote` is the editor.
@@ -93,24 +95,31 @@ impl std::fmt::Debug for PluginBridge {
 }
 
 /// What loads the editor-only instance of the plugin `load` chooses in the file
-/// at a path, in this process (`OutOfProcess::load_editor` for the path's
-/// format), and the collector of the plugin's owner that instance hands its close
+/// at a path, in this process (`OutOfProcess::load_editor` for the file's
+/// format, which the load names), and the collector of the plugin's owner that instance hands its close
 /// to. The host passes its own: which formats it was built with is the host's, not
 /// the bridge's.
 #[derive(Clone)]
 pub struct EditorLoader {
-    load: fn(MainThreadMarker, &MainWorkHandle, &Path, &Load) -> BridgeResult<Box<dyn Editor>>,
+    load: EditorLoad,
     work: MainWorkHandle,
 }
+
+/// How an [`EditorLoader`] makes an editor: the work collector, the file, the
+/// format that opens it and the plugin chosen in it.
+type EditorLoad = fn(
+    MainThreadMarker,
+    &MainWorkHandle,
+    &Path,
+    PluginFormat,
+    &Load,
+) -> BridgeResult<Box<dyn Editor>>;
 
 impl EditorLoader {
     /// A loader that makes the editor instance with `load`, which hands its close
     /// to `work`.
     #[must_use]
-    pub fn new(
-        load: fn(MainThreadMarker, &MainWorkHandle, &Path, &Load) -> BridgeResult<Box<dyn Editor>>,
-        work: MainWorkHandle,
-    ) -> Self {
+    pub fn new(load: EditorLoad, work: MainWorkHandle) -> Self {
         Self { load, work }
     }
 
@@ -118,9 +127,10 @@ impl EditorLoader {
         &self,
         main: MainThreadMarker,
         path: &Path,
+        format: PluginFormat,
         load: &Load,
     ) -> BridgeResult<Box<dyn Editor>> {
-        (self.load)(main, &self.work, path, load)
+        (self.load)(main, &self.work, path, format, load)
     }
 }
 
@@ -226,6 +236,7 @@ impl PluginBridge {
         socket_path: PathBuf,
         audio_buffer: Arc<AudioSlab>,
         origin: Origin,
+        format: PluginFormat,
         load_editor: Option<EditorLoader>,
         sample_rate: SampleRate,
     ) -> BridgeResult<(Arc<Self>, BridgeThread)> {
@@ -234,6 +245,7 @@ impl PluginBridge {
             remote: Mutex::new(RemoteEditor::new(audio.clone())),
             audio,
             origin,
+            format,
             load_editor,
             gui: Mutex::new(None),
             baseline: Mutex::new(None),
@@ -252,6 +264,7 @@ impl PluginBridge {
         socket_path: PathBuf,
         audio_buffer: Arc<AudioSlab>,
         origin: Origin,
+        format: PluginFormat,
         load_editor: Option<EditorLoader>,
         sample_rate: SampleRate,
         state_progress_timeout: std::time::Duration,
@@ -262,6 +275,7 @@ impl PluginBridge {
             remote: Mutex::new(RemoteEditor::new(audio.clone())),
             audio,
             origin,
+            format,
             load_editor,
             gui: Mutex::new(None),
             baseline: Mutex::new(None),
@@ -483,7 +497,7 @@ impl PluginBridge {
                     EditorError::PluginError("this bridge has no in-process editor loader".into())
                 })?;
                 let instance = load_editor
-                    .load(main, self.origin.path(), self.origin.load())
+                    .load(main, self.origin.path(), self.format, self.origin.load())
                     .map_err(|e| {
                         EditorError::PluginError(format!("failed to load in-process GUI: {e}"))
                     })?;

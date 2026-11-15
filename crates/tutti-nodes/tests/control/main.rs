@@ -1,6 +1,7 @@
 //! Control lanes, modulation sources and the reconciler.
 
 mod automation_segments;
+mod azimuth_lane;
 mod control_lane;
 mod corners;
 mod graph_param_mod;

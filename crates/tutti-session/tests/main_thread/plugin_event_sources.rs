@@ -43,10 +43,8 @@ fn session_with_open_editor(command: u32) -> Session {
         .max_block(MaxBlock::of(Samples(512)))
         .build()
         .expect("an offline session builds");
-    let plugin = PluginRef::file(clap_probe())
-        .expect("a plugin file")
-        .with_hosting(Hosting::InProcess);
-    let load = s.plugin_load(PluginLoadRequest::new(plugin));
+    let plugin = PluginRef::file(clap_probe()).expect("a plugin file");
+    let load = s.plugin_load(PluginLoadRequest::new(plugin).hosting(Hosting::InProcess));
     let node = s
         .add_plugin(tutti_fixtures::main_thread(), load.run())
         .expect("the reference plugin loads in this process");

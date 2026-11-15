@@ -46,10 +46,10 @@ fn notes_state() -> Vec<u8> {
 fn an_in_process_instrument_without_a_live_render_mode_bounces_its_clip() {
     let real = tutti_fixtures::cdylib("tutti_shared_plugin", "tutti-shared-plugin");
     let plugin = PluginRef::file(tutti_fixtures::publish_with_extension(&real, "clap"))
-        .expect("a plugin file")
-        .with_hosting(Hosting::InProcess);
+        .expect("a plugin file");
     let mut session = offline_session();
     let request = PluginLoadRequest::new(plugin.clone())
+        .hosting(Hosting::InProcess)
         .restoring(PluginState::new(plugin, notes_state()))
         .expect("the state is the plugin's own");
     let main = tutti_fixtures::main_thread();

@@ -104,6 +104,9 @@ pub(crate) mod wire;
 /// - **Version 39** removed three messages nothing sent (the server's
 ///   instance-destroyed notice, the host's single-parameter declaration query
 ///   and its reply); the variants after them renumber.
+/// - **Version 40** added `format` to `LoadPlugin`, after `path`: the server
+///   opens the file as that format, where it chose the format by the path's
+///   extension and so could not open a link whose target has another one.
 /// - **Version 41** adds to a plugin's wiring whether it has a bypass of its own
 ///   and the controller table it declares, to a parameter its role (now a
 ///   `ControlRole`) and its overview mark, and the host's `SetBypassed` write,
@@ -217,8 +220,9 @@ pub use tutti_plugin_types::SampleFormat;
 pub use tutti_plugin_types::{
     AutomationMode, BusChannels, ChannelLayout, ChordChanges, LoadedPlugin, Normalized,
     NoteExpressionChanges, NoteExpressionIntChanges, NoteExpressionTextChanges, ParamEdit, ParamId,
-    ParameterChanges, ParameterInfo, ParameterPoint, ParameterQueue, PluginDescriptor, PluginTail,
-    Preset, PresetId, RenderMode, Samples, ScaleChanges, TransportChanges, TransportInfo,
+    ParameterChanges, ParameterInfo, ParameterPoint, ParameterQueue, PluginDescriptor,
+    PluginFormat, PluginTail, Preset, PresetId, RenderMode, Samples, ScaleChanges,
+    TransportChanges, TransportInfo,
 };
 
 #[cfg(test)]
@@ -335,6 +339,7 @@ mod tests {
         assert_eq!(tag(&first), 1, "UnloadPlugin follows LoadPlugin, the first");
         let load = postcard::to_allocvec(&HostMessage::LoadPlugin {
             path: PathBuf::new(),
+            format: PluginFormat::Clap,
             load: Load::new(),
             sample_rate: SampleRate::SR_48K,
             block_size: 64,
@@ -799,7 +804,8 @@ mod tests {
     #[test]
     fn test_load_plugin_f64_serialization() {
         let msg = HostMessage::LoadPlugin {
-            path: PathBuf::from("/test/reverb.vst3"),
+            path: PathBuf::from("/test/reverb.so"),
+            format: PluginFormat::Vst3,
             load: Load::new().plugin("vst3.00112233-44556677-8899AABB-CCDDEEFF"),
             sample_rate: SampleRate::SR_96K,
             block_size: 1024,
@@ -814,13 +820,19 @@ mod tests {
         match decoded {
             HostMessage::LoadPlugin {
                 path,
+                format,
                 load,
                 sample_rate,
                 block_size,
                 preferred_format,
                 ..
             } => {
-                assert_eq!(path, PathBuf::from("/test/reverb.vst3"));
+                assert_eq!(path, PathBuf::from("/test/reverb.so"));
+                assert_eq!(
+                    format,
+                    PluginFormat::Vst3,
+                    "the format crosses the wire, whatever the path's extension"
+                );
                 assert_eq!(
                     load.chosen(),
                     Some("vst3.00112233-44556677-8899AABB-CCDDEEFF"),

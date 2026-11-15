@@ -20,10 +20,9 @@ use super::memory_source::{MemorySource, VoiceWindow};
 use super::pool::{DrainCounters, PoolDrops, Retired};
 use super::slot::{stretch_values_want_filter, stretch_wanted};
 use super::types::{Direction, Playback, SlotId, Voice, VoiceSource};
-use crossbeam_channel::{Receiver, Sender, TrySendError};
 use tutti_codec::Wave;
 use tutti_graph::ParamSet;
-use tutti_rt::ArcLend;
+use tutti_rt::{ArcLend, PushError, RingReader, RingWriter};
 use tutti_types::{
     Amplitude, AtomicSampleRate, Cents, ChannelLayout, Param, PlaybackRate, SampleRate,
     StretchFactor,
@@ -53,12 +52,12 @@ impl SharedRate {
 ///
 /// The drain runs in the audio callback, so `voices.push` must not reallocate
 /// there: an add for a new slot once the pool is full is refused, handed back
-/// through the retirement channel and counted
+/// through the retirement ring and counted
 /// ([`PoolDrops::voices_refused`]).
 /// 64 covers any realistic per-track voice count.
 pub(super) const MAX_RESIDENT_VOICES: usize = 64;
 
-/// Commands a reader's channel holds before a send starts failing with
+/// Commands the pool's ring holds before a send starts failing with
 /// [`SendError::Full`]. The drain empties it every block, so a full queue means
 /// the control thread outran a whole audio block.
 pub(super) const COMMAND_CAPACITY: usize = 64;
@@ -95,10 +94,10 @@ pub(crate) enum VoiceCommand {
         id: SlotId,
         /// Boxed: a [`Voice`] carries a whole `MemorySource`/`DiskVoice`,
         /// far larger than the other command variants — boxing keeps the bounded
-        /// command channel's per-slot footprint small. Cold path (drained off the
+        /// command ring's per-slot footprint small. Cold path (drained off the
         /// per-sample loop), so the indirection costs nothing audible. The box
         /// itself moves into the pool's slot — the drain never unboxes it, so
-        /// it frees nothing — and leaves through the retirement channel with
+        /// it frees nothing — and leaves through the retirement ring with
         /// the slot.
         voice: Box<Voice>,
         /// A stretch filter built by the SENDER, on the control thread, when
@@ -120,7 +119,7 @@ pub(crate) enum VoiceCommand {
     /// Retire the slot with this id, filter and all.
     ///
     /// The drain does not drop the slot in the callback — it hands it to the
-    /// control thread through the retirement channel, because freeing a
+    /// control thread through the retirement ring, because freeing a
     /// [`stretch::Unit`] frees its vocoder bank. See
     /// [`VoicePoolHandle::collect_retired`].
     Remove(SlotId),
@@ -135,7 +134,7 @@ pub(crate) enum VoiceCommand {
     ///
     /// The wave the drain lets go of (the slot's old one, or this one when no
     /// in-memory slot takes it) is never dropped in the callback: it leaves
-    /// through the retirement channel, since it may be the last reference to
+    /// through the retirement ring, since it may be the last reference to
     /// a decoded buffer. See [`VoicePoolHandle::collect_retired`].
     ReplaceWave {
         /// The slot to re-point.
@@ -600,12 +599,12 @@ impl VoiceNodeHandle {
 }
 
 /// The control-thread end of a [`VoicePool`](super::pool::VoicePool)'s command
-/// channel, and the collection point for what the audio thread retires.
+/// ring, and the collection point for what the audio thread retires.
 ///
-/// Held by the host (an ECS system, typically) and cloned freely — the sender is
-/// multi-producer. It mirrors the reader's width, and shares the rate the
-/// reader was last prepared at, so `send` can build a stretch
-/// filter that matches, on this thread. It holds the [`Stream`] of every
+/// Held by the host (an ECS system, typically) and cloned freely — its several
+/// control threads share the one command writer behind a lock. It mirrors the
+/// reader's width, and shares the rate the reader was last prepared at, so
+/// `send` can build a stretch filter that matches, on this thread. It holds the [`Stream`] of every
 /// streaming voice added through [`add_streaming`](Self::add_streaming), so
 /// `send` sets a streaming voice's loop and direction on its stream itself: the
 /// pool's drain has no stream to set them on, and a stream cannot live in a
@@ -624,14 +623,16 @@ impl VoiceNodeHandle {
 /// stream nothing plays, and the drain finds no slot to record it on.
 #[derive(Clone, Debug)]
 pub struct VoicePoolHandle {
-    /// Sends into the reader's bounded command queue.
-    pub(crate) tx: Sender<Queued>,
+    /// Pushes into the pool's bounded command ring. A handle is `Clone` and
+    /// several control threads send, so the one writer sits behind a lock no
+    /// audio thread ever takes.
+    pub(crate) tx: Arc<Mutex<RingWriter<Queued>>>,
     /// Slots the audio thread has removed and handed back to be freed here.
     ///
     /// See [`VoicePool`](super::pool::VoicePool)'s `retired`. Draining this is what actually moves the
     /// deallocation off the callback; [`collect_retired`](Self::collect_retired)
     /// is the call that does it.
-    pub(crate) retired: Receiver<Retired>,
+    pub(crate) retired: Arc<Mutex<RingReader<Retired>>>,
     /// The reader's output width, copied at construction (it is fixed for the
     /// reader's lifetime). Lets [`send`](Self::send) build a stretch filter at
     /// the right width on the CONTROL thread — see
@@ -680,16 +681,16 @@ impl VoicePoolHandle {
     /// slots, surplus stretch filters and replaced waves alike.
     ///
     /// Call this periodically from the control thread — once a frame is ample.
-    /// Skipping it is safe but forfeits the point: the retirement channel fills,
+    /// Skipping it is safe but forfeits the point: the retirement ring fills,
     /// and further retirements fall back to freeing in the audio callback.
     ///
     /// Returns how many values were freed, which is what a test can assert on.
     pub fn collect_retired(&self) -> usize {
-        let mut n = 0;
-        while self.retired.try_recv().is_ok() {
-            n += 1;
-        }
-        n
+        self.retired
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .drain()
+            .count()
     }
 
     /// What the pool's drain has dropped, refused, or freed in the callback
@@ -947,7 +948,7 @@ impl VoicePoolHandle {
         mut stream: Stream,
         stretch: Option<stretch::Unit>,
     ) -> Result<(), Box<StreamingAddError>> {
-        if self.tx.is_full() {
+        if self.writer().is_full() {
             let error = SendError::Full;
             return Err(Box::new(StreamingAddError { error, stream }));
         }
@@ -1053,6 +1054,11 @@ impl VoicePoolHandle {
         self.streams().get(&id).cloned()
     }
 
+    /// The command ring's writer, locked.
+    fn writer(&self) -> std::sync::MutexGuard<'_, RingWriter<Queued>> {
+        self.tx.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// The stream table, locked.
     fn streams(&self) -> std::sync::MutexGuard<'_, HashMap<SlotId, Arc<Mutex<Stream>>>> {
         self.streams.lock().unwrap_or_else(PoisonError::into_inner)
@@ -1060,11 +1066,11 @@ impl VoicePoolHandle {
 
     /// Queues `cmd` for the drain, with the stream its loop was set on.
     fn queue(&self, cmd: VoiceCommand, forwarded: Option<StreamId>) -> Result<(), SendError> {
-        self.tx
-            .try_send(Queued { cmd, forwarded })
-            .map_err(|e| match e {
-                TrySendError::Full(_) => SendError::Full,
-                TrySendError::Disconnected(_) => SendError::Disconnected,
+        self.writer()
+            .push(Queued { cmd, forwarded })
+            .map_err(|r| match r.error {
+                PushError::Disconnected => SendError::Disconnected,
+                PushError::Full => SendError::Full,
             })?;
         self.counters.note_queued();
         Ok(())

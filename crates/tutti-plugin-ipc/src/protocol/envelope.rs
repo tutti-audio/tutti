@@ -16,7 +16,9 @@ use super::SampleFormat;
 use super::Samples;
 use super::process::ProcessAudioData;
 use super::shm::SlabLayout;
-use super::{LoadedPlugin, ParameterInfo, PluginDescriptor, PluginTail, Preset, PresetId};
+use super::{
+    LoadedPlugin, ParameterInfo, PluginDescriptor, PluginFormat, PluginTail, Preset, PresetId,
+};
 use dpi::Size;
 use tutti_plugin_types::{BlockStatus, ContentScale, Load, StateUse};
 use tutti_types::SampleRate;
@@ -57,6 +59,10 @@ pub enum HostMessage {
     LoadPlugin {
         /// Filesystem path to the plugin bundle or shared library.
         path: PathBuf,
+        /// The format whose loader opens the file: the catalog's reading of it,
+        /// which a path's extension need not give (a link `Foo.clap` to
+        /// `libfoo.so` is CLAP).
+        format: PluginFormat,
         /// Which plugin of the file to load, when it exports several (a CLAP
         /// plugin id, a VST3 class id, an AU descriptor id): the same
         /// [`Load`] the server hands its format's
