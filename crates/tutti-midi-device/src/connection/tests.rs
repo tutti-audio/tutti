@@ -652,6 +652,7 @@ fn static_function_blocks_ignore_a_later_info_and_name() {
 
 // §7.1.8 and §7.1.9: an Endpoint that has not declared its blocks static sends
 // a Notification when a property changes, and the connection follows it.
+/// Spec: m2-104/6.1#2, m2-104/6.1#3, m2-104/6.1.1#4
 #[test]
 fn function_blocks_that_are_not_static_follow_a_later_info_and_name() {
     let t0 = Instant::now();
