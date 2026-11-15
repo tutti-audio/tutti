@@ -138,7 +138,10 @@ fn a_final_reply_with_no_profiles_ends_the_inquiry_and_prunes_the_silent_address
         i.table().get(channel(0), profile(1)).is_some(),
         "kept until the final Reply"
     );
-    assert!(i.is_known(), "the answer before holds while an inquiry waits");
+    assert!(
+        i.is_known(),
+        "the answer before holds while an inquiry waits"
+    );
     i.on_message(&reply(CiDeviceId::FunctionBlock, &[], &[]));
     assert!(i.table().is_empty());
 }
