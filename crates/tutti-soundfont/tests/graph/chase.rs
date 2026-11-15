@@ -8,9 +8,9 @@ use std::sync::{Arc, Mutex};
 
 use tutti_fixtures::midi;
 use tutti_graph::{
-    Buses, Chase, CrossfadeCurve, Cx, Editor, EventCapacity, EventEdge, EventIn, EventInletNode,
-    EventInletWriter, EventKind, EventOut, Executor, Fade, Io, Node, OutPort, Prepare, Shape,
-    Source, Status, TransportPosition, Unforkable,
+    Buses, Chase, Cx, Editor, EventCapacity, EventEdge, EventIn, EventInletNode, EventInletWriter,
+    EventKind, EventOut, Executor, Fade, FadeLaw, Io, Node, OutPort, Prepare, Shape, Source,
+    Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{NodeKey, Stamp};
 use tutti_midi_protocol::widen_velocity;
@@ -235,7 +235,7 @@ fn a_crossfade_between_fonts_chases_the_incoming_unit() {
         .replace(
             NodeKey(2),
             Unforkable(unit()),
-            Fade::new(Samples(2 * BLOCK), CrossfadeCurve::EqualPower),
+            Fade::new(Samples(2 * BLOCK), FadeLaw::EqualPower),
         )
         .expect("fits");
     rig.ed.commit().expect("commits");

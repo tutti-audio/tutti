@@ -51,12 +51,12 @@
 //!   runs first on a copy of the node's inputs with no events and detached
 //!   event writers (every push refused, as the executor's), the incoming
 //!   one runs as any node does, and each output sample `i` of the block is
-//!   `incoming * g_in + outgoing * g_out` with the gains of frame
+//!   `outgoing * g_out + incoming * g_in` with the gains of frame
 //!   `done + i` of the fade while that is inside it. A replace while a fade
 //!   runs waits in the entry (the newest wins) and starts, from the running
 //!   fade's incoming unit, on the block after that fade ends. A hard edit at
 //!   the key, or a re-prepare, drops the entry. Only the gain law
-//!   ([`CrossfadeCurve::gains`](crate::CrossfadeCurve::gains)) is shared
+//!   ([`FadeLaw::gains`](crate::FadeLaw::gains)) is shared
 //!   with the executor. Like every node here, the outgoing unit is handed
 //!   `SilenceMask::NONE` and `ConstantMask::NONE`, where the executor passes
 //!   it (and the incoming unit) the real input masks; a unit that renders
@@ -69,8 +69,8 @@
 //!   `Editor::set_mode`'s contract, read at the start of the next block. A
 //!   node's weights `(y, x)` (its own output, the aligned input) are walked
 //!   **frame by frame**: Active `(1, 0)`, Bypassed `(0, 1)`, Muted `(0, 0)`,
-//!   a change of mode a 256-frame fade from the weights it has, with the
-//!   gains of frame `k` of [`CrossfadeCurve::gains`] (the one thing shared
+//!   a change of mode a [`DECLICK`](crate::DECLICK) fade from the weights it has, with the
+//!   gains of frame `k` of [`FadeLaw::gains`] (the one thing shared
 //!   with the executor); the aligned input is the input through a
 //!   `VecDeque` of the declared latency. A bypassed node whose fade is done
 //!   is **not called**; leaving Bypassed resets it and keeps the aligned
@@ -97,19 +97,20 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::MAX_NODE_LATENCY;
 use crate::NodeKey;
-use crate::{CrossfadeCurve, Edge, EdgeId, InPort, OutPort, Sink, Source};
+use crate::{Edge, EdgeId, InPort, OutPort, Sink, Source};
+use tutti_curve::{FadeLaw, declick_frames};
 use tutti_rt::with_no_denormals;
 use tutti_types::{Amplitude, At, Frame, Latency, Mix, Samples};
 
 use crate::event::{Event, EventKind, EventWriter, SortedEvents};
 use crate::history::TransportHistory;
 use crate::io::Io;
-use crate::mode::{MODE_DECLICK, NodeMix, NodeMode};
+use crate::mode::{NodeMix, NodeMode};
 use crate::node::{
     ConstantMask, Cx, Env, InPlaceMask, Node, Prepare, SilenceMask, Status, TransportChanges,
     TransportPosition,
 };
-use crate::param::{PARAM_DECLICK, ParamIn, ParamInput, ParamRange};
+use crate::param::{ParamIn, ParamInput, ParamRange};
 use crate::plan::DelayKey;
 use crate::play::PlayClock;
 use crate::spec::{EventEdge, EventIn, EventOut, ValidGraph};
@@ -670,7 +671,7 @@ impl Reference {
                             old,
                             done: 0,
                             len: fade.duration.get(),
-                            curve: fade.curve,
+                            law: fade.law,
                             next: None,
                         },
                     );
@@ -712,6 +713,7 @@ impl Reference {
                         spec_mix(key).get(),
                         &shape,
                         t.nodes[&key].latency.get(),
+                        declick_frames(self.prepare.sample_rate()).get(),
                     ),
                 );
                 // A new unit, or a swapped one: its params start over. (A
@@ -1258,7 +1260,7 @@ impl Reference {
                             old,
                             done: 0,
                             len: fade.duration.get(),
-                            curve: fade.curve,
+                            law: fade.law,
                             next: None,
                         },
                     );
@@ -1578,7 +1580,7 @@ impl Reference {
                 if k >= f.len {
                     break;
                 }
-                let (g_in, g_out) = f.curve.gains(k, f.len);
+                let (g_out, g_in) = f.law.gains(k, f.len);
                 for (o, x) in outs.iter_mut().zip(&old) {
                     o[i] = o[i] * g_in + x[i] * g_out;
                 }
@@ -1685,6 +1687,7 @@ impl Reference {
                     source: gain.source,
                     events: &evs,
                     frames,
+                    declick: declick_frames(self.prepare.sample_rate()).get(),
                 },
             ) {
                 let (vals, _) = vals;
@@ -1748,6 +1751,7 @@ impl Reference {
                 source,
                 events: &evs,
                 frames,
+                declick: declick_frames(self.prepare.sample_rate()).get(),
             },
         )
         .map(|(vals, _)| vals)
@@ -1803,6 +1807,7 @@ impl Reference {
                     source,
                     events: &evs,
                     frames,
+                    declick: declick_frames(self.prepare.sample_rate()).get(),
                 },
             ));
         }
@@ -1820,6 +1825,8 @@ struct RefPortIn<'a> {
     /// The source's events, through its PDC delay.
     events: &'a [Event],
     frames: usize,
+    /// The declick's length in frames.
+    declick: usize,
 }
 
 /// One block of the param port step, written from the rules in `param.rs`'s
@@ -1834,8 +1841,9 @@ fn ref_port(st: &mut RefParam, fresh: bool, p: RefPortIn<'_>) -> Option<(Vec<f32
         source,
         events: evs,
         frames,
+        declick,
     } = p;
-    let decl = PARAM_DECLICK.get();
+    let decl = declick;
     if fresh {
         st.source = source;
     } else if st.source != source {
@@ -1993,8 +2001,8 @@ fn ref_port(st: &mut RefParam, fresh: bool, p: RefPortIn<'_>) -> Option<(Vec<f32
     for (i, v) in vals.iter_mut().enumerate() {
         if st.fading > 0 && i < st.fading {
             let j = decl - st.fading + i;
-            let g = 1.0 - (j + 1) as f32 / decl as f32;
-            *v += (st.hold - *v) * g;
+            let (out, inn) = FadeLaw::EqualAmplitude.gains(j, decl);
+            *v = st.hold * out + *v * inn;
         }
     }
     st.fading = st.fading.saturating_sub(frames);
@@ -2022,6 +2030,8 @@ struct RefMode {
     mix_to: f32,
     /// `(y, x)` at the start of the fade, and the fade's frames done.
     fade: Option<((f32, f32), usize)>,
+    /// The fade's length in frames.
+    declick: usize,
     warm: usize,
     stale: bool,
     latency: usize,
@@ -2066,7 +2076,13 @@ fn weights_of(mode: NodeMode, mix: f32) -> (f32, f32) {
 }
 
 impl RefMode {
-    fn new(mode: NodeMode, mix: f32, shape: &crate::node::Shape, latency: usize) -> Self {
+    fn new(
+        mode: NodeMode,
+        mix: f32,
+        shape: &crate::node::Shape,
+        latency: usize,
+        declick: usize,
+    ) -> Self {
         let (y, x) = weights_of(mode, mix);
         let mut m = Self {
             heading: mode,
@@ -2075,6 +2091,7 @@ impl RefMode {
             mix_from: mix,
             mix_to: mix,
             fade: None,
+            declick,
             warm: 0,
             stale: mode == NodeMode::Bypassed,
             latency,
@@ -2156,7 +2173,11 @@ impl RefMode {
             } else if from == to {
                 to
             } else {
-                from + (to - from) * ((i + 1) as f32 / frames as f32)
+                if i + 1 == frames {
+                    to
+                } else {
+                    from + (to - from) * ((i + 1) as f32 / frames as f32)
+                }
             }
         };
         (0..frames)
@@ -2174,13 +2195,11 @@ impl RefMode {
                         moving: lane.is_some() || from != to,
                     };
                 };
-                let g = CrossfadeCurve::EqualAmplitude
-                    .gains(k, MODE_DECLICK.get())
-                    .0;
+                let g = FadeLaw::EqualAmplitude.gains(k, self.declick).1;
                 let wy = begin.0 + (target.0 - begin.0) * g;
                 let wx = begin.1 + (target.1 - begin.1) * g;
                 (self.y, self.x) = (wy, wx);
-                self.fade = if k + 1 == MODE_DECLICK.get() {
+                self.fade = if k + 1 == self.declick {
                     (self.y, self.x) = target;
                     None
                 } else {
@@ -2354,7 +2373,7 @@ struct RefFade {
     old: Box<dyn Node>,
     done: usize,
     len: usize,
-    curve: crate::CrossfadeCurve,
+    law: crate::FadeLaw,
     next: Option<(Box<dyn Node>, crate::Fade)>,
 }
 
@@ -2731,8 +2750,11 @@ fn sum_addends(mut addends: Vec<RefAddend>, frames: usize) -> Vec<f32> {
                         None => *x + *y,
                         Some(RefWeight::Ramp { from, to }) => {
                             let (from, to) = (from.get(), to.get());
-                            let w = tutti_curve::Piece::new(from, to, tutti_curve::Law::Linear)
-                                .value((i + 1) as f32 / frames as f32);
+                            let w = if i + 1 == frames {
+                                to
+                            } else {
+                                from + (to - from) * ((i + 1) as f32 / frames as f32)
+                            };
                             *x + w * *y
                         }
                         Some(RefWeight::Frames(w)) => *x + w[i] * *y,

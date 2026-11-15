@@ -12,8 +12,8 @@ use common::{Kind, TestNode, prepare};
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    CommitError, CrossfadeCurve, Cx, Editor, EventIn, EventKind, Executor, Fade, Io, Node, Prepare,
-    Shape, Status, TransportPosition, Unforkable, compile,
+    CommitError, Cx, Editor, EventIn, EventKind, Executor, Fade, FadeLaw, Io, Node, Prepare, Shape,
+    Status, TransportPosition, Unforkable, compile,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_rt::RtScope;
@@ -77,7 +77,7 @@ const RAGGED: [usize; 7] = [7, 13, 64, 1, 50, 128, 33];
 /// for equal power; 5 bounds both) — where a swap moves by 2 in one sample.
 #[test]
 fn a_fade_has_no_step_at_either_end() {
-    for curve in [CrossfadeCurve::EqualAmplitude, CrossfadeCurve::EqualPower] {
+    for curve in [FadeLaw::EqualAmplitude, FadeLaw::EqualPower] {
         let len = 100;
         let (mut ed, mut exec) = gain_graph(1.0);
         let mut out = dc(&mut exec, 40);
@@ -87,7 +87,10 @@ fn a_fade_has_no_step_at_either_end() {
         for &n in RAGGED.iter().cycle().take(12) {
             out.extend(dc(&mut exec, n));
         }
-        let bound = 5.0 / (len + 1) as f32;
+        // Five times the position step, scaled by the smootherstep's steepest
+        // slope (15/8): the level rises by at most 3 and falls by at most 1
+        // over a fade, and a law's gain moves at most pi/2 of that.
+        let bound = 5.0 * 1.875 / (len + 1) as f32;
         let worst = out
             .windows(2)
             .map(|w| (w[1] - w[0]).abs())
@@ -114,7 +117,7 @@ fn the_fade_is_exactly_its_length() {
     ed.replace(
         NODE,
         Unforkable(gain(3.0)),
-        Fade::new(Samples(len), CrossfadeCurve::EqualAmplitude),
+        Fade::new(Samples(len), FadeLaw::EqualAmplitude),
     )
     .expect("same shape");
     ed.commit().expect("commits");
@@ -198,7 +201,7 @@ fn the_outgoing_unit_retires_on_the_control_thread() {
     ed.replace(
         NODE,
         Unforkable(gain(2.0)),
-        Fade::new(Samples(100), CrossfadeCurve::EqualPower),
+        Fade::new(Samples(100), FadeLaw::EqualPower),
     )
     .expect("same shape");
     ed.commit().expect("commits");
@@ -234,7 +237,7 @@ fn long_fades_do_not_block_commits() {
     }
     ed.commit().expect("commits");
     exec.process(64, &TransportPosition::default(), &[], &mut []);
-    let second = Fade::new(Samples(48_000), CrossfadeCurve::EqualAmplitude);
+    let second = Fade::new(Samples(48_000), FadeLaw::EqualAmplitude);
     for &k in &keys {
         ed.replace(k, Unforkable(gain(2.0)), second).expect("fits");
         ed.commit().expect("a running fade blocks nothing");
@@ -257,7 +260,7 @@ fn a_remove_beside_a_fade_retires_at_once() {
     ed.replace(
         NODE,
         Unforkable(gain(2.0)),
-        Fade::new(Samples(48_000), CrossfadeCurve::EqualAmplitude),
+        Fade::new(Samples(48_000), FadeLaw::EqualAmplitude),
     )
     .expect("fits");
     ed.remove(other);
@@ -274,7 +277,7 @@ fn a_remove_beside_a_fade_retires_at_once() {
 /// over in a delta built by hand.
 #[test]
 fn a_shape_mismatch_is_refused() {
-    let fade = Fade::new(Samples(64), CrossfadeCurve::EqualAmplitude);
+    let fade = Fade::new(Samples(64), FadeLaw::EqualAmplitude);
     let (mut ed, mut exec) = gain_graph(1.0);
     let wider = TestNode::new(Kind::Gain {
         gain: 1.0,
@@ -405,7 +408,7 @@ fn a_shape_mismatch_is_refused() {
 #[test]
 fn a_replace_during_a_fade_waits_for_it() {
     let (mut ed, mut exec) = gain_graph(1.0);
-    let fade = |len| Fade::new(Samples(len), CrossfadeCurve::EqualAmplitude);
+    let fade = |len| Fade::new(Samples(len), FadeLaw::EqualAmplitude);
     ed.replace(NODE, Unforkable(gain(2.0)), fade(100))
         .expect("fits");
     ed.commit().expect("commits");
@@ -438,11 +441,11 @@ fn a_replace_during_a_fade_waits_for_it() {
     let expect: Vec<f32> = (0..out.len())
         .map(|f| match f {
             0..100 => {
-                let (i, o) = CrossfadeCurve::EqualAmplitude.gains(f, 100);
+                let (o, i) = FadeLaw::EqualAmplitude.gains(f, 100);
                 2.0 * i + 1.0 * o
             }
             100..150 => {
-                let (i, o) = CrossfadeCurve::EqualAmplitude.gains(f - 100, 50);
+                let (o, i) = FadeLaw::EqualAmplitude.gains(f - 100, 50);
                 8.0 * i + 2.0 * o
             }
             _ => 8.0,
@@ -523,7 +526,7 @@ fn events_go_to_the_incoming_unit_only() {
     ed.replace(
         NODE,
         Unforkable(EventCount(Arc::clone(&new))),
-        Fade::new(Samples(200), CrossfadeCurve::EqualPower),
+        Fade::new(Samples(200), FadeLaw::EqualPower),
     )
     .expect("same shape");
     ed.commit().expect("commits");
@@ -546,7 +549,7 @@ fn events_go_to_the_incoming_unit_only() {
 /// cut.
 #[test]
 fn a_hard_edit_cuts_a_fade() {
-    let fade = Fade::new(Samples(1000), CrossfadeCurve::EqualAmplitude);
+    let fade = Fade::new(Samples(1000), FadeLaw::EqualAmplitude);
     for cut in ["remove", "insert"] {
         let (mut ed, mut exec) = gain_graph(1.0);
         ed.replace(NODE, Unforkable(gain(2.0)), fade).expect("fits");
@@ -606,7 +609,7 @@ fn a_hard_edit_cuts_a_fade() {
 /// the plan compensates, so a fade cannot run across the change.
 #[test]
 fn set_latency_cuts_a_fade() {
-    let fade = Fade::new(Samples(1000), CrossfadeCurve::EqualAmplitude);
+    let fade = Fade::new(Samples(1000), FadeLaw::EqualAmplitude);
     let (mut ed, mut exec) = gain_graph(1.0);
     ed.replace(NODE, Unforkable(gain(2.0)), fade).expect("fits");
     ed.commit().expect("commits");
@@ -669,7 +672,7 @@ fn the_reference_cuts_a_fade_on_a_latency_change() {
             .into_iter()
             .collect()
     };
-    let fade = Fade::new(Samples(1000), CrossfadeCurve::EqualAmplitude);
+    let fade = Fade::new(Samples(1000), FadeLaw::EqualAmplitude);
     let fades: BTreeMap<NodeKey, Fade> = [(NODE, fade)].into_iter().collect();
     let mut r = Reference::new(prepare(128));
     let render = |r: &mut Reference| {
@@ -704,7 +707,7 @@ fn the_reference_cuts_a_fade_on_a_latency_change() {
 /// diagnostics print), whether the replace fades or swaps.
 #[test]
 fn a_replace_takes_the_incoming_units_kind() {
-    let fade = Fade::new(Samples(100), CrossfadeCurve::EqualAmplitude);
+    let fade = Fade::new(Samples(100), FadeLaw::EqualAmplitude);
     for incoming in [gain(3.0), TestNode::new(Kind::Lag { latency: 3 })] {
         let (mut ed, _exec) = gain_graph(1.0);
         assert_eq!(ed.spec().topology.nodes[&NODE].kind, "gain");
@@ -725,7 +728,7 @@ fn a_replace_takes_the_incoming_units_kind() {
 /// node that is not running yet.
 #[test]
 fn replace_or_swap_fades_when_it_fits_and_swaps_when_it_does_not() {
-    let fade = Fade::new(Samples(100), CrossfadeCurve::EqualAmplitude);
+    let fade = Fade::new(Samples(100), FadeLaw::EqualAmplitude);
 
     let (mut ed, mut exec) = gain_graph(1.0);
     dc(&mut exec, 20);

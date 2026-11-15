@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use common::{Kind, TestNode, prepare};
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    CommitError, CrossfadeCurve, Cx, Editor, Executor, Fade, Io, MAX_NODE_TAIL, Node, Prepare,
-    Shape, Status, TransportPosition, Unforkable,
+    CommitError, Cx, Editor, Executor, Fade, FadeLaw, Io, MAX_NODE_TAIL, Node, Prepare, Shape,
+    Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_types::{ChannelLayout, Samples, Tail};
@@ -190,7 +190,7 @@ fn set_tail_refuses_and_never_clamps() {
 /// is `replace.rs`'s).
 #[test]
 fn set_tail_does_not_cut_a_fade() {
-    let fade = Fade::new(Samples(1000), CrossfadeCurve::EqualAmplitude);
+    let fade = Fade::new(Samples(1000), FadeLaw::EqualAmplitude);
     let gain = |g: f32| TestNode::new(Kind::Gain { gain: g, width: 1 });
     let (mut ed, mut exec, _) = graph(Tail::None);
     // A gain node at its own key: the fade needs a unit whose shape matches.
