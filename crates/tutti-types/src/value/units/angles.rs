@@ -49,7 +49,8 @@ impl Azimuth {
         Azimuth((if r >= 360.0 { 360.0_f32.next_down() } else { r }) - 180.0)
     }
 
-    /// The shortest signed rotation from `self` to `to`, in `-180..=180`.
+    /// The shortest signed rotation from `self` to `to`, in `-180..180`: a
+    /// half turn is `-180`, as [`wrap`](Self::wrap) is half-open.
     ///
     /// The replacement for `to - self`. A plain subtraction across the seam
     /// gives the long way around: from 170 to -170 it reports -340 degrees

@@ -18,7 +18,7 @@
 use std::cell::Cell;
 
 use tutti_curve::{Curvature, Exponent, Law, Piece};
-use tutti_types::{ParamAddr, ParamKey, SamplePosition, Samples, Unit, UnitAddr};
+use tutti_types::{ParamAddr, ParamKey, SamplePosition, Samples, Unit, UnitAddr, UnitParam};
 use tutti_ump::Ump;
 
 use crate::time::Offset;
@@ -225,6 +225,11 @@ impl ShapeTag {
 /// t >= 1: to, held until the source's next event
 /// ```
 ///
+/// A segment of a circular param ([`UnitParam::is_circular`], `Azimuth`) takes
+/// the short arc: the value for `t < 1` is `wrap(from + arc(from, to) ·
+/// shape.eval(t))`, so one from 170 to -170 passes through 180, never 0. The
+/// param's unit decides, not the segment.
+///
 /// [`new`](Self::new) builds the ramp convention (`position = 1`: the
 /// event's frame is one step in, `to` lands on frame `duration - 1`);
 /// [`resumed`](Self::resumed) sets a fractional position and length, for a
@@ -295,7 +300,7 @@ impl ParamSegment {
         Self::unit(key.addr(), from.to_raw(), to.to_raw(), duration, shape)
     }
 
-    /// A segment of built-in parameter `param` (a [`UnitParam`](tutti_types::UnitParam),
+    /// A segment of built-in parameter `param` (a [`UnitParam`],
     /// which is its index-0 address, or a [`UnitAddr`]) in its raw `f32` domain, as
     /// [`new`](Self::new) otherwise: for a producer that is erased over the
     /// unit (a control lane built from a `ParamAddr`, doc 014 §4.1), and for
@@ -417,7 +422,13 @@ impl ParamSegment {
     /// parameter) or a test. Past `u32::MAX` frames it reads the value
     /// there.
     pub fn raw_value_after(&self, j: Samples) -> f32 {
-        segment_value(self.piece(), self.position, self.length, saturate(j))
+        segment_value(
+            self.unit_param(),
+            self.piece(),
+            self.position,
+            self.length,
+            saturate(j),
+        )
     }
 
     /// How many frames after the event's frame the segment arrives: the
@@ -436,6 +447,19 @@ impl ParamSegment {
         Piece::new(self.from, self.to, self.shape())
     }
 
+    /// The built-in param this moves, `None` for a foreign one: what decides
+    /// whether it turns the short arc ([`UnitParam::is_circular`]). The
+    /// reading of a segment between frames (`Piece::value(param, t)` at its
+    /// progress) takes it; a reader of many frames takes it once.
+    pub fn unit_param(&self) -> Option<UnitParam> {
+        if self.foreign {
+            return None;
+        }
+        u16::try_from(self.id)
+            .ok()
+            .and_then(|id| UnitParam::try_from(id & 0xFF).ok())
+    }
+
     /// The raw position and length, for the graph's own param port, which is
     /// erased over the unit as the port it drives is.
     pub(crate) fn timing(&self) -> (f32, f32) {
@@ -449,9 +473,15 @@ impl ParamSegment {
 /// interpreter and [`ParamSegment::raw_value_after`] share, as they share a
 /// shaping LUT.
 #[inline]
-pub(crate) fn segment_value(piece: Piece, position: f32, length: f32, j: u32) -> f32 {
+pub(crate) fn segment_value(
+    param: Option<UnitParam>,
+    piece: Piece,
+    position: f32,
+    length: f32,
+    j: u32,
+) -> f32 {
     match segment_progress(position, length, j) {
-        Some(t) => piece.value(t),
+        Some(t) => piece.value(param, t),
         None => piece.to,
     }
 }

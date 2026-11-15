@@ -640,7 +640,7 @@ impl GraphSpec {
                     errs.push(GraphInvalid::UnknownParamNode { at, missing: node });
                 }
             }
-            if m.range.min.is_nan() || m.range.max.is_nan() {
+            if m.range.min.is_nan() || m.range.max.is_nan() || !m.range.fits(at.param.param) {
                 errs.push(GraphInvalid::BadParamRange { at, range: m.range });
             }
         }
@@ -749,7 +749,9 @@ pub enum GraphInvalid {
         /// The key that is not there.
         missing: NodeKey,
     },
-    /// A param port's range has a NaN bound. Refused here rather than
+    /// A param port's range has crossed bounds on a circular param (an arc
+    /// is written `ParamRange::arc`; ordering `170..-170` would read the
+    /// opposite arc), or a NaN bound. Refused here rather than
     /// ordered where it is applied: a NaN bound clamps every value to NaN or
     /// to the other bound, and `f32::clamp` panics on it — on the audio
     /// thread. An infinite bound is fine (no clamp on that side).
