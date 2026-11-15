@@ -56,8 +56,8 @@
 use tutti_graph::FadeLaw;
 use tutti_types::{SamplePosition, Samples};
 
-use crate::MAX_SAMPLER_CHANNELS;
 use crate::streamer::{Arrangement, Block, Cells, RingMap, RingReader, SharedReader};
+use tutti_types::MAX_CHANNELS;
 
 use super::interp::{Place, hermite_lanes, interpolate_taps};
 use super::loop_span::blend;
@@ -158,7 +158,7 @@ impl Clone for LiveRead {
 impl LiveRead {
     /// A reader over `ring` through its one `reader` and the reader of the
     /// ring's control registered beside it (`None`: silent), `width` wide (at most
-    /// [`MAX_SAMPLER_CHANNELS`]), placing the ring's channels by `place`. Both
+    /// [`MAX_CHANNELS`]), placing the ring's channels by `place`. Both
     /// are registered by whoever built them, on the control side: building the
     /// pair is what may allocate, and this does not.
     pub(crate) fn new(
@@ -300,7 +300,7 @@ impl LiveRead {
         let place = &self.place;
         let st = &mut self.st;
         let w = st.width;
-        let silent = [0.0f32; MAX_SAMPLER_CHANNELS];
+        let silent = [0.0f32; MAX_CHANNELS];
         let Some(reader) = self.reader.as_mut() else {
             // Severed, or a clone: nothing to read (not an underrun).
             for i in 0..positions.len() {
@@ -374,7 +374,7 @@ impl LiveRead {
             return;
         }
 
-        let mut frame = [0.0f32; MAX_SAMPLER_CHANNELS];
+        let mut frame = [0.0f32; MAX_CHANNELS];
         for (i, pos) in positions.iter().enumerate() {
             let Some(pos) = pos.map(SamplePosition::get) else {
                 out.put(at + i, &silent[..w]);
@@ -535,7 +535,7 @@ impl State {
     /// nothing); a fade in progress is blended into it at its own weights.
     fn continue_from(&mut self, frames: usize, mut source: impl FnMut(usize, &mut [f32]) -> bool) {
         let w = self.width;
-        let mut s = [0.0f32; MAX_SAMPLER_CHANNELS];
+        let mut s = [0.0f32; MAX_CHANNELS];
         let mut n = 0;
         while n < OLD_FRAMES && source(n, &mut s[..w]) {
             let out = &mut self.spare[n * w..(n + 1) * w];

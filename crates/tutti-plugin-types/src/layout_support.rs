@@ -74,7 +74,7 @@ mod tests {
     use crate::{BusRole, ChannelLayout, ChannelTopology, PluginBus};
 
     fn stereo() -> ChannelTopology {
-        ChannelTopology::smpte(ChannelLayout::STEREO).expect("stereo has an order")
+        ChannelTopology::assumed(ChannelLayout::STEREO)
     }
 
     fn one_bus_each(
@@ -132,7 +132,7 @@ mod tests {
     /// was said, and not enough of it is usable.
     #[test]
     fn a_topology_disagreeing_with_its_width_is_not_full() {
-        let mono = ChannelTopology::smpte(ChannelLayout::MONO).expect("mono has an order");
+        let mono = ChannelTopology::assumed(ChannelLayout::MONO);
         let loaded = one_bus_each(Some(mono), Some(stereo()));
         assert_eq!(LayoutSupport::of(&loaded), LayoutSupport::Partial);
         assert_ne!(LayoutSupport::of(&loaded), LayoutSupport::Full);

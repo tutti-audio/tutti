@@ -440,7 +440,7 @@ impl RegionBuffer {
         len: Option<Samples>,
         fade_frames: Samples,
     ) -> (RegionOut, SharedReader, PosReader) {
-        let channels = nonempty(topology.layout());
+        let channels = nonempty(topology.width());
         let stride = channels.count() as usize;
         let frames = capacity.clamp(4096, MAX_POS_RING_FRAMES);
         let (mapping, arrangement) = match len {

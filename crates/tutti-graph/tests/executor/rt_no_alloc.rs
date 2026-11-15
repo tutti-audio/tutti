@@ -1444,6 +1444,68 @@ fn parallel_toggling_modes_are_allocation_free() {
     toggling_modes_are_allocation_free_on(4);
 }
 
+/// A node that declares its own bypass is called in `Bypassed`, and toggling
+/// its mode and rendering inside `assert_no_alloc` allocates nothing: the
+/// executor neither blends nor parks it, so no fade, reset or park runs. Its
+/// calls are counted: one per block, bypassed or not.
+fn own_bypass_toggling_is_allocation_free_on(workers: usize) {
+    use tutti_graph::NodeMode;
+    use tutti_graph::Unforkable;
+    let (mut ed, mut exec) = Editor::new(prepare(256));
+    use_pool(&mut exec, workers);
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let kind = Kind::OwnBypass {
+        inner: Box::new(Kind::Gain {
+            gain: 2.0,
+            width: 1,
+        }),
+    };
+    ed.insert(
+        NodeKey(1),
+        "own",
+        Unforkable(TestNode::counted(kind, Arc::clone(&calls))),
+    );
+    ed.spec_mut().topology.inputs = ChannelLayout::from_count(1);
+    let t = &mut ed.spec_mut().topology;
+    t.connect(at(1, 0), Edge::Direct(Source::Global(0)));
+    t.set_outputs(vec![Source::Node(OutPort {
+        node: NodeKey(1),
+        port: 0,
+    })]);
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    ed.collect();
+    let input = vec![0.5f32; 256];
+    let mut out = vec![0.0f32; 256];
+    for block in 0..60usize {
+        let mode = [NodeMode::Active, NodeMode::Bypassed][(block / 3) % 2];
+        ed.set_mode(NodeKey(1), mode).expect("a node");
+        assert_no_alloc::assert_no_alloc(|| {
+            exec.process(
+                64,
+                &TransportPosition::default(),
+                &[&input[..64]],
+                &mut [&mut out[..64]],
+            );
+        });
+        assert!(
+            out[..64].iter().all(|&x| x == 1.0),
+            "block {block} in {mode:?}: the node's own output, never blended"
+        );
+    }
+    assert_eq!(calls.load(Ordering::Relaxed), 60, "called every block");
+}
+
+#[test]
+fn own_bypass_toggling_is_allocation_free() {
+    own_bypass_toggling_is_allocation_free_on(1);
+}
+
+#[test]
+fn parallel_own_bypass_toggling_is_allocation_free() {
+    own_bypass_toggling_is_allocation_free_on(4);
+}
+
 /// Moving mixes and rendering inside `assert_no_alloc`, on `workers`
 /// participants: the graph of
 /// the mode gate with every node's mix moved every few blocks (the ends and

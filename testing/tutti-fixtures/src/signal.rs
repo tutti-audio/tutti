@@ -3,8 +3,8 @@
 //! render ([`bits`]) and a float WAV on disk ([`write_wav_f32`],
 //! [`read_wav_f32`]).
 //!
-//! Noise is [`noise`](crate::noise) and the digest of a render is
-//! [`Fnv`](crate::Fnv), both in this crate's root. Every figure here is plain
+//! Noise is [`noise`](crate::noise) and a bit hash is [`Fnv`](crate::Fnv), both in
+//! this crate's root. Every figure here is plain
 //! `f32` samples; only the arguments that name a quantity are units.
 //!
 //! These are definitions, not references: a test pins an analytic figure with

@@ -78,7 +78,7 @@ fn a_probe_does_not_activate() {
     drop(active);
 
     reset(&path);
-    let plugins = describe(main, &path).expect("probes");
+    let plugins = describe(main, &path, None).expect("probes");
     let [descriptor] = plugins.as_slice() else {
         panic!("a plugin that is no shell is one plugin: {plugins:?}");
     };

@@ -3,7 +3,7 @@
 //! Every figure here comes from IEEE `+ - * / sqrt` and `libm`'s pure-Rust
 //! `log1p`, `expm1` and `exp`, and a test that needs `ln` calls `libm::log`
 //! too. None of it reaches the platform's libm, so the figures hold on any
-//! target and no golden digest is needed.
+//! target.
 
 use crate::common::{Lcg, R, pt};
 use tutti_tempo::{TempoError, TempoMap, TempoPoint, Transition};

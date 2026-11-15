@@ -160,7 +160,7 @@ impl Bus {
 /// [`width`](Self::width) is at most the side's channel count. Equal to it for
 /// a node whose every channel is in a bus (every node but a plugin with more
 /// than [`MAX_BUSES`] buses, or a bus wider than
-/// [`MAX_BUS_CHANNELS`](tutti_types::MAX_BUS_CHANNELS)): the ports past the
+/// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)): the ports past the
 /// buses are reached by port, not by bus.
 ///
 /// ```
@@ -204,14 +204,14 @@ impl Buses {
     ///
     /// # Panics
     ///
-    /// Past [`MAX_BUS_CHANNELS`](tutti_types::MAX_BUS_CHANNELS) (in a `const`
+    /// Past [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) (in a `const`
     /// context, at compile time): a wider side is
     /// [`Shape::through_unassigned`](crate::Shape::through_unassigned) and its
     /// kin, or several buses.
     #[must_use]
     pub const fn unassigned(width: ChannelLayout) -> Self {
         assert!(
-            width.count() as usize <= tutti_types::MAX_BUS_CHANNELS,
+            width.count() as usize <= tutti_types::MAX_CHANNELS,
             "an unassigned bus wider than a bus holds"
         );
         Self::unplaced(width)

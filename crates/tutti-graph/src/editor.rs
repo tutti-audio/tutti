@@ -89,14 +89,7 @@ use lifecycle::Lifecycle;
 use link::Link;
 use outlets::Outlets;
 use placements::Placements;
-use tutti_types::Amplitude;
-
-/// The widest graph root a host folds to its device: mono through 7.1. The
-/// engine's fold scratch holds this many channels, so it bounds its editor's
-/// [`Limits::max_global_outputs`] to it, and the sampler's voice width
-/// equals it. (A device wider than this is fine: the channels past what the
-/// root folds to are silent.) A size of the scratch, not a property of the graph.
-pub const MAX_ROOT_CHANNELS: usize = 8;
+use tutti_types::{Amplitude, MAX_CHANNELS};
 
 /// What the host that runs an [`Executor`] can take, enforced by its
 /// [`Editor`] on every later commit and re-prepare, so a graph the host

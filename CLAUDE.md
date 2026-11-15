@@ -56,9 +56,9 @@ std only. A rule the compiler already enforces is not a gate.
   features job and to `cargo xtask test-features`, or it never runs.
   `tutti-midi-hardware --features sequencer-tests` needs the kernel's `snd-seq`; CI only
   lints it, so run it locally before changing `backend/alsa`.
-- **Golden digests** go through `tutti_fixtures::assert_golden`: asserted on the recorded
-  libm (x86_64, glibc 2.39), skipped elsewhere, required in CI (`TUTTI_GOLDEN=require`).
-  Re-record only for an argued libm move, with the owner.
+- **A test pins an analytic figure, a spec value or an invariant**, never a digest of
+  tutti's own output. A comparison with an external implementation is a one-off
+  validation, never a test.
 - **One integration binary per area**: `tests/<area>/main.rs`, one `mod` per file. An area
   binary installs `assert_no_alloc::AllocDisabler` once and its allocation tests are
   modules in it; a file is its own binary only for a different allocator (counting,
@@ -69,8 +69,8 @@ std only. A rule the compiler already enforces is not a gate.
   computed it.
 - **Never weaken a test to make it pass.** Fix the bug, or report the failure and its
   cause.
-- **Never compare a render against another render.** Pin an analytic figure, an invariant
-  or a golden digest. No migration tests (old against new) and no test-only seams.
+- **Never compare a render against another render.** Pin an analytic figure or an
+  invariant. No migration tests (old against new) and no test-only seams.
 - The spec is the oracle: nothing is pinned against another implementation.
 
 ## Code rules

@@ -23,7 +23,7 @@ fn key(n: u64) -> NodeKey {
 }
 
 fn smpte(n: u16) -> Bus {
-    let topology = ChannelTopology::smpte(ChannelLayout::from_count(n)).expect("an SMPTE width");
+    let topology = ChannelTopology::assumed(ChannelLayout::from_count(n));
     Bus::new(
         BusTopology::try_from(&topology).expect("fits a bus"),
         BusRole::Main,

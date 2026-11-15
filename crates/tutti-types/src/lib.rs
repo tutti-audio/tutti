@@ -138,6 +138,8 @@ mod mint;
 
 // Private: everything public in these is re-exported at the root below, so the
 // module path would be a second name for a type that already has one.
+mod ambisonic;
+mod bed;
 mod bus;
 mod channels;
 mod topology;
@@ -174,12 +176,17 @@ pub use value::{
 };
 
 // Channel layout — how many channels.
-pub use bus::{BusTooWide, BusTopology, MAX_BUS_CHANNELS};
-pub use channels::{ChannelCountOutOfRange, ChannelLayout};
+pub use bus::{BusTooWide, BusTopology};
+pub use channels::{ChannelCountOutOfRange, ChannelLayout, MAX_CHANNELS};
 
 // Channel topology — which speaker each channel feeds. Distinct from the count
 // above, and additive to it: a width-only caller keeps using `ChannelLayout`.
-pub use topology::{ChannelTopology, Speaker};
+pub use ambisonic::{
+    AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
+    AmbisonicOrdering,
+};
+pub use bed::Bed;
+pub use topology::{ChannelTopology, Placement, Speaker, Speakers, TopologyError};
 
 // Musical meter.
 pub use meter::{

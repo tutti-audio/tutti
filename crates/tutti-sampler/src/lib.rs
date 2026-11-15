@@ -82,10 +82,10 @@
 //!
 //! ## Channel ceiling
 //!
-//! `MAX_SAMPLER_CHANNELS` is the widest frame a voice reads or emits. It equals
-//! `tutti_graph::MAX_ROOT_CHANNELS`, the graph root's width: a voice wider than the
-//! root could render would be truncated downstream, so the sampler refuses it
-//! here instead (`VoicePool::with_channels` returns `PoolTooWide`).
+//! `tutti_types::MAX_CHANNELS` is the widest frame a voice reads or emits, the
+//! same cap as a bus and the graph root: a voice wider than the root could
+//! render would be truncated downstream, so the sampler refuses it here instead
+//! (`VoicePool::with_channels` returns `PoolTooWide`).
 //!
 //! ## Features
 //!
@@ -130,20 +130,12 @@ pub use clip::Clip;
 mod error;
 pub use error::{Error, PlaceError, Result};
 
-/// Widest frame the sampler reads, interpolates, or emits, in channels.
-///
-/// Equal to [`tutti_graph::MAX_ROOT_CHANNELS`], the graph root's own ceiling,
-/// and the two move together: a voice wider than the root can render is a
-/// voice nobody can hear, and letting the sampler exceed it would move the
-/// truncation silently downstream (to the root's fold) rather than reporting
-/// it here ([`PoolTooWide`]).
-pub const MAX_SAMPLER_CHANNELS: usize = tutti_graph::MAX_ROOT_CHANNELS;
-
-/// [`MAX_SAMPLER_CHANNELS`] as a layout's count. The cast is checked at compile
-/// time: the build fails if the root ever grows past what a layout holds.
+/// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) as a layout's count. The cast is
+/// checked at compile time: the build fails if the cap ever grows past what a
+/// layout holds.
 pub(crate) const MAX_SAMPLER_WIDTH: u16 = {
-    assert!(MAX_SAMPLER_CHANNELS <= u16::MAX as usize);
-    MAX_SAMPLER_CHANNELS as u16
+    assert!(tutti_types::MAX_CHANNELS <= u16::MAX as usize);
+    tutti_types::MAX_CHANNELS as u16
 };
 
 /// Reject the empty layout for anything that is a graph node.
@@ -156,7 +148,7 @@ pub(crate) const MAX_SAMPLER_WIDTH: u16 = {
 ///
 /// This is the one place that clamp lives: the layout carries the declaration
 /// and this carries the node-arity invariant, so no call site has to re-remember
-/// the rule. The upper bound is *not* applied here — [`MAX_SAMPLER_CHANNELS`] is
+/// the rule. The upper bound is *not* applied here — [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) is
 /// a per-read stack ceiling, not a limit on what a node may declare, and only
 /// [`DiskVoice`] needs it.
 #[inline]

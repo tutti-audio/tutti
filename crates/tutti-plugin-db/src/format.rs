@@ -27,6 +27,9 @@ pub enum PluginFormat {
 }
 
 impl PluginFormat {
+    /// Every format.
+    pub const ALL: [Self; 4] = [Self::Vst3, Self::Vst2, Self::Clap, Self::AudioUnit];
+
     /// The plugin file extensions (without the dot) a scan recognizes.
     pub const EXTENSIONS: &'static [&'static str] = &EXTENSION_NAMES;
 
@@ -39,6 +42,12 @@ impl PluginFormat {
             PluginFormat::Clap => "clap",
             PluginFormat::AudioUnit => "au",
         }
+    }
+
+    /// The format whose [`extension_id`](Self::extension_id) is `id`.
+    #[must_use]
+    pub fn from_extension_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|f| f.extension_id() == id)
     }
 }
 
@@ -63,3 +72,35 @@ const fn extension_names<const N: usize>() -> [&'static str; N] {
 }
 
 const EXTENSION_NAMES: [&str; 6] = extension_names::<6>();
+
+#[cfg(test)]
+mod tests {
+    use super::PluginFormat;
+
+    /// **`from_extension_id` inverts `extension_id`** for every format, and `ALL`
+    /// lists each format once, so the name a caller sends to `plugin-probe --as`
+    /// is the one it reads back.
+    #[test]
+    fn every_extension_id_names_its_own_format() {
+        for format in PluginFormat::ALL {
+            assert_eq!(
+                PluginFormat::from_extension_id(format.extension_id()),
+                Some(format)
+            );
+        }
+        // An exhaustive match: a new format fails to compile here until it has
+        // a place in `ALL`.
+        let place = |f: PluginFormat| match f {
+            PluginFormat::Vst3 => 0,
+            PluginFormat::Vst2 => 1,
+            PluginFormat::Clap => 2,
+            PluginFormat::AudioUnit => 3,
+        };
+        for (i, format) in PluginFormat::ALL.into_iter().enumerate() {
+            assert_eq!(place(format), i);
+        }
+        for unknown in ["vst", "component", "CLAP", ""] {
+            assert_eq!(PluginFormat::from_extension_id(unknown), None);
+        }
+    }
+}

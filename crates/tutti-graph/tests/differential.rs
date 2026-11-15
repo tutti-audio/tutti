@@ -2569,6 +2569,41 @@ proptest! {
             }
         }
     }
+
+    /// The modes property with a third of the nodes declaring their own
+    /// bypass: the executor and the reference both read `Bypassed` as `Active`
+    /// for them (called every block, no blend, no park), bit for bit, while
+    /// `Muted` and a toggle back stay the executor's.
+    #[test]
+    fn own_bypass_nodes_are_bit_identical_to_the_reference(seed in any::<u64>(), which in 0usize..5) {
+        for workers in modes(seed) {
+            let mut modes = Rng::new(seed ^ 0x40DE_5EED);
+            let mut own = Rng::new(seed ^ 0x0B79_A55E);
+            let mut desc = random_graph(seed);
+            for key in desc.order.clone() {
+                if own.chance(34) {
+                    let inner = desc.kinds.remove(&key).expect("a kind");
+                    desc.kinds.insert(key, Kind::OwnBypass { inner: Box::new(inner) });
+                }
+            }
+            let mut pair = Pair::with_workers(MAX_BLOCK, workers);
+            pair.switch(&desc.spec.validate().expect("generated graphs are valid"), &desc.kinds);
+            let blocks = schedule(which, seed, 1400);
+            let mut frame = 0u64;
+            for &n in &blocks {
+                if modes.chance(20)
+                    && let Some((key, mode)) = pick_mode(&desc, &mut modes)
+                {
+                    pair.set_mode(key, mode);
+                    note_mode(&mut desc, key, mode);
+                }
+                let input = input_signal(frame, n);
+                let (a, b) = pair.block(n, &input);
+                prop_assert_eq!(bits(&a), bits(&b), "diverged at frame {} ({} frames)", frame, n);
+                frame += n as u64;
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2923,9 +2958,10 @@ struct BusGraph {
 
 fn bus_of(width: usize, named: bool) -> Bus {
     let layout = ChannelLayout::from_count(width as u16);
-    let topology = match ChannelTopology::smpte(layout).filter(|_| named) {
-        Some(t) => BusTopology::try_from(&t).expect("fits a bus"),
-        None => BusTopology::unassigned(layout).expect("fits a bus"),
+    let topology = if named {
+        BusTopology::try_from(&ChannelTopology::assumed(layout)).expect("fits a bus")
+    } else {
+        BusTopology::unassigned(layout).expect("fits a bus")
     };
     Bus::new(topology, BusRole::Main)
 }

@@ -46,8 +46,8 @@ pub use format::{
 };
 pub use fs::{canonical_path, discover, format_from_path};
 pub use scanner::{
-    ProbeFailure, Scan, ScanBusy, ScanPhase, ScanPoll, ScanProgress, ScanResult, Scanner,
-    probe_plugin_fallback,
+    Cancel, FileFailure, FilesError, ProbeFailure, ProbeFailureKind, Scan, ScanBusy, ScanPhase,
+    ScanPoll, ScanProgress, ScanResult, Scanner, probe_plugin_fallback,
 };
 pub use table::{BlacklistedFile, Delta, FileRow, FileState, PluginDb, PluginEntry};
 #[cfg(feature = "serde")]
