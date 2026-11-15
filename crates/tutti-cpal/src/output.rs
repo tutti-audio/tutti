@@ -36,6 +36,35 @@ pub struct AudioEngine {
     pub(crate) opened: Opened,
 }
 
+/// A device found and its config read, not yet opened as a stream
+/// ([`AudioEngine::resolve_device`]): what
+/// [`TuttiDriver::start_resolved`](crate::TuttiDriver::start_resolved) starts.
+pub struct Resolved {
+    spec: OutputSpec,
+    pub(crate) driver: CpalDriver,
+    pub(crate) opened: Opened,
+}
+
+impl Resolved {
+    /// The config the stream will run at.
+    #[must_use]
+    pub fn spec(&self) -> &OutputSpec {
+        &self.spec
+    }
+
+    pub(crate) fn into_parts(self) -> (OutputSpec, CpalDriver, Opened) {
+        (self.spec, self.driver, self.opened)
+    }
+}
+
+impl std::fmt::Debug for Resolved {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Resolved")
+            .field("spec", &self.spec)
+            .finish_non_exhaustive()
+    }
+}
+
 /// The device a stream runs on, as the engine learned it when it opened.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Opened {
@@ -174,6 +203,22 @@ impl AudioEngine {
     /// (`TuttiDriver::restart_with`).
     pub(crate) fn resolve(&self) -> Result<(CpalDriver, OutputSpec, Opened)> {
         Self::resolve_target(self.target.as_ref())
+    }
+
+    /// Resolves the selected device and reads its config, without opening a
+    /// stream: the device is found and its config known, so a host that moves
+    /// a running graph onto it can refuse what the device cannot take (a root
+    /// it cannot place) while the old stream still plays.
+    ///
+    /// # Errors
+    /// As [`start`](Self::start) up to the stream's opening.
+    pub fn resolve_device(&self) -> Result<Resolved> {
+        let (driver, spec, opened) = self.resolve()?;
+        Ok(Resolved {
+            spec,
+            driver,
+            opened,
+        })
     }
 
     /// [`resolve`](Self::resolve) for a bare `target`, which a restart reads

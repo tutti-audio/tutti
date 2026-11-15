@@ -235,6 +235,26 @@ impl<C: Clock> Jobs<C> {
     }
 }
 
+impl<C: Clock> Jobs<C> {
+    /// The same jobs for a session on clock `K`: the spawner, the counter and
+    /// the channel carry over, and no lander does (the caller failed them all).
+    /// A late arrival of a failed job finds no lander and is ignored.
+    pub(crate) fn rebind<K: Clock>(mut self) -> Jobs<K> {
+        debug_assert!(self.landers.is_empty(), "every lander was failed");
+        let (_, empty) = channel();
+        // The old flag is raised by the old value's drop, which the jobs still
+        // running read as the session being gone: the new ones get a fresh one.
+        Jobs {
+            spawn: self.spawn.clone(),
+            tx: self.tx.clone(),
+            rx: std::mem::replace(&mut self.rx, empty),
+            landers: HashMap::new(),
+            next: std::mem::replace(&mut self.next, tutti_types::Mint::new()),
+            closed: std::mem::replace(&mut self.closed, Arc::new(AtomicBool::new(false))),
+        }
+    }
+}
+
 impl<C: Clock> Drop for Jobs<C> {
     fn drop(&mut self) {
         self.closed.store(true, Ordering::Release);
@@ -327,6 +347,17 @@ impl<C: Clock> Jobs<C> {
 }
 
 impl<C: Clock> Session<C> {
+    /// Fails every job still in flight as [`JobFailed::Dropped`], landing the
+    /// failure on its lander, so each reports once. A lander may submit another
+    /// job, which fails in turn.
+    pub(crate) fn fail_jobs(&mut self, out: &mut Vec<SessionEvent>) {
+        while let Some(&id) = self.jobs.landers.keys().next() {
+            if let Some(mut lander) = self.jobs.landers.remove(&id) {
+                lander(self, Arrival::End(id, Err(JobFailed::Dropped)), out);
+            }
+        }
+    }
+
     /// Lands what the jobs sent since the last update, in arrival order.
     /// What arrives during a lander (a job it submits that ends at once)
     /// waits for the next update.

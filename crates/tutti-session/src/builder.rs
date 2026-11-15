@@ -444,13 +444,21 @@ impl SessionBuilder<SystemClock> {
         let clock = engine.block_clock();
         let spec = tutti_engine::OutputSpec::new(rate, layout, tutti_buffers::SampleFormat::F32)
             .with_quantum(max_block);
-        let mut stream = tutti_engine::OutputStream::new(spec);
-        let latency = stream.latency();
-        stream.start_with(
+        let mut host = tutti_engine::StreamHost::new(
+            tutti_engine::OutputStream::new(spec),
             Arc::new(tutti_engine::AudioCallbackState::new(engine)),
-            tutti_engine::TimerDriver::new(),
+        );
+        let latency = host.stream().latency();
+        host.start_with(tutti_engine::TimerDriver::new())?;
+        let mut session = self.session(
+            parts,
+            crate::clock::SystemEngine {
+                host: Some(host),
+                #[cfg(feature = "device")]
+                audio_host: self.opts.host,
+            },
+            true,
         )?;
-        let mut session = self.session(parts, crate::clock::SystemEngine { stream }, true)?;
         session.load = load;
         session.heard = Some((heard, layout));
         // The hardware out is timed by the session's one clock reader and the
@@ -534,8 +542,11 @@ impl SessionBuilder<crate::DeviceClock> {
         let mut engine = parts.graph.engine(&parts.transport)?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph, spec.channels)?;
-        let mut session: crate::LiveSession =
-            self.session(parts, crate::device::DeviceHandle::vacant(), true)?;
+        let mut session: crate::LiveSession = self.session(
+            parts,
+            crate::device::DeviceHandle::vacant(self.opts.host),
+            true,
+        )?;
         session.load = engine.take_load_meter();
         session.heard = Some((engine.heard_taps(), spec.channels));
         let clock = engine.block_clock();
@@ -925,7 +936,11 @@ impl<C: Clock> SessionBuilder<C> {
         let _ = streamer;
         #[cfg(feature = "plugin")]
         let (main_work, work) = tutti_plugin_types::MainWork::new();
+        #[cfg(feature = "plugin")]
+        let main_work = crate::session::SharedWork::new(main_work);
         Ok(Session {
+            #[cfg(feature = "plugin")]
+            early_work: crate::session::EarlyWork(main_work.clone()),
             running,
             graph: parts.graph,
             resource_ids: crate::peer::ResourceIds::new(),
@@ -986,6 +1001,7 @@ impl<C: Clock> SessionBuilder<C> {
             work,
             #[cfg(feature = "plugin")]
             main_work,
+            carried_events: Vec::new(),
         })
     }
 }

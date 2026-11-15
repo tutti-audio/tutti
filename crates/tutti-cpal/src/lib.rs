@@ -128,7 +128,7 @@ pub use driver_seam::{CpalDriver, CpalStream, PREFERRED_QUANTUM};
 pub use error::{Error, Result};
 pub use host::{AudioHost, DeviceHost, DeviceSelector, available_hosts};
 pub use listing::{DeviceListing, Listed};
-pub use output::AudioEngine;
+pub use output::{AudioEngine, Resolved};
 pub use poller::{DevicePoller, MIN_POLL_INTERVAL};
 pub use roster::{DeviceChange, DeviceId, DeviceRoster, Direction, Snapshot, SnapshotSource};
 

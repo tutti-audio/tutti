@@ -63,6 +63,9 @@ use crate::{
 #[derive(Debug)]
 pub struct DeviceHandle {
     device: Option<Device>,
+    /// The platform host the device was opened on, which a switch to the
+    /// system clock hands on.
+    pub(crate) audio_host: tutti_cpal::AudioHost,
     /// The device watch, and what restarts reported since the last poll.
     pub(crate) watch: Option<DeviceWatch>,
     pub(crate) events: Vec<SessionEvent>,
@@ -71,9 +74,10 @@ pub struct DeviceHandle {
 impl DeviceHandle {
     /// A handle whose device is yet to be started: the builder's, until the
     /// stream is up.
-    pub(crate) fn vacant() -> Self {
+    pub(crate) fn vacant(audio_host: tutti_cpal::AudioHost) -> Self {
         Self {
             device: None,
+            audio_host,
             watch: None,
             events: Vec::new(),
         }
@@ -96,8 +100,14 @@ impl DeviceHandle {
             .expect("the device is in its slot except while a restart runs")
     }
 
+    /// The device, taken out of the handle: a switch to the system clock
+    /// moves its host.
+    pub(crate) fn into_device(mut self) -> Device {
+        self.take()
+    }
+
     /// Takes the device out for a restart; [`fill`](Self::fill) puts it back.
-    fn take(&mut self) -> Device {
+    pub(crate) fn take(&mut self) -> Device {
         self.device
             .take()
             .expect("the device is in its slot except while a restart runs")
@@ -259,7 +269,7 @@ impl Session<DeviceClock> {
     /// Runs `f` with the device out of its slot and the session beside it: the
     /// restart's hook moves the whole session while the device's driver runs.
     /// The device goes back before `f`'s panic, if it has one, unwinds on.
-    fn with_device<R>(&mut self, f: impl FnOnce(&mut Self, &mut Device) -> R) -> R {
+    pub(crate) fn with_device<R>(&mut self, f: impl FnOnce(&mut Self, &mut Device) -> R) -> R {
         let mut device = self.running.take();
         let outcome =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self, &mut device)));
@@ -287,7 +297,7 @@ impl Session<DeviceClock> {
         let outcome = self.check_restart(max_block).and_then(|()| {
             let previous = self.device().graph_rate();
             self.with_device(|session, device| {
-                device.driver.restart_on(spec, driver, |spec, stopped| {
+                device.driver.switch(spec, driver, |spec, stopped| {
                     session.rerate(spec, stopped, max_block)
                 })
             })
@@ -418,10 +428,10 @@ impl Session<DeviceClock> {
 /// }
 /// ```
 pub struct Device {
-    driver: TuttiDriver,
+    pub(crate) driver: TuttiDriver,
     /// What the host last chose to run on (the build's, then a restart's):
     /// what the device policy follows.
-    chosen: DeviceSelector,
+    pub(crate) chosen: DeviceSelector,
     /// The capture delay the session's inputs report, read by
     /// [`latency`](Self::latency).
     input_latency: Arc<StreamLatency>,
@@ -756,6 +766,14 @@ pub enum DeviceEvent {
         /// Why not.
         error: Error,
     },
+    /// A capture the session held ended because the session left the sound
+    /// card's clock ([`Session::into_system_clock`]): the input's node stays in
+    /// the graph, silent. One event for each input.
+    #[cfg(feature = "audio-io")]
+    InputClosed {
+        /// The input.
+        input: crate::Input,
+    },
     /// The listing started with [`Session::list_outputs`] answered: the
     /// host's output devices, in enumeration order. Reported once.
     OutputsListed(Vec<DeviceId>),
@@ -823,14 +841,14 @@ impl<C: Clock> Session<C> {
     }
 
     /// The checks that must pass before the stream stops.
-    fn check_restart(&self, max_block: Option<MaxBlock>) -> Result<()> {
+    pub(crate) fn check_restart(&self, max_block: Option<MaxBlock>) -> Result<()> {
         self.graph.check_reprepare(max_block)?;
         Ok(())
     }
 
     /// The hook: move everything the session owns to `spec`, with no
     /// callback running.
-    fn rerate(
+    pub(crate) fn rerate(
         &mut self,
         spec: &OutputSpec,
         stopped: &Stopped<'_>,

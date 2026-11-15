@@ -122,7 +122,7 @@ fn entry(key: &'static str, probe: Probe) -> Declared<&'static str, Probe> {
 }
 
 /// The pool events of one update, as `(key, what)`.
-fn events(session: &mut crate::DetachedSession) -> Vec<(&'static str, String)> {
+fn events<C: crate::Clock>(session: &mut Session<C>) -> Vec<(&'static str, String)> {
     session
         .update()
         .into_iter()
@@ -141,7 +141,7 @@ fn events(session: &mut crate::DetachedSession) -> Vec<(&'static str, String)> {
         .collect()
 }
 
-fn state(session: &crate::DetachedSession, key: &'static str) -> Option<String> {
+fn state<C: crate::Clock>(session: &Session<C>, key: &'static str) -> Option<String> {
     session.pool_state(&key).map(|state| match state {
         PoolState::Loading => "loading".to_owned(),
         PoolState::Loaded => "loaded".to_owned(),
@@ -151,8 +151,8 @@ fn state(session: &crate::DetachedSession, key: &'static str) -> Option<String> 
     })
 }
 
-fn handle(
-    session: &crate::DetachedSession,
+fn handle<C: crate::Clock>(
+    session: &Session<C>,
     key: &'static str,
 ) -> Result<ProbeHandle, HandleError<&'static str>> {
     session.pool.handle::<_, Probe>(&key)
@@ -807,5 +807,92 @@ mod font {
         let again = s.soundfont(&"gm").unwrap();
         assert!(Arc::ptr_eq(&font, &again), "one parsed font");
         assert!(!font.presets().is_empty());
+    }
+}
+
+/// A clock switch, with loads of the session's own in flight (the pool's loads
+/// run as jobs on the session's spawner).
+#[cfg(feature = "device")]
+mod clock_switch {
+    use tutti_engine::{ManualStreamDriver, OutputSpec};
+    use tutti_types::ChannelLayout;
+
+    use super::*;
+
+    fn system_session() -> (crate::SystemSession, Spawned) {
+        let spawned = Spawned::default();
+        let held = spawned.clone();
+        let session = Session::builder()
+            .spawn_with(move |job| held.0.lock().unwrap().push(job))
+            .system_clock()
+            .build()
+            .unwrap();
+        (session, spawned)
+    }
+
+    fn card() -> (ManualStreamDriver, OutputSpec) {
+        let (driver, _stream) = ManualStreamDriver::new();
+        let spec = OutputSpec::new(
+            SampleRate::SR_48K,
+            ChannelLayout::STEREO,
+            tutti_buffers::SampleFormat::F32,
+        );
+        (driver, spec)
+    }
+
+    /// **A loaded entry survives a clock switch, and each load in flight is
+    /// failed and reported once**: a switch cannot carry a job to the other
+    /// clock, so a load that has not landed lands as `LoadError::Job(Dropped)`
+    /// (its entry `Failed`, one event each), while the entry that had loaded is
+    /// as it was, handle and all. The failed job, when it finishes late, reports
+    /// nothing more.
+    #[test]
+    fn a_loaded_entry_survives_a_clock_switch_and_loads_in_flight_are_failed_once() {
+        let (mut s, spawned) = system_session();
+        let runs = runs();
+        s.pool((
+            entry("loaded", probe(1, &runs)),
+            entry("late", probe(1, &runs)),
+            entry("later", probe(1, &runs)),
+        ))
+        .unwrap();
+        let mut jobs = spawned.take();
+        assert_eq!(jobs.len(), 3);
+        let held_back: Vec<_> = jobs.drain(1..).collect();
+        for job in jobs {
+            job.run();
+        }
+        // `loaded` lands on the timer's clock; the other two are in flight.
+        let mut landed = Vec::new();
+        while landed.is_empty() {
+            landed = events(&mut s);
+            std::thread::yield_now();
+        }
+        assert_eq!(landed, [("loaded", "loaded".to_owned())]);
+        let (driver, spec) = card();
+        let mut live = s
+            .into_device_on(spec, driver)
+            .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+        let after = events(&mut live);
+        assert_eq!(
+            after.iter().map(|(key, _)| *key).collect::<Vec<_>>(),
+            ["late", "later"],
+            "each load in flight reports, once: {after:?}"
+        );
+        assert!(
+            after.iter().all(|(_, what)| what.starts_with("failed")),
+            "{after:?}"
+        );
+        assert_eq!(state(&live, "late").as_deref(), Some("failed"));
+        assert_eq!(state(&live, "later").as_deref(), Some("failed"));
+        assert_eq!(state(&live, "loaded").as_deref(), Some("loaded"));
+        assert_eq!(*handle(&live, "loaded").unwrap().info(), 100, "intact");
+        for job in held_back {
+            job.run();
+        }
+        assert!(
+            events(&mut live).is_empty(),
+            "the late jobs report nothing more"
+        );
     }
 }
