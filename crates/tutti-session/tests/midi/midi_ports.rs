@@ -692,7 +692,7 @@ fn another_devices_removal_leaves_a_port_open() {
 /// handle then reads the stream.
 #[test]
 fn a_ports_info_follows_what_the_device_says() {
-    use tutti_midi_hardware::{Basis, Capabilities, Endpoint};
+    use tutti_midi_hardware::{Basis, Capabilities, Endpoint, Supports};
     use tutti_ump::Protocol;
 
     let (mut s, fake) = session();
@@ -704,11 +704,11 @@ fn a_ports_info_follows_what_the_device_says() {
     let port = s.midi_input(&"wire").expect("loaded");
     assert!(port.info().stream().is_none(), "nothing settled yet");
 
-    let mut device = Endpoint::new(Capabilities {
+    let mut device = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         ..Capabilities::default()
-    });
+    }));
     let raw = EndpointId::from_raw(7);
     let mut said = Vec::new();
     for _ in 0..20 {
