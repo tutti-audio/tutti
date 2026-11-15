@@ -118,6 +118,10 @@ impl<C: crate::Clock> Session<C> {
         }
         self.pool_openings();
         self.pool.sweep();
+        // Before the waits settle: a swap the graph refuses fails the entry the
+        // wait would otherwise report as loaded.
+        #[cfg(feature = "plugin")]
+        self.swap_pooled_plugins();
         self.pool.poll_waiters();
         // One at a time, each over the pool as the run before it left it. A run
         // asked during these waits for the next update; one that panics leaves

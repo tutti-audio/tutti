@@ -413,6 +413,10 @@ unsafe extern "C" fn plugin_deactivate(plugin: *const clap_plugin) {
         if !state.active.swap(false, Ordering::SeqCst) {
             refusal::note_inactive_deactivation();
         }
+        // THREADING: `[main-thread]`; a host that closes the plugin where it
+        // does not run on the main thread is told so by this site.
+        // SAFETY: the host this plugin was created with, live until `destroy`.
+        unsafe { threading::record_thread_roles(threading::Site::Deactivate, plugin_host(plugin)) };
         // SAFETY: the host this plugin was created with, live until `destroy`.
         unsafe { threading::run_pending_command(threading::Site::Deactivate, plugin_host(plugin)) };
     }
@@ -1101,6 +1105,9 @@ pub enum PortLayoutMode {
     /// `out = [2]`). CLAP requires a host to hand exactly the declared count
     /// on each side, so this pins that the host hands no input buffer.
     Instrument = 2,
+    /// Two mono buses on both sides (`in = [1, 1]`, `out = [1, 1]`): the
+    /// stereo layout's channel totals with another split of buses.
+    TwoMono = 3,
 }
 
 /// Process-global selected layout. `AtomicU32` rather than a `Mutex` because
@@ -1113,6 +1120,7 @@ impl PortLayoutMode {
         match v {
             1 => Self::AsymmetricAux,
             2 => Self::Instrument,
+            3 => Self::TwoMono,
             _ => Self::SymmetricStereo,
         }
     }
@@ -1121,7 +1129,7 @@ impl PortLayoutMode {
     fn port_count(self, is_input: bool) -> u32 {
         match self {
             Self::SymmetricStereo => 1,
-            Self::AsymmetricAux => 2,
+            Self::AsymmetricAux | Self::TwoMono => 2,
             Self::Instrument => u32::from(!is_input),
         }
     }
@@ -1132,6 +1140,7 @@ impl PortLayoutMode {
         let ports: &[u32] = match self {
             Self::SymmetricStereo => &[2],
             Self::AsymmetricAux => &[2, 1],
+            Self::TwoMono => &[1, 1],
             Self::Instrument if is_input => &[],
             Self::Instrument => &[2],
         };

@@ -429,6 +429,9 @@ pub struct Session<C: Clock = Offline> {
     pub(crate) resource_ids: crate::peer::ResourceIds,
     /// What the app declared loaded ([`Session::pool`]).
     pub(crate) pool: crate::Pool<C>,
+    /// The plugin entries whose node waits to swap to a reloaded plugin.
+    #[cfg(feature = "plugin")]
+    pub(crate) pooled_swaps: std::collections::BTreeSet<crate::PoolKey>,
     pub(crate) transport: Transport,
     /// The engine's load meter, offline or on a device; `None` detached.
     pub(crate) load: Option<tutti_metering::LoadMeter>,

@@ -217,6 +217,20 @@ fn from_mcm_rejects_out_of_range_configurations() {
     assert_eq!(MpeZoneConfig::from_mcm(&sixteen), None);
 }
 
+/// An MPE Configuration Message declares its member count in the top 7 bits
+/// of the data; the 25 bits below are undefined and ignored (M2-104 section
+/// 7.4.7.1).
+/// Spec: m2-104/7.4.7.1#5
+#[test]
+fn an_mcm_ignores_the_low_25_bits_of_its_data() {
+    for below in [0, 1, 0x00FF_FFFF, 0x01FF_FFFF] {
+        let mcm = registered(ch(0), Rpn::MPE_CONFIGURATION, 7 << 25 | below);
+        assert_eq!(MpeZoneConfig::from_mcm(&mcm), Some((MpeZone::Lower, 7)));
+        let upper = registered(ch(15), Rpn::MPE_CONFIGURATION, 4 << 25 | below);
+        assert_eq!(MpeZoneConfig::from_mcm(&upper), Some((MpeZone::Upper, 4)));
+    }
+}
+
 #[test]
 fn an_mcm_round_trips_and_zero_disables() {
     for z in [MpeZone::Lower, MpeZone::Upper] {

@@ -55,6 +55,9 @@ fn the_first_clock_is_due_immediately() {
     assert_eq!(jr_clock_value(&first), Some(0));
 }
 
+/// A clock carries the sender time of the frame it is due at, in ticks, and a
+/// cadence shorter than the 250 ms maximum is allowed.
+/// Spec: m2-104/7.2.2.1#1, m2-104/7.2.2.1#5
 #[test]
 fn clocks_are_emitted_on_the_configured_cadence() {
     let mut e = JrClockEmitter::with_interval(SampleRate::SR_48K, Duration::from_millis(100));
@@ -67,7 +70,8 @@ fn clocks_are_emitted_on_the_configured_cadence() {
         e.due(at(Samples(interval.get() - 1))).is_none(),
         "one sample short"
     );
-    assert!(e.due(at(interval)).is_some(), "exactly due");
+    let second = e.due(at(interval)).expect("exactly due");
+    assert_eq!(jr_clock_value(&second), Some(3_125), "100 ms is 3125 ticks");
     assert!(
         e.due(at(Samples(interval.get() + 1))).is_none(),
         "just emitted"
@@ -78,7 +82,7 @@ fn clocks_are_emitted_on_the_configured_cadence() {
     );
 }
 
-/// Spec: m2-104/7.2.2.1#2
+/// Spec: m2-104/7.2.2.1#2, m2-104/7.2.2.1#7
 #[test]
 fn the_cadence_keeps_running_through_silence() {
     // The load-bearing case. §7.2.2.1: JR Clocks are independent of
@@ -159,7 +163,7 @@ fn stamp_advances_by_events_and_stamp_span_by_the_block() {
     assert_eq!(by_block.origin(), Frame::new(512), "the block advanced it");
 }
 
-/// Spec: m2-104/7.2.2.1#2
+/// Spec: m2-104/7.2.2.1#2, m2-104/7.2.2.1#7
 #[test]
 #[should_panic(expected = "exceeds the §7.2.2.1 maximum")]
 fn an_interval_over_the_spec_maximum_is_rejected() {
@@ -168,7 +172,7 @@ fn an_interval_over_the_spec_maximum_is_rejected() {
     JrClockEmitter::with_interval(SampleRate::SR_48K, Duration::from_millis(251));
 }
 
-/// Spec: m2-104/7.2.2.1#2
+/// Spec: m2-104/7.2.2.1#2, m2-104/7.2.2.1#7
 #[test]
 fn the_default_interval_is_inside_the_spec_maximum() {
     assert!(JR_CLOCK_INTERVAL < JR_CLOCK_MAX_INTERVAL);
@@ -220,6 +224,7 @@ fn a_stream_advances_its_origin_across_blocks() {
 /// The events sit at a *block-sized* offset, not zero: a JR tick is 32 µs —
 /// about 1.5 samples at 48 kHz — so a one-sample advance rounds to the same
 /// tick and would prove nothing either way.
+/// Spec: m2-104/7.2.2.2#4
 #[test]
 fn two_producers_on_one_stream_keep_stamps_monotonic() {
     let mut wire = JrStream::new(SampleRate::SR_48K);

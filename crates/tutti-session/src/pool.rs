@@ -22,7 +22,9 @@
 //! its handles read closed, and the entry reads failed.
 //!
 //! Each kind of entry is a [`PoolEntry`]; `audio_file` (feature `sampler`) and
-//! `soundfont` (feature `soundfont`) are the data kinds. A load's outcome lands
+//! `soundfont` (feature `soundfont`) are the data kinds, and
+//! `Session::plugin_entry` (feature `plugin`) declares a plugin, which a node
+//! then takes (`Session::add_pooled_plugin`). A load's outcome lands
 //! in [`Session::update`] as a [`SessionEvent::Pool`](crate::SessionEvent::Pool), and
 //! [`Session::pool_state`] reads where an entry stands. A handle read by key
 //! (`Session::audio`, `Session::soundfont`) is a clone that owns nothing:
@@ -84,6 +86,8 @@ pub use refresh::RefreshPool;
 pub use report::{PoolOutcome, PoolReport};
 pub(crate) use table::Pool;
 pub use table::{HandleError, PoolError, PoolEvent, PoolState, RetryError, WhenLoadedError};
+#[cfg(feature = "plugin")]
+pub(crate) use table::{Hold, HoldKind};
 pub use wait::PoolWait;
 
 #[cfg(test)]
