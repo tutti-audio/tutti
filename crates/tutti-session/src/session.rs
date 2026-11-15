@@ -184,7 +184,9 @@ pub enum SessionEvent {
     /// longer has. Reported once, by the update that commits the re-insert,
     /// per node: the audio edges, the event edges and the bus edges (root feeds
     /// included) that were dropped, by the ports the app named them with.
-    /// Edges to the ports the node still has are kept, gains included.
+    /// Edges to the ports the node still has are kept, gains included. A
+    /// refused commit reports nothing: the record waits for the update whose
+    /// commit lands.
     ///
     /// A feedback edge is listed as the pair of ports it joined (its delay
     /// is not part of an [`Edge`](crate::Edge)). A modulation route onto a
