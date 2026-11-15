@@ -86,7 +86,7 @@ fn part(n: u8) -> NonZeroU8 {
 /// parts, as 5/4 in 3 + 2 and 9/4 in 3 + 3 + 3 or 4 + 4 + 1; and the parts add
 /// up to the beats of the bar. A shape with Part 1 zero, or a part after a zero
 /// part, is no Set Metronome.
-/// Spec: m2-104/7.5.5#5, m2-104/7.5.5#6, m2-104/7.5.5#7, m2-104/7.5.5#8, m2-104/7.5.5#9
+/// Spec: m2-104/7.5.5#5, m2-104/7.5.5#6, m2-104/7.5.5#7, m2-104/7.5.5#8
 #[test]
 fn the_bar_accents_are_the_parts_of_the_bar() {
     let word = |a: u8, b: u8, c: u8| [head(2, 0x0002), u32::from_be_bytes([24, a, b, c]), 0, 0];

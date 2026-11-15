@@ -126,6 +126,16 @@ fn a_time_signature_is_a_signature_and_a_metronome() {
     };
     let [sig, metronome] = signature_events(6, 3, 8, 36);
     assert_eq!((&a.1, &b.1), (&sig, &metronome));
+    // The Metronome's accent parts add up to the Time Signature's beats.
+    let (
+        FileEvent::Message(Message::Flex(_, Flex::SetTimeSignature(time))),
+        FileEvent::Message(Message::Flex(_, Flex::SetMetronome(click))),
+    ) = (&a.1, &b.1)
+    else {
+        panic!("{a:?} {b:?}")
+    };
+    assert_eq!(click.accents.beats(), u16::from(time.numerator));
+    assert_eq!(time.numerator, 6);
 }
 
 /// M2-104 section 7.5.7: sharps or flats, and the tonic's letter. 3 sharps
