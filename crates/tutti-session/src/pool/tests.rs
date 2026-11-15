@@ -57,6 +57,7 @@ fn probe(version: u32, runs: &Arc<AtomicUsize>) -> Probe {
     }
 }
 
+#[derive(Clone)]
 struct ProbeHandle {
     id: ResourceId,
     loaded: u32,
@@ -356,6 +357,24 @@ fn an_entry_no_one_holds_is_released_at_the_next_update_and_its_handle_closes() 
     ));
     assert_eq!(events(&mut s), [("a", "released".to_owned())]);
     assert!(events(&mut s).is_empty(), "released once");
+}
+
+#[test]
+fn dropping_a_handle_leaves_its_entry_loaded() {
+    let (mut s, spawned) = session();
+    let runs = runs();
+    s.pool(entry("a", probe(1, &runs))).unwrap();
+    spawned.run_all();
+    let _ = events(&mut s);
+    let first = handle(&s, "a").unwrap();
+    let second = first.clone();
+    drop(first);
+    drop(second);
+    assert!(events(&mut s).is_empty(), "no release, no reload");
+    assert_eq!(state(&s, "a").as_deref(), Some("loaded"));
+    let again = handle(&s, "a").unwrap();
+    assert_eq!(again.presence(), Presence::Live);
+    assert_eq!(runs.load(Ordering::SeqCst), 1, "loaded once");
 }
 
 #[test]
@@ -681,7 +700,7 @@ fn a_refused_set_applies_nothing_while_a_release_is_pending() {
 #[cfg(feature = "sampler")]
 mod audio {
     use super::*;
-    use crate::audio_file;
+    use crate::{AudioEntry, audio_file};
 
     fn write_wav(path: &std::path::Path, frames: u32) {
         let spec = hound::WavSpec {
@@ -700,7 +719,10 @@ mod audio {
     }
 
     fn wave(session: &Session, key: &'static str) -> Arc<tutti_codec::Wave> {
-        session.audio(&key).unwrap()
+        match session.audio(&key).unwrap() {
+            AudioEntry::Resident(wave) => wave,
+            other => panic!("a resident entry reads as its wave, got {other:?}"),
+        }
     }
 
     #[test]
@@ -724,6 +746,74 @@ mod audio {
         assert_eq!(events(&mut s), [("kick", "reloaded".to_owned())]);
         assert_eq!(wave(&s, "kick").len().0, 250);
         assert_eq!(loaded.len().0, 100, "a reader of the old wave keeps it");
+    }
+
+    #[test]
+    fn dropping_an_audio_handle_leaves_the_entry_loaded_and_its_wave_shared() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.wav");
+        write_wav(&path, 10);
+        let (mut s, spawned) = session();
+        s.pool(audio_file("kick", &path)).unwrap();
+        spawned.run_all();
+        let _ = events(&mut s);
+        let first = wave(&s, "kick");
+        let handle = s.audio(&"kick").unwrap();
+        drop(handle);
+        drop(first.clone());
+        assert!(events(&mut s).is_empty(), "no release, no reload");
+        assert_eq!(state(&s, "kick").as_deref(), Some("loaded"));
+        assert!(Arc::ptr_eq(&first, &wave(&s, "kick")), "the one decode");
+        assert!(spawned.take().is_empty(), "nothing loads again");
+    }
+
+    #[test]
+    fn a_streamed_entry_reads_the_files_header_not_its_samples() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.wav");
+        write_wav(&path, 480);
+        let (mut s, spawned) = session();
+        s.pool(audio_file("long", &path).streamed()).unwrap();
+        spawned.run_all();
+        assert_eq!(events(&mut s), [("long", "loaded".to_owned())]);
+        let AudioEntry::Streamed(info) = s.audio(&"long").unwrap() else {
+            panic!("a streamed entry reads as its header");
+        };
+        assert_eq!(info.path(), path);
+        assert_eq!(info.facts().frames.map(|frames| frames.0), Some(480));
+        assert_eq!(info.facts().layout.count(), 2);
+        assert_eq!(info.facts().sample_rate, tutti_types::SampleRate::SR_48K);
+    }
+
+    #[test]
+    fn the_tier_is_part_of_the_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.wav");
+        write_wav(&path, 10);
+        let (mut s, spawned) = session();
+        s.pool(audio_file("a", &path)).unwrap();
+        spawned.run_all();
+        let _ = events(&mut s);
+        s.pool(audio_file("a", &path).streamed()).unwrap();
+        assert_eq!(state(&s, "a").as_deref(), Some("reloading"));
+        spawned.run_all();
+        assert_eq!(events(&mut s), [("a", "reloaded".to_owned())]);
+        assert!(matches!(s.audio(&"a"), Ok(AudioEntry::Streamed(_))));
+    }
+
+    #[test]
+    fn a_streamed_entry_of_a_file_that_is_no_audio_fails_with_a_probe_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.wav");
+        std::fs::write(&path, b"not audio").unwrap();
+        let (mut s, spawned) = session();
+        s.pool(audio_file("a", &path).streamed()).unwrap();
+        spawned.run_all();
+        let _ = s.update();
+        assert!(matches!(
+            s.pool_state(&"a"),
+            Some(PoolState::Failed(LoadError::Probe(_)))
+        ));
     }
 
     #[test]

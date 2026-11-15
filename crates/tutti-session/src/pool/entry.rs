@@ -357,6 +357,15 @@ pub enum LoadError {
     /// A file could not be decoded.
     #[error(transparent)]
     Decode(Arc<tutti_codec::DecodeError>),
+    /// A file's header could not be read to stream it.
+    #[cfg(feature = "sampler")]
+    #[error(transparent)]
+    Probe(Arc<tutti_sampler::ProbeError>),
+    /// A file declared streamed cannot be streamed by this build: its container
+    /// reports no length, its decoder cannot seek, or no codec covers it.
+    #[cfg(feature = "sampler")]
+    #[error("{} cannot be streamed", .0.display())]
+    NotStreamable(std::path::PathBuf),
     /// A SoundFont could not be opened.
     #[cfg(feature = "soundfont")]
     #[error(transparent)]
@@ -427,7 +436,7 @@ impl<K> fmt::Debug for PoolSet<K> {
 #[derive(Clone, Debug)]
 pub struct Declared<K, E> {
     key: K,
-    entry: E,
+    pub(crate) entry: E,
     share: Option<Cloner>,
 }
 

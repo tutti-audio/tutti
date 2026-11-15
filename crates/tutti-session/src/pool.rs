@@ -56,7 +56,7 @@ mod table;
 
 pub use config::PoolConfig;
 #[cfg(feature = "sampler")]
-pub use data::{AudioFile, audio_file};
+pub use data::{AudioEntry, AudioFile, StreamInfo, audio_file};
 #[cfg(feature = "soundfont")]
 pub use data::{SoundFontFile, soundfont};
 pub use entry::{Declared, IntoPool, Life, Load, LoadError, PoolEntry, PoolSet, stranded_loads};
@@ -166,14 +166,18 @@ impl Session {
 
 #[cfg(feature = "sampler")]
 impl Session {
-    /// The wave of the `audio_file` entry under `key`.
+    /// What the `audio_file` entry under `key` read: its wave, or its stream's
+    /// header ([`AudioEntry`]).
+    ///
+    /// The handle is a clone and owns nothing: dropping it leaves the entry
+    /// loaded, and the entry's release leaves it reading what it had.
     ///
     /// # Errors
     ///
     /// [`HandleError::NotPooled`] when the key is not declared (never, or
     /// released); [`HandleError::WrongKind`] when it is another kind of entry;
     /// [`HandleError::NotLoaded`] before the load lands, or after it failed.
-    pub fn audio<K>(&self, key: &K) -> Result<Arc<tutti_codec::Wave>, HandleError<K>>
+    pub fn audio<K>(&self, key: &K) -> Result<AudioEntry, HandleError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
@@ -184,6 +188,7 @@ impl Session {
 #[cfg(feature = "soundfont")]
 impl Session {
     /// The SoundFont of the `soundfont` entry under `key`, shared by its `Arc`.
+    /// The handle owns nothing: dropping it leaves the entry loaded.
     ///
     /// # Errors
     ///

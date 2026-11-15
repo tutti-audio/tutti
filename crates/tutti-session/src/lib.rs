@@ -189,7 +189,7 @@ pub use plugin::{
 };
 pub(crate) use pool::Pool;
 #[cfg(feature = "sampler")]
-pub use pool::{AudioFile, audio_file};
+pub use pool::{AudioEntry, AudioFile, StreamInfo, audio_file};
 pub use pool::{
     Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, PoolConfig, PoolEntry,
     PoolError, PoolEvent, PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet, PoolState,
