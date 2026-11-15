@@ -299,6 +299,11 @@ impl Link {
     /// cache is forgotten); one that does not settle or answer in time is
     /// [`Unanswered`](ParamWriteError::Unanswered).
     ///
+    /// **It waits**: the settle sleep-polls for as long as the bridge has news
+    /// pending, up to the link's timeout, and a bridge wedged inside its listener
+    /// makes the write fail `Unanswered` after that. Control thread only; the
+    /// realtime path reads no cache.
+    ///
     /// # Errors
     ///
     /// As above, naming `id`, the parameter the caller was writing.

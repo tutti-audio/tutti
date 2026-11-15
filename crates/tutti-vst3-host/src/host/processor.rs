@@ -8,8 +8,8 @@ use tutti_graph::UmpAt;
 use vst3::Steinberg::Vst::ProcessSetup;
 
 use tutti_plugin_types::{
-    AudioBufferMut, Edit, EditDrain, EditSink, Normalized, ParamId, PluginError, PluginIo,
-    PluginResult, Processor, RtMidiEvents,
+    AudioBufferMut, Edit, EditDrain, EditSink, Normalized, ParamAccess, ParamId, ParamWriteError,
+    PluginError, PluginIo, PluginResult, Processor, RtMidiEvents,
 };
 use tutti_rt::DrainBeat;
 use tutti_types::{ChannelLayout, SampleRate};
@@ -217,9 +217,13 @@ pub struct Vst3Processor<T: Vst3Sample> {
     /// Edits the block could not hold, and writes to a read-only parameter, since
     /// activation.
     edits_dropped: u64,
-    /// The ids the plugin declared read-only at activation, sorted: the host
-    /// writes none of them, by a Controller write or by automation.
-    read_only: Box<[ParamId]>,
+    /// The parameters the plugin declared at activation and what each declares
+    /// of its writability, sorted by id: the write policy
+    /// ([`ParamWriteError::check_sorted`]) reads it, so a Controller write or
+    /// automation for an undeclared or read-only parameter is not sent. Taken
+    /// per activation: a plugin that changes its parameters later is read again
+    /// at the next one.
+    declared: Box<[(ParamId, ParamAccess)]>,
     /// Whether `setProcessing(1)` is the plugin's last word.
     processing: bool,
     /// Last: the plugin outlives everything above, and a last holder retires
@@ -246,7 +250,7 @@ pub(super) struct ProcessorParts {
     pub reports: EditSink,
     pub beat: DrainBeat,
     pub carried: Vec<(ParamId, Normalized)>,
-    pub read_only: Box<[ParamId]>,
+    pub declared: Box<[(ParamId, ParamAccess)]>,
 }
 
 impl<T: Vst3Sample> Vst3Processor<T> {
@@ -260,7 +264,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             reports,
             beat,
             mut carried,
-            read_only,
+            declared,
         } = parts;
         carried.reserve(EDIT_CAPACITY);
         Self {
@@ -274,7 +278,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             beat,
             pending: carried,
             edits_dropped: 0,
-            read_only,
+            declared,
             processing: true,
             shell: Hold::new(shell),
         }
@@ -330,8 +334,8 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     }
 
     /// Writes the ring held that no block took, since activation, for want of
-    /// room in the block in hand, and those to a parameter the plugin declared
-    /// read-only (which no write reaches).
+    /// room in the block in hand, and those to a parameter the plugin did not
+    /// declare or declared read-only (which no write reaches).
     #[must_use]
     pub fn edits_dropped(&self) -> u64 {
         self.edits_dropped
@@ -344,12 +348,12 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             drain,
             pending,
             edits_dropped,
-            read_only,
+            declared,
             ..
         } = self;
         drain.drain(|edit| {
             let (id, value) = match edit {
-                Edit::Param { id, .. } if read_only.binary_search(&id).is_ok() => {
+                Edit::Param { id, .. } if ParamWriteError::check_sorted(id, declared).is_err() => {
                     *edits_dropped += 1;
                     return;
                 }
@@ -464,9 +468,12 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         let staged = (|| {
             let mut staging = self.audio.input.param_changes.try_begin().ok_or(Busy)?;
             if let Some(changes) = input_params {
-                // Automation never writes a parameter the plugin declared
-                // read-only: its points are counted with the dropped ones.
-                staging.refill_where(changes, |id| self.read_only.binary_search(&id).is_err())?;
+                // Automation never writes a parameter the plugin did not
+                // declare or declared read-only: its points are counted with
+                // the dropped ones.
+                staging.refill_where(changes, |id| {
+                    ParamWriteError::check_sorted(id, &self.declared).is_ok()
+                })?;
             }
             for &(id, value) in &self.pending {
                 staging.prepend(id, value)?;

@@ -454,6 +454,34 @@ pub fn automation_to_a_read_only_parameter_is_not_applied<F: Format>() {
     );
 }
 
+/// Automation for an id the plugin does not declare is not applied: a block
+/// whose automation names it and the level moves the level and sends the plugin
+/// no event for the undeclared id, whichever route carries the points. (A format
+/// that delivers a point directly leaves no event for either, so the transcript
+/// half is vacuous there.)
+pub fn automation_to_an_undeclared_parameter_is_not_applied<F: Format>() {
+    let mut a = active_in::<F>(Mode::Level);
+    let mut points = ParameterChanges::reserved(2, 4);
+    assert!(points.add_change(spec::UNLISTED, 0, spec::WRITE));
+    assert!(points.add_change(Param::Level.id(), 0, spec::WRITE));
+    let out = a.render(
+        &silence(BLOCK),
+        BLOCK,
+        &ProcessContext::new().params(&points),
+    );
+    assert!(
+        out[0].iter().all(|&v| v == spec::WRITE as f32),
+        "the declared parameter took its point"
+    );
+    tutti_plugin_types::Control::flush_edits(a.controller_mut(), main_thread());
+    let t = transcript::<F, _>(a.controller_mut());
+    assert!(
+        t.of(Kind::Param).all(|e| e.id != spec::UNLISTED.get()),
+        "automation reached an undeclared parameter: {:?}",
+        t.events
+    );
+}
+
 /// A write to an id the plugin does not declare fails at the call with a named
 /// error, loaded and active (`ParamWriteError`, one policy for every format).
 pub fn undeclared_parameter_write_is_refused<F: Format>() {

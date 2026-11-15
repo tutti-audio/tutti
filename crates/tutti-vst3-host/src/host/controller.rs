@@ -416,14 +416,13 @@ impl Vst3Loaded {
             });
         };
         let context_requirements = loaded.context_requirements();
-        // What the plugin declares read-only now: no write of the host reaches it.
-        let mut read_only: Vec<ParamId> = loaded
+        // What the plugin declares now, for the write policy on the process route.
+        let mut declared: Vec<(ParamId, ParamAccess)> = loaded
             .parameter_list(main)
             .iter()
-            .filter(|info| ParamAccess::of(info) == ParamAccess::ReadOnly)
-            .map(ParameterInfo::id)
+            .map(|info| (info.id(), ParamAccess::of(info)))
             .collect();
-        read_only.sort_unstable();
+        declared.sort_unstable_by_key(|&(id, _)| id);
         let shell = Arc::new(Shell::new());
         let (sink, drain) = tutti_plugin_types::edits(EDIT_CAPACITY);
         let (reports_in, reports_out) = tutti_plugin_types::edits(EDIT_CAPACITY);
@@ -445,7 +444,7 @@ impl Vst3Loaded {
             reports: reports_in,
             beat,
             carried,
-            read_only: read_only.into(),
+            declared: declared.into(),
         });
         Ok((
             processor,

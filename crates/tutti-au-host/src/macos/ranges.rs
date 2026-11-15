@@ -140,6 +140,15 @@ impl RangeTable {
         self.read_only.binary_search(&id).is_ok()
     }
 
+    /// What the AU declares of `id`'s writability, `None` for a parameter it
+    /// never declared: the figure the write policy
+    /// ([`ParamWriteError::check`](tutti_plugin_types::ParamWriteError::check))
+    /// reads.
+    pub(crate) fn access(&self, id: u32) -> Option<tutti_plugin_types::ParamAccess> {
+        self.bounds(id)
+            .map(|_| tutti_plugin_types::ParamAccess::reported(self.is_read_only(id)))
+    }
+
     /// Every declared id, ascending.
     pub(crate) fn ids(&self) -> impl Iterator<Item = u32> + '_ {
         self.ranges.iter().map(|&(id, _)| id)

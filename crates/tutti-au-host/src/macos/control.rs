@@ -16,11 +16,11 @@ use tutti_au_ffi::AuEditor;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AuComponentType, AutomationMode, ContentScale, Control, EditorCapabilities, EditorError,
-    EditorPresence, EditorWindow, Features, LoadedPlugin, MainThreadMarker, Normalized,
-    ParamAccess, ParamEdit, ParamFlags, ParamId, ParamMapping, ParamRange, ParamSteps,
-    ParamWriteError, ParameterInfo, PluginBus, PluginBuses, PluginClass, PluginDescriptor,
-    PluginError, PluginResult, PluginTail, Preset, PresetId, RenderModeSupport, Request,
-    RescanScope, StateUse, WindowHandle, Wraps, taken,
+    EditorPresence, EditorWindow, Features, LoadedPlugin, MainThreadMarker, Normalized, ParamEdit,
+    ParamFlags, ParamId, ParamMapping, ParamRange, ParamSteps, ParamWriteError, ParameterInfo,
+    PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail,
+    Preset, PresetId, RenderModeSupport, Request, RescanScope, StateUse, WindowHandle, Wraps,
+    taken,
 };
 use tutti_types::Samples;
 
@@ -407,11 +407,7 @@ impl Control for AuLoaded {
         _main: MainThreadMarker,
         id: ParamId,
     ) -> Result<(), ParamWriteError> {
-        let declared = self
-            .ranges
-            .bounds(id.get())
-            .map(|_| ParamAccess::reported(self.ranges.is_read_only(id.get())));
-        ParamWriteError::check(id, declared)
+        ParamWriteError::check(id, self.ranges.access(id.get()))
     }
 
     /// The AU's own display string. `AudioUnitParameterStringFromValue` takes

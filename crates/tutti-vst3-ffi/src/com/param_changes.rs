@@ -289,14 +289,15 @@ impl ParamStaging<'_> {
     ) -> Result<(), Busy> {
         let Self { list, inner } = self;
         let Inner { live, pool } = &mut **inner;
-        let mut refused: u64 = changes
+        // The points of the queues `keep` refuses never reach the list.
+        let left_out: u64 = changes
             .queues
             .iter()
             .filter(|q| !keep(q.param_id))
             .map(|q| q.points.len() as u64)
             .sum();
         let mut kept = changes.queues.iter().filter(|q| keep(q.param_id));
-        let mut lost = refused;
+        let mut lost = left_out;
         let mut admitted = 0;
         for (i, slot) in list.queues.iter().enumerate() {
             let Some(q) = kept.next() else {
@@ -304,9 +305,8 @@ impl ParamStaging<'_> {
             };
             let Some(mut state) = slot.try_stage() else {
                 *live = 0;
-                list.count_dropped(
-                    lost + kept.map(|q| q.points.len() as u64).sum::<u64>() + q.points.len() as u64,
-                );
+                let waiting: u64 = kept.map(|q| q.points.len() as u64).sum();
+                list.count_dropped(lost + waiting + q.points.len() as u64);
                 list.count_busy();
                 return Err(Busy);
             };
@@ -318,10 +318,10 @@ impl ParamStaging<'_> {
             lost += state.refill(q);
             admitted += 1;
         }
-        // The queues past the list's own.
-        refused = kept.map(|q| q.points.len() as u64).sum();
+        // The kept queues past the list's own.
+        let past: u64 = kept.map(|q| q.points.len() as u64).sum();
         *live = admitted;
-        list.count_dropped(lost + refused);
+        list.count_dropped(lost + past);
         Ok(())
     }
 

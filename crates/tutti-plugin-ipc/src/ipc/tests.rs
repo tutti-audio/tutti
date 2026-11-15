@@ -675,6 +675,68 @@ fn a_resync_with_a_changed_list_flips_the_answer() {
     assert!(list_asks(&server) >= 2, "the list was asked again");
 }
 
+/// **A write settles the news the bridge has not delivered yet**: with the
+/// bridge held inside its listener (so the plugin's change of list is on the
+/// connection and the news is pending), a write to the parameter that became
+/// read-only waits, and once the bridge is released it is refused `ReadOnly`
+/// rather than accepted from the old list.
+#[test]
+fn a_write_waits_for_the_news_the_bridge_has_not_delivered() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+    use tutti_plugin_types::{Normalized, ParamWriteError};
+    let _machine = machine_lock();
+    let (mut ipc, server) = mock();
+    *server.parameters.lock().unwrap() = vec![param(3, false)];
+    let main = main_thread();
+    let half = Normalized::of(0.5);
+    assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
+
+    // The first event the listener sees holds the bridge thread until released.
+    let (held_tx, held_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let release_rx = Mutex::new(release_rx);
+    let first = AtomicBool::new(true);
+    let held_tx = Mutex::new(held_tx);
+    ipc.forward_events(Some(Arc::new(move |event| {
+        if matches!(event, BridgeEvent::LatencyChanged { .. })
+            && first.swap(false, Ordering::SeqCst)
+        {
+            held_tx.lock().unwrap().send(()).unwrap();
+            let _ = release_rx.lock().unwrap().recv();
+        }
+    })));
+    server.say(&BridgeMessage::LatencyChanged {
+        samples: tutti_plugin_types::Samples(64),
+    });
+    held_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the bridge reached its listener");
+
+    // The list changes and the plugin says so, behind the held bridge.
+    *server.parameters.lock().unwrap() = vec![param(3, true)];
+    server.say(&BridgeMessage::PluginParamTitlesChanged);
+
+    let done = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        let write = scope.spawn(|| {
+            let answer = ipc.set_parameter(main_thread(), ParamId::new(3), half);
+            done.store(true, Ordering::SeqCst);
+            answer
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(
+            !done.load(Ordering::SeqCst),
+            "the write was answered from the old list while news was pending"
+        );
+        release_tx.send(()).unwrap();
+        assert_eq!(
+            write.join().unwrap(),
+            Err(ParamWriteError::ReadOnly(ParamId::new(3)))
+        );
+    });
+}
+
 /// **A value resync does not forget the list**: every dropped parameter event
 /// raises `ParamValues`, which says nothing of the declarations, so the next
 /// write is still answered from the cache.

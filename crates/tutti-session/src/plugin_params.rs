@@ -317,9 +317,14 @@ impl<'a> Param<'a> {
     /// mirror holds of this parameter's declaration.
     fn writable(&self) -> Result<(), PluginParamError> {
         use tutti_plugin_types::{ParamAccess, ParamWriteError};
-        // A declared parameter: the policy can only refuse it as read-only.
-        ParamWriteError::check(self.id(), Some(ParamAccess::of(self.info())))
-            .map_err(|_| PluginParamError::ReadOnly(self.id()))
+        // The mirror holds a declaration, so the policy can only refuse as
+        // read-only; any other refusal is reported as an unknown parameter.
+        ParamWriteError::check(self.id(), Some(ParamAccess::of(self.info()))).map_err(|refused| {
+            match refused {
+                ParamWriteError::ReadOnly(id) => PluginParamError::ReadOnly(id),
+                other => PluginParamError::Unknown(other.id()),
+            }
+        })
     }
 
     /// Sends `value` to the plugin and reads it back at once.
