@@ -725,6 +725,47 @@ fn blocks_may_share_and_overlap_groups() {
     );
 }
 
+/// §7.1.6.3: what a capability change drops from the active configuration goes
+/// off with a Stream Configuration Notification after the Endpoint Info: an
+/// Endpoint in MIDI 2.0 with both JR directions that loses MIDI 2.0 and JR is
+/// in MIDI 1.0 without JR (word 0 of the Notification: protocol 1 in bits 15-8).
+/// A change that leaves the active configuration alone sends the Info only.
+/// Spec: m2-104/7.1.2#2
+#[test]
+fn a_capability_change_drops_what_it_no_longer_supports_from_the_active_set() {
+    let active = StreamConfig {
+        protocol: Protocol::Midi2,
+        rx_jr: true,
+        tx_jr: true,
+    };
+    let mut e = changeable().with_active(active);
+    let m1_only = Capabilities {
+        midi1: true,
+        ..Capabilities::default()
+    };
+    assert_eq!(
+        changed(&mut e, EndpointChange::Capabilities(m1_only)),
+        [[0xF001_0101, 0x0100_0100, 0, 0], [0xF006_0100, 0, 0, 0],]
+    );
+    assert_eq!(
+        e.active(),
+        StreamConfig {
+            protocol: Protocol::Midi1,
+            rx_jr: false,
+            tx_jr: false,
+        }
+    );
+    let both = Capabilities {
+        midi2: true,
+        ..m1_only
+    };
+    assert_eq!(
+        changed(&mut e, EndpointChange::Capabilities(both)).len(),
+        1,
+        "nothing active was lost"
+    );
+}
+
 /// A device whose blocks may change: not static, one named block 0 over Group 0.
 fn changeable() -> Endpoint {
     Endpoint::new(FULL).with_function_block(
@@ -784,8 +825,9 @@ fn a_block_added_sends_endpoint_info_then_its_block_info() {
 /// §7.1.8: a changed property of a block sends Function Block Info alone,
 /// with the count unchanged: the active bit of word 0 goes low. §7.1.9: the
 /// same block with a new name sends the name alone, a Complete message with
-/// the block number then the text; a name removed is one Complete message of
-/// zeros.
+/// the block number then the text. The spec has no message that removes a
+/// name; this crate sends an empty one as one Complete message of zeros, which
+/// is pinned here.
 /// Spec: m2-104/7.1.8#3, m2-104/7.1.9#3
 #[test]
 fn a_changed_block_sends_the_part_that_changed() {
@@ -837,6 +879,14 @@ fn a_static_endpoint_refuses_a_block_change() {
         .unwrap();
     assert_eq!(
         e.change(EndpointChange::Block(renamed), &mut out),
+        Err(ChangeError::StaticBlocks)
+    );
+    assert!(out.is_empty());
+    assert_eq!(e, before);
+    // A block of a number the Endpoint does not have is a new block: refused.
+    let new = block(5, 8, 1).build().unwrap();
+    assert_eq!(
+        e.change(EndpointChange::Block(new), &mut out),
         Err(ChangeError::StaticBlocks)
     );
     assert!(out.is_empty());

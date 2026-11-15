@@ -358,8 +358,10 @@ pub enum EndpointChange {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
 pub enum ChangeError {
-    /// The Endpoint declared its Function Blocks static, so it never changes
-    /// a property or a name of one after discovery (§7.1.2, §7.1.9).
+    /// The Endpoint declared its Function Blocks static, so a block that is
+    /// not the one held is refused: §7.1.2 fixes the set of blocks, and every
+    /// property and name of each, after discovery. That includes a block
+    /// with a number the Endpoint does not have yet.
     #[error("the Endpoint declared its Function Blocks static")]
     StaticBlocks,
 }
@@ -721,9 +723,15 @@ impl Endpoint {
     /// in the order Endpoint Info, then the part that changed. A change that
     /// leaves the Endpoint as it was sends nothing.
     ///
-    /// A block replaced by one with no name sends one Complete Function
-    /// Block Name of zeros, as an empty name is sent (§7.1.1), so a peer
-    /// drops the old one.
+    /// A [`EndpointChange::Capabilities`] that drops what is active (a
+    /// Protocol, RXJR or TXJR) also changes the active configuration to what
+    /// is left and sends its Stream Configuration Notification (§7.1.6.3).
+    ///
+    /// The spec has no message that removes a block name. A block replaced by
+    /// one with no name sends one Complete Function Block Name of zeros, the
+    /// way this crate sends an empty name (§7.1.1 does for an Endpoint's), so
+    /// a peer that reads it as empty drops the old one; that is this crate's
+    /// choice.
     ///
     /// # Errors
     ///
@@ -740,6 +748,30 @@ impl Endpoint {
                 if capabilities != self.capabilities {
                     self.capabilities = capabilities;
                     self.send_info(out);
+                    // What it no longer supports does not stay active: the
+                    // Protocol falls to the one left (the choice `new` makes
+                    // for an Endpoint of those capabilities) and JR Timestamps
+                    // go off. Its Stream Configuration Notification follows
+                    // when that changed the active configuration (§7.1.6.3:
+                    // sent when any property in it changes).
+                    let was = self.active;
+                    let supported = match self.active.protocol {
+                        Protocol::Midi1 => capabilities.midi1,
+                        Protocol::Midi2 => capabilities.midi2,
+                        _ => false,
+                    };
+                    if !supported {
+                        self.active.protocol = if capabilities.midi2 && !capabilities.midi1 {
+                            Protocol::Midi2
+                        } else {
+                            Protocol::Midi1
+                        };
+                    }
+                    self.active.rx_jr &= capabilities.rx_jr;
+                    self.active.tx_jr &= capabilities.tx_jr;
+                    if self.active != was {
+                        send(out, Stream::StreamConfigurationNotification(self.active));
+                    }
                 }
             }
             EndpointChange::Identity(identity) => {
