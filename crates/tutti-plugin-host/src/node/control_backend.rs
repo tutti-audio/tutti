@@ -542,22 +542,29 @@ mod off_main_tests {
     }
 
     /// **Off the main thread an in-process bypass is lost and unread, without
-    /// waiting**: a tick on a pool thread neither writes nor reads the plugin
-    /// (the main thread's pump is not asked), so it cannot be held up by it.
+    /// waiting**, whether it is a parameter or a property: a tick on a pool
+    /// thread neither writes nor reads the plugin (the main thread's pump is not
+    /// asked), so it cannot be held up by it. A property write that took the
+    /// main thread's hop would wait out the deadline.
     #[test]
     fn off_the_main_thread_an_in_process_bypass_is_lost_and_unread_at_once() {
         let (_client, handle, _pump) = loaded();
-        let site = tutti_plugin_types::OwnBypass::Parameter(ParamId::new(1));
-        let began = std::time::Instant::now();
-        assert_eq!(
-            handle.any_thread().set_bypassed(site, true),
-            tutti_plugin_types::BypassWrite::Lost
-        );
-        assert_eq!(handle.any_thread().bypassed(site), None);
-        assert!(
-            began.elapsed() < std::time::Duration::from_millis(500),
-            "neither waited for the main thread's tick"
-        );
+        for site in [
+            tutti_plugin_types::OwnBypass::Parameter(ParamId::new(1)),
+            tutti_plugin_types::OwnBypass::Property,
+        ] {
+            let began = std::time::Instant::now();
+            assert_eq!(
+                handle.any_thread().set_bypassed(site, true),
+                tutti_plugin_types::BypassWrite::Lost,
+                "{site:?}"
+            );
+            assert_eq!(handle.any_thread().bypassed(site), None, "{site:?}");
+            assert!(
+                began.elapsed() < std::time::Duration::from_millis(500),
+                "{site:?}: neither waited for the main thread's tick"
+            );
+        }
     }
 
     /// **A VST2 plugin that advertises the soft bypass and refuses it claims no

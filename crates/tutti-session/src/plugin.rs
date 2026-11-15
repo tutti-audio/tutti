@@ -960,7 +960,9 @@ impl HostedPlugin {
     /// controls, a fresh debounce, and not yet told the render mode. Nothing
     /// of the outgoing plugin's state carries over: its last good state is
     /// cleared (its bytes would restore the wrong plugin), a fresh snapshot token
-    /// makes a job of the outgoing plugin still in flight land nowhere, and the snapshot clock restarts.
+    /// makes a job of the outgoing plugin still in flight land nowhere, the
+    /// snapshot clock restarts, and its own-bypass state (the episode, the waits
+    /// and the count) starts over.
     ///
     /// (`modulation`) A record that kept a parameter mirror gets one for
     /// the incoming plugin, from its handle (where its reports now arrive),

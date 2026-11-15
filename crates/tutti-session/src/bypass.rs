@@ -338,9 +338,10 @@ pub(crate) mod tests {
     }
 
     /// **A change of mode is written at once, whatever the wait, and again on
-    /// the next tick when that write is lost too.** The retries have backed off
-    /// to a long wait when the mode changes; the write still goes out, and when
-    /// the link drops it the very next tick tries again.
+    /// the next tick when that write is lost too.** The first half shows the
+    /// write goes out at once after the retries backed off; the second, which
+    /// fails without the wait being cleared, shows a lost one is tried again on
+    /// the next tick.
     #[test]
     fn a_change_of_mode_is_never_held_back() {
         let (handle, plugin, mirror) = rig(true);
