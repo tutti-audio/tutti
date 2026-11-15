@@ -10,8 +10,8 @@ use tutti_rt::{DrainMark, DrainWatch};
 
 use tutti_plugin_types::{
     Control, Controller, Edit, EditDrain, EditQueue, EditSink, Loaded, Normalized, ParamAccess,
-    ParamEdit, ParamId, ParameterInfo, PluginError, PluginResult, PluginTail, Prepare, Processor,
-    Refused, Request, RestartRules, SampleFormat, Samples, Stuck, Wraps,
+    ParamEdit, ParamId, PluginError, PluginResult, PluginTail, Prepare, Processor, Refused,
+    Request, RestartRules, SampleFormat, Samples, Stuck, Wraps,
 };
 
 use crate::types::{ProcessMode, Vst3Sample};
