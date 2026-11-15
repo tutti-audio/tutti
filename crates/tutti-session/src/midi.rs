@@ -104,7 +104,6 @@ pub(crate) fn arrival_clock(
 /// The `Instant` of a reading of [`tutti_rt::monotonic_ns`]: the one pairing of
 /// the two clocks, read once per process, so the conversion is an offset.
 /// `None` where it is beyond what an `Instant` holds.
-#[cfg(any(feature = "device", feature = "midi-hardware"))]
 fn os_instant(ns: i64) -> Option<Instant> {
     use std::sync::OnceLock;
     static PAIRING: OnceLock<(Instant, i64)> = OnceLock::new();
@@ -121,14 +120,12 @@ fn os_instant(ns: i64) -> Option<Instant> {
 /// What the session reads of the engine to time the hardware out: its block
 /// clock and the audio output's latency (the stream's cell, which the device's
 /// callback writes, `None` until it reports, and a restart resets in place).
-#[cfg(feature = "device")]
 #[derive(Clone, Debug)]
 pub(crate) struct OutputClockSource {
     clock: tutti_engine::BlockClockReader,
     audio_latency: std::sync::Arc<tutti_engine::StreamLatency>,
 }
 
-#[cfg(feature = "device")]
 impl OutputClockSource {
     pub(crate) fn new(
         clock: tutti_engine::BlockClockReader,
@@ -246,11 +243,23 @@ enum Sink {
 }
 
 impl Sink {
+    /// Queues `events`; returns how many events the host's sink refused, not
+    /// counting the JR stamps among them. A device's output counts its own
+    /// refusals in its losses.
     fn queue_timed(&mut self, events: &[Outgoing]) -> usize {
         match self {
-            Self::Host(sink) => sink.queue_timed(events),
+            Self::Host(sink) => {
+                let taken = sink.queue_timed(events).packets();
+                events[taken..]
+                    .iter()
+                    .filter(|event| !event.ump.is_jr())
+                    .count()
+            }
             #[cfg(feature = "midi-hardware")]
-            Self::Device(out) => out.queue_timed(events),
+            Self::Device(out) => {
+                let _ = out.queue_timed(events);
+                0
+            }
         }
     }
 }
@@ -383,9 +392,10 @@ impl UmpOut {
     /// latency, less the device's, plus the offset), and the sink schedules it;
     /// without, every event goes at once. An event whose time is more than
     /// [`MAX_OUTPUT_AHEAD`](tutti_midi_runtime::MAX_OUTPUT_AHEAD) ahead is not
-    /// sent, and the call returns how many were refused; a batch whose span no
-    /// block on this target can hold is refused whole. The JR stamps keep the
-    /// events' spacing whether or not they are scheduled.
+    /// sent, and the call returns how many events were refused, those a host's
+    /// sink refused with them; a batch whose span no block on this target can
+    /// hold is refused whole. The JR stamps keep the events' spacing whether or
+    /// not they are scheduled.
     pub fn send_frames(&mut self, events: &[(Frame, Ump)], timing: Option<&OutputTiming>) -> usize {
         let (Some(first), Some(last)) = (
             events.iter().map(|e| e.0).min(),
@@ -422,28 +432,28 @@ impl UmpOut {
         }
         sends.sort_unstable_by_key(|&(at, _)| at);
         self.sends = sends;
-        self.send_batch(&batch);
+        let sink_refused = self.send_batch(&batch);
         self.sends.clear();
         self.rebased = batch;
-        refused
+        refused + sink_refused
     }
 
     /// Stamps `events` (when stamping) and sends them, each at the time
     /// `self.sends` has for its offset, else at once.
-    fn send_batch(&mut self, events: &[UmpAt]) {
+    fn send_batch(&mut self, events: &[UmpAt]) -> usize {
         if !self.is_stamping() {
-            self.send_all(events);
-            return;
+            return self.send_all(events);
         }
         // Taken out and put back so `stream` and the buffer can be borrowed
         // mutably at once; `stamp` clears it, so the swap carries no state.
         let mut buf = core::mem::take(&mut self.stamped);
         self.stream.stamp(events, &mut buf);
-        self.send_all(&buf);
+        let refused = self.send_all(&buf);
         self.stamped = buf;
+        refused
     }
 
-    fn send_all(&mut self, events: &[UmpAt]) {
+    fn send_all(&mut self, events: &[UmpAt]) -> usize {
         let mut out = core::mem::take(&mut self.outgoing);
         out.clear();
         // A JR stamp is at its event's offset, so it is sent with it. An offset
@@ -451,19 +461,19 @@ impl UmpOut {
         // the frame, so events on one offset share one send time and any
         // match of the search is the right one.
         out.extend(events.iter().map(|&(at, ump)| {
-            Outgoing {
+            Outgoing::new(
                 at,
-                send: self
-                    .sends
+                self.sends
                     .binary_search_by_key(&at, |&(o, _)| o)
                     .map_or(SendAt::Now, |i| self.sends[i].1),
                 ump,
-            }
+            )
         }));
         // One `queue_timed` for the batch: a backend may pack several UMP
         // messages into one packet.
-        self.sink.queue_timed(&out);
+        let refused = self.sink.queue_timed(&out);
         self.outgoing = out;
+        refused
     }
 
     /// The absolute frame the next stamp starts from. For tests and
@@ -812,9 +822,8 @@ pub(crate) struct MidiState {
     /// reports them.
     follow_events: Vec<MidiEvent>,
     /// What the engine gives the hardware out's timing: its block clock and the
-    /// audio output's latency. `None` with no audio device, where every event
+    /// audio output's latency. `None` offline, where every event
     /// is sent at once.
-    #[cfg(feature = "device")]
     output_clock: Option<OutputClockSource>,
     /// The hardware out's own latency and offset ([`Midi::set_output_latency`]).
     output_latency: OutputLatency,
@@ -891,8 +900,7 @@ impl MidiState {
     }
 
     /// The hardware out is timed by `clock` from now on (a session with an
-    /// audio device).
-    #[cfg(feature = "device")]
+    /// audio device, or the system clock's zero-latency output).
     pub(crate) fn set_output_clock(&mut self, clock: OutputClockSource) {
         self.output_clock = Some(clock);
     }
@@ -1049,13 +1057,10 @@ impl MidiState {
             frame: Frame::ZERO,
             ump: Ump([0; 4]),
         }; DRAIN_CHUNK];
-        #[cfg(feature = "device")]
         let timing = self
             .output_clock
             .as_ref()
             .map(|source| source.timing(self.output_latency));
-        #[cfg(not(feature = "device"))]
-        let timing: Option<OutputTiming> = None;
         let mut router = MidiOutRouter {
             out: self.out.as_mut(),
             drops: Some(&self.drops),
@@ -1183,13 +1188,10 @@ impl MidiState {
             return;
         };
         let batch: Vec<(Frame, Ump)> = packets.map(|ump| (frame, ump)).collect();
-        #[cfg(feature = "device")]
         let timing = self
             .output_clock
             .as_ref()
             .map(|source| source.timing(self.output_latency));
-        #[cfg(not(feature = "device"))]
-        let timing: Option<OutputTiming> = None;
         MidiOutRouter {
             out: self.out.as_mut(),
             drops: Some(&self.drops),
@@ -1245,9 +1247,9 @@ impl MidiState {
 
 tutti_types::id! {
     /// A file load a [`Midi`] started, named so the event that lands it can be
-    /// matched to the call: [`Midi::load_file`] and `Midi::load_soundfont`
-    /// return one, and [`MidiEvent::FileLoaded`] and
-    /// `SoundFontLoaded` carry it. The session mints it; it names nothing else.
+    /// matched to the call: [`Midi::load_file`] returns one, and
+    /// [`MidiEvent::FileLoaded`] carries it. The session mints it; it names
+    /// nothing else.
     pub struct MidiLoad;
 }
 
@@ -1259,7 +1261,7 @@ pub struct Midi<'a> {
     pub(crate) graph: &'a mut Graph,
     pub(crate) state: &'a mut MidiState,
     pub(crate) nodes: Option<&'a MidiNodes>,
-    pub(crate) jobs: &'a mut crate::jobs::Jobs,
+    pub(crate) jobs: &'a mut dyn crate::jobs::EventJobs,
     /// The transport's settings (the tempo map a follower overlays).
     pub(crate) settings: &'a tutti_transport::TransportSettings,
     /// The project meter a follower overlays.
@@ -1359,6 +1361,22 @@ fn wire_inlets(
     edited
 }
 
+impl<'a> Midi<'a> {
+    /// The same view, borrowed for a shorter time.
+    pub(crate) fn reborrow(&mut self) -> Midi<'_> {
+        Midi {
+            graph: &mut *self.graph,
+            state: &mut *self.state,
+            nodes: self.nodes,
+            jobs: &mut *self.jobs,
+            settings: self.settings,
+            meter: self.meter.clone(),
+            #[cfg(feature = "midi-hardware")]
+            io: self.io.as_deref_mut(),
+        }
+    }
+}
+
 impl Midi<'_> {
     fn next_load(&self) -> MidiLoad {
         MidiLoad::mint(&self.state.loads)
@@ -1373,49 +1391,20 @@ impl Midi<'_> {
     pub fn load_file(&mut self, path: impl Into<std::path::PathBuf>) -> MidiLoad {
         let load = self.next_load();
         let path = path.into();
-        self.jobs.submit(
-            move || tutti_midi_file::MidiFile::read(path),
-            move |_, done, events| {
-                let file = match done {
-                    Ok(read) => read.map_err(MidiError::from),
-                    Err(failed) => Err(failed.into()),
-                };
-                events.push(MidiEvent::FileLoaded { load, file }.into());
-            },
-        );
-        load
-    }
-
-    /// Opens the SoundFont at `path` and builds a unit from it with
-    /// `settings`, on the session's spawner. Returns at once; the result
-    /// lands as [`MidiEvent::SoundFontLoaded`] with the returned id in a later
-    /// [`Session::update`](crate::Session::update), on the thread that calls
-    /// `update()`. The host adds the unit (`add_instrument`,
-    /// `add_general_midi`) when it lands.
-    #[must_use = "the id matches the event that lands the load"]
-    #[cfg(feature = "soundfont")]
-    pub fn load_soundfont(
-        &mut self,
-        path: impl Into<std::path::PathBuf>,
-        settings: tutti_soundfont::Settings,
-    ) -> MidiLoad {
-        let load = self.next_load();
-        let path = path.into();
-        self.jobs.submit(
-            move || -> Result<Box<tutti_soundfont::SoundFontUnit>> {
-                let font = tutti_sf2::SoundFont::open(path)?;
-                Ok(Box::new(tutti_soundfont::SoundFontUnit::new(
-                    std::sync::Arc::new(font),
-                    settings,
-                )?))
-            },
-            move |_, done, events| {
-                let unit = match done {
-                    Ok(built) => built,
-                    Err(failed) => Err(failed.into()),
-                };
-                events.push(MidiEvent::SoundFontLoaded { load, unit }.into());
-            },
+        self.jobs.submit_events(
+            Box::new(move || {
+                let read = tutti_midi_file::MidiFile::read(path);
+                Box::new(move |events: &mut Vec<crate::SessionEvent>| {
+                    let file = read.map_err(MidiError::from);
+                    events.push(MidiEvent::FileLoaded { load, file }.into());
+                })
+            }),
+            Box::new(move |failed| {
+                Box::new(move |events: &mut Vec<crate::SessionEvent>| {
+                    let file = Err(failed.into());
+                    events.push(MidiEvent::FileLoaded { load, file }.into());
+                })
+            }),
         );
         load
     }
@@ -2359,9 +2348,10 @@ impl Midi<'_> {
     }
 
     /// The terms the hardware out's events are timed by now: the audio
-    /// output's latency as the device reports it, and the output's own
-    /// ([`set_output_latency`](Self::set_output_latency)). `None` on a session
-    /// with no audio device, which sends every event at once.
+    /// output's latency as the device reports it (zero on a system clock, which
+    /// has no device), and the output's own
+    /// ([`set_output_latency`](Self::set_output_latency)). `None` on an offline
+    /// session, which has no clock of its own and sends every event at once.
     ///
     /// **While [`is_complete`](OutputTerms::is_complete) is false the audio
     /// output's latency is not reported yet** (before the stream's first
@@ -2369,16 +2359,11 @@ impl Midi<'_> {
     /// known, so they leave early by that latency.
     #[must_use]
     pub fn output_terms(&self) -> Option<OutputTerms> {
-        #[cfg(feature = "device")]
-        {
-            let source = self.state.output_clock.as_ref()?;
-            Some(OutputTerms {
-                audio_output: source.audio_output(),
-                latency: self.state.output_latency,
-            })
-        }
-        #[cfg(not(feature = "device"))]
-        None
+        let source = self.state.output_clock.as_ref()?;
+        Some(OutputTerms {
+            audio_output: source.audio_output(),
+            latency: self.state.output_latency,
+        })
     }
 
     /// The sample rate the hardware out's frames are on: the rate the graph
@@ -2416,9 +2401,10 @@ mod tests {
     /// these tests run on every platform.
     struct CountingSink(Arc<AtomicUsize>);
     impl tutti_midi_runtime::MidiOut for CountingSink {
-        fn queue(&self, events: &[UmpAt]) -> usize {
+        fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
+            let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
             self.0.fetch_add(events.len(), Ordering::SeqCst);
-            events.len()
+            tutti_midi_runtime::Taken::within(batch, batch.len())
         }
     }
 
@@ -2522,9 +2508,10 @@ mod tests {
     /// Keeps every batch it is handed.
     struct Recording(Arc<std::sync::Mutex<Vec<Vec<UmpAt>>>>);
     impl tutti_midi_runtime::MidiOut for Recording {
-        fn queue(&self, events: &[UmpAt]) -> usize {
+        fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
+            let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
             self.0.lock().unwrap().push(events.to_vec());
-            events.len()
+            tutti_midi_runtime::Taken::within(batch, batch.len())
         }
     }
 
@@ -2569,7 +2556,7 @@ mod tests {
         let log = Arc::new(std::sync::Mutex::new(Vec::new()));
         let mut out = UmpOut::new(Box::new(Recording(log.clone())), SampleRate::SR_48K);
         let (tx, rx) = tutti_midi_runtime::MidiMailbox::pair();
-        tx.queue_stamped(&[(u32::MAX - 4, note(0).1), (5, note(0).1)]);
+        let _ = tx.queue_stamped(&[(u32::MAX - 4, note(0).1), (5, note(0).1)]);
         let mut router = MidiOutRouter {
             out: Some(&mut out),
             drops: None,
@@ -2599,7 +2586,7 @@ mod tests {
         );
         let mut stamped: Vec<(u32, Ump)> = (0..256).map(|s| (s, note(0).1)).collect();
         stamped.push((1_000, note(0).1));
-        tx.queue_stamped(&stamped);
+        let _ = tx.queue_stamped(&stamped);
         let mut router = MidiOutRouter {
             out: Some(&mut out),
             drops: None,
@@ -2644,12 +2631,9 @@ mod tests {
     /// Keeps every batch's events with the time each was sent at.
     struct Timed(Arc<std::sync::Mutex<Vec<Outgoing>>>);
     impl tutti_midi_runtime::MidiOut for Timed {
-        fn queue(&self, events: &[UmpAt]) -> usize {
-            events.len()
-        }
-        fn queue_timed(&self, events: &[Outgoing]) -> usize {
+        fn queue_timed(&self, events: &[Outgoing]) -> tutti_midi_runtime::Taken {
             self.0.lock().unwrap().extend_from_slice(events);
-            events.len()
+            tutti_midi_runtime::Taken::within(events, events.len())
         }
     }
 

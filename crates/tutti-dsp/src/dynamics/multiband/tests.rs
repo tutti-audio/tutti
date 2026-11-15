@@ -192,7 +192,7 @@ fn run(k: &mut Runner, audio: &[&[f32]], lanes: &[Option<&[f32]>]) -> Vec<Vec<f3
     while at < n {
         let end = (at + CHUNK).min(n);
         let a: Vec<&[f32]> = audio.iter().map(|c| &c[at..end]).collect();
-        let mut feed = Feed::new(&a);
+        let mut feed = Inputs::new(&a);
         for (i, lane) in lanes.iter().enumerate() {
             if let Some(lane) = lane {
                 feed = feed.with_lane(i, &lane[at..end]);
@@ -563,4 +563,44 @@ fn a_band_reads_its_own_threshold_lane() {
     let mut k = runner(&f, &set);
     run(&mut k, &[&x], &[Some(&nan)]);
     assert_eq!(k.take_reading().band(0).unwrap(), Db::UNITY);
+}
+
+/// The crossover inside the multiband stays within the derived bound when its split moves
+/// between 1 Hz and its cap on every grid period (16 frames) under full-scale input, for 10^5
+/// frames: every band is within `T^(2 n)` of the input for `n` splits (`T` the tap bound of a
+/// section at the largest gain, `tutti_fixtures::tpt`), the unity compressors pass them as
+/// they are, and the output is their sum, `n + 1` bands.
+#[test]
+fn the_crossover_inside_stays_within_the_bound_under_a_switching_split() {
+    let tap = tutti_fixtures::tpt::tpt_section_bound((PI * crate::SOLVE_CEILING).tan() * 1.001).tap;
+    for (bands, low, high) in [
+        (2usize, vec![1.0f32], vec![23_952.0f32]),
+        (3, vec![1.0, 2.0], vec![23_951.0, 23_952.0]),
+        (4, vec![1.0, 2.0, 3.0], vec![23_950.0, 23_951.0, 23_952.0]),
+    ] {
+        let f = mono(bands);
+        let bound = bands as f64 * tap.powi(2 * (bands as i32 - 1));
+        for alternate in [false, true] {
+            let mut k = runner(&f, &unity(&low));
+            let mut peak = 0.0f64;
+            for period in 0..6_250usize {
+                let set = unity(if period.is_multiple_of(2) {
+                    &low
+                } else {
+                    &high
+                });
+                k.retarget(&f.member(&set, RATE));
+                let x: Vec<f32> = (0..16)
+                    .map(|i| if alternate { [1.0, -1.0][i % 2] } else { 1.0 })
+                    .collect();
+                for y in &run(&mut k, &[&x], &[])[0] {
+                    peak = peak.max(f64::from(y.abs()));
+                }
+            }
+            assert!(
+                peak.is_finite() && peak <= bound,
+                "{bands} bands, alternating {alternate}: {peak} over {bound}"
+            );
+        }
+    }
 }

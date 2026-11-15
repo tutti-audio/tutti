@@ -10,7 +10,7 @@ use crate::stft::window::{CosineWindow, Window};
 /// What the STFT geometry and the grid refuse at construction.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
-pub enum Error {
+pub enum StftError {
     /// A zero-length analysis window.
     #[error("analysis window is zero-length")]
     ZeroWindow,
@@ -59,5 +59,5 @@ pub enum Error {
     },
 }
 
-/// Result of a geometry or grid call, defaulting the error to [`Error`].
-pub type Result<T> = core::result::Result<T, Error>;
+/// Result of a geometry or grid call, defaulting the error to [`StftError`].
+pub(crate) type Result<T> = core::result::Result<T, StftError>;

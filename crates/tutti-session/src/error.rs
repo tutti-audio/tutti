@@ -249,20 +249,10 @@ pub enum MidiError {
     #[error("MIDI file: {0}")]
     File(#[from] tutti_midi_file::Error),
 
-    /// A session job did not finish ([`Midi::load_file`](crate::Midi::load_file),
-    /// `Midi::load_soundfont`): its work panicked, or the spawner dropped it.
+    /// A session job did not finish ([`Midi::load_file`](crate::Midi::load_file)):
+    /// its work panicked, or the spawner dropped it.
     #[error("MIDI load: {0}")]
     Job(#[from] crate::JobFailed),
-
-    /// A SoundFont file could not be read.
-    #[cfg(feature = "soundfont")]
-    #[error("SoundFont file: {0}")]
-    SoundFont(#[from] tutti_sf2::Error),
-
-    /// A SoundFont unit could not be built from the font and its settings.
-    #[cfg(feature = "soundfont")]
-    #[error("SoundFont instrument: {0}")]
-    Instrument(#[from] tutti_soundfont::Error),
 
     /// A message was not queued ([`Refused::Full`](tutti_graph::Refused::Full)).
     #[error("MIDI send: {0}")]
@@ -421,12 +411,51 @@ pub enum Error {
     #[error("graph engine: {0}")]
     Graph(#[from] tutti_engine::GraphEngineError),
 
+    /// The root's declaration was refused by the engine's fold table, other
+    /// than for a fold: its id is not past the published roots, or too many
+    /// published roots are waiting for a plan to carry them (the stream is not
+    /// rendering). Wraps `tutti_graph::RootError`.
+    #[error(transparent)]
+    Root(tutti_graph::RootError),
+
     /// The graph root cannot be placed on the output: the device has no
     /// channels, or the root is wider than a device at least one of whose
     /// widths has no channel order (a 6-wide root on a 5-channel device would
     /// lose a channel). Wraps `tutti_buffers::FoldError`.
     #[error("the graph root cannot be placed on the output: {0}")]
     Output(#[from] tutti_buffers::FoldError),
+
+    /// The graph root has no place on the output device a restart opened: the
+    /// root in force at `width` channels has no fold into the device's
+    /// `device` channels as they are stated or assumed (a root with a channel
+    /// no speaker names, or one wider than a device where either width has no
+    /// order). Nothing moved, and the stream is left stopped
+    /// (`LiveSession::restart`).
+    #[error("root {root} ({width:?} wide) has no place on a {device:?} device: {source}")]
+    Unplaceable {
+        /// The root generation in force.
+        root: tutti_graph::RootId,
+        /// The root's channels.
+        width: tutti_types::ChannelLayout,
+        /// The device's channels.
+        device: tutti_types::ChannelLayout,
+        /// Why the fold is refused.
+        source: tutti_buffers::FoldError,
+    },
+
+    /// The output policy's map has no place on the device a restart opened: it
+    /// names a channel the device does not have, or no longer fits what is
+    /// heard. Nothing moved, and the map is kept, never reset to the
+    /// identity: set a new one ([`Session::policy`](crate::Session::policy)).
+    #[error("the output map {map:?} has no place on a {device:?} device: {source}")]
+    MapUnplaceable {
+        /// The map in force.
+        map: tutti_engine::OutputMap,
+        /// The device's channels.
+        device: tutti_types::ChannelLayout,
+        /// What the map broke on.
+        source: tutti_engine::RoutingError,
+    },
 
     /// An inlet refused its producer's ring ([`Graph::add_inlet`](crate::Graph::add_inlet)).
     #[error(transparent)]
@@ -449,6 +478,11 @@ pub enum Error {
     #[cfg(feature = "modulation")]
     #[error(transparent)]
     Modulation(#[from] crate::RouteError),
+
+    /// The system clock's timer thread did not start
+    /// ([`SessionBuilder::system_clock`](crate::SessionBuilder::system_clock)).
+    #[error(transparent)]
+    Clock(#[from] tutti_engine::StartError<tutti_engine::TimerError>),
 
     /// Audio device failure: enumeration, stream construction, or playback.
     /// Wraps `tutti_cpal::Error`, which owns every CPAL concern.
@@ -546,3 +580,13 @@ pub enum Error {
 
 /// `Result<T, `[`enum@Error`]`>`.
 pub type Result<T> = core::result::Result<T, Error>;
+
+impl From<tutti_graph::RootError> for Error {
+    /// A fold refusal is [`Error::Output`]; the rest are [`Error::Root`].
+    fn from(e: tutti_graph::RootError) -> Self {
+        match e {
+            tutti_graph::RootError::Fold(fold) => Self::Output(fold),
+            other => Self::Root(other),
+        }
+    }
+}

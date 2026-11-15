@@ -25,9 +25,10 @@ const RATE: f64 = 48_000.0;
 struct Wire(Arc<Mutex<Vec<Vec<UmpAt>>>>);
 
 impl MidiOut for Wire {
-    fn queue(&self, events: &[UmpAt]) -> usize {
+    fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
+        let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
         self.0.lock().unwrap().push(events.to_vec());
-        events.len()
+        tutti_midi_runtime::Taken::within(batch, batch.len())
     }
 }
 

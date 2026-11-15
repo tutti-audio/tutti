@@ -26,7 +26,7 @@ use tutti_plugin::catalog::{Hosting, PluginRef};
 use tutti_plugin_types::PluginForkError;
 use tutti_session::BufferMaster;
 use tutti_session::{
-    Bounce, BounceError, BounceLatency, BounceTail, ExportClock, InPort, OutPort,
+    Bounce, BounceError, BounceLatency, BounceTail, DetachedSession, ExportClock, InPort, OutPort,
     PluginLoadRequest, Range, Session, Stem,
 };
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
@@ -61,7 +61,7 @@ fn buffers(seconds: f64) -> Bounce<NodeKey, BufferMaster> {
 }
 
 /// The planes `bounce` renders; panics with the refusal otherwise.
-fn planes(session: &mut Session, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<Vec<f32>> {
+fn planes(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<Vec<f32>> {
     match session.bounce(bounce) {
         Ok(out) => out.into_master().into_planes(),
         Err(e) => panic!("the bounce failed: {e:?}"),
@@ -70,7 +70,10 @@ fn planes(session: &mut Session, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<V
 
 /// The planes of the one stem `bounce` names, in memory, rendered beside the
 /// master; panics with the refusal otherwise.
-fn stem_planes(session: &mut Session, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<Vec<f32>> {
+fn stem_planes(
+    session: &mut DetachedSession,
+    bounce: Bounce<NodeKey, BufferMaster>,
+) -> Vec<Vec<f32>> {
     match session.bounce(bounce) {
         Ok(out) => {
             let (_, mut stems) = out.into_parts();
@@ -104,7 +107,7 @@ fn session_with_probe_at(
     mode: u32,
     path: std::path::PathBuf,
     hosting: Hosting,
-) -> (Session, NodeKey) {
+) -> (DetachedSession, NodeKey) {
     probe_env("TUTTI_PLUGIN_SERVER", plugin_server().display());
     probe_env("TUTTI_CLAP_PROBE_RENDER_MODE", mode);
     let mut session = Session::builder()
@@ -125,18 +128,18 @@ fn session_with_probe_at(
 }
 
 /// [`session_with_probe_at`] over the reference plugin.
-fn session_with_probe(mode: u32) -> (Session, NodeKey) {
+fn session_with_probe(mode: u32) -> (DetachedSession, NodeKey) {
     session_with_probe_hosted(mode, Hosting::OutOfProcess)
 }
 
 /// [`session_with_probe`], the plugin hosted as `hosting` says.
-fn session_with_probe_hosted(mode: u32, hosting: Hosting) -> (Session, NodeKey) {
+fn session_with_probe_hosted(mode: u32, hosting: Hosting) -> (DetachedSession, NodeKey) {
     session_with_probe_at(mode, clap_probe(), hosting)
 }
 
 /// Feed the probe's two main inputs `node`'s output.
 fn feed_with(
-    session: &mut Session,
+    session: &mut DetachedSession,
     probe: NodeKey,
     node: impl tutti_session::SessionNode<Controls = ()>,
 ) {

@@ -39,7 +39,7 @@ impl Channels {
 
     /// One output bus where the input is, and a side-chain **key** bus of the input's
     /// width after the main one: a compressor's or a gate's. The runner receives the
-    /// key channels in [`Feed::key`](crate::Feed::key).
+    /// key channels in [`Inputs::key`](crate::Inputs::key).
     #[must_use]
     pub const fn keyed(input: BusTopology) -> Self {
         Self {

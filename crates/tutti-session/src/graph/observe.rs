@@ -39,7 +39,7 @@ impl Taps<'_> {
     /// returned reader drains: a tap on any ports, at any width. The tap is
     /// compiled by the next commit and fed by every block that renders after
     /// it (a device, [`Session::render`](crate::Session::render) and
-    /// [`Session::render_frame`](crate::Session::render_frame) alike).
+    /// `Session::render_frame` alike).
     /// `capacity` is each lane's ring in frames; what the reader does not
     /// drain in time is counted ([`TapReader::take_lost`]).
     ///
@@ -283,7 +283,7 @@ impl Meters<'_> {
     /// [`enable`](MeterReader::enable). The meter is compiled by the next
     /// commit and fed by every block that renders after it (a device,
     /// [`Session::render`](crate::Session::render) and
-    /// [`Session::render_frame`](crate::Session::render_frame) alike).
+    /// `Session::render_frame` alike).
     ///
     /// A meter reads before the engine's fold to the device and its declick.
     /// It holds the peak since the last

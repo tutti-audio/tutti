@@ -6,7 +6,6 @@
 use crate::common::{MF, Seen, blocks, note, offline, play, tap};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tutti_graph::UmpAt;
 use tutti_session::Stamp;
 
 use std::time::{Duration, Instant};
@@ -18,7 +17,9 @@ use tutti_midi_runtime::{CHANNELLESS_PORT, LIVE_INLET_CAPACITY, MIDI_INPUT_PORTS
 use tutti_types::{Beat, BeatDuration, Frame, SampleRate};
 #[cfg(feature = "midi-hardware")]
 use tutti_ump::Ump;
-use tutti_ump::{KeyEvent, MidiChannel, MidiGroup, NoteNumber, NoteVelocity};
+use tutti_ump::{
+    KeyEvent, MidiChannel, MidiGroup, MpeChannels, MpeZoneSpan, NoteNumber, NoteVelocity,
+};
 
 use tutti_fixtures::midi;
 use tutti_session::{
@@ -472,9 +473,10 @@ fn the_routes_have_one_declarer() {
 /// Counts what reached the wire.
 struct CountingSink(Arc<AtomicUsize>);
 impl tutti_midi_runtime::MidiOut for CountingSink {
-    fn queue(&self, events: &[UmpAt]) -> usize {
+    fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
+        let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
         self.0.fetch_add(events.len(), Ordering::SeqCst);
-        events.len()
+        tutti_midi_runtime::Taken::within(batch, batch.len())
     }
 }
 
@@ -1915,14 +1917,10 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     let peers = s.midi().profiles(&device);
     assert_eq!(
         peers[0].mpe_zones(),
-        Some(MpeZones::single(
-            MpeZoneConfig::profile(
-                MidiChannel::of(0),
-                4,
-                PitchBendSensitivity::MPE_PROFILE_DEFAULT
-            )
-            .unwrap()
-        ))
+        Some(MpeZones::single(MpeZoneConfig::profile(
+            MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(4)).unwrap(),
+            PitchBendSensitivity::MPE_PROFILE_DEFAULT
+        )))
     );
     let mut ranges = BendRanges::default();
     for (_, ump) in seen.lock().unwrap().iter() {

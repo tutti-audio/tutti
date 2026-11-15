@@ -7,6 +7,7 @@ use crate::common::{track, unsorted};
 use tutti_fixtures::midi;
 use tutti_midi_file::{
     ClipFileError, Error, FileEvent, Meta, MidiFile, MidiFileKind, SmfFormat, Tick, Track,
+    Truncated,
 };
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::ControlValue;
@@ -246,11 +247,19 @@ fn a_clip_without_a_dctpq_is_refused() {
     assert_eq!(clip_error(&parts), ClipFileError::MissingDctpq);
 }
 
+/// The ticks per quarter note run from 1 to 65535, and 0 is reserved
+/// (M2-104 section 7.2.3.1).
+/// Spec: m2-104/7.2.3.1#1
 #[test]
-fn a_zero_dctpq_is_refused() {
+fn a_dctpq_is_1_to_65535_and_zero_is_refused() {
     let mut parts = valid();
     parts[1] = dctpq(0);
     assert_eq!(clip_error(&parts), ClipFileError::ZeroDctpq);
+    for ticks in [1, u16::MAX] {
+        parts[1] = dctpq(ticks);
+        let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
+        assert_eq!(file.ticks_per_quarter(), ticks);
+    }
 }
 
 /// Spec: m2-116/7#3, m2-116/7.1#1
@@ -295,7 +304,7 @@ fn the_magic_alignment_and_a_cut_packet_are_refused() {
     let cut = &good[..good.len() - 12];
     assert!(matches!(
         MidiFile::from_bytes(cut),
-        Err(Error::Clip(ClipFileError::Truncated))
+        Err(Error::Clip(ClipFileError::Truncated(Truncated::Message)))
     ));
 }
 
@@ -680,7 +689,7 @@ fn the_constructor_holds_a_header_to_the_same_rules() {
 
 /// Section 3.2.2: a gap past 1,048,575 ticks is written as a DCS of 1,048,575
 /// followed by a Null message, once per restart, then the remainder's DCS.
-/// Spec: m2-116/3.2.2#4
+/// Spec: m2-116/3.2.2#4, m2-104/7.2.3.2#3
 #[test]
 fn a_long_gap_is_written_as_dcs_then_a_null() {
     let gap: u32 = 2 * 0x000F_FFFF + 3;
@@ -1021,4 +1030,59 @@ fn half_a_packet_after_end_of_clip_is_trailing_data() {
         MidiFile::from_bytes(&bytes),
         Err(Error::Clip(ClipFileError::TrailingData))
     ));
+}
+
+/// Every message of a written clip but a Set Profile On has a Delta Clockstamp
+/// right before it (M2-116 sections 3.2.2, 6 and 7), Start of Clip and End of
+/// Clip (M2-104 sections 7.1.10 and 7.1.11) among them, and the header ends at
+/// the Delta Clockstamp of Start of Clip: the header messages are before it and
+/// no sequence event is.
+/// Spec: m2-116/6#2, m2-116/6#8, m2-116/6#9, m2-116/7#1, m2-116/7#2, m2-104/7.1.10#1, m2-104/7.1.11#1
+#[test]
+fn a_written_clip_stamps_every_message_and_ends_the_header_at_start_of_clip() {
+    let sysex = sysex7(tutti_ump::SysexStatus::Complete, &[0x7D, 1, 2, 3]);
+    let file = MidiFile::from_bytes(&clip(&with_header(&[
+        dcs(0),
+        program_change(),
+        dcs(10),
+        sysex,
+    ])))
+    .unwrap();
+    let packets = packets_of(&file.to_bytes().unwrap());
+    let position = |want: Ump| packets.iter().position(|p| *p == want).unwrap();
+    let (s, e) = (position(start()), position(end()));
+    assert!(is_dcs(packets[s - 1]), "Start of Clip has a DCS before it");
+    assert!(is_dcs(packets[e - 1]), "End of Clip has a DCS before it");
+    assert_eq!(e, packets.len() - 1, "End of Clip is the last message");
+    for (i, p) in packets.iter().enumerate().skip(1) {
+        assert!(
+            is_dcs(*p) || is_dcs(packets[i - 1]),
+            "message {i} of {packets:08x?} has no DCS before it"
+        );
+    }
+    let header = &packets[..s - 1];
+    assert!(header.contains(&program_change()) && header.contains(&sysex));
+    assert!(header.iter().all(|p| p.key_event().is_none()));
+    assert!(packets[s..].iter().any(|p| p.key_event().is_some()));
+}
+
+/// Events that follow one Delta Clockstamp are at one tick and keep the order
+/// they were stored in, which the file written back keeps too.
+/// Spec: m2-116/3.2.2#2, m2-116/3.2.2#3, m2-104/7.2.3.2#1, m2-104/7.2.3.2#2
+#[test]
+fn simultaneous_events_share_a_delta_clockstamp_in_presentation_order() {
+    let at_zero = [on(60, 1), on(64, 2), off(60), on(67, 3)];
+    let mut parts = vec![dcs(0), dctpq(TPQ), dcs(0), start(), dcs(0)];
+    parts.extend(at_zero);
+    parts.extend([dcs(u32::from(TPQ)), off(64), dcs(0), end()]);
+    let file = MidiFile::from_bytes(&clip(&parts)).unwrap();
+    let events = &file.tracks()[0].events;
+    assert_eq!(events.len(), 5);
+    let ticks: Vec<Tick> = events.iter().map(|e| e.0).collect();
+    assert_eq!(ticks, [Tick(0), Tick(0), Tick(0), Tick(0), Tick(96)]);
+    for (event, want) in events.iter().zip(at_zero) {
+        assert_eq!(event.1, FileEvent::Message(want.decode().unwrap()));
+    }
+    let back = MidiFile::from_bytes(&file.to_bytes().unwrap()).unwrap();
+    assert_eq!(back.tracks()[0].events, *events);
 }

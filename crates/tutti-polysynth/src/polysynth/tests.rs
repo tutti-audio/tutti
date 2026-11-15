@@ -12,8 +12,8 @@ use tutti_midi_protocol::{bend_to_signed_f32, velocity_to_unit_f32};
 use tutti_midi_protocol::{widen_bend, widen_value, widen_velocity};
 use tutti_types::{Amplitude, Hz, Resonance, Seconds, Spread};
 use tutti_ump::{
-    Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7,
-    U14, Ump, Voice1, Voice2,
+    Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
+    PerNoteManagement, U7, U14, Ump, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
 
@@ -192,13 +192,12 @@ fn ev_bend(channel: u8, bend14: u16) -> Ump {
     midi::pitch_bend(MidiChannel::of(channel), widen_bend(U14::of(bend14)).get())
 }
 
-fn ev_per_note_management(channel: u8, note: u8, detach: bool, reset: bool) -> Ump {
+fn ev_per_note_management(channel: u8, note: u8, management: PerNoteManagement) -> Ump {
     Ump::from(Message::midi2(
         MidiChannel::of(channel),
         Voice2::PerNoteManagement {
             note: NoteNumber::of(note),
-            detach,
-            reset,
+            management,
         },
     ))
 }
@@ -1212,7 +1211,10 @@ fn test_midi2_per_note_management_reset_zeroes_only_addressed_voice() {
     assert!(bent(&synth, 64) > 40.0, "note 64 should start bent");
 
     // Per-Note Management Reset addressed to note 60 only.
-    queue_midi(&mut synth, &[ev_per_note_management(1, 60, false, true)]);
+    queue_midi(
+        &mut synth,
+        &[ev_per_note_management(1, 60, PerNoteManagement::Reset)],
+    );
     synth.tick(&[], &mut output);
 
     assert!(
@@ -1329,7 +1331,10 @@ fn test_per_note_management_detach_freezes_the_note() {
     assert!(frozen_at > 40.0, "note should be bent before detach");
 
     // Detach (D=1, S=0).
-    queue_midi(&mut synth, &[ev_per_note_management(1, 60, true, false)]);
+    queue_midi(
+        &mut synth,
+        &[ev_per_note_management(1, 60, PerNoteManagement::Detach)],
+    );
     synth.tick(&[], &mut output);
 
     // A further per-note bend to zero must be IGNORED — the note holds its value.
@@ -1441,7 +1446,10 @@ fn a_pitch_sent_before_the_note_on_is_the_pitch_it_sounds_at() {
     let mut synth = hand_mpe();
     queue_midi(
         &mut synth,
-        &[ev_per_note_management(1, 0, true, true), pitch_60(1, 0)],
+        &[
+            ev_per_note_management(1, 0, PerNoteManagement::DetachAndReset),
+            pitch_60(1, 0),
+        ],
     );
     let mut out = [0.0f32; 2];
     synth.tick(&[], &mut out);
@@ -1465,7 +1473,7 @@ fn a_pitch_after_a_detach_reaches_the_next_note_and_not_the_old_one() {
     queue_midi(
         &mut synth,
         &[
-            ev_per_note_management(1, 0, true, false),
+            ev_per_note_management(1, 0, PerNoteManagement::Detach),
             pitch_of(1, 0, 62),
         ],
     );
@@ -3404,6 +3412,60 @@ fn the_construction_time_scale_is_the_initial_mts_table() {
     queue_midi(&mut s, &[ev_note_on(0, 69, 100)]);
     s.tick(&[], &mut out);
     assert!((s.voices[2].sounding_freq().get() - 440.0).abs() < 0.01);
+}
+
+/// The integer part of a Pitch 7.9 attribute and of a Pitch 7.25 per-note
+/// value is the 12-tone equal-tempered pitch with note 69 at A = 440 Hz, and
+/// the note number of an attribute pitch is only an index (M2-104 sections
+/// 7.4.15.2 and 7.4.15.3).
+/// Spec: m2-104/7.4.15.2#1, m2-104/7.4.15.3#2
+#[test]
+fn pitch_7_9_and_7_25_put_note_69_at_a440() {
+    let mut out = [0.0f32; 2];
+    // Attribute Pitch 7.9 on note index 0: the pitch is 69 at fraction 0,
+    // then 69 and a half semitone.
+    for (q7_9, want) in [
+        (69 << 9, 440.0),
+        ((69 << 9) + 256, 440.0 * 2f32.powf(0.5 / 12.0)),
+    ] {
+        let mut s = steady(|_| {});
+        queue_midi(
+            &mut s,
+            &[ump(Message::Midi2(
+                address(0),
+                Voice2::NoteOn {
+                    note: NoteNumber::of(0),
+                    velocity: NoteVelocity::CENTER,
+                    attribute: Attribute::Pitch(q7_9),
+                },
+            ))],
+        );
+        s.tick(&[], &mut out);
+        let got = s.voices[0].sounding_freq().get();
+        assert!(
+            (got - want).abs() < 0.01,
+            "{q7_9:#x}: {got} Hz, want {want}"
+        );
+    }
+    // Registered Per-Note Controller 3, Pitch 7.25, on a note at key 0.
+    let mut s = steady(|_| {});
+    queue_midi(
+        &mut s,
+        &[
+            ev_note_on(0, 0, 100),
+            ump(Message::Midi2(
+                address(0),
+                Voice2::RegisteredPerNote {
+                    note: NoteNumber::of(0),
+                    controller: tutti_ump::RegisteredPerNoteController::Pitch,
+                    value: ControlValue::new(69 << 25),
+                },
+            )),
+        ],
+    );
+    s.tick(&[], &mut out);
+    let got = s.voices[0].sounding_freq().get();
+    assert!((got - 440.0).abs() < 0.01, "{got} Hz");
 }
 
 /// MTS: a real-time Single Note Tuning Change retunes a sounding note with no

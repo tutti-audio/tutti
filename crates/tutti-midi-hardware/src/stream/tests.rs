@@ -98,7 +98,11 @@ impl Wire {
 
     /// Queues `events` to the held output: how many the device took.
     fn send(&mut self, events: &[UmpAt]) -> usize {
-        self.output.as_mut().expect("an output").queue(events)
+        self.output
+            .as_mut()
+            .expect("an output")
+            .queue(events)
+            .packets()
     }
 
     /// One tick of the session at `ms`, then the device reads what the session

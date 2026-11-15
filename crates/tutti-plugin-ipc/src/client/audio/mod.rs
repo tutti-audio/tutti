@@ -957,16 +957,33 @@ mod tests {
     /// gives up on the server at `deadline` and replies into the `ask` then (a
     /// late answer or its `None`); the host's wait ends a margin after, so it
     /// does not give up the instant the bridge answers.
+    ///
+    /// The answer is sent a quarter of the margin past `deadline`, which a wait
+    /// that ended at the deadline would miss. An attempt whose answer a stalled
+    /// runner sent after the margin had closed is not the case under test and
+    /// is run again; every answer sent inside the margin is heard.
     #[test]
     fn an_answer_after_the_bridges_deadline_is_heard_within_the_margin() {
+        const ATTEMPTS: usize = 5;
         let deadline = Duration::from_millis(100);
-        let (waiting, reply) = ask::ask::<u8>();
-        let bridge = std::thread::spawn(move || {
-            std::thread::sleep(deadline + REPLY_MARGIN / 2);
-            reply.send(7);
-        });
-        assert_eq!(await_reply(waiting, deadline), Ok(7));
-        bridge.join().unwrap();
+        for _ in 0..ATTEMPTS {
+            let (waiting, reply) = ask::ask::<u8>();
+            let started = std::time::Instant::now();
+            let bridge = std::thread::spawn(move || {
+                let due = started + deadline + REPLY_MARGIN / 4;
+                std::thread::sleep(due.saturating_duration_since(std::time::Instant::now()));
+                let sent = std::time::Instant::now();
+                reply.send(7);
+                sent
+            });
+            let heard = await_reply(waiting, deadline);
+            let sent = bridge.join().unwrap();
+            if sent < started + deadline + REPLY_MARGIN {
+                assert_eq!(heard, Ok(7));
+                return;
+            }
+        }
+        panic!("no answer was sent inside the margin in {ATTEMPTS} attempts");
     }
 
     /// The wait is still bounded: a bridge that never answers is given up on a

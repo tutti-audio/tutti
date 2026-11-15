@@ -23,8 +23,8 @@ const SEVEN: [Position; 7] = [
     (0.0, 0.0),
     (90.0, 0.0),
     (-90.0, 0.0),
-    (150.0, 0.0),
-    (-150.0, 0.0),
+    (135.0, 0.0),
+    (-135.0, 0.0),
 ];
 const ATMOS: [Position; 11] = [
     (30.0, 0.0),
@@ -32,12 +32,12 @@ const ATMOS: [Position; 11] = [
     (0.0, 0.0),
     (90.0, 0.0),
     (-90.0, 0.0),
-    (150.0, 0.0),
-    (-150.0, 0.0),
-    (45.0, 45.0),
-    (-45.0, 45.0),
-    (135.0, 45.0),
-    (-135.0, 45.0),
+    (135.0, 0.0),
+    (-135.0, 0.0),
+    (45.0, 30.0),
+    (-45.0, 30.0),
+    (135.0, 30.0),
+    (-135.0, 30.0),
 ];
 
 fn layout(positions: &[Position]) -> SpeakerLayout {
@@ -48,13 +48,17 @@ fn layout(positions: &[Position]) -> SpeakerLayout {
     SpeakerLayout::new(&p).unwrap()
 }
 
+/// The beds the tests pan over, each with the nominal positions of its placed
+/// speakers (BS.2051-3 Table 1: middle layer at 0, upper at +30), restated
+/// here, in the bed's channel order with the LFE left out.
 fn presets() -> Vec<(&'static str, SpeakerLayout, &'static [Position])> {
+    let bed = |bed| SpeakerLayout::from_bed(bed).expect("a bed's speakers form tuples");
     vec![
-        ("stereo", SpeakerLayout::stereo(), &STEREO),
-        ("quad", SpeakerLayout::quad(), &QUAD),
-        ("5.1", SpeakerLayout::surround_5_1(), &FIVE),
-        ("7.1", SpeakerLayout::surround_7_1(), &SEVEN),
-        ("7.1.4", SpeakerLayout::atmos_7_1_4(), &ATMOS),
+        ("stereo", bed(Bed::Stereo), &STEREO),
+        ("quad", bed(Bed::Quad), &QUAD),
+        ("5.1", bed(Bed::Surround51), &FIVE),
+        ("7.1", bed(Bed::Surround71), &SEVEN),
+        ("7.1.4", bed(Bed::Surround714), &ATMOS),
     ]
 }
 
@@ -110,8 +114,10 @@ fn covered(name: &str) -> Vec<(f64, f64)> {
 /// neighbours by bearing (stereo's pair is listed once, the long way round
 /// being 300 degrees), and Atmos 7.1.4's triangulation of the upper
 /// hemisphere. Its speakers are 0 L, 1 R, 2 C, 3 Lss, 4 Rss, 5 Lrs, 6 Rrs,
-/// 7 Ltf, 8 Rtf, 9 Ltr, 10 Rtr. The overhead four are one coplanar square
-/// (7, 9, 10, 8) and the rear wall (5, 6, 10, 9) another, so two of the
+/// 7 Ltf, 8 Rtf, 9 Ltr, 10 Rtr. The overhead four (at 45 and 135 degrees either
+/// side, +30 high) are one coplanar square (7, 9, 10, 8). The rear wall
+/// (5, 6, 10, 9), the two rears at the horizon under the two top rears, is a
+/// coplanar isosceles trapezoid. So two of the
 /// three-speaker combinations in each tile it and the shortest diagonal decides,
 /// the two diagonals of each being equal and the lower indices winning:
 /// 7-10 and 5-10. The front wall is (0,2,7), (2,7,8) and (1,2,8), and each
@@ -218,7 +224,7 @@ fn the_corrected_gains_are_unit_power_everywhere() {
 /// at 15 degrees (`0.939071`, `0.343724`) and the equal-power centre.
 #[test]
 fn a_front_only_pair_mirrors_the_rear_and_hard_pans_outside_it() {
-    let layout = SpeakerLayout::stereo();
+    let layout = SpeakerLayout::from_bed(Bed::Stereo).unwrap();
     let centre = core::f32::consts::FRAC_1_SQRT_2;
     // (azimuth, left, right)
     for (az, left, right) in [
@@ -250,7 +256,7 @@ fn a_front_only_pair_mirrors_the_rear_and_hard_pans_outside_it() {
 /// bearing the front pair (speakers FL, FR, RL, RR).
 #[test]
 fn a_surrounding_layout_does_not_fold_its_rear_arc() {
-    let layout = SpeakerLayout::quad();
+    let layout = SpeakerLayout::from_bed(Bed::Quad).unwrap();
     let at = |az: f32| {
         let mut g = [0.0f32; 4];
         layout.gains_into(Azimuth(az), Elevation(0.0), Spread::POINT, &mut g);
@@ -379,7 +385,7 @@ fn gains_are_continuous_across_every_tuple_edge() {
 /// gains agree: the tuples share the edge and its two speakers' gains.
 #[test]
 fn a_shared_edge_has_the_same_gains_on_both_sides() {
-    let layout = SpeakerLayout::atmos_7_1_4();
+    let layout = SpeakerLayout::from_bed(Bed::Surround714).unwrap();
     let mut edges: Vec<((u16, u16), usize)> = Vec::new();
     for t in &layout.tuples {
         let s = t.speakers();
@@ -522,4 +528,24 @@ fn a_bed_pans_to_each_of_its_speakers_at_unity() {
             required: 2
         }
     );
+}
+
+/// A direction that is not a number gives silence, with no panic: the solve
+/// finds no energy at any height and answers all zeros, spread included.
+#[test]
+fn a_non_finite_direction_gives_silence_without_panicking() {
+    for (_, layout, _) in presets() {
+        for (az, el) in [(f32::NAN, 0.0), (0.0, f32::NAN), (f32::NAN, f32::NAN)] {
+            for spread in [0.0, 0.5] {
+                let mut gains = vec![1.0f32; layout.speaker_count()];
+                layout.gains_into(
+                    Azimuth(az),
+                    Elevation(el),
+                    Spread::new_clamped(spread),
+                    &mut gains,
+                );
+                assert!(gains.iter().all(|&g| g == 0.0), "({az}, {el}): {gains:?}");
+            }
+        }
+    }
 }

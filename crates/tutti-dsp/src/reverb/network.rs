@@ -206,7 +206,7 @@ pub struct AllPass {
     /// The coefficient: signed, so not an `Amplitude`.
     pub gain: f32,
     /// How its delay is modulated.
-    pub modulation: Modulation,
+    pub modulation: LineModulation,
     /// Which transfer function.
     pub form: AllPassForm,
 }
@@ -241,22 +241,22 @@ impl AllPass {
 
 /// How a delay moves around its centre.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Modulation {
+pub struct LineModulation {
     /// The excursion either side of the centre, in frames.
     pub depth: f32,
     /// The rate.
     pub rate: Hz,
 }
 
-impl Modulation {
+impl LineModulation {
     /// No modulation.
-    pub const NONE: Modulation = Modulation {
+    pub const NONE: LineModulation = LineModulation {
         depth: 0.0,
         rate: Hz(0.0),
     };
 }
 
-impl Default for Modulation {
+impl Default for LineModulation {
     fn default() -> Self {
         Self::NONE
     }
@@ -295,7 +295,7 @@ pub struct Line {
     /// positive: a delay-free loop is not a loop a network can have.
     pub length: f32,
     /// How the length is modulated.
-    pub modulation: Modulation,
+    pub modulation: LineModulation,
     /// What the line absorbs per trip.
     pub absorption: Absorption,
     /// An all-pass nested in the loop (the plate's diffusers).
@@ -315,7 +315,7 @@ impl Default for Line {
     fn default() -> Self {
         Line {
             length: 0.0,
-            modulation: Modulation::NONE,
+            modulation: LineModulation::NONE,
             absorption: Absorption::Gain(Amplitude::SILENT),
             diffuser: None,
         }

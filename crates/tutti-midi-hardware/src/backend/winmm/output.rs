@@ -9,8 +9,8 @@ use super::super::legacy_port::bytes::{ByteOut, Wire};
 use super::super::legacy_port::sender::{Mailbox, run};
 use crate::endpoints::DeviceOut;
 use crate::error::{Error, Result};
-use tutti_graph::{Losses, UmpAt};
-use tutti_midi_runtime::{MidiOut, Outgoing, SendAt};
+use tutti_graph::Losses;
+use tutti_midi_runtime::{MidiOut, Outgoing, SendAt, Taken};
 use tutti_ump::Ump;
 use tutti_winmm_ffi::{MidiOut as Port, Sleeper};
 
@@ -40,18 +40,17 @@ pub struct WinMmOutput {
 }
 
 impl MidiOut for WinMmOutput {
-    fn queue(&self, events: &[UmpAt]) -> usize {
-        self.queue_timed(&Outgoing::now_batch(events))
-    }
-
-    /// Returns how many events were taken: an unbroken prefix, short only when
-    /// [`MAX_PENDING`] events already wait, and none once the output is dead.
-    /// A send that then fails is counted in [`losses`](DeviceOut::losses).
-    fn queue_timed(&self, events: &[Outgoing]) -> usize {
+    /// Returns what was taken: whole messages, short only when [`MAX_PENDING`]
+    /// events already wait or the batch's next message would pass it, and none
+    /// once the output is dead. A send that then fails is counted in
+    /// [`losses`](DeviceOut::losses).
+    fn queue_timed(&self, events: &[Outgoing]) -> Taken {
         let now = Instant::now();
-        let taken = self.shared.mailbox.state().take(
+        let mut state = self.shared.mailbox.state();
+        let taken = Taken::within(events, state.room(MAX_PENDING));
+        state.take(
             MAX_PENDING,
-            events.iter().map(|event| {
+            events[..taken.packets()].iter().map(|event| {
                 let due = match event.send {
                     SendAt::Now => now,
                     SendAt::At(at) => at,
@@ -59,7 +58,8 @@ impl MidiOut for WinMmOutput {
                 (due, event.ump)
             }),
         );
-        if taken > 0
+        drop(state);
+        if !taken.is_none()
             && let Err(e) = self.shared.sleeper.wake()
         {
             tracing::warn!("winmm MIDI output wake: {e}");
@@ -128,7 +128,7 @@ fn thread(mut port: Port, shared: &Shared) {
 ///
 /// # Errors
 ///
-/// [`Error::WinMm`] from the port's or the timer's creation, and
+/// [`Error::Os`](crate::Error::Os) from the port's or the timer's creation, and
 /// [`Error::MidiDevice`] if the thread cannot be spawned.
 pub(super) fn open(index: u32) -> Result<WinMmOutput> {
     let port = Port::open(index)?;

@@ -861,11 +861,10 @@ impl Command {
                 })
             }
             code::AUTH_REQUIRED | code::USER_AUTH_REQUIRED => {
-                let (nonce, rest) = payload.split_at_checked(16).ok_or_else(bad_length)?;
+                let (nonce, rest) = payload.split_first_chunk::<16>().ok_or_else(bad_length)?;
                 let (name, id) =
                     split_identity(usize::from(header.data1()), rest).ok_or_else(bad_length)?;
-                let nonce = Nonce::new(nonce.try_into().map_err(|_| bad_length())?)
-                    .ok_or(ParseError::Nonce)?;
+                let nonce = Nonce::new(*nonce).ok_or(ParseError::Nonce)?;
                 let identity = read_identity(name, id)?;
                 if header.code() == code::AUTH_REQUIRED {
                     let state = match header.data2() {
@@ -894,10 +893,7 @@ impl Command {
             }
             code::PING | code::PING_REPLY => {
                 let id = PingId::new(u32::from_be_bytes(
-                    payload
-                        .get(..4)
-                        .and_then(|b| b.try_into().ok())
-                        .ok_or_else(bad_length)?,
+                    *payload.first_chunk::<4>().ok_or_else(bad_length)?,
                 ));
                 Ok(if header.code() == code::PING {
                     Self::Ping(id)

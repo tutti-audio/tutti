@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::UmpAt;
 use tutti_midi_runtime::MidiOut;
-use tutti_session::{Session, UmpOut};
+use tutti_session::{LiveSession, Session, UmpOut};
 use tutti_transport::MotionEvent;
 use tutti_types::{ChannelLayout, SampleRate};
 use tutti_ump::{Message, MidiGroup, System, Ump};
@@ -27,9 +27,10 @@ fn spec_at(rate: f64) -> OutputSpec {
 struct Wire(Arc<Mutex<Vec<Vec<UmpAt>>>>);
 
 impl MidiOut for Wire {
-    fn queue(&self, events: &[UmpAt]) -> usize {
+    fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
+        let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
         self.0.lock().unwrap().push(events.to_vec());
-        events.len()
+        tutti_midi_runtime::Taken::within(batch, batch.len())
     }
 }
 
@@ -37,7 +38,7 @@ impl MidiOut for Wire {
 /// hardware out hands `wire` the events the clock sent, as one batch whose
 /// offsets are their frames' spacing (stamping is off).
 fn clock(
-    s: &mut Session,
+    s: &mut LiveSession,
     wire: &Wire,
     stream: &ManualStream,
     (frames, blocks): (usize, usize),
@@ -68,11 +69,10 @@ fn clock(
 #[test]
 fn a_restart_re_rates_the_midi_clock() {
     let (driver, old) = ManualStreamDriver::new();
-    let (mut s, mut device) = Session::builder()
+    let mut s = Session::builder()
         .device(Default::default())
         .build_device_on(spec_at(OLD), driver)
-        .expect("builds with no device")
-        .into_parts();
+        .expect("builds with no device");
     let _ = s.update();
     let wire = Wire::default();
     s.midi().set_hardware_out(Some(UmpOut::new(
@@ -104,7 +104,7 @@ fn a_restart_re_rates_the_midi_clock() {
     assert!((ticks(&before) - 918.75).abs() < 0.05, "{}", ticks(&before));
 
     let (driver, new) = ManualStreamDriver::new();
-    s.restart_on(&mut device, spec_at(NEW), driver, None)
+    s.restart_on(spec_at(NEW), driver, None, None)
         .expect("restarts");
     assert_eq!(
         s.midi().hardware_out_rate(),

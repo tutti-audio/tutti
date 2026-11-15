@@ -18,7 +18,9 @@ use tutti_graph::{Event, Node, Offset};
 use tutti_midi_runtime::TimedMidiEvent;
 use tutti_polysynth::{Adsr, OscillatorType, PolySynth, SynthConfig};
 use tutti_session::BufferMaster;
-use tutti_session::{Bounce, BounceLatency, BounceTail, ExportClock, Range, Session, Stem};
+use tutti_session::{
+    Bounce, BounceLatency, BounceTail, DetachedSession, ExportClock, Range, Session, Stem,
+};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Settings, SoundFontUnit};
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
@@ -48,7 +50,7 @@ fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, Buf
         .tail(BounceTail::None)
 }
 
-fn render(session: &mut Session, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<Vec<f32>> {
+fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<Vec<f32>> {
     session
         .bounce(bounce)
         .expect("the bounce renders")
@@ -58,7 +60,10 @@ fn render(session: &mut Session, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<V
 
 /// The planes of the one stem `bounce` names, in memory: the master is
 /// rendered beside it and dropped.
-fn render_stem(session: &mut Session, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<Vec<f32>> {
+fn render_stem(
+    session: &mut DetachedSession,
+    bounce: Bounce<NodeKey, BufferMaster>,
+) -> Vec<Vec<f32>> {
     let (_, mut stems) = session
         .bounce(bounce)
         .expect("the bounce renders")
@@ -105,7 +110,7 @@ fn sf2(font: &Arc<SoundFont>) -> SoundFontUnit {
 /// graph node (the path a host takes), routed to the outputs: a unit with no
 /// params of its own (`SoundFontUnit`) or one a param write reaches
 /// (`PolySynth`).
-fn session_with<N: tutti_session::SessionNode>(unit: N) -> (Session, NodeKey) {
+fn session_with<N: tutti_session::SessionNode>(unit: N) -> (DetachedSession, NodeKey) {
     let mut session = Session::builder()
         .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)
@@ -143,7 +148,7 @@ fn clip_note_on() -> Ump {
     midi::note_on(MidiChannel::FIRST, 60, 0xFFFF)
 }
 
-fn install_clip(session: &mut Session, synth: NodeKey) {
+fn install_clip(session: &mut DetachedSession, synth: NodeKey) {
     session
         .midi()
         .play_clip(synth, Beat(0.0), clip())
@@ -206,7 +211,7 @@ fn assert_note_at_beat_1(what: &str, rate: f64, planes: &[Vec<f32>], reference: 
 /// transport: rolled and seated on beat 1, the live graph sounds the
 /// note. A fork that shared the live clip or synth would have left them
 /// where the render did, and the live graph would stay silent.
-fn assert_live_untouched(session: &mut Session) {
+fn assert_live_untouched(session: &mut DetachedSession) {
     let mut heard = false;
     // Rolling at 120 BPM from beat 1.
     for i in 0..4_096 {

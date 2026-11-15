@@ -1,6 +1,6 @@
 //! Spatial panners.
 //!
-//! - [`VbapPannerNode`]: a stereo-in, N-out loudspeaker panner.
+//! - [`VbapPannerNode`]: a stereo-in loudspeaker panner over a `Bed`.
 //! - [`VbapError`]: what building a VBAP panner can fail with.
 //! - [`HrtfBinauralNode`]: the binaural renderer.
 //!   Its error, `tutti_dsp::HrtfBinauralError`, and the sphere rates
@@ -13,8 +13,6 @@
 mod hrtf;
 mod target;
 mod vbap;
-
-pub(crate) use target::AngleSmoother;
 
 pub use hrtf::HrtfBinauralNode;
 pub use vbap::{VbapError, VbapPannerNode};

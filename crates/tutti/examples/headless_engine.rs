@@ -19,10 +19,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .device(Default::default())
         .build()?;
     let tone = Osc::sine(Hz(440.0)).with_amplitude(Amplitude(0.2));
-    let (tone, _) = live.session_mut().graph().add(ForkByClone(tone));
-    live.session_mut().graph().connect(tone, Root).unwrap();
-    report(live.session_mut().update());
-    live.session_mut().play()?;
+    let (tone, _) = live.graph().add(ForkByClone(tone));
+    live.graph().connect(tone, Root).unwrap();
+    report(live.update());
+    live.play()?;
     std::thread::sleep(std::time::Duration::from_secs(2));
     println!("running: {}", live.device().is_running()); // dropping `live` stops it
     Ok(())

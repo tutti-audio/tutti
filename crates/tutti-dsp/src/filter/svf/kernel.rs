@@ -128,9 +128,7 @@ impl SvfCoeffs {
             _ => g0,
         };
 
-        let a1 = 1.0 / (1.0 + g * (g + k));
-        let a2 = g * a1;
-        let a3 = g * a2;
+        let [a1, a2, a3] = integrator_gains(g, k);
 
         let (m0, m1, m2) = match filter_type {
             SvfType::LowPass => (0.0, 0.0, 1.0),
@@ -232,13 +230,31 @@ impl<F: Float + Lanes> Lerp for SvfCoefficients<F> {
 /// voices at a time.
 #[inline(always)]
 pub fn svf_step<L: Lanes>(c: &SvfCoefficients<L>, s: &mut [L; 2], v0: L) -> L {
+    let [v1, v2] = svf_taps([c.a1, c.a2, c.a3], s, v0);
+    c.m0 * v0 + c.m1 * v1 + c.m2 * v2
+}
+
+/// The integrator coefficients `[a1, a2, a3]` of a trapezoidal state-variable filter at the
+/// prewarped gain `g = tan(pi fc / fs)` and the damping `k = 1 / Q`: `a1 = 1 / (1 + g (g +
+/// k))`, `a2 = g a1`, `a3 = g a2`. The one solve of [`SvfCoeffs`] and the crossover's sections.
+pub(crate) fn integrator_gains(g: f64, k: f64) -> [f64; 3] {
+    let a1 = 1.0 / (1.0 + g * (g + k));
+    let a2 = g * a1;
+    [a1, a2, g * a2]
+}
+
+/// One integrator step over the state `[ic1eq, ic2eq]` with the coefficients `[a1, a2, a3]`:
+/// the band-pass and low-pass taps `[v1, v2]` the filter's responses are mixed from. The
+/// recurrence of [`svf_step`] and of the crossover's sections.
+#[inline(always)]
+pub(crate) fn svf_taps<L: Lanes>([a1, a2, a3]: [L; 3], s: &mut [L; 2], v0: L) -> [L; 2] {
     let two = L::from_f32(2.0);
     let [ic1eq, ic2eq] = *s;
     let v3 = v0 - ic2eq;
-    let v1 = c.a1 * ic1eq + c.a2 * v3;
-    let v2 = ic2eq + c.a2 * ic1eq + c.a3 * v3;
+    let v1 = a1 * ic1eq + a2 * v3;
+    let v2 = ic2eq + a2 * ic1eq + a3 * v3;
     *s = [two * v1 - ic1eq, two * v2 - ic2eq];
-    c.m0 * v0 + c.m1 * v1 + c.m2 * v2
+    [v1, v2]
 }
 
 #[cfg(test)]

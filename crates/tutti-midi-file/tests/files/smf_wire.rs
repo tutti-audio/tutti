@@ -4,7 +4,7 @@
 
 use crate::common::{note, track, unsorted};
 use crate::support::{Division, RawEvent, build_smf, write_vlq};
-use tutti_midi_file::{Error, FileEvent, Meta, MidiFile, SmfFormat, TextKind, Tick};
+use tutti_midi_file::{Error, FileEvent, Meta, MidiFile, SmfFormat, SmfParseError, TextKind, Tick};
 use tutti_ump::{Message, Voice1};
 
 const TPQ: u16 = 96;
@@ -108,7 +108,7 @@ fn a_five_byte_quantity_is_refused() {
     let body = [0x81, 0x80, 0x80, 0x80, 0x00, 0x90, 0x3C, 0x40];
     assert!(matches!(
         MidiFile::from_bytes(&raw_track(&body)),
-        Err(Error::MidiFileParse(_))
+        Err(Error::MidiFileParse(SmfParseError::VariableLengthQuantity))
     ));
     // And one cut off mid-quantity.
     assert!(matches!(

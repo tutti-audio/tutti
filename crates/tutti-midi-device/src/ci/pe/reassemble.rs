@@ -131,7 +131,7 @@ pub enum PeReassemblyError {
     #[error("the message would take more than {} buffered bytes", .0.get())]
     Overflow(BufferLimit),
     /// The Header Data of a complete first chunk is not a header.
-    #[error("the Header Data is not valid: {0}")]
+    #[error("the Header Data is not valid")]
     Header(#[from] PeHeaderError),
 }
 

@@ -1731,6 +1731,7 @@ pub fn compile(
         order: order.iter().map(|&n| keys[n]).collect(),
         global_inputs: topology.inputs.count(),
         compensation,
+        root_id: crate::RootId::GENESIS,
         total_latency: total,
         audio_values,
         event_values,

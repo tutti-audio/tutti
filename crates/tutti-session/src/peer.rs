@@ -15,6 +15,7 @@
 
 use std::fmt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use thiserror::Error;
 
@@ -34,21 +35,25 @@ impl fmt::Display for ResourceId {
     }
 }
 
-/// The session's source of [`ResourceId`]s: one counter, from 1.
-#[derive(Debug)]
+/// The session's source of [`ResourceId`]s: one counter, from 1. A clone
+/// draws from the same counter, so a pool entry that mints when its load lands
+/// (off the session's own call) takes ids no other token has.
+#[derive(Clone, Debug)]
 pub(crate) struct ResourceIds {
-    last: u64,
+    last: Arc<AtomicU64>,
 }
 
 impl ResourceIds {
-    pub(crate) const fn new() -> Self {
-        Self { last: 0 }
+    pub(crate) fn new() -> Self {
+        Self {
+            last: Arc::new(AtomicU64::new(0)),
+        }
     }
 
-    /// The next id: distinct from every one this source returned before.
-    pub(crate) fn mint(&mut self) -> ResourceId {
-        self.last += 1;
-        ResourceId(self.last)
+    /// The next id: distinct from every one this source (and its clones)
+    /// returned before.
+    pub(crate) fn mint(&self) -> ResourceId {
+        ResourceId(self.last.fetch_add(1, Ordering::Relaxed) + 1)
     }
 }
 

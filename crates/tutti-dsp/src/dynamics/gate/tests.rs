@@ -164,7 +164,7 @@ fn run(
         let end = (at + CHUNK).min(n);
         let a: Vec<&[f32]> = audio.iter().map(|c| &c[at..end]).collect();
         let kk: Vec<&[f32]> = key.iter().map(|c| &c[at..end]).collect();
-        let mut feed = Feed::new(&a).with_key(&kk);
+        let mut feed = Inputs::new(&a).with_key(&kk);
         if let Some(lane) = lane {
             feed = feed.with_lane(0, &lane[at..end]);
         }
@@ -604,7 +604,7 @@ fn a_block_of_the_prepared_length_renders() {
     let mut out = [vec![0.0f32; 300], vec![0.0f32; 300]];
     let [l, r] = &mut out;
     k.process(
-        &Feed::new(&[&ones, &ones]).with_key(&[&silent, &silent]),
+        &Inputs::new(&[&ones, &ones]).with_key(&[&silent, &silent]),
         &mut [l.as_mut_slice(), r.as_mut_slice()],
         300,
     );

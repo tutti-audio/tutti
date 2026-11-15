@@ -30,8 +30,8 @@ use tutti_nodes::{SvfFilterNode, SvfType};
 use tutti_session::BufferMaster;
 use tutti_session::SessionNode;
 use tutti_session::{
-    Bounce, BounceConfigError, BounceError, BounceLatency, ExportClock, InPort, OutPort,
-    PreparedGraph, Range, Root, Session, Stem,
+    Bounce, BounceConfigError, BounceError, BounceLatency, DetachedSession, ExportClock, InPort,
+    OutPort, PreparedGraph, Range, Root, Session, Stem,
 };
 use tutti_types::ChannelLayout;
 use tutti_types::{Amplitude, Hz, Param, Q, SampleRate, Samples, Seconds, Tail};
@@ -39,11 +39,11 @@ use tutti_types::{Amplitude, Hz, Param, Q, SampleRate, Samples, Seconds, Tail};
 const RATE: f64 = 48_000.0;
 
 /// A detached stereo session whose graph is at the export's rate.
-fn session() -> Session {
+fn session() -> DetachedSession {
     session_with_outputs(2)
 }
 
-fn session_with_outputs(outputs: usize) -> Session {
+fn session_with_outputs(outputs: usize) -> DetachedSession {
     let mut session = Session::builder()
         .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::clamped(outputs))
@@ -72,7 +72,7 @@ fn buffers(seconds: f64) -> Bounce<NodeKey, BufferMaster> {
 }
 
 /// The planes `bounce` renders, run on this thread.
-fn render(session: &mut Session, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<Vec<f32>> {
+fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<Vec<f32>> {
     session
         .bounce(bounce)
         .expect("the bounce renders")
@@ -83,7 +83,7 @@ fn render(session: &mut Session, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<V
 /// The planes `bounce` renders for each of its stems, in memory, run on this
 /// thread: the master is rendered with them and not returned.
 fn render_stems(
-    session: &mut Session,
+    session: &mut DetachedSession,
     bounce: Bounce<NodeKey, BufferMaster>,
 ) -> Vec<Vec<Vec<f32>>> {
     let (_, stems) = session
@@ -100,14 +100,14 @@ fn render_stems(
 }
 
 /// The one stem `node` of a bounce of `seconds`: its planes.
-fn stem_of(session: &mut Session, node: NodeKey, seconds: f64) -> Vec<Vec<f32>> {
+fn stem_of(session: &mut DetachedSession, node: NodeKey, seconds: f64) -> Vec<Vec<f32>> {
     render_stems(session, buffers(seconds).stem_with(Stem::buffers(node)))
         .pop()
         .expect("one stem")
 }
 
 /// What the session refuses `bounce` with, started and run on this thread.
-fn refused(session: &mut Session, bounce: Bounce<NodeKey, BufferMaster>) -> BounceError {
+fn refused(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>) -> BounceError {
     match session.bounce(bounce) {
         Err(e) => e,
         Ok(out) => panic!(
@@ -124,7 +124,7 @@ fn refused(session: &mut Session, bounce: Bounce<NodeKey, BufferMaster>) -> Boun
 /// A saw through a low-pass on channel 0, the raw saw on channel 1: a master
 /// that differs from a node export of the filter on every channel, so the
 /// two cannot pass for each other. Returns the filter's key.
-fn chain(session: &mut Session) -> NodeKey {
+fn chain(session: &mut DetachedSession) -> NodeKey {
     let graph = session.graph();
     let (osc, _) = graph.add(ForkByClone(Osc::saw(Hz(110.0))));
     let (filter, _params) = graph.add(SvfFilterNode::<f64>::new(
@@ -401,14 +401,13 @@ fn an_unrenderable_stem_is_refused_by_name() {
     let (orphan, _) = session.graph().add(ForkByClone(Sink::mono()));
     let (loose, _) = session.graph().add(ForkByClone(Const::mono(0.25)));
     let gone = NodeKey::fresh();
-    let refusal =
-        |session: &mut Session, stem: Stem<NodeKey, tutti_session::BufferStem>| match refused(
-            session,
-            buffers(0.01).stem_with(stem),
-        ) {
+    let refusal = |session: &mut DetachedSession,
+                   stem: Stem<NodeKey, tutti_session::BufferStem>| {
+        match refused(session, buffers(0.01).stem_with(stem)) {
             BounceError::Config(why) => why,
             other => panic!("expected a refusal by name, got {other:?}"),
-        };
+        }
+    };
     assert_eq!(
         refusal(&mut session, Stem::buffers(gone)),
         BounceConfigError::StemNotInGraph { node: gone }
@@ -444,7 +443,7 @@ fn an_unrenderable_stem_is_refused_by_name() {
 
 /// A one-second-free session with a constant 0.5 on the outputs: a graph a
 /// hook's edit is told apart from by its level.
-fn graph_with_one_node_on() -> (Session, NodeKey) {
+fn graph_with_one_node_on() -> (DetachedSession, NodeKey) {
     let mut session = session();
     let (node, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, Root).unwrap().hard();
