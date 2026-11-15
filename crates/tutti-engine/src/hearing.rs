@@ -133,6 +133,10 @@ impl Control {
 }
 
 /// The audio thread's ends: installs in, retired writers out, the live one.
+///
+/// The rings hold boxed writers, so this is dropped with the engine on the
+/// control side (`tutti_rt::ring`'s contract): an install still queued is
+/// freed there.
 pub(crate) struct Hearing {
     install: RingReader<Install>,
     retire: RingWriter<Box<TapWriter>>,

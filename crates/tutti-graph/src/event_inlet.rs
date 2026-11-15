@@ -111,6 +111,7 @@ use crate::time::Due;
 /// A stamp cannot name a beat any more, so a full ring, or a node that is gone,
 /// are the only ways left.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[non_exhaustive]
 pub enum Refused {
     /// The ring is full: the event was dropped and counted
     /// ([`Losses::lost`]).

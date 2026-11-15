@@ -301,6 +301,10 @@ pub struct Executor {
 
 /// The executor's end of the rings to its editor, and the commands it
 /// delivers.
+///
+/// The rings hold boxes, so this end is dropped with the executor on the
+/// control side (`tutti_rt::ring`'s contract): a commit still queued, or one
+/// pushed as the editor dropped, is freed there.
 struct Inbox {
     queue: RingReader<Box<Commit>>,
     back: RingWriter<Box<Commit>>,

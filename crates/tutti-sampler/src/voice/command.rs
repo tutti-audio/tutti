@@ -602,9 +602,9 @@ impl VoiceNodeHandle {
 /// ring, and the collection point for what the audio thread retires.
 ///
 /// Held by the host (an ECS system, typically) and cloned freely — its several
-/// control threads share the one command writer behind a lock. It mirrors the reader's width, and shares the rate the
-/// reader was last prepared at, so `send` can build a stretch
-/// filter that matches, on this thread. It holds the [`Stream`] of every
+/// control threads share the one command writer behind a lock. It mirrors the
+/// reader's width, and shares the rate the reader was last prepared at, so
+/// `send` can build a stretch filter that matches, on this thread. It holds the [`Stream`] of every
 /// streaming voice added through [`add_streaming`](Self::add_streaming), so
 /// `send` sets a streaming voice's loop and direction on its stream itself: the
 /// pool's drain has no stream to set them on, and a stream cannot live in a

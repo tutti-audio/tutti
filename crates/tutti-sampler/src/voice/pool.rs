@@ -272,6 +272,11 @@ pub struct VoicePool {
     /// This pool's own: a dead one until [`into_parts`](IntoNode::into_parts)
     /// (or [`with_handle`](Self::with_handle)) hands out the sending end; a
     /// clone gets a dead one — see this type's `Clone`.
+    ///
+    /// Both rings of the pool hold boxes: the pool is dropped on the control
+    /// side, with its graph unit (`tutti_rt::ring`'s contract), so a command
+    /// still queued, or a retirement pushed as the handle dropped, is freed
+    /// there.
     pub(crate) rx: RingReader<Queued>,
 
     /// Where removed slots go to be freed, off the audio thread.
