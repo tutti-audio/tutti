@@ -579,9 +579,7 @@ impl Graph {
         exec.set_pool(self.render_pool("tutti-worker", self.render_worker_start.as_ref()));
         let engine = tutti_engine::Engine::new(transport, &mut self.editor, exec)?;
         let control = engine.output_control();
-        control
-            .support(device)
-            .map_err(tutti_buffers::FoldError::from)?;
+        control.support(device)?;
         control.state_device(device, topology)?;
         self.output = Some(Placed { control, device });
         Ok(engine)

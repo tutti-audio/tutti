@@ -490,9 +490,12 @@ impl SessionBuilder<SystemClock> {
         let root = self.root_width(layout);
         self.check_placement(root, layout)?;
         let mut parts = self.parts(rate, max_block, Some(max_block), root)?;
-        let mut engine = parts.graph.engine(&parts.transport)?;
+        let mut engine =
+            parts
+                .graph
+                .engine(&parts.transport, layout, self.opts.device_topology.clone())?;
         Self::clock_midi(&parts, &engine);
-        self.declare(&mut parts.graph, layout)?;
+        self.declare(&mut parts.graph)?;
         let mut session = self.session(parts, None, true)?;
         session.load = engine.take_load_meter();
         session.heard = Some((engine.heard_taps(), layout));
