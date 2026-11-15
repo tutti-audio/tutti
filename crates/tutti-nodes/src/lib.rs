@@ -154,7 +154,7 @@
 //! ## Features
 //!
 //! `default = []`. The FFT convolution reverb is not a feature: `ConvolverNode` at any width, with
-//! `IrChannelConfig`, over `tutti_dsp::Convolver`, whose FFT is
+//! `IrLayout`, over `tutti_dsp::Convolver` and `MatrixConvolver`, whose FFT is
 //! `tutti_dsp::RealFft` (scalar, so the output is CPU-independent). An IR's
 //! spectra are stored once (`tutti_dsp::IrSpectra`, behind an `Arc`) and shared
 //! by every channel and every fork of the graph.
@@ -351,7 +351,7 @@ mod reconcile;
 pub use reconcile::{Applied, Feed, ModHost, Modulation, ReconcileError, Target};
 mod convolution;
 pub use convolution::{
-    ConvolverError, ConvolverNode, IrChannelConfig, generate_room_ir, generate_room_ir_into,
+    ConvolverError, ConvolverNode, IrLayout, PortSide, generate_room_ir, generate_room_ir_into,
     generate_test_ir, generate_test_ir_into,
 };
 
