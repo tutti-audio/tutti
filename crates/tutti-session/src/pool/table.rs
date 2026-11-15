@@ -44,7 +44,10 @@ pub enum PoolState {
     Reloading,
     /// Declared; its load failed. Declaring the key again with the same
     /// identity does not load again; [`Session::retry`](crate::Session::retry)
-    /// does. A failed reload leaves no value: the old one is dropped.
+    /// does. A failed reload leaves no value: the old one is dropped. A kind
+    /// whose holder refuses a value that landed (a node over a plugin with
+    /// other ports) reads failed too, with its own error, after the landing's
+    /// [`PoolEvent::Loaded`] or [`PoolEvent::Reloaded`] in the same update.
     Failed(LoadError),
     /// No longer declared, and kept by a node or a snapshot until their last
     /// hold is dropped.
@@ -58,7 +61,10 @@ pub enum PoolEvent {
     /// The entry's first load landed.
     Loaded,
     /// A reload landed: the entry's identity changed and the new value
-    /// replaced the old one.
+    /// replaced the old one. It does not promise that whatever holds the old
+    /// value (a node over a plugin) took the new one: a kind whose holder can
+    /// refuse the landed value fails the entry, as [`Failed`](Self::Failed),
+    /// after this event in the same update.
     Reloaded,
     /// The load failed.
     Failed(LoadError),
@@ -676,13 +682,24 @@ impl Pool {
         }
     }
 
-    /// Fails an entry that has landed: its loaded value is dropped, its handles
-    /// read closed, and it reads failed with `error`
-    /// ([`PoolEvent::Failed`], at the next report).
-    #[cfg(feature = "plugin")]
-    pub(crate) fn fail_loaded(&mut self, key: &PoolKey, error: LoadError) {
-        let Some(slot) = self.slots.get_mut(key) else {
-            return;
+    /// Refuses a landed value the graph could not take: its value is dropped,
+    /// its handles read closed, and the entry reads failed with `error`
+    /// ([`PoolEvent::Failed`], after the landing's event). `generation` is the
+    /// landing that was refused ([`landing_of`](Self::landing_of)): a refusal of
+    /// a landing that a newer declaration or a pending load has since
+    /// superseded is stale and records nothing, so it cannot clobber the load
+    /// in flight. Returns whether the entry failed.
+    #[cfg(any(test, feature = "plugin"))]
+    pub(crate) fn refuse_landed(
+        &mut self,
+        key: &PoolKey,
+        generation: u64,
+        error: LoadError,
+    ) -> bool {
+        let Some(slot) = self.slots.get_mut(key).filter(|slot| {
+            slot.generation == generation && !slot.pending() && slot.loaded.is_some()
+        }) else {
+            return false;
         };
         slot.loaded = None;
         slot.life.close();
@@ -698,6 +715,17 @@ impl Pool {
         } else {
             slot.unreported = Some(event);
         }
+        true
+    }
+
+    /// The keys whose load landed since the last report, in landing order.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn landed_keys(&self) -> Vec<PoolKey> {
+        self.queued
+            .iter()
+            .filter(|queued| matches!(queued.event, PoolEvent::Loaded | PoolEvent::Reloaded))
+            .map(|queued| queued.key.clone())
+            .collect()
     }
 
     /// Loads the declared entry under `key` again: one that failed, or one the
@@ -889,14 +917,15 @@ impl Pool {
         Ok((loaded, &slot.life))
     }
 
-    /// `E`'s loaded value under `key`, wherever the entry stands in the app's
-    /// set (declared or held): what a node over the entry takes its plugin from.
-    #[cfg(feature = "plugin")]
-    pub(crate) fn loaded_of<E: PoolEntry>(&self, key: &PoolKey) -> Option<&E::Loaded> {
+    /// `E`'s loaded value under `key` and the generation of the landing that
+    /// made it, wherever the entry stands in the app's set (declared or held).
+    #[cfg(any(test, feature = "plugin"))]
+    pub(crate) fn landing_of<E: PoolEntry>(&self, key: &PoolKey) -> Option<(u64, &E::Loaded)> {
         let slot = self
             .slots
             .get(key)
             .filter(|slot| slot.kind == TypeId::of::<E>())?;
-        slot.loaded.as_ref()?.downcast_ref::<E::Loaded>()
+        let loaded = slot.loaded.as_ref()?.downcast_ref::<E::Loaded>()?;
+        Some((slot.generation, loaded))
     }
 }

@@ -16,7 +16,7 @@ use tutti_plugin_db::{PluginDb, PluginFormat, ScanPoll};
 use tutti_session::{
     LoadError, Peer, PoolError, PoolEvent, PoolState, Presence, Session, SessionEvent,
 };
-use tutti_types::{MaxBlock, Samples};
+use tutti_types::{MaxBlock, SampleRate, Samples};
 
 use crate::support::clap_probe;
 
@@ -292,6 +292,7 @@ fn an_in_process_swap_to_other_ports_fails_the_entry() {
 
     // The next plugin opened has the probe's aux-bus layout.
     probe().set(ClapSwitch::PortLayout, 1);
+    probe().thread_reset();
     s.pool(
         s.plugin_entry("fx", &second_id(), &catalog)
             .hosting(Hosting::InProcess),
@@ -315,6 +316,72 @@ fn an_in_process_swap_to_other_ports_fails_the_entry() {
         "{events:?}"
     );
     assert_eq!(s.plugin(node).unwrap().descriptor().id, before);
+    // The unused plugin was closed where the refusal ran, on the main thread,
+    // and the graph still commits.
+    let closed = deactivation();
+    assert!(closed.observed && closed.is_main, "{closed:?}");
+    assert!(
+        s.update()
+            .iter()
+            .all(|event| !matches!(event, SessionEvent::CommitRefused(_))),
+        "the graph still commits"
+    );
+    s.close(tutti_fixtures::main_thread());
+}
+
+/// **An in-process swap that waits is made on the main thread only**: with the
+/// graph resumed by updates off the main thread, the node keeps its plugin
+/// (binding the new one and closing the old are main-thread work), and the
+/// main thread's next update swaps.
+fn an_in_process_swap_waits_for_the_main_thread() {
+    let (catalog, _dir) = catalog();
+    let mut s = Session::builder()
+        .max_block(MaxBlock::of(Samples(512)))
+        .build_detached(SampleRate::SR_48K)
+        .expect("a detached session builds");
+    s.pool(
+        s.plugin_entry("fx", &id(), &catalog)
+            .hosting(Hosting::InProcess),
+    )
+    .unwrap();
+    assert!(matches!(next_event(&mut s, "fx"), PoolEvent::Loaded));
+    let node = s.add_pooled_plugin(&"fx").unwrap();
+    let second = tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap();
+
+    // The graph re-prepares, so the landing's swap waits.
+    let mut side = s.graph().take_audio_side();
+    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    assert!(s.graph_ref().testing().is_repreparing(), "mid re-prepare");
+    s.pool(
+        s.plugin_entry("fx", &second_id(), &catalog)
+            .hosting(Hosting::InProcess),
+    )
+    .unwrap();
+    assert!(matches!(next_event(&mut s, "fx"), PoolEvent::Reloaded));
+    assert_ne!(s.plugin(node).unwrap().descriptor().id, second);
+
+    // Off the main thread the re-prepare resumes, and the swap still waits.
+    let mut s = thread::spawn(move || {
+        let mut s = s;
+        let mut out = vec![Vec::new(), Vec::new()];
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while s.graph_ref().testing().is_repreparing() {
+            assert!(Instant::now() < deadline, "the re-prepare never resumed");
+            side.render(512, 512, &mut out);
+            let _ = s.update();
+        }
+        let _ = s.update();
+        assert_ne!(
+            s.plugin(node).unwrap().descriptor().id,
+            second,
+            "an update off the main thread does not swap an in-process plugin"
+        );
+        s
+    })
+    .join()
+    .unwrap();
+    let _ = s.update();
+    assert_eq!(s.plugin(node).unwrap().descriptor().id, second);
     s.close(tutti_fixtures::main_thread());
 }
 
@@ -325,4 +392,5 @@ a_released_in_process_plugin_is_closed_on_the_main_thread,
 a_released_in_process_plugin_on_the_main_thread_is_closed_in_place,
 a_changed_identity_swaps_an_in_process_node,
 an_in_process_swap_to_other_ports_fails_the_entry,
+an_in_process_swap_waits_for_the_main_thread,
 ];

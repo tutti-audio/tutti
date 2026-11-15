@@ -8,6 +8,7 @@
 use std::time::{Duration, Instant};
 
 use tutti_buffers::InterleavedMut;
+use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_plugin::catalog::{
     Catalog, CatalogConfig, Hosting, Locator, NO_SCAN_DIRS, PluginId, PluginRef, PluginState,
 };
@@ -16,10 +17,10 @@ use tutti_plugin_db::{PluginDb, PluginFormat, ScanPoll};
 use tutti_plugin_types::TerminationReason;
 use tutti_plugin_types::{Normalized, ParamId};
 use tutti_session::{
-    AddPluginError, LoadError, Peer, PluginCause, PluginHealth, PoolEvent, PoolState, Presence,
-    RecoveryPolicy, Resource, RetryError, Session, SessionEvent,
+    AddPluginError, CrossfadeRefused, LoadError, Peer, PluginCause, PluginHealth, PoolEvent,
+    PoolState, Presence, RecoveryPolicy, Resource, RetryError, Session, SessionEvent,
 };
-use tutti_types::{ChannelLayout, MaxBlock, Samples};
+use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
 
 const BLOCK: usize = 512;
 
@@ -92,6 +93,16 @@ fn pump(s: &mut Session) -> Vec<SessionEvent> {
     s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
     std::thread::sleep(Duration::from_millis(5));
     events
+}
+
+/// Updates (no render: the session has no output) until `done`.
+fn settle_until(s: &mut Session, what: &str, mut done: impl FnMut(&mut Session) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !done(s) {
+        assert!(Instant::now() < deadline, "{what} never happened");
+        let _ = s.update();
+        std::thread::sleep(Duration::from_millis(2));
+    }
 }
 
 /// Pumps until `done`.
@@ -468,6 +479,264 @@ fn a_node_holds_its_entry_until_it_is_removed() {
     let event = until(&mut s, "the release", |k, _| *k == "fx");
     assert!(matches!(event, PoolEvent::Released), "{event:?}");
     assert_eq!(handle.presence(), Presence::Closed);
+}
+
+/// A node that cannot run above 90 kHz: its `prepare` panics there, which
+/// poisons the graph's editor.
+struct Grenade;
+
+impl Node for Grenade {
+    fn shape(&self) -> Shape {
+        Shape::source_unassigned(ChannelLayout::MONO)
+    }
+    fn prepare(&mut self, prepare: &Prepare) {
+        assert!(prepare.sample_rate().get() < 90_000.0, "no such rate");
+    }
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        io.output(0).fill(0.0);
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+}
+
+/// A session with no output, whose audio side a test can take (a re-prepare
+/// then waits for it).
+fn detached() -> Session {
+    set_env("TUTTI_PLUGIN_SERVER", plugin_server());
+    Session::builder()
+        .max_block(MaxBlock::of(Samples(BLOCK)))
+        .build_detached(SampleRate::SR_48K)
+        .expect("a detached session builds")
+}
+
+/// One session with the first plugin loaded and in a node, under key `fx`.
+fn with_node(catalog: &Catalog) -> (Session, tutti_session::Key<tutti_session::PluginNode>) {
+    with_node_in(session(true), catalog)
+}
+
+fn with_node_in(
+    mut s: Session,
+    catalog: &Catalog,
+) -> (Session, tutti_session::Key<tutti_session::PluginNode>) {
+    s.pool(s.plugin_entry("fx", &first_id(), catalog)).unwrap();
+    loaded(&mut s, "fx");
+    let node = s.add_pooled_plugin(&"fx").unwrap();
+    (s, node)
+}
+
+fn pid_of(s: &Session, node: tutti_session::Key<tutti_session::PluginNode>) -> Option<u32> {
+    s.plugin(node).unwrap().diagnostics().server_pid()
+}
+
+/// Declares `id` (hosted as `hosting`) under `fx`, with the aux-bus layout
+/// `layout` for the plugin it loads.
+fn declare_with_layout(
+    s: &mut Session,
+    catalog: &Catalog,
+    id: &PluginId,
+    hosting: Hosting,
+    layout: &str,
+) {
+    set_env("TUTTI_CLAP_PROBE_PORT_LAYOUT", layout);
+    s.pool(s.plugin_entry("fx", id, catalog).hosting(hosting))
+        .unwrap();
+}
+
+/// **Equal channel totals with another split of buses are other ports**: two
+/// mono buses where the node has one stereo bus. The totals match; the buses
+/// the node's edges name do not.
+#[test]
+fn a_swap_to_the_same_totals_in_other_buses_fails_the_entry() {
+    let (catalog, _dir) = catalog();
+    let (mut s, node) = with_node(&catalog);
+    declare_with_layout(&mut s, &catalog, &second_id(), Hosting::Auto, "3");
+    let events = until_all(&mut s, "the failure", "fx");
+    let [
+        PoolEvent::Reloaded,
+        PoolEvent::Failed(LoadError::PluginPorts { got, was }),
+    ] = events.as_slice()
+    else {
+        panic!("{events:?}");
+    };
+    assert_eq!(
+        (got.inputs.clone(), was.inputs.clone()),
+        (vec![1, 1], vec![2])
+    );
+    assert_eq!(
+        s.plugin(node).unwrap().descriptor().id,
+        tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap()
+    );
+}
+
+/// **After a refused swap the entry loads again and the node swaps**: a
+/// `retry` to a plugin that fits lands as a load of an entry that has a node,
+/// and the node takes it, where a second node for the key is refused.
+#[test]
+fn a_retry_after_a_refused_swap_swaps_the_node() {
+    let (catalog, _dir) = catalog();
+    let (mut s, node) = with_node(&catalog);
+    let first = pid_of(&s, node);
+    declare_with_layout(&mut s, &catalog, &second_id(), Hosting::Auto, "1");
+    let events = until_all(&mut s, "the failure", "fx");
+    assert!(matches!(
+        events.as_slice(),
+        [
+            PoolEvent::Reloaded,
+            PoolEvent::Failed(LoadError::PluginPorts { .. })
+        ]
+    ));
+
+    // The next server has the node's layout.
+    set_env("TUTTI_CLAP_PROBE_PORT_LAYOUT", "0");
+    s.retry(&"fx").expect("a failed entry loads again");
+    let events = until_all(&mut s, "the retry", "fx");
+    assert!(
+        matches!(events.as_slice(), [PoolEvent::Loaded]),
+        "{events:?}"
+    );
+    let second = tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap();
+    pump_until(&mut s, "the swap", |s| {
+        s.plugin(node).unwrap().descriptor().id == second
+    });
+    assert_ne!(pid_of(&s, node), first, "another server");
+    assert!(matches!(
+        s.add_pooled_plugin(&"fx"),
+        Err(AddPluginError::Installed("fx"))
+    ));
+}
+
+/// **A third identity after a refused swap is the node's last**, and one
+/// declared while a swap waits for the graph replaces the one waiting: the node
+/// ends on the last identity declared.
+#[test]
+fn a_later_identity_is_the_one_the_node_ends_on() {
+    let (catalog, _dir) = catalog();
+    let (mut s, node) = with_node(&catalog);
+    let first = pid_of(&s, node);
+    declare_with_layout(&mut s, &catalog, &second_id(), Hosting::Auto, "1");
+    let events = until_all(&mut s, "the failure", "fx");
+    assert!(matches!(events.last(), Some(PoolEvent::Failed(_))));
+    // The same plugin served explicitly is another identity, with fitting ports.
+    declare_with_layout(&mut s, &catalog, &first_id(), Hosting::OutOfProcess, "0");
+    pump_until(&mut s, "the swap", |s| pid_of(s, node) != first);
+    assert_eq!(
+        s.plugin(node).unwrap().descriptor().id,
+        tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap()
+    );
+}
+
+/// What a graph that re-prepares does to a swap: it waits, with the executor
+/// taken, until the audio side has run and an update has collected.
+fn repreparing(s: &mut Session) -> tutti_session::AudioSide {
+    let side = s.graph().take_audio_side();
+    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    assert!(s.graph_ref().testing().is_repreparing(), "mid re-prepare");
+    side
+}
+
+/// **A swap waits for a graph that is re-preparing, and the last identity
+/// declared meanwhile is the one it makes.** The node keeps its plugin until
+/// the re-prepare resumes, then ends on the second declaration.
+#[test]
+fn a_swap_waits_for_the_graph_and_ends_on_the_last_identity() {
+    let (catalog, _dir) = catalog();
+    let (mut s, node) = with_node_in(detached(), &catalog);
+    let first = pid_of(&s, node);
+    let mut side = repreparing(&mut s);
+
+    s.pool(s.plugin_entry("fx", &second_id(), &catalog))
+        .unwrap();
+    let events = until_all(&mut s, "the landing", "fx");
+    assert!(
+        matches!(events.as_slice(), [PoolEvent::Reloaded]),
+        "{events:?}"
+    );
+    assert_eq!(
+        pid_of(&s, node),
+        first,
+        "the graph is re-preparing: it waits"
+    );
+    s.pool(
+        s.plugin_entry("fx", &first_id(), &catalog)
+            .hosting(Hosting::OutOfProcess),
+    )
+    .unwrap();
+    let events = until_all(&mut s, "the second landing", "fx");
+    assert!(
+        matches!(events.as_slice(), [PoolEvent::Reloaded]),
+        "{events:?}"
+    );
+    assert_eq!(pid_of(&s, node), first, "still waiting");
+
+    let mut out = vec![Vec::new(), Vec::new()];
+    settle_until(&mut s, "the swap", |s| {
+        side.render(BLOCK, BLOCK, &mut out);
+        pid_of(s, node) != first
+    });
+    assert_eq!(
+        s.plugin(node).unwrap().descriptor().id,
+        tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap(),
+        "the last identity declared"
+    );
+}
+
+/// **A node removed while its swap waits drops the swap**, and the landed
+/// plugin stays the entry's for a next node.
+#[test]
+fn a_node_removed_while_its_swap_waits_leaves_the_plugin_to_the_entry() {
+    let (catalog, _dir) = catalog();
+    let (mut s, node) = with_node_in(detached(), &catalog);
+    let mut side = repreparing(&mut s);
+    s.pool(s.plugin_entry("fx", &second_id(), &catalog))
+        .unwrap();
+    let events = until_all(&mut s, "the landing", "fx");
+    assert!(
+        matches!(events.as_slice(), [PoolEvent::Reloaded]),
+        "{events:?}"
+    );
+
+    s.remove(node).unwrap();
+    let mut out = vec![Vec::new(), Vec::new()];
+    settle_until(&mut s, "the re-prepare to resume", |s| {
+        side.render(BLOCK, BLOCK, &mut out);
+        !s.graph_ref().testing().is_repreparing()
+    });
+    assert!(matches!(s.pool_state(&"fx"), Some(PoolState::Loaded)));
+    let next = s
+        .add_pooled_plugin(&"fx")
+        .expect("the landed plugin is the next node's");
+    assert_eq!(
+        s.plugin(next).unwrap().descriptor().id,
+        tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap()
+    );
+}
+
+/// **A graph that refuses the swap fails the entry with the refusal**: a
+/// poisoned graph is `PluginSwap(Poisoned)`, and the node keeps its plugin.
+#[test]
+fn a_graph_that_refuses_the_swap_fails_the_entry() {
+    let (catalog, _dir) = catalog();
+    let (mut s, node) = with_node(&catalog);
+    s.graph().add(Unforkable(Grenade));
+    s.graph().set_sample_rate(SampleRate::SR_96K);
+    s.pool(s.plugin_entry("fx", &second_id(), &catalog))
+        .unwrap();
+    let events = until_all(&mut s, "the refusal", "fx");
+    let [
+        PoolEvent::Reloaded,
+        PoolEvent::Failed(LoadError::PluginSwap(refused)),
+    ] = events.as_slice()
+    else {
+        panic!("{events:?}");
+    };
+    assert!(
+        matches!(**refused, CrossfadeRefused::Poisoned(_)),
+        "{refused:?}"
+    );
+    assert_eq!(
+        s.plugin(node).unwrap().descriptor().id,
+        tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap()
+    );
 }
 
 /// The cases that name the server by its process id.

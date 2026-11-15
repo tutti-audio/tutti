@@ -107,18 +107,11 @@ impl Session {
         }
         self.pool_openings();
         self.pool.sweep();
+        // Before the waits settle: a swap the graph refuses fails the entry the
+        // wait would otherwise report as loaded.
+        #[cfg(feature = "plugin")]
+        self.swap_pooled_plugins();
         self.pool.poll_waiters();
-        #[cfg(feature = "plugin")]
-        let first = out.len();
         self.pool.drain_events(out);
-        // A node over a reloaded plugin entry swaps to what the reload brought.
-        #[cfg(feature = "plugin")]
-        {
-            let landed = out.split_off(first);
-            self.swap_pooled_plugins(&landed);
-            out.extend(landed);
-            // What a swap that could not be made reports.
-            self.pool.drain_events(out);
-        }
     }
 }

@@ -186,7 +186,8 @@ pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 pub use plugin::{
     AddPluginError, LoadedPlugin, Plugin, PluginCause, PluginChange, PluginDeclaration,
     PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginLoad, PluginLoadRequest,
-    PluginLoaded, PluginNode, PooledPlugin, SNAPSHOT_INTERVAL, StateRestore, StateView,
+    PluginLoaded, PluginNode, PluginPorts, PooledPlugin, SNAPSHOT_INTERVAL, StateRestore,
+    StateView,
 };
 #[cfg(feature = "plugin")]
 pub(crate) use pool::Hold;

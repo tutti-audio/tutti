@@ -140,7 +140,7 @@ mod entry;
 use entry::PooledLink;
 pub use entry::{
     AddPluginError, LoadedPlugin, PluginCause, PluginDeclaration, PluginEntry, PluginInfo,
-    PooledPlugin,
+    PluginPorts, PooledPlugin,
 };
 
 use crate::plugin_diagnostics::Figures;
