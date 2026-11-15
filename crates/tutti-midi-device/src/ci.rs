@@ -29,6 +29,7 @@ use tutti_ump::{MidiChannel, MidiGroup, Sysex7Packets, U7, U28, Ump};
 mod default_cc;
 mod device;
 mod discovery;
+mod drawbar;
 mod drum_map;
 mod endpoint;
 mod escape;
@@ -41,6 +42,7 @@ mod profile;
 mod read;
 mod status;
 mod text;
+mod two_state;
 mod wait;
 
 pub use default_cc::{CcFunction, CcPart, CcReset, CcValue, DefaultCcLevel, SuggestedCc};
@@ -49,6 +51,10 @@ pub use discovery::{
     CiCategories, DiscoveryData, MaxSysexSize, NotASysexSize, SUB_ID2_ACK, SUB_ID2_DISCOVERY,
     SUB_ID2_DISCOVERY_REPLY, SUB_ID2_ENDPOINT_INQUIRY, SUB_ID2_ENDPOINT_REPLY,
     SUB_ID2_INVALIDATE_MUID, SUB_ID2_NAK,
+};
+pub use drawbar::{
+    Drawbar, DrawbarSetting, NotADrawbarSetting, ORGAN_HIGHEST_NOTE, ORGAN_LOWEST_NOTE,
+    ORGAN_REFERENCE_NOTE, OrganFeatures, OrganLevel, OrganOption, OrganValue, VibratoChorus,
 };
 pub use drum_map::{
     BitmapPosition, DrumControl, DrumFeatures, DrumInstrument, DrumNoteMapLevel, DrumSounds,
@@ -108,6 +114,7 @@ pub use profile::{
 };
 pub use status::{Ack, Nak};
 pub use text::MessageText;
+pub use two_state::TwoState;
 pub use wait::{NotATimeoutWait, PEER_REPLY_TIMEOUT, TimeoutWait};
 
 /// Universal SysEx non-real-time id, the first byte of every CI message: `0x7E`.
