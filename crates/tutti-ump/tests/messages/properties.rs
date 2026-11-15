@@ -178,11 +178,15 @@ proptest! {
         }
     }
 
+    /// Every encoded packet has a defined message type and decodes again, so
+    /// no message is written reserved.
+    /// Spec: m2-104/2.1.3#1, m2-104/2.1.4#1
     #[test]
     fn decoded_messages_round_trip(w in either()) {
         if let Ok(m) = Ump(w).decode() {
             let canonical = Ump::from(m);
             prop_assert_eq!(canonical.decode(), Ok(m));
+            prop_assert!(matches!(canonical.0[0] >> 28, 0..=5 | 0xD | 0xF));
             // Re-encoding a canonical packet changes nothing.
             prop_assert_eq!(Ump::from(canonical.decode().unwrap()), canonical);
             // The packet's size is the message type's.
