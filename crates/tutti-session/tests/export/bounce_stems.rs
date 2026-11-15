@@ -17,8 +17,8 @@ use tutti_export::{Error, Normalize, Produced, Resample, TargetError};
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    Bounce, BounceConfigError, BounceError, BounceLatency, BounceTail, ExportClock, InPort,
-    OutPort, PreparedGraph, Range, Root, Session, Stem, StemGain,
+    Bounce, BounceConfigError, BounceError, BounceLatency, BounceTail, DetachedSession,
+    ExportClock, InPort, OutPort, PreparedGraph, Range, Root, Session, Stem, StemGain,
 };
 use tutti_session::{Bounced, BufferMaster, Master};
 use tutti_types::ChannelLayout;
@@ -27,7 +27,7 @@ use tutti_types::{Db, SampleRate, Samples, Seconds};
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// A detached stereo session at the render's rate.
-fn session() -> Session {
+fn session() -> DetachedSession {
     Session::builder()
         .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)
@@ -62,7 +62,7 @@ fn planes(out: Result<Bounced<BufferMaster>, BounceError>) -> Vec<Vec<Vec<f32>>>
 }
 
 /// What a bounce is refused with, started and run on this thread.
-fn refused<M: Master>(session: &mut Session, bounce: Bounce<NodeKey, M>) -> BounceError {
+fn refused<M: Master>(session: &mut DetachedSession, bounce: Bounce<NodeKey, M>) -> BounceError {
     match session.bounce(bounce) {
         Err(e) => e,
         Ok(out) => panic!("expected a refusal, got {:?}", out.stems().len()),
@@ -357,7 +357,7 @@ fn shared_gain_keeps_the_balance_and_each_measures_its_own() {
     let target = Normalize::peak(Db(-6.0));
     let dir = tempfile::tempdir().unwrap();
     // The three files' samples, and the gain each reports.
-    let run = |session: &mut Session, tag: &str, gain: StemGain| {
+    let run = |session: &mut DetachedSession, tag: &str, gain: StemGain| {
         let paths = ["master", "loud", "quiet"].map(|n| dir.path().join(format!("{tag}-{n}.wav")));
         let done = session
             .bounce(
@@ -430,7 +430,7 @@ fn a_request_that_cannot_work_is_refused_by_name() {
     let mut session = session();
     let (node, _) = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, Root).unwrap();
-    fn why<M: Master>(session: &mut Session, b: Bounce<NodeKey, M>) -> BounceConfigError {
+    fn why<M: Master>(session: &mut DetachedSession, b: Bounce<NodeKey, M>) -> BounceConfigError {
         match refused(session, b) {
             BounceError::Config(why) => why,
             other => panic!("expected a refusal by name, got {other:?}"),

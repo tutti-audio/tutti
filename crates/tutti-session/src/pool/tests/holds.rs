@@ -71,7 +71,7 @@ impl PoolEntry for Shared {
     }
 }
 
-fn session(config: PoolConfig) -> (Session, Spawned) {
+fn session(config: PoolConfig) -> (crate::DetachedSession, Spawned) {
     let spawned = Spawned::default();
     let held = spawned.clone();
     let session = Session::builder()
@@ -92,14 +92,14 @@ fn device(key: &'static str, loads: &Arc<AtomicUsize>) -> Declared<&'static str,
     )
 }
 
-fn life(session: &Session, key: &'static str) -> Life {
+fn life(session: &crate::DetachedSession, key: &'static str) -> Life {
     session.pool.handle::<_, Device>(&key).unwrap()
 }
 
 /// Declares `keys`, loads them, and takes a snapshot hold on each in order,
 /// then undeclares them: the pool holds only what the holds keep.
 fn held(
-    s: &mut Session,
+    s: &mut crate::DetachedSession,
     spawned: &Spawned,
     loads: &Arc<AtomicUsize>,
     keys: &[&'static str],

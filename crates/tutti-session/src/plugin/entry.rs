@@ -573,7 +573,7 @@ enum Swap {
     Refused(u64, LoadError),
 }
 
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// A plugin to keep loaded under `key`: declare it with
     /// [`pool`](Self::pool), and the session loads it.
     ///

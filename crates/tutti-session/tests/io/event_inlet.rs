@@ -13,12 +13,12 @@ use tutti_fixtures::midi;
 use tutti_fixtures::midi::key_of;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_graph::{EventCapacity, EventInletNode, EventTapReader, TapAlign, TapEvent};
-use tutti_session::{Losses, OutPort, Root, Session, Stamp};
+use tutti_session::{DetachedSession, Losses, OutPort, Root, Session, Stamp};
 use tutti_types::ChannelLayout;
 use tutti_types::{Frame, SampleRate};
 use tutti_ump::{MidiChannel, U7, Ump};
 
-fn session() -> Session {
+fn session() -> DetachedSession {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::SR_48K)
@@ -30,7 +30,7 @@ fn note(n: u8) -> Ump {
     midi::m1_note_on(MidiChannel::FIRST, n, U7::of(100))
 }
 
-fn frames(n: usize, s: &mut Session) {
+fn frames(n: usize, s: &mut DetachedSession) {
     let mut out = [0.0f32];
     for _ in 0..n {
         s.render_frame(&mut out);
