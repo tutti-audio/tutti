@@ -14,8 +14,8 @@ use tutti_plugin_types::{
     ParamUnit, ParameterInfo, PluginFailure, PluginRefresh, RenderMode,
 };
 use tutti_session::{
-    HostPluginError, Key, PluginChange, PluginEvent, PluginNode, PluginParamError, Session,
-    SessionEvent,
+    DetachedSession, HostPluginError, Key, PluginChange, PluginEvent, PluginNode, PluginParamError,
+    Session, SessionEvent,
 };
 use tutti_types::{ChannelLayout, Db, Hz, SampleRate};
 
@@ -138,13 +138,13 @@ impl Health for Fake {
 
 /// A detached session with the fake hosted at a node, its parameters not yet
 /// read, and the sink the fake announces a rescan through.
-fn session() -> (Session, NodeKey, Arc<Fake>, RefreshSink) {
+fn session() -> (DetachedSession, NodeKey, Arc<Fake>, RefreshSink) {
     let (s, key, fake, refresh) = session_keyed();
     (s, key.erase(), fake, refresh)
 }
 
 /// [`session`], with the key `host_plugin` returned.
-fn session_keyed() -> (Session, Key<PluginNode>, Arc<Fake>, RefreshSink) {
+fn session_keyed() -> (DetachedSession, Key<PluginNode>, Arc<Fake>, RefreshSink) {
     let fake = Fake::new();
     let refresh = RefreshSink::default();
     let handle = PluginHandle::from_backend(
@@ -186,20 +186,20 @@ fn plugin_events(events: Vec<SessionEvent>) -> Vec<PluginEvent> {
 
 /// An update that submits a parameter read (the spawner runs it inline) and
 /// one that lands it; the plugin events both reported.
-fn update(s: &mut Session) -> Vec<PluginEvent> {
+fn update(s: &mut DetachedSession) -> Vec<PluginEvent> {
     let mut reported = plugin_events(s.update());
     reported.extend(plugin_events(s.update()));
     reported
 }
 
 /// A session whose parameters are read.
-fn ready() -> (Session, NodeKey, Arc<Fake>, RefreshSink) {
+fn ready() -> (DetachedSession, NodeKey, Arc<Fake>, RefreshSink) {
     let (mut s, node, fake, refresh) = session();
     let _ = update(&mut s);
     (s, node, fake, refresh)
 }
 
-fn cutoff(s: &Session, node: NodeKey) -> tutti_session::Param<'_> {
+fn cutoff(s: &DetachedSession, node: NodeKey) -> tutti_session::Param<'_> {
     s.plugin(node).unwrap().params().get(CUTOFF).unwrap()
 }
 
@@ -244,7 +244,7 @@ fn a_second_hosting_of_a_node_is_refused() {
 #[test]
 fn a_gesture_guard_dropped_mid_drag_ends_the_gesture() {
     let (mut s, node, fake, _) = ready();
-    let drag = |s: &Session| -> Result<(), &'static str> {
+    let drag = |s: &DetachedSession| -> Result<(), &'static str> {
         let gesture = cutoff(s, node).edit().unwrap();
         for (i, v) in [0.1, 0.2, 0.3, 0.4].into_iter().enumerate() {
             if i == 2 {

@@ -258,10 +258,16 @@ fn the_accepted_count_is_in_the_callers_events() {
     let jr = Ump::from(Message::Utility(Utility::JrClock(1)));
     let note = midi::note_on(MidiChannel::FIRST, 60, 0xFFFF);
     let events: Vec<UmpAt> = [jr, rpn(0, 0, 0), note].into_iter().map(at).collect();
-    wire.convert(&Outgoing::now_batch(&events));
+    let events = Outgoing::now_batch(&events);
+    wire.convert(&events);
     assert_eq!(wire.batch().len(), 5, "no JR, four for the RPN, one note");
     // The device took n of the five packets.
-    let counts: Vec<usize> = (0..=5).map(|n| wire.accepted(n)).collect();
+    let counts: Vec<usize> = (0..=5)
+        .map(|n| {
+            wire.accepted(tutti_midi_runtime::Taken::within(wire.batch(), n), &events)
+                .packets()
+        })
+        .collect();
     // The JR is nothing, so it is taken with nothing taken.
     assert_eq!(counts, [1, 1, 1, 1, 2, 3]);
 }
@@ -290,16 +296,8 @@ fn a_change_of_protocol_makes_the_narrower_forget() {
 #[test]
 fn a_send_time_stays_with_its_event_through_the_conversion() {
     let t = std::time::Instant::now() + std::time::Duration::from_secs(1);
-    let rpn_event = Outgoing {
-        at: Offset::ZERO,
-        send: SendAt::At(t),
-        ump: rpn(0, 0, 12 << 25),
-    };
-    let after = Outgoing {
-        at: Offset::ZERO,
-        send: SendAt::Now,
-        ump: rpn(0, 0, 12 << 25),
-    };
+    let rpn_event = Outgoing::new(Offset::ZERO, SendAt::At(t), rpn(0, 0, 12 << 25));
+    let after = Outgoing::new(Offset::ZERO, SendAt::Now, rpn(0, 0, 12 << 25));
     let mut wire = Wire::new(MIDI1);
     wire.convert(&[rpn_event, after]);
     let sends: Vec<SendAt> = wire.batch().iter().map(|o| o.send).collect();
@@ -310,4 +308,23 @@ fn a_send_time_stays_with_its_event_through_the_conversion() {
         first_now > 1,
         "the narrowed RPN is more than one packet, all at its time"
     );
+}
+
+/// **A registered controller narrowed to MIDI 1.0 is one message**: the Control
+/// Changes that select it and set its value go whole or not at all, because a
+/// receiver left with the controller selected and no value is wrong until the
+/// next one. A sink with room for two of the four takes none, and one with room
+/// for all takes all.
+#[test]
+fn a_narrowed_controller_is_taken_whole_or_not_at_all() {
+    let mut wire = Wire::new(MIDI1);
+    let events = Outgoing::now_batch(&[
+        at(rpn(0, 0, 0)),
+        at(midi::note_on(MidiChannel::FIRST, 60, 0xFFFF)),
+    ]);
+    wire.convert(&events);
+    assert_eq!(wire.batch().len(), 5, "four Control Changes and a note");
+    let room = |n| Taken::within(wire.batch(), n).packets();
+    assert_eq!([room(0), room(2), room(3)], [0, 0, 0]);
+    assert_eq!([room(4), room(5)], [4, 5]);
 }

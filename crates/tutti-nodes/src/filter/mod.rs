@@ -1,49 +1,18 @@
 //! Filter nodes: state-variable, Moog ladder, parametric EQ band, and the
-//! Linkwitz-Riley crossover. The algorithms are `tutti-dsp`'s.
+//! Linkwitz-Riley crossover, each a kernel on the one driver. The algorithms are `tutti-dsp`'s.
 
 mod crossover;
 pub mod eq_band;
 pub mod ladder;
 pub mod svf;
 
-pub use crossover::CrossoverNode;
 pub(crate) use crossover::Splits;
+pub use crossover::{CrossoverKernel, CrossoverNode};
 pub use eq_band::EqBandNode;
-pub use ladder::LadderFilterNode;
+pub use ladder::{LadderFilterNode, LadderKernel};
 pub use svf::{SvfFilterNode, SvfKernel};
 
-use tutti_dsp::{Cadence, ChannelRecurrence, Family, Filter};
-use tutti_types::{BusTopology, ChannelLayout, SampleRate};
-
-use crate::params::ControlSet;
-use crate::reverb::{NodeFamily, Rings};
-
-/// A filter recurrence's control set: what [`Filter`] needs of it to be one [`NodeFamily`]
-/// for the SVF, the ladder and the crossover.
-pub trait NodeRecurrence: ChannelRecurrence {
-    /// The cells of the filter's controls.
-    type Set: ControlSet<Controls = Self::Controls>;
-
-    /// The control set for a filter whose controls start at `initial`.
-    fn set(&self, initial: &Self::Controls) -> Self::Set;
-}
-
-/// A filter declares an unknown tail and never parks; it reads its controls on its own
-/// grid, so a control that moves inside a block is in the render within 16 frames.
-impl<R: NodeRecurrence> NodeFamily for Filter<R> {
-    type Set = R::Set;
-
-    fn rings(&self) -> Rings {
-        Rings::Unknown
-    }
-    const SAMPLING: Cadence = <Self as Family>::CADENCE;
-
-    fn set(&self, initial: &R::Controls) -> R::Set {
-        self.recurrence().set(initial)
-    }
-
-    fn capacity(&self, _: SampleRate) {}
-}
+use tutti_types::{BusTopology, ChannelLayout};
 
 /// The bus a filter built for a width runs on: the engine's order for it
 /// ([`BusTopology::assumed`]).

@@ -28,7 +28,7 @@ use tutti_types::MaxBlock;
 use tutti_types::{Hz, Q, SampleRate};
 use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
-    RegisteredPerNoteController, Rpn, U7, U14, Ump, Voice1, Voice2,
+    PerNoteManagement, RegisteredPerNoteController, Rpn, U7, U14, Ump, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
 
@@ -235,13 +235,11 @@ fn polysynth_every_decoded_message_is_allocation_free() {
         }),
         m2(Voice2::PerNoteManagement {
             note,
-            detach: false,
-            reset: true,
+            management: PerNoteManagement::Reset,
         }),
         m2(Voice2::PerNoteManagement {
             note,
-            detach: true,
-            reset: true,
+            management: PerNoteManagement::DetachAndReset,
         }),
         m2(Voice2::RegisteredPerNote {
             note,

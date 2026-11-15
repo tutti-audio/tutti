@@ -10,7 +10,7 @@ use tutti_plugin_types::{NoteExpressionType, NoteExpressionValue};
 use tutti_types::Samples;
 use tutti_ump::{
     Address, CCNumber, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity,
-    Sysex7Packets, SysexStatus, System, U7, U14, Ump, Voice2,
+    PerNoteManagement, Sysex7Packets, SysexStatus, System, U7, U14, Ump, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue, RegisteredPerNoteController};
 use tutti_vst3_ffi::EventList;
@@ -1160,8 +1160,7 @@ mod message {
                 address(0),
                 Voice2::PerNoteManagement {
                     note: note(60),
-                    detach: true,
-                    reset: false,
+                    management: PerNoteManagement::Detach,
                 },
             )),
             // The start of a multi-packet SysEx stands for nothing alone.

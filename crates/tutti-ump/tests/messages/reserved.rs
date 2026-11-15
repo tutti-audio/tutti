@@ -41,7 +41,7 @@ fn unknown(words: [u32; 4]) {
 
 const ALL: u32 = 0xFFFF_FFFF;
 
-/// Spec: m2-104/2.1.3#2, m2-104/2.1.3#3, m2-104/2.1.3#4, m2-104/2.1.3#5, m2-104/7.4.9#2
+/// Spec: m2-104/2.1.3#2, m2-104/2.1.3#3, m2-104/2.1.3#4, m2-104/2.1.3#5, m2-104/7.4.9#1, m2-104/7.4.9#2, m2-104/7.4.14#1, m2-104/7.4.14#2, m2-104/7.6#1, m2-104/7.7#3, m2-104/7.8#3
 #[test]
 fn reserved_bits_are_ignored() {
     // Utility: the group nibble and the data of a NOOP are reserved.
@@ -271,7 +271,7 @@ fn reserved_values_are_kept() {
     );
     // A Registered Per-Note Controller number is an index, read as one whether
     // or not Appendix A defines it, like an RPN, an NRPN or a CC index.
-    for controller in [0u32, 4, 9, 12, 69, 80, 96, 255] {
+    for controller in [0u32, 4, 9, 13, 69, 80, 96, 255] {
         kept(
             [0x4102_3C00 | controller, 7, 0, 0],
             Message::Midi2(
@@ -560,7 +560,7 @@ fn a_registered_per_note_controller_number_round_trips() {
         if let RegisteredPerNoteController::Reserved(r) = c {
             assert_eq!(r, n);
             let defined = [
-                1, 2, 3, 7, 8, 10, 11, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79,
+                1, 2, 3, 7, 8, 10, 11, 12, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79,
             ]
             .contains(&n)
                 || (91..=95).contains(&n);

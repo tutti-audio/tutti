@@ -16,7 +16,7 @@
 use core::ops::Range as Frames;
 
 use tutti_dsp::{
-    Cadence, Capacity, Channels, Effort, Family, Feed, FreeverbControls, FreeverbFamily, Grows,
+    Cadence, Capacity, Channels, Effort, Family, FreeverbControls, FreeverbFamily, Grows, Inputs,
     NetworkCapacity, Reach, Realized, Recurrence, Ring, Setup, System, TAIL_FLOOR,
 };
 use tutti_graph::{
@@ -26,13 +26,11 @@ use tutti_graph::{
 use tutti_types::{Latency, MAX_CHANNELS, MaxBlock, Mix, SampleRate, Samples, Seconds, Tail};
 
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
+use crate::tail_clock::{Heard, TailClock, UNBOUNDED, frames_tail};
 
 // The node measures its tail to `TAIL_FLOOR`: the level the wet signal has fallen to
 // when the declared tail ends, and below which the node parks, 60 dB under what it
 // carried.
-
-/// A tail of this many frames never ends.
-const UNBOUNDED: u64 = u64::MAX;
 
 /// What a [`FamilyNode`] declares of a family's ring-out, and whether it parks on it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -288,19 +286,13 @@ struct Tuned<F: NodeFamily> {
     applied: Option<F::Controls>,
     /// The tail of `network`, in frames at `rate`.
     current: u64,
-    /// The ceiling: what `Shape::tail` declares, in frames.
-    ceiling: u64,
+    /// The ring-out owed: its ceiling is what `Shape::tail` declares, in frames.
+    clock: TailClock,
     /// The processing latency the node declares: the family's own (a member's
     /// [`System::latency`], the blank's, so it does not move with a control) and what the
     /// realization adds to it ([`Realized::latency`]).
     latency: Samples,
-    /// Frames of ring-out after the last non-silent input frame that the
-    /// settings in force since may still need.
-    ring: u64,
-    /// Frames since the last non-silent input frame, up to the end of the
-    /// previous block (`UNBOUNDED` when there never was one).
-    since: u64,
-    /// Whether the realization holds exactly silence (reset, nothing since).
+    /// Whether the realization holds exactly silence (reset, nothing rendered since).
     silent: bool,
     /// Frames rendered since the last reset: where a stream grid's points fall.
     position: u64,
@@ -311,10 +303,7 @@ impl<F: NodeFamily> std::fmt::Debug for FamilyNode<F> {
         let mut d = f.debug_struct("FamilyNode");
         d.field("channels", &self.rig.channels);
         if let Some(t) = &self.tuned {
-            d.field("rate", &t.rate)
-                .field("ceiling", &t.ceiling)
-                .field("ring", &t.ring)
-                .field("since", &t.since);
+            d.field("rate", &t.rate).field("clock", &t.clock);
         }
         d.finish_non_exhaustive()
     }
@@ -358,12 +347,6 @@ impl<F: NodeFamily> FamilyNode<F> {
             tuned: None,
         }
     }
-
-    /// The controls the model was last designed from, for a node's own tests.
-    #[cfg(test)]
-    pub(crate) fn applied(&self) -> Option<F::Controls> {
-        self.tuned.as_ref().and_then(|t| t.applied)
-    }
 }
 
 impl<F: NodeFamily> Tuned<F> {
@@ -401,10 +384,8 @@ impl<F: NodeFamily> Tuned<F> {
             longest,
             applied: None,
             current: 0,
-            ceiling,
+            clock: TailClock::new(ceiling, latency.get() as u64),
             latency,
-            ring: 0,
-            since: UNBOUNDED,
             silent: true,
             position: 0,
         };
@@ -416,8 +397,7 @@ impl<F: NodeFamily> Tuned<F> {
     fn clear(&mut self, rig: &mut Rig<F>) {
         self.realization.reset();
         self.silent = true;
-        self.ring = 0;
-        self.since = UNBOUNDED;
+        self.clock.clear();
         self.position = 0;
         rig.params.land();
     }
@@ -449,42 +429,12 @@ impl<F: NodeFamily> Tuned<F> {
             current = current.max(frames(self.longest.tail(TAIL_FLOOR), self.rate));
         }
 
-        // A tail that was unbounded (a freeze) and is not now rings out from
-        // here: the energy it held is in the loop, owed to the settings in force.
-        if self.ring == UNBOUNDED && current != UNBOUNDED {
-            self.ring = current;
-            self.since = 0;
-        }
         let last_input = (0..inputs)
             .filter_map(|c| io.input(c)[..size].iter().rposition(|&s| s != 0.0))
             .max();
-        let since = self.since;
-        match last_input {
-            Some(i) => {
-                self.ring = self.ring.saturating_sub(since.saturating_add(1 + i as u64));
-                self.since = (size - 1 - i) as u64;
-                self.silent = false;
-            }
-            None => self.since = since.saturating_add(size as u64),
-        }
-        self.ring = self.ring.max(current).min(self.ceiling);
-        io.report_tail(tail_of(self.ring));
-
-        // The latency before the tail starts (a tail excludes latency).
-        let owed = if self.ring == UNBOUNDED {
-            UNBOUNDED
-        } else {
-            self.ring.saturating_add(self.latency.get() as u64)
-        };
-        let live = if owed == UNBOUNDED {
-            size as u64
-        } else {
-            match last_input {
-                Some(i) => (i as u64).saturating_add(owed).saturating_add(1),
-                None => owed.saturating_sub(since),
-            }
-        };
-        live.min(size as u64) as usize
+        let owed = self.clock.advance(current, Heard { size, last_input });
+        io.report_tail(owed.tail);
+        owed.live
     }
 
     /// Renders `frames` of the block through the realization: the main input, the
@@ -494,6 +444,7 @@ impl<F: NodeFamily> Tuned<F> {
         if frames.is_empty() {
             return;
         }
+        self.silent = false;
         let inputs = rig.channels.input_width();
         let lanes = rig.params.lanes(io);
         let (ins, mut outs) = io.split();
@@ -515,7 +466,7 @@ impl<F: NodeFamily> Tuned<F> {
             *slot = &mut ch[frames.clone()];
         }
         let width = rig.channels.output_width();
-        let mut feed = Feed::new(&input[..inputs]).with_key(&key[..keys]);
+        let mut feed = Inputs::new(&input[..inputs]).with_key(&key[..keys]);
         for (i, lane) in lanes.iter().enumerate() {
             if let Some(lane) = lane {
                 feed = feed.with_lane(i, &lane[frames.clone()]);
@@ -606,14 +557,6 @@ fn frames(tail: Ring, rate: SampleRate) -> u64 {
     }
 }
 
-fn tail_of(frames: u64) -> Tail {
-    if frames == UNBOUNDED {
-        Tail::Unbounded
-    } else {
-        Tail::Finite(Samples(usize::try_from(frames).unwrap_or(usize::MAX)))
-    }
-}
-
 fn cost(effort: Effort) -> Cost {
     match effort {
         Effort::Light => Cost::Light,
@@ -659,7 +602,7 @@ impl<F: NodeFamily> Node for FamilyNode<F> {
             .with_cost(cost(t.realization.effort()))
             .with_latency(Latency::new(t.latency))
             .with_tail(match rig.family.rings() {
-                Rings::Tracks => tail_of(t.ceiling),
+                Rings::Tracks => frames_tail(t.clock.ceiling()),
                 Rings::Unknown => Tail::Unknown,
                 Rings::Silent => Tail::None,
                 Rings::Ceiling(c) => Tail::Finite(c.get().to_samples_ceil(t.rate)),
@@ -777,10 +720,12 @@ impl<F: NodeFamily> Clone for FamilyNode<F> {
                 longest: t.longest.clone(),
                 applied: t.applied,
                 current: t.current,
-                ceiling: t.ceiling,
+                clock: {
+                    let mut clock = t.clock;
+                    clock.clear();
+                    clock
+                },
                 latency: t.latency,
-                ring: 0,
-                since: UNBOUNDED,
                 silent: true,
                 position: 0,
             }),

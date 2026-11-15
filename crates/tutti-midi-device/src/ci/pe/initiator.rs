@@ -51,7 +51,7 @@
 //!   acts on the request with that ID and on a Subscription message of the peer's
 //!   with it, and nothing is sent back. Status 144 ends the request
 //!   ([`PeOutcome::Terminated`], by the Responder) and drops the message; 408 ends it
-//!   as the NAK of a timeout ([`PeOutcome::Nak`]) and drops it; 100 holds it one more
+//!   as the NAK of a timeout ([`PeOutcome::Refused`]) and drops it; 100 holds it one more
 //!   [`PE_TIMEOUT`], as a Timeout Wait whose period the message does not name. A
 //!   Notify with another status, or for no request in flight, changes nothing.
 //! - Status (§7.4.1, Table 15): a reply ends the request with its status, as
@@ -80,7 +80,9 @@ use super::reassemble::{
     PeFlowControl, PeReassembler, PeReassemblyError, PeReassemblyLimits, PeReceived, PeStep,
 };
 use super::request_ids::RequestIds;
-use crate::{CiHeader, CiMessage, Decoded, Destination, MaxSysexSize, Muid, Nak, TimeoutWait};
+use crate::ci::handshake::Handshake;
+use crate::ci::link::Link;
+use crate::{CiHeader, CiMessage, Decoded, MaxSysexSize, Muid, Nak, TimeoutWait};
 
 /// The most times a chunk is sent again, whether for a NAK or for the lack of an
 /// ACK, before the transaction ends (M2-103 §15.5: it fails after three).
@@ -315,7 +317,7 @@ pub enum PeOutcome {
     TooLarge(BodyLimit),
     /// The peer ended the request with the NAK of a failure other than a
     /// terminate: out of sequence, malformed or a timeout.
-    Nak(PeSignal),
+    Refused(PeSignal),
     /// No reply came within the time (§12.2).
     TimedOut,
     /// What came cannot be used.
@@ -404,13 +406,6 @@ pub enum PeAction {
     Notification(PeNotification),
 }
 
-#[derive(Clone, Copy, Debug)]
-enum Phase {
-    Asking { deadline: Instant },
-    Ready(PeCapabilities),
-    Unavailable,
-}
-
 #[derive(Clone, Debug)]
 enum Work {
     Get {
@@ -475,10 +470,10 @@ struct Pending {
 /// The Initiator of Property Exchange with one peer.
 #[derive(Debug)]
 pub struct PeInitiator {
-    own: Muid,
-    peer: Muid,
+    link: Link,
     settings: PeSettings,
-    phase: Phase,
+    /// The Capabilities Inquiry: waiting, or answered with what the peer reported.
+    phase: Handshake<PeCapabilities>,
     ids: RequestIds,
     pending: Vec<Pending>,
     reassembler: PeReassembler,
@@ -491,10 +486,9 @@ impl PeInitiator {
     #[must_use]
     pub fn new(own: Muid, peer: Muid, settings: PeSettings, now: Instant) -> (Self, Vec<PeAction>) {
         let mut initiator = Self {
-            own,
-            peer,
+            link: Link { own, peer },
             settings,
-            phase: Phase::Unavailable,
+            phase: Handshake::Unanswered,
             ids: RequestIds::default(),
             pending: Vec::new(),
             reassembler: PeReassembler::new(settings.reassembly),
@@ -507,16 +501,13 @@ impl PeInitiator {
     /// The peer's MUID.
     #[must_use]
     pub fn peer(&self) -> Muid {
-        self.peer
+        self.link.peer
     }
 
     /// What the peer reported, once its Reply has come.
     #[must_use]
     pub fn capabilities(&self) -> Option<&PeCapabilities> {
-        match &self.phase {
-            Phase::Ready(capabilities) => Some(capabilities),
-            _ => None,
-        }
+        self.phase.answer()
     }
 
     /// The Subscriptions that are active, with their Resources.
@@ -533,12 +524,10 @@ impl PeInitiator {
     /// Sends the Capabilities Inquiry again and waits for the Reply, which
     /// replaces what the peer reported before.
     pub fn ask_capabilities(&mut self, now: Instant) -> Vec<PeAction> {
-        self.phase = Phase::Asking {
-            deadline: now + PE_TIMEOUT,
-        };
+        self.phase.ask(now, PE_TIMEOUT, ());
         vec![PeAction::Send(CiMessage::PropertyExchange {
             header: self.header(),
-            to: self.peer,
+            to: self.link.peer,
             message: PeCiMessage::CapabilitiesInquiry(self.settings.capabilities),
         })]
     }
@@ -560,9 +549,9 @@ impl PeInitiator {
         now: Instant,
     ) -> Result<(PeRequestId, Vec<PeAction>), PeError> {
         let capabilities = match self.phase {
-            Phase::Ready(capabilities) => capabilities,
-            Phase::Asking { .. } => return Err(PeError::CapabilitiesPending),
-            Phase::Unavailable => return Err(PeError::CapabilitiesUnavailable),
+            Handshake::Answered(capabilities) => capabilities,
+            Handshake::Asking { .. } => return Err(PeError::CapabilitiesPending),
+            Handshake::Unanswered => return Err(PeError::CapabilitiesUnavailable),
         };
         let unsubscribed = match &call {
             PeCall::Unsubscribe(id) => Some(
@@ -670,11 +659,8 @@ impl PeInitiator {
     /// with nothing waiting.
     #[must_use]
     pub fn deadline(&self) -> Option<Instant> {
-        let asking = match self.phase {
-            Phase::Asking { deadline } => Some(deadline),
-            _ => None,
-        };
-        asking
+        self.phase
+            .deadline()
             .into_iter()
             .chain(self.pending.iter().map(|pending| pending.deadline))
             .chain(self.reassembler.next_deadline())
@@ -685,8 +671,7 @@ impl PeInitiator {
     /// harmless.
     pub fn on_timeout(&mut self, now: Instant) -> Vec<PeAction> {
         let mut actions = Vec::new();
-        if matches!(self.phase, Phase::Asking { deadline } if now >= deadline) {
-            self.phase = Phase::Unavailable;
+        if self.phase.expire(now) {
             actions.push(PeAction::CapabilitiesFailed(
                 PeCapabilitiesFailure::TimedOut,
             ));
@@ -745,15 +730,13 @@ impl PeInitiator {
         let Decoded::Message(message) = decoded else {
             return actions;
         };
-        if message.header().source != self.peer
-            || message.destination() != Destination::Muid(self.own)
-        {
+        if !self.link.is_from_peer(message) || !self.link.is_to_us(message) {
             return actions;
         }
         match message {
             CiMessage::PropertyExchange { message, .. } => match message {
                 PeCiMessage::CapabilitiesReply(capabilities) => {
-                    self.phase = Phase::Ready(*capabilities);
+                    self.phase = Handshake::Answered(*capabilities);
                     actions.push(PeAction::Capabilities(*capabilities));
                 }
                 PeCiMessage::Chunk { kind, chunk } => {
@@ -769,8 +752,7 @@ impl PeInitiator {
             }
             CiMessage::Nak { nak, .. } => {
                 if nak.nak_sub_id2.get() == SUB_ID2_PE_CAPABILITIES_INQUIRY {
-                    if matches!(self.phase, Phase::Asking { .. }) {
-                        self.phase = Phase::Unavailable;
+                    if self.phase.refuse() {
                         actions.push(PeAction::CapabilitiesFailed(
                             PeCapabilitiesFailure::Refused(nak.clone()),
                         ));
@@ -800,12 +782,13 @@ impl PeInitiator {
                 let Some(at) = at else { return };
                 NOTIFY_WAIT.extend(&mut self.pending[at].deadline);
                 let kind = self.pending[at].work.reply_kind();
-                self.reassembler.extend(self.peer, kind, id, NOTIFY_WAIT);
+                self.reassembler
+                    .extend(self.link.peer, kind, id, NOTIFY_WAIT);
             }
             // As a NAK that terminates; the peer is the Responder.
             PeStatus::Terminate => {
                 self.reassembler
-                    .terminate(self.peer, PeMessageKind::SUBSCRIPTION_INQUIRY, id);
+                    .terminate(self.link.peer, PeMessageKind::SUBSCRIPTION_INQUIRY, id);
                 if let Some(at) = at {
                     self.conclude(at, PeOutcome::Terminated(PeTerminator::Responder), actions);
                 }
@@ -813,10 +796,10 @@ impl PeInitiator {
             // As a NAK that says a timeout occurred.
             PeStatus::TimedOut => {
                 self.reassembler
-                    .terminate(self.peer, PeMessageKind::SUBSCRIPTION_INQUIRY, id);
+                    .terminate(self.link.peer, PeMessageKind::SUBSCRIPTION_INQUIRY, id);
                 if let Some(at) = at {
                     let signal = PeSignal::TimedOut { request_id: id };
-                    self.conclude(at, PeOutcome::Nak(signal), actions);
+                    self.conclude(at, PeOutcome::Refused(signal), actions);
                 }
             }
             // No other status is one a Notify carries (§12).
@@ -858,7 +841,10 @@ impl PeInitiator {
             // A Get or a Set inquiry is a Responder's to read.
             return;
         };
-        match self.reassembler.push(self.peer, kind, chunk, flow, now) {
+        match self
+            .reassembler
+            .push(self.link.peer, kind, chunk, flow, now)
+        {
             Ok(PeStep::Pending { send }) => {
                 if kind.reply && self.stop_if_too_large(id, kind, None, actions) {
                     return;
@@ -924,7 +910,7 @@ impl PeInitiator {
         };
         let (header, sent) = match whole {
             Some(received) => (Some(&received.header), received.body.len()),
-            None => match self.reassembler.held(self.peer, kind, id) {
+            None => match self.reassembler.held(self.link.peer, kind, id) {
                 Some(held) => (Some(held.header), held.data.len()),
                 None => (None, 0),
             },
@@ -1108,7 +1094,7 @@ impl PeInitiator {
             PeSignal::TimeoutWait { wait, .. } => {
                 wait.extend(&mut self.pending[at].deadline);
                 let kind = self.pending[at].work.reply_kind();
-                self.reassembler.extend(self.peer, kind, id, wait);
+                self.reassembler.extend(self.link.peer, kind, id, wait);
             }
             PeSignal::SendNext { chunk, .. } => self.on_send_next(at, chunk.get(), now, actions),
             PeSignal::Resend { .. } => self.on_resend(at, now, actions),
@@ -1117,7 +1103,7 @@ impl PeInitiator {
             }
             PeSignal::OutOfSequence { .. }
             | PeSignal::Malformed { .. }
-            | PeSignal::TimedOut { .. } => self.conclude(at, PeOutcome::Nak(signal), actions),
+            | PeSignal::TimedOut { .. } => self.conclude(at, PeOutcome::Refused(signal), actions),
         }
     }
 
@@ -1178,7 +1164,7 @@ impl PeInitiator {
         let pending = self.pending.remove(at);
         self.ids.release(pending.id);
         self.reassembler
-            .terminate(self.peer, pending.work.reply_kind(), pending.id);
+            .terminate(self.link.peer, pending.work.reply_kind(), pending.id);
         actions.push(PeAction::Finished {
             request_id: pending.id,
             kind: pending.work.kind(),
@@ -1193,13 +1179,13 @@ impl PeInitiator {
     }
 
     fn header(&self) -> CiHeader {
-        CiHeader::new(self.own)
+        CiHeader::new(self.link.own)
     }
 
     fn send_chunk(&self, kind: PeMessageKind, chunk: PeChunk) -> PeAction {
         PeAction::Send(CiMessage::PropertyExchange {
             header: self.header(),
-            to: self.peer,
+            to: self.link.peer,
             message: PeCiMessage::Chunk { kind, chunk },
         })
     }
@@ -1208,12 +1194,12 @@ impl PeInitiator {
         PeAction::Send(match signal.answer(transaction) {
             PeAnswer::Ack(ack) => CiMessage::Ack {
                 header: self.header(),
-                to: self.peer,
+                to: self.link.peer,
                 ack,
             },
             PeAnswer::Nak(nak) => CiMessage::Nak {
                 header: self.header(),
-                to: self.peer,
+                to: self.link.peer,
                 nak,
             },
         })

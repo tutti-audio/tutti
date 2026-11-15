@@ -29,8 +29,11 @@
 //! [`InputProducerHandle`]: crate::InputProducerHandle
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
+
+use tutti_graph::Losses;
+use tutti_midi_device::ResourceStore;
 
 use crate::HardwareMidiInputs;
 use crate::backend;
@@ -40,7 +43,9 @@ use crate::endpoints::MidiEndpoints;
 use crate::error::{Error, Result};
 use crate::process::{ProcessChange, ReportAsk, ReportError, ReportPeer};
 use crate::profiles::{PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange};
+use crate::properties::{PropertyAsk, PropertyChange, PropertyError, PropertyPeer};
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
+use tutti_midi_device::{CiDeviceId, ProfileChange, ProfileId};
 use tutti_midi_device::{DeviceId, DeviceInfo, EntropyError, Learned, SavedDevice};
 use tutti_midi_runtime::{DeviceInlets, DeviceSlot};
 use tutti_ump::{DeviceIdentity, MidiGroup};
@@ -76,6 +81,9 @@ pub struct MidiSession {
     /// The identity MIDI-CI is enabled with; none while it is off, which is
     /// the default ([`MidiSession::enable_ci`]).
     ci_identity: Option<DeviceIdentity>,
+    /// What the MIDI-CI devices' Property Exchange Responders serve
+    /// ([`MidiSession::serve_properties`]); empty by default.
+    properties: Arc<Mutex<ResourceStore>>,
 }
 
 /// One open input, and the UMP Stream negotiation of its device.
@@ -185,6 +193,10 @@ pub enum Polled {
     /// A MIDI-CI peer answered Process Inquiry, a MIDI Message Report began or
     /// ended, or the peer's Process Inquiry was dropped.
     Process(DeviceId, PeerId, ProcessChange),
+    /// A MIDI-CI peer answered Property Exchange, a call ended, the peer
+    /// changed what the device serves, or the peer's Property Exchange was
+    /// dropped.
+    Property(DeviceId, PeerId, PropertyChange),
     /// MIDI-CI could not start a device on a Group of the device: the operating
     /// system gave no random bytes for its MUID. It is reported once until the
     /// device starts, and again if the Group leaves the device's Groups and
@@ -221,6 +233,7 @@ impl MidiSession {
             ports: Arc::new(HardwareMidiInputs::new(inlets)),
             devices: Devices::open_over(backend)?,
             ci_identity: None,
+            properties: Arc::default(),
         })
     }
 
@@ -287,7 +300,7 @@ impl MidiSession {
     ///
     /// [`Error::NoDeviceNamed`] when a name matches no input (listing the
     /// inputs it searched; an absent device is an error, never a silent
-    /// no-op). [`Error::NoDevice`] when an id names no present device — the
+    /// no-op). [`Error::NotFound`] when an id names no present device — the
     /// shape a stale id takes after a hot-plug — and [`Error::WrongDirection`]
     /// when it is not an input. Otherwise whatever the backend raises while
     /// opening the port.
@@ -412,7 +425,7 @@ impl MidiSession {
     /// # Errors
     ///
     /// [`Error::NoDeviceNamed`] when a name matches no output,
-    /// [`Error::NoDevice`] when an id names no present device,
+    /// [`Error::NotFound`] when an id names no present device,
     /// [`Error::WrongDirection`] when it is not an output, plus whatever the
     /// backend raises while opening.
     pub fn connect_output(&self, device: impl Into<DeviceQuery>) -> Result<OpenOutput> {
@@ -474,7 +487,7 @@ impl MidiSession {
                 lost_during: after > before,
             };
             held.lost_seen = after;
-            let stepped = held.stream.poll(now, &heard, ci);
+            let stepped = held.stream.poll(now, &heard, ci, &self.properties);
             // Off the moment nothing listens, so no packet is kept for no one.
             sync_hearing(ports, held, ci.is_some());
             if let Some(stream) = stepped.stream {
@@ -487,10 +500,12 @@ impl MidiSession {
                     .into_iter()
                     .map(|(peer, change)| Polled::Ci(id.clone(), peer, change)),
             );
+            let refusals = mpe_zone_refusals(&stepped.profiles, &held.stream.profiles());
             polled.extend(
                 stepped
                     .profiles
                     .into_iter()
+                    .chain(refusals)
                     .map(|(peer, change)| Polled::Profile(id.clone(), peer, change)),
             );
             polled.extend(
@@ -498,6 +513,12 @@ impl MidiSession {
                     .process
                     .into_iter()
                     .map(|(peer, change)| Polled::Process(id.clone(), peer, change)),
+            );
+            polled.extend(
+                stepped
+                    .properties
+                    .into_iter()
+                    .map(|(peer, change)| Polled::Property(id.clone(), peer, change)),
             );
             polled.extend(
                 stepped
@@ -552,6 +573,78 @@ impl MidiSession {
         self.inputs
             .get(id)
             .map_or_else(Arc::default, |held| held.stream.ci_peers())
+    }
+
+    /// The MIDI-CI messages the output of the open input `id` has refused, as
+    /// [`refused`](Losses::refused): a message the output had no room for, or
+    /// that it could no longer take, is not sent again (the protocol repeats what
+    /// matters), so this is how many a peer may never have heard. Empty when the
+    /// input is not open.
+    #[must_use]
+    pub fn ci_losses(&self, id: &DeviceId) -> Losses {
+        self.inputs
+            .get(id)
+            .map_or(Losses::NONE, |held| held.stream.ci_losses())
+    }
+
+    /// Makes the MIDI-CI devices' Property Exchange Responders serve `store`
+    /// (M2-103): on every open input and every input opened later, at the next
+    /// [`poll`](Self::poll). It replaces what was served. The session serves an
+    /// empty store until this is called.
+    ///
+    /// Every device on every input serves this one store, so a peer's Set
+    /// through one Group is seen by the others and by the app
+    /// ([`served_properties`](Self::served_properties)), and is reported as
+    /// [`PropertyChange::Served`].
+    /// The session has no way to tell a subscriber of a change the app makes,
+    /// so every entry is served as not subscribable: the ResourceList says so
+    /// and a Subscription Start is refused with the status for a Resource that
+    /// cannot be subscribed to (M2-103 §11.1). Publishing to subscribers is not
+    /// offered.
+    pub fn serve_properties(&mut self, store: ResourceStore) {
+        *self
+            .properties
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = store.without_subscriptions();
+    }
+
+    /// The store the devices serve: what [`serve_properties`](Self::serve_properties)
+    /// gave, as peers' Sets have changed it. Lock it for as short a time as a
+    /// read takes: the devices lock it inside [`poll`](Self::poll), so a guard held on
+    /// the thread that calls `poll` deadlocks it.
+    #[must_use]
+    pub fn served_properties(&self) -> Arc<Mutex<ResourceStore>> {
+        Arc::clone(&self.properties)
+    }
+
+    /// The MIDI-CI peers of the open input `id` that declared Property Exchange
+    /// and answered its Capabilities (M2-103 §3.2), by Group then MUID: empty
+    /// when it is not open or no peer did. The session asks each such peer for
+    /// its Capabilities when it is found. Shared like
+    /// [`ci_peers`](Self::ci_peers): read again after a [`Polled::Property`].
+    #[must_use]
+    pub fn property_peers(&self, id: &DeviceId) -> Arc<[PropertyPeer]> {
+        self.inputs
+            .get(id)
+            .map_or_else(Arc::default, |held| held.stream.property_peers())
+    }
+
+    /// Asks a peer for a Property Exchange call, as the Initiator (M2-103): the
+    /// request is made at the next [`poll`](Self::poll), a
+    /// [`PropertyChange::Started`] names its call and the
+    /// [`PropertyChange::Event`]s that follow end it. Make the [`PropertyAsk`]
+    /// from a handle in [`property_peers`](Self::property_peers).
+    ///
+    /// # Errors
+    ///
+    /// [`PropertyError::NotOpen`] when that input has since closed, and
+    /// [`PropertyError::NoSuchPeer`] when the peer is gone.
+    pub fn ask_property(&mut self, ask: PropertyAsk) -> std::result::Result<(), PropertyError> {
+        self.inputs
+            .get_mut(&ask.peer.device)
+            .ok_or(PropertyError::NotOpen)?
+            .stream
+            .ask_property(ask)
     }
 
     /// The inlet slot the open input `id` holds, `None` when it is not open: the
@@ -710,3 +803,38 @@ fn sync_hearing(ports: &HardwareMidiInputs, held: &mut Held, ci: bool) {
 
 #[cfg(test)]
 mod tests;
+
+/// The refusals the `changes` make news of, as the changes that say so: the
+/// zone an Enabled Report on a Manager Channel named, if its zones leave it
+/// out, and, once a peer's inquiry is whole, every zone its table already
+/// enabled that they leave out. A refusal is said once, with the change that
+/// enabled the zone.
+fn mpe_zone_refusals(
+    changes: &[(PeerId, ProfilesChange)],
+    peers: &[PeerProfiles],
+) -> Vec<(PeerId, ProfilesChange)> {
+    let mut said = Vec::new();
+    for (peer, change) in changes {
+        let named = match change {
+            ProfilesChange::Known => None,
+            ProfilesChange::Changed {
+                address: CiDeviceId::Channel(manager),
+                profile: ProfileId::MPE,
+                change: ProfileChange::Enabled,
+            } => Some(*manager),
+            _ => continue,
+        };
+        let Some(held) = peers
+            .iter()
+            .find(|p| p.group() == peer.group && p.muid() == peer.muid)
+        else {
+            continue;
+        };
+        for overlap in held.refused_mpe_zones() {
+            if named.is_none_or(|manager| overlap.added.manager() == manager) {
+                said.push((*peer, ProfilesChange::MpeZoneRefused(overlap)));
+            }
+        }
+    }
+    said
+}

@@ -3,10 +3,12 @@
 //!
 //! A [`Session`] is a [`Graph`] (a `tutti-graph` editor, the nodes inserted
 //! through it, their event feeds), its transport, and the engine side it
-//! renders on, built by a [`SessionBuilder`]: offline (the host pulls blocks
-//! with [`Session::render`]), on a device (`device`: the `!Send`
-//! `Device` stays on the thread that opened it), or detached (the
-//! executor stays on this side). One call, [`Session::update`], runs the
+//! renders on, built by a [`SessionBuilder`]. Its type parameter is its
+//! [`Clock`], what runs its blocks: [`Offline`] (the host pulls blocks with
+//! [`Session::render`]), `DeviceClock` (`device`: a sound card's callback; the
+//! `!Send` `Device` stays on the thread that opened it) or [`SystemClock`] (an
+//! OS timer thread, for an app that plays MIDI); a call a clock cannot serve
+//! is not a method of its session. One call, [`Session::update`], runs the
 //! steps of a frame in [`PHASES`] order.
 //!
 //! ```
@@ -59,6 +61,7 @@
 #[cfg(feature = "export")]
 mod bounce;
 mod builder;
+mod clock;
 #[cfg(feature = "device")]
 mod device;
 mod edge;
@@ -99,6 +102,7 @@ mod plugin_diagnostics;
 mod plugin_params;
 #[cfg(feature = "plugin")]
 mod plugin_presets;
+mod policy;
 mod pool;
 #[cfg(feature = "record")]
 mod recorder;
@@ -118,9 +122,12 @@ pub use bounce::{
     BounceLatency, BounceRendered, BounceTail, Bounced, BufferMaster, BufferStem, ExportClock,
     FileMaster, FileStem, Master, NoMaster, PrepareEdit, PreparedGraph, Range, Stem, StemGain,
 };
+pub use builder::{BlockConfig, SessionBuilder, Workers, root_width};
 #[cfg(feature = "device")]
-pub use builder::OnDevice;
-pub use builder::{Offline, SessionBuilder, Workers, root_width};
+pub use clock::DeviceClock;
+pub use clock::{Clock, Offline, OfflineSession, RealTime, SystemClock, SystemSession};
+#[cfg(feature = "testing")]
+pub use clock::{Detached, DetachedSession};
 #[cfg(feature = "device")]
 pub use device::{
     Device, DeviceEvent, DeviceLatency, DeviceRestart, DeviceRestarted, LiveSession, RestartError,
@@ -181,16 +188,21 @@ pub use params::{ParamError, RangeError, TypedParamRef};
 pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 #[cfg(feature = "plugin")]
 pub use plugin::{
-    Plugin, PluginChange, PluginEvent, PluginHealth, PluginLoad, PluginLoadRequest, PluginLoaded,
-    PluginNode, SNAPSHOT_INTERVAL, StateRestore, StateView,
+    AddPluginError, LoadedPlugin, Plugin, PluginCause, PluginChange, PluginDeclaration,
+    PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginLoad, PluginLoadRequest,
+    PluginLoaded, PluginNode, PluginPorts, PooledPlugin, SNAPSHOT_INTERVAL, StateRestore,
+    StateView,
 };
 pub(crate) use pool::Pool;
 #[cfg(feature = "sampler")]
-pub use pool::{AudioFile, audio_file};
+pub use pool::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 pub use pool::{
-    Declared, HandleError, IntoPool, Life, Load, LoadError, PoolEntry, PoolError, PoolEvent,
-    PoolKey, PoolSet, PoolState,
+    Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, Parking, PoolConfig, PoolEntry,
+    PoolError, PoolEvent, PoolKey, PoolOutcome, PoolReport, PoolSet, PoolState, PoolWait,
+    RefreshPool, RetryError, WhenLoadedError, stranded_loads,
 };
+#[cfg(feature = "plugin")]
+pub(crate) use pool::{Hold, HoldKind};
 #[cfg(feature = "soundfont")]
 pub use pool::{SoundFontFile, soundfont};
 
@@ -204,6 +216,7 @@ pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 pub use plugin_params::{Param, ParamGesture, Params, PluginParamError, TypedParam};
 #[cfg(feature = "plugin")]
 pub use plugin_presets::{PresetEntry, PresetKind, Presets};
+pub use policy::{OutputPolicy, OutputPolicyError, OutputPolicyHandle, Policy};
 #[cfg(feature = "record")]
 pub use recorder::{Finite, IDLE_PARK, Live, PumpLoop, PumpPass, Recorder, RecorderError};
 #[cfg(feature = "plugin")]
@@ -212,7 +225,7 @@ pub use recovery::{
     ReloadCause,
 };
 #[cfg(feature = "sampler")]
-pub use sampler::{Residency, STREAM_ABOVE_BYTES, SamplerError, SamplerEvent, SamplerLoad};
+pub use sampler::{SamplerError, SamplerEvent, SamplerLoad};
 #[cfg(feature = "midi")]
 pub use session::MidiNodes;
 #[cfg(feature = "modulation")]
@@ -227,7 +240,7 @@ pub use take::{
 pub use tutti_dsp::DitherShape;
 #[cfg(feature = "record")]
 pub use tutti_dsp::{DitherSink, DitherSpec};
-pub use tutti_engine::{HeardOpen, Playhead};
+pub use tutti_engine::{HeardOpen, OutputPlacement, Playhead};
 #[cfg(feature = "export")]
 pub use tutti_export::{
     EventLossPolicy, Normalize, Outcome, Produced, Progress, Rendered, Resample, Stage, Written,

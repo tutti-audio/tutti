@@ -27,7 +27,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use crate::{Session, SessionEvent};
+use crate::{Clock, Session, SessionEvent};
 
 /// One unit of blocking work the session hands to its spawner
 /// ([`SessionBuilder::spawn_with`](crate::SessionBuilder::spawn_with)). The
@@ -171,7 +171,7 @@ enum Arrival {
 }
 
 /// A job's lander, typed away: it downcasts what its own work sent.
-type Lander = Box<dyn FnMut(&mut Session, Arrival, &mut Vec<SessionEvent>) + Send>;
+type Lander<C> = Box<dyn FnMut(&mut Session<C>, Arrival, &mut Vec<SessionEvent>) + Send>;
 
 /// The spawner a host gives the session.
 #[derive(Clone)]
@@ -204,16 +204,16 @@ impl fmt::Debug for Spawner {
 
 /// The session's jobs: the spawner, the channel their arrivals come back
 /// on, and the lander of each job still running.
-pub(crate) struct Jobs {
+pub(crate) struct Jobs<C: Clock> {
     spawn: Spawner,
     tx: Sender<Arrival>,
     rx: Receiver<Arrival>,
-    landers: HashMap<JobId, Lander>,
+    landers: HashMap<JobId, Lander<C>>,
     next: tutti_types::Mint,
     closed: Arc<AtomicBool>,
 }
 
-impl fmt::Debug for Jobs {
+impl<C: Clock> fmt::Debug for Jobs<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Jobs")
             .field("running", &self.landers.len())
@@ -221,7 +221,43 @@ impl fmt::Debug for Jobs {
     }
 }
 
-impl Jobs {
+/// What a job reports when it ends: the events of its landing, built where the
+/// result is, so the lander needs nothing of the session.
+#[cfg(feature = "midi")]
+pub(crate) type Report = Box<dyn FnOnce(&mut Vec<SessionEvent>) + Send>;
+
+/// The jobs a handle that holds no session (the session's MIDI view) submits:
+/// jobs whose landing only reports events, so they do not name the session's
+/// clock.
+#[cfg(feature = "midi")]
+pub(crate) trait EventJobs: fmt::Debug {
+    /// Runs `work` on the spawner and reports what it returns at a later
+    /// update; a job that did not finish reports what `failed` makes of why.
+    fn submit_events(
+        &mut self,
+        work: Box<dyn FnOnce() -> Report + Send>,
+        failed: Box<dyn FnOnce(JobFailed) -> Report + Send>,
+    );
+}
+
+#[cfg(feature = "midi")]
+impl<C: Clock> EventJobs for Jobs<C> {
+    fn submit_events(
+        &mut self,
+        work: Box<dyn FnOnce() -> Report + Send>,
+        failed: Box<dyn FnOnce(JobFailed) -> Report + Send>,
+    ) {
+        self.submit(work, move |_, done, events| {
+            let report = match done {
+                Ok(report) => report,
+                Err(why) => failed(why),
+            };
+            report(events);
+        });
+    }
+}
+
+impl<C: Clock> Jobs<C> {
     pub(crate) fn new(spawn: Spawner) -> Self {
         let (tx, rx) = channel();
         Self {
@@ -235,13 +271,13 @@ impl Jobs {
     }
 }
 
-impl Drop for Jobs {
+impl<C: Clock> Drop for Jobs<C> {
     fn drop(&mut self) {
         self.closed.store(true, Ordering::Release);
     }
 }
 
-impl Jobs {
+impl<C: Clock> Jobs<C> {
     /// Runs `work` on the spawner and lands its result in a later
     /// [`Session::update`], on the control thread.
     ///
@@ -254,7 +290,7 @@ impl Jobs {
     where
         R: Send + 'static,
         W: FnOnce() -> R + Send + 'static,
-        L: FnOnce(&mut Session, Result<R, JobFailed>, &mut Vec<SessionEvent>) + Send + 'static,
+        L: FnOnce(&mut Session<C>, Result<R, JobFailed>, &mut Vec<SessionEvent>) + Send + 'static,
     {
         let mut land = Some(land);
         self.submit_stream(
@@ -282,7 +318,7 @@ impl Jobs {
         M: Send + 'static,
         R: Send + 'static,
         W: FnOnce(&Landings<M>) -> R + Send + 'static,
-        L: FnMut(&mut Session, Landed<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
+        L: FnMut(&mut Session<C>, Landed<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
     {
         let jobs = &mut *self;
         let id = JobId(jobs.next.mint().get());
@@ -292,7 +328,7 @@ impl Jobs {
             closed: Arc::clone(&jobs.closed),
             _message: PhantomData,
         };
-        let lander: Lander = Box::new(move |session, arrival, events| {
+        let lander: Lander<C> = Box::new(move |session, arrival, events| {
             let landed = match arrival {
                 Arrival::Message(_, message) => Landed::Message(
                     *message
@@ -326,7 +362,7 @@ impl Jobs {
     }
 }
 
-impl Session {
+impl<C: Clock> Session<C> {
     /// Lands what the jobs sent since the last update, in arrival order.
     /// What arrives during a lander (a job it submits that ends at once)
     /// waits for the next update.
@@ -349,7 +385,7 @@ impl Session {
     }
 }
 
-fn panic_message(payload: &(dyn Any + Send)) -> String {
+pub(crate) fn panic_message(payload: &(dyn Any + Send)) -> String {
     payload
         .downcast_ref::<&str>()
         .map(|s| (*s).to_owned())
@@ -365,12 +401,12 @@ mod tests {
     use std::time::{Duration, Instant};
     use tutti_types::SampleRate;
 
-    fn session(builder: crate::SessionBuilder) -> Session {
+    fn session(builder: crate::SessionBuilder) -> crate::DetachedSession {
         builder.build_detached(SampleRate::SR_48K).unwrap()
     }
 
     /// Updates until `done` holds, or panics after a generous wait.
-    fn update_until(s: &mut Session, done: impl Fn() -> bool) -> Vec<SessionEvent> {
+    fn update_until(s: &mut crate::DetachedSession, done: impl Fn() -> bool) -> Vec<SessionEvent> {
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut events = Vec::new();
         while !done() {

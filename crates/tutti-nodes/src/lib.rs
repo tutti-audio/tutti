@@ -16,7 +16,7 @@
 //! - **Filters** — `SvfFilterNode`, `LadderFilterNode` (both any width, one
 //!   coefficient solve shared across the channels) and `EqBandNode`.
 //! - **Crossover** — `CrossoverNode`, which makes `bands × channels` outputs from
-//!   `tutti_dsp::CrossoverFamily`, a 2 to 6 band Linkwitz-Riley 4th-order split (the
+//!   `tutti_dsp::CrossoverBank`, a 2 to 6 band Linkwitz-Riley 4th-order split (the
 //!   bands sum to flat magnitude; IIR, so not linear-phase and no latency). Each
 //!   crossover is an indexed `Cutoff` param (`UnitAddr::new(UnitParam::Cutoff, i)`).
 //! - **Delay** — `DelayNode` (any width, with a checked cross-feedback `Routing`),
@@ -46,10 +46,10 @@
 //! - **Mixing** — `BusStripNode` (volume / balance; a mute or bypass is the graph's `NodeMode`).
 //!   Summing is the graph's: a port or an output channel sums its sources; so is
 //!   folding between layouts (a bus edge between declared buses).
-//! - **Spatial** — `VbapPannerNode` (stereo in, one output per speaker of a 2, 4,
-//!   6, 8 or 12 channel layout) and `HrtfBinauralNode` (two outputs, by FFT
-//!   convolution against a caller-supplied HRIR sphere), both steered by their
-//!   params (bearing, height, spread and width, or the blend), de-zippered. A mix of several panned sources
+//! - **Spatial** — `VbapPannerNode` (stereo in, one output per channel of a `Bed`)
+//!   and `HrtfBinauralNode` (two outputs, by FFT convolution against a
+//!   caller-supplied HRIR sphere), both steered by their params (bearing,
+//!   height, spread and width, or the blend), glided. A mix of several panned sources
 //!   is plain fan-in: wire each panner's outputs to the same graph ports.
 //! - **Param ports** — each modulatable node declares its params once, with its
 //!   cells (`tutti_graph::declare_params!`), as param ports, filled per
@@ -67,8 +67,8 @@
 //! A `*Node` is the graph-facing node; the inner object some are built from,
 //! `Modulator`, carries no suffix, because it is not a node and
 //! can be used on its own. The algorithms are `tutti-dsp`'s (`tutti_dsp::DelayLine`,
-//! `tutti_dsp::CrossoverFamily`, …); this crate re-exports only the types in a node's
-//! signature: `SvfType`, `LadderType`, `Real`, `CrossoverError`,
+//! `tutti_dsp::CrossoverBank`, …); this crate re-exports only the types in a node's
+//! signature: `SvfType`, `LadderType`, `Lanes`, `CrossoverError`,
 //! `InterpolationMode` and `ShapeKind`.
 //!
 //! Nothing in this crate can fail: there is no `Error` type, and a node is ready
@@ -184,9 +184,9 @@
 //! - Filters: [`SvfFilterNode`] ([`SvfType`]), [`LadderFilterNode`]
 //!   ([`LadderType`]), [`EqBandNode`]; the coefficient solvers
 //!   [`SvfCoeffs::new`](tutti_dsp::SvfCoeffs::new) and
-//!   [`LadderCoeffs::new`](tutti_dsp::LadderCoeffs::new); [`Real`], the
-//!   `f32`/`f64` state type.
-//! - Crossover: [`CrossoverNode`], over `tutti_dsp::CrossoverFamily`, a 2 to 6 band
+//!   [`LadderCoeffs::new`](tutti_dsp::LadderCoeffs::new); the `f32`/`f64` state type
+//!   is `tutti_buffers::Float` with [`Lanes`].
+//! - Crossover: [`CrossoverNode`], over `tutti_dsp::CrossoverBank`, a 2 to 6 band
 //!   Linkwitz-Riley 4th-order split (`f64` state, solved on the stream's 16-frame grid), each
 //!   crossover frequency an indexed [`Cutoff`](tutti_types::UnitParam::Cutoff) param, with
 //!   [`CrossoverError`].
@@ -225,6 +225,7 @@ mod buses;
 #[macro_use]
 mod params;
 mod ramp;
+mod tail_clock;
 
 // Rendering helpers for the width-generic nodes' unit tests.
 #[cfg(test)]
@@ -275,13 +276,14 @@ pub use tutti_dsp::ShapeKind;
 
 mod filter;
 pub use filter::{
-    CrossoverNode, EqBandNode, LadderFilterNode, NodeRecurrence, SvfFilterNode, SvfKernel,
+    CrossoverKernel, CrossoverNode, EqBandNode, LadderFilterNode, LadderKernel, SvfFilterNode,
+    SvfKernel,
 };
 // The types in the filter nodes' signatures stay reachable from here; the
 // algorithms behind them (`SvfCoeffs`, `LadderCoeffs`, `CrossoverModel`) are
 // `tutti-dsp`'s only.
 pub use tutti_dsp::{
-    CrossoverControls, CrossoverError, LadderControls, LadderType, Real, SvfControls, SvfType,
+    CrossoverControls, CrossoverError, LadderControls, LadderType, Lanes, SvfControls, SvfType,
 };
 
 mod dynamics;
@@ -309,12 +311,12 @@ mod reverb;
 pub use params::{At, Control, ControlRead, ControlSet, ControlValid, Params};
 pub use reverb::{FamilyNode, FreeverbNode, NodeFamily, Rings, TailCeiling, TailCeilingError};
 
-// The feedback delay network as a `FamilyNode`.
+// The feedback delay network as a `KernelNode`.
 mod reverb_fdn;
-pub use reverb_fdn::FdnNode;
+pub use reverb_fdn::{FdnKernel, FdnNode};
 
-// The families and controls that sit in a `FamilyNode<F>`'s signature.
-pub use tutti_dsp::{FdnControls, FdnFamily, FreeverbControls, FreeverbFamily};
+// The families and controls that sit in a node's signature.
+pub use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, FreeverbFamily};
 
 // The spatial panners: VBAP speaker panning and binaural HRTF rendering.
 mod spatial;

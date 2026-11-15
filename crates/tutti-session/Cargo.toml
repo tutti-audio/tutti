@@ -50,7 +50,7 @@ tutti-midi-file = { version = "0.0.1", path = "../tutti-midi-file", optional = t
 tutti-midi-hardware = { version = "0.0.1", path = "../tutti-midi-hardware", optional = true }
 tutti-sampler = { version = "0.0.1", path = "../tutti-sampler", default-features = false, optional = true }
 tutti-soundfont = { version = "0.0.1", path = "../tutti-soundfont", optional = true }
-# The font a `Midi::load_soundfont` job opens (`tutti-soundfont` does not re-export it).
+# The font a `soundfont` pool entry opens (`tutti-soundfont` does not re-export it).
 tutti-sf2 = { version = "0.0.1", path = "../tutti-sf2", optional = true }
 tutti-polysynth = { version = "0.0.1", path = "../tutti-polysynth", optional = true }
 tutti-export = { version = "0.0.1", path = "../tutti-export", default-features = false, optional = true }

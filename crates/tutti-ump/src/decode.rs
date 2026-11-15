@@ -23,9 +23,9 @@ use crate::message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BlockFilter, BlockSelect,
     ChordBass, ChordName, ChordPitch, ChordType, Data128, DeviceIdentity, Direction,
     DiscoveryFilter, EndpointInfo, Flex, FlexAddress, FlexTextKind, Form, FunctionBlockInfo,
-    KeySignature, Letter, Message, Metronome, Midi1Port, MixedDataHeader, Protocol, Stream,
-    StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus, System, TimeSignature, UiHint,
-    UmpVersion, Unknown, Utility, Voice1, Voice2,
+    KeySignature, Letter, Message, Metronome, Midi1Port, MixedDataHeader, PerNoteManagement,
+    Protocol, Stream, StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus, System, TimeSignature,
+    UiHint, UmpVersion, Unknown, Utility, Voice1, Voice2,
 };
 use crate::{
     BendValue, CCNumber, ControlValue, ManufacturerId, MdsChunk, MdsChunkSize, MdsChunks,
@@ -347,10 +347,12 @@ fn voice2(w: [u32; 4]) -> Option<Voice2> {
         }),
         0xD => Some(Voice2::ChannelPressure(ControlValue::new(data))),
         0xE => Some(Voice2::PitchBend(BendValue::new(data))),
-        0xF => Some(Voice2::PerNoteManagement {
-            note: note(w0, 1),
-            detach: flag(w0, 1),
-            reset: flag(w0, 0),
+        // D=0 and S=0 has no defined function: it is not a message.
+        0xF => PerNoteManagement::from_flags(flag(w0, 1), flag(w0, 0)).map(|management| {
+            Voice2::PerNoteManagement {
+                note: note(w0, 1),
+                management,
+            }
         }),
         _ => None,
     }

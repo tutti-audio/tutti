@@ -67,6 +67,26 @@ impl StandardProfile {
     /// `0x00`, version `0x01`, level `0x01`.
     pub const MPE: Self = Self::new(U7::of(0x31), U7::of(0x00), U7::of(0x01), U7::of(0x01));
 
+    /// The Note On Orchestral Articulation Profile (M2-123 section 3.2, Table
+    /// 4): bank `0x21`, number `0x01`, version `0x01`, level `0x01`.
+    pub const ARTICULATION: Self =
+        Self::new(U7::of(0x21), U7::of(0x01), U7::of(0x01), U7::of(0x01));
+
+    /// The Rotary Speaker Profile (M2-122 §3.1, Table 4): bank `0x22`, number
+    /// `0x00`, version `0x01`, level `0x01`.
+    pub const ROTARY_SPEAKER: Self =
+        Self::new(U7::of(0x22), U7::of(0x00), U7::of(0x01), U7::of(0x01));
+
+    /// The General MIDI 2 Function Block Profile (M2-118 §3.4, Table 4): bank
+    /// `0x00`, number `0x00`, version `0x01`, level `0x01`.
+    pub const GM2_FUNCTION_BLOCK: Self =
+        Self::new(U7::of(0x00), U7::of(0x00), U7::of(0x01), U7::of(0x01));
+
+    /// The General MIDI 2 Single Channel Profile (M2-119 §3.2, Table 4): bank
+    /// `0x20`, number `0x02`, version `0x01`, level `0x01`.
+    pub const GM2_SINGLE_CHANNEL: Self =
+        Self::new(U7::of(0x20), U7::of(0x02), U7::of(0x01), U7::of(0x01));
+
     /// A Standard Defined Profile. Every combination of the four bytes is one;
     /// what each means is the Profile's specification's (byte 5, the level, is
     /// M2-102 §3.2's).
@@ -150,6 +170,21 @@ pub enum ProfileId {
 impl ProfileId {
     /// The MPE Profile ([`StandardProfile::MPE`]).
     pub const MPE: Self = Self::Standard(StandardProfile::MPE);
+
+    /// The Note On Orchestral Articulation Profile
+    /// ([`StandardProfile::ARTICULATION`]).
+    pub const ARTICULATION: Self = Self::Standard(StandardProfile::ARTICULATION);
+
+    /// The General MIDI 2 Function Block Profile
+    /// ([`StandardProfile::GM2_FUNCTION_BLOCK`]).
+    pub const GM2_FUNCTION_BLOCK: Self = Self::Standard(StandardProfile::GM2_FUNCTION_BLOCK);
+
+    /// The General MIDI 2 Single Channel Profile
+    /// ([`StandardProfile::GM2_SINGLE_CHANNEL`]).
+    pub const GM2_SINGLE_CHANNEL: Self = Self::Standard(StandardProfile::GM2_SINGLE_CHANNEL);
+
+    /// The Rotary Speaker Profile ([`StandardProfile::ROTARY_SPEAKER`]).
+    pub const ROTARY_SPEAKER: Self = Self::Standard(StandardProfile::ROTARY_SPEAKER);
 
     /// The five wire bytes.
     #[must_use]

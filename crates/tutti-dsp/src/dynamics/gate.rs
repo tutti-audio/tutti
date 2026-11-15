@@ -10,7 +10,7 @@
 //! image does not move when one side is louder.
 //!
 //! The threshold is the one control read **per frame** when the graph drives it (lane 0 of
-//! the [`Feed`]): it is a level to compare
+//! the [`Inputs`]): it is a level to compare
 //! against, not a coefficient. Every other control lands on the stream grid
 //! ([`Family::CADENCE`]), the range over [`GAIN_GLIDE`] (it multiplies the output
 //! directly, so a step in it is a click) and the rest whole: the times only move what the
@@ -26,7 +26,7 @@ use super::key_source::KeySource;
 use crate::control::COEFF_STREAM;
 use crate::smoother::Smoother;
 use crate::{
-    Approach, Cadence, Channels, Effort, Family, Feed, Glide, Recurrence, Ring, Setup, Start,
+    Approach, Cadence, Channels, Effort, Family, Glide, Inputs, Recurrence, Ring, Setup, Start,
     Steps, System,
 };
 
@@ -285,7 +285,7 @@ pub struct GateState {
 ///
 /// K, per frame: the key's level (the loudest channel of the [`KeySource`]'s source, the
 /// side-chain or the signal; a NaN reads as quiet), the decision *open* (against the
-/// member's linear threshold, or, when lane 0 of the [`Feed`] is finite at the frame,
+/// member's linear threshold, or, when lane 0 of the [`Inputs`] is finite at the frame,
 /// against that threshold in dB: the level in dB, floored at [`Db::FLOOR`], at or over
 /// it), the follower (the attack coefficient toward 1 and the hold counter reloaded while
 /// open; the counter counting down while closed, the follower still; then the release
@@ -372,7 +372,7 @@ impl Recurrence for GateRecurrence {
         &self,
         coeffs: &GateCoeffs,
         state: &mut GateState,
-        feed: &Feed<'_>,
+        feed: &Inputs<'_>,
         output: &mut [&mut [f32]],
         frames: Range<usize>,
         _: usize,

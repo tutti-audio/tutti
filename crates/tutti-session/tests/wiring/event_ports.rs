@@ -7,7 +7,7 @@
 //! The figures are the graph's own: which edges it holds.
 
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
-use tutti_session::{ConnectError, EventInPort, EventOutPort, Session};
+use tutti_session::{ConnectError, DetachedSession, EventInPort, EventOutPort, Session};
 use tutti_types::{ChannelLayout, SampleRate};
 
 /// A node with `IN` event inputs and `OUT` event outputs and nothing else.
@@ -26,7 +26,7 @@ impl<const IN: u16, const OUT: u16> Node for Events<IN, OUT> {
     fn reset(&mut self) {}
 }
 
-fn detached() -> Session {
+fn detached() -> DetachedSession {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::SR_48K)

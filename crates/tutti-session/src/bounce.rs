@@ -1042,6 +1042,11 @@ pub enum BounceError {
     /// still alive. Finish or drop it first.
     #[error("another bounce is in flight")]
     InFlight,
+    /// A declared pool entry has not landed: a bounce never forks a pending
+    /// entry silently. These are the pending entries' keys, in
+    /// declaration order; wait with [`Session::pool_loaded`] first.
+    #[error("{} pool entries are still loading", .0.len())]
+    PoolPending(Vec<crate::PoolKey>),
     /// The bounce asks for something no render could give.
     #[error("bounce: {0}")]
     Config(#[from] BounceConfigError),
@@ -1697,7 +1702,7 @@ fn span(
     }
 }
 
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// Starts a bounce: checks what it names, derives what it does not,
     /// gathers its fork of the live graph here (what it reads of the live graph
     /// and its nodes, now; an in-process VST2 plugin's second instance is built
@@ -1731,7 +1736,8 @@ impl Session {
     /// # Errors
     ///
     /// [`BounceError::InFlight`] while another bounce's token lives;
-    /// [`BounceError::Config`] for a request that names no
+    /// [`BounceError::PoolPending`] while a declared pool entry has not
+    /// landed; [`BounceError::Config`] for a request that names no
     /// range, whose range keeps no frame, or for a graph with no outputs (all
     /// before anything is forked); [`BounceError::NotForkable`] and
     /// [`BounceError::Fork`] for a node the fork cannot copy.
@@ -1741,6 +1747,10 @@ impl Session {
     ) -> Result<BounceJob<M>, BounceError> {
         if self.bounce.in_flight() {
             return Err(BounceError::InFlight);
+        }
+        let pending = self.pool.pending();
+        if !pending.is_empty() {
+            return Err(BounceError::PoolPending(pending));
         }
         let Bounce {
             master,
@@ -2050,13 +2060,55 @@ mod tests {
     }
 
     /// A detached session whose outputs hear a dc node: something to bounce.
-    fn session() -> Session {
+    fn session() -> crate::DetachedSession {
         let mut session = Session::builder().build_detached(RATE).unwrap();
         let (dc, _) = session
             .graph()
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.0)));
         session.graph().connect(dc, Root).unwrap();
         session
+    }
+
+    /// **A bounce refuses while a declared pool entry is pending**, naming it,
+    /// and renders once it landed.
+    #[test]
+    fn a_bounce_is_refused_while_a_declared_pool_entry_is_pending() {
+        use crate::{Declared, Life, Load, PoolEntry, PoolKey};
+        use std::sync::Mutex;
+
+        struct Slow;
+        impl PoolEntry for Slow {
+            type Identity = ();
+            type Loaded = ();
+            type Handle = ();
+            fn identity(&self) {}
+            fn load(&self) -> Load<()> {
+                Load::on_worker(|| Ok(()))
+            }
+            fn handle(_: &(), _: &Life) {}
+        }
+        let held = Arc::new(Mutex::new(Vec::new()));
+        let spawned = Arc::clone(&held);
+        let mut session = Session::builder()
+            .spawn_with(move |job| spawned.lock().unwrap().push(job))
+            .build_detached(RATE)
+            .unwrap();
+        let (dc, _) = session
+            .graph()
+            .add(ForkByClone(tutti_nodes::testing::Const::mono(0.0)));
+        session.graph().connect(dc, Root).unwrap();
+        session.pool(Declared::new("slow", Slow)).unwrap();
+        match session.bounce(short()) {
+            Err(BounceError::PoolPending(keys)) => {
+                assert_eq!(keys, [PoolKey::new(&"slow")]);
+            }
+            other => panic!("refused naming the pending entry, got {other:?}"),
+        }
+        for job in held.lock().unwrap().drain(..) {
+            job.run();
+        }
+        let _ = session.update();
+        assert!(session.bounce(short()).is_ok(), "landed, so it renders");
     }
 
     /// The planes of a finished buffers bounce.
@@ -2209,7 +2261,10 @@ mod tests {
     #[test]
     fn a_bounce_that_misses_what_it_needs_is_refused_before_it_forks() {
         let mut session = session();
-        fn refused<M: Master>(session: &mut Session, b: Bounce<NodeKey, M>) -> BounceConfigError {
+        fn refused<M: Master>(
+            session: &mut crate::DetachedSession,
+            b: Bounce<NodeKey, M>,
+        ) -> BounceConfigError {
             match session.bounce_start(b) {
                 Err(BounceError::Config(e)) => e,
                 other => panic!("expected a config error, got {other:?}"),
@@ -2416,7 +2471,7 @@ mod tests {
     #[test]
     fn a_leaked_bounce_is_warned_about_once() {
         let mut session = session();
-        let collect = |session: &mut Session, at: Instant| {
+        let collect = |session: &mut crate::DetachedSession, at: Instant| {
             session.run_phase(Phase::Collect, PhaseCx::at(at), &mut Vec::new());
             session.bounce.stall_warnings
         };
@@ -2454,7 +2509,9 @@ mod tests {
         // Back to back, with no collect between: 50 minutes, then 59.
         let t2 = t1 + 4 * BOUNCE_STALL_WARNING;
         assert_eq!(collect(&mut session, t2), 2, "nothing in flight");
-        let start = |session: &mut Session| session.bounce_start(short()).expect("a bounce starts");
+        let start = |session: &mut crate::DetachedSession| {
+            session.bounce_start(short()).expect("a bounce starts")
+        };
         let first = start(&mut session);
         assert_eq!(collect(&mut session, t2), 2);
         assert_eq!(collect(&mut session, t2 + 50 * minute), 2);

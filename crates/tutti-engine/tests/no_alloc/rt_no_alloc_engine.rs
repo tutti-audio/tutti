@@ -723,3 +723,140 @@ fn a_714_root_block_is_allocation_free() {
         );
     }
 }
+
+/// A published root and a stated device are looked up and applied without
+/// allocating: a 7.1.4 root declared as the next generation, into a twelve-wide
+/// device stated with its front pair swapped, renders the swapped fronts and
+/// every other channel straight, in blocks that allocate nothing.
+#[test]
+fn a_declared_root_into_a_stated_device_is_allocation_free() {
+    use tutti_graph::{Editor, NodeKey, OutPort, Prepare, Source, Unforkable};
+    use tutti_types::{Bed, ChannelTopology, Speaker};
+
+    let transport = Transport::new(SampleRate::of(48_000.0));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::of(48_000.0),
+        tutti_types::MaxBlock::of(tutti_types::Samples(512)),
+    ));
+    ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
+    ed.spec_mut().topology.set_outputs((0..12).map(|port| {
+        Source::Node(OutPort {
+            node: NodeKey(1),
+            port,
+        })
+    }));
+    ed.commit().expect("commits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
+    let control = engine.output_control();
+    let twelve = ChannelLayout::from(12u16);
+    let mut speakers = Bed::Surround714.topology().positions().unwrap().to_vec();
+    speakers.swap(0, 1);
+    assert_eq!(speakers[0], Speaker::FrontRight);
+    control
+        .state_device(twelve, Some(ChannelTopology::new(speakers).unwrap()))
+        .expect("a stated device");
+    let id = ed.spec().root_id.next();
+    control
+        .publish_root(id, Some(Bed::Surround714.topology()), twelve)
+        .expect("places");
+    ed.spec_mut().root_id = id;
+    ed.commit().expect("commits");
+
+    let mut out = vec![0.0f32; 512 * 12];
+    // The first guarded block adopts the plan that carries the new root, lends
+    // its folds and renders with them: the swap block allocates nothing.
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..16 {
+            engine.process(&mut InterleavedMut::new(&mut out, twelve).unwrap());
+        }
+    });
+    let v = |c: usize| (c + 1) as f32 / 16.0;
+    for frame in out.as_chunks::<12>().0 {
+        assert_eq!(frame[0], v(1), "the left channel carries the right speaker");
+        assert_eq!(frame[1], v(0));
+        for (c, &s) in frame.iter().enumerate().skip(2) {
+            assert_eq!(s, v(c), "channel {c}");
+        }
+    }
+}
+
+/// A routing set live (a stereo monitor on outputs 3 and 4) and output gains
+/// ramping (a mute and a dim, retargeted in mid-ramp) are applied without
+/// allocating: the 64-frame blocks through both ramps and after them are
+/// guarded, each `set_levels` (which publishes on the control side) runs
+/// between guarded calls, and the settled figures are checked.
+#[test]
+fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
+    use tutti_engine::{OutputLevels, OutputMap, OutputStrip, Routing};
+    use tutti_graph::{Editor, NodeKey, OutPort, Prepare, Source, Unforkable};
+    use tutti_types::{Amplitude, Bed};
+
+    let transport = Transport::new(SampleRate::of(48_000.0));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::of(48_000.0),
+        tutti_types::MaxBlock::of(tutti_types::Samples(512)),
+    ));
+    ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
+    ed.spec_mut().topology.set_outputs((0..12).map(|port| {
+        Source::Node(OutPort {
+            node: NodeKey(1),
+            port,
+        })
+    }));
+    ed.commit().expect("commits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
+    let twelve = ChannelLayout::from(12u16);
+    engine.support_output(twelve).expect("a width");
+    let control = engine.output_control();
+    // Blocks of 64 frames: the 240-frame declick crosses four of them.
+    let mut out = vec![0.0f32; 64 * 12];
+    let mut block = |engine: &Engine| {
+        assert_no_alloc::assert_no_alloc(|| {
+            engine.process(&mut InterleavedMut::new(&mut out, twelve).unwrap());
+        });
+    };
+    // The first block adopts the plan (the commit apply is guarded elsewhere).
+    engine.process(&mut InterleavedMut::new(&mut vec![0.0f32; 64 * 12], twelve).unwrap());
+
+    control.set_routing(Routing {
+        monitor: Some(Bed::Stereo.topology()),
+        map: OutputMap::channels([2, 3]).unwrap(),
+        ..Routing::default()
+    });
+    let strip = |mute| OutputStrip {
+        mute,
+        ..OutputStrip::default()
+    };
+    let mut levels = OutputLevels::new();
+    levels.set_strip(2, strip(true)).unwrap();
+    control.set_levels(&levels.clone().with_dim(Some(Amplitude(0.5))).unwrap());
+    // Two blocks into the first ramp...
+    block(&engine);
+    block(&engine);
+    // ...the targets turn: output 2 is heard again and output 3 is muted, at
+    // another dim.
+    levels.set_strip(2, strip(false)).unwrap();
+    levels.set_strip(3, strip(true)).unwrap();
+    control.set_levels(&levels.with_dim(Some(Amplitude(0.25))).unwrap());
+    for _ in 0..8 {
+        block(&engine);
+    }
+    // Settled: output 3 is silent, output 4 is the stereo fold's left channel
+    // at the dim, the rest are silent.
+    let v = |c: usize| (c + 1) as f32 / 16.0;
+    let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
+    let left = v(0) + m * (v(2) + v(4) + v(6) + v(8) + v(10));
+    for frame in out.as_chunks::<12>().0 {
+        assert!(
+            (frame[2] - left * 0.25).abs() < 1e-5,
+            "{} vs {}",
+            frame[2],
+            left * 0.25
+        );
+        for (c, &s) in frame.iter().enumerate() {
+            if c != 2 {
+                assert_eq!(s, 0.0, "output {c}");
+            }
+        }
+    }
+}

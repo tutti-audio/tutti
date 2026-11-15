@@ -11,9 +11,8 @@ use super::select;
 ///
 /// The retreat halves the distance to the plane each round, so the bound is a
 /// number of halvings and not an angle. Measured over a 5 by 5 degree grid of
-/// the five presets, the worst case is two rounds (Atmos, far below the
-/// array); the horizontal layouts need at most one, and only exactly at the
-/// poles. Eight is therefore slack rather than a budget: it exists so the loop
+/// the beds, the worst case is four rounds (7.1.4, far below the array); the
+/// horizontal layouts need at most one, and only exactly at the poles. Eight is therefore slack rather than a budget: it exists so the loop
 /// is bounded on the audio thread, not because any real bearing approaches it.
 const MAX_ELEVATION_RETREATS: u32 = 8;
 
@@ -72,7 +71,7 @@ impl Tuple {
 
 /// A speaker array, ready to pan over.
 ///
-/// Built once on the control side by [`new`](Self::new) or a preset; the solve
+/// Built once on the control side by [`from_bed`](Self::from_bed) or [`new`](Self::new); the solve
 /// ([`gains_into`](Self::gains_into)) takes `&self` and allocates nothing, so one layout
 /// serves any number of sources.
 #[derive(Debug, Clone)]
@@ -88,9 +87,7 @@ impl SpeakerLayout {
     ///
     /// Gain `i` is the `i`-th placed speaker of the bed in the bed's own channel
     /// order ([`Bed::topology`]): the LFE has no direction and is never fed, so a
-    /// bed with one has a gain slice one shorter than its width. A topology that
-    /// [`Bed::from_topology`] matched in another order maps each of its channels
-    /// through `index_of` on the bed's topology.
+    /// bed with one has a gain slice one shorter than its width.
     ///
     /// # Errors
     ///
@@ -197,62 +194,6 @@ impl SpeakerLayout {
         })
     }
 
-    /// A fixed preset: its geometry is a constant, so `new` cannot refuse it
-    /// (every preset is built in the tests).
-    fn preset(positions: &[Direction]) -> Self {
-        Self::new(positions).expect("a preset's geometry forms tuples")
-    }
-
-    /// Two speakers at 30 degrees either side of the front.
-    pub fn stereo() -> Self {
-        Self::preset(&[
-            Direction::new(Azimuth(30.0), Elevation(0.0)),
-            Direction::new(Azimuth(-30.0), Elevation(0.0)),
-        ])
-    }
-
-    /// Four speakers at 45 and 135 degrees either side of the front (L, R,
-    /// then the two rears).
-    pub fn quad() -> Self {
-        Self::preset(&[
-            Direction::new(Azimuth(45.0), Elevation(0.0)),
-            Direction::new(Azimuth(-45.0), Elevation(0.0)),
-            Direction::new(Azimuth(135.0), Elevation(0.0)),
-            Direction::new(Azimuth(-135.0), Elevation(0.0)),
-        ])
-    }
-
-    /// 5.0 (ITU-R BS.775-1: L, R at 30, C, Ls, Rs at 110; the LFE is not
-    /// panned).
-    pub fn surround_5_1() -> Self {
-        Self::preset(&[
-            Direction::new(Azimuth(30.0), Elevation(0.0)),
-            Direction::new(Azimuth(-30.0), Elevation(0.0)),
-            Direction::new(Azimuth(0.0), Elevation(0.0)),
-            Direction::new(Azimuth(110.0), Elevation(0.0)),
-            Direction::new(Azimuth(-110.0), Elevation(0.0)),
-        ])
-    }
-
-    /// 7.0: 5.0's front with side surrounds at 90 and rear surrounds at 150
-    /// (L, R, C, Lss, Rss, Lrs, Rrs).
-    pub fn surround_7_1() -> Self {
-        Self::preset(&SEVEN_ZERO)
-    }
-
-    /// Dolby Atmos 7.1.4: the 7.0 bed and four overhead speakers at 45 degrees
-    /// of height (Ltf, Rtf at 45, Ltr, Rtr at 135).
-    pub fn atmos_7_1_4() -> Self {
-        let mut speakers = SEVEN_ZERO.to_vec();
-        speakers.extend([
-            Direction::new(Azimuth(45.0), Elevation(45.0)),
-            Direction::new(Azimuth(-45.0), Elevation(45.0)),
-            Direction::new(Azimuth(135.0), Elevation(45.0)),
-            Direction::new(Azimuth(-135.0), Elevation(45.0)),
-        ]);
-        Self::preset(&speakers)
-    }
-
     /// The number of speakers.
     #[must_use]
     pub(crate) fn speaker_count(&self) -> usize {
@@ -307,6 +248,9 @@ impl SpeakerLayout {
     /// out: a front-only pair genuinely cannot place a rear image, and
     /// collapsing to the nearest speaker keeps an automation audible all the
     /// way round.
+    ///
+    /// A direction that is not finite (a NaN bearing or height) gives silence:
+    /// every gain zero, spread included.
     pub fn gains_into(
         &self,
         azimuth: Azimuth,
@@ -320,6 +264,10 @@ impl SpeakerLayout {
         let written = out.len().min(self.count);
         for (out, &g) in out.iter_mut().zip(&scratch[..written]) {
             *out = g as f32;
+        }
+        // Silence stays silent: spread would blend in an equal gain.
+        if scratch[..written].iter().all(|&g| g == 0.0) {
+            return;
         }
         apply_spread(spread, &mut out[..written]);
     }
@@ -352,20 +300,16 @@ impl SpeakerLayout {
             // Nothing survived the clamp at this height. Halve the distance to
             // the horizontal plane, which every supported layout covers, and
             // try again. Snapping the last sliver to exactly 0 rather than
-            // halving forever is what keeps the bound at two rounds in practice.
+            // halving forever is what keeps the bound at a few rounds in practice.
             elevation_deg *= 0.5;
             if elevation_deg.abs() < ELEVATION_SNAP_DEG {
                 elevation_deg = 0.0;
             }
         }
 
-        // Unreachable for the five presets: the horizontal plane is covered by
-        // all of them, so the retreat terminates well inside the bound. Left as
-        // silence rather than a panic because this is the audio thread.
-        debug_assert!(
-            false,
-            "VBAP gain solve found no energy after {MAX_ELEVATION_RETREATS} elevation retreats"
-        );
+        // No energy after the retreats: only a direction that is not a number
+        // reaches here (a finite one finds the horizontal plane, which every
+        // bed covers). The answer is silence, never a panic on the audio thread.
         scratch.fill(0.0);
     }
 
@@ -413,17 +357,6 @@ impl SpeakerLayout {
         }
     }
 }
-
-/// L, R, C, Lss, Rss, Lrs, Rrs: the 7.0 bed.
-const SEVEN_ZERO: [Direction; 7] = [
-    Direction::new(Azimuth(30.0), Elevation(0.0)),
-    Direction::new(Azimuth(-30.0), Elevation(0.0)),
-    Direction::new(Azimuth(0.0), Elevation(0.0)),
-    Direction::new(Azimuth(90.0), Elevation(0.0)),
-    Direction::new(Azimuth(-90.0), Elevation(0.0)),
-    Direction::new(Azimuth(150.0), Elevation(0.0)),
-    Direction::new(Azimuth(-150.0), Elevation(0.0)),
-];
 
 /// Fold a bearing into the front hemisphere by mirroring it about the lateral
 /// (left-right) axis: 135 degrees becomes 45, 180 becomes 0.

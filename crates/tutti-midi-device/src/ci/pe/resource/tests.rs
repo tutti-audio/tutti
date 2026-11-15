@@ -290,7 +290,7 @@ fn program_list_reads_its_entries() {
     assert_eq!(list.entries()[1].bank_program.program.get(), 49);
 }
 
-// M2-107 Table 2: `bankPC` is required, three integers 0 to 127.
+// M2-107 §2.2: `bankPC` is required, three integers 0 to 127.
 #[test]
 fn a_program_has_a_3_item_7_bit_bank_pc() {
     assert_eq!(

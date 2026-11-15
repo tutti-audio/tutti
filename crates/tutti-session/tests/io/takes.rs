@@ -13,8 +13,8 @@ use tutti_cpal::MicConfig;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::{InletRing, TapWriter};
 use tutti_session::{
-    Armed, Input, InputConfig, InputOpener, OpenedInput, Punch, Recorded, Session, SessionEvent,
-    Start, Take, TakeEnd, TakeError, TakeEvent, TakeTarget, Trim,
+    Armed, Input, InputConfig, InputOpener, LiveSession, OpenedInput, Punch, Recorded, Session,
+    SessionEvent, Start, Take, TakeEnd, TakeError, TakeEvent, TakeTarget, Trim,
 };
 use tutti_types::{At, Beat, ChannelLayout, Frame, SampleRate, Samples};
 
@@ -55,7 +55,7 @@ impl InputOpener for Opener {
 }
 
 struct Rig {
-    session: Session,
+    session: LiveSession,
     stream: ManualStream,
     capture: Arc<Mutex<Capture>>,
     input: Input,
@@ -65,7 +65,6 @@ struct Rig {
     events: Vec<SessionEvent>,
     /// The playback delay each rendered block reports; `None`: none.
     delay: Option<Duration>,
-    _device: tutti_session::Device,
 }
 
 fn rig(config: InputConfig, lead: Samples) -> Rig {
@@ -85,7 +84,7 @@ fn rig(config: InputConfig, lead: Samples) -> Rig {
         .device(Default::default())
         .build_device_on(spec, driver)
         .expect("builds with no device");
-    let (mut session, device) = live.into_parts();
+    let mut session = live;
     let input = session.add_input(config).expect("opens");
     Rig {
         session,
@@ -95,7 +94,6 @@ fn rig(config: InputConfig, lead: Samples) -> Rig {
         pushed: 0,
         events: Vec::new(),
         delay: None,
-        _device: device,
     }
 }
 

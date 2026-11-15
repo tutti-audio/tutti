@@ -32,7 +32,7 @@ impl Peer for Token {
 
 #[test]
 fn ids_are_unique_within_a_session_and_start_at_one() {
-    let mut ids = ResourceIds::new();
+    let ids = ResourceIds::new();
     let minted: Vec<ResourceId> = (0..1_000).map(|_| ids.mint()).collect();
     assert_eq!(minted[0].to_string(), "resource 1");
     assert_eq!(minted.iter().collect::<HashSet<_>>().len(), minted.len());
@@ -41,14 +41,14 @@ fn ids_are_unique_within_a_session_and_start_at_one() {
 
 #[test]
 fn two_sessions_mint_independently() {
-    let (mut a, mut b) = (ResourceIds::new(), ResourceIds::new());
+    let (a, b) = (ResourceIds::new(), ResourceIds::new());
     assert_eq!(a.mint(), b.mint(), "the id is the session's, not global");
     assert_ne!(a.mint(), a.mint());
 }
 
 #[test]
 fn a_token_reads_its_id_info_and_presence() {
-    let mut ids = ResourceIds::new();
+    let ids = ResourceIds::new();
     let id = ids.mint();
     let token = Token {
         id,

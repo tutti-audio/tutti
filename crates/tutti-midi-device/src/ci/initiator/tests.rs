@@ -138,6 +138,10 @@ fn a_final_reply_with_no_profiles_ends_the_inquiry_and_prunes_the_silent_address
         i.table().get(channel(0), profile(1)).is_some(),
         "kept until the final Reply"
     );
+    assert!(
+        !i.is_known(),
+        "the table is partly replaced while an inquiry waits"
+    );
     i.on_message(&reply(CiDeviceId::FunctionBlock, &[], &[]));
     assert!(i.table().is_empty());
 }
@@ -596,11 +600,11 @@ fn the_same_set_cannot_be_asked_twice_at_once() {
     i.set_on(ProfileTarget::Group, profile(1), now).unwrap();
     assert_eq!(
         i.set_on(ProfileTarget::Group, profile(1), now),
-        Err(RequestError::InFlight)
+        Err(RequestError::AlreadyAsking)
     );
     assert_eq!(
         i.set_off(CiDeviceId::Group, profile(1), now),
-        Err(RequestError::InFlight)
+        Err(RequestError::AlreadyAsking)
     );
     // Another Profile or address is a request of its own.
     assert!(i.set_on(ProfileTarget::Group, profile(2), now).is_ok());

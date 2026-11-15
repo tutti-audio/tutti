@@ -47,6 +47,8 @@ mod alloc_count;
 mod au;
 mod digest;
 mod env;
+#[cfg(feature = "graph")]
+mod event_rig;
 mod machine_lock;
 mod main_thread;
 pub mod midi;
@@ -56,6 +58,7 @@ mod range_contract;
 mod round_trip;
 pub mod sf2;
 pub mod signal;
+pub mod tpt;
 #[cfg(feature = "vst3-cpp")]
 mod vst3_cpp;
 
@@ -64,6 +67,8 @@ pub use alloc_count::{ThreadCounting, allocations};
 pub use au::{au_bundle, element_name_retain_count};
 pub use digest::{Fnv, Noise, noise};
 pub use env::{ScopedEnv, cases};
+#[cfg(feature = "graph")]
+pub use event_rig::{BlockClock, EventRig, Output, Seen, Sink, heard};
 pub use machine_lock::{MachineLock, machine_lock};
 pub use main_thread::{main_thread, main_thread_cases};
 #[cfg(feature = "plugin")]

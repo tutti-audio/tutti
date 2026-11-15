@@ -1,14 +1,29 @@
-use super::error::{Result, VbapError};
+use super::error::Result;
 use tutti_buffers::Fold;
-use tutti_dsp::{SpeakerLayout, VbapGains};
+use tutti_dsp::{COEFF_INTERVAL, Glide, Lerp, SpeakerLayout, VbapGains, VbapKernel};
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
 use tutti_types::UnitParam;
-use tutti_types::{Azimuth, Direction, Elevation, Param, SampleRate, Spread, StereoWidth, Tail};
-use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_types::{
+    Azimuth, Bed, ChannelLayout, ChannelTopology, Elevation, Param, SampleRate, Seconds, Spread,
+    StereoWidth, Tail,
+};
 
-use super::panner::VbapPanner;
 use crate::buses::main_bus;
 use crate::ramp::LastGood;
+
+/// The grid the gains are solved on, in frames: the controls are read, and the
+/// gains solved, every `GRID` frames counted from the last reset, and a frame
+/// reads the gains glided between the two grid points around it.
+///
+/// It is [`COEFF_INTERVAL`], the grid the filters and the modulated delays solve
+/// on (0.33 ms at 48 kHz): short enough that a gain vector turning through a
+/// whole bed in a second moves by under a degree between two points, so the
+/// chord between them sits within a hair of unit power.
+const GRID: usize = COEFF_INTERVAL;
+
+/// The time a bearing or height written to a cell takes to glide to its new
+/// value.
+const GLIDE: Seconds = Seconds(0.05);
 
 // The params a [`VbapPannerNode`] lets the graph modulate, in port order.
 tutti_graph::declare_params!([] VbapPannerNode, n {
@@ -27,22 +42,27 @@ struct Held {
     width: LastGood,
 }
 
-/// A VBAP loudspeaker panner: stereo in, one output per speaker of a fixed
-/// layout.
+/// The grid points a glide of [`GLIDE`] takes at `rate`: its length in frames,
+/// rounded to whole grid periods (at least one).
+fn glide_steps(rate: SampleRate) -> u32 {
+    let frames = GLIDE.to_samples(rate);
+    let points = ((frames.get() + GRID / 2) / GRID).max(1);
+    u32::try_from(points).unwrap_or(u32::MAX)
+}
+
+/// A VBAP loudspeaker panner: stereo in, one output per channel of a [`Bed`].
 ///
-/// Build it from a preset ([`stereo`](Self::stereo), [`quad`](Self::quad),
+/// Build it with [`new`](Self::new) from a bed, whose speakers sit where
+/// `tutti_types::Bed::direction` puts them, or from a preset
+/// ([`stereo`](Self::stereo), [`quad`](Self::quad),
 /// [`surround_5_1`](Self::surround_5_1), [`surround_7_1`](Self::surround_7_1),
-/// [`atmos_7_1_4`](Self::atmos_7_1_4)), or from a topology
-/// ([`for_topology`](Self::for_topology), with
-/// [`ChannelTopology::assumed`] for a bare count). It is a graph node
-/// (`tutti_graph::Node` and [`ParamNode`]); inserting it hands back its
+/// [`atmos_7_1_4`](Self::atmos_7_1_4)), which is `new` over one bed. It is a
+/// graph node (`tutti_graph::Node` and [`ParamNode`]); inserting it hands back its
 /// [`ParamSet`] ([`UnitParam::Azimuth`], [`Elevation`](tutti_types::UnitParam::Elevation),
 /// [`Spread`](tutti_types::UnitParam::Spread) and [`StereoWidth`](tutti_types::UnitParam::StereoWidth)),
 /// which move the source lock-free while it renders, and a graph's control
-/// lanes may drive all four .
-/// Position changes are de-zippered over 50 ms. A mono source presents the
-/// same sample on both inputs. Rendering allocates nothing and reports no
-/// latency.
+/// lanes may drive all four. A mono source presents the same sample on both
+/// inputs. Rendering allocates nothing and reports no latency.
 ///
 /// # Examples
 ///
@@ -60,18 +80,38 @@ struct Held {
 /// assert_eq!(out.len(), 4); // one channel per speaker
 /// ```
 ///
-/// # The layouts are a closed set
+/// # The beds
 ///
-/// Five widths are supported — stereo, quad, 5.1, 7.1 and 7.1.4 Atmos — each
-/// built from a named preset of `tutti_dsp::SpeakerLayout`, which is
-/// what supplies the speaker *positions*. VBAP pans across the two or three
-/// speakers surrounding a direction, so it needs that arrangement and not
-/// merely a channel count; a bare width does not determine one.
+/// The speaker positions are the bed's: [`Bed::direction`] answers each from the
+/// one BS.2051 table in `tutti_types`, and a channel's speaker is its place
+/// among the bed's placed speakers. VBAP pans across the two or three speakers
+/// surrounding a direction, so it needs an arrangement and not merely a channel
+/// count; a topology that is not a bed ([`Bed::from_topology`]) is not a panner
+/// input. [`Bed::Mono`] has one speaker, so no direction to pan between, and is
+/// refused.
 ///
-/// [`for_topology`](Self::for_topology) therefore refuses an unrecognized topology with
-/// [`VbapError::NoBed`] rather than substituting a nearby
-/// layout, so a caller picks a real arrangement instead of silently rendering
-/// for a different one.
+/// # The glide
+///
+/// The controls are read, and the gains solved, on a grid of 16 frames counted
+/// from the last reset. A frame reads the gains of the two grid points around it
+/// blended linearly (`tutti_dsp::Glide`, in closed form), so the render does not
+/// depend on where the blocks fall: a control that moves between two grid points
+/// is read at the next one, and sounds from the frame after it.
+///
+/// A bearing or height written to a cell is a step: the node glides to it over
+/// 50 ms (a whole number of grid points, [`tutti_dsp::Glide`] per coordinate),
+/// and the gains are solved for the direction it has reached at each grid point.
+/// The glide of the bearing takes the short arc: from 170 to -170 degrees it
+/// passes through 180, never through the front.
+///
+/// A param that a lane drives is followed, not smoothed: a lane is already a
+/// signal, so the direction at each grid point is the lane's value at that
+/// frame (a bearing wrapped), and the gains chord along the short arc to the next
+/// point. A lane is read every 16 frames, so a source it moves lags it by at most
+/// one grid period. A spread or width reaches the gains at the next grid point
+/// and is blended in with them. The first grid point after construction, a
+/// [`reset`](Node::reset) or a [`prepare`](Node::prepare) lands on the controls
+/// whole.
 ///
 /// # The energy law
 ///
@@ -79,30 +119,25 @@ struct Held {
 /// supported layout, including the directions no speaker tuple surrounds;
 /// [`SpeakerLayout::gains_into`](tutti_dsp::SpeakerLayout::gains_into) says how.
 ///
-/// That law holds at block edges, not strictly inside a moving block. The
-/// gains are solved once per block, at its last frame, and ramped *linearly*
-/// from the previous block's solve — a chord between two unit-energy vectors,
-/// not the arc between them — so while the source moves, the frames inside a
-/// block sit slightly below unit energy (by `1 - cos(Δ/2)` for a gain vector
-/// turning through `Δ` in one block; a 64-frame block at the 50 ms de-zipper
-/// keeps `Δ` to a few degrees, a dip of well under 0.1 dB). A held source is
-/// exact everywhere. Longer blocks (up to the graph's `Prepare::max_block`;
-/// an export renders 1024) widen `Δ` and so deepen the dip for a source
-/// moving inside one block.
+/// That law holds at the grid points, not strictly between them: the gains are
+/// blended linearly, a chord between two unit-energy vectors and not the arc
+/// between them, so a source that moves sits slightly below unit energy between
+/// grid points. The energy of a chord midpoint is `cos²(Δ/2)` for a gain vector
+/// turning through `Δ` in one grid step, a dip of at most `sin²(Δ/2)`. A cell step
+/// of half a turn glides at 1.2 degrees of direction per grid step at 48 kHz; a
+/// lane moves the direction as fast as it likes, and the dip follows its speed. A held source is exact everywhere.
 ///
 /// Note that LFE is not one of the gains: the panner never feeds it
 /// (a low-passed send, wired by the caller, feeds it), so it reads zero and is outside the law above.
-///
-/// [`VbapError::NoBed`]: crate::spatial::VbapError::NoBed
 ///
 /// # Clone
 ///
 /// A clone shares the node's control cells (so a clone taken as a fork's
 /// template reads the placement as it is when the fork is taken) and copies
-/// its de-zipper state. A fork detaches the cells and resets the copy.
+/// its glides. A fork detaches the cells and resets the copy.
 #[derive(Clone, Debug)]
 pub struct VbapPannerNode {
-    panner: VbapPanner,
+    kernel: VbapKernel,
     layout: ChannelLayout,
     /// Bearing, wrapped onto the circle when read.
     azimuth: Param<Azimuth>,
@@ -115,174 +150,189 @@ pub struct VbapPannerNode {
     /// than the source. NOT an `Amplitude` despite the matching range: it
     /// scales the SIDE component against the mid. See [`StereoWidth`].
     width: Param<StereoWidth>,
-    sample_rate: SampleRate,
     /// Output-channel → speaker gather map, derived from the bed's topology
     /// (see `speaker_of_channel`). `None` marks a channel no speaker feeds:
     /// the LFE, which the panner leaves silent. Precomputed per layout so the
     /// RT path just indexes it, so the render can run channel-outer over each
     /// output's planar slice.
     speaker_of_channel: Vec<Option<usize>>,
-    /// The gains the previous block ended on, which this block ramps away
-    /// from. `None` until the first block after construction or a
-    /// [`reset`](Node::reset) (which a fork runs): the ramp then starts from the smoother's
-    /// current position instead, so there is no stale vector to glide from.
-    ramp_from: Option<VbapGains>,
     /// The stereo input folded to mono, for the mono-fold branch. Built at
     /// construction.
     fold: Fold,
-    /// The last finite azimuth, elevation, spread and width the cells held. The
-    /// de-zipper smoother is recursive, so one NaN or ±∞ bearing would leave
-    /// it NaN for good; a non-finite write reads as unchanged instead.
+    /// The last finite azimuth, elevation, spread and width the cells held, so
+    /// a non-finite write reads as unchanged instead of reaching the solve.
     good: Held,
+    /// The bearing the gains are solved for, gliding to a cell's value over
+    /// [`glide_steps`] grid points (one step per grid point) and parked on a
+    /// lane's.
+    aim_azimuth: Glide<Azimuth>,
+    /// The height, as `aim_azimuth`.
+    aim_elevation: Glide<Elevation>,
+    /// The gains between the grid point behind and the one ahead: its steps
+    /// are the frames of a grid segment.
+    gains: Glide<VbapGains>,
+    /// The grid points a bearing or height glide takes (see [`glide_steps`]).
+    steps: u32,
+    /// Frames into the grid segment, in `0..GRID`: zero is a grid point.
+    pos: usize,
+    /// Whether a grid point has landed on the controls since construction, a
+    /// reset or a prepare; the first does, whole.
+    seated: bool,
 }
 
 impl VbapPannerNode {
-    /// Creates a 2-out panner over the stereo speaker pair (±30°).
-    pub fn stereo() -> Self {
-        Self::on_bed(ChannelLayout::STEREO, SpeakerLayout::stereo())
-    }
-
-    /// Creates a 4-out panner over the quad field (FL/FR/RL/RR, no LFE).
-    pub fn quad() -> Self {
-        Self::on_bed(ChannelLayout::QUAD, SpeakerLayout::quad())
-    }
-
-    /// Creates a 6-out panner over the 5.1 field. The preset is 5.0: the LFE
-    /// channel is left silent here and fed separately by
-    /// the caller's wiring.
-    pub fn surround_5_1() -> Self {
-        Self::on_bed(ChannelLayout::from(6u16), SpeakerLayout::surround_5_1())
-    }
-
-    /// Creates an 8-out panner over the 7.1 field. Like 5.1, the preset is 7.0
-    /// and the LFE channel is fed separately.
-    pub fn surround_7_1() -> Self {
-        Self::on_bed(ChannelLayout::from(8u16), SpeakerLayout::surround_7_1())
-    }
-
-    /// Creates a 12-out panner over the 7.1.4 Atmos bed: 7.1 plus four height
-    /// speakers.
-    pub fn atmos_7_1_4() -> Self {
-        Self::on_bed(ChannelLayout::from(12u16), SpeakerLayout::atmos_7_1_4())
-    }
-
-    /// Creates a panner for the bed `topology` names: the engine's order for
-    /// 2 (stereo), 4 (quad), 6 (5.1), 8 (7.1) or 12 (7.1.4) channels.
+    /// Creates a panner over `bed`: stereo in, the bed's channels out, in the
+    /// bed's order ([`Bed::topology`]), each placed speaker at its
+    /// [`Bed::direction`] and the LFE, if the bed has one, silent.
     ///
     /// # Errors
-    /// Returns [`VbapError::NoBed`] for a
-    /// topology that is not one of those five beds.
-    pub fn for_topology(topology: &ChannelTopology) -> Result<Self> {
-        let layout = topology.width();
-        let speakers = match layout.count() {
-            2 => SpeakerLayout::stereo(),
-            4 => SpeakerLayout::quad(),
-            6 => SpeakerLayout::surround_5_1(),
-            8 => SpeakerLayout::surround_7_1(),
-            12 => SpeakerLayout::atmos_7_1_4(),
-            _ => return Err(VbapError::NoBed(topology.clone())),
-        };
-        if ChannelTopology::assumed(layout) != *topology {
-            return Err(VbapError::NoBed(topology.clone()));
-        }
-        Ok(Self::on_bed(layout, speakers))
-    }
-
-    /// A panner over `speakers`, whose channels run in the engine's order for
-    /// `layout`. The bed picks the angles; the order picks the channels.
-    fn on_bed(layout: ChannelLayout, speakers: SpeakerLayout) -> Self {
-        let topology = ChannelTopology::assumed(layout);
-        Self {
-            panner: VbapPanner::new(speakers),
-            layout,
+    /// [`VbapError::Geometry`](super::VbapError::Geometry) for a bed whose
+    /// speakers cannot be panned over: [`Bed::Mono`].
+    pub fn new(bed: Bed) -> Result<Self> {
+        let layout = SpeakerLayout::from_bed(bed)?;
+        let steps = glide_steps(SampleRate::SR_48K);
+        let mut kernel = VbapKernel::new(layout);
+        let gains = kernel.gains(
+            Azimuth::FRONT,
+            Elevation::LEVEL,
+            StereoWidth::NATURAL,
+            Spread::POINT,
+        );
+        Ok(Self {
+            kernel,
+            layout: bed.width(),
             azimuth: Param::new(Azimuth::FRONT),
             elevation: Param::new(Elevation::LEVEL),
             spread: Param::new(Spread::POINT),
             width: Param::new(StereoWidth::NATURAL),
-            sample_rate: SampleRate::SR_48K,
-            speaker_of_channel: speaker_of_channel(&topology),
-            ramp_from: None,
-            fold: Fold::between(
-                &ChannelTopology::assumed(ChannelLayout::STEREO),
-                &ChannelTopology::assumed(ChannelLayout::MONO),
-            )
-            .expect("stereo folds to mono"),
+            speaker_of_channel: speaker_of_channel(bed),
+            fold: stereo_to_mono(),
             good: Held {
                 azimuth: LastGood::fixed(Azimuth::FRONT.get()),
                 elevation: LastGood::fixed(Elevation::LEVEL.get()),
                 spread: LastGood::fixed(Spread::POINT.get()),
                 width: LastGood::fixed(StereoWidth::NATURAL.get()),
             },
-        }
+            aim_azimuth: Glide::landed(Azimuth::FRONT).by(steps),
+            aim_elevation: Glide::landed(Elevation::LEVEL).by(steps),
+            gains: Glide::landed(gains).by(GRID as u32),
+            steps,
+            pos: 0,
+            seated: false,
+        })
     }
 
-    /// The output channels: the speaker layout's width.
+    /// Creates a 2-out panner over the stereo bed (`Bed::Stereo`, ±30°).
+    pub fn stereo() -> Self {
+        Self::preset(Bed::Stereo)
+    }
+
+    /// Creates a 4-out panner over the quad bed (`Bed::Quad`, FL/FR/BL/BR, no LFE).
+    pub fn quad() -> Self {
+        Self::preset(Bed::Quad)
+    }
+
+    /// Creates a 6-out panner over 5.1 (`Bed::Surround51`). The LFE channel is
+    /// left silent here and fed separately by the caller's wiring.
+    pub fn surround_5_1() -> Self {
+        Self::preset(Bed::Surround51)
+    }
+
+    /// Creates an 8-out panner over 7.1 (`Bed::Surround71`). Like 5.1, the LFE
+    /// channel is fed separately.
+    pub fn surround_7_1() -> Self {
+        Self::preset(Bed::Surround71)
+    }
+
+    /// Creates a 12-out panner over 7.1.4 (`Bed::Surround714`): 7.1 plus four
+    /// height speakers.
+    pub fn atmos_7_1_4() -> Self {
+        Self::preset(Bed::Surround714)
+    }
+
+    /// [`new`](Self::new) over a bed that has two or more speakers.
+    fn preset(bed: Bed) -> Self {
+        Self::new(bed).expect("a preset bed has speakers to pan between")
+    }
+
+    /// The output channels: the bed's width.
     pub fn channels(&self) -> ChannelLayout {
         self.layout
     }
 
-    /// The position and spread cells, read once (`driven` is the block's
-    /// azimuth, elevation and spread where a lane drives them): non-finite
-    /// values held at the last finite one, the bearing wrapped and the height
-    /// and spread clamped.
-    #[inline]
-    fn placement(&mut self, [azimuth, elevation, spread]: [Option<f32>; 3]) -> (Direction, Spread) {
-        let azimuth = self
-            .good
-            .azimuth
-            .read(azimuth.unwrap_or_else(|| self.azimuth.load().get()));
-        let elevation = self
-            .good
-            .elevation
-            .read(elevation.unwrap_or_else(|| self.elevation.load().get()));
-        let spread = self
-            .good
-            .spread
-            .read(spread.unwrap_or_else(|| self.spread.load().get()));
-        (
-            Direction::new(Azimuth(azimuth).wrap(), Elevation::new_clamped(elevation)),
-            Spread::new_clamped(spread),
-        )
-    }
-
-    /// The ramp for a block of `frames`: from where the previous block ended
-    /// to the gains at this block's last frame.
+    /// One grid point, at frame `at` of the block: reads the controls (a
+    /// lane's value at that frame where a lane drives the param, else the
+    /// block's `cells`), steps the bearing and height one grid step and aims the
+    /// gains glide at the gains solved for where they have reached.
     ///
-    /// Everything the solve depends on — target, spread, width — is read here,
-    /// once per block. The end point is remembered as the next block's start,
-    /// which is what keeps consecutive blocks continuous: a block boundary is
-    /// a point on the ramp, never a step.
-    fn block_gains(&mut self, frames: usize, driven: [Option<f32>; 4]) -> (VbapGains, VbapGains) {
-        let [azimuth, elevation, spread, width] = driven;
-        let (aim, spread) = self.placement([azimuth, elevation, spread]);
-        let width = StereoWidth(
-            self.good
-                .width
-                .read(width.unwrap_or_else(|| self.width.load().get())),
+    /// A cell's value is a step, which the bearing and height glide to over
+    /// [`glide_steps`] grid points. A lane is already a signal, so a driven
+    /// coordinate is the lane's value at the grid point, wrapped for a bearing,
+    /// and the gains chord to the next grid point from there.
+    fn grid_point(&mut self, at: usize, driven: &[Option<&[f32]>; 4], cells: [f32; 4]) {
+        // A lane shorter than the block reads as the cell.
+        let lane = |k: usize| driven[k].and_then(|lane| lane.get(at)).copied();
+        let read = |k: usize| lane(k).unwrap_or(cells[k]);
+        let azimuth = self.good.azimuth.read(read(0));
+        let elevation = self.good.elevation.read(read(1));
+        let spread = Spread::new_clamped(self.good.spread.read(read(2)));
+        let width = StereoWidth(self.good.width.read(read(3)));
+        let whole = !self.seated;
+        steer(
+            &mut self.aim_azimuth,
+            Azimuth(azimuth).wrap(),
+            whole || lane(0).is_some(),
+            self.steps,
         );
-        let from = match self.ramp_from {
-            Some(gains) => gains,
-            None => self.panner.gains_now(width, spread),
-        };
-        let to = self.panner.solve_block(aim, width, spread, frames);
-        self.ramp_from = Some(to);
-        (from, to)
+        steer(
+            &mut self.aim_elevation,
+            Elevation::new_clamped(elevation),
+            whole || lane(1).is_some(),
+            self.steps,
+        );
+        let (azimuth, elevation) = (self.aim_azimuth.now(), self.aim_elevation.now());
+        let gains = self.kernel.gains(azimuth, elevation, width, spread);
+        if whole {
+            self.gains = Glide::landed(gains).by(GRID as u32);
+            self.seated = true;
+        }
+        self.gains.settle();
+        self.gains.aim(gains);
     }
 }
 
-/// Which speaker feeds each channel of the bed `topology`: the preset's
-/// speakers are its channels in order with the LFE left out, so a channel's
-/// speaker is the count of non-LFE channels before it, and the LFE's is `None`.
-/// Allocates, so it runs at construction only.
-fn speaker_of_channel(topology: &ChannelTopology) -> Vec<Option<usize>> {
+/// One grid step of a coordinate's glide toward `target`: parked on it when
+/// `whole`, else aimed at it when it moved, then stepped.
+fn steer<T: Lerp>(glide: &mut Glide<T>, target: T, whole: bool, steps: u32) {
+    if whole {
+        *glide = Glide::landed(target).by(steps);
+    } else if target != glide.target() {
+        glide.aim(target);
+    }
+    glide.advance(1);
+}
+
+/// The fold of the stereo input to the mono the single-source branch pans.
+fn stereo_to_mono() -> Fold {
+    Fold::between(
+        &ChannelTopology::assumed(ChannelLayout::STEREO),
+        &ChannelTopology::assumed(ChannelLayout::MONO),
+    )
+    .expect("stereo folds to mono")
+}
+
+/// Which speaker feeds each channel of `bed`: its place among the bed's placed
+/// speakers, in the bed's order, and `None` for a channel with no direction (the
+/// LFE). Allocates, so it runs at construction only.
+fn speaker_of_channel(bed: Bed) -> Vec<Option<usize>> {
     let mut next = 0;
-    // The bed's topology is speakers.
-    topology
+    // A bed's topology is speakers.
+    bed.topology()
         .positions()
         .unwrap_or_default()
         .iter()
-        .map(|position| {
-            (!position.is_lfe()).then(|| {
+        .map(|&speaker| {
+            bed.direction(speaker).map(|_| {
                 next += 1;
                 next - 1
             })
@@ -290,25 +340,26 @@ fn speaker_of_channel(topology: &ChannelTopology) -> Vec<Option<usize>> {
         .collect()
 }
 
-/// A graph node: stereo in, the layout's width out, no latency.
+/// A graph node: stereo in, the bed's width out, no latency.
 ///
 /// # Reset clears time, not placement
 ///
-/// [`reset`](Node::reset) clears the de-zipper ramp only. Position, spread
-/// and width are caller-set configuration and survive: a host resets between
-/// clips to clear a tail, and a reset that re-aimed would silently move every
-/// spatialised source to front-centre — and, since clones share these cells,
-/// the *live* node's source too.
+/// [`reset`](Node::reset) restarts the grid and drops the glides in flight.
+/// Position, spread and width are caller-set configuration and survive: a host
+/// resets between clips to clear a tail, and a reset that re-aimed would
+/// silently move every spatialised source to front-centre and, since clones
+/// share these cells, the *live* node's source too.
 ///
-/// The ramp is seated on the commanded position, so the first block after a
-/// reset already renders there rather than gliding in from front-centre.
+/// The first grid point after a reset lands on the controls as they are then, so
+/// the first block after a reset already renders there rather than gliding in
+/// from front-centre, and a reset node renders what a fresh one does.
 ///
 /// # Tail
 ///
 /// [`Tail::Unknown`], deliberately not [`Tail::None`]: the executor skips a
 /// `Tail::None` node on a silent block, and a skipped block would not step the
-/// position de-zipper, so a source moved during silence would resume from a
-/// stalled ramp instead of the settled bearing.
+/// grid, so a source moved during silence would resume from a stalled glide
+/// instead of the settled bearing.
 impl Node for VbapPannerNode {
     fn shape(&self) -> Shape {
         // A stereo pair in and the bed's speakers out, so the graph's mix and
@@ -317,68 +368,81 @@ impl Node for VbapPannerNode {
             .with_ports(ChannelLayout::STEREO, self.layout)
             .with_tail(Tail::Unknown)
             .with_param_addrs(self.declared_ports().as_slice())
-            // A ramped gain pair per output channel and frame, and the
-            // smoother stepped per frame: measured 10.9 ns per frame and
-            // channel at stereo, 4.3 at 5.1 while the source moves, against
-            // a gain's 0.2 and `SvfFilterNode`'s 7.2. A held source costs about 1.5 and 0.6.
+            // A blended gain pair per output channel and frame, and two
+            // solves per grid segment while the source moves.
             .with_cost(tutti_graph::Cost::Moderate)
     }
 
     fn prepare(&mut self, p: &Prepare) {
-        self.sample_rate = p.sample_rate();
-        self.panner.set_sample_rate(self.sample_rate);
+        self.steps = glide_steps(p.sample_rate());
+        self.aim_azimuth = self.aim_azimuth.by(self.steps);
+        self.aim_elevation = self.aim_elevation.by(self.steps);
+        // The next grid point lands whole at the new rate.
+        self.seated = false;
+        self.pos = 0;
     }
 
-    /// Solves the gains once for the block and ramps into them.
+    /// Renders the block along the grid.
     ///
+    /// At each grid point (every 16 frames from the last reset, wherever
+    /// the blocks fall) the controls are read and the gains solved; the frames
+    /// until the next point read the glide between them. A lane that drives a
+    /// param is read at the grid point's frame, a cell once for the block.
     /// Each output channel is rendered over its own planar slice, reading the
     /// speaker that feeds it (LFE: none, so silence). The panner never feeds
-    /// LFE; the caller feeds it a separate low-passed send. A block of
-    /// one frame collapses the ramp to its end point, which is the exact
-    /// per-frame solve (pinned by `a_position_change_lands_in_the_next_block_as_a_ramp` in
-    /// `tests/spatial/vbap_block_gains.rs`).
+    /// LFE; the caller feeds it a separate low-passed send.
     fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         let size = io.frames();
         if size == 0 {
             return Status::Modified;
         }
-        // A lane that drives a param overrides its cell for the block, at the
-        // block's last frame (`ParamInput::last_frame`).
         let driven = [
             self.declared_param::<{ UnitParam::Azimuth as u16 }>(&io)
-                .last_frame(),
+                .frames(),
             self.declared_param::<{ UnitParam::Elevation as u16 }>(&io)
-                .last_frame(),
+                .frames(),
             self.declared_param::<{ UnitParam::Spread as u16 }>(&io)
-                .last_frame(),
+                .frames(),
             self.declared_param::<{ UnitParam::StereoWidth as u16 }>(&io)
-                .last_frame(),
+                .frames(),
         ];
-        let (from, to) = self.block_gains(size, driven);
+        let cells = [
+            self.azimuth.load().get(),
+            self.elevation.load().get(),
+            self.spread.load().get(),
+            self.width.load().get(),
+        ];
         let (inputs, mut outputs) = io.split();
         let (left, right) = (&inputs.get(0)[..size], &inputs.get(1)[..size]);
-        for (ch, out) in outputs.iter_mut().enumerate() {
-            VbapGains::render_channel(
-                &from,
-                &to,
-                self.speaker_of_channel[ch],
-                &self.fold,
-                left,
-                right,
-                &mut out[..size],
-            );
+        let mut at = 0;
+        while at < size {
+            if self.pos == 0 {
+                self.grid_point(at, &driven, cells);
+            }
+            let end = at + (GRID - self.pos).min(size - at);
+            // The first frame after a grid point reads step 1.
+            let first = self.pos as u32 + 1;
+            for (ch, out) in outputs.iter_mut().enumerate() {
+                VbapGains::render_channel(
+                    &self.gains,
+                    first,
+                    self.speaker_of_channel[ch],
+                    &self.fold,
+                    &left[at..end],
+                    &right[at..end],
+                    &mut out[at..end],
+                );
+            }
+            self.pos = (self.pos + end - at) % GRID;
+            at = end;
         }
         Status::Modified
     }
 
     fn reset(&mut self) {
-        // Seats the smoother on the position the cells hold now, so a
-        // `set_position` → `reset` with no block between resumes there.
-        // Dropping `ramp_from` discards the previous block's gains along with
-        // the ramp.
-        let (aim, _) = self.placement([None; 3]);
-        self.panner.reset_state(aim);
-        self.ramp_from = None;
+        // The next grid point lands on the cells as they are then.
+        self.seated = false;
+        self.pos = 0;
     }
 
     fn param_base(&self, k: usize) -> Option<f32> {
@@ -393,7 +457,7 @@ impl ParamNode for VbapPannerNode {
     }
 
     /// A clone with its four cells detached (at their values now) and its
-    /// ramp reset.
+    /// grid restarted.
     fn fork_fresh(&self) -> Self {
         let mut fork = self.clone();
         fork.azimuth.detach();

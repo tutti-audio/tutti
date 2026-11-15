@@ -11,7 +11,7 @@ use crate::{PlaceError, Wave};
 
 /// Builds an in-memory voice from a decoded wave.
 ///
-/// The `Residency::Whole` half of the tier decision, expressed as a function so
+/// The resident half of the tier decision, expressed as a function so
 /// a host writes one line rather than assembling a `Voice` by hand. The disk
 /// half needs a streamer round-trip and so is not a pure function: it goes
 /// through a [`DiskStreamer`](crate::DiskStreamer).

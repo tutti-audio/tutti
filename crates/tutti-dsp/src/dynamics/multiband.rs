@@ -1,6 +1,6 @@
 //! [`MultibandFamily`]: the multiband compressor as a [`Family`].
 //!
-//! A Linkwitz-Riley crossover (the tree of [`CrossoverFamily`], one
+//! A Linkwitz-Riley crossover (the tree of [`CrossoverModel`], one
 //! per channel) splits the signal into 2 to 4 bands; each band is compressed by its own
 //! compressor (the frame step of [`CompressorFamily`](super::CompressorFamily), one
 //! copy of it) with a gain **linked** across channels, from the loudest channel of the
@@ -13,10 +13,10 @@
 //! metering). Both are weights of 0 or 1 that glide over [`GAIN_GLIDE`], like a makeup: a
 //! step in either multiplies the output directly, so it would click.
 //!
-//! The crossover lands whole on the stream grid ([`Family::CADENCE`]), as
-//! [`CrossoverFamily`]'s does, and so do the detectors; only the
-//! makeups and the two weights glide. Each band's threshold is a per-frame lane of the
-//! [`Feed`] (lane `b` is band `b`'s).
+//! The crossover is designed on the stream grid ([`Family::CADENCE`]) and glides to each
+//! design over a grid period, as [`CrossoverBank`](crate::CrossoverBank)'s does; the
+//! detectors land whole, and the makeups and the two weights glide over [`GAIN_GLIDE`]. Each
+//! band's threshold is a per-frame lane of the [`Inputs`] (lane `b` is band `b`'s).
 //!
 //! The deepest reduction each band reached since the last read is in the state
 //! ([`BandReductions`], the recurrence's [`Readout`]): a reading for a meter, which the node publishes.
@@ -30,16 +30,16 @@ use super::compressor::{CompressorControls, CompressorMember, Detector};
 use crate::control::COEFF_STREAM;
 use crate::filter::CrossoverState;
 use crate::{
-    Approach, Cadence, ChannelRecurrence, Channels, CrossoverControls, CrossoverError,
-    CrossoverFamily, CrossoverModel, CrossoverTree, Effort, Family, Feed, Glide, Readout,
-    Recurrence, Ring, Setup, Start, Steps, System,
+    Approach, COEFF_INTERVAL, Cadence, Channels, CrossoverCoefficients, CrossoverControls,
+    CrossoverError, CrossoverModel, Effort, Family, Glide, Inputs, Readout, Recurrence, Ring,
+    Setup, Start, Steps, System,
 };
 
 /// The most bands.
 const MAX_BANDS: usize = 4;
 
 /// The bands a crossover tree makes at the most, the width of one frame's split.
-const TREE_BANDS: usize = CrossoverFamily::MAX_BANDS;
+const TREE_BANDS: usize = CrossoverModel::MAX_BANDS;
 
 /// The controls of one band.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -162,7 +162,7 @@ impl System for MultibandMember {
 #[derive(Clone, Copy, Debug)]
 pub struct MultibandFamily {
     input: BusTopology,
-    tree: CrossoverTree,
+    bands: usize,
 }
 
 impl MultibandFamily {
@@ -188,16 +188,19 @@ impl MultibandFamily {
         if input.layout().count() == 0 {
             return Err(CrossoverError::Channels { channels: 0 });
         }
-        Ok(Self {
-            input,
-            tree: CrossoverTree::new(bands)?,
-        })
+        Ok(Self { input, bands })
     }
 
     /// How many bands it makes.
     #[must_use]
     pub fn bands(&self) -> usize {
-        self.tree.bands()
+        self.bands
+    }
+
+    /// The crossover of `controls` at `rate`, `self.bands()` bands wide.
+    fn split(&self, controls: &CrossoverControls, rate: SampleRate) -> CrossoverModel {
+        CrossoverModel::designed(self.bands, controls, rate)
+            .expect("a multiband's band count is checked in `new` and within a crossover's")
     }
 }
 
@@ -215,7 +218,7 @@ impl Family for MultibandFamily {
 
     fn blank(&self, rate: SampleRate) -> MultibandMember {
         MultibandMember {
-            crossover: self.tree.blank(rate),
+            crossover: self.split(&CrossoverControls::octaves(rate), rate),
             bands: [CompressorMember::designed(&CompressorControls::DEFAULT, rate); MAX_BANDS],
             count: self.bands(),
             bypass: [false; MAX_BANDS],
@@ -223,12 +226,11 @@ impl Family for MultibandFamily {
         }
     }
 
-    /// The controls, made runnable: the crossover as [`CrossoverTree`] makes it (total: a
-    /// set out of order is solved with its splits no lower than the one before), and each
-    /// band as [`CompressorFamily`](super::CompressorFamily) does.
+    /// The controls, made runnable: the crossover as [`CrossoverModel::design_into`] makes it
+    /// (total: a set out of order is solved with its splits no lower than the one before),
+    /// and each band as [`CompressorFamily`](super::CompressorFamily) does.
     fn member_into(&self, c: &MultibandSettings, rate: SampleRate, out: &mut MultibandMember) {
-        self.tree
-            .member_into(&c.crossover, rate, &mut out.crossover);
+        out.crossover.design_into(&c.crossover, rate);
         out.count = self.bands();
         for (b, band) in c.bands.iter().enumerate() {
             out.bands[b] = CompressorMember::designed(&band.compressor, rate);
@@ -264,10 +266,10 @@ pub struct MultibandTarget {
 ///
 /// As for the compressor, a generic glide of the whole target would run for every frame of
 /// the glide when only a ratio moved: only what multiplies the output unsmoothed takes
-/// steps. The crossover cannot glide at all (a blend of a split's sections is not one).
+/// steps. The crossover glides over a grid period, in its integrator gains.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MultibandCoeffs {
-    crossover: CrossoverModel,
+    crossover: Glide<CrossoverCoefficients>,
     count: usize,
     detectors: [Detector; MAX_BANDS],
     makeup: [Glide<f32>; MAX_BANDS],
@@ -281,7 +283,7 @@ impl Approach for MultibandCoeffs {
     type Target = MultibandTarget;
 
     fn aim(&mut self, t: &MultibandTarget) {
-        self.crossover = t.crossover;
+        self.crossover.aim(t.crossover.coefficients());
         self.count = t.count;
         self.detectors = t.detectors;
         let steps = Steps::Fixed(self.steps);
@@ -294,7 +296,7 @@ impl Approach for MultibandCoeffs {
 
     #[inline]
     fn step(&mut self) -> bool {
-        let mut moved = false;
+        let mut moved = self.crossover.step();
         for b in 0..MAX_BANDS {
             moved |= self.makeup[b].step();
             moved |= self.bypass[b].step();
@@ -304,6 +306,7 @@ impl Approach for MultibandCoeffs {
     }
 
     fn settle(&mut self) {
+        self.crossover.settle();
         for b in 0..MAX_BANDS {
             self.makeup[b].settle();
             self.bypass[b].settle();
@@ -367,7 +370,7 @@ impl Readout for MultibandRecurrence {
 /// K, per frame: each channel through its crossover tree; then, per band in order, the
 /// band's level (the loudest channel of the band, a NaN reading as quiet), its compressor
 /// (the frame step of [`CompressorRecurrence`](super::CompressorRecurrence), at the
-/// threshold of lane `b` of the [`Feed`] when it is finite, else the member's), the bypass
+/// threshold of lane `b` of the [`Inputs`] when it is finite, else the member's), the bypass
 /// blend `g (1 - w) + w` (skipped at `w = 0`), the audible multiply (skipped at 1, and the
 /// band left out of the sum at 0) and each channel's `x g` added to its sum. The bands
 /// are summed lowest first, from 0.
@@ -401,7 +404,7 @@ impl Recurrence for MultibandRecurrence {
         self.coefficients_into(member, &mut target);
         Start {
             coeffs: MultibandCoeffs {
-                crossover: target.crossover,
+                crossover: Glide::landed(target.crossover.coefficients()).by(COEFF_INTERVAL as u32),
                 count: target.count,
                 detectors: target.detectors,
                 makeup: target.makeup.map(Glide::landed),
@@ -456,7 +459,7 @@ impl Recurrence for MultibandRecurrence {
         &self,
         coeffs: &MultibandCoeffs,
         state: &mut MultibandState,
-        feed: &Feed<'_>,
+        feed: &Inputs<'_>,
         output: &mut [&mut [f32]],
         frames: Range<usize>,
         _: usize,
@@ -470,9 +473,10 @@ impl Recurrence for MultibandRecurrence {
             deepest,
         } = state;
         for i in frames {
+            let crossover = coeffs.crossover.now();
             for ((filter, bands), input) in filters.iter_mut().zip(split.iter_mut()).zip(feed.audio)
             {
-                *bands = filter.tick(&coeffs.crossover, input[i]);
+                *bands = filter.tick(&crossover, input[i]);
             }
             sum.fill(0.0);
             for b in 0..bands {

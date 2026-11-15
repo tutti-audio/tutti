@@ -24,7 +24,8 @@ use tutti_sampler::{
 };
 use tutti_session::BufferMaster;
 use tutti_session::{
-    Bounce, BounceError, BounceLatency, BounceTail, ExportClock, Range, Session, Stem,
+    Bounce, BounceError, BounceLatency, BounceTail, DetachedSession, ExportClock, Range, Session,
+    Stem,
 };
 use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_types::ChannelLayout;
@@ -45,7 +46,7 @@ fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, Buf
         .tail(BounceTail::None)
 }
 
-fn render(session: &mut Session, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<Vec<f32>> {
+fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<Vec<f32>> {
     session
         .bounce(bounce)
         .expect("the bounce renders")
@@ -57,7 +58,7 @@ fn render(session: &mut Session, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<V
 /// master. A stem is a node the outputs hear, so the node is routed to them
 /// first: the master is then the node alone, and the stem its own output.
 fn render_stem(
-    session: &mut Session,
+    session: &mut DetachedSession,
     bounce: Bounce<NodeKey, BufferMaster>,
     node: NodeKey,
 ) -> Vec<Vec<f32>> {
@@ -73,7 +74,7 @@ fn render_stem(
 }
 
 /// A detached stereo session whose graph is at the export's rate.
-fn session() -> Session {
+fn session() -> DetachedSession {
     let mut session = Session::builder()
         .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)

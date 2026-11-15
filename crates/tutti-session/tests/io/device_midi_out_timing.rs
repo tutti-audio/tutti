@@ -10,9 +10,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
-use tutti_graph::UmpAt;
-use tutti_midi_runtime::{MidiOut, Outgoing, OutputLatency, OutputOffset, SendAt};
-use tutti_session::{Session, UmpOut};
+use tutti_midi_runtime::{MidiOut, Outgoing, OutputLatency, OutputOffset, SendAt, Taken};
+use tutti_session::{LiveSession, Session, UmpOut};
 use tutti_transport::MotionEvent;
 use tutti_types::{ChannelLayout, SampleRate, Seconds};
 use tutti_ump::{Message, MidiGroup, System, Ump};
@@ -25,13 +24,9 @@ const BLOCK: usize = 512;
 struct Wire(Arc<Mutex<Vec<Outgoing>>>);
 
 impl MidiOut for Wire {
-    fn queue(&self, events: &[UmpAt]) -> usize {
-        events.len()
-    }
-
-    fn queue_timed(&self, events: &[Outgoing]) -> usize {
+    fn queue_timed(&self, events: &[Outgoing]) -> Taken {
         self.0.lock().unwrap().extend_from_slice(events);
-        events.len()
+        Taken::within(events, events.len())
     }
 }
 
@@ -62,15 +57,13 @@ fn spec() -> OutputSpec {
     )
 }
 
-/// A session on a manual stream with its clock running into `wire`; the device
-/// is returned because the stream stops when it drops.
-fn rig(wire: &Wire) -> (Session, ManualStream, tutti_session::Device) {
+/// A session on a manual stream with its clock running into `wire`.
+fn rig(wire: &Wire) -> (LiveSession, ManualStream) {
     let (driver, stream) = ManualStreamDriver::new();
-    let (mut s, device) = Session::builder()
+    let mut s = Session::builder()
         .device(Default::default())
         .build_device_on(spec(), driver)
-        .expect("builds with no device")
-        .into_parts();
+        .expect("builds with no device");
     let _ = s.update();
     s.midi().set_hardware_out(Some(UmpOut::new(
         Box::new(wire.clone()),
@@ -81,7 +74,7 @@ fn rig(wire: &Wire) -> (Session, ManualStream, tutti_session::Device) {
         .motion()
         .try_send(MotionEvent::Play)
         .expect("room");
-    (s, stream, device)
+    (s, stream)
 }
 
 /// Renders `blocks` blocks reporting `delay` as the audio output's latency, the
@@ -106,7 +99,7 @@ fn render(stream: &ManualStream, blocks: usize, delay: Option<Duration>) -> Inst
 #[test]
 fn the_clock_is_sent_at_the_time_of_its_frames() {
     let wire = Wire::default();
-    let (mut s, stream, _device) = rig(&wire);
+    let (mut s, stream) = rig(&wire);
     let latency = Duration::from_millis(1500);
     let last_block = render(&stream, 100, Some(latency));
     let _ = s.update();
@@ -137,7 +130,7 @@ fn an_output_offset_shifts_the_send_times() {
     let latency = Some(Duration::from_millis(1500));
     let newest_after_block = |offset: f64| {
         let wire = Wire::default();
-        let (mut s, stream, _device) = rig(&wire);
+        let (mut s, stream) = rig(&wire);
         s.midi().set_output_latency(
             OutputLatency::new(Duration::ZERO, OutputOffset::new(Seconds(offset)).unwrap())
                 .unwrap(),
@@ -163,7 +156,7 @@ fn an_output_offset_shifts_the_send_times() {
 #[test]
 fn an_unreported_audio_latency_is_left_out_and_reported() {
     let wire = Wire::default();
-    let (mut s, stream, _device) = rig(&wire);
+    let (mut s, stream) = rig(&wire);
     let terms = s.midi().output_terms().expect("a device session has terms");
     assert_eq!(terms.audio_output, None);
     assert!(!terms.is_complete());

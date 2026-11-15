@@ -15,14 +15,14 @@
 //! Each render is preceded by one block of silence, the block the mix's ramp from
 //! the unit's `WET` start lands on, and only the frames after it are compared.
 
-use tutti_dsp::{FdnControls, FdnFamily, FreeverbControls, FreeverbFamily};
+use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, FreeverbFamily};
 use tutti_fixtures::noise;
 use tutti_fixtures::signal::bits;
 use tutti_graph::contract::drive;
 use tutti_graph::{IntoNode, Prepare, Solo};
 use tutti_nodes::{
     ChannelTimes, CompressorControls, CompressorNode, CrossoverNode, DelayControls, DelayLayout,
-    DelayNode, FamilyNode, GateControls, GateNode, InterpolationMode, KeySource, MaxDelay,
+    DelayNode, FamilyNode, FdnNode, GateControls, GateNode, InterpolationMode, KeySource, MaxDelay,
     ModDelayNode, PhaserControls, PhaserNode, Stages,
 };
 use tutti_types::MaxBlock;
@@ -268,7 +268,7 @@ fn the_reverbs_are_blended_by_the_graph() {
     );
     check_io(
         "fdn",
-        &|| FamilyNode::live(FdnFamily::default(), FdnControls::DEFAULT),
+        &|| FdnNode::live(FdnLayout::default(), FdnControls::DEFAULT),
         1,
         2,
         0,

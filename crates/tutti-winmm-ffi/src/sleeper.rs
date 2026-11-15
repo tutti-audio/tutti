@@ -41,7 +41,7 @@ unsafe impl Sync for Sleeper {}
 fn last(operation: &'static str) -> Error {
     // SAFETY: reads the calling thread's last-error value.
     let code = unsafe { GetLastError() };
-    Error { operation, code }
+    Error::Call { operation, code }
 }
 
 impl Sleeper {

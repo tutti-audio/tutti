@@ -1,12 +1,16 @@
-//! The Linkwitz-Riley crossover: its model, its design over [`Filter`](super::Filter) (the
-//! band tree as a kernel) and the state that runs the tree (`state`).
+//! The Linkwitz-Riley crossover: its model (the band tree's coefficients), its controls,
+//! and [`CrossoverBank`], the band tree per channel over buffers views.
 
 mod bands;
-mod design;
+mod bank;
+mod coefficients;
+mod controls;
 mod model;
 mod state;
 
 pub use bands::{CrossoverError, MAX_SPLITS, SOLVE_CEILING, fit_to_rate};
-pub use design::{CrossoverControls, CrossoverFamily, CrossoverTree};
+pub use bank::CrossoverBank;
+pub use coefficients::CrossoverCoefficients;
+pub use controls::CrossoverControls;
 pub use model::CrossoverModel;
 pub(crate) use state::CrossoverState;

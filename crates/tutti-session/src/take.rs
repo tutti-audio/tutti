@@ -737,7 +737,7 @@ impl<S: InFlight> Take<S> {
     }
 }
 
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// Arms a take on `input`: opens a plan tap on its inlet node and runs the
     /// pump into `target` on the session's spawner. The take records what the
     /// graph is given by the input, so it is on the graph's clock whatever the

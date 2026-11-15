@@ -34,7 +34,6 @@ tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
 tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 
-ringbuf = "0.6"
 
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -55,7 +54,7 @@ tutti-alsa-ffi = { path = "../tutti-alsa-ffi", features = ["testing"] }
 tutti-midi-hardware = { path = ".", features = ["testing"] }
 
 assert_no_alloc = { version = "1", default-features = false }
-tutti-fixtures = { path = "../../testing/tutti-fixtures" }
+tutti-fixtures = { path = "../../testing/tutti-fixtures", features = ["graph"] }
 
 [package.metadata.docs.rs]
 all-features = true

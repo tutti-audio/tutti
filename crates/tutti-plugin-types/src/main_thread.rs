@@ -33,7 +33,39 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 pub use tutti_rt::MainThreadMarker;
 
 /// Work a thread that is not the main thread hands to it.
-type Work = Box<dyn FnOnce(MainThreadMarker) + Send>;
+///
+/// Whatever it holds may be main-thread-affine (a plugin's close), so it is
+/// never dropped off the main thread: dropped there without having run, it is
+/// forgotten and counted in [`MainWork::stranded`]. This is what holds when a
+/// send lands after the collector last drained its queue and the receiver's
+/// drop then frees it.
+struct Work(Option<Box<dyn FnOnce(MainThreadMarker) + Send>>);
+
+impl Work {
+    fn new(work: impl FnOnce(MainThreadMarker) + Send + 'static) -> Self {
+        Self(Some(Box::new(work)))
+    }
+
+    fn run(mut self, main: MainThreadMarker) {
+        if let Some(work) = self.0.take() {
+            work(main);
+        }
+    }
+}
+
+impl Drop for Work {
+    fn drop(&mut self) {
+        let Some(work) = self.0.take() else {
+            return;
+        };
+        if MainThreadMarker::new().is_some() {
+            drop(work);
+        } else {
+            STRANDED.fetch_add(1, Ordering::Relaxed);
+            std::mem::forget(work);
+        }
+    }
+}
 
 /// Work that found no collector and no main thread to run it.
 static STRANDED: AtomicU64 = AtomicU64::new(0);
@@ -91,7 +123,7 @@ impl MainWork {
         let arrived: Vec<Work> = self.queue.try_iter().collect();
         let ran = arrived.len();
         for work in arrived {
-            work(main);
+            work.run(main);
         }
         ran
     }
@@ -128,7 +160,7 @@ impl Drop for MainWork {
         }
         if let Some(main) = MainThreadMarker::new() {
             for work in pending {
-                work(main);
+                work.run(main);
             }
         } else {
             STRANDED.fetch_add(pending.len() as u64, Ordering::Relaxed);
@@ -174,11 +206,11 @@ impl MainWorkHandle {
     /// deferral here never runs there. The in-process VST2 suite pins it:
     /// `tutti-plugin-host/tests/node/vst2_in_process_retire.rs`.
     pub fn defer(&self, work: impl FnOnce(MainThreadMarker) + Send + 'static) {
-        let Err(gone) = self.queue.send(Box::new(work)) else {
+        let Err(gone) = self.queue.send(Work::new(work)) else {
             return;
         };
         match MainThreadMarker::new() {
-            Some(main) => (gone.0)(main),
+            Some(main) => gone.0.run(main),
             None => {
                 STRANDED.fetch_add(1, Ordering::Relaxed);
                 // Dropping the work would drop what it holds on this thread, and a
@@ -200,7 +232,7 @@ impl MainWorkHandle {
 
 #[cfg(test)]
 mod tests {
-    use super::MainWork;
+    use super::{MainWork, Work};
 
     /// **Only a plugin drop counts as a deferred drop**: `defer_drop` adds one
     /// each, plain `defer` adds none, and the collector runs both.
@@ -215,5 +247,35 @@ mod tests {
         handle.defer_drop(|_main| {});
         assert_eq!(MainWork::deferred_drops(), before + 2, "two drops");
         assert_eq!(work.run(main), 3, "the collector runs all three");
+    }
+
+    /// **Work dropped off the main thread without running is forgotten and
+    /// counted**, never dropped: a send that lands after the collector's last
+    /// drain is freed by the receiver's drop, which reaches this guard. (The
+    /// interleaving itself cannot be made deterministic: it is a send racing the
+    /// collector's drop. The guard every queued item carries is what is pinned.)
+    /// The count is process-wide; nextest isolates each test in a process of its own.
+    #[test]
+    fn work_dropped_off_the_main_thread_is_forgotten_and_counted() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct Holds(Arc<AtomicBool>);
+        impl Drop for Holds {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let dropped = Arc::new(AtomicBool::new(false));
+        let held = Holds(Arc::clone(&dropped));
+        let before = MainWork::stranded();
+        drop(Work::new(move |_main| {
+            let _ = &held;
+        }));
+        assert!(
+            !dropped.load(Ordering::SeqCst),
+            "what it holds is not dropped here"
+        );
+        assert_eq!(MainWork::stranded(), before + 1);
     }
 }
