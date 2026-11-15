@@ -84,7 +84,7 @@ impl PluginBus {
     pub fn placement(&self) -> Option<&ChannelTopology> {
         self.topology
             .as_ref()
-            .filter(|t| t.layout() == self.channels)
+            .filter(|t| t.width() == self.channels)
     }
 }
 
@@ -325,7 +325,7 @@ mod tests {
     use tutti_types::{MaxBlock, SampleRate};
 
     fn stereo() -> ChannelTopology {
-        ChannelTopology::smpte(ChannelLayout::STEREO).expect("stereo has an order")
+        ChannelTopology::assumed(ChannelLayout::STEREO)
     }
 
     /// A stereo main input with its placement, a mono aux with none.
@@ -387,7 +387,7 @@ mod tests {
     /// would satisfy the negative half alone.
     #[test]
     fn topology_is_complete_only_when_every_bus_agrees_with_its_count() {
-        let mono = ChannelTopology::smpte(ChannelLayout::MONO).expect("mono has an order");
+        let mono = ChannelTopology::assumed(ChannelLayout::MONO);
         let bus = |topology| PluginBus::new(ChannelLayout::STEREO, BusRole::Main).placed(topology);
         let of = |input, output| LoadedPlugin {
             inputs: vec![bus(input)],

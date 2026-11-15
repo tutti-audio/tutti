@@ -325,15 +325,9 @@ fn a_tuning_dump_crosses_the_reader_and_a_corrupt_one_is_counted() {
 /// read as `Recipient::AllCall` in a header.
 #[test]
 fn the_all_call_is_no_devices_own_id() {
-    assert_eq!(SysexDeviceId::new(U7::of(0x7F)), None);
-    assert_eq!(
-        SysexDeviceId::try_from(U7::of(0x7F)),
-        Err(NotSysexDeviceId(U7::of(0x7F)))
-    );
-    assert_eq!(
-        SysexDeviceId::new(U7::of(0x7E)).map(SysexDeviceId::get),
-        Some(U7::of(0x7E))
-    );
+    assert_eq!(SysexDeviceId::new(0x7F), None);
+    assert_eq!(SysexDeviceId::try_from(0x7F), Err(NotSysexDeviceId(0x7F)));
+    assert_eq!(SysexDeviceId::new(0x7E).map(SysexDeviceId::get), Some(0x7E));
     assert_eq!(Recipient::of_byte(U7::of(0x7F)), Recipient::AllCall);
     assert_eq!(
         Recipient::of_byte(U7::of(0x7E)),
@@ -1109,4 +1103,43 @@ mod machine_control {
         );
         assert_eq!(at(86_400.0), None);
     }
+}
+
+/// RP-013 p.8: a subframe count is hundredths of a frame, 0 to 99.
+#[test]
+fn a_subframe_count_keeps_the_range_contract() {
+    use tutti_midi_protocol::MmcSubframes;
+    tutti_fixtures::check_range_contract(&tutti_fixtures::RangeContract {
+        new: MmcSubframes::new,
+        get: MmcSubframes::get,
+        of: Some(MmcSubframes::of),
+        valid: &[0, 50, 99],
+        invalid: &[100, 127, 255],
+    });
+}
+
+/// The ranged ids keep the range-checked contract: `00` to `7E`, and serde
+/// refuses `7F` and every byte above.
+#[test]
+fn a_device_id_and_a_slot_keep_the_range_contract() {
+    use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
+    use tutti_midi_protocol::MmcSlot;
+    let ids = RangeContract {
+        new: SysexDeviceId::new,
+        get: SysexDeviceId::get,
+        of: Some(SysexDeviceId::of),
+        valid: &[0, 1, 0x7E],
+        invalid: &[0x7F, 0x80, 0xFF],
+    };
+    check_range_contract(&ids);
+    check_range_serde(&ids);
+    let slots = RangeContract {
+        new: MmcSlot::new,
+        get: MmcSlot::get,
+        of: Some(MmcSlot::of),
+        valid: &[0, 1, 0x7E],
+        invalid: &[0x7F, 0x80, 0xFF],
+    };
+    check_range_contract(&slots);
+    check_range_serde(&slots);
 }

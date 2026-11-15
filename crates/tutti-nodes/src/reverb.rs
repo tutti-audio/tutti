@@ -23,7 +23,7 @@ use tutti_graph::{
     Bus, BusRole, Buses, Cost, Cx, HasParam, HasParams, InBus, IntoNode, Io, Node, NodeParts,
     OutBus, ParamNode, ParamSet, Prepare, Shape, Status,
 };
-use tutti_types::{Latency, MAX_BUS_CHANNELS, MaxBlock, Mix, SampleRate, Samples, Seconds, Tail};
+use tutti_types::{Latency, MAX_CHANNELS, MaxBlock, Mix, SampleRate, Samples, Seconds, Tail};
 
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
 
@@ -497,11 +497,11 @@ impl<F: NodeFamily> Tuned<F> {
         let inputs = rig.channels.input_width();
         let lanes = rig.params.lanes(io);
         let (ins, mut outs) = io.split();
-        let mut input: [&[f32]; MAX_BUS_CHANNELS] = [&[]; MAX_BUS_CHANNELS];
+        let mut input: [&[f32]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
         for (c, slot) in input.iter_mut().enumerate().take(inputs) {
             *slot = &ins.get(c)[frames.clone()];
         }
-        let mut key: [&[f32]; MAX_BUS_CHANNELS] = [&[]; MAX_BUS_CHANNELS];
+        let mut key: [&[f32]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
         let mut keys = 0;
         if let Some(bus) = rig.key {
             for (slot, ch) in key.iter_mut().zip(ins.bus(bus).channels()) {
@@ -509,8 +509,7 @@ impl<F: NodeFamily> Tuned<F> {
                 keys += 1;
             }
         }
-        let mut output: [&mut [f32]; MAX_BUS_CHANNELS] =
-            std::array::from_fn(|_| Default::default());
+        let mut output: [&mut [f32]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
         let channels = outs.bus(rig.out).into_channels();
         for (slot, ch) in output.iter_mut().zip(channels) {
             *slot = &mut ch[frames.clone()];

@@ -3,7 +3,7 @@
 //! error, never later at the commit and never as silence.
 
 use tutti_graph::ForkByClone;
-use tutti_graph::{CrossfadeCurve, GraphInvalid, NodeKey, ParamRange};
+use tutti_graph::{FadeLaw, GraphInvalid, NodeKey, ParamRange};
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
     ConnectError, Crossfade, CrossfadeRefused, EventInPort, EventOutPort, InPort, OutPort, Root,
@@ -178,7 +178,7 @@ fn a_crossfade_of_a_missing_node_is_refused_during_a_re_prepare() {
             GHOST,
             ForkByClone(Const::frame(&[2.0])),
             Seconds(0.005),
-            CrossfadeCurve::EqualAmplitude,
+            FadeLaw::EqualAmplitude,
         )
         .expect_err("a node that is not there");
     assert_eq!(refused, CrossfadeRefused::NoSuchNode(GHOST));
@@ -189,7 +189,7 @@ fn a_crossfade_of_a_missing_node_is_refused_during_a_re_prepare() {
         knob,
         ForkByClone(Const::frame(&[2.0])),
         Seconds(0.005),
-        CrossfadeCurve::EqualAmplitude,
+        FadeLaw::EqualAmplitude,
     );
     assert!(matches!(waits, Ok(Crossfade::Waiting(_))), "{waits:?}");
 }

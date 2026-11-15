@@ -144,6 +144,10 @@ bits!(
     U14, u16, "u16", 14
 );
 bits!(
+    /// A 28-bit value (`0..=0x0FFF_FFFF`): a MIDI-CI MUID, a 28-bit size.
+    U28, u32, "u32", 28
+);
+bits!(
     /// A MIDI note number on the wire (`0..=127`). The musical pitch is
     /// `tutti_types::Note`, which converts with `u8::try_from`.
     NoteNumber, u8, "u8", 7
@@ -152,6 +156,86 @@ bits!(
     /// A Delta Clockstamp: ticks since the previous event (20 bits).
     DeltaTicks, u32, "u32", 20
 );
+
+impl U14 {
+    /// The two 7-bit wire bytes, least significant first (the MIDI-CI and
+    /// MIDI Tuning order).
+    #[inline]
+    #[must_use]
+    pub const fn to_le7(self) -> [u8; 2] {
+        [(self.0 & 0x7F) as u8, (self.0 >> 7) as u8]
+    }
+
+    /// The value of a length, or `None` above 14 bits.
+    #[inline]
+    #[must_use]
+    pub const fn from_len(len: usize) -> Option<Self> {
+        if len <= Self::MAX.0 as usize {
+            Some(Self(len as u16))
+        } else {
+            None
+        }
+    }
+
+    /// The value of two 7-bit wire bytes, least significant first, or `None`
+    /// when a byte has its top bit set.
+    #[inline]
+    #[must_use]
+    pub const fn from_le7(bytes: [u8; 2]) -> Option<Self> {
+        if (bytes[0] | bytes[1]) & 0x80 != 0 {
+            return None;
+        }
+        Some(Self((bytes[0] as u16) | (bytes[1] as u16) << 7))
+    }
+}
+
+impl U28 {
+    /// The four 7-bit wire bytes, least significant first.
+    #[inline]
+    #[must_use]
+    pub const fn to_le7(self) -> [u8; 4] {
+        [
+            (self.0 & 0x7F) as u8,
+            ((self.0 >> 7) & 0x7F) as u8,
+            ((self.0 >> 14) & 0x7F) as u8,
+            (self.0 >> 21) as u8,
+        ]
+    }
+
+    /// The value of a length, or `None` above 28 bits.
+    #[inline]
+    #[must_use]
+    pub const fn from_len(len: usize) -> Option<Self> {
+        if len <= Self::MAX.0 as usize {
+            Some(Self(len as u32))
+        } else {
+            None
+        }
+    }
+
+    /// The value of four 7-bit wire bytes, least significant first, or `None`
+    /// when a byte has its top bit set.
+    #[inline]
+    #[must_use]
+    pub const fn from_le7(bytes: [u8; 4]) -> Option<Self> {
+        if (bytes[0] | bytes[1] | bytes[2] | bytes[3]) & 0x80 != 0 {
+            return None;
+        }
+        Some(Self(
+            (bytes[0] as u32)
+                | (bytes[1] as u32) << 7
+                | (bytes[2] as u32) << 14
+                | (bytes[3] as u32) << 21,
+        ))
+    }
+}
+
+/// The index of the first byte of `bytes` with its top bit set, or `None` when
+/// every byte is a 7-bit data byte.
+#[must_use]
+pub fn first_non_seven_bit(bytes: &[u8]) -> Option<usize> {
+    bytes.iter().position(|&b| b & 0x80 != 0)
+}
 
 bounded!(
     /// A Function Block number (`0..=31`). A reserved number read from the wire
@@ -221,7 +305,48 @@ impl Pitch {
 
 #[cfg(test)]
 mod tests {
-    use super::Pitch;
+    use super::{Pitch, U14, U28, first_non_seven_bit};
+
+    #[test]
+    fn a_u14_is_two_seven_bit_bytes_least_significant_first() {
+        assert_eq!(U14::of(0x2001).to_le7(), [0x01, 0x40]);
+        assert_eq!(U14::of(0x3FFF).to_le7(), [0x7F, 0x7F]);
+        assert_eq!(U14::from_le7([0x01, 0x40]), Some(U14::of(0x2001)));
+        assert_eq!(U14::from_le7([0x80, 0]), None);
+        assert_eq!(U14::from_le7([0, 0x80]), None);
+    }
+
+    #[test]
+    fn a_u28_is_four_seven_bit_bytes_least_significant_first() {
+        assert_eq!(U28::of(0x0FFF_FFFF).to_le7(), [0x7F; 4]);
+        assert_eq!(U28::of(1 << 21).to_le7(), [0, 0, 0, 1]);
+        assert_eq!(
+            U28::from_le7([1, 2, 3, 4]),
+            Some(U28::of(1 | 2 << 7 | 3 << 14 | 4 << 21))
+        );
+        assert_eq!(U28::new(0x1000_0000), None);
+        for at in 0..4 {
+            let mut bytes = [0u8; 4];
+            bytes[at] = 0x80;
+            assert_eq!(U28::from_le7(bytes), None);
+        }
+    }
+
+    #[test]
+    fn a_length_is_refused_above_the_width() {
+        assert_eq!(U14::from_len(0x3FFF), Some(U14::MAX));
+        assert_eq!(U14::from_len(0x4000), None);
+        assert_eq!(U28::from_len(0x0FFF_FFFF), Some(U28::MAX));
+        assert_eq!(U28::from_len(0x1000_0000), None);
+    }
+
+    #[test]
+    fn the_first_byte_with_its_top_bit_set_is_found() {
+        assert_eq!(first_non_seven_bit(&[0, 0x7F, 0x80, 0xFF]), Some(2));
+        assert_eq!(first_non_seven_bit(&[0, 0x7F]), None);
+        assert_eq!(first_non_seven_bit(&[]), None);
+    }
+
     use crate::Attribute;
 
     #[test]

@@ -28,6 +28,22 @@ impl Piece {
     pub fn value(self, t: f32) -> f32 {
         self.from + (self.to - self.from) * self.law.eval(t)
     }
+
+    /// Frame `k` of an `n`-frame ramp from `from` to `to`: the linear piece at
+    /// `t = (k + 1) / n`, so the last frame lands exactly on `to` and the next
+    /// block starts from the exact value. A ramp is chained block after block,
+    /// so it is linear (a shape flat at its ends would stall the slope at every
+    /// block boundary); a one-off move between two states is a
+    /// [`FadeLaw`](crate::FadeLaw).
+    #[inline]
+    #[must_use]
+    pub fn ramp_at(from: f32, to: f32, k: usize, n: usize) -> f32 {
+        if k + 1 >= n {
+            to
+        } else {
+            Self::new(from, to, Law::Linear).value((k + 1) as f32 / n as f32)
+        }
+    }
 }
 
 #[cfg(test)]

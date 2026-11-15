@@ -24,7 +24,7 @@
 
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    CrossfadeCurve, Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable,
+    Cx, FadeLaw, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable,
 };
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{
@@ -269,7 +269,7 @@ impl Node for From {
 /// **A crossfade follows its law to the new filter.** `Graph::crossfade`
 /// fades the filter to one with another cutoff over 5 ms (240 frames),
 /// starting on the first frame of the next block (1 024), along
-/// `CrossfadeCurve::EqualAmplitude`:
+/// `FadeLaw::EqualAmplitude`:
 ///
 /// - before it the scene is the unfaded one, to the bit;
 /// - from its end on it is the new filter as if it had run from the fade's
@@ -292,7 +292,7 @@ fn a_crossfade_follows_its_law_to_the_new_filter() {
             s.filter,
             low_pass(300.0),
             Seconds(0.005),
-            CrossfadeCurve::EqualAmplitude,
+            FadeLaw::EqualAmplitude,
         )
         .expect("the crossfade starts");
     let _ = s.session.update();

@@ -200,7 +200,7 @@ fn an_hour_unread_reads_the_analytic_rms() {
 /// The switch starts off and both ends see it.
 #[test]
 fn the_switch_starts_off_and_both_ends_see_it() {
-    let (reader, writer) = MeterReader::pair(MeterId(0), 1, 1);
+    let (reader, writer) = MeterReader::pair(MeterId::of(1), 1, 1);
     let on = || writer.shared.enabled.load(Ordering::Relaxed);
     assert!(!reader.is_enabled() && !on());
     reader.enable();

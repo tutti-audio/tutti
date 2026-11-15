@@ -5,12 +5,22 @@ use tutti_ump::{BendValue, ControlValue, NoteVelocity, U7, U14};
 /// A 16-bit Note On or Note Off velocity as 7 bits: the top 7 bits.
 ///
 /// A nonzero velocity below `0x0200` narrows to 0, which MIDI 1.0 reads as a
-/// Note Off. A caller that sends a Note On on must not send that 0.
+/// Note Off. A Note On goes through
+/// [`narrow_note_on_velocity`] instead.
 #[inline]
 #[must_use]
 pub fn narrow_velocity(velocity: NoteVelocity) -> U7 {
     // `>> 9` leaves 7 bits: the mask removes nothing.
     U7::masked((velocity.get() >> 9) as u8)
+}
+
+/// A 16-bit Note On velocity as 7 bits, never 0: a MIDI 1.0 Note On with
+/// velocity 0 is a Note Off, so a nonzero velocity below `0x0200` narrows to 1,
+/// the lowest audible Note On velocity.
+#[inline]
+#[must_use]
+pub fn narrow_note_on_velocity(velocity: NoteVelocity) -> U7 {
+    narrow_velocity(velocity).max(U7::of(1))
 }
 
 /// A 32-bit controller or pressure value as 7 bits: the top 7 bits.

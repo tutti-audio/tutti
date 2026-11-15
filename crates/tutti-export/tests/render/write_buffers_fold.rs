@@ -70,7 +70,8 @@ fn the_files_topology_places_the_channels() {
         Speaker::FrontRight,
         Speaker::FrontCenter,
         Speaker::LowFrequency,
-    ]);
+    ])
+    .unwrap();
     let planes = rendered(&[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
     write_buffers(&planes, &config(ChannelLayout::QUAD, Some(topology)), &path).unwrap();
     let frame = first_frame(&path, 4);

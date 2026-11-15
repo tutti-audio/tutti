@@ -28,7 +28,7 @@ pub(crate) fn name(name: MmcName, out: Out<'_>) -> Done {
 pub(crate) fn recipient(to: Recipient, out: Out<'_>) -> Done {
     out.push(match to {
         Recipient::AllCall => 0x7F,
-        Recipient::Device(device) => device.get().get(),
+        Recipient::Device(device) => device.get(),
     })
 }
 
@@ -79,13 +79,13 @@ fn user_bits(bits: MmcUserBits, out: Out<'_>) -> Done {
 
 fn selection(selection: MmcSelection) -> u8 {
     match selection {
-        MmcSelection::One(slot) => slot.get().get(),
+        MmcSelection::One(slot) => slot.get(),
         MmcSelection::All => 0x7F,
     }
 }
 
 fn slot(slot: MmcSlot) -> u8 {
-    slot.get().get()
+    slot.get()
 }
 
 fn event_flags(flags: MmcEventFlags) -> u8 {
@@ -313,7 +313,7 @@ pub(crate) fn command(command: &MmcCommand, out: Out<'_>) -> Done {
         MmcCommand::AssignSystemMaster(master) => counted(0x49, out, |b| {
             b.push(match master {
                 MmcSystemMaster::Nobody => 0x7F,
-                MmcSystemMaster::Device(device) => device.get().get(),
+                MmcSystemMaster::Device(device) => device.get(),
             })
         }),
         MmcCommand::GeneratorCommand(a) => counted(0x4A, out, |b| b.push(a.wire())),
@@ -359,7 +359,7 @@ pub(crate) fn command(command: &MmcCommand, out: Out<'_>) -> Done {
         }),
         MmcCommand::Group(g) => counted(0x52, out, |b| match g {
             MmcGroup::Assign { group, devices } => {
-                b.extend(&[0, group.get().get()])?;
+                b.extend(&[0, group.get()])?;
                 b.extend(devices.as_bytes())
             }
             MmcGroup::DisAssign { group, devices } => {

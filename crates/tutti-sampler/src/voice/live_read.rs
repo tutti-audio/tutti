@@ -35,8 +35,8 @@
 //! its next cycle, following `Ring::play`), the old side plays on alone, and
 //! the fade starts once the new side sounds. So once a fade is done the output
 //! is the memory tier's again. A continuation that runs out, and the ring
-//! coming back after a frame it could not supply (an underrun), are ramped
-//! over [`RAMP_FRAMES`], never cut.
+//! coming back after a frame it could not supply (an underrun), are faded
+//! over [`DECLICK`](tutti_graph::DECLICK), never cut.
 //!
 //! Nothing here allocates, locks or blocks: the buffers are sized at
 //! construction, the control (the map in it) is read once per block (through a `Reader`
@@ -53,10 +53,11 @@
 //! instead. A block that reads nothing tells the ring so (`PosReader::idle`), so a
 //! paused voice holds no refill back.
 
+use tutti_graph::FadeLaw;
 use tutti_types::{SamplePosition, Samples};
 
-use crate::MAX_SAMPLER_CHANNELS;
 use crate::streamer::{Arrangement, Block, Cells, RingMap, RingReader, SharedReader};
+use tutti_types::MAX_CHANNELS;
 
 use super::interp::{Place, hermite_lanes, interpolate_taps};
 use super::loop_span::blend;
@@ -65,10 +66,6 @@ use crate::lanes::{Gather, Lane};
 /// Output frames of continuation rendered at a discontinuity: the refill gap
 /// plus the fade, with room to spare.
 pub(crate) const OLD_FRAMES: usize = 2_048;
-
-/// Output frames a continuation ramps out over as it runs out, and the ring
-/// ramps back in over after an underrun.
-pub(crate) const RAMP_FRAMES: usize = 64;
 
 /// How far a frame's position may sit from the last one's continuation before
 /// it counts as a jump. Under a frame: a seat re-anchored by the clock lands on
@@ -88,14 +85,12 @@ struct Fade {
 }
 
 impl Fade {
-    /// The new side's weight at fade frame `k`.
+    /// The new side's weight at fade frame `k`: the incoming side of
+    /// [`FadeLaw::EqualAmplitude`] (the two sides are one source, in phase), and
+    /// 1 from the fade's end on.
     #[inline]
     fn weight(frames: usize, k: usize) -> f32 {
-        if k >= frames {
-            1.0
-        } else {
-            (k + 1) as f32 / (frames + 1) as f32
-        }
+        FadeLaw::EqualAmplitude.between(0.0, 1.0, k, frames)
     }
 }
 
@@ -163,7 +158,7 @@ impl Clone for LiveRead {
 impl LiveRead {
     /// A reader over `ring` through its one `reader` and the reader of the
     /// ring's control registered beside it (`None`: silent), `width` wide (at most
-    /// [`MAX_SAMPLER_CHANNELS`]), placing the ring's channels by `place`. Both
+    /// [`MAX_CHANNELS`]), placing the ring's channels by `place`. Both
     /// are registered by whoever built them, on the control side: building the
     /// pair is what may allocate, and this does not.
     pub(crate) fn new(
@@ -295,6 +290,7 @@ impl LiveRead {
         positions: &[Option<SamplePosition>],
         segment: u64,
         rate: f64,
+        declick: usize,
         gain: f32,
         state: &Cells,
         at: usize,
@@ -304,7 +300,7 @@ impl LiveRead {
         let place = &self.place;
         let st = &mut self.st;
         let w = st.width;
-        let silent = [0.0f32; MAX_SAMPLER_CHANNELS];
+        let silent = [0.0f32; MAX_CHANNELS];
         let Some(reader) = self.reader.as_mut() else {
             // Severed, or a clone: nothing to read (not an underrun).
             for i in 0..positions.len() {
@@ -378,7 +374,7 @@ impl LiveRead {
             return;
         }
 
-        let mut frame = [0.0f32; MAX_SAMPLER_CHANNELS];
+        let mut frame = [0.0f32; MAX_CHANNELS];
         for (i, pos) in positions.iter().enumerate() {
             let Some(pos) = pos.map(SamplePosition::get) else {
                 out.put(at + i, &silent[..w]);
@@ -395,12 +391,12 @@ impl LiveRead {
                 pos,
                 &mut frame[..w],
             );
-            let sounded = st.mix(new, &mut frame[..w]);
+            let sounded = st.mix(new, &mut frame[..w], declick);
             if sounded {
                 if let Some(r) = st.recover {
-                    let g = (r + 1) as f32 / (RAMP_FRAMES + 1) as f32;
+                    let g = FadeLaw::EqualAmplitude.between(0.0, 1.0, r, declick);
                     frame[..w].iter_mut().for_each(|s| *s *= g);
-                    st.recover = (r + 1 < RAMP_FRAMES).then_some(r + 1);
+                    st.recover = (r + 1 < declick).then_some(r + 1);
                 }
             } else {
                 state.report_underrun();
@@ -539,7 +535,7 @@ impl State {
     /// nothing); a fade in progress is blended into it at its own weights.
     fn continue_from(&mut self, frames: usize, mut source: impl FnMut(usize, &mut [f32]) -> bool) {
         let w = self.width;
-        let mut s = [0.0f32; MAX_SAMPLER_CHANNELS];
+        let mut s = [0.0f32; MAX_CHANNELS];
         let mut n = 0;
         while n < OLD_FRAMES && source(n, &mut s[..w]) {
             let out = &mut self.spare[n * w..(n + 1) * w];
@@ -597,16 +593,20 @@ impl State {
     /// Mix one frame: `frame` holds the ring's read (`new`: it sounded). Plays
     /// the fade in progress, if any, into `frame`; `true` when the frame
     /// sounded.
-    fn mix(&mut self, new: bool, frame: &mut [f32]) -> bool {
+    fn mix(&mut self, new: bool, frame: &mut [f32], declick: usize) -> bool {
         let w = self.width;
         let Some(mut fade) = self.fade else {
             return new;
         };
         let left = self.old_len.saturating_sub(self.old_k);
         let old = (left > 0).then(|| &self.old[self.old_k * w..(self.old_k + 1) * w]);
-        // Running out ramps: the old side's gain (alone) or weight (in a
-        // fade) goes to the new side over its last `RAMP_FRAMES`.
-        let out_ramp = (left as f32 / RAMP_FRAMES as f32).min(1.0);
+        // Running out fades: the old side's gain (alone) or weight (in a
+        // fade) goes to the new side over its last `declick` frames.
+        let out_ramp = if left > declick {
+            1.0
+        } else {
+            FadeLaw::EqualAmplitude.between(1.0, 0.0, declick - left, declick)
+        };
         fade.started |= new;
 
         match (fade.started, old) {

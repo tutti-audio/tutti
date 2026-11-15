@@ -9,8 +9,8 @@ use tutti_types::{ChannelLayout, ChannelTopology};
 fn a_signed_zero_gain_change_takes_the_ramp() {
     let mut from = VbapGains {
         mono: true,
-        a: [0.0; MAX_SPEAKERS],
-        b: [0.0; MAX_SPEAKERS],
+        a: [0.0; MAX_CHANNELS],
+        b: [0.0; MAX_CHANNELS],
     };
     let mut to = from;
     from.a[0] = 0.0;

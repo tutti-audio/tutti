@@ -34,7 +34,7 @@
 //! Declining is the point. `MidSide` silently read as `L R` is a stereo image
 //! collapsed to mono-plus-noise, and the count says nothing is wrong.
 
-use tutti_types::{ChannelTopology, Speaker};
+use tutti_types::{ChannelTopology, Speaker, Speakers};
 
 use crate::channel_layout::AuLayoutTag;
 
@@ -138,7 +138,9 @@ pub fn topology_of(tag: AuLayoutTag) -> Option<ChannelTopology> {
         // grows a wide pair, which is a `tutti-types` decision.
         AuLayoutTag::Octagonal | AuLayoutTag::Cube => return None,
     };
-    Some(ChannelTopology::new(positions.iter().copied()))
+    Some(ChannelTopology::Speakers(Speakers::from_format(
+        positions.iter().copied(),
+    )))
 }
 
 #[cfg(test)]
@@ -167,28 +169,28 @@ mod tests {
         ] {
             let topology = topology_of(tag).expect("every placement tag has a topology");
             assert_eq!(
-                Some(topology.layout().count()),
+                Some(topology.width().count()),
                 tag.channel_count(),
                 "{tag:?} topology width disagrees with the count in its tag"
             );
         }
     }
 
-    /// 5.1 and 7.1 agree with the engine's own SMPTE order.
+    /// 5.1 and 7.1 agree with the engine's own order.
     ///
     /// The two layouts where AU and the engine happen to coincide, which is why
-    /// they need no channel remapping. Asserted against `smpte` rather than a
+    /// they need no channel remapping. Asserted against `ChannelTopology::assumed` rather than a
     /// literal so the claim is about *agreement*, not about a copied list.
     #[test]
-    fn the_audiounit_surround_tags_match_the_engines_smpte_order() {
+    fn the_audiounit_surround_tags_match_the_engines_order() {
         assert_eq!(
             topology_of(AuLayoutTag::AudioUnit5_1),
-            ChannelTopology::smpte(ChannelLayout::from(6u16)),
+            Some(ChannelTopology::assumed(ChannelLayout::from(6u16))),
             "AudioUnit_5_1 is L R C LFE Ls Rs, the engine's own 5.1 order"
         );
         assert_eq!(
             topology_of(AuLayoutTag::AudioUnit7_1),
-            ChannelTopology::smpte(ChannelLayout::from(8u16)),
+            Some(ChannelTopology::assumed(ChannelLayout::from(8u16))),
             "AudioUnit_7_1 is L R C LFE Ls Rs Rls Rrs, the engine's own 7.1 order"
         );
     }
@@ -205,8 +207,8 @@ mod tests {
         let five_oh = topology_of(AuLayoutTag::AudioUnit5_0).expect("5.0 has an order");
         let five_one = topology_of(AuLayoutTag::AudioUnit5_1).expect("5.1 has an order");
 
-        assert_eq!(five_oh.positions()[2], Speaker::SideLeft);
-        assert_eq!(five_one.positions()[2], Speaker::FrontCenter);
+        assert_eq!(five_oh.positions().unwrap()[2], Speaker::SideLeft);
+        assert_eq!(five_one.positions().unwrap()[2], Speaker::FrontCenter);
         assert_eq!(five_oh.index_of(Speaker::FrontCenter), Some(4));
         assert_eq!(five_one.index_of(Speaker::FrontCenter), Some(2));
     }

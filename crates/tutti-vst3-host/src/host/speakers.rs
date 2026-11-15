@@ -31,7 +31,7 @@
 //! Only 5.1 comes out right, and only because bits 0–5 happen to be contiguous
 //! and in SMPTE order. A quad bus would ask the plugin for a centre and an LFE.
 
-use tutti_types::{ChannelTopology, Speaker};
+use tutti_types::{Bed, ChannelTopology, Speaker, Speakers};
 // The individual speaker bits live directly in `Vst`; only the named
 // arrangements (`kStereo`, `k51`, …) are in the `SpeakerArr` submodule.
 use vst3::Steinberg::Vst::{
@@ -85,8 +85,7 @@ const SPEAKER_BITS: &[(SpeakerArrangement, Speaker)] = &[
 ///
 /// `kMono` is `kSpeakerM` (`vstspeaker.h:123`), a dedicated "this bus is mono"
 /// bit sitting above the whole placement range, rather than the centre speaker.
-/// The engine's own mono is `FrontCenter` ([`ChannelTopology::smpte`] of width
-/// 1), so the two vocabularies disagree about what one channel means.
+/// The engine's own mono is `FrontCenter` ([`Bed::Mono`]), so the two vocabularies disagree about what one channel means.
 ///
 /// It is kept out of [`SPEAKER_BITS`] and handled as a special case in
 /// the decode, for two reasons. In the table `FrontCenter` would be named by two
@@ -115,17 +114,21 @@ pub(crate) fn from_arrangement(arr: SpeakerArrangement) -> ChannelTopology {
     // placement bits it means something this host cannot interpret, and the
     // walk below reports it as unnamed rather than guessing.
     if arr == MONO_BIT {
-        return ChannelTopology::new([Speaker::FrontCenter]);
+        return Bed::Mono.topology();
     }
 
-    ChannelTopology::new((0..64).filter(|bit| arr & (1u64 << bit) != 0).map(|bit| {
-        let mask = 1u64 << bit;
-        SPEAKER_BITS
-            .iter()
-            .find(|(b, _)| *b == mask)
-            .map(|(_, s)| *s)
-            .unwrap_or(Speaker::Unknown(bit as u16))
-    }))
+    // A mask names each bit once and the table names each speaker once, so no
+    // named speaker repeats.
+    ChannelTopology::Speakers(Speakers::from_format(
+        (0..64).filter(|bit| arr & (1u64 << bit) != 0).map(|bit| {
+            let mask = 1u64 << bit;
+            SPEAKER_BITS
+                .iter()
+                .find(|(b, _)| *b == mask)
+                .map(|(_, s)| *s)
+                .unwrap_or(Speaker::Unknown(bit as u16))
+        }),
+    ))
 }
 
 #[cfg(test)]
@@ -161,7 +164,7 @@ mod tests {
         ];
         for (bit, speaker) in spec {
             assert_eq!(
-                from_arrangement(1u64 << bit).positions(),
+                from_arrangement(1u64 << bit).positions().unwrap(),
                 &[speaker],
                 "bit {bit} decoded wrong"
             );
@@ -203,7 +206,7 @@ mod tests {
 
     /// 5.1 decodes to the engine's own channel order.
     ///
-    /// Pinned against `ChannelTopology::smpte` rather than a hand-written list:
+    /// Pinned against `ChannelTopology::assumed` rather than a hand-written list:
     /// the point is that VST3's derived order and the engine's SMPTE order
     /// *agree* for this layout, which is why 5.1 needs no channel remapping.
     #[test]
@@ -211,7 +214,7 @@ mod tests {
         let decoded = from_arrangement(SpeakerArr::k51);
         assert_eq!(
             decoded,
-            ChannelTopology::smpte(ChannelLayout::from(6u16)).expect("6 has an order"),
+            ChannelTopology::assumed(ChannelLayout::from(6u16)),
             "VST3's k51 and the engine's SMPTE 5.1 must be the same channel order"
         );
         assert_eq!(decoded.lfe_index(), Some(3));
@@ -227,7 +230,7 @@ mod tests {
     fn a_four_channel_bus_is_a_surround_pair_not_the_low_four_bits() {
         let decoded = from_arrangement(SpeakerArr::k40Music);
         assert_eq!(
-            decoded.positions(),
+            decoded.positions().unwrap(),
             &[
                 Speaker::FrontLeft,
                 Speaker::FrontRight,
@@ -245,7 +248,7 @@ mod tests {
             "the low-four-bits mask is not a four-channel surround layout"
         );
         assert_eq!(
-            from_arrangement(old_mask).positions(),
+            from_arrangement(old_mask).positions().unwrap(),
             &[
                 Speaker::FrontLeft,
                 Speaker::FrontRight,
@@ -256,38 +259,35 @@ mod tests {
         );
     }
 
-    /// VST3's four-channel layout is not the engine's quad, and is not silently
-    /// treated as it.
+    /// VST3's four-channel layout is spelled with side speakers, the engine's
+    /// quad with back ones, and both are the quad bed.
     ///
-    /// `ChannelTopology::quad()` is `FL FR BL BR` — the order `downmix.rs`
-    /// folds a 4-channel buffer by. `k40Music` is `L R Ls Rs`, whose surround
-    /// pair is VST3 bits 4/5, and those are the channels the engine calls
-    /// `SL`/`SR`. Same width, different speakers.
-    ///
-    /// Recorded rather than reconciled: making them equal would require
-    /// deciding that VST3's `Ls`/`Rs` mean rears, which would then put a 5.1
-    /// bus's surrounds in the wrong channels. The width-4 ambiguity is real and
-    /// belongs to the caller, which is why `smpte()` declines width 4 at all.
+    /// `Bed::Quad.topology()` is `FL FR BL BR`. `k40Music` is `L R Ls Rs`,
+    /// whose surround pair is VST3 bits 4/5, and those are the channels the
+    /// engine calls `SL`/`SR`: the two lists differ, so the topologies are not
+    /// equal, but `Bed::from_topology` matches both to the one bed up to a
+    /// side/back counterpart.
     #[test]
     fn the_vst3_four_channel_layout_is_not_the_engines_quad() {
         let vst3_four = from_arrangement(SpeakerArr::k40Music);
         assert_eq!(
-            vst3_four.layout(),
-            ChannelTopology::quad().layout(),
+            vst3_four.width(),
+            tutti_types::Bed::Quad.topology().width(),
             "both are four channels"
         );
         assert_ne!(
             vst3_four,
-            ChannelTopology::quad(),
-            "but they name different speakers, and conflating them would move audio"
+            tutti_types::Bed::Quad.topology(),
+            "but they name different speakers"
         );
+        assert_eq!(Bed::from_topology(&vst3_four), Some(Bed::Quad));
     }
 
     /// `k71Music` decodes to the engine's own 7.1 order.
     ///
     /// `k71Music` is the 7.1 whose extra pair sits beyond the 5.1 core
     /// (`vstspeaker.h:170-173`), which is what the engine's SMPTE 7.1 describes.
-    /// Pinned against `smpte` rather than a literal so the two orders are
+    /// Pinned against `ChannelTopology::assumed` rather than a literal so the two orders are
     /// asserted to *agree*, which is what makes 7.1 need no channel remapping.
     ///
     /// The other width a low-bits mask gets wrong: `(1<<8)-1` adds the front
@@ -297,7 +297,7 @@ mod tests {
         let decoded = from_arrangement(SpeakerArr::k71Music);
         assert_eq!(
             decoded,
-            ChannelTopology::smpte(ChannelLayout::from(8u16)).expect("8 has an order"),
+            ChannelTopology::assumed(ChannelLayout::from(8u16)),
             "k71Music and the engine's SMPTE 7.1 must be the same channel order"
         );
         assert_eq!(decoded.lfe_index(), Some(3));
@@ -306,11 +306,15 @@ mod tests {
         assert!(
             from_arrangement(old_mask)
                 .positions()
+                .unwrap()
                 .contains(&Speaker::FrontLeftOfCenter),
             "the old 8-channel mask named a front-of-centre pair"
         );
         assert!(
-            !decoded.positions().contains(&Speaker::FrontLeftOfCenter),
+            !decoded
+                .positions()
+                .unwrap()
+                .contains(&Speaker::FrontLeftOfCenter),
             "a real 7.1 arrangement has no front-of-centre speakers"
         );
     }
@@ -330,7 +334,7 @@ mod tests {
         let cine = from_arrangement(SpeakerArr::k71CineFullRear);
         let music = from_arrangement(SpeakerArr::k71Music);
 
-        assert_eq!(cine.layout(), music.layout(), "both are 8 channels");
+        assert_eq!(cine.width(), music.width(), "both are 8 channels");
         assert_ne!(cine, music, "but they are not the same channel order");
         assert!(
             !cine.is_fully_named(),
@@ -343,7 +347,7 @@ mod tests {
     #[test]
     fn an_empty_arrangement_decodes_to_no_channels() {
         let decoded = from_arrangement(SpeakerArr::kEmpty);
-        assert_eq!(decoded.layout(), ChannelLayout::EMPTY);
+        assert_eq!(decoded.width(), ChannelLayout::EMPTY);
     }
 
     /// An unnamed bit keeps its channel slot rather than vanishing.
@@ -358,8 +362,8 @@ mod tests {
         // than shortening the bus.
         let arr = SpeakerArr::kStereo | kSpeakerLfe2;
         let decoded = from_arrangement(arr);
-        assert_eq!(decoded.layout(), ChannelLayout::from(3u16));
-        assert_eq!(decoded.positions()[2], Speaker::Unknown(18));
+        assert_eq!(decoded.width(), ChannelLayout::from(3u16));
+        assert_eq!(decoded.positions().unwrap()[2], Speaker::Unknown(18));
         assert!(!decoded.is_fully_named());
     }
 
@@ -369,7 +373,7 @@ mod tests {
     /// placement range — while the engine's one-channel bus is `FrontCenter`.
     #[test]
     fn the_mono_marker_decodes_to_the_engines_mono() {
-        let engine_mono = ChannelTopology::smpte(ChannelLayout::MONO).expect("mono has an order");
+        let engine_mono = ChannelTopology::assumed(ChannelLayout::MONO);
         assert_ne!(
             SpeakerArr::kMono,
             kSpeakerC,
@@ -378,7 +382,7 @@ mod tests {
 
         let decoded = from_arrangement(SpeakerArr::kMono);
         assert_eq!(decoded, engine_mono);
-        assert_eq!(decoded.layout(), ChannelLayout::MONO);
+        assert_eq!(decoded.width(), ChannelLayout::MONO);
     }
 
     /// The mono marker mixed with placement bits is not silently read as mono.
@@ -391,8 +395,8 @@ mod tests {
     fn the_mono_marker_beside_placements_is_not_read_as_mono() {
         let odd = SpeakerArr::kStereo | kSpeakerM;
         let decoded = from_arrangement(odd);
-        assert_eq!(decoded.layout(), ChannelLayout::from(3u16));
-        assert_eq!(decoded.positions()[2], Speaker::Unknown(19));
+        assert_eq!(decoded.width(), ChannelLayout::from(3u16));
+        assert_eq!(decoded.positions().unwrap()[2], Speaker::Unknown(19));
     }
 
     /// Decoded width always equals the mask's popcount.
@@ -412,7 +416,7 @@ mod tests {
             SpeakerArr::kStereo | (1u64 << 19),
         ] {
             assert_eq!(
-                u32::from(from_arrangement(arr).layout().count()),
+                u32::from(from_arrangement(arr).width().count()),
                 arr.count_ones(),
                 "width disagreed with popcount for {arr:#x}"
             );

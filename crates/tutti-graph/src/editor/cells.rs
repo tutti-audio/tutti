@@ -9,6 +9,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use tutti_curve::declick_frames;
+
 use super::{BusLanes, mix_range_of, range_of};
 use crate::gain::{EdgeGain, GainCell};
 use crate::mode::{ModeCell, ModeState, NodeMode};
@@ -95,6 +97,7 @@ impl RangeCells {
         key: NodeKey,
         ports: usize,
         max: usize,
+        declick: usize,
         declared: Option<ParamPorts>,
         spec: &GraphSpec,
     ) -> ParamState {
@@ -115,7 +118,7 @@ impl RangeCells {
         for &param in list.as_slice() {
             cells.store(param, range_of(spec, ParamIn { node: key, param }));
         }
-        ParamState::new(ports, max, Some(Arc::clone(cells)))
+        ParamState::new(ports, max, declick, Some(Arc::clone(cells)))
     }
 }
 
@@ -210,7 +213,12 @@ impl ModeCells {
         carry_mix(committed, key, cell, spec.mix(key));
         cell.store_range(mix_range_of(spec, key));
         let shape = &plan.unit(key).expect("a placed unit is in its plan").shape;
-        ModeState::new(cell.clone(), shape, plan.prepare.max_block().get())
+        ModeState::new(
+            cell.clone(),
+            shape,
+            plan.prepare.max_block().get(),
+            declick_frames(plan.prepare.sample_rate()).get(),
+        )
     }
 }
 

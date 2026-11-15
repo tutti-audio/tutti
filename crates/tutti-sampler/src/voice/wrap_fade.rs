@@ -1,6 +1,6 @@
 //! A placed memory voice across a transport loop wrap: the tail it was
 //! playing past the loop's end fades out under the loop's start, over
-//! `clock::WRAP_FADE`, instead of cutting. Each test runs on both hosts of
+//! `DECLICK`, instead of cutting. Each test runs on both hosts of
 //! the read: a `VoicePool` slot and a bare `MemorySource` node.
 //!
 //! The source is a pure tone, so the render is continuous but for the wrap:
@@ -10,6 +10,7 @@
 use crate::VoiceWindow;
 
 use std::sync::Arc;
+use tutti_graph::declick_frames;
 use tutti_types::MaxBlock;
 
 use tutti_codec::Wave;
@@ -18,7 +19,6 @@ use tutti_types::{
     Beat, BeatDuration, Bpm, ChannelLayout, Frame, FrameClock, LoopRange, SampleRate, Samples,
 };
 
-use super::clock::WRAP_FADE;
 use super::memory_source::MemorySource;
 use super::node::VoiceNode;
 use super::pool::VoicePool;
@@ -281,20 +281,20 @@ fn natural_step(freq: f64) -> f32 {
 
 /// What a wrap's crossfade of `fade` frames can step by: each of the two
 /// tones moves by its own step under gains summing to at most root 2, and the
-/// gain moves by at most `pi/2` over `fade + 1` frames across their gap of at
-/// most `2 * AMP`.
+/// gain moves by at most `15/8 * pi/2` over `fade + 1` frames (the
+/// smootherstep's steepest slope) across their gap of at most `2 * AMP`.
 fn step_bound(freq: f64, fade: usize) -> f32 {
     std::f32::consts::SQRT_2 * natural_step(freq)
-        + 2.0 * AMP * std::f32::consts::FRAC_PI_2 / (fade + 1) as f32
+        + 2.0 * AMP * 1.875 * std::f32::consts::FRAC_PI_2 / (fade + 1) as f32
         + 1e-4
 }
 
 /// The fade in frames at 48 kHz.
 #[test]
 fn the_fade_is_five_milliseconds() {
-    assert_eq!(WRAP_FADE.to_samples(SampleRate::of(SR)), Samples(FADE));
+    assert_eq!(declick_frames(SampleRate::of(SR)), Samples(FADE));
     assert_eq!(
-        WRAP_FADE.to_samples(SampleRate::SR_96K),
+        declick_frames(SampleRate::SR_96K),
         Samples(2 * FADE),
         "a time, not a frame count"
     );
@@ -342,8 +342,8 @@ fn the_fade_begins_on_the_wrap_frame_and_changes_nothing_before_it(host: Host) {
     for (i, s) in out[0].iter().enumerate().take(WRAP) {
         assert_eq!(s.to_bits(), tone(437.3, i).to_bits(), "frame {i}");
     }
-    let x = 1.0 / (FADE + 1) as f32 * std::f32::consts::FRAC_PI_2;
-    let want = x.sin() * tone(437.3, LS) + x.cos() * tone(437.3, WRAP);
+    let angle = smootherstep(1.0 / (FADE + 1) as f64) * std::f64::consts::FRAC_PI_2;
+    let want = angle.sin() as f32 * tone(437.3, LS) + angle.cos() as f32 * tone(437.3, WRAP);
     assert!(
         (out[0][WRAP] - want).abs() < 1e-5,
         "{} vs {want}",
@@ -529,8 +529,16 @@ fn steps_at(channels: usize, before: f32, after: f32, split: usize) -> Arc<Wave>
     Arc::new(w)
 }
 
+/// The smootherstep `x³(6x² − 15x + 10)`.
+fn smootherstep(x: f64) -> f64 {
+    x * x * x * (6.0 * x * x - 15.0 * x + 10.0)
+}
+
+/// `(g_in, g_out)` of frame `k`: `sin` and `cos` of `pi/2` times the
+/// smootherstep at `(k + 1) / (FADE + 1)`, written out in `f64`.
 fn equal_power(k: usize) -> (f32, f32) {
-    tutti_graph::CrossfadeCurve::EqualPower.gains(k, FADE)
+    let angle = smootherstep((k + 1) as f64 / (FADE + 1) as f64) * std::f64::consts::FRAC_PI_2;
+    (angle.sin() as f32, angle.cos() as f32)
 }
 
 /// The gains of the crossfade, frame for frame: a mid-sound head (0.25) and
@@ -643,9 +651,19 @@ fn an_in_phase_join_peaks_at_three_decibels_and_a_clip_start_at_twice_the_tone(h
         (peak - std::f32::consts::SQRT_2).abs() < 1e-3,
         "peak {peak}"
     );
+    // The mean of `sin + cos` over the fade, `x = (k + 1) / (FADE + 1)`,
+    // summed in `f64` (not a plain sine/cosine's `4 / pi`: the position is the
+    // smootherstep's).
+    let mean_want = (0..FADE)
+        .map(|k| {
+            let (g_in, g_out) = equal_power(k);
+            f64::from(g_in + g_out)
+        })
+        .sum::<f64>()
+        / FADE as f64;
     assert!(
-        (mean - 4.0 / std::f32::consts::PI).abs() < 5e-3,
-        "mean {mean}"
+        (f64::from(mean) - mean_want).abs() < 1e-4,
+        "mean {mean}, {mean_want}"
     );
 
     let mut rig = Rig::new(host, Some(region(LOOP_START_BEATS, LOOP_BEATS)), 1000);

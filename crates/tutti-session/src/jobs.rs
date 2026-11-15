@@ -209,7 +209,7 @@ pub(crate) struct Jobs {
     tx: Sender<Arrival>,
     rx: Receiver<Arrival>,
     landers: HashMap<JobId, Lander>,
-    next: u64,
+    next: tutti_types::Mint,
     closed: Arc<AtomicBool>,
 }
 
@@ -229,7 +229,7 @@ impl Jobs {
             tx,
             rx,
             landers: HashMap::new(),
-            next: 0,
+            next: tutti_types::Mint::new(),
             closed: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -285,8 +285,7 @@ impl Jobs {
         L: FnMut(&mut Session, Landed<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
     {
         let jobs = &mut *self;
-        let id = JobId(jobs.next);
-        jobs.next += 1;
+        let id = JobId(jobs.next.mint().get());
         let landings = Landings {
             tx: jobs.tx.clone(),
             id,

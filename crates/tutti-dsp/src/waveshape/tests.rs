@@ -8,9 +8,8 @@ use super::*;
 /// The four curves built from `+ * / round floor clamp abs` are pinned
 /// **exactly**: IEEE-754 rounds each of those correctly, so the result is
 /// the same on every platform. `tanh` and `atan` are libm
-/// quality-of-implementation and differ in the last ulp between C runtimes
-/// (the same reason `tutti-nodes`'s click digest is gated off MSVC), so those
-/// two are pinned against the f64 closed form with a tolerance instead.
+/// quality-of-implementation and differ in the last ulp between C runtimes, so
+/// those two are pinned against the f64 closed form with a tolerance instead.
 #[test]
 fn curves_are_pinned() {
     let exact = [

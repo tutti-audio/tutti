@@ -241,7 +241,7 @@ fn vorbis_order(spec: &Spec) -> Result<Option<Box<[usize]>>> {
         topology: spec.topology().clone(),
     };
     let source = spec.topology();
-    let have = source.positions();
+    let have = source.positions().ok_or_else(refused)?;
     let mut taken = vec![false; have.len()];
     let mut order: Vec<Option<usize>> = vec![None; target.len()];
     // Exact speakers first, so a rear never takes the place of a side that is

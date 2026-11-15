@@ -20,7 +20,7 @@ use tutti_graph::{
     Cost, Cx, IntoNode, Io, MAX_PARAM_PORTS, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape,
     Status,
 };
-use tutti_types::{AtomicF32, CompressionRatio, Db, Hz, MAX_BUS_CHANNELS, Param, SampleRate};
+use tutti_types::{AtomicF32, CompressionRatio, Db, Hz, MAX_CHANNELS, Param, SampleRate};
 use tutti_types::{BusTopology, ChannelLayout, Seconds, Tail, UnitParam};
 
 use crate::filter::Splits;
@@ -456,11 +456,11 @@ impl Tuned {
         if frames.is_empty() {
             return;
         }
-        let mut audio: [&[f32]; MAX_BUS_CHANNELS] = [&[]; MAX_BUS_CHANNELS];
+        let mut audio: [&[f32]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
         for (slot, ch) in audio.iter_mut().zip(input) {
             *slot = &ch[frames.clone()];
         }
-        let mut out: [&mut [f32]; MAX_BUS_CHANNELS] = std::array::from_fn(|_| Default::default());
+        let mut out: [&mut [f32]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
         for (slot, ch) in out.iter_mut().zip(output.iter_mut()) {
             *slot = &mut ch[frames.clone()];
         }
@@ -586,12 +586,11 @@ impl Node for MultibandCompressorNode {
 
         let (inputs, mut outputs) = io.split();
         let width = inputs.len();
-        let mut input: [&[f32]; MAX_BUS_CHANNELS] = [&[]; MAX_BUS_CHANNELS];
+        let mut input: [&[f32]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
         for (c, slot) in input.iter_mut().enumerate().take(width) {
             *slot = &inputs.get(c)[..n];
         }
-        let mut output: [&mut [f32]; MAX_BUS_CHANNELS] =
-            std::array::from_fn(|_| Default::default());
+        let mut output: [&mut [f32]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
         for (slot, ch) in output.iter_mut().zip(outputs.iter_mut()) {
             *slot = &mut ch[..n];
         }

@@ -94,12 +94,12 @@ fn wait_until(mut cond: impl FnMut() -> bool) -> bool {
 }
 
 fn unique_shm_name(label: &str) -> String {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
     format!(
         "hostile_{}_{}_{}",
         label,
         std::process::id(),
-        COUNTER.fetch_add(1, Ordering::Relaxed)
+        COUNTER.mint()
     )
 }
 

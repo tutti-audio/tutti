@@ -46,16 +46,17 @@
 //! **The declick is audio only, and its fade-out ends on the command's
 //! frame.** A declick stop or seek moves the transport on its command's
 //! frame, as an immediate one does. The fade is the engine's, as a gain on
-//! the output, continuous at every frame:
+//! the output along [`FadeLaw::EqualAmplitude`]'s one side, continuous at
+//! every frame:
 //!
 //! - **A timed command** (`At::Frame`, `At::Beat`) is seen ahead: the walk
-//!   looks one fade (10 ms) past each block for the next declicked
-//!   command playback reaches, and the gain falls linearly on the *old*
+//!   looks one fade ([`DECLICK`](tutti_graph::DECLICK)) past each block for the next declicked
+//!   command playback reaches, and the gain falls on the *old*
 //!   position's audio to reach zero exactly on its frame. Seen with less
 //!   than a fade to go (sent late, or reached sooner after a tempo change),
 //!   it falls over whatever frames are left: steeper, still continuous.
 //! - **On the frame** the transport jumps or stops, sample-accurately, and
-//!   the gain rises from zero over one fade: the new position's audio after
+//!   the gain rises from zero over one fade ([`DECLICK`](tutti_graph::DECLICK)): the new position's audio after
 //!   a seek, and after a stop whatever still sounds while stopped (live
 //!   input, a reverb tail; transport-gated sources are already silent), so
 //!   the output never comes back with a step.
@@ -72,7 +73,7 @@
 //! # Limits
 //!
 //! [`Engine::new`] bounds the graph's editor ([`Editor::set_limits`]) to
-//! what its fold scratch holds: at most [`MAX_ROOT_CHANNELS`] global
+//! what its fold scratch holds: at most [`MAX_CHANNELS`] global
 //! outputs, and a `MaxBlock` no larger than its block capacity (the larger
 //! of the prepared maximum and [`DEFAULT_BLOCK_CAPACITY`], or the
 //! capacity given to [`Engine::with_capacity`]). A commit or a re-prepare
@@ -81,8 +82,8 @@
 //! callback never meets a graph it cannot render.
 
 use tutti_graph::{
-    CommitError, Due, Editor, Env, Executor, Limits, MAX_ROOT_CHANNELS, Offset, Playhead,
-    TransportChanges,
+    CommitError, Due, Editor, Env, Executor, FadeLaw, Limits, Offset, Playhead, TransportChanges,
+    declick_frames,
 };
 
 use crate::block_clock::{BlockClock, BlockClockReader, Pose};
@@ -97,7 +98,7 @@ use tutti_transport::{
     AudioTaken, FadeOut, IMMEDIATE_RESERVE, MotionEvent, SCHEDULE_CAPACITY, Scheduled,
     TransportAudio, TransportCommand,
 };
-use tutti_types::{At, Frame};
+use tutti_types::{At, Frame, MAX_CHANNELS};
 use tutti_types::{ChannelLayout, SampleRate, Samples, Seconds};
 
 /// The block capacity an engine sizes its fold scratch for unless given
@@ -113,7 +114,7 @@ pub enum GraphEngineError {
     #[error("the executor is not the editor's")]
     NotAPair,
     /// What the editor already sent is past what the engine can run: more
-    /// than [`MAX_ROOT_CHANNELS`] global outputs, or a `MaxBlock` above the
+    /// than [`MAX_CHANNELS`] global outputs, or a `MaxBlock` above the
     /// block capacity.
     #[error("the graph is past the engine's limits: {0}")]
     Limits(CommitError),
@@ -199,7 +200,7 @@ struct GraphRender {
     /// drives the clock itself; every node reads what it publishes from its
     /// block's `Env`.
     transport: TransportAudio,
-    /// `MAX_ROOT_CHANNELS` planar channels of `stride` frames each.
+    /// `MAX_CHANNELS` planar channels of `stride` frames each.
     scratch: Vec<f32>,
     stride: usize,
     playhead: Playhead,
@@ -271,7 +272,7 @@ impl Engine {
     /// it publishes the playhead, steady time and tempo in force.
     ///
     /// **Bounds the editor** ([`Editor::set_limits`]) to at most
-    /// [`MAX_ROOT_CHANNELS`] global outputs and a `MaxBlock` of at most the
+    /// [`MAX_CHANNELS`] global outputs and a `MaxBlock` of at most the
     /// capacity, so every later commit or re-prepare past them is refused
     /// there, with a `CommitError`. Refused here, building nothing, when
     /// `executor` is not `editor`'s, or when what the editor already sent is
@@ -293,7 +294,7 @@ impl Engine {
     /// reads it from its block's `Env`, which shares nothing.
     ///
     /// Control thread. Allocates the fold scratch
-    /// (`MAX_ROOT_CHANNELS × capacity` samples).
+    /// (`MAX_CHANNELS × capacity` samples).
     ///
     /// # Errors
     ///
@@ -304,7 +305,7 @@ impl Engine {
     ///   `transport` (or a clone of it, or a transport sharing its `motion`
     ///   handle) is alive.
     /// - [`GraphEngineError::Limits`]: what the editor already sent has more
-    ///   than [`MAX_ROOT_CHANNELS`] global outputs or a `MaxBlock` above the
+    ///   than [`MAX_CHANNELS`] global outputs or a `MaxBlock` above the
     ///   capacity.
     pub fn with_capacity(
         transport: &tutti_transport::Transport,
@@ -329,7 +330,7 @@ impl Engine {
             .max(editor.prepare().max_block().get());
         editor
             .set_limits(Limits {
-                max_global_outputs: MAX_ROOT_CHANNELS,
+                max_global_outputs: MAX_CHANNELS,
                 max_block: stride,
             })
             .map_err(GraphEngineError::Limits)?;
@@ -348,7 +349,7 @@ impl Engine {
             graph: AudioThreadCell::new(GraphRender {
                 exec: executor,
                 transport: audio,
-                scratch: vec![0.0; MAX_ROOT_CHANNELS * stride],
+                scratch: vec![0.0; MAX_CHANNELS * stride],
                 stride,
                 playhead: Playhead::new(),
                 dropped_seen,
@@ -370,7 +371,7 @@ impl Engine {
     /// channels, so the engine can render into a buffer of that width.
     ///
     /// A new engine renders into buffers of up to 16 channels without being
-    /// asked: the folds from each root width (1 to `MAX_ROOT_CHANNELS`) to each
+    /// asked: the folds from each root width (1 to `MAX_CHANNELS`) to each
     /// device width are built on the control side, in
     /// [`Engine::new`](Self::new), and published through an `ArcLend` that each
     /// call lends once, so a plan change needs no rebuild and the audio thread
@@ -481,7 +482,7 @@ impl Engine {
     /// One executor block per device block (up to its prepared maximum),
     /// under the
     /// transport as it stands. The graph root has no inputs. The root is
-    /// rendered at its **own** output width (at most [`MAX_ROOT_CHANNELS`],
+    /// rendered at its **own** output width (at most [`MAX_CHANNELS`],
     /// which the editor's limits enforce) into scratch, then each frame is
     /// folded to the *output's* width — the device / target width — by
     /// [`fold_to_width`](tutti_graph::fold_to_width), built in
@@ -871,13 +872,9 @@ struct Walk {
     frames: usize,
 }
 
-/// How long a declick fades, out and in: long enough to kill a click, short
-/// enough not to read as a fade.
-const FADE_TIME: Seconds = Seconds(0.01);
-
-/// Frames a declick fades over at `rate`, at least one.
+/// Frames a declick fades over at `rate`: [`DECLICK`](tutti_graph::DECLICK), at least one.
 fn fade_frames(rate: SampleRate) -> usize {
-    FADE_TIME.to_samples(rate).get().max(1)
+    declick_frames(rate).get()
 }
 
 /// Whether `command` asks for a declick (the motion machine grants it only
@@ -969,11 +966,12 @@ impl GainPlan {
 /// The declick gain, carried across blocks: a fade-out that ends exactly on
 /// a declicked command's frame, and a fade-in that starts there.
 ///
-/// Continuous by construction: a fade-out falls linearly from wherever the
-/// gain is to zero at its target, so with a full fade of lead each frame
-/// moves it by at most `1/fade`; a fade-in rises by `1/fade` a frame. The one
-/// step is a declicked command with no lead time (`At::NextBlock`, a late
-/// command, an untimed `try_send`): the old audio ends on the jump frame
+/// A fade is one move of the gain from where it is to zero or to one, along
+/// [`FadeLaw::EqualAmplitude`]: a fade-out is `from * out` over the frames up
+/// to its target, a fade-in `from * out + in` over one [`DECLICK`](tutti_graph::DECLICK). The gain
+/// is continuous by construction: a fade starts from wherever the gain is, so
+/// the one step is a declicked command with no lead time (`At::NextBlock`, a
+/// late command, an untimed `try_send`): the old audio ends on the jump frame
 /// with the gain at zero there, and the new audio fades in.
 #[derive(Clone, Copy, Debug)]
 struct Fader {
@@ -981,6 +979,35 @@ struct Fader {
     aim: Option<Frame>,
     /// Frames a fade spans, at the rate of the block being shaped.
     fade: usize,
+    /// The fade the gain is on, if any.
+    run: Option<Run>,
+}
+
+/// One fade of the gain: `n` frames from `from` to silence (a fade-out that
+/// ends on `aim`) or to unity, `k` of them done.
+#[derive(Clone, Copy, Debug)]
+struct Run {
+    from: f32,
+    k: usize,
+    n: usize,
+    /// The frame a fade-out ends on; `None`: a fade-in.
+    aim: Option<Frame>,
+}
+
+impl Run {
+    /// The gain of the fade's next frame, and the run moved past it; `None`
+    /// once it has reached its end.
+    fn step(self) -> (f32, Option<Self>) {
+        let to = if self.aim.is_some() { 0.0 } else { 1.0 };
+        let gain = FadeLaw::EqualAmplitude.between(self.from, to, self.k, self.n);
+        // A fade-in lasts one frame past its last law step, which is the
+        // gain's exact end; a fade-out ends on its aim, which is zero.
+        let next = Self {
+            k: self.k + 1,
+            ..self
+        };
+        (gain, (next.k <= self.n).then_some(next))
+    }
 }
 
 impl Fader {
@@ -989,7 +1016,18 @@ impl Fader {
             gain: 1.0,
             aim: None,
             fade,
+            run: None,
         }
+    }
+
+    /// A fade-in from silence, starting on the next frame.
+    fn rise(fade: usize) -> Option<Run> {
+        Some(Run {
+            from: 0.0,
+            k: 0,
+            n: fade,
+            aim: None,
+        })
     }
 
     /// Shape frames `base..base + frames` of the interleaved `output`
@@ -1009,7 +1047,7 @@ impl Fader {
         // Nothing to do on a block with no event, full gain, and no fade-out
         // starting inside it: the common case.
         let quiet = self.aim.is_none_or(|to| to.get() > end + fade as u64);
-        if plan.len == 0 && self.gain == 1.0 && quiet {
+        if plan.len == 0 && self.gain == 1.0 && self.run.is_none() && quiet {
             return;
         }
         let mut next = 0;
@@ -1030,6 +1068,7 @@ impl Fader {
             let x = frame0.get() + i as u64;
             if jump {
                 self.gain = 0.0;
+                self.run = Self::rise(fade);
             } else {
                 match self.aim {
                     Some(to) if x >= to.get() => {
@@ -1037,12 +1076,38 @@ impl Fader {
                         // here (whether or not the command was applied).
                         self.gain = 0.0;
                         self.aim = None;
+                        self.run = Self::rise(fade);
                     }
                     Some(to) if to.get() - x <= fade as u64 => {
-                        let left = (to.get() - x) as f32;
-                        self.gain *= left / (left + 1.0);
+                        // A fade-out over the frames left, from the gain the
+                        // frame has (a fade-in cut short continues from there).
+                        let run = match self.run {
+                            Some(r) if r.aim == Some(to) => r,
+                            _ => Run {
+                                from: self.gain,
+                                k: 0,
+                                n: (to.get() - x) as usize,
+                                aim: Some(to),
+                            },
+                        };
+                        (self.gain, self.run) = run.step();
                     }
-                    _ => self.gain = (self.gain + 1.0 / fade as f32).min(1.0),
+                    _ => {
+                        let run = match self.run {
+                            Some(r) if r.aim.is_none() => Some(r),
+                            _ if self.gain < 1.0 => Some(Run {
+                                from: self.gain,
+                                k: 0,
+                                n: fade,
+                                aim: None,
+                            }),
+                            _ => None,
+                        };
+                        match run {
+                            Some(r) => (self.gain, self.run) = r.step(),
+                            None => self.run = None,
+                        }
+                    }
                 }
             }
             if self.gain != 1.0 {
@@ -1149,16 +1214,13 @@ impl GraphRender {
         // ones the block renders with. The editor's limits refuse a graph
         // wider than the scratch.
         let width = self.exec.plan().map_or(0, |p| p.global_outputs());
-        debug_assert!(
-            width <= MAX_ROOT_CHANNELS,
-            "the editor's limits refuse this"
-        );
-        let width = width.min(MAX_ROOT_CHANNELS);
+        debug_assert!(width <= MAX_CHANNELS, "the editor's limits refuse this");
+        let width = width.min(MAX_CHANNELS);
         let block = &mut output[at * out_ch..(at + len) * out_ch];
         let stride = self.stride;
         let mut chunks = self.scratch.chunks_mut(stride);
-        let mut outs: [&mut [f32]; MAX_ROOT_CHANNELS] =
-            std::array::from_fn(|_| chunks.next().expect("MAX_ROOT_CHANNELS chunks"));
+        let mut outs: [&mut [f32]; MAX_CHANNELS] =
+            std::array::from_fn(|_| chunks.next().expect("MAX_CHANNELS chunks"));
         self.exec
             .render_applied(len, transport, changes, &[], &mut outs[..width]);
         // Published after the block, not by the walk before it: through the
@@ -1170,7 +1232,7 @@ impl GraphRender {
             return true;
         }
         // The fold of this width into the device, built on the control side.
-        // `width` is within `1..=MAX_ROOT_CHANNELS` (the editor's limits), so a
+        // `width` is within `1..=MAX_CHANNELS` (the editor's limits), so a
         // fold is there.
         match folds.get(out_ch, width) {
             Some(fold) => {
@@ -1180,7 +1242,7 @@ impl GraphRender {
                     .expect("a fold exists only for a held device width, and the block is whole frames of it");
                 // The rendered channels, a block long each, as one table on
                 // the stack.
-                let mut table: [&[f32]; MAX_ROOT_CHANNELS] = [&[]; MAX_ROOT_CHANNELS];
+                let mut table: [&[f32]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
                 for (slot, out) in table.iter_mut().zip(&outs).take(width) {
                     *slot = &out[..len];
                 }
@@ -1510,7 +1572,7 @@ mod tests {
         transport
             .motion()
             .schedule(
-                At::Frame(Frame::new(812)),
+                At::Frame(Frame::new(700)),
                 tutti_transport::MotionEvent::stop(),
             )
             .expect("room");
@@ -1526,7 +1588,7 @@ mod tests {
             &mut pieces,
         );
         assert_eq!(walk.gain.len, 1);
-        assert_eq!(walk.gain.items[0], (0, Gain::Aim(Some(Frame::new(812)))));
+        assert_eq!(walk.gain.items[0], (0, Gain::Aim(Some(Frame::new(700)))));
     }
 
     /// A block refused the graph is a dropout the meter counts, not times:
@@ -1633,7 +1695,7 @@ mod tests {
     #[test]
     fn every_root_width_places_into_any_device() {
         let folds = OutputFolds::up_to(DEFAULT_DEVICE_WIDTHS);
-        for root in 1..=MAX_ROOT_CHANNELS {
+        for root in 1..=MAX_CHANNELS {
             for device in 1..=DEFAULT_DEVICE_WIDTHS {
                 let ordered = |w: usize| [1, 2, 4, 6, 8, 12].contains(&w);
                 let refused = root > device && !(ordered(root) && ordered(device));
@@ -1651,7 +1713,7 @@ mod tests {
             assert!(folds.has_device(device));
         }
         assert!(folds.get(DEFAULT_DEVICE_WIDTHS + 1, 2).is_none());
-        assert!(folds.get(2, MAX_ROOT_CHANNELS + 1).is_none());
+        assert!(folds.get(2, MAX_CHANNELS + 1).is_none());
         assert!(folds.get(0, 2).is_none() && folds.get(2, 0).is_none());
 
         let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
@@ -1778,7 +1840,7 @@ mod tests {
         let folded = [61.0 + m * 63.0 + m * 65.0, 62.0 + m * 63.0 + m * 66.0];
         assert_eq!(first_frame(&engine, 2), folded);
         let control = engine.output_control();
-        let five_one = ChannelTopology::smpte(ChannelLayout::from(6u16)).unwrap();
+        let five_one = ChannelTopology::assumed(ChannelLayout::from(6u16));
         control
             .declare_root(Some(five_one), ChannelLayout::STEREO)
             .expect("5.1 into stereo");
@@ -1791,7 +1853,8 @@ mod tests {
             LowFrequency,
             SideLeft,
             SideRight,
-        ]);
+        ])
+        .unwrap();
         control
             .declare_root(Some(swapped), ChannelLayout::STEREO)
             .expect("places");
@@ -1819,15 +1882,15 @@ mod tests {
         let by_index = [41.0, 42.0, 43.0, 44.0, 0.0, 0.0, 0.0, 0.0];
         for root in [
             ChannelTopology::unassigned(ChannelLayout::QUAD),
-            ChannelTopology::smpte(ChannelLayout::from(6u16)).unwrap(),
-            ChannelTopology::smpte(eight).unwrap(),
+            ChannelTopology::assumed(ChannelLayout::from(6u16)),
+            ChannelTopology::assumed(eight),
         ] {
             control.declare_root(Some(root), eight).unwrap();
             assert_eq!(first_frame(&engine, 8), by_index);
         }
         // At its own width: replaced at once (the quad of speakers, rears on 6, 7).
         control
-            .declare_root(Some(ChannelTopology::quad()), eight)
+            .declare_root(Some(tutti_types::Bed::Quad.topology()), eight)
             .unwrap();
         assert_ne!(first_frame(&engine, 8), by_index);
         // Undeclared: every entry goes, the bare quad.
@@ -1889,7 +1952,8 @@ mod tests {
             tutti_types::Speaker::FrontRight,
             tutti_types::Speaker::Unknown(9),
             tutti_types::Speaker::FrontCenter,
-        ]);
+        ])
+        .unwrap();
         assert!(matches!(
             control.declare_root(Some(lfe2), ChannelLayout::STEREO),
             Err(FoldError::Unnamed { .. })

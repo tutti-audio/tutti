@@ -225,7 +225,7 @@ mod tests {
         let mut cycle = StreamerCycle::new(config, StreamerSender::from(reports));
         assert_eq!(cycle.step(&shared, || None), StepOutcome::Idle, "no stream");
 
-        let id = StreamId(1);
+        let id = StreamId::of(1);
         let (record, _ring, _pos) =
             super::super::record::tests::record(id, PathBuf::from("t.wav"), 1024, 1u16);
         let _ = step(&mut cycle.local.streams, Cmd::Open(Box::new(record)));
@@ -262,7 +262,7 @@ mod tests {
         let (reports, _queue) = crossbeam_channel::bounded(8);
         let reports = StreamerSender::from(reports);
         let mut cycle = StreamerCycle::new(config, reports);
-        let id = StreamId(1);
+        let id = StreamId::of(1);
         let (record, ring, _pos) =
             super::super::record::tests::record(id, PathBuf::from("t.wav"), 1024, 1u16);
         let _ = step(&mut cycle.local.streams, Cmd::Open(Box::new(record)));
@@ -303,8 +303,12 @@ mod tests {
         let (reports, _queue) = crossbeam_channel::bounded(8);
         let reports = StreamerSender::from(reports);
         let mut cycle = StreamerCycle::new(config, reports);
-        let (record, ring, _pos) =
-            super::super::record::tests::record(StreamId(1), PathBuf::from("t.wav"), 1024, 1u16);
+        let (record, ring, _pos) = super::super::record::tests::record(
+            StreamId::of(1),
+            PathBuf::from("t.wav"),
+            1024,
+            1u16,
+        );
         let _ = step(&mut cycle.local.streams, Cmd::Open(Box::new(record)));
 
         let mut control = ring.control_reader();

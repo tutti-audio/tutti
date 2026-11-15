@@ -126,7 +126,7 @@ use tutti_plugin_types::{
     BridgeError, Normalized, ParamEdit, ParamId, PluginFailure, PluginInvalidation, PluginRefresh,
     PluginTail,
 };
-use tutti_types::{SampleRate, Samples, Seconds};
+use tutti_types::{SampleRate, Samples};
 
 use crate::plugin_diagnostics::Figures;
 use crate::{
@@ -1640,8 +1640,8 @@ impl Session {
         match self.graph.replace_plugin(
             node,
             client,
-            Seconds(0.01),
-            tutti_graph::CrossfadeCurve::default(),
+            tutti_graph::DECLICK,
+            tutti_graph::FadeLaw::default(),
         ) {
             Ok(()) => {}
             Err(crate::ReplaceRefused::Busy(client)) => {
@@ -2500,19 +2500,19 @@ mod tests {
             let mut rig = rig(None);
             let replacement = tutti_graph::ForkByClone(tutti_nodes::testing::Const::mono(1.0));
             let fade = tutti_types::Seconds(0.0);
-            let curve = tutti_graph::CrossfadeCurve::EqualAmplitude;
+            let law = tutti_graph::FadeLaw::EqualAmplitude;
             if crossfade {
                 assert!(matches!(
                     rig.session
                         .graph()
-                        .crossfade(rig.node, replacement, fade, curve),
+                        .crossfade(rig.node, replacement, fade, law),
                     Ok(crate::Crossfade::Landed(_))
                 ));
             } else {
                 assert!(
                     rig.session
                         .graph()
-                        .replace(rig.node, replacement, fade, curve)
+                        .replace(rig.node, replacement, fade, law)
                         .is_ok()
                 );
             }
