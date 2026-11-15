@@ -40,7 +40,8 @@ use super::instance::Instance;
 use crate::MainThreadControl;
 use crate::ParameterChangeSink;
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, Control, Health, InProcess, StateError,
+    AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health, InProcess,
+    OwnBypass, StateError, bypass_value, is_bypassed,
 };
 use tutti_plugin_types::{
     Normalized, ParamId, ParameterInfo, PluginFailure, RenderMode, TerminationReason,
@@ -109,9 +110,17 @@ where
         wait.recv_timeout(OFF_MAIN_DEADLINE).ok()
     }
 
+    /// `work` on the plugin now, when this is the main thread and the instance is
+    /// not locked; `None` otherwise. Never waits.
+    fn try_main<R>(&self, work: impl FnOnce(MainThreadMarker, &mut Instance<F>) -> R) -> Option<R> {
+        let main = MainThreadMarker::new()?;
+        let mut instance = self.inner.try_lock()?;
+        Some(work(main, &mut instance))
+    }
+
     /// `work` on the main thread without waiting: at once on it, posted to the
     /// owner's collector off it (refused while that collector has never run).
-    /// Skipped when the instance is locked, as a write has always been.
+    /// Skipped when the instance is locked.
     fn post(&self, work: impl FnOnce(MainThreadMarker, &mut Instance<F>) + Send + 'static) {
         if let Some(main) = MainThreadMarker::new() {
             if let Some(mut instance) = self.inner.try_lock() {
@@ -162,6 +171,41 @@ where
                 let _ = control.set_parameter(main, id, value);
             }
         });
+    }
+
+    /// The plugin's own bypass at `site`, written on the main thread and only
+    /// there: the write runs at once and is [`Lost`](BypassWrite::Lost) when the
+    /// instance is locked (a long `editor_idle`). Off the main thread it is
+    /// `Lost` without waiting for it: an in-process plugin's own bypass is kept
+    /// only by a session ticked on the main thread, where the session makes it.
+    fn set_bypassed(&self, site: OwnBypass, bypassed: bool) -> BypassWrite {
+        self.try_main(|main, instance| {
+            let control = instance.control()?;
+            match site {
+                OwnBypass::Parameter(id) => Some(BypassWrite::of_write(control.set_parameter(
+                    main,
+                    id,
+                    bypass_value(bypassed),
+                ))),
+                OwnBypass::Property => Some(control.set_bypassed(main, bypassed)),
+            }
+        })
+        .flatten()
+        .unwrap_or(BypassWrite::Lost)
+    }
+
+    /// The bypass the plugin holds now, read without waiting for the instance:
+    /// `None` when it is locked or this is not the main thread, so a control
+    /// tick skips a busy plugin instead of waiting on it.
+    fn bypassed(&self, site: OwnBypass) -> Option<bool> {
+        self.try_main(|main, instance| {
+            let control = instance.control()?;
+            match site {
+                OwnBypass::Parameter(id) => control.parameter(main, id).map(is_bypassed),
+                OwnBypass::Property => control.bypassed(main),
+            }
+        })
+        .flatten()
     }
 
     /// The format's own conversion ([`Control::parameter_plain`]).
@@ -500,6 +544,46 @@ mod off_main_tests {
         let (_client, handle, _pump) = loaded();
         assert!(handle.any_thread().set_render_mode(RenderMode::Offline));
         assert!(handle.any_thread().set_render_mode(RenderMode::Realtime));
+    }
+
+    /// **Off the main thread an in-process bypass is lost and unread, without
+    /// waiting**, whether it is a parameter or a property: a tick on a pool
+    /// thread neither writes nor reads the plugin (the main thread's pump is not
+    /// asked), so it cannot be held up by it. A property write that took the
+    /// main thread's hop would wait out the deadline.
+    #[test]
+    fn off_the_main_thread_an_in_process_bypass_is_lost_and_unread_at_once() {
+        let (_client, handle, _pump) = loaded();
+        for site in [
+            tutti_plugin_types::OwnBypass::Parameter(ParamId::new(1)),
+            tutti_plugin_types::OwnBypass::Property,
+        ] {
+            let began = std::time::Instant::now();
+            assert_eq!(
+                handle.any_thread().set_bypassed(site, true),
+                tutti_plugin_types::BypassWrite::Lost,
+                "{site:?}"
+            );
+            assert_eq!(handle.any_thread().bypassed(site), None, "{site:?}");
+            assert!(
+                began.elapsed() < std::time::Duration::from_millis(500),
+                "{site:?}: neither waited for the main thread's tick"
+            );
+        }
+    }
+
+    /// **A VST2 plugin that advertises the soft bypass and refuses it claims no
+    /// bypass of its own**: the reference plugin answers `canDo(bypass)` and
+    /// declines `effSetBypass`, so its node keeps the executor's bypass and the
+    /// handle writes nothing.
+    #[test]
+    fn a_plugin_that_refuses_its_soft_bypass_claims_no_bypass_of_its_own() {
+        let (_client, handle, _pump) = loaded();
+        assert_eq!(handle.loaded().own_bypass, None);
+        assert_eq!(
+            handle.set_bypassed(true),
+            tutti_plugin_types::BypassWrite::NoOwnBypass
+        );
     }
 
     /// **No in-process format carries the automation advisory**, and says so

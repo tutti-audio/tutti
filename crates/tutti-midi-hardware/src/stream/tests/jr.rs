@@ -231,7 +231,7 @@ fn the_request_to_stop_jr_is_made_once_per_episode() {
     assert_eq!(requests(&wire), 0, "a refusal changes nothing");
     // A block's name changes: the stream changes and the device is not asked.
     let renamed = Stream::FunctionBlockName {
-        block: tutti_ump::FunctionBlockId::new(0).unwrap(),
+        block: tutti_ump::FunctionBlockId::new(0).unwrap().into(),
         form: tutti_ump::Form::Complete,
         bytes: *b"Other\0\0\0\0\0\0\0\0",
     };

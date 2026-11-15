@@ -3,7 +3,9 @@
 //!
 //! `midi_2_packets_pass_through_unchanged` has no line here: the translator
 //! has no MIDI 2.0 path to break (it decodes a MIDI 1.0 voice message or
-//! returns the packet), so the test pins that a fold is never added.
+//! returns the packet), so the test pins that a fold is never added; the one
+//! MIDI 2.0 packet it drops is the Control Change of a controller the Protocol
+//! ignores.
 
 use tutti_midi_protocol::Translator;
 use tutti_ump::ControlValue;
@@ -519,6 +521,49 @@ fn midi_2_packets_pass_through_unchanged() {
     for ump in [on0, reserved] {
         assert_eq!(t.translate(ump), Some(ump));
     }
+}
+
+/// M2-104 §7.4.6: a MIDI 2.0 Protocol receiver ignores Control Change 0, 6, 32,
+/// 38 and 98 to 101, which Program Change, Registered Controller and Assignable
+/// Controller carry instead. A native MIDI 2.0 Control Change of each of the
+/// 128 controllers is dropped exactly when it is one of those eight, so a CC 6
+/// after a CC 101 and 100 is no Registered Controller, and any other controller
+/// passes unchanged.
+/// Spec: m2-104/7.4.6#5
+#[test]
+fn a_midi_2_control_change_the_protocol_ignores_is_dropped() {
+    let native = |controller: u8| -> Ump {
+        Message::midi2(
+            A,
+            Voice2::control_change(CCNumber::of(controller), ControlValue::new(0x1234_5678)),
+        )
+        .into()
+    };
+    let mut t = Translator::new();
+    for controller in 0..=127u8 {
+        let ump = native(controller);
+        let ignored = matches!(controller, 0 | 6 | 32 | 38 | 98..=101);
+        assert_eq!(
+            t.translate(ump),
+            (!ignored).then_some(ump),
+            "controller {controller}"
+        );
+    }
+    // The run a MIDI 1.0 sender would make of them builds nothing from MIDI 2.0
+    // Control Changes: the Data Entry has no parameter selected.
+    let mut t = Translator::new();
+    let out: Vec<Option<Ump>> = [(101, 0), (100, 0), (6, 12), (38, 0)]
+        .into_iter()
+        .map(|(controller, value)| {
+            let ump: Ump = Message::midi2(
+                A,
+                Voice2::control_change(CCNumber::of(controller), ControlValue::new(value << 25)),
+            )
+            .into();
+            t.translate(ump)
+        })
+        .collect();
+    assert_eq!(out, [None; 4]);
 }
 
 #[test]

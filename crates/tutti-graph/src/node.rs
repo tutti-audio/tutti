@@ -649,7 +649,10 @@ impl Shape {
     /// it reports, so compensation does not move. What it does with its input,
     /// its tail and its dry path is the node's, and the executor tells it
     /// nothing: the mode is [`Editor::mode`](crate::Editor::mode), on the
-    /// control side, not on the audio thread. A node with no pass can be set `Bypassed`.
+    /// control side, not on the audio thread. A plugin's host writes the
+    /// plugin's own bypass when the mode changes (`tutti-plugin-host`'s
+    /// `PluginHandle::set_bypassed`). A node with no pass can be set
+    /// `Bypassed`.
     /// [`Muted`](crate::NodeMode::Muted) and a [`Mix`](tutti_types::Mix) stay
     /// the executor's.
     ///

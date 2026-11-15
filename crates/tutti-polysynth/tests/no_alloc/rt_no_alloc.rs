@@ -213,7 +213,7 @@ fn polysynth_every_decoded_message_is_allocation_free() {
         m2(Voice2::NoteOn {
             note,
             velocity: NoteVelocity::CENTER,
-            attribute: Attribute::Reserved { kind: 5, data: 1 },
+            attribute: midi::reserved_attribute(5, 1),
         }),
         m2(Voice2::PerNotePitchBend {
             note,
@@ -280,7 +280,7 @@ fn polysynth_every_decoded_message_is_allocation_free() {
         m2(Voice2::NoteOff {
             note,
             velocity: NoteVelocity::MIN,
-            attribute: Attribute::Reserved { kind: 9, data: 2 },
+            attribute: midi::reserved_attribute(9, 2),
         }),
         ev(Message::System(
             MidiGroup::FIRST,

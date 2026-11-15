@@ -34,7 +34,7 @@ use crate::types::{
 use super::instance::usable_topology;
 use super::library::Library;
 use super::midi_learn::MidiLearnConsumer;
-use super::midi_mapping::{MidiCcCell, MidiCcMapping};
+use super::midi_mapping::MidiCcCell;
 
 mod buses;
 mod editor;
@@ -84,6 +84,9 @@ pub struct Vst3Loaded {
     /// The `IMidiMapping` table the Processor routes against: published by
     /// whichever half rebuilds it, lent to the Processor once per block.
     pub(super) midi_cc: Arc<ArcLend<MidiCcCell>>,
+    /// What the `IMidiMapping` table declares, read when the table is rebuilt
+    /// (at load, at every activation and when the plugin says it changed).
+    pub(super) assignments: Vec<tutti_plugin_types::MidiAssignment>,
     /// Notifications [`Control::take_reported_edits`](tutti_plugin_types::Control::take_reported_edits)
     /// popped that are not edits, for the next
     /// [`poll_plugin_notifications`](Self::poll_plugin_notifications) to hand

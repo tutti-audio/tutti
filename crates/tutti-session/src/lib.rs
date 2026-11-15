@@ -61,6 +61,8 @@
 #[cfg(feature = "export")]
 mod bounce;
 mod builder;
+#[cfg(feature = "plugin")]
+mod bypass;
 mod clock;
 #[cfg(feature = "device")]
 mod device;

@@ -311,7 +311,7 @@ fn soundfont_every_decoded_message_is_allocation_free() {
         m2(Voice2::NoteOff {
             note,
             velocity: NoteVelocity::MIN,
-            attribute: Attribute::Reserved { kind: 9, data: 2 },
+            attribute: midi::reserved_attribute(9, 2),
         }),
         ev(Message::Utility(Utility::JrClock(1))),
         ev(Message::System(MidiGroup::FIRST, System::TimingClock)),

@@ -11,11 +11,12 @@
 //!   constructor). This subsumes the old host
 //!   crates' scans, `plugin-server`'s loaders and the VST2 caller pins. A home
 //!   that forbids `unsafe` after all, or is gone, is a stale entry.
-//! - **The `-ffi` crates carry the lints** that make every `unsafe` block
-//!   a `// SAFETY:` comment and every `unsafe fn` a `# Safety` section:
+//! - **Every home carries the lints** that make every `unsafe` block a
+//!   `// SAFETY:` comment and every `unsafe fn` a `# Safety` section:
 //!   `undocumented_unsafe_blocks` and `missing_safety_doc`, in a
-//!   `#![deny(..)]` of the crate root. Clippy cannot check its own lints are
-//!   on.
+//!   `#![deny(..)]` of the crate root. So does `tutti-fixtures`
+//!   ([`TESTING_HOMES`]), which holds the tests' `unsafe`. Clippy cannot
+//!   check its own lints are on.
 //! - **`tutti-midi-hardware`** has no `unsafe` outside `src/` either (`build.rs`,
 //!   `tests/`, `examples/`, `benches/` are separate crates the forbid does not
 //!   cover), and names none of the raw bindings in its manifest.
@@ -57,16 +58,8 @@ pub(super) const HOMES: &[(&str, &str, Option<&str>)] = &[
     ),
 ];
 
-/// The crates whose `unsafe` must be documented.
-const FFI: &[&str] = &[
-    "tutti-clap-ffi",
-    "tutti-vst3-ffi",
-    "tutti-au-ffi",
-    "tutti-vst2-ffi",
-    "tutti-alsa-ffi",
-    "tutti-coremidi-ffi",
-    "tutti-winmm-ffi",
-];
+/// The crates under `testing/` whose `unsafe` must be documented, beside [`HOMES`].
+const TESTING_HOMES: &[&str] = &["testing/tutti-fixtures"];
 const LINTS: &[&str] = &["undocumented_unsafe_blocks", "missing_safety_doc"];
 
 const MIDI: &str = "crates/tutti-midi-hardware";
@@ -130,8 +123,12 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
         }
     }
 
-    for name in FFI {
-        let path = format!("crates/{name}/src/lib.rs");
+    let documented = HOMES
+        .iter()
+        .map(|(name, ..)| format!("crates/{name}"))
+        .chain(TESTING_HOMES.iter().map(|dir| (*dir).to_owned()));
+    for dir in documented {
+        let path = format!("{dir}/src/lib.rs");
         let Some(text) = tree.read(&path) else {
             bad.push(format!("{path}: missing; was the crate moved?"));
             continue;
@@ -236,11 +233,13 @@ mod tests {
         for (name, _, attr) in HOMES {
             put(format!("crates/{name}/Cargo.toml"), "");
             let lib = match attr {
-                Some(a) => format!("#![{a}]\n"),
-                None if FFI.contains(name) => DENY_LINTS.to_owned(),
-                None => "unsafe fn f() {}\n".to_owned(),
+                Some(a) => format!("#![{a}]\n{DENY_LINTS}"),
+                None => DENY_LINTS.to_owned(),
             };
             put(format!("crates/{name}/src/lib.rs"), &lib);
+        }
+        for dir in TESTING_HOMES {
+            put(format!("{dir}/src/lib.rs"), DENY_LINTS);
         }
         put(
             format!("{MIDI}/Cargo.toml"),
@@ -324,6 +323,33 @@ mod tests {
             "// #![deny(clippy::missing_safety_doc, clippy::undocumented_unsafe_blocks)]\n",
         );
         assert_eq!(r.findings.len(), 3);
+    }
+
+    #[test]
+    fn every_home_and_the_fixtures_carry_the_lints() {
+        for path in [
+            "crates/tutti-rt/src/lib.rs",
+            "crates/tutti-plugin-ipc-ffi/src/lib.rs",
+            "testing/tutti-fixtures/src/lib.rs",
+        ] {
+            let r = with(clean(), path, "#![deny(clippy::missing_safety_doc)]\n");
+            assert_eq!(
+                r.findings[1],
+                format!("  {path}: missing #![deny(clippy::undocumented_unsafe_blocks)]")
+            );
+        }
+        let r = with(
+            clean(),
+            "crates/tutti-plugin-types/src/lib.rs",
+            "#![deny(unsafe_code)]\n",
+        );
+        assert_eq!(r.findings.len(), 3, "{:?}", r.findings);
+        let mut m = clean();
+        m.files.remove("testing/tutti-fixtures/src/lib.rs");
+        assert_eq!(
+            check(&m).findings[1],
+            "  testing/tutti-fixtures/src/lib.rs: missing; was the crate moved?"
+        );
     }
 
     #[test]
