@@ -10,8 +10,8 @@ use std::any::TypeId;
 
 use tutti_session::HasParam;
 use tutti_types::{
-    Amplitude, Azimuth, CompressionRatio, Db, Depth, Drive, Elevation, Feedback, Hz, Mix, Pan, Q,
-    Resonance, Seconds, Spread, StereoWidth, UnitParam,
+    Amplitude, Azimuth, Balance, CompressionRatio, Db, Depth, Drive, Elevation, Feedback, Hz, Mix,
+    Q, Resonance, Seconds, Spread, StereoWidth, UnitParam,
 };
 
 /// Whether `N`'s param of kind `P` is in `U`: the unit a key's method for it
@@ -61,7 +61,7 @@ units! {
         tutti_nodes::LimiterNode { Threshold => Db, Ceiling => Db, Release => Seconds }
         tutti_nodes::BrickwallLimiterNode { Ceiling => Db }
         tutti_nodes::DistortionNode { Drive => Drive }
-        tutti_nodes::BusStripNode { Volume => Amplitude, Pan => Pan }
+        tutti_nodes::BusStripNode { Volume => Amplitude, Balance => Balance }
         tutti_nodes::CrossoverNode { Cutoff => Hz }
         tutti_nodes::MultibandCompressorNode {
             Cutoff => Hz, Threshold => Db, Knee => Db, Ratio => CompressionRatio,
