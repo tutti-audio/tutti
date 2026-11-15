@@ -260,7 +260,9 @@ impl Phase {
         libm::sin(f64::from(self.0) * core::f64::consts::TAU) as f32
     }
 
-    /// This phase in radians, `[0, 2·pi)` — for the `sin`/`cos` call.
+    /// This phase in radians, `[0, 2·pi)`. An oscillator's sine of a phase is
+    /// [`sin`](Self::sin), which keeps the turn in f64; [`Radians::sin`] is
+    /// `libm`'s f32 sine, deterministic and within 1e-6 of it.
     #[inline]
     #[must_use]
     pub fn to_radians(self) -> Radians {

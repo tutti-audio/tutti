@@ -31,8 +31,8 @@ impl Db {
     }
 
     /// Amplitude as decibels (`20·log10`). **Silence is `-inf`, not
-    /// [`FLOOR`](Self::FLOOR)**, the one floor a consumer pins at its own
-    /// boundary.
+    /// [`FLOOR`](Self::FLOOR)**, the constant a consumer clamps to at its own
+    /// boundary. A negative amplitude is NaN.
     ///
     /// No floor is applied. Silence has no logarithm, and what to substitute
     /// for it belongs to the consumer, not to the conversion: a meter wants one
@@ -55,8 +55,8 @@ impl Db {
     /// about -3.01 dB.
     ///
     /// Follows the rule of [`from_amplitude`](Self::from_amplitude): zero power
-    /// is `-inf`, not [`FLOOR`](Self::FLOOR), the one floor a consumer pins at
-    /// its own boundary.
+    /// is `-inf`, not [`FLOOR`](Self::FLOOR), the constant a consumer clamps to
+    /// at its own boundary, and a negative power is NaN.
     #[inline]
     #[must_use]
     pub fn from_power(power: f32) -> Db {

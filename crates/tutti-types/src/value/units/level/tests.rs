@@ -240,3 +240,11 @@ fn power_is_the_square_of_amplitude_in_db() {
 fn zero_power_is_negative_infinity_not_the_floor() {
     assert_eq!(Db::from_power(0.0).get(), f32::NEG_INFINITY);
 }
+
+/// A negative power or amplitude has no logarithm: the conversion is NaN,
+/// never a finite figure a caller could mistake for a level.
+#[test]
+fn a_negative_power_or_amplitude_is_nan() {
+    assert!(Db::from_power(-1.0).get().is_nan());
+    assert!(Db::from_amplitude(Amplitude(-0.5)).get().is_nan());
+}
