@@ -386,6 +386,74 @@ fn an_in_process_swap_waits_for_the_main_thread() {
     s.close(tutti_fixtures::main_thread());
 }
 
+/// **A restore job runs in the first update on the main thread, for a served
+/// plugin too, and applies the saved state.** A value saved through `save_state`, then moved, is the
+/// value the plugin and its mirror hold after `restore_state` lands; the
+/// outcome lands in an update, never at the call.
+fn a_restore_job_applies_the_saved_state_on_the_main_thread() {
+    const CUTOFF: tutti_plugin_types::ParamId = tutti_plugin_types::ParamId::new(101);
+    let (catalog, _dir) = catalog();
+    let mut s = session();
+    s.pool(
+        s.plugin_entry("verb", &id(), &catalog)
+            .hosting(Hosting::OutOfProcess),
+    )
+    .unwrap();
+    assert!(matches!(next_event(&mut s, "verb"), PoolEvent::Loaded));
+    let node = s.add_pooled_plugin(&"verb").unwrap();
+    let knob = |s: &Session| {
+        s.plugin_view(node)
+            .unwrap()
+            .params()
+            .get(CUTOFF)
+            .unwrap()
+            .normalized()
+            .get()
+    };
+    let set = |s: &Session, v: f64| {
+        s.plugin_view(node)
+            .unwrap()
+            .params()
+            .get(CUTOFF)
+            .unwrap()
+            .set(tutti_plugin_types::Normalized::of(v))
+            .unwrap();
+    };
+
+    set(&s, 0.9);
+    let saving = s.save_state(&"verb").expect("a node holds the plugin");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !saving.has_landed() {
+        assert!(Instant::now() < deadline, "the save never landed");
+        let _ = s.update();
+        thread::sleep(Duration::from_millis(2));
+    }
+    let state = saving.take().expect("landed").expect("a state");
+
+    set(&s, 0.1);
+    let restoring = s.restore_state(&"verb", state).expect("its own plugin's");
+    assert!(!restoring.has_landed(), "it lands in an update");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !restoring.has_landed() {
+        assert!(Instant::now() < deadline, "the restore never landed");
+        let _ = s.update();
+        thread::sleep(Duration::from_millis(2));
+    }
+    restoring.take().expect("landed").expect("applied");
+    // The mirror is read again by a job the next updates land.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while (knob(&s) - 0.9).abs() > 1e-6 {
+        assert!(
+            Instant::now() < deadline,
+            "the saved value never came back: {}",
+            knob(&s)
+        );
+        let _ = s.update();
+        thread::sleep(Duration::from_millis(2));
+    }
+    s.close(tutti_fixtures::main_thread());
+}
+
 pub(crate) const CASES: &[(&str, fn())] = tutti_fixtures::cases!["plugin_pool_main";
 an_in_process_plugin_lands_in_an_update_on_the_main_thread,
 an_in_process_plugin_needs_the_main_thread_and_is_refused_without_one,
@@ -394,4 +462,5 @@ a_released_in_process_plugin_on_the_main_thread_is_closed_in_place,
 a_changed_identity_swaps_an_in_process_node,
 an_in_process_swap_to_other_ports_fails_the_entry,
 an_in_process_swap_waits_for_the_main_thread,
+a_restore_job_applies_the_saved_state_on_the_main_thread,
 ];

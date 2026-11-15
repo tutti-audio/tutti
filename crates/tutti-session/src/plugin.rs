@@ -140,6 +140,7 @@ use tutti_types::{SampleRate, Samples};
 
 mod entry;
 mod lost;
+mod state_job;
 pub(crate) use lost::Lost;
 
 use entry::PooledLink;
@@ -147,6 +148,7 @@ pub use entry::{
     AddPluginError, LoadedPlugin, PluginCause, PluginDeclaration, PluginEntry, PluginInfo,
     PluginPorts, PooledPlugin,
 };
+pub use state_job::{StateJobError, StateJobFailed};
 
 use crate::plugin_diagnostics::Figures;
 use crate::{
