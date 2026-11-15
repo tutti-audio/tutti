@@ -20,6 +20,10 @@ mod vst2_off_main_handle;
 mod vst2_modulation;
 // A pool load's worker output when its session ends: dropped on the main thread, or leaked and counted.
 mod pool_main;
+// A plugin hosted in process, as a pool entry: its main-thread stage and the drop of its
+// main-affine parts. The reference CLAP plugin.
+#[cfg(feature = "clap")]
+mod plugin_pool_main;
 // What plugins hand to the main thread: each session runs its own, and `close` runs what is owed.
 #[cfg(feature = "vst2")]
 mod main_work;
@@ -52,6 +56,8 @@ fn main() {
     #[cfg(feature = "vst2")]
     cases.extend_from_slice(main_work::CASES);
     cases.extend_from_slice(pool_main::CASES);
+    #[cfg(feature = "clap")]
+    cases.extend_from_slice(plugin_pool_main::CASES);
     cases.extend_from_slice(plugin_event_sources::CASES);
     #[cfg(all(feature = "export", feature = "clap"))]
     cases.extend_from_slice(export_fork_plugin::CASES);

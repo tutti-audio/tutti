@@ -286,7 +286,7 @@ fn run(k: &mut Realized<ModDelayRecurrence>, audio: &[Vec<f32>], block: usize) -
     while at < n {
         let end = (at + block).min(n);
         let a: Vec<&[f32]> = audio.iter().map(|c| &c[at..end]).collect();
-        let feed = Feed::new(&a);
+        let feed = Inputs::new(&a);
         let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
         k.process(&feed, &mut outs, end - at);
         at = end;

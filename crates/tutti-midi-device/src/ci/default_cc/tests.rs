@@ -1,6 +1,6 @@
 use tutti_ump::{CCNumber, MidiChannel, U7};
 
-use super::super::testing::{self, channel};
+use super::super::testing::{channel, profile_table};
 use super::super::*;
 use CcFunction as F;
 
@@ -22,7 +22,7 @@ fn the_profile_id_is_7e_21_00_01_and_the_level() {
 }
 
 fn table_with(address: CiDeviceId, level: DefaultCcLevel, enabled: bool) -> ProfileTable {
-    testing::profile_table(address, level.profile(), enabled)
+    profile_table(address, level.profile(), enabled)
 }
 
 #[test]

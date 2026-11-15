@@ -141,7 +141,7 @@ fn run_in(
     while at < n {
         let end = (at + block).min(n);
         let a: Vec<&[f32]> = audio.iter().map(|c| &c[at..end]).collect();
-        let mut feed = Feed::new(&a);
+        let mut feed = Inputs::new(&a);
         for (i, lane) in lanes.iter().enumerate() {
             if let Some(lane) = lane {
                 feed = feed.with_lane(i, &lane[at..end]);

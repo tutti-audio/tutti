@@ -17,7 +17,7 @@
 //! for `[Vec<f32>; CH]` — one deinterleaved audio channel per plane, a 1-D
 //! time series per channel rather than a 2-D matrix.
 
-use crate::stft::error::{Error, Result};
+use crate::stft::error::{Result, StftError};
 
 macro_rules! grid_newtype {
     ($(#[$m:meta])* $name:ident) => {
@@ -113,12 +113,12 @@ impl<T> Grid<T> {
     /// Wraps `data` as a `frames × bins` grid.
     ///
     /// # Errors
-    /// Returns [`Error::GridShapeMismatch`] unless
+    /// Returns [`StftError::GridShapeMismatch`] unless
     /// `data.len() == frames * bins`.
     pub fn new(data: Vec<T>, frames: FrameCount, bins: BinCount) -> Result<Self> {
         let expected = frames.get() * bins.get();
         if data.len() != expected {
-            return Err(Error::GridShapeMismatch {
+            return Err(StftError::GridShapeMismatch {
                 len: data.len(),
                 rows: frames.get(),
                 cols: bins.get(),

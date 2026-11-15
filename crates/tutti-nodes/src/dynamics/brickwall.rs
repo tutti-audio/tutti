@@ -19,7 +19,7 @@ use crate::reverb::{FamilyNode, NodeFamily, Rings};
 ///
 /// The ceiling (dB) is the node's one control, modulatable by the graph. It is
 /// **read per frame**: a lane on the ceiling's port is the recurrence's own
-/// ([`Feed`](tutti_dsp::Feed) lane 0), a frame clamps at the amplitude of its own
+/// ([`Inputs`](tutti_dsp::Inputs) lane 0), a frame clamps at the amplitude of its own
 /// value, and the cell is what a frame nobody drives clamps at. Unmodulated, the node
 /// reads its cell once per block, and a render with a lane that holds the cell's value
 /// is the render with no lane.

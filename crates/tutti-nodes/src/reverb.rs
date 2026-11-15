@@ -16,7 +16,7 @@
 use core::ops::Range as Frames;
 
 use tutti_dsp::{
-    Cadence, Capacity, Channels, Effort, Family, Feed, FreeverbControls, FreeverbFamily, Grows,
+    Cadence, Capacity, Channels, Effort, Family, FreeverbControls, FreeverbFamily, Grows, Inputs,
     NetworkCapacity, Reach, Realized, Recurrence, Ring, Setup, System, TAIL_FLOOR,
 };
 use tutti_graph::{
@@ -472,7 +472,7 @@ impl<F: NodeFamily> Tuned<F> {
             *slot = &mut ch[frames.clone()];
         }
         let width = rig.channels.output_width();
-        let mut feed = Feed::new(&input[..inputs]).with_key(&key[..keys]);
+        let mut feed = Inputs::new(&input[..inputs]).with_key(&key[..keys]);
         for (i, lane) in lanes.iter().enumerate() {
             if let Some(lane) = lane {
                 feed = feed.with_lane(i, &lane[frames.clone()]);

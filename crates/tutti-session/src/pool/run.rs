@@ -8,7 +8,8 @@ use tutti_rt::MainThreadMarker;
 use crate::jobs::panic_message;
 use crate::pool::entry::{Defer, LoadError, Staged, Step, Value};
 use crate::pool::open::OpenCx;
-use crate::pool::table::{Opening, Start};
+use crate::pool::stamp::Stamp;
+use crate::pool::table::{Opening, Start, Worker};
 use crate::{JobFailed, Session};
 
 /// A panic in a stage the session runs itself, as a load's failure.
@@ -34,16 +35,26 @@ impl Session {
     /// Starts queued worker stages while fewer than the configured number run.
     /// Each landing starts the next.
     fn pool_pump(&mut self) {
-        while let Some((flight, work)) = self.pool.next_worker() {
+        while let Some(Worker { flight, work, file }) = self.pool.next_worker() {
             let defer = self.main_deferral();
             // A main stage the worker made drops its output on the main thread
             // wherever the stage itself is dropped: the jobs' channel, a session
             // that ends.
+            // The stamp is taken before the load reads the file, so a change
+            // during the read shows at the next refresh.
             self.jobs.submit(
-                move || work().map(|staged| staged.deferring(defer)),
+                move || {
+                    let stamp = file.and_then(|file| Stamp::of(&file).ok());
+                    (stamp, work().map(|staged| staged.deferring(defer)))
+                },
                 move |session, done, _| {
                     session.pool.worker_ended();
-                    match done.unwrap_or_else(|failed| Err(LoadError::Job(failed))) {
+                    let (stamp, done) = match done {
+                        Ok((stamp, done)) => (stamp, done),
+                        Err(failed) => (None, Err(LoadError::Job(failed))),
+                    };
+                    session.pool.stamped(flight, stamp);
+                    match done {
                         Ok(Staged::Done(value)) => session.pool.land(flight, Ok(value)),
                         Ok(Staged::Main(stage)) => session.pool.stage_main(flight, stage),
                         Err(error) => session.pool.land(flight, Err(error)),
@@ -107,7 +118,18 @@ impl Session {
         }
         self.pool_openings();
         self.pool.sweep();
+        // Before the waits settle: a swap the graph refuses fails the entry the
+        // wait would otherwise report as loaded.
+        #[cfg(feature = "plugin")]
+        self.swap_pooled_plugins();
         self.pool.poll_waiters();
+        // One at a time, each over the pool as the run before it left it. A run
+        // asked during these waits for the next update; one that panics leaves
+        // the rest waiting.
+        let through = self.pool.last_when();
+        while let Some(then) = self.pool.next_loaded(through) {
+            then(self);
+        }
         self.pool.drain_events(out);
     }
 }

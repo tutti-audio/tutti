@@ -27,11 +27,15 @@ use std::vec::Vec;
 use tutti_ump::{MidiChannel, MidiGroup, Sysex7Packets, U7, U28, Ump};
 
 mod articulation;
+mod curve;
 mod default_cc;
 mod device;
 mod discovery;
+mod drawbar;
+mod drum_map;
 mod endpoint;
 mod escape;
+mod gm2;
 mod handshake;
 mod initiator;
 mod link;
@@ -40,14 +44,17 @@ mod process;
 mod process_initiator;
 mod profile;
 mod read;
+mod rotary;
 mod status;
 mod text;
+mod two_state;
 mod wait;
 
 pub use articulation::{
     ArticulationDetails, ArticulationDetailsError, ArticulationFeatures, ArticulationLevel,
     CustomSounds, NotVariationCount, Sound, SoundSet, SubclassCounts, VariationCount,
 };
+pub use curve::{send_level, volume_gain};
 pub use default_cc::{CcFunction, CcPart, CcReset, CcValue, DefaultCcLevel, SuggestedCc};
 pub use device::{CiAction, CiDevice, CiPeer, DISCOVERY_WINDOW};
 pub use discovery::{
@@ -55,7 +62,16 @@ pub use discovery::{
     SUB_ID2_DISCOVERY_REPLY, SUB_ID2_ENDPOINT_INQUIRY, SUB_ID2_ENDPOINT_REPLY,
     SUB_ID2_INVALIDATE_MUID, SUB_ID2_NAK,
 };
+pub use drawbar::{
+    Drawbar, DrawbarSetting, NotADrawbarSetting, ORGAN_HIGHEST_NOTE, ORGAN_LOWEST_NOTE,
+    ORGAN_REFERENCE_NOTE, OrganFeatures, OrganLevel, OrganOption, OrganValue, VibratoChorus,
+};
+pub use drum_map::{
+    BitmapPosition, DrumControl, DrumFeatures, DrumInstrument, DrumNoteMapLevel, DrumSounds,
+    MutuallyExclusiveSet, NotAMutuallyExclusiveSet,
+};
 pub use endpoint::{CiInstanceId, EndpointInfo, EndpointStatus};
+pub use gm2::{Gm2ChannelCount, Gm2FunctionBlock, Gm2Role, Gm2SingleChannel, NotAGm2ChannelCount};
 pub use initiator::{
     Outcome, ProfileAction, ProfileChange, ProfileEntry, ProfileInitiator, ProfileTable,
     ProfileTarget, Request, RequestError,
@@ -107,8 +123,10 @@ pub use profile::{
     SUB_ID2_PROFILE_REMOVED, SUB_ID2_PROFILE_REPLY, SUB_ID2_PROFILE_SPECIFIC_DATA,
     SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SpecificData, StandardProfile,
 };
+pub use rotary::{RotaryControl, RotarySpeaker, RotaryValue};
 pub use status::{Ack, Nak};
 pub use text::MessageText;
+pub use two_state::{SwitchMeaning, TwoState};
 pub use wait::{NotATimeoutWait, PEER_REPLY_TIMEOUT, TimeoutWait};
 
 /// Universal SysEx non-real-time id, the first byte of every CI message: `0x7E`.
