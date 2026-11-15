@@ -382,6 +382,12 @@ pub enum CompileError {
     /// A target range with a NaN bound.
     #[error("target {0:?}: a NaN range bound")]
     NanRange(TargetKey),
+    /// A circular target ([`tutti_types::UnitParam::is_circular`], `Azimuth`) whose
+    /// `min` is above its `max`: an arc is the bounds in order, across ±180°
+    /// as `170..190` (`tutti_graph::ParamRange::arc` writes one), since
+    /// ordering `170..-170` would read the opposite arc.
+    #[error("target {0:?}: a circular target's range is an arc, min at most max")]
+    CrossedArc(TargetKey),
     /// An automation curve that is not frozen (its `Curve::frozen` returns
     /// a copy): a program compares it by identity, and reads it on the
     /// audio thread.
@@ -496,6 +502,12 @@ pub fn compile(
     for (&key, t) in &targets {
         if t.min.is_nan() || t.max.is_nan() {
             return Err(CompileError::NanRange(key));
+        }
+        if t.min > t.max
+            && matches!(key, TargetKey::Param { param, .. }
+                if param.as_unit().is_some_and(|a| a.param.is_circular()))
+        {
+            return Err(CompileError::CrossedArc(key));
         }
         if t.automation.as_ref().is_some_and(|c| c.frozen().is_some()) {
             return Err(CompileError::LiveCurve(key));

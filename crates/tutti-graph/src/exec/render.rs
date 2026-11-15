@@ -1,7 +1,6 @@
 //! Rendering a block: the serial and parallel paths over a plan's ops.
 
-use ringbuf::HeapProd;
-use ringbuf::traits::Producer;
+use tutti_rt::RingWriter;
 use tutti_rt::{RtScope, with_no_denormals};
 use tutti_types::Samples;
 
@@ -29,7 +28,7 @@ use crate::slots::{EventSlots, SlotFlags};
 pub(super) fn end_fades(
     plan: &Plan,
     store: &mut [Option<Unit>],
-    fade_back: &mut HeapProd<Box<Crossfade>>,
+    fade_back: &mut RingWriter<Box<Crossfade>>,
     inject: &mut [Inject],
     has_inject: &mut [bool],
 ) {
@@ -518,7 +517,7 @@ impl Executor {
             // ring keeps the report in the lane for the next block.
             for (lane, id) in lanes.iter_mut().zip(&plan.sum_lanes) {
                 if let (Some(kind), Some(id)) = (lane.finished(), id)
-                    && edge_fades.try_push((*id, kind)).is_ok()
+                    && edge_fades.push((*id, kind)).is_ok()
                 {
                     lane.acknowledge();
                 }

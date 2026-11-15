@@ -87,8 +87,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use ringbuf::traits::{Consumer, Producer, Split};
-use ringbuf::{HeapCons, HeapProd, HeapRb};
+use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
 use tutti_types::{At, Latency};
 
 use crate::event::{Event, EventKind, merge_into};
@@ -212,8 +211,8 @@ enum Cancel {
 pub(crate) struct CommandTx {
     /// This pair's identity, stamped into every `CommandId`.
     pair: u64,
-    tx: HeapProd<Scheduled>,
-    cancel: HeapProd<Cancel>,
+    tx: RingWriter<Scheduled>,
+    cancel: RingWriter<Cancel>,
     sent: u64,
     done: Arc<AtomicU64>,
 }
@@ -232,8 +231,8 @@ struct DueItem {
 /// The executor's end: the ring, the commands waiting for their frame, and
 /// this block's deliveries. Every buffer is sized at construction.
 pub(crate) struct CommandRx {
-    rx: HeapCons<Scheduled>,
-    cancel: HeapCons<Cancel>,
+    rx: RingReader<Scheduled>,
+    cancel: RingReader<Cancel>,
     /// Cancels that arrived before the commands they name (see `pull`).
     held: Vec<Cancel>,
     /// One past the highest `seq` pulled so far.
@@ -259,8 +258,8 @@ impl CommandTx {
 
 /// Build the command ring pair.
 pub(crate) fn command_channel() -> (CommandTx, CommandRx) {
-    let (tx, rx) = HeapRb::<Scheduled>::new(COMMAND_CAPACITY).split();
-    let (cancel_tx, cancel_rx) = HeapRb::<Cancel>::new(CANCEL_CAPACITY).split();
+    let (tx, rx) = ring::<Scheduled>(COMMAND_CAPACITY, Overflow::Refuse);
+    let (cancel_tx, cancel_rx) = ring::<Cancel>(CANCEL_CAPACITY, Overflow::Refuse);
     let done = Arc::new(AtomicU64::new(0));
     (
         CommandTx {
@@ -317,10 +316,16 @@ impl CommandTx {
             kind,
             pos,
         };
-        // Cannot fail: at most `outstanding` commands sit in the ring, and
-        // that is below its capacity.
-        if self.tx.try_push(cmd).is_err() {
-            unreachable!("the command ring has a free slot for every credit");
+        // Full cannot happen: at most `outstanding` commands sit in the ring,
+        // and that is below its capacity. With the executor gone the command
+        // is dropped and counts as sent all the same, so the credits run out
+        // as they would behind a stalled one.
+        if let Err(refused) = self.tx.push(cmd) {
+            assert_eq!(
+                refused.error,
+                PushError::Disconnected,
+                "the command ring has a free slot for every credit"
+            );
         }
         self.sent += 1;
         Ok(CommandId {
@@ -338,14 +343,14 @@ impl CommandTx {
             return Err(ScheduleError::UnknownCommand { id });
         }
         self.cancel
-            .try_push(Cancel::One(id.seq))
+            .push(Cancel::One(id.seq))
             .map_err(|_| ScheduleError::Backpressure)
     }
 
     /// Cancel every command scheduled so far that has not landed.
     pub(crate) fn cancel_all(&mut self) -> Result<(), ScheduleError> {
         self.cancel
-            .try_push(Cancel::Below(self.sent))
+            .push(Cancel::Below(self.sent))
             .map_err(|_| ScheduleError::Backpressure)
     }
 }
@@ -378,7 +383,7 @@ impl CommandRx {
     /// next_seq`) is *held* and re-applied after every pull until the
     /// command has arrived; a `Below(n)` is held until every `seq < n` has.
     fn pull(&mut self) {
-        while let Some(cmd) = self.rx.try_pop() {
+        while let Some(cmd) = self.rx.pop() {
             debug_assert!(self.pending.len() < self.pending.capacity());
             self.next_seq = cmd.seq + 1;
             self.pending.push(cmd);
@@ -394,7 +399,7 @@ impl CommandRx {
         }
         // Past the held list's capacity, cancels wait in their ring.
         while self.held.len() < self.held.capacity() {
-            let Some(c) = self.cancel.try_pop() else {
+            let Some(c) = self.cancel.pop() else {
                 break;
             };
             if !self.apply_cancel(c) {
@@ -676,7 +681,7 @@ mod tests {
     fn a_cancel_seen_before_its_command_is_held_until_it_arrives() {
         let (mut tx, mut rx) = command_channel();
         // `One`: the cancel for seq 0 is visible first.
-        tx.cancel.try_push(Cancel::One(0)).expect("room");
+        tx.cancel.push(Cancel::One(0)).expect("room");
         rx.pull();
         assert_eq!(rx.held.len(), 1, "held, not dropped");
         send(&mut tx, 1_000_000);
@@ -686,7 +691,7 @@ mod tests {
         assert!(rx.held.is_empty());
 
         // `Below`: covers seq 1 and 2, which arrive after it.
-        tx.cancel.try_push(Cancel::Below(3)).expect("room");
+        tx.cancel.push(Cancel::Below(3)).expect("room");
         rx.pull();
         send(&mut tx, 1_000_000);
         rx.pull();

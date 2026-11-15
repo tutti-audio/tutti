@@ -345,6 +345,7 @@ fn a_served_plugin_reopens_and_restores_off_the_main_thread() {
     let first = Ipc::launch(
         BridgeConfig::default(),
         tutti_fixtures::clap_probe().to_path_buf(),
+        tutti_plugin_types::PluginFormat::Clap,
         tutti_plugin_types::Load::new(),
         SR,
         None,
@@ -399,6 +400,7 @@ fn a_chosen_plugin_is_the_one_a_reopen_loads() {
     let first = Ipc::launch(
         BridgeConfig::default(),
         tutti_fixtures::clap_probe().to_path_buf(),
+        tutti_plugin_types::PluginFormat::Clap,
         Load::new().plugin(second),
         SR,
         None,
