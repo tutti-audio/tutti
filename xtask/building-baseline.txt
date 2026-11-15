@@ -1,0 +1,357 @@
+# Violations of the one building shape (`cargo xtask check-building`).
+#
+# One `<crate>  <rule>  <key>` row per violation that is not yet fixed; the gate fails on
+# a violation with no row and on a row with no violation, so the list only shrinks. A
+# lane that touches a crate deletes that crate's rows with the code they name.
+#
+# rule  with-prefix   a `pub fn with_*` taking `self`
+#       chain-result  a chained option (`self` in, `Self` out) that returns a `Result`
+#       setter        a `pub fn set_*` taking `&self` or `&mut self` on a node, source or spec
+#       node-ctor     a public constructor on a `*Node`
+#       config-width  a `*Config` constructor whose first parameter is not a width
+#       ctor-result   a constructor returning `Result`
+#       range-macro   a `macro_rules!` writing a range type outside tutti-types
+# key   `<file>::<Owner>::<fn>`, or `<file>::<macro>` for `range-macro`.
+
+# tutti-curve
+tutti-curve  with-prefix  crates/tutti-curve/src/trajectory.rs::Trajectory::with_range
+
+# tutti-dsp
+tutti-dsp  with-prefix  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_routing
+tutti-dsp  with-prefix  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_times
+tutti-dsp  with-prefix  crates/tutti-dsp/src/model/inputs.rs::Inputs::with_key
+tutti-dsp  with-prefix  crates/tutti-dsp/src/model/inputs.rs::Inputs::with_lane
+tutti-dsp  with-prefix  crates/tutti-dsp/src/stft/geometry.rs::StftGeometry::with_window_fn
+tutti-dsp  chain-result  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_routing
+tutti-dsp  chain-result  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_times
+
+# tutti-engine
+tutti-engine  with-prefix  crates/tutti-engine/src/routing.rs::OutputLevels::with_dim
+tutti-engine  with-prefix  crates/tutti-engine/src/stream.rs::OutputSpec::with_quantum
+tutti-engine  chain-result  crates/tutti-engine/src/routing.rs::OutputLevels::with_dim
+
+# tutti-export
+tutti-export  with-prefix  crates/tutti-export/src/graph.rs::Setup::with_pool
+tutti-export  with-prefix  crates/tutti-export/src/graph.rs::Setup::with_root
+tutti-export  with-prefix  crates/tutti-export/src/job.rs::Job::with_event_loss
+tutti-export  with-prefix  crates/tutti-export/src/output.rs::BufferTarget::with_topology
+tutti-export  with-prefix  crates/tutti-export/src/output.rs::FileTarget::with_dither
+tutti-export  with-prefix  crates/tutti-export/src/output.rs::FileTarget::with_normalize
+tutti-export  with-prefix  crates/tutti-export/src/output.rs::FileTarget::with_resample
+tutti-export  with-prefix  crates/tutti-export/src/output.rs::FileTarget::with_topology
+
+# tutti-graph
+tutti-graph  with-prefix  crates/tutti-graph/src/event.rs::ParamRamp::with_shape
+tutti-graph  with-prefix  crates/tutti-graph/src/graph.rs::NodeSpec::with_latency
+tutti-graph  with-prefix  crates/tutti-graph/src/graph.rs::NodeSpec::with_tail
+tutti-graph  with-prefix  crates/tutti-graph/src/node.rs::TransportPosition::with_recording
+tutti-graph  setter  crates/tutti-graph/src/bus_edge.rs::GraphSpec::set_bus_fade
+tutti-graph  setter  crates/tutti-graph/src/spec.rs::GraphSpec::set_edge_gain
+tutti-graph  setter  crates/tutti-graph/src/spec.rs::GraphSpec::set_mix
+tutti-graph  setter  crates/tutti-graph/src/spec.rs::GraphSpec::set_mode
+tutti-graph  setter  crates/tutti-graph/src/spec.rs::GraphSpec::set_param_range
+tutti-graph  node-ctor  crates/tutti-graph/src/inlet.rs::InletNode::new
+
+# tutti-measure
+tutti-measure  with-prefix  crates/tutti-measure/src/align.rs::AlignConfig::with_band
+tutti-measure  with-prefix  crates/tutti-measure/src/chord.rs::ChordConfig::with_self_transition
+tutti-measure  with-prefix  crates/tutti-measure/src/chord.rs::ChordConfig::with_sharpness
+tutti-measure  with-prefix  crates/tutti-measure/src/chroma.rs::ChromaConfig::with_band
+tutti-measure  with-prefix  crates/tutti-measure/src/chroma.rs::ChromaConfig::with_harmonic_decay
+tutti-measure  with-prefix  crates/tutti-measure/src/chroma.rs::ChromaConfig::with_harmonics
+tutti-measure  with-prefix  crates/tutti-measure/src/chroma.rs::ChromaConfig::with_peak_floor
+tutti-measure  with-prefix  crates/tutti-measure/src/chroma.rs::ChromaConfig::with_tuning
+tutti-measure  with-prefix  crates/tutti-measure/src/notes.rs::NoteConfig::with_floor
+tutti-measure  with-prefix  crates/tutti-measure/src/notes.rs::NoteConfig::with_hold
+tutti-measure  with-prefix  crates/tutti-measure/src/notes.rs::NoteConfig::with_hop
+tutti-measure  with-prefix  crates/tutti-measure/src/notes.rs::NoteConfig::with_min_length
+tutti-measure  with-prefix  crates/tutti-measure/src/notes.rs::NoteConfig::with_pitch_split
+tutti-measure  with-prefix  crates/tutti-measure/src/notes.rs::NoteConfig::with_smoothing
+tutti-measure  with-prefix  crates/tutti-measure/src/onset.rs::OnsetConfig::with_min_gap
+tutti-measure  with-prefix  crates/tutti-measure/src/onset.rs::OnsetConfig::with_sensitivity
+tutti-measure  with-prefix  crates/tutti-measure/src/onset.rs::OnsetConfig::with_threshold
+tutti-measure  with-prefix  crates/tutti-measure/src/silence.rs::SilenceConfig::with_padding
+tutti-measure  with-prefix  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::with_banding
+tutti-measure  with-prefix  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::with_floor
+tutti-measure  with-prefix  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::with_peak_hold
+tutti-measure  with-prefix  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::with_smoothing
+tutti-measure  with-prefix  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::with_spectrogram
+tutti-measure  with-prefix  crates/tutti-measure/src/tempo.rs::TempoConfig::with_alternatives
+tutti-measure  with-prefix  crates/tutti-measure/src/tempo.rs::TempoConfig::with_prior
+tutti-measure  with-prefix  crates/tutti-measure/src/tempo.rs::TempoConfig::with_range
+tutti-measure  with-prefix  crates/tutti-measure/src/tempo.rs::TempoConfig::with_tightness
+tutti-measure  with-prefix  crates/tutti-measure/src/transform.rs::StftRequest::with_window
+tutti-measure  with-prefix  crates/tutti-measure/src/yin.rs::YinConfig::with_threshold
+tutti-measure  chain-result  crates/tutti-measure/src/align.rs::AlignConfig::with_band
+tutti-measure  chain-result  crates/tutti-measure/src/chroma.rs::ChromaConfig::with_band
+tutti-measure  chain-result  crates/tutti-measure/src/notes.rs::NoteConfig::with_floor
+tutti-measure  chain-result  crates/tutti-measure/src/notes.rs::NoteConfig::with_hop
+tutti-measure  chain-result  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::with_banding
+tutti-measure  chain-result  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::with_peak_hold
+tutti-measure  chain-result  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::with_spectrogram
+tutti-measure  chain-result  crates/tutti-measure/src/tempo.rs::TempoConfig::with_range
+tutti-measure  ctor-result  crates/tutti-measure/src/chroma.rs::ChromaConfig::new
+tutti-measure  ctor-result  crates/tutti-measure/src/loudness.rs::LoudnessConfig::new
+tutti-measure  ctor-result  crates/tutti-measure/src/loudness.rs::WindowedLoudnessConfig::new
+tutti-measure  ctor-result  crates/tutti-measure/src/notes.rs::NoteConfig::new
+tutti-measure  ctor-result  crates/tutti-measure/src/silence.rs::SilenceConfig::new
+tutti-measure  ctor-result  crates/tutti-measure/src/spectrum.rs::SpectrumConfig::new
+tutti-measure  ctor-result  crates/tutti-measure/src/yin.rs::YinConfig::new
+tutti-measure  ctor-result  crates/tutti-measure/src/yin.rs::YinConfig::standard
+
+# tutti-midi-device
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_get
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_paginate
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_set
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_subscribe
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_columns
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_encodings
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_extensions
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_fc_on_get
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_fc_on_set
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_media_types
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_require_res_id
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_schema
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/request.rs::ResourceGet::with_flow_control
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/state.rs::PeState::with_rev
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/ci/pe/resource/state.rs::PeState::with_timestamp
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/endpoint.rs::Endpoint::with_active
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/endpoint.rs::Endpoint::with_function_block
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/endpoint.rs::Endpoint::with_identity
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/endpoint.rs::Endpoint::with_instance_id
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/endpoint.rs::Endpoint::with_name
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/endpoint.rs::Endpoint::with_static_function_blocks
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/learned.rs::Learned::with_identity
+tutti-midi-device  with-prefix  crates/tutti-midi-device/src/learned.rs::Learned::with_instance_id
+tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/partial.rs::PartialUpdate::with
+tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_get
+tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_paginate
+tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_can_set
+tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_columns
+tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_encodings
+tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_fc_on_get
+tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_fc_on_set
+tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_media_types
+tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_require_res_id
+tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/entry.rs::ResourceEntry::with_schema
+tutti-midi-device  chain-result  crates/tutti-midi-device/src/ci/pe/resource/request.rs::ResourceGet::paged
+tutti-midi-device  range-macro  crates/tutti-midi-device/src/ci/pe/limits.rs::text_type
+tutti-midi-device  range-macro  crates/tutti-midi-device/src/ci/pe/resource/fields.rs::text_enum
+
+# tutti-midi-hardware
+tutti-midi-hardware  with-prefix  crates/tutti-midi-hardware/src/virtual_endpoint.rs::VirtualSpec::with_function_block
+tutti-midi-hardware  with-prefix  crates/tutti-midi-hardware/src/virtual_endpoint.rs::VirtualSpec::with_protocol
+
+# tutti-midi-network
+tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_command_timeout
+tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_fec
+tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_idle_interval
+tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_liveness_timeout
+tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_pending_timeout
+tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_ping_interval
+tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_reorder_wait
+tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_repeat_interval
+tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_requests
+tutti-midi-network  with-prefix  crates/tutti-midi-network/src/config.rs::SessionConfig::with_retransmit
+tutti-midi-network  with-prefix  crates/tutti-midi-network/src/policy.rs::Credentials::with_secret
+tutti-midi-network  with-prefix  crates/tutti-midi-network/src/policy.rs::Credentials::with_user
+
+# tutti-midi-protocol
+tutti-midi-protocol  with-prefix  crates/tutti-midi-protocol/src/mpe/zone.rs::MpeZoneConfig::with_channel_response
+tutti-midi-protocol  with-prefix  crates/tutti-midi-protocol/src/universal/machine_control/values.rs::MmcTimeLabel::with_color_frame
+tutti-midi-protocol  with-prefix  crates/tutti-midi-protocol/src/universal/machine_control/values.rs::MmcTimeLabel::with_sign
+
+# tutti-midi-runtime
+tutti-midi-runtime  with-prefix  crates/tutti-midi-runtime/src/live/ingest_node.rs::MidiIngestNode::with_mpe
+tutti-midi-runtime  with-prefix  crates/tutti-midi-runtime/src/outbound/jr_timestamp.rs::JrStream::with_clock
+tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/live/ingest_node.rs::MidiIngestNode::new
+tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/live/transform_node.rs::MpeTransformNode::new
+tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/outbound/clock_node.rs::ClockNode::new
+tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/outbound/machine_control_node.rs::MachineControlNode::new
+tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/outbound/out_node.rs::MidiOutNode::new
+tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/schedule/clip_node.rs::MidiClipNode::new
+tutti-midi-runtime  node-ctor  crates/tutti-midi-runtime/src/schedule/harmony_node.rs::HarmonyNode::new
+
+# tutti-nodes
+tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::ModulatorNode::with_beat_sync
+tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::ModulatorNode::with_depth
+tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::ModulatorNode::with_phase_offset
+tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::ModulatorNode::with_rate
+tutti-nodes  with-prefix  crates/tutti-nodes/src/lfo.rs::ModulatorNode::with_seed
+tutti-nodes  with-prefix  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::with_level
+tutti-nodes  setter  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::set_gain
+tutti-nodes  setter  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::set_frequency
+tutti-nodes  setter  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::set_level
+tutti-nodes  setter  crates/tutti-nodes/src/strip.rs::BusStripNode::set_volume
+tutti-nodes  node-ctor  crates/tutti-nodes/src/automation/control_lane.rs::ControlLaneNode::for_foreign
+tutti-nodes  node-ctor  crates/tutti-nodes/src/automation/control_lane.rs::ControlLaneNode::for_unit
+tutti-nodes  node-ctor  crates/tutti-nodes/src/automation/lane.rs::AutomationLaneNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/click.rs::ClickNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::folded
+tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::per_channel
+tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::shared_ir
+tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::stereo
+tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::with_ir
+tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::from_layout
+tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::mono
+tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::stereo
+tutti-nodes  node-ctor  crates/tutti-nodes/src/distortion.rs::DistortionNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/distortion.rs::DistortionNode::with_channels
+tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/brickwall.rs::BrickwallLimiterNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/brickwall.rs::BrickwallLimiterNode::with_bus
+tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/compressor.rs::CompressorNode::mono
+tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/compressor.rs::CompressorNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/compressor.rs::CompressorNode::stereo
+tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/gate.rs::GateNode::mono
+tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/gate.rs::GateNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/gate.rs::GateNode::stereo
+tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/limiter.rs::LimiterNode::mono
+tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/limiter.rs::LimiterNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/limiter.rs::LimiterNode::stereo
+tutti-nodes  node-ctor  crates/tutti-nodes/src/dynamics/multiband.rs::MultibandCompressorNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/crossover.rs::CrossoverNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/eq_band.rs::EqBandNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/ladder.rs::LadderFilterNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/ladder.rs::LadderFilterNode::with_channels
+tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/svf.rs::SvfFilterNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/svf.rs::SvfFilterNode::with_channels
+tutti-nodes  node-ctor  crates/tutti-nodes/src/filter/svf.rs::SvfFilterNode::with_controls
+tutti-nodes  node-ctor  crates/tutti-nodes/src/kernel.rs::KernelNode::with_kernel
+tutti-nodes  node-ctor  crates/tutti-nodes/src/lfo.rs::ModulatorNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/lfo.rs::ModulatorNode::with_modulator
+tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::chorus
+tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::flanger
+tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::general_midi_chorus
+tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/phaser.rs::PhaserNode::mono
+tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/phaser.rs::PhaserNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/modulation/phaser.rs::PhaserNode::stereo
+tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::saw
+tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::sine
+tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::square
+tutti-nodes  node-ctor  crates/tutti-nodes/src/oscillator.rs::OscillatorNode::triangle
+tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb.rs::FamilyNode::fixed
+tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb.rs::FamilyNode::general_midi
+tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb.rs::FamilyNode::live
+tutti-nodes  node-ctor  crates/tutti-nodes/src/reverb_fdn.rs::FdnNode::live
+tutti-nodes  node-ctor  crates/tutti-nodes/src/signal/follower.rs::SourceNode::from_decl
+tutti-nodes  node-ctor  crates/tutti-nodes/src/signal/follower.rs::SourceNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/signal/note_envelope.rs::SourceNode::from_decl
+tutti-nodes  node-ctor  crates/tutti-nodes/src/signal/note_envelope.rs::SourceNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/spatial/hrtf/node.rs::HrtfBinauralNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerNode::atmos_7_1_4
+tutti-nodes  node-ctor  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerNode::quad
+tutti-nodes  node-ctor  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerNode::stereo
+tutti-nodes  node-ctor  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerNode::surround_5_1
+tutti-nodes  node-ctor  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerNode::surround_7_1
+tutti-nodes  node-ctor  crates/tutti-nodes/src/strip.rs::BusStripNode::mono
+tutti-nodes  node-ctor  crates/tutti-nodes/src/strip.rs::BusStripNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/strip.rs::BusStripNode::stereo
+tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::folded
+tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::per_channel
+tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::shared_ir
+tutti-nodes  ctor-result  crates/tutti-nodes/src/dynamics/multiband.rs::MultibandCompressorNode::new
+tutti-nodes  ctor-result  crates/tutti-nodes/src/filter/crossover.rs::CrossoverNode::new
+tutti-nodes  ctor-result  crates/tutti-nodes/src/modulation/mod_delay.rs::ModDelayNode::new
+tutti-nodes  ctor-result  crates/tutti-nodes/src/modulation/phaser.rs::PhaserNode::new
+tutti-nodes  ctor-result  crates/tutti-nodes/src/spatial/hrtf/node.rs::HrtfBinauralNode::new
+tutti-nodes  ctor-result  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerNode::new
+
+# tutti-plugin
+tutti-plugin  with-prefix  crates/tutti-plugin/src/host/catalog.rs::Catalog::with_measuring
+
+# tutti-plugin-host
+tutti-plugin-host  with-prefix  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_invalidate_sink
+tutti-plugin-host  with-prefix  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_refresh_sink
+tutti-plugin-host  with-prefix  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_server_pid
+tutti-plugin-host  with-prefix  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_transport_sink
+
+# tutti-plugin-types
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/lifecycle.rs::Prepare::with_format
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/lifecycle.rs::Prepare::with_mode
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/lifecycle.rs::Prepare::with_rate
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/metadata.rs::Processing::with_measured
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_flags
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_group
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_measures
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_normalized_default
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_plain_range
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_range
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_role
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_steps
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_unit
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_bar
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_continuous_samples
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_loop
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_loop_seconds
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_playing
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_position_beats
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_position_quarters
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_position_samples
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_recording
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_sample_rate
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_system_time_ns
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_tempo
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_tempo_inc
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/transport.rs::TransportInfo::with_time_signature
+
+# tutti-sampler
+tutti-sampler  with-prefix  crates/tutti-sampler/src/clip.rs::Clip::with_tempo
+tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/disk_voice.rs::DiskVoice::with_tempo
+tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/loop_span.rs::Loop::with_crossfade
+tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::with_tempo
+tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/node.rs::VoiceNode::with_handle
+tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/node.rs::VoiceNode::with_tempo
+tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/pool.rs::VoicePool::with_handle
+tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/pool.rs::VoicePool::with_tempo
+tutti-sampler  chain-result  crates/tutti-sampler/src/clip.rs::Clip::channels
+tutti-sampler  chain-result  crates/tutti-sampler/src/voice/loop_span.rs::Loop::with_crossfade
+tutti-sampler  setter  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::set_gain
+tutti-sampler  setter  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::set_loop
+tutti-sampler  setter  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::set_session_sample_rate
+tutti-sampler  setter  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::set_speed
+tutti-sampler  setter  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::set_wave
+tutti-sampler  setter  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::set_window
+tutti-sampler  node-ctor  crates/tutti-sampler/src/voice/node.rs::VoiceNode::new
+tutti-sampler  node-ctor  crates/tutti-sampler/src/voice/node.rs::VoiceNode::streaming
+tutti-sampler  node-ctor  crates/tutti-sampler/src/voice/node.rs::VoiceNode::with_channels
+tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::new
+tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::placed
+tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::with_channels
+tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::with_config
+
+# tutti-session
+tutti-session  with-prefix  crates/tutti-session/src/pool/config.rs::PoolConfig::with_live_holds
+tutti-session  with-prefix  crates/tutti-session/src/pool/config.rs::PoolConfig::with_parallel_loads
+tutti-session  with-prefix  crates/tutti-session/src/session.rs::PhaseCx::with_mods
+tutti-session  chain-result  crates/tutti-session/src/bounce.rs::Bounce::try_map
+tutti-session  chain-result  crates/tutti-session/src/bounce.rs::Stem::try_map
+tutti-session  chain-result  crates/tutti-session/src/key.rs::Connection::gain
+tutti-session  chain-result  crates/tutti-session/src/plugin/entry.rs::PluginDeclaration::initial_state
+tutti-session  chain-result  crates/tutti-session/src/take.rs::Punch::until
+tutti-session  chain-result  crates/tutti-session/src/take.rs::Take::rolling
+
+# tutti-soundfont
+tutti-soundfont  with-prefix  crates/tutti-soundfont/src/settings.rs::Settings::with_device
+tutti-soundfont  with-prefix  crates/tutti-soundfont/src/settings.rs::Settings::with_group
+tutti-soundfont  with-prefix  crates/tutti-soundfont/src/settings.rs::Settings::with_polyphony
+
+# tutti-ump
+tutti-ump  chain-result  crates/tutti-ump/src/mpe_zone.rs::MpeZoneSet::with
+tutti-ump  range-macro  crates/tutti-ump/src/field.rs::bits
+tutti-ump  range-macro  crates/tutti-ump/src/field.rs::bounded
+
+# tutti-voicing
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_bend_range
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_exclusive_groups
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_mode
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_per_note_bend_range
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_percussion
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_polyphony
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_retrigger
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_sostenuto
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_steal
+tutti-voicing  with-prefix  crates/tutti-voicing/src/voicing.rs::Rules::with_tuning_capacity
