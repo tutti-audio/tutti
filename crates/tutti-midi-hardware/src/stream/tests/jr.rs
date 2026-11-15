@@ -125,7 +125,11 @@ fn a_jr_input_places_an_event_at_its_timestamp_not_its_arrival() {
 
 /// With TXJR off (the input was opened for arrival), the same traffic leaves the
 /// event at its arrival stamp, and the JR messages are still not heard. Also
-/// where the device turns TXJR on by itself: the input did not ask for it.
+/// where the device turns TXJR on by itself: the input did not ask for it, so
+/// the event is rendered at once (M2-104 §7.2.2.3) and the device is asked to
+/// stop: one Stream Configuration Request with TXJR off, which it grants, and
+/// nothing is asked after.
+/// Spec: m2-104/7.2.2.3#2
 #[test]
 fn an_arrival_input_keeps_the_arrival_stamp_though_the_device_sends_jr() {
     let (mut wire, mut rig, stream) = settled(InputTiming::Arrival, offering_both());
@@ -136,11 +140,46 @@ fn an_arrival_input_keeps_the_arrival_stamp_though_the_device_sends_jr() {
         tx_jr: true,
     });
     send_ump(&wire, on, 20);
-    assert_eq!(streams(wire.poll(30)).len(), 1);
-    assert!(wire.session.stream(&wire.id).unwrap().config().tx_jr);
+    let (sent, reported) = wire.tick(30);
+    assert_eq!(reported.len(), 1);
+    assert_eq!(
+        sent,
+        [Stream::StreamConfigurationRequest(StreamConfig {
+            protocol: Protocol::Midi2,
+            rx_jr: false,
+            tx_jr: false,
+        })]
+    );
     let (frame, heard) = note_delayed_by_10ms(&wire, &mut rig);
     assert_near(frame, frame_at(1_000 + 312 + LATENCY + 10));
     assert_eq!(heard.len(), 1);
+    // The device granted it, and is not asked again.
+    assert_eq!(wire.tick(1_400).1.len(), 1);
+    assert!(!wire.session.stream(&wire.id).unwrap().config().tx_jr);
+    assert!(wire.tick(1_410).0.is_empty());
+}
+
+/// M2-104 §7.1.6.2: an input that asked for TXJR expects no JR Timestamps until
+/// the Stream Configuration Notification arrives. A JR Clock and a JR Timestamp
+/// that come before it are not heard, and the event is placed at its arrival.
+/// Spec: m2-104/7.1.6.2#5
+#[test]
+fn no_jr_is_expected_before_the_notification() {
+    let mut wire = session_over(
+        UmpCapability::midi2(),
+        PortDirection::Duplex,
+        offering_both(),
+    );
+    wire.session
+        .connect_input(&wire.id.clone(), InputTiming::JitterReduction)
+        .unwrap();
+    let mut rig = Rig::over(wire.session.ports().inlets(), wire.start);
+    rig.run(1);
+    rig.apply();
+    let (frame, heard) = note_delayed_by_10ms(&wire, &mut rig);
+    assert_near(frame, frame_at(1_000 + 312 + LATENCY + 10));
+    assert_eq!(heard.len(), 1, "the JR messages are not heard");
+    assert!(settle(&mut wire).config().tx_jr);
 }
 
 /// A device that does not offer TXJR settles with it off, so an input opened for
@@ -184,7 +223,7 @@ fn a_timestamp_before_any_clock_places_the_event_at_its_arrival() {
 
 /// Events keep the order they arrived in (M2-104 §7.2.2.2): a second note whose
 /// timestamp maps earlier than the first's is not placed before it.
-/// Spec: m2-104/7.2.2.2#3
+/// Spec: m2-104/7.2.2.2#3, m2-104/7.2.2.2#5
 #[test]
 fn events_are_placed_in_the_order_they_arrive() {
     let (wire, mut rig, _) = settled(InputTiming::JitterReduction, offering_both());

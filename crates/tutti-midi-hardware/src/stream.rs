@@ -74,7 +74,8 @@ use tutti_midi_device::{
 };
 use tutti_midi_protocol::{Addressed, Read, Universal, read};
 use tutti_ump::{
-    DeviceIdentity, MidiGroup, Protocol, StreamConfig, SysexAssembler, SysexStep, Ump,
+    DeviceIdentity, Message, MidiGroup, Protocol, Stream, StreamConfig, SysexAssembler, SysexStep,
+    Ump,
 };
 
 use crate::capability::UmpCapability;
@@ -513,9 +514,10 @@ impl Negotiation {
             return self.poll_inquiry(now, heard);
         }
         let mut actions = Vec::new();
+        let wanted = self.timing.wanted();
         match &mut self.run {
             Run::Idle => {
-                let (connection, first) = Connection::with_wanted(self.timing.wanted(), now);
+                let (connection, first) = Connection::with_wanted(wanted, now);
                 actions.push(first);
                 self.run = Run::Asking(Box::new(connection));
             }
@@ -544,7 +546,17 @@ impl Negotiation {
                 // MIDI-CI follows: its Groups are the blocks' now, taken up
                 // by the next poll (`Ci::poll`).
                 self.ci.decide(groups_after_settle(stream));
-                return Some(**stream);
+                let reported = **stream;
+                // A device that sends JR Timestamps the input did not ask for
+                // is asked to stop (M2-104 §7.2.2.3); a device that keeps
+                // them has said so with a notification that changes nothing,
+                // which is not asked about again.
+                if reported.endpoint.active().tx_jr && !wanted.tx_jr {
+                    self.send(Ump::from(Message::Stream(
+                        Stream::StreamConfigurationRequest(wanted),
+                    )));
+                }
+                return Some(reported);
             }
         }
         for action in actions {

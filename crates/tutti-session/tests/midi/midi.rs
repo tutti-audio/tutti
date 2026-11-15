@@ -2249,6 +2249,40 @@ fn jr_session() -> (
     (s, fake, raw)
 }
 
+/// M2-104 §7.1.6.2: a device that asked to receive JR Timestamps (RXJR) has
+/// every message prefixed with one. Two notes 480 frames apart go out as
+/// timestamp, note, timestamp, note, the first stamped 0 and the second the
+/// ticks of 480 frames at the session rate (31 250 ticks a second, whole
+/// ticks), and every note is directly after its own stamp.
+/// Spec: m2-104/7.1.6.2#4
+#[cfg(feature = "midi-hardware")]
+#[test]
+fn a_device_that_receives_jr_has_every_message_prefixed_by_a_timestamp() {
+    use tutti_ump::{Message, Utility};
+    let (mut s, fake, raw) = jr_session();
+    s.midi()
+        .hardware_out()
+        .route(&[(Frame::new(0), key(0, 60)), (Frame::new(480), key(0, 61))]);
+    let sent: Vec<Ump> = fake
+        .take_sent(raw)
+        .into_iter()
+        .filter(|u| u.message_type() != 0 || u.is_jr())
+        .collect();
+    let stamp = |u: &Ump| match u.decode() {
+        Ok(Message::Utility(Utility::JrTimestamp(t))) => Some(t),
+        _ => None,
+    };
+    let notes: Vec<usize> = (0..sent.len())
+        .filter(|&i| sent[i].message_type() == 4)
+        .collect();
+    assert_eq!(notes.len(), 2, "{sent:?}");
+    let ticks = (480.0 * 31_250.0 / RATE) as u16;
+    for (note, want) in notes.iter().zip([0, ticks]) {
+        let before = note.checked_sub(1).and_then(|i| stamp(&sent[i]));
+        assert_eq!(before, Some(want), "{sent:?}");
+    }
+}
+
 /// **The JR stamp stream carries on across a disconnect and reconnect of the
 /// output**: a stream that restarted at origin 0 would stamp the next
 /// events earlier than ones already sent. Two events 480 frames apart move
