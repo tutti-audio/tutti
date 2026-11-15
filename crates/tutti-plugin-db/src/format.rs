@@ -77,8 +77,9 @@ const EXTENSION_NAMES: [&str; 6] = extension_names::<6>();
 mod tests {
     use super::PluginFormat;
 
-    /// **`from_extension_id` inverts `extension_id`** for every format, so the
-    /// name a caller sends to `plugin-probe --as` is the one it reads back.
+    /// **`from_extension_id` inverts `extension_id`** for every format, and `ALL`
+    /// lists each format once, so the name a caller sends to `plugin-probe --as`
+    /// is the one it reads back.
     #[test]
     fn every_extension_id_names_its_own_format() {
         for format in PluginFormat::ALL {
@@ -86,6 +87,17 @@ mod tests {
                 PluginFormat::from_extension_id(format.extension_id()),
                 Some(format)
             );
+        }
+        // An exhaustive match: a new format fails to compile here until it has
+        // a place in `ALL`.
+        let place = |f: PluginFormat| match f {
+            PluginFormat::Vst3 => 0,
+            PluginFormat::Vst2 => 1,
+            PluginFormat::Clap => 2,
+            PluginFormat::AudioUnit => 3,
+        };
+        for (i, format) in PluginFormat::ALL.into_iter().enumerate() {
+            assert_eq!(place(format), i);
         }
         for unknown in ["vst", "component", "CLAP", ""] {
             assert_eq!(PluginFormat::from_extension_id(unknown), None);

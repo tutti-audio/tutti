@@ -166,7 +166,7 @@ const ONLY: &[(&str, &[&str])] = &[
     ),
     // The probe reads one file as a format host would: the hosts, the descriptor
     // types, the experiment's units, and the catalog's format names for `--as`.
-    // No hosting (`-ipc`, `-host`, the facade).
+    // No hosting (`tutti-plugin-ipc`, `tutti-plugin-host`, `tutti-plugin`).
     (
         "tutti-plugin-probe",
         &[
