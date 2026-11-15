@@ -15,7 +15,8 @@ use tutti_plugin_ipc::state_chunk::{self, Reassembler};
 use tutti_plugin_ipc::{AudioSlab, BridgeMessage, HostMessage, MAX_STATE_BYTES, StagedState};
 use tutti_plugin_types::{
     BridgeError, BridgeResult, EditorError, Load, MainThreadMarker, MainWork, MainWorkHandle,
-    ParameterQueue, PluginError, Ready, SampleFormat, SampleRate, StateUse, Wakeups, WindowHandle,
+    ParameterQueue, PluginError, PluginFormat, Ready, SampleFormat, SampleRate, StateUse, Wakeups,
+    WindowHandle,
 };
 
 /// What [`Session::handle`] asks the transport loop to do.
@@ -240,6 +241,7 @@ impl Session {
         match msg {
             M::LoadPlugin {
                 path,
+                format,
                 load,
                 sample_rate,
                 block_size,
@@ -249,6 +251,7 @@ impl Session {
             } => self.handle_load(
                 main,
                 path,
+                format,
                 &load,
                 sample_rate,
                 block_size,
@@ -629,6 +632,7 @@ impl Session {
         &mut self,
         main: MainThreadMarker,
         path: std::path::PathBuf,
+        format: PluginFormat,
         load: &Load,
         sample_rate: SampleRate,
         block_size: usize,
@@ -669,6 +673,7 @@ impl Session {
             main,
             &self.work_handle,
             &path,
+            format,
             load,
             sample_rate,
             block_size,
@@ -1436,6 +1441,7 @@ mod tests {
                 main_thread(),
                 HostMessage::LoadPlugin {
                     path: std::path::PathBuf::from("/nonexistent/path/plugin.vst3"),
+                    format: PluginFormat::Vst3,
                     load: tutti_plugin_types::Load::new(),
                     sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                     block_size: 512,
@@ -1465,12 +1471,8 @@ mod tests {
     /// `cargo test` run. Resolved rather than hard-coded so these tests run on
     /// any machine.
     ///
-    /// Uses the `.clap`-suffixed link: these tests load through
-    /// `HostMessage::LoadPlugin`, which picks the format from the file
-    /// extension, and the raw cdylib is a `.so` — which that table reads as
-    /// VST2.
     fn clap_plugin() -> &'static str {
-        crate::test_utils::clap_probe_path_dot_clap()
+        crate::test_utils::clap_probe_path()
     }
 
     /// Load the real CLAP plugin into a Session and attach shared memory.
@@ -1483,6 +1485,7 @@ mod tests {
             main_thread(),
             HostMessage::LoadPlugin {
                 path: std::path::PathBuf::from(clap_plugin()),
+                format: PluginFormat::Clap,
                 load: tutti_plugin_types::Load::new(),
                 sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                 block_size: 512,
@@ -1516,6 +1519,7 @@ mod tests {
                 main_thread(),
                 HostMessage::LoadPlugin {
                     path: std::path::PathBuf::from(clap_plugin()),
+                    format: PluginFormat::Clap,
                     load,
                     sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                     block_size: 512,
@@ -2193,6 +2197,7 @@ mod tests {
                 main_thread(),
                 HostMessage::LoadPlugin {
                     path: std::path::PathBuf::from(clap_plugin()),
+                    format: PluginFormat::Clap,
                     load: tutti_plugin_types::Load::new(),
                     sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                     block_size: 512,
@@ -2214,6 +2219,7 @@ mod tests {
             main_thread(),
             HostMessage::LoadPlugin {
                 path: std::path::PathBuf::from("/nonexistent/plugin.clap"),
+                format: PluginFormat::Clap,
                 load: tutti_plugin_types::Load::new(),
                 sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                 block_size: 512,
@@ -2392,6 +2398,7 @@ mod tests {
                     main_thread(),
                     HostMessage::LoadPlugin {
                         path: std::path::PathBuf::from(clap_plugin()),
+                        format: PluginFormat::Clap,
                         load: tutti_plugin_types::Load::new(),
                         sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                         block_size: 512,
@@ -2557,6 +2564,7 @@ mod tests {
             main_thread(),
             HostMessage::LoadPlugin {
                 path: bundle,
+                format: PluginFormat::Vst3,
                 load: tutti_plugin_types::Load::new(),
                 sample_rate: tutti_plugin_types::SampleRate::SR_48K,
                 block_size: 512,
@@ -2711,8 +2719,8 @@ mod tests {
         // `PluginParamTitlesChanged` assertion below pins that this is the bit.
         const K_PARAM_TITLES_CHANGED: i32 = 1 << 4;
         let _lock = crate::test_utils::plugin_load_lock();
-        // `AnyServed::load` picks the format by the `.vst3` bundle, not the
-        // module inside it that `vst3_probe_path` names.
+        // The load names the `.vst3` bundle, not the module inside it that
+        // `vst3_probe_path` names.
         let bundle = std::path::Path::new(crate::test_utils::vst3_probe_path())
             .ancestors()
             .find(|p| p.extension().is_some_and(|e| e == "vst3"))
@@ -2723,6 +2731,7 @@ mod tests {
             main_thread(),
             HostMessage::LoadPlugin {
                 path: bundle,
+                format: PluginFormat::Vst3,
                 load: tutti_plugin_types::Load::new(),
                 sample_rate: tutti_plugin_types::SampleRate::SR_48K,
                 block_size: 512,
