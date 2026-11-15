@@ -25,8 +25,10 @@ use crate::{HeardOpen, HeardTapError, Playhead, RemoveError, ScheduleError, Temp
 #[non_exhaustive]
 pub enum Phase {
     /// What the session's jobs sent lands first (`SessionBuilder::spawn_with`:
-    /// each message, then each end, in arrival order). Then crossfades that
-    /// waited out a re-prepare are retried, what bounces
+    /// each message, then each end, in arrival order). Then the pool's
+    /// landings are reported ([`SessionEvent::Pool`], in the order the app's
+    /// set names the entries), then its releases (by key), then crossfades
+    /// that waited out a re-prepare are retried, what bounces
     /// sent back is dropped (feature `export`; and a bounce in flight for
     /// `BOUNCE_STALL_WARNING` of `PhaseCx::now` warned about, once), then
     /// `Editor::collect` frees what the audio thread retired (here, on the
@@ -264,6 +266,15 @@ pub enum SessionEvent {
         /// Which of its readings changed.
         fact: crate::ResourceFact,
     },
+    /// A pool entry's change: its load landed or failed, a reload landed, or it
+    /// was released. See [`PoolEvent`](crate::PoolEvent); `key` is the key the
+    /// app declared it under ([`PoolKey::get`](crate::PoolKey::get)).
+    Pool {
+        /// The entry's key.
+        key: crate::PoolKey,
+        /// What changed.
+        event: crate::PoolEvent,
+    },
 }
 
 impl std::fmt::Debug for SessionEvent {
@@ -314,6 +325,11 @@ impl std::fmt::Debug for SessionEvent {
                 .debug_struct("ResourceChanged")
                 .field("id", id)
                 .field("fact", fact)
+                .finish(),
+            Self::Pool { key, event } => f
+                .debug_struct("Pool")
+                .field("key", key)
+                .field("event", event)
                 .finish(),
         }
     }
@@ -399,6 +415,8 @@ pub struct Session {
     pub(crate) graph: Graph,
     /// The source of the ids of this session's resources.
     pub(crate) resource_ids: crate::peer::ResourceIds,
+    /// What the app declared loaded ([`Session::pool`]).
+    pub(crate) pool: crate::Pool,
     pub(crate) transport: Transport,
     /// The engine, for an offline session (the host pulls blocks); `None` on
     /// a device (the callback holds it) or detached.
@@ -452,7 +470,7 @@ pub struct Session {
     /// The device's fault record, shared with the [`Device`](crate::Device),
     /// and the count the last poll saw.
     #[cfg(feature = "device")]
-    pub(crate) faults: Option<(Arc<tutti_cpal::StreamFaults>, u64)>,
+    pub(crate) faults: Option<(Arc<tutti_engine::StreamFaults>, u64)>,
     /// The device watch, and what restarts reported since the
     /// last poll.
     #[cfg(feature = "device")]
@@ -695,6 +713,8 @@ impl Session {
             Phase::Collect => {
                 // First, so what a job landed is in the graph this update commits.
                 self.land_jobs(out);
+                // What those landings and the holds' ends changed.
+                self.pool_events(out);
                 // What the graph's own removals left declared.
                 self.forget_removed();
                 // Before the collect, as a frame's spawns run before its

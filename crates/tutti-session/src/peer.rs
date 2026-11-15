@@ -109,6 +109,10 @@ pub enum Presence<C> {
     },
     /// Gone; the cause says whether it can return.
     Lost(C),
+    /// Its pool entry was released, or swapped to another identity: final,
+    /// this handle never returns. It has no cause, since nothing about it can
+    /// change.
+    Closed,
 }
 
 impl<C> Presence<C> {
@@ -123,7 +127,7 @@ impl<C> Presence<C> {
     pub const fn cause(&self) -> Option<&C> {
         match self {
             Self::Recovering { cause, .. } | Self::Lost(cause) => Some(cause),
-            Self::Live | Self::Stalled => None,
+            Self::Live | Self::Stalled | Self::Closed => None,
         }
     }
 }
@@ -164,6 +168,11 @@ pub enum PeerError<E> {
     /// The peer did not answer in time.
     #[error("the peer did not answer in time")]
     TimedOut,
+    /// The peer's pool entry was released, or swapped to another identity,
+    /// before the request landed: this handle reads
+    /// [`Presence::Closed`].
+    #[error("the peer's pool entry was released")]
+    Released,
     /// The peer answered, and the answer is not success.
     #[error("the peer refused the request: {0}")]
     Refused(E),

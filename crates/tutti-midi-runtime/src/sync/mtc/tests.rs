@@ -1,4 +1,5 @@
 use super::*;
+use tutti_midi_protocol::SmpteFrameRate;
 use tutti_ump::{MidiGroup, U7};
 
 /// A quarter-frame data byte as the packet a device sends it in.

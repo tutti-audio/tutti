@@ -1,6 +1,7 @@
 use super::*;
 use crate::{BufferError, InterleavedMut};
 use Speaker::*;
+use tutti_types::{AmbisonicFormat, AmbisonicOrder, AmbisonicOrdering};
 
 fn smpte(n: u16) -> ChannelTopology {
     ChannelTopology::assumed(ChannelLayout::from(n))
@@ -1215,27 +1216,429 @@ fn contributions_past_the_destination_width_panic() {
     let _ = fold(&smpte(2), &smpte(2)).contributions(2);
 }
 
-/// An ambisonic set folds into an equal set as the identity, and into anything
-/// else (speakers, another format) is refused rather than guessed.
+/// Real spherical harmonics, SN3D, by ACN index: the oracle the tests measure
+/// the conversions against. Degree `l` and order `m` come from `n = l² + l + m`;
+/// the value is `√((2 − δm0)(l−|m|)!/(l+|m|)!) · P_l^|m|(sin el) · trig(|m|·az)`.
+mod harmonics {
+    fn degree_and_order(n: usize) -> (usize, i32) {
+        let l = (0..).take_while(|l| l * l <= n).last().unwrap();
+        (l, n as i32 - (l * l + l) as i32)
+    }
+
+    fn factorial(n: usize) -> f64 {
+        (1..=n).map(|k| k as f64).product()
+    }
+
+    /// The associated Legendre function `P_l^m(x)`, `m >= 0`, by recurrence.
+    fn legendre(l: usize, m: usize, x: f64) -> f64 {
+        let mut pmm = 1.0;
+        let mut fact = 1.0;
+        for _ in 0..m {
+            pmm *= -fact * ((1.0 - x) * (1.0 + x)).sqrt();
+            fact += 2.0;
+        }
+        if l == m {
+            return pmm;
+        }
+        let mut pmmp1 = x * (2 * m + 1) as f64 * pmm;
+        for ll in (m + 2)..=l {
+            let pll =
+                (x * (2 * ll - 1) as f64 * pmmp1 - (ll + m - 1) as f64 * pmm) / (ll - m) as f64;
+            pmm = pmmp1;
+            pmmp1 = pll;
+        }
+        pmmp1
+    }
+
+    pub fn sn3d(n: usize, azimuth: f64, sin_elevation: f64) -> f64 {
+        let (l, m) = degree_and_order(n);
+        let am = m.unsigned_abs() as usize;
+        let norm =
+            ((if m == 0 { 1.0 } else { 2.0 }) * factorial(l - am) / factorial(l + am)).sqrt();
+        let trig = if m >= 0 {
+            (am as f64 * azimuth).cos()
+        } else {
+            (am as f64 * azimuth).sin()
+        };
+        norm * legendre(l, am, sin_elevation) * trig
+    }
+
+    /// Mean square over the sphere of an SN3D harmonic, by the midpoint rule on
+    /// an equal-area grid (uniform in azimuth and in the sine of elevation).
+    pub fn mean_square(n: usize) -> f64 {
+        const AZ: usize = 720;
+        const EL: usize = 360;
+        let mut sum = 0.0;
+        for i in 0..AZ {
+            let az = (i as f64 + 0.5) / AZ as f64 * std::f64::consts::TAU;
+            for j in 0..EL {
+                let y = sn3d(n, az, -1.0 + (j as f64 + 0.5) * 2.0 / EL as f64);
+                sum += y * y;
+            }
+        }
+        sum / (AZ * EL) as f64
+    }
+
+    /// Peak magnitude of an SN3D harmonic over a grid that includes the poles.
+    pub fn peak(n: usize) -> f64 {
+        const AZ: usize = 720;
+        const EL: usize = 361;
+        let mut peak = 0.0f64;
+        for i in 0..AZ {
+            let az = i as f64 / AZ as f64 * std::f64::consts::TAU;
+            for j in 0..EL {
+                let y = sn3d(n, az, -1.0 + j as f64 * 2.0 / (EL - 1) as f64);
+                peak = peak.max(y.abs());
+            }
+        }
+        peak
+    }
+}
+
+/// What multiplies an SN3D channel to give the harmonic in `norm`, measured: N3D
+/// is the reciprocal root of SN3D's mean square over the sphere (fully
+/// normalised means mean square one), MaxN the reciprocal of its peak, and FuMa
+/// is MaxN with W at −3 dB.
+fn measured_scale(norm: AmbisonicNormalization, n: usize) -> f64 {
+    match norm {
+        AmbisonicNormalization::Sn3d => 1.0,
+        AmbisonicNormalization::N3d => 1.0 / harmonics::mean_square(n).sqrt(),
+        AmbisonicNormalization::MaxN => 1.0 / harmonics::peak(n),
+        AmbisonicNormalization::FuMa if n == 0 => 0.5f64.sqrt() / harmonics::peak(n),
+        AmbisonicNormalization::FuMa => 1.0 / harmonics::peak(n),
+        _ => unreachable!("the 2D normalizations are not full-sphere"),
+    }
+}
+
+fn ambisonic(
+    order: u8,
+    ordering: AmbisonicOrdering,
+    normalization: AmbisonicNormalization,
+) -> ChannelTopology {
+    AmbisonicFormat::new(AmbisonicOrder::of(order), ordering, normalization).into()
+}
+
+/// Destination channels when only source channel `k` carries a one.
+fn from_source(f: &Fold, k: usize) -> Vec<f32> {
+    let mut frame = vec![0.0; f.src_layout().count().into()];
+    frame[k] = 1.0;
+    let mut out = vec![0.0; f.dst_layout().count().into()];
+    f.frame(&frame, &mut out);
+    out
+}
+
+fn close(got: f32, want: f64, what: &str) {
+    near_rel(got, want, 4.0 * f64::from(f32::EPSILON), what);
+}
+
+/// `got` within a relative `tol` of `want`: for figures measured on a grid. The
+/// midpoint rule's error on the mean square stays near 5e-5 after the root, and
+/// the grid resolves each peak to about 1e-5, so the measured scales hold to
+/// 1e-4, far under the gaps between scales.
+fn near_rel(got: f32, want: f64, tol: f64, what: &str) {
+    assert!(
+        (f64::from(got) - want).abs() <= tol * want.abs().max(1.0),
+        "{what}: {got} vs {want}"
+    );
+}
+
+/// N3D is SN3D times `√(2l+1)`: `√3` for the first order, `√5` for the second,
+/// `√7` for the third and 1 for W.
 #[test]
-fn an_ambisonic_set_folds_only_into_itself() {
-    use tutti_types::{AmbisonicFormat, AmbisonicOrder};
-    let first = ChannelTopology::from(AmbisonicFormat::ambix(AmbisonicOrder::of(1)));
-    let f = Fold::<f32>::between(&first, &first).unwrap();
-    assert!(f.is_identity());
-    assert_eq!(f.src_layout(), ChannelLayout::QUAD);
-    for other in [
-        ChannelTopology::from(AmbisonicFormat::fuma(AmbisonicOrder::of(1))),
-        ChannelTopology::from(AmbisonicFormat::ambix(AmbisonicOrder::of(2))),
+fn sn3d_to_n3d_scales_each_degree_by_root_of_two_l_plus_one() {
+    use AmbisonicNormalization::{N3d, Sn3d};
+    let f = fold(
+        &ambisonic(3, AmbisonicOrdering::Acn, Sn3d),
+        &ambisonic(3, AmbisonicOrdering::Acn, N3d),
+    );
+    for (n, want) in [
+        (0, 1.0),
+        (1, 3f64.sqrt()),
+        (3, 3f64.sqrt()),
+        (4, 5f64.sqrt()),
+    ]
+    .into_iter()
+    .chain([(8, 5f64.sqrt()), (9, 7f64.sqrt()), (15, 7f64.sqrt())])
+    {
+        let r = from_source(&f, n);
+        close(r[n], want, &format!("ACN {n}"));
+        assert!(r.iter().enumerate().all(|(i, &v)| i == n || v == 0.0));
+    }
+}
+
+/// Every pair of the four full-sphere normalizations, at orders 1 to 3, scales
+/// harmonic `n` by `scale(dst, n) / scale(src, n)`, the scales measured from the
+/// spherical harmonics themselves.
+#[test]
+fn each_normalization_pair_converts_by_the_ratio_of_the_measured_scales() {
+    use AmbisonicNormalization::*;
+    let norms = [Sn3d, N3d, MaxN, FuMa];
+    let scales: Vec<Vec<f64>> = norms
+        .iter()
+        .map(|&norm| (0..16).map(|n| measured_scale(norm, n)).collect())
+        .collect();
+    for order in 1..=3u8 {
+        let width = usize::from((order + 1).pow(2));
+        for (si, &s) in norms.iter().enumerate() {
+            for (di, &d) in norms.iter().enumerate() {
+                let f = fold(
+                    &ambisonic(order, AmbisonicOrdering::Acn, s),
+                    &ambisonic(order, AmbisonicOrdering::Acn, d),
+                );
+                for n in 0..width {
+                    let r = from_source(&f, n);
+                    near_rel(
+                        r[n],
+                        scales[di][n] / scales[si][n],
+                        1e-4,
+                        &format!("{s:?} -> {d:?}, order {order}, ACN {n}"),
+                    );
+                    assert!(r.iter().enumerate().all(|(i, &v)| i == n || v == 0.0));
+                }
+                // Orders 0 and 1 are one in SN3D and MaxN alike, so those two meet
+                // as an identity at order 1; one scale always does.
+                assert!(s != d || f.is_identity());
+            }
+        }
+    }
+}
+
+/// MaxN's gains over SN3D are the published ones: 1 for degrees 0 and 1,
+/// `2/√3` for degree 2 but R, and `√(8/5)`, `3/√5`, `√(45/32)` and 1 across
+/// degree 3 (Q O M K L N P), written as closed forms.
+#[test]
+fn sn3d_to_maxn_gains_are_the_published_table() {
+    use AmbisonicNormalization::{MaxN, Sn3d};
+    let f = fold(
+        &ambisonic(3, AmbisonicOrdering::Acn, Sn3d),
+        &ambisonic(3, AmbisonicOrdering::Acn, MaxN),
+    );
+    let two_thirds = 2.0 / 3f64.sqrt();
+    let want = [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        two_thirds,
+        two_thirds,
+        1.0,
+        two_thirds,
+        two_thirds,
+        (8.0f64 / 5.0).sqrt(),
+        3.0 / 5f64.sqrt(),
+        (45.0f64 / 32.0).sqrt(),
+        1.0,
+        (45.0f64 / 32.0).sqrt(),
+        3.0 / 5f64.sqrt(),
+        (8.0f64 / 5.0).sqrt(),
+    ];
+    for (n, want) in want.into_iter().enumerate() {
+        close(from_source(&f, n)[n], want, &format!("ACN {n}"));
+    }
+}
+
+/// FuMa's W is MaxN's at −3 dB: SN3D W (one) becomes `1/√2`, and back `√2`.
+#[test]
+fn fuma_w_sits_at_minus_3_db() {
+    use AmbisonicNormalization::{FuMa, Sn3d};
+    let there = fold(
+        &ambisonic(1, AmbisonicOrdering::Acn, Sn3d),
+        &ambisonic(1, AmbisonicOrdering::Acn, FuMa),
+    );
+    assert_eq!(from_source(&there, 0)[0], f32::MINUS_3_DB);
+    assert_eq!(
+        from_source(&there, 1)[1],
+        1.0,
+        "the first-order gains are 1"
+    );
+    let back = fold(
+        &ambisonic(1, AmbisonicOrdering::Acn, FuMa),
+        &ambisonic(1, AmbisonicOrdering::Acn, Sn3d),
+    );
+    close(from_source(&back, 0)[0], 2f64.sqrt(), "FuMa W to SN3D");
+}
+
+/// FuMa stores `W X Y Z R S T U V K L M N O P Q`; each letter is a harmonic
+/// `(l, m)` (X = (1, +1), Y = (1, −1), Z = (1, 0), S = (2, +1), T = (2, −1),
+/// U = (2, +2), V = (2, −2), L = (3, +1), M = (3, −1), N = (3, +2), O = (3, −2),
+/// P = (3, +3), Q = (3, −3)) and ACN index `l² + l + m`: the reorder lands each
+/// letter on its ACN channel.
+#[test]
+fn fuma_channels_reorder_to_acn() {
+    use AmbisonicNormalization::Sn3d;
+    let letters: [(&str, i32, i32); 16] = [
+        ("W", 0, 0),
+        ("X", 1, 1),
+        ("Y", 1, -1),
+        ("Z", 1, 0),
+        ("R", 2, 0),
+        ("S", 2, 1),
+        ("T", 2, -1),
+        ("U", 2, 2),
+        ("V", 2, -2),
+        ("K", 3, 0),
+        ("L", 3, 1),
+        ("M", 3, -1),
+        ("N", 3, 2),
+        ("O", 3, -2),
+        ("P", 3, 3),
+        ("Q", 3, -3),
+    ];
+    let f = fold(
+        &ambisonic(3, AmbisonicOrdering::FuMa, Sn3d),
+        &ambisonic(3, AmbisonicOrdering::Acn, Sn3d),
+    );
+    for (i, (letter, l, m)) in letters.into_iter().enumerate() {
+        let acn = (l * l + l + m) as usize;
+        let r = from_source(&f, i);
+        assert_eq!(r[acn], 1.0, "{letter} (FuMa {i}) is ACN {acn}");
+        assert_eq!(r.iter().filter(|&&v| v != 0.0).count(), 1);
+    }
+    // ACN to FuMa is the inverse.
+    let back = fold(
+        &ambisonic(3, AmbisonicOrdering::Acn, Sn3d),
+        &ambisonic(3, AmbisonicOrdering::FuMa, Sn3d),
+    );
+    for (i, (_, l, m)) in letters.into_iter().enumerate() {
+        assert_eq!(from_source(&back, (l * l + l + m) as usize)[i], 1.0);
+    }
+}
+
+/// FuMa B-format to AmbiX is the reorder and FuMa's per-harmonic gains undone:
+/// SN3D = FuMa ÷ (MaxN gain, W at −3 dB), measured from the harmonics.
+#[test]
+fn fuma_to_ambix_reorders_and_undoes_the_fuma_gains() {
+    for order in 1..=3u8 {
+        let f = fold(
+            &AmbisonicFormat::fuma(AmbisonicOrder::of(order)).into(),
+            &AmbisonicFormat::ambix(AmbisonicOrder::of(order)).into(),
+        );
+        let fuma_to_acn = [0usize, 3, 1, 2, 6, 7, 5, 8, 4, 12, 13, 11, 14, 10, 15, 9];
+        for (i, &acn) in fuma_to_acn[..usize::from((order + 1).pow(2))]
+            .iter()
+            .enumerate()
+        {
+            let want = 1.0 / measured_scale(AmbisonicNormalization::FuMa, acn);
+            near_rel(
+                from_source(&f, i)[acn],
+                want,
+                1e-4,
+                &format!("order {order}, FuMa {i}"),
+            );
+        }
+    }
+}
+
+/// A narrowing keeps the lower orders and reads nothing of the higher ones; a
+/// widening keeps them and fills the new orders with silence.
+#[test]
+fn ambisonic_narrowing_drops_higher_orders_and_widening_zero_fills() {
+    use AmbisonicNormalization::{N3d, Sn3d};
+    let third = ambisonic(3, AmbisonicOrdering::Acn, Sn3d);
+    let first = ambisonic(1, AmbisonicOrdering::Acn, Sn3d);
+    let down = fold(&third, &first);
+    assert_eq!(down.dst_layout(), ChannelLayout::QUAD);
+    for k in 0..16 {
+        let r = from_source(&down, k);
+        if k < 4 {
+            assert_eq!(r[k], 1.0);
+        } else {
+            assert!(r.iter().all(|&v| v == 0.0), "ACN {k} is above first order");
+        }
+    }
+    let up = fold(&first, &ambisonic(2, AmbisonicOrdering::Acn, N3d));
+    assert_eq!(up.dst_layout().count(), 9);
+    close(
+        from_source(&up, 2)[2],
+        3f64.sqrt(),
+        "a kept channel is rescaled",
+    );
+    for k in 0..4 {
+        assert!(from_source(&up, k)[4..].iter().all(|&v| v == 0.0));
+    }
+    // Silence in, silence out for the new orders.
+    let mut out = [1.0f32; 9];
+    up.frame(&[0.5, 0.25, -0.5, 1.0], &mut out);
+    assert!(out[4..].iter().all(|&v| v == 0.0));
+    // Across orderings: FuMa third order to AmbiX first order keeps W X Y Z.
+    let narrow = fold(&ambisonic(3, AmbisonicOrdering::FuMa, Sn3d), &first);
+    assert_eq!(from_source(&narrow, 1)[3], 1.0, "FuMa X is ACN 3");
+    assert!(
+        from_source(&narrow, 4).iter().all(|&v| v == 0.0),
+        "R is second order"
+    );
+}
+
+/// Speakers and ambisonics never fold: they need an encoder or a decoder node.
+#[test]
+fn speakers_to_ambisonic_and_back_need_a_codec() {
+    let first = ambisonic(1, AmbisonicOrdering::Acn, AmbisonicNormalization::Sn3d);
+    for speakers in [
         tutti_types::Bed::Quad.topology(),
+        tutti_types::Bed::Stereo.topology(),
+        ChannelTopology::unassigned(ChannelLayout::QUAD),
     ] {
         assert_eq!(
-            Fold::<f32>::between(&first, &other),
-            Err(FoldError::Ambisonic)
+            Fold::<f32>::between(&first, &speakers),
+            Err(FoldError::NeedsCodec)
         );
         assert_eq!(
-            Fold::<f32>::between(&other, &first),
-            Err(FoldError::Ambisonic)
+            Fold::<f32>::between(&speakers, &first),
+            Err(FoldError::NeedsCodec)
         );
+    }
+}
+
+/// An ambisonic set meets itself as the identity.
+#[test]
+fn an_ambisonic_set_folds_into_itself_as_the_identity() {
+    let first = ambisonic(1, AmbisonicOrdering::FuMa, AmbisonicNormalization::FuMa);
+    let f = fold(&first, &first);
+    assert!(f.is_identity());
+    assert_eq!(f.src_layout(), ChannelLayout::QUAD);
+}
+
+/// The horizontal-only normalizations convert to themselves, a pure reorder or
+/// order change, and to nothing else: a 2D scale is defined for the horizontal
+/// harmonics alone, so 2D to 3D has no coefficient for the rest, and the other
+/// 2D scale is not converted.
+#[test]
+fn a_2d_normalization_converts_only_to_itself() {
+    use AmbisonicNormalization::*;
+    let acn = AmbisonicOrdering::Acn;
+    for planar in [Sn2d, N2d] {
+        let f = fold(&ambisonic(2, acn, planar), &ambisonic(1, acn, planar));
+        assert_eq!(
+            from_source(&f, 3)[3],
+            1.0,
+            "a narrowing within one 2D scale"
+        );
+        let g = fold(
+            &ambisonic(1, AmbisonicOrdering::FuMa, planar),
+            &ambisonic(1, acn, planar),
+        );
+        assert_eq!(from_source(&g, 1)[3], 1.0, "a reorder within one 2D scale");
+        for other in [
+            Sn3d,
+            N3d,
+            MaxN,
+            FuMa,
+            if planar == Sn2d { N2d } else { Sn2d },
+        ] {
+            assert_eq!(
+                Fold::<f32>::between(&ambisonic(1, acn, planar), &ambisonic(1, acn, other)),
+                Err(FoldError::PlanarNormalization {
+                    src: planar,
+                    dst: other
+                })
+            );
+            assert_eq!(
+                Fold::<f32>::between(&ambisonic(1, acn, other), &ambisonic(1, acn, planar)),
+                Err(FoldError::PlanarNormalization {
+                    src: other,
+                    dst: planar
+                })
+            );
+        }
     }
 }

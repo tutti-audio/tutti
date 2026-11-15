@@ -19,6 +19,22 @@
 use tutti_midi_protocol::{MmcCommand, MmcCommands, MmcLocate, MmcPosition, MtcRate, Recipient};
 use tutti_types::{Frame, SampleRate, Seconds};
 
+/// Why a look at the transport could not be sent as Machine Control: the
+/// transport moved to a time no time code names (before zero, NaN, or a day
+/// or more). The look is taken (the next one compares against it), and nothing
+/// is sent.
+#[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
+#[error("{0:?} has no time code")]
+pub struct NoTimeCode(pub Seconds);
+
+/// Adds `command` to `commands`. A look sends at most a Locate (11 bytes) and a
+/// Deferred Play (1), far inside the 48 bytes a message holds.
+fn put(commands: &mut MmcCommands, command: &MmcCommand) {
+    commands
+        .push(command)
+        .expect("at most two commands of a dozen bytes fit 48 bytes");
+}
+
 /// What the transport was at a look.
 #[derive(Clone, Copy, Debug)]
 struct Seen {
@@ -36,8 +52,8 @@ struct Seen {
 ///
 /// let mut sender = MachineControlSender::new(Recipient::AllCall, MtcRate::Fps30);
 /// let rate = SampleRate::SR_48K;
-/// assert!(sender.observe(false, Seconds::new(0.0), Frame::new(0), rate).is_none());
-/// let started = sender.observe(true, Seconds::new(0.0), Frame::new(512), rate).unwrap();
+/// assert_eq!(sender.observe(false, Seconds::new(0.0), Frame::new(0), rate), Ok(None));
+/// let started = sender.observe(true, Seconds::new(0.0), Frame::new(512), rate).unwrap().unwrap();
 /// assert_eq!(started, [0x7F, 0x7F, 0x06, 0x02]);
 /// ```
 #[derive(Clone, Copy, Debug)]
@@ -73,23 +89,30 @@ impl MachineControlSender {
     /// and the graph `frame` count the look was made at, on a graph at `rate`.
     /// The payload of the message the change since the last look calls for, if
     /// any: pack it with `Sysex7Packets::from_payload`.
+    ///
+    /// # Errors
+    ///
+    /// [`NoTimeCode`] when the transport moved to a time no time code names;
+    /// nothing is sent.
     pub fn observe(
         &mut self,
         playing: bool,
         seconds: Seconds,
         frame: Frame,
         rate: SampleRate,
-    ) -> Option<Vec<u8>> {
+    ) -> Result<Option<Vec<u8>>, NoTimeCode> {
         let now = Seen {
             playing,
             seconds,
             frame,
         };
-        let before = self.last.replace(now)?;
+        let Some(before) = self.last.replace(now) else {
+            return Ok(None);
+        };
         let mut commands = MmcCommands::new();
         if before.playing && !playing {
-            commands.push(&MmcCommand::Stop).ok()?;
-            return Some(commands.payload(self.to));
+            put(&mut commands, &MmcCommand::Stop);
+            return Ok(Some(commands.payload(self.to)));
         }
         let expected = if before.playing {
             before.seconds
@@ -98,16 +121,19 @@ impl MachineControlSender {
             before.seconds
         };
         let moved = (now.seconds - expected).get().abs() > Self::LOCATE_TOLERANCE.get();
-        if moved && let Some(target) = MmcPosition::from_seconds(now.seconds, self.rate) {
-            commands
-                .push(&MmcCommand::Locate(MmcLocate::Target(target)))
-                .ok()?;
+        if moved {
+            let target =
+                MmcPosition::from_seconds(now.seconds, self.rate).ok_or(NoTimeCode(now.seconds))?;
+            put(
+                &mut commands,
+                &MmcCommand::Locate(MmcLocate::Target(target)),
+            );
             if playing {
-                commands.push(&MmcCommand::DeferredPlay).ok()?;
+                put(&mut commands, &MmcCommand::DeferredPlay);
             }
         } else if playing && !before.playing {
-            commands.push(&MmcCommand::Play).ok()?;
+            put(&mut commands, &MmcCommand::Play);
         }
-        (!commands.is_empty()).then(|| commands.payload(self.to))
+        Ok((!commands.is_empty()).then(|| commands.payload(self.to)))
     }
 }

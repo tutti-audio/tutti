@@ -220,7 +220,7 @@ fn loom_runs_only_the_models_it_is_named() {
 #[test]
 fn check_windows_stubs_under_the_target_dir() {
     let steps = plan("check-windows", &[], &ctx()).unwrap();
-    assert_eq!(steps.len(), 9);
+    assert_eq!(steps.len(), 10);
     let Step::WriteFile { path, contents } = &steps[0] else {
         panic!()
     };
