@@ -2943,6 +2943,7 @@ dependencies = [
  "dpi",
  "libloading 0.9.1",
  "parking_lot",
+ "thiserror 2.0.21",
  "tracing",
  "tutti-fixtures",
  "tutti-graph",

@@ -1111,6 +1111,9 @@ pub enum PortLayoutMode {
     /// Two mono buses on both sides (`in = [1, 1]`, `out = [1, 1]`): the
     /// stereo layout's channel totals with another split of buses.
     TwoMono = 3,
+    /// One bus of more channels than a block serves, on both sides (`in = [17]`,
+    /// `out = [17]`): a plugin the host must refuse a node for.
+    TooWide = 4,
 }
 
 /// Process-global selected layout. `AtomicU32` rather than a `Mutex` because
@@ -1124,6 +1127,7 @@ impl PortLayoutMode {
             1 => Self::AsymmetricAux,
             2 => Self::Instrument,
             3 => Self::TwoMono,
+            4 => Self::TooWide,
             _ => Self::SymmetricStereo,
         }
     }
@@ -1131,7 +1135,7 @@ impl PortLayoutMode {
     /// Number of ports on the given side.
     fn port_count(self, is_input: bool) -> u32 {
         match self {
-            Self::SymmetricStereo => 1,
+            Self::SymmetricStereo | Self::TooWide => 1,
             Self::AsymmetricAux | Self::TwoMono => 2,
             Self::Instrument => u32::from(!is_input),
         }
@@ -1144,6 +1148,7 @@ impl PortLayoutMode {
             Self::SymmetricStereo => &[2],
             Self::AsymmetricAux => &[2, 1],
             Self::TwoMono => &[1, 1],
+            Self::TooWide => &[17],
             Self::Instrument if is_input => &[],
             Self::Instrument => &[2],
         };
