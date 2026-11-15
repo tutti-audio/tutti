@@ -98,29 +98,43 @@ fn the_block_clock_is_dated_by_deadlines_not_wake_ups() {
         .start_with(state, TimerDriver::new())
         .expect("a thread starts");
 
+    // A re-anchor counts a fault and then writes the reading after it. A
+    // reading not seen at a read was written after that read began, so the
+    // count loaded before that read is a floor for the count at its write; a
+    // reading seen at a read was written before the count loaded after it.
+    // A pair is unbroken when the first reading's floor equals the count after
+    // the second's read: the count held across both writes.
     let mut checked = 0;
-    let mut previous: Option<(BlockReading, u64)> = None;
+    // The latest reading and its floor; `None` until a reading is first seen
+    // after an earlier read, which is what gives it a floor.
+    let mut latest: Option<(BlockReading, u64)> = None;
+    // The last reading read, and the count loaded before that read.
+    let mut seen: Option<(BlockReading, u64)> = None;
     let limit = Instant::now() + Duration::from_secs(10);
     while checked < 5 && Instant::now() < limit {
         let before = faults.count();
         let Some(reading) = clock.read() else {
             continue;
         };
-        if let Some((last, last_faults)) = previous
-            && reading.frame != last.frame
-            && last_faults == before
-            && faults.count() == before
+        let after = faults.count();
+        if let Some((last_seen, floor)) = seen
+            && reading.frame != last_seen.frame
         {
-            let frames = (reading.frame.get() - last.frame.get()) as f64;
-            let expected = (frames / SAMPLE_RATE * 1e9).round() as i64;
-            let got = reading.os_ns - last.os_ns;
-            assert!(
-                (got - expected).abs() <= 1,
-                "{got} ns between readings, the schedule says {expected} ns"
-            );
-            checked += 1;
+            if let Some((last, last_floor)) = latest
+                && last_floor == after
+            {
+                let frames = (reading.frame.get() - last.frame.get()) as f64;
+                let expected = (frames / SAMPLE_RATE * 1e9).round() as i64;
+                let got = reading.os_ns - last.os_ns;
+                assert!(
+                    (got - expected).abs() <= 1,
+                    "{got} ns between readings, the schedule says {expected} ns"
+                );
+                checked += 1;
+            }
+            latest = Some((reading, floor));
         }
-        previous = Some((reading, before));
+        seen = Some((reading, before));
         std::thread::sleep(Duration::from_millis(3));
     }
     assert!(checked >= 5, "too few unbroken pairs of readings");
