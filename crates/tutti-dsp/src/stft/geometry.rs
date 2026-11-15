@@ -9,7 +9,7 @@
 
 use tutti_types::{Hz, SampleRate, Samples, Seconds};
 
-use crate::stft::error::{Error, Result};
+use crate::stft::error::{Result, StftError};
 use crate::stft::grid::{BinCount, BinIndex, FrameCount};
 use crate::stft::window::{CosineWindow, Window};
 
@@ -43,7 +43,7 @@ impl StftGeometry {
     ///
     /// # Errors
     ///
-    /// [`Error::ZeroWindow`] or [`Error::ZeroHop`] for a zero length.
+    /// [`StftError::ZeroWindow`] or [`StftError::ZeroHop`] for a zero length.
     pub fn new(
         sample_rate: impl Into<SampleRate>,
         window: impl Into<Samples>,
@@ -52,10 +52,10 @@ impl StftGeometry {
         let (sample_rate, window, hop) = (sample_rate.into(), window.into(), hop.into());
 
         if window.is_zero() {
-            return Err(Error::ZeroWindow);
+            return Err(StftError::ZeroWindow);
         }
         if hop.is_zero() {
-            return Err(Error::ZeroHop);
+            return Err(StftError::ZeroHop);
         }
 
         Ok(Self {
@@ -94,8 +94,8 @@ impl StftGeometry {
     /// of islands separated by silence.
     ///
     /// # Errors
-    /// Returns [`Error::HopExceedsWindow`] if frames do not overlap, or
-    /// [`Error::NotColaCompliant`] if the hop does not divide the
+    /// Returns [`StftError::HopExceedsWindow`] if frames do not overlap, or
+    /// [`StftError::NotColaCompliant`] if the hop does not divide the
     /// window at 4x overlap — this constructor fixes the shape as Hann, which
     /// is where that figure comes from. Use
     /// [`cola_with`](Self::cola_with) for another window.
@@ -117,8 +117,8 @@ impl StftGeometry {
     /// # Errors
     ///
     /// Everything [`new`](Self::new) returns, plus
-    /// [`Error::HopExceedsWindow`] when frames do not overlap and
-    /// [`Error::NotColaCompliant`] when the hop does not divide the window at
+    /// [`StftError::HopExceedsWindow`] when frames do not overlap and
+    /// [`StftError::NotColaCompliant`] when the hop does not divide the window at
     /// the overlap `window_fn` requires.
     pub fn cola_with(
         sample_rate: impl Into<SampleRate>,
@@ -128,13 +128,13 @@ impl StftGeometry {
     ) -> Result<Self> {
         let geometry = Self::new(sample_rate, window, hop)?.with_window_fn(window_fn);
         if !geometry.frames_overlap() {
-            return Err(Error::HopExceedsWindow {
+            return Err(StftError::HopExceedsWindow {
                 window: geometry.window,
                 hop: geometry.hop,
             });
         }
         if !geometry.is_cola() {
-            return Err(Error::NotColaCompliant {
+            return Err(StftError::NotColaCompliant {
                 window: geometry.window,
                 hop: geometry.hop,
                 window_fn,
