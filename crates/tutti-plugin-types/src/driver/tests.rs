@@ -339,6 +339,7 @@ fn a_failed_rebuild_is_refused_and_the_next_activation_rebuilds_first() {
 fn a_parameter_set_reaches_the_processor_at_the_next_block() {
     let mut rig = Rig::new();
     let (a, b) = (ParamId::new(3), ParamId::new(9));
+    rig.plugin.declare(&[(a, false), (b, false)]);
     rig.lifecycle
         .control()
         .unwrap()
@@ -586,6 +587,7 @@ fn a_refused_edit_is_retried_on_the_next_tick() {
     rig.plugin.edit_capacity(1);
     rig.op(HostOp::Activate(prepare(48_000.0)));
     let (a, b) = (ParamId::new(1), ParamId::new(2));
+    rig.plugin.declare(&[(a, false), (b, false)]);
     rig.lifecycle
         .control()
         .expect("the plugin is there")
