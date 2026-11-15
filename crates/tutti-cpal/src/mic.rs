@@ -51,9 +51,9 @@ use tutti_buffers::{InterleavedMut, Pull, Source};
 use tutti_codec::{FileOut, Format, Spec};
 use tutti_graph::{InletRing, TapReader, TapWriter};
 use tutti_rt::Drained;
-use tutti_types::SampleRate;
 use tutti_types::Samples;
 use tutti_types::{ChannelLayout, ChannelTopology};
+use tutti_types::{SampleRate, Seconds};
 
 use crate::driver_seam::device_rate;
 use crate::edge;
@@ -63,19 +63,20 @@ use crate::owner::Owned;
 use crate::roster::Direction;
 use tutti_engine::{StreamFaults, StreamLatency};
 
-/// Capture-ring capacity in frames — ~1s at 48kHz. Large enough that a
-/// briefly descheduled pump thread doesn't overrun, small enough to bound
-/// latency/RAM. This is the *recording* ring; the pump thread drains it, so a
-/// deep buffer trades latency (irrelevant to a file) for dropout resistance.
-const RING_FRAMES: usize = 48_000;
+/// Capture-ring capacity: one second, held whole at the stream's rate. Large
+/// enough that a briefly descheduled pump thread doesn't overrun, small enough
+/// to bound latency/RAM. This is the *recording* ring; the pump thread drains
+/// it, so a deep buffer trades latency (irrelevant to a file) for dropout
+/// resistance.
+const CAPTURE_RING: Seconds = Seconds::new(1.0);
 
-/// Monitor-ring capacity in frames — ~10ms at 48kHz. The audio callback
+/// Monitor-ring depth, 10 ms, at the stream's rate. The audio callback
 /// drains this one *per block*, so it needs only enough slack to bridge one
 /// buffer's jitter. It is deliberately SHALLOW: a deep monitor ring would be
 /// heard as latency (you'd hear yourself slapped-back), and a full ring just
 /// drops the oldest-unread frames, which for live monitoring is the right
 /// failure — always hear "now", never a growing delay.
-pub const MONITOR_RING_FRAMES: usize = 480;
+pub const MONITOR_RING: Seconds = Seconds::new(0.01);
 
 /// Device frames the capture callback selects and pushes at a time. The
 /// callback's scratch is this many frames of the selection, allocated once, so
@@ -168,10 +169,10 @@ pub struct MicConfig {
     /// [`MicIn::latency`]). A host that reopens its mic hands the same cell to
     /// each, so one reader follows them all.
     pub latency: Option<Arc<StreamLatency>>,
-    /// The depth of the monitor ring [`MicIn::open_with_monitor`] makes, in
-    /// frames: shallow on purpose, so a monitored input is heard now and not
-    /// late. [`MONITOR_RING_FRAMES`] (about 10 ms at 48 kHz) by default.
-    pub monitor_frames: Samples,
+    /// The depth of the monitor ring [`MicIn::open_with_monitor`] makes, at the
+    /// stream's rate: shallow on purpose, so a monitored input is heard now and
+    /// not late. [`MONITOR_RING`] (10 ms) by default.
+    pub monitor_depth: Seconds,
 }
 
 impl Default for MicConfig {
@@ -181,7 +182,7 @@ impl Default for MicConfig {
             device: DeviceSelector::default(),
             inputs: None,
             latency: None,
-            monitor_frames: Samples(MONITOR_RING_FRAMES),
+            monitor_depth: MONITOR_RING,
         }
     }
 }
@@ -269,11 +270,18 @@ impl MicIn {
         let width = select.dst_layout();
 
         let faults = Arc::new(StreamFaults::new());
-        let (reader, rec) = TapReader::pair(usize::from(width.count()), Samples(RING_FRAMES));
+        let (reader, rec) = TapReader::pair(
+            usize::from(width.count()),
+            CAPTURE_RING.to_samples_ceil(sample_rate),
+        );
         let (ring, mon) = if monitor {
             // The ring carries the rate the stream runs at, so whoever takes it
             // into a graph can check it there.
-            let (ring, writer) = InletRing::pair(width, mic.monitor_frames, sample_rate);
+            let (ring, writer) = InletRing::pair(
+                width,
+                mic.monitor_depth.to_samples_ceil(sample_rate),
+                sample_rate,
+            );
             (Some(ring), Some(writer))
         } else {
             (None, None)

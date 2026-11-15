@@ -84,7 +84,10 @@ use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use tutti_types::Samples;
 
-/// The upper bound on any single node's reported latency: 10 s at 48 kHz.
+/// The upper bound on any single node's reported latency, in frames: 480 000.
+///
+/// A frame count, not a duration: [`delays`] and the editor's limits run on a
+/// topology that carries no rate, so the bound cannot follow one.
 ///
 /// Reported latencies are clamped to this rather than trusted. A plugin that
 /// returns garbage would otherwise size a multi-gigabyte compensation ring.
