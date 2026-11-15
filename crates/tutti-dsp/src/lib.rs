@@ -163,7 +163,7 @@ mod testing;
 mod xorshift;
 
 pub use control::{COEFF_INTERVAL, LANES};
-pub use convolver::{Convolver, IrSpectra};
+pub use convolver::{Convolver, IrSpectra, MatrixConvolver, MatrixConvolverError};
 pub use delay::{
     ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayGlides, DelayLanes,
     DelayLayout, DelayLine, InterpolationMode, MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError,

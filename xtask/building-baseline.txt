@@ -78,6 +78,7 @@ tutti-dsp  chain-result  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with
 tutti-dsp  chain-result  crates/tutti-dsp/src/delay/layout.rs::DelayLayout::with_times
 tutti-dsp  setter  crates/tutti-dsp/src/smoother.rs::Smoother::set_coeff
 tutti-dsp  setter  crates/tutti-dsp/src/spatial/hrtf.rs::HrtfBinaural::set_sample_rate
+tutti-dsp  ctor-result  crates/tutti-dsp/src/convolver/matrix.rs::MatrixConvolver::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/routing.rs::Routing::new
 tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/routing.rs::Routing::normalized
 tutti-dsp  ctor-result  crates/tutti-dsp/src/delay/times.rs::ChannelTimes::each
@@ -363,11 +364,13 @@ tutti-nodes  node-ctor  crates/tutti-nodes/src/automation/control_lane.rs::Contr
 tutti-nodes  node-ctor  crates/tutti-nodes/src/automation/control_lane.rs::ControlLaneNode::for_unit
 tutti-nodes  node-ctor  crates/tutti-nodes/src/automation/lane.rs::AutomationLaneNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/click.rs::ClickNode::new
+tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::ambisonic
 tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::folded
+tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::from_layout
 tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::per_channel
 tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::shared_ir
-tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::stereo
+tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::true_stereo
 tutti-nodes  node-ctor  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::with_ir
 tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::from_layout
 tutti-nodes  node-ctor  crates/tutti-nodes/src/delay.rs::DelayNode::mono
@@ -425,7 +428,9 @@ tutti-nodes  node-ctor  crates/tutti-nodes/src/spatial/vbap/node.rs::VbapPannerN
 tutti-nodes  node-ctor  crates/tutti-nodes/src/strip.rs::BusStripNode::mono
 tutti-nodes  node-ctor  crates/tutti-nodes/src/strip.rs::BusStripNode::new
 tutti-nodes  node-ctor  crates/tutti-nodes/src/strip.rs::BusStripNode::stereo
+tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::ambisonic
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::folded
+tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::from_layout
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::per_channel
 tutti-nodes  ctor-result  crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::shared_ir
 tutti-nodes  ctor-result  crates/tutti-nodes/src/dynamics/multiband.rs::MultibandCompressorNode::new

@@ -127,7 +127,7 @@ enum Side {
 }
 
 /// The side of each channel of `topology`: a speaker is `Left` or `Right` when
-/// its [`mirror`](Speaker::mirror) is also on the bus, and `Mid` otherwise. A bus
+/// its [`mirror`](tutti_types::Speaker::mirror) is also on the bus, and `Mid` otherwise. A bus
 /// with no placement or an ambisonic one has no pair, so every channel is `Mid`.
 /// Control side: runs once.
 fn sides_of(topology: &BusTopology) -> [Side; MAX_CHANNELS] {

@@ -149,7 +149,6 @@ crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::folded  pending
 crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::new  pending
 crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::per_channel  pending
 crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::shared_ir  pending
-crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::stereo  pending
 crates/tutti-nodes/src/convolution/node.rs::ConvolverNode::with_ir  pending
 crates/tutti-nodes/src/modulator.rs::Modulator::fill  pending
 crates/tutti-nodes/src/params.rs::ControlSet::assemble  pending
