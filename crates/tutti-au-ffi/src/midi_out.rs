@@ -376,7 +376,7 @@ impl AuMidiOutput {
     /// must hold for that to be impossible after the free, and `withdraw` checks
     /// both after writing the cleared callback:
     ///
-    /// - **The unit is uninitialized**, and stays so until the free is done
+    /// - **The unit is uninitialized**, checked before anything is written, and stays so until the free is done
     ///   (`Unit::while_uninitialized` holds the lifecycle lock across it). An AU
     ///   may take its callbacks at `AudioUnitInitialize` and keep calling the old
     ///   pair after a later property write; an uninitialized unit renders nothing,
@@ -401,24 +401,23 @@ impl AuMidiOutput {
     /// withdraws the callback and leaks the state.
     /// - `Error::Os` if the AU refuses the clearing write: the unit may still
     ///   call into the state.
-    /// - `Error::Invalid` if the unit is initialized or a render is in flight: the
-    ///   callback is cleared, and the state stays allocated because the AU may
-    ///   still call it.
+    /// - `Error::Invalid` if the unit is initialized (nothing was written), or a
+    ///   render is in flight (the callback is cleared, and the state stays
+    ///   allocated because that render may still call it).
     ///
     /// An AU that refuses the clearing write of a handle that is then dropped
     /// keeps the unit's claim for good, so the unit cannot register again.
     #[must_use = "a refused withdrawal hands the registration back, with its state"]
     pub fn withdraw(mut self) -> std::result::Result<(), (Self, Error)> {
-        if let Err(refused) = self.clear_callback() {
-            return Err((self, refused));
-        }
         let unit = self.unit.clone();
-        let state = &mut self.state;
+        // The lifecycle is checked before anything is written: a refusal on an
+        // initialized unit changes nothing.
         let freed = unit.while_uninitialized(|| {
+            self.clear_callback()?;
             if !unit.no_render_in_flight() {
-                return Err("a render of the unit is in flight");
+                return Err(Self::left_allocated("a render of the unit is in flight"));
             }
-            if let Some(state) = state.take() {
+            if let Some(state) = self.state.take() {
                 // SAFETY: made by `Box::into_raw` in `install`. The withdrawing
                 // write succeeded, the unit is uninitialized and `initialize`
                 // waits on the lock this runs under, and no render was in flight
@@ -434,8 +433,15 @@ impl AuMidiOutput {
                 self.unit.release_midi_output();
                 Ok(())
             }
-            Some(Err(why)) => Err((self, Self::left_allocated(why))),
-            None => Err((self, Self::left_allocated("the unit is initialized"))),
+            Some(Err(refused)) => Err((self, refused)),
+            None => Err((
+                self,
+                Error::Invalid(
+                    "the unit is initialized: nothing is withdrawn; uninitialize the \
+                     unit, then withdraw"
+                        .into(),
+                ),
+            )),
         }
     }
 

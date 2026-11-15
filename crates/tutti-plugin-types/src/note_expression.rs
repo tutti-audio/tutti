@@ -255,6 +255,8 @@ mod tests {
         assert_eq!(bits(12.0), 72 << 25);
         assert_eq!(bits(-0.25), (59 << 25) | (3 << 23));
         assert_eq!(bits(-60.0), 0);
+        // Just under 128 rounds to 2^32 in Q7.25 and saturates at the top word.
+        assert_eq!(bits(128.0 - 60.0 - 1e-9), u32::MAX);
         assert_eq!(per_note_tuning(note, 68.0), None, "128 is past the range");
         assert_eq!(per_note_tuning(note, -61.0), None, "below note 0");
         assert_eq!(per_note_tuning(note, f64::NAN), None);
