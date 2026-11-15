@@ -102,12 +102,15 @@ impl OutputStream {
         self.buses_dropped
     }
 
-    /// Everything counted above and the events a full block list had no room
-    /// for, since construction: what the host reports as lost MIDI, by its
-    /// change from block to block.
+    /// The events lost since construction: expressions dropped, events on a bus
+    /// past the Groups, and events a full block list had no room for. What the
+    /// host reports as lost MIDI, by its change from block to block. An eviction
+    /// is not here: it loses a mapping, not an event, and any expression it later
+    /// costs is already in `expressions_dropped` ([`notes_evicted`](Self::notes_evicted)
+    /// is its own reading).
     #[must_use]
     pub fn lost_total(&self) -> u64 {
-        self.notes_evicted + self.expressions_dropped + self.buses_dropped + self.full_dropped
+        self.expressions_dropped + self.buses_dropped + self.full_dropped
     }
 
     pub(super) fn count_bus_dropped(&mut self) {

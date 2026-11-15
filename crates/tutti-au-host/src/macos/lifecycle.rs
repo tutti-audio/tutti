@@ -187,7 +187,7 @@ impl AuLoaded {
             // hand back: dropping the armed guard retries it and disposes.
             let error: AuError = e.into();
             return Err(match unit.uninitialize() {
-                Ok(()) => {
+                Ok(_) => {
                     rendering.guard.armed = false;
                     drop(rendering);
                     (Some(self), error)

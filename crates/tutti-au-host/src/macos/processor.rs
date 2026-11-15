@@ -135,6 +135,8 @@ pub(crate) struct MidiOut {
     /// withdraws it: the state is freed only there, after the unit is
     /// uninitialized.
     registration: Option<AuMidiOutput>,
+    /// The unit, which says whether the registration may be freed.
+    unit: Unit,
     queue: MidiQueue,
     /// Lists for an output stream with no reader, as far as `ProcessOutput`
     /// has been told.
@@ -159,6 +161,7 @@ impl MidiOut {
         let registration = midi_out::install(unit, queue.sink())?;
         Ok(Some(Self {
             registration: Some(registration),
+            unit: unit.clone(),
             queue,
             unrouted_told: 0,
         }))
@@ -192,15 +195,20 @@ impl MidiOut {
 }
 
 impl Drop for MidiOut {
+    /// Withdraws the registration, which frees its state only against the proof
+    /// that the unit is not initialized (`Unit::uninitialized`): in a
+    /// `Rendering`, after the `guard` (a field declared before this one)
+    /// uninitialized it, and on a failed `initialize`, on a unit that never
+    /// initialized. A unit that is initialized has no proof, and the state is
+    /// left allocated (never freed under a render that might read it).
     fn drop(&mut self) {
         if let Some(registration) = self.registration.take() {
-            // SAFETY: a `MidiOut` is dropped after the unit stopped rendering: in
-            // a `Rendering`, after its `guard` (a field declared before this one)
-            // uninitialized the unit, and on a failed `initialize`, on a unit that
-            // never initialized. The one thread that renders the activation is
-            // the `AuProcessor` that owns the `Rendering`, and it is being dropped
-            // here.
-            let _ = unsafe { registration.withdraw() };
+            match self.unit.uninitialized() {
+                Some(proof) => {
+                    let _ = registration.withdraw(&proof);
+                }
+                None => drop(registration),
+            }
         }
     }
 }

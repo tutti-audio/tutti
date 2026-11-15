@@ -1962,6 +1962,11 @@ fn a_full_table_evicts_an_ended_note_before_the_oldest_live_one() {
     let extra = Event::at(0, Payload::NoteOn(NoteOn::new(0, 61, 0.5, 20_000)));
     let _ = extra.to_midi(&mut stream);
     assert_eq!(stream.notes_evicted(), 1);
+    assert_eq!(
+        stream.lost_total(),
+        0,
+        "an eviction loses a mapping, not an event"
+    );
     let pan = |id| {
         Event::at(
             0,
