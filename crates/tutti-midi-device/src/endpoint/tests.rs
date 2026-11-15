@@ -205,6 +205,7 @@ fn a_discovery_of_another_version_is_answered() {
 // Figure 14, §7.1.3: word 1 holds the manufacturer's three bytes, word 2 the
 // family and model, word 3 the revision. §7.1.4: a 30 byte name is a Start (14),
 // a Continue (14) and an End (2 then zeros). §7.1.5: "SN-0001" is Complete.
+/// Spec: m2-104/7.1.4#2, m2-104/7.1.5#7
 #[test]
 fn identity_name_and_instance_id_words() {
     let out = ask(&mut device(), discovery(ALL));
@@ -244,7 +245,7 @@ fn function_block_info_and_name_words() {
 }
 
 // A 30 byte block name: 13 bytes a packet, so Start, Continue, End with 4.
-/// Spec: m2-104/7.1.9#5, m2-104/7.1.9#6, m2-104/7.1.9#7
+/// Spec: m2-104/7.1.9#4, m2-104/7.1.9#5, m2-104/7.1.9#6, m2-104/7.1.9#7
 #[test]
 fn a_long_block_name_splits_at_thirteen_bytes() {
     let name = BlockName::new("0123456789abcdefghijklmnopqrst").unwrap();
@@ -264,7 +265,7 @@ fn a_long_block_name_splits_at_thirteen_bytes() {
 }
 
 // §7.1.7: 0xFF is every block, a number one block.
-/// Spec: m2-104/7.1.8#2, m2-104/7.1.9#2
+/// Spec: m2-104/6.1#1, m2-104/7.1.8#2, m2-104/7.1.9#2
 #[test]
 fn function_block_discovery_answers_one_block_or_all() {
     let all = ask(
@@ -422,6 +423,7 @@ fn a_message_that_is_not_a_request_is_not_answered() {
     assert!(out.is_empty());
 }
 
+/// Spec: m2-104/6.2#2, m2-104/6.2.1.1#1
 #[test]
 fn a_midi1_device_has_one_inferred_block() {
     let e = Endpoint::midi1_device(EndpointName::new("Keystep"));
@@ -567,6 +569,7 @@ fn a_discovery_is_answered_even_for_a_block_that_is_absent() {
 /// The application's Endpoint (M2-104 §7.1.2, §7.1.8): UMP 1.1, both
 /// Protocols, no JR Timestamps, one static, active, bidirectional block over
 /// the Groups, which a discovery reports in the words of the spec.
+/// Spec: m2-104/7.1.8#5, m2-104/7.1.8#9
 #[test]
 fn a_local_endpoint_declares_one_static_block_over_its_groups() {
     let mut e = Endpoint::local(GroupSpan::new(4).unwrap());
@@ -597,4 +600,127 @@ fn a_local_endpoint_declares_one_static_block_over_its_groups() {
     assert_eq!(b.direction, BlockDirection::Bidirectional);
     assert_eq!((b.first_group.get(), b.groups_spanned.get()), (0, 4));
     assert_eq!(blocks.len(), 1);
+}
+
+/// §7.1.8: an output-only block does not declare itself primarily a receiver,
+/// and no hint contradicts the direction: an input-only block is no sender
+/// either. A hint the direction allows is built.
+/// Spec: m2-104/7.1.8#7, m2-104/7.1.8#8
+#[test]
+fn a_ui_hint_the_direction_rules_out_is_refused() {
+    let with = |direction, hint| {
+        FunctionBlock::builder(
+            id(0),
+            direction,
+            FirstGroup::new(0).unwrap(),
+            GroupSpan::new(1).unwrap(),
+        )
+        .ui_hint(hint)
+        .build()
+    };
+    for (direction, hint) in [
+        (BlockDirection::Output, UiHint::Receiver),
+        (BlockDirection::Input, UiHint::Sender),
+    ] {
+        assert_eq!(
+            with(direction, hint),
+            Err(BlockError::UiHintContradictsDirection { direction, hint })
+        );
+    }
+    for (direction, hint) in [
+        (BlockDirection::Output, UiHint::Sender),
+        (BlockDirection::Output, UiHint::Both),
+        (BlockDirection::Output, UiHint::Unknown),
+        (BlockDirection::Input, UiHint::Receiver),
+        (BlockDirection::Input, UiHint::Both),
+        (BlockDirection::Bidirectional, UiHint::Receiver),
+        (BlockDirection::Bidirectional, UiHint::Sender),
+    ] {
+        assert!(with(direction, hint).is_ok(), "{direction:?} {hint:?}");
+    }
+}
+
+/// §7.1.2 and §7.1.8: an Endpoint that declares its blocks static keeps its
+/// declared count and every block's properties through any discovery it
+/// answers.
+/// Spec: m2-104/7.1.2#3, m2-104/7.1.2#4
+#[test]
+fn answering_discoveries_changes_no_block_of_a_static_endpoint() {
+    let mut e = Endpoint::local(GroupSpan::new(4).unwrap());
+    let before = e;
+    ask(&mut e, discovery(ALL));
+    ask(&mut e, block_discovery(BlockSelect::All, true, true));
+    ask(&mut e, block_discovery(BlockSelect::One(id(0)), true, true));
+    ask(&mut e, block_discovery(BlockSelect::One(id(7)), true, true));
+    assert_eq!(e, before);
+    assert_eq!(e.declared_function_blocks(), 1);
+}
+
+/// §7.1.5: an instance id of 30 bytes is a Start, a Continue and an End of 14
+/// bytes each but the last, and the zero fill that ends it is in the End alone.
+/// Spec: m2-104/7.1.5#5, m2-104/7.1.5#8
+#[test]
+fn a_long_instance_id_is_zero_filled_only_in_its_end() {
+    let mut e = Endpoint::new(FULL)
+        .with_instance_id(ProductInstanceId::new("0123456789abcdefghijklmnopqrst").unwrap());
+    let out = ask(
+        &mut e,
+        discovery(DiscoveryFilter {
+            product_instance_id: true,
+            ..NONE
+        }),
+    );
+    assert_eq!(
+        out.iter().map(words).collect::<Vec<_>>(),
+        [
+            [0xF404_3031, 0x3233_3435, 0x3637_3839, 0x6162_6364],
+            [0xF804_6566, 0x6768_696A, 0x6B6C_6D6E, 0x6F70_7172],
+            [0xFC04_7374, 0, 0, 0],
+        ]
+    );
+}
+
+/// §6.1.1 and §7.1.8, Figure 22: a block is bidirectional, input only or
+/// output only, as the direction bits `0b11`, `0b01` and `0b10`.
+/// Spec: m2-104/6.1.1#3
+#[test]
+fn a_block_is_bidirectional_input_only_or_output_only() {
+    for (direction, bits) in [
+        (BlockDirection::Bidirectional, 0b11),
+        (BlockDirection::Input, 0b01),
+        (BlockDirection::Output, 0b10),
+    ] {
+        let mut e = Endpoint::new(FULL).with_function_block(
+            FunctionBlock::builder(
+                id(0),
+                direction,
+                FirstGroup::new(0).unwrap(),
+                GroupSpan::new(1).unwrap(),
+            )
+            .build()
+            .unwrap(),
+        );
+        let out = ask(&mut e, block_discovery(BlockSelect::All, true, false));
+        assert_eq!(words(&out[0])[0], 0xF011_8000 | bits);
+    }
+}
+
+/// §6.1.1 and §6.2: blocks may overlap and share a Group, and a MIDI 1.0 port
+/// block may sit on a Group a MIDI 2.0 block spans: each is declared as it is.
+/// Spec: m2-104/6.1.1#5, m2-104/6.1.1#6, m2-104/6.2.1.2#2, m2-104/6.2.2#1, m2-104/6.2.2#2
+#[test]
+fn blocks_may_share_and_overlap_groups() {
+    let mut e = Endpoint::new(FULL)
+        .with_function_block(block(0, 0, 4).build().unwrap())
+        .with_function_block(block(1, 2, 1).midi1(Midi1Port::Restricted).build().unwrap())
+        .with_function_block(block(2, 2, 1).build().unwrap());
+    let out = ask(&mut e, block_discovery(BlockSelect::All, true, false));
+    assert_eq!(
+        out.iter().map(words).collect::<Vec<_>>(),
+        [
+            [0xF011_8003, 0x0004_0000, 0, 0],
+            [0xF011_810B, 0x0201_0000, 0, 0],
+            [0xF011_8203, 0x0201_0000, 0, 0],
+        ]
+    );
 }

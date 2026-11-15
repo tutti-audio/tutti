@@ -652,6 +652,7 @@ fn static_function_blocks_ignore_a_later_info_and_name() {
 
 // §7.1.8 and §7.1.9: an Endpoint that has not declared its blocks static sends
 // a Notification when a property changes, and the connection follows it.
+/// Spec: m2-104/6.1#2, m2-104/6.1#3, m2-104/6.1.1#4
 #[test]
 fn function_blocks_that_are_not_static_follow_a_later_info_and_name() {
     let t0 = Instant::now();
@@ -761,6 +762,35 @@ fn a_static_endpoints_inactive_block_is_read_active() {
     let mut c = in_blocks_declaring(t0, 1, false);
     c.on_message(inactive(0), t0);
     assert!(!c.endpoint().function_block(id(0)).unwrap().active());
+}
+
+// §7.1.8: a hint the direction rules out is read as undeclared, and the block
+// is kept.
+#[test]
+fn a_hint_the_direction_rules_out_is_read_as_unknown() {
+    let t0 = Instant::now();
+    let hinted = |direction, ui_hint| {
+        let Message::Stream(Stream::FunctionBlockInfo(mut info)) = info_of(0) else {
+            unreachable!()
+        };
+        info.direction = direction;
+        info.ui_hint = ui_hint;
+        let mut c = in_blocks(t0, 1);
+        c.on_message(stream(Stream::FunctionBlockInfo(info)), t0);
+        c.endpoint().function_block(id(0)).map(|b| b.ui_hint())
+    };
+    assert_eq!(
+        hinted(BlockDirection::Output, UiHint::Receiver),
+        Some(UiHint::Unknown)
+    );
+    assert_eq!(
+        hinted(BlockDirection::Input, UiHint::Sender),
+        Some(UiHint::Unknown)
+    );
+    assert_eq!(
+        hinted(BlockDirection::Output, UiHint::Sender),
+        Some(UiHint::Sender)
+    );
 }
 
 // §7.1.8: a MIDI 1.0 Port spans exactly one Group: a block that says both is read as a block of the Endpoint's protocol, not

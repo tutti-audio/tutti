@@ -57,3 +57,25 @@ fn a_per_note_bend_decodes_to_a_bend() {
     };
     assert_eq!(value, BendValue::new(0x9000_0000));
 }
+
+/// A Function Block Discovery for one block names a block number from 0 to 31
+/// (M2-104 section 7.1.7); the number is a checked type, so a request for
+/// another one cannot be written, and `0xFF` is the request for all.
+/// Spec: m2-104/7.1.7#1
+#[test]
+fn a_block_request_names_a_number_from_0_to_31() {
+    use tutti_ump::{BlockFilter, BlockSelect, FunctionBlockId, Stream};
+    assert!(FunctionBlockId::new(31).is_some());
+    assert!(FunctionBlockId::new(32).is_none());
+    assert!(FunctionBlockId::new(0xFF).is_none());
+    for n in [0u8, 17, 31] {
+        let request = Ump::from(Message::Stream(Stream::FunctionBlockDiscovery {
+            block: BlockSelect::One(FunctionBlockId::new(n).unwrap()),
+            filter: BlockFilter {
+                info: true,
+                name: false,
+            },
+        }));
+        assert_eq!(request.0[0] >> 8 & 0xFF, u32::from(n));
+    }
+}
