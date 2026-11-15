@@ -31,9 +31,9 @@ use std::path::PathBuf;
 use tutti::plugin::catalog::{CatalogConfig, PluginDb, ScanPoll};
 use tutti::ump::{Address, Message, NoteNumber, U7, Ump, Voice1};
 use tutti::{
-    Beat, Bounce, Catalog, Format, Hosting, MaxBlock, MidiChannel, Normalized, ParamId, Pcm,
-    PluginEvent, PluginLoadRequest, PluginRef, PresetError, PresetKind, Range, Root, SampleRate,
-    Samples, Session, SessionEvent, TimedMidiEvent,
+    Beat, Bounce, Catalog, Format, MaxBlock, MidiChannel, Normalized, ParamId, Pcm, PluginEvent,
+    PluginLoadRequest, PluginRef, PresetError, PresetKind, Range, Root, SampleRate, Samples,
+    Session, SessionEvent, TimedMidiEvent,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -75,10 +75,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .find(|e| e.descriptor.name == name)
         .ok_or_else(|| format!("no plugin named {name:?} in the scan"))?;
     let instrument = entry.is_instrument();
-    // `Hosting::Auto` is what a ref starts with: CLAP, VST3 and AU are served
-    //    from a `plugin-server` process, VST2 runs here. `Hosting::InProcess`
+    // The request's `Hosting::Auto` serves CLAP, VST3 and AU from a
+    //    `plugin-server` process and runs VST2 here; `.hosting(Hosting::InProcess)`
     //    asks for this process where the format allows it.
-    let plugin = PluginRef::from(&entry).with_hosting(Hosting::Auto);
+    let plugin = PluginRef::from(&entry);
     eprintln!("{name}: {:?} in {}", plugin.id(), plugin.path().display());
 
     // 3. Load it into an offline session. The load is a job (a server launch
