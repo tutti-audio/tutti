@@ -6,7 +6,7 @@ use tutti_ump::{
     Address, Articulation, ArticulationError, Attribute, Classification, ColorSound, CoreSound,
     CustomClassification as Cc, EffectSound, GestureSound, IntervallicTrill, Message, MidiChannel,
     MidiGroup, NoteArticulation, NoteEnding, NoteNumber, NoteOffArticulation, NoteVelocity,
-    RunSound, SameNoteSound, ShortSound, StringAssignment, Stroke, U4, Ump, Voice2,
+    ReleaseTime, RunSound, SameNoteSound, ShortSound, StringAssignment, Stroke, U4, Ump, Voice2,
 };
 
 fn u4(raw: u8) -> U4 {
@@ -296,9 +296,10 @@ fn table_5_stroke_direction() {
     );
 }
 
-/// M2-123 4.1/table-6, 7.1/table-18.
+/// M2-123 4.1/table-6: the Note On string field leaves the round-robin reset
+/// bit beside it alone.
 #[test]
-fn table_6_string_assignment() {
+fn table_6_string_assignment_in_a_note_on() {
     use StringAssignment::*;
     let rows = [
         (0, Unassigned),
@@ -311,19 +312,39 @@ fn table_6_string_assignment() {
         (7, Other),
     ];
     for (bits, string) in rows {
-        let on = Attribute::Reserved {
+        // Bit 3 is the reset flag, set here.
+        let attribute = Attribute::Reserved {
             kind: 0x10,
-            data: bits,
+            data: bits | 0x0008,
         };
-        assert_eq!(NoteArticulation::from_attribute(on).unwrap().string, string);
-        let off = Attribute::Reserved {
+        let read = NoteArticulation::from_attribute(attribute).unwrap();
+        assert_eq!((read.string, read.reset_round_robin), (string, true));
+    }
+}
+
+/// M2-123 7.1/table-18: the Note Off string field leaves the Subclass above it
+/// alone.
+#[test]
+fn table_18_string_assignment_in_a_note_off() {
+    use StringAssignment::*;
+    let rows = [
+        (0, Unassigned),
+        (1, First),
+        (2, Second),
+        (3, Third),
+        (4, Fourth),
+        (5, Fifth),
+        (6, Sixth),
+        (7, Other),
+    ];
+    for (bits, string) in rows {
+        // Subclass 1 (Soft Ending) in bits 15-12.
+        let attribute = Attribute::Reserved {
             kind: 0x10,
-            data: bits,
+            data: bits | 0x1000,
         };
-        assert_eq!(
-            NoteOffArticulation::from_attribute(off).unwrap().string,
-            string
-        );
+        let read = NoteOffArticulation::from_attribute(attribute).unwrap();
+        assert_eq!((read.string, read.ending), (string, NoteEnding::Soft));
     }
 }
 
@@ -453,7 +474,7 @@ fn note_off_words_follow_figure_2() {
         variation: u4(5),
         string: StringAssignment::Third,
     };
-    let voice = off.note_off(NoteNumber::of(60), NoteVelocity::new(0x8000));
+    let voice = off.note_off(NoteNumber::of(60), ReleaseTime::DEFAULT);
     assert_eq!(word_of(voice), [0x4080_3C10, 0x8000_2503, 0, 0]);
     assert_eq!(
         NoteOffArticulation::from_attribute(Attribute::Reserved {
@@ -525,7 +546,12 @@ fn an_attribute_that_is_not_an_articulation_is_refused() {
     let off = Voice2::note_off(NoteNumber::of(60), NoteVelocity::new(0));
     assert_eq!(
         NoteArticulation::from_note_on(&off),
-        Err(ArticulationError::NotAnArticulation(0x00))
+        Err(ArticulationError::NotANoteOn)
+    );
+    let on = Voice2::note_on(NoteNumber::of(60), NoteVelocity::new(0));
+    assert_eq!(
+        NoteOffArticulation::from_note_off(&on),
+        Err(ArticulationError::NotANoteOff)
     );
     // A Note Off carries only type 0x10 of the Profile (Table 16).
     assert_eq!(
@@ -566,8 +592,9 @@ fn a_reserved_bit_of_the_data_is_refused() {
 #[test]
 fn every_value_the_types_hold_round_trips_through_the_attribute() {
     for class in Classification::STANDARD
-        .into_iter()
-        .chain(Cc::ALL.map(Classification::Custom))
+        .iter()
+        .copied()
+        .chain(Cc::ALL.iter().copied().map(Classification::Custom))
     {
         for subclass in 0..16 {
             let Ok(articulation) = Articulation::from_parts(class, u4(subclass)) else {

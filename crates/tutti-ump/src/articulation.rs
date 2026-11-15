@@ -342,7 +342,7 @@ pub enum CustomClassification {
 }
 
 impl CustomClassification {
-    /// All six, in the order of the attribute type.
+    /// Every custom Classification, in the order of the attribute type.
     pub const ALL: [Self; 6] = [
         Self::C1A,
         Self::C1B,
@@ -400,7 +400,7 @@ pub enum Classification {
 
 impl Classification {
     /// The eight defined Classifications, in the order of the attribute type.
-    pub const STANDARD: [Self; 8] = [
+    pub const STANDARD: &'static [Self] = &[
         Self::Core,
         Self::Shorts,
         Self::SameNote,
@@ -613,6 +613,12 @@ pub enum ArticulationError {
     /// Off): a receiver chooses the articulation itself (M2-123 §5.1).
     #[error("attribute type {0:#04x} is not an articulation")]
     NotAnArticulation(u8),
+    /// The message is not a Note On.
+    #[error("the message is not a Note On")]
+    NotANoteOn,
+    /// The message is not a Note Off.
+    #[error("the message is not a Note Off")]
+    NotANoteOff,
     /// Attribute types `0x18` and `0x19` are reserved (M2-123 §5.2.9).
     #[error("attribute type {0:#04x} is a reserved Classification")]
     ReservedClassification(u8),
@@ -726,16 +732,27 @@ impl NoteArticulation {
     ///
     /// # Errors
     ///
-    /// [`ArticulationError::NotAnArticulation`] for a message that is not a Note
-    /// On, and the errors of [`from_attribute`](Self::from_attribute).
+    /// [`ArticulationError::NotANoteOn`] for a message that is not a Note On,
+    /// and the errors of [`from_attribute`](Self::from_attribute).
     pub fn from_note_on(message: &Voice2) -> Result<Self, ArticulationError> {
         match message {
             Voice2::NoteOn { attribute, .. } => Self::from_attribute(*attribute),
-            _ => Err(ArticulationError::NotAnArticulation(0x00)),
+            _ => Err(ArticulationError::NotANoteOn),
         }
     }
 
     /// A Note On of `note` carrying this articulation.
+    ///
+    /// ```
+    /// use tutti_ump::{
+    ///     Articulation, NoteArticulation, NoteNumber, NoteVelocity, ShortSound, Voice2,
+    /// };
+    ///
+    /// let articulation = NoteArticulation::new(Articulation::Short(ShortSound::Pizzicato));
+    /// let note_on = articulation.note_on(NoteNumber::of(60), NoteVelocity::new(0x8000));
+    /// assert_eq!(NoteArticulation::from_note_on(&note_on), Ok(articulation));
+    /// assert!(matches!(note_on, Voice2::NoteOn { .. }));
+    /// ```
     #[must_use]
     pub const fn note_on(self, note: NoteNumber, velocity: NoteVelocity) -> Voice2 {
         Voice2::NoteOn {
@@ -764,7 +781,7 @@ pub enum NoteEnding {
 
 impl NoteEnding {
     /// Every ending, in the order of the Subclass value.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: &'static [Self] = &[
         Self::NoSample,
         Self::Soft,
         Self::Hard,
@@ -789,6 +806,44 @@ impl NoteEnding {
             4 => Some(Self::PitchFall),
             _ => None,
         }
+    }
+}
+
+/// A Note Off's release time (M2-123 §7.1), carried as the message's 16-bit
+/// release velocity: [`LONGEST`](Self::LONGEST) is the receiver's longest
+/// release, [`DEFAULT`](Self::DEFAULT) the natural release of the chosen sound
+/// and [`SHORTEST`](Self::SHORTEST) an immediate one. A sender that cannot vary
+/// the release time sends [`DEFAULT`](Self::DEFAULT), which is what
+/// [`Default`] gives. The receiver applies it only when it declared Note Off
+/// velocity support in its Profile Details reply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ReleaseTime(u16);
+
+impl ReleaseTime {
+    /// `0x0000`: the longest release time of the receiver.
+    pub const LONGEST: Self = Self(0x0000);
+    /// `0x8000`: the default release time.
+    pub const DEFAULT: Self = Self(0x8000);
+    /// `0xFFFF`: the shortest release time, an immediate release.
+    pub const SHORTEST: Self = Self(0xFFFF);
+
+    /// A release time from its 16-bit value; every value is one. §7.1 states
+    /// only the three anchors, and the receiver orders the values between.
+    #[must_use]
+    pub const fn new(raw: u16) -> Self {
+        Self(raw)
+    }
+
+    /// The 16-bit value.
+    #[must_use]
+    pub const fn get(self) -> u16 {
+        self.0
+    }
+}
+
+impl Default for ReleaseTime {
+    fn default() -> Self {
+        Self::DEFAULT
     }
 }
 
@@ -855,14 +910,33 @@ impl NoteOffArticulation {
         })
     }
 
-    /// A Note Off of `note` with release velocity `velocity` carrying this
-    /// articulation.
+    /// A Note Off of `note` with `release` carrying this articulation.
     #[must_use]
-    pub const fn note_off(self, note: NoteNumber, velocity: NoteVelocity) -> Voice2 {
+    pub const fn note_off(self, note: NoteNumber, release: ReleaseTime) -> Voice2 {
         Voice2::NoteOff {
             note,
-            velocity,
+            velocity: NoteVelocity::new(release.get()),
             attribute: self.to_attribute(),
+        }
+    }
+
+    /// The articulation and release time of a Note Off.
+    ///
+    /// # Errors
+    ///
+    /// [`ArticulationError::NotANoteOff`] for a message that is not a Note Off,
+    /// and the errors of [`from_attribute`](Self::from_attribute).
+    pub fn from_note_off(message: &Voice2) -> Result<(Self, ReleaseTime), ArticulationError> {
+        match message {
+            Voice2::NoteOff {
+                velocity,
+                attribute,
+                ..
+            } => Ok((
+                Self::from_attribute(*attribute)?,
+                ReleaseTime::new(velocity.get()),
+            )),
+            _ => Err(ArticulationError::NotANoteOff),
         }
     }
 }

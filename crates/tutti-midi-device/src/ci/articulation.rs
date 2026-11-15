@@ -54,10 +54,20 @@ impl ArticulationLevel {
             .then_some(level)
     }
 
-    /// The articulation of a Note On received on `channel`: `None` when the
-    /// Profile is not enabled there, because the attribute is then the
-    /// receiver's to interpret (§5.1); otherwise the articulation or why the
-    /// attribute is not one.
+    /// The articulation of a Note On received on `channel`.
+    ///
+    /// The outer `Option` is the Profile: `None` when it is not enabled on the
+    /// channel, because the attribute is then the receiver's to interpret
+    /// (§5.1). The inner `Result` is the attribute: the articulation, or why it
+    /// is not one.
+    ///
+    /// # Errors
+    ///
+    /// When the Profile is enabled, the inner [`ArticulationError`] of
+    /// [`NoteArticulation::from_note_on`]: the message is not a Note On, the
+    /// attribute type is not an articulation's (a Sender with no articulation
+    /// sends `0x00`, §5.1), or the attribute names a reserved Classification,
+    /// Subclass or stroke or sets a reserved bit.
     #[must_use]
     pub fn read(
         table: &ProfileTable,
@@ -228,6 +238,15 @@ impl ArticulationDetails {
     }
 
     /// The Target Data of the reply (§9.1.2, Tables 21 and 22).
+    ///
+    /// ```
+    /// use tutti_midi_device::ArticulationDetails;
+    ///
+    /// // The bitmap and 16 counts for each of eight Classifications.
+    /// let data = ArticulationDetails::default().to_data();
+    /// assert_eq!(data.as_bytes().len(), ArticulationDetails::LEN);
+    /// assert_eq!(ArticulationDetails::LEN, 130);
+    /// ```
     #[must_use]
     pub fn to_data(&self) -> DetailsData {
         let bits = self.features.bits();

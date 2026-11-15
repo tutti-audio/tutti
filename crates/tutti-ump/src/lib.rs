@@ -92,7 +92,7 @@ mod ump;
 pub use articulation::{
     Articulation, ArticulationError, Classification, ColorSound, CoreSound, CustomClassification,
     EffectSound, GestureSound, IntervallicTrill, NoteArticulation, NoteEnding, NoteOffArticulation,
-    RunSound, SameNoteSound, ShortSound, StringAssignment, Stroke,
+    ReleaseTime, RunSound, SameNoteSound, ShortSound, StringAssignment, Stroke,
 };
 pub use bend_value::BendValue;
 pub use cc_number::CCNumber;
