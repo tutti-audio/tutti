@@ -1035,7 +1035,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
     use tutti_midi_device::{
         BlockName, CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, MaxSysexSize, Muid,
     };
-    use tutti_midi_hardware::{Capabilities, Endpoint, FunctionBlock};
+    use tutti_midi_hardware::{Capabilities, Endpoint, FunctionBlock, Supports};
     use tutti_ump::{Direction, FirstGroup, FunctionBlockId, GroupSpan, SysexAssembler, SysexStep};
 
     let (mut s, fake) = hot_plug_session();
@@ -1063,11 +1063,11 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
     .name(BlockName::new("Main").unwrap())
     .build()
     .unwrap();
-    let mut device = Endpoint::new(Capabilities {
+    let mut device = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         ..Capabilities::default()
-    })
+    }))
     .with_function_block(block);
     let raw = EndpointId::from_raw(7);
     let peer = Muid::of(0x0012_3456);
@@ -1155,6 +1155,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     };
     use tutti_midi_hardware::{
         Capabilities, ChannelCount, Endpoint, FunctionBlock, ListedProfile, ProfilesChange,
+        Supports,
     };
     use tutti_ump::{
         DeviceIdentity, Direction, FirstGroup, FunctionBlockId, GroupSpan, ManufacturerId,
@@ -1187,11 +1188,11 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     .name(BlockName::new("Main").unwrap())
     .build()
     .unwrap();
-    let mut device = Endpoint::new(Capabilities {
+    let mut device = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         ..Capabilities::default()
-    })
+    }))
     .with_function_block(block);
     let raw = EndpointId::from_raw(7);
     let peer = Muid::of(0x0012_3456);
@@ -1429,7 +1430,7 @@ impl MpePeer {
     const RAW: u64 = 7;
 
     fn new() -> Self {
-        use tutti_midi_hardware::{Capabilities, Endpoint, FunctionBlock};
+        use tutti_midi_hardware::{Capabilities, Endpoint, FunctionBlock, Supports};
         use tutti_ump::{Direction, FirstGroup, FunctionBlockId, GroupSpan, SysexAssembler};
         let block = FunctionBlock::builder(
             FunctionBlockId::new(0).unwrap(),
@@ -1443,11 +1444,11 @@ impl MpePeer {
         .unwrap();
         let room = SysexAssembler::room_for(256, 1, 16);
         Self {
-            device: Endpoint::new(Capabilities {
+            device: Endpoint::new(Supports::of(Capabilities {
                 midi1: true,
                 midi2: true,
                 ..Capabilities::default()
-            })
+            }))
             .with_function_block(block),
             assembler: SysexAssembler::new(vec![0; room].into_boxed_slice(), 256, 16),
             muid: tutti_midi_device::Muid::of(0x0012_3456),
@@ -1709,7 +1710,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
         DataControl, Decoded, DiscoveryData, MaxSysexSize, Muid, NoteData, ProcessFeatures,
         ReportRequest, ReportScope, SystemMessages,
     };
-    use tutti_midi_hardware::{Capabilities, Endpoint, FunctionBlock, ProcessChange};
+    use tutti_midi_hardware::{Capabilities, Endpoint, FunctionBlock, ProcessChange, Supports};
     use tutti_ump::{
         DeviceIdentity, Direction, FirstGroup, FunctionBlockId, GroupSpan, ManufacturerId,
         SysexAssembler, SysexStep, U7,
@@ -1741,11 +1742,11 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
     .name(BlockName::new("Main").unwrap())
     .build()
     .unwrap();
-    let mut device = Endpoint::new(Capabilities {
+    let mut device = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         ..Capabilities::default()
-    })
+    }))
     .with_function_block(block);
     let raw = EndpointId::from_raw(7);
     let peer = Muid::of(0x0012_3456);
@@ -1914,15 +1915,15 @@ fn settle(
     fake: &tutti_midi_hardware::test_support::FakeCounters,
     raw: EndpointId,
 ) -> Instant {
-    use tutti_midi_hardware::{Capabilities, Endpoint};
+    use tutti_midi_hardware::{Capabilities, Endpoint, Supports};
     use tutti_ump::Message;
     // The device answers the session's Stream messages as an Endpoint does.
-    let mut device = Endpoint::new(Capabilities {
+    let mut device = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         rx_jr: true,
         tx_jr: false,
-    });
+    }));
     let start = Instant::now();
     let mut settled = false;
     for ms in 0..8 {

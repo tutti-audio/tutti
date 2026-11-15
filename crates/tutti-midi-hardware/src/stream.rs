@@ -73,6 +73,7 @@ use tutti_midi_device::{
     Action, Connection, Ending, Endpoint, EntropyError, IdentityInquiry, InquiryAction, Learned,
 };
 use tutti_midi_protocol::{Addressed, Read, Universal, read};
+use tutti_midi_runtime::Outgoing;
 use tutti_ump::{
     DeviceIdentity, Message, MidiGroup, Protocol, Stream, StreamConfig, SysexAssembler, SysexStep,
     Ump,
@@ -256,12 +257,13 @@ impl StopJr {
     /// The state after a poll, where `unwanted` says the device's TXJR is on
     /// against the input, and `send` queues the request: whether the output
     /// took it. A request is made once per episode and retried each poll
-    /// until it goes out.
-    fn next(self, unwanted: bool, send: impl FnOnce() -> bool) -> Self {
+    /// until it goes out. `send` is told whether this is a retry, which is
+    /// to be quiet: a refusal is counted and logged once per episode.
+    fn next(self, unwanted: bool, send: impl FnOnce(bool) -> bool) -> Self {
         match (unwanted, self) {
             (false, _) => Self::Settled,
             (true, Self::Asked) => Self::Asked,
-            (true, _) if send() => Self::Asked,
+            (true, state) if send(state == Self::Unsent) => Self::Asked,
             (true, _) => Self::Unsent,
         }
     }
@@ -586,9 +588,9 @@ impl Negotiation {
                 // after its TXJR has gone off and come back on.
                 let unwanted = stream.endpoint.active().tx_jr && !wanted.tx_jr;
                 let out = &mut self.out;
-                self.stop = self.stop.next(unwanted, || {
+                self.stop = self.stop.next(unwanted, |retry| {
                     let request = Stream::StreamConfigurationRequest(wanted);
-                    queue(out, Ump::from(Message::Stream(request)))
+                    queue(out, Ump::from(Message::Stream(request)), retry)
                 });
                 return reported;
             }
@@ -606,7 +608,7 @@ impl Negotiation {
     /// Sends a negotiation step. One the output refused is counted by the
     /// output ([`OpenOutput::losses`]) and sent again when the step times out.
     fn send(&mut self, ump: Ump) {
-        queue(&mut self.out, ump);
+        queue(&mut self.out, ump, false);
     }
 
     fn settle(&mut self, ending: Ending) -> Option<DeviceStream> {
@@ -639,14 +641,17 @@ impl Negotiation {
 }
 
 /// Queues `ump` to the device: whether the output took it. A refusal is
-/// counted by the output.
-fn queue(out: &mut Option<OpenOutput>, ump: Ump) -> bool {
+/// counted by the output and logged, unless `retry` says it is a repeat of an
+/// offer that was refused already.
+fn queue(out: &mut Option<OpenOutput>, ump: Ump, retry: bool) -> bool {
     let Some(out) = out else { return false };
-    let taken = !out.queue(&[(Offset::ZERO, ump)]).is_none();
-    if !taken {
+    let events = Outgoing::now_batch(&[(Offset::ZERO, ump)]);
+    let (taken, refused) = out.offer(&events);
+    if refused > 0 && !retry {
+        out.count_refused(refused);
         tracing::debug!("a UMP Stream message was refused by {}", out.name());
     }
-    taken
+    !taken.is_none()
 }
 
 #[cfg(test)]

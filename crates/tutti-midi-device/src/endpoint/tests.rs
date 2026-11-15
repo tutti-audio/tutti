@@ -56,7 +56,7 @@ const FULL: Capabilities = Capabilities {
 /// A device with a name, an id, an identity and two blocks, the second a
 /// MIDI-CI 1.2 block (message version 2) with two SysEx 8 streams.
 fn device() -> Endpoint {
-    Endpoint::new(FULL)
+    Endpoint::new(Supports::of(FULL))
         .with_identity(identity())
         .with_name(EndpointName::new("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123").unwrap())
         .with_instance_id(ProductInstanceId::new("SN-0001").unwrap())
@@ -185,7 +185,7 @@ fn each_filter_bit_asks_for_its_own_reply() {
 // the reply optional).
 #[test]
 fn a_part_an_endpoint_lacks_is_left_out() {
-    let mut bare = Endpoint::new(FULL);
+    let mut bare = Endpoint::new(Supports::of(FULL));
     let out = ask(&mut bare, discovery(ALL));
     assert_eq!(out.iter().map(status).collect::<Vec<_>>(), [0x01, 0x06]);
 }
@@ -235,8 +235,8 @@ fn function_block_info_and_name_words() {
 
     // The other way round: MIDI-CI version 1, 16 streams, block 7, Groups 5 to 7,
     // so a swapped pair of bytes shows. 0x8000 | 0x0700 | 0b11, then 5, 3, 1, 16.
-    let mut e =
-        Endpoint::new(FULL).with_function_block(block(7, 5, 3).midi_ci(1, 16).build().unwrap());
+    let mut e = Endpoint::new(Supports::of(FULL))
+        .with_function_block(block(7, 5, 3).midi_ci(1, 16).build().unwrap());
     let out = ask(
         &mut e,
         block_discovery(BlockSelect::One(id(7)), true, false),
@@ -249,7 +249,8 @@ fn function_block_info_and_name_words() {
 #[test]
 fn a_long_block_name_splits_at_thirteen_bytes() {
     let name = BlockName::new("0123456789abcdefghijklmnopqrst").unwrap();
-    let mut e = Endpoint::new(FULL).with_function_block(block(1, 0, 1).name(name).build().unwrap());
+    let mut e = Endpoint::new(Supports::of(FULL))
+        .with_function_block(block(1, 0, 1).name(name).build().unwrap());
     let out = ask(
         &mut e,
         block_discovery(BlockSelect::One(id(1)), false, true),
@@ -391,11 +392,11 @@ fn what_an_endpoint_cannot_do_is_not_done() {
         }
     );
     // Some parts: MIDI 2.0 and receive are possible, transmit is not.
-    let mut e = Endpoint::new(Capabilities {
+    let mut e = Endpoint::new(Supports::of(Capabilities {
         midi2: true,
         rx_jr: true,
         ..Capabilities::default()
-    });
+    }));
     let c = notified(&ask(&mut e, request(Protocol::Midi2, true, true)));
     assert_eq!(
         c,
@@ -497,7 +498,7 @@ fn a_function_block_stays_inside_the_groups() {
 
 #[test]
 fn a_block_is_replaced_by_number_and_the_count_follows_the_highest() {
-    let e = Endpoint::new(FULL)
+    let e = Endpoint::new(Supports::of(FULL))
         .with_function_block(block(5, 0, 1).build().unwrap())
         .with_function_block(block(5, 2, 3).build().unwrap());
     assert_eq!(e.declared_function_blocks(), 6);
@@ -515,11 +516,11 @@ fn replied(endpoint: &mut Endpoint, stream: Stream) -> Reply {
 /// and carries both what was asked and what is active.
 #[test]
 fn a_request_is_reported_as_granted_or_reduced() {
-    let mut e = Endpoint::new(Capabilities {
+    let mut e = Endpoint::new(Supports::of(Capabilities {
         midi2: true,
         rx_jr: true,
         ..Capabilities::default()
-    });
+    }));
     let granted = StreamConfig {
         protocol: Protocol::Midi2,
         rx_jr: true,
@@ -661,7 +662,7 @@ fn answering_discoveries_changes_no_block_of_a_static_endpoint() {
 /// Spec: m2-104/7.1.5#5, m2-104/7.1.5#8
 #[test]
 fn a_long_instance_id_is_zero_filled_only_in_its_end() {
-    let mut e = Endpoint::new(FULL)
+    let mut e = Endpoint::new(Supports::of(FULL))
         .with_instance_id(ProductInstanceId::new("0123456789abcdefghijklmnopqrst").unwrap());
     let out = ask(
         &mut e,
@@ -690,7 +691,7 @@ fn a_block_is_bidirectional_input_only_or_output_only() {
         (BlockDirection::Input, 0b01),
         (BlockDirection::Output, 0b10),
     ] {
-        let mut e = Endpoint::new(FULL).with_function_block(
+        let mut e = Endpoint::new(Supports::of(FULL)).with_function_block(
             FunctionBlock::builder(
                 id(0),
                 direction,
@@ -710,7 +711,7 @@ fn a_block_is_bidirectional_input_only_or_output_only() {
 /// Spec: m2-104/6.1.1#5, m2-104/6.1.1#6, m2-104/6.2.1.2#2, m2-104/6.2.2#1, m2-104/6.2.2#2
 #[test]
 fn blocks_may_share_and_overlap_groups() {
-    let mut e = Endpoint::new(FULL)
+    let mut e = Endpoint::new(Supports::of(FULL))
         .with_function_block(block(0, 0, 4).build().unwrap())
         .with_function_block(block(1, 2, 1).midi1(Midi1Port::Restricted).build().unwrap())
         .with_function_block(block(2, 2, 1).build().unwrap());
@@ -730,7 +731,7 @@ fn blocks_may_share_and_overlap_groups() {
 /// Endpoint in MIDI 2.0 with both JR directions that loses MIDI 2.0 and JR is
 /// in MIDI 1.0 without JR (word 0 of the Notification: protocol 1 in bits 15-8).
 /// A change that leaves the active configuration alone sends the Info only.
-/// Spec: m2-104/7.1.2#2
+/// Spec: m2-104/7.1.2#2, m2-104/7.1.6.3#1
 #[test]
 fn a_capability_change_drops_what_it_no_longer_supports_from_the_active_set() {
     let active = StreamConfig {
@@ -739,10 +740,10 @@ fn a_capability_change_drops_what_it_no_longer_supports_from_the_active_set() {
         tx_jr: true,
     };
     let mut e = changeable().with_active(active);
-    let m1_only = Capabilities {
+    let m1_only = Supports::of(Capabilities {
         midi1: true,
         ..Capabilities::default()
-    };
+    });
     assert_eq!(
         changed(&mut e, EndpointChange::Capabilities(m1_only)),
         [[0xF001_0101, 0x0100_0100, 0, 0], [0xF006_0100, 0, 0, 0],]
@@ -755,10 +756,10 @@ fn a_capability_change_drops_what_it_no_longer_supports_from_the_active_set() {
             tx_jr: false,
         }
     );
-    let both = Capabilities {
+    let both = Supports::of(Capabilities {
         midi2: true,
-        ..m1_only
-    };
+        ..m1_only.get()
+    });
     assert_eq!(
         changed(&mut e, EndpointChange::Capabilities(both)).len(),
         1,
@@ -768,7 +769,7 @@ fn a_capability_change_drops_what_it_no_longer_supports_from_the_active_set() {
 
 /// A device whose blocks may change: not static, one named block 0 over Group 0.
 fn changeable() -> Endpoint {
-    Endpoint::new(FULL).with_function_block(
+    Endpoint::new(Supports::of(FULL)).with_function_block(
         block(0, 0, 1)
             .name(BlockName::new("Keys").unwrap())
             .build()
@@ -790,15 +791,15 @@ fn changed(endpoint: &mut Endpoint, change: EndpointChange) -> Vec<[u32; 4]> {
 #[test]
 fn a_changed_capability_sends_endpoint_info() {
     let mut e = changeable();
-    let m1_only = Capabilities {
+    let m1_only = Supports::of(Capabilities {
         midi1: true,
         ..Capabilities::default()
-    };
+    });
     assert_eq!(
         changed(&mut e, EndpointChange::Capabilities(m1_only)),
         [[0xF001_0101, 0x0100_0100, 0, 0]]
     );
-    assert_eq!(e.capabilities(), m1_only);
+    assert_eq!(e.capabilities(), m1_only.get());
     assert!(changed(&mut e, EndpointChange::Capabilities(m1_only)).is_empty());
 }
 

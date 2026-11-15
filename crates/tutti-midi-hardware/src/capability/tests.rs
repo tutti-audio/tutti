@@ -17,12 +17,12 @@ fn block() -> FunctionBlock {
 /// the same: the OS's description and the negotiated one meet in this value.
 #[test]
 fn a_capability_is_the_active_protocol_and_the_blocks_of_an_endpoint() {
-    let offers_both = Endpoint::new(Capabilities {
+    let offers_both = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         rx_jr: true,
         tx_jr: true,
-    })
+    }))
     .with_function_block(block());
     let cap = UmpCapability::of(&offers_both);
     assert_eq!(cap.protocol, Protocol::Midi1, "active, not offered");

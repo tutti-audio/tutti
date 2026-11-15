@@ -147,7 +147,7 @@ pub use connection::{Action, Connection, Ending, MAX_ATTEMPTS, NAME_GRACE, STEP_
 pub use dialect::{ChannelVoice, Dialect, Expression, JrTimestamps, Midi1Rate, NoDialect};
 pub use endpoint::{
     BlockError, Capabilities, ChangeError, Configuration, Endpoint, EndpointChange, FunctionBlock,
-    FunctionBlockBuilder, MAX_FUNCTION_BLOCKS, Reply, UMP_VERSION,
+    FunctionBlockBuilder, MAX_FUNCTION_BLOCKS, NoProtocol, Reply, Supports, UMP_VERSION,
 };
 pub use entropy::{EntropyError, EntropyWords, random_bytes};
 pub use id::{DeviceId, DeviceInfo, EndpointId, Identity, PortDirection, WinMmDevice};

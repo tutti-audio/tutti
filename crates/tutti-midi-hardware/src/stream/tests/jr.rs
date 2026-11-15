@@ -177,12 +177,16 @@ fn no_jr_is_expected_before_the_notification() {
         PortDirection::Duplex,
         offering_both(),
     );
-    wire.session
+    let crate::Connected::Opened(inlet) = wire
+        .session
         .connect_input(&wire.id.clone(), InputTiming::JitterReduction)
-        .unwrap();
+        .unwrap()
+    else {
+        panic!("the wire's input was not open");
+    };
     let mut rig = Rig::over(wire.session.ports().inlets(), wire.start);
     rig.run(1);
-    rig.apply();
+    rig.attach(inlet);
     let (frame, heard) = note_delayed_by_10ms(&wire, &mut rig);
     assert_near(frame, frame_at(1_000 + 312 + LATENCY + 10));
     assert_eq!(heard.len(), 1, "the JR messages are not heard");
@@ -257,7 +261,8 @@ fn a_reconnected_input_asks_again_to_stop_jr() {
     send_ump(&wire, on, 20);
     wire.poll(30);
     assert!(wire.session.disconnect_input(&wire.id.clone()));
-    wire.session
+    let _ = wire
+        .session
         .connect_input(&wire.id.clone(), InputTiming::Arrival)
         .unwrap();
     wire.counters.take_sent(wire.raw);
@@ -279,12 +284,12 @@ fn a_reconnected_input_asks_again_to_stop_jr() {
 /// JR is placed by arrival as any other.
 #[test]
 fn a_jr_input_of_a_device_without_txjr_is_timed_by_arrival() {
-    let device = Endpoint::new(Capabilities {
+    let device = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         rx_jr: true,
         tx_jr: false,
-    })
+    }))
     .with_function_block(block());
     let (wire, mut rig, stream) = settled(InputTiming::JitterReduction, device);
     assert!(!stream.config().tx_jr);

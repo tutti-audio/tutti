@@ -21,7 +21,7 @@ pub const MAX_FUNCTION_BLOCKS: usize = 32;
 pub const UMP_VERSION: UmpVersion = UmpVersion { major: 1, minor: 1 };
 
 /// What an Endpoint supports (M2-104 §7.1.2).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Capabilities {
     /// Sends and receives the MIDI 1.0 Protocol (`M1`).
     pub midi1: bool,
@@ -31,6 +31,61 @@ pub struct Capabilities {
     pub rx_jr: bool,
     /// Sends JR Timestamps (`TXJR`).
     pub tx_jr: bool,
+}
+
+/// What an Endpoint that answers supports: [`Capabilities`] with at least one
+/// Protocol (M2-104 §7.1.2: the Protocol it is in is one it supports, so an
+/// Endpoint with neither has none to be in). A peer's report is a
+/// [`Capabilities`] and may say neither; this is what an Endpoint declares of
+/// itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Supports(Capabilities);
+
+/// Why [`Supports::new`] refuses: neither Protocol is supported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("an Endpoint supports at least one of MIDI 1.0 and MIDI 2.0")]
+pub struct NoProtocol;
+
+impl Supports {
+    /// `capabilities` as what an Endpoint supports, `None` with neither
+    /// Protocol.
+    #[must_use]
+    pub const fn new(capabilities: Capabilities) -> Option<Self> {
+        if capabilities.midi1 || capabilities.midi2 {
+            Some(Self(capabilities))
+        } else {
+            None
+        }
+    }
+
+    /// As [`new`](Self::new), for a literal: panics with neither Protocol.
+    #[must_use]
+    pub const fn of(capabilities: Capabilities) -> Self {
+        match Self::new(capabilities) {
+            Some(supports) => supports,
+            None => panic!("an Endpoint supports at least one Protocol"),
+        }
+    }
+
+    /// The capabilities.
+    #[must_use]
+    pub const fn get(self) -> Capabilities {
+        self.0
+    }
+}
+
+impl From<Supports> for Capabilities {
+    fn from(supports: Supports) -> Self {
+        supports.0
+    }
+}
+
+impl TryFrom<Capabilities> for Supports {
+    type Error = NoProtocol;
+
+    fn try_from(capabilities: Capabilities) -> Result<Self, NoProtocol> {
+        Self::new(capabilities).ok_or(NoProtocol)
+    }
 }
 
 /// One Function Block (M2-104 §7.1.8): a set of Groups that act as one
@@ -338,7 +393,7 @@ pub enum Reply {
 pub enum EndpointChange {
     /// The protocols and JR Timestamps it supports: an Endpoint Info
     /// Notification (§7.1.2).
-    Capabilities(Capabilities),
+    Capabilities(Supports),
     /// A new Device Identity: a Device Identity Notification (§7.1.3).
     Identity(DeviceIdentity),
     /// A new name: an Endpoint Name Notification (§7.1.4).
@@ -424,7 +479,13 @@ impl Endpoint {
     /// ours, and [`Endpoint::reply`] changes it on a Stream Configuration
     /// Request.
     #[must_use]
-    pub const fn new(capabilities: Capabilities) -> Self {
+    pub const fn new(supports: Supports) -> Self {
+        Self::declaring(supports.0)
+    }
+
+    /// An Endpoint declaring `capabilities`, which may be none that work: a
+    /// discoverer's blank Endpoint, before the peer has said.
+    const fn declaring(capabilities: Capabilities) -> Self {
         let protocol = if capabilities.midi2 && !capabilities.midi1 {
             Protocol::Midi2
         } else {
@@ -454,10 +515,10 @@ impl Endpoint {
     /// static.
     #[must_use]
     pub fn midi1_device(name: Option<EndpointName>) -> Self {
-        let mut endpoint = Self::new(Capabilities {
+        let mut endpoint = Self::new(Supports::of(Capabilities {
             midi1: true,
             ..Capabilities::default()
-        })
+        }))
         .with_static_function_blocks(true);
         endpoint.name = name;
         endpoint.insert_inferred_block();
@@ -489,11 +550,11 @@ impl Endpoint {
     /// [`with_name`](Self::with_name)).
     #[must_use]
     pub fn local(groups: GroupSpan) -> Self {
-        let mut endpoint = Self::new(Capabilities {
+        let mut endpoint = Self::new(Supports::of(Capabilities {
             midi1: true,
             midi2: true,
             ..Capabilities::default()
-        })
+        }))
         .with_static_function_blocks(true);
         if let (Some(id), Some(first)) = (FunctionBlockId::new(0), FirstGroup::new(0))
             && let Ok(block) =
@@ -506,7 +567,7 @@ impl Endpoint {
 
     /// An Endpoint with nothing known, for a discoverer to fill.
     pub(crate) const fn blank() -> Self {
-        let mut endpoint = Self::new(Capabilities {
+        let mut endpoint = Self::declaring(Capabilities {
             midi1: false,
             midi2: false,
             rx_jr: false,
@@ -744,7 +805,8 @@ impl Endpoint {
         out: &mut impl Extend<Ump>,
     ) -> Result<(), ChangeError> {
         match change {
-            EndpointChange::Capabilities(capabilities) => {
+            EndpointChange::Capabilities(supports) => {
+                let capabilities = supports.get();
                 if capabilities != self.capabilities {
                     self.capabilities = capabilities;
                     self.send_info(out);
@@ -761,6 +823,7 @@ impl Endpoint {
                         _ => false,
                     };
                     if !supported {
+                        // One Protocol is supported: `Supports` has at least one.
                         self.active.protocol = if capabilities.midi2 && !capabilities.midi1 {
                             Protocol::Midi2
                         } else {

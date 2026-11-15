@@ -14,7 +14,7 @@ use tutti_fixtures::midi;
 use tutti_graph::UmpAt;
 use tutti_midi_device::{
     BlockName, Capabilities, DeviceId, EndpointId, FunctionBlock, MAX_ATTEMPTS, PortDirection,
-    STEP_TIMEOUT,
+    STEP_TIMEOUT, Supports,
 };
 use tutti_ump::ControlValue;
 use tutti_ump::MidiChannel;
@@ -158,12 +158,12 @@ fn block() -> FunctionBlock {
 
 /// A device that offers both protocols and JR both ways, in MIDI 1.0 now.
 fn offering_both() -> Endpoint {
-    Endpoint::new(Capabilities {
+    Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         rx_jr: true,
         tx_jr: true,
-    })
+    }))
     .with_function_block(block())
 }
 
@@ -250,10 +250,10 @@ fn a_device_that_answers_is_negotiated_onto_midi2_with_jr_off() {
 /// supports).
 #[test]
 fn a_device_that_offers_only_midi1_stays_in_midi1() {
-    let device = Endpoint::new(Capabilities {
+    let device = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         ..Capabilities::default()
-    })
+    }))
     .with_function_block(block());
     let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
     wire.open(InputTiming::Arrival);
@@ -282,7 +282,10 @@ fn a_device_that_offers_only_midi1_stays_in_midi1() {
 /// is `Unanswered`, as the OS describes it (here MIDI 2.0, what the OS said).
 #[test]
 fn a_silent_device_settles_as_the_os_describes_it() {
-    let silent = Endpoint::new(Capabilities::default());
+    let silent = Endpoint::new(Supports::of(Capabilities {
+        midi1: true,
+        ..Capabilities::default()
+    }));
     let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, silent);
     wire.open(InputTiming::Arrival);
 
@@ -321,7 +324,10 @@ fn a_midi1_port_is_not_sent_stream_messages_and_is_described_at_once() {
     let mut wire = session_over(
         UmpCapability::midi1(),
         PortDirection::Duplex,
-        Endpoint::new(Capabilities::default()),
+        Endpoint::new(Supports::of(Capabilities {
+            midi1: true,
+            ..Capabilities::default()
+        })),
     );
     wire.open(InputTiming::Arrival);
     let stream = wire.session.stream(&wire.id).expect("settled at connect");
@@ -343,7 +349,10 @@ fn midi1_wire() -> Wire {
     let mut wire = session_over(
         UmpCapability::midi1(),
         PortDirection::Duplex,
-        Endpoint::new(Capabilities::default()),
+        Endpoint::new(Supports::of(Capabilities {
+            midi1: true,
+            ..Capabilities::default()
+        })),
     );
     if let crate::Connected::Opened(inlet) = wire
         .session
@@ -481,7 +490,10 @@ fn a_refused_output_does_not_fail_the_input_and_nothing_is_asked() {
     let mut wire = session_over(
         UmpCapability::midi1(),
         PortDirection::Duplex,
-        Endpoint::new(Capabilities::default()),
+        Endpoint::new(Supports::of(Capabilities {
+            midi1: true,
+            ..Capabilities::default()
+        })),
     );
     wire.counters.refuse_output_opens(true);
     wire.open(InputTiming::Arrival);
@@ -633,7 +645,10 @@ fn an_endpoint_with_no_output_is_described_not_waited_for() {
     let mut wire = session_over(
         UmpCapability::midi2(),
         PortDirection::Input,
-        Endpoint::new(Capabilities::default()),
+        Endpoint::new(Supports::of(Capabilities {
+            midi1: true,
+            ..Capabilities::default()
+        })),
     );
     wire.open(InputTiming::Arrival);
     let stream = wire.session.stream(&wire.id).expect("settled at connect");
@@ -782,11 +797,11 @@ fn a_midi1_port_is_never_sent_type_4() {
 /// Configuration Notification moves it again.
 #[test]
 fn the_output_follows_the_negotiated_protocol() {
-    let device = Endpoint::new(Capabilities {
+    let device = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         ..Capabilities::default()
-    })
+    }))
     .with_function_block(block());
     // A device that has MIDI 2.0 on offer but is in MIDI 1.0; the session asks
     // for MIDI 2.0, so it ends in MIDI 2.0 ...
@@ -925,10 +940,10 @@ fn a_jr_message_a_device_sends_never_reaches_the_graph() {
 /// its first send, not the OS's description (here MIDI 2.0, the device MIDI 1.0).
 #[test]
 fn an_output_connected_after_the_settle_starts_in_the_settled_protocol() {
-    let device = Endpoint::new(Capabilities {
+    let device = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         ..Capabilities::default()
-    })
+    }))
     .with_function_block(block());
     let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
     wire.open(InputTiming::Arrival);
@@ -1024,17 +1039,19 @@ fn an_endpoint_that_answers_declares_its_identity_and_product_instance_id() {
 #[test]
 fn a_refused_stop_request_is_retried_until_it_goes_out() {
     use super::StopJr;
-    let mut tries = 0;
+    let mut offers = Vec::new();
     let mut state = StopJr::Settled;
     for taken in [false, false, true] {
-        state = state.next(true, || {
-            tries += 1;
+        state = state.next(true, |retry| {
+            offers.push(retry);
             taken
         });
     }
-    assert_eq!(tries, 3);
+    // The first refusal is the one that is counted and logged: the retries
+    // are told to be quiet.
+    assert_eq!(offers, [false, true, true]);
     assert!(state == StopJr::Asked);
-    state = state.next(true, || panic!("asked twice in one episode"));
+    state = state.next(true, |_| panic!("asked twice in one episode"));
     assert!(state == StopJr::Asked);
-    assert!(state.next(false, || panic!("nothing to ask")) == StopJr::Settled);
+    assert!(state.next(false, |_| panic!("nothing to ask")) == StopJr::Settled);
 }
