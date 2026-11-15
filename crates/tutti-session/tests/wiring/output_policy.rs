@@ -1,0 +1,160 @@
+//! The output policy: where the mix lands, set through
+//! `session.policy::<OutputPolicy>()` and applied by `update`, live.
+//!
+//! Every figure is analytic: a `Const` writes a known value per channel and the
+//! expected frame is written out from the ITU rules and the ramp's formula.
+
+use tutti_buffers::{Float, InterleavedMut};
+use tutti_engine::{OutputMap, OutputStrip, RoutingError};
+use tutti_graph::ForkByClone;
+use tutti_nodes::testing::Const;
+use tutti_session::{OutPort, OutputPolicy, OutputPolicyError, Root, Session, SessionBuilder};
+use tutti_types::{Amplitude, Bed, ChannelLayout, MaxBlock, SampleRate, Samples};
+
+const RATE: SampleRate = SampleRate::SR_48K;
+
+fn feed(session: &mut Session, values: &[f32]) {
+    let (node, _) = session.graph().add(ForkByClone(Const::frame(values)));
+    for c in 0..values.len() {
+        session
+            .graph()
+            .set_sources_hard(Root::output(c), [OutPort::new(node, c)])
+            .unwrap();
+    }
+}
+
+fn offline(builder: SessionBuilder, device: u16) -> Session {
+    builder
+        .sample_rate(RATE)
+        .outputs(ChannelLayout::from(device))
+        .max_block(MaxBlock::of(Samples(64)))
+        .build()
+        .unwrap()
+}
+
+/// Renders `frames` frames after an update, returning the last frame heard.
+fn last_frame(session: &mut Session, device: u16, frames: usize) -> Vec<f32> {
+    let _ = session.update();
+    let width = usize::from(device);
+    let mut out = vec![-9.0f32; width * frames];
+    session.render(&mut InterleavedMut::new(&mut out, ChannelLayout::from(device)).unwrap());
+    out[width * (frames - 1)..].to_vec()
+}
+
+/// A monitor format and a map are heard on the device and change nothing the
+/// root is: a tap on the root reads the six channels as fed.
+#[test]
+fn monitoring_changes_what_is_heard_and_never_the_root() {
+    let mut s = offline(Session::builder(), 6);
+    feed(&mut s, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+    let mut tap = s
+        .graph()
+        .taps()
+        .open_output(Samples(4_096))
+        .expect("the sources exist");
+    assert_eq!(last_frame(&mut s, 6, 128), [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+
+    let mut policy = OutputPolicy::default();
+    policy.monitor = Some(Bed::Stereo.topology());
+    policy.map = OutputMap::channels([2, 3]).unwrap();
+    s.policy::<OutputPolicy>().set(policy).unwrap();
+    let m = f32::MINUS_3_DB;
+    let (l, r) = (1.0 + m * 3.0 + m * 5.0, 2.0 + m * 3.0 + m * 6.0);
+    // Heard: the stereo fold on outputs 3 and 4, silence elsewhere.
+    assert_eq!(last_frame(&mut s, 6, 128), [0.0, 0.0, l, r, 0.0, 0.0]);
+
+    // The root is as fed, every frame the tap holds.
+    let mut frame = [0.0f32; 6];
+    let mut seen = 0;
+    while tap.pop_into(&mut frame).get() == 1 {
+        assert_eq!(frame, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0], "frame {seen}");
+        seen += 1;
+    }
+    assert!(seen > 0, "the tap read the root");
+}
+
+/// The policy is checked against the device when it is set: a map that names an
+/// output the device lacks, a width that is not what is heard, a strip past the
+/// device. Nothing is kept.
+#[test]
+fn a_policy_that_does_not_fit_the_device_is_refused_when_set() {
+    let mut s = offline(Session::builder(), 2);
+    let mut map = OutputPolicy::default();
+    map.monitor = Some(Bed::Stereo.topology());
+    map.map = OutputMap::channels([2, 3]).unwrap();
+    assert_eq!(
+        s.policy::<OutputPolicy>().set(map),
+        Err(OutputPolicyError::Routing(RoutingError::MapPast {
+            output: 2,
+            device: ChannelLayout::STEREO
+        }))
+    );
+    let mut wide = OutputPolicy::default();
+    wide.map = OutputMap::channels([0, 1, 2]).unwrap();
+    assert_eq!(
+        s.policy::<OutputPolicy>().set(wide),
+        Err(OutputPolicyError::Routing(RoutingError::MapWidth {
+            map: 3,
+            heard: ChannelLayout::STEREO
+        }))
+    );
+    let mut strip = OutputPolicy::default();
+    strip.outputs.set_strip(2, OutputStrip::default()).unwrap();
+    assert_eq!(
+        s.policy::<OutputPolicy>().set(strip),
+        Err(OutputPolicyError::StripPast {
+            output: 2,
+            device: ChannelLayout::STEREO
+        })
+    );
+    assert_eq!(*s.policy::<OutputPolicy>().get(), OutputPolicy::default());
+}
+
+/// A session with no engine has no device to route to.
+#[test]
+fn a_detached_session_has_nothing_to_route() {
+    let mut s = Session::builder().build_detached(RATE).unwrap();
+    assert_eq!(
+        s.policy::<OutputPolicy>().set(OutputPolicy::default()),
+        Err(OutputPolicyError::Detached)
+    );
+}
+
+/// A mute ramps to silence over the declick length and the dim scales the
+/// rest, live, applied by `update`: the frames in between are the ramp.
+#[test]
+fn a_mute_and_a_dim_ramp_and_settle() {
+    let mut s = offline(Session::builder(), 2);
+    feed(&mut s, &[1.0, 1.0]);
+    assert_eq!(last_frame(&mut s, 2, 64), [1.0, 1.0]);
+
+    let mut policy = OutputPolicy::default();
+    policy
+        .outputs
+        .set_strip(
+            0,
+            OutputStrip {
+                mute: true,
+                ..OutputStrip::default()
+            },
+        )
+        .unwrap();
+    policy.outputs = std::mem::take(&mut policy.outputs).with_dim(Some(Amplitude(0.5)));
+    s.policy::<OutputPolicy>().set(policy).unwrap();
+    let _ = s.update();
+    let n = tutti_graph::declick_frames(RATE).get();
+    let mut out = vec![0.0f32; 2 * (n + 8)];
+    s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
+    // Left ramps from unity to silence; right from unity to the dim.
+    for k in 0..n {
+        let t = (k + 1) as f32 / n as f32;
+        let (left, right) = if k + 1 >= n {
+            (0.0, 0.5)
+        } else {
+            (1.0 + (0.0 - 1.0) * t, 1.0 + (0.5 - 1.0) * t)
+        };
+        assert_eq!(out[2 * k], left, "left, frame {k}");
+        assert_eq!(out[2 * k + 1], right, "right, frame {k}");
+    }
+    assert_eq!(&out[2 * n..2 * n + 2], [0.0, 0.5]);
+}

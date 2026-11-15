@@ -965,6 +965,8 @@ impl<S> SessionBuilder<S> {
             clock: engine.as_ref().map(tutti_engine::Engine::block_clock),
             root_request: self.opts.root.clone(),
             root_refusal: None,
+            output_policy: crate::OutputPolicy::default(),
+            output_policy_staged: false,
             engine,
             click: parts.click,
             click_settings: parts.click_settings,

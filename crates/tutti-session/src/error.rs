@@ -443,6 +443,20 @@ pub enum Error {
         source: tutti_buffers::FoldError,
     },
 
+    /// The output policy's map has no place on the device a restart opened: it
+    /// names a channel the device does not have, or no longer fits what is
+    /// heard (G11). Nothing moved, and the map is kept, never reset to the
+    /// identity: set a new one ([`Session::policy`](crate::Session::policy)).
+    #[error("the output map {map:?} has no place on a {device:?} device: {source}")]
+    MapUnplaceable {
+        /// The map in force.
+        map: tutti_engine::OutputMap,
+        /// The device's channels.
+        device: tutti_types::ChannelLayout,
+        /// What the map broke on.
+        source: tutti_engine::RoutingError,
+    },
+
     /// An inlet refused its producer's ring ([`Graph::add_inlet`](crate::Graph::add_inlet)).
     #[error(transparent)]
     Inlet(#[from] InletError),

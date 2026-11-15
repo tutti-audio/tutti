@@ -12,6 +12,7 @@ mod fan_in;
 mod graph;
 mod latency_removal;
 mod loop_region;
+mod output_policy;
 mod root_topology;
 mod scene_render;
 mod system_clock;
