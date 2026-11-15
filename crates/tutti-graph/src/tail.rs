@@ -47,7 +47,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use tutti_types::{Samples, Tail};
 
-/// The upper bound on any single node's reported tail: 60 s at 48 kHz.
+/// The upper bound on any single node's reported tail, in frames: 2 880 000.
 ///
 /// A finite tail past this is not trusted as a figure: [`graph_tail`] counts
 /// it as [`Tail::Unbounded`], for the reason
@@ -64,8 +64,8 @@ use tutti_types::{Samples, Tail};
 /// somebody meant. Sixty is past every measured unit (no Apple unit exceeds
 /// ~21 s) while still bounding a garbage answer.
 ///
-/// Like its sibling this is a frame count at an assumed 48 kHz, so at 96 kHz it
-/// bounds 30 s rather than 60 — still past everything measured.
+/// Like its sibling this is a frame count (2 880 000), not a duration: the
+/// topology it bounds carries no rate, so the bound cannot follow one.
 ///
 /// Applied per node, so a long chain can legitimately sum past it. That is the
 /// same property the latency bound has: the bound rejects one bad answer, it
@@ -531,6 +531,13 @@ mod tests {
             outputs: vec![Some(2)],
         };
         assert!(!graph_tail(&g).is_unbounded());
+    }
+
+    /// The bound is 60 s and the latency bound 10 s, at 48 kHz, as frames.
+    #[test]
+    fn the_node_bounds_are_sixty_and_ten_seconds_at_48k() {
+        assert_eq!(MAX_NODE_TAIL, Samples(2_880_000));
+        assert_eq!(crate::MAX_NODE_LATENCY, Samples(480_000));
     }
 
     /// A finite tail past the bound is not trusted as a figure and not cut to

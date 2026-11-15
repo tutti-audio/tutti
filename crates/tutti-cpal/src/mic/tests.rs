@@ -382,3 +382,16 @@ fn the_capture_callback_does_not_allocate() {
     // The rings filled and refused whole frames; nothing was lost silently.
     assert!(Source::take_lost(&mut mic).get() > 0);
 }
+
+/// The monitor ring is 10 ms and the capture ring one second, in frames at the
+/// stream's rate: 480 and 48 000 at 48 kHz, 441 and 44 100 at 44.1 kHz.
+#[test]
+fn ring_depths_follow_the_stream_rate() {
+    for (rate, monitor, capture) in [
+        (SampleRate::SR_48K, 480, 48_000),
+        (SampleRate::SR_44K1, 441, 44_100),
+    ] {
+        assert_eq!(MONITOR_RING.to_samples_ceil(rate), Samples(monitor));
+        assert_eq!(RING.to_samples_ceil(rate), Samples(capture));
+    }
+}

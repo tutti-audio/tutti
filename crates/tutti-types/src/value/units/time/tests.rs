@@ -266,3 +266,49 @@ fn the_named_sample_rates_are_their_figures() {
         assert_eq!(rate.get(), hz);
     }
 }
+
+#[test]
+fn frame_offset_keeps_the_sign_where_to_samples_clamps() {
+    // -0.5 s at 48 kHz is exactly -24 000 frames.
+    assert_eq!(Seconds(-0.5).to_frame_offset(SampleRate::SR_48K), -24_000);
+    assert_eq!(Seconds(0.5).to_frame_offset(SampleRate::SR_48K), 24_000);
+    assert_eq!(Seconds(-0.5).to_samples(SampleRate::SR_48K), Samples::ZERO);
+}
+
+#[test]
+fn frame_offset_rounding_is_named_for_a_third_of_a_frame_each_way() {
+    // At 3 Hz, 1/9 s is a third of a frame.
+    let rate = SampleRate::of(3.0);
+    let third = Seconds(1.0 / 9.0);
+    let neg = Seconds(-1.0 / 9.0);
+    assert_eq!(third.to_frame_offset(rate), 0);
+    assert_eq!(third.to_frame_offset_floor(rate), 0);
+    assert_eq!(third.to_frame_offset_ceil(rate), 1);
+    assert_eq!(neg.to_frame_offset(rate), 0);
+    assert_eq!(neg.to_frame_offset_floor(rate), -1);
+    assert_eq!(neg.to_frame_offset_ceil(rate), 0);
+    // Two thirds rounds away from zero, either sign.
+    assert_eq!(Seconds(2.0 / 9.0).to_frame_offset(rate), 1);
+    assert_eq!(Seconds(-2.0 / 9.0).to_frame_offset(rate), -1);
+}
+
+#[test]
+fn frame_offset_of_nonsense_is_zero_and_huge_saturates() {
+    assert_eq!(Seconds(f64::NAN).to_frame_offset(SampleRate::SR_48K), 0);
+    assert_eq!(
+        Seconds(f64::INFINITY).to_frame_offset(SampleRate::SR_48K),
+        i64::MAX
+    );
+    assert_eq!(
+        Seconds(f64::NEG_INFINITY).to_frame_offset(SampleRate::SR_48K),
+        i64::MIN
+    );
+}
+
+#[test]
+fn one_second_holds_the_rate_rounded_up_and_at_least_one_frame() {
+    assert_eq!(SampleRate::SR_44K1.one_second(), Samples(44_100));
+    assert_eq!(SampleRate::SR_48K.one_second(), Samples(48_000));
+    assert_eq!(SampleRate::of(44_100.5).one_second(), Samples(44_101));
+    assert_eq!(SampleRate::of(0.2).one_second(), Samples(1));
+}

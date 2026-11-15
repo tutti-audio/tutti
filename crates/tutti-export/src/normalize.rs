@@ -282,10 +282,10 @@ fn headroom_ceiling(target: &FileTarget) -> Option<Db> {
     )))
 }
 
-/// The most frames a measurement takes at once: one second of audio at `rate`,
-/// and at least one. A cancel waits for at most one chunk, and the chunk is the unit the conversion before it is cut in too.
+/// The most frames a measurement takes at once: one second of audio at `rate`
+/// rounded up, and at least one. A cancel waits for at most one chunk, and the chunk is the unit the conversion before it is cut in too.
 pub(crate) fn chunk_frames(rate: SampleRate) -> usize {
-    (rate.get().round() as usize).max(1)
+    rate.one_second().get()
 }
 
 /// What a peak-normalizing [`Measurer`] read: a placement-weighted loudness,
