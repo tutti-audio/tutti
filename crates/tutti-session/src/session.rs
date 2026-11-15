@@ -36,7 +36,8 @@ pub enum Phase {
     /// main thread) and, mid re-prepare, sends the resumed plan.
     Collect,
     /// Hosted plugins' health, latency, parameter edits and state
-    /// snapshots (feature `plugin`): a dead plugin's node is removed
+    /// snapshots (feature `plugin`): a dead pooled plugin's node stays at its
+    /// key, silent, and a host-inserted plugin's is removed
     /// (`PluginChange::Died`), a moved latency handed to the graph
     /// (`PluginChange::LatencyChanged`), a due snapshot, a parameter
     /// read and a reload submitted to the session's spawner (their results land in
@@ -536,7 +537,8 @@ pub struct Session<C: Clock = Offline> {
     /// How often a healthy plugin's state is captured.
     #[cfg(feature = "plugin")]
     pub(crate) snapshot_interval: std::time::Duration,
-    /// What a hosted plugin's death or hang does; `None`: it is removed.
+    /// What a hosted plugin's death or hang does; `None`: a pooled plugin's
+    /// node stays silent at its key, a host-inserted plugin's is removed.
     #[cfg(feature = "plugin")]
     pub(crate) recovery: Option<crate::RecoveryPolicy>,
     /// When a hosted plugin's unanswered blocks are a hang.

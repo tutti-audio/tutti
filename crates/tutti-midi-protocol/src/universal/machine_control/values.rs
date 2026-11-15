@@ -740,3 +740,31 @@ impl MmcFragment {
         self.0.len()
     }
 }
+
+/// The most string bytes one segment carries: a message holds 48 bytes, and
+/// the segment command takes its code, its count and its identification.
+pub const MMC_SEGMENT_BYTES: usize = 45;
+
+/// The string bytes of one [`MmcSegment`](super::MmcSegment): at most
+/// [`MMC_SEGMENT_BYTES`] data bytes, each below 128, so a segment always fits
+/// one message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MmcSegmentBytes(MmcBytes);
+
+impl MmcSegmentBytes {
+    /// The bytes, or `None` for a byte over 127 or more than
+    /// [`MMC_SEGMENT_BYTES`].
+    #[must_use]
+    pub fn new(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() > MMC_SEGMENT_BYTES {
+            return None;
+        }
+        MmcBytes::from_slice(bytes).map(Self)
+    }
+
+    /// The bytes.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}

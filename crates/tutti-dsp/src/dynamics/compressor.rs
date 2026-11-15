@@ -1,40 +1,34 @@
-//! [`CompressorFamily`]: the feed-forward compressor as a [`Family`].
+//! [`CompressorBank`]: the feed-forward compressor over buffers views.
 //!
 //! A compressor reads a **key**: the side-chain as wide as the signal (an unwired one is
-//! silence and compresses nothing) or the signal itself, as the family's [`KeySource`] says. It
-//! finds its level (the loudest key channel at
+//! silence and compresses nothing) or the signal itself, as the caller hands the bank its
+//! [`KeySource`](super::KeySource). It finds its level (the loudest key channel at
 //! each frame), turns the level over the threshold into a reduction by the static
 //! curve, smooths that reduction with an attack and a release, and multiplies **every**
 //! channel by one gain: the reduction's, plus the makeup. The gain is linked, so the
 //! stereo image does not move when one side is louder.
 //!
-//! The threshold is the one control read **per frame** when the graph drives it (lane 0
-//! of the [`Inputs`]): it is a level to
-//! compare against, not a coefficient. Every other control lands on the stream grid
-//! ([`Family::CADENCE`]), the detector's whole and the makeup over [`GAIN_GLIDE`]: a
-//! makeup multiplies the output directly, so a step in it is a click; the knee, the
-//! ratio and the times only move what the follower is smoothing toward, and the follower
-//! is the smoother.
+//! The threshold is the one control read **per frame** when the graph drives it
+//! ([`CompressorLanes`]): it is a level to compare against, not a coefficient. The makeup
+//! multiplies the output directly, so a step in it is a click: it is a ramp, a control moving
+//! to a target, and glides over [`GAIN_GLIDE`] as a [`Glide`] read on the stream. The knee,
+//! the ratio and the times only move what the follower is smoothing toward, and the
+//! follower is the smoother: they land whole.
+//!
+//! The compressor has no latency (the detector is on the signal and the key, never ahead
+//! of them) and no tail (the gain only scales, so a silent signal is a silent output
+//! whatever the follower is doing).
 
-use core::ops::Range;
-
-use tutti_types::{Amplitude, BusTopology, CompressionRatio, Db, SampleRate, Samples, Seconds};
+use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
+use tutti_types::{Amplitude, CompressionRatio, Db, SampleRate, Seconds};
 
 use super::curves::{amplitude_to_db, compute_compressor_gain_reduction};
-use super::key_source::KeySource;
-use crate::control::COEFF_STREAM;
+use super::shared::{CHUNK, GAIN_GLIDE, key_levels};
+use crate::delay::finite_or;
 use crate::smoother::Smoother;
-use crate::{
-    Approach, Cadence, Channels, Effort, Family, Glide, Inputs, Recurrence, Ring, Setup, Start,
-    Steps, System,
-};
+use crate::{Glide, Steps};
 
-/// How long a makeup that moves takes to arrive: 5 ms, counted on the stream, so the
-/// de-zipper does not depend on the block (a block ramp was 1.3 to 10.7 ms at 48 kHz,
-/// by the host's block).
-pub const GAIN_GLIDE: Seconds = Seconds(0.005);
-
-/// The controls of a [`CompressorFamily`].
+/// The controls of a [`CompressorBank`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CompressorControls {
     /// The level above which reduction begins, in dB.
@@ -73,18 +67,13 @@ impl Default for CompressorControls {
     }
 }
 
-/// `x` if it is finite, else `default`.
-fn finite_or(x: f32, default: f32) -> f32 {
-    if x.is_finite() { x } else { default }
-}
+/// The most makeup, in dB, a compressor applies: 10^(400/20) is 1e20, so the gain of a
+/// makeup and a reduction stays finite whatever either is.
+const MAX_MAKEUP_DB: f32 = 400.0;
 
-/// A compressor at one set of controls and one rate: the static curve, and the figures
-/// its smoother runs on. Memoryless in the sense that matters to the graph: no latency
-/// (the detector is on the signal and the key, never ahead of them) and no tail (the
-/// gain only scales, so a silent signal is a silent output whatever the follower is
-/// doing).
+/// A compressor at one set of controls and one rate: the controls made runnable.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CompressorMember {
+pub(crate) struct CompressorMember {
     threshold: Db,
     knee: Db,
     ratio: CompressionRatio,
@@ -95,39 +84,8 @@ pub struct CompressorMember {
 }
 
 impl CompressorMember {
-    /// The threshold, in dB.
-    #[must_use]
-    pub fn threshold(&self) -> Db {
-        self.threshold
-    }
-
-    /// The knee width, in dB, at least 0.
-    #[must_use]
-    pub fn knee(&self) -> Db {
-        self.knee
-    }
-
-    /// The ratio, at least 1.
-    #[must_use]
-    pub fn ratio(&self) -> CompressionRatio {
-        self.ratio
-    }
-
-    /// The attack time constant, at least 0.
-    #[must_use]
-    pub fn attack(&self) -> Seconds {
-        self.attack
-    }
-
-    /// The release time constant, at least 0.
-    #[must_use]
-    pub fn release(&self) -> Seconds {
-        self.release
-    }
-
     /// The makeup gain, in dB.
-    #[must_use]
-    pub fn makeup(&self) -> Db {
+    pub(crate) fn makeup(&self) -> Db {
         self.makeup
     }
 
@@ -136,12 +94,10 @@ impl CompressorMember {
     /// `threshold - knee/2`, `(1 - 1/ratio) (level - threshold)` above
     /// `threshold + knee/2`, and the quadratic that joins them inside the knee.
     #[must_use]
-    pub fn reduction_db(&self, level: Db) -> Db {
+    pub(crate) fn reduction_db(&self, level: Db) -> Db {
         compute_compressor_gain_reduction(level, self.threshold, self.ratio, self.knee)
     }
-}
 
-impl CompressorMember {
     /// The member for `c` at `rate`: a non-finite control is the default's, a knee and
     /// the times are floored at 0 and a ratio at 1.
     pub(crate) fn designed(c: &CompressorControls, rate: SampleRate) -> Self {
@@ -154,81 +110,18 @@ impl CompressorMember {
             ratio: CompressionRatio::new_clamped(finite_or(c.ratio.get(), d.ratio.get())),
             attack: Seconds(c.attack.get().max(0.0)),
             release: Seconds(c.release.get().max(0.0)),
-            makeup: Db(finite_or(c.makeup.get(), d.makeup.get())),
+            makeup: Db(
+                finite_or(c.makeup.get(), d.makeup.get()).clamp(-MAX_MAKEUP_DB, MAX_MAKEUP_DB)
+            ),
             rate,
         }
-    }
-}
-
-impl System for CompressorMember {
-    fn latency(&self) -> Samples {
-        Samples::ZERO
-    }
-
-    fn tail(&self, _: Db) -> Ring {
-        Ring::Finite(Seconds(0.0))
-    }
-}
-
-/// The [`Family`] of the compressor, `input` wide, its detector on the [`KeySource`] it is
-/// given. One gain is computed from the loudest key channel and applied to every channel.
-#[derive(Clone, Copy, Debug)]
-pub struct CompressorFamily {
-    input: BusTopology,
-    key: KeySource,
-}
-
-impl CompressorFamily {
-    /// A compressor on the bus `input` whose detector reads `key`, and one output bus
-    /// where the input is. A [`KeySource::Sidechain`] is a second bus as wide as the input.
-    #[must_use]
-    pub const fn new(input: BusTopology, key: KeySource) -> Self {
-        Self { input, key }
-    }
-}
-
-impl Family for CompressorFamily {
-    type Controls = CompressorControls;
-    type Member = CompressorMember;
-    type Recurrence = CompressorRecurrence;
-
-    /// Solved on the stream's grid of 16 frames, like the filters: a control that
-    /// moves inside a block reaches the render within 16 frames, wherever the blocks
-    /// fall.
-    const CADENCE: Cadence = COEFF_STREAM;
-
-    fn channels(&self) -> Channels {
-        self.key.channels(self.input)
-    }
-
-    fn blank(&self, rate: SampleRate) -> CompressorMember {
-        let d = CompressorControls::DEFAULT;
-        CompressorMember {
-            threshold: d.threshold,
-            knee: d.knee,
-            ratio: d.ratio,
-            attack: d.attack,
-            release: d.release,
-            makeup: d.makeup,
-            rate,
-        }
-    }
-
-    /// The controls, made runnable: a non-finite one is the default's, a knee and the
-    /// times are floored at 0 and a ratio at 1.
-    fn member_into(&self, c: &CompressorControls, rate: SampleRate, out: &mut CompressorMember) {
-        *out = CompressorMember::designed(c, rate);
-    }
-
-    fn recurrence(&self, _: SampleRate) -> CompressorRecurrence {
-        CompressorRecurrence { key: self.key }
     }
 }
 
 /// The figures the detector runs on: the controls it follows, with the times as
 /// one-pole coefficients at the rate.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Detector {
+pub(crate) struct Detector {
     threshold: Db,
     knee: Db,
     ratio: CompressionRatio,
@@ -251,6 +144,11 @@ impl Detector {
         }
     }
 
+    /// The threshold, in dB.
+    pub(crate) fn threshold(&self) -> Db {
+        self.threshold
+    }
+
     /// The figures of a compressor that does nothing, for a target to start from.
     pub(crate) const NEUTRAL: Self = Self {
         threshold: Db(0.0),
@@ -260,16 +158,11 @@ impl Detector {
         release: 0.0,
     };
 
-    /// The threshold, in dB.
-    pub(crate) fn threshold(&self) -> Db {
-        self.threshold
-    }
-
     /// One frame of the compressor: the key's `level` (an amplitude) in dB, the static
     /// curve at `threshold`, the one-pole follower `reduction` on it (the attack
     /// coefficient while it rises, the release while it falls) and the linear gain
-    /// `-reduction + makeup_db`. The one copy of the compressor's frame, run by
-    /// [`CompressorRecurrence`] and by each band of the multiband.
+    /// `-reduction + makeup`. The one copy of the compressor's frame, run by
+    /// [`CompressorBank`] and by each band of the multiband.
     #[inline]
     pub(crate) fn frame(
         &self,
@@ -290,164 +183,129 @@ impl Detector {
     }
 }
 
-/// The coefficient point of a compressor: the [`Detector`], which lands whole, and the
-/// makeup, which glides.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CompressorTarget {
-    detector: Detector,
-    makeup: Db,
+/// The per-frame lane a compressor reads beside its audio, in the audio's sample format,
+/// `None` where nothing drives it. A lane is at least as long as the frames a call renders;
+/// a frame past its end is not driven.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CompressorLanes<'a, S: Float = f32> {
+    /// The threshold in dB. A frame that is not finite is the aimed threshold.
+    pub threshold: Option<Mono<'a, S>>,
 }
 
-/// The coefficients in flight: the detector's, landed, and a makeup gliding over
-/// [`GAIN_GLIDE`].
+/// A feed-forward compressor of any width: one gain from the loudest key channel, applied
+/// to every channel, with the follower that smooths it and the makeup that glides.
 ///
-/// A generic glide of the whole target would run for every frame of the glide when
-/// only the ratio moved; the detector lands at once (the follower is its own smoother)
-/// and only the makeup, which has nothing smoothing it, takes steps.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CompressorCoeffs {
-    detector: Detector,
-    /// The makeup in dB.
-    makeup: Glide<f32>,
-    /// The steps a makeup glide takes: [`GAIN_GLIDE`] at the prepared rate.
-    steps: u32,
-}
-
-impl Approach for CompressorCoeffs {
-    type Target = CompressorTarget;
-
-    fn aim(&mut self, target: &CompressorTarget) {
-        self.detector = target.detector;
-        self.makeup
-            .aim_by(target.makeup.get(), Steps::Fixed(self.steps));
-    }
-
-    #[inline]
-    fn step(&mut self) -> bool {
-        self.makeup.step()
-    }
-
-    fn settle(&mut self) {
-        self.makeup.settle();
-    }
-}
-
-/// What a block changes: the follower, and the gain of each frame of the block.
+/// Built on the control side for one rate; the state is `f32`, and a view of another sample
+/// format is converted at the edges. Nothing it holds grows.
 #[derive(Clone, Debug)]
-pub struct CompressorState {
+pub struct CompressorBank {
+    detector: Detector,
+    /// The makeup in dB, gliding over [`GAIN_GLIDE`].
+    makeup: Glide<f32>,
+    /// The steps a makeup glide takes: [`GAIN_GLIDE`] at the rate.
+    steps: u32,
+    rate: SampleRate,
     /// The smoothed reduction, in dB and positive.
     reduction: f32,
-    /// The linked gain of each frame of the block being run, sized to the longest
-    /// block in `prepare`.
-    gains: Vec<f32>,
 }
 
-/// The [`Recurrence`] of a [`CompressorFamily`].
-///
-/// K, per frame: the key's level (the loudest channel of the [`KeySource`]'s source, the
-/// side-chain or the signal; a NaN reads as quiet) in dB
-/// (floored at [`Db::FLOOR`]), the static curve at the threshold (lane 0 of the
-/// [`Inputs`] when it is finite, else the member's), the one-pole follower on the
-/// reduction (the attack coefficient while it rises, the release while it falls), and
-/// the gain `-reduction + makeup` as an amplitude. The gain of every frame is written
-/// first, and the channels are then multiplied by it, a multiply that vectorizes.
-///
-/// **Lane 0 is the threshold in dB, per frame.** A frame that is not finite falls back
-/// to the member's threshold.
-#[derive(Clone, Copy, Debug)]
-pub struct CompressorRecurrence {
-    key: KeySource,
-}
-
-impl Recurrence for CompressorRecurrence {
-    type Member = CompressorMember;
-    type Capacity = ();
-    type Target = CompressorTarget;
-    type Coeffs = CompressorCoeffs;
-    type State = CompressorState;
-
-    const STEP: usize = 1;
-
-    fn start(&self, member: &CompressorMember) -> Start<Self> {
-        let mut target = CompressorTarget {
+impl CompressorBank {
+    /// A compressor that does nothing at `rate`, to be aimed.
+    #[must_use]
+    pub fn new(rate: SampleRate) -> Self {
+        // 5 ms is a few hundred frames at any real rate; an absurd rate saturates rather
+        // than panic, since a prepare must not.
+        let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
+        Self {
             detector: Detector::NEUTRAL,
-            makeup: Db(0.0),
-        };
-        self.coefficients_into(member, &mut target);
-        Start {
-            coeffs: CompressorCoeffs {
-                detector: target.detector,
-                makeup: Glide::landed(target.makeup.get()),
-                steps: 0,
-            },
-            state: CompressorState {
-                reduction: 0.0,
-                gains: Vec::new(),
-            },
-            target,
+            makeup: Glide::landed(0.0),
+            steps,
+            rate,
+            reduction: 0.0,
         }
     }
 
-    fn prepare(
+    /// Back to silence: no reduction, and the makeup landed on its target. No allocation.
+    pub fn reset(&mut self) {
+        self.reduction = 0.0;
+        self.makeup.settle();
+    }
+
+    /// Lands the makeup on its target now.
+    pub fn settle(&mut self) {
+        self.makeup.settle();
+    }
+
+    /// Aims at `controls`: the detector's figures land whole (the follower smooths them) and
+    /// the makeup glides over [`GAIN_GLIDE`]. A non-finite control is the default's, a knee
+    /// and the times are floored at 0 and a ratio at 1. No allocation.
+    pub fn aim(&mut self, controls: &CompressorControls) {
+        let member = CompressorMember::designed(controls, self.rate);
+        self.detector = Detector::of(&member);
+        self.makeup
+            .aim_by(member.makeup.get(), Steps::Fixed(self.steps));
+    }
+
+    /// Runs `input` into `output`, scaled by one gain from the loudest channel of `key`.
+    ///
+    /// `key` is the signal the detector listens to: the side-chain bus, or `input` itself
+    /// for a compressor on its own signal. Channel `c` of `input` feeds channel `c` of
+    /// `output`; a channel past the narrower of the two views is not touched, and the frames
+    /// rendered are the fewest of the three views'. A NaN key sample reads as quiet and an
+    /// infinite one as the largest finite level. Frame `i` reads the makeup at the glide's
+    /// step `taken + 1 + i`, then the block's steps are taken. No allocation.
+    pub fn process<S: Float>(
         &mut self,
-        _: &(),
-        setup: &Setup,
-        coeffs: &mut CompressorCoeffs,
-        state: &mut CompressorState,
-        _: &mut CompressorTarget,
+        lanes: CompressorLanes<'_, S>,
+        key: Planes<'_, S>,
+        input: Planes<'_, S>,
+        mut output: PlanesMut<'_, '_, S>,
     ) {
-        // 5 ms is a few hundred frames at any real rate; an absurd rate saturates
-        // rather than panic, since a prepare must not.
-        coeffs.steps =
-            u32::try_from(GAIN_GLIDE.to_samples_ceil(setup.rate).get()).unwrap_or(u32::MAX);
-        state.gains = vec![0.0; setup.max_block.get()];
-    }
-
-    fn coefficients_into(&self, m: &CompressorMember, target: &mut CompressorTarget) -> bool {
-        target.detector = Detector::of(m);
-        target.makeup = m.makeup;
-        true
-    }
-
-    fn clear(&self, state: &mut CompressorState) {
-        state.reduction = 0.0;
-    }
-
-    fn run(
-        &self,
-        coeffs: &CompressorCoeffs,
-        state: &mut CompressorState,
-        feed: &Inputs<'_>,
-        output: &mut [&mut [f32]],
-        frames: Range<usize>,
-        _: usize,
-    ) {
-        let d = &coeffs.detector;
-        let makeup = coeffs.makeup.now();
-        let detected = self.key.detected(feed);
-        let gains = &mut state.gains[frames.clone()];
-        for (g, i) in gains.iter_mut().zip(frames.clone()) {
-            let level = detected.iter().fold(0.0f32, |m, ch| m.max(ch[i].abs()));
-            let threshold = feed.lanes[0]
-                .map(|lane| Db(lane[i]))
-                .filter(|t| t.get().is_finite())
-                .unwrap_or(d.threshold);
-            *g = d.frame(&mut state.reduction, level, threshold, makeup);
-        }
-        let gains = &state.gains[frames.clone()];
-        for (out, input) in output.iter_mut().zip(feed.audio) {
-            for ((o, &x), &g) in out[frames.clone()]
-                .iter_mut()
-                .zip(&input[frames.clone()])
-                .zip(gains)
-            {
-                *o = x * g;
+        let frames = input
+            .frames()
+            .get()
+            .min(output.frames().get())
+            .min(key.frames().get());
+        let width = input.channels().min(output.channels());
+        let d = self.detector;
+        let blended = self.makeup.blended(frames);
+        let taken = self.makeup.taken();
+        let mut gains = [0.0f32; CHUNK];
+        let mut start = 0;
+        while start < frames {
+            let n = (frames - start).min(CHUNK);
+            let end = start + n;
+            let gains = &mut gains[..n];
+            // The key's level: the loudest channel at each frame.
+            key_levels(&key, start..end, gains);
+            for (k, g) in gains.iter_mut().enumerate() {
+                let i = start + k;
+                let threshold = lanes
+                    .threshold
+                    .and_then(|l| l.samples().get(i))
+                    .map(|x| Db(x.convert_to::<f32>()))
+                    .filter(|t| t.get().is_finite())
+                    .unwrap_or(d.threshold);
+                let makeup = if i < blended {
+                    self.makeup
+                        .at(taken.saturating_add(1).saturating_add(i as u32))
+                } else {
+                    self.makeup.target()
+                };
+                *g = d.frame(&mut self.reduction, *g, threshold, makeup);
             }
+            for c in 0..width {
+                let xs = &input.plane(c).samples()[start..end];
+                let mut plane = output.plane_mut(c);
+                let ys = &mut plane.samples_mut()[start..end];
+                for ((y, x), &g) in ys.iter_mut().zip(xs).zip(gains.iter()) {
+                    *y = (x.convert_to::<f32>() * g).convert_to::<S>();
+                }
+            }
+            start = end;
         }
-    }
-
-    fn effort(&self) -> Effort {
-        Effort::Moderate
+        self.makeup
+            .advance(u32::try_from(frames).unwrap_or(u32::MAX));
     }
 }
 
