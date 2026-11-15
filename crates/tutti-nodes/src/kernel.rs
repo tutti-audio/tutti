@@ -9,7 +9,8 @@
 
 use core::ops::Range;
 
-use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_buffers::{Float, Mono, Planes, PlanesMut};
+use tutti_dsp::MAX_LANES;
 use tutti_graph::{
     Cx, HasParam, HasParams, IntoNode, Io, Node, NodeParts, OutBus, ParamNode, ParamSet, Prepare,
     Shape, Status,
@@ -17,6 +18,25 @@ use tutti_graph::{
 use tutti_types::{Latency, MAX_CHANNELS, MaxBlock, SampleRate, Samples, Tail};
 
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
+
+/// The per-frame lanes of a block's [`ControlRead::Fast`](crate::ControlRead::Fast)
+/// controls, in the order of their rows: the frames a port carries, in the port's own unit
+/// and the sample format `S` of the audio, each `None` where nothing drives it.
+///
+/// Every lane is as long as the frames the call renders.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ControlLanes<'a, S: Float = f32>([Option<Mono<'a, S>>; MAX_LANES]);
+
+impl<'a, S: Float> ControlLanes<'a, S> {
+    /// No lane is driven.
+    pub const NONE: Self = Self([None; MAX_LANES]);
+
+    /// Lane `k`, or `None` when nothing drives it, and for a `k` past [`MAX_LANES`].
+    #[must_use]
+    pub fn get(&self, k: usize) -> Option<Mono<'a, S>> {
+        self.0.get(k).copied().flatten()
+    }
+}
 
 /// An effect's algorithm with its state, as [`KernelNode`] runs it.
 ///
@@ -30,6 +50,13 @@ pub trait Kernel: Clone + Send + 'static {
     /// designs at every `GRID`-th frame of the stream clock, counted from the last reset,
     /// and only while a control moves, so a held block renders in one call.
     const GRID: usize;
+
+    /// Whether the node cuts at every grid point whether or not a control moved, and
+    /// retargets there: for a kernel whose design moves every frame (a phaser's LFO). Then
+    /// a render call never spans a grid point, and a retarget at a frame that is not a grid
+    /// point is a control that moved. A kernel that does not move on its own leaves it
+    /// `false`.
+    const CUT_ALWAYS: bool = false;
 
     /// The ports: the input and output buses and the cost. The node adds the params, the
     /// latency and the tail.
@@ -47,8 +74,14 @@ pub trait Kernel: Clone + Send + 'static {
     fn retarget(&mut self, controls: &<Self::Set as ControlSet>::Controls);
 
     /// Runs `input` into `output`, the same number of frames, in any sample format (the
-    /// graph's is `f32`). Audio thread: no allocation.
-    fn render<S: Float>(&mut self, input: Planes<'_, S>, output: PlanesMut<'_, '_, S>);
+    /// graph's is `f32`), with the controls a port drives per frame in `lanes`. Audio
+    /// thread: no allocation.
+    fn render<S: Float>(
+        &mut self,
+        input: Planes<'_, S>,
+        lanes: ControlLanes<'_, S>,
+        output: PlanesMut<'_, '_, S>,
+    );
 
     /// The processing latency, once prepared.
     fn latency(&self) -> Samples {
@@ -68,7 +101,9 @@ pub trait Kernel: Clone + Send + 'static {
 /// kernel's grid points ([`Kernel::GRID`], counted on the stream clock from the last reset,
 /// so the render does not depend on where blocks fall) and at the corners of a driving
 /// port, and each cut that moved a control designs and retargets before the frames after
-/// it render. Otherwise the block renders in one call.
+/// it render. Otherwise the block renders in one call. A kernel that cuts at every grid
+/// point ([`Kernel::CUT_ALWAYS`]) is cut and retargeted at each of them whether or not a
+/// control moved.
 ///
 /// # In a graph
 ///
@@ -150,6 +185,7 @@ impl<K: Kernel> KernelNode<K> {
         if frames.is_empty() {
             return;
         }
+        let driven = self.params.lanes(io);
         let (ins, mut outs) = io.split();
         let mut input: [&[f32]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
         for (c, slot) in input.iter_mut().enumerate().take(self.inputs) {
@@ -168,7 +204,11 @@ impl<K: Kernel> KernelNode<K> {
             Planes::new(&input[..self.inputs]),
             PlanesMut::new(&mut output[..width]),
         ) {
-            self.kernel.render(input, output);
+            let mut lanes = ControlLanes::<f32>::NONE;
+            for (slot, lane) in lanes.0.iter_mut().zip(driven) {
+                *slot = lane.map(|l| Mono::new(&l[frames.clone()]));
+            }
+            self.kernel.render(input, lanes, output);
         }
     }
 
@@ -186,15 +226,15 @@ impl<K: Kernel> KernelNode<K> {
         let mut from = 0;
         loop {
             let corner = self.params.corner_from(io, from);
-            let cut = match (grid.peek().copied(), corner) {
+            let (cut, at_grid) = match (grid.peek().copied(), corner) {
                 (Some(g), Some(c)) if g <= c => {
                     grid.next();
-                    g
+                    (g, true)
                 }
-                (_, Some(c)) => c,
+                (_, Some(c)) => (c, false),
                 (Some(g), None) => {
                     grid.next();
-                    g
+                    (g, true)
                 }
                 (None, None) => break,
             };
@@ -208,7 +248,8 @@ impl<K: Kernel> KernelNode<K> {
                 },
             );
             let applied = self.tuned.as_ref().and_then(|t| t.applied);
-            if applied.is_none_or(|a| self.params.moved(&a, &target)) {
+            if (K::CUT_ALWAYS && at_grid) || applied.is_none_or(|a| self.params.moved(&a, &target))
+            {
                 self.render(io, held..cut);
                 self.apply(target);
                 held = cut;
@@ -272,7 +313,7 @@ impl<K: Kernel> Node for KernelNode<K> {
         let moved = applied
             .as_ref()
             .is_none_or(|a| self.params.moved(a, &target));
-        let stepped = self.params.driven(&io) || (applied.is_some() && moved);
+        let stepped = K::CUT_ALWAYS || self.params.driven(&io) || (applied.is_some() && moved);
         if stepped {
             self.render_steps(&mut io, position, rate);
         } else {

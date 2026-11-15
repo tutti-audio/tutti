@@ -20,7 +20,8 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use tutti_cpal::{AudioHost, DeviceSelector, MONITOR_RING_FRAMES, MicConfig, MicIn, StreamLatency};
+use tutti_cpal::{AudioHost, DeviceSelector, MONITOR_RING_FRAMES, MicConfig, MicIn};
+use tutti_engine::StreamLatency;
 use tutti_graph::{DECLICK, FadeLaw, InletNode, InletRing};
 use tutti_types::{Mint, SampleRate, Samples};
 

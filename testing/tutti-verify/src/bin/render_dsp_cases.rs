@@ -21,8 +21,8 @@ use std::path::Path;
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
     ChunkSize, CrossoverControls, CrossoverFamily, Family, Glide, LadderControls, LadderFamily,
-    LadderType, Lanes, Recurrence, Setup, StreamingResampler, SvfBank, SvfCoefficients,
-    SvfControls, SvfModel, SvfType, allpass_chain, allpass_coeff,
+    LadderType, Lanes, PhaserChain, Recurrence, Setup, Stages, StreamingResampler, SvfBank,
+    SvfCoefficients, SvfControls, SvfModel, SvfType, allpass_coeff,
 };
 use tutti_fixtures::signal::write_wav_f32;
 use tutti_types::{
@@ -217,16 +217,18 @@ fn crossover(dir: &Path, cases: &mut Cases) {
 }
 
 fn phaser(dir: &Path, cases: &mut Cases) {
-    for stages in [1usize, 4] {
+    for stages in [2usize, 4] {
         for fc in [300.0f32, 2_000.0, 10_000.0] {
             let c = allpass_coeff(fc, RATE as f32);
-            let mut y = Vec::with_capacity(IR_FRAMES);
-            let (mut x1, mut y1) = (vec![0.0f32; stages], vec![0.0f32; stages]);
-            for i in 0..IR_FRAMES {
-                let mut lane = [if i == 0 { 1.0f32 } else { 0.0 }];
-                allpass_chain(stages, &[c], &mut lane, &mut x1, &mut y1);
-                y.push(lane[0]);
-            }
+            let mut chain = PhaserChain::new(Stages::of(stages), 1);
+            let x = impulse(1.0);
+            let mut y = vec![0.0f32; IR_FRAMES];
+            chain.process(
+                &mut [Glide::landed(c)],
+                &mut Glide::landed(0.0),
+                Planes::new(&[&x[..]]).expect("one plane"),
+                PlanesMut::new(&mut [&mut y[..]]).expect("one plane"),
+            );
             let name = format!("allpass_chain_{stages}x_{fc}");
             wav(dir, &name, RATE, &[y]);
             cases.push(
