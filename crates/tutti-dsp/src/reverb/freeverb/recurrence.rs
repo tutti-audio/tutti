@@ -17,7 +17,7 @@
 
 use std::cmp;
 
-use tutti_types::{Db, SampleRate, Seconds};
+use tutti_types::{Db, Gain, SampleRate, Seconds};
 
 use core::ops::Range;
 
@@ -44,7 +44,7 @@ pub struct Freeverb {
 
 impl Freeverb {
     /// The gain the input is scaled by.
-    pub const FIXED_GAIN: f32 = 0.015;
+    pub const FIXED_GAIN: Gain = Gain::new(0.015);
     /// The comb feedback: Freeverb's room size 0.5 scaled (`0.5 * 0.28 + 0.7`).
     /// A bare `f32` because the comb loop multiplies it per sample and this
     /// change leaves that code alone; the design carries it as an `Amplitude`
@@ -53,7 +53,7 @@ impl Freeverb {
     /// The comb damping: Freeverb's damp 0.5 scaled (`0.5 * 0.4`).
     pub(crate) const DAMPING: f32 = 0.5 * 0.4;
     /// The all-pass feedback.
-    pub(crate) const ALLPASS_FEEDBACK: f32 = 0.5;
+    pub(crate) const ALLPASS_FEEDBACK: Gain = Gain::new(0.5);
     pub(crate) const STEREO_SPREAD: usize = 23;
 
     pub(crate) const CF_TUNING_L1: usize = 1116;
@@ -122,7 +122,8 @@ impl Freeverb {
         ];
 
         for apf in apfs_l.iter_mut().chain(&mut apfs_r) {
-            apf.feedback = Self::ALLPASS_FEEDBACK;
+            // The comb and all-pass kernels multiply per sample: they hold the raw.
+            apf.feedback = Self::ALLPASS_FEEDBACK.get();
         }
         for cf in cfs_l.iter_mut().chain(&mut cfs_r) {
             cf.feedback = Self::ROOM_FEEDBACK;
@@ -179,7 +180,7 @@ impl Freeverb {
         }
 
         for cf in self.cfs_l.iter_mut() {
-            cf.process(input, Self::FIXED_GAIN, output_left);
+            cf.process(input, Self::FIXED_GAIN.get(), output_left);
         }
 
         for apf in self.apfs_l.iter_mut() {
@@ -187,7 +188,7 @@ impl Freeverb {
         }
 
         for cf in self.cfs_r.iter_mut() {
-            cf.process(input, Self::FIXED_GAIN, output_right);
+            cf.process(input, Self::FIXED_GAIN.get(), output_right);
         }
 
         for apf in self.apfs_r.iter_mut() {

@@ -652,7 +652,8 @@ fn a_stepped_parameter_set_from_the_control_thread_reaches_that_position() {
     for k in 0..=22u32 {
         param_reset();
         let n = Normalized::new(f64::from(k) / 22.0).expect("on 0..=1");
-        Control::set_parameter(&mut loaded, main_thread(), mode.id.into(), n);
+        Control::set_parameter(&mut loaded, main_thread(), mode.id.into(), n)
+            .expect("a declared, writable parameter");
         let cap = probe.capture();
         assert_eq!(cap.flush_event_count, 1, "position {k}");
         assert_eq!(
@@ -707,8 +708,9 @@ fn automation_is_not_written_to_a_read_only_parameter() {
     set_readonly_param(u32::MAX);
 }
 
-/// The control thread's `set_parameter` does not write a read-only parameter
-/// either, and still writes a writable one.
+/// The control thread's `set_parameter` refuses a read-only parameter at the
+/// call with `ParamWriteError::ReadOnly` ("can't be changed by the host",
+/// `params.h`), writes nothing, and still writes a writable one.
 #[test]
 fn set_parameter_does_not_write_a_read_only_parameter() {
     let probe = Probe::acquire();
@@ -716,10 +718,15 @@ fn set_parameter_does_not_write_a_read_only_parameter() {
     set_readonly_param(param(0).id);
     let n = Normalized::new(0.5).expect("on 0..=1");
 
-    Control::set_parameter(&mut loaded, main_thread(), param(0).id.into(), n);
+    let read_only = param(0).id.into();
+    assert_eq!(
+        Control::set_parameter(&mut loaded, main_thread(), read_only, n),
+        Err(tutti_plugin_types::ParamWriteError::ReadOnly(read_only))
+    );
     assert_eq!(probe.capture().flush_event_count, 0, "a read-only value");
 
-    Control::set_parameter(&mut loaded, main_thread(), param(1).id.into(), n);
+    Control::set_parameter(&mut loaded, main_thread(), param(1).id.into(), n)
+        .expect("a declared, writable parameter");
     assert_eq!(probe.capture().flush_event_count, 1, "a writable one");
     set_readonly_param(u32::MAX);
 }

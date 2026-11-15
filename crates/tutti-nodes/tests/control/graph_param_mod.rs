@@ -1072,7 +1072,7 @@ fn an_unmodulated_param_adds_nothing_to_the_plan() {
         Some(Arc::new(AtomicF32::new(5.0)).into()),
         None,
     );
-    let controls = r.editor_mut().insert(LANE, "lane", lane);
+    let controls = r.editor_mut().insert(LANE, "lane", lane).controls;
     r.editor_mut().commit().expect("commits");
     // A steady tone, so a jump in drive is a jump in level.
     let tone = vec![0.25f32; 600];

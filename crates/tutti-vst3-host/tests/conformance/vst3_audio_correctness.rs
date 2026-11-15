@@ -1451,7 +1451,11 @@ fn an_unlisted_parameter_id_is_reported_not_written() {
         tutti_plugin_types::StateUse::Project,
     )
     .expect("the probe saves");
-    Control::set_parameter(&mut loaded, main_thread(), unlisted, Normalized::of(0.25));
+    assert_eq!(
+        Control::set_parameter(&mut loaded, main_thread(), unlisted, Normalized::of(0.25)),
+        Err(tutti_plugin_types::ParamWriteError::Undeclared(unlisted)),
+        "the write fails at the call, naming the id"
+    );
     assert_eq!(Control::parameter(&loaded, main_thread(), unlisted), None);
     let after: Vec<_> = listed
         .iter()
@@ -1469,6 +1473,33 @@ fn an_unlisted_parameter_id_is_reported_not_written() {
         .expect("the probe saves"),
         saved_before
     );
+}
+
+/// A parameter the plugin declares read-only (`kIsReadOnly`: the audio-probe's
+/// `ObservedProcessMode`, which its processor writes and the host never sets)
+/// refuses a host write at the call, naming the id, and the value is not
+/// written.
+#[test]
+fn a_read_only_parameter_write_is_refused() {
+    use tutti_plugin_types::{Control, Normalized, ParamWriteError};
+
+    let _guard = plugin_guard();
+    let mut loaded = Vst3Loaded::load(
+        main_thread(),
+        &tutti_fixtures::detached_work(),
+        probe_path(),
+        LoadOptions::new(),
+    )
+    .expect("audio-probe loads");
+    let id = ParamId::new(crate::conformance_support::K_PARAM_OBSERVED_PROCESS_MODE);
+    let info = loaded.parameter_info(main_thread(), id).expect("declared");
+    assert!(info.is_read_only());
+    let before = Control::parameter(&loaded, main_thread(), id);
+    assert_eq!(
+        Control::set_parameter(&mut loaded, main_thread(), id, Normalized::of(1.0)),
+        Err(ParamWriteError::ReadOnly(id))
+    );
+    assert_eq!(Control::parameter(&loaded, main_thread(), id), before);
 }
 
 // ── Writes to a plugin that is loaded and not active ─────────────────────────
@@ -1500,7 +1531,8 @@ mod loaded_writes {
             main_thread(),
             ParamId::new(id),
             Normalized::clamped(value),
-        );
+        )
+        .expect("a declared, writable parameter");
     }
 
     fn read(plugin: &impl Control, id: u32) -> Option<f64> {
@@ -1605,7 +1637,8 @@ mod loaded_writes {
             main_thread(),
             ParamId::new(PARAM_RAMP),
             Normalized::of(0.5),
-        );
+        )
+        .expect("a declared, writable parameter");
         for _ in 0..3 {
             render(&mut inst, 64, &[], None, |_, _, _| 0.0);
         }
@@ -1692,7 +1725,8 @@ mod loaded_writes {
             main_thread(),
             ParamId::new(id),
             Normalized::clamped(value),
-        );
+        )
+        .expect("a declared, writable parameter");
     }
 
     /// A version 2 blob loaded into an active plugin reaches its next block: the

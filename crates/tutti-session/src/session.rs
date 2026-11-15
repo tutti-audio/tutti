@@ -179,6 +179,34 @@ pub enum SessionEvent {
         /// Why.
         refused: crate::CrossfadeRefused,
     },
+    /// A node re-inserted with a narrower shape (a plugin whose ports changed,
+    /// a node re-declared at a new width) lost wiring to the ports it no
+    /// longer has. Reported once, by the update that commits the re-insert,
+    /// per node: the audio edges, the event edges and the bus edges (root feeds
+    /// included) that were dropped, by the ports the app named them with.
+    /// Edges to the ports the node still has are kept, gains included. A
+    /// refused commit reports nothing: the record waits for the update whose
+    /// commit lands.
+    ///
+    /// A feedback edge is listed as the pair of ports it joined (its delay
+    /// is not part of an [`Edge`](crate::Edge)). A modulation route onto a
+    /// dropped edge, or a param or edge-gain lane the node's lost event
+    /// outputs drove, is not listed: the route stays declared and reads
+    /// unresolved (`Problem::Unresolved`, feature `modulation`) until its target
+    /// is wired again.
+    Unwired {
+        /// The node whose re-insert dropped the wiring.
+        node: NodeKey,
+        /// The audio edges dropped, into or out of the node (a feedback edge
+        /// as the pair of ports it joined).
+        edges: Vec<crate::Edge>,
+        /// The event edges dropped, into or out of the node.
+        event_edges: Vec<crate::EventEdge>,
+        /// The bus edges dropped, into or out of the node, as the app wired
+        /// them: the source bus and the sink, a node's input bus or the
+        /// root.
+        bus_edges: Vec<(tutti_graph::BusSource, crate::BusSink)>,
+    },
     /// A node's event output port lost events since the last update: they
     /// were past its capacity (a note-off only past the room set aside for
     /// note-offs), a PDC or feedback delay it feeds was full, or the node
@@ -323,6 +351,18 @@ impl std::fmt::Debug for SessionEvent {
                 .field("node", node)
                 .field("id", id)
                 .field("refused", refused)
+                .finish(),
+            Self::Unwired {
+                node,
+                edges,
+                event_edges,
+                bus_edges,
+            } => f
+                .debug_struct("Unwired")
+                .field("node", node)
+                .field("edges", edges)
+                .field("event_edges", event_edges)
+                .field("bus_edges", bus_edges)
                 .finish(),
             Self::Fault(fault) => f.debug_tuple("Fault").field(fault).finish(),
             #[cfg(feature = "device")]
@@ -862,6 +902,14 @@ impl<C: Clock> Session<C> {
                         .into_iter()
                         .map(|(id, topology)| SessionEvent::RootReaderReopened { id, topology }),
                 );
+                for u in self.graph.take_unwired() {
+                    out.push(SessionEvent::Unwired {
+                        node: u.node,
+                        edges: u.edges,
+                        event_edges: u.event_edges,
+                        bus_edges: u.bus_edges,
+                    });
+                }
                 if !sent && self.resumed {
                     self.publish_sent();
                 }

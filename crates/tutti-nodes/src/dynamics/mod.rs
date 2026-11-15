@@ -6,7 +6,8 @@
 //! why each keeps its own file and nothing here is a trait. The compressor, gate, limiter
 //! and brickwall are [`KernelNode`](crate::KernelNode)s over the banks of `tutti-dsp`
 //! (`CompressorBank`, `GateBank`, `LimiterBank` and `BrickwallBank`); the multiband is a
-//! hand-written node over `Realized<MultibandRecurrence>`, see its file.
+//! hand-written node over `MultibandBank` (the crossover and a `CompressorBank` a band), see
+//! its file.
 //!
 //! [`CompressorNode`] and [`GateNode`] take a typed [`KeySource`](tutti_dsp::KeySource): an
 //! **external sidechain** (their level detector reads separate inputs, so the signal

@@ -26,8 +26,8 @@ use clap_sys::ext::note_ports::{
     clap_plugin_note_ports,
 };
 use clap_sys::ext::params::{
-    CLAP_EXT_PARAMS, CLAP_PARAM_IS_AUTOMATABLE, CLAP_PARAM_IS_STEPPED, clap_param_info,
-    clap_plugin_params,
+    CLAP_EXT_PARAMS, CLAP_PARAM_IS_AUTOMATABLE, CLAP_PARAM_IS_READONLY, CLAP_PARAM_IS_STEPPED,
+    clap_param_info, clap_plugin_params,
 };
 use clap_sys::ext::state::{CLAP_EXT_STATE, clap_plugin_state};
 use clap_sys::ext::tail::{CLAP_EXT_TAIL, clap_plugin_tail};
@@ -234,12 +234,16 @@ unsafe extern "C" fn params_info(
     // SAFETY, for this function's `unsafe` blocks: `info` is an out-pointer the host owns for the call (checked non-null above).
     let info = unsafe { &mut *info };
     info.id = index;
-    info.flags = CLAP_PARAM_IS_AUTOMATABLE
-        | if index == core::MODE {
-            CLAP_PARAM_IS_STEPPED
-        } else {
-            0
-        };
+    // The meter is the one parameter the host may not write.
+    info.flags = if index == core::METER {
+        CLAP_PARAM_IS_READONLY
+    } else {
+        CLAP_PARAM_IS_AUTOMATABLE
+    } | if index == core::MODE {
+        CLAP_PARAM_IS_STEPPED
+    } else {
+        0
+    };
     info.cookie = ptr::null_mut();
     info.name = [0; CLAP_NAME_SIZE];
     let name = core::NAMES[index as usize].as_bytes();

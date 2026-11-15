@@ -20,4 +20,5 @@ mod scene_render;
 mod system_clock;
 mod transport_verbs;
 mod typed_params;
+mod unwired;
 mod vocabulary;

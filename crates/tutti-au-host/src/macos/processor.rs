@@ -18,8 +18,9 @@ use tutti_au_ffi::{
 };
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    AudioBufferMut, MIDI_STACK_CAPACITY, ParamMapping, PlayheadWatch, PluginError, PluginIo,
-    PluginResult, ProcessContext, ProcessOutput, Processor, TransportInfo, WireMidi, is_usable,
+    AudioBufferMut, MIDI_STACK_CAPACITY, ParamId, ParamMapping, ParamWriteError, PlayheadWatch,
+    PluginError, PluginIo, PluginResult, ProcessContext, ProcessOutput, Processor, TransportInfo,
+    WireMidi, is_usable,
 };
 use tutti_rt::Reader;
 use tutti_ump::SysexAssembler;
@@ -260,6 +261,9 @@ pub struct AuProcessor {
     block_size: u32,
     /// The block's staged automation, which the render notify schedules.
     stage: SharedStage,
+    /// Automation points for a parameter the AU does not declare or declares
+    /// read-only, which are not applied, since activation.
+    param_points_dropped: u64,
 }
 
 /// What `send_midi` delivers through: the protocol the unit takes, the list
@@ -388,6 +392,7 @@ impl AuProcessor {
             midi: MidiDelivery::new(midi_protocol),
             block_size,
             stage,
+            param_points_dropped: 0,
         }
     }
 
@@ -553,6 +558,14 @@ impl AuProcessor {
         }
     }
 
+    /// Automation points dropped since activation because the AU does not
+    /// declare their parameter, or declares it read-only
+    /// (`kAudioUnitParameterFlag_IsWritable` clear): the host writes none of
+    /// them.
+    pub fn param_points_dropped(&self) -> u64 {
+        self.param_points_dropped
+    }
+
     /// Channel voice messages dropped since activation because they were of a
     /// Group other than 0 on the legacy path (see [`send_midi`](Self::send_midi)).
     /// Zero on a unit that takes MIDI 2.0, which is sent the Group.
@@ -716,6 +729,13 @@ impl AuProcessor {
             let scheduled = self.rendering.notify.is_some();
             for queue in &changes.queues {
                 let id = queue.param_id.get();
+                // One policy on every route: a parameter the AU does not declare,
+                // or declares read-only, is never written. Its points are
+                // counted, not applied.
+                if ParamWriteError::check(ParamId::new(id), table.access(id)).is_err() {
+                    self.param_points_dropped += queue.points.len() as u64;
+                    continue;
+                }
                 let (Some(bounds), Some(slot), Some(last)) =
                     (table.bounds(id), table.slot(id), queue.points.last())
                 else {
@@ -861,6 +881,40 @@ mod tests {
         let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(tutti_types::Samples(512)));
         au.activate(tutti_fixtures::main_thread(), prepare)
             .unwrap_or_else(|e| panic!("AUDelay activates: {}", e.reason))
+    }
+
+    /// **Automation for a parameter the AU does not declare is counted, not
+    /// applied**: two points for an id AUDelay lacks leave the unit's stage
+    /// empty and read as two dropped points; a declared parameter's point beside
+    /// them is staged as usual.
+    #[test]
+    fn automation_for_an_undeclared_parameter_is_counted_not_written() {
+        let (mut processor, _controller) = delay();
+        let mut changes = ParameterChanges::reserved(2, 4);
+        assert!(changes.add_change(ParamId::from(9_999), 3, 0.25));
+        assert!(changes.add_change(ParamId::from(9_999), 25, 0.75));
+        assert!(changes.add_change(ParamId::from(0), 3, 0.5));
+        let ctx = ProcessContext::new().params(&changes);
+
+        let input = vec![vec![0.0f32; 64]; 2];
+        let mut output = vec![vec![0.0f32; 64]; 2];
+        let inputs: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
+        let mut outputs: Vec<&mut [f32]> = output.iter_mut().map(|v| v.as_mut_slice()).collect();
+        let mut out = ProcessOutput::default();
+        let mut buffer = AudioBufferMut::F32(AudioBuffer {
+            inputs: &inputs,
+            outputs: &mut outputs,
+            num_samples: 64,
+            sample_rate: 48_000.0,
+        });
+        processor.render(&mut buffer, &ctx, &mut out).unwrap();
+
+        assert_eq!(processor.param_points_dropped(), 2);
+        assert_eq!(
+            processor.stage.borrow().ends().len(),
+            1,
+            "only the declared parameter was staged"
+        );
     }
 
     /// A block's automation points are staged and then handed to the unit from

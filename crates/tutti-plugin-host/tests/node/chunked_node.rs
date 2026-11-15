@@ -148,7 +148,14 @@ macro_rules! rec_control {
             fn parameter(&self, _: MainThreadMarker, _: ParamId) -> Option<Normalized> {
                 None
             }
-            fn set_parameter(&mut self, _: MainThreadMarker, _: ParamId, _: Normalized) {}
+            fn set_parameter(
+                &mut self,
+                _: MainThreadMarker,
+                _: ParamId,
+                _: Normalized,
+            ) -> Result<(), tutti_plugin_types::ParamWriteError> {
+                Ok(())
+            }
             fn parameter_plain(
                 &self,
                 _: MainThreadMarker,

@@ -31,7 +31,7 @@ fn rig(clip: MidiClipNode, max: usize) -> (Editor, Executor, MidiClipControls, S
 
 fn rig_with<N: IntoNode>(clip: N, max: usize) -> (Editor, Executor, N::Controls, Seen) {
     let mut rig = EventRig::events_only(RATE, max, 1);
-    let controls = rig.editor.insert(NodeKey(1), "clip", clip);
+    let controls = rig.editor.insert(NodeKey(1), "clip", clip).controls;
     rig.feed(NodeKey(1), 0, 0);
     rig.commit();
     (rig.editor, rig.exec, controls, rig.seen)

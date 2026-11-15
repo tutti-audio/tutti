@@ -129,7 +129,7 @@ impl Shared {
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
 /// let c_major = Harmony::chord(60, 60, 0b1001_0001);
 /// let node = HarmonyNode::new([TimedHarmony::new(Beat(0.0), c_major)]);
-/// let controls = editor.insert(NodeKey(1), "harmony", node);
+/// let controls = editor.insert(NodeKey(1), "harmony", node).controls;
 /// assert_eq!(controls.len(), 1);
 /// ```
 pub struct HarmonyNode {

@@ -6,8 +6,8 @@ const RATE: SampleRate = SampleRate::SR_48K;
 /// 10^-3 exactly. At RT60 2 s it loses 30 dB: 10^-1.5.
 #[test]
 fn a_loop_that_decays_sixty_decibels_per_trip_has_a_thousandth_gain() {
-    assert!((loop_gain(48_000.0, Seconds(1.0), RATE).get() - 1e-3).abs() < 1e-9);
-    let g = loop_gain(48_000.0, Seconds(2.0), RATE);
+    assert!((loop_gain(SampleSpan::of(48_000.0), Seconds(1.0), RATE).get() - 1e-3).abs() < 1e-9);
+    let g = loop_gain(SampleSpan::of(48_000.0), Seconds(2.0), RATE);
     assert!((g.get() - 10f32.powf(-1.5)).abs() < 1e-6, "{g}");
 }
 
@@ -15,13 +15,17 @@ fn a_loop_that_decays_sixty_decibels_per_trip_has_a_thousandth_gain() {
 #[test]
 fn rt60_from_gain_inverts_loop_gain() {
     for rate in [44_100.0, 48_000.0, 96_000.0] {
-        for delay in [1.0f32, 37.5, 1116.0, 40_000.0] {
+        for delay in [1.0f64, 37.5, 1116.0, 40_000.0] {
             for rt60 in [0.05f32, 0.5, 2.0, 8.0] {
-                let g = loop_gain(delay, Seconds::from_f32(rt60), SampleRate::of(rate));
+                let g = loop_gain(
+                    SampleSpan::of(delay),
+                    Seconds::from_f32(rt60),
+                    SampleRate::of(rate),
+                );
                 if g.get() <= 1e-6 {
                     continue; // below f32's resolution of a gain
                 }
-                let back = rt60_from_gain(g, delay, SampleRate::of(rate)).to_f32();
+                let back = rt60_from_gain(g, SampleSpan::of(delay), SampleRate::of(rate)).to_f32();
                 assert!((back - rt60).abs() <= 2e-3 * rt60, "{back} vs {rt60}");
             }
         }
@@ -35,7 +39,7 @@ fn rt60_from_gain_inverts_loop_gain() {
 fn rt60_from_gain_is_exact() {
     let want = -3.0 * 100.0 / (48_000.0 * libm::log10(0.5));
     assert_eq!(
-        rt60_from_gain(Amplitude(0.5), 100.0, SampleRate::SR_48K),
+        rt60_from_gain(Amplitude(0.5), SampleSpan::of(100.0), SampleRate::SR_48K),
         Seconds(want)
     );
 }
@@ -45,28 +49,54 @@ fn rt60_from_gain_is_exact() {
 /// gain below 1 decays at once.
 #[test]
 fn the_edges_of_the_formula() {
-    assert_eq!(loop_gain(100.0, Seconds(0.0), RATE), Amplitude::SILENT);
-    assert_eq!(loop_gain(100.0, Seconds(f64::NAN), RATE), Amplitude::SILENT);
     assert_eq!(
-        loop_gain(100.0, Seconds(f64::INFINITY), RATE),
+        loop_gain(SampleSpan::of(100.0), Seconds(0.0), RATE),
+        Amplitude::SILENT
+    );
+    assert_eq!(
+        loop_gain(SampleSpan::of(100.0), Seconds(f64::NAN), RATE),
+        Amplitude::SILENT
+    );
+    assert_eq!(
+        loop_gain(SampleSpan::of(100.0), Seconds(f64::INFINITY), RATE),
         Amplitude::UNITY
     );
-    assert_eq!(rt60_from_gain(Amplitude(0.0), 100.0, RATE).to_f32(), 0.0);
     assert_eq!(
-        rt60_from_gain(Amplitude(1.0), 100.0, RATE).to_f32(),
+        rt60_from_gain(Amplitude(0.0), SampleSpan::of(100.0), RATE).to_f32(),
+        0.0
+    );
+    assert_eq!(
+        rt60_from_gain(Amplitude(1.0), SampleSpan::of(100.0), RATE).to_f32(),
         f32::INFINITY
     );
     assert_eq!(
-        rt60_from_gain(Amplitude(1.2), 100.0, RATE).to_f32(),
+        rt60_from_gain(Amplitude(1.2), SampleSpan::of(100.0), RATE).to_f32(),
         f32::INFINITY
     );
     assert_eq!(
-        rt60_from_gain(Amplitude(f32::NAN), 100.0, RATE).to_f32(),
+        rt60_from_gain(Amplitude(f32::NAN), SampleSpan::of(100.0), RATE).to_f32(),
         f32::INFINITY
     );
     assert_eq!(
-        rt60_from_gain(Amplitude(-0.5), 100.0, RATE).to_f32(),
+        rt60_from_gain(Amplitude(-0.5), SampleSpan::of(100.0), RATE).to_f32(),
         f32::INFINITY
     );
-    assert_eq!(rt60_from_gain(Amplitude(0.5), 0.0, RATE).to_f32(), 0.0);
+    assert_eq!(
+        rt60_from_gain(Amplitude(0.5), SampleSpan::of(0.0), RATE).to_f32(),
+        0.0
+    );
+}
+
+/// An RT60 whose frame count overflows `f64` never decays, like an infinite one: gain 1,
+/// not the silence of a loop with no memory.
+#[test]
+fn an_rt60_too_long_to_count_in_frames_never_decays() {
+    assert_eq!(
+        loop_gain(SampleSpan::of(100.0), Seconds(1e300), SampleRate::of(1e10)),
+        Amplitude::UNITY
+    );
+    assert_eq!(
+        loop_gain(SampleSpan::of(100.0), Seconds(1e300), RATE),
+        Amplitude::UNITY
+    );
 }
