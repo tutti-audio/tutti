@@ -12,13 +12,13 @@ use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_plugin::catalog::{Catalog, Hosting, PluginId, PluginRef, PluginState};
 use tutti_plugin::error::StateError;
 use tutti_plugin_db::PluginFormat;
-use tutti_plugin_types::TerminationReason;
 use tutti_plugin_types::{Normalized, ParamId};
+use tutti_plugin_types::{PluginFailure, TerminationReason};
 use tutti_session::{
     AddPluginError, CrossfadeRefused, DetachedSession, LoadError, Peer, PluginCause, PluginHealth,
     PoolEvent, PoolState, Presence, RecoveryPolicy, Resource, RetryError, Session, SessionEvent,
 };
-use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
+use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples, Tail};
 
 const BLOCK: usize = 512;
 
@@ -283,6 +283,14 @@ fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
         .graph_ref()
         .node_latency(node)
         .expect("the node is in the graph");
+    let tail = s
+        .graph_ref()
+        .node_tail(node)
+        .expect("the node is in the graph");
+    assert!(
+        matches!(tail, Tail::Finite(_)),
+        "the live plugin declares a tail: {tail:?}"
+    );
     let dead_pid = s
         .plugin_view(node)
         .unwrap()
@@ -297,10 +305,15 @@ fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
             held: Duration::from_secs(5),
         });
     pump_until(&mut s, "the death", |_| !before.presence().is_live());
-    assert!(matches!(
-        before.presence(),
-        Presence::Lost(PluginCause::Died(_))
-    ));
+    assert!(
+        matches!(
+            before.presence(),
+            Presence::Lost(PluginCause::Died(PluginFailure::Terminated {
+                reason: TerminationReason::Hung { .. }
+            }))
+        ),
+        "the entry says how the plugin died"
+    );
     // The node stays at its key, silent, in the plugin's place: its latency is
     // the plugin's last, its plugin is released, and the entry still holds it.
     pump_until(&mut s, "the death to be declared", |s| {
@@ -309,9 +322,11 @@ fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
             Ok(PluginHealth::Died { .. })
         )
     });
-    for _ in 0..10 {
-        let _ = pump(&mut s);
-    }
+    // The stand-in takes the plugin's place: it has no tail (the dead plugin's
+    // node still declared one), which is what tells the swap was made.
+    pump_until(&mut s, "the stand-in", |s| {
+        s.graph_ref().node_tail(node) == Ok(Tail::None)
+    });
     assert_eq!(
         s.graph_ref().node_latency(node),
         Ok(latency),
@@ -337,11 +352,13 @@ fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
         s.plugin(&"verb").unwrap().presence(),
         Presence::Live
     ));
-    // The reloaded plugin is the node's: it swaps in at the same key.
+    // The reloaded plugin is the node's: it swaps in at the same key, taking
+    // the stand-in's place and its own tail back.
     pump_until(&mut s, "the node's new plugin", |s| {
         s.plugin_view(node)
             .is_ok_and(|view| view.diagnostics().server_pid() != Some(dead_pid))
     });
+    assert_eq!(s.graph_ref().node_tail(node), Ok(tail));
     assert!(matches!(
         s.add_pooled_plugin(&"verb"),
         Err(AddPluginError::Installed("verb"))
@@ -564,9 +581,15 @@ impl Node for Grenade {
 /// A session with no output, whose audio side a test can take (a re-prepare
 /// then waits for it).
 fn detached() -> DetachedSession {
+    detached_with(Some(RecoveryPolicy::default()))
+}
+
+/// [`detached`] with `recovery` as its policy (`None`: recovery off).
+fn detached_with(recovery: Option<RecoveryPolicy>) -> DetachedSession {
     servers();
     Session::builder()
         .max_block(MaxBlock::of(Samples(BLOCK)))
+        .plugin_recovery(recovery)
         .build_detached(SampleRate::SR_48K)
         .expect("a detached session builds")
 }
@@ -817,6 +840,51 @@ fn a_graph_that_refuses_the_swap_fails_the_entry() {
         s.plugin_view(node).unwrap().descriptor().id,
         tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap()
     );
+}
+
+/// **A plugin that dies while the graph re-prepares is silenced at the next
+/// phase that can**: the dead plugin's node keeps its tail until the swap is
+/// made (the graph refuses it mid re-prepare and asks again), and has none
+/// once the re-prepare resumes.
+#[test]
+fn a_plugin_that_dies_during_a_re_prepare_is_silenced_when_it_resumes() {
+    let (catalog, _dir) = catalog();
+    let (mut s, node) = with_node_in(detached_with(None), &catalog);
+    let tail = s
+        .graph_ref()
+        .node_tail(node)
+        .expect("the node is in the graph");
+    assert!(matches!(tail, Tail::Finite(_)), "{tail:?}");
+    let mut side = repreparing(&mut s);
+
+    s.plugin_view(node)
+        .unwrap()
+        .diagnostics()
+        .terminate(TerminationReason::Hung {
+            blocks: 16,
+            held: Duration::from_secs(5),
+        });
+    settle_until(&mut s, "the death to be declared", |s| {
+        matches!(
+            s.plugin_view(node).map(|view| view.health()),
+            Ok(PluginHealth::Died { .. })
+        )
+    });
+    for _ in 0..5 {
+        let _ = s.update();
+    }
+    assert_eq!(
+        s.graph_ref().node_tail(node),
+        Ok(tail),
+        "the graph is re-preparing: the swap waits"
+    );
+    assert!(s.graph_ref().contains(node));
+
+    let mut out = vec![Vec::new(), Vec::new()];
+    settle_until(&mut s, "the stand-in", |s| {
+        side.render(BLOCK, BLOCK, &mut out);
+        s.graph_ref().node_tail(node) == Ok(Tail::None)
+    });
 }
 
 /// The cases that name the server by its process id.

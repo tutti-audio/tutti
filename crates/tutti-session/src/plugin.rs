@@ -51,8 +51,10 @@
 //!
 //! - **Health.** `tutti_plugin_host::Liveness` observes the handle's status at
 //!   `PhaseCx::now`: dead after at least `Liveness::DEATHS` consecutive
-//!   unhealthy observations spanning at least the window. A dead plugin's
-//!   node is removed ([`Session::remove`]) and reported once,
+//!   unhealthy observations spanning at least the window. A dead pooled
+//!   plugin's node stays at its key, silent in its place, and the entry reads
+//!   lost; a node of a plugin the host inserted itself ([`Graph::host_plugin`](crate::Graph::host_plugin))
+//!   is removed ([`Session::remove`]). Either is reported once,
 //!   [`PluginChange::Died`].
 //! - **Reports.** What the plugin reported since the last update (its own edit
 //!   of a parameter, a rescan, a new tail, a bus change) is queued where it
@@ -103,7 +105,8 @@
 //!   one that panics [`RecoveryFailure::ReloadPanicked`]: a failed attempt.
 //! - **Reported.** [`PluginChange::Recovered`] says whether the state
 //!   came back and how old it was; a spent budget is
-//!   [`PluginChange::GaveUp`] and the node is removed.
+//!   [`PluginChange::GaveUp`], and the node is silenced (a pooled plugin's) or
+//!   removed (a host-inserted one).
 //!
 //! An in-process plugin (VST2) is not recovered: a crash in it takes the
 //! process, and a hang in it blocks the audio thread itself, which nothing
@@ -388,8 +391,9 @@ pub(crate) enum PluginLiveness {
         /// Why it needs a replacement.
         cause: ReloadCause,
     },
-    /// Written off: its node is being removed (recovery off, or its budget
-    /// spent).
+    /// Written off (recovery off, or its budget spent): a pooled plugin's node
+    /// stays at its key, silent; a host-inserted plugin's node is being
+    /// removed.
     Dead {
         /// The engine's latched reason.
         cause: PluginFailure,
@@ -400,10 +404,11 @@ pub(crate) enum PluginLiveness {
 /// one reading of what the engine latched, the session's debounce and its
 /// recovery.
 ///
-/// The verdicts that remove the node (written off with recovery off, or
-/// recovery's budget spent) are not here: the node and its view are gone in the
-/// update that reaches them, and the events say so ([`PluginChange::Died`],
-/// [`PluginChange::GaveUp`]).
+/// The verdicts that remove a host-inserted plugin's node (written off with
+/// recovery off, or recovery's budget spent) are not here: the node and its
+/// view are gone in the update that reaches them, and the events say so
+/// ([`PluginChange::Died`], [`PluginChange::GaveUp`]). A pooled plugin's node
+/// stays at its key, silent, and reads [`Died`](Self::Died) for good.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum PluginHealth {
@@ -415,7 +420,8 @@ pub enum PluginHealth {
     Stalled,
     /// The engine reports it dead, and the session has not yet written it off
     /// (it waits out a debounce first). It then becomes
-    /// [`Reloading`](Self::Reloading), or, with recovery off, its node is
+    /// [`Reloading`](Self::Reloading), or, with recovery off, a pooled
+    /// plugin's node stays at its key, silent, and a host-inserted one's is
     /// removed.
     Died {
         /// The engine's latched reason.
@@ -505,9 +511,10 @@ pub enum PluginChange {
     /// [`Opened::Embedded`](crate::Opened::Embedded)'s is.
     EditorWantsSize(Size),
     /// A hosted plugin was declared dead
-    /// (`tutti_plugin_host::Liveness`) with recovery off: its node was
+    /// (`tutti_plugin_host::Liveness`) with recovery off: a pooled plugin's
+    /// node stays at its key, silent, and a host-inserted plugin's node was
     /// removed. Reported once. With recovery on the death is
-    /// [`Reloading`](Self::Reloading), and the node's removal
+    /// [`Reloading`](Self::Reloading), and the node's end
     /// [`GaveUp`](Self::GaveUp).
     Died {
         /// The engine's latched reason.
@@ -538,7 +545,8 @@ pub enum PluginChange {
         /// Attempts it took.
         attempts: u32,
     },
-    /// Recovery stopped: the failures spent the budget. The node is removed.
+    /// Recovery stopped: the failures spent the budget. A pooled plugin's node
+    /// stays at its key, silent; a host-inserted plugin's node is removed.
     GaveUp {
         /// Why.
         why: GiveUp,

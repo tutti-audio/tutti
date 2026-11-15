@@ -4,7 +4,8 @@ use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 
 /// A node that renders silence in the shape the plugin's node had: its ports,
 /// events and latency, so the wiring stays valid and delay compensation does
-/// not move, with no tail, so it parks. A fork of it is itself.
+/// not move, with no tail (nothing is left to sound after its input stops) and
+/// a light cost, and it parks (it returns `Idle`). A fork of it is itself.
 #[derive(Clone, Debug)]
 pub(crate) struct Lost {
     shape: Shape,
@@ -14,7 +15,9 @@ impl Lost {
     /// The stand-in for a node of `shape`.
     pub(crate) const fn of(shape: Shape) -> Self {
         Self {
-            shape: shape.with_tail(tutti_types::Tail::None),
+            shape: shape
+                .with_tail(tutti_types::Tail::None)
+                .with_cost(tutti_graph::Cost::Light),
         }
     }
 }
@@ -27,7 +30,8 @@ impl Node for Lost {
     fn prepare(&mut self, _: &Prepare) {}
 
     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
-        Status::Silent
+        // Nothing is pending inside it: with no tail, an idle node parks.
+        Status::Idle
     }
 
     fn reset(&mut self) {}

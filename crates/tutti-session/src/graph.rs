@@ -1008,7 +1008,9 @@ impl Graph {
     /// ([`Lost`](crate::plugin::Lost)), the plugin's record kept: the node keeps
     /// its key, its ports, its wiring and its latency, renders silence and has
     /// no tail, and the plugin's node is retired to the control thread. Returns
-    /// whether the swap was made: not while the graph re-prepares.
+    /// whether the swap was made: not while the graph re-prepares. A swap parked
+    /// for the same node (a crossfade waiting for the re-prepare) lands after the
+    /// stand-in and wins.
     ///
     /// # Errors
     ///
@@ -1028,6 +1030,8 @@ impl Graph {
         match self.swap_unit(node, stand_in, tutti_graph::DECLICK, FadeLaw::default()) {
             Ok(_) => Ok(true),
             Err(ReplaceRefused::Failed(refused)) => Err(refused),
+            // A re-prepare is `swap_unit`'s only cause for `Busy`, and it was
+            // checked above on this thread.
             Err(ReplaceRefused::Busy(_)) => unreachable!("checked above"),
         }
     }
