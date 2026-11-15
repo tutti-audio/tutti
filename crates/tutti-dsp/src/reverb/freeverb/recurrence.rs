@@ -23,7 +23,7 @@ use core::ops::Range;
 
 use crate::reverb::fdn::bank::{CHUNK, ramp};
 use crate::reverb::network::{Absorption, Network, NetworkCapacity, Stage};
-use crate::{Approach, Effort, Feed, Glide, Recurrence, Setup, Start, Steps};
+use crate::{Approach, Effort, Glide, Inputs, Recurrence, Setup, Start, Steps};
 
 /// A Freeverb at one sample rate: mono in, stereo out, with the comb feedback and
 /// damping the only figures that move (`set_combs`).
@@ -377,7 +377,7 @@ impl Recurrence for FreeverbRecurrence {
         &self,
         c: &FreeverbCoeffs,
         state: &mut Freeverb,
-        feed: &Feed<'_>,
+        feed: &Inputs<'_>,
         output: &mut [&mut [f32]],
         frames: Range<usize>,
         _: usize,

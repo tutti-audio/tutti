@@ -1,7 +1,7 @@
 use tutti_types::{Amplitude, Db, Seconds, StereoWidth};
 
 use super::*;
-use crate::reverb::network::{Gains, Inline, Modulation, OutputMap, Tap, Taps};
+use crate::reverb::network::{Gains, Inline, LineModulation, OutputMap, Tap, Taps};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -12,7 +12,7 @@ fn gains(v: &[f32]) -> Gains {
 fn line(length: f32, absorption: Absorption) -> Line {
     Line {
         length,
-        modulation: Modulation::NONE,
+        modulation: LineModulation::NONE,
         absorption,
         diffuser: None,
     }
@@ -64,7 +64,7 @@ fn the_two_all_pass_forms_have_their_documented_gains() {
         let a = AllPass {
             delay: 8.0,
             gain: 0.5,
-            modulation: Modulation::NONE,
+            modulation: LineModulation::NONE,
             form,
         };
         let mut channels = Inline::new();
@@ -100,7 +100,7 @@ fn an_all_pass_has_the_l1_norm_of_its_impulse_response() {
         let a = AllPass {
             delay: 4.0,
             gain: g,
-            modulation: Modulation::NONE,
+            modulation: LineModulation::NONE,
             form,
         };
         let mut channels = Inline::new();

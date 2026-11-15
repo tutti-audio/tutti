@@ -16,7 +16,7 @@
 //! The crossover lands whole on the stream grid ([`Family::CADENCE`]), as
 //! [`CrossoverFamily`]'s does, and so do the detectors; only the
 //! makeups and the two weights glide. Each band's threshold is a per-frame lane of the
-//! [`Feed`] (lane `b` is band `b`'s).
+//! [`Inputs`] (lane `b` is band `b`'s).
 //!
 //! The deepest reduction each band reached since the last read is in the state
 //! ([`BandReductions`], the recurrence's [`Readout`]): a reading for a meter, which the node publishes.
@@ -31,7 +31,7 @@ use crate::control::COEFF_STREAM;
 use crate::filter::CrossoverState;
 use crate::{
     Approach, Cadence, ChannelRecurrence, Channels, CrossoverControls, CrossoverError,
-    CrossoverFamily, CrossoverModel, CrossoverTree, Effort, Family, Feed, Glide, Readout,
+    CrossoverFamily, CrossoverModel, CrossoverTree, Effort, Family, Glide, Inputs, Readout,
     Recurrence, Ring, Setup, Start, Steps, System,
 };
 
@@ -367,7 +367,7 @@ impl Readout for MultibandRecurrence {
 /// K, per frame: each channel through its crossover tree; then, per band in order, the
 /// band's level (the loudest channel of the band, a NaN reading as quiet), its compressor
 /// (the frame step of [`CompressorRecurrence`](super::CompressorRecurrence), at the
-/// threshold of lane `b` of the [`Feed`] when it is finite, else the member's), the bypass
+/// threshold of lane `b` of the [`Inputs`] when it is finite, else the member's), the bypass
 /// blend `g (1 - w) + w` (skipped at `w = 0`), the audible multiply (skipped at 1, and the
 /// band left out of the sum at 0) and each channel's `x g` added to its sum. The bands
 /// are summed lowest first, from 0.
@@ -456,7 +456,7 @@ impl Recurrence for MultibandRecurrence {
         &self,
         coeffs: &MultibandCoeffs,
         state: &mut MultibandState,
-        feed: &Feed<'_>,
+        feed: &Inputs<'_>,
         output: &mut [&mut [f32]],
         frames: Range<usize>,
         _: usize,

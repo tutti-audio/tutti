@@ -1,4 +1,5 @@
 use super::*;
+use crate::Window;
 
 /// The cutoff fit lands on the values rubato documents for it: 0.894 at 128
 /// taps and 0.947 at 256, each within 0.001. Worked by hand from the fit's
@@ -9,38 +10,6 @@ use super::*;
 fn the_cutoff_fit_matches_its_documented_values() {
     assert!((cutoff(128) - 0.894).abs() < 0.001, "{}", cutoff(128));
     assert!((cutoff(256) - 0.947).abs() < 0.001, "{}", cutoff(256));
-}
-
-/// The window is the squared four-term Blackman-Harris, from its closed
-/// form `w(x) = (a - b cos(2 pi x/n) + c cos(4 pi x/n) - d cos(6 pi x/n))^2`
-/// with `a, b, c, d = 0.35875, 0.48829, 0.14128, 0.01168`. At n = 64: the
-/// peak at x = 32 is `(a + b + c + d)^2 = 1`; the start is
-/// `(a - b + c - d)^2 = 0.00006^2 = 3.6e-9`; a quarter of the way in, the
-/// cosines at 2 pi x/n = pi/2 give `(a - c)^2 = 0.21747^2 = 0.047293`; and it is
-/// symmetric about the peak.
-#[test]
-fn the_window_is_the_squared_blackman_harris() {
-    let n = 64;
-    let w = window(n);
-    assert!((w[n / 2] - 1.0).abs() < 1e-5, "peak {}", w[n / 2]);
-    assert!(w[0] < 1e-6, "start {}", w[0]);
-    assert!((w[n / 4] - 0.047_293).abs() < 1e-5, "quarter {}", w[n / 4]);
-    let (peak, _) = w
-        .iter()
-        .enumerate()
-        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-        .unwrap();
-    assert_eq!(peak, n / 2);
-    for (x, (head, tail)) in w[1..].iter().zip(w[1..].iter().rev()).enumerate() {
-        assert!((head - tail).abs() < 1e-6, "asymmetric at {}", x + 1);
-    }
-    // The same closed form, in f64, at every tap.
-    for (x, &got) in w.iter().enumerate() {
-        let t = 2.0 * std::f64::consts::PI * x as f64 / n as f64;
-        let bh =
-            0.35875 - 0.48829 * t.cos() + 0.14128 * (2.0 * t).cos() - 0.01168 * (3.0 * t).cos();
-        assert!((got as f64 - bh * bh).abs() < 1e-6, "tap {x}");
-    }
 }
 
 /// The window sets the filter's response: a 256-tap, 0.9-cutoff filter is
@@ -140,4 +109,101 @@ fn an_overflowing_block_size_is_an_error() {
 fn a_zero_rate_is_an_error() {
     assert!(FftResampler::new(0, 48_000, 1024, 2, 1).is_err());
     assert!(FftResampler::new(44_100, 0, 1024, 2, 1).is_err());
+}
+
+/// The magnitude of `taps`' DFT in dB at `rel` times Nyquist, tap `n / 2`
+/// taken as the time origin so a symmetric filter has a real response.
+fn response_db(taps: &[f32], rel: f64) -> f64 {
+    let mid = (taps.len() / 2) as f64;
+    let (mut re, mut im) = (0.0f64, 0.0f64);
+    for (i, &t) in taps.iter().enumerate() {
+        let w = std::f64::consts::PI * rel * (i as f64 - mid);
+        re += f64::from(t) * w.cos();
+        im += f64::from(t) * w.sin();
+    }
+    20.0 * re.hypot(im).log10()
+}
+
+/// The resampler's filter against its design, at `n = 256` taps and cutoff
+/// 0.5, read as the DFT of the taps in `f64`:
+///
+/// - the passband (up to 0.4 of Nyquist) is flat within 0.01 dB;
+/// - the cutoff is the half-amplitude point, -6.02 dB within 0.5 dB, which is
+///   where a windowed sinc crosses its ideal edge;
+/// - beyond the main lobe of the squared four-term window (it convolves two
+///   four-bin lobes, so it ends `2 * 4 = 8` bins out, `2 * 8 / n` of Nyquist)
+///   the response is at the floor of the taps' `f32` narrowing. The window's
+///   own highest sidelobe is twice Blackman-Harris's published -92 dB, -184 dB,
+///   far under that floor, so the floor is what is left: each tap is off by at
+///   most `2^-24` of itself, so the response is off by at most
+///   `2^-24 * sum|t|` (the taps sum to 1), which the test computes from the
+///   taps and bounds the stopband by;
+/// - the transition is the ideal step convolved with the window's main lobe: at
+///   0.5, 1 and 2 bins either side of the cutoff the amplitude is 0.5 minus or
+///   plus the window spectrum's integral from the cutoff, over its integral
+///   across the lobe (the test integrates the window's DFT), within 0.002.
+#[test]
+fn the_filter_passes_to_its_cutoff_and_stops_at_the_taps_precision_floor() {
+    let n = 256usize;
+    let fc = 0.5f64;
+    let taps = sinc_filter(n, fc as f32);
+
+    for k in 0..=40 {
+        let rel = f64::from(k) / 40.0 * (fc - 0.1);
+        let db = response_db(&taps, rel);
+        assert!(db.abs() < 0.01, "{rel:.3} Nyquist: {db:.4} dB");
+    }
+    let edge = response_db(&taps, fc);
+    assert!((edge + 6.02).abs() < 0.5, "cutoff: {edge:.2} dB");
+
+    let sidelobe_db = 2.0 * -92.0;
+    let abs_sum: f64 = taps.iter().map(|&t| f64::from(t).abs()).sum();
+    let floor_db = 20.0 * (2.0f64.powi(-24) * abs_sum).log10();
+    let bound = floor_db.max(sidelobe_db);
+    let lobe = 2.0 * 8.0 / n as f64;
+    let mut worst = f64::MIN;
+    let mut rel = fc + lobe;
+    while rel <= 1.0 {
+        worst = worst.max(response_db(&taps, rel));
+        rel += 0.002;
+    }
+    assert!(
+        worst < bound,
+        "stopband worst {worst:.1} dB over {:.3}..1 Nyquist, bound {bound:.1} dB",
+        fc + lobe
+    );
+
+    // The transition is the ideal step convolved with the window's main lobe,
+    // so at `d` bins from the cutoff the amplitude is `0.5 +/- int_0^d A / int A`,
+    // `A(b) = sum_i w_i cos(2 pi b (i - n/2) / n)` the window's spectrum, and
+    // the integral over the whole lobe (+/- 8 bins) normalises it.
+    let w = CosineWindow::BLACKMAN_HARRIS_SQUARED.coefficients(n);
+    let spectrum = |b: f64| -> f64 {
+        w.iter()
+            .enumerate()
+            .map(|(i, &v)| {
+                let t = std::f64::consts::TAU * b * (i as f64 - (n / 2) as f64) / n as f64;
+                f64::from(v) * t.cos()
+            })
+            .sum()
+    };
+    let integral = |from: f64, to: f64| -> f64 {
+        let steps = 4000;
+        let h = (to - from) / f64::from(steps);
+        (0..steps)
+            .map(|k| spectrum(from + (f64::from(k) + 0.5) * h) * h)
+            .sum()
+    };
+    let total = integral(-8.0, 8.0);
+    for offset in [0.5f64, 1.0, 2.0] {
+        let rel = offset * 2.0 / n as f64;
+        let step = integral(0.0, offset) / total;
+        for (at, want) in [(fc + rel, 0.5 - step), (fc - rel, 0.5 + step)] {
+            let got = 10.0f64.powf(response_db(&taps, at) / 20.0);
+            assert!(
+                (got - want).abs() < 0.002,
+                "{offset} bins from the cutoff ({at:.4}): amplitude {got:.4}, lobe integral {want:.4}"
+            );
+        }
+    }
 }

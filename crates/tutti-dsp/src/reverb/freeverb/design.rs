@@ -19,8 +19,8 @@ use tutti_types::{Amplitude, BusTopology, Mix, SampleRate};
 use crate::reverb::fdn::bank::CHUNK;
 use crate::reverb::freeverb::recurrence::{Freeverb, FreeverbRecurrence};
 use crate::reverb::network::{
-    Absorption, AllPass, AllPassForm, Fdn, Gains, Inline, Line, MAX_CHANNELS, MAX_LINES, Matrix,
-    Modulation, Network, NetworkCapacity, OutputMap, Stage,
+    Absorption, AllPass, AllPassForm, Fdn, Gains, Inline, Line, LineModulation, MAX_CHANNELS,
+    MAX_LINES, Matrix, Network, NetworkCapacity, OutputMap, Stage,
 };
 use crate::{Cadence, Capacity, Channels, Family, Grows, MaxDecay, Reach};
 
@@ -139,7 +139,7 @@ impl Family for FreeverbFamily {
         for &tuning in COMBS_LEFT.iter().chain(&COMBS_RIGHT) {
             let line = Line {
                 length: Freeverb::scale_tuning(rate, tuning) as f32,
-                modulation: Modulation::NONE,
+                modulation: LineModulation::NONE,
                 absorption,
                 diffuser: None,
             };
@@ -177,7 +177,7 @@ impl Family for FreeverbFamily {
             let all_pass = |tuning| AllPass {
                 delay: Freeverb::scale_tuning(rate, tuning) as f32,
                 gain: Freeverb::ALLPASS_FEEDBACK,
-                modulation: Modulation::NONE,
+                modulation: LineModulation::NONE,
                 form: AllPassForm::Freeverb,
             };
             let mut channels = Inline::new();

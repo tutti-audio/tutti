@@ -138,6 +138,24 @@ pub struct CosineWindow {
     terms: &'static [f32],
 }
 
+/// The coefficients of the product of Blackman-Harris with itself.
+const SQUARED_BLACKMAN_HARRIS: [f32; 7] = {
+    let a = [0.35875f32, 0.48829, 0.14128, 0.01168];
+    let mut b = [0.0f32; 7];
+    let mut j = 0;
+    while j < 4 {
+        let mut k = 0;
+        while k < 4 {
+            let half = 0.5 * a[j] * a[k];
+            b[j + k] += half;
+            b[j.abs_diff(k)] += half;
+            k += 1;
+        }
+        j += 1;
+    }
+    b
+};
+
 impl CosineWindow {
     /// A window from raised-cosine coefficients.
     ///
@@ -177,6 +195,17 @@ impl CosineWindow {
     /// Its [`cola_overlap`](Window::cola_overlap) follows from its four
     /// terms.
     pub const BLACKMAN_HARRIS: Self = Self::new(&[0.35875, 0.48829, 0.14128, 0.01168]);
+
+    /// Periodic Blackman-Harris squared: seven terms, the product of
+    /// [`BLACKMAN_HARRIS`](Self::BLACKMAN_HARRIS) with itself. Its far
+    /// sidelobes sit below those of the window it squares, at the price of a
+    /// wider main lobe, which a windowed-sinc low-pass pays as a wider
+    /// transition band.
+    ///
+    /// The terms are `Σⱼₖ ½ aⱼ aₖ [cos((j+k)θ) + cos((j−k)θ)]` collected by
+    /// harmonic; the alternating sign `(−1)ᵐ` of harmonic `m` is the product of
+    /// its factors' signs.
+    pub const BLACKMAN_HARRIS_SQUARED: Self = Self::new(&SQUARED_BLACKMAN_HARRIS);
 
     /// No window at all — the identity, for callers holding samples that are
     /// already windowed.

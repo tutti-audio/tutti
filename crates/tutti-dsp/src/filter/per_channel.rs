@@ -13,7 +13,7 @@ use tutti_types::{BusTopology, ChannelLayout, SampleRate};
 
 use crate::control::{COEFF_STREAM, lane_group};
 use crate::{
-    Cadence, Channels, Effort, Family, Feed, Glide, LANES, Lerp, Recurrence, Start, System,
+    Cadence, Channels, Effort, Family, Glide, Inputs, LANES, Lerp, Recurrence, Start, System,
 };
 
 /// The most outputs one input channel makes: a crossover's bands.
@@ -204,7 +204,7 @@ impl<C: ChannelRecurrence> Recurrence for PerChannel<C> {
         &self,
         coeffs: &Glide<C::Coeffs>,
         state: &mut Vec<C::State>,
-        feed: &Feed<'_>,
+        feed: &Inputs<'_>,
         output: &mut [&mut [f32]],
         frames: Range<usize>,
         _: usize,
