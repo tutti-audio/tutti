@@ -13,16 +13,21 @@
 //!   pool, the transport, the heard tap and the load meter. The transport keeps
 //!   its place: a rolling one resumes at the beat the last block ended on, so
 //!   the switch costs wall-clock time and no musical time.
-//! - **Jobs in flight do not:** a job's result lands on the clock it was
-//!   submitted on, so each job still running when the switch begins lands as
-//!   [`JobFailed::Dropped`](crate::JobFailed::Dropped), reported once by the
-//!   events its lander raises. Pool entries are not jobs and are untouched.
+//! - **Jobs in flight carry over:** a job's lander names nothing of the clock,
+//!   so a job still running when the switch begins lands on the converted
+//!   session, once. Pool loads are jobs, so the entries loading carry over and
+//!   land after the switch. The one thing that cannot follow is a run asked
+//!   with [`Session::when_loaded`](crate::Session::when_loaded): its closure
+//!   takes the session of the clock it was asked of. Those whose entry has
+//!   loaded run first, on the old clock; the rest are reported once as
+//!   [`PoolEvent::RunDropped`](crate::PoolEvent::RunDropped).
 //! - **Captures end** when the session leaves the sound card: each input the
 //!   session held closes and is reported as
 //!   [`DeviceEvent::InputClosed`](crate::DeviceEvent) (feature `audio-io`).
 //! - **A rate that differs** is [`SessionEvent::RateChanged`].
 //! - **A failure gives the session back, running on its old clock,** unless the
-//!   graph is poisoned: everything checkable runs before the old stream stops
+//!   graph is poisoned (a stream that will not open after the stop is undone
+//!   by starting the old clock again at its old spec): everything checkable runs before the old stream stops
 //!   (the graph root against the new channel count, and the restart's own
 //!   refusals), and a device that will not open fails before anything stops.
 //!   After the stop, the only failure is a re-prepare that poisons the graph;
@@ -104,8 +109,12 @@ impl Session<SystemClock> {
     /// be found or opened, [`Error::Unplaceable`] or [`Error::Reprepare`] when the
     /// graph cannot take the device (a declared root it cannot place, a
     /// re-prepare already between its halves) **before the timer stops**, and
-    /// otherwise the re-prepare's own failure with the session stopped (see the
-    /// module docs).
+    /// otherwise the failure of the re-prepare or of the card's stream, with
+    /// the timer started again (the session stopped only if a re-prepare
+    /// poisoned the graph).
+    ///
+    /// A panic during the switch (a node's `prepare`, the OS) unwinds out of
+    /// this call and drops the session: it is not returned as a [`ClockError`].
     pub fn into_device(
         mut self,
         device: DeviceSelector,
@@ -123,13 +132,20 @@ impl Session<SystemClock> {
             return Err(ClockError::new(self, e));
         }
         let previous = self.graph.prepared().sample_rate();
+        // What the timer's stream reported since the last update is reported
+        // before the card's stream clears the record.
+        let mut unpolled = Vec::new();
+        self.fault_poll(&mut unpolled);
+        let old = self.running.host().stream().spec().clone();
         let host = self.running.take_host();
         match TuttiDriver::start_resolved(host, engine, resolved, |spec, stopped| {
             self.rerate(spec, stopped, None, None)
         }) {
-            Ok(driver) => Ok(self.on_device(driver, device, previous)),
+            Ok(driver) => Ok(self.on_device(driver, device, previous, unpolled)),
             Err((host, e)) => {
                 self.running.host = Some(host);
+                self.back_to_the_timer(old);
+                self.carried_events.append(&mut unpolled);
                 Err(ClockError::new(self, e))
             }
         }
@@ -155,16 +171,35 @@ impl Session<SystemClock> {
             return Err(ClockError::new(self, e));
         }
         let previous = self.graph.prepared().sample_rate();
+        let mut unpolled = Vec::new();
+        self.fault_poll(&mut unpolled);
+        let old = self.running.host().stream().spec().clone();
         let host = self.running.take_host();
         match TuttiDriver::start_on(host, spec, driver, |spec, stopped| {
             self.rerate(spec, stopped, None, None)
         }) {
-            Ok(driver) => Ok(self.on_device(driver, DeviceSelector::default(), previous)),
+            Ok(driver) => Ok(self.on_device(driver, DeviceSelector::default(), previous, unpolled)),
             Err((host, e)) => {
                 self.running.host = Some(host);
+                self.back_to_the_timer(old);
+                self.carried_events.append(&mut unpolled);
                 Err(ClockError::new(self, e))
             }
         }
+    }
+
+    /// A switch failed after the timer stopped: the timer starts again at the
+    /// spec it had, the graph re-prepared at its rate and block. If that fails
+    /// too (a graph that no longer compiles), the session stays stopped.
+    fn back_to_the_timer(&mut self, old: OutputSpec) {
+        let mut host = self.running.take_host();
+        let restored = host.restart_with(
+            || Ok::<_, Error>((old, TimerDriver::new())),
+            |spec, stopped| self.rerate(spec, stopped, None, None),
+        );
+        self.faults_seen = host.stream().faults().count();
+        self.running.host = Some(host);
+        let _ = restored;
     }
 
     /// The session on the sound card's clock, now the card's stream runs.
@@ -173,8 +208,9 @@ impl Session<SystemClock> {
         driver: TuttiDriver,
         chosen: DeviceSelector,
         previous: SampleRate,
+        unpolled: Vec<SessionEvent>,
     ) -> LiveSession {
-        let mut events = Vec::new();
+        let mut events = unpolled;
         let audio_host = self.running.audio_host;
         let (mut live, _timer) =
             self.with_clock::<DeviceClock>(DeviceHandle::vacant(audio_host), &mut events);
@@ -214,32 +250,93 @@ impl Session<DeviceClock> {
     /// end ([`DeviceEvent::InputClosed`](crate::DeviceEvent), feature
     /// `audio-io`); the device watch ends with the device.
     ///
+    /// **A failure gives the session back running on the card**: before the
+    /// stream stops when the graph cannot re-prepare, and after it (the timer
+    /// thread would not start, or the graph would not re-prepare) by starting
+    /// the card again at the spec it had. Only when that fails too is the
+    /// session returned stopped.
+    ///
+    /// A panic during the switch (a node's `prepare`, the OS) unwinds out of
+    /// this call and drops the session: it is not returned as a [`ClockError`].
+    ///
     /// # Errors
     ///
     /// A [`ClockError`] whose error is [`Error::Reprepare`] before the stream
     /// stops when the graph cannot re-prepare, and otherwise the re-prepare's
-    /// own failure with the session stopped (see the module docs).
-    pub fn into_system_clock(mut self) -> std::result::Result<SystemSession, ClockError<Self>> {
+    /// or the timer's own failure ([`Error::Clock`]).
+    pub fn into_system_clock(self) -> std::result::Result<SystemSession, ClockError<Self>> {
+        self.into_timer(TimerDriver::new(), |session, device, old| {
+            let chosen = device.chosen.clone();
+            device
+                .driver
+                .restart_with(chosen, |spec, stopped| {
+                    session.rerate(spec, stopped, None, None)
+                })
+                .map_err(|_: Error| ())?;
+            let _ = old;
+            Ok(())
+        })
+    }
+
+    /// [`into_system_clock`](Self::into_system_clock) on a timer driver of the
+    /// caller's choosing, and `back` the driver the card is started again on
+    /// should that fail: the device-free switch, for a test. Behind `testing`.
+    ///
+    /// # Errors
+    ///
+    /// As [`into_system_clock`](Self::into_system_clock).
+    #[cfg(feature = "testing")]
+    pub fn into_system_clock_on<B: StreamDriver>(
+        self,
+        timer: impl StreamDriver<Error = tutti_engine::TimerError>,
+        back: B,
+    ) -> std::result::Result<SystemSession, ClockError<Self>>
+    where
+        B::Error: Into<tutti_cpal::Error>,
+    {
+        self.into_timer(timer, |session, device, old| {
+            device
+                .driver
+                .switch(old, back, |spec, stopped| {
+                    session.rerate(spec, stopped, None, None)
+                })
+                .map_err(|_: Error| ())
+        })
+    }
+
+    /// The switch to a timer driven by `timer`; `undo` starts the card again.
+    fn into_timer<D>(
+        mut self,
+        timer: D,
+        undo: impl FnOnce(&mut Self, &mut Device, OutputSpec) -> std::result::Result<(), ()>,
+    ) -> std::result::Result<SystemSession, ClockError<Self>>
+    where
+        D: StreamDriver<Error = tutti_engine::TimerError>,
+    {
         let rate = self.device().graph_rate();
-        let mut spec = self
-            .device()
-            .spec()
-            .clone()
-            .with_quantum(self.graph.prepared().max_block());
+        let old = self.device().spec().clone();
+        let mut spec = old.clone().with_quantum(self.graph.prepared().max_block());
         spec.sample_rate = rate;
         if let Err(e) = self.check_switch(spec.channels) {
             return Err(ClockError::new(self, e));
         }
+        // What the card's stream reported since the last update is reported
+        // before the timer's start clears the record.
+        let mut events = Vec::new();
+        self.fault_poll(&mut events);
         let moved = self.with_device(|session, device| {
             device.driver.host_mut().restart_with(
-                || Ok::<_, Error>((spec, TimerDriver::new())),
+                || Ok::<_, Error>((spec, timer)),
                 |spec, stopped| session.rerate(spec, stopped, None, None),
             )
         });
         if let Err(e) = moved {
+            // The card again, at its old rate and block.
+            let _ = self.with_device(|session, device| undo(session, device, old));
+            self.faults_seen = self.device().faults().count();
+            self.carried_events.append(&mut events);
             return Err(ClockError::new(self, e));
         }
-        let mut events = Vec::new();
         #[cfg(feature = "audio-io")]
         events.extend(
             self.inputs
@@ -255,6 +352,10 @@ impl Session<DeviceClock> {
             },
             &mut events,
         );
+        // What the card's restarts reported and nothing polled yet is not lost
+        // with the card.
+        let mut handle = handle;
+        events.append(&mut handle.events);
         system.running.host = Some(handle.into_device().driver.into_host());
         system.faults_seen = system.running.host().stream().faults().count();
         let now = system.graph.prepared().sample_rate();

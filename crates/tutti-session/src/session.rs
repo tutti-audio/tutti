@@ -229,7 +229,8 @@ pub enum SessionEvent {
     BlocksSilenced(u64),
     /// The session's rate changed with its clock: a switch onto a sound card
     /// that runs at another rate, or the card's rate carried to the timer. A
-    /// capture a host holds itself at the graph's rate reopens on it.
+    /// capture a host holds itself (not one the session added) is at the old
+    /// rate and is the host's to reopen.
     RateChanged {
         /// The rate the graph ran at.
         from: tutti_types::SampleRate,
@@ -529,7 +530,7 @@ pub struct Session<C: Clock = Offline> {
     #[cfg(feature = "export")]
     pub(crate) bounce: crate::bounce::BounceState,
     /// The blocking work running on the spawner, landed in `Phase::Collect`.
-    pub(crate) jobs: crate::jobs::Jobs<C>,
+    pub(crate) jobs: crate::jobs::Jobs,
     /// What every plugin this session loads hands to the main thread: the closes of
     /// a drop off the main thread. The handle is cloned into each load.
     #[cfg(feature = "plugin")]
@@ -664,18 +665,16 @@ impl<C: Clock> Session<C> {
     /// The same session on the clock `running` belongs to: every field moves,
     /// the clock's own state is swapped, and the old one is handed back.
     ///
-    /// Jobs still in flight on this clock are failed first, each as
-    /// [`JobFailed::Dropped`](crate::JobFailed::Dropped), landed on this
-    /// session (the events they report go to `out`): a job's lander is typed to
-    /// the clock it was submitted on. Jobs that already finished land as they
-    /// would.
+    /// Jobs in flight carry over: a job's lander is typed to nothing of the
+    /// clock, and lands on the converted session. The runs waiting for an
+    /// entry to load (`when_loaded`) are typed to the clock they were asked of:
+    /// those whose entry has loaded run first, the rest are reported
+    /// [`PoolEvent::RunDropped`](crate::PoolEvent::RunDropped).
     pub(crate) fn with_clock<K: Clock>(
         mut self,
         running: K::Running,
         out: &mut Vec<SessionEvent>,
     ) -> (Session<K>, C::Running) {
-        self.land_jobs(out);
-        self.fail_jobs(out);
         // The runs whose entry has loaded run here, on the clock they were
         // asked of; the rest cannot follow the session to the next.
         self.pool_run_loaded();
@@ -802,7 +801,7 @@ impl<C: Clock> Session<C> {
                 render_mode,
                 #[cfg(feature = "export")]
                 bounce,
-                jobs: jobs.rebind(),
+                jobs,
                 #[cfg(feature = "plugin")]
                 work,
                 #[cfg(feature = "plugin")]
@@ -1351,7 +1350,7 @@ impl<C: Clock> Session<C> {
     /// its own kind, and a later fault that only bumps the count (an overrun
     /// the record keeps no message for beside a latched panic) is not read as
     /// the old message again.
-    fn fault_poll(&mut self, out: &mut Vec<SessionEvent>) -> bool {
+    pub(crate) fn fault_poll(&mut self, out: &mut Vec<SessionEvent>) -> bool {
         let Some(stream) = crate::clock::sealed::Running::stream(&self.running) else {
             return false;
         };

@@ -171,7 +171,7 @@ enum Arrival {
 }
 
 /// A job's lander, typed away: it downcasts what its own work sent.
-type Lander<C> = Box<dyn FnMut(&mut Session<C>, Arrival, &mut Vec<SessionEvent>) + Send>;
+type Lander = Box<dyn FnMut(&mut dyn JobSession, Arrival, &mut Vec<SessionEvent>) + Send>;
 
 /// The spawner a host gives the session.
 #[derive(Clone)]
@@ -204,16 +204,16 @@ impl fmt::Debug for Spawner {
 
 /// The session's jobs: the spawner, the channel their arrivals come back
 /// on, and the lander of each job still running.
-pub(crate) struct Jobs<C: Clock> {
+pub(crate) struct Jobs {
     spawn: Spawner,
     tx: Sender<Arrival>,
     rx: Receiver<Arrival>,
-    landers: HashMap<JobId, Lander<C>>,
+    landers: HashMap<JobId, Lander>,
     next: tutti_types::Mint,
     closed: Arc<AtomicBool>,
 }
 
-impl<C: Clock> fmt::Debug for Jobs<C> {
+impl fmt::Debug for Jobs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Jobs")
             .field("running", &self.landers.len())
@@ -221,43 +221,131 @@ impl<C: Clock> fmt::Debug for Jobs<C> {
     }
 }
 
-/// What a job reports when it ends: the events of its landing, built where the
-/// result is, so the lander needs nothing of the session.
-#[cfg(feature = "midi")]
-pub(crate) type Report = Box<dyn FnOnce(&mut Vec<SessionEvent>) + Send>;
-
-/// The jobs a handle that holds no session (the session's MIDI view) submits:
-/// jobs whose landing only reports events, so they do not name the session's
-/// clock.
-#[cfg(feature = "midi")]
-pub(crate) trait EventJobs: fmt::Debug {
-    /// Runs `work` on the spawner and reports what it returns at a later
-    /// update; a job that did not finish reports what `failed` makes of why.
-    fn submit_events(
+/// What a job's lander may do to the session, whichever clock it is on: a
+/// lander is typed to nothing of the clock, so the jobs in flight at a clock
+/// switch land on the converted session.
+pub(crate) trait JobSession {
+    /// A pool load's worker ended: its stamp and what it staged.
+    fn land_pool_load(
         &mut self,
-        work: Box<dyn FnOnce() -> Report + Send>,
-        failed: Box<dyn FnOnce(JobFailed) -> Report + Send>,
+        flight: u64,
+        stamp: Option<crate::pool::Stamp>,
+        done: Result<crate::pool::Staged, crate::LoadError>,
+    );
+
+    /// A pool refresh's check ended: the entries whose file changed reload.
+    fn land_pool_refresh(&mut self, checked: Vec<crate::pool::Checked>) -> crate::RefreshPool;
+
+    /// A hosted plugin's reload ended with its plugin.
+    #[cfg(feature = "plugin")]
+    fn land_plugin_reload(
+        &mut self,
+        node: tutti_graph::NodeKey,
+        token: &Arc<()>,
+        snapshot_age: Option<std::time::Duration>,
+        loaded: crate::plugin::PluginLoaded,
+        out: &mut Vec<SessionEvent>,
+    );
+
+    /// A hosted plugin's reload ended without one.
+    #[cfg(feature = "plugin")]
+    fn fail_plugin_reload(
+        &mut self,
+        node: tutti_graph::NodeKey,
+        token: &Arc<()>,
+        failed: JobFailed,
+        out: &mut Vec<SessionEvent>,
+    );
+
+    /// A plugin's parameter read ended with its values.
+    #[cfg(feature = "plugin")]
+    fn land_plugin_params(
+        &mut self,
+        node: tutti_graph::NodeKey,
+        token: &Arc<()>,
+        values: crate::plugin::ParamValues,
+    );
+
+    /// A plugin's state snapshot ended with its state.
+    #[cfg(feature = "plugin")]
+    fn land_plugin_snapshot(
+        &mut self,
+        node: tutti_graph::NodeKey,
+        token: &Arc<()>,
+        asked: std::time::Instant,
+        state: Result<Vec<u8>, tutti_plugin::error::StateError>,
     );
 }
 
-#[cfg(feature = "midi")]
-impl<C: Clock> EventJobs for Jobs<C> {
-    fn submit_events(
+impl<C: Clock> JobSession for Session<C> {
+    fn land_pool_load(
         &mut self,
-        work: Box<dyn FnOnce() -> Report + Send>,
-        failed: Box<dyn FnOnce(JobFailed) -> Report + Send>,
+        flight: u64,
+        stamp: Option<crate::pool::Stamp>,
+        done: Result<crate::pool::Staged, crate::LoadError>,
     ) {
-        self.submit(work, move |_, done, events| {
-            let report = match done {
-                Ok(report) => report,
-                Err(why) => failed(why),
-            };
-            report(events);
-        });
+        self.pool.worker_ended();
+        self.pool.stamped(flight, stamp);
+        match done {
+            Ok(crate::pool::Staged::Done(value)) => self.pool.land(flight, Ok(value)),
+            Ok(crate::pool::Staged::Main(stage)) => self.pool.stage_main(flight, stage),
+            Err(error) => self.pool.land(flight, Err(error)),
+        }
+        self.pool_pump();
+    }
+
+    fn land_pool_refresh(&mut self, checked: Vec<crate::pool::Checked>) -> crate::RefreshPool {
+        let (starts, refreshed) = self.pool.reload_changed(checked);
+        self.pool_start(starts);
+        refreshed
+    }
+
+    #[cfg(feature = "plugin")]
+    fn land_plugin_reload(
+        &mut self,
+        node: tutti_graph::NodeKey,
+        token: &Arc<()>,
+        snapshot_age: Option<std::time::Duration>,
+        loaded: crate::plugin::PluginLoaded,
+        out: &mut Vec<SessionEvent>,
+    ) {
+        self.land_reload(node, token, snapshot_age, loaded, out);
+    }
+
+    #[cfg(feature = "plugin")]
+    fn fail_plugin_reload(
+        &mut self,
+        node: tutti_graph::NodeKey,
+        token: &Arc<()>,
+        failed: JobFailed,
+        out: &mut Vec<SessionEvent>,
+    ) {
+        self.reload_job_failed(node, token, failed, out);
+    }
+
+    #[cfg(feature = "plugin")]
+    fn land_plugin_params(
+        &mut self,
+        node: tutti_graph::NodeKey,
+        token: &Arc<()>,
+        values: crate::plugin::ParamValues,
+    ) {
+        self.land_params(node, token, values);
+    }
+
+    #[cfg(feature = "plugin")]
+    fn land_plugin_snapshot(
+        &mut self,
+        node: tutti_graph::NodeKey,
+        token: &Arc<()>,
+        asked: std::time::Instant,
+        state: Result<Vec<u8>, tutti_plugin::error::StateError>,
+    ) {
+        self.land_snapshot(node, token, asked, state);
     }
 }
 
-impl<C: Clock> Jobs<C> {
+impl Jobs {
     pub(crate) fn new(spawn: Spawner) -> Self {
         let (tx, rx) = channel();
         Self {
@@ -271,34 +359,13 @@ impl<C: Clock> Jobs<C> {
     }
 }
 
-impl<C: Clock> Jobs<C> {
-    #[cfg(feature = "device")]
-    /// The same jobs for a session on clock `K`: the spawner, the counter and
-    /// the channel carry over, and no lander does (the caller failed them all).
-    /// A late arrival of a failed job finds no lander and is ignored.
-    pub(crate) fn rebind<K: Clock>(mut self) -> Jobs<K> {
-        debug_assert!(self.landers.is_empty(), "every lander was failed");
-        let (_, empty) = channel();
-        // The old flag is raised by the old value's drop, which the jobs still
-        // running read as the session being gone: the new ones get a fresh one.
-        Jobs {
-            spawn: self.spawn.clone(),
-            tx: self.tx.clone(),
-            rx: std::mem::replace(&mut self.rx, empty),
-            landers: HashMap::new(),
-            next: std::mem::replace(&mut self.next, tutti_types::Mint::new()),
-            closed: std::mem::replace(&mut self.closed, Arc::new(AtomicBool::new(false))),
-        }
-    }
-}
-
-impl<C: Clock> Drop for Jobs<C> {
+impl Drop for Jobs {
     fn drop(&mut self) {
         self.closed.store(true, Ordering::Release);
     }
 }
 
-impl<C: Clock> Jobs<C> {
+impl Jobs {
     /// Runs `work` on the spawner and lands its result in a later
     /// [`Session::update`], on the control thread.
     ///
@@ -311,7 +378,9 @@ impl<C: Clock> Jobs<C> {
     where
         R: Send + 'static,
         W: FnOnce() -> R + Send + 'static,
-        L: FnOnce(&mut Session<C>, Result<R, JobFailed>, &mut Vec<SessionEvent>) + Send + 'static,
+        L: FnOnce(&mut dyn JobSession, Result<R, JobFailed>, &mut Vec<SessionEvent>)
+            + Send
+            + 'static,
     {
         let mut land = Some(land);
         self.submit_stream(
@@ -339,7 +408,7 @@ impl<C: Clock> Jobs<C> {
         M: Send + 'static,
         R: Send + 'static,
         W: FnOnce(&Landings<M>) -> R + Send + 'static,
-        L: FnMut(&mut Session<C>, Landed<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
+        L: FnMut(&mut dyn JobSession, Landed<M, R>, &mut Vec<SessionEvent>) + Send + 'static,
     {
         let jobs = &mut *self;
         let id = JobId(jobs.next.mint().get());
@@ -349,7 +418,7 @@ impl<C: Clock> Jobs<C> {
             closed: Arc::clone(&jobs.closed),
             _message: PhantomData,
         };
-        let lander: Lander<C> = Box::new(move |session, arrival, events| {
+        let lander: Lander = Box::new(move |session, arrival, events| {
             let landed = match arrival {
                 Arrival::Message(_, message) => Landed::Message(
                     *message
@@ -384,18 +453,6 @@ impl<C: Clock> Jobs<C> {
 }
 
 impl<C: Clock> Session<C> {
-    #[cfg(feature = "device")]
-    /// Fails every job still in flight as [`JobFailed::Dropped`], landing the
-    /// failure on its lander, so each reports once. A lander may submit another
-    /// job, which fails in turn.
-    pub(crate) fn fail_jobs(&mut self, out: &mut Vec<SessionEvent>) {
-        while let Some(&id) = self.jobs.landers.keys().next() {
-            if let Some(mut lander) = self.jobs.landers.remove(&id) {
-                lander(self, Arrival::End(id, Err(JobFailed::Dropped)), out);
-            }
-        }
-    }
-
     /// Lands what the jobs sent since the last update, in arrival order.
     /// What arrives during a lander (a job it submits that ends at once)
     /// waits for the next update.

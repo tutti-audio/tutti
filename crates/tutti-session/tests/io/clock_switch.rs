@@ -185,12 +185,11 @@ fn a_root_the_device_cannot_place_is_refused_before_the_timer_stops() {
     wait_past(&mut s, before);
 }
 
-/// **A graph that cannot be re-prepared fails the switch after the stop and
-/// the session comes back stopped**: the one failure that follows the stop. The
-/// card's stream is not open, the timer does not render, and the session is
-/// still usable.
+/// **A graph that does not compile fails the switch, and the timer starts
+/// again**: the failure follows the stop, the card never started, and the
+/// session is handed back running on the timer.
 #[test]
-fn a_graph_that_no_longer_compiles_comes_back_stopped() {
+fn a_graph_that_no_longer_compiles_fails_the_switch_and_the_timer_runs_again() {
     let mut s = system();
     play(&s);
     let (osc, _) = s.graph().add(ForkByClone(Const::mono(0.1)));
@@ -202,7 +201,7 @@ fn a_graph_that_no_longer_compiles_comes_back_stopped() {
         .set_sources(Root::output(0), [OutPort::new(lim, 0)])
         .unwrap();
     let _ = s.update();
-    wait_past(&mut s, 0);
+    let before = wait_past(&mut s, 0);
     // An edit not yet committed feeds the node from a node it feeds.
     let (loop_back, _) = s.graph().add(ForkByClone(Through::mono()));
     s.graph()
@@ -215,6 +214,56 @@ fn a_graph_that_no_longer_compiles_comes_back_stopped() {
     let err = s
         .into_device_on(stereo(SampleRate::SR_48K), driver)
         .expect_err("the graph no longer compiles");
+    assert!(
+        matches!(err.error().error(), Error::Reprepare(_) | Error::Output(_)),
+        "{}",
+        err.error()
+    );
+    assert!(!stream.is_open(), "the card never started");
+    let mut s = err.into_session();
+    wait_past(&mut s, before);
+}
+
+/// A node that cannot run above 90 kHz: its `prepare` panics there, which is
+/// how a re-prepare poisons an editor.
+struct Grenade;
+
+impl tutti_graph::Node for Grenade {
+    fn shape(&self) -> tutti_graph::Shape {
+        tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
+    }
+
+    fn prepare(&mut self, prepare: &tutti_graph::Prepare) {
+        assert!(prepare.sample_rate().get() < 90_000.0, "no such rate");
+    }
+
+    fn process(
+        &mut self,
+        _: &tutti_graph::Cx<'_>,
+        mut io: tutti_graph::Io<'_>,
+    ) -> tutti_graph::Status {
+        io.output(0).fill(0.0);
+        tutti_graph::Status::Modified
+    }
+
+    fn reset(&mut self) {}
+}
+
+/// **A re-prepare that poisons the graph is the one failure that leaves the
+/// session stopped**: the switch onto a 96 kHz card panics a node's `prepare`,
+/// the way back to the timer cannot re-prepare either, and the session comes
+/// back stopped with the error, its host in its slot.
+#[test]
+fn a_poisoned_graph_comes_back_stopped() {
+    let mut s = system();
+    play(&s);
+    s.graph().add(tutti_graph::Unforkable(Grenade));
+    let _ = s.update();
+    wait_past(&mut s, 0);
+    let (driver, stream) = ManualStreamDriver::new();
+    let err = s
+        .into_device_on(stereo(SampleRate::of(96_000.0)), driver)
+        .expect_err("the graph is poisoned by the re-prepare");
     assert!(
         matches!(err.error().error(), Error::Reprepare(_) | Error::Output(_)),
         "{}",
@@ -355,6 +404,301 @@ fn the_output_policy_carries_over_and_a_card_the_map_does_not_fit_is_refused() {
         .unwrap_or_else(|e| panic!("outputs 3 and 4 are there: {}", e.error()));
     assert_eq!(live.policy::<OutputPolicy>().get().map, fits.map);
     assert_eq!(live.output_device().unwrap().topology.width().count(), 4);
+}
+
+// --- A start that fails after the old stream stopped ---
+
+/// The handle of a stream that never opens.
+struct Never;
+
+impl tutti_engine::RunningStream for Never {
+    fn stop(self: Box<Self>) {}
+}
+
+/// A card whose stream will not open, after the device was found.
+struct UnopenableCard;
+
+impl tutti_engine::StreamDriver for UnopenableCard {
+    type Running = Never;
+    type Error = tutti_cpal::Error;
+
+    fn open(
+        self,
+        _: &OutputSpec,
+        _: tutti_engine::OutputBlock,
+        _: std::sync::Arc<tutti_engine::StreamFaults>,
+    ) -> Result<Never, Self::Error> {
+        Err(tutti_cpal::Error::InvalidDevice(
+            "a card that will not open".into(),
+        ))
+    }
+}
+
+/// A timer whose thread the OS refuses.
+struct UnstartableTimer;
+
+impl tutti_engine::StreamDriver for UnstartableTimer {
+    type Running = Never;
+    type Error = tutti_engine::TimerError;
+
+    fn open(
+        self,
+        _: &OutputSpec,
+        _: tutti_engine::OutputBlock,
+        _: std::sync::Arc<tutti_engine::StreamFaults>,
+    ) -> Result<Never, Self::Error> {
+        Err(tutti_engine::TimerError::Thread(std::io::Error::other(
+            "no thread",
+        )))
+    }
+}
+
+/// **A card whose stream will not open, after the timer stopped and the graph
+/// moved to the card's rate, returns the session running on the timer**: the
+/// graph is at the old rate again and the timer renders blocks.
+#[test]
+fn a_card_that_fails_to_open_after_the_stop_returns_the_session_running_on_the_timer() {
+    let mut s = system();
+    play(&s);
+    let before = wait_past(&mut s, 0);
+    let err = s
+        .into_device_on(stereo(SampleRate::SR_44K1), UnopenableCard)
+        .expect_err("the card's stream will not open");
+    assert!(
+        matches!(err.error().error(), Error::Device(_)),
+        "{}",
+        err.error()
+    );
+    let mut s = err.into_session();
+    assert_eq!(
+        s.transport().sample_rate(),
+        SampleRate::SR_48K,
+        "the old rate again"
+    );
+    wait_past(&mut s, before);
+}
+
+/// **A timer thread the OS refuses, after the card stopped, returns the session
+/// running on the card**: the card's stream is started again on its driver and
+/// the session's rate and spec are the ones it had.
+#[test]
+fn a_timer_that_fails_to_start_returns_the_session_running_on_the_card() {
+    let (driver, stream) = ManualStreamDriver::new();
+    let live = Session::builder()
+        .device(Default::default())
+        .build_device_on(stereo(SampleRate::SR_48K), driver)
+        .expect("builds with no device");
+    let (back, again) = ManualStreamDriver::new();
+    let err = live
+        .into_system_clock_on(UnstartableTimer, back)
+        .expect_err("the timer thread will not start");
+    assert!(
+        matches!(err.error().error(), Error::Clock(_)),
+        "{}",
+        err.error()
+    );
+    let mut live = err.into_session();
+    assert!(live.device().is_running(), "the card runs again");
+    assert_eq!(live.device().graph_rate(), SampleRate::SR_48K);
+    assert_eq!(live.device().spec().sample_rate, SampleRate::SR_48K);
+    assert!(
+        again.render_block(64).is_some(),
+        "the card renders blocks again"
+    );
+    assert!(stream.render_block(64).is_none(), "the old stream is gone");
+    let _ = live.update();
+}
+
+// --- What is not lost across a switch ---
+
+/// **A fault the timer reported and no update read is reported after the
+/// switch**: the card's start clears the record, so the session reads it first.
+#[test]
+fn a_fault_no_update_read_is_reported_after_the_switch() {
+    let s = system();
+    s.faults().record_overrun("the timer fell behind");
+    let (driver, _card) = ManualStreamDriver::new();
+    let mut live = s
+        .into_device_on(stereo(SampleRate::SR_48K), driver)
+        .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+    let events = live.update();
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            SessionEvent::Fault(f) if f.kind == tutti_engine::StreamFaultKind::Overrun
+        )),
+        "{events:?}"
+    );
+}
+
+/// **A restart's report no update read is reported after the switch to the
+/// timer**: it was held for the next poll, which the card's session no longer
+/// has.
+#[test]
+fn a_restart_report_no_update_read_is_reported_after_the_switch() {
+    let (driver, _stream) = ManualStreamDriver::new();
+    let mut live = Session::builder()
+        .device(Default::default())
+        .build_device_on(stereo(SampleRate::SR_48K), driver)
+        .expect("builds with no device");
+    let (driver, _new) = ManualStreamDriver::new();
+    live.restart_on(stereo(SampleRate::SR_44K1), driver, None, None)
+        .expect("restarts");
+    let mut system = live
+        .into_system_clock()
+        .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+    let events = system.update();
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            SessionEvent::Device(tutti_session::DeviceEvent::Restarted(_))
+        )),
+        "{events:?}"
+    );
+}
+
+// --- Two drivers never run the graph at once ---
+
+/// Records which thread renders each block, then silence.
+#[derive(Clone)]
+struct Renderer(std::sync::Arc<std::sync::Mutex<Vec<std::thread::ThreadId>>>);
+
+impl tutti_graph::Node for Renderer {
+    fn shape(&self) -> tutti_graph::Shape {
+        tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
+    }
+
+    fn prepare(&mut self, _: &tutti_graph::Prepare) {}
+
+    fn process(
+        &mut self,
+        _: &tutti_graph::Cx<'_>,
+        mut io: tutti_graph::Io<'_>,
+    ) -> tutti_graph::Status {
+        self.0
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .push(std::thread::current().id());
+        io.output(0).fill(0.0);
+        tutti_graph::Status::Modified
+    }
+
+    fn reset(&mut self) {}
+}
+
+/// A card on a thread of its own, rendering a block every millisecond.
+struct ThreadedCard;
+
+struct ThreadedRunning {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl tutti_engine::RunningStream for ThreadedRunning {
+    fn stop(self: Box<Self>) {}
+}
+
+impl Drop for ThreadedRunning {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+impl tutti_engine::StreamDriver for ThreadedCard {
+    type Running = ThreadedRunning;
+    type Error = tutti_cpal::Error;
+
+    fn open(
+        self,
+        spec: &OutputSpec,
+        mut block: tutti_engine::OutputBlock,
+        _: std::sync::Arc<tutti_engine::StreamFaults>,
+    ) -> Result<ThreadedRunning, Self::Error> {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = std::sync::Arc::clone(&stop);
+        let channels = usize::from(spec.channels.count());
+        let thread = std::thread::spawn(move || {
+            let mut data = vec![0.0f32; 64 * channels];
+            while !flag.load(std::sync::atomic::Ordering::SeqCst) {
+                block.render(&mut data);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        });
+        Ok(ThreadedRunning {
+            stop,
+            thread: Some(thread),
+        })
+    }
+}
+
+/// How many times the rendering thread changed, and whether one that left came
+/// back: with two drivers that never overlap, once, and no.
+fn hand_overs(log: &[std::thread::ThreadId]) -> (usize, bool) {
+    let mut changes = 0;
+    let mut seen = Vec::new();
+    let mut back = false;
+    for pair in log.windows(2) {
+        if pair[0] != pair[1] {
+            changes += 1;
+        }
+    }
+    for id in log {
+        if seen.last() != Some(id) {
+            if seen.contains(id) {
+                back = true;
+            }
+            seen.push(*id);
+        }
+    }
+    (changes, back)
+}
+
+/// **The old driver's last block is rendered before the new one's first, in
+/// both directions**: the thread that renders the graph changes exactly once
+/// and the old one never renders again. (The engine has one renderer: a second
+/// thread in `process` at once is the failure.)
+#[test]
+fn the_old_driver_renders_its_last_block_before_the_new_one_its_first() {
+    let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    // The timer, then a card on a thread of its own.
+    let mut s = system();
+    let (node, _) = s.graph().add(ForkByClone(Renderer(log.clone())));
+    s.graph()
+        .set_sources_hard(Root::output(0), [OutPort::new(node, 0)])
+        .unwrap();
+    let _ = s.update();
+    wait_until("the timer never rendered", || {
+        !log.lock().unwrap().is_empty()
+    });
+    let mut live = s
+        .into_device_on(stereo(SampleRate::SR_48K), ThreadedCard)
+        .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+    let _ = live.update();
+    let at = log.lock().unwrap().len();
+    wait_until("the card never rendered", || {
+        log.lock().unwrap().len() > at + 3
+    });
+    let (changes, back) = hand_overs(&log.lock().unwrap());
+    assert_eq!((changes, back), (1, false), "timer, then card");
+
+    // The card, then the timer.
+    let mut system = live
+        .into_system_clock()
+        .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+    let _ = system.update();
+    let at = log.lock().unwrap().len();
+    wait_until("the timer never rendered again", || {
+        log.lock().unwrap().len() > at + 3
+    });
+    let (changes, back) = hand_overs(&log.lock().unwrap());
+    assert_eq!(
+        (changes, back),
+        (2, false),
+        "timer, card, timer: a new timer thread each"
+    );
 }
 
 /// What an open MIDI port is across a switch: the pool entry stays loaded, the

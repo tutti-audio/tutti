@@ -6,7 +6,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use tutti_rt::MainThreadMarker;
 
 use crate::jobs::panic_message;
-use crate::pool::entry::{Defer, LoadError, Staged, Step, Value};
+use crate::pool::entry::{Defer, LoadError, Step, Value};
 use crate::pool::open::OpenCx;
 use crate::pool::stamp::Stamp;
 use crate::pool::table::{Opening, Start, Worker};
@@ -34,7 +34,7 @@ impl<C: crate::Clock> Session<C> {
 
     /// Starts queued worker stages while fewer than the configured number run.
     /// Each landing starts the next.
-    fn pool_pump(&mut self) {
+    pub(crate) fn pool_pump(&mut self) {
         while let Some(Worker { flight, work, file }) = self.pool.next_worker() {
             let defer = self.main_deferral();
             // A main stage the worker made drops its output on the main thread
@@ -48,18 +48,11 @@ impl<C: crate::Clock> Session<C> {
                     (stamp, work().map(|staged| staged.deferring(defer)))
                 },
                 move |session, done, _| {
-                    session.pool.worker_ended();
                     let (stamp, done) = match done {
                         Ok((stamp, done)) => (stamp, done),
                         Err(failed) => (None, Err(LoadError::Job(failed))),
                     };
-                    session.pool.stamped(flight, stamp);
-                    match done {
-                        Ok(Staged::Done(value)) => session.pool.land(flight, Ok(value)),
-                        Ok(Staged::Main(stage)) => session.pool.stage_main(flight, stage),
-                        Err(error) => session.pool.land(flight, Err(error)),
-                    }
-                    session.pool_pump();
+                    session.land_pool_load(flight, stamp, done);
                 },
             );
         }

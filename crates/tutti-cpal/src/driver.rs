@@ -211,10 +211,11 @@ impl TuttiDriver {
 
     /// [`start_resolved`](Self::start_resolved) with a driver of the caller's
     /// choosing at the caller's `spec`: no device is opened, as
-    /// [`switch`](Self::switch) opens none.
+    /// [`switch`](Self::switch) opens none. Behind `testing`.
     ///
     /// # Errors
     /// As [`start_resolved`](Self::start_resolved).
+    #[cfg(feature = "testing")]
     pub fn start_on<D: StreamDriver, E: From<crate::Error>>(
         mut host: StreamHost,
         spec: OutputSpec,

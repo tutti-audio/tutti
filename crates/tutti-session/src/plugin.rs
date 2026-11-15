@@ -305,7 +305,8 @@ impl Open {
 
 /// What a parameter read gave: the values, or the read itself back to be run
 /// again (the plugin's list was unavailable).
-type ParamValues = Result<tutti_plugin_host::ParamSnapshot, Box<tutti_plugin_host::ParamRead>>;
+pub(crate) type ParamValues =
+    Result<tutti_plugin_host::ParamSnapshot, Box<tutti_plugin_host::ParamRead>>;
 
 /// What a `PluginLoad`'s run did.
 enum Opened {
@@ -1299,7 +1300,7 @@ impl<C: crate::Clock> Session<C> {
     /// A snapshot of a plugin no longer at its node (removed, or crossfaded
     /// to another plugin since the job was asked for) lands nowhere: it is
     /// the outgoing plugin's state, not a recovery point for the node.
-    fn land_snapshot(
+    pub(crate) fn land_snapshot(
         &mut self,
         node: NodeKey,
         token: &Arc<()>,
@@ -1332,7 +1333,12 @@ impl<C: crate::Clock> Session<C> {
     /// nowhere. A read the plugin did not answer (its list unavailable) does
     /// not land either: the mirror stays not ready, the read goes back to the
     /// plugin's record, and the next `Phase::Plugins` submits it again.
-    fn land_params(&mut self, node: NodeKey, token: &Arc<()>, values: ParamValues) -> bool {
+    pub(crate) fn land_params(
+        &mut self,
+        node: NodeKey,
+        token: &Arc<()>,
+        values: ParamValues,
+    ) -> bool {
         let Some(hosted) = self.graph.plugins.get_mut(&node) else {
             return false;
         };
@@ -1373,7 +1379,7 @@ impl<C: crate::Clock> Session<C> {
     /// main thread, and a served plugin's replacement must not be one, so a
     /// load that came back unopened is a failed attempt
     /// ([`RecoveryFailure::ReplacementInProcess`]) without opening it.
-    fn land_reload(
+    pub(crate) fn land_reload(
         &mut self,
         node: NodeKey,
         token: &Arc<()>,
@@ -1778,15 +1784,15 @@ impl<C: crate::Clock> Session<C> {
         self.jobs.submit(
             move || load.run(),
             move |session, ended, out| match ended {
-                Ok(loaded) => session.land_reload(node, &token, snapshot_age, loaded, out),
-                Err(failed) => session.reload_job_failed(node, &token, failed, out),
+                Ok(loaded) => session.land_plugin_reload(node, &token, snapshot_age, loaded, out),
+                Err(failed) => session.fail_plugin_reload(node, &token, failed, out),
             },
         );
     }
 
     /// The reload's job ended without a result (the spawner dropped it, or it
     /// panicked): a failed attempt, unless the attempt no longer applies.
-    fn reload_job_failed(
+    pub(crate) fn reload_job_failed(
         &mut self,
         node: NodeKey,
         token: &Arc<()>,
@@ -1984,7 +1990,7 @@ impl<C: crate::Clock> Session<C> {
                     move || read.run(),
                     move |session, ended, _| match ended {
                         Ok(values) => {
-                            session.land_params(node, &token, values);
+                            session.land_plugin_params(node, &token, values);
                         }
                         Err(failed) => {
                             tracing::warn!("plugin {node:?}: its parameter read ended: {failed}");
@@ -2020,7 +2026,7 @@ impl<C: crate::Clock> Session<C> {
                     move || handle.any_thread().save_state(),
                     move |session, ended, _| match ended {
                         Ok(state) => {
-                            session.land_snapshot(node, &token, asked, state);
+                            session.land_plugin_snapshot(node, &token, asked, state);
                         }
                         Err(failed) => {
                             tracing::warn!("plugin {node:?}: its state snapshot ended: {failed}");

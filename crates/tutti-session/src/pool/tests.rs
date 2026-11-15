@@ -1004,14 +1004,12 @@ mod clock_switch {
         (driver, spec)
     }
 
-    /// **A loaded entry survives a clock switch, and each load in flight is
-    /// failed and reported once**: a switch cannot carry a job to the other
-    /// clock, so a load that has not landed lands as `LoadError::Job(Dropped)`
-    /// (its entry `Failed`, one event each), while the entry that had loaded is
-    /// as it was, handle and all. The failed job, when it finishes late, reports
-    /// nothing more.
+    /// **A loaded entry survives a clock switch, and each load in flight lands
+    /// after it**: a job's lander is typed to nothing of the clock, so the
+    /// loads that had not landed when the session converted land on the new
+    /// session, once each, while the entry that had loaded is as it was.
     #[test]
-    fn a_loaded_entry_survives_a_clock_switch_and_loads_in_flight_are_failed_once() {
+    fn a_loaded_entry_survives_a_clock_switch_and_loads_in_flight_land_after_it() {
         let (mut s, spawned) = system_session();
         let runs = runs();
         s.pool((
@@ -1026,46 +1024,37 @@ mod clock_switch {
         for job in jobs {
             job.run();
         }
-        // `loaded` lands on the timer's clock; the other two are in flight.
-        let mut landed = Vec::new();
-        while landed.is_empty() {
-            landed = events(&mut s);
-            std::thread::yield_now();
-        }
-        assert_eq!(landed, [("loaded", "loaded".to_owned())]);
+        assert_eq!(events(&mut s), [("loaded", "loaded".to_owned())]);
         let (driver, spec) = card();
         let mut live = s
             .into_device_on(spec, driver)
             .unwrap_or_else(|e| panic!("switches: {}", e.error()));
-        let after = events(&mut live);
-        assert_eq!(
-            after.iter().map(|(key, _)| *key).collect::<Vec<_>>(),
-            ["late", "later"],
-            "each load in flight reports, once: {after:?}"
-        );
-        assert!(
-            after.iter().all(|(_, what)| what.starts_with("failed")),
-            "{after:?}"
-        );
-        assert_eq!(state(&live, "late").as_deref(), Some("failed"));
-        assert_eq!(state(&live, "later").as_deref(), Some("failed"));
-        assert_eq!(state(&live, "loaded").as_deref(), Some("loaded"));
-        assert_eq!(*handle(&live, "loaded").unwrap().info(), 100, "intact");
+        assert!(events(&mut live).is_empty(), "nothing lands at the switch");
+        assert_eq!(state(&live, "late").as_deref(), Some("loading"));
         for job in held_back {
             job.run();
         }
-        assert!(
-            events(&mut live).is_empty(),
-            "the late jobs report nothing more"
+        assert_eq!(
+            events(&mut live),
+            [
+                ("late", "loaded".to_owned()),
+                ("later", "loaded".to_owned())
+            ],
+            "each lands once, on the converted session"
         );
+        assert_eq!(state(&live, "loaded").as_deref(), Some("loaded"));
+        assert_eq!(*handle(&live, "late").unwrap().info(), 100);
+        assert_eq!(*handle(&live, "loaded").unwrap().info(), 100, "intact");
+        assert!(events(&mut live).is_empty(), "and no more");
     }
 
     /// **A run asked with `when_loaded` is run or reported dropped by a clock
     /// switch, never silently lost**: a run is typed to the clock it was asked
     /// of, so the one whose entry has loaded runs before the session converts,
     /// and the one whose entry has not is reported once as
-    /// `PoolEvent::RunDropped` and does not run (its entry's load, in flight,
-    /// fails with the job).
+    /// `PoolEvent::RunDropped` and does not run, though its entry's load, in
+    /// flight, carries over and lands. (The run's closure takes the session of
+    /// the clock it was asked of; no closure can be handed another clock's.)
     #[test]
     fn a_run_for_a_loaded_entry_runs_and_one_for_a_pending_entry_is_reported_dropped() {
         let (mut s, spawned) = system_session();
@@ -1112,13 +1101,17 @@ mod clock_switch {
         for job in held_back {
             job.run();
         }
-        assert!(events(&mut live).is_empty());
-        assert_eq!(ran_pending.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            events(&mut live),
+            [("pending", "loaded".to_owned())],
+            "the load itself carried over and lands"
+        );
+        assert_eq!(ran_pending.load(Ordering::SeqCst), 0, "the run did not");
     }
 
-    /// **A wait for the pool to load carries over a clock switch**: the entry
-    /// whose load was in flight fails with its job, and the wait taken before
-    /// the switch lands its report on the new clock.
+    /// **A wait for the pool to load carries over a clock switch**: the load
+    /// in flight carries over too, and the wait taken before the switch lands
+    /// its report on the new clock once the load does.
     #[test]
     fn a_pool_wait_carries_over_a_clock_switch() {
         let (mut s, spawned) = system_session();
@@ -1131,7 +1124,11 @@ mod clock_switch {
             .into_device_on(spec, driver)
             .unwrap_or_else(|e| panic!("switches: {}", e.error()));
         let _ = events(&mut live);
+        assert!(wait.take().is_none(), "the load is still in flight");
+        for job in spawned.take() {
+            job.run();
+        }
+        let _ = events(&mut live);
         assert!(wait.take().is_some(), "the wait landed on the new clock");
-        drop(spawned);
     }
 }
