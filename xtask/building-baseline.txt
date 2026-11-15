@@ -53,14 +53,19 @@ tutti-clap-host  setter  crates/tutti-clap-host/src/instance/thread_pool.rs::Cla
 
 # tutti-codec
 tutti-codec  ctor-result  crates/tutti-codec/src/aiff.rs::AiffWriter::create
+tutti-codec  ctor-result  crates/tutti-codec/src/decode/read.rs::Wave::from_bytes
 tutti-codec  ctor-result  crates/tutti-codec/src/encoder.rs::Encoder::create
 tutti-codec  ctor-result  crates/tutti-codec/src/encoder.rs::Encoder::create_file
 tutti-codec  ctor-result  crates/tutti-codec/src/encoder.rs::Encoder::create_file_planned
+tutti-codec  ctor-result  crates/tutti-codec/src/file_out.rs::FileOut::create
 tutti-codec  ctor-result  crates/tutti-codec/src/flac.rs::FlacWriter::create
 tutti-codec  ctor-result  crates/tutti-codec/src/format.rs::Format::from_extension
 tutti-codec  ctor-result  crates/tutti-codec/src/format.rs::Format::from_path
 tutti-codec  ctor-result  crates/tutti-codec/src/vorbis.rs::VorbisWriter::create
 tutti-codec  ctor-result  crates/tutti-codec/src/wav.rs::WavWriter::create
+
+# tutti-cpal
+tutti-cpal  ctor-result  crates/tutti-cpal/src/mic.rs::MicIn::open
 
 # tutti-curve
 tutti-curve  with-prefix  crates/tutti-curve/src/trajectory.rs::Trajectory::with_range
@@ -302,6 +307,7 @@ tutti-midi-network  with-prefix  crates/tutti-midi-network/src/policy.rs::Creden
 tutti-midi-network  with-prefix  crates/tutti-midi-network/src/policy.rs::Credentials::with_user
 tutti-midi-network  ctor-result  crates/tutti-midi-network/src/command.rs::Command::parse
 tutti-midi-network  ctor-result  crates/tutti-midi-network/src/command.rs::UmpData::new
+tutti-midi-network  ctor-result  crates/tutti-midi-network/src/discovery.rs::Advertisement::start
 tutti-midi-network  ctor-result  crates/tutti-midi-network/src/discovery.rs::FoundHost::from_service
 tutti-midi-network  ctor-result  crates/tutti-midi-network/src/text.rs::BoundedText::new
 
@@ -611,6 +617,9 @@ tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::star
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_finite_with_capacity
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::Recorder::start_with_capacity
 
+# tutti-sf2
+tutti-sf2  ctor-result  crates/tutti-sf2/src/soundfont.rs::SoundFont::from_reader
+
 # tutti-soundfont
 tutti-soundfont  with-prefix  crates/tutti-soundfont/src/settings.rs::Settings::with_device
 tutti-soundfont  with-prefix  crates/tutti-soundfont/src/settings.rs::Settings::with_group
@@ -674,3 +683,4 @@ tutti-vst2-host  setter  crates/tutti-vst2-host/src/parameters.rs::Vst2Loaded::s
 tutti-vst3-host  setter  crates/tutti-vst3-host/src/host/loaded/buses.rs::Vst3Loaded::set_audio_presentation_latency
 tutti-vst3-host  setter  crates/tutti-vst3-host/src/host/loaded/editor.rs::Vst3Loaded::set_editor_focus
 tutti-vst3-host  setter  crates/tutti-vst3-host/src/host/processor.rs::Vst3Processor::set_prefetch
+tutti-vst3-host  ctor-result  crates/tutti-vst3-host/src/host/controller.rs::Vst3Loaded::deactivate_typed

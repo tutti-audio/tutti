@@ -51,7 +51,7 @@
 //!
 //! **Lists.** [`LIST`] holds `<crate>  <rule>  <key>` lines (`#` lines and blank lines
 //! aside), today's violations by crate; its crate must be the key's. [`ALLOW`] holds
-//! the types of another kind, one row per type (a whole-module row only for an FFI
+//! the types of another kind, one row per type or per `Type::fn` (a whole-module row only for an FFI
 //! crate or a `testing.rs`), each with its reason; a violation a row covers is not
 //! counted, and a row that covers no violation fails like a stale baseline row.
 
@@ -98,7 +98,8 @@ impl Rule {
 }
 
 /// A type of another kind: the violations of `rules` (all when empty) of items
-/// under `path`, owned by `owner` (any when empty), are not counted. A row that covers
+/// under `path`, owned by `owner` (any when empty; `Type::fn` names one function), are
+/// not counted. A row that covers
 /// no violation fails the gate.
 pub(super) struct Allow {
     /// A repo path prefix: a crate's directory, or a file.
@@ -204,15 +205,15 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-vst3-host/",
-        "Vst3Loaded",
+        "Vst3Loaded::load",
         CTOR,
         "loading a VST3 module the OS refuses: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-sf2/",
-        "SoundFont",
+        "SoundFont::open",
         CTOR,
-        "reading a SoundFont from a file or a stream: the failure is the file's, not a value's",
+        "opening a SoundFont file: the failure is the file's, not a value's",
     ),
     ty(
         "crates/tutti-au-host/",
@@ -234,21 +235,15 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-codec/",
-        "Wave",
+        "Wave::read",
         CTOR,
-        "reading and decoding a file, whose failure is the file's: the failure is the file's, not a value's",
+        "reading and decoding a file: the failure is the file's, not a value's",
     ),
     ty(
         "crates/tutti-codec/",
         "FileIn",
         CTOR,
         "opening a file for decoding: the failure is the file's, not a value's",
-    ),
-    ty(
-        "crates/tutti-codec/",
-        "FileOut",
-        CTOR,
-        "creating the output file: the failure is the file system's, not a value's",
     ),
     ty(
         "crates/tutti-cpal/",
@@ -261,12 +256,6 @@ pub(super) const ALLOW: &[Allow] = &[
         "DeviceListing",
         CTOR,
         "enumerating devices on a thread the OS lends: the failure is the OS's, not a value's",
-    ),
-    ty(
-        "crates/tutti-cpal/",
-        "MicIn",
-        CTOR,
-        "opening an input device: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-cpal/",
@@ -297,12 +286,6 @@ pub(super) const ALLOW: &[Allow] = &[
         "VirtualDestination",
         CTOR,
         "opening an OS endpoint: the failure is the OS's, not a value's",
-    ),
-    ty(
-        "crates/tutti-midi-network/",
-        "Advertisement",
-        CTOR,
-        "binding the mDNS advertisement: the failure is the OS's, not a value's",
     ),
     ty(
         "crates/tutti-midi-network/",
@@ -716,7 +699,10 @@ fn allowed(path: &str, s: &Site, a: &Allow) -> bool {
         path.starts_with(a.path)
     };
     under
-        && (a.owner.is_empty() || a.owner == s.owner)
+        && match a.owner.split_once("::") {
+            Some((owner, func)) => owner == s.owner && s.key.rsplit("::").next() == Some(func),
+            None => a.owner.is_empty() || a.owner == s.owner,
+        }
         && (a.rules.is_empty() || a.rules.contains(&s.rule))
 }
 
@@ -1086,6 +1072,33 @@ mod tests {
             )
             .passed()
         );
+    }
+
+    #[test]
+    fn a_function_allow_row_allows_one_function_and_leaves_its_sibling_counted() {
+        let src = "impl Wave { pub fn read(p: &str) -> Result<Self, E> { todo!() }\n\
+                   pub fn from_bytes(b: Vec<u8>) -> Result<Self, E> { todo!() } }";
+        let allow = [ty("crates/a/", "Wave::read", CTOR, "r")];
+        let r = run("", src, &allow);
+        assert_eq!(
+            r.findings[1],
+            "  a  ctor-result  crates/a/src/lib.rs::Wave::from_bytes"
+        );
+        assert!(
+            run(
+                "a  ctor-result  crates/a/src/lib.rs::Wave::from_bytes\n",
+                src,
+                &allow
+            )
+            .passed()
+        );
+        let gone = [ty("crates/a/", "Wave::gone", CTOR, "r")];
+        let r = run(
+            "a  ctor-result  crates/a/src/lib.rs::Wave::from_bytes\na  ctor-result  crates/a/src/lib.rs::Wave::read\n",
+            src,
+            &gone,
+        );
+        assert!(r.findings[0].contains("ALLOW covers no violation"));
     }
 
     #[test]
