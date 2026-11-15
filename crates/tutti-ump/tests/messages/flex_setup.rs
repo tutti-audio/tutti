@@ -2,7 +2,8 @@
 //! Complete message addressed to the Group, pinned by the spec's bit
 //! positions (Figures 70 to 72), and nothing else decodes as one.
 
-use tutti_ump::{Flex, Message, Metronome, MidiGroup, TimeSignature, Ump};
+use core::num::NonZeroU8;
+use tutti_ump::{BarAccents, Flex, Message, Metronome, MidiGroup, TimeSignature, Ump};
 
 /// The first word of a Complete, Group-addressed Flex Data message of Status
 /// Bank 0: message type 0xD, Format 0 in bits 23-22, Address 1 in bits 21-20.
@@ -29,9 +30,7 @@ fn setup_messages_are_complete_and_group_addressed() {
     assert_eq!(signature.0, [head(2, 0x0001), 0x0703_0800, 0, 0]);
     let metronome = setup(Flex::SetMetronome(Metronome {
         clocks_per_click: 24,
-        accent_1: 3,
-        accent_2: 2,
-        accent_3: 0,
+        accents: BarAccents::Two(NonZeroU8::new(3).unwrap(), NonZeroU8::new(2).unwrap()),
         subdivision_1: 2,
         subdivision_2: 0,
     }));
@@ -75,5 +74,54 @@ fn other_formats_and_addresses_are_not_setup_messages() {
                 "{status:#x} address {address}"
             );
         }
+    }
+}
+
+fn part(n: u8) -> NonZeroU8 {
+    NonZeroU8::new(n).unwrap()
+}
+
+/// The Bar Accent fields of Set Metronome (M2-104 §7.5.5): an undivided bar has
+/// its beats in Part 1 and zero in Parts 2 and 3; a bar divides in up to three
+/// parts, as 5/4 in 3 + 2 and 9/4 in 3 + 3 + 3 or 4 + 4 + 1; and the parts add
+/// up to the beats of the bar. A shape with Part 1 zero, or a part after a zero
+/// part, is no Set Metronome.
+/// Spec: m2-104/7.5.5#5, m2-104/7.5.5#6, m2-104/7.5.5#7, m2-104/7.5.5#8, m2-104/7.5.5#9
+#[test]
+fn the_bar_accents_are_the_parts_of_the_bar() {
+    let word = |a: u8, b: u8, c: u8| [head(2, 0x0002), u32::from_be_bytes([24, a, b, c]), 0, 0];
+    let accents = |a: u8, b: u8, c: u8| match Ump(word(a, b, c)).decode() {
+        Ok(Message::Flex(_, Flex::SetMetronome(m))) => Some(m.accents),
+        Err(_) => None,
+        other => panic!("{other:?}"),
+    };
+    // 6/8 undivided: Part 1 is the six beats, Parts 2 and 3 zero.
+    let undivided = BarAccents::Undivided(part(6));
+    assert_eq!(accents(6, 0, 0), Some(undivided));
+    assert_eq!((undivided.parts(), undivided.beats()), ([6, 0, 0], 6));
+    // 5/4 as 3 + 2; 9/4 as 3 + 3 + 3 and as 4 + 4 + 1.
+    for (parts, accent, beats) in [
+        ([3, 2, 0], BarAccents::Two(part(3), part(2)), 5),
+        ([3, 3, 3], BarAccents::Three(part(3), part(3), part(3)), 9),
+        ([4, 4, 1], BarAccents::Three(part(4), part(4), part(1)), 9),
+    ] {
+        let [a, b, c] = parts;
+        assert_eq!(accents(a, b, c), Some(accent));
+        assert_eq!((accent.parts(), accent.beats()), (parts, beats));
+        let metronome = Metronome {
+            clocks_per_click: 24,
+            accents: accent,
+            subdivision_1: 0,
+            subdivision_2: 0,
+        };
+        assert_eq!(
+            setup(Flex::SetMetronome(metronome)).0[1],
+            u32::from_be_bytes([24, a, b, c])
+        );
+    }
+    // No Part 1, or a part after a zero part.
+    for (a, b, c) in [(0, 0, 0), (0, 2, 0), (0, 0, 2), (0, 2, 3), (3, 0, 2)] {
+        assert_eq!(accents(a, b, c), None, "{a} {b} {c}");
+        assert_eq!(BarAccents::from_parts([a, b, c]), None);
     }
 }

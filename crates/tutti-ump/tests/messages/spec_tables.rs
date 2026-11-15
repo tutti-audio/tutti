@@ -15,11 +15,12 @@
 //! `spec_words.rs`), the MIDI 1.0 controller roster (`cc_number.rs`).
 //! Every other number-to-name table is held by `spec_words.rs`.
 
+use core::num::NonZeroU8;
 use tutti_ump::{
-    Accidental, Alteration, AlterationKind, ChordBass, ChordName, ChordPitch, ChordType, Direction,
-    DiscoveryFilter, EndpointInfo, FirstGroup, Flex, FlexAddress, FlexTextKind, Form,
-    FunctionBlockId, FunctionBlockInfo, GroupSpan, Letter, Message, Metronome, Midi1Port,
-    MidiGroup, Protocol, Stream, StreamConfig, U4, U7, UiHint, Ump, UmpVersion,
+    Accidental, Alteration, AlterationKind, BarAccents, ChordBass, ChordName, ChordPitch,
+    ChordType, Direction, DiscoveryFilter, EndpointInfo, FirstGroup, Flex, FlexAddress,
+    FlexTextKind, Form, FunctionBlockId, FunctionBlockInfo, GroupSpan, Letter, Message, Metronome,
+    Midi1Port, MidiGroup, Protocol, Stream, StreamConfig, U4, U7, UiHint, Ump, UmpVersion,
 };
 
 /// Decode gives the message, and encode gives the words back.
@@ -406,9 +407,11 @@ fn metronome_fields_in_order() {
             MidiGroup::FIRST,
             Flex::SetMetronome(Metronome {
                 clocks_per_click: 24,
-                accent_1: 3,
-                accent_2: 4,
-                accent_3: 5,
+                accents: BarAccents::Three(
+                    NonZeroU8::new(3).unwrap(),
+                    NonZeroU8::new(4).unwrap(),
+                    NonZeroU8::new(5).unwrap(),
+                ),
                 subdivision_1: 6,
                 subdivision_2: 7,
             }),

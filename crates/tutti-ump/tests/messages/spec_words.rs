@@ -4,15 +4,17 @@
 //! comment, then the words. Nothing here calls the codec to produce an
 //! expected value.
 
+use core::num::NonZeroU8;
 use tutti_ump::{
-    Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BlockFilter, BlockSelect,
-    CCNumber, ChordBass, ChordName, ChordPitch, ChordType, Data128, DeltaTicks, DeviceIdentity,
-    Direction, DiscoveryFilter, EndpointInfo, FirstGroup, Flex, FlexAddress, FlexTextKind, Form,
-    FunctionBlockId, FunctionBlockInfo, GroupSpan, KeySignature, Letter, MdsChunk, MdsChunkSize,
-    MdsChunks, MdsIdentity, Message, Metronome, Midi1Port, MidiChannel, MidiGroup, MixedDataHeader,
-    NoteNumber, NoteVelocity, PerNoteManagement, Protocol, RegisteredPerNoteController,
-    SharpsFlats, Stream, StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus, System,
-    TimeSignature, U4, U7, U14, UiHint, Ump, UmpVersion, Utility, Voice1, Voice2,
+    Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockFilter,
+    BlockSelect, CCNumber, ChordBass, ChordName, ChordPitch, ChordType, Data128, DeltaTicks,
+    DeviceIdentity, Direction, DiscoveryFilter, EndpointInfo, FirstGroup, Flex, FlexAddress,
+    FlexTextKind, Form, FunctionBlockId, FunctionBlockInfo, GroupSpan, KeySignature, Letter,
+    MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Message, Metronome, Midi1Port, MidiChannel,
+    MidiGroup, MixedDataHeader, NoteNumber, NoteVelocity, PerNoteManagement, Protocol,
+    RegisteredPerNoteController, SharpsFlats, Stream, StreamConfig, Sysex7Packet, Sysex8Packet,
+    SysexStatus, System, TimeSignature, U4, U7, U14, UiHint, Ump, UmpVersion, Utility, Voice1,
+    Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
 use tutti_ump::{ManufacturerId, Unknown};
@@ -505,9 +507,7 @@ fn flex_setup() {
         [0xD610_0002, 0x1803_0200, 0x0200_0000, 0],
         f(Flex::SetMetronome(Metronome {
             clocks_per_click: 24,
-            accent_1: 3,
-            accent_2: 2,
-            accent_3: 0,
+            accents: BarAccents::Two(NonZeroU8::new(3).unwrap(), NonZeroU8::new(2).unwrap()),
             subdivision_1: 2,
             subdivision_2: 0,
         })),

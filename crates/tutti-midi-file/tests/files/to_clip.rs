@@ -9,13 +9,14 @@
 //! packets the conversion makes survive them.
 
 use crate::common::{note, track};
+use core::num::NonZeroU8;
 use tutti_midi_file::{
     DropReason, Error, FileEvent, Meta, MidiFile, SmfFormat, TextKind, Tick, ToClipError, Track,
 };
 use tutti_types::{Beat, Seconds};
 use tutti_ump::{
-    Flex, FlexAddress, FlexTextKind, Form, KeySignature, Letter, Message, Metronome, MidiGroup,
-    SharpsFlats, SysexStatus, TimeSignature,
+    BarAccents, Flex, FlexAddress, FlexTextKind, Form, KeySignature, Letter, Message, Metronome,
+    MidiGroup, SharpsFlats, SysexStatus, TimeSignature,
 };
 
 const TPQ: u16 = 480;
@@ -54,9 +55,7 @@ fn signature_events(n: u8, d: u8, bb: u8, cc: u8) -> [FileEvent; 2] {
         // Subdivision Clicks value of 0 means none.
         flex(Flex::SetMetronome(Metronome {
             clocks_per_click: cc,
-            accent_1: n,
-            accent_2: 0,
-            accent_3: 0,
+            accents: BarAccents::Undivided(NonZeroU8::new(n).unwrap()),
             subdivision_1: 0,
             subdivision_2: 0,
         })),

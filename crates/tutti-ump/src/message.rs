@@ -1,6 +1,8 @@
 //! The message catalogue: one value per defined M2-104 message, `Copy`, with
 //! no lifetime.
 
+use core::num::NonZeroU8;
+
 use crate::field::{
     DeltaTicks, FirstGroup, FunctionBlockId, GroupSpan, NoteNumber, Pitch, SharpsFlats, U4, U7, U14,
 };
@@ -989,17 +991,75 @@ pub struct TimeSignature {
     pub thirty_seconds: u8,
 }
 
+/// The Bar Accent fields of Set Metronome (§7.5.5): how a bar divides.
+///
+/// The three parts are the beats of each division, and they add up to the
+/// beats in the bar. An undivided bar has its beat count in Part 1 and zero in
+/// Parts 2 and 3; a bar divided in two has Part 3 zero; a part is never zero
+/// before one that is not. The variants hold exactly those shapes, so the
+/// message cannot be written with a part after a zero part, or an undivided
+/// bar with a second part.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BarAccents {
+    /// The bar is not divided: Part 1 is the bar's beat count.
+    Undivided(NonZeroU8),
+    /// The bar is divided in two, like 3 + 2 in 5/4.
+    Two(NonZeroU8, NonZeroU8),
+    /// The bar is divided in three, like 3 + 3 + 3 or 4 + 4 + 1 in 9/4.
+    Three(NonZeroU8, NonZeroU8, NonZeroU8),
+}
+
+impl BarAccents {
+    /// The beats in the bar these parts add up to.
+    ///
+    /// ```
+    /// use core::num::NonZeroU8;
+    /// use tutti_ump::BarAccents;
+    ///
+    /// let part = |n| NonZeroU8::new(n).unwrap();
+    /// assert_eq!(BarAccents::Three(part(4), part(4), part(1)).beats(), 9);
+    /// ```
+    #[must_use]
+    pub const fn beats(self) -> u16 {
+        let [a, b, c] = self.parts();
+        a as u16 + b as u16 + c as u16
+    }
+
+    /// Part 1, 2 and 3 as the fields carry them, a part the bar does not have
+    /// being zero.
+    #[must_use]
+    pub const fn parts(self) -> [u8; 3] {
+        match self {
+            Self::Undivided(a) => [a.get(), 0, 0],
+            Self::Two(a, b) => [a.get(), b.get(), 0],
+            Self::Three(a, b, c) => [a.get(), b.get(), c.get()],
+        }
+    }
+
+    /// The accents of three fields, or `None` for a shape §7.5.5 does not
+    /// have: Part 1 zero, or a part after a zero part.
+    #[must_use]
+    pub const fn from_parts(parts: [u8; 3]) -> Option<Self> {
+        match (
+            NonZeroU8::new(parts[0]),
+            NonZeroU8::new(parts[1]),
+            NonZeroU8::new(parts[2]),
+        ) {
+            (Some(a), None, None) => Some(Self::Undivided(a)),
+            (Some(a), Some(b), None) => Some(Self::Two(a, b)),
+            (Some(a), Some(b), Some(c)) => Some(Self::Three(a, b, c)),
+            _ => None,
+        }
+    }
+}
+
 /// Set Metronome fields (§7.5.5).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Metronome {
     /// MIDI clocks per primary click.
     pub clocks_per_click: u8,
-    /// Bar accent part 1.
-    pub accent_1: u8,
-    /// Bar accent part 2.
-    pub accent_2: u8,
-    /// Bar accent part 3.
-    pub accent_3: u8,
+    /// How the bar divides, its parts adding up to the bar's beats.
+    pub accents: BarAccents,
     /// Subdivision clicks, first set.
     pub subdivision_1: u8,
     /// Subdivision clicks, second set.

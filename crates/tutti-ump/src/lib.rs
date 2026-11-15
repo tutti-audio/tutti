@@ -111,8 +111,8 @@ pub use flex_text::{
 pub use held_keys::{KeyBitset, Lane, LaneSet};
 pub use manufacturer::{ManufacturerId, NotManufacturerId};
 pub use message::{
-    Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BlockFilter, BlockSelect,
-    ChordBass, ChordName, ChordPitch, ChordType, Data128, DeviceIdentity, Direction,
+    Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockFilter,
+    BlockSelect, ChordBass, ChordName, ChordPitch, ChordType, Data128, DeviceIdentity, Direction,
     DiscoveryFilter, EndpointInfo, Flex, FlexAddress, FlexTextKind, Form, FunctionBlockInfo,
     KeySignature, Letter, Message, Metronome, Midi1Port, MixedDataHeader, PerNoteManagement,
     Protocol, RegisteredPerNoteController, Stream, StreamConfig, Sysex7Packet, Sysex8Packet,

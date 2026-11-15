@@ -376,12 +376,15 @@ fn flex(g: MidiGroup, f: Flex) -> [u32; 4] {
             0,
             0,
         ],
-        Flex::SetMetronome(m) => [
-            complete(FlexAddress::Group, 0, 0x02),
-            word([m.clocks_per_click, m.accent_1, m.accent_2, m.accent_3]),
-            word([m.subdivision_1, m.subdivision_2, 0, 0]),
-            0,
-        ],
+        Flex::SetMetronome(m) => {
+            let [a, b, c] = m.accents.parts();
+            [
+                complete(FlexAddress::Group, 0, 0x02),
+                word([m.clocks_per_click, a, b, c]),
+                word([m.subdivision_1, m.subdivision_2, 0, 0]),
+                0,
+            ]
+        }
         Flex::SetKeySignature(a, k) => [complete(a, 0, 0x05), key_signature(k), 0, 0],
         Flex::SetChordName(a, c) => {
             let mut w = chord_name(c);

@@ -98,9 +98,7 @@ fn other_messages_are_not_followed() {
         MidiGroup::FIRST,
         Flex::SetMetronome(tutti_ump::Metronome {
             clocks_per_click: 24,
-            accent_1: 0,
-            accent_2: 0,
-            accent_3: 0,
+            accents: tutti_ump::BarAccents::Undivided(std::num::NonZeroU8::MIN),
             subdivision_1: 0,
             subdivision_2: 0,
         }),

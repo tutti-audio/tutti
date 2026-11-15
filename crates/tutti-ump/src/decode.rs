@@ -20,8 +20,8 @@ use crate::field::{
     DeltaTicks, FirstGroup, FunctionBlockId, GroupSpan, NoteNumber, SharpsFlats, U4, U7, U14,
 };
 use crate::message::{
-    Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BlockFilter, BlockSelect,
-    ChordBass, ChordName, ChordPitch, ChordType, Data128, DeviceIdentity, Direction,
+    Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockFilter,
+    BlockSelect, ChordBass, ChordName, ChordPitch, ChordType, Data128, DeviceIdentity, Direction,
     DiscoveryFilter, EndpointInfo, Flex, FlexAddress, FlexTextKind, Form, FunctionBlockInfo,
     KeySignature, Letter, Message, Metronome, Midi1Port, MixedDataHeader, PerNoteManagement,
     Protocol, Stream, StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus, System, TimeSignature,
@@ -448,11 +448,11 @@ fn flex(w: [u32; 4]) -> Option<Flex> {
             }))
         }
         (0x00, 0x02) if complete && address == FlexAddress::Group => {
+            // Accent parts of a shape §7.5.5 does not have are no Set Metronome.
+            let accents = BarAccents::from_parts([byte(w[1], 2), byte(w[1], 1), byte(w[1], 0)])?;
             Some(Flex::SetMetronome(Metronome {
                 clocks_per_click: byte(w[1], 3),
-                accent_1: byte(w[1], 2),
-                accent_2: byte(w[1], 1),
-                accent_3: byte(w[1], 0),
+                accents,
                 subdivision_1: byte(w[2], 3),
                 subdivision_2: byte(w[2], 2),
             }))
