@@ -166,7 +166,12 @@ fn curve(level: f64, threshold: f64, knee: f64, ratio: f64) -> f64 {
     }
 }
 
-/// The member's `reduction_db` is the static curve: nothing under the knee, the
+/// The static curve of `m`'s controls at `level`.
+fn reduction_db(m: &CompressorMember, level: Db) -> Db {
+    compute_compressor_gain_reduction(level, m.threshold, m.ratio, m.knee)
+}
+
+/// The member's reduction is the static curve: nothing under the knee, the
 /// straight line over it, the quadratic between, and the three agree at the knee's two
 /// edges (the curve is continuous).
 #[test]
@@ -181,7 +186,7 @@ fn the_member_reduction_is_the_static_curve() {
         for step in -80..=40 {
             let level = f64::from(step) * 1.5 - 20.0;
             let want = curve(level, t, w, r);
-            let got = f64::from(m.reduction_db(Db(level as f32)).get());
+            let got = f64::from(reduction_db(&m, Db(level as f32)).get());
             assert!(
                 (got - want).abs() < 2e-3,
                 "{c:?} at {level}: {got} vs {want}"
@@ -190,8 +195,8 @@ fn the_member_reduction_is_the_static_curve() {
         // Continuity at both edges: the two pieces meeting there give the same value.
         for edge in [t - w / 2.0, t + w / 2.0] {
             let (below, above) = (
-                f64::from(m.reduction_db(Db((edge - 1e-3) as f32)).get()),
-                f64::from(m.reduction_db(Db((edge + 1e-3) as f32)).get()),
+                f64::from(reduction_db(&m, Db((edge - 1e-3) as f32)).get()),
+                f64::from(reduction_db(&m, Db((edge + 1e-3) as f32)).get()),
             );
             assert!(
                 (above - below).abs() < 1e-2,
@@ -206,12 +211,12 @@ fn the_member_reduction_is_the_static_curve() {
 fn the_curve_has_its_three_regions() {
     let m = CompressorMember::designed(&controls(-20.0, 10.0, 4.0, 0.0, 0.0, 0.0), RATE);
     // Under -25 dB: nothing. Over -15 dB: three quarters of the excess.
-    assert_eq!(m.reduction_db(Db(-40.0)), Db(0.0));
-    assert_eq!(m.reduction_db(Db(-25.0)), Db(0.0));
-    assert!((m.reduction_db(Db(-10.0)).get() - 7.5).abs() < 1e-5);
-    assert!((m.reduction_db(Db(0.0)).get() - 15.0).abs() < 1e-5);
+    assert_eq!(reduction_db(&m, Db(-40.0)), Db(0.0));
+    assert_eq!(reduction_db(&m, Db(-25.0)), Db(0.0));
+    assert!((reduction_db(&m, Db(-10.0)).get() - 7.5).abs() < 1e-5);
+    assert!((reduction_db(&m, Db(0.0)).get() - 15.0).abs() < 1e-5);
     // At the threshold the quadratic has run a half of the knee: (3/4)(5)^2/(2*10).
-    assert!((m.reduction_db(Db(-20.0)).get() - 0.75 * 25.0 / 20.0).abs() < 1e-5);
+    assert!((reduction_db(&m, Db(-20.0)).get() - 0.75 * 25.0 / 20.0).abs() < 1e-5);
 }
 
 /// The member holds the controls made runnable: a knee under 0 reads as 0, a ratio under
@@ -696,5 +701,53 @@ fn an_f64_render_is_the_f32_render_converted() {
     }
     for (i, (&g, &w)) in got.iter().zip(&want).enumerate() {
         assert_eq!(g, f64::from(w), "frame {i}");
+    }
+}
+
+/// The deepest reduction since the last take is the curve's value at a steady key (a hard
+/// knee, an instant attack, a release that holds), is read once and starts again from
+/// nothing, and a reset clears it.
+#[test]
+fn the_deepest_reduction_is_read_once_and_cleared_by_a_reset() {
+    let c = controls(-20.0, 0.0, 4.0, 0.0, f64::INFINITY, 0.0);
+    let mut bank = runner(&c);
+    let level = -6.0;
+    let x = vec![amplitude(level); 4_800];
+    run(&mut bank, &[&x], &[&x], None);
+    let got = f64::from(bank.take_deepest().get());
+    let want = curve(level, -20.0, 0.0, 4.0);
+    assert!((got - want).abs() < 1e-3, "{got} vs {want}");
+    assert_eq!(bank.take_deepest(), Db::UNITY, "a read starts again");
+    // The held follower reads the same depth again at once; a reset forgets it.
+    let quiet = vec![0.0f32; 64];
+    run(&mut bank, &[&quiet], &[&quiet], None);
+    assert!(f64::from(bank.take_deepest().get()) > want - 1e-3);
+    run(&mut bank, &[&quiet], &[&quiet], None);
+    bank.reset();
+    assert_eq!(bank.take_deepest(), Db::UNITY);
+}
+
+/// A knee past 400 dB is held there: a knee of 1e20 (whose square overflows) or 3e38 (whose
+/// double does) renders finite with the key inside it, and once the key has left (silence,
+/// then a steady -30 dB) the gain is back on the static curve of the 400 dB knee.
+#[test]
+fn a_huge_knee_is_held_and_the_gain_returns_to_the_static_curve() {
+    for knee in [1.0e20f32, 3.0e38] {
+        let mut bank = runner(&controls(-20.0, knee, 4.0, 0.001, 0.001, 0.0));
+        let inside = vec![amplitude(-6.0); 4_800];
+        let out = run(&mut bank, &[&inside], &[&inside], None);
+        assert!(out[0].iter().all(|s| s.is_finite()), "knee {knee}: inside");
+        let silence = vec![0.0f32; 4_800];
+        let out = run(&mut bank, &[&silence], &[&silence], None);
+        assert!(out[0].iter().all(|s| s.is_finite()), "knee {knee}: silence");
+        let level = -30.0;
+        let x = vec![amplitude(level); 9_600];
+        let out = run(&mut bank, &[&x], &[&x], None);
+        let got = f64::from(out[0][9_599] / x[9_599]);
+        let want = 10f64.powf(-curve(level, -20.0, 400.0, 4.0) / 20.0);
+        assert!(
+            (got - want).abs() < 1e-3 * want,
+            "knee {knee}: gain {got} vs {want}"
+        );
     }
 }

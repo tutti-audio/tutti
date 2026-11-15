@@ -1,45 +1,41 @@
-//! [`MultibandFamily`]: the multiband compressor as a [`Family`].
+//! [`MultibandBank`]: the multiband compressor over buffers views.
 //!
-//! A Linkwitz-Riley crossover (the tree of [`CrossoverModel`], one
-//! per channel) splits the signal into 2 to 4 bands; each band is compressed by its own
-//! compressor (the frame step of [`CompressorBank`](super::CompressorBank), one
-//! copy of it) with a gain **linked** across channels, from the loudest channel of the
-//! band; and the bands are summed. The detector is the band itself: there is no
-//! side-chain.
+//! A Linkwitz-Riley crossover ([`CrossoverBank`], one band tree per channel) splits the
+//! signal into 2 to 4 bands; each band is compressed by its own [`CompressorBank`] with a
+//! gain **linked** across channels, from the loudest channel of the band; and the bands are
+//! summed. The detector is the band itself: there is no side-chain.
 //!
 //! A band may be **bypassed** (its gain goes to unity, the makeup with it, while its
 //! compressor keeps running so a release finds it warm) and **soloed** (while any band is
-//! soloed the output is the sum of the soloed bands, the others muted but still
-//! metering). Both are weights of 0 or 1 that glide over [`GAIN_GLIDE`], like a makeup: a
-//! step in either multiplies the output directly, so it would click.
+//! soloed the output is the sum of the soloed bands, the others muted but still metering).
+//! Both are weights of 0 or 1 that glide over [`GAIN_GLIDE`], like a makeup: a step in
+//! either multiplies the output directly, so it would click.
 //!
-//! The crossover is designed on the stream grid ([`Family::CADENCE`]) and glides to each
-//! design over a grid period, as [`CrossoverBank`](crate::CrossoverBank)'s does; the
-//! detectors land whole, and the makeups and the two weights glide over [`GAIN_GLIDE`]. Each
-//! band's threshold is a per-frame lane of the [`Inputs`] (lane `b` is band `b`'s).
+//! The crossover glides to each design over a grid period of [`COEFF_INTERVAL`] frames, as
+//! [`CrossoverBank`]'s does; each compressor's detector lands whole, and the makeups and the
+//! two weights glide over [`GAIN_GLIDE`]. Each band's threshold is a per-frame lane
+//! ([`MultibandLanes`]).
 //!
-//! The deepest reduction each band reached since the last read is in the state
-//! ([`BandReductions`], the recurrence's [`Readout`]): a reading for a meter, which the node publishes.
+//! The controls are `MultibandSettings` and `BandSettings`, not `*Controls`: the node's
+//! `MultibandControls` (its handle on the params and meters) is a different type.
+//!
+//! The crossover is IIR, so the bands ring on after the input stops (a tail the bank leaves
+//! to its caller to declare), and the compressors only scale. There is no latency.
 
 use core::ops::Range;
 
-use tutti_types::{BusTopology, Db, Hz, SampleRate, Samples};
+use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
+use tutti_types::{ChannelLayout, Db, Hz, SampleRate, Samples};
 
-use super::GAIN_GLIDE;
-use super::compressor::{CompressorControls, CompressorMember, Detector};
-use crate::control::COEFF_STREAM;
-use crate::filter::CrossoverState;
+use super::compressor::{CompressorBank, CompressorControls, CompressorLanes};
+use super::shared::{CHUNK, GAIN_GLIDE};
 use crate::{
-    Approach, COEFF_INTERVAL, Cadence, Channels, CrossoverCoefficients, CrossoverControls,
-    CrossoverError, CrossoverModel, Effort, Family, Glide, Inputs, Readout, Recurrence, Ring,
-    Setup, Start, Steps, System,
+    COEFF_INTERVAL, CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError,
+    CrossoverModel, Glide, Steps,
 };
 
 /// The most bands.
 const MAX_BANDS: usize = 4;
-
-/// The bands a crossover tree makes at the most, the width of one frame's split.
-const TREE_BANDS: usize = CrossoverModel::MAX_BANDS;
 
 /// The controls of one band.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -68,8 +64,8 @@ impl Default for BandSettings {
     }
 }
 
-/// The controls of a [`MultibandFamily`]: the split frequencies and a [`BandSettings`]
-/// each band. Entries past the family's bands (and past its splits) are ignored.
+/// The controls of a [`MultibandBank`]: the split frequencies and a [`BandSettings`] each
+/// band. Entries past the bank's bands (and past its splits) are ignored.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MultibandSettings {
     /// The crossover's split frequencies, lowest first.
@@ -95,245 +91,20 @@ impl Default for MultibandSettings {
     }
 }
 
-/// A multiband compressor at one set of controls and one rate: the crossover's design, a
-/// compressor a band, and which bands are bypassed and soloed. No latency (the
-/// bands are not delayed) and a tail of the crossover's ring: the splits' sections ring
-/// after the input stops, and the compressors only scale.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MultibandMember {
-    crossover: CrossoverModel,
-    bands: [CompressorMember; MAX_BANDS],
-    count: usize,
-    bypass: [bool; MAX_BANDS],
-    solo: [bool; MAX_BANDS],
-}
-
-impl MultibandMember {
-    /// How many bands it has.
-    #[must_use]
-    pub fn bands(&self) -> usize {
-        self.count
-    }
-
-    /// The crossover's design.
-    #[must_use]
-    pub fn crossover(&self) -> &CrossoverModel {
-        &self.crossover
-    }
-
-    /// Band `band`'s compressor, or `None` past the last band.
-    #[must_use]
-    fn compressor(&self, band: usize) -> Option<&CompressorMember> {
-        self.bands[..self.count].get(band)
-    }
-
-    /// Whether band `band` is heard: nothing is soloed, or it is. `false` past the last
-    /// band.
-    #[must_use]
-    pub fn is_audible(&self, band: usize) -> bool {
-        band < self.count && (!self.any_solo() || self.solo[band])
-    }
-
-    /// The reduction, in dB and positive, that a steady `level` in band `band` asks
-    /// for (the compressor's static curve; a bypassed band still asks for it, and
-    /// passes none of it). `None` past the last band.
-    #[must_use]
-    pub fn reduction_db(&self, band: usize, level: Db) -> Option<Db> {
-        self.compressor(band).map(|c| c.reduction_db(level))
-    }
-
-    fn any_solo(&self) -> bool {
-        self.solo[..self.count].iter().any(|&s| s)
-    }
-}
-
-impl System for MultibandMember {
-    fn latency(&self) -> Samples {
-        Samples::ZERO
-    }
-
-    fn tail(&self, floor: Db) -> Ring {
-        self.crossover.tail(floor)
-    }
-}
-
-/// The [`Family`] of the multiband compressor: `bands` bands (2 to 4) over `input`, one
-/// output bus where the input is.
-#[derive(Clone, Copy, Debug)]
-pub struct MultibandFamily {
-    input: BusTopology,
-    bands: usize,
-}
-
-impl MultibandFamily {
-    /// The fewest bands.
-    pub const MIN_BANDS: usize = 2;
-    /// The most bands.
-    pub const MAX_BANDS: usize = MAX_BANDS;
-
-    /// `bands` bands on the bus `input`.
-    ///
-    /// # Errors
-    ///
-    /// [`CrossoverError::Bands`] if `bands` is not 2 to 4 and
-    /// [`CrossoverError::Channels`] for no channels.
-    pub fn new(input: BusTopology, bands: usize) -> Result<Self, CrossoverError> {
-        if !(Self::MIN_BANDS..=Self::MAX_BANDS).contains(&bands) {
-            return Err(CrossoverError::Bands {
-                bands,
-                min: Self::MIN_BANDS,
-                max: Self::MAX_BANDS,
-            });
-        }
-        if input.layout().count() == 0 {
-            return Err(CrossoverError::Channels { channels: 0 });
-        }
-        Ok(Self { input, bands })
-    }
-
-    /// How many bands it makes.
-    #[must_use]
-    pub fn bands(&self) -> usize {
-        self.bands
-    }
-
-    /// The crossover of `controls` at `rate`, `self.bands()` bands wide.
-    fn split(&self, controls: &CrossoverControls, rate: SampleRate) -> CrossoverModel {
-        CrossoverModel::designed(self.bands, controls, rate)
-            .expect("a multiband's band count is checked in `new` and within a crossover's")
-    }
-}
-
-impl Family for MultibandFamily {
-    type Controls = MultibandSettings;
-    type Member = MultibandMember;
-    type Recurrence = MultibandRecurrence;
-
-    /// Solved on the stream's grid of 16 frames, as the crossover's and the compressor's.
-    const CADENCE: Cadence = COEFF_STREAM;
-
-    fn channels(&self) -> Channels {
-        Channels::same(self.input)
-    }
-
-    fn blank(&self, rate: SampleRate) -> MultibandMember {
-        MultibandMember {
-            crossover: self.split(&CrossoverControls::octaves(rate), rate),
-            bands: [CompressorMember::designed(&CompressorControls::DEFAULT, rate); MAX_BANDS],
-            count: self.bands(),
-            bypass: [false; MAX_BANDS],
-            solo: [false; MAX_BANDS],
-        }
-    }
-
-    /// The controls, made runnable: the crossover as [`CrossoverModel::design_into`] makes it
-    /// (total: a set out of order is solved with its splits no lower than the one before),
-    /// and each band as [`CompressorBank`](super::CompressorBank) does.
-    fn member_into(&self, c: &MultibandSettings, rate: SampleRate, out: &mut MultibandMember) {
-        out.crossover.design_into(&c.crossover, rate);
-        out.count = self.bands();
-        for (b, band) in c.bands.iter().enumerate() {
-            out.bands[b] = CompressorMember::designed(&band.compressor, rate);
-            out.bypass[b] = band.bypass;
-            out.solo[b] = band.solo;
-        }
-    }
-
-    fn recurrence(&self, _: SampleRate) -> MultibandRecurrence {
-        MultibandRecurrence {
-            width: usize::from(self.input.layout().count()),
-            bands: self.bands(),
-        }
-    }
-}
-
-/// The coefficient point of a multiband: the crossover and the detectors, which land
-/// whole, and the figures that glide, each band's makeup (dB) and its two weights.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MultibandTarget {
-    crossover: CrossoverModel,
-    count: usize,
-    detectors: [Detector; MAX_BANDS],
-    makeup: [f32; MAX_BANDS],
-    /// 1 while the band is bypassed, else 0.
-    bypass: [f32; MAX_BANDS],
-    /// 1 while the band is heard, else 0.
-    audible: [f32; MAX_BANDS],
-}
-
-/// The coefficients in flight: the crossover's and the detectors', landed, and each band's
-/// makeup, bypass weight and audible weight gliding over [`GAIN_GLIDE`].
-///
-/// As for the compressor, a generic glide of the whole target would run for every frame of
-/// the glide when only a ratio moved: only what multiplies the output unsmoothed takes
-/// steps. The crossover glides over a grid period, in its integrator gains.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MultibandCoeffs {
-    crossover: Glide<CrossoverCoefficients>,
-    count: usize,
-    detectors: [Detector; MAX_BANDS],
-    makeup: [Glide<f32>; MAX_BANDS],
-    bypass: [Glide<f32>; MAX_BANDS],
-    audible: [Glide<f32>; MAX_BANDS],
-    /// The steps a glide takes: [`GAIN_GLIDE`] at the prepared rate.
-    steps: u32,
-}
-
-impl Approach for MultibandCoeffs {
-    type Target = MultibandTarget;
-
-    fn aim(&mut self, t: &MultibandTarget) {
-        self.crossover.aim(t.crossover.coefficients());
-        self.count = t.count;
-        self.detectors = t.detectors;
-        let steps = Steps::Fixed(self.steps);
-        for b in 0..MAX_BANDS {
-            self.makeup[b].aim_by(t.makeup[b], steps);
-            self.bypass[b].aim_by(t.bypass[b], steps);
-            self.audible[b].aim_by(t.audible[b], steps);
-        }
-    }
-
-    #[inline]
-    fn step(&mut self) -> bool {
-        let mut moved = self.crossover.step();
-        for b in 0..MAX_BANDS {
-            moved |= self.makeup[b].step();
-            moved |= self.bypass[b].step();
-            moved |= self.audible[b].step();
-        }
-        moved
-    }
-
-    fn settle(&mut self) {
-        self.crossover.settle();
-        for b in 0..MAX_BANDS {
-            self.makeup[b].settle();
-            self.bypass[b].settle();
-            self.audible[b].settle();
-        }
-    }
-}
-
-/// What a block changes: each channel's crossover sections, each band's follower and the
-/// deepest reduction each band reached since the last [`Readout`] read, and the
-/// frame's scratch (one split and one sum per channel, sized to the width with the
-/// recurrence).
-#[derive(Clone, Debug)]
-pub struct MultibandState {
-    filters: Vec<CrossoverState>,
-    split: Vec<[f32; TREE_BANDS]>,
-    sum: Vec<f32>,
-    /// Each band's smoothed reduction, in dB and positive.
-    reductions: [f32; MAX_BANDS],
-    /// Each band's largest reduction since the last read, in dB.
-    deepest: [f32; MAX_BANDS],
+/// The per-frame lanes a multiband reads beside its audio, in the audio's sample format,
+/// `None` where nothing drives them. A lane is at least as long as the frames a call
+/// renders; a frame past its end is not driven.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MultibandLanes<'a, S: Float = f32> {
+    /// Band `b`'s threshold in dB. A frame that is not finite is the aimed threshold.
+    pub thresholds: [Option<Mono<'a, S>>; MAX_BANDS],
 }
 
 /// Each band's largest reduction since the last read, in dB and positive: a
-/// **measurement**, for a reduction meter, and the multiband's [`Readout`]. It counts only
-/// the frames a band is not fully bypassed on (a bypassed band passes none of it). It
-/// carries the family's band count, so a reader cannot ask about a band that is not there.
+/// **measurement**, for a reduction meter. A band is left out of it only for a whole chunk
+/// of 64 frames of a call on which its bypass weight is 1 (a bypassed band passes none of
+/// its reduction); any chunk with a frame not bypassed counts. It carries the bank's band
+/// count, so a reader cannot ask about a band that is not there.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BandReductions {
     deepest: [Db; MAX_BANDS],
@@ -348,172 +119,367 @@ impl BandReductions {
         self.deepest[..self.bands].get(band).copied()
     }
 
-    /// Every band's deepest reduction, in band order: exactly the family's bands.
+    /// Every band's deepest reduction, in band order: exactly the bank's bands.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = Db> + '_ {
         self.deepest[..self.bands].iter().copied()
     }
 }
 
-impl Readout for MultibandRecurrence {
-    type Reading = BandReductions;
-
-    fn take_reading(&self, state: &mut MultibandState) -> BandReductions {
-        BandReductions {
-            deepest: core::mem::take(&mut state.deepest).map(Db),
-            bands: self.bands,
-        }
-    }
-}
-
-/// The [`Recurrence`] of a [`MultibandFamily`].
-///
-/// K, per frame: each channel through its crossover tree; then, per band in order, the
-/// band's level (the loudest channel of the band, a NaN reading as quiet), its compressor
-/// (the frame step of [`CompressorBank`](super::CompressorBank), at the
-/// threshold of lane `b` of the [`Inputs`] when it is finite, else the member's), the bypass
-/// blend `g (1 - w) + w` (skipped at `w = 0`), the audible multiply (skipped at 1, and the
-/// band left out of the sum at 0) and each channel's `x g` added to its sum. The bands
-/// are summed lowest first, from 0.
-///
-/// **Lane `b` is band `b`'s threshold in dB, per frame.**
-#[derive(Clone, Copy, Debug)]
-pub struct MultibandRecurrence {
-    width: usize,
-    /// The family's band count, which a [`BandReductions`] reading carries.
+/// The width and band count of a [`MultibandBank`] that can be built: what
+/// [`MultibandBank::check`] returns, so [`MultibandBank::from_shape`] has nothing to refuse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BankShape {
+    width: ChannelLayout,
     bands: usize,
 }
 
-impl Recurrence for MultibandRecurrence {
-    type Member = MultibandMember;
-    type Capacity = ();
-    type Target = MultibandTarget;
-    type Coeffs = MultibandCoeffs;
-    type State = MultibandState;
+impl BankShape {
+    /// The channels each band has.
+    #[must_use]
+    pub fn width(&self) -> ChannelLayout {
+        self.width
+    }
 
-    const STEP: usize = 1;
+    /// The bands, 2 to 4.
+    #[must_use]
+    pub fn bands(&self) -> usize {
+        self.bands
+    }
+}
 
-    fn start(&self, member: &MultibandMember) -> Start<Self> {
-        let mut target = MultibandTarget {
-            crossover: member.crossover,
-            count: member.count,
-            detectors: [Detector::NEUTRAL; MAX_BANDS],
-            makeup: [0.0; MAX_BANDS],
-            bypass: [0.0; MAX_BANDS],
-            audible: [1.0; MAX_BANDS],
-        };
-        self.coefficients_into(member, &mut target);
-        Start {
-            coeffs: MultibandCoeffs {
-                crossover: Glide::landed(target.crossover.coefficients()).by(COEFF_INTERVAL as u32),
-                count: target.count,
-                detectors: target.detectors,
-                makeup: target.makeup.map(Glide::landed),
-                bypass: target.bypass.map(Glide::landed),
-                audible: target.audible.map(Glide::landed),
-                steps: 0,
-            },
-            state: MultibandState {
-                filters: vec![CrossoverState::default(); self.width],
-                split: vec![[0.0; TREE_BANDS]; self.width],
-                sum: vec![0.0; self.width],
-                reductions: [0.0; MAX_BANDS],
-                deepest: [0.0; MAX_BANDS],
-            },
-            target,
+/// The planes a chunk of [`CHUNK`] frames passes through, sized when the bank is built.
+#[derive(Clone, Debug)]
+struct Scratch {
+    /// The input, as `f32`, a plane per channel.
+    input: Vec<Vec<f32>>,
+    /// The crossover's bands, band-major: plane `band * width + channel`.
+    bands: Vec<Vec<f32>>,
+    /// One band, compressed.
+    squeezed: Vec<Vec<f32>>,
+    /// The bands summed.
+    sum: Vec<Vec<f32>>,
+}
+
+impl Scratch {
+    fn new(width: usize, bands: usize) -> Self {
+        let planes = |n: usize| vec![vec![0.0f32; CHUNK]; n];
+        Self {
+            input: planes(width),
+            bands: planes(width * bands),
+            squeezed: planes(width),
+            sum: planes(width),
+        }
+    }
+}
+
+/// A multiband compressor of `bands` bands over a fixed width: the crossover, a
+/// [`CompressorBank`] a band, and the weights that bypass and solo.
+///
+/// Built on the control side for one rate; the state is `f32`, and a view of another sample
+/// format is converted at the edges. Nothing it holds grows.
+#[derive(Clone, Debug)]
+pub struct MultibandBank {
+    width: usize,
+    bands: usize,
+    rate: SampleRate,
+    crossover: CrossoverBank,
+    /// The model the controls design, in place.
+    model: CrossoverModel,
+    /// The coefficients in flight over one grid period.
+    coefficients: Glide<CrossoverCoefficients>,
+    compressors: [CompressorBank; MAX_BANDS],
+    /// 1 while the band is bypassed, else 0, gliding over [`GAIN_GLIDE`].
+    bypass: [Glide<f32>; MAX_BANDS],
+    /// 1 while the band is heard, else 0, gliding over [`GAIN_GLIDE`].
+    audible: [Glide<f32>; MAX_BANDS],
+    /// The steps a weight glide takes: [`GAIN_GLIDE`] at the rate.
+    steps: u32,
+    /// Whether the first aim since the last reset has landed.
+    landed: bool,
+    /// Each band's deepest reduction since the last reading, in dB.
+    deepest: [f32; MAX_BANDS],
+    scratch: Scratch,
+}
+
+impl MultibandBank {
+    /// The fewest bands.
+    pub const MIN_BANDS: usize = 2;
+    /// The most bands.
+    pub const MAX_BANDS: usize = MAX_BANDS;
+
+    /// A multiband of `bands` bands over `width` at `rate`, splitting and summing until it
+    /// is aimed. Allocates: build it on the control side.
+    ///
+    /// # Errors
+    ///
+    /// As [`check`](Self::check).
+    pub fn new(
+        width: ChannelLayout,
+        bands: usize,
+        rate: SampleRate,
+    ) -> Result<Self, CrossoverError> {
+        Ok(Self::from_shape(Self::check(width, bands)?, rate))
+    }
+
+    /// A multiband of a checked `shape` at `rate`: [`new`](Self::new) past its checks.
+    /// Allocates: build it on the control side.
+    ///
+    /// # Panics
+    ///
+    /// Never for a shape [`check`](Self::check) made: the one `expect` is on the crossover
+    /// design's band count, which a shape keeps within 2 to 4.
+    #[must_use]
+    pub fn from_shape(shape: BankShape, rate: SampleRate) -> Self {
+        let BankShape { width, bands } = shape;
+        let channels = usize::from(width.count());
+        let model = CrossoverModel::designed(bands, &CrossoverControls::octaves(rate), rate)
+            .expect("a shape's bands are 2 to 4, inside a crossover's 2 to 6");
+        // 5 ms is a few hundred frames at any real rate; an absurd rate saturates rather
+        // than panic, since a prepare must not.
+        let steps = u32::try_from(GAIN_GLIDE.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
+        Self {
+            width: channels,
+            bands,
+            rate,
+            crossover: CrossoverBank::new(width),
+            coefficients: Glide::landed(model.coefficients()).by(COEFF_INTERVAL as u32),
+            model,
+            compressors: core::array::from_fn(|_| CompressorBank::new(rate)),
+            bypass: [Glide::landed(0.0); MAX_BANDS],
+            audible: [Glide::landed(1.0); MAX_BANDS],
+            steps,
+            landed: false,
+            deepest: [0.0; MAX_BANDS],
+            scratch: Scratch::new(channels, bands),
         }
     }
 
-    fn prepare(
+    /// Whether a bank of `bands` bands over `width` can be built, as the shape that says so.
+    ///
+    /// # Errors
+    ///
+    /// [`CrossoverError::Bands`] if `bands` is not 2 to 4, and
+    /// [`CrossoverError::Channels`] for no channels or more than the planes of a crossover
+    /// hold.
+    pub fn check(width: ChannelLayout, bands: usize) -> Result<BankShape, CrossoverError> {
+        if !(Self::MIN_BANDS..=Self::MAX_BANDS).contains(&bands) {
+            return Err(CrossoverError::Bands {
+                bands,
+                min: Self::MIN_BANDS,
+                max: Self::MAX_BANDS,
+            });
+        }
+        let channels = usize::from(width.count());
+        if channels == 0 || ChannelLayout::try_from(channels * bands).is_err() {
+            return Err(CrossoverError::Channels { channels });
+        }
+        Ok(BankShape { width, bands })
+    }
+
+    /// How many bands it makes.
+    #[must_use]
+    pub fn bands(&self) -> usize {
+        self.bands
+    }
+
+    /// Back to a fresh bank: silent, splitting and summing at the octave splits, every band
+    /// a compressor that does nothing, the weights at 0 (bypass) and 1 (audible), the meters
+    /// at none, and the next [`aim`](Self::aim) landing at once. No allocation.
+    pub fn reset(&mut self) {
+        self.crossover.reset();
+        self.model
+            .design_into(&CrossoverControls::octaves(self.rate), self.rate);
+        self.coefficients = Glide::landed(self.model.coefficients()).by(COEFF_INTERVAL as u32);
+        self.compressors = core::array::from_fn(|_| CompressorBank::new(self.rate));
+        self.bypass = [Glide::landed(0.0); MAX_BANDS];
+        self.audible = [Glide::landed(1.0); MAX_BANDS];
+        self.deepest = [0.0; MAX_BANDS];
+        self.landed = false;
+    }
+
+    /// Aims at `controls`: the crossover is designed in place (total: a set out of order is
+    /// solved with its splits no lower than the one before) and glides to the design over a
+    /// grid period, each band's compressor is aimed as [`CompressorBank::aim`] does, and the
+    /// bypass and solo weights glide over [`GAIN_GLIDE`]. The first aim after
+    /// [`new`](Self::new) or [`reset`](Self::reset) lands whole. No allocation.
+    pub fn aim(&mut self, controls: &MultibandSettings) {
+        self.model.design_into(&controls.crossover, self.rate);
+        self.coefficients.aim(self.model.coefficients());
+        let bands = &controls.bands[..self.bands];
+        let any_solo = bands.iter().any(|b| b.solo);
+        let steps = Steps::Fixed(self.steps);
+        for (b, band) in bands.iter().enumerate() {
+            self.compressors[b].aim(&band.compressor);
+            self.bypass[b].aim_by(f32::from(band.bypass), steps);
+            self.audible[b].aim_by(f32::from(!any_solo || band.solo), steps);
+        }
+        if !self.landed {
+            self.coefficients.settle();
+            for b in 0..self.bands {
+                self.compressors[b].settle();
+                self.bypass[b].settle();
+                self.audible[b].settle();
+            }
+            self.landed = true;
+        }
+    }
+
+    /// Each band's deepest reduction since the last call, and the meters cleared. No
+    /// allocation.
+    pub fn take_reading(&mut self) -> BandReductions {
+        BandReductions {
+            deepest: core::mem::take(&mut self.deepest).map(Db),
+            bands: self.bands,
+        }
+    }
+
+    /// Runs `input` into `output`: the bands of each channel, compressed and summed.
+    ///
+    /// Channel `c` of `input` feeds channel `c` of `output`; an input channel the bank is
+    /// wider than reads as silence, an output channel past the bank's width is not touched,
+    /// and the frames rendered are the fewer of the two views'. Frame `i` reads the
+    /// weights at the glide's step `taken + 1 + i`, then the block's steps are taken. No
+    /// allocation.
+    pub fn process<S: Float>(
         &mut self,
-        _: &(),
-        setup: &Setup,
-        coeffs: &mut MultibandCoeffs,
-        _: &mut MultibandState,
-        _: &mut MultibandTarget,
+        lanes: MultibandLanes<'_, S>,
+        input: Planes<'_, S>,
+        mut output: PlanesMut<'_, '_, S>,
     ) {
-        // 5 ms is a few hundred frames at any real rate; an absurd rate saturates
-        // rather than panic, since a prepare must not.
-        coeffs.steps =
-            u32::try_from(GAIN_GLIDE.to_samples_ceil(setup.rate).get()).unwrap_or(u32::MAX);
-    }
-
-    fn coefficients_into(&self, m: &MultibandMember, target: &mut MultibandTarget) -> bool {
-        target.crossover = m.crossover;
-        target.count = m.count;
-        for b in 0..MAX_BANDS {
-            target.detectors[b] = Detector::of(&m.bands[b]);
-            target.makeup[b] = m.bands[b].makeup().get();
-            target.bypass[b] = f32::from(m.bypass[b]);
-            target.audible[b] = f32::from(m.is_audible(b) || b >= m.count);
+        let frames = input.frames().get().min(output.frames().get());
+        let mut start = 0;
+        while start < frames {
+            let end = (start + CHUNK).min(frames);
+            self.chunk(&lanes, &input, &mut output, start..end);
+            start = end;
         }
-        true
     }
 
-    fn clear(&self, state: &mut MultibandState) {
-        state.filters.fill(CrossoverState::default());
-        state.reductions = [0.0; MAX_BANDS];
-        state.deepest = [0.0; MAX_BANDS];
-    }
-
-    fn run(
-        &self,
-        coeffs: &MultibandCoeffs,
-        state: &mut MultibandState,
-        feed: &Inputs<'_>,
-        output: &mut [&mut [f32]],
-        frames: Range<usize>,
-        _: usize,
+    /// Runs frames `at` of the views, at most [`CHUNK`] of them.
+    fn chunk<S: Float>(
+        &mut self,
+        lanes: &MultibandLanes<'_, S>,
+        input: &Planes<'_, S>,
+        output: &mut PlanesMut<'_, '_, S>,
+        at: Range<usize>,
     ) {
-        let bands = coeffs.count;
-        let MultibandState {
-            filters,
-            split,
-            sum,
-            reductions,
-            deepest,
-        } = state;
-        for i in frames {
-            let crossover = coeffs.crossover.now();
-            for ((filter, bands), input) in filters.iter_mut().zip(split.iter_mut()).zip(feed.audio)
+        let n = at.len();
+        let width = self.width;
+        let scratch = &mut self.scratch;
+        for (c, plane) in scratch.input.iter_mut().enumerate() {
+            let dst = &mut plane[..n];
+            match input.get_plane(c) {
+                Some(src) => {
+                    for (d, s) in dst.iter_mut().zip(&src.samples()[at.clone()]) {
+                        *d = s.convert_to::<f32>();
+                    }
+                }
+                None => dst.fill(0.0),
+            }
+        }
+        for plane in &mut scratch.sum {
+            plane[..n].fill(0.0);
+        }
+        let frames = Samples(0)..Samples(n);
+        {
+            let (Ok(heard), Ok(mut split)) = (
+                Planes::from_vecs(&scratch.input),
+                PlanesMut::from_vecs(&mut scratch.bands[..self.bands * width]),
+            ) else {
+                return;
+            };
+            self.crossover.process(
+                &mut self.coefficients,
+                heard.slice(frames.clone()),
+                split.slice_mut(frames.clone()),
+            );
+        }
+        let mut by = [0.0f32; CHUNK];
+        let mut au = [0.0f32; CHUNK];
+        let mut lane = [0.0f32; CHUNK];
+        for b in 0..self.bands {
             {
-                *bands = filter.tick(&crossover, input[i]);
+                let (Ok(band), Ok(mut squeezed)) = (
+                    Planes::from_vecs(&scratch.bands[b * width..(b + 1) * width]),
+                    PlanesMut::from_vecs(&mut scratch.squeezed),
+                ) else {
+                    return;
+                };
+                let band = band.slice(frames.clone());
+                // The lane in `f32`, a frame past its end not finite, so not driven.
+                let threshold = lanes.thresholds[b].map(|l| {
+                    let all = l.samples();
+                    let driven = &all[at.start.min(all.len())..at.end.min(all.len())];
+                    for (i, t) in lane[..n].iter_mut().enumerate() {
+                        *t = driven.get(i).map_or(f32::NAN, |x| x.convert_to::<f32>());
+                    }
+                    Mono::new(&lane[..n])
+                });
+                self.compressors[b].process(
+                    CompressorLanes { threshold },
+                    band,
+                    band,
+                    squeezed.slice_mut(frames.clone()),
+                );
             }
-            sum.fill(0.0);
-            for b in 0..bands {
-                let level = split.iter().fold(0.0f32, |m, ch| m.max(ch[b].abs()));
-                let d = &coeffs.detectors[b];
-                let threshold = feed.lanes[b]
-                    .map(|lane| Db(lane[i]))
-                    .filter(|t| t.get().is_finite())
-                    .unwrap_or_else(|| d.threshold());
-                let mut g = d.frame(&mut reductions[b], level, threshold, coeffs.makeup[b].now());
-                let w = coeffs.bypass[b].now();
-                if w != 1.0 {
-                    deepest[b] = deepest[b].max(reductions[b]);
-                }
-                if w != 0.0 {
-                    // Blend toward unity (makeup included) as the bypass takes hold.
-                    g = g * (1.0 - w) + w;
-                }
-                let a = coeffs.audible[b].now();
-                if a == 0.0 {
-                    continue;
-                }
-                if a != 1.0 {
-                    g *= a;
-                }
-                for (s, ch) in sum.iter_mut().zip(split.iter()) {
-                    *s += ch[b] * g;
+            // The meter counts a band unless the whole chunk is bypassed.
+            let deepest = self.compressors[b].take_deepest().get();
+            let bypass = &self.bypass[b];
+            if bypass.blended(n) != 0 || bypass.target() < 1.0 {
+                self.deepest[b] = self.deepest[b].max(deepest);
+            }
+            weights(bypass, &mut by[..n]);
+            weights(&self.audible[b], &mut au[..n]);
+            for c in 0..width {
+                let x = &scratch.bands[b * width + c][..n];
+                let y = &scratch.squeezed[c][..n];
+                for (i, s) in scratch.sum[c][..n].iter_mut().enumerate() {
+                    let (w, a) = (by[i], au[i]);
+                    if a == 0.0 {
+                        continue;
+                    }
+                    // The blend toward the unreduced band, makeup included, as the bypass
+                    // takes hold; at either end it is exactly one of the two.
+                    let v = if w == 0.0 {
+                        y[i]
+                    } else if w == 1.0 {
+                        x[i]
+                    } else {
+                        y[i] * (1.0 - w) + x[i] * w
+                    };
+                    *s += if a == 1.0 { v } else { v * a };
                 }
             }
-            for (out, &s) in output.iter_mut().zip(sum.iter()) {
-                out[i] = s;
+        }
+        let steps = u32::try_from(n).unwrap_or(u32::MAX);
+        for b in 0..self.bands {
+            self.bypass[b].advance(steps);
+            self.audible[b].advance(steps);
+        }
+        for c in 0..width.min(output.channels()) {
+            let mut plane = output.plane_mut(c);
+            for (y, &x) in plane.samples_mut()[at.clone()]
+                .iter_mut()
+                .zip(&scratch.sum[c][..n])
+            {
+                *y = x.convert_to::<S>();
             }
         }
     }
+}
 
-    fn effort(&self) -> Effort {
-        Effort::Heavy
+/// The weight of `glide` at each of the next frames: its blend while it moves, then its
+/// target.
+#[inline]
+fn weights(glide: &Glide<f32>, out: &mut [f32]) {
+    let blended = glide.blended(out.len());
+    let taken = glide.taken();
+    for (i, w) in out.iter_mut().enumerate() {
+        *w = if i < blended {
+            glide.at(taken.saturating_add(1).saturating_add(i as u32))
+        } else {
+            glide.target()
+        };
     }
 }
 
