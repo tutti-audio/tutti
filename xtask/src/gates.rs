@@ -10,6 +10,7 @@
 
 mod alloc_binaries;
 mod buffers;
+mod building;
 mod canonical_paths;
 mod clap_sys;
 mod comments;
@@ -140,6 +141,8 @@ pub(crate) enum Gate {
     Conformance,
     /// A public item names audio with a fixed sample format only as a row of the list.
     Buffers,
+    /// A configured thing is built one way, bar the rows of the baseline.
+    Building,
 }
 
 impl Gate {
@@ -166,6 +169,7 @@ impl Gate {
             Gate::PlatformSeam => "gate check-platform-seam".to_owned(),
             Gate::Conformance => "gate check-conformance".to_owned(),
             Gate::Buffers => "gate check-buffers".to_owned(),
+            Gate::Building => "gate check-building".to_owned(),
         }
     }
 
@@ -195,6 +199,7 @@ impl Gate {
             Gate::PassiveTests => passive_tests::check(&tree),
             Gate::Comments => comments::check(&tree),
             Gate::Buffers => buffers::check(&tree, buffers::MIN_SITES),
+            Gate::Building => building::check(&tree, building::ALLOW, building::MIN_SITES),
             Gate::AllocBinaries => alloc_binaries::check(&tree, alloc_binaries::ALLOWED),
             Gate::PlatformSeam => platform_seam::check(&tree, platform_seam::ALLOW),
             Gate::Conformance => {
