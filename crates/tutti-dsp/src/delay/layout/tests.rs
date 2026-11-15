@@ -125,7 +125,7 @@ fn a_normalized_routing_scales_a_row_past_one_and_no_other() {
     let four = bus(4);
     let r = Routing::normalized(four, &gains(&[1.0; 16])).unwrap();
     for row in 0..4 {
-        let sum: f32 = (0..4).map(|c| r.weight(row, c).get().abs()).sum();
+        let sum: f32 = (0..4).map(|c| r.weight(row, c).magnitude().get()).sum();
         assert!((sum - 1.0).abs() < 1e-6, "row {row}: {sum}");
         assert!((0..4).all(|c| r.weight(row, c) == Gain::new(0.25)));
     }

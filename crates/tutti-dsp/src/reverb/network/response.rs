@@ -12,7 +12,7 @@
 //! of band gains that would exceed 1 anywhere to peak at 0.9999; the model does not,
 //! and [`Absorption::peak`] is what shows a design never asks for it.
 
-use tutti_types::{Gain, Hz, SampleRate};
+use tutti_types::{Amplitude, Gain, Hz, SampleRate};
 
 use super::{
     Absorption, AllPass, AllPassForm, Band, Fdn, Line, MAX_CHANNELS, Matrix, Network, Stage, energy,
@@ -201,7 +201,7 @@ impl AllPass {
     /// Freeverb's has `-1` at 0 and `(1 + g) g^(k-1) - g^k = g^(k-1)` at `kD`.
     /// `1 + 2|g|` and `1 + 1/(1 - |g|)` at `r = 1`. Infinity when `|g| r^-D >= 1`.
     fn majorant(&self, r: f64) -> f64 {
-        let g = f64::from(self.gain.get()).abs();
+        let g = f64::from(self.gain.magnitude().get());
         let d = self.delay.get();
         if !(g.is_finite() && g < 1.0) {
             return f64::INFINITY;
@@ -232,7 +232,7 @@ impl AllPass {
 
     /// The pole radius `|g|^(1/D)`: an all-pass of no delay is memoryless.
     fn radius(&self) -> f64 {
-        let g = f64::from(self.gain.get()).abs();
+        let g = f64::from(self.gain.magnitude().get());
         let d = self.delay.get();
         if !(g.is_finite() && g < 1.0) {
             return f64::INFINITY;
@@ -509,11 +509,11 @@ impl Network {
                 Stage::Taps(t) => {
                     let mut per = [0.0f64; MAX_CHANNELS];
                     for tap in t.taps.iter() {
-                        let (g, d) = (f64::from(tap.gain.get()), tap.delay.get());
+                        let (g, d) = (f64::from(tap.gain.magnitude().get()), tap.delay.get());
                         if !(g.is_finite() && d.is_finite() && d >= 0.0) {
                             return f64::INFINITY;
                         }
-                        per[usize::from(tap.channel).min(MAX_CHANNELS - 1)] += g.abs();
+                        per[usize::from(tap.channel).min(MAX_CHANNELS - 1)] += g;
                     }
                     per.iter().copied().fold(0.0, f64::max)
                 }
@@ -656,7 +656,7 @@ impl Fdn {
                         .zip(self.input.iter())
                         .zip(&a)
                         .map(|((c, b), a)| {
-                            let w = f64::from(c.get()).abs() * f64::from(b.get()).abs();
+                            let w = f64::from(c.magnitude().get()) * f64::from(b.magnitude().get());
                             if w == 0.0 { 0.0 } else { w / (1.0 - a) }
                         })
                         .map(|x| if x < 0.0 { f64::INFINITY } else { x })
@@ -780,7 +780,7 @@ impl Lti for Network {
     fn is_stable(&self) -> bool {
         self.stages.iter().all(|s| match s {
             Stage::Fdn(f) => f.is_stable(),
-            Stage::AllPass(a) => a.iter().all(|a| a.gain.get().abs() < 1.0),
+            Stage::AllPass(a) => a.iter().all(|a| a.gain.magnitude() < Amplitude::UNITY),
             Stage::Taps(t) => t.taps.iter().all(|t| t.gain.get().is_finite()),
             Stage::Fir(s) => s.rt60.iter().all(|r| !r.get().is_nan()),
         })

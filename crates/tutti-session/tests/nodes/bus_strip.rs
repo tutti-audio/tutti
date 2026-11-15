@@ -7,8 +7,8 @@
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::BusStripNode;
-use tutti_session::{OutPort, Root, Session, SessionBuilder};
-use tutti_types::{BusTopology, ChannelLayout, ChannelTopology, MaxBlock, Samples};
+use tutti_session::{OutPort, ParamError, Root, Session, SessionBuilder};
+use tutti_types::{Balance, BusTopology, ChannelLayout, ChannelTopology, MaxBlock, Samples};
 
 /// Constant `values` on its output channels, declaring `out` as its bus.
 struct Src {
@@ -89,4 +89,20 @@ fn a_stereo_strip_feeds_a_declared_surround_root() {
         .expect("a placed stereo bus folds onto 5.1")
         .hard();
     assert_eq!(heard(&mut s, 6), [0.25, 0.75, 0.0, 0.0, 0.0, 0.0]);
+}
+
+/// A balance is addressable only where a strip has a left/right pair: a stereo
+/// strip takes it, and a mono strip refuses it by name and writes nothing.
+#[test]
+fn a_strip_without_a_pair_refuses_a_balance_by_name() {
+    let mut s = offline(Session::builder(), 2);
+    let g = s.graph();
+    let (stereo, _) = g.add(BusStripNode::stereo());
+    let (mono, _) = g.add(BusStripNode::mono());
+    g.set_param(stereo.balance(), Balance(0.5))
+        .expect("a stereo strip balances");
+    assert!(matches!(
+        g.set_param(mono.balance(), Balance(0.5)),
+        Err(ParamError::NoSuchParam { .. })
+    ));
 }

@@ -34,9 +34,7 @@ pub fn vst3_cpp_module() -> PathBuf {
 /// When `module` is not inside a `.vst3` bundle.
 #[must_use]
 pub fn bundle_of(module: &Path) -> PathBuf {
-    module
-        .ancestors()
-        .find(|p| p.extension().is_some_and(|e| e == "vst3"))
+    tutti_plugin_types::bundle::bundle_dir_of(module, tutti_plugin_types::bundle::ModuleKind::Vst3)
         .expect("a .vst3 bundle around the module")
         .to_path_buf()
 }
