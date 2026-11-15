@@ -633,8 +633,7 @@ impl Session {
     /// node, which holds the entry (the pool keeps it, whether or not the
     /// app still declares it, until the node is removed).
     ///
-    /// The one way a pooled plugin enters the graph; it installs as
-    /// [`add_plugin`](Self::add_plugin) does. An in-process plugin was opened
+    /// The one way a plugin enters the graph. An in-process plugin was opened
     /// on the main thread by the load, so this call needs no main thread.
     /// An entry has one plugin: after the node is removed the entry stays
     /// loaded and this call is [`AddPluginError::Installed`] until the entry

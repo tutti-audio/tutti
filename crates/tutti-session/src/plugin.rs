@@ -159,9 +159,8 @@ pub const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(8);
 /// second to fifteen), so it runs on a worker, never on the control thread.
 #[must_use = "a load does nothing until it is run"]
 pub(crate) struct PluginLoad {
-    /// The plugin, under the blacklist of the catalog it was given
-    /// ([`with_catalog`](Self::with_catalog)), asked by [`run`](Self::run) as
-    /// the load opens.
+    /// The plugin, under the blacklist of the catalog that resolved it, asked
+    /// by [`run`](Self::run) as the load opens.
     loadable: Loadable,
     rate: SampleRate,
     config: AudioConfig,
