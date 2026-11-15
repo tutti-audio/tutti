@@ -3,6 +3,7 @@
 
 use core::iter::FusedIterator;
 
+use crate::field::first_non_seven_bit;
 use crate::{Message, MidiGroup, Sysex7Packet, SysexStatus, Ump};
 
 /// The longest SysEx7 payload (the bytes between `0xF0` and `0xF7`) tutti
@@ -90,7 +91,7 @@ impl<'a> SysexMessage<'a> {
         let Some((&0xF7, interior)) = rest.split_last() else {
             return Err(SysexError::MissingEnd);
         };
-        match interior.iter().position(|&b| b >= 0x80) {
+        match first_non_seven_bit(interior) {
             Some(i) => Err(SysexError::NotSevenBit { index: i + 1 }),
             None => Ok(Self(bytes)),
         }
@@ -157,7 +158,7 @@ impl<'a> Sysex7Packets<'a> {
     ///
     /// [`SysexError::NotSevenBit`] for the first byte that is 128 or more.
     pub fn from_payload(group: MidiGroup, payload: &'a [u8]) -> Result<Self, SysexError> {
-        match payload.iter().position(|&b| b >= 0x80) {
+        match first_non_seven_bit(payload) {
             Some(index) => Err(SysexError::NotSevenBit { index }),
             None => Ok(Self::over(group, payload)),
         }

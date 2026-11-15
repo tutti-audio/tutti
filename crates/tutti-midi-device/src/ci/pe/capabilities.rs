@@ -11,7 +11,6 @@ use tutti_ump::U7;
 
 use super::chunk::PeChunk;
 use super::flow::PeMessageKind;
-use super::limits::NotInRange;
 
 /// Sub-ID#2: Inquiry: Property Exchange Capabilities (M2-101 §8.5).
 pub const SUB_ID2_PE_CAPABILITIES_INQUIRY: u8 = 0x30;
@@ -21,16 +20,19 @@ pub const SUB_ID2_PE_CAPABILITIES_REPLY: u8 = 0x31;
 /// still read (M2-103 §12).
 pub const SUB_ID2_PE_NOTIFY: u8 = 0x3F;
 
-/// The Number of Simultaneous Property Exchange Requests Supported: 1 to 127.
-///
-/// The field is one 7-bit byte, so the count stops at 127 although there are 128
-/// Request IDs (M2-101 Tables 30 and 32, M2-103 §5.3); a device that supports one
-/// request, the default (§8.4), reports 1. A device uses no more requests than
-/// the other reports (M2-103 §5.3).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
-pub struct SimultaneousRequests(u8);
+tutti_types::ranged! {
+    /// The Number of Simultaneous Property Exchange Requests Supported: 1 to 127.
+    ///
+    /// The field is one 7-bit byte, so the count stops at 127 although there are 128
+    /// Request IDs (M2-101 Tables 30 and 32, M2-103 §5.3); a device that supports one
+    /// request, the default (§8.4), reports 1. A device uses no more requests than
+    /// the other reports (M2-103 §5.3).
+    #[derive(Eq, Hash, PartialOrd, Ord)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    SimultaneousRequests(u8), NotASimultaneousRequests, "a simultaneous request count (1 to 127)",
+    |raw| raw >= 1 && raw <= 127
+}
 
 impl SimultaneousRequests {
     /// The fewest, 1.
@@ -38,59 +40,12 @@ impl SimultaneousRequests {
     /// The most a 7-bit field reports, 127.
     pub const MAX: u8 = 127;
     /// One request at a time, the default of a device (M2-101 §8.4).
-    pub const ONE: Self = Self(1);
-
-    /// The count, or `None` for 0 or past 127.
-    #[must_use]
-    pub const fn new(raw: u8) -> Option<Self> {
-        if raw >= Self::MIN && raw <= Self::MAX {
-            Some(Self(raw))
-        } else {
-            None
-        }
-    }
-
-    /// The count for a literal or a constant.
-    ///
-    /// # Panics
-    ///
-    /// For 0 or past 127; in a `const` that is a compile error.
-    #[must_use]
-    #[track_caller]
-    pub const fn of(raw: u8) -> Self {
-        match Self::new(raw) {
-            Some(count) => count,
-            None => panic!("a simultaneous request count is 1 to 127"),
-        }
-    }
-
-    /// The count.
-    #[must_use]
-    pub const fn get(self) -> u8 {
-        self.0
-    }
-}
-
-impl TryFrom<u8> for SimultaneousRequests {
-    type Error = NotInRange<u8>;
-
-    fn try_from(raw: u8) -> Result<Self, NotInRange<u8>> {
-        Self::new(raw).ok_or(NotInRange {
-            what: "simultaneous request count",
-            raw,
-        })
-    }
-}
-
-impl From<SimultaneousRequests> for u8 {
-    fn from(count: SimultaneousRequests) -> u8 {
-        count.0
-    }
+    pub const ONE: Self = Self::of(1);
 }
 
 impl fmt::Display for SimultaneousRequests {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+        self.get().fmt(f)
     }
 }
 

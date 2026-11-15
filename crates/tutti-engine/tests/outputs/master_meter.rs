@@ -60,7 +60,7 @@ fn engine(
         }
     }));
     let meter = ed
-        .open_meter(MeterId(1), MeterSpec::Outputs)
+        .open_meter(MeterId::of(1), MeterSpec::Outputs)
         .expect("the sources exist");
     ed.commit().expect("commits");
     let engine = Engine::with_capacity(&transport, &mut ed, exec, capacity).expect("within limits");
@@ -197,7 +197,7 @@ fn the_master_reads_before_the_declick() {
             port: 0,
         })]);
     let mut meter = ed
-        .open_meter(MeterId(1), MeterSpec::Outputs)
+        .open_meter(MeterId::of(1), MeterSpec::Outputs)
         .expect("the sources exist");
     meter.enable();
     ed.commit().expect("commits");
@@ -277,7 +277,7 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
         }
     }));
     let mut meter = ed
-        .open_meter(MeterId(1), MeterSpec::Outputs)
+        .open_meter(MeterId::of(1), MeterSpec::Outputs)
         .expect("the sources exist");
     meter.enable();
     ed.commit().expect("commits");

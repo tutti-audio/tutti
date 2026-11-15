@@ -1551,13 +1551,15 @@ fn open_stem_taps(
     editor: &mut Editor,
     stems: &[StemTap],
 ) -> Result<Vec<tutti_graph::TapReader>, BounceConfigError> {
+    // The fork's topology is isolated and never merges back, so its ids are
+    // numbered above the ones it holds instead of minted from a counter.
     let mut next = editor
         .spec()
         .topology
         .taps
         .keys()
         .next_back()
-        .map_or(0, |id| id.0 + 1);
+        .map_or(1, |id| id.get() + 1);
     let capacity = Samples(2 * GRAPH_MAX_BLOCK.get());
     stems
         .iter()
@@ -1572,7 +1574,7 @@ fn open_stem_taps(
                     })
                 })
                 .collect();
-            let id = TapId(next);
+            let id = TapId::of(next);
             next += 1;
             editor
                 .open_tap(id, sources, TapAlign::ToOutput, capacity)

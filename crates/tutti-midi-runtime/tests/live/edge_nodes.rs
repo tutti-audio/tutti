@@ -850,14 +850,13 @@ fn clearing_a_slots_profiles_returns_it_to_the_rules_it_had() {
 #[test]
 fn a_host_set_modes_reset_goes_ahead_of_the_blocks_events() {
     use tutti_fixtures::midi::BendRanges;
-    use tutti_midi_protocol::PitchBendSensitivity;
-    use tutti_ump::Rpn;
+    use tutti_ump::{RegisteredData, Rpn, U7};
     let range = at(
         0,
         midi::registered(
             MidiChannel::of(2),
             Rpn::PITCH_BEND_SENSITIVITY,
-            PitchBendSensitivity::of(12).to_rpn_bits(),
+            RegisteredData::new(U7::of(12), U7::of(0)).to_word(),
         ),
     );
     let wire = Script::new(vec![vec![range]]);
@@ -1016,7 +1015,7 @@ fn an_event_tap_hands_midi_back_and_counts_drops() {
     ));
     let (inlet, mut keys) = EventInletNode::pair(EventCapacity::of(256));
     ed.insert(NodeKey(1), "keys", inlet);
-    let mut out = common::sink(&mut ed, 0, &[(1, 0)]);
+    let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
     for k in 0..5u64 {
         // The inlet holds each event for its frame: offset 7, then 8, in

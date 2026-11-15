@@ -28,7 +28,7 @@ use tutti_midi_runtime::{
     Placement, RouteRule, SendAt, TimedMidiEvent, compile_routes,
 };
 use tutti_tempo::TempoMap;
-use tutti_types::{Beat, BeatDuration, Frame, MeterMap, Samples};
+use tutti_types::{Beat, BeatDuration, Frame, MeterMap, Mint, Samples};
 use tutti_ump::{MidiChannel, MidiGroup, Ump};
 
 use crate::RouteDeclarer;
@@ -651,9 +651,10 @@ impl TakePlacement {
     }
 }
 
-/// An id [`Midi::route`] returns, for [`Midi::unroute`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct MidiRouteId(u64);
+tutti_types::id! {
+    /// An id [`Midi::route`] returns, for [`Midi::unroute`].
+    pub struct MidiRouteId;
+}
 
 /// One inbound routing rule: which Group and channel of the hardware input
 /// reach which targets, keyed by `T` (the session's own rules name nodes, a
@@ -766,12 +767,13 @@ struct Live {
 pub(crate) struct MidiState {
     clips: BTreeMap<NodeKey, Clip>,
     live: BTreeMap<NodeKey, Live>,
-    /// The session's own route rules, and the last id minted.
+    /// The session's own route rules.
     rules: BTreeMap<MidiRouteId, MidiRouteRule>,
     fallback: Option<NodeKey>,
-    minted: u64,
-    /// The last load id minted ([`MidiLoad`]).
-    loads: u64,
+    /// Names the session's own route rules.
+    minted: Mint,
+    /// Names the [`MidiLoad`]s.
+    loads: Mint,
     /// The sinks the last route compile fed.
     routed: BTreeSet<NodeKey>,
     /// Whether a host's last `set_routes` declared any rule or fallback:
@@ -1231,12 +1233,13 @@ impl MidiState {
     }
 }
 
-/// A file load a [`Midi`] started, named so the event that lands it can be
-/// matched to the call: [`Midi::load_file`] and `Midi::load_soundfont`
-/// return one, and [`MidiEvent::FileLoaded`] and
-/// `SoundFontLoaded` carry it. The session mints it; it names nothing else.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MidiLoad(u64);
+tutti_types::id! {
+    /// A file load a [`Midi`] started, named so the event that lands it can be
+    /// matched to the call: [`Midi::load_file`] and `Midi::load_soundfont`
+    /// return one, and [`MidiEvent::FileLoaded`] and
+    /// `SoundFontLoaded` carry it. The session mints it; it names nothing else.
+    pub struct MidiLoad;
+}
 
 /// The session's MIDI: live inputs, clips, the hardware
 /// input's routes and the hardware out. [`Session::midi`](crate::Session::midi)
@@ -1347,9 +1350,8 @@ fn wire_inlets(
 }
 
 impl Midi<'_> {
-    fn next_load(&mut self) -> MidiLoad {
-        self.state.loads += 1;
-        MidiLoad(self.state.loads)
+    fn next_load(&self) -> MidiLoad {
+        MidiLoad::mint(&self.state.loads)
     }
 
     /// Reads the MIDI file at `path` on the session's spawner. Returns at
@@ -1740,8 +1742,7 @@ impl Midi<'_> {
     pub fn route(&mut self, rule: MidiRouteRule) -> Result<MidiRouteId> {
         let input = self.ingest_node()?;
         self.own_may_declare()?;
-        self.state.minted += 1;
-        let id = MidiRouteId(self.state.minted);
+        let id = MidiRouteId::mint(&self.state.minted);
         self.state.rules.insert(id, rule);
         self.compile_own(input);
         Ok(id)

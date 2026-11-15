@@ -228,7 +228,7 @@ pub enum PumpPass {
 /// let out = |port| Source::Node(OutPort { node: NodeKey(1), port });
 /// editor.spec_mut().topology.set_outputs([out(0), out(1)]);
 /// let reader = editor
-///     .open_tap(TapId(0), vec![out(0), out(1)], TapAlign::ToOutput, Samples(1024))
+///     .open_tap(TapId::of(1), vec![out(0), out(1)], TapAlign::ToOutput, Samples(1024))
 ///     .expect("the ports exist");
 /// editor.commit().expect("compiles");
 /// executor.apply_pending();
