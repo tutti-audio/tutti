@@ -43,10 +43,10 @@
 //! client.connect(now);
 //! // The invitation travels to the host, the acceptance back.
 //! while let Some(sent) = client.poll_transmit() {
-//!     host.handle_datagram(now, client_addr, &sent.payload);
+//!     host.on_message(client_addr, &sent.payload, now);
 //! }
 //! while let Some(sent) = host.poll_transmit() {
-//!     client.handle_datagram(now, host_addr, &sent.payload);
+//!     client.on_message(host_addr, &sent.payload, now);
 //! }
 //! assert_eq!(client.state(), SessionState::Established);
 //! assert!(matches!(client.poll_event(), Some(Event::Established { .. })));

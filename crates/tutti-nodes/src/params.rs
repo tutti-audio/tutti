@@ -15,7 +15,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
 
-use tutti_dsp::{GAIN_GLIDE, MAX_LANES, Ramp};
+use tutti_dsp::{GAIN_GLIDE, Glide, MAX_LANES};
 use tutti_graph::{Io, ParamSetBuilder};
 use tutti_types::{AtomicF32, SampleRate, UnitAddr};
 
@@ -291,10 +291,8 @@ pub struct At {
 /// stood to the cell's value, over the frames from `start`.
 #[derive(Clone, Copy, Debug)]
 struct CellGlide {
-    ramp: Ramp,
-    /// Where it arrives: the cell's value it glides to.
-    to: f32,
-    /// The stream frame of the ramp's first frame.
+    glide: Glide<f32>,
+    /// The stream frame of the glide's first frame, which reads step 1.
     start: u64,
 }
 
@@ -302,8 +300,7 @@ impl CellGlide {
     /// Landed on `value` at stream frame `start`.
     fn landed(value: f32, start: u64) -> Self {
         Self {
-            ramp: Ramp::new(value, value, 1),
-            to: value,
+            glide: Glide::landed(value),
             start,
         }
     }
@@ -311,7 +308,8 @@ impl CellGlide {
     /// The control's value at stream frame `position`.
     fn at(&self, position: u64) -> f32 {
         let i = position.saturating_sub(self.start);
-        self.ramp.at(usize::try_from(i).unwrap_or(usize::MAX))
+        self.glide
+            .at(u32::try_from(i).map_or(u32::MAX, |i| i.saturating_add(1)))
     }
 }
 
@@ -417,12 +415,13 @@ impl<S: ControlSet> Params<S> {
             let glide = &mut self.glides[k];
             if !self.primed {
                 *glide = CellGlide::landed(to, position);
-            } else if to.to_bits() != glide.to.to_bits() {
+            } else if to.to_bits() != glide.glide.target().to_bits() {
                 // Where it stood on the frame before this block, the last one rendered.
                 let from = glide.at(position.saturating_sub(1));
+                let mut aimed = Glide::landed(from);
+                aimed.aim_in(to, u32::try_from(self.glide).unwrap_or(u32::MAX));
                 *glide = CellGlide {
-                    ramp: Ramp::new(from, to, self.glide),
-                    to,
+                    glide: aimed,
                     start: position,
                 };
             }
@@ -559,5 +558,153 @@ impl<S: ControlSet> Params<S> {
     /// Whether `target` is far enough from `applied` to design again ([`ControlSet::moved`]).
     pub(crate) fn moved(&self, applied: &S::Controls, target: &S::Controls) -> bool {
         self.set.moved(applied, target)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A glide of `n` frames from `from` to `to` begun at stream frame `start`, as
+    /// [`Params::begin`] builds it.
+    fn aimed(from: f32, to: f32, n: u32, start: u64) -> CellGlide {
+        let mut glide = Glide::landed(from);
+        glide.aim_in(to, n);
+        CellGlide { glide, start }
+    }
+
+    /// Frame `i` of an `n`-frame glide is `from + (to - from) * (i + 1) / n`, and the
+    /// last frame is `to` to the bit, whatever the arithmetic rounds to.
+    #[test]
+    fn a_cell_glide_is_linear_and_lands_on_its_target_bits() {
+        for (from, to, n) in [(0.7f32, 0.2f32, 64u32), (3.3, 1.1, 17), (0.0, 1.0, 240)] {
+            let g = aimed(from, to, n, 1_000);
+            for i in 0..n - 1 {
+                let want = f64::from(from)
+                    + (f64::from(to) - f64::from(from)) * f64::from(i + 1) / f64::from(n);
+                let got = f64::from(g.at(1_000 + u64::from(i)));
+                assert!(
+                    (got - want).abs() < 1e-6,
+                    "{from} -> {to}: frame {i}: {got} vs {want}"
+                );
+            }
+            assert_eq!(
+                g.at(1_000 + u64::from(n) - 1).to_bits(),
+                to.to_bits(),
+                "{from} -> {to} over {n}: the last frame"
+            );
+            assert_eq!(
+                g.at(1_000 + u64::from(n)).to_bits(),
+                to.to_bits(),
+                "held after"
+            );
+        }
+    }
+
+    /// A one-frame glide is the new value on its first frame.
+    #[test]
+    fn a_one_frame_cell_glide_is_the_new_value() {
+        assert_eq!(aimed(3.0, 9.0, 1, 5).at(5), 9.0);
+    }
+
+    /// A retarget mid-glide starts from the value of the frame before it: the first
+    /// frame of the new glide is one step on from there.
+    #[test]
+    fn a_cell_glide_retargeted_mid_flight_continues_from_its_value() {
+        let first = aimed(0.0, 1.0, 100, 0);
+        let before = first.at(39);
+        let second = aimed(before, 0.25, 50, 40);
+        let step = (0.25 - f64::from(before)) / 50.0;
+        let got = f64::from(second.at(40));
+        assert!((got - (f64::from(before) + step)).abs() < 1e-6, "{got}");
+        assert_eq!(second.at(40 + 49).to_bits(), 0.25f32.to_bits());
+    }
+
+    /// A set of one glided control.
+    #[derive(Clone, Debug)]
+    struct One;
+
+    impl ControlSet for One {
+        type Controls = f32;
+        fn addrs(&self) -> &'static [UnitAddr] {
+            const ADDRS: [UnitAddr; 1] = [UnitAddr::first(tutti_types::UnitParam::Cutoff)];
+            &ADDRS
+        }
+        fn defaults(&self) -> f32 {
+            0.0
+        }
+        fn flatten(&self, c: &f32, out: &mut [f32]) {
+            out[0] = *c;
+        }
+        fn assemble(&self, v: &[f32]) -> f32 {
+            v[0]
+        }
+    }
+
+    /// The glide length of the stream test, in frames.
+    const N: u64 = 1_000;
+    /// A write lands before these stream frames: a multiple of every block length the
+    /// split test uses, the second inside the first's glide.
+    const FIRST: u64 = 448;
+    const SECOND: u64 = 896;
+    const TOTAL: u64 = 3_136;
+
+    /// A cell at 0 written to 1 before frame [`FIRST`] and to 0.25 before [`SECOND`],
+    /// read per frame through [`Params::begin`] in blocks of `block` frames.
+    fn stream(block: u64) -> Vec<f32> {
+        let mut params = Params::new(One, &0.0);
+        params.retune(SampleRate::SR_48K, true);
+        params.glide = N as usize;
+        let mut out = Vec::new();
+        let mut position = 0;
+        while position < TOTAL {
+            match position {
+                FIRST => params.cells[0].store(1.0, Relaxed),
+                SECOND => params.cells[0].store(0.25, Relaxed),
+                _ => {}
+            }
+            params.begin(position);
+            for i in 0..block {
+                out.push(params.glides[0].at(position + i));
+            }
+            position += block;
+        }
+        out
+    }
+
+    /// The first write glides `0 -> 1` over [`N`] frames from the first frame of its
+    /// block; the second, mid-glide, starts from the first glide's value on the frame
+    /// before its block and takes one step of the new distance on its first frame, and
+    /// lands on the target's bits on its last. Expected values are the line
+    /// `from + (to - from) * k / n` in `f64`.
+    #[test]
+    fn a_cell_written_mid_glide_continues_from_its_value_through_begin() {
+        let got = stream(64);
+        let line = |from: f64, to: f64, k: u64| from + (to - from) * k as f64 / N as f64;
+        let near = |frame: u64, want: f64| {
+            let got = f64::from(got[frame as usize]);
+            assert!((got - want).abs() < 1e-6, "frame {frame}: {got} vs {want}");
+        };
+        near(FIRST - 1, 0.0);
+        near(FIRST, line(0.0, 1.0, 1));
+        near(SECOND - 1, line(0.0, 1.0, SECOND - FIRST));
+        let mid = line(0.0, 1.0, SECOND - FIRST);
+        near(SECOND, line(mid, 0.25, 1));
+        near(SECOND + 499, line(mid, 0.25, 500));
+        assert_eq!(got[(SECOND + N - 1) as usize].to_bits(), 0.25f32.to_bits());
+        assert_eq!(got[TOTAL as usize - 1].to_bits(), 0.25f32.to_bits());
+    }
+
+    /// The same writes read in blocks of 1, 7 and 64 frames give the same value on every
+    /// frame, bit for bit: a glide is on the stream clock, not the block's.
+    #[test]
+    fn a_cell_glide_is_the_same_whatever_the_blocks() {
+        let whole = stream(64);
+        for block in [1, 7] {
+            let got = stream(block);
+            for (f, (g, w)) in got.iter().zip(&whole).enumerate() {
+                assert_eq!(g.to_bits(), w.to_bits(), "block {block}, frame {f}");
+            }
+        }
     }
 }

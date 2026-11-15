@@ -19,7 +19,7 @@
 //!   The file layer does not translate: a MIDI 1.0 Note On at velocity 0 stays one.
 //! - **Lossless.** A read, a write and a read give the same file: SysEx and meta
 //!   included. Running status and a Delta Clockstamp's spelling may differ.
-//! - **Truncation is an error** ([`Error::Truncated`]), not a shorter file.
+//! - **Truncation is an error** ([`Error::Truncated`], naming what was being read), not a shorter file.
 //! - **Format 2** keeps its sequences apart: no merged `events()`, a tempo map
 //!   per track ([`MidiFile::tempo_map_of`]).
 //! - **Tempo** is `MidiFile::tempo_map()`, steps at the tick each Set Tempo (an
@@ -100,6 +100,7 @@
 
 mod clip_file;
 mod config;
+mod fault;
 mod file;
 mod kind;
 mod smf;
@@ -107,6 +108,7 @@ mod write;
 
 pub use clip_file::ClipFileError;
 pub use config::{ConfigError, OutOfOrder, Refusal};
+pub use fault::{SmfParseError, Truncated};
 pub use file::{
     Converted, DropReason, Dropped, FileEvent, Meta, MidiFile, NoCommonTimeline, PairedNote,
     SmfFormat, TextKind, Tick, ToClipError, Track,
@@ -122,7 +124,7 @@ use thiserror::Error;
 pub enum Error {
     /// The file could not be read or written at all — missing, unreadable, or
     /// the write failed.
-    #[error("IO error: {0}")]
+    #[error("IO error")]
     Io(#[from] std::io::Error),
 
     /// A write found something at its path (a file, a directory or a symlink)
@@ -138,16 +140,14 @@ pub enum Error {
     /// with its top bit set, a running status with none active, a
     /// variable-length quantity over four bytes, an event cut off inside its
     /// chunk), a track count that disagrees with the header, a zero
-    /// ticks-per-beat division. The message says which.
-    #[error("MIDI parse error: {0}")]
-    MidiFileParse(String),
+    /// ticks-per-beat division. The [`SmfParseError`] says which.
+    #[error("MIDI parse error")]
+    MidiFileParse(#[source] SmfParseError),
 
-    /// The file is cut off: a chunk header short of its eight bytes, a chunk
-    /// whose declared length runs past the end of the file, or fewer track
-    /// chunks than the header declares. What was read is not returned: a
-    /// shorter file is not the file.
+    /// The file is cut off. What was read is not returned: a shorter file is
+    /// not the file. The [`Truncated`] says what was being read.
     #[error("the MIDI file is truncated")]
-    Truncated,
+    Truncated(#[source] Truncated),
 
     /// SMPTE/timecode division. The codec reads metrical timing only: beats
     /// come from the file's division, and a timecode file has no beat grid to
@@ -158,7 +158,7 @@ pub enum Error {
     /// The tracks cannot make a file of the container asked for: an empty
     /// track list, a zero division, events out of order, an event the
     /// container cannot hold. The [`ConfigError`] says which and where.
-    #[error("invalid tracks: {0}")]
+    #[error("invalid tracks")]
     Config(#[from] ConfigError),
 
     /// An event pushed before the last of its track
@@ -167,7 +167,7 @@ pub enum Error {
     OutOfOrder(#[from] OutOfOrder),
 
     /// The file's tempo events do not make a tempo map.
-    #[error("the file's tempo events: {0}")]
+    #[error("the file's tempo events do not make a tempo map")]
     Tempo(#[from] tutti_tempo::TempoError),
 
     /// A Clip File that did not parse, read from bytes by

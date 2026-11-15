@@ -147,14 +147,15 @@ fn park<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
     }
     u.keys.settle();
 
-    // Events sent to a parked node are discarded: flushed ones and commands.
+    // Events sent to a parked node are discarded: flushed ones, the closes
+    // still owed to it and commands. Nothing it was sent goes unclosed: every
+    // unit keeps a `held_in` table for each event input (`ModeState::new`),
+    // which a bypass closes on its way out.
     if !ein.is_empty() {
         let unit = rec.unit;
         if st.has_inject[st.at] {
             for inj in st.inject.iter_mut().filter(|i| i.unit == unit) {
-                inj.events.clear();
-                inj.merged.clear();
-                inj.live = false;
+                inj.discard();
             }
             st.has_inject[st.at] = false;
         }

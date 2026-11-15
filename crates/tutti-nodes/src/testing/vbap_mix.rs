@@ -1,42 +1,42 @@
 //! A VBAP mix as a test graph is wired: a panner per source, summed by fan-in
-//! onto the output channels, and (where the layout has an LFE) a bass-managed
+//! onto the output channels, and (where the bed has an LFE) a bass-managed
 //! send, because a panner never feeds the LFE.
 
 use tutti_graph::{GraphBuilder, NodeKey};
-use tutti_types::{Azimuth, ChannelLayout, ChannelTopology, Hz, Q, UnitParam};
+use tutti_types::{Azimuth, Bed, Hz, Q, Speaker, UnitParam};
 
 use crate::{SvfFilterNode, SvfType, VbapError, VbapPannerNode};
 
-/// Wire a panner for `layout` per `(source, bearing)` into `g`'s outputs: the
+/// Wire a panner over `bed` per `(source, bearing)` into `g`'s outputs: the
 /// source's ports 0 and 1 feed the panner (at ear level), and each
 /// panner channel `c` feeds output `c`, so the graph sums the panners by
 /// fan-in.
 ///
 /// # Errors
 ///
-/// [`VbapError`] for a layout with no bed.
+/// [`VbapError`] for a bed with no speakers to pan between ([`Bed::Mono`]).
 pub fn vbap_mix(
     g: &mut GraphBuilder,
-    layout: ChannelLayout,
+    bed: Bed,
     sources: &[(NodeKey, Azimuth)],
 ) -> Result<(), VbapError> {
     for &(source, azimuth) in sources {
-        let panner = VbapPannerNode::for_topology(&ChannelTopology::assumed(layout))?;
+        let panner = VbapPannerNode::new(bed)?;
         let (pan, params) = g.add_with_controls(panner);
         params.set(UnitParam::Azimuth, azimuth.get());
         g.connect(source, 0, pan, 0).connect(source, 1, pan, 1);
-        for c in 0..layout.count() as usize {
+        for c in 0..bed.width().count() as usize {
             g.connect_output(pan, c, c);
         }
     }
     Ok(())
 }
 
-/// A bass-managed send for the LFE of `layout`: each source's port 0, summed by
-/// fan-in onto a 120 Hz low-pass, into the output the layout's SMPTE topology
-/// names as its LFE. Nothing is added for a layout without one.
-pub fn bass_send(g: &mut GraphBuilder, layout: ChannelLayout, sources: &[NodeKey]) {
-    let Some(lfe) = ChannelTopology::assumed(layout).lfe_index() else {
+/// A bass-managed send for the LFE of `bed`: each source's port 0, summed by
+/// fan-in onto a 120 Hz low-pass, into the output the bed's topology names as
+/// its LFE. Nothing is added for a bed without one.
+pub fn bass_send(g: &mut GraphBuilder, bed: Bed, sources: &[NodeKey]) {
+    let Some(lfe) = bed.topology().index_of(Speaker::LowFrequency) else {
         return;
     };
     let (low_pass, _) = g.add_with_controls(SvfFilterNode::<f32>::new(

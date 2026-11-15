@@ -47,6 +47,7 @@
 use std::time::Instant;
 use std::vec::Vec;
 
+use super::handshake::Handshake;
 use super::link::Link;
 use super::{PEER_REPLY_TIMEOUT, TimeoutWait};
 
@@ -107,7 +108,7 @@ pub enum ProcessAction {
 pub enum ProcessError {
     /// A report is still waiting for its Reply or its End.
     #[error("a MIDI Message Report is already in flight")]
-    InFlight,
+    AlreadyAsking,
     /// The peer's capabilities say it does not support MIDI Message Report.
     #[error("the peer does not support MIDI Message Report")]
     NotSupported,
@@ -132,8 +133,7 @@ struct Report {
 #[derive(Clone, Debug)]
 pub struct ProcessInitiator {
     link: Link,
-    features: Option<ProcessFeatures>,
-    capabilities_deadline: Option<Instant>,
+    capabilities: Handshake<ProcessFeatures>,
     report: Option<Report>,
 }
 
@@ -144,8 +144,7 @@ impl ProcessInitiator {
     pub fn new(own: Muid, peer: Muid, now: Instant) -> (Self, Vec<ProcessAction>) {
         let mut initiator = Self {
             link: Link { own, peer },
-            features: None,
-            capabilities_deadline: None,
+            capabilities: Handshake::Unanswered,
             report: None,
         };
         let actions = initiator.inquire(now);
@@ -158,16 +157,16 @@ impl ProcessInitiator {
         self.link.peer
     }
 
-    /// The features the peer's last reply declared, `None` before one arrived.
+    /// The features the peer's reply declared, `None` before one arrived; a new
+    /// inquiry keeps them until its reply, and a timeout or refusal drops them.
     #[must_use]
     pub fn features(&self) -> Option<ProcessFeatures> {
-        self.features
+        self.capabilities.answer().copied()
     }
 
-    /// Asks for the capabilities again: a wait already running starts over. The
-    /// features are kept until the reply replaces them.
+    /// Asks for the capabilities again: a wait already running starts over.
     pub fn inquire(&mut self, now: Instant) -> Vec<ProcessAction> {
-        self.capabilities_deadline = Some(now + PEER_REPLY_TIMEOUT);
+        self.capabilities.ask(now, PEER_REPLY_TIMEOUT, ());
         vec![self.send(CiDeviceId::FunctionBlock, |header, to| {
             CiMessage::ProcessCapabilitiesInquiry { header, to }
         })]
@@ -178,7 +177,7 @@ impl ProcessInitiator {
     ///
     /// # Errors
     ///
-    /// [`ProcessError::InFlight`] while a report is waiting, and
+    /// [`ProcessError::AlreadyAsking`] while a report is waiting, and
     /// [`ProcessError::NotSupported`] once the peer's capabilities lack MIDI
     /// Message Report. A request made before the capabilities are known is sent:
     /// the spec does not require the inquiry first.
@@ -188,10 +187,10 @@ impl ProcessInitiator {
         now: Instant,
     ) -> Result<Vec<ProcessAction>, ProcessError> {
         if self.report.is_some() {
-            return Err(ProcessError::InFlight);
+            return Err(ProcessError::AlreadyAsking);
         }
         if self
-            .features
+            .features()
             .is_some_and(|features| !features.contains(ProcessFeatures::MIDI_MESSAGE_REPORT))
         {
             return Err(ProcessError::NotSupported);
@@ -222,7 +221,8 @@ impl ProcessInitiator {
     /// with nothing waiting.
     #[must_use]
     pub fn deadline(&self) -> Option<Instant> {
-        self.capabilities_deadline
+        self.capabilities
+            .deadline()
             .into_iter()
             .chain(self.report.map(|report| report.deadline))
             .min()
@@ -232,8 +232,7 @@ impl ProcessInitiator {
     /// harmless.
     pub fn on_timeout(&mut self, now: Instant) -> Vec<ProcessAction> {
         let mut actions = Vec::new();
-        if self.capabilities_deadline.is_some_and(|at| now >= at) {
-            self.capabilities_deadline = None;
+        if self.capabilities.expire(now) {
             actions.push(ProcessAction::CapabilitiesTimedOut);
         }
         if self.report.is_some_and(|report| now >= report.deadline) {
@@ -255,10 +254,9 @@ impl ProcessInitiator {
         let address = message.header().device_id;
         match message {
             CiMessage::ProcessCapabilitiesReply { features, .. }
-                if self.capabilities_deadline.is_some() =>
+                if self.capabilities.is_asking() =>
             {
-                self.capabilities_deadline = None;
-                self.features = Some(*features);
+                self.capabilities = Handshake::Answered(*features);
                 actions.push(ProcessAction::Capabilities(*features));
             }
             CiMessage::MessageReportReply { scope, .. } => {
@@ -298,7 +296,7 @@ impl ProcessInitiator {
     fn on_wait(&mut self, address: CiDeviceId, original: u8, wait: TimeoutWait) {
         match original {
             SUB_ID2_PROCESS_CAPABILITIES_INQUIRY if address == CiDeviceId::FunctionBlock => {
-                if let Some(deadline) = self.capabilities_deadline.as_mut() {
+                if let Some(deadline) = self.capabilities.deadline_mut() {
                     wait.extend(deadline);
                 }
             }
@@ -318,8 +316,7 @@ impl ProcessInitiator {
     fn on_nak(&mut self, address: CiDeviceId, nak: &Nak, actions: &mut Vec<ProcessAction>) {
         match nak.nak_sub_id2.get() {
             SUB_ID2_PROCESS_CAPABILITIES_INQUIRY
-                if address == CiDeviceId::FunctionBlock
-                    && self.capabilities_deadline.take().is_some() =>
+                if address == CiDeviceId::FunctionBlock && self.capabilities.refuse() =>
             {
                 actions.push(ProcessAction::CapabilitiesRefused(nak.clone()));
             }

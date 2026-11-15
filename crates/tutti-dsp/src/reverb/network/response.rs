@@ -3,12 +3,12 @@
 //! The response is composed from the stages, never from a pole list: a series of
 //! stages carries a vector of channels, and a feedback delay network is solved
 //! over its own lines (`y = C D (I - A G D)^-1 b`, the structure of
-//! [`FdnRecurrence`](crate::FdnRecurrence)). The bounds are sufficient ones and say so.
+//! [`FdnBank`](crate::FdnBank)). The bounds are sufficient ones and say so.
 //!
 //! **What the model leaves out, on purpose.** Modulation moves a line around its
 //! centre length, and the model reads the centre. A [`Stage::Fir`] holds a
 //! summary and not the response, so it has no frequency response (NaN), no
-//! finite `l1_norm` and radius 0. [`FdnRecurrence`](crate::FdnRecurrence) rescales a set
+//! finite `l1_norm` and radius 0. [`FdnBank`](crate::FdnBank) rescales a set
 //! of band gains that would exceed 1 anywhere to peak at 0.9999; the model does not,
 //! and [`Absorption::peak`] is what shows a design never asks for it.
 
@@ -70,7 +70,7 @@ impl Absorption {
 
     /// The largest `|G|` of the absorption over a grid of frequencies from DC to
     /// Nyquist (dense toward DC, where the bands change): what
-    /// [`FdnRecurrence`](crate::FdnRecurrence) rescales when it exceeds 1. A design whose
+    /// [`FdnBank`](crate::FdnBank) rescales when it exceeds 1. A design whose
     /// absorptions peak at 1 or under is one the kernel runs as the model says.
     #[must_use]
     pub fn peak(&self, rate: SampleRate) -> f64 {

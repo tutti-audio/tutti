@@ -4,7 +4,8 @@
 use std::any::TypeId;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, Weak};
 
 use tutti_rt::MainThreadMarker;
 
@@ -15,7 +16,10 @@ use crate::pool::entry::{
     Staged, Step, Value,
 };
 use crate::pool::key::PoolKey;
-use crate::pool::report::{Landing, PoolOutcome, PoolReport};
+use crate::pool::refresh::{Checked, RefreshPool};
+use crate::pool::report::{PoolOutcome, PoolReport};
+use crate::pool::stamp::Stamp;
+use crate::pool::wait::Landing;
 
 /// Where a pool entry stands.
 ///
@@ -123,12 +127,47 @@ pub enum HandleError<K: fmt::Debug> {
     NotLoaded(PoolState),
 }
 
+/// Why [`Session::when_loaded`](crate::Session::when_loaded) took nothing.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum WhenLoadedError<K: fmt::Debug> {
+    /// The pool does not declare the key: never declared, or released.
+    #[error("key {0:?} is not in the pool")]
+    NotPooled(K),
+}
+
+/// What a [`Hold`] is for: whether the entry parks when the hold is old.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "a node over an entry and a snapshot take holds; neither exists yet"
+    )
+)]
+pub(crate) enum HoldKind {
+    /// A live node reads the entry: it stays loaded while the hold lasts.
+    Node,
+    /// A snapshot recorded the entry: past the depth it parks.
+    Snapshot,
+}
+
 /// A claim on a pool entry that keeps it held, not released, after the app's
 /// pool stops naming it: a node over it, a snapshot. Dropping it is the hold's
 /// end; the entry is released at the next update that finds no hold left.
 #[derive(Clone, Debug)]
 pub(crate) struct Hold {
     _claim: Arc<()>,
+    _pin: Option<Arc<()>>,
+    _rank: Option<Arc<()>>,
+}
+
+/// A snapshot hold's place among the newest: held weakly, so the hold's drop
+/// ends it.
+struct Rank {
+    seq: u64,
+    key: PoolKey,
+    tag: Weak<()>,
 }
 
 /// Where a load that has not landed stands.
@@ -159,6 +198,18 @@ struct Slot {
     order: usize,
     /// One strong count for the slot, one for each [`Hold`].
     holds: Arc<()>,
+    /// One strong count for the slot, one for each node [`Hold`].
+    pins: Arc<()>,
+    /// The value was released by the kind's [`park`](PoolEntry::park); the
+    /// next declaration loads it again.
+    parked: bool,
+    /// What the kind does with the value when the entry parks.
+    park: fn(Value) -> Option<Value>,
+    /// The file the load reads.
+    file: Option<PathBuf>,
+    /// The file's stamp as the worker took it before the load that made the
+    /// loaded value read it.
+    stamp: Option<Stamp>,
     life: Life,
     loaded: Option<Value>,
     state: PoolState,
@@ -187,6 +238,11 @@ impl Slot {
     /// No hold but the slot's own.
     fn unheld(&self) -> bool {
         Arc::strong_count(&self.holds) == 1
+    }
+
+    /// No node holds it.
+    fn unpinned(&self) -> bool {
+        Arc::strong_count(&self.pins) == 1
     }
 
     /// A load of this entry has not landed.
@@ -230,6 +286,16 @@ struct Flight {
     share: Option<Cloner>,
     /// The load has a stage on the main thread.
     needs_main: bool,
+    /// The stamp the worker took of the entries' file.
+    stamp: Option<Stamp>,
+}
+
+/// A worker stage the pool let start: its flight, the stage, and the file the
+/// worker stamps before running it.
+pub(crate) struct Worker {
+    pub(crate) flight: u64,
+    pub(crate) work: Box<dyn FnOnce() -> Result<Staged, LoadError> + Send>,
+    pub(crate) file: Option<PathBuf>,
 }
 
 /// A worker stage waiting for a free worker.
@@ -251,6 +317,13 @@ pub(crate) struct Opening {
 pub(crate) struct MainItem {
     pub(crate) flight: u64,
     pub(crate) stage: MainStage,
+}
+
+/// What the app asked to run once an entry is loaded.
+struct WhenLoaded {
+    seq: u64,
+    key: PoolKey,
+    then: Box<dyn FnOnce(&mut crate::Session) + Send>,
 }
 
 struct Pending {
@@ -277,7 +350,13 @@ pub(crate) struct Pool {
     queued: Vec<Pending>,
     /// Released since the last report.
     released: Vec<PoolKey>,
+    /// The snapshot holds, with their order.
+    ranks: Vec<Rank>,
+    last_rank: u64,
     waiters: Vec<Box<dyn FnMut(&Pool) -> bool + Send>>,
+    /// Runs waiting for an entry to load, in the order they were asked.
+    when_loaded: Vec<WhenLoaded>,
+    last_when: u64,
 }
 
 impl fmt::Debug for Pool {
@@ -302,7 +381,11 @@ impl Pool {
             main_seen: false,
             queued: Vec::new(),
             released: Vec::new(),
+            ranks: Vec::new(),
+            last_rank: 0,
             waiters: Vec::new(),
+            when_loaded: Vec::new(),
+            last_when: 0,
         }
     }
 
@@ -370,6 +453,8 @@ impl Pool {
             load,
             reload,
             lost,
+            park,
+            file,
             share,
             ..
         } = item;
@@ -386,6 +471,11 @@ impl Pool {
                     declared: true,
                     order,
                     holds: Arc::new(()),
+                    pins: Arc::new(()),
+                    parked: false,
+                    park,
+                    file,
+                    stamp: None,
                     life: Life::new(),
                     loaded: None,
                     state: PoolState::Loading,
@@ -405,7 +495,17 @@ impl Pool {
         // latest declaration's.
         slot.reload = reload;
         slot.lost = lost;
+        slot.park = park;
+        slot.file = file;
         slot.share = share;
+        if slot.parked {
+            // Its value was released: the recall loads it again.
+            slot.parked = false;
+            slot.unreported = None;
+            slot.kind = kind;
+            slot.identity = identity;
+            return self.begin(key, load);
+        }
         if slot.kind == kind && slot.identity.same(&*identity) {
             if reshared && slot.pending() {
                 // A load pending for an entry that shared is not one for an entry
@@ -440,10 +540,10 @@ impl Pool {
             Stage::Loading
         };
         if self.slots[key].share.is_some() {
-            if let Some(copy) = self.sibling_value(key) {
+            if let Some((copy, stamp)) = self.sibling_value(key) {
                 let slot = self.slots.get_mut(key).expect("the slot is declared");
                 slot.generation = generation;
-                self.land_slot(key, Ok(copy));
+                self.land_slot(key, Ok(copy), stamp);
                 return None;
             }
             if let Some(flight) = self.sibling_flight(key) {
@@ -469,6 +569,7 @@ impl Pool {
                 stage,
                 share: slot.share,
                 needs_main,
+                stamp: None,
             },
         );
         Some(Start {
@@ -478,12 +579,13 @@ impl Pool {
     }
 
     /// A copy of the value another key's entry of `key`'s kind and identity
-    /// has loaded.
-    fn sibling_value(&self, key: &PoolKey) -> Option<Value> {
+    /// has loaded, with the stamp it was read under.
+    fn sibling_value(&self, key: &PoolKey) -> Option<(Value, Option<Stamp>)> {
         let own = &self.slots[key];
         self.slots.iter().find_map(|(other, slot)| {
             let alike = other != key
                 && slot.kind == own.kind
+                && slot.declared
                 && slot.share.is_some()
                 && matches!(slot.state, PoolState::Loaded)
                 && slot.identity.same(&*own.identity);
@@ -493,6 +595,7 @@ impl Pool {
                     .as_ref()
                     .filter(|value| !(slot.lost)(value))
                     .and_then(|value| own.share?(value))
+                    .map(|copy| (copy, slot.stamp.clone()))
             } else {
                 None
             }
@@ -538,6 +641,39 @@ impl Pool {
                 self.released.push(key);
             }
         }
+        self.park_overflow();
+    }
+
+    /// Parks the loaded, undeclared entries that no node holds and that only
+    /// snapshot holds outside the newest [`PoolConfig::live_holds`] keep. A
+    /// kind that keeps its value keeps it.
+    fn park_overflow(&mut self) {
+        self.ranks.retain(|rank| rank.tag.strong_count() > 0);
+        let mut newest: Vec<&Rank> = self.ranks.iter().collect();
+        newest.sort_by_key(|rank| std::cmp::Reverse(rank.seq));
+        let live: BTreeSet<&PoolKey> = newest
+            .iter()
+            .take(self.config.live_holds)
+            .map(|rank| &rank.key)
+            .collect();
+        for (key, slot) in &mut self.slots {
+            let parkable = !slot.declared
+                && !live.contains(key)
+                && slot.unpinned()
+                && matches!(slot.state, PoolState::Loaded);
+            if !parkable {
+                continue;
+            }
+            let Some(value) = slot.loaded.take() else {
+                continue;
+            };
+            slot.loaded = (slot.park)(value);
+            if slot.loaded.is_none() {
+                slot.life.close();
+                slot.life = Life::new();
+                slot.parked = true;
+            }
+        }
     }
 
     /// Whether any entry waits on the flight.
@@ -563,18 +699,29 @@ impl Pool {
     /// The next worker stage to start, if fewer than the configured number run:
     /// it counts as running from here. A stage no entry waits on any more is
     /// never started.
-    pub(crate) fn next_worker(
-        &mut self,
-    ) -> Option<(u64, Box<dyn FnOnce() -> Result<Staged, LoadError> + Send>)> {
+    pub(crate) fn next_worker(&mut self) -> Option<Worker> {
         while self.running < self.config.parallel_loads.get() {
             let Queued { flight, work } = self.queue.pop_front()?;
             if self.live(flight) {
                 self.running += 1;
-                return Some((flight, work));
+                let file = self.flights.get(&flight).and_then(|flight_| {
+                    flight_
+                        .targets
+                        .iter()
+                        .find_map(|key| self.slots.get(key)?.file.clone())
+                });
+                return Some(Worker { flight, work, file });
             }
             self.flights.remove(&flight);
         }
         None
+    }
+
+    /// The stamp the worker took of a flight's file before its load read it.
+    pub(crate) fn stamped(&mut self, flight: u64, stamp: Option<Stamp>) {
+        if let Some(flight_) = self.flights.get_mut(&flight) {
+            flight_.stamp = stamp;
+        }
     }
 
     /// A started worker stage ended.
@@ -622,7 +769,13 @@ impl Pool {
     /// result nothing waits on (the key was released, or its identity changed
     /// since the load started) is dropped.
     pub(crate) fn land(&mut self, flight: u64, done: Result<Value, LoadError>) {
-        let Some(Flight { targets, share, .. }) = self.flights.remove(&flight) else {
+        let Some(Flight {
+            targets,
+            share,
+            stamp,
+            ..
+        }) = self.flights.remove(&flight)
+        else {
             return;
         };
         let waiting: Vec<PoolKey> = targets
@@ -645,12 +798,12 @@ impl Pool {
                     .expect("a flight of several entries shares its kind's value")),
                 Err(error) => Err(error.clone()),
             };
-            self.land_slot(key, copy);
+            self.land_slot(key, copy, stamp.clone());
         }
-        self.land_slot(last, done);
+        self.land_slot(last, done, stamp);
     }
 
-    fn land_slot(&mut self, key: &PoolKey, done: Result<Value, LoadError>) {
+    fn land_slot(&mut self, key: &PoolKey, done: Result<Value, LoadError>, stamp: Option<Stamp>) {
         let Some(slot) = self.slots.get_mut(key) else {
             return;
         };
@@ -662,6 +815,7 @@ impl Pool {
         let event = match done {
             Ok(value) => {
                 slot.loaded = Some(value);
+                slot.stamp = stamp;
                 slot.state = PoolState::Loaded;
                 if reloaded {
                     PoolEvent::Reloaded
@@ -670,6 +824,7 @@ impl Pool {
                 }
             }
             Err(error) => {
+                slot.stamp = None;
                 slot.state = PoolState::Failed(error.clone());
                 PoolEvent::Failed(error)
             }
@@ -823,8 +978,11 @@ impl Pool {
     }
 
     /// A report of `K` keys that lands, once, when no declared entry is pending.
-    /// The wait ends when its [`PoolLoaded`](crate::PoolLoaded) is dropped.
-    pub(crate) fn wait_loaded<K: Clone + Send + 'static>(&mut self, landing: Landing<K>) {
+    /// The wait ends when its [`PoolWait`](crate::PoolWait) is dropped.
+    pub(crate) fn wait_loaded<K: Clone + Send + 'static>(
+        &mut self,
+        landing: Landing<PoolReport<K>>,
+    ) {
         let waiter = move |pool: &Pool| {
             if landing.orphaned() {
                 return true;
@@ -850,13 +1008,112 @@ impl Pool {
         self.waiters = waiters;
     }
 
+    /// Runs `then` once the declared entry under `key` is loaded.
+    ///
+    /// # Errors
+    ///
+    /// [`WhenLoadedError::NotPooled`] when the key is not declared.
+    pub(crate) fn when_loaded<K>(
+        &mut self,
+        key: &K,
+        then: Box<dyn FnOnce(&mut crate::Session) + Send>,
+    ) -> Result<(), WhenLoadedError<K>>
+    where
+        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+    {
+        let erased = PoolKey::new(key);
+        if !self.slots.get(&erased).is_some_and(|slot| slot.declared) {
+            return Err(WhenLoadedError::NotPooled(key.clone()));
+        }
+        self.last_when += 1;
+        self.when_loaded.push(WhenLoaded {
+            seq: self.last_when,
+            key: erased,
+            then,
+        });
+        Ok(())
+    }
+
+    /// The next run, of those asked up to `through`, whose entry is declared
+    /// and loaded now, taken out. A run whose entry was released is dropped;
+    /// one whose entry is loading, failed or held keeps waiting. The caller
+    /// asks again after each run, so a run sees what the one before it did.
+    pub(crate) fn next_loaded(
+        &mut self,
+        through: u64,
+    ) -> Option<Box<dyn FnOnce(&mut crate::Session) + Send>> {
+        let slots = &self.slots;
+        self.when_loaded.retain(|run| slots.contains_key(&run.key));
+        let at = self.when_loaded.iter().position(|run| {
+            run.seq <= through
+                && slots
+                    .get(&run.key)
+                    .is_some_and(|slot| slot.declared && matches!(slot.state, PoolState::Loaded))
+        })?;
+        Some(self.when_loaded.remove(at).then)
+    }
+
+    /// The newest run asked: the bound of one update's runs.
+    pub(crate) const fn last_when(&self) -> u64 {
+        self.last_when
+    }
+
+    /// The declared, loaded entries that read a file, with the file and the
+    /// stamp it was read under, `None` for one whose stat failed at its load
+    /// (the refresh tries again).
+    pub(crate) fn stamped_files(&self) -> Vec<(PoolKey, PathBuf, Option<Stamp>)> {
+        self.slots
+            .iter()
+            .filter(|(_, slot)| slot.declared && matches!(slot.state, PoolState::Loaded))
+            .filter_map(|(key, slot)| Some((key.clone(), slot.file.clone()?, slot.stamp.clone())))
+            .collect()
+    }
+
+    /// Loads again each entry whose file's stamp moved from the one it was
+    /// read under, and reports what moved and what could not be read. An entry
+    /// that changed since the check began (reloaded, undeclared, failed) is
+    /// left alone.
+    pub(crate) fn reload_changed(&mut self, checked: Vec<Checked>) -> (Vec<Start>, RefreshPool) {
+        let mut refreshed = RefreshPool::default();
+        for Checked { key, was, now } in checked {
+            let current = self.slots.get(&key).is_some_and(|slot| {
+                slot.declared && matches!(slot.state, PoolState::Loaded) && slot.stamp == was
+            });
+            if !current {
+                continue;
+            }
+            match now {
+                Ok(now) if Some(&now) == was.as_ref() => {}
+                Ok(_) => refreshed.reloaded.push(key),
+                Err(kind) => refreshed.unreadable.push((key, kind)),
+            }
+        }
+        // Every entry that reloads is pending before any starts, so two keys
+        // of one file share one load and neither takes the other's old value.
+        for key in &refreshed.reloaded {
+            if let Some(slot) = self.slots.get_mut(key) {
+                slot.state = PoolState::Reloading;
+            }
+        }
+        let starts = refreshed
+            .reloaded
+            .clone()
+            .iter()
+            .filter_map(|key| {
+                let load = (self.slots[key].reload)();
+                self.begin(key, load)
+            })
+            .collect();
+        (starts, refreshed)
+    }
+
     /// How many waits are registered.
     #[cfg(test)]
     pub(crate) fn waiting(&self) -> usize {
         self.waiters.len()
     }
 
-    /// A hold on `key`'s entry, `None` when the pool has none.
+    /// A hold of `kind` on `key`'s entry, `None` when the pool has none.
     #[cfg_attr(
         not(any(test, feature = "plugin")),
         expect(
@@ -864,9 +1121,24 @@ impl Pool {
             reason = "a node over an entry (feature `plugin`) takes holds"
         )
     )]
-    pub(crate) fn hold(&self, key: &PoolKey) -> Option<Hold> {
-        self.slots.get(key).map(|slot| Hold {
-            _claim: Arc::clone(&slot.holds),
+    pub(crate) fn hold(&mut self, key: &PoolKey, kind: HoldKind) -> Option<Hold> {
+        let slot = self.slots.get(key)?;
+        let claim = Arc::clone(&slot.holds);
+        let pin = (kind == HoldKind::Node).then(|| Arc::clone(&slot.pins));
+        let rank = (kind == HoldKind::Snapshot).then(|| {
+            let tag = Arc::new(());
+            self.last_rank += 1;
+            self.ranks.push(Rank {
+                seq: self.last_rank,
+                key: key.clone(),
+                tag: Arc::downgrade(&tag),
+            });
+            tag
+        });
+        Some(Hold {
+            _claim: claim,
+            _pin: pin,
+            _rank: rank,
         })
     }
 

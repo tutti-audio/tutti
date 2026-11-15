@@ -21,7 +21,7 @@ use tutti_types::{Db, SampleRate, Seconds};
 
 use core::ops::Range;
 
-use crate::reverb::fdn::recurrence::{CHUNK, ramp};
+use crate::reverb::fdn::bank::{CHUNK, ramp};
 use crate::reverb::network::{Absorption, Network, NetworkCapacity, Stage};
 use crate::{Approach, Effort, Feed, Glide, Recurrence, Setup, Start, Steps};
 

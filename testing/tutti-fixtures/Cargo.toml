@@ -37,6 +37,11 @@ serde_json = "1"
 # meet.
 tutti-plugin-types = { path = "../../crates/tutti-plugin-types", optional = true }
 raw-window-handle = { version = "0.6", optional = true }
+# `graph`: the capture sink and rig of the MIDI crates' tests (`event_rig`). Only
+# crates above `tutti-graph` turn it on; in a workspace build the feature
+# unifies, so `tutti-graph`'s own tests may link a second copy of it through this
+# crate: none passes its own types into `event_rig`, so the copies never meet.
+tutti-graph = { path = "../../crates/tutti-graph", optional = true }
 # `vst3-cpp`: the C++ twin of the shared plugin, built by cargo in the same
 # invocation; its `links` key hands the bundle directory to `build.rs`.
 tutti-shared-plugin-vst3-cpp = { path = "../tutti-shared-plugin-vst3-cpp", optional = true }
@@ -47,6 +52,8 @@ tutti-shared-plugin = { path = "../tutti-shared-plugin", optional = true }
 coreaudio-sys = { version = "0.2", optional = true }
 
 [features]
+# `EventRig` and `Sink`: a graph that logs the MIDI its event inputs receive.
+graph = ["dep:tutti-graph"]
 # `au_bundle`, the bundle that declares the shared plugin's Audio Unit, and
 # `element_name_retain_count` (macOS).
 au = ["plugin", "dep:tutti-shared-plugin", "dep:coreaudio-sys"]

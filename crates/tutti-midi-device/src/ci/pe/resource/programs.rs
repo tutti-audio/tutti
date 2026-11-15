@@ -8,7 +8,7 @@ use super::fields::{
 };
 use super::link::PeLink;
 
-/// A Program of a Program Collection (M2-107 Table 2).
+/// A Program of a Program Collection (M2-107 §2.2).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PeProgramEntry {
     /// The name of the Program.
@@ -114,7 +114,7 @@ impl PeProgramList {
     }
 }
 
-/// A Mode of the device (M2-106 Table 3).
+/// A Mode of the device (M2-106 §2.2).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PeModeEntry {
     /// The id `CurrentMode` carries.
