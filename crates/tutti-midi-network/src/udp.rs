@@ -88,14 +88,14 @@ impl<E: Endpoint> UdpDriver<E> {
         let now = Instant::now();
         let until_deadline = self
             .endpoint
-            .poll_timeout()
+            .deadline()
             .map_or(IDLE_WAIT_MAX, |at| at.saturating_duration_since(now));
         let wait = until_deadline.min(max_wait).max(WAIT_MIN);
         self.socket.set_read_timeout(Some(wait))?;
         match self.socket.recv_from(&mut self.buffer) {
             Ok((len, from)) => {
                 self.endpoint
-                    .handle_datagram(Instant::now(), from, &self.buffer[..len]);
+                    .on_message(from, &self.buffer[..len], Instant::now());
             }
             Err(e)
                 if matches!(
@@ -106,7 +106,7 @@ impl<E: Endpoint> UdpDriver<E> {
             Err(e) if e.kind() == io::ErrorKind::ConnectionReset => {}
             Err(e) => return Err(e),
         }
-        self.endpoint.handle_timeout(Instant::now());
+        self.endpoint.on_timeout(Instant::now());
         self.flush()
     }
 

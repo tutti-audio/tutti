@@ -31,6 +31,7 @@ mod device;
 mod discovery;
 mod endpoint;
 mod escape;
+mod handshake;
 mod initiator;
 mod link;
 mod pe;

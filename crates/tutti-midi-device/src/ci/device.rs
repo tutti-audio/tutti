@@ -391,22 +391,21 @@ impl<R: FnMut() -> u32> CiDevice<R> {
                     self.answer_process(message, header, actions);
                 }
             }
-            // A Property Exchange Responder is not the Management core's: the
-            // inquiries it would answer are refused, the rest is the Initiator's.
+            // A Property Exchange Responder is not the Management core's: a device
+            // that declares none refuses the inquiries one would answer, and one
+            // that declares it leaves them to its Responder. The rest is the
+            // Initiator's.
             CiMessage::PropertyExchange {
                 header,
                 to,
                 message,
             } => {
                 if *to == self.muid
-                    && matches!(
-                        message,
-                        PeCiMessage::CapabilitiesInquiry(_)
-                            | PeCiMessage::Chunk {
-                                kind: PeMessageKind::GET_INQUIRY | PeMessageKind::SET_INQUIRY,
-                                ..
-                            }
-                    )
+                    && !self
+                        .own
+                        .categories
+                        .contains(CiCategories::PROPERTY_EXCHANGE)
+                    && is_property_inquiry(message)
                 {
                     actions.push(self.nak(
                         header.source,
@@ -566,14 +565,61 @@ impl<R: FnMut() -> u32> CiDevice<R> {
         }
     }
 
+    /// The NAK a Property Exchange inquiry to this device is answered with when
+    /// the caller's Responder does not serve its sender (M2-101 §5.11, Table 16),
+    /// or `None` for any other message. A device that declares Property
+    /// Exchange leaves its inquiries to a Responder: the caller sends this for
+    /// the ones the Responder did not accept, a Subscription Start among them.
+    #[must_use]
+    pub fn refuse_property_exchange(&self, decoded: &Decoded) -> Option<CiMessage> {
+        let Decoded::Message(CiMessage::PropertyExchange {
+            header,
+            to,
+            message,
+        }) = decoded
+        else {
+            return None;
+        };
+        let subscription = matches!(
+            message,
+            PeCiMessage::Chunk {
+                kind: PeMessageKind::SUBSCRIPTION_INQUIRY,
+                ..
+            }
+        );
+        (*to == self.muid && (is_property_inquiry(message) || subscription)).then(|| {
+            self.nak_message(
+                header.source,
+                message.sub_id2(),
+                Nak::STATUS_MESSAGE_NOT_SUPPORTED,
+            )
+        })
+    }
+
     fn nak(&self, to: Muid, original: u8, status: U7) -> CiAction {
-        CiAction::Send(CiMessage::Nak {
+        CiAction::Send(self.nak_message(to, original, status))
+    }
+
+    fn nak_message(&self, to: Muid, original: u8, status: U7) -> CiMessage {
+        CiMessage::Nak {
             header: self.header(),
             to,
             // A sub-ID#2 is seven bits wherever it was read from.
             nak: Nak::new(U7::new(original).unwrap_or_default(), status),
-        })
+        }
     }
+}
+
+/// Whether `message` is an inquiry a Property Exchange Responder answers.
+fn is_property_inquiry(message: &PeCiMessage) -> bool {
+    matches!(
+        message,
+        PeCiMessage::CapabilitiesInquiry(_)
+            | PeCiMessage::Chunk {
+                kind: PeMessageKind::GET_INQUIRY | PeMessageKind::SET_INQUIRY,
+                ..
+            }
+    )
 }
 
 /// A MUID from `entropy` that `taken` does not refuse.

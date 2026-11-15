@@ -399,3 +399,21 @@ fn a_refused_open_leaves_no_port() {
     assert!(s.ports().list_input_ports().is_empty());
     assert_eq!(s.ports().port_count(), 0);
 }
+
+/// A session moves between threads with the Property Exchange Responders its
+/// devices hold, so the Session that owns it does too.
+#[test]
+fn a_session_is_send() {
+    // The bound is the test: this stops compiling when a session is not `Send`.
+    fn is_send<T: Send>(_: &T) -> bool {
+        true
+    }
+    let (backend, _counters) = FakeBackend::build_with(vec![], vec![], usize::MAX);
+    let inlets = tutti_midi_runtime::DeviceInlets::new(
+        NonZeroUsize::new(1).unwrap(),
+        tutti_graph::EventCapacity::of(8),
+        std::time::Duration::ZERO,
+    );
+    let session = MidiSession::open_over(backend, inlets).unwrap();
+    assert!(is_send(&session));
+}
