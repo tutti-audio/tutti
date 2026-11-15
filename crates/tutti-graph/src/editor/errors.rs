@@ -72,7 +72,7 @@ pub enum CommitError {
         limit: usize,
     },
     /// The root has no fold into the device it renders to: `root` at `width`
-    /// channels has no place on the `device` ([`RootId`], and a width a
+    /// channels has no place on the `device` ([`RootId`](crate::RootId), and a
     /// device has no order for, or a declaration it cannot take). Nothing was
     /// sent, and the last plan goes on sounding. Raised by the host that owns
     /// the device, not by the editor.

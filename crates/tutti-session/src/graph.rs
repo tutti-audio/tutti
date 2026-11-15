@@ -2859,7 +2859,8 @@ impl Graph {
     }
 
     /// The generation of the root the next commit carries
-    /// ([`RootId`](tutti_graph::RootId)).
+    /// ([`RootId`](tutti_graph::RootId)); a restart names it.
+    #[cfg(feature = "device")]
     pub(crate) fn root_id(&self) -> tutti_graph::RootId {
         self.editor.spec().root_id
     }

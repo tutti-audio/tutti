@@ -692,7 +692,7 @@ impl Session {
     /// into them, and whether that was
     /// [`Stated`](tutti_types::Placement::Stated)
     /// ([`SessionBuilder::device_topology`](crate::SessionBuilder::device_topology),
-    /// [`DeviceRestart::topology`](crate::DeviceRestart::topology)) or
+    /// `DeviceRestart::topology`) or
     /// [`Assumed`](tutti_types::Placement::Assumed) from the device's width
     /// alone ([`ChannelTopology::assumed`]). `None` for a session with no
     /// engine (a detached one).

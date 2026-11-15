@@ -499,7 +499,7 @@ impl<S> SessionBuilder<S> {
     /// The statement is the device's width: a build whose device has another
     /// is refused ([`Error::Output`](crate::Error::Output)), and so is a root
     /// the statement cannot place. A restart takes the statement of its own
-    /// request ([`DeviceRestart::topology`](crate::DeviceRestart::topology)),
+    /// request (`DeviceRestart::topology`),
     /// since another device is wired another way.
     #[must_use]
     pub fn device_topology(mut self, device: ChannelTopology) -> Self {

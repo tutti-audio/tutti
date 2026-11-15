@@ -433,7 +433,7 @@ pub enum Error {
     /// `device` channels as they are stated or assumed (a root with a channel
     /// no speaker names, or one wider than a device where either width has no
     /// order). Nothing moved, and the stream is left stopped
-    /// ([`LiveSession::restart`](crate::LiveSession::restart)).
+    /// (`LiveSession::restart`).
     #[error("root {root} ({width:?} wide) has no place on a {device:?} device: {source}")]
     Unplaceable {
         /// The root generation in force.

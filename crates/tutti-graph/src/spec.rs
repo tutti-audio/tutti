@@ -184,7 +184,7 @@ pub struct GraphSpec {
     /// width. The session keeps it in step with its root declaration.
     pub root: Option<BusTopology>,
     /// The root's generation: a commit that changes the root's declaration
-    /// carries the next one ([`RootId`]), and the plan it compiles to reports
+    /// carries the next one ([`RootId`](crate::RootId)), and the plan it compiles to reports
     /// it ([`Plan::root_id`](crate::Plan::root_id)).
     pub root_id: crate::RootId,
     /// Bus edges into the root, in source order
