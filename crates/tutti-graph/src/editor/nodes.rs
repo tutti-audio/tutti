@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use tutti_types::{Latency, Tail};
 
 use super::outlets::Closed;
-use super::{CommitError, Editor};
+use super::{CommitError, Editor, Placed, Unwired};
 use crate::bus_edge::{BusRef, BusSource};
 use crate::fade::Fade;
 use crate::fork::ForkSource;
@@ -20,10 +20,17 @@ use crate::{MeterSpec, NodeKey, TapSpec};
 
 impl Editor {
     /// Adds `node` at `key`, or replaces the unit there (a new generation).
-    /// Returns the node's typed controls.
+    /// Returns the node's typed controls with what the placement unwired.
     ///
     /// The node is prepared now, and its [`NodeSpec`] is written from its
-    /// shape; edges and params already recorded for `key` are kept. Every
+    /// shape. Edges and params already recorded for `key` are kept, but for
+    /// the wiring to a port the new shape lacks: that is removed from the
+    /// spec and returned in [`Placed::unwired`] (audio, event and feedback
+    /// edges, and bus edges, whether `key` is their source or their sink),
+    /// and nothing fails on a narrower shape. A port is the same port by its
+    /// index within its kind, and a bus by its index and band; wiring to a
+    /// port the shape still has stays exactly as it was, gains and declick
+    /// state included. Every
     /// insert at a key takes a fresh generation, even after a
     /// [`remove`](Self::remove) — so a unit can never be mistaken for the one
     /// that used to live at its key.
@@ -31,7 +38,12 @@ impl Editor {
     /// A node that hands over a [`ForkSource`] ([`IntoNode::into_parts`]) is
     /// forkable from now on ([`fork`](Self::fork)); one that does not makes
     /// the key unforkable, even if the unit it replaces was.
-    pub fn insert<N: IntoNode>(&mut self, key: NodeKey, kind: &str, node: N) -> N::Controls {
+    pub fn insert<N: IntoNode>(
+        &mut self,
+        key: NodeKey,
+        kind: &str,
+        node: N,
+    ) -> Placed<N::Controls> {
         let NodeParts {
             node: mut unit,
             controls,
@@ -41,8 +53,8 @@ impl Editor {
         unit.bind_wake(wake.clone());
         unit.prepare(&self.prepare);
         let shape = unit.shape();
-        self.place(key, kind, unit, wake, shape, fork);
-        controls
+        let unwired = self.place(key, kind, unit, wake, shape, fork);
+        Placed { controls, unwired }
     }
 
     /// Adds a unit already prepared for this editor's [`Prepare`](crate::Prepare), without
@@ -55,9 +67,9 @@ impl Editor {
         kind: &str,
         unit: Box<dyn Node>,
         wake: Wake,
-    ) {
+    ) -> Unwired {
         let shape = unit.shape();
-        self.place(key, kind, unit, wake, shape, None);
+        self.place(key, kind, unit, wake, shape, None)
     }
 
     /// Replaces the unit running at `key` with `node`, crossfading from one
@@ -139,7 +151,9 @@ impl Editor {
             running.audio_out(),
             running.event_in,
             running.event_out,
-        ) && shape.latency == running.latency
+        ) && shape.buses_in() == running.buses_in()
+            && shape.buses_out() == running.buses_out()
+            && shape.latency == running.latency
             && shape.in_place == running.in_place
             && shape.event_resolution == running.event_resolution
             // The plan sizes the node's event ports from its declaration, and
@@ -157,7 +171,9 @@ impl Editor {
         // As `insert`: the new unit's fork source, or none — a replace with
         // an unforkable unit makes the key unforkable. Only past the checks,
         // so a refused replace changes nothing.
-        self.place(key, kind, unit, wake, shape, fork);
+        // Same ports and buses as the running unit: nothing is unwired.
+        let unwired = self.place(key, kind, unit, wake, shape, fork);
+        debug_assert!(unwired.is_empty(), "a fitting replace unwires nothing");
         self.placements.set_fade(key, fade);
         Ok(controls)
     }
@@ -169,6 +185,10 @@ impl Editor {
     /// existing key does, keeping the key's kind. What a host that swaps a
     /// unit under a node wants: the fade when there is one to have, never a
     /// refusal for want of it.
+    ///
+    /// A swap unwires what the new shape lacks, as [`insert`](Self::insert)
+    /// does, and returns it in [`Placed::unwired`]; a fade runs only for a
+    /// shape that fits, which unwires nothing.
     ///
     /// Refused, changing nothing, only when the editor is poisoned or
     /// re-preparing (check [`is_repreparing`](Self::is_repreparing) first to
@@ -187,7 +207,7 @@ impl Editor {
         key: NodeKey,
         node: N,
         fade: Fade,
-    ) -> Result<N::Controls, CommitError> {
+    ) -> Result<Placed<N::Controls>, CommitError> {
         self.check_poisoned()?;
         if self.is_repreparing() {
             return Err(CommitError::Repreparing);
@@ -221,15 +241,16 @@ impl Editor {
                 && shape.event_capacity == r.event_capacity
                 && shape.params == r.params
         });
-        self.place(key, kind, unit, wake, shape, fork);
+        let unwired = self.place(key, kind, unit, wake, shape, fork);
         if fits {
             self.placements.set_fade(key, fade);
         }
-        Ok(controls)
+        Ok(Placed { controls, unwired })
     }
 
     /// Write a prepared unit at `key` with a fresh generation — the common
-    /// half of [`insert`](Self::insert) and [`replace`](Self::replace).
+    /// half of [`insert`](Self::insert) and [`replace`](Self::replace) — and
+    /// unwire what its shape lacks.
     fn place(
         &mut self,
         key: NodeKey,
@@ -238,7 +259,7 @@ impl Editor {
         wake: Wake,
         shape: Shape,
         fork: Option<Box<dyn ForkSource>>,
-    ) {
+    ) -> Unwired {
         self.touch();
         // A later placement at a key takes an earlier fade back (the fade
         // was for the unit this one supersedes), and a unit that hands no
@@ -250,6 +271,7 @@ impl Editor {
         self.spec.topology.nodes.insert(key, spec);
         self.spec.generations.insert(key, generation);
         self.shapes.insert(key, shape);
+        self.unwire(key, &shape)
     }
 
     /// Changes `key`'s declared processing latency at runtime — a plugin whose

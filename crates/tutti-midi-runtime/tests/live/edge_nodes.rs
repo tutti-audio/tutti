@@ -60,7 +60,7 @@ fn rig_with<N: tutti_graph::IntoNode>(
     extra: impl FnOnce(&mut Editor),
 ) -> (Editor, Executor, N::Controls, Seen) {
     let mut rig = EventRig::new(RATE, max, ports);
-    let controls = rig.editor.insert(NodeKey(1), "source", source);
+    let controls = rig.editor.insert(NodeKey(1), "source", source).controls;
     extra(&mut rig.editor);
     for p in 0..ports {
         rig.feed(NodeKey(1), p, p);

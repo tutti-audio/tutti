@@ -97,7 +97,7 @@ fn render_with_knob(synth: PolySynth, drive: Option<Drive>) -> ([Vec<f32>; 2], O
     )
     .unwrap();
     ed.insert(NodeKey(1), "clip", MidiClipNode::new([note]));
-    let params = ed.insert(SYNTH, "synth", synth);
+    let params = ed.insert(SYNTH, "synth", synth).controls;
     ed.spec_mut().connect_events(
         EventIn {
             node: SYNTH,

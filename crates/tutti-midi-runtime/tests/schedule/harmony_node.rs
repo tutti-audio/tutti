@@ -52,7 +52,7 @@ fn rig(node: HarmonyNode, max: usize) -> (Editor, Executor, HarmonyControls, See
         SampleRate::of(RATE),
         MaxBlock::of(Samples(max)),
     ));
-    let controls = ed.insert(NodeKey(1), "harmony", node);
+    let controls = ed.insert(NodeKey(1), "harmony", node).controls;
     let seen = Seen::default();
     ed.insert(
         NodeKey(2),

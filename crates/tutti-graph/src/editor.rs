@@ -83,6 +83,7 @@ mod nodes;
 mod outlets;
 mod placements;
 mod taps;
+mod unwired;
 use cells::LiveCells;
 pub use errors::{CloseError, CommitError, MissingSource};
 use lifecycle::Lifecycle;
@@ -90,6 +91,7 @@ use link::Link;
 use outlets::Outlets;
 use placements::Placements;
 use tutti_types::{Amplitude, MAX_CHANNELS};
+pub use unwired::{Placed, Unwired};
 
 /// The host's side of a root generation: whether it has published the folds
 /// for `root` at `outputs` channels ([`Editor::set_root_gate`]).
