@@ -5,8 +5,7 @@
 //! frames since the last non-silent input frame, keeps the longest ring-out the settings in
 //! force since may still need (never past the declared ceiling), and says how much of the
 //! next block is live. What it does with the answer (report it, cut the output, park) is the
-//! node's. The clock is shared by [`KernelNode`](crate::KernelNode) and
-//! [`FamilyNode`](crate::FamilyNode).
+//! node's. The clock is [`KernelNode`](crate::KernelNode)'s.
 
 use tutti_graph::MAX_NODE_TAIL;
 use tutti_types::{Samples, Tail};
@@ -96,11 +95,6 @@ impl TailClock {
     pub(crate) fn clear(&mut self) {
         self.ring = 0;
         self.since = UNBOUNDED;
-    }
-
-    /// The ceiling, in frames.
-    pub(crate) fn ceiling(&self) -> u64 {
-        self.ceiling
     }
 
     /// Takes a block in which `heard` says where the input was, under settings that ring

@@ -284,7 +284,6 @@ jobs:
           cargo clippy --locked -p tutti-midi-device --features serde --all-targets -- -D warnings
           cargo clippy --locked -p tutti-tempo --features serde --all-targets -- -D warnings
           cargo clippy --locked -p tutti-dsp --lib -- -D warnings
-          cargo clippy --locked -p tutti-dsp --lib --features contract -- -D warnings
           cargo clippy --locked -p tutti-plugin-types --lib --features contract -- -D warnings
           cargo clippy --locked -p tutti-midi-hardware --features sequencer-tests --all-targets -- -D warnings
           cargo clippy --locked -p tutti-clap-ffi --lib -- -D warnings

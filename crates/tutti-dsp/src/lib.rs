@@ -49,13 +49,9 @@
 //! - **Resampling and dither** — `FftResampler` and `StreamingResampler` for export, and
 //!   `DitherNoise` with `DitherSink`, the dither path export and recording share.
 //!
-//! A family samples its slow controls on a `Cadence`: `Block` (once per block, so the render depends
-//! on how audio is split), or `Stream` (a period on the stream's clock, which makes it block
-//! independent; every family but the block-sampled ones is on `Cadence::stream(16)`).
-//!
-//! Each family is laid out as its design (controls to a model), its model (a `System`, and
-//! an `Lti` where it is linear and time-invariant) and its kernel (the per-frame math that
-//! `Realized` runs).
+//! Each algorithm is laid out as its design (controls to a model), its model (a `System`, and
+//! an `Lti` where it is linear and time-invariant) and its bank (the per-frame math over
+//! buffers views).
 //!
 //! FFT is `RealFft`, the engine's one real-input FFT: rustfft's
 //! *scalar* planner under realfft's even-length real passes (an odd size runs a
@@ -73,11 +69,6 @@
 //! - **No threading and no scheduling.** A host that wants these results on a
 //!   background thread owns that plumbing itself.
 //!
-//! ## Features
-//!
-//! - `contract` (off by default): the `contract` module, the cases a `Family` and its
-//!   `Realized` runner are held to. Test support.
-//!
 //! The `tutti` crate re-exports this one as `tutti::dsp` behind its `dsp` feature. `tutti-nodes`, `tutti-sampler` and
 //! `tutti-export` use it.
 #![forbid(unsafe_code)]
@@ -85,24 +76,16 @@
 //!
 //! ## Items
 //!
-//! By family, as the source is laid out (each family's design, model and kernel side
+//! By algorithm, as the source is laid out (each one's design, model and bank side
 //! by side):
 //!
-//! - **The model** (`model/`): the traits every family answers to. A
-//!   [`Family`] maps a family's controls to its [`Member`](Family::Member) and states its
-//!   buses ([`Channels`]); a [`System`] is what every member answers (its
-//!   [`latency`](System::latency) and [`tail`](System::tail)), and [`Lti`] the class of
-//!   a linear time-invariant one ([`frequency_response`](Lti::frequency_response),
+//! - **The model** (`model/`): a [`System`] is what every processor answers (its
+//!   [`latency`](System::latency) and [`tail`](System::tail), a [`Ring`] to a floor,
+//!   [`TAIL_FLOOR`] by default), and [`Lti`] the class of a linear time-invariant one
+//!   ([`frequency_response`](Lti::frequency_response),
 //!   [`spectral_radius`](Lti::spectral_radius), [`l1_norm`](Lti::l1_norm),
-//!   [`hinf_norm`](Lti::hinf_norm), with [`Complex64`]). A [`Recurrence`] runs a member:
-//!   its [`coefficients_into`](Recurrence::coefficients_into) asks for the coefficient point
-//!   of a member, its [`Approach`] (a [`Glide`]) moves the coefficients there, and its
-//!   [`run`](Recurrence::run) is the per-frame math over an [`Inputs`] (the audio, a side-chain
-//!   key, and up to [`MAX_LANES`] per-frame control lanes); [`Realized`] is the one runner of
-//!   them. A family whose state grows with its member is also [`Grows`]: its
-//!   [`reach`](Grows::reach) over a [`Reach`] (with a family's [`Domain`], [`MaxDecay`] for a
-//!   reverb) is a [`Capacity`], what its recurrence allocates; [`Effort`] and [`Cadence`]
-//!   are the engineering that schedules it.
+//!   [`hinf_norm`](Lti::hinf_norm), with [`Complex64`]); [`MaxDecay`] is the longest decay
+//!   a reverb is built to.
 //! - **Filters** (`filter/`): the SVF ([`SvfBank`], [`SvfModel`], [`SvfType`]), the
 //!   ladder ([`LadderBank`], [`LadderModel`], [`LadderType`]) and the Linkwitz-Riley
 //!   crossover ([`CrossoverBank`], [`CrossoverModel`]), each one filter per channel over
@@ -152,21 +135,12 @@
 //! - **Small kernels**: [`cubic_hermite`], [`ShapeKind`] and [`Shaper`], [`Smoother`],
 //!   [`balance_gains`].
 //!
-//! ## Feature flags
-//!
-//! - `contract` (off by default): the `contract` module, the cases a [`Family`] and
-//!   its [`Realized`] runner are held to, with `family_contract!` and
-//!   `recurrence_contract!`. Test support: enable it from a dev-dependency.
-//!
 //! ## Import paths
 //!
 //! Every public item is re-exported at the crate root; import from there
-//! (`tutti_dsp::RealFft`). The only public module is `contract`, which has paths of
-//! its own.
+//! (`tutti_dsp::RealFft`). No module is public.
 
 mod balance;
-#[cfg(feature = "contract")]
-pub mod contract;
 mod control;
 mod convolver;
 mod delay;
@@ -216,11 +190,7 @@ pub use filter::{
 };
 pub use glide::{Glide, Lerp, Steps};
 pub use interp::cubic_hermite;
-pub use model::{
-    Approach, Cadence, Capacity, Channels, Domain, Effort, Family, Grows, Inputs, Lti, MAX_LANES,
-    MaxDecay, MaxDecayError, Reach, Realized, Recurrence, Ring, Setup, Start, Step, System,
-    TAIL_FLOOR,
-};
+pub use model::{Lti, MaxDecay, MaxDecayError, Ring, System, TAIL_FLOOR};
 pub use modulation::allpass::{allpass_coeff, sweep_hz};
 pub use modulation::mod_delay::{
     MAX_MOD_DELAY_CHANNELS, MIN_RATE, ModDelayBank, ModDelayControls, ModDelayLayout, SweepDesign,

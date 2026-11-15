@@ -18,13 +18,12 @@ use crate::Complex64;
 /// move, and two limits follow. The frozen response
 /// overstates decay near Nyquist under a delay modulated with linear interpolation: a
 /// fractional delay of one half cancels a tone there and the modulation visits every
-/// fraction, so the contract holds the queries on static probes only. And a frozen
+/// fraction, so the queries are held to static probes only. And a frozen
 /// [`spectral_radius`](Self::spectral_radius) below 1 does not imply that the system is
 /// stable while its controls move.
 ///
 /// `spectral_radius`, `l1_norm` and `hinf_norm` are **sufficient bounds**: they
-/// never fall under the true figure, and the contract measures that the
-/// realization is under them.
+/// never fall under the true figure, so a realization measures under them.
 pub trait Lti: System {
     /// The input signals.
     fn inputs(&self) -> usize {

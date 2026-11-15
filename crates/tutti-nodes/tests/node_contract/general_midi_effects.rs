@@ -1,5 +1,5 @@
 //! The two effect nodes behind a SoundFont unit's sends: the General MIDI
-//! chorus (`ModDelayNode::general_midi_chorus`) and `FamilyNode`. Every
+//! chorus (`ModDelayNode::general_midi_chorus`) and `FreeverbNode`. Every
 //! figure is from the definition of the effect (a wet-only line is a delayed
 //! copy, a reverb's tail covers its ring-out), not from another render.
 
@@ -97,7 +97,7 @@ fn a_raw_write_cannot_make_the_general_midi_chorus_recirculate() {
     }
 }
 
-/// The chorus declares its delay as its tail (a [ceiling](tutti_nodes::Rings), 5 ms,
+/// The chorus declares its delay as its tail (a ceiling, 5 ms,
 /// which errs long over the 3.9 ms its longest sweep takes), and the output never
 /// outlasts it. The tail is the sweep's `max_delay`: 240 frames at 48 kHz.
 /// `assert_honest_tail` renders an impulse past it and fails on a sound.

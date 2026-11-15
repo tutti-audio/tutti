@@ -31,7 +31,7 @@ use crate::reverb::network::{
     Absorption, Fdn, Gains, Inline, Line, LineModulation, MAX_LINES, Matrix, Network,
     NetworkCapacity, OutputMap, Stage, pre_delay_frames,
 };
-use crate::{Capacity, MaxDecay, Ring, TAIL_FLOOR};
+use crate::{MaxDecay, Ring, TAIL_FLOOR};
 
 /// The line lengths at 44.1 kHz for a room size of 0.5 (the scale is
 /// `0.5 + size`), values near primes, so the delays share few factors.

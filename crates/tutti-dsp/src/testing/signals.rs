@@ -21,3 +21,13 @@ pub(crate) fn amplitude_at(x: &[f32], hz: f64, rate: f64) -> f64 {
     let (re, im) = lock_in(x, hz, rate);
     re.hypot(im)
 }
+
+/// `frames` of seeded uniform noise in `-level..=level`.
+pub(crate) fn noise(seed: u64, frames: usize, level: f32) -> Vec<f32> {
+    use rand::{RngExt, SeedableRng, rngs::StdRng};
+
+    let mut rng = StdRng::seed_from_u64(seed);
+    (0..frames)
+        .map(|_| rng.random_range(-level..=level))
+        .collect()
+}

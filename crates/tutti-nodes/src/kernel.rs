@@ -10,7 +10,6 @@
 use core::ops::Range;
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
-use tutti_dsp::MAX_LANES;
 use tutti_graph::{
     BusRole, Cx, HasParam, HasParams, InBus, IntoNode, Io, MAX_PORTS, Node, NodeParts, OutBus,
     ParamNode, ParamSet, Prepare, Shape, Status,
@@ -19,6 +18,11 @@ use tutti_types::{Latency, MaxBlock, SampleRate, Samples, Tail};
 
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
 use crate::tail_clock::{Heard, TailClock, tail_frames};
+
+/// The most per-frame control lanes a [`ControlLanes`] carries.
+///
+/// Four serve every effect that reads lanes (a limiter's threshold and ceiling are two).
+pub const MAX_LANES: usize = 4;
 
 /// The per-frame lanes of a block's [`ControlRead::Fast`](crate::ControlRead::Fast)
 /// controls, in the order of their rows: the frames a port carries, in the port's own unit

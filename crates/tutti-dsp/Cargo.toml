@@ -38,17 +38,7 @@ wide = { version = "1.6", default-features = false }
 # The `Error` enum's Display/Error impls.
 thiserror.workspace = true
 
-# Seeded noise for the `contract` feature's measured cases (`contract/harness.rs`).
-rand = { version = "0.10", optional = true }
-
-[features]
-default = []
-# The contract suite, `tutti_dsp::contract`: the cases a design and its realization are held
-# to. `rand` is its seeded noise.
-contract = ["dep:rand"]
-
 [dev-dependencies]
-tutti-dsp = { path = ".", features = ["contract"] }
 # Reproducible noise for the reverb's tests. Seeded, so an assertion is not
 # flaky.
 rand = "0.10"

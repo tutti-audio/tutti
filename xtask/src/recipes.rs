@@ -615,7 +615,6 @@ impl Planner<'_> {
                     r#"RUSTDOCFLAGS="-D warnings --document-private-items" cargo doc --locked --workspace --no-deps"#,
                     r#"RUSTDOCFLAGS="-D warnings --document-private-items" cargo doc --locked -p tutti-session -p tutti --no-deps --all-features"#,
                     r#"RUSTDOCFLAGS="-D warnings" cargo doc --locked -p tutti-graph --no-deps --features contract"#,
-                    r#"RUSTDOCFLAGS="-D warnings" cargo doc --locked -p tutti-dsp --no-deps --features contract"#,
                     r#"RUSTDOCFLAGS="-D warnings" cargo doc --locked -p tutti-plugin-types --no-deps --features contract"#,
                 ]);
                 self.out.push(Step::DocFeatures);
@@ -791,7 +790,6 @@ const CHECK_FEATURES: &[&str] = &[
     r#"cargo clippy --locked -p tutti-midi-device --features serde --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-tempo --features serde --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-dsp --lib -- -D warnings"#,
-    r#"cargo clippy --locked -p tutti-dsp --lib --features contract -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-plugin-types --lib --features contract -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-midi-hardware --features sequencer-tests --all-targets -- -D warnings"#,
     r#"cargo clippy --locked -p tutti-clap-ffi --lib -- -D warnings"#,

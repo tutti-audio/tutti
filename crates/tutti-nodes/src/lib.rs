@@ -305,12 +305,9 @@ pub use strip::BusStripNode;
 // The one node over an effect's algorithm and state: the driver and the trait an
 // algorithm implements to run in it.
 mod kernel;
-pub use kernel::{ControlLanes, Kernel, KernelNode};
+pub use kernel::{ControlLanes, Kernel, KernelNode, MAX_LANES};
 
-// The reverb: any `tutti_dsp::Family` as a node.
-mod reverb;
 pub use params::{At, Control, ControlRead, ControlSet, ControlValid, Params};
-pub use reverb::{FamilyNode, NodeFamily, Rings, TailCeiling, TailCeilingError};
 
 // Freeverb as a `KernelNode`, and the send (mono in, stereo wet out) the SoundFont
 // player's General MIDI setup uses.

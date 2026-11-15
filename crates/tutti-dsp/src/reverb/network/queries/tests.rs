@@ -5,7 +5,7 @@ use super::super::{
     Matrix, Network, NetworkCapacity, OutputMap, Stage, Tap, Taps, loop_gain,
 };
 use super::*;
-use crate::{Capacity as _, Lti as _};
+use crate::Lti as _;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
