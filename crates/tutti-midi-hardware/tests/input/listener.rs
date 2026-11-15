@@ -11,12 +11,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tutti_types::MaxBlock;
 
+use tutti_graph::EventInletNode;
 use tutti_graph::{
     Cx, Editor, EventEdge, EventIn, EventKind, EventOut, Executor, Io, Node, NodeKey, OutPort,
     Prepare, Shape, Source, Status, TransportPosition, Unforkable,
 };
-use tutti_midi_hardware::{DeviceInlets, MidiIngestNode};
-use tutti_midi_runtime::InletChange;
+use tutti_midi_hardware::{InputInlets, MidiIngestNode};
 use tutti_types::{ChannelLayout, Frame, SampleRate, Samples};
 use tutti_ump::Ump;
 
@@ -77,7 +77,6 @@ impl Node for Sink {
 }
 
 pub struct Listener {
-    inlets: Arc<DeviceInlets>,
     seen: Arc<Mutex<Vec<Ump>>>,
     editor: Editor,
     exec: Executor,
@@ -90,25 +89,21 @@ pub struct Listener {
 
 impl Listener {
     /// A graph over `inlets`, whose clock reads the wall time now at frame 0.
-    pub fn over(inlets: &Arc<DeviceInlets>) -> Self {
+    pub fn over(inlets: &Arc<InputInlets>) -> Self {
         Self::build(inlets, false)
     }
 
     /// As [`over`](Self::over), with the engine's ingest node between the
     /// inlets and the log: a MIDI 1.0 message arrives widened.
-    pub fn over_ingest(inlets: &Arc<DeviceInlets>) -> Self {
+    pub fn over_ingest(inlets: &Arc<InputInlets>) -> Self {
         Self::build(inlets, true)
     }
 
-    fn build(inlets: &Arc<DeviceInlets>, ingest: bool) -> Self {
-        // The sink hears an event input per inlet slot, or, behind the ingest
-        // node, per output port of its first Group.
+    fn build(inlets: &Arc<InputInlets>, ingest: bool) -> Self {
+        // The sink hears the one inlet's event input, or, behind the ingest
+        // node, each output port of its first Group.
         let ports = tutti_midi_runtime::MidiInputPorts::FIRST_GROUP.count();
-        let slots = if ingest {
-            NonZeroUsize::new(ports).expect("a port")
-        } else {
-            inlets.slots()
-        };
+        let slots = if ingest { ports } else { 1 };
         let (mut editor, exec) = Editor::new(Prepare::new(
             SampleRate::of(RATE),
             MaxBlock::of(Samples(BLOCK)),
@@ -118,7 +113,7 @@ impl Listener {
             SINK,
             "sink",
             Unforkable(Sink {
-                slots: slots.get() as u16,
+                slots: slots as u16,
                 seen: Arc::clone(&seen),
             }),
         );
@@ -130,7 +125,7 @@ impl Listener {
                 port: 0,
             })]);
         if ingest {
-            editor.insert(INGEST, "ingest", MidiIngestNode::new(inlets.slots()));
+            editor.insert(INGEST, "ingest", MidiIngestNode::new(NonZeroUsize::MIN));
             for port in 0..ports as u16 {
                 editor.spec_mut().connect_events(
                     EventIn { node: SINK, port },
@@ -142,7 +137,6 @@ impl Listener {
         let clock = BlockClock::new();
         inlets.set_clock(Some(clock.reader()));
         Self {
-            inlets: Arc::clone(inlets),
             seen,
             editor,
             exec,
@@ -153,22 +147,18 @@ impl Listener {
         }
     }
 
-    /// Wires the inlets of the ports opened since.
-    pub fn apply(&mut self) {
-        for change in self.inlets.take_changes() {
-            if let InletChange::Attach { slot, node } = change {
-                let slot = slot.index();
-                let key = NodeKey(100 + slot as u64);
-                self.editor.insert(key, "inlet", node);
-                self.editor.spec_mut().connect_events(
-                    EventIn {
-                        node: self.entry,
-                        port: slot as u16,
-                    },
-                    EventEdge::Direct(EventOut { node: key, port: 0 }),
-                );
-            }
-        }
+    /// Adds the inlet of a port that opened and wires it to the entry's one
+    /// event input.
+    pub fn attach(&mut self, inlet: EventInletNode) {
+        let key = NodeKey(100);
+        self.editor.insert(key, "inlet", inlet);
+        self.editor.spec_mut().connect_events(
+            EventIn {
+                node: self.entry,
+                port: 0,
+            },
+            EventEdge::Direct(EventOut { node: key, port: 0 }),
+        );
         self.editor.commit().expect("commits");
     }
 

@@ -391,7 +391,7 @@ fn nothing_midi_ci_reaches_the_sessions_output_and_the_graph_still_hears_sysex()
 
     let mut rig = Rig::over(wire.session.ports().inlets(), wire.start);
     rig.run(1);
-    rig.apply();
+    rig.attach(wire.inlet.take().expect("the wire connected its input"));
 
     let _ = polled(&mut wire, 0);
     reply_at(&wire, identity_reply(0), 1);

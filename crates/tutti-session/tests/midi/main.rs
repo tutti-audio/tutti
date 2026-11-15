@@ -8,6 +8,9 @@ mod held_keys;
 // Clips, live inputs, routes and the hardware out (`Session::midi`).
 #[cfg(feature = "midi")]
 mod midi;
+// MIDI ports as pool entries: absent, replugged, ambiguous, released, per-port ingest.
+#[cfg(feature = "midi-hardware")]
+mod midi_ports;
 // Route rules: the union of two on one target, and a disabled one.
 #[cfg(feature = "midi")]
 mod midi_routes;

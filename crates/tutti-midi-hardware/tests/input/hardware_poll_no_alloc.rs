@@ -17,19 +17,19 @@
 //! Each gate runs the nodes in a graph, channel 0's port wired to an event tap
 //! whose ring the test drains, so what was carried is counted.
 
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tutti_types::MaxBlock;
 
 use tutti_fixtures::midi;
+use tutti_graph::EventInletNode;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Editor, EventEdge, EventIn, EventOut, EventTapId, EventTapReader, Executor, Prepare, TapAlign,
     TapEvent, TransportPosition,
 };
 use tutti_midi_hardware::{HardwareMidiInputs, InputProducerHandle};
-use tutti_midi_runtime::{DeviceInlets, InletChange, MidiIngestNode};
+use tutti_midi_runtime::{InputInlets, MidiIngestNode};
 use tutti_types::{Frame, SampleRate, Samples};
 use tutti_ump::{Message, MidiChannel, Ump, Utility};
 
@@ -83,27 +83,29 @@ struct Rig {
 }
 
 impl Rig {
-    /// `inputs`' ports must be opened first: their inlets are added here.
-    fn new(inputs: &HardwareMidiInputs) -> Self {
+    /// `ports` are the inlets of the ports of `inputs` that were opened: they
+    /// are added here, each feeding the ingest node's one event input in turn.
+    fn new(inputs: &HardwareMidiInputs, ports: Vec<EventInletNode>) -> Self {
         let inlets = inputs.inlets();
         let (mut editor, exec) = Editor::new(Prepare::new(
             SampleRate::of(RATE),
             MaxBlock::of(Samples(1024)),
         ));
-        editor.insert(INGEST, "in", MidiIngestNode::new(inlets.slots()));
-        for change in inlets.take_changes() {
-            if let InletChange::Attach { slot, node } = change {
-                let slot = slot.index();
-                let key = NodeKey(100 + slot as u64);
-                editor.insert(key, "inlet", node);
-                editor.spec_mut().connect_events(
-                    EventIn {
-                        node: INGEST,
-                        port: slot as u16,
-                    },
-                    EventEdge::Direct(EventOut { node: key, port: 0 }),
-                );
-            }
+        editor.insert(
+            INGEST,
+            "in",
+            MidiIngestNode::new(std::num::NonZeroUsize::new(ports.len()).expect("a port")),
+        );
+        for (input, node) in ports.into_iter().enumerate() {
+            let key = NodeKey(100 + input as u64);
+            editor.insert(key, "inlet", node);
+            editor.spec_mut().connect_events(
+                EventIn {
+                    node: INGEST,
+                    port: input as u16,
+                },
+                EventEdge::Direct(EventOut { node: key, port: 0 }),
+            );
         }
         let out = editor
             .open_event_tap(
@@ -162,9 +164,8 @@ impl Rig {
     }
 }
 
-fn inputs(slots: usize, capacity: u32) -> Arc<HardwareMidiInputs> {
-    Arc::new(HardwareMidiInputs::new(DeviceInlets::new(
-        NonZeroUsize::new(slots).expect("a slot"),
+fn inputs(capacity: u32) -> Arc<HardwareMidiInputs> {
+    Arc::new(HardwareMidiInputs::new(InputInlets::new(
         tutti_graph::EventCapacity::of(capacity),
         Duration::ZERO,
     )))
@@ -186,9 +187,9 @@ fn feed(port: &mut InputProducerHandle, count: usize, at: Instant) {
 /// each placed inside the block that follows.
 #[test]
 fn hardware_input_is_allocation_free() {
-    let inputs = inputs(1, 256);
-    let mut port = inputs.open_input_port("Test Input").unwrap();
-    let mut rig = Rig::new(&inputs);
+    let inputs = inputs(256);
+    let (mut port, inlet) = inputs.open_input_port("Test Input");
+    let mut rig = Rig::new(&inputs, vec![inlet]);
 
     // Warm up: the first block publishes the clock the stamp needs.
     rig.run(512);
@@ -214,11 +215,11 @@ fn hardware_input_is_allocation_free() {
 /// never grow past its capacity.
 #[test]
 fn hardware_input_over_capacity_is_allocation_free() {
-    let inputs = inputs(4, 64);
-    let mut ports: Vec<InputProducerHandle> = (0..4)
-        .map(|i| inputs.open_input_port(format!("Input {i}")).unwrap())
-        .collect();
-    let mut rig = Rig::new(&inputs);
+    let inputs = inputs(64);
+    let (mut ports, inlets): (Vec<InputProducerHandle>, Vec<EventInletNode>) = (0..4)
+        .map(|i| inputs.open_input_port(format!("Input {i}")))
+        .unzip();
+    let mut rig = Rig::new(&inputs, inlets);
     rig.run(512);
 
     assert_no_alloc::assert_no_alloc(|| {
@@ -237,9 +238,9 @@ fn hardware_input_over_capacity_is_allocation_free() {
 /// length.
 #[test]
 fn hardware_input_across_block_sizes_is_allocation_free() {
-    let inputs = inputs(1, 256);
-    let mut port = inputs.open_input_port("Test Input").unwrap();
-    let mut rig = Rig::new(&inputs);
+    let inputs = inputs(256);
+    let (mut port, inlet) = inputs.open_input_port("Test Input");
+    let mut rig = Rig::new(&inputs, vec![inlet]);
 
     const SIZES: [usize; 5] = [64, 128, 256, 512, 1024];
     rig.run(64);
@@ -263,9 +264,9 @@ fn hardware_input_across_block_sizes_is_allocation_free() {
 /// The steady-state test above never reaches that branch.
 #[test]
 fn hardware_input_with_stale_timestamps_is_allocation_free() {
-    let inputs = inputs(1, 256);
-    let mut port = inputs.open_input_port("Test Input").unwrap();
-    let mut rig = Rig::new(&inputs);
+    let inputs = inputs(256);
+    let (mut port, inlet) = inputs.open_input_port("Test Input");
+    let mut rig = Rig::new(&inputs, vec![inlet]);
     rig.run(512);
 
     // An arrival at frame 0, long before every block that follows.
@@ -287,9 +288,9 @@ fn hardware_input_with_stale_timestamps_is_allocation_free() {
 /// allocates nothing either.
 #[test]
 fn hardware_input_before_the_first_reading_is_allocation_free() {
-    let inputs = inputs(1, 256);
-    let mut port = inputs.open_input_port("Test Input").unwrap();
-    let mut rig = Rig::new(&inputs);
+    let inputs = inputs(256);
+    let (mut port, inlet) = inputs.open_input_port("Test Input");
+    let mut rig = Rig::new(&inputs, vec![inlet]);
     // Nothing has run, so the clock holds no reading.
     assert_no_alloc::assert_no_alloc(|| {
         feed(&mut port, 16, Instant::now());
@@ -305,11 +306,11 @@ fn hardware_input_before_the_first_reading_is_allocation_free() {
 #[test]
 fn hardware_input_timed_by_jr_is_allocation_free() {
     use tutti_midi_hardware::InputTiming;
-    let inputs = inputs(1, 256);
-    let mut port = inputs.open_input_port("Test Input").unwrap();
-    let mut rig = Rig::new(&inputs);
+    let inputs = inputs(256);
+    let (mut port, inlet) = inputs.open_input_port("Test Input");
+    let mut rig = Rig::new(&inputs, vec![inlet]);
     rig.run(512);
-    assert!(inputs.set_input_timing(port.slot(), InputTiming::JitterReduction));
+    assert!(inputs.set_input_timing(port.port(), InputTiming::JitterReduction));
     let jr = |utility| Ump::from(Message::Utility(utility));
 
     assert_no_alloc::assert_no_alloc(|| {
@@ -340,6 +341,6 @@ fn hardware_input_timed_by_jr_is_allocation_free() {
         }
     });
     assert!(rig.carried > 0);
-    let info = inputs.port_info(port.slot()).unwrap();
+    let info = inputs.port_info(port.port()).unwrap();
     assert!(info.jr_restarted > 0 && info.jr_late > 0, "{info:?}");
 }

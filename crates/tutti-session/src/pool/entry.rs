@@ -361,6 +361,10 @@ pub enum LoadError {
     #[cfg(feature = "soundfont")]
     #[error(transparent)]
     SoundFont(Arc<tutti_sf2::Error>),
+    /// A MIDI port could not be opened.
+    #[cfg(feature = "midi-hardware")]
+    #[error(transparent)]
+    Midi(Arc<crate::MidiPortError>),
     /// The load's job did not finish: it panicked, or the spawner dropped it.
     #[error(transparent)]
     Job(#[from] JobFailed),
@@ -429,6 +433,13 @@ pub struct Declared<K, E> {
     key: K,
     entry: E,
     share: Option<Cloner>,
+}
+
+impl<K, E> Declared<K, E> {
+    /// The entry, for a kind's builder to set its options on.
+    pub(crate) fn entry_mut(&mut self) -> &mut E {
+        &mut self.entry
+    }
 }
 
 impl<K, E: PoolEntry> Declared<K, E> {

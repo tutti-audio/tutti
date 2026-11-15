@@ -8,7 +8,6 @@ use crate::MidiSession;
 use crate::session::Polled;
 use crate::test_support::{FakeBackend, FakeCounters, endpoint};
 use crate::{HardwareMidiInputs, Pushed};
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_fixtures::midi;
@@ -35,6 +34,8 @@ struct Wire {
     /// The device's own state, which answers what it is sent.
     device: Endpoint,
     start: Instant,
+    /// The inlet of the input a helper connected, for a test that reads the graph.
+    inlet: Option<tutti_graph::EventInletNode>,
 }
 
 /// The stream reports among what a poll returned.
@@ -50,11 +51,8 @@ fn streams(polled: impl IntoIterator<Item = Polled>) -> Vec<(DeviceId, DeviceStr
 
 fn session_over(os: UmpCapability, direction: PortDirection, device: Endpoint) -> Wire {
     let (backend, counters) = FakeBackend::build_with(vec![], vec![], usize::MAX);
-    let inlets = tutti_midi_runtime::DeviceInlets::new(
-        NonZeroUsize::new(4).unwrap(),
-        tutti_graph::EventCapacity::of(64),
-        Duration::ZERO,
-    );
+    let inlets =
+        tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
     let session = MidiSession::open_over(backend, inlets).unwrap();
     let mut info = endpoint(7, "Wire");
     info.capability = os;
@@ -72,6 +70,7 @@ fn session_over(os: UmpCapability, direction: PortDirection, device: Endpoint) -
         raw: EndpointId::from_raw(7),
         device,
         start: Instant::now(),
+        inlet: None,
     }
 }
 
@@ -340,9 +339,13 @@ fn midi1_wire() -> Wire {
         PortDirection::Duplex,
         Endpoint::new(Capabilities::default()),
     );
-    wire.session
+    if let crate::Connected::Opened(inlet) = wire
+        .session
         .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+        .unwrap()
+    {
+        wire.inlet = Some(inlet);
+    }
     wire
 }
 
@@ -591,17 +594,14 @@ fn only_an_identity_reply_inside_the_inquiry_answers_it() {
 fn sysex_is_copied_to_the_stream_ring_while_asked_and_always_reaches_the_graph() {
     use crate::testing::Rig;
 
-    let inlets = tutti_midi_runtime::DeviceInlets::new(
-        NonZeroUsize::new(2).unwrap(),
-        tutti_graph::EventCapacity::of(64),
-        Duration::ZERO,
-    );
+    let inlets =
+        tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
     let ports = Arc::new(HardwareMidiInputs::new(Arc::clone(&inlets)));
     let mut rig = Rig::over(&inlets, Instant::now());
     rig.run(1);
-    let mut producer = ports.open_input_port("dev").unwrap();
-    let port = producer.slot();
-    rig.apply();
+    let (mut producer, inlet) = ports.open_input_port("dev");
+    let port = producer.port();
+    rig.attach(inlet);
     let packets = identity_reply(0);
     let arrival = rig.origin + Duration::from_millis(1);
 
@@ -645,18 +645,15 @@ fn an_endpoint_with_no_output_is_described_not_waited_for() {
 fn stream_messages_never_reach_the_graph() {
     use crate::testing::Rig;
 
-    let inlets = tutti_midi_runtime::DeviceInlets::new(
-        NonZeroUsize::new(2).unwrap(),
-        tutti_graph::EventCapacity::of(64),
-        Duration::ZERO,
-    );
+    let inlets =
+        tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
     let ports = Arc::new(HardwareMidiInputs::new(Arc::clone(&inlets)));
     let start = Instant::now();
     let mut rig = Rig::over(&inlets, start);
     rig.run(1);
-    let mut producer = ports.open_input_port("dev").unwrap();
-    let port = producer.slot();
-    rig.apply();
+    let (mut producer, inlet) = ports.open_input_port("dev");
+    let port = producer.port();
+    rig.attach(inlet);
     let stream = tutti_ump::Ump::from(Message::Stream(Stream::EndpointDiscovery {
         version: tutti_midi_device::UMP_VERSION,
         filter: tutti_ump::DiscoveryFilter {
@@ -906,16 +903,13 @@ fn a_jr_message_a_device_sends_never_reaches_the_graph() {
 
     use tutti_ump::Utility;
 
-    let inlets = tutti_midi_runtime::DeviceInlets::new(
-        NonZeroUsize::new(2).unwrap(),
-        tutti_graph::EventCapacity::of(64),
-        Duration::ZERO,
-    );
+    let inlets =
+        tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
     let ports = Arc::new(HardwareMidiInputs::new(Arc::clone(&inlets)));
     let mut rig = Rig::over(&inlets, Instant::now());
     rig.run(1);
-    let mut producer = ports.open_input_port("dev").unwrap();
-    rig.apply();
+    let (mut producer, inlet) = ports.open_input_port("dev");
+    rig.attach(inlet);
     let note = midi::note_on(MidiChannel::FIRST, 60, 0x8000);
     let arrival = rig.origin + Duration::from_millis(1);
     for jr in [Utility::JrClock(10), Utility::JrTimestamp(20)] {

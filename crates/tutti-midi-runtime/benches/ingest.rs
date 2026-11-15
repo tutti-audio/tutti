@@ -24,7 +24,7 @@ use tutti_graph::{
     Editor, EventCapacity, EventEdge, EventIn, EventOut, Executor, NodeKey, Prepare,
     TransportPosition,
 };
-use tutti_midi_runtime::{DeviceInlets, DeviceInput, InletChange, MidiIngestNode};
+use tutti_midi_runtime::{DeviceEpochs, DeviceInput, InputInlets, MidiIngestNode};
 use tutti_types::MaxBlock;
 use tutti_types::{SampleRate, Samples};
 use tutti_ump::{CCNumber, MidiChannel, U7, Ump};
@@ -46,11 +46,13 @@ fn wire() -> Vec<Ump> {
         .collect()
 }
 
-/// An executor over an ingest node that follows a one-slot set of inlets, and
+/// An executor over an ingest node that follows a one-input set of epochs, and
 /// the device's end of its inlet.
 fn rig() -> (Executor, DeviceInput) {
-    let inlets = DeviceInlets::new(NonZeroUsize::MIN, EventCapacity::of(4_096), Duration::ZERO);
-    let device = inlets.open().expect("a free slot");
+    let inlets = InputInlets::new(EventCapacity::of(4_096), Duration::ZERO);
+    let (device, inlet) = inlets.open();
+    let epochs = DeviceEpochs::new(NonZeroUsize::MIN);
+    epochs.arrive(0);
     let (mut editor, exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
         MaxBlock::of(Samples(BLOCK)),
@@ -59,24 +61,20 @@ fn rig() -> (Executor, DeviceInput) {
         NodeKey(1),
         "ingest",
         MidiIngestNode::new(NonZeroUsize::MIN)
-            .following(&inlets)
-            .expect("one slot"),
+            .following(&epochs)
+            .expect("one input"),
     );
-    for change in inlets.take_changes() {
-        if let InletChange::Attach { node, .. } = change {
-            editor.insert(NodeKey(2), "inlet", node);
-            editor.spec_mut().connect_events(
-                EventIn {
-                    node: NodeKey(1),
-                    port: 0,
-                },
-                EventEdge::Direct(EventOut {
-                    node: NodeKey(2),
-                    port: 0,
-                }),
-            );
-        }
-    }
+    editor.insert(NodeKey(2), "inlet", inlet);
+    editor.spec_mut().connect_events(
+        EventIn {
+            node: NodeKey(1),
+            port: 0,
+        },
+        EventEdge::Direct(EventOut {
+            node: NodeKey(2),
+            port: 0,
+        }),
+    );
     editor.commit().expect("commits");
     (exec, device)
 }

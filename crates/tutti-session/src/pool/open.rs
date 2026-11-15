@@ -26,6 +26,13 @@ impl<'a> OpenCx<'a> {
         Self { session }
     }
 
+    /// A fresh id for the resource being opened: one no other token of the
+    /// session has.
+    #[cfg(feature = "midi-hardware")]
+    pub(crate) fn mint_resource_id(&mut self) -> crate::ResourceId {
+        self.session.resource_ids.mint()
+    }
+
     /// The graph's sample rate now.
     #[must_use]
     pub fn rate(&self) -> SampleRate {

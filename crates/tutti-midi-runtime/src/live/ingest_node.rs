@@ -2,7 +2,7 @@
 //! one event port per Group and channel.
 //!
 //! A hardware device reaches the graph through an event inlet of its own
-//! ([`DeviceInlets`]), each event already on its frame
+//! ([`InputInlets`](crate::InputInlets)), each event already on its frame
 //! (the device's thread stamps it, `tutti-graph`'s event inlet holds it until
 //! its block); the node has one event input per device slot, so what it reads
 //! is what the inlets emitted. Each block it translates every slot's events,
@@ -35,9 +35,9 @@
 //! same translation as any other message, in three cases:
 //!
 //! - *The device changed or went.* Built [`following`](MidiIngestNode::following)
-//!   the [`DeviceInlets`] its inputs are fed from, the node compares each
-//!   slot's epoch (which the inlets bump as each device takes the slot and as
-//!   it lets go) with the one it last saw every block. A slot that differs
+//!   the [`DeviceEpochs`] that track its inputs' devices, the node compares each
+//!   slot's epoch (which the control side moves as each device arrives and as
+//!   it departs) with the one it last saw every block. A slot that differs
 //!   releases everything the old device held, at the block's first frame, then
 //!   starts empty, translator and MPE state, so one device's half-sent run is
 //!   not completed by the next; and a slot whose device went hears nothing
@@ -90,7 +90,7 @@ use super::mpe_ingest::MpeIngest;
 use super::order::{BLANK, in_offset_order, offset_of};
 use super::sensing::ActiveSensing;
 use crate::held::HeldState;
-use crate::live::device_inlets::{DeviceInlets, DeviceSlot};
+use crate::live::device_epochs::DeviceEpochs;
 
 /// The port that carries a Group's events with no channel: after its sixteen
 /// channel ports. For the first Group (and a node that hears only it); Group
@@ -249,9 +249,9 @@ pub struct MidiIngestNode {
     devices: Box<[Device]>,
     /// How many `devices` there are: never zero.
     count: NonZeroUsize,
-    /// The slots' epochs ([`MidiIngestNode::following`]); `None` for a node
-    /// whose slots no inlets hand out, which never restarts one.
-    epochs: Option<Arc<[AtomicU64]>>,
+    /// The devices' epochs ([`MidiIngestNode::following`]); `None` for a node
+    /// that follows none, whose devices are always present and never restart.
+    epochs: Option<DeviceEpochs>,
     /// What the block sends: the translated events, which may outnumber the
     /// ones read (a member channel's bend range fans out over its zone).
     out: Box<[UmpAt]>,
@@ -445,24 +445,32 @@ impl MidiIngestNode {
         self.count
     }
 
-    /// Restart a slot's translator and MPE state when a device takes it, as
-    /// `inlets` hand the slots out: the node reads each slot's epoch once per
-    /// block (a relaxed load of a cell the control side stores to when a
-    /// device opens), so no one has to tell it. The slots are the inlets' own,
-    /// so the node must have as many.
+    /// Follows the devices `epochs` says are behind the node's event inputs:
+    /// each block the node reads every input's epoch (an acquire load of a
+    /// cell the control side stores to when a device comes or goes), and an
+    /// input whose epoch changed releases what its device held, starts over,
+    /// and hears nothing while no device is there. Without it every input has
+    /// a device from the first block, and so has one that follows epochs no
+    /// device has yet arrived in (it has sent nothing to release). The node must have as many inputs as the
+    /// epochs.
     ///
     /// # Errors
     ///
-    /// [`SlotCountMismatch`] when the node and the inlets have different
-    /// numbers of slots.
-    pub fn following(mut self, inlets: &DeviceInlets) -> Result<Self, SlotCountMismatch> {
-        if inlets.slots() != self.count {
+    /// [`SlotCountMismatch`] when the node and the epochs have different
+    /// numbers of inputs.
+    pub fn following(mut self, epochs: &DeviceEpochs) -> Result<Self, SlotCountMismatch> {
+        if epochs.inputs() != self.count.get() {
             return Err(SlotCountMismatch {
                 node: self.count,
-                inlets: inlets.slots(),
+                epochs: epochs.inputs(),
             });
         }
-        self.epochs = Some(inlets.epochs());
+        // Where the epochs are now is where the node starts: no change to
+        // release at the first block.
+        for (input, device) in self.devices.iter_mut().enumerate() {
+            device.epoch = epochs.epoch(input);
+        }
+        self.epochs = Some(epochs.clone());
         Ok(self)
     }
 
@@ -510,15 +518,15 @@ impl MidiIngestNode {
     }
 }
 
-/// A [`MidiIngestNode`] and the [`DeviceInlets`] it was to follow have
-/// different numbers of slots.
+/// A [`MidiIngestNode`] and the [`DeviceEpochs`] it was to follow have
+/// different numbers of event inputs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("the ingest node has {} device slots and the inlets {}", .node, .inlets)]
+#[error("the ingest node has {} event inputs and the epochs {}", .node, .epochs)]
 pub struct SlotCountMismatch {
     /// The node's event inputs.
     pub node: NonZeroUsize,
-    /// The inlets' slots.
-    pub inlets: NonZeroUsize,
+    /// The epochs' inputs.
+    pub epochs: usize,
 }
 
 /// The host's handle on a [`MidiIngestNode`]: its MPE mode and the MPE Profile
@@ -544,24 +552,22 @@ impl MidiIngestControls {
         self.request.publish(request);
     }
 
-    /// The MIDI-CI MPE Profile zones (M2-120) the device holding `slot` enabled
-    /// on `group`: from the next block, what the device sends on that Group
-    /// follows the zones' rules instead of the mode's, until `zones` is `None`
-    /// ([`MpeIngest::set_profile`] says what the change stops and resets).
-    /// Control thread. Setting what is set changes nothing.
+    /// The MIDI-CI MPE Profile zones (M2-120) the device behind event input
+    /// `slot` enabled on `group`: from the next block, what the device sends on
+    /// that Group follows the zones' rules instead of the mode's, until `zones`
+    /// is `None` ([`MpeIngest::set_profile`] says what the change stops and
+    /// resets). Control thread. Setting what is set changes nothing.
     ///
-    /// The zones are the device's alone: another slot's, and the mode
-    /// [`set_mpe_mode`](Self::set_mpe_mode) sets, are not changed. A slot a
+    /// The zones are the device's alone: another input's, and the mode
+    /// [`set_mpe_mode`](Self::set_mpe_mode) sets, are not changed. An input a
     /// new device takes starts with none, but the control side's record stays
     /// until it is set: clear it when the device goes
     /// ([`clear_mpe_profiles`](Self::clear_mpe_profiles)).
     ///
     /// # Panics
     ///
-    /// If `slot` is not one of the inlets the node follows
-    /// ([`MidiIngestNode::following`]): those have as many slots as the node,
-    /// so each slot they hand out is one of its event inputs.
-    pub fn set_mpe_profile(&self, slot: DeviceSlot, group: MidiGroup, zones: Option<MpeZones>) {
+    /// If `slot` is not one of the node's event inputs.
+    pub fn set_mpe_profile(&self, slot: usize, group: MidiGroup, zones: Option<MpeZones>) {
         self.edit_profiles(slot, |held| {
             let changed = held[group.index()] != zones;
             held[group.index()] = zones;
@@ -570,12 +576,12 @@ impl MidiIngestControls {
     }
 
     /// [`set_mpe_profile`](Self::set_mpe_profile) with none, on every Group of
-    /// `slot`.
+    /// event input `slot`.
     ///
     /// # Panics
     ///
     /// As [`set_mpe_profile`](Self::set_mpe_profile).
-    pub fn clear_mpe_profiles(&self, slot: DeviceSlot) {
+    pub fn clear_mpe_profiles(&self, slot: usize) {
         self.edit_profiles(slot, |held| {
             let changed = held.iter().any(Option::is_some);
             *held = [None; MidiGroup::COUNT as usize];
@@ -585,9 +591,9 @@ impl MidiIngestControls {
 
     /// Publishes the requests with `edit` applied to the slot's zones, when it
     /// says it changed them.
-    fn edit_profiles(&self, slot: DeviceSlot, edit: impl FnOnce(&mut GroupProfiles) -> bool) {
+    fn edit_profiles(&self, slot: usize, edit: impl FnOnce(&mut GroupProfiles) -> bool) {
         let mut request = (*self.request.current()).clone();
-        let held = &mut request.profiles[slot.index()];
+        let held = &mut request.profiles[slot];
         if edit(held) {
             request.generation += 1;
             self.request.publish(request);
@@ -600,7 +606,7 @@ impl MidiIngestControls {
     /// translation (a bend range or an MPE reset fans out over a zone) is
     /// dropped whole rather than cut partway. What a device's inlet could not
     /// hold is counted at the inlet, not here
-    /// ([`DeviceInlets`]).
+    /// ([`InputInlets`](crate::InputInlets)).
     pub fn losses(&self) -> Losses {
         Losses::refused(self.dropped.load(Ordering::Relaxed))
     }
@@ -684,7 +690,7 @@ impl Node for MidiIngestNode {
             // A device that took the slot or let go of it: what the one before
             // held is ended before anything else of the slot is read.
             if let Some(epochs) = &self.epochs {
-                let epoch = epochs[slot].load(Ordering::Acquire);
+                let epoch = epochs.epoch(slot);
                 if epoch != device.epoch {
                     device.release(None, Offset::ZERO, &mut staging);
                     device.restart(mode, epoch);
@@ -693,6 +699,13 @@ impl Node for MidiIngestNode {
                 }
             }
             device.pay(&mut staging);
+            if let Some(epochs) = &self.epochs
+                && device.owing == 0
+            {
+                // What the control side was told it may wait for: the epoch's
+                // release has gone out.
+                epochs.settle(slot, device.epoch);
+            }
             if !device.present {
                 continue;
             }

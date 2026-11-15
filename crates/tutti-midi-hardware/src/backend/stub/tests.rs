@@ -42,13 +42,12 @@ fn virtual_endpoints_report_unsupported() {
         open_virtual_source(&spec),
         Err(Error::Unsupported(_))
     ));
-    let inlets = tutti_midi_runtime::DeviceInlets::new(
-        std::num::NonZeroUsize::MIN,
+    let inlets = tutti_midi_runtime::InputInlets::new(
         tutti_graph::EventCapacity::of(8),
         std::time::Duration::ZERO,
     );
     let ports = crate::HardwareMidiInputs::new(inlets);
-    let producer = ports.open_input_port("virtual").expect("a slot");
+    let producer = ports.open_input_port("virtual").0;
     assert!(matches!(
         open_virtual_destination(&spec, producer),
         Err(Error::Unsupported(_))

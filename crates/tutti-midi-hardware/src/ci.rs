@@ -1174,7 +1174,6 @@ fn send(out: &mut OpenOutput, sends: &[(MidiGroup, CiMessage)]) {
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroUsize;
     use std::time::Duration;
 
     use tutti_midi_device::{CiCategories, DiscoveryData, EndpointId, PortDirection};
@@ -1196,8 +1195,7 @@ mod tests {
     /// The output of a fake device, and the counters of what it was sent.
     fn output() -> (OpenOutput, FakeCounters) {
         let (backend, counters) = FakeBackend::build_with(vec![], vec![], usize::MAX);
-        let inlets = tutti_midi_runtime::DeviceInlets::new(
-            NonZeroUsize::new(4).unwrap(),
+        let inlets = tutti_midi_runtime::InputInlets::new(
             tutti_graph::EventCapacity::of(64),
             Duration::ZERO,
         );

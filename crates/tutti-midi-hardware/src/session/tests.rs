@@ -5,7 +5,6 @@ use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, NoWatch, Watch};
 use crate::test_support::FakeBackend;
-use std::num::NonZeroUsize;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tutti_fixtures::midi;
@@ -17,10 +16,9 @@ use tutti_midi_device::EndpointId;
 /// Returned as a tuple rather than the `FakeCounters` struct so each test
 /// names only the counter it uses — `(s, _, opens)` says at a glance that
 /// this one is about opens.
-/// Inlets for four devices of 64 events, with no lead.
-fn inlets() -> Arc<DeviceInlets> {
-    DeviceInlets::new(
-        NonZeroUsize::new(4).unwrap(),
+/// Inlets of 64 events, with no lead.
+fn inlets() -> Arc<InputInlets> {
+    InputInlets::new(
         tutti_graph::EventCapacity::of(64),
         std::time::Duration::ZERO,
     )
@@ -269,10 +267,9 @@ fn each_connected_output_is_its_own_value_on_its_own_device() {
 }
 
 /// Repeated connect/disconnect cycles keep the port set bounded: a
-/// disconnect retires its port, and the reconnect takes its slot back.
+/// disconnect retires its port, and the reconnect opens a new one.
 ///
-/// Device 2 stays connected throughout, so device 1's slot is an interior
-/// one on every cycle after the first.
+/// Device 2 stays connected throughout.
 #[test]
 fn hot_plug_cycles_keep_the_port_set_bounded() {
     let (mut s, _, opens) = session();

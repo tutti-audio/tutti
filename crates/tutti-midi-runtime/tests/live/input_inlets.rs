@@ -1,10 +1,9 @@
-//! `DeviceInlets` and `DeviceInput`: a device's thread places
+//! `InputInlets` and `DeviceInput`: a device's thread places
 //! each arrival on a frame with a `ClockMap` fed the engine's block clock, and
 //! pushes it into its own event inlet. Figures are analytic: a reading says OS
 //! time `T` is frame `F`, so an arrival `d` after `T` is frame `F + d * rate`,
 //! plus the lead.
 
-use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tutti_types::MaxBlock;
@@ -14,7 +13,7 @@ use tutti_graph::{
     Cx, Editor, EventEdge, EventIn, EventKind, EventOut, Executor, Io, Node, NodeKey, OutPort,
     Prepare, Shape, Source, Status, TransportPosition, Unforkable,
 };
-use tutti_midi_runtime::{DeviceInlets, DeviceInput, InletChange, NoFreeSlot};
+use tutti_midi_runtime::{DeviceInput, InputInlets};
 use tutti_types::{ChannelLayout, Frame, SampleRate, Samples};
 use tutti_ump::{MidiChannel, Ump};
 
@@ -83,11 +82,8 @@ struct Rig {
 }
 
 impl Rig {
-    fn new(inlets: &DeviceInlets) -> Self {
-        let input = inlets.open().expect("a free slot");
-        let Some(InletChange::Attach { node, .. }) = inlets.take_changes().last() else {
-            panic!("an open queues its inlet");
-        };
+    fn new(inlets: &InputInlets) -> Self {
+        let (input, node) = inlets.open();
         let (mut editor, exec) = Editor::new(Prepare::new(
             SampleRate::of(RATE),
             MaxBlock::of(Samples(BLOCK)),
@@ -143,12 +139,8 @@ fn after(t: Instant, frames: u64) -> Instant {
     t + Duration::from_secs_f64(frames as f64 / RATE)
 }
 
-fn inlets(lead: Duration) -> Arc<DeviceInlets> {
-    DeviceInlets::new(
-        NonZeroUsize::new(2).unwrap(),
-        tutti_graph::EventCapacity::of(64),
-        lead,
-    )
+fn inlets(lead: Duration) -> Arc<InputInlets> {
+    InputInlets::new(tutti_graph::EventCapacity::of(64), lead)
 }
 
 /// **An arrival is the frame the reading puts it on, plus the lead**: the
@@ -267,112 +259,46 @@ fn a_reading_at_another_rate_is_rescaled_by_the_inlet() {
     assert_eq!(rig.take(), vec![(1480, note(60))]);
 }
 
-/// **A device holds a slot until it drops; a stale slot names nothing.**
-/// With two slots, a third open is refused; dropping one device frees its slot
-/// for the next, which is a different `DeviceSlot` (the generation differs)
-/// at the same index.
+/// **Each open is an input of its own, and ids are never reused**: ids count
+/// up from 1 in the order inputs opened, and an input that dropped leaves no
+/// id for the next, so a stale id names nothing; there is no cap.
 #[test]
-fn a_slot_is_held_until_its_device_drops() {
+fn every_open_is_a_new_id_and_none_is_reused() {
     let inlets = inlets(Duration::ZERO);
-    let a = inlets.open().unwrap();
-    let _b = inlets.open().unwrap();
-    assert_eq!(inlets.open().unwrap_err(), NoFreeSlot { slots: 2 });
-    let slot = a.slot();
-    assert_eq!(slot.index(), 0);
-    drop(a);
-    let c = inlets.open().unwrap();
-    assert_eq!(c.slot().index(), 0, "the freed slot is taken");
-    assert_ne!(c.slot(), slot);
-    assert!(c.slot().generation() > slot.generation());
-    assert_eq!(
-        inlets.open().unwrap_err(),
-        NoFreeSlot { slots: 2 },
-        "the new device holds it"
-    );
+    let ids: Vec<u64> = (0..100)
+        .map(|_| {
+            let (input, _node) = inlets.open();
+            input.id().get()
+        })
+        .collect();
+    assert_eq!(ids, (1..=100).collect::<Vec<u64>>());
 }
 
-/// **The owner takes the changes in order**: an attach for each open, a detach
-/// for each drop of a device whose inlet the owner has taken.
+/// **Two inputs share the clock and keep their own maps**: both read the one
+/// block clock, and one input's arrivals do not move the other's.
 #[test]
-fn the_owner_takes_attaches_and_detaches_in_order() {
+fn two_inputs_share_the_clock_and_keep_their_own_events() {
     let inlets = inlets(Duration::ZERO);
-    let a = inlets.open().unwrap();
-    let b = inlets.open().unwrap();
-    let (slot_a, slot_b) = (a.slot(), b.slot());
-    let first: Vec<_> = inlets.take_changes().collect();
-    assert!(matches!(
-        first.as_slice(),
-        [
-            InletChange::Attach { slot: s0, .. },
-            InletChange::Attach { slot: s1, .. }
-        ] if (*s0, *s1) == (slot_a, slot_b) && (s0.index(), s1.index()) == (0, 1)
-    ));
-    drop(b);
-    drop(a);
-    let second: Vec<_> = inlets.take_changes().collect();
-    assert!(matches!(
-        second.as_slice(),
-        [
-            InletChange::Detach { slot: s1 },
-            InletChange::Detach { slot: s0 }
-        ] if (*s0, *s1) == (slot_a, slot_b)
-    ));
-    assert_eq!(inlets.take_changes().count(), 0, "taken once");
-}
-
-/// **A device that comes and goes before the owner looks leaves nothing**: its
-/// attach and detach cancel, so a connect and disconnect loop with no owner
-/// draining does not pile up inlets.
-#[test]
-fn an_inlet_dropped_before_it_was_taken_is_never_queued() {
-    let inlets = inlets(Duration::ZERO);
-    for _ in 0..100 {
-        drop(inlets.open().unwrap());
-    }
-    assert_eq!(inlets.take_changes().count(), 0);
-}
-
-/// **A change the owner does not read stays queued, and applying one may open
-/// or drop a device**: `take_changes` drains a change per step and holds no
-/// lock between steps, so the owner's own handling of an attach (here, a device
-/// dropping, which takes the lock) cannot deadlock, and what it queues is read
-/// by the same iterator.
-#[test]
-fn draining_changes_holds_no_lock_across_the_owners_work() {
-    let inlets = inlets(Duration::ZERO);
-    let a = inlets.open().unwrap();
-    let mut a = Some(a);
-    let mut seen = Vec::new();
-    for change in inlets.take_changes() {
-        match change {
-            InletChange::Attach { slot, .. } => {
-                seen.push(("attach", slot.index()));
-                // The device goes while the owner is handling its attach.
-                drop(a.take());
-            }
-            InletChange::Detach { slot } => seen.push(("detach", slot.index())),
-        }
-    }
-    assert_eq!(seen, [("attach", 0), ("detach", 0)]);
-    // An iterator read part way leaves the rest queued.
-    let _b = inlets.open().unwrap();
-    let _c = inlets.open().unwrap();
-    let mut changes = inlets.take_changes();
-    assert!(changes.next().is_some());
-    drop(changes);
-    assert_eq!(inlets.take_changes().count(), 1);
+    let mut a = Rig::new(&inlets);
+    let mut b = Rig::new(&inlets);
+    let t0 = Instant::now();
+    let mut clock = BlockClock::new();
+    inlets.set_clock(Some(clock.reader()));
+    clock.write(t0, Frame::new(1000), SampleRate::of(RATE));
+    assert!(a.input.push(note(60), after(t0, 100)));
+    assert!(b.input.push(note(61), after(t0, 300)));
+    a.run(6);
+    b.run(6);
+    assert_eq!(a.take(), vec![(1100, note(60))]);
+    assert_eq!(b.take(), vec![(1300, note(61))]);
 }
 
 /// **The counts are readable from the control side while the thread pushes**:
 /// a push into a full inlet is refused and counted as lost.
 #[test]
 fn a_full_inlet_refuses_and_counts() {
-    let inlets = DeviceInlets::new(
-        NonZeroUsize::MIN,
-        tutti_graph::EventCapacity::of(2),
-        Duration::ZERO,
-    );
-    let mut device = inlets.open().unwrap();
+    let inlets = InputInlets::new(tutti_graph::EventCapacity::of(2), Duration::ZERO);
+    let (mut device, _node) = inlets.open();
     let counts = device.counts();
     let pushed: Vec<bool> = (0..4)
         .map(|i| device.push(note(60 + i), Instant::now()))

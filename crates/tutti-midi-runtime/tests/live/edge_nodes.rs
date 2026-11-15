@@ -7,7 +7,6 @@
 
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use tutti_types::MaxBlock;
 
 use crate::common;
@@ -24,7 +23,7 @@ use tutti_midi_protocol::{
     MpeZoneConfig, MpeZones, PitchBendSensitivity, channel_voice, widen_velocity,
 };
 use tutti_midi_runtime::{
-    CHANNELLESS_PORT, ClockNode, DeviceInlets, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS,
+    CHANNELLESS_PORT, ClockNode, DeviceEpochs, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS,
     MidiIngestNode, MidiInputPorts, MpeTransformNode, SlotCountMismatch,
 };
 use tutti_types::{Beat, Bpm, Frame, SampleRate, Samples};
@@ -394,7 +393,7 @@ fn two_devices_runs_do_not_meet() {
 }
 
 /// **A slot a new device takes starts empty**: device 0 selects an RPN in
-/// block 0, a new device then opens the slot (the inlets bump its epoch, which
+/// block 0, a new device then arrives at the slot (the epochs move on, which
 /// the node follows with no call from the owner), and the Data Entry in block 1
 /// finds no select to complete, so no Registered Controller is made; with no
 /// new device the same Data Entry completes the run.
@@ -413,12 +412,12 @@ fn a_slot_a_new_device_takes_forgets_the_previous_devices_half_sent_run() {
         ])
     };
     for reopened in [false, true] {
-        let inlets = DeviceInlets::new(NonZeroUsize::MIN, EventCapacity::of(64), Duration::ZERO);
+        let epochs = DeviceEpochs::new(NonZeroUsize::MIN);
         let Ingest {
             node,
             inlets: nodes,
         } = Ingest::new(script());
-        let node = node.following(&inlets).expect("one slot each");
+        let node = node.following(&epochs).expect("one slot each");
         let (_ed, mut exec, _controls, seen) = ingest(
             Ingest {
                 node,
@@ -428,7 +427,9 @@ fn a_slot_a_new_device_takes_forgets_the_previous_devices_half_sent_run() {
             512,
         );
         block(&mut exec, 512);
-        let _device = reopened.then(|| inlets.open().expect("a free slot"));
+        if reopened {
+            epochs.arrive(0);
+        }
         block(&mut exec, 512);
         let made = seen
             .lock()
@@ -440,14 +441,14 @@ fn a_slot_a_new_device_takes_forgets_the_previous_devices_half_sent_run() {
     }
 }
 
-/// An ingest node that follows `inlets`, over the script's one slot.
-fn following(script: Script, inlets: &DeviceInlets) -> Ingest {
+/// An ingest node that follows `epochs`, over the script's one slot.
+fn following(script: Script, epochs: &DeviceEpochs) -> Ingest {
     let Ingest {
         node,
         inlets: nodes,
     } = Ingest::new(script);
     Ingest {
-        node: node.following(inlets).expect("one slot each"),
+        node: node.following(epochs).expect("one slot each"),
         inlets: nodes,
     }
 }
@@ -490,8 +491,8 @@ fn heard(seen: &Seen) -> Vec<(u64, String)> {
 #[test]
 fn a_device_that_lets_go_has_what_it_held_released() {
     for replaced in [false, true] {
-        let inlets = DeviceInlets::new(NonZeroUsize::MIN, EventCapacity::of(64), Duration::ZERO);
-        let device = inlets.open().expect("a free slot");
+        let epochs = DeviceEpochs::new(NonZeroUsize::MIN);
+        epochs.arrive(0);
         let bend = at(
             30,
             midi::pitch_bend(Address::new(G, MidiChannel::of(0)), 0xC000_0000),
@@ -501,12 +502,14 @@ fn a_device_that_lets_go_has_what_it_held_released() {
             vec![note(0, 61, 5)],
         ]);
         let (_ed, mut exec, _c, seen) =
-            ingest(following(wire, &inlets), MIDI_INPUT_PORTS as u16, 512);
+            ingest(following(wire, &epochs), MIDI_INPUT_PORTS as u16, 512);
         block(&mut exec, 512);
         assert_eq!(heard(&seen).len(), 3, "the key, the pedal, the bend");
         seen.lock().unwrap().clear();
-        drop(device);
-        let _next = replaced.then(|| inlets.open().expect("the slot is free again"));
+        epochs.depart(0);
+        if replaced {
+            epochs.arrive(0);
+        }
         block(&mut exec, 512);
         let mut expected = vec![
             (512, "off 60".to_string()),
@@ -619,26 +622,22 @@ fn a_system_reset_ends_its_cables_notes_and_runs_and_is_not_echoed() {
     );
 }
 
-/// A node follows inlets with the slots it has inputs for, and refuses others.
+/// A node follows epochs with the inputs it has, and refuses others.
 #[test]
-fn a_node_refuses_inlets_with_another_number_of_slots() {
-    let inlets = DeviceInlets::new(
-        NonZeroUsize::new(2).unwrap(),
-        EventCapacity::of(64),
-        Duration::ZERO,
-    );
+fn a_node_refuses_epochs_with_another_number_of_inputs() {
+    let epochs = DeviceEpochs::new(NonZeroUsize::new(2).unwrap());
     assert_eq!(
         MidiIngestNode::new(NonZeroUsize::new(3).unwrap())
-            .following(&inlets)
+            .following(&epochs)
             .unwrap_err(),
         SlotCountMismatch {
             node: NonZeroUsize::new(3).unwrap(),
-            inlets: NonZeroUsize::new(2).unwrap()
+            epochs: 2
         }
     );
     assert!(
         MidiIngestNode::new(NonZeroUsize::new(2).unwrap())
-            .following(&inlets)
+            .following(&epochs)
             .is_ok()
     );
 }
@@ -735,18 +734,15 @@ fn a_requested_mpe_mode_is_adopted_once() {
 fn a_devices_profile_zones_switch_its_rules_alone() {
     let reset = |frame: usize| cc_at(frame, 2, CCNumber::RESET_ALL, 0);
     let device = || Script::new(vec![vec![reset(0)], vec![reset(1)], vec![reset(2)]]);
-    let inlets = DeviceInlets::new(
-        NonZeroUsize::new(2).unwrap(),
-        EventCapacity::of(64),
-        Duration::ZERO,
-    );
-    let (first, _second) = (inlets.open().unwrap(), inlets.open().unwrap());
+    let epochs = DeviceEpochs::new(NonZeroUsize::new(2).unwrap());
+    epochs.arrive(0);
+    epochs.arrive(1);
     let Ingest {
         node,
         inlets: nodes,
     } = Ingest::devices(vec![device(), device()]);
     let node = Ingest {
-        node: node.following(&inlets).expect("two slots each"),
+        node: node.following(&epochs).expect("two slots each"),
         inlets: nodes,
     };
     let (_ed, mut exec, controls, seen) = ingest(node, MIDI_INPUT_PORTS as u16, 512);
@@ -760,9 +756,9 @@ fn a_devices_profile_zones_switch_its_rules_alone() {
     );
     let group = MidiGroup::FIRST;
     block(&mut exec, 512);
-    controls.set_mpe_profile(first.slot(), group, Some(zone));
+    controls.set_mpe_profile(0, group, Some(zone));
     block(&mut exec, 512);
-    controls.set_mpe_profile(first.slot(), group, None);
+    controls.set_mpe_profile(0, group, None);
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();
     let is_reset = |ev: &Ump| {
@@ -801,11 +797,11 @@ fn a_devices_profile_zones_switch_its_rules_alone() {
 /// heard again.
 #[test]
 fn clearing_a_slots_profiles_returns_it_to_the_rules_it_had() {
-    let inlets = DeviceInlets::new(NonZeroUsize::MIN, EventCapacity::of(64), Duration::ZERO);
-    let device = inlets.open().unwrap();
+    let epochs = DeviceEpochs::new(NonZeroUsize::MIN);
+    epochs.arrive(0);
     let reset = cc_at(1, 2, CCNumber::RESET_ALL, 0);
     let (_ed, mut exec, controls, seen) = ingest(
-        following(Script::new(vec![vec![], vec![reset], vec![reset]]), &inlets),
+        following(Script::new(vec![vec![], vec![reset], vec![reset]]), &epochs),
         MIDI_INPUT_PORTS as u16,
         512,
     );
@@ -819,9 +815,9 @@ fn clearing_a_slots_profiles_returns_it_to_the_rules_it_had() {
     );
     // The first block takes the device's slot over; the zones come after it.
     block(&mut exec, 512);
-    controls.set_mpe_profile(device.slot(), MidiGroup::FIRST, Some(zone));
+    controls.set_mpe_profile(0, MidiGroup::FIRST, Some(zone));
     block(&mut exec, 512);
-    controls.clear_mpe_profiles(device.slot());
+    controls.clear_mpe_profiles(0);
     block(&mut exec, 512);
     let heard_at = |frame: u64| {
         seen.lock()

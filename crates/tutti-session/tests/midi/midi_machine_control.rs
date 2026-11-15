@@ -35,14 +35,23 @@ fn rig() -> (Session, FakeCounters) {
         .build()
         .expect("builds");
     let _ = s.update();
-    s.midi().connect_input("keys").expect("connects");
+    let keys = s.midi().devices().remove(0);
+    s.pool(tutti_session::midi_input("keys", keys))
+        .expect("declares");
     let _ = s.update();
     (s, fake)
 }
 
+/// The ingest node of the input port `"keys"`, which a follower reads.
+fn input(s: &Session) -> tutti_graph::NodeKey {
+    s.midi_input(&"keys").expect("loaded").node()
+}
+
 fn follow(s: &mut Session) {
+    let input = input(s);
     s.midi()
         .follow_machine_control(FollowMachineControl {
+            input,
             group: G,
             device: OURS,
         })
@@ -240,8 +249,10 @@ fn a_command_the_transport_cannot_do_is_reported() {
 #[test]
 fn machine_control_follows_beside_a_beat_clock_and_owns_no_tempo() {
     let (mut s, fake) = rig();
+    let input = input(&s);
     s.midi()
         .follow_clock(FollowClock {
+            input,
             group: G,
             kind: ClockKind::BeatClock,
         })
@@ -280,8 +291,10 @@ fn unfollowing_is_reported_and_refused_when_not_following() {
 fn a_group_the_input_does_not_hear_is_refused() {
     let (mut s, _fake) = rig();
     let far = MidiGroup::of(9);
+    let input = input(&s);
     assert!(matches!(
         s.midi().follow_machine_control(FollowMachineControl {
+            input,
             group: far,
             device: OURS
         }),

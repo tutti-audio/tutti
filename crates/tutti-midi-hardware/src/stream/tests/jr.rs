@@ -21,13 +21,17 @@ fn jr(utility: Utility) -> Ump {
 /// A connected, settled wire and a graph reading its inlets.
 fn settled(timing: InputTiming, device: Endpoint) -> (Wire, Rig, DeviceStream) {
     let mut wire = session_over(UmpCapability::midi2(), PortDirection::Duplex, device);
-    wire.session
+    let crate::Connected::Opened(inlet) = wire
+        .session
         .connect_input(&wire.id.clone(), timing)
-        .unwrap();
+        .unwrap()
+    else {
+        panic!("the wire's input was not open");
+    };
     let stream = settle(&mut wire);
     let mut rig = Rig::over(wire.session.ports().inlets(), wire.start);
     rig.run(1);
-    rig.apply();
+    rig.attach(inlet);
     (wire, rig, stream)
 }
 

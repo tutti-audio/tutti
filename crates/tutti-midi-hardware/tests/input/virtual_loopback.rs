@@ -2,7 +2,6 @@
 //! with a backend: the session lists the endpoint as it lists a device, and what
 //! crosses it arrives whole and in order.
 
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -12,7 +11,7 @@ use tutti_fixtures::midi::note_on;
 use tutti_graph::{EventCapacity, Offset};
 use tutti_midi_device::{DeviceInfo, EndpointName};
 use tutti_midi_hardware::{
-    DeviceInlets, MidiSession, VirtualDestination, VirtualProtocol, VirtualSource, VirtualSpec,
+    InputInlets, MidiSession, VirtualDestination, VirtualProtocol, VirtualSource, VirtualSpec,
 };
 use tutti_ump::{MidiChannel, Ump};
 
@@ -25,11 +24,7 @@ fn spec(tag: &str) -> VirtualSpec {
 
 /// A session over four inlet slots, and the graph that plays them.
 fn session() -> (MidiSession, Listener) {
-    let inlets = DeviceInlets::new(
-        NonZeroUsize::new(4).unwrap(),
-        EventCapacity::of(64),
-        Duration::ZERO,
-    );
+    let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let listener = Listener::over(&inlets);
     (MidiSession::open(inlets).expect("a session"), listener)
 }
@@ -67,9 +62,13 @@ fn what_a_virtual_source_sends_reaches_a_session_input_in_order() {
     let source = VirtualSource::open(&spec).expect("a virtual source");
     let (mut io, mut graph) = session();
     let device = listed(|| io.inputs(), &spec);
-    io.connect_input(&device.id, tutti_midi_hardware::InputTiming::Arrival)
-        .expect("connects");
-    graph.apply();
+    let tutti_midi_hardware::Connected::Opened(inlet) = io
+        .connect_input(&device.id, tutti_midi_hardware::InputTiming::Arrival)
+        .expect("connects")
+    else {
+        panic!("a new input opens");
+    };
+    graph.attach(inlet);
     std::thread::sleep(Duration::from_millis(200));
     graph.listen(Duration::from_millis(50));
 
@@ -86,10 +85,8 @@ fn what_a_virtual_source_sends_reaches_a_session_input_in_order() {
 fn what_a_session_output_sends_reaches_a_virtual_destination_in_order() {
     let spec = spec("destination");
     let (io, mut graph) = session();
-    let producer = Arc::clone(io.ports())
-        .open_input_port("virtual")
-        .expect("a slot");
-    graph.apply();
+    let (producer, inlet) = Arc::clone(io.ports()).open_input_port("virtual");
+    graph.attach(inlet);
     let destination = VirtualDestination::open(&spec, producer).expect("a virtual destination");
     let device = listed(|| io.outputs(), &spec);
     let mut out = io.connect_output(&device.id).expect("connects");
@@ -111,17 +108,11 @@ fn what_a_session_output_sends_reaches_a_virtual_destination_in_order() {
 #[test]
 fn a_midi1_destination_delivers_what_the_ingest_node_widens() {
     let spec = spec("midi1").with_protocol(VirtualProtocol::Midi1);
-    let inlets = DeviceInlets::new(
-        NonZeroUsize::new(4).unwrap(),
-        EventCapacity::of(64),
-        Duration::ZERO,
-    );
+    let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let mut graph = Listener::over_ingest(&inlets);
     let io = MidiSession::open(inlets).expect("a session");
-    let producer = Arc::clone(io.ports())
-        .open_input_port("virtual")
-        .expect("a slot");
-    graph.apply();
+    let (producer, inlet) = Arc::clone(io.ports()).open_input_port("virtual");
+    graph.attach(inlet);
     let _destination = VirtualDestination::open(&spec, producer).expect("a virtual destination");
     let device = listed(|| io.outputs(), &spec);
     let mut out = io.connect_output(&device.id).expect("connects");
