@@ -170,8 +170,8 @@ mod tests {
     }
 
     /// A source fanning out to four unordered ops that fan in: the source and
-    /// the four arms are live together at the join's inputs (the arms), and
-    /// the join takes the source's slot, so five slots.
+    /// all four arms are live while the arms write, and the join takes the
+    /// source's slot, so five slots.
     #[test]
     fn a_fan_out_fan_in_needs_width_plus_one_slots() {
         let reads = vec![vec![], vec![0], vec![0], vec![0], vec![0], vec![1, 2, 3, 4]];
@@ -198,10 +198,36 @@ mod tests {
             .collect()
     }
 
+    /// Happens-before over the ops, by transitive closure of the `reads`
+    /// edges: built here rather than through `Reach`, so the property below
+    /// checks the colouring against a relation the code under test did not
+    /// compute.
+    fn closure(reads: &[Vec<u32>]) -> Vec<Vec<bool>> {
+        let n = reads.len();
+        let mut before = vec![vec![false; n]; n];
+        for (op, rs) in reads.iter().enumerate() {
+            for &u in rs {
+                before[u as usize][op] = true;
+            }
+        }
+        for k in 0..n {
+            let through = before[k].clone();
+            for row in &mut before {
+                if row[k] {
+                    for (cell, &on) in row.iter_mut().zip(&through) {
+                        *cell |= on;
+                    }
+                }
+            }
+        }
+        before
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(256), ..ProptestConfig::default() })]
 
-        /// No two values with overlapping lifetimes per `Reach` share a slot:
+        /// No two values with overlapping lifetimes share a slot, judged by a
+        /// happens-before closure built from the edges alone:
         /// for two values in one slot, every op touching the earlier one
         /// happens-before the later one's writer, except the declared in-place
         /// hand-over (the writer is a reader of the earlier value and every
@@ -214,6 +240,7 @@ mod tests {
         ) {
             let reads = random_reads(&masks);
             let (vals, reach) = dag(&reads);
+            let before = closure(&reads);
             let mut in_place = BTreeMap::new();
             for (v, rs) in reads.iter().enumerate() {
                 if offer[v] && let Some(&u) = rs.first() {
@@ -230,13 +257,14 @@ mod tests {
                     if c.slot[u] != c.slot[v] {
                         continue;
                     }
-                    let w = vals[v].writer;
+                    let w = vals[v].writer as usize;
                     let src = &vals[u];
-                    let clear = finished_before(src, w, &reach);
+                    let precedes = |op: u32| before[op as usize][w];
+                    let clear = precedes(src.writer) && src.readers.iter().all(|&r| precedes(r));
                     let hand_over = in_place.get(&(v as u32)) == Some(&(u as u32))
-                        && src.readers.contains(&w)
-                        && reach.before(src.writer, w)
-                        && src.readers.iter().all(|&r| r == w || reach.before(r, w));
+                        && src.readers.contains(&(w as u32))
+                        && precedes(src.writer)
+                        && src.readers.iter().all(|&r| r as usize == w || precedes(r));
                     prop_assert!(clear || hand_over, "values {u} and {v} overlap in slot {}", c.slot[u]);
                 }
             }
