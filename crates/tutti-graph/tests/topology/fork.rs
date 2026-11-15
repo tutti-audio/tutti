@@ -329,7 +329,7 @@ fn a_fork_hands_its_sources_its_mode() {
 fn a_value_set_after_insert_reaches_the_fork() {
     let (mut ed, mut exec) = Editor::new(prepare(64));
     let key = NodeKey(1);
-    let controls = ed.insert(key, "level", Level::new(0.5));
+    let controls = ed.insert(key, "level", Level::new(0.5)).controls;
     ed.spec_mut().topology.set_outputs(vec![out(key, 0)]);
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -738,7 +738,7 @@ fn the_live_graph_is_unaffected_while_a_fork_renders() {
                 pos: Arc::new(AtomicU32::new(0)),
             },
         );
-        let controls = ed.insert(NodeKey(2), "level", level);
+        let controls = ed.insert(NodeKey(2), "level", level).controls;
         ed.spec_mut()
             .topology
             .set_outputs(vec![out(NodeKey(1), 0), out(NodeKey(2), 0)]);
@@ -1178,7 +1178,7 @@ fn witness(ed: &mut Editor, key: NodeKey, how: How, value: u32) -> (Arc<AtomicU3
 fn a_gathered_fork_is_the_live_graph_at_the_gather() {
     let pre = prepare(64);
     let (mut ed, mut exec) = Editor::new(pre);
-    let level = ed.insert(NodeKey(1), "level", Level::new(0.5));
+    let level = ed.insert(NodeKey(1), "level", Level::new(0.5)).controls;
     ed.spec_mut().topology.set_outputs(vec![out(NodeKey(1), 0)]);
     let (cell, _) = witness(&mut ed, NodeKey(2), How::Deferred, 3);
     ed.insert(NodeKey(3), "other", consts(1, 100.0));

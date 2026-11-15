@@ -192,6 +192,15 @@ impl OutPort {
     pub(crate) const fn end(self) -> OutEnd {
         self.0
     }
+
+    /// The port the graph's `source` names, `None` for explicit silence.
+    pub(crate) fn of_source(source: tutti_graph::Source) -> Option<Self> {
+        match source {
+            tutti_graph::Source::Node(p) => Some(Self::new(p.node, usize::from(p.port))),
+            tutti_graph::Source::Global(c) => Some(Root::input(usize::from(c))),
+            tutti_graph::Source::Zero => None,
+        }
+    }
 }
 
 /// One channel a signal arrives at: an input port of a node, or a channel of
@@ -235,6 +244,14 @@ impl InPort {
 
     pub(crate) const fn end(self) -> InEnd {
         self.0
+    }
+
+    /// The port the graph's `sink` names.
+    pub(crate) fn of_sink(sink: tutti_graph::Sink) -> Self {
+        match sink {
+            tutti_graph::Sink::Port(p) => Self::new(p.node, usize::from(p.port)),
+            tutti_graph::Sink::Output(c) => Root::output(usize::from(c)),
+        }
     }
 }
 
@@ -350,6 +367,40 @@ impl EventInPort {
             node: self.node,
             port: u16::try_from(self.index).ok()?,
         })
+    }
+
+    pub(crate) fn of_raw(at: tutti_graph::EventIn) -> Self {
+        Self::new(at.node, usize::from(at.port))
+    }
+}
+
+/// One event edge, named: what feeds which event input. What
+/// [`Graph::connect`] adds between an [`EventOutPort`] and an
+/// [`EventInPort`], and what [`SessionEvent::Unwired`](crate::SessionEvent::Unwired)
+/// lists for a node that lost an event port.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct EventEdge {
+    from: EventOutPort,
+    to: EventInPort,
+}
+
+impl EventEdge {
+    /// The edge from `from` into `to`.
+    #[must_use]
+    pub const fn new(from: EventOutPort, to: EventInPort) -> Self {
+        Self { from, to }
+    }
+
+    /// What feeds it.
+    #[must_use]
+    pub const fn source(self) -> EventOutPort {
+        self.from
+    }
+
+    /// Where it goes.
+    #[must_use]
+    pub const fn sink(self) -> EventInPort {
+        self.to
     }
 }
 

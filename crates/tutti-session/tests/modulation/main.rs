@@ -9,6 +9,9 @@ mod modulation;
 // A route onto an edge's gain (doc 013, "Edge gain", G2).
 #[cfg(feature = "modulation")]
 mod edge_modulation;
+// A route onto the gain of an edge a narrower re-insert dropped.
+#[cfg(feature = "modulation")]
+mod unwired_route;
 // A route onto a node's mix (doc 013, "Bypass and mute are graph state", M4b).
 #[cfg(feature = "modulation")]
 mod mix_modulation;

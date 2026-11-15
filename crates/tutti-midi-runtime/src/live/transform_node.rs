@@ -51,7 +51,7 @@ use crate::schedule::CLIP_EVENT_DENSITY;
 /// use tutti_midi_runtime::MpeTransformNode;
 ///
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-/// let controls = editor.insert(NodeKey(1), "mpe", MpeTransformNode::new(MpeMode::Disabled));
+/// let controls = editor.insert(NodeKey(1), "mpe", MpeTransformNode::new(MpeMode::Disabled)).controls;
 /// controls.set_mode(MpeMode::Disabled);
 /// assert_eq!(controls.mode(), MpeMode::Disabled);
 /// ```

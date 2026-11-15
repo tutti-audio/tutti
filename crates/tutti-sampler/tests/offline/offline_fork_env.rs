@@ -58,7 +58,7 @@ fn prepare() -> Prepare {
 /// controls.
 fn graph<N: IntoNode>(node: N, width: u16) -> (Editor, Executor, N::Controls) {
     let (mut ed, mut exec) = Editor::new(prepare());
-    let controls = ed.insert(NodeKey(1), "under test", node);
+    let controls = ed.insert(NodeKey(1), "under test", node).controls;
     ed.spec_mut().topology.set_outputs((0..width).map(|port| {
         Source::Node(OutPort {
             node: NodeKey(1),

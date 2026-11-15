@@ -332,6 +332,10 @@ pub struct Graph {
     master_meter: Option<MeterReader>,
     /// Crossfades refused `Busy`, in request order.
     parked: VecDeque<Parked>,
+    /// The wiring each re-insert dropped, by node, until the commit that
+    /// carries the re-insert is sent and the session reports it
+    /// ([`SessionEvent::Unwired`](crate::SessionEvent::Unwired)).
+    unwired: Vec<Unwiring>,
     /// The nodes [`remove`](Self::remove) took out since the session last
     /// forgot what it declared on them ([`Graph::take_removed`]).
     removed: Vec<NodeKey>,
@@ -363,6 +367,15 @@ pub struct Graph {
     /// publisher is the session's `TransportSettings`, whose `Reclaim` sweep
     /// already covers the cell.
     pub(crate) tempo: tutti_transport::TempoReader,
+}
+
+/// The wiring a re-insert at one key dropped, in the session's port types.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Unwiring {
+    pub(crate) node: NodeKey,
+    pub(crate) edges: Vec<Edge>,
+    pub(crate) event_edges: Vec<crate::EventEdge>,
+    pub(crate) bus_edges: Vec<(BusSource, BusSink)>,
 }
 
 /// A hook each live render helper runs once on its own thread, with its
@@ -493,6 +506,7 @@ impl Graph {
             event_taps: BTreeMap::new(),
             master_meter: Some(master_meter),
             parked: VecDeque::new(),
+            unwired: Vec::new(),
             removed: Vec::new(),
             root: None,
             output: None,
@@ -703,7 +717,8 @@ impl Graph {
     /// are not a [`SessionNode`] (a bound plugin).
     pub(crate) fn place<N: IntoNode>(&mut self, node: N) -> (Key<N>, N::Controls) {
         let id = NodeKey::fresh();
-        let controls = self.editor.insert(id, N::kind(), node);
+        // A fresh key has no wiring recorded, so nothing is unwired.
+        let controls = self.editor.insert(id, N::kind(), node).controls;
         self.nodes.insert(
             id,
             Entry {
@@ -838,7 +853,11 @@ impl Graph {
         let hosted = crate::plugin::HostedPlugin::new(client.handle(), client.plugin().clone())
             .with_controls(client.controls());
         let tempo = self.tempo.clone();
-        let _controls = self.editor.insert(node, PLUGIN_KIND, client.bind(tempo));
+        // A fresh key has no wiring recorded, so nothing is unwired.
+        let _controls = self
+            .editor
+            .insert(node, PLUGIN_KIND, client.bind(tempo))
+            .controls;
         self.nodes.insert(
             node,
             Entry {
@@ -1188,16 +1207,97 @@ impl Graph {
             return Err(ReplaceRefused::Busy(incoming));
         }
         let rate = self.editor.prepare().sample_rate();
-        let controls = self
+        let placed = self
             .editor
             .replace_or_swap(node, incoming, Fade::seconds(fade, rate, law))
             .map_err(|e| ReplaceRefused::Failed(CrossfadeRefused::Editor(e)))?;
+        let controls = placed.controls;
+        self.note_unwired(node, &placed.unwired);
         if let Some(entry) = self.nodes.get_mut(&node) {
             entry.params = None;
             entry.reclaimer = None;
         }
         self.edited = true;
         Ok(controls)
+    }
+
+    /// Records what a re-insert at `node` unwired, in the session's port
+    /// types, for the update that commits it to report. A dropped edge no
+    /// feed put there stops being one a feed owns.
+    fn note_unwired(&mut self, node: NodeKey, unwired: &tutti_graph::Unwired) {
+        if unwired.is_empty() {
+            return;
+        }
+        let mut edges: Vec<Edge> = Vec::new();
+        for id in &unwired.edges {
+            // A feedback edge is reported as the pair of ports it joins.
+            let source = match id.from {
+                RawEdge::Direct(source) => source,
+                RawEdge::Feedback(f) => Source::Node(f.from),
+            };
+            // Explicit silence is no wire an app made: nothing to report.
+            let Some(from) = OutPort::of_source(source) else {
+                continue;
+            };
+            let edge = Edge::new(from, InPort::of_sink(id.sink));
+            if !edges.contains(&edge) {
+                edges.push(edge);
+            }
+        }
+        let mut event_edges: Vec<crate::EventEdge> = Vec::new();
+        for (at, edge) in &unwired.event_edges {
+            let (from, to) = (EventOutPort::of_raw(edge.from()), EventInPort::of_raw(*at));
+            if at.port == 0
+                && let Some(fed) = self.fed_edges.get_mut(&at.node)
+            {
+                fed.retain(|s| *s != from);
+            }
+            let edge = crate::EventEdge::new(from, to);
+            if !event_edges.contains(&edge) {
+                event_edges.push(edge);
+            }
+        }
+        let mut bus_edges: Vec<(BusSource, BusSink)> = Vec::new();
+        let named = unwired
+            .bus_edges
+            .iter()
+            .map(|(to, feed)| (feed.source, BusSink::Node(*to)))
+            .chain(
+                unwired
+                    .root_buses
+                    .iter()
+                    .map(|feed| (feed.source, BusSink::Root)),
+            );
+        for wire in named {
+            if !bus_edges.contains(&wire) {
+                bus_edges.push(wire);
+            }
+        }
+        if edges.is_empty() && event_edges.is_empty() && bus_edges.is_empty() {
+            return;
+        }
+        match self.unwired.iter_mut().find(|u| u.node == node) {
+            Some(held) => {
+                held.edges.extend(edges);
+                held.event_edges.extend(event_edges);
+                held.bus_edges.extend(bus_edges);
+            }
+            None => self.unwired.push(Unwiring {
+                node,
+                edges,
+                event_edges,
+                bus_edges,
+            }),
+        }
+    }
+
+    /// What the re-inserts since the last call unwired, once the commit that
+    /// carries them is sent: nothing while an edit still waits.
+    pub(crate) fn take_unwired(&mut self) -> Vec<Unwiring> {
+        if self.edited {
+            return Vec::new();
+        }
+        std::mem::take(&mut self.unwired)
     }
 
     /// Swaps the node behind `node` for `incoming` under `fade` along
@@ -1636,11 +1736,13 @@ impl Graph {
         self.write_event_sources(sink, 0, &all);
     }
 
-    /// Every source any feeder feeds `sink` that is in the graph.
+    /// Every source any feeder feeds `sink` that is an event output the graph
+    /// has: a source re-inserted without that port is not fed until it has it
+    /// again.
     fn fed_in_graph(&self, sink: NodeKey) -> Vec<EventOutPort> {
         self.fed(sink)
             .into_iter()
-            .filter(|s| self.contains(s.node()))
+            .filter(|s| self.check_event_out(*s).is_ok())
             .collect()
     }
 
