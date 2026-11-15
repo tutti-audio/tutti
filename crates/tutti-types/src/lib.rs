@@ -17,6 +17,8 @@
 //!   subsystem shares instead of a bare integer. `ChannelTopology` + `Speaker`
 //!   answer the *different* question of which speaker each channel feeds; distinct
 //!   questions, so distinct types.
+//! - **Ids** — `Mint`, a lock-free counter of unique non-zero numbers from 1, and
+//!   `id!`, the macro that writes an id type minted from one.
 //! - **`meter`** — musical meter: `TimeSignature`, the `MeterMap` timeline of
 //!   changes, and the `Meter` trait that turns a `Beat` into a bar and beat. Pure
 //!   musical math, so it layers *over* a transport rather than living inside one.
@@ -36,7 +38,10 @@
 //! dependencies are `atomic_float` and `libm`, plus `serde`
 //! behind its feature) and `#![forbid(unsafe_code)]`. The lock-free and `unsafe`
 //! runtime primitives, the graph runtime, the engine, the device and the file
-//! codecs are other crates'. One consequence makes the split load-bearing:
+//! codecs are other crates'. The exception is `Mint`, a bare atomic counter:
+//! it has no protocol to model, like `Param` and `AtomicSampleRate`, so it
+//! needs no loom model and sits with the vocabulary. One consequence makes the
+//! split load-bearing:
 //!
 //! - Unit newtypes are **mandatory** across the engine, so their home has to be
 //!   reachable from everywhere. A crate that only needs `Beat` gets `Beat` and
@@ -126,8 +131,15 @@ pub mod value;
 // range-checked type, used as `tutti_types::ranged!`.
 mod ranged;
 
+// `id!` is `#[macro_export]`ed for the same reason: the one way any crate
+// writes an id, used as `tutti_types::id!`.
+mod id;
+mod mint;
+
 // Private: everything public in these is re-exported at the root below, so the
 // module path would be a second name for a type that already has one.
+mod ambisonic;
+mod bed;
 mod bus;
 mod channels;
 mod topology;
@@ -138,6 +150,9 @@ pub mod meter;
 // addresses params without their unit types need not depend on `atomic_float`
 // itself.
 pub use atomic_float::{AtomicF32, AtomicF64};
+
+// The counter ids and file-name suffixes are numbered from.
+pub use mint::Mint;
 
 // Value vocabulary.
 pub use value::{
@@ -161,12 +176,17 @@ pub use value::{
 };
 
 // Channel layout — how many channels.
-pub use bus::{BusTooWide, BusTopology, MAX_BUS_CHANNELS};
-pub use channels::{ChannelCountOutOfRange, ChannelLayout};
+pub use bus::{BusTooWide, BusTopology};
+pub use channels::{ChannelCountOutOfRange, ChannelLayout, MAX_CHANNELS};
 
 // Channel topology — which speaker each channel feeds. Distinct from the count
 // above, and additive to it: a width-only caller keeps using `ChannelLayout`.
-pub use topology::{ChannelTopology, Speaker};
+pub use ambisonic::{
+    AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
+    AmbisonicOrdering,
+};
+pub use bed::Bed;
+pub use topology::{ChannelTopology, Placement, Speaker, Speakers, TopologyError};
 
 // Musical meter.
 pub use meter::{

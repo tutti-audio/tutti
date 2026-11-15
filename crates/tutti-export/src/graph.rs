@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tutti_types::SampleRate;
 
 use tutti_graph::GraphTail;
-use tutti_graph::{Editor, Executor, Pool, Prepare};
+use tutti_graph::{Editor, Executor, Pool, Prepare, RenderMode};
 use tutti_types::{ChannelTopology, MaxBlock, Samples};
 
 use crate::{ConfigError, Result};
@@ -218,9 +218,10 @@ impl RenderGraph {
     }
 
     /// What a graph is prepared at to render at `sample_rate`: that
-    /// rate, and [`GRAPH_MAX_BLOCK`].
+    /// rate, [`GRAPH_MAX_BLOCK`], and [`RenderMode::Offline`], so a node
+    /// that waits for its inputs or spends more per block for quality does.
     pub fn prepare(sample_rate: SampleRate) -> Prepare {
-        Prepare::new(sample_rate, GRAPH_MAX_BLOCK)
+        Prepare::new(sample_rate, GRAPH_MAX_BLOCK).with_render_mode(RenderMode::Offline)
     }
 
     /// The look-ahead latency the graph reports, as a frame count — the

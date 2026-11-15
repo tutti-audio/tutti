@@ -29,9 +29,10 @@ pub use controllers::{
 pub use data::{OpaqueBody, PeData, PeOpaque};
 pub use entry::{EntryError, PeResourceList, ResourceEntry};
 pub use fields::{
-    ClusterKind, CtrlKind, CtrlValueKind, ModeId, NotVendorName, ParamPath, PeBankProgram,
-    PeChannel, PeDataError, PeDataFault, PeExtensions, PeMidiMode, PeText, Priority, RoleName,
-    SignificantBits, StepCount, TypeHint,
+    ClusterKind, CtrlKind, CtrlValueKind, ModeId, NotAPeChannel, NotAPriority, NotAStepCount,
+    NotSignificantBits, NotVendorName, ParamPath, PeBankProgram, PeChannel, PeDataError,
+    PeDataFault, PeExtensions, PeMidiMode, PeText, Priority, RoleName, SignificantBits, StepCount,
+    TypeHint,
 };
 pub use info::{PeDeviceInfo, PeJsonSchema};
 pub use kind::{CanSet, CustomResource, PeResource, ResIdUse, ResourceDefaults};
@@ -48,9 +49,9 @@ pub use simple::{
     PeBasicChannelRx, PeBasicChannelTx, PeChannelMode, PeCurrentMode, PeExternalSync, PeLocalOn,
 };
 pub use state::{
-    Arrival, CommonState, GetStateError, PeState, PeStateEntry, PeStateList, RefusedAt,
-    RestoreError, SavedState, StateDevice, StateId, StateRev, StateSize, StateStamp, UnixSeconds,
-    Verdict, WrongDevice,
+    Arrival, CommonState, GetStateError, NotAStateSize, NotUnixSeconds, PeState, PeStateEntry,
+    PeStateList, RefusedAt, RestoreError, SavedState, StateDevice, StateId, StateRev, StateSize,
+    StateStamp, UnixSeconds, Verdict, WrongDevice,
 };
 pub use store::{ResourceStore, StoreError};
 

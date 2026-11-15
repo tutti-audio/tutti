@@ -25,7 +25,7 @@ use tutti_types::{ChannelLayout, ChannelTopology, SampleRate};
 /// # use tutti_types::{ChannelTopology, SampleRate};
 /// let _ = Spec {
 ///     format: Format::Wav(Pcm::Int16),
-///     topology: ChannelTopology::quad(),
+///     topology: tutti_types::Bed::Quad.topology(),
 ///     rate: SampleRate::SR_48K,
 /// };
 /// ```
@@ -49,16 +49,13 @@ impl Spec {
         }
     }
 
-    /// A file of `layout` at `rate` whose speakers are the engine's order for
-    /// the width ([`ChannelTopology::smpte`]: mono, stereo, 5.1, 7.1 and 7.1.4
-    /// named), and unassigned channels for every other width, 4 included (quad
-    /// and B-format are both four channels, so a caller that knows it is writing
-    /// quad passes [`ChannelTopology::quad`] to [`new`](Self::new)).
+    /// A file of `layout` at `rate` whose speakers are what a bare width is
+    /// taken to mean ([`ChannelTopology::assumed`]: mono, stereo, quad, 5.1, 7.1
+    /// and 7.1.4 named, unassigned channels for every other width). A caller
+    /// that knows better passes its own topology to [`new`](Self::new).
     #[must_use]
     pub fn of_width(format: Format, layout: ChannelLayout, rate: SampleRate) -> Self {
-        let topology =
-            ChannelTopology::smpte(layout).unwrap_or_else(|| ChannelTopology::unassigned(layout));
-        Self::new(format, topology, rate)
+        Self::new(format, ChannelTopology::assumed(layout), rate)
     }
 
     /// The container and its settings.
@@ -78,7 +75,7 @@ impl Spec {
     /// encoder have this width.
     #[must_use]
     pub fn layout(&self) -> ChannelLayout {
-        self.topology.layout()
+        self.topology.width()
     }
 
     /// The rate the file declares.

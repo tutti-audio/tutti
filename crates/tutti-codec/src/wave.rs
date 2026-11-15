@@ -12,7 +12,7 @@ use std::path::Path;
 #[cfg(encode)]
 use tutti_buffers::Interleaved;
 use tutti_types::Samples;
-use tutti_types::{ChannelLayout, ChannelTopology, SampleRate};
+use tutti_types::{ChannelLayout, ChannelTopology, Placement, SampleRate};
 
 /// Frames written to the encoder at a time by [`Wave::write`].
 #[cfg(encode)]
@@ -50,15 +50,16 @@ pub struct Wave {
     sample_rate: SampleRate,
     /// Length in frames. 0 if there are no channels.
     len: Samples,
-    /// Which speaker each channel feeds; its length is the channel count.
+    /// Which speaker each channel feeds; its width is the channel count.
     topology: ChannelTopology,
+    /// Whether `topology` was stated or guessed from the count.
+    placement: Placement,
 }
 
-/// What a bare channel count is taken to mean: the engine's own order where it
-/// has one, else channels that feed no speaker.
-fn assumed(channels: usize) -> ChannelTopology {
+/// What a bare channel count is taken to mean: [`ChannelTopology::assumed`].
+fn assumed(channels: usize) -> (ChannelTopology, Placement) {
     let layout = ChannelLayout::try_from(channels).expect("a wave has at most u16::MAX channels");
-    ChannelTopology::smpte(layout).unwrap_or_else(|| ChannelTopology::unassigned(layout))
+    (ChannelTopology::assumed(layout), Placement::Assumed)
 }
 
 impl std::fmt::Debug for Wave {
@@ -87,30 +88,43 @@ impl Wave {
     ///
     /// If `channels` is above `u16::MAX`, which no layout holds.
     pub fn with_capacity(channels: usize, sample_rate: SampleRate, capacity: Samples) -> Self {
+        let (topology, placement) = assumed(channels);
         Self {
             vec: (0..channels)
                 .map(|_| Vec::with_capacity(capacity.get()))
                 .collect(),
             sample_rate,
             len: Samples::ZERO,
-            topology: assumed(channels),
+            topology,
+            placement,
         }
     }
 
     /// Creates an empty wave whose channels feed the speakers of `topology`,
-    /// one channel per speaker.
+    /// one channel per speaker, with a [`Stated`](Placement::Stated) placement.
     ///
     /// [`new`](Self::new) takes a bare count, and a count is not a placement:
-    /// it assumes the engine's own order ([`ChannelTopology::smpte`]) for the
-    /// widths that have one (1, 2, 6, 8 and 12) and channels that feed no
-    /// speaker ([`ChannelTopology::unassigned`]) for the rest. Use this when the
-    /// source says more.
+    /// it takes [`ChannelTopology::assumed`] and reports
+    /// [`Placement::Assumed`]. Use this when the source says more.
     pub fn with_topology(topology: ChannelTopology, sample_rate: SampleRate) -> Self {
+        Self::with_placement(topology, Placement::Stated, sample_rate)
+    }
+
+    /// Creates an empty wave as [`with_topology`](Self::with_topology) does,
+    /// reporting `placement` as the basis of `topology` (a decoder whose
+    /// container stated a count and no placement passes
+    /// [`Placement::Assumed`]).
+    pub fn with_placement(
+        topology: ChannelTopology,
+        placement: Placement,
+        sample_rate: SampleRate,
+    ) -> Self {
         Self {
-            vec: vec![Vec::new(); topology.positions().len()],
+            vec: vec![Vec::new(); usize::from(topology.width().count())],
             sample_rate,
             len: Samples::ZERO,
             topology,
+            placement,
         }
     }
 
@@ -124,11 +138,18 @@ impl Wave {
         &self.topology
     }
 
+    /// Returns whether [`topology`](Self::topology) was stated or assumed from
+    /// the channel count.
+    #[inline]
+    pub fn placement(&self) -> Placement {
+        self.placement
+    }
+
     /// Returns the width, as a [`ChannelLayout`]: the length of the
     /// [`topology`](Self::topology).
     #[inline]
     pub fn layout(&self) -> ChannelLayout {
-        self.topology.layout()
+        self.topology.width()
     }
 
     /// Creates an all-zero wave `duration` seconds long, rounded to the
@@ -147,21 +168,25 @@ impl Wave {
     ) -> Self {
         let length = (duration.into().get() * sample_rate.get()).round() as usize;
         assert!(channels > 0 || length == 0);
+        let (topology, placement) = assumed(channels);
         Self {
             vec: vec![vec![0.0; length]; channels],
             sample_rate,
             len: Samples(length),
-            topology: assumed(channels),
+            topology,
+            placement,
         }
     }
 
     /// Creates a mono wave holding a copy of `samples`.
     pub fn from_samples(sample_rate: SampleRate, samples: &[f32]) -> Self {
+        let (topology, placement) = assumed(1);
         Self {
             vec: vec![samples.to_vec()],
             sample_rate,
             len: Samples(samples.len()),
-            topology: assumed(1),
+            topology,
+            placement,
         }
     }
 

@@ -3,7 +3,7 @@
 
 use tutti_types::Samples;
 
-use super::{CloseError, CommitError, Editor, MAX_ROOT_CHANNELS, MissingSource, TapOpened};
+use super::{CloseError, CommitError, Editor, MAX_CHANNELS, MissingSource, TapOpened};
 use crate::Source;
 use crate::event_tap::EventTapReader;
 use crate::meter::MeterReader;
@@ -53,7 +53,7 @@ impl Editor {
         capacity: Samples,
     ) -> Result<TapReader, MissingSource> {
         self.check_sources(&sources)?;
-        let (reader, writer) = TapReader::pair(id, sources.len(), capacity);
+        let (reader, writer) = TapReader::named(id, sources.len(), capacity);
         let opened = TapOpened {
             width: reader.width(),
             end: reader.end_latch(),
@@ -95,7 +95,7 @@ impl Editor {
             .copied()
             .collect();
         self.check_sources(&named)?;
-        let (reader, writer) = TapReader::pair(id, width, capacity);
+        let (reader, writer) = TapReader::named(id, width, capacity);
         let opened = TapOpened {
             width: reader.width(),
             end: reader.end_latch(),
@@ -300,7 +300,7 @@ impl Editor {
     /// executor its cells; until then the reader sees nothing.
     ///
     /// [`MeterSpec::Outputs`] meters the graph's global outputs, one channel
-    /// each, following them as they change (up to [`MAX_ROOT_CHANNELS`]),
+    /// each, following them as they change (up to [`MAX_CHANNELS`]),
     /// aligned: each lane is what its output channel carries, at the
     /// output's time. [`MeterSpec::Ports`] meters those sources, fixed at the
     /// width given here, as they leave their nodes or aligned to the output
@@ -331,7 +331,7 @@ impl Editor {
             self.check_sources(sources)?;
         }
         let (lanes, width) = match &spec {
-            MeterSpec::Outputs => (MAX_ROOT_CHANNELS, 0),
+            MeterSpec::Outputs => (MAX_CHANNELS, 0),
             MeterSpec::Ports { sources, .. } => (sources.len(), sources.len()),
         };
         let (reader, writer) = MeterReader::pair(id, lanes, width);

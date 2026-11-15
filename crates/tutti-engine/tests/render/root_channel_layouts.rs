@@ -12,11 +12,11 @@ use crate::support;
 use support::Sine;
 use tutti_buffers::InterleavedMut;
 use tutti_engine::{Engine, GraphEngineError};
-use tutti_graph::MAX_ROOT_CHANNELS;
 use tutti_graph::NodeKey;
 use tutti_graph::{CommitError, Editor, ForkByClone, Prepare};
 use tutti_graph::{OutPort, Source};
 use tutti_transport::Transport;
+use tutti_types::MAX_CHANNELS;
 use tutti_types::MaxBlock;
 use tutti_types::{ChannelLayout, Hz, SampleRate, Samples};
 
@@ -125,7 +125,30 @@ fn center_root_folds_symmetrically_to_stereo() {
     );
 }
 
-/// A root wider than `MAX_ROOT_CHANNELS` (8) never reaches the callback:
+/// A 7.1.4 root (twelve channels) renders: a source on its last channel, the
+/// top back right at index 11, reaches the same channel of a twelve-wide
+/// device and no other.
+#[test]
+fn a_714_root_reaches_a_matching_width_device() {
+    let out = render_root_to(12, 12, &[11]);
+    let e: Vec<f32> = (0..12).map(|c| channel_energy(&out, c, 12)).collect();
+    assert!(e[11] > 0.0, "the source must reach channel 11 ({e:?})");
+    for &en in e.iter().take(11) {
+        assert_eq!(en, 0.0, "only channel 11 carries energy ({e:?})");
+    }
+}
+
+/// The same 7.1.4 root folds to a stereo device by speaker: the top back right
+/// (index 11) goes to the right channel alone.
+#[test]
+fn a_714_root_folds_to_a_stereo_device_by_speaker() {
+    let out = render_root_to(12, 2, &[11]);
+    let (el, er) = (channel_energy(&out, 0, 2), channel_energy(&out, 1, 2));
+    assert!(er > 0.0, "the right channel carries the source");
+    assert_eq!(el, 0.0, "the left channel carries none (el={el}, er={er})");
+}
+
+/// A root wider than `MAX_CHANNELS` never reaches the callback:
 /// the engine refuses it at construction, naming the widths.
 ///
 /// A graph cannot be handed to the engine that wide, so the property is the
@@ -134,14 +157,14 @@ fn center_root_folds_symmetrically_to_stereo() {
 /// `a_graph_engine_refuses_more_outputs_than_it_folds`).
 #[test]
 fn over_wide_root_is_refused_before_it_can_render() {
-    let wide = 12;
+    let wide = MAX_CHANNELS + 1;
     let (mut ed, exec) = root(wide, &(0..wide).collect::<Vec<_>>());
     let refused = Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).err();
     assert_eq!(
         refused,
         Some(GraphEngineError::Limits(CommitError::TooManyOutputs {
             outputs: wide,
-            limit: MAX_ROOT_CHANNELS,
+            limit: MAX_CHANNELS,
         }))
     );
 }

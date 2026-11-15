@@ -312,10 +312,12 @@ pub use presets::{Preset, PresetId, PresetSupport};
 #[cfg(feature = "probe-wire")]
 pub use probe_wire::{ProbeOutcome, ResultError, read_result, write_result};
 pub use process::{BlockStatus, ExpressiveContext, ProcessContext, ProcessOutput};
-pub use render_mode::{RenderMode, RenderModeSupport};
+pub use render_mode::RenderModeSupport;
 pub use sample_format::{SampleFormat, negotiate};
 pub use sysex::{SYSEX_MESSAGE_CAPACITY, push_sysex, sysex_assembler, sysex_packets};
 pub use transport::{
     BarInfo, LoopRegion, MusicalTiming, PlayheadWatch, TransportChange, TransportChanges,
     TransportFlags, TransportInfo, TransportPosition, is_usable,
 };
+// The session's render mode, which a plugin's `Prepare` carries and `Control::set_render_mode` takes.
+pub use tutti_graph::RenderMode;

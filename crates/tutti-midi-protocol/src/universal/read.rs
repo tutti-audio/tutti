@@ -59,7 +59,7 @@ fn u7(input: &mut &[u8]) -> Res<U7> {
 /// A 14-bit value sent least significant byte first (M1 p.40, p.57).
 fn u14(input: &mut &[u8]) -> Res<U14> {
     (u7, u7)
-        .map(|(lsb, msb)| U14::masked(u16::from(msb.get()) << 7 | u16::from(lsb.get())))
+        .map(|(lsb, msb)| U14::from_halves(msb, lsb))
         .parse_next(input)
 }
 
@@ -146,7 +146,7 @@ fn mtc_full(input: &mut &[u8]) -> Res<Universal> {
 /// fractions and offsets (`0abcdefg 0hijklmn`, `40 00` is the middle).
 fn u14_msb_first(input: &mut &[u8]) -> Res<U14> {
     (u7, u7)
-        .map(|(msb, lsb)| U14::masked(u16::from(msb.get()) << 7 | u16::from(lsb.get())))
+        .map(|(msb, lsb)| U14::from_halves(msb, lsb))
         .parse_next(input)
 }
 

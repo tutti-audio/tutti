@@ -652,13 +652,8 @@ mod tests {
     /// ways: these tests stage nothing, but a batcher cannot exist without the
     /// writer its chunks go through.
     fn slab(samples: usize) -> SlabWriter {
-        use std::sync::atomic::{AtomicU32, Ordering};
-        static N: AtomicU32 = AtomicU32::new(0);
-        let name = format!(
-            "batcher_{}_{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        );
+        static N: tutti_types::Mint = tutti_types::Mint::new();
+        let name = format!("batcher_{}_{}", std::process::id(), N.mint());
         let stereo = tutti_plugin_types::ChannelLayout::STEREO;
         AudioSlab::create(
             name,

@@ -24,6 +24,8 @@ contract = []
 # executor with: test support (about 2,700 lines), so off by default. This
 # crate's own tests turn it on through the self dev-dependency below.
 testing = ["dep:assert_no_alloc"]
+# `Serialize` and `Deserialize` on `RenderMode`, which a plugin's IPC carries.
+serde = ["dep:serde"]
 
 [dependencies]
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
@@ -48,6 +50,8 @@ bytemuck = { version = "1.16", features = ["derive"] }
 ringbuf = { version = "0.6", default-features = false, features = ["alloc"] }
 # `testing` only: `TestPool::no_alloc` runs each participant under the gate.
 assert_no_alloc = { version = "1", default-features = false, optional = true }
+# `RenderMode`'s wire form, with `serde`.
+serde = { version = "1", features = ["derive"], optional = true }
 # The `Error` derive of the crate's error types.
 thiserror = { workspace = true }
 

@@ -208,7 +208,8 @@ pub(crate) fn tap_op<A: AudioSlots>(
 /// the editor closes or reaps it; the audio thread then writes nothing for it.
 /// It must not be dropped on the audio thread (debug builds panic there).
 pub struct TapReader {
-    id: TapId,
+    /// The tap's id in a topology; `None` for a reader outside any.
+    id: Option<TapId>,
     lanes: Vec<HeapCons<f32>>,
     lost: Arc<AtomicU64>,
     /// The writer's [`Run`]s not yet read through.
@@ -240,12 +241,22 @@ impl Drop for TapReader {
 }
 
 impl TapReader {
-    /// A reader and the writer that fills it: `width` lanes, each holding
-    /// `capacity` frames (at least one). A plan's tap gets one from the editor;
-    /// a writer that is not an op of a plan (the engine's, after the fader; an
-    /// inlet's producer) takes one here.
+    /// A reader outside any topology and the writer that fills it: `width`
+    /// lanes, each holding `capacity` frames (at least one). A plan's tap gets
+    /// its reader from the editor, which names it; a writer that is not an op
+    /// of a plan (the engine's, after the fader; an inlet's producer) takes
+    /// one here, and its reader has no [`id`](Self::id).
     #[must_use]
-    pub fn pair(id: TapId, width: usize, capacity: Samples) -> (Self, TapWriter) {
+    pub fn pair(width: usize, capacity: Samples) -> (Self, TapWriter) {
+        Self::build(None, width, capacity)
+    }
+
+    /// The reader of the tap `id` names, and its writer.
+    pub(crate) fn named(id: TapId, width: usize, capacity: Samples) -> (Self, TapWriter) {
+        Self::build(Some(id), width, capacity)
+    }
+
+    fn build(id: Option<TapId>, width: usize, capacity: Samples) -> (Self, TapWriter) {
         let lost = Arc::new(AtomicU64::new(0));
         let end = Arc::new(FaultLatch::new());
         let (run_prod, run_cons) = HeapRb::<Run>::new(capacity.get().clamp(1, MAX_RUNS)).split();
@@ -298,9 +309,10 @@ impl TapReader {
         self.end.is_raised()
     }
 
-    /// The tap's id, the one [`Editor::close_tap`](crate::Editor::close_tap) takes.
+    /// The tap's id, the one [`Editor::close_tap`](crate::Editor::close_tap)
+    /// takes; `None` for a reader [`pair`](Self::pair) made outside any topology.
     #[must_use]
-    pub fn id(&self) -> TapId {
+    pub fn id(&self) -> Option<TapId> {
         self.id
     }
 

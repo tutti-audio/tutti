@@ -11,20 +11,14 @@ use super::open::Opened;
 use crate::voice::Direction;
 use crate::{Loop, OpenError};
 
-/// One open stream's identity: minted on the control side when the open is
-/// asked for ([`DiskStreamer::open`](crate::DiskStreamer::open)), never
-/// reused, and what every command about the stream names.
-///
-/// Opaque: the only way to hold one is to be handed it
-/// ([`Stream::id`](crate::Stream::id), [`StreamReader::id`](crate::StreamReader::id)),
-/// so a command can only name a stream that was opened.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct StreamId(pub(crate) u64);
-
-impl std::fmt::Display for StreamId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "stream {}", self.0)
-    }
+tutti_types::id! {
+    /// One open stream's identity: minted on the control side when the open is
+    /// asked for ([`DiskStreamer::open`](crate::DiskStreamer::open)), never
+    /// reused, and what every command about the stream names. A host is
+    /// handed one ([`Stream::id`](crate::Stream::id),
+    /// [`StreamReader::id`](crate::StreamReader::id)); a number it makes up
+    /// names no open stream, which the streamer ignores.
+    pub struct StreamId;
 }
 
 /// Where the streamer answers an open: one cell, written once by the streamer

@@ -244,7 +244,7 @@ fn twenty_four_bit_capture_round_trips() {
 fn a_multichannel_file_declares_the_mask_of_tutti_s_channel_order() {
     let dir = tempfile::tempdir().unwrap();
     for (channels, depth, mask) in [
-        (4u16, Pcm::Float32, 0u32),
+        (4u16, Pcm::Float32, 0x33u32),
         (6, Pcm::Float32, 0x60F),
         (6, Pcm::Int24, 0x60F),
         (8, Pcm::Float32, 0),
@@ -274,15 +274,20 @@ fn a_multichannel_file_declares_the_mask_of_tutti_s_channel_order() {
 }
 
 /// Quad is declared only by a caller that says it is quad: the same four
-/// channels with `ChannelTopology::quad()` carry `0x33`. (A topology of
+/// channels with `tutti_types::Bed::Quad.topology()` carry `0x33`. (A topology of
 /// another width than the file cannot be asked for: the constructor takes the
 /// width from the topology.)
 #[test]
 fn a_declared_quad_topology_sets_the_quad_mask() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("quad.wav");
-    let mut sink =
-        wav_with_topology(&path, 48_000.0, ChannelTopology::quad(), Pcm::Float32).unwrap();
+    let mut sink = wav_with_topology(
+        &path,
+        48_000.0,
+        tutti_types::Bed::Quad.topology(),
+        Pcm::Float32,
+    )
+    .unwrap();
     assert_eq!(sink.layout(), ChannelLayout::from(4u16));
     write_samples(&mut sink, &[0.25; 5 * 4]).unwrap();
     sink.finalize().unwrap();

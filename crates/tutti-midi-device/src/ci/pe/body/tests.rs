@@ -184,7 +184,7 @@ fn the_body_limit_is_a_range_checked_value() {
     check_range_contract(&RangeContract {
         new: BodyLimit::new,
         get: BodyLimit::get,
-        of: None,
+        of: Some(BodyLimit::of),
         valid: &[1, usize::MAX],
         invalid: &[0],
     });

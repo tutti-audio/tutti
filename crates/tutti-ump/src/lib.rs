@@ -71,6 +71,7 @@ mod decode;
 mod encode;
 mod field;
 mod flex_text;
+mod held_keys;
 mod manufacturer;
 mod message;
 mod midi1;
@@ -82,6 +83,7 @@ mod note_velocity;
 mod rpn;
 mod sysex;
 mod sysex8;
+mod text;
 mod ump;
 
 pub use bend_value::BendValue;
@@ -89,11 +91,12 @@ pub use cc_number::CCNumber;
 pub use control_value::ControlValue;
 pub use field::{
     DeltaTicks, FirstGroup, FunctionBlockId, GroupSpan, NoteNumber, OutOfRange, Pitch, SharpsFlats,
-    U4, U7, U14,
+    U4, U7, U14, U28, first_non_seven_bit,
 };
 pub use flex_text::{
     FlexText, FlexTextAssembler, FlexTextPackets, FlexTextStep, flex_text_packets,
 };
+pub use held_keys::{KeyBitset, Lane, LaneSet};
 pub use manufacturer::{ManufacturerId, NotManufacturerId};
 pub use message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BlockFilter, BlockSelect,
@@ -112,10 +115,11 @@ pub use mixed_data::{
 };
 pub use note_id::NoteId;
 pub use note_velocity::NoteVelocity;
-pub use rpn::Rpn;
+pub use rpn::{RegisteredData, Rpn};
 pub use sysex::{
     SYSEX7_MAX_PAYLOAD, Sysex7Packets, SysexAssembler, SysexError, SysexMessage, SysexRef,
     SysexStep,
 };
 pub use sysex8::{Sysex8Assembler, Sysex8Message, Sysex8Packets, Sysex8Step};
+pub use text::{StreamTextAssembler, TextPackets, text_packets};
 pub use ump::{Key, KeyEvent, Ump, split_stream};

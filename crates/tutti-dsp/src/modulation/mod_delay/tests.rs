@@ -962,15 +962,15 @@ fn a_stagger_is_finite_and_wrapped_into_one_cycle() {
     assert_eq!(each.offset(1), PhaseIncrement(0.75));
     assert_eq!(each.offset(7), PhaseIncrement(0.0), "past the named: none");
     assert_eq!((each.channels(), s.channels()), (Some(2), None));
-    let too_many = [PhaseIncrement(0.0); MAX_BUS_CHANNELS + 1];
+    let too_many = [PhaseIncrement(0.0); MAX_CHANNELS + 1];
     assert_eq!(
         Stagger::each(&too_many),
         Err(StaggerError::TooMany {
-            count: MAX_BUS_CHANNELS + 1,
-            max: MAX_BUS_CHANNELS
+            count: MAX_CHANNELS + 1,
+            max: MAX_CHANNELS
         })
     );
-    assert!(Stagger::each(&too_many[..MAX_BUS_CHANNELS]).is_ok());
+    assert!(Stagger::each(&too_many[..MAX_CHANNELS]).is_ok());
 }
 
 /// A family refuses offsets that are not one for each channel of its bus, and takes a step

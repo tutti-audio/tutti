@@ -413,7 +413,7 @@ fn a_topology_that_is_not_a_bed_is_refused_by_name() {
             "{width} unassigned channels"
         );
     }
-    let quad = ChannelTopology::quad();
+    let quad = tutti_types::Bed::Quad.topology();
     assert_eq!(
         VbapPannerNode::for_topology(&quad)
             .unwrap()

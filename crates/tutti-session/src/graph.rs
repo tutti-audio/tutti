@@ -48,7 +48,7 @@ use tutti_graph::{BusRef, BusSource, Buses, EdgeFade, EdgeGain};
 use tutti_graph::{
     CommitError, Editor, EventEdge, EventIn, EventOut, Executor, Fade, GraphInvalid, InletNode,
     InletRing, IntoNode, MeterReader, MixError, ModeError, NodeMode, ParamIn, ParamMod, ParamRange,
-    ParamSet, Prepare, TapWriter, TransportPosition,
+    ParamSet, Prepare, RenderMode, TapWriter, TransportPosition,
 };
 use tutti_graph::{
     Edge as RawEdge, EdgeId, InPort as RawIn, NodeKey, OutPort as RawOut, Sink, Source,
@@ -60,6 +60,7 @@ use tutti_graph::{
 #[cfg(feature = "plugin")]
 use tutti_types::Latency;
 use tutti_types::MaxBlock;
+use tutti_types::Mint;
 use tutti_types::{Amplitude, ChannelLayout, Mix, SampleRate, Seconds, UnitAddr};
 use tutti_types::{Samples, Tail};
 
@@ -130,10 +131,11 @@ pub enum Feeder {
     Declared,
 }
 
-/// A crossfade waiting for a re-prepare, named so its landing can be told
-/// from another's ([`SessionEvent::CrossfadeLanded`](crate::SessionEvent)).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct CrossfadeId(u64);
+tutti_types::id! {
+    /// A crossfade waiting for a re-prepare, named so its landing can be told
+    /// from another's ([`SessionEvent::CrossfadeLanded`](crate::SessionEvent)).
+    pub struct CrossfadeId;
+}
 
 /// What [`Graph::crossfade`] came to, when the graph did not refuse it.
 #[derive(Debug)]
@@ -308,16 +310,12 @@ pub struct Graph {
     /// there and the host did not wire itself, which are all a change of the
     /// feeds may take away. Every other edge on the input is the host's.
     fed_edges: BTreeMap<NodeKey, Vec<EventOutPort>>,
-    /// The id the next tap takes.
-    next_tap: u32,
-    /// The id the next event tap takes.
-    next_event_tap: u32,
+    /// Names every tap, event tap, meter and crossfade of this graph.
+    ids: Mint,
     /// Each open event tap as it was opened (its port, alignment and
     /// capacity), so [`Taps::reopen_events`] can open it
     /// again.
     event_taps: BTreeMap<EventTapId, (tutti_graph::EventTapSource, TapAlign, EventCapacity)>,
-    /// The id the next meter takes (`MASTER_METER` is taken at construction).
-    next_meter: u32,
     /// The master meter's reader until a host takes it.
     master_meter: Option<MeterReader>,
     /// Crossfades refused `Busy`, in request order.
@@ -325,7 +323,6 @@ pub struct Graph {
     /// The nodes [`remove`](Self::remove) took out since the session last
     /// forgot what it declared on them ([`Graph::take_removed`]).
     removed: Vec<NodeKey>,
-    next_crossfade: u64,
     /// What the root's channels are, when a host declared it
     /// ([`Session::declare_root_topology`](crate::Session::declare_root_topology));
     /// `None` is the engine's order for the root's width.
@@ -386,8 +383,7 @@ impl std::fmt::Debug for Graph {
             .field("render_workers", &self.render_workers)
             .field("feeds", &self.feeds)
             .field("fed_edges", &self.fed_edges)
-            .field("parked", &self.parked)
-            .field("next_crossfade", &self.next_crossfade);
+            .field("parked", &self.parked);
         #[cfg(feature = "plugin")]
         d.field("plugins", &self.plugins);
         d.finish_non_exhaustive()
@@ -410,9 +406,6 @@ pub enum Committed {
     Retry,
 }
 
-/// The master meter's id; every other meter takes the ids after it.
-const MASTER_METER: MeterId = MeterId(0);
-
 fn compensation_of(plan: &tutti_graph::Plan) -> Compensation {
     Compensation::new(plan.compensation().to_vec(), plan.total_latency().samples())
 }
@@ -420,13 +413,15 @@ fn compensation_of(plan: &tutti_graph::Plan) -> Compensation {
 /// The graph's `Prepare`: `rate`, `max_block`, and the device's callback
 /// `quantum` when the host knows it (`tutti_cpal::OutputSpec::quantum`). A
 /// hosted out-of-process plugin ships one quantum per callback to its server,
-/// so the quantum is what keeps its pipeline in step with the device.
+/// so the quantum is what keeps its pipeline in step with the device. The
+/// session's own graph is live: [`RenderMode::Realtime`]. An offline render or
+/// a bounce prepares its fork with `RenderGraph::prepare`, which is offline.
 pub(crate) fn prepare_for(
     rate: SampleRate,
     max_block: MaxBlock,
     quantum: Option<MaxBlock>,
 ) -> Prepare {
-    let p = Prepare::new(rate, max_block);
+    let p = Prepare::new(rate, max_block).with_render_mode(RenderMode::Realtime);
     match quantum {
         Some(q) => p.with_quantum(q),
         None => p,
@@ -459,8 +454,9 @@ impl Graph {
         // Declared and on from the start: a host reads the master level
         // without asking for it.
         // `Outputs` names no source, so the open cannot be refused.
+        let ids = Mint::new();
         let master_meter = editor
-            .open_meter(MASTER_METER, MeterSpec::Outputs)
+            .open_meter(MeterId::mint(&ids), MeterSpec::Outputs)
             .expect("a master meter names no source");
         master_meter.enable();
         Self {
@@ -477,14 +473,11 @@ impl Graph {
             render_worker_start: None,
             feeds: BTreeMap::new(),
             fed_edges: BTreeMap::new(),
-            next_tap: 0,
-            next_event_tap: 0,
+            ids,
             event_taps: BTreeMap::new(),
-            next_meter: 1,
             master_meter: Some(master_meter),
             parked: VecDeque::new(),
             removed: Vec::new(),
-            next_crossfade: 0,
             root: None,
             output: None,
             widen_refusal: None,
@@ -1181,8 +1174,7 @@ impl Graph {
         fade: Seconds,
         law: FadeLaw,
     ) -> CrossfadeId {
-        let id = CrossfadeId(self.next_crossfade);
-        self.next_crossfade += 1;
+        let id = CrossfadeId::mint(&self.ids);
         self.parked.push_back(Parked {
             id,
             node,
@@ -2329,7 +2321,7 @@ impl Graph {
                 // its width.
                 let source = tutti_types::ChannelTopology::from(out_topology);
                 let placed = if source.is_unassigned() {
-                    tutti_types::ChannelTopology::assumed(source.layout())
+                    tutti_types::ChannelTopology::assumed(source.width())
                 } else {
                     source
                 };
@@ -2795,7 +2787,7 @@ impl Graph {
     ///   ([`Session::declare_root_topology`](crate::Session::declare_root_topology)),
     ///   anything wider than the declaration: the root is not widened under
     ///   it ([`RootError::Width`](tutti_graph::RootError::Width));
-    /// - past [`MAX_ROOT_CHANNELS`](tutti_graph::MAX_ROOT_CHANNELS): the root
+    /// - past [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS): the root
     ///   is widened to that and the excess is not rendered
     ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), the first
     ///   channel with no place).
@@ -2809,19 +2801,19 @@ impl Graph {
         let refused = if let Some(root) = self
             .root
             .as_ref()
-            .filter(|r| channels > r.positions().len())
+            .filter(|r| channels > usize::from(r.width().count()))
         {
             Some(tutti_graph::RootError::Width {
-                declared: root.layout(),
+                declared: root.width(),
                 // Only the report names the request; one past `u16::MAX` is
-                // refused either way (it is past `MAX_ROOT_CHANNELS`), so the
+                // refused either way (it is past `MAX_CHANNELS`), so the
                 // saturated figure loses nothing.
                 requested: ChannelLayout::clamped(channels),
             })
-        } else if channels > tutti_graph::MAX_ROOT_CHANNELS {
+        } else if channels > tutti_types::MAX_CHANNELS {
             Some(tutti_graph::RootError::Fold(
                 tutti_buffers::FoldError::Unplaced {
-                    channel: tutti_graph::MAX_ROOT_CHANNELS,
+                    channel: tutti_types::MAX_CHANNELS,
                     speaker: tutti_types::Speaker::Unassigned,
                 },
             ))
@@ -2833,7 +2825,7 @@ impl Graph {
         // request widens as far as the engine renders.
         let target = match refused {
             Some(tutti_graph::RootError::Width { .. }) => 0,
-            _ => channels.min(tutti_graph::MAX_ROOT_CHANNELS),
+            _ => channels.min(tutti_types::MAX_CHANNELS),
         };
         let outputs = &mut self.editor.spec_mut().topology.outputs;
         if outputs.len() < target {
@@ -2880,7 +2872,7 @@ impl Graph {
     /// # Errors
     ///
     /// The [`FoldError`](tutti_buffers::FoldError) when the declaration is empty, wider than the engine
-    /// renders ([`MAX_ROOT_CHANNELS`](tutti_graph::MAX_ROOT_CHANNELS),
+    /// renders ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS),
     /// [`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced)), or cannot be placed on `device`. Nothing is
     /// changed.
     /// Whether `root` can be a root, and be placed on `device` when there is
@@ -2891,14 +2883,18 @@ impl Graph {
         device: impl Into<Option<ChannelLayout>>,
     ) -> Result<(), tutti_buffers::FoldError> {
         use tutti_buffers::{BufferError, FoldError};
-        let width = root.positions().len();
+        let width = usize::from(root.width().count());
         if width == 0 {
             return Err(BufferError::ZeroWidth.into());
         }
-        if width > tutti_graph::MAX_ROOT_CHANNELS {
+        if width > tutti_types::MAX_CHANNELS {
             return Err(FoldError::Unplaced {
-                channel: tutti_graph::MAX_ROOT_CHANNELS,
-                speaker: root.positions()[tutti_graph::MAX_ROOT_CHANNELS],
+                channel: tutti_types::MAX_CHANNELS,
+                speaker: root
+                    .positions()
+                    .and_then(|list| list.get(tutti_types::MAX_CHANNELS))
+                    .copied()
+                    .unwrap_or(tutti_types::Speaker::Unassigned),
             });
         }
         if let Some(device) = device.into() {
@@ -2915,7 +2911,7 @@ impl Graph {
         let width = match &root {
             Some(root) => {
                 Self::check_root(root, device)?;
-                root.positions().len()
+                usize::from(root.width().count())
             }
             None => {
                 if let Some(device) = device {
@@ -2938,9 +2934,8 @@ impl Graph {
         if let (Some(output), Some(device)) = (&self.output, device) {
             output.declare_root(root.clone(), device)?;
         }
-        // The bus form of the declaration; `check_root` held it to the
-        // engine's `MAX_ROOT_CHANNELS`, which fit a bus (asserted at build).
-        const _: () = assert!(tutti_graph::MAX_ROOT_CHANNELS <= tutti_types::MAX_BUS_CHANNELS);
+        // The bus form of the declaration; `check_root` held it to
+        // `MAX_CHANNELS`, which is a bus's width.
         let bus = root
             .as_ref()
             .map(|r| tutti_types::BusTopology::try_from(r).expect("a checked root fits a bus"));

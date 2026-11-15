@@ -3,7 +3,7 @@
 use tutti_types::BusTopology;
 
 /// The widest routing: a bus's channel count.
-pub(crate) const MAX_WIDTH: usize = tutti_types::MAX_BUS_CHANNELS;
+pub(crate) const MAX_WIDTH: usize = tutti_types::MAX_CHANNELS;
 
 /// The cross-feedback routing of a delay: entry `(c, j)` is how much of channel `j`'s
 /// delayed tap recirculates into channel `c`'s line, before the cross-feedback amount

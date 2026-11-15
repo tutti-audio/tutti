@@ -4,11 +4,10 @@ use super::facts::FileFacts;
 use super::format::PluginFormat;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::debug;
 
 /// Disambiguates concurrent temp files within one process.
-static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+static TMP_COUNTER: tutti_types::Mint = tutti_types::Mint::new();
 
 /// The one extension → format table: the single source of truth for which
 /// file extensions name a plugin. VST2 ships as a bare shared library on
@@ -196,11 +195,7 @@ pub(super) fn replace_file(
     {
         std::fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension(format!(
-        "tmp-{}-{}",
-        std::process::id(),
-        TMP_COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
+    let tmp = path.with_extension(format!("tmp-{}-{}", std::process::id(), TMP_COUNTER.mint()));
     let written = (|| {
         let mut f = std::fs::File::create(&tmp)?;
         fill(&mut f)?;
