@@ -226,6 +226,8 @@ pub fn tail_markers_reported<F: Format>() {
 /// Spec: clap.ext.params.count, clap.ext.params.get_info, vst3.IEditController.getParameterCount, vst3.IEditController.getParameterInfo, vst2.field.numParams, vst2.eff.GetParamName, au.prop.ParameterList, au.prop.ParameterInfo
 pub fn parameters_listed<F: Format>() {
     let mut got = F::load().parameters(main_thread());
+    // The bypass parameter some formats list is the bypass cases' witness.
+    got.retain(|p| p.id() != spec::BYPASS_ID);
     got.sort_by_key(|p| p.id().get());
     assert_eq!(got.len(), Param::ALL.len(), "the listed parameters");
     for (info, &(param, default)) in got.iter().zip(&Param::ALL) {
@@ -246,6 +248,147 @@ pub fn parameters_listed<F: Format>() {
             "{param:?} automatable"
         );
     }
+}
+
+/// A plugin with a bypass of its own says so in its wiring, and the host's
+/// write of it reaches the plugin: `set_bypassed(true)` tells it `1`,
+/// `set_bypassed(false)` tells it `0`, each in the next block, loaded or not
+/// (the plugin's own transcript is the witness). Where the format keeps the
+/// bypass in a parameter (VST3, CLAP) it is that parameter's point; an AU's is
+/// its `BypassEffect` property, which the plugin tells as the same point.
+/// Spec: clap.ext.params.get_info, vst3.IEditController.getParameterInfo, au.prop.BypassEffect
+pub fn own_bypass_is_declared_and_written<F: Format>() {
+    let main = main_thread();
+    assert!(
+        F::load().wiring(main).own_bypass,
+        "{}: the plugin has its own bypass",
+        F::NAME
+    );
+    let mut a = active_in::<F>(Mode::Tag);
+    assert!(
+        a.controller().wiring(main).own_bypass,
+        "{}: the active plugin has its own bypass",
+        F::NAME
+    );
+    for (bypassed, want) in [(true, 1.0), (false, 0.0)] {
+        assert!(
+            a.controller_mut().set_bypassed(main, bypassed),
+            "{}: the plugin takes a write of its bypass",
+            F::NAME
+        );
+        a.silent(BLOCK);
+        let told = transcript::<F, _>(a.controller_mut());
+        let last = told
+            .events
+            .iter()
+            .rev()
+            .find(|e| e.kind == Kind::Param && e.id == spec::BYPASS_ID.get())
+            .unwrap_or_else(|| panic!("{}: the plugin was told its bypass", F::NAME));
+        assert_eq!(last.value, want, "{}: bypassed = {bypassed}", F::NAME);
+    }
+}
+
+/// A plugin's bypass is the node's mode, so it is not a listed control. Where the
+/// format keeps it in a parameter the parameter is listed, flagged as the
+/// bypass, and left out of `controls`; where it is a property (AU) there is no
+/// parameter to leave out. The four other parameters are controls either way.
+/// Spec: clap.ext.params.get_info, vst3.IEditController.getParameterInfo, au.prop.BypassEffect
+pub fn the_bypass_parameter_is_not_a_listed_control<F: Format>() {
+    let main = main_thread();
+    let loaded = F::load();
+    let listed = loaded.parameters(main);
+    let controls = loaded.controls(main);
+    let flagged: Vec<_> = listed
+        .iter()
+        .filter(|p| p.flag(ParamFlags::BYPASS) == Some(true))
+        .map(|p| p.id())
+        .collect();
+    match F::SURFACE.bypass {
+        spec::Bypass::Parameter => assert_eq!(
+            flagged,
+            [spec::BYPASS_ID],
+            "{}: the plugin lists its bypass parameter, flagged",
+            F::NAME
+        ),
+        spec::Bypass::Property => assert_eq!(
+            flagged,
+            [],
+            "{}: the plugin lists no bypass parameter",
+            F::NAME
+        ),
+    }
+    let mut ids: Vec<_> = controls.iter().map(|p| p.id().get()).collect();
+    ids.sort_unstable();
+    let want: Vec<_> = Param::ALL.iter().map(|(p, _)| p.id().get()).collect();
+    assert_eq!(ids, want, "{}: the controls are the four", F::NAME);
+}
+
+/// What the plugin declares of a control reaches the host: `aux`'s group (and
+/// no other's), the roles of VST3's function names, the AU overview's
+/// shortlist, and the shape a control surface draws (`mode` is a
+/// five-position selector, the others continuous), loaded and active alike.
+/// Spec: clap.ext.params.get_info, vst3.IUnitInfo.getUnitInfo, vst3.IParameterFunctionName.getParameterIDFromFunctionName, au.prop.ParameterClumpName, au.prop.ParametersForOverview, au.prop.ParameterInfo
+pub fn a_control_carries_what_the_plugin_declares_of_it<F: Format>() {
+    fn check<F: Format, C: Control + ?Sized>(c: &C, when: &str) {
+        let spec = F::SURFACE;
+        for info in c.controls(main_thread()) {
+            let (param, _) = *Param::ALL
+                .iter()
+                .find(|(p, _)| p.id() == info.id())
+                .unwrap_or_else(|| panic!("{} ({when}): an unlisted control", F::NAME));
+            let what = format!("{} {param:?} ({when})", F::NAME);
+            let group = if param == Param::Aux {
+                spec.aux_group
+            } else {
+                ""
+            };
+            assert_eq!(info.group(), group, "{what} group");
+            let role = spec
+                .roles
+                .iter()
+                .find(|(p, _)| *p == param)
+                .map(|&(_, role)| role);
+            assert_eq!(info.role(), role, "{what} role");
+            assert_eq!(
+                info.overview(),
+                spec.overview.contains(&param),
+                "{what} overview"
+            );
+            let steps = if param == Param::Mode {
+                spec.mode_steps
+            } else {
+                spec.continuous_steps
+            };
+            assert_eq!(info.steps(), steps, "{what} steps");
+        }
+    }
+    let loaded = F::load();
+    check::<F, _>(&loaded, "loaded");
+    let active = activate(loaded, BLOCK);
+    check::<F, _>(active.controller(), "active");
+}
+
+/// The controller table a plugin declares is listed in its wiring as data:
+/// VST3's `IMidiMapping` (Control Change 74 on channel 0 drives `level`; no
+/// other slot is mapped) and an AU's mapping table. CLAP and VST2 have no such
+/// table, so they list none.
+/// Spec: vst3.IMidiMapping.getMidiControllerAssignment, au.prop.AllParameterMIDIMappings
+pub fn the_plugins_midi_assignments_are_listed<F: Format>() {
+    let main = main_thread();
+    let loaded = F::load();
+    assert_eq!(
+        loaded.wiring(main).assignments,
+        F::SURFACE.assignments,
+        "{}: loaded",
+        F::NAME
+    );
+    let active = activate(loaded, BLOCK);
+    assert_eq!(
+        active.controller().wiring(main).assignments,
+        F::SURFACE.assignments,
+        "{}: active",
+        F::NAME
+    );
 }
 
 /// `got` is `want` to the format's own representation (`Format::PARAM_VALUE_TOLERANCE`,
