@@ -15,7 +15,7 @@ fn counts(raw: [u8; 16]) -> SubclassCounts {
 }
 
 fn table(address: CiDeviceId, enabled: bool) -> ProfileTable {
-    testing::table_with(address, ArticulationLevel::One.profile(), enabled)
+    testing::profile_table(address, ArticulationLevel::One.profile(), enabled)
 }
 
 #[test]
@@ -49,7 +49,7 @@ fn the_profile_is_per_channel_and_only_an_enabled_one_counts() {
         None
     );
     // Another Profile enabled on the channel is not this one.
-    let other = testing::table_with(channel(5), ProfileId::MPE, true);
+    let other = testing::profile_table(channel(5), ProfileId::MPE, true);
     assert_eq!(ArticulationLevel::enabled_on(&other, ch), None);
 }
 

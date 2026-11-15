@@ -22,7 +22,7 @@ fn the_profile_id_is_7e_21_00_01_and_the_level() {
 }
 
 fn table_with(address: CiDeviceId, level: DefaultCcLevel, enabled: bool) -> ProfileTable {
-    testing::table_with(address, level.profile(), enabled)
+    testing::profile_table(address, level.profile(), enabled)
 }
 
 #[test]

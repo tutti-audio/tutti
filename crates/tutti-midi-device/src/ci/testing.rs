@@ -135,7 +135,11 @@ pub(super) fn sent<A: Action>(actions: &[A]) -> Vec<&CiMessage> {
 
 /// A Profile table that has heard `profile` enabled (`enabled`) or disabled at
 /// `address` from the peer.
-pub(super) fn table_with(address: CiDeviceId, profile: ProfileId, enabled: bool) -> ProfileTable {
+pub(super) fn profile_table(
+    address: CiDeviceId,
+    profile: ProfileId,
+    enabled: bool,
+) -> ProfileTable {
     let now = std::time::Instant::now();
     let (mut peer, _) = ProfileInitiator::new(Muid::of(OURS), Muid::of(PEER), now);
     let header = header_from(PEER, address);
