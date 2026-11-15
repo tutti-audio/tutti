@@ -4,7 +4,8 @@
 
 use std::time::{Duration, Instant};
 
-use tutti_cpal::{DeviceId, DeviceListing, ManualStreamDriver, OutputSpec};
+use tutti_cpal::{DeviceId, DeviceListing};
+use tutti_engine::{ManualStreamDriver, OutputSpec};
 use tutti_session::{DeviceEvent, Session, SessionEvent};
 use tutti_types::{ChannelLayout, SampleRate};
 
@@ -21,7 +22,7 @@ fn a_blocked_enumeration_does_not_hold_the_update_and_lands_when_it_answers() {
             OutputSpec::new(
                 SampleRate::SR_48K,
                 ChannelLayout::STEREO,
-                tutti_cpal::cpal::SampleFormat::F32,
+                tutti_buffers::SampleFormat::F32,
             ),
             driver,
         )
@@ -73,7 +74,7 @@ fn a_failed_listing_reports_the_typed_error() {
             OutputSpec::new(
                 SampleRate::SR_48K,
                 ChannelLayout::STEREO,
-                tutti_cpal::cpal::SampleFormat::F32,
+                tutti_buffers::SampleFormat::F32,
             ),
             driver,
         )
