@@ -62,8 +62,10 @@ crates/tutti-dsp/src/waveshape.rs::ShapeKind::shape_block  pending
 crates/tutti-dsp/src/waveshape.rs::ShapeKind::shape_block_in_place  pending
 crates/tutti-dsp/src/waveshape.rs::ShapeKind::shape_block_per_frame  pending
 crates/tutti-engine/src/callback.rs::OutputBlock::render  engine-f32
+crates/tutti-engine/src/callback.rs::OutputBlock::render_at  engine-f32
 crates/tutti-engine/src/callback.rs::process_audio  pending
 crates/tutti-engine/src/engine.rs::Engine::process  pending
+crates/tutti-engine/src/engine.rs::Engine::process_at  pending
 crates/tutti-engine/src/engine.rs::Engine::process_segment  pending
 crates/tutti-engine/src/manual.rs::ManualStream::callback_once  engine-f32
 crates/tutti-engine/src/manual.rs::ManualStream::render_block  pending

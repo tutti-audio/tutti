@@ -46,6 +46,10 @@ pub enum StreamFaultKind {
     /// may have been left half-written. Only a new stream (a restart) renders
     /// again.
     CallbackPanicked,
+    /// A clock that paces the stream itself (the timer driver) woke so far
+    /// behind that it gave up the blocks it owed and began again from now.
+    /// The stream keeps running: this is a count, not a loss of the stream.
+    Overrun,
 }
 
 /// One fault reported by the backend, with the backend's own message.
@@ -230,6 +234,14 @@ impl StreamFaults {
         self.publish(StreamFaultKind::CallbackPanicked, Cow::Borrowed(what));
     }
 
+    /// Records that a clock paced by a thread of its own fell too far behind
+    /// and re-anchored ([`StreamFaultKind::Overrun`]): `what` says so. The
+    /// stream continues, so this raises no disconnect. Allocates nothing and
+    /// never waits.
+    pub fn record_overrun(&self, what: &'static str) {
+        self.publish(StreamFaultKind::Overrun, Cow::Borrowed(what));
+    }
+
     fn publish(&self, kind: StreamFaultKind, message: Cow<'static, str>) {
         let fault = StreamFault { kind, message };
         match self.last.try_lock() {
@@ -237,7 +249,10 @@ impl StreamFaults {
             Err(std::sync::TryLockError::Poisoned(p)) => *p.into_inner() = Some(fault),
             Err(std::sync::TryLockError::WouldBlock) => {}
         }
-        if kind != StreamFaultKind::Backend {
+        if matches!(
+            kind,
+            StreamFaultKind::Disconnected | StreamFaultKind::CallbackPanicked
+        ) {
             self.disconnected.raise();
         }
         self.count.fetch_add(1, Ordering::Release);

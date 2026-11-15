@@ -198,3 +198,27 @@ fn a_metered_and_tapped_callback_is_allocation_free() {
     assert!(meter.read()[0].peak.get() > 0.0, "the meter read nothing");
     assert!(tap.available().get() > 0, "the tap read nothing");
 }
+
+/// A block rendered to a schedule (`render_at`, dated by its deadline, with the
+/// zero latency the timer reports) and an overrun record must not allocate:
+/// the timer thread runs both once per block and once per re-anchor.
+#[test]
+fn a_scheduled_render_and_an_overrun_record_are_allocation_free() {
+    let (_transport, state) = rolling_state();
+    let faults = tutti_engine::StreamFaults::new();
+    let mut block = OutputBlock::new(std::sync::Arc::new(state), ChannelLayout::STEREO);
+    let mut out = vec![0.0f32; 480 * 2];
+    for n in 0..4 {
+        block.render_at(&mut out, n, Some(std::time::Duration::ZERO));
+    }
+    faults.record_overrun("warm");
+
+    assert_no_alloc::assert_no_alloc(|| {
+        for n in 4..64 {
+            block.render_at(&mut out, n * 10_000_000, Some(std::time::Duration::ZERO));
+        }
+        faults.record_overrun("the timer fell behind");
+    });
+    assert!(out.iter().any(|s| *s != 0.0), "the gate rendered silence");
+    assert_eq!(faults.count(), 2);
+}

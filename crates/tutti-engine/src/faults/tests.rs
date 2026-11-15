@@ -113,3 +113,21 @@ fn a_route_change_and_a_refused_promotion_record_nothing() {
     assert!(!faults.is_faulted());
     assert_eq!(faults.count(), 0);
 }
+
+/// **Each overrun is one count, and the stream stays up.** Overruns recorded
+/// with no audio delivered between them are not a run of backend errors: they
+/// never promote to a disconnect however long they go on, and none raises the
+/// latch `is_running` reads.
+#[test]
+fn each_overrun_counts_once_and_never_disconnects() {
+    let faults = StreamFaults::new();
+    for expected in 1..=3 {
+        faults.record_overrun("late");
+        assert_eq!(faults.count(), expected);
+    }
+    assert!(!faults.is_disconnected());
+    assert_eq!(
+        faults.last().map(|f| f.kind),
+        Some(StreamFaultKind::Overrun)
+    );
+}
