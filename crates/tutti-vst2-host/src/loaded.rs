@@ -10,7 +10,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
+use tutti_plugin_types::bundle::{ModuleKind, native_module_path};
+use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, PluginError};
 
 use vst::host::{PluginInstance, PluginLoader};
 use vst::plugin::Category;
@@ -330,7 +331,7 @@ impl Vst2Loaded {
         // Loading runs the plugin's init sequence and probes its editor — VST2
         // requires this happen on the host main thread, which `main` proves.
 
-        let resolved = resolve_bundle(path);
+        let resolved = resolve_module(path)?;
 
         // Bounded, allocated once here. `automate` and `process_events` push
         // into these from inside the plugin's `processReplacing`, so neither
@@ -651,20 +652,24 @@ impl Vst2Loaded {
     }
 }
 
-/// Resolves a `.vst` bundle directory to its inner Mach-O / ELF binary.
+/// The file a load opens for `path`: the bundle's native module, or `path`
+/// itself when it is a file.
 ///
-/// Plain files and nonexistent paths pass through unchanged — the caller
-/// surfaces the load failure with its own diagnostic. Bundle layouts:
-/// macOS `Contents/MacOS/<stem>`, Linux `Contents/x86_64-linux/<stem>.so`,
-/// Windows `Contents/x86_64-win/<stem>.dll`.
-fn resolve_bundle(path: &Path) -> PathBuf {
-    // `native_*`: a VST2 module for another CPU cannot be loaded here, and the
-    // caller's own diagnostic on the unchanged path says more than a wrong hit.
-    tutti_plugin_types::bundle::native_module_in_bundle(
-        path,
-        tutti_plugin_types::bundle::ModuleKind::Vst2,
-    )
-    .unwrap_or_else(|| path.to_path_buf())
+/// # Errors
+///
+/// [`Vst2Error::LoadFailed`] at the opening stage when `path` is a bundle
+/// directory holding no module this target can load.
+fn resolve_module(path: &Path) -> Result<PathBuf> {
+    native_module_path(path, ModuleKind::Vst2).map_err(|e| {
+        let PluginError::Load { stage, reason } = e else {
+            unreachable!("native_module_path fails only with PluginError::Load")
+        };
+        Vst2Error::LoadFailed {
+            path: path.to_path_buf(),
+            stage,
+            reason,
+        }
+    })
 }
 
 /// Refuses a pin count a layout cannot hold (negative, or above `u16::MAX`),
@@ -680,6 +685,45 @@ fn check_pin_counts(inputs: i32, outputs: i32) -> std::result::Result<(), String
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod resolve_tests {
+    use super::resolve_module;
+    use crate::error::{LoadStage, Vst2Error};
+
+    /// **A bundle with no loadable module is a named load failure**, not the
+    /// bundle path handed to the loader to fail with a lower-level message.
+    #[test]
+    fn a_bundle_without_a_module_fails_the_load_at_opening() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle = tmp.path().join("Empty.vst");
+        std::fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();
+        match resolve_module(&bundle) {
+            Err(Vst2Error::LoadFailed {
+                path,
+                stage,
+                reason,
+            }) => {
+                assert_eq!(path, bundle);
+                assert_eq!(stage, LoadStage::Opening);
+                assert!(reason.contains("holds no module"), "{reason}");
+            }
+            other => panic!("expected LoadFailed, got {other:?}"),
+        }
+    }
+
+    /// A file and a path that names nothing pass through for the loader to
+    /// report in its own words.
+    #[test]
+    fn a_file_or_a_missing_path_is_left_to_the_loader() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("plugin.so");
+        std::fs::write(&file, b"x").unwrap();
+        assert_eq!(resolve_module(&file).unwrap(), file);
+        let missing = tmp.path().join("absent.vst");
+        assert_eq!(resolve_module(&missing).unwrap(), missing);
+    }
 }
 
 #[cfg(test)]

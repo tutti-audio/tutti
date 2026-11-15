@@ -1,12 +1,14 @@
 //! [`PluginFormat`]: which format's loader opens a plugin, and [`PluginId`]:
 //! the identity a saved reference to a plugin names.
 
+use thiserror::Error;
+
 /// A plugin format.
 ///
-/// A file's extension names a format for a scan (`format_from_path` in
-/// `tutti-plugin-db`); a load and a probe take the format as a value, since a
-/// link whose target has another extension is still the format it was
-/// scanned as.
+/// A file's extension names a format for a scan
+/// ([`from_extension`](Self::from_extension)); a load and a probe take the
+/// format as a value, since a link whose target has another extension is still
+/// the format it was scanned as.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
@@ -50,11 +52,52 @@ impl PluginFormat {
         }
     }
 
-    /// The format whose [`extension_id`](Self::extension_id) is `id`.
+    /// The format whose [`extension_id`](Self::extension_id) is `id`: the
+    /// stable id string (`"vst3"`, `"au"`) a plugin id and the wire carry, not a
+    /// file extension; [`from_extension`](Self::from_extension) reads a file's.
     #[must_use]
     pub fn from_extension_id(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|f| f.extension_id() == id)
     }
+
+    /// The format a file extension (without the dot) names, not an id string
+    /// (`"au"` is an id, `"component"` the extension;
+    /// [`from_extension_id`](Self::from_extension_id) reads ids), matched without
+    /// regard to case: `vst3`, `vst`/`dll`/`so` (VST2 ships as a bare shared
+    /// library off macOS), `clap` and `component`.
+    ///
+    /// Case-insensitive because macOS (APFS, HFS+) and Windows (NTFS) volumes
+    /// are, so a vendor shipping `Reverb.VST3` is a real case, and a bundle is a
+    /// directory a scan would otherwise walk into and find nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`UnknownExtension`] naming `ext` when no format claims it.
+    pub fn from_extension(ext: &str) -> Result<Self, UnknownExtension> {
+        const BY_EXTENSION: [(&str, PluginFormat); 6] = [
+            ("vst3", PluginFormat::Vst3),
+            ("vst", PluginFormat::Vst2),
+            ("dll", PluginFormat::Vst2),
+            ("so", PluginFormat::Vst2),
+            ("clap", PluginFormat::Clap),
+            ("component", PluginFormat::AudioUnit),
+        ];
+        BY_EXTENSION
+            .iter()
+            .find(|(known, _)| known.eq_ignore_ascii_case(ext))
+            .map(|(_, format)| *format)
+            .ok_or_else(|| UnknownExtension {
+                extension: ext.to_owned(),
+            })
+    }
+}
+
+/// A file extension no plugin format claims.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("`.{extension}` is not a plugin extension")]
+pub struct UnknownExtension {
+    /// The extension as given, without the dot.
+    pub extension: String,
 }
 
 /// Which plugin a saved reference names: its format and the format's own id
@@ -112,6 +155,42 @@ mod tests {
         }
         for unknown in ["vst", "component", "CLAP", ""] {
             assert_eq!(PluginFormat::from_extension_id(unknown), None);
+        }
+    }
+
+    /// **An extension names its format whatever its case**: `.VST3`, `.Clap`
+    /// and `.component` (a case-insensitive volume keeps the vendor's
+    /// spelling), and VST2's `vst`, `dll` and `so`.
+    #[test]
+    fn an_extension_names_its_format_in_any_case() {
+        for (ext, format) in [
+            ("vst3", PluginFormat::Vst3),
+            ("VST3", PluginFormat::Vst3),
+            ("Clap", PluginFormat::Clap),
+            ("CLAP", PluginFormat::Clap),
+            ("component", PluginFormat::AudioUnit),
+            ("Component", PluginFormat::AudioUnit),
+            ("Vst", PluginFormat::Vst2),
+            ("DLL", PluginFormat::Vst2),
+            ("So", PluginFormat::Vst2),
+        ] {
+            assert_eq!(PluginFormat::from_extension(ext), Ok(format), "{ext}");
+        }
+    }
+
+    /// **An unknown extension is refused, and the refusal names it**: no
+    /// default format stands in, and the empty extension is not a format.
+    #[test]
+    fn an_unknown_extension_is_refused_by_name() {
+        for unknown in ["txt", "wasm", "vst4", "au", ""] {
+            let err = PluginFormat::from_extension(unknown).unwrap_err();
+            assert_eq!(
+                err,
+                super::UnknownExtension {
+                    extension: unknown.to_owned()
+                }
+            );
+            assert!(err.to_string().contains(&format!("`.{unknown}`")), "{err}");
         }
     }
 }

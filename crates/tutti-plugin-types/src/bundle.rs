@@ -20,6 +20,7 @@
 //! bundle assembled for another host, should be found rather than silently
 //! skipped.
 
+use crate::PluginFormat;
 use std::path::{Path, PathBuf};
 
 /// Which plugin format's bundle is being walked.
@@ -215,6 +216,23 @@ pub fn native_module_path(path: &Path, kind: ModuleKind) -> crate::PluginResult<
     })
 }
 
+/// The bundle directory `path` lies in: `path` itself or its nearest ancestor
+/// that is a directory whose extension names `kind`'s format, in any case
+/// ([`PluginFormat::from_extension`]). `None` for a bare library with no
+/// bundle around it, and for a bundle-named *file*.
+///
+/// Inverts [`native_module_path`]: the module path leads back to the bundle.
+pub fn bundle_dir_of(path: &Path, kind: ModuleKind) -> Option<&Path> {
+    path.ancestors().find(|dir| {
+        dir.is_dir()
+            && dir
+                .extension()
+                .and_then(|e| e.to_str())
+                .and_then(|e| PluginFormat::from_extension(e).ok())
+                .is_some_and(|format| format.module_kind() == kind)
+    })
+}
+
 /// Returns the module inside `bundle` for *any* platform, or `None`.
 ///
 /// Probes every directory in [`ALL_ARCH_SUBDIRS`] by name, then falls back to
@@ -345,6 +363,27 @@ mod tests {
                 "{required} is missing from ALL_ARCH_SUBDIRS"
             );
         }
+    }
+
+    /// **A module path leads back to its bundle, whatever the extension's
+    /// case**, and only for the format asked: a `.VST3` directory is no `.clap`
+    /// bundle, a file named `.vst3` is no bundle, and a bare library has none.
+    #[test]
+    fn the_bundle_dir_is_found_from_a_nested_module_in_any_case() {
+        let tmp = TempDir::new().expect("tmp");
+        for name in ["Reverb.vst3", "Reverb.VST3", "Reverb.Vst3"] {
+            let b = bundle_with(&tmp, name, "x86_64-linux", &["Reverb.so"]);
+            let inner = b.join("Contents/x86_64-linux/Reverb.so");
+            assert_eq!(bundle_dir_of(&inner, ModuleKind::Vst3), Some(b.as_path()));
+            assert_eq!(bundle_dir_of(&b, ModuleKind::Vst3), Some(b.as_path()));
+            assert_eq!(bundle_dir_of(&inner, ModuleKind::Clap), None, "{name}");
+        }
+        let bare = tmp.path().join("libplain.so");
+        fs::write(&bare, b"x").expect("write");
+        assert_eq!(bundle_dir_of(&bare, ModuleKind::Vst3), None);
+        let file = tmp.path().join("Fake.vst3");
+        fs::write(&file, b"x").expect("write");
+        assert_eq!(bundle_dir_of(&file, ModuleKind::Vst3), None);
     }
 
     #[test]
