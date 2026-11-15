@@ -721,6 +721,9 @@ impl Node for MidiIngestNode {
                     _ => {}
                 }
                 device.held.observe(raw);
+                // The translator ignores a MIDI 2.0 Control Change of CC 0, 6,
+                // 32, 38 and 98 to 101, as a MIDI 2.0 receiver does (M2-104
+                // section 7.4.6): `None` here is that rule, not a lost event.
                 if let Some(ev) = device.translator.translate(raw) {
                     let mpe = &mut device.mpe;
                     staging.whole(ev.is_note_off(), |send| mpe.translate(&(at, ev), send));
