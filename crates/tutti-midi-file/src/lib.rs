@@ -19,7 +19,7 @@
 //!   The file layer does not translate: a MIDI 1.0 Note On at velocity 0 stays one.
 //! - **Lossless.** A read, a write and a read give the same file: SysEx and meta
 //!   included. Running status and a Delta Clockstamp's spelling may differ.
-//! - **Truncation is an error** ([`Error::Truncated`]), not a shorter file.
+//! - **Truncation is an error** ([`Error::Truncated`], naming what was being read), not a shorter file.
 //! - **Format 2** keeps its sequences apart: no merged `events()`, a tempo map
 //!   per track ([`MidiFile::tempo_map_of`]).
 //! - **Tempo** is `MidiFile::tempo_map()`, steps at the tick each Set Tempo (an
@@ -100,6 +100,7 @@
 
 mod clip_file;
 mod config;
+mod fault;
 mod file;
 mod kind;
 mod smf;
@@ -107,6 +108,7 @@ mod write;
 
 pub use clip_file::ClipFileError;
 pub use config::{ConfigError, OutOfOrder, Refusal};
+pub use fault::{SmfParseError, Truncated};
 pub use file::{
     Converted, DropReason, Dropped, FileEvent, Meta, MidiFile, NoCommonTimeline, PairedNote,
     SmfFormat, TextKind, Tick, ToClipError, Track,
@@ -138,16 +140,14 @@ pub enum Error {
     /// with its top bit set, a running status with none active, a
     /// variable-length quantity over four bytes, an event cut off inside its
     /// chunk), a track count that disagrees with the header, a zero
-    /// ticks-per-beat division. The message says which.
+    /// ticks-per-beat division. The [`SmfParseError`] says which.
     #[error("MIDI parse error: {0}")]
-    MidiFileParse(String),
+    MidiFileParse(#[source] SmfParseError),
 
-    /// The file is cut off: a chunk header short of its eight bytes, a chunk
-    /// whose declared length runs past the end of the file, or fewer track
-    /// chunks than the header declares. What was read is not returned: a
-    /// shorter file is not the file.
-    #[error("the MIDI file is truncated")]
-    Truncated,
+    /// The file is cut off. What was read is not returned: a shorter file is
+    /// not the file. The [`Truncated`] says what was being read.
+    #[error("the MIDI file is truncated: {0}")]
+    Truncated(#[source] Truncated),
 
     /// SMPTE/timecode division. The codec reads metrical timing only: beats
     /// come from the file's division, and a timecode file has no beat grid to
