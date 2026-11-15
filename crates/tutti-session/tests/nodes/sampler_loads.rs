@@ -1,7 +1,7 @@
-//! A stream or a clip opened on the session's spawner lands in `update()`
-//! (design 030, A5 and A6): the open's event carries the call's id, a missing
-//! file lands its typed error, and a clip plays the file's own samples from
-//! either tier.
+//! A stream opened on the session's spawner lands in `update()`: the open's
+//! event carries the call's id, a missing file lands its typed error, and a
+//! clip over a pool `audio_file` entry plays the file's own samples from either
+//! tier.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 use tutti_buffers::InterleavedMut;
 use tutti_sampler::{OpenError, Placement, StreamPhase};
 use tutti_session::{
-    OutPort, Residency, Root, STREAM_ABOVE_BYTES, SamplerError, SamplerEvent, SamplerLoad, Session,
-    SessionEvent,
+    AudioEntry, OutPort, PoolState, Root, SamplerError, SamplerEvent, SamplerLoad, Session,
+    SessionEvent, audio_file,
 };
 use tutti_transport::MotionEvent;
 use tutti_types::{Beat, ChannelLayout, SampleRate};
@@ -117,15 +117,32 @@ fn a_session_without_a_streamer_refuses_an_open_at_the_call() {
     ));
 }
 
-/// The clip `load_clip` landed for `id`, from the events of one `update()` run.
-fn clip_of(events: Vec<SamplerEvent>, id: SamplerLoad) -> tutti_sampler::Clip {
-    let mut events = events.into_iter();
-    match events.next() {
-        Some(SamplerEvent::ClipLoaded { id: got, clip }) => {
-            assert_eq!(got, id);
-            clip
+/// The clip over the file's `audio_file` entry, declared in `tier`: the wave of
+/// a resident entry, the stream a streamed entry's path opens.
+fn clip_of(path: &Path, streamed: bool) -> tutti_sampler::Clip {
+    let mut s = session();
+    let entry = audio_file("ramp", path);
+    s.pool(if streamed { entry.streamed() } else { entry })
+        .expect("a declaration");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !matches!(s.pool_state(&"ramp"), Some(PoolState::Loaded)) {
+        assert!(Instant::now() < deadline, "the entry never loaded");
+        let _ = s.update();
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    match s.audio(&"ramp").expect("loaded") {
+        AudioEntry::Resident(wave) => tutti_sampler::Clip::new(wave).expect("a placeable wave"),
+        AudioEntry::Streamed(info) => {
+            s.open_stream(info.path(), Placement::HEAD)
+                .expect("a streamer");
+            match landed(&mut s, 1).pop() {
+                Some(SamplerEvent::Opened { stream, reader, .. }) => {
+                    tutti_sampler::Clip::streaming(reader, stream)
+                }
+                other => panic!("expected the open, got {other:?}"),
+            }
         }
-        other => panic!("expected the clip, got {other:?}"),
+        other => panic!("unexpected entry {other:?}"),
     }
 }
 
@@ -165,18 +182,16 @@ fn play(clip: tutti_sampler::Clip, frames: usize) -> Vec<f32> {
 }
 
 /// **A clip of either tier plays the file's own samples.** The same ramp file
-/// loaded resident and streamed: each is checked against the ramp the test
+/// declared resident and streamed: each is checked against the ramp the test
 /// wrote (frame `i` is `value(i)`), neither against the other.
 #[test]
 fn a_clip_of_either_tier_plays_the_files_samples() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
-    for residency in [Residency::Resident, Residency::Streamed] {
-        let mut s = session();
-        let id = s.load_clip(&path, residency).expect("a streamer");
-        let clip = clip_of(landed(&mut s, 1), id);
-        assert_eq!(clip.is_streamed(), residency == Residency::Streamed);
+    for residency in [false, true] {
+        let clip = clip_of(&path, residency);
+        assert_eq!(clip.is_streamed(), residency);
         let heard = play(clip.at(Beat(0.0)), 3_000);
         // The transport starts on the render's next block, so the file begins
         // a block or so in, under the engine's start fade: over
@@ -195,19 +210,19 @@ fn a_clip_of_either_tier_plays_the_files_samples() {
         let first = heard
             .iter()
             .position(|&x| x != 0.0)
-            .unwrap_or_else(|| panic!("{residency:?}: silent"));
+            .unwrap_or_else(|| panic!("{residency}: silent"));
         let want = f64::from(value(0)) * gain(0);
         assert!(
             (f64::from(heard[first]) - want).abs() <= want * 1e-3,
-            "{residency:?}: the first sound {} is not the file's frame 0 under the fade's frame 0, {want}",
+            "{residency}: the first sound {} is not the file's frame 0 under the fade's frame 0, {want}",
             heard[first]
         );
-        assert!(first <= 2 * BLOCK, "{residency:?}: began at frame {first}");
+        assert!(first <= 2 * BLOCK, "{residency}: began at frame {first}");
         for k in 0..n {
             let want = f64::from(value(k)) * gain(k);
             assert!(
                 (f64::from(heard[first + k]) - want).abs() <= 1e-8,
-                "{residency:?}: fade frame {k}: {}, want {want}",
+                "{residency}: fade frame {k}: {}, want {want}",
                 heard[first + k]
             );
         }
@@ -215,50 +230,9 @@ fn a_clip_of_either_tier_plays_the_files_samples() {
             assert_eq!(
                 heard[first + k],
                 value(k),
-                "{residency:?}: file frame {k} at output frame {}",
+                "{residency}: file frame {k} at output frame {}",
                 first + k
             );
         }
-    }
-}
-
-/// **`Auto` decides by the file's decoded size.** A short file is resident; one
-/// past [`STREAM_ABOVE_BYTES`] of decoded audio streams. (The long file is
-/// 16-bit mono, whose decoded `f32` form is twice its size on disk, so the
-/// file is half the line.)
-#[test]
-fn auto_streams_a_file_past_the_threshold_and_holds_a_short_one() {
-    let dir = tempfile::tempdir().expect("a temp dir");
-    let short = dir.path().join("short.wav");
-    write_ramp(&short);
-    let long = dir.path().join("long.wav");
-    let frames = (STREAM_ABOVE_BYTES / 4) as usize + 1;
-    let spec = hound::WavSpec {
-        channels: 1,
-        sample_rate: 8_000,
-        bits_per_sample: 16,
-        sample_format: hound::SampleFormat::Int,
-    };
-    let mut w = hound::WavWriter::create(&long, spec).expect("creates");
-    for _ in 0..frames {
-        w.write_sample(0i16).expect("writes");
-    }
-    w.finalize().expect("finalizes");
-
-    let mut s = session();
-    let ids = [
-        s.load_clip(&short, Residency::Auto).expect("loads"),
-        s.load_clip(&long, Residency::Auto).expect("loads"),
-    ];
-    let events = landed(&mut s, 2);
-    for (id, streamed) in ids.into_iter().zip([false, true]) {
-        let clip = events
-            .iter()
-            .find_map(|event| match event {
-                SamplerEvent::ClipLoaded { id: got, clip } if *got == id => Some(clip),
-                _ => None,
-            })
-            .unwrap_or_else(|| panic!("no clip landed for {id:?}: {events:?}"));
-        assert_eq!(clip.is_streamed(), streamed, "{id:?}");
     }
 }

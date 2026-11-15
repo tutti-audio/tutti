@@ -216,7 +216,7 @@ pub use recovery::{
     ReloadCause,
 };
 #[cfg(feature = "sampler")]
-pub use sampler::{Residency, STREAM_ABOVE_BYTES, SamplerError, SamplerEvent, SamplerLoad};
+pub use sampler::{SamplerError, SamplerEvent, SamplerLoad};
 #[cfg(feature = "midi")]
 pub use session::MidiNodes;
 #[cfg(feature = "modulation")]
