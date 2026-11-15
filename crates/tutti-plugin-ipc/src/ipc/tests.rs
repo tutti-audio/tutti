@@ -585,6 +585,72 @@ fn a_client_with_a_loader_sends_no_editor_message() {
     );
 }
 
+/// Renders one block of `frames` silent frames through `processor`.
+fn render_silence(processor: &mut IpcProcessor, frames: usize) {
+    use tutti_plugin_types::{
+        AudioBuffer, AudioBufferMut, PluginIo, ProcessContext, ProcessOutput,
+    };
+    let input = vec![vec![0.0f32; frames]; 2];
+    let mut output = vec![vec![0.0f32; frames]; 2];
+    let inputs: Vec<&[f32]> = input.iter().map(Vec::as_slice).collect();
+    let mut outputs: Vec<&mut [f32]> = output.iter_mut().map(Vec::as_mut_slice).collect();
+    let ctx = ProcessContext::new();
+    let mut out = ProcessOutput::default();
+    let mut io = PluginIo {
+        buffer: AudioBufferMut::F32(AudioBuffer {
+            inputs: &inputs,
+            outputs: &mut outputs,
+            num_samples: frames,
+            sample_rate: RATE.get(),
+        }),
+        ctx: &ctx,
+        out: &mut out,
+    };
+    processor.process(&mut io).expect("the block renders");
+}
+
+/// The sequences of the `ProcessAudio` messages the mock was sent, in order.
+fn process_seqs(server: &Mock, count: usize) -> Vec<u64> {
+    let seqs = |log: &[HostMessage]| {
+        log.iter()
+            .filter_map(|m| match m {
+                HostMessage::ProcessAudio(data) => Some(data.seq),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        server.wait_for(|log| seqs(log).len() >= count),
+        "{count} chunks reach the server"
+    );
+    seqs(&server.received.lock().unwrap())
+}
+
+/// **A reactivation never reuses a chunk sequence.** The slab outlives an
+/// activation, and a `ProcessAudio` of the old one can still be in the audio
+/// socket when the server publishes: a new activation that restarted its
+/// sequence would match that publish as its own chunk and play old audio as
+/// new. The sequence of the second activation is past every one of the first.
+#[test]
+fn a_reactivation_continues_the_chunk_sequence() {
+    let _machine = machine_lock();
+    let main = main_thread();
+    let (ipc, server) = mock();
+    let (mut processor, controller) = activate(ipc, 32);
+    render_silence(&mut processor, 32);
+    render_silence(&mut processor, 32);
+    let first = process_seqs(&server, 2);
+    let ipc = Ipc::deactivate(main, processor, controller).expect("the halves rejoin");
+    let (mut processor, _controller) = activate(ipc, 32);
+    render_silence(&mut processor, 32);
+    let all = process_seqs(&server, 3);
+    let (old, new) = all.split_at(first.len());
+    assert!(
+        new.iter().all(|n| old.iter().all(|o| n > o)),
+        "old {old:?}, new {new:?}"
+    );
+}
+
 /// How many times the mock server was asked for its parameter list.
 fn list_asks(server: &Mock) -> usize {
     server

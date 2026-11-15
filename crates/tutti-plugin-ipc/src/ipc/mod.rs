@@ -399,6 +399,9 @@ pub(crate) struct Watch {
 pub struct Ipc {
     pub(crate) link: Arc<Link>,
     slab: SlabWriter,
+    /// The sequence the slab's next chunk carries: the slab outlives each
+    /// activation's batcher, so the sequence does too.
+    next_seq: u64,
 }
 
 impl std::fmt::Debug for Ipc {
@@ -470,6 +473,7 @@ impl Ipc {
         Self {
             link: Arc::new(link),
             slab,
+            next_seq: 1,
         }
     }
 
@@ -721,7 +725,11 @@ impl Ipc {
         self,
         prepare: Prepare,
     ) -> Result<(IpcProcessor, IpcController), Refused<Self>> {
-        let Self { link, slab } = self;
+        let Self {
+            link,
+            slab,
+            next_seq,
+        } = self;
         let rate = prepare.rate();
         if rate != link.rate() {
             let _ = link.bridge.set_sample_rate_rt(rate);
@@ -734,6 +742,7 @@ impl Ipc {
             link.ceiling,
             slab,
         )
+        .starting_at(next_seq)
         .with_counters(Arc::clone(&link.counters));
         batcher.prepare(Samples(prepare.max_block().get()), None);
         if let Some(Watch {
@@ -782,10 +791,11 @@ impl Loaded for Ipc {
                 ),
             });
         }
-        let slab = processor.into_slab();
+        let (slab, next_seq) = processor.into_parts();
         Ok(Self {
             link: controller.link,
             slab,
+            next_seq,
         })
     }
 }

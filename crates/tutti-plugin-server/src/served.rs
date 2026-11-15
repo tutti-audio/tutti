@@ -698,7 +698,8 @@ pub(crate) fn through<P: Processor, T: Sample>(
         num_samples,
         sample_rate,
     } = buffer;
-    let width = outputs.len().min(MAX_BLOCK_CHANNELS);
+    // At most `MAX_BLOCK_CHANNELS`: the caller's table is the slab's width.
+    let width = outputs.len();
     let mut rest = outputs.iter_mut();
     let mut table: [&mut [T]; MAX_BLOCK_CHANNELS] =
         std::array::from_fn(|_| rest.next().map_or(&mut [][..], |o| &mut **o));

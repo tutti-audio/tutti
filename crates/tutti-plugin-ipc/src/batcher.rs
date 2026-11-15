@@ -336,10 +336,21 @@ impl Batcher {
         self.reset();
     }
 
-    /// The slab's input writer, given back: a served plugin's deactivation
-    /// rejoins it with the rest of the plugin (`Ipc::deactivate`).
-    pub(crate) fn into_slab(self) -> SlabWriter {
-        self.slab
+    /// The slab's input writer and the sequence the next chunk would carry,
+    /// given back: a served plugin's deactivation rejoins them with the rest
+    /// of the plugin (`Ipc::deactivate`), and the next activation resumes at
+    /// [`starting_at`](Self::starting_at) so no sequence of this one is reused.
+    pub(crate) fn into_parts(self) -> (SlabWriter, u64) {
+        (self.slab, self.next_seq)
+    }
+
+    /// Issues sequences from `next_seq` on. A slab outlives a batcher, and a
+    /// publish of the old batcher's can still be in the audio socket: the
+    /// sequence stays monotonic across the slab's batchers, as it does across
+    /// a [`reset`](Self::reset). `next_seq` is at least 1.
+    pub(crate) fn starting_at(mut self, next_seq: u64) -> Self {
+        self.next_seq = next_seq.max(1);
+        self
     }
 
     /// The frames every submission carries.

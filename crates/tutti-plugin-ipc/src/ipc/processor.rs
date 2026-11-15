@@ -56,9 +56,10 @@ impl IpcProcessor {
         }
     }
 
-    /// The slab's writer, back to the loaded plugin on deactivation.
-    pub(super) fn into_slab(self) -> SlabWriter {
-        self.batcher.into_slab()
+    /// The slab's writer and the next chunk's sequence, back to the loaded
+    /// plugin on deactivation.
+    pub(super) fn into_parts(self) -> (SlabWriter, u64) {
+        self.batcher.into_parts()
     }
 }
 

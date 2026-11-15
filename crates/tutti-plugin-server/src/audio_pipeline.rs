@@ -423,13 +423,14 @@ impl AudioPipeline {
             }
 
             let sample_rate = clock.sample_rate;
+            // The widths are the slab's, and a slab is only made from a layout
+            // `check_layout` bounded by `MAX_BLOCK_CHANNELS` per direction
+            // (`AudioSlab::create`/`open`), so they fit the slice tables.
             debug_assert!(
                 num_channels <= MAX_BLOCK_CHANNELS,
                 "channel count > {MAX_BLOCK_CHANNELS}"
             );
-            // Per-direction channel widths, clamped to the slice-table capacity.
-            let in_n = total_in.min(MAX_BLOCK_CHANNELS);
-            let out_n = total_out.min(MAX_BLOCK_CHANNELS);
+            let (in_n, out_n) = (total_in, total_out);
             // Set false by any channel whose write into the slab failed. Publishing
             // a slot whose later channels never landed is worse than not publishing
             // at all: the host's sequence check would pass and it would read the
@@ -641,8 +642,8 @@ fn with_audio_buffer_f32<R>(
     sample_rate: f64,
     f: impl FnOnce(AudioBufferMut<'_, '_>) -> R,
 ) -> R {
-    let in_n = inputs.len().min(MAX_BLOCK_CHANNELS);
-    let out_n = outputs.len().min(MAX_BLOCK_CHANNELS);
+    // At most `MAX_BLOCK_CHANNELS`: the caller's slices are the slab's widths.
+    let (in_n, out_n) = (inputs.len(), outputs.len());
 
     let mut in_refs: [&[f32]; MAX_BLOCK_CHANNELS] = [&[]; MAX_BLOCK_CHANNELS];
     for (slot, chan) in in_refs[..in_n].iter_mut().zip(inputs) {
@@ -670,8 +671,8 @@ fn with_audio_buffer_f64<R>(
     sample_rate: f64,
     f: impl FnOnce(AudioBufferMut<'_, '_>) -> R,
 ) -> R {
-    let in_n = inputs.len().min(MAX_BLOCK_CHANNELS);
-    let out_n = outputs.len().min(MAX_BLOCK_CHANNELS);
+    // At most `MAX_BLOCK_CHANNELS`: the caller's slices are the slab's widths.
+    let (in_n, out_n) = (inputs.len(), outputs.len());
 
     let mut in_refs: [&[f64]; MAX_BLOCK_CHANNELS] = [&[]; MAX_BLOCK_CHANNELS];
     for (slot, chan) in in_refs[..in_n].iter_mut().zip(inputs) {
