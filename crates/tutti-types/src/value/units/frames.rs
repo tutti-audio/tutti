@@ -14,7 +14,7 @@ crate::ranged! {
     /// position far into a long buffer.
     ///
     /// **Range-checked**: [`new`](Self::new) refuses NaN, the infinities and
-    /// anything below zero, and so do `TryFrom<f64>` and serde. [`of`](Self::of)
+    /// anything below zero (negative zero included), and so do `TryFrom<f64>` and serde. [`of`](Self::of)
     /// is for a literal. [`clamped`](Self::clamped) is the one saturating
     /// constructor; [`Unit::from_raw`] is it too, since a parameter cell holds
     /// any float.
@@ -33,7 +33,7 @@ crate::ranged! {
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[cfg_attr(feature = "serde", serde(try_from = "f64", into = "f64"))]
     SampleSpan(f64), SampleSpanOutOfRange, "a span of frames, finite and not below zero",
-    |raw| raw >= 0.0 && raw <= f64::MAX
+    |raw| raw.is_sign_positive() && raw <= f64::MAX
 }
 
 // NOT `Sub`, `Neg`, `Mul<f64>`, `Div<f64>`: each can leave the range. The
@@ -42,11 +42,11 @@ impl SampleSpan {
     /// No frames.
     pub const ZERO: SampleSpan = SampleSpan(0.0);
 
-    /// `raw` constrained into `0..=f64::MAX`; NaN is [`ZERO`](Self::ZERO).
+    /// `raw` constrained into `0..=f64::MAX`; NaN and negative zero are [`ZERO`](Self::ZERO).
     #[inline]
     #[must_use]
     pub const fn clamped(raw: f64) -> SampleSpan {
-        if raw.is_nan() || raw < 0.0 {
+        if raw.is_nan() || !raw.is_sign_positive() {
             SampleSpan::ZERO
         } else if raw > f64::MAX {
             SampleSpan(f64::MAX)
@@ -65,11 +65,11 @@ impl SampleSpan {
     /// The frames `time` occupies at `rate`, kept fractional; the inverse of
     /// [`to_seconds`](Self::to_seconds).
     ///
-    /// `None` for a negative or NaN time, and for a product past `f64::MAX`.
+    /// Negative zero is [`ZERO`](Self::ZERO). `None` for a negative or NaN time, and for a product past `f64::MAX`.
     #[inline]
     #[must_use]
     pub fn from_seconds(time: Seconds, rate: impl Into<SampleRate>) -> Option<SampleSpan> {
-        SampleSpan::new(time.get() * rate.into().get())
+        SampleSpan::new(time.get() * rate.into().get() + 0.0)
     }
 
     /// The time this span takes at `rate`.
@@ -123,7 +123,8 @@ impl SampleSpan {
     #[inline]
     #[must_use]
     pub fn scaled(self, factor: f64) -> Option<SampleSpan> {
-        SampleSpan::new(self.0 * factor)
+        // `0 * negative` is negative zero: a span of nothing, not a refusal.
+        SampleSpan::new(self.0 * factor + 0.0)
     }
 
     /// Returns the shorter of the two.
@@ -168,7 +169,8 @@ impl core::ops::AddAssign for SampleSpan {
     }
 }
 
-/// How many times one span holds another, a bare number.
+/// How many times one span holds another, a bare number. A zero divisor gives
+/// infinity, or NaN for `0 / 0`.
 impl core::ops::Div for SampleSpan {
     type Output = f64;
     #[inline]

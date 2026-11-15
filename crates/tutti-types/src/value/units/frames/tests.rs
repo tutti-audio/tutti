@@ -33,7 +33,14 @@ fn sample_span_keeps_the_range_contract() {
         get: SampleSpan::get,
         of: Some(SampleSpan::of),
         valid: &[0.0, 0.5, 504.0, 1.0e12],
-        invalid: &[-0.001, -50.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY],
+        invalid: &[
+            -0.0,
+            -0.001,
+            -50.0,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ],
     });
 }
 
@@ -146,10 +153,18 @@ fn spans_add_and_scale_and_subtract_by_name() {
     assert_eq!(b.scaled(0.5), Some(SampleSpan::of(10.0)));
     assert_eq!(b.scaled(0.0), Some(SampleSpan::ZERO));
     assert_eq!(b.scaled(-1.0), None);
+    // Nothing scaled by a negative factor is still nothing, with a positive zero.
+    assert!(
+        SampleSpan::ZERO
+            .scaled(-1.0)
+            .unwrap()
+            .get()
+            .is_sign_positive()
+    );
     assert_eq!(b.scaled(f64::NAN), None);
     assert_eq!(SampleSpan::of(f64::MAX).scaled(2.0), None);
 
-    assert_eq!(a / b, 100.5 / 20.0);
+    assert_eq!(a / b, 5.025);
     assert_eq!(a.min(b), b);
     assert_eq!(a.max(b), a);
     assert_eq!(SampleSpan::of(5.0).clamp(b, a), b);
@@ -193,4 +208,20 @@ fn a_span_is_a_param() {
     assert_eq!(time.load(), SampleSpan::ZERO);
     cell.store(100.0, core::sync::atomic::Ordering::Relaxed);
     assert_eq!(time.load(), SampleSpan::of(100.0));
+}
+
+#[test]
+fn negative_zero_is_never_a_span() {
+    assert_eq!(SampleSpan::new(-0.0), None);
+    assert!(SampleSpan::clamped(-0.0).get().is_sign_positive());
+    assert!(
+        <SampleSpan as Unit>::from_raw(-0.0)
+            .get()
+            .is_sign_positive()
+    );
+    let none = SampleSpan::from_seconds(Seconds(-0.0), SampleRate::SR_48K).unwrap();
+    assert!(none.get().is_sign_positive());
+    let a = SampleSpan::of(3.0);
+    assert!(a.saturating_sub(a).get().is_sign_positive());
+    assert!(a.checked_sub(a).unwrap().get().is_sign_positive());
 }

@@ -8,14 +8,15 @@ use super::*;
 /// - `Db / Db` — a quotient of logarithms is not a quantity.
 /// - `Amplitude + Amplitude` — cascading gains multiply; summing is what
 ///   the *signals* do, not their gains.
-/// - `Gain * f32 -> Gain`, `Gain / f32` — `Gain * f32` is a gain applied to a
-///   sample and returns the `f32`; a second reading that scaled the gain would
-///   make one expression mean two things. Compose with `Gain * Gain`.
+/// - `Gain * f32`, `f32 * Gain`, `Gain / f32` — `Amplitude` is `Scalable`, so
+///   the same `x * 0.5` would read as scaling the gain there and as applying
+///   it here. `Gain::apply` applies a gain to a sample; compose with
+///   `Gain * Gain`.
 /// - `Gain / Gain`, `Gain::to_db` — a quotient divides by a zero gain, and a
-///   negative gain has no logarithm. `Gain::recip` refuses zero; `magnitude`
-///   gives the `Amplitude` whose `to_db` is the level.
-/// - `From<Gain> for Amplitude` — a negative gain has no amplitude. `magnitude`
-///   drops the sign by name and `to_amplitude` refuses it. (`From<Amplitude>
+///   negative gain has no logarithm. `Gain::recip` refuses a non-finite
+///   reciprocal; `to_amplitude` gives the `Amplitude` whose `to_db` is the level.
+/// - `From<Gain> for Amplitude` — a negative gain has no amplitude. `to_amplitude`
+///   refuses it. (`From<Amplitude>
 ///   for Gain` is present: total and lossless.)
 /// - `From<raw> for Unit`, `From<Unit> for raw`, so `.into()` between a unit and
 ///   its bare number — a bare float must not become a unit unnamed at the call
@@ -133,19 +134,16 @@ fn gains_sum_and_negate() {
 }
 
 #[test]
-fn a_gain_scales_a_sample_with_its_sign() {
-    assert_eq!(Gain(0.5) * 0.8_f32, 0.4);
-    assert_eq!(0.8_f32 * Gain(0.5), 0.4);
-    assert_eq!(0.25_f32 * Gain::INVERTING, -0.25);
-    assert_eq!(Gain::UNITY * 0.3_f32, 0.3);
-    let mut sample = 0.5_f32;
-    sample *= Gain(-2.0);
-    assert_eq!(sample, -1.0);
+fn a_gain_applies_to_a_sample_with_its_sign() {
+    assert_eq!(Gain(0.5).apply(0.8), 0.4);
+    assert_eq!(Gain::INVERTING.apply(0.25), -0.25);
+    assert_eq!(Gain::UNITY.apply(0.3), 0.3);
+    assert_eq!(Gain(-2.0).apply(0.5), -1.0);
+    assert_eq!(Gain::SILENT.apply(0.5), 0.0);
 }
 
 #[test]
 fn a_gain_converts_to_and_from_an_amplitude() {
-    assert_eq!(Gain::from_amplitude(Amplitude(2.0)), Gain(2.0));
     assert_eq!(Gain::from(Amplitude(0.5)), Gain(0.5));
     assert_eq!(Gain::from(Amplitude::UNITY), Gain::UNITY);
 
@@ -155,16 +153,17 @@ fn a_gain_converts_to_and_from_an_amplitude() {
     assert_eq!(Gain(-2.0).to_amplitude(), None);
     assert_eq!(Gain(f32::NAN).to_amplitude(), None);
 
-    // The magnitude drops the sign by name: -6 dB and its inversion share it.
-    assert_eq!(Gain(-0.5).magnitude(), Amplitude(0.5));
-    assert_eq!(Gain(0.5).magnitude(), Gain(-0.5).magnitude());
-    assert_eq!(Gain(-1.0).magnitude().to_db(), Db::UNITY);
-
+    // -6 dB and its inversion share a level: the sign is the refusal's.
+    assert_eq!(
+        Gain(0.5).to_amplitude(),
+        Some(Amplitude(Gain(-0.5).get().abs()))
+    );
+    assert_eq!(
+        Gain(1.0).to_amplitude().map(Amplitude::to_db),
+        Some(Db::UNITY)
+    );
     for a in [0.0_f32, 0.25, 1.0, 8.0] {
-        assert_eq!(
-            Gain::from_amplitude(Amplitude(a)).to_amplitude(),
-            Some(Amplitude(a))
-        );
+        assert_eq!(Gain::from(Amplitude(a)).to_amplitude(), Some(Amplitude(a)));
     }
 }
 
@@ -174,6 +173,9 @@ fn a_gain_reciprocal_undoes_it_and_refuses_zero() {
     assert_eq!(Gain(-0.5).recip(), Some(Gain(-2.0)));
     assert_eq!(Gain::SILENT.recip(), None);
     assert_eq!(Gain(-0.0).recip(), None);
+    // 1 / 1e-45 overflows f32, and NaN has no reciprocal.
+    assert_eq!(Gain::new(1e-45).recip(), None);
+    assert_eq!(Gain(f32::NAN).recip(), None);
     assert_eq!(Gain(-4.0) * Gain(-4.0).recip().unwrap(), Gain::UNITY);
 }
 

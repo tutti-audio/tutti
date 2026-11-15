@@ -1,4 +1,4 @@
-// Gain: the logarithmic and the linear spelling of one quantity.
+// Level: decibels, the linear amplitude, and the signed linear gain.
 
 use super::*;
 
@@ -104,15 +104,18 @@ unit! {
     ///
     /// It composes by multiplication (`Gain * Gain`, signs multiply), sums
     /// (`Gain + Gain`, the gain of two parallel paths) and scales a sample
-    /// (`f32 * Gain`, `Gain * f32`, both an `f32`).
+    /// ([`apply`](Self::apply)).
+    ///
+    /// The signed multiplier: an all-pass coefficient, a polarity, a routing
+    /// weight. A delay's bounded feedback amount is [`Feedback`], not a `Gain`.
     pub struct Gain(pub f32): Unit, Ordered, Bounded, Additive, Signed;
 }
-// NOT `Scalable`: `Gain * f32` is a gain applied to a sample, an `f32`, and a
-// second spelling that returned a `Gain` would make the same expression mean
-// two things. Compose gains with `Gain * Gain`.
+// NOT `Scalable`: `Amplitude * f32` scales the amplitude, so a `Gain * f32`
+// that applied it to a sample would read differently for the same `x * 0.5`.
+// Apply with `apply`; compose gains with `Gain * Gain`.
 // NOT `Div` / `Ratio`: a quotient of gains divides by a zero gain. `recip` is
 // the one reciprocal, and refuses zero.
-// NOT a dB view: a negative gain has no logarithm. Take `magnitude` and its
+// NOT a dB view: a negative gain has no logarithm. Take `to_amplitude` and its
 // `Amplitude::to_db` where a level is meant.
 
 impl Gain {
@@ -122,15 +125,6 @@ impl Gain {
     pub const UNITY: Gain = Gain(1.0);
     /// The signal passes with its polarity inverted.
     pub const INVERTING: Gain = Gain(-1.0);
-
-    /// The unsigned level of this gain: its absolute value. The sign, a
-    /// polarity inversion, is dropped; use [`to_amplitude`](Self::to_amplitude)
-    /// to refuse a negative gain rather than drop its sign.
-    #[inline]
-    #[must_use]
-    pub fn magnitude(self) -> Amplitude {
-        Amplitude(self.0.abs())
-    }
 
     /// This gain as an [`Amplitude`], or `None` when it is negative or NaN.
     #[inline]
@@ -143,22 +137,20 @@ impl Gain {
         }
     }
 
-    /// The gain of an [`Amplitude`], which is never inverting.
+    /// This gain applied to a sample.
     #[inline]
     #[must_use]
-    pub const fn from_amplitude(amp: Amplitude) -> Gain {
-        Gain(amp.0)
+    pub fn apply(self, sample: f32) -> f32 {
+        self.0 * sample
     }
 
-    /// The gain that undoes this one (`1 / g`), or `None` for zero.
+    /// The gain that undoes this one (`1 / g`), or `None` when that is not
+    /// finite: a zero, a gain so small its reciprocal overflows, or NaN.
     #[inline]
     #[must_use]
     pub fn recip(self) -> Option<Gain> {
-        if self.0 == 0.0 {
-            None
-        } else {
-            Some(Gain(1.0 / self.0))
-        }
+        let r = 1.0 / self.0;
+        if r.is_finite() { Some(Gain(r)) } else { None }
     }
 }
 
@@ -178,36 +170,11 @@ impl core::ops::MulAssign for Gain {
     }
 }
 
-/// A gain applied to a sample.
-impl core::ops::Mul<f32> for Gain {
-    type Output = f32;
-    #[inline]
-    fn mul(self, sample: f32) -> f32 {
-        self.0 * sample
-    }
-}
-
-/// A sample with a gain applied.
-impl core::ops::Mul<Gain> for f32 {
-    type Output = f32;
-    #[inline]
-    fn mul(self, gain: Gain) -> f32 {
-        self * gain.0
-    }
-}
-
-impl core::ops::MulAssign<Gain> for f32 {
-    #[inline]
-    fn mul_assign(&mut self, gain: Gain) {
-        *self *= gain.0;
-    }
-}
-
 // An amplitude is a gain that never inverts: total, lossless, one answer.
 impl From<Amplitude> for Gain {
     #[inline]
     fn from(amp: Amplitude) -> Gain {
-        Gain::from_amplitude(amp)
+        Gain(amp.0)
     }
 }
 
