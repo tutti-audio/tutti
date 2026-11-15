@@ -68,11 +68,11 @@ fn ci_block(id: u8, first_group: u8, version: u8) -> FunctionBlock {
 }
 
 fn endpoint_of(blocks: &[FunctionBlock]) -> Endpoint {
-    let device = Endpoint::new(Capabilities {
+    let device = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         ..Capabilities::default()
-    });
+    }));
     blocks
         .iter()
         .cloned()
@@ -192,7 +192,10 @@ fn an_endpoint_with_no_blocks_or_no_answer_gets_discovery_on_group_0() {
     let mut wire = session_over(
         UmpCapability::midi2(),
         PortDirection::Duplex,
-        Endpoint::new(Capabilities::default()),
+        Endpoint::new(Supports::of(Capabilities {
+            midi1: true,
+            ..Capabilities::default()
+        })),
     );
     wire.session.enable_ci(identity());
     wire.open(InputTiming::Arrival);
