@@ -64,6 +64,7 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(not(test), no_std)]
 
+mod articulation;
 mod bend_value;
 mod cc_number;
 mod control_value;
@@ -81,12 +82,18 @@ mod mixed_data;
 mod mpe_zone;
 mod note_id;
 mod note_velocity;
+mod orchestral;
 mod rpn;
 mod sysex;
 mod sysex8;
 mod text;
 mod ump;
 
+pub use articulation::{
+    Articulation, ArticulationError, Classification, ColorSound, CoreSound, CustomClassification,
+    EffectSound, GestureSound, IntervallicTrill, NoteArticulation, NoteEnding, NoteOffArticulation,
+    ReleaseTime, RunSound, SameNoteSound, ShortSound, StringAssignment, Stroke,
+};
 pub use bend_value::BendValue;
 pub use cc_number::CCNumber;
 pub use control_value::ControlValue;
@@ -118,6 +125,9 @@ pub use mixed_data::{
 pub use mpe_zone::{MpeOverlap, MpeZoneSet, MpeZoneSpan};
 pub use note_id::NoteId;
 pub use note_velocity::NoteVelocity;
+pub use orchestral::{
+    MuteAmount, MuteError, MuteMessage, MuteState, MuteType, PlayingPosition, ReservedMuteType,
+};
 pub use rpn::{RegisteredData, Rpn};
 pub use sysex::{
     SYSEX7_MAX_PAYLOAD, Sysex7Packets, SysexAssembler, SysexError, SysexMessage, SysexRef,
