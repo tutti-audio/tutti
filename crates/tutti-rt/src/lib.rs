@@ -30,6 +30,8 @@
 //!   where the OS says so (`!Send`, `!Sync`); what a plugin's main-thread entries take.
 //! - **`request_priority`** — asks the OS to raise the calling thread's priority and returns
 //!   what it granted (never real time on Linux), or the refusal.
+//! - **`sleep_until_ns`** — blocks a thread until an absolute `monotonic_ns` deadline, the
+//!   sleep of a thread that paces itself against deadlines.
 //! - **`ArcLend`/`Loan`/`Reader`** — the publish cell, re-exported from `arc-lend`:
 //!   a control thread publishes non-scalar state, the audio thread only borrows it.
 //!
@@ -191,6 +193,7 @@ mod reclaim;
 mod request_word;
 mod scope;
 mod seq_cell;
+mod sleep;
 mod spin;
 mod split;
 mod task_graph;
@@ -220,6 +223,7 @@ pub use reclaim::Reclaim;
 pub use request_word::{REQUEST_BITS, RequestBit, RequestBitOutOfRange, RequestBits, RequestWord};
 pub use scope::{RtScope, RtScopeGuard};
 pub use seq_cell::{Contended, SeqReader, SeqWriter};
+pub use sleep::sleep_until_ns;
 pub use spin::BlockWaits;
 pub use split::{ClaimConflict, ClaimTable, Claimed, ClaimedRun, Held, RwView, SplitMut, SplitRw};
 pub use task_graph::{Participant, TaskGraph};
