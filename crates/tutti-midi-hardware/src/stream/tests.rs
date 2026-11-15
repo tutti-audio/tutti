@@ -1034,3 +1034,25 @@ fn an_endpoint_that_answers_declares_its_identity_and_product_instance_id() {
         .with_instance_id(ProductInstanceId::new("SN-0043").unwrap());
     assert_eq!(saved.confirm(&other_unit), Match::Different);
 }
+
+/// The request to stop JR is made on the first poll of an episode, retried
+/// while the output refuses it, and not repeated once it is out until the
+/// episode ends.
+/// Spec: m2-104/7.2.2.3#2
+#[test]
+fn a_refused_stop_request_is_retried_until_it_goes_out() {
+    use super::StopJr;
+    let mut tries = 0;
+    let mut state = StopJr::Settled;
+    for taken in [false, false, true] {
+        state = state.next(true, || {
+            tries += 1;
+            taken
+        });
+    }
+    assert_eq!(tries, 3);
+    assert!(state == StopJr::Asked);
+    state = state.next(true, || panic!("asked twice in one episode"));
+    assert!(state == StopJr::Asked);
+    assert!(state.next(false, || panic!("nothing to ask")) == StopJr::Settled);
+}

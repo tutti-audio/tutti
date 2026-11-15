@@ -128,7 +128,9 @@ fn a_jr_input_places_an_event_at_its_timestamp_not_its_arrival() {
 /// where the device turns TXJR on by itself: the input did not ask for it, so
 /// the event is rendered at once (M2-104 §7.2.2.3) and the device is asked to
 /// stop: one Stream Configuration Request with TXJR off, which it grants, and
-/// nothing is asked after.
+/// nothing is asked after. An input opened for arrival is, for this rule, a
+/// receiver without JR support: it places every event at its arrival and
+/// never reads a JR message.
 /// Spec: m2-104/7.2.2.3#2
 #[test]
 fn an_arrival_input_keeps_the_arrival_stamp_though_the_device_sends_jr() {
@@ -180,6 +182,92 @@ fn no_jr_is_expected_before_the_notification() {
     assert_near(frame, frame_at(1_000 + 312 + LATENCY + 10));
     assert_eq!(heard.len(), 1, "the JR messages are not heard");
     assert!(settle(&mut wire).config().tx_jr);
+}
+
+/// The request to stop JR Timestamps goes once an episode, an episode being
+/// the time the device's TXJR is on against an input that wants it off
+/// (M2-104 §7.2.2.3): a device that keeps TXJR on is not asked again when a
+/// Function Block name changes, and is asked again after it has turned TXJR
+/// off and on. A refused request is retried until the output takes it.
+/// Spec: m2-104/7.2.2.3#2
+#[test]
+fn the_request_to_stop_jr_is_made_once_per_episode() {
+    let (mut wire, _rig, _) = settled(InputTiming::Arrival, offering_both());
+    let on = |tx_jr| {
+        Stream::StreamConfigurationNotification(StreamConfig {
+            protocol: Protocol::Midi2,
+            rx_jr: false,
+            tx_jr,
+        })
+    };
+    let requests = |wire: &Wire| {
+        wire.counters
+            .take_sent(wire.raw)
+            .into_iter()
+            .filter(|u| {
+                matches!(
+                    u.decode(),
+                    Ok(Message::Stream(Stream::StreamConfigurationRequest(_)))
+                )
+            })
+            .count()
+    };
+    wire.counters.take_sent(wire.raw);
+    // The device turns TXJR on and keeps it on when asked.
+    send_ump(&wire, on(true), 20);
+    wire.poll(30);
+    assert_eq!(requests(&wire), 1);
+    send_ump(&wire, on(true), 40);
+    wire.poll(50);
+    assert_eq!(requests(&wire), 0, "a refusal changes nothing");
+    // A block's name changes: the stream changes and the device is not asked.
+    let renamed = Stream::FunctionBlockName {
+        block: tutti_ump::FunctionBlockId::new(0).unwrap(),
+        form: tutti_ump::Form::Complete,
+        bytes: *b"Other\0\0\0\0\0\0\0\0",
+    };
+    send_ump(&wire, renamed, 60);
+    assert_eq!(streams(wire.poll(70)).len(), 1, "the name changed");
+    assert_eq!(requests(&wire), 0);
+    // TXJR goes off, which ends the episode, and on again: asked again.
+    send_ump(&wire, on(false), 80);
+    wire.poll(90);
+    assert_eq!(requests(&wire), 0);
+    send_ump(&wire, on(true), 100);
+    wire.poll(110);
+    assert_eq!(requests(&wire), 1);
+}
+
+/// A reconnected input negotiates afresh: the request to stop JR goes again
+/// for the new connection even though the device kept TXJR on the last time.
+/// Spec: m2-104/7.2.2.3#2
+#[test]
+fn a_reconnected_input_asks_again_to_stop_jr() {
+    let (mut wire, _rig, _) = settled(InputTiming::Arrival, offering_both());
+    let on = Stream::StreamConfigurationNotification(StreamConfig {
+        protocol: Protocol::Midi2,
+        rx_jr: false,
+        tx_jr: true,
+    });
+    send_ump(&wire, on, 20);
+    wire.poll(30);
+    assert!(wire.session.disconnect_input(&wire.id.clone()));
+    wire.session
+        .connect_input(&wire.id.clone(), InputTiming::Arrival)
+        .unwrap();
+    wire.counters.take_sent(wire.raw);
+    // A new device state answers the new negotiation, and turns TXJR on again.
+    let settled = settle(&mut wire);
+    assert!(!settled.config().tx_jr);
+    send_ump(&wire, on, 200);
+    wire.poll(210);
+    let asked = wire.counters.take_sent(wire.raw).into_iter().any(|u| {
+        matches!(
+            u.decode(),
+            Ok(Message::Stream(Stream::StreamConfigurationRequest(c))) if !c.tx_jr
+        )
+    });
+    assert!(asked);
 }
 
 /// A device that does not offer TXJR settles with it off, so an input opened for
