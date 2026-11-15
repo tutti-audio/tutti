@@ -2043,7 +2043,7 @@ fn a_device_that_receives_jr_has_every_message_prefixed_by_a_timestamp() {
     assert!(fake.send_input(raw, on, start));
     update_at(&mut s, start + Duration::from_millis(20));
     fake.take_sent(raw);
-    roll(&mut s, 4_096);
+    roll(&s, 4_096);
     update_at(&mut s, start + Duration::from_millis(21));
     let sent = fake.take_sent(raw);
     let stamp = |u: &Ump| match u.decode() {
