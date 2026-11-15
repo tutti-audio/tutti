@@ -9,7 +9,7 @@
 //! - Linux and Android: `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME)`, the
 //!   same clock `monotonic_ns` reads, so the kernel wakes the thread at the
 //!   deadline itself.
-//! - Every other target: the time left, slept through `std::thread::sleep` and
+//! - Every other target, and Linux if the kernel refuses the call: the time left, slept through `std::thread::sleep` and
 //!   re-read until the deadline has passed. Windows' std sleeps on a
 //!   high-resolution waitable timer where the OS has one; macOS sleeps on
 //!   `nanosleep`.
@@ -22,9 +22,10 @@
 )]
 #[cfg_attr(
     not(any(target_os = "linux", target_os = "android")),
-    path = "sleep/relative.rs"
+    path = "sleep/none.rs"
 )]
 mod os;
+mod relative;
 
 /// Blocks the calling thread until [`monotonic_ns`](crate::monotonic_ns)
 /// reads at least `deadline_ns`. A deadline already past returns at once.
@@ -40,7 +41,11 @@ mod os;
 /// assert!(monotonic_ns() >= deadline);
 /// ```
 pub fn sleep_until_ns(deadline_ns: i64) {
-    os::sleep_until_ns(deadline_ns);
+    // The kernel's absolute sleep, or, where it has none or refuses, the time
+    // left slept until the clock reads the deadline: either way never early.
+    if os::sleep_until_ns(deadline_ns).is_err() {
+        relative::sleep_until_ns(deadline_ns);
+    }
 }
 
 #[cfg(test)]

@@ -199,26 +199,36 @@ fn a_metered_and_tapped_callback_is_allocation_free() {
     assert!(tap.available().get() > 0, "the tap read nothing");
 }
 
-/// A block rendered to a schedule (`render_at`, dated by its deadline, with the
-/// zero latency the timer reports) and an overrun record must not allocate:
-/// the timer thread runs both once per block and once per re-anchor.
+/// A delayed render (the timer's per-block call, with the zero latency it
+/// reports) and the render-thread fault records must not allocate or free, even
+/// over a fault whose message is an owned string: an overrun leaves a latching
+/// or owned message in place, and a panic replaces it without dropping it.
 #[test]
-fn a_scheduled_render_and_an_overrun_record_are_allocation_free() {
+fn a_delayed_render_and_the_render_thread_fault_records_are_allocation_free() {
     let (_transport, state) = rolling_state();
-    let faults = tutti_engine::StreamFaults::new();
     let mut block = OutputBlock::new(std::sync::Arc::new(state), ChannelLayout::STEREO);
     let mut out = vec![0.0f32; 480 * 2];
-    for n in 0..4 {
-        block.render_at(&mut out, n, Some(std::time::Duration::ZERO));
+    for _ in 0..4 {
+        block.render_delayed_with(&mut out, Some(std::time::Duration::ZERO), |x| x);
     }
-    faults.record_overrun("warm");
+    let disconnected = tutti_engine::StreamFaults::new();
+    disconnected.record(tutti_engine::BackendErrorKind::DeviceGone, &"unplugged");
+    let backend = tutti_engine::StreamFaults::new();
+    backend.record(tutti_engine::BackendErrorKind::Other, &"xrun");
+    let clean = tutti_engine::StreamFaults::new();
+    clean.record_overrun("warm");
 
     assert_no_alloc::assert_no_alloc(|| {
-        for n in 4..64 {
-            block.render_at(&mut out, n * 10_000_000, Some(std::time::Duration::ZERO));
+        for _ in 4..64 {
+            block.render_delayed_with(&mut out, Some(std::time::Duration::ZERO), |x| x);
         }
-        faults.record_overrun("the timer fell behind");
+        disconnected.record_overrun("the timer fell behind");
+        backend.record_overrun("the timer fell behind");
+        clean.record_overrun("the timer fell behind");
+        backend.record_panic("the output callback panicked");
+        disconnected.record_panic("the output callback panicked");
     });
     assert!(out.iter().any(|s| *s != 0.0), "the gate rendered silence");
-    assert_eq!(faults.count(), 2);
+    assert_eq!(disconnected.count(), 3);
+    assert_eq!(backend.count(), 3);
 }

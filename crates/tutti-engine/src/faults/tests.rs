@@ -131,3 +131,30 @@ fn each_overrun_counts_once_and_never_disconnects() {
         Some(StreamFaultKind::Overrun)
     );
 }
+
+/// **An overrun does not replace a latching fault's message**, and a panic
+/// does replace a lesser one: the first cause of a stream's end is the one
+/// `last` keeps from an overrun, and a panic is always the latest word.
+#[test]
+fn an_overrun_keeps_a_latching_message_and_a_panic_replaces_a_lesser_one() {
+    let faults = StreamFaults::new();
+    faults.record(BackendErrorKind::DeviceGone, &"unplugged");
+    faults.record_overrun("late");
+    let last = faults.last().expect("a fault");
+    assert_eq!(last.kind, StreamFaultKind::Disconnected);
+    assert_eq!(last.message, "unplugged");
+    assert_eq!(faults.count(), 2, "the overrun still counts");
+
+    let faults = StreamFaults::new();
+    faults.record(BackendErrorKind::Other, &"xrun");
+    faults.record_overrun("late");
+    assert_eq!(
+        faults.last().map(|f| f.kind),
+        Some(StreamFaultKind::Backend)
+    );
+    faults.record_panic("panicked");
+    assert_eq!(
+        faults.last().map(|f| f.kind),
+        Some(StreamFaultKind::CallbackPanicked)
+    );
+}

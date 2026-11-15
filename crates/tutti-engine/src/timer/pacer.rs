@@ -29,8 +29,8 @@ pub(crate) enum Due {
 }
 
 /// The schedule of a block of `frames` frames at `rate`: block `n` is due at
-/// `start + n * frames / rate - frames / rate`, where `start` is when block 0
-/// plays.
+/// `start + n * block - block`, where `block` is `frames / rate` in
+/// nanoseconds and `start` is when block 0 plays.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Pacer {
     start_ns: i64,
@@ -73,7 +73,9 @@ impl Pacer {
             return Due::Wait(deadline);
         }
         if now_ns - deadline > MAX_LAG_BLOCKS * self.block_ns {
-            // Block 0 of the new schedule is due now.
+            // Block 0 of the new schedule is due now. Only the schedule
+            // restarts: the engine's frame count continues, so the graph's
+            // frames stay continuous across the jump in OS time.
             self.start_ns = now_ns.saturating_add(self.block_ns);
             self.next = 0;
             return Due::Reanchored;

@@ -602,7 +602,7 @@ impl Engine {
     /// due, so a reader mapping frames to the OS clock sees the schedule and
     /// not the jitter of the wake-up that ran it.
     #[inline]
-    pub fn process_at(&self, output: &mut InterleavedMut<'_>, os_ns: i64) {
+    pub(crate) fn process_at(&self, output: &mut InterleavedMut<'_>, os_ns: i64) {
         self.process_stamped(output, Some(os_ns));
     }
 

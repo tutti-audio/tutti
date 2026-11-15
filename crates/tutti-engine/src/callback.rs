@@ -257,7 +257,7 @@ impl OutputBlock {
     /// schedule calls this with the block's deadline. Wait-free like
     /// `render_with`, with the same panic latch.
     #[inline]
-    pub fn render_at(&mut self, data: &mut [f32], os_ns: i64, delay: Option<Duration>) {
+    pub(crate) fn render_at(&mut self, data: &mut [f32], os_ns: i64, delay: Option<Duration>) {
         self.latency.record(delay);
         self.render_stamped(data, Some(os_ns), |x| x);
     }

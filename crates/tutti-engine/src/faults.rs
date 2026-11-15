@@ -231,7 +231,7 @@ impl StreamFaults {
     /// [`OutputStream::is_running`](crate::OutputStream::is_running) reads
     /// `false` and a capture source answers `Failed`.
     pub fn record_panic(&self, what: &'static str) {
-        self.publish(StreamFaultKind::CallbackPanicked, Cow::Borrowed(what));
+        self.publish_rt(StreamFaultKind::CallbackPanicked, what);
     }
 
     /// Records that a clock paced by a thread of its own fell too far behind
@@ -239,7 +239,45 @@ impl StreamFaults {
     /// stream continues, so this raises no disconnect. Allocates nothing and
     /// never waits.
     pub fn record_overrun(&self, what: &'static str) {
-        self.publish(StreamFaultKind::Overrun, Cow::Borrowed(what));
+        self.publish_rt(StreamFaultKind::Overrun, what);
+    }
+
+    /// [`publish`](Self::publish) for a fault recorded on the render thread,
+    /// which must not free: the message it replaces is never dropped there.
+    ///
+    /// - An overrun never replaces the message of a latching fault
+    ///   ([`Disconnected`](StreamFaultKind::Disconnected),
+    ///   [`CallbackPanicked`](StreamFaultKind::CallbackPanicked)), nor an owned
+    ///   message it could not free; it only counts.
+    /// - A panic replaces any message; an owned one it replaces is leaked,
+    ///   once per stream, as the panic payload is.
+    fn publish_rt(&self, kind: StreamFaultKind, what: &'static str) {
+        let place = |last: &mut Option<StreamFault>| {
+            let keep = kind == StreamFaultKind::Overrun
+                && last.as_ref().is_some_and(|old| {
+                    matches!(
+                        old.kind,
+                        StreamFaultKind::Disconnected | StreamFaultKind::CallbackPanicked
+                    ) || matches!(old.message, Cow::Owned(_))
+                });
+            if !keep {
+                let fault = StreamFault {
+                    kind,
+                    message: Cow::Borrowed(what),
+                };
+                if let Some(old) = last.replace(fault)
+                    && matches!(old.message, Cow::Owned(_))
+                {
+                    std::mem::forget(old);
+                }
+            }
+        };
+        match self.last.try_lock() {
+            Ok(mut last) => place(&mut last),
+            Err(std::sync::TryLockError::Poisoned(p)) => place(&mut p.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => {}
+        }
+        self.raise_and_count(kind);
     }
 
     fn publish(&self, kind: StreamFaultKind, message: Cow<'static, str>) {
@@ -249,6 +287,11 @@ impl StreamFaults {
             Err(std::sync::TryLockError::Poisoned(p)) => *p.into_inner() = Some(fault),
             Err(std::sync::TryLockError::WouldBlock) => {}
         }
+        self.raise_and_count(kind);
+    }
+
+    /// Raises the latch a latching `kind` sets, then counts the fault.
+    fn raise_and_count(&self, kind: StreamFaultKind) {
         if matches!(
             kind,
             StreamFaultKind::Disconnected | StreamFaultKind::CallbackPanicked
