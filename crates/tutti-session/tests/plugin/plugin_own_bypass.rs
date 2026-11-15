@@ -11,11 +11,11 @@ use crate::support;
 
 use std::time::{Duration, Instant};
 
+use crate::pooled::{LoadPlugin, Spec};
 use tutti_buffers::InterleavedMut;
 use tutti_plugin::catalog::{Loadable, PluginRef};
 use tutti_plugin::handles::PluginClient;
 use tutti_plugin_types::{Normalized, ParamId};
-use crate::pooled::{LoadPlugin, Spec};
 use tutti_session::{NodeMode, Session};
 use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples, Seconds};
 
@@ -169,7 +169,10 @@ fn a_restore_that_leaves_the_bypass_on_under_an_active_node_is_reconciled() {
         "the session did not make the plugin's bypass the node's mode"
     );
     assert!(
-        s.plugin_view(node).expect("hosted").bypass_writes_unapplied() >= 1,
+        s.plugin_view(node)
+            .expect("hosted")
+            .bypass_writes_unapplied()
+            >= 1,
         "the correction is counted"
     );
 }
