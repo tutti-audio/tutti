@@ -106,7 +106,8 @@ unsafe extern "C" {
     /// A host never needs this for parameter values — that is what
     /// [`AUParameterSet`] is for. It exists here solely to *emit gestures*,
     /// which is otherwise the exclusive province of a plugin's own editor; see
-    /// [`emit_gesture`].
+    /// `emit_gesture`, the one caller, which the `testing` feature builds.
+    #[cfg(feature = "testing")]
     fn AUEventListenerNotify(
         sending_listener: AUEventListenerRef,
         sending_object: *mut c_void,
