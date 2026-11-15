@@ -56,7 +56,9 @@ enum Standing {
 /// differs from the mode or cannot be read. Lifting the refusal closes the
 /// episode: a new mode, [`assert_mode`](Self::assert_mode), or a reload (which
 /// makes a new `BypassSync`). A later refusal then counts again, one episode per
-/// refused mode.
+/// refused mode. A plugin still in another mode than the node's reopens an
+/// episode at the next comparison, which a lifted refusal makes on the next
+/// tick.
 #[derive(Debug)]
 pub(crate) struct BypassSync {
     /// Episodes: a bypass found other than the mode after a write.
@@ -157,6 +159,8 @@ impl BypassSync {
         if matches!(self.standing, Standing::Refused { .. }) {
             self.standing = Standing::Open;
             self.episode = false;
+            self.wait = 0;
+            self.backoff = 1;
         }
     }
 
@@ -229,7 +233,7 @@ pub(crate) mod tests {
 
     use tutti_graph::NodeMode;
 
-    use super::BypassSync;
+    use super::{BypassSync, Setting};
 
     pub(crate) const ID: ParamId = ParamId::new(5);
 
@@ -241,6 +245,8 @@ pub(crate) mod tests {
         pub(crate) delivers: AtomicBool,
         /// The write policy refuses the bypass parameter.
         pub(crate) refuses: AtomicBool,
+        /// The plugin answers a read of its bypass.
+        pub(crate) readable: AtomicBool,
         /// Writes of the bypass the session attempted, refused or not.
         pub(crate) attempts: AtomicU32,
         pub(crate) writes: AtomicU32,
@@ -253,7 +259,9 @@ pub(crate) mod tests {
             ])
         }
         fn parameter_value(&self, _id: ParamId) -> Option<Normalized> {
-            Some(bypass_value(self.held.load(SeqCst)))
+            self.readable
+                .load(SeqCst)
+                .then(|| bypass_value(self.held.load(SeqCst)))
         }
         fn set_parameter_value(&self, _id: ParamId, value: Normalized) {
             self.writes.fetch_add(1, SeqCst);
@@ -322,6 +330,7 @@ pub(crate) mod tests {
             accepts: true.into(),
             delivers: true.into(),
             refuses: false.into(),
+            readable: true.into(),
             attempts: 0.into(),
             writes: 0.into(),
         });
@@ -406,6 +415,42 @@ pub(crate) mod tests {
         assert!(plugin.held.load(SeqCst), "and taken");
     }
 
+    /// **A refusal counts when the plugin's bypass cannot be read.** The
+    /// plugin answers no read, so the refusal is not known to be harmless.
+    #[test]
+    fn a_refusal_of_an_unreadable_bypass_counts_one_episode() {
+        let (handle, plugin, mirror) = rig(false);
+        plugin.refuses.store(true, SeqCst);
+        plugin.readable.store(false, SeqCst);
+        let mut sync = BypassSync::default();
+        sync.assert_mode(&handle, &mirror, NodeMode::Active);
+        for _ in 0..10 {
+            sync.reconcile(&handle, &mirror, NodeMode::Active);
+        }
+        assert_eq!(plugin.attempts.load(SeqCst), 1);
+        assert_eq!(sync.unapplied(), 1, "it cannot be read, so it is counted");
+    }
+
+    /// **Muted lets the plugin process: after Bypassed, it writes processing.**
+    #[test]
+    fn muted_writes_the_plugin_processing() {
+        let (handle, plugin, mirror) = rig(false);
+        let mut sync = BypassSync::default();
+        sync.assert_mode(&handle, &mirror, NodeMode::Bypassed);
+        assert_eq!(handle.bypassed(), Some(true));
+        sync.assert_mode(&handle, &mirror, NodeMode::Muted);
+        assert_eq!(handle.bypassed(), Some(false), "a muted node's plugin runs");
+        assert_eq!(plugin.writes.load(SeqCst), 2);
+    }
+
+    /// **Only a bypassed node bypasses its plugin.**
+    #[test]
+    fn only_bypassed_maps_to_the_bypassed_setting() {
+        assert_eq!(Setting::of(NodeMode::Active), Setting::Processing);
+        assert_eq!(Setting::of(NodeMode::Muted), Setting::Processing);
+        assert_eq!(Setting::of(NodeMode::Bypassed), Setting::Bypassed);
+    }
+
     /// **A plugin that refuses the mode it already holds is not counted.** It
     /// enters holding processing and refuses to be written processing.
     #[test]
@@ -421,8 +466,10 @@ pub(crate) mod tests {
         assert_eq!(sync.unapplied(), 0, "it holds what the node wants");
     }
 
-    /// **A refusal counts once per refused mode.** Bypassed is refused, the mode
-    /// changes to Active and back to Bypassed, and the refusal counts again.
+    /// **A refusal counts once per refused mode.** Bypassed is refused; the
+    /// plugin's bypass is then moved to on behind the host's back, so Active is
+    /// refused while it holds the other value and counts again; moved off again,
+    /// Bypassed is refused and counts a third time.
     #[test]
     fn a_refusal_of_a_later_mode_counts_again() {
         let (handle, plugin, mirror) = rig(false);
