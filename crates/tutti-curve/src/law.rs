@@ -12,11 +12,11 @@ use crate::{Curvature, Exponent};
 /// refuses what the law cannot evaluate, so every `Law` is evaluable and the
 /// audio thread never computes a NaN from one.
 ///
-/// **Platform figures.** `Linear`, `Hold`, `Smootherstep` and the power laws at exponents 0.5
-/// and 1–5 evaluate with IEEE-exact operations (multiplication, `sqrt`). Other
-/// exponents (`powf`) and [`Exp`](Self::Exp) (`exp_m1`) are `libm`'s pure-Rust
-/// `powf` and `expm1f`, not the platform's C math library, so every law gives
-/// the same bits on every target.
+/// **Platform figures.** `Linear`, `Hold`, `Smootherstep` and the power laws
+/// at exponents 0.5 and 1–5 evaluate with IEEE-exact operations
+/// (multiplication, `sqrt`). Other exponents and [`Exp`](Self::Exp) use
+/// `libm`'s pure-Rust `powf` and `expm1f`, not the platform's C math library,
+/// so every law gives the same bits on every target.
 ///
 /// ```
 /// use tutti_curve::Law;

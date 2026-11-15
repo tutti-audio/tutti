@@ -59,7 +59,7 @@ impl FadeLaw {
         match self {
             Self::EqualAmplitude => (1.0 - s, s),
             Self::EqualPower => {
-                let a = s * std::f32::consts::FRAC_PI_2;
+                let a = s * core::f32::consts::FRAC_PI_2;
                 (libm::cosf(a), libm::sinf(a))
             }
         }
