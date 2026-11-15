@@ -4,7 +4,8 @@
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    CrossoverBank, CrossoverControls, CrossoverError, CrossoverModel, MAX_SPLITS, fit_to_rate,
+    CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError, CrossoverModel, Glide,
+    MAX_SPLITS, fit_to_rate,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_types::{BusTopology, ChannelLayout, Hz, MaxBlock, Param, SampleRate, Tail};
@@ -88,9 +89,11 @@ impl Splits {
 /// `UnitAddr::new(UnitParam::Cutoff, i)` in [`Hz`], on the node's
 /// [`ParamSet`](tutti_graph::ParamSet) and a param port the graph can modulate. The
 /// crossovers are solved on a 16-frame grid counted from the last reset, at each
-/// segment's first frame, and held over it: a control is in the render up to 16
-/// frames after it was sampled, and the render does not depend on how audio is split
-/// into blocks. A cell that moved glides, in hertz, from the last solve to its value
+/// segment's first frame, and the sections glide to that solve over the segment (each
+/// split's integrator gain moves linearly, so every frame is a Butterworth split of some
+/// frequency in between): a control is in the render up to 16 frames after it was sampled
+/// and arrives within 16 more, and the render does not depend on how audio is split into
+/// blocks. A cell that moved glides, in hertz, from the last solve to its value
 /// across the block, and a port's value is sampled at the solve frame (a split with a
 /// port does not glide while another's cell does). The design holds each split between
 /// the one below it and about 0.499 of the rate, so a set out of order is solved with
@@ -122,16 +125,22 @@ impl CrossoverNode {
     }
 }
 
-/// The Linkwitz-Riley crossover as a [`Kernel`]: a [`CrossoverBank`] and the model every
-/// channel is run at. A design lands whole: a blend of a split's low-pass, high-pass and
-/// all-pass is not one, so the bands would stop summing to an all-pass inside it, and a
-/// split that moves is a ramp in hertz of the controls (a cell glides), not of the
-/// coefficients.
+/// The frames a design takes to arrive: one grid period, so a design is reached at the
+/// next grid point.
+const GLIDE_STEPS: u32 = 16;
+
+/// The Linkwitz-Riley crossover as a [`Kernel`]: a [`CrossoverBank`], the model the controls
+/// design and the coefficients in flight to it. A split that moves glides over the grid:
+/// the sections share their states and a blend of two splits' integrator gains is a split,
+/// so the bands stay a Butterworth set at every frame.
 #[derive(Clone, Debug)]
 pub struct CrossoverKernel {
     input: BusTopology,
     bank: CrossoverBank,
     model: CrossoverModel,
+    /// The coefficients in flight; the first design after `prepare` or `reset` lands at once.
+    coefficients: Glide<CrossoverCoefficients>,
+    landed: bool,
     rate: SampleRate,
 }
 
@@ -153,10 +162,13 @@ impl CrossoverKernel {
             return Err(CrossoverError::Channels { channels: 0 });
         }
         let rate = SampleRate::SR_48K;
+        let model = CrossoverModel::designed(bands, controls, rate)?;
         Ok(Self {
             input,
             bank: CrossoverBank::new(input.layout()),
-            model: CrossoverModel::designed(bands, controls, rate)?,
+            coefficients: Glide::landed(model.coefficients()).by(GLIDE_STEPS),
+            model,
+            landed: false,
             rate,
         })
     }
@@ -170,7 +182,8 @@ impl CrossoverKernel {
 impl Kernel for CrossoverKernel {
     type Set = CrossoverSet;
 
-    const GRID: usize = 16;
+    // A design arrives at the next grid point: the glide is one grid period long.
+    const GRID: usize = GLIDE_STEPS as usize;
 
     fn shape(&self) -> Shape {
         // Band-major outputs: output `band * channels + channel`.
@@ -185,14 +198,23 @@ impl Kernel for CrossoverKernel {
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
+        self.landed = false;
     }
 
+    /// Silence, and the next design lands at once, as a fresh node's first does.
     fn reset(&mut self) {
+        self.coefficients.settle();
+        self.landed = false;
         self.bank.reset();
     }
 
     fn retarget(&mut self, controls: &CrossoverControls) {
         self.model.design_into(controls, self.rate);
+        self.coefficients.aim(self.model.coefficients());
+        if !self.landed {
+            self.coefficients.settle();
+            self.landed = true;
+        }
     }
 
     fn render<S: Float>(
@@ -201,7 +223,7 @@ impl Kernel for CrossoverKernel {
         _: ControlLanes<'_, S>,
         output: PlanesMut<'_, '_, S>,
     ) {
-        self.bank.process(&self.model, input, output);
+        self.bank.process(&mut self.coefficients, input, output);
     }
 
     /// An IIR's sections ring after the input stops, as long as the slowest split says,

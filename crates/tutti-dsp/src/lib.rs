@@ -13,11 +13,11 @@
 //! - **Filters** — `SvfCoeffs` and `SvfBank<F>` (Simper's trapezoidal
 //!   state-variable filter, eight responses by `SvfType`); `LadderCoeffs` and
 //!   `LadderBank<F>` (the Moog ladder, `tanh` feedback); `CrossoverModel` and
-//!   `CrossoverBank`, a 2 to 6 band Linkwitz-Riley 4th-order split. Each bank is one
-//!   filter per channel over buffers views, its coefficients a `Glide` the caller aims
-//!   (the crossover's land whole). `F` is the `f32` or `f64` the state runs in; its
-//!   transcendentals call `libm`, so results do not depend on the platform's C math
-//!   library.
+//!   `CrossoverBank`, a 2 to 6 band Linkwitz-Riley 4th-order split on trapezoidal
+//!   state-variable sections. Each bank is one filter per channel over buffers views,
+//!   its coefficients a `Glide` the caller aims. `F` is the `f32` or `f64` the state
+//!   runs in; its transcendentals call `libm`, so results do not depend on the
+//!   platform's C math library.
 //! - **Dynamics** — the curves
 //!   `compute_compressor_gain_reduction`, `compute_limiter_gain` and
 //!   `LimiterCurve`; the compressor and the noise gate as families (`CompressorFamily` and
@@ -212,10 +212,10 @@ pub use dynamics::{
 };
 pub use fft::{Complex32, FftScratch, RealFft};
 pub use filter::{
-    Biquad, CrossoverBank, CrossoverControls, CrossoverError, CrossoverModel, DirectForm1,
-    LadderBank, LadderCoefficients, LadderCoeffs, LadderControls, LadderDesign, LadderModel,
-    LadderType, Lanes, MAX_SPLITS, SOLVE_CEILING, SvfBank, SvfCoefficients, SvfCoeffs, SvfControls,
-    SvfModel, SvfType, fit_to_rate, ladder_step, svf_step,
+    Biquad, CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError,
+    CrossoverModel, DirectForm1, LadderBank, LadderCoefficients, LadderCoeffs, LadderControls,
+    LadderDesign, LadderModel, LadderType, Lanes, MAX_SPLITS, SOLVE_CEILING, SvfBank,
+    SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType, fit_to_rate, ladder_step, svf_step,
 };
 pub use glide::{Glide, Lerp, Steps};
 pub use interp::cubic_hermite;
