@@ -280,11 +280,10 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
     }
     set_server();
     let (driver, stream) = ManualStreamDriver::new();
-    let (mut s, mut device) = Session::builder()
+    let mut s = Session::builder()
         .device(Default::default())
         .build_device_on(spec(512), driver)
-        .expect("builds with no device")
-        .into_parts();
+        .expect("builds with no device");
 
     let client = PluginClient::new(
         tutti_plugin::BridgeConfig::default(),
@@ -308,7 +307,7 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
     assert_eq!(s.latency(), s.graph_ref().node_latency(node).unwrap());
 
     let (driver, _new) = ManualStreamDriver::new();
-    s.restart_on(&mut device, spec(256), driver, None, None)
+    s.restart_on(spec(256), driver, None, None)
         .expect("restarts");
     assert_eq!(
         s.graph_ref().node_latency(node).unwrap(),

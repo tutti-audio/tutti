@@ -155,7 +155,7 @@ pub fn prime(plugin: &PluginRef) {
     }
 }
 
-impl LoadPlugin for Session {
+impl<C: tutti_session::Clock> LoadPlugin for Session<C> {
     fn load_plugin_blocking(
         &mut self,
         main: MainThreadMarker,
@@ -226,7 +226,7 @@ pub trait LoadEntry {
     ) -> Result<Key<PluginNode>, LoadError>;
 }
 
-impl LoadEntry for Session {
+impl<C: tutti_session::Clock> LoadEntry for Session<C> {
     fn declare_entry(
         &mut self,
         main: MainThreadMarker,

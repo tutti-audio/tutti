@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::{Spawned, events, session, state};
-use crate::{Declared, Life, Load, LoadError, PoolEntry, PoolKey, RefreshPool, Session};
+use crate::{Declared, Life, Load, LoadError, PoolEntry, PoolKey, RefreshPool};
 
 /// A kind that reads a whole file: the loaded value is its bytes.
 struct Read {
@@ -53,19 +53,19 @@ fn read(key: &'static str, path: &Path, reads: &Arc<AtomicUsize>) -> Declared<&'
     )
 }
 
-fn bytes(session: &Session, key: &'static str) -> Vec<u8> {
+fn bytes(session: &crate::DetachedSession, key: &'static str) -> Vec<u8> {
     session.pool.handle::<_, Read>(&key).unwrap().to_vec()
 }
 
 /// Runs a refresh to its landing: the stat job, then the update that lands it.
-fn refreshed(s: &mut Session, spawned: &Spawned) -> RefreshPool {
+fn refreshed(s: &mut crate::DetachedSession, spawned: &Spawned) -> RefreshPool {
     let wait = s.refresh_pool();
     spawned.run_all();
     let _ = s.update();
     wait.take().expect("landed").expect("the job finished")
 }
 
-fn loaded(dir: &Path, text: &[u8]) -> (Session, Spawned, PathBuf, Arc<AtomicUsize>) {
+fn loaded(dir: &Path, text: &[u8]) -> (crate::DetachedSession, Spawned, PathBuf, Arc<AtomicUsize>) {
     let path = dir.join("a.bin");
     std::fs::write(&path, text).unwrap();
     let (mut s, spawned) = session();

@@ -13,7 +13,7 @@
 //!   explicit device waits, silent, for its own return or for the host.
 //! - The session decides and the host executes. A `Device` is `!Send` and the
 //!   host owns it, so a poll reports [`DeviceEvent::RestartWanted`] and the
-//!   host calls `LiveSession::restart` with the request, or ignores it to
+//!   host calls `Session::restart` with the request, or ignores it to
 //!   decline (a strike is counted). Every restart, wanted or the host's own,
 //!   is reported by the next poll as [`DeviceEvent::Restarted`] or
 //!   [`DeviceEvent::RestartFailed`]. A restart failed by the policy keeps the
@@ -21,7 +21,7 @@
 //! - A policy restart never makes a choice: the request goes through the same
 //!   call as the host's, which drops it as stale when the host has chosen
 //!   another device since.
-//! - A stream is lost only by a fault ([`DeviceEvent::Fault`]). Absence from a
+//! - A stream is lost only by a fault ([`SessionEvent::Fault`]). Absence from a
 //!   listing never ends it: ALSA opens every PCM to enumerate, so a device
 //!   this process holds can drop out of the list while it plays.
 //!   [`DeviceEvent::Lost`] and [`DeviceEvent::Appeared`] mean "no longer
@@ -264,7 +264,7 @@ impl Follow {
 }
 
 /// A source, its roster and the policy: what a session runs on `Phase::Poll`
-/// ([`LiveSession::watch_devices`](crate::LiveSession::watch_devices)), or, with no
+/// ([`Session::watch_devices`](crate::Session::watch_devices)), or, with no
 /// session yet, what an app polls until a device appears
 /// ([`without_stream`](Self::without_stream)).
 pub struct DeviceWatch {
@@ -314,7 +314,7 @@ impl DeviceWatch {
     }
 
     /// The source, to hand to the session that takes over once the start
-    /// succeeds ([`LiveSession::watch_devices`](crate::LiveSession::watch_devices)).
+    /// succeeds ([`Session::watch_devices`](crate::Session::watch_devices)).
     #[must_use]
     pub fn into_source(self) -> Box<dyn SnapshotSource + Send> {
         self.source

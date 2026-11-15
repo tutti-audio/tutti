@@ -11,7 +11,8 @@ use tutti_codec::{Format, Pcm};
 use tutti_export::{GRAPH_MAX_BLOCK, Normalize, Stage};
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_session::{
-    Bounce, BounceError, BounceHandle, BounceTail, ExportClock, FileMaster, Range, Session,
+    Bounce, BounceError, BounceHandle, BounceTail, DetachedSession, ExportClock, FileMaster, Range,
+    Session,
 };
 use tutti_types::ChannelLayout;
 use tutti_types::{Db, Frame, SampleRate, Samples};
@@ -45,7 +46,7 @@ impl Node for CancelAt {
 }
 
 struct Rig {
-    session: Session,
+    session: DetachedSession,
     node: tutti_graph::NodeKey,
     blocks: Arc<AtomicUsize>,
     handle: Arc<OnceLock<BounceHandle>>,

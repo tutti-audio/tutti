@@ -190,7 +190,10 @@ fn declare(stub: &Stub) -> Declared<&'static str, Stub> {
     Declared::new(stub.name, stub.clone())
 }
 
-fn made(session: &Session, key: &'static str) -> Result<Arc<Made>, HandleError<&'static str>> {
+fn made(
+    session: &crate::DetachedSession,
+    key: &'static str,
+) -> Result<Arc<Made>, HandleError<&'static str>> {
     session
         .pool
         .handle::<_, Stub>(&key)
@@ -200,9 +203,9 @@ fn made(session: &Session, key: &'static str) -> Result<Arc<Made>, HandleError<&
 /// Runs `f` on a thread that holds the main-thread proof, and hands the
 /// session back with what `f` returned and the thread's id.
 fn on_main<R: Send + 'static>(
-    mut session: Session,
-    f: impl FnOnce(&mut Session, MainThreadMarker) -> R + Send + 'static,
-) -> (Session, R, ThreadId) {
+    mut session: crate::DetachedSession,
+    f: impl FnOnce(&mut crate::DetachedSession, MainThreadMarker) -> R + Send + 'static,
+) -> (crate::DetachedSession, R, ThreadId) {
     thread::spawn(move || {
         let marker = tutti_fixtures::main_thread();
         let result = f(&mut session, marker);
@@ -213,7 +216,7 @@ fn on_main<R: Send + 'static>(
 }
 
 /// An update on a main thread has run: the session has one.
-fn with_main_thread(session: Session) -> Session {
+fn with_main_thread(session: crate::DetachedSession) -> crate::DetachedSession {
     on_main(session, |session, main| session.pool_main_stages(main)).0
 }
 
@@ -952,7 +955,7 @@ fn a_stage_dropped_off_the_main_thread_hands_its_output_to_the_collector_which_d
     assert_eq!(log.thread_of("drop output a"), main);
 }
 
-fn session_with_pending_output(queued: bool, log: &Log) -> Session {
+fn session_with_pending_output(queued: bool, log: &Log) -> crate::DetachedSession {
     let (s, spawned) = session();
     let mut s = with_main_thread(s);
     s.pool(declare(&stub("a", How::Main, log))).unwrap();
@@ -1008,13 +1011,13 @@ fn a_pending_entry_that_starts_to_share_does_not_leave_a_shared_flight_without_a
 /// What `when_loaded` runs saw: the entry's state and its pool events' order.
 fn recorder() -> (
     Arc<Mutex<Vec<String>>>,
-    impl Fn(&'static str) -> Box<dyn FnOnce(&mut Session) + Send>,
+    impl Fn(&'static str) -> Box<dyn FnOnce(&mut crate::DetachedSession) + Send>,
 ) {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let into = Arc::clone(&seen);
-    let make = move |what: &'static str| -> Box<dyn FnOnce(&mut Session) + Send> {
+    let make = move |what: &'static str| -> Box<dyn FnOnce(&mut crate::DetachedSession) + Send> {
         let seen = Arc::clone(&into);
-        Box::new(move |session: &mut Session| {
+        Box::new(move |session: &mut crate::DetachedSession| {
             let stood = state(session, "a").unwrap_or_default();
             seen.lock().unwrap().push(format!("{what} while {stood}"));
         })
@@ -1122,12 +1125,12 @@ fn a_when_loaded_run_whose_entry_an_earlier_run_released_is_dropped() {
     let _ = s.update();
     let ran = Arc::new(Mutex::new(Vec::new()));
     let (first, second) = (Arc::clone(&ran), Arc::clone(&ran));
-    s.when_loaded(&"a", move |session: &mut Session| {
+    s.when_loaded(&"a", move |session: &mut crate::DetachedSession| {
         first.lock().unwrap().push("a");
         session.pool::<&'static str>(()).unwrap();
     })
     .unwrap();
-    s.when_loaded(&"b", move |_: &mut Session| {
+    s.when_loaded(&"b", move |_: &mut crate::DetachedSession| {
         second.lock().unwrap().push("b")
     })
     .unwrap();
@@ -1144,11 +1147,13 @@ fn a_when_loaded_run_asked_inside_a_run_waits_for_the_next_update() {
     let _ = s.update();
     let count = Arc::new(Mutex::new(0));
     let inner = Arc::clone(&count);
-    s.when_loaded(&"a", move |session: &mut Session| {
+    s.when_loaded(&"a", move |session: &mut crate::DetachedSession| {
         *inner.lock().unwrap() += 1;
         let again = Arc::clone(&inner);
         session
-            .when_loaded(&"a", move |_: &mut Session| *again.lock().unwrap() += 10)
+            .when_loaded(&"a", move |_: &mut crate::DetachedSession| {
+                *again.lock().unwrap() += 10
+            })
             .unwrap();
     })
     .unwrap();

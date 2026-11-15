@@ -21,7 +21,7 @@ use tutti_plugin_host::Liveness;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{BridgeError, ParameterInfo, PluginFailure};
 use tutti_plugin_types::{Normalized, ParamId};
-use tutti_session::{Phase, PhaseCx, PluginHealth, Session, SessionEvent};
+use tutti_session::{DetachedSession, Phase, PhaseCx, PluginHealth, Session, SessionEvent};
 use tutti_session::{PluginChange, PluginEvent};
 use tutti_types::SampleRate;
 
@@ -92,7 +92,7 @@ fn handle_with(cause: Option<PluginFailure>) -> PluginHandle {
 
 /// A detached session with a fake plugin (reporting `cause`) hosted at a dc
 /// node.
-fn session_with(cause: Option<PluginFailure>) -> (Session, NodeKey) {
+fn session_with(cause: Option<PluginFailure>) -> (DetachedSession, NodeKey) {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
@@ -111,7 +111,7 @@ fn session_with(cause: Option<PluginFailure>) -> (Session, NodeKey) {
 }
 
 /// `Phase::Plugins` at `t0 + ms`: the deaths it reported.
-fn deaths_at(s: &mut Session, t0: Instant, ms: u64) -> Vec<(NodeKey, PluginFailure)> {
+fn deaths_at(s: &mut DetachedSession, t0: Instant, ms: u64) -> Vec<(NodeKey, PluginFailure)> {
     let mut out = Vec::new();
     s.run_phase(
         Phase::Plugins,
@@ -132,7 +132,7 @@ fn deaths_at(s: &mut Session, t0: Instant, ms: u64) -> Vec<(NodeKey, PluginFailu
 
 /// One observation every half window, as frames at 60 Hz span it: `frames`
 /// of them. The deaths each reported.
-fn observe(s: &mut Session, frames: usize) -> Vec<(NodeKey, PluginFailure)> {
+fn observe(s: &mut DetachedSession, frames: usize) -> Vec<(NodeKey, PluginFailure)> {
     let _ = tutti_fixtures::main_thread();
     let t0 = Instant::now();
     let half = Liveness::DEFAULT_WINDOW.as_millis() as u64 / 2;
@@ -254,7 +254,7 @@ fn a_live_plugin_is_never_declared_dead() {
 /// listeners its backend reports through (firing one is the plugin
 /// reporting).
 fn session_reporting() -> (
-    Session,
+    DetachedSession,
     NodeKey,
     tutti_plugin_host::ParameterChangeSink,
     tutti_plugin_host::RefreshSink,
@@ -291,7 +291,7 @@ fn session_reporting() -> (
 }
 
 /// The plugin events one `Phase::Plugins` reported.
-fn plugin_events(s: &mut Session) -> Vec<PluginEvent> {
+fn plugin_events(s: &mut DetachedSession) -> Vec<PluginEvent> {
     let mut out = Vec::new();
     s.run_phase(Phase::Plugins, PhaseCx::at(Instant::now()), &mut out);
     out.into_iter()

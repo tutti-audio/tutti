@@ -29,9 +29,9 @@ use tutti_modulation::{
 use tutti_nodes::automation::{Breakpoint, RecordMode, Trajectory};
 use tutti_nodes::{Feed, ReconcileError};
 use tutti_session::{
-    AudioSide, AutomationTake, MixRef, ModInput, ModKeys, ModRefusal, ModRouteId, ModTarget,
-    NoSuchModRoute, NoSuchModSource, OutPort, PHASES, ParamRef, PhaseCx, Problem, Root, RouteSpec,
-    Session, SessionEvent, TargetName, declare_targets,
+    AudioSide, AutomationTake, DetachedSession, MixRef, ModInput, ModKeys, ModRefusal, ModRouteId,
+    ModTarget, NoSuchModRoute, NoSuchModSource, OutPort, PHASES, ParamRef, PhaseCx, Problem, Root,
+    RouteSpec, Session, SessionEvent, TargetName, declare_targets,
 };
 use tutti_types::{
     Amplitude, Beat, Bpm, ChannelLayout, Depth, Drive, Frame, Hz, SampleRate, Samples, Seconds,
@@ -50,7 +50,7 @@ const DECLICK: usize = 240;
 
 /// A detached session of `outputs` channels at 48 kHz, its audio side taken:
 /// the executor on this side, played in device-sized blocks.
-fn rig(outputs: usize) -> (Session, AudioSide) {
+fn rig(outputs: usize) -> (DetachedSession, AudioSide) {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::clamped(outputs))
         .build_detached(SampleRate::DEFAULT)
@@ -61,7 +61,7 @@ fn rig(outputs: usize) -> (Session, AudioSide) {
 }
 
 /// Output channel `c` from `nodes[c]`'s port 0.
-fn master(s: &mut Session, nodes: &[NodeKey]) {
+fn master(s: &mut DetachedSession, nodes: &[NodeKey]) {
     for (c, &n) in nodes.iter().enumerate() {
         s.graph()
             .set_sources(Root::output(c), [OutPort::new(n, 0)])
@@ -70,7 +70,7 @@ fn master(s: &mut Session, nodes: &[NodeKey]) {
 }
 
 /// Updates until nothing is left to resolve: nodes committed, then lanes.
-fn settle(s: &mut Session) {
+fn settle(s: &mut DetachedSession) {
     for _ in 0..4 {
         let _ = s.update();
     }
@@ -595,7 +595,7 @@ impl ModKeys for HostKeys {
 /// (source 1) routed at depth 0.1 (route 2) onto `target`, whose targets are
 /// `targets`.
 fn host_update(
-    s: &mut Session,
+    s: &mut DetachedSession,
     keys: &HostKeys,
     target: TargetKey,
     targets: &[(TargetKey, tutti_modulation::TargetDecl)],
@@ -651,7 +651,7 @@ fn two_ranges_or_automations_on_one_param_are_refused() {
     assert_eq!(s.mod_state().problems().next(), None);
     assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 600.0);
 
-    let refused_by_cutoff = |s: &mut Session, targets: &[_], what: &str| {
+    let refused_by_cutoff = |s: &mut DetachedSession, targets: &[_], what: &str| {
         let mut refused = refusals(host_update(s, &keys, cutoff, targets));
         refused.extend(refusals(host_update(s, &keys, cutoff, targets)));
         assert_eq!(refused.len(), 1, "{what}: one message: {refused:?}");
@@ -987,7 +987,7 @@ fn an_added_synth_is_a_modulation_target() {
 // ----------------------------------------------- what an edit sends --
 
 /// The plan the graph sent last.
-fn sent(s: &Session) -> Arc<tutti_graph::Plan> {
+fn sent(s: &DetachedSession) -> Arc<tutti_graph::Plan> {
     s.graph_ref()
         .testing()
         .sent_plan()
@@ -995,12 +995,12 @@ fn sent(s: &Session) -> Arc<tutti_graph::Plan> {
 }
 
 /// Nothing is staged: the last update's commit took every edit.
-fn idle(s: &Session) -> bool {
+fn idle(s: &DetachedSession) -> bool {
     !s.graph_ref().is_edited()
 }
 
 /// One update, then a block rendered, as a device would between updates.
-fn frame(s: &mut Session, side: &mut AudioSide) {
+fn frame(s: &mut DetachedSession, side: &mut AudioSide) {
     let _ = s.update();
     render(side, 128, 128);
 }
@@ -1009,7 +1009,7 @@ fn frame(s: &mut Session, side: &mut AudioSide) {
 /// Hz routed into it at `depth`, settled. Returns the probe's param, the
 /// route's key.
 fn lfo_scene(
-    s: &mut Session,
+    s: &mut DetachedSession,
     side: &mut AudioSide,
     rate: f32,
     depth: f32,

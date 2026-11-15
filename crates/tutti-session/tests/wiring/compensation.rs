@@ -12,12 +12,12 @@
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_nodes::{LimiterControls, LimiterNode};
-use tutti_session::{InPort, OutPort, Root, Session};
+use tutti_session::{DetachedSession, InPort, OutPort, Root, Session};
 use tutti_types::{ChannelLayout, Db, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_44K1;
 
-fn detached() -> Session {
+fn detached() -> DetachedSession {
     Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
@@ -35,7 +35,7 @@ fn limiter() -> LimiterNode {
 
 /// ch0 through a limiter, ch1 dry: ch1's source must pre-roll to match.
 /// Returns the limiter's node latency.
-fn skewed(s: &mut Session) -> (tutti_graph::NodeKey, Samples) {
+fn skewed(s: &mut DetachedSession) -> (tutti_graph::NodeKey, Samples) {
     let (a, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
     let (eff, _) = s.graph().add(limiter());
     let (b, _) = s.graph().add(ForkByClone(Const::mono(1.0)));
@@ -152,7 +152,7 @@ fn an_update_with_no_edit_publishes_nothing() {
 /// reports no channels when nothing is latent; the plan a zero per output).
 #[test]
 fn the_latency_fold_and_the_compiled_plan_agree() {
-    fn figures(s: &Session) -> (Vec<Samples>, Samples) {
+    fn figures(s: &DetachedSession) -> (Vec<Samples>, Samples) {
         let folded = s.graph_ref().latency_plan();
         let planned = s
             .graph_ref()

@@ -208,7 +208,7 @@ where
     }
 }
 
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// Adds `instrument` to the graph, makes it playable and wires its strip
     /// to the master, so a note sent through its keys is heard. It holds no MPE
     /// zones: classic MPE reaches it already rewritten as per-note messages, by the

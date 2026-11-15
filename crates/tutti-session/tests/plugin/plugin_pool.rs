@@ -15,8 +15,8 @@ use tutti_plugin_db::PluginFormat;
 use tutti_plugin_types::TerminationReason;
 use tutti_plugin_types::{Normalized, ParamId};
 use tutti_session::{
-    AddPluginError, CrossfadeRefused, LoadError, Peer, PluginCause, PluginHealth, PoolEvent,
-    PoolState, Presence, RecoveryPolicy, Resource, RetryError, Session, SessionEvent,
+    AddPluginError, CrossfadeRefused, DetachedSession, LoadError, Peer, PluginCause, PluginHealth,
+    PoolEvent, PoolState, Presence, RecoveryPolicy, Resource, RetryError, Session, SessionEvent,
 };
 use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
 
@@ -113,7 +113,11 @@ fn pump(s: &mut Session) -> Vec<SessionEvent> {
 }
 
 /// Updates (no render: the session has no output) until `done`.
-fn settle_until(s: &mut Session, what: &str, mut done: impl FnMut(&mut Session) -> bool) {
+fn settle_until<C: tutti_session::Clock>(
+    s: &mut Session<C>,
+    what: &str,
+    mut done: impl FnMut(&mut Session<C>) -> bool,
+) {
     let deadline = Instant::now() + Duration::from_secs(30);
     while !done(s) {
         assert!(Instant::now() < deadline, "{what} never happened");
@@ -132,8 +136,8 @@ fn pump_until(s: &mut Session, what: &str, mut done: impl FnMut(&mut Session) ->
 }
 
 /// Updates until `done` finds what it waits for in an update's pool events.
-fn until(
-    s: &mut Session,
+fn until<C: tutti_session::Clock>(
+    s: &mut Session<C>,
     what: &str,
     mut done: impl FnMut(&&'static str, &PoolEvent) -> bool,
 ) -> PoolEvent {
@@ -153,7 +157,11 @@ fn until(
 }
 
 /// The key's pool events of the first update that has any.
-fn until_all(s: &mut Session, what: &str, key: &'static str) -> Vec<PoolEvent> {
+fn until_all<C: tutti_session::Clock>(
+    s: &mut Session<C>,
+    what: &str,
+    key: &'static str,
+) -> Vec<PoolEvent> {
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         let events: Vec<PoolEvent> = s
@@ -174,7 +182,7 @@ fn until_all(s: &mut Session, what: &str, key: &'static str) -> Vec<PoolEvent> {
     }
 }
 
-fn loaded(s: &mut Session, key: &'static str) {
+fn loaded<C: tutti_session::Clock>(s: &mut Session<C>, key: &'static str) {
     let event = until(s, "the load", |k, _| *k == key);
     assert!(matches!(event, PoolEvent::Loaded), "{event:?}");
 }
@@ -511,7 +519,7 @@ impl Node for Grenade {
 
 /// A session with no output, whose audio side a test can take (a re-prepare
 /// then waits for it).
-fn detached() -> Session {
+fn detached() -> DetachedSession {
     servers();
     Session::builder()
         .max_block(MaxBlock::of(Samples(BLOCK)))
@@ -524,17 +532,20 @@ fn with_node(catalog: &Catalog) -> (Session, tutti_session::Key<tutti_session::P
     with_node_in(session(true), catalog)
 }
 
-fn with_node_in(
-    mut s: Session,
+fn with_node_in<C: tutti_session::Clock>(
+    mut s: Session<C>,
     catalog: &Catalog,
-) -> (Session, tutti_session::Key<tutti_session::PluginNode>) {
+) -> (Session<C>, tutti_session::Key<tutti_session::PluginNode>) {
     s.pool(s.plugin_entry("fx", &first_id(), catalog)).unwrap();
     loaded(&mut s, "fx");
     let node = s.add_pooled_plugin(&"fx").unwrap();
     (s, node)
 }
 
-fn pid_of(s: &Session, node: tutti_session::Key<tutti_session::PluginNode>) -> Option<u32> {
+fn pid_of<C: tutti_session::Clock>(
+    s: &Session<C>,
+    node: tutti_session::Key<tutti_session::PluginNode>,
+) -> Option<u32> {
     s.plugin_view(node).unwrap().diagnostics().server_pid()
 }
 
@@ -639,7 +650,7 @@ fn a_later_identity_is_the_one_the_node_ends_on() {
 
 /// What a graph that re-prepares does to a swap: it waits, with the executor
 /// taken, until the audio side has run and an update has collected.
-fn repreparing(s: &mut Session) -> tutti_session::AudioSide {
+fn repreparing<C: tutti_session::Clock>(s: &mut Session<C>) -> tutti_session::AudioSide {
     let side = s.graph().take_audio_side();
     s.graph().set_sample_rate(SampleRate::SR_44K1);
     assert!(s.graph_ref().testing().is_repreparing(), "mid re-prepare");

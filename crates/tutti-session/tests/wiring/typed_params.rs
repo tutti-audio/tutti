@@ -8,12 +8,12 @@ use tutti_graph::{
     Cx, FadeLaw, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status, Unforkable,
 };
 use tutti_nodes::{CompressorControls, CompressorNode, KeySource, SvfFilterNode, SvfType};
-use tutti_session::{ParamError, Session};
+use tutti_session::{DetachedSession, ParamError, Session};
 use tutti_types::{
     BusTopology, ChannelLayout, Db, Hz, Param, Q, SampleRate, Seconds, UnitAddr, UnitParam,
 };
 
-fn detached() -> Session {
+fn detached() -> DetachedSession {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::SR_48K)
