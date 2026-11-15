@@ -17,7 +17,7 @@
 //!
 //! Each kind of entry is a [`PoolEntry`]; `audio_file` (feature `sampler`) and
 //! `soundfont` (feature `soundfont`) are the data kinds. A load's outcome lands
-//! in [`Session::update`] as a [`SessionEvent::Pool`], and
+//! in [`Session::update`] as a [`SessionEvent::Pool`](crate::SessionEvent::Pool), and
 //! [`Session::pool_state`] reads where an entry stands.
 //!
 //! # Stages
@@ -36,7 +36,7 @@
 //!
 //! [`Session::pool_loaded`] reports every declared entry's outcome once none
 //! is pending, and a bounce refuses while one is
-//! ([`BounceError::PoolPending`](crate::BounceError)).
+//! (`BounceError::PoolPending`, feature `export`).
 
 use std::fmt;
 #[cfg(any(feature = "sampler", feature = "soundfont"))]
@@ -86,7 +86,7 @@ impl Session {
     /// load; [`retry`](Self::retry) does.
     ///
     /// Returns at once. Each load's outcome lands as a
-    /// [`SessionEvent::Pool`] in a later [`update`](Self::update), those of one
+    /// [`SessionEvent::Pool`](crate::SessionEvent::Pool) in a later [`update`](Self::update), those of one
     /// update in the order the set names them, then the releases, by key within a key type.
     /// An outcome that landed while its entry was held is reported when the
     /// pool declares the entry again. At most

@@ -384,8 +384,8 @@ impl<K, E: PoolEntry> Declared<K, E> {
     /// `entry`, declared under `key` as a resource that shares: another key
     /// declared with the same kind and identity, and shared too, shares this
     /// one's load, and every handle reads the same loaded value (a
-    /// [`Clone`] of it, an `Arc`). The data kinds ([`audio_file`](crate::audio_file),
-    /// [`soundfont`](crate::soundfont)) are declared this way; a kind with
+    /// [`Clone`] of it, an `Arc`). The data kinds (`audio_file` and
+    /// `soundfont`) are declared this way; a kind with
     /// something live behind it (a plugin client, a capture) uses
     /// [`new`](Self::new).
     pub const fn shared(key: K, entry: E) -> Self
