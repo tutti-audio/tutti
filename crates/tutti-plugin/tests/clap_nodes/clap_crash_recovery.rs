@@ -304,7 +304,7 @@ fn a_plugin_that_aborts_mid_render_leaves_the_host_alive_and_silent() {
 ///
 /// The bound is deliberately loose — it is [`PACE`] per render, and a render of a
 /// dead plugin touches no socket. A synchronous design would spend its full reply
-/// budget in every render.
+/// timeout in every render.
 #[test]
 fn rendering_through_a_dead_plugin_does_not_block() {
     let _lock = machine_lock();
