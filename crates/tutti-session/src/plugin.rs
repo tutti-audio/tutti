@@ -783,6 +783,8 @@ pub(crate) struct HostedPlugin {
     status: PluginLiveness,
     /// Told a render mode since it was added (or crossfaded in).
     pub(crate) told: bool,
+    /// The plugin's own bypass against the node's mode.
+    pub(crate) bypass: crate::bypass::BypassSync,
     snapshot: Option<PluginState>,
     /// When the snapshot's capture was asked for.
     snapshot_from: Option<Instant>,
@@ -924,6 +926,7 @@ impl HostedPlugin {
             hang: HangDetector::default(),
             status: PluginLiveness::Healthy,
             told: false,
+            bypass: crate::bypass::BypassSync::default(),
             snapshot: None,
             snapshot_from: None,
             withheld: None,
@@ -1195,6 +1198,16 @@ impl<'a> Plugin<'a> {
     /// `Graph::connect`.
     pub fn buses(&self) -> PluginBuses<'a> {
         PluginBuses::new(self.node, self.hosted)
+    }
+
+    /// How many times the plugin's own bypass was found other than its node's
+    /// mode after a write, over its life: a write that was lost or refused, or a
+    /// bypass its editor, a restored state or its automation moved since. One
+    /// count per episode, not per retry; `0` for a plugin with no bypass of its
+    /// own, which the executor bypasses.
+    #[must_use]
+    pub fn bypass_writes_unapplied(&self) -> u64 {
+        self.hosted.bypass.unapplied()
     }
 
     /// The plugin's control handle, the low layer the views are built on

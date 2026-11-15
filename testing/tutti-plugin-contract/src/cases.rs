@@ -272,6 +272,7 @@ pub fn own_bypass_is_declared_and_written<F: Format>() {
                 assert_eq!(id, spec::BYPASS_ID, "{}: the bypass parameter", F::NAME);
             }
             (spec::Bypass::Property, OwnBypass::Property) => {}
+            (spec::Bypass::None, got) => panic!("{}: claims {got:?}, the spec says none", F::NAME),
             (want, got) => panic!("{}: the bypass is {got:?}, the spec says {want:?}", F::NAME),
         }
     };
@@ -325,7 +326,7 @@ pub fn the_bypass_parameter_is_not_a_listed_control<F: Format>() {
             "{}: the plugin lists its bypass parameter, flagged",
             F::NAME
         ),
-        spec::Bypass::Property => assert_eq!(
+        spec::Bypass::Property | spec::Bypass::None => assert_eq!(
             flagged,
             [],
             "{}: the plugin lists no bypass parameter",

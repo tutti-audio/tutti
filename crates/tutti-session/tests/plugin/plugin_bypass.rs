@@ -158,17 +158,26 @@ fn a_bypassed_plugin_passes_a_click_its_declared_latency_late() {
 
 /// **A plugin without a bypass of its own is bypassed by the executor, and the
 /// host writes nothing to it.** The reference plugin lists no bypass: it claims
-/// none, its node is the executor's (the tests above), and across ticks of the
-/// session no write is lost, refused or re-asserted.
+/// none, the session ticks over it (each `update` reconciles the plugins it
+/// hosts) and its click still comes out late, as the executor's bypass delays
+/// it, and no write is counted.
 #[test]
 fn a_plugin_without_its_own_bypass_is_left_to_the_executor() {
     let mut r = rig(NodeMode::Bypassed);
-    let _ = r.render(2);
-    let _ = r.s.update();
-    let _ = r.s.update();
+    let latency = r.s.graph_ref().node_latency(r.plugin).unwrap().0;
+    let mut out = Vec::new();
+    for _ in 0..(FIRE + latency) / BLOCK + 2 {
+        out.extend(r.render(1));
+        let _ = r.s.update();
+    }
+    assert_eq!(
+        out[FIRE + latency].to_bits(),
+        1.0f32.to_bits(),
+        "the click is the executor's bypass line, ticks and all"
+    );
     let plugin = r.s.plugin(r.plugin).expect("hosted");
     assert_eq!(plugin.handle().loaded().own_bypass, None);
-    assert_eq!(plugin.handle().bypass_writes_unapplied(), 0);
+    assert_eq!(plugin.bypass_writes_unapplied(), 0);
     assert_eq!(plugin.handle().bypassed(), None, "nothing to read back");
 }
 

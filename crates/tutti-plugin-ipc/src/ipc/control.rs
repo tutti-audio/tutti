@@ -8,11 +8,12 @@
 
 use dpi::Size;
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, BlockCounts, ContentScale, Control, Delivered,
-    EditorCapabilities, EditorPresence, EditorWindow, Features, Health, LoadedPlugin,
-    MainThreadMarker, Normalized, ParamId, ParameterInfo, PluginDescriptor, PluginError,
-    PluginFailure, PluginResult, Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport,
-    Request, SampleRate, StateError, StateUse, TerminationReason, TrackInfo, WindowHandle,
+    AnyThread, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, ContentScale,
+    Control, Delivered, EditorCapabilities, EditorPresence, EditorWindow, Features, Health,
+    LoadedPlugin, MainThreadMarker, Normalized, OwnBypass, ParamId, ParameterInfo,
+    PluginDescriptor, PluginError, PluginFailure, PluginResult, Preset, PresetId, ProcessWake,
+    RenderMode, RenderModeSupport, Request, SampleRate, StateError, StateUse, TerminationReason,
+    TrackInfo, WindowHandle, bypass_value,
 };
 
 use super::{Ipc, IpcController};
@@ -41,6 +42,27 @@ macro_rules! served_control {
             /// another process.
             fn set_parameter_value(&self, id: ParamId, value: Normalized) {
                 let _ = self.link.bridge.set_parameter_rt(id, value);
+            }
+
+            /// A parameter bypass is a parameter write, [`Lost`](BypassWrite::Lost)
+            /// when the command queue refuses it or the link is gone, so the
+            /// session writes it again. A property bypass is not claimed by a
+            /// served plugin.
+            fn set_bypassed(&self, site: OwnBypass, bypassed: bool) -> BypassWrite {
+                match site {
+                    OwnBypass::Parameter(id) => {
+                        if self
+                            .link
+                            .bridge
+                            .set_parameter_rt(id, bypass_value(bypassed))
+                        {
+                            BypassWrite::Sent
+                        } else {
+                            BypassWrite::Lost
+                        }
+                    }
+                    OwnBypass::Property => BypassWrite::Lost,
+                }
             }
 
             fn parameter_plain(&self, id: ParamId, value: Normalized) -> Option<f64> {

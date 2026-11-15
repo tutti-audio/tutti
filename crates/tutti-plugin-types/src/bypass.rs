@@ -32,11 +32,12 @@ pub enum OwnBypass {
 pub enum BypassWrite {
     /// The plugin has no bypass of its own; nothing was written.
     NoOwnBypass,
-    /// The write was handed to the plugin.
+    /// The write was handed to the plugin. The plugin may still not apply it.
     Sent,
-    /// The write did not reach the plugin, or the plugin refused it: the
-    /// queue was full, the plugin is gone, the main thread did not answer in
-    /// time, or the format said no.
+    /// The write did not reach the plugin, or the format refused it: a served
+    /// plugin's command queue was full or its link gone, an in-process
+    /// plugin's instance was busy or the main thread did not answer in time,
+    /// or an AU refused the property.
     Lost,
 }
 

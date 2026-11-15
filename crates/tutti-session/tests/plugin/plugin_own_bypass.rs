@@ -168,7 +168,7 @@ fn a_restore_that_leaves_the_bypass_on_under_an_active_node_is_reconciled() {
         "the session did not make the plugin's bypass the node's mode"
     );
     assert!(
-        handle.bypass_writes_unapplied() >= 1,
+        s.plugin(node).expect("hosted").bypass_writes_unapplied() >= 1,
         "the correction is counted"
     );
 }

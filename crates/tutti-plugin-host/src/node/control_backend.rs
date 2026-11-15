@@ -110,6 +110,14 @@ where
         wait.recv_timeout(OFF_MAIN_DEADLINE).ok()
     }
 
+    /// `work` on the plugin now, when this is the main thread and the instance is
+    /// not locked; `None` otherwise. Never waits.
+    fn try_main<R>(&self, work: impl FnOnce(MainThreadMarker, &mut Instance<F>) -> R) -> Option<R> {
+        let main = MainThreadMarker::new()?;
+        let mut instance = self.inner.try_lock()?;
+        Some(work(main, &mut instance))
+    }
+
     /// `work` on the main thread without waiting: at once on it, posted to the
     /// owner's collector off it (refused while that collector has never run).
     /// Skipped when the instance is locked, as a write has always been.
@@ -161,36 +169,52 @@ where
         });
     }
 
-    /// The plugin's own bypass at `site`: a parameter like any other (so it is
-    /// skipped while the instance is locked, and the read back finds out), a
-    /// property through [`Control::set_bypassed`], run on the main thread (off
-    /// it, by its next tick, and lost if that does not come within the
-    /// deadline).
+    /// The plugin's own bypass at `site`. On the main thread the write runs at
+    /// once and is [`Lost`](BypassWrite::Lost) when the instance is locked (a
+    /// long `editor_idle`), the one case a write is dropped there. Off it, a
+    /// parameter is posted to the main thread like any other, and a property
+    /// waits for the main thread's next tick and is lost past the deadline.
     fn set_bypassed(&self, site: OwnBypass, bypassed: bool) -> BypassWrite {
-        match site {
-            OwnBypass::Parameter(id) => {
-                self.set_parameter_value(id, bypass_value(bypassed));
+        let value = bypass_value(bypassed);
+        match (site, MainThreadMarker::new()) {
+            (OwnBypass::Parameter(id), Some(_)) => self
+                .try_main(|main, instance| {
+                    instance.control().map(|c| c.set_parameter(main, id, value))
+                })
+                .flatten()
+                .map_or(BypassWrite::Lost, |()| BypassWrite::Sent),
+            (OwnBypass::Parameter(id), None) => {
+                self.set_parameter_value(id, value);
                 BypassWrite::Sent
             }
-            OwnBypass::Property => self
+            (OwnBypass::Property, Some(_)) => self
+                .try_main(|main, instance| {
+                    instance.control().map(|c| c.set_bypassed(main, bypassed))
+                })
+                .flatten()
+                .unwrap_or(BypassWrite::Lost),
+            (OwnBypass::Property, None) => self
                 .on_main(move |main, instance| {
-                    instance.control().map_or(BypassWrite::Lost, |control| {
-                        control.set_bypassed(main, bypassed)
-                    })
+                    instance
+                        .control()
+                        .map_or(BypassWrite::Lost, |c| c.set_bypassed(main, bypassed))
                 })
                 .unwrap_or(BypassWrite::Lost),
         }
     }
 
-    /// The bypass the plugin holds now: its parameter's value, or the property
-    /// ([`Control::bypassed`]).
+    /// The bypass the plugin holds now, read without waiting for the instance:
+    /// `None` when it is locked, so a control tick skips a busy plugin instead
+    /// of waiting on it.
     fn bypassed(&self, site: OwnBypass) -> Option<bool> {
-        match site {
-            OwnBypass::Parameter(id) => self.parameter_value(id).map(is_bypassed),
-            OwnBypass::Property => self
-                .on_main(|main, instance| instance.control()?.bypassed(main))
-                .flatten(),
-        }
+        self.try_main(|main, instance| {
+            let control = instance.control()?;
+            match site {
+                OwnBypass::Parameter(id) => control.parameter(main, id).map(is_bypassed),
+                OwnBypass::Property => control.bypassed(main),
+            }
+        })
+        .flatten()
     }
 
     /// The format's own conversion ([`Control::parameter_plain`]).
@@ -543,7 +567,6 @@ mod off_main_tests {
             handle.set_bypassed(true),
             tutti_plugin_types::BypassWrite::NoOwnBypass
         );
-        assert_eq!(handle.bypass_writes_unapplied(), 0);
     }
 
     /// **No in-process format carries the automation advisory**, and says so

@@ -24,16 +24,6 @@ use tutti_plugin_types::{
 #[cfg(doc)]
 use tutti_plugin_types::{PluginInvalidation, PluginRefresh, TransportRequest};
 
-/// What reconciling a plugin's own bypass keeps: the episodes counted, whether
-/// one is open, and the wait before the next retry.
-#[derive(Default)]
-struct BypassSync {
-    unapplied: std::sync::atomic::AtomicU64,
-    episode: std::sync::atomic::AtomicBool,
-    wait: std::sync::atomic::AtomicU32,
-    backoff: std::sync::atomic::AtomicU32,
-}
-
 /// How a [`PluginHandle`] reaches a plugin's main-thread [`Control`].
 ///
 /// A `Control` call takes the token and `&mut self`, and the plugin sits
@@ -206,8 +196,6 @@ pub struct PluginHandle {
     invalidate_sink: InvalidateSink,
     transport_sink: TransportSink,
     server_pid: Option<u32>,
-    /// What reconciling the plugin's own bypass keeps, shared by every clone.
-    bypass: Arc<BypassSync>,
 }
 
 impl std::fmt::Debug for PluginHandle {
@@ -253,7 +241,6 @@ impl PluginHandle {
             transport_sink: TransportSink::default(),
             // No subprocess to name unless `with_server_pid` says so.
             server_pid: None,
-            bypass: Arc::default(),
         }
     }
 
@@ -757,91 +744,27 @@ impl PluginHandle {
     /// ([`LoadedPlugin::own_bypass`], claimed only where the host can read it
     /// back) declares [`Shape::with_own_bypass`](tutti_graph::Shape::with_own_bypass),
     /// so the executor leaves it running in
-    /// [`NodeMode::Bypassed`](tutti_graph::NodeMode::Bypassed): the host writes
-    /// the bypass when the mode changes and
-    /// [`reconcile_bypass`](Self::reconcile_bypass) keeps it there. A plugin
-    /// without one is [`NoOwnBypass`](BypassWrite::NoOwnBypass) and the
+    /// [`NodeMode::Bypassed`](tutti_graph::NodeMode::Bypassed): the session
+    /// writes the bypass when the mode changes and compares it every tick. A
+    /// plugin without one is [`NoOwnBypass`](BypassWrite::NoOwnBypass) and the
     /// executor's bypass serves it. A write is fire-and-forget:
-    /// [`Sent`](BypassWrite::Sent) is not applied.
+    /// [`Sent`](BypassWrite::Sent) is not applied, and
+    /// [`Lost`](BypassWrite::Lost) did not reach the plugin.
     pub fn set_bypassed(&self, bypassed: bool) -> BypassWrite {
-        let Some(site) = self.loaded.own_bypass else {
-            return BypassWrite::NoOwnBypass;
-        };
-        let written = self.any_thread.set_bypassed(site, bypassed);
-        if written == BypassWrite::Sent {
-            // An active plugin applies a write at its next block, so the next
-            // reconcile is not yet an answer.
-            self.bypass
-                .wait
-                .store(1, std::sync::atomic::Ordering::Relaxed);
+        match self.loaded.own_bypass {
+            Some(site) => self.any_thread.set_bypassed(site, bypassed),
+            None => BypassWrite::NoOwnBypass,
         }
-        written
     }
 
     /// Whether the plugin's own bypass is on now, read from the plugin: `None`
-    /// when it has none or did not answer. A served plugin's read is a round
-    /// trip, which the session never makes: it passes the mirrored value to
-    /// [`reconcile_bypass`](Self::reconcile_bypass) instead.
+    /// when it has none or did not answer, or the instance is busy (an
+    /// in-process read never waits for it). A served plugin's read is a round
+    /// trip, which the session never makes: it compares the plugin's mirrored
+    /// parameter values instead.
     #[must_use]
     pub fn bypassed(&self) -> Option<bool> {
         self.any_thread.bypassed(self.loaded.own_bypass?)
-    }
-
-    /// Makes the plugin's own bypass `want`, once per control tick: compares
-    /// what the plugin holds with `want` and, where they differ, writes `want`
-    /// again. The plugin holds what is read from it in process (a plugin that is
-    /// not active takes the write at once, an active one at its next block, so
-    /// a write is given one tick), and, for a
-    /// served plugin, `mirrored` (its parameter mirror, no round trip; `None`
-    /// skips it). A difference is one episode, counted once until the plugin is
-    /// back in `want` ([`bypass_writes_unapplied`](Self::bypass_writes_unapplied)),
-    /// and the write is retried with a growing wait (1, 2, 4, up to 32 ticks).
-    /// A served plugin's mirror records a write as written, so a plugin that
-    /// refuses it is not seen; a change the plugin reports (its editor, its
-    /// automation) is.
-    pub fn reconcile_bypass(&self, want: bool, mirrored: Option<bool>) {
-        use std::sync::atomic::Ordering::Relaxed;
-        let Some(site) = self.loaded.own_bypass else {
-            return;
-        };
-        let held = if self.server_pid.is_some() {
-            mirrored
-        } else {
-            self.any_thread.bypassed(site)
-        };
-        let Some(held) = held else { return };
-        let sync = &*self.bypass;
-        if held == want {
-            sync.episode.store(false, Relaxed);
-            sync.backoff.store(1, Relaxed);
-            sync.wait.store(0, Relaxed);
-            return;
-        }
-        let wait = sync.wait.load(Relaxed);
-        if wait > 0 {
-            sync.wait.store(wait - 1, Relaxed);
-            return;
-        }
-        if !sync.episode.swap(true, Relaxed) {
-            sync.unapplied.fetch_add(1, Relaxed);
-            sync.backoff.store(1, Relaxed);
-        }
-        let _ = self.set_bypassed(want);
-        let backoff = sync.backoff.load(Relaxed).clamp(1, 32);
-        sync.wait.store(backoff, Relaxed);
-        sync.backoff.store((backoff * 2).min(32), Relaxed);
-    }
-
-    /// The times the plugin's own bypass was found other than the node's mode
-    /// after a write, over the plugin's life: a write that was lost or refused,
-    /// or a bypass the plugin's editor, a restored state or its automation moved
-    /// since. One count per episode, not per retry. Beside
-    /// [`block_counts`](Self::block_counts) among the plugin's losses.
-    #[must_use]
-    pub fn bypass_writes_unapplied(&self) -> u64 {
-        self.bypass
-            .unapplied
-            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Announces the host's [`AutomationMode`] to the plugin so its editor can
@@ -1272,165 +1195,5 @@ mod tests {
             Delivered::PluginDead,
             "a route to a plugin that is lost"
         );
-    }
-
-    /// A plugin that holds a bypass and takes a write only when told to.
-    struct Bypassing {
-        held: std::sync::atomic::AtomicBool,
-        accepts: std::sync::atomic::AtomicBool,
-        writes: std::sync::atomic::AtomicU32,
-    }
-
-    impl AnyThread for Bypassing {
-        fn parameter_descriptors(&self) -> Option<Vec<ParameterInfo>> {
-            None
-        }
-        fn parameter_value(&self, _id: ParamId) -> Option<Normalized> {
-            Some(tutti_plugin_types::bypass_value(
-                self.held.load(std::sync::atomic::Ordering::SeqCst),
-            ))
-        }
-        fn set_parameter_value(&self, _id: ParamId, value: Normalized) {
-            use std::sync::atomic::Ordering::SeqCst;
-            self.writes.fetch_add(1, SeqCst);
-            if self.accepts.load(SeqCst) {
-                self.held
-                    .store(tutti_plugin_types::is_bypassed(value), SeqCst);
-            }
-        }
-        fn parameter_plain(&self, _id: ParamId, _value: Normalized) -> Option<f64> {
-            None
-        }
-        fn parameter_normalized(&self, _id: ParamId, _plain: f64) -> Option<Normalized> {
-            None
-        }
-        fn parameter_text(&self, _id: ParamId, _value: Normalized) -> Option<String> {
-            None
-        }
-        fn parameter_value_from_text(&self, _id: ParamId, _text: &str) -> Option<Normalized> {
-            None
-        }
-        fn save_state(&self) -> std::result::Result<Vec<u8>, StateError> {
-            Err(StateError::NoStateRoute)
-        }
-        fn set_render_mode(&self, _mode: RenderMode) -> bool {
-            false
-        }
-        fn set_automation_mode(
-            &self,
-            _mode: AutomationMode,
-        ) -> std::result::Result<(), tutti_plugin_types::AutomationModeError> {
-            Err(tutti_plugin_types::AutomationModeError::PluginDead)
-        }
-    }
-
-    impl Health for Bypassing {
-        fn is_crashed(&self) -> bool {
-            false
-        }
-        fn crash_cause(&self) -> Option<PluginFailure> {
-            None
-        }
-        fn rate_refusal(&self) -> Option<(tutti_types::SampleRate, String)> {
-            None
-        }
-        fn block_counts(&self) -> BlockCounts {
-            BlockCounts::default()
-        }
-        fn terminate(&self, _reason: TerminationReason) {}
-    }
-
-    fn bypassing(accepts: bool) -> (PluginHandle, Arc<Bypassing>) {
-        let plugin = Arc::new(Bypassing {
-            held: false.into(),
-            accepts: accepts.into(),
-            writes: 0.into(),
-        });
-        let loaded = LoadedPlugin {
-            own_bypass: Some(tutti_plugin_types::OwnBypass::Parameter(ParamId::new(5))),
-            ..LoadedPlugin::default()
-        };
-        let handle = PluginHandle::from_backend(
-            Arc::clone(&plugin),
-            None,
-            PluginDescriptor::default(),
-            loaded,
-            ParameterChangeSink::default(),
-        );
-        (handle, plugin)
-    }
-
-    /// **A write the plugin refuses is retried with a growing wait and counted
-    /// once, and the count starts again after it takes.** The plugin refuses
-    /// every write for a while: ticks 0, 2 and 5 write (1, 2, then 4 ticks of
-    /// wait between), the count stays 1; then it accepts, the next write confirms, and
-    /// a bypass moved off afterwards is a second episode.
-    #[test]
-    fn a_refused_bypass_write_is_retried_with_backoff_and_counted_once() {
-        use std::sync::atomic::Ordering::SeqCst;
-        let (handle, plugin) = bypassing(false);
-        let mut written_at = Vec::new();
-        for tick in 0..8 {
-            let before = plugin.writes.load(SeqCst);
-            handle.reconcile_bypass(true, None);
-            if plugin.writes.load(SeqCst) > before {
-                written_at.push(tick);
-            }
-        }
-        assert_eq!(
-            written_at,
-            [0, 2, 5],
-            "writes back off: 1, 2, 4 ticks apart"
-        );
-        assert_eq!(handle.bypass_writes_unapplied(), 1, "one episode");
-
-        plugin.accepts.store(true, SeqCst);
-        for _ in 0..8 {
-            handle.reconcile_bypass(true, None);
-        }
-        assert_eq!(handle.bypassed(), Some(true), "the plugin took the write");
-        assert_eq!(handle.bypass_writes_unapplied(), 1, "still the one episode");
-
-        handle.reconcile_bypass(true, None);
-        plugin.held.store(false, SeqCst);
-        handle.reconcile_bypass(true, None);
-        assert_eq!(handle.bypassed(), Some(true), "moved off, written again");
-        assert_eq!(handle.bypass_writes_unapplied(), 2, "a second episode");
-    }
-
-    /// **A plugin that holds the mode is left alone**, and a plugin with no
-    /// bypass of its own is never written.
-    #[test]
-    fn a_plugin_in_the_nodes_mode_is_not_written() {
-        use std::sync::atomic::Ordering::SeqCst;
-        let (handle, plugin) = bypassing(true);
-        handle.reconcile_bypass(false, None);
-        assert_eq!(plugin.writes.load(SeqCst), 0);
-        assert_eq!(handle.bypass_writes_unapplied(), 0);
-        let none = handle_with(None);
-        none.reconcile_bypass(true, None);
-        assert_eq!(none.set_bypassed(true), BypassWrite::NoOwnBypass);
-        assert_eq!(none.bypass_writes_unapplied(), 0);
-    }
-
-    /// **A served plugin is compared with its mirror, never read.** The backend
-    /// would answer a read (a round trip in a real server) and holds the wrong
-    /// value; the mirrored one decides: nothing mirrored is no comparison, a
-    /// mirror in the node's mode writes nothing, and a mirror that differs writes
-    /// the mode, without a read.
-    #[test]
-    fn a_served_plugin_is_compared_with_its_mirror_and_not_read() {
-        use std::sync::atomic::Ordering::SeqCst;
-        let (handle, plugin) = bypassing(true);
-        let handle = handle.with_server_pid(Some(1234));
-        // The plugin holds `true`: a read would find it in the node's mode.
-        plugin.held.store(true, SeqCst);
-        handle.reconcile_bypass(true, None);
-        assert_eq!(plugin.writes.load(SeqCst), 0, "no mirror, no comparison");
-        handle.reconcile_bypass(true, Some(true));
-        assert_eq!(plugin.writes.load(SeqCst), 0, "the mirror holds the mode");
-        handle.reconcile_bypass(true, Some(false));
-        assert_eq!(plugin.writes.load(SeqCst), 1, "the mirror differs: written");
-        assert_eq!(handle.bypass_writes_unapplied(), 1);
     }
 }
