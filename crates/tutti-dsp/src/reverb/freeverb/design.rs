@@ -16,7 +16,7 @@ use core::num::NonZeroU32;
 
 use tutti_types::{Amplitude, BusTopology, Mix, SampleRate};
 
-use crate::reverb::fdn::recurrence::CHUNK;
+use crate::reverb::fdn::bank::CHUNK;
 use crate::reverb::freeverb::recurrence::{Freeverb, FreeverbRecurrence};
 use crate::reverb::network::{
     Absorption, AllPass, AllPassForm, Fdn, Gains, Inline, Line, MAX_CHANNELS, MAX_LINES, Matrix,

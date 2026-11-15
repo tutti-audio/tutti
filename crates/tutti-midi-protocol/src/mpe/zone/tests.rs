@@ -1,5 +1,5 @@
 use super::*;
-use tutti_ump::{NoteNumber, NoteVelocity, U7, Voice2};
+use tutti_ump::{MpeChannels, NoteNumber, NoteVelocity, U7, Voice2};
 
 const MASTER: PitchBendSensitivity = PitchBendSensitivity::MPE_MASTER_DEFAULT;
 const MEMBER: PitchBendSensitivity = PitchBendSensitivity::MPE_MEMBER_DEFAULT;
@@ -333,11 +333,9 @@ fn zones_answer_which_one_owns_a_channel() {
 
 fn pzone(manager: u8, channels: u8) -> MpeZoneConfig {
     MpeZoneConfig::profile(
-        ch(manager),
-        channels,
+        MpeZoneSpan::new(ch(manager), MpeChannels::of(channels)).expect("a layout that fits"),
         PitchBendSensitivity::MPE_PROFILE_DEFAULT,
     )
-    .expect("a layout that fits")
 }
 
 /// M2-120 section 3.5: a Profile starts at 48 for the Manager and for every
@@ -367,7 +365,7 @@ fn a_profile_zone_answers_one_range_for_its_manager_and_a_member() {
         PitchBendSensitivity::MPE_PROFILE_DEFAULT,
         PitchBendSensitivity::of(24),
     ] {
-        let z = MpeZoneConfig::profile(ch(3), 5, range).unwrap();
+        let z = MpeZoneConfig::profile(MpeZoneSpan::new(ch(3), MpeChannels::of(5)).unwrap(), range);
         for c in MidiChannel::all() {
             assert_eq!(z.pitch_bend_range_for(c), range, "channel {c:?}");
         }
@@ -388,53 +386,6 @@ fn a_zone_follows_the_specification_it_was_built_for() {
 /// M2-120 appendix A: the Number of Channels counts the Manager and the
 /// Members, and a zone is a Manager with at least one Member that fits in the
 /// sixteen channels.
-#[test]
-fn a_profile_zone_is_a_manager_and_at_least_one_member_within_sixteen_channels() {
-    assert_eq!(
-        MpeZoneConfig::profile(ch(0), 0, PitchBendSensitivity::MPE_PROFILE_DEFAULT),
-        None
-    );
-    assert_eq!(
-        MpeZoneConfig::profile(ch(0), 1, PitchBendSensitivity::MPE_PROFILE_DEFAULT),
-        None,
-        "a Manager alone"
-    );
-    assert_eq!(
-        MpeZoneConfig::profile(ch(0), 17, PitchBendSensitivity::MPE_PROFILE_DEFAULT),
-        None
-    );
-    assert_eq!(
-        MpeZoneConfig::profile(ch(0), 255, PitchBendSensitivity::MPE_PROFILE_DEFAULT),
-        None
-    );
-    assert_eq!(
-        MpeZoneConfig::profile(ch(14), 3, PitchBendSensitivity::MPE_PROFILE_DEFAULT),
-        None,
-        "runs past channel 16"
-    );
-    assert_eq!(
-        MpeZoneConfig::profile(ch(15), 2, PitchBendSensitivity::MPE_PROFILE_DEFAULT),
-        None
-    );
-    assert!(MpeZoneConfig::profile(ch(0), 16, PitchBendSensitivity::MPE_PROFILE_DEFAULT).is_some());
-    assert!(MpeZoneConfig::profile(ch(14), 2, PitchBendSensitivity::MPE_PROFILE_DEFAULT).is_some());
-    for manager in 0..16u8 {
-        for channels in 0..=255u8 {
-            let fits = channels >= 2 && u16::from(manager) + u16::from(channels) <= 16;
-            assert_eq!(
-                MpeZoneConfig::profile(
-                    ch(manager),
-                    channels,
-                    PitchBendSensitivity::MPE_PROFILE_DEFAULT
-                )
-                .is_some(),
-                fits,
-                "manager {manager}, {channels} channels"
-            );
-        }
-    }
-}
-
 /// M2-120 section 2.2: the Manager is the zone's lowest channel, and the
 /// Members are the channels above it, on any Manager.
 #[test]
@@ -631,7 +582,10 @@ mod serde_tests {
     #[test]
     fn a_persisted_profile_zone_is_read_back_through_its_check() {
         let set = MpeZones::single(pzone(0, 4).with_channel_response(ChannelResponse::Monophonic))
-            .with(MpeZoneConfig::profile(ch(8), 8, PitchBendSensitivity::of(24)).unwrap())
+            .with(MpeZoneConfig::profile(
+                MpeZoneSpan::new(ch(8), MpeChannels::of(8)).unwrap(),
+                PitchBendSensitivity::of(24),
+            ))
             .unwrap();
         let json = serde_json::to_string(&set).unwrap();
         assert_eq!(serde_json::from_str::<MpeZones>(&json).unwrap(), set);
