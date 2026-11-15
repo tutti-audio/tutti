@@ -767,11 +767,11 @@ fn a_tempo_off_the_clock_grid_moves_to_the_nearest_position() {
     let smf = format0(vec![
         (29, tempo_event(400_000)),
         (30, tempo_event(300_000)),
-        (40, tempo_event(200_000)),
-        (50, note(0, 60)),
+        (60, tempo_event(200_000)),
+        (70, note(0, 60)),
     ]);
     let done = smf.to_clip().unwrap();
-    assert_eq!(at_ticks(&done.clip, is_tempo), [0, 20, 40, 40]);
+    assert_eq!(at_ticks(&done.clip, is_tempo), [0, 20, 40, 60]);
     let moves: Vec<_> = done.moved.iter().map(|m| (m.from.0, m.to.0)).collect();
     assert_eq!(moves, [(29, 20), (30, 40)]);
 }
@@ -855,4 +855,128 @@ fn events_on_their_grids_are_not_moved() {
     let done = smf.to_clip().unwrap();
     assert!(done.moved.is_empty());
     assert_eq!(at_ticks(&done.clip, is_tempo), [0, 960, 3360]);
+}
+
+fn smf_at(tpq: u16, events: Vec<(u64, FileEvent)>) -> MidiFile {
+    MidiFile::smf(SmfFormat::SingleTrack, tpq, vec![track(events)]).unwrap()
+}
+
+fn flex_events(clip: &MidiFile, wanted: fn(&FileEvent) -> bool) -> Vec<(u64, FileEvent)> {
+    events_of(clip)
+        .iter()
+        .filter(|(_, e)| wanted(e))
+        .map(|(t, e)| (t.0, e.clone()))
+        .collect()
+}
+
+/// A clip holds one Set Time Signature at a position (M2-104 section 7.5.4,
+/// M2-116 section 6.1.2). At 96 ticks per quarter a 4/4 bar is 384 ticks:
+/// signatures at 200 and 300 both round to the bar line at 384, the later
+/// (2/4) wins, the earlier (3/4) is reported superseded, and nothing panics
+/// counting a bar from a position past the second one's own tick.
+/// Spec: m2-104/7.5.4#3, m2-116/6.1.2#3
+#[test]
+fn two_time_signatures_that_snap_to_one_bar_line_leave_the_later() {
+    let smf = smf_at(
+        96,
+        vec![
+            (200, signature_meta(3, 2)),
+            (300, signature_meta(2, 2)),
+            (400, note(0, 60)),
+        ],
+    );
+    let done = smf.to_clip().unwrap();
+    let [sig, metronome] = signature_events(2, 2, 8, 24);
+    // The default 4/4 at tick 0, then the later signature at 384.
+    let got = flex_events(&done.clip, |e| {
+        is_signature(e)
+            || matches!(
+                e,
+                FileEvent::Message(Message::Flex(_, Flex::SetMetronome(_)))
+            )
+    });
+    let [default_sig, default_metronome] = signature_events(4, 2, 8, 24);
+    assert_eq!(
+        got,
+        [
+            (0, default_sig),
+            (0, default_metronome),
+            (384, sig),
+            (384, metronome)
+        ]
+    );
+    let dropped: Vec<_> = done.dropped.iter().map(|d| (d.tick.0, d.reason)).collect();
+    assert_eq!(dropped, [(Tick(200).0, DropReason::Superseded)]);
+    let moves: Vec<_> = done.moved.iter().map(|m| (m.from.0, m.to.0)).collect();
+    assert_eq!(moves, [(300, 384)]);
+}
+
+/// Two tempos that snap to one 1/24-quarter position (every 20 ticks at 480
+/// per quarter; 22 and 28 both go to 20) leave the later; the earlier is
+/// reported superseded. M2-104 section 7.5.3 gives a tempo a position, one
+/// message there.
+/// Spec: m2-104/7.5.3#4, m2-116/6.1.1#3
+#[test]
+fn two_tempos_that_snap_to_one_position_leave_the_later() {
+    let smf = format0(vec![
+        (22, tempo_event(400_000)),
+        (28, tempo_event(300_000)),
+        (60, note(0, 60)),
+    ]);
+    let done = smf.to_clip().unwrap();
+    assert_eq!(
+        flex_events(&done.clip, is_tempo),
+        [
+            (0, flex(Flex::SetTempo(DEFAULT_TEMPO))),
+            (20, flex(Flex::SetTempo(30_000_000)))
+        ]
+    );
+    let dropped: Vec<_> = done.dropped.iter().map(|d| (d.tick.0, d.reason)).collect();
+    assert_eq!(dropped, [(22, DropReason::Superseded)]);
+}
+
+/// A tempo at tick 5 of 480 per quarter snaps to tick 0, where the clip
+/// already has the file's own tempo: no default joins it, so the header holds
+/// one tempo (M2-116 section 6.1.1) and the clip survives its bytes.
+/// Spec: m2-116/6.1.1#3, m2-116/7.1.1#1
+#[test]
+fn a_tempo_that_snaps_to_tick_zero_is_the_only_one_there() {
+    let smf = format0(vec![(5, tempo_event(1_000_000)), (50, note(0, 60))]);
+    let clip = smf.to_clip().unwrap().clip;
+    let again = MidiFile::from_bytes(&clip.to_bytes().unwrap()).unwrap();
+    assert_eq!(again, clip);
+    assert_eq!(
+        flex_events(&again, is_tempo),
+        [(0, flex(Flex::SetTempo(100_000_000)))]
+    );
+}
+
+/// The same for a Time Signature at tick 5, snapped to the bar line at 0.
+/// Spec: m2-116/6.1.2#3, m2-116/7.1.2#1
+#[test]
+fn a_signature_that_snaps_to_tick_zero_is_the_only_one_there() {
+    let smf = format0(vec![(5, signature_meta(3, 2)), (50, note(0, 60))]);
+    let clip = smf.to_clip().unwrap().clip;
+    let again = MidiFile::from_bytes(&clip.to_bytes().unwrap()).unwrap();
+    assert_eq!(again, clip);
+    let [sig, _] = signature_events(3, 2, 8, 24);
+    assert_eq!(flex_events(&again, is_signature), [(0, sig)]);
+}
+
+/// A tempo and a Time Signature at the last tick a file can reach in one
+/// gap (0x0FFF_FFFF, the SMF delta limit) land on a grid position at or before
+/// the clip's end and within a step of where they were. (The arithmetic at
+/// the top of `u64` is pinned in `src/file/to_clip/tests.rs`.)
+/// Spec: m2-104/7.5.3#4, m2-104/7.5.4#3
+#[test]
+fn ticks_at_the_largest_gap_stay_on_their_grids() {
+    let at = 0x0FFF_FFFF - 3;
+    let smf = format0(vec![(at, tempo_event(400_000)), (at, signature_meta(3, 2))]);
+    let clip = smf.to_clip().unwrap().clip;
+    let tempo = flex_events(&clip, is_tempo).pop().unwrap().0;
+    let signature = flex_events(&clip, is_signature).pop().unwrap().0;
+    // 480 per quarter: tempo grid every 20 ticks, and bar lines of the
+    // default 4/4 (1920 ticks) before the file's first signature.
+    assert!(tempo <= at && at - tempo < 20 && tempo.is_multiple_of(20));
+    assert!(signature <= at && at - signature < 1920 && signature.is_multiple_of(1920));
 }
