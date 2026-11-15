@@ -433,7 +433,10 @@ fn a_redeclared_root_relowers_its_edges_and_a_misfit_refuses_the_commit() {
     let [l, r] = stereo_block(&mut s);
     assert!(all_are(&l, 0.25) && all_are(&r, 0.75));
 
-    s.declare_root_topology(Some(smpte(1))).expect("mono");
+    // A cut: the render is read at the first block after it.
+    s.declare_root_topology(Some(smpte(1)))
+        .expect("mono")
+        .hard();
     assert!(s.graph_ref().is_edited());
     let [l, _] = stereo_block(&mut s);
     assert!(all_are(&l, 0.5), "{:?}", &l[..2]);
