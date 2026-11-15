@@ -100,8 +100,8 @@ fn the_block_clock_is_dated_by_deadlines_not_wake_ups() {
 
     // A re-anchor counts a fault and then writes the reading after it. A
     // reading not seen at a read was written after that read began, so the
-    // count loaded before that read is a floor for the count at its write; a
-    // reading seen at a read was written before the count loaded after it.
+    // count loaded before that read is a floor for the count at its write; the
+    // count loaded after the read that sees a reading is a ceiling for it.
     // A pair is unbroken when the first reading's floor equals the count after
     // the second's read: the count held across both writes.
     let mut checked = 0;
