@@ -1,7 +1,7 @@
 //! A plugin's own bypass: where it lives ([`OwnBypass`]) and what a write of it
 //! came to ([`BypassWrite`]).
 
-use crate::{Normalized, ParamFlags, ParamId, ParameterInfo};
+use crate::{Normalized, ParamFlags, ParamId, ParamWriteError, ParameterInfo};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -39,6 +39,24 @@ pub enum BypassWrite {
     /// plugin's instance was busy or the main thread did not answer in time,
     /// or an AU refused the property.
     Lost,
+    /// The plugin refused the write at the call: its bypass parameter is not
+    /// declared, or is declared read-only
+    /// ([`ParamWriteError::Undeclared`], [`ParamWriteError::ReadOnly`]). The
+    /// plugin is at fault, not the link: writing it again changes nothing.
+    Refused,
+}
+
+impl BypassWrite {
+    /// What a write of the bypass parameter came to: handed over, refused by
+    /// the write policy, or not made because the plugin was lost or did not
+    /// answer.
+    pub fn of_write(write: Result<(), ParamWriteError>) -> Self {
+        match write {
+            Ok(()) => Self::Sent,
+            Err(ParamWriteError::Undeclared(_) | ParamWriteError::ReadOnly(_)) => Self::Refused,
+            Err(ParamWriteError::Lost(_) | ParamWriteError::Unanswered(_)) => Self::Lost,
+        }
+    }
 }
 
 /// The parameter a plugin lists as its own bypass, if it lists one: the one

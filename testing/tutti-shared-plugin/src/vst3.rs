@@ -694,12 +694,11 @@ impl IEditControllerTrait for Plugin {
         };
         let can_automate: i32 = sdk(ParameterInfo_::ParameterFlags_::kCanAutomate);
         let is_bypass: i32 = sdk(ParameterInfo_::ParameterFlags_::kIsBypass);
-        info.flags = can_automate
-            | if index as u32 == core::BYPASS {
-                is_bypass
-            } else {
-                0
-            };
+        info.flags = match index as u32 {
+            core::METER => sdk(ParameterInfo_::ParameterFlags_::kIsReadOnly),
+            core::BYPASS => can_automate | is_bypass,
+            _ => can_automate,
+        };
         kResultOk
     }
     unsafe fn getParamStringByValue(&self, id: u32, v: f64, s: *mut String128) -> tresult {

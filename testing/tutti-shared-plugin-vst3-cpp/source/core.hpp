@@ -13,8 +13,8 @@
 
 namespace shared {
 
-constexpr uint32_t kLevel = 0, kAux = 1, kMode = 2, kTone = 3, kBypass = 5, kParams = 4, kListed = 5, kModes = 5;
-// kBypass is core.rs's BYPASS: listed by the VST3 shells beside the four, flagged as the bypass parameter.
+constexpr uint32_t kLevel = 0, kAux = 1, kMode = 2, kTone = 3, kMeter = 4, kBypass = 5, kParams = 5, kListed = 6, kModes = 5;
+// kBypass is core.rs's BYPASS: listed by the VST3 shells after the meter, flagged as the bypass parameter.
 // `tone`'s plain domain (core.rs, "Spec"): a decreasing exponential, 20000 * 1000^(-n).
 constexpr double kTonePlainMax = 20000.0, kTonePlainMin = 20.0;
 inline double tonePlain (double n)
@@ -82,7 +82,8 @@ struct Core
 	bool param (uint32_t id, double& v) const
 	{
 		if (id == kLevel) v = level; else if (id == kAux) v = aux; else if (id == kTone) v = tone; else if (id == kBypass) v = bypass;
-		else if (id == kMode) v = double (mode) / double (kModes - 1); else return false;
+		else if (id == kMode) v = double (mode) / double (kModes - 1);
+		else if (id == kMeter) v = 0.0; else return false;
 		return true;
 	}
 	void setParam (uint32_t id, double v)

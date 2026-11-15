@@ -6,7 +6,8 @@ use tutti_plugin_types::{BypassWrite, OwnBypass, bypass_value, is_bypassed};
 
 /// One hosted plugin's reconciliation of its own bypass, on the control thread.
 ///
-/// A write is [`Sent`](BypassWrite::Sent) or [`Lost`](BypassWrite::Lost); a
+/// A write is [`Sent`](BypassWrite::Sent), [`Lost`](BypassWrite::Lost) or
+/// [`Refused`](BypassWrite::Refused); a
 /// `Sent` one is not applied until the plugin is read in the node's mode.
 /// Each [`reconcile`](Self::reconcile) compares the plugin with the mode, with no
 /// round trip, and writes the mode again where they differ, or where the last
@@ -121,7 +122,9 @@ impl BypassSync {
                     mirror.report(id, bypass_value(want));
                 }
             }
-            BypassWrite::Lost => self.lost = true,
+            // A refusal is the plugin's: the retries back off like a loss and
+            // the episode is the one already counted.
+            BypassWrite::Lost | BypassWrite::Refused => self.lost = true,
             BypassWrite::NoOwnBypass => {}
         }
     }

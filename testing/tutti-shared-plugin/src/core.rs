@@ -216,6 +216,9 @@ pub const AUX: u32 = 1;
 pub const MODE: u32 = 2;
 /// The parameter with a plain domain: a decreasing exponential (see the spec).
 pub const TONE: u32 = 3;
+/// The read-only parameter: a meter the host never writes, always 0. Every
+/// format declares it read-only where the format has the flag (VST2 has none).
+pub const METER: u32 = 4;
 /// The bypass parameter: `0` processing, `1` bypassed. Only CLAP and VST3 list
 /// it, flagged as the format's bypass; an AU's bypass is its
 /// `kAudioUnitProperty_BypassEffect` property and VST2's `effSetBypass`, and a
@@ -238,14 +241,14 @@ pub const FUNCTION_NAMES: [(i32, &str, u32); 4] = [
     (0, "LowLatencyMode", MODE),
     (0, "PanPosCenterZ", TONE),
 ];
-/// Number of parameters VST2 and AU list: the four above.
-pub const PARAMS: u32 = 4;
-/// The ids CLAP and VST3 list, in list order: the four above and [`BYPASS`].
-pub const LISTED_IDS: [u32; 5] = [LEVEL, AUX, MODE, TONE, BYPASS];
+/// Number of parameters VST2 and AU list: the four above and the meter.
+pub const PARAMS: u32 = 5;
+/// The ids CLAP and VST3 list, in list order: the five above and [`BYPASS`].
+pub const LISTED_IDS: [u32; 6] = [LEVEL, AUX, MODE, TONE, METER, BYPASS];
 /// Number of parameters CLAP and VST3 list.
 pub const LISTED: u32 = LISTED_IDS.len() as u32;
-/// Parameter names, by id; a slot no parameter has holds "".
-pub const NAMES: [&str; 6] = ["level", "aux", "mode", "tone", "", "bypass"];
+/// Parameter names, by id.
+pub const NAMES: [&str; 6] = ["level", "aux", "mode", "tone", "meter", "bypass"];
 /// The plain value of `TONE` at its normalized minimum, its largest.
 pub const TONE_PLAIN_MAX: f64 = 20_000.0;
 /// The plain value of `TONE` at its normalized maximum, its smallest.
@@ -384,6 +387,7 @@ pub fn default_of(id: u32) -> Option<f64> {
         AUX => Some(0.25),
         MODE => Some(0.0),
         TONE => Some(0.5),
+        METER => Some(0.0),
         BYPASS => Some(0.0),
         _ => None,
     }
@@ -660,6 +664,7 @@ impl Core {
             TONE => Some(f64::from_bits(self.tone.load(Relaxed))),
             BYPASS => Some(f64::from_bits(self.bypass.load(Relaxed))),
             MODE => Some(f64::from(self.mode.load(Relaxed)) / f64::from(MODES - 1)),
+            METER => Some(0.0),
             _ => None,
         }
     }

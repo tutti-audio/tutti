@@ -28,8 +28,6 @@ crates/tutti-dsp/src/contract/harness.rs::rms  pending
 crates/tutti-dsp/src/convolver.rs::Convolver::new  pending
 crates/tutti-dsp/src/convolver.rs::Convolver::process_block  pending
 crates/tutti-dsp/src/convolver.rs::Convolver::with_ir  pending
-crates/tutti-dsp/src/delay/routing.rs::Routing::new  pending
-crates/tutti-dsp/src/delay/routing.rs::Routing::normalized  pending
 crates/tutti-dsp/src/dither.rs::DitherNoise::apply  pending
 crates/tutti-dsp/src/fft/real.rs::RealFft::forward  pending
 crates/tutti-dsp/src/fft/real.rs::RealFft::inverse  pending

@@ -164,7 +164,11 @@ where
     fn set_parameter_value(&self, id: ParamId, value: Normalized) {
         self.post(move |main, instance| {
             if let Some(control) = instance.control() {
-                control.set_parameter(main, id, value);
+                // Fire-and-forget: a write the plugin refuses (undeclared,
+                // read-only) is refused by `Control::set_parameter` here and
+                // not written; this route has no reply to carry the error. The
+                // session checks the same policy before it hands a write over.
+                let _ = control.set_parameter(main, id, value);
             }
         });
     }
@@ -178,10 +182,11 @@ where
         self.try_main(|main, instance| {
             let control = instance.control()?;
             match site {
-                OwnBypass::Parameter(id) => {
-                    control.set_parameter(main, id, bypass_value(bypassed));
-                    Some(BypassWrite::Sent)
-                }
+                OwnBypass::Parameter(id) => Some(BypassWrite::of_write(control.set_parameter(
+                    main,
+                    id,
+                    bypass_value(bypassed),
+                ))),
                 OwnBypass::Property => Some(control.set_bypassed(main, bypassed)),
             }
         })

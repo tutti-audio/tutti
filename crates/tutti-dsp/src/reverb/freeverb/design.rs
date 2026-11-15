@@ -14,7 +14,7 @@
 
 use core::num::NonZeroU32;
 
-use tutti_types::{Amplitude, BusTopology, Mix, SampleRate};
+use tutti_types::{Amplitude, BusTopology, Gain, Mix, SampleRate, SampleSpan, Samples};
 
 use crate::reverb::fdn::bank::CHUNK;
 use crate::reverb::freeverb::recurrence::{Freeverb, FreeverbRecurrence};
@@ -138,7 +138,9 @@ impl Family for FreeverbFamily {
         let mut lines: Inline<Line, MAX_LINES> = Inline::new();
         for &tuning in COMBS_LEFT.iter().chain(&COMBS_RIGHT) {
             let line = Line {
-                length: Freeverb::scale_tuning(rate, tuning) as f32,
+                length: SampleSpan::from_samples(Samples::new(Freeverb::scale_tuning(
+                    rate, tuning,
+                ))),
                 modulation: LineModulation::NONE,
                 absorption,
                 diffuser: None,
@@ -148,8 +150,8 @@ impl Family for FreeverbFamily {
         let n = lines.len();
 
         // Left row: the first eight lines; right row: the next eight.
-        let mut left = Gains::filled(0.0, n).unwrap_or_default();
-        let mut right = Gains::filled(0.0, n).unwrap_or_default();
+        let mut left = Gains::filled(Gain::SILENT, n).unwrap_or_default();
+        let mut right = Gains::filled(Gain::SILENT, n).unwrap_or_default();
         for (i, (l, r)) in left
             .as_mut_slice()
             .iter_mut()
@@ -157,9 +159,9 @@ impl Family for FreeverbFamily {
             .enumerate()
         {
             if i < COMBS_LEFT.len() {
-                *l = 1.0;
+                *l = Gain::UNITY;
             } else {
-                *r = 1.0;
+                *r = Gain::UNITY;
             }
         }
         let mut rows = Inline::new();
@@ -175,7 +177,7 @@ impl Family for FreeverbFamily {
         }));
         for [l, r] in ALL_PASSES {
             let all_pass = |tuning| AllPass {
-                delay: Freeverb::scale_tuning(rate, tuning) as f32,
+                delay: SampleSpan::from_samples(Samples::new(Freeverb::scale_tuning(rate, tuning))),
                 gain: Freeverb::ALLPASS_FEEDBACK,
                 modulation: LineModulation::NONE,
                 form: AllPassForm::Freeverb,

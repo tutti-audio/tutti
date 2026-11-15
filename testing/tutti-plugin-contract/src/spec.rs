@@ -22,15 +22,19 @@ pub enum Param {
     /// exponential, `20000 * 1000^(-n)` for the normalized `n`. It changes
     /// nothing a block renders.
     Tone,
+    /// The read-only parameter: a meter the host never writes, always 0.
+    /// Every format that has the flag declares it read-only; VST2 has none.
+    Meter,
 }
 
 impl Param {
     /// Every parameter the plugin lists, with its default.
-    pub const ALL: [(Param, f64); 4] = [
+    pub const ALL: [(Param, f64); 5] = [
         (Param::Level, 0.5),
         (Param::Aux, 0.25),
         (Param::Mode, 0.0),
         (Param::Tone, 0.5),
+        (Param::Meter, 0.0),
     ];
 
     /// The id every format lists it under.
@@ -49,12 +53,13 @@ impl Param {
             Param::Aux => "aux",
             Param::Mode => "mode",
             Param::Tone => "tone",
+            Param::Meter => "meter",
         }
     }
 }
 
 /// The parameter that holds the plugin's own bypass where the format lists one
-/// (CLAP and VST3): `0` processing, `1` bypassed. It is listed after the four
+/// (CLAP and VST3): `0` processing, `1` bypassed. It is listed after the five
 /// of [`Param::ALL`], flagged as the format's bypass, and a write to it reaches
 /// the plugin as this parameter's point in the next block.
 pub const BYPASS_ID: ParamId = ParamId::new(5);
@@ -77,6 +82,10 @@ pub enum Bypass {
 /// table (VST3 `IMidiMapping`, AU's mapping table): Control Change
 /// 74 on channel 0 drives `level`.
 pub const MAPPED_CONTROLLER: u8 = 74;
+
+/// The normalized value the write cases send: `level` takes it where a write is
+/// allowed, and the meter is refused it.
+pub const WRITE: f64 = 0.75;
 
 /// The normalized values the conversion cases ask about.
 pub const TONE_AT: [f64; 4] = [0.0, 0.25, 0.5, 1.0];
@@ -337,6 +346,17 @@ pub struct Surface {
     /// The controller table the plugin declares. Empty where the format has no
     /// such table: CLAP and VST2.
     pub assignments: &'static [MidiAssignment],
+    /// Whether the format reports a parameter's read-only bit: every format but
+    /// VST2, whose `effGetParameterProperties` has none. Where `true`, the
+    /// parameter list reports [`Param::Meter`] read-only and every other
+    /// parameter not. Where `false` the format has no read-only parameter, and
+    /// the cases about one do not apply.
+    pub reports_access: bool,
+    /// Whether the format reports a parameter's automatable bit: CLAP and VST3.
+    /// An AUv2 unit advertises only `kAudioUnitParameterFlag_IsWritable`, and VST2 says nothing per
+    /// parameter. Where `true`, the meter is not automatable and every other
+    /// parameter is.
+    pub reports_automatable: bool,
 }
 
 /// The role every VST3 plugin of ours declares, by parameter (function names
@@ -376,6 +396,8 @@ pub const CLAP: Surface = Surface {
     mode_steps: ParamSteps::Enumerated(5),
     continuous_steps: ParamSteps::Continuous,
     assignments: &[],
+    reports_access: true,
+    reports_automatable: true,
 };
 
 /// VST2: no editor in the plugin, a live render mode, an automate report.
@@ -396,6 +418,8 @@ pub const VST2: Surface = Surface {
     mode_steps: ParamSteps::Unknown,
     continuous_steps: ParamSteps::Unknown,
     assignments: &[],
+    reports_access: false,
+    reports_automatable: false,
 };
 
 /// VST3 from the Rust plugin: an editor once selected, the mode read at activation, an edit of `aux` to 0.75 on each state
@@ -417,6 +441,8 @@ pub const VST3: Surface = Surface {
     mode_steps: ParamSteps::Enumerated(5),
     continuous_steps: ParamSteps::Continuous,
     assignments: &[assignment(Some(MidiChannel::of(0)))],
+    reports_access: true,
+    reports_automatable: true,
 };
 
 /// VST3 from the C++ plugin: no editor, an edit of `aux` to 0.75 on each state
@@ -438,6 +464,8 @@ pub const VST3_CPP: Surface = Surface {
     mode_steps: ParamSteps::Enumerated(5),
     continuous_steps: ParamSteps::Continuous,
     assignments: &[assignment(Some(MidiChannel::of(0)))],
+    reports_access: true,
+    reports_automatable: true,
 };
 
 /// AU, from the shared plugin's Audio Unit shell: no editor (the shell offers no
@@ -462,4 +490,6 @@ pub const AU: Surface = Surface {
     mode_steps: ParamSteps::Enumerated(5),
     continuous_steps: ParamSteps::Continuous,
     assignments: &[assignment(Some(MidiChannel::of(0)))],
+    reports_access: true,
+    reports_automatable: false,
 };

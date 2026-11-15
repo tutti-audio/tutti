@@ -21,12 +21,12 @@
 //! The delay has **no latency**: the echo is the effect, not processing delay.
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
-use tutti_types::{Feedback, SampleRate, Seconds};
+use tutti_types::{Feedback, Gain, SampleRate, SampleSpan, Samples, Seconds};
 
 use super::layout::{DELAY_SLEW, DelayControls, DelayLayout, MAX_DELAY_CHANNELS};
 use super::routing::Routing;
 use super::taps::finite_or;
-use crate::{DelayLine, Glide, InterpolationMode, Steps, delay_step, fractional_samples};
+use crate::{DelayLine, Glide, InterpolationMode, Steps, delay_step};
 
 /// What a delay reads while it runs: the delay in frames, and the two feedbacks, each
 /// aimed by [`DelayBank::aim`] and stepped by [`DelayBank::process`].
@@ -73,11 +73,17 @@ impl DelayGlides {
 }
 
 /// `secs` as a delay in frames: clamped into `0..=max_secs` and into the line of `cap`
-/// frames.
+/// frames. The delay kernel reads an `f32` position per frame, so the span narrows here,
+/// once per frame, after the clamp.
 #[inline(always)]
 fn frames_of(secs: f32, max_secs: f32, rate: SampleRate, cap: usize) -> f32 {
     let secs = Seconds::from_f32(secs.clamp(0.0, max_secs));
-    fractional_samples(secs, rate).min(cap as f32)
+    // The clamp leaves `0..=max_secs` (finite), so a span exists; a NaN time, which
+    // the callers never pass, is no delay.
+    let Some(span) = SampleSpan::from_seconds(secs, rate) else {
+        return 0.0;
+    };
+    span.min(SampleSpan::from_samples(Samples::new(cap))).get() as f32
 }
 
 /// The per-frame lanes a delay reads beside its audio, in the audio's sample format, each
@@ -314,8 +320,8 @@ impl DelayBank {
                 let mut acc = xs[c][i].convert_to::<f32>() + self.taps[c] * fb;
                 for j in 0..width {
                     let w = self.routing.weight(c, j);
-                    if w != 0.0 {
-                        acc += (w * cf) * self.taps[j];
+                    if w != Gain::SILENT {
+                        acc += w.apply(cf) * self.taps[j];
                     }
                 }
                 line.push_sample(acc);
