@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use tutti_dsp::{
-    Family, FdnControls, FdnFamily, Feed, Freeverb, FreeverbControls, FreeverbFamily, Grows, Reach,
+    Family, FdnControls, FdnLayout, Feed, Freeverb, FreeverbControls, FreeverbFamily, Grows, Reach,
     Setup, System,
 };
 use tutti_fixtures::Noise;
@@ -146,7 +146,7 @@ fn the_port_order_is_the_cells_in_their_order() {
         ]
     );
     let fdn: FdnNode = prepared(
-        FamilyNode::live(FdnFamily::default(), FdnControls::DEFAULT),
+        FdnNode::live(FdnLayout::default(), FdnControls::DEFAULT),
         SR,
         BLOCK,
     );

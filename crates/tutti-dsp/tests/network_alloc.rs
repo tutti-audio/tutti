@@ -7,7 +7,7 @@
 
 use tutti_dsp::{Family, FreeverbControls, FreeverbFamily, Grows};
 use tutti_fixtures::{ThreadCounting, allocations};
-use tutti_types::{Mix, SampleRate};
+use tutti_types::{Mix, SampleRate, Seconds};
 
 #[global_allocator]
 static A: ThreadCounting = ThreadCounting;
@@ -102,27 +102,20 @@ fn member_into_needs_no_network_sized_stack() {
     assert_eq!(handle.join().unwrap(), 5);
 }
 
-/// The FDN's `member_into`, `retarget` and `process` allocate nothing, with a
-/// different network every block (a decay, a size, a diffusion, a pre-delay, a
-/// width, a wet gain and a freeze all move), after the one `prepare` that sizes
-/// the realization from the bounds. The ramps the realization starts are the work of the
+/// The FDN bank's `aim` and `process` allocate nothing, with a different network every block
+/// (a decay, a size, a diffusion, a pre-delay, a width, a wet gain and a freeze all move),
+/// after the one `FdnBank::new` that sizes it. The ramps the glides start are the work of the
 /// following blocks, which allocate nothing either.
 #[test]
-fn the_fdn_retargets_and_renders_without_allocating() {
-    use tutti_dsp::{FdnControls, FdnFamily, Network, Reach, Setup};
-    use tutti_types::{Db, Depth, Hz, MaxBlock, Samples, Seconds, StereoWidth};
+fn the_fdn_aims_and_renders_without_allocating() {
+    use tutti_buffers::{Planes, PlanesMut};
+    use tutti_dsp::{FdnBank, FdnControls, FdnLayout};
+    use tutti_types::{Db, Depth, Hz, StereoWidth};
 
     let rate = SampleRate::SR_48K;
-    let design = FdnFamily::new(8, Seconds(8.0), true).unwrap();
-    let mut realization = design.realized(rate);
-    realization.prepare(
-        &design.reach(&Reach::at(rate)),
-        &Setup {
-            rate,
-            max_block: MaxBlock::of(Samples(64)),
-        },
-    );
-    let mut network = Box::new(Network::new(rate));
+    let layout = FdnLayout::new(8, Seconds(8.0), true).unwrap();
+    let mut bank = FdnBank::new(&layout, rate);
+    let mut glides = bank.glides();
     let input = vec![0.25f32; 64];
     let (mut left, mut right) = (vec![0.0f32; 64], vec![0.0f32; 64]);
     for block in 0..200u32 {
@@ -143,28 +136,28 @@ fn the_fdn_retargets_and_renders_without_allocating() {
             freeze: block % 11 == 0,
         };
         let n = allocations(|| {
-            design.member_into(&c, rate, &mut network);
-            realization.retarget(&network);
-            realization.process(
-                &tutti_dsp::Feed::new(&[&input]),
-                &mut [&mut left, &mut right],
-                64,
+            bank.aim(&mut glides, &c);
+            bank.process(
+                &mut glides,
+                Planes::new(&[&input]).unwrap(),
+                PlanesMut::new(&mut [&mut left, &mut right]).unwrap(),
             );
+            std::hint::black_box(bank.tail_of(&glides, &c));
         });
         assert_eq!(n, 0, "the block allocated");
     }
 }
 
-/// The FDN's `member_into` runs on a 96 KiB stack, like Freeverb's.
+/// The FDN's `design_into` runs on a 96 KiB stack, like Freeverb's.
 #[test]
-fn the_fdns_member_into_needs_no_network_sized_stack() {
-    use tutti_dsp::{FdnControls, FdnFamily};
+fn the_fdns_design_into_needs_no_network_sized_stack() {
+    use tutti_dsp::{FdnControls, FdnLayout};
     let rate = SampleRate::SR_44K1;
     let mut network = Box::new(tutti_dsp::Network::new(rate));
     let handle = std::thread::Builder::new()
         .stack_size(96 * 1024)
         .spawn(move || {
-            FdnFamily::default().member_into(&FdnControls::DEFAULT, rate, &mut network);
+            FdnLayout::default().design_into(&FdnControls::DEFAULT, rate, &mut network);
             network.stages.len()
         })
         .unwrap();
