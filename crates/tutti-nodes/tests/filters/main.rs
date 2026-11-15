@@ -3,6 +3,7 @@
 mod delay_echoes;
 mod filter_block_independence;
 mod filter_responses;
+mod ladder_crossover_node;
 mod non_finite_constructors;
 mod non_finite_controls;
 mod non_finite_inputs;
