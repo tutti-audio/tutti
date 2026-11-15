@@ -195,7 +195,7 @@ macro_rules! served_control {
             }
 
             /// From the declared parameters the client keeps, not a round trip
-            /// per write ([`Link::declared`]): a lost plugin is
+            /// per write (the client's declared-parameter cache): a lost plugin is
             /// [`Lost`](tutti_plugin_types::ParamWriteError::Lost), one that does
             /// not answer in time [`Unanswered`](tutti_plugin_types::ParamWriteError::Unanswered).
             fn parameter_writable(
