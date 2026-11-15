@@ -5,7 +5,8 @@ use tutti_types::Seconds;
 tutti_types::ranged! {
     /// The longest decay a reverb's control may ask for.
     ///
-    /// A range-checked value: finite, at least [`MIN_DECAY`](crate::MIN_DECAY) and at most [`CAP`](Self::CAP).
+    /// A range-checked value: finite, at least [`MIN_DECAY`](crate::MIN_DECAY) and at most
+    /// [`CAP`](Self::CAP).
     /// [`new`](Self::new) refuses anything else and never clamps: a network sized from it
     /// becomes a reverb's allocations (a 60 s decay at 192 kHz is already some 11.5 M
     /// frames of line to hold).

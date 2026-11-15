@@ -63,7 +63,7 @@ pub const MAX_PRE_DELAY: Seconds = Seconds(0.5);
 const MAX_MODULATION: SampleSpan = SampleSpan::of(8.0);
 /// The modulation rates a control may ask for.
 const RATES: (f32, f32) = (0.05, 5.0);
-/// The shortest RT60 a control may ask for.
+/// The shortest RT60 a control may ask for, and the least a [`MaxDecay`] holds.
 pub const MIN_DECAY: Seconds = Seconds(0.05);
 /// The widest stereo image.
 const MAX_WIDTH: f32 = 2.0;
