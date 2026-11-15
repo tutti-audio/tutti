@@ -270,6 +270,7 @@ pub struct Editor {
 
 /// The old root of a crossfade in progress, as the commit that began it
 /// found it: what each commit while the crossfade runs compiles the bank from.
+/// It holds a clone of the committed spec and shapes until the crossfade ends.
 #[derive(Clone)]
 struct Fading {
     /// The old root's spec and shapes.

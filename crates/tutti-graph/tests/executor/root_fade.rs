@@ -11,10 +11,10 @@ use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, declick, prepare};
 use tutti_graph::{
-    Editor, Executor, Fade, FadeLaw, NodeKey, OutPort, Renderer, RootFade, Source,
-    TransportPosition, Unforkable,
+    Edge, EdgeGain, EdgeId, Editor, Executor, Fade, FadeLaw, NodeKey, OutPort, Renderer, RootFade,
+    Sink, Source, TransportPosition, Unforkable,
 };
-use tutti_types::Samples;
+use tutti_types::{Amplitude, Latency, Samples};
 
 const OLD: f32 = 0.5;
 const NEW: f32 = 0.25;
@@ -49,19 +49,57 @@ fn gains(law: FadeLaw, k: usize, n: usize) -> (f64, f64) {
 /// Three constants at keys 1, 2 and 3 (0.5, 0.25, 0.125), the root taking the
 /// first.
 fn rig() -> Renderer {
+    rig_with(
+        &[
+            (
+                1,
+                Kind::Const {
+                    value: OLD,
+                    width: 1,
+                },
+            ),
+            (
+                2,
+                Kind::Const {
+                    value: NEW,
+                    width: 1,
+                },
+            ),
+            (
+                3,
+                Kind::Const {
+                    value: THIRD,
+                    width: 1,
+                },
+            ),
+        ],
+        &[1],
+    )
+}
+
+/// The nodes at their keys, the root taking `outputs`.
+fn rig_with(nodes: &[(u64, Kind)], outputs: &[u64]) -> Renderer {
     let (mut ed, exec) = Editor::new(prepare(256));
-    for (k, v) in [(1, OLD), (2, NEW), (3, THIRD)] {
-        ed.insert(
-            key(k),
-            "const",
-            Unforkable(TestNode::new(Kind::Const { value: v, width: 1 })),
-        );
+    for (k, kind) in nodes {
+        ed.insert(key(*k), "node", Unforkable(TestNode::new(kind.clone())));
     }
-    ed.spec_mut().topology.set_outputs(vec![source(1)]);
+    ed.spec_mut()
+        .topology
+        .set_outputs(outputs.iter().map(|&n| source(n)).collect::<Vec<_>>());
     ed.commit().expect("commits");
     let mut r = Renderer::new(ed, exec);
     r.set_block(Samples(BLOCK));
     r
+}
+
+/// Ends the crossfade the executor reported over, as a session does each
+/// tick: settles it and, when that changed the editor, commits.
+fn settle(r: &mut Renderer) -> bool {
+    let changed = r.editor_mut().settle_fades();
+    if changed {
+        r.editor_mut().commit().expect("commits");
+    }
+    changed
 }
 
 /// Declares a new root heard from the constant at `node`, to fade in over
@@ -80,6 +118,8 @@ struct Block {
     fade: Option<RootFade>,
     new: Vec<f32>,
     old: Option<Vec<f32>>,
+    /// Every channel the plan rendered: the root's, then the old root's.
+    all: Vec<Vec<f32>>,
 }
 
 /// Applies what is queued and renders `frames`.
@@ -96,8 +136,9 @@ fn step(r: &mut Renderer, frames: usize) -> Block {
     let old = (rendered > base).then(|| bufs[base].clone());
     Block {
         fade,
-        new: bufs.swap_remove(0),
+        new: bufs[0].clone(),
         old,
+        all: bufs,
     }
 }
 
@@ -289,39 +330,407 @@ fn a_commit_at_the_block_the_fade_ends_on_leaves_only_the_new_root() {
     }
 }
 
-/// A commit that declares the root again begins a new fade from the root that
-/// was fading in, at full level, to the newest, counted from the commit's
-/// block; the root that was fading out is dropped. Mid-fade and at the block
-/// the first fade ends on.
+/// The root's id a plan renders under.
+fn root_in_force(r: &Renderer) -> tutti_graph::RootId {
+    r.executor().plan().expect("plan").root_id()
+}
+
+/// Declares the root again while a fade runs: the running fade's gains do not
+/// move, frame by frame, and the plan stays on the root in force.
 #[test]
-fn a_commit_that_declares_the_root_again_begins_a_new_fade_from_the_root_that_was_fading_in() {
-    for (blocks, mid_fade) in [(2, true), (3, false)] {
-        for law in LAWS {
-            let mut r = rig();
+fn a_redeclare_mid_fade_leaves_the_running_fades_gains_as_they_were() {
+    for law in LAWS {
+        let mut r = rig();
+        step(&mut r, BLOCK);
+        declare(&mut r, 2, fade(law));
+        let first = r.editor().spec().root_id;
+        let n = declick();
+        check_fade(law, n, 0, &host_mix(&step(&mut r, BLOCK)), OLD, NEW);
+        check_fade(law, n, BLOCK, &host_mix(&step(&mut r, BLOCK)), OLD, NEW);
+        declare(&mut r, 3, fade(law));
+        let block = step(&mut r, BLOCK);
+        let f = block.fade.expect("the same fade runs on");
+        assert_eq!(f.done.get(), 2 * BLOCK);
+        assert_eq!(root_in_force(&r), first, "the root in force is the first's");
+        assert_eq!(r.executor().plan().expect("plan").rendered_outputs(), 2);
+        check_fade(law, n, 2 * BLOCK, &host_mix(&block), OLD, NEW);
+    }
+}
+
+/// The deferred root begins its fade at the block after the running one ends,
+/// from gain (1, 0): the root in force, whole, to the newest declared.
+#[test]
+fn a_redeclared_root_fades_in_from_gain_one_at_the_block_after_the_running_fade_ends() {
+    for (blocks, law) in [(2, FadeLaw::EqualAmplitude), (3, FadeLaw::EqualPower)] {
+        let mut r = rig();
+        step(&mut r, BLOCK);
+        declare(&mut r, 2, fade(law));
+        let first = r.editor().spec().root_id;
+        for _ in 0..blocks {
             step(&mut r, BLOCK);
-            declare(&mut r, 2, fade(law));
-            let first = r.executor().plan().map(|p| p.root_id());
-            for _ in 0..blocks {
-                step(&mut r, BLOCK);
-            }
-            declare(&mut r, 3, fade(law));
-            let n = declick();
-            for b in 0..3 {
-                let block = step(&mut r, BLOCK);
-                let f = block.fade.expect("the second fade runs");
-                assert_eq!(f.done.get(), b * BLOCK, "counted from its own commit");
-                assert_ne!(Some(f.old), first, "the root that faded in now fades out");
-                assert_eq!(f.width, 1);
-                check_fade(law, n, b * BLOCK, &host_mix(&block), NEW, THIRD);
-            }
+        }
+        declare(&mut r, 3, fade(law));
+        let newest = r.editor().spec().root_id;
+        if blocks == 2 {
+            step(&mut r, BLOCK);
+        }
+        assert_eq!(
+            root_in_force(&r),
+            first,
+            "waiting: the plan keeps the root in force"
+        );
+        assert!(settle(&mut r), "the fade's end is reported once");
+        let n = declick();
+        for b in 0..3 {
             let block = step(&mut r, BLOCK);
-            assert_eq!(block.fade, None);
-            assert!(
-                host_mix(&block).iter().all(|&(_, _, mix)| mix == THIRD),
-                "mid_fade {mid_fade}: the newest root alone"
+            let f = block.fade.expect("the deferred fade runs");
+            assert_eq!(f.done.get(), b * BLOCK, "counted from its own block");
+            assert_eq!(f.old, first, "the root in force fades out");
+            assert_eq!(root_in_force(&r), newest);
+            assert_eq!(f.width, 1);
+            check_fade(law, n, b * BLOCK, &host_mix(&block), NEW, THIRD);
+        }
+        let block = step(&mut r, BLOCK);
+        assert_eq!(block.fade, None);
+        assert!(
+            host_mix(&block).iter().all(|&(_, _, mix)| mix == THIRD),
+            "the newest root alone"
+        );
+    }
+}
+
+/// Two declarations during one fade give one deferred fade, to the newest.
+#[test]
+fn two_redeclares_during_one_fade_give_one_deferred_fade_to_the_newest() {
+    let law = FadeLaw::EqualAmplitude;
+    let mut r = rig();
+    step(&mut r, BLOCK);
+    declare(&mut r, 2, fade(law));
+    let first = r.editor().spec().root_id;
+    step(&mut r, BLOCK);
+    declare(&mut r, 3, fade(law));
+    step(&mut r, BLOCK);
+    declare(&mut r, 1, fade(law));
+    let newest = r.editor().spec().root_id;
+    step(&mut r, BLOCK);
+    assert!(settle(&mut r));
+    let n = declick();
+    for b in 0..3 {
+        let block = step(&mut r, BLOCK);
+        let f = block.fade.expect("the deferred fade runs");
+        assert_eq!((f.done.get(), f.old), (b * BLOCK, first));
+        assert_eq!(root_in_force(&r), newest);
+        check_fade(law, n, b * BLOCK, &host_mix(&block), NEW, OLD);
+    }
+    let block = step(&mut r, BLOCK);
+    assert_eq!(block.fade, None);
+    assert!(host_mix(&block).iter().all(|&(_, _, mix)| mix == OLD));
+}
+
+/// A declaration with no fade set cuts at its block and ends the running one.
+#[test]
+fn a_hard_redeclare_mid_fade_cuts_at_its_block() {
+    let mut r = rig();
+    step(&mut r, BLOCK);
+    declare(&mut r, 2, fade(FadeLaw::EqualAmplitude));
+    step(&mut r, BLOCK);
+    r.editor_mut().set_root_fade(None);
+    let ed = r.editor_mut();
+    ed.spec_mut().root_id = ed.spec().root_id.next();
+    ed.spec_mut().topology.set_outputs(vec![source(3)]);
+    ed.commit().expect("commits");
+    let newest = r.editor().spec().root_id;
+    let block = step(&mut r, BLOCK);
+    assert_eq!(block.fade, None);
+    assert_eq!(root_in_force(&r), newest);
+    assert_eq!(r.executor().plan().expect("plan").rendered_outputs(), 1);
+    assert!(
+        block.new.iter().all(|&x| x == THIRD),
+        "the newest root, whole, from frame 0"
+    );
+}
+
+/// A width change that does not declare the root again ends the fade as a
+/// cut: the old root's channels cannot stand beside a root of another width.
+#[test]
+fn a_width_change_without_a_new_root_cuts_the_fade() {
+    let mut r = rig();
+    step(&mut r, BLOCK);
+    declare(&mut r, 2, fade(FadeLaw::EqualAmplitude));
+    step(&mut r, BLOCK);
+    r.editor_mut()
+        .spec_mut()
+        .topology
+        .set_outputs(vec![source(2), source(2)]);
+    r.editor_mut().commit().expect("commits");
+    let block = step(&mut r, BLOCK);
+    assert_eq!(block.fade, None);
+    assert_eq!(r.executor().plan().expect("plan").rendered_outputs(), 2);
+    assert!(
+        block.all.iter().all(|c| c.iter().all(|&x| x == NEW)),
+        "both channels of the new root, whole, from frame 0"
+    );
+}
+
+/// The carried fade renders the serial executor's samples bit for bit on a
+/// pool, through a continuing commit, a deferred declaration and its fade.
+#[test]
+fn a_carried_fade_renders_bit_for_bit_the_same_on_the_parallel_executor() {
+    fn trace(pooled: bool) -> Vec<u32> {
+        let nodes: Vec<(u64, Kind)> = (1..=8)
+            .map(|k| {
+                (
+                    k,
+                    Kind::Const {
+                        value: k as f32 / 16.0,
+                        width: 1,
+                    },
+                )
+            })
+            .collect();
+        let mut r = rig_with(&nodes, &[1, 2]);
+        if pooled {
+            r.executor_mut().set_pool(Some(common::TestPool::new(4)));
+        }
+        let law = FadeLaw::EqualPower;
+        let mut bits = Vec::new();
+        let mut record = |r: &mut Renderer| {
+            let b = step(r, BLOCK);
+            for c in b.all {
+                bits.extend(c.iter().map(|x| x.to_bits()));
+            }
+            bits.push(b.fade.map_or(u32::MAX, |f| f.done.get() as u32));
+        };
+        record(&mut r);
+        let ed = r.editor_mut();
+        ed.set_root_fade(Some(fade(law)));
+        ed.spec_mut().root_id = ed.spec().root_id.next();
+        ed.spec_mut()
+            .topology
+            .set_outputs(vec![source(3), source(4)]);
+        ed.commit().expect("commits");
+        record(&mut r);
+        r.editor_mut().remove(key(7));
+        r.editor_mut().commit().expect("commits");
+        record(&mut r);
+        declare_pair(&mut r, 5, 6, fade(law));
+        record(&mut r);
+        record(&mut r);
+        assert!(settle(&mut r));
+        for _ in 0..5 {
+            record(&mut r);
+        }
+        bits
+    }
+    let serial = trace(false);
+    assert!(
+        serial.iter().any(|&b| b != 0),
+        "the graph rendered something"
+    );
+    assert_eq!(serial, trace(true));
+}
+
+/// As `declare`, two channels wide.
+fn declare_pair(r: &mut Renderer, a: u64, b: u64, fade: Fade) {
+    let ed = r.editor_mut();
+    ed.set_root_fade(Some(fade));
+    ed.spec_mut().root_id = ed.spec().root_id.next();
+    ed.spec_mut()
+        .topology
+        .set_outputs(vec![source(a), source(b)]);
+    ed.commit().expect("commits");
+}
+
+/// A carried fade reports its end once, under the seq that began it, and
+/// settling it compiles the old root's channels away.
+#[test]
+fn a_carried_fade_reports_its_end_once_and_settling_drops_the_bank() {
+    let mut r = rig();
+    step(&mut r, BLOCK);
+    declare(&mut r, 2, fade(FadeLaw::EqualAmplitude));
+    step(&mut r, BLOCK);
+    r.editor_mut().insert(
+        key(9),
+        "const",
+        Unforkable(TestNode::new(Kind::Const {
+            value: 1.0,
+            width: 1,
+        })),
+    );
+    r.editor_mut().commit().expect("commits");
+    step(&mut r, BLOCK);
+    assert!(
+        !r.editor_mut().settle_fades(),
+        "the fade has a block to run"
+    );
+    step(&mut r, BLOCK);
+    assert_eq!(r.executor().root_fade(), None);
+    assert!(r.editor_mut().settle_fades(), "reported once");
+    assert!(!r.editor_mut().settle_fades(), "and not again");
+    r.editor_mut().commit().expect("commits");
+    let block = step(&mut r, BLOCK);
+    assert_eq!(r.executor().plan().expect("plan").rendered_outputs(), 1);
+    assert!(block.new.iter().all(|&x| x == NEW));
+}
+
+/// A source removed in a carried commit leaves the bank, and the others keep
+/// their weights: the old root is `[0.5, 0.25 * 0.5]`.
+#[test]
+fn a_carried_commit_that_removes_an_old_source_drops_it_from_the_bank_and_keeps_the_others() {
+    let mut r = rig_with(
+        &[
+            (
+                1,
+                Kind::Const {
+                    value: OLD,
+                    width: 1,
+                },
+            ),
+            (
+                2,
+                Kind::Const {
+                    value: NEW,
+                    width: 1,
+                },
+            ),
+            (
+                3,
+                Kind::Const {
+                    value: THIRD,
+                    width: 1,
+                },
+            ),
+        ],
+        &[1, 2],
+    );
+    let weighted = EdgeId {
+        sink: Sink::Output(1),
+        from: Edge::Direct(source(2)),
+    };
+    r.editor_mut()
+        .spec_mut()
+        .gains
+        .insert(weighted, EdgeGain::new(Amplitude(0.5)));
+    r.editor_mut().commit().expect("commits");
+    step(&mut r, BLOCK);
+    r.editor_mut().spec_mut().gains.remove(&weighted);
+    declare_pair(&mut r, 3, 3, fade(FadeLaw::EqualAmplitude));
+    let block = step(&mut r, BLOCK);
+    assert!(block.all[2].iter().all(|&x| x == OLD));
+    assert!(block.all[3].iter().all(|&x| x == NEW * 0.5), "weighted");
+    r.editor_mut().remove(key(1));
+    r.editor_mut().commit().expect("commits");
+    let block = step(&mut r, BLOCK);
+    assert!(block.fade.is_some(), "the fade goes on");
+    assert!(
+        block.all[2].iter().all(|&x| x == 0.0),
+        "the removed source left the bank"
+    );
+    assert!(
+        block.all[3].iter().all(|&x| x == NEW * 0.5),
+        "the other keeps its weight"
+    );
+}
+
+/// When every old source is gone the carried commit has no bank: a cut, with
+/// the inserted node, wired to the root, heard whole from the commit's block.
+#[test]
+fn a_carried_commit_that_removes_every_old_source_cuts() {
+    let mut r = rig();
+    step(&mut r, BLOCK);
+    declare(&mut r, 2, fade(FadeLaw::EqualAmplitude));
+    step(&mut r, BLOCK);
+    let ed = r.editor_mut();
+    ed.remove(key(1));
+    ed.insert(
+        key(9),
+        "const",
+        Unforkable(TestNode::new(Kind::Const {
+            value: 1.0,
+            width: 1,
+        })),
+    );
+    ed.spec_mut().topology.set_outputs(vec![source(9)]);
+    ed.commit().expect("commits");
+    let block = step(&mut r, BLOCK);
+    assert_eq!(block.fade, None);
+    assert_eq!(r.executor().plan().expect("plan").rendered_outputs(), 1);
+    assert!(block.new.iter().all(|&x| x == 1.0));
+}
+
+/// A carried commit that changes an old source's latency leaves the old
+/// root's alignment where the fade began it: the old root is `[emitter, lag]`,
+/// the emitter's staircase held 48 frames back to align with the lag. The new
+/// root has no latency, yet the staircase stays 48 frames back through the
+/// commit, and only the lag, whose latency moved, is touched.
+#[test]
+fn a_carried_commit_that_changes_an_old_sources_latency_keeps_the_banks_alignment() {
+    let lag = |latency| Kind::Spec {
+        behaviour: tutti_graph::testing::SpecBehaviour::Dc(NEW),
+        ins: 0,
+        outs: 1,
+        latency,
+        tail: tutti_types::Tail::None,
+    };
+    let mut r = rig_with(
+        &[
+            (
+                1,
+                Kind::Emitter {
+                    period: 80,
+                    phase: 0,
+                },
+            ),
+            (2, lag(48)),
+            (
+                3,
+                Kind::Const {
+                    value: THIRD,
+                    width: 1,
+                },
+            ),
+        ],
+        &[1, 2],
+    );
+    // The emitter's count after the block `t` falls in, aligned 48 frames late.
+    let aligned = |t: usize| {
+        if t < 48 {
+            0.0
+        } else {
+            ((t - 48) / BLOCK + 1) as f32
+        }
+    };
+    for _ in 0..2 {
+        step(&mut r, BLOCK);
+    }
+    // A new root with no latency: the plan's total drops from 48 to 0, and
+    // the old root's channels stay aligned to the 48 they were heard at.
+    declare(&mut r, 3, fade(FadeLaw::EqualAmplitude));
+    let mut t = 2 * BLOCK;
+    let heard = |r: &mut Renderer, t: &mut usize| {
+        let block = step(r, BLOCK);
+        for (i, &x) in block.all[1].iter().enumerate() {
+            assert_eq!(
+                x,
+                aligned(*t + i),
+                "the emitter's bank channel at frame {}",
+                *t + i
             );
         }
-    }
+        *t += BLOCK;
+        block
+    };
+    heard(&mut r, &mut t);
+    r.editor_mut()
+        .set_latency(key(2), Latency::new(Samples(96)))
+        .expect("sets");
+    r.editor_mut().commit().expect("commits");
+    let block = heard(&mut r, &mut t);
+    assert!(block.fade.is_some(), "the fade goes on through the commit");
+    assert!(
+        block.all[2].iter().all(|&x| x == NEW),
+        "the lag's channel is unmoved"
+    );
 }
 
 /// Applying a commit that continues a fade, one that begins another, and
@@ -362,6 +771,8 @@ mod no_alloc {
         r.editor_mut().commit().expect("commits");
         run(&mut r);
         declare(&mut r, 3, fade(law));
+        run(&mut r);
+        assert!(settle(&mut r));
         run(&mut r);
         run(&mut r);
         assert_eq!(

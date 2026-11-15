@@ -182,7 +182,9 @@ impl Editor {
             }
             return Ok(());
         }
-        let (valid, weights, fading) = self.lower_with_bank()?;
+        let overlay = self.in_force_spec();
+        let spec = overlay.as_ref().unwrap_or(&self.spec);
+        let (valid, weights, fading) = self.lower_with_bank(spec)?;
         let (mut plan, mut delta) = compile(
             &valid,
             &self.shapes,
@@ -190,7 +192,8 @@ impl Editor {
             self.base().map(|p| &**p),
         )
         .map_err(CommitError::Compile)?;
-        plan.root_id = self.spec.root_id;
+        plan.root_id = spec.root_id;
+        let in_force = overlay.clone();
         // The crossfades `replace` asked for, for the keys this delta
         // replaces (a key removed since has none to carry).
         delta.fades = delta
@@ -239,8 +242,10 @@ impl Editor {
         self.send(plan, delta, units, &weights, None);
         self.fading = fading;
         self.sync_ranges();
-        self.life
-            .set_committed(self.spec.clone(), self.shapes.clone());
+        self.life.set_committed(
+            in_force.unwrap_or_else(|| self.spec.clone()),
+            self.shapes.clone(),
+        );
         Ok(())
     }
 
@@ -258,10 +263,20 @@ impl Editor {
     ///   frames already rendered stay counted, and the old root's channels
     ///   keep the wiring they had when the fade began, less the sources
     ///   removed since.
-    /// - A commit that declares the root again ends it at that block and
-    ///   begins another, of the fade set now, from the root that was fading
-    ///   in (at full level) to the newest: the root that was fading out is
-    ///   dropped, as a plan holds two roots at most.
+    /// - A commit that declares the root again while a crossfade runs waits:
+    ///   it compiles as a continuation under the root in force, and the
+    ///   newest declared root (several coalesce to it) begins its own fade,
+    ///   from the root in force at full level, at the first commit after
+    ///   [`settle_fades`](Self::settle_fades) reports the running one over.
+    ///   No gain steps. A declaration made with no fade set (`None`, a hard
+    ///   change) does not wait: it cuts at its block and ends the crossfade
+    ///   running.
+    /// - A commit that changes the root's width without declaring it again
+    ///   ends the crossfade running as a cut: the old root's channels cannot
+    ///   stand beside a root of another width.
+    ///
+    /// While a crossfade runs the editor holds a clone of the committed spec
+    /// and shapes, the old root's wiring, until it ends.
     pub fn set_root_fade(&mut self, fade: Option<Fade>) {
         self.root_fade = fade.filter(|f| !f.is_cut());
     }
@@ -271,35 +286,82 @@ impl Editor {
         self.root_fade
     }
 
+    /// The spec the running plan is compiled from while a root declared during
+    /// a crossfade waits for it to end: this spec, with the root and the
+    /// output wiring of the root in force (the committed one, less the sources
+    /// removed since). `None` when nothing waits.
+    fn in_force_spec(&self) -> Option<GraphSpec> {
+        let fading = self.fading.as_ref()?;
+        let c = self.life.committed()?;
+        let waiting = self.root_fade.is_some()
+            && fading.root != self.spec.root_id
+            && c.spec.root_id == fading.root
+            && !self.bank.is_some_and(|b| b.ended)
+            && fading.bank.base == c.spec.topology.outputs.len();
+        if !waiting {
+            return None;
+        }
+        let alive = |source: &Source| match source {
+            Source::Node(p) => self
+                .shapes
+                .get(&p.node)
+                .is_some_and(|shape| usize::from(p.port) < usize::from(shape.audio_out().count())),
+            Source::Global(ch) => *ch < self.spec.topology.inputs.count(),
+            Source::Zero => true,
+        };
+        let mut spec = self.spec.clone();
+        spec.root_id = c.spec.root_id;
+        spec.topology.outputs = c
+            .spec
+            .topology
+            .outputs
+            .iter()
+            .map(|sources| sources.iter().copied().filter(|s| alive(s)).collect())
+            .collect();
+        spec.gains
+            .retain(|id, _| !matches!(id.sink, Sink::Output(_)));
+        spec.gains.extend(c.spec.gains.iter().filter_map(|(id, g)| {
+            let kept = match (id.sink, id.from) {
+                (Sink::Output(_), Edge::Direct(s)) => alive(&s),
+                (Sink::Output(_), Edge::Feedback(_)) => false,
+                _ => return None,
+            };
+            kept.then_some((*id, *g))
+        }));
+        Some(spec)
+    }
+
     /// The spec lowered and validated, as [`lower_and_validate`](Self::lower_and_validate)
     /// does, and, when this commit changes the root's generation and a root
     /// fade is set, with the previous root's output channels after the new
     /// root's: the old root's wiring as it was committed, over the nodes that
     /// are still here. Its lanes are static at the weights they had.
-    fn lower_with_bank(&self) -> Result<(ValidGraph, BusLanes, Option<Fading>), CommitError> {
+    fn lower_with_bank(
+        &self,
+        spec: &GraphSpec,
+    ) -> Result<(ValidGraph, BusLanes, Option<Fading>), CommitError> {
         let plain = || {
-            Self::lower_and_validate(&self.spec, &self.shapes)
-                .map(|(valid, lanes)| (valid, lanes, None))
+            Self::lower_and_validate(spec, &self.shapes).map(|(valid, lanes)| (valid, lanes, None))
         };
         let committed = self.life.committed();
         // The crossfade running, when this commit leaves its root alone and
         // its channels stand.
         let continuing = self.fading.as_ref().filter(|f| {
-            f.root == self.spec.root_id
-                && committed.is_some_and(|c| c.spec.root_id == self.spec.root_id)
+            f.root == spec.root_id
+                && committed.is_some_and(|c| c.spec.root_id == spec.root_id)
                 && !self.bank.is_some_and(|b| b.ended)
-                && f.bank.base == self.spec.topology.outputs.len()
+                && f.bank.base == spec.topology.outputs.len()
         });
         let (fade, was, published) = match (continuing, self.root_fade, committed) {
             (Some(f), _, _) => (f.bank.fade, &f.was, true),
-            (None, Some(fade), Some(c)) if c.spec.root_id != self.spec.root_id => (fade, c, false),
+            (None, Some(fade), Some(c)) if c.spec.root_id != spec.root_id => (fade, c, false),
             _ => return plain(),
         };
         let lower = |spec: &GraphSpec, shapes: &Shapes| {
             spec.lowered(shapes)
                 .map_err(|e| CommitError::Compile(CompileError::Bus(e)))
         };
-        let mut now = lower(&self.spec, &self.shapes)?;
+        let mut now = lower(spec, &self.shapes)?;
         let before = lower(&was.spec, &was.shapes)?;
         let base = now.spec.topology.outputs.len();
         let old_width = before.spec.topology.outputs.len();
@@ -365,7 +427,7 @@ impl Editor {
         };
         let fading = Fading {
             was: was.clone(),
-            root: self.spec.root_id,
+            root: spec.root_id,
             bank,
         };
         Ok((valid.with_root_bank(bank), now.weights(), Some(fading)))
@@ -419,6 +481,7 @@ impl Editor {
         resume: Option<Resume>,
     ) {
         self.touch();
+        let overlay = self.in_force_spec();
         let fades = starting(&delta);
         // A plan that carries the crossfade the last one carried continues
         // it: the executor keeps its progress, and it ends under the seq that
@@ -439,7 +502,7 @@ impl Editor {
         }
         let plan = Arc::new(plan);
         let committed = self.life.committed().map(|c| &c.spec);
-        let spec = &self.spec;
+        let spec = overlay.as_ref().unwrap_or(&self.spec);
         let (ranges, modes_cells) = (&mut self.cells.ranges, &mut self.cells.modes);
         let declick = declick_frames(plan.prepare.sample_rate()).get();
         let params = |key: NodeKey, ports: usize, max: usize| {
@@ -491,7 +554,7 @@ impl Editor {
                 },
             },
         );
-        self.cells.keep_placed(&plan, &self.spec);
+        self.cells.keep_placed(&plan, spec);
         self.link.send(commit, fades);
         // `commit` syncs the cells against the spec it last sent, then
         // records this one.

@@ -673,9 +673,9 @@ pub fn compile(
     // aligned like any output and report nothing outward.
     let rendered_outputs = topology.outputs.len();
     // An old root's channels are aligned to the output time they were heard
-    // at, the plan before this one's, so the new root's alignment does not
-    // move for the length of the fade and back after it.
-    // A plan that continues the crossfade of the one before keeps its alignment.
+    // at: the previous plan's total, or, for a plan that continues the
+    // previous plan's crossfade, the alignment that plan kept. The new root's
+    // alignment does not move for the length of the fade and back after it.
     let bank_total = match (graph.root_bank(), prev) {
         (Some(bank), Some(p)) if p.root_bank.is_some_and(|b| b.old == bank.old) => p.bank_total,
         (_, Some(p)) => p.total_latency,
