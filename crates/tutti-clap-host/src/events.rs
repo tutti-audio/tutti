@@ -614,7 +614,12 @@ impl ClapEvent {
     /// expression of any kind that makes no message (a value that is not a number,
     /// no address, a dimension with no per-note message such as vibrato or
     /// expression, a tuning past what Pitch 7.25 holds), and MIDI bytes that are
-    /// no message. A MIDI message the translator holds in a run is not.
+    /// no message. A MIDI message the translator holds in a run is not, nor is
+    /// one it drops after parsing (the translator does not say which): those
+    /// are not counted. The other event kinds are not notes or MIDI to forward
+    /// (a voice's `NoteEnd` and `NoteChoke` are notices with no UMP
+    /// counterpart; a plugin's `CLAP_EVENT_MIDI2` has no variant here and never
+    /// reaches the list) and are not counted either.
     fn lost_in_translation(&self) -> bool {
         match self {
             ClapEvent::NoteOn(e) | ClapEvent::NoteOff(e) => {

@@ -204,7 +204,10 @@ impl Unit {
     /// a withdrawal's free ([`while_uninitialized`](Self::while_uninitialized)).
     ///
     /// # Errors
-    /// The `OSStatus` of the call.
+    /// The `OSStatus` of the call. The unit is then taken to be uninitialized (a
+    /// refused `AudioUnitInitialize` leaves it so), which is what lets a
+    /// withdrawal free; an AU that took its callbacks before refusing would
+    /// break that, and none measured does.
     pub fn initialize(&self) -> std::result::Result<(), OsError> {
         let mut initialized = self.lifecycle();
         // SAFETY: `raw()` is a live instance.
