@@ -185,8 +185,10 @@ pub use params::{ParamError, RangeError, TypedParamRef};
 pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 #[cfg(feature = "plugin")]
 pub use plugin::{
-    Plugin, PluginChange, PluginEvent, PluginHealth, PluginLoad, PluginLoadRequest, PluginLoaded,
-    PluginNode, SNAPSHOT_INTERVAL, StateRestore, StateView,
+    AddPluginError, LoadedPlugin, Plugin, PluginCause, PluginChange, PluginDeclaration,
+    PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginLoad, PluginLoadRequest,
+    PluginLoaded, PluginNode, PluginPorts, PooledPlugin, SNAPSHOT_INTERVAL, StateRestore,
+    StateView,
 };
 pub(crate) use pool::Pool;
 #[cfg(feature = "sampler")]
@@ -196,6 +198,8 @@ pub use pool::{
     PoolError, PoolEvent, PoolKey, PoolOutcome, PoolReport, PoolSet, PoolState, PoolWait,
     RefreshPool, RetryError, WhenLoadedError, stranded_loads,
 };
+#[cfg(feature = "plugin")]
+pub(crate) use pool::{Hold, HoldKind};
 #[cfg(feature = "soundfont")]
 pub use pool::{SoundFontFile, soundfont};
 

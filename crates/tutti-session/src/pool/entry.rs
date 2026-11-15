@@ -409,6 +409,28 @@ pub enum LoadError {
     #[cfg(feature = "soundfont")]
     #[error(transparent)]
     SoundFont(Arc<tutti_sf2::Error>),
+    /// A plugin did not open.
+    #[cfg(feature = "plugin")]
+    #[error(transparent)]
+    Plugin(Arc<tutti_plugin_types::BridgeError>),
+    /// The plugin's id names no plugin of the catalog, or several.
+    #[cfg(feature = "plugin")]
+    #[error(transparent)]
+    Unresolved(tutti_plugin::catalog::BindError),
+    /// The landed plugin has other ports than the node over the entry, which
+    /// keeps the plugin it has.
+    #[cfg(feature = "plugin")]
+    #[error("the plugin has {got} where its node has {was}")]
+    PluginPorts {
+        /// The landed plugin's ports.
+        got: crate::PluginPorts,
+        /// The node's.
+        was: crate::PluginPorts,
+    },
+    /// The graph refused the node's swap to the landed plugin.
+    #[cfg(feature = "plugin")]
+    #[error("the node could not swap to the landed plugin: {0}")]
+    PluginSwap(Arc<crate::CrossfadeRefused>),
     /// The load's job did not finish: it panicked, or the spawner dropped it.
     #[error(transparent)]
     Job(#[from] JobFailed),

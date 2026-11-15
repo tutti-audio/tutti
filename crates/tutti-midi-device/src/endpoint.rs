@@ -51,6 +51,7 @@ pub struct FunctionBlock {
 
 /// Why a [`FunctionBlockBuilder`] cannot build a block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum BlockError {
     /// The direction is the reserved `0b00` (M2-104 §7.1.8).
     #[error("the block's direction is the reserved 0b00")]
@@ -62,6 +63,15 @@ pub enum BlockError {
         first_group: FirstGroup,
         /// How many Groups it was to span.
         groups: GroupSpan,
+    },
+    /// The UI hint names a role the direction rules out: a receiver hint on
+    /// an output-only block, or a sender hint on an input-only one (§7.1.8).
+    #[error("the {hint:?} UI hint contradicts the {direction:?} direction")]
+    UiHintContradictsDirection {
+        /// The block's direction.
+        direction: BlockDirection,
+        /// The hint that contradicts it.
+        hint: UiHint,
     },
     /// The MIDI 1.0 port is the reserved `0x03`.
     #[error("the block's MIDI 1.0 port is the reserved 3")]
@@ -94,9 +104,22 @@ impl FunctionBlockBuilder {
     }
 
     /// The block's UI hint (default: [`UiHint::Unknown`]).
+    /// [`build`](Self::build) refuses a hint the direction rules out.
     pub const fn ui_hint(mut self, hint: UiHint) -> Self {
         self.block.ui_hint = hint;
         self
+    }
+
+    /// The block's UI hint as read off the wire: a hint the direction rules
+    /// out is kept as [`UiHint::Unknown`], so a block a peer or an OS
+    /// describes is never refused for it.
+    pub const fn wire_ui_hint(self, hint: UiHint) -> Self {
+        let hint = if contradicts(self.block.direction, hint) {
+            UiHint::Unknown
+        } else {
+            hint
+        };
+        self.ui_hint(hint)
     }
 
     /// Whether the block is a MIDI 1.0 port (default: [`Midi1Port::No`]).
@@ -126,8 +149,9 @@ impl FunctionBlockBuilder {
     ///
     /// # Errors
     ///
-    /// A [`BlockError`]: the reserved direction, Groups past Group 16, the
-    /// reserved MIDI 1.0 port, or a MIDI 1.0 port over several Groups.
+    /// A [`BlockError`]: the reserved direction, Groups past Group 16, a UI hint
+    /// that contradicts the direction, the reserved MIDI 1.0 port, or a MIDI 1.0
+    /// port over several Groups.
     pub fn build(self) -> Result<FunctionBlock, BlockError> {
         let block = self.block;
         if matches!(block.direction, BlockDirection::Reserved(_)) {
@@ -137,6 +161,12 @@ impl FunctionBlockBuilder {
             return Err(BlockError::PastGroup16 {
                 first_group: block.first_group,
                 groups: block.groups,
+            });
+        }
+        if contradicts(block.direction, block.ui_hint) {
+            return Err(BlockError::UiHintContradictsDirection {
+                direction: block.direction,
+                hint: block.ui_hint,
             });
         }
         match block.midi1 {
@@ -268,12 +298,22 @@ impl FunctionBlock {
         };
         Self::builder(id, info.direction, first_group, groups)
             .active(info.active)
-            .ui_hint(info.ui_hint)
+            .wire_ui_hint(info.ui_hint)
             .midi1(midi1)
             .midi_ci(info.midi_ci_version, info.max_sysex8_streams)
             .build()
             .ok()
     }
+}
+
+/// Whether `hint` names a role `direction` rules out (§7.1.8): an
+/// output-only block is not primarily a receiver, nor an input-only one
+/// primarily a sender.
+const fn contradicts(direction: BlockDirection, hint: UiHint) -> bool {
+    matches!(
+        (direction, hint),
+        (BlockDirection::Output, UiHint::Receiver) | (BlockDirection::Input, UiHint::Sender)
+    )
 }
 
 /// What [`Endpoint::reply`] did with one message.

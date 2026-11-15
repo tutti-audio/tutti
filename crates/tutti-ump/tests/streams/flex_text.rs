@@ -2,7 +2,9 @@
 //! Complete for up to 12 bytes, else Start, Continue, End, the last padded
 //! with zeros).
 
-use tutti_ump::{Flex, FlexAddress, FlexTextKind, Form, Message, MidiGroup, flex_text_packets};
+use tutti_ump::{
+    FLEX_TEXT_MAX_LEN, Flex, FlexAddress, FlexTextKind, Form, Message, MidiGroup, flex_text_packets,
+};
 
 fn packets(text: &str) -> Vec<(Form, [u8; 12])> {
     flex_text_packets(
@@ -94,6 +96,31 @@ fn a_nul_is_refused() {
             FlexAddress::Group,
             FlexTextKind::Lyrics,
             "a\0b"
+        )
+        .is_none()
+    );
+}
+
+/// A Flex Data message has at most 32 packets: a Start, 30 Continue and an
+/// End carry the longest text, and one byte more is refused.
+/// Spec: m2-104/7.5.1#4
+#[test]
+fn a_message_has_at_most_32_packets() {
+    let longest = "x".repeat(FLEX_TEXT_MAX_LEN);
+    let umps = flex_text_packets(
+        MidiGroup::of(0),
+        FlexAddress::Group,
+        FlexTextKind::Lyrics,
+        &longest,
+    )
+    .unwrap();
+    assert_eq!(umps.len(), 32);
+    assert!(
+        flex_text_packets(
+            MidiGroup::of(0),
+            FlexAddress::Group,
+            FlexTextKind::Lyrics,
+            &format!("{longest}x")
         )
         .is_none()
     );

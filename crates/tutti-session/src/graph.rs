@@ -950,6 +950,56 @@ impl Graph {
         }
     }
 
+    /// [`replace_plugin`](Self::replace_plugin) for a plugin hosted in process:
+    /// bound and swapped in at `node`, its record carried over to it.
+    ///
+    /// # Errors
+    ///
+    /// As [`replace_plugin`](Self::replace_plugin), handing `plugin` back
+    /// while the graph re-prepares.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn replace_hosted_plugin(
+        &mut self,
+        node: NodeKey,
+        plugin: Box<tutti_plugin::catalog::Plugin>,
+        fade: Seconds,
+        law: FadeLaw,
+    ) -> Result<(), ReplaceRefused<Box<tutti_plugin::catalog::Plugin>>> {
+        if let Some(cause) = self.editor.poison_cause() {
+            return Err(ReplaceRefused::Failed(CrossfadeRefused::Poisoned(
+                cause.to_owned(),
+            )));
+        }
+        if !self.nodes.contains_key(&node) {
+            return Err(ReplaceRefused::Failed(CrossfadeRefused::NoSuchNode(node)));
+        }
+        if self.editor.is_repreparing() {
+            return Err(ReplaceRefused::Busy(plugin));
+        }
+        let handle = plugin.handle().clone();
+        let controls = plugin.node_controls();
+        let plugin_ref = plugin.plugin().clone();
+        let bound = (*plugin).bind(self.tempo.clone());
+        match self.swap_unit(node, bound, fade, law) {
+            Ok(_) => {
+                match self.plugins.get_mut(&node) {
+                    Some(hosted) => {
+                        let outgoing = hosted.replace_hosted(handle, controls, plugin_ref);
+                        self.graveyard.bury_handle(outgoing);
+                    }
+                    None => {
+                        let mut hosted = crate::plugin::HostedPlugin::new(handle, plugin_ref);
+                        hosted.node = Some(controls);
+                        self.plugins.insert(node, hosted);
+                    }
+                }
+                Ok(())
+            }
+            Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
+            Err(ReplaceRefused::Busy(_)) => unreachable!("checked above"),
+        }
+    }
+
     /// The control-thread half of a copy of the master for an offline render
     /// at `rate`, sharing no state with this graph: `Editor::fork_gather`
     /// with `ForkMode::Offline`, prepared as a bounce is
