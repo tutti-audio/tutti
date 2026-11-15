@@ -43,6 +43,12 @@ mod status;
 mod transport;
 mod unit;
 
+// Test-only global allocator for the no-alloc tests: panics on any heap
+// allocation inside `assert_no_alloc::assert_no_alloc(..)` scopes.
+#[cfg(test)]
+#[global_allocator]
+static NO_ALLOC_HARNESS: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+
 pub use bundle::{BundleError, DeclaredComponent, declared_components};
 pub use cf::{
     NotADictionary, PresetFacts, cfstring_to_string_checked, preset_facts, preset_with_identity,

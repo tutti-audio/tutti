@@ -147,6 +147,9 @@
 //! - [`gauge()`] / [`counter()`] — a reading a node writes and any thread reads: a
 //!   level that moves both ways ([`Gauge`]) or a count that only grows
 //!   ([`Counter`]), each one word, never reset by a read.
+//! - [`RenderCount`] — the renders of one thing in flight (an `enter` that
+//!   returns a [`RenderGuard`]), and a `quiescent` check for the thread that has
+//!   cleared what they read, so it frees only when none can still read it.
 //! - [`RequestWord`] — up to 32 kinds of request a callee raises from any
 //!   thread (one `fetch_or`) and a control thread takes whole.
 //! - [`WakeFlag`] — a flag any thread raises (one store) and the audio thread
@@ -203,6 +206,7 @@ mod packed_atomic;
 mod pos_ring;
 mod priority;
 mod reclaim;
+mod render_count;
 mod request_word;
 mod ring;
 mod scope;
@@ -234,6 +238,7 @@ pub use pos_ring::{
 };
 pub use priority::{PriorityOutcome, PriorityRequest, Scheduling, request_priority};
 pub use reclaim::Reclaim;
+pub use render_count::{RenderCount, RenderGuard};
 pub use request_word::{REQUEST_BITS, RequestBit, RequestBitOutOfRange, RequestBits, RequestWord};
 pub use ring::{Drain, Iter, Overflow, PushError, Returned, RingReader, RingWriter, ring};
 pub use scope::{RtScope, RtScopeGuard};

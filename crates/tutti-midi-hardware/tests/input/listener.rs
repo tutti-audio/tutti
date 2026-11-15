@@ -6,16 +6,17 @@
 //! block begins and its frame) and renders blocks as real time passes, logging
 //! what the inlets emit.
 
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tutti_fixtures::{BlockClock, EventRig};
-use tutti_graph::{EventEdge, EventIn, EventOut, NodeKey};
-use tutti_midi_hardware::{DeviceInlets, MidiIngestNode};
-use tutti_midi_runtime::InletChange;
+use tutti_graph::{EventEdge, EventIn, EventInletNode, EventOut, NodeKey};
+use tutti_midi_hardware::{InputInlets, MidiIngestNode};
 use tutti_types::{Frame, SampleRate};
 use tutti_ump::Ump;
+
+/// How long [`Listener::hear`] plays on after the events it waited for.
+const SETTLE: Duration = Duration::from_millis(100);
 
 const RATE: f64 = 44_100.0;
 const BLOCK: usize = 64;
@@ -23,7 +24,6 @@ const SINK: NodeKey = EventRig::SINK;
 const INGEST: NodeKey = NodeKey(2);
 
 pub struct Listener {
-    inlets: Arc<DeviceInlets>,
     rig: EventRig,
     clock: BlockClock,
     origin: Instant,
@@ -34,29 +34,24 @@ pub struct Listener {
 
 impl Listener {
     /// A graph over `inlets`, whose clock reads the wall time now at frame 0.
-    pub fn over(inlets: &Arc<DeviceInlets>) -> Self {
+    pub fn over(inlets: &Arc<InputInlets>) -> Self {
         Self::build(inlets, false)
     }
 
     /// As [`over`](Self::over), with the engine's ingest node between the
     /// inlets and the log: a MIDI 1.0 message arrives widened.
-    pub fn over_ingest(inlets: &Arc<DeviceInlets>) -> Self {
+    pub fn over_ingest(inlets: &Arc<InputInlets>) -> Self {
         Self::build(inlets, true)
     }
 
-    fn build(inlets: &Arc<DeviceInlets>, ingest: bool) -> Self {
-        // The sink hears an event input per inlet slot, or, behind the ingest
-        // node, per output port of its first Group.
+    fn build(inlets: &Arc<InputInlets>, ingest: bool) -> Self {
+        // The sink hears the one inlet's event input, or, behind the ingest
+        // node, each output port of its first Group.
         let ports = tutti_midi_runtime::MidiInputPorts::FIRST_GROUP.count();
-        let slots = if ingest {
-            NonZeroUsize::new(ports).expect("a port")
-        } else {
-            inlets.slots()
-        };
-        let mut rig = EventRig::new(RATE, BLOCK, slots.get() as u16);
+        let slots = if ingest { ports } else { 1 };
+        let mut rig = EventRig::new(RATE, BLOCK, slots as u16);
         if ingest {
-            rig.editor
-                .insert(INGEST, "ingest", MidiIngestNode::new(inlets.slots()));
+            rig.editor.insert(INGEST, "ingest", MidiIngestNode::new());
             for port in 0..ports as u16 {
                 rig.feed(INGEST, port, port);
             }
@@ -65,7 +60,6 @@ impl Listener {
         let clock = BlockClock::new();
         inlets.set_clock(Some(clock.reader()));
         Self {
-            inlets: Arc::clone(inlets),
             rig,
             clock,
             origin: Instant::now(),
@@ -74,22 +68,18 @@ impl Listener {
         }
     }
 
-    /// Wires the inlets of the ports opened since.
-    pub fn apply(&mut self) {
-        for change in self.inlets.take_changes() {
-            if let InletChange::Attach { slot, node } = change {
-                let slot = slot.index();
-                let key = NodeKey(100 + slot as u64);
-                self.rig.editor.insert(key, "inlet", node);
-                self.rig.editor.spec_mut().connect_events(
-                    EventIn {
-                        node: self.entry,
-                        port: slot as u16,
-                    },
-                    EventEdge::Direct(EventOut { node: key, port: 0 }),
-                );
-            }
-        }
+    /// Adds the inlet of a port that opened and wires it to the entry's one
+    /// event input.
+    pub fn attach(&mut self, inlet: EventInletNode) {
+        let key = NodeKey(100);
+        self.rig.editor.insert(key, "inlet", inlet);
+        self.rig.editor.spec_mut().connect_events(
+            EventIn {
+                node: self.entry,
+                port: 0,
+            },
+            EventEdge::Direct(EventOut { node: key, port: 0 }),
+        );
         self.rig.commit();
     }
 
@@ -103,6 +93,19 @@ impl Listener {
             self.rig.block(BLOCK);
             self.frames += BLOCK as u64;
         }
+    }
+
+    /// Plays until `count` events have arrived or `patience` has passed, then
+    /// for [`SETTLE`] more, so that an event beyond `count` is heard too, and
+    /// returns what arrived. The wait is for the events, not a span guessed to
+    /// be long enough for a loaded machine.
+    pub fn hear(&mut self, count: usize, patience: Duration) -> Vec<Ump> {
+        let end = Instant::now() + patience;
+        while self.rig.seen.lock().unwrap().len() < count && Instant::now() < end {
+            self.play();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        self.listen(SETTLE)
     }
 
     /// Plays for `span` of real time and returns what arrived.

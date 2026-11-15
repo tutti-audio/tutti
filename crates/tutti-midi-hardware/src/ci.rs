@@ -543,18 +543,7 @@ impl Ci {
     /// Asks that the peer of `switch` be sent it at the next poll, after
     /// checking the peer still lists the Profile at that address.
     pub(crate) fn set_profile(&mut self, switch: ProfileSwitch) -> Result<(), ProfileError> {
-        let peer = self
-            .profiles
-            .iter()
-            .find(|p| p.group() == switch.group && p.muid() == switch.muid)
-            .ok_or(ProfileError::NoSuchPeer)?;
-        let address = match switch.switch {
-            Switch::On(target) => target.address(),
-            Switch::Off(address) => address,
-        };
-        if peer.table().get(address, switch.profile).is_none() {
-            return Err(ProfileError::NotListed);
-        }
+        switch.check(&self.profiles)?;
         self.queue.push(switch);
         Ok(())
     }
@@ -567,9 +556,7 @@ impl Ci {
     /// Asks that the peer of `ask` be sent its request at the next poll, after
     /// checking it is still one that supports MIDI Message Report.
     pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), ReportError> {
-        if !self.reporters.contains(&ask.peer) {
-            return Err(ReportError::NoSuchPeer);
-        }
+        ask.check(&self.reporters)?;
         self.reports.push(ask);
         Ok(())
     }
@@ -1308,9 +1295,9 @@ impl Member {
 
 /// Queues the messages as SysEx7 on `out`, each in one batch. A refusal is not
 /// retried: Discovery and its replies are repeated by their protocol, and a
-/// lost one is a peer found later or never. A device takes a batch as a prefix
-/// (`MidiOut::queue`), so a message taken in part is a SysEx7 whose end the
-/// device never gets; it is logged as cut, apart from one wholly refused.
+/// lost one is a peer found later or never. A device takes a batch as a whole
+/// message or not at all (`MidiOut::queue_timed`), so a refused message leaves
+/// no SysEx7 without its end on the wire; it is logged and counted as refused.
 fn send(out: &mut OpenOutput, sends: &[(MidiGroup, CiMessage)]) -> Losses {
     let mut refused = 0;
     for (group, message) in sends {
@@ -1318,20 +1305,9 @@ fn send(out: &mut OpenOutput, sends: &[(MidiGroup, CiMessage)]) -> Losses {
             .packets(*group)
             .map(|ump| (Offset::ZERO, ump))
             .collect();
-        match out.queue(&packets) {
-            taken if taken == packets.len() => {}
-            0 => {
-                refused += 1;
-                tracing::debug!("a MIDI-CI message was refused by {}", out.name());
-            }
-            taken => {
-                refused += 1;
-                tracing::debug!(
-                    "a MIDI-CI message was cut after {taken} of {} packets by {}",
-                    packets.len(),
-                    out.name()
-                );
-            }
+        if !out.queue(&packets).is_all(&packets) {
+            refused += 1;
+            tracing::debug!("a MIDI-CI message was refused by {}", out.name());
         }
     }
     Losses::refused(refused)
@@ -1339,7 +1315,6 @@ fn send(out: &mut OpenOutput, sends: &[(MidiGroup, CiMessage)]) -> Losses {
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroUsize;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -1361,14 +1336,13 @@ mod tests {
 
     /// The output of a fake device, and the counters of what it was sent.
     fn output() -> (OpenOutput, FakeCounters) {
-        output_accepting(usize::MAX)
+        output_taking(usize::MAX)
     }
 
-    /// As [`output`], taking at most `accepts` packets of a batch.
-    fn output_accepting(accepts: usize) -> (OpenOutput, FakeCounters) {
-        let (backend, counters) = FakeBackend::build_with(vec![], vec![], accepts);
-        let inlets = tutti_midi_runtime::DeviceInlets::new(
-            NonZeroUsize::new(4).unwrap(),
+    /// As [`output`], the device taking `room` packets in all.
+    fn output_taking(room: usize) -> (OpenOutput, FakeCounters) {
+        let (backend, counters) = FakeBackend::build_with(vec![], vec![], room);
+        let inlets = tutti_midi_runtime::InputInlets::new(
             tutti_graph::EventCapacity::of(64),
             Duration::ZERO,
         );
@@ -1376,6 +1350,25 @@ mod tests {
         counters.plug(endpoint(7, "Wire"), PortDirection::Duplex);
         let id = session.outputs().first().expect("the device").id.clone();
         (session.connect_output(&id).unwrap(), counters)
+    }
+
+    // A MIDI-CI message is SysEx7 packets, and a device with room for some of
+    // them takes none: a SysEx7 whose end the device never gets is no message.
+    #[test]
+    fn a_ci_message_the_device_has_no_room_for_whole_is_not_sent_in_part() {
+        let message = CiMessage::Discovery {
+            header: CiHeader::new(Muid::of(0x0012_3456)),
+            data: DiscoveryData::new(identity(), CiCategories::empty(), MaxSysexSize::of(256)),
+        };
+        let packets = message.packets(G0).count();
+        assert!(packets >= 2, "a message of several packets");
+        let (mut out, counters) = output_taking(packets - 1);
+        assert_eq!(send(&mut out, &[(G0, message.clone())]), Losses::refused(1));
+        assert!(counters.take_sent(EndpointId::from_raw(7)).is_empty());
+
+        let (mut out, counters) = output_taking(packets);
+        assert_eq!(send(&mut out, &[(G0, message)]), Losses::NONE);
+        assert_eq!(counters.take_sent(EndpointId::from_raw(7)).len(), packets);
     }
 
     /// An entropy source that refuses draws `from..to` (counted from 1) and
@@ -1520,7 +1513,7 @@ mod tests {
     #[test]
     fn a_ci_message_the_output_refuses_is_counted_and_one_it_takes_is_not() {
         let now = Instant::now();
-        let (mut full, _counters) = output_accepting(0);
+        let (mut full, _counters) = output_taking(0);
         let (_, changes) = Running::start(&[G0, G1], identity(), &mut entropy, now, &mut full);
         assert_eq!(changes.refused, Losses::refused(2));
 
@@ -1530,12 +1523,12 @@ mod tests {
         assert!(counters.sent() > 0, "the messages were sent");
     }
 
-    // A message taken in part is a SysEx whose end the device never gets: it
-    // is counted too.
+    // A message the output has room for only in part is not sent in part: it
+    // is refused whole, and counted.
     #[test]
-    fn a_ci_message_the_output_takes_in_part_is_counted() {
+    fn a_ci_message_the_output_has_room_for_only_in_part_is_counted() {
         let now = Instant::now();
-        let (mut short, _counters) = output_accepting(1);
+        let (mut short, _counters) = output_taking(1);
         let (_, changes) = Running::start(&[G0], identity(), &mut entropy, now, &mut short);
         assert_eq!(changes.refused, Losses::refused(1));
     }
@@ -1675,8 +1668,7 @@ mod tests {
     /// The id of a fake device.
     fn device_id() -> DeviceId {
         let (backend, counters) = FakeBackend::build_with(vec![], vec![], usize::MAX);
-        let inlets = tutti_midi_runtime::DeviceInlets::new(
-            NonZeroUsize::new(4).unwrap(),
+        let inlets = tutti_midi_runtime::InputInlets::new(
             tutti_graph::EventCapacity::of(64),
             Duration::ZERO,
         );

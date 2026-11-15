@@ -9,8 +9,7 @@
 //! scipy and numpy, which know nothing of tutti. Neither side reads the other's
 //! expectation.
 //!
-//! Only tutti-dsp's public API is used: a design's model, its runner, and
-//! `Realized::process`, as a node drives them.
+//! Only tutti-dsp's public API is used: a design's model and its bank, as a node drives them.
 //!
 //! Run: `cargo run --release -p tutti-verify --bin render_dsp_cases -- <outdir>`
 
@@ -20,44 +19,33 @@ use std::path::Path;
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    ChunkSize, CrossoverControls, CrossoverFamily, Family, Glide, LadderControls, LadderFamily,
-    LadderType, Lanes, PhaserChain, Recurrence, Setup, Stages, StreamingResampler, SvfBank,
+    ChunkSize, CrossoverBank, CrossoverControls, CrossoverModel, Glide, LadderBank, LadderControls,
+    LadderDesign, LadderModel, LadderType, Lanes, PhaserChain, Stages, StreamingResampler, SvfBank,
     SvfCoefficients, SvfControls, SvfModel, SvfType, allpass_coeff,
 };
 use tutti_fixtures::signal::write_wav_f32;
-use tutti_types::{
-    BusTopology, ChannelLayout, Db, Drive, Hz, MaxBlock, Q, Resonance, SampleRate, Samples,
-};
+use tutti_types::{ChannelLayout, Db, Drive, Hz, Q, Resonance, SampleRate};
 
 const RATE: f64 = 48_000.0;
 /// Impulse-response length: long enough that every case below has rung out.
 const IR_FRAMES: usize = 1 << 16;
 
-/// Runs `design` (a family that does not grow) at `controls` over `input` (mono in), returning one plane per output.
-fn run<D: Family<Recurrence: Recurrence<Capacity = ()>>>(
-    design: &D,
-    controls: &D::Controls,
-    rate: SampleRate,
+/// Runs `input` (mono in) through `process`, a block of 512 frames at a time, into `outputs`
+/// planes.
+fn blocks(
     input: &[f32],
+    outputs: usize,
+    mut process: impl FnMut(Planes<'_, f32>, PlanesMut<'_, '_, f32>),
 ) -> Vec<Vec<f32>> {
-    let mut k = design.realized(rate);
-    let setup = Setup {
-        rate,
-        max_block: MaxBlock::of(Samples(512)),
-    };
-    k.prepare(&(), &setup);
-    k.retarget(&design.member(controls, rate));
-    let outputs = design.channels().output_width();
     let mut out = vec![vec![0.0f32; input.len()]; outputs];
-    for (start, block) in (0..input.len())
-        .step_by(512)
-        .map(|s| (s, &input[s..(s + 512).min(input.len())]))
-    {
-        let mut outs: Vec<&mut [f32]> = out
-            .iter_mut()
-            .map(|c| &mut c[start..start + block.len()])
-            .collect();
-        k.process(&tutti_dsp::Inputs::new(&[block]), &mut outs, block.len());
+    for start in (0..input.len()).step_by(512) {
+        let end = (start + 512).min(input.len());
+        let ins = [&input[start..end]];
+        let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[start..end]).collect();
+        process(
+            Planes::new(&ins).expect("one plane"),
+            PlanesMut::new(&mut outs).expect("equal planes"),
+        );
     }
     out
 }
@@ -168,7 +156,6 @@ fn svf(dir: &Path, cases: &mut Cases) {
 
 fn ladder(dir: &Path, cases: &mut Cases) {
     let rate = SampleRate::of(RATE);
-    let d = LadderFamily::<f64>::new(BusTopology::MONO);
     // The impulse is small so the saturator (tanh) stays in its linear region:
     // the case judges the small-signal response, and the Python half divides the
     // amplitude out.
@@ -188,7 +175,12 @@ fn ladder(dir: &Path, cases: &mut Cases) {
                 drive: Drive::UNITY,
             };
             let name = format!("ladder_{label}_{freq}_{res}");
-            wav(dir, &name, RATE, &run(&d, &c, rate, &impulse(amplitude)));
+            let mut bank = LadderBank::<f64>::new(ChannelLayout::MONO);
+            let mut design = Glide::landed(LadderDesign::from(&LadderModel::new(c, rate)));
+            let out = blocks(&impulse(amplitude), 1, |x, y| {
+                bank.process(&mut design, x, y);
+            });
+            wav(dir, &name, RATE, &out);
             cases.push(
                 &name,
                 "ladder",
@@ -207,11 +199,16 @@ fn crossover(dir: &Path, cases: &mut Cases) {
         ("lr4_2band", vec![1_000.0f32]),
         ("lr4_3band", vec![300.0, 3_000.0]),
     ] {
-        let d = CrossoverFamily::new(BusTopology::MONO, splits.len() + 1).expect("bands");
         let hz: Vec<Hz> = splits.iter().map(|&f| Hz(f)).collect();
         let c = CrossoverControls::new(&hz, rate).expect("controls");
+        let model = CrossoverModel::designed(splits.len() + 1, &c, rate).expect("bands");
+        let mut bank = CrossoverBank::new(ChannelLayout::MONO);
+        let mut coefficients = Glide::landed(model.coefficients());
         // One channel per band, band 0 first.
-        wav(dir, name, RATE, &run(&d, &c, rate, &impulse(1.0)));
+        let out = blocks(&impulse(1.0), model.bands(), |x, y| {
+            bank.process(&mut coefficients, x, y);
+        });
+        wav(dir, name, RATE, &out);
         cases.push(name, "crossover", RATE, &format!(r#""splits": {splits:?}"#));
     }
 }

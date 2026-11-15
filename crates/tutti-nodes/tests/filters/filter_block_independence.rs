@@ -365,14 +365,14 @@ fn the_crossover_renders_alike_at_every_block_length_with_lanes() {
     });
 }
 
-/// A step in a crossover's lane at frame 40 is held to the next grid point and then
-/// whole: the point at 32 reads the old frequency and its segment runs on that set
-/// to frame 47; the point at 48 reads the new one and its segment runs on it, the
-/// same set at frame 48 and at frame 63 (the coefficients do not ramp). An impulse
-/// into a crossover with no state answers with the set in force at that frame, so
-/// the low band there is the held crossover's with that frequency, bit for bit.
+/// A step in a crossover's lane at frame 40 is held to the next grid point, then glides: the
+/// point at 32 reads the old frequency and its segment runs on that set to frame 47; the
+/// point at 48 reads the new one and the integrator gain `g = tan(pi f / fs)` moves linearly
+/// to it over the 16 frames, frame 48 + m at step m + 1 of 16, reached exactly at frame 63. An
+/// impulse into a crossover with no state answers with the set in force at that frame, so the
+/// low band there is `a3^2`, `a3 = g^2 / (1 + g (g + sqrt2))`, at that frame's gain.
 #[test]
-fn a_crossover_lane_step_is_held_to_the_next_grid_point_then_whole() {
+fn a_crossover_lane_step_is_held_to_the_next_grid_point_then_glides() {
     const STEP: usize = 40;
     let (old, new) = (400.0f32, 4_000.0f32);
     let lane: Vec<f32> = (0..64).map(|i| if i < STEP { old } else { new }).collect();
@@ -386,13 +386,28 @@ fn a_crossover_lane_step_is_held_to_the_next_grid_point_then_whole() {
         f64::from(out[0][at])
     };
     let at_old = response(Some(old), 47);
-    let at_new = response(Some(new), 48);
+    let at_new = response(Some(new), 63);
     assert_ne!(at_old, at_new, "the two frequencies must be told apart");
     assert_eq!(
         response(None, 47),
         at_old,
         "frame 47 is still on the old set"
     );
-    assert_eq!(response(None, 48), at_new, "frame 48 is on the new set");
-    assert_eq!(response(None, 63), at_new, "and so is frame 63");
+    assert_eq!(
+        response(None, 63),
+        at_new,
+        "frame 63 is on the new set, exactly"
+    );
+    let g = |hz: f32| (core::f64::consts::PI * f64::from(hz) / RATE.get()).tan();
+    for at in [48usize, 49, 55, 62] {
+        let step = (at - 47) as f64 / 16.0;
+        let g = g(old) + (g(new) - g(old)) * step;
+        let a3 = g * g / (1.0 + g * (g + core::f64::consts::SQRT_2));
+        let got = response(None, at);
+        assert!(
+            (got - a3 * a3).abs() < 1e-6 * a3 * a3,
+            "frame {at}: {got} against {}",
+            a3 * a3
+        );
+    }
 }

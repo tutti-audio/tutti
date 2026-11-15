@@ -9,6 +9,7 @@
 //! without it every test here fails, naming that command. They must fail
 //! rather than skip.
 
+use crate::pooled::{LoadPlugin, Spec};
 use crate::support;
 use tutti_session::Root;
 use tutti_session::{PluginChange, PluginEvent};
@@ -22,7 +23,7 @@ use tutti_plugin::catalog::{Loadable, PluginRef};
 use tutti_plugin::handles::PluginClient;
 use tutti_plugin_types::{Normalized, ParamId};
 use tutti_session::{
-    Crossfade, EventInPort, EventOutPort, PHASES, ParamRef, PhaseCx, PluginLoadRequest, RouteSpec,
+    Crossfade, DetachedSession, EventInPort, EventOutPort, PHASES, ParamRef, PhaseCx, RouteSpec,
     Session, SessionEvent,
 };
 use tutti_types::{ChannelLayout, Depth, Hz, SampleRate, Seconds};
@@ -43,7 +44,7 @@ fn set_env(key: &str, value: impl AsRef<std::ffi::OsStr>) {
 
 /// A detached stereo session at 48 kHz, the probe's server in the
 /// environment.
-fn detached() -> Session {
+fn detached() -> DetachedSession {
     set_env("TUTTI_PLUGIN_SERVER", plugin_server());
     // Jobs run inline, in the phase that submits them, and land in the next
     // update's `Collect`.
@@ -55,11 +56,11 @@ fn detached() -> Session {
 }
 
 /// Loads the probe into `s` and puts it on the outputs.
-fn add_probe(s: &mut Session) -> tutti_session::Key<tutti_session::PluginNode> {
+fn add_probe(s: &mut DetachedSession) -> tutti_session::Key<tutti_session::PluginNode> {
     let node = s
-        .add_plugin_blocking(
+        .load_plugin_blocking(
             tutti_fixtures::main_thread(),
-            PluginLoadRequest::new(PluginRef::file(clap_probe()).expect("a plugin file")),
+            Spec::new(PluginRef::file(clap_probe()).expect("a plugin file")),
         )
         .expect("the reference CLAP plugin loads");
     s.graph().connect(node, Root).unwrap();
@@ -83,7 +84,7 @@ impl Drive {
     }
 
     /// One frame: every phase at the clock 20 ms on.
-    fn update(&mut self, s: &mut Session) {
+    fn update(&mut self, s: &mut DetachedSession) {
         self.now += Duration::from_millis(20);
         let mut out = Vec::new();
         for &phase in PHASES {
@@ -111,7 +112,7 @@ impl Drive {
     /// [`update`](Self::update) and a plugin chunk's worth of frames rendered
     /// from the graph (the pipeline sends the server one block per chunk).
     /// Whether any was non-zero.
-    fn frame(&mut self, s: &mut Session) -> bool {
+    fn frame(&mut self, s: &mut DetachedSession) -> bool {
         self.update(s);
         let mut heard = false;
         for _ in 0..CHUNK {
@@ -125,9 +126,9 @@ impl Drive {
 }
 
 /// Updates until the plugin at `node` has its parameter values read.
-fn wait_for_values(drive: &mut Drive, s: &mut Session, node: impl Into<NodeKey> + Copy) {
+fn wait_for_values(drive: &mut Drive, s: &mut DetachedSession, node: impl Into<NodeKey> + Copy) {
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !s.plugin(node).is_ok_and(|p| p.params().is_ready()) {
+    while !s.plugin_view(node).is_ok_and(|p| p.params().is_ready()) {
         assert!(
             Instant::now() < deadline,
             "the plugin's parameter read never landed"
@@ -138,7 +139,7 @@ fn wait_for_values(drive: &mut Drive, s: &mut Session, node: impl Into<NodeKey> 
 }
 
 /// The node of `target`'s lane, waiting for it while the declarations apply.
-fn lane_of(drive: &mut Drive, s: &mut Session, target: ParamRef) -> NodeKey {
+fn lane_of(drive: &mut Drive, s: &mut DetachedSession, target: ParamRef) -> NodeKey {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         assert!(
@@ -156,8 +157,8 @@ fn lane_of(drive: &mut Drive, s: &mut Session, target: ParamRef) -> NodeKey {
     }
 }
 
-fn gain_value(s: &Session, node: impl Into<NodeKey> + Copy) -> Option<Normalized> {
-    s.plugin(node)
+fn gain_value(s: &DetachedSession, node: impl Into<NodeKey> + Copy) -> Option<Normalized> {
+    s.plugin_view(node)
         .expect("hosted")
         .handle()
         .any_thread()
@@ -182,6 +183,8 @@ fn a_modulation_lane_on_the_plugin_survives_its_replacement() {
     let once = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join(format!("session-recovery-lane.once.{}", std::process::id()));
     let _ = std::fs::remove_file(&once);
+    // The probe of the plugin's file runs before the fault variable is set.
+    crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
     set_env("TUTTI_CLAP_PROBE_RENDER_MODE", "1");
     set_env("TUTTI_CLAP_PROBE_ONCE_FILE", &once);
     set_env("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "8");
@@ -292,7 +295,7 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
     assert!(matches!(landed, Crossfade::Landed(())), "nothing waits");
     // Rebuilt by the crossfade: not ready until the job is run and landed.
     assert!(
-        !s.plugin(node).is_ok_and(|p| p.params().is_ready()),
+        !s.plugin_view(node).is_ok_and(|p| p.params().is_ready()),
         "the incoming plugin's mirror starts unread"
     );
     wait_for_values(&mut drive, &mut s, node);
@@ -336,6 +339,8 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     const BLOCK: usize = 1_024;
     const BLOCKS: usize = 24;
 
+    // The plugin's file is probed before its variables are set.
+    crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
     set_env("TUTTI_CLAP_PROBE_RENDER_MODE", "2");
     set_env("TUTTI_CLAP_PROBE_APPLY_GAIN", "1");
     let mut s = detached();
@@ -444,6 +449,6 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     }
 }
 
-fn diagnostics_of(s: &Session, node: NodeKey) -> tutti_session::Diagnostics<'_> {
-    s.plugin(node).expect("hosted").diagnostics()
+fn diagnostics_of(s: &DetachedSession, node: NodeKey) -> tutti_session::Diagnostics<'_> {
+    s.plugin_view(node).expect("hosted").diagnostics()
 }

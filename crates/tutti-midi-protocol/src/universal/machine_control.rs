@@ -45,6 +45,7 @@
 mod command;
 mod field;
 mod read;
+mod segmentation;
 mod values;
 mod write;
 
@@ -61,14 +62,18 @@ pub use command::{
     MmcProcedure, MmcReservedCommand, MmcSystemMaster, MmcUpdate,
 };
 pub use field::*;
+pub use segmentation::{
+    MMC_MAX_SEGMENTED, MMC_MAX_SEGMENTS, MmcCommandReassembler, MmcReassembler,
+    MmcResponseReassembler, MmcSegmentError, MmcSegments, MmcSegmentsRefused, MmcString,
+};
 pub use values::{
-    MMC_MAX_TRACK_BITMAP_BYTES, MmcCodeStatus, MmcDirection, MmcExtension, MmcFragment, MmcName,
-    MmcPosition, MmcSelection, MmcShortTimeCode, MmcSign, MmcSlot, MmcSpeed, MmcStep, MmcSubframes,
-    MmcTimeCode, MmcTimeLabel, MmcTimeTail, MmcTrack, MmcTrackBitmap, MmcUserBitFlags, MmcUserBits,
-    NotMmcPosition, NotMmcSlot, NotMmcSubframes,
+    MMC_MAX_TRACK_BITMAP_BYTES, MMC_SEGMENT_BYTES, MmcCodeStatus, MmcDirection, MmcExtension,
+    MmcFragment, MmcName, MmcPosition, MmcSegmentBytes, MmcSelection, MmcShortTimeCode, MmcSign,
+    MmcSlot, MmcSpeed, MmcStep, MmcSubframes, MmcTimeCode, MmcTimeLabel, MmcTimeTail, MmcTrack,
+    MmcTrackBitmap, MmcUserBitFlags, MmcUserBits, NotMmcPosition, NotMmcSlot, NotMmcSubframes,
 };
 
-pub(crate) use read::{commands, fields};
+pub(crate) use read::{commands, fields, truncated_segment};
 
 /// The most bytes a message holds after its sub-ID (RP-013 p.2).
 pub const MMC_MAX_DATA: usize = 48;
@@ -295,6 +300,16 @@ impl<T> fmt::Debug for MmcItems<'_, T> {
     }
 }
 
+impl<'a, T> MmcItems<'a, T> {
+    /// The items of `rest`, which the caller has validated.
+    pub(crate) const fn over(rest: &'a [u8]) -> Self {
+        Self {
+            rest,
+            item: PhantomData,
+        }
+    }
+}
+
 impl<T: MmcItem> Iterator for MmcItems<'_, T> {
     type Item = T;
 
@@ -318,8 +333,8 @@ impl MmcCommands {
     /// (`7F device 06 commands`), the bytes between `F0` and `F7`. It goes out
     /// as SysEx7 through [`Sysex7Packets::from_payload`](tutti_ump::Sysex7Packets::from_payload).
     #[must_use]
-    pub fn payload(&self, to: Recipient) -> Vec<u8> {
-        framed(to.device_byte(), 0x06, self.as_bytes())
+    pub fn payload(&self, to: Recipient) -> MmcPayload {
+        MmcPayload::framed(to.device_byte(), 0x06, self.as_bytes())
     }
 }
 
@@ -327,15 +342,55 @@ impl MmcFields {
     /// The payload of the Response message from `source` (`7F source 07
     /// fields`), the bytes between `F0` and `F7`.
     #[must_use]
-    pub fn payload(&self, source: SysexDeviceId) -> Vec<u8> {
-        framed(source.get(), 0x07, self.as_bytes())
+    pub fn payload(&self, source: SysexDeviceId) -> MmcPayload {
+        MmcPayload::framed(source.get(), 0x07, self.as_bytes())
     }
 }
 
-/// `7F`, the device ID, the sub-ID and the data.
-fn framed(device: u8, sub_id: u8, data: &[u8]) -> Vec<u8> {
-    let mut payload = Vec::with_capacity(3 + data.len());
-    payload.extend_from_slice(&[0x7F, device, sub_id]);
-    payload.extend_from_slice(data);
-    payload
+/// The payload of one Machine Control message: `7F`, a device ID, the
+/// sub-ID and up to [`MMC_MAX_DATA`] data bytes, held inline so that building
+/// and sending one allocates nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MmcPayload {
+    buf: [u8; 3 + MMC_MAX_DATA],
+    len: u8,
+}
+
+impl MmcPayload {
+    /// `7F`, the device ID, the sub-ID and the data.
+    fn framed(device: u8, sub_id: u8, data: &[u8]) -> Self {
+        let mut buf = [0; 3 + MMC_MAX_DATA];
+        buf[..3].copy_from_slice(&[0x7F, device, sub_id]);
+        buf[3..3 + data.len()].copy_from_slice(data);
+        Self {
+            buf,
+            len: u8::try_from(3 + data.len()).expect("a message holds at most 48 data bytes"),
+        }
+    }
+
+    /// The bytes.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.buf[..usize::from(self.len)]
+    }
+}
+
+impl std::ops::Deref for MmcPayload {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
+impl AsRef<[u8]> for MmcPayload {
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
+impl<const N: usize> PartialEq<[u8; N]> for MmcPayload {
+    fn eq(&self, other: &[u8; N]) -> bool {
+        self.as_bytes() == other
+    }
 }

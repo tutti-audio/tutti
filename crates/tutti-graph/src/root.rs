@@ -2,7 +2,7 @@
 //! topology, so how a root of known or bare channels reaches a device or a
 //! file of which only the width is known lives here, once.
 
-use tutti_buffers::{Fold, FoldEnd, FoldError};
+use tutti_buffers::{Fold, FoldEnd, FoldError, FoldLevels};
 use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
 
 /// The generation of the graph root: each commit that changes the root's
@@ -45,6 +45,30 @@ impl std::fmt::Display for RootId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
+}
+
+/// The old root's outputs a plan renders beside its own while a root change
+/// crossfades.
+///
+/// A plan that carries one renders `base` channels of the new root (the root's
+/// width, [`Plan::global_outputs`](crate::Plan::global_outputs)) and, after
+/// them, the old root's channels: the same nodes, wired as the previous root
+/// wired them. The host folds each bank with its own root's fold and sums them
+/// under the [`fade`](Self::fade)'s gains, the old root's as the outgoing side,
+/// for the first [`Fade::duration`](crate::Fade::duration) frames the plan renders.
+///
+/// The old root's channels align to the previous plan's total latency: when the
+/// old and new totals differ, a source present in both roots is heard at two
+/// delays during the fade and shifts once at its end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RootBank {
+    /// The generation of the root that fades out.
+    pub old: RootId,
+    /// The index of the old root's first channel among the plan's outputs:
+    /// the new root's width.
+    pub base: usize,
+    /// How the two roots trade places.
+    pub fade: crate::Fade,
 }
 
 /// Why the graph root cannot be widened or placed.
@@ -119,6 +143,21 @@ pub fn fold_to_width(src: &ChannelTopology, dst: ChannelLayout) -> Result<Fold, 
 /// As [`Fold::between`] and [`Fold::by_index`], and [`FoldError::Unnamed`] as
 /// above.
 pub fn fold_to_topology(src: &ChannelTopology, dst: &ChannelTopology) -> Result<Fold, FoldError> {
+    fold_to_topology_with(src, dst, FoldLevels::default())
+}
+
+/// [`fold_to_topology`] with the downmix levels stated: where [`Fold::between`]
+/// is the fold, `levels` are its gains ([`Fold::spec`]). Channels placed by
+/// index have no levels.
+///
+/// # Errors
+///
+/// As [`fold_to_topology`].
+pub fn fold_to_topology_with(
+    src: &ChannelTopology,
+    dst: &ChannelTopology,
+    levels: FoldLevels,
+) -> Result<Fold, FoldError> {
     if let Some(channel) = src
         .positions()
         .and_then(|list| list.iter().position(|p| matches!(p, Speaker::Unknown(_))))
@@ -132,6 +171,6 @@ pub fn fold_to_topology(src: &ChannelTopology, dst: &ChannelTopology) -> Result<
     if src.is_unassigned() || src.ambisonic().is_some() || dst.is_unassigned() {
         Fold::by_index(src.width(), dst.width())
     } else {
-        Fold::between(src, dst)
+        Fold::spec(src, dst).levels(levels).build()
     }
 }

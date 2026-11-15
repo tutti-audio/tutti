@@ -28,11 +28,5 @@ pub(crate) fn open_virtual_destination(
     Err(Error::Unsupported(VIRTUAL_REASON))
 }
 
-impl From<tutti_winmm_ffi::Error> for Error {
-    fn from(e: tutti_winmm_ffi::Error) -> Self {
-        Self::WinMm {
-            operation: e.operation,
-            code: e.code,
-        }
-    }
-}
+/// The platform's own error, as [`Error::Os`](crate::Error::Os) carries it.
+pub(crate) type OsError = tutti_winmm_ffi::Error;

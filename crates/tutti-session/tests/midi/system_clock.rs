@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tutti_graph::UmpAt;
-use tutti_midi_runtime::MidiOut;
+use tutti_midi_runtime::{MidiOut, Outgoing, Taken};
 use tutti_session::{Session, UmpOut};
 use tutti_transport::MotionEvent;
 use tutti_types::{MaxBlock, SampleRate, Samples};
@@ -17,9 +17,12 @@ use tutti_ump::{Message, MidiGroup, System, Ump};
 struct Wire(Arc<Mutex<Vec<UmpAt>>>);
 
 impl MidiOut for Wire {
-    fn queue(&self, events: &[UmpAt]) -> usize {
-        self.0.lock().unwrap().extend_from_slice(events);
-        events.len()
+    fn queue_timed(&self, events: &[Outgoing]) -> Taken {
+        self.0
+            .lock()
+            .unwrap()
+            .extend(events.iter().map(|e| (e.at, e.ump)));
+        Taken::within(events, events.len())
     }
 }
 
@@ -36,7 +39,7 @@ fn the_midi_clock_reaches_the_output_on_the_timers_blocks() {
         .system_clock()
         .build()
         .expect("builds");
-    let s = system.session_mut();
+    let s = &mut system;
     let _ = s.update();
     s.midi_nodes().unwrap().clock_master.set_enabled(true);
     s.midi().set_hardware_out(Some(UmpOut::new(

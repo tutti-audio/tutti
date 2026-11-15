@@ -28,9 +28,9 @@ use super::command::{
 };
 use super::field::*;
 use super::values::{
-    MmcExtension, MmcFragment, MmcName, MmcPosition, MmcSelection, MmcShortTimeCode, MmcSlot,
-    MmcSpeed, MmcStep, MmcTimeCode, MmcTimeLabel, MmcTimeTail, MmcTrackBitmap, MmcUserBitFlags,
-    MmcUserBits, sign_of,
+    MmcExtension, MmcFragment, MmcName, MmcPosition, MmcSegmentBytes, MmcSelection,
+    MmcShortTimeCode, MmcSlot, MmcSpeed, MmcStep, MmcTimeCode, MmcTimeLabel, MmcTimeTail,
+    MmcTrackBitmap, MmcUserBitFlags, MmcUserBits, sign_of,
 };
 use super::{MMC_MAX_DATA, MmcBytes, MmcCommands, MmcFields, MmcNames, MmcSequence};
 use crate::smpte::MtcRate;
@@ -393,7 +393,7 @@ fn segment(d: &[u8]) -> Option<MmcSegment> {
             MmcSegmentPlace::Later
         },
         id & 0x3F,
-        fragment(rest)?,
+        MmcSegmentBytes::new(rest)?,
     )
 }
 
@@ -722,6 +722,28 @@ pub(crate) fn commands(rest: &[u8]) -> Option<MmcCommands> {
         return None;
     }
     sequence(rest)
+}
+
+/// The commands before a COMMAND SEGMENT whose count is more than the bytes left
+/// in the message (RP-013 p.40 b): the segment is cut short and takes the rest.
+/// `None` when the message is anything else.
+pub(crate) fn truncated_segment(rest: &[u8]) -> Option<MmcCommands> {
+    let mut input = rest;
+    while !input.is_empty() {
+        if let [0x53, count, tail @ ..] = input
+            && *count < 0x80
+            && usize::from(*count) > tail.len()
+        {
+            let before = &rest[..rest.len() - input.len()];
+            return if before.is_empty() {
+                Some(MmcCommands::new())
+            } else {
+                sequence(before)
+            };
+        }
+        command(&mut input).ok()?;
+    }
+    None
 }
 
 /// The bytes after `07`: one or more information fields, at most [`MMC_MAX_DATA`].

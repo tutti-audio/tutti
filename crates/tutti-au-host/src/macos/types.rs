@@ -45,6 +45,12 @@ pub use sys::{MIDIPacket, MIDIPacketList};
 
 // AudioToolbox functions (verbatim from coreaudio-sys — these are the real
 // framework symbols, replacing the crate's former hand-rolled `extern "C"`).
+//
+// `AudioUnitRender`, here and in the push block below, is a render this crate
+// does not count: a caller of it through a raw handle holds
+// `Unit::rendering()` across the call, or keeps it from overlapping
+// `AuMidiOutput::withdraw`, which frees the MIDI-output callback's state once
+// no counted render is in flight.
 pub use sys::{
     AudioComponentCopyName, AudioComponentCount, AudioComponentFindNext,
     AudioComponentGetDescription, AudioComponentInstanceDispose, AudioComponentInstanceNew,

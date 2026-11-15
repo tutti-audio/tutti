@@ -4,10 +4,11 @@
 //! (`tutti-vst2-host`'s `IntegerRange`), so `Hz(31.75)` is position `0.25`
 //! (the figures are the range's, written here, not read from the host).
 
+use crate::pooled::{LoadPlugin, Spec};
 use tutti_graph::NodeKey;
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_types::{Normalized, ParamId, ParamUnit};
-use tutti_session::{PluginLoadRequest, PluginParamError, Root, Session};
+use tutti_session::{DetachedSession, PluginParamError, Root, Session};
 use tutti_types::{ChannelLayout, Db, Hz, SampleRate};
 
 /// The probe's parameter that is labelled `Hz` and has an integer range.
@@ -31,16 +32,16 @@ fn probe_answering_properties() -> (libloading::Library, std::path::PathBuf) {
     (lib, path.to_path_buf())
 }
 
-fn session_with_probe() -> (Session, NodeKey, libloading::Library) {
+fn session_with_probe() -> (DetachedSession, NodeKey, libloading::Library) {
     let (image, probe) = probe_answering_properties();
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
     let node = s
-        .add_plugin_blocking(
+        .load_plugin_blocking(
             tutti_fixtures::main_thread(),
-            PluginLoadRequest::new(PluginRef::file(probe).expect("a plugin file")),
+            Spec::new(PluginRef::file(probe).expect("a plugin file")),
         )
         .expect("the in-process VST2 loads");
     s.graph().connect(node, Root).unwrap();
@@ -52,7 +53,7 @@ fn session_with_probe() -> (Session, NodeKey, libloading::Library) {
 /// wrong unit on the same parameter: `Db` on a parameter that measures hertz.
 fn a_typed_hertz_parameter_round_trips_through_the_formats_own_range() {
     let (s, node, _image) = session_with_probe();
-    let params = s.plugin(node).unwrap().params();
+    let params = s.plugin_view(node).unwrap().params();
     assert_eq!(
         params.get(HERTZ).unwrap().info().measures(),
         Some(ParamUnit::Hertz),

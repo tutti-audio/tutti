@@ -10,6 +10,7 @@
 //! every test here fails, naming that command. They must fail rather than
 //! skip.
 
+use crate::pooled::{LoadPlugin, Spec};
 use crate::support;
 
 use std::time::Instant;
@@ -21,7 +22,7 @@ use tutti_plugin::catalog::{Loadable, PluginRef};
 use tutti_plugin::handles::PluginClient;
 use tutti_session::{
     Bounce, BounceLatency, BounceTail, BufferMaster, Crossfade, ExportClock, OutPort, PHASES,
-    Phase, PhaseCx, PluginLoadRequest, Range, Root, Session, SessionEvent,
+    Phase, PhaseCx, Range, Root, Session, SessionEvent,
 };
 use tutti_session::{PluginChange, PluginEvent};
 use tutti_types::{ChannelLayout, SampleRate, Samples};
@@ -49,9 +50,9 @@ fn offline() -> Session {
 
 fn add_probe_on_outputs(s: &mut Session) -> tutti_graph::NodeKey {
     let node = s
-        .add_plugin_blocking(
+        .load_plugin_blocking(
             tutti_fixtures::main_thread(),
-            PluginLoadRequest::new(PluginRef::file(clap_probe()).expect("a plugin file")),
+            Spec::new(PluginRef::file(clap_probe()).expect("a plugin file")),
         )
         .expect("the reference CLAP plugin loads");
     s.graph()
@@ -162,6 +163,8 @@ fn request() -> Bounce<tutti_graph::NodeKey, BufferMaster> {
 /// the next update, with a `LatencyChanged`.
 #[test]
 fn a_latency_the_plugin_reports_reaches_the_graph() {
+    // The plugin's file is probed before its variables are set.
+    crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
     // SAFETY: as `set_server`: before the first server, from the test's thread.
     unsafe { std::env::set_var("TUTTI_CLAP_PROBE_OFFLINE_EXTRA_LATENCY", "300") };
     let mut s = offline();
@@ -277,11 +280,10 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
     }
     set_server();
     let (driver, stream) = ManualStreamDriver::new();
-    let (mut s, mut device) = Session::builder()
+    let mut s = Session::builder()
         .device(Default::default())
         .build_device_on(spec(512), driver)
-        .expect("builds with no device")
-        .into_parts();
+        .expect("builds with no device");
 
     let client = PluginClient::new(
         tutti_plugin::BridgeConfig::default(),
@@ -305,7 +307,7 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
     assert_eq!(s.latency(), s.graph_ref().node_latency(node).unwrap());
 
     let (driver, _new) = ManualStreamDriver::new();
-    s.restart_on(&mut device, spec(256), driver, None, None)
+    s.restart_on(spec(256), driver, None, None)
         .expect("restarts");
     assert_eq!(
         s.graph_ref().node_latency(node).unwrap(),
@@ -320,12 +322,12 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
 }
 
 fn diagnostics_of(s: &Session, node: tutti_graph::NodeKey) -> tutti_session::Diagnostics<'_> {
-    s.plugin(node).expect("hosted").diagnostics()
+    s.plugin_view(node).expect("hosted").diagnostics()
 }
 
 /// One control round trip to the probe's server: the server sends the
 /// `latency.changed` of a render mode after that call's reply, and the bridge
 /// thread reads it off the socket only while it waits for the next reply.
 fn round_trip(s: &Session, node: tutti_graph::NodeKey) {
-    let _ = s.plugin(node).expect("hosted").state().save();
+    let _ = s.plugin_view(node).expect("hosted").state().save();
 }

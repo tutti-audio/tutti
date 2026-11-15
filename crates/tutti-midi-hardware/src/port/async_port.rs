@@ -20,11 +20,10 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
-use ringbuf::traits::{Consumer, Producer, Split};
-use ringbuf::{HeapCons, HeapProd, HeapRb};
 use tutti_graph::Losses;
 use tutti_midi_device::{ClockHeard, JrReceiver};
-use tutti_midi_runtime::{DeviceInput, DeviceSlot, InletCounts};
+use tutti_midi_runtime::{DeviceInput, InletCounts, InputId};
+use tutti_rt::{Overflow, RingReader, RingWriter, ring};
 use tutti_ump::{Message, Ump, Utility};
 
 use crate::InputTiming;
@@ -159,9 +158,7 @@ pub struct InputProducerHandle {
     /// Whether the port delivers: shared with the port's entry.
     active: Arc<AtomicBool>,
     /// Where the device's UMP Stream messages go: not into the graph.
-    stream: HeapProd<Ump>,
-    /// How many of them the ring had no room for: shared with the port's entry.
-    stream_lost: Arc<AtomicU64>,
+    stream: RingWriter<Ump>,
     /// Whether the control side wants a copy of the SysEx7 packets the device
     /// sends (it is waiting for an Identity Reply): shared with the port's entry.
     hear_sysex: Arc<AtomicBool>,
@@ -183,7 +180,7 @@ const SYSEX7: u8 = 0x3;
 impl core::fmt::Debug for InputProducerHandle {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("InputProducerHandle")
-            .field("slot", &self.input.slot())
+            .field("port", &self.input.id())
             .finish_non_exhaustive()
     }
 }
@@ -191,7 +188,7 @@ impl core::fmt::Debug for InputProducerHandle {
 impl InputProducerHandle {
     /// Pushes one event the OS delivered at `timestamp`: it is placed on the
     /// frame the engine's clock puts that time on, plus the inlets' lead
-    /// ([`DeviceInlets`](tutti_midi_runtime::DeviceInlets)), so the order and
+    /// ([`InputInlets`](tutti_midi_runtime::InputInlets)), so the order and
     /// spacing of the device's events are kept to the clock map's accuracy.
     ///
     /// A **UMP Stream message** (type `0xF`, M2-104 §7.1) is the device's talk
@@ -237,9 +234,8 @@ impl InputProducerHandle {
             return Pushed::Diverted;
         }
         if event.is_stream() {
-            if self.stream.try_push(event).is_err() {
-                self.stream_lost.fetch_add(1, Ordering::Relaxed);
-            }
+            // A message the ring has no room for is counted by the ring.
+            let _ = self.stream.push(event);
             return Pushed::Diverted;
         }
         self.jr.follow(self.timing.get());
@@ -249,11 +245,8 @@ impl InputProducerHandle {
             }
             return Pushed::Diverted;
         }
-        if event.message_type() == SYSEX7
-            && self.hear_sysex.load(Ordering::Relaxed)
-            && self.stream.try_push(event).is_err()
-        {
-            self.stream_lost.fetch_add(1, Ordering::Relaxed);
+        if event.message_type() == SYSEX7 && self.hear_sysex.load(Ordering::Relaxed) {
+            let _ = self.stream.push(event);
         }
         if self.input.push(event, self.jr.place(timestamp)) {
             Pushed::Sent
@@ -262,13 +255,12 @@ impl InputProducerHandle {
         }
     }
 
-    /// The identity of the port this handle feeds, and the slot it holds
-    /// until it drops: the key to pass to
+    /// The identity of the port this handle feeds: the key to pass to
     /// [`HardwareMidiInputs`](super::HardwareMidiInputs)' `set_port_active` or
     /// `remove_input_port`.
     #[must_use]
-    pub fn slot(&self) -> DeviceSlot {
-        self.input.slot()
+    pub fn port(&self) -> InputId {
+        self.input.id()
     }
 }
 
@@ -316,8 +308,7 @@ pub(crate) struct HardwareMidiInput {
     active: Arc<AtomicBool>,
     counts: InletCounts,
     /// The reading end of the stream ring; control side, one reader at a time.
-    stream: Mutex<HeapCons<Ump>>,
-    stream_lost: Arc<AtomicU64>,
+    stream: Mutex<RingReader<Ump>>,
     hear_sysex: Arc<AtomicBool>,
     timing: Arc<SharedTiming>,
     jr_counts: Arc<JrCounts>,
@@ -327,18 +318,16 @@ impl HardwareMidiInput {
     /// A port named `name` over `input`, and the producer handle for it.
     pub(crate) fn new(name: impl Into<String>, input: DeviceInput) -> (Self, InputProducerHandle) {
         let active = Arc::new(AtomicBool::new(true));
-        let stream_lost = Arc::new(AtomicU64::new(0));
         let hear_sysex = Arc::new(AtomicBool::new(false));
         let timing = Arc::new(SharedTiming::new());
         let jr_counts = Arc::new(JrCounts::default());
-        let (stream_in, stream_out) = HeapRb::<Ump>::new(STREAM_CAPACITY).split();
+        let (stream_in, stream_out) = ring(STREAM_CAPACITY, Overflow::DropNewest);
         (
             Self {
                 name: name.into(),
                 active: Arc::clone(&active),
                 counts: input.counts(),
                 stream: Mutex::new(stream_out),
-                stream_lost: Arc::clone(&stream_lost),
                 hear_sysex: Arc::clone(&hear_sysex),
                 timing: Arc::clone(&timing),
                 jr_counts: Arc::clone(&jr_counts),
@@ -347,7 +336,6 @@ impl HardwareMidiInput {
                 input,
                 active,
                 stream: stream_in,
-                stream_lost,
                 hear_sysex,
                 timing,
                 jr: JrInput::new(jr_counts),
@@ -362,7 +350,10 @@ impl HardwareMidiInput {
 
     /// How many Stream messages the ring had no room for.
     pub(crate) fn stream_lost(&self) -> u64 {
-        self.stream_lost.load(Ordering::Relaxed)
+        self.stream
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .lost()
     }
 
     /// Whether the stream ring also takes a copy of the SysEx7 packets.
@@ -390,7 +381,7 @@ impl HardwareMidiInput {
         self.stream
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .try_pop()
+            .pop()
     }
 
     pub(crate) fn name(&self) -> &str {

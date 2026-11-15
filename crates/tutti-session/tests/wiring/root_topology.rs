@@ -15,7 +15,7 @@ use tutti_types::{ChannelLayout, ChannelTopology, Placement, SampleRate, Samples
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// The channels `values` hold, one per global output from channel 0.
-fn feed(session: &mut Session, values: &[f32]) {
+fn feed<C: tutti_session::Clock>(session: &mut Session<C>, values: &[f32]) {
     let (node, _) = session.graph().add(ForkByClone(Const::frame(values)));
     for c in 0..values.len() {
         session
@@ -86,7 +86,7 @@ fn a_declared_surround_root_folds_by_the_surround_rules() {
         Speaker::SideRight,
     ])
     .unwrap();
-    s.declare_root_topology(Some(swapped)).unwrap();
+    s.declare_root_topology(Some(swapped)).unwrap().hard();
     assert_eq!(
         heard(&mut s, 2),
         [
@@ -184,7 +184,7 @@ fn a_declaration_sets_the_roots_width_and_the_width_cannot_leave_it() {
     assert_eq!(s.root_topology_status(), RootTopologyStatus::Refused(err));
     assert_eq!(s.graph_ref().outputs(), 4);
 
-    s.declare_root_topology(None).unwrap();
+    s.declare_root_topology(None).unwrap().hard();
     assert_eq!(s.root_topology(), None);
     assert_eq!(s.graph_ref().outputs(), 4);
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.0, 0.0, 0.3, 0.4]);
@@ -251,7 +251,7 @@ fn declaring_the_same_topology_again_changes_nothing() {
 #[test]
 fn an_export_is_placed_from_the_declaration() {
     use tutti_session::{Bounce, BounceLatency, BounceTail, ExportClock, Range};
-    let planes = |s: &mut Session| {
+    let planes = |s: &mut tutti_session::DetachedSession| {
         let request = Bounce::project()
             .master_buffers()
             .channels(ChannelLayout::from(6u16))
@@ -369,10 +369,10 @@ fn a_commit_with_no_fold_into_the_device_is_refused_by_name() {
 fn a_root_declared_after_the_build_folds_from_the_plan_that_carries_it() {
     let mut s = offline(Session::builder(), 6).unwrap();
     feed(&mut s, &[0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
-    s.declare_root_topology(Some(buses(4))).unwrap();
+    s.declare_root_topology(Some(buses(4))).unwrap().hard();
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
     // Back to the bare root (the root is four wide now): quad, rears on 4, 5.
-    s.declare_root_topology(None).unwrap();
+    s.declare_root_topology(None).unwrap().hard();
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.0, 0.0, 0.3, 0.4]);
 }
 
@@ -398,7 +398,7 @@ fn a_declaration_past_the_pending_roots_is_refused_by_name() {
         // Alternate, so each declaration is a new root.
         let root = (i % 2 == 0).then(|| buses(4));
         match s.declare_root_topology(root) {
-            Ok(()) => {}
+            Ok(_) => {}
             Err(e) => {
                 refused = Some(e);
                 break;

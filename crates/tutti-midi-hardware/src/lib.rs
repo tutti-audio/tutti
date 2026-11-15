@@ -87,24 +87,25 @@
 //!
 //! [`MidiSession`] is the whole OS edge. Inbound events never pass *through* it:
 //! each opened input is a port of the session's [`HardwareMidiInputs`]
-//! (`session.ports()`), a slot of the [`DeviceInlets`] the session was opened
-//! over, and the device's own thread stamps each arrival with the frame the
-//! engine's block clock puts it on and pushes it into that device's event inlet.
-//! The graph reads the inlets on their frames (a [`MidiIngestNode`] has one event
-//! input per slot), so the audio thread converts no time. The session only owns
-//! the connection. Disconnecting drops the connection's [`InputProducerHandle`],
-//! which gives its slot back, so hot-plug cycles do not accumulate inlets.
+//! (`session.ports()`), an inlet made by the [`InputInlets`] the session was
+//! opened over, and the device's own thread stamps each arrival with the frame
+//! the engine's block clock puts it on and pushes it into that device's event
+//! inlet. The graph reads the inlets on their frames (the node
+//! `connect_input` returns is the inlet's graph side, to be wired to a
+//! [`MidiIngestNode`]), so the audio thread converts no time. The session only
+//! owns the connection. Disconnecting drops the connection's
+//! [`InputProducerHandle`] and retires its port.
 //!
 //! ```rust,no_run
 //! use std::sync::Arc;
-//! use tutti_midi_hardware::{DeviceInlets, InputTiming, MidiSession};
+//! use tutti_midi_hardware::{InputInlets, InputTiming, MidiSession};
 //! use tutti_graph::Offset;
 //! use tutti_fixtures::midi;
 //! use tutti_ump::{MidiChannel, NoteVelocity};
 //!
-//! // The inlets inbound events land in (four devices, 1024 events each, placed
-//! // 10 ms after they arrive), then a session over this platform's backend.
-//! let inlets = DeviceInlets::new(std::num::NonZeroUsize::new(4).unwrap(), tutti_graph::EventCapacity::of(1024), std::time::Duration::from_millis(10));
+//! // The inlets inbound events land in (1024 events each, placed 10 ms after
+//! // they arrive), then a session over this platform's backend.
+//! let inlets = InputInlets::new(tutti_graph::EventCapacity::of(1024), std::time::Duration::from_millis(10));
 //! let mut session = MidiSession::open(Arc::clone(&inlets))?;
 //!
 //! // The devices present now; capability (protocol, function blocks) is read from
@@ -115,16 +116,17 @@
 //!
 //! // Connect by id when the choice matters (see "Matching by name" below).
 //! if let Some(first) = session.inputs().first() {
-//!     session.connect_input(&first.id, InputTiming::Arrival)?;
+//!     // The inlet node of a newly opened input is the graph's to add and wire.
+//!     let _inlet = session.connect_input(&first.id, InputTiming::Arrival)?;
 //! }
 //! // Or by name: one `DeviceQuery` form for connect and disconnect.
 //! session.disconnect_input("keystep");
 //!
-//! // Outbound: the output is a value the caller owns; `queue` returns how many
-//! // events the device accepted.
+//! // Outbound: the output is a value the caller owns; `queue` returns what the
+//! // device took of them, always whole messages.
 //! let mut output = session.connect_output("iac")?;
 //! let note = midi::note_on(MidiChannel::FIRST, 60, 0x8000);
-//! assert_eq!(output.queue(&[(Offset::ZERO, note)]), 1);
+//! assert_eq!(output.queue(&[(Offset::ZERO, note)]).packets(), 1);
 //! # Ok::<(), tutti_midi_hardware::Error>(())
 //! ```
 //!
@@ -137,8 +139,7 @@
 //!   `&DeviceId` or a `&str`); `connect_output` returns the [`OpenOutput`], which
 //!   the caller owns and sends through.
 //! - [`HardwareMidiInputs`]: the open input ports, each named by its
-//!   [`DeviceSlot`] (one id: the slot of the [`DeviceInlets`] and which device
-//!   took it) and the [`InputProducerHandle`] its driver thread pushes through,
+//!   [`InputId`] and the [`InputProducerHandle`] its driver thread pushes through,
 //!   whose `push` answers [`Pushed`].
 //! - [`DeviceInfo`], [`DeviceId`], [`DeviceEvent`]: what the list holds and reports;
 //!   they live in `tutti-midi-device`, with the pure `DeviceTable` behind them.
@@ -265,7 +266,7 @@ pub use devices::{
     WatchFailure,
 };
 pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
-pub use error::{Error, Result};
+pub use error::{Error, NotFound, Result};
 pub use port::{HardwareMidiInputs, InputProducerHandle, PortInfo, Pushed, StreamDrain};
 pub use process::{ProcessChange, ReportAsk, ReportError, ReportPeer};
 pub use profiles::{
@@ -273,7 +274,7 @@ pub use profiles::{
     ProfileSwitch, ProfilesChange, Whole, WholeProfile,
 };
 pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyError, PropertyPeer};
-pub use session::{DeviceQuery, MidiSession, Polled};
+pub use session::{Connected, DeviceQuery, MidiSession, Polled};
 pub use stream::{Basis, DeviceStream, InputTiming};
 pub use tutti_midi_device::{
     BindPolicy, Capabilities, DeviceEvent, DeviceId, DeviceInfo, Endpoint, EndpointId,
@@ -284,15 +285,15 @@ pub use virtual_endpoint::{VirtualDestination, VirtualProtocol, VirtualSource, V
 
 // --- Runtime delivery (the graph's MIDI border) ---
 //
-// The nodes a port feeds (`MidiIngestNode`, over the `DeviceInlets` each port is a slot of), the
+// The nodes a port feeds (`MidiIngestNode`, over the inlet each port is made with), the
 // ring MIDI crosses threads on (`MidiMailbox`/`MidiSender`/`MidiReceiver`) and
 // clip playback live in `tutti-midi-runtime`; surfaced here because delivery
 // is what a port feeds, so a hardware consumer needs both. That is the test a
 // file codec fails: a `.mid` reader needs no port, and no port needs it.
 
 pub use tutti_midi_runtime::{
-    DeviceInlets, DeviceSlot, MidiIngestNode, MidiMailbox, MidiOut, MidiReceiver, MidiSender,
-    NoFreeSlot, TimedMidiEvent,
+    InputId, InputInlets, MidiIngestNode, MidiMailbox, MidiOut, MidiReceiver, MidiSender,
+    TimedMidiEvent,
 };
 
 // --- Standard MIDI File codec: NOT here ---

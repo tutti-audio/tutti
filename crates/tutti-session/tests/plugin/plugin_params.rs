@@ -14,8 +14,8 @@ use tutti_plugin_types::{
     ParamUnit, ParameterInfo, PluginFailure, PluginRefresh, RenderMode,
 };
 use tutti_session::{
-    HostPluginError, Key, PluginChange, PluginEvent, PluginNode, PluginParamError, Session,
-    SessionEvent,
+    DetachedSession, HostPluginError, Key, PluginChange, PluginEvent, PluginNode, PluginParamError,
+    Session, SessionEvent,
 };
 use tutti_types::{ChannelLayout, Db, Hz, SampleRate};
 
@@ -138,13 +138,13 @@ impl Health for Fake {
 
 /// A detached session with the fake hosted at a node, its parameters not yet
 /// read, and the sink the fake announces a rescan through.
-fn session() -> (Session, NodeKey, Arc<Fake>, RefreshSink) {
+fn session() -> (DetachedSession, NodeKey, Arc<Fake>, RefreshSink) {
     let (s, key, fake, refresh) = session_keyed();
     (s, key.erase(), fake, refresh)
 }
 
 /// [`session`], with the key `host_plugin` returned.
-fn session_keyed() -> (Session, Key<PluginNode>, Arc<Fake>, RefreshSink) {
+fn session_keyed() -> (DetachedSession, Key<PluginNode>, Arc<Fake>, RefreshSink) {
     let fake = Fake::new();
     let refresh = RefreshSink::default();
     let handle = PluginHandle::from_backend(
@@ -186,21 +186,21 @@ fn plugin_events(events: Vec<SessionEvent>) -> Vec<PluginEvent> {
 
 /// An update that submits a parameter read (the spawner runs it inline) and
 /// one that lands it; the plugin events both reported.
-fn update(s: &mut Session) -> Vec<PluginEvent> {
+fn update(s: &mut DetachedSession) -> Vec<PluginEvent> {
     let mut reported = plugin_events(s.update());
     reported.extend(plugin_events(s.update()));
     reported
 }
 
 /// A session whose parameters are read.
-fn ready() -> (Session, NodeKey, Arc<Fake>, RefreshSink) {
+fn ready() -> (DetachedSession, NodeKey, Arc<Fake>, RefreshSink) {
     let (mut s, node, fake, refresh) = session();
     let _ = update(&mut s);
     (s, node, fake, refresh)
 }
 
-fn cutoff(s: &Session, node: NodeKey) -> tutti_session::Param<'_> {
-    s.plugin(node).unwrap().params().get(CUTOFF).unwrap()
+fn cutoff(s: &DetachedSession, node: NodeKey) -> tutti_session::Param<'_> {
+    s.plugin_view(node).unwrap().params().get(CUTOFF).unwrap()
 }
 
 fn changes(events: Vec<PluginEvent>) -> Vec<PluginChange> {
@@ -229,7 +229,7 @@ fn a_second_hosting_of_a_node_is_refused() {
         )
         .expect_err("the node already hosts a plugin");
     assert_eq!(refused, HostPluginError::AlreadyHosted(key.erase()));
-    let kept = s.plugin(key).expect("still hosted").plugin().clone();
+    let kept = s.plugin_view(key).expect("still hosted").plugin().clone();
     assert_eq!(
         kept.path(),
         std::path::Path::new("fake.clap"),
@@ -244,7 +244,7 @@ fn a_second_hosting_of_a_node_is_refused() {
 #[test]
 fn a_gesture_guard_dropped_mid_drag_ends_the_gesture() {
     let (mut s, node, fake, _) = ready();
-    let drag = |s: &Session| -> Result<(), &'static str> {
+    let drag = |s: &DetachedSession| -> Result<(), &'static str> {
         let gesture = cutoff(s, node).edit().unwrap();
         for (i, v) in [0.1, 0.2, 0.3, 0.4].into_iter().enumerate() {
             if i == 2 {
@@ -293,7 +293,7 @@ fn a_gesture_guard_dropped_mid_drag_ends_the_gesture() {
 #[test]
 fn a_gesture_on_a_read_only_parameter_never_begins() {
     let (mut s, node, fake, _) = ready();
-    let locked = s.plugin(node).unwrap().params().get(LOCKED).unwrap();
+    let locked = s.plugin_view(node).unwrap().params().get(LOCKED).unwrap();
     assert!(matches!(
         locked.edit(),
         Err(PluginParamError::ReadOnly(id)) if id == LOCKED
@@ -312,7 +312,7 @@ fn a_gesture_on_a_read_only_parameter_never_begins() {
 #[test]
 fn a_typed_handle_of_the_wrong_unit_is_refused() {
     let (s, node, _, _) = ready();
-    let params = s.plugin(node).unwrap().params();
+    let params = s.plugin_view(node).unwrap().params();
     assert!(matches!(
         params.typed::<Db>(CUTOFF),
         Err(PluginParamError::UnitMismatch { id, declared: ParamUnit::Hertz, .. }) if id == CUTOFF
@@ -340,7 +340,7 @@ fn a_typed_handle_of_the_wrong_unit_is_refused() {
 fn a_typed_parameter_goes_through_the_range_and_the_plugins_map() {
     let (s, node, fake, _) = ready();
     let cutoff = s
-        .plugin(node)
+        .plugin_view(node)
         .unwrap()
         .params()
         .typed::<Hz>(CUTOFF)
@@ -375,7 +375,7 @@ fn a_typed_parameter_goes_through_the_range_and_the_plugins_map() {
 fn a_typed_read_of_a_silent_plugin_is_an_error_not_the_default() {
     let (s, node, fake, _) = ready();
     let cutoff = s
-        .plugin(node)
+        .plugin_view(node)
         .unwrap()
         .params()
         .typed::<Hz>(CUTOFF)
@@ -393,7 +393,7 @@ fn a_typed_read_of_a_silent_plugin_is_an_error_not_the_default() {
 fn a_non_finite_typed_write_is_not_finite_and_out_of_range_stays_out_of_range() {
     let (s, node, fake, _) = ready();
     let cutoff = s
-        .plugin(node)
+        .plugin_view(node)
         .unwrap()
         .params()
         .typed::<Hz>(CUTOFF)
@@ -417,12 +417,12 @@ fn a_non_finite_typed_write_is_not_finite_and_out_of_range_stays_out_of_range() 
 #[test]
 fn an_unknown_id_is_refused_and_an_unread_plugin_resolves_nothing() {
     let (mut s, node, _, _) = session();
-    let params = s.plugin(node).unwrap().params();
+    let params = s.plugin_view(node).unwrap().params();
     assert!(!params.is_ready());
     assert!(matches!(params.get(CUTOFF), Err(PluginParamError::NotRead)));
 
     let _ = update(&mut s);
-    let params = s.plugin(node).unwrap().params();
+    let params = s.plugin_view(node).unwrap().params();
     assert!(params.is_ready());
     assert_eq!(params.len(), 4);
     let unknown = ParamId::new(99);
@@ -444,7 +444,7 @@ fn an_unknown_id_is_refused_and_an_unread_plugin_resolves_nothing() {
 #[test]
 fn a_rescan_replaces_the_declarations_and_the_values_with_them() {
     let (mut s, node, fake, refresh) = ready();
-    assert!(s.plugin(node).unwrap().params().get(MODE).is_ok());
+    assert!(s.plugin_view(node).unwrap().params().get(MODE).is_ok());
 
     // The plugin drops `mode` and gains `shape`, and moves `cutoff`.
     let shape = ParamId::new(7);
@@ -462,7 +462,7 @@ fn a_rescan_replaces_the_declarations_and_the_values_with_them() {
     // declarations stand until the read lands, in the next update.
     let mut events = plugin_events(s.update());
     assert!(
-        s.plugin(node).unwrap().params().get(MODE).is_ok(),
+        s.plugin_view(node).unwrap().params().get(MODE).is_ok(),
         "not yet"
     );
     events.extend(plugin_events(s.update()));
@@ -472,7 +472,7 @@ fn a_rescan_replaces_the_declarations_and_the_values_with_them() {
             .any(|c| matches!(c, PluginChange::ParamTitlesChanged))
     );
 
-    let params = s.plugin(node).unwrap().params();
+    let params = s.plugin_view(node).unwrap().params();
     assert!(matches!(params.get(MODE), Err(PluginParamError::Unknown(id)) if id == MODE));
     assert_eq!(params.get(shape).unwrap().normalized(), Normalized::of(0.5));
     assert_eq!(
@@ -488,7 +488,7 @@ fn a_rescan_replaces_the_declarations_and_the_values_with_them() {
 #[test]
 fn text_and_plain_values_go_through_the_plugin() {
     let (s, node, fake, _) = ready();
-    let level = s.plugin(node).unwrap().params().get(LEVEL).unwrap();
+    let level = s.plugin_view(node).unwrap().params().get(LEVEL).unwrap();
     assert_eq!(level.plain(), Some(-60.0 + 72.0 * 0.25));
 
     assert_eq!(level.set_plain(-24.0).unwrap(), Normalized::of(0.5));
@@ -513,7 +513,7 @@ fn text_and_plain_values_go_through_the_plugin() {
 fn the_automation_mode_refusal_is_its_own_type() {
     let (s, node, _, _) = ready();
     assert_eq!(
-        s.plugin(node)
+        s.plugin_view(node)
             .unwrap()
             .params()
             .set_automation_mode(AutomationMode::Writing),
@@ -529,7 +529,7 @@ fn the_automation_mode_refusal_is_its_own_type() {
 #[test]
 fn a_plugin_parameter_targets_a_modulation_route_through_a_param_ref() {
     let (s, node, _, _) = ready();
-    let level = s.plugin(node).unwrap().params().get(LEVEL).unwrap();
+    let level = s.plugin_view(node).unwrap().params().get(LEVEL).unwrap();
     assert_eq!(
         level.target(),
         tutti_session::ParamRef::plugin(node, LEVEL.get())
@@ -551,7 +551,12 @@ fn a_plugin_key_names_a_parameter_a_route_targets() {
     assert_eq!(target, ParamRef::plugin(key, LEVEL.get()));
     assert_eq!(
         target,
-        s.plugin(key).unwrap().params().get(LEVEL).unwrap().target()
+        s.plugin_view(key)
+            .unwrap()
+            .params()
+            .get(LEVEL)
+            .unwrap()
+            .target()
     );
     let id = {
         let mut m = s.mods_mut();

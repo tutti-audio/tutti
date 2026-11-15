@@ -118,3 +118,21 @@ fn a_block_written_to_an_os_record_reads_back_whole() {
     .unwrap();
     assert_eq!(RawBlock::of(&block).function_block(), Some(block));
 }
+
+// M2-104 §7.1.8: a hint the direction rules out is a sender's slip, not a
+// reason to lose the block: it is read as undeclared.
+#[test]
+fn a_hint_the_direction_rules_out_is_read_as_unknown() {
+    let hinted = |direction, ui_hint| {
+        RawBlock {
+            ui_hint,
+            ..raw(direction, 0, 1)
+        }
+        .function_block()
+        .map(|b| b.ui_hint())
+    };
+    assert_eq!(hinted(2, 1), Some(UiHint::Unknown), "output, receiver");
+    assert_eq!(hinted(1, 2), Some(UiHint::Unknown), "input, sender");
+    assert_eq!(hinted(2, 2), Some(UiHint::Sender));
+    assert_eq!(hinted(1, 1), Some(UiHint::Receiver));
+}

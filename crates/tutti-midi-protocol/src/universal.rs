@@ -361,6 +361,12 @@ pub enum Universal {
     /// MIDI Machine Control commands (Real Time `06`, RP-013 p.2). The
     /// header's recipient is the destination: a device, a group or all.
     MachineControl(machine_control::MmcCommands),
+    /// A Machine Control Command message that ends in a COMMAND SEGMENT whose
+    /// count is more than the bytes left in the message (RP-013 p.40 b): the
+    /// segment was cut short. Holds the commands before it, whole and not yet
+    /// acted on, and none when the segment is first. Only read; no writer can
+    /// name it.
+    MachineControlTruncated(machine_control::MmcCommands),
     /// MIDI Machine Control responses (Real Time `07`, RP-013 p.2). The
     /// header's device ID is the source, and always a device's own.
     MachineControlResponse(machine_control::MmcFields),

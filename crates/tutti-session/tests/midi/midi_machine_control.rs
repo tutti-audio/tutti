@@ -35,14 +35,23 @@ fn rig() -> (Session, FakeCounters) {
         .build()
         .expect("builds");
     let _ = s.update();
-    s.midi().connect_input("keys").expect("connects");
+    let keys = s.midi().devices().remove(0);
+    s.pool(tutti_session::midi_input("keys", keys))
+        .expect("declares");
     let _ = s.update();
     (s, fake)
 }
 
+/// The ingest node of the input port `"keys"`, which a follower reads.
+fn input(s: &Session) -> tutti_graph::NodeKey {
+    s.midi_input(&"keys").expect("loaded").node()
+}
+
 fn follow(s: &mut Session) {
+    let input = input(s);
     s.midi()
         .follow_machine_control(FollowMachineControl {
+            input,
             group: G,
             device: OURS,
         })
@@ -234,14 +243,58 @@ fn a_command_the_transport_cannot_do_is_reported() {
     assert!(!s.playhead().playing());
 }
 
+/// **A segmented string acts whole, in order, and a segment that does not belong
+/// is reported (RP-013 p.40)**: a later segment with no first is a
+/// `MachineControlSegmentation(MissingFirst)`; then, from a rolling transport, a
+/// LOCATE to beat 4.0 (`44 06 01 60 00 02 00 00`) and a STOP cut across two
+/// COMMAND SEGMENTs do nothing until the last arrives, and then both run: the
+/// transport stands at beat 4.0, stopped.
+#[test]
+fn segmented_commands_act_whole_and_a_stray_segment_is_reported() {
+    use tutti_midi_runtime::SegmentFault;
+    let (mut s, fake) = rig();
+    follow(&mut s);
+    command(&fake, 5, &[0x53, 0x02, 0x00, 0x02]);
+    let mut seen = Vec::new();
+    for _ in 0..40 {
+        seen.extend(pump(&mut s));
+    }
+    assert!(
+        seen.iter().any(|e| matches!(
+            e,
+            MidiEvent::MachineControlSegmentation(SegmentFault::String(
+                tutti_midi_protocol::MmcSegmentError::MissingFirst
+            ))
+        )),
+        "{seen:?}"
+    );
+    command(&fake, 5, &[0x02]);
+    until_rolling(&mut s, true);
+    let string = [0x44, 0x06, 0x01, 0x60, 0x00, 0x02, 0x00, 0x00, 0x01];
+    let mut first = vec![0x53, 0x05, 0x41];
+    first.extend_from_slice(&string[..4]);
+    command(&fake, 5, &first);
+    for _ in 0..40 {
+        pump(&mut s);
+    }
+    assert!(s.playhead().playing(), "half a string does nothing");
+    let mut last = vec![0x53, 0x06, 0x00];
+    last.extend_from_slice(&string[4..]);
+    command(&fake, 5, &last);
+    until_rolling(&mut s, false);
+    until_beat(&mut s, 4.0);
+}
+
 /// **MMC follows beside a Beat Clock follower** and takes no part of the tempo
 /// map: following both is allowed, the Beat Clock still owns the tempo, and a
 /// PLAY still plays.
 #[test]
 fn machine_control_follows_beside_a_beat_clock_and_owns_no_tempo() {
     let (mut s, fake) = rig();
+    let input = input(&s);
     s.midi()
         .follow_clock(FollowClock {
+            input,
             group: G,
             kind: ClockKind::BeatClock,
         })
@@ -280,8 +333,10 @@ fn unfollowing_is_reported_and_refused_when_not_following() {
 fn a_group_the_input_does_not_hear_is_refused() {
     let (mut s, _fake) = rig();
     let far = MidiGroup::of(9);
+    let input = input(&s);
     assert!(matches!(
         s.midi().follow_machine_control(FollowMachineControl {
+            input,
             group: far,
             device: OURS
         }),
@@ -296,12 +351,13 @@ fn a_group_the_input_does_not_hear_is_refused() {
 struct Wire(Arc<Mutex<Vec<Ump>>>);
 
 impl MidiOut for Wire {
-    fn queue(&self, events: &[tutti_graph::UmpAt]) -> usize {
+    fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
+        let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
         self.0
             .lock()
             .unwrap()
             .extend(events.iter().map(|(_, ump)| *ump));
-        events.len()
+        tutti_midi_runtime::Taken::within(batch, batch.len())
     }
 }
 

@@ -6,6 +6,7 @@
 static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 mod data128_no_alloc;
+mod flex_lyrics;
 mod flex_text;
 mod flex_text_assembler;
 mod midi1_stream;

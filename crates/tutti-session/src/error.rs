@@ -92,7 +92,7 @@ pub enum HostPluginError {
     #[error(transparent)]
     NoSuchNode(#[from] NoSuchNode),
     /// The node already hosts a plugin (added by
-    /// [`Session::add_plugin`](crate::Session::add_plugin),
+    /// [`Session::add_pooled_plugin`](crate::Session::add_pooled_plugin),
     /// [`Graph::insert_plugin`](crate::Graph::insert_plugin) or an earlier
     /// `host_plugin`): a plugin record is freed on the main thread, so a
     /// second one is never put over the first.
@@ -235,16 +235,6 @@ pub enum MidiError {
     #[error("MIDI hardware: {0}")]
     Hardware(#[from] tutti_midi_hardware::Error),
 
-    /// A Profile switch was refused ([`Midi::set_profile`](crate::Midi::set_profile)).
-    #[cfg(feature = "midi-hardware")]
-    #[error("MIDI-CI Profile: {0}")]
-    Profile(#[from] tutti_midi_hardware::ProfileError),
-
-    /// A MIDI Message Report request was refused ([`Midi::report`](crate::Midi::report)).
-    #[cfg(feature = "midi-hardware")]
-    #[error("MIDI-CI Process Inquiry: {0}")]
-    Report(#[from] tutti_midi_hardware::ReportError),
-
     /// A MIDI file could not be read, built or written.
     #[error("MIDI file: {0}")]
     File(#[from] tutti_midi_file::Error),
@@ -268,17 +258,16 @@ pub enum MidiError {
     #[error("{0:?} takes no MIDI: it is not in the graph, or has no event input")]
     NoEventInput(tutti_graph::NodeKey),
 
-    /// A route rule on a session with no MIDI input node (one built
-    /// detached).
-    #[error("the session has no MIDI input node to route")]
-    NoMidiInput,
+    /// A follower named a node that is not the ingest node of an input port
+    /// (`MidiInput::node`).
+    #[error("{0:?} is not the ingest node of a MIDI input port")]
+    NotAnInput(tutti_graph::NodeKey),
 
-    /// A hardware call on a session with no OS MIDI layer
-    /// ([`SessionBuilder::midi_hardware`](crate::SessionBuilder::midi_hardware)
-    /// was not asked for).
+    /// A call on a port layer that is not there: a session with no OS MIDI
+    /// layer is [`MidiPortError::NoHardware`](crate::MidiPortError::NoHardware).
     #[cfg(feature = "midi-hardware")]
-    #[error("the session has no OS MIDI layer; build it with `midi_hardware()`")]
-    NoHardware,
+    #[error(transparent)]
+    Port(#[from] crate::MidiPortError),
 
     /// `Midi::retarget` named a node that is not a clip of the session's.
     #[error("{0:?} is not a clip of this session's")]
@@ -303,16 +292,6 @@ pub enum MidiError {
     /// start, or an event moved by it.
     #[error("a clip beat must be finite, not {0}")]
     BeatNotFinite(tutti_types::Beat),
-
-    /// `Midi::disconnect_input` named a device that is not an open input.
-    #[cfg(feature = "midi-hardware")]
-    #[error("no open MIDI input answers to {0:?}")]
-    InputNotOpen(tutti_midi_hardware::DeviceQuery),
-
-    /// `Midi::disconnect_output` with no output open.
-    #[cfg(feature = "midi-hardware")]
-    #[error("no MIDI output is open")]
-    OutputNotOpen,
 
     /// `Midi::retarget_input` named a target with no live input.
     #[error("{0:?} has no live input")]
@@ -443,6 +422,20 @@ pub enum Error {
         source: tutti_buffers::FoldError,
     },
 
+    /// The output policy's map has no place on the device a restart opened: it
+    /// names a channel the device does not have, or no longer fits what is
+    /// heard. Nothing moved, and the map is kept, never reset to the
+    /// identity: set a new one ([`Session::policy`](crate::Session::policy)).
+    #[error("the output map {map:?} has no place on a {device:?} device: {source}")]
+    MapUnplaceable {
+        /// The map in force.
+        map: tutti_engine::OutputMap,
+        /// The device's channels.
+        device: tutti_types::ChannelLayout,
+        /// What the map broke on.
+        source: tutti_engine::RoutingError,
+    },
+
     /// An inlet refused its producer's ring ([`Graph::add_inlet`](crate::Graph::add_inlet)).
     #[error(transparent)]
     Inlet(#[from] InletError),
@@ -485,8 +478,8 @@ pub enum Error {
     Midi(#[from] MidiError),
 
     /// [`Session::instrument`](crate::Session::instrument) (or
-    /// `add_instrument`, `instrument_plugin`) was given a node that cannot be
-    /// played as an instrument.
+    /// `add_instrument`) was given a node that cannot be played as an
+    /// instrument.
     #[cfg(feature = "midi")]
     #[error("{node:?} is not an instrument: {why}")]
     NotInstrument {

@@ -1,6 +1,6 @@
 //! [`MidiOut`]: the terminal sink MIDI events are pushed at. The input
 //! direction has no trait: a device's events reach the graph through an event
-//! inlet ([`DeviceInlets`](crate::DeviceInlets)).
+//! inlet ([`InputInlets`](crate::InputInlets)).
 //!
 //! The sink carries no address: an endpoint *is* its stream. Which node hears
 //! what is the graph's wiring (a `MidiIngestNode` in `tutti-midi-runtime`
@@ -8,7 +8,7 @@
 
 use tutti_graph::UmpAt;
 
-use crate::Outgoing;
+use crate::{Outgoing, Taken};
 
 // -----------------------------------------------------------------------------
 // Delivery: write side (out) and read side (in)
@@ -20,42 +20,36 @@ use crate::Outgoing;
 /// mailbox, a hardware wire), so `queue` carries no id. What was delivered
 /// is read from the sink's own reader.
 ///
-/// Implementations must be **lock-free** and **alloc-free** — `queue` runs on
-/// the audio thread, once per event.
+/// Implementations never block: a sink with no room takes less.
 pub trait MidiOut: Send + Sync {
-    /// Delivers `events` and returns how many the sink **accepted**.
+    /// Delivers `events`, each to go at its [`SendAt`](crate::SendAt), and
+    /// returns what the sink [`Taken`] of them.
     ///
-    /// `< events.len()` means the rest were dropped — a full ring, a device that
-    /// refused the write. Dropping a note-off whose note-on landed is what
-    /// produces a stuck note, so a caller with anywhere to report it must.
-    /// A sink that cannot fail returns `events.len()`.
+    /// Less than all means the rest were refused: a full ring, a device that
+    /// would not take the write. The caller counts them. Dropping a note-off
+    /// whose note-on landed is what produces a stuck note, so a caller with
+    /// anywhere to report it must.
     ///
-    /// A partial accept is a **prefix**, not a subset: an implementation that
-    /// hits a failure stops there rather than skipping and continuing, so the
-    /// count always names an unbroken run and the stream stays in order.
-    fn queue(&self, events: &[UmpAt]) -> usize;
+    /// What is taken is a **prefix** that ends between two messages, not a
+    /// subset and not a cut inside one: a sink that cannot take a message of
+    /// several packets (a System Exclusive message) whole takes none of it, and
+    /// nothing after it, so the stream stays in order and no receiver is left
+    /// waiting for the end of a message. One case can still cut a message: the
+    /// ALSA sequencer's destination fifo cannot be read, so a destination that
+    /// fills up between two packets of a message takes its head only. For a
+    /// direct (`Now`) send that output takes the message, counts the lost tail
+    /// in its losses, and does not send the head again. For a scheduled (`At`)
+    /// message the overflow happens later, in the sequencer's queue, after the
+    /// output has taken the whole message: the tail is lost and nothing counts it.
+    ///
+    /// A sink with no wire clock (a mailbox, a test's) ignores the time.
+    fn queue_timed(&self, events: &[Outgoing]) -> Taken;
 
-    /// [`queue`](Self::queue) for events that say when to send
-    /// ([`SendAt`](crate::SendAt)). A sink that schedules (a hardware output)
-    /// overrides it and sends each at its time; the default hands the events
-    /// to `queue` and ignores the time, which is every sink that has no wire
-    /// clock (a mailbox, a test's). Same count and prefix semantics.
-    fn queue_timed(&self, events: &[Outgoing]) -> usize {
-        // Chunked on the stack: no allocation for a sink that may be on the
-        // audio thread.
-        const CHUNK: usize = 64;
-        let mut accepted = 0;
-        for chunk in events.chunks(CHUNK) {
-            let mut buf = [(tutti_graph::Offset::ZERO, tutti_ump::Ump([0; 4])); CHUNK];
-            for (slot, e) in buf.iter_mut().zip(chunk) {
-                *slot = (e.at, e.ump);
-            }
-            let taken = self.queue(&buf[..chunk.len()]);
-            accepted += taken;
-            if taken < chunk.len() {
-                break;
-            }
-        }
-        accepted
+    /// [`queue_timed`](Self::queue_timed) for events that go at once.
+    ///
+    /// The default allocates, so it is for a sink on a control thread. A sink
+    /// the audio thread writes to overrides it.
+    fn queue(&self, events: &[UmpAt]) -> Taken {
+        self.queue_timed(&Outgoing::now_batch(events))
     }
 }

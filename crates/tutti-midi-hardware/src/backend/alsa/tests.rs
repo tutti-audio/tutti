@@ -2,14 +2,15 @@
 //! readable and writable port is a device to every other client, so creating
 //! and dropping one is a hot-plug the kernel announces: nothing here is faked.
 
-use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
+use crate::DeviceOut;
 use crate::{Devices, HardwareMidiInputs};
 use tutti_alsa_ffi::Client;
 use tutti_alsa_ffi::{
     CAP_READ, CAP_SUBS_READ, CAP_SUBS_WRITE, CAP_WRITE, TYPE_APPLICATION, TYPE_MIDI_GENERIC,
 };
+use tutti_graph::Losses;
 use tutti_midi_device::{DeviceEvent, DeviceId, DeviceInfo, Identity};
 
 /// Long enough to be a failure, not a race: the announce arrives at once.
@@ -143,7 +144,9 @@ fn open_input_when_listed(
     id: &DeviceId,
     ports: &std::sync::Arc<HardwareMidiInputs>,
 ) -> crate::OpenInput {
-    when_listed(devices, || devices.open_input(id, ports))
+    when_listed(devices, || {
+        devices.open_input(id, ports).map(|(input, _inlet)| input)
+    })
 }
 
 fn info(event: DeviceEvent) -> DeviceInfo {
@@ -264,11 +267,7 @@ fn a_port_gaining_its_capabilities_is_added_as_a_duplex() {
 fn an_input_held_when_its_device_vanishes_is_reported_removed() {
     let devices = Watched::open();
     let ports = std::sync::Arc::new(HardwareMidiInputs::new(
-        tutti_midi_runtime::DeviceInlets::new(
-            NonZeroUsize::new(4).unwrap(),
-            tutti_graph::EventCapacity::of(16),
-            Duration::ZERO,
-        ),
+        tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(16), Duration::ZERO),
     ));
     let name = unique("held");
     let device = plug(&name);
@@ -361,11 +360,7 @@ fn an_idle_devices_does_not_wake_itself() {
 fn the_engines_own_clients_are_not_listed() {
     let devices = Watched::open();
     let ports = std::sync::Arc::new(HardwareMidiInputs::new(
-        tutti_midi_runtime::DeviceInlets::new(
-            NonZeroUsize::new(4).unwrap(),
-            tutti_graph::EventCapacity::of(16),
-            Duration::ZERO,
-        ),
+        tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(16), Duration::ZERO),
     ));
     let name = unique("own");
     let device = plug(&name);
@@ -628,16 +623,12 @@ impl Pumped {
 
     /// A pump on `device`'s port 0.
     fn over(device: Virtual, lead: Duration) -> Self {
-        let inlets = tutti_midi_runtime::DeviceInlets::new(
-            NonZeroUsize::new(4).unwrap(),
-            tutti_graph::EventCapacity::of(64),
-            lead,
-        );
+        let inlets = tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), lead);
         let ports = std::sync::Arc::new(HardwareMidiInputs::new(std::sync::Arc::clone(&inlets)));
         let id = super::enumerate::pack_id(device.0.id(), 0);
-        let producer = ports.open_input_port("pump").expect("a slot");
+        let (producer, inlet) = ports.open_input_port("pump");
         let mut rig = crate::testing::Rig::over(&inlets, Instant::now());
-        rig.apply();
+        rig.attach(inlet);
         rig.run(1);
         let connection = super::input::open(id, producer).expect("the pump to open");
         Self {
@@ -826,11 +817,7 @@ fn dropping_an_input_stops_a_blocked_pump_promptly() {
 fn an_input_whose_pump_fails_reads_as_gone() {
     let devices = Watched::open();
     let ports = std::sync::Arc::new(HardwareMidiInputs::new(
-        tutti_midi_runtime::DeviceInlets::new(
-            NonZeroUsize::new(4).unwrap(),
-            tutti_graph::EventCapacity::of(16),
-            Duration::ZERO,
-        ),
+        tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(16), Duration::ZERO),
     ));
     let name = unique("dies");
     let device = plug(&name);
@@ -938,9 +925,7 @@ fn an_output_with_a_poisoned_lock_still_sends() {
     let id = super::enumerate::pack_id(target.0.id(), 0);
     let output = super::output::connect(id).expect("the output to open");
     output.poison();
-    output
-        .send_ump_at(&[0x2090_3C64], tutti_midi_runtime::SendAt::Now)
-        .expect("the send to go");
+    send(&output, 0x2090_3C64, tutti_midi_runtime::SendAt::Now);
 }
 
 /// The next note message (type `0x2`) that reaches `device`'s port, polling
@@ -979,9 +964,7 @@ fn a_scheduled_event_arrives_at_its_time_and_now_at_once() {
     let slack = Duration::from_millis(10);
 
     let asked = Instant::now() + Duration::from_millis(100);
-    output
-        .send_ump_at(&[0x2090_3C64], tutti_midi_runtime::SendAt::At(asked))
-        .expect("the scheduled send to go");
+    send(&output, 0x2090_3C64, tutti_midi_runtime::SendAt::At(asked));
     std::thread::sleep(Duration::from_millis(50));
     assert!(
         next_note(&target, Duration::ZERO).is_none(),
@@ -1000,9 +983,7 @@ fn a_scheduled_event_arrives_at_its_time_and_now_at_once() {
     );
 
     let sent = Instant::now();
-    output
-        .send_ump_at(&[0x2090_3C64], tutti_midi_runtime::SendAt::Now)
-        .expect("the direct send to go");
+    send(&output, 0x2090_3C64, tutti_midi_runtime::SendAt::Now);
     let arrived = arrival_at(&target, Duration::from_millis(500)).expect("the event to arrive");
     assert!(
         arrived - sent < Duration::from_millis(50),
@@ -1025,15 +1006,177 @@ fn events_are_delivered_by_their_times_and_a_past_time_at_once() {
     let second = [0x2090_3D64];
     let third = [0x2090_3E64];
     use tutti_midi_runtime::SendAt;
-    output.send_ump_at(&first, SendAt::At(late)).unwrap();
-    output.send_ump_at(&second, SendAt::At(early)).unwrap();
-    output
-        .send_ump_at(&third, SendAt::At(now - Duration::from_millis(500)))
-        .unwrap();
+    send(&output, first[0], SendAt::At(late));
+    send(&output, second[0], SendAt::At(early));
+    send(
+        &output,
+        third[0],
+        SendAt::At(now - Duration::from_millis(500)),
+    );
     let got: Vec<u32> = (0..3)
         .map_while(|_| next_note(&target, Duration::from_millis(500)).map(|(w, _)| w))
         .collect();
     assert_eq!(got, [third[0], second[0], first[0]]);
+}
+
+/// Sends the note-on word `word` through `output`, at `at`, and expects it
+/// taken.
+fn send(output: &super::output::AlsaOutput, word: u32, at: tutti_midi_runtime::SendAt) {
+    use tutti_midi_runtime::MidiOut;
+    let packet = [tutti_midi_runtime::Outgoing::new(
+        tutti_graph::Offset::ZERO,
+        at,
+        tutti_ump::Ump([word, 0, 0, 0]),
+    )];
+    assert!(
+        output.queue_timed(&packet).is_all(&packet),
+        "the send to go"
+    );
+}
+
+/// What an output sends: `ump`, at once.
+fn now(ump: tutti_ump::Ump) -> tutti_midi_runtime::Outgoing {
+    tutti_midi_runtime::Outgoing::new(
+        tutti_graph::Offset::ZERO,
+        tutti_midi_runtime::SendAt::Now,
+        ump,
+    )
+}
+
+/// A System Exclusive message of three packets, start, continue and end.
+fn sysex() -> [tutti_midi_runtime::Outgoing; 3] {
+    use tutti_ump::{Message, MidiGroup, Sysex7Packet, SysexStatus};
+    [SysexStatus::Start, SysexStatus::Continue, SysexStatus::End].map(|status| {
+        now(tutti_ump::Ump::from(Message::Sysex7(
+            MidiGroup::FIRST,
+            Sysex7Packet::new(status, &[1, 2]).unwrap(),
+        )))
+    })
+}
+
+/// Sends notes to `output` until it refuses one: the destination is full.
+fn fill(output: &super::output::AlsaOutput) -> usize {
+    use tutti_midi_runtime::MidiOut;
+    let note = now(tutti_ump::Ump([0x2090_3C64, 0, 0, 0]));
+    (0..10_000)
+        .take_while(|_| !output.queue_timed(&[note]).is_none())
+        .count()
+}
+
+/// **The output never waits for room.** Events held for a minute fill the
+/// client's own output pool; a batch longer than the pool holds comes back at
+/// once with what it took, short of the batch, where a blocking client would
+/// wait for the pool to drain, which takes the minute.
+#[test]
+fn an_output_with_a_full_pool_takes_what_fits_and_does_not_wait() {
+    use tutti_midi_runtime::MidiOut;
+    let target = plug(&unique("pool"));
+    let id = super::enumerate::pack_id(target.0.id(), 0);
+    let output = super::output::connect(id).expect("the output to open");
+    let held = held(tutti_ump::Ump([0x2090_3C64, 0, 0, 0]));
+    let batch = vec![held; 10_000];
+    let started = Instant::now();
+    let taken = output.queue_timed(&batch);
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "waited {:?} for room in the pool",
+        started.elapsed()
+    );
+    assert!(!taken.is_none(), "an empty pool takes some");
+    assert!(!taken.is_all(&batch), "the pool holds fewer than 10 000");
+}
+
+/// A packet held by the queue for a minute.
+fn held(ump: tutti_ump::Ump) -> tutti_midi_runtime::Outgoing {
+    tutti_midi_runtime::Outgoing::new(
+        tutti_graph::Offset::ZERO,
+        tutti_midi_runtime::SendAt::At(Instant::now() + Duration::from_secs(60)),
+        ump,
+    )
+}
+
+/// **A scheduled message the output pool has no room for whole is refused
+/// whole.** With room for two of a message's three packets, none of it is
+/// queued, and the output has lost nothing.
+#[test]
+fn a_scheduled_message_the_pool_cannot_hold_whole_is_refused_whole() {
+    use tutti_midi_runtime::MidiOut;
+    let note = held(tutti_ump::Ump([0x2090_3C64, 0, 0, 0]));
+    let pool = {
+        let target = plug(&unique("pool-size"));
+        let id = super::enumerate::pack_id(target.0.id(), 0);
+        let output = super::output::connect(id).expect("the output to open");
+        (0..10_000)
+            .take_while(|_| !output.queue_timed(&[note]).is_none())
+            .count()
+    };
+    let target = plug(&unique("pool-room"));
+    let id = super::enumerate::pack_id(target.0.id(), 0);
+    let output = super::output::connect(id).expect("the output to open");
+    let notes = vec![note; pool - 2];
+    assert!(output.queue_timed(&notes).is_all(&notes));
+    let message = sysex().map(|packet| held(packet.ump));
+    assert!(output.queue_timed(&message).is_none());
+    assert_eq!(output.losses(), Losses::NONE);
+    assert_eq!(output.output_free(), 2, "none of it was queued");
+}
+
+/// **A full destination refuses a note at once**, and the destination is not
+/// waited on either.
+#[test]
+fn a_full_destination_refuses_a_send_at_once() {
+    use tutti_midi_runtime::MidiOut;
+    let target = plug(&unique("full"));
+    let id = super::enumerate::pack_id(target.0.id(), 0);
+    let output = super::output::connect(id).expect("the output to open");
+    let started = Instant::now();
+    assert!(fill(&output) > 0, "an empty destination takes some");
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(
+        output
+            .queue_timed(&[now(tutti_ump::Ump([0x2090_3C64, 0, 0, 0]))])
+            .is_none()
+    );
+}
+
+/// **A message the destination has no room to start is not taken, and nothing
+/// of it goes.** With the destination full, a message of three packets is
+/// refused whole, and the output has lost nothing: the refusal is the caller's
+/// to count.
+#[test]
+fn a_message_a_full_destination_cannot_start_is_refused_whole() {
+    use tutti_midi_runtime::MidiOut;
+    let target = plug(&unique("refused"));
+    let id = super::enumerate::pack_id(target.0.id(), 0);
+    let output = super::output::connect(id).expect("the output to open");
+    fill(&output);
+    assert!(output.queue_timed(&sysex()).is_none());
+    assert_eq!(output.losses(), Losses::NONE);
+}
+
+/// **A destination that fills inside a message cuts it, and the tail is
+/// counted.** With room for two of a message's three packets (a destination of
+/// the same size as one `fill` found full, less two notes), its head goes and
+/// its end is lost; the message is taken, so that the caller does not send its
+/// head again, and the lost packet is in `losses`.
+#[test]
+fn a_destination_that_fills_inside_a_message_has_the_lost_tail_counted() {
+    use tutti_midi_runtime::MidiOut;
+    let room = {
+        let target = plug(&unique("measured"));
+        let id = super::enumerate::pack_id(target.0.id(), 0);
+        fill(&super::output::connect(id).expect("the output to open"))
+    };
+    assert!(room > 2, "a destination holds more than two");
+    let target = plug(&unique("cut"));
+    let id = super::enumerate::pack_id(target.0.id(), 0);
+    let output = super::output::connect(id).expect("the output to open");
+    let note = now(tutti_ump::Ump([0x2090_3C64, 0, 0, 0]));
+    let notes = vec![note; room - 2];
+    assert!(output.queue_timed(&notes).is_all(&notes));
+    let batch = sysex();
+    assert!(output.queue_timed(&batch).is_all(&batch));
+    assert_eq!(output.losses(), Losses::lost(1));
 }
 
 /// A device named `name` that publishes a UMP Endpoint in `protocol` with a
@@ -1125,11 +1268,8 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
     let name = unique("negotiated");
     let device = plug_ump(&name, tutti_alsa_ffi::PROTO_MIDI1);
     let stop = std::sync::Arc::new(AtomicBool::new(false));
-    let inlets = tutti_midi_runtime::DeviceInlets::new(
-        NonZeroUsize::new(4).unwrap(),
-        tutti_graph::EventCapacity::of(64),
-        Duration::ZERO,
-    );
+    let inlets =
+        tutti_midi_runtime::InputInlets::new(tutti_graph::EventCapacity::of(64), Duration::ZERO);
     let mut session = crate::MidiSession::open(inlets).unwrap();
     let want = format!("{name}: port");
     let deadline = Instant::now() + PATIENCE;
@@ -1169,7 +1309,7 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
             }
         })
     };
-    session
+    let _ = session
         .connect_input(&id, crate::InputTiming::Arrival)
         .unwrap();
     let deadline = Instant::now() + PATIENCE;

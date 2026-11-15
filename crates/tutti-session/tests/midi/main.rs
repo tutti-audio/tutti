@@ -1,5 +1,10 @@
 //! MIDI through the session: clips, routes, held keys, the hardware out and the SoundFont unit.
 
+/// Inert outside `assert_no_alloc`, so every test here may also gate a closure on
+/// allocating nothing.
+#[global_allocator]
+static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
+
 // A held key across a retarget and a re-route.
 #[cfg(feature = "midi")]
 mod common;
@@ -8,8 +13,11 @@ mod held_keys;
 // Clips, live inputs, routes and the hardware out (`Session::midi`).
 #[cfg(feature = "midi")]
 mod midi;
+// MIDI ports as pool entries: absent, replugged, ambiguous, released, per-port ingest.
+#[cfg(feature = "midi-hardware")]
+mod midi_ports;
 // Route rules: the union of two on one target, and a disabled one.
-#[cfg(feature = "midi")]
+#[cfg(feature = "midi-hardware")]
 mod midi_routes;
 // A clip's velocity keeps its 16 bits to the event input.
 #[cfg(feature = "midi")]
@@ -46,3 +54,6 @@ mod midi_machine_control;
 // The hardware out on the system clock: no device, the timer's blocks.
 #[cfg(feature = "midi")]
 mod system_clock;
+// A session's input and output ports render a block without allocating.
+#[cfg(feature = "midi-hardware")]
+mod ports_no_alloc;

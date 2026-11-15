@@ -1,4 +1,3 @@
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -42,8 +41,7 @@ fn id_of(devices: &Devices, name: &str) -> DeviceId {
 
 fn ports() -> Arc<HardwareMidiInputs> {
     Arc::new(HardwareMidiInputs::new(
-        tutti_midi_runtime::DeviceInlets::new(
-            NonZeroUsize::new(4).unwrap(),
+        tutti_midi_runtime::InputInlets::new(
             tutti_graph::EventCapacity::of(16),
             std::time::Duration::ZERO,
         ),
@@ -221,7 +219,7 @@ fn a_dropped_input_retires_its_port() {
     fake.plug(endpoint(1, "Keys"), PortDirection::Input);
     wake(&events);
     let ports = ports();
-    let input = devices
+    let (input, _inlet) = devices
         .open_input(&id_of(&devices, "Keys"), &ports)
         .unwrap();
     assert_eq!(ports.list_input_ports().len(), 1);
@@ -402,7 +400,7 @@ fn open_input_refuses_a_device_that_was_unplugged() {
     wake(&events);
     assert!(matches!(
         devices.open_input(&keys, &ports()),
-        Err(Error::NoDevice(_))
+        Err(Error::NotFound(NotFound::Device(_)))
     ));
 }
 
@@ -607,8 +605,8 @@ struct Tagging(Arc<std::sync::Mutex<Vec<tutti_ump::Protocol>>>);
 struct TaggedSink(Arc<std::sync::Mutex<Vec<tutti_ump::Protocol>>>);
 
 impl tutti_midi_runtime::MidiOut for TaggedSink {
-    fn queue(&self, events: &[tutti_graph::UmpAt]) -> usize {
-        events.len()
+    fn queue_timed(&self, events: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
+        tutti_midi_runtime::Taken::within(events, events.len())
     }
 }
 

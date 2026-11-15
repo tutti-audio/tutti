@@ -349,7 +349,7 @@ fn a_peak_normalized_export_writes_its_normalized_render() {
         // `render_normalized_to_file`'s own steps on planes already rendered:
         // measure, apply (no resample here to convert first).
         |mut r| {
-            r.apply_gain(normalize.gain_for_rendered(&r)?);
+            r.apply_gain(normalize.gain_for_rendered(&r, &Bed::Stereo.topology())?);
             Ok(r)
         },
     );

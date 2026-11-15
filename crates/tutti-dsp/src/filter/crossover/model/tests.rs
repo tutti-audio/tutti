@@ -108,9 +108,10 @@ fn the_response_is_what_the_crossover_runs() {
     let freqs = [Hz(300.0), Hz(3_000.0)];
     let m = CrossoverModel::new(&freqs, RATE).unwrap();
     let mut xo = CrossoverState::default();
+    let c = m.coefficients();
     let mut bands = vec![vec![0.0f32; N]; 3];
     for n in 0..N {
-        let out = xo.tick(&m, if n == 0 { 1.0 } else { 0.0 });
+        let out = xo.tick(&c, if n == 0 { 1.0 } else { 0.0 });
         for (b, v) in bands.iter_mut().zip(out) {
             b[n] = v;
         }
@@ -155,8 +156,9 @@ fn the_tail_covers_the_measured_ring_and_the_norms_bound_the_output() {
     let freqs = [Hz(80.0), Hz(2_000.0)];
     let m = CrossoverModel::new(&freqs, RATE).unwrap();
     let mut xo = CrossoverState::default();
+    let c = m.coefficients();
     let ir: Vec<f32> = (0..N)
-        .map(|n| xo.tick(&m, if n == 0 { 1.0 } else { 0.0 })[0])
+        .map(|n| xo.tick(&c, if n == 0 { 1.0 } else { 0.0 })[0])
         .collect();
     let win = 256;
     let env: Vec<f64> = ir
@@ -186,11 +188,64 @@ fn the_tail_covers_the_measured_ring_and_the_norms_bound_the_output() {
     for _ in 0..(60 * 48_000) {
         state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         let x = (state >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
-        let out = xo.tick(&m, x);
+        let out = xo.tick(&c, x);
         worst = out[..3]
             .iter()
             .fold(worst, |m, &s| m.max(f64::from(s.abs())));
     }
     assert!(worst <= m.l1_norm(), "{worst} against {}", m.l1_norm());
     assert!(m.hinf_norm() <= m.l1_norm());
+}
+
+fn controls(low: f32, high: f32) -> CrossoverControls {
+    CrossoverControls {
+        frequencies: [Hz(low), Hz(high), Hz(0.0), Hz(0.0), Hz(0.0)],
+    }
+}
+
+/// A set is solved with every split inside `1 Hz..=SOLVE_CEILING * rate` and none below the
+/// one before, whatever the controls say (a NaN reads as the floor, a split out of order as
+/// the one before it).
+#[test]
+fn a_design_orders_and_caps_the_splits() {
+    let mut m = CrossoverModel::designed(3, &controls(100.0, 1_000.0), RATE).unwrap();
+    for set in [[5_000.0, 4_000.0], [30_000.0, 25_000.0], [-1.0, f32::NAN]] {
+        m.design_into(&controls(set[0], set[1]), RATE);
+        let (a, b) = (m.frequency(0).unwrap().get(), m.frequency(1).unwrap().get());
+        assert!(
+            1.0 <= a && a <= b && f64::from(b) <= SOLVE_CEILING * RATE.get(),
+            "{set:?}: {a} {b}"
+        );
+        assert_eq!(m.frequency(2), None);
+    }
+}
+
+/// A design in place is the design made whole: the same coefficients as `designed` at the
+/// new controls, whatever it held before.
+#[test]
+fn a_design_in_place_is_the_design_made_whole() {
+    let mut m = CrossoverModel::designed(3, &controls(100.0, 1_000.0), RATE).unwrap();
+    m.design_into(&controls(300.0, 4_000.0), RATE);
+    assert_eq!(
+        m,
+        CrossoverModel::designed(3, &controls(300.0, 4_000.0), RATE).unwrap()
+    );
+}
+
+/// The band count is 2 to 6.
+#[test]
+fn a_design_refuses_a_band_count_a_tree_does_not_have() {
+    let c = controls(100.0, 1_000.0);
+    for bands in [0, 1, 7] {
+        assert!(matches!(
+            CrossoverModel::designed(bands, &c, RATE),
+            Err(CrossoverError::Bands { .. })
+        ));
+    }
+    for bands in 2..=CrossoverModel::MAX_BANDS {
+        assert_eq!(
+            CrossoverModel::designed(bands, &c, RATE).unwrap().bands(),
+            bands
+        );
+    }
 }

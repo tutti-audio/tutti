@@ -4,7 +4,6 @@
 //! Each test names its endpoints with its own process id, so tests (each its
 //! own process under nextest) and other clients on the machine do not meet.
 
-use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
 use super::listener::Listener;
@@ -19,7 +18,7 @@ use tutti_fixtures::midi::{
 use tutti_graph::EventCapacity;
 use tutti_midi_device::{BlockName, EndpointName, FunctionBlock};
 use tutti_midi_hardware::{
-    DeviceInlets, HardwareMidiInputs, VirtualDestination, VirtualProtocol, VirtualSource,
+    HardwareMidiInputs, InputInlets, VirtualDestination, VirtualProtocol, VirtualSource,
     VirtualSpec,
 };
 use tutti_ump::{
@@ -43,12 +42,12 @@ fn find(peer: &Client, spec: &VirtualSpec) -> Option<PortEntry> {
         .find(|p| p.client_name == spec.name().as_str())
 }
 
-fn peer(caps: u32) -> (Client, i32) {
+fn peer(caps: u32) -> (Client, u8) {
     peer_in(caps, UmpVersion::Midi2)
 }
 
 /// A peer client delivered `version`.
-fn peer_in(caps: u32, version: UmpVersion) -> (Client, i32) {
+fn peer_in(caps: u32, version: UmpVersion) -> (Client, u8) {
     let client = Client::open("tutti-virt-peer", Blocking::NonBlock, version).expect("a sequencer");
     let port = client
         .open_port("peer", caps, TYPE_MIDI_GENERIC | TYPE_APPLICATION)
@@ -102,11 +101,11 @@ fn a_subscriber_receives_what_a_virtual_source_sends_in_order() {
 #[test]
 fn a_virtual_destination_delivers_what_a_client_sends_to_the_graph_in_order() {
     let spec = spec("destination");
-    let inlets = DeviceInlets::new(NonZeroUsize::MIN, EventCapacity::of(64), Duration::ZERO);
+    let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let mut listener = Listener::over(&inlets);
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
-    let producer = ports.open_input_port("virtual").expect("a slot");
-    listener.apply();
+    let (producer, inlet) = ports.open_input_port("virtual");
+    listener.attach(inlet);
     let destination = VirtualDestination::open(&spec, producer).expect("a virtual destination");
     let (peer, port) = peer(CAP_READ);
     let found = find(&peer, &spec).expect("the destination is listed");
@@ -115,10 +114,9 @@ fn a_virtual_destination_delivers_what_a_client_sends_to_the_graph_in_order() {
 
     let sent = notes(5);
     for ump in &sent {
-        peer.send_to_subscribers(u8::try_from(port).unwrap(), ump.words())
-            .expect("sends");
+        peer.send_to_subscribers(port, ump.words()).expect("sends");
     }
-    let heard = listener.listen(Duration::from_millis(300));
+    let heard = listener.hear(sent.len(), PATIENCE);
     assert_eq!(heard, sent);
     assert!(destination.is_alive());
 }
@@ -129,11 +127,11 @@ fn a_virtual_destination_delivers_what_a_client_sends_to_the_graph_in_order() {
 #[test]
 fn jr_messages_a_client_sends_are_not_heard_by_an_arrival_port() {
     let spec = spec("jr");
-    let inlets = DeviceInlets::new(NonZeroUsize::MIN, EventCapacity::of(64), Duration::ZERO);
+    let inlets = InputInlets::new(EventCapacity::of(64), Duration::ZERO);
     let mut listener = Listener::over(&inlets);
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
-    let producer = ports.open_input_port("virtual").expect("a slot");
-    listener.apply();
+    let (producer, inlet) = ports.open_input_port("virtual");
+    listener.attach(inlet);
     let _destination = VirtualDestination::open(&spec, producer).expect("a virtual destination");
     let (peer, port) = peer(CAP_READ);
     let found = find(&peer, &spec).expect("the destination is listed");
@@ -144,10 +142,9 @@ fn jr_messages_a_client_sends_are_not_heard_by_an_arrival_port() {
     let stamp = Ump::from(Message::Utility(Utility::JrTimestamp(0x1300)));
     let note = note_on(MidiChannel::of(2), 60, 0x8000);
     for ump in [clock, stamp, note] {
-        peer.send_to_subscribers(u8::try_from(port).unwrap(), ump.words())
-            .expect("sends");
+        peer.send_to_subscribers(port, ump.words()).expect("sends");
     }
-    assert_eq!(listener.listen(Duration::from_millis(300)), [note]);
+    assert_eq!(listener.hear(1, PATIENCE), [note]);
     assert_eq!(ports.losses().dropped(), 0);
 }
 
@@ -174,9 +171,9 @@ fn the_published_endpoint_record_carries_the_protocol_and_the_blocks() {
     let source_spec = spec("record-source").with_function_block(block());
     let dest_spec = spec("record-destination").with_function_block(block());
     let source = VirtualSource::open(&source_spec).expect("a virtual source");
-    let inlets = DeviceInlets::new(NonZeroUsize::MIN, EventCapacity::of(8), Duration::ZERO);
+    let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let ports = HardwareMidiInputs::new(inlets);
-    let producer = ports.open_input_port("virtual").expect("a slot");
+    let producer = ports.open_input_port("virtual").0;
     let destination = VirtualDestination::open(&dest_spec, producer).expect("a destination");
     assert_eq!(source.protocol(), VirtualProtocol::Midi2);
     assert_eq!(destination.protocol(), VirtualProtocol::Midi2);
@@ -209,11 +206,11 @@ fn the_published_endpoint_record_carries_the_protocol_and_the_blocks() {
 #[test]
 fn a_midi1_destination_reports_midi1_and_its_messages_arrive_widened() {
     let spec = spec("midi1").with_protocol(VirtualProtocol::Midi1);
-    let inlets = DeviceInlets::new(NonZeroUsize::MIN, EventCapacity::of(8), Duration::ZERO);
+    let inlets = InputInlets::new(EventCapacity::of(8), Duration::ZERO);
     let mut listener = Listener::over_ingest(&inlets);
     let ports = HardwareMidiInputs::new(std::sync::Arc::clone(&inlets));
-    let producer = ports.open_input_port("virtual").expect("a slot");
-    listener.apply();
+    let (producer, inlet) = ports.open_input_port("virtual");
+    listener.attach(inlet);
     let destination = VirtualDestination::open(&spec, producer).expect("a destination");
     assert_eq!(destination.protocol(), VirtualProtocol::Midi1);
 
@@ -223,9 +220,8 @@ fn a_midi1_destination_reports_midi1_and_its_messages_arrive_widened() {
     peer.connect_to(port, found.client, found.port)
         .expect("subscribes");
     let note = m1_note_on(MidiChannel::of(2), 60, U7::of(0x40));
-    peer.send_to_subscribers(u8::try_from(port).unwrap(), note.words())
-        .expect("sends");
-    let heard = listener.listen(Duration::from_millis(300));
+    peer.send_to_subscribers(port, note.words()).expect("sends");
+    let heard = listener.hear(1, PATIENCE);
     assert_eq!(heard, [note_on(MidiChannel::of(2), 60, 0x8000)]);
 }
 

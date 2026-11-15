@@ -381,6 +381,7 @@ impl Renderer {
         };
         let timestamp = timestamp_at(sample_time);
         let mut flags: AudioUnitRenderActionFlags = 0;
+        let in_flight = self.unit.rendering();
         // SAFETY: `abl` points at the scratch's list, bound to buffers of at
         // least `frames` frames (the caller's contract); `timestamp` and `flags`
         // are live for the call. The scratch is not borrowed across it, because
@@ -388,6 +389,7 @@ impl Renderer {
         let status = unsafe {
             coreaudio_sys::AudioUnitRender(self.unit.raw(), &mut flags, &timestamp, 0, frames, abl)
         };
+        drop(in_flight);
         check_render("AudioUnitRender", status, &self.unit)?;
         Ok(flags & coreaudio_sys::kAudioUnitRenderAction_OutputIsSilence != 0)
     }
@@ -814,11 +816,13 @@ pub fn process_push(
     let timestamp = timestamp_at(scratch.advance(frames));
     let mut flags: AudioUnitRenderActionFlags = 0;
 
+    let in_flight = unit.rendering();
     // SAFETY: `list` is input slab 0, bound to buffers of `frames` frames by
     // `bind_inputs`, and `timestamp` and `flags` are live for the call.
     let status = unsafe {
         coreaudio_sys::AudioUnitProcess(unit.raw(), &mut flags, &timestamp, frames, list)
     };
+    drop(in_flight);
     check_render("AudioUnitProcess", status, unit)?;
 
     // `OutputIsSilence` is honoured for the reason `Renderer::render` documents:
@@ -902,6 +906,7 @@ pub fn process_push_multiple(
     // is a field read and nothing on this path allocates.
     let n_in = scratch.input_ptrs.len() as u32;
     let n_out = scratch.output_ptrs.len() as u32;
+    let in_flight = unit.rendering();
     // SAFETY: both pointer tables name `n_in` and `n_out` slabs bound by
     // `bind_inputs`/`bind_outputs` to buffers of `frames` frames; the timestamp
     // and flags are live for the call.
@@ -917,6 +922,7 @@ pub fn process_push_multiple(
             scratch.output_ptrs.as_mut_ptr(),
         )
     };
+    drop(in_flight);
     check_render("AudioUnitProcessMultiple", status, unit)?;
 
     // As in `process_push`: an AU that flags the block silent has not promised

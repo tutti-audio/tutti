@@ -71,15 +71,6 @@ pub(crate) fn gate_gain_at(gate_level: f32, range_linear: f32) -> Amplitude {
     Amplitude(range_linear + gate_level * (1.0 - range_linear))
 }
 
-/// The limiter's gain when `peak_db` is over the threshold: the drive
-/// (`drive_db = ceiling - threshold`) less the excess over the threshold,
-/// which puts the driven peak at the ceiling.
-#[inline]
-fn limiter_over_gain(peak_db: f32, threshold: f32, drive_db: f32) -> Amplitude {
-    let reduction = peak_db - threshold;
-    Db(-reduction + drive_db).to_amplitude()
-}
-
 /// Pure limiter gain computation: the transfer curve of [`LimiterCurve`] in
 /// dB, for a threshold and ceiling that may change every frame.
 ///
@@ -97,7 +88,10 @@ pub fn compute_limiter_gain(
     let threshold = threshold.into().get();
     let ceiling = ceiling.into().get();
     if peak_db > threshold {
-        limiter_over_gain(peak_db, threshold, ceiling - threshold)
+        // The gain that puts the peak at the ceiling, taken as the difference of the two
+        // levels: it does not lose the ceiling to cancellation when the threshold is far
+        // below it.
+        Db(ceiling - peak_db).to_amplitude()
     } else {
         Db(ceiling - threshold).to_amplitude()
     }
@@ -118,23 +112,26 @@ pub fn compute_limiter_gain(
 /// `peak == threshold`, so the curve is continuous and monotonic whatever
 /// the ordering of ceiling and threshold.
 ///
-/// Over the threshold the dB form is `10^((drive - (peak_db - threshold)) / 20)`,
-/// which is `10^(drive/20) * threshold_lin / peak`; the comparison
+/// Over the threshold the gain is `ceiling / peak`, the ceiling's amplitude over the peak
+/// (which is `10^(drive/20) * threshold_lin / peak`); the comparison
 /// `peak_db > threshold` is `peak > threshold_lin` (the log is monotonic).
 ///
-/// **Silence.** A zero peak is under any finite threshold, so exact digital
-/// silence takes the `below` gain `10^((ceiling - threshold)/20)` (the dB
-/// form pinned it at -144 dB instead, which differs only for thresholds
-/// below that). To keep that boost finite (`0 * inf` is NaN), the gap
-/// `ceiling - threshold` is clamped to `MAX_GAP_DB` and the threshold
-/// amplitude to `f32::MIN_POSITIVE`; neither moves a threshold at or above
-/// -144 dB.
+/// **Silence and the extremes.** A zero peak is under any finite threshold, so exact digital
+/// silence takes the `below` gain `10^((ceiling - threshold)/20)`. To keep that boost
+/// finite (`0 * inf` is NaN) the gap is clamped to `MAX_GAP_DB`, the threshold amplitude
+/// to `f32::MIN_POSITIVE` and the ceiling's amplitude to `MAX_OVER` and to
+/// `f32::MAX * threshold` (so `over / peak`, with a peak over the threshold, never
+/// overflows: where the threshold is clamped a ceiling above 4 holds at 4); and `below` is
+/// held to `over / threshold`, so a peak under the threshold is never raised past the
+/// ceiling where the clamps bite (a threshold under -758 dB, or `-inf`). None of this moves
+/// a curve whose ceiling is under 1e37 (740 dB) and no more than about 770 dB over its
+/// threshold (`f32::MAX` times the threshold's amplitude): a threshold at or above -144 dB
+/// keeps any ceiling up to about +626 dB.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LimiterCurve {
     /// The threshold as an amplitude.
     threshold: f32,
-    /// `10^(drive/20) * threshold`, the ceiling as an amplitude: the gain
-    /// over the threshold is this over the peak.
+    /// The ceiling as an amplitude: the gain over the threshold is this over the peak.
     over: f32,
     /// The gain at or under the threshold.
     below: f32,
@@ -145,19 +142,26 @@ impl LimiterCurve {
     /// 1e38, finite in `f32` (the limit is about 770 dB).
     const MAX_GAP_DB: f32 = 760.0;
 
+    /// The largest ceiling amplitude used: a boost's output stays far from `f32::MAX`.
+    const MAX_OVER: f32 = 1.0e37;
+
     /// The curve for `threshold` and `ceiling`, held across a block.
     #[must_use]
     pub fn new(threshold: Db, ceiling: Db) -> Self {
         let (threshold, ceiling) = (threshold.get(), ceiling.get());
         let gap = (ceiling - threshold).min(Self::MAX_GAP_DB);
         let threshold_lin = Db(threshold).to_amplitude().get().max(f32::MIN_POSITIVE);
-        let over = Db(gap).to_amplitude().get() * threshold_lin;
+        // `over / peak` for a peak over the threshold is at most `over / threshold`: held
+        // to `f32::MAX`, so the gain is finite whatever the peak.
+        let over = Db(ceiling)
+            .to_amplitude()
+            .get()
+            .min(Self::MAX_OVER)
+            .min(f32::MAX * threshold_lin);
         Self {
             threshold: threshold_lin,
-            // A threshold of `+inf` dB (nothing is over it, so `over` is never read) makes
-            // `0 * inf`: 0 keeps the curve comparable (a NaN is not equal to itself).
-            over: if over.is_nan() { 0.0 } else { over },
-            below: Db(gap).to_amplitude().get(),
+            over,
+            below: Db(gap).to_amplitude().get().min(over / threshold_lin),
         }
     }
 
@@ -166,12 +170,13 @@ impl LimiterCurve {
     /// `threshold_lin > 0` (the `MIN_POSITIVE` clamp in `new`) so that the
     /// divisor is never zero.
     #[inline]
-    pub fn gain(&self, peak: f32) -> f32 {
-        if peak > self.threshold {
+    pub fn gain(&self, peak: Amplitude) -> Amplitude {
+        let peak = peak.get();
+        Amplitude(if peak > self.threshold {
             self.over / peak
         } else {
             self.below
-        }
+        })
     }
 }
 

@@ -39,3 +39,32 @@ fn a_departure_is_the_clock_reading_at_the_instant() {
         Some(stamped)
     );
 }
+
+// A pairing is taken at the midpoint of the two readings of `Instant` the clock
+// was read between, and a send time is the clock's reading plus as long as it is
+// after that midpoint.
+#[test]
+fn a_pairing_is_the_midpoint_of_the_readings_around_the_clock() {
+    let before = Instant::now();
+    let paired = Paired::read(|| {
+        std::thread::sleep(Duration::from_millis(20));
+        Ok::<_, std::convert::Infallible>(Duration::from_secs(7))
+    })
+    .unwrap();
+    let after = Instant::now();
+    let at = before + Duration::from_secs(1);
+    let departs = paired.departure(at).unwrap();
+    // The midpoint is at least 10 ms after `before` and before `after`, so the
+    // second between `before` and `at` is a second less that, past the reading.
+    assert!(departs <= Duration::from_secs(8) - Duration::from_millis(10));
+    assert!(departs >= Duration::from_secs(8) - (after - before));
+}
+
+// A clock that cannot be read pairs nothing.
+#[test]
+fn an_unreadable_clock_pairs_nothing() {
+    assert_eq!(
+        Paired::read(|| Err::<Duration, _>("no clock")).unwrap_err(),
+        "no clock"
+    );
+}

@@ -19,8 +19,9 @@
 //! that changes it takes `&mut self`, and it is `Send` but is not shared.
 //! Inbound **events** never pass through this type — a backend pushes them straight into the
 //! [`InputProducerHandle`] of a [`HardwareMidiInputs`] port, which places each
-//! arrival on a frame and pushes it into the device's event inlet, read by the
-//! graph's ingest node. What [`poll`](MidiSession::poll) steps is only the
+//! arrival on a frame and pushes it into the device's event inlet, whose node
+//! [`connect_input`](MidiSession::connect_input) hands the caller to add to the
+//! graph. What [`poll`](MidiSession::poll) steps is only the
 //! devices' *talk about themselves*: the UMP Stream negotiation of each open
 //! input, read from the port's stream ring.
 //!
@@ -45,8 +46,10 @@ use crate::process::{ProcessChange, ReportAsk, ReportError, ReportPeer};
 use crate::profiles::{PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange};
 use crate::properties::{PropertyAsk, PropertyChange, PropertyError, PropertyPeer};
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
+use tutti_graph::EventInletNode;
+use tutti_midi_device::{CiDeviceId, ProfileChange, ProfileId};
 use tutti_midi_device::{DeviceId, DeviceInfo, EntropyError, Learned, SavedDevice};
-use tutti_midi_runtime::{DeviceInlets, DeviceSlot};
+use tutti_midi_runtime::InputInlets;
 use tutti_ump::{DeviceIdentity, MidiGroup};
 
 /// The set of open MIDI inputs, and the endpoints available to open.
@@ -175,6 +178,18 @@ impl DeviceQuery {
     }
 }
 
+/// What [`MidiSession::connect_input`] did.
+#[derive(Debug)]
+#[must_use = "an opened input's inlet is to be added to the graph"]
+pub enum Connected {
+    /// The input was opened: the inlet node its port pushes into, for the caller
+    /// to add to the graph.
+    Opened(EventInletNode),
+    /// The input was open and delivering already: nothing opened, so there is no
+    /// new inlet.
+    AlreadyOpen,
+}
+
 /// What one [`MidiSession::poll`] found, for the device it names.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
@@ -205,14 +220,14 @@ pub enum Polled {
 }
 
 impl MidiSession {
-    /// Opens a session over this platform's backend, its input ports slots of
-    /// `inlets` (the session builds and owns the [`HardwareMidiInputs`] over
+    /// Opens a session over this platform's backend, its input ports inlets made
+    /// by `inlets` (the session builds and owns the [`HardwareMidiInputs`] over
     /// them: [`ports`](Self::ports)).
     ///
     /// # Errors
     ///
     /// As [`Devices::open`].
-    pub fn open(inlets: Arc<DeviceInlets>) -> Result<Self> {
+    pub fn open(inlets: Arc<InputInlets>) -> Result<Self> {
         Self::open_over(backend::active(), inlets)
     }
 
@@ -226,7 +241,7 @@ impl MidiSession {
     /// # Errors
     ///
     /// As [`Devices::open_over`].
-    pub fn open_over(backend: Box<dyn MidiEndpoints>, inlets: Arc<DeviceInlets>) -> Result<Self> {
+    pub fn open_over(backend: Box<dyn MidiEndpoints>, inlets: Arc<InputInlets>) -> Result<Self> {
         Ok(Self {
             inputs: HashMap::new(),
             ports: Arc::new(HardwareMidiInputs::new(inlets)),
@@ -243,9 +258,8 @@ impl MidiSession {
         &self.devices
     }
 
-    /// The input ports the session opened, and the inlets they are slots of
-    /// ([`HardwareMidiInputs::inlets`]): the graph's owner takes the inlets'
-    /// changes from it.
+    /// The input ports the session opened, and the inlets they are made by
+    /// ([`HardwareMidiInputs::inlets`]).
     pub fn ports(&self) -> &Arc<HardwareMidiInputs> {
         &self.ports
     }
@@ -272,12 +286,14 @@ impl MidiSession {
 
     /// Opens an input endpoint, by [`DeviceId`] or by name (see
     /// [`DeviceQuery`]). Idempotent — connecting an already-open endpoint
-    /// succeeds without reopening it, because a second driver connection to one
-    /// device duplicates every inbound event.
+    /// succeeds without reopening it ([`Connected::AlreadyOpen`]), because a
+    /// second driver connection to one device duplicates every inbound event.
     ///
     /// Each newly opened input gets its own port in [`ports`](Self::ports); the
     /// backend pushes into it from the driver's thread and the audio thread
-    /// drains it. Events never pass through this type.
+    /// drains it. Events never pass through this type. The inlet node the port
+    /// pushes into comes back as [`Connected::Opened`]: the caller adds it to
+    /// the graph, and takes it out when the input closes.
     ///
     /// The device's output, if it has one, is opened too, for discovery alone
     /// (the UMP Stream negotiation, or a MIDI 1.0 port's Identity Request, then
@@ -299,7 +315,7 @@ impl MidiSession {
     ///
     /// [`Error::NoDeviceNamed`] when a name matches no input (listing the
     /// inputs it searched; an absent device is an error, never a silent
-    /// no-op). [`Error::NoDevice`] when an id names no present device — the
+    /// no-op). [`Error::NotFound`] when an id names no present device — the
     /// shape a stale id takes after a hot-plug — and [`Error::WrongDirection`]
     /// when it is not an input. Otherwise whatever the backend raises while
     /// opening the port.
@@ -307,7 +323,7 @@ impl MidiSession {
         &mut self,
         device: impl Into<DeviceQuery>,
         timing: InputTiming,
-    ) -> Result<()> {
+    ) -> Result<Connected> {
         let id = device.into().pick(self.inputs())?;
         // An input whose reader died is replaced, not kept: it is silent.
         if let Some(held) = self.inputs.get_mut(&id)
@@ -318,14 +334,14 @@ impl MidiSession {
                 held.timing = timing;
                 follow_timing(&self.ports, held);
             }
-            return Ok(());
+            return Ok(Connected::AlreadyOpen);
         }
         if let Some(mut held) = self.inputs.remove(&id) {
             held.stream.close();
         }
 
         // One ring per connection, retired with it.
-        let input = self.devices.open_input(&id, &self.ports)?;
+        let (input, inlet) = self.devices.open_input(&id, &self.ports)?;
         // A UMP Endpoint with an output is asked what it is by the next
         // `poll`. Its output is the negotiation's own, not the session's one
         // destination: asking must not wait for, or disturb, that choice.
@@ -342,7 +358,7 @@ impl MidiSession {
         };
         follow_timing(&self.ports, &held);
         self.inputs.insert(id, held);
-        Ok(())
+        Ok(Connected::Opened(inlet))
     }
 
     /// Closes an open input and retires the port its events landed in, by
@@ -424,7 +440,7 @@ impl MidiSession {
     /// # Errors
     ///
     /// [`Error::NoDeviceNamed`] when a name matches no output,
-    /// [`Error::NoDevice`] when an id names no present device,
+    /// [`Error::NotFound`] when an id names no present device,
     /// [`Error::WrongDirection`] when it is not an output, plus whatever the
     /// backend raises while opening.
     pub fn connect_output(&self, device: impl Into<DeviceQuery>) -> Result<OpenOutput> {
@@ -470,7 +486,7 @@ impl MidiSession {
         let ci = self.ci_identity;
         let ports = &*self.ports;
         for (id, held) in &mut self.inputs {
-            let slot = held.input.slot();
+            let slot = held.input.port();
             // The copy of the SysEx7 packets is on before a request goes out
             // and before MIDI-CI starts, which a step decides a poll ahead
             // (`Ci::Idle`), and off once nothing listens.
@@ -499,10 +515,12 @@ impl MidiSession {
                     .into_iter()
                     .map(|(peer, change)| Polled::Ci(id.clone(), peer, change)),
             );
+            let refusals = mpe_zone_refusals(&stepped.profiles, &held.stream.profiles());
             polled.extend(
                 stepped
                     .profiles
                     .into_iter()
+                    .chain(refusals)
                     .map(|(peer, change)| Polled::Profile(id.clone(), peer, change)),
             );
             polled.extend(
@@ -644,13 +662,6 @@ impl MidiSession {
             .ask_property(ask)
     }
 
-    /// The inlet slot the open input `id` holds, `None` when it is not open: the
-    /// event input of the ingest node its events go to.
-    #[must_use]
-    pub fn slot(&self, id: &DeviceId) -> Option<DeviceSlot> {
-        self.inputs.get(id).map(|held| held.input.slot())
-    }
-
     /// The Profiles of the MIDI-CI peers found on the open input `id` that
     /// declared Profile Configuration, by Group then MUID (M2-101 §7): empty when
     /// it is not open or no peer did. The session asks each such peer for its
@@ -783,12 +794,12 @@ fn follow_timing(ports: &HardwareMidiInputs, held: &Held) {
         .map_or(InputTiming::Arrival, |stream| {
             held.timing.applied(stream.config())
         });
-    ports.set_input_timing(held.input.slot(), source);
+    ports.set_input_timing(held.input.port(), source);
 }
 
 /// Makes the port's copy of SysEx7 packets what the negotiation wants.
 fn sync_hearing(ports: &HardwareMidiInputs, held: &mut Held, ci: bool) {
-    let slot = held.input.slot();
+    let slot = held.input.port();
     let want = held.stream.hears_sysex(ci);
     if want && !held.hearing {
         held.hearing = ports.hear_sysex(slot, true);
@@ -800,3 +811,38 @@ fn sync_hearing(ports: &HardwareMidiInputs, held: &mut Held, ci: bool) {
 
 #[cfg(test)]
 mod tests;
+
+/// The refusals the `changes` make news of, as the changes that say so: the
+/// zone an Enabled Report on a Manager Channel named, if its zones leave it
+/// out, and, once a peer's inquiry is whole, every zone its table already
+/// enabled that they leave out. A refusal is said once, with the change that
+/// enabled the zone.
+fn mpe_zone_refusals(
+    changes: &[(PeerId, ProfilesChange)],
+    peers: &[PeerProfiles],
+) -> Vec<(PeerId, ProfilesChange)> {
+    let mut said = Vec::new();
+    for (peer, change) in changes {
+        let named = match change {
+            ProfilesChange::Known => None,
+            ProfilesChange::Changed {
+                address: CiDeviceId::Channel(manager),
+                profile: ProfileId::MPE,
+                change: ProfileChange::Enabled,
+            } => Some(*manager),
+            _ => continue,
+        };
+        let Some(held) = peers
+            .iter()
+            .find(|p| p.group() == peer.group && p.muid() == peer.muid)
+        else {
+            continue;
+        };
+        for overlap in held.refused_mpe_zones() {
+            if named.is_none_or(|manager| overlap.added.manager() == manager) {
+                said.push((*peer, ProfilesChange::MpeZoneRefused(overlap)));
+            }
+        }
+    }
+    said
+}

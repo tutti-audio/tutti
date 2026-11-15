@@ -20,7 +20,7 @@ use tutti_plugin_types::fake::{Call, FakePlugin};
 use tutti_plugin_types::{
     ContentScale, EditorError, Normalized, ParamId, ParameterInfo, PluginFailure,
 };
-use tutti_session::{Opened, PluginChange, PluginEvent, Session, SessionEvent};
+use tutti_session::{DetachedSession, Opened, PluginChange, PluginEvent, Session, SessionEvent};
 use tutti_types::{ChannelLayout, SampleRate};
 
 /// A backend that answers nothing: the editor route is the fake control's.
@@ -77,7 +77,7 @@ impl tutti_plugin_types::Health for Inert {
 }
 
 /// A detached session with a fake plugin (with an editor) at a node.
-fn session_with_editor() -> (Session, NodeKey, FakePlugin) {
+fn session_with_editor() -> (DetachedSession, NodeKey, FakePlugin) {
     let (fake, loaded) = FakePlugin::new();
     fake.with_editor(true);
     let control: Arc<dyn tutti_plugin_host::MainThreadControl> = Arc::new(loaded);

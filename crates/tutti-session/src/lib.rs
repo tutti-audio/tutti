@@ -3,10 +3,12 @@
 //!
 //! A [`Session`] is a [`Graph`] (a `tutti-graph` editor, the nodes inserted
 //! through it, their event feeds), its transport, and the engine side it
-//! renders on, built by a [`SessionBuilder`]: offline (the host pulls blocks
-//! with [`Session::render`]), on a device (`device`: the `!Send`
-//! `Device` stays on the thread that opened it), or detached (the
-//! executor stays on this side). One call, [`Session::update`], runs the
+//! renders on, built by a [`SessionBuilder`]. Its type parameter is its
+//! [`Clock`], what runs its blocks: [`Offline`] (the host pulls blocks with
+//! [`Session::render`]), `DeviceClock` (`device`: a sound card's callback; the
+//! `!Send` `Device` stays on the thread that opened it) or [`SystemClock`] (an
+//! OS timer thread, for an app that plays MIDI); a call a clock cannot serve
+//! is not a method of its session. One call, [`Session::update`], runs the
 //! steps of a frame in [`PHASES`] order.
 //!
 //! ```
@@ -61,6 +63,7 @@ mod bounce;
 mod builder;
 #[cfg(feature = "plugin")]
 mod bypass;
+mod clock;
 #[cfg(feature = "device")]
 mod device;
 mod edge;
@@ -88,6 +91,8 @@ mod midi_event;
 mod midi_follow;
 #[cfg(feature = "midi-hardware")]
 mod midi_hardware;
+#[cfg(feature = "midi-hardware")]
+mod midi_port;
 #[cfg(feature = "modulation")]
 mod modulation;
 mod node;
@@ -101,6 +106,7 @@ mod plugin_diagnostics;
 mod plugin_params;
 #[cfg(feature = "plugin")]
 mod plugin_presets;
+mod policy;
 mod pool;
 #[cfg(feature = "record")]
 mod recorder;
@@ -109,7 +115,6 @@ mod recovery;
 #[cfg(feature = "sampler")]
 mod sampler;
 mod session;
-mod system;
 #[cfg(all(feature = "device", feature = "audio-io"))]
 mod take;
 #[cfg(feature = "device")]
@@ -121,11 +126,12 @@ pub use bounce::{
     BounceLatency, BounceRendered, BounceTail, Bounced, BufferMaster, BufferStem, ExportClock,
     FileMaster, FileStem, Master, NoMaster, PrepareEdit, PreparedGraph, Range, Stem, StemGain,
 };
+pub use builder::{BlockConfig, SessionBuilder, Workers, root_width};
 #[cfg(feature = "device")]
-pub use builder::OnDevice;
-pub use builder::{
-    BlockConfig, HasBlockConfig, Offline, SessionBuilder, SystemClock, Workers, root_width,
-};
+pub use clock::DeviceClock;
+pub use clock::{Clock, Offline, OfflineSession, RealTime, SystemClock, SystemSession};
+#[cfg(feature = "testing")]
+pub use clock::{Detached, DetachedSession};
 #[cfg(feature = "device")]
 pub use device::{
     Device, DeviceEvent, DeviceLatency, DeviceRestart, DeviceRestarted, LiveSession, RestartError,
@@ -158,22 +164,25 @@ pub use instrument::{AddedInstrument, AnyNode, InstrumentHandle, NotInstrument};
 pub use jobs::{Job, JobFailed};
 pub use key::{
     Bus, BusSink, Channel, Connection, Edge, Event, EventInPort, EventOutPort, EventTapPort, Fanin,
-    InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root, Weighted, Wire,
+    InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root, RootDeclaration, Weighted, Wire,
 };
 #[cfg(feature = "plugin")]
 pub use main_session::{EditorView, MainPlugin, MainSession, Opened};
 #[cfg(feature = "midi")]
 pub use midi::{
-    MIDI_INPUT_DEVICES, MIDI_INPUT_DROP_REPORT, MIDI_OUT_DROP_REPORT, Midi, MidiLoad, MidiOutDrops,
-    MidiOutRouter, MidiRouteId, MidiRouteRule, NoSuchMidiRoute, OutputTiming, TakePlacement,
-    UmpOut, drain_receiver_through,
+    MIDI_INPUT_DROP_REPORT, MIDI_OUT_DROP_REPORT, Midi, MidiLoad, MidiOutDrops, MidiOutRouter,
+    MidiRouteId, MidiRouteRule, NoSuchMidiRoute, OutputTiming, TakePlacement, UmpOut,
+    drain_receiver_through,
 };
 #[cfg(feature = "midi")]
 pub use midi_event::MidiEvent;
 #[cfg(feature = "midi")]
 pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo, SendMachineControl};
 #[cfg(feature = "midi-hardware")]
-pub use midi_hardware::Resolution;
+pub use midi_port::{
+    InputLoaded, MidiInput, MidiInputEntry, MidiInputInfo, MidiOutput, MidiOutputEntry,
+    MidiOutputInfo, MidiPortError, OutputLoaded, OutputOptions, PortCause, midi_input, midi_output,
+};
 #[cfg(feature = "modulation")]
 pub use modulation::{
     AutomationTake, MixRef, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget, Mods,
@@ -187,9 +196,8 @@ pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 #[cfg(feature = "plugin")]
 pub use plugin::{
     AddPluginError, LoadedPlugin, Plugin, PluginCause, PluginChange, PluginDeclaration,
-    PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginLoad, PluginLoadRequest,
-    PluginLoaded, PluginNode, PluginPorts, PooledPlugin, SNAPSHOT_INTERVAL, StateRestore,
-    StateView,
+    PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginPorts, PooledPlugin,
+    SNAPSHOT_INTERVAL, StateRestore, StateView,
 };
 pub(crate) use pool::Pool;
 #[cfg(feature = "sampler")]
@@ -214,6 +222,7 @@ pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 pub use plugin_params::{Param, ParamGesture, Params, PluginParamError, TypedParam};
 #[cfg(feature = "plugin")]
 pub use plugin_presets::{PresetEntry, PresetKind, Presets};
+pub use policy::{OutputPolicy, OutputPolicyError, OutputPolicyHandle, Policy};
 #[cfg(feature = "record")]
 pub use recorder::{Finite, IDLE_PARK, Live, PumpLoop, PumpPass, Recorder, RecorderError};
 #[cfg(feature = "plugin")]
@@ -228,7 +237,6 @@ pub use session::MidiNodes;
 #[cfg(feature = "modulation")]
 pub use session::ModInput;
 pub use session::{PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent};
-pub use system::SystemSession;
 #[cfg(all(feature = "device", feature = "audio-io"))]
 pub use take::{
     Armed, InFlight, Placement, Punch, PunchError, Recorded, Rolling, Start, Take, TakeEnd,

@@ -8,11 +8,12 @@
 //! own view: how many closes ran, and when. The target runs on the process's main thread, so
 //! a load never waits out a deadline for a main-thread tick that nothing pumps.
 
+use crate::pooled::{LoadPlugin, Spec};
 use std::path::PathBuf;
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::{MainThreadMarker, MainWork};
-use tutti_session::{PluginLoadRequest, Session};
+use tutti_session::{DetachedSession, Session};
 use tutti_types::{ChannelLayout, SampleRate};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -35,7 +36,7 @@ fn closes() -> u32 {
     count
 }
 
-fn session() -> Session {
+fn session() -> DetachedSession {
     Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
@@ -44,14 +45,14 @@ fn session() -> Session {
 
 /// A probe plugin loaded in `session`, then removed from it and let go of by the session:
 /// what is left of it is the returned handle, so dropping that is the last release.
-fn loaded_and_released(session: &mut Session, main: MainThreadMarker) -> PluginHandle {
+fn loaded_and_released(session: &mut DetachedSession, main: MainThreadMarker) -> PluginHandle {
     let node = session
-        .add_plugin_blocking(
+        .load_plugin_blocking(
             main,
-            PluginLoadRequest::new(PluginRef::file(probe()).expect("a plugin file")),
+            Spec::new(PluginRef::file(probe()).expect("a plugin file")),
         )
         .expect("the in-process VST2 loads");
-    let handle = session.plugin(node).expect("hosted").handle().clone();
+    let handle = session.plugin_view(node).expect("hosted").handle().clone();
     session.remove(node).expect("the plugin is removed");
     let mut frame = [0.0f32; 2];
     for _ in 0..4 {
@@ -114,9 +115,9 @@ fn a_session_dropped_off_the_main_thread_counts_its_stranded_closes() {
     let mut session = session();
     for _ in 0..2 {
         session
-            .add_plugin_blocking(
+            .load_plugin_blocking(
                 main,
-                PluginLoadRequest::new(PluginRef::file(probe()).expect("a plugin file")),
+                Spec::new(PluginRef::file(probe()).expect("a plugin file")),
             )
             .expect("the in-process VST2 loads");
     }

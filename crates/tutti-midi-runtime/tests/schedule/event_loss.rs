@@ -4,7 +4,6 @@
 //! Every figure is counted by hand from the clip below, not from another
 //! render. The clip plays at 120 BPM and 48 kHz, so a beat is 24,000 frames.
 
-use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use tutti_types::MaxBlock;
 
@@ -258,7 +257,7 @@ fn the_ingest_node_follows_the_block() {
     use tutti_midi_runtime::MidiIngestNode;
 
     for (block, want) in [(64usize, 512u32), (4096, 512), (8192, 1024), (16_384, 2048)] {
-        let mut node = MidiIngestNode::new(NonZeroUsize::MIN);
+        let mut node = MidiIngestNode::new();
         node.prepare(&Prepare::new(
             SampleRate::SR_48K,
             MaxBlock::of(Samples(block)),

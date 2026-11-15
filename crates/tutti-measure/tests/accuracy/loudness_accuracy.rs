@@ -15,8 +15,8 @@
 
 use tutti_buffers::Interleaved;
 use tutti_measure::{LoudnessConfig, measure_loudness};
-use tutti_types::ChannelLayout;
 use tutti_types::{Amplitude, Db, SampleRate};
+use tutti_types::{Bed, ChannelLayout};
 
 /// Interleaved stereo sine, both channels identical.
 fn stereo_sine(rate: f64, freq: f64, secs: f64, amp: f64) -> Vec<f32> {
@@ -30,7 +30,7 @@ fn stereo_sine(rate: f64, freq: f64, secs: f64, amp: f64) -> Vec<f32> {
 }
 
 fn measure(rate: f64, amp: f64) -> tutti_measure::Loudness {
-    let cfg = LoudnessConfig::new(SampleRate::of(rate), ChannelLayout::STEREO);
+    let cfg = LoudnessConfig::new(SampleRate::of(rate), Bed::Stereo.topology()).unwrap();
     let buf = stereo_sine(rate, 1000.0, 3.0, amp);
     measure_loudness(&cfg, Interleaved::new(&buf, ChannelLayout::STEREO).unwrap())
         .expect("stereo meters")
@@ -158,7 +158,7 @@ fn a_steady_tone_has_no_loudness_range() {
 /// module clamps to R128's -70 LUFS gate; this pins that it does.
 #[test]
 fn silence_reads_the_gate_not_negative_infinity() {
-    let cfg = LoudnessConfig::new(SampleRate::SR_48K, ChannelLayout::STEREO);
+    let cfg = LoudnessConfig::new(SampleRate::SR_48K, Bed::Stereo.topology()).unwrap();
     let silence = vec![0.0f32; 48_000 * 2];
     let l = measure_loudness(
         &cfg,

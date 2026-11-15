@@ -106,6 +106,8 @@ pub(crate) struct GraphSource<'a> {
     global_inputs: usize,
     /// One plane per global output, `max_block` long.
     planes: Vec<Vec<f32>>,
+    /// The root's channels: the first of `planes`.
+    outputs: usize,
     /// What the graph's output channels are, when it declared it.
     root: Option<ChannelTopology>,
     max_block: usize,
@@ -150,14 +152,25 @@ impl<'a> GraphSource<'a> {
         // a full delay), so the loss is counted from `before`, which predates
         // this call, and not from here.
         executor.apply_pending();
-        let (global_inputs, outputs) = executor.plan().map_or_else(
+        // The executor takes a slice for every channel the plan renders, and
+        // the root's are the first `outputs`: a plan that carries an old
+        // root's channels (a root change crossfading) renders them into planes
+        // the export never reads.
+        let (global_inputs, outputs, rendered) = executor.plan().map_or_else(
             || {
                 let topology = &editor.spec().topology;
-                (usize::from(topology.inputs.count()), topology.outputs.len())
+                let width = topology.outputs.len();
+                (usize::from(topology.inputs.count()), width, width)
             },
-            |p| (p.global_inputs() as usize, p.global_outputs()),
+            |p| {
+                (
+                    p.global_inputs() as usize,
+                    p.global_outputs(),
+                    p.rendered_outputs(),
+                )
+            },
         );
-        let planes = vec![vec![0.0f32; max_block]; outputs];
+        let planes = vec![vec![0.0f32; max_block]; rendered];
         Ok(Self {
             editor,
             executor,
@@ -165,6 +178,7 @@ impl<'a> GraphSource<'a> {
             silence: vec![0.0; max_block],
             global_inputs,
             planes,
+            outputs,
             root,
             max_block,
             produced: Samples(0),
@@ -184,7 +198,7 @@ impl GraphSource<'_> {
 
     /// The graph's global output channels: the planes of a block.
     pub(crate) fn outputs(&self) -> usize {
-        self.planes.len()
+        self.outputs
     }
 
     /// What the graph's outputs are, when it declared it.
@@ -195,7 +209,7 @@ impl GraphSource<'_> {
     /// The planes of the block last rendered: one per global output, the first
     /// frames of each valid.
     pub(crate) fn planes(&self) -> &[Vec<f32>] {
-        &self.planes
+        &self.planes[..self.outputs]
     }
 
     /// Frames handed out so far.

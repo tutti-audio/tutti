@@ -5,17 +5,17 @@
 //! controls ([`Kernel::retarget`]) and runs a stretch of audio
 //! ([`Kernel::render`]). Everything about being a graph node is the node's, written
 //! once: reading the param cells and ports, the solve grid on the stream clock, the
-//! corners of a driving port, the dead-band, the fork.
+//! corners of a driving port, the dead-band, the key bus, the fork.
 
 use core::ops::Range;
 
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_dsp::MAX_LANES;
 use tutti_graph::{
-    Cx, HasParam, HasParams, IntoNode, Io, Node, NodeParts, OutBus, ParamNode, ParamSet, Prepare,
-    Shape, Status,
+    BusRole, Cx, HasParam, HasParams, InBus, IntoNode, Io, MAX_PORTS, Node, NodeParts, OutBus,
+    ParamNode, ParamSet, Prepare, Shape, Status,
 };
-use tutti_types::{Latency, MAX_CHANNELS, MaxBlock, SampleRate, Samples, Tail};
+use tutti_types::{Latency, MaxBlock, SampleRate, Samples, Tail};
 
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
 use crate::tail_clock::{Heard, TailClock, tail_frames};
@@ -84,6 +84,23 @@ pub trait Kernel: Clone + Send + 'static {
         output: PlanesMut<'_, '_, S>,
     );
 
+    /// Runs `input` into `output` as [`render`](Self::render) does, with the signal a
+    /// detector listens to in `key`: the input bus of the kernel's [`shape`](Self::shape) with
+    /// the [`Sidechain`](BusRole::Sidechain) role (a bus nobody wired is silence). The node
+    /// calls this instead of `render` when the shape declares one, so a kernel with one
+    /// overrides it; a block whose key bus (or main input bus) has no channels renders as silence.
+    /// Audio thread: no allocation.
+    fn render_keyed<S: Float>(
+        &mut self,
+        input: Planes<'_, S>,
+        key: Planes<'_, S>,
+        lanes: ControlLanes<'_, S>,
+        output: PlanesMut<'_, '_, S>,
+    ) {
+        let _ = key;
+        self.render(input, lanes, output);
+    }
+
     /// The processing latency, once prepared.
     fn latency(&self) -> Samples {
         Samples::ZERO
@@ -138,6 +155,9 @@ pub struct KernelNode<K: Kernel> {
     out: OutBus,
     /// The input width.
     inputs: usize,
+    /// The side-chain key bus: the input bus the kernel's shape gives the
+    /// [`Sidechain`](BusRole::Sidechain) role, if any.
+    key: Option<InBus>,
     /// What [`prepare`](Node::prepare) sets: `None` until the node has a rate.
     tuned: Option<Tuned<<K::Set as ControlSet>::Controls>>,
 }
@@ -184,12 +204,18 @@ impl<K: Kernel> KernelNode<K> {
         let shape = kernel.shape();
         let out = shape.output_bus(0).expect("a kernel has an output");
         let inputs = shape.input_bus(0).map_or(0, |b| b.width());
+        let key = shape
+            .buses_in()
+            .iter()
+            .position(|b| b.role == BusRole::Sidechain)
+            .and_then(|i| shape.input_bus(i));
         let params = Params::new(set, &controls);
         Self {
             kernel,
             params,
             out,
             inputs,
+            key,
             tuned: None,
         }
     }
@@ -257,28 +283,50 @@ impl<K: Kernel> KernelNode<K> {
         }
         let driven = self.params.lanes(io);
         let (ins, mut outs) = io.split();
-        let mut input: [&[f32]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
+        let mut input: [&[f32]; MAX_PORTS] = [&[]; MAX_PORTS];
         for (c, slot) in input.iter_mut().enumerate().take(self.inputs) {
             *slot = &ins.get(c)[frames.clone()];
         }
-        let mut output: [&mut [f32]; MAX_CHANNELS] = core::array::from_fn(|_| Default::default());
+        let mut key: [&[f32]; MAX_PORTS] = [&[]; MAX_PORTS];
+        let mut keys = 0;
+        if let Some(bus) = self.key {
+            for (slot, ch) in key.iter_mut().zip(ins.bus(bus).channels()) {
+                *slot = &ch[frames.clone()];
+                keys += 1;
+            }
+        }
+        let mut output: [&mut [f32]; MAX_PORTS] = core::array::from_fn(|_| Default::default());
         let mut width = 0;
         for (slot, ch) in output.iter_mut().zip(outs.bus(self.out).into_channels()) {
             *slot = &mut ch[frames.clone()];
             width += 1;
         }
-        // Both views are whole planes of `frames.len()` frames, at most
-        // `MAX_CHANNELS` wide; a bus with no channels is the one refusal, and it has
-        // nothing to render.
-        if let (Ok(input), Ok(output)) = (
-            Planes::new(&input[..self.inputs]),
-            PlanesMut::new(&mut output[..width]),
-        ) {
-            let mut lanes = ControlLanes::<f32>::NONE;
-            for (slot, lane) in lanes.0.iter_mut().zip(driven) {
-                *slot = lane.map(|l| Mono::new(&l[frames.clone()]));
+        // Both views are whole planes of `frames.len()` frames, at most `MAX_PORTS` wide
+        // (the most ports a shape declares, so a crossover's bands are all written). A bus
+        // can be declared with no channels (an empty `BusTopology`): an output with none has
+        // nothing to write, and an input or key bus with none has nothing to render or detect,
+        // so the output renders as silence rather than as the arena had it.
+        let Ok(output) = PlanesMut::new(&mut output[..width]) else {
+            return;
+        };
+        let silence = |mut output: PlanesMut<'_, '_, f32>| {
+            for c in 0..output.channels() {
+                output.plane_mut(c).samples_mut().fill(0.0);
             }
-            self.kernel.render(input, lanes, output);
+        };
+        let Ok(input) = Planes::new(&input[..self.inputs]) else {
+            return silence(output);
+        };
+        let mut lanes = ControlLanes::<f32>::NONE;
+        for (slot, lane) in lanes.0.iter_mut().zip(driven) {
+            *slot = lane.map(|l| Mono::new(&l[frames.clone()]));
+        }
+        match self.key {
+            None => self.kernel.render(input, lanes, output),
+            Some(_) => match Planes::new(&key[..keys]) {
+                Ok(key) => self.kernel.render_keyed(input, key, lanes, output),
+                Err(_) => silence(output),
+            },
         }
     }
 
@@ -446,6 +494,7 @@ impl<K: Kernel> Clone for KernelNode<K> {
             params,
             out: self.out,
             inputs: self.inputs,
+            key: self.key,
             tuned: self.tuned.map(|t| Tuned {
                 position: 0,
                 clock: t.clock.map(|mut clock| {
@@ -538,5 +587,82 @@ mod tests {
             heard |= d.audio[0].iter().any(|&s| s != 0.0);
         }
         assert!(heard);
+    }
+
+    /// A kernel with a sidechain bus or a main input bus of no channels (either can be
+    /// declared: an empty topology) renders silence, not what the output held: nothing is
+    /// detected or passed. A zero-width output has nothing to write.
+    #[test]
+    fn a_bus_with_no_channels_renders_silence() {
+        use tutti_graph::contract::Direct;
+        use tutti_graph::{Bus, BusRole, Buses};
+        use tutti_types::{BusTopology, Db};
+
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        struct Gain {
+            gain: Db,
+        }
+        #[derive(Clone, Copy, Debug)]
+        struct GainSet;
+        control_set! {
+            GainSet(_s): Gain = Gain { gain: Db(0.0) };
+            live: (all);
+            GainDb => Db = gain { whole };
+            fn defaults(&self) -> Gain {
+                Gain { gain: Db(0.0) }
+            }
+        }
+        /// Never asked to render: the node refuses each block it is declared empty for.
+        #[derive(Clone)]
+        struct Keyed {
+            main: BusTopology,
+            key: Option<BusTopology>,
+        }
+        impl Kernel for Keyed {
+            type Set = GainSet;
+            const GRID: usize = 16;
+            fn shape(&self) -> Shape {
+                let mut main = Buses::main(self.main);
+                if let Some(key) = self.key {
+                    main = main
+                        .with(Bus::new(key, BusRole::Sidechain))
+                        .expect("two buses");
+                }
+                let out = Bus::banded(BusTopology::MONO, BusRole::Main, 1).expect("a bus");
+                Shape::buses(main, Buses::NONE.with(out).expect("one bus"))
+            }
+            fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
+            fn reset(&mut self) {}
+            fn retarget(&mut self, _: &Gain) {}
+            fn render<S: Float>(
+                &mut self,
+                _: Planes<'_, S>,
+                _: ControlLanes<'_, S>,
+                _: PlanesMut<'_, '_, S>,
+            ) {
+                unreachable!("an empty bus is refused before the kernel renders");
+            }
+            fn tail(&self) -> Tail {
+                Tail::None
+            }
+        }
+        for (main, key) in [
+            (BusTopology::MONO, Some(BusTopology::EMPTY)),
+            (BusTopology::EMPTY, None),
+            (BusTopology::EMPTY, Some(BusTopology::MONO)),
+        ] {
+            let node =
+                KernelNode::with_kernel(Keyed { main, key }, GainSet, Gain { gain: Db(0.0) });
+            let mut d = Direct::new(node, SampleRate::SR_48K, 64);
+            for c in d.inputs_mut() {
+                c.fill(0.5);
+            }
+            d.outputs_mut()[0].fill(7.0);
+            d.block();
+            assert!(
+                d.output(0).iter().all(|&s| s == 0.0),
+                "{main:?}, key {key:?}"
+            );
+        }
     }
 }

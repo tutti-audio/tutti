@@ -66,7 +66,7 @@ fn zx(msb: u8, lsb: u8) -> u32 {
 
 // D.3.3: a run is sent on a CC 38, a later CC 6, or a new parameter select.
 
-/// Spec: m2-104/d.3.3#7
+/// Spec: m2-104/7.4.6#1, m2-104/7.4.6#2, m2-104/d.3.3#7
 #[test]
 fn cc_6_then_cc_38_is_one_controller() {
     let mut t = Translator::new();
@@ -420,7 +420,7 @@ fn groups_keep_their_own_runs() {
     );
 }
 
-/// Spec: m2-104/d.3.3#8
+/// Spec: m2-104/7.4.6#3, m2-104/7.4.6#4, m2-104/d.3.3#8
 #[test]
 fn bank_select_rides_on_the_next_program_change_only() {
     let mut t = Translator::new();
@@ -828,4 +828,78 @@ fn reset_group_forgets_that_groups_selection_alone() {
         !matches!(gone, Some(Ok(Message::Midi2(_, Voice2::Registered { .. })))),
         "{gone:?}"
     );
+}
+
+/// Appendix D.3.3: a 14-bit controller's MSB (1 to 31) and LSB (33 to 63) are
+/// not merged into one 32-bit value: each is its own Control Change, widened
+/// on its own, and neither is a relative controller.
+/// Spec: m2-104/d.3.3#1, m2-104/d.3.3#2
+#[test]
+fn a_14_bit_controller_pair_stays_two_control_changes() {
+    let mut t = Translator::new();
+    let control = |number: u8, value: u32| {
+        Message::Midi2(
+            A,
+            Voice2::ControlChange {
+                controller: CCNumber::of(number),
+                value: ControlValue::new(value),
+            },
+        )
+    };
+    let out = run(
+        &mut t,
+        &[
+            cc(CCNumber::of(1), 64),
+            cc(CCNumber::of(33), 127),
+            cc(CCNumber::of(31), 0),
+            cc(CCNumber::of(63), 64),
+        ],
+    );
+    assert_eq!(
+        out,
+        vec![
+            vec![control(1, 0x8000_0000)],
+            vec![control(33, 0xFFFF_FFFF)],
+            vec![control(31, 0)],
+            vec![control(63, 0x8000_0000)],
+        ]
+    );
+}
+
+/// Every MIDI 1.0 Channel Voice message translates to a MIDI 2.0 one: a
+/// device in the MIDI 2.0 Protocol does not send MIDI 1.0 Channel Voice
+/// messages (M2-104 section 3.3.1), and a Group that uses one kind does not use
+/// the other (section 7.4).
+/// Spec: m2-104/3.3.1#2, m2-104/7.4#1
+#[test]
+fn translated_channel_voice_messages_are_all_midi_2() {
+    let mut t = Translator::new();
+    let note = NoteNumber::of(60);
+    let voice = |v: Voice1| -> Ump { Message::Midi1(A, v).into() };
+    let input = [
+        voice(Voice1::NoteOn {
+            note,
+            velocity: U7::of(90),
+        }),
+        voice(Voice1::NoteOn {
+            note,
+            velocity: U7::of(0),
+        }),
+        voice(Voice1::NoteOff {
+            note,
+            velocity: U7::of(5),
+        }),
+        voice(Voice1::PolyPressure {
+            note,
+            pressure: U7::of(7),
+        }),
+        cc(CCNumber::of(7), 100),
+        voice(Voice1::ProgramChange(U7::of(3))),
+        voice(Voice1::ChannelPressure(U7::of(9))),
+        voice(Voice1::PitchBend(tutti_ump::U14::of(0x2000))),
+    ];
+    for out in run(&mut t, &input) {
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert!(matches!(out[0], Message::Midi2(..)), "{out:?}");
+    }
 }

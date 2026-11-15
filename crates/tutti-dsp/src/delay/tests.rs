@@ -64,3 +64,42 @@ fn test_delay_line_reset() {
     let val = dl.read_sample(1.0, InterpolationMode::None);
     assert!((val).abs() < 0.001, "After reset, should read 0.0");
 }
+
+/// The whole-frame reader is the fixed delay: pushing `x` and reading `len` back returns
+/// each sample `len` pushes later, and silence before the first one arrives, across every
+/// wrap and after a reset.
+#[test]
+fn a_whole_read_returns_each_sample_len_pushes_later() {
+    const LEN: usize = 4;
+    let mut line = DelayLine::new(LEN);
+    for round in 0..2 {
+        for k in 0..5 * LEN {
+            line.push_sample((k + 1) as f32);
+            let want = if k >= LEN { (k - LEN + 1) as f32 } else { 0.0 };
+            assert_eq!(line.read_whole(LEN), want, "round {round}, push {k}");
+        }
+        line.reset();
+    }
+}
+
+/// The two readers share one ring: at a whole delay the interpolated read of every mode is
+/// the whole-frame read, and a read past the capacity is the oldest sample held.
+#[test]
+fn the_two_readers_agree_on_a_whole_delay() {
+    const MAX: usize = 7;
+    let mut line = DelayLine::new(MAX);
+    for k in 0..3 * MAX {
+        line.push_sample(((k * 37) % 11) as f32 - 5.0);
+        for d in 0..=MAX {
+            let whole = line.read_whole(d);
+            for mode in [
+                InterpolationMode::None,
+                InterpolationMode::Linear,
+                InterpolationMode::CubicHermite,
+            ] {
+                assert_eq!(line.read_sample(d as f32, mode), whole, "{mode:?} at {d}");
+            }
+        }
+        assert_eq!(line.read_whole(MAX + 5), line.read_whole(MAX));
+    }
+}

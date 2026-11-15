@@ -8,7 +8,7 @@ use tutti_midi_device::{
     CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DiscoveryData,
     INQUIRY_TIMEOUT, MaxSysexSize, Muid,
 };
-use tutti_ump::{MidiGroup, MpeChannels, MpeZoneSpan, U7};
+use tutti_ump::{MidiGroup, MpeChannels, MpeOverlap, MpeZoneSpan, U7};
 
 const GROUP_0: MidiGroup = MidiGroup::of(0);
 
@@ -88,9 +88,7 @@ fn endpoint_wire(blocks: &[FunctionBlock]) -> Wire {
         endpoint_of(blocks),
     );
     wire.session.enable_ci(identity());
-    wire.session
-        .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+    wire.open(InputTiming::Arrival);
     // One Function Block Discovery per declared block takes a few ticks.
     let settled = (0..32).any(|ms| !wire.tick(ms).1.is_empty());
     assert!(settled, "the negotiation settled");
@@ -197,9 +195,7 @@ fn an_endpoint_with_no_blocks_or_no_answer_gets_discovery_on_group_0() {
         Endpoint::new(Capabilities::default()),
     );
     wire.session.enable_ci(identity());
-    wire.session
-        .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+    wire.open(InputTiming::Arrival);
     let step = STEP_TIMEOUT.as_millis() as u64;
     for ms in [0, step, 2 * step, 3 * step + 1, 3 * step + 2] {
         let _ = polled(&mut wire, ms);
@@ -394,7 +390,7 @@ fn nothing_midi_ci_reaches_the_sessions_output_and_the_graph_still_hears_sysex()
 
     let mut rig = Rig::over(wire.session.ports().inlets(), wire.start);
     rig.run(1);
-    rig.apply();
+    rig.attach(wire.inlet.take().expect("the wire connected its input"));
 
     let _ = polled(&mut wire, 0);
     reply_at(&wire, identity_reply(0), 1);
@@ -519,9 +515,7 @@ fn midi_ci_is_off_by_default() {
         PortDirection::Duplex,
         endpoint_of(&[ci_block(0, 2, 2)]),
     );
-    wire.session
-        .connect_input(&wire.id.clone(), InputTiming::Arrival)
-        .unwrap();
+    wire.open(InputTiming::Arrival);
     let settled = (0..32).any(|ms| !wire.tick(ms).1.is_empty());
     assert!(settled);
     for ms in [100, 5_000, 20_000] {
@@ -1341,6 +1335,54 @@ fn an_enabled_mpe_profile_is_a_zone_of_the_channels_its_report_gave() {
     );
     let _ = polled(&mut wire, 150);
     assert_eq!(zones(&wire), None, "disabled again");
+}
+
+/// M2-120 section 3.4: a zone that shares a Channel with a lower one is not a
+/// zone of the peer, and the session says so rather than leaving it out in
+/// silence: a change names the zone and why.
+#[test]
+fn an_mpe_zone_sharing_channels_with_a_lower_one_is_reported_refused() {
+    let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
+    known_profiles(&mut wire, ours, vec![], vec![ProfileId::MPE], vec![]);
+    let enable = |wire: &Wire, manager: u8, channels: u8, ms: u64| {
+        say(
+            wire,
+            GROUP_0,
+            &CiMessage::ProfileEnabled {
+                header: CiHeader {
+                    device_id: channel(manager),
+                    ..CiHeader::new(peer())
+                },
+                profile: ProfileId::MPE,
+                channels: ProfileChannels::of(channels.into()),
+            },
+            ms,
+        );
+    };
+    enable(&wire, 0, 5, 120);
+    let first = polled(&mut wire, 130);
+    let refused = |polled: &[Polled]| {
+        polled
+            .iter()
+            .filter_map(|p| match p {
+                Polled::Profile(_, _, ProfilesChange::MpeZoneRefused(overlap)) => Some(*overlap),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(refused(&first), [], "one zone is refused by none");
+    enable(&wire, 3, 4, 140);
+    let second = polled(&mut wire, 150);
+    let span = |manager: u8, channels: u8| {
+        MpeZoneSpan::new(MidiChannel::of(manager), MpeChannels::of(channels)).unwrap()
+    };
+    assert_eq!(
+        refused(&second),
+        [MpeOverlap {
+            held: span(0, 5),
+            added: span(3, 4)
+        }]
+    );
 }
 
 /// M2-120 section 3.6.3: the Channel Response Type Notification is Profile

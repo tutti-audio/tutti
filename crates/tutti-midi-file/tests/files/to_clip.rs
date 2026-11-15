@@ -97,7 +97,9 @@ fn a_set_tempo_is_ten_ns_units_per_quarter() {
 /// SMF 1.0: `58 04 06 03 18 08` is 6/8, 24 MIDI clocks a click, 8 32nds per
 /// quarter. M2-104 sections 7.5.4 and 7.5.5: the signature carries numerator,
 /// denominator power and the 32nds; the metronome the clocks per click, and
-/// 0 for the accents and subdivisions SMF has no field for.
+/// 0 for the accents and subdivisions SMF has no field for. The one bar
+/// accent part is the bar's six beats, so the parts add up to the beats.
+/// Spec: m2-104/7.5.5#5, m2-104/7.5.5#9
 #[test]
 fn a_time_signature_is_a_signature_and_a_metronome() {
     let smf = format0(vec![

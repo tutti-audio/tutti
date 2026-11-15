@@ -11,7 +11,6 @@
 //! The suite needs the `snd-seq` module and a `Midi Through` client
 //! (`sudo modprobe snd-seq-dummy`) and fails without them.
 
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -19,7 +18,7 @@ use super::listener::Listener;
 
 use tutti_fixtures::midi::{note_off, note_on};
 use tutti_graph::{EventCapacity, Offset};
-use tutti_midi_hardware::{DeviceInfo, DeviceInlets, MidiSession, OpenOutput};
+use tutti_midi_hardware::{DeviceInfo, InputInlets, MidiSession, OpenOutput};
 use tutti_ump::{KeyEvent, MidiChannel, Ump};
 
 /// Whether `ev` starts a note, in either protocol.
@@ -42,12 +41,8 @@ struct Loopback {
 }
 
 fn open() -> Loopback {
-    // One inlet slot, 256 events, each placed 20 ms after it arrived.
-    let inlets = DeviceInlets::new(
-        NonZeroUsize::MIN,
-        EventCapacity::of(256),
-        Duration::from_millis(20),
-    );
+    // 256 events, each placed 20 ms after it arrived.
+    let inlets = InputInlets::new(EventCapacity::of(256), Duration::from_millis(20));
     let mut graph = Listener::over(&inlets);
     let mut io = MidiSession::open(Arc::clone(&inlets)).expect("open MIDI");
     let inputs = io.inputs();
@@ -55,9 +50,13 @@ fn open() -> Loopback {
     let (Some(inp), Some(out)) = (pick(&inputs), pick(&outputs)) else {
         panic!("no `Midi Through` port: `sudo modprobe snd-seq-dummy`");
     };
-    io.connect_input(&inp.id, tutti_midi_hardware::InputTiming::Arrival)
-        .expect("connect input");
-    graph.apply();
+    let tutti_midi_hardware::Connected::Opened(inlet) = io
+        .connect_input(&inp.id, tutti_midi_hardware::InputTiming::Arrival)
+        .expect("connect input")
+    else {
+        panic!("a new input opens");
+    };
+    graph.attach(inlet);
     let sink = io.connect_output(&out.id).expect("connect output");
     std::thread::sleep(Duration::from_millis(200));
     // Whatever was buffered before the test.
@@ -76,19 +75,20 @@ fn midi_through_returns_a_note_on_a_note_off_and_a_burst_of_ten_note_ons() {
     let mut lb = open();
 
     let on = note_on(MidiChannel::FIRST, 60, 0x8000);
-    assert_eq!(lb.sink.queue(&[(Offset::ZERO, on)]), 1);
+    assert_eq!(lb.sink.queue(&[(Offset::ZERO, on)]).packets(), 1);
     let heard = lb.graph.listen(Duration::from_millis(150));
     assert_eq!(heard.len(), 1, "one event came back for the note on");
     assert!(is_note_on(heard[0]), "the event is a note on");
 
     let off = note_off(MidiChannel::FIRST, 60, 0x4000);
-    assert_eq!(lb.sink.queue(&[(Offset::ZERO, off)]), 1);
+    assert_eq!(lb.sink.queue(&[(Offset::ZERO, off)]).packets(), 1);
     let heard = lb.graph.listen(Duration::from_millis(150));
     assert_eq!(heard.len(), 1, "one event came back for the note off");
     assert!(heard[0].is_note_off(), "the event is a note off");
 
     for n in 60..70u8 {
-        lb.sink
+        let _ = lb
+            .sink
             .queue(&[(Offset::ZERO, note_on(MidiChannel::FIRST, n, 0xA000))]);
     }
     let heard = lb.graph.listen(Duration::from_millis(250));

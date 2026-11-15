@@ -627,3 +627,34 @@ fn the_chase_carries_the_selected_program_and_bank() {
         (U7::of(6), U7::of(2))
     );
 }
+
+/// Tuning Program Change and Tuning Bank Select carry their number in the top
+/// 7 bits of the data; the 25 bits below are undefined and ignored (M2-104
+/// section 7.4.7.1).
+/// Spec: m2-104/7.4.7.1#3, m2-104/7.4.7.1#4
+#[test]
+fn rpn_3_and_4_read_only_the_top_seven_bits() {
+    let mut core = Voicing::new(
+        Rules::poly(NonZeroUsize::new(8).unwrap())
+            .with_tuning_capacity(TuningCapacity::new(3, 4).unwrap()),
+    );
+    let select = |core: &mut Voicing, which: Rpn, number: u32, below: u32| {
+        step(
+            core,
+            0,
+            Voice2::Registered {
+                bank: which.bank(),
+                index: which.index(),
+                value: ControlValue::new(number << 25 | below),
+            },
+        )
+    };
+    for below in [0, 1, 0x00FF_FFFF, 0x01FF_FFFF] {
+        select(&mut core, Rpn::TUNING_PROGRAM_SELECT, 2, below);
+        select(&mut core, Rpn::TUNING_BANK_SELECT, 2, below);
+        assert_eq!(core.channel(MidiChannel::of(0)).tuning_program(), U7::of(2));
+        assert_eq!(core.channel(MidiChannel::of(0)).tuning_bank(), U7::of(2));
+        select(&mut core, Rpn::TUNING_PROGRAM_SELECT, 0, 0);
+        select(&mut core, Rpn::TUNING_BANK_SELECT, 0, 0);
+    }
+}
