@@ -704,16 +704,6 @@ pub(crate) fn command(input: &mut &[u8]) -> Res<MmcCommand> {
         })
     };
     if let Shape::Counted = shape(code) {
-        if base && code == 0x53 {
-            // A count past the end of the message (p.40 b) is a segment cut
-            // short, not an unreadable message.
-            let mut ahead = *input;
-            let count = u7.parse_next(&mut ahead)?;
-            if usize::from(count.get()) > ahead.len() {
-                *input = &[];
-                return Ok(MmcCommand::TruncatedSegment);
-            }
-        }
         let data = counted.parse_next(input)?;
         if base && (0x40..=0x55).contains(&code) {
             return counted_command(code, data).map_or_else(bad, Ok);
@@ -732,6 +722,28 @@ pub(crate) fn commands(rest: &[u8]) -> Option<MmcCommands> {
         return None;
     }
     sequence(rest)
+}
+
+/// The commands before a COMMAND SEGMENT whose count is more than the bytes left
+/// in the message (RP-013 p.40 b): the segment is cut short and takes the rest.
+/// `None` when the message is anything else.
+pub(crate) fn truncated_segment(rest: &[u8]) -> Option<MmcCommands> {
+    let mut input = rest;
+    while !input.is_empty() {
+        if let [0x53, count, tail @ ..] = input
+            && *count < 0x80
+            && usize::from(*count) > tail.len()
+        {
+            let before = &rest[..rest.len() - input.len()];
+            return if before.is_empty() {
+                Some(MmcCommands::new())
+            } else {
+                sequence(before)
+            };
+        }
+        command(&mut input).ok()?;
+    }
+    None
 }
 
 /// The bytes after `07`: one or more information fields, at most [`MMC_MAX_DATA`].

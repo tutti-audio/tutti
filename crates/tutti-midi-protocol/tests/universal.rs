@@ -1284,17 +1284,33 @@ mod machine_control {
     }
 
     /// RP-013 p.40 (b): a COMMAND SEGMENT whose count is more than the bytes left
-    /// in its message is a segment cut short, read as such and not as an
-    /// unreadable message; it is not written.
+    /// in its message is a segment cut short, read as such (with the commands
+    /// before it) and not as an unreadable message. No writer can name it: it is
+    /// a `Universal`, not an `MmcCommand`.
     #[test]
     fn a_segment_whose_count_passes_the_message_is_truncated() {
+        let truncated = |data: &[u8]| match heard(&framed(0x7F, 0x06, data)).message {
+            Universal::MachineControlTruncated(before) => before.iter().collect::<Vec<_>>(),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(truncated(&[0x53, 0x09, 0x01, 0x02]), []);
         assert_eq!(
-            one_command(&[0x53, 0x09, 0x01, 0x02]),
-            MmcCommand::TruncatedSegment
+            truncated(&[0x02, 0x01, 0x53, 0x09, 0x01]),
+            [MmcCommand::Play, MmcCommand::Stop]
         );
-        let mut list = MmcCommands::new();
-        assert!(list.push(&MmcCommand::TruncatedSegment).is_err());
-        assert!(list.is_empty());
+        // A whole segment, and a cut-short command that is not a segment, are
+        // not this.
+        assert!(matches!(
+            heard(&framed(0x7F, 0x06, &[0x53, 0x02, 0x00, 0x02])).message,
+            Universal::MachineControl(_)
+        ));
+        assert!(!matches!(
+            parse(&framed(0x7F, 0x06, &[0x44, 0x09, 0x01])),
+            Read::Universal(Addressed {
+                message: Universal::MachineControlTruncated(_),
+                ..
+            })
+        ));
     }
 
     /// RP-013 p.40: a non-segmented message when a later segment was due

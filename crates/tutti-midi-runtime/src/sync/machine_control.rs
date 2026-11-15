@@ -209,17 +209,25 @@ impl MachineControlFollower {
         let SysexStep::Complete(done) = self.sysex.push(ump) else {
             return;
         };
-        let Read::Universal(Addressed {
-            to,
-            message: Universal::MachineControl(commands),
-        }) = read(self.sysex.message(done))
-        else {
+        let Read::Universal(Addressed { to, message }) = read(self.sysex.message(done)) else {
             return;
         };
-        if !self.is_for_us(to) {
-            return;
+        match message {
+            Universal::MachineControl(commands) if self.is_for_us(to) => {
+                self.segmented_or_plain(&commands, out);
+            }
+            // The segment is cut short (p.40 b): the commands before it are not
+            // acted on, as for any segment that is not first.
+            Universal::MachineControlTruncated(before) if self.is_for_us(to) => {
+                self.segments.cancel();
+                out(MachineControlEvent::Segmentation(if before.is_empty() {
+                    SegmentFault::CountMismatch
+                } else {
+                    SegmentFault::NotFirst
+                }));
+            }
+            _ => {}
         }
-        self.segmented_or_plain(&commands, out);
     }
 
     /// The commands of one message to this device: a COMMAND SEGMENT goes to
@@ -234,14 +242,6 @@ impl MachineControlFollower {
         let Some(first) = items.next() else {
             return;
         };
-        if first == MmcCommand::TruncatedSegment {
-            // The segment's count is past the end of its message (p.40 b).
-            self.segments.cancel();
-            out(MachineControlEvent::Segmentation(
-                SegmentFault::CountMismatch,
-            ));
-            return;
-        }
         if let MmcCommand::CommandSegment(segment) = first {
             if items.next().is_some() {
                 self.segments.cancel();
@@ -253,12 +253,7 @@ impl MachineControlFollower {
             self.segment(segment, out);
             return;
         }
-        if items.any(|c| {
-            matches!(
-                c,
-                MmcCommand::CommandSegment(_) | MmcCommand::TruncatedSegment
-            )
-        }) {
+        if items.any(|c| matches!(c, MmcCommand::CommandSegment(_))) {
             self.segments.cancel();
             out(MachineControlEvent::Segmentation(SegmentFault::NotFirst));
             return;
@@ -292,10 +287,7 @@ impl MachineControlFollower {
         match self.segments.push(segment) {
             Ok(Some(string)) => {
                 for command in string {
-                    if matches!(
-                        command,
-                        MmcCommand::CommandSegment(_) | MmcCommand::TruncatedSegment
-                    ) {
+                    if matches!(command, MmcCommand::CommandSegment(_)) {
                         out(MachineControlEvent::Segmentation(SegmentFault::Nested));
                     } else {
                         self.state.act(command, out);
@@ -384,7 +376,6 @@ impl State {
             | MmcCommand::Procedure(_)
             | MmcCommand::Event(_)
             | MmcCommand::CommandSegment(_)
-            | MmcCommand::TruncatedSegment
             | MmcCommand::DeferredVariablePlay(_)
             | MmcCommand::RecordStrobeVariable(_)
             | MmcCommand::Reserved(_) => out(MachineControlEvent::Ignored(command)),

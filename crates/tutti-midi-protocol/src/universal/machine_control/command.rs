@@ -211,11 +211,6 @@ pub enum MmcCommand {
     Group(MmcGroup),
     /// `53`: a piece of a command string too long for one message.
     CommandSegment(MmcSegment),
-    /// `53` whose count is more than the bytes left in the message (RP-013 p.40
-    /// b): a COMMAND SEGMENT that was cut short, which takes the rest of the
-    /// message. Read only: [`MmcCommands::push`](super::MmcCommands::push)
-    /// refuses it, as no segment is written with a wrong count.
-    TruncatedSegment,
     /// `54`: variable play, after a locate in progress completes.
     DeferredVariablePlay(MmcSpeed),
     /// `55`.
