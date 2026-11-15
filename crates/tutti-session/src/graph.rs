@@ -1004,6 +1004,38 @@ impl Graph {
         }
     }
 
+    /// Puts the silent stand-in of a plugin that is gone at `node`
+    /// ([`Lost`](crate::plugin::Lost)), the plugin's record kept: the node keeps
+    /// its key, its ports, its wiring and its latency, renders silence and has
+    /// no tail, and the plugin's node is retired to the control thread. Returns
+    /// whether the swap was made: not while the graph re-prepares. A swap parked
+    /// for the same node (a crossfade waiting for the re-prepare) lands after the
+    /// stand-in and wins.
+    ///
+    /// # Errors
+    ///
+    /// A poisoned graph, or a `node` not in it.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn silence_plugin(&mut self, node: NodeKey) -> Result<bool, CrossfadeRefused> {
+        if let Some(cause) = self.editor.poison_cause() {
+            return Err(CrossfadeRefused::Poisoned(cause.to_owned()));
+        }
+        let Some(shape) = self.shape(node).filter(|_| self.nodes.contains_key(&node)) else {
+            return Err(CrossfadeRefused::NoSuchNode(node));
+        };
+        if self.editor.is_repreparing() {
+            return Ok(false);
+        }
+        let stand_in = tutti_graph::ForkByClone(crate::plugin::Lost::of(shape));
+        match self.swap_unit(node, stand_in, tutti_graph::DECLICK, FadeLaw::default()) {
+            Ok(_) => Ok(true),
+            Err(ReplaceRefused::Failed(refused)) => Err(refused),
+            // A re-prepare is `swap_unit`'s only cause for `Busy`, and it was
+            // checked above on this thread.
+            Err(ReplaceRefused::Busy(_)) => unreachable!("checked above"),
+        }
+    }
+
     /// The control-thread half of a copy of the master for an offline render
     /// at `rate`, sharing no state with this graph: `Editor::fork_gather`
     /// with `ForkMode::Offline`, prepared as a bounce is

@@ -793,9 +793,10 @@ impl<C: Clock> SessionBuilder<C> {
 
     /// What a hosted plugin's death or hang does. Default
     /// `Some(RecoveryPolicy::default())`: the plugin reloads at its node with
-    /// its last snapshot. `None`: its node is removed
-    /// ([`PluginChange::Died`](crate::PluginChange::Died)) and the
-    /// host decides, a prompt to the user for instance. A hang is detected
+    /// its last snapshot. `None`: a pooled plugin's node stays silent at its
+    /// key and the entry reads lost, and a node of a plugin the host inserted
+    /// itself is removed ([`PluginChange::Died`](crate::PluginChange::Died));
+    /// the host decides, a prompt to the user for instance. A hang is detected
     /// either way ([`plugin_hang`](Self::plugin_hang)): the hung server is
     /// ended and its death is what this decides.
     ///

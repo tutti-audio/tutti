@@ -51,8 +51,10 @@
 //!
 //! - **Health.** `tutti_plugin_host::Liveness` observes the handle's status at
 //!   `PhaseCx::now`: dead after at least `Liveness::DEATHS` consecutive
-//!   unhealthy observations spanning at least the window. A dead plugin's
-//!   node is removed ([`Session::remove`]) and reported once,
+//!   unhealthy observations spanning at least the window. A dead pooled
+//!   plugin's node stays at its key, silent in its place, and the entry reads
+//!   lost; a node of a plugin the host inserted itself ([`Graph::host_plugin`](crate::Graph::host_plugin))
+//!   is removed ([`Session::remove`]). Either is reported once,
 //!   [`PluginChange::Died`].
 //! - **Reports.** What the plugin reported since the last update (its own edit
 //!   of a parameter, a rescan, a new tail, a bus change) is queued where it
@@ -103,7 +105,8 @@
 //!   one that panics [`RecoveryFailure::ReloadPanicked`]: a failed attempt.
 //! - **Reported.** [`PluginChange::Recovered`] says whether the state
 //!   came back and how old it was; a spent budget is
-//!   [`PluginChange::GaveUp`] and the node is removed.
+//!   [`PluginChange::GaveUp`], and the node is silenced (a pooled plugin's) or
+//!   removed (a host-inserted one).
 //!
 //! An in-process plugin (VST2) is not recovered: a crash in it takes the
 //! process, and a hang in it blocks the audio thread itself, which nothing
@@ -136,6 +139,8 @@ use tutti_plugin_types::{
 use tutti_types::{SampleRate, Samples};
 
 mod entry;
+mod lost;
+pub(crate) use lost::Lost;
 
 use entry::PooledLink;
 pub use entry::{
@@ -386,8 +391,9 @@ pub(crate) enum PluginLiveness {
         /// Why it needs a replacement.
         cause: ReloadCause,
     },
-    /// Written off: its node is being removed (recovery off, or its budget
-    /// spent).
+    /// Written off (recovery off, or its budget spent): a pooled plugin's node
+    /// stays at its key, silent; a host-inserted plugin's node is being
+    /// removed.
     Dead {
         /// The engine's latched reason.
         cause: PluginFailure,
@@ -398,10 +404,11 @@ pub(crate) enum PluginLiveness {
 /// one reading of what the engine latched, the session's debounce and its
 /// recovery.
 ///
-/// The verdicts that remove the node (written off with recovery off, or
-/// recovery's budget spent) are not here: the node and its view are gone in the
-/// update that reaches them, and the events say so ([`PluginChange::Died`],
-/// [`PluginChange::GaveUp`]).
+/// The verdicts that remove a host-inserted plugin's node (written off with
+/// recovery off, or recovery's budget spent) are not here: the node and its
+/// view are gone in the update that reaches them, and the events say so
+/// ([`PluginChange::Died`], [`PluginChange::GaveUp`]). A pooled plugin's node
+/// stays at its key, silent, and reads [`Died`](Self::Died) for good.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum PluginHealth {
@@ -413,7 +420,8 @@ pub enum PluginHealth {
     Stalled,
     /// The engine reports it dead, and the session has not yet written it off
     /// (it waits out a debounce first). It then becomes
-    /// [`Reloading`](Self::Reloading), or, with recovery off, its node is
+    /// [`Reloading`](Self::Reloading), or, with recovery off, a pooled
+    /// plugin's node stays at its key, silent, and a host-inserted one's is
     /// removed.
     Died {
         /// The engine's latched reason.
@@ -503,9 +511,10 @@ pub enum PluginChange {
     /// [`Opened::Embedded`](crate::Opened::Embedded)'s is.
     EditorWantsSize(Size),
     /// A hosted plugin was declared dead
-    /// (`tutti_plugin_host::Liveness`) with recovery off: its node was
+    /// (`tutti_plugin_host::Liveness`) with recovery off: a pooled plugin's
+    /// node stays at its key, silent, and a host-inserted plugin's node was
     /// removed. Reported once. With recovery on the death is
-    /// [`Reloading`](Self::Reloading), and the node's removal
+    /// [`Reloading`](Self::Reloading), and the node's end
     /// [`GaveUp`](Self::GaveUp).
     Died {
         /// The engine's latched reason.
@@ -536,7 +545,8 @@ pub enum PluginChange {
         /// Attempts it took.
         attempts: u32,
     },
-    /// Recovery stopped: the failures spent the budget. The node is removed.
+    /// Recovery stopped: the failures spent the budget. A pooled plugin's node
+    /// stays at its key, silent; a host-inserted plugin's node is removed.
     GaveUp {
         /// Why.
         why: GiveUp,
@@ -724,6 +734,9 @@ pub(crate) struct HostedPlugin {
     /// Held by that job: a later read mints a new one, and the earlier read
     /// lands nowhere.
     mirror_token: Arc<()>,
+    /// The node of a plugin that is gone renders silence in the plugin's
+    /// place ([`lost`]); until the graph takes the swap it is not.
+    pub(crate) silenced: bool,
     /// The pool entry this plugin's node is over, `None` for a plugin added
     /// outside the pool. Dropped when the record retires, which ends the hold.
     pub(crate) pooled: Option<PooledLink>,
@@ -845,6 +858,7 @@ impl HostedPlugin {
             gate: Gate::default(),
             param_read: Some(read),
             mirror_token: Arc::new(()),
+            silenced: false,
             pooled: None,
         }
     }
@@ -927,6 +941,7 @@ impl HostedPlugin {
         self.probation_until = None;
         self.recovery = self.recovery.as_ref().map(|r| Recovery::new(r.policy()));
         self.reload = Reload::default();
+        self.silenced = false;
         self.snapshot_token = Arc::new(());
         self.snapshot_at = None;
         outgoing
@@ -1653,6 +1668,40 @@ impl<C: crate::Clock> Session<C> {
         }
     }
 
+    /// A plugin's node after the plugin ended for good (it died with recovery
+    /// off, or recovery gave up). The node of a pooled plugin stays at its
+    /// key, silent in the plugin's place, and the entry reads lost
+    /// ([`PluginCause`]) until a `retry` brings a plugin to it; any other
+    /// plugin's node goes.
+    fn end_node(&mut self, node: NodeKey) {
+        if self
+            .graph
+            .plugins
+            .get(&node)
+            .is_some_and(|hosted| hosted.pooled.is_some())
+        {
+            self.silence_node(node);
+        } else {
+            let _ = self.remove(node); // gone already is as good as removed
+        }
+    }
+
+    /// Puts the silent stand-in at `node`, which releases the dead plugin on
+    /// the control side. A graph that is re-preparing is asked again at the
+    /// next phase.
+    fn silence_node(&mut self, node: NodeKey) {
+        let done = match self.graph.silence_plugin(node) {
+            Ok(done) => done,
+            Err(refused) => {
+                tracing::warn!("plugin {node:?}: its node could not be silenced: {refused}");
+                true // nothing more to ask of a graph that refuses
+            }
+        };
+        if done && let Some(hosted) = self.graph.plugins.get_mut(&node) {
+            hosted.silenced = true;
+        }
+    }
+
     fn finish_gave_up(&mut self, gave_up: Vec<(NodeKey, GiveUp)>, out: &mut Vec<SessionEvent>) {
         for (node, why) in gave_up {
             // The last state worth offering a user: what was withheld, else
@@ -1668,9 +1717,9 @@ impl<C: crate::Clock> Session<C> {
                 .get(&node)
                 .and_then(|h| h.pooled.as_ref())
             {
-                link.gave_up();
+                link.gave_up(why.clone());
             }
-            let _ = self.remove(node); // gone already is as good as removed
+            self.end_node(node);
             out.push(event(node, PluginChange::GaveUp { why, state }));
         }
     }
@@ -1778,12 +1827,18 @@ impl<C: crate::Clock> Session<C> {
         let hang_policy = self.hang;
         let mut dead = Vec::new();
         let mut gave_up = Vec::new();
+        // Nodes of plugins that are gone whose silent stand-in the graph has
+        // not taken yet (it was re-preparing).
+        let mut unsilenced = Vec::new();
         let nodes: Vec<NodeKey> = self.graph.plugins.keys().copied().collect();
         for node in nodes {
             let Some(hosted) = self.graph.plugins.get_mut(&node) else {
                 continue;
             };
             if matches!(hosted.status, PluginLiveness::Dead { .. }) {
+                if hosted.pooled.is_some() && !hosted.silenced {
+                    unsilenced.push(node);
+                }
                 continue;
             }
             // What the plugin reported since the last update, in the order
@@ -1809,10 +1864,8 @@ impl<C: crate::Clock> Session<C> {
                 PluginStatus::Dead { cause } => Some(cause),
                 _ => None,
             };
-            if cause.is_some()
-                && let Some(link) = hosted.pooled.as_ref()
-            {
-                link.died();
+            if let (Some(cause), Some(link)) = (&cause, hosted.pooled.as_ref()) {
+                link.died(cause.clone());
             }
             if matches!(hosted.status, PluginLiveness::Recovering { .. }) {
                 self.drive_reload(node, now, out, &mut gave_up);
@@ -1976,8 +2029,11 @@ impl<C: crate::Clock> Session<C> {
                 );
             }
         }
+        for node in unsilenced {
+            self.silence_node(node);
+        }
         for (node, cause) in dead {
-            let _ = self.remove(node); // gone already is as good as removed
+            self.end_node(node);
             out.push(event(node, PluginChange::Died { cause }));
         }
         self.finish_gave_up(gave_up, out);
