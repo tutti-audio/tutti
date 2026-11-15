@@ -1286,8 +1286,7 @@ impl<C: crate::Clock> Session<C> {
             Err(plugin) => {
                 let node_controls = plugin.node_controls();
                 node_controls.set_meter(meter);
-                let bound = (*plugin).bind(self.graph.tempo.clone());
-                let rebinder = bound.rebinder();
+                let (bound, rebinder) = (*plugin).bind_with_rebinder(self.graph.tempo.clone());
                 let (node, _) = self.graph.place(bound);
                 let mut hosted = HostedPlugin::new(handle, loaded_ref);
                 hosted.node = Some(node_controls);

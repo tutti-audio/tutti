@@ -437,7 +437,7 @@ pub mod catalog {
     // Named in `Plugin::role` and `Catalog::iter`.
     pub use crate::host::catalog::{BlacklistView, Catalog, PersistError};
     pub use crate::host::loadable::{BindError, Hosting, Loadable, Resolved};
-    pub use crate::host::plugin::{BoundPlugin, Plugin, PluginRebinder};
+    pub use crate::host::plugin::{BoundPlugin, Plugin, PluginRebinder, Rebuilt};
     pub use crate::host::plugin_ref::{PluginRef, PluginState};
     pub use tutti_plugin_db::{
         FileFailure, FilesError, PluginDb, ProbeFailure, ProbeFailureKind, Scan, ScanBusy,

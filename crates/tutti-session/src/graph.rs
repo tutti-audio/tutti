@@ -1008,8 +1008,7 @@ impl Graph {
         let handle = plugin.handle().clone();
         let controls = plugin.node_controls();
         let plugin_ref = plugin.plugin().clone();
-        let bound = (*plugin).bind(self.tempo.clone());
-        let rebinder = bound.rebinder();
+        let (bound, rebinder) = (*plugin).bind_with_rebinder(self.tempo.clone());
         match self.swap_unit(node, bound, fade, law) {
             Ok(_) => {
                 match self.plugins.get_mut(&node) {

@@ -23,6 +23,7 @@
 //! plugin's ports are fixed by its slab: a change of width is
 //! [`PluginChange::PortsRefused`] and its node stays.
 
+use tutti_plugin::catalog::Rebuilt;
 use tutti_plugin_host::{RebindError, Settlement};
 use tutti_plugin_types::MainThreadMarker;
 
@@ -81,11 +82,8 @@ impl<C: Clock> Session<C> {
                 continue;
             }
             let done = match rebinder.rebind(main) {
-                Ok(Some(bound)) => {
-                    let controls = bound.node_controls();
-                    if let Some(controls) = &controls {
-                        controls.set_meter(self.click_settings.project_meter());
-                    }
+                Ok(Some(Rebuilt { bound, controls })) => {
+                    controls.set_meter(self.click_settings.project_meter());
                     if let Err(refused) = self.graph.replace_rebound(node, bound) {
                         tracing::error!("the rebuilt node of {node:?} was refused: {refused}");
                         continue;
@@ -98,7 +96,7 @@ impl<C: Clock> Session<C> {
                 Err(RebindError::Restarting | RebindError::NotRunning | RebindError::NoPorts) => {
                     continue;
                 }
-                Err(why @ RebindError::OutsideSlab { .. }) => {
+                Err(why @ (RebindError::OutsideSlab { .. } | RebindError::TooWide(_))) => {
                     out.push(SessionEvent::Plugin(PluginEvent {
                         node,
                         change: PluginChange::PortsRefused { why },
@@ -113,7 +111,7 @@ impl<C: Clock> Session<C> {
                 state.laid_out = Some(now);
                 state.settling = matches!(done, Done::Rebuilt(_));
             }
-            if let Done::Rebuilt(Some(controls)) = done {
+            if let Done::Rebuilt(controls) = done {
                 hosted.node = Some(controls);
             }
         }
@@ -122,9 +120,8 @@ impl<C: Clock> Session<C> {
 
 /// What a rebind did.
 enum Done {
-    /// A node over the new ports was swapped in, with its controls when the
-    /// plugin is in process.
-    Rebuilt(Option<tutti_plugin_host::NodeControls>),
+    /// A node over the new ports was swapped in, with its controls.
+    Rebuilt(tutti_plugin_host::NodeControls),
     /// The node stays.
     Kept,
 }

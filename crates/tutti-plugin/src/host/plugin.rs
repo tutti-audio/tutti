@@ -514,18 +514,50 @@ impl Plugin {
     /// [`TempoReader::fixed`](tutti_transport::TempoReader::fixed) one.
     #[must_use]
     pub fn bind(self, tempo: tutti_transport::TempoReader) -> BoundPlugin {
-        let bound = match self.placed {
-            Placed::Served(c) => BoundPlaced::Served(Box::new(c.bind(tempo))),
+        self.bind_with_rebinder(tempo).0
+    }
+
+    /// [`bind`](Self::bind), and the builder of the node that replaces this one
+    /// when the plugin changes its audio ports, over the same plugin, binding
+    /// its successors to `tempo` too. A served plugin's is limited to the ports
+    /// it was launched with.
+    #[must_use]
+    pub fn bind_with_rebinder(
+        self,
+        tempo: tutti_transport::TempoReader,
+    ) -> (BoundPlugin, PluginRebinder) {
+        let (bound, rebinder) = match self.placed {
+            Placed::Served(c) => {
+                let bound = c.bind(tempo);
+                let rebinder = PluginRebinder::served(bound.rebinder());
+                (BoundPlaced::Served(Box::new(bound)), rebinder)
+            }
             #[cfg(feature = "vst2")]
-            Placed::Vst2(c) => BoundPlaced::Vst2(Box::new(c.bind(tempo))),
+            Placed::Vst2(c) => {
+                let rebinder =
+                    PluginRebinder::in_process(c.rebinder(tempo.clone(), None), BoundPlaced::Vst2);
+                (BoundPlaced::Vst2(Box::new(c.bind(tempo))), rebinder)
+            }
             #[cfg(feature = "clap")]
-            Placed::Clap(c) => BoundPlaced::Clap(Box::new(c.bind(tempo))),
+            Placed::Clap(c) => {
+                let rebinder =
+                    PluginRebinder::in_process(c.rebinder(tempo.clone(), None), BoundPlaced::Clap);
+                (BoundPlaced::Clap(Box::new(c.bind(tempo))), rebinder)
+            }
             #[cfg(feature = "vst3")]
-            Placed::Vst3(c) => BoundPlaced::Vst3(Box::new(c.bind(tempo))),
+            Placed::Vst3(c) => {
+                let rebinder =
+                    PluginRebinder::in_process(c.rebinder(tempo.clone(), None), BoundPlaced::Vst3);
+                (BoundPlaced::Vst3(Box::new(c.bind(tempo))), rebinder)
+            }
             #[cfg(all(feature = "au", target_os = "macos"))]
-            Placed::Au(c) => BoundPlaced::Au(Box::new(c.bind(tempo))),
+            Placed::Au(c) => {
+                let rebinder =
+                    PluginRebinder::in_process(c.rebinder(tempo.clone(), None), BoundPlaced::Au);
+                (BoundPlaced::Au(Box::new(c.bind(tempo))), rebinder)
+            }
         };
-        BoundPlugin { bound }
+        (BoundPlugin { bound }, rebinder)
     }
 
     /// Returns the node as the concrete out-of-process [`PluginClient`],
@@ -578,61 +610,6 @@ pub struct BoundPlugin {
     bound: BoundPlaced,
 }
 
-/// Runs `$in_process` on the node of whichever in-process format a
-/// [`BoundPlaced`] holds, with `$wrap` the variant that holds a node of that
-/// format, or `$served` on the served client: the one place the format arms
-/// are listed for a call that does not consume the node.
-macro_rules! bound {
-    ($bound:expr, served $s:ident => $served:expr, in_process $c:ident, $wrap:ident => $in_process:expr $(,)?) => {
-        match $bound {
-            BoundPlaced::Served($s) => $served,
-            #[cfg(feature = "vst2")]
-            BoundPlaced::Vst2($c) => {
-                let $wrap = BoundPlaced::Vst2;
-                $in_process
-            }
-            #[cfg(feature = "clap")]
-            BoundPlaced::Clap($c) => {
-                let $wrap = BoundPlaced::Clap;
-                $in_process
-            }
-            #[cfg(feature = "vst3")]
-            BoundPlaced::Vst3($c) => {
-                let $wrap = BoundPlaced::Vst3;
-                $in_process
-            }
-            #[cfg(all(feature = "au", target_os = "macos"))]
-            BoundPlaced::Au($c) => {
-                let $wrap = BoundPlaced::Au;
-                $in_process
-            }
-        }
-    };
-}
-
-impl BoundPlugin {
-    /// The node's controls of an in-process plugin: its meter cell and its
-    /// parameter delivery's counters. `None` for a served plugin, whose
-    /// controls are [`PluginControls`](tutti_plugin_host::PluginControls).
-    #[must_use]
-    pub fn node_controls(&self) -> Option<tutti_plugin_host::NodeControls> {
-        bound!(&self.bound, served _s => None, in_process c, _wrap => Some(c.controls()))
-    }
-
-    /// The builder of the node that replaces this one when the plugin changes
-    /// its audio ports, over the same plugin. Take it before the plugin goes
-    /// into a graph. A served plugin's is limited to the ports it was launched
-    /// with.
-    #[must_use]
-    pub fn rebinder(&self) -> PluginRebinder {
-        bound!(
-            &self.bound,
-            served c => PluginRebinder::served(c.rebinder()),
-            in_process c, wrap => PluginRebinder::in_process(c.rebinder(None), wrap),
-        )
-    }
-}
-
 /// Builds the node that replaces a plugin's node when the plugin changes its
 /// audio ports ([`BoundPlugin::rebinder`]): an in-process plugin's successor
 /// is over the same instance, and the Processor moves to it with no
@@ -645,6 +622,16 @@ pub struct PluginRebinder {
     inner: std::sync::Arc<std::sync::Mutex<dyn Rebind>>,
 }
 
+/// A node [`PluginRebinder::rebind`] built over the plugin's new ports.
+#[derive(Debug)]
+pub struct Rebuilt {
+    /// The node, to swap in for the one it replaces.
+    pub bound: BoundPlugin,
+    /// The node's controls: its meter cell and its parameter delivery's
+    /// counters.
+    pub controls: tutti_plugin_host::NodeControls,
+}
+
 /// One hosting's rebinder, behind the format.
 trait Rebind: Send {
     fn layout(&self) -> Option<tutti_plugin_types::Layout>;
@@ -652,7 +639,7 @@ trait Rebind: Send {
     fn rebind(
         &self,
         main: MainThreadMarker,
-    ) -> std::result::Result<Option<BoundPlugin>, tutti_plugin_host::RebindError>;
+    ) -> std::result::Result<Option<Rebuilt>, tutti_plugin_host::RebindError>;
 }
 
 /// An in-process format's rebinder, and the variant of [`BoundPlaced`] its
@@ -664,14 +651,14 @@ trait Rebind: Send {
         reason = "a build with no in-process format has only served plugins"
     )
 )]
-struct InProcessRebind<F: tutti_plugin_types::Loaded> {
+struct InProcessRebind<F: tutti_plugin_types::InProcess> {
     rebinder: tutti_plugin_host::Rebinder<F>,
     wrap: fn(Box<tutti_plugin_host::PluginNode<F>>) -> BoundPlaced,
 }
 
 impl<F> Rebind for InProcessRebind<F>
 where
-    F: tutti_plugin_types::Loaded + 'static,
+    F: tutti_plugin_types::InProcess + 'static,
     F::Processor: 'static,
 {
     fn layout(&self) -> Option<tutti_plugin_types::Layout> {
@@ -685,10 +672,14 @@ where
     fn rebind(
         &self,
         main: MainThreadMarker,
-    ) -> std::result::Result<Option<BoundPlugin>, tutti_plugin_host::RebindError> {
+    ) -> std::result::Result<Option<Rebuilt>, tutti_plugin_host::RebindError> {
         let node = self.rebinder.rebind(main)?;
-        Ok(Some(BoundPlugin {
-            bound: (self.wrap)(Box::new(node)),
+        let controls = node.controls();
+        Ok(Some(Rebuilt {
+            bound: BoundPlugin {
+                bound: (self.wrap)(Box::new(node)),
+            },
+            controls,
         }))
     }
 }
@@ -709,7 +700,7 @@ impl Rebind for ServedRebind {
     fn rebind(
         &self,
         _main: MainThreadMarker,
-    ) -> std::result::Result<Option<BoundPlugin>, tutti_plugin_host::RebindError> {
+    ) -> std::result::Result<Option<Rebuilt>, tutti_plugin_host::RebindError> {
         self.0.check_ports().map(|()| None)
     }
 }
@@ -742,7 +733,7 @@ impl PluginRebinder {
         wrap: fn(Box<tutti_plugin_host::PluginNode<F>>) -> BoundPlaced,
     ) -> Self
     where
-        F: tutti_plugin_types::Loaded + 'static,
+        F: tutti_plugin_types::InProcess + 'static,
         F::Processor: 'static,
     {
         Self {
@@ -784,7 +775,7 @@ impl PluginRebinder {
     pub fn rebind(
         &self,
         main: MainThreadMarker,
-    ) -> std::result::Result<Option<BoundPlugin>, tutti_plugin_host::RebindError> {
+    ) -> std::result::Result<Option<Rebuilt>, tutti_plugin_host::RebindError> {
         self.lock().rebind(main)
     }
 }
