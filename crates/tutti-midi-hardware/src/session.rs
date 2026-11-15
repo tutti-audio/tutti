@@ -45,6 +45,7 @@ use crate::process::{ProcessChange, ReportAsk, ReportError, ReportPeer};
 use crate::profiles::{PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange};
 use crate::properties::{PropertyAsk, PropertyChange, PropertyError, PropertyPeer};
 use crate::stream::{DeviceStream, InputTiming, Negotiation};
+use tutti_midi_device::{CiDeviceId, ProfileChange, ProfileId};
 use tutti_midi_device::{DeviceId, DeviceInfo, EntropyError, Learned, SavedDevice};
 use tutti_midi_runtime::{DeviceInlets, DeviceSlot};
 use tutti_ump::{DeviceIdentity, MidiGroup};
@@ -299,7 +300,7 @@ impl MidiSession {
     ///
     /// [`Error::NoDeviceNamed`] when a name matches no input (listing the
     /// inputs it searched; an absent device is an error, never a silent
-    /// no-op). [`Error::NoDevice`] when an id names no present device — the
+    /// no-op). [`Error::NotFound`] when an id names no present device — the
     /// shape a stale id takes after a hot-plug — and [`Error::WrongDirection`]
     /// when it is not an input. Otherwise whatever the backend raises while
     /// opening the port.
@@ -424,7 +425,7 @@ impl MidiSession {
     /// # Errors
     ///
     /// [`Error::NoDeviceNamed`] when a name matches no output,
-    /// [`Error::NoDevice`] when an id names no present device,
+    /// [`Error::NotFound`] when an id names no present device,
     /// [`Error::WrongDirection`] when it is not an output, plus whatever the
     /// backend raises while opening.
     pub fn connect_output(&self, device: impl Into<DeviceQuery>) -> Result<OpenOutput> {
@@ -499,10 +500,12 @@ impl MidiSession {
                     .into_iter()
                     .map(|(peer, change)| Polled::Ci(id.clone(), peer, change)),
             );
+            let refusals = mpe_zone_refusals(&stepped.profiles, &held.stream.profiles());
             polled.extend(
                 stepped
                     .profiles
                     .into_iter()
+                    .chain(refusals)
                     .map(|(peer, change)| Polled::Profile(id.clone(), peer, change)),
             );
             polled.extend(
@@ -800,3 +803,38 @@ fn sync_hearing(ports: &HardwareMidiInputs, held: &mut Held, ci: bool) {
 
 #[cfg(test)]
 mod tests;
+
+/// The refusals the `changes` make news of, as the changes that say so: the
+/// zone an Enabled Report on a Manager Channel named, if its zones leave it
+/// out, and, once a peer's inquiry is whole, every zone its table already
+/// enabled that they leave out. A refusal is said once, with the change that
+/// enabled the zone.
+fn mpe_zone_refusals(
+    changes: &[(PeerId, ProfilesChange)],
+    peers: &[PeerProfiles],
+) -> Vec<(PeerId, ProfilesChange)> {
+    let mut said = Vec::new();
+    for (peer, change) in changes {
+        let named = match change {
+            ProfilesChange::Known => None,
+            ProfilesChange::Changed {
+                address: CiDeviceId::Channel(manager),
+                profile: ProfileId::MPE,
+                change: ProfileChange::Enabled,
+            } => Some(*manager),
+            _ => continue,
+        };
+        let Some(held) = peers
+            .iter()
+            .find(|p| p.group() == peer.group && p.muid() == peer.muid)
+        else {
+            continue;
+        };
+        for overlap in held.refused_mpe_zones() {
+            if named.is_none_or(|manager| overlap.added.manager() == manager) {
+                said.push((*peer, ProfilesChange::MpeZoneRefused(overlap)));
+            }
+        }
+    }
+    said
+}

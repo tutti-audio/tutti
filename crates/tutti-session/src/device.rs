@@ -886,16 +886,37 @@ impl<C: Clock> Session<C> {
             )
             .into());
         }
+        // A map names the root's own channels, so a device swap does not widen
+        // a root that has one; without it a wider device widens an undeclared
+        // root by the build's rule.
+        let mapped = self.output_policy.map.targets().is_some();
         let root = self.graph.root_topology().cloned().unwrap_or_else(|| {
-            let width = crate::root_width(ChannelLayout::clamped(self.graph.outputs()), channels);
+            let width = if mapped {
+                self.graph.outputs()
+            } else {
+                crate::root_width(ChannelLayout::clamped(self.graph.outputs()), channels)
+            };
             ChannelTopology::assumed(ChannelLayout::clamped(width))
         });
-        tutti_graph::fold_to_topology(&root, &placed).map_err(|source| Error::Unplaceable {
-            root: self.graph.root_id(),
-            width: root.width(),
-            device: channels,
-            source,
-        })?;
+        // The policy in force has to place the root on the new device too: a
+        // device a map does not fit is refused, never reset to the identity;
+        // the host sets a new map.
+        self.output_policy
+            .routing()
+            .fold(&root, &placed)
+            .map_err(|refusal| match refusal {
+                tutti_engine::RoutingError::Fold(source) => Error::Unplaceable {
+                    root: self.graph.root_id(),
+                    width: root.width(),
+                    device: channels,
+                    source,
+                },
+                map => Error::MapUnplaceable {
+                    map: self.output_policy.map.clone(),
+                    device: channels,
+                    source: map,
+                },
+            })?;
         Ok(())
     }
 
@@ -957,8 +978,9 @@ impl<C: Clock> Session<C> {
         // edit flag set, and the next update retries.
         // A declared root keeps the width it declared: the device is no floor
         // under it.
+        let mapped = self.output_policy.map.targets().is_some();
         let width = crate::root_width(ChannelLayout::clamped(self.graph.outputs()), spec.channels);
-        if self.graph.root_topology().is_none() && width > self.graph.outputs() {
+        if self.graph.root_topology().is_none() && !mapped && width > self.graph.outputs() {
             // Undeclared, so it cannot be refused.
             let widened = self.graph.widen_outputs(width);
             debug_assert!(widened.is_ok());

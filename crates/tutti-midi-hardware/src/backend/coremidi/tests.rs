@@ -160,18 +160,10 @@ fn a_scheduled_packet_is_held_until_its_time_and_now_goes_at_once() {
     let start = Instant::now();
     let due = start + Duration::from_millis(150);
     let sent = out.queue_timed(&[
-        Outgoing {
-            at: tutti_graph::Offset::ZERO,
-            send: SendAt::At(due),
-            ump: note(60),
-        },
-        Outgoing {
-            at: tutti_graph::Offset::ZERO,
-            send: SendAt::Now,
-            ump: note(61),
-        },
+        Outgoing::new(tutti_graph::Offset::ZERO, SendAt::At(due), note(60)),
+        Outgoing::new(tutti_graph::Offset::ZERO, SendAt::Now, note(61)),
     ]);
-    assert_eq!(sent, 2);
+    assert_eq!(sent.packets(), 2);
 
     let wait = Duration::from_secs(2);
     let (first_at, first) = rx.recv_timeout(wait).expect("the note sent now");

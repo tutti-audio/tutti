@@ -28,12 +28,11 @@ tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = f
 # CPUs. Same version as `Cargo.lock`'s.
 rustfft = { version = "6.4", default-features = false }
 
-# The filters' `Real` (`filter/real.rs`) calls `libm`'s pure-Rust
-# transcendentals, so results do not depend on the platform's C math library.
+# The filters' models call `libm`'s pure-Rust transcendentals (the crossover's `tan`), so results do not depend on the platform's C math library.
 libm = "0.2.15"
 
 # `f32x8`, so the filter steps written over `Lanes` run eight voices of the
-# polysynth's lane bank at a time (`filter/real.rs`). Same version as `Cargo.lock`'s.
+# polysynth's lane bank at a time (`filter/lanes.rs`). Same version as `Cargo.lock`'s.
 wide = { version = "1.6", default-features = false }
 
 # The `Error` enum's Display/Error impls.

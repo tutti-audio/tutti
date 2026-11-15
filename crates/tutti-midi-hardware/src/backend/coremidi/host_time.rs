@@ -5,49 +5,48 @@
 //! (`mach_timebase_info` gives the ratio), and `Instant` has no constructor from
 //! a mach reading, so a callback reads the host clock and `Instant::now()`
 //! together once ([`Pairing::now`]) and each packet is placed before that
-//! reading by its stamp ([`crate::stamp::arrival`]).
+//! reading by its stamp ([`Paired::arrival`]).
 //!
 //! The Mach clock itself is `tutti-coremidi-ffi`'s (`host_ticks`, `Timebase`).
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
+use crate::stamp::Paired;
 use tutti_coremidi_ffi::{Timebase, host_ticks};
 
-/// The host clock and the OS's read together, to place a callback's packets.
+/// The host clock and the OS's read together ([`Paired`]): to place a
+/// callback's packets, and to stamp a batch's.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Pairing {
     base: Timebase,
-    os: Instant,
-    host: Duration,
+    paired: Paired,
 }
 
 impl Pairing {
     /// Reads both clocks now. Allocation-free, so it runs in CoreMIDI's callback.
     pub(super) fn now() -> Self {
         let base = Timebase::get();
-        let host = base.duration(host_ticks());
-        Self {
-            base,
-            os: Instant::now(),
-            host,
-        }
+        let Ok(paired) =
+            Paired::read(|| Ok::<_, std::convert::Infallible>(base.duration(host_ticks())));
+        Self { base, paired }
     }
 
     /// The instant of a packet stamped `host_time` ticks; a 0 stamp ("now") is
     /// the pairing's own.
     pub(super) fn instant_of(&self, host_time: u64) -> Instant {
         if host_time == 0 {
-            return self.os;
+            return self.paired.arrival(self.paired.clock());
         }
-        crate::stamp::arrival(self.os, self.host, self.base.duration(host_time))
+        self.paired.arrival(self.base.duration(host_time))
     }
 
     /// The host time to stamp a packet that is to leave at `at`: the one place
-    /// an `Instant` becomes CoreMIDI's clock, by this pairing's reading of both
-    /// ([`crate::stamp::departure`]). An instant the host clock cannot hold is 0,
-    /// "now".
+    /// an `Instant` becomes CoreMIDI's clock, by this pairing's reading of both.
+    /// An instant the host clock cannot hold is 0, "now".
     pub(super) fn host_time_of(&self, at: Instant) -> u64 {
-        crate::stamp::departure(self.os, self.host, at).map_or(0, |host| self.base.ticks(host))
+        self.paired
+            .departure(at)
+            .map_or(0, |host| self.base.ticks(host))
     }
 }
 

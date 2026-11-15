@@ -6,15 +6,16 @@
 //! safety measure.
 //!
 //! One width-generic node, [`LadderFilterNode`]. The algorithm is `tutti-dsp`'s
-//! ([`LadderFamily`]); the node is a [`FamilyNode`] over it, and this file holds
-//! the cells and how a block reads them.
+//! ([`LadderBank`]); the node is a [`KernelNode`] over it, and this file holds the
+//! kernel, the cells and how a block reads them.
 
-use tutti_dsp::{Ladder, LadderControls, LadderFamily, LadderType, Real};
-use tutti_types::{ChannelLayout, Drive, Hz, Resonance};
+use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_dsp::{Glide, LadderBank, LadderControls, LadderDesign, LadderModel, LadderType, Lanes};
+use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_types::{BusTopology, ChannelLayout, Drive, Hz, MaxBlock, Resonance, SampleRate, Tail};
 
-use super::NodeRecurrence;
 use super::filter_bus;
-use crate::reverb::FamilyNode;
+use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
 /// A Moog-style four-stage ladder filter with resonance and drive, of any
 /// width: `N` audio inputs, `N` outputs.
@@ -64,13 +65,13 @@ use crate::reverb::FamilyNode;
 /// A graph node ([`IntoNode`](tutti_graph::IntoNode)): inserted, its controls are
 /// a [`ParamSet`](tutti_graph::ParamSet) over cutoff, resonance (as `UnitParam::Q`)
 /// and drive, and a fork of it starts from the values last set through that set.
-/// Its tail is [`Tail::Unknown`](tutti_types::Tail::Unknown): a resonant ladder
+/// Its tail is [`Tail::Unknown`]: a resonant ladder
 /// rings on after its input stops, so it is never skipped on a silent block and
 /// never parks. The graph prepares it at the device rate before its first block.
 /// Rendering allocates nothing.
-pub type LadderFilterNode<F = f64> = FamilyNode<LadderFamily<F>>;
+pub type LadderFilterNode<F = f64> = KernelNode<LadderKernel<F>>;
 
-impl<F: Real> LadderFilterNode<F> {
+impl<F: Float + Lanes> LadderFilterNode<F> {
     /// A mono ladder filter (1 in, 1 out) of `ladder_type` at `frequency`
     /// cutoff and `resonance`, with unity [`Drive`].
     ///
@@ -98,8 +99,9 @@ impl<F: Real> LadderFilterNode<F> {
         frequency: impl Into<Hz>,
         resonance: impl Into<Resonance>,
     ) -> Self {
-        Self::live(
-            LadderFamily::new(filter_bus(channels.into())),
+        Self::with_kernel(
+            LadderKernel::new(filter_bus(channels.into())),
+            LadderSet(ladder_type),
             LadderControls {
                 ty: ladder_type,
                 freq: frequency.into(),
@@ -107,6 +109,92 @@ impl<F: Real> LadderFilterNode<F> {
                 drive: Drive::UNITY,
             },
         )
+    }
+}
+
+/// The steps the design takes to a new one: one grid period, so a design arrives at the
+/// next grid point. The glide is a ramp (a control moving to a target), not a fade.
+const GLIDE_STEPS: u32 = 16;
+
+/// The ladder as a [`Kernel`]: a [`LadderBank`] in state precision `F` and the glide of the
+/// design (coefficients and drive) every channel shares.
+#[derive(Clone, Debug)]
+pub struct LadderKernel<F: Float + Lanes> {
+    input: BusTopology,
+    bank: LadderBank<F>,
+    /// The design in flight; the first one after `prepare` lands at once.
+    design: Glide<LadderDesign<F>>,
+    rate: SampleRate,
+    landed: bool,
+}
+
+impl<F: Float + Lanes> LadderKernel<F> {
+    /// A filter on the bus `input`, its output where it is. Allocates the state. Its design
+    /// until `prepare` is a placeholder at 48 kHz: an unprepared node renders nothing, and
+    /// `prepare` designs for the rate it is given.
+    fn new(input: BusTopology) -> Self {
+        let rate = SampleRate::SR_48K;
+        Self {
+            input,
+            bank: LadderBank::new(input.layout()),
+            design: Glide::landed(Self::design(&LadderControls::DEFAULT, rate)),
+            rate,
+            landed: false,
+        }
+    }
+
+    fn design(controls: &LadderControls, rate: SampleRate) -> LadderDesign<F> {
+        LadderDesign::from(&LadderModel::new(*controls, rate))
+    }
+}
+
+impl<F: Float + Lanes> Kernel for LadderKernel<F> {
+    type Set = LadderSet;
+
+    // A design arrives at the next grid point: the glide is one grid period long.
+    const GRID: usize = GLIDE_STEPS as usize;
+
+    fn shape(&self) -> Shape {
+        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
+        Shape::buses(
+            Buses::main(self.input),
+            Buses::NONE.with(output).expect("one bus"),
+        )
+        .with_cost(Cost::Moderate)
+    }
+
+    fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
+        self.rate = rate;
+        self.design = Glide::landed(Self::design(&LadderControls::DEFAULT, rate)).by(GLIDE_STEPS);
+        self.landed = false;
+    }
+
+    fn reset(&mut self) {
+        self.design.settle();
+        self.bank.reset();
+    }
+
+    fn retarget(&mut self, controls: &LadderControls) {
+        self.design.aim(Self::design(controls, self.rate));
+        if !self.landed {
+            self.design.settle();
+            self.landed = true;
+        }
+    }
+
+    fn render<S: Float>(
+        &mut self,
+        input: Planes<'_, S>,
+        _: ControlLanes<'_, S>,
+        output: PlanesMut<'_, '_, S>,
+    ) {
+        self.bank.process(&mut self.design, input, output);
+    }
+
+    /// A resonant ladder rings on after its input stops, and at a resonance of 1 it does not
+    /// stop: unknown, so the graph's tail fold never reads it as none.
+    fn tail(&self) -> Tail {
+        Tail::Unknown
     }
 }
 
@@ -129,14 +217,6 @@ control_set! {
 
     fn defaults(&self) -> LadderControls {
         LadderControls::DEFAULT
-    }
-}
-
-impl<F: Real> NodeRecurrence for Ladder<F> {
-    type Set = LadderSet;
-
-    fn set(&self, initial: &LadderControls) -> LadderSet {
-        LadderSet(initial.ty)
     }
 }
 

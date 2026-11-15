@@ -1,24 +1,22 @@
-//! Filter algorithms: state-variable, Moog ladder and the Linkwitz-Riley
-//! crossover, over the [`Real`] float they share, each a [`ChannelRecurrence`] run by
-//! [`PerChannel`] under the one [`Filter`] design.
+//! Filter algorithms: state-variable, Moog ladder and the Linkwitz-Riley crossover, each a
+//! bank of one filter per channel over buffers views ([`SvfBank`], [`LadderBank`],
+//! [`CrossoverBank`]), over the [`Lanes`] arithmetic their steps share.
 
 mod biquad;
 mod crossover;
 mod ladder;
-mod per_channel;
-mod real;
+mod lanes;
 mod svf;
 
 pub use biquad::{Biquad, DirectForm1};
 pub(crate) use crossover::CrossoverState;
 pub use crossover::{
-    CrossoverControls, CrossoverError, CrossoverFamily, CrossoverModel, CrossoverTree, MAX_SPLITS,
-    SOLVE_CEILING, fit_to_rate,
+    CrossoverBank, CrossoverControls, CrossoverError, CrossoverModel, MAX_SPLITS, SOLVE_CEILING,
+    fit_to_rate,
 };
 pub use ladder::{
-    Ladder, LadderCoefficients, LadderCoeffs, LadderControls, LadderFamily, LadderModel,
+    LadderBank, LadderCoefficients, LadderCoeffs, LadderControls, LadderDesign, LadderModel,
     LadderType, ladder_step,
 };
-pub use per_channel::{ChannelRecurrence, Filter, PerChannel};
-pub use real::{Lanes, Real};
+pub use lanes::Lanes;
 pub use svf::{SvfBank, SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType, svf_step};

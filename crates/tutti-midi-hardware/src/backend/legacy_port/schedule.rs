@@ -101,18 +101,24 @@ impl<T> Outbox<T> {
         }
     }
 
-    /// Takes a batch as [`Schedule::push_batch`] does, `room` bounding what is
-    /// held and pending. A dead sender takes nothing.
+    /// How many more events a sender bounded at `limit` pending takes now:
+    /// none once it is dead.
+    pub(in crate::backend) fn room(&self, limit: usize) -> usize {
+        if self.alive {
+            limit.saturating_sub(self.pending)
+        } else {
+            0
+        }
+    }
+
+    /// Takes a batch as [`Schedule::push_batch`] does, at most
+    /// [`room`](Self::room)`(limit)` of it. A dead sender takes nothing.
     pub(in crate::backend) fn take(
         &mut self,
-        room: usize,
+        limit: usize,
         batch: impl IntoIterator<Item = (Instant, T)>,
     ) -> usize {
-        if !self.alive {
-            return 0;
-        }
-        let room = room.saturating_sub(self.pending);
-        let taken = self.queue.push_batch(room, batch);
+        let taken = self.queue.push_batch(self.room(limit), batch);
         self.pending += taken;
         taken
     }

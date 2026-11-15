@@ -301,3 +301,58 @@ fn a_switch_to_a_device_at_another_rate_reports_the_change() {
     assert_eq!(live.transport().sample_rate(), SampleRate::SR_44K1);
     assert_eq!(live.device().graph_rate(), SampleRate::SR_44K1);
 }
+
+/// **The output policy carries over a clock switch, and a device the map does
+/// not fit is refused before the timer stops**: as a device restart refuses
+/// it, with the map named and kept (never reset to the identity). Once the
+/// host sets a map the card has places for, the switch goes through and the
+/// policy is in force on the card.
+#[test]
+fn the_output_policy_carries_over_and_a_card_the_map_does_not_fit_is_refused() {
+    use tutti_engine::OutputMap;
+    use tutti_session::OutputPolicy;
+    use tutti_types::Bed;
+    let mut s = system_builder()
+        .outputs(ChannelLayout::from(6u16))
+        .build()
+        .expect("builds");
+    let policy = OutputPolicy {
+        monitor: Some(Bed::Stereo.topology()),
+        map: OutputMap::channels([4, 5]).unwrap(),
+        ..OutputPolicy::default()
+    };
+    s.policy::<OutputPolicy>().set(policy.clone()).unwrap();
+    play(&s);
+    let before = wait_past(&mut s, 0);
+
+    let four = spec(SampleRate::SR_48K, ChannelLayout::from(4u16));
+    let (driver, card) = ManualStreamDriver::new();
+    let err = s
+        .into_device_on(four.clone(), driver)
+        .expect_err("the map has no output 4 on a four-channel card");
+    match err.error().error() {
+        Error::MapUnplaceable { map, device, .. } => {
+            assert_eq!(*map, policy.map);
+            assert_eq!(device.count(), 4);
+        }
+        other => panic!("expected the map named, got {other:?}"),
+    }
+    assert!(!card.is_open(), "the card never opened");
+    let mut s = err.into_session();
+    assert_eq!(
+        s.policy::<OutputPolicy>().get().map,
+        policy.map,
+        "never reset to the identity"
+    );
+    wait_past(&mut s, before);
+
+    let mut fits = policy;
+    fits.map = OutputMap::channels([2, 3]).unwrap();
+    s.policy::<OutputPolicy>().set(fits.clone()).unwrap();
+    let (driver, _card) = ManualStreamDriver::new();
+    let mut live = s
+        .into_device_on(four, driver)
+        .unwrap_or_else(|e| panic!("outputs 3 and 4 are there: {}", e.error()));
+    assert_eq!(live.policy::<OutputPolicy>().get().map, fits.map);
+    assert_eq!(live.output_device().unwrap().topology.width().count(), 4);
+}

@@ -11,13 +11,13 @@
 //! ramps and the graph shape. Here they take plain typed values per call.
 //!
 //! - **Filters** — `SvfCoeffs` and `SvfBank<F>` (Simper's trapezoidal
-//!   state-variable filter, eight responses by `SvfType`);
-//!   `LadderCoeffs` and `LadderFamily<F>` (the Moog
-//!   ladder, `tanh` feedback); `CrossoverFamily`, a 2 to 6 band Linkwitz-Riley 4th-order
-//!   split (the design on a 16-frame grid, landing whole). The three
-//!   designs are one `Filter<R>` over a `ChannelRecurrence`, run by `Realized<PerChannel<R>>`. `Real` is the `f32` or `f64` the state
-//!   runs in; its transcendentals call `libm`, so results do not depend on the
-//!   platform's C math library.
+//!   state-variable filter, eight responses by `SvfType`); `LadderCoeffs` and
+//!   `LadderBank<F>` (the Moog ladder, `tanh` feedback); `CrossoverModel` and
+//!   `CrossoverBank`, a 2 to 6 band Linkwitz-Riley 4th-order split. Each bank is one
+//!   filter per channel over buffers views, its coefficients a `Glide` the caller aims
+//!   (the crossover's land whole). `F` is the `f32` or `f64` the state runs in; its
+//!   transcendentals call `libm`, so results do not depend on the platform's C math
+//!   library.
 //! - **Dynamics** — the curves
 //!   `compute_compressor_gain_reduction`, `compute_limiter_gain` and
 //!   `LimiterCurve`; the compressor and the noise gate as families (`CompressorFamily` and
@@ -104,10 +104,10 @@
 //!   reverb) is a [`Capacity`], what its recurrence allocates; [`Effort`] and [`Cadence`]
 //!   are the engineering that schedules it.
 //! - **Filters** (`filter/`): the SVF ([`SvfBank`], [`SvfModel`], [`SvfType`]), the
-//!   ladder ([`LadderFamily`], [`LadderModel`], [`LadderType`]) and the Linkwitz-Riley
-//!   crossover ([`CrossoverFamily`], [`CrossoverModel`]), each a [`ChannelRecurrence`] under the one
-//!   [`Filter`] family, run by [`PerChannel`]; [`Real`], the `f32` or `f64` their state
-//!   runs in, and the [`Biquad`] section they share.
+//!   ladder ([`LadderBank`], [`LadderModel`], [`LadderType`]) and the Linkwitz-Riley
+//!   crossover ([`CrossoverBank`], [`CrossoverModel`]), each one filter per channel over
+//!   buffers views; [`Lanes`], the arithmetic their steps run in, and the [`Biquad`]
+//!   section they share.
 //! - **Dynamics** (`dynamics/`): the
 //!   gain curves ([`LimiterCurve`] and the `compute_*` functions); the lookahead limiter as a family ([`LimiterFamily`], run by
 //!   [`LimiterRecurrence`], its threshold and ceiling lanes of the [`Inputs`], its lookahead
@@ -212,11 +212,10 @@ pub use dynamics::{
 };
 pub use fft::{Complex32, FftScratch, RealFft};
 pub use filter::{
-    Biquad, ChannelRecurrence, CrossoverControls, CrossoverError, CrossoverFamily, CrossoverModel,
-    CrossoverTree, DirectForm1, Filter, Ladder, LadderCoefficients, LadderCoeffs, LadderControls,
-    LadderFamily, LadderModel, LadderType, Lanes, MAX_SPLITS, PerChannel, Real, SOLVE_CEILING,
-    SvfBank, SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType, fit_to_rate, ladder_step,
-    svf_step,
+    Biquad, CrossoverBank, CrossoverControls, CrossoverError, CrossoverModel, DirectForm1,
+    LadderBank, LadderCoefficients, LadderCoeffs, LadderControls, LadderDesign, LadderModel,
+    LadderType, Lanes, MAX_SPLITS, SOLVE_CEILING, SvfBank, SvfCoefficients, SvfCoeffs, SvfControls,
+    SvfModel, SvfType, fit_to_rate, ladder_step, svf_step,
 };
 pub use glide::{Glide, Lerp, Steps};
 pub use interp::cubic_hermite;

@@ -1052,3 +1052,65 @@ fn a_start_with_no_device_is_retried_once_the_device_is_listed() {
 fn a_listed_device_starts_nothing_with_retry_startup_off() {
     assert!(start_when_listed(false).is_empty());
 }
+
+/// **A restart onto a device the map does not fit is refused, and the map
+/// is kept**, never reset to the identity: the error names the map and the
+/// device, the old device is as it was, and once the host sets a map the new
+/// device has places for, the same restart goes through.
+#[test]
+fn a_restart_onto_a_device_the_map_does_not_fit_is_refused_and_keeps_the_map() {
+    use tutti_engine::OutputMap;
+    use tutti_session::OutputPolicy;
+    use tutti_types::Bed;
+    let spec = |channels: usize| {
+        OutputSpec::new(
+            SampleRate::SR_48K,
+            ChannelLayout::try_from(channels).unwrap(),
+            tutti_buffers::SampleFormat::F32,
+        )
+    };
+    let (driver, _stream) = ManualStreamDriver::new();
+    let mut session = Session::builder()
+        .device(Default::default())
+        .build_device_on(spec(6), driver)
+        .unwrap();
+    let policy = OutputPolicy {
+        monitor: Some(Bed::Stereo.topology()),
+        map: OutputMap::channels([4, 5]).unwrap(),
+        ..OutputPolicy::default()
+    };
+    session
+        .policy::<OutputPolicy>()
+        .set(policy.clone())
+        .unwrap();
+    let _ = session.update();
+
+    let (driver, _four) = ManualStreamDriver::new();
+    let refused = session.restart_on(spec(4), driver, None, None);
+    match refused {
+        Err(e) => match e.error() {
+            tutti_session::Error::MapUnplaceable { map, device, .. } => {
+                assert_eq!(*map, policy.map);
+                assert_eq!(device.count(), 4);
+            }
+            other => panic!("expected the map named, got {other:?}"),
+        },
+        Ok(_) => panic!("the map has no output 4 on a four-channel device"),
+    }
+    assert_eq!(
+        session.policy::<OutputPolicy>().get().map,
+        policy.map,
+        "never reset to the identity"
+    );
+    assert_eq!(session.output_device().unwrap().topology.width().count(), 6);
+
+    // A map the new device has places for, and the restart goes through.
+    let mut fits = policy;
+    fits.map = OutputMap::channels([2, 3]).unwrap();
+    session.policy::<OutputPolicy>().set(fits).unwrap();
+    let (driver, _four) = ManualStreamDriver::new();
+    session
+        .restart_on(spec(4), driver, None, None)
+        .expect("outputs 3 and 4 are there");
+    assert_eq!(session.output_device().unwrap().topology.width().count(), 4);
+}

@@ -2998,6 +2998,26 @@ impl Graph {
         self.output.as_ref()?.control.device(device)
     }
 
+    /// The device the engine renders into and what it is for a fold; `None`
+    /// with no engine.
+    pub(crate) fn placed_device(&self) -> Option<(ChannelLayout, tutti_types::ChannelTopology)> {
+        let placed = self.output.as_ref()?;
+        Some((placed.device, self.placed_topology()?))
+    }
+
+    /// The control side of the engine's output folds; `None` with no engine.
+    pub(crate) fn output_control(&self) -> Option<&tutti_engine::OutputControl> {
+        self.output.as_ref().map(|placed| &placed.control)
+    }
+
+    /// The root the next commit renders: what was declared, else the engine's
+    /// order for the width the graph has.
+    pub(crate) fn root_in_force(&self) -> tutti_types::ChannelTopology {
+        self.root.clone().unwrap_or_else(|| {
+            tutti_types::ChannelTopology::assumed(ChannelLayout::clamped(self.outputs()))
+        })
+    }
+
     /// What the device the engine renders into is for a fold: what was stated
     /// for it, else the engine's order for its width. `None` with no engine.
     fn placed_topology(&self) -> Option<tutti_types::ChannelTopology> {
