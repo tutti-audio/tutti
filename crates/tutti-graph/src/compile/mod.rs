@@ -1,8 +1,8 @@
 //! The compiler: `compile(&ValidGraph, &Shapes, &Prepare, prev) -> (Plan, Delta)`.
 //!
 //! Pure: no I/O, no audio, no units — only the value, the shapes
-//! the units declared, and the previous plan (for placements and nothing
-//! else). The passes, in order:
+//! the units declared, and the previous plan (for placements, and for the
+//! output time an old root's channels were heard at). The passes, in order:
 //!
 //! 1. **Check** every node's shape against its spec — widths, latency and
 //!    tail must all agree — and every event edge's ports against the shapes.
@@ -430,10 +430,13 @@ impl Emitted {
 /// allocates. [`Editor::commit`](crate::Editor::commit) calls it for you; call
 /// it directly to inspect a plan or to drive [`Editor::package`](crate::Editor::package).
 ///
-/// `prev` is the plan currently running, if any. It is read for exactly one
-/// thing — which store index each surviving key already occupies — so that the
-/// [`Delta`] moves only what changed. Delay-ring and feedback state carry over
-/// by *key* at the runtime and need nothing from `prev`.
+/// `prev` is the plan currently running, if any. It is read for two things:
+/// which store index each surviving key already occupies, so that the
+/// [`Delta`] moves only what changed, and, when the graph carries an old
+/// root's channels ([`ValidGraph::root_bank`]), its total latency, the output
+/// time those channels align to. With no `prev`, that time is the new root's
+/// own total. Delay-ring and feedback state carry over by *key* at the
+/// runtime and need nothing else from `prev`.
 ///
 /// # Errors
 ///

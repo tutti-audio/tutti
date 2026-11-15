@@ -77,7 +77,10 @@
 //! [`Editor::set_root_fade`]). Over the fade's length the engine folds each root
 //! with its own fold, `(RootId, device)`, and mixes them by the fade law's
 //! gains: the old root's channels fade out as the new root's fade in, frame by
-//! frame, and past the fade the new root is heard alone. A commit with no fade
+//! frame, and past the fade the new root is heard alone. The old root's
+//! channels align to the previous plan's total latency, so when the two totals
+//! differ a source present in both roots is heard at two delays during the
+//! fade and shifts once at its end. A commit with no fade
 //! cuts at its block. A commit that installs while the fade runs replaces the
 //! plan that carries the old root, so it ends the fade at that block, as a
 //! hard edit ends a unit's crossfade.

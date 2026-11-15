@@ -480,18 +480,23 @@ impl Stager {
                     .collect()
             })
             .unwrap_or_default();
-        // The first old ring that aligns each source to an output, whichever
-        // channel it fed: what a source on a new channel starts from.
+        // The longest old ring that aligns each source to an output, whichever
+        // channel it fed (the lowest key among equals): what a source on a new
+        // channel starts from, with none of its history zero-filled.
+        let old_delays_list = cx.old.map(|p| p.delays.as_slice()).unwrap_or_default();
         let mut old_by_source: BTreeMap<crate::Source, usize> = BTreeMap::new();
-        for (i, d) in cx
-            .old
-            .map(|p| p.delays.as_slice())
-            .unwrap_or_default()
-            .iter()
-            .enumerate()
-        {
+        for (i, d) in old_delays_list.iter().enumerate() {
             if let DelayKey::Output { from, .. } = d.key {
-                old_by_source.entry(from).or_insert(i);
+                let better = |j: &usize| {
+                    let best = &old_delays_list[*j];
+                    (d.len, std::cmp::Reverse(d.key)) > (best.len, std::cmp::Reverse(best.key))
+                };
+                match old_by_source.get(&from) {
+                    Some(j) if !better(j) => {}
+                    _ => {
+                        old_by_source.insert(from, i);
+                    }
+                }
             }
         }
         let mut caps = BTreeMap::new();
@@ -1152,8 +1157,8 @@ pub(super) fn sort_by_offset(events: &mut [Event]) {
 /// The old ring an output channel's ring of this plan starts from when no old
 /// ring has its own key: the old root's channel `c` for the bank's channel
 /// `base + c`, and, in a root change, for a root channel of a source the old
-/// plan aligned on another channel, that channel's ring (a source's delayed signal does not
-/// depend on the channel it feeds).
+/// plan aligned on another channel, that channel's ring (a source's delayed
+/// signal does not depend on the channel it feeds).
 fn copy_origin(
     plan: &Plan,
     key: &DelayKey,

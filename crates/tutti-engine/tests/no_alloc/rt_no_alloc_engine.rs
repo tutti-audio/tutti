@@ -885,10 +885,11 @@ impl tutti_graph::Node for Latent {
 
 /// A root change that crossfades over several blocks is applied without
 /// allocating, a latent source in the old root included, whose delay rings
-/// the install block copies into the old root's channels: a 7.1.4 root fades out as a 5.1 root fades in over the 240-frame
-/// declick, which 64-frame blocks cross in four, and every block (the one that
-/// installs the plan with the old root's channels, the ones that fold both
-/// roots, and the one that ends the fade) is guarded. The blocks after the
+/// the install block copies into the old root's channels: a 7.1.4 root fades
+/// out as a 5.1 root fades in over the 240-frame declick, which 64-frame blocks
+/// cross in four, and every block (the one that installs the plan with the old
+/// root's channels, the ones that fold both roots, and the one that ends the
+/// fade) is guarded. The blocks after the
 /// fade are the new root's fold alone, by its own rule.
 #[test]
 fn a_root_change_crossfaded_across_several_blocks_is_allocation_free() {
