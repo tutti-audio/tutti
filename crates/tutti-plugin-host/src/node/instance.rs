@@ -68,7 +68,9 @@ pub(super) struct Instance<F: Loaded> {
     /// A successor was committed ([`commit`](Self::commit)).
     committed: bool,
     /// Whether the plugin is lost, readable with no lock: a node dropped while
-    /// the control side holds the instance reads it.
+    /// the control side holds the instance reads it. A latch: it is set once,
+    /// nothing is published through it, and a reader that misses it only
+    /// hands a Processor back that nothing then collects, so no fence is needed.
     lost: Arc<AtomicBool>,
 }
 

@@ -17,11 +17,18 @@
 //! the next update's pump: the plugin is silent from the swap to then, at least
 //! one block and one update.
 //!
+//! A [`Bypassed`](crate::NodeMode::Bypassed) node is parked and never polled, so
+//! the Processor never leaves it: the plugin's port change, and any restart,
+//! waits until the bypass ends. A plugin with a bypass of its own keeps running
+//! and is not affected.
+//!
 //! The record is `Settling` until the rebinder says
 //! [`Moved`](tutti_plugin_host::Settlement::Moved), or
 //! [`Lost`](tutti_plugin_host::Settlement::Lost) when the plugin died (which the
 //! plugin's own path reports, and both nodes then render silence); no second
-//! rebuild starts before.
+//! rebuild starts before. A plugin that is deactivated when the commit lands
+//! keeps the record `Settling`, and holds off further port changes, until it is
+//! activated again and lends its Processor to the new node.
 //!
 //! An in-process plugin changes its ports on the main thread and is ticked
 //! there, so the rebuild runs in an update that runs on it: `plugins_phase` does

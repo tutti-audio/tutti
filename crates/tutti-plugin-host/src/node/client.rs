@@ -199,8 +199,8 @@ pub struct InProcClient<F: Loaded> {
 /// retune's poll does between blocks.
 ///
 /// It reads no lock: the instance may be held by the control thread that
-/// drops the node. A plugin that is lost (its flag, set when its lifecycle
-/// poisons) has no controller left to stop under, so its node does not run
+/// drops the node. A plugin that is lost (its flag, a latch set when its
+/// lifecycle poisons, through which nothing else is published) has no controller left to stop under, so its node does not run
 /// `stop`: the Processor drops with the end, as the Processor of a lost plugin
 /// does when the session retires its node.
 impl<F: Loaded> Drop for InProcClient<F> {
@@ -502,6 +502,8 @@ pub(super) struct Reload {
 }
 
 impl<F: Loaded> InProcClient<F> {
+    /// A client over `inner`, which it locks once for the plugin's lost flag:
+    /// a caller must not hold that lock.
     pub(super) fn new(
         inner: Arc<Mutex<Instance<F>>>,
         rt: Rt<F::Processor>,

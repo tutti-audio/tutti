@@ -774,11 +774,13 @@ fn a_muted_node_stays_muted_through_a_port_change() {
     r.s.close(tutti_fixtures::main_thread());
 }
 
-/// **A change of ports under a graph that re-prepares is rebuilt once the
-/// graph resumes, and never refused.** The re-prepare is under way when the
-/// plugin announces its ports: no refusal is reported, and the node ends with
-/// the new ports.
-fn a_rebuild_waits_for_a_re_preparing_graph_and_then_succeeds() {
+/// **A port change announced while the graph re-prepares for another rate
+/// ends with the new ports, and is never refused.** The sample-rate change is
+/// under way when the plugin announces its ports: no refusal is reported, and
+/// the node ends with the new ports. (The retry of a swap the graph refuses as
+/// busy is not forced here: the re-prepare may resume before the rebuild
+/// runs.)
+fn a_port_change_during_a_sample_rate_change_ends_with_the_new_ports() {
     use tutti_session::{PluginChange, PluginEvent};
     probe().set(ClapSwitch::PortLayout, 0);
     probe().set(ClapSwitch::RenderMode, 2);
@@ -830,29 +832,28 @@ fn a_rebuild_waits_for_a_re_preparing_graph_and_then_succeeds() {
 fn a_node_removed_while_its_rebuild_settles_leaves_nothing_behind() {
     let mut r = rebound(0);
     let node = r.node;
-    probe().thread_reset();
     r.change_ports(1);
     let _ = r.until("the wider node", |s| {
         s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
     });
-    r.s.graph().remove(node).expect("the node is there");
-    for _ in 0..6 {
-        let events = r.s.update();
-        assert!(
-            !events.iter().any(|event| matches!(
-                event,
-                SessionEvent::Plugin(tutti_session::PluginEvent { node: n, .. })
-                    if *n == node.erase()
-            )),
-            "nothing is said of a removed node: {events:?}"
-        );
-        thread::sleep(Duration::from_millis(2));
-    }
-    assert!(r.s.plugin_view(node).is_err(), "the record is gone");
-    assert!(
-        deactivation().observed,
-        "the plugin was closed: no rebinder kept it open"
+    assert_eq!(
+        r.s.graph_ref().testing().rebuild_settling(node),
+        Some(true),
+        "the Processor has not reached the new node yet"
     );
+    r.s.graph().remove(node).expect("the node is there");
+    let events = r.until("the node to be gone", |s| s.plugin_view(node).is_err());
+    assert!(
+        !events.iter().any(|event| matches!(
+            event,
+            SessionEvent::Plugin(tutti_session::PluginEvent { node: n, .. })
+                if *n == node.erase()
+        )),
+        "nothing is said of a removed node: {events:?}"
+    );
+    // The pool entry alone keeps the plugin loaded: releasing it completes.
+    r.s.pool::<&'static str>(()).unwrap();
+    assert!(matches!(next_event(&mut r.s, "verb"), PoolEvent::Released));
     r.s.close(tutti_fixtures::main_thread());
 }
 
@@ -871,6 +872,6 @@ a_plugin_that_widens_its_ports_is_re_inserted_wider,
 a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost,
 a_plugin_that_grows_wider_than_a_block_is_refused_by_name,
 a_muted_node_stays_muted_through_a_port_change,
-a_rebuild_waits_for_a_re_preparing_graph_and_then_succeeds,
+a_port_change_during_a_sample_rate_change_ends_with_the_new_ports,
 a_node_removed_while_its_rebuild_settles_leaves_nothing_behind,
 ];

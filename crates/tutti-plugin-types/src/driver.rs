@@ -96,6 +96,9 @@ impl<P> Hand<P> {
     ///   in its `Drop`).
     ///
     /// A local hand becomes a threaded one at the swap.
+    ///
+    /// `tutti-plugin-host`'s commit is the only caller: it installs once the
+    /// node over the successor's end is in its graph.
     pub fn install(&mut self, successor: Successor<P>) {
         self.successor = Some(successor.0);
     }

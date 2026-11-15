@@ -1463,13 +1463,13 @@ fn a_lane_on_a_param_with_no_typed_key_reaches_its_port() {
         &mut host,
         5,
         Probe {
-            param: UnitParam::Pan,
+            param: UnitParam::Balance,
             extra: None,
             knob: Arc::new(AtomicF32::new(0.0)),
         },
     );
     let mut decl = Decl::default();
-    let pan = TargetKey::param(5, ParamAddr::Unit(UnitParam::Pan));
+    let pan = TargetKey::param(5, ParamAddr::Unit(UnitParam::Balance));
     decl.target(pan, -1.0, 1.0);
     let s = decl.source(1, ModSource::Macro { value: 1.0 });
     decl.route(1, s, pan, 0.25);

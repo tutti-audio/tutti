@@ -149,8 +149,7 @@
 //!   `tutti_buffers::Sink` adapter export and recording share.
 //! - **Oscillator** (`oscillator.rs`): [`Oscillator`], a sine, or a saw, square or
 //!   triangle band-limited by PolyBLEP and PolyBLAMP ([`OscillatorWave`]).
-//! - **Small kernels**: [`cubic_hermite`], [`ShapeKind`] and [`Shaper`], [`Smoother`],
-//!   [`balance_gains`].
+//! - **Small kernels**: [`cubic_hermite`], [`ShapeKind`] and [`Shaper`], [`Smoother`].
 //!
 //! ## Feature flags
 //!
@@ -164,7 +163,6 @@
 //! (`tutti_dsp::RealFft`). The only public module is `contract`, which has paths of
 //! its own.
 
-mod balance;
 #[cfg(feature = "contract")]
 pub mod contract;
 mod control;
@@ -190,7 +188,6 @@ mod stft;
 mod testing;
 mod xorshift;
 
-pub use balance::balance_gains;
 pub use control::{COEFF_INTERVAL, LANES};
 pub use convolver::{Convolver, IrSpectra};
 pub use delay::{
