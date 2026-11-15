@@ -2,11 +2,7 @@
 
 use std::fmt;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
-use tutti_rt::MainThreadMarker;
-
-use crate::Session;
 use crate::pool::entry::LoadError;
 
 /// How one declared entry ended its load.
@@ -79,17 +75,10 @@ impl<K> PoolReport<K> {
     }
 }
 
-/// Why [`PoolLoaded::wait`] did not return a report.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, thiserror::Error)]
-#[non_exhaustive]
-pub enum PoolWaitError {
-    /// An entry waits for its main-thread stage, and the calling thread is not
-    /// the main thread, so no update here can run it. The wait is still
-    /// pending: call it again from the main thread.
-    #[error("an entry waits for the main thread, and this is not it")]
-    NeedsMainThread,
-    /// The report was already taken.
-    #[error("the pool report was already taken")]
+/// Where the report is.
+enum Cell<K> {
+    Pending,
+    Landed(PoolReport<K>),
     Taken,
 }
 
@@ -99,19 +88,12 @@ fn lock<K>(cell: &Mutex<Cell<K>>) -> std::sync::MutexGuard<'_, Cell<K>> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Where the report is.
-enum Cell<K> {
-    Pending,
-    Landed(PoolReport<K>),
-    Taken,
-}
-
 /// The wait for every declared entry's outcome: [`Session::pool_loaded`].
 ///
-/// It lands once. [`take`](Self::take) reads it after an
-/// [`update`](Session::update); [`wait`](Self::wait) updates until it lands.
-/// Dropping it cancels nothing: it only reads.
-#[must_use = "a pool_loaded wait reports nothing until it is taken or waited on"]
+/// It lands once, in an [`update`](Session::update): the app calls `update`
+/// until [`has_landed`](Self::has_landed), then [`take`](Self::take)s the
+/// report. Dropping it ends the wait.
+#[must_use = "a pool_loaded wait reports nothing until it is taken"]
 pub struct PoolLoaded<K> {
     cell: Arc<Mutex<Cell<K>>>,
 }
@@ -146,38 +128,6 @@ impl<K> PoolLoaded<K> {
     pub fn has_landed(&self) -> bool {
         matches!(*lock(&self.cell), Cell::Landed(_))
     }
-
-    /// Calls [`Session::update`] until the report lands, and returns it. The
-    /// events of those updates stay queued: the app's next `update` returns
-    /// them first, in the order they came.
-    ///
-    /// It runs an entry's main-thread stage only when called on the main
-    /// thread, as `update` does.
-    ///
-    /// # Errors
-    ///
-    /// [`PoolWaitError::NeedsMainThread`] when an entry waits for its
-    /// main-thread stage and this is not the main thread;
-    /// [`PoolWaitError::Taken`] when the report was already taken.
-    pub fn wait(&self, session: &mut Session) -> Result<PoolReport<K>, PoolWaitError> {
-        loop {
-            if let Some(report) = self.take() {
-                return Ok(report);
-            }
-            if matches!(*lock(&self.cell), Cell::Taken) {
-                return Err(PoolWaitError::Taken);
-            }
-            let events = session.update();
-            session.pool.defer_events(events);
-            if self.has_landed() {
-                continue;
-            }
-            if session.pool.awaits_main() && MainThreadMarker::new().is_none() {
-                return Err(PoolWaitError::NeedsMainThread);
-            }
-            std::thread::sleep(Duration::from_millis(1));
-        }
-    }
 }
 
 impl<K> fmt::Debug for PoolLoaded<K> {
@@ -194,5 +144,10 @@ pub(crate) struct Landing<K> {
 impl<K> Landing<K> {
     pub(crate) fn land(&self, report: PoolReport<K>) {
         *lock(&self.cell) = Cell::Landed(report);
+    }
+
+    /// The [`PoolLoaded`] was dropped: nothing will read what lands.
+    pub(crate) fn orphaned(&self) -> bool {
+        Arc::strong_count(&self.cell) == 1
     }
 }

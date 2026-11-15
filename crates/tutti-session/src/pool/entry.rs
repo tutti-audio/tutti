@@ -3,7 +3,7 @@
 use std::any::{Any, TypeId};
 use std::fmt;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use tutti_rt::MainThreadMarker;
 
@@ -56,8 +56,12 @@ pub trait PoolEntry: Send + 'static {
     /// handle reads as [`Presence::Lost`] (a plugin that gave up, a capture
     /// whose device left). The kind decides presence; the pool only asks, and
     /// [`Session::retry`](crate::Session::retry) reopens such an entry by
-    /// running [`load`](Self::load) again. The default is `false`: a data kind
-    /// is never lost.
+    /// running [`load`](Self::load) again.
+    ///
+    /// This is the one definition: a handle's `presence()` must read `Lost`
+    /// exactly when `is_lost` is true of the loaded value it was made from,
+    /// by calling it or by reading the same state. The default is `false`: a
+    /// data kind is never lost.
     fn is_lost(_loaded: &Self::Loaded) -> bool {
         false
     }
@@ -92,15 +96,39 @@ pub(crate) enum Step<T> {
 /// that finishes it.
 pub(crate) enum Staged<T> {
     Done(T),
-    Main(MainStage<T>),
+    Main(MainStage),
+}
+
+/// Hands work to the main thread's next tick: the session's main-work
+/// collector, when it has one.
+pub(crate) type Defer = Arc<dyn Fn(Box<dyn FnOnce(MainThreadMarker) + Send>) + Send + Sync>;
+
+/// Main-thread stages whose worker output was neither run nor dropped on the
+/// main thread, and that nothing could defer to it: leaked.
+static STRANDED: AtomicU64 = AtomicU64::new(0);
+
+/// How many worker outputs the pool leaked, process-wide since the process
+/// began: outputs of a load's worker stage that were dropped off the main
+/// thread with no main-work collector to hand them to
+/// (`tutti_plugin_types::MainWork::stranded` counts those a collector could not
+/// run). A diagnostic only.
+pub fn stranded_loads() -> u64 {
+    STRANDED.load(Ordering::Relaxed)
 }
 
 /// A load's main-thread stage with the worker's output inside it. It runs or
 /// is discarded only with a [`MainThreadMarker`], so the worker's output is
-/// consumed or dropped on the main thread and nowhere else.
-pub(crate) struct MainStage<T>(
-    Box<dyn FnOnce(MainThreadMarker, Turn) -> Option<Result<T, LoadError>> + Send>,
-);
+/// consumed or dropped on the main thread.
+///
+/// Dropped without either, the stage drops nowhere else: on the main thread it
+/// discards the output; elsewhere it hands the discard to the session's
+/// main-work collector, and with none the output is leaked and counted
+/// ([`stranded_loads`]).
+pub(crate) struct MainStage {
+    stage:
+        Option<Box<dyn FnOnce(MainThreadMarker, Turn) -> Option<Result<Value, LoadError>> + Send>>,
+    defer: Option<Defer>,
+}
 
 /// What a [`MainStage`] is asked to do with the worker's output.
 enum Turn {
@@ -108,37 +136,60 @@ enum Turn {
     Discard,
 }
 
-impl<T: Send + 'static> MainStage<T> {
-    fn new<W: Send + 'static>(
+impl MainStage {
+    pub(crate) fn new<T: Send + 'static, W: Send + 'static>(
         output: W,
         main: impl FnOnce(W, MainThreadMarker) -> Result<T, LoadError> + Send + 'static,
     ) -> Self {
-        Self(Box::new(move |marker, turn| match turn {
-            Turn::Run => Some(main(output, marker)),
-            Turn::Discard => {
-                drop(output);
-                None
-            }
-        }))
+        Self {
+            stage: Some(Box::new(move |marker, turn| match turn {
+                Turn::Run => Some(main(output, marker).map(|done| Box::new(done) as Value)),
+                Turn::Discard => {
+                    drop(output);
+                    None
+                }
+            })),
+            defer: None,
+        }
     }
 
-    fn map<U>(self, map: impl FnOnce(T) -> U + Send + 'static) -> MainStage<U>
-    where
-        U: Send + 'static,
-    {
-        MainStage(Box::new(move |marker, turn| {
-            (self.0)(marker, turn).map(|done| done.map(map))
-        }))
+    /// This stage, with `defer` to hand its discard to when it is dropped off
+    /// the main thread.
+    pub(crate) fn deferring(mut self, defer: Option<Defer>) -> Self {
+        self.defer = defer;
+        self
     }
 
     /// Runs the stage on the main thread.
-    pub(crate) fn run(self, main: MainThreadMarker) -> Result<T, LoadError> {
-        (self.0)(main, Turn::Run).expect("a stage asked to run answers")
+    pub(crate) fn run(mut self, main: MainThreadMarker) -> Result<Value, LoadError> {
+        let stage = self.stage.take().expect("a stage is run once");
+        stage(main, Turn::Run).expect("a stage asked to run answers")
     }
 
     /// Drops the worker's output on the main thread, running nothing.
-    pub(crate) fn discard(self, main: MainThreadMarker) {
-        let _ = (self.0)(main, Turn::Discard);
+    pub(crate) fn discard(mut self, main: MainThreadMarker) {
+        if let Some(stage) = self.stage.take() {
+            let _ = stage(main, Turn::Discard);
+        }
+    }
+}
+
+impl Drop for MainStage {
+    fn drop(&mut self) {
+        let Some(stage) = self.stage.take() else {
+            return;
+        };
+        if let Some(main) = MainThreadMarker::new() {
+            let _ = stage(main, Turn::Discard);
+        } else if let Some(defer) = self.defer.take() {
+            defer(Box::new(move |main| {
+                let _ = stage(main, Turn::Discard);
+            }));
+        } else {
+            STRANDED.fetch_add(1, Ordering::Relaxed);
+            // Dropping it here would drop the worker's output off the main thread.
+            std::mem::forget(stage);
+        }
     }
 }
 
@@ -146,7 +197,16 @@ impl<T: Send + 'static> Staged<T> {
     fn map<U: Send + 'static>(self, map: impl FnOnce(T) -> U + Send + 'static) -> Staged<U> {
         match self {
             Self::Done(done) => Staged::Done(map(done)),
-            Self::Main(stage) => Staged::Main(stage.map(map)),
+            Self::Main(stage) => Staged::Main(stage),
+        }
+    }
+
+    /// This output, its main stage (if it has one) handing its discard to
+    /// `defer` when dropped off the main thread.
+    pub(crate) fn deferring(self, defer: Option<Defer>) -> Self {
+        match self {
+            Self::Done(done) => Self::Done(done),
+            Self::Main(stage) => Self::Main(stage.deferring(defer)),
         }
     }
 }
@@ -169,9 +229,17 @@ impl<T: Send + 'static> Load<T> {
     /// The entry reads [`PoolState::WaitingForMainThread`](crate::PoolState::WaitingForMainThread)
     /// between the stages, and [`Session::pool`](crate::Session::pool) refuses
     /// the entry with [`PoolError::NeedsMainThread`](crate::PoolError::NeedsMainThread)
-    /// when the session has no main thread to run `main` on. A load cancelled
-    /// or superseded between the stages never runs `main`: its `W` is dropped
-    /// on the main thread, by the same queue that would have run `main`.
+    /// when no update has run on the main thread and the caller is not on it.
+    ///
+    /// `W` is never dropped off the main thread. A load cancelled or
+    /// superseded between the stages never runs `main`: its `W` is dropped on
+    /// the main thread, by the queue that would have run `main`. `W` dropped
+    /// anywhere else (a session that ends off the main thread, the jobs'
+    /// channel closing) is handed to the session's main-work collector to drop
+    /// at its next tick on the main thread when the session has one (feature
+    /// `plugin`); with none, or when the collector itself ends off the main
+    /// thread, `W` is leaked and counted
+    /// ([`stranded_loads`](crate::stranded_loads)).
     pub fn on_worker_then_main<W: Send + 'static>(
         work: impl FnOnce() -> Result<W, LoadError> + Send + 'static,
         main: impl FnOnce(W, MainThreadMarker) -> Result<T, LoadError> + Send + 'static,

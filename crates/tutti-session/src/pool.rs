@@ -59,10 +59,10 @@ pub use config::PoolConfig;
 pub use data::{AudioFile, audio_file};
 #[cfg(feature = "soundfont")]
 pub use data::{SoundFontFile, soundfont};
-pub use entry::{Declared, IntoPool, Life, Load, LoadError, PoolEntry, PoolSet};
+pub use entry::{Declared, IntoPool, Life, Load, LoadError, PoolEntry, PoolSet, stranded_loads};
 pub use key::PoolKey;
 pub use open::OpenCx;
-pub use report::{PoolLoaded, PoolOutcome, PoolReport, PoolWaitError};
+pub use report::{PoolLoaded, PoolOutcome, PoolReport};
 pub(crate) use table::Pool;
 pub use table::{HandleError, PoolError, PoolEvent, PoolState, RetryError};
 
@@ -95,13 +95,14 @@ impl Session {
     /// # Errors
     ///
     /// [`PoolError::DuplicateKey`] for a key the set names twice;
-    /// [`PoolError::NeedsMainThread`] for a key whose load has a stage on the
-    /// main thread ([`Load::on_worker_then_main`]) when the session has none:
-    /// this thread is not the main thread, and no update has run on it. The
-    /// call refuses the set whole: nothing of it is applied.
+    /// [`PoolError::NeedsMainThread`] for a key whose own load has a stage on
+    /// the main thread ([`Load::on_worker_then_main`]) when no update has run
+    /// on the main thread and this call is not on it. A key of the same kind
+    /// whose load is [`Load::on_worker`] is not refused. The call refuses the
+    /// set whole: nothing of it is applied.
     pub fn pool<K>(&mut self, parts: impl IntoPool<K>) -> Result<(), PoolError<K>>
     where
-        K: Ord + Clone + fmt::Debug + Send + 'static,
+        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         let mut set = PoolSet::new();
         parts.into_pool(&mut set);
@@ -126,7 +127,7 @@ impl Session {
     /// [`RetryError::NotPooled`] for a key the pool does not declare.
     pub fn retry<K>(&mut self, key: &K) -> Result<(), RetryError<K>>
     where
-        K: Ord + Clone + fmt::Debug + Send + 'static,
+        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         let start = self.pool.retry(key)?;
         self.pool_start(start.into_iter().collect());
@@ -136,13 +137,14 @@ impl Session {
     /// The wait for every declared entry's outcome: it lands once no declared
     /// entry is pending, as a [`PoolReport`] of each key's outcome. Entries
     /// that failed are in it, as [`PoolOutcome::Failed`]. An offline session
-    /// waits with [`PoolLoaded::wait`] before it renders.
+    /// calls [`update`](Self::update) until [`PoolLoaded::has_landed`] before
+    /// it renders. Dropping the [`PoolLoaded`] ends the wait.
     ///
     /// `K` is the type of the keys the pool was declared with; keys of another
     /// type are not in the report.
     pub fn pool_loaded<K>(&mut self) -> PoolLoaded<K>
     where
-        K: Ord + Clone + fmt::Debug + Send + 'static,
+        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         let (loaded, landing) = PoolLoaded::new();
         self.pool.wait_loaded(landing);
@@ -154,7 +156,7 @@ impl Session {
     #[must_use]
     pub fn pool_state<K>(&self, key: &K) -> Option<PoolState>
     where
-        K: Ord + Clone + fmt::Debug + Send + 'static,
+        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         self.pool.state(&PoolKey::new(key))
     }
@@ -171,7 +173,7 @@ impl Session {
     /// [`HandleError::NotLoaded`] before the load lands, or after it failed.
     pub fn audio<K>(&self, key: &K) -> Result<Arc<tutti_codec::Wave>, HandleError<K>>
     where
-        K: Ord + Clone + fmt::Debug + Send + 'static,
+        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         self.pool.handle::<K, AudioFile>(key)
     }
@@ -188,7 +190,7 @@ impl Session {
     /// [`HandleError::NotLoaded`] before the load lands, or after it failed.
     pub fn soundfont<K>(&self, key: &K) -> Result<Arc<tutti_sf2::SoundFont>, HandleError<K>>
     where
-        K: Ord + Clone + fmt::Debug + Send + 'static,
+        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         self.pool.handle::<K, SoundFontFile>(key)
     }

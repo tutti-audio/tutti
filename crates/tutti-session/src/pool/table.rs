@@ -75,10 +75,10 @@ pub enum PoolError<K: fmt::Debug> {
     /// The set names this key twice.
     #[error("the pool names key {0:?} twice")]
     DuplicateKey(K),
-    /// The set declares this key with a stage on the main thread, and the
-    /// session has no main thread to run it: no update has run on one, and
-    /// this thread is not it.
-    #[error("key {0:?} needs a main-thread stage, and the session has no main thread")]
+    /// The set declares this key with a load that has a stage on the main
+    /// thread, and no update has run on the main thread: the stage would wait
+    /// for one that may never come. A call on the main thread is not refused.
+    #[error("key {0:?} needs a main-thread stage, and no update has run on the main thread")]
     NeedsMainThread(K),
 }
 
@@ -238,7 +238,7 @@ pub(crate) struct Opening {
 /// where the cancel was.
 pub(crate) struct MainItem {
     pub(crate) flight: u64,
-    pub(crate) stage: MainStage<Value>,
+    pub(crate) stage: MainStage,
 }
 
 struct Pending {
@@ -260,14 +260,12 @@ pub(crate) struct Pool {
     running: usize,
     openings: Vec<Opening>,
     main: Vec<MainItem>,
-    /// An update has run on the main thread.
+    /// An update has run on the main thread: the stages that wait for it run.
     main_seen: bool,
     queued: Vec<Pending>,
     /// Released since the last report.
     released: Vec<PoolKey>,
     waiters: Vec<Box<dyn FnMut(&Pool) -> bool + Send>>,
-    /// The events of the updates a wait ran: the next update returns them first.
-    deferred: Vec<SessionEvent>,
 }
 
 impl fmt::Debug for Pool {
@@ -275,28 +273,6 @@ impl fmt::Debug for Pool {
         f.debug_struct("Pool")
             .field("entries", &self.slots.len())
             .finish_non_exhaustive()
-    }
-}
-
-impl Drop for Pool {
-    /// Worker output still waiting for the main thread drops there; with no
-    /// main thread it is leaked, as `MainWork` leaks what it cannot run.
-    fn drop(&mut self) {
-        let waiting = std::mem::take(&mut self.main);
-        if waiting.is_empty() {
-            return;
-        }
-        if let Some(main) = MainThreadMarker::new() {
-            for item in waiting {
-                item.stage.discard(main);
-            }
-        } else {
-            tracing::warn!(
-                "{} pool loads were waiting for the main thread when the session dropped off it; their worker output is leaked",
-                waiting.len()
-            );
-            std::mem::forget(waiting);
-        }
     }
 }
 
@@ -315,12 +291,11 @@ impl Pool {
             queued: Vec::new(),
             released: Vec::new(),
             waiters: Vec::new(),
-            deferred: Vec::new(),
         }
     }
 
-    /// Whether a stage on the main thread can run: the caller is on it, or an
-    /// update has run on it.
+    /// Whether a stage on the main thread will be run: the caller is on the main
+    /// thread, or an update has run on it.
     fn has_main_thread(&self) -> bool {
         self.main_seen || MainThreadMarker::new().is_some()
     }
@@ -339,7 +314,7 @@ impl Pool {
     /// [`PoolError::DuplicateKey`] for a key named twice;
     /// [`PoolError::NeedsMainThread`] for a key with a main-thread stage when
     /// there is no main thread. Nothing is applied.
-    pub(crate) fn declare<K: Ord + Clone + fmt::Debug + Send + 'static>(
+    pub(crate) fn declare<K: Ord + Clone + fmt::Debug + Send + Sync + 'static>(
         &mut self,
         set: PoolSet<K>,
     ) -> Result<Vec<Start>, PoolError<K>> {
@@ -413,8 +388,11 @@ impl Pool {
         };
         slot.declared = true;
         slot.order = order;
-        // What a retry loads is the latest declaration of the same identity.
+        // What a retry loads, and how the kind reads and shares it, is the
+        // latest declaration's.
         slot.reload = reload;
+        slot.lost = lost;
+        slot.share = share;
         if slot.kind == kind && slot.identity.same(&*identity) {
             if let Some(event) = slot.unreported.take() {
                 self.queued.push(Pending {
@@ -428,8 +406,6 @@ impl Pool {
         slot.unreported = None;
         slot.kind = kind;
         slot.identity = identity;
-        slot.lost = lost;
-        slot.share = share;
         self.begin(key, load)
     }
 
@@ -491,7 +467,11 @@ impl Pool {
                 && matches!(slot.state, PoolState::Loaded)
                 && slot.identity.same(&*own.identity);
             if alike {
-                slot.loaded.as_ref().and_then(|value| own.share?(value))
+                // A value its kind reads as lost is not one to copy.
+                slot.loaded
+                    .as_ref()
+                    .filter(|value| !(slot.lost)(value))
+                    .and_then(|value| own.share?(value))
             } else {
                 None
             }
@@ -588,7 +568,7 @@ impl Pool {
 
     /// A flight's worker stage ended with a stage for the main thread: it
     /// waits there, whether or not an entry still wants it.
-    pub(crate) fn stage_main(&mut self, flight: u64, stage: MainStage<Value>) {
+    pub(crate) fn stage_main(&mut self, flight: u64, stage: MainStage) {
         if let Some(flight_) = self.flights.get_mut(&flight) {
             flight_.stage = Stage::Main;
             let targets = flight_.targets.clone();
@@ -607,11 +587,6 @@ impl Pool {
     pub(crate) fn take_main(&mut self, _main: MainThreadMarker) -> Vec<MainItem> {
         self.main_seen = true;
         std::mem::take(&mut self.main)
-    }
-
-    /// Whether a stage waits for the main thread.
-    pub(crate) fn awaits_main(&self) -> bool {
-        !self.main.is_empty()
     }
 
     /// Forgets a flight no entry waits on, after its stage was dropped.
@@ -695,7 +670,7 @@ impl Pool {
     /// [`RetryError::NotFailed`] when its entry is neither failed nor lost.
     pub(crate) fn retry<K>(&mut self, key: &K) -> Result<Option<Start>, RetryError<K>>
     where
-        K: Ord + Clone + fmt::Debug + Send + 'static,
+        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         let erased = PoolKey::new(key);
         let slot = self
@@ -735,7 +710,7 @@ impl Pool {
 
     /// The declared entries whose load has not landed, in declaration order.
     #[cfg(feature = "export")]
-    pub(crate) fn pending(&self) -> Vec<String> {
+    pub(crate) fn pending(&self) -> Vec<PoolKey> {
         let mut pending: Vec<(usize, &PoolKey)> = self
             .slots
             .iter()
@@ -743,10 +718,7 @@ impl Pool {
             .map(|(key, slot)| (slot.order, key))
             .collect();
         pending.sort_by_key(|&(order, _)| order);
-        pending
-            .into_iter()
-            .map(|(_, key)| format!("{key:?}"))
-            .collect()
+        pending.into_iter().map(|(_, key)| key.clone()).collect()
     }
 
     /// Every declared entry's outcome as a report of `K` keys, `None` while any
@@ -775,23 +747,26 @@ impl Pool {
     }
 
     /// A report of `K` keys that lands, once, when no declared entry is pending.
+    /// The wait ends when its [`PoolLoaded`](crate::PoolLoaded) is dropped.
     pub(crate) fn wait_loaded<K: Clone + Send + 'static>(&mut self, landing: Landing<K>) {
-        let mut landing = Some(landing);
-        let mut waiter = move |pool: &Pool| {
+        let waiter = move |pool: &Pool| {
+            if landing.orphaned() {
+                return true;
+            }
             let Some(report) = pool.report::<K>() else {
                 return false;
             };
-            if let Some(landing) = landing.take() {
-                landing.land(report);
-            }
+            landing.land(report);
             true
         };
+        let waiter = Box::new(waiter);
         if !waiter(self) {
-            self.waiters.push(Box::new(waiter));
+            self.waiters.push(waiter);
         }
     }
 
-    /// Lands the waits whose entries all have an outcome.
+    /// Lands the waits whose entries all have an outcome, and ends those whose
+    /// handle was dropped.
     pub(crate) fn poll_waiters(&mut self) {
         let mut waiters = std::mem::take(&mut self.waiters);
         waiters.retain_mut(|waiter| !waiter(self));
@@ -799,14 +774,10 @@ impl Pool {
         self.waiters = waiters;
     }
 
-    /// Keeps the events of a wait's update for the next one.
-    pub(crate) fn defer_events(&mut self, events: Vec<SessionEvent>) {
-        self.deferred = events;
-    }
-
-    /// The events a wait kept, which come first.
-    pub(crate) fn release_deferred(&mut self, out: &mut Vec<SessionEvent>) {
-        out.append(&mut self.deferred);
+    /// How many waits are registered.
+    #[cfg(test)]
+    pub(crate) fn waiting(&self) -> usize {
+        self.waiters.len()
     }
 
     /// A hold on `key`'s entry, `None` when the pool has none.
@@ -830,7 +801,7 @@ impl Pool {
     )]
     pub(crate) fn handle<K, E>(&self, key: &K) -> Result<E::Handle, HandleError<K>>
     where
-        K: Ord + Clone + fmt::Debug + Send + 'static,
+        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
         E: PoolEntry,
     {
         let slot = self

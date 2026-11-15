@@ -12,6 +12,11 @@ use crate::Session;
 /// The stage runs inside [`Session::update`](crate::Session::update), on the
 /// thread that owns the session, so it may use what a worker cannot (a MIDI
 /// device is `!Send`).
+///
+/// A panic in the stage is caught and fails the entry
+/// ([`LoadError::Job`](crate::LoadError::Job)), but it unwinds through the
+/// session's own state: a panic inside a call on [`midi`](Self::midi) can leave
+/// the MIDI state half changed.
 pub struct OpenCx<'a> {
     session: &'a mut Session,
 }

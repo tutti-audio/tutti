@@ -711,8 +711,6 @@ impl Session {
         let _ = cx;
         match phase {
             Phase::Collect => {
-                // The events of the updates a `pool_loaded().wait` ran come first.
-                self.pool.release_deferred(out);
                 // First, so what a job landed is in the graph this update commits.
                 self.land_jobs(out);
                 // What those landings and the holds' ends changed, and the pool's

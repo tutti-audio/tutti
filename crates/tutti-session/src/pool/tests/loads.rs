@@ -11,7 +11,7 @@ use tutti_rt::MainThreadMarker;
 use super::{Spawned, events, session, state};
 use crate::{
     Declared, HandleError, Life, Load, LoadError, PoolConfig, PoolEntry, PoolError, PoolOutcome,
-    PoolWaitError, RetryError, Session, jobs::JobFailed,
+    Presence, RetryError, Session, jobs::JobFailed,
 };
 
 /// What ran, and on which thread, in the order it ran.
@@ -108,7 +108,7 @@ fn stub(name: &'static str, how: How, log: &Log) -> Stub {
 impl PoolEntry for Stub {
     type Identity = u32;
     type Loaded = Arc<Made>;
-    type Handle = Arc<Made>;
+    type Handle = StubHandle;
 
     fn identity(&self) -> u32 {
         self.version
@@ -159,12 +159,30 @@ impl PoolEntry for Stub {
         }
     }
 
-    fn handle(loaded: &Arc<Made>, _: &Life) -> Arc<Made> {
-        Arc::clone(loaded)
+    fn handle(loaded: &Arc<Made>, _: &Life) -> StubHandle {
+        StubHandle {
+            made: Arc::clone(loaded),
+        }
     }
 
     fn is_lost(loaded: &Arc<Made>) -> bool {
         loaded.lost.load(Ordering::SeqCst)
+    }
+}
+
+/// The handle of a stub: its presence is read from the loaded value, as a peer
+/// kind's is.
+struct StubHandle {
+    made: Arc<Made>,
+}
+
+impl StubHandle {
+    fn presence(&self) -> Presence<&'static str> {
+        if Stub::is_lost(&self.made) {
+            Presence::Lost("gone")
+        } else {
+            Presence::Live
+        }
     }
 }
 
@@ -173,7 +191,10 @@ fn declare(stub: &Stub) -> Declared<&'static str, Stub> {
 }
 
 fn made(session: &Session, key: &'static str) -> Result<Arc<Made>, HandleError<&'static str>> {
-    session.pool.handle::<_, Stub>(&key)
+    session
+        .pool
+        .handle::<_, Stub>(&key)
+        .map(|handle| handle.made)
 }
 
 /// Runs `f` on a thread that holds the main-thread proof, and hands the
@@ -447,15 +468,12 @@ fn the_parallel_cap_is_the_builders() {
     let held = spawned.clone();
     let mut s = Session::builder()
         .spawn_with(move |job| held.0.lock().unwrap().push(job))
-        .pool_config(PoolConfig {
-            parallel_loads: std::num::NonZeroUsize::new(2).unwrap(),
-        })
+        .pool_config(PoolConfig::new().with_parallel_loads(std::num::NonZeroUsize::new(2).unwrap()))
         .build_detached(tutti_types::SampleRate::SR_48K)
         .unwrap();
     s.pool(["a", "b", "c"].map(|name| declare(&stub(name, How::Worker, &log))))
         .unwrap();
     assert_eq!(spawned.take().len(), 2);
-    assert_eq!(PoolConfig::default().parallel_loads.get(), 4);
 }
 
 #[test]
@@ -465,9 +483,7 @@ fn a_queued_load_superseded_before_it_starts_never_runs() {
     let held = spawned.clone();
     let mut s = Session::builder()
         .spawn_with(move |job| held.0.lock().unwrap().push(job))
-        .pool_config(PoolConfig {
-            parallel_loads: std::num::NonZeroUsize::new(1).unwrap(),
-        })
+        .pool_config(PoolConfig::new().with_parallel_loads(std::num::NonZeroUsize::new(1).unwrap()))
         .build_detached(tutti_types::SampleRate::SR_48K)
         .unwrap();
     s.pool((
@@ -590,44 +606,29 @@ fn pool_loaded_lands_once_every_declared_entry_has_an_outcome_and_reports_each()
 }
 
 #[test]
-fn pool_loaded_wait_updates_until_it_lands_and_leaves_the_events_for_the_next_update() {
+fn pool_loaded_lands_in_the_update_that_settles_the_last_entry_and_a_dropped_one_ends_its_wait() {
+    let (mut s, spawned) = session();
     let log = Log::default();
-    let mut s = Session::builder()
-        .spawn_with(|job| job.run())
-        .build_detached(tutti_types::SampleRate::SR_48K)
-        .unwrap();
     s.pool((
         declare(&stub("a", How::Worker, &log)),
         declare(&stub("b", How::Worker, &log)),
     ))
     .unwrap();
     let loaded = s.pool_loaded::<&'static str>();
-    let report = loaded.wait(&mut s).unwrap();
-    assert!(report.all_loaded());
-    assert_eq!(report.len(), 2);
-    assert_eq!(
-        events(&mut s),
-        [("a", "loaded".to_owned()), ("b", "loaded".to_owned())],
-        "the waited updates' events are the next update's"
-    );
-    assert_eq!(loaded.wait(&mut s).unwrap_err(), PoolWaitError::Taken);
-}
-
-#[test]
-fn pool_loaded_wait_off_the_main_thread_refuses_while_a_main_stage_waits() {
-    let (s, spawned) = session();
-    let mut s = with_main_thread(s);
-    let log = Log::default();
-    s.pool(declare(&stub("a", How::Main, &log))).unwrap();
+    let dropped = s.pool_loaded::<&'static str>();
+    assert_eq!(s.pool.waiting(), 2);
+    drop(dropped);
+    let _ = s.update();
+    assert_eq!(s.pool.waiting(), 1, "a dropped handle's wait ended");
+    assert!(!loaded.has_landed());
     spawned.run_all();
-    let loaded = s.pool_loaded::<&'static str>();
-    assert_eq!(
-        loaded.wait(&mut s).unwrap_err(),
-        PoolWaitError::NeedsMainThread
+    let _ = s.update();
+    assert!(
+        loaded.has_landed(),
+        "the update that landed both settled it"
     );
-    let (mut s, (), _) = on_main(s, |s, main| s.pool_main_stages(main));
-    let report = loaded.wait(&mut s).expect("still the caller's");
-    assert!(report.all_loaded());
+    assert_eq!(s.pool.waiting(), 0);
+    assert!(loaded.take().expect("landed").all_loaded());
 }
 
 #[test]
@@ -747,4 +748,228 @@ fn a_worker_stage_whose_entry_was_released_still_frees_its_capacity() {
     let _ = s.update();
     s.pool(declare(&stub("z", How::Worker, &log))).unwrap();
     assert_eq!(spawned.take().len(), 1, "the four running stages ended");
+}
+
+/// Worker outputs the pool leaked (and, with `plugin`, those a collector could
+/// not run).
+fn stranded_total() -> u64 {
+    #[cfg(feature = "plugin")]
+    {
+        crate::stranded_loads() + tutti_plugin_types::MainWork::stranded()
+    }
+    #[cfg(not(feature = "plugin"))]
+    {
+        crate::stranded_loads()
+    }
+}
+
+#[test]
+fn a_handles_presence_reads_lost_exactly_when_the_kind_says_lost_and_retry_follows_it() {
+    let (mut s, spawned) = session();
+    let log = Log::default();
+    let entry = stub("a", How::Worker, &log);
+    s.pool(declare(&entry)).unwrap();
+    spawned.run_all();
+    let _ = events(&mut s);
+    let handle = s.pool.handle::<_, Stub>(&"a").unwrap();
+    assert_eq!(handle.presence(), Presence::Live);
+    assert_eq!(s.retry(&"a"), Err(RetryError::NotFailed("a")));
+    handle.made.lost.store(true, Ordering::SeqCst);
+    assert_eq!(handle.presence(), Presence::Lost("gone"));
+    assert_eq!(s.retry(&"a"), Ok(()), "lost for the pool as for the handle");
+}
+
+#[test]
+fn only_an_entry_whose_own_load_has_a_main_stage_needs_the_main_thread() {
+    let (mut s, _) = session();
+    let log = Log::default();
+    // One kind: the entry that loads on a worker (a plugin served out of
+    // process) passes with no main thread, the one with a main stage does not.
+    assert!(s.pool(declare(&stub("served", How::Worker, &log))).is_ok());
+    assert_eq!(
+        s.pool(declare(&stub("in-process", How::Main, &log))),
+        Err(PoolError::NeedsMainThread("in-process"))
+    );
+    assert_eq!(state(&s, "in-process"), None);
+}
+
+#[test]
+fn a_panic_in_a_main_stage_fails_its_entry_and_not_the_update() {
+    struct Panics;
+    impl PoolEntry for Panics {
+        type Identity = ();
+        type Loaded = ();
+        type Handle = ();
+        fn identity(&self) {}
+        fn load(&self) -> Load<()> {
+            Load::on_worker_then_main(|| Ok(()), |(), _main| panic!("the plugin aborted"))
+        }
+        fn handle(_: &(), _: &Life) {}
+    }
+    let (s, spawned) = session();
+    let mut s = with_main_thread(s);
+    s.pool(Declared::new("a", Panics)).unwrap();
+    spawned.run_all();
+    let _ = s.update();
+    let (mut s, (), _) = on_main(s, |s, main| s.pool_main_stages(main));
+    assert_eq!(
+        events(&mut s),
+        [(
+            "a",
+            "failed: a session job panicked: the plugin aborted".to_owned()
+        )]
+    );
+}
+
+#[test]
+fn a_key_joining_a_shared_load_already_waiting_for_the_main_thread_waits_with_it() {
+    let (s, spawned) = session();
+    let mut s = with_main_thread(s);
+    let log = Log::default();
+    let first = stub("a", How::Main, &log);
+    let second = Stub {
+        name: "b",
+        ..first.clone()
+    };
+    s.pool(Declared::shared("a", first.clone())).unwrap();
+    spawned.run_all();
+    let _ = s.update();
+    assert_eq!(state(&s, "a").as_deref(), Some("waiting-for-main"));
+    s.pool((Declared::shared("a", first), Declared::shared("b", second)))
+        .unwrap();
+    assert_eq!(
+        state(&s, "b").as_deref(),
+        Some("waiting-for-main"),
+        "joined it"
+    );
+    assert!(spawned.take().is_empty(), "no second worker");
+    let (mut s, (), _) = on_main(s, |s, main| s.pool_main_stages(main));
+    assert_eq!(
+        events(&mut s),
+        [("a", "loaded".to_owned()), ("b", "loaded".to_owned())]
+    );
+    assert!(Arc::ptr_eq(
+        &made(&s, "a").unwrap(),
+        &made(&s, "b").unwrap()
+    ));
+    assert_eq!(log.count("main a"), 1, "the main stage ran once");
+}
+
+#[test]
+fn a_shared_key_whose_identity_changes_mid_flight_leaves_the_shared_load_and_gets_its_own() {
+    let (mut s, spawned) = session();
+    let log = Log::default();
+    let first = stub("a", How::Worker, &log);
+    let second = Stub {
+        name: "b",
+        ..first.clone()
+    };
+    s.pool((
+        Declared::shared("a", first.clone()),
+        Declared::shared("b", second.clone()),
+    ))
+    .unwrap();
+    let changed = Stub {
+        version: 2,
+        ..second
+    };
+    s.pool((Declared::shared("a", first), Declared::shared("b", changed)))
+        .unwrap();
+    let jobs = spawned.take();
+    assert_eq!(jobs.len(), 2, "the shared load, and b's own");
+    for job in jobs {
+        job.run();
+    }
+    assert_eq!(
+        events(&mut s),
+        [("a", "loaded".to_owned()), ("b", "loaded".to_owned())]
+    );
+    assert_eq!(made(&s, "a").unwrap().value, 1);
+    assert_eq!(made(&s, "b").unwrap().value, 2);
+}
+
+#[test]
+fn a_loaded_value_its_kind_reads_as_lost_is_not_copied_to_a_key_that_shares_its_identity() {
+    let (mut s, spawned) = session();
+    let log = Log::default();
+    let entry = stub("a", How::Worker, &log);
+    s.pool(Declared::shared("a", entry.clone())).unwrap();
+    spawned.run_all();
+    let _ = events(&mut s);
+    entry.lost.store(true, Ordering::SeqCst);
+    let again = Stub {
+        name: "b",
+        lost: Arc::default(),
+        ..entry.clone()
+    };
+    s.pool((Declared::shared("a", entry), Declared::shared("b", again)))
+        .unwrap();
+    assert_eq!(spawned.take().len(), 1, "b loads for itself");
+}
+
+/// A stage dropped off the main thread: its output must not drop there.
+fn stage(log: &Log, defer: Option<crate::pool::entry::Defer>) -> crate::pool::entry::MainStage {
+    crate::pool::entry::MainStage::new(
+        Output {
+            log: log.clone(),
+            name: "a",
+        },
+        |_output, _main| Ok(1_u32),
+    )
+    .deferring(defer)
+}
+
+#[test]
+fn a_stage_dropped_off_the_main_thread_with_no_collector_leaks_its_output_and_counts_it() {
+    let log = Log::default();
+    let before = crate::stranded_loads();
+    drop(stage(&log, None));
+    assert_eq!(crate::stranded_loads(), before + 1);
+    assert_eq!(log.count("drop output a"), 0, "not dropped here");
+}
+
+#[cfg(feature = "plugin")]
+#[test]
+fn a_stage_dropped_off_the_main_thread_hands_its_output_to_the_collector_which_drops_it_on_main() {
+    let log = Log::default();
+    let (work, handle) = tutti_plugin_types::MainWork::new();
+    let defer: crate::pool::entry::Defer = Arc::new(move |discard| handle.defer(discard));
+    drop(stage(&log, Some(defer)));
+    assert_eq!(
+        log.count("drop output a"),
+        0,
+        "not dropped where it was let go"
+    );
+    let main = thread::spawn(move || {
+        let marker = tutti_fixtures::main_thread();
+        assert_eq!(work.run(marker), 1);
+        thread::current().id()
+    })
+    .join()
+    .unwrap();
+    assert_eq!(log.thread_of("drop output a"), main);
+}
+
+fn session_with_pending_output(queued: bool, log: &Log) -> Session {
+    let (s, spawned) = session();
+    let mut s = with_main_thread(s);
+    s.pool(declare(&stub("a", How::Main, log))).unwrap();
+    spawned.run_all();
+    if queued {
+        let _ = s.update(); // the output lands in the pool's main queue
+    }
+    s
+}
+
+#[test]
+fn a_session_dropped_off_the_main_thread_leaks_the_output_waiting_in_the_pool_and_in_the_jobs_channel()
+ {
+    for queued in [true, false] {
+        let log = Log::default();
+        let s = session_with_pending_output(queued, &log);
+        let before = stranded_total();
+        drop(s);
+        assert_eq!(stranded_total(), before + 1, "queued: {queued}");
+        assert_eq!(log.count("drop output a"), 0, "queued: {queued}");
+    }
 }
