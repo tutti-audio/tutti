@@ -309,10 +309,21 @@ impl<T: Send> RingWriter<T> {
     /// [`vacant`](Self::vacant) first. A panic in the iterator publishes the
     /// values already written.
     pub fn push_iter(&mut self, values: impl IntoIterator<Item = T>) -> usize {
-        struct Publish<'a, T>(&'a mut RingWriter<T>);
+        /// Counts the values written in a local, and on drop (a panic in the
+        /// iterator included) advances the writer's head past them and
+        /// publishes it.
+        struct Publish<'a, T> {
+            writer: &'a mut RingWriter<T>,
+            done: u64,
+        }
         impl<T> Drop for Publish<'_, T> {
             fn drop(&mut self) {
-                self.0.shared.head.0.store(self.0.head, Ordering::Release);
+                self.writer.head += self.done;
+                self.writer
+                    .shared
+                    .head
+                    .0
+                    .store(self.writer.head, Ordering::Release);
             }
         }
         if self.shared.reader_gone.load(Ordering::Acquire) {
@@ -321,18 +332,20 @@ impl<T: Send> RingWriter<T> {
         // `u64::MAX` always refreshes the cached tail: one `Acquire` load
         // for the whole run.
         let room = self.room(u64::MAX);
-        let writer = Publish(self);
-        let mut at = writer.0.shared.start(writer.0.head);
-        let mut taken = 0;
+        let mut at = self.shared.start(self.head);
+        let mut run = Publish {
+            writer: self,
+            done: 0,
+        };
         for value in values.into_iter().take(room as usize) {
-            // SAFETY: `taken < room` slots are free (see `push`), and this is
-            // the only writer; the publish below follows every write.
-            unsafe { writer.0.shared.slots[at].write(value) };
-            at = writer.0.shared.next(at);
-            taken += 1;
-            writer.0.head += 1;
+            // SAFETY: `done < room` slots are free (see `push`), and this is
+            // the only writer; the head is published on drop, after every
+            // write.
+            unsafe { run.writer.shared.slots[at].write(value) };
+            at = run.writer.shared.next(at);
+            run.done += 1;
         }
-        taken
+        run.done as usize
     }
 
     /// How many more values fit now: at least this many, more if the reader
@@ -453,24 +466,38 @@ impl<T: Send> RingReader<T> {
     /// publish, and returns how many it took. `f` may panic: the values it was
     /// handed stay taken.
     pub fn pop_each(&mut self, max: usize, mut f: impl FnMut(T)) -> usize {
-        struct Publish<'a, T>(&'a mut RingReader<T>);
+        /// Counts the values handed out in a local, and on drop (a panic in
+        /// `f` included) advances the reader's tail past them and publishes it.
+        struct Publish<'a, T> {
+            reader: &'a mut RingReader<T>,
+            done: u64,
+        }
         impl<T> Drop for Publish<'_, T> {
             fn drop(&mut self) {
-                self.0.shared.tail.0.store(self.0.tail, Ordering::Release);
+                self.reader.tail += self.done;
+                self.reader
+                    .shared
+                    .tail
+                    .0
+                    .store(self.reader.tail, Ordering::Release);
             }
         }
-        let take = self.available(max as u64).min(max as u64) as usize;
-        let reader = Publish(self);
-        let mut at = reader.0.shared.start(reader.0.tail);
-        for _ in 0..take {
-            // SAFETY: `tail < head` (published), and this is the only reader;
-            // the tail is advanced before `f` runs and published on drop.
-            let value = unsafe { reader.0.shared.slots[at].take() };
-            at = reader.0.shared.next(at);
-            reader.0.tail += 1;
+        let take = self.available(max as u64).min(max as u64);
+        let mut at = self.shared.start(self.tail);
+        let mut run = Publish {
+            reader: self,
+            done: 0,
+        };
+        while run.done < take {
+            // SAFETY: `tail + done < head` (published), and this is the only
+            // reader; the count is advanced before `f` runs and published on
+            // drop.
+            let value = unsafe { run.reader.shared.slots[at].take() };
+            at = run.reader.shared.next(at);
+            run.done += 1;
             f(value);
         }
-        take
+        take as usize
     }
 
     /// Takes and drops up to `n` values; returns how many it took.
