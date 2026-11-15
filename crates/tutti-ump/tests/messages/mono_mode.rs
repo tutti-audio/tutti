@@ -25,9 +25,16 @@ fn the_channel_count_is_the_top_seven_bits_of_the_value() {
     for count in 0..=127u32 {
         for low in [0, 1, 0x00FF_FFFF, 0x01FF_FFFF] {
             let read = MonoChannels::from_value(cc126_value(count << 25 | low));
-            let want = u8::try_from(count).ok().and_then(MonoChannels::new);
-            assert_eq!(read, want, "count {count}, low bits {low:#x}");
-            assert_eq!(read.is_some(), count <= 16);
+            // M = 1 to 16 channels, 0 for every voice, and nothing past 16.
+            let want = match count {
+                0..=16 => Some(count as u8),
+                _ => None,
+            };
+            assert_eq!(
+                read.map(MonoChannels::get),
+                want,
+                "count {count}, low bits {low:#x}"
+            );
         }
     }
 }

@@ -286,7 +286,7 @@ impl Connection {
     }
 
     fn start_blocks(&mut self, now: Instant) -> Action {
-        if self.endpoint.declared_blocks == 0 {
+        if self.endpoint.declared_blocks.get() == 0 {
             return self.settle(Ending::Negotiated);
         }
         self.step = Step::Blocks {
@@ -329,10 +329,10 @@ impl Connection {
             }
             _ => {}
         }
-        let every = if self.endpoint.declared_blocks >= 32 {
+        let every = if self.endpoint.declared_blocks.get() >= 32 {
             u32::MAX
         } else {
-            (1u32 << self.endpoint.declared_blocks) - 1
+            (1u32 << self.endpoint.declared_blocks.get()) - 1
         };
         if info & every == every && infos.is_none() {
             infos = Some(now);

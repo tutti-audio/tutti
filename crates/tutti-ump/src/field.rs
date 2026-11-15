@@ -103,7 +103,7 @@ macro_rules! bits {
 
 // A field with a stated inclusive range that is not a bit width.
 macro_rules! bounded {
-    ($(#[$doc:meta])* $name:ident, $repr:ty, $min:expr, $max:expr) => {
+    (@core $(#[$doc:meta])* $name:ident, $repr:ty, $min:expr, $max:expr) => {
         $(#[$doc])*
         #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $name($repr);
@@ -136,7 +136,17 @@ macro_rules! bounded {
             pub const fn get(self) -> $repr {
                 self.0
             }
+        }
+    };
+    // A type whose out-of-range wire value is another type's (`Reserved`):
+    // `get` is always in range.
+    ($(#[$doc:meta])* $name:ident, $repr:ty, $min:expr, $max:expr, strict) => {
+        bounded!(@core $(#[$doc])* $name, $repr, $min, $max);
+    };
+    ($(#[$doc:meta])* $name:ident, $repr:ty, $min:expr, $max:expr) => {
+        bounded!(@core $(#[$doc])* $name, $repr, $min, $max);
 
+        impl $name {
             // The value as the wire sent it, in range or not: a reserved value
             // is kept so the message re-encodes exactly.
             #[allow(dead_code)] // `SharpsFlats` has no reserved value to keep.
@@ -301,8 +311,9 @@ macro_rules! bounded_conversions {
 bounded!(
     /// How many Function Blocks an Endpoint Info Notification declares
     /// (`0..=32`, M2-104 §7.1.2). A reserved count (`33..=127`) read from the
-    /// wire is kept, so such a message re-encodes exactly.
-    FunctionBlockCount, u8, 0, 32
+    /// wire is a [`FunctionBlocks::Reserved`](crate::FunctionBlocks::Reserved),
+    /// not a value of this type.
+    FunctionBlockCount, u8, 0, 32, strict
 );
 bounded_conversions!(FunctionBlockCount, u8);
 
@@ -313,9 +324,10 @@ impl FunctionBlockCount {
 
 bounded!(
     /// The Delta Clockstamp ticks per quarter note (`1..=65535`, M2-104
-    /// §7.2.3.1); `0` is reserved. A zero read from the wire is kept, so such a
-    /// message re-encodes exactly.
-    TicksPerQuarterNote, u16, 1, 65535
+    /// §7.2.3.1); `0` is reserved. A zero read from the wire is a
+    /// [`Utility::ReservedTicksPerQuarterNote`](crate::Utility::ReservedTicksPerQuarterNote),
+    /// not a value of this type.
+    TicksPerQuarterNote, u16, 1, 65535, strict
 );
 bounded_conversions!(TicksPerQuarterNote, u16);
 

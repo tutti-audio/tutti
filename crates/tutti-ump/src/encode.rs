@@ -4,9 +4,9 @@
 use crate::field::U7;
 use crate::message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, BlockSelect, ChordName, ChordPitch,
-    Data128, Direction, Flex, FlexAddress, FlexTextKind, Form, KeySignature, Letter, Message,
-    Midi1Port, Protocol, Stream, StreamConfig, Sysex7Packet, SysexStatus, System, UiHint, Utility,
-    Voice1, Voice2,
+    Data128, Direction, Flex, FlexAddress, FlexTextKind, Form, FunctionBlocks, KeySignature,
+    Letter, Message, Midi1Port, Protocol, Stream, StreamConfig, Sysex7Packet, SysexStatus, System,
+    UiHint, Utility, Voice1, Voice2,
 };
 use crate::{MidiGroup, Ump};
 
@@ -60,6 +60,7 @@ fn utility(u: Utility) -> u32 {
         Utility::JrClock(t) => (0x1 << 20) | u32::from(t),
         Utility::JrTimestamp(t) => (0x2 << 20) | u32::from(t),
         Utility::TicksPerQuarterNote(n) => (0x3 << 20) | u32::from(n.get()),
+        Utility::ReservedTicksPerQuarterNote(r) => (0x3 << 20) | u32::from(r.get()),
         Utility::DeltaClockstamp(t) => (0x4 << 20) | t.get(),
     }
 }
@@ -180,6 +181,7 @@ fn attribute(a: Attribute) -> (u32, u32) {
         Attribute::Manufacturer(d) => (0x01, u32::from(d)),
         Attribute::Profile(d) => (0x02, u32::from(d)),
         Attribute::Pitch(d) => (0x03, u32::from(d)),
+        Attribute::Articulation(a) => (u32::from(a.kind()), u32::from(a.data())),
         Attribute::Reserved(r) => (u32::from(r.kind()), u32::from(r.data())),
     }
 }
@@ -450,7 +452,10 @@ fn stream(s: Stream) -> [u32; 4] {
                 | (u32::from(e.version.major) << 8)
                 | u32::from(e.version.minor),
             (u32::from(e.static_function_blocks) << 31)
-                | (u32::from(e.function_blocks.get()) << 24)
+                | (u32::from(match e.function_blocks {
+                    FunctionBlocks::Count(count) => count.get(),
+                    FunctionBlocks::Reserved(r) => r.get(),
+                }) << 24)
                 | (u32::from(e.midi2) << 9)
                 | (u32::from(e.midi1) << 8)
                 | (u32::from(e.rx_jr) << 1)

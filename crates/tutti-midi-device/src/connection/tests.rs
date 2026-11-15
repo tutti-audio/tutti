@@ -470,7 +470,7 @@ fn in_blocks_declaring(t0: Instant, n: u8, is_static: bool) -> Connection {
         stream(Stream::EndpointInfo(tutti_ump::EndpointInfo {
             version: UMP_VERSION,
             static_function_blocks: is_static,
-            function_blocks: FunctionBlockCount::new(n).unwrap(),
+            function_blocks: FunctionBlockCount::new(n).unwrap().into(),
             midi2: true,
             midi1: true,
             rx_jr: false,

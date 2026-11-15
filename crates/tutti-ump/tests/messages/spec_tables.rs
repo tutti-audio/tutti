@@ -253,7 +253,7 @@ fn the_version_is_major_then_minor() {
         Message::Stream(Stream::EndpointInfo(EndpointInfo {
             version,
             static_function_blocks: false,
-            function_blocks: FunctionBlockCount::of(0),
+            function_blocks: FunctionBlockCount::of(0).into(),
             midi2: false,
             midi1: false,
             rx_jr: false,
@@ -269,7 +269,7 @@ fn endpoint_info_flags_each_alone() {
     let none = EndpointInfo {
         version: UmpVersion { major: 1, minor: 1 },
         static_function_blocks: false,
-        function_blocks: FunctionBlockCount::of(0),
+        function_blocks: FunctionBlockCount::of(0).into(),
         midi2: false,
         midi1: false,
         rx_jr: false,
@@ -291,7 +291,7 @@ fn endpoint_info_flags_each_alone() {
     case(
         0x0500_0000,
         EndpointInfo {
-            function_blocks: FunctionBlockCount::of(5),
+            function_blocks: FunctionBlockCount::of(5).into(),
             ..none
         },
     );

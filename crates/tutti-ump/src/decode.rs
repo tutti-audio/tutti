@@ -24,14 +24,14 @@ use crate::message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockFilter,
     BlockSelect, ChordBass, ChordName, ChordPitch, ChordType, Data128, DeviceIdentity, Direction,
     DiscoveryFilter, EndpointInfo, Flex, FlexAddress, FlexTextKind, Form, FunctionBlockInfo,
-    KeySignature, Letter, Message, Metronome, Midi1Port, MixedDataHeader, PerNoteManagement,
-    Protocol, Stream, StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus, System, TimeSignature,
-    UiHint, UmpVersion, Unknown, Utility, Voice1, Voice2,
+    FunctionBlocks, KeySignature, Letter, Message, Metronome, Midi1Port, MixedDataHeader,
+    PerNoteManagement, Protocol, Stream, StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus,
+    System, TimeSignature, UiHint, UmpVersion, Unknown, Utility, Voice1, Voice2,
 };
 use crate::{
-    BendValue, CCNumber, ControlValue, ManufacturerId, MdsChunk, MdsChunkSize, MdsChunks,
-    MdsIdentity, MidiChannel, MidiGroup, NoteVelocity, RegisteredPerNoteController, Reserved,
-    ReservedAttribute, Ump,
+    ArticulationAttribute, BendValue, CCNumber, ControlValue, ManufacturerId, MdsChunk,
+    MdsChunkSize, MdsChunks, MdsIdentity, MidiChannel, MidiGroup, NoteVelocity,
+    RegisteredPerNoteController, Reserved, ReservedAttribute, Ump,
 };
 
 impl Ump {
@@ -128,9 +128,10 @@ fn utility(w0: u32) -> Option<Utility> {
         0x0 => Some(Utility::Noop),
         0x1 => Some(Utility::JrClock(low16)),
         0x2 => Some(Utility::JrTimestamp(low16)),
-        0x3 => Some(Utility::TicksPerQuarterNote(TicksPerQuarterNote::wire(
-            low16,
-        ))),
+        0x3 => Some(match TicksPerQuarterNote::new(low16) {
+            Some(ticks) => Utility::TicksPerQuarterNote(ticks),
+            None => Utility::ReservedTicksPerQuarterNote(Reserved::wire(0)),
+        }),
         0x4 => Some(Utility::DeltaClockstamp(DeltaTicks::masked(w0 & 0xf_ffff))),
         _ => None,
     }
@@ -282,6 +283,7 @@ fn attribute(kind: u8, data: u16) -> Attribute {
         0x01 => Attribute::Manufacturer(data),
         0x02 => Attribute::Profile(data),
         0x03 => Attribute::Pitch(data),
+        0x10..=0x1F => Attribute::Articulation(ArticulationAttribute::wire(kind, data)),
         _ => Attribute::Reserved(ReservedAttribute::wire(kind, data)),
     }
 }
@@ -451,8 +453,7 @@ fn flex(w: [u32; 4]) -> Option<Flex> {
             }))
         }
         (0x00, 0x02) if complete && address == FlexAddress::Group => {
-            // Accent parts of a shape §7.5.5 does not have are no Set Metronome.
-            let accents = BarAccents::from_parts([byte(w[1], 2), byte(w[1], 1), byte(w[1], 0)])?;
+            let accents = BarAccents::wire([byte(w[1], 2), byte(w[1], 1), byte(w[1], 0)]);
             Some(Flex::SetMetronome(Metronome {
                 clocks_per_click: byte(w[1], 3),
                 accents,
@@ -548,7 +549,10 @@ fn stream(w: [u32; 4]) -> Option<Stream> {
         0x01 if complete => Some(Stream::EndpointInfo(EndpointInfo {
             version,
             static_function_blocks: flag(w[1], 31),
-            function_blocks: FunctionBlockCount::wire(byte(w[1], 3) & 0x7f),
+            function_blocks: match FunctionBlockCount::new(byte(w[1], 3) & 0x7f) {
+                Some(count) => FunctionBlocks::Count(count),
+                None => FunctionBlocks::Reserved(Reserved::wire(byte(w[1], 3) & 0x7f)),
+            },
             midi2: flag(w[1], 9),
             midi1: flag(w[1], 8),
             rx_jr: flag(w[1], 1),

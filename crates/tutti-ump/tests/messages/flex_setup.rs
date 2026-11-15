@@ -85,19 +85,22 @@ fn part(n: u8) -> NonZeroU8 {
 /// its beats in Part 1 and zero in Parts 2 and 3; a bar divides in up to three
 /// parts, as 5/4 in 3 + 2 and 9/4 in 3 + 3 + 3 or 4 + 4 + 1; and the parts add
 /// up to the beats of the bar. A shape with Part 1 zero, or a part after a zero
-/// part, is no Set Metronome.
+/// part, is read as `BarAccents::Reserved`, which keeps the rest of the message
+/// and the bytes, and which no sender builds.
 /// Spec: m2-104/7.5.5#5, m2-104/7.5.5#6, m2-104/7.5.5#7, m2-104/7.5.5#8
 #[test]
 fn the_bar_accents_are_the_parts_of_the_bar() {
     let word = |a: u8, b: u8, c: u8| [head(2, 0x0002), u32::from_be_bytes([24, a, b, c]), 0, 0];
     let accents = |a: u8, b: u8, c: u8| match Ump(word(a, b, c)).decode() {
-        Ok(Message::Flex(_, Flex::SetMetronome(m))) => Some(m.accents),
-        Err(_) => None,
+        Ok(Message::Flex(_, Flex::SetMetronome(m))) => {
+            assert_eq!(m.clocks_per_click, 24);
+            m.accents
+        }
         other => panic!("{other:?}"),
     };
     // 6/8 undivided: Part 1 is the six beats, Parts 2 and 3 zero.
     let undivided = BarAccents::Undivided(part(6));
-    assert_eq!(accents(6, 0, 0), Some(undivided));
+    assert_eq!(accents(6, 0, 0), undivided);
     assert_eq!((undivided.parts(), undivided.beats()), ([6, 0, 0], 6));
     // 5/4 as 3 + 2; 9/4 as 3 + 3 + 3 and as 4 + 4 + 1.
     for (parts, accent, beats) in [
@@ -106,7 +109,7 @@ fn the_bar_accents_are_the_parts_of_the_bar() {
         ([4, 4, 1], BarAccents::Three(part(4), part(4), part(1)), 9),
     ] {
         let [a, b, c] = parts;
-        assert_eq!(accents(a, b, c), Some(accent));
+        assert_eq!(accents(a, b, c), accent);
         assert_eq!((accent.parts(), accent.beats()), (parts, beats));
         let metronome = Metronome {
             clocks_per_click: 24,
@@ -121,7 +124,16 @@ fn the_bar_accents_are_the_parts_of_the_bar() {
     }
     // No Part 1, or a part after a zero part.
     for (a, b, c) in [(0, 0, 0), (0, 2, 0), (0, 0, 2), (0, 2, 3), (3, 0, 2)] {
-        assert_eq!(accents(a, b, c), None, "{a} {b} {c}");
+        let read = accents(a, b, c);
+        assert!(matches!(read, BarAccents::Reserved(r) if r.parts() == [a, b, c]));
         assert_eq!(BarAccents::from_parts([a, b, c]), None);
+        // The clocks and the subdivisions are still there, and the packet
+        // re-encodes to the words it came from.
+        let packet = Ump([word(a, b, c)[0], word(a, b, c)[1], 0x0200_0000, 0]);
+        let Ok(message @ Message::Flex(_, Flex::SetMetronome(m))) = packet.decode() else {
+            panic!("{a} {b} {c}")
+        };
+        assert_eq!((m.clocks_per_click, m.subdivision_1), (24, 2));
+        assert_eq!(Ump::from(message), packet);
     }
 }

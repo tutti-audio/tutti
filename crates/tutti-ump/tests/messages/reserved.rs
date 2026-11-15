@@ -15,10 +15,10 @@ use tutti_ump::ControlValue;
 use tutti_ump::{
     Accidental, Address, Alteration, AlterationKind, Attribute, BlockSelect, ChordBass, ChordName,
     ChordPitch, ChordType, Direction, FirstGroup, Flex, FlexAddress, FlexTextKind,
-    FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, GroupSpan, KeySignature, Letter,
-    Message, Midi1Port, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Protocol,
-    RegisteredPerNoteController, SharpsFlats, Stream, StreamConfig, U4, UiHint, Ump, Unknown,
-    Utility, Voice2,
+    FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupSpan,
+    KeySignature, Letter, Message, Midi1Port, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
+    Protocol, RegisteredPerNoteController, SharpsFlats, Stream, StreamConfig, U4, UiHint, Ump,
+    Unknown, Utility, Voice2,
 };
 
 /// `dirty` decodes to the message `clean` encodes, and re-encoding gives
@@ -282,10 +282,15 @@ fn reserved_values_are_kept() {
     let n = |v| NoteNumber::new(v).unwrap();
 
     // A Delta Clockstamp Ticks Per Quarter Note of 0 is reserved (§7.2.3.1).
-    let Message::Utility(Utility::TicksPerQuarterNote(zero)) = read([0x0030_0000, 0, 0, 0]) else {
-        panic!("a Ticks Per Quarter Note")
+    let Message::Utility(Utility::ReservedTicksPerQuarterNote(zero)) = read([0x0030_0000, 0, 0, 0])
+    else {
+        panic!("a reserved Ticks Per Quarter Note")
     };
     assert_eq!(zero.get(), 0);
+    assert!(matches!(
+        read([0x0030_01E0, 0, 0, 0]),
+        Message::Utility(Utility::TicksPerQuarterNote(t)) if t.get() == 480
+    ));
     // Attribute types 4 to 255 are reserved (Table 8): the data is kept too.
     for (words, on, kind, data) in [
         ([0x4192_3C04u32, 0xABCD_1234, 0, 0], true, 4u8, 0x1234u16),
@@ -371,8 +376,23 @@ fn reserved_values_are_kept() {
         else {
             panic!("{count}")
         };
-        assert_eq!(info.function_blocks.get(), count);
+        let FunctionBlocks::Reserved(reserved) = info.function_blocks else {
+            panic!("{count} is held as {:?}", info.function_blocks)
+        };
+        assert_eq!(reserved.get(), count);
+        assert_eq!(info.function_blocks.count(), None);
         assert!(FunctionBlockCount::new(count).is_none());
+    }
+    for count in [0u8, 1, 32] {
+        let Message::Stream(Stream::EndpointInfo(info)) =
+            read([0xF001_0101, u32::from(count) << 24, 0, 0])
+        else {
+            panic!("{count}")
+        };
+        assert_eq!(
+            info.function_blocks.count().map(FunctionBlockCount::get),
+            Some(count)
+        );
     }
     // Stream Configuration: protocols other than 1 and 2.
     for protocol in [0u8, 3, 0xFF] {

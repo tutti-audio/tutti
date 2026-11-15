@@ -8,8 +8,9 @@ use crate::field::{
     SharpsFlats, TicksPerQuarterNote, U4, U7, U14,
 };
 use crate::{
-    BendValue, CCNumber, ControlValue, ManufacturerId, MdsChunk, MdsChunkSize, MdsChunks,
-    MdsIdentity, MidiChannel, MidiGroup, NoteVelocity, Reserved, ReservedAttribute, Rpn, Ump,
+    ArticulationAttribute, BendValue, CCNumber, ControlValue, ManufacturerId, MdsChunk,
+    MdsChunkSize, MdsChunks, MdsIdentity, MidiChannel, MidiGroup, NoteVelocity, Reserved,
+    ReservedAccents, ReservedAttribute, Rpn, Ump,
 };
 
 /// One UMP, decoded.
@@ -71,9 +72,10 @@ pub enum Utility {
     JrClock(u16),
     /// The time of the following messages, in ticks of 1/31250 s.
     JrTimestamp(u16),
-    /// Delta Clockstamp ticks per quarter note; a `0` read from the wire is
-    /// reserved and kept.
+    /// Delta Clockstamp ticks per quarter note.
     TicksPerQuarterNote(TicksPerQuarterNote),
+    /// A Ticks Per Quarter Note of the reserved `0`, as read from the wire.
+    ReservedTicksPerQuarterNote(Reserved),
     /// Ticks since the last event.
     DeltaClockstamp(DeltaTicks),
 }
@@ -449,7 +451,8 @@ pub struct MixedDataHeader {
 // ---- MIDI 2.0 channel voice ------------------------------------------------
 
 /// A Note On or Note Off attribute (§7.4.14). An attribute type of `0x00`
-/// carries no data, and `0x04` to `0xFF` are reserved.
+/// carries no data. Types `0x10` to `0x1F` are the articulation attributes of
+/// the M2-123 Profile; the rest of `0x04` to `0xFF` are reserved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Attribute {
     /// Type `0x00`.
@@ -460,9 +463,12 @@ pub enum Attribute {
     Profile(u16),
     /// Type `0x03`: Q7.9 pitch in half-tone units.
     Pitch(u16),
-    /// A type M2-104 reserves (`0x04` to `0xFF`), with its data: read from the
-    /// wire, or written by a profile's typed attribute (the articulation
-    /// types of M2-123 are `0x10` to `0x1F`).
+    /// Types `0x10` to `0x1F`: an articulation of the M2-123 Profile, which
+    /// [`NoteArticulation`](crate::NoteArticulation) and
+    /// [`NoteOffArticulation`](crate::NoteOffArticulation) write.
+    Articulation(ArticulationAttribute),
+    /// A type neither M2-104 nor a Profile this crate types defines, with its
+    /// data: read from the wire, and written by no sender.
     Reserved(ReservedAttribute),
 }
 
@@ -1000,7 +1006,8 @@ pub struct TimeSignature {
 /// Parts 2 and 3; a bar divided in two has Part 3 zero; a part is never zero
 /// before one that is not. The variants hold exactly those shapes, so the
 /// message cannot be written with a part after a zero part, or an undivided
-/// bar with a second part.
+/// bar with a second part. A packet of another shape is read as
+/// [`Reserved`](Self::Reserved), which only the decoder builds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BarAccents {
     /// The bar is not divided: Part 1 is the bar's beat count.
@@ -1009,6 +1016,9 @@ pub enum BarAccents {
     Two(NonZeroU8, NonZeroU8),
     /// The bar is divided in three, like 3 + 3 + 3 or 4 + 4 + 1 in 9/4.
     Three(NonZeroU8, NonZeroU8, NonZeroU8),
+    /// A shape §7.5.5 does not have, as read from the wire: Part 1 zero, or a
+    /// part after a zero part.
+    Reserved(ReservedAccents),
 }
 
 impl BarAccents {
@@ -1035,6 +1045,7 @@ impl BarAccents {
             Self::Undivided(a) => [a.get(), 0, 0],
             Self::Two(a, b) => [a.get(), b.get(), 0],
             Self::Three(a, b, c) => [a.get(), b.get(), c.get()],
+            Self::Reserved(r) => r.parts(),
         }
     }
 
@@ -1051,6 +1062,15 @@ impl BarAccents {
             (Some(a), Some(b), None) => Some(Self::Two(a, b)),
             (Some(a), Some(b), Some(c)) => Some(Self::Three(a, b, c)),
             _ => None,
+        }
+    }
+
+    /// The accents of the three fields as the wire carried them: a shape
+    /// §7.5.5 does not have is kept as [`Reserved`](Self::Reserved).
+    pub(crate) const fn wire(parts: [u8; 3]) -> Self {
+        match Self::from_parts(parts) {
+            Some(accents) => accents,
+            None => Self::Reserved(ReservedAccents::wire(parts)),
         }
     }
 }
@@ -1267,6 +1287,34 @@ impl UmpVersion {
     }
 }
 
+/// The Function Block count of an Endpoint Info Notification: `0..=32`, or a
+/// reserved count (`33..=127`) as read from the wire, which only the decoder
+/// builds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FunctionBlocks {
+    /// A count M2-104 defines.
+    Count(FunctionBlockCount),
+    /// A reserved count, as read.
+    Reserved(Reserved),
+}
+
+impl FunctionBlocks {
+    /// The count, or `None` for a reserved one.
+    #[must_use]
+    pub const fn count(self) -> Option<FunctionBlockCount> {
+        match self {
+            Self::Count(count) => Some(count),
+            Self::Reserved(_) => None,
+        }
+    }
+}
+
+impl From<FunctionBlockCount> for FunctionBlocks {
+    fn from(count: FunctionBlockCount) -> Self {
+        Self::Count(count)
+    }
+}
+
 /// Which notifications an Endpoint Discovery asks for (§7.1.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DiscoveryFilter {
@@ -1291,7 +1339,7 @@ pub struct EndpointInfo {
     pub static_function_blocks: bool,
     /// How many Function Blocks: `0..=32` is defined, a `33..=127` read from
     /// the wire is reserved and kept.
-    pub function_blocks: FunctionBlockCount,
+    pub function_blocks: FunctionBlocks,
     /// Supports the MIDI 2.0 Protocol.
     pub midi2: bool,
     /// Supports the MIDI 1.0 Protocol.

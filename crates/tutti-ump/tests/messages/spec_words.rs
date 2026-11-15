@@ -716,7 +716,7 @@ fn stream_endpoint_info() {
         Message::Stream(Stream::EndpointInfo(EndpointInfo {
             version: UmpVersion { major: 1, minor: 1 },
             static_function_blocks: true,
-            function_blocks: FunctionBlockCount::of(3),
+            function_blocks: FunctionBlockCount::of(3).into(),
             midi2: true,
             midi1: true,
             rx_jr: true,
@@ -729,7 +729,7 @@ fn stream_endpoint_info() {
         Message::Stream(Stream::EndpointInfo(EndpointInfo {
             version: UmpVersion { major: 1, minor: 1 },
             static_function_blocks: false,
-            function_blocks: FunctionBlockCount::of(32),
+            function_blocks: FunctionBlockCount::of(32).into(),
             midi2: true,
             midi1: false,
             rx_jr: false,

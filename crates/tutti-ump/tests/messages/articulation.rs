@@ -647,3 +647,30 @@ fn attr(kind: u8, data: u16) -> Attribute {
         other => panic!("{other:?}"),
     }
 }
+
+/// The articulation types `0x10` to `0x1F` (M2-123 Table 15) are their own
+/// attribute, which an articulation writes and the decoder reads for the whole
+/// range; no other type is one, and `Attribute::Reserved` holds only what
+/// neither spec defines.
+#[test]
+fn an_articulation_is_an_articulation_attribute_and_no_other_type_is() {
+    let written = NoteArticulation::new(Articulation::NORMAL).to_attribute();
+    assert!(matches!(written, Attribute::Articulation(a) if a.kind() == 0x10));
+    for kind in 0..=255u8 {
+        let read = attr(kind, 0x1234);
+        match kind {
+            0x10..=0x1F => assert!(
+                matches!(read, Attribute::Articulation(a) if a.kind() == kind && a.data() == 0x1234),
+                "{kind:#x}: {read:?}"
+            ),
+            0x04..=0x0F | 0x20..=0xFF => assert!(
+                matches!(read, Attribute::Reserved(r) if r.kind() == kind),
+                "{kind:#x}: {read:?}"
+            ),
+            _ => assert!(!matches!(
+                read,
+                Attribute::Reserved(_) | Attribute::Articulation(_)
+            )),
+        }
+    }
+}

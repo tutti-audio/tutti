@@ -39,7 +39,9 @@ use winnow::combinator::{alt, cut_err, eof, fail, opt, peek, repeat};
 use winnow::error::{ContextError, ModalResult};
 use winnow::token::any;
 
-use tutti_ump::{Flex, Message, Stream, SysexStatus, Ump, Utility, split_stream};
+use tutti_ump::{
+    Flex, Message, Stream, SysexStatus, TicksPerQuarterNote, Ump, Utility, split_stream,
+};
 
 use super::{CLIP_FILE_MAGIC, ClipFileError, ParsedClip, property_exchange};
 use crate::Truncated;
@@ -74,8 +76,8 @@ enum Kind {
     Dcs(u32),
     /// The Null message, which restarts the delta count.
     Noop,
-    /// The DCTPQ and its ticks per quarter note.
-    Dctpq(u16),
+    /// The DCTPQ and its ticks per quarter note; `None` for the reserved 0.
+    Dctpq(Option<TicksPerQuarterNote>),
     StartOfClip,
     EndOfClip,
     /// Padding that says nothing of timing or structure: a JR message, or a
@@ -97,7 +99,8 @@ struct Packet {
 fn classify(ump: Ump) -> Packet {
     let kind = match ump.decode() {
         Ok(Message::Utility(Utility::DeltaClockstamp(ticks))) => Kind::Dcs(ticks.get()),
-        Ok(Message::Utility(Utility::TicksPerQuarterNote(ticks))) => Kind::Dctpq(ticks.get()),
+        Ok(Message::Utility(Utility::TicksPerQuarterNote(ticks))) => Kind::Dctpq(Some(ticks)),
+        Ok(Message::Utility(Utility::ReservedTicksPerQuarterNote(_))) => Kind::Dctpq(None),
         Ok(Message::Utility(Utility::Noop)) => Kind::Noop,
         Ok(Message::Utility(Utility::JrClock(_) | Utility::JrTimestamp(_))) => Kind::Pad,
         Err(_) if ump.message_type() == 0x0 => Kind::Pad,
@@ -263,7 +266,7 @@ fn fault_before_dctpq(input: Input<'_>) -> Fault {
     Fault::MissingDctpq
 }
 
-fn dctpq_after_gap(input: &mut Input<'_>) -> Res<(Gap, u16)> {
+fn dctpq_after_gap(input: &mut Input<'_>) -> Res<(Gap, Option<TicksPerQuarterNote>)> {
     (
         gap,
         any.verify_map(|p: Packet| match p.kind {
@@ -283,10 +286,10 @@ fn dctpq(input: &mut Input<'_>) -> Res<u16> {
     if before.dcs != Some(0) || before.ticks() != 0 {
         return halt(Fault::DctpqDelta).parse_next(input);
     }
-    if ticks == 0 {
-        return halt(Fault::ZeroDctpq).parse_next(input);
+    match ticks {
+        Some(ticks) => Ok(ticks.get()),
+        None => halt(Fault::ZeroDctpq).parse_next(input),
     }
-    Ok(ticks)
 }
 
 // ---- the configuration header ----------------------------------------------
