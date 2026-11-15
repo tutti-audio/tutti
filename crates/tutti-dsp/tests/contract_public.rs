@@ -13,7 +13,7 @@ use std::ops::Range;
 
 use tutti_dsp::contract::{FamilyCase, Figure, Hook, LtiCase, RecurrenceCase};
 use tutti_dsp::{
-    Cadence, Channels, Complex64, Family, Feed, Glide, Lti, Recurrence, Ring, Start, System,
+    Cadence, Channels, Complex64, Family, Glide, Inputs, Lti, Recurrence, Ring, Start, System,
     family_contract, recurrence_contract,
 };
 use tutti_types::BusTopology;
@@ -89,7 +89,7 @@ impl Recurrence for GainRecurrence {
         &self,
         gain: &Glide<f32>,
         _: &mut (),
-        feed: &Feed<'_>,
+        feed: &Inputs<'_>,
         output: &mut [&mut [f32]],
         frames: Range<usize>,
         _: usize,

@@ -3,7 +3,7 @@
 //! CPU-independent real FFT and the algorithms behind the built-in effect nodes: filters, dynamics,
 //! the partitioned convolver, delay lines, reverb, waveshapers and the export
 //! resampler. The analyzers (loudness, pitch, onsets, spectra, ...) are `tutti-measure`,
-//! built on this crate's FFT, windows and `StftGeometry` (whose refusals are `Error`).
+//! built on this crate's FFT, windows and `StftGeometry` (whose refusals are `StftError`).
 //!
 //! ## Effect algorithms
 //!
@@ -97,7 +97,7 @@
 //!   [`hinf_norm`](Lti::hinf_norm), with [`Complex64`]). A [`Recurrence`] runs a member:
 //!   its [`coefficients_into`](Recurrence::coefficients_into) asks for the coefficient point
 //!   of a member, its [`Approach`] (a [`Glide`]) moves the coefficients there, and its
-//!   [`run`](Recurrence::run) is the per-frame math over a [`Feed`] (the audio, a side-chain
+//!   [`run`](Recurrence::run) is the per-frame math over an [`Inputs`] (the audio, a side-chain
 //!   key, and up to [`MAX_LANES`] per-frame control lanes); [`Realized`] is the one runner of
 //!   them. A family whose state grows with its member is also [`Grows`]: its
 //!   [`reach`](Grows::reach) over a [`Reach`] (with a family's [`Domain`], [`MaxDecay`] for a
@@ -110,10 +110,10 @@
 //!   runs in, and the [`Biquad`] section they share.
 //! - **Dynamics** (`dynamics/`): the
 //!   gain curves ([`LimiterCurve`] and the `compute_*` functions); the lookahead limiter as a family ([`LimiterFamily`], run by
-//!   [`LimiterRecurrence`], its threshold and ceiling lanes of the [`Feed`], its lookahead
+//!   [`LimiterRecurrence`], its threshold and ceiling lanes of the [`Inputs`], its lookahead
 //!   the member's latency); the brickwall clipper as a family
 //!   ([`BrickwallFamily`], run by [`BrickwallRecurrence`], its ceiling a per-frame lane of
-//!   the [`Feed`]); and the compressor ([`CompressorFamily`], run by
+//!   the [`Inputs`]); and the compressor ([`CompressorFamily`], run by
 //!   [`CompressorRecurrence`], keyed, its threshold a lane, its makeup gliding over
 //!   [`GAIN_GLIDE`]) and the noise gate ([`GateFamily`], run by [`GateRecurrence`], its
 //!   range gliding likewise). Both read a [`KeySource`]: a side-chain bus or the signal itself.
@@ -143,7 +143,7 @@
 //!   plans and buffers.
 //! - **STFT vocabulary** (`stft/`): [`CosineWindow`] and the [`Window`] trait,
 //!   [`StftGeometry`] (window, hop, shape and rate, validated together), and [`Grid`]
-//!   with its typed indices; [`enum@Error`] and [`Result`] are what they refuse with.
+//!   with its typed indices; [`StftError`] is what they refuse with.
 //! - **Resampling** (`resample/`): [`WindowedSinc`], [`FftResampler`] (failing with a
 //!   [`ResampleError`]) and [`StreamingResampler`], sized by a [`ChunkSize`].
 //! - **Dither** (`dither/`): [`DitherNoise`] ([`DitherShape`]) and [`DitherSink`], the
@@ -189,6 +189,7 @@ mod spatial;
 mod stft;
 #[cfg(test)]
 mod testing;
+mod xorshift;
 
 pub use balance::balance_gains;
 pub use control::{COEFF_INTERVAL, LANES};
@@ -220,7 +221,7 @@ pub use filter::{
 pub use glide::{Glide, Lerp, Steps};
 pub use interp::cubic_hermite;
 pub use model::{
-    Approach, Cadence, Capacity, Channels, Domain, Effort, Family, Feed, Grows, Lti, MAX_LANES,
+    Approach, Cadence, Capacity, Channels, Domain, Effort, Family, Grows, Inputs, Lti, MAX_LANES,
     MaxDecay, MaxDecayError, Reach, Readout, Realized, Recurrence, Ring, Setup, Start, Step,
     System, TAIL_FLOOR,
 };
@@ -242,7 +243,7 @@ pub use reverb::freeverb::design::{FreeverbControls, FreeverbFamily};
 pub use reverb::freeverb::recurrence::{Freeverb, FreeverbRecurrence};
 pub use reverb::network::{
     Absorption, AllPass, AllPassForm, Band, Fdn, FirSummary, Full, Gains, Inline, Line,
-    MAX_CHANNELS, MAX_DENSE, MAX_LINES, MAX_STAGES, MAX_TAPS, Matrix, Modulation, Network,
+    LineModulation, MAX_CHANNELS, MAX_DENSE, MAX_LINES, MAX_STAGES, MAX_TAPS, Matrix, Network,
     NetworkCapacity, OutputMap, Stage, Tap, Taps, loop_gain, pre_delay_frames, rt60_from_gain,
 };
 pub use rustfft::num_complex::Complex64;
@@ -251,8 +252,9 @@ pub use spatial::{
     HRTF_LATENCY, HRTF_STEP, HrtfBinaural, HrtfBinauralError, MAX_PREPARED_RATE, MAX_SPHERE_RATE,
     MIN_SPHERE_RATE, SpeakerGeometryError, SpeakerLayout, VbapGains, VbapKernel,
 };
-pub use stft::error::{Error, Result};
+pub use stft::error::StftError;
 pub use stft::geometry::StftGeometry;
 pub use stft::grid::{BinCount, BinIndex, FrameCount, FrameIndex, Grid};
 pub use stft::window::{CosineWindow, Window};
 pub use waveshape::{ShapeKind, Shaper};
+pub use xorshift::Xorshift32;

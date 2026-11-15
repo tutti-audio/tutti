@@ -1,6 +1,6 @@
 use tutti_ump::{CCNumber, MidiChannel, U7};
 
-use super::super::testing::{OURS, PEER, channel, header_from};
+use super::super::testing::{channel, profile_table};
 use super::super::*;
 use CcFunction as F;
 
@@ -22,28 +22,7 @@ fn the_profile_id_is_7e_21_00_01_and_the_level() {
 }
 
 fn table_with(address: CiDeviceId, level: DefaultCcLevel, enabled: bool) -> ProfileTable {
-    let (mut peer, _, _) = {
-        let now = std::time::Instant::now();
-        let (p, a) = ProfileInitiator::new(Muid::of(OURS), Muid::of(PEER), now);
-        (p, a, now)
-    };
-    let header = header_from(PEER, address);
-    let profile = level.profile();
-    let channels = ProfileChannels::of(1);
-    peer.on_message(&Decoded::Message(if enabled {
-        CiMessage::ProfileEnabled {
-            header,
-            profile,
-            channels,
-        }
-    } else {
-        CiMessage::ProfileDisabled {
-            header,
-            profile,
-            channels,
-        }
-    }));
-    peer.table().clone()
+    profile_table(address, level.profile(), enabled)
 }
 
 #[test]

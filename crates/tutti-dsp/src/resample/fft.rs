@@ -19,9 +19,9 @@
 //! design are adapted from rubato 0.16.2 by Henrik Enquist (MIT); the notice is
 //! `LICENSE-rubato`, beside this file.
 
-use super::ResampleError;
+use super::{ResampleError, WindowedSinc};
+use crate::CosineWindow;
 use crate::fft::{Complex32, RealFft};
-use std::f32::consts::PI;
 
 /// One block's worth of resampling: the filter, the plans and the scratch.
 #[derive(Debug)]
@@ -41,20 +41,6 @@ struct Unit {
     output_buf: Vec<f32>,
 }
 
-/// Squared Blackman-Harris, periodic: `npoints` samples.
-fn window(npoints: usize) -> Vec<f32> {
-    let (a, b, c, d) = (0.35875f32, 0.48829f32, 0.14128f32, 0.01168f32);
-    let n = npoints as f32;
-    (0..npoints)
-        .map(|x| {
-            let x = x as f32;
-            let w = a - b * (2.0 * PI * x / n).cos() + c * (4.0 * PI * x / n).cos()
-                - d * (6.0 * PI * x / n).cos();
-            w * w
-        })
-        .collect()
-}
-
 /// The relative cutoff (1.0 is Nyquist) at which a squared Blackman-Harris
 /// windowed sinc of `npoints` taps rolls off to -6 dB at the band edge: a cubic
 /// fit in `1 / npoints`, good for 32 to 2048 taps.
@@ -65,22 +51,19 @@ fn cutoff(npoints: usize) -> f32 {
 }
 
 /// A windowed sinc of `npoints` taps at relative cutoff `f_cutoff`, summing to 1
-/// (unity gain at DC).
+/// (unity gain at DC): [`WindowedSinc`] over the squared Blackman-Harris window,
+/// whose support is the `npoints` taps and whose peak is tap `npoints / 2`.
 fn sinc_filter(npoints: usize, f_cutoff: f32) -> Vec<f32> {
-    let w = window(npoints);
-    let mid = (npoints / 2) as f32;
-    let mut taps: Vec<f32> = w
-        .iter()
-        .enumerate()
-        .map(|(x, &w)| {
-            let v = (x as f32 - mid) * f_cutoff;
-            let s = if v == 0.0 {
-                1.0
-            } else {
-                (v * PI).sin() / (v * PI)
-            };
-            w * s
-        })
+    let cutoff = f64::from(f_cutoff);
+    let kernel = WindowedSinc::new(
+        cutoff,
+        npoints as f64 * cutoff / 2.0,
+        CosineWindow::BLACKMAN_HARRIS_SQUARED,
+    )
+    .expect("the cutoff and the tap count are positive and finite");
+    let mid = (npoints / 2) as f64;
+    let mut taps: Vec<f32> = (0..npoints)
+        .map(|x| kernel.weight(x as f64 - mid) as f32)
         .collect();
     let sum: f32 = taps.iter().sum();
     taps.iter_mut().for_each(|t| *t /= sum);

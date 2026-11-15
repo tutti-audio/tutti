@@ -8,7 +8,7 @@
 //! (floors, clamps, whole-set validation) is the design's, never the reader's.
 //!
 //! A control the family reads **per frame** is [`ControlRead::Fast`]: the
-//! recurrence takes its port's frames from the [`Feed`](tutti_dsp::Feed) lanes
+//! recurrence takes its port's frames from the [`Inputs`](tutti_dsp::Inputs) lanes
 //! (`Params::lanes`), and the reader sees only its cell, the base the member is
 //! designed at.
 
@@ -76,7 +76,7 @@ pub enum ControlRead {
     /// is the recurrence's own (a detector's) is not ramped by the reader.
     Whole,
     /// Read **per frame** by the recurrence, from its port, into a
-    /// [`Feed`](tutti_dsp::Feed) lane (the fast controls fill the lanes in row order).
+    /// [`Inputs`](tutti_dsp::Inputs) lane (the fast controls fill the lanes in row order).
     /// The reader takes only its cell, the base the member is designed at, and a
     /// frame nobody drives is clamped at that member. A fast control lands whole.
     Fast,
@@ -117,7 +117,7 @@ impl Control {
         }
     }
 
-    /// The row flag `fast`: read per frame from a [`Feed`](tutti_dsp::Feed) lane.
+    /// The row flag `fast`: read per frame from an [`Inputs`](tutti_dsp::Inputs) lane.
     #[must_use]
     pub(crate) const fn fast(self) -> Self {
         Self {
@@ -198,7 +198,7 @@ pub trait HasControls<const P: u16>: HasControl<P> {}
 /// `Kind[0] => Unit = field[0]` the first of several of a kind (`HasControls`),
 /// and `Kind[i]` with `i` above 0 the others. A row may end in flags, `{ .. }`, that
 /// say how the reader takes it ([`Control`]): `whole` (lands whole, no glide), `fast`
-/// (read per frame into a [`Feed`](tutti_dsp::Feed) lane, in row order; more fast rows
+/// (read per frame into an [`Inputs`](tutti_dsp::Inputs) lane, in row order; more fast rows
 /// than [`MAX_LANES`] do not compile) and `not_nan` (accepts `+-inf`). A flag that is
 /// not one of these does not compile.
 macro_rules! control_set {
@@ -227,7 +227,7 @@ macro_rules! control_set {
                 ),+];
                 const _: () = assert!(
                     $crate::params::Control::fast_count(ALL) <= tutti_dsp::MAX_LANES,
-                    "more fast controls than a Feed has lanes",
+                    "more fast controls than an Inputs has lanes",
                 );
                 ALL[k]
             }
@@ -341,7 +341,7 @@ impl<S: ControlSet> Params<S> {
     ///
     /// # Panics
     ///
-    /// If `set` has more [`ControlRead::Fast`] controls than a [`Feed`](tutti_dsp::Feed) has
+    /// If `set` has more [`ControlRead::Fast`] controls than an [`Inputs`](tutti_dsp::Inputs) has
     /// lanes ([`MAX_LANES`]): only a hand-written [`ControlSet`] can, since
     /// `control_set!` refuses it at compile time.
     #[must_use]
@@ -358,7 +358,7 @@ impl<S: ControlSet> Params<S> {
             if controls[k].read == ControlRead::Fast {
                 assert!(
                     fast_len < MAX_LANES,
-                    "more fast controls than a Feed has lanes"
+                    "more fast controls than an Inputs has lanes"
                 );
                 fast[fast_len] = k;
                 fast_len += 1;
@@ -526,7 +526,7 @@ impl<S: ControlSet> Params<S> {
     }
 
     /// The per-frame lanes of the [`ControlRead::Fast`] controls, for the
-    /// [`Feed`](tutti_dsp::Feed): the port's frames in the port's own unit, `None` where
+    /// [`Inputs`](tutti_dsp::Inputs): the port's frames in the port's own unit, `None` where
     /// nothing drives it. They are the block's, so a caller slices them by the frames it
     /// renders.
     pub(crate) fn lanes<'a>(&self, io: &Io<'a>) -> [Option<&'a [f32]>; MAX_LANES] {
