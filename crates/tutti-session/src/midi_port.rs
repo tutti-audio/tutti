@@ -6,7 +6,8 @@
 //! A port needs no device to exist. An entry whose saved device is absent
 //! loads at once and reads [`Presence::Lost`] with [`PortCause::Unplugged`];
 //! the session opens it in place, under the same key and the same [`Life`],
-//! when the device arrives and is surely the saved one. Only a saved device
+//! when the device arrives and is the one a load would bind (surely the saved
+//! device, or the only present one of its name). Only a saved device
 //! that several present devices could be fails the load, with the candidates
 //! ([`MidiPortError::Ambiguous`]).
 //!
@@ -28,7 +29,7 @@ use tutti_midi_runtime::{DeviceEpochs, JrStream, MidiIngestControls, MidiInputPo
 use tutti_ump::StreamConfig;
 
 use crate::midi::UmpOut;
-use crate::pool::{Declared, HandleError, Life, Load, LoadError, OpenCx, PoolEntry};
+use crate::pool::{Declared, HandleError, Life, Load, LoadError, PoolEntry};
 use crate::{
     EventInPort, EventOutPort, Feeder, MidiEvent, Peer, PeerError, Presence, Resource,
     ResourceFact, ResourceId, Session, SessionEvent,
@@ -43,15 +44,16 @@ use crate::{
 #[non_exhaustive]
 pub enum PortCause {
     /// The saved device is not present: it was unplugged, or it was never seen
-    /// this run. The port opens by itself when the device arrives and is surely
-    /// the saved one.
+    /// this run. The port opens by itself when the device arrives and is the one a
+    /// load would bind.
     Unplugged,
-    /// The device returned and is surely the saved one, but opening it failed.
-    /// It is tried again when it next returns.
+    /// The device returned and is the one a load would bind, but opening it failed.
+    /// It is tried again when its device next appears in the device list.
     ReopenFailed,
     /// The reader of an open input died while its device stayed listed. The
     /// session reopens it at once, and the port reads this only when that
-    /// failed.
+    /// failed; it is tried again when its device next appears in the device
+    /// list.
     ReaderFailed,
 }
 
@@ -287,7 +289,7 @@ impl PoolEntry for MidiInputEntry {
     fn load(&self) -> Load<InputLoaded> {
         let saved = self.saved.clone();
         Load::on_session(move |cx| {
-            let id = cx.resource_id();
+            let id = cx.mint_resource_id();
             cx.midi()
                 .open_input_port(id, saved)
                 .map_err(|error| LoadError::Midi(Arc::new(error)))
@@ -343,7 +345,7 @@ impl PoolEntry for MidiOutputEntry {
     fn load(&self) -> Load<OutputLoaded> {
         let saved = self.saved.clone();
         Load::on_session(move |cx| {
-            let id = cx.resource_id();
+            let id = cx.mint_resource_id();
             cx.midi()
                 .open_output_port(id, saved)
                 .map_err(|error| LoadError::Midi(Arc::new(error)))
@@ -383,11 +385,17 @@ impl std::fmt::Debug for InputShared {
 }
 
 impl MidiInput {
-    /// The port's ingest node: its event outputs are one per Group and channel
+    /// The port's ingest node: the node to wire from and to follow. Its event
+    /// outputs are one per Group and channel
     /// ([`MidiNodes::input_ports`](crate::MidiNodes::input_ports)), which a route
     /// rule, a follower or a tap reads. The node is in the graph while the entry
     /// is loaded, and the same node serves the port across an unplug and a
     /// replug.
+    ///
+    /// Its one event input is the session's: the device's inlet is wired to it
+    /// at every open, so a host `set_sources` onto it would cut the device off
+    /// until the next replug. The graph has no way to refuse an edge into a node
+    /// by who owns it, so it is not refused; do not wire into it.
     #[must_use]
     pub const fn node(&self) -> NodeKey {
         self.node
@@ -401,10 +409,21 @@ impl MidiInput {
     ///
     /// [`PeerError::Released`] once the entry is released or swapped;
     /// [`PeerError::Disconnected`] while the port is lost;
-    /// [`PeerError::Refused`] when the peer is gone from the port's peers or no
-    /// longer lists the Profile there.
+    /// [`PeerError::Refused`] with [`ProfileError::NotOpen`] for a switch made
+    /// from another input, [`ProfileError::NoSuchPeer`] when the peer is gone
+    /// from the port's peers and [`ProfileError::NotListed`] when it no longer
+    /// lists the Profile there, as the port's info reads now. A peer that goes
+    /// between the call and the next update ends the request as a
+    /// [`ProfilesChange::NotQueued`](tutti_midi_hardware::ProfilesChange::NotQueued)
+    /// event.
     pub fn set_profile(&self, switch: ProfileSwitch) -> Result<(), PeerError<ProfileError>> {
-        self.ask(InputRequest::Profile(switch))
+        let info = self.sendable()?;
+        if switch.device() != &info.device.id {
+            return Err(PeerError::Refused(ProfileError::NotOpen));
+        }
+        switch.check(&info.profiles).map_err(PeerError::Refused)?;
+        self.enqueue(InputRequest::Profile(switch));
+        Ok(())
     }
 
     /// Asks a peer for a MIDI Message Report ([`MidiInputInfo::report_peers`]):
@@ -413,23 +432,41 @@ impl MidiInput {
     ///
     /// # Errors
     ///
-    /// As [`set_profile`](Self::set_profile), with [`PeerError::Refused`] when
-    /// the peer is gone.
+    /// As [`set_profile`](Self::set_profile), with [`PeerError::Refused`] of
+    /// [`ReportError::NotOpen`] for a request made from another input, and
+    /// [`ReportError::NoSuchPeer`] when the peer is gone or declared no Process
+    /// Inquiry with MIDI Message Report. A peer that goes between the call and
+    /// the next update ends the request as a
+    /// [`ProcessChange::NotQueued`](tutti_midi_hardware::ProcessChange::NotQueued)
+    /// event.
     pub fn report(&self, ask: ReportAsk) -> Result<(), PeerError<ReportError>> {
-        self.ask(InputRequest::Report(ask))
+        let info = self.sendable()?;
+        if ask.device() != &info.device.id {
+            return Err(PeerError::Refused(ReportError::NotOpen));
+        }
+        ask.check(&info.report_peers).map_err(PeerError::Refused)?;
+        self.enqueue(InputRequest::Report(ask));
+        Ok(())
     }
 
-    fn ask<E>(&self, request: InputRequest) -> Result<(), PeerError<E>> {
+    /// The info a request is checked against, when the port can take one.
+    fn sendable<E>(&self) -> Result<Arc<MidiInputInfo>, PeerError<E>> {
         self.life.check()?;
-        if self.shared.read(|cell| cell.presence) != Presence::Live {
+        let (info, presence) = self
+            .shared
+            .read(|cell| (Arc::clone(&cell.info), cell.presence));
+        if presence != Presence::Live {
             return Err(PeerError::Disconnected);
         }
+        Ok(info)
+    }
+
+    fn enqueue(&self, request: InputRequest) {
         self.shared
             .requests
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(request);
-        Ok(())
     }
 }
 
@@ -473,8 +510,10 @@ impl std::fmt::Debug for OutputShared {
 }
 
 impl MidiOutput {
-    /// The port's output node: what is wired to its event input is sent to the
-    /// device each update, and the session's MIDI clock feeds it. The node is
+    /// The port's output node: the node to wire to. What is wired to its event
+    /// input (`Graph::set_sources`) is sent to the device each update, beside the
+    /// session's MIDI clock, which feeds it as a feed of its own
+    /// ([`Feeder::Clock`]) that a host's `set_sources` does not replace. The node is
     /// in the graph while the entry is loaded, and the same node serves the
     /// port across an unplug and a replug.
     #[must_use]
@@ -726,8 +765,7 @@ impl Ports {
             };
         }
         for group in tutti_ump::MidiGroup::all() {
-            port.controls
-                .set_mpe_profile(0, group, zones[group.index()]);
+            port.controls.set_mpe_profile(group, zones[group.index()]);
         }
     }
 
@@ -752,7 +790,7 @@ impl Ports {
                 let _ =
                     graph.set_sources(EventInPort::new(port.node, 0), [EventOutPort::new(key, 0)]);
                 port.inlet = Some(key);
-                port.epochs.arrive(0);
+                port.epochs.arrive();
                 port.open = Some(info.id.clone());
                 Ok(())
             }
@@ -778,8 +816,8 @@ impl Ports {
             // A host that removed the inlet itself leaves nothing to take.
             let _ = graph.remove(key);
         }
-        port.epochs.depart(0);
-        port.controls.clear_mpe_profiles(0);
+        port.epochs.depart();
+        port.controls.clear_mpe_profiles();
     }
 
     /// The step of the update's `Phase::Poll` for the ports: retires those whose
@@ -808,8 +846,8 @@ impl Ports {
                 _ => {}
             }
         }
-        self.send_requests(io);
-        edits |= self.step(io, graph, rate, now, out);
+        self.send_requests(io, out);
+        edits |= self.step(io, graph, now, out);
         edits
     }
 
@@ -844,7 +882,7 @@ impl Ports {
         edits.graph |= self.outputs.len() != before;
         self.retiring.retain(|going| {
             // The node's block that released the notes has run.
-            let done = going.epochs.is_settled(0);
+            let done = going.epochs.is_settled();
             if done {
                 let _ = graph.remove(going.node);
                 edits.graph = true;
@@ -895,8 +933,10 @@ impl Ports {
         edits
     }
 
-    /// `arrived` was added to the list: the lost ports it surely is open again,
-    /// and a port that fails to open reads [`PortCause::ReopenFailed`].
+    /// `arrived` was added to the list: the lost ports it is open again (it is
+    /// what a load would bind: surely the saved device, or the only one of its
+    /// name), and a port that fails to open reads [`PortCause::ReopenFailed`] and
+    /// is tried again when a device next arrives.
     fn restore(
         &mut self,
         io: &mut MidiSession,
@@ -906,9 +946,15 @@ impl Ports {
         out: &mut Vec<SessionEvent>,
     ) -> Edits {
         let mut edits = Edits::default();
-        // The one matcher: only a device that is surely the saved one is bound
-        // unasked.
-        let is_arrived = |io: &MidiSession, saved: &DeviceInfo| matches!(io.devices().resolve(saved), Resolved::Exact(found) if found.id == arrived.id);
+        // The matcher a load binds by: the device that is surely the saved one,
+        // or the only present one of its name. Several that could be it stay
+        // for the app to choose.
+        let is_arrived = |io: &MidiSession, saved: &DeviceInfo| {
+            matches!(
+                io.devices().resolve(saved),
+                Resolved::Exact(found) | Resolved::SameName(found) if found.id == arrived.id
+            )
+        };
         for at in 0..self.inputs.len() {
             let port = &self.inputs[at];
             if port.open.is_some() || !arrived.direction.is_input() || !is_arrived(io, &port.saved)
@@ -955,7 +1001,7 @@ impl Ports {
     }
 
     /// Sends what the handles asked of the peers.
-    fn send_requests(&mut self, io: &mut MidiSession) {
+    fn send_requests(&mut self, io: &mut MidiSession, out: &mut Vec<SessionEvent>) {
         for port in &self.inputs {
             let requests = std::mem::take(
                 &mut *port
@@ -965,16 +1011,35 @@ impl Ports {
                     .unwrap_or_else(PoisonError::into_inner),
             );
             for request in requests {
-                // The peer or its input went since the call: the request has no
-                // end to report, and says so in the log.
-                let sent = match request {
+                // The call checked the port's info; what went since is the
+                // request's end, as an event.
+                match request {
                     InputRequest::Profile(switch) => {
-                        io.set_profile(switch).map_err(|e| e.to_string())
+                        let (device, peer) = (switch.device().clone(), switch.peer());
+                        if let Err(error) = io.set_profile(switch) {
+                            out.push(
+                                MidiEvent::CiProfiles {
+                                    device,
+                                    peer,
+                                    change: tutti_midi_hardware::ProfilesChange::NotQueued(error),
+                                }
+                                .into(),
+                            );
+                        }
                     }
-                    InputRequest::Report(ask) => io.report(ask).map_err(|e| e.to_string()),
-                };
-                if let Err(why) = sent {
-                    tracing::warn!("midi: a request to a peer was not sent: {why}");
+                    InputRequest::Report(ask) => {
+                        let (device, peer) = (ask.device().clone(), ask.peer());
+                        if let Err(error) = io.report(ask) {
+                            out.push(
+                                MidiEvent::CiProcess {
+                                    device,
+                                    peer,
+                                    change: tutti_midi_hardware::ProcessChange::NotQueued(error),
+                                }
+                                .into(),
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -986,7 +1051,6 @@ impl Ports {
         &mut self,
         io: &mut MidiSession,
         graph: &mut crate::graph::Graph,
-        rate: tutti_types::SampleRate,
         now: std::time::Instant,
         out: &mut Vec<SessionEvent>,
     ) -> Edits {
@@ -1072,7 +1136,6 @@ impl Ports {
             }
             edits.graph = true;
         }
-        let _ = rate;
         edits
     }
 }
@@ -1118,15 +1181,14 @@ impl crate::Midi<'_> {
             Resolved::Missing => None,
         };
         let found = found.filter(|info| info.direction.is_input());
-        let epochs = DeviceEpochs::new(std::num::NonZeroUsize::MIN);
+        let epochs = DeviceEpochs::new();
         let layout = self
             .nodes
             .map_or(MidiInputPorts::FIRST_GROUP, |n| n.input_ports);
-        let node = tutti_midi_runtime::MidiIngestNode::new(std::num::NonZeroUsize::MIN)
+        let node = tutti_midi_runtime::MidiIngestNode::new()
             .hearing(layout)
             .with_mpe(*self.state.mpe())
-            .following(&epochs)
-            .expect("the node and its epochs have the one input");
+            .following(&epochs);
         let (key, controls) = self.graph.add(node);
         let node = key.erase();
         let token = Arc::new(());
@@ -1251,13 +1313,6 @@ impl crate::Midi<'_> {
     }
 }
 
-impl OpenCx<'_> {
-    /// The id of the port being opened, minted from the session's own source.
-    pub(crate) fn resource_id(&mut self) -> ResourceId {
-        self.mint_resource_id()
-    }
-}
-
 // --- Draining the outputs ---
 
 impl Ports {
@@ -1303,3 +1358,6 @@ impl Ports {
         any
     }
 }
+
+#[cfg(test)]
+mod tests;

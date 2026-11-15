@@ -312,9 +312,7 @@ mod tests {
                 tutti_midi_protocol::MpeMode::Disabled
             )));
             assert!(keeps_one(tutti_midi_runtime::HarmonyNode::new([])));
-            assert!(keeps_one(tutti_midi_runtime::MidiIngestNode::new(
-                std::num::NonZeroUsize::MIN
-            )));
+            assert!(keeps_one(tutti_midi_runtime::MidiIngestNode::new()));
         }
         #[cfg(feature = "sampler")]
         {

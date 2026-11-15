@@ -39,7 +39,7 @@ impl Midi<'_> {
     ///
     /// # Errors
     ///
-    /// [`MidiError::NoHardware`] on a session with no OS MIDI layer.
+    /// [`MidiPortError::NoHardware`](crate::MidiPortError::NoHardware) (as [`MidiError::Port`]) on a session with no OS MIDI layer.
     pub fn enable_ci(&mut self, identity: DeviceIdentity) -> Result<()> {
         self.hardware_mut()?.enable_ci(identity);
         Ok(())
@@ -51,13 +51,15 @@ impl Midi<'_> {
     ///
     /// # Errors
     ///
-    /// [`MidiError::NoHardware`] on a session with no OS MIDI layer.
+    /// [`MidiPortError::NoHardware`](crate::MidiPortError::NoHardware) (as [`MidiError::Port`]) on a session with no OS MIDI layer.
     pub fn disable_ci(&mut self) -> Result<()> {
         self.hardware_mut()?.disable_ci();
         Ok(())
     }
 
     fn hardware_mut(&mut self) -> Result<&mut tutti_midi_hardware::MidiSession> {
-        self.io.as_deref_mut().ok_or(MidiError::NoHardware)
+        self.io
+            .as_deref_mut()
+            .ok_or(crate::MidiPortError::NoHardware.into())
     }
 }

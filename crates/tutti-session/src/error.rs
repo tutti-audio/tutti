@@ -273,12 +273,11 @@ pub enum MidiError {
     #[error("{0:?} is not the ingest node of a MIDI input port")]
     NotAnInput(tutti_graph::NodeKey),
 
-    /// A call on a session with no OS MIDI layer
-    /// ([`SessionBuilder::midi_hardware`](crate::SessionBuilder::midi_hardware)
-    /// was not asked for).
+    /// A call on a port layer that is not there: a session with no OS MIDI
+    /// layer is [`MidiPortError::NoHardware`](crate::MidiPortError::NoHardware).
     #[cfg(feature = "midi-hardware")]
-    #[error("the session has no OS MIDI layer; build it with `midi_hardware()`")]
-    NoHardware,
+    #[error(transparent)]
+    Port(#[from] crate::MidiPortError),
 
     /// `Midi::retarget` named a node that is not a clip of the session's.
     #[error("{0:?} is not a clip of this session's")]

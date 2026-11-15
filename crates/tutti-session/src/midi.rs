@@ -2210,10 +2210,15 @@ impl Midi<'_> {
 
     // --- Hardware out ---
 
-    /// The output the hardware out (an event tap on the clock, aligned to the
-    /// graph's outputs) drains to at each update's
-    /// [`MidiOut`](crate::Phase::MidiOut) phase. `None`: its events are counted as dropped
-    /// ([`MidiEvent::OutputDropped`]).
+    /// The host's own sink: the output the hardware out (an event tap on the
+    /// clock, aligned to the graph's outputs) drains to at each update's
+    /// [`MidiOut`](crate::Phase::MidiOut) phase. `None`: its events are counted
+    /// as dropped ([`MidiEvent::OutputDropped`]).
+    ///
+    /// This is the host-sink path only. A device is reached through a
+    /// `midi_output` port of the pool (the session's clock feeds each one), whose
+    /// own stamp stream and timing it keeps; this call, [`hardware_out`](Self::hardware_out)
+    /// and [`drain_out`](Self::drain_out) leave the ports alone.
     ///
     /// **Whether it JR-stamps is the device's.** With the `midi-hardware`
     /// feature, an output that is a device's (a `midi_output` port)
@@ -2226,9 +2231,10 @@ impl Midi<'_> {
         self.state.out = out;
     }
 
-    /// The router onto the output: what a host writes its own outbound
-    /// MIDI through (a MIDI-CI reply, a track's MIDI out), stamped and
-    /// counted as the hardware out is.
+    /// The router onto the host's own sink ([`set_hardware_out`](Self::set_hardware_out)):
+    /// what a host writes its own outbound MIDI through (a MIDI-CI reply, a
+    /// track's MIDI out), stamped and counted as the hardware out is. It does not
+    /// reach a `midi_output` port.
     pub fn hardware_out(&mut self) -> MidiOutRouter<'_> {
         MidiOutRouter {
             out: self.state.out.as_mut(),
@@ -2252,9 +2258,9 @@ impl Midi<'_> {
     /// Sets the hardware out's own latency and offset: what its MIDI device
     /// takes to sound an event (it is sent that much earlier) and a trim on top
     /// (positive sends later), added to the terms every event is timed by
-    /// ([`output_terms`](Self::output_terms)). Applies from the next drain; the
-    /// session has one output, and the setting stays when another device is
-    /// connected to it.
+    /// ([`output_terms`](Self::output_terms)). Applies from the next drain, to the
+    /// host's sink and to every `midi_output` port: it is one setting of the
+    /// session, not a port's.
     pub fn set_output_latency(&mut self, latency: OutputLatency) {
         self.state.output_latency = latency;
     }
@@ -2284,9 +2290,10 @@ impl Midi<'_> {
         })
     }
 
-    /// The sample rate the hardware out's frames are on: the rate the graph
-    /// was prepared at when its tap was opened, which the session reopens
-    /// when the graph is re-rated. `None` when the session has no engine
+    /// The sample rate the host sink's frames are on: the rate the graph was
+    /// prepared at when the clock's tap was opened, which the session reopens
+    /// when the graph is re-rated. A `midi_output` port keeps its own tap at the
+    /// graph's rate in the same way. `None` when the session has no engine
     /// MIDI.
     #[must_use]
     pub fn hardware_out_rate(&self) -> Option<tutti_types::SampleRate> {

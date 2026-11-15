@@ -1306,10 +1306,41 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     assert_eq!(listed[0].state(), ProfileState::Enabled);
     assert_eq!(listed[0].channels(), Some(ProfileChannels::of(2)));
 
-    // A request on a released port fails at the call.
     let [ListedProfile::Channel(c)] = listed.as_slice() else {
         panic!("one Profile on a Channel: {listed:?}");
     };
+    // A request the call accepts and the device then leaves before the next
+    // update ends as an event with its reason.
+    port.set_profile(c.disable()).expect("the peer lists it");
+    fake.unplug(raw);
+    let events = s.update();
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            SessionEvent::Midi(MidiEvent::CiProfiles {
+                change: ProfilesChange::NotQueued(tutti_midi_hardware::ProfileError::NotOpen),
+                ..
+            })
+        )),
+        "{events:?}"
+    );
+    // A request on a lost port fails at the call.
+    assert!(matches!(
+        port.set_profile(c.disable()),
+        Err(tutti_session::PeerError::Disconnected)
+    ));
+    // The device returns with no peers found yet: a switch made from the old
+    // listing names a peer the port does not have, and is refused at the call.
+    plug(&fake, 7, "Wire", PortDirection::Duplex);
+    let _ = s.update();
+    assert_eq!(port.presence(), tutti_session::Presence::Live);
+    assert!(matches!(
+        port.set_profile(c.disable()),
+        Err(tutti_session::PeerError::Refused(
+            tutti_midi_hardware::ProfileError::NoSuchPeer
+        ))
+    ));
+    // A request on a released port fails at the call.
     s.pool(Vec::<
         tutti_session::Declared<&str, tutti_session::MidiInputEntry>,
     >::new())
@@ -1775,6 +1806,37 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
         .filter(|c| !matches!(c, ProcessChange::Capabilities(_)))
         .collect();
     assert_eq!(report, ended.iter().collect::<Vec<_>>());
+
+    // A request the call accepts and the device then leaves before the next
+    // update ends as an event with its reason; on a lost port the call fails; and
+    // once the device is back with no peers found, a request made from the old
+    // listing is refused at the call.
+    let ask = port.info().report_peers()[0].ask(ReportRequest::new(DataControl::Full, asked));
+    port.report(ask.clone()).expect("the peer supports it");
+    fake.unplug(raw);
+    let events = s.update();
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            SessionEvent::Midi(MidiEvent::CiProcess {
+                change: ProcessChange::NotQueued(tutti_midi_hardware::ReportError::NotOpen),
+                ..
+            })
+        )),
+        "{events:?}"
+    );
+    assert!(matches!(
+        port.report(ask.clone()),
+        Err(tutti_session::PeerError::Disconnected)
+    ));
+    plug(&fake, 7, "Wire", PortDirection::Duplex);
+    let _ = s.update();
+    assert!(matches!(
+        port.report(ask),
+        Err(tutti_session::PeerError::Refused(
+            tutti_midi_hardware::ReportError::NoSuchPeer
+        ))
+    ));
 }
 
 /// Runs the Stream negotiation of the open duplex device `raw`, the input port

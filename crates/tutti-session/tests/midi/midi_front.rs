@@ -488,7 +488,10 @@ mod hardware {
             revision: [tutti_ump::U7::of(3); 4],
         };
         let refused = bare.midi().enable_ci(identity).unwrap_err();
-        assert!(matches!(refused, MidiError::NoHardware));
+        assert!(matches!(
+            refused,
+            MidiError::Port(tutti_session::MidiPortError::NoHardware)
+        ));
         let session_error: tutti_session::Error = refused.into();
         assert!(matches!(session_error, tutti_session::Error::Midi(_)));
     }

@@ -13,7 +13,6 @@
 //! The clip tests roll the transport from beat 0 at 120 BPM (24 000 frames a
 //! beat); the property is that a note sounds on its beat and not before.
 
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use tutti_fixtures::signal::rms;
 use tutti_session::Root;
@@ -189,7 +188,7 @@ fn routed_level(channel: MidiChannel) -> f32 {
     let (mut s, synth) = rig();
     // The device's inlet, wired to the ingest node's one event input.
     let (inlet, mut device) = s.graph().open_event_inlet(EventCapacity::of(64));
-    let (input, _) = s.graph().add(MidiIngestNode::new(NonZeroUsize::MIN));
+    let (input, _) = s.graph().add(MidiIngestNode::new());
     s.graph()
         .connect(inlet.events_out(), EventInPort::new(input, 0))
         .unwrap();
