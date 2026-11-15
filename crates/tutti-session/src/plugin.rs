@@ -504,7 +504,7 @@ pub enum PluginChange {
     },
     /// The plugin's bus layout changed. A pooled in-process plugin's node is
     /// re-inserted at its key with the new ports by the session
-    /// ([`SessionEvent::Unwired`](crate::SessionEvent::Unwired) names the
+    /// ([`SessionEvent::Unwired`] names the
     /// wiring a narrower shape dropped); another plugin's node keeps its ports,
     /// and the app re-reads and rewires.
     IoChanged,

@@ -578,23 +578,45 @@ pub struct BoundPlugin {
     bound: BoundPlaced,
 }
 
+/// Runs `$in_process` on the node of whichever in-process format a
+/// [`BoundPlaced`] holds, with `$wrap` the variant that holds a node of that
+/// format, or `$served` on the served client: the one place the format arms
+/// are listed for a call that does not consume the node.
+macro_rules! bound {
+    ($bound:expr, served $s:ident => $served:expr, in_process $c:ident, $wrap:ident => $in_process:expr $(,)?) => {
+        match $bound {
+            BoundPlaced::Served($s) => $served,
+            #[cfg(feature = "vst2")]
+            BoundPlaced::Vst2($c) => {
+                let $wrap = BoundPlaced::Vst2;
+                $in_process
+            }
+            #[cfg(feature = "clap")]
+            BoundPlaced::Clap($c) => {
+                let $wrap = BoundPlaced::Clap;
+                $in_process
+            }
+            #[cfg(feature = "vst3")]
+            BoundPlaced::Vst3($c) => {
+                let $wrap = BoundPlaced::Vst3;
+                $in_process
+            }
+            #[cfg(all(feature = "au", target_os = "macos"))]
+            BoundPlaced::Au($c) => {
+                let $wrap = BoundPlaced::Au;
+                $in_process
+            }
+        }
+    };
+}
+
 impl BoundPlugin {
     /// The node's controls of an in-process plugin: its meter cell and its
     /// parameter delivery's counters. `None` for a served plugin, whose
     /// controls are [`PluginControls`](tutti_plugin_host::PluginControls).
     #[must_use]
     pub fn node_controls(&self) -> Option<tutti_plugin_host::NodeControls> {
-        match &self.bound {
-            BoundPlaced::Served(_) => None,
-            #[cfg(feature = "vst2")]
-            BoundPlaced::Vst2(c) => Some(c.controls()),
-            #[cfg(feature = "clap")]
-            BoundPlaced::Clap(c) => Some(c.controls()),
-            #[cfg(feature = "vst3")]
-            BoundPlaced::Vst3(c) => Some(c.controls()),
-            #[cfg(all(feature = "au", target_os = "macos"))]
-            BoundPlaced::Au(c) => Some(c.controls()),
-        }
+        bound!(&self.bound, served _s => None, in_process c, _wrap => Some(c.controls()))
     }
 
     /// The builder of the node that replaces this one when the plugin changes
@@ -603,18 +625,11 @@ impl BoundPlugin {
     /// with.
     #[must_use]
     pub fn rebinder(&self) -> PluginRebinder {
-        let placed = match &self.bound {
-            BoundPlaced::Served(c) => RebinderPlaced::Served(c.rebinder()),
-            #[cfg(feature = "vst2")]
-            BoundPlaced::Vst2(c) => RebinderPlaced::Vst2(c.rebinder(None)),
-            #[cfg(feature = "clap")]
-            BoundPlaced::Clap(c) => RebinderPlaced::Clap(c.rebinder(None)),
-            #[cfg(feature = "vst3")]
-            BoundPlaced::Vst3(c) => RebinderPlaced::Vst3(c.rebinder(None)),
-            #[cfg(all(feature = "au", target_os = "macos"))]
-            BoundPlaced::Au(c) => RebinderPlaced::Au(c.rebinder(None)),
-        };
-        PluginRebinder { placed }
+        bound!(
+            &self.bound,
+            served c => PluginRebinder::served(c.rebinder()),
+            in_process c, wrap => PluginRebinder::in_process(c.rebinder(None), wrap),
+        )
     }
 }
 
@@ -627,20 +642,76 @@ impl BoundPlugin {
 /// `Clone`: every clone drives the same plugin.
 #[derive(Clone)]
 pub struct PluginRebinder {
-    placed: RebinderPlaced,
+    inner: std::sync::Arc<std::sync::Mutex<dyn Rebind>>,
 }
 
-#[derive(Clone)]
-enum RebinderPlaced {
-    Served(tutti_plugin_host::Rebinder<tutti_plugin_ipc::Ipc>),
-    #[cfg(feature = "vst2")]
-    Vst2(tutti_plugin_host::Rebinder<tutti_vst2_host::Vst2Loaded>),
-    #[cfg(feature = "clap")]
-    Clap(tutti_plugin_host::Rebinder<tutti_clap_host::ClapLoaded>),
-    #[cfg(feature = "vst3")]
-    Vst3(tutti_plugin_host::Rebinder<tutti_vst3_host::Vst3Loaded>),
-    #[cfg(all(feature = "au", target_os = "macos"))]
-    Au(tutti_plugin_host::Rebinder<tutti_au_host::AuLoaded>),
+/// One hosting's rebinder, behind the format.
+trait Rebind: Send {
+    fn layout(&self) -> Option<tutti_plugin_types::Layout>;
+    fn settled(&self) -> tutti_plugin_host::Settlement;
+    fn rebind(
+        &self,
+        main: MainThreadMarker,
+    ) -> std::result::Result<Option<BoundPlugin>, tutti_plugin_host::RebindError>;
+}
+
+/// An in-process format's rebinder, and the variant of [`BoundPlaced`] its
+/// nodes go in.
+#[cfg_attr(
+    not(any(feature = "vst2", feature = "clap", feature = "vst3", feature = "au")),
+    expect(
+        dead_code,
+        reason = "a build with no in-process format has only served plugins"
+    )
+)]
+struct InProcessRebind<F: tutti_plugin_types::Loaded> {
+    rebinder: tutti_plugin_host::Rebinder<F>,
+    wrap: fn(Box<tutti_plugin_host::PluginNode<F>>) -> BoundPlaced,
+}
+
+impl<F> Rebind for InProcessRebind<F>
+where
+    F: tutti_plugin_types::Loaded + 'static,
+    F::Processor: 'static,
+{
+    fn layout(&self) -> Option<tutti_plugin_types::Layout> {
+        self.rebinder.layout()
+    }
+
+    fn settled(&self) -> tutti_plugin_host::Settlement {
+        self.rebinder.settled()
+    }
+
+    fn rebind(
+        &self,
+        main: MainThreadMarker,
+    ) -> std::result::Result<Option<BoundPlugin>, tutti_plugin_host::RebindError> {
+        let node = self.rebinder.rebind(main)?;
+        Ok(Some(BoundPlugin {
+            bound: (self.wrap)(Box::new(node)),
+        }))
+    }
+}
+
+/// A served plugin's rebinder: it builds no node, for its slab is laid out at
+/// launch.
+struct ServedRebind(tutti_plugin_host::Rebinder<tutti_plugin_ipc::Ipc>);
+
+impl Rebind for ServedRebind {
+    fn layout(&self) -> Option<tutti_plugin_types::Layout> {
+        self.0.layout()
+    }
+
+    fn settled(&self) -> tutti_plugin_host::Settlement {
+        self.0.settled()
+    }
+
+    fn rebind(
+        &self,
+        _main: MainThreadMarker,
+    ) -> std::result::Result<Option<BoundPlugin>, tutti_plugin_host::RebindError> {
+        self.0.check_ports().map(|()| None)
+    }
 }
 
 impl std::fmt::Debug for PluginRebinder {
@@ -649,44 +720,55 @@ impl std::fmt::Debug for PluginRebinder {
     }
 }
 
-/// Runs `$e` on the rebinder of whichever hosting a [`RebinderPlaced`] holds.
-macro_rules! rebinder_of {
-    ($placed:expr, $r:ident => $e:expr) => {
-        match $placed {
-            RebinderPlaced::Served($r) => $e,
-            #[cfg(feature = "vst2")]
-            RebinderPlaced::Vst2($r) => $e,
-            #[cfg(feature = "clap")]
-            RebinderPlaced::Clap($r) => $e,
-            #[cfg(feature = "vst3")]
-            RebinderPlaced::Vst3($r) => $e,
-            #[cfg(all(feature = "au", target_os = "macos"))]
-            RebinderPlaced::Au($r) => $e,
-        }
-    };
-}
-
 impl PluginRebinder {
     /// The rebinder of a served plugin's bound client
     /// ([`PluginClient::rebinder`](crate::handles::PluginClient::rebinder)).
     #[must_use]
     pub fn served(rebinder: tutti_plugin_host::Rebinder<tutti_plugin_ipc::Ipc>) -> Self {
         Self {
-            placed: RebinderPlaced::Served(rebinder),
+            inner: std::sync::Arc::new(std::sync::Mutex::new(ServedRebind(rebinder))),
         }
+    }
+
+    #[cfg_attr(
+        not(any(feature = "vst2", feature = "clap", feature = "vst3", feature = "au")),
+        expect(
+            dead_code,
+            reason = "a build with no in-process format has only served plugins"
+        )
+    )]
+    fn in_process<F>(
+        rebinder: tutti_plugin_host::Rebinder<F>,
+        wrap: fn(Box<tutti_plugin_host::PluginNode<F>>) -> BoundPlaced,
+    ) -> Self
+    where
+        F: tutti_plugin_types::Loaded + 'static,
+        F::Processor: 'static,
+    {
+        Self {
+            inner: std::sync::Arc::new(std::sync::Mutex::new(InProcessRebind { rebinder, wrap })),
+        }
+    }
+
+    /// The rebinder, whatever a panic left in its lock: it holds no state of
+    /// its own.
+    fn lock(&self) -> std::sync::MutexGuard<'_, dyn Rebind + 'static> {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// The ports the plugin has now, as its lifecycle last read them. `None`
     /// for a lost plugin.
     #[must_use]
     pub fn layout(&self) -> Option<tutti_plugin_types::Layout> {
-        rebinder_of!(&self.placed, r => r.layout())
+        self.lock().layout()
     }
 
     /// Where the Processor's way is after the last [`rebind`](Self::rebind).
     #[must_use]
     pub fn settled(&self) -> tutti_plugin_host::Settlement {
-        rebinder_of!(&self.placed, r => r.settled())
+        self.lock().settled()
     }
 
     /// A node over the plugin's ports as they are now, with its Processor on
@@ -703,27 +785,7 @@ impl PluginRebinder {
         &self,
         main: MainThreadMarker,
     ) -> std::result::Result<Option<BoundPlugin>, tutti_plugin_host::RebindError> {
-        // A build with no in-process format has only the served arm.
-        let _ = main;
-        match &self.placed {
-            RebinderPlaced::Served(r) => r.check_ports().map(|()| None),
-            #[cfg(feature = "vst2")]
-            RebinderPlaced::Vst2(r) => Ok(Some(BoundPlugin {
-                bound: BoundPlaced::Vst2(Box::new(r.rebind(main)?)),
-            })),
-            #[cfg(feature = "clap")]
-            RebinderPlaced::Clap(r) => Ok(Some(BoundPlugin {
-                bound: BoundPlaced::Clap(Box::new(r.rebind(main)?)),
-            })),
-            #[cfg(feature = "vst3")]
-            RebinderPlaced::Vst3(r) => Ok(Some(BoundPlugin {
-                bound: BoundPlaced::Vst3(Box::new(r.rebind(main)?)),
-            })),
-            #[cfg(all(feature = "au", target_os = "macos"))]
-            RebinderPlaced::Au(r) => Ok(Some(BoundPlugin {
-                bound: BoundPlaced::Au(Box::new(r.rebind(main)?)),
-            })),
-        }
+        self.lock().rebind(main)
     }
 }
 
