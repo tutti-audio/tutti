@@ -111,8 +111,8 @@ impl AudioSlab {
     ///
     /// # Errors
     ///
-    /// Returns an error if `layout` is refused ([`SlabLayoutError`]), or if the backing file exists or cannot be
-    /// created, sized or mapped.
+    /// Returns an error if `layout` is refused ([`SlabLayoutError`]), or if the
+    /// backing file exists or cannot be created, sized or mapped.
     pub fn create(name: impl Into<String>, layout: SlabLayout) -> BridgeResult<SlabWriter> {
         let bytes = check_layout(&layout)?;
         let name = name.into();

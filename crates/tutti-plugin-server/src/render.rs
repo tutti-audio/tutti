@@ -74,9 +74,11 @@ pub(crate) struct RenderConfig {
     pub rate_refused: bool,
     /// What the plugin consumes, as it reports now.
     pub features: Features,
-    /// The channels the plugin takes and gives now, over all its buses, 0 with
-    /// none loaded. A block renders only into a slab laid out the same.
+    /// The channels the plugin takes now, over all its buses, 0 with none
+    /// loaded. A block renders only into a slab laid out the same.
     pub inputs: usize,
+    /// The channels the plugin gives now, over all its buses, 0 with none
+    /// loaded. A block renders only into a slab laid out the same.
     pub outputs: usize,
 }
 
@@ -502,11 +504,10 @@ impl RenderSide {
     /// Whether a block of `frames` may reach the plugin: not empty, within the
     /// length it was activated for, within the slab's per-channel room (the
     /// scratch's size), and into a slab laid out as the plugin's ports are now.
-    /// The length is the peer's to choose, so it is
-    /// checked here, once, for every format: unchecked, a long one sized the
-    /// scratch to it on the audio thread, and the formats disagreed past the
-    /// activated length (CLAP refused it, VST2 split it, VST3 passed it to the
-    /// plugin). A plugin that changed its ports before the host set up a slab
+    /// The length is the peer's to choose, so it is checked here, once, for
+    /// every format: unchecked, a long one sized the scratch to it on the audio
+    /// thread, and the formats disagreed past the activated length (CLAP
+    /// refused it, VST2 split it, VST3 passed it to the plugin). A plugin that changed its ports before the host set up a slab
     /// for them is read and written as the other layout otherwise. A refused
     /// block is counted and reads back as silence.
     fn block_fits(&mut self, frames: usize) -> bool {
