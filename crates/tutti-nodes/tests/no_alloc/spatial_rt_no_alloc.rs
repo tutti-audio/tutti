@@ -5,14 +5,14 @@
 //! installs a global allocator, which only a test binary of that crate may do.
 
 use tutti_graph::ParamNode;
-use tutti_graph::contract::BlockRig;
+use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node};
 use tutti_nodes::VbapPannerNode;
 use tutti_nodes::testing::aim;
-use tutti_types::Azimuth;
 use tutti_types::Elevation;
 use tutti_types::MaxBlock;
 use tutti_types::SampleRate;
+use tutti_types::{Azimuth, Bed, UnitParam};
 
 /// `node` alone in a graph (`BlockRig`) at 48 kHz in 64-frame blocks, fed a
 /// DC pair: `warm` blocks, then 1 000 under `assert_no_alloc`.
@@ -91,6 +91,205 @@ fn vbap_elevation_retreat_is_allocation_free() {
     aim(&node.param_set(), Azimuth::new(0.0), Elevation::new(90.0));
     Node::reset(&mut node);
     gate(node, 1);
+}
+
+/// Values a param is driven or written with: ordinary, extreme and hostile
+/// (NaN, infinities, magnitudes that overflow an offset, a denormal).
+const HOSTILE: [f32; 20] = [
+    f32::NAN,
+    f32::INFINITY,
+    f32::NEG_INFINITY,
+    1e30,
+    -1e30,
+    3e37,
+    f32::MAX,
+    -f32::MAX,
+    0.0,
+    -0.0,
+    1e-40,
+    720.5,
+    -540.25,
+    91.0,
+    -91.0,
+    180.0,
+    -180.0,
+    0.5,
+    3.0,
+    12.0,
+];
+
+/// The block lengths a host may call with: none a multiple of the 16-frame
+/// grid, so a grid segment is carried across calls.
+const BLOCKS: [usize; 4] = [1, 7, 33, 64];
+
+/// A panner whose `process` runs under `assert_no_alloc`. `Direct` rebuilds the
+/// node's `Shape` each block, which allocates and which an executor does not,
+/// so the window is the node's own `process`.
+struct Gated(VbapPannerNode);
+
+impl Node for Gated {
+    fn shape(&self) -> tutti_graph::Shape {
+        self.0.shape()
+    }
+    fn prepare(&mut self, p: &tutti_graph::Prepare) {
+        self.0.prepare(p);
+    }
+    fn process(
+        &mut self,
+        cx: &tutti_graph::Cx<'_>,
+        io: tutti_graph::Io<'_>,
+    ) -> tutti_graph::Status {
+        assert_no_alloc::assert_no_alloc(|| self.0.process(cx, io))
+    }
+    fn reset(&mut self) {
+        self.0.reset();
+    }
+    fn param_base(&self, k: usize) -> Option<f32> {
+        self.0.param_base(k)
+    }
+}
+
+/// Frames of a rendered block: finite, the LFE silent, the power sum of the
+/// speakers within the bound a unit-power gain pair gives an input pair of
+/// 0.5 and 0.5, `(|l| + |r|)^2 = 1`. Returns the least power over the block.
+fn check_block(
+    rig: &Direct<Gated>,
+    channels: usize,
+    lfe: Option<usize>,
+    len: usize,
+    health: &mut (bool, bool, f32),
+) -> f32 {
+    let mut least = f32::MAX;
+    for frame in 0..len {
+        let mut power = 0.0f32;
+        for c in 0..channels {
+            let s = rig.output(c)[frame];
+            health.0 &= s.is_finite();
+            power += s * s;
+            health.1 |= Some(c) == lfe && s != 0.0;
+        }
+        health.2 = health.2.max(power);
+        least = least.min(power);
+    }
+    least
+}
+
+/// The corner sweep of every bed: each placed bed up to the widest, with its
+/// four params moving every block, as cells and as lanes, through ordinary,
+/// extreme and hostile values, in blocks that are not multiples of the grid,
+/// with resets and a prepare at another rate between blocks, and a fork, allocates
+/// nothing, renders finite audio, never feeds the LFE, and keeps the power sum
+/// of the speakers within `(|l| + |r|)^2`. A source then held (a mono
+/// fold, every param still) settles within 50 ms and plays every frame at the
+/// unit power of its gains.
+#[test]
+fn vbap_every_bed_under_hostile_cells_and_lanes_is_allocation_free_finite_and_bounded() {
+    use tutti_graph::Prepare;
+    use tutti_types::{MaxBlock, Samples, Speaker};
+
+    const FRAMES: usize = 64;
+    let params = [
+        UnitParam::Azimuth,
+        UnitParam::Elevation,
+        UnitParam::Spread,
+        UnitParam::StereoWidth,
+    ];
+    for bed in Bed::ALL {
+        let Ok(node) = VbapPannerNode::new(bed) else {
+            assert_eq!(bed, Bed::Mono);
+            continue;
+        };
+        let lfe = bed.topology().index_of(Speaker::LowFrequency);
+        let channels = bed.width().count() as usize;
+        assert!(channels <= tutti_types::MAX_CHANNELS);
+        let controls = node.param_set();
+        let fork = node.fork_fresh();
+        let mut rig = Direct::new(Gated(node), SampleRate::SR_48K, FRAMES);
+        let mut forked = Direct::new(Gated(fork), SampleRate::SR_48K, FRAMES);
+        for d in [&mut rig, &mut forked] {
+            for c in d.inputs_mut() {
+                c.fill(0.5);
+            }
+        }
+        let fork_controls = forked.node.0.param_set();
+        let mut health = (true, false, 0.0f32);
+        let mut lane = vec![0.0f32; FRAMES];
+
+        // The hostile phase: every param a cell or a lane, by turns.
+        for step in 0..600usize {
+            let pick = |k: usize| HOSTILE[(step * (k + 3) / 2 + k) % HOSTILE.len()];
+            for (k, &param) in params.iter().enumerate() {
+                if (step + k) % 3 == 0 {
+                    // A lane of hostile values, per frame.
+                    for (i, v) in lane.iter_mut().enumerate() {
+                        *v = if i % 5 == 0 {
+                            pick(k + i)
+                        } else {
+                            (i * 7 + step) as f32
+                        };
+                    }
+                    rig.feed(k, Some(&lane));
+                } else {
+                    rig.feed(k, None);
+                    controls.set(param, pick(k));
+                }
+            }
+            let len = BLOCKS[step % BLOCKS.len()];
+            rig.set_block_len(len);
+            assert_no_alloc::assert_no_alloc(|| {
+                if step % 97 == 96 {
+                    rig.node.0.reset();
+                }
+                if step % 131 == 130 {
+                    let rate = [SampleRate::SR_44K1, SampleRate::SR_96K, SampleRate::SR_48K]
+                        [step / 131 % 3];
+                    rig.node
+                        .0
+                        .prepare(&Prepare::new(rate, MaxBlock::of(Samples(FRAMES))));
+                }
+            });
+            rig.block();
+            let _ = check_block(&rig, channels, lfe, len, &mut health);
+        }
+        // The fork, moved by cells, under the same window.
+        for step in 0..200usize {
+            for (k, &param) in params.iter().enumerate() {
+                fork_controls.set(param, HOSTILE[(step + k * 5) % HOSTILE.len()]);
+            }
+            let len = BLOCKS[step % BLOCKS.len()];
+            forked.set_block_len(len);
+            forked.block();
+            let _ = check_block(&forked, channels, lfe, len, &mut health);
+        }
+        assert!(health.0, "{bed:?}: a non-finite sample reached the output");
+        assert!(!health.1, "{bed:?}: the LFE was fed");
+        assert!(health.2 <= 1.0 + 1e-3, "{bed:?}: power sum {}", health.2);
+
+        // Held: lanes off, a mono fold at an ordinary bearing, the glide
+        // past; every frame is the unit power of its gains (0.5^2 for the
+        // folded input 0.5), within a hair.
+        for k in 0..4 {
+            rig.feed(k, None);
+        }
+        controls.set(UnitParam::Azimuth, 20.0);
+        controls.set(UnitParam::Elevation, 10.0);
+        controls.set(UnitParam::Spread, 0.0);
+        controls.set(UnitParam::StereoWidth, 0.0);
+        let mut least = f32::MAX;
+        for step in 0..400usize {
+            let len = BLOCKS[step % BLOCKS.len()];
+            rig.set_block_len(len);
+            rig.block();
+            // 400 blocks of 26 frames on average: past 50 ms by far.
+            if step >= 300 {
+                least = least.min(check_block(&rig, channels, lfe, len, &mut health));
+            }
+        }
+        assert!(
+            least >= 0.25 * 0.99 && health.2 <= 1.0 + 1e-3,
+            "{bed:?}: a held source's frame has power {least}, want 0.25"
+        );
+    }
 }
 
 /// Minimal format-valid HRIR sphere (a tetrahedron with delta impulse
