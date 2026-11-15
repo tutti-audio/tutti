@@ -220,7 +220,12 @@ pub fn sample_plugins() -> Vec<(String, PathBuf)> {
     let mut out: Vec<(String, PathBuf)> = entries
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "vst3"))
+        .filter(|p| {
+            p.extension()
+                .and_then(|x| x.to_str())
+                .and_then(|x| tutti_plugin_types::PluginFormat::from_extension(x).ok())
+                == Some(tutti_plugin_types::PluginFormat::Vst3)
+        })
         .filter_map(|p| {
             let name = p.file_stem()?.to_str()?.to_string();
             let bin = resolve_bundle(&p);
