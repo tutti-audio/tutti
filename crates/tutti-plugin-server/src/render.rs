@@ -20,7 +20,7 @@
 //!   and every [`RENDER_WAIT`] while the host is quiet, so a recall is never
 //!   left waiting for a block).
 //! - **Commands** ([`ToRender`]) travel one way, main to render, through a
-//!   `ringbuf` queue: the slab, the sizes the pipeline reserves at a load, the
+//!   `tutti_rt` ring: the slab, the sizes the pipeline reserves at a load, the
 //!   figures a block reads ([`RenderConfig`]) and the seat the Processor
 //!   arrives in. What the render thread has finished with goes back through a
 //!   second queue ([`Back`]) to be dropped on the main thread: a plugin's
@@ -35,14 +35,12 @@ use std::sync::{Arc, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use ringbuf::traits::{Consumer, Producer, Split};
-use ringbuf::{HeapCons, HeapProd, HeapRb};
 use tutti_plugin_ipc::{BridgeMessage, HostMessage, SlabWriter};
 use tutti_plugin_types::{
     AudioBufferMut, BlockStatus, BridgeError, BridgeResult, Features, MidiEventVec, PluginResult,
     ProcessContext, ProcessOutput, Processor, SampleFormat,
 };
-use tutti_rt::Rt;
+use tutti_rt::{Overflow, PushError, Returned, RingReader, RingWriter, Rt, ring};
 
 use crate::audio_pipeline::{AudioBlock, AudioPipeline, Clock, ProcessExtras};
 use crate::served::{Render, through};
@@ -215,8 +213,8 @@ pub(crate) enum Back {
 
 /// The main thread's end of the render thread's queues.
 pub(crate) struct RenderLink {
-    to: HeapProd<ToRender>,
-    back: HeapCons<Back>,
+    to: RingWriter<ToRender>,
+    back: RingReader<Back>,
     /// The number of the last barrier sent, and of the last one acknowledged.
     barrier_sent: u64,
     barrier_acked: u64,
@@ -231,9 +229,16 @@ impl RenderLink {
         let mut command = command;
         let giving_up = Instant::now() + SEND_PATIENCE;
         loop {
-            match self.to.try_push(command) {
+            match self.to.push(command) {
                 Ok(()) => return,
-                Err(back) => command = back,
+                Err(Returned {
+                    error: PushError::Disconnected,
+                    ..
+                }) => {
+                    tracing::error!("plugin-server: the render thread is gone");
+                    return;
+                }
+                Err(Returned { value, .. }) => command = value,
             }
             if Instant::now() >= giving_up {
                 tracing::error!("plugin-server: the render thread takes no commands");
@@ -246,7 +251,7 @@ impl RenderLink {
     /// Drops what the render thread handed back, noting the barriers it
     /// acknowledged.
     pub(crate) fn reap(&mut self) {
-        while let Some(back) = self.back.try_pop() {
+        while let Some(back) = self.back.pop() {
             if let Back::Ack(id) = back {
                 self.barrier_acked = self.barrier_acked.max(id);
             }
@@ -291,8 +296,8 @@ impl RenderLink {
 
 /// The render thread's state: what a block is rendered with.
 pub(crate) struct RenderSide {
-    commands: HeapCons<ToRender>,
-    back: HeapProd<Back>,
+    commands: RingReader<ToRender>,
+    back: RingWriter<Back>,
     slab: Option<SlabWriter>,
     pipeline: AudioPipeline,
     config: RenderConfig,
@@ -308,8 +313,8 @@ pub(crate) struct RenderSide {
 /// render side, which a thread runs ([`RenderThread::spawn`]) once the host's
 /// audio connection is there.
 pub(crate) fn link() -> (RenderLink, RenderSide) {
-    let (to, commands) = HeapRb::<ToRender>::new(COMMANDS).split();
-    let (back_tx, back) = HeapRb::<Back>::new(COMMANDS).split();
+    let (to, commands) = ring::<ToRender>(COMMANDS, Overflow::Refuse);
+    let (back_tx, back) = ring::<Back>(COMMANDS, Overflow::Refuse);
     let config = RenderConfig::new();
     (
         RenderLink {
@@ -334,7 +339,7 @@ pub(crate) fn link() -> (RenderLink, RenderSide) {
 impl RenderSide {
     /// Applies what the main thread queued.
     pub(crate) fn drain(&mut self) {
-        while let Some(command) = self.commands.try_pop() {
+        while let Some(command) = self.commands.pop() {
             match command {
                 ToRender::Slab(slab) => {
                     // The scratch is sized here, between blocks, to the most a
@@ -384,7 +389,7 @@ impl RenderSide {
     /// which only an abandoned session reaches: the main thread reaps on every
     /// command it sends.
     fn give_back(&mut self, back: Back) {
-        if self.back.try_push(back).is_err() {
+        if self.back.push(back).is_err() {
             tracing::error!("plugin-server: the main thread reaps nothing");
         }
     }
@@ -555,7 +560,7 @@ impl RenderSide {
         let output = pipeline.process(seat.as_mut(), slab, &config.clock, block)?;
         if reaches && let Some(id) = barrier.take() {
             // This block ran the Processor after the barrier was taken.
-            if back.try_push(Back::Ack(id)).is_err() {
+            if back.push(Back::Ack(id)).is_err() {
                 tracing::error!("plugin-server: the main thread reaps nothing");
             }
         }

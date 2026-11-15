@@ -3093,7 +3093,6 @@ dependencies = [
  "interprocess",
  "libc",
  "memmap2",
- "ringbuf",
  "serde",
  "tracing",
  "tracing-subscriber",
