@@ -82,12 +82,14 @@
 //! callback never meets a graph it cannot render.
 
 use tutti_graph::{
-    CommitError, Due, Editor, Env, Executor, FadeLaw, Limits, Offset, Playhead, TransportChanges,
-    declick_frames,
+    CommitError, Due, Editor, Env, Executor, FadeLaw, Limits, Offset, Playhead, RootId,
+    TransportChanges, declick_frames,
 };
 
 use crate::block_clock::{BlockClock, BlockClockReader, Pose};
 use crate::output::{DEFAULT_DEVICE_WIDTHS, OutputControl, OutputFolds};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use tutti_buffers::{FoldError, InterleavedMut, Planes};
 use tutti_metering::{LoadMeter, LoadRecorder};
@@ -211,6 +213,9 @@ struct GraphRender {
     /// frame clock: what a producer thread's `ClockMap` is fed
     /// ([`Engine::block_clock`]).
     clock: BlockClock,
+    /// The root of the plan the last block rendered, for the control side to
+    /// retire the older roots' folds by ([`OutputControl::reclaim`]).
+    installed: Arc<AtomicU64>,
 }
 
 impl GraphRender {
@@ -354,6 +359,7 @@ impl Engine {
                 playhead: Playhead::new(),
                 dropped_seen,
                 clock,
+                installed: Arc::clone(output.installed()),
             }),
             fader: AudioThreadCell::new(Fader::new(fade_frames(rate))),
             capacity: Samples(stride),
@@ -388,7 +394,7 @@ impl Engine {
     /// front pair of a 4-wide (quad) or a stereo one. An undeclared 4-wide
     /// root is **treated as quad** into a 6, 8 or 12-wide device (its rears are
     /// the back pair, not the centre and LFE); a root of independent buses says
-    /// so with [`OutputControl::declare_root`] and stays by index.
+    /// so with [`OutputControl::publish_root`] and stays by index.
     ///
     /// A callback mid-block keeps the folds it lent, and the next call reads
     /// the new ones. Returns at once, publishing nothing, for a width already
@@ -407,7 +413,8 @@ impl Engine {
 
     /// The control side of the output folds, to keep when this engine moves to
     /// the audio thread: it declares what the graph root is
-    /// ([`OutputControl::declare_root`]) and adds devices, publishing into the
+    /// ([`OutputControl::publish_root`]), states what a device is
+    /// ([`OutputControl::state_device`]) and adds devices, publishing into the
     /// folds this engine lends.
     pub fn output_control(&self) -> OutputControl {
         self.output.clone()
@@ -1213,7 +1220,12 @@ impl GraphRender {
         // block, so the width, the block bound and the rate read here are the
         // ones the block renders with. The editor's limits refuse a graph
         // wider than the scratch.
-        let width = self.exec.plan().map_or(0, |p| p.global_outputs());
+        let (root, width) = self
+            .exec
+            .plan()
+            .map_or((RootId::GENESIS, 0), |p| (p.root_id(), p.global_outputs()));
+        // A relaxed store: the control side only needs it to catch up.
+        self.installed.store(root.get(), Ordering::Relaxed);
         debug_assert!(width <= MAX_CHANNELS, "the editor's limits refuse this");
         let width = width.min(MAX_CHANNELS);
         let block = &mut output[at * out_ch..(at + len) * out_ch];
@@ -1234,7 +1246,7 @@ impl GraphRender {
         // The fold of this width into the device, built on the control side.
         // `width` is within `1..=MAX_CHANNELS` (the editor's limits), so a
         // fold is there.
-        match folds.get(out_ch, width) {
+        match folds.get(root, out_ch, width) {
             Some(fold) => {
                 let mut device = ChannelLayout::try_from(out_ch)
                     .ok()
@@ -1277,6 +1289,7 @@ mod tests {
     use tutti_types::Bpm;
     use tutti_types::ChannelTopology;
     use tutti_types::MaxBlock;
+    use tutti_types::Placement;
 
     /// A graph walk's `Pieces` that stores a new tempo from "the control
     /// thread" while each piece runs: the store races the walk, staged
@@ -1655,6 +1668,22 @@ mod tests {
         ed.commit().expect("commits");
     }
 
+    /// Declares `root` as the next root generation the way a session does:
+    /// its folds are published first, then the spec carries the id and the
+    /// commit is sent.
+    fn declare(
+        ed: &mut Editor,
+        control: &OutputControl,
+        root: Option<ChannelTopology>,
+        device: ChannelLayout,
+    ) -> Result<RootId, FoldError> {
+        let id = ed.spec().root_id.next();
+        control.publish_root(id, root, device)?;
+        ed.spec_mut().root_id = id;
+        ed.commit().expect("commits");
+        Ok(id)
+    }
+
     /// One graph block as `process_segment` runs it, with `between` run after
     /// `settle` and before `render`: the control thread's commit landing in
     /// the gap.
@@ -1672,7 +1701,8 @@ mod tests {
         let t = g.transport.begin_block();
         g.transport.advance(len, &t);
         let mut out = vec![-9.0f32; len * out_ch];
-        let folds = OutputFolds::up_to(16);
+        let mut reader = engine.folds.borrow_mut();
+        let folds = reader.lend();
         g.render(
             &mut out,
             &folds,
@@ -1699,7 +1729,7 @@ mod tests {
             for device in 1..=DEFAULT_DEVICE_WIDTHS {
                 let ordered = |w: usize| [1, 2, 4, 6, 8, 12].contains(&w);
                 let refused = root > device && !(ordered(root) && ordered(device));
-                let Some(fold) = folds.get(device, root) else {
+                let Some(fold) = folds.get(RootId::GENESIS, device, root) else {
                     assert!(refused, "{root} -> {device} has no fold");
                     continue;
                 };
@@ -1709,17 +1739,28 @@ mod tests {
             }
         }
         for (root, device) in [(5, 3), (6, 5), (8, 7), (3, 1), (4, 3)] {
-            assert!(folds.get(device, root).is_none(), "{root} -> {device}");
+            assert!(
+                folds.get(RootId::GENESIS, device, root).is_none(),
+                "{root} -> {device}"
+            );
             assert!(folds.has_device(device));
         }
-        assert!(folds.get(DEFAULT_DEVICE_WIDTHS + 1, 2).is_none());
-        assert!(folds.get(2, MAX_CHANNELS + 1).is_none());
-        assert!(folds.get(0, 2).is_none() && folds.get(2, 0).is_none());
+        let first = |device, root| folds.get(RootId::GENESIS, device, root);
+        assert!(first(DEFAULT_DEVICE_WIDTHS + 1, 2).is_none());
+        assert!(first(2, MAX_CHANNELS + 1).is_none());
+        assert!(first(0, 2).is_none() && first(2, 0).is_none());
+        assert!(
+            folds.get(RootId::GENESIS.next(), 2, 2).is_none(),
+            "a root never published has no fold"
+        );
 
         let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
         let run = |root: usize, device: usize, frame: &[f32]| {
             let mut out = vec![9.0f32; device];
-            folds.get(device, root).unwrap().frame(frame, &mut out);
+            folds
+                .get(RootId::GENESIS, device, root)
+                .unwrap()
+                .frame(frame, &mut out);
             out
         };
         assert_eq!(
@@ -1812,12 +1853,11 @@ mod tests {
         assert_eq!(first_frame(&engine, 6), [41.0, 42.0, 0.0, 0.0, 43.0, 44.0]);
 
         let control = engine.output_control();
-        control
-            .declare_root(Some(ChannelTopology::unassigned(ChannelLayout::QUAD)), six)
-            .expect("buses place by index");
+        let buses = Some(ChannelTopology::unassigned(ChannelLayout::QUAD));
+        declare(&mut ed, &control, buses, six).expect("buses place by index");
         assert_eq!(first_frame(&engine, 6), [41.0, 42.0, 43.0, 44.0, 0.0, 0.0]);
 
-        control.declare_root(None, six).expect("undeclared");
+        declare(&mut ed, &control, None, six).expect("undeclared");
         assert_eq!(first_frame(&engine, 6), [41.0, 42.0, 0.0, 0.0, 43.0, 44.0]);
     }
 
@@ -1841,9 +1881,7 @@ mod tests {
         assert_eq!(first_frame(&engine, 2), folded);
         let control = engine.output_control();
         let five_one = ChannelTopology::assumed(ChannelLayout::from(6u16));
-        control
-            .declare_root(Some(five_one), ChannelLayout::STEREO)
-            .expect("5.1 into stereo");
+        declare(&mut ed, &control, Some(five_one), ChannelLayout::STEREO).expect("5.1 into stereo");
         assert_eq!(first_frame(&engine, 2), folded);
         // The same six channels declared with the front pair swapped.
         let swapped = ChannelTopology::new([
@@ -1855,22 +1893,20 @@ mod tests {
             SideRight,
         ])
         .unwrap();
-        control
-            .declare_root(Some(swapped), ChannelLayout::STEREO)
-            .expect("places");
+        declare(&mut ed, &control, Some(swapped), ChannelLayout::STEREO).expect("places");
         assert_eq!(
             first_frame(&engine, 2),
             [62.0 + m * 63.0 + m * 65.0, 61.0 + m * 63.0 + m * 66.0]
         );
     }
 
-    /// The fold follows the plan, not the declaration history: with the plan
-    /// still four wide (it is never re-committed), three declarations at other
-    /// widths in a row (a quad of buses, a 5.1, a 7.1) leave the four-wide plan
-    /// on the first one's by-index fold. Re-declaring at its own width replaces
-    /// it at once, and undeclaring is the bare quad.
+    /// The fold follows the plan, not the publication history: roots published
+    /// and never committed (a quad of buses, a 5.1, a 7.1) leave the plan
+    /// rendering on the fold of the root it carries, and the commit that
+    /// carries a published root's id is the block where that root's fold
+    /// takes over, with the plan.
     #[test]
-    fn declarations_at_other_widths_leave_the_plan_in_flight_its_fold() {
+    fn a_published_root_takes_over_with_the_plan_that_carries_its_id() {
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) =
             Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
@@ -1879,26 +1915,176 @@ mod tests {
         let eight = ChannelLayout::from(8u16);
         let _ = first_frame(&engine, 8);
         let control = engine.output_control();
-        let by_index = [41.0, 42.0, 43.0, 44.0, 0.0, 0.0, 0.0, 0.0];
+        let quad_on_eight = [41.0, 42.0, 0.0, 0.0, 0.0, 0.0, 43.0, 44.0];
+        assert_eq!(first_frame(&engine, 8), quad_on_eight);
+        let mut id = ed.spec().root_id;
         for root in [
             ChannelTopology::unassigned(ChannelLayout::QUAD),
             ChannelTopology::assumed(ChannelLayout::from(6u16)),
             ChannelTopology::assumed(eight),
         ] {
-            control.declare_root(Some(root), eight).unwrap();
-            assert_eq!(first_frame(&engine, 8), by_index);
+            id = id.next();
+            control.publish_root(id, Some(root), eight).unwrap();
+            assert_eq!(first_frame(&engine, 8), quad_on_eight, "{id}");
         }
-        // At its own width: replaced at once (the quad of speakers, rears on 6, 7).
+        // The plan that carries the by-index quad's id: its fold, at once.
+        id = id.next();
         control
-            .declare_root(Some(tutti_types::Bed::Quad.topology()), eight)
+            .publish_root(
+                id,
+                Some(ChannelTopology::unassigned(ChannelLayout::QUAD)),
+                eight,
+            )
             .unwrap();
-        assert_ne!(first_frame(&engine, 8), by_index);
-        // Undeclared: every entry goes, the bare quad.
-        control.declare_root(None, eight).unwrap();
+        ed.spec_mut().root_id = id;
+        ed.commit().unwrap();
         assert_eq!(
             first_frame(&engine, 8),
-            [41.0, 42.0, 0.0, 0.0, 0.0, 0.0, 43.0, 44.0]
+            [41.0, 42.0, 43.0, 44.0, 0.0, 0.0, 0.0, 0.0]
         );
+    }
+
+    /// A root change is bit-exact at the plan swap: in one engine block the
+    /// plan of the old root renders with the old root's fold, and the next
+    /// block, the first of the new plan, with the new root's, with no block of
+    /// the new plan folded by the old root or the other way round.
+    #[test]
+    fn the_fold_swaps_at_the_block_the_plan_swaps() {
+        use std::cell::RefCell;
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
+        rewire(&mut ed, 4);
+        let ed = RefCell::new(ed);
+        let engine = Engine::new(&transport, &mut ed.borrow_mut(), exec).expect("within limits");
+        let control = engine.output_control();
+        let six = ChannelLayout::from(6u16);
+        let _ = block_with(&engine, 6, || {});
+        let quad = [41.0, 42.0, 0.0, 0.0, 43.0, 44.0];
+        let buses = [41.0, 42.0, 43.0, 44.0, 0.0, 0.0];
+        let frames = |row: [f32; 6]| -> Vec<f32> { (0..8).flat_map(|_| row).collect() };
+        assert_eq!(block_with(&engine, 6, || {}), frames(quad));
+        // The commit lands after this block's `settle`: this block is the old
+        // plan and the old fold, the next the new plan and the new fold.
+        let got = block_with(&engine, 6, || {
+            declare(
+                &mut ed.borrow_mut(),
+                &control,
+                Some(ChannelTopology::unassigned(ChannelLayout::QUAD)),
+                six,
+            )
+            .unwrap();
+        });
+        assert_eq!(got, frames(quad));
+        assert_eq!(block_with(&engine, 6, || {}), frames(buses));
+    }
+
+    /// A root with no fold into the device (five buses into three) is
+    /// reported by `has_fold` before any block runs, so the session can
+    /// refuse the commit that would make it; a width a declared root does not
+    /// have is not one it renders.
+    #[test]
+    fn has_fold_names_the_pairs_a_commit_would_make() {
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        let control = engine.output_control();
+        let three = ChannelLayout::from(3u16);
+        let genesis = RootId::GENESIS;
+        assert!(control.has_fold(genesis, 3, three));
+        assert!(
+            control.has_fold(genesis, 2, three),
+            "stereo into 3: zero-filled"
+        );
+        assert!(!control.has_fold(genesis, 5, three), "5 into 3 drops two");
+        let id = genesis.next();
+        control
+            .publish_root(
+                id,
+                Some(ChannelTopology::unassigned(ChannelLayout::from(2u16))),
+                three,
+            )
+            .unwrap();
+        assert!(control.has_fold(id, 2, three));
+        assert!(
+            !control.has_fold(id, 3, three),
+            "the root is declared 2 wide"
+        );
+        assert!(control.has_width(id, 2) && !control.has_width(id, 3));
+        assert!(!control.has_fold(id.next(), 2, three), "not published");
+    }
+
+    /// A device whose wiring is stated is folded into by speaker, and is
+    /// reported `Stated`; the width's order is `Assumed`. A stereo root into
+    /// a device stated right then left lands its left on the device's second
+    /// channel, and taking the statement back is the identity again.
+    #[test]
+    fn a_stated_device_is_folded_into_by_its_speakers() {
+        use tutti_types::Speaker::*;
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        rewire(&mut ed, 2);
+        let control = engine.output_control();
+        let _ = first_frame(&engine, 2);
+        // Assumed stereo; a 2-wide root passes through.
+        let stereo = ChannelLayout::STEREO;
+        assert_eq!(
+            control.device(stereo).map(|d| d.placement),
+            Some(Placement::Assumed)
+        );
+        assert_eq!(first_frame(&engine, 2), [21.0, 22.0]);
+        // A 2-wide device stated as a left-right swap of the front pair: the
+        // root's left lands on the device's channel 1.
+        let swapped = ChannelTopology::new([FrontRight, FrontLeft]).unwrap();
+        control.state_device(stereo, Some(swapped.clone())).unwrap();
+        let placed = control.device(stereo).unwrap();
+        assert_eq!(placed.placement, Placement::Stated);
+        assert_eq!(placed.topology, swapped);
+        assert_eq!(first_frame(&engine, 2), [22.0, 21.0]);
+        // Taken back: the width's order.
+        control.state_device(stereo, None).unwrap();
+        assert_eq!(
+            control.device(stereo).map(|d| d.placement),
+            Some(Placement::Assumed)
+        );
+        assert_eq!(first_frame(&engine, 2), [21.0, 22.0]);
+        // A statement of another width than the device is refused.
+        assert!(matches!(
+            control.state_device(ChannelLayout::from(6u16), Some(swapped)),
+            Err(FoldError::Buffer(
+                tutti_buffers::BufferError::WidthMismatch { .. }
+            ))
+        ));
+    }
+
+    /// A root generation's folds are published until a plan of a later root
+    /// has rendered: `reclaim` keeps the older root while its plan is the one
+    /// rendering, drops it after the new plan's first block, and frees what the
+    /// replaced set held once no block holds it.
+    #[test]
+    fn the_old_roots_folds_go_at_the_first_reclaim_after_the_new_plan_renders() {
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        rewire(&mut ed, 2);
+        let control = engine.output_control();
+        let stereo = ChannelLayout::STEREO;
+        let _ = first_frame(&engine, 2);
+        let old = ed.spec().root_id;
+        let new = declare(&mut ed, &control, None, stereo).unwrap();
+        // Committed and published, not yet rendered: both roots are held.
+        let _ = control.reclaim();
+        assert!(control.has_fold(old, 2, stereo) && control.has_fold(new, 2, stereo));
+        // The new plan's first block.
+        let _ = first_frame(&engine, 2);
+        let _ = control.reclaim();
+        assert!(!control.has_fold(old, 2, stereo), "the old root is gone");
+        assert!(control.has_fold(new, 2, stereo));
+        assert_eq!(control.reclaim(), 0, "nothing is left pinned");
     }
 
     /// A fold set a block holds when it is replaced stays pinned until the
@@ -1914,7 +2100,8 @@ mod tests {
         let mut reader = loan_holder.borrow_mut();
         let loan = reader.lend();
         control
-            .declare_root(
+            .publish_root(
+                ed.spec().root_id.next(),
                 Some(ChannelTopology::unassigned(ChannelLayout::QUAD)),
                 ChannelLayout::from(6u16),
             )
@@ -1937,8 +2124,10 @@ mod tests {
         let _ = first_frame(&engine, 2);
         let before = first_frame(&engine, 2);
         let control = engine.output_control();
+        let next = ed.spec().root_id.next();
         assert_eq!(
-            control.declare_root(
+            control.publish_root(
+                next,
                 Some(ChannelTopology::unassigned(ChannelLayout::QUAD)),
                 ChannelLayout::STEREO
             ),
@@ -1955,9 +2144,10 @@ mod tests {
         ])
         .unwrap();
         assert!(matches!(
-            control.declare_root(Some(lfe2), ChannelLayout::STEREO),
+            control.publish_root(next, Some(lfe2), ChannelLayout::STEREO),
             Err(FoldError::Unnamed { .. })
         ));
+        assert!(!control.has_fold(next, 4, ChannelLayout::STEREO));
         assert_eq!(first_frame(&engine, 2), before);
     }
 

@@ -723,3 +723,59 @@ fn a_714_root_block_is_allocation_free() {
         );
     }
 }
+
+/// A published root and a stated device are looked up and applied without
+/// allocating: a 7.1.4 root declared as the next generation, into a twelve-wide
+/// device stated with its front pair swapped, renders the swapped fronts and
+/// every other channel straight, in blocks that allocate nothing.
+#[test]
+fn a_declared_root_into_a_stated_device_is_allocation_free() {
+    use tutti_graph::{Editor, NodeKey, OutPort, Prepare, Source, Unforkable};
+    use tutti_types::{Bed, ChannelTopology, Speaker};
+
+    let transport = Transport::new(SampleRate::of(48_000.0));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::of(48_000.0),
+        tutti_types::MaxBlock::of(tutti_types::Samples(512)),
+    ));
+    ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
+    ed.spec_mut().topology.set_outputs((0..12).map(|port| {
+        Source::Node(OutPort {
+            node: NodeKey(1),
+            port,
+        })
+    }));
+    ed.commit().expect("commits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
+    let control = engine.output_control();
+    let twelve = ChannelLayout::from(12u16);
+    let mut speakers = Bed::Surround714.topology().positions().unwrap().to_vec();
+    speakers.swap(0, 1);
+    assert_eq!(speakers[0], Speaker::FrontRight);
+    control
+        .state_device(twelve, Some(ChannelTopology::new(speakers).unwrap()))
+        .expect("a stated device");
+    let id = ed.spec().root_id.next();
+    control
+        .publish_root(id, Some(Bed::Surround714.topology()), twelve)
+        .expect("places");
+    ed.spec_mut().root_id = id;
+    ed.commit().expect("commits");
+
+    let mut out = vec![0.0f32; 512 * 12];
+    // The commit applies on this block, which may allocate.
+    engine.process(&mut InterleavedMut::new(&mut out, twelve).unwrap());
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..16 {
+            engine.process(&mut InterleavedMut::new(&mut out, twelve).unwrap());
+        }
+    });
+    let v = |c: usize| (c + 1) as f32 / 16.0;
+    for frame in out.as_chunks::<12>().0 {
+        assert_eq!(frame[0], v(1), "the left channel carries the right speaker");
+        assert_eq!(frame[1], v(0));
+        for (c, &s) in frame.iter().enumerate().skip(2) {
+            assert_eq!(s, v(c), "channel {c}");
+        }
+    }
+}
