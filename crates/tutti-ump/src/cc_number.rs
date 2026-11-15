@@ -212,6 +212,25 @@ impl CCNumber {
         }
     }
 
+    /// Whether a MIDI 2.0 Protocol receiver ignores this controller as a
+    /// Control Change (M2-104 §7.4.6): Bank Select (0 and 32), Data Entry (6
+    /// and 38) and the RPN and NRPN selects (98 to 101), which the Program
+    /// Change, Registered Controller and Assignable Controller messages
+    /// carry instead.
+    ///
+    /// ```
+    /// use tutti_ump::CCNumber;
+    ///
+    /// assert!(CCNumber::BANK_SELECT.is_ignored_in_midi2());
+    /// assert!(CCNumber::RPN_MSB.is_ignored_in_midi2());
+    /// assert!(!CCNumber::VOLUME.is_ignored_in_midi2());
+    /// ```
+    #[inline]
+    #[must_use]
+    pub const fn is_ignored_in_midi2(self) -> bool {
+        matches!(self.0, 0 | 6 | 32 | 38 | 98..=101)
+    }
+
     /// Returns the raw 0-based controller number, for a UMP constructor or a
     /// wire byte.
     #[inline]
