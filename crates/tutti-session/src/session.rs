@@ -657,6 +657,7 @@ impl Session<crate::Detached> {
 }
 
 impl<C: Clock> Session<C> {
+    #[cfg(feature = "device")]
     /// The same session on the clock `running` belongs to: every field moves,
     /// the clock's own state is swapped, and the old one is handed back.
     ///
@@ -734,7 +735,7 @@ impl<C: Clock> Session<C> {
             Session {
                 #[cfg(feature = "plugin")]
                 early_work,
-                running: running,
+                running,
                 graph,
                 resource_ids,
                 pool,

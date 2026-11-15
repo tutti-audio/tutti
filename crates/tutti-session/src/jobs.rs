@@ -236,6 +236,7 @@ impl<C: Clock> Jobs<C> {
 }
 
 impl<C: Clock> Jobs<C> {
+    #[cfg(feature = "device")]
     /// The same jobs for a session on clock `K`: the spawner, the counter and
     /// the channel carry over, and no lander does (the caller failed them all).
     /// A late arrival of a failed job finds no lander and is ignored.
@@ -347,6 +348,7 @@ impl<C: Clock> Jobs<C> {
 }
 
 impl<C: Clock> Session<C> {
+    #[cfg(feature = "device")]
     /// Fails every job still in flight as [`JobFailed::Dropped`], landing the
     /// failure on its lander, so each reports once. A lander may submit another
     /// job, which fails in turn.

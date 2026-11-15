@@ -30,7 +30,9 @@
 //!   ([`Error::Reprepare`]).
 
 use tutti_cpal::{AudioEngine, DeviceHost, DeviceSelector, TuttiDriver};
-use tutti_engine::{OutputSpec, StreamDriver, TimerDriver};
+use tutti_engine::TimerDriver;
+#[cfg(feature = "testing")]
+use tutti_engine::{OutputSpec, StreamDriver};
 use tutti_types::{ChannelLayout, SampleRate};
 
 use crate::clock::SystemEngine;
@@ -50,14 +52,14 @@ use crate::{
 #[derive(Debug, thiserror::Error)]
 #[error("{error}")]
 pub struct ClockError<S> {
-    session: S,
+    session: Box<S>,
     error: RestartError,
 }
 
 impl<S> ClockError<S> {
     pub(crate) fn new(session: S, error: Error) -> Self {
         Self {
-            session,
+            session: Box::new(session),
             error: RestartError::new(error),
         }
     }
@@ -71,13 +73,13 @@ impl<S> ClockError<S> {
     /// The session, on the clock it was on.
     #[must_use]
     pub fn into_session(self) -> S {
-        self.session
+        *self.session
     }
 
     /// The session and why the switch failed.
     #[must_use]
     pub fn into_parts(self) -> (S, RestartError) {
-        (self.session, self.error)
+        (*self.session, self.error)
     }
 }
 
