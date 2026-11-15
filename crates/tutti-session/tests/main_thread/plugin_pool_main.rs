@@ -755,6 +755,107 @@ fn a_plugin_that_grows_wider_than_a_block_is_refused_by_name() {
     r.s.close(tutti_fixtures::main_thread());
 }
 
+/// **A node muted before its plugin changes ports is still muted after:** the
+/// swap keeps the mode of the key. (A bypassed node is not run, so it never
+/// hands its Processor back and its plugin's restart waits for the bypass to
+/// end; a muted node keeps running.)
+fn a_muted_node_stays_muted_through_a_port_change() {
+    use tutti_session::NodeMode;
+    let mut r = rebound(0);
+    let node = r.node;
+    r.s.graph()
+        .set_mode(node, NodeMode::Muted)
+        .expect("a node can be muted");
+    r.change_ports(1);
+    let _ = r.until("the wider node", |s| {
+        s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
+    });
+    assert_eq!(r.s.graph_ref().mode(node), Ok(NodeMode::Muted));
+    r.s.close(tutti_fixtures::main_thread());
+}
+
+/// **A change of ports under a graph that re-prepares is rebuilt once the
+/// graph resumes, and never refused.** The re-prepare is under way when the
+/// plugin announces its ports: no refusal is reported, and the node ends with
+/// the new ports.
+fn a_rebuild_waits_for_a_re_preparing_graph_and_then_succeeds() {
+    use tutti_session::{PluginChange, PluginEvent};
+    probe().set(ClapSwitch::PortLayout, 0);
+    probe().set(ClapSwitch::RenderMode, 2);
+    let (catalog, _dir) = catalog();
+    let mut s = Session::builder()
+        .max_block(MaxBlock::of(Samples(512)))
+        .build_detached(SampleRate::SR_48K)
+        .expect("a detached session builds");
+    s.pool(
+        s.plugin_entry("fx", &id(), &catalog)
+            .hosting(Hosting::InProcess),
+    )
+    .unwrap();
+    assert!(matches!(next_event(&mut s, "fx"), PoolEvent::Loaded));
+    let node = s.add_pooled_plugin(&"fx").unwrap();
+    let mut side = s.graph().take_audio_side();
+    let mut out = vec![Vec::new(), Vec::new()];
+    // The plugin has its Processor in the graph before the re-prepare.
+    let _ = s.update();
+    side.render(512, 512, &mut out);
+    s.graph().set_sample_rate(SampleRate::SR_44K1);
+    assert!(s.graph_ref().testing().is_repreparing(), "mid re-prepare");
+    probe().set(ClapSwitch::PortLayout, 1);
+    probe().set(ClapSwitch::RequestPortsRescan, 0x24);
+    let mut events = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while s.graph_ref().node_outputs(node).is_ok_and(|n| n != 3) {
+        assert!(Instant::now() < deadline, "the wider node never came");
+        side.render(512, 512, &mut out);
+        events.extend(s.update());
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert!(
+        !events.iter().any(|event| matches!(
+            event,
+            SessionEvent::Plugin(PluginEvent {
+                change: PluginChange::PortsRefused { .. },
+                ..
+            })
+        )),
+        "a graph that re-prepares is waited for, not refused"
+    );
+    s.close(tutti_fixtures::main_thread());
+}
+
+/// **A node removed while its rebuild is settling leaves nothing behind.** The
+/// record, its rebinder and the plugin it keeps alive go with the node: the
+/// next updates report nothing about the key, and the plugin is closed.
+fn a_node_removed_while_its_rebuild_settles_leaves_nothing_behind() {
+    let mut r = rebound(0);
+    let node = r.node;
+    probe().thread_reset();
+    r.change_ports(1);
+    let _ = r.until("the wider node", |s| {
+        s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
+    });
+    r.s.graph().remove(node).expect("the node is there");
+    for _ in 0..6 {
+        let events = r.s.update();
+        assert!(
+            !events.iter().any(|event| matches!(
+                event,
+                SessionEvent::Plugin(tutti_session::PluginEvent { node: n, .. })
+                    if *n == node.erase()
+            )),
+            "nothing is said of a removed node: {events:?}"
+        );
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert!(r.s.plugin_view(node).is_err(), "the record is gone");
+    assert!(
+        deactivation().observed,
+        "the plugin was closed: no rebinder kept it open"
+    );
+    r.s.close(tutti_fixtures::main_thread());
+}
+
 pub(crate) const CASES: &[(&str, fn())] = tutti_fixtures::cases!["plugin_pool_main";
 an_in_process_plugin_lands_in_an_update_on_the_main_thread,
 an_in_process_plugin_needs_the_main_thread_and_is_refused_without_one,
@@ -769,4 +870,7 @@ an_in_process_save_the_main_thread_does_not_run_is_unavailable,
 a_plugin_that_widens_its_ports_is_re_inserted_wider,
 a_plugin_that_narrows_its_ports_reports_the_wiring_it_lost,
 a_plugin_that_grows_wider_than_a_block_is_refused_by_name,
+a_muted_node_stays_muted_through_a_port_change,
+a_rebuild_waits_for_a_re_preparing_graph_and_then_succeeds,
+a_node_removed_while_its_rebuild_settles_leaves_nothing_behind,
 ];

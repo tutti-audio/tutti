@@ -100,12 +100,6 @@ impl<P> Hand<P> {
         self.successor = Some(successor.0);
     }
 
-    /// Takes the successor back, when the Processor has not moved to it:
-    /// whether there was one to take.
-    pub fn withdraw(&mut self) -> bool {
-        self.successor.take().is_some()
-    }
-
     /// Whether an [`install`](Self::install) has not yet moved the Processor's
     /// way to its new realtime end: the Processor may still be in the old one.
     #[must_use]
@@ -131,7 +125,9 @@ impl<P> Hand<P> {
 pub struct Successor<P>(tutti_rt::Hand<P>);
 
 impl<P: Send> Successor<P> {
-    /// A new realtime end, and the control end that lends to it.
+    /// A new realtime end, and the control end that lends to it. The end stays
+    /// empty, and lent nothing, until a [`Hand`] it is installed in lends its
+    /// Processor to it; a node over it renders silence until then.
     #[must_use]
     pub fn new() -> (Self, tutti_rt::Rt<P>) {
         let (end, rt) = tutti_rt::handoff();
