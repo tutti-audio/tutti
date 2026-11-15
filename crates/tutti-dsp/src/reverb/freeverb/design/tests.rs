@@ -1,6 +1,6 @@
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
-use tutti_types::{Db, Seconds};
+use tutti_types::{Db, Gain, SampleSpan, Seconds};
 
 use super::*;
 use crate::contract::{FamilyCase, Figure, Hook, LtiCase, ReverbCase};
@@ -41,7 +41,7 @@ impl FamilyCase for FreeverbFamily {
     }
 
     fn musical_delay(&self, n: &Network) -> usize {
-        n.min_delay() as usize
+        n.min_delay().map_or(0, |d| d.to_samples_floor().get())
     }
 
     /// Freeverb has no size, diffusion, pre-delay, freeze, width or wet
@@ -118,7 +118,7 @@ impl LtiCase for FreeverbFamily {
             .into_iter()
             .flat_map(|(room, damp)| {
                 let loop_gain = f64::from(room * 0.28 + 0.7);
-                let dc = 8.0 * f64::from(Freeverb::FIXED_GAIN) / (1.0 - loop_gain);
+                let dc = 8.0 * f64::from(Freeverb::FIXED_GAIN.get()) / (1.0 - loop_gain);
                 (0..2).map(move |output| Figure {
                     controls: controls(room, damp),
                     rate,
@@ -132,7 +132,7 @@ impl LtiCase for FreeverbFamily {
     }
 
     fn fill(&self, rate: SampleRate, trips: f32) -> usize {
-        (trips * self.capacity(rate).line) as usize
+        (f64::from(trips) * self.capacity(rate).line.get()) as usize
     }
 }
 
@@ -157,7 +157,7 @@ fn the_general_midi_controls_give_todays_coefficients_to_the_bit() {
     assert!(
         fdn.input
             .iter()
-            .all(|&g| g.to_bits() == Freeverb::FIXED_GAIN.to_bits())
+            .all(|&g| g.get().to_bits() == Freeverb::FIXED_GAIN.get().to_bits())
     );
     for stage in &n.stages[1..] {
         let Stage::AllPass(a) = stage else {
@@ -165,7 +165,7 @@ fn the_general_midi_controls_give_todays_coefficients_to_the_bit() {
         };
         assert!(
             a.iter()
-                .all(|a| a.gain.to_bits() == Freeverb::ALLPASS_FEEDBACK.to_bits())
+                .all(|a| a.gain.get().to_bits() == Freeverb::ALLPASS_FEEDBACK.get().to_bits())
         );
         // Freeverb's own all-pass, not the lattice (see `AllPassForm`).
         assert!(a.iter().all(|a| a.form == AllPassForm::Freeverb));
@@ -174,8 +174,8 @@ fn the_general_midi_controls_give_todays_coefficients_to_the_bit() {
     // loop gain 0.84, the damping 0.2, the all-pass feedback 0.5, the input 0.015.
     assert_eq!(Freeverb::ROOM_FEEDBACK, 0.84);
     assert_eq!(Freeverb::DAMPING, 0.2);
-    assert_eq!(Freeverb::ALLPASS_FEEDBACK, 0.5);
-    assert_eq!(Freeverb::FIXED_GAIN, 0.015);
+    assert_eq!(Freeverb::ALLPASS_FEEDBACK, Gain::new(0.5));
+    assert_eq!(Freeverb::FIXED_GAIN, Gain::new(0.015));
 }
 
 /// The network's lines are those of a `Freeverb` built at the same rate,
@@ -194,7 +194,7 @@ fn the_network_has_the_lines_of_a_freeverb_built_at_the_rate() {
         let Stage::Fdn(fdn) = &n.stages[0] else {
             panic!()
         };
-        let lengths: Vec<usize> = fdn.lines.iter().map(|l| l.length as usize).collect();
+        let lengths: Vec<usize> = fdn.lines.iter().map(|l| l.length.get() as usize).collect();
         let want: Vec<usize> = figures
             .combs_left
             .iter()
@@ -211,7 +211,7 @@ fn the_network_has_the_lines_of_a_freeverb_built_at_the_rate() {
         ) {
             let Stage::AllPass(a) = stage else { panic!() };
             assert_eq!(
-                (a[0].delay as usize, a[1].delay as usize),
+                (a[0].delay.get() as usize, a[1].delay.get() as usize),
                 (*l, *r),
                 "{hz} Hz"
             );
@@ -230,7 +230,7 @@ fn a_gain(n: &Network) -> f32 {
     let Stage::AllPass(a) = &n.stages[1] else {
         panic!()
     };
-    a[0].gain
+    a[0].gain.get()
 }
 
 /// The stereo spread: the right combs and all-passes are 23 frames longer
@@ -248,8 +248,11 @@ fn the_tunings_and_the_stereo_spread_are_freeverbs() {
         1116.0f32, 1188.0, 1277.0, 1356.0, 1422.0, 1491.0, 1557.0, 1617.0,
     ];
     for (i, base) in left.iter().enumerate() {
-        assert_eq!(fdn.lines[i].length, *base);
-        assert_eq!(fdn.lines[8 + i].length, base + 23.0);
+        assert_eq!(fdn.lines[i].length, SampleSpan::of(f64::from(*base)));
+        assert_eq!(
+            fdn.lines[8 + i].length,
+            SampleSpan::of(f64::from(*base) + 23.0)
+        );
     }
     assert_eq!(fdn.output.rows.len(), 2);
     for (i, (l, r)) in fdn.output.rows[0]
@@ -257,12 +260,25 @@ fn the_tunings_and_the_stereo_spread_are_freeverbs() {
         .zip(fdn.output.rows[1].iter())
         .enumerate()
     {
-        assert_eq!((*l, *r), if i < 8 { (1.0, 0.0) } else { (0.0, 1.0) });
+        assert_eq!(
+            (*l, *r),
+            if i < 8 {
+                (Gain::UNITY, Gain::SILENT)
+            } else {
+                (Gain::SILENT, Gain::UNITY)
+            }
+        );
     }
     let aps = [556.0f32, 441.0, 341.0, 225.0];
     for (stage, base) in n.stages[1..].iter().zip(aps) {
         let Stage::AllPass(a) = stage else { panic!() };
-        assert_eq!((a[0].delay, a[1].delay), (base, base + 23.0));
+        assert_eq!(
+            (a[0].delay, a[1].delay),
+            (
+                SampleSpan::of(f64::from(base)),
+                SampleSpan::of(f64::from(base) + 23.0)
+            )
+        );
     }
     // 16 combs and 8 all-passes: 2 * (sum of the tunings) + 8 * 23 + 4 * 23.
     let total: f32 = 2.0 * (left.iter().sum::<f32>() + aps.iter().sum::<f32>()) + 12.0 * 23.0;

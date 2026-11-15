@@ -393,3 +393,31 @@ fn early_readings_whose_delay_shrinks_do_not_restart() {
     let (error, ..) = link.error(&rx, 0.55);
     assert!(error < 40e-6, "{error}");
 }
+
+/// A sender may send extra JR Clocks at a shorter period (M2-104 §7.2.2.1), so
+/// the receiver draws no conclusion from the interval between them: clocks
+/// 10 ms, 240 ms, 10 ms and 250 ms apart over a link with no latency, jitter or
+/// drift are all taken, report only the tick's rounding as jitter (two ticks,
+/// 64 us), and a message sent at 0.4 s maps to 0.4 s after the base within the
+/// same.
+/// Spec: m2-104/7.2.2.1#6
+#[test]
+fn the_interval_between_clocks_says_nothing_of_the_link() {
+    let mut link = Link::new(0.0, 100.0, Duration::ZERO);
+    link.latency = Duration::ZERO;
+    let mut rx = JrReceiver::new();
+    for t in [0.0, 0.010, 0.250, 0.260, 0.510] {
+        assert_eq!(link.clock(&mut rx, t), ClockHeard::Taken);
+    }
+    let sent = 0.4;
+    let arrival = link.arrival(sent);
+    let JrTime::Sent { at, jitter } = rx.resolve(link.ticks(sent), arrival) else {
+        panic!("locked");
+    };
+    let bound = Duration::from_micros(64);
+    assert!(jitter <= bound, "{jitter:?}");
+    let error = at
+        .duration_since(link.send(sent))
+        .max(link.send(sent).duration_since(at));
+    assert!(error <= bound, "{error:?}");
+}

@@ -17,9 +17,10 @@ use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AuComponentType, AutomationMode, ContentScale, Control, EditorCapabilities, EditorError,
     EditorPresence, EditorWindow, Features, LoadedPlugin, MainThreadMarker, Normalized, ParamEdit,
-    ParamFlags, ParamId, ParamMapping, ParamRange, ParamSteps, ParameterInfo, PluginBus,
-    PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, Preset,
-    PresetId, RenderModeSupport, Request, RescanScope, StateUse, WindowHandle, Wraps, taken,
+    ParamFlags, ParamId, ParamMapping, ParamRange, ParamSteps, ParamWriteError, ParameterInfo,
+    PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail,
+    Preset, PresetId, RenderModeSupport, Request, RescanScope, StateUse, WindowHandle, Wraps,
+    taken,
 };
 use tutti_types::Samples;
 
@@ -214,11 +215,10 @@ impl AuLoaded {
         }
     }
 
-    fn denormalize(&self, id: ParamId, value: Normalized) -> f32 {
-        match self.ranges.bounds(id.get()) {
-            Some(bounds) => bounds.plain(value) as f32,
-            None => value.get() as f32,
-        }
+    /// `value` in the declared plain units; `None` for a parameter off the
+    /// table, which has no range to denormalize against.
+    fn denormalize(&self, id: ParamId, value: Normalized) -> Option<f32> {
+        Some(self.ranges.bounds(id.get())?.plain(value) as f32)
     }
 
     /// Reads the declared ranges again, after the unit said its parameter list
@@ -386,9 +386,28 @@ impl Control for AuLoaded {
     /// active unit takes it directly rather than through a queue to the
     /// Processor). Normalized in, denormalized against the same table the
     /// automation path uses, so the two cannot disagree about a range.
-    fn set_parameter(&mut self, _main: MainThreadMarker, id: ParamId, value: Normalized) {
-        let plain = self.denormalize(id, value);
-        let _ = parameters::set(self.unit(), id.get(), plain);
+    fn set_parameter(
+        &mut self,
+        main: MainThreadMarker,
+        id: ParamId,
+        value: Normalized,
+    ) -> Result<(), ParamWriteError> {
+        self.parameter_writable(main, id)?;
+        // Declared, so the table has its range.
+        if let Some(plain) = self.denormalize(id, value) {
+            let _ = parameters::set(self.unit(), id.get(), plain);
+        }
+        Ok(())
+    }
+
+    /// From the range table, which holds every declared parameter and the ids
+    /// the AU declared read-only.
+    fn parameter_writable(
+        &self,
+        _main: MainThreadMarker,
+        id: ParamId,
+    ) -> Result<(), ParamWriteError> {
+        ParamWriteError::check(id, self.ranges.access(id.get()))
     }
 
     /// The AU's own display string. `AudioUnitParameterStringFromValue` takes
@@ -404,7 +423,7 @@ impl Control for AuLoaded {
         id: ParamId,
         value: Normalized,
     ) -> Option<String> {
-        parameters::string_from_value(self.unit(), id.get(), self.denormalize(id, value))
+        parameters::string_from_value(self.unit(), id.get(), self.denormalize(id, value)?)
     }
 
     /// The inverse, re-normalized so the result can be handed straight to

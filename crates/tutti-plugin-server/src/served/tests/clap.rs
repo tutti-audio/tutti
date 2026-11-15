@@ -1231,7 +1231,9 @@ fn test_reference_set_parameter_flush() {
     assert!(!params.is_empty(), "Need at least one parameter");
 
     let param_id = params[0].id();
-    instance.set_parameter(main_thread(), param_id, Normalized::of(0.5));
+    instance
+        .set_parameter(main_thread(), param_id, Normalized::of(0.5))
+        .expect("a declared, writable parameter");
 }
 
 // ── Group A: Plugin Lifecycle ──
@@ -1369,7 +1371,9 @@ fn test_clap_param_write_is_settled_for_a_state_save() {
     let original = instance.normalized(main_thread(), param_id);
     let new_value = if original < 0.5 { 0.75 } else { 0.25 };
 
-    instance.set_parameter(main_thread(), param_id, Normalized::clamped(new_value));
+    instance
+        .set_parameter(main_thread(), param_id, Normalized::clamped(new_value))
+        .expect("a declared, writable parameter");
     assert_eq!(
         instance.normalized(main_thread(), param_id),
         original,
@@ -1486,7 +1490,9 @@ fn test_clap_param_set_reaches_the_next_block() {
 
     // Set to a different value
     let new_value = if original < 0.5 { 0.75 } else { 0.25 };
-    instance.set_parameter(main_thread(), param_id, Normalized::clamped(new_value));
+    instance
+        .set_parameter(main_thread(), param_id, Normalized::clamped(new_value))
+        .expect("a declared, writable parameter");
     // The bridge also applies the write now (see `set_parameter`), and the
     // queued copy reaches the next block.
     process_blocks(&mut instance, 1);
@@ -1546,7 +1552,9 @@ fn test_clap_state_save_load_roundtrip() {
 
     // Change parameter
     let new_value = if original_value < 0.5 { 0.75 } else { 0.25 };
-    instance.set_parameter(main_thread(), param_id, Normalized::clamped(new_value));
+    instance
+        .set_parameter(main_thread(), param_id, Normalized::clamped(new_value))
+        .expect("a declared, writable parameter");
 
     // Restore state
     instance
@@ -1768,7 +1776,9 @@ fn test_reference_state_save_load() {
 
     let original_value = instance.normalized(main_thread(), param_id);
     let new_value = if original_value < 0.5 { 0.75 } else { 0.25 };
-    instance.set_parameter(main_thread(), param_id, Normalized::clamped(new_value));
+    instance
+        .set_parameter(main_thread(), param_id, Normalized::clamped(new_value))
+        .expect("a declared, writable parameter");
 
     instance
         .load_state(main_thread(), &saved, StateUse::Project)

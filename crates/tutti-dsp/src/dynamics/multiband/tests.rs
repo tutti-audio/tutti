@@ -1,28 +1,20 @@
 use core::f64::consts::PI;
 
-use rand::rngs::StdRng;
-use rand::{RngExt, SeedableRng};
-use tutti_types::{BusTopology, CompressionRatio, Seconds};
+use tutti_buffers::{Mono, Planes, PlanesMut};
+use tutti_types::{ChannelLayout, CompressionRatio, Seconds};
 
 use super::*;
-use crate::contract::{FamilyCase, Hook, RecurrenceCase, built};
-use crate::testing::amplitude_at;
-use crate::{Complex32, Complex64, Lti, MAX_LANES, RealFft, Realized};
+use crate::testing::{amplitude_at, lock_in};
+use crate::{Complex32, Complex64, Lti, RealFft};
 
 const RATE: SampleRate = SampleRate::SR_48K;
-/// The longest block `run` hands the runner.
-const CHUNK: usize = 256;
 /// Frames a glide takes at [`RATE`]: `ceil(0.005 * 48000)`.
 const GLIDE: usize = 240;
 /// Frames for the crossover's sections and the followers to settle on a constant.
 const SETTLE: usize = 24_000;
 
-fn design() -> MultibandFamily {
-    MultibandFamily::new(BusTopology::STEREO, 3).unwrap()
-}
-
-fn mono(bands: usize) -> MultibandFamily {
-    MultibandFamily::new(BusTopology::MONO, bands).unwrap()
+fn bank(width: u16, bands: usize) -> MultibandBank {
+    MultibandBank::new(ChannelLayout::from_count(width), bands, RATE).unwrap()
 }
 
 fn hz(freqs: &[f32]) -> CrossoverControls {
@@ -63,146 +55,37 @@ fn unity(freqs: &[f32]) -> MultibandSettings {
     }
 }
 
-impl FamilyCase for MultibandFamily {
-    fn capacity(&self, _: SampleRate) {}
-
-    fn reachable(&self) -> Vec<MultibandSettings> {
-        let mut all = Vec::new();
-        for threshold in [-40.0, -18.0, 0.0] {
-            for ratio in [1.0, 4.0, 20.0] {
-                for (attack, release) in [(0.0, 0.0), (0.005, 0.1)] {
-                    let b = band(threshold, 6.0, ratio, attack, release, 3.0);
-                    all.push(MultibandSettings {
-                        crossover: hz(&[200.0, 3_000.0, 9_000.0]),
-                        bands: [b; MAX_BANDS],
-                    });
-                }
-            }
-        }
-        let mut rng = StdRng::seed_from_u64(9);
-        for _ in 0..48 {
-            let mut set = unity(&[
-                rng.random_range(60.0..300.0),
-                rng.random_range(400.0..3_000.0),
-                rng.random_range(4_000.0..12_000.0),
-            ]);
-            for b in &mut set.bands {
-                *b = BandSettings {
-                    bypass: rng.random_bool(0.3),
-                    solo: rng.random_bool(0.3),
-                    ..band(
-                        rng.random_range(-60.0..0.0),
-                        rng.random_range(0.0..12.0),
-                        rng.random_range(1.0..20.0),
-                        rng.random_range(0.0..0.05),
-                        rng.random_range(0.0..0.5),
-                        rng.random_range(-12.0..12.0),
-                    )
-                };
-            }
-            all.push(set);
-        }
-        all
-    }
-
-    /// A band below the floors, a control that is not finite, and splits out of order, not
-    /// finite or above Nyquist: each is a member the family can run.
-    fn hostile(&self) -> Vec<MultibandSettings> {
-        let mut all = Vec::new();
-        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            let mut set = unity(&[200.0, 3_000.0]);
-            set.bands[1] = band(bad, bad, bad, f64::from(bad), f64::from(bad), bad);
-            all.push(set);
-            all.push(unity(&[bad, 3_000.0]));
-        }
-        all.push(unity(&[3_000.0, 200.0]));
-        all.push(unity(&[100_000.0, 200_000.0]));
-        let mut set = unity(&[200.0, 3_000.0]);
-        set.bands[0] = band(-18.0, -6.0, 0.25, -1.0, -1.0, 0.0);
-        all.push(set);
-        all
-    }
-
-    fn vacant(&self) -> &'static [(Hook, &'static str)] {
-        &[(
-            Hook::Extremes,
-            "every follower is a one-pole inside the unit circle and the crossover is \
-             stable at every split: there is no loop to close on its limit",
-        )]
-    }
-}
-
-impl RecurrenceCase for MultibandFamily {
-    fn probes(&self) -> Vec<MultibandSettings> {
-        let mut soloed = unity(&[300.0, 4_000.0]);
-        soloed.bands[0] = BandSettings {
-            solo: true,
-            ..band(-30.0, 0.0, 3.0, 0.002, 0.05, 2.0)
-        };
-        vec![
-            MultibandSettings {
-                crossover: hz(&[250.0, 2_500.0]),
-                bands: [band(-24.0, 6.0, 4.0, 0.003, 0.08, 3.0); MAX_BANDS],
-            },
-            unity(&[120.0, 1_500.0]),
-            soloed,
-        ]
-    }
-
-    fn extremes(&self) -> Vec<MultibandSettings> {
-        Vec::new()
-    }
-
-    /// A makeup that moves and a bypass and a solo that flip (each must glide), and a
-    /// split that moves a little.
-    fn steps(&self) -> Vec<(MultibandSettings, MultibandSettings)> {
-        let base = MultibandSettings {
-            crossover: hz(&[250.0, 2_500.0]),
-            bands: [band(-24.0, 6.0, 4.0, 0.01, 0.1, 0.0); MAX_BANDS],
-        };
-        let with = |f: &dyn Fn(&mut MultibandSettings)| {
-            let mut s = base;
-            f(&mut s);
-            s
-        };
-        vec![
-            (base, with(&|s| s.bands[1].compressor.makeup = Db(6.0))),
-            (base, with(&|s| s.bands[0].bypass = true)),
-            (base, with(&|s| s.bands[2].solo = true)),
-            (base, with(&|s| s.crossover = hz(&[300.0, 2_200.0]))),
-        ]
-    }
-}
-
-crate::family_contract!(design());
-crate::recurrence_contract!(design(), BlockIndependent);
-
-type Runner = Realized<MultibandRecurrence>;
-
-fn runner(f: &MultibandFamily, c: &MultibandSettings) -> Runner {
-    built(f, c, RATE).0
-}
-
-/// `audio` (one slice per channel) through `k` in blocks of [`CHUNK`], band `b`'s
+/// `audio` (one slice per channel) through `k` in calls of `chunk` frames, band `b`'s
 /// threshold lane `lanes[b]` where given.
-fn run(k: &mut Runner, audio: &[&[f32]], lanes: &[Option<&[f32]>]) -> Vec<Vec<f32>> {
+fn run_in(
+    k: &mut MultibandBank,
+    audio: &[&[f32]],
+    lanes: [Option<&[f32]>; MAX_BANDS],
+    chunk: usize,
+) -> Vec<Vec<f32>> {
     let n = audio[0].len();
     let mut out = vec![vec![0.0f32; n]; audio.len()];
     let mut at = 0;
     while at < n {
-        let end = (at + CHUNK).min(n);
+        let end = (at + chunk).min(n);
         let a: Vec<&[f32]> = audio.iter().map(|c| &c[at..end]).collect();
-        let mut feed = Inputs::new(&a);
-        for (i, lane) in lanes.iter().enumerate() {
-            if let Some(lane) = lane {
-                feed = feed.with_lane(i, &lane[at..end]);
-            }
-        }
         let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
-        k.process(&feed, &mut outs, end - at);
+        let mut driven = MultibandLanes::default();
+        for (slot, lane) in driven.thresholds.iter_mut().zip(lanes) {
+            *slot = lane.map(|l| Mono::new(&l[at..end]));
+        }
+        k.process(
+            driven,
+            Planes::new(&a).unwrap(),
+            PlanesMut::new(&mut outs).unwrap(),
+        );
         at = end;
     }
     out
+}
+
+fn run(k: &mut MultibandBank, audio: &[&[f32]]) -> Vec<Vec<f32>> {
+    run_in(k, audio, [None; MAX_BANDS], 256)
 }
 
 fn mean(x: &[f32]) -> f64 {
@@ -220,6 +103,20 @@ fn hard(level_db: f64, threshold: f64, ratio: f64) -> f64 {
     (1.0 - 1.0 / ratio) * (level_db - threshold).max(0.0)
 }
 
+/// The reduction in dB of the static curve with a knee of `knee` dB (Giannoulis, Massberg
+/// and Reiss, 2012, eq. 4): nothing below `T - W/2`, the quadratic inside the knee, the
+/// hard-knee line above `T + W/2`.
+fn curve(level: f64, threshold: f64, ratio: f64, knee: f64) -> f64 {
+    let over = level - threshold;
+    if 2.0 * over < -knee {
+        0.0
+    } else if 2.0 * over.abs() <= knee {
+        (1.0 - 1.0 / ratio) * (over + knee / 2.0).powi(2) / (2.0 * knee)
+    } else {
+        (1.0 - 1.0 / ratio) * over
+    }
+}
+
 fn db(amplitude: f64) -> f64 {
     20.0 * libm::log10(amplitude)
 }
@@ -228,41 +125,115 @@ fn linear(db: f64) -> f64 {
     libm::pow(10.0, db / 20.0)
 }
 
-/// Band `b`'s complex response at `f`, from the model.
-fn response(m: &MultibandMember, band: usize, f: f32) -> Complex64 {
-    let mut g = [Complex64::new(0.0, 0.0)];
-    m.crossover().frequency_response(band, &[Hz(f)], &mut g);
-    g[0]
+/// The warped frequency ratio `tan(pi f / fs) / tan(pi fc / fs)` of the bilinear transform.
+fn warp(f: f64, fc: f64) -> f64 {
+    libm::tan(PI * f / RATE.get()) / libm::tan(PI * fc / RATE.get())
 }
 
-/// The family refuses a band count outside 2 to 4 and an empty layout, and answers for
-/// the bands it has.
+/// The magnitude of band `band` of a tree with splits `fc` at `f`: its low-pass `1 / (1 +
+/// u^4)` (the last band has none), the high-pass `u^4 / (1 + u^4)` of every split below it,
+/// and the all-passes of the later splits, which are unity.
+fn band_magnitude(band: usize, fc: &[f64], f: f64) -> f64 {
+    let hp = |c: f64| warp(f, c).powi(4) / (1.0 + warp(f, c).powi(4));
+    let lp = |c: f64| 1.0 / (1.0 + warp(f, c).powi(4));
+    let below: f64 = fc[..band].iter().map(|&c| hp(c)).product();
+    below * fc.get(band).map_or(1.0, |&c| lp(c))
+}
+
+/// The all-pass of a split at `fc` at `f`: the 2nd-order Butterworth
+/// `(1 - u^2 - j sqrt2 u) / (1 - u^2 + j sqrt2 u)`, `u = tan(pi f / fs) / tan(pi fc / fs)`.
+fn all_pass(f: f64, fc: f64) -> Complex64 {
+    let u = warp(f, fc);
+    let (re, im) = (1.0 - u * u, core::f64::consts::SQRT_2 * u);
+    let d = re * re + im * im;
+    // (re - j im) / (re + j im)
+    Complex64::new((re * re - im * im) / d, -2.0 * re * im / d)
+}
+
+/// The analytic formulas the tests lean on are themselves right: the bands' magnitudes add to
+/// 1 at every frequency (the bands are phase-aligned and sum to an all-pass), the all-pass is
+/// unit, and the design's own model reads a split's band at -6.02 dB.
 #[test]
-fn the_family_has_two_to_four_bands() {
+fn the_analytic_band_magnitudes_sum_to_one() {
+    let fc = [120.0, 1_000.0, 6_000.0];
+    for f in [
+        20.0, 100.0, 120.0, 500.0, 1_000.0, 3_000.0, 6_000.0, 15_000.0,
+    ] {
+        let sum: f64 = (0..4).map(|b| band_magnitude(b, &fc, f)).sum();
+        assert!((sum - 1.0).abs() < 1e-12, "{f} Hz: {sum}");
+        assert!((all_pass(f, 1_000.0).norm() - 1.0).abs() < 1e-12);
+    }
+    let m = CrossoverModel::new(&[Hz(1_000.0)], RATE).unwrap();
+    let mut g = [Complex64::new(0.0, 0.0)];
+    m.frequency_response(0, &[Hz(1_000.0)], &mut g);
+    assert!((g[0].norm() - band_magnitude(0, &[1_000.0], 1_000.0)).abs() < 1e-6);
+}
+
+/// The bank refuses a band count outside 2 to 4 and an empty layout.
+#[test]
+fn a_bank_has_two_to_four_bands_over_a_width() {
     for bands in [0, 1, 5, 6] {
         assert!(
             matches!(
-                MultibandFamily::new(BusTopology::STEREO, bands),
+                MultibandBank::new(ChannelLayout::STEREO, bands, RATE),
                 Err(CrossoverError::Bands { min: 2, max: 4, .. })
             ),
             "{bands}"
         );
     }
-    assert!(MultibandFamily::new(BusTopology::EMPTY, 3).is_err());
-    let f = MultibandFamily::new(BusTopology::STEREO, 4).unwrap();
-    let m = f.member(&MultibandSettings::DEFAULT, RATE);
-    assert_eq!((f.bands(), m.bands()), (4, 4));
-    assert!(m.compressor(3).is_some() && m.compressor(4).is_none());
-    assert_eq!(f.channels().output_width(), 2);
-    // One lane a band at the widest.
-    const { assert!(MAX_LANES >= MultibandFamily::MAX_BANDS) };
+    assert_eq!(
+        MultibandBank::new(ChannelLayout::from_count(0), 3, RATE).unwrap_err(),
+        CrossoverError::Channels { channels: 0 }
+    );
+    for bands in 2..=4 {
+        assert_eq!(bank(2, bands).bands(), bands);
+    }
 }
 
-/// With every band at unity ratio and no makeup the bands sum to the crossover's
-/// all-pass: unit magnitude at every frequency, read from an impulse, for 2, 3 and 4
-/// bands; and the sum is not the input (the all-pass rings).
+/// With every band at unity ratio and no makeup the bands sum to the product of the splits'
+/// Butterworth all-passes, in magnitude and in phase: the output's complex response at a tone
+/// is read by lock-in over whole periods and compared to the analytic response, for 2, 3 and
+/// 4 bands.
 #[test]
-fn unity_bands_sum_to_the_crossovers_all_pass() {
+fn unity_bands_sum_to_the_analytic_all_pass_response() {
+    // Whole periods of every tone on the 5 Hz grid.
+    const WINDOW: usize = 9_600;
+    for (bands, freqs) in [
+        (2, vec![1_000.0f32]),
+        (3, vec![200.0, 3_000.0]),
+        (4, vec![120.0, 1_000.0, 6_000.0]),
+    ] {
+        let mut turns = 0.0f64;
+        for i in 0..14 {
+            let f = (30.0 * (18_000.0f64 / 30.0).powf(f64::from(i) / 13.0) / 5.0).round() * 5.0;
+            let mut k = bank(1, bands);
+            k.aim(&unity(&freqs));
+            let x = tone(f, 1.0, SETTLE + WINDOW);
+            let out = run(&mut k, &[&x]).remove(0);
+            let (xr, xi) = lock_in(&x[SETTLE..], f, RATE.get());
+            let (yr, yi) = lock_in(&out[SETTLE..], f, RATE.get());
+            let got = Complex64::new(yr, yi) / Complex64::new(xr, xi);
+            let want = freqs
+                .iter()
+                .map(|&c| all_pass(f, f64::from(c)))
+                .fold(Complex64::new(1.0, 0.0), |a, b| a * b);
+            assert!(
+                (got - want).norm() < 3e-5,
+                "{bands} bands at {f} Hz: {got:?} vs {want:?}"
+            );
+            turns = turns.max((want - Complex64::new(1.0, 0.0)).norm());
+        }
+        assert!(
+            turns > 1.0,
+            "{bands} bands: the sum is no input copy, its phase turns"
+        );
+    }
+}
+
+/// The sum of an impulse is flat in magnitude at every bin (the all-pass of the crossover),
+/// read from the whole spectrum of one render.
+#[test]
+fn unity_bands_have_a_flat_impulse_magnitude() {
     const N: usize = 1 << 15;
     let mut impulse = vec![0.0f32; N];
     impulse[0] = 1.0;
@@ -271,8 +242,9 @@ fn unity_bands_sum_to_the_crossovers_all_pass() {
         (3, vec![200.0, 3_000.0]),
         (4, vec![120.0, 1_000.0, 6_000.0]),
     ] {
-        let mut k = runner(&mono(bands), &unity(&freqs));
-        let out = run(&mut k, &[&impulse], &[])[0].clone();
+        let mut k = bank(1, bands);
+        k.aim(&unity(&freqs));
+        let out = run(&mut k, &[&impulse]).remove(0);
         let fft = RealFft::new(N);
         let mut scratch = fft.new_scratch();
         let mut bins = vec![Complex32::new(0.0, 0.0); fft.bins()];
@@ -284,34 +256,95 @@ fn unity_bands_sum_to_the_crossovers_all_pass() {
                 "{bands} bands, bin {i}: {magnitude}"
             );
         }
-        let ring: f32 = out[1..64].iter().map(|v| v.abs()).sum();
-        assert!(
-            ring > 0.1,
-            "{bands} bands: the sum rings {ring}, not an input copy"
-        );
     }
 }
 
-/// Loud content in band 0 is reduced by the compressor's static curve and a quiet
-/// band is left alone.
+/// A steady tone inside one band settles that band's gain on the compressor's static curve,
+/// and leaves every other band alone.
+///
+/// The compressor holds the deepest reduction (an instant attack, a release of infinity), so
+/// the settled reduction is the curve at the band's peak level, `A |H_b(f)|` with `|H_b|` the
+/// band's analytic magnitude, whatever the ripple of the band's rectified tone. The tone runs
+/// at ratio 1 until the crossover has settled, so its start-up overshoot is not held. The
+/// meter reads that reduction, and the output amplitude is `A` times the bands' magnitudes
+/// weighted by their gains (the bands are phase-aligned, so their amplitudes add). Each band
+/// takes a hard knee, a level inside the knee and a level under it, and a makeup.
+#[test]
+fn a_tone_in_a_band_settles_on_that_bands_static_curve() {
+    // Whole periods of every tone in 2 s, over a dense set of sample phases.
+    const WINDOW: usize = 96_000;
+    let splits = [200.0f32, 1_000.0, 5_000.0];
+    let fc = splits.map(f64::from);
+    let tones = [100.5, 500.5, 2_500.5, 10_000.5];
+    for (b, &f) in tones.iter().enumerate() {
+        for (knee, over, ratio, makeup) in [
+            (0.0, 8.0, 3.0, 0.0),
+            (6.0, 1.0, 4.0, 2.0),
+            (6.0, -2.0, 4.0, -3.0),
+        ] {
+            let a = 0.5f64;
+            let level = db(a * band_magnitude(b, &fc, f));
+            let threshold = level - over;
+            let mut k = bank(1, 4);
+            k.aim(&unity(&splits));
+            let x = tone(f, a as f32, SETTLE + 4_800 + WINDOW);
+            run(&mut k, &[&x[..SETTLE]]);
+            k.take_reading();
+            let mut set = unity(&splits);
+            set.bands[b] = band(threshold as f32, knee, ratio, 0.0, f64::INFINITY, makeup);
+            k.aim(&set);
+            let out = run(&mut k, &[&x[SETTLE..]]).remove(0);
+            let reading = k.take_reading();
+
+            let want = curve(
+                level,
+                f64::from(threshold as f32),
+                f64::from(ratio),
+                f64::from(knee),
+            );
+            let got = f64::from(reading.band(b).unwrap().get());
+            assert!(
+                (got - want).abs() < 2e-3,
+                "band {b}, knee {knee}: metered {got} dB, the curve says {want}"
+            );
+            for other in (0..4).filter(|&o| o != b) {
+                assert_eq!(
+                    reading.band(other).unwrap(),
+                    Db::UNITY,
+                    "band {b} leaves band {other} alone"
+                );
+            }
+            let gain = linear(f64::from(makeup) - want);
+            let weighted: f64 = (0..4)
+                .map(|j| band_magnitude(j, &fc, f) * if j == b { gain } else { 1.0 })
+                .sum();
+            let amp = amplitude_at(&out[4_800..], f, RATE.get());
+            assert!(
+                (amp - a * weighted).abs() < 2e-5,
+                "band {b}, knee {knee}: output {amp} vs {}",
+                a * weighted
+            );
+        }
+    }
+}
+
+/// Loud content in band 0 is reduced by the compressor's static curve and a quiet band is
+/// left alone.
 ///
 /// A constant 0.5 (-6.02 dB) is all band 0 once the crossover settles, and the one input
-/// whose detector reading is exact: at -20 dB, 4:1 the reduction is
-/// `(-6.02 + 20) * 3/4` dB, with a 2 dB makeup on it. The tone is 0.01 (-40 dB), under
-/// every band's -18 dB threshold. The meter is read over the settled window alone (it
-/// holds each band's deepest since it was last taken, and the step's own transient
-/// overshoots the curve a little).
+/// whose detector reading is exact: at -20 dB, 4:1 the reduction is `(-6.02 + 20) * 3/4` dB,
+/// with a 2 dB makeup on it. The tone is 0.01 (-40 dB), under every band's -18 dB threshold.
 #[test]
 fn a_loud_band_follows_the_static_curve_and_a_quiet_band_is_left_alone() {
     let mut set = unity(&[200.0, 3_000.0]);
     set.bands[0] = band(-20.0, 0.0, 4.0, 0.001, 0.001, 2.0);
     let len = SETTLE + 9_600;
     let x: Vec<f32> = tone(5_000.0, 0.01, len).iter().map(|s| 0.5 + s).collect();
-    let mut k = runner(&mono(3), &set);
-    let mut out = run(&mut k, &[&x[..SETTLE]], &[]);
+    let mut k = bank(1, 3);
+    k.aim(&set);
+    let mut out = run(&mut k, &[&x[..SETTLE]]);
     k.take_reading();
-    let rest = run(&mut k, &[&x[SETTLE..]], &[]);
-    out[0].extend_from_slice(&rest[0]);
+    out[0].extend_from_slice(&run(&mut k, &[&x[SETTLE..]])[0]);
     let reduction = hard(db(0.5), -20.0, 4.0);
     let want = 0.5 * linear(2.0 - reduction);
     let dc = mean(&out[0][SETTLE..]);
@@ -321,7 +354,6 @@ fn a_loud_band_follows_the_static_curve_and_a_quiet_band_is_left_alone() {
     );
     let amp = amplitude_at(&out[0][SETTLE..], 5_000.0, RATE.get());
     assert!((amp - 0.01).abs() < 2e-5, "the quiet band is {amp}");
-    // The meter over the window: band 0 sits on the curve, the others reduce nothing.
     let reading = k.take_reading();
     let deepest = f64::from(reading.band(0).unwrap().get());
     assert!(
@@ -338,18 +370,17 @@ fn a_bypassed_band_passes_unprocessed() {
     let mut set = unity(&[200.0, 3_000.0]);
     set.bands[0] = band(-30.0, 0.0, 8.0, 0.001, 0.001, 6.0);
     set.bands[0].bypass = true;
-    let f = mono(3);
-    let mut k = runner(&f, &set);
+    let mut k = bank(1, 3);
+    k.aim(&set);
     let x = vec![0.5f32; SETTLE + 9_600];
-    let out = run(&mut k, &[&x], &[]);
+    let out = run(&mut k, &[&x]);
     assert!((mean(&out[0][SETTLE..]) - 0.5).abs() < 1e-6);
     assert_eq!(k.take_reading().band(0).unwrap(), Db::UNITY);
     set.bands[0].bypass = false;
-    k.retarget(&f.member(&set, RATE));
-    let out = run(&mut k, &[&x], &[]);
+    k.aim(&set);
+    let out = run(&mut k, &[&x]);
     // Over -30 dB at 8:1 the 0.5 DC is reduced by `(30 - 6.02) * 7/8`, with the makeup.
-    let reduction = hard(db(0.5), -30.0, 8.0);
-    let want = 0.5 * linear(6.0 - reduction);
+    let want = 0.5 * linear(6.0 - hard(db(0.5), -30.0, 8.0));
     assert!(
         (mean(&out[0][SETTLE..]) - want).abs() < 1e-5,
         "{}",
@@ -357,14 +388,14 @@ fn a_bypassed_band_passes_unprocessed() {
     );
 }
 
-/// While any band is soloed the output is the sum of the soloed bands alone: the model's
-/// band responses at the tone, summed as complex numbers.
+/// While any band is soloed the output is the sum of the soloed bands alone: their analytic
+/// magnitudes at the tone, which add because the bands are phase-aligned.
 #[test]
 fn solo_leaves_only_the_soloed_bands() {
-    let f = mono(3);
     let freqs = [300.0f32, 3_000.0];
-    let (tone_hz, len) = (3_500.0f32, SETTLE + 9_600);
-    let x = tone(f64::from(tone_hz), 1.0, len);
+    let fc = freqs.map(f64::from);
+    let (tone_hz, len) = (3_500.0f64, SETTLE + 9_600);
+    let x = tone(tone_hz, 1.0, len);
     for soloed in [
         [true, false, false],
         [false, true, false],
@@ -375,40 +406,33 @@ fn solo_leaves_only_the_soloed_bands() {
         for (b, &s) in set.bands.iter_mut().zip(&soloed) {
             b.solo = s;
         }
-        let m = f.member(&set, RATE);
-        let mut want = Complex64::new(0.0, 0.0);
-        for (b, &s) in soloed.iter().enumerate() {
-            assert_eq!(m.is_audible(b), s);
-            if s {
-                want += response(&m, b, tone_hz);
-            }
-        }
-        let mut k = runner(&f, &set);
-        let out = run(&mut k, &[&x], &[]);
-        let got = amplitude_at(&out[0][SETTLE..], f64::from(tone_hz), RATE.get());
-        assert!(
-            (got - want.norm()).abs() < 1e-4,
-            "{soloed:?}: {got} vs {}",
-            want.norm()
-        );
+        let want: f64 = (0..3)
+            .filter(|&b| soloed[b])
+            .map(|b| band_magnitude(b, &fc, tone_hz))
+            .sum();
+        let mut k = bank(1, 3);
+        k.aim(&set);
+        let out = run(&mut k, &[&x]);
+        let got = amplitude_at(&out[0][SETTLE..], tone_hz, RATE.get());
+        assert!((got - want).abs() < 1e-5, "{soloed:?}: {got} vs {want}");
     }
 }
 
-/// A bypass that flips glides linearly over 5 ms and lands: on a settled DC the output
-/// is the blend `g (1 - w) + w` of the compressed gain `g` and unity, `w` the weight
-/// `k / 240` at frame `k - 1` of the glide.
+/// A bypass that flips glides linearly over 5 ms and lands: on a settled DC the output is the
+/// blend `g (1 - w) + w` of the compressed gain `g` and unity, `w` the weight `k / 240` at
+/// frame `k - 1` of the glide.
 #[test]
 fn a_moved_bypass_glides_over_five_milliseconds() {
     let mut set = unity(&[200.0, 3_000.0]);
     set.bands[0] = band(-30.0, 0.0, 8.0, 0.001, 0.001, 0.0);
-    let f = mono(3);
-    let mut k = runner(&f, &set);
+    let mut k = bank(1, 3);
+    k.aim(&set);
     let x = vec![0.5f32; SETTLE + 2 * GLIDE];
-    let before = run(&mut k, &[&x[..SETTLE]], &[]);
+    let before = run(&mut k, &[&x[..SETTLE]]);
     let held = f64::from(*before[0].last().unwrap());
     set.bands[0].bypass = true;
-    k.retarget(&f.member(&set, RATE));
-    let out = run(&mut k, &[&x[SETTLE..]], &[])[0].clone();
+    k.aim(&set);
+    let out = run(&mut k, &[&x[SETTLE..]])[0].clone();
     for (j, &y) in out.iter().take(GLIDE).enumerate() {
         let w = (j + 1) as f64 / GLIDE as f64;
         let want = held * (1.0 - w) + 0.5 * w;
@@ -426,20 +450,20 @@ fn a_moved_bypass_glides_over_five_milliseconds() {
     );
 }
 
-/// A solo that moves mutes the other band over 5 ms: the muted band's DC is its settled
-/// level times the audible weight `1 - k / 240`, and lands on silence.
+/// A solo that moves mutes the other band over 5 ms: the muted band's DC is its settled level
+/// times the audible weight `1 - k / 240`, and lands on silence.
 #[test]
 fn a_moved_solo_glides_the_mute_over_five_milliseconds() {
     let set = unity(&[200.0, 3_000.0]);
-    let f = mono(3);
-    let mut k = runner(&f, &set);
+    let mut k = bank(1, 3);
+    k.aim(&set);
     let x = vec![0.5f32; SETTLE + 2 * GLIDE];
-    let before = run(&mut k, &[&x[..SETTLE]], &[]);
+    let before = run(&mut k, &[&x[..SETTLE]]);
     let held = f64::from(*before[0].last().unwrap());
     let mut soloed = set;
     soloed.bands[1].solo = true;
-    k.retarget(&f.member(&soloed, RATE));
-    let out = run(&mut k, &[&x[SETTLE..]], &[])[0].clone();
+    k.aim(&soloed);
+    let out = run(&mut k, &[&x[SETTLE..]])[0].clone();
     for (j, &y) in out.iter().take(GLIDE).enumerate() {
         let w = (j + 1) as f64 / GLIDE as f64;
         let want = held * (1.0 - w);
@@ -454,30 +478,30 @@ fn a_moved_solo_glides_the_mute_over_five_milliseconds() {
     assert!((held - 0.5).abs() < 1e-5, "{held}");
 }
 
-/// Detection is linked across channels: one reduction from the loudest channel of the
-/// band, applied to both.
+/// Detection is linked across channels: one reduction from the loudest channel of the band,
+/// applied to both, whichever channel is the loud one.
 #[test]
-fn detection_is_linked_across_channels() {
+fn the_linked_gain_follows_the_loudest_channel() {
     let mut set = unity(&[200.0, 3_000.0]);
     set.bands[0] = band(-20.0, 0.0, 4.0, 0.001, 0.001, 0.0);
     let len = SETTLE + 4_800;
     let (loud, quiet) = (vec![0.5f32; len], vec![0.05f32; len]);
     let g = linear(-hard(db(0.5), -20.0, 4.0));
-    // Whichever channel is the loud one.
     for (left, right, loud_side) in [(&loud, &quiet, 0), (&quiet, &loud, 1)] {
-        let mut k = runner(&design(), &set);
-        let out = run(&mut k, &[left, right], &[]);
+        let mut k = bank(2, 3);
+        k.aim(&set);
+        let out = run(&mut k, &[left, right]);
         let (l, r) = (mean(&out[0][SETTLE..]), mean(&out[1][SETTLE..]));
         let (want_l, want_r) = if loud_side == 0 {
             (0.5, 0.05)
         } else {
             (0.05, 0.5)
         };
+        // The quiet channel alone is under the threshold (-26 dB) and would not be reduced.
         assert!(
             (l - want_l * g).abs() < 1e-5 * g,
             "loud {loud_side}: left {l}"
         );
-        // The quiet channel alone is under the threshold (-26 dB) and would not be reduced.
         assert!(
             (r - want_r * g).abs() < 1e-5 * g,
             "loud {loud_side}: right {r}"
@@ -485,29 +509,34 @@ fn detection_is_linked_across_channels() {
     }
 }
 
-/// A band's follower is the compressor's one-pole: after one attack time on a settled
-/// level the reduction has closed `1 - 1/e` of its way to the curve.
+/// A band's follower is the compressor's one-pole: after one attack time on a settled level
+/// the reduction has closed `1 - 1/e` of its way to the curve.
 ///
-/// The level is a settled constant and the step is the threshold lane dropping from
-/// +20 dB (nothing to reduce) to -30 dB, so the target reduction jumps at once and the
-/// crossover has no transient of its own to blur it.
+/// The level is a settled constant and the step is the threshold lane dropping from +20 dB
+/// (nothing to reduce) to -30 dB, so the target reduction jumps at once and the crossover
+/// has no transient of its own to blur it.
 #[test]
 fn a_bands_follower_closes_one_minus_one_over_e_in_one_attack() {
     let mut set = unity(&[200.0, 3_000.0]);
     let attack = 0.01;
     set.bands[0] = band(0.0, 0.0, 8.0, attack, 1.0, 0.0);
-    let mut k = runner(&mono(3), &set);
-    run(
+    let mut k = bank(1, 3);
+    k.aim(&set);
+    let high = vec![20.0f32; SETTLE];
+    run_in(
         &mut k,
         &[&vec![0.5f32; SETTLE]],
-        &[Some(&vec![20.0f32; SETTLE])],
+        [Some(&high), None, None, None],
+        256,
     );
     k.take_reading();
     let frames = (attack * RATE.get()) as usize;
-    run(
+    let low = vec![-30.0f32; frames];
+    run_in(
         &mut k,
         &[&vec![0.5f32; frames]],
-        &[Some(&vec![-30.0f32; frames])],
+        [Some(&low), None, None, None],
+        256,
     );
     let reached = f64::from(k.take_reading().band(0).unwrap().get());
     let curve = hard(db(0.5), -30.0, 8.0);
@@ -515,54 +544,210 @@ fn a_bands_follower_closes_one_minus_one_over_e_in_one_attack() {
     assert!((reached - want).abs() < 2e-3 * curve, "{reached} vs {want}");
 }
 
-/// The meter holds the deepest reduction since it was last taken, over every block in
-/// between and not the last frame's: a loud block and the silent one after it read as the
-/// loud one's; and the read starts again from nothing (a second with no frames between
-/// is 0, and once the follower has released, the next reads 0 too).
+/// The meter holds the deepest reduction since it was last taken, over every call in between
+/// and not the last frame's, and the read starts again from nothing.
 #[test]
 fn the_meter_reports_the_deepest_reduction_since_the_last_read() {
     let mut set = unity(&[200.0, 3_000.0]);
     set.bands[0] = band(-30.0, 0.0, 8.0, 0.001, 0.005, 0.0);
-    let mut k = runner(&mono(3), &set);
-    run(&mut k, &[&vec![0.5f32; SETTLE]], &[]);
+    let mut k = bank(1, 3);
+    k.aim(&set);
+    run(&mut k, &[&vec![0.5f32; SETTLE]]);
     k.take_reading();
-    run(&mut k, &[&vec![0.5f32; 4_800]], &[]);
-    run(&mut k, &[&vec![0.0f32; 4_800]], &[]);
+    run(&mut k, &[&vec![0.5f32; 4_800]]);
+    run(&mut k, &[&vec![0.0f32; 4_800]]);
     let curve = hard(db(0.5), -30.0, 8.0);
     let both = f64::from(k.take_reading().band(0).unwrap().get());
     assert!((both - curve).abs() < 1e-3, "{both} vs {curve}");
     assert_eq!(k.take_reading().band(0).unwrap(), Db::UNITY);
     // The follower released during the silence: nothing is held over from before the read.
-    run(&mut k, &[&vec![0.0f32; 4_800]], &[]);
+    run(&mut k, &[&vec![0.0f32; 4_800]]);
     assert!(k.take_reading().band(0).unwrap().get() < 1e-3);
     // Past the last band there is nothing to read.
     assert_eq!(k.take_reading().band(3), None);
 }
 
-/// Each band reads its own threshold lane per frame: driving band 0's lane low reduces
-/// band 0 and no other, and a frame that is not finite falls back to the member's.
+/// Each band reads its own threshold lane per frame: driving band 0's lane low reduces band
+/// 0 and no other, a frame that is not finite falls back to the aimed threshold, and a lane
+/// in `f64` reads as the same dB.
 #[test]
 fn a_band_reads_its_own_threshold_lane() {
     let mut set = unity(&[200.0, 3_000.0]);
     for b in &mut set.bands {
         *b = band(0.0, 0.0, 4.0, 0.001, 0.05, 0.0);
     }
-    let f = mono(3);
     let len = SETTLE;
     let x = vec![0.5f32; len];
     let low = vec![-30.0f32; len];
-    let mut k = runner(&f, &set);
-    run(&mut k, &[&x], &[Some(&low)]);
-    let curve = hard(db(0.5), -30.0, 4.0);
+    let mut k = bank(1, 3);
+    k.aim(&set);
+    run_in(&mut k, &[&x], [Some(&low), None, None, None], 256);
+    let want = hard(db(0.5), -30.0, 4.0);
     let reading = k.take_reading();
     let d0 = f64::from(reading.band(0).unwrap().get());
-    assert!((d0 - curve).abs() < 0.05, "{d0} vs {curve}");
+    assert!((d0 - want).abs() < 0.05, "{d0} vs {want}");
     assert!(reading.band(1).unwrap().get() < 1e-3 && reading.band(2).unwrap().get() < 1e-3);
-    // A lane that is NaN reads as the member's threshold (0 dB): nothing to reduce.
+    // A lane that is NaN reads as the aimed threshold (0 dB): nothing to reduce.
     let nan = vec![f32::NAN; len];
-    let mut k = runner(&f, &set);
-    run(&mut k, &[&x], &[Some(&nan)]);
+    let mut k = bank(1, 3);
+    k.aim(&set);
+    run_in(&mut k, &[&x], [Some(&nan), None, None, None], 256);
     assert_eq!(k.take_reading().band(0).unwrap(), Db::UNITY);
+    // The same lane in f64 over f64 audio.
+    let mut k = bank(1, 3);
+    k.aim(&set);
+    let (x64, low64) = (vec![0.5f64; len], vec![-30.0f64; len]);
+    let mut out = vec![0.0f64; len];
+    let mut lanes = MultibandLanes::<f64>::default();
+    lanes.thresholds[0] = Some(Mono::new(&low64));
+    let planes = [&x64[..]];
+    let mut outs = [&mut out[..]];
+    k.process(
+        lanes,
+        Planes::new(&planes).unwrap(),
+        PlanesMut::new(&mut outs).unwrap(),
+    );
+    let d0 = f64::from(k.take_reading().band(0).unwrap().get());
+    assert!((d0 - want).abs() < 0.05, "f64: {d0} vs {want}");
+}
+
+/// Any split of a stream into calls gives the same bits: the controls move at fixed frames
+/// (a split, a ratio, a makeup, a bypass and a solo), the audio is wide, a threshold lane is
+/// driven, and the calls are every length from one frame to the whole stream.
+#[test]
+fn any_call_length_gives_the_same_bits() {
+    let len = 2_000;
+    let audio: Vec<Vec<f32>> = (0..3)
+        .map(|c| {
+            (0..len)
+                .map(|n| {
+                    0.8 * libm::sin(0.037 * (c + 1) as f64 * n as f64) as f32
+                        + 0.1 * libm::cos(1.31 * n as f64) as f32
+                })
+                .collect()
+        })
+        .collect();
+    let lane: Vec<f32> = (0..len).map(|n| -40.0 + (n % 97) as f32 * 0.2).collect();
+    let mut first = unity(&[300.0, 2_000.0, 8_000.0]);
+    first.bands[0] = band(-30.0, 6.0, 4.0, 0.002, 0.02, 3.0);
+    first.bands[2] = band(-25.0, 0.0, 2.0, 0.001, 0.05, -2.0);
+    let mut second = first;
+    second.crossover = hz(&[150.0, 3_000.0, 9_000.0]);
+    second.bands[0].compressor.ratio = CompressionRatio(8.0);
+    second.bands[2].compressor.makeup = Db(4.0);
+    second.bands[1].bypass = true;
+    second.bands[3].solo = true;
+    // Aims at frames 333 and 1_001, whichever the calls are.
+    let cuts = [(0, first), (333, second), (1_001, first)];
+    let render = |chunk: usize| {
+        let mut k = bank(3, 4);
+        let mut out = vec![vec![0.0f32; len]; 3];
+        for (i, &(at, set)) in cuts.iter().enumerate() {
+            let end = cuts.get(i + 1).map_or(len, |c| c.0);
+            k.aim(&set);
+            let a: Vec<&[f32]> = audio.iter().map(|c| &c[at..end]).collect();
+            let got = run_in(&mut k, &a, [Some(&lane[at..end]), None, None, None], chunk);
+            for (o, g) in out.iter_mut().zip(got) {
+                o[at..end].copy_from_slice(&g);
+            }
+        }
+        out
+    };
+    let whole = render(len);
+    assert!(
+        whole.iter().flatten().all(|y| y.is_finite()) && whole[0].iter().any(|&y| y != 0.0),
+        "the stream is not silence"
+    );
+    for chunk in [1, 7, 63, 64, 65, 100, 128, 129, 500] {
+        let got = render(chunk);
+        for (c, (g, w)) in got.iter().zip(&whole).enumerate() {
+            assert!(
+                g.iter().zip(w).all(|(a, b)| a.to_bits() == b.to_bits()),
+                "calls of {chunk} frames differ on channel {c}"
+            );
+        }
+    }
+}
+
+/// A reset bank is a fresh one: after a loud, moved and bypassed run, `reset` and the same
+/// aim render the bits a fresh bank renders, and so does `process` straight after `reset`
+/// with no aim; the meters read nothing.
+#[test]
+fn a_reset_bank_renders_as_a_fresh_one() {
+    let len = 3_000;
+    let x: Vec<f32> = (0..len)
+        .map(|n| 0.7 * libm::sin(0.05 * n as f64) as f32)
+        .collect();
+    let mut loud = unity(&[200.0, 3_000.0]);
+    loud.bands[0] = band(-40.0, 0.0, 10.0, 0.001, 0.2, 6.0);
+    loud.bands[1].bypass = true;
+    loud.bands[2].solo = true;
+    let mut set = unity(&[400.0, 2_000.0]);
+    set.bands[1] = band(-20.0, 3.0, 3.0, 0.001, 0.05, 2.0);
+    let mut fresh = bank(1, 3);
+    fresh.aim(&set);
+    let want = run(&mut fresh, &[&x]);
+    let mut k = bank(1, 3);
+    k.aim(&loud);
+    run(&mut k, &[&vec![0.9f32; 5_000]]);
+    k.reset();
+    assert_eq!(k.take_reading().iter().map(Db::get).sum::<f32>(), 0.0);
+    k.aim(&set);
+    let got = run(&mut k, &[&x]);
+    assert!(
+        got[0]
+            .iter()
+            .zip(&want[0])
+            .all(|(a, b)| a.to_bits() == b.to_bits()),
+        "a reset bank differs from a fresh one"
+    );
+    // Straight after the reset, with no aim: the fresh bank splits and sums at the octave
+    // splits, and a reset one does the same.
+    let mut fresh = bank(1, 3);
+    let want = run(&mut fresh, &[&x]);
+    let mut k = bank(1, 3);
+    k.aim(&loud);
+    run(&mut k, &[&vec![0.9f32; 5_000]]);
+    k.reset();
+    let got = run(&mut k, &[&x]);
+    assert!(
+        got[0]
+            .iter()
+            .zip(&want[0])
+            .all(|(a, b)| a.to_bits() == b.to_bits()),
+        "a reset bank differs from a fresh one without an aim"
+    );
+}
+
+/// A threshold lane that ends inside a chunk drives the frames it has and no others: with
+/// instant followers, frames up to the lane's end are reduced by the curve at the lane's
+/// -30 dB and the frames after it are at the aimed 0 dB threshold, unreduced, chunk or not.
+#[test]
+fn a_lane_that_ends_inside_a_chunk_drives_its_own_frames() {
+    let mut set = unity(&[200.0, 3_000.0]);
+    set.bands[0] = band(0.0, 0.0, 4.0, 0.0, 0.0, 0.0);
+    let mut k = bank(1, 3);
+    k.aim(&set);
+    run(&mut k, &[&vec![0.5f32; SETTLE]]);
+    // 70 frames of lane over 300 of audio: the end falls inside the second chunk of 64.
+    let lane = vec![-30.0f32; 70];
+    let x = vec![0.5f32; 300];
+    let mut out = vec![0.0f32; 300];
+    let mut driven = MultibandLanes::default();
+    driven.thresholds[0] = Some(Mono::new(&lane));
+    let (ins, mut outs) = ([&x[..]], [&mut out[..]]);
+    k.process(
+        driven,
+        Planes::new(&ins).unwrap(),
+        PlanesMut::new(&mut outs).unwrap(),
+    );
+    let reduced = 0.5 * linear(-hard(db(0.5), -30.0, 4.0));
+    for (i, &y) in out.iter().enumerate().take(70) {
+        assert!((f64::from(y) - reduced).abs() < 1e-4, "frame {i}: {y}");
+    }
+    for (i, &y) in out.iter().enumerate().skip(70) {
+        assert!((y - 0.5).abs() < 1e-4, "frame {i} past the lane: {y}");
+    }
 }
 
 /// The crossover inside the multiband stays within the derived bound when its split moves
@@ -578,22 +763,21 @@ fn the_crossover_inside_stays_within_the_bound_under_a_switching_split() {
         (3, vec![1.0, 2.0], vec![23_951.0, 23_952.0]),
         (4, vec![1.0, 2.0, 3.0], vec![23_950.0, 23_951.0, 23_952.0]),
     ] {
-        let f = mono(bands);
         let bound = bands as f64 * tap.powi(2 * (bands as i32 - 1));
         for alternate in [false, true] {
-            let mut k = runner(&f, &unity(&low));
+            let mut k = bank(1, bands);
+            k.aim(&unity(&low));
             let mut peak = 0.0f64;
             for period in 0..6_250usize {
-                let set = unity(if period.is_multiple_of(2) {
+                k.aim(&unity(if period.is_multiple_of(2) {
                     &low
                 } else {
                     &high
-                });
-                k.retarget(&f.member(&set, RATE));
+                }));
                 let x: Vec<f32> = (0..16)
                     .map(|i| if alternate { [1.0, -1.0][i % 2] } else { 1.0 })
                     .collect();
-                for y in &run(&mut k, &[&x], &[])[0] {
+                for y in &run(&mut k, &[&x])[0] {
                     peak = peak.max(f64::from(y.abs()));
                 }
             }
@@ -602,5 +786,29 @@ fn the_crossover_inside_stays_within_the_bound_under_a_switching_split() {
                 "{bands} bands, alternating {alternate}: {peak} over {bound}"
             );
         }
+    }
+}
+
+/// A knee past 400 dB is held there, on a band too: a knee of 1e20 or 3e38 renders finite with
+/// the band's level inside it, and once the level has moved (a settled DC of 0.5, then of 0.1)
+/// the band's reduction is back on the static curve of the 400 dB knee.
+#[test]
+fn a_huge_knee_is_held_and_a_band_returns_to_the_static_curve() {
+    for knee in [1.0e20f32, 3.0e38] {
+        let mut set = unity(&[200.0, 3_000.0]);
+        set.bands[0] = band(-20.0, knee, 4.0, 0.001, 0.001, 0.0);
+        let mut k = bank(1, 3);
+        k.aim(&set);
+        let out = run(&mut k, &[&vec![0.5f32; SETTLE]]);
+        assert!(out[0].iter().all(|s| s.is_finite()), "knee {knee}");
+        let out = run(&mut k, &[&vec![0.0f32; 4_800]]);
+        assert!(out[0].iter().all(|s| s.is_finite()), "knee {knee}: silence");
+        let out = run(&mut k, &[&vec![0.1f32; SETTLE]]);
+        let want = 0.1 * linear(-curve(db(0.1), -20.0, 4.0, 400.0));
+        let got = mean(&out[0][SETTLE - 2_000..]);
+        assert!(
+            (got - want).abs() < 1e-3 * want,
+            "knee {knee}: {got} vs {want}"
+        );
     }
 }

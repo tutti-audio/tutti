@@ -35,6 +35,13 @@ macro_rules! served_control {
                 self.link.bridge.parameter(id)
             }
 
+            /// Fire-and-forget, and the realtime path: the write is sent as it is.
+            /// It reads no cache, takes no lock and holds no `Arc`, so the audio
+            /// thread never waits or frees here; the server's own
+            /// `Control::set_parameter` refuses a write the plugin does not
+            /// declare or declares read-only, and writes nothing. The client-side
+            /// check, which names the error, is [`Control::set_parameter`].
+            ///
             /// Stays `Normalized` to the wire, which narrows it to an `f32`.
             /// The server's decode refuses a value outside 0..=1 (NaN
             /// included): the wire is a foreign boundary and the peer is
@@ -169,8 +176,31 @@ macro_rules! served_control {
                 AnyThread::parameter_value(self, id)
             }
 
-            fn set_parameter(&mut self, _main: MainThreadMarker, id: ParamId, value: Normalized) {
+            fn set_parameter(
+                &mut self,
+                main: MainThreadMarker,
+                id: ParamId,
+                value: Normalized,
+            ) -> Result<(), tutti_plugin_types::ParamWriteError> {
+                // The policy answers here, at the call, from the declared
+                // parameters kept on the client; the write itself is
+                // fire-and-forget across the wire.
+                self.parameter_writable(main, id)?;
                 AnyThread::set_parameter_value(self, id, value);
+                Ok(())
+            }
+
+            /// From the declared parameters the client keeps, not a round trip
+            /// per write (the client's declared-parameter cache): a lost plugin is
+            /// [`Lost`](tutti_plugin_types::ParamWriteError::Lost), one that does
+            /// not answer in time [`Unanswered`](tutti_plugin_types::ParamWriteError::Unanswered).
+            fn parameter_writable(
+                &self,
+                _main: MainThreadMarker,
+                id: ParamId,
+            ) -> Result<(), tutti_plugin_types::ParamWriteError> {
+                let declared = self.link.declared(id)?;
+                tutti_plugin_types::ParamWriteError::check_sorted(id, &declared)
             }
 
             fn parameter_plain(

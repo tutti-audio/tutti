@@ -154,7 +154,7 @@ fn run_thread(
     // (a request to be processed again, a latency change), whether or not a
     // command is waiting: a thread that only waits on it tells the bridge.
     match ipc::Watch::of(&lanes.control.stream) {
-        Ok(watch) => watch_control(watch, channels.clone(), lifecycle.clone()),
+        Ok(watch) => watch_control(Arc::new(watch), channels.clone(), lifecycle.clone()),
         Err(e) => tracing::warn!("the bridge cannot watch the control connection: {e}"),
     }
     pump(&channels, &payloads, &lifecycle, &listener, &mut lanes);
@@ -167,7 +167,8 @@ const WATCH_SLICE: std::time::Duration = std::time::Duration::from_millis(20);
 
 /// Spawns the watcher: it waits for the control connection to have bytes and
 /// tells the bridge thread, then waits for the bridge to have read them.
-fn watch_control(watch: ipc::Watch, channels: Channels, lifecycle: Lifecycle) {
+fn watch_control(watch: Arc<ipc::Watch>, channels: Channels, lifecycle: Lifecycle) {
+    channels.set_probe(Arc::clone(&watch));
     let spawned = thread::Builder::new()
         .name("plugin-bridge-news".to_string())
         .spawn(move || {
@@ -182,6 +183,8 @@ fn watch_control(watch: ipc::Watch, channels: Channels, lifecycle: Lifecycle) {
                     thread::park_timeout(std::time::Duration::from_millis(1));
                 }
             }
+            // The bridge is done: the duplicate of its connection goes with it.
+            channels.clear_probe();
         });
     if let Err(e) = spawned {
         tracing::warn!("the bridge cannot watch the control connection: {e}");

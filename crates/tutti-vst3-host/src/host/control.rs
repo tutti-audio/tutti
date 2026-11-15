@@ -6,10 +6,10 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
-    KeyUse, LoadedPlugin, ModifierConvention, Normalized, ParamEdit, ParamId, ParamMapping,
-    ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, Preset,
-    PresetId, RenderModeSupport, Request, RescanScope, Samples, StateUse, Vst3SubCategories,
-    WindowHandle,
+    KeyUse, LoadedPlugin, ModifierConvention, Normalized, ParamAccess, ParamEdit, ParamId,
+    ParamMapping, ParamWriteError, ParameterInfo, PluginClass, PluginDescriptor, PluginError,
+    PluginResult, PluginTail, Preset, PresetId, RenderModeSupport, Request, RescanScope, Samples,
+    StateUse, Vst3SubCategories, WindowHandle,
 };
 
 use crate::error::Vst3Error;
@@ -270,7 +270,13 @@ impl Control for Vst3Loaded {
     /// inactive plugin waits in `carried`, which the next activation delivers in
     /// its first block and `save_state` stores beside the component's stream.
     /// While active, the Controller queues the write to the Processor instead.
-    fn set_parameter(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
+    fn set_parameter(
+        &mut self,
+        main: MainThreadMarker,
+        id: ParamId,
+        value: Normalized,
+    ) -> Result<(), ParamWriteError> {
+        self.parameter_writable(main, id)?;
         let written = self.write_normalized(main, id, value);
         // A write the last activation left undelivered is older than this one.
         if let Some(slot) = self.carried.iter_mut().find(|(waiting, _)| *waiting == id) {
@@ -278,6 +284,25 @@ impl Control for Vst3Loaded {
         } else if written && !self.active.is_active() && self.parameter_info(main, id).is_some() {
             self.carried.push((id, value));
         }
+        Ok(())
+    }
+
+    /// While active, from the activation's table (what the Processor drops
+    /// against, so `Ok` is a write that is applied); otherwise from the
+    /// plugin's own parameter info, which carries `kIsReadOnly`.
+    fn parameter_writable(
+        &self,
+        main: MainThreadMarker,
+        id: ParamId,
+    ) -> Result<(), ParamWriteError> {
+        if let Some(declared) = &self.declared {
+            return ParamWriteError::check_sorted(id, declared);
+        }
+        let info = self.parameter_info(main, id);
+        ParamWriteError::check(
+            id,
+            info.map(|info| ParamAccess::reported(info.is_read_only())),
+        )
     }
 
     /// The controller's own `normalizedParamToPlain`, whatever shape it has
@@ -384,9 +409,15 @@ impl Control for Vst3Loaded {
     fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
         match self.program_write(main, id) {
             Some((param, value)) => {
+                // A refused write leaves what is carried as it was.
+                if self.parameter_writable(main, param).is_err() {
+                    return false;
+                }
                 // A program replaces the plugin's other parameters too.
                 self.carried.clear();
-                self.set_parameter(main, param, value);
+                if self.set_parameter(main, param, value).is_err() {
+                    return false;
+                }
                 if self.active.is_active() {
                     // The Controller of this activation queues it to the Processor.
                     self.carried.push((param, value));

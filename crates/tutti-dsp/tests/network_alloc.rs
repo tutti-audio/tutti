@@ -85,7 +85,7 @@ fn freeverb_retargets_and_renders_without_allocating() {
     let _: Realized<FreeverbRecurrence> = realization;
 }
 
-/// `member_into` builds no value of the network's size (about 56 KB): it runs
+/// `member_into` builds no value of the network's size (about 67 KB): it runs
 /// on a 96 KiB stack, as an audio thread's callback may. An unoptimised build
 /// copies a network about three times, so building one needs well over that.
 #[test]

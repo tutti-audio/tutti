@@ -15,8 +15,8 @@ use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use tutti_plugin_types::{
-    Normalized, ParamFlags, ParamId, ParamRange, ParamSteps, ParameterInfo, PluginDescriptor,
-    SampleFormat,
+    Normalized, ParamAccess, ParamFlags, ParamId, ParamRange, ParamSteps, ParameterInfo,
+    PluginDescriptor, SampleFormat,
 };
 use tutti_rt::ArcLend;
 use tutti_types::ChannelTopology;
@@ -74,6 +74,13 @@ pub struct Vst3Loaded {
     /// Writes a rejoin took from the halves that no block had delivered, for
     /// the next activation's first block.
     pub(super) carried: Vec<(ParamId, Normalized)>,
+    /// What the plugin declared when it was activated, and what each parameter
+    /// declares of its writability, sorted by id: the table the Processor drops
+    /// writes against. `None` while inactive. A write is answered from it while
+    /// active, so `Ok` means the Processor will apply it; the plugin's live
+    /// parameter info may have moved since (a `kParamTitlesChanged` restart), and
+    /// the table is read again at the next activation.
+    pub(super) declared: Option<Arc<[(ParamId, ParamAccess)]>>,
     /// The `IMidiMapping` table the Processor routes against: published by
     /// whichever half rebuilds it, lent to the Processor once per block.
     pub(super) midi_cc: Arc<ArcLend<MidiCcCell>>,

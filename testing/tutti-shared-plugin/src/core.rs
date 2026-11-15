@@ -192,10 +192,13 @@ pub const AUX: u32 = 1;
 pub const MODE: u32 = 2;
 /// The parameter with a plain domain: a decreasing exponential (see the spec).
 pub const TONE: u32 = 3;
+/// The read-only parameter: a meter the host never writes, always 0. Every
+/// format declares it read-only where the format has the flag (VST2 has none).
+pub const METER: u32 = 4;
 /// Number of parameters.
-pub const PARAMS: u32 = 4;
+pub const PARAMS: u32 = 5;
 /// Parameter names, by id.
-pub const NAMES: [&str; PARAMS as usize] = ["level", "aux", "mode", "tone"];
+pub const NAMES: [&str; PARAMS as usize] = ["level", "aux", "mode", "tone", "meter"];
 /// The plain value of `TONE` at its normalized minimum, its largest.
 pub const TONE_PLAIN_MAX: f64 = 20_000.0;
 /// The plain value of `TONE` at its normalized maximum, its smallest.
@@ -334,6 +337,7 @@ pub fn default_of(id: u32) -> Option<f64> {
         AUX => Some(0.25),
         MODE => Some(0.0),
         TONE => Some(0.5),
+        METER => Some(0.0),
         _ => None,
     }
 }
@@ -606,6 +610,7 @@ impl Core {
             AUX => Some(f64::from_bits(self.aux.load(Relaxed))),
             TONE => Some(f64::from_bits(self.tone.load(Relaxed))),
             MODE => Some(f64::from(self.mode.load(Relaxed)) / f64::from(MODES - 1)),
+            METER => Some(0.0),
             _ => None,
         }
     }
