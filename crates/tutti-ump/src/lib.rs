@@ -64,6 +64,7 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(not(test), no_std)]
 
+mod articulation;
 mod bend_value;
 mod cc_number;
 mod control_value;
@@ -87,6 +88,11 @@ mod sysex8;
 mod text;
 mod ump;
 
+pub use articulation::{
+    Articulation, ArticulationError, Classification, ColorSound, CoreSound, CustomClassification,
+    EffectSound, GestureSound, IntervallicTrill, NoteArticulation, NoteEnding, NoteOffArticulation,
+    RunSound, SameNoteSound, ShortSound, StringAssignment, Stroke,
+};
 pub use bend_value::BendValue;
 pub use cc_number::CCNumber;
 pub use control_value::ControlValue;
