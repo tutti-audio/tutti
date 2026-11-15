@@ -7,6 +7,7 @@ use crate::common::{track, unsorted};
 use tutti_fixtures::midi;
 use tutti_midi_file::{
     ClipFileError, Error, FileEvent, Meta, MidiFile, MidiFileKind, SmfFormat, Tick, Track,
+    Truncated,
 };
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::ControlValue;
@@ -295,7 +296,7 @@ fn the_magic_alignment_and_a_cut_packet_are_refused() {
     let cut = &good[..good.len() - 12];
     assert!(matches!(
         MidiFile::from_bytes(cut),
-        Err(Error::Clip(ClipFileError::Truncated))
+        Err(Error::Clip(ClipFileError::Truncated(Truncated::Message)))
     ));
 }
 

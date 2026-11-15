@@ -36,6 +36,7 @@
 
 use std::vec::Vec;
 
+use crate::Truncated;
 use tutti_ump::{DeltaTicks, Flex, FlexTextKind, Form, Message, Stream, SysexStatus, Ump, Utility};
 
 mod read;
@@ -91,9 +92,9 @@ pub enum ClipFileError {
     /// The body length is not a whole number of 32-bit UMP words.
     #[error("clip body is not 32-bit-word aligned")]
     Unaligned,
-    /// A UMP claims more words than remain in the stream.
-    #[error("clip file is truncated mid-message")]
-    Truncated,
+    /// The stream ends too soon; the [`Truncated`] says in what.
+    #[error("clip file is truncated")]
+    Truncated(#[source] Truncated),
     /// No DCTPQ (tick-unit declaration) in the file.
     #[error("clip file has no DCTPQ tick-unit declaration")]
     MissingDctpq,

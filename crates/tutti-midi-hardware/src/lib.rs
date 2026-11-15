@@ -236,6 +236,7 @@ mod guard;
 mod port;
 mod process;
 mod profiles;
+mod properties;
 mod session;
 // Only the backends with a clock of their own to read convert its timestamp.
 #[cfg_attr(
@@ -271,6 +272,7 @@ pub use profiles::{
     ChannelCount, ChannelProfile, ListedProfile, NotAChannelCount, PeerProfiles, ProfileError,
     ProfileSwitch, ProfilesChange, Whole, WholeProfile,
 };
+pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyError, PropertyPeer};
 pub use session::{DeviceQuery, MidiSession, Polled};
 pub use stream::{Basis, DeviceStream, InputTiming};
 pub use tutti_midi_device::{

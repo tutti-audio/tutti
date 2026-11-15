@@ -325,6 +325,13 @@ impl ResourceInitiator {
             .map(|s| (&s.id, &s.target, s.data.as_ref()))
     }
 
+    /// Asks for the peer's Capabilities again, which replace what it reported
+    /// before and, once they arrive, the ResourceList.
+    pub fn ask_capabilities(&mut self, now: Instant) -> Vec<ResourceAction> {
+        let actions = self.pe.ask_capabilities(now);
+        self.map(actions, now)
+    }
+
     /// When [`on_timeout`](Self::on_timeout) is next needed.
     #[must_use]
     pub fn deadline(&self) -> Option<Instant> {

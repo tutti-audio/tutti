@@ -662,7 +662,7 @@ fn the_other_chunk_naks_end_the_request_with_their_signal() {
         let (request, _) = i.start(get("State"), now).unwrap();
         assert_eq!(request, id(0));
         let actions = i.on_message(&signal_message(PeTransaction::Get, signal), now);
-        assert_eq!(one_finished(&actions).2, PeOutcome::Nak(signal));
+        assert_eq!(one_finished(&actions).2, PeOutcome::Refused(signal));
     }
 }
 
@@ -1391,7 +1391,7 @@ fn a_notify_timed_out_ends_the_request_as_a_timeout_nak() {
         (
             request,
             PeKind::Get,
-            PeOutcome::Nak(PeSignal::TimedOut {
+            PeOutcome::Refused(PeSignal::TimedOut {
                 request_id: request
             })
         )

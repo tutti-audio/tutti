@@ -9,6 +9,12 @@
 //! holds it, and **released** at the last hold's drop; declaring a held key
 //! again with the same identity adopts it with no reload.
 //!
+//! Holds have a depth ([`PoolConfig::live_holds`]): the newest snapshot holds
+//! keep their entries live, and an entry only older holds keep is **parked**
+//! when its kind says so ([`PoolEntry::park`]): its value is released and its
+//! handles read closed, and declaring the key again loads it afresh. A node's
+//! hold never parks.
+//!
 //! A key declared again with the same identity keeps what it has, a failed
 //! load included: [`Session::retry`] loads it again, and also reopens a loaded
 //! entry its kind reads as lost. When an identity changes, the old value
@@ -18,7 +24,14 @@
 //! Each kind of entry is a [`PoolEntry`]; `audio_file` (feature `sampler`) and
 //! `soundfont` (feature `soundfont`) are the data kinds. A load's outcome lands
 //! in [`Session::update`] as a [`SessionEvent::Pool`](crate::SessionEvent::Pool), and
-//! [`Session::pool_state`] reads where an entry stands.
+//! [`Session::pool_state`] reads where an entry stands. A handle read by key
+//! (`Session::audio`, `Session::soundfont`) is a clone that owns nothing:
+//! dropping it leaves its entry loaded. [`Session::when_loaded`] runs a
+//! closure once an entry is loaded.
+//!
+//! A file entry takes the file's stamp on the worker that loads it, and
+//! [`Session::refresh_pool`] compares stamps on a worker and loads again the
+//! entries whose file changed; the diff itself never reads metadata.
 //!
 //! # Stages
 //!
@@ -39,7 +52,7 @@
 //! (`BounceError::PoolPending`, feature `export`).
 
 use std::fmt;
-#[cfg(any(feature = "sampler", feature = "soundfont"))]
+#[cfg(feature = "soundfont")]
 use std::sync::Arc;
 
 use crate::Session;
@@ -50,21 +63,28 @@ mod data;
 mod entry;
 mod key;
 mod open;
+mod refresh;
 mod report;
 mod run;
+mod stamp;
 mod table;
+mod wait;
 
 pub use config::PoolConfig;
 #[cfg(feature = "sampler")]
-pub use data::{AudioFile, audio_file};
+pub use data::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 #[cfg(feature = "soundfont")]
 pub use data::{SoundFontFile, soundfont};
-pub use entry::{Declared, IntoPool, Life, Load, LoadError, PoolEntry, PoolSet, stranded_loads};
+pub use entry::{
+    Declared, IntoPool, Life, Load, LoadError, Parking, PoolEntry, PoolSet, stranded_loads,
+};
 pub use key::PoolKey;
 pub use open::OpenCx;
-pub use report::{PoolLoaded, PoolOutcome, PoolReport};
+pub use refresh::RefreshPool;
+pub use report::{PoolOutcome, PoolReport};
 pub(crate) use table::Pool;
-pub use table::{HandleError, PoolError, PoolEvent, PoolState, RetryError};
+pub use table::{HandleError, PoolError, PoolEvent, PoolState, RetryError, WhenLoadedError};
+pub use wait::PoolWait;
 
 #[cfg(test)]
 mod tests;
@@ -139,18 +159,85 @@ impl Session {
     /// The wait for every declared entry's outcome: it lands once no declared
     /// entry is pending, as a [`PoolReport`] of each key's outcome. Entries
     /// that failed are in it, as [`PoolOutcome::Failed`]. An offline session
-    /// calls [`update`](Self::update) until [`PoolLoaded::has_landed`] before
-    /// it renders. Dropping the [`PoolLoaded`] ends the wait.
+    /// calls [`update`](Self::update) until [`PoolWait::has_landed`] before
+    /// it renders. Dropping the [`PoolWait`] ends the wait.
     ///
     /// `K` is the type of the keys the pool was declared with; keys of another
     /// type are not in the report.
-    pub fn pool_loaded<K>(&mut self) -> PoolLoaded<K>
+    pub fn pool_loaded<K>(&mut self) -> PoolWait<PoolReport<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
-        let (loaded, landing) = PoolLoaded::new();
+        let (loaded, landing) = PoolWait::new();
         self.pool.wait_loaded(landing);
         loaded
+    }
+
+    /// Runs `then` in an [`update`](Self::update), once, when the declared
+    /// entry under `key` is loaded: in the update where its load lands, or the
+    /// next one when it already is. `then` runs after the update's other
+    /// landings and is given the session, so it reads the entry's handle and
+    /// declares what depends on it.
+    ///
+    /// A run waits through a failed load, so a [`retry`](Self::retry) that
+    /// lands runs it, and through a reload (the entry reads
+    /// [`PoolState::Reloading`] until it lands). It is dropped without
+    /// running when its entry is released, and while the entry is only held it
+    /// waits.
+    ///
+    /// The runs of one update go one at a time, each checked against the pool
+    /// as the run before it left it: a run whose entry an earlier run released
+    /// is dropped. A run asked from inside a run waits for the next update. A
+    /// run that panics unwinds out of `update`, and the runs after it stay
+    /// asked for the next one.
+    ///
+    /// # Errors
+    ///
+    /// [`WhenLoadedError::NotPooled`] when the key is not declared: never
+    /// declared, or released.
+    pub fn when_loaded<K>(
+        &mut self,
+        key: &K,
+        then: impl FnOnce(&mut Self) + Send + 'static,
+    ) -> Result<(), WhenLoadedError<K>>
+    where
+        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+    {
+        self.pool.when_loaded(key, Box::new(then))
+    }
+
+    /// Checks the files the pool's entries read, on a worker, and loads again
+    /// the entries whose file changed.
+    ///
+    /// Each file entry took the file's stamp (length and modification time)
+    /// when it loaded. The check takes each stamp again and compares: an entry
+    /// whose stamp differs reloads as it does for a changed identity (the old
+    /// value stays until the new one lands, as a [`PoolEvent::Reloaded`]), and
+    /// two keys that share a load reload with one. An entry whose file can no
+    /// longer be read keeps what it has, and is named as unreadable. An entry
+    /// with no stamp (its stat failed when it loaded) loads again once its file
+    /// reads, and that load's worker stage stamps it; a kind whose load has no
+    /// worker stage takes no stamp, so it loads again at every refresh.
+    ///
+    /// This is the one place the pool reads file metadata: [`pool`](Self::pool)
+    /// never does, so a key declared after its file changed shares the loaded
+    /// entry until the next refresh, and a plugin binary that changed on disk
+    /// or a provided asset is never detected. The result lands in a later
+    /// [`update`](Self::update) as a [`RefreshPool`], or as the job's failure.
+    pub fn refresh_pool(&mut self) -> PoolWait<Result<RefreshPool, crate::JobFailed>> {
+        let (wait, landing) = PoolWait::new();
+        let files = self.pool.stamped_files();
+        self.jobs.submit(
+            move || refresh::check(files),
+            move |session, done, _| {
+                landing.land(done.map(|checked| {
+                    let (starts, refreshed) = session.pool.reload_changed(checked);
+                    session.pool_start(starts);
+                    refreshed
+                }));
+            },
+        );
+        wait
     }
 
     /// Where the entry under `key` stands, `None` when the pool has none: never
@@ -166,14 +253,18 @@ impl Session {
 
 #[cfg(feature = "sampler")]
 impl Session {
-    /// The wave of the `audio_file` entry under `key`.
+    /// What the `audio_file` entry under `key` read: its wave, or its stream's
+    /// header ([`AudioEntry`]).
+    ///
+    /// The handle is a clone and owns nothing: dropping it leaves the entry
+    /// loaded, and the entry's release leaves it reading what it had.
     ///
     /// # Errors
     ///
     /// [`HandleError::NotPooled`] when the key is not declared (never, or
     /// released); [`HandleError::WrongKind`] when it is another kind of entry;
     /// [`HandleError::NotLoaded`] before the load lands, or after it failed.
-    pub fn audio<K>(&self, key: &K) -> Result<Arc<tutti_codec::Wave>, HandleError<K>>
+    pub fn audio<K>(&self, key: &K) -> Result<AudioEntry, HandleError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
@@ -184,6 +275,7 @@ impl Session {
 #[cfg(feature = "soundfont")]
 impl Session {
     /// The SoundFont of the `soundfont` entry under `key`, shared by its `Arc`.
+    /// The handle owns nothing: dropping it leaves the entry loaded.
     ///
     /// # Errors
     ///

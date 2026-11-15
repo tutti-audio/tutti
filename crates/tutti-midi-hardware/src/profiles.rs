@@ -387,6 +387,12 @@ pub enum ProfilesChange {
         /// Why.
         error: RequestError,
     },
+    /// A [`ProfileSwitch`] was not sent: the peer was lost between the request
+    /// and the poll that would have sent it.
+    PeerGone {
+        /// The Profile.
+        profile: ProfileId,
+    },
     /// The peer sent Profile Specific Data (M2-101 §7.12): a Profile's own
     /// message, which [`mpe_channel_response`](ProfilesChange::mpe_channel_response)
     /// reads for the MPE Profile.

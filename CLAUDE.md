@@ -128,7 +128,8 @@ std only. A rule the compiler already enforces is not a gate.
 - The audio thread never holds an owning handle to published state and never frees it.
   `publish` and `reclaim` are control-thread only.
 - Register a `Reader` on the control side where the reader is built, and store it in the
-  node. Lend once per block, never per sample, and never keep a `Loan` across blocks.
+  node. Lend once per block (once per segment where a commit can install mid-block),
+  never per sample, and never keep a `Loan` across blocks.
 - Every cell's publisher calls `reclaim()` on a control-side tick it already has; a new
   cell joins its owner's sweep in the same change.
 
