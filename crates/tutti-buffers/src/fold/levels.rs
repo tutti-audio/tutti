@@ -1,0 +1,97 @@
+//! The downmix levels of a [`Fold`] and the spec that states them.
+
+use std::marker::PhantomData;
+
+use super::{Fold, FoldError};
+use crate::Float;
+use tutti_types::{Amplitude, ChannelTopology};
+
+/// The gains a fold applies where a speaker the destination lacks folds into
+/// the nearest ones.
+///
+/// The default is ITU-R BS.775's: the centre and the surrounds at -3 dB, the
+/// heights at -3 dB into the layer below, and the LFE omitted. A deliverable
+/// that states its own (-4.5 or -6 dB, the LFE in) builds the fold with
+/// [`Fold::spec`] and [`FoldSpec::levels`].
+///
+/// ```
+/// use tutti_buffers::{Fold, FoldLevels};
+/// use tutti_types::{Amplitude, Bed};
+///
+/// let levels = FoldLevels {
+///     centre: Amplitude(0.5),
+///     ..FoldLevels::default()
+/// };
+/// let fold: Fold = Fold::spec(&Bed::Surround51.topology(), &Bed::Stereo.topology())
+///     .levels(levels)
+///     .build()
+///     .unwrap();
+/// // Left takes the centre (channel 2) at 0.5.
+/// assert_eq!(fold.contributions(0)[1], (2, 0.5));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FoldLevels {
+    /// The front centre (and the centre pair) folded into the front pair, or a
+    /// missing front speaker into its neighbour.
+    pub centre: Amplitude,
+    /// A side or rear speaker the destination lacks, folded into the speakers
+    /// it has. A pure reposition (5.1 to quad) stays at unity.
+    pub surround: Amplitude,
+    /// An overhead speaker the destination lacks, folded into the layer below.
+    pub height: Amplitude,
+    /// `None` omits the LFE where the destination has none. `Some(g)` feeds it
+    /// to the front left and right at `g`, or to the one channel of a mono
+    /// destination at `g`.
+    pub lfe: Option<Amplitude>,
+}
+
+impl Default for FoldLevels {
+    /// ITU-R BS.775: -3 dB for the centre, the surrounds and the heights, and
+    /// no LFE.
+    fn default() -> Self {
+        let minus_3_db = Amplitude(f32::MINUS_3_DB);
+        Self {
+            centre: minus_3_db,
+            surround: minus_3_db,
+            height: minus_3_db,
+            lfe: None,
+        }
+    }
+}
+
+/// A fold from one topology into another, with its levels stated and not yet
+/// built ([`Fold::spec`]).
+#[derive(Debug, Clone, Copy)]
+#[must_use = "a spec builds nothing until `build`"]
+pub struct FoldSpec<'a, F: Float = f32> {
+    src: &'a ChannelTopology,
+    dst: &'a ChannelTopology,
+    levels: FoldLevels,
+    float: PhantomData<F>,
+}
+
+impl<'a, F: Float> FoldSpec<'a, F> {
+    pub(super) fn new(src: &'a ChannelTopology, dst: &'a ChannelTopology) -> Self {
+        Self {
+            src,
+            dst,
+            levels: FoldLevels::default(),
+            float: PhantomData,
+        }
+    }
+
+    /// This spec with `levels` in place of the defaults.
+    pub fn levels(mut self, levels: FoldLevels) -> Self {
+        self.levels = levels;
+        self
+    }
+
+    /// Builds the fold. Control side: it allocates.
+    ///
+    /// # Errors
+    ///
+    /// As [`Fold::between`].
+    pub fn build(self) -> Result<Fold<F>, FoldError> {
+        Fold::build(self.src, self.dst, self.levels)
+    }
+}
