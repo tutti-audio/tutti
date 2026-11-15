@@ -76,19 +76,20 @@ fn midi_through_returns_a_note_on_a_note_off_and_a_burst_of_ten_note_ons() {
     let mut lb = open();
 
     let on = note_on(MidiChannel::FIRST, 60, 0x8000);
-    assert_eq!(lb.sink.queue(&[(Offset::ZERO, on)]), 1);
+    assert_eq!(lb.sink.queue(&[(Offset::ZERO, on)]).packets(), 1);
     let heard = lb.graph.listen(Duration::from_millis(150));
     assert_eq!(heard.len(), 1, "one event came back for the note on");
     assert!(is_note_on(heard[0]), "the event is a note on");
 
     let off = note_off(MidiChannel::FIRST, 60, 0x4000);
-    assert_eq!(lb.sink.queue(&[(Offset::ZERO, off)]), 1);
+    assert_eq!(lb.sink.queue(&[(Offset::ZERO, off)]).packets(), 1);
     let heard = lb.graph.listen(Duration::from_millis(150));
     assert_eq!(heard.len(), 1, "one event came back for the note off");
     assert!(heard[0].is_note_off(), "the event is a note off");
 
     for n in 60..70u8 {
-        lb.sink
+        let _ = lb
+            .sink
             .queue(&[(Offset::ZERO, note_on(MidiChannel::FIRST, n, 0xA000))]);
     }
     let heard = lb.graph.listen(Duration::from_millis(250));

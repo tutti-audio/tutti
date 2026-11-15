@@ -99,6 +99,7 @@ mod plugin_diagnostics;
 mod plugin_params;
 #[cfg(feature = "plugin")]
 mod plugin_presets;
+mod policy;
 mod pool;
 #[cfg(feature = "record")]
 mod recorder;
@@ -211,6 +212,7 @@ pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 pub use plugin_params::{Param, ParamGesture, Params, PluginParamError, TypedParam};
 #[cfg(feature = "plugin")]
 pub use plugin_presets::{PresetEntry, PresetKind, Presets};
+pub use policy::{OutputPolicy, OutputPolicyError, OutputPolicyHandle, Policy};
 #[cfg(feature = "record")]
 pub use recorder::{Finite, IDLE_PARK, Live, PumpLoop, PumpPass, Recorder, RecorderError};
 #[cfg(feature = "plugin")]

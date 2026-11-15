@@ -77,7 +77,7 @@ fn what_a_virtual_source_sends_reaches_a_session_input_in_order() {
     for ump in &sent {
         source.send(*ump).expect("sends");
     }
-    assert_eq!(graph.listen(Duration::from_millis(300)), sent);
+    assert_eq!(graph.hear(sent.len(), PATIENCE), sent);
 }
 
 /// What a session output sends to a virtual destination arrives at the
@@ -98,9 +98,9 @@ fn what_a_session_output_sends_reaches_a_virtual_destination_in_order() {
 
     let sent = notes();
     for ump in &sent {
-        assert_eq!(out.queue(&[(Offset::ZERO, *ump)]), 1);
+        assert_eq!(out.queue(&[(Offset::ZERO, *ump)]).packets(), 1);
     }
-    assert_eq!(graph.listen(Duration::from_millis(300)), sent);
+    assert_eq!(graph.hear(sent.len(), PATIENCE), sent);
     assert!(destination.is_alive());
 }
 
@@ -129,11 +129,12 @@ fn a_midi1_destination_delivers_what_the_ingest_node_widens() {
     graph.listen(Duration::from_millis(50));
 
     assert_eq!(
-        out.queue(&[(Offset::ZERO, note_on(MidiChannel::of(1), 60, 0x8100))]),
+        out.queue(&[(Offset::ZERO, note_on(MidiChannel::of(1), 60, 0x8100))])
+            .packets(),
         1
     );
     assert_eq!(
-        graph.listen(Duration::from_millis(300)),
+        graph.hear(1, PATIENCE),
         [note_on(MidiChannel::of(1), 60, 0x8000)]
     );
 }

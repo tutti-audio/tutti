@@ -120,11 +120,11 @@
 //! // Or by name: one `DeviceQuery` form for connect and disconnect.
 //! session.disconnect_input("keystep");
 //!
-//! // Outbound: the output is a value the caller owns; `queue` returns how many
-//! // events the device accepted.
+//! // Outbound: the output is a value the caller owns; `queue` returns what the
+//! // device took of them, always whole messages.
 //! let mut output = session.connect_output("iac")?;
 //! let note = midi::note_on(MidiChannel::FIRST, 60, 0x8000);
-//! assert_eq!(output.queue(&[(Offset::ZERO, note)]), 1);
+//! assert_eq!(output.queue(&[(Offset::ZERO, note)]).packets(), 1);
 //! # Ok::<(), tutti_midi_hardware::Error>(())
 //! ```
 //!
@@ -265,7 +265,7 @@ pub use devices::{
     WatchFailure,
 };
 pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
-pub use error::{Error, Result};
+pub use error::{Error, NotFound, Result};
 pub use port::{HardwareMidiInputs, InputProducerHandle, PortInfo, Pushed, StreamDrain};
 pub use process::{ProcessChange, ReportAsk, ReportError, ReportPeer};
 pub use profiles::{

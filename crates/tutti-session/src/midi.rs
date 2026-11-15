@@ -243,11 +243,23 @@ enum Sink {
 }
 
 impl Sink {
+    /// Queues `events`; returns how many events the host's sink refused, not
+    /// counting the JR stamps among them. A device's output counts its own
+    /// refusals in its losses.
     fn queue_timed(&mut self, events: &[Outgoing]) -> usize {
         match self {
-            Self::Host(sink) => sink.queue_timed(events),
+            Self::Host(sink) => {
+                let taken = sink.queue_timed(events).packets();
+                events[taken..]
+                    .iter()
+                    .filter(|event| !event.ump.is_jr())
+                    .count()
+            }
             #[cfg(feature = "midi-hardware")]
-            Self::Device(out) => out.queue_timed(events),
+            Self::Device(out) => {
+                let _ = out.queue_timed(events);
+                0
+            }
         }
     }
 }
@@ -380,9 +392,10 @@ impl UmpOut {
     /// latency, less the device's, plus the offset), and the sink schedules it;
     /// without, every event goes at once. An event whose time is more than
     /// [`MAX_OUTPUT_AHEAD`](tutti_midi_runtime::MAX_OUTPUT_AHEAD) ahead is not
-    /// sent, and the call returns how many were refused; a batch whose span no
-    /// block on this target can hold is refused whole. The JR stamps keep the
-    /// events' spacing whether or not they are scheduled.
+    /// sent, and the call returns how many events were refused, those a host's
+    /// sink refused with them; a batch whose span no block on this target can
+    /// hold is refused whole. The JR stamps keep the events' spacing whether or
+    /// not they are scheduled.
     pub fn send_frames(&mut self, events: &[(Frame, Ump)], timing: Option<&OutputTiming>) -> usize {
         let (Some(first), Some(last)) = (
             events.iter().map(|e| e.0).min(),
@@ -419,28 +432,28 @@ impl UmpOut {
         }
         sends.sort_unstable_by_key(|&(at, _)| at);
         self.sends = sends;
-        self.send_batch(&batch);
+        let sink_refused = self.send_batch(&batch);
         self.sends.clear();
         self.rebased = batch;
-        refused
+        refused + sink_refused
     }
 
     /// Stamps `events` (when stamping) and sends them, each at the time
     /// `self.sends` has for its offset, else at once.
-    fn send_batch(&mut self, events: &[UmpAt]) {
+    fn send_batch(&mut self, events: &[UmpAt]) -> usize {
         if !self.is_stamping() {
-            self.send_all(events);
-            return;
+            return self.send_all(events);
         }
         // Taken out and put back so `stream` and the buffer can be borrowed
         // mutably at once; `stamp` clears it, so the swap carries no state.
         let mut buf = core::mem::take(&mut self.stamped);
         self.stream.stamp(events, &mut buf);
-        self.send_all(&buf);
+        let refused = self.send_all(&buf);
         self.stamped = buf;
+        refused
     }
 
-    fn send_all(&mut self, events: &[UmpAt]) {
+    fn send_all(&mut self, events: &[UmpAt]) -> usize {
         let mut out = core::mem::take(&mut self.outgoing);
         out.clear();
         // A JR stamp is at its event's offset, so it is sent with it. An offset
@@ -448,19 +461,19 @@ impl UmpOut {
         // the frame, so events on one offset share one send time and any
         // match of the search is the right one.
         out.extend(events.iter().map(|&(at, ump)| {
-            Outgoing {
+            Outgoing::new(
                 at,
-                send: self
-                    .sends
+                self.sends
                     .binary_search_by_key(&at, |&(o, _)| o)
                     .map_or(SendAt::Now, |i| self.sends[i].1),
                 ump,
-            }
+            )
         }));
         // One `queue_timed` for the batch: a backend may pack several UMP
         // messages into one packet.
-        self.sink.queue_timed(&out);
+        let refused = self.sink.queue_timed(&out);
         self.outgoing = out;
+        refused
     }
 
     /// The absolute frame the next stamp starts from. For tests and
@@ -2367,9 +2380,10 @@ mod tests {
     /// these tests run on every platform.
     struct CountingSink(Arc<AtomicUsize>);
     impl tutti_midi_runtime::MidiOut for CountingSink {
-        fn queue(&self, events: &[UmpAt]) -> usize {
+        fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
+            let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
             self.0.fetch_add(events.len(), Ordering::SeqCst);
-            events.len()
+            tutti_midi_runtime::Taken::within(batch, batch.len())
         }
     }
 
@@ -2473,9 +2487,10 @@ mod tests {
     /// Keeps every batch it is handed.
     struct Recording(Arc<std::sync::Mutex<Vec<Vec<UmpAt>>>>);
     impl tutti_midi_runtime::MidiOut for Recording {
-        fn queue(&self, events: &[UmpAt]) -> usize {
+        fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
+            let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
             self.0.lock().unwrap().push(events.to_vec());
-            events.len()
+            tutti_midi_runtime::Taken::within(batch, batch.len())
         }
     }
 
@@ -2520,7 +2535,7 @@ mod tests {
         let log = Arc::new(std::sync::Mutex::new(Vec::new()));
         let mut out = UmpOut::new(Box::new(Recording(log.clone())), SampleRate::SR_48K);
         let (tx, rx) = tutti_midi_runtime::MidiMailbox::pair();
-        tx.queue_stamped(&[(u32::MAX - 4, note(0).1), (5, note(0).1)]);
+        let _ = tx.queue_stamped(&[(u32::MAX - 4, note(0).1), (5, note(0).1)]);
         let mut router = MidiOutRouter {
             out: Some(&mut out),
             drops: None,
@@ -2550,7 +2565,7 @@ mod tests {
         );
         let mut stamped: Vec<(u32, Ump)> = (0..256).map(|s| (s, note(0).1)).collect();
         stamped.push((1_000, note(0).1));
-        tx.queue_stamped(&stamped);
+        let _ = tx.queue_stamped(&stamped);
         let mut router = MidiOutRouter {
             out: Some(&mut out),
             drops: None,
@@ -2595,12 +2610,9 @@ mod tests {
     /// Keeps every batch's events with the time each was sent at.
     struct Timed(Arc<std::sync::Mutex<Vec<Outgoing>>>);
     impl tutti_midi_runtime::MidiOut for Timed {
-        fn queue(&self, events: &[UmpAt]) -> usize {
-            events.len()
-        }
-        fn queue_timed(&self, events: &[Outgoing]) -> usize {
+        fn queue_timed(&self, events: &[Outgoing]) -> tutti_midi_runtime::Taken {
             self.0.lock().unwrap().extend_from_slice(events);
-            events.len()
+            tutti_midi_runtime::Taken::within(events, events.len())
         }
     }
 

@@ -1642,3 +1642,239 @@ fn a_2d_normalization_converts_only_to_itself() {
         }
     }
 }
+
+/// The default levels are ITU-R BS.775's, written out: 5.1 into stereo takes the
+/// centre and each surround at -3 dB and omits the LFE, and `between` is that
+/// fold.
+#[test]
+fn the_default_levels_are_bs775_minus_3_db() {
+    use tutti_types::{Amplitude, Bed};
+    let m = f32::MINUS_3_DB;
+    let levels = FoldLevels::default();
+    assert_eq!(
+        (levels.centre, levels.surround, levels.height, levels.lfe),
+        (Amplitude(m), Amplitude(m), Amplitude(m), None)
+    );
+    let f = fold(&Bed::Surround51.topology(), &Bed::Stereo.topology());
+    assert_eq!(f.contributions(0), [(0, 1.0), (2, m), (4, m)]);
+    assert_eq!(f.contributions(1), [(1, 1.0), (2, m), (5, m)]);
+}
+
+/// A level that is not a gain (NaN, infinite or negative) is refused by name
+/// when the fold is built, so it never reaches a signal.
+#[test]
+fn a_level_that_is_not_a_gain_is_refused() {
+    use tutti_types::{Amplitude, Bed};
+    let (five_one, stereo) = (Bed::Surround51.topology(), Bed::Stereo.topology());
+    for bad in [f32::NAN, f32::INFINITY, -0.5] {
+        let spec = |levels| Fold::<f32>::spec(&five_one, &stereo).levels(levels).build();
+        let base = FoldLevels::default();
+        assert_eq!(
+            spec(FoldLevels {
+                centre: Amplitude(bad),
+                ..base
+            }),
+            Err(FoldError::NotAGain {
+                level: FoldLevel::Centre
+            })
+        );
+        assert_eq!(
+            spec(FoldLevels {
+                lfe: Some(Amplitude(bad)),
+                ..base
+            }),
+            Err(FoldError::NotAGain {
+                level: FoldLevel::Lfe
+            })
+        );
+    }
+    assert!(
+        Fold::<f32>::spec(&five_one, &stereo)
+            .levels(FoldLevels {
+                height: Amplitude(0.0),
+                ..FoldLevels::default()
+            })
+            .build()
+            .is_ok(),
+        "silence is a gain"
+    );
+}
+
+/// Stated levels are the coefficients of the fold, per class of speaker: the
+/// centre, the surrounds and the heights each at their own gain.
+#[test]
+fn levels_state_the_centre_the_surround_and_the_height_gains() {
+    use tutti_types::{Amplitude, Bed};
+    let levels = FoldLevels {
+        centre: Amplitude(0.5),
+        surround: Amplitude(0.25),
+        height: Amplitude(0.125),
+        lfe: None,
+    };
+    let five_one = Bed::Surround51.topology();
+    let stereo = Bed::Stereo.topology();
+    let f = Fold::<f32>::spec(&five_one, &stereo)
+        .levels(levels)
+        .build()
+        .unwrap();
+    // 5.1: FL FR FC LFE SL SR. The LFE is omitted at the default.
+    assert_eq!(f.contributions(0), [(0, 1.0), (2, 0.5), (4, 0.25)]);
+    assert_eq!(f.contributions(1), [(1, 1.0), (2, 0.5), (5, 0.25)]);
+
+    // 7.1.4 into 7.1: each height folds into the layer below at the height
+    // gain. FL FR FC LFE SL SR BL BR TFL TFR TBL TBR.
+    let seven_one = Bed::Surround71.topology();
+    let f = Fold::<f32>::spec(&Bed::Surround714.topology(), &seven_one)
+        .levels(levels)
+        .build()
+        .unwrap();
+    assert_eq!(f.contributions(0), [(0, 1.0), (8, 0.125)]);
+    assert_eq!(f.contributions(1), [(1, 1.0), (9, 0.125)]);
+    assert_eq!(f.contributions(6), [(6, 1.0), (10, 0.125)]);
+    assert_eq!(f.contributions(7), [(7, 1.0), (11, 0.125)]);
+    // The centre and the LFE are in both beds: straight across.
+    assert_eq!(f.contributions(2), [(2, 1.0)]);
+    assert_eq!(f.contributions(3), [(3, 1.0)]);
+}
+
+/// A destination that lacks the speaker takes the gain; one that has it takes
+/// the speaker at unity whatever the level says.
+#[test]
+fn a_level_applies_only_where_the_speaker_folds() {
+    use tutti_types::{Amplitude, Bed};
+    let levels = FoldLevels {
+        surround: Amplitude(0.25),
+        ..FoldLevels::default()
+    };
+    // 5.1 to quad: the side pair is repositioned to the back pair, at unity.
+    let f = Fold::<f32>::spec(&Bed::Surround51.topology(), &Bed::Quad.topology())
+        .levels(levels)
+        .build()
+        .unwrap();
+    let back_left = f.contributions(2);
+    assert!(back_left.contains(&(4, 1.0)), "{back_left:?}");
+    // 7.1 to 5.1: the back pair is missing and folds into the side pair, at
+    // the surround level.
+    let f = Fold::<f32>::spec(&Bed::Surround71.topology(), &Bed::Surround51.topology())
+        .levels(levels)
+        .build()
+        .unwrap();
+    assert!(
+        f.contributions(4).contains(&(6, 0.25)),
+        "{:?}",
+        f.contributions(4)
+    );
+}
+
+/// `lfe: Some(g)` feeds the LFE to the front pair at `g`, and to the one
+/// channel of a mono destination at `g`; `None` omits it.
+#[test]
+fn the_lfe_level_feeds_the_front_pair_or_the_mono_channel() {
+    use tutti_types::{Amplitude, Bed};
+    let five_one = Bed::Surround51.topology();
+    let with = FoldLevels {
+        lfe: Some(Amplitude(0.5)),
+        ..FoldLevels::default()
+    };
+    let stereo = Bed::Stereo.topology();
+    let f = Fold::<f32>::spec(&five_one, &stereo)
+        .levels(with)
+        .build()
+        .unwrap();
+    assert!(f.contributions(0).contains(&(3, 0.5)));
+    assert!(f.contributions(1).contains(&(3, 0.5)));
+    let none = Fold::<f32>::between(&five_one, &stereo).unwrap();
+    assert!(none.contributions(0).iter().all(|&(c, _)| c != 3));
+
+    // Mono: the stereo fold times -3 dB, and the LFE at its own gain.
+    let mono = Bed::Mono.topology();
+    let f = Fold::<f32>::spec(&five_one, &mono)
+        .levels(with)
+        .build()
+        .unwrap();
+    let c = f.contributions(0);
+    assert_eq!(
+        c.iter().filter(|&&(s, _)| s == 3).collect::<Vec<_>>(),
+        [&(3, 0.5)]
+    );
+    // And only the LFE changed from the default mono mix.
+    let plain = Fold::<f32>::between(&five_one, &mono)
+        .unwrap()
+        .contributions(0);
+    let others: Vec<_> = c.iter().filter(|&&(s, _)| s != 3).copied().collect();
+    assert_eq!(others, plain);
+}
+
+/// A composition is the matrix product of the two folds' coefficients, written
+/// out by hand: 5.1 into stereo, then stereo into mono (`(L + R) / 2`).
+#[test]
+fn then_is_the_matrix_product() {
+    use tutti_types::Bed;
+    let m = f32::MINUS_3_DB;
+    let a = fold(&Bed::Surround51.topology(), &Bed::Stereo.topology());
+    let b = fold(&Bed::Stereo.topology(), &Bed::Mono.topology());
+    let both = a.then(&b).unwrap();
+    // Hand product. A: L = x0 + m·x2 + m·x4, R = x1 + m·x2 + m·x5;
+    // B: out = ½L + ½R.
+    let expected = [
+        (0, 0.5 * 1.0),
+        (1, 0.5 * 1.0),
+        (2, 0.5 * m + 0.5 * m),
+        (4, 0.5 * m),
+        (5, 0.5 * m),
+    ];
+    assert_eq!(both.contributions(0), expected);
+    assert_eq!(both.src_layout(), a.src_layout());
+    assert_eq!(both.dst_layout(), b.dst_layout());
+    // An analytic frame: (x0 + x1)/2 + m·x2 + (x4 + x5)·m/2, at rounding.
+    let x = [0.2f32, -0.4, 0.6, 0.9, 0.3, 0.5];
+    let mut out = [0.0f32];
+    both.frame(&x, &mut out);
+    let want = (x[0] + x[1]) / 2.0 + m * x[2] + m * (x[4] + x[5]) / 2.0;
+    assert!((out[0] - want).abs() < 1e-6, "{} vs {want}", out[0]);
+}
+
+/// An identity on either side leaves the other as it is, and a width that does
+/// not meet is refused.
+#[test]
+fn then_with_an_identity_is_the_other_fold_and_widths_must_meet() {
+    use tutti_types::Bed;
+    let a = fold(&Bed::Surround51.topology(), &Bed::Stereo.topology());
+    let stereo_id = fold(&Bed::Stereo.topology(), &Bed::Stereo.topology());
+    assert_eq!(a.then(&stereo_id).unwrap(), a);
+    let six_id = fold(&Bed::Surround51.topology(), &Bed::Surround51.topology());
+    assert_eq!(six_id.then(&a).unwrap(), a);
+    assert_eq!(
+        a.then(&a),
+        Err(BufferError::WidthMismatch {
+            src: ChannelLayout::STEREO,
+            dst: ChannelLayout::from(6u16),
+        })
+    );
+}
+
+/// A route sends each source to its destination channel and silences the rest;
+/// two sources to one destination are summed; a channel past the width is
+/// refused by name.
+#[test]
+fn route_sends_channels_to_channels() {
+    let (two, four) = (ChannelLayout::STEREO, ChannelLayout::QUAD);
+    let f = Fold::<f32>::route(two, four, &[3, 1]).unwrap();
+    let mut out = [9.0f32; 4];
+    f.frame(&[0.25, 0.75], &mut out);
+    assert_eq!(out, [0.0, 0.75, 0.0, 0.25]);
+    let sum = Fold::<f32>::route(two, four, &[0, 0]).unwrap();
+    sum.frame(&[0.25, 0.75], &mut out);
+    assert_eq!(out, [1.0, 0.0, 0.0, 0.0]);
+    assert_eq!(
+        Fold::<f32>::route(two, four, &[0, 4]),
+        Err(FoldError::NoSuchChannel {
+            channel: 4,
+            width: four
+        })
+    );
+    assert!(matches!(
+        Fold::<f32>::route(two, four, &[0]),
+        Err(FoldError::Buffer(BufferError::WidthMismatch { .. }))
+    ));
+}

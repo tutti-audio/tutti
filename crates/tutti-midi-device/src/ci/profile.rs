@@ -67,6 +67,11 @@ impl StandardProfile {
     /// `0x00`, version `0x01`, level `0x01`.
     pub const MPE: Self = Self::new(U7::of(0x31), U7::of(0x00), U7::of(0x01), U7::of(0x01));
 
+    /// The Note On Orchestral Articulation Profile (M2-123 section 3.2, Table
+    /// 4): bank `0x21`, number `0x01`, version `0x01`, level `0x01`.
+    pub const ARTICULATION: Self =
+        Self::new(U7::of(0x21), U7::of(0x01), U7::of(0x01), U7::of(0x01));
+
     /// The Rotary Speaker Profile (M2-122 §3.1, Table 4): bank `0x22`, number
     /// `0x00`, version `0x01`, level `0x01`.
     pub const ROTARY_SPEAKER: Self =
@@ -165,6 +170,10 @@ pub enum ProfileId {
 impl ProfileId {
     /// The MPE Profile ([`StandardProfile::MPE`]).
     pub const MPE: Self = Self::Standard(StandardProfile::MPE);
+
+    /// The Note On Orchestral Articulation Profile
+    /// ([`StandardProfile::ARTICULATION`]).
+    pub const ARTICULATION: Self = Self::Standard(StandardProfile::ARTICULATION);
 
     /// The General MIDI 2 Function Block Profile
     /// ([`StandardProfile::GM2_FUNCTION_BLOCK`]).

@@ -9,12 +9,14 @@
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_graph::UmpAt;
 
 use crossbeam_queue::ArrayQueue;
-use tutti_ump::Ump;
+use tutti_ump::{Span, Ump, spans};
 
 use crate::traits::MidiOut;
+use crate::{Outgoing, Taken};
 
 /// The ring's default capacity, in events.
 pub const MAILBOX_CAPACITY: NonZeroUsize = NonZeroUsize::new(256).unwrap();
@@ -27,6 +29,9 @@ pub struct MidiMailbox {
     /// (a host's own events carry a block offset). The types stop here; a
     /// stamp becomes an `Offset` where a block is known.
     events: ArrayQueue<(u32, Ump)>,
+    /// Held by the clone that is writing a message, so no other clone puts a
+    /// packet between its packets.
+    writing: AtomicBool,
 }
 
 impl std::fmt::Debug for MidiMailbox {
@@ -48,6 +53,7 @@ impl MidiMailbox {
     pub fn with_capacity(capacity: NonZeroUsize) -> (MidiSender, MidiReceiver) {
         let slot = Arc::new(Self {
             events: ArrayQueue::new(capacity.get()),
+            writing: AtomicBool::new(false),
         });
         (
             MidiSender {
@@ -68,39 +74,86 @@ pub struct MidiSender {
 }
 
 impl MidiSender {
-    /// Pushes `events` and returns how many were accepted. `< events.len()` means
-    /// the ring was full and the rest were dropped (a prefix is accepted, so
-    /// the stream stays in order). Dropping a note-off whose note-on landed is
-    /// what leaves a note stuck, so a caller with anywhere to report it must.
-    /// Never blocks.
-    pub fn queue(&self, events: &[UmpAt]) -> usize {
-        let mut accepted = 0;
-        for &(offset, ump) in events {
-            if self.slot.events.push((offset.get(), ump)).is_err() {
-                break;
-            }
-            accepted += 1;
-        }
-        accepted
+    /// Pushes `events` and returns what the ring [`Taken`]. Less than all means
+    /// the ring was full and the rest were dropped: a prefix that ends between
+    /// two messages is taken, so the stream stays in order and a message of
+    /// several packets is in the ring whole or not at all. Dropping a note-off
+    /// whose note-on landed is what leaves a note stuck, so a caller with
+    /// anywhere to report it must. Never blocks.
+    ///
+    /// A message of several packets is written by one clone at a time: a clone
+    /// that finds another writing refuses its message and takes nothing, so
+    /// two clones never interleave their packets in the ring, and none waits.
+    pub fn queue(&self, events: &[UmpAt]) -> Taken {
+        self.push(spans(events, |event| event.1), |&(offset, ump)| {
+            (offset.get(), ump)
+        })
     }
 
     /// [`queue`](Self::queue) for events stamped with a raw `u32` that is not
     /// an offset into a block (the out node's graph-clock frame, wrapped at
-    /// 2^32). Same prefix semantics: the count accepted, never a gap.
-    pub fn queue_stamped(&self, events: &[(u32, Ump)]) -> usize {
-        let mut accepted = 0;
-        for &event in events {
-            if self.slot.events.push(event).is_err() {
+    /// 2^32). Same prefix semantics: what is taken, never a gap.
+    pub fn queue_stamped(&self, events: &[(u32, Ump)]) -> Taken {
+        self.push(spans(events, |event| event.1), |&event| event)
+    }
+
+    /// Pushes the messages of `events` while the ring has room for each and no
+    /// other clone is writing.
+    fn push<'a, T: 'a>(
+        &self,
+        messages: impl Iterator<Item = Span<'a, T>>,
+        stamped: impl Fn(&T) -> (u32, Ump),
+    ) -> Taken {
+        let ring = &self.slot.events;
+        let mut taken = Taken::NONE;
+        for message in messages {
+            // One writer at a time, so a message's packets are together in the
+            // ring and the room read below is still there when they are
+            // written (the reader only adds room). A clone that finds another
+            // writing refuses the message: it never waits.
+            let Some(_claim) = Claim::take(&self.slot.writing) else {
+                break;
+            };
+            if ring.capacity() - ring.len() < message.len() {
                 break;
             }
-            accepted += 1;
+            for event in message.packets() {
+                // The room was read under the claim: the push has room.
+                let _ = ring.push(stamped(event));
+            }
+            taken = taken.through(message);
         }
-        accepted
+        taken
+    }
+}
+
+/// The claim on the ring for one message, released when it drops, so nothing
+/// that unwinds through a write leaves the ring claimed.
+struct Claim<'a>(&'a AtomicBool);
+
+impl<'a> Claim<'a> {
+    /// The claim, or `None` when another clone holds it. Never waits.
+    fn take(flag: &'a AtomicBool) -> Option<Self> {
+        flag.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .ok()
+            .map(|_| Self(flag))
+    }
+}
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
     }
 }
 
 impl MidiOut for MidiSender {
-    fn queue(&self, events: &[UmpAt]) -> usize {
+    fn queue_timed(&self, events: &[Outgoing]) -> Taken {
+        self.push(Outgoing::messages(events), |event| {
+            (event.at.get(), event.ump)
+        })
+    }
+
+    fn queue(&self, events: &[UmpAt]) -> Taken {
         self.queue(events)
     }
 }

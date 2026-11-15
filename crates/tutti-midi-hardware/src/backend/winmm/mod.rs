@@ -39,7 +39,7 @@ use crate::capability::EndpointInfo;
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
-use crate::error::{Error, Result};
+use crate::error::{NotFound, Result};
 use tutti_midi_device::{EndpointId, OsDevice, WinMmDevice};
 
 use super::legacy_port::poll;
@@ -108,19 +108,14 @@ fn devices() -> Vec<OsDevice> {
 }
 
 /// The position of the port `id` names on `side` now, wherever the list has
-/// moved it; an error when the device is gone.
+/// moved it; [`NotFound::Endpoint`] when the id is not a `side` port's, or the
+/// device is gone.
 fn resolve(id: EndpointId, side: Side) -> Result<u32> {
     let slot = slot_of(id);
     if slot.side != side {
-        return Err(Error::device(format!(
-            "{id:?} is not a WinMM {side:?} endpoint id"
-        )));
+        return Err(NotFound::Endpoint(id).into());
     }
-    locate(slot, ports(side)).ok_or_else(|| {
-        Error::device(format!(
-            "{id:?} names no WinMM {side:?} port now (the device was removed)"
-        ))
-    })
+    Ok(locate(slot, ports(side)).ok_or(NotFound::Endpoint(id))?)
 }
 
 impl MidiEndpoints for WinMmEndpoints {

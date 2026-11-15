@@ -33,8 +33,8 @@
 //! (`MidiSession::poll`) after it.
 
 use tutti_midi_protocol::Narrower;
-use tutti_midi_runtime::Outgoing;
-use tutti_ump::{Message, Protocol, StreamConfig, Ump, Utility, parse_exact};
+use tutti_midi_runtime::{Outgoing, Taken};
+use tutti_ump::{Join, Message, Protocol, StreamConfig, Ump, Utility, parse_exact};
 
 /// One device output's wire form: its configuration, the [`Narrower`] that
 /// serves it for as long as it is in MIDI 1.0, and the buffers one batch is
@@ -87,31 +87,46 @@ impl Wire {
         self.ends.clear();
         let narrows = self.narrows();
         let jr = self.config.rx_jr;
-        for &Outgoing { at, send, ump } in events {
+        // Whether the event before made a packet: a packet joined to the one
+        // before it joins nothing when that event made none.
+        let mut follows_packet = false;
+        for event in events {
+            let (at, send, ump) = (event.at, event.send, event.ump);
+            let first = if follows_packet {
+                event.join()
+            } else {
+                Join::Alone
+            };
+            let made = self.out.len();
+            let packet = |ump: Ump, join: Join| {
+                let packet = Outgoing::new(at, send, ump);
+                match join {
+                    Join::Alone => packet,
+                    Join::ToPrevious => packet.joined_to_previous(),
+                }
+            };
             match ump.message_type() {
                 0 => {
                     if let Some(kept) = utility(ump, jr) {
-                        self.out.push(Outgoing {
-                            at,
-                            send,
-                            ump: kept,
-                        });
+                        self.out.push(packet(kept, first));
                     }
                 }
                 4 if narrows => {
                     if let Ok(message) = ump.decode() {
                         let out = &mut self.out;
-                        narrow_voice(&mut self.narrower, message, |packet| {
-                            out.push(Outgoing {
-                                at,
-                                send,
-                                ump: packet,
-                            });
+                        let mut next = first;
+                        narrow_voice(&mut self.narrower, message, |narrowed| {
+                            out.push(packet(narrowed, next));
+                            // The packets of one event are one message: a cut
+                            // between a controller's select and its value
+                            // leaves the receiver selected with no value.
+                            next = Join::ToPrevious;
                         });
                     }
                 }
-                _ => self.out.push(Outgoing { at, send, ump }),
+                _ => self.out.push(packet(ump, first)),
             }
+            follows_packet = self.out.len() > made;
             self.ends.push(self.out.len());
         }
     }
@@ -121,11 +136,15 @@ impl Wire {
         &self.out
     }
 
-    /// How many of the events [`convert`](Self::convert) was given the device
-    /// has taken, when it took the first `taken` of the batch: the events whose
-    /// packets all went, so an event that became nothing counts as taken.
-    pub(crate) fn accepted(&self, taken: usize) -> usize {
-        self.ends.partition_point(|&end| end <= taken)
+    /// How much of `events`, the batch [`convert`](Self::convert) was given,
+    /// the device has taken, when it took `taken` of the batch it was sent: the
+    /// events whose packets all went, so an event that became nothing counts as
+    /// taken. A message of several packets is one event per packet and goes
+    /// through the conversion as it is, so the count still ends between
+    /// messages.
+    pub(crate) fn accepted(&self, taken: Taken, events: &[Outgoing]) -> Taken {
+        let events_taken = self.ends.partition_point(|&end| end <= taken.packets());
+        Taken::within(events, events_taken)
     }
 }
 

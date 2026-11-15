@@ -50,8 +50,9 @@ pub enum Phase {
     /// onto the graph, staging what is new for the commit. A refusal is
     /// `SessionEvent::Modulation`.
     Modulation,
-    /// The commit, iff the graph was edited since the last one, and the
-    /// compensation of the plan it sent (or of a re-prepare's resumed plan)
+    /// The output policy staged since the last update, applied
+    /// ([`Session::policy`]); then the commit, iff the graph was edited since
+    /// the last one, and the compensation of the plan it sent (or of a re-prepare's resumed plan)
     /// published.
     Commit,
     /// Modulation's re-apply and resyncs (feature `modulation`): while a
@@ -437,6 +438,10 @@ pub struct Session {
     pub(crate) root_request: Option<ChannelTopology>,
     /// Why `root_request` is not in force, if it is not.
     pub(crate) root_refusal: Option<tutti_graph::RootError>,
+    /// Where the mix lands, as set ([`Session::policy`]).
+    pub(crate) output_policy: crate::OutputPolicy,
+    /// Whether `output_policy` was set and not yet applied.
+    pub(crate) output_policy_staged: bool,
     pub(crate) click: Option<NodeKey>,
     pub(crate) click_settings: Arc<ClickSettings>,
     /// The per-channel pre-roll of the plan sent last, for sources outside
@@ -771,6 +776,7 @@ impl Session {
                 self.resumed |= repreparing && !self.graph.is_repreparing();
             }
             Phase::Commit => {
+                self.apply_output_policy();
                 let sent = self.graph.is_edited() && self.commit_reporting(out);
                 if !sent && self.resumed {
                     self.publish_sent();

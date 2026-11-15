@@ -228,7 +228,7 @@ impl MidiIn {
         };
         let worker = match worker {
             Ok(worker) => worker,
-            Err(_) => {
+            Err(source) => {
                 let mut input = Self {
                     id,
                     handle,
@@ -236,9 +236,9 @@ impl MidiIn {
                     worker: None,
                 };
                 input.close();
-                return Err(Error {
+                return Err(Error::Spawn {
                     operation: "spawn the input worker",
-                    code: Error::NOT_RETURNED,
+                    source,
                 });
             }
         };
