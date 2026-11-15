@@ -16,8 +16,8 @@ use tutti_dsp::{Lanes, SvfControls, SvfType};
 /// [`UnitParam`](tutti_types::UnitParam) through the [`ParamSet`] it is
 /// inserted with. Stack several to build a parametric EQ, one band
 /// per [`SvfType`]. A band's bypass is not here: it is `NodeMode::Bypassed`
-/// (`Graph::set_mode`), the graph's for every node, bit-exact once its
-/// declick is over.
+/// (`Graph::set_mode`), the graph's for every node: a crossfade of
+/// [`DECLICK`](tutti_graph::DECLICK), bit-exact once it is over.
 ///
 /// `F` is the internal state precision; defaults to `f64`.
 #[derive(Clone, Debug)]
