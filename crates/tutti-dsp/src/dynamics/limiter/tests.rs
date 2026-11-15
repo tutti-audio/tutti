@@ -668,21 +668,6 @@ fn hostile_controls_render_finite() {
     }
 }
 
-// The shape `check_range_contract` checks is serde's; `Lookahead` has none in the library
-// (nothing persists it), so the check runs on the same `try_from` shape written here.
-impl serde::Serialize for Lookahead {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        self.0.serialize(s)
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for Lookahead {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        Self::try_from(<Seconds as serde::Deserialize>::deserialize(d)?)
-            .map_err(serde::de::Error::custom)
-    }
-}
-
 /// `Lookahead` keeps the range-checked shape: `new` refuses what is not a
 /// lookahead (not finite, not above zero, past the cap) and never clamps, `of` agrees,
 /// and `TryFrom` carries the refused raw. A silently clamped lookahead would declare a
@@ -704,7 +689,6 @@ fn a_lookahead_keeps_the_range_checked_shape() {
         ],
     };
     tutti_fixtures::check_range_contract(&c);
-    tutti_fixtures::check_range_serde(&c);
     assert_eq!(
         Lookahead::try_from(Seconds(-1.0)),
         Err(LookaheadError(Seconds(-1.0)))

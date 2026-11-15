@@ -6,7 +6,9 @@
 //! and the commands of pp.20 to 28.
 
 use tutti_midi_protocol::{MtcRate, Recipient, SysexDeviceId};
-use tutti_midi_runtime::{MachineControlEvent, MachineControlFollower, MachineControlSender};
+use tutti_midi_runtime::{
+    MachineControlEvent, MachineControlFollower, MachineControlSender, NoTimeCode,
+};
 use tutti_types::{Frame, SampleRate, Seconds};
 use tutti_ump::{MidiGroup, Sysex7Packets};
 
@@ -109,7 +111,9 @@ fn look(
     seconds: f64,
     frame: u64,
 ) -> Option<Vec<u8>> {
-    sender.observe(playing, Seconds::new(seconds), Frame::new(frame), RATE)
+    sender
+        .observe(playing, Seconds::new(seconds), Frame::new(frame), RATE)
+        .expect("every look in these tests names a time code")
 }
 
 /// **The sender's commands are the changes**: nothing at the first look; PLAY at
@@ -176,4 +180,26 @@ fn a_stop_that_moved_is_only_a_stop() {
         look(&mut s, false, 0.0, 480),
         Some(vec![0x7F, 0x7F, 0x06, 0x01])
     );
+}
+
+/// **A locate to a time no time code names is refused with a typed error, not
+/// dropped (RP-013 p.8: hours are 0 to 23)**: a position before zero or a day
+/// and more out is `NoTimeCode` with the time, nothing is sent, and the look
+/// is taken, so the next one compares against it.
+#[test]
+fn a_locate_to_no_time_code_is_a_typed_refusal() {
+    let mut s = MachineControlSender::new(Recipient::AllCall, MtcRate::Fps30);
+    look(&mut s, false, 0.0, 0);
+    for seconds in [-1.0, 86_400.0] {
+        assert_eq!(
+            s.observe(false, Seconds::new(seconds), Frame::new(480), RATE),
+            Err(NoTimeCode(Seconds::new(seconds)))
+        );
+        // Standing where it was left, the next look is no change.
+        assert_eq!(
+            s.observe(false, Seconds::new(seconds), Frame::new(960), RATE),
+            Ok(None)
+        );
+        look(&mut s, false, 0.0, 1440);
+    }
 }

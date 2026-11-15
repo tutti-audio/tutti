@@ -1,22 +1,17 @@
-//! The output callback, tested without a sound card.
+//! The sample-format conversion the device driver hands the output block, tested
+//! without a sound card.
 //!
-//! None of this was reachable before [`OutputBlock`] existed. The
-//! `MAX_FRAMES` clamp, the zero-fill and the
-//! eight-way sample-format conversion all lived inside the closure handed to
-//! `build_output_stream`, so the only thing that could run them was CPAL with
-//! a device open — and this crate had six tests, none of which touched any of
-//! it. That is most of the code a device-layer bug hides in.
+//! The block renders `f32`; a driver converts each sample to its device's type
+//! with `T::from_sample` (what `CpalDriver`'s callback passes to
+//! `OutputBlock::render_delayed_with`). The clamp, the zero-fill and the width
+//! are the block's, tested in `tutti-engine`.
 //!
 //! Expected values are stated from **each format's own arithmetic**, never by
 //! calling `T::from_sample`: asking the function under test what it should
 //! have produced is not a second opinion.
-//!
-//! The master meter's tests (the centre of a wide device, the analytic
-//! level, enabled against disabled) are `tutti-engine`'s `tests/outputs/master_meter.rs`:
-//! the meter is an op in the graph's plan, not this callback's.
 
-use crate::support::{dc_state, rolling_state};
-use tutti_cpal::{MAX_FRAMES, OutputBlock};
+use crate::support::dc_state;
+use tutti_engine::OutputBlock;
 use tutti_types::ChannelLayout;
 
 /// Full scale for an integer format, from the format's definition rather than
@@ -28,7 +23,7 @@ fn dc_and_check<T: cpal::SizedSample + cpal::FromSample<f32> + PartialEq + std::
 ) {
     let mut block = OutputBlock::new(dc_state(level, 2), ChannelLayout::STEREO);
     let mut out = [T::from_sample(0.0f32); 64];
-    block.render(&mut out);
+    block.render_with(&mut out, T::from_sample);
     for (i, s) in out.iter().enumerate() {
         assert_eq!(
             *s, expected,
@@ -70,61 +65,4 @@ fn silence_is_the_formats_own_zero_not_a_literal_zero() {
     dc_and_check::<i16>(0.0, 0, "i16");
     dc_and_check::<u8>(0.0, 128, "u8");
     dc_and_check::<u16>(0.0, 32768, "u16");
-}
-
-/// **An over-sized callback renders its head and silences its tail.**
-///
-/// The clamp exists so the callback never allocates. It is observable here
-/// only because the `debug_assert` on the CPAL contract lives at the *driver*
-/// boundary rather than inside `render` — it is a claim about CPAL, not about
-/// the block, and keeping it out is what lets a debug build reach this.
-#[test]
-fn an_oversized_callback_silences_its_tail() {
-    let mut block = OutputBlock::new(dc_state(1.0, 2), ChannelLayout::STEREO);
-
-    let frames = MAX_FRAMES + 64;
-    let mut out = vec![-1.0f32; frames * 2];
-    block.render(&mut out);
-
-    assert_eq!(
-        block.last_rendered_frames(),
-        MAX_FRAMES,
-        "the clamp must report what it actually rendered, not what it was asked for"
-    );
-    assert!(
-        out[..MAX_FRAMES * 2].iter().all(|&s| s == 1.0),
-        "the head must carry the rendered signal"
-    );
-    assert!(
-        out[MAX_FRAMES * 2..].iter().all(|&s| s == 0.0),
-        "the tail past MAX_FRAMES must be silence, not the caller's stale \
-         buffer contents"
-    );
-}
-
-/// The block reports the width it was built for, and renders at it.
-#[test]
-fn the_block_renders_at_the_width_it_was_built_for() {
-    for width in [1usize, 2, 6, 8] {
-        let mut block = OutputBlock::new(
-            rolling_state(width).1,
-            ChannelLayout::try_from(width).expect("a test width is small"),
-        );
-        assert_eq!(block.channels(), width);
-        let mut out = vec![0.0f32; 32 * width];
-        block.render(&mut out);
-        assert_eq!(block.last_rendered_frames(), 32);
-    }
-}
-
-/// A zero-length callback is a no-op, not a panic.
-///
-/// Reachable in practice: some backends hand over an empty buffer on the first
-/// callback after a device change.
-#[test]
-fn an_empty_callback_renders_nothing_and_does_not_panic() {
-    let mut block = OutputBlock::new(dc_state(1.0, 2), ChannelLayout::STEREO);
-    let mut out: [f32; 0] = [];
-    block.render(&mut out);
-    assert_eq!(block.last_rendered_frames(), 0);
 }

@@ -3,7 +3,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use tutti_cpal::{ManualStream, ManualStreamDriver, OutputSpec};
+use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::UmpAt;
 use tutti_midi_runtime::MidiOut;
 use tutti_session::{Session, UmpOut};
@@ -18,7 +18,7 @@ fn spec_at(rate: f64) -> OutputSpec {
     OutputSpec::new(
         SampleRate::of(rate),
         ChannelLayout::STEREO,
-        tutti_cpal::cpal::SampleFormat::F32,
+        tutti_buffers::SampleFormat::F32,
     )
 }
 

@@ -13,7 +13,7 @@
 //!
 //! # What the widths mean
 //!
-//! A device states its channel count and nothing else (`cpal` has no channel
+//! A device states its channel count and nothing else (a backend has no channel
 //! map), and so does the graph root. Each is the engine's order for its width
 //! where it has one ([`ChannelTopology::assumed`](tutti_types::ChannelTopology::assumed):
 //! mono, stereo, quad, 5.1, 7.1, 7.1.4), so a 5.1 root plays folded on a stereo
