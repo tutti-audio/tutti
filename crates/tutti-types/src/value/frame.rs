@@ -113,9 +113,9 @@ impl Frame {
     }
 
     /// The frame nearest a fractional `position`, half away from zero:
-    /// saturating, so a negative or NaN position is [`Frame::ZERO`]. Where a
-    /// position keeps its fraction (an order key that survives a rate change)
-    /// and the frame it lands on is rounded from it.
+    /// saturating, so a negative or NaN position is [`Frame::ZERO`]. A position
+    /// that keeps its fraction as an order key, across a rate change, lands on
+    /// the frame this rounds it to.
     ///
     /// ```
     /// use tutti_types::Frame;

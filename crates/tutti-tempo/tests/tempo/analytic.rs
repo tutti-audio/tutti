@@ -52,14 +52,16 @@ fn frames_between_integrates_the_tempo_over_the_span() {
     assert_eq!(m.view(R).frames_between(Beat(2.0), Beat(6.0)), 72_000);
 }
 
-/// A span a hair past a whole frame (the float noise of the seconds
-/// difference) is that frame, and one a fifth of a frame past is the next.
+/// A span within `FRAME_TOLERANCE` (1e-6 frame) past a whole frame is that
+/// frame: 5e-7 frame past 1 lands on 1, where a bare ceiling would say 2. A
+/// span 2e-6 frame past, beyond the tolerance, is the next frame.
 #[test]
 fn frames_between_lands_on_a_frame_within_the_tolerance() {
     let m = TempoMap::constant(Bpm::of(120.0)).unwrap();
-    let frame = Beat(1.0 / 24_000.0);
-    assert_eq!(m.view(R).frames_between(Beat(0.0), frame), 1);
-    assert_eq!(m.view(R).frames_between(Beat(0.0), Beat(1.2 / 24_000.0)), 2);
+    let within = Beat((1.0 + 5e-7) / 24_000.0);
+    let beyond = Beat((1.0 + 2e-6) / 24_000.0);
+    assert_eq!(m.view(R).frames_between(Beat(0.0), within), 1);
+    assert_eq!(m.view(R).frames_between(Beat(0.0), beyond), 2);
 }
 
 /// 120 -> 180 over 4 beats, tempo linear in time. `T = 2*4/(2+3) = 1.6 s`
