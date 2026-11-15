@@ -795,7 +795,7 @@ impl<C: crate::Clock> Session<C> {
 
         let ports: Vec<_> = (0..width).map(|channel| node.out(channel)).collect();
         // A second of frames: the pump parks `IDLE_PARK` at a time.
-        let capacity = Samples(rate.get().ceil() as usize);
+        let capacity = rate.one_second();
         let reader = self.graph.taps().open(&ports, TapAlign::Raw, capacity)?;
 
         let id = TakeId::mint(self.inputs.takes());

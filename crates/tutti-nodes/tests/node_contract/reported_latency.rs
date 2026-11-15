@@ -9,6 +9,7 @@
 //! the output with an impulse, because the number alone cannot fail on a node
 //! whose DSP drifted away from it.
 
+use tutti_buffers::Mono;
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{GraphBuilder, IntoNode, Node, Prepare};
 use tutti_nodes::testing::Through;
@@ -335,11 +336,23 @@ mod convolver {
     #[test]
     fn stereo_convolver_dry_and_wet_leave_together_at_the_reported_latency() {
         type Build = fn() -> ConvolverNode;
-        let builds: [(&str, Build); 6] = [
+        let builds: [(&str, Build); 7] = [
             ("mono", || {
                 ConvolverNode::shared_ir(2u16, &[1.0], 128).unwrap()
             }),
-            ("stereo", || ConvolverNode::stereo(&[1.0], &[1.0], 128)),
+            ("dual mono", || {
+                ConvolverNode::per_channel(&[&[1.0], &[1.0]], 128).unwrap()
+            }),
+            ("true stereo", || {
+                let one = [1.0_f32];
+                ConvolverNode::true_stereo(
+                    Mono::new(&one[..]),
+                    Mono::new(&one[..]),
+                    Mono::new(&one[..]),
+                    Mono::new(&one[..]),
+                    128,
+                )
+            }),
             ("folded", || {
                 ConvolverNode::folded(&[&[1.0], &[1.0]], 128).unwrap()
             }),

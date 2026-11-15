@@ -322,7 +322,9 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
     let mut sums = tracks;
     if reverb {
         let (l, r) = (ir(1), ir(2));
-        let (conv, _) = s.graph().add(ConvolverNode::stereo(&l, &r, PARTITION));
+        let (conv, _) = s
+            .graph()
+            .add(ConvolverNode::per_channel(&[&l, &r], PARTITION).unwrap());
         for send in &sends {
             add_stereo(&mut s, conv, *send);
         }
