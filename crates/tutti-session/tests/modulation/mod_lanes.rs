@@ -901,13 +901,13 @@ fn a_bus_strips_volume_and_pan_take_lanes() {
     let (strip, _) = s.graph().add(tutti_nodes::BusStripNode::stereo());
     let mut m = s.mods_mut();
     let offset = m.macro_(0.5);
-    for param in [UnitParam::Volume, UnitParam::Pan] {
+    for param in [UnitParam::Volume, UnitParam::Balance] {
         let at = ParamRef::unit(strip, param);
         m.range_raw(at, 0.0, 1.0).unwrap();
         m.route(RouteSpec::new(offset, at, Depth::of(0.5))).unwrap();
     }
     settle(&mut s);
-    for param in [UnitParam::Volume, UnitParam::Pan] {
+    for param in [UnitParam::Volume, UnitParam::Balance] {
         assert!(
             s.mod_state()
                 .lane(ParamRef::unit(strip, param).key())

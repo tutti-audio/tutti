@@ -621,7 +621,7 @@ pub(super) mod realization {
                         continue;
                     }
                     checked += 1;
-                    let want = 0.5 * (f.input[i] * row[i]).get().abs();
+                    let want = 0.5 * (f.input[i] * row[i]).magnitude().get();
                     if out[r][at].abs() < want {
                         return Err(format!(
                             "line {i} (length {}, pre {} at {at}, row {r}): output {} at its first echo, wanted {want}",
