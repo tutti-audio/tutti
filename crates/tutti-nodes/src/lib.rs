@@ -33,7 +33,7 @@
 //!   toggle per band (`>= 0.5` is on, as every toggle; cells without a port). The
 //!   per-band gain reduction meters are readings on `MultibandControls`.
 //! - **Modulation effects** — `ModDelayNode` (chorus and flanger are
-//!   its two `Sweep` presets, over `tutti_dsp::ModDelayFamily`; the General MIDI chorus a third,
+//!   its two `Sweep` presets, a `KernelNode` over `ModDelayKernel`; the General MIDI chorus a third,
 //!   with no feedback and a finite tail) and `PhaserNode` (a `KernelNode` over `PhaserKernel`, its `Stages`
 //!   and `SweepRange` checked; the rate is floored at 0.01 Hz, a lane's value and a cell's alike), both any width.
 //! - **Distortion** — `DistortionNode` and its `ShapeKind` waveshapers.
@@ -170,9 +170,9 @@
 //! Every time constant here is derived from a sample rate: delay taps and ring
 //! lengths from [`Seconds`], filter coefficients from a cutoff in [`Hz`]
 //! against Nyquist, envelope attack and release coefficients, LFO phase
-//! increments. A node built over a family ([`FamilyNode`]: the filters, delays, dynamics,
+//! increments. A node built over a kernel ([`KernelNode`]: the filters, delays, dynamics,
 //! modulation effects and reverbs) has no rate until `prepare` gives it one: it builds its
-//! realization, its models and every figure derived from the rate there, so an unprepared
+//! bank and every figure derived from the rate there, so an unprepared
 //! node holds none. Before `prepare` it declares no latency and an unknown tail, which the
 //! graph reads again after it, and renders silence. A setting that names a frequency is
 //! checked for what a rate does not change (finite, above 0, in order), and a frequency
@@ -198,7 +198,7 @@
 //!   [`BrickwallLimiterNode`], and [`MultibandCompressorNode`] (2 to 4
 //!   bands over a Linkwitz-Riley crossover, every setting an indexed param: see
 //!   [`BAND_PARAMS`]) with its [`MultibandControls`].
-//! - Modulation effects: [`ModDelayNode`] (over `tutti_dsp::ModDelayFamily`, its [`Sweep`] and
+//! - Modulation effects: [`ModDelayNode`] (over `tutti_dsp::ModDelayBank`, its [`Sweep`] and
 //!   [`Stagger`] checked) and [`PhaserNode`] (over `tutti_dsp::PhaserChain`, its [`Stages`] and
 //!   [`SweepRange`] checked); [`DistortionNode`] with [`ShapeKind`].
 //! - Modulation sources: [`LfoNode`] and [`ModulatorNode`], over a
@@ -307,30 +307,34 @@ pub use strip::BusStripNode;
 mod kernel;
 pub use kernel::{ControlLanes, Kernel, KernelNode};
 
-// The reverb: any `tutti_dsp::Family` as a node, and the Freeverb send (mono in,
-// stereo wet out) the SoundFont player's General MIDI setup uses.
+// The reverb: any `tutti_dsp::Family` as a node.
 mod reverb;
 pub use params::{At, Control, ControlRead, ControlSet, ControlValid, Params};
-pub use reverb::{FamilyNode, FreeverbNode, NodeFamily, Rings, TailCeiling, TailCeilingError};
+pub use reverb::{FamilyNode, NodeFamily, Rings, TailCeiling, TailCeilingError};
+
+// Freeverb as a `KernelNode`, and the send (mono in, stereo wet out) the SoundFont
+// player's General MIDI setup uses.
+mod reverb_freeverb;
+pub use reverb_freeverb::{FreeverbKernel, FreeverbNode};
 
 // The feedback delay network as a `KernelNode`.
 mod reverb_fdn;
 pub use reverb_fdn::{FdnKernel, FdnNode};
 
 // The families and controls that sit in a node's signature.
-pub use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls, FreeverbFamily};
+pub use tutti_dsp::{FdnControls, FdnLayout, FreeverbControls};
 
 // The spatial panners: VBAP speaker panning and binaural HRTF rendering.
 mod spatial;
 pub use spatial::{HrtfBinauralNode, VbapError, VbapPannerNode};
 
 mod modulation;
-pub use modulation::{ModDelayNode, PhaserKernel, PhaserNode};
+pub use modulation::{ModDelayKernel, ModDelayNode, PhaserKernel, PhaserNode};
 // The sweep, its stagger and the controls are in `ModDelayNode::new`'s and `PhaserNode::new`'s
 // signatures.
 pub use tutti_dsp::{
-    ModDelayControls, ModDelayFamily, PhaserControls, Stages, StagesError, Stagger, StaggerError,
-    Sweep, SweepError, SweepRange, SweepRangeError,
+    ModDelayControls, PhaserControls, Stages, StagesError, Stagger, StaggerError, Sweep,
+    SweepError, SweepRange, SweepRangeError,
 };
 
 // The control sources' node (`SourceNode<S: ControlSource>`) and the

@@ -29,9 +29,8 @@
 //! building a coverage report; they are not the reading path.
 
 use bitflags::bitflags;
-use tutti_types::UnitParam;
 
-use crate::{ParamUnit, PlainUnit};
+use crate::{ControlRole, ParamUnit, PlainUnit};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -468,38 +467,14 @@ pub struct ParameterInfo {
     /// unlike
     /// [`role`](Self::role), whose custom serde needs its own `default`.
     measures: Option<ParamUnit>,
-    /// The tutti role this parameter plays, only where the format declared the
-    /// role itself (a bypass flag, AU's pan unit, VST3's `DryWetMix` function
-    /// name), never from a name. Its `serde(default)` is load-bearing: `with` turns off serde's implicit missing-`Option` default.
-    #[cfg_attr(feature = "serde", serde(default, with = "role_serde"))]
-    role: Option<UnitParam>,
-}
-
-/// `UnitParam` has no serde of its own, and its persisted form is its stable
-/// discriminant ([`UnitParam`]'s `u16` conversions), so a role crosses as that.
-#[cfg(feature = "serde")]
-mod role_serde {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use tutti_types::UnitParam;
-
-    pub(super) fn serialize<S: Serializer>(
-        role: &Option<UnitParam>,
-        s: S,
-    ) -> Result<S::Ok, S::Error> {
-        role.map(u16::from).serialize(s)
-    }
-
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
-        d: D,
-    ) -> Result<Option<UnitParam>, D::Error> {
-        Option::<u16>::deserialize(d)?
-            .map(|raw| {
-                UnitParam::try_from(raw).map_err(|_| {
-                    serde::de::Error::custom(format!("{raw} is not a UnitParam discriminant"))
-                })
-            })
-            .transpose()
-    }
+    /// The role the plugin declared for this parameter (VST3's function names),
+    /// never inferred from a name.
+    role: Option<ControlRole>,
+    /// The plugin marks this parameter as one of its headline controls (AU's
+    /// `ParametersForOverview`). `false` is both "not marked" and "the format
+    /// has no such list": VST3 and CLAP say nothing of it.
+    #[cfg_attr(feature = "serde", serde(default))]
+    overview: bool,
 }
 
 impl ParameterInfo {
@@ -519,6 +494,7 @@ impl ParameterInfo {
             group: String::new(),
             measures: None,
             role: None,
+            overview: false,
         }
     }
 
@@ -575,11 +551,27 @@ impl ParameterInfo {
         self.measures
     }
 
-    /// The tutti role this parameter plays, only where the format declared the
-    /// role itself.
+    /// The role the plugin declared for this parameter ([`ControlRole`]), only
+    /// where the format declares one itself. `None` for every CLAP and AU
+    /// parameter, and for a VST3 parameter no function name points at.
     #[must_use]
-    pub const fn role(&self) -> Option<UnitParam> {
+    pub const fn role(&self) -> Option<ControlRole> {
         self.role
+    }
+
+    /// Whether the plugin marks this parameter as a headline control (AU
+    /// `ParametersForOverview`). Always `false` for VST3 and CLAP, which have
+    /// no such list.
+    #[must_use]
+    pub const fn overview(&self) -> bool {
+        self.overview
+    }
+
+    /// Marks this parameter as one of the plugin's headline controls.
+    #[must_use]
+    pub const fn with_overview(mut self, overview: bool) -> Self {
+        self.overview = overview;
+        self
     }
 
     /// What the plugin declared about the value range, including the case
@@ -597,9 +589,9 @@ impl ParameterInfo {
         self.steps
     }
 
-    /// Sets the role the format declared for this parameter.
+    /// Sets the role the plugin declared for this parameter.
     #[must_use]
-    pub fn with_role(mut self, role: Option<UnitParam>) -> Self {
+    pub const fn with_role(mut self, role: Option<ControlRole>) -> Self {
         self.role = role;
         self
     }
@@ -1138,63 +1130,50 @@ mod tests {
 #[cfg(all(test, feature = "serde"))]
 mod measures_serde_tests {
     use super::*;
+    use crate::Axis;
 
-    /// What `ParameterInfo` serialized as before `measures` and `role`: the
-    /// JSON of an older saved catalog.
+    /// What `ParameterInfo` serialized as before `measures`, `role` and
+    /// `overview`: the JSON of an older saved catalog.
     const OLD_JSON: &str = r#"{
         "id": 7, "name": "Cutoff", "unit": "Hz",
         "range": {"Plain": {"min": 20.0, "max": 20000.0, "default": 1000.0}},
         "steps": "Continuous", "flags": "AUTOMATABLE", "known": "AUTOMATABLE", "group": "Filter"
     }"#;
 
-    /// An old `ParameterInfo` without the fields still deserializes, with both
-    /// `None`.
+    /// An old `ParameterInfo` without the fields still deserializes, with
+    /// every one unmarked.
     #[test]
     fn an_old_parameter_without_the_fields_still_deserializes() {
         let p: ParameterInfo = serde_json::from_str(OLD_JSON).expect("old data reads");
         assert_eq!(p.name, "Cutoff");
-        assert_eq!(p.measures, None);
-        assert_eq!(p.role, None);
+        assert_eq!((p.measures, p.role, p.overview), (None, None, false));
     }
 
-    /// The same, for `role` alone: `measures` present, `role` absent.
+    /// A unit, a role and the overview mark survive JSON and the IPC's postcard.
     #[test]
-    fn an_old_parameter_without_a_role_deserializes() {
-        let json = OLD_JSON.replace(
-            r#""group": "Filter""#,
-            r#""group": "Filter", "measures": "Hertz""#,
-        );
-        let p: ParameterInfo = serde_json::from_str(&json).expect("reads");
-        assert_eq!(p.measures, Some(ParamUnit::Hertz));
-        assert_eq!(p.role, None);
-    }
-
-    /// A typed unit and a role survive JSON and the IPC's postcard.
-    #[test]
-    fn measures_and_role_round_trip() {
+    fn measures_role_and_overview_round_trip() {
         let p = ParameterInfo::new(ParamId::new(3), "Pan")
             .with_plain_range(-1.0, 1.0, 0.0)
             .with_measures(Some(ParamUnit::Pan))
-            .with_role(Some(UnitParam::Pan));
+            .with_role(Some(ControlRole::Pan(Axis::Y)))
+            .with_overview(true);
+        let want = (Some(ParamUnit::Pan), Some(ControlRole::Pan(Axis::Y)), true);
 
         let json: ParameterInfo =
             serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
-        assert_eq!(
-            (json.measures, json.role),
-            (Some(ParamUnit::Pan), Some(UnitParam::Pan))
-        );
+        assert_eq!((json.measures, json.role, json.overview), want);
 
         let bin: ParameterInfo = postcard::from_bytes(&postcard::to_allocvec(&p).unwrap()).unwrap();
-        assert_eq!(
-            (bin.measures, bin.role),
-            (Some(ParamUnit::Pan), Some(UnitParam::Pan))
-        );
+        assert_eq!((bin.measures, bin.role, bin.overview), want);
     }
 
-    /// A role number that is no `UnitParam` is refused, not mapped to another.
+    /// A role no `ControlRole` names is refused, not mapped to another.
     #[test]
-    fn a_role_that_names_no_unit_param_is_refused() {
-        let json = OLD_JSON.replace(r#""group": "Filter""#, r#""group": "Filter", "role": 9999"#);
+    fn a_role_that_names_no_control_role_is_refused() {
+        let json = OLD_JSON.replace(
+            r#""group": "Filter""#,
+            r#""group": "Filter", "role": "Nope""#,
+        );
         assert!(serde_json::from_str::<ParameterInfo>(&json).is_err());
     }
 }

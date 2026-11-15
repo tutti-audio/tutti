@@ -1,105 +1,47 @@
-//! A `Family::member` call allocates nothing: a design is pure, and building
-//! a member must not touch the allocator.
+//! The reverbs' audio-thread paths allocate nothing: the banks' `aim`, `process` and
+//! `tail_of`, and the network design in place.
 //!
 //! The crate carries no `assert_no_alloc` dev-dependency,
 //! so this binary counts allocations with its own global allocator, per thread.
-//! The check is generic over a [`Family`].
 
-use tutti_dsp::{Family, FreeverbControls, FreeverbFamily, Grows};
 use tutti_fixtures::{ThreadCounting, allocations};
 use tutti_types::{Mix, SampleRate, Seconds};
 
 #[global_allocator]
 static A: ThreadCounting = ThreadCounting;
 
-/// Designing at each of `controls` allocates nothing.
-fn design_allocates_nothing<D: Family>(design: &D, controls: &[D::Controls], rate: SampleRate) {
-    for c in controls {
-        let n = allocations(|| {
-            std::hint::black_box(design.member(c, rate));
-        });
-        assert_eq!(n, 0, "design allocated");
-    }
-}
-
-/// Freeverb's design, over in-range and hostile controls and several rates,
-/// allocates nothing.
+/// Freeverb's `aim`, `process` and `tail_of` allocate nothing, with a different room every
+/// block (hostile controls among them), after the one `FreeverbBank::new` that sizes it.
 #[test]
-fn freeverb_design_allocates_nothing() {
-    let controls: Vec<FreeverbControls> = [0.0, 0.5, 1.0, f32::NAN, 9.0]
-        .iter()
-        .flat_map(|&r| {
-            [0.0, 0.5, f32::INFINITY].map(|d| FreeverbControls {
-                room: Mix(r),
-                damp: Mix(d),
-            })
-        })
-        .collect();
+fn freeverb_aims_and_renders_without_allocating() {
+    use tutti_buffers::{Planes, PlanesMut};
+    use tutti_dsp::{FreeverbBank, FreeverbControls};
+
     for rate in [44_100.0, 48_000.0, 192_000.0] {
-        design_allocates_nothing(&FreeverbFamily, &controls, SampleRate::of(rate));
-        let bounds = allocations(|| {
-            std::hint::black_box(FreeverbFamily.reach(&tutti_dsp::Reach::at(SampleRate::of(rate))));
-        });
-        assert_eq!(bounds, 0, "bounds allocated");
+        let mut bank = FreeverbBank::new(SampleRate::of(rate));
+        let mut glides = bank.glides();
+        let input = vec![0.25f32; 64];
+        let (mut left, mut right) = (vec![0.0f32; 64], vec![0.0f32; 64]);
+        for block in 0..64u32 {
+            let c = FreeverbControls {
+                room: Mix([(block % 8) as f32 / 7.0, f32::NAN, 9.0][(block % 3) as usize]),
+                damp: Mix(
+                    [((block / 8) % 8) as f32 / 7.0, f32::INFINITY, -2.0][(block % 5 % 3) as usize]
+                ),
+            };
+            let n = allocations(|| {
+                bank.aim(&mut glides, &c);
+                bank.process(
+                    &mut glides,
+                    Planes::new(&[&input]).unwrap(),
+                    PlanesMut::new(&mut [&mut left, &mut right]).unwrap(),
+                );
+                std::hint::black_box(bank.tail_of(&c));
+                std::hint::black_box(bank.tail());
+            });
+            assert_eq!(n, 0, "the block allocated at {rate} Hz");
+        }
     }
-}
-
-/// Freeverb's `member_into`, `retarget` and `process` allocate nothing, with a
-/// different network every block: the
-/// node's audio-thread path, the network designed in place into one built
-/// beforehand.
-#[test]
-fn freeverb_retargets_and_renders_without_allocating() {
-    use tutti_dsp::{FreeverbRecurrence, Network, Reach, Realized, Setup};
-    use tutti_types::{MaxBlock, Samples};
-
-    let rate = SampleRate::SR_48K;
-    let design = FreeverbFamily;
-    let mut realization = design.realized(rate);
-    realization.prepare(
-        &design.reach(&Reach::at(rate)),
-        &Setup {
-            rate,
-            max_block: MaxBlock::of(Samples(64)),
-        },
-    );
-    let mut network = Box::new(Network::new(rate));
-    let input = vec![0.25f32; 64];
-    let (mut left, mut right) = (vec![0.0f32; 64], vec![0.0f32; 64]);
-    for block in 0..64u32 {
-        let c = FreeverbControls {
-            room: Mix((block % 8) as f32 / 7.0),
-            damp: Mix(((block / 8) % 8) as f32 / 7.0),
-        };
-        let n = allocations(|| {
-            design.member_into(&c, rate, &mut network);
-            realization.retarget(&network);
-            realization.process(
-                &tutti_dsp::Inputs::new(&[&input]),
-                &mut [&mut left, &mut right],
-                64,
-            );
-        });
-        assert_eq!(n, 0, "the block allocated");
-    }
-    let _: Realized<FreeverbRecurrence> = realization;
-}
-
-/// `member_into` builds no value of the network's size (about 67 KB): it runs
-/// on a 96 KiB stack, as an audio thread's callback may. An unoptimised build
-/// copies a network about three times, so building one needs well over that.
-#[test]
-fn member_into_needs_no_network_sized_stack() {
-    let rate = SampleRate::SR_44K1;
-    let mut network = Box::new(tutti_dsp::Network::new(rate));
-    let handle = std::thread::Builder::new()
-        .stack_size(96 * 1024)
-        .spawn(move || {
-            FreeverbFamily.member_into(&FreeverbControls::GENERAL_MIDI, rate, &mut network);
-            network.stages.len()
-        })
-        .unwrap();
-    assert_eq!(handle.join().unwrap(), 5);
 }
 
 /// The FDN bank's `aim` and `process` allocate nothing, with a different network every block
@@ -148,7 +90,9 @@ fn the_fdn_aims_and_renders_without_allocating() {
     }
 }
 
-/// The FDN's `design_into` runs on a 96 KiB stack, like Freeverb's.
+/// The FDN's `design_into` runs on a 96 KiB stack: a network is 67 KB, and building one on an
+/// audio thread's callback must not copy it. An unoptimised build copies a network about
+/// three times, so building one needs well over that.
 #[test]
 fn the_fdns_design_into_needs_no_network_sized_stack() {
     use tutti_dsp::{FdnControls, FdnLayout};

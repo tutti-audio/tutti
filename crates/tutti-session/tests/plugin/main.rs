@@ -17,6 +17,10 @@ mod plugin;
 // the reference CLAP plugin in a real `plugin-server`.
 #[cfg(feature = "clap")]
 mod plugin_bypass;
+// A hosted plugin with a bypass of its own is bypassed by the host writing it:
+// the shared test plugin (CLAP) in a real `plugin-server`.
+#[cfg(feature = "clap")]
+mod plugin_own_bypass;
 // Which plugin of a bundle a load opens, and whose state a restore accepts:
 // the reference CLAP bundle exports two, in a real `plugin-server`.
 #[cfg(feature = "clap")]

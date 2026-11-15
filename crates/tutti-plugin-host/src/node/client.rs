@@ -243,12 +243,21 @@ impl Declared {
     /// [`PluginTooWide`] when the plugin has more channels in a direction than
     /// a block serves.
     pub(super) fn of(loaded: &LoadedPlugin) -> Result<Self, PluginTooWide> {
-        Self::from_layout(&Layout::from(loaded), loaded.latency_samples, loaded.tail)
+        let mut declared =
+            Self::from_layout(&Layout::from(loaded), loaded.latency_samples, loaded.tail)?;
+        // A plugin with a bypass of its own keeps running in
+        // `NodeMode::Bypassed`: the host writes that bypass
+        // ([`PluginHandle::set_bypassed`](crate::PluginHandle::set_bypassed)).
+        if loaded.own_bypass.is_some() {
+            declared.ports = declared.ports.with_own_bypass();
+        }
+        Ok(declared)
     }
 
     /// What the plugin reports now: the ports of the layout the lifecycle last
     /// read ([`State::layout`](tutti_plugin_types::State::layout)), and the
-    /// figures `latency` and `tail`.
+    /// figures `latency` and `tail`. A bypass of the plugin's own is not part of
+    /// a layout: the caller keeps it ([`Rebinder`](super::Rebinder) does).
     ///
     /// # Errors
     ///
@@ -1422,6 +1431,29 @@ mod declared_buses {
                 direction: "output",
                 channels: max + 1
             }
+        );
+    }
+
+    /// A plugin with a bypass of its own gives its node a shape that declares
+    /// it, so the executor leaves the node running in `Bypassed`; a plugin
+    /// without one keeps the executor's bypass.
+    #[test]
+    fn only_a_plugin_with_its_own_bypass_declares_one() {
+        let with = LoadedPlugin {
+            own_bypass: Some(tutti_plugin_types::OwnBypass::Property),
+            ..LoadedPlugin::default()
+        };
+        assert!(
+            Declared::of(&with)
+                .expect("a plugin of a few channels")
+                .ports
+                .own_bypass
+        );
+        assert!(
+            !Declared::of(&LoadedPlugin::default())
+                .expect("an empty plugin")
+                .ports
+                .own_bypass
         );
     }
 }

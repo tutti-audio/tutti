@@ -633,7 +633,8 @@ fn a_chorus_depth_lane_past_its_range_is_held_at_the_sweeps_bound() {
     // by some 1e-5 of a cycle over the render; a depth past 40 ms misses by hundreds.
     let mut most = f32::MIN;
     for n in (2_400..FRAMES).step_by(16) {
-        let phase = RATE * n as f64 / sr;
+        // The LFO steps before the frame it sounds in: frame `n` sounds step `n + 1`.
+        let phase = RATE * (n + 1) as f64 / sr;
         let want = ((0.010 + 0.040 * (std::f64::consts::TAU * phase).sin()) * sr).max(1.0);
         let got = delay_at(&out, n);
         most = most.max(got);

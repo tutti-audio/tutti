@@ -713,6 +713,8 @@ pub(crate) struct HostedPlugin {
     status: PluginLiveness,
     /// Told a render mode since it was added (or crossfaded in).
     pub(crate) told: bool,
+    /// The plugin's own bypass against the node's mode.
+    pub(crate) bypass: crate::bypass::BypassSync,
     snapshot: Option<PluginState>,
     /// When the snapshot's capture was asked for.
     snapshot_from: Option<Instant>,
@@ -908,6 +910,7 @@ impl HostedPlugin {
             hang: HangDetector::default(),
             status: PluginLiveness::Healthy,
             told: false,
+            bypass: crate::bypass::BypassSync::default(),
             snapshot: None,
             snapshot_from: None,
             withheld: None,
@@ -929,6 +932,11 @@ impl HostedPlugin {
         }
     }
 
+    /// Whether the plugin answers normally: its own bypass is compared only then.
+    pub(crate) fn is_healthy(&self) -> bool {
+        matches!(self.status, PluginLiveness::Healthy)
+    }
+
     pub(crate) fn with_controls(mut self, controls: PluginControls) -> Self {
         self.node = Some((*controls).clone());
         self.controls = Some(controls);
@@ -939,7 +947,9 @@ impl HostedPlugin {
     /// controls, a fresh debounce, and not yet told the render mode. Nothing
     /// of the outgoing plugin's state carries over: its last good state is
     /// cleared (its bytes would restore the wrong plugin), a fresh snapshot token
-    /// makes a job of the outgoing plugin still in flight land nowhere, and the snapshot clock restarts.
+    /// makes a job of the outgoing plugin still in flight land nowhere, the
+    /// snapshot clock restarts, and its own-bypass state (the episode, the waits
+    /// and the count) starts over.
     ///
     /// (`modulation`) A record that kept a parameter mirror gets one for
     /// the incoming plugin, from its handle (where its reports now arrive),
@@ -1009,6 +1019,9 @@ impl HostedPlugin {
         self.probation_until = None;
         self.recovery = self.recovery.as_ref().map(|r| Recovery::new(r.policy()));
         self.reload = Reload::default();
+        // The incoming plugin's bypass is its own: nothing of the outgoing one's
+        // episode, waits or count carries over.
+        self.bypass = crate::bypass::BypassSync::default();
         self.silenced = false;
         self.snapshot_token = Arc::new(());
         self.snapshot_at = None;
@@ -1209,6 +1222,18 @@ impl<'a> Plugin<'a> {
         PluginBuses::new(self.node, self.hosted)
     }
 
+    /// How many times the plugin's own bypass was found other than its node's
+    /// mode after a write, over this plugin instance's life (a replacement or a
+    /// reload starts the count again): a write that was lost, a write the
+    /// plugin refused while it held another bypass, or a bypass its editor, a
+    /// restored state or its automation moved since. One count per episode, not
+    /// per retry, and a refusal is latched until the node's mode changes; `0`
+    /// for a plugin with no bypass of its own, which the executor bypasses.
+    #[must_use]
+    pub fn bypass_writes_unapplied(&self) -> u64 {
+        self.hosted.bypass.unapplied()
+    }
+
     /// The plugin's control handle, the low layer the views are built on
     /// (feature `testing`: a host uses the views).
     #[cfg(feature = "testing")]
@@ -1327,6 +1352,7 @@ impl<C: crate::Clock> Session<C> {
                 let mut hosted = HostedPlugin::new(handle, loaded_ref);
                 hosted.node = Some(node_controls);
                 self.graph.plugins.insert(node.erase(), hosted);
+                self.graph.write_own_bypass(node.erase());
                 (Key::new(node.erase()), rebinder)
             }
         };
@@ -1907,6 +1933,7 @@ impl<C: crate::Clock> Session<C> {
     /// `Phase::Plugins`. See the module docs.
     pub(crate) fn plugins_phase(&mut self, cx: crate::PhaseCx<'_>, out: &mut Vec<SessionEvent>) {
         self.graph.graveyard.warn_if_piling();
+        self.graph.reconcile_own_bypass();
         let now = cx.now;
         self.plugins_now = now;
         let interval = self.snapshot_interval;
@@ -2977,5 +3004,74 @@ mod tests {
         );
         let events = rig.run_and_land(job);
         assert!(events.is_empty(), "nothing is reported: {events:?}");
+    }
+
+    /// **A plugin that replaces another starts its own bypass episode.** The
+    /// outgoing plugin ignored the node's mode (an open episode, counted once);
+    /// the incoming one's divergence is counted as its own, from zero.
+    #[test]
+    fn a_replacement_counts_its_own_bypass_episode() {
+        use crate::bypass::tests::rig;
+        use std::sync::atomic::Ordering::SeqCst;
+        let (outgoing, plugin_a, mirror_a) = rig(false);
+        plugin_a.accepts.store(false, SeqCst);
+        let mut hosted = HostedPlugin::new(
+            outgoing.clone(),
+            PluginRef::file("fake.clap").expect("a plugin file"),
+        );
+        hosted
+            .bypass
+            .reconcile(&outgoing, &mirror_a, tutti_graph::NodeMode::Bypassed);
+        assert_eq!(
+            hosted.bypass.unapplied(),
+            1,
+            "the outgoing plugin's episode"
+        );
+
+        let (incoming, plugin_b, _) = rig(false);
+        plugin_b.accepts.store(false, SeqCst);
+        let _ = hosted.adopt(incoming.clone());
+        assert_eq!(hosted.bypass.unapplied(), 0, "nothing carries over");
+        hosted
+            .bypass
+            .reconcile(&incoming, &hosted.mirror, tutti_graph::NodeMode::Bypassed);
+        assert_eq!(hosted.bypass.unapplied(), 1, "the incoming plugin's own");
+        assert_eq!(plugin_b.writes.load(SeqCst), 1);
+    }
+
+    /// **A plugin that enters refusing its bypass is written once and counted
+    /// once.** The outgoing plugin's refusal is latched; the incoming one, which
+    /// refuses too, starts unlatched: the node's mode is written to it and its
+    /// refusal is its own episode.
+    #[test]
+    fn a_replacement_that_refuses_is_written_and_counted_once() {
+        use crate::bypass::tests::rig;
+        use std::sync::atomic::Ordering::SeqCst;
+        use tutti_graph::NodeMode;
+        let (outgoing, plugin_a, mirror_a) = rig(false);
+        plugin_a.refuses.store(true, SeqCst);
+        let mut hosted = HostedPlugin::new(
+            outgoing.clone(),
+            PluginRef::file("fake.clap").expect("a plugin file"),
+        );
+        hosted
+            .bypass
+            .assert_mode(&outgoing, &mirror_a, NodeMode::Bypassed);
+        assert_eq!(hosted.bypass.unapplied(), 1, "the outgoing plugin's");
+
+        let (incoming, plugin_b, _) = rig(false);
+        plugin_b.refuses.store(true, SeqCst);
+        let _ = hosted.adopt(incoming.clone());
+        assert_eq!(hosted.bypass.unapplied(), 0, "nothing carries over");
+        hosted
+            .bypass
+            .assert_mode(&incoming, &hosted.mirror, NodeMode::Bypassed);
+        for _ in 0..40 {
+            hosted
+                .bypass
+                .reconcile(&incoming, &hosted.mirror, NodeMode::Bypassed);
+        }
+        assert_eq!(plugin_b.attempts.load(SeqCst), 1, "written once");
+        assert_eq!(hosted.bypass.unapplied(), 1, "counted once");
     }
 }

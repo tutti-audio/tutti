@@ -99,6 +99,8 @@ pub struct Rebinder<F: Loaded> {
     /// The pipeline the node had when the rebinder was made, for a node over
     /// a plugin whose `controls` hold none.
     pipeline: Samples,
+    /// The node declares a bypass of the plugin's own.
+    own_bypass: bool,
     tempo: TempoReader,
     limit: Option<PortLimit>,
 }
@@ -117,6 +119,7 @@ impl<F: Loaded> Clone for Rebinder<F> {
             spares: self.spares,
             controls: self.controls.clone(),
             pipeline: self.pipeline,
+            own_bypass: self.own_bypass,
             tempo: self.tempo.clone(),
             limit: self.limit,
         }
@@ -164,7 +167,8 @@ where
         let instance = self.inner.lock();
         let (layout, latency, tail) = instance.reading().ok_or(RebindError::NoPorts)?;
         self.fits(layout)?;
-        let declared = Declared::from_layout(layout, latency, tail)?;
+        let mut declared = Declared::from_layout(layout, latency, tail)?;
+        declared.ports.own_bypass = self.own_bypass;
         instance.ready_to_rehand()?;
         drop(instance);
         let (successor, rt) = Successor::new();
@@ -333,6 +337,7 @@ impl<F: Loaded> InProcClient<F> {
             spares: self.spares,
             controls: self.controls.clone(),
             pipeline: self.pipeline,
+            own_bypass: self.declared.ports.own_bypass,
             tempo,
             limit,
         }

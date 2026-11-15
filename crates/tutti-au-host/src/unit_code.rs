@@ -1,5 +1,4 @@
-//! What an `AudioUnitParameterUnit` code measures, as a [`ParamUnit`] and a
-//! [`UnitParam`] role.
+//! What an `AudioUnitParameterUnit` code measures, as a [`ParamUnit`].
 //!
 //! AU's unit is a numeric code from a closed enumeration, the most honest
 //! declaration of the four formats. The codes are plain numbers, so this module
@@ -15,7 +14,6 @@
 //! tempo, *Percent* is "usually from 0 -> 100, sometimes -50 -> +50".
 
 use tutti_plugin_types::ParamUnit;
-use tutti_types::UnitParam;
 
 /// `kAudioUnitParameterUnit_*`, by value (`AudioUnitProperties.h`).
 mod code {
@@ -94,14 +92,6 @@ pub fn unit_measures(raw: u32) -> Option<ParamUnit> {
     })
 }
 
-/// The role the unit code `raw` declares: `Pan` for the pan code, nothing else.
-/// AU has no per-parameter bypass flag (`BypassEffect` is a unit property), so
-/// no parameter is a `Bypass` from here.
-#[must_use]
-pub fn unit_role(raw: u32) -> Option<UnitParam> {
-    (raw == code::PAN).then_some(UnitParam::Pan)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,15 +141,6 @@ mod tests {
     fn an_unknown_code_is_none() {
         for raw in [27, 28, 100, 0x6d73_7264, u32::MAX] {
             assert_eq!(unit_measures(raw), None, "code {raw}");
-        }
-    }
-
-    /// Only the pan code declares a role.
-    #[test]
-    fn only_the_pan_code_is_a_role() {
-        assert_eq!(unit_role(18), Some(UnitParam::Pan));
-        for raw in (0..27).filter(|&r| r != 18) {
-            assert_eq!(unit_role(raw), None, "code {raw}");
         }
     }
 

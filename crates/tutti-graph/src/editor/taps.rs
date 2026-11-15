@@ -3,6 +3,7 @@
 
 use tutti_types::Samples;
 
+use super::outlets::Closed;
 use super::{CloseError, CommitError, Editor, MAX_CHANNELS, MissingSource, TapOpened};
 use crate::Source;
 use crate::event_tap::EventTapReader;
@@ -22,10 +23,9 @@ impl Editor {
     /// frames; what the reader does not drain in time is counted
     /// ([`TapReader::take_lost`]).
     ///
-    /// Opening an id again replaces it: the new reader is fed from the next
-    /// commit and the old one gets nothing more. A tap the topology does not
-    /// name compiles to nothing, so a closed tap costs the audio thread
-    /// nothing.
+    /// Opening an id again ends the reader it replaces: that reader drains what
+    /// its rings hold, then reads `Ended` ([`TapReader::source_gone`]). The new
+    /// reader is fed from the next commit.
     ///
     /// Every source must exist now, in the spec as edited (uncommitted edits
     /// included): a node port past the node's width, a key no node has, or a
@@ -53,6 +53,7 @@ impl Editor {
         capacity: Samples,
     ) -> Result<TapReader, MissingSource> {
         self.check_sources(&sources)?;
+        self.end_replaced_tap(id);
         let (reader, writer) = TapReader::named(id, sources.len(), capacity);
         let opened = TapOpened {
             width: reader.width(),
@@ -72,8 +73,9 @@ impl Editor {
     /// heard whole, at the output's time. The tap follows the outputs when
     /// they are re-wired; its width is fixed here, a lane past the output
     /// count reads silence. Otherwise as [`open_tap`](Self::open_tap): taken
-    /// at the next commit, opening an id again replaces it, and it sees the
-    /// signal before the engine's declick fader. Only the open is checked:
+    /// at the next commit, and it sees the signal before the engine's declick
+    /// fader. Opening an id again ends the reader it replaces: that reader
+    /// drains what its rings hold, then reads `Ended`. Only the open is checked:
     /// every source an output names must exist now, as for a ports tap.
     ///
     /// # Errors
@@ -95,6 +97,32 @@ impl Editor {
             .copied()
             .collect();
         self.check_sources(&named)?;
+        Ok(self.replace_output_tap(id, width, capacity))
+    }
+
+    /// Opens the outputs tap `id` again at `width` lanes, with no check of the
+    /// outputs' sources: the tap is already open, so the outputs it reads were
+    /// accepted when it was and are the spec's own. The new reader is fed from
+    /// the next commit, and the reader it replaces drains what its rings hold,
+    /// then reads `Ended`.
+    ///
+    /// # Errors
+    ///
+    /// [`CloseError::Tap`] when no outputs tap `id` is open; nothing changes.
+    pub fn reopen_output_tap(
+        &mut self,
+        id: TapId,
+        width: usize,
+        capacity: Samples,
+    ) -> Result<TapReader, CloseError> {
+        match self.spec.topology.taps.get(&id) {
+            Some(TapSpec::Outputs { .. }) => Ok(self.replace_output_tap(id, width, capacity)),
+            _ => Err(CloseError::Tap(id)),
+        }
+    }
+
+    fn replace_output_tap(&mut self, id: TapId, width: usize, capacity: Samples) -> TapReader {
+        self.end_replaced_tap(id);
         let (reader, writer) = TapReader::named(id, width, capacity);
         let opened = TapOpened {
             width: reader.width(),
@@ -105,7 +133,22 @@ impl Editor {
             .topology
             .taps
             .insert(id, TapSpec::Outputs { width });
-        Ok(reader)
+        reader
+    }
+
+    /// Ends the reader of `id` when `id` is opened again: the commit that
+    /// carries the new writer leaves the old one out, and once the executor
+    /// has applied it the old reader reads what its rings hold and then ends
+    /// ([`TapReader::source_gone`]). A writer the executor never held ends its
+    /// reader at once.
+    fn end_replaced_tap(&mut self, id: TapId) {
+        if let Some(Closed { meta, unsent }) = self.taps.close(id) {
+            if unsent {
+                meta.end.raise();
+            } else {
+                self.link.end_tap(meta.end);
+            }
+        }
     }
 
     /// Refuses a source that is not in the spec now, uncommitted edits

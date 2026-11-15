@@ -1,6 +1,5 @@
-//! [`NetworkCapacity`]: the reverb's worst-case sizes, what [`Grows::reach`](crate::Grows::reach)
-//! gives for [`FreeverbFamily`](crate::FreeverbFamily) and what a [`FdnLayout`](crate::FdnLayout)
-//! sizes its bank from.
+//! [`NetworkCapacity`]: the reverb's worst-case sizes, what a
+//! [`FdnLayout`](crate::FdnLayout) sizes its bank from.
 
 use tutti_types::{Db, SampleSpan, Samples};
 
