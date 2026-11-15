@@ -73,6 +73,33 @@ impl Tick {
     pub fn beats(self, ticks_per_quarter: u16) -> Beat {
         Beat(self.0 as f64 / f64::from(ticks_per_quarter))
     }
+
+    /// The tick nearest `beat` in a file of division `ticks_per_quarter`: the
+    /// inverse of [`beats`](Self::beats).
+    ///
+    /// A beat between two ticks rounds to the nearer; exactly halfway rounds to
+    /// the later. `None` for a beat before 0, NaN, or whose tick is past
+    /// `u64::MAX`; nothing saturates. Past 2^53 ticks an `f64` beat no longer
+    /// names every tick, and the nearest one it does name is returned.
+    ///
+    /// ```
+    /// use tutti_midi_file::Tick;
+    /// use tutti_types::Beat;
+    ///
+    /// assert_eq!(Tick::from_beat(Beat(1.5), 480), Some(Tick(720)));
+    /// // 0.5 tick at 128 ticks per quarter rounds up.
+    /// assert_eq!(Tick::from_beat(Beat(1.0 / 256.0), 128), Some(Tick(1)));
+    /// assert_eq!(Tick::from_beat(Beat(-1.0), 480), None);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn from_beat(beat: Beat, ticks_per_quarter: u16) -> Option<Self> {
+        // `round` takes a tie away from zero, which is later for a beat at or
+        // after 0. A beat in (-0.5 tick, 0) is before 0 and is refused.
+        let ticks = (beat.get() * f64::from(ticks_per_quarter)).round();
+        // `u64::MAX as f64` is 2^64, the first value out of range.
+        (beat.get() >= 0.0 && ticks < u64::MAX as f64).then_some(Self(ticks as u64))
+    }
 }
 
 /// `ticks` later. Overflows like `u64`'s `+`.
@@ -1021,6 +1048,15 @@ impl MidiFile {
     /// `tick` in quarter notes: the tick over the division.
     pub fn beat_at(&self, tick: Tick) -> Beat {
         tick.beats(self.ticks_per_quarter.get())
+    }
+
+    /// The tick nearest `beat`: the inverse of [`beat_at`](Self::beat_at),
+    /// over the division alone (a file's division is always ticks per quarter,
+    /// and tempo does not enter). Rounds as [`Tick::from_beat`] does: halfway
+    /// goes to the later tick, and `None` is a beat before 0 or past the last
+    /// tick.
+    pub fn tick_at(&self, beat: Beat) -> Option<Tick> {
+        Tick::from_beat(beat, self.ticks_per_quarter.get())
     }
 
     /// Seconds from beat 0 to `at` over the [`tempo_map`](Self::tempo_map),
