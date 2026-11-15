@@ -4,13 +4,16 @@ use tutti_midi_protocol::Translator;
 use tutti_ump::{MidiChannel, NoteNumber};
 
 /// The notes a plugin may name in an expression at once. A plugin sounds a few
-/// dozen voices; past this the notes are counted ([`OutputStream::notes_dropped`])
-/// and their expression falls back to the host's own note ids.
+/// dozen voices; past this the oldest entry is evicted for a new note
+/// ([`OutputStream::notes_evicted`]).
 const OWN_NOTES: usize = 256;
 
 /// A note the plugin started under an id of its own.
 #[derive(Clone, Copy, Debug)]
 struct OwnNote {
+    /// When it started, in the stream's own count of note starts: the oldest
+    /// is the one a full table evicts.
+    born: u64,
     id: i32,
     channel: MidiChannel,
     note: NoteNumber,
@@ -28,7 +31,10 @@ struct OwnNote {
 pub struct OutputStream {
     pub(super) translator: Translator,
     notes: [Option<OwnNote>; OWN_NOTES],
-    notes_dropped: u64,
+    started: u64,
+    notes_evicted: u64,
+    expressions_dropped: u64,
+    buses_dropped: u64,
 }
 
 impl Default for OutputStream {
@@ -44,7 +50,10 @@ impl OutputStream {
         Self {
             translator: Translator::new(),
             notes: [None; OWN_NOTES],
-            notes_dropped: 0,
+            started: 0,
+            notes_evicted: 0,
+            expressions_dropped: 0,
+            buses_dropped: 0,
         }
     }
 
@@ -54,27 +63,63 @@ impl OutputStream {
         self.notes = [None; OWN_NOTES];
     }
 
-    /// Note starts the plugin reported while its table was full, since
-    /// construction: each fell back to the host's id space for its expressions.
+    /// Notes the plugin started under an id of its own that evicted an older
+    /// note's entry because the table was full, since construction.
     #[must_use]
-    pub fn notes_dropped(&self) -> u64 {
-        self.notes_dropped
+    pub fn notes_evicted(&self) -> u64 {
+        self.notes_evicted
     }
 
-    /// The plugin started `note` on `channel` under `id` (`-1` is no id).
+    /// Expressions dropped because their id names no note the plugin has
+    /// started, since construction.
+    #[must_use]
+    pub fn expressions_dropped(&self) -> u64 {
+        self.expressions_dropped
+    }
+
+    /// Events dropped because they left on an event bus past the sixteen Groups,
+    /// since construction.
+    #[must_use]
+    pub fn buses_dropped(&self) -> u64 {
+        self.buses_dropped
+    }
+
+    pub(super) fn count_bus_dropped(&mut self) {
+        self.buses_dropped += 1;
+    }
+
+    pub(super) fn count_expression_dropped(&mut self) {
+        self.expressions_dropped += 1;
+    }
+
+    /// The plugin started `note` on `channel` under `id` (`-1` is no id). A full
+    /// table evicts its oldest entry for it.
     pub(super) fn note_on(&mut self, id: i32, channel: MidiChannel, note: NoteNumber) {
         if id < 0 {
             return;
         }
-        let entry = Some(OwnNote { id, channel, note });
+        self.started += 1;
+        let entry = Some(OwnNote {
+            born: self.started,
+            id,
+            channel,
+            note,
+        });
         let slot = self
             .notes
             .iter()
             .position(|n| n.is_some_and(|n| n.id == id))
-            .or_else(|| self.notes.iter().position(Option::is_none));
-        match slot {
-            Some(i) => self.notes[i] = entry,
-            None => self.notes_dropped += 1,
+            .or_else(|| self.notes.iter().position(Option::is_none))
+            .or_else(|| {
+                self.notes_evicted += 1;
+                self.notes
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, n)| n.map_or(u64::MAX, |n| n.born))
+                    .map(|(i, _)| i)
+            });
+        if let Some(i) = slot {
+            self.notes[i] = entry;
         }
     }
 

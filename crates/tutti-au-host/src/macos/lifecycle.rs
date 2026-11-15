@@ -141,7 +141,10 @@ impl AuLoaded {
         // callback is installed on the main thread, before `AudioUnitInitialize`
         // as the host's own tests do, and held for the activation. A failed
         // initialize drops it, which withdraws it.
-        let midi_out = MidiOut::install(self.unit());
+        let (midi_out, midi_out_refused) = match MidiOut::install(self.unit()) {
+            Ok(installed) => (installed, false),
+            Err(_) => (None, true),
+        };
 
         if let Err(e) = self.unit().initialize() {
             return Err((Some(self), e.into()));
@@ -171,6 +174,7 @@ impl AuLoaded {
             notify,
             renderer,
             midi_out,
+            midi_out_refused,
         });
 
         if self.config().channels.has_input

@@ -183,32 +183,38 @@ fn stage_with_text(stage: &mut Staging<'_>, make: impl FnOnce(&mut Staging<'_>) 
 /// event on the Group of its event bus, MIDI 1.0 through `stream`. Clears
 /// `out` first and never grows it: events past its cap are dropped
 /// (`out.is_overflowed()` reports it), a SysEx that does not fit is dropped
-/// whole and counted in the list's [`dropped`](EventList::dropped).
+/// whole and counted in the list's [`dropped`](EventList::dropped). Every event
+/// is read through `stream` whether or not `out` has room, so its translator and
+/// note table see the whole output; an event on a bus past the sixteen Groups is
+/// counted on the stream ([`OutputStream::buses_dropped`]).
+///
+/// A parameter run (select, Data Entry MSB) with no Data Entry LSB waits for
+/// one: the stream's translator never flushes a live output, which has no end
+/// (M2-104 Appendix D.3.3).
 pub fn drain_midi(list: &EventList, stream: &mut OutputStream, out: &mut RtMidiEvents) {
     out.clear();
     let Some(refused) = list.try_with_events(|staged| {
         let mut refused = 0;
         for event in staged.events {
+            // A bus past the sixteen Groups names none: the event is dropped and
+            // counted on the stream, SysEx included.
+            let Some(group) = u16::try_from(event.header.bus_index)
+                .ok()
+                .and_then(group_of_port)
+            else {
+                stream.count_bus_dropped();
+                continue;
+            };
             if let Payload::SysEx(message) = event.payload {
                 let frame = u32::try_from(event.sample_offset()).unwrap_or(0);
-                // A bus past the sixteen Groups names none: dropped, as any
-                // other event on it is.
-                let group = u16::try_from(event.header.bus_index)
-                    .ok()
-                    .and_then(group_of_port);
-                match group {
-                    Some(group)
-                        if !push_sysex(out, group, frame, &staged.sysex[message.range()]) =>
-                    {
-                        refused += 1;
-                    }
-                    Some(_) => {}
-                    None => refused += 1,
+                if !push_sysex(out, group, frame, &staged.sysex[message.range()]) {
+                    refused += 1;
                 }
-            } else if let Some(midi) = event.to_midi(stream)
-                && !out.push(midi)
-            {
-                break;
+            } else if let Some(midi) = event.to_midi(stream) {
+                // Every event goes through the stream whether or not `out` has
+                // room, so its translator and note table see the whole output;
+                // what does not fit is dropped and latches `out`'s overflow.
+                let _ = out.push(midi);
             }
         }
         refused

@@ -304,12 +304,12 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         out.append(&mut self.pending);
     }
 
-    /// Notes the plugin started under an id of its own that its table had no
-    /// room for, since activation: their expressions fall back to the host's id
-    /// space.
+    /// What the plugin's output stream has dropped or evicted since activation:
+    /// its note-id table's evictions, expressions on ids no note holds, and
+    /// events on a bus past the sixteen Groups.
     #[must_use]
-    pub fn emitted_notes_dropped(&self) -> u64 {
-        self.audio.output.emitted_stream.notes_dropped()
+    pub fn output_stream(&self) -> &OutputStream {
+        &self.audio.output.emitted_stream
     }
 
     /// Writes the ring held that no block took, since activation, for want of

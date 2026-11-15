@@ -34,7 +34,7 @@ use tutti_plugin_types::{
     LinearRange, Normalized, ParamEdit, ParamId, ParamMapping, RtMidiEvents,
     SYSEX_MESSAGE_CAPACITY, StableOrder, WireMidi, expression_of_per_note_controller,
     group_of_port, note_id_to_channel_note, per_note_message, per_note_tuning, plugin_note_id,
-    port_of_group, push_sysex, sysex_assembler,
+    push_sysex, sysex_assembler,
 };
 
 use crate::types::RtNoteExpressions;
@@ -695,6 +695,10 @@ impl ClapEvent {
         reason = "CLAP expression values are f64; the MIDI-2 helpers take f32"
     )]
     fn note_expression_to_midi(e: &clap_event_note_expression) -> Option<WireMidi> {
+        // A value that is not a number is no expression.
+        if !e.value.is_finite() {
+            return None;
+        }
         let (channel, note) = note_address(e.channel, e.key, e.note_id)?;
         let group = group_of_event_port(e.port_index)?;
 
@@ -708,12 +712,16 @@ impl ClapEvent {
         };
 
         let voice = match expression_type {
-            NoteExpressionType::Tuning => per_note_tuning(note, e.value),
+            NoteExpressionType::Tuning => per_note_tuning(note, e.value)?,
             // VOLUME arrives as a CLAP gain (`0 < x <= 4`), not a unit
             // fraction: converted before the unit encoding, or a plugin's
             // unity 1.0 and its +12 dB 4.0 both saturate to MIDI full scale
             // indistinguishably.
-            other => per_note_message(other, note, expression_value_to_unit(other, e.value))?,
+            other => per_note_message(
+                other,
+                note,
+                Normalized::clamped(f64::from(expression_value_to_unit(other, e.value))),
+            )?,
         };
         Some(WireMidi {
             offset: e.header.time,
@@ -1188,7 +1196,7 @@ impl InputEventList {
     /// The note port of `address`'s Group, or `None` (counted) when the plugin
     /// has none.
     fn port_of(&mut self, address: Address) -> Option<u16> {
-        let port = port_of_group(address.group);
+        let port = u16::from(address.group.get());
         if usize::from(port) < self.ports {
             Some(port)
         } else {
@@ -1724,9 +1732,9 @@ pub struct OutputEventList {
     /// Pushes `try_push` refused since the list was built: see
     /// [`events_refused`](Self::events_refused).
     refused: u64,
-    /// MIDI events and SysEx the plugin sent from a port no Group has, since
-    /// the list was built: see [`midi_ports_dropped`](Self::midi_ports_dropped).
-    midi_ports_dropped: std::sync::atomic::AtomicU64,
+    /// Events the plugin sent from a port no Group has: see
+    /// [`ports_dropped`](Self::ports_dropped).
+    ports_dropped: u64,
 }
 
 impl std::fmt::Debug for OutputEventList {
@@ -1757,17 +1765,17 @@ impl OutputEventList {
             touched: Vec::new(),
             coalesced: 0,
             refused: 0,
-            midi_ports_dropped: std::sync::atomic::AtomicU64::new(0),
+            ports_dropped: 0,
         }
     }
 
-    /// How many MIDI events and SysEx messages the plugin sent from a port past
-    /// the sixteen Groups (or a negative one that is not the `-1` wildcard),
-    /// since the list was built. They are dropped: a port names the Group it
-    /// would land on, and none is a Group's.
-    pub fn midi_ports_dropped(&self) -> u64 {
-        self.midi_ports_dropped
-            .load(std::sync::atomic::Ordering::Relaxed)
+    /// How many notes, note expressions, MIDI events and SysEx messages the
+    /// plugin sent from a port past the sixteen Groups (or a negative one that is
+    /// not the `-1` wildcard), counted when [`fill_midi_events`](Self::fill_midi_events)
+    /// reads them. They are dropped: a port names the Group it would land on, and
+    /// none is a Group's.
+    pub fn ports_dropped(&self) -> u64 {
+        self.ports_dropped
     }
 
     /// Borrows the events the plugin has pushed.
@@ -1894,8 +1902,11 @@ impl OutputEventList {
     /// ([`push_sysex`]): any length the pool
     /// has room for, whole or dropped. A MIDI 1.0 message goes through
     /// `translator`, which keeps the output's RPN, NRPN and Bank Select runs
-    /// across blocks: one translator serves one plugin's output for its life.
-    pub fn fill_midi_events(&self, translator: &mut Translator, out: &mut RtMidiEvents) {
+    /// across blocks: one translator serves one plugin's output for its life. A
+    /// parameter run (select, Data Entry MSB) with no LSB waits for one: the
+    /// translator never flushes a live output, which has no end (M2-104
+    /// Appendix D.3.3).
+    pub fn fill_midi_events(&mut self, translator: &mut Translator, out: &mut RtMidiEvents) {
         out.clear();
         for e in &self.events {
             if let Some((bytes, time, port)) = e.sysex_bytes() {
@@ -1907,21 +1918,17 @@ impl OutputEventList {
                     Some(group) => {
                         push_sysex(out, group, time, bytes);
                     }
-                    None => self.count_port_dropped(),
+                    None => self.ports_dropped += 1,
                 }
             } else if let Some(midi) = e.to_midi(translator) {
-                if !out.push(midi) {
-                    break;
-                }
+                // Every event goes through the translator whether or not `out`
+                // has room, so its runs see the whole output; what does not fit
+                // is dropped and latches `out`'s overflow.
+                let _ = out.push(midi);
             } else if e.names_no_group() {
-                self.count_port_dropped();
+                self.ports_dropped += 1;
             }
         }
-    }
-
-    fn count_port_dropped(&self) {
-        self.midi_ports_dropped
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Drains the parameter-value events, grouped by parameter ID, into a
@@ -3929,7 +3936,7 @@ mod tests {
             [3, 4, 5, 6, 0],
             "the wildcard is Group 0; ports 16 and 40 name none"
         );
-        assert_eq!(list.midi_ports_dropped(), 2, "and they are counted");
+        assert_eq!(list.ports_dropped(), 2, "and they are counted");
     }
 
     /// **A parameter run assembles across blocks**: the Data Entry LSB that
@@ -3957,6 +3964,56 @@ mod tests {
             panic!("expected one Registered Controller, got {got:?}");
         };
         assert_eq!((bank.get(), index.get(), value.get()), (0, 0, 12 << 25));
+    }
+
+    /// **Every event of the output reaches the translator, whether or not the
+    /// block's list has room**: a run's Data Entry LSB that arrives after the list
+    /// is full is read, so the run is one controller in the block after.
+    #[test]
+    fn a_run_through_a_full_list_still_assembles() {
+        let cc = |controller, value| ClapEvent::midi(0, 0, [0xB0, controller, value]);
+        let mut translator = Translator::new();
+        let mut pool = RtMidiEvents::new();
+        let mut first = OutputEventList::new();
+        for key in 0..RT_MIDI_CAPACITY as i16 {
+            first.events.push(ClapEvent::note_on(0, 0, key % 100, 1.0));
+        }
+        for event in [cc(101, 0), cc(100, 0), cc(6, 12), cc(38, 0)] {
+            first.events.push(event);
+        }
+        first.fill_midi_events(&mut translator, &mut pool);
+        assert!(pool.is_overflowed(), "the controller had no room");
+        assert_eq!(pool.len(), RT_MIDI_CAPACITY);
+
+        let mut second = OutputEventList::new();
+        second.events.push(cc(6, 7));
+        second.events.push(cc(38, 0));
+        second.fill_midi_events(&mut translator, &mut pool);
+        let got: Vec<Message> = pool.iter().map(message).collect();
+        let [Message::Midi2(_, Voice2::Registered { value, .. })] = got[..] else {
+            panic!("expected one Registered Controller, got {got:?}");
+        };
+        assert_eq!(value.get(), 7 << 25);
+    }
+
+    /// A note expression whose value is not a number is no expression.
+    #[test]
+    fn a_non_finite_note_expression_is_dropped() {
+        let mut list = OutputEventList::new();
+        for (ty, value) in [
+            (NoteExpressionType::Tuning, f64::NAN),
+            (NoteExpressionType::Tuning, f64::INFINITY),
+            (NoteExpressionType::Pan, f64::NAN),
+        ] {
+            let mut e = ClapEvent::note_expression(0, ty, -1, value).unwrap();
+            if let ClapEvent::NoteExpression(x) = &mut e {
+                (x.channel, x.key) = (1, 60);
+            }
+            list.events.push(e);
+        }
+        let mut pool = RtMidiEvents::new();
+        list.fill_midi_events(&mut Translator::new(), &mut pool);
+        assert!(pool.is_empty());
     }
 
     /// Poly pressure (`0xAn`) is a per-note expression to a CLAP-dialect port

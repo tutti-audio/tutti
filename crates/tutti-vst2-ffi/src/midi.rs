@@ -104,7 +104,10 @@ impl MidiIo {
     /// that ends no run is absorbed), for the piece of a block that starts `start` frames into it: the
     /// plugin's offsets are relative to its call, the returned ones to the
     /// block. Allocation-free: `out` is reserved for the inbox's whole
-    /// capacity at construction, so draining a full inbox cannot grow it.
+    /// capacity at construction, so draining a full inbox cannot grow it. A
+    /// parameter run (select, Data Entry MSB) with no LSB waits for one: the
+    /// translator never flushes a live output, which has no end (M2-104
+    /// Appendix D.3.3).
     pub fn drain_from(&mut self, start: usize) {
         let start = u32::try_from(start).unwrap_or(u32::MAX);
         while let Some(ev) = self.out_rx.pop() {
