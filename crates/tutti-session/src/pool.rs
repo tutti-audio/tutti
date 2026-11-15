@@ -9,9 +9,9 @@
 //! holds it, and **released** at the last hold's drop; declaring a held key
 //! again with the same identity adopts it with no reload.
 //!
-//! Each kind of entry is a [`PoolEntry`]; [`audio_file`] and [`soundfont`]
-//! are the data kinds. A load's outcome lands in [`Session::update`] as a
-//! [`SessionEvent::Pool`](crate::SessionEvent::Pool), and
+//! Each kind of entry is a [`PoolEntry`]; `audio_file` (feature `sampler`) and
+//! `soundfont` (feature `soundfont`) are the data kinds. A load's outcome lands
+//! in [`Session::update`] as a [`SessionEvent::Pool`], and
 //! [`Session::pool_state`] reads where an entry stands.
 
 use std::fmt;
