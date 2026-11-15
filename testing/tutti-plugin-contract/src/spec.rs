@@ -54,6 +54,10 @@ impl Param {
     }
 }
 
+/// The normalized value the write cases send: `level` takes it where a write is
+/// allowed, and the meter is refused it.
+pub const WRITE: f64 = 0.75;
+
 /// The normalized values the conversion cases ask about.
 pub const TONE_AT: [f64; 4] = [0.0, 0.25, 0.5, 1.0];
 
@@ -295,7 +299,12 @@ pub struct Surface {
     /// VST2, whose `effGetParameterProperties` has none. Where `true`, the
     /// parameter list reports [`Param::Meter`] read-only and every other
     /// parameter not.
-    pub reports_read_only: bool,
+    pub reports_access: bool,
+    /// Whether the format reports a parameter's automatable bit: CLAP and VST3.
+    /// An AUv2 unit advertises only `IsWritable`, and VST2 says nothing per
+    /// parameter. Where `true`, the meter is not automatable and every other
+    /// parameter is.
+    pub reports_automatable: bool,
 }
 
 /// CLAP: no editor in the plugin, no `clap.render` (so no render mode), a
@@ -310,7 +319,8 @@ pub const CLAP: Surface = Surface {
     tone: TONE_LINEAR,
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
-    reports_read_only: true,
+    reports_access: true,
+    reports_automatable: true,
 };
 
 /// VST2: no editor in the plugin, a live render mode, an automate report.
@@ -324,7 +334,8 @@ pub const VST2: Surface = Surface {
     tone: TONE_NORMALIZED,
     selects_tail: true,
     infinite_tail: None,
-    reports_read_only: false,
+    reports_access: false,
+    reports_automatable: false,
 };
 
 /// VST3 from the Rust plugin: an editor once selected, the mode read at activation, an edit of `aux` to 0.75 on each state
@@ -339,7 +350,8 @@ pub const VST3: Surface = Surface {
     tone: TONE_CURVED,
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
-    reports_read_only: true,
+    reports_access: true,
+    reports_automatable: true,
 };
 
 /// VST3 from the C++ plugin: no editor, an edit of `aux` to 0.75 on each state
@@ -354,7 +366,8 @@ pub const VST3_CPP: Surface = Surface {
     tone: TONE_CURVED,
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
-    reports_read_only: true,
+    reports_access: true,
+    reports_automatable: true,
 };
 
 /// AU, from the shared plugin's Audio Unit shell: no editor (the shell offers no
@@ -372,5 +385,6 @@ pub const AU: Surface = Surface {
     tone: TONE_LINEAR,
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
-    reports_read_only: true,
+    reports_access: true,
+    reports_automatable: false,
 };

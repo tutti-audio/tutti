@@ -244,35 +244,17 @@ pub fn parameters_listed<F: Format>() {
         // The access the spec gives each parameter: the meter alone is read-only
         // and never automatable; the others are writable. A format that reports
         // no read-only bit (VST2) reports neither answer.
-        if param == Param::Meter {
-            if F::SURFACE.reports_read_only {
-                assert_eq!(
-                    info.flag(ParamFlags::READ_ONLY),
-                    Some(true),
-                    "the meter is read-only"
-                );
-            }
-        } else {
-            assert_ne!(
+        if F::SURFACE.reports_access {
+            assert_eq!(
                 info.flag(ParamFlags::READ_ONLY),
-                Some(true),
-                "{param:?} is not read-only"
+                Some(param == Param::Meter),
+                "{param:?} read-only"
             );
         }
-        if param == Param::Meter {
-            // A format with no read-only bit has no per-parameter automatable
-            // bit either (VST2 says every parameter is).
-            if F::SURFACE.reports_read_only {
-                assert_ne!(
-                    info.flag(ParamFlags::AUTOMATABLE),
-                    Some(true),
-                    "the meter is not automatable"
-                );
-            }
-        } else {
-            assert_ne!(
+        if F::SURFACE.reports_automatable {
+            assert_eq!(
                 info.flag(ParamFlags::AUTOMATABLE),
-                Some(false),
+                Some(param != Param::Meter),
                 "{param:?} automatable"
             );
         }
@@ -396,30 +378,36 @@ pub fn unlisted_parameter_is_none<F: Format>() {
 /// the call with `ReadOnly`, loaded and active, and does not reach the plugin:
 /// beside an accepted write of `level`, which the plugin holds afterwards, the
 /// plugin's record of what the host sent has no event for the meter. (A format
-/// that delivers a write outside a block, as AU's `AudioUnitSetParameter` does,
-/// leaves no event for either; the record is the check where one is made.)
+/// that delivers a write directly, as AU's `AudioUnitSetParameter` and VST2's
+/// `setParameter` do, leaves no event for either, so the transcript half is
+/// vacuous there and `Err(ReadOnly)` is the check; VST2 reports no access at all
+/// and is a Gap.)
 pub fn read_only_parameter_write_is_refused<F: Format>() {
     let main = main_thread();
     let id = Param::Meter.id();
     let refused = Err(ParamWriteError::ReadOnly(id));
     let mut loaded = F::load();
     assert_eq!(
-        loaded.set_parameter(main, id, Normalized::of(0.75)),
+        loaded.set_parameter(main, id, Normalized::of(spec::WRITE)),
         refused,
         "read-only write refused (loaded)"
     );
     let mut a = activate(loaded, BLOCK);
     assert_eq!(
         a.controller_mut()
-            .set_parameter(main, id, Normalized::of(0.75)),
+            .set_parameter(main, id, Normalized::of(spec::WRITE)),
         refused,
         "read-only write refused (active)"
     );
-    write(a.controller_mut(), Param::Level, 0.75);
+    write(a.controller_mut(), Param::Level, spec::WRITE);
     a.silent(BLOCK);
     tutti_plugin_types::Control::flush_edits(a.controller_mut(), main_thread());
     let t = transcript::<F, _>(a.controller_mut());
-    assert_eq!(t.level, 0.75, "the writable parameter took its write");
+    assert_eq!(
+        t.level,
+        spec::WRITE,
+        "the writable parameter took its write"
+    );
     assert!(
         t.of(Kind::Param).all(|e| e.id != id.get()),
         "the refused write reached the plugin: {:?}",

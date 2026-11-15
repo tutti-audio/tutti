@@ -236,25 +236,36 @@ fn a_read_only_write_on_the_realtime_route_is_not_applied<F: Format>(path: PathB
 
     let (mut a, _) = served::<F>(path);
     let main = tutti_fixtures::main_thread();
-    AnyThread::set_parameter_value(a.controller(), Param::Meter.id(), Normalized::of(0.75));
-    AnyThread::set_parameter_value(a.controller(), Param::Level.id(), Normalized::of(0.75));
+    AnyThread::set_parameter_value(
+        a.controller(),
+        Param::Meter.id(),
+        Normalized::of(spec::WRITE),
+    );
+    AnyThread::set_parameter_value(
+        a.controller(),
+        Param::Level.id(),
+        Normalized::of(spec::WRITE),
+    );
     // The writes travel on the control connection and the blocks on the audio
     // one: blocks run until the writable one has landed.
     let mut level = a.controller().parameter(main, Param::Level.id());
     for _ in 0..200 {
         a.silent(BLOCK);
         level = a.controller().parameter(main, Param::Level.id());
-        if level.map(Normalized::get) == Some(0.75) {
+        if level.map(Normalized::get) == Some(spec::WRITE) {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
     assert_eq!(
         level.map(Normalized::get),
-        Some(0.75),
+        Some(spec::WRITE),
         "{}: the positive control",
         F::NAME
     );
+    // The read can come back before a block has run on the plugin's side, so the
+    // record may lack the write yet: one more block, then the record.
+    a.silent(BLOCK);
     let state = a
         .controller_mut()
         .save_state(main, tutti_plugin_types::StateUse::Project)
