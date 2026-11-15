@@ -8,7 +8,7 @@ use crate::field::{
     SharpsFlats, TicksPerQuarterNote, U4, U7, U14,
 };
 use crate::{
-    ArticulationAttribute, BendValue, CCNumber, ControlValue, ManufacturerId, MdsChunk,
+    ArticulationAttribute, BendValue, CCNumber, ControlValue, Field, ManufacturerId, MdsChunk,
     MdsChunkSize, MdsChunks, MdsIdentity, MidiChannel, MidiGroup, NoteVelocity, Reserved,
     ReservedAccents, ReservedAttribute, Rpn, Ump,
 };
@@ -1393,10 +1393,12 @@ pub struct StreamConfig {
 /// Which Function Block a Discovery asks about (§7.1.7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BlockSelect {
-    /// One block. A number above 31 is reserved and kept.
+    /// One block.
     One(FunctionBlockId),
     /// All of them (`0xFF`).
     All,
+    /// A number above 31 other than `0xFF`, as read.
+    Reserved(Reserved),
 }
 
 /// Which notifications a Function Block Discovery asks for.
@@ -1453,7 +1455,7 @@ pub struct FunctionBlockInfo {
     /// Whether the block is active.
     pub active: bool,
     /// Which block.
-    pub id: FunctionBlockId,
+    pub id: Field<FunctionBlockId>,
     /// Its direction.
     pub direction: Direction,
     /// Its UI hint.
@@ -1461,9 +1463,9 @@ pub struct FunctionBlockInfo {
     /// MIDI 1.0 port status.
     pub midi1: Midi1Port,
     /// The first Group it spans.
-    pub first_group: FirstGroup,
+    pub first_group: Field<FirstGroup>,
     /// How many Groups it spans.
-    pub groups_spanned: GroupSpan,
+    pub groups_spanned: Field<GroupSpan>,
     /// The MIDI-CI message version, `0` for none.
     pub midi_ci_version: u8,
     /// Simultaneous SysEx 8 streams supported.
@@ -1505,7 +1507,7 @@ pub enum Stream {
     /// Function Block Name Notification: 13 UTF-8 bytes, zero-padded.
     FunctionBlockName {
         /// Which block.
-        block: FunctionBlockId,
+        block: Field<FunctionBlockId>,
         /// The packet's place.
         form: Form,
         /// The bytes.

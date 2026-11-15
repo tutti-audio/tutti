@@ -84,3 +84,52 @@ impl ReservedAccents {
         self.0
     }
 }
+
+/// A field a table bounds, as read from the wire: a value in range, or the
+/// [`Reserved`] raw outside it. Only the decoder builds the second, so a sender
+/// writes a value in range, and a message a receiver read re-encodes exactly.
+///
+/// ```compile_fail,E0423
+/// use tutti_ump::{Field, FunctionBlockId, Reserved};
+/// let _: Field<FunctionBlockId> = Field::Reserved(Reserved(40));
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Field<T> {
+    /// A value in range.
+    Value(T),
+    /// A raw outside the range, as read.
+    Reserved(Reserved),
+}
+
+impl<T: Copy> Field<T> {
+    /// The value, or `None` for a reserved raw.
+    #[must_use]
+    pub const fn value(self) -> Option<T> {
+        match self {
+            Self::Value(value) => Some(value),
+            Self::Reserved(_) => None,
+        }
+    }
+
+    /// The field of the checked `value`, or the reserved `raw` it came from.
+    pub(crate) const fn read(value: Option<T>, raw: u8) -> Self {
+        match value {
+            Some(value) => Self::Value(value),
+            None => Self::Reserved(Reserved::wire(raw)),
+        }
+    }
+
+    /// The raw byte: `get` of the value, or the reserved raw.
+    pub(crate) fn raw(self, get: impl FnOnce(T) -> u8) -> u8 {
+        match self {
+            Self::Value(value) => get(value),
+            Self::Reserved(reserved) => reserved.get(),
+        }
+    }
+}
+
+impl<T> From<T> for Field<T> {
+    fn from(value: T) -> Self {
+        Self::Value(value)
+    }
+}

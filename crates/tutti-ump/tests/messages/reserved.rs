@@ -14,7 +14,7 @@
 use tutti_ump::ControlValue;
 use tutti_ump::{
     Accidental, Address, Alteration, AlterationKind, Attribute, BlockSelect, ChordBass, ChordName,
-    ChordPitch, ChordType, Direction, FirstGroup, Flex, FlexAddress, FlexTextKind,
+    ChordPitch, ChordType, Direction, Field, FirstGroup, Flex, FlexAddress, FlexTextKind,
     FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupSpan,
     KeySignature, Letter, Message, Midi1Port, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
     Protocol, RegisteredPerNoteController, SharpsFlats, Stream, StreamConfig, U4, UiHint, Ump,
@@ -411,13 +411,13 @@ fn reserved_values_are_kept() {
     for block in [32u8, 0xFE] {
         let words = [0xF010_0003 | u32::from(block) << 8, 0, 0, 0];
         let Message::Stream(Stream::FunctionBlockDiscovery {
-            block: BlockSelect::One(id),
+            block: BlockSelect::Reserved(reserved),
             ..
         }) = read(words)
         else {
             panic!("{words:08x?}");
         };
-        assert_eq!(id.get(), block);
+        assert_eq!(reserved.get(), block);
     }
     // A chord type past 0x1B, as a type and as a bass type.
     for words in [
@@ -438,9 +438,9 @@ fn an_inactive_function_block_with_zeroed_fields_is_still_read() {
         panic!("a Function Block Info with zeroed fields is a Function Block Info");
     };
     assert!(!info.active);
-    assert_eq!(info.id.get(), 5);
+    assert_eq!(info.id.value().map(FunctionBlockId::get), Some(5));
     assert!(matches!(info.direction, Direction::Reserved(r) if r.get() == 0));
-    assert_eq!(info.groups_spanned.get(), 0);
+    assert!(matches!(info.groups_spanned, Field::Reserved(r) if r.get() == 0));
     assert_eq!(
         Ump::from(Message::Stream(Stream::FunctionBlockInfo(info))),
         Ump([0xF011_0500, 0, 0, 0])
@@ -471,16 +471,16 @@ fn a_later_revisions_reserved_codes_leave_the_message_readable() {
         match check {
             0 => assert!(matches!(info.direction, Direction::Reserved(r) if r.get() == 0)),
             1 => assert!(matches!(info.midi1, Midi1Port::Reserved(r) if r.get() == 3)),
-            2 => assert_eq!(info.id.get(), 0x23),
-            3 => assert_eq!(info.first_group.get(), 0x10),
-            4 => assert_eq!(info.groups_spanned.get(), 0),
-            _ => assert_eq!(info.groups_spanned.get(), 0x11),
+            2 => assert!(matches!(info.id, Field::Reserved(r) if r.get() == 0x23)),
+            3 => assert!(matches!(info.first_group, Field::Reserved(r) if r.get() == 0x10)),
+            4 => assert!(matches!(info.groups_spanned, Field::Reserved(r) if r.get() == 0)),
+            _ => assert!(matches!(info.groups_spanned, Field::Reserved(r) if r.get() == 0x11)),
         }
     }
     // Function Block Name: a block above 31.
     assert!(matches!(
-        Ump([0xF012_2000, 0, 0, 0]).decode(),
-        Ok(Message::Stream(Stream::FunctionBlockName { .. }))
+        read([0xF012_2000, 0, 0, 0]),
+        Message::Stream(Stream::FunctionBlockName { block: Field::Reserved(r), .. }) if r.get() == 0x20
     ));
 }
 
@@ -693,12 +693,12 @@ fn a_constructed_message_encodes_no_reserved_value() {
             round_trip(Message::Stream(Stream::FunctionBlockInfo(
                 FunctionBlockInfo {
                     active: true,
-                    id: FunctionBlockId::of(3),
+                    id: FunctionBlockId::of(3).into(),
                     direction,
                     ui_hint: UiHint::Both,
                     midi1,
-                    first_group: FirstGroup::of(0),
-                    groups_spanned: GroupSpan::of(1),
+                    first_group: FirstGroup::of(0).into(),
+                    groups_spanned: GroupSpan::of(1).into(),
                     midi_ci_version: 0,
                     max_sysex8_streams: 0,
                 },

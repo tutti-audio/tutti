@@ -861,12 +861,12 @@ fn jr_reaches_a_device_only_after_its_notification_enables_it() {
 fn moved_block(first_group: u8) -> Stream {
     Stream::FunctionBlockInfo(tutti_ump::FunctionBlockInfo {
         active: true,
-        id: FunctionBlockId::new(0).unwrap(),
+        id: FunctionBlockId::new(0).unwrap().into(),
         direction: BlockDirection::Bidirectional,
         ui_hint: tutti_ump::UiHint::Both,
         midi1: tutti_ump::Midi1Port::No,
-        first_group: FirstGroup::new(first_group).unwrap(),
-        groups_spanned: GroupSpan::new(2).unwrap(),
+        first_group: FirstGroup::new(first_group).unwrap().into(),
+        groups_spanned: GroupSpan::new(2).unwrap().into(),
         midi_ci_version: 0,
         max_sysex8_streams: 0,
     })

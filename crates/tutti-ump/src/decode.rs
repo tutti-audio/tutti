@@ -29,7 +29,7 @@ use crate::message::{
     System, TimeSignature, UiHint, UmpVersion, Unknown, Utility, Voice1, Voice2,
 };
 use crate::{
-    ArticulationAttribute, BendValue, CCNumber, ControlValue, ManufacturerId, MdsChunk,
+    ArticulationAttribute, BendValue, CCNumber, ControlValue, Field, ManufacturerId, MdsChunk,
     MdsChunkSize, MdsChunks, MdsIdentity, MidiChannel, MidiGroup, NoteVelocity,
     RegisteredPerNoteController, Reserved, ReservedAttribute, Ump,
 };
@@ -575,7 +575,10 @@ fn stream(w: [u32; 4]) -> Option<Stream> {
         0x10 if complete => Some(Stream::FunctionBlockDiscovery {
             block: match byte(w0, 1) {
                 0xFF => BlockSelect::All,
-                n => BlockSelect::One(FunctionBlockId::wire(n)),
+                n => match FunctionBlockId::new(n) {
+                    Some(id) => BlockSelect::One(id),
+                    None => BlockSelect::Reserved(Reserved::wire(n)),
+                },
             },
             filter: BlockFilter {
                 info: flag(w0, 0),
@@ -584,7 +587,7 @@ fn stream(w: [u32; 4]) -> Option<Stream> {
         }),
         0x11 if complete => Some(Stream::FunctionBlockInfo(FunctionBlockInfo {
             active: flag(w0, 15),
-            id: FunctionBlockId::wire(byte(w0, 1) & 0x7f),
+            id: Field::read(FunctionBlockId::new(byte(w0, 1) & 0x7f), byte(w0, 1) & 0x7f),
             direction: match w0 & 0x3 {
                 0b01 => Direction::Input,
                 0b10 => Direction::Output,
@@ -603,13 +606,13 @@ fn stream(w: [u32; 4]) -> Option<Stream> {
                 2 => Midi1Port::Restricted,
                 n => Midi1Port::Reserved(Reserved::wire(n as u8)),
             },
-            first_group: FirstGroup::wire(byte(w[1], 3)),
-            groups_spanned: GroupSpan::wire(byte(w[1], 2)),
+            first_group: Field::read(FirstGroup::new(byte(w[1], 3)), byte(w[1], 3)),
+            groups_spanned: Field::read(GroupSpan::new(byte(w[1], 2)), byte(w[1], 2)),
             midi_ci_version: byte(w[1], 1),
             max_sysex8_streams: byte(w[1], 0),
         })),
         0x12 => Some(Stream::FunctionBlockName {
-            block: FunctionBlockId::wire(byte(w0, 1)),
+            block: Field::read(FunctionBlockId::new(byte(w0, 1)), byte(w0, 1)),
             form: form(w0, 26),
             bytes: {
                 let mut b = [0u8; 13];

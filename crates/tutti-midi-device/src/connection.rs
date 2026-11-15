@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 
 use bitflags::bitflags;
 use tutti_ump::{
-    BlockFilter, BlockSelect, DiscoveryFilter, Message, Protocol, Stream, StreamConfig,
+    BlockFilter, BlockSelect, DiscoveryFilter, Field, Message, Protocol, Stream, StreamConfig,
     StreamTextAssembler, Ump,
 };
 
@@ -312,7 +312,11 @@ impl Connection {
                     self.endpoint.insert_block(block);
                 }
             }
-            Stream::FunctionBlockName { block, form, bytes } => {
+            Stream::FunctionBlockName {
+                block: Field::Value(block),
+                form,
+                bytes,
+            } => {
                 // One name is open at a time: another block's Start drops it.
                 if let Some(text) = self.block_name.feed(block.get(), form, &bytes)
                     && let (Some(name_text), Some(slot)) = (
@@ -372,7 +376,11 @@ impl Connection {
                 self.endpoint.insert_block(block);
                 Action::Changed
             }
-            Stream::FunctionBlockName { block, form, bytes } => {
+            Stream::FunctionBlockName {
+                block: Field::Value(block),
+                form,
+                bytes,
+            } => {
                 let Some(text) = self.block_name.feed(block.get(), form, &bytes) else {
                     return Action::Wait;
                 };

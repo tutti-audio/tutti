@@ -1,8 +1,9 @@
 //! Wire-width integers: a value of a stated range, so a field cannot hold one
 //! the packet cannot carry.
 //!
-//! The public constructor refuses a value out of range. The codec builds one
-//! from bits it has just masked, through the private `wire`.
+//! The public constructor refuses a value out of range, and no constructor
+//! stores one. The codec builds a bit-width field from bits it has just masked,
+//! through `masked`; a bounded value out of range it reads as a `Field::Reserved`.
 
 use crate::ControlValue;
 
@@ -103,7 +104,7 @@ macro_rules! bits {
 
 // A field with a stated inclusive range that is not a bit width.
 macro_rules! bounded {
-    (@core $(#[$doc:meta])* $name:ident, $repr:ty, $min:expr, $max:expr) => {
+    ($(#[$doc:meta])* $name:ident, $repr:ty, $min:expr, $max:expr) => {
         $(#[$doc])*
         #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $name($repr);
@@ -131,27 +132,10 @@ macro_rules! bounded {
                 }
             }
 
-            /// The raw value.
+            /// The raw value, always in range.
             #[must_use]
             pub const fn get(self) -> $repr {
                 self.0
-            }
-        }
-    };
-    // A type whose out-of-range wire value is another type's (`Reserved`):
-    // `get` is always in range.
-    ($(#[$doc:meta])* $name:ident, $repr:ty, $min:expr, $max:expr, strict) => {
-        bounded!(@core $(#[$doc])* $name, $repr, $min, $max);
-    };
-    ($(#[$doc:meta])* $name:ident, $repr:ty, $min:expr, $max:expr) => {
-        bounded!(@core $(#[$doc])* $name, $repr, $min, $max);
-
-        impl $name {
-            // The value as the wire sent it, in range or not: a reserved value
-            // is kept so the message re-encodes exactly.
-            #[allow(dead_code)] // `SharpsFlats` has no reserved value to keep.
-            pub(crate) const fn wire(raw: $repr) -> Self {
-                Self(raw)
             }
         }
     };
@@ -264,30 +248,10 @@ pub fn first_non_seven_bit(bytes: &[u8]) -> Option<usize> {
     bytes.iter().position(|&b| b & 0x80 != 0)
 }
 
-bounded!(
-    /// A Function Block number (`0..=31`). A reserved number read from the wire
-    /// is kept, so such a message re-encodes exactly.
-    FunctionBlockId, u8, 0, 31
-);
-bounded!(
-    /// A Group number as a Function Block declares its first Group (`0..=15`).
-    /// A reserved number read from the wire is kept.
-    FirstGroup, u8, 0, 15
-);
-bounded!(
-    /// How many Groups a Function Block spans (`1..=16`). A reserved count read
-    /// from the wire is kept.
-    GroupSpan, u8, 1, 16
-);
-bounded!(
-    /// How many channels an MPE Profile zone has, its Manager Channel and one
-    /// to fifteen Member Channels: `2..=16` (M2-120 §2.1).
-    MpeChannels, u8, 2, 16
-);
 // `From` into the raw and `TryFrom` from it, for a bounded type with an
 // unsigned raw.
 macro_rules! bounded_conversions {
-    ($name:ident, $repr:ty) => {
+    ($name:ident, $repr:ty, $max:expr) => {
         impl From<$name> for $repr {
             fn from(value: $name) -> $repr {
                 value.get()
@@ -301,7 +265,7 @@ macro_rules! bounded_conversions {
                 Self::new(raw).ok_or(OutOfRange {
                     what: stringify!($name),
                     value: u32::from(raw),
-                    max: u32::from(<$repr>::from(Self::MAX)),
+                    max: $max as u32,
                 })
             }
         }
@@ -309,13 +273,38 @@ macro_rules! bounded_conversions {
 }
 
 bounded!(
+    /// A Function Block number (`0..=31`). A reserved number read from the
+    /// wire is a [`Field::Reserved`](crate::Field::Reserved), not a value of
+    /// this type.
+    FunctionBlockId, u8, 0, 31
+);
+bounded_conversions!(FunctionBlockId, u8, 31);
+bounded!(
+    /// A Group number as a Function Block declares its first Group (`0..=15`).
+    /// A reserved number read from the wire is a
+    /// [`Field::Reserved`](crate::Field::Reserved).
+    FirstGroup, u8, 0, 15
+);
+bounded_conversions!(FirstGroup, u8, 15);
+bounded!(
+    /// How many Groups a Function Block spans (`1..=16`). A reserved count read
+    /// from the wire is a [`Field::Reserved`](crate::Field::Reserved).
+    GroupSpan, u8, 1, 16
+);
+bounded_conversions!(GroupSpan, u8, 16);
+bounded!(
+    /// How many channels an MPE Profile zone has, its Manager Channel and one
+    /// to fifteen Member Channels: `2..=16` (M2-120 §2.1).
+    MpeChannels, u8, 2, 16
+);
+bounded!(
     /// How many Function Blocks an Endpoint Info Notification declares
     /// (`0..=32`, M2-104 §7.1.2). A reserved count (`33..=127`) read from the
     /// wire is a [`FunctionBlocks::Reserved`](crate::FunctionBlocks::Reserved),
     /// not a value of this type.
-    FunctionBlockCount, u8, 0, 32, strict
+    FunctionBlockCount, u8, 0, 32
 );
-bounded_conversions!(FunctionBlockCount, u8);
+bounded_conversions!(FunctionBlockCount, u8, 32);
 
 impl FunctionBlockCount {
     /// The most blocks an Endpoint declares.
@@ -327,9 +316,9 @@ bounded!(
     /// §7.2.3.1); `0` is reserved. A zero read from the wire is a
     /// [`Utility::ReservedTicksPerQuarterNote`](crate::Utility::ReservedTicksPerQuarterNote),
     /// not a value of this type.
-    TicksPerQuarterNote, u16, 1, 65535, strict
+    TicksPerQuarterNote, u16, 1, 65535
 );
-bounded_conversions!(TicksPerQuarterNote, u16);
+bounded_conversions!(TicksPerQuarterNote, u16, u16::MAX);
 
 impl TicksPerQuarterNote {
     /// The most ticks, 65535.

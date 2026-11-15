@@ -486,12 +486,12 @@ fn in_blocks_declaring(t0: Instant, n: u8, is_static: bool) -> Connection {
 fn info_of(n: u8) -> Message {
     stream(Stream::FunctionBlockInfo(FunctionBlockInfo {
         active: true,
-        id: id(n),
+        id: id(n).into(),
         direction: BlockDirection::Input,
         ui_hint: UiHint::Receiver,
         midi1: Midi1Port::No,
-        first_group: FirstGroup::new(n).unwrap(),
-        groups_spanned: GroupSpan::new(1).unwrap(),
+        first_group: FirstGroup::new(n).unwrap().into(),
+        groups_spanned: GroupSpan::new(1).unwrap().into(),
         midi_ci_version: 0,
         max_sysex8_streams: 0,
     }))
@@ -501,7 +501,7 @@ fn block_name_packet(n: u8, form: Form, text: &[u8]) -> Message {
     let mut bytes = [0u8; 13];
     bytes[..text.len()].copy_from_slice(text);
     stream(Stream::FunctionBlockName {
-        block: id(n),
+        block: id(n).into(),
         form,
         bytes,
     })
@@ -631,7 +631,7 @@ fn info_moved(n: u8, first_group: u8) -> Message {
     let Message::Stream(Stream::FunctionBlockInfo(mut info)) = info_of(n) else {
         unreachable!()
     };
-    info.first_group = FirstGroup::new(first_group).unwrap();
+    info.first_group = FirstGroup::new(first_group).unwrap().into();
     stream(Stream::FunctionBlockInfo(info))
 }
 
@@ -800,7 +800,7 @@ fn a_midi1_port_over_several_groups_is_read_as_a_plain_block() {
             unreachable!()
         };
         info.midi1 = Midi1Port::Unrestricted;
-        info.groups_spanned = GroupSpan::new(span).unwrap();
+        info.groups_spanned = GroupSpan::new(span).unwrap().into();
         stream(Stream::FunctionBlockInfo(info))
     };
     let mut c = in_blocks(t0, 1);

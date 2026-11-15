@@ -148,7 +148,7 @@ pub use note_velocity::NoteVelocity;
 pub use orchestral::{
     MuteAmount, MuteError, MuteMessage, MuteState, MuteType, PlayingPosition, ReservedMuteType,
 };
-pub use reserved::{Reserved, ReservedAccents, ReservedAttribute};
+pub use reserved::{Field, Reserved, ReservedAccents, ReservedAttribute};
 pub use rpn::{RegisteredData, Rpn};
 pub use sysex::{
     SYSEX7_MAX_PAYLOAD, Sysex7Packets, SysexAssembler, SysexError, SysexMessage, SysexRef,

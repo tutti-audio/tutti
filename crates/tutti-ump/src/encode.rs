@@ -1,7 +1,7 @@
 //! `From<Message> for Ump`: a message to its canonical words, reserved bits
 //! zero. The mirror of `decode.rs`.
 
-use crate::field::U7;
+use crate::field::{FirstGroup, FunctionBlockId, GroupSpan, U7};
 use crate::message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, BlockSelect, ChordName, ChordPitch,
     Data128, Direction, Flex, FlexAddress, FlexTextKind, Form, FunctionBlocks, KeySignature,
@@ -490,6 +490,7 @@ fn stream(s: Stream) -> [u32; 4] {
             let block = match block {
                 BlockSelect::One(id) => u32::from(id.get()),
                 BlockSelect::All => 0xFF,
+                BlockSelect::Reserved(r) => u32::from(r.get()),
             };
             [
                 stream_head(done, 0x10)
@@ -523,12 +524,12 @@ fn stream(s: Stream) -> [u32; 4] {
             [
                 stream_head(done, 0x11)
                     | (u32::from(i.active) << 15)
-                    | (u32::from(i.id.get()) << 8)
+                    | (u32::from(i.id.raw(FunctionBlockId::get)) << 8)
                     | (ui_hint << 4)
                     | (midi1 << 2)
                     | direction,
-                (u32::from(i.first_group.get()) << 24)
-                    | (u32::from(i.groups_spanned.get()) << 16)
+                (u32::from(i.first_group.raw(FirstGroup::get)) << 24)
+                    | (u32::from(i.groups_spanned.raw(GroupSpan::get)) << 16)
                     | (u32::from(i.midi_ci_version) << 8)
                     | u32::from(i.max_sysex8_streams),
                 0,
@@ -540,7 +541,9 @@ fn stream(s: Stream) -> [u32; 4] {
             form,
             bytes: b,
         } => [
-            stream_head(form, 0x12) | (u32::from(block.get()) << 8) | u32::from(b[0]),
+            stream_head(form, 0x12)
+                | (u32::from(block.raw(FunctionBlockId::get)) << 8)
+                | u32::from(b[0]),
             word([b[1], b[2], b[3], b[4]]),
             word([b[5], b[6], b[7], b[8]]),
             word([b[9], b[10], b[11], b[12]]),

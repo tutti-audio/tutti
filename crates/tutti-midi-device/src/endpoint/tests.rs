@@ -602,7 +602,13 @@ fn a_local_endpoint_declares_one_static_block_over_its_groups() {
     };
     assert!(b.active);
     assert_eq!(b.direction, BlockDirection::Bidirectional);
-    assert_eq!((b.first_group.get(), b.groups_spanned.get()), (0, 4));
+    assert_eq!(
+        (
+            b.first_group.value().map(FirstGroup::get),
+            b.groups_spanned.value().map(GroupSpan::get)
+        ),
+        (Some(0), Some(4))
+    );
     assert_eq!(blocks.len(), 1);
 }
 

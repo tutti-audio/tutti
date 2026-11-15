@@ -272,12 +272,12 @@ impl FunctionBlock {
     fn info(&self) -> FunctionBlockInfo {
         FunctionBlockInfo {
             active: self.active,
-            id: self.id,
+            id: self.id.into(),
             direction: self.direction,
             ui_hint: self.ui_hint,
             midi1: self.midi1,
-            first_group: self.first_group,
-            groups_spanned: self.groups,
+            first_group: self.first_group.into(),
+            groups_spanned: self.groups.into(),
             midi_ci_version: self.midi_ci_version,
             max_sysex8_streams: self.max_sysex8_streams,
         }
@@ -287,9 +287,9 @@ impl FunctionBlock {
     /// field the wire kept is out of range: a number above 31, a Group span
     /// off the end, or a reserved direction.
     pub(crate) fn from_info(info: &FunctionBlockInfo) -> Option<Self> {
-        let id = FunctionBlockId::new(info.id.get())?;
-        let first_group = FirstGroup::new(info.first_group.get())?;
-        let groups = GroupSpan::new(info.groups_spanned.get())?;
+        let id = info.id.value()?;
+        let first_group = info.first_group.value()?;
+        let groups = info.groups_spanned.value()?;
         // A peer's reserved MIDI 1.0 value, or a port over several Groups, is
         // kept as not a port: the block is still usable as MIDI 2.0.
         let midi1 = match info.midi1 {
@@ -702,6 +702,8 @@ impl Endpoint {
                 }
                 None => return,
             },
+            // A number no Endpoint has.
+            BlockSelect::Reserved(_) => return,
         };
         if filter.info {
             for block in asked.iter().flatten() {
@@ -715,7 +717,7 @@ impl Endpoint {
                         send(
                             out,
                             Stream::FunctionBlockName {
-                                block: block.id,
+                                block: block.id.into(),
                                 form,
                                 bytes,
                             },

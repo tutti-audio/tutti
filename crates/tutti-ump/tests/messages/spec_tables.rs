@@ -147,12 +147,12 @@ fn function_block_fields() {
     let info = |direction, ui_hint, midi1| {
         Message::Stream(Stream::FunctionBlockInfo(FunctionBlockInfo {
             active: false,
-            id: FunctionBlockId::new(0).unwrap(),
+            id: FunctionBlockId::new(0).unwrap().into(),
             direction,
             ui_hint,
             midi1,
-            first_group: FirstGroup::new(0).unwrap(),
-            groups_spanned: GroupSpan::new(1).unwrap(),
+            first_group: FirstGroup::new(0).unwrap().into(),
+            groups_spanned: GroupSpan::new(1).unwrap().into(),
             midi_ci_version: 0,
             max_sysex8_streams: 0,
         }))
