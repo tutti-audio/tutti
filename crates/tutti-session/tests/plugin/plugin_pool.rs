@@ -327,6 +327,13 @@ fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
     pump_until(&mut s, "the stand-in", |s| {
         s.graph_ref().node_tail(node) == Ok(Tail::None)
     });
+    assert!(
+        matches!(
+            s.plugin_view(node).map(|view| view.health()),
+            Ok(PluginHealth::Died { .. })
+        ),
+        "the node reads Died after the swap"
+    );
     assert_eq!(
         s.graph_ref().node_latency(node),
         Ok(latency),
