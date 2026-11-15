@@ -108,6 +108,9 @@ impl Session {
         self.pool_openings();
         self.pool.sweep();
         self.pool.poll_waiters();
+        for then in self.pool.take_loaded() {
+            then(self);
+        }
         self.pool.drain_events(out);
     }
 }

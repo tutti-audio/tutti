@@ -64,7 +64,7 @@ pub use key::PoolKey;
 pub use open::OpenCx;
 pub use report::{PoolLoaded, PoolOutcome, PoolReport};
 pub(crate) use table::Pool;
-pub use table::{HandleError, PoolError, PoolEvent, PoolState, RetryError};
+pub use table::{HandleError, PoolError, PoolEvent, PoolState, RetryError, WhenLoadedError};
 
 #[cfg(test)]
 mod tests;
@@ -151,6 +151,33 @@ impl Session {
         let (loaded, landing) = PoolLoaded::new();
         self.pool.wait_loaded(landing);
         loaded
+    }
+
+    /// Runs `then` in an [`update`](Self::update), once, when the declared
+    /// entry under `key` is loaded: in the update where its load lands, or the
+    /// next one when it already is. `then` runs after the update's other
+    /// landings and is given the session, so it reads the entry's handle and
+    /// declares what depends on it.
+    ///
+    /// A run waits through a failed load, so a [`retry`](Self::retry) that
+    /// lands runs it, and through a reload (the entry reads
+    /// [`PoolState::Reloading`] until it lands). It is dropped without
+    /// running when its entry is released, and while the entry is only held it
+    /// waits.
+    ///
+    /// # Errors
+    ///
+    /// [`WhenLoadedError::NotPooled`] when the key is not declared: never
+    /// declared, or released.
+    pub fn when_loaded<K>(
+        &mut self,
+        key: &K,
+        then: impl FnOnce(&mut Self) + Send + 'static,
+    ) -> Result<(), WhenLoadedError<K>>
+    where
+        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+    {
+        self.pool.when_loaded(key, Box::new(then))
     }
 
     /// Where the entry under `key` stands, `None` when the pool has none: never

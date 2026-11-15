@@ -193,7 +193,7 @@ pub use pool::{AudioEntry, AudioFile, StreamInfo, audio_file};
 pub use pool::{
     Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, PoolConfig, PoolEntry,
     PoolError, PoolEvent, PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet, PoolState,
-    RetryError, stranded_loads,
+    RetryError, WhenLoadedError, stranded_loads,
 };
 #[cfg(feature = "soundfont")]
 pub use pool::{SoundFontFile, soundfont};

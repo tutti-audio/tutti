@@ -114,6 +114,15 @@ pub enum HandleError<K: fmt::Debug> {
     NotLoaded(PoolState),
 }
 
+/// Why [`Session::when_loaded`](crate::Session::when_loaded) took nothing.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum WhenLoadedError<K: fmt::Debug> {
+    /// The pool does not declare the key: never declared, or released.
+    #[error("key {0:?} is not in the pool")]
+    NotPooled(K),
+}
+
 /// A claim on a pool entry that keeps it held, not released, after the app's
 /// pool stops naming it: a node over it, a snapshot. Dropping it is the hold's
 /// end; the entry is released at the next update that finds no hold left.
@@ -251,6 +260,12 @@ pub(crate) struct MainItem {
     pub(crate) stage: MainStage,
 }
 
+/// What the app asked to run once an entry is loaded.
+struct WhenLoaded {
+    key: PoolKey,
+    then: Box<dyn FnOnce(&mut crate::Session) + Send>,
+}
+
 struct Pending {
     order: usize,
     key: PoolKey,
@@ -276,6 +291,8 @@ pub(crate) struct Pool {
     /// Released since the last report.
     released: Vec<PoolKey>,
     waiters: Vec<Box<dyn FnMut(&Pool) -> bool + Send>>,
+    /// Runs waiting for an entry to load, in the order they were asked.
+    when_loaded: Vec<WhenLoaded>,
 }
 
 impl fmt::Debug for Pool {
@@ -301,6 +318,7 @@ impl Pool {
             queued: Vec::new(),
             released: Vec::new(),
             waiters: Vec::new(),
+            when_loaded: Vec::new(),
         }
     }
 
@@ -798,6 +816,44 @@ impl Pool {
         waiters.retain_mut(|waiter| !waiter(self));
         waiters.append(&mut self.waiters);
         self.waiters = waiters;
+    }
+
+    /// Runs `then` once the declared entry under `key` is loaded.
+    ///
+    /// # Errors
+    ///
+    /// [`WhenLoadedError::NotPooled`] when the key is not declared.
+    pub(crate) fn when_loaded<K>(
+        &mut self,
+        key: &K,
+        then: Box<dyn FnOnce(&mut crate::Session) + Send>,
+    ) -> Result<(), WhenLoadedError<K>>
+    where
+        K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
+    {
+        let erased = PoolKey::new(key);
+        if !self.slots.get(&erased).is_some_and(|slot| slot.declared) {
+            return Err(WhenLoadedError::NotPooled(key.clone()));
+        }
+        self.when_loaded.push(WhenLoaded { key: erased, then });
+        Ok(())
+    }
+
+    /// The runs whose entry is declared and loaded, in the order they were
+    /// asked, taken out. A run whose entry was released is dropped; one whose
+    /// entry is loading, failed or held keeps waiting.
+    pub(crate) fn take_loaded(&mut self) -> Vec<Box<dyn FnOnce(&mut crate::Session) + Send>> {
+        let slots = &self.slots;
+        self.when_loaded.retain(|run| slots.contains_key(&run.key));
+        let (ready, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.when_loaded)
+            .into_iter()
+            .partition(|run| {
+                slots
+                    .get(&run.key)
+                    .is_some_and(|slot| slot.declared && matches!(slot.state, PoolState::Loaded))
+            });
+        self.when_loaded = waiting;
+        ready.into_iter().map(|run| run.then).collect()
     }
 
     /// How many waits are registered.
