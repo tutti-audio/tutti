@@ -3414,6 +3414,60 @@ fn the_construction_time_scale_is_the_initial_mts_table() {
     assert!((s.voices[2].sounding_freq().get() - 440.0).abs() < 0.01);
 }
 
+/// The integer part of a Pitch 7.9 attribute and of a Pitch 7.25 per-note
+/// value is the 12-tone equal-tempered pitch with note 69 at A = 440 Hz, and
+/// the note number of an attribute pitch is only an index (M2-104 sections
+/// 7.4.15.2 and 7.4.15.3).
+/// Spec: m2-104/7.4.15.2#1, m2-104/7.4.15.3#2
+#[test]
+fn pitch_7_9_and_7_25_put_note_69_at_a440() {
+    let mut out = [0.0f32; 2];
+    // Attribute Pitch 7.9 on note index 0: the pitch is 69 at fraction 0,
+    // then 69 and a half semitone.
+    for (q7_9, want) in [
+        (69 << 9, 440.0),
+        ((69 << 9) + 256, 440.0 * 2f32.powf(0.5 / 12.0)),
+    ] {
+        let mut s = steady(|_| {});
+        queue_midi(
+            &mut s,
+            &[ump(Message::Midi2(
+                address(0),
+                Voice2::NoteOn {
+                    note: NoteNumber::of(0),
+                    velocity: NoteVelocity::CENTER,
+                    attribute: Attribute::Pitch(q7_9),
+                },
+            ))],
+        );
+        s.tick(&[], &mut out);
+        let got = s.voices[0].sounding_freq().get();
+        assert!(
+            (got - want).abs() < 0.01,
+            "{q7_9:#x}: {got} Hz, want {want}"
+        );
+    }
+    // Registered Per-Note Controller 3, Pitch 7.25, on a note at key 0.
+    let mut s = steady(|_| {});
+    queue_midi(
+        &mut s,
+        &[
+            ev_note_on(0, 0, 100),
+            ump(Message::Midi2(
+                address(0),
+                Voice2::RegisteredPerNote {
+                    note: NoteNumber::of(0),
+                    controller: tutti_ump::RegisteredPerNoteController::Pitch,
+                    value: ControlValue::new(69 << 25),
+                },
+            )),
+        ],
+    );
+    s.tick(&[], &mut out);
+    let got = s.voices[0].sounding_freq().get();
+    assert!((got - 440.0).abs() < 0.01, "{got} Hz");
+}
+
 /// MTS: a real-time Single Note Tuning Change retunes a sounding note with no
 /// new attack; the same key struck after has it too.
 /// `3D 00 00` for key 60 is note 61's pitch.

@@ -180,7 +180,7 @@ proptest! {
 
     /// Every encoded packet has a defined message type and decodes again, so
     /// no message is written reserved.
-    /// Spec: m2-104/2.1.3#1, m2-104/2.1.4#1
+    /// Spec: m2-104/2.1.4#1
     #[test]
     fn decoded_messages_round_trip(w in either()) {
         if let Ok(m) = Ump(w).decode() {

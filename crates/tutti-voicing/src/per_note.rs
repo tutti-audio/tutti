@@ -774,7 +774,7 @@ mod tests {
     /// M2-104 section 7.4.15.3: Attribute Pitch 7.9 is that note's pitch, and
     /// is not valid for any subsequent Notes. The note number is an index: the
     /// pitch is the attribute's whole, an integer part on the semitone scale.
-    /// Spec: m2-104/7.4.14#11, m2-104/7.4.15.3#1, m2-104/7.4.15.3#2
+    /// Spec: m2-104/7.4.14#11, m2-104/7.4.15.3#1
     #[test]
     fn an_attribute_pitch_is_for_that_note_alone() {
         let mut s = state();
@@ -912,7 +912,6 @@ mod tests {
     /// M2-104 section 7.4.15.2: Per-Note Pitch Bend acts as an offset from the
     /// pitch set by Registered Per-Note Controller #3. A pitch told to a live
     /// note and then a bend sounds as their sum.
-    /// Spec: m2-104/7.4.15.2#1
     #[test]
     fn a_pitch_then_a_bend_sounds_as_the_sum() {
         let mut s = state();

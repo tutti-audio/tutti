@@ -170,7 +170,7 @@ fn a_single_beside_an_open_run() {
 /// **A UMP of the open message's Group ends it (M2-104 §7.7.1)**, dropped and
 /// counted once, whatever kind it is that is not a Continue or a System Real
 /// Time message: the packets left over are an orphan and are skipped.
-/// Spec: m2-104/7.7.1#1, m2-104/7.7.1#4
+/// Spec: m2-104/7.7.1#4
 #[test]
 fn another_message_on_the_group_ends_the_run() {
     let body = payload(20);
@@ -205,7 +205,7 @@ fn another_message_on_the_group_ends_the_run() {
 /// **What the spec lets sit inside a message does not end it**: a System Real
 /// Time message on its Group, a Groupless Utility or UMP Stream message, and
 /// any message on another Group.
-/// Spec: m2-104/7.7.1#1, m2-104/7.7.1#3, m2-104/7.7.1#5
+/// Spec: m2-104/7.7.1#3, m2-104/7.7.1#5
 #[test]
 fn what_may_be_interspersed_does_not_end_the_run() {
     let body = payload(20);

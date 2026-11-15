@@ -158,22 +158,27 @@ fn an_all_zero_complete_packet_is_a_melisma() {
 }
 
 /// A Recording/Concert Date is text in the common format (M2-104 section
-/// 7.5.9.2): it goes out in Complete, or Start to End, packets, and reads back
-/// whole with its kind, an ISO 8601 date and time as one.
+/// 7.5.9.2): status bank 1, status 0x0B, Complete for up to 12 bytes, else
+/// Start, Continue and End with the bytes after the end zero.
 /// Spec: m2-104/7.5.9.2#1
 #[test]
 fn a_recording_date_is_common_format_text() {
-    let mut a = FlexTextAssembler::new(vec![0; 64], 64, 1);
-    for date in ["2026-11-15", "2026-11-15T10:30:00+09:00"] {
-        let mut got = None;
-        for ump in
-            flex_text_packets(G0, FlexAddress::Group, FlexTextKind::RecordingDate, date).unwrap()
-        {
-            if let FlexTextStep::Done(t) = a.push(ump) {
-                assert_eq!(t.kind, FlexTextKind::RecordingDate);
-                got = Some(t.text.to_owned());
-            }
-        }
-        assert_eq!(got.as_deref(), Some(date));
-    }
+    let words = |date: &str| -> Vec<[u32; 4]> {
+        flex_text_packets(G0, FlexAddress::Group, FlexTextKind::RecordingDate, date)
+            .unwrap()
+            .map(|u| u.0)
+            .collect()
+    };
+    assert_eq!(
+        words("2026-11-15"),
+        [[0xD010_010B, 0x3230_3236, 0x2D31_312D, 0x3135_0000]]
+    );
+    assert_eq!(
+        words("2026-11-15T10:30:00+09:00"),
+        [
+            [0xD050_010B, 0x3230_3236, 0x2D31_312D, 0x3135_5431],
+            [0xD090_010B, 0x303A_3330, 0x3A30_302B, 0x3039_3A30],
+            [0xD0D0_010B, 0x3000_0000, 0, 0],
+        ]
+    );
 }

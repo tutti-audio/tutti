@@ -78,7 +78,7 @@ fn twelve_and_thirteen_bytes() {
 
 /// A long payload: `Start`, `Continue`*, `End`, six bytes each but the last,
 /// and nothing else between the `Start` and the `End`.
-/// Spec: m2-104/7.7#1, m2-104/7.7#2, m2-104/7.7.1#2
+/// Spec: m2-104/7.7#1, m2-104/7.7#2, m2-104/7.7.1#1, m2-104/7.7.1#2
 #[test]
 fn a_long_payload_runs_start_continue_end() {
     let p = payload(1000);
