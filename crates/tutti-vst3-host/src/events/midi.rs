@@ -551,11 +551,9 @@ pub(super) fn decode(event: &Event, stream: &mut OutputStream) -> Option<WireMid
 
 /// The per-note message a plugin's note expression (`typeId`, `value` normalized
 /// on `[0, 1]`, tuning `0.5` at the key and `1/240` per semitone) of the note
-/// `note_id` is, on `group`: the note the plugin started under that id, which is
-/// the only way an id names a note (the plugin's id space is its own). `None` for a dimension with no per-note message
-/// (vibrato, expression, a custom id), a non-finite value, and a `note_id` that
-/// is not the host's `channel * 128 + note`: a plugin's own id space cannot be
-/// decoded, and binding it to a phantom voice would be worse than dropping it.
+/// `note_id` is, on `group`. `None` for a dimension with no per-note message
+/// (vibrato, expression, a custom id), a non-finite value, or an id no note of
+/// the plugin holds (both counted on the stream).
 fn expression(
     stream: &mut OutputStream,
     type_id: u32,
@@ -565,6 +563,7 @@ fn expression(
     group: MidiGroup,
 ) -> Option<WireMidi> {
     if !value.is_finite() {
+        stream.count_expression_dropped();
         return None;
     }
     let Some((channel, note)) = stream.note_of(note_id) else {

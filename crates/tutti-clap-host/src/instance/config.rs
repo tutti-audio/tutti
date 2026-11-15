@@ -54,6 +54,9 @@ pub(crate) struct AudioScratch {
     /// deactivation drops it; [`ClapProcessor::reset`](super::ClapProcessor::reset)
     /// forgets them without sending what was pending.
     pub out_translator: Translator,
+    /// MIDI the block's output lost (see `fill_midi_events`), for the block's
+    /// `ProcessOutput` to count.
+    pub out_midi_lost: usize,
     /// Reserved at activation, one queue per parameter with a block's point
     /// room, and filled within that room (`fill_param_changes`); points past
     /// it are counted in `out_param_points_dropped`.
@@ -93,6 +96,7 @@ impl AudioScratch {
             output_events: OutputEventList::new(),
             out_midi: RtMidiEvents::new(),
             out_translator: Translator::new(),
+            out_midi_lost: 0,
             out_param_changes: ParameterChanges::new(),
             out_param_points_dropped: 0,
             out_note_expressions: RtNoteExpressions::new(),

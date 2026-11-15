@@ -21,7 +21,7 @@ use tutti_plugin_types::{MidiEventVec, WireMidi, group_of_port};
 use tutti_ump::{Message, Midi1Parser, MidiGroup, Ump};
 
 use crate::callback::with_state_mut;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::property::{Element, MidiOutputCallbackInfo, MidiOutputCallbackProperty, Scope};
 use crate::status::{CANNOT_DO_IN_CURRENT_CONTEXT, NO_ERR};
 use crate::unit::Unit;
@@ -179,22 +179,20 @@ impl Decoder {
 
 /// A host's registration of a MIDI-output callback on one AU.
 ///
-/// Holding this is what keeps the callback installed. Dropping it withdraws the
-/// callback from the AU **before** the state the AU points at is freed — see
-/// [`Drop for AuMidiOutput`](AuMidiOutput::drop) for why that order is the whole
-/// point of the type existing rather than `install` returning `()`.
-#[must_use = "dropping it uninstalls the output"]
+/// Holding this is what keeps the callback installed. A unit has at most one
+/// registration at a time ([`install`] refuses a second). Dropping it writes the
+/// null callback, so the AU stops calling, and **leaks** the state the AU's
+/// `userData` pointed at: a render may be running on another thread, and nothing
+/// in a `Drop` can know it is not. Freeing is [`withdraw`](Self::withdraw), which
+/// says what it needs.
+#[must_use = "dropping it uninstalls the output and leaks its state; `withdraw` frees it"]
 pub struct AuMidiOutput {
     unit: Unit,
-    /// The heap-pinned state, owned through the raw pointer `Box::into_raw` made
-    /// of it: the AU retains a `userData` that *is* this pointer, so no `Box`
-    /// (whose moves assert uniqueness) or reference is ever formed from it
-    /// while the AU may call. It is freed by `Box::from_raw` only after the
-    /// property write that withdraws the callback has succeeded, or before the
-    /// AU ever held it.
-    ///
-    /// `Option` so [`Self::remove`] can take it out *after* the property has
-    /// been cleared, giving `Drop` nothing left to free.
+    /// The state, owned through the raw pointer `Box::into_raw` made of it: the
+    /// AU retains a `userData` that *is* this pointer, so no `Box` (whose moves
+    /// assert uniqueness) or reference is ever formed from it while the AU may
+    /// call. It is freed by `Box::from_raw` only in [`withdraw`](Self::withdraw),
+    /// or before the AU ever held it; never by `Drop`.
     state: Option<std::ptr::NonNull<MidiOutState>>,
     /// [`MidiOutState::unrouted`], shared so the handle reads it without
     /// touching the state the render thread holds.
@@ -292,15 +290,31 @@ pub fn midi_output_info(unit: &Unit) -> Option<MidiOutputInfo> {
 
 /// Installs `sink` as this AU's MIDI-output destination.
 ///
-/// # Deliberately not gated on [`midi_output_info`]
+/// One registration per unit: `kAudioUnitProperty_MIDIOutputCallback` is write
+/// only (`AudioUnitProperties.h`), so a callback already installed cannot be read
+/// back, and the unit carries a claim instead that its registration holds until
+/// it is withdrawn or dropped. A second install on a unit that holds one is
+/// refused, which keeps a dropped handle from nulling another's callback.
+///
+/// Not gated on [`midi_output_info`]: whether the unit publishes streams is the
+/// caller's question, and 45 units accept the property while publishing none.
 ///
 /// # Errors
 ///
+/// [`Error::Invalid`] when the unit already has a registration; the AU's own
+/// status when it refuses the property (the claim is then released).
+///
 /// The registration holds a share of the unit, so the unit outlives it.
 pub fn install(unit: &Unit, sink: MidiOutSink) -> Result<AuMidiOutput> {
+    if !unit.claim_midi_output() {
+        return Err(Error::Invalid(
+            "the unit already has a MIDI-output registration".into(),
+        ));
+    }
     // Boxed once, here, on the control thread — the only allocation in the whole
-    // path. `MidiOutState` is heap-pinned so the `userData` the AU retains stays
-    // valid across moves of the returned handle.
+    // path. The state stays at its address until the registration is withdrawn
+    // (and is never freed by a drop), so the `userData` the AU retains stays
+    // valid however the returned handle is moved.
     // One reader for each stream the AU publishes (one when it publishes
     // none, which every AU that accepts the callback does not), at most one
     // for each of the sixteen Groups.
@@ -339,8 +353,8 @@ pub fn install(unit: &Unit, sink: MidiOutSink) -> Result<AuMidiOutput> {
         unit.set::<MidiOutputCallbackProperty>(Scope::GLOBAL, Element::ZERO, &callback)
     {
         // The AU refused the property, so it never held the pointer: the state
-        // is the host's to free, not one to leak against a withdrawal that
-        // cannot be needed.
+        // is the host's to free, and the unit's claim is released.
+        handle.unit.release_midi_output();
         if let Some(state) = handle.state.take() {
             // SAFETY: made by `Box::into_raw` above and never shared with the AU.
             drop(unsafe { Box::from_raw(state.as_ptr()) });
@@ -351,47 +365,45 @@ pub fn install(unit: &Unit, sink: MidiOutSink) -> Result<AuMidiOutput> {
 }
 
 impl AuMidiOutput {
-    /// Withdraw the callback, returning any error the AU reported.
-    ///
-    /// Equivalent to dropping the handle, except that the AU's status reaches the
-    /// caller. Use this when a failed withdrawal is something the host wants to
-    /// know about; `Drop` cannot report one.
+    /// Withdraws the callback and frees the state the AU's `userData` pointed at,
+    /// returning any error the AU reported.
     ///
     /// # Errors
-    /// `Error::Os` if the AU refuses the clearing write; the boxed state is then
-    /// leaked, since the unit may still call into it.
-    pub fn remove(mut self) -> Result<()> {
-        let result = self.clear();
-        // `state` is now `None`; `Drop` will find nothing to do.
+    /// `Error::Os` if the AU refuses the clearing write; the state is then not
+    /// freed (the unit may still call into it), and the unit's claim stays.
+    ///
+    /// # Safety
+    /// The unit is uninitialized, or its renderer is the caller's and not
+    /// running, so no render is in flight: the AU calls the callback only from
+    /// inside a render, and a render that began before the withdrawing write may
+    /// still be reading the state when it returns.
+    pub unsafe fn withdraw(mut self) -> Result<()> {
+        let result = self.unhook();
+        if result.is_ok()
+            && let Some(state) = self.state.take()
+        {
+            // SAFETY: made by `Box::into_raw` in `install`; the withdrawing write
+            // succeeded and, by the caller's contract, no render is in flight, so
+            // the AU holds no pointer it will use and nothing else frees it.
+            drop(unsafe { Box::from_raw(state.as_ptr()) });
+        }
         result
     }
 
-    /// The withdrawal, in one place so both [`Self::remove`] and `Drop` obey the
-    /// same rule.
+    /// Writes the callback away, so the AU calls no more, and releases the unit's
+    /// claim on success. The state is not touched.
     ///
     /// # How the withdrawal is spelled, and why a null proc is NOT it
     ///
-    /// # ORDERING INVARIANT
-    ///
-    /// The property write **MUST** complete before the boxed state is freed. This
-    /// is the MIDI-output twin of the invariant
-    /// `uninitialize` documents (there:
-    /// `AudioUnitUninitialize` before the boxed `RenderScratch` is dropped) and of
-    /// the one `Drop for HostCallbacks` documents for `HostCallbackInfo`. All three are
-    /// the same hazard: while the property holds the live `userData` the AU may
-    /// dereference it **on its render thread**, and freeing the box first leaves a
-    /// use-after-free a host would experience as a random crash inside
-    /// `AudioUnitRender`.
-    ///
-    /// # Safety
-    /// `self.unit` must still be a live `AudioUnit`.
-    fn clear(&mut self) -> Result<()> {
-        // Nothing installed (already removed): nothing to withdraw.
+    /// A REAL proc with a null `userData`: a null proc is refused with -4 on
+    /// every unit (measured on macOS 15.6), so the callback written is
+    /// `au_midi_output_callback` with nothing to point at, which answers
+    /// `NOT_INSTALLED`.
+    fn unhook(&mut self) -> Result<()> {
+        // Nothing installed (already withdrawn): nothing to write.
         if self.state.is_none() {
             return Ok(());
         }
-        // A REAL proc with a null `userData` — see this method's docs for the
-        // measured reason a null proc is refused with -4 on every unit.
         let withdrawn = AuMidiOutputCallbackStruct {
             midi_output_callback: Some(au_midi_output_callback),
             user_data: std::ptr::null_mut(),
@@ -399,44 +411,32 @@ impl AuMidiOutput {
         let result =
             self.unit
                 .set::<MidiOutputCallbackProperty>(Scope::GLOBAL, Element::ZERO, &withdrawn);
-        let state = self.state.take();
         if result.is_ok() {
-            if let Some(state) = state {
-                // SAFETY: made by `Box::into_raw` in `install`; the property
-                // write that withdrew the callback succeeded, so the AU holds
-                // no pointer to it and nothing else frees it.
-                drop(unsafe { Box::from_raw(state.as_ptr()) });
-            }
-        } else {
-            // The unit may still hold the pointer, and other `Unit` clones can
-            // keep it alive and calling: leak the state rather than free memory
-            // the callback could read.
-            // (The pointer is simply not freed.)
-            let _ = state;
+            self.unit.release_midi_output();
         }
         result
     }
 }
 
-// SAFETY: the pointer owns a `MidiOutState` (a `Send` sink, decoders and
-// atomics) that only the AU's render thread and this handle's withdrawal reach,
-// never at once (see `au_midi_output_callback`); moving the handle to another
-// thread moves that ownership.
+// SAFETY: the pointer owns a `MidiOutState` (a `MidiOutSink`, which is `Send`,
+// decoders and atomics, all `Send`) that only the AU's render thread and
+// `withdraw` reach, never at once (see `au_midi_output_callback`); moving the
+// handle to another thread moves that ownership.
 unsafe impl Send for AuMidiOutput {}
 
 impl Drop for AuMidiOutput {
-    /// Withdraw the callback before freeing the state the AU points at.
+    /// Writes the null callback, so the AU calls no more, and leaks the state.
     ///
-    /// Unlike `Drop for HostCallbacks`, which can lean on Rust's field drop order
-    /// happening to be correct, this type has no such luck: the AU is not owned
-    /// here, so nothing else will stop it calling back. The explicit clear is the
-    /// only thing standing between a dropped registration and a use-after-free on
-    /// the render thread.
+    /// A `Drop` cannot know a render is not running on another thread (this type
+    /// is `Send` and public), and the callback reads the state during one: freeing
+    /// here could be a use-after-free inside `AudioUnitRender`. The state is a
+    /// few kilobytes per registration; a host that wants it back calls
+    /// [`withdraw`](Self::withdraw) under its contract.
     ///
-    /// The status is ignored because a `Drop` has nowhere to report one; a host
-    /// that needs it calls [`Self::remove`] instead.
+    /// The status is ignored because a `Drop` has nowhere to report one.
     fn drop(&mut self) {
-        let _ = self.clear();
+        let _ = self.unhook();
+        self.state = None;
     }
 }
 
@@ -455,11 +455,13 @@ impl Drop for AuMidiOutput {
 /// a live `MidiOutState` box, which the withdrawing property write outlives —
 /// that write is what makes the pointer unreachable before the box is freed.
 ///
-/// The body forms a `&mut MidiOutState` from it, so no other reference to that
-/// box may exist for the duration of the call. That holds because the AU invokes
-/// this only from inside its own render, one call at a time, and the host side
-/// touches the box only before installing and after the withdrawing write
-/// returns.
+/// The body forms a `&mut MidiOutState` from it, so no other reference to the
+/// state may exist for the duration of the call. That holds because the AU
+/// invokes this only from inside its own render, one call at a time (an
+/// assumption about AudioToolbox: Apple's header says the callback is called
+/// from the render, and documents no concurrent calls), and the host side
+/// touches the state only before installing and in [`AuMidiOutput::withdraw`],
+/// which frees it only after the withdrawing write and with no render in flight.
 ///
 /// `pktlist` must be null or a well-formed `MIDIPacketList` valid for the
 /// duration of the call.
@@ -475,6 +477,9 @@ unsafe extern "C" fn au_midi_output_callback(
     // inside its own render (a render-time callback, never from another thread
     // or between renders), one call at a time, and the host touches the box only
     // before installing and after withdrawing.
+    // The one `unsafe` block also covers the `dispatch` call in the closure:
+    // `state` is the only reference (the callback's invariant above) and
+    // `pktlist` is non-null (checked) and the AU's, valid for the call.
     unsafe {
         with_state_mut::<MidiOutState, _>(
             user_data,
@@ -484,9 +489,7 @@ unsafe extern "C" fn au_midi_output_callback(
                 if pktlist.is_null() {
                     return NOT_INSTALLED;
                 }
-                // SAFETY: `state` is the only reference (the callback's invariant
-                // above) and `pktlist` is non-null and the AU's, valid for the call.
-                unsafe { dispatch(state, midi_out_num, pktlist) }
+                dispatch(state, midi_out_num, pktlist)
             },
         )
     }
@@ -541,6 +544,10 @@ unsafe fn dispatch(
 /// them (see below).
 ///
 /// # Why the walk is by byte offset rather than by struct read
+///
+/// The binding's `MIDIPacket` declares its `data[256]` inline, so a by-value read
+/// would run past the end of a real list, whose packets are as short as their
+/// payload. Each field is read at its offset instead.
 ///
 /// # Safety
 /// The OS gives no byte size of the list, so the bound this walk keeps is the

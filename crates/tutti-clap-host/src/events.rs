@@ -621,6 +621,11 @@ impl ClapEvent {
         }
     }
 
+    /// Whether this is a note expression whose value is not a number.
+    fn is_unreadable_expression(&self) -> bool {
+        matches!(self, ClapEvent::NoteExpression(e) if !e.value.is_finite())
+    }
+
     /// The bytes and frame offset of a plugin-emitted SysEx message, which
     /// is several UMP packets rather than the one event [`Self::to_midi`]
     /// returns. `None` for any other event.
@@ -1919,8 +1924,17 @@ impl OutputEventList {
     /// parameter run (select, Data Entry MSB) with no LSB waits for one: the
     /// translator never flushes a live output, which has no end (M2-104
     /// Appendix D.3.3).
-    pub fn fill_midi_events(&mut self, translator: &mut Translator, out: &mut RtMidiEvents) {
+    ///
+    /// Returns how many events were lost: the ones `out` had no room for, the
+    /// SysEx that did not fit, the ones from a port no Group has and the note
+    /// expressions whose value is not a number.
+    pub fn fill_midi_events(
+        &mut self,
+        translator: &mut Translator,
+        out: &mut RtMidiEvents,
+    ) -> usize {
         out.clear();
+        let mut lost = 0;
         for e in &self.events {
             if let Some((bytes, time, port)) = e.sysex_bytes() {
                 // Whole or not at all: a message that does not fit is dropped
@@ -1928,20 +1942,25 @@ impl OutputEventList {
                 // still get the room that is left. A port past the Groups
                 // names none, and the message is dropped.
                 match group_of_port(port) {
-                    Some(group) => {
-                        push_sysex(out, group, time, bytes);
+                    Some(group) => lost += usize::from(!push_sysex(out, group, time, bytes)),
+                    None => {
+                        self.ports_dropped += 1;
+                        lost += 1;
                     }
-                    None => self.ports_dropped += 1,
                 }
             } else if let Some(midi) = e.to_midi(translator) {
                 // Every event goes through the translator whether or not `out`
                 // has room, so its runs see the whole output; what does not fit
                 // is dropped and latches `out`'s overflow.
-                let _ = out.push(midi);
+                lost += usize::from(!out.push(midi));
             } else if e.names_no_group() {
                 self.ports_dropped += 1;
+                lost += 1;
+            } else if e.is_unreadable_expression() {
+                lost += 1;
             }
         }
+        lost
     }
 
     /// Drains the parameter-value events, grouped by parameter ID, into a
@@ -3936,7 +3955,8 @@ mod tests {
             .push(ClapEvent::note_on(6, 2, 62, 1.0).addressed(40, -1));
 
         let mut pool = RtMidiEvents::new();
-        list.fill_midi_events(&mut Translator::new(), &mut pool);
+        let lost = list.fill_midi_events(&mut Translator::new(), &mut pool);
+        assert_eq!(lost, 2, "the two events from ports with no Group");
         let groups: Vec<u8> = pool
             .iter()
             .map(|midi| match message(midi) {
@@ -3994,8 +4014,9 @@ mod tests {
         for event in [cc(101, 0), cc(100, 0), cc(6, 12), cc(38, 0)] {
             first.events.push(event);
         }
-        first.fill_midi_events(&mut translator, &mut pool);
+        let lost = first.fill_midi_events(&mut translator, &mut pool);
         assert!(pool.is_overflowed(), "the controller had no room");
+        assert_eq!(lost, 1, "and it is counted");
         assert_eq!(pool.len(), RT_MIDI_CAPACITY);
 
         let mut second = OutputEventList::new();
@@ -4025,8 +4046,9 @@ mod tests {
             list.events.push(e);
         }
         let mut pool = RtMidiEvents::new();
-        list.fill_midi_events(&mut Translator::new(), &mut pool);
+        let lost = list.fill_midi_events(&mut Translator::new(), &mut pool);
         assert!(pool.is_empty());
+        assert_eq!(lost, 3, "each is counted as lost MIDI");
     }
 
     /// Poly pressure (`0xAn`) is a per-note expression to a CLAP-dialect port

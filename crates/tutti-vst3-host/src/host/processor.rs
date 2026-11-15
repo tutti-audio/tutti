@@ -95,6 +95,10 @@ pub(super) struct OutputStaging {
     /// Group of its state). Built with the activation, so a deactivation drops
     /// it; [`Vst3Processor::stop`] forgets the runs without sending them.
     pub(super) emitted_stream: OutputStream,
+    /// What `emitted_stream` had lost as of the last block, and what it lost in
+    /// the block in hand (the change): the events the host reports as lost MIDI.
+    pub(super) lost_told: u64,
+    pub(super) emitted_lost: usize,
     pub(super) emitted_param_changes: ParameterChanges,
 }
 
@@ -106,6 +110,7 @@ impl OutputStaging {
     /// param queues go back to the set's spares with their point storage.
     pub(super) fn clear_emitted(&mut self) {
         self.emitted_midi.clear();
+        self.emitted_lost = 0;
         self.emitted_param_changes.clear();
     }
 
@@ -113,6 +118,7 @@ impl OutputStaging {
     pub(super) fn emitted_ref(&self) -> ProcessOutputRef<'_> {
         ProcessOutputRef {
             midi_events: &self.emitted_midi,
+            midi_lost: self.emitted_lost,
             parameter_changes: &self.emitted_param_changes,
         }
     }
@@ -126,6 +132,10 @@ impl OutputStaging {
             &mut self.emitted_stream,
             &mut self.emitted_midi,
         );
+        let lost = self.emitted_stream.lost_total();
+        self.emitted_lost =
+            usize::try_from(lost.saturating_sub(self.lost_told)).unwrap_or(usize::MAX);
+        self.lost_told = lost;
         // A refusal is counted in `lists_busy` and leaves the pool empty.
         if !self
             .param_changes
@@ -926,6 +936,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
 /// carries it inbound only), so `out`'s stays empty.
 fn copy_process_output(output: ProcessOutputRef<'_>, out: &mut tutti_plugin_types::ProcessOutput) {
     out.emit_midi(output.midi_events.iter().copied());
+    out.count_midi_dropped(output.midi_lost);
     for queue in &output.parameter_changes.queues {
         for point in &queue.points {
             // `emit_param_point`, not `ParameterChanges::add_change`: the former

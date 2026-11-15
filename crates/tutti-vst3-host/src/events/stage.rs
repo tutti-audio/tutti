@@ -214,7 +214,9 @@ pub fn drain_midi(list: &EventList, stream: &mut OutputStream, out: &mut RtMidiE
                 // Every event goes through the stream whether or not `out` has
                 // room, so its translator and note table see the whole output;
                 // what does not fit is dropped and latches `out`'s overflow.
-                let _ = out.push(midi);
+                if !out.push(midi) {
+                    stream.count_full_dropped();
+                }
             }
         }
         refused
