@@ -9,8 +9,9 @@
 //! - Linux and Android: `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME)`, the
 //!   same clock `monotonic_ns` reads, so the kernel wakes the thread at the
 //!   deadline itself.
-//! - Every other target, and Linux if the kernel refuses the call: the time left, slept through `std::thread::sleep` and
-//!   re-read until the deadline has passed. Windows' std sleeps on a
+//! - Every other target, and Linux if the kernel refuses the call: the time
+//!   left, slept through `std::thread::sleep` and re-read until the deadline
+//!   has passed. Windows' std sleeps on a
 //!   high-resolution waitable timer where the OS has one; macOS sleeps on
 //!   `nanosleep`.
 //!

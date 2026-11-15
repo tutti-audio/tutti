@@ -30,3 +30,16 @@ fn a_sleep_lasts_at_least_the_distance_to_its_deadline() {
     sleep_until_ns(monotonic_ns() + 30_000_000);
     assert!(began.elapsed().as_millis() >= 30);
 }
+
+/// The relative path, which the absolute one falls back to and every target
+/// without an absolute sleep takes, never wakes early and returns at once for
+/// a deadline in the past.
+#[test]
+fn the_relative_sleep_never_returns_before_its_deadline() {
+    let deadline = monotonic_ns() + 15_000_000;
+    super::relative::sleep_until_ns(deadline);
+    assert!(monotonic_ns() >= deadline);
+    let began = Instant::now();
+    super::relative::sleep_until_ns(i64::MIN);
+    assert!(began.elapsed().as_millis() < 1_000);
+}

@@ -148,9 +148,11 @@ fn an_overrun_keeps_a_latching_message_and_a_panic_replaces_a_lesser_one() {
     let faults = StreamFaults::new();
     faults.record(BackendErrorKind::Other, &"xrun");
     faults.record_overrun("late");
+    let kept = faults.last().expect("a fault");
+    assert_eq!(kept.kind, StreamFaultKind::Backend);
     assert_eq!(
-        faults.last().map(|f| f.kind),
-        Some(StreamFaultKind::Backend)
+        kept.message, "xrun",
+        "the overrun left the owned text alone"
     );
     faults.record_panic("panicked");
     assert_eq!(

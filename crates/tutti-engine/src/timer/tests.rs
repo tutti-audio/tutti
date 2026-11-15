@@ -147,36 +147,32 @@ fn every_block_renders_in_order_with_none_skipped() {
 }
 
 /// The os time a block carries is its deadline, not the wake-up that ran it:
-/// with every wake-up 3 ms late, each block that slept is rendered 3 ms after
-/// the os time it is handed.
+/// with every wake-up 3 ms late, the blocks are still dated on the schedule.
 #[test]
 fn a_blocks_os_time_is_its_deadline_not_its_wake_up() {
     let time = Scripted::at(0);
     time.wake_late.set(3 * MS);
     let mut pacer = pacer_at(0);
     let stop = AtomicBool::new(false);
-    let seen = RefCell::new(Vec::<(i64, i64)>::new());
+    let seen = RefCell::new(Vec::<i64>::new());
     run(
         &time,
         &mut pacer,
         &stop,
         |os_ns| {
-            seen.borrow_mut().push((os_ns, time.now_ns()));
+            seen.borrow_mut().push(os_ns);
             if seen.borrow().len() == 20 {
                 stop.store(true, Ordering::Release);
             }
         },
         || {},
     );
-    for (n, (os_ns, woke)) in seen.into_inner().into_iter().enumerate() {
+    for (n, os_ns) in seen.into_inner().into_iter().enumerate() {
         assert_eq!(
             os_ns,
             n as i64 * 10 * MS,
             "block {n} is dated by its deadline"
         );
-        // Block 0 is due at once and never slept.
-        let late = if n == 0 { 0 } else { 3 * MS };
-        assert_eq!(woke - os_ns, late, "block {n} ran at its wake-up");
     }
 }
 

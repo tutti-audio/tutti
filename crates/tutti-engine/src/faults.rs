@@ -78,6 +78,14 @@ pub enum BackendErrorKind {
     Other,
 }
 
+/// The messages a [`StreamFaults`] holds: the latest fault, and a message the
+/// render thread replaced, which the control side frees.
+#[derive(Debug, Default)]
+struct Slots {
+    last: Option<StreamFault>,
+    retired: Option<StreamFault>,
+}
+
 /// The accumulated faults of one output stream, shared between the backend's
 /// error callback and the host.
 ///
@@ -91,7 +99,7 @@ pub struct StreamFaults {
     /// Raised once the device is gone; a capture source reads it through
     /// `drain`, before its ring.
     disconnected: FaultLatch,
-    last: Mutex<Option<StreamFault>>,
+    slots: Mutex<Slots>,
     /// Zero point of `run_start`.
     pub(crate) epoch: Instant,
     /// Nanoseconds after `epoch`, plus one, at which the current run of
@@ -112,7 +120,7 @@ impl StreamFaults {
         Self {
             count: AtomicU64::new(0),
             disconnected: FaultLatch::new(),
-            last: Mutex::new(None),
+            slots: Mutex::new(Slots::default()),
             epoch: Instant::now(),
             run_start: AtomicU64::new(0),
         }
@@ -125,8 +133,8 @@ impl StreamFaults {
         self.run_start.store(0, Ordering::Relaxed);
     }
 
-    fn last_guard(&self) -> MutexGuard<'_, Option<StreamFault>> {
-        self.last.lock().unwrap_or_else(|p| p.into_inner())
+    fn last_guard(&self) -> MutexGuard<'_, Slots> {
+        self.slots.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     /// Returns how many faults this stream has reported since the last start.
@@ -163,14 +171,19 @@ impl StreamFaults {
 
     /// Returns a copy of the most recent fault, if any.
     pub fn last(&self) -> Option<StreamFault> {
-        self.last_guard().clone()
+        let mut slots = self.last_guard();
+        // A message the render thread replaced is freed here, on the control side.
+        slots.retired = None;
+        slots.last.clone()
     }
 
     /// Takes the most recent fault, leaving `None`, for a host that shows each
     /// fault once. [`count`](Self::count) and
     /// [`is_disconnected`](Self::is_disconnected) are unaffected.
     pub fn take_last(&self) -> Option<StreamFault> {
-        self.last_guard().take()
+        let mut slots = self.last_guard();
+        slots.retired = None;
+        slots.last.take()
     }
 
     /// Records a fault from the backend's error callback: `kind` is the
@@ -230,6 +243,10 @@ impl StreamFaults {
     /// the same latch a disconnect does, so
     /// [`OutputStream::is_running`](crate::OutputStream::is_running) reads
     /// `false` and a capture source answers `Failed`.
+    ///
+    /// The panic's message replaces the one in [`last`](Self::last); the
+    /// message it replaces is kept aside and freed by the next control-side
+    /// read ([`last`](Self::last), [`take_last`](Self::take_last)), never here.
     pub fn record_panic(&self, what: &'static str) {
         self.publish_rt(StreamFaultKind::CallbackPanicked, what);
     }
@@ -238,6 +255,10 @@ impl StreamFaults {
     /// and re-anchored ([`StreamFaultKind::Overrun`]): `what` says so. The
     /// stream continues, so this raises no disconnect. Allocates nothing and
     /// never waits.
+    ///
+    /// An overrun counts, but it does not replace the message of a latching
+    /// fault or of an owned one: [`last`](Self::last) may keep an older
+    /// message, and an older kind, than the overrun.
     pub fn record_overrun(&self, what: &'static str) {
         self.publish_rt(StreamFaultKind::Overrun, what);
     }
@@ -249,31 +270,38 @@ impl StreamFaults {
     ///   ([`Disconnected`](StreamFaultKind::Disconnected),
     ///   [`CallbackPanicked`](StreamFaultKind::CallbackPanicked)), nor an owned
     ///   message it could not free; it only counts.
-    /// - A panic replaces any message; an owned one it replaces is leaked,
-    ///   once per stream, as the panic payload is.
+    /// - A panic replaces any message. An owned one moves to `retired`, which
+    ///   the control side frees; if that is occupied (a second panic, which the
+    ///   latch prevents) the old message is leaked.
     fn publish_rt(&self, kind: StreamFaultKind, what: &'static str) {
-        let place = |last: &mut Option<StreamFault>| {
+        let place = |slots: &mut Slots| {
             let keep = kind == StreamFaultKind::Overrun
-                && last.as_ref().is_some_and(|old| {
+                && slots.last.as_ref().is_some_and(|old| {
                     matches!(
                         old.kind,
                         StreamFaultKind::Disconnected | StreamFaultKind::CallbackPanicked
                     ) || matches!(old.message, Cow::Owned(_))
                 });
-            if !keep {
-                let fault = StreamFault {
-                    kind,
-                    message: Cow::Borrowed(what),
-                };
-                if let Some(old) = last.replace(fault)
-                    && matches!(old.message, Cow::Owned(_))
-                {
-                    std::mem::forget(old);
-                }
+            if keep {
+                return;
+            }
+            let fault = StreamFault {
+                kind,
+                message: Cow::Borrowed(what),
+            };
+            let Some(old) = slots.last.replace(fault) else {
+                return;
+            };
+            if !matches!(old.message, Cow::Owned(_)) {
+                // Borrowed: dropping frees nothing.
+            } else if slots.retired.is_none() {
+                slots.retired = Some(old);
+            } else {
+                std::mem::forget(old);
             }
         };
-        match self.last.try_lock() {
-            Ok(mut last) => place(&mut last),
+        match self.slots.try_lock() {
+            Ok(mut slots) => place(&mut slots),
             Err(std::sync::TryLockError::Poisoned(p)) => place(&mut p.into_inner()),
             Err(std::sync::TryLockError::WouldBlock) => {}
         }
@@ -282,9 +310,9 @@ impl StreamFaults {
 
     fn publish(&self, kind: StreamFaultKind, message: Cow<'static, str>) {
         let fault = StreamFault { kind, message };
-        match self.last.try_lock() {
-            Ok(mut last) => *last = Some(fault),
-            Err(std::sync::TryLockError::Poisoned(p)) => *p.into_inner() = Some(fault),
+        match self.slots.try_lock() {
+            Ok(mut slots) => slots.last = Some(fault),
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner().last = Some(fault),
             Err(std::sync::TryLockError::WouldBlock) => {}
         }
         self.raise_and_count(kind);
@@ -303,7 +331,7 @@ impl StreamFaults {
 
     /// Forgets everything. Called when a stream starts.
     pub(crate) fn clear(&self) {
-        *self.last_guard() = None;
+        *self.last_guard() = Slots::default();
         self.disconnected.clear();
         self.count.store(0, Ordering::Release);
         self.run_start.store(0, Ordering::Relaxed);

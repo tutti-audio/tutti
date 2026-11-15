@@ -74,7 +74,8 @@
 //!   control register with `asm!`, which has no safe spelling; its `# Soundness`
 //!   docs say what it does and does not guarantee.
 //! - `monotonic_ns` (`clock.rs`): the OS clock calls.
-//! - `sleep_until_ns` (`sleep/absolute.rs`): the `clock_nanosleep` call on Linux and Android.
+//! - `sleep_until_ns` (`sleep/absolute.rs`): the `clock_nanosleep` call on Linux and
+//!   Android.
 //! - `MainThreadMarker::new` (`main_thread/`): the OS's "is this the main thread" query,
 //!   one module per OS (on Windows, a `.CRT$XCU` initializer entry), and `MainThreadMarker::new_unchecked`, whose `# Safety` names the
 //!   caller's duty (a test harness's constructor).
