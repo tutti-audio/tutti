@@ -67,8 +67,8 @@
 use crate::protocol::{BusChannels, ChannelLayout, SampleFormat, SlabLayout};
 use bytemuck::Pod;
 use std::sync::Arc;
-use tutti_plugin_types::Sample;
 use tutti_plugin_types::{BridgeError, BridgeResult};
+use tutti_plugin_types::{MAX_BLOCK_CHANNELS, Sample};
 
 use tutti_plugin_ipc_ffi::{
     Direction, MappingWriter, RING_SLOTS, SLAB_HEADER_BYTES, SharedMapping, SlabError, slot_for,
@@ -111,15 +111,14 @@ impl AudioSlab {
     ///
     /// # Errors
     ///
-    /// Returns an error if `layout` names no bus in a direction or a ring depth
-    /// other than [`RING_SLOTS`], or if the backing file exists or cannot be
-    /// created, sized or mapped.
+    /// Returns an error if `layout` is refused ([`SlabLayoutError`]), or if the
+    /// backing file exists or cannot be created, sized or mapped.
     pub fn create(name: impl Into<String>, layout: SlabLayout) -> BridgeResult<SlabWriter> {
-        check_layout(&layout)?;
+        let bytes = check_layout(&layout)?;
         let name = name.into();
         // Stamped before it returns: the peer is told the slab's name only
         // after this, and the header's magic is released last.
-        let writer = MappingWriter::create(&name, byte_size(&layout)?).map_err(slab_err)?;
+        let writer = MappingWriter::create(&name, bytes).map_err(slab_err)?;
         let slab = Self {
             mapping: Arc::clone(writer.mapping()),
             name,
@@ -144,11 +143,11 @@ impl AudioSlab {
     /// too short, is not a tutti slab, or was written with a different header
     /// version.
     pub fn open(name: impl Into<String>, layout: SlabLayout) -> BridgeResult<SlabWriter> {
-        check_layout(&layout)?;
+        let bytes = check_layout(&layout)?;
         let name = name.into();
         // Checks the length before the header, and the header before this
         // side trusts a byte.
-        let writer = MappingWriter::open(&name, byte_size(&layout)?).map_err(slab_err)?;
+        let writer = MappingWriter::open(&name, bytes).map_err(slab_err)?;
         let slab = Self {
             mapping: Arc::clone(writer.mapping()),
             name,
@@ -472,36 +471,89 @@ impl SlabLayout {
     }
 }
 
-/// Total mapping size for `layout`, header included, or an error when it
-/// does not fit in `usize`. The layout comes over the wire on the server's
-/// side, so a peer can name any shape; every later offset is below this
-/// figure, which is why only it is checked.
-fn byte_size(layout: &SlabLayout) -> BridgeResult<usize> {
-    layout
-        .checked_byte_size_with_header(SLAB_HEADER_BYTES)
-        .ok_or_else(|| oob("slab layout's size overflows usize"))
+/// Why a [`SlabLayout`] is refused: it is a shape the peer chose, and a slab
+/// is mapped and addressed from it.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SlabLayoutError {
+    /// A direction names no bus: an empty list would read as "share one region
+    /// in place", which is the aliasing bypass.
+    #[error(
+        "slab layout must name at least one bus per direction; \
+         an empty list would read as 'share one region in place', which is the bypass"
+    )]
+    NoBus,
+    /// The ring depth is not this build's.
+    #[error("slab layout asks for {asked} ring slots, this build addresses {RING_SLOTS}")]
+    Slots {
+        /// The depth the layout names.
+        asked: u32,
+    },
+    /// A direction names more buses than a block carries channels.
+    #[error("slab layout names {buses} {direction} buses, at most {MAX_BLOCK_CHANNELS} are served")]
+    TooManyBuses {
+        /// `"input"` or `"output"`.
+        direction: &'static str,
+        /// The bus count the layout names.
+        buses: usize,
+    },
+    /// A direction is wider than a block's channel tables.
+    #[error(
+        "slab layout names {channels} {direction} channels, at most {MAX_BLOCK_CHANNELS} are served"
+    )]
+    TooManyChannels {
+        /// `"input"` or `"output"`.
+        direction: &'static str,
+        /// The channel count the layout names.
+        channels: u64,
+    },
+    /// The mapping's size does not fit in `usize`.
+    #[error("slab layout's size overflows usize")]
+    SizeOverflow,
 }
 
-/// Reject a layout this build cannot address before it becomes a mapping.
+impl From<SlabLayoutError> for BridgeError {
+    fn from(e: SlabLayoutError) -> Self {
+        BridgeError::SharedMemoryError(e.to_string())
+    }
+}
+
+/// Reject a layout this build cannot address or serve, before it becomes a
+/// mapping, and return the mapping's size, header included.
 ///
-/// Both conditions would otherwise be silently representable, and both produce
-/// wrong audio rather than an error: an empty bus list reads as "single flat
-/// range shared in place" (the aliasing bypass), and a mismatched slot count
-/// indexes the wrong ring slot.
-fn check_layout(layout: &SlabLayout) -> BridgeResult<()> {
+/// The layout comes over the wire on the server's side, so a peer can name any
+/// shape: the bus and channel counts are capped at [`MAX_BLOCK_CHANNELS`] (the
+/// width the render path's tables hold), and the size is computed with checked
+/// arithmetic, so every later offset is below a figure that fits in `usize`.
+/// An empty bus list and a mismatched slot count would otherwise be silently
+/// representable and produce wrong audio rather than an error.
+fn check_layout(layout: &SlabLayout) -> Result<usize, SlabLayoutError> {
     if layout.inputs.is_empty() || layout.outputs.is_empty() {
-        return Err(oob(
-            "slab layout must name at least one bus per direction; \
-             an empty list would read as 'share one region in place', which is the bypass",
-        ));
+        return Err(SlabLayoutError::NoBus);
     }
     if layout.slots as usize != RING_SLOTS {
-        return Err(oob_owned(format!(
-            "slab layout asks for {} ring slots, this build addresses {RING_SLOTS}",
-            layout.slots
-        )));
+        return Err(SlabLayoutError::Slots {
+            asked: layout.slots,
+        });
     }
-    Ok(())
+    for (direction, buses) in [("input", &layout.inputs), ("output", &layout.outputs)] {
+        if buses.len() > MAX_BLOCK_CHANNELS {
+            return Err(SlabLayoutError::TooManyBuses {
+                direction,
+                buses: buses.len(),
+            });
+        }
+        // At most MAX_BLOCK_CHANNELS buses, so the sum cannot overflow.
+        let channels: u64 = buses.iter().map(|b| u64::from(b.count())).sum();
+        if channels > MAX_BLOCK_CHANNELS as u64 {
+            return Err(SlabLayoutError::TooManyChannels {
+                direction,
+                channels,
+            });
+        }
+    }
+    layout
+        .checked_byte_size_with_header(SLAB_HEADER_BYTES)
+        .ok_or(SlabLayoutError::SizeOverflow)
 }
 
 impl Drop for AudioSlab {
@@ -516,10 +568,6 @@ impl Drop for AudioSlab {
 
 fn oob(msg: &'static str) -> BridgeError {
     BridgeError::SharedMemoryError(msg.into())
-}
-
-fn oob_owned(msg: String) -> BridgeError {
-    BridgeError::SharedMemoryError(msg)
 }
 
 fn slab_err(e: SlabError) -> BridgeError {
@@ -568,6 +616,55 @@ mod tests {
         let host = AudioSlab::create(n.clone(), l.clone()).unwrap();
         let server = AudioSlab::open(n, l).unwrap();
         (host, server)
+    }
+
+    /// **A peer cannot name a layout the render path cannot serve.** A
+    /// direction past `MAX_BLOCK_CHANNELS` channels or buses, and a size that
+    /// overflows `usize`, are refused by name at `create` and at `open`; the
+    /// widest served layout is accepted.
+    #[test]
+    fn a_layout_past_the_served_width_or_size_is_refused_by_name() {
+        let wide = |count: usize| SlabLayout {
+            inputs: vec![ChannelLayout::clamped(count)],
+            ..layout(64, SampleFormat::Float32)
+        };
+        let many = |count: usize| SlabLayout {
+            outputs: vec![ChannelLayout::MONO; count],
+            ..layout(64, SampleFormat::Float32)
+        };
+        let huge = SlabLayout {
+            samples_per_channel: usize::MAX / 8,
+            ..layout(64, SampleFormat::Float32)
+        };
+        let max = MAX_BLOCK_CHANNELS;
+        assert!(check_layout(&wide(max)).is_ok(), "the widest layout serves");
+        assert!(check_layout(&many(max)).is_ok(), "the most buses serve");
+        let refusals = [
+            (
+                wide(max + 1),
+                SlabLayoutError::TooManyChannels {
+                    direction: "input",
+                    channels: max as u64 + 1,
+                },
+            ),
+            (
+                many(max + 1),
+                SlabLayoutError::TooManyBuses {
+                    direction: "output",
+                    buses: max + 1,
+                },
+            ),
+            (huge, SlabLayoutError::SizeOverflow),
+        ];
+        for (layout, refusal) in refusals {
+            assert_eq!(check_layout(&layout), Err(refusal.clone()));
+            let n = name("refused");
+            assert!(
+                AudioSlab::create(n.clone(), layout.clone()).is_err(),
+                "create: {refusal}"
+            );
+            assert!(AudioSlab::open(n, layout).is_err(), "open: {refusal}");
+        }
     }
 
     /// A caller's sample type must be the slab's width: a mismatch is an error
@@ -939,7 +1036,7 @@ mod tests {
         let mapping = &host.slab().mapping;
         assert_eq!(
             mapping.len(),
-            byte_size(&l).unwrap(),
+            check_layout(&l).unwrap(),
             "mapping is not the sized length"
         );
         let mut bytes = vec![0u8; mapping.len()];

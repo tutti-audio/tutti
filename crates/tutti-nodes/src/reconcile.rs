@@ -421,7 +421,8 @@ struct SourcePlan {
 ///     filter,
 ///     "svf",
 ///     SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(1_000.0), Q(0.7)),
-/// );
+/// )
+/// .controls;
 /// // A native target's range cell exists once its node is placed.
 /// editor.commit().expect("commits");
 ///
@@ -1025,7 +1026,7 @@ impl Modulation {
                     let cell = editor.param_range_cell(*at);
                     let node =
                         ControlLaneNode::for_unit(at.param, program.clone(), knob.clone(), cell);
-                    let controls = editor.insert(key, "control-lane", node);
+                    let controls = editor.insert(key, "control-lane", node).controls;
                     editor
                         .spec_mut()
                         .connect_param(*at, EventOut { node: key, port: 0 });
@@ -1041,7 +1042,7 @@ impl Modulation {
                         Some(knob.clone()),
                         Some(range.clone()),
                     );
-                    let controls = editor.insert(key, "control-lane", node);
+                    let controls = editor.insert(key, "control-lane", node).controls;
                     editor
                         .spec_mut()
                         .connect_edge_gain(*id, EventOut { node: key, port: 0 });
@@ -1057,7 +1058,7 @@ impl Modulation {
                         Some(knob.clone()),
                         Some(range.clone()),
                     );
-                    let controls = editor.insert(key, "control-lane", node);
+                    let controls = editor.insert(key, "control-lane", node).controls;
                     editor
                         .spec_mut()
                         .connect_param(*at, EventOut { node: key, port: 0 });
@@ -1066,7 +1067,7 @@ impl Modulation {
                 Bind::Foreign { to, id, knob, .. } => {
                     let node =
                         ControlLaneNode::for_foreign(*id, program.clone(), *knob, (min, max));
-                    let controls = editor.insert(key, "control-lane", node);
+                    let controls = editor.insert(key, "control-lane", node).controls;
                     editor
                         .spec_mut()
                         .connect_events(*to, EventEdge::Direct(EventOut { node: key, port: 0 }));

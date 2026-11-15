@@ -315,11 +315,14 @@ impl PendingFork {
         for (key, (forked, wake)) in built {
             let kind = &spec.topology.nodes[&key].kind;
             // Not forkable itself (module docs: a fork is not a fork source).
-            if let Some(wake) = wake {
-                editor.insert_prepared(key, kind, forked.node, wake);
+            // The fork's editor holds no wiring yet (it is copied in below),
+            // so a placement unwires nothing.
+            let unwired = if let Some(wake) = wake {
+                editor.insert_prepared(key, kind, forked.node, wake)
             } else {
-                editor.insert(key, kind, Unforkable(forked.node));
-            }
+                editor.insert(key, kind, Unforkable(forked.node)).unwired
+            };
+            debug_assert!(unwired.is_empty());
             if let Some(health) = forked.health {
                 editor.watch_fork(key, health);
             }

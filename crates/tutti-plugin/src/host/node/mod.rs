@@ -23,7 +23,7 @@
 //! use tutti_graph::NodeKey;
 //! use tutti_transport::TempoReader;
 //! fn insert(client: PluginClient, tempo: TempoReader, editor: &mut Editor) -> PluginControls {
-//!     editor.insert(NodeKey(1), "plugin", client.bind(tempo))
+//!     editor.insert(NodeKey(1), "plugin", client.bind(tempo)).controls
 //! }
 //! ```
 //!
@@ -183,7 +183,7 @@ impl std::fmt::Debug for Bound {
 /// use tutti_graph::NodeKey;
 /// use tutti_transport::TempoReader;
 /// fn insert(client: PluginClient, tempo: TempoReader, editor: &mut Editor) -> PluginControls {
-///     editor.insert(NodeKey(1), "plugin", client.bind(tempo))
+///     editor.insert(NodeKey(1), "plugin", client.bind(tempo)).controls
 /// }
 /// ```
 pub struct PluginClient<S = Unbound> {
@@ -435,7 +435,8 @@ impl PluginClient<Unbound> {
             params,
             ParameterChanges::SPARE_QUEUES,
             Some(controls.clone()),
-        );
+        )
+        .map_err(|e| failed(e.to_string()))?;
         Ok(Self {
             bridge,
             descriptor,

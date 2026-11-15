@@ -1262,7 +1262,7 @@ fn a_clients_protocol_and_blocks_are_read_from_its_ump_endpoint() {
 fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
     use std::sync::atomic::{AtomicBool, Ordering};
     use tutti_alsa_ffi::Read;
-    use tutti_midi_device::{Capabilities, Endpoint};
+    use tutti_midi_device::{Capabilities, Endpoint, Supports};
     use tutti_ump::{Message, Protocol};
 
     let name = unique("negotiated");
@@ -1284,11 +1284,11 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
         let stop = std::sync::Arc::clone(&stop);
         std::thread::spawn(move || {
             // The device: in MIDI 1.0, offering MIDI 2.0.
-            let mut endpoint = Endpoint::new(Capabilities {
+            let mut endpoint = Endpoint::new(Supports::of(Capabilities {
                 midi1: true,
                 midi2: true,
                 ..Capabilities::default()
-            });
+            }));
             while !stop.load(Ordering::Acquire) {
                 match device.0.read_event() {
                     Ok(Read::Event(received)) => {

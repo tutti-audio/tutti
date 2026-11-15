@@ -56,7 +56,7 @@ const FULL: Capabilities = Capabilities {
 /// A device with a name, an id, an identity and two blocks, the second a
 /// MIDI-CI 1.2 block (message version 2) with two SysEx 8 streams.
 fn device() -> Endpoint {
-    Endpoint::new(FULL)
+    Endpoint::new(Supports::of(FULL))
         .with_identity(identity())
         .with_name(EndpointName::new("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123").unwrap())
         .with_instance_id(ProductInstanceId::new("SN-0001").unwrap())
@@ -185,7 +185,7 @@ fn each_filter_bit_asks_for_its_own_reply() {
 // the reply optional).
 #[test]
 fn a_part_an_endpoint_lacks_is_left_out() {
-    let mut bare = Endpoint::new(FULL);
+    let mut bare = Endpoint::new(Supports::of(FULL));
     let out = ask(&mut bare, discovery(ALL));
     assert_eq!(out.iter().map(status).collect::<Vec<_>>(), [0x01, 0x06]);
 }
@@ -235,8 +235,8 @@ fn function_block_info_and_name_words() {
 
     // The other way round: MIDI-CI version 1, 16 streams, block 7, Groups 5 to 7,
     // so a swapped pair of bytes shows. 0x8000 | 0x0700 | 0b11, then 5, 3, 1, 16.
-    let mut e =
-        Endpoint::new(FULL).with_function_block(block(7, 5, 3).midi_ci(1, 16).build().unwrap());
+    let mut e = Endpoint::new(Supports::of(FULL))
+        .with_function_block(block(7, 5, 3).midi_ci(1, 16).build().unwrap());
     let out = ask(
         &mut e,
         block_discovery(BlockSelect::One(id(7)), true, false),
@@ -249,7 +249,8 @@ fn function_block_info_and_name_words() {
 #[test]
 fn a_long_block_name_splits_at_thirteen_bytes() {
     let name = BlockName::new("0123456789abcdefghijklmnopqrst").unwrap();
-    let mut e = Endpoint::new(FULL).with_function_block(block(1, 0, 1).name(name).build().unwrap());
+    let mut e = Endpoint::new(Supports::of(FULL))
+        .with_function_block(block(1, 0, 1).name(name).build().unwrap());
     let out = ask(
         &mut e,
         block_discovery(BlockSelect::One(id(1)), false, true),
@@ -391,11 +392,11 @@ fn what_an_endpoint_cannot_do_is_not_done() {
         }
     );
     // Some parts: MIDI 2.0 and receive are possible, transmit is not.
-    let mut e = Endpoint::new(Capabilities {
+    let mut e = Endpoint::new(Supports::of(Capabilities {
         midi2: true,
         rx_jr: true,
         ..Capabilities::default()
-    });
+    }));
     let c = notified(&ask(&mut e, request(Protocol::Midi2, true, true)));
     assert_eq!(
         c,
@@ -497,7 +498,7 @@ fn a_function_block_stays_inside_the_groups() {
 
 #[test]
 fn a_block_is_replaced_by_number_and_the_count_follows_the_highest() {
-    let e = Endpoint::new(FULL)
+    let e = Endpoint::new(Supports::of(FULL))
         .with_function_block(block(5, 0, 1).build().unwrap())
         .with_function_block(block(5, 2, 3).build().unwrap());
     assert_eq!(e.declared_function_blocks(), 6);
@@ -515,11 +516,11 @@ fn replied(endpoint: &mut Endpoint, stream: Stream) -> Reply {
 /// and carries both what was asked and what is active.
 #[test]
 fn a_request_is_reported_as_granted_or_reduced() {
-    let mut e = Endpoint::new(Capabilities {
+    let mut e = Endpoint::new(Supports::of(Capabilities {
         midi2: true,
         rx_jr: true,
         ..Capabilities::default()
-    });
+    }));
     let granted = StreamConfig {
         protocol: Protocol::Midi2,
         rx_jr: true,
@@ -661,7 +662,7 @@ fn answering_discoveries_changes_no_block_of_a_static_endpoint() {
 /// Spec: m2-104/7.1.5#5, m2-104/7.1.5#8
 #[test]
 fn a_long_instance_id_is_zero_filled_only_in_its_end() {
-    let mut e = Endpoint::new(FULL)
+    let mut e = Endpoint::new(Supports::of(FULL))
         .with_instance_id(ProductInstanceId::new("0123456789abcdefghijklmnopqrst").unwrap());
     let out = ask(
         &mut e,
@@ -690,7 +691,7 @@ fn a_block_is_bidirectional_input_only_or_output_only() {
         (BlockDirection::Input, 0b01),
         (BlockDirection::Output, 0b10),
     ] {
-        let mut e = Endpoint::new(FULL).with_function_block(
+        let mut e = Endpoint::new(Supports::of(FULL)).with_function_block(
             FunctionBlock::builder(
                 id(0),
                 direction,
@@ -710,7 +711,7 @@ fn a_block_is_bidirectional_input_only_or_output_only() {
 /// Spec: m2-104/6.1.1#5, m2-104/6.1.1#6, m2-104/6.2.1.2#2, m2-104/6.2.2#1, m2-104/6.2.2#2
 #[test]
 fn blocks_may_share_and_overlap_groups() {
-    let mut e = Endpoint::new(FULL)
+    let mut e = Endpoint::new(Supports::of(FULL))
         .with_function_block(block(0, 0, 4).build().unwrap())
         .with_function_block(block(1, 2, 1).midi1(Midi1Port::Restricted).build().unwrap())
         .with_function_block(block(2, 2, 1).build().unwrap());
@@ -722,5 +723,202 @@ fn blocks_may_share_and_overlap_groups() {
             [0xF011_810B, 0x0201_0000, 0, 0],
             [0xF011_8203, 0x0201_0000, 0, 0],
         ]
+    );
+}
+
+/// §7.1.6.3: what a capability change drops from the active configuration goes
+/// off with a Stream Configuration Notification after the Endpoint Info: an
+/// Endpoint in MIDI 2.0 with both JR directions that loses MIDI 2.0 and JR is
+/// in MIDI 1.0 without JR (word 0 of the Notification: protocol 1 in bits 15-8).
+/// A change that leaves the active configuration alone sends the Info only.
+/// Spec: m2-104/7.1.2#2, m2-104/7.1.6.3#1
+#[test]
+fn a_capability_change_drops_what_it_no_longer_supports_from_the_active_set() {
+    let active = StreamConfig {
+        protocol: Protocol::Midi2,
+        rx_jr: true,
+        tx_jr: true,
+    };
+    let mut e = changeable().with_active(active);
+    let m1_only = Supports::of(Capabilities {
+        midi1: true,
+        ..Capabilities::default()
+    });
+    assert_eq!(
+        changed(&mut e, EndpointChange::Capabilities(m1_only)),
+        [[0xF001_0101, 0x0100_0100, 0, 0], [0xF006_0100, 0, 0, 0],]
+    );
+    assert_eq!(
+        e.active(),
+        StreamConfig {
+            protocol: Protocol::Midi1,
+            rx_jr: false,
+            tx_jr: false,
+        }
+    );
+    let both = Supports::of(Capabilities {
+        midi2: true,
+        ..m1_only.get()
+    });
+    assert_eq!(
+        changed(&mut e, EndpointChange::Capabilities(both)).len(),
+        1,
+        "nothing active was lost"
+    );
+}
+
+/// A device whose blocks may change: not static, one named block 0 over Group 0.
+fn changeable() -> Endpoint {
+    Endpoint::new(Supports::of(FULL)).with_function_block(
+        block(0, 0, 1)
+            .name(BlockName::new("Keys").unwrap())
+            .build()
+            .unwrap(),
+    )
+}
+
+fn changed(endpoint: &mut Endpoint, change: EndpointChange) -> Vec<[u32; 4]> {
+    let mut out = Vec::new();
+    endpoint.change(change, &mut out).unwrap();
+    out.iter().map(words).collect()
+}
+
+/// §7.1.2: an Endpoint Info Notification goes out when a property of it
+/// changes. Word 1 is the static bit, the block count (1 here), M2, M1, RXJR
+/// and TXJR: 1 << 24 | 1 << 8 for MIDI 1.0 alone. A change to the same value
+/// changes nothing and sends nothing.
+/// Spec: m2-104/7.1.2#2
+#[test]
+fn a_changed_capability_sends_endpoint_info() {
+    let mut e = changeable();
+    let m1_only = Supports::of(Capabilities {
+        midi1: true,
+        ..Capabilities::default()
+    });
+    assert_eq!(
+        changed(&mut e, EndpointChange::Capabilities(m1_only)),
+        [[0xF001_0101, 0x0100_0100, 0, 0]]
+    );
+    assert_eq!(e.capabilities(), m1_only.get());
+    assert!(changed(&mut e, EndpointChange::Capabilities(m1_only)).is_empty());
+}
+
+/// §7.1.2 and §7.1.8: a block added raises the declared count, so Endpoint
+/// Info (count 3) comes first, then the block's Function Block Info: active,
+/// block 2, no hint, bidirectional is 0x8000 | 0x0200 | 0b11, then first
+/// Group 4, two Groups, no MIDI-CI, no streams. §7.1.9: a block with no name
+/// has no name notification.
+/// Spec: m2-104/7.1.2#2, m2-104/7.1.8#3
+#[test]
+fn a_block_added_sends_endpoint_info_then_its_block_info() {
+    let mut e = changeable();
+    let added = block(2, 4, 2).build().unwrap();
+    assert_eq!(
+        changed(&mut e, EndpointChange::Block(added)),
+        [
+            [0xF001_0101, 0x0300_0303, 0, 0],
+            [0xF011_8203, 0x0402_0000, 0, 0],
+        ]
+    );
+    assert_eq!(e.function_block(id(2)), Some(&added));
+}
+
+/// §7.1.8: a changed property of a block sends Function Block Info alone,
+/// with the count unchanged: the active bit of word 0 goes low. §7.1.9: the
+/// same block with a new name sends the name alone, a Complete message with
+/// the block number then the text. The spec has no message that removes a
+/// name; this crate sends an empty one as one Complete message of zeros, which
+/// is pinned here.
+/// Spec: m2-104/7.1.8#3, m2-104/7.1.9#3
+#[test]
+fn a_changed_block_sends_the_part_that_changed() {
+    let mut e = changeable();
+    let keys = || block(0, 0, 1).name(BlockName::new("Keys").unwrap());
+    assert_eq!(
+        changed(
+            &mut e,
+            EndpointChange::Block(keys().active(false).build().unwrap())
+        ),
+        [[0xF011_0003, 0x0001_0000, 0, 0]]
+    );
+    let organ = block(0, 0, 1).name(BlockName::new("Organ").unwrap());
+    assert_eq!(
+        changed(&mut e, EndpointChange::Block(organ.build().unwrap())),
+        [
+            [0xF011_8003, 0x0001_0000, 0, 0],
+            [0xF012_004F, 0x7267_616E, 0, 0],
+        ]
+    );
+    assert_eq!(
+        changed(
+            &mut e,
+            EndpointChange::Block(block(0, 0, 1).build().unwrap())
+        ),
+        [[0xF012_0000, 0, 0, 0]]
+    );
+    assert!(
+        changed(
+            &mut e,
+            EndpointChange::Block(block(0, 0, 1).build().unwrap())
+        )
+        .is_empty()
+    );
+}
+
+/// §7.1.2: with static blocks declared the Endpoint never changes a block
+/// property or name, so the change is refused and nothing is sent or kept; a
+/// replacement equal to the block held is no change.
+/// Spec: m2-104/7.1.2#3, m2-104/7.1.9#3
+#[test]
+fn a_static_endpoint_refuses_a_block_change() {
+    let mut e = device();
+    let before = e;
+    let mut out = Vec::new();
+    let renamed = block(0, 0, 1)
+        .name(BlockName::new("Organ").unwrap())
+        .build()
+        .unwrap();
+    assert_eq!(
+        e.change(EndpointChange::Block(renamed), &mut out),
+        Err(ChangeError::StaticBlocks)
+    );
+    assert!(out.is_empty());
+    assert_eq!(e, before);
+    // A block of a number the Endpoint does not have is a new block: refused.
+    let new = block(5, 8, 1).build().unwrap();
+    assert_eq!(
+        e.change(EndpointChange::Block(new), &mut out),
+        Err(ChangeError::StaticBlocks)
+    );
+    assert!(out.is_empty());
+    assert_eq!(e, before);
+    let same = *before.function_block(id(0)).unwrap();
+    assert_eq!(e.change(EndpointChange::Block(same), &mut out), Ok(()));
+    assert!(out.is_empty());
+}
+
+/// §7.1.3 to §7.1.5: an identity, name or Product Instance Id may be sent at
+/// any time, and a change of one sends it: the same words a discovery
+/// answers with (Figure 14; a Complete name; "SN-0002" as ASCII).
+/// Spec: m2-104/7.1.3#1, m2-104/7.1.4#1, m2-104/7.1.5#3
+#[test]
+fn a_changed_identity_name_or_instance_id_is_sent() {
+    let mut e = changeable();
+    assert_eq!(
+        changed(&mut e, EndpointChange::Identity(identity())),
+        [[0xF002_0000, 0x0000_2109, 0x0102_0304, 0x0506_0708]]
+    );
+    assert!(changed(&mut e, EndpointChange::Identity(identity())).is_empty());
+    let name = EndpointName::new("Hi").unwrap();
+    assert_eq!(
+        changed(&mut e, EndpointChange::Name(name)),
+        [[0xF003_4869, 0, 0, 0]]
+    );
+    assert_eq!(e.name(), Some(&name));
+    assert!(changed(&mut e, EndpointChange::Name(name)).is_empty());
+    let id = ProductInstanceId::new("SN-0002").unwrap();
+    assert_eq!(
+        changed(&mut e, EndpointChange::InstanceId(id)),
+        [[0xF004_534E, 0x2D30_3030, 0x3200_0000, 0]]
     );
 }

@@ -279,7 +279,7 @@ pub use stream::{Basis, DeviceStream, InputTiming};
 pub use tutti_midi_device::{
     BindPolicy, Capabilities, DeviceEvent, DeviceId, DeviceInfo, Endpoint, EndpointId,
     FunctionBlock, Identity, Learned, Match, OsChange, OsDevice, PortDirection, Resolved,
-    SavedDevice,
+    SavedDevice, Supports,
 };
 pub use virtual_endpoint::{VirtualDestination, VirtualProtocol, VirtualSource, VirtualSpec};
 

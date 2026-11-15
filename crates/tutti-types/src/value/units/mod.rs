@@ -53,8 +53,8 @@
 //! # Measurements are not controls
 //!
 //! [`Correlation`], [`StereoBalance`] and [`Confidence`] are values the engine
-//! *reports*; [`Depth`], [`Pan`] and [`Mix`] are values a user *sets*. The ranges coincide and the
-//! meanings do not, so they are distinct types — swapping a reading for a
+//! *reports*; [`Depth`], [`Pan`], [`Balance`] and [`Mix`] are values a user
+//! *sets*. The ranges coincide and the meanings do not, so they are distinct types — swapping a reading for a
 //! control is otherwise silent. [`Q`] and [`Resonance`] split on the same line.
 
 #[macro_use]
@@ -73,7 +73,9 @@ mod transport;
 // `samples.rs`; the families name it through this import.
 use super::samples::Samples;
 
-pub use amounts::{Depth, DepthOutOfRange, Drive, Feedback, Mix, Pan, Spread, StereoWidth};
+pub use amounts::{
+    Balance, Depth, DepthOutOfRange, Drive, Feedback, Mix, Pan, Spread, StereoWidth,
+};
 pub use angles::{ArcDegrees, Azimuth, Direction, Elevation, Phase, PhaseIncrement, Radians};
 pub use frames::{SampleSpan, SampleSpanOutOfRange};
 pub use level::{Amplitude, Db, Gain};

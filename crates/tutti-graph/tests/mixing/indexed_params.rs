@@ -153,7 +153,7 @@ fn render(ed: &mut Editor, exec: &mut tutti_graph::Executor, frames: usize) -> [
 /// stepping `to`; the two bands are its outputs. Nothing is connected yet.
 fn graph(to: &[(UnitAddr, f32)]) -> (Editor, tutti_graph::Executor, ParamSet) {
     let (mut ed, exec) = Editor::new(prepare(64));
-    let controls = ed.insert(BANDS, "bands", Bands::new(-10.0, -20.0));
+    let controls = ed.insert(BANDS, "bands", Bands::new(-10.0, -20.0)).controls;
     ed.insert(
         SRC,
         "steps",

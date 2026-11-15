@@ -26,7 +26,6 @@ use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 use tutti_fixtures::main_thread;
 use tutti_plugin_types::Load;
-use tutti_types::MaxBlock;
 use tutti_vst2_host::Vst2Loaded;
 
 use tutti_plugin_host::PluginHandle;
@@ -450,52 +449,16 @@ fn the_output_is_what_the_plugin_wrote() {
     drop(loaded.handle);
 }
 
-/// A node of `WIDE` channels in and out writing `value` to every output,
-/// whatever its input: what leaves a non-zero buffer behind for a later node
-/// to be handed.
-struct Fill {
-    width: tutti_types::ChannelLayout,
-    inputs: tutti_types::ChannelLayout,
-    value: f32,
-}
-
-impl tutti_graph::Node for Fill {
-    fn shape(&self) -> tutti_graph::Shape {
-        // Ports with no bus: a fill of any width, which nothing bypasses.
-        tutti_graph::Shape::EMPTY.with_ports(self.inputs, self.width)
-    }
-    fn prepare(&mut self, _: &tutti_graph::Prepare) {}
-    fn process(
-        &mut self,
-        _: &tutti_graph::Cx<'_>,
-        mut io: tutti_graph::Io<'_>,
-    ) -> tutti_graph::Status {
-        for c in 0..io.output_count() {
-            io.output(c).fill(self.value);
-        }
-        tutti_graph::Status::Modified
-    }
-    fn reset(&mut self) {}
-}
-
-/// A plugin wider than the node's channel tables (sixteen) has the outputs
-/// past them silenced, not left holding whatever the graph's buffer held.
+/// A plugin wider than a block serves (sixteen channels a direction) is
+/// refused at load by name, not run on its first sixteen channels.
 ///
-/// The probe is loaded with eighteen inputs and outputs, behind two fill
-/// nodes (the first writes a stale value, the second, fed by it, the
-/// plugin's input), so the slots the first one wrote are free by the time
-/// the plugin's outputs are placed, and an output the node leaves unwritten
-/// shows what the first one left there. Channels within the tables are the
-/// plugin's (`in + tag(ch)`); the two past them are zero.
-fn outputs_past_the_tables_are_silent() {
-    use tutti_graph::{GraphBuilder, Prepare, TransportPosition, Unforkable};
-    use tutti_types::{ChannelLayout, Samples};
-    use tutti_vst2_test_plugin::channel_tag;
+/// The probe is loaded with eighteen inputs and outputs: no node is built, and
+/// the load's reason is the [`PluginTooWide`] text for the input direction,
+/// the first one checked.
+fn a_plugin_wider_than_a_block_is_refused_at_load() {
+    use tutti_plugin_types::{BridgeError, LoadStage, PluginTooWide};
 
     const WIDE: usize = 18;
-    const TABLE: usize = 16;
-    const STALE: f32 = -7.0;
-    const INPUT: f32 = 3.0;
 
     let _guard = lock_probe();
     let path = tutti_fixtures::vst2_probe().to_path_buf();
@@ -517,53 +480,18 @@ fn outputs_past_the_tables_are_silent() {
         std::env::remove_var("TUTTI_VST2_PROBE_INPUTS");
         std::env::remove_var("TUTTI_VST2_PROBE_OUTPUTS");
     }
-    let (unit, handle) = loaded.unwrap_or_else(|e| panic!("in-process load: {e:?}"));
-    let unit = unit.bind(tempo());
-
-    let wide = ChannelLayout::try_from(WIDE).expect("a test width is small");
-    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, wide);
-    let stale = g.add(Unforkable(Fill {
-        width: wide,
-        inputs: ChannelLayout::EMPTY,
-        value: STALE,
-    }));
-    let feed = g.add(Unforkable(Fill {
-        width: wide,
-        inputs: wide,
-        value: INPUT,
-    }));
-    let key = g.add(Unforkable(unit));
-    g.pipe(stale, feed);
-    g.pipe(feed, key);
-    g.pipe_output(key);
-    let mut r = g
-        .renderer(Prepare::new(
-            SampleRate::of(SAMPLE_RATE),
-            MaxBlock::of(Samples(BLOCK)),
-        ))
-        .expect("the graph compiles");
-
-    for block in 0..3usize {
-        let mut out = vec![vec![0.0f32; BLOCK]; WIDE];
-        let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
-        r.executor_mut()
-            .process(BLOCK, &TransportPosition::default(), &[], &mut outs);
-        for (c, ch) in out.iter().enumerate() {
-            let want = if c < TABLE {
-                INPUT + channel_tag(c)
-            } else {
-                0.0
-            };
-            assert!(
-                ch.iter().all(|&s| s == want),
-                "block {block}, channel {c}: want {want}, got {:?}",
-                &ch[..4]
-            );
+    let Err(BridgeError::LoadFailed { stage, reason, .. }) = loaded else {
+        panic!("a plugin of {WIDE} channels has no node");
+    };
+    assert_eq!(stage, LoadStage::Activation);
+    assert_eq!(
+        reason,
+        PluginTooWide {
+            direction: "input",
+            channels: WIDE
         }
-    }
-
-    drop(r);
-    drop(handle);
+        .to_string()
+    );
 }
 
 /// A plugin's parameter reports the host lost are counted on its
@@ -735,7 +663,7 @@ fn main() {
         a_prepare_on_the_main_thread_tells_the_plugin_at_once,
         a_drain_with_nothing_parked_dispatches_nothing,
         the_output_is_what_the_plugin_wrote,
-        outputs_past_the_tables_are_silent,
+        a_plugin_wider_than_a_block_is_refused_at_load,
         the_handle_counts_lost_parameter_reports,
         a_block_past_the_announced_maximum_is_split_before_the_plugin,
         an_io_change_reaches_a_subscriber_and_the_shape,

@@ -553,11 +553,13 @@ fn holding_clip() -> (
     Shared,
 ) {
     let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))));
-    let controls = ed.insert(
-        NodeKey(1),
-        "clip",
-        MidiClipNode::new([at(0, on(60)), at(100_000, off(60))]),
-    );
+    let controls = ed
+        .insert(
+            NodeKey(1),
+            "clip",
+            MidiClipNode::new([at(0, on(60)), at(100_000, off(60))]),
+        )
+        .controls;
     let a = sink(&mut ed, 2);
     let b = sink(&mut ed, 3);
     connect(&mut ed, 1, 2);
@@ -645,11 +647,13 @@ fn forkable_rig() -> (
     Arc<Mutex<Vec<Shared>>>,
 ) {
     let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(256))));
-    let controls = ed.insert(
-        NodeKey(1),
-        "clip",
-        MidiClipNode::new([at(10, on(60)), at(300, off(60))]),
-    );
+    let controls = ed
+        .insert(
+            NodeKey(1),
+            "clip",
+            MidiClipNode::new([at(10, on(60)), at(300, off(60))]),
+        )
+        .controls;
     let tally = Shared::default();
     let forks = Arc::default();
     ed.insert(
@@ -1010,8 +1014,9 @@ fn the_loss_count_is_exact_through_loops_and_replacements() {
         let replace = r.below(2) == 0;
         let (mut ed, mut exec) =
             Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
-        let controls: MidiClipControls =
-            ed.insert(NodeKey(1), "clip", MidiClipNode::new(first.clone()));
+        let controls: MidiClipControls = ed
+            .insert(NodeKey(1), "clip", MidiClipNode::new(first.clone()))
+            .controls;
         let tally = sink(&mut ed, 2);
         connect(&mut ed, 1, 2);
         ed.commit().unwrap();

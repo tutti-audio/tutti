@@ -161,8 +161,9 @@ pub use input::{Input, InputConfig, InputOpener, OpenedInput, Trim};
 pub use instrument::{AddedInstrument, AnyNode, InstrumentHandle, NotInstrument};
 pub use jobs::{Job, JobFailed};
 pub use key::{
-    Bus, BusSink, Channel, Connection, Edge, Event, EventInPort, EventOutPort, EventTapPort, Fanin,
-    InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root, RootDeclaration, Weighted, Wire,
+    Bus, BusSink, Channel, Connection, Edge, Event, EventEdge, EventInPort, EventOutPort,
+    EventTapPort, Fanin, InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root,
+    RootDeclaration, Weighted, Wire,
 };
 #[cfg(feature = "plugin")]
 pub use main_session::{EditorView, MainPlugin, MainSession, Opened};
@@ -195,7 +196,7 @@ pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 pub use plugin::{
     AddPluginError, LoadedPlugin, Plugin, PluginCause, PluginChange, PluginDeclaration,
     PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginNode, PluginPorts, PooledPlugin,
-    SNAPSHOT_INTERVAL, StateRestore, StateView,
+    SNAPSHOT_INTERVAL, StateJobError, StateJobFailed, StateRestore, StateView,
 };
 pub(crate) use pool::Pool;
 #[cfg(feature = "sampler")]
