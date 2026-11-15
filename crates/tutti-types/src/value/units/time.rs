@@ -81,11 +81,13 @@ impl Seconds {
     /// The *offset* form of [`to_samples`](Self::to_samples): a shift of a
     /// position can be negative (a device that reports too much latency, a
     /// peer's clock ahead of ours), and `to_samples` clamps a negative span to
-    /// zero. A NaN or non-finite product gives 0, and a span too large for
-    /// `i64` saturates. It returns a bare `i64` because tutti has no signed
-    /// frame unit: [`Frame`](crate::Frame) is a `u64` position.
-    /// [`std::time::Duration`] is unsigned: a caller holding one
-    /// builds a `Seconds` from it and signs it by direction.
+    /// zero. A NaN gives 0, and a span too large for `i64` (an infinite one
+    /// included) saturates.
+    ///
+    /// It returns a bare `i64` because tutti has no signed frame unit:
+    /// [`Frame`](crate::Frame) is a `u64` position. A
+    /// [`std::time::Duration`] is unsigned, so a caller holding one builds a
+    /// `Seconds` from it and signs it by direction.
     ///
     /// ```
     /// use tutti_types::{SampleRate, Seconds};
@@ -93,21 +95,9 @@ impl Seconds {
     /// ```
     #[inline]
     pub fn to_frame_offset(self, sample_rate: impl Into<SampleRate>) -> i64 {
-        Self::signed_frames(self.0 * sample_rate.into().get(), f64::round)
-    }
-
-    /// Signed frames in this span at `sample_rate`, rounded toward negative
-    /// infinity: the offset form of [`to_samples_floor`](Self::to_samples_floor).
-    #[inline]
-    pub fn to_frame_offset_floor(self, sample_rate: impl Into<SampleRate>) -> i64 {
-        Self::signed_frames(self.0 * sample_rate.into().get(), f64::floor)
-    }
-
-    /// Signed frames in this span at `sample_rate`, rounded toward positive
-    /// infinity: the offset form of [`to_samples_ceil`](Self::to_samples_ceil).
-    #[inline]
-    pub fn to_frame_offset_ceil(self, sample_rate: impl Into<SampleRate>) -> i64 {
-        Self::signed_frames(self.0 * sample_rate.into().get(), f64::ceil)
+        let raw = self.0 * sample_rate.into().get();
+        // `as` saturates out-of-range and infinite values into `i64`.
+        if raw.is_nan() { 0 } else { raw.round() as i64 }
     }
 
     /// The per-sample coefficient of a one-pole smoother with this time
@@ -163,13 +153,6 @@ impl Seconds {
         } else {
             1.0
         }
-    }
-
-    /// Shared tail of the offset forms: apply `round`, then saturate into
-    /// `i64`; a NaN is 0.
-    #[inline]
-    fn signed_frames(raw: f64, round: fn(f64) -> f64) -> i64 {
-        if raw.is_nan() { 0 } else { round(raw) as i64 }
     }
 
     /// Shared tail: apply `round`, then clamp into `usize`.

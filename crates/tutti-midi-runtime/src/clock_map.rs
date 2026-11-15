@@ -126,8 +126,9 @@ impl ClockMap {
         self.anchor
     }
 
-    /// The frame the graph is at when the OS clock reads `os`, to the nearest
-    /// frame (half away from zero); `None` before frame 0.
+    /// The frame the graph is at when the OS clock reads `os`: the anchor's
+    /// frame plus the offset to `os`, which rounds to the nearest frame (half
+    /// away from zero); `None` before frame 0.
     #[must_use]
     pub fn frame_at(&self, os: Instant) -> Option<Frame> {
         let seconds = match os.checked_duration_since(self.anchor.os) {

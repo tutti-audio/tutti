@@ -276,17 +276,16 @@ fn frame_offset_keeps_the_sign_where_to_samples_clamps() {
 }
 
 #[test]
-fn frame_offset_rounding_modes_agree_with_their_names() {
+fn frame_offset_rounds_to_nearest_half_away_from_zero() {
     // At 3 Hz, 1/9 s is a third of a frame.
     let rate = SampleRate::of(3.0);
     let third = Seconds(1.0 / 9.0);
     let neg = Seconds(-1.0 / 9.0);
     assert_eq!(third.to_frame_offset(rate), 0);
-    assert_eq!(third.to_frame_offset_floor(rate), 0);
-    assert_eq!(third.to_frame_offset_ceil(rate), 1);
     assert_eq!(neg.to_frame_offset(rate), 0);
-    assert_eq!(neg.to_frame_offset_floor(rate), -1);
-    assert_eq!(neg.to_frame_offset_ceil(rate), 0);
+    // Exactly half a frame (1/6 s at 3 Hz) rounds away from zero, either sign.
+    assert_eq!(Seconds(0.5 / 3.0).to_frame_offset(rate), 1);
+    assert_eq!(Seconds(-0.5 / 3.0).to_frame_offset(rate), -1);
     // Two thirds rounds away from zero, either sign.
     assert_eq!(Seconds(2.0 / 9.0).to_frame_offset(rate), 1);
     assert_eq!(Seconds(-2.0 / 9.0).to_frame_offset(rate), -1);
