@@ -17,12 +17,12 @@
 //! SysEx 7 data), which is part of the byte being 7-bit, not a reserved bit.
 
 use crate::field::{
-    DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan, NoteNumber,
+    ChordType, DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan, NoteNumber,
     SharpsFlats, TicksPerQuarterNote, U4, U7, U14,
 };
 use crate::message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockFilter,
-    BlockSelect, ChordBass, ChordName, ChordPitch, ChordType, Data128, DeviceIdentity, Direction,
+    BlockSelect, ChordBass, ChordName, ChordPitch, Data128, DeviceIdentity, Direction,
     DiscoveryFilter, EndpointInfo, Flex, FlexAddress, FlexTextKind, Form, FunctionBlockInfo,
     FunctionBlocks, KeySignature, Letter, Message, Metronome, Midi1Port, MixedDataHeader,
     PerNoteManagement, Protocol, Stream, StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus,
@@ -500,7 +500,7 @@ fn chord_name(w: [u32; 4]) -> ChordName {
     ChordName {
         tonic_accidental: accidental(w[1] >> 28),
         tonic: letter(w[1] >> 24),
-        chord_type: ChordType::wire(byte(w[1], 2)),
+        chord_type: Field::read(ChordType::new(byte(w[1], 2)), byte(w[1], 2)),
         alterations: [
             alteration(w[1] >> 8),
             alteration(w[1]),
@@ -509,7 +509,7 @@ fn chord_name(w: [u32; 4]) -> ChordName {
         ],
         bass: ChordBass {
             pitch: bass_pitch,
-            chord_type: ChordType::wire(byte(w[3], 2)),
+            chord_type: Field::read(ChordType::new(byte(w[3], 2)), byte(w[3], 2)),
             alterations: [alteration(w[3] >> 8), alteration(w[3])],
         },
     }

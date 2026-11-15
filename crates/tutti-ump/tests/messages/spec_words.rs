@@ -554,11 +554,11 @@ fn flex_key_and_chord() {
             ChordName {
                 tonic_accidental: Accidental::Natural,
                 tonic: Some(Letter::C),
-                chord_type: ChordType::new(0x01).unwrap(),
+                chord_type: ChordType::new(0x01).unwrap().into(),
                 alterations: [alt(AlterationKind::Add, 9), none(), none(), none()],
                 bass: ChordBass {
                     pitch: None,
-                    chord_type: ChordType::new(0).unwrap(),
+                    chord_type: ChordType::new(0).unwrap().into(),
                     alterations: [none(), none()],
                 },
             },
@@ -573,7 +573,7 @@ fn flex_key_and_chord() {
             ChordName {
                 tonic_accidental: Accidental::Flat,
                 tonic: Some(Letter::E),
-                chord_type: ChordType::new(0x09).unwrap(),
+                chord_type: ChordType::new(0x09).unwrap().into(),
                 alterations: [
                     none(),
                     none(),
@@ -585,7 +585,7 @@ fn flex_key_and_chord() {
                         accidental: Accidental::Flat,
                         letter: Letter::B,
                     }),
-                    chord_type: ChordType::new(0x01).unwrap(),
+                    chord_type: ChordType::new(0x01).unwrap().into(),
                     alterations: [alt(AlterationKind::Subtract, 3), none()],
                 },
             },
@@ -890,14 +890,14 @@ fn what_the_oracle_found() {
             ChordName {
                 tonic_accidental: Accidental::Natural,
                 tonic: Some(Letter::C),
-                chord_type: ChordType::new(0x1B).unwrap(),
+                chord_type: ChordType::new(0x1B).unwrap().into(),
                 alterations: [none(), none(), none(), none()],
                 bass: ChordBass {
                     pitch: Some(ChordPitch {
                         accidental: Accidental::Natural,
                         letter: Letter::G,
                     }),
-                    chord_type: ChordType::new(0x1B).unwrap(),
+                    chord_type: ChordType::new(0x1B).unwrap().into(),
                     alterations: [none(), none()],
                 },
             },

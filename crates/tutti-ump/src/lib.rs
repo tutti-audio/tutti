@@ -115,9 +115,9 @@ pub use bend_value::BendValue;
 pub use cc_number::CCNumber;
 pub use control_value::ControlValue;
 pub use field::{
-    DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan, MonoChannels,
-    MpeChannels, NoteNumber, OutOfRange, Pitch, SharpsFlats, TicksPerQuarterNote, U4, U7, U14, U28,
-    first_non_seven_bit,
+    ChordType, DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan,
+    MonoChannels, MpeChannels, NoteNumber, OutOfRange, Pitch, SharpsFlats, TicksPerQuarterNote, U4,
+    U7, U14, U28, first_non_seven_bit,
 };
 pub use flex_text::{
     FLEX_TEXT_MAX_LEN, FlexText, FlexTextAssembler, FlexTextPackets, FlexTextStep,
@@ -127,7 +127,7 @@ pub use held_keys::{KeyBitset, Lane, LaneSet};
 pub use manufacturer::{ManufacturerId, NotManufacturerId};
 pub use message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockFilter,
-    BlockSelect, ChordBass, ChordName, ChordPitch, ChordType, Data128, DeviceIdentity, Direction,
+    BlockSelect, ChordBass, ChordName, ChordPitch, Data128, DeviceIdentity, Direction,
     DiscoveryFilter, EndpointInfo, Flex, FlexAddress, FlexTextKind, Form, FunctionBlockInfo,
     FunctionBlocks, KeySignature, Letter, Message, Metronome, Midi1Port, MixedDataHeader,
     PerNoteManagement, Protocol, RegisteredPerNoteController, Stream, StreamConfig, Sysex7Packet,

@@ -2,7 +2,9 @@
 //! names no other workspace crate, so the check runs from here.
 
 use tutti_fixtures::{RangeContract, check_range_contract};
-use tutti_ump::{FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan, TicksPerQuarterNote};
+use tutti_ump::{
+    ChordType, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan, TicksPerQuarterNote,
+};
 
 /// Ticks per quarter note run 1 to 65535, with 0 reserved (M2-104 §7.2.3.1);
 /// the type holds exactly that range, so a sender cannot write the reserved 0.
@@ -65,5 +67,18 @@ fn a_first_group_and_a_group_span_keep_the_range_contract() {
         of: Some(GroupSpan::of),
         valid: &[1, 2, 15, 16],
         invalid: &[0, 17, 255],
+    });
+}
+
+/// A chord type is `0x00..=0x1B` (M2-104 Table 14); a reserved type is read as
+/// a reserved field, never held by the type.
+#[test]
+fn a_chord_type_keeps_the_range_contract() {
+    check_range_contract(&RangeContract {
+        new: ChordType::new,
+        get: ChordType::get,
+        of: Some(ChordType::of),
+        valid: &[0, 1, 0x1A, 0x1B],
+        invalid: &[0x1C, 0x7F, 0xFF],
     });
 }

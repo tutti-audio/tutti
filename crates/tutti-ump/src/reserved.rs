@@ -48,7 +48,7 @@ impl ReservedAttribute {
         Self { kind, data }
     }
 
-    /// The attribute type, `0x04..=0xFF`.
+    /// The attribute type: `0x04..=0x0F` or `0x20..=0xFF`.
     #[must_use]
     pub const fn kind(self) -> u8 {
         self.kind

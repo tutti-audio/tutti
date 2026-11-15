@@ -109,11 +109,11 @@ fn accidentals_are_tables_13_and_15() {
                 ChordName {
                     tonic_accidental,
                     tonic: Some(Letter::C),
-                    chord_type: major,
+                    chord_type: major.into(),
                     alterations: [no_alteration; 4],
                     bass: ChordBass {
                         pitch,
-                        chord_type: clear,
+                        chord_type: clear.into(),
                         alterations: [no_alteration; 2],
                     },
                 },

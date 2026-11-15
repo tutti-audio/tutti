@@ -298,6 +298,14 @@ bounded!(
     MpeChannels, u8, 2, 16
 );
 bounded!(
+    /// A chord type, `0x00..=0x1B` (Table 14). A reserved type read from the
+    /// wire is a [`Field::Reserved`](crate::Field::Reserved), not a value of
+    /// this type.
+    ChordType, u8, 0, 0x1B
+);
+bounded_conversions!(ChordType, u8, 0x1B);
+
+bounded!(
     /// How many Function Blocks an Endpoint Info Notification declares
     /// (`0..=32`, M2-104 §7.1.2). A reserved count (`33..=127`) read from the
     /// wire is a [`FunctionBlocks::Reserved`](crate::FunctionBlocks::Reserved),

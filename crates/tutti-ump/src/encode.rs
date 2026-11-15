@@ -1,7 +1,7 @@
 //! `From<Message> for Ump`: a message to its canonical words, reserved bits
 //! zero. The mirror of `decode.rs`.
 
-use crate::field::{FirstGroup, FunctionBlockId, GroupSpan, U7};
+use crate::field::{ChordType, FirstGroup, FunctionBlockId, GroupSpan, U7};
 use crate::message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, BlockSelect, ChordName, ChordPitch,
     Data128, Direction, Flex, FlexAddress, FlexTextKind, Form, FunctionBlocks, KeySignature,
@@ -332,13 +332,13 @@ fn chord_name(c: ChordName) -> [u32; 4] {
         0,
         (accidental(c.tonic_accidental) << 28)
             | (letter(c.tonic) << 24)
-            | (u32::from(c.chord_type.get()) << 16)
+            | (u32::from(c.chord_type.raw(ChordType::get)) << 16)
             | (alteration(c.alterations[0]) << 8)
             | alteration(c.alterations[1]),
         (alteration(c.alterations[2]) << 24) | (alteration(c.alterations[3]) << 16),
         (bass_acc << 28)
             | (bass_note << 24)
-            | (u32::from(c.bass.chord_type.get()) << 16)
+            | (u32::from(c.bass.chord_type.raw(ChordType::get)) << 16)
             | (alteration(c.bass.alterations[0]) << 8)
             | alteration(c.bass.alterations[1]),
     ]

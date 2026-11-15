@@ -4,8 +4,8 @@
 use core::num::NonZeroU8;
 
 use crate::field::{
-    DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan, NoteNumber, Pitch,
-    SharpsFlats, TicksPerQuarterNote, U4, U7, U14,
+    ChordType, DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan, NoteNumber,
+    Pitch, SharpsFlats, TicksPerQuarterNote, U4, U7, U14,
 };
 use crate::{
     ArticulationAttribute, BendValue, CCNumber, ControlValue, Field, ManufacturerId, MdsChunk,
@@ -1140,29 +1140,6 @@ pub struct Alteration {
     pub degree: U4,
 }
 
-/// A chord type, `0x00..=0x1B` (Table 14). A reserved type read from the wire
-/// is kept.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ChordType(u8);
-
-impl ChordType {
-    /// The type, or `None` above `0x1B`.
-    #[must_use]
-    pub const fn new(raw: u8) -> Option<Self> {
-        if raw <= 0x1B { Some(Self(raw)) } else { None }
-    }
-
-    /// The Table 14 value.
-    #[must_use]
-    pub const fn get(self) -> u8 {
-        self.0
-    }
-
-    pub(crate) const fn wire(raw: u8) -> Self {
-        Self(raw)
-    }
-}
-
 /// A chord note with its accidental.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChordPitch {
@@ -1179,7 +1156,7 @@ pub struct ChordBass {
     /// note `0`).
     pub pitch: Option<ChordPitch>,
     /// The bass chord type; `0` clears the bass chord.
-    pub chord_type: ChordType,
+    pub chord_type: Field<ChordType>,
     /// Up to two alterations of the bass chord.
     pub alterations: [Alteration; 2],
 }
@@ -1192,7 +1169,7 @@ pub struct ChordName {
     /// The tonic; `None` is unknown (no chord).
     pub tonic: Option<Letter>,
     /// The chord type.
-    pub chord_type: ChordType,
+    pub chord_type: Field<ChordType>,
     /// Up to four alterations.
     pub alterations: [Alteration; 4],
     /// The bass.

@@ -425,7 +425,9 @@ fn reserved_values_are_kept() {
         [0xD610_0006, 0x0301_0000, 0, 0x801C_0000],
     ] {
         let c = chord_of(words);
-        assert!(c.chord_type.get() == 0x1C || c.bass.chord_type.get() == 0x1C);
+        let reserved = |f: Field<ChordType>| matches!(f, Field::Reserved(r) if r.get() == 0x1C);
+        assert!(reserved(c.chord_type) || reserved(c.bass.chord_type));
+        assert!(ChordType::new(0x1C).is_none());
     }
 }
 
@@ -658,7 +660,7 @@ fn a_constructed_message_encodes_no_reserved_value() {
                 ChordName {
                     tonic_accidental,
                     tonic: Some(Letter::C),
-                    chord_type: ChordType::new(1).unwrap(),
+                    chord_type: ChordType::new(1).unwrap().into(),
                     alterations: [
                         Alteration {
                             kind,
@@ -673,7 +675,7 @@ fn a_constructed_message_encodes_no_reserved_value() {
                             accidental: tonic_accidental,
                             letter: Letter::G,
                         }),
-                        chord_type: ChordType::new(0).unwrap(),
+                        chord_type: ChordType::new(0).unwrap().into(),
                         alterations: [none; 2],
                     },
                 },
