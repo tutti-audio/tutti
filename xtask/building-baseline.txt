@@ -455,6 +455,7 @@ tutti-plugin-host  with-prefix  crates/tutti-plugin-host/src/control_handle.rs::
 tutti-plugin-host  with-prefix  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_server_pid
 tutti-plugin-host  with-prefix  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::with_transport_sink
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::set_automation_mode
+tutti-plugin-host  setter  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::set_bypassed
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::set_editor_scale
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::set_editor_size
 tutti-plugin-host  setter  crates/tutti-plugin-host/src/control_handle.rs::PluginHandle::set_track_info
@@ -489,6 +490,7 @@ tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/metadata.rs::Proc
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_flags
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_group
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_measures
+tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_overview
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_normalized_default
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_plain_range
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/parameters.rs::ParameterInfo::with_range
