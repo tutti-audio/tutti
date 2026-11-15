@@ -356,3 +356,78 @@ fn the_output_policy_carries_over_and_a_card_the_map_does_not_fit_is_refused() {
     assert_eq!(live.policy::<OutputPolicy>().get().map, fits.map);
     assert_eq!(live.output_device().unwrap().topology.width().count(), 4);
 }
+
+/// What an open MIDI port is across a switch: the pool entry stays loaded, the
+/// port's ingest node stays the graph's, and the device stays connected.
+#[cfg(feature = "midi-hardware")]
+mod midi_ports {
+    use tutti_midi_hardware::EndpointId;
+    use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
+    use tutti_session::PoolState;
+    use tutti_ump::{Message, MidiGroup, System, Ump};
+
+    use super::*;
+
+    fn timer_with_port() -> (SystemSession, FakeCounters) {
+        let (backend, fake) =
+            FakeBackend::build_with(vec![endpoint(1, "Keys")], vec![], usize::MAX);
+        let mut s = system_builder()
+            .midi_hardware_over(backend)
+            .build()
+            .expect("builds");
+        let _ = s.update();
+        let keys = s.midi().devices().remove(0);
+        s.pool(tutti_session::midi_input("keys", keys))
+            .expect("declares");
+        wait_until("the port never loaded", || {
+            let _ = s.update();
+            matches!(s.pool_state(&"keys"), Some(PoolState::Loaded))
+        });
+        (s, fake)
+    }
+
+    fn tick() -> Ump {
+        Message::System(MidiGroup::FIRST, System::TimingClock).into()
+    }
+
+    /// **An open input port keeps its entry, its ingest node and its device
+    /// across a switch in both directions**: the entry is still `Loaded`, the
+    /// handle names the same node and the graph holds it, the device still
+    /// takes a message, and no pool failure is reported for it.
+    #[test]
+    fn an_open_input_port_survives_a_switch_to_the_card_and_back() {
+        let (s, fake) = timer_with_port();
+        let node = s.midi_input(&"keys").expect("loaded").node();
+
+        let (driver, _card) = ManualStreamDriver::new();
+        let mut live = s
+            .into_device_on(stereo(SampleRate::SR_48K), driver)
+            .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+        let events = live.update();
+        assert!(matches!(live.pool_state(&"keys"), Some(PoolState::Loaded)));
+        assert_eq!(live.midi_input(&"keys").expect("loaded").node(), node);
+        assert!(live.graph_ref().contains(node), "the ingest node stays");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, SessionEvent::Pool { .. })),
+            "no pool event for the port: {events:?}"
+        );
+        assert!(fake.send_input(EndpointId::from_raw(1), tick(), Instant::now()));
+
+        let mut back = live
+            .into_system_clock()
+            .unwrap_or_else(|e| panic!("switches: {}", e.error()));
+        let events = back.update();
+        assert!(matches!(back.pool_state(&"keys"), Some(PoolState::Loaded)));
+        assert_eq!(back.midi_input(&"keys").expect("loaded").node(), node);
+        assert!(back.graph_ref().contains(node));
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, SessionEvent::Pool { .. })),
+            "no pool event for the port: {events:?}"
+        );
+        assert!(fake.send_input(EndpointId::from_raw(1), tick(), Instant::now()));
+    }
+}

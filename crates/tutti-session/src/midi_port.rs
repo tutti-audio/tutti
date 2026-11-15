@@ -544,7 +544,7 @@ impl Peer for MidiOutput {
     }
 }
 
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// The input port of the `midi_input` entry under `key`.
     ///
     /// # Errors
