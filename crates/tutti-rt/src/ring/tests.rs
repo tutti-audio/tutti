@@ -302,9 +302,8 @@ fn a_panicking_drop_in_the_readers_drop_double_drops_nothing() {
 fn a_panicking_iterator_in_push_iter_publishes_what_it_wrote() {
     let (mut writer, mut reader) = ring::<u32>(8, Overflow::Refuse);
     let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        writer.push_iter((0..5).map(|n| {
-            assert!(n < 3, "the iterator panics at 3");
-            n
+        writer.push_iter((0..5).inspect(|n| {
+            assert!(*n < 3, "the iterator panics at 3");
         }));
     }));
     assert!(unwound.is_err());

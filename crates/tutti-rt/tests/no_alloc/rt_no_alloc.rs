@@ -398,7 +398,9 @@ fn ring_is_allocation_free() {
                 core::hint::black_box(reader.pop_slice(&mut out));
                 core::hint::black_box(writer.push_slice(&out));
                 core::hint::black_box(writer.push_iter(out.iter().copied()));
-                core::hint::black_box(reader.pop_each(1, core::hint::black_box));
+                core::hint::black_box(reader.pop_each(1, |edit| {
+                    core::hint::black_box(edit);
+                }));
                 for edit in reader.drain() {
                     core::hint::black_box(edit);
                 }
