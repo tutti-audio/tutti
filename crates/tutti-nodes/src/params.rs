@@ -22,11 +22,11 @@ use tutti_types::{AtomicF32, SampleRate, UnitAddr};
 use crate::kernel::MAX_LANES;
 use crate::ramp::LastGood;
 
-/// The most controls a family has: the compressor's six, the gate's five and the
+/// The most controls a kernel has: the compressor's six, the gate's five and the
 /// limiter's three fit with room.
 const MAX_CONTROLS: usize = 16;
 
-/// A family's controls as a list of `f32` cells.
+/// A kernel's controls as a list of `f32` cells.
 pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
     /// The design's own `Controls`.
     type Controls: Copy + PartialEq + Send;
@@ -74,9 +74,9 @@ pub enum ControlRead {
     /// port is read at the solve frame when a lane drives it.
     Glide,
     /// As [`Glide`](Self::Glide), but a moved cell lands whole: a control whose glide
-    /// is the recurrence's own (a detector's) is not ramped by the reader.
+    /// is the kernel's own (a detector's) is not ramped by the reader.
     Whole,
-    /// Read **per frame** by the recurrence, from its port, into a
+    /// Read **per frame** by the kernel, from its port, into a
     /// [`ControlLanes`](crate::ControlLanes) lane (the fast controls fill the lanes in row order).
     /// The reader takes only its cell, the base the member is designed at, and a
     /// frame nobody drives is clamped at that member. A fast control lands whole.
@@ -162,7 +162,7 @@ impl Control {
 
 /// That a [`ControlSet`] has a control of the kind `P` (a packed
 /// [`UnitAddr`] at index 0), in the unit `Unit`: what
-/// `control_set!` writes from the family's own `Controls` fields, and what
+/// `control_set!` writes from the kernel's own `Controls` fields, and what
 /// the typed key of a [`KernelNode`](crate::KernelNode) reads
 /// ([`HasParam`](tutti_graph::HasParam)).
 pub trait HasControl<const P: u16> {
@@ -173,7 +173,7 @@ pub trait HasControl<const P: u16> {
 /// That a [`ControlSet`] has several controls of the kind `P`, numbered from 0.
 pub trait HasControls<const P: u16>: HasControl<P> {}
 
-/// Writes a family's [`ControlSet`] from its `Controls` fields, once: the
+/// Writes a kernel's [`ControlSet`] from its `Controls` fields, once: the
 /// addresses, the conversion to the `f32`s the ports carry and back, and the
 /// unit of each control ([`HasControl`]). The unit a row states is checked
 /// against the field's own type (`flatten` reads it as that unit), so a
@@ -383,8 +383,8 @@ impl<S: ControlSet> Params<S> {
     }
 
     /// Takes the rate a cell's glide is measured at, and whether a moved cell glides
-    /// at all: a family whose realization glides its own coefficients between block
-    /// designs (a block cadence) lands it whole. Every cell lands whole on the next
+    /// at all: a kernel that glides its own coefficients between block
+    /// designs lands it whole. Every cell lands whole on the next
     /// block, as after [`land`](Self::land).
     pub(crate) fn retune(&mut self, rate: SampleRate, glides: bool) {
         self.glide = if glides {

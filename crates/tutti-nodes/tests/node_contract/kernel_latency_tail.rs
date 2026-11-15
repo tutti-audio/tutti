@@ -5,10 +5,12 @@
 
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_graph::contract::{Driven, assert_honest_tail, drive_input, prepared};
-use tutti_graph::{Buses, Node, Shape};
+use tutti_graph::{Buses, Node, ParamNode, Shape};
 use tutti_graph::{Env, PlayClock, Prepare, Solo, Status, TransportChanges, TransportPosition};
 use tutti_nodes::{ControlLanes, ControlSet, Kernel, KernelNode};
-use tutti_types::{BusTopology, Frame, MaxBlock, Mix, SampleRate, Samples, Tail, UnitAddr};
+use tutti_types::{
+    BusTopology, Frame, MaxBlock, Mix, SampleRate, Samples, Tail, UnitAddr, UnitParam,
+};
 
 const SR: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;
@@ -157,14 +159,41 @@ fn latency_and_tail_are_declared_apart() {
     assert_honest_tail(&mut n, SR);
 }
 
+/// A kernel with no controls declares no port and addresses no cell: its dry/wet is the
+/// graph's.
+#[test]
+fn a_kernel_without_controls_offers_no_ports() {
+    let n = node(Echo::new(4, 4, 0));
+    assert_eq!(n.shape().params.len(), 0);
+    assert_eq!(n.param_set().params().count(), 0);
+    assert!(n.param_set().get(UnitParam::Wet).is_none());
+}
+
+/// What an echo with its first echo `first` frames after the input and its second `second`
+/// frames after it plays for `x` from a silent line: `x` delayed by each, summed. The
+/// definition of the delay, not a render.
+fn echoes(x: &[f32], first: usize, second: usize) -> Vec<f32> {
+    let at = |g: usize, d: usize| g.checked_sub(d).map_or(0.0, |i| f64::from(x[i]));
+    (0..x.len())
+        .map(|g| (at(g, first) + at(g, second)) as f32)
+        .collect()
+}
+
 /// A kernel that rings past its tail is cut at `tail + latency` after the last input
 /// frame, to the frame, inside the block that holds it: input on the first 20 frames, and
-/// the last frame to sound is the last input frame plus the reported tail plus the latency.
+/// the last frame to sound is frame 19 + 10 + 7 = 36.
+///
+/// A node that did not cut would sound the second echo of the last three input frames at
+/// frames 37 to 39, so the last-frame pin fails for it. The kernel keeps running over the
+/// rest of the block (its line is flushed by the silence), so what follows the cut is the
+/// echoes of the later input alone: the blocks after it carry only an input of 1e-20 (not
+/// exactly 0.0, the level at which the node hears input), and the output is exactly those
+/// echoes from a silent line. That the park itself resets the kernel is held by
+/// `a_block_aligned_cut_parks_and_resets`.
 #[test]
 fn a_cut_inside_a_block_is_at_tail_plus_latency() {
     let (claimed, latency) = (10, 7);
-    let echo = Echo::new(claimed, claimed + 3, latency);
-    let mut rig = Rig::new(echo.clone());
+    let mut rig = Rig::new(Echo::new(claimed, claimed + 3, latency));
     let mut x = vec![0.0f32; BLOCK];
     for (i, s) in x.iter_mut().enumerate().take(20) {
         *s = 1.0 + i as f32;
@@ -173,26 +202,30 @@ fn a_cut_inside_a_block_is_at_tail_plus_latency() {
     let Some(Tail::Finite(ring)) = d.reported_tail else {
         panic!("finite")
     };
+    // A kernel with a finite tail and the default `tail_of` reports its ceiling whole.
+    assert_eq!(ring.get(), claimed);
     let last = d.audio[0].iter().rposition(|&s| s != 0.0);
-    // The second echo, 3 frames past the claim, would sound for 3 frames more; the cut is
-    // at 19 + ring + 7, inside the block.
-    assert_eq!(last, Some(19 + ring.get() + latency));
-    assert!(19 + ring.get() + latency < BLOCK);
+    assert_eq!(last, Some(19 + claimed + latency), "frame 36");
+    assert!(19 + claimed + latency < BLOCK);
 
-    // The cut reset the kernel: what it held when cut (the second echo, still in flight)
-    // never sounds. Faint input keeps the node running; a node that never heard the noise
-    // answers it identically.
-    let mut fresh = Rig::new(echo);
-    for _ in 0..4 {
-        let whisper = vec![1e-20; BLOCK];
-        assert_eq!(rig.block(&whisper).audio, fresh.block(&whisper).audio);
+    let whisper = vec![1e-20f32; 4 * BLOCK];
+    let mut heard = Vec::new();
+    for block in whisper.chunks(BLOCK) {
+        heard.extend(rig.block(block).audio.remove(0));
     }
+    assert_eq!(
+        heard,
+        echoes(&whisper, claimed + latency, claimed + 3 + latency)
+    );
 }
 
 /// A cut that falls on a block edge parks the node in the next block, and the park resets
-/// the kernel: the node that woke answers as a fresh one. The echo rings far past its
-/// claim, so its line still holds the impulse when the cut lands, and a node that parked
-/// without resetting would play it back.
+/// the kernel. The echo rings far past its claim (a second echo 300 frames after the
+/// input), so its line still holds the impulse when the cut lands. The node then hears
+/// silence, an impulse and an input of 1e-20 (not exactly 0.0, so it stays awake and runs
+/// the kernel), and its output is exactly the echoes of that input from a silent line: the
+/// impulse's two echoes at 63 and 343 frames and the whisper's. A node that parked without
+/// resetting would replay the first impulse's second echo and differ.
 #[test]
 fn a_block_aligned_cut_parks_and_resets() {
     // The ring the node reports for an echo of 20 frames, to land the cut at 64.
@@ -203,34 +236,31 @@ fn a_block_aligned_cut_parks_and_resets() {
         Some(Tail::Finite(n)) => n.get(),
         other => panic!("{other:?}"),
     };
+    assert_eq!(ring, 20);
     // Impulse at frame 0: the cut is at 0 + ring + latency + 1 = 64 frames.
-    let echo = Echo::new(20, 300, BLOCK - 1 - ring);
-    let mut rig = Rig::new(echo.clone());
+    let latency = BLOCK - 1 - ring;
+    let mut rig = Rig::new(Echo::new(20, 300, latency));
     let first = rig.block(&impulse_block());
     assert_eq!(first.status, Some(Status::Modified), "sound to the edge");
+    assert_eq!(
+        first.audio[0].iter().rposition(|&s| s != 0.0),
+        Some(20 + latency),
+        "the first echo is the last frame of the block"
+    );
     let second = rig.block(&[0.0; BLOCK]);
     assert_eq!(
         second.status,
         Some(Status::Idle),
         "parked in the next block"
     );
-    // A node that never heard the impulse. The same silence then an impulse to both: the
-    // woken node must not play back the one the cut left in its line.
-    let mut fresh = Rig::new(echo);
+    let mut x = vec![0.0f32; 3 * BLOCK];
+    x.extend(impulse_block());
+    x.extend(vec![1e-20f32; 8 * BLOCK]);
     let mut woken = Vec::new();
-    let mut new = Vec::new();
-    for b in 0..12 {
-        // Silence, then input that is faint but never exactly silent (so the node stays
-        // awake and the kernel runs on): an impulse, then a whisper.
-        let x = match b {
-            0..=2 => vec![0.0; BLOCK],
-            3 => impulse_block(),
-            _ => vec![1e-20; BLOCK],
-        };
-        woken.extend(rig.block(&x).audio.remove(0));
-        new.extend(fresh.block(&x).audio.remove(0));
+    for block in x.chunks(BLOCK) {
+        woken.extend(rig.block(block).audio.remove(0));
     }
-    assert_eq!(woken, new);
+    assert_eq!(woken, echoes(&x, 20 + latency, 300 + latency));
 }
 
 /// The graph's mix aligns the dry input to the kernel's declared latency, never to the tail

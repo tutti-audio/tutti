@@ -5,7 +5,7 @@ use crate::reverb::network::{Band, Fdn, Matrix, Network, Stage};
 use crate::{Lti as _, System as _};
 
 fn freezable() -> FdnLayout {
-    FdnLayout::new(8, MaxDecay::DEFAULT.get(), true).unwrap()
+    FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap()
 }
 
 fn base() -> FdnControls {
@@ -145,7 +145,7 @@ fn lengths_are_whole_frames_that_grow_with_size_and_rate() {
 #[test]
 fn the_input_feeds_every_line_and_the_ears_take_alternate_lines() {
     for n in [2usize, 8, 16] {
-        let d = FdnLayout::new(n, Seconds(2.0), false).unwrap();
+        let d = FdnLayout::new(n, MaxDecay::of(Seconds(2.0)), false).unwrap();
         let net = design_of(&d, &base());
         let f = fdn_of(&net);
         let input = 1.0 / (n as f32).sqrt();
@@ -170,20 +170,14 @@ fn the_input_feeds_every_line_and_the_ears_take_alternate_lines() {
     }
 }
 
-/// The configuration refuses what the network cannot hold.
+/// The configuration refuses a line count the network cannot hold: it is 2 to 16 and even.
 #[test]
-fn a_configuration_refuses_what_it_cannot_hold() {
-    let ok = Seconds(8.0);
+fn a_configuration_refuses_a_line_count_it_cannot_hold() {
+    let ok = MaxDecay::DEFAULT;
     assert!(FdnLayout::new(8, ok, false).is_some());
     assert!(FdnLayout::new(16, ok, true).is_some());
     for lines in [0, 1, 7, 17, 18] {
         assert!(FdnLayout::new(lines, ok, false).is_none(), "{lines}");
-    }
-    for bad in [0.0, 0.01, 60.001, f32::NAN, f32::INFINITY] {
-        assert!(
-            FdnLayout::new(8, Seconds::from_f32(bad), false).is_none(),
-            "{bad}"
-        );
     }
 }
 

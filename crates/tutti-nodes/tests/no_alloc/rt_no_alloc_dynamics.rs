@@ -90,7 +90,7 @@ fn compressor_stereo_process_is_allocation_free() {
 }
 
 /// The compressor's lane path with every cell moving too: the threshold port fed a per-frame
-/// ramp with a NaN frame (the `Inputs` lane the recurrence reads), and each block writes
+/// ramp with a NaN frame (the `ControlLanes` lane the kernel reads per frame), and each block writes
 /// the ratio, the times, the knee and the makeup (a new design on the stream grid, the makeup
 /// gliding) through the `ParamSet`, 6 channels, 2 000 blocks under `assert_no_alloc`.
 #[test]
@@ -275,8 +275,8 @@ fn limiter_node_burst_and_release_are_allocation_free() {
     );
 }
 
-/// The brickwall with its ceiling port fed a per-frame ramp (the `Inputs` lane the
-/// recurrence reads each frame), 6 channels, 1 000 blocks under `assert_no_alloc`.
+/// The brickwall with its ceiling port fed a per-frame ramp (the `ControlLanes` lane the
+/// kernel reads each frame), 6 channels, 1 000 blocks under `assert_no_alloc`.
 /// `Direct` feeds the port, which `BlockRig` cannot.
 #[test]
 fn brickwall_limiter_fed_ceiling_process_is_allocation_free() {

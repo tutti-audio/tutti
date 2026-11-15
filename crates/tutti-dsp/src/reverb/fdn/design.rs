@@ -140,22 +140,18 @@ impl FdnLayout {
     const LINES: usize = 8;
 
     /// A design of `lines` lines (2 to 16, even: half feed each ear), RT60s up
-    /// to `max_decay` (at most [`MaxDecay::CAP`]), which holds its tail
-    /// on a freeze if `freezable`. `None` when the figures are out of range.
+    /// to `max_decay`, which holds its tail on a freeze if `freezable`. `None`
+    /// when `lines` is out of range (`max_decay` is range-checked by its type).
     ///
     /// **A design that can freeze has an unbounded tail reach**, so a node
     /// of it never has a finite tail to declare to an export (which spends the
     /// whole cap): freeze is opt-in for that reason.
     #[must_use]
-    pub fn new(lines: usize, max_decay: Seconds, freezable: bool) -> Option<Self> {
-        let ok = (2..=LENGTHS.len()).contains(&lines)
-            && lines.is_multiple_of(2)
-            && max_decay.get().is_finite()
-            && max_decay.get() >= MIN_DECAY.get()
-            && max_decay.get() <= MaxDecay::CAP.get();
+    pub fn new(lines: usize, max_decay: MaxDecay, freezable: bool) -> Option<Self> {
+        let ok = (2..=LENGTHS.len()).contains(&lines) && lines.is_multiple_of(2);
         ok.then_some(Self {
             lines,
-            max_decay,
+            max_decay: max_decay.get(),
             freezable,
         })
     }

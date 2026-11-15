@@ -78,7 +78,7 @@ fn the_general_midi_chorus_cannot_recirculate() {
     }
 }
 
-/// The ceiling holds against a raw write to the cell, which the family's own clamp
+/// The ceiling holds against a raw write to the cell, which the kernel's own clamp
 /// meets: -0.9 (a negative would recirculate with a flipped sign) and 5.0 (past any
 /// ceiling) both leave the line a pure delay, so the declared finite tail stays true.
 #[test]

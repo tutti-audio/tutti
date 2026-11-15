@@ -52,7 +52,10 @@ fn the_tail_is_pre_delay_transit_and_the_decay_to_the_floor() {
         Matrix::Diagonal,
     ))]);
     n.pre_delay = Samples(4_800);
-    let seconds = |floor| n.tail(Db(floor)).seconds().unwrap().get();
+    let seconds = |floor| match n.tail(Db(floor)) {
+        Ring::Finite(s) => s.get(),
+        Ring::Unbounded => panic!("a damped line rings out"),
+    };
     assert!((seconds(-60.0) - 3.1).abs() < 1e-5, "{}", seconds(-60.0));
     assert!((seconds(-30.0) - 2.1).abs() < 1e-5);
     assert!((seconds(-90.0) - 4.1).abs() < 1e-5);
@@ -71,7 +74,10 @@ fn a_series_all_pass_rings_for_its_geometric_train() {
         form: AllPassForm::Lattice,
     };
     let n = network(&[Stage::AllPass(Inline::from_slice(&[ap, ap]).unwrap())]);
-    let t = n.tail(Db(-60.0)).seconds().unwrap().get();
+    let Ring::Finite(t) = n.tail(Db(-60.0)) else {
+        panic!("an all-pass chain rings out")
+    };
+    let t = t.get();
     assert!((t - 1100.0 / 48_000.0).abs() < 1e-7, "{t}");
     assert_eq!(n.rt60(Band::Low).get(), 0.0);
     assert!(n.is_stable() && !n.is_lossless());

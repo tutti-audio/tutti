@@ -342,7 +342,7 @@ mod tests {
     }
 
     /// A fork starts from the values last set through the node's `ParamSet` and shares no
-    /// cell with it, and the set has the three controls in the family's order.
+    /// cell with it, and the set has the three controls in the kernel's order.
     #[test]
     fn a_fork_starts_from_the_authored_values_and_shares_nothing() {
         let node = PhaserNode::stereo(Stages::of(4), PhaserControls::DEFAULT);
@@ -557,7 +557,7 @@ mod tests {
     /// and the feedback written between two blocks at frame 1024 (a multiple of every block
     /// below) give the same render in blocks of 1, 16, 64, 128 and 1024 (the node against
     /// itself under cuts), because the reader takes each whole at the grid and the
-    /// recurrence's glides are on the stream's clock, not a block's. And the move is heard.
+    /// kernel's glides are on the stream's clock, not a block's. And the move is heard.
     #[test]
     fn a_moved_cell_lands_on_the_grid_whatever_the_blocks() {
         let len = 4_096;

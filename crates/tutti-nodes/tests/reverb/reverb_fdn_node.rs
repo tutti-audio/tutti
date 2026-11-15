@@ -31,7 +31,7 @@ fn plain() -> FdnLayout {
 }
 
 fn freezable() -> FdnLayout {
-    FdnLayout::new(8, Seconds(8.0), true).unwrap()
+    FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap()
 }
 
 fn live(layout: FdnLayout, c: FdnControls) -> FdnNode {
@@ -611,7 +611,7 @@ fn the_declared_tail_is_within_the_graphs_bound_or_unbounded() {
         default.get() < 2_000_000,
         "nothing stretches the ceiling: {default:?}"
     );
-    let nineteen = FdnLayout::new(8, Seconds(19.0), false).unwrap();
+    let nineteen = FdnLayout::new(8, MaxDecay::of(Seconds(19.0)), false).unwrap();
     let Tail::Finite(long) = at(nineteen, SampleRate::SR_48K) else {
         panic!("a finite ceiling")
     };
@@ -619,6 +619,6 @@ fn the_declared_tail_is_within_the_graphs_bound_or_unbounded() {
         long <= MAX_NODE_TAIL && long.get() as f64 > 19.0 * 48_000.0,
         "{long:?}"
     );
-    let cap = FdnLayout::new(16, MaxDecay::CAP, false).unwrap();
+    let cap = FdnLayout::new(16, MaxDecay::new(MaxDecay::CAP).unwrap(), false).unwrap();
     assert_eq!(at(cap, SampleRate::SR_192K), Tail::Unbounded);
 }

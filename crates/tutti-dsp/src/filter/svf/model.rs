@@ -333,7 +333,7 @@ impl Lti for SvfModel {
     /// The peak of `|H|`, found on a grid of 1024 frequencies and a log-spaced
     /// run around the resonance (the pole's angle) and refined by golden section
     /// at the largest, then raised by a part in a million: a sufficient bound to
-    /// that figure, which the contract holds against its own grid.
+    /// that figure.
     fn hinf_norm(&self) -> f64 {
         let nyquist = PI;
         let mut pts: Vec<f64> = (0..=1024)

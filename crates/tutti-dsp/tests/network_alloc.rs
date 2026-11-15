@@ -51,11 +51,11 @@ fn freeverb_aims_and_renders_without_allocating() {
 #[test]
 fn the_fdn_aims_and_renders_without_allocating() {
     use tutti_buffers::{Planes, PlanesMut};
-    use tutti_dsp::{FdnBank, FdnControls, FdnLayout};
+    use tutti_dsp::{FdnBank, FdnControls, FdnLayout, MaxDecay};
     use tutti_types::{Db, Depth, Hz, StereoWidth};
 
     let rate = SampleRate::SR_48K;
-    let layout = FdnLayout::new(8, Seconds(8.0), true).unwrap();
+    let layout = FdnLayout::new(8, MaxDecay::DEFAULT, true).unwrap();
     let mut bank = FdnBank::new(&layout, rate);
     let mut glides = bank.glides();
     let input = vec![0.25f32; 64];

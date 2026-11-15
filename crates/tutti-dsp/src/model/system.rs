@@ -16,17 +16,6 @@ pub enum Ring {
     Unbounded,
 }
 
-impl Ring {
-    /// The finite figure, or `None` for [`Unbounded`](Self::Unbounded).
-    #[must_use]
-    pub fn seconds(self) -> Option<Seconds> {
-        match self {
-            Ring::Finite(s) => Some(s),
-            Ring::Unbounded => None,
-        }
-    }
-}
-
 /// A causal system from input signals to output signals:
 /// the base of every processor class. It answers where the response to a unit
 /// impulse starts and where it effectively ends.

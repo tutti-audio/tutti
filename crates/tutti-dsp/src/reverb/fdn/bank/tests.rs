@@ -2,6 +2,7 @@ use tutti_buffers::{Planes, PlanesMut};
 use tutti_types::{Db, Depth, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
 
 use super::*;
+use crate::MaxDecay;
 use crate::reverb::network::{Fdn, Network, Stage};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -21,7 +22,7 @@ fn still(f: impl FnOnce(&mut FdnControls)) -> FdnControls {
 }
 
 fn layout(lines: usize, freezable: bool) -> FdnLayout {
-    FdnLayout::new(lines, Seconds(8.0), freezable).unwrap()
+    FdnLayout::new(lines, MaxDecay::DEFAULT, freezable).unwrap()
 }
 
 /// A bank of `layout` at `rate`, landed on `c`.

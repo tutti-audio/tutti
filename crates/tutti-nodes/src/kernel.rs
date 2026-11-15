@@ -1,4 +1,4 @@
-//! [`Kernel`]: what a family of effects tells the one node that runs it, and
+//! [`Kernel`]: what an effect tells the one node that runs it, and
 //! [`KernelNode`], that node.
 //!
 //! A kernel is the effect's algorithm with its state: it designs itself from its plain

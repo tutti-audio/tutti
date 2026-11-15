@@ -11,7 +11,7 @@
 /// sweep moves at, so the interpolation error is a small fraction of the change
 /// between two solves. Measured against the per-sample solve: 3e-5 worst on a
 /// 200 Hz → 8 kHz cutoff sweep in 85 ms (4.6e-4 at 64 samples; exactly 0 at
-/// 1), 3.5e-6 on a 2 Hz phaser. (Every family solves on the stream's grid, not
+/// 1), 3.5e-6 on a 2 Hz phaser. (Every bank solves on the stream's grid, not
 /// from a block's start: a control is in the render up to 16 frames
 /// after it was sampled, wherever the blocks fall.)
 pub const COEFF_INTERVAL: usize = 16;
