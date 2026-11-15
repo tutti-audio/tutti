@@ -262,62 +262,105 @@ fn a_crossed_range_on_a_circular_param_is_refused() {
         .expect("an arc, and a line's crossed bounds, commit");
 }
 
-/// The bearing a port reads through its declick: a probe whose base is
-/// `base` runs one block alone, then a source that steps to `target` on the
-/// next block's first frame is connected, so the port fades from the base to
-/// the source over the declick. The next block's frames, on `workers`
-/// participants (1: the serial executor).
+/// How many independent probes the declick graph has: wide and heavy enough
+/// that the pool's schedule runs it in parallel.
+const WIDTH: u64 = 24;
+
+/// A `Probe` that spends 40 microseconds a block, so a wide graph of them pays
+/// for the pool.
+#[derive(Clone)]
+struct Heavy(Probe);
+
+impl Node for Heavy {
+    fn shape(&self) -> Shape {
+        self.0.shape()
+    }
+    fn prepare(&mut self, p: &Prepare) {
+        self.0.prepare(p);
+    }
+    fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
+        let t = std::time::Instant::now();
+        while t.elapsed() < std::time::Duration::from_micros(40) {
+            std::hint::spin_loop();
+        }
+        self.0.process(cx, io)
+    }
+    fn reset(&mut self) {}
+    fn param_base(&self, port: usize) -> Option<f32> {
+        self.0.param_base(port)
+    }
+}
+
+/// The bearings [`WIDTH`] independent probes read through their declick:
+/// each has base `base` and runs one block alone, then a source that steps
+/// to `target` on the next block's first frame is connected to all, so each
+/// port fades from the base to the source over the declick. The next block's
+/// frames of the first probe, on `workers` participants (1: the serial
+/// executor); every probe reads the same.
 fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
     let (mut ed, mut exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples(256))));
     if workers > 1 {
-        exec.set_pool(Some(common::TestPool::new(workers)));
+        exec.set_pool(Some(common::test_pool(workers)));
     }
-    ed.insert(NodeKey(PROBE), "probe", Unforkable(Probe(base)));
+    let probe = |k: u64| NodeKey(PROBE + k);
+    for k in 0..WIDTH {
+        ed.insert(probe(k), "probe", Unforkable(Heavy(Probe(base))));
+    }
     let step = ParamSegment::unit(UnitParam::Azimuth, target, target, Samples(0), Law::Linear);
     ed.insert(
         NodeKey(SENDER),
         "sender",
         Unforkable(Sender(vec![(64, step)])),
     );
-    ed.spec_mut().topology.set_outputs([Source::Node(OutPort {
-        node: NodeKey(PROBE),
-        port: 0,
-    })]);
+    ed.spec_mut().topology.set_outputs((0..WIDTH).map(|k| {
+        Source::Node(OutPort {
+            node: probe(k),
+            port: 0,
+        })
+    }));
     ed.commit().expect("commits");
-    let mut one = |frames: usize| {
-        let mut out = vec![0.0; frames];
-        exec.process(
-            frames,
-            &TransportPosition::default(),
-            &[],
-            &mut [&mut out[..]],
-        );
+    let run = |ed: &mut Editor, exec: &mut Executor, frames: usize| {
+        let mut chans = vec![vec![0.0f32; frames]; WIDTH as usize];
+        let mut outs: Vec<&mut [f32]> = chans.iter_mut().map(Vec::as_mut_slice).collect();
+        exec.process(frames, &TransportPosition::default(), &[], &mut outs);
         ed.collect();
-        out
+        chans
     };
+    let first = run(&mut ed, &mut exec, 64);
     assert!(
-        one(64).iter().all(|&v| v == base),
+        first.iter().flatten().all(|&v| v == base),
         "undriven reads the base"
     );
-    drop(one);
-    ed.spec_mut().connect_param(
-        at(UnitParam::Azimuth),
-        EventOut {
-            node: NodeKey(SENDER),
-            port: 0,
-        },
-    );
+    for k in 0..WIDTH {
+        ed.spec_mut().connect_param(
+            ParamIn {
+                node: probe(k),
+                param: UnitParam::Azimuth.into(),
+            },
+            EventOut {
+                node: NodeKey(SENDER),
+                port: 0,
+            },
+        );
+    }
     ed.commit().expect("commits");
     exec.apply_pending();
-    let mut out = vec![0.0; 256];
-    exec.process(256, &TransportPosition::default(), &[], &mut [&mut out[..]]);
-    out
+    assert_eq!(exec.is_parallel(), workers > 1, "{workers} workers");
+    let out = run(&mut ed, &mut exec, 256);
+    for c in &out {
+        assert_eq!(
+            c.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            out[0].iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            "the probes read alike"
+        );
+    }
+    out.into_iter().next().expect("a probe")
 }
 
 /// A bearing's declick between 170 and -170 (and back) crosses at 180 along the
 /// short arc, `wrap(hold + arc · gain)`: no frame of the fade is near 0 as an
-/// equal-amplitude blend of the two bearings would be, and the pool's render
-/// is the serial one bit for bit.
+/// equal-amplitude blend of the two bearings would be, and the pool's render,
+/// which runs in parallel, is the serial one bit for bit.
 #[test]
 fn a_bearings_declick_crosses_the_seam_and_the_pool_agrees_bit_for_bit() {
     let d = tutti_graph::declick_frames(RATE).get();

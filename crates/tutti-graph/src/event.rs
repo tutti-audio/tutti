@@ -455,7 +455,9 @@ impl ParamSegment {
         if self.foreign {
             return None;
         }
-        UnitParam::try_from((self.id & 0xFF) as u16).ok()
+        u16::try_from(self.id)
+            .ok()
+            .and_then(|id| UnitParam::try_from(id & 0xFF).ok())
     }
 
     /// The raw position and length, for the graph's own param port, which is

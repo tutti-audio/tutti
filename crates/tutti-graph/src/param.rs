@@ -344,6 +344,7 @@ impl ParamRange {
 /// a block's loop constrains values by, with the arc's centre and half-span
 /// worked out once.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum RangeView {
     /// A line: values are clamped to `lo..=hi`.
     Line {
@@ -358,7 +359,7 @@ pub enum RangeView {
     Arc {
         /// The arc's middle, in degrees (not wrapped).
         centre: f32,
-        /// Its half-span, in `0..180`.
+        /// Its half-span, in `0..180` (0 included: a single bearing).
         half: f32,
     },
 }
@@ -1074,13 +1075,14 @@ impl ParamState {
             }
         }
         if fading {
+            let circular = param.param.is_circular();
             for (i, o) in out.iter_mut().enumerate() {
                 let j = st.fade + i;
                 if j >= d {
                     break;
                 }
                 let (out, inn) = FadeLaw::EqualAmplitude.gains(j, d);
-                *o = if param.param.is_circular() {
+                *o = if circular {
                     // A crossfade of two bearings would sweep through the
                     // mean; the fade turns the short arc by the incoming gain.
                     param
