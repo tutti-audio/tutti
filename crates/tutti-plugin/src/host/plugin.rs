@@ -703,21 +703,27 @@ impl PluginRebinder {
         &self,
         main: MainThreadMarker,
     ) -> std::result::Result<Option<BoundPlugin>, tutti_plugin_host::RebindError> {
-        let bound = match &self.placed {
-            RebinderPlaced::Served(r) => {
-                r.check_ports()?;
-                return Ok(None);
-            }
+        // A build with no in-process format has only the served arm.
+        let _ = main;
+        match &self.placed {
+            RebinderPlaced::Served(r) => r.check_ports().map(|()| None),
             #[cfg(feature = "vst2")]
-            RebinderPlaced::Vst2(r) => BoundPlaced::Vst2(Box::new(r.rebind(main)?)),
+            RebinderPlaced::Vst2(r) => Ok(Some(BoundPlugin {
+                bound: BoundPlaced::Vst2(Box::new(r.rebind(main)?)),
+            })),
             #[cfg(feature = "clap")]
-            RebinderPlaced::Clap(r) => BoundPlaced::Clap(Box::new(r.rebind(main)?)),
+            RebinderPlaced::Clap(r) => Ok(Some(BoundPlugin {
+                bound: BoundPlaced::Clap(Box::new(r.rebind(main)?)),
+            })),
             #[cfg(feature = "vst3")]
-            RebinderPlaced::Vst3(r) => BoundPlaced::Vst3(Box::new(r.rebind(main)?)),
+            RebinderPlaced::Vst3(r) => Ok(Some(BoundPlugin {
+                bound: BoundPlaced::Vst3(Box::new(r.rebind(main)?)),
+            })),
             #[cfg(all(feature = "au", target_os = "macos"))]
-            RebinderPlaced::Au(r) => BoundPlaced::Au(Box::new(r.rebind(main)?)),
-        };
-        Ok(Some(BoundPlugin { bound }))
+            RebinderPlaced::Au(r) => Ok(Some(BoundPlugin {
+                bound: BoundPlaced::Au(Box::new(r.rebind(main)?)),
+            })),
+        }
     }
 }
 
