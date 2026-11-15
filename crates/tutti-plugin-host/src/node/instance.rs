@@ -296,7 +296,7 @@ impl<F: Loaded> Instance<F> {
         }
     }
 
-    /// The flag [`is_lost`](Self::is_lost) sets, shared with the nodes over this
+    /// The flag [`lost_flag`](Self::lost_flag) shares: set when the lifecycle poisons, shared with the nodes over this
     /// instance.
     pub(super) fn lost_flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.lost)
