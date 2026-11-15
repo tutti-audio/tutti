@@ -11,7 +11,6 @@
 //! The suite needs the `snd-seq` module and a `Midi Through` client
 //! (`sudo modprobe snd-seq-dummy`) and fails without them.
 
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -19,7 +18,7 @@ use super::listener::Listener;
 
 use tutti_fixtures::midi::{note_off, note_on};
 use tutti_graph::{EventCapacity, Offset};
-use tutti_midi_hardware::{DeviceInfo, DeviceInlets, MidiSession, OpenOutput};
+use tutti_midi_hardware::{DeviceInfo, InputInlets, MidiSession, OpenOutput};
 use tutti_ump::{KeyEvent, MidiChannel, Ump};
 
 /// Whether `ev` starts a note, in either protocol.
@@ -42,12 +41,8 @@ struct Loopback {
 }
 
 fn open() -> Loopback {
-    // One inlet slot, 256 events, each placed 20 ms after it arrived.
-    let inlets = DeviceInlets::new(
-        NonZeroUsize::MIN,
-        EventCapacity::of(256),
-        Duration::from_millis(20),
-    );
+    // 256 events, each placed 20 ms after it arrived.
+    let inlets = InputInlets::new(EventCapacity::of(256), Duration::from_millis(20));
     let mut graph = Listener::over(&inlets);
     let mut io = MidiSession::open(Arc::clone(&inlets)).expect("open MIDI");
     let inputs = io.inputs();
@@ -55,9 +50,13 @@ fn open() -> Loopback {
     let (Some(inp), Some(out)) = (pick(&inputs), pick(&outputs)) else {
         panic!("no `Midi Through` port: `sudo modprobe snd-seq-dummy`");
     };
-    io.connect_input(&inp.id, tutti_midi_hardware::InputTiming::Arrival)
-        .expect("connect input");
-    graph.apply();
+    let tutti_midi_hardware::Connected::Opened(inlet) = io
+        .connect_input(&inp.id, tutti_midi_hardware::InputTiming::Arrival)
+        .expect("connect input")
+    else {
+        panic!("a new input opens");
+    };
+    graph.attach(inlet);
     let sink = io.connect_output(&out.id).expect("connect output");
     std::thread::sleep(Duration::from_millis(200));
     // Whatever was buffered before the test.

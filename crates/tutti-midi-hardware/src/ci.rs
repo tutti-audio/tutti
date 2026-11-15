@@ -543,18 +543,7 @@ impl Ci {
     /// Asks that the peer of `switch` be sent it at the next poll, after
     /// checking the peer still lists the Profile at that address.
     pub(crate) fn set_profile(&mut self, switch: ProfileSwitch) -> Result<(), ProfileError> {
-        let peer = self
-            .profiles
-            .iter()
-            .find(|p| p.group() == switch.group && p.muid() == switch.muid)
-            .ok_or(ProfileError::NoSuchPeer)?;
-        let address = match switch.switch {
-            Switch::On(target) => target.address(),
-            Switch::Off(address) => address,
-        };
-        if peer.table().get(address, switch.profile).is_none() {
-            return Err(ProfileError::NotListed);
-        }
+        switch.check(&self.profiles)?;
         self.queue.push(switch);
         Ok(())
     }
@@ -567,9 +556,7 @@ impl Ci {
     /// Asks that the peer of `ask` be sent its request at the next poll, after
     /// checking it is still one that supports MIDI Message Report.
     pub(crate) fn report(&mut self, ask: ReportAsk) -> Result<(), ReportError> {
-        if !self.reporters.contains(&ask.peer) {
-            return Err(ReportError::NoSuchPeer);
-        }
+        ask.check(&self.reporters)?;
         self.reports.push(ask);
         Ok(())
     }
@@ -1328,7 +1315,6 @@ fn send(out: &mut OpenOutput, sends: &[(MidiGroup, CiMessage)]) -> Losses {
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroUsize;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -1356,8 +1342,7 @@ mod tests {
     /// As [`output`], the device taking `room` packets in all.
     fn output_taking(room: usize) -> (OpenOutput, FakeCounters) {
         let (backend, counters) = FakeBackend::build_with(vec![], vec![], room);
-        let inlets = tutti_midi_runtime::DeviceInlets::new(
-            NonZeroUsize::new(4).unwrap(),
+        let inlets = tutti_midi_runtime::InputInlets::new(
             tutti_graph::EventCapacity::of(64),
             Duration::ZERO,
         );
@@ -1683,8 +1668,7 @@ mod tests {
     /// The id of a fake device.
     fn device_id() -> DeviceId {
         let (backend, counters) = FakeBackend::build_with(vec![], vec![], usize::MAX);
-        let inlets = tutti_midi_runtime::DeviceInlets::new(
-            NonZeroUsize::new(4).unwrap(),
+        let inlets = tutti_midi_runtime::InputInlets::new(
             tutti_graph::EventCapacity::of(64),
             Duration::ZERO,
         );

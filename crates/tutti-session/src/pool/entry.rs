@@ -64,15 +64,13 @@ pub trait PoolEntry: Send + 'static {
     /// once the entry is released or swapped to another identity.
     fn handle(loaded: &Self::Loaded, life: &Life) -> Self::Handle;
 
-    /// Whether the live thing behind a loaded value is gone: what a peer
-    /// handle reads as [`Presence::Lost`] (a plugin that gave up, a capture
-    /// whose device left). The kind decides presence; the pool only asks, and
-    /// [`Session::retry`](crate::Session::retry) reopens such an entry by
-    /// running [`load`](Self::load) again.
+    /// Whether the entry is lost in a way only `retry` recovers: when true, its
+    /// handle's presence is `Lost`. A kind that recovers by itself (a port that
+    /// re-opens when its device returns) can read `Lost` while this is false.
     ///
-    /// This is the one definition: a handle's `presence()` must read `Lost`
-    /// exactly when `is_lost` is true of the loaded value it was made from,
-    /// by calling it or by reading the same state. The default is `false`: a
+    /// The kind decides; the pool only asks, and
+    /// [`Session::retry`](crate::Session::retry) reopens an entry for which it
+    /// is true by running [`load`](Self::load) again. The default is `false`: a
     /// data kind is never lost.
     fn is_lost(_loaded: &Self::Loaded) -> bool {
         false
@@ -409,6 +407,10 @@ pub enum LoadError {
     #[cfg(feature = "soundfont")]
     #[error(transparent)]
     SoundFont(Arc<tutti_sf2::Error>),
+    /// A MIDI port could not be opened.
+    #[cfg(feature = "midi-hardware")]
+    #[error(transparent)]
+    Midi(Arc<crate::MidiPortError>),
     /// A plugin did not open.
     #[cfg(feature = "plugin")]
     #[error(transparent)]
@@ -502,6 +504,14 @@ pub struct Declared<K, E> {
     key: K,
     pub(crate) entry: E,
     share: Option<Cloner>,
+}
+
+impl<K, E> Declared<K, E> {
+    /// The entry, for a kind's builder to set its options on.
+    #[cfg(feature = "midi-hardware")]
+    pub(crate) fn entry_mut(&mut self) -> &mut E {
+        &mut self.entry
+    }
 }
 
 impl<K, E: PoolEntry> Declared<K, E> {
