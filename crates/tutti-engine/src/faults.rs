@@ -141,7 +141,7 @@ impl StreamFaults {
     ///
     /// Lock-free. A per-frame consumer compares this against what it saw last
     /// and calls [`last`](Self::last) only when it moved. The message of a
-    /// fault recorded while `last` was being read is dropped, so `last` can
+    /// fault recorded while the slots were being read is dropped, so `last` can
     /// lag the count.
     pub fn count(&self) -> u64 {
         self.count.load(Ordering::Acquire)
@@ -188,7 +188,7 @@ impl StreamFaults {
 
     /// Records a fault from the backend's error callback: `kind` is the
     /// driver's reading of `err`, which supplies the message. Never waits: if
-    /// another thread holds `last`, the message is dropped and the count still
+    /// another thread holds the slots, the message is dropped and the count still
     /// moves. Written message, then `disconnected`, then `count`, so a reader
     /// that sees the count also sees the message.
     ///

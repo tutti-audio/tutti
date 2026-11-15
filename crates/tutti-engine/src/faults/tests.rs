@@ -1,6 +1,6 @@
 use super::*;
 
-/// `record` must never wait on a reader holding `last`: it counts the fault
+/// `record` must never wait on a reader holding the slots: it counts the fault
 /// and drops the message.
 #[test]
 fn record_while_last_is_locked_counts_and_returns() {
