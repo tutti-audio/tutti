@@ -279,11 +279,11 @@ pub use order::{StableOrder, insertion_sort_by_key};
 pub use points::{PointBuf, PointPool};
 pub use process_wake::ProcessWake;
 pub use requests::{Edit, EditDrain, EditQueue, EditSink, edits, taken};
-pub use state_frame::{FrameReader, Opened, StateFrame, StateFrameError, Unframed};
+pub use state_frame::{BareFrame, FrameReader, Opened, StateFrame, StateFrameError};
 pub use state_use::StateUse;
 pub use track_info::{TrackInfo, TrackKind};
 pub use transport_request::TransportRequest;
-pub use version::PluginVersion;
+pub use version::{EmptyVersionText, PluginVersion, VersionText};
 // Exported as `PluginResult` only: the bare name `Result` shadows std's under a
 // glob import.
 pub use error::{Delivered, PluginError, PresetError, Result as PluginResult, StateError};

@@ -135,44 +135,31 @@ fn a_plugins_flat_channel_counts_match_its_bus_zero() {
     println!("checked {checked} plugin(s)");
 }
 
-/// A plugin's reported version comes from the plugin, not from a literal.
+/// A plugin's reported version is the one its class declares, verbatim.
 ///
-/// The real string is on `PClassInfoW::version` (e.g. `"1.0.0.512"`,
-/// Major.Minor.Subversion.Build). `vendor` sits beside it, and the header calls
-/// that field an *overwrite* of the factory's (`ipluginbase.h:357`) — reading
-/// only the factory's would credit a distributor rather than the maker.
-///
-/// Asserted as "at least one plugin disagrees with a `"1.0.0"` placeholder"
-/// rather than per-plugin: a plugin that genuinely is version 1.0.0, or that
-/// declares none (`PluginVersion::Absent`), is not a bug. What would be a bug is *every*
-/// plugin agreeing with the placeholder, which a hardcoded version guarantees.
+/// The corpus is the in-repo `audio-probe`, which this crate builds and whose factory
+/// declares `PClassInfo2::version` as `FULL_VERSION_STR`, `"3.8.0.0"` in the generated
+/// `projectversion.h`. Neither the host's old `"1.0.0"` placeholder nor an absent version
+/// is that string, so a host that invents or drops it fails here. `vendor` sits beside it,
+/// and the header calls that field an *overwrite* of the factory's (`ipluginbase.h:357`).
 #[test]
 fn a_plugins_version_is_read_from_it_rather_than_assumed() {
     let mut loaded = 0;
-    let mut non_placeholder = 0;
-
     for path in corpus_or_fail() {
         let library = resolve_bundle(&path);
         let Ok(plugin) = Active::<f32>::load(&library, 48_000.0, 64) else {
             continue;
         };
         let info = plugin.loaded().plugin_info();
-        println!(
-            "{}: version={:?} vendor={:?}",
-            info.name, info.version, info.vendor
-        );
         loaded += 1;
-        if info.version.to_string() != "1.0.0" {
-            non_placeholder += 1;
-        }
+        assert_eq!(
+            info.version,
+            tutti_plugin_types::PluginVersion::text("3.8.0.0"),
+            "{}: the class declares 3.8.0.0",
+            info.name
+        );
     }
-
     assert!(loaded > 0, "no VST3 plugin in the corpus could be loaded");
-    assert!(
-        non_placeholder > 0,
-        "every one of {loaded} plugins reported exactly \"1.0.0\" — the version \
-         is being assumed rather than read from PClassInfoW"
-    );
 }
 
 /// A plugin's subcategories are read from it rather than left blank.

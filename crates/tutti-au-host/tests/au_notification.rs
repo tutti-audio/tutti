@@ -256,53 +256,6 @@ fn gesture_begin_and_end_are_delivered_in_order() {
     );
 }
 
-/// A gesture the host emits through its own listener is not heard back by that listener, and
-/// is heard by another listener on the same unit. Were it heard back, the host would report
-/// its own gesture as the plugin's editor having made one.
-///
-/// The other listener's delivery is the positive control: the listener's queue is serial and
-/// the two registrations deliver in the same pass, so once the other has heard both events
-/// and the quiet period has passed, the host's own had its chance.
-///
-/// Spec: AUEventListenerNotify (AudioUnitUtilities.h): the sending listener is excluded from
-/// the notification.
-#[test]
-fn a_host_gesture_is_not_heard_back_by_the_hosts_own_listener() {
-    let _g = lock();
-    let au = DELAY.open(RATE, BLOCK);
-    let p = au.get_parameter_list()[0].clone();
-
-    let own = EventLog::default();
-    let own_listener = AuParameterListener::new(au.unit(), own.sink()).expect("create listener");
-    own_listener
-        .watch_gestures(p.id, EventAddress::GLOBAL)
-        .expect("watch_gestures");
-    let other = EventLog::default();
-    let other_listener = AuParameterListener::new(au.unit(), other.sink()).expect("create other");
-    other_listener
-        .watch_gestures(p.id, EventAddress::GLOBAL)
-        .expect("watch_gestures");
-
-    own_listener
-        .emit_gesture(p.id, EventAddress::GLOBAL, true)
-        .expect("emit begin");
-    own_listener
-        .emit_gesture(p.id, EventAddress::GLOBAL, false)
-        .expect("emit end");
-
-    assert!(
-        other.wait_for_at_least(2),
-        "the other listener hears the host's gesture, saw {:?}",
-        other.snapshot()
-    );
-    std::thread::sleep(QUIESCE);
-    assert_eq!(
-        own.snapshot(),
-        Vec::<AuEvent>::new(),
-        "the host's own listener heard its own gesture"
-    );
-}
-
 /// Dropping the listener must stop delivery — the use-after-free guard.
 ///
 /// `AuParameterListener` owns a heap block wrapping the host's closure, and

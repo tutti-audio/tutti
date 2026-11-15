@@ -510,30 +510,6 @@ impl AuParameterListener {
         .map_err(Error::from)
     }
 
-    /// Emits a gesture boundary of the **host's own** to every listener **but this
-    /// one** (`AUEventListenerNotify` with this listener as the sender, which the
-    /// header excludes), so the host's gesture does not come back through its own
-    /// listener as if the plugin's editor had made it. The plugin's editor and every
-    /// other listener hear it. [`emit_gesture`] is the form with no sender, for a
-    /// gesture that is not the host's.
-    ///
-    /// # Errors
-    /// Returns the `OSStatus` if AudioToolbox refuses.
-    pub fn emit_gesture(
-        &self,
-        id: AudioUnitParameterID,
-        address: EventAddress,
-        begin: bool,
-    ) -> Result<()> {
-        let event = gesture_event(self.parameter(id, address), begin);
-        // SAFETY: `event` is live for the call, `self.listener` is live for `&self`,
-        // and a null sending object is the documented "none".
-        check("AUEventListenerNotify", unsafe {
-            AUEventListenerNotify(self.listener, std::ptr::null_mut(), &event)
-        })
-        .map_err(Error::from)
-    }
-
     /// Delivers [`AuEvent::BeginGesture`] and [`AuEvent::EndGesture`] for
     /// parameter `id`.
     ///
@@ -656,20 +632,7 @@ pub fn notify_parameter(
     .map_err(Error::from)
 }
 
-/// The event of a gesture boundary on `parameter`.
-fn gesture_event(parameter: AudioUnitParameter, begin: bool) -> AudioUnitEvent {
-    AudioUnitEvent {
-        event_type: if begin {
-            K_AUDIO_UNIT_EVENT_BEGIN_PARAMETER_CHANGE_GESTURE
-        } else {
-            K_AUDIO_UNIT_EVENT_END_PARAMETER_CHANGE_GESTURE
-        },
-        argument: parameter,
-    }
-}
-
-/// Emits a gesture boundary to every listener registered on `unit`, the host's own
-/// among them; [`AuParameterListener::emit_gesture`] leaves that one out.
+/// Emits a gesture boundary to every listener registered on `unit`.
 ///
 /// Gestures normally originate in the *plugin's own editor* — the AU emits them
 /// when the user grabs and releases a control, and receiving them is this
@@ -683,15 +646,19 @@ pub fn emit_gesture(
     address: EventAddress,
     begin: bool,
 ) -> Result<()> {
-    let event = gesture_event(
-        AudioUnitParameter {
+    let event = AudioUnitEvent {
+        event_type: if begin {
+            K_AUDIO_UNIT_EVENT_BEGIN_PARAMETER_CHANGE_GESTURE
+        } else {
+            K_AUDIO_UNIT_EVENT_END_PARAMETER_CHANGE_GESTURE
+        },
+        argument: AudioUnitParameter {
             mAudioUnit: unit.raw(),
             mParameterID: id,
             mScope: address.scope.raw(),
             mElement: address.element.0,
         },
-        begin,
-    );
+    };
     // Null sending listener/object: notify everyone, exclude nobody.
     // SAFETY: `event` is live for the call and null sender arguments are the
     // documented "no exclusion" values.

@@ -436,7 +436,7 @@ impl Vst2Loaded {
             id: format!("vst2.{}", info.unique_id),
             name: info.name.clone(),
             vendor: info.vendor.clone(),
-            version: PluginVersion::integer(info.version),
+            version: PluginVersion::Integer(info.version),
             category: map_category(info.category, info.category_code),
             receives_midi,
             emits_midi,

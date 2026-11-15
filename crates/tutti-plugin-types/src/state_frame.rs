@@ -1,26 +1,21 @@
 //! The check a host makes before it reads a saved plugin state as its own container.
 //!
 //! A format whose host wraps the plugin's state in a container of its own (VST2's four-byte
-//! tags, VST3's two-stream magic) opens it with one [`StateFrame`]. A blob that begins with
-//! one of the frame's tags is framed, and everything after is read through a
-//! [`FrameReader`], which refuses a short or oversized field by name. A blob that begins with
-//! none is *unframed*: [`Unframed::Accepted`] says which rule of the format's spec lets the
-//! plugin's own stream stand without a container, and [`Unframed::Refused`] makes it an
-//! error. A framed blob that does not read is never handed to the plugin as an unframed one.
+//! tags, VST3's two-stream magic) opens it with a frame. A blob that begins with one of the
+//! frame's tags is framed, and everything after is read through a [`FrameReader`], which
+//! refuses a short or oversized field by name. A framed blob that does not read is never
+//! handed to the plugin as an unframed one.
+//!
+//! A blob that begins with no tag is *unframed*, and the two frame types differ in what that
+//! is. [`StateFrame`] refuses it: the format has no state but the host's own. [`BareFrame`]
+//! accepts it as the plugin's own stream, and is constructed only where the format's spec
+//! defines no container, so the plugin's stream stands without one; the rustdoc of each
+//! such frame names the rule.
 //!
 //! CLAP and AU have no container: the plugin's state is the stream the plugin wrote, so a
 //! host passes it through and has no frame to open.
 
 use thiserror::Error;
-
-/// Whether a blob that begins with none of a frame's tags is a state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Unframed {
-    /// It is not: the blob is refused with [`StateFrameError::Unframed`].
-    Refused,
-    /// It is the plugin's own stream, and the string names the spec rule that makes it one.
-    Accepted(&'static str),
-}
 
 /// A saved state read through a [`StateFrame`] that did not read.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -60,6 +55,16 @@ pub enum StateFrameError {
         /// The bytes left in the blob.
         available: usize,
     },
+    /// A part of a state is longer than the container's length field can describe.
+    #[error("the {format} state's {field} is {len} bytes, more than its container describes")]
+    TooLarge {
+        /// The format whose frame was written.
+        format: &'static str,
+        /// The field that does not fit.
+        field: &'static str,
+        /// Its length in bytes.
+        len: u64,
+    },
     /// A framed blob holds a value its format does not allow.
     #[error("the {format} state's {field} is invalid: {reason}")]
     Invalid {
@@ -72,7 +77,7 @@ pub enum StateFrameError {
     },
 }
 
-/// What [`StateFrame::open`] found at the start of a blob.
+/// What [`BareFrame::open`] found at the start of a blob.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Opened<'a> {
     /// The blob begins with `tags[tag]`; `body` is what follows it.
@@ -82,34 +87,118 @@ pub enum Opened<'a> {
         /// The bytes after the tag.
         body: &'a [u8],
     },
-    /// The blob begins with no tag and the frame accepts that: the whole blob is the plugin's
-    /// own stream.
-    Unframed(&'a [u8]),
+    /// The blob begins with no tag: the whole blob is the plugin's own stream.
+    Bare(&'a [u8]),
 }
 
-/// How one format's host frames a saved state: the tags a framed blob begins with, and what an
-/// unframed one is.
+/// Whether no tag of `tags` is a prefix of another (or equal to it): the property that makes
+/// the tag a blob begins with unique.
+const fn tags_are_prefix_free(tags: &[&[u8]]) -> bool {
+    let mut a = 0;
+    while a < tags.len() {
+        let mut b = 0;
+        while b < tags.len() {
+            if a != b && is_prefix(tags[a], tags[b]) {
+                return false;
+            }
+            b += 1;
+        }
+        a += 1;
+    }
+    true
+}
+
+const fn is_prefix(prefix: &[u8], of: &[u8]) -> bool {
+    if prefix.len() > of.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < prefix.len() {
+        if prefix[i] != of[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// The index of the tag `data` begins with.
+fn tag_of(tags: &[&[u8]], data: &[u8]) -> Option<(usize, usize)> {
+    tags.iter()
+        .position(|tag| data.starts_with(tag))
+        .map(|at| (at, tags[at].len()))
+}
+
+/// A frame that refuses an unframed blob: every state the format's host writes begins with
+/// one of its tags, and a blob without one is not a state of it.
 #[derive(Debug, Clone, Copy)]
 pub struct StateFrame {
     format: &'static str,
     tags: &'static [&'static [u8]],
-    unframed: Unframed,
 }
 
 impl StateFrame {
-    /// A frame for `format` whose blobs begin with one of `tags`. No tag is a prefix of
-    /// another.
+    /// A frame for `format` whose blobs begin with one of `tags`.
+    ///
+    /// # Panics
+    ///
+    /// At compile time, in a `const`, when a tag is a prefix of another.
     #[must_use]
-    pub const fn new(
-        format: &'static str,
-        tags: &'static [&'static [u8]],
-        unframed: Unframed,
-    ) -> Self {
-        Self {
-            format,
-            tags,
-            unframed,
+    pub const fn new(format: &'static str, tags: &'static [&'static [u8]]) -> Self {
+        assert!(
+            tags_are_prefix_free(tags),
+            "a state tag is a prefix of another"
+        );
+        Self { format, tags }
+    }
+
+    /// The index of the tag `data` begins with, and what follows it.
+    ///
+    /// # Errors
+    ///
+    /// [`StateFrameError::Unframed`] when the blob begins with no tag.
+    pub fn open<'a>(&self, data: &'a [u8]) -> Result<(usize, &'a [u8]), StateFrameError> {
+        match tag_of(self.tags, data) {
+            Some((tag, len)) => Ok((tag, &data[len..])),
+            None => Err(StateFrameError::Unframed {
+                format: self.format,
+            }),
         }
+    }
+
+    /// A reader over the body of a framed blob, whose errors name this frame's format.
+    #[must_use]
+    pub const fn reader<'a>(&self, body: &'a [u8]) -> FrameReader<'a> {
+        FrameReader {
+            format: self.format,
+            rest: body,
+        }
+    }
+}
+
+/// A frame that accepts an unframed blob as the plugin's own stream.
+///
+/// Constructed only for a format whose spec defines no state container, so the plugin's
+/// stream is a state without one; the host's own container is the one framed form.
+#[derive(Debug, Clone, Copy)]
+pub struct BareFrame {
+    format: &'static str,
+    tags: &'static [&'static [u8]],
+}
+
+impl BareFrame {
+    /// A frame for `format` whose framed blobs begin with one of `tags`.
+    ///
+    /// # Panics
+    ///
+    /// At compile time, in a `const`, when a tag is a prefix of another.
+    #[must_use]
+    pub const fn new(format: &'static str, tags: &'static [&'static [u8]]) -> Self {
+        assert!(
+            tags_are_prefix_free(tags),
+            "a state tag is a prefix of another"
+        );
+        Self { format, tags }
     }
 
     /// The format's name, as its errors spell it.
@@ -118,23 +207,15 @@ impl StateFrame {
         self.format
     }
 
-    /// Separates a framed blob from an unframed one.
-    ///
-    /// # Errors
-    ///
-    /// [`StateFrameError::Unframed`] when the blob begins with no tag and the frame is
-    /// [`Unframed::Refused`].
-    pub fn open<'a>(&self, data: &'a [u8]) -> Result<Opened<'a>, StateFrameError> {
-        for (tag, magic) in self.tags.iter().enumerate() {
-            if let Some(body) = data.strip_prefix(*magic) {
-                return Ok(Opened::Framed { tag, body });
-            }
-        }
-        match self.unframed {
-            Unframed::Accepted(_) => Ok(Opened::Unframed(data)),
-            Unframed::Refused => Err(StateFrameError::Unframed {
-                format: self.format,
-            }),
+    /// Separates a framed blob from the plugin's own bare stream.
+    #[must_use]
+    pub fn open<'a>(&self, data: &'a [u8]) -> Opened<'a> {
+        match tag_of(self.tags, data) {
+            Some((tag, len)) => Opened::Framed {
+                tag,
+                body: &data[len..],
+            },
+            None => Opened::Bare(data),
         }
     }
 
@@ -156,12 +237,6 @@ pub struct FrameReader<'a> {
 }
 
 impl<'a> FrameReader<'a> {
-    /// The bytes not yet read.
-    #[must_use]
-    pub const fn rest(&self) -> &'a [u8] {
-        self.rest
-    }
-
     /// The next byte.
     ///
     /// # Errors
@@ -244,35 +319,29 @@ impl<'a> FrameReader<'a> {
 mod tests {
     use super::*;
 
-    const FRAMED: StateFrame = StateFrame::new(
-        "TEST",
-        &[b"AAA\x01", b"BBB\x01"],
-        Unframed::Accepted("the test format's plugin stream"),
-    );
-    const STRICT: StateFrame = StateFrame::new("TEST", &[b"AAA\x01"], Unframed::Refused);
+    const BARE: BareFrame = BareFrame::new("TEST", &[b"AAA\x01", b"BBB\x01"]);
+    const STRICT: StateFrame = StateFrame::new("TEST", &[b"AAA\x01"]);
 
     /// A blob opens on the tag it begins with and hands back what follows, whichever tag.
     #[test]
     fn a_tagged_blob_opens_on_its_tag() {
         assert_eq!(
-            FRAMED.open(b"BBB\x01rest"),
-            Ok(Opened::Framed {
+            BARE.open(b"BBB\x01rest"),
+            Opened::Framed {
                 tag: 1,
                 body: b"rest"
-            })
+            }
         );
-        assert_eq!(
-            FRAMED.open(b"AAA\x01"),
-            Ok(Opened::Framed { tag: 0, body: b"" })
-        );
+        assert_eq!(BARE.open(b"AAA\x01"), Opened::Framed { tag: 0, body: b"" });
+        assert_eq!(STRICT.open(b"AAA\x01rest"), Ok((0, &b"rest"[..])));
     }
 
-    /// A blob with no tag is the plugin's stream where the frame accepts one, and refused by
-    /// name where it does not; a blob shorter than a tag is the same case.
+    /// A blob with no tag is the plugin's stream in a bare frame, and refused by name in a
+    /// strict one; a blob shorter than a tag is the same case.
     #[test]
-    fn an_untagged_blob_is_unframed_or_refused_by_the_frame() {
-        assert_eq!(FRAMED.open(b"plain"), Ok(Opened::Unframed(b"plain")));
-        assert_eq!(FRAMED.open(b""), Ok(Opened::Unframed(b"")));
+    fn an_untagged_blob_is_bare_or_refused_by_the_frame() {
+        assert_eq!(BARE.open(b"plain"), Opened::Bare(b"plain"));
+        assert_eq!(BARE.open(b""), Opened::Bare(b""));
         assert_eq!(
             STRICT.open(b"plain"),
             Err(StateFrameError::Unframed { format: "TEST" })
@@ -285,6 +354,18 @@ mod tests {
             STRICT.open(b"plain").unwrap_err().to_string(),
             "the TEST state carries none of the tags a saved state begins with"
         );
+    }
+
+    /// A tag that is a prefix of another, or a repeat of it, is not prefix-free; distinct
+    /// tags of one length and tags that differ before their ends are.
+    #[test]
+    fn tags_must_be_prefix_free() {
+        assert!(tags_are_prefix_free(&[b"CHK\x01", b"CHK\0", b"PRM\x01"]));
+        assert!(tags_are_prefix_free(&[]));
+        assert!(!tags_are_prefix_free(&[b"CHK", b"CHK\x01"]));
+        assert!(!tags_are_prefix_free(&[b"CHK\x01", b"CHK"]));
+        assert!(!tags_are_prefix_free(&[b"CHK", b"CHK"]));
+        assert!(!tags_are_prefix_free(&[b"", b"A"]));
     }
 
     /// A reader refuses a field that does not fit and a length past the end, each by name.
@@ -309,7 +390,7 @@ mod tests {
             })
         );
         assert_eq!(r.bytes(2, "payload"), Ok(&[1u8, 2][..]));
-        assert_eq!(r.rest(), b"");
+        assert_eq!(r.take_rest(), b"");
         assert!(matches!(
             STRICT.reader(&[]).u8("version"),
             Err(StateFrameError::Truncated { .. })

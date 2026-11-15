@@ -9,7 +9,6 @@ use vst3::Steinberg::Vst::{PhysicalUITypeIDs_, ePrefetchableSupport_};
 
 use tutti_plugin_types::{AutomationMode, read_utf16_str};
 
-
 /// Host-facing bus descriptor. Thin wrapper around `vst3::Steinberg::Vst::BusInfo`
 /// whose field layout is retained verbatim for FFI, but whose only public
 /// accessor for the UTF-16 name is [`BusInfo::name_string`].

@@ -12,7 +12,7 @@ use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_fact
 use clap_sys::plugin::clap_plugin_descriptor;
 use clap_sys::version::{CLAP_VERSION_MAJOR, clap_version, clap_version_is_compatible};
 
-use tutti_plugin_types::{MainWorkHandle, read_c_chars};
+use tutti_plugin_types::MainWorkHandle;
 
 use crate::guard::lossy;
 use crate::host::Host;

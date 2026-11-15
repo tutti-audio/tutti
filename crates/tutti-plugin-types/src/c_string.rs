@@ -219,7 +219,11 @@ mod tests {
         for (capacity, written) in [(5, 0), (6, 0), (7, 0), (8, 4)] {
             let mut dst = vec![0xAAu8; capacity.max(8)];
             let dst = &mut dst[..capacity];
-            assert_eq!(write_c_str(dst, "\u{1F3B5}"), written, "capacity {capacity}");
+            assert_eq!(
+                write_c_str(dst, "\u{1F3B5}"),
+                written,
+                "capacity {capacity}"
+            );
             assert_eq!(dst[written], 0);
         }
         let mut dst = [0xAAu8; 6];
@@ -256,7 +260,10 @@ mod tests {
         let mut dst = [1 as c_char; 8];
         assert_eq!(write_c_chars(&mut dst, "Éclat"), 6);
         assert_eq!(read_c_chars(&dst), "Éclat");
-        assert_eq!(read_c_chars(&[0x61 as c_char, 0xFFu8 as c_char, 0]), "a\u{FFFD}");
+        assert_eq!(
+            read_c_chars(&[0x61 as c_char, 0xFFu8 as c_char, 0]),
+            "a\u{FFFD}"
+        );
         assert_eq!(read_c_chars(&[0x61 as c_char, 0, 0x62 as c_char]), "a");
         let mut dst = [1 as c_char; 3];
         assert_eq!(write_c_chars(&mut dst, "Éa"), 2);

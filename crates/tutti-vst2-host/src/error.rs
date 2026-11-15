@@ -12,6 +12,7 @@ pub type Result<T> = std::result::Result<T, Vst2Error>;
 /// Shared by all format hosts; VST2 reports only the Opening, Factory,
 /// Instantiation and Initialization phases.
 pub use tutti_plugin_types::LoadStage;
+use tutti_plugin_types::StateFrameError;
 
 /// An error reported by the VST2 host.
 #[derive(Debug, Error)]
@@ -41,4 +42,9 @@ pub enum Vst2Error {
     /// malformed for this plugin.
     #[error("State error: {0}")]
     StateError(String),
+
+    /// A saved state is not one this host's container reads: untagged, or tagged and cut
+    /// short or malformed. Which, is the [`StateFrameError`] variant.
+    #[error("State error: {0}")]
+    StateFrame(#[from] StateFrameError),
 }

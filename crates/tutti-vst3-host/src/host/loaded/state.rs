@@ -1,7 +1,7 @@
 //! Programs and units, the compatibility JSON, and the state container.
 
 use std::collections::HashSet;
-use tutti_plugin_types::{MainThreadMarker, Opened, StateFrame, StateFrameError, Unframed};
+use tutti_plugin_types::{BareFrame, MainThreadMarker, Opened, StateFrameError};
 
 use super::*;
 use crate::host::controller::latest_per_parameter;
@@ -158,7 +158,7 @@ impl Vst3Loaded {
                 .copied()
                 .collect::<Vec<_>>(),
         );
-        Ok(pack_state_with_pending(&component, &controller, &pending))
+        Ok(pack_state_with_pending(&component, &controller, &pending)?)
     }
 
     /// Reads the controller's own `getState` stream, or `None` when there is no
@@ -234,7 +234,7 @@ impl Vst3Loaded {
             component,
             controller,
             pending,
-        } = unpack_full(data).map_err(|e| Vst3Error::StateError(e.to_string()))?;
+        } = unpack_full(data)?;
 
         // A plugin with no component state still gets the controller's stream
         // and the pending writes: the writes are for its separate controller's
@@ -293,14 +293,7 @@ pub(super) const STATE_MAGIC: &[u8] = b"TUTTIVS3";
 /// (`ivstcomponent.h`, `ivsteditcontroller.h`). The container is this host's, so a blob
 /// without its magic is accepted as the component stream alone, which [`pack_state`] writes
 /// when the controller has no state of its own.
-const FRAME: StateFrame = StateFrame::new(
-    "VST3",
-    &[STATE_MAGIC],
-    Unframed::Accepted(
-        "VST3 specifies no state container: a blob without the host's magic is the \
-         component's own getState stream",
-    ),
-);
+const FRAME: BareFrame = BareFrame::new("VST3", &[STATE_MAGIC]);
 
 /// Container version: the component's length, then the component, then the controller.
 pub(super) const STATE_VERSION: u8 = 1;
@@ -325,17 +318,30 @@ const PENDING_BYTES: usize = 12;
 /// empty controller half, so the blob is never read as a container it is not. That keeps the
 /// common case byte-identical to what this host saved before the controller stream existed,
 /// so nothing re-saves a project merely for having been opened.
-pub(super) fn pack_state(component: &[u8], controller: &Option<Vec<u8>>) -> Vec<u8> {
+///
+/// # Errors
+///
+/// [`StateFrameError::TooLarge`] for a component whose own bytes begin with the magic and
+/// whose length no `u32` holds: it cannot be framed, and unframed it would read as a
+/// container. Any other component too long to describe is kept alone, dropping the
+/// controller's half.
+pub(super) fn pack_state(
+    component: &[u8],
+    controller: &Option<Vec<u8>>,
+) -> std::result::Result<Vec<u8>, StateFrameError> {
     let controller = controller.as_deref().unwrap_or_default();
-    if controller.is_empty() && !component.starts_with(STATE_MAGIC) {
-        return component.to_vec();
+    let magic_led = component.starts_with(STATE_MAGIC);
+    if controller.is_empty() && !magic_led {
+        return Ok(component.to_vec());
     }
 
     // A component stream too long to describe in a u32 cannot be split back
     // apart, so keep the half a project cannot be restored without and drop
     // the UI half. 4 GiB of component state is not a case worth a wider field.
-    let Ok(len) = u32::try_from(component.len()) else {
-        return component.to_vec();
+    let len = match length_field(component.len(), "component") {
+        Ok(len) => len,
+        Err(e) if magic_led => return Err(e),
+        Err(_) => return Ok(component.to_vec()),
     };
 
     let mut out = Vec::with_capacity(STATE_MAGIC.len() + 5 + component.len() + controller.len());
@@ -344,21 +350,34 @@ pub(super) fn pack_state(component: &[u8], controller: &Option<Vec<u8>>) -> Vec<
     out.extend_from_slice(&len.to_le_bytes());
     out.extend_from_slice(component);
     out.extend_from_slice(controller);
-    out
+    Ok(out)
+}
+
+/// `len` as a container length field.
+fn length_field(len: usize, field: &'static str) -> std::result::Result<u32, StateFrameError> {
+    u32::try_from(len).map_err(|_| StateFrameError::TooLarge {
+        format: FRAME.format(),
+        field,
+        len: len as u64,
+    })
 }
 
 /// [`pack_state`], with the parameter writes the component's stream cannot hold
 /// yet (`Vst3Loaded::carried`): magic, version 2, their count as a `u32`, each
 /// write, then the component's length, the component and the controller as in
 /// version 1. With nothing pending the blob is [`pack_state`]'s.
+///
+/// # Errors
+///
+/// As [`pack_state`].
 pub(super) fn pack_state_with_pending(
     component: &[u8],
     controller: &Option<Vec<u8>>,
     pending: &[(ParamId, Normalized)],
-) -> Vec<u8> {
+) -> std::result::Result<Vec<u8>, StateFrameError> {
     let (Ok(count), Ok(len), false) = (
-        u32::try_from(pending.len()),
-        u32::try_from(component.len()),
+        length_field(pending.len(), "pending writes"),
+        length_field(component.len(), "component"),
         pending.is_empty(),
     ) else {
         return pack_state(component, controller);
@@ -377,7 +396,7 @@ pub(super) fn pack_state_with_pending(
     out.extend_from_slice(&len.to_le_bytes());
     out.extend_from_slice(component);
     out.extend_from_slice(controller);
-    out
+    Ok(out)
 }
 
 /// `pending` with each listed parameter once, at its latest value, in the order
@@ -426,8 +445,8 @@ pub(super) struct Unpacked<'a> {
 ///
 /// [`StateFrameError`] for a container that is malformed.
 pub(super) fn unpack_full(data: &[u8]) -> std::result::Result<Unpacked<'_>, StateFrameError> {
-    let body = match FRAME.open(data)? {
-        Opened::Unframed(component) => {
+    let body = match FRAME.open(data) {
+        Opened::Bare(component) => {
             return Ok(Unpacked {
                 component,
                 controller: None,
@@ -475,8 +494,21 @@ pub(super) fn unpack_full(data: &[u8]) -> std::result::Result<Unpacked<'_>, Stat
 mod state_container_tests {
     use super::{
         Normalized, ParamId, STATE_MAGIC, STATE_VERSION, STATE_VERSION_PENDING, StateFrameError,
-        Unpacked, latest_listed, pack_state, pack_state_with_pending, unpack_full,
+        Unpacked, latest_listed, length_field, pack_state as try_pack_state,
+        pack_state_with_pending as try_pack_pending, unpack_full,
     };
+
+    fn pack_state(component: &[u8], controller: &Option<Vec<u8>>) -> Vec<u8> {
+        try_pack_state(component, controller).unwrap()
+    }
+
+    fn pack_state_with_pending(
+        component: &[u8],
+        controller: &Option<Vec<u8>>,
+        pending: &[(ParamId, Normalized)],
+    ) -> Vec<u8> {
+        try_pack_pending(component, controller, pending).unwrap()
+    }
 
     /// Both halves survive the round trip, split back at the right byte.
     #[test]
@@ -717,5 +749,20 @@ mod state_container_tests {
         let (last_7, last_1) = (last_of(7), last_of(1));
         let got = latest_listed(pending, &listed);
         assert_eq!(got, [(ParamId::new(7), last_7), (ParamId::new(1), last_1)]);
+    }
+
+    /// A length no `u32` holds is refused by name, with its size; one that fits is the field.
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn a_length_past_four_gibibytes_is_too_large_to_frame() {
+        assert_eq!(length_field(7, "component"), Ok(7));
+        assert_eq!(
+            length_field(u32::MAX as usize + 1, "component"),
+            Err(StateFrameError::TooLarge {
+                format: "VST3",
+                field: "component",
+                len: 1 << 32
+            })
+        );
     }
 }

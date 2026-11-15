@@ -63,8 +63,8 @@ impl Class for HostApplication {
 }
 
 impl HostApplication {
-    /// A host application that names itself `name` (cut to 127 UTF-16 units without splitting a surrogate pair)
-    /// and, on Linux, answers `IRunLoop` with `run_loop`.
+    /// A host application that names itself `name` (cut to 127 UTF-16 units, never inside a
+    /// surrogate pair) and, on Linux, answers `IRunLoop` with `run_loop`.
     pub(crate) fn new(
         name: &str,
         #[cfg(target_os = "linux")] run_loop: Arc<RunLoop>,

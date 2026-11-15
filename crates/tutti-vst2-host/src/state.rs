@@ -26,7 +26,7 @@
 //! does with a program chunk it is handed while another program is current; setting the
 //! program first is the only order the opcodes' wording allows.
 
-use tutti_plugin_types::{MainThreadMarker, Opened, StateFrame, StateFrameError, Unframed};
+use tutti_plugin_types::{MainThreadMarker, StateFrame};
 
 use crate::error::{Result, Vst2Error};
 use crate::loaded::Vst2Loaded;
@@ -58,7 +58,6 @@ const FRAME: StateFrame = StateFrame::new(
         &STATE_HEADER_CHUNK_NO_PROGRAM,
         &STATE_HEADER_PARAMS_NO_PROGRAM,
     ],
-    Unframed::Refused,
 );
 
 /// The program index a state records when the plugin has no programs to select.
@@ -91,14 +90,7 @@ pub(crate) enum StateHeader<'a> {
 /// plugin (the plugin-parameter-count cross-check stays in `write_state`).
 /// Errors mirror the `write_state` early-returns exactly.
 pub(crate) fn parse_state_header(data: &[u8]) -> Result<StateHeader<'_>> {
-    parse_frame(data).map_err(|e| Vst2Error::StateError(e.to_string()))
-}
-
-/// [`parse_state_header`], with the frame's own error.
-fn parse_frame(data: &[u8]) -> std::result::Result<StateHeader<'_>, StateFrameError> {
-    let Opened::Framed { tag, body } = FRAME.open(data)? else {
-        unreachable!("`FRAME` refuses an unframed blob");
-    };
+    let (tag, body) = FRAME.open(data)?;
     let chunk = tag == TAG_CHUNK || tag == TAG_CHUNK_NO_PROGRAM;
     let with_program = tag == TAG_CHUNK || tag == TAG_PARAMS;
     let mut reader = FRAME.reader(body);
@@ -111,25 +103,29 @@ fn parse_frame(data: &[u8]) -> std::result::Result<StateHeader<'_>, StateFrameEr
     if chunk {
         let payload = reader.take_rest();
         if payload.is_empty() {
-            return Err(reader.invalid("chunk", "empty"));
+            return Err(reader.invalid("chunk", "empty").into());
         }
         return Ok(StateHeader::Chunk { program, payload });
     }
 
     let count = reader.i32_le("parameter count")?;
     if count < 0 {
-        return Err(reader.invalid("parameter count", format!("{count} is negative")));
+        return Err(reader
+            .invalid("parameter count", format!("{count} is negative"))
+            .into());
     }
     let values = reader.take_rest();
     let expected = count as usize * 4;
     if values.len() != expected {
-        return Err(reader.invalid(
-            "parameter values",
-            format!(
-                "{count} values need {expected} bytes, {} follow",
-                values.len()
-            ),
-        ));
+        return Err(reader
+            .invalid(
+                "parameter values",
+                format!(
+                    "{count} values need {expected} bytes, {} follow",
+                    values.len()
+                ),
+            )
+            .into());
     }
     Ok(StateHeader::Params {
         program,
@@ -286,11 +282,15 @@ impl Vst2Loaded {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_plugin_types::StateFrameError;
 
     #[test]
     fn header_too_short() {
         let err = parse_state_header(&[0x43, 0x48]).unwrap_err();
-        assert!(matches!(err, Vst2Error::StateError(_)));
+        assert!(matches!(
+            err,
+            Vst2Error::StateFrame(StateFrameError::Unframed { format: "VST2" })
+        ));
         assert!(err.to_string().contains("none of the tags"));
     }
 
@@ -340,7 +340,13 @@ mod tests {
         let mut data = STATE_HEADER_CHUNK.to_vec();
         data.extend_from_slice(&[0, 0]);
         let err = parse_state_header(&data).unwrap_err();
-        assert!(err.to_string().contains("program index is missing"));
+        assert!(matches!(
+            err,
+            Vst2Error::StateFrame(StateFrameError::Truncated {
+                field: "program index",
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -349,7 +355,13 @@ mod tests {
         let mut data = STATE_HEADER_PARAMS_NO_PROGRAM.to_vec();
         data.extend_from_slice(&[0, 0]);
         let err = parse_state_header(&data).unwrap_err();
-        assert!(err.to_string().contains("parameter count is missing"));
+        assert!(matches!(
+            err,
+            Vst2Error::StateFrame(StateFrameError::Truncated {
+                field: "parameter count",
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -371,7 +383,13 @@ mod tests {
         data.extend_from_slice(&2i32.to_le_bytes());
         data.extend_from_slice(&1.0f32.to_le_bytes());
         let err = parse_state_header(&data).unwrap_err();
-        assert!(err.to_string().contains("parameter values is invalid"));
+        assert!(matches!(
+            err,
+            Vst2Error::StateFrame(StateFrameError::Invalid {
+                field: "parameter values",
+                ..
+            })
+        ));
     }
 
     #[test]

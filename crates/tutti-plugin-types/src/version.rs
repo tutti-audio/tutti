@@ -23,8 +23,8 @@ pub enum PluginVersion {
     /// The plugin states no version.
     #[default]
     Absent,
-    /// The version as the plugin spelled it: never empty.
-    Text(String),
+    /// The version as the plugin spelled it.
+    Text(VersionText),
     /// A single integer with no layout the format defines.
     Integer(i32),
     /// A major, minor and dot release number.
@@ -43,18 +43,7 @@ impl PluginVersion {
     /// text is empty, the text verbatim otherwise.
     #[must_use]
     pub fn text(text: impl Into<String>) -> Self {
-        let text = text.into();
-        if text.is_empty() {
-            Self::Absent
-        } else {
-            Self::Text(text)
-        }
-    }
-
-    /// The version a VST2 plugin reports as its one `int`.
-    #[must_use]
-    pub const fn integer(raw: i32) -> Self {
-        Self::Integer(raw)
+        VersionText::new(text.into()).map_or(Self::Absent, Self::Text)
     }
 
     /// The version `AudioComponentGetVersion` returns, `0xMMMMmmdd`: the major in the top 16
@@ -67,11 +56,45 @@ impl PluginVersion {
             dot: packed as u8,
         }
     }
+}
 
-    /// Whether the plugin states no version.
+/// A version the plugin spelled as text: never empty, so [`PluginVersion::Absent`] is the one
+/// way to state no version.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "String", into = "String"))]
+pub struct VersionText(String);
+
+impl VersionText {
+    /// `text` as a version, or `None` when it is empty.
     #[must_use]
-    pub const fn is_absent(&self) -> bool {
-        matches!(self, Self::Absent)
+    pub fn new(text: String) -> Option<Self> {
+        (!text.is_empty()).then_some(Self(text))
+    }
+
+    /// The text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<VersionText> for String {
+    fn from(text: VersionText) -> Self {
+        text.0
+    }
+}
+
+/// The text of a version that is not empty.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("a version's text is not empty")]
+pub struct EmptyVersionText;
+
+impl TryFrom<String> for VersionText {
+    type Error = EmptyVersionText;
+
+    fn try_from(text: String) -> Result<Self, EmptyVersionText> {
+        Self::new(text).ok_or(EmptyVersionText)
     }
 }
 
@@ -81,7 +104,7 @@ impl fmt::Display for PluginVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Absent => Ok(()),
-            Self::Text(text) => f.write_str(text),
+            Self::Text(text) => f.write_str(text.as_str()),
             Self::Integer(raw) => write!(f, "{raw}"),
             Self::Dotted { major, minor, dot } => write!(f, "{major}.{minor}.{dot}"),
         }
@@ -98,10 +121,11 @@ mod tests {
         assert_eq!(PluginVersion::text(""), PluginVersion::Absent);
         assert_eq!(
             PluginVersion::text("1.0.0.512"),
-            PluginVersion::Text("1.0.0.512".into())
+            PluginVersion::Text(VersionText::new("1.0.0.512".into()).unwrap())
         );
         assert_eq!(PluginVersion::text("1.0.0.512").to_string(), "1.0.0.512");
-        assert!(PluginVersion::default().is_absent());
+        assert_eq!(PluginVersion::default(), PluginVersion::Absent);
+        assert_eq!(VersionText::new(String::new()), None);
         assert_eq!(PluginVersion::Absent.to_string(), "");
     }
 
@@ -130,9 +154,20 @@ mod tests {
     /// negative one stays negative.
     #[test]
     fn a_vst2_version_is_one_integer_with_no_invented_layout() {
-        assert_eq!(PluginVersion::integer(1100).to_string(), "1100");
-        assert_eq!(PluginVersion::integer(-1).to_string(), "-1");
-        assert_ne!(PluginVersion::integer(0), PluginVersion::Absent);
+        assert_eq!(PluginVersion::Integer(1100).to_string(), "1100");
+        assert_eq!(PluginVersion::Integer(-1).to_string(), "-1");
+        assert_ne!(PluginVersion::Integer(0), PluginVersion::Absent);
+    }
+
+    /// A catalog or wire record that spells the text variant with no text is refused, so the
+    /// empty string has one meaning only: absent.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn empty_text_does_not_deserialize() {
+        assert!(serde_json::from_str::<PluginVersion>(r#"{"Text":""}"#).is_err());
+        assert!(serde_json::from_str::<PluginVersion>(r#"{"Text":"1"}"#).is_ok());
+        let wire = postcard::to_stdvec(&PluginVersion::Text(VersionText(String::new()))).unwrap();
+        assert!(postcard::from_bytes::<PluginVersion>(&wire).is_err());
     }
 
     /// Every shape survives the catalog's JSON and the wire's postcard unchanged, so a
@@ -143,7 +178,7 @@ mod tests {
         for version in [
             PluginVersion::Absent,
             PluginVersion::text("1.0.0.512"),
-            PluginVersion::integer(1100),
+            PluginVersion::Integer(1100),
             PluginVersion::from_au(0x0001_0203),
         ] {
             let json = serde_json::to_string(&version).unwrap();
