@@ -113,7 +113,7 @@ pub fn catalog_of(plugin: &PluginRef) -> (Catalog, PluginId, tempfile::TempDir) 
     (catalog, id, dir)
 }
 
-/// What `Session::add_plugin_blocking` was: the entry, loaded and in a node.
+/// A plugin loaded through the pool and in a node, in one call.
 pub trait LoadPlugin {
     /// Loads `spec` through the pool and adds its node.
     ///
