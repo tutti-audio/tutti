@@ -511,7 +511,11 @@ pub enum PluginChange {
     /// another plugin's node keeps its ports, and the app re-reads and rewires.
     /// The re-inserted plugin renders silence from the swap until its
     /// Processor reaches the new node: the old node returns it at its next block
-    /// and the next update's pump lends it on.
+    /// and the next update's pump lends it on. A node that is
+    /// [`Bypassed`](crate::NodeMode::Bypassed) is not run, so it hands nothing
+    /// back: a plugin's port change (and any restart) waits there until the
+    /// bypass ends. A plugin with a bypass of its own keeps running, and is not
+    /// held up.
     IoChanged,
     /// The plugin's new ports were not made a node, and the node stays as it
     /// is: they are wider than a block serves, or outside a served plugin's
@@ -789,6 +793,12 @@ impl RebindState {
     pub(crate) fn new(rebinder: tutti_plugin::catalog::PluginRebinder) -> Option<Self> {
         let laid_out = rebinder.layout()?;
         Some(Self::Idle { rebinder, laid_out })
+    }
+
+    /// Whether a rebuilt node's Processor has not arrived.
+    #[cfg(feature = "testing")]
+    pub(crate) fn is_settling(&self) -> bool {
+        matches!(self, Self::Settling { .. })
     }
 
     pub(crate) fn laid_out(&self) -> &tutti_plugin_types::Layout {

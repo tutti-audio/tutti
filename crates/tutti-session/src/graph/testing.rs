@@ -72,6 +72,20 @@ impl Testing<'_> {
             .is_some_and(|entry| entry.reclaimer.is_some())
     }
 
+    /// Whether the node of the pooled plugin at `node` was re-inserted for new
+    /// ports and its Processor has not reached it yet (its record is
+    /// `Settling`): `None` for a node with no such record.
+    #[cfg(feature = "plugin")]
+    pub fn rebuild_settling(&self, node: impl Into<NodeKey>) -> Option<bool> {
+        let node = node.into();
+        self.graph
+            .plugins
+            .get(&node)?
+            .rebind
+            .as_ref()
+            .map(crate::plugin::RebindState::is_settling)
+    }
+
     /// How many crossfades wait for a re-prepare to resume.
     pub fn waiting_crossfades(&self) -> usize {
         self.graph.parked.len()
