@@ -963,7 +963,7 @@ fn a_refused_connection_does_not_fail_the_load() {
 }
 
 /// **A write is answered from the activation's table**, which is the table the
-/// Processor drops against: the probe's `ObservedProcessMode` is read-only when
+/// Processor drops against: the probe's `OBSERVED_PROCESS_MODE` is read-only when
 /// the activation reads it, and the plugin then reports it writable
 /// (`kMisbehaveObservedWritableLate`). The live parameter info says writable, and
 /// a write the host answered from it would be `Ok` and then dropped by the
