@@ -47,7 +47,7 @@ use tutti_graph::{
     Cx, Inputs, IntoNode, Io, Node, NodeParts, Outputs, ParamNode, ParamSet, Prepare, Shape, Status,
 };
 use tutti_types::UnitParam;
-use tutti_types::{Amplitude, Balance, BusTopology, MAX_CHANNELS, Param, Speaker, Tail};
+use tutti_types::{Amplitude, Balance, BusTopology, MAX_CHANNELS, Param, Tail};
 
 // The params a [`BusStripNode`] lets the graph modulate, in port order.
 tutti_graph::declare_params!([] BusStripNode, n {
