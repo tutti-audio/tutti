@@ -2,7 +2,7 @@
 //! deterministically by sample count rather than wall clock.
 //!
 //! Primary consumer is offline audio export, but anything that needs a
-//! reproducible timeline without a real CPAL callback (golden tests,
+//! reproducible timeline without a real CPAL callback (tests,
 //! automation scrubbing) can use it.
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};

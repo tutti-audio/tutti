@@ -179,10 +179,9 @@ pub struct GraphSpec {
     pub bus_edges: BTreeMap<BusRef, Vec<BusFeed>>,
     /// The declared topology of the root, the graph's outputs, as a bus (doc
     /// 013, "Buses", B4): what a bus edge into the root folds to. `None` is
-    /// undeclared. Every root the engine renders
-    /// ([`MAX_ROOT_CHANNELS`](crate::MAX_ROOT_CHANNELS), 8) fits a bus
-    /// ([`MAX_BUS_CHANNELS`](tutti_types::MAX_BUS_CHANNELS), 16). The session
-    /// keeps it in step with its root declaration.
+    /// undeclared. Every root the engine renders is at most
+    /// [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) wide, which is a bus's
+    /// width. The session keeps it in step with its root declaration.
     pub root: Option<BusTopology>,
     /// Bus edges into the root, in source order
     /// ([`connect_bus_to_root`](Self::connect_bus_to_root)): lowered, as
@@ -255,7 +254,7 @@ impl GraphSpec {
     /// source **replaces** the base from its first event on (ramps and
     /// segments addressed to [`EdgeGain::ADDR`]), the value is clamped to
     /// the entry's `range`, a source that changes (or goes) crossfades over
-    /// [`PARAM_DECLICK`](crate::PARAM_DECLICK), an undriven lane reads its
+    /// [`DECLICK`](crate::DECLICK), an undriven lane reads its
     /// base, and a lane's first block starts at its value. The rules are the
     /// param port's, stated once in [`param`](crate::ParamMod)'s docs and on
     /// [`connect_param`](Self::connect_param). The step is the sum's own, so
@@ -443,7 +442,7 @@ impl GraphSpec {
     /// - **Connecting or disconnecting is declicked.** When a port's source
     ///   changes (a new one, or none), its output crossfades from where it
     ///   was — the last value it delivered, or the base — to the new value
-    ///   over [`PARAM_DECLICK`](crate::PARAM_DECLICK) frames. Nothing else
+    ///   over [`DECLICK`](crate::DECLICK). Nothing else
     ///   is smoothed: a step in a source lands on its frame (the
     ///   sample-accuracy contract). A unit's **first** block is not a change:
     ///   a unit placed by a commit (an insert, a hard replace, a fork, a

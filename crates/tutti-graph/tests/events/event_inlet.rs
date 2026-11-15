@@ -592,7 +592,7 @@ fn graph(
     ed.spec_mut().topology.set_outputs([out(30)]);
     let tap = tap.then(|| {
         ed.open_event_tap(
-            EventTapId(1),
+            EventTapId::of(1),
             EventOut {
                 node: NodeKey(1),
                 port: 0,

@@ -1,22 +1,30 @@
 //! Edge fades (doc 030 section 4): a lane an editor marks `EdgeFade::In` or
-//! `Out` moves its weight linearly over `EDGE_DECLICK` frames, counted from its
-//! first block under the fade and across blocks, and the editor learns when it
-//! ended (`Editor::settle_fades`). `Editor` itself fades nothing unless asked.
+//! `Out` moves its weight over `DECLICK` along the smootherstep, at the
+//! position `(j + 1) / (n + 1)` of frame `j` of an `n`-frame fade, counted from
+//! its first block under the fade and across blocks, and the editor learns when
+//! it ended (`Editor::settle_fades`). `Editor` itself fades nothing unless
+//! asked.
 //!
-//! Every figure is analytic: the weights below are powers of two over 256, so
-//! the expected sample is exact.
+//! Every figure is analytic: the smootherstep `x³(6x² − 15x + 10)` written out
+//! in `f64`, to within `f32` rounding.
 
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
 use tutti_graph::{
-    EDGE_DECLICK, Edge, EdgeFade, EdgeGain, EdgeId, Editor, Executor, NodeKey, OutPort, Sink,
-    Source, TransportPosition, Unforkable,
+    Edge, EdgeFade, EdgeGain, EdgeId, Editor, Executor, NodeKey, OutPort, Sink, Source,
+    TransportPosition, Unforkable,
 };
 use tutti_types::Amplitude;
 
 const BLOCK: usize = 64;
-const SPAN: usize = 256;
+/// `DECLICK` at the rig's 48 kHz.
+const SPAN: usize = 240;
+
+/// The smootherstep at frame `j` of the `SPAN`-frame fade.
+fn s(j: usize) -> f64 {
+    common::smooth_gains(j, SPAN).1
+}
 
 fn key(n: u64) -> NodeKey {
     NodeKey(n)
@@ -85,12 +93,13 @@ fn faded(base: f32) -> EdgeGain {
     EdgeGain::new(Amplitude::new(base))
 }
 
-/// **A fade in starts at exactly 0 and is the weight at `EDGE_DECLICK`.**
-/// Frame `j` of the fade is `base * j / 256`, across the block boundaries
-/// (blocks of 64), and every frame after the 256th is the base itself.
+/// **A fade in leaves 0 and is the weight from `DECLICK` on.** Frame `j` of the
+/// fade is `base * s((j + 1) / 241)`, across the block boundaries (blocks of
+/// 64), strictly inside `(0, base)`, and every frame after the 240th is the
+/// base itself.
 #[test]
-fn a_fade_in_ramps_from_exactly_zero_and_reaches_its_weight_at_edge_declick() {
-    assert_eq!(EDGE_DECLICK.get(), SPAN);
+fn a_fade_in_rises_along_the_smootherstep_and_reaches_its_weight_at_declick() {
+    assert_eq!(common::declick(), SPAN, "the rig's rate");
     let mut rig = Rig::new(&[1.0]);
     rig.ed.spec_mut().set_edge_gain(output_edge(1), faded(0.5));
     rig.ed
@@ -99,17 +108,16 @@ fn a_fade_in_ramps_from_exactly_zero_and_reaches_its_weight_at_edge_declick() {
     rig.commit();
 
     let got = rig.blocks(6);
-    assert_eq!(
-        got[0].to_bits(),
-        0.0f32.to_bits(),
-        "the first frame is +0.0"
-    );
     for (j, &g) in got.iter().enumerate().take(SPAN) {
-        let want = 0.5 * (j as f32 / SPAN as f32);
-        assert_eq!(g.to_bits(), want.to_bits(), "frame {j}");
+        let want = 0.5 * s(j);
+        assert!(
+            (f64::from(g) - want).abs() < 1e-6,
+            "frame {j}: {g}, smootherstep {want}"
+        );
+        assert!(g > 0.0 && g < 0.5, "frame {j} is neither silent nor full");
     }
     for (j, &g) in got.iter().enumerate().skip(SPAN) {
-        assert_eq!(g, 0.5, "frame {j}: at the weight from EDGE_DECLICK on");
+        assert_eq!(g, 0.5, "frame {j}: at the weight from DECLICK on");
     }
 }
 
@@ -128,8 +136,11 @@ fn a_fade_out_ends_inside_the_span_and_the_edge_leaves_the_spec() {
 
     let got = rig.blocks(6);
     for (j, &g) in got.iter().enumerate().take(SPAN) {
-        let want = 1.0 - j as f32 / SPAN as f32;
-        assert_eq!(g.to_bits(), want.to_bits(), "frame {j}");
+        let want = 1.0 - s(j);
+        assert!(
+            (f64::from(g) - want).abs() < 1e-6,
+            "frame {j}: {g}, smootherstep {want}"
+        );
     }
     let last = got.iter().rposition(|&x| x != 0.0).expect("it was heard");
     assert!(
@@ -178,14 +189,18 @@ fn a_fade_reversed_midway_continues_from_the_weight_it_had() {
         .set_edge_fade(output_edge(1), EdgeFade::Out)
         .expect("the edge exists");
     rig.commit();
-    let down = rig.blocks(2); // 128 frames: weight 1 - 127/256 at the end
+    let down = rig.blocks(2); // 128 frames of the fade out
     let at = *down.last().expect("frames");
     rig.ed
         .set_edge_fade(output_edge(1), EdgeFade::In)
         .expect("the edge exists");
     rig.commit();
     let up = rig.blocks(1);
-    assert_eq!(up[0], at, "rises from the weight the fade out had reached");
+    assert!(
+        (up[0] - at).abs() < 1e-5,
+        "rises from the weight the fade out had reached: {} from {at}",
+        up[0]
+    );
     assert!(up[BLOCK - 1] > up[0], "and rises");
 }
 

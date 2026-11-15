@@ -3,6 +3,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use tutti_curve::declick_frames;
+
 use super::{BusLanes, CommitError, Editor, starting};
 use crate::NodeKey;
 use crate::compile::compile;
@@ -264,9 +266,10 @@ impl Editor {
         let committed = self.life.committed().map(|c| &c.spec);
         let spec = &self.spec;
         let (ranges, modes_cells) = (&mut self.cells.ranges, &mut self.cells.modes);
+        let declick = declick_frames(plan.prepare.sample_rate()).get();
         let params = |key: NodeKey, ports: usize, max: usize| {
             let declared = plan.unit(key).map(|u| u.shape.params);
-            ranges.state(key, ports, max, declared, spec)
+            ranges.state(key, ports, max, declick, declared, spec)
         };
         let gains = self
             .cells

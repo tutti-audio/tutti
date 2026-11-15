@@ -30,8 +30,7 @@
 use core::ops::Range;
 
 use tutti_types::{
-    BusTopology, Db, Depth, Feedback, Hz, MAX_BUS_CHANNELS, Phase, PhaseIncrement, SampleRate,
-    Samples,
+    BusTopology, Db, Depth, Feedback, Hz, MAX_CHANNELS, Phase, PhaseIncrement, SampleRate, Samples,
 };
 
 use super::allpass::{allpass_chain, allpass_coeff, sweep_hz};
@@ -45,7 +44,7 @@ use crate::{
 };
 
 /// The most channels a phaser has: a bus's.
-pub const MAX_PHASER_CHANNELS: usize = MAX_BUS_CHANNELS;
+pub const MAX_PHASER_CHANNELS: usize = MAX_CHANNELS;
 
 /// How many first-order all-pass sections a phaser's chain has, per channel: 2 to 12.
 ///

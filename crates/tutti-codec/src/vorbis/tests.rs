@@ -77,7 +77,7 @@ fn vorbis_spec(width: u16, topology: Option<ChannelTopology>) -> Spec {
 }
 
 fn names(speakers: &[Speaker]) -> ChannelTopology {
-    ChannelTopology::new(speakers.iter().copied())
+    ChannelTopology::new(speakers.iter().copied()).unwrap()
 }
 
 /// Stream channel `i` of the engine's 7.1 (`FL FR FC LFE SL SR BL BR`) is
@@ -123,17 +123,18 @@ fn a_rear_stands_in_only_for_a_missing_side() {
         BackRight,
         SideLeft,
         SideRight,
-        SideRight,
+        Unassigned,
     ]);
     assert!(vorbis_order(&vorbis_spec(8, Some(no_lfe))).is_err());
 }
 
 /// A width Vorbis defines is refused when the file cannot say which speakers it
-/// holds (3, 4, 5 and 7 have no engine default), or says speakers that are not
-/// Vorbis's layout.
+/// holds (3, 5 and 7 have no engine default; a bare 4 is the assumed quad, which
+/// is Vorbis's own), or says speakers that are not Vorbis's layout.
 #[test]
 fn a_width_with_no_vorbis_layout_is_refused() {
-    for width in [3u16, 4, 5, 7] {
+    assert_eq!(vorbis_order(&vorbis_spec(4, None)).unwrap(), None);
+    for width in [3u16, 5, 7] {
         let err = vorbis_order(&vorbis_spec(width, None)).unwrap_err();
         assert!(
             matches!(err, Error::Spec(SpecError::VorbisLayout { channels, .. }) if channels == width),
@@ -261,9 +262,9 @@ mod round_trip {
             let spec = vorbis_spec(case.width, topology.clone());
             let source: Vec<Speaker> = match case.source {
                 Some(s) => s.to_vec(),
-                None => ChannelTopology::smpte(spec.layout())
-                    .unwrap()
+                None => ChannelTopology::assumed(spec.layout())
                     .positions()
+                    .unwrap()
                     .to_vec(),
             };
             let width = usize::from(case.width);

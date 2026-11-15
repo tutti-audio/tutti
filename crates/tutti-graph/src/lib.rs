@@ -484,7 +484,7 @@
 //! # Editing a running graph
 //!
 //! - [`Editor::replace`] swaps a node's unit with a crossfade ([`Fade`],
-//!   along a [`CrossfadeCurve`]); the outgoing unit retires on the control
+//!   along a [`FadeLaw`]); the outgoing unit retires on the control
 //!   thread.
 //! - [`Editor::set_latency`] changes a node's declared latency (a hosted
 //!   plugin's pipeline changing).
@@ -585,6 +585,7 @@ mod pool;
 mod preroll;
 #[cfg(feature = "testing")]
 mod reference;
+mod render_mode;
 mod root;
 mod slots;
 mod spec;
@@ -601,7 +602,7 @@ pub use compile::{CompileError, CycleEdge, Shapes, VerifyError, compile};
 pub use controls::{ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts};
 pub use cost::{Cost, Schedule, Work};
 pub use declare::{HasParam, HasParams, ParamUnit, Scalar};
-pub use editor::{CloseError, CommitError, Editor, Limits, MAX_ROOT_CHANNELS, MissingSource};
+pub use editor::{CloseError, CommitError, Editor, Limits, MissingSource};
 pub use event::{
     Event, EventDensity, EventKind, EventOrderError, EventRejected, EventWriter, Harmony,
     HarmonyKind, MAX_EVENT_PORT_CAPACITY, MIN_EVENT_PORT_CAPACITY, ParamRamp, ParamSegment,
@@ -614,17 +615,17 @@ pub use event_inlet::{
 pub use event_losses::Losses;
 pub use event_tap::{EventTapReader, EventTapWriter, TapEvent};
 pub use exec::{DEFAULT_EVENT_CAPACITY, Executor, FADE_CAPACITY, QUEUE_CAPACITY};
-pub use fade::{CrossfadeCurve, Fade};
+pub use fade::Fade;
 pub use fork::{
     ForkBuild, ForkByClone, ForkCause, ForkError, ForkFault, ForkFaultKind, ForkHealth, ForkMode,
     ForkRemains, ForkSource, ForkTarget, Forked, PendingFork, Unforkable,
 };
-pub use tutti_curve::{Curvature, Exponent, Law};
+pub use tutti_curve::{Curvature, DECLICK, Exponent, FadeLaw, Law, declick_frames};
 // The audio graph as a value, and the two passes over it. `plan` is the
 // latency pass and is exported as `latency_plan`.
 pub use bus::{Bus, BusRole, Buses, InBus, MAX_BUSES, OutBus};
 pub use bus_edge::{BusError, BusFeed, BusFold, BusRef, BusSide, BusSource, Lowering};
-pub use gain::{EDGE_DECLICK, EdgeFade, EdgeGain};
+pub use gain::{EdgeFade, EdgeGain};
 pub use graph::{
     Edge, EdgeId, EventTapId, EventTapSource, EventTapSpec, FeedbackFrom, InPort, Invalid, MeterId,
     MeterSpec, NodeKey, NodeSpec, OutPort, Sink, Source, TapAlign, TapId, TapSpec, Topology, Valid,
@@ -638,7 +639,7 @@ pub use latency::{
     OutputDelay, PortFeed, delays, plan as latency_plan,
 };
 pub use loss::EventLoss;
-pub use mode::{MODE_DECLICK, MixError, ModeError, NodeMix, NodeMode};
+pub use mode::{MixError, ModeError, NodeMix, NodeMode};
 pub use node::{
     Chase, ConstantMask, Cx, Env, InPlaceMask, IntoNode, LoopRange, MAX_PORTS,
     MAX_TRANSPORT_CHANGES, Node, NodeParts, Prepare, Resolution, Scratch, Shape, SilenceMask,
@@ -646,8 +647,8 @@ pub use node::{
 };
 pub use par::Pool;
 pub use param::{
-    MAX_PARAM_PORTS, PARAM_DECLICK, ParamIn, ParamInput, ParamMod, ParamPorts, ParamPortsError,
-    ParamRange, ParamRangeReader,
+    MAX_PARAM_PORTS, ParamIn, ParamInput, ParamMod, ParamPorts, ParamPortsError, ParamRange,
+    ParamRangeReader,
 };
 pub use pass::{Pass, PassError};
 pub use plan::{
@@ -657,6 +658,7 @@ pub use plan::{
 pub use play::PlayClock;
 pub use pool::{WorkerPool, WorkerPoolBuilder};
 pub use preroll::PrerollTable;
+pub use render_mode::RenderMode;
 pub use root::{RootError, fold_to_width};
 pub use tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};
 pub use wake::Wake;

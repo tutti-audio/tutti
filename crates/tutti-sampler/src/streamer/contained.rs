@@ -292,7 +292,7 @@ fn a_panicking_decode_faults_only_its_stream(threaded: bool) {
         let hook_armed = Arc::clone(&armed);
         let seams = Seams {
             read_hook: Some(Arc::new(move |id, _at| {
-                if id == StreamId(1) && hook_armed.load(Ordering::SeqCst) {
+                if id == StreamId::of(1) && hook_armed.load(Ordering::SeqCst) {
                     panic!("test hook: the decoder panicked");
                 }
             })),
@@ -300,7 +300,11 @@ fn a_panicking_decode_faults_only_its_stream(threaded: bool) {
         };
         let mut driver = Driver::start(f64::from(RATE), threaded, seams);
         let mut open: Vec<_> = (0..streams).map(|_| driver.open(&path)).collect();
-        assert_eq!(open[0].1.id(), StreamId(1), "setup: the first open is 1");
+        assert_eq!(
+            open[0].1.id(),
+            StreamId::of(1),
+            "setup: the first open is 1"
+        );
         let before: Vec<u64> = open.iter().map(|(_, r)| r.ring.window().1).collect();
 
         armed.store(true, Ordering::SeqCst);
@@ -357,7 +361,7 @@ fn a_panic_while_a_loop_is_captured_faults_that_stream() {
     let hook_armed = Arc::clone(&armed);
     let seams = Seams {
         read_hook: Some(Arc::new(move |id, _at| {
-            if id == StreamId(1) && hook_armed.load(Ordering::SeqCst) {
+            if id == StreamId::of(1) && hook_armed.load(Ordering::SeqCst) {
                 panic!("test hook: the decoder panicked");
             }
         })),

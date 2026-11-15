@@ -1,15 +1,14 @@
-//! [`ChannelTopology`] — *which speaker* each channel feeds, as opposed to
+//! [`ChannelTopology`]: *what* a set of channels is, as opposed to
 //! [`ChannelLayout`]'s *how many*.
 //!
-//! The two are deliberately separate types. `ChannelLayout` is a count, and a
-//! foreign layout type converts to and from it at a crate boundary losing the
-//! placement on purpose. Reach for this type only when the placement is the
-//! thing needed; a caller that wants a width keeps the count.
+//! A channel set is speakers (an ordered list, each channel feeding one
+//! [`Speaker`]) or ambisonic (a spherical-harmonic encoding, not speaker
+//! feeds). The width of either is derived from it, never stored beside it.
 //!
-//! What a count alone cannot carry is visible in the vocabulary:
-//! [`ChannelLayout::QUAD`](crate::ChannelLayout::QUAD) reads "quad / ambisonic
-//! B-format" — one constant for two incompatible meanings, because a count
-//! cannot tell four speaker feeds from a spherical-harmonic encoding.
+//! `ChannelLayout` is a count, and a foreign layout type converts to and from
+//! it at a crate boundary losing the placement on purpose. Reach for this type
+//! only when the placement is the thing needed; a caller that wants a width
+//! keeps the count.
 //!
 //! # Why an ordered list rather than a set of speakers
 //!
@@ -32,12 +31,10 @@
 //!
 //! # Ambisonics is not speaker positions
 //!
-//! B-format `W X Y Z` is a spherical-harmonic encoding, not four speaker feeds,
-//! and all three formats that carry it treat it as a separate axis. It is
-//! deliberately **not** modelled here as four invented [`Speaker`]s — that
-//! would recreate the exact ambiguity described above, one step further in.
+//! B-format `W X Y Z` is not four speaker feeds, and is not modelled as four
+//! invented [`Speaker`]s: it is [`ChannelTopology::Ambisonic`].
 
-use crate::ChannelLayout;
+use crate::{AmbisonicFormat, Bed, ChannelLayout};
 
 /// Which speaker one channel of a bus feeds.
 ///
@@ -135,7 +132,7 @@ impl Speaker {
     /// Returns the surround speaker this one is exchanged with: side for back
     /// and back for side (`None` for any other speaker).
     ///
-    /// The two spellings of one set of feeds (see [`ChannelTopology::quad`]):
+    /// The two spellings of one set of feeds (see [`Bed::Quad`]):
     /// a `tutti_buffers::Fold` and an encoder's channel order both let a bed
     /// use either.
     #[must_use]
@@ -150,269 +147,423 @@ impl Speaker {
     }
 }
 
-/// The speaker each channel of a bus feeds, in channel order.
-///
-/// *Which speaker*, as opposed to [`ChannelLayout`]'s *how many*. Reach for this
-/// type only when the placement is the thing needed; a caller that wants a
-/// width keeps the count. `positions()[i]` is the speaker fed by channel `i`,
-/// so the length **is** the channel count (see [`layout`](Self::layout)); it
-/// is derived, never stored beside the list, so the two cannot drift.
-///
-/// # An ordered list, not a set
-///
-/// The plugin formats disagree. VST3 stores a speaker **set** (a 64-bit mask)
-/// and derives buffer order from ascending bit index, so it cannot express two
-/// orders of the same speakers. AU, CLAP and VST2 store **ordered lists**
-/// (Apple's `MPEG_5_1_A/B/C/D` are four orders of the same six speakers). A
-/// list is the more expressive of the two: every VST3 arrangement converts to
-/// one without loss, and the one lossy direction is *out* to VST3.
-///
-/// # Ambisonics is not speaker positions
-///
-/// B-format `W X Y Z` is a spherical-harmonic encoding, not four speaker feeds,
-/// and is not modelled here as four invented [`Speaker`]s.
-///
-/// # A width alone is not a placement
-///
-/// A [`ChannelLayout`] says how many channels, and nothing about what they
-/// are: 4 is quad or B-format, 6 is 5.1 or six interface inputs, 12 is 7.1.4
-/// or twelve tracks. Only an edge knows, so an edge states a topology:
-/// [`smpte`](Self::smpte) when the width really is the engine's own order,
-/// [`quad`](Self::quad) for four speaker feeds, [`unassigned`](Self::unassigned)
-/// for channels that feed no speaker. `tutti_buffers::Fold::between`
-/// is the one place two topologies meet.
-///
-/// # Examples
-///
-/// ```
-/// use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
-///
-/// let bed = ChannelTopology::smpte(ChannelLayout::from(6u16)).unwrap();
-/// assert_eq!(bed.index_of(Speaker::FrontCenter), Some(2));
-/// assert_eq!(bed.lfe_index(), Some(3));
-/// assert_eq!(bed.layout().count(), 6);
-///
-/// // A width of 4 is ambiguous (quad or B-format), so it has no default order.
-/// assert!(ChannelTopology::smpte(ChannelLayout::QUAD).is_none());
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ChannelTopology {
-    // A plain `Vec`: a topology is built and read on the control thread (and
-    // rides the plugin-load reply), so storage inline buys nothing.
-    positions: Vec<Speaker>,
+/// A speaker list that names a speaker twice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum TopologyError {
+    /// A named speaker appears more than once. [`Speaker::Unassigned`] and
+    /// each distinct [`Speaker::Unknown`] may repeat; any other speaker feeds
+    /// one channel.
+    #[error("{0:?} feeds more than one channel")]
+    Duplicate(Speaker),
 }
 
-impl ChannelTopology {
-    /// Creates a topology from an ordered list of speakers.
+/// The speaker each channel of a bus feeds, in channel order, no named speaker
+/// twice.
+///
+/// `positions()[i]` is the speaker fed by channel `i`, so the length **is** the
+/// channel count: it is derived, never stored beside the list, so the two
+/// cannot drift. [`Speaker::Unassigned`] and each distinct
+/// [`Speaker::Unknown`] may repeat, so a 16-channel discrete interface is
+/// sixteen `Unassigned`.
+///
+/// ```
+/// use tutti_types::{Speaker, Speakers, TopologyError};
+///
+/// let stereo = Speakers::new([Speaker::FrontLeft, Speaker::FrontRight]).unwrap();
+/// assert_eq!(stereo.index_of(Speaker::FrontRight), Some(1));
+/// assert_eq!(
+///     Speakers::new([Speaker::FrontLeft, Speaker::FrontLeft]),
+///     Err(TopologyError::Duplicate(Speaker::FrontLeft)),
+/// );
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(try_from = "Vec<Speaker>", into = "Vec<Speaker>")
+)]
+pub struct Speakers {
+    // A plain `Vec`: a topology is built and read on the control thread (and
+    // rides the plugin-load reply), so storage inline buys nothing.
+    list: Vec<Speaker>,
+}
+
+impl Speakers {
+    /// The speakers of an ordered list.
     ///
-    /// Takes any iterator rather than a slice so a format's decode loop can
-    /// feed it directly without collecting twice.
+    /// Takes any iterator so a decode loop can feed it directly.
     ///
-    /// Duplicates are **not** rejected. A plugin that reports two `FrontLeft`
-    /// channels is describing something this host cannot route sensibly, but
-    /// refusing here would discard the whole map — including the channels that
-    /// *were* readable — and a boundary layer does not get to drop data because
-    /// a consumer might not like it. [`index_of`](Self::index_of) answers with
-    /// the first, which is the only defensible reading of an ambiguous map.
-    pub fn new(positions: impl IntoIterator<Item = Speaker>) -> Self {
+    /// # Errors
+    ///
+    /// [`TopologyError::Duplicate`] when a named speaker appears twice.
+    pub fn new(list: impl IntoIterator<Item = Speaker>) -> Result<Self, TopologyError> {
+        let list: Vec<Speaker> = list.into_iter().collect();
+        for (i, &speaker) in list.iter().enumerate() {
+            if !matches!(speaker, Speaker::Unassigned | Speaker::Unknown(_))
+                && list[..i].contains(&speaker)
+            {
+                return Err(TopologyError::Duplicate(speaker));
+            }
+        }
+        Ok(Self { list })
+    }
+
+    /// The speakers a format reports, never refusing: a named speaker that
+    /// repeats becomes [`Speaker::Unassigned`] in each slot after its first.
+    ///
+    /// For a format boundary, which does not get to drop a plugin's whole map
+    /// because it names `FrontLeft` twice: every other channel keeps its slot
+    /// and its speaker.
+    #[must_use]
+    pub fn from_format(list: impl IntoIterator<Item = Speaker>) -> Self {
+        let mut out: Vec<Speaker> = Vec::new();
+        for speaker in list {
+            let repeated = !matches!(speaker, Speaker::Unassigned | Speaker::Unknown(_))
+                && out.contains(&speaker);
+            out.push(if repeated {
+                Speaker::Unassigned
+            } else {
+                speaker
+            });
+        }
+        Self { list: out }
+    }
+
+    /// `width` channels that feed no speaker.
+    #[must_use]
+    pub fn unassigned(width: ChannelLayout) -> Self {
         Self {
-            positions: positions.into_iter().collect(),
+            list: vec![Speaker::Unassigned; usize::from(width.count())],
         }
     }
 
-    /// Returns the speaker each channel feeds, in channel order.
-    pub fn positions(&self) -> &[Speaker] {
-        &self.positions
+    /// The speaker each channel feeds, in channel order.
+    #[must_use]
+    pub fn as_slice(&self) -> &[Speaker] {
+        &self.list
     }
 
-    /// Returns the channel count, as a [`ChannelLayout`].
-    ///
-    /// The bridge back to the count-only vocabulary, for a signature that
-    /// takes a width.
-    pub fn layout(&self) -> ChannelLayout {
-        // `new` takes any iterator, so a (absurd) bus past `u16::MAX` saturates here
-        // rather than panicking in an accessor.
-        ChannelLayout::clamped(self.positions.len())
+    /// The channel count.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.list.len()
     }
 
-    /// Returns which channel feeds `speaker`, or `None` if this bus has none.
-    ///
-    /// The first match when a speaker appears twice (see [`new`](Self::new)).
+    /// Whether there are no channels.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.list.is_empty()
+    }
+
+    /// Which channel feeds `speaker`, or `None` if none does.
+    #[must_use]
     pub fn index_of(&self, speaker: Speaker) -> Option<usize> {
-        self.positions.iter().position(|&p| p == speaker)
+        self.list.iter().position(|&p| p == speaker)
     }
 
-    /// Returns the LFE channel's index, if this bus has one.
+    /// The LFE channel's index, if there is one.
     ///
     /// Named because it is the lookup with a consequence: the LFE is dropped
     /// from a consumer downmix and is fed by a separate bass-management send
     /// rather than a panner, so "which index is it" is asked by code that will
     /// treat that channel differently.
+    #[must_use]
     pub fn lfe_index(&self) -> Option<usize> {
-        self.positions.iter().position(|p| p.is_lfe())
+        self.list.iter().position(|p| p.is_lfe())
     }
 
-    /// Returns whether no position is [`Unknown`](Speaker::Unknown).
+    /// Whether no position is [`Unknown`](Speaker::Unknown).
     ///
     /// A caller that intends to *route* by speaker needs this: an
     /// [`Unknown`](Speaker::Unknown) channel keeps its slot, but nothing can be
-    /// said about where it should go. A [`Unassigned`](Speaker::Unassigned) channel
-    /// counts as named: it is known to feed no speaker. The plugin hosts decode
-    /// only named speakers and `Unknown`, so their use of this is unchanged.
+    /// said about where it should go. An [`Unassigned`](Speaker::Unassigned)
+    /// channel counts as named: it is known to feed no speaker.
     #[must_use]
     pub fn is_fully_named(&self) -> bool {
-        !self
-            .positions
-            .iter()
-            .any(|p| matches!(p, Speaker::Unknown(_)))
+        !self.list.iter().any(|p| matches!(p, Speaker::Unknown(_)))
     }
 
-    /// Returns the engine's own channel order for a width, or `None` for a
-    /// width with no defined one.
-    ///
-    /// This is the SMPTE / WAV `WAVEFORMATEXTENSIBLE` order that
-    /// `tutti_buffers::Fold` folds by and that the spatial panner maps to:
-    /// `FC` for mono, `FL FR` for stereo, `FL FR C LFE SL SR [BL BR]` for 5.1
-    /// and 7.1, and 7.1.4 at 12: the 7.1 bed then `TFL TFR TBL TBR`. These are
-    /// the widths `tutti_buffers::Fold` has an order for.
-    ///
-    /// `None` for a width the engine has no order for — including **4**, which
-    /// is genuinely ambiguous: quad `FL FR BL BR` and ambisonic B-format
-    /// `W X Y Z` are both four channels and are not interchangeable. Returning
-    /// a quad guess would be the [`ChannelLayout::QUAD`] ambiguity again, so
-    /// the caller is made to say which it has.
-    ///
-    /// [`ChannelLayout::QUAD`]: crate::ChannelLayout::QUAD
-    pub fn smpte(layout: ChannelLayout) -> Option<Self> {
-        use Speaker::*;
-        let positions: &[Speaker] = match layout.count() {
-            1 => &[FrontCenter],
-            2 => &[FrontLeft, FrontRight],
-            6 => &[
-                FrontLeft,
-                FrontRight,
-                FrontCenter,
-                LowFrequency,
-                SideLeft,
-                SideRight,
-            ],
-            8 => &[
-                FrontLeft,
-                FrontRight,
-                FrontCenter,
-                LowFrequency,
-                SideLeft,
-                SideRight,
-                BackLeft,
-                BackRight,
-            ],
-            12 => &[
-                FrontLeft,
-                FrontRight,
-                FrontCenter,
-                LowFrequency,
-                SideLeft,
-                SideRight,
-                BackLeft,
-                BackRight,
-                TopFrontLeft,
-                TopFrontRight,
-                TopBackLeft,
-                TopBackRight,
-            ],
-            _ => return None,
-        };
-        Some(Self::new(positions.iter().copied()))
-    }
-
-    /// Returns what a bare width of `layout` channels is taken to mean at the
-    /// engine's edges (a device, a node's outputs, a file that states nothing):
-    /// [`smpte`](Self::smpte) where it has an order, quad at 4, and
-    /// [`unassigned`](Self::unassigned) channels elsewhere.
-    ///
-    /// The quad is an assumption [`smpte`](Self::smpte) refuses to make: a
-    /// four-channel device or graph root is far more often quad than B-format.
-    /// An edge that knows better states its own topology instead. A width with
-    /// no order (3, 5, 7, 9 to 11, 13 and up, and zero) names no speaker, so
-    /// each channel is unassigned and a fold places it by index.
-    #[must_use]
-    pub fn assumed(layout: ChannelLayout) -> Self {
-        match layout.count() {
-            4 => Self::quad(),
-            _ => Self::smpte(layout).unwrap_or_else(|| Self::unassigned(layout)),
-        }
-    }
-
-    /// Returns the quad topology, `FL FR BL BR`: four speaker feeds.
-    ///
-    /// The spelling is WAVE's (`KSAUDIO_SPEAKER_QUAD`, mask `0x33`, is
-    /// front pair and back pair). VST3's `k40Music` and AU's `Quadraphonic`
-    /// call the same pair `Ls Rs` and decode to `FL FR SL SR`; the engine's own
-    /// 5.1 uses side too. The two spellings are one set of feeds, not two:
-    /// `tutti_buffers::Fold::between` moves a side or back pair whose
-    /// counterpart the source lacks to the destination's at gain 1.0, a bit-exact
-    /// relabelling either way (pinned in `fold/tests.rs`), so no decode is
-    /// rewritten to agree and a consumer need not normalise.
-    ///
-    /// Separate from [`smpte`](Self::smpte) because a bare width of 4 cannot
-    /// say whether it means this or B-format; a caller that *knows* it has quad
-    /// says so by naming it.
-    pub fn quad() -> Self {
-        use Speaker::*;
-        Self::new([FrontLeft, FrontRight, BackLeft, BackRight])
-    }
-
-    /// Returns `width` channels that feed no speaker.
-    ///
-    /// For an edge whose channels are numbered rather than placed (a 16-input
-    /// interface, a multitrack file, B-format, which is not speaker feeds
-    /// either). A fold maps them one to one and never through a surround matrix.
-    pub fn unassigned(width: ChannelLayout) -> Self {
-        Self::new(core::iter::repeat_n(
-            Speaker::Unassigned,
-            usize::from(width.count()),
-        ))
-    }
-
-    /// Returns whether the bus is not empty and every channel is
+    /// Whether the list is not empty and every channel is
     /// [`Unassigned`](Speaker::Unassigned).
     #[must_use]
     pub fn is_unassigned(&self) -> bool {
-        !self.positions.is_empty() && self.positions.iter().all(|p| p.is_unassigned())
+        !self.list.is_empty() && self.list.iter().all(|p| p.is_unassigned())
     }
+}
+
+impl TryFrom<Vec<Speaker>> for Speakers {
+    type Error = TopologyError;
+
+    fn try_from(list: Vec<Speaker>) -> Result<Self, TopologyError> {
+        Self::new(list)
+    }
+}
+
+impl From<Speakers> for Vec<Speaker> {
+    fn from(speakers: Speakers) -> Self {
+        speakers.list
+    }
+}
+
+/// A channel set: speakers, or an ambisonic signal.
+///
+/// *What* the channels are, as opposed to [`ChannelLayout`]'s *how many*; the
+/// [`width`](Self::width) is derived from either arm.
+///
+/// # A width alone is not a placement
+///
+/// A [`ChannelLayout`] says how many channels, and nothing about what they
+/// are: 4 is quad or B-format, 6 is 5.1 or six interface inputs, 12 is 7.1.4
+/// or twelve tracks. Only an edge knows, so an edge states a topology, or says
+/// it guessed with [`assumed`](Self::assumed) and reports a [`Placement`].
+/// `tutti_buffers::Fold::between` is the one place two topologies meet.
+///
+/// # Examples
+///
+/// ```
+/// use tutti_types::{Bed, ChannelLayout, ChannelTopology, Speaker};
+///
+/// let bed = ChannelTopology::assumed(ChannelLayout::from(6u16));
+/// assert_eq!(bed, Bed::Surround51.topology());
+/// assert_eq!(bed.index_of(Speaker::FrontCenter), Some(2));
+/// assert_eq!(bed.lfe_index(), Some(3));
+/// assert_eq!(bed.width().count(), 6);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ChannelTopology {
+    /// Speaker feeds, in channel order.
+    Speakers(Speakers),
+    /// A spherical-harmonic encoding.
+    Ambisonic(AmbisonicFormat),
+}
+
+impl ChannelTopology {
+    /// A speaker topology from an ordered list.
+    ///
+    /// # Errors
+    ///
+    /// [`TopologyError::Duplicate`] when a named speaker appears twice.
+    pub fn new(list: impl IntoIterator<Item = Speaker>) -> Result<Self, TopologyError> {
+        Speakers::new(list).map(Self::Speakers)
+    }
+
+    /// The channel count, as a [`ChannelLayout`]: the speaker count, or
+    /// `(order + 1)²`.
+    #[must_use]
+    pub fn width(&self) -> ChannelLayout {
+        match self {
+            // A list past `u16::MAX` saturates here rather than panicking in
+            // an accessor; every cap then refuses it.
+            Self::Speakers(s) => ChannelLayout::clamped(s.len()),
+            Self::Ambisonic(f) => f.width(),
+        }
+    }
+
+    /// The speakers, or `None` for an ambisonic set.
+    #[must_use]
+    pub fn speakers(&self) -> Option<&Speakers> {
+        match self {
+            Self::Speakers(s) => Some(s),
+            Self::Ambisonic(_) => None,
+        }
+    }
+
+    /// The speaker each channel feeds, or `None` for an ambisonic set.
+    #[must_use]
+    pub fn positions(&self) -> Option<&[Speaker]> {
+        self.speakers().map(Speakers::as_slice)
+    }
+
+    /// The ambisonic format, or `None` for speakers.
+    #[must_use]
+    pub fn ambisonic(&self) -> Option<AmbisonicFormat> {
+        match self {
+            Self::Speakers(_) => None,
+            Self::Ambisonic(f) => Some(*f),
+        }
+    }
+
+    /// Which channel feeds `speaker`, or `None` if none does (and for an
+    /// ambisonic set).
+    #[must_use]
+    pub fn index_of(&self, speaker: Speaker) -> Option<usize> {
+        self.speakers()?.index_of(speaker)
+    }
+
+    /// The LFE channel's index, if there is one.
+    #[must_use]
+    pub fn lfe_index(&self) -> Option<usize> {
+        self.speakers()?.lfe_index()
+    }
+
+    /// Whether no position is [`Unknown`](Speaker::Unknown); an ambisonic set
+    /// has no positions to be unknown.
+    #[must_use]
+    pub fn is_fully_named(&self) -> bool {
+        self.speakers().is_none_or(Speakers::is_fully_named)
+    }
+
+    /// Whether this is speakers, not empty, and every channel is
+    /// [`Unassigned`](Speaker::Unassigned).
+    #[must_use]
+    pub fn is_unassigned(&self) -> bool {
+        self.speakers().is_some_and(Speakers::is_unassigned)
+    }
+
+    /// `width` channels that feed no speaker.
+    ///
+    /// For an edge whose channels are numbered rather than placed (a 16-input
+    /// interface, a multitrack file). A fold maps them one to one and never
+    /// through a surround matrix.
+    #[must_use]
+    pub fn unassigned(width: ChannelLayout) -> Self {
+        Self::Speakers(Speakers::unassigned(width))
+    }
+
+    /// What a bare width is taken to mean at an edge that cannot know (a
+    /// device, a node's outputs, a file whose container states a count and no
+    /// placement): 1 mono, 2 stereo, 4 quad, 6 5.1, 8 7.1, 12 7.1.4, and
+    /// [`unassigned`](Self::unassigned) channels at any other width.
+    ///
+    /// The one count-to-placement map: an edge that uses it reports
+    /// [`Placement::Assumed`], and an edge that knows better states its own
+    /// topology instead. The quad is a guess a four-channel device or root
+    /// invites over B-format; an unlisted width names no speaker, so a fold
+    /// places each channel by index.
+    #[must_use]
+    pub fn assumed(width: ChannelLayout) -> Self {
+        let bed = match width.count() {
+            1 => Bed::Mono,
+            2 => Bed::Stereo,
+            4 => Bed::Quad,
+            6 => Bed::Surround51,
+            8 => Bed::Surround71,
+            12 => Bed::Surround714,
+            _ => return Self::unassigned(width),
+        };
+        bed.topology()
+    }
+
+    /// The [`Bed`] this is, up to a side/back counterpart, or `None`: see
+    /// [`Bed::from_topology`].
+    #[must_use]
+    pub fn bed(&self) -> Option<Bed> {
+        Bed::from_topology(self)
+    }
+}
+
+impl From<Speakers> for ChannelTopology {
+    fn from(speakers: Speakers) -> Self {
+        Self::Speakers(speakers)
+    }
+}
+
+impl From<AmbisonicFormat> for ChannelTopology {
+    fn from(format: AmbisonicFormat) -> Self {
+        Self::Ambisonic(format)
+    }
+}
+
+impl From<Bed> for ChannelTopology {
+    fn from(bed: Bed) -> Self {
+        bed.topology()
+    }
+}
+
+/// Where a reported topology came from.
+///
+/// An edge that cannot know a placement (a device, a container that states a
+/// count and no placement) calls [`ChannelTopology::assumed`] and says so with
+/// [`Assumed`](Self::Assumed); an edge that read it from the format says
+/// [`Stated`](Self::Stated).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Placement {
+    /// The format, the device or the caller stated it.
+    Stated,
+    /// A count became a placement through [`ChannelTopology::assumed`].
+    Assumed,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{AmbisonicNormalization, AmbisonicOrder, AmbisonicOrdering};
+
+    fn topology(list: &[Speaker]) -> ChannelTopology {
+        ChannelTopology::new(list.iter().copied()).unwrap()
+    }
 
     /// The width is the list's length, and is never stored separately.
     #[test]
-    fn the_layout_is_derived_from_the_position_count() {
-        let t = ChannelTopology::new([Speaker::FrontLeft, Speaker::FrontRight]);
-        assert_eq!(t.layout(), ChannelLayout::STEREO);
-        assert_eq!(t.positions().len(), 2);
+    fn the_width_is_derived_from_the_position_count() {
+        let t = topology(&[Speaker::FrontLeft, Speaker::FrontRight]);
+        assert_eq!(t.width(), ChannelLayout::STEREO);
+        assert_eq!(t.positions().unwrap().len(), 2);
+    }
+
+    /// An ambisonic set's width is (order + 1)², from its format alone.
+    #[test]
+    fn an_ambisonic_width_is_derived_from_its_order() {
+        for (order, width) in [(0u8, 1u16), (1, 4), (2, 9), (3, 16)] {
+            let t = ChannelTopology::from(AmbisonicFormat::ambix(AmbisonicOrder::of(order)));
+            assert_eq!(t.width().count(), width);
+            assert_eq!(t.positions(), None);
+        }
     }
 
     /// An empty topology is a real answer (a disabled bus), not a failure.
     #[test]
-    fn an_empty_topology_is_an_empty_layout() {
-        let t = ChannelTopology::new([]);
-        assert_eq!(t.layout(), ChannelLayout::EMPTY);
+    fn an_empty_topology_is_an_empty_width() {
+        let t = topology(&[]);
+        assert_eq!(t.width(), ChannelLayout::EMPTY);
         assert_eq!(t.lfe_index(), None);
     }
 
-    /// The engine's 5.1 order puts the LFE at index 3.
-    ///
-    /// Pinned as an absolute index rather than by round-tripping through
-    /// `lfe_index`, which would agree with any consistent-but-wrong order. 3 is
-    /// the number `downmix.rs` skips.
+    /// A named speaker twice is refused with the speaker; `Unassigned` and each
+    /// distinct `Unknown` repeat freely, and the same `Unknown` twice is one
+    /// position twice.
     #[test]
-    fn the_smpte_51_order_puts_lfe_at_index_three() {
-        let t = ChannelTopology::smpte(ChannelLayout::from(6u16)).expect("6 has an order");
+    fn a_named_speaker_may_not_repeat_and_unassigned_may() {
+        use Speaker::*;
         assert_eq!(
-            t.positions(),
+            Speakers::new([FrontLeft, FrontRight, FrontLeft]),
+            Err(TopologyError::Duplicate(FrontLeft))
+        );
+        assert_eq!(
+            Speakers::new([LowFrequency, LowFrequency]),
+            Err(TopologyError::Duplicate(LowFrequency))
+        );
+        assert!(Speakers::new([Unassigned; 16]).is_ok());
+        assert!(Speakers::new([Unknown(1), Unknown(2), FrontLeft, Unknown(1)]).is_ok());
+    }
+
+    /// At a format boundary a repeated named speaker becomes `Unassigned` in
+    /// its later slot and the rest of the map keeps its speakers and slots.
+    #[test]
+    fn a_format_boundary_unassigns_a_repeat_and_keeps_the_rest() {
+        use Speaker::*;
+        let s = Speakers::from_format([FrontLeft, FrontRight, FrontLeft, FrontCenter, FrontRight]);
+        assert_eq!(
+            s.as_slice(),
+            &[FrontLeft, FrontRight, Unassigned, FrontCenter, Unassigned]
+        );
+        let clean = Speakers::from_format([FrontLeft, Unassigned, Unknown(7), Unassigned]);
+        assert_eq!(
+            clean.as_slice(),
+            &[FrontLeft, Unassigned, Unknown(7), Unassigned]
+        );
+    }
+
+    /// The assumed 5.1 puts the LFE at index 3, pinned as an absolute index
+    /// (the number the downmix skips) rather than through `lfe_index` alone.
+    #[test]
+    fn the_assumed_51_order_puts_lfe_at_index_three() {
+        let t = ChannelTopology::assumed(ChannelLayout::from(6u16));
+        assert_eq!(
+            t.positions().unwrap(),
             &[
                 Speaker::FrontLeft,
                 Speaker::FrontRight,
@@ -425,56 +576,44 @@ mod tests {
         assert_eq!(t.lfe_index(), Some(3));
     }
 
-    /// 7.1 keeps the LFE at 3 and appends the rear pair.
-    ///
-    /// The property that matters is that widening does not *move* the shared
-    /// prefix — a 7.1 bus and a 5.1 bus agree channel-for-channel up to index 5.
+    /// The count-to-placement map: 1 mono, 2 stereo, 4 quad, 6 5.1, 8 7.1,
+    /// 12 7.1.4, every other width unassigned.
     #[test]
-    fn the_smpte_71_order_extends_51_rather_than_reshuffling_it() {
-        let five_one = ChannelTopology::smpte(ChannelLayout::from(6u16)).expect("6 has an order");
-        let seven_one = ChannelTopology::smpte(ChannelLayout::from(8u16)).expect("8 has an order");
-        assert_eq!(&seven_one.positions()[..6], five_one.positions());
-        assert_eq!(seven_one.lfe_index(), Some(3));
+    fn assumed_maps_the_six_widths_and_leaves_the_rest_unassigned() {
+        for (width, bed) in [
+            (1u16, Bed::Mono),
+            (2, Bed::Stereo),
+            (4, Bed::Quad),
+            (6, Bed::Surround51),
+            (8, Bed::Surround71),
+            (12, Bed::Surround714),
+        ] {
+            let t = ChannelTopology::assumed(ChannelLayout::from(width));
+            assert_eq!(t, bed.topology(), "width {width}");
+            assert_eq!(t.width().count(), width);
+        }
+        for width in [0u16, 3, 5, 7, 9, 10, 11, 13, 16] {
+            let w = ChannelLayout::from(width);
+            assert_eq!(ChannelTopology::assumed(w), ChannelTopology::unassigned(w));
+        }
+        assert!(!ChannelTopology::assumed(ChannelLayout::EMPTY).is_unassigned());
+    }
+
+    /// 7.1 extends 5.1 without moving its prefix; 7.1.4 extends 7.1 with the
+    /// four heights.
+    #[test]
+    fn the_assumed_orders_extend_each_other() {
+        let five = ChannelTopology::assumed(ChannelLayout::from(6u16));
+        let seven = ChannelTopology::assumed(ChannelLayout::from(8u16));
+        let atmos = ChannelTopology::assumed(ChannelLayout::from(12u16));
+        assert_eq!(&seven.positions().unwrap()[..6], five.positions().unwrap());
         assert_eq!(
-            &seven_one.positions()[6..],
+            &seven.positions().unwrap()[6..],
             &[Speaker::BackLeft, Speaker::BackRight]
         );
-    }
-
-    /// A width of 4 has no inferable order.
-    ///
-    /// Quad and ambisonic B-format are both 4 channels and mean different
-    /// things, so `smpte` declines rather than guessing. This is the one arm
-    /// most likely to be "helpfully" filled in later — it is a deliberate
-    /// refusal, and `quad()` is the way to say you have quad.
-    #[test]
-    fn a_width_of_four_is_ambiguous_and_declines() {
-        assert_eq!(ChannelTopology::smpte(ChannelLayout::QUAD), None);
-        assert_eq!(ChannelTopology::quad().layout(), ChannelLayout::QUAD);
-        assert_eq!(ChannelTopology::quad().lfe_index(), None);
-    }
-
-    /// Widths the engine has no order for decline rather than guessing.
-    #[test]
-    fn an_unhandled_width_has_no_smpte_order() {
-        for width in [3u16, 5, 7, 9, 10, 11, 13] {
-            assert_eq!(
-                ChannelTopology::smpte(ChannelLayout::from(width)),
-                None,
-                "width {width} should have no inferred order"
-            );
-        }
-    }
-
-    /// 7.1.4 is the 7.1 bed with the four heights after it, so the order
-    /// extends 7.1 as 7.1 extends 5.1.
-    #[test]
-    fn the_smpte_714_order_extends_71() {
-        let seven_one = ChannelTopology::smpte(ChannelLayout::from(8u16)).expect("8 has an order");
-        let bed = ChannelTopology::smpte(ChannelLayout::from(12u16)).expect("12 has an order");
-        assert_eq!(&bed.positions()[..8], seven_one.positions());
+        assert_eq!(&atmos.positions().unwrap()[..8], seven.positions().unwrap());
         assert_eq!(
-            &bed.positions()[8..],
+            &atmos.positions().unwrap()[8..],
             &[
                 Speaker::TopFrontLeft,
                 Speaker::TopFrontRight,
@@ -489,34 +628,24 @@ mod tests {
     #[test]
     fn unassigned_channels_are_counted_named_and_unplaced() {
         let d = ChannelTopology::unassigned(ChannelLayout::from(6u16));
-        assert_eq!(d.layout().count(), 6);
+        assert_eq!(d.width().count(), 6);
         assert!(d.is_unassigned() && d.is_fully_named());
         assert_eq!(d.index_of(Speaker::FrontCenter), None);
-        assert!(
-            !ChannelTopology::smpte(ChannelLayout::from(6u16))
-                .unwrap()
-                .is_unassigned()
-        );
+        assert!(!Bed::Surround51.topology().is_unassigned());
         assert!(!ChannelTopology::unassigned(ChannelLayout::EMPTY).is_unassigned());
-        assert!(!ChannelTopology::new([Speaker::Unassigned, Speaker::Unknown(1)]).is_unassigned());
-        assert!(!ChannelTopology::new([Speaker::Unassigned, Speaker::Unknown(1)]).is_fully_named());
+        assert!(!topology(&[Speaker::Unassigned, Speaker::Unknown(1)]).is_unassigned());
+        assert!(!topology(&[Speaker::Unassigned, Speaker::Unknown(1)]).is_fully_named());
     }
 
     /// An unknown position keeps its slot instead of collapsing the list.
-    ///
-    /// The property the `Unknown` arm exists for: the list is indexed by
-    /// channel, so a dropped entry would renumber every later channel. Asserted
-    /// on the *following* channel's index, since that is what a drop corrupts —
-    /// a length check alone would pass if two entries were dropped and one
-    /// invented.
     #[test]
     fn an_unknown_position_holds_its_channel_slot() {
-        let t = ChannelTopology::new([
+        let t = topology(&[
             Speaker::FrontLeft,
             Speaker::Unknown(4242),
             Speaker::FrontRight,
         ]);
-        assert_eq!(t.layout(), ChannelLayout::from(3u16));
+        assert_eq!(t.width(), ChannelLayout::from(3u16));
         assert_eq!(
             t.index_of(Speaker::FrontRight),
             Some(2),
@@ -525,53 +654,59 @@ mod tests {
         assert!(!t.is_fully_named());
     }
 
-    /// A fully-named topology says so.
-    ///
-    /// The positive half of the test above: without it, an `is_fully_named`
-    /// that always returned `false` would satisfy the negative assertion.
+    /// An ambisonic set has no speaker lookups, no LFE, and nothing unknown.
     #[test]
-    fn a_named_topology_reports_itself_fully_named() {
-        assert!(
-            ChannelTopology::smpte(ChannelLayout::STEREO)
-                .expect("stereo has an order")
-                .is_fully_named()
+    fn an_ambisonic_set_answers_no_speaker_question() {
+        let t = ChannelTopology::from(AmbisonicFormat::new(
+            AmbisonicOrder::of(1),
+            AmbisonicOrdering::Acn,
+            AmbisonicNormalization::N3d,
+        ));
+        assert_eq!(t.index_of(Speaker::FrontLeft), None);
+        assert_eq!(t.lfe_index(), None);
+        assert!(t.is_fully_named() && !t.is_unassigned());
+        assert_eq!(
+            t.ambisonic().unwrap().normalization(),
+            AmbisonicNormalization::N3d
         );
+        assert_eq!(topology(&[Speaker::FrontLeft]).ambisonic(), None);
     }
 
     /// A speaker this bus does not carry is absent, not index 0.
     #[test]
     fn a_missing_speaker_has_no_index() {
-        let t = ChannelTopology::smpte(ChannelLayout::STEREO).expect("stereo has an order");
+        let t = Bed::Stereo.topology();
         assert_eq!(t.index_of(Speaker::LowFrequency), None);
         assert_eq!(t.index_of(Speaker::FrontLeft), Some(0));
     }
 
-    /// A topology survives a serde round trip, including an unknown position.
+    /// A topology survives a serde round trip, including an unknown position
+    /// and an ambisonic set, and a document naming a speaker twice is refused.
     ///
-    /// It rides the plugin-load IPC reply, so this is a wire path rather than a
-    /// convenience. The `Unknown` payload is included deliberately: it is the
-    /// one arm carrying data, so a serialization that flattened it to a unit
-    /// variant would lose the raw value while still round-tripping *length*.
+    /// It rides the plugin-load IPC reply, so this is a wire path.
     #[cfg(feature = "serde")]
     #[test]
-    fn a_topology_survives_a_serde_round_trip() {
-        let original = ChannelTopology::new([
+    fn a_topology_survives_a_serde_round_trip_and_refuses_a_duplicate() {
+        let original = topology(&[
             Speaker::FrontLeft,
             Speaker::Unknown(4242),
             Speaker::LowFrequency,
         ]);
         tutti_fixtures::check_round_trip(
             &original,
-            r#"{"positions":["FrontLeft",{"Unknown":4242},"LowFrequency"]}"#,
+            r#"{"Speakers":["FrontLeft",{"Unknown":4242},"LowFrequency"]}"#,
         );
-        assert_eq!(original.positions()[1], Speaker::Unknown(4242));
-        assert_eq!(original.lfe_index(), Some(2));
+        tutti_fixtures::check_round_trip(
+            &ChannelTopology::from(AmbisonicFormat::ambix(AmbisonicOrder::of(1))),
+            r#"{"Ambisonic":{"order":1,"ordering":"Acn","normalization":"Sn3d"}}"#,
+        );
+        assert!(
+            serde_json::from_str::<ChannelTopology>(r#"{"Speakers":["FrontLeft","FrontLeft"]}"#)
+                .is_err()
+        );
     }
 
     /// Only the LFE answers `is_lfe`.
-    ///
-    /// Guards the predicate against being widened to "any non-placed channel" —
-    /// `TopCenter` and `BackCenter` are placed speakers and must not match.
     #[test]
     fn only_the_lfe_is_the_lfe() {
         assert!(Speaker::LowFrequency.is_lfe());
@@ -604,24 +739,5 @@ mod tests {
         ] {
             assert_eq!(sp.counterpart(), None);
         }
-    }
-
-    /// A bare width is the engine's order where it has one (quad at 4) and
-    /// unassigned channels where it has none.
-    #[test]
-    fn a_bare_width_is_assumed_else_unassigned() {
-        assert_eq!(
-            ChannelTopology::assumed(ChannelLayout::from(4u16)),
-            ChannelTopology::quad()
-        );
-        assert_eq!(
-            ChannelTopology::assumed(ChannelLayout::from(6u16)).lfe_index(),
-            Some(3)
-        );
-        let odd = ChannelLayout::from(3u16);
-        assert_eq!(
-            ChannelTopology::assumed(odd),
-            ChannelTopology::unassigned(odd)
-        );
     }
 }

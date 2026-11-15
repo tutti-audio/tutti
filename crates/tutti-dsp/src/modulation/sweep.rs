@@ -1,7 +1,7 @@
 //! [`Sweep`] and [`Stagger`]: the construction constants of a chorus or flanger, each
 //! checked where it is made.
 
-use tutti_types::{Feedback, MAX_BUS_CHANNELS, Phase, PhaseIncrement, Seconds};
+use tutti_types::{Feedback, MAX_CHANNELS, Phase, PhaseIncrement, Seconds};
 
 use crate::MaxDelay;
 
@@ -213,7 +213,7 @@ enum Kind {
     /// One wrapped offset for each of the first `count` channels.
     Each {
         count: usize,
-        offsets: [PhaseIncrement; MAX_BUS_CHANNELS],
+        offsets: [PhaseIncrement; MAX_CHANNELS],
     },
 }
 
@@ -284,13 +284,13 @@ impl Stagger {
     ///
     /// [`StaggerError::NotFinite`] or [`TooMany`](StaggerError::TooMany).
     pub fn each(offsets: &[PhaseIncrement]) -> Result<Self, StaggerError> {
-        if offsets.len() > MAX_BUS_CHANNELS {
+        if offsets.len() > MAX_CHANNELS {
             return Err(StaggerError::TooMany {
                 count: offsets.len(),
-                max: MAX_BUS_CHANNELS,
+                max: MAX_CHANNELS,
             });
         }
-        let mut all = [PhaseIncrement(0.0); MAX_BUS_CHANNELS];
+        let mut all = [PhaseIncrement(0.0); MAX_CHANNELS];
         for (channel, &offset) in offsets.iter().enumerate() {
             if !offset.0.is_finite() {
                 return Err(StaggerError::NotFinite { channel, offset });

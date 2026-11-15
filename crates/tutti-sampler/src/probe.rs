@@ -132,7 +132,7 @@ pub fn probe(path: impl AsRef<Path>) -> Result<SampleFacts, ProbeError> {
     Ok(SampleFacts {
         frames: meta.total_frames.map(|f| Samples(f as usize)),
         sample_rate: meta.sample_rate,
-        layout: meta.topology.layout(),
+        layout: meta.topology.width(),
         streamable: streamable(path, &meta),
         topology: meta.topology,
     })
@@ -228,7 +228,7 @@ mod tests {
             frames: None,
             sample_rate: SampleRate::SR_48K,
             layout: ChannelLayout::STEREO,
-            topology: ChannelTopology::smpte(ChannelLayout::STEREO).unwrap(),
+            topology: ChannelTopology::assumed(ChannelLayout::STEREO),
             streamable: false,
         };
         assert_eq!(unknown.frames_or_zero(), Samples(0));

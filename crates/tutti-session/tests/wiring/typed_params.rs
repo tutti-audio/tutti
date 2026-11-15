@@ -5,7 +5,7 @@
 //! `SessionNode`.
 
 use tutti_graph::{
-    CrossfadeCurve, Cx, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status, Unforkable,
+    Cx, FadeLaw, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status, Unforkable,
 };
 use tutti_nodes::{CompressorControls, CompressorNode, KeySource, SvfFilterNode, SvfType};
 use tutti_session::{ParamError, Session};
@@ -100,7 +100,7 @@ fn set_param_refuses_a_missing_node_and_a_missing_param() {
                 Q(0.7),
             )),
             Seconds(0.0),
-            CrossfadeCurve::EqualPower,
+            FadeLaw::EqualPower,
         )
         .unwrap_or_else(|_| panic!("a detached graph swaps at once"));
     assert_eq!(

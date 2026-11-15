@@ -256,7 +256,7 @@ impl PlaybackSlot {
     ///
     /// `width` is a plain `usize`, deliberately not a [`ChannelLayout`]: it is
     /// an already-intersected clamp that callers compute as
-    /// `slot width ∧ output channels ∧ MAX_SAMPLER_CHANNELS`, not a declaration
+    /// `slot width ∧ output channels ∧ MAX_CHANNELS`, not a declaration
     /// of how many channels anything *has*.
     #[inline]
     pub(crate) fn render_into(

@@ -17,11 +17,11 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::MAX_SAMPLER_CHANNELS;
 use tutti_graph::{
     Cx, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, IntoNode, Io, Node,
-    NodeParts, Prepare, Shape, Status,
+    NodeParts, Prepare, RenderMode, Shape, Status, declick_frames,
 };
+use tutti_types::MAX_CHANNELS;
 use tutti_types::{
     Amplitude, ChannelLayout, PlaybackRate, ReadRate, SamplePosition, SampleRate, SrcRatio, Tail,
 };
@@ -104,7 +104,7 @@ impl DiskSource {
     }
 
     /// A source over `consumer` through its one `reader` and the reader of its
-    /// map (`None`: silent), `width` wide (at most [`MAX_SAMPLER_CHANNELS`],
+    /// map (`None`: silent), `width` wide (at most [`MAX_CHANNELS`],
     /// the widest frame the read path stacks), placing the ring's channels by
     /// `place`: the [`Place`] of the ring's topology into `width`
     /// ([`Place::for_topology`], built, and so refusing, when the stream was
@@ -232,6 +232,13 @@ pub struct DiskVoice {
     /// and says so rather than play off pitch; a live voice never told one
     /// steps by the streamer's conversion for the session rate.
     sample_rate: Option<SampleRate>,
+    /// The live read's fade length in frames: `DECLICK` at `sample_rate`, or at
+    /// the file's rate until a rate is given.
+    declick: usize,
+
+    /// The render mode `prepare` last gave this voice: a fork reads its file
+    /// on the render's thread, which only an offline render allows.
+    render_mode: RenderMode,
 
     /// The transport as this voice reads it when it is a graph node of its
     /// own (a voice in a pool or a `VoiceNode` reads its owner's).
@@ -291,6 +298,10 @@ enum OfflineFault {
     /// It was asked to render before it was prepared with a sample rate.
     #[error("it was rendered before it was given a sample rate")]
     NoRenderRate,
+    /// It was prepared for a realtime render, where its file read would block
+    /// the audio thread.
+    #[error("it was prepared for a realtime render, and its file read blocks")]
+    PreparedRealtime,
 }
 
 /// Why a disk voice refused a fork.
@@ -338,6 +349,8 @@ impl Clone for DiskVoice {
             origin: self.origin.clone(),
             offline: self.offline.clone(),
             sample_rate: self.sample_rate,
+            render_mode: self.render_mode,
+            declick: self.declick,
             clock: Clock::new(),
             tempo: self.tempo.clone(),
             // Unsized, so a clone stays allocation-free as it was: a copy
@@ -367,6 +380,8 @@ impl DiskVoice {
             origin: None,
             offline: None,
             sample_rate: None,
+            render_mode: RenderMode::Realtime,
+            declick: declick_frames(config.file_sample_rate).get(),
             clock: Clock::new(),
             tempo: None,
             positions: Vec::new(),
@@ -672,6 +687,7 @@ impl DiskVoice {
         out: &mut Out<'_, F>,
     ) {
         let rate = self.step_rate();
+        let declick = self.declick;
         let gain = audible(self.shared_state.gain().get());
         // Borrowed beside `inner`, not cloned: `self` holds a strong
         // reference, so a clone only adds two atomic refcount updates.
@@ -683,6 +699,7 @@ impl DiskVoice {
                 &positions[a - base..b - base],
                 run.generation,
                 rate.get(),
+                declick,
                 gain,
                 state,
                 a - base,
@@ -705,8 +722,8 @@ impl DiskVoice {
         positions: &mut [Option<SamplePosition>],
         mut emit: impl FnMut(usize, &[f32]),
     ) {
-        let w = self.width().min(MAX_SAMPLER_CHANNELS);
-        let silent = [0.0f32; MAX_SAMPLER_CHANNELS];
+        let w = self.width().min(MAX_CHANNELS);
+        let silent = [0.0f32; MAX_CHANNELS];
         let frames = range.len();
         let gate = self.gate();
         let rate = self.step_rate();
@@ -719,7 +736,7 @@ impl DiskVoice {
             return;
         };
         let direction = offline.direction;
-        let mut frame = [0.0f32; MAX_SAMPLER_CHANNELS];
+        let mut frame = [0.0f32; MAX_CHANNELS];
         for (i, pos) in positions[..frames].iter().enumerate() {
             let Some(pos) = pos else {
                 emit(i, &silent[..w]);
@@ -727,7 +744,13 @@ impl DiskVoice {
             };
             // A copy never told a rate latches, inside its window.
             if !told_rate {
-                offline.fault.latch(OfflineFault::NoRenderRate);
+                offline.fault.latch_static(&OfflineFault::NoRenderRate);
+                emit(i, &silent[..w]);
+                continue;
+            }
+            // Its read blocks on file I/O, which a realtime render never waits on.
+            if !self.render_mode.is_offline() {
+                offline.fault.latch_static(&OfflineFault::PreparedRealtime);
                 emit(i, &silent[..w]);
                 continue;
             }
@@ -747,10 +770,13 @@ impl DiskVoice {
         }
     }
 
-    /// Run at `sample_rate`: the step converts the file's rate to it. What
+    /// Run at `sample_rate` under `mode`: the step converts the file's rate to
+    /// it, and a fork reads its file only when `mode` is offline. What
     /// [`Node::prepare`] does; allocation-free.
-    pub(crate) fn set_render_rate(&mut self, sample_rate: SampleRate) {
+    pub(crate) fn set_render(&mut self, sample_rate: SampleRate, mode: RenderMode) {
         self.sample_rate = Some(sample_rate);
+        self.render_mode = mode;
+        self.declick = declick_frames(sample_rate).get();
     }
 
     /// Forget the read's jump state (a slot's flush at a jump, a reset).
@@ -828,7 +854,7 @@ impl Node for DiskVoice {
     /// The render rate, and the block's position scratch sized from
     /// `max_block` (a re-prepare at another size resizes it).
     fn prepare(&mut self, p: &Prepare) {
-        self.set_render_rate(p.sample_rate());
+        self.set_render(p.sample_rate(), p.render_mode());
         let frames = p.max_block().get();
         self.positions.clear();
         self.positions.resize(frames, None);
@@ -846,12 +872,11 @@ impl Node for DiskVoice {
         let clock = self.clock.observe_with(cx.env, map.as_deref());
         let frames = io.frames();
         let (_, mut outs) = io.split();
-        let n = self.width().min(outs.len()).min(MAX_SAMPLER_CHANNELS);
+        let n = self.width().min(outs.len()).min(MAX_CHANNELS);
         for c in n..outs.len() {
             outs.get(c).fill(0.0);
         }
-        let mut refs: [&mut [f32]; MAX_SAMPLER_CHANNELS] =
-            std::array::from_fn(|_| Default::default());
+        let mut refs: [&mut [f32]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
         for (slot, ch) in refs.iter_mut().zip(outs.iter_mut()) {
             *slot = ch;
         }

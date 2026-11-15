@@ -9,7 +9,7 @@
 //! `tutti-codec` turns every encoder on). `hound` decodes the results back.
 //!
 //! Every graph here is built with `tutti_graph::GraphBuilder` and rendered
-//! as a `RenderGraph`; the golden-digest pins live in `graph_source.rs`.
+//! as a `RenderGraph`.
 
 use crate::support;
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
@@ -1374,7 +1374,7 @@ fn a_declared_root_is_what_the_file_is_placed_from() {
         g.pipe_output(id);
         built_with(g, RATE, Setup::new().with_root(Some(root)))
     };
-    let swapped = ChannelTopology::smpte(ChannelLayout::from(6u16)).unwrap();
+    let swapped = ChannelTopology::assumed(ChannelLayout::from(6u16));
     assert!(swapped.index_of(Speaker::FrontLeft).is_some());
     let mut six = six_channels(swapped);
     let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
@@ -1388,7 +1388,8 @@ fn a_declared_root_is_what_the_file_is_placed_from() {
         Speaker::LowFrequency,
         Speaker::SideLeft,
         Speaker::SideRight,
-    ]);
+    ])
+    .unwrap();
     let mut six = six_channels(swapped);
     assert_eq!(
         first_frame(&mut six, 2).unwrap(),

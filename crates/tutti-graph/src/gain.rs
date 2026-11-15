@@ -29,7 +29,8 @@
 //! where `w_prev` is the weight the previous block was given (the snapshot it
 //! read, not the last sample of its ramp), kept in the lane across commits
 //! that keep the edge. A lane's first block starts at its value, and a
-//! static weight (`w_prev == w_new`) skips the ramp. The ramp is evaluated
+//! static weight (`w_prev == w_new`) skips the ramp. The ramp is a linear
+//! [`Piece`], and its last frame is exactly `w_new`. It is evaluated
 //! per sample from that expression: no per-lane scratch is needed, so
 //! nothing allocates on the audio thread.
 //!
@@ -44,7 +45,7 @@
 //! entry's `range`. That is the param port's step, not a copy of it: a driven
 //! lane keeps a one-port [`ParamState`], and the sum asks it for the lane's
 //! value at every frame ([`Weight::Frames`]), with the port's rules (the
-//! declick over [`PARAM_DECLICK`](crate::PARAM_DECLICK) when the source
+//! declick over [`DECLICK`](crate::DECLICK) when the source
 //! changes or goes, the base before the first event, a first block that
 //! starts at its value). The state is sized when the plan is applied, so
 //! nothing allocates on the audio thread.
@@ -52,22 +53,15 @@
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
-use tutti_curve::{Law, Piece};
+use tutti_curve::{FadeLaw, Piece};
 
-use tutti_types::{Amplitude, AtomicF32, ParamCell, Samples, UnitAddr, UnitParam};
-
-use crate::mode::MODE_DECLICK;
+use tutti_types::{Amplitude, AtomicF32, ParamCell, UnitAddr, UnitParam};
 
 use crate::event::Event;
 use crate::param::{ParamPorts, ParamRange, ParamRangeReader, ParamRanges, ParamState};
 use crate::spec::EventOut;
 
-/// The span, in frames, over which the session's wiring fades an edge in or
-/// out ([doc 030](../../../docs/design/030-core-api.md) section 4): the same
-/// figure as every other declick in the graph, [`MODE_DECLICK`].
-pub const EDGE_DECLICK: Samples = MODE_DECLICK;
-
-/// A fade an edge's lane runs over [`EDGE_DECLICK`] frames, counted from the
+/// A fade an edge's lane runs over [`DECLICK`](crate::DECLICK), counted from the
 /// lane's first block under it. It is a control of the lane (a cell the
 /// executor snapshots once per block, as the base is), so changing it on an
 /// edge that already has an entry is no recompile.
@@ -303,7 +297,9 @@ pub(crate) enum Weight<'a> {
     },
     /// A declick fade (`EdgeFade`) under way: from `start` to `goal` over
     /// `len` frames, `k` of them done before this block. Frame `i` of the
-    /// block is fade frame `k + i`: `start` at `0`, `goal` from `len` on.
+    /// block is fade frame `k + i`, at [`FadeLaw::EqualAmplitude`]'s gains:
+    /// never `start` or `goal` inside the fade, and exactly `goal` from `len`
+    /// on.
     Fade {
         /// The weight the fade left from.
         start: Amplitude,
@@ -311,7 +307,7 @@ pub(crate) enum Weight<'a> {
         goal: Amplitude,
         /// Fade frames before this block.
         k: usize,
-        /// The fade's length, [`EDGE_DECLICK`].
+        /// The fade's length, [`DECLICK`](crate::DECLICK) in frames.
         len: usize,
     },
     /// A driven lane: the weight at each frame, already clamped to the
@@ -341,6 +337,8 @@ pub(crate) struct SumLane {
     want: EdgeFade,
     /// The declick fade's bookkeeping.
     fade: FadeState,
+    /// The declick's length in frames at the graph's rate.
+    declick: usize,
 }
 
 /// A lane's declick fade across blocks, carried across a commit that keeps the
@@ -367,22 +365,35 @@ impl SumLane {
             drive: None,
             want: EdgeFade::None,
             fade: FadeState::default(),
+            declick: 0,
         }
     }
 
     /// A lane reading `cell`. `carried` is what the same edge's lane held
     /// when a commit keeps it (`Carried::default()` starts at the value).
     /// `driven` says whether this plan's lane has a source; `max` is the
-    /// prepared block, which sizes the driven state's values.
-    pub(crate) fn weighted(cell: GainCell, carried: Carried, driven: bool, max: usize) -> Self {
+    /// prepared block, which sizes the driven state's values, and `declick`
+    /// the declick's length in frames.
+    pub(crate) fn weighted(
+        cell: GainCell,
+        carried: Carried,
+        driven: bool,
+        max: usize,
+        declick: usize,
+    ) -> Self {
         let Carried { prev, drive, fade } = carried;
         // A driven lane keeps its state across the commit; an undriven one
         // keeps it only while it fades to its base. A lane that has run
         // before resumes (a source connected now is a connection to a
         // running port); a new one is on its first block.
         let drive = match drive {
-            Some(state) if (driven || state.busy()) && state.fits(max) => Some(state),
-            _ if driven => Some(ParamState::lane(max, cell.ranges(), prev.is_some())),
+            Some(state) if (driven || state.busy()) && state.fits(max, declick) => Some(state),
+            _ if driven => Some(ParamState::lane(
+                max,
+                declick,
+                cell.ranges(),
+                prev.is_some(),
+            )),
             _ => None,
         };
         Self {
@@ -392,6 +403,7 @@ impl SumLane {
             prev,
             drive,
             fade,
+            declick,
         }
     }
 
@@ -484,7 +496,7 @@ impl SumLane {
             }
         }
         if let Some(start) = self.fade.start {
-            let (k, len) = (self.fade.k, EDGE_DECLICK.get());
+            let (k, len) = (self.fade.k, self.declick);
             let w = Weight::Fade {
                 start,
                 goal: to,
@@ -529,21 +541,11 @@ pub(crate) struct Carried {
     pub(crate) fade: FadeState,
 }
 
-/// `w[i]` of a ramp across `frames`: a linear [`Piece`] at `t = (i + 1) / frames`.
-#[inline(always)]
-pub(crate) fn ramp_at(from: f32, to: f32, i: usize, frames: f32) -> f32 {
-    Piece::new(from, to, Law::Linear).value((i + 1) as f32 / frames)
-}
-
-/// `w` at fade frame `j` of a fade of `len` frames: `start` at `0`, then linear,
-/// and exactly `goal` from `len` on.
+/// `w` at fade frame `j` of a fade of `len` frames: `start` moved to `goal` along
+/// [`FadeLaw::EqualAmplitude`], and exactly `goal` from `len` on.
 #[inline(always)]
 pub(crate) fn fade_at(start: f32, goal: f32, j: usize, len: usize) -> f32 {
-    if j >= len {
-        goal
-    } else {
-        Piece::new(start, goal, Law::Linear).value(j as f32 / len as f32)
-    }
+    FadeLaw::EqualAmplitude.between(start, goal, j, len)
 }
 
 /// The first live addend: `out = +0.0 + w * a`, or `out = +0.0 + w * out`
@@ -552,7 +554,7 @@ pub(crate) fn fade_at(start: f32, goal: f32, j: usize, len: usize) -> f32 {
 /// The `+0.0 +` is the fold's start and turns a `-0.0` product into `+0.0`.
 #[inline]
 pub(crate) fn first(out: &mut [f32], a: Option<&[f32]>, w: Weight<'_>) {
-    let frames = out.len() as f32;
+    let frames = out.len();
     match (a, w) {
         (Some(a), Weight::Unit) => {
             for (o, &x) in out.iter_mut().zip(a) {
@@ -579,13 +581,13 @@ pub(crate) fn first(out: &mut [f32], a: Option<&[f32]>, w: Weight<'_>) {
         (Some(a), Weight::Ramp { from, to }) => {
             let (from, to) = (from.get(), to.get());
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o = 0.0 + ramp_at(from, to, i, frames) * x;
+                *o = 0.0 + Piece::ramp_at(from, to, i, frames) * x;
             }
         }
         (None, Weight::Ramp { from, to }) => {
             let (from, to) = (from.get(), to.get());
             for (i, o) in out.iter_mut().enumerate() {
-                *o = 0.0 + ramp_at(from, to, i, frames) * *o;
+                *o = 0.0 + Piece::ramp_at(from, to, i, frames) * *o;
             }
         }
         (
@@ -633,7 +635,7 @@ pub(crate) fn first(out: &mut [f32], a: Option<&[f32]>, w: Weight<'_>) {
 /// roundings (Rust never contracts them into a fused multiply-add).
 #[inline]
 pub(crate) fn add(out: &mut [f32], a: &[f32], w: Weight<'_>) {
-    let frames = out.len() as f32;
+    let frames = out.len();
     match w {
         Weight::Unit => {
             for (o, &x) in out.iter_mut().zip(a) {
@@ -649,7 +651,7 @@ pub(crate) fn add(out: &mut [f32], a: &[f32], w: Weight<'_>) {
         Weight::Ramp { from, to } => {
             let (from, to) = (from.get(), to.get());
             for (i, (o, &x)) in out.iter_mut().zip(a).enumerate() {
-                *o += ramp_at(from, to, i, frames) * x;
+                *o += Piece::ramp_at(from, to, i, frames) * x;
             }
         }
         Weight::Fade {
@@ -683,7 +685,7 @@ mod tests {
         let cell = GainCell::new(amp(base), EdgeGain::DEFAULT_RANGE);
         (
             cell.clone(),
-            SumLane::weighted(cell, Carried::default(), false, 8),
+            SumLane::weighted(cell, Carried::default(), false, 8, 240),
         )
     }
 

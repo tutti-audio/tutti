@@ -20,7 +20,7 @@
 //! Built on the control side (a fold allocates); applied without allocating.
 
 use tutti_buffers::{Fold, FoldError, MonoMut, Planes};
-use tutti_types::{ChannelTopology, MAX_BUS_CHANNELS, Speaker};
+use tutti_types::{ChannelTopology, MAX_CHANNELS, Speaker};
 
 /// Why a node has no pass: what it would need to declare to be bypassed or
 /// mixed.
@@ -102,10 +102,10 @@ impl Pass {
             };
         };
         let unassigned = |b: &crate::Bus| {
+            // An ambisonic bus names no speaker either.
             b.topology
                 .positions()
-                .iter()
-                .all(|s| *s == Speaker::Unassigned)
+                .is_none_or(|list| list.iter().all(|s| *s == Speaker::Unassigned))
         };
         // A side that names no speaker says nothing about where a channel of
         // the other goes, except by its index at one width. (`Fold::between`
@@ -212,14 +212,14 @@ impl Pass {
         let fold = self.fold.as_ref().expect("a pass that folds");
         // The aligned slots are separate slices; the table of them is a stack
         // array, at most one bus wide: `width` is clamped to
-        // `MAX_BUS_CHANNELS` above, and a fold's source layout is at most a
+        // `MAX_CHANNELS` above, and a fold's source layout is at most a
         // bus wide, so the clamp never narrows it.
         debug_assert!(
-            usize::from(fold.src_layout().count()) <= MAX_BUS_CHANNELS,
+            usize::from(fold.src_layout().count()) <= MAX_CHANNELS,
             "a fold's source is at most a bus wide"
         );
-        let width = usize::from(fold.src_layout().count()).min(MAX_BUS_CHANNELS);
-        let mut table: [&[f32]; MAX_BUS_CHANNELS] = [&[]; MAX_BUS_CHANNELS];
+        let width = usize::from(fold.src_layout().count()).min(MAX_CHANNELS);
+        let mut table: [&[f32]; MAX_CHANNELS] = [&[]; MAX_CHANNELS];
         for (i, slot) in table.iter_mut().enumerate().take(width) {
             *slot = src(i);
         }

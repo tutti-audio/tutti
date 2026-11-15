@@ -15,7 +15,7 @@ use std::hint::black_box;
 use std::time::{Duration, Instant};
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use tutti_graph::{TapId, TapReader};
+use tutti_graph::TapReader;
 use tutti_types::Samples;
 
 const FRAMES: usize = 512;
@@ -31,7 +31,7 @@ fn tap_lanes(c: &mut Criterion) {
     let capacity = Samples(FRAMES * 4);
 
     group.bench_function("write_512x2", |b| {
-        let (mut reader, mut writer) = TapReader::pair(TapId(0), WIDTH, capacity);
+        let (mut reader, mut writer) = TapReader::pair(WIDTH, capacity);
         b.iter_custom(|iters| {
             let mut spent = Duration::ZERO;
             for _ in 0..iters {
@@ -45,7 +45,7 @@ fn tap_lanes(c: &mut Criterion) {
     });
 
     group.bench_function("read_512x2", |b| {
-        let (mut reader, mut writer) = TapReader::pair(TapId(0), WIDTH, capacity);
+        let (mut reader, mut writer) = TapReader::pair(WIDTH, capacity);
         b.iter_custom(|iters| {
             let mut spent = Duration::ZERO;
             for _ in 0..iters {
@@ -59,7 +59,7 @@ fn tap_lanes(c: &mut Criterion) {
     });
 
     group.bench_function("round_trip_512x2", |b| {
-        let (mut reader, mut writer) = TapReader::pair(TapId(0), WIDTH, capacity);
+        let (mut reader, mut writer) = TapReader::pair(WIDTH, capacity);
         b.iter(|| {
             writer.push_interleaved(black_box(&block));
             black_box(reader.pop_into(black_box(&mut out)));

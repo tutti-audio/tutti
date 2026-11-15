@@ -141,14 +141,14 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "permanent: any plugin with any saved bytes is a state; the plugin refuses what it cannot read",
     ),
     (
+        "crates/tutti-types/src/ambisonic.rs",
+        "AmbisonicFormat",
+        "permanent: each field is its own checked type, so every combination is a format",
+    ),
+    (
         "crates/tutti-types/src/meter.rs",
         "TimeSignature",
         "permanent: each half is its own checked type, so every pair is a signature",
-    ),
-    (
-        "crates/tutti-types/src/topology.rs",
-        "ChannelTopology",
-        "permanent: any ordered list of speakers is a topology; duplicates are not refused",
     ),
     (
         "crates/tutti-types/src/value/note.rs",

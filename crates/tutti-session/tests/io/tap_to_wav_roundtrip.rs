@@ -124,7 +124,7 @@ fn graph_tap(capacity: usize) -> (Graph, TapReader) {
     ed.spec_mut().topology.set_outputs(vec![port(0), port(1)]);
     let reader = ed
         .open_tap(
-            TapId(0),
+            TapId::of(1),
             vec![port(0), port(1)],
             TapAlign::ToOutput,
             Samples(capacity),

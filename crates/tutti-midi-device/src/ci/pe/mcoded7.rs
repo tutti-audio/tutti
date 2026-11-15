@@ -20,6 +20,8 @@
 //! assert_eq!(mcoded7::decode_vec(&wire), Ok(vec![0x80, 0x01, 0xFF]));
 //! ```
 
+use tutti_ump::first_non_seven_bit;
+
 /// The data bytes in a full group.
 const GROUP: usize = 7;
 
@@ -101,7 +103,7 @@ pub fn encode(data: &[u8], out: &mut [u8]) -> Result<usize, Mcoded7Error> {
 /// [`Mcoded7Error::OutputTooShort`] when `out` is shorter than
 /// [`decoded_len`]`(wire.len())`.
 pub fn decode(wire: &[u8], out: &mut [u8]) -> Result<usize, Mcoded7Error> {
-    if let Some(at) = wire.iter().position(|b| b & 0x80 != 0) {
+    if let Some(at) = first_non_seven_bit(wire) {
         return Err(Mcoded7Error::NotSevenBit { at });
     }
     let need = decoded_len(wire.len()).ok_or(Mcoded7Error::Truncated)?;

@@ -27,7 +27,7 @@
 //! renders in pieces that long, on a `#[cold]` path the prepared render
 //! never enters.
 
-use crate::MAX_SAMPLER_CHANNELS;
+use tutti_types::MAX_CHANNELS;
 use tutti_types::SamplePosition;
 
 /// Frames of scratch a node holds before any `prepare` (its constructor's
@@ -39,7 +39,7 @@ pub(crate) const UNPREPARED_FRAMES: usize = 64;
 /// One channel of a block, planar: as long as its scratch's frames.
 pub(crate) type Lane = Vec<f32>;
 
-/// A block of planar scratch: [`MAX_SAMPLER_CHANNELS`] lanes, the first
+/// A block of planar scratch: [`MAX_CHANNELS`] lanes, the first
 /// `width` (the owner's channel count) as long as the longest block its
 /// owner is prepared for, the rest empty.
 ///
@@ -48,7 +48,7 @@ pub(crate) type Lane = Vec<f32>;
 /// nothing between blocks: every read writes each frame it hands on. A read
 /// writes only lanes below its `n`, which every caller clamps to the
 /// owner's width.
-pub(crate) struct Lanes(Box<[Lane; MAX_SAMPLER_CHANNELS]>);
+pub(crate) struct Lanes(Box<[Lane; MAX_CHANNELS]>);
 
 impl Lanes {
     /// No frames in any lane. Allocates the box: control thread.
@@ -72,13 +72,13 @@ impl Lanes {
 
     /// The lanes, one per channel.
     #[inline]
-    pub(crate) fn lanes(&self) -> &[Lane; MAX_SAMPLER_CHANNELS] {
+    pub(crate) fn lanes(&self) -> &[Lane; MAX_CHANNELS] {
         &self.0
     }
 
     /// The lanes, one per channel, to write.
     #[inline]
-    pub(crate) fn lanes_mut(&mut self) -> &mut [Lane; MAX_SAMPLER_CHANNELS] {
+    pub(crate) fn lanes_mut(&mut self) -> &mut [Lane; MAX_CHANNELS] {
         &mut self.0
     }
 
@@ -172,13 +172,13 @@ impl BlockScratch {
     }
 
     /// Sized for blocks of up to `frames` frames of `width` channels
-    /// (clamped to `1..=MAX_SAMPLER_CHANNELS`), every buffer zeroed and
+    /// (clamped to `1..=MAX_CHANNELS`), every buffer zeroed and
     /// exactly that long: what a node's `prepare` calls with
     /// `Prepare::max_block` and its own width, so a re-prepare at a larger
     /// block grows it and one at a smaller block gives the memory back.
     /// Allocates: control thread only, never `process`.
     pub(crate) fn resize(&mut self, frames: usize, width: usize) {
-        let width = width.clamp(1, MAX_SAMPLER_CHANNELS);
+        let width = width.clamp(1, MAX_CHANNELS);
         self.out.resize(frames, width);
         self.raw.resize(frames, width);
         fit(&mut self.positions, frames, None);
@@ -349,7 +349,7 @@ mod tests {
     /// its own width, and a re-prepare resizes it: a stereo pool, a stereo
     /// `VoiceNode` and a `MemorySource` prepared at 512 hold 512 frames,
     /// re-prepared at 1024 hold 1024, and at 64, 64; the pool's and the
-    /// node's lanes are two wide, not `MAX_SAMPLER_CHANNELS`. Unprepared, the pool
+    /// node's lanes are two wide, not `MAX_CHANNELS`. Unprepared, the pool
     /// and the node hold `UNPREPARED_FRAMES` and the source none. (The disk voice's own check is
     /// `disk_voice::tests::a_disk_voice_sizes_its_positions_from_max_block`.)
     #[test]

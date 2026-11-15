@@ -152,10 +152,6 @@ fn queued_values_drop_with_the_ring() {
     drop((writer, reader));
     assert_eq!(std::sync::Arc::strong_count(&live), 1);
 }
-    assert_eq!(std::sync::Arc::strong_count(&live), 5);
-    drop((writer, reader));
-    assert_eq!(std::sync::Arc::strong_count(&live), 1);
-}
 
 /// **The writer's drop frees nothing**: queued values wait for the reader,
 /// which is where they are freed.
@@ -313,7 +309,11 @@ fn a_panicking_iterator_in_push_iter_publishes_what_it_wrote() {
     }));
     assert!(unwound.is_err());
     assert_eq!(reader.drain().collect::<Vec<_>>(), [0, 1, 2]);
-    assert_eq!(writer.push_iter([7, 8]), 2, "the writer carries on from there");
+    assert_eq!(
+        writer.push_iter([7, 8]),
+        2,
+        "the writer carries on from there"
+    );
     assert_eq!(reader.drain().collect::<Vec<_>>(), [7, 8]);
 }
 

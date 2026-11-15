@@ -32,7 +32,6 @@
 
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 
-use tutti_graph::TapId;
 use tutti_graph::{TapReader, TapWriter};
 use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
 use tutti_types::{ChannelLayout, Samples};
@@ -195,7 +194,7 @@ impl HeardTaps {
         if c.owed_close || c.install.vacant() <= 1 {
             return Ok(HeardOpen::Retry);
         }
-        let (reader, writer) = TapReader::pair(TapId(0), usize::from(width.count()), capacity);
+        let (reader, writer) = TapReader::pair(usize::from(width.count()), capacity);
         // Full cannot happen (the vacancy was checked). With the engine gone the
         // writer is dropped here and the reader stays open, as one opened just
         // before the engine went would be.
@@ -279,7 +278,7 @@ mod tests {
     use super::*;
 
     fn writer(width: usize) -> Box<TapWriter> {
-        Box::new(TapReader::pair(TapId(0), width, Samples(8)).1)
+        Box::new(TapReader::pair(width, Samples(8)).1)
     }
 
     fn width(h: &Hearing) -> Option<usize> {

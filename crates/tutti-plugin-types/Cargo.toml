@@ -19,7 +19,7 @@ default = []
 # ParameterChanges, EditorCapabilities, WindowHandle). Required
 # by the plugin IPC protocol (postcard); host crates that don't need IPC
 # don't pay for the serde dep.
-serde = ["dep:serde", "arrayvec/serde", "bitflags/serde", "dpi/serde", "keyboard-types/serde", "rgb/serde", "tutti-types/serde"]
+serde = ["dep:serde", "arrayvec/serde", "bitflags/serde", "dpi/serde", "keyboard-types/serde", "rgb/serde", "tutti-types/serde", "tutti-graph/serde"]
 
 # The probe's result file (`ProbeOutcome`, `write_result`, `read_result`): the
 # wire between `tutti-plugin-probe` and the host that spawned it.

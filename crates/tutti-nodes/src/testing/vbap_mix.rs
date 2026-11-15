@@ -36,7 +36,7 @@ pub fn vbap_mix(
 /// fan-in onto a 120 Hz low-pass, into the output the layout's SMPTE topology
 /// names as its LFE. Nothing is added for a layout without one.
 pub fn bass_send(g: &mut GraphBuilder, layout: ChannelLayout, sources: &[NodeKey]) {
-    let Some(lfe) = ChannelTopology::smpte(layout).and_then(|t| t.lfe_index()) else {
+    let Some(lfe) = ChannelTopology::assumed(layout).lfe_index() else {
         return;
     };
     let (low_pass, _) = g.add_with_controls(SvfFilterNode::<f32>::new(

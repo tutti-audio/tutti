@@ -96,11 +96,16 @@ fn rolling_state_with(
             .flatten()
             .copied()
             .collect();
-        ed.open_tap(TapId(0), sources, TapAlign::ToOutput, Samples(MAX_FRAMES))
-            .expect("the sources exist")
+        ed.open_tap(
+            TapId::of(1),
+            sources,
+            TapAlign::ToOutput,
+            Samples(MAX_FRAMES),
+        )
+        .expect("the sources exist")
     });
     let meter = ed
-        .open_meter(MeterId(0), MeterSpec::Outputs)
+        .open_meter(MeterId::of(1), MeterSpec::Outputs)
         .expect("the sources exist");
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");

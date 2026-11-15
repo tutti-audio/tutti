@@ -491,7 +491,7 @@ mod tests {
         use std::path::PathBuf;
 
         let (mut writer, ring, mut reader) =
-            RegionBuffer::with_capacity(StreamId(1), PathBuf::from("t.wav"), 4096, 1u16);
+            RegionBuffer::with_capacity(StreamId::of(1), PathBuf::from("t.wav"), 4096, 1u16);
         let cells = Cells::new();
         let mut buffer = Vec::new();
         for _ in 0..3 {

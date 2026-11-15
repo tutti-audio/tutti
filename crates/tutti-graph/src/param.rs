@@ -33,11 +33,11 @@ use std::sync::Arc;
 use crate::NodeKey;
 use crate::mode::NodeMix;
 use tutti_rt::{PackedAtomic, RtScope};
-use tutti_types::{ParamAddr, Samples, UnitAddr, UnitParam};
+use tutti_types::{ParamAddr, UnitAddr, UnitParam};
 
 use crate::event::{Event, EventKind, segment_progress};
 use crate::spec::EventOut;
-use tutti_curve::{Law, Piece};
+use tutti_curve::{FadeLaw, Law, Piece};
 
 /// Most params one node can declare modulatable: 32 addresses.
 ///
@@ -49,13 +49,6 @@ use tutti_curve::{Law, Piece};
 /// bound (`par.rs`). 32 is also the most `[bool; N]: Default` allows, which
 /// `ParamState` derives.
 pub const MAX_PARAM_PORTS: usize = 32;
-
-/// How long a param port crossfades when its source changes: from where it
-/// was to where the new source puts it (see
-/// [`GraphSpec::connect_param`](crate::GraphSpec::connect_param)). 256 frames is about 5 ms at 48 kHz: long enough that a
-/// modulator connected at full swing is not a click, short enough that the
-/// connection is heard where it was made.
-pub const PARAM_DECLICK: Samples = Samples(256);
 
 /// The params a node lets the graph modulate, in **port order** — the index
 /// [`Io::param`](crate::Io::param) and [`Node::param_base`](crate::Node::param_base)
@@ -710,7 +703,7 @@ pub(crate) struct PortState {
     last_base: f32,
     /// Where the declick fades from.
     hold: f32,
-    /// Frames of the declick done; `PARAM_DECLICK` or more: none running.
+    /// Frames of the declick done; the declick's length or more: none running.
     fade: usize,
     /// Its event source's ramp: the source's own, so it is reset when the
     /// source changes and kept otherwise.
@@ -726,7 +719,7 @@ impl Default for PortState {
             last: 0.0,
             last_base: 0.0,
             hold: 0.0,
-            fade: PARAM_DECLICK.get(),
+            fade: usize::MAX,
             ramp: Ramp::default(),
         }
     }
@@ -745,6 +738,9 @@ pub(crate) struct ParamState {
     /// How many of each port's corner slots this block wrote.
     corner_count: [usize; MAX_PARAM_PORTS],
     max: usize,
+    /// The declick's length in frames: [`DECLICK`](crate::DECLICK) at the
+    /// graph's rate.
+    declick: usize,
     /// Per port: whether this block's step delivered frames.
     framed: [bool; MAX_PARAM_PORTS],
     /// Whether any port delivered frames this block, is mid-declick, or has
@@ -759,7 +755,12 @@ pub(crate) struct ParamState {
 impl ParamState {
     /// State for `ports` declared params at blocks of up to `max` frames,
     /// clamping to `ranges`. Allocates nothing when `ports` is 0.
-    pub(crate) fn new(ports: usize, max: usize, ranges: Option<Arc<ParamRanges>>) -> Self {
+    pub(crate) fn new(
+        ports: usize,
+        max: usize,
+        declick: usize,
+        ranges: Option<Arc<ParamRanges>>,
+    ) -> Self {
         if ports == 0 {
             return Self::default();
         }
@@ -769,6 +770,7 @@ impl ParamState {
             corners: vec![0; ports * max],
             corner_count: [0; MAX_PARAM_PORTS],
             max,
+            declick,
             framed: [false; MAX_PARAM_PORTS],
             // Its first block runs the step whatever the plan says, to
             // seed each port (see `PortState::fresh`).
@@ -791,17 +793,23 @@ impl ParamState {
     /// already run a block undriven: it is not on its first block, so a
     /// source connected now fades in as a connection to a running port does,
     /// rather than starting at its value.
-    pub(crate) fn lane(max: usize, ranges: Arc<ParamRanges>, resumed: bool) -> Self {
-        let mut state = Self::new(1, max, Some(ranges));
+    pub(crate) fn lane(
+        max: usize,
+        declick: usize,
+        ranges: Arc<ParamRanges>,
+        resumed: bool,
+    ) -> Self {
+        let mut state = Self::new(1, max, declick, Some(ranges));
         if resumed {
             state.ports[0].fresh = false;
         }
         state
     }
 
-    /// Whether the state can serve blocks of up to `max` frames.
-    pub(crate) fn fits(&self, max: usize) -> bool {
-        self.max >= max
+    /// Whether the state can serve blocks of up to `max` frames, declicking
+    /// over `declick` frames.
+    pub(crate) fn fits(&self, max: usize, declick: usize) -> bool {
+        self.max >= max && self.declick == declick
     }
 
     /// Port `k`'s values this block, after [`port`](Self::port): `None` when
@@ -854,7 +862,7 @@ impl ParamState {
         m: Option<(EventOut, &[Event])>,
         base: Option<f32>,
     ) {
-        let d = PARAM_DECLICK.get();
+        let d = self.declick;
         let st = &mut self.ports[k];
         let Some(b1) = base else {
             // A node that cannot say its base is never driven: it reads
@@ -882,7 +890,6 @@ impl ParamState {
         }
         let from = if st.modulated { st.last_base } else { b1 };
         let out = &mut self.scratch[k * self.max..k * self.max + frames];
-        let n = frames as f32;
         match m {
             Some((_, events)) => {
                 let mut corners = Corners::new(&mut self.corners[k * self.max..(k + 1) * self.max]);
@@ -891,7 +898,7 @@ impl ParamState {
                     events,
                     param,
                     out,
-                    |i| base_at(from, b1, i, frames, n),
+                    |i| Piece::ramp_at(from, b1, i, frames),
                     &mut corners,
                 );
                 self.corner_count[k] = corners.len();
@@ -910,7 +917,7 @@ impl ParamState {
             }
             None => {
                 for (i, o) in out.iter_mut().enumerate() {
-                    *o = base_at(from, b1, i, frames, n);
+                    *o = Piece::ramp_at(from, b1, i, frames);
                 }
             }
         }
@@ -920,8 +927,8 @@ impl ParamState {
                 if j >= d {
                     break;
                 }
-                let g = 1.0 - (j + 1) as f32 / d as f32;
-                *o += (st.hold - *o) * g;
+                let (out, inn) = FadeLaw::EqualAmplitude.gains(j, d);
+                *o = st.hold * out + *o * inn;
             }
             st.fade = (st.fade + frames).min(d);
         }
@@ -944,23 +951,12 @@ impl Drop for ParamState {
     }
 }
 
-/// The base at frame `i` of an `frames`-frame block ramping `from → to`:
-/// linear, landing exactly on `to` at the last frame.
-#[inline]
-fn base_at(from: f32, to: f32, i: usize, frames: usize, n: f32) -> f32 {
-    if i + 1 == frames {
-        to
-    } else {
-        Piece::new(from, to, Law::Linear).value((i + 1) as f32 / n)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::event::ParamRamp;
     use crate::time::Offset;
-    use tutti_types::{Hz, ParamKey, SamplePosition};
+    use tutti_types::{Hz, ParamKey, SamplePosition, Samples};
 
     /// A ramp event starts on its frame and lands on its target on its last
     /// frame; a zero-length one is a step on its frame.

@@ -9,7 +9,7 @@
 
 use std::fmt;
 
-use tutti_ump::U7;
+use tutti_ump::{U7, U14};
 
 use crate::name::ProductInstanceId;
 
@@ -119,7 +119,11 @@ impl EndpointInfo {
         match self {
             Self::ProductInstanceId(id) => {
                 let text = id.get().as_str().as_bytes();
-                out.extend([(text.len() & 0x7F) as u8, ((text.len() >> 7) & 0x7F) as u8]);
+                out.extend(
+                    U14::from_len(text.len())
+                        .expect("an Instance Id is 42 bytes at most")
+                        .to_le7(),
+                );
                 out.extend(text.iter().copied());
             }
         }
