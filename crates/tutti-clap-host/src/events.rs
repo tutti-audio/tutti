@@ -608,9 +608,23 @@ impl ClapEvent {
         }
     }
 
-    /// Whether this is a note expression whose value is not a number.
-    fn is_unreadable_expression(&self) -> bool {
-        matches!(self, ClapEvent::NoteExpression(e) if !e.value.is_finite())
+    /// Whether this note or MIDI event, which [`to_midi`](Self::to_midi) made no
+    /// message of, is a loss, given that its port names a Group: a note with no
+    /// address (channel and key `-1`, and an id that decodes to none), a note
+    /// expression of any kind that makes no message (a value that is not a number,
+    /// no address, a dimension with no per-note message such as vibrato or
+    /// expression, a tuning past what Pitch 7.25 holds), and MIDI bytes that are
+    /// no message. A MIDI message the translator holds in a run is not.
+    fn lost_in_translation(&self) -> bool {
+        match self {
+            ClapEvent::NoteOn(e) | ClapEvent::NoteOff(e) => {
+                note_address(e.channel, e.key, e.note_id).is_none()
+            }
+            ClapEvent::NoteExpression(_) => true,
+            ClapEvent::Midi(e) => group_of_port(e.port_index)
+                .is_some_and(|group| parse_exact(group, &e.data).is_none()),
+            _ => false,
+        }
     }
 
     /// The bytes and frame offset of a plugin-emitted SysEx message, which
@@ -689,8 +703,8 @@ impl ClapEvent {
     }
 
     /// Rebuilds the MIDI-2 per-note [`WireMidi`] a CLAP note-expression stands
-    /// for: Tuning → per-note pitch bend, Pressure → poly pressure,
-    /// Volume/Pan/Brightness → the matching per-note controller. `(channel, note)`
+    /// for: Tuning → Registered Pitch 7.25, Pressure → poly pressure,
+    /// Volume/Pan/Brightness → the matching Registered Per-Note Controller. `(channel, note)`
     /// come from the event's `channel`/`key` when the host stamped them, else
     /// from decoding its `note_id`; the Group is its note port's. Returns
     /// `None` for dimensions with no MIDI-2 per-note counterpart (Vibrato,
@@ -1913,8 +1927,8 @@ impl OutputEventList {
     /// Appendix D.3.3).
     ///
     /// Returns how many events were lost: the ones `out` had no room for, the
-    /// SysEx that did not fit, the ones from a port no Group has and the note
-    /// expressions whose value is not a number.
+    /// SysEx that did not fit, the ones from a port no Group has, and the notes
+    /// and expressions that make no message (vibrato and expression included).
     pub fn fill_midi_events(
         &mut self,
         translator: &mut Translator,
@@ -1943,7 +1957,7 @@ impl OutputEventList {
             } else if e.names_no_group() {
                 self.ports_dropped += 1;
                 lost += 1;
-            } else if e.is_unreadable_expression() {
+            } else if e.lost_in_translation() {
                 lost += 1;
             }
         }
@@ -2196,6 +2210,7 @@ mod tests {
     use super::*;
     use crate::ParameterQueue;
     use tutti_fixtures::midi as fx;
+    use tutti_ump::RegisteredPerNoteController;
 
     use tutti_graph::Offset;
     use tutti_plugin_types::{MIDI_STACK_CAPACITY, RT_MIDI_CAPACITY};
@@ -3366,13 +3381,22 @@ mod tests {
         let controller = |ty| {
             let clap = per_note_expression(0, ty, MidiChannel::of(1), NoteNumber::of(64), 0.5)?;
             match message(&clap.to_midi(&mut Translator::new())?) {
-                Message::Midi2(_, Voice2::AssignablePerNote { controller, .. }) => Some(controller),
-                other => panic!("expected a per-note controller, got {other:?}"),
+                Message::Midi2(_, Voice2::RegisteredPerNote { controller, .. }) => Some(controller),
+                other => panic!("expected a registered per-note controller, got {other:?}"),
             }
         };
-        assert_eq!(controller(NoteExpressionType::Volume), Some(7));
-        assert_eq!(controller(NoteExpressionType::Pan), Some(10));
-        assert_eq!(controller(NoteExpressionType::Brightness), Some(74));
+        assert_eq!(
+            controller(NoteExpressionType::Volume),
+            Some(RegisteredPerNoteController::Volume)
+        );
+        assert_eq!(
+            controller(NoteExpressionType::Pan),
+            Some(RegisteredPerNoteController::Pan)
+        );
+        assert_eq!(
+            controller(NoteExpressionType::Brightness),
+            Some(RegisteredPerNoteController::Brightness)
+        );
         assert_eq!(controller(NoteExpressionType::Expression), None);
     }
 
@@ -3393,10 +3417,10 @@ mod tests {
                 .to_midi(&mut Translator::new())
                 .expect("volume -> midi");
             match message(&midi) {
-                Message::Midi2(_, Voice2::AssignablePerNote { value, .. }) => {
+                Message::Midi2(_, Voice2::RegisteredPerNote { value, .. }) => {
                     value_to_unit_f32(value)
                 }
-                other => panic!("expected a per-note controller, got {other:?}"),
+                other => panic!("expected a registered per-note controller, got {other:?}"),
             }
         };
 
@@ -3492,16 +3516,13 @@ mod tests {
     }
 
     #[test]
-    fn tuning_note_expression_round_trips_to_per_note_pitch_bend() {
-        use tutti_midi_protocol::bend_to_signed_f32;
-
-        let value_semitones = 0.5 * MPE_BEND_RANGE;
+    fn tuning_note_expression_is_registered_pitch_7_25() {
         let clap = per_note_expression(
             7,
             NoteExpressionType::Tuning,
             MidiChannel::of(5),
             NoteNumber::of(67),
-            value_semitones,
+            -0.25,
         )
         .expect("Tuning is a named CLAP dimension");
         let midi = clap
@@ -3509,13 +3530,20 @@ mod tests {
             .expect("tuning -> midi");
         assert_eq!(midi.offset, 7);
         match message(&midi) {
-            Message::Midi2(address, Voice2::PerNotePitchBend { note, value }) => {
+            Message::Midi2(
+                address,
+                Voice2::RegisteredPerNote {
+                    note,
+                    controller: RegisteredPerNoteController::Pitch,
+                    value,
+                },
+            ) => {
                 assert_eq!(address.channel.get(), 5);
                 assert_eq!(note.get(), 67);
-                let value = bend_to_signed_f32(value);
-                assert!((value - 0.5).abs() < 0.01, "bend {value}");
+                // 66.75 as Q7.25: the key a quarter tone down.
+                assert_eq!(value.get(), (66 << 25) | (3 << 23));
             }
-            other => panic!("expected PerNotePitchBend, got {other:?}"),
+            other => panic!("expected Registered Pitch 7.25, got {other:?}"),
         }
     }
 
@@ -4036,6 +4064,60 @@ mod tests {
         let lost = list.fill_midi_events(&mut Translator::new(), &mut pool);
         assert!(pool.is_empty());
         assert_eq!(lost, 3, "each is counted as lost MIDI");
+    }
+
+    /// **Note events that make no message are counted lost, each once**: a note
+    /// on, a note off and an expression with no address (channel and key `-1` and
+    /// an id that decodes to none), a vibrato and an expression-dimension event
+    /// (which have no per-note message), a tuning past what Pitch 7.25 holds, an
+    /// expression id CLAP defines that the host does not know, and MIDI bytes that
+    /// are no message. An RPN select the translator holds is not lost.
+    #[test]
+    fn note_events_that_make_no_message_are_counted_lost() {
+        let mut list = OutputEventList::new();
+        let unaddressed = |mut e: ClapEvent| {
+            match &mut e {
+                ClapEvent::NoteOn(x) | ClapEvent::NoteOff(x) => {
+                    (x.channel, x.key, x.note_id) = (-1, -1, -1);
+                }
+                ClapEvent::NoteExpression(x) => {
+                    (x.channel, x.key, x.note_id) = (-1, -1, -1);
+                }
+                _ => {}
+            }
+            e
+        };
+        list.events
+            .push(unaddressed(ClapEvent::note_on(0, 0, 60, 0.5)));
+        list.events
+            .push(unaddressed(ClapEvent::note_off(0, 0, 60, 0.5)));
+        list.events.push(unaddressed(
+            ClapEvent::note_expression(0, NoteExpressionType::Pan, -1, 0.5).unwrap(),
+        ));
+        for ty in [NoteExpressionType::Vibrato, NoteExpressionType::Expression] {
+            let mut e = ClapEvent::note_expression(0, ty, -1, 0.5).unwrap();
+            if let ClapEvent::NoteExpression(x) = &mut e {
+                (x.channel, x.key) = (1, 60);
+            }
+            list.events.push(e);
+        }
+        let mut far = ClapEvent::note_expression(0, NoteExpressionType::Tuning, -1, 100.0).unwrap();
+        if let ClapEvent::NoteExpression(x) = &mut far {
+            (x.channel, x.key) = (1, 60);
+        }
+        list.events.push(far);
+        // A status byte that is no message.
+        list.events.push(ClapEvent::midi(0, 0, [0x00, 1, 2]));
+        let mut pool = RtMidiEvents::new();
+        let lost = list.fill_midi_events(&mut Translator::new(), &mut pool);
+        assert!(pool.is_empty());
+        assert_eq!(lost, 7, "each is counted as lost MIDI");
+
+        // An RPN select is held by the translator, which is no loss.
+        let mut held = OutputEventList::new();
+        held.events.push(ClapEvent::midi(0, 0, [0xB0, 101, 0]));
+        let lost = held.fill_midi_events(&mut Translator::new(), &mut pool);
+        assert_eq!(lost, 0);
     }
 
     /// Poly pressure (`0xAn`) is a per-note expression to a CLAP-dialect port

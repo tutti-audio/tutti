@@ -50,6 +50,12 @@ pub(crate) struct Inner {
     /// ([`Unit::rendering`]): what a withdrawal checks, after its write, before
     /// it frees what the AU's callback reads.
     renders: tutti_rt::RenderCount,
+    /// Whether the unit is initialized: `AudioUnitInitialize` has succeeded and
+    /// `AudioUnitUninitialize` has not since. The lock is held across each of
+    /// those calls and across a withdrawal's free ([`Unit::while_uninitialized`]),
+    /// so no `initialize` overlaps the free; only control-side calls take it, the
+    /// render path never does.
+    initialized: std::sync::Mutex<bool>,
 }
 
 // SAFETY: the instance is an opaque handle into AudioToolbox. Nothing in Rust
@@ -136,6 +142,7 @@ impl Unit {
                 work: work.clone(),
                 midi_output: std::sync::atomic::AtomicBool::new(false),
                 renders: tutti_rt::RenderCount::new(),
+                initialized: std::sync::Mutex::new(false),
             }),
             _not_sync: PhantomData,
         })
@@ -186,18 +193,29 @@ impl Unit {
 
     // ---- lifecycle ----
 
-    /// `AudioUnitInitialize`.
+    fn lifecycle(&self) -> std::sync::MutexGuard<'_, bool> {
+        self.inner
+            .initialized
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// `AudioUnitInitialize`. Serialized with every other lifecycle call and with
+    /// a withdrawal's free ([`while_uninitialized`](Self::while_uninitialized)).
     ///
     /// # Errors
     /// The `OSStatus` of the call.
     pub fn initialize(&self) -> std::result::Result<(), OsError> {
+        let mut initialized = self.lifecycle();
         // SAFETY: `raw()` is a live instance.
         check("AudioUnitInitialize", unsafe {
             sys::AudioUnitInitialize(self.raw())
-        })
+        })?;
+        *initialized = true;
+        Ok(())
     }
 
-    /// `AudioUnitUninitialize`.
+    /// `AudioUnitUninitialize`. Serialized as [`initialize`](Self::initialize) is.
     ///
     /// Must not overlap a render of the unit on any thread (a `Unit` clone may
     /// be rendering): whether the AU waits for a render in flight is the AU's, and
@@ -205,12 +223,29 @@ impl Unit {
     /// thread that renders, or between its blocks.
     ///
     /// # Errors
-    /// The `OSStatus` of the call.
+    /// The `OSStatus` of the call, which leaves the unit initialized.
     pub fn uninitialize(&self) -> std::result::Result<(), OsError> {
+        let mut initialized = self.lifecycle();
         // SAFETY: `raw()` is a live instance.
         check("AudioUnitUninitialize", unsafe {
             sys::AudioUnitUninitialize(self.raw())
-        })
+        })?;
+        *initialized = false;
+        Ok(())
+    }
+
+    /// Runs `f` while the unit is known uninitialized and no `initialize` can
+    /// begin: `None`, without running it, when the unit is initialized (or its
+    /// `AudioUnitUninitialize` failed). A unit that was never initialized is
+    /// uninitialized.
+    pub(crate) fn while_uninitialized<R>(&self, f: impl FnOnce() -> R) -> Option<R> {
+        let initialized = self.lifecycle();
+        if *initialized {
+            return None;
+        }
+        let result = f();
+        drop(initialized);
+        Some(result)
     }
 
     /// Counts a render of the unit as in flight until the guard drops. Every

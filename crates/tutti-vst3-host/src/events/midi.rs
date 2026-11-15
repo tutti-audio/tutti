@@ -509,39 +509,57 @@ pub(super) fn decode(event: &Event, stream: &mut OutputStream) -> Option<WireMid
         Payload::Data(d) => {
             let bytes = d.payload();
             if bytes.len() < 2 {
+                stream.count_untranslated();
                 return None;
             }
             // The 0xF0 framing is the reliable SysEx signal: the kMidiSysEx subtype is 0,
             // as is the raw channel-voice fallback's. Strip the delimiters and rebuild a
             // single packet; a message too long for one packet is dropped, not truncated,
-            // and so is one with a payload byte of 128 or more (malformed).
+            // and so is one with a payload byte of 128 or more (malformed); both are
+            // counted lost.
             if bytes[0] == 0xF0 {
-                let mut packets = SysexMessage::from_framed(bytes).ok()?.packets(group);
-                if packets.len() != 1 {
+                let single = SysexMessage::from_framed(bytes)
+                    .ok()
+                    .map(|message| message.packets(group))
+                    .filter(|packets| packets.len() == 1)
+                    .and_then(|mut packets| packets.next());
+                let Some(ump) = single else {
+                    stream.count_sysex_dropped();
                     return None;
-                }
-                return packets.next().map(|ump| WireMidi { offset: frame, ump });
+                };
+                return Some(WireMidi { offset: frame, ump });
             }
             // A MIDI 1.0 message through the output's translator, which gives
             // Channel Voice 2 (M2-104 Appendix D.3). System messages pass
-            // through unchanged.
+            // through unchanged. Bytes that are no message are counted lost; one
+            // the translator takes into a run is not (it is sent when the run ends).
+            let Some(message) = parse_exact(group, bytes) else {
+                stream.count_untranslated();
+                return None;
+            };
             return Some(WireMidi {
                 offset: frame,
-                ump: stream.translator.translate(parse_exact(group, bytes)?)?,
+                ump: stream.translator.translate(message)?,
             });
         }
         Payload::LegacyCcOut(e) => {
-            return super::legacy_cc::decode(e, frame, group, &mut stream.translator);
+            return super::legacy_cc::decode(e, frame, group, stream);
         }
         Payload::ExpressionValue(e) => {
             return expression(stream, e.typeId, e.noteId, e.value, frame, group);
         }
         // A reassembled SysEx's bytes are in the list's buffer, which the list drains.
-        Payload::SysEx(_)
-        | Payload::ExpressionText(_)
+        Payload::SysEx(_) => return None,
+        // Dimensions with no per-note or MIDI message of their own (an
+        // expression's text or integer value, a chord, a scale): deliberately not
+        // translated, and counted lost.
+        Payload::ExpressionText(_)
         | Payload::Chord(_)
         | Payload::Scale(_)
-        | Payload::ExpressionInt(_) => return None,
+        | Payload::ExpressionInt(_) => {
+            stream.count_untranslated();
+            return None;
+        }
     };
     Some(WireMidi {
         offset: frame,
@@ -551,9 +569,10 @@ pub(super) fn decode(event: &Event, stream: &mut OutputStream) -> Option<WireMid
 
 /// The per-note message a plugin's note expression (`typeId`, `value` normalized
 /// on `[0, 1]`, tuning `0.5` at the key and `1/240` per semitone) of the note
-/// `note_id` is, on `group`. `None` for a dimension with no per-note message
-/// (vibrato, expression, a custom id), a non-finite value, or an id no note of
-/// the plugin holds (both counted on the stream).
+/// `note_id` is, on `group`. `None`, counted lost on the stream, for a dimension
+/// with no per-note message (vibrato, expression, a custom id, an unknown id), a
+/// non-finite value, an id no note of the plugin holds, or a tuning past what
+/// Pitch 7.25 holds.
 fn expression(
     stream: &mut OutputStream,
     type_id: u32,
@@ -570,14 +589,19 @@ fn expression(
         stream.count_expression_dropped();
         return None;
     };
-    let voice = match expression_type_from_id(type_id)? {
-        NoteExpressionType::Tuning => per_note_tuning(note, tuning_semitones(value))?,
-        NoteExpressionType::Volume => per_note_message(
-            NoteExpressionType::Volume,
-            note,
-            Normalized::clamped(volume_unit(value)),
-        )?,
-        other => per_note_message(other, note, Normalized::clamped(value))?,
+    let voice =
+        expression_type_from_id(type_id).and_then(|expression_type| match expression_type {
+            NoteExpressionType::Tuning => per_note_tuning(note, tuning_semitones(value)),
+            NoteExpressionType::Volume => per_note_message(
+                NoteExpressionType::Volume,
+                note,
+                Normalized::clamped(volume_unit(value)),
+            ),
+            other => per_note_message(other, note, Normalized::clamped(value)),
+        });
+    let Some(voice) = voice else {
+        stream.count_expression_dropped();
+        return None;
     };
     Some(WireMidi {
         offset: frame,

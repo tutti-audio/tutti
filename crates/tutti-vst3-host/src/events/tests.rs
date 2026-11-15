@@ -12,7 +12,7 @@ use tutti_ump::{
     Address, CCNumber, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity,
     Sysex7Packets, SysexStatus, System, U7, U14, Ump, Voice2,
 };
-use tutti_ump::{BendValue, ControlValue};
+use tutti_ump::{BendValue, ControlValue, RegisteredPerNoteController};
 use tutti_vst3_ffi::EventList;
 
 /// A packet from its words, zero-padded to four, at offset 0.
@@ -1635,13 +1635,13 @@ mod message {
 }
 
 /// **A plugin's note expression is the per-note message of its dimension**, on
-/// the Group of its event bus: volume, pan and brightness are the Assignable
-/// Per-Note Controllers 7, 10 and 74, over the full 32 bits of the unit; a
-/// tuning of `0.5 + 12/240` is 12 semitones, a quarter of the MPE default
-/// range of ±48 (RP-053), which is a Per-Note Pitch Bend a quarter of the way
-/// from the centre `0x8000_0000` to the top (M2-115 section 3: min-centre-max).
-/// A dimension with no per-note message, a custom id and a note id that is not
-/// the host's `channel * 128 + note` are dropped.
+/// the Group of its event bus: volume, pan and brightness are the Registered
+/// Per-Note Controllers 7, 10 and 74 (M2-104 Appendix A), over the full 32 bits
+/// of the unit; a tuning of `0.5 + 12/240` is 12 semitones, which is Registered
+/// Per-Note Controller 3, Pitch 7.25, at the absolute pitch 72.0 (§7.4.15.2).
+/// A dimension with no per-note message, a custom id, a note id the plugin did
+/// not start, a value that is not a number and a tuning past Pitch 7.25's range
+/// are dropped, and each is counted lost once.
 #[test]
 fn a_plugins_note_expression_is_the_per_note_message_of_its_dimension() {
     use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
@@ -1674,9 +1674,9 @@ fn a_plugins_note_expression_is_the_per_note_message_of_its_dimension() {
             )),
         ))
     };
-    let controller = |index, value| Voice2::AssignablePerNote {
+    let controller = |controller, value| Voice2::RegisteredPerNote {
         note: NoteNumber::of(60),
-        controller: index,
+        controller,
         value: ControlValue::new(value),
     };
     // Volume is `0` for silence, `0.25` for 0 dB and `1` for +12 dB
@@ -1684,30 +1684,32 @@ fn a_plugins_note_expression_is_the_per_note_message_of_its_dimension() {
     // scale (2^31, rounded), and a boost saturates.
     assert_eq!(
         decode(Ids::kVolumeTypeID, note_id, 0.25),
-        per_note(controller(7, u32::MAX))
+        per_note(controller(RegisteredPerNoteController::Volume, u32::MAX))
     );
     assert_eq!(
         decode(Ids::kVolumeTypeID, note_id, 0.125),
-        per_note(controller(7, 0x8000_0000))
+        per_note(controller(RegisteredPerNoteController::Volume, 0x8000_0000))
     );
     assert_eq!(
         decode(Ids::kVolumeTypeID, note_id, 1.0),
-        per_note(controller(7, u32::MAX))
+        per_note(controller(RegisteredPerNoteController::Volume, u32::MAX))
     );
     assert_eq!(
         decode(Ids::kPanTypeID, note_id, 1.0),
-        per_note(controller(10, u32::MAX))
+        per_note(controller(RegisteredPerNoteController::Pan, u32::MAX))
     );
     assert_eq!(
         decode(Ids::kBrightnessTypeID, note_id, 0.0),
-        per_note(controller(74, 0))
+        per_note(controller(RegisteredPerNoteController::Brightness, 0))
     );
     assert_eq!(
         decode(Ids::kTuningTypeID, note_id, 0.5 + 12.0 / 240.0),
-        per_note(Voice2::PerNotePitchBend {
-            note: NoteNumber::of(60),
-            value: BendValue::new(0xA000_0000),
-        })
+        per_note(controller(RegisteredPerNoteController::Pitch, 72 << 25))
+    );
+    assert_eq!(
+        decode(Ids::kTuningTypeID, note_id, 0.5 + 80.0 / 240.0),
+        None,
+        "key 60 + 80 semitones is past Pitch 7.25's range"
     );
     assert_eq!(decode(Ids::kVibratoTypeID, note_id, 0.5), None);
     assert_eq!(decode(Ids::kExpressionTypeID, note_id, 0.5), None);
@@ -1719,6 +1721,47 @@ fn a_plugins_note_expression_is_the_per_note_message_of_its_dimension() {
     );
     assert_eq!(decode(Ids::kVolumeTypeID, -1, 0.5), None, "the wildcard");
     assert_eq!(decode(Ids::kVolumeTypeID, note_id, f64::NAN), None);
+    // Each of the seven drops above is one lost event: the tuning past its
+    // range, vibrato, expression, a custom id, a plugin's own id, the wildcard
+    // and a value that is not a number.
+    assert_eq!(stream.expressions_dropped(), 7);
+    assert_eq!(stream.lost_total(), 7);
+}
+
+/// **Events with no UMP form are counted lost**: bytes that are no MIDI
+/// message, a Data event too short to be one, a SysEx too long for one packet
+/// or with a payload byte past 127, a controller number with no message (Cable
+/// Select 135) and the dimensions the host does not translate (an expression's
+/// text, a chord). A message the translator holds in a run is not a loss.
+#[test]
+fn events_with_no_ump_form_are_counted_lost() {
+    let mut stream = OutputStream::new();
+    let data = |bytes: &[u8]| Event::at(0, Payload::Data(Data::new(0, bytes).unwrap()));
+    // A lone data byte, then bytes whose status is not a message.
+    for bytes in [&[0x90][..], &[0x90, 60][..], &[0x00, 1, 2][..]] {
+        assert!(data(bytes).to_midi(&mut stream).is_none(), "{bytes:?}");
+    }
+    assert_eq!(stream.untranslated_dropped(), 3);
+    // A SysEx of two packets, and one with an 8-bit payload byte.
+    assert!(
+        data(&[0xF0, 1, 2, 3, 4, 5, 6, 7, 0xF7])
+            .to_midi(&mut stream)
+            .is_none()
+    );
+    assert!(data(&[0xF0, 1, 0x80, 0xF7]).to_midi(&mut stream).is_none());
+    assert_eq!(stream.sysex_dropped(), 2);
+    // Cable Select (135) has no message, and an expression's integer value has
+    // no UMP form.
+    let cable_select = Event::at(0, Payload::LegacyCcOut(legacy_cc(135, 0, 0, 0)));
+    assert!(cable_select.to_midi(&mut stream).is_none());
+    let int_value = Event::at(0, Payload::ExpressionInt(ExpressionInt::new(3, 7, 1)));
+    assert!(int_value.to_midi(&mut stream).is_none());
+    assert_eq!(stream.untranslated_dropped(), 5);
+    assert_eq!(stream.lost_total(), 7);
+    // A message the translator takes into a run is held, not lost.
+    let select = Event::at(0, Payload::LegacyCcOut(legacy_cc(101, 0, 0, 0)));
+    assert!(select.to_midi(&mut stream).is_none());
+    assert_eq!(stream.lost_total(), 7, "an RPN select is held, not lost");
 }
 
 /// **A parameter run assembles across blocks**: the Data Entry LSB that ends a
@@ -1779,9 +1822,9 @@ fn a_plugins_expression_on_its_own_note_id_is_translated() {
                 group: MidiGroup::FIRST,
                 channel: MidiChannel::of(3)
             },
-            Voice2::AssignablePerNote {
+            Voice2::RegisteredPerNote {
                 note: NoteNumber::of(62),
-                controller: 10,
+                controller: RegisteredPerNoteController::Pan,
                 value: ControlValue::new(u32::MAX),
             },
         ))
@@ -1905,7 +1948,7 @@ fn a_run_and_a_note_through_a_full_list_are_still_read() {
         Ok(Message::Midi2(_, Voice2::Registered { value, .. })),
         Ok(Message::Midi2(
             address,
-            Voice2::AssignablePerNote {
+            Voice2::RegisteredPerNote {
                 note, controller, ..
             },
         )),
@@ -1914,7 +1957,10 @@ fn a_run_and_a_note_through_a_full_list_are_still_read() {
         panic!("expected a controller and an expression, got {got:?}");
     };
     assert_eq!(value.get(), 7 << 25);
-    assert_eq!((address.channel.get(), note.get(), controller), (3, 62, 10));
+    assert_eq!(
+        (address.channel.get(), note.get(), controller),
+        (3, 62, RegisteredPerNoteController::Pan)
+    );
 }
 
 /// **An id the plugin's output has not started names no note**: a low own id is
@@ -1970,7 +2016,7 @@ fn a_release_phase_expression_after_the_note_off_is_translated() {
         .expect("the release is that note's");
     assert!(matches!(
         got.ump.decode(),
-        Ok(Message::Midi2(a, Voice2::AssignablePerNote { note, .. }))
+        Ok(Message::Midi2(a, Voice2::RegisteredPerNote { note, .. }))
             if a.channel == MidiChannel::of(2) && note == NoteNumber::of(40)
     ));
     assert_eq!(stream.expressions_dropped(), 0);

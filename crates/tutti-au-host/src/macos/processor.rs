@@ -60,8 +60,9 @@ pub(crate) struct Rendering {
     pub(crate) notify: Option<RenderNotify>,
     pub(crate) renderer: Renderer,
     /// The MIDI the unit generates while it renders, for a unit that publishes
-    /// output streams. Withdrawn when dropped, which frees its state when no
-    /// render of the unit is in flight.
+    /// output streams. After the guard, so the unit is uninitialized when it is
+    /// dropped: withdrawn then, which frees its state when the unit is
+    /// uninitialized and no render is in flight.
     pub(crate) midi_out: Option<MidiOut>,
     /// The unit publishes MIDI output streams and refused the callback.
     pub(crate) midi_out_refusal: Option<String>,
@@ -201,13 +202,15 @@ impl MidiOut {
 }
 
 impl Drop for MidiOut {
-    /// Withdraws the registration, which frees its state when no render of the
-    /// unit is in flight, and leaves it allocated when one is
-    /// ([`AuMidiOutput::withdraw`]).
+    /// Withdraws the registration, which frees its state when the unit is
+    /// uninitialized and no render of it is in flight, and leaves it allocated
+    /// otherwise ([`AuMidiOutput::withdraw`]): a `Rendering` dropped by
+    /// `deactivate` has uninitialized the unit, and one dropped on a failed
+    /// uninitialize leaks.
     fn drop(&mut self) {
         if let Some(registration) = self.registration.take() {
             // Teardown: a refused withdrawal is dropped here, which leaks its
-            // state on purpose (a render may still read it).
+            // state on purpose (the unit may still call it).
             let _ = registration.withdraw();
         }
     }

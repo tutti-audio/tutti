@@ -79,10 +79,8 @@ pub const RT_MIDI_CAPACITY: usize = 64;
 /// `is_overflowed()`.
 pub type RtMidiEvents = RtVec<WireMidi, RT_MIDI_CAPACITY>;
 
-/// The Group of the plugin's note port or event bus `port`, or `None` for a
-/// port past the sixteen Groups: a UMP Group is the port of its own number (M2-104
-/// section 2.1.2: a Group is a channel space of its own), in every format and
-/// both directions, and a plugin's output on `port` is that Group's.
+/// The UMP Group a plugin's note port or event bus `port` is (M2-104 section
+/// 2.1.2: a Group is a channel space of its own), or `None` past the sixteen.
 #[must_use]
 pub fn group_of_port(port: u16) -> Option<MidiGroup> {
     MidiGroup::new(u8::try_from(port).ok()?)

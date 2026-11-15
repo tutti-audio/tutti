@@ -369,17 +369,31 @@ pub fn install(unit: &Unit, sink: MidiOutSink) -> Result<AuMidiOutput> {
 }
 
 impl AuMidiOutput {
-    /// Withdraws the callback and frees the state the AU's `userData` pointed at.
+    /// Withdraws the callback and frees the state the AU's `userData` pointed at,
+    /// when nothing can still read it.
     ///
-    /// The callback runs only inside a render, and a render that began before
-    /// the withdrawing write may still be reading the state when it returns. So
-    /// the write comes first, then the count of renders this crate has in flight
-    /// on the unit (`Unit::rendering`), read after a fence: a render the count
-    /// does not show starts after the write and reads the cleared callback, and
-    /// one it shows is waited for by leaving the state allocated. No lock is
-    /// taken here or by a render. A render started outside this crate's safe
-    /// calls (`RenderUnit::get`'s `unsafe` contract) is not counted: its caller
-    /// owes that no such render overlaps a withdrawal.
+    /// What can read the state is a render calling the AU's callback. Two things
+    /// must hold for that to be impossible after the free, and `withdraw` checks
+    /// both after writing the cleared callback:
+    ///
+    /// - **The unit is uninitialized**, and stays so until the free is done
+    ///   (`Unit::while_uninitialized` holds the lifecycle lock across it). An AU
+    ///   may take its callbacks at `AudioUnitInitialize` and keep calling the old
+    ///   pair after a later property write; an uninitialized unit renders nothing,
+    ///   and an `initialize` that waits on the lock takes the cleared callback. A
+    ///   unit whose `AudioUnitUninitialize` failed, or has not run, counts as
+    ///   initialized.
+    /// - **No render of this crate's is in flight** (`Unit::rendering`), read
+    ///   after a `SeqCst` fence. A render that began before the unit was
+    ///   uninitialized, or while a clone uninitialized it (it must not:
+    ///   `Unit::uninitialize`), is counted; one the count does not show starts
+    ///   after the check and reads the cleared callback. A render made outside
+    ///   this crate's safe calls (`RenderUnit::get`'s `unsafe` contract) is not
+    ///   counted: its caller owes that none overlaps a withdrawal.
+    ///
+    /// A host calls it after `Unit::uninitialize` and before the next
+    /// `Unit::initialize`. The lifecycle lock is control-side: no render takes
+    /// it.
     ///
     /// # Errors
     /// The handle comes back with the error, still holding the unit's claim and
@@ -387,9 +401,9 @@ impl AuMidiOutput {
     /// withdraws the callback and leaks the state.
     /// - `Error::Os` if the AU refuses the clearing write: the unit may still
     ///   call into the state.
-    /// - `Error::Invalid` if a render is in flight: the AU calls nothing for a
-    ///   later render, and the state stays allocated because the running one may
-    ///   still read it.
+    /// - `Error::Invalid` if the unit is initialized or a render is in flight: the
+    ///   callback is cleared, and the state stays allocated because the AU may
+    ///   still call it.
     ///
     /// An AU that refuses the clearing write of a handle that is then dropped
     /// keeps the unit's claim for good, so the unit cannot register again.
@@ -398,25 +412,37 @@ impl AuMidiOutput {
         if let Err(refused) = self.clear_callback() {
             return Err((self, refused));
         }
-        if !self.unit.no_render_in_flight() {
-            return Err((
-                self,
-                Error::Invalid(
-                    "a render of the unit is in flight: the callback is withdrawn \
-                     and its state is left allocated"
-                        .into(),
-                ),
-            ));
+        let unit = self.unit.clone();
+        let state = &mut self.state;
+        let freed = unit.while_uninitialized(|| {
+            if !unit.no_render_in_flight() {
+                return Err("a render of the unit is in flight");
+            }
+            if let Some(state) = state.take() {
+                // SAFETY: made by `Box::into_raw` in `install`. The withdrawing
+                // write succeeded, the unit is uninitialized and `initialize`
+                // waits on the lock this runs under, and no render was in flight
+                // after the write (the fence in `no_render_in_flight` orders the
+                // two), so the AU holds no pointer it will use and no render
+                // reads the state; nothing else frees it.
+                drop(unsafe { Box::from_raw(state.as_ptr()) });
+            }
+            Ok(())
+        });
+        match freed {
+            Some(Ok(())) => {
+                self.unit.release_midi_output();
+                Ok(())
+            }
+            Some(Err(why)) => Err((self, Self::left_allocated(why))),
+            None => Err((self, Self::left_allocated("the unit is initialized"))),
         }
-        if let Some(state) = self.state.take() {
-            // SAFETY: made by `Box::into_raw` in `install`. The withdrawing write
-            // succeeded and no render was in flight after it (the fence in
-            // `no_render_in_flight` orders the two), so the AU holds no pointer
-            // it will use and no render reads the state; nothing else frees it.
-            drop(unsafe { Box::from_raw(state.as_ptr()) });
-        }
-        self.unit.release_midi_output();
-        Ok(())
+    }
+
+    fn left_allocated(why: &str) -> Error {
+        Error::Invalid(format!(
+            "{why}: the callback is withdrawn and its state is left allocated"
+        ))
     }
 
     /// Writes the callback away, so the AU calls no more, and releases the unit's
@@ -1079,6 +1105,39 @@ mod tests {
         registration.withdraw().expect("no render in flight: freed");
         let again = install(&unit, Box::new(|_, _| {})).expect("the claim was released");
         again.withdraw().expect("freed");
+    }
+
+    /// **A withdrawal on an initialized unit frees nothing**: an AU may have taken
+    /// its callback at initialization, so the withdrawal is refused and hands the
+    /// registration back; once the unit is uninitialized the same registration
+    /// withdraws and frees, and the unit takes a new one.
+    #[test]
+    fn a_withdrawal_on_an_initialized_unit_is_refused_until_it_is_uninitialized() {
+        let desc = coreaudio_sys::AudioComponentDescription {
+            componentType: coreaudio_sys::kAudioUnitType_Effect,
+            componentSubType: u32::from_be_bytes(*b"dely"),
+            componentManufacturer: u32::from_be_bytes(*b"appl"),
+            componentFlags: 0,
+            componentFlagsMask: 0,
+        };
+        let comp = crate::ComponentRef::first_matching(&desc).expect("AUDelay ships with macOS");
+        let (_work, handle) = tutti_plugin_types::MainWork::new();
+        let unit = Unit::new(comp, &handle).expect("instantiate");
+        let registration = install(&unit, Box::new(|_, _| {})).expect("install");
+        unit.initialize().expect("initialize");
+        let Err((registration, Error::Invalid(_))) = registration.withdraw() else {
+            panic!("a withdrawal on an initialized unit is refused");
+        };
+        assert!(
+            install(&unit, Box::new(|_, _| {})).is_err(),
+            "the refused registration keeps the claim"
+        );
+        unit.uninitialize().expect("uninitialize");
+        registration.withdraw().expect("uninitialized: freed");
+        install(&unit, Box::new(|_, _| {}))
+            .expect("the claim was released")
+            .withdraw()
+            .expect("freed");
     }
 
     /// What `decoder` makes of `bytes` as one list at `offset`.

@@ -53,6 +53,7 @@ pub struct OutputStream {
     full_dropped: u64,
     sysex_dropped: u64,
     lists_busy: u64,
+    untranslated_dropped: u64,
 }
 
 impl Default for OutputStream {
@@ -75,6 +76,7 @@ impl OutputStream {
             full_dropped: 0,
             sysex_dropped: 0,
             lists_busy: 0,
+            untranslated_dropped: 0,
         }
     }
 
@@ -92,8 +94,9 @@ impl OutputStream {
     }
 
     /// Expressions dropped since construction: on an id no output note on
-    /// started (or whose entry was evicted), or with a value that is not a
-    /// number.
+    /// started (or whose entry was evicted), with a value that is not a number,
+    /// or of a dimension with no per-note message (vibrato, expression, a custom
+    /// or unknown id) or past what Pitch 7.25 holds.
     #[must_use]
     pub fn expressions_dropped(&self) -> u64 {
         self.expressions_dropped
@@ -113,6 +116,15 @@ impl OutputStream {
         self.sysex_dropped
     }
 
+    /// Events dropped because they have no UMP form: bytes that are no MIDI
+    /// message, a controller number with no message, and the dimensions a host
+    /// does not translate (an expression's text or integer value, a chord, a
+    /// scale), since construction.
+    #[must_use]
+    pub fn untranslated_dropped(&self) -> u64 {
+        self.untranslated_dropped
+    }
+
     /// Blocks whose output list a plugin thread held when the host came to read
     /// it, so nothing of it was read, since construction.
     #[must_use]
@@ -121,13 +133,12 @@ impl OutputStream {
     }
 
     /// The events lost since construction: expressions dropped, events on a bus
-    /// past the Groups, events a full block list had no room for, and SysEx
-    /// messages that did not fit, and one for each block whose list could not be
-    /// read. What the
-    /// host reports as lost MIDI, by its change from block to block. An eviction
-    /// is not here: it loses a mapping, not an event, and any expression it later
-    /// costs is already in `expressions_dropped` ([`notes_evicted`](Self::notes_evicted)
-    /// is its own reading).
+    /// past the Groups, events a full block list had no room for, SysEx that did
+    /// not fit, events with no UMP form, and one for each block whose list could
+    /// not be read. What the host reports as lost MIDI, by its change from block
+    /// to block. An eviction is not here: it loses a mapping, not an event, and any
+    /// expression it later costs is already in `expressions_dropped`
+    /// ([`notes_evicted`](Self::notes_evicted) is its own reading).
     #[must_use]
     pub fn lost_total(&self) -> u64 {
         self.expressions_dropped
@@ -135,6 +146,7 @@ impl OutputStream {
             + self.full_dropped
             + self.sysex_dropped
             + self.lists_busy
+            + self.untranslated_dropped
     }
 
     pub(super) fn count_bus_dropped(&mut self) {
@@ -151,6 +163,10 @@ impl OutputStream {
 
     pub(super) fn count_sysex_dropped(&mut self) {
         self.sysex_dropped += 1;
+    }
+
+    pub(super) fn count_untranslated(&mut self) {
+        self.untranslated_dropped += 1;
     }
 
     pub(super) fn count_list_busy(&mut self) {
