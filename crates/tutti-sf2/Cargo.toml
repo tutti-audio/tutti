@@ -29,4 +29,3 @@ tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 # The `Bank` contract test needs serde on.
 tutti-sf2 = { path = ".", features = ["serde"] }
-serde_json = "1"

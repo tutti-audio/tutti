@@ -83,13 +83,15 @@ fn a_delay_with_a_nan_initial_time_starts_at_zero() {
 /// The strip's volume and balance cells hold a bad write off: the output stays
 /// finite while it is there and after a finite write.
 ///
-/// The pan cases pin that a NaN or infinite balance is already finite without a guard.
+/// The balance case pins that a NaN or infinite balance is already finite without a guard.
 #[test]
-fn the_strip_holds_off_non_finite_volume_and_pan() {
+fn the_strip_holds_off_non_finite_volume_and_balance() {
     type Cell = fn(&BusStripNode) -> std::sync::Arc<AtomicF32>;
     let cells: [(&str, Cell); 2] = [
         ("volume", |n| n.volume().as_atomic()),
-        ("pan", |n| n.pan().as_atomic()),
+        ("balance", |n| {
+            n.balance().expect("a stereo strip balances").as_atomic()
+        }),
     ];
     for (name, cell) in cells {
         for bad in BAD {

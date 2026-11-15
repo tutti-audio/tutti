@@ -30,8 +30,6 @@ tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false
 # The one OS look at a plugin's descriptors (`service_now`).
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 
-# Lock-free f64 cursor for the node's controls.
-atomic_float = "1.1"
 # The in-process node's stack channel tables.
 arrayvec = "0.7"
 parking_lot = "0.13"

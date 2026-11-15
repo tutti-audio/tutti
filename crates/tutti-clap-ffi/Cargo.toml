@@ -36,9 +36,6 @@ tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-types = { version = "0.0.1", path = "../tutti-types" }
 log = "0.4"
 
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
 [dev-dependencies]
 # The reference plugin the wrapper tests load; Cargo builds its cdylib in the
 # same `cargo test` invocation and the tests find the artifact beside the test
