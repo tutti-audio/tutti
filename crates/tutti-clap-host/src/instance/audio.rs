@@ -42,6 +42,9 @@ pub struct ProcessOutput {
 pub struct ProcessOutputRef<'a> {
     /// MIDI the plugin emitted during the block, in event order.
     pub midi_events: &'a [WireMidi],
+    /// MIDI the plugin emitted that is not in `midi_events`: events the pool had
+    /// no room for, from a port no Group has, or with a value that is not a number.
+    pub midi_lost: usize,
     /// Parameter values the plugin changed itself, e.g. from its own GUI.
     pub param_changes: &'a ParameterChanges,
     /// Note expressions the plugin emitted.
@@ -439,6 +442,8 @@ impl ClapProcessor {
             input_events,
             output_events,
             out_midi,
+            out_translator,
+            out_midi_lost,
             out_param_changes,
             out_param_points_dropped,
             out_note_expressions,
@@ -451,12 +456,13 @@ impl ClapProcessor {
                 input_events.note_ended(end.note_id);
             }
         }
-        output_events.fill_midi_events(out_midi);
+        *out_midi_lost = output_events.fill_midi_events(out_translator, out_midi);
         *out_param_points_dropped += output_events.fill_param_changes(out_param_changes);
         output_events.fill_note_expressions(out_note_expressions);
 
         Ok(ProcessOutputRef {
             midi_events: &self.scratch.out_midi,
+            midi_lost: self.scratch.out_midi_lost,
             param_changes: &self.scratch.out_param_changes,
             note_expressions: &self.scratch.out_note_expressions,
         })

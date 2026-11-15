@@ -1,6 +1,6 @@
 //! [`MidiOut`]: the terminal sink MIDI events are pushed at. The input
 //! direction has no trait: a device's events reach the graph through an event
-//! inlet ([`DeviceInlets`](crate::DeviceInlets)).
+//! inlet ([`InputInlets`](crate::InputInlets)).
 //!
 //! The sink carries no address: an endpoint *is* its stream. Which node hears
 //! what is the graph's wiring (a `MidiIngestNode` in `tutti-midi-runtime`

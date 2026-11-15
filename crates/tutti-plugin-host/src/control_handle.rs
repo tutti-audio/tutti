@@ -873,7 +873,14 @@ mod tests {
         fn parameter(&self, _main: MainThreadMarker, _id: ParamId) -> Option<Normalized> {
             None
         }
-        fn set_parameter(&mut self, _main: MainThreadMarker, _id: ParamId, _value: Normalized) {}
+        fn set_parameter(
+            &mut self,
+            _main: MainThreadMarker,
+            _id: ParamId,
+            _value: Normalized,
+        ) -> Result<(), tutti_plugin_types::ParamWriteError> {
+            Ok(())
+        }
         fn parameter_plain(
             &self,
             _main: MainThreadMarker,

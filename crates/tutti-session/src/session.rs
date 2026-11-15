@@ -2,8 +2,6 @@
 //! run in ([`PHASES`]).
 
 use std::any::Any;
-#[cfg(feature = "midi")]
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
@@ -15,6 +13,7 @@ use tutti_tempo::TempoMap;
 use tutti_transport::{FadeOut, LoopEdit, MotionEvent, QueueFull, ScheduleFull, Then, Transport};
 use tutti_types::{At, Beat, Bpm, ChannelLayout, ChannelTopology, LoopRange, Samples};
 
+use crate::RootDeclaration;
 use crate::graph::{Committed, CrossfadeId, Graph, Retried};
 use crate::{Clock, Offline, RealTime};
 use crate::{HeardOpen, HeardTapError, Playhead, RemoveError, ScheduleError, TempoError};
@@ -180,6 +179,34 @@ pub enum SessionEvent {
         /// Why.
         refused: crate::CrossfadeRefused,
     },
+    /// A node re-inserted with a narrower shape (a plugin whose ports changed,
+    /// a node re-declared at a new width) lost wiring to the ports it no
+    /// longer has. Reported once, by the update that commits the re-insert,
+    /// per node: the audio edges, the event edges and the bus edges (root feeds
+    /// included) that were dropped, by the ports the app named them with.
+    /// Edges to the ports the node still has are kept, gains included. A
+    /// refused commit reports nothing: the record waits for the update whose
+    /// commit lands.
+    ///
+    /// A feedback edge is listed as the pair of ports it joined (its delay
+    /// is not part of an [`Edge`](crate::Edge)). A modulation route onto a
+    /// dropped edge, or a param or edge-gain lane the node's lost event
+    /// outputs drove, is not listed: the route stays declared and reads
+    /// unresolved (`Problem::Unresolved`, feature `modulation`) until its target
+    /// is wired again.
+    Unwired {
+        /// The node whose re-insert dropped the wiring.
+        node: NodeKey,
+        /// The audio edges dropped, into or out of the node (a feedback edge
+        /// as the pair of ports it joined).
+        edges: Vec<crate::Edge>,
+        /// The event edges dropped, into or out of the node.
+        event_edges: Vec<crate::EventEdge>,
+        /// The bus edges dropped, into or out of the node, as the app wired
+        /// them: the source bus and the sink, a node's input bus or the
+        /// root.
+        bus_edges: Vec<(tutti_graph::BusSource, crate::BusSink)>,
+    },
     /// A node's event output port lost events since the last update: they
     /// were past its capacity (a note-off only past the room set aside for
     /// note-offs), a PDC or feedback delay it feeds was full, or the node
@@ -301,6 +328,18 @@ impl std::fmt::Debug for SessionEvent {
                 .field("id", id)
                 .field("refused", refused)
                 .finish(),
+            Self::Unwired {
+                node,
+                edges,
+                event_edges,
+                bus_edges,
+            } => f
+                .debug_struct("Unwired")
+                .field("node", node)
+                .field("edges", edges)
+                .field("event_edges", event_edges)
+                .field("bus_edges", bus_edges)
+                .finish(),
             Self::Fault(fault) => f.debug_tuple("Fault").field(fault).finish(),
             #[cfg(feature = "device")]
             Self::Device(event) => f.debug_tuple("Device").field(event).finish(),
@@ -345,24 +384,19 @@ impl std::fmt::Debug for SessionEvent {
     }
 }
 
-/// The engine's MIDI, as graph nodes the builder inserts: the hardware
-/// input's ingest and the clock (Beat Clock and MTC, off until a host enables it),
-/// with their controls. The hardware out is not a node: the session reads an
-/// event tap on the clock's output ([`Midi::set_hardware_out`](crate::Midi::set_hardware_out)).
+/// The engine's MIDI, as graph nodes the builder inserts: the clock (Beat Clock
+/// and MTC, off until a host enables it), with its controls. An input port's
+/// ingest node is not here: each `midi_input` entry makes its own
+/// (`MidiInput::node`). The host's hardware out is
+/// not a node: the session reads an event tap on the clock's output
+/// ([`Midi::set_hardware_out`](crate::Midi::set_hardware_out)), and a
+/// `midi_output` port's node is fed by the clock.
 #[cfg(feature = "midi")]
 #[derive(Clone, Debug)]
 pub struct MidiNodes {
-    /// The hardware input's ingest node: its ports feed what a route rule names.
-    pub input: NodeKey,
-    /// Which of its event outputs carries which Group and channel
+    /// Which of an input port's event outputs carries which Group and channel
     /// ([`SessionBuilder::midi_groups`](crate::SessionBuilder::midi_groups)).
     pub input_ports: tutti_midi_runtime::MidiInputPorts,
-    /// How many hardware devices the input takes at once: it has that many
-    /// event inputs, one for each
-    /// ([`SessionBuilder::midi_devices`](crate::SessionBuilder::midi_devices)).
-    pub input_devices: NonZeroUsize,
-    /// Its controls (the MPE mode).
-    pub input_controls: tutti_midi_runtime::MidiIngestControls,
     /// The clock's node.
     pub clock: NodeKey,
     /// The clock master: enable it, pick MTC and its frame rate.
@@ -668,7 +702,15 @@ impl<C: Clock> Session<C> {
     /// narrowed (channels past it are dropped), with no floor of the device's
     /// ([`root_width`](crate::root_width)). Afterwards the width and the
     /// declaration cannot disagree: [`Graph::widen_outputs`] refuses to widen a
-    /// declared root. Declare again to change both. An export of the master
+    /// declared root. Declare again to change both.
+    ///
+    /// A declaration that changes the root crossfades: the old root's outputs
+    /// fade out and the new root's fade in over the declick length (5 ms),
+    /// both rendering the same nodes, so a change of layout never steps the
+    /// sound. [`.hard()`](RootDeclaration::hard) on the returned declaration
+    /// cuts at one block instead. A commit that lands while the fade runs ends
+    /// it at that block, as a hard edit ends a unit's crossfade; the new root
+    /// is heard alone from there. An export of the master
     /// places the file from the declaration (`tutti_export::Setup::with_root`, set by the export's fork).
     ///
     /// The device a declaration must place on is the one the session renders
@@ -682,22 +724,24 @@ impl<C: Clock> Session<C> {
     /// renders ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)), or the
     /// device cannot place it (an unassigned root wider than the device, a channel
     /// no speaker names). Nothing is changed.
-    pub fn declare_root_topology(&mut self, root: Option<ChannelTopology>) -> crate::Result<()> {
+    pub fn declare_root_topology(
+        &mut self,
+        root: Option<ChannelTopology>,
+    ) -> crate::Result<RootDeclaration<'_>> {
         // The same request again, in force, is nothing to do.
-        if root == self.root_request && self.root_refusal.is_none() {
-            return Ok(());
-        }
-        self.root_request = root.clone();
-        match self.graph.declare_root(root) {
-            Ok(()) => {
-                self.root_refusal = None;
-                Ok(())
-            }
-            Err(e) => {
-                self.root_refusal = Some(e);
-                Err(e.into())
+        if !(root == self.root_request && self.root_refusal.is_none()) {
+            self.root_request = root.clone();
+            match self.graph.declare_root(root, false) {
+                Ok(()) => self.root_refusal = None,
+                Err(e) => {
+                    self.root_refusal = Some(e);
+                    return Err(e.into());
+                }
             }
         }
+        Ok(RootDeclaration {
+            graph: &mut self.graph,
+        })
     }
 
     /// The topology last asked for with
@@ -823,6 +867,14 @@ impl<C: Clock> Session<C> {
             Phase::Commit => {
                 self.apply_output_policy();
                 let sent = self.graph.is_edited() && self.commit_reporting(out);
+                for u in self.graph.take_unwired() {
+                    out.push(SessionEvent::Unwired {
+                        node: u.node,
+                        edges: u.edges,
+                        event_edges: u.event_edges,
+                        bus_edges: u.bus_edges,
+                    });
+                }
                 if !sent && self.resumed {
                     self.publish_sent();
                 }
@@ -1523,7 +1575,7 @@ impl<C: Clock> Session<C> {
     /// ([`SessionBuilder::midi_hardware`](crate::SessionBuilder::midi_hardware)):
     /// for a test that drives the layer under the session (a fake backend's
     /// hot-plug, a device's ports and negotiation). A host reaches devices
-    /// through [`Midi`](crate::Midi) (`s.midi().connect_input(..)`) and the
+    /// through the pool's `midi_input` and `midi_output` entries and the
     /// events of `Session::update`.
     #[cfg(all(feature = "midi-hardware", feature = "testing"))]
     pub fn testing_midi_io(&self) -> Option<&tutti_midi_hardware::MidiSession> {

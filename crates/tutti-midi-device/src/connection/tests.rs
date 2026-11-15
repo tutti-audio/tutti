@@ -8,7 +8,7 @@ use tutti_ump::{
 };
 
 use super::*;
-use crate::endpoint::{Capabilities, Endpoint, FunctionBlock, FunctionBlockBuilder};
+use crate::endpoint::{Capabilities, Endpoint, FunctionBlock, FunctionBlockBuilder, Supports};
 use crate::name::{BlockName, EndpointName, ProductInstanceId};
 
 fn at(base: Instant, ms: u64) -> Instant {
@@ -55,7 +55,7 @@ fn block(n: u8, first: u8, span: u8, name: &str) -> FunctionBlockBuilder {
 /// A MIDI 2.0 device with every optional part and two blocks.
 fn device() -> Endpoint {
     let u = |n| U7::new(n).unwrap();
-    Endpoint::new(FULL)
+    Endpoint::new(Supports::of(FULL))
         .with_identity(DeviceIdentity {
             manufacturer: ManufacturerId::of(0xA109),
             family: [u(1), u(2)],
@@ -197,24 +197,24 @@ fn the_request_asks_only_for_what_the_peer_supports() {
     let t0 = Instant::now();
     let (mut c, first) = Connection::new(t0);
     let first = discovery_of(first);
-    let mut peer = Endpoint::new(Capabilities {
+    let mut peer = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         rx_jr: true,
         tx_jr: false,
-    });
+    }));
     let (_, sent) = run(&mut c, &mut peer, first, t0);
     assert_eq!(sent[1].0, [0xF005_0202, 0, 0, 0]);
     assert_eq!(c.endpoint().active(), peer.active());
     // And the other direction.
     let (mut c, first) = Connection::new(t0);
     let first = discovery_of(first);
-    let mut peer = Endpoint::new(Capabilities {
+    let mut peer = Endpoint::new(Supports::of(Capabilities {
         midi1: true,
         midi2: true,
         rx_jr: false,
         tx_jr: true,
-    });
+    }));
     let (_, sent) = run(&mut c, &mut peer, first, t0);
     assert_eq!(sent[1].0, [0xF005_0201, 0, 0, 0]);
     assert_eq!(c.endpoint().active(), peer.active());
@@ -286,7 +286,7 @@ fn notification(protocol: Protocol, rx_jr: bool, tx_jr: bool) -> Message {
 /// replies by hand, so it has sent its Stream Configuration Request.
 fn requested(t0: Instant) -> Connection {
     let (mut c, _) = Connection::new(t0);
-    let mut peer = Endpoint::new(FULL);
+    let mut peer = Endpoint::new(Supports::of(FULL));
     let mut replies: Vec<Ump> = Vec::new();
     let _ = peer.reply(
         stream(Stream::EndpointDiscovery {

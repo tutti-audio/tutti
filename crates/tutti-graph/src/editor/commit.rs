@@ -6,14 +6,18 @@ use std::sync::Arc;
 use tutti_curve::declick_frames;
 
 use super::lifecycle::Resume;
-use super::{BusLanes, CommitError, Editor, starting};
-use crate::NodeKey;
-use crate::compile::compile;
+use super::{BusLanes, CommitError, Editor, SentBank, starting};
+use crate::compile::{CompileError, Shapes, compile};
 use crate::exec::Commit;
 use crate::exec::{Opened, StageIn};
+use crate::gain::{EdgeFade, EdgeGain};
 use crate::node::Node;
 use crate::param::ParamState;
 use crate::plan::{Delta, Placement, Plan};
+use crate::spec::{GraphSpec, ValidGraph};
+use crate::{Edge, EdgeId, Sink, Source};
+use crate::{Fade, NodeKey, RootBank};
+use tutti_types::Amplitude;
 
 impl Editor {
     /// `Err(Poisoned)` once a re-prepare has failed with its units out.
@@ -160,6 +164,9 @@ impl Editor {
             && !self.taps.has_pending()
             && !self.event_taps.has_pending()
             && !self.meters.has_pending()
+            // A plan whose root crossfade has ended is compiled again without
+            // the old root's channels.
+            && !self.bank.is_some_and(|b| b.ended)
             && self
                 .life
                 .committed()
@@ -175,7 +182,7 @@ impl Editor {
             }
             return Ok(());
         }
-        let (valid, weights) = Self::lower_and_validate(&self.spec, &self.shapes)?;
+        let (valid, weights) = self.lower_with_bank()?;
         let (mut plan, mut delta) = compile(
             &valid,
             &self.shapes,
@@ -236,6 +243,106 @@ impl Editor {
         Ok(())
     }
 
+    /// How a commit that changes the root's generation trades the old root
+    /// for the new: the old root's channels are rendered beside the new root's
+    /// for the `fade`'s length, and the host folds each with its own root's
+    /// fold and mixes them by the fade's gains ([`RootBank`]).
+    /// `None` (the default) cuts at the commit's block, as does a zero
+    /// duration. Read when a commit is compiled.
+    pub fn set_root_fade(&mut self, fade: Option<Fade>) {
+        self.root_fade = fade.filter(|f| !f.is_cut());
+    }
+
+    /// The fade a root change takes ([`set_root_fade`](Self::set_root_fade)).
+    pub fn root_fade(&self) -> Option<Fade> {
+        self.root_fade
+    }
+
+    /// The spec lowered and validated, as [`lower_and_validate`](Self::lower_and_validate)
+    /// does, and, when this commit changes the root's generation and a root
+    /// fade is set, with the previous root's output channels after the new
+    /// root's: the old root's wiring as it was committed, over the nodes that
+    /// are still here. Its lanes are static at the weights they had.
+    fn lower_with_bank(&self) -> Result<(ValidGraph, BusLanes), CommitError> {
+        let (Some(fade), Some(was)) = (
+            self.root_fade,
+            self.life
+                .committed()
+                .filter(|c| c.spec.root_id != self.spec.root_id),
+        ) else {
+            return Self::lower_and_validate(&self.spec, &self.shapes);
+        };
+        let lower = |spec: &GraphSpec, shapes: &Shapes| {
+            spec.lowered(shapes)
+                .map_err(|e| CommitError::Compile(CompileError::Bus(e)))
+        };
+        let mut now = lower(&self.spec, &self.shapes)?;
+        let before = lower(&was.spec, &was.shapes)?;
+        let base = now.spec.topology.outputs.len();
+        let old_width = before.spec.topology.outputs.len();
+        let published = self
+            .root_gate
+            .as_ref()
+            .is_none_or(|gate| gate.published(was.spec.root_id, old_width));
+        if base == 0 || old_width == 0 || !published {
+            let valid = now.spec.validate().map_err(CommitError::Invalid)?;
+            return Ok((valid, now.weights()));
+        }
+        let alive = |source: Source| match source {
+            Source::Node(p) => self
+                .shapes
+                .get(&p.node)
+                .is_some_and(|shape| usize::from(p.port) < usize::from(shape.audio_out().count())),
+            Source::Global(ch) => ch < now.spec.topology.inputs.count(),
+            Source::Zero => false,
+        };
+        let mut kept = false;
+        for (c, sources) in before.spec.topology.outputs.iter().enumerate() {
+            let mut bank_sources = Vec::new();
+            for &source in sources.iter().filter(|&&s| alive(s)) {
+                let was_id = EdgeId {
+                    sink: Sink::Output(c as u16),
+                    from: Edge::Direct(source),
+                };
+                let gain = before.spec.gains.get(&was_id);
+                if gain.is_some_and(|g| g.fade == EdgeFade::Out) {
+                    continue;
+                }
+                let id = EdgeId {
+                    sink: Sink::Output((base + c) as u16),
+                    from: Edge::Direct(source),
+                };
+                let weight = gain.map_or(Amplitude::UNITY, |g| g.base);
+                if weight.get().to_bits() != 1.0f32.to_bits() {
+                    now.spec.gains.insert(id, EdgeGain::new(weight));
+                }
+                now.lanes.insert(id, weight);
+                bank_sources.push(source);
+            }
+            kept |= !bank_sources.is_empty();
+            now.spec.topology.outputs.push(bank_sources);
+        }
+        if !kept {
+            now.spec.topology.outputs.truncate(base);
+            now.lanes
+                .retain(|id, _| !matches!(id.sink, Sink::Output(c) if usize::from(c) >= base));
+            now.spec
+                .gains
+                .retain(|id, _| !matches!(id.sink, Sink::Output(c) if usize::from(c) >= base));
+        }
+        let valid = now.spec.validate().map_err(CommitError::Invalid)?;
+        let valid = if kept {
+            valid.with_root_bank(RootBank {
+                old: was.spec.root_id,
+                base,
+                fade,
+            })
+        } else {
+            valid
+        };
+        Ok((valid, now.weights()))
+    }
+
     /// Sends a plan compiled elsewhere — against [`base`](Self::base) — with
     /// the units its delta places, as this editor's next commit. For a caller
     /// that compiles itself (a test harness driving two interpreters from one
@@ -284,6 +391,10 @@ impl Editor {
     ) {
         self.touch();
         let fades = starting(&delta);
+        self.bank = plan.root_bank().map(|_| SentBank {
+            seq: self.link.next_seq(),
+            ended: false,
+        });
         let plan = Arc::new(plan);
         let committed = self.life.committed().map(|c| &c.spec);
         let spec = &self.spec;

@@ -162,7 +162,8 @@ fn a_parameter_written_while_not_processing_is_flushed<F: Format<L = Vst3Loaded>
     let mut a = active::<F>();
     let main = main_thread();
     a.controller_mut()
-        .set_parameter(main, Param::Aux.id(), Normalized::clamped(0.9));
+        .set_parameter(main, Param::Aux.id(), Normalized::clamped(0.9))
+        .expect("a declared, writable parameter");
     assert!(
         !a.processor().flush_parameters().unwrap(),
         "it is processing"

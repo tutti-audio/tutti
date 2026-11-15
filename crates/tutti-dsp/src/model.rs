@@ -77,6 +77,6 @@ pub use family::{Channels, Family, Grows};
 pub use inputs::{Inputs, MAX_LANES};
 pub use lti::Lti;
 pub use reach::{Domain, MaxDecay, MaxDecayError, Reach, TAIL_FLOOR};
-pub use realized::{Approach, Readout, Realized, Recurrence, Start};
+pub use realized::{Approach, Realized, Recurrence, Start};
 pub use setup::{Effort, Setup};
 pub use system::{Ring, System};

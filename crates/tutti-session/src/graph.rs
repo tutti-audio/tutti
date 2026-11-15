@@ -131,6 +131,9 @@ pub enum Feeder {
     Instrument,
     /// A host's declarations.
     Declared,
+    /// The session's MIDI clock, which feeds every output port
+    /// (`midi_output`, feature `midi-hardware`).
+    Clock,
 }
 
 tutti_types::id! {
@@ -329,6 +332,10 @@ pub struct Graph {
     master_meter: Option<MeterReader>,
     /// Crossfades refused `Busy`, in request order.
     parked: VecDeque<Parked>,
+    /// The wiring each re-insert dropped, by node, until the commit that
+    /// carries the re-insert is sent and the session reports it
+    /// ([`SessionEvent::Unwired`](crate::SessionEvent::Unwired)).
+    unwired: Vec<Unwiring>,
     /// The nodes [`remove`](Self::remove) took out since the session last
     /// forgot what it declared on them ([`Graph::take_removed`]).
     removed: Vec<NodeKey>,
@@ -360,6 +367,15 @@ pub struct Graph {
     /// publisher is the session's `TransportSettings`, whose `Reclaim` sweep
     /// already covers the cell.
     pub(crate) tempo: tutti_transport::TempoReader,
+}
+
+/// The wiring a re-insert at one key dropped, in the session's port types.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Unwiring {
+    pub(crate) node: NodeKey,
+    pub(crate) edges: Vec<Edge>,
+    pub(crate) event_edges: Vec<crate::EventEdge>,
+    pub(crate) bus_edges: Vec<(BusSource, BusSink)>,
 }
 
 /// A hook each live render helper runs once on its own thread, with its
@@ -490,6 +506,7 @@ impl Graph {
             event_taps: BTreeMap::new(),
             master_meter: Some(master_meter),
             parked: VecDeque::new(),
+            unwired: Vec::new(),
             removed: Vec::new(),
             root: None,
             output: None,
@@ -700,7 +717,8 @@ impl Graph {
     /// are not a [`SessionNode`] (a bound plugin).
     pub(crate) fn place<N: IntoNode>(&mut self, node: N) -> (Key<N>, N::Controls) {
         let id = NodeKey::fresh();
-        let controls = self.editor.insert(id, N::kind(), node);
+        // A fresh key has no wiring recorded, so nothing is unwired.
+        let controls = self.editor.insert(id, N::kind(), node).controls;
         self.nodes.insert(
             id,
             Entry {
@@ -835,7 +853,11 @@ impl Graph {
         let hosted = crate::plugin::HostedPlugin::new(client.handle(), client.plugin().clone())
             .with_controls(client.controls());
         let tempo = self.tempo.clone();
-        let _controls = self.editor.insert(node, PLUGIN_KIND, client.bind(tempo));
+        // A fresh key has no wiring recorded, so nothing is unwired.
+        let _controls = self
+            .editor
+            .insert(node, PLUGIN_KIND, client.bind(tempo))
+            .controls;
         self.nodes.insert(
             node,
             Entry {
@@ -1182,16 +1204,97 @@ impl Graph {
             return Err(ReplaceRefused::Busy(incoming));
         }
         let rate = self.editor.prepare().sample_rate();
-        let controls = self
+        let placed = self
             .editor
             .replace_or_swap(node, incoming, Fade::seconds(fade, rate, law))
             .map_err(|e| ReplaceRefused::Failed(CrossfadeRefused::Editor(e)))?;
+        let controls = placed.controls;
+        self.note_unwired(node, &placed.unwired);
         if let Some(entry) = self.nodes.get_mut(&node) {
             entry.params = None;
             entry.reclaimer = None;
         }
         self.edited = true;
         Ok(controls)
+    }
+
+    /// Records what a re-insert at `node` unwired, in the session's port
+    /// types, for the update that commits it to report. A dropped edge no
+    /// feed put there stops being one a feed owns.
+    fn note_unwired(&mut self, node: NodeKey, unwired: &tutti_graph::Unwired) {
+        if unwired.is_empty() {
+            return;
+        }
+        let mut edges: Vec<Edge> = Vec::new();
+        for id in &unwired.edges {
+            // A feedback edge is reported as the pair of ports it joins.
+            let source = match id.from {
+                RawEdge::Direct(source) => source,
+                RawEdge::Feedback(f) => Source::Node(f.from),
+            };
+            // Explicit silence is no wire an app made: nothing to report.
+            let Some(from) = OutPort::of_source(source) else {
+                continue;
+            };
+            let edge = Edge::new(from, InPort::of_sink(id.sink));
+            if !edges.contains(&edge) {
+                edges.push(edge);
+            }
+        }
+        let mut event_edges: Vec<crate::EventEdge> = Vec::new();
+        for (at, edge) in &unwired.event_edges {
+            let (from, to) = (EventOutPort::of_raw(edge.from()), EventInPort::of_raw(*at));
+            if at.port == 0
+                && let Some(fed) = self.fed_edges.get_mut(&at.node)
+            {
+                fed.retain(|s| *s != from);
+            }
+            let edge = crate::EventEdge::new(from, to);
+            if !event_edges.contains(&edge) {
+                event_edges.push(edge);
+            }
+        }
+        let mut bus_edges: Vec<(BusSource, BusSink)> = Vec::new();
+        let named = unwired
+            .bus_edges
+            .iter()
+            .map(|(to, feed)| (feed.source, BusSink::Node(*to)))
+            .chain(
+                unwired
+                    .root_buses
+                    .iter()
+                    .map(|feed| (feed.source, BusSink::Root)),
+            );
+        for wire in named {
+            if !bus_edges.contains(&wire) {
+                bus_edges.push(wire);
+            }
+        }
+        if edges.is_empty() && event_edges.is_empty() && bus_edges.is_empty() {
+            return;
+        }
+        match self.unwired.iter_mut().find(|u| u.node == node) {
+            Some(held) => {
+                held.edges.extend(edges);
+                held.event_edges.extend(event_edges);
+                held.bus_edges.extend(bus_edges);
+            }
+            None => self.unwired.push(Unwiring {
+                node,
+                edges,
+                event_edges,
+                bus_edges,
+            }),
+        }
+    }
+
+    /// What the re-inserts since the last call unwired, once the commit that
+    /// carries them is sent: nothing while an edit still waits.
+    pub(crate) fn take_unwired(&mut self) -> Vec<Unwiring> {
+        if self.edited {
+            return Vec::new();
+        }
+        std::mem::take(&mut self.unwired)
     }
 
     /// Swaps the node behind `node` for `incoming` under `fade` along
@@ -1630,11 +1733,13 @@ impl Graph {
         self.write_event_sources(sink, 0, &all);
     }
 
-    /// Every source any feeder feeds `sink` that is in the graph.
+    /// Every source any feeder feeds `sink` that is an event output the graph
+    /// has: a source re-inserted without that port is not fed until it has it
+    /// again.
     fn fed_in_graph(&self, sink: NodeKey) -> Vec<EventOutPort> {
         self.fed(sink)
             .into_iter()
-            .filter(|s| self.contains(s.node()))
+            .filter(|s| self.check_event_out(*s).is_ok())
             .collect()
     }
 
@@ -3083,9 +3188,20 @@ impl Graph {
         Ok(())
     }
 
+    /// Makes the root declaration last made a cut: the commit that carries
+    /// it renders no old root.
+    pub(crate) fn harden_root(&mut self) {
+        self.editor.set_root_fade(None);
+    }
+
+    /// Declares the root's topology. A declaration that changes it is the next
+    /// root, and the commit that carries it crossfades the old root's outputs
+    /// into the new root's over the declick length (`Editor::set_root_fade`),
+    /// unless `hard`: the new root takes over at the commit's block.
     pub(crate) fn declare_root(
         &mut self,
         root: Option<tutti_types::ChannelTopology>,
+        hard: bool,
     ) -> Result<(), tutti_graph::RootError> {
         let placed = self.placed_topology();
         let width = match &root {
@@ -3129,6 +3245,14 @@ impl Graph {
         let bus = root
             .as_ref()
             .map(|r| tutti_types::BusTopology::try_from(r).expect("a checked root fits a bus"));
+        // Both roots render the same nodes, in phase.
+        self.editor.set_root_fade((!hard).then(|| {
+            tutti_graph::Fade::seconds(
+                tutti_graph::DECLICK,
+                self.editor.prepare().sample_rate(),
+                tutti_graph::FadeLaw::EqualAmplitude,
+            )
+        }));
         let spec = self.editor.spec_mut();
         if spec.root != bus {
             spec.root = bus;
@@ -3353,15 +3477,35 @@ fn render(
         output.fill(0.0);
         return;
     };
-    let (ins, outs) = (plan.global_inputs() as usize, plan.global_outputs());
+    let (ins, outs, root) = (
+        plan.global_inputs() as usize,
+        plan.rendered_outputs(),
+        plan.global_outputs(),
+    );
     scratch.resize_with(outs, || vec![0.0]);
     let inputs: Vec<&[f32]> = (0..ins)
         .map(|c| input.get(c).map_or(&[0.0f32][..], std::slice::from_ref))
         .collect();
+    let fade = exec.root_fade();
     let mut outputs: Vec<&mut [f32]> = scratch.iter_mut().map(|c| &mut c[..1]).collect();
     exec.process(1, transport, &inputs, &mut outputs);
+    // With no device there is no fold: the root's channels are the output's
+    // by index, and a root change crossfades channel by channel, the old
+    // root's channels after the new root's.
+    let gains = fade.map(|f| f.fade.law.gains(f.done.get(), f.fade.duration.get()));
     for (c, o) in output.iter_mut().enumerate() {
-        *o = scratch.get(c).map_or(0.0, |s| s[0]);
+        let new = scratch.get(c).filter(|_| c < root).map_or(0.0, |s| s[0]);
+        *o = match (fade, gains) {
+            (Some(f), Some((go, gn))) => {
+                let old = if c < f.width {
+                    scratch[root + c][0]
+                } else {
+                    0.0
+                };
+                old * go + new * gn
+            }
+            _ => new,
+        };
     }
 }
 
@@ -3540,5 +3684,69 @@ mod tail_tests {
             !g.refresh_node_tail(NodeKey(9_999), Tail::None),
             "no such node"
         );
+    }
+}
+
+#[cfg(test)]
+mod root_fade_tests {
+    use super::*;
+    use std::sync::Arc;
+    use tutti_graph::{FadeLaw, ForkByClone, OutPort, RootId, Source};
+    use tutti_nodes::testing::Const;
+    use tutti_tempo::TempoMap;
+    use tutti_types::{Bed, Bpm};
+
+    fn graph() -> (Graph, NodeKey) {
+        let map = TempoMap::constant(Bpm::of(120.0)).expect("a tempo");
+        let mut g = Graph::new(
+            ChannelLayout::STEREO,
+            2,
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples(64)),
+            None,
+            tutti_transport::TempoReader::fixed(Arc::new(map)),
+        );
+        let (node, _) = g.add(ForkByClone(Const::mono(1.0)));
+        let node = NodeKey::from(node);
+        g.editor
+            .spec_mut()
+            .topology
+            .set_outputs([Source::Node(OutPort { node, port: 0 }), Source::Zero]);
+        g.commit();
+        (g, node)
+    }
+
+    /// **A root declaration crossfades by the declick unless it is hard**: the
+    /// plan of the commit that carries the next root also renders the old
+    /// root's outputs, the old root's id and the root's width naming where
+    /// they begin, over the declick length (5 ms, 240 frames at 48 kHz) along
+    /// the equal-amplitude law; a hard declaration carries none.
+    #[test]
+    fn a_root_declaration_crossfades_for_the_declick_unless_hard() {
+        let (mut g, _) = graph();
+        g.declare_root(Some(Bed::Surround51.topology()), false)
+            .expect("declares");
+        assert!(matches!(g.commit(), Committed::Sent));
+        let plan = g.editor.base().expect("a plan");
+        let bank = plan.root_bank().expect("the old root is carried");
+        assert_eq!(bank.old, RootId::GENESIS);
+        assert_eq!(bank.base, 6, "the new root's width");
+        assert_eq!(
+            plan.rendered_outputs(),
+            6 + 2,
+            "and the old root's after it"
+        );
+        assert_eq!(plan.global_outputs(), 6);
+        assert_eq!(
+            (bank.fade.duration, bank.fade.law),
+            (Samples(240), FadeLaw::EqualAmplitude)
+        );
+
+        g.declare_root(Some(Bed::Stereo.topology()), true)
+            .expect("declares");
+        assert!(matches!(g.commit(), Committed::Sent));
+        let plan = g.editor.base().expect("a plan");
+        assert_eq!(plan.root_bank(), None, "a hard declaration cuts");
+        assert_eq!(plan.rendered_outputs(), 2);
     }
 }

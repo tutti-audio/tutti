@@ -76,7 +76,7 @@ fn peak(node: &mut dyn tutti_graph::Node, beat: f64) -> f32 {
 /// A graph holding `node` at key 1 on output 0, committed; its controls.
 fn graph_with(node: VoiceNode) -> (Editor, Executor, tutti_sampler::VoiceNodeHandle) {
     let (mut ed, mut exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples(256))));
-    let handle = ed.insert(NodeKey(1), "voice", node);
+    let handle = ed.insert(NodeKey(1), "voice", node).controls;
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort {

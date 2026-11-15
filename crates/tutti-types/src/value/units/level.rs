@@ -137,6 +137,15 @@ impl Gain {
         }
     }
 
+    /// How loud this gain is, without its sign: `|g|` as an [`Amplitude`].
+    /// Total, unlike [`to_amplitude`](Self::to_amplitude), which refuses a
+    /// negative gain; a NaN gain has a NaN magnitude.
+    #[inline]
+    #[must_use]
+    pub fn magnitude(self) -> Amplitude {
+        Amplitude(self.0.abs())
+    }
+
     /// This gain applied to a sample.
     #[inline]
     #[must_use]

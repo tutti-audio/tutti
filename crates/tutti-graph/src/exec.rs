@@ -191,7 +191,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use tutti_rt::{RingReader, RingWriter};
 use tutti_types::PlayReading;
-use tutti_types::{Frame, Tail};
+use tutti_types::{Frame, Samples, Tail};
 
 use crate::NodeKey;
 use crate::command::CommandRx;
@@ -307,6 +307,11 @@ pub struct Executor {
     pool_participants: Arc<AtomicUsize>,
     /// Blocks rendered with a plan, for the editor's bounds (`Stager`).
     rendered: Arc<AtomicU64>,
+    /// How far the root change the running plan crossfades has got: `Some`
+    /// while its fade runs (`root_fade`).
+    root_fade: Option<RootFadeRun>,
+    /// Where the `seq` of the commit whose root fade ended is published.
+    root_fade_ended: Arc<AtomicU64>,
     /// Commits taken off the queue by [`set_pool`](Self::set_pool), to apply
     /// first: room for every commit the queue holds.
     stash: std::collections::VecDeque<Box<Commit>>,
@@ -332,6 +337,31 @@ struct Inbox {
     commands: CommandRx,
     /// `seq` of the last commit applied.
     applied: u64,
+}
+
+/// The frames a plan's root crossfade has rendered.
+#[derive(Clone, Copy)]
+struct RootFadeRun {
+    /// The `seq` of the commit that installed the plan.
+    seq: u64,
+    done: usize,
+}
+
+/// The root change a running plan crossfades, and how far it has got: what a
+/// host that folds the two roots reads before each block
+/// ([`Executor::root_fade`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RootFade {
+    /// The root fading out.
+    pub old: crate::RootId,
+    /// The plan's old-root channels, after its root's: how many.
+    pub width: usize,
+    /// Frames of the fade already rendered: the next block's first frame is
+    /// frame `done` of [`fade`](Self::fade).
+    pub done: Samples,
+    /// The fade: its length and law. Frame `k` of it takes
+    /// `fade.law.gains(k, fade.duration)` as `(old, new)`.
+    pub fade: crate::Fade,
 }
 
 /// Where the graph is in time.
@@ -449,6 +479,8 @@ impl Executor {
             pool: None,
             pool_participants: ends.pool,
             rendered: ends.rendered,
+            root_fade: None,
+            root_fade_ended: ends.root_fade_ended,
             stash: std::collections::VecDeque::with_capacity(QUEUE_CAPACITY),
         }
     }
@@ -540,6 +572,26 @@ impl Executor {
             Suspension::Running => None,
             Suspension::Suspended { next, .. } => Some(next),
         }
+    }
+
+    /// The root change the running plan is crossfading, until its fade has
+    /// rendered: `None` when the plan carries no old root or the fade is over.
+    ///
+    /// The plan renders both roots' channels
+    /// ([`Plan::rendered_outputs`]); the host folds each with its own root's
+    /// fold and mixes them by the fade's gains. Read it before each block:
+    /// the block advances it by its frames, and the fade ends on the block
+    /// that reaches the fade's length.
+    pub fn root_fade(&self) -> Option<RootFade> {
+        let plan = self.plan.as_ref()?;
+        let bank = plan.root_bank()?;
+        let run = self.root_fade?;
+        (run.done < bank.fade.duration.get()).then(|| RootFade {
+            old: bank.old,
+            width: plan.rendered_outputs() - bank.base,
+            done: Samples(run.done),
+            fade: bank.fade,
+        })
     }
 
     /// The plan running now.

@@ -602,7 +602,9 @@ pub use compile::{CompileError, CycleEdge, Shapes, VerifyError, compile};
 pub use controls::{ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts};
 pub use cost::{Cost, Schedule, Work};
 pub use declare::{HasParam, HasParams, ParamUnit, Scalar};
-pub use editor::{CloseError, CommitError, Editor, Limits, MissingSource, RootGate};
+pub use editor::{
+    CloseError, CommitError, Editor, Limits, MissingSource, Placed, RootGate, Unwired,
+};
 pub use event::{
     Event, EventDensity, EventKind, EventOrderError, EventRejected, EventWriter, Harmony,
     HarmonyKind, MAX_EVENT_PORT_CAPACITY, MIN_EVENT_PORT_CAPACITY, ParamRamp, ParamSegment,
@@ -614,7 +616,7 @@ pub use event_inlet::{
 };
 pub use event_losses::Losses;
 pub use event_tap::{EventTapReader, EventTapWriter, TapEvent};
-pub use exec::{DEFAULT_EVENT_CAPACITY, Executor, FADE_CAPACITY, QUEUE_CAPACITY};
+pub use exec::{DEFAULT_EVENT_CAPACITY, Executor, FADE_CAPACITY, QUEUE_CAPACITY, RootFade};
 pub use fade::Fade;
 pub use fork::{
     ForkBuild, ForkByClone, ForkCause, ForkError, ForkFault, ForkFaultKind, ForkHealth, ForkMode,
@@ -659,7 +661,9 @@ pub use play::PlayClock;
 pub use pool::{WorkerPool, WorkerPoolBuilder};
 pub use preroll::PrerollTable;
 pub use render_mode::RenderMode;
-pub use root::{RootError, RootId, fold_to_topology, fold_to_topology_with, fold_to_width};
+pub use root::{
+    RootBank, RootError, RootId, fold_to_topology, fold_to_topology_with, fold_to_width,
+};
 pub use tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};
 pub use wake::Wake;
 // The reading is a value type, `tutti-types`' (the modulation compiler

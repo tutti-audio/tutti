@@ -222,6 +222,8 @@ impl Executor {
                 pool,
                 pool_participants: _,
                 rendered,
+                root_fade,
+                root_fade_ended,
                 stash: _,
             } = self;
             let mut env = Env {
@@ -245,7 +247,7 @@ impl Executor {
                 *frame += Samples(frames);
                 return;
             };
-            if outputs.len() < plan.global_outputs()
+            if outputs.len() < plan.rendered_outputs()
                 || inputs.len() < usize::from(plan.global_inputs())
             {
                 debug_assert!(
@@ -254,7 +256,7 @@ impl Executor {
                     inputs.len(),
                     outputs.len(),
                     plan.global_inputs(),
-                    plan.global_outputs()
+                    plan.rendered_outputs()
                 );
                 for o in outputs.iter_mut() {
                     o[..frames].fill(0.0);
@@ -341,7 +343,7 @@ impl Executor {
                         inputs,
                         // The claim table is sized for the plan's width; slices
                         // past it are ignored here as on the serial path.
-                        outputs: &mut outputs[..plan.global_outputs()],
+                        outputs: &mut outputs[..plan.rendered_outputs()],
                         arena,
                         flags,
                         events,
@@ -532,6 +534,13 @@ impl Executor {
             }
             if fade_ended {
                 end_fades(plan, store, fade_back, inject, has_inject);
+            }
+            if let (Some(run), Some(bank)) = (root_fade.as_mut(), plan.root_bank()) {
+                let before = run.done;
+                run.done += frames;
+                if before < bank.fade.duration.get() && run.done >= bank.fade.duration.get() {
+                    root_fade_ended.store(run.seq, Ordering::Release);
+                }
             }
             *frame += Samples(frames);
             rendered.fetch_add(1, Ordering::Release);

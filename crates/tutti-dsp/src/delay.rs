@@ -1,8 +1,6 @@
 //! The fractional-read delay ring and its interpolation: a delay whose time is
 //! modulated must interpolate between taps or it steps audibly.
 
-use tutti_types::{SampleRate, Seconds};
-
 mod bank;
 mod layout;
 mod max_delay;
@@ -43,12 +41,14 @@ pub enum InterpolationMode {
 /// A fractional-delay ring buffer: push a sample per frame, read back at any
 /// real-valued delay.
 ///
-/// The read position is fractional and interpolated
-/// ([`InterpolationMode`]), which is what makes it usable as the core of a
-/// modulated delay. Capacity is fixed at construction — [`read_sample`] clamps
-/// rather than growing, so the line never allocates on the audio thread.
+/// One ring, two readers. [`read_sample`] reads a fractional delay, interpolated
+/// ([`InterpolationMode`]): the core of a modulated delay. [`read_whole`] reads a whole
+/// number of frames back with no interpolation: a fixed delay, such as the limiter's
+/// lookahead. Capacity is fixed at construction: both clamp rather than grow, so the line
+/// never allocates on the audio thread.
 ///
 /// [`read_sample`]: Self::read_sample
+/// [`read_whole`]: Self::read_whole
 #[derive(Clone)]
 pub struct DelayLine {
     buffer: Vec<f32>,
@@ -97,12 +97,12 @@ impl DelayLine {
     /// Reads the line `delay_samples` frames back from the newest write,
     /// interpolating per `mode`.
     ///
-    /// `delay_samples` is a **fractional frame count**, not [`Seconds`] — the
-    /// caller converts, because keeping the fraction is the whole point of an
-    /// interpolated read. `0.0` is the sample just pushed. Where the unit types
-    /// stop: `Samples` is an integer count and cannot carry the fraction, and
-    /// `SamplePosition` is an absolute f64 offset into a wave, where this is a
-    /// per-sample f32 span back from the write head.
+    /// `delay_samples` is a **fractional frame count**, not seconds: the caller
+    /// converts ([`SampleSpan::from_seconds`](tutti_types::SampleSpan::from_seconds)),
+    /// because keeping the fraction is the whole point of an interpolated read.
+    /// `0.0` is the sample just pushed. It is a bare `f32` because this is the
+    /// per-sample kernel read: a caller lowers its span to the raw once per block
+    /// (or once per frame for a driven delay) and reads at it.
     ///
     /// The delay is clamped to `0.0..=max_delay_samples`, so an over-long
     /// request shortens silently rather than panicking. Does not allocate.
@@ -114,22 +114,22 @@ impl DelayLine {
         match mode {
             InterpolationMode::None => {
                 let idx = delay.round() as usize;
-                self.read_at(idx)
+                self.read_whole(idx)
             }
             InterpolationMode::Linear => {
                 let floor = delay.floor() as usize;
                 let frac = delay - floor as f32;
-                let s0 = self.read_at(floor);
-                let s1 = self.read_at(floor + 1);
+                let s0 = self.read_whole(floor);
+                let s1 = self.read_whole(floor + 1);
                 s0 + frac * (s1 - s0)
             }
             InterpolationMode::CubicHermite => {
                 let floor = delay.floor() as usize;
                 let frac = delay - floor as f32;
-                let sm1 = self.read_at(floor.saturating_sub(1));
-                let s0 = self.read_at(floor);
-                let s1 = self.read_at(floor + 1);
-                let s2 = self.read_at(floor + 2);
+                let sm1 = self.read_whole(floor.saturating_sub(1));
+                let s0 = self.read_whole(floor);
+                let s1 = self.read_whole(floor + 1);
+                let s2 = self.read_whole(floor + 2);
                 crate::cubic_hermite(sm1, s0, s1, s2, frac)
             }
         }
@@ -144,29 +144,18 @@ impl DelayLine {
         self.write_pos = 0;
     }
 
+    /// Reads the line `frames` frames back from the newest write, a whole number and no
+    /// interpolation: `0` is the sample just pushed, and a `frames` past the line's
+    /// capacity reads the oldest it holds. Does not allocate.
     #[inline]
-    fn read_at(&self, delay_samples: usize) -> f32 {
+    #[must_use]
+    pub fn read_whole(&self, frames: usize) -> f32 {
         let len = self.buffer.len();
         // `write_pos < len` and the clamped delay is below `len`, so the sum
         // is below `2 * len`: one conditional subtract wraps it.
-        let idx = self.write_pos + len - 1 - delay_samples.min(self.max_delay_samples);
+        let idx = self.write_pos + len - 1 - frames.min(self.max_delay_samples);
         self.buffer[if idx >= len { idx - len } else { idx }]
     }
-}
-
-/// A delay position in samples, keeping the fraction.
-///
-/// Deliberately **not** `Seconds::to_samples`: that returns `Samples`, an
-/// integer frame count, and the whole point of an interpolated read is the
-/// fractional part — rounding here would quantise every delay to a frame
-/// boundary and step audibly under modulation.
-///
-/// The multiply stays in `f64` and narrows once at the end. Narrowing the
-/// *rate* first (`secs * sample_rate as f32`) computes the whole position at
-/// `f32` precision, which is coarser than the fractional read can resolve.
-#[inline]
-pub fn fractional_samples(secs: Seconds, sample_rate: SampleRate) -> f32 {
-    (secs.get() * sample_rate.get()) as f32
 }
 
 /// One sample of one uncoupled channel: read the feedback tap, write the line,

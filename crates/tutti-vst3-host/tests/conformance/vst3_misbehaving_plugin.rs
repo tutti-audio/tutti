@@ -70,6 +70,7 @@ mod misbehave {
     pub const ARRANGEMENT_REFUSED: &str = "11";
     pub const LATENCY_FOLLOWS_RATE: &str = "12";
     pub const SAMPLE64_AFTER_INIT: &str = "13";
+    pub const OBSERVED_WRITABLE_LATE: &str = "16";
 }
 
 /// Width the probe's main *input* keeps under `ARRANGEMENT_REFUSED`, having
@@ -958,5 +959,56 @@ fn a_refused_connection_does_not_fail_the_load() {
     assert!(
         !out.is_empty(),
         "the plugin produced no output buses after a refused connect"
+    );
+}
+
+/// **A write is answered from the activation's table**, which is the table the
+/// Processor drops against: the probe's `OBSERVED_PROCESS_MODE` is read-only when
+/// the activation reads it, and the plugin then reports it writable
+/// (`kMisbehaveObservedWritableLate`). The live parameter info says writable, and
+/// a write the host answered from it would be `Ok` and then dropped by the
+/// Processor; it is refused `ReadOnly`, as the activation declared it.
+#[test]
+fn a_write_is_answered_from_the_activations_table_not_the_live_info() {
+    use tutti_plugin_types::{Control, Normalized, ParamFlags, ParamId, ParamWriteError};
+    const OBSERVED_PROCESS_MODE: u32 = 106;
+    const REQUEST_IO_CHANGED: u32 = 103;
+    let _m = Misbehaviour::set(misbehave::OBSERVED_WRITABLE_LATE);
+    let loaded = Vst3Loaded::load(
+        main_thread(),
+        &tutti_fixtures::detached_work(),
+        probe_path(),
+        LoadOptions::new(),
+    )
+    .expect("load");
+    let mut inst = loaded
+        .activate_at::<f32>(SAMPLE_RATE, BLOCK)
+        .expect("activate");
+    let observed = ParamId::new(OBSERVED_PROCESS_MODE);
+    let write = |inst: &mut Active| {
+        Control::set_parameter(
+            inst.controller_mut(),
+            main_thread(),
+            observed,
+            Normalized::of(0.5),
+        )
+    };
+    assert_eq!(write(&mut inst), Err(ParamWriteError::ReadOnly(observed)));
+
+    inst.set_parameter(REQUEST_IO_CHANGED, 1.0);
+    let live = Control::parameters(inst.controller_mut(), main_thread());
+    let info = live
+        .iter()
+        .find(|p| p.id() == observed)
+        .expect("the probe declares it");
+    assert_eq!(
+        info.flag(ParamFlags::READ_ONLY),
+        Some(false),
+        "the plugin now reports it writable"
+    );
+    assert_eq!(
+        write(&mut inst),
+        Err(ParamWriteError::ReadOnly(observed)),
+        "the Processor drops it against the activation's table, so the write is refused"
     );
 }

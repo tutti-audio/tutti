@@ -9,7 +9,6 @@ mod lanes;
 mod svf;
 
 pub use biquad::{Biquad, DirectForm1};
-pub(crate) use crossover::CrossoverState;
 pub use crossover::{
     CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError, CrossoverModel,
     MAX_SPLITS, SOLVE_CEILING, fit_to_rate,

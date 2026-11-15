@@ -22,10 +22,12 @@
 //! - **Delay** — `DelayNode` (any width, with a checked cross-feedback `Routing`),
 //!   a `KernelNode` over `DelayKernel` (`tutti_dsp::DelayBank`); the time and feedback are
 //!   read per frame when driven.
-//! - **Dynamics** — `CompressorNode`, `GateNode`, `BrickwallLimiterNode`,
-//!   `LimiterNode`, and `MultibandCompressorNode` (2 to 4 bands, a linked
+//! - **Dynamics** — `CompressorNode`, `GateNode`, `BrickwallLimiterNode` and
+//!   `LimiterNode` (each a `KernelNode` over a bank of `tutti_dsp`: the compressor and the
+//!   gate read a typed `KeySource`, the limiter reports its lookahead as latency), and
+//!   `MultibandCompressorNode` (2 to 4 bands, a linked
 //!   compressor per band of a Linkwitz-Riley crossover, a hand-written node over
-//!   `Realized<MultibandRecurrence>`). Every setting is an indexed param: a
+//!   `tutti_dsp::MultibandBank`). Every setting is an indexed param: a
 //!   threshold, knee, ratio, attack, release and make-up (`GainDb`) per band, a
 //!   `Cutoff` per crossover (27 ports at 4 bands), and a `Bypass` and `Solo`
 //!   toggle per band (`>= 0.5` is on, as every toggle; cells without a port). The
@@ -288,8 +290,8 @@ pub use tutti_dsp::{
 
 mod dynamics;
 pub use dynamics::{
-    BAND_PARAMS, BrickwallLimiterNode, CompressorNode, GateNode, LimiterNode,
-    MultibandCompressorNode, MultibandControls,
+    BAND_PARAMS, BrickwallKernel, BrickwallLimiterNode, CompressorKernel, CompressorNode,
+    GateKernel, GateNode, LimiterKernel, LimiterNode, MultibandCompressorNode, MultibandControls,
 };
 // The types in the dynamics nodes' constructors: the controls a node is built at, and the
 // key a compressor or a gate listens to.

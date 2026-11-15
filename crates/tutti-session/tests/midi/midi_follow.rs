@@ -3,7 +3,7 @@
 //! next block start and publishes the overlay maps, and the engine renders under
 //! them.
 
-use crate::common::{blocks, play};
+use crate::common::{blocks, play, tap};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -31,9 +31,16 @@ fn rig_with(groups: Option<MidiGroup>) -> (Session, FakeCounters) {
         .build()
         .expect("builds");
     let _ = s.update();
-    s.midi().connect_input("keys").expect("connects");
+    let keys = s.midi().devices().remove(0);
+    s.pool(tutti_session::midi_input("keys", keys))
+        .expect("declares");
     let _ = s.update();
     (s, fake)
+}
+
+/// The ingest node of the input port `"keys"`, which a follower reads.
+fn input(s: &Session) -> tutti_graph::NodeKey {
+    s.midi_input(&"keys").expect("loaded").node()
 }
 
 fn rig() -> (Session, FakeCounters) {
@@ -41,8 +48,13 @@ fn rig() -> (Session, FakeCounters) {
 }
 
 fn follow(s: &mut Session, group: MidiGroup, meter: bool) {
+    let input = input(s);
     s.midi()
-        .follow_tempo(FollowTempo { group, meter })
+        .follow_tempo(FollowTempo {
+            input,
+            group,
+            meter,
+        })
         .expect("follows");
     // The update that commits the tap.
     let _ = s.update();
@@ -420,12 +432,23 @@ fn a_repeated_tempo_adds_no_point() {
 #[test]
 fn follow_refusals() {
     let (mut s, _fake) = rig();
+    let node = input(&s);
     assert!(matches!(
         s.midi().follow_tempo(FollowTempo {
+            input: node,
             group: MidiGroup::of(3),
             meter: false
         }),
         Err(MidiError::GroupNotHeard(g)) if g == MidiGroup::of(3)
+    ));
+    let (not_a_port, _) = tap(&mut s);
+    assert!(matches!(
+        s.midi().follow_tempo(FollowTempo {
+            input: not_a_port,
+            group: MidiGroup::FIRST,
+            meter: false
+        }),
+        Err(MidiError::NotAnInput(n)) if n == not_a_port
     ));
     assert!(
         matches!(s.midi().unfollow_tempo(), Err(MidiError::NotFollowing)),

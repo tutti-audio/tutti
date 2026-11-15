@@ -38,7 +38,9 @@
 //!
 //! - **To a Clip File.** [`MidiFile::to_clip`] converts a format 0 or 1 SMF: its meta
 //!   events become the Flex Data messages of M2-116 Appendix B, and what has no UMP
-//!   form comes back in [`Converted::dropped`], never lost silently.
+//!   form comes back in [`Converted::dropped`], never lost silently. A Set Tempo or Time
+//!   Signature off the grid a Clip File requires moves to the nearest position and is
+//!   listed in [`Converted::moved`].
 //!
 //! [`MidiFileKind::detect`] tells the two containers apart by magic, not by
 //! extension. Nothing here touches an OS MIDI API; ports are in
@@ -110,7 +112,7 @@ pub use clip_file::ClipFileError;
 pub use config::{ConfigError, OutOfOrder, Refusal};
 pub use fault::{SmfParseError, Truncated};
 pub use file::{
-    Converted, DropReason, Dropped, FileEvent, Meta, MidiFile, NoCommonTimeline, PairedNote,
+    Converted, DropReason, Dropped, FileEvent, Meta, MidiFile, Moved, NoCommonTimeline, PairedNote,
     SmfFormat, TextKind, Tick, ToClipError, Track,
 };
 pub use kind::MidiFileKind;

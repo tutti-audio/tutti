@@ -5,8 +5,6 @@
 //! Beat Clock on the frames the transport reaches, a start inside a block
 //! included.
 
-use std::num::NonZeroUsize;
-use std::time::Duration;
 use tutti_types::MaxBlock;
 
 use crate::common;
@@ -19,11 +17,13 @@ use tutti_graph::{
 };
 use tutti_graph::{IntoNode as _, NodeKey};
 use tutti_midi_protocol::{
-    MpeZoneConfig, MpeZones, PitchBendSensitivity, channel_voice, widen_velocity,
+    MpeZoneConfig, MpeZones, MtcRate, PitchBendSensitivity, Recipient, channel_voice,
+    widen_velocity,
 };
 use tutti_midi_runtime::{
-    CHANNELLESS_PORT, ClockNode, DeviceInlets, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS,
-    MidiIngestNode, MidiInputPorts, MpeTransformNode, SlotCountMismatch,
+    CHANNELLESS_PORT, ClockNode, DeviceEpochs, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS,
+    MachineControlEvent, MachineControlFollower, MachineControlNode, MidiIngestNode,
+    MidiInputPorts, MidiOutNode, MpeTransformNode,
 };
 use tutti_types::{Beat, Bpm, Frame, SampleRate, Samples};
 use tutti_ump::{
@@ -60,7 +60,7 @@ fn rig_with<N: tutti_graph::IntoNode>(
     extra: impl FnOnce(&mut Editor),
 ) -> (Editor, Executor, N::Controls, Seen) {
     let mut rig = EventRig::new(RATE, max, ports);
-    let controls = rig.editor.insert(NodeKey(1), "source", source);
+    let controls = rig.editor.insert(NodeKey(1), "source", source).controls;
     extra(&mut rig.editor);
     for p in 0..ports {
         rig.feed(NodeKey(1), p, p);
@@ -69,7 +69,7 @@ fn rig_with<N: tutti_graph::IntoNode>(
     (rig.editor, rig.exec, controls, rig.seen)
 }
 
-/// An ingest node and the device inlets that feed it (keys 3 upward), over
+/// An ingest node and the device inlet that feeds it (key 3), over
 /// `ports` sink inputs.
 fn ingest(
     ingest: Ingest,
@@ -81,19 +81,17 @@ fn ingest(
     tutti_midi_runtime::MidiIngestControls,
     Seen,
 ) {
-    let Ingest { node, inlets } = ingest;
+    let Ingest { node, inlet } = ingest;
     rig_with(node, ports, max, |ed| {
-        for (slot, inlet) in inlets.into_iter().enumerate() {
-            let key = NodeKey(3 + slot as u64);
-            ed.insert(key, "inlet", inlet);
-            ed.spec_mut().connect_events(
-                EventIn {
-                    node: NodeKey(1),
-                    port: slot as u16,
-                },
-                EventEdge::Direct(EventOut { node: key, port: 0 }),
-            );
-        }
+        let key = NodeKey(3);
+        ed.insert(key, "inlet", inlet);
+        ed.spec_mut().connect_events(
+            EventIn {
+                node: NodeKey(1),
+                port: 0,
+            },
+            EventEdge::Direct(EventOut { node: key, port: 0 }),
+        );
     })
 }
 
@@ -112,36 +110,25 @@ impl Script {
     }
 }
 
-/// An ingest node with one device slot for each script, and the inlet each
-/// device's thread has pushed its script into, every event for its frame; an
-/// inlet holds it until its block.
+/// An ingest node, and the inlet its device's thread has pushed the script
+/// into, every event for its frame; an inlet holds it until its block.
 struct Ingest {
     node: MidiIngestNode,
-    inlets: Vec<EventInletNode>,
+    inlet: EventInletNode,
 }
 
 impl Ingest {
     fn new(script: Script) -> Self {
-        Self::devices(vec![script])
-    }
-
-    fn devices(scripts: Vec<Script>) -> Self {
-        let inlets = scripts
-            .iter()
-            .map(|script| {
-                let (inlet, mut writer) = EventInletNode::pair(EventCapacity::of(4096));
-                for (block, batch) in script.0.iter().enumerate() {
-                    for &(offset, ump) in batch {
-                        let frame = Frame::new(512 * block as u64 + u64::from(offset.get()));
-                        writer.push(Stamp::Frame(frame), ump).expect("room");
-                    }
-                }
-                inlet
-            })
-            .collect();
+        let (inlet, mut writer) = EventInletNode::pair(EventCapacity::of(4096));
+        for (block, batch) in script.0.iter().enumerate() {
+            for &(offset, ump) in batch {
+                let frame = Frame::new(512 * block as u64 + u64::from(offset.get()));
+                writer.push(Stamp::Frame(frame), ump).expect("room");
+            }
+        }
         Self {
-            node: MidiIngestNode::new(NonZeroUsize::new(scripts.len()).expect("a script")),
-            inlets,
+            node: MidiIngestNode::new(),
+            inlet,
         }
     }
 
@@ -286,24 +273,20 @@ fn is_registered(ev: Ump) -> bool {
     )
 }
 
-/// **Two devices' (N)RPN runs do not meet** (M2-104 D.3.3 gives a run to the
-/// one controller that sends it: a Data Entry completes the parameter *its*
-/// sender selected). Device 0 selects RPN 0/6 on channel 3 and device 1 sends a
-/// Data Entry on channel 3 with no select of its own: no Registered
-/// Controller is made.
-/// Alone on one device, the same two messages make one.
+/// **A device's (N)RPN select and Data Entry make a run** (M2-104 D.3.3: a Data
+/// Entry completes the parameter its sender selected). One device selects RPN
+/// 0/6 on channel 3 and sends the entry: one Registered Controller is made.
+/// (A second device is a second node with a translator of its own, so its Data
+/// Entry cannot complete this device's select.)
 #[test]
-fn two_devices_runs_do_not_meet() {
-    let select = vec![vec![
+fn a_devices_select_and_entry_make_a_run() {
+    // One device sending both: the run completes.
+    let together = vec![vec![
         cc_ev(3, CCNumber::RPN_MSB, 0),
         cc_ev(3, CCNumber::RPN_LSB, 6),
-    ]];
-    let entry = vec![vec![
         cc_ev(3, CCNumber::DATA_ENTRY, 10),
         cc_ev(3, CCNumber::DATA_ENTRY_LSB, 0),
     ]];
-    // One device sending both: the run completes.
-    let together: Vec<Vec<UmpAt>> = vec![select[0].iter().chain(&entry[0]).copied().collect()];
     let (_ed, mut exec, _c, seen) = ingest(
         Ingest::new(Script::new(together)),
         MIDI_INPUT_PORTS as u16,
@@ -319,24 +302,116 @@ fn two_devices_runs_do_not_meet() {
         1,
         "one device's select and entry make a run"
     );
-
-    // Two devices, one sending each.
-    let (_ed, mut exec, _c, seen) = ingest(
-        Ingest::devices(vec![Script::new(select), Script::new(entry)]),
-        MIDI_INPUT_PORTS as u16,
-        512,
-    );
-    block(&mut exec, 512);
-    let seen = seen.lock().unwrap();
-    assert_eq!(
-        seen.iter().filter(|s| is_registered(s.2)).count(),
-        0,
-        "device 1's Data Entry did not complete device 0's select: {seen:?}"
-    );
 }
 
-/// **A slot a new device takes starts empty**: device 0 selects an RPN in
-/// block 0, a new device then opens the slot (the inlets bump its epoch, which
+/// **A departed device's epoch settles only once a block has run**: the node
+/// pushes the release in a block, then says so. After `depart` nothing is
+/// settled until that block has gone, and the block's first frame carries the
+/// Note Off.
+#[test]
+fn a_departed_devices_epoch_settles_only_after_a_block_has_run() {
+    let epochs = DeviceEpochs::new();
+    epochs.arrive();
+    let wire = Script::new(vec![vec![note(0, 60, 10)], vec![]]);
+    let (_ed, mut exec, _c, seen) = ingest(following(wire, &epochs), MIDI_INPUT_PORTS as u16, 512);
+    block(&mut exec, 512);
+    assert!(epochs.is_settled(), "the block handled the arrival");
+    assert_eq!(heard(&seen).len(), 1, "the key is down");
+    epochs.depart();
+    assert!(!epochs.is_settled(), "the departure is owed a block");
+    block(&mut exec, 512);
+    assert!(epochs.is_settled(), "the block released and said so");
+    assert_eq!(heard(&seen)[1], (512, "off 60".to_string()));
+}
+
+/// **A release that does not fit the block is owed, and the epoch settles only
+/// when it has gone**: a device holds 800 keys, more than the port's note-off
+/// room (584 at 512 events). Its departure's block sends what fits and the
+/// epoch stays unsettled; the next block's first frame sends the rest, and only
+/// then is the epoch settled.
+#[test]
+fn a_release_that_does_not_fit_is_owed_and_settles_when_it_has_gone() {
+    let keys = |first: u8| -> Vec<UmpAt> {
+        (0..400usize)
+            .map(|i| note(first + (i / 100) as u8, (i % 100) as u8, i))
+            .collect()
+    };
+    let epochs = DeviceEpochs::new();
+    epochs.arrive();
+    let wire = Script::new(vec![keys(0), keys(4), vec![], vec![]]);
+    let (_ed, mut exec, _c, seen) = ingest(following(wire, &epochs), MIDI_INPUT_PORTS as u16, 512);
+    let offs = |from: u64, to: u64| {
+        heard(&seen)
+            .iter()
+            .filter(|(frame, what)| (from..to).contains(frame) && what.starts_with("off"))
+            .count()
+    };
+    block(&mut exec, 512);
+    block(&mut exec, 512);
+    assert_eq!(heard(&seen).len(), 800, "every key is down");
+
+    epochs.depart();
+    block(&mut exec, 512);
+    assert_eq!(offs(1024, 1536), 584, "what the port has room for");
+    assert!(!epochs.is_settled(), "216 are still owed");
+    block(&mut exec, 512);
+    assert_eq!(
+        offs(1536, 2048),
+        216,
+        "the rest, at the next block's first frame"
+    );
+    assert!(
+        heard(&seen)
+            .iter()
+            .filter(|(frame, what)| *frame >= 1536 && what.starts_with("off"))
+            .all(|(frame, _)| *frame == 1536),
+        "on its first frame"
+    );
+    assert!(epochs.is_settled(), "now the release has gone");
+}
+
+/// **The output node counts what it cannot pass**: two sources feed it 1,200
+/// events in one block, past its room of `MIDI_OUT_EVENT_CAPACITY`; the ones it
+/// cannot pass are counted as lost.
+#[test]
+fn the_midi_out_node_counts_the_events_it_cannot_pass() {
+    let (_ed, mut exec, (), seen) =
+        rig_with(tutti_graph::ForkByClone(MidiOutNode::new()), 1, 512, |ed| {
+            for source in 0..2u64 {
+                let (inlet, mut writer) = EventInletNode::pair(EventCapacity::of(4096));
+                for i in 0..600u64 {
+                    writer
+                        .push(Stamp::Frame(Frame::new(i % 512)), note_on_ump(i))
+                        .expect("room");
+                }
+                let key = NodeKey(3 + source);
+                ed.insert(key, "source", inlet);
+                ed.spec_mut().connect_events(
+                    EventIn {
+                        node: NodeKey(1),
+                        port: 0,
+                    },
+                    EventEdge::Direct(EventOut { node: key, port: 0 }),
+                );
+            }
+        });
+    block(&mut exec, 512);
+    let passed = seen.lock().unwrap().len() as u64;
+    let lost = exec.dropped_event_count();
+    assert_eq!(
+        passed + lost,
+        1_200,
+        "every event passed or counted: {passed} + {lost}"
+    );
+    assert!(lost >= 1_200 - tutti_midi_runtime::MIDI_OUT_EVENT_CAPACITY as u64);
+}
+
+fn note_on_ump(i: u64) -> Ump {
+    midi::note_on(MidiChannel::of((i % 16) as u8), (i % 100) as u8, 0x8000)
+}
+
+/// **An input a new device takes starts empty**: device 0 selects an RPN in
+/// block 0, a new device then arrives at the slot (the epochs move on, which
 /// the node follows with no call from the owner), and the Data Entry in block 1
 /// finds no select to complete, so no Registered Controller is made; with no
 /// new device the same Data Entry completes the run.
@@ -355,22 +430,15 @@ fn a_slot_a_new_device_takes_forgets_the_previous_devices_half_sent_run() {
         ])
     };
     for reopened in [false, true] {
-        let inlets = DeviceInlets::new(NonZeroUsize::MIN, EventCapacity::of(64), Duration::ZERO);
-        let Ingest {
-            node,
-            inlets: nodes,
-        } = Ingest::new(script());
-        let node = node.following(&inlets).expect("one slot each");
-        let (_ed, mut exec, _controls, seen) = ingest(
-            Ingest {
-                node,
-                inlets: nodes,
-            },
-            MIDI_INPUT_PORTS as u16,
-            512,
-        );
+        let epochs = DeviceEpochs::new();
+        let Ingest { node, inlet } = Ingest::new(script());
+        let node = node.following(&epochs);
+        let (_ed, mut exec, _controls, seen) =
+            ingest(Ingest { node, inlet }, MIDI_INPUT_PORTS as u16, 512);
         block(&mut exec, 512);
-        let _device = reopened.then(|| inlets.open().expect("a free slot"));
+        if reopened {
+            epochs.arrive();
+        }
         block(&mut exec, 512);
         let made = seen
             .lock()
@@ -382,15 +450,12 @@ fn a_slot_a_new_device_takes_forgets_the_previous_devices_half_sent_run() {
     }
 }
 
-/// An ingest node that follows `inlets`, over the script's one slot.
-fn following(script: Script, inlets: &DeviceInlets) -> Ingest {
-    let Ingest {
-        node,
-        inlets: nodes,
-    } = Ingest::new(script);
+/// An ingest node that follows `epochs`, over the script's device.
+fn following(script: Script, epochs: &DeviceEpochs) -> Ingest {
+    let Ingest { node, inlet } = Ingest::new(script);
     Ingest {
-        node: node.following(inlets).expect("one slot each"),
-        inlets: nodes,
+        node: node.following(epochs),
+        inlet,
     }
 }
 
@@ -432,8 +497,8 @@ fn heard(seen: &Seen) -> Vec<(u64, String)> {
 #[test]
 fn a_device_that_lets_go_has_what_it_held_released() {
     for replaced in [false, true] {
-        let inlets = DeviceInlets::new(NonZeroUsize::MIN, EventCapacity::of(64), Duration::ZERO);
-        let device = inlets.open().expect("a free slot");
+        let epochs = DeviceEpochs::new();
+        epochs.arrive();
         let bend = at(
             30,
             midi::pitch_bend(Address::new(G, MidiChannel::of(0)), 0xC000_0000),
@@ -443,12 +508,14 @@ fn a_device_that_lets_go_has_what_it_held_released() {
             vec![note(0, 61, 5)],
         ]);
         let (_ed, mut exec, _c, seen) =
-            ingest(following(wire, &inlets), MIDI_INPUT_PORTS as u16, 512);
+            ingest(following(wire, &epochs), MIDI_INPUT_PORTS as u16, 512);
         block(&mut exec, 512);
         assert_eq!(heard(&seen).len(), 3, "the key, the pedal, the bend");
         seen.lock().unwrap().clear();
-        drop(device);
-        let _next = replaced.then(|| inlets.open().expect("the slot is free again"));
+        epochs.depart();
+        if replaced {
+            epochs.arrive();
+        }
         block(&mut exec, 512);
         let mut expected = vec![
             (512, "off 60".to_string()),
@@ -561,52 +628,6 @@ fn a_system_reset_ends_its_cables_notes_and_runs_and_is_not_echoed() {
     );
 }
 
-/// A node follows inlets with the slots it has inputs for, and refuses others.
-#[test]
-fn a_node_refuses_inlets_with_another_number_of_slots() {
-    let inlets = DeviceInlets::new(
-        NonZeroUsize::new(2).unwrap(),
-        EventCapacity::of(64),
-        Duration::ZERO,
-    );
-    assert_eq!(
-        MidiIngestNode::new(NonZeroUsize::new(3).unwrap())
-            .following(&inlets)
-            .unwrap_err(),
-        SlotCountMismatch {
-            node: NonZeroUsize::new(3).unwrap(),
-            inlets: NonZeroUsize::new(2).unwrap()
-        }
-    );
-    assert!(
-        MidiIngestNode::new(NonZeroUsize::new(2).unwrap())
-            .following(&inlets)
-            .is_ok()
-    );
-}
-
-/// **The devices merge in the listener's fan-in**: two devices' notes on one
-/// channel arrive on that channel's port, in time order.
-#[test]
-fn two_devices_notes_merge_on_the_channels_port() {
-    let (_ed, mut exec, _c, seen) = ingest(
-        Ingest::devices(vec![
-            Script::new(vec![vec![note(0, 60, 30)]]),
-            Script::new(vec![vec![note(0, 64, 10)]]),
-        ]),
-        MIDI_INPUT_PORTS as u16,
-        512,
-    );
-    block(&mut exec, 512);
-    let got: Vec<(usize, u64, u8)> = seen
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|s| (s.0, s.1, note_of(s.2).unwrap()))
-        .collect();
-    assert_eq!(got, vec![(0, 10, 64), (0, 30, 60)]);
-}
-
 /// **A requested MPE mode is adopted once and holds.** With the lower zone
 /// requested, a note on member channel 1 binds it; a channel bend there in
 /// each of the next two blocks folds into a per-note bend on the note. The
@@ -665,32 +686,22 @@ fn a_requested_mpe_mode_is_adopted_once() {
     assert_eq!(folded, vec![Some(60), Some(60)], "{seen:?}");
 }
 
-/// **A device's MPE Profile zones switch that device's rules alone** (M2-120
-/// section 3.3, Table 15). Two devices each send Reset All Controllers on
-/// member channel 2 in three blocks. The Profile is enabled on the first
-/// device before block 1 and disabled before block 2: the Profile makes
-/// Reset All Controllers on a Member Channel prohibited, so the first device's
-/// is ignored in block 1 alone, and the second device's, with no zones, is
-/// heard in every block. Enabling sends the zone's channels All Sound Off and
-/// Reset All Controllers once, ahead of the block's events.
+/// **A device's MPE Profile zones switch its rules** (M2-120 section 3.3,
+/// Table 15). The device sends Reset All Controllers on member channel 2 in
+/// three blocks. The Profile is enabled before block 1 and disabled before
+/// block 2: the Profile makes Reset All Controllers on a Member Channel
+/// prohibited, so the device's is ignored in block 1 alone and heard in the
+/// others. Enabling sends the zone's channels All Sound Off and Reset All
+/// Controllers once, ahead of the block's events.
 #[test]
-fn a_devices_profile_zones_switch_its_rules_alone() {
+fn a_devices_profile_zones_switch_its_rules() {
     let reset = |frame: usize| cc_at(frame, 2, CCNumber::RESET_ALL, 0);
-    let device = || Script::new(vec![vec![reset(0)], vec![reset(1)], vec![reset(2)]]);
-    let inlets = DeviceInlets::new(
-        NonZeroUsize::new(2).unwrap(),
-        EventCapacity::of(64),
-        Duration::ZERO,
+    let epochs = DeviceEpochs::new();
+    epochs.arrive();
+    let node = following(
+        Script::new(vec![vec![reset(0)], vec![reset(1)], vec![reset(2)]]),
+        &epochs,
     );
-    let (first, _second) = (inlets.open().unwrap(), inlets.open().unwrap());
-    let Ingest {
-        node,
-        inlets: nodes,
-    } = Ingest::devices(vec![device(), device()]);
-    let node = Ingest {
-        node: node.following(&inlets).expect("two slots each"),
-        inlets: nodes,
-    };
     let (_ed, mut exec, controls, seen) = ingest(node, MIDI_INPUT_PORTS as u16, 512);
     let zone = MpeZones::single(MpeZoneConfig::profile(
         MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(4)).unwrap(),
@@ -698,9 +709,9 @@ fn a_devices_profile_zones_switch_its_rules_alone() {
     ));
     let group = MidiGroup::FIRST;
     block(&mut exec, 512);
-    controls.set_mpe_profile(first.slot(), group, Some(zone));
+    controls.set_mpe_profile(group, Some(zone));
     block(&mut exec, 512);
-    controls.set_mpe_profile(first.slot(), group, None);
+    controls.set_mpe_profile(group, None);
     block(&mut exec, 512);
     let seen = seen.lock().unwrap();
     let is_reset = |ev: &Ump| {
@@ -711,8 +722,8 @@ fn a_devices_profile_zones_switch_its_rules_alone() {
         )
     };
     // Block 1's frames are 512 to 1023: the Reset All Controllers of the
-    // zone's four channels at its first frame, and the second device's own at
-    // frame 513 alone.
+    // zone's four channels at its first frame, and the device's own (frame 513)
+    // ignored.
     let block_one: Vec<(usize, u64)> = seen
         .iter()
         .filter(|s| (512..1024).contains(&s.1) && is_reset(&s.2))
@@ -720,7 +731,7 @@ fn a_devices_profile_zones_switch_its_rules_alone() {
         .collect();
     assert_eq!(
         block_one,
-        [(0, 512), (1, 512), (2, 512), (2, 513), (3, 512)],
+        [(0, 512), (1, 512), (2, 512), (3, 512)],
         "{seen:?}"
     );
     let heard = |first: u64| {
@@ -728,22 +739,22 @@ fn a_devices_profile_zones_switch_its_rules_alone() {
             .filter(|s| (first..first + 512).contains(&s.1) && s.0 == 2 && is_reset(&s.2))
             .count()
     };
-    assert_eq!(heard(0), 2, "both devices before the Profile");
-    // Both devices again, and the Reset All Controllers that leaving the
-    // Profile sends to the channel.
-    assert_eq!(heard(1024), 3);
+    assert_eq!(heard(0), 1, "the device's own, before the Profile");
+    // The device's own, and the Reset All Controllers that leaving the Profile
+    // sends to the channel.
+    assert_eq!(heard(1024), 2);
 }
 
-/// Clearing a slot's zones sets each of its Groups to none: the device's
+/// Clearing the device's zones sets each of its Groups to none: the device's
 /// Reset All Controllers on a Member Channel, ignored under the Profile, is
 /// heard again.
 #[test]
-fn clearing_a_slots_profiles_returns_it_to_the_rules_it_had() {
-    let inlets = DeviceInlets::new(NonZeroUsize::MIN, EventCapacity::of(64), Duration::ZERO);
-    let device = inlets.open().unwrap();
+fn clearing_a_devices_profiles_returns_it_to_the_rules_it_had() {
+    let epochs = DeviceEpochs::new();
+    epochs.arrive();
     let reset = cc_at(1, 2, CCNumber::RESET_ALL, 0);
     let (_ed, mut exec, controls, seen) = ingest(
-        following(Script::new(vec![vec![], vec![reset], vec![reset]]), &inlets),
+        following(Script::new(vec![vec![], vec![reset], vec![reset]]), &epochs),
         MIDI_INPUT_PORTS as u16,
         512,
     );
@@ -753,9 +764,9 @@ fn clearing_a_slots_profiles_returns_it_to_the_rules_it_had() {
     ));
     // The first block takes the device's slot over; the zones come after it.
     block(&mut exec, 512);
-    controls.set_mpe_profile(device.slot(), MidiGroup::FIRST, Some(zone));
+    controls.set_mpe_profile(MidiGroup::FIRST, Some(zone));
     block(&mut exec, 512);
-    controls.clear_mpe_profiles(device.slot());
+    controls.clear_mpe_profiles();
     block(&mut exec, 512);
     let heard_at = |frame: u64| {
         seen.lock()
@@ -996,6 +1007,132 @@ fn a_start_inside_a_block_clocks_from_its_frame() {
             (1_100, Ump::from(Message::System(G, System::TimingClock)))
         ]
     );
+}
+
+/// What a [`MachineControlFollower`] makes of `seen`, each event on its frame.
+fn followed(seen: &Seen) -> Vec<(u64, MachineControlEvent)> {
+    let mut follower = MachineControlFollower::new(tutti_midi_protocol::SysexDeviceId::of(1));
+    let mut got = Vec::new();
+    for (frame, ump) in tutti_fixtures::heard(seen) {
+        follower.step(ump, &mut |event| got.push((frame, event)));
+    }
+    got
+}
+
+/// **A Machine Control message is on the frame its transport change happens
+/// (RP-013 pp.20 to 28)**: a start on frame 100 of a block is PLAY at offset
+/// 100, a stop on frame 300 of the next is STOP at 300, and a jump on 700 of
+/// a third is LOCATE with DEFERRED PLAY at 700 (one message, whose packets
+/// follow each other). Heard through the follower, every message is whole.
+#[test]
+fn a_machine_control_message_is_on_the_frame_of_its_transport_change() {
+    let (_ed, mut exec, _controls, seen) = rig(
+        MachineControlNode::new(G, Recipient::AllCall, MtcRate::Fps30),
+        1,
+        2048,
+    );
+    let at_beat = |frames: f64| Beat(frames / 24_000.0);
+    let stopped = |beat: Beat| TransportPosition::new(false, Bpm::of(120.0), beat, None);
+    let rolling = |beat: Beat| TransportPosition::new(true, Bpm::of(120.0), beat, None);
+    let mut out = vec![0.0f32; 2048];
+    let mut run = |exec: &mut Executor,
+                   start: &TransportPosition,
+                   change: Option<(usize, TransportPosition)>| {
+        let mut changes = TransportChanges::NONE;
+        if let Some((frame, to)) = change {
+            changes
+                .push(Offset::of(Samples(frame), Samples(2048)), to)
+                .unwrap();
+        }
+        seen.lock().unwrap().clear();
+        exec.process_with_changes(2048, start, &changes, &[], &mut [&mut out[..]]);
+    };
+    // The first block only looks.
+    run(&mut exec, &stopped(Beat(0.0)), None);
+    assert!(followed(&seen).is_empty());
+    // Start on frame 100 (at beat 0); the rest of the block rolls 1 948 frames.
+    run(
+        &mut exec,
+        &stopped(Beat(0.0)),
+        Some((100, rolling(Beat(0.0)))),
+    );
+    let block_start = |n: u64| n * 2048;
+    assert_eq!(
+        followed(&seen),
+        [(block_start(1) + 100, MachineControlEvent::Play)]
+    );
+    // The next block continues from there and stops on frame 300.
+    let resumed = at_beat(1948.0);
+    run(
+        &mut exec,
+        &rolling(resumed),
+        Some((300, stopped(at_beat(1948.0 + 300.0)))),
+    );
+    assert_eq!(
+        followed(&seen),
+        [(block_start(2) + 300, MachineControlEvent::Stop)]
+    );
+    // Stopped, it jumps to beat 2 (one second) on frame 700 and rolls from there.
+    run(
+        &mut exec,
+        &stopped(at_beat(1948.0 + 300.0)),
+        Some((700, rolling(Beat(2.0)))),
+    );
+    let got = followed(&seen);
+    assert_eq!(got.len(), 2, "a locate and a deferred play: {got:?}");
+    for (frame, _) in &got {
+        assert_eq!(*frame, block_start(3) + 700);
+    }
+    assert_eq!(
+        got[0].1,
+        MachineControlEvent::Locate(tutti_types::Seconds::new(1.0))
+    );
+    assert_eq!(got[1].1, MachineControlEvent::Play);
+}
+
+/// **A transport no time code names is counted, and sends nothing.**
+#[test]
+fn a_machine_control_locate_to_no_time_code_is_counted() {
+    let (_ed, mut exec, controls, seen) = rig(
+        MachineControlNode::new(G, Recipient::AllCall, MtcRate::Fps30),
+        1,
+        512,
+    );
+    let mut out = vec![0.0f32; 512];
+    for beat in [0.0, -4.0] {
+        exec.process(
+            512,
+            &TransportPosition::new(false, Bpm::of(120.0), Beat(beat), None),
+            &[],
+            &mut [&mut out[..]],
+        );
+    }
+    assert!(seen.lock().unwrap().is_empty());
+    assert_eq!(controls.losses().refused, 1);
+}
+
+/// **A Machine Control node's fork sends nothing.**
+#[test]
+fn a_machine_control_fork_sends_nothing() {
+    let (live, _exec, _controls, seen) = rig(
+        MachineControlNode::new(G, Recipient::AllCall, MtcRate::Fps30),
+        1,
+        512,
+    );
+    let prepare = *live.prepare();
+    let (_fork, mut fork_exec) = live
+        .fork(ForkTarget::Master, ForkMode::Live, prepare)
+        .expect("forks");
+    let mut out = vec![0.0f32; 512];
+    for playing in [false, true] {
+        fork_exec.process(
+            512,
+            &TransportPosition::new(playing, Bpm::of(120.0), Beat(0.0), None),
+            &[],
+            &mut [&mut out[..]],
+        );
+    }
+    assert!(seen.lock().unwrap().is_empty());
 }
 
 /// **A clock's fork sends nothing.**

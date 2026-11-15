@@ -89,6 +89,8 @@ mod midi_event;
 mod midi_follow;
 #[cfg(feature = "midi-hardware")]
 mod midi_hardware;
+#[cfg(feature = "midi-hardware")]
+mod midi_port;
 #[cfg(feature = "modulation")]
 mod modulation;
 mod node;
@@ -159,23 +161,27 @@ pub use input::{Input, InputConfig, InputOpener, OpenedInput, Trim};
 pub use instrument::{AddedInstrument, AnyNode, InstrumentHandle, NotInstrument};
 pub use jobs::{Job, JobFailed};
 pub use key::{
-    Bus, BusSink, Channel, Connection, Edge, Event, EventInPort, EventOutPort, EventTapPort, Fanin,
-    InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root, Weighted, Wire,
+    Bus, BusSink, Channel, Connection, Edge, Event, EventEdge, EventInPort, EventOutPort,
+    EventTapPort, Fanin, InPort, Inlet, Key, MainBus, MainSink, OutPort, Outlet, Root,
+    RootDeclaration, Weighted, Wire,
 };
 #[cfg(feature = "plugin")]
 pub use main_session::{EditorView, MainPlugin, MainSession, Opened};
 #[cfg(feature = "midi")]
 pub use midi::{
-    MIDI_INPUT_DEVICES, MIDI_INPUT_DROP_REPORT, MIDI_OUT_DROP_REPORT, Midi, MidiLoad, MidiOutDrops,
-    MidiOutRouter, MidiRouteId, MidiRouteRule, NoSuchMidiRoute, OutputTiming, TakePlacement,
-    UmpOut, drain_receiver_through,
+    MIDI_INPUT_DROP_REPORT, MIDI_OUT_DROP_REPORT, Midi, MidiLoad, MidiOutDrops, MidiOutRouter,
+    MidiRouteId, MidiRouteRule, NoSuchMidiRoute, OutputTiming, TakePlacement, UmpOut,
+    drain_receiver_through,
 };
 #[cfg(feature = "midi")]
 pub use midi_event::MidiEvent;
 #[cfg(feature = "midi")]
 pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo, SendMachineControl};
 #[cfg(feature = "midi-hardware")]
-pub use midi_hardware::Resolution;
+pub use midi_port::{
+    InputLoaded, MidiInput, MidiInputEntry, MidiInputInfo, MidiOutput, MidiOutputEntry,
+    MidiOutputInfo, MidiPortError, OutputLoaded, OutputOptions, PortCause, midi_input, midi_output,
+};
 #[cfg(feature = "modulation")]
 pub use modulation::{
     AutomationTake, MixRef, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget, Mods,

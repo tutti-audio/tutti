@@ -1,4 +1,4 @@
-//! [`LimiterFamily`]: the lookahead limiter as a [`Family`].
+//! [`LimiterBank`]: the lookahead limiter over buffers views.
 //!
 //! A limiter delays its audio by the **lookahead** and runs its gain decision ahead of
 //! the delayed signal, so a peak is already reduced when it arrives. The decision is
@@ -18,38 +18,41 @@
 //!    target);
 //! 4. every channel is that gain times its signal, delayed by the lookahead.
 //!
-//! The output is therefore bounded by the ceiling (a gain divide and a product can in
-//! principle round one ulp past). The lookahead is the family's own constant, fixed when
-//! it is built, and **is the member's latency** ([`System::latency`]): the graph's PDC
-//! compensates for it. It has no tail, which excludes latency: what the delay holds
-//! comes out within the latency, and gain on silence is silence.
+//! The ceiling bounds the **sample** peak of the output to within a few ulps of
+//! rounding; it is not a true-peak limit, which would need an oversampled detector. The
+//! lookahead is the bank's own constant, fixed when it is built, and **is its latency**
+//! ([`latency`](LimiterBank::latency)): the graph's PDC compensates for it. It has no tail,
+//! which excludes latency: what the delay holds comes out within the latency (the output is
+//! exactly silent that many frames after the input is), and gain on silence is silence.
 //!
-//! The threshold and the ceiling are the two controls read **per frame** when the graph drives
-//! them (lanes 0 and 1 of the [`Inputs`]); a frame that is not finite falls back to the member's.
-//! Every coefficient lands whole: a glided ceiling would let a sample past the new one.
+//! The threshold and the ceiling are the two controls read **per frame** when the graph
+//! drives them ([`LimiterLanes`]); a frame that is not finite falls back to the aimed
+//! value. Every coefficient lands whole: a glided ceiling would let a sample past the new
+//! one.
 //!
-//! A prepare or a reset leaves the envelope **unset** (`+inf`, no history), and the first
-//! frame takes its target at once, whatever it is: the first audio is limited from its
-//! first sample, as a limiter that had heard silence
-//! for ever would limit it (on silence the envelope settles at the drive, the target of a
-//! zero peak, which is where an unset envelope meets its first quiet frame).
-
-use core::ops::Range;
+//! A reset leaves the envelope **unset** (`+inf`, no history), and the first frame takes
+//! its target at once, whatever it is: the first audio is limited from its first sample,
+//! as a limiter that had heard silence for ever would limit it (on silence the envelope
+//! settles at the drive, the target of a zero peak, which is where an unset envelope
+//! meets its first quiet frame).
 
 /// The envelope with no history: the next frame takes its target at once.
 const UNSET: f32 = f32::INFINITY;
 
-use tutti_types::{Amplitude, BusTopology, Db, SampleRate, Samples, Seconds};
+/// The most a lane's level may say, in dB either way: past it a lane value reads as this.
+/// 300 dB is 1e15 as an amplitude, so a gain from a lane's ceiling and threshold, and from
+/// the peak (floored at -144 dB), stays finite in `f32`.
+const LANE_DB_LIMIT: f32 = 300.0;
+
+use tutti_buffers::{Float, Mono, Planes, PlanesMut};
+use tutti_types::{Amplitude, ChannelLayout, Db, SampleRate, Samples, Seconds};
 
 use super::curves::{LimiterCurve, amplitude_to_db, compute_limiter_gain};
 use super::lookahead::{LookaheadRing, fold_peak};
-use crate::control::COEFF_STREAM;
+use super::shared::CHUNK;
 use crate::smoother::Smoother;
-use crate::{
-    Cadence, Channels, Effort, Family, Glide, Inputs, Lerp, Recurrence, Ring, Setup, Start, System,
-};
 
-/// The controls of a [`LimiterFamily`].
+/// The controls of a [`LimiterBank`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LimiterControls {
     /// The input level, in dB, at which the curve reaches the ceiling: where reduction
@@ -77,7 +80,7 @@ impl LimiterControls {
         release: Seconds(0.1),
     };
 
-    /// The shortest release a member has: 1 ms.
+    /// The shortest release a limiter has: 1 ms.
     pub const MIN_RELEASE: Seconds = Seconds(0.001);
 }
 
@@ -87,20 +90,18 @@ impl Default for LimiterControls {
     }
 }
 
-/// How far ahead a limiter looks: the delay it runs its gain decision ahead of the
-/// audio by, and so the processing latency it declares to PDC.
-///
-/// A range-checked value: finite, above zero and at
-/// most [`CAP`](Self::CAP). [`new`](Self::new) refuses anything else and never clamps,
-/// since the lookahead is the latency the graph compensates, and a silently different
-/// figure would misalign everything downstream.
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
-pub struct Lookahead(Seconds);
-
-/// A refused lookahead: the raw it carries.
-#[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
-#[error("{0:?} is not a lookahead: it must be above zero and at most {cap:?}", cap = Lookahead::CAP)]
-pub struct LookaheadError(pub Seconds);
+tutti_types::ranged! {
+    /// How far ahead a limiter looks: the delay it runs its gain decision ahead of the
+    /// audio by, and so the processing latency it declares to PDC.
+    ///
+    /// A range-checked value: finite, above zero and at most [`CAP`](Self::CAP).
+    /// [`new`](Self::new) refuses anything else and never clamps, since the lookahead is the
+    /// latency the graph compensates, and a silently different figure would misalign
+    /// everything downstream.
+    #[derive(PartialOrd)]
+    Lookahead(Seconds), LookaheadError, "a lookahead, above zero and at most one second",
+    |raw| raw.get().is_finite() && raw.get() > 0.0 && raw.get() <= Lookahead::CAP.get()
+}
 
 impl Lookahead {
     /// The lookahead of a limiter built without one: 5 ms, which catches peaks
@@ -109,37 +110,6 @@ impl Lookahead {
     /// The longest lookahead [`new`](Self::new) accepts: one second, far past any
     /// limiter's (a mastering limiter looks a few to a few tens of milliseconds ahead).
     pub const CAP: Seconds = Seconds(1.0);
-
-    /// A lookahead of `seconds`, or `None` when it is not finite, not above zero or
-    /// above [`CAP`](Self::CAP). Never clamps.
-    #[must_use]
-    pub const fn new(seconds: Seconds) -> Option<Self> {
-        let s = seconds.get();
-        if s.is_finite() && s > 0.0 && s <= Self::CAP.get() {
-            Some(Self(seconds))
-        } else {
-            None
-        }
-    }
-
-    /// A lookahead for a literal or a constant.
-    ///
-    /// # Panics
-    ///
-    /// If [`new`](Self::new) refuses `seconds`.
-    #[must_use]
-    pub const fn of(seconds: Seconds) -> Self {
-        match Self::new(seconds) {
-            Some(l) => l,
-            None => panic!("a lookahead is above zero and at most one second"),
-        }
-    }
-
-    /// The lookahead in seconds.
-    #[must_use]
-    pub const fn get(self) -> Seconds {
-        self.0
-    }
 }
 
 impl Default for Lookahead {
@@ -148,29 +118,14 @@ impl Default for Lookahead {
     }
 }
 
-impl TryFrom<Seconds> for Lookahead {
-    type Error = LookaheadError;
-
-    fn try_from(seconds: Seconds) -> Result<Self, LookaheadError> {
-        Self::new(seconds).ok_or(LookaheadError(seconds))
-    }
-}
-
-impl From<Lookahead> for Seconds {
-    fn from(lookahead: Lookahead) -> Seconds {
-        lookahead.0
-    }
-}
-
-/// The longest window a limiter allocates, in frames. [`Lookahead`] already bounds the
-/// seconds (one second is 192000 frames at 192 kHz); this guards only against an absurd
-/// rate, since a prepare must not panic and an allocation that size would abort.
+/// The longest window a limiter holds, in frames: 16.7 million, 87 s at 192 kHz. A
+/// [`Lookahead`] is at most one second, so this only bounds the window at an absurd rate
+/// (a rate no device has), where the count would otherwise be as large as the rate.
 const MAX_LOOKAHEAD_FRAMES: usize = 1 << 24;
 
 /// The lookahead window in frames at `rate`: `ceil(lookahead * rate)`, at least one (a
-/// lookahead is above zero, so its ceiling is). The ring must hold at least the window,
-/// so it rounds up; and it is the one figure the member's latency and the recurrence's
-/// delay both are.
+/// lookahead is above zero, so its ceiling is). The ring must hold at least the window, so
+/// it rounds up; it is the one figure the latency and the delay both are.
 fn lookahead_frames(lookahead: Lookahead, rate: SampleRate) -> usize {
     lookahead
         .get()
@@ -179,25 +134,26 @@ fn lookahead_frames(lookahead: Lookahead, rate: SampleRate) -> usize {
         .clamp(1, MAX_LOOKAHEAD_FRAMES)
 }
 
-/// A limiter at one set of controls and one rate: the curve, the release, and the delay
-/// it makes.
+/// What aiming a limiter at a set of controls designs: the curve, the levels a frame nobody
+/// drives falls back to, and the release as a one-pole coefficient.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct LimiterMember {
-    threshold: Db,
-    ceiling: Db,
-    release: Seconds,
-    rate: SampleRate,
-    /// [`lookahead_frames`] at `rate`.
-    lookahead: usize,
+struct Design {
+    /// The transfer curve at the aimed threshold and ceiling, for a block no lane drives.
     curve: LimiterCurve,
+    /// What a frame nobody drives (or a non-finite one) is: the aimed threshold.
+    threshold: Db,
+    /// And the aimed ceiling.
+    ceiling: Db,
+    /// The one-pole coefficient the envelope releases at.
+    release: f32,
 }
 
-impl LimiterMember {
-    /// The member of `controls` at `rate`, delaying by `lookahead`: the controls made
-    /// runnable.
-    fn of(controls: &LimiterControls, lookahead: Lookahead, rate: SampleRate) -> Self {
+impl Design {
+    /// The design of `controls` at `rate`: a NaN threshold or ceiling and a non-finite
+    /// release are the default's (`+-inf` are thresholds and ceilings; only a NaN has no
+    /// level), and the release is floored at 1 ms.
+    fn of(controls: &LimiterControls, rate: SampleRate) -> Self {
         let d = LimiterControls::DEFAULT;
-        // `+-inf` are thresholds and ceilings; only a NaN has no level.
         let threshold = if controls.threshold.get().is_nan() {
             d.threshold
         } else {
@@ -214,286 +170,165 @@ impl LimiterMember {
             d.release
         };
         Self {
+            curve: LimiterCurve::new(threshold, ceiling),
             threshold,
             ceiling,
-            release: Seconds(release.get().max(LimiterControls::MIN_RELEASE.get())),
-            rate,
-            lookahead: lookahead_frames(lookahead, rate),
-            curve: LimiterCurve::new(threshold, ceiling),
+            release: Seconds(release.get().max(LimiterControls::MIN_RELEASE.get()))
+                .one_pole_coeff(rate),
         }
-    }
-
-    /// The threshold, in dB.
-    #[must_use]
-    pub fn threshold(&self) -> Db {
-        self.threshold
-    }
-
-    /// The ceiling, in dB.
-    #[must_use]
-    pub fn ceiling(&self) -> Db {
-        self.ceiling
-    }
-
-    /// The release time constant, at least 1 ms.
-    #[must_use]
-    pub fn release(&self) -> Seconds {
-        self.release
-    }
-
-    /// The transfer curve: the gain at a linked peak, before the envelope.
-    #[must_use]
-    pub fn curve(&self) -> LimiterCurve {
-        self.curve
     }
 }
 
-/// The lookahead is the member's latency: processing delay, never musical. A tail excludes
-/// latency, so it has none: the delay holds the last `lookahead` frames, which come out
-/// within the latency, and gain applied to silence is silence.
-impl System for LimiterMember {
-    fn latency(&self) -> Samples {
+/// The per-frame lanes a limiter reads beside its audio, in the audio's sample format, each
+/// `None` where nothing drives it. A lane is at least as long as the frames a call renders;
+/// a frame past its end is not driven. A frame that is not finite is the aimed value (a
+/// lane value of `+-inf` is not a level to divide by: the curve in dB would make a NaN of
+/// it, which the envelope would keep); a finite one is held within 300 dB either way. The
+/// aimed value a frame falls back to keeps its meaning (`-inf` ceiling mutes, `+inf`
+/// threshold is a gain of 0, `-inf` threshold limits everything) but for a ceiling above
+/// 300 dB, which is held at 300.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LimiterLanes<'a, S: Float = f32> {
+    /// The threshold in dB.
+    pub threshold: Option<Mono<'a, S>>,
+    /// The ceiling in dB.
+    pub ceiling: Option<Mono<'a, S>>,
+}
+
+/// A lookahead limiter of any width: one linked gain from the loudest channel, a delay per
+/// channel, and the envelope and window minimum that decide the gain.
+///
+/// Built on the control side for one rate, where it allocates the rings; a clone keeps
+/// their size, and [`reset`](Self::reset) empties them without allocating. The state is
+/// `f32`; a view of another sample format is converted at the edges.
+#[derive(Clone, Debug)]
+pub struct LimiterBank {
+    design: Design,
+    rate: SampleRate,
+    /// The lookahead in frames at `rate`: the bank's latency.
+    lookahead: usize,
+    /// The envelope gain (linear): instant attack, one-pole release. `+inf` is **unset**
+    /// (after a reset): the first frame replaces it, through the attack branch, before any
+    /// arithmetic reads it (a target is finite, so it is under `+inf`), and it never leaves
+    /// the bank: the window minimum is pushed the replaced value.
+    envelope: f32,
+    ring: LookaheadRing,
+}
+
+impl LimiterBank {
+    /// A silent limiter `width` channels wide at `rate`, looking `lookahead` ahead, aimed
+    /// at [`LimiterControls::DEFAULT`]. Allocates: build it on the control side.
+    #[must_use]
+    pub fn new(width: ChannelLayout, lookahead: Lookahead, rate: SampleRate) -> Self {
+        let frames = lookahead_frames(lookahead, rate);
+        Self {
+            design: Design::of(&LimiterControls::DEFAULT, rate),
+            rate,
+            lookahead: frames,
+            envelope: UNSET,
+            ring: LookaheadRing::new(usize::from(width.count()), frames),
+        }
+    }
+
+    /// The processing latency: the lookahead in frames, at least one.
+    #[must_use]
+    pub fn latency(&self) -> Samples {
         Samples(self.lookahead)
     }
 
-    fn tail(&self, _: Db) -> Ring {
-        Ring::Finite(Seconds(0.0))
-    }
-}
-
-/// The [`Family`] of the lookahead limiter, as wide as its input bus: one gain, linked
-/// across every channel, from the loudest. There is no side-chain: it limits what it
-/// delays.
-///
-/// The lookahead is a **construction constant**, not a control: it sizes the delay (and
-/// is the latency the graph compensates), so it cannot move while the node runs.
-#[derive(Clone, Copy, Debug)]
-pub struct LimiterFamily {
-    input: BusTopology,
-    lookahead: Lookahead,
-}
-
-impl LimiterFamily {
-    /// A limiter on the bus `input`, delaying by `lookahead` (at least one frame at any
-    /// rate), and one output bus where it is.
-    #[must_use]
-    pub const fn new(input: BusTopology, lookahead: Lookahead) -> Self {
-        Self { input, lookahead }
-    }
-}
-
-impl Family for LimiterFamily {
-    type Controls = LimiterControls;
-    type Member = LimiterMember;
-    type Recurrence = LimiterRecurrence;
-
-    /// Solved on the stream's grid of 16 frames, like the filters. The coefficients land
-    /// whole, so a control that moves inside a block reaches the render within 16 frames,
-    /// wherever the blocks fall.
-    const CADENCE: Cadence = COEFF_STREAM;
-
-    fn channels(&self) -> Channels {
-        Channels::same(self.input)
+    /// Back to silence: the rings empty and the envelope without history. No allocation.
+    pub fn reset(&mut self) {
+        self.envelope = UNSET;
+        self.ring.clear();
     }
 
-    fn blank(&self, rate: SampleRate) -> LimiterMember {
-        LimiterMember::of(&LimiterControls::DEFAULT, self.lookahead, rate)
+    /// Designs `controls` and lands them whole. No allocation.
+    pub fn aim(&mut self, controls: &LimiterControls) {
+        self.design = Design::of(controls, self.rate);
     }
 
-    /// The controls, made runnable: a NaN threshold or ceiling and a non-finite release
-    /// are the default's, and the release is floored at 1 ms.
-    fn member_into(&self, c: &LimiterControls, rate: SampleRate, out: &mut LimiterMember) {
-        *out = LimiterMember::of(c, self.lookahead, rate);
-    }
-
-    fn recurrence(&self, _: SampleRate) -> LimiterRecurrence {
-        LimiterRecurrence {
-            lookahead: self.lookahead,
-            channels: usize::from(self.input.layout().count()),
-        }
-    }
-}
-
-/// The coefficient point of a limiter: the curve and the figures the frame form runs on,
-/// which all land whole.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct LimiterTarget {
-    /// The transfer curve at the member's own threshold and ceiling, for a block no lane
-    /// drives.
-    curve: LimiterCurve,
-    /// What a frame nobody drives (or a non-finite one) is: the member's threshold.
-    threshold: Db,
-    /// And its ceiling.
-    ceiling: Db,
-    /// The one-pole coefficient the envelope releases at.
-    release: f32,
-}
-
-/// A limiter's coefficients do not blend: its glide has no steps, so this is only ever
-/// the target.
-impl Lerp for LimiterTarget {
-    fn lerp(&self, to: &Self, _: u32, _: u32) -> Self {
-        *to
-    }
-}
-
-/// What a block changes: the gain envelope, the delay and window minimum, and the peaks
-/// (then gains) of the block being run.
-#[derive(Clone, Debug)]
-pub struct LimiterState {
-    /// The envelope gain (linear): instant attack, one-pole release. `+inf` is **unset**
-    /// (after a prepare or a reset): the first frame replaces it, through the attack
-    /// branch, before any arithmetic reads it (a target is finite, so it is under `+inf`),
-    /// and it never leaves the recurrence: the window minimum is pushed the replaced value,
-    /// and the recurrence has no reading (`Readout`) to report it through.
-    envelope: f32,
-    ring: LookaheadRing,
-    /// The linked peak of each frame of the block, which becomes its window-minimum gain;
-    /// sized to the longest block in `prepare`.
-    peaks: Vec<f32>,
-}
-
-/// The [`Recurrence`] of a [`LimiterFamily`].
-///
-/// K, per frame: the linked peak (the loudest channel, a NaN ignored), the target gain
-/// (the member's curve, or, when a lane of the [`Inputs`] drives the threshold or the
-/// ceiling, the curve in dB at that frame's values), the envelope (taken at once when
-/// lower, released toward the target by the member's coefficient otherwise) and the
-/// minimum over the lookahead window, with which every channel's delayed sample is
-/// multiplied.
-///
-/// **Lane 0 is the threshold and lane 1 the ceiling, in dB, per frame.** A frame that is
-/// not finite falls back to the member's (a lane value of `+-inf` is not a level to
-/// divide by: the curve in dB would make a NaN of it, which the envelope would keep). The delay is the lookahead, which the *member*
-/// declares as its latency: the recurrence adds none of its own.
-#[derive(Clone, Copy, Debug)]
-pub struct LimiterRecurrence {
-    lookahead: Lookahead,
-    channels: usize,
-}
-
-impl LimiterRecurrence {
     /// The target gain of frame `i`, whose linked peak is `peak`.
     #[inline]
-    fn target_gain(target: &LimiterTarget, feed: &Inputs<'_>, i: usize, peak: f32) -> f32 {
-        if feed.lanes[0].is_none() && feed.lanes[1].is_none() {
-            return target.curve.gain(peak);
+    fn target_gain<S: Float>(&self, lanes: &LimiterLanes<'_, S>, i: usize, peak: f32) -> f32 {
+        if lanes.threshold.is_none() && lanes.ceiling.is_none() {
+            return self.design.curve.gain(Amplitude::new(peak)).get();
         }
-        let read = |lane: Option<&[f32]>, base: Db| match lane {
-            Some(lane) if lane[i].is_finite() => Db(lane[i]),
-            _ => base,
+        // A lane's finite value, held within `LANE_DB_LIMIT` either way; else the aimed
+        // value, held only where it can overflow or cancel: a ceiling at most
+        // `LANE_DB_LIMIT` (a `+inf` or 1e30 dB one would make an infinite gain), and a
+        // threshold as it is (`-inf` leaves every signal over it, `+inf` none, a gain of 0).
+        // A ceiling of `-inf` is a gain of 0 and stays one: only an infinity can make the
+        // envelope NaN.
+        let lane_or = |lane: Option<Mono<'_, S>>, base: f32, held: fn(f32) -> f32| {
+            lane.and_then(|l| l.samples().get(i))
+                .map(|x| x.convert_to::<f32>())
+                .filter(|x| x.is_finite())
+                .map_or_else(|| held(base), |x| x.clamp(-LANE_DB_LIMIT, LANE_DB_LIMIT))
         };
         let peak_db = amplitude_to_db(Amplitude::new(peak));
-        let threshold = read(feed.lanes[0], target.threshold);
-        let ceiling = read(feed.lanes[1], target.ceiling);
+        let threshold = Db(lane_or(lanes.threshold, self.design.threshold.get(), |t| t));
+        let ceiling = Db(lane_or(lanes.ceiling, self.design.ceiling.get(), |c| {
+            c.min(LANE_DB_LIMIT)
+        }));
         compute_limiter_gain(peak_db, threshold, ceiling).get()
     }
-}
 
-impl Recurrence for LimiterRecurrence {
-    type Member = LimiterMember;
-    type Capacity = ();
-    type Target = LimiterTarget;
-    type Coeffs = Glide<LimiterTarget>;
-    type State = LimiterState;
-
-    const STEP: usize = 1;
-
-    fn start(&self, member: &LimiterMember) -> Start<Self> {
-        let mut target = LimiterTarget {
-            curve: member.curve,
-            threshold: member.threshold,
-            ceiling: member.ceiling,
-            release: 0.0,
-        };
-        self.coefficients_into(member, &mut target);
-        Start {
-            coeffs: Glide::landed(target).by(0),
-            state: LimiterState {
-                envelope: UNSET,
-                ring: LookaheadRing::new(self.channels, member.lookahead),
-                peaks: Vec::new(),
-            },
-            target,
-        }
-    }
-
-    /// Sizes the delay from the lookahead at the rate, and the peaks from the longest
-    /// block. The conversions saturate: a prepare must not panic.
-    fn prepare(
+    /// Runs `input` into `output`, delayed by the lookahead and scaled by the linked gain.
+    ///
+    /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the bank's
+    /// width, or past the narrower of the two views, is not output (the linked peak is the
+    /// loudest of every input channel). No allocation.
+    pub fn process<S: Float>(
         &mut self,
-        _: &(),
-        setup: &Setup,
-        _: &mut Glide<LimiterTarget>,
-        state: &mut LimiterState,
-        _: &mut LimiterTarget,
+        lanes: LimiterLanes<'_, S>,
+        input: Planes<'_, S>,
+        mut output: PlanesMut<'_, '_, S>,
     ) {
-        let frames = lookahead_frames(self.lookahead, setup.rate);
-        state.ring = LookaheadRing::new(self.channels, frames);
-        state.peaks = vec![0.0; setup.max_block.get()];
-    }
+        let frames = input.frames().get().min(output.frames().get());
+        let width = self
+            .ring
+            .width()
+            .min(input.channels())
+            .min(output.channels());
+        let mut gains = [0.0f32; CHUNK];
+        let mut start = 0;
+        while start < frames {
+            let n = (frames - start).min(CHUNK);
+            let end = start + n;
+            let gains = &mut gains[..n];
 
-    fn coefficients_into(&self, m: &LimiterMember, target: &mut LimiterTarget) -> bool {
-        *target = LimiterTarget {
-            curve: m.curve,
-            threshold: m.threshold,
-            ceiling: m.ceiling,
-            release: m.release.one_pole_coeff(m.rate),
-        };
-        true
-    }
-
-    fn clear(&self, state: &mut LimiterState) {
-        state.envelope = UNSET;
-        state.ring.clear();
-    }
-
-    fn run(
-        &self,
-        coeffs: &Glide<LimiterTarget>,
-        state: &mut LimiterState,
-        feed: &Inputs<'_>,
-        output: &mut [&mut [f32]],
-        frames: Range<usize>,
-        _: usize,
-    ) {
-        let target = coeffs.now();
-        let LimiterState {
-            envelope,
-            ring,
-            peaks,
-        } = state;
-        let peaks = &mut peaks[frames.clone()];
-
-        // The linked peak: the loudest channel at each frame, taken a channel at a time
-        // (`max` is exact, so the order does not matter).
-        peaks.fill(0.0);
-        for input in feed.audio {
-            for (p, &x) in peaks.iter_mut().zip(&input[frames.clone()]) {
-                *p = fold_peak(*p, x);
+            // The linked peak: the loudest channel at each frame, taken a channel at a time
+            // (`max` is exact, so the order does not matter).
+            gains.fill(0.0);
+            for plane in input.iter() {
+                for (p, x) in gains.iter_mut().zip(&plane.samples()[start..end]) {
+                    *p = fold_peak(*p, x.convert_to::<f32>());
+                }
             }
-        }
 
-        // The recursive half: the envelope and the sliding minimum, one frame at a time;
-        // each frame's peak becomes its window-minimum gain.
-        for (p, i) in peaks.iter_mut().zip(frames.clone()) {
-            let gain = Self::target_gain(&target, feed, i, *p);
-            // The instant attack: an unset envelope (`+inf`) takes its first target here.
-            if gain < *envelope {
-                *envelope = gain;
-            } else {
-                *envelope = Smoother::toward(*envelope, gain, target.release);
+            // The recursive half: the envelope and the sliding minimum, one frame at a
+            // time; each frame's peak becomes its window-minimum gain.
+            for (k, g) in gains.iter_mut().enumerate() {
+                let target = self.target_gain(&lanes, start + k, *g);
+                // The instant attack: an unset envelope (`+inf`) takes its first target here.
+                if target < self.envelope {
+                    self.envelope = target;
+                } else {
+                    self.envelope = Smoother::toward(self.envelope, target, self.design.release);
+                }
+                *g = self.ring.push_gain(self.envelope);
             }
-            *p = ring.push_gain(*envelope);
-        }
 
-        for (c, (out, input)) in output.iter_mut().zip(feed.audio).enumerate() {
-            ring.delay_scaled(c, &input[frames.clone()], peaks, &mut out[frames.clone()]);
+            for c in 0..width {
+                self.ring.delay_scaled(
+                    c,
+                    &input.plane(c).samples()[start..end],
+                    gains,
+                    &mut output.plane_mut(c).samples_mut()[start..end],
+                );
+            }
+            start = end;
         }
-    }
-
-    fn effort(&self) -> Effort {
-        Effort::Moderate
     }
 }
 
