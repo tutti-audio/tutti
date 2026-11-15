@@ -102,7 +102,8 @@ pub use field::{
     SharpsFlats, U4, U7, U14, U28, first_non_seven_bit,
 };
 pub use flex_text::{
-    FlexText, FlexTextAssembler, FlexTextPackets, FlexTextStep, flex_text_packets,
+    FLEX_TEXT_MAX_LEN, FlexText, FlexTextAssembler, FlexTextPackets, FlexTextStep,
+    flex_text_packets,
 };
 pub use held_keys::{KeyBitset, Lane, LaneSet};
 pub use manufacturer::{ManufacturerId, NotManufacturerId};
