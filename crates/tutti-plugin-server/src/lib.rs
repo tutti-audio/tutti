@@ -157,7 +157,7 @@ pub(crate) mod test_utils {
     // Every import here belongs to the probe-path helpers, which are gated to
     // the format whose reference plugin they find.
     // `Path` belongs to the VST3 bundle walk; CLAP only resolves a path string.
-    #[cfg(any(feature = "clap", feature = "vst3"))]
+    #[cfg(feature = "vst3")]
     use std::path::Path;
     #[cfg(any(feature = "clap", feature = "vst3"))]
     use std::sync::OnceLock;

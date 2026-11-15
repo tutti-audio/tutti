@@ -17,7 +17,7 @@ use tutti_types::MaxBlock;
 
 use support::{clap_probe, plugin_server};
 use tutti_cpal::{ManualStreamDriver, OutputSpec};
-use tutti_plugin::catalog::PluginRef;
+use tutti_plugin::catalog::{Loadable, PluginRef};
 use tutti_plugin::handles::PluginClient;
 use tutti_session::{
     Bounce, BounceLatency, BounceTail, BufferMaster, Crossfade, ExportClock, OutPort, PHASES,
@@ -219,7 +219,7 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
     let incoming = PluginClient::new(
         tutti_plugin::BridgeConfig::default(),
         &tutti_fixtures::detached_work(),
-        &PluginRef::file(clap_probe()).expect("a plugin file"),
+        &Loadable::uncatalogued(PluginRef::file(clap_probe()).expect("a plugin file")),
         RATE,
     )
     .expect("load a second instance of the reference plugin");
@@ -286,7 +286,7 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
     let client = PluginClient::new(
         tutti_plugin::BridgeConfig::default(),
         &tutti_fixtures::detached_work(),
-        &PluginRef::file(clap_probe()).expect("a plugin file"),
+        &Loadable::uncatalogued(PluginRef::file(clap_probe()).expect("a plugin file")),
         RATE,
     )
     .expect("the reference plugin loads");

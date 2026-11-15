@@ -292,7 +292,7 @@ impl PluginLoad {
         let opened = if let Some(refusal) = refused {
             Opened::Done(Box::new(Open::refused(refusal)))
         } else if self.opens_in_process() {
-            Opened::OnMain(self)
+            Opened::OnMain(Box::new(self))
         } else {
             Opened::Done(Box::new(self.open(None)))
         };
@@ -397,7 +397,7 @@ enum Opened {
     /// larger than an unopened load.
     Done(Box<Open>),
     /// Hosted in process: opened by `add_plugin`, on the main thread.
-    OnMain(PluginLoad),
+    OnMain(Box<PluginLoad>),
 }
 
 /// What became of the state a reload was to restore.
@@ -1339,7 +1339,7 @@ impl Session {
         } = match loaded.opened {
             Opened::Done(open) => *open,
             // A plugin hosted in process opens here, on the main thread.
-            Opened::OnMain(load) => load.open(Some(main)),
+            Opened::OnMain(load) => (*load).open(Some(main)),
         };
         let plugin = plugin?;
         let handle = plugin.handle().clone();
