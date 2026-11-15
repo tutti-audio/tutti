@@ -51,13 +51,12 @@ pub fn rolling_state(outputs: usize) -> (Transport, Arc<AudioCallbackState>) {
     let transport = Transport::new(SampleRate::of(SAMPLE_RATE));
     let engine = graph_engine(&transport, |ed| {
         let (source, filter) = (NodeKey(1), NodeKey(2));
-        ed.insert(source, "sine", Osc::sine(Hz(220.0))).controls;
-        ed.insert(
+        let _ = ed.insert(source, "sine", Osc::sine(Hz(220.0)));
+        let _ = ed.insert(
             filter,
             "filter",
             SvfFilterNode::<f64>::new(SvfType::LowPass, Hz(2_000.0), Q(0.7)),
-        )
-        .controls;
+        );
         ed.spec_mut().topology.edges.insert(
             InPort {
                 node: filter,
@@ -86,7 +85,7 @@ pub fn rolling_state(outputs: usize) -> (Transport, Arc<AudioCallbackState>) {
 /// matrix assertable.
 pub fn dc_state(level: f32, outputs: usize) -> Arc<AudioCallbackState> {
     let engine = graph_engine(&Transport::new(SampleRate::of(SAMPLE_RATE)), |ed| {
-        ed.insert(NodeKey(1), "dc", Const::mono(level)).controls;
+        let _ = ed.insert(NodeKey(1), "dc", Const::mono(level));
         fan(ed, NodeKey(1), outputs);
     });
     Arc::new(AudioCallbackState::new(engine))

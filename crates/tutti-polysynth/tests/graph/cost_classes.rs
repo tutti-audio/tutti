@@ -100,18 +100,16 @@ fn graph(workers: usize, declared: bool) -> Executor {
     ed.spec_mut().topology.set_outputs([Source::Zero; 2]);
     for k in 0..sources {
         let (clip, key) = (NodeKey(100 + k), NodeKey(k + 1));
-        ed.insert(clip, "clip", MidiClipNode::new(notes(k)))
-            .controls;
+        let _ = ed.insert(clip, "clip", MidiClipNode::new(notes(k)));
         match (k < LIGHT, declared) {
             (true, true) => {
-                ed.insert(key, "synth", synth(8, 1)).controls;
+                let _ = ed.insert(key, "synth", synth(8, 1));
             }
             (true, false) => {
-                ed.insert(key, "synth", Unforkable(Undeclared(synth(8, 1))))
-                    .controls;
+                let _ = ed.insert(key, "synth", Unforkable(Undeclared(synth(8, 1))));
             }
             (false, _) => {
-                ed.insert(key, "synth", synth(32, 1)).controls;
+                let _ = ed.insert(key, "synth", synth(32, 1));
             }
         }
         ed.spec_mut().connect_events(

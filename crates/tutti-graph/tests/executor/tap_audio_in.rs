@@ -51,15 +51,14 @@ fn tap_with_ring(frames: &[(f32, f32)], ring: usize) -> TapReader {
         SampleRate::SR_48K,
         MaxBlock::of(Samples(BLOCK)),
     ));
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(1),
         "play",
         Unforkable(Play {
             frames: frames.to_vec(),
             at: 0,
         }),
-    )
-    .controls;
+    );
     let port = |port| {
         Origin::Node(OutPort {
             node: NodeKey(1),

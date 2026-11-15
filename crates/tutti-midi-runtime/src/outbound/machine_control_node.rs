@@ -65,7 +65,7 @@ impl MachineControlControls {
 ///
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
 /// let node = MachineControlNode::new(MidiGroup::FIRST, Recipient::AllCall, MtcRate::Fps30);
-/// let controls = editor.insert(NodeKey(1), "mmc", node);
+/// let controls = editor.insert(NodeKey(1), "mmc", node).controls;
 /// assert_eq!(controls.losses().total(), 0);
 /// ```
 #[derive(Debug)]

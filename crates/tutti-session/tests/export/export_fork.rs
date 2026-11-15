@@ -327,9 +327,7 @@ fn the_trim_is_read_after_the_prepare_hook() {
         |prepared: PreparedGraph<'_>| {
             let key = prepared.fresh_key();
             let editor = prepared.editor;
-            editor
-                .insert(key, "test:late", ForkByClone(Late { pos: 0 }))
-                .controls;
+            let _ = editor.insert(key, "test:late", ForkByClone(Late { pos: 0 }));
             for out in editor.spec_mut().topology.outputs.iter_mut() {
                 *out = vec![tutti_graph::Source::Node(tutti_graph::OutPort {
                     node: key,
@@ -471,9 +469,7 @@ fn a_prepare_hook_reaches_the_graph_that_gets_rendered() {
         // Replace the whole graph's output with a constant.
         let key = prepared.fresh_key();
         let editor = prepared.editor;
-        editor
-            .insert(key, "test:level", Const::mono(level))
-            .controls;
+        let _ = editor.insert(key, "test:level", Const::mono(level));
         for out in editor.spec_mut().topology.outputs.iter_mut() {
             *out = vec![tutti_graph::Source::Node(tutti_graph::OutPort {
                 node: key,

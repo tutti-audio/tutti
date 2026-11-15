@@ -135,7 +135,7 @@ fn rig(p: Prepare) -> Rig {
     let (exec_inbox, ref_inbox) = (Inbox::default(), Inbox::default());
     let (mut ed, mut exec) = Editor::new(p);
     for (k, u) in units(&exec_inbox) {
-        ed.insert(k, "n", Unforkable(u)).controls;
+        let _ = ed.insert(k, "n", Unforkable(u));
     }
     wire(&mut ed);
     ed.commit().expect("commits");
@@ -240,7 +240,7 @@ fn rig_reference(p: Prepare) -> Solo {
     let inbox = Inbox::default();
     let (mut ed, _exec) = Editor::new(p);
     for (k, u) in units(&Inbox::default()) {
-        ed.insert(k, "n", Unforkable(u)).controls;
+        let _ = ed.insert(k, "n", Unforkable(u));
     }
     wire(&mut ed);
     let mut reference = Reference::new(p);
@@ -317,8 +317,7 @@ fn a_rate_change_resets_rings_and_flushes_pending_events() {
 #[test]
 fn a_feedback_edge_shorter_than_the_new_block_is_refused_first() {
     let (mut ed, mut exec) = Editor::new(prep(48_000.0, 64));
-    ed.insert(LAG, "smooth", Unforkable(TestNode::new(Kind::Smooth)))
-        .controls;
+    let _ = ed.insert(LAG, "smooth", Unforkable(TestNode::new(Kind::Smooth)));
     let at = InPort { node: LAG, port: 0 };
     ed.spec_mut().topology.edges.insert(
         at,
@@ -380,7 +379,7 @@ fn every_unit_is_re_prepared_and_its_new_latency_compiled() {
     };
     let (mut ed, mut exec) = Editor::new(prep(48_000.0, 64));
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
-    ed.insert(LAG, "look", Unforkable(unit(&log))).controls;
+    let _ = ed.insert(LAG, "look", Unforkable(unit(&log)));
     ed.spec_mut().topology.edges.insert(
         InPort { node: LAG, port: 0 },
         vec![Edge::Direct(Source::Global(0))],
@@ -394,7 +393,7 @@ fn every_unit_is_re_prepared_and_its_new_latency_compiled() {
     assert_eq!(exec.plan().unwrap().total_latency().samples(), Samples(48));
 
     // Uncommitted: inserted and wired, then the rate changes.
-    ed.insert(SUM, "look", Unforkable(unit(&log))).controls;
+    let _ = ed.insert(SUM, "look", Unforkable(unit(&log)));
     ed.spec_mut().topology.edges.insert(
         InPort { node: SUM, port: 0 },
         vec![Edge::Direct(Source::Node(OutPort { node: LAG, port: 0 }))],
@@ -568,8 +567,7 @@ fn assert_poisoned(mut ed: Editor, mut exec: Executor, cause: &str) {
 #[test]
 fn a_panic_in_prepare_poisons_the_editor() {
     let (mut ed, mut exec) = Editor::new(prep(48_000.0, 64));
-    ed.insert(NodeKey(1), "fragile", Unforkable(FragileAt96k))
-        .controls;
+    let _ = ed.insert(NodeKey(1), "fragile", Unforkable(FragileAt96k));
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort {
@@ -587,21 +585,19 @@ fn a_panic_in_prepare_poisons_the_editor() {
 #[test]
 fn a_resolution_that_coarsens_on_prepare_poisons_the_editor() {
     let (mut ed, mut exec) = Editor::new(prep(48_000.0, 64));
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(0),
         "emit",
         Unforkable(TestNode::new(Kind::Emitter {
             period: 5,
             phase: 0,
         })),
-    )
-    .controls;
-    ed.insert(
+    );
+    let _ = ed.insert(
         NodeKey(1),
         "coarse",
         Unforkable(CoarseAt96k(tutti_graph::Resolution::Sample)),
-    )
-    .controls;
+    );
     let (from, at) = (
         EventOut {
             node: NodeKey(0),

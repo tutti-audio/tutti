@@ -520,15 +520,14 @@ fn graph(
     let mut writers = Vec::new();
     for k in 1..=u64::from(n) {
         let (node, writer) = EventInletNode::pair(EventCapacity::of(256));
-        ed.insert(NodeKey(k), "inlet", node).controls;
+        let _ = ed.insert(NodeKey(k), "inlet", node);
         writers.push(writer);
     }
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(10),
         "consumer",
         Forkable(Kind::Consumer { inputs: n }),
-    )
-    .controls;
+    );
     for k in 1..=n {
         ed.spec_mut().connect_events(
             EventIn {
@@ -545,25 +544,23 @@ fn graph(
     // a thread: the plan is spread on a pool only when that pays.
     for c in (0..4u64).filter(|_| heavy) {
         let base = 100 + c * 10;
-        ed.insert(
+        let _ = ed.insert(
             NodeKey(base),
             "const",
             Forkable(Kind::Const {
                 value: 0.25,
                 width: 1,
             }),
-        )
-        .controls;
+        );
         for g in 1..4u64 {
-            ed.insert(
+            let _ = ed.insert(
                 NodeKey(base + g),
                 "gain",
                 Forkable(Kind::Gain {
                     gain: 0.5,
                     width: 1,
                 }),
-            )
-            .controls;
+            );
             ed.spec_mut().topology.connect(
                 InPort {
                     node: NodeKey(base + g),
@@ -574,8 +571,7 @@ fn graph(
         }
     }
     let sum = if heavy { 5 } else { 1 };
-    ed.insert(NodeKey(30), "sum", Forkable(Kind::Sum { inputs: sum }))
-        .controls;
+    let _ = ed.insert(NodeKey(30), "sum", Forkable(Kind::Sum { inputs: sum }));
     let topology = &mut ed.spec_mut().topology;
     topology.connect(
         InPort {

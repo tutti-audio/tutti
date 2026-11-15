@@ -1064,21 +1064,19 @@ fn nodes_default_to_sample_resolution() {
 #[test]
 fn removing_a_node_removes_its_resolution_marks() {
     let (mut ed, _exec) = tutti_graph::Editor::new(common::prepare(PREP));
-    ed.insert(
+    let _ = ed.insert(
         A,
         "emit",
         Unforkable(common::TestNode::new(Kind::Emitter {
             period: 4,
             phase: 0,
         })),
-    )
-    .controls;
-    ed.insert(
+    );
+    let _ = ed.insert(
         B,
         "consume",
         Unforkable(common::TestNode::new(Kind::Consumer { inputs: 1 })),
-    )
-    .controls;
+    );
     let (from, at) = (EventOut { node: A, port: 0 }, EventIn { node: B, port: 0 });
     ed.spec_mut().connect_events(at, EventEdge::Direct(from));
     ed.spec_mut()
@@ -1095,21 +1093,19 @@ fn removing_a_node_removes_its_resolution_marks() {
 #[test]
 fn disconnecting_an_edge_drops_its_resolution_mark() {
     let (mut ed, _exec) = tutti_graph::Editor::new(common::prepare(PREP));
-    ed.insert(
+    let _ = ed.insert(
         A,
         "emit",
         Unforkable(common::TestNode::new(Kind::Emitter {
             period: 4,
             phase: 0,
         })),
-    )
-    .controls;
-    ed.insert(
+    );
+    let _ = ed.insert(
         B,
         "consume",
         Unforkable(common::TestNode::new(Kind::Consumer { inputs: 1 })),
-    )
-    .controls;
+    );
     let (from, at) = (EventOut { node: A, port: 0 }, EventIn { node: B, port: 0 });
     ed.spec_mut().connect_events(at, EventEdge::Direct(from));
     ed.spec_mut()

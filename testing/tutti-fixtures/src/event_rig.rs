@@ -131,13 +131,11 @@ impl EventRig {
             MaxBlock::of(Samples(max_block)),
         ));
         let seen = Seen::default();
-        editor
-            .insert(
-                Self::SINK,
-                "sink",
-                ForkByClone(Sink::new(ports, &seen, output)),
-            )
-            .controls;
+        let _ = editor.insert(
+            Self::SINK,
+            "sink",
+            ForkByClone(Sink::new(ports, &seen, output)),
+        );
         if output == Output::Mono {
             editor
                 .spec_mut()

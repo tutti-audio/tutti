@@ -38,17 +38,16 @@ fn build_engine_with_chain() -> Engine {
         MaxBlock::of(Samples(512)),
     ));
     let [osc, eq, strip, limiter] = [1, 2, 3, 4].map(NodeKey);
-    ed.insert(osc, "osc", Osc::sine(Hz(440.0))).controls;
-    ed.insert(
+    let _ = ed.insert(osc, "osc", Osc::sine(Hz(440.0)));
+    let _ = ed.insert(
         eq,
         "eq",
         EqBandNode::<f64>::new(SvfType::Bell, Hz(1_000.0), Q(1.0), Db(6.0)),
-    )
-    .controls;
-    ed.insert(strip, "strip", BusStripNode::stereo()).controls;
+    );
+    let _ = ed.insert(strip, "strip", BusStripNode::stereo());
     // The limiter's lookahead ring is sized at the prepared rate, on the
     // control thread, when the commit prepares it: outside the gate.
-    ed.insert(
+    let _ = ed.insert(
         limiter,
         "limiter",
         LimiterNode::stereo(LimiterControls {
@@ -56,8 +55,7 @@ fn build_engine_with_chain() -> Engine {
             ceiling: Db(-0.3),
             ..LimiterControls::DEFAULT
         }),
-    )
-    .controls;
+    );
     let topology = &mut ed.spec_mut().topology;
     let mut wire = |node: NodeKey, port: u16, from: NodeKey, out: u16| {
         topology.edges.insert(

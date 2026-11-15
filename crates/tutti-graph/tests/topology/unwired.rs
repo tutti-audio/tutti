@@ -81,7 +81,7 @@ fn ein(node: NodeKey, port: u16) -> EventIn {
 fn rig() -> (Editor, Executor) {
     let (mut ed, mut exec) = Editor::new(prepare(128));
     for key in [A, X, B] {
-        ed.insert(key, "ported", Unforkable(ported(3, 3))).controls;
+        let _ = ed.insert(key, "ported", Unforkable(ported(3, 3)));
     }
     let spec = ed.spec_mut();
     for (at, from) in [
@@ -204,7 +204,7 @@ fn a_narrower_shape_drops_exactly_the_event_edges_to_missing_ports() {
 #[test]
 fn a_surviving_edge_keeps_its_gain_and_its_fade() {
     let (mut ed, _exec) = rig();
-    ed.insert(X, "ported", Unforkable(narrow())).controls;
+    let _ = ed.insert(X, "ported", Unforkable(narrow()));
     let kept = ed.spec().gains[&id(inp(X, 0), direct(A, 0))];
     assert_eq!(kept.base, Amplitude::new(0.25));
     assert_eq!(kept.fade, EdgeFade::In);
@@ -220,7 +220,7 @@ fn a_surviving_edge_keeps_its_gain_and_its_fade() {
 #[test]
 fn the_commit_after_a_narrower_shape_goes_through() {
     let (mut ed, mut exec) = rig();
-    ed.insert(X, "ported", Unforkable(narrow())).controls;
+    let _ = ed.insert(X, "ported", Unforkable(narrow()));
     ed.commit().expect("nothing names a port X lacks");
     exec.apply_pending();
     ed.collect();
@@ -305,9 +305,9 @@ fn bused(with_aux: bool) -> Ported {
 fn bus_edges_to_a_missing_bus_are_dropped() {
     let (mut ed, _exec) = Editor::new(prepare(128));
     let (s, y, t) = (NodeKey(1), NodeKey(2), NodeKey(3));
-    ed.insert(s, "bused", Unforkable(bused(true))).controls;
-    ed.insert(y, "bused", Unforkable(bused(true))).controls;
-    ed.insert(t, "bused", Unforkable(bused(true))).controls;
+    let _ = ed.insert(s, "bused", Unforkable(bused(true)));
+    let _ = ed.insert(y, "bused", Unforkable(bused(true)));
+    let _ = ed.insert(t, "bused", Unforkable(bused(true)));
     let feeds = [
         (BusSource::Node(BusRef::new(s, 0)), BusRef::new(y, 0)),
         (BusSource::Node(BusRef::new(s, 1)), BusRef::new(y, 1)),
@@ -420,10 +420,8 @@ fn a_lost_banded_output_bus_drops_its_feeds_by_band_and_to_the_root() {
     let (mut ed, _exec) = Editor::new(prepare(128));
     let (y, t) = (NodeKey(2), NodeKey(3));
     let banded = Some(Bus::new(stereo(), BusRole::Aux));
-    ed.insert(y, "bused", Unforkable(stereo_bus_node(banded)))
-        .controls;
-    ed.insert(t, "bused", Unforkable(stereo_bus_node(banded)))
-        .controls;
+    let _ = ed.insert(y, "bused", Unforkable(stereo_bus_node(banded)));
+    let _ = ed.insert(t, "bused", Unforkable(stereo_bus_node(banded)));
     ed.spec_mut().root = Some(stereo());
     let main_to_root = BusSource::Node(BusRef::new(y, 0));
     let band0 = BusSource::Node(BusRef::band(y, 1, 0));
@@ -469,7 +467,7 @@ fn a_lost_banded_output_bus_drops_its_feeds_by_band_and_to_the_root() {
 fn a_tap_lane_on_a_lost_port_reads_silence() {
     let (mut ed, mut exec) = Editor::new(prepare(64));
     let konst = |width| Unforkable(TestNode::new(Kind::Const { value: 0.5, width }));
-    ed.insert(X, "const", konst(2)).controls;
+    let _ = ed.insert(X, "const", konst(2));
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(out(X, 0))]);

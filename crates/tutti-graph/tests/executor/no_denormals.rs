@@ -79,7 +79,7 @@ fn render_probes(workers: usize, entry: Entry) {
     }
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     for k in 1..=PROBES {
-        ed.insert(NodeKey(k), "probe", Unforkable(Probe)).controls;
+        let _ = ed.insert(NodeKey(k), "probe", Unforkable(Probe));
         ed.spec_mut().topology.edges.insert(
             InPort {
                 node: NodeKey(k),

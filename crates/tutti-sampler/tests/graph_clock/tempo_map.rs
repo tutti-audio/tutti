@@ -135,14 +135,14 @@ fn render(
             .expect("a placeable wave");
             let mut pool = VoicePool::new().with_tempo(transport.settings().tempo_reader());
             pool.insert(SlotId(1), source, Playback::default());
-            ed.insert(NodeKey(1), "voice", pool).controls;
+            let _ = ed.insert(NodeKey(1), "voice", pool);
         }
         // Free-running: a node of its own, from its first frame, at its own
         // speed, on no window.
         None => {
             let source = MemorySource::new(wave).expect("a placeable wave");
             source.trigger();
-            ed.insert(NodeKey(1), "voice", source).controls;
+            let _ = ed.insert(NodeKey(1), "voice", source);
         }
     }
     ed.spec_mut().topology.set_outputs((0..2).map(|port| {

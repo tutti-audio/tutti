@@ -349,15 +349,14 @@ impl Node for PanicsAt {
 
 fn panicking_state(calls: &Arc<AtomicUsize>, panic_at: usize) -> Arc<AudioCallbackState> {
     let engine = graph_engine(&Transport::new(SampleRate::of(SAMPLE_RATE)), |ed| {
-        ed.insert(
+        let _ = ed.insert(
             NodeKey(1),
             "panics",
             ForkByClone(PanicsAt {
                 calls: Arc::clone(calls),
                 panic_at,
             }),
-        )
-        .controls;
+        );
         fan(ed, NodeKey(1), 2);
     });
     Arc::new(AudioCallbackState::new(engine))

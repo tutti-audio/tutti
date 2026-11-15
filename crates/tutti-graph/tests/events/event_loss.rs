@@ -112,27 +112,25 @@ fn rig(
     }
     let ports: u16 = writers.iter().map(|w| w.len() as u16).sum();
     let seen = Arc::new(Mutex::new(vec![(0, 0); ports as usize]));
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(100),
         "counter",
         tutti_graph::Unforkable(Counter {
             ports,
             seen: Arc::clone(&seen),
         }),
-    )
-    .controls;
+    );
     let mut next = 0;
     for (i, scripts) in writers.iter().enumerate() {
         let key = NodeKey(1 + i as u64);
-        ed.insert(
+        let _ = ed.insert(
             key,
             "writer",
             tutti_graph::Unforkable(Writer {
                 cap,
                 scripts: scripts.clone(),
             }),
-        )
-        .controls;
+        );
         for p in 0..scripts.len() {
             ed.spec_mut().connect_events(
                 EventIn {

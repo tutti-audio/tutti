@@ -312,8 +312,7 @@ fn wire_events(ed: &mut Editor, from: u64, to: u64) {
 
 /// A `Tap` at `tap` on `from`'s events, its four outputs appended.
 fn tap(ed: &mut Editor, from: u64, tap: u64) {
-    ed.insert(NodeKey(tap), "tap", ForkByClone(Tap::default()))
-        .controls;
+    let _ = ed.insert(NodeKey(tap), "tap", ForkByClone(Tap::default()));
     wire_events(ed, from, tap);
     ed.spec_mut()
         .topology
@@ -341,8 +340,7 @@ fn lane_to_probe(
     lane: u64,
     probe: u64,
 ) {
-    ed.insert(NodeKey(probe), "probe", ForkByClone(Probe))
-        .controls;
+    let _ = ed.insert(NodeKey(probe), "probe", ForkByClone(Probe));
     ed.spec_mut().topology.outputs.push(vec![out(probe, 0)]);
     ed.set_param_range(cutoff(probe), ParamRange::new(0.0, 1.0))
         .expect("a probe");
@@ -363,7 +361,7 @@ fn lane_to_probe(
         Some(Arc::new(AtomicF32::new(knob)).into()),
         Some(ed.param_range_cell(cutoff(probe)).expect("committed")),
     );
-    ed.insert(NodeKey(lane), "lane", node).controls;
+    let _ = ed.insert(NodeKey(lane), "lane", node);
     ed.spec_mut().connect_param(
         cutoff(probe),
         EventOut {
@@ -486,14 +484,12 @@ fn adsr(a: f32, d: f32, s: f32, r: f32) -> Adsr {
 /// committed, at most `max` frames a block.
 fn envelope_rig(max: usize, plan: Vec<(u64, [u32; 4])>, adsr: Adsr) -> (Editor, Executor) {
     let (mut ed, exec) = editor(max);
-    ed.insert(NodeKey(1), "midi", ForkByClone(Midi { plan }))
-        .controls;
-    ed.insert(
+    let _ = ed.insert(NodeKey(1), "midi", ForkByClone(Midi { plan }));
+    let _ = ed.insert(
         NodeKey(2),
         "envelope",
         ForkByClone(NoteEnvelopeNode::new(SourceId(1), adsr)),
-    )
-    .controls;
+    );
     wire_events(&mut ed, 1, 2);
     tap(&mut ed, 2, 3);
     ed.commit().expect("commits");
@@ -524,21 +520,19 @@ fn piece(tap: &[Vec<f32>], f: usize) -> (f32, f32) {
 fn a_follower_lags_one_step_at_any_block_size() {
     let render = |sizes: &[usize]| {
         let (mut ed, mut exec) = editor(128);
-        ed.insert(
+        let _ = ed.insert(
             NodeKey(1),
             "pulse",
             ForkByClone(Pulse {
                 width: ChannelLayout::MONO,
                 on: vec![(100, u64::MAX, 1.0)],
             }),
-        )
-        .controls;
-        ed.insert(
+        );
+        let _ = ed.insert(
             NodeKey(2),
             "follower",
             ForkByClone(follower(5, 0.002, 0.05, ChannelLayout::MONO)),
-        )
-        .controls;
+        );
         wire_audio(&mut ed, 1, 2, 1);
         tap(&mut ed, 2, 3);
         ed.commit().expect("commits");
@@ -600,41 +594,37 @@ fn a_follower_lags_one_step_at_any_block_size() {
 #[test]
 fn a_follower_and_a_note_envelope_reset_at_play_start() {
     let (mut ed, mut exec) = editor(128);
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(1),
         "pulse",
         ForkByClone(Pulse {
             width: ChannelLayout::MONO,
             on: vec![(0, u64::MAX, 1.0)],
         }),
-    )
-    .controls;
-    ed.insert(
+    );
+    let _ = ed.insert(
         NodeKey(2),
         "follower",
         ForkByClone(follower(5, 0.001, 0.05, ChannelLayout::MONO)),
-    )
-    .controls;
+    );
     wire_audio(&mut ed, 1, 2, 1);
     tap(&mut ed, 2, 3);
     let s = 3 * 128 + 37;
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(4),
         "midi",
         ForkByClone(Midi {
             plan: vec![(10, note_on(60)), (s as u64 + 100, note_off(60))],
         }),
-    )
-    .controls;
-    ed.insert(
+    );
+    let _ = ed.insert(
         NodeKey(5),
         "envelope",
         ForkByClone(NoteEnvelopeNode::new(
             SourceId(6),
             adsr(0.001, 0.002, 0.6, 0.01),
         )),
-    )
-    .controls;
+    );
     wire_events(&mut ed, 4, 5);
     tap(&mut ed, 5, 6);
     ed.commit().expect("commits");
@@ -718,8 +708,7 @@ fn a_note_envelopes_stages_land_on_their_frames() {
     ];
     let render = |sizes: &[usize]| {
         let (mut ed, mut exec) = editor(128);
-        ed.insert(NodeKey(1), "midi", ForkByClone(Midi { plan: plan.clone() }))
-            .controls;
+        let _ = ed.insert(NodeKey(1), "midi", ForkByClone(Midi { plan: plan.clone() }));
         let decl = SignalSource {
             id: SourceId(3),
             kind: SignalKind::NoteEnvelope {
@@ -728,8 +717,7 @@ fn a_note_envelopes_stages_land_on_their_frames() {
         };
         let node = NoteEnvelopeNode::from_decl(&decl).expect("a note envelope");
         assert_eq!(node.source(), SourceId(3));
-        ed.insert(NodeKey(2), "envelope", ForkByClone(node))
-            .controls;
+        let _ = ed.insert(NodeKey(2), "envelope", ForkByClone(node));
         wire_events(&mut ed, 1, 2);
         tap(&mut ed, 2, 3);
         ed.commit().expect("commits");
@@ -830,21 +818,19 @@ fn from_decl_builds_its_own_kind() {
 #[test]
 fn a_kick_ducks_the_pad_through_a_lane() {
     let (mut ed, mut exec) = editor(128);
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(1),
         "kick",
         ForkByClone(Pulse {
             width: ChannelLayout::STEREO,
             on: vec![(4_800, 7_200, 0.8)],
         }),
-    )
-    .controls;
-    ed.insert(
+    );
+    let _ = ed.insert(
         NodeKey(2),
         "follower",
         ForkByClone(follower(7, 0.001, 0.05, ChannelLayout::STEREO)),
-    )
-    .controls;
+    );
     // Crossed: the pulse's full channel (0) on the follower's right, so
     // the peak is not the first channel.
     for (from, to) in [(0, 1), (1, 0)] {
@@ -904,33 +890,29 @@ fn a_kick_ducks_the_pad_through_a_lane() {
 #[test]
 fn an_export_is_the_live_render_for_signal_sources() {
     let (mut ed, mut exec) = editor(128);
-    ed.insert(NodeKey(1), "kick", ForkByClone(Kick { bleed: 0.8 }))
-        .controls;
-    ed.insert(
+    let _ = ed.insert(NodeKey(1), "kick", ForkByClone(Kick { bleed: 0.8 }));
+    let _ = ed.insert(
         NodeKey(2),
         "follower",
         ForkByClone(follower(3, 0.002, 0.08, ChannelLayout::STEREO)),
-    )
-    .controls;
+    );
     wire_audio(&mut ed, 1, 2, 2);
     lane_to_probe(&mut ed, 2, 3, -0.6, 0.8, 3, 4);
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(5),
         "clip",
         ForkByClone(Seq {
             stopped_on: Some(50),
         }),
-    )
-    .controls;
-    ed.insert(
+    );
+    let _ = ed.insert(
         NodeKey(6),
         "envelope",
         ForkByClone(NoteEnvelopeNode::new(
             SourceId(4),
             adsr(0.002, 0.003, 0.4, 0.2),
         )),
-    )
-    .controls;
+    );
     wire_events(&mut ed, 5, 6);
     lane_to_probe(&mut ed, 6, 4, 0.5, 0.2, 7, 8);
     ed.commit().expect("commits");
@@ -1142,21 +1124,19 @@ fn a_refused_segment_is_resent_resumed() {
 #[test]
 fn a_long_release_decays_at_its_own_rate() {
     let (mut ed, mut exec) = editor(128);
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(1),
         "pulse",
         ForkByClone(Pulse {
             width: ChannelLayout::MONO,
             on: vec![(0, 4_800, 1.0)],
         }),
-    )
-    .controls;
-    ed.insert(
+    );
+    let _ = ed.insert(
         NodeKey(2),
         "follower",
         ForkByClone(follower(1, 0.0, 1_000.0, ChannelLayout::MONO)),
-    )
-    .controls;
+    );
     wire_audio(&mut ed, 1, 2, 1);
     tap(&mut ed, 2, 3);
     ed.commit().expect("commits");
@@ -1174,21 +1154,19 @@ fn a_long_release_decays_at_its_own_rate() {
 #[test]
 fn a_zero_attack_and_release_follow_exactly() {
     let (mut ed, mut exec) = editor(128);
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(1),
         "pulse",
         ForkByClone(Pulse {
             width: ChannelLayout::MONO,
             on: vec![(0, 500, 0.6), (500, 1_000, 0.25)],
         }),
-    )
-    .controls;
-    ed.insert(
+    );
+    let _ = ed.insert(
         NodeKey(2),
         "follower",
         ForkByClone(follower(1, 0.0, 0.0, ChannelLayout::MONO)),
-    )
-    .controls;
+    );
     wire_audio(&mut ed, 1, 2, 1);
     tap(&mut ed, 2, 3);
     ed.commit().expect("commits");
@@ -1214,21 +1192,19 @@ fn a_zero_attack_and_release_follow_exactly() {
 #[test]
 fn an_infinite_release_holds_the_peak() {
     let (mut ed, mut exec) = editor(128);
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(1),
         "pulse",
         ForkByClone(Pulse {
             width: ChannelLayout::MONO,
             on: vec![(0, 500, 0.6)],
         }),
-    )
-    .controls;
-    ed.insert(
+    );
+    let _ = ed.insert(
         NodeKey(2),
         "follower",
         ForkByClone(follower(1, 0.0, f32::INFINITY, ChannelLayout::MONO)),
-    )
-    .controls;
+    );
     wire_audio(&mut ed, 1, 2, 1);
     tap(&mut ed, 2, 3);
     ed.commit().expect("commits");
@@ -1257,21 +1233,19 @@ fn an_infinite_release_holds_the_peak() {
 fn past_its_capacity_a_follower_thins_its_grid() {
     const LEN: usize = 16_384;
     let (mut ed, mut exec) = editor(LEN);
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(1),
         "pulse",
         ForkByClone(Pulse {
             width: ChannelLayout::MONO,
             on: vec![(0, u64::MAX, 1.0)],
         }),
-    )
-    .controls;
-    ed.insert(
+    );
+    let _ = ed.insert(
         NodeKey(2),
         "follower",
         ForkByClone(follower(1, 0.5, 1.0, ChannelLayout::MONO)),
-    )
-    .controls;
+    );
     wire_audio(&mut ed, 1, 2, 1);
     tap(&mut ed, 2, 3);
     ed.commit().expect("commits");

@@ -76,8 +76,7 @@ fn render(exec: &mut Executor, outs: usize) {
 fn one_napper() -> (Editor, Executor, Placements) {
     let placements = Placements::default();
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
-    ed.insert(NAP, "napper", ForkByClone(Napper::new(&placements)))
-        .controls;
+    let _ = ed.insert(NAP, "napper", ForkByClone(Napper::new(&placements)));
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort { node: NAP, port: 0 })]);
@@ -205,12 +204,10 @@ fn run(workers: usize) -> (Vec<Vec<f32>>, Vec<[usize; 3]>) {
     }
     let keys = [NodeKey(10), NodeKey(11), NodeKey(12)];
     for key in keys {
-        ed.insert(key, "napper", Unforkable(Napper::new(&placements)))
-            .controls;
+        let _ = ed.insert(key, "napper", Unforkable(Napper::new(&placements)));
     }
     let pulse = NodeKey(20);
-    ed.insert(pulse, "pulse", Unforkable(Pulse::new(5)))
-        .controls;
+    let _ = ed.insert(pulse, "pulse", Unforkable(Pulse::new(5)));
     let outputs: Vec<Source> = keys
         .iter()
         .chain([&pulse])

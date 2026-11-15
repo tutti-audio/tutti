@@ -167,17 +167,15 @@ fn rig(workers: usize, no_alloc: bool, m: usize) -> Rig {
             common::test_pool(workers)
         }));
     }
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(90),
         "const",
         Forkable(Kind::Const {
             value: 1.0,
             width: 1,
         }),
-    )
-    .controls;
-    ed.insert(NodeKey(91), "lag", Forkable(Kind::Lag { latency: m }))
-        .controls;
+    );
+    let _ = ed.insert(NodeKey(91), "lag", Forkable(Kind::Lag { latency: m }));
     let t = &mut ed.spec_mut().topology;
     t.connect(
         InPort {
@@ -195,7 +193,7 @@ fn rig(workers: usize, no_alloc: bool, m: usize) -> Rig {
 }
 
 fn script(r: &mut Rig, key: u64, s: Script) {
-    r.ed.insert(NodeKey(key), "script", ForkByClone(s)).controls;
+    let _ = r.ed.insert(NodeKey(key), "script", ForkByClone(s));
 }
 
 fn commit(r: &mut Rig) {
@@ -767,7 +765,7 @@ fn fan_in(r: &mut Rig, probe_ports: usize) -> Arc<Mutex<Vec<TapEvent>>> {
     script(r, 1, Script::new(shared.clone()));
     script(r, 2, Script::new(shared).latency(15));
     let heard = Arc::new(Mutex::new(Vec::new()));
-    r.ed.insert(
+    let _ = r.ed.insert(
         NodeKey(3),
         "probe",
         ForkByClone(Probe {
@@ -775,8 +773,7 @@ fn fan_in(r: &mut Rig, probe_ports: usize) -> Arc<Mutex<Vec<TapEvent>>> {
             ports: probe_ports,
             capacity: 0,
         }),
-    )
-    .controls;
+    );
     for from in [1, 2] {
         r.ed.spec_mut().connect_events(
             EventIn {
@@ -898,7 +895,7 @@ fn an_aligned_input_tap_is_sized_for_every_source_of_the_input() {
         script(&mut r, key, s);
     }
     let heard = Arc::new(Mutex::new(Vec::new()));
-    r.ed.insert(
+    let _ = r.ed.insert(
         NodeKey(3),
         "probe",
         ForkByClone(Probe {
@@ -906,8 +903,7 @@ fn an_aligned_input_tap_is_sized_for_every_source_of_the_input() {
             ports: 1,
             capacity: 1,
         }),
-    )
-    .controls;
+    );
     for from in [1, 2] {
         r.ed.spec_mut().connect_events(
             EventIn {

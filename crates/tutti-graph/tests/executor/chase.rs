@@ -151,7 +151,7 @@ impl Node for Edge0 {
 /// One keeper at key 1 into the output; its event input is fed by nothing.
 fn rig(old: Keeper) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
-    ed.insert(NodeKey(1), "keeper", Unforkable(old)).controls;
+    let _ = ed.insert(NodeKey(1), "keeper", Unforkable(old));
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort {
@@ -185,13 +185,13 @@ fn the_chased_state_is_heard_on_the_incoming_nodes_first_block() {
     let set = cc(7, 100);
     let (mut ed, mut exec) = rig(Keeper::new(Some(set), true, 8, &log));
     assert_eq!(block(&mut exec)[0], data(&set), "the old node's state");
-    ed.replace(
-        NodeKey(1),
-        Unforkable(Keeper::new(None, true, 8, &log)),
-        cut(),
-    )
-    .expect("fits")
-    .controls;
+    let _ = ed
+        .replace(
+            NodeKey(1),
+            Unforkable(Keeper::new(None, true, 8, &log)),
+            cut(),
+        )
+        .expect("fits");
     ed.commit().expect("commits");
     let first = block(&mut exec);
     assert!(
@@ -207,13 +207,13 @@ fn a_node_that_does_not_chase_hands_nothing_over() {
     let log = Log::default();
     let (mut ed, mut exec) = rig(Keeper::new(Some(cc(7, 100)), false, 8, &log));
     block(&mut exec);
-    ed.replace(
-        NodeKey(1),
-        Unforkable(Keeper::new(None, true, 8, &log)),
-        cut(),
-    )
-    .expect("fits")
-    .controls;
+    let _ = ed
+        .replace(
+            NodeKey(1),
+            Unforkable(Keeper::new(None, true, 8, &log)),
+            cut(),
+        )
+        .expect("fits");
     ed.commit().expect("commits");
     assert!(block(&mut exec).iter().all(|&s| s == 0.0));
     assert!(log.lock().unwrap().is_empty());
@@ -228,13 +228,13 @@ fn a_crossfade_chases_the_incoming_node_alone() {
     let (mut ed, mut exec) = rig(Keeper::new(Some(set), true, 8, &old_log));
     block(&mut exec);
     let fade = Fade::new(Samples(4 * BLOCK), FadeLaw::EqualPower);
-    ed.replace(
-        NodeKey(1),
-        Unforkable(Keeper::new(None, true, 8, &new_log)),
-        fade,
-    )
-    .expect("fits")
-    .controls;
+    let _ = ed
+        .replace(
+            NodeKey(1),
+            Unforkable(Keeper::new(None, true, 8, &new_log)),
+            fade,
+        )
+        .expect("fits");
     ed.commit().expect("commits");
     for _ in 0..3 {
         block(&mut exec);
@@ -256,14 +256,12 @@ fn the_chase_comes_ahead_of_edge_events_at_offset_zero() {
     let (old, edge) = (cc(7, 100), cc(10, 20));
     let on = Arc::new(AtomicBool::new(false));
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(1),
         "keeper",
         Unforkable(Keeper::new(Some(old), true, 8, &log)),
-    )
-    .controls;
-    ed.insert(NodeKey(2), "edge", Unforkable(Edge0(edge, Arc::clone(&on))))
-        .controls;
+    );
+    let _ = ed.insert(NodeKey(2), "edge", Unforkable(Edge0(edge, Arc::clone(&on))));
     ed.spec_mut().connect_events(
         EventIn {
             node: NodeKey(1),
@@ -283,13 +281,13 @@ fn the_chase_comes_ahead_of_edge_events_at_offset_zero() {
     ed.commit().expect("commits");
     block(&mut exec);
     on.store(true, Ordering::Relaxed);
-    ed.replace(
-        NodeKey(1),
-        Unforkable(Keeper::new(None, true, 8, &log)),
-        cut(),
-    )
-    .expect("fits")
-    .controls;
+    let _ = ed
+        .replace(
+            NodeKey(1),
+            Unforkable(Keeper::new(None, true, 8, &log)),
+            cut(),
+        )
+        .expect("fits");
     ed.commit().expect("commits");
     block(&mut exec);
     let seen: Vec<_> = log.lock().unwrap().iter().map(|e| (e.1, e.2)).collect();
@@ -304,7 +302,7 @@ fn a_successor_with_no_event_input_counts_the_drop() {
     let (mut ed, mut exec) = rig(Keeper::new(Some(cc(7, 100)), true, 8, &log));
     block(&mut exec);
     assert_eq!(exec.dropped_event_count(), 0);
-    ed.insert(NodeKey(1), "deaf", Unforkable(Deaf)).controls;
+    let _ = ed.insert(NodeKey(1), "deaf", Unforkable(Deaf));
     ed.commit().expect("commits");
     block(&mut exec);
     assert_eq!(exec.dropped_event_count(), 1);
@@ -316,7 +314,7 @@ fn a_successor_with_no_event_input_counts_the_drop() {
 fn a_chase_past_its_declared_capacity_is_counted() {
     let log = Log::default();
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
-    ed.insert(NodeKey(1), "wide", Unforkable(Wide(5))).controls;
+    let _ = ed.insert(NodeKey(1), "wide", Unforkable(Wide(5)));
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort {
@@ -325,13 +323,13 @@ fn a_chase_past_its_declared_capacity_is_counted() {
         })]);
     ed.commit().expect("commits");
     block(&mut exec);
-    ed.replace(
-        NodeKey(1),
-        Unforkable(Keeper::new(None, true, 8, &log)),
-        cut(),
-    )
-    .expect("fits")
-    .controls;
+    let _ = ed
+        .replace(
+            NodeKey(1),
+            Unforkable(Keeper::new(None, true, 8, &log)),
+            cut(),
+        )
+        .expect("fits");
     ed.commit().expect("commits");
     block(&mut exec);
     assert_eq!(
@@ -357,12 +355,11 @@ fn a_chase_renders_bit_identically_in_parallel() {
         }
         let keys = 1..=6u64;
         for k in keys.clone() {
-            ed.insert(
+            let _ = ed.insert(
                 NodeKey(k),
                 "keeper",
                 Unforkable(Keeper::new(Some(cc(k as u8, 10 * k as u8)), true, 8, &log)),
-            )
-            .controls;
+            );
         }
         ed.spec_mut().topology.set_outputs(keys.clone().map(|k| {
             Source::Node(OutPort {
@@ -380,26 +377,26 @@ fn a_chase_renders_bit_identically_in_parallel() {
             } else {
                 Fade::new(Samples(3 * BLOCK), FadeLaw::EqualPower)
             };
-            ed.replace(
-                NodeKey(k),
-                Unforkable(Keeper::new(None, true, 8, &log)),
-                fade,
-            )
-            .expect("fits")
-            .controls;
+            let _ = ed
+                .replace(
+                    NodeKey(k),
+                    Unforkable(Keeper::new(None, true, 8, &log)),
+                    fade,
+                )
+                .expect("fits");
         }
         ed.commit().expect("commits");
         run(&mut exec);
         // The odd keys replace again behind their running fades: chased when
         // those fades end.
         for k in keys.clone().filter(|k| k % 2 == 1) {
-            ed.replace(
-                NodeKey(k),
-                Unforkable(Keeper::new(None, true, 8, &log)),
-                Fade::new(Samples(2 * BLOCK), FadeLaw::EqualPower),
-            )
-            .expect("fits")
-            .controls;
+            let _ = ed
+                .replace(
+                    NodeKey(k),
+                    Unforkable(Keeper::new(None, true, 8, &log)),
+                    Fade::new(Samples(2 * BLOCK), FadeLaw::EqualPower),
+                )
+                .expect("fits");
         }
         ed.commit().expect("commits");
         for _ in 0..8 {
@@ -427,13 +424,13 @@ fn a_replace_queued_behind_a_fade_is_chased_when_the_fade_ends() {
     let (mut ed, mut exec) = rig(Keeper::new(Some(set), true, 8, &a));
     block(&mut exec);
     let fade = || Fade::new(Samples(8 * BLOCK), FadeLaw::EqualPower);
-    ed.replace(
-        NodeKey(1),
-        Unforkable(Keeper::new(None, true, 8, &b)),
-        fade(),
-    )
-    .expect("fits")
-    .controls;
+    let _ = ed
+        .replace(
+            NodeKey(1),
+            Unforkable(Keeper::new(None, true, 8, &b)),
+            fade(),
+        )
+        .expect("fits");
     ed.commit().expect("commits");
     // B's fade is eight blocks, the first of which this one is.
     block(&mut exec);
@@ -442,13 +439,13 @@ fn a_replace_queued_behind_a_fade_is_chased_when_the_fade_ends() {
         &[(0, 0, set.words()[0])],
         "the first swap chased B"
     );
-    ed.replace(
-        NodeKey(1),
-        Unforkable(Keeper::new(None, true, 8, &c)),
-        fade(),
-    )
-    .expect("fits")
-    .controls;
+    let _ = ed
+        .replace(
+            NodeKey(1),
+            Unforkable(Keeper::new(None, true, 8, &c)),
+            fade(),
+        )
+        .expect("fits");
     ed.commit().expect("commits");
     for n in 2..=8 {
         block(&mut exec);
@@ -496,7 +493,7 @@ impl Node for Mute {
 #[test]
 fn a_held_chase_counts_what_the_successor_cannot_take() {
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
-    ed.insert(NodeKey(1), "mute", Unforkable(Mute)).controls;
+    let _ = ed.insert(NodeKey(1), "mute", Unforkable(Mute));
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort {
@@ -506,17 +503,17 @@ fn a_held_chase_counts_what_the_successor_cannot_take() {
     ed.commit().expect("commits");
     block(&mut exec);
     let fade = || Fade::new(Samples(4 * BLOCK), FadeLaw::EqualPower);
-    ed.replace(NodeKey(1), Unforkable(Mute), fade())
-        .expect("fits")
-        .controls;
+    let _ = ed
+        .replace(NodeKey(1), Unforkable(Mute), fade())
+        .expect("fits");
     ed.commit().expect("commits");
     block(&mut exec);
     let before = exec.dropped_event_count();
     // Behind the running fade: what the first Mute wrote is held for the
     // second, which has no event input to take it.
-    ed.replace(NodeKey(1), Unforkable(Mute), fade())
-        .expect("fits")
-        .controls;
+    let _ = ed
+        .replace(NodeKey(1), Unforkable(Mute), fade())
+        .expect("fits");
     ed.commit().expect("commits");
     for _ in 0..8 {
         block(&mut exec);

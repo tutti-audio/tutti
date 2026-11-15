@@ -67,8 +67,7 @@ fn rig(azimuth: ParamRange, elevation: ParamRange) -> (Editor, Executor) {
         SampleRate::of(RATE),
         MaxBlock::of(Samples(2048)),
     ));
-    ed.insert(NodeKey(PROBE), "probe", ForkByClone(Probe))
-        .controls;
+    let _ = ed.insert(NodeKey(PROBE), "probe", ForkByClone(Probe));
     for c in 0..2 {
         ed.spec_mut()
             .topology
@@ -95,7 +94,7 @@ fn lane(ed: &mut Editor, key: u64, param: UnitParam, program: &ControlProgram, k
         Some(Arc::new(AtomicF32::new(knob)).into()),
         Some(ed.param_range_cell(at(param)).expect("committed")),
     );
-    ed.insert(NodeKey(key), "lane", node).controls;
+    let _ = ed.insert(NodeKey(key), "lane", node);
     ed.spec_mut().connect_param(
         at(param),
         EventOut {

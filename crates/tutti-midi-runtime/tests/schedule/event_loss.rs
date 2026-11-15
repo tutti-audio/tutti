@@ -79,11 +79,9 @@ struct Rig {
 /// A clip at key 1 into the sink at key 2, blocks of at most `max`.
 fn rig(events: impl IntoIterator<Item = TimedMidiEvent>, max: usize) -> Rig {
     let (mut ed, exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(max))));
-    ed.insert(NodeKey(1), "clip", MidiClipNode::new(events))
-        .controls;
+    let _ = ed.insert(NodeKey(1), "clip", MidiClipNode::new(events));
     let tally = Arc::new(Mutex::new(Tally::default()));
-    ed.insert(NodeKey(2), "sink", Unforkable(Sink(Arc::clone(&tally))))
-        .controls;
+    let _ = ed.insert(NodeKey(2), "sink", Unforkable(Sink(Arc::clone(&tally))));
     connect(&mut ed, 1, 2);
     ed.commit().expect("commits");
     Rig { ed, exec, tally }

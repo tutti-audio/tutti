@@ -55,18 +55,16 @@ fn rig() -> (Executor, DeviceInput) {
         SampleRate::SR_48K,
         MaxBlock::of(Samples(BLOCK)),
     ));
-    editor
-        .insert(
-            NodeKey(1),
-            "ingest",
-            MidiIngestNode::new(NonZeroUsize::MIN)
-                .following(&inlets)
-                .expect("one slot"),
-        )
-        .controls;
+    let _ = editor.insert(
+        NodeKey(1),
+        "ingest",
+        MidiIngestNode::new(NonZeroUsize::MIN)
+            .following(&inlets)
+            .expect("one slot"),
+    );
     for change in inlets.take_changes() {
         if let InletChange::Attach { node, .. } = change {
-            editor.insert(NodeKey(2), "inlet", node).controls;
+            let _ = editor.insert(NodeKey(2), "inlet", node);
             editor.spec_mut().connect_events(
                 EventIn {
                     node: NodeKey(1),

@@ -740,23 +740,20 @@ fn a_fifo_whose_bound_a_swap_lowered_delivers_its_backlog_on_time() {
     let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64)));
     // A default of 1, so nothing is sized by accident from the default.
     let (mut ed, mut exec) = Editor::with_event_capacity(prep, 1);
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(1),
         "sink",
         Unforkable(Sink {
             ports: 1,
             seen: Arc::clone(&seen),
         }),
-    )
-    .controls;
-    ed.insert(
+    );
+    let _ = ed.insert(
         NodeKey(2),
         "burst",
         burst_unit(PER_BLOCK as u32, &plan, &refused),
-    )
-    .controls;
-    ed.insert(NodeKey(3), "late", Unforkable(Late { latency: LATE }))
-        .controls;
+    );
+    let _ = ed.insert(NodeKey(3), "late", Unforkable(Late { latency: LATE }));
     let g = ed.spec_mut();
     g.connect_events(at(1, 0), EventEdge::Direct(out(2, 0)));
     g.connect_events(at(1, 0), EventEdge::Direct(out(3, 0)));
@@ -768,8 +765,7 @@ fn a_fifo_whose_bound_a_swap_lowered_delivers_its_backlog_on_time() {
     assert!(seen.lock().unwrap().is_empty(), "nothing is due before 300");
     // The same source, now declaring 1 a block: bound 1 × (⌈300/64⌉ + 2)
     // + 7/4 + 8 = 16, against 128 queued.
-    ed.insert(NodeKey(2), "burst", burst_unit(1, &[], &refused))
-        .controls;
+    let _ = ed.insert(NodeKey(2), "burst", burst_unit(1, &[], &refused));
     ed.commit().expect("commits");
     for _ in 4..12 {
         exec.process(64, &transport, &[], &mut []);
@@ -799,19 +795,16 @@ fn a_fifo_whose_bound_a_reprepare_lowered_delivers_its_backlog_on_time() {
     let plan: Vec<(u64, u16, u32)> = (0..LEN as u64).map(|f| (f, 0, f as u32)).collect();
     let small = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(16)));
     let (mut ed, mut exec) = Editor::with_event_capacity(small, 1);
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(1),
         "sink",
         Unforkable(Sink {
             ports: 2,
             seen: Arc::clone(&seen),
         }),
-    )
-    .controls;
-    ed.insert(NodeKey(2), "burst", burst_unit(16, &plan, &refused))
-        .controls;
-    ed.insert(NodeKey(3), "late", Unforkable(Late { latency: LEN }))
-        .controls;
+    );
+    let _ = ed.insert(NodeKey(2), "burst", burst_unit(16, &plan, &refused));
+    let _ = ed.insert(NodeKey(3), "late", Unforkable(Late { latency: LEN }));
     let g = ed.spec_mut();
     g.connect_events(at(1, 0), EventEdge::Direct(out(2, 0)));
     g.connect_events(at(1, 0), EventEdge::Direct(out(3, 0)));
@@ -884,21 +877,17 @@ fn a_flush_into_a_port_a_lowered_bound_widened_drops_nothing() {
     let b_plan = [(200u64, 0u16, 9_001u32), (201, 0, 9_002), (202, 0, 9_003)];
     let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64)));
     let (mut ed, mut exec) = Editor::with_event_capacity(prep, 1);
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(1),
         "sink",
         Unforkable(Sink {
             ports: 1,
             seen: Arc::clone(&seen),
         }),
-    )
-    .controls;
-    ed.insert(NodeKey(2), "a", burst_unit(32, &a_plan, &refused))
-        .controls;
-    ed.insert(NodeKey(3), "late", Unforkable(Late { latency: LATE }))
-        .controls;
-    ed.insert(NodeKey(4), "b", burst_unit(4, &b_plan, &refused))
-        .controls;
+    );
+    let _ = ed.insert(NodeKey(2), "a", burst_unit(32, &a_plan, &refused));
+    let _ = ed.insert(NodeKey(3), "late", Unforkable(Late { latency: LATE }));
+    let _ = ed.insert(NodeKey(4), "b", burst_unit(4, &b_plan, &refused));
     let g = ed.spec_mut();
     g.connect_events(at(1, 0), EventEdge::Direct(out(2, 0)));
     g.connect_events(at(1, 0), EventEdge::Direct(out(3, 0)));
@@ -909,8 +898,7 @@ fn a_flush_into_a_port_a_lowered_bound_widened_drops_nothing() {
         exec.process(64, &transport, &[], &mut []);
     }
     assert!(seen.lock().unwrap().is_empty(), "nothing is due before 256");
-    ed.insert(NodeKey(2), "a", burst_unit(1, &[], &refused))
-        .controls;
+    let _ = ed.insert(NodeKey(2), "a", burst_unit(1, &[], &refused));
     ed.remove(NodeKey(4));
     ed.commit().expect("commits");
     for _ in 4..12 {

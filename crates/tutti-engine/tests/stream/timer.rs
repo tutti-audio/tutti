@@ -21,7 +21,7 @@ use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
 
 fn timer_state() -> (Arc<AudioCallbackState>, BlockClockReader) {
     let engine = graph_engine(&Transport::new(SampleRate::of(SAMPLE_RATE)), |ed| {
-        ed.insert(NodeKey(1), "dc", Const::mono(0.5)).controls;
+        let _ = ed.insert(NodeKey(1), "dc", Const::mono(0.5));
         fan(ed, NodeKey(1), 2);
     });
     let clock = engine.block_clock();

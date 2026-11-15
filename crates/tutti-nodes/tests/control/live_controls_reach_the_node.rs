@@ -108,10 +108,9 @@ fn a_by_value_change_reaches_the_audio_by_replacing_the_node() {
     let high_pass = EqBandNode::<f32>::new(SvfType::HighPass, Hz(20_000.0), Q(0.7), Db(0.0));
     let key = s.key();
     let editor = s.renderer_mut().editor_mut();
-    editor
+    let _ = editor
         .replace(key, high_pass, Fade::new(Samples(1), FadeLaw::default()))
-        .expect("same shape")
-        .controls;
+        .expect("same shape");
     editor.commit().expect("commits");
     let replaced = energy(&mut s);
     assert!(

@@ -48,9 +48,8 @@ fn graph(frame: u64) -> (Editor, Executor) {
         SampleRate::of(RATE),
         MaxBlock::of(Samples(BLOCK)),
     ));
-    ed.insert(NodeKey(1), "clip", MidiClipNode::new([note_on_at(frame)]))
-        .controls;
-    ed.insert(NodeKey(2), "synth", saw()).controls;
+    let _ = ed.insert(NodeKey(1), "clip", MidiClipNode::new([note_on_at(frame)]));
+    let _ = ed.insert(NodeKey(2), "synth", saw());
     ed.spec_mut().connect_events(
         EventIn {
             node: NodeKey(2),

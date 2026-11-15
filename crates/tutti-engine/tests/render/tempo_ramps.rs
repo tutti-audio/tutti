@@ -72,8 +72,7 @@ fn graph(log: &Log) -> (Editor, Executor) {
         SampleRate::of(SR),
         MaxBlock::of(Samples(MAX_BLOCK)),
     ));
-    ed.insert(NodeKey(1), "beats", Unforkable(BeatLog(Arc::clone(log))))
-        .controls;
+    let _ = ed.insert(NodeKey(1), "beats", Unforkable(BeatLog(Arc::clone(log))));
     ed.spec_mut()
         .topology
         .set_outputs(vec![Source::Node(OutPort {

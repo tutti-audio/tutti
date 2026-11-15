@@ -81,12 +81,11 @@ fn constants(r: &mut Rig, values: &[f32]) {
     let mut outputs = Vec::new();
     for (k, &value) in values.iter().enumerate() {
         let key = 1 + k as u64;
-        r.ed.insert(
+        let _ = r.ed.insert(
             NodeKey(key),
             "const",
             Forkable(Kind::Const { value, width: 1 }),
-        )
-        .controls;
+        );
         outputs.push(out(key));
     }
     r.ed.spec_mut().topology.set_outputs(outputs);
@@ -213,15 +212,14 @@ impl Node for Spike {
 #[test]
 fn a_spike_is_held_until_read_and_read_once() {
     let mut r = rig(1, false);
-    r.ed.insert(
+    let _ = r.ed.insert(
         NodeKey(1),
         "spike",
         Unforkable(Spike {
             at: 777,
             done: false,
         }),
-    )
-    .controls;
+    );
     r.ed.spec_mut().topology.set_outputs(vec![out(1)]);
     let mut m =
         r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
@@ -429,15 +427,14 @@ fn a_reused_key_is_not_read_by_the_old_meter() {
     assert_eq!(level(&mut m), vec![(0.25, 0.25, 32)]);
 
     r.ed.remove(NodeKey(2));
-    r.ed.insert(
+    let _ = r.ed.insert(
         NodeKey(2),
         "again",
         Forkable(Kind::Const {
             value: 0.125,
             width: 1,
         }),
-    )
-    .controls;
+    );
     commit(&mut r);
     block(&mut r, 32);
     assert_eq!(
@@ -457,17 +454,16 @@ fn output_bits(workers: usize, master: bool, track: bool) -> Vec<u32> {
     let mut outputs = Vec::new();
     for (k, latency) in [30usize, 11, 0].into_iter().enumerate() {
         let (lag, gain) = (10 + k as u64, 20 + k as u64);
-        r.ed.insert(NodeKey(lag), "lag", Forkable(Kind::Lag { latency }))
-            .controls;
-        r.ed.insert(
+        let _ =
+            r.ed.insert(NodeKey(lag), "lag", Forkable(Kind::Lag { latency }));
+        let _ = r.ed.insert(
             NodeKey(gain),
             "gain",
             Forkable(Kind::Gain {
                 gain: 0.5 + k as f32 / 10.0,
                 width: 1,
             }),
-        )
-        .controls;
+        );
         let t = &mut r.ed.spec_mut().topology;
         t.edges.insert(
             InPort {
@@ -557,15 +553,14 @@ fn a_meter_changes_no_output_bit() {
 #[test]
 fn a_narrowed_node_silences_the_lanes_past_its_width_and_commits() {
     let mut r = rig(1, false);
-    r.ed.insert(
+    let _ = r.ed.insert(
         NodeKey(1),
         "wide",
         Forkable(Kind::Const {
             value: 0.5,
             width: 2,
         }),
-    )
-    .controls;
+    );
     let port = |p| {
         Source::Node(OutPort {
             node: NodeKey(1),
@@ -583,15 +578,14 @@ fn a_narrowed_node_silences_the_lanes_past_its_width_and_commits() {
 
     // The same key, now one output wide: the meter's second lane names a port
     // that no longer exists.
-    r.ed.insert(
+    let _ = r.ed.insert(
         NodeKey(1),
         "narrow",
         Forkable(Kind::Const {
             value: 0.25,
             width: 1,
         }),
-    )
-    .controls;
+    );
     commit(&mut r);
     block(&mut r, 32);
     assert_eq!(level(&mut m), vec![(0.25, 0.25, 32), (0.0, 0.0, 32)]);
@@ -631,12 +625,12 @@ impl Node for Pulse {
 #[test]
 fn the_master_reads_at_the_outputs_time() {
     let mut r = rig(1, false);
-    r.ed.insert(NodeKey(1), "pulse", Unforkable(Pulse { len: 50, done: 0 }))
-        .controls;
-    r.ed.insert(NodeKey(2), "pulse", Unforkable(Pulse { len: 50, done: 0 }))
-        .controls;
-    r.ed.insert(NodeKey(3), "lag", Forkable(Kind::Lag { latency: 30 }))
-        .controls;
+    let _ =
+        r.ed.insert(NodeKey(1), "pulse", Unforkable(Pulse { len: 50, done: 0 }));
+    let _ =
+        r.ed.insert(NodeKey(2), "pulse", Unforkable(Pulse { len: 50, done: 0 }));
+    let _ =
+        r.ed.insert(NodeKey(3), "lag", Forkable(Kind::Lag { latency: 30 }));
     r.ed.spec_mut().topology.edges.insert(
         InPort {
             node: NodeKey(3),
@@ -822,8 +816,8 @@ fn run(r: &mut Rig, blocks: usize) -> Vec<Vec<Level>> {
     let values: Vec<f32> = (0..6).map(|k| 0.1 + 0.13 * k as f32).collect();
     constants(r, &values);
     // A chain with latency so the compiler aligns the outputs.
-    r.ed.insert(NodeKey(20), "lag", Forkable(Kind::Lag { latency: 7 }))
-        .controls;
+    let _ =
+        r.ed.insert(NodeKey(20), "lag", Forkable(Kind::Lag { latency: 7 }));
     r.ed.spec_mut().topology.edges.insert(
         InPort {
             node: NodeKey(20),

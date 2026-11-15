@@ -1716,8 +1716,7 @@ mod tests {
     fn rewire(ed: &mut Editor, width: u16) {
         use tutti_graph::NodeKey;
         use tutti_graph::{OutPort, Source};
-        ed.insert(NodeKey(1), "ramp", tutti_graph::Unforkable(Ramp(width)))
-            .controls;
+        let _ = ed.insert(NodeKey(1), "ramp", tutti_graph::Unforkable(Ramp(width)));
         ed.spec_mut().topology.set_outputs((0..width).map(|port| {
             Source::Node(OutPort {
                 node: NodeKey(1),

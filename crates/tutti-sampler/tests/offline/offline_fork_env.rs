@@ -221,13 +221,12 @@ impl Node for Pass {
 #[test]
 fn a_voice_behind_another_node_is_forked_too() {
     let (mut ed, mut exec) = Editor::new(prepare());
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(1),
         "voice",
         VoiceNode::with_channels(voice(), ChannelLayout::MONO),
-    )
-    .controls;
-    ed.insert(NodeKey(2), "pass", ForkByClone(Pass)).controls;
+    );
+    let _ = ed.insert(NodeKey(2), "pass", ForkByClone(Pass));
     ed.spec_mut().topology.edges.insert(
         tutti_graph::InPort {
             node: NodeKey(2),

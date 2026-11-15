@@ -93,13 +93,11 @@ struct Rig {
 fn rig(lat: usize, forkable: bool) -> Rig {
     let (mut ed, exec) = Editor::new(prepare(MAX));
     if forkable {
-        ed.insert(LATENT, "latent", ForkByClone(Latent(lat)))
-            .controls;
-        ed.insert(PROBE, "probe", ForkByClone(Probe)).controls;
+        let _ = ed.insert(LATENT, "latent", ForkByClone(Latent(lat)));
+        let _ = ed.insert(PROBE, "probe", ForkByClone(Probe));
     } else {
-        ed.insert(LATENT, "latent", Unforkable(Latent(lat)))
-            .controls;
-        ed.insert(PROBE, "probe", Unforkable(Probe)).controls;
+        let _ = ed.insert(LATENT, "latent", Unforkable(Latent(lat)));
+        let _ = ed.insert(PROBE, "probe", Unforkable(Probe));
     }
     let t = &mut ed.spec_mut().topology;
     t.edges.insert(

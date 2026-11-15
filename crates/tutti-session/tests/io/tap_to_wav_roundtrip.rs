@@ -114,8 +114,7 @@ fn graph_tap(capacity: usize) -> (Graph, TapReader) {
         SampleRate::SR_48K,
         MaxBlock::of(Samples(BLOCK)),
     ));
-    ed.insert(NodeKey(1), "ramp", Unforkable(Ramp { at: 0 }))
-        .controls;
+    let _ = ed.insert(NodeKey(1), "ramp", Unforkable(Ramp { at: 0 }));
     let port = |port| {
         Origin::Node(OutPort {
             node: NodeKey(1),

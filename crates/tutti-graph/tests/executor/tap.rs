@@ -58,23 +58,21 @@ fn build(ed: &mut Editor) -> Vec<Source> {
     let mut gains = Vec::new();
     for k in 0..CHAINS {
         let (lag, gain) = (10 + k, 20 + k);
-        ed.insert(
+        let _ = ed.insert(
             NodeKey(lag),
             "lag",
             Forkable(Kind::Lag {
                 latency: 5 * k as usize,
             }),
-        )
-        .controls;
-        ed.insert(
+        );
+        let _ = ed.insert(
             NodeKey(gain),
             "gain",
             Forkable(Kind::Gain {
                 gain: 0.5 + k as f32 / 10.0,
                 width: 1,
             }),
-        )
-        .controls;
+        );
         let t = &mut ed.spec_mut().topology;
         t.edges.insert(
             InPort {
@@ -947,8 +945,8 @@ fn pop_planes_reads_whole_frames_and_keeps_the_lanes_level() {
 
 /// A wide `Const` node (key 1, two outputs of `value`) outside the outputs.
 fn wide(r: &mut Rig, value: f32, width: usize) {
-    r.ed.insert(NodeKey(1), "const", Forkable(Kind::Const { value, width }))
-        .controls;
+    let _ =
+        r.ed.insert(NodeKey(1), "const", Forkable(Kind::Const { value, width }));
 }
 
 fn port(node: u64, port: u16) -> Source {

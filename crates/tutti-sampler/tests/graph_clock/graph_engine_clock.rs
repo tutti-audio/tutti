@@ -80,7 +80,7 @@ fn graph_engine(transport: &Transport, units: Vec<VoicePool>) -> (Engine, Editor
     ));
     let n = units.len();
     for (i, u) in units.into_iter().enumerate() {
-        ed.insert(NodeKey(i as u64 + 1), "voice", u).controls;
+        let _ = ed.insert(NodeKey(i as u64 + 1), "voice", u);
     }
     ed.spec_mut()
         .topology
@@ -244,13 +244,13 @@ fn a_crossfaded_voice_plays_on_through_the_fade() {
         let mut spare = Some(spare);
         play(&engine, &t, 512, blocks, |i| {
             if fade && i == 20 {
-                ed.replace(
-                    NodeKey(1),
-                    spare.take().expect("once"),
-                    Fade::new(Samples(4096), FadeLaw::EqualAmplitude),
-                )
-                .expect("same shape")
-                .controls;
+                let _ = ed
+                    .replace(
+                        NodeKey(1),
+                        spare.take().expect("once"),
+                        Fade::new(Samples(4096), FadeLaw::EqualAmplitude),
+                    )
+                    .expect("same shape");
                 ed.commit().expect("commits");
             }
             ed.collect();

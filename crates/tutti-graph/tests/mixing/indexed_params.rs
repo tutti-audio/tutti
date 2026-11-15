@@ -154,12 +154,11 @@ fn render(ed: &mut Editor, exec: &mut tutti_graph::Executor, frames: usize) -> [
 fn graph(to: &[(UnitAddr, f32)]) -> (Editor, tutti_graph::Executor, ParamSet) {
     let (mut ed, exec) = Editor::new(prepare(64));
     let controls = ed.insert(BANDS, "bands", Bands::new(-10.0, -20.0)).controls;
-    ed.insert(
+    let _ = ed.insert(
         SRC,
         "steps",
         tutti_graph::ForkByClone(Steps { to: to.to_vec() }),
-    )
-    .controls;
+    );
     ed.spec_mut()
         .topology
         .set_outputs(vec![out(BANDS, 0), out(BANDS, 1)]);
@@ -387,20 +386,18 @@ fn a_node_declares_up_to_the_cap_and_no_more() {
     // The last of 32 ports, driven through the whole graph.
     let last = addrs[31];
     let (mut ed, mut exec) = Editor::new(prepare(64));
-    ed.insert(
+    let _ = ed.insert(
         BANDS,
         "wide",
         tutti_graph::ForkByClone(Wide(addrs[..32].to_vec())),
-    )
-    .controls;
-    ed.insert(
+    );
+    let _ = ed.insert(
         SRC,
         "steps",
         tutti_graph::ForkByClone(Steps {
             to: vec![(last, -7.0)],
         }),
-    )
-    .controls;
+    );
     ed.spec_mut()
         .topology
         .set_outputs(vec![out(BANDS, 0), out(BANDS, 1)]);

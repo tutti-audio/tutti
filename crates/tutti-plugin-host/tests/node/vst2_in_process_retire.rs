@@ -69,9 +69,7 @@ fn a_removed_vst2_node_is_dropped_on_the_control_side() {
         SampleRate::of(RATE),
         MaxBlock::of(Samples(BLOCK)),
     ));
-    editor
-        .insert(key, "vst2", Unforkable(unit.bind(tempo())))
-        .controls;
+    let _ = editor.insert(key, "vst2", Unforkable(unit.bind(tempo())));
     editor
         .spec_mut()
         .topology

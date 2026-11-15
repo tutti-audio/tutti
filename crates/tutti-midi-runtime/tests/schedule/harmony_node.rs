@@ -54,12 +54,11 @@ fn rig(node: HarmonyNode, max: usize) -> (Editor, Executor, HarmonyControls, See
     ));
     let controls = ed.insert(NodeKey(1), "harmony", node).controls;
     let seen = Seen::default();
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(2),
         "sink",
         tutti_graph::ForkByClone(Sink(Arc::clone(&seen))),
-    )
-    .controls;
+    );
     connect(&mut ed, 1, 2);
     ed.spec_mut()
         .topology

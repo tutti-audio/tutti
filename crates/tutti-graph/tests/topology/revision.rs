@@ -52,7 +52,7 @@ fn every_edit_moves_the_revision_and_nothing_else_does() {
     let (mut ed, mut exec) = Editor::new(prep(512));
     let one = NodeKey(1);
     moves(&mut ed, "insert", |ed| {
-        ed.insert(one, "out", Unforkable(Out)).controls;
+        let _ = ed.insert(one, "out", Unforkable(Out));
     });
     moves(&mut ed, "spec_mut", |ed| {
         ed.spec_mut()
@@ -88,13 +88,13 @@ fn every_edit_moves_the_revision_and_nothing_else_does() {
             .expect("a node");
     });
     moves(&mut ed, "replace", |ed| {
-        ed.replace(
-            one,
-            Unforkable(Out),
-            Fade::new(Samples(64), FadeLaw::EqualPower),
-        )
-        .expect("replaces")
-        .controls;
+        let _ = ed
+            .replace(
+                one,
+                Unforkable(Out),
+                Fade::new(Samples(64), FadeLaw::EqualPower),
+            )
+            .expect("replaces");
     });
     ed.commit().expect("commits");
     exec.apply_pending();

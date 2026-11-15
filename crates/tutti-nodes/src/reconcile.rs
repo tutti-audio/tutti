@@ -959,9 +959,7 @@ impl Modulation {
                     if replacing {
                         node = node.replacing();
                     }
-                    editor
-                        .insert(plan.key, "envelope-follower", ForkByClone(node))
-                        .controls;
+                    let _ = editor.insert(plan.key, "envelope-follower", ForkByClone(node));
                 }
                 SignalKind::NoteEnvelope { .. } => {
                     let mut node =
@@ -969,9 +967,7 @@ impl Modulation {
                     if replacing {
                         node = node.replacing();
                     }
-                    editor
-                        .insert(plan.key, "note-envelope", ForkByClone(node))
-                        .controls;
+                    let _ = editor.insert(plan.key, "note-envelope", ForkByClone(node));
                 }
             }
             wire_feed(editor, plan.key, plan.feed);

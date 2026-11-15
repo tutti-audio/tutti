@@ -56,8 +56,7 @@ impl Rig {
         for (i, &value) in values.iter().enumerate() {
             let n = i as u64 + 1;
             let k = Kind::Const { value, width: 1 };
-            ed.insert(key(n), "const", Unforkable(TestNode::new(k)))
-                .controls;
+            let _ = ed.insert(key(n), "const", Unforkable(TestNode::new(k)));
         }
         ed.spec_mut().topology.outputs = vec![(1..=values.len() as u64).map(out).collect()];
         ed.commit().expect("commits");
@@ -218,8 +217,7 @@ fn parallel_equals_serial_for_a_graph_mid_fade() {
         }
         for (i, &value) in values.iter().enumerate() {
             let k = Kind::Const { value, width: 1 };
-            ed.insert(key(i as u64 + 1), "const", Unforkable(TestNode::new(k)))
-                .controls;
+            let _ = ed.insert(key(i as u64 + 1), "const", Unforkable(TestNode::new(k)));
         }
         ed.spec_mut().topology.outputs = vec![(1..=8).map(out).collect()];
         ed.commit().expect("commits");

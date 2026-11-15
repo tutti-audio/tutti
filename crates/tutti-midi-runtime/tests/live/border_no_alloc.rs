@@ -29,7 +29,7 @@ fn note_on(ch: u8, note: u8) -> Ump {
 /// node at key 1: what the device's thread pushes into.
 fn device(ed: &mut Editor, inlet: u64) -> EventInletWriter {
     let (node, writer) = EventInletNode::pair(LIVE_INLET_CAPACITY);
-    ed.insert(NodeKey(inlet), "device", node).controls;
+    let _ = ed.insert(NodeKey(inlet), "device", node);
     ed.spec_mut().connect_events(
         EventIn {
             node: NodeKey(1),
@@ -64,11 +64,10 @@ fn busy(device: &mut EventInletWriter, block: u64) {
 fn the_border_nodes_process_without_allocating() {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-    ed.insert(NodeKey(1), "in", MidiIngestNode::new(NonZeroUsize::MIN))
-        .controls;
+    let _ = ed.insert(NodeKey(1), "in", MidiIngestNode::new(NonZeroUsize::MIN));
     let mut dev = device(&mut ed, 4);
     let (inlet, writer) = EventInletNode::pair(LIVE_INLET_CAPACITY);
-    ed.insert(NodeKey(2), "keys", inlet).controls;
+    let _ = ed.insert(NodeKey(2), "keys", inlet);
     let mut keys = MidiKeys::new(writer, MidiGroup::FIRST);
     let clock = ed
         .insert(
@@ -136,12 +135,11 @@ fn bend_range(device: &mut EventInletWriter, block: u64) {
 fn the_mpe_bend_range_fan_out_processes_without_allocating() {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(1),
         "in",
         MidiIngestNode::new(NonZeroUsize::MIN).with_mpe(tutti_fixtures::midi::lower_zone(15)),
-    )
-    .controls;
+    );
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 15)]);
     ed.commit().unwrap();
@@ -195,12 +193,11 @@ fn gesture(device: &mut EventInletWriter, block: u64) {
 fn the_mpe_expression_paths_process_without_allocating() {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(1),
         "in",
         MidiIngestNode::new(NonZeroUsize::MIN).with_mpe(tutti_fixtures::midi::lower_zone(15)),
-    )
-    .controls;
+    );
     let mut dev = device(&mut ed, 4);
     let mut out = common::sink(&mut ed, 1, &[(1, 2)]);
     ed.commit().unwrap();
@@ -300,7 +297,7 @@ fn a_block_of_many_loop_passes_walks_without_allocating() {
         SampleRate::of(RATE),
         MaxBlock::of(Samples(512)),
     ));
-    ed.insert(
+    let _ = ed.insert(
         NodeKey(1),
         "clip",
         MidiClipNode::new([
@@ -325,17 +322,15 @@ fn a_block_of_many_loop_passes_walks_without_allocating() {
             )
             .unwrap(),
         ]),
-    )
-    .controls;
-    ed.insert(
+    );
+    let _ = ed.insert(
         NodeKey(2),
         "harmony",
         HarmonyNode::new([
             TimedHarmony::new(Beat(0.0), Harmony::chord(60, 60, 0b1001_0001)),
             TimedHarmony::new(beat(1_032.0), Harmony::chord(67, 67, 0b1001_0001)),
         ]),
-    )
-    .controls;
+    );
     let mut out = common::sink(&mut ed, 1, &[(1, 0), (2, 0)]);
     ed.commit().unwrap();
     let region = tutti_types::LoopRange::new(start, end).unwrap();
@@ -399,8 +394,7 @@ fn a_clip_overflowing_its_port_refuses_and_retries_without_allocating() {
         SampleRate::of(RATE),
         MaxBlock::of(Samples(64)),
     ));
-    ed.insert(NodeKey(1), "clip", MidiClipNode::new(events))
-        .controls;
+    let _ = ed.insert(NodeKey(1), "clip", MidiClipNode::new(events));
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
     let mut drain = [(0, Ump([0; 4])); 1024];
@@ -469,8 +463,7 @@ fn a_clip_with_a_full_table_sends_and_pays_without_allocating() {
     });
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-    ed.insert(NodeKey(1), "clip", MidiClipNode::new(events))
-        .controls;
+    let _ = ed.insert(NodeKey(1), "clip", MidiClipNode::new(events));
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
     let mut drain = [(0, Ump([0; 4])); 1024];
@@ -528,7 +521,7 @@ fn the_event_inlet_processes_without_allocating() {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
     let (queue, mut tx) = EventInletNode::pair(LIVE_INLET_CAPACITY);
-    ed.insert(NodeKey(1), "timed", queue).controls;
+    let _ = ed.insert(NodeKey(1), "timed", queue);
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
@@ -565,7 +558,7 @@ fn the_event_inlet_with_a_full_list_processes_without_allocating() {
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
     let (queue, mut tx) = EventInletNode::pair(LIVE_INLET_CAPACITY);
-    ed.insert(NodeKey(1), "timed", queue).controls;
+    let _ = ed.insert(NodeKey(1), "timed", queue);
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat(0.0), None);
@@ -665,11 +658,13 @@ fn the_machine_control_node_processes_without_allocating() {
 
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
-    let controls = ed.insert(
-        NodeKey(1),
-        "mmc",
-        MachineControlNode::new(MidiGroup::FIRST, Recipient::AllCall, MtcRate::Fps30),
-    );
+    let controls = ed
+        .insert(
+            NodeKey(1),
+            "mmc",
+            MachineControlNode::new(MidiGroup::FIRST, Recipient::AllCall, MtcRate::Fps30),
+        )
+        .controls;
     let mut out = common::sink(&mut ed, 1, &[(1, 0)]);
     ed.commit().unwrap();
     let at = |playing: bool, beat: f64| {

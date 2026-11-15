@@ -75,10 +75,10 @@ fn fans(ed: &mut Editor, fans: usize, lanes: usize, gains: Option<Cost>, sums: O
     let mut outputs = Vec::new();
     for f in 0..fans {
         let s = 1_000 * (f as u64 + 1);
-        ed.insert(NodeKey(s), "sum", sum(lanes, sums)).controls;
+        let _ = ed.insert(NodeKey(s), "sum", sum(lanes, sums));
         for l in 0..lanes {
             let k = s + 1 + l as u64;
-            ed.insert(NodeKey(k), "gain", gain(gains)).controls;
+            let _ = ed.insert(NodeKey(k), "gain", gain(gains));
             wire(ed, k, 0, Source::Global(f as u16));
             wire(ed, s, l as u16, node(k));
         }
@@ -92,13 +92,12 @@ fn fans(ed: &mut Editor, fans: usize, lanes: usize, gains: Option<Cost>, sums: O
 fn wide(ed: &mut Editor, lanes: usize, depth: usize, cost: Option<Cost>) {
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     let s = 1_000_000;
-    ed.insert(NodeKey(s), "sum", sum(lanes, Some(Cost::Light)))
-        .controls;
+    let _ = ed.insert(NodeKey(s), "sum", sum(lanes, Some(Cost::Light)));
     for l in 0..lanes {
         let mut last = Source::Global(0);
         for d in 0..depth {
             let k = 1_000 * (l as u64 + 1) + d as u64;
-            ed.insert(NodeKey(k), "gain", gain(cost)).controls;
+            let _ = ed.insert(NodeKey(k), "gain", gain(cost));
             wire(ed, k, 0, last);
             last = node(k);
         }
@@ -215,11 +214,11 @@ fn packed_siblings_render_bit_identically() {
         let (mut ed, mut exec) = pair(workers);
         ed.spec_mut().topology.inputs = ChannelLayout::MONO;
         let s = 1_000_000;
-        ed.insert(NodeKey(s), "sum", sum(15, None)).controls;
+        let _ = ed.insert(NodeKey(s), "sum", sum(15, None));
         for l in 0..15u64 {
             // Every fifth gain declares nothing (heavy).
             let cost = (l % 5 != 4).then_some(Cost::Light);
-            ed.insert(NodeKey(l + 1), "gain", gain(cost)).controls;
+            let _ = ed.insert(NodeKey(l + 1), "gain", gain(cost));
             wire(&mut ed, l + 1, 0, Source::Global(0));
             wire(&mut ed, s, l as u16, node(l + 1));
         }

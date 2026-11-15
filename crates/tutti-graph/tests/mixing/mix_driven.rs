@@ -631,8 +631,7 @@ impl tutti_graph::Node for Triple {
 fn solo() -> (Editor, tutti_graph::Executor) {
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
-    ed.insert(key(1), "triple", tutti_graph::ForkByClone(Triple))
-        .controls;
+    let _ = ed.insert(key(1), "triple", tutti_graph::ForkByClone(Triple));
     ed.spec_mut()
         .topology
         .connect(at(1), Edge::Direct(Source::Global(0)));

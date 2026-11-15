@@ -53,24 +53,22 @@ fn graph(tail: Tail) -> (Editor, Executor, Arc<AtomicUsize>) {
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
     // A source flagged silent from its first block (`Status::Constant`, +0.0),
     // which is what the skip reads.
-    ed.insert(
+    let _ = ed.insert(
         SRC,
         "silence",
         Unforkable(TestNode::new(Kind::Const {
             value: 0.0,
             width: 1,
         })),
-    )
-    .controls;
-    ed.insert(
+    );
+    let _ = ed.insert(
         NODE,
         "ringer",
         Unforkable(Ringer {
             tail,
             calls: Arc::clone(&calls),
         }),
-    )
-    .controls;
+    );
     ed.spec_mut().topology.edges.insert(
         InPort {
             node: NODE,
@@ -197,8 +195,7 @@ fn set_tail_does_not_cut_a_fade() {
     let (mut ed, mut exec, _) = graph(Tail::None);
     // A gain node at its own key: the fade needs a unit whose shape matches.
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
-    ed.insert(NodeKey(2), "gain", Unforkable(gain(1.0)))
-        .controls;
+    let _ = ed.insert(NodeKey(2), "gain", Unforkable(gain(1.0)));
     ed.spec_mut().topology.edges.insert(
         InPort {
             node: NodeKey(2),
@@ -215,9 +212,9 @@ fn set_tail_does_not_cut_a_fade() {
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
-    ed.replace(NodeKey(2), Unforkable(gain(2.0)), fade)
-        .expect("fits")
-        .controls;
+    let _ = ed
+        .replace(NodeKey(2), Unforkable(gain(2.0)), fade)
+        .expect("fits");
     ed.commit().expect("commits");
     block(&mut exec, 1.0);
     assert_eq!(ed.fades_in_flight(), 1);
