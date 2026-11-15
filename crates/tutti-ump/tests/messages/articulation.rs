@@ -485,6 +485,51 @@ fn note_off_words_follow_figure_2() {
     );
 }
 
+/// M2-123 7.1: the release time is the Note Off's 16-bit velocity, with the
+/// three anchors the section states.
+#[test]
+fn the_note_off_word_carries_the_release_time_anchors() {
+    let off = NoteOffArticulation {
+        ending: NoteEnding::Soft,
+        variation: u4(0),
+        string: StringAssignment::Unassigned,
+    };
+    // Type 0x10, subclass 1 (Soft Ending): attribute data 0x1000.
+    for (release, word1) in [
+        (ReleaseTime::LONGEST, 0x0000_1000),
+        (ReleaseTime::DEFAULT, 0x8000_1000),
+        (ReleaseTime::SHORTEST, 0xFFFF_1000),
+    ] {
+        let voice = off.note_off(NoteNumber::of(60), release);
+        assert_eq!(word_of(voice), [0x4080_3C10, word1, 0, 0]);
+    }
+    assert_eq!(ReleaseTime::default(), ReleaseTime::DEFAULT);
+}
+
+/// M2-123 7.1, Figure 2.
+#[test]
+fn a_note_off_reads_back_what_note_off_wrote() {
+    for ending in NoteEnding::ALL.iter().copied() {
+        for (variation, string, release) in [
+            (0, StringAssignment::Unassigned, ReleaseTime::DEFAULT),
+            (9, StringAssignment::Fourth, ReleaseTime::LONGEST),
+            (15, StringAssignment::Other, ReleaseTime::SHORTEST),
+            (3, StringAssignment::First, ReleaseTime::new(0x1234)),
+        ] {
+            let off = NoteOffArticulation {
+                ending,
+                variation: u4(variation),
+                string,
+            };
+            let voice = off.note_off(NoteNumber::of(60), release);
+            assert_eq!(
+                NoteOffArticulation::from_note_off(&voice),
+                Ok((off, release))
+            );
+        }
+    }
+}
+
 /// M2-123 5.2/tables-8-to-15.
 #[test]
 fn a_reserved_subclass_is_refused_with_its_classification() {
