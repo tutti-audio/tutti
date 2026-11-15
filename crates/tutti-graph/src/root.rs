@@ -55,7 +55,7 @@ impl std::fmt::Display for RootId {
 /// them, the old root's channels: the same nodes, wired as the previous root
 /// wired them. The host folds each bank with its own root's fold and sums them
 /// under the [`fade`](Self::fade)'s gains, the old root's as the outgoing side,
-/// for the first [`Fade::duration`] frames the plan renders.
+/// for the first [`Fade::duration`](crate::Fade::duration) frames the plan renders.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct RootBank {
     /// The generation of the root that fades out.

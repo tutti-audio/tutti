@@ -246,7 +246,7 @@ impl Editor {
     /// How a commit that changes the root's generation trades the old root
     /// for the new: the old root's channels are rendered beside the new root's
     /// for the `fade`'s length, and the host folds each with its own root's
-    /// fold and mixes them by the fade's gains ([`RootBank`](crate::RootBank)).
+    /// fold and mixes them by the fade's gains ([`RootBank`]).
     /// `None` (the default) cuts at the commit's block, as does a zero
     /// duration. Read when a commit is compiled.
     pub fn set_root_fade(&mut self, fade: Option<Fade>) {
