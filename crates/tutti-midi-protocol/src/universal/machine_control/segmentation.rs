@@ -8,12 +8,8 @@ use std::marker::PhantomData;
 use tutti_ump::first_non_seven_bit;
 
 use super::field::{MmcSegment, MmcSegmentPlace};
-use super::values::MmcFragment;
+use super::values::{MMC_SEGMENT_BYTES, MmcSegmentBytes};
 use super::{MmcCommand, MmcInfoField, MmcItem};
-
-/// The most string bytes one segment carries: a message holds 48 bytes, and
-/// the segment command takes its code, its count and its identification.
-pub const MMC_SEGMENT_BYTES: usize = 45;
 
 /// The most segments a string has: the identification byte counts down from 63.
 pub const MMC_MAX_SEGMENTS: usize = 64;
@@ -25,7 +21,7 @@ pub const MMC_MAX_SEGMENTED: usize = MMC_MAX_SEGMENTS * MMC_SEGMENT_BYTES;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum MmcSegmentsRefused {
     /// More than [`MMC_MAX_SEGMENTED`] bytes.
-    #[error("a segmented string holds at most 2880 bytes")]
+    #[error("a segmented string holds at most {MMC_MAX_SEGMENTED} bytes")]
     TooLong,
     /// A byte above 127, which no data byte is.
     #[error("a segmented string holds data bytes, each below 128")]
@@ -95,7 +91,7 @@ impl Iterator for MmcSegments<'_> {
             MmcSegmentPlace::Later
         };
         let remaining = u8::try_from(self.left).expect("at most 63 segments follow");
-        let bytes = MmcFragment::new(now).expect("a segment's bytes are seven-bit and short");
+        let bytes = MmcSegmentBytes::new(now).expect("a segment's bytes are seven-bit and short");
         Some(MmcSegment::new(place, remaining, bytes).expect("at most 63 segments follow"))
     }
 
@@ -106,19 +102,18 @@ impl Iterator for MmcSegments<'_> {
 
 impl ExactSizeIterator for MmcSegments<'_> {}
 
-/// Why a segment did not belong (RP-013 p.40, the "Segmentation Error" of
-/// COMMAND ERROR, [`MmcErrorKind::Segmentation`](super::MmcErrorKind::Segmentation)).
-/// The string in progress is cancelled.
+/// Why a segment did not belong to the string in progress (RP-013 p.40 c and
+/// d, the "Segmentation Error" of COMMAND ERROR,
+/// [`MmcErrorKind::Segmentation`](super::MmcErrorKind::Segmentation)), or why a
+/// finished string is not commands. The string in progress is cancelled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum MmcSegmentError {
-    /// A COMMAND SEGMENT came after another command in its message (RP-013
-    /// p.40 a). A reassembler never sees this: its caller does.
-    #[error("a segment is not the first command of its message")]
-    NotFirst,
     /// A later segment came with no first one before it.
     #[error("a later segment arrived with no first segment")]
     MissingFirst,
-    /// A first segment came while a string was in progress.
+    /// A first segment came while a string was in progress. The string is
+    /// cancelled and the segment is not taken in: [`push`](MmcReassembler::push)
+    /// it again to start its string.
     #[error("a first segment arrived inside a string")]
     FirstInsideString,
     /// A later segment's count is not the one that follows the last.
@@ -238,7 +233,7 @@ impl<T: MmcItem> MmcReassembler<T> {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            bytes: Vec::with_capacity(MMC_MAX_SEGMENTS * MmcFragment::MAX),
+            bytes: Vec::with_capacity(MMC_MAX_SEGMENTS * MMC_SEGMENT_BYTES),
             due: None,
             item: PhantomData,
         }

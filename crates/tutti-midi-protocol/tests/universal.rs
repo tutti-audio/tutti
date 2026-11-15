@@ -408,8 +408,8 @@ mod machine_control {
     use tutti_midi_protocol::{
         MMC_MAX_DATA, McpSuccess, McsSuccess, MmcCodeStatus, MmcCommand, MmcCommandReassembler,
         MmcCommands, MmcDirection, MmcErrorCode, MmcErrorKind, MmcEventDirection, MmcEventFlags,
-        MmcFields, MmcFragment, MmcGroup, MmcInfoField, MmcLocate, MmcName, MmcPosition,
-        MmcProcedure, MmcResponseReassembler, MmcSegment, MmcSegmentError, MmcSegmentPlace,
+        MmcFields, MmcGroup, MmcInfoField, MmcLocate, MmcName, MmcPosition, MmcProcedure,
+        MmcResponseReassembler, MmcSegment, MmcSegmentBytes, MmcSegmentError, MmcSegmentPlace,
         MmcSegments, MmcSegmentsRefused, MmcSelection, MmcShortTimeCode, MmcSign, MmcSlot,
         MmcSpeed, MmcStep, MmcSubframes, MmcTimeCode, MmcTimeCodeName, MmcTimeLabel, MmcTimeTail,
         MmcUpdate, MotionControlTally, MotionProcess, MotionState, MtcRate, MtcTimeCode,
@@ -1128,7 +1128,7 @@ mod machine_control {
 
     /// The segment `place`, `remaining`, `bytes` as the command that carries it.
     fn segment(place: MmcSegmentPlace, remaining: u8, bytes: &[u8]) -> MmcSegment {
-        MmcSegment::new(place, remaining, MmcFragment::new(bytes).unwrap()).unwrap()
+        MmcSegment::new(place, remaining, MmcSegmentBytes::new(bytes).unwrap()).unwrap()
     }
 
     /// The wire bytes of `segment` as a COMMAND SEGMENT message to all.
@@ -1244,23 +1244,43 @@ mod machine_control {
         assert_eq!(MmcErrorKind::Segmentation.wire(), 0x09);
     }
 
-    /// RP-013 p.40 (c): a later segment with no first one is refused; and a
-    /// first inside a string is out of order, which cancels the string.
+    /// RP-013 p.40 (c): a later segment with no first one is refused; and a first
+    /// inside a string is out of order, which cancels the string and is not taken
+    /// in, so pushing it again starts its string.
     #[test]
-    fn a_later_segment_needs_a_first_and_a_first_cannot_interrupt() {
+    fn a_later_segment_needs_a_first_and_a_first_restarts_after_its_refusal() {
         use MmcSegmentPlace::{First, Later};
         let mut r = MmcCommandReassembler::new();
         assert_eq!(
             r.push(segment(Later, 0, &[1])).unwrap_err(),
             MmcSegmentError::MissingFirst
         );
-        r.push(segment(First, 1, &[1])).unwrap();
+        r.push(segment(First, 1, &[0x02])).unwrap();
         assert!(r.in_progress());
+        let restart = segment(First, 1, &[0x01]);
         assert_eq!(
-            r.push(segment(First, 0, &[2])).unwrap_err(),
+            r.push(restart).unwrap_err(),
             MmcSegmentError::FirstInsideString
         );
         assert!(!r.in_progress());
+        // The new string is whole from the refused first, with none of the old.
+        assert!(r.push(restart).unwrap().is_none());
+        let done = r.push(segment(Later, 0, &[0x02])).unwrap().unwrap();
+        assert_eq!(
+            done.iter().collect::<Vec<_>>(),
+            [MmcCommand::Stop, MmcCommand::Play]
+        );
+    }
+
+    /// A segment holds at most 45 string bytes: a message holds 48 and the
+    /// segment command takes three, so 46 cannot be written.
+    #[test]
+    fn a_segment_holds_at_most_forty_five_bytes() {
+        assert!(MmcSegmentBytes::new(&[0x02; 45]).is_some());
+        assert!(MmcSegmentBytes::new(&[0x02; 46]).is_none());
+        assert!(MmcSegmentBytes::new(&[0x80]).is_none());
+        let full = segment(MmcSegmentPlace::First, 0, &[0x02; 45]);
+        assert_eq!(segment_message(full).len(), 3 + MMC_MAX_DATA);
     }
 
     /// RP-013 p.40: a non-segmented message when a later segment was due

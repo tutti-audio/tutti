@@ -28,9 +28,9 @@ use super::command::{
 };
 use super::field::*;
 use super::values::{
-    MmcExtension, MmcFragment, MmcName, MmcPosition, MmcSelection, MmcShortTimeCode, MmcSlot,
-    MmcSpeed, MmcStep, MmcTimeCode, MmcTimeLabel, MmcTimeTail, MmcTrackBitmap, MmcUserBitFlags,
-    MmcUserBits, sign_of,
+    MmcExtension, MmcFragment, MmcName, MmcPosition, MmcSegmentBytes, MmcSelection,
+    MmcShortTimeCode, MmcSlot, MmcSpeed, MmcStep, MmcTimeCode, MmcTimeLabel, MmcTimeTail,
+    MmcTrackBitmap, MmcUserBitFlags, MmcUserBits, sign_of,
 };
 use super::{MMC_MAX_DATA, MmcBytes, MmcCommands, MmcFields, MmcNames, MmcSequence};
 use crate::smpte::MtcRate;
@@ -393,7 +393,7 @@ fn segment(d: &[u8]) -> Option<MmcSegment> {
             MmcSegmentPlace::Later
         },
         id & 0x3F,
-        fragment(rest)?,
+        MmcSegmentBytes::new(rest)?,
     )
 }
 
