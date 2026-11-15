@@ -34,7 +34,7 @@ use crate::types::{
 use super::instance::usable_topology;
 use super::library::Library;
 use super::midi_learn::MidiLearnConsumer;
-use super::midi_mapping::{MidiCcCell, MidiCcMapping};
+use super::midi_mapping::MidiCcCell;
 
 mod buses;
 mod editor;

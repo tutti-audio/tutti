@@ -1,7 +1,7 @@
 //! Loading, initialization and the plugin's requests and notifications.
 
 use super::*;
-use crate::host::midi_mapping::declared_assignments;
+use crate::host::midi_mapping::{MidiCcMapping, declared_assignments, scan};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 
 impl Vst3Loaded {
@@ -410,10 +410,11 @@ impl Vst3Loaded {
     /// block. Call it when the plugin raised
     /// [`Request::MidiCcAssignmentChanged`](tutti_plugin_types::Request::MidiCcAssignmentChanged). Allocates.
     pub(crate) fn rebuild_midi_cc_mapping(&mut self, main: MainThreadMarker) {
+        let slots = scan(main, &self.plugin);
         self.midi_cc
-            .publish(MidiCcCell(MidiCcMapping::query(main, &self.plugin)));
+            .publish(MidiCcCell(MidiCcMapping::from_slots(&slots)));
         self.midi_cc.reclaim();
-        self.assignments = declared_assignments(main, &self.plugin);
+        self.assignments = declared_assignments(&slots);
     }
 }
 

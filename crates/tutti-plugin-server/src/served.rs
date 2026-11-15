@@ -837,7 +837,9 @@ impl<F: ServerSide> ServedPlugin for Served<F> {
 
     fn set_bypassed(&mut self, main: MainThreadMarker, bypassed: bool) {
         if let Some(control) = self.lifecycle.control() {
-            control.set_bypassed(main, bypassed);
+            // The wire has no reply: the host reads the bypass back (a parameter
+            // bypass) and counts a write that did not take.
+            let _ = control.set_bypassed(main, bypassed);
         }
     }
 

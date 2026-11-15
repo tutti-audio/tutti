@@ -293,8 +293,8 @@ pub enum HostMessage {
         info: tutti_plugin_types::TrackInfo,
     },
     /// Write the plugin's own bypass (`true` bypassed): a parameter for VST3 and
-    /// CLAP, AU's unit property, VST2's `effSetBypass`. The server writes it as
-    /// the format does.
+    /// CLAP, AU's unit property. The server writes it as the format does and
+    /// sends no reply: the host reads a parameter bypass back.
     SetBypassed {
         /// Whether the plugin is bypassed.
         bypassed: bool,

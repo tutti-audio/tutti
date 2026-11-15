@@ -6,9 +6,9 @@ use crate::transcript::select_tail;
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    AudioBuffer, AudioBufferMut, BusRole, Control, Controller, Loaded, Normalized, ParamFlags,
-    ParameterChanges, PluginBus, PluginIo, PluginTail, ProcessContext, ProcessOutput, Processor,
-    Reopen, SampleFormat, Samples, TransportChange, TransportInfo,
+    AudioBuffer, AudioBufferMut, BusRole, BypassWrite, Control, Controller, Loaded, Normalized,
+    OwnBypass, ParamFlags, ParameterChanges, PluginBus, PluginIo, PluginTail, ProcessContext,
+    ProcessOutput, Processor, Reopen, SampleFormat, Samples, TransportChange, TransportInfo,
 };
 use tutti_plugin_types::{ParamEdit, Request};
 use tutti_ump::{MidiChannel, MidiGroup};
@@ -259,20 +259,27 @@ pub fn parameters_listed<F: Format>() {
 /// Spec: clap.ext.params.get_info, vst3.IEditController.getParameterInfo, vst2.eff.SetBypass, au.prop.BypassEffect
 pub fn own_bypass_is_declared_and_written<F: Format>() {
     let main = main_thread();
-    assert!(
-        F::load().wiring(main).own_bypass,
-        "{}: the plugin has its own bypass",
-        F::NAME
-    );
+    let site = |wiring: tutti_plugin_types::LoadedPlugin, when: &str| {
+        let site = wiring
+            .own_bypass
+            .unwrap_or_else(|| panic!("{}: the {when} plugin has its own bypass", F::NAME));
+        // The bypass lives where the format keeps it: a parameter the spec lists
+        // (VST3, CLAP), or not a parameter at all (AU, VST2).
+        match (F::SURFACE.bypass, site) {
+            (spec::Bypass::Parameter, OwnBypass::Parameter(id)) => {
+                assert_eq!(id, spec::BYPASS_ID, "{}: the bypass parameter", F::NAME);
+            }
+            (spec::Bypass::Unlisted, OwnBypass::Unlisted) => {}
+            (want, got) => panic!("{}: the bypass is {got:?}, the spec says {want:?}", F::NAME),
+        }
+    };
+    site(F::load().wiring(main), "loaded");
     let mut a = active_in::<F>(Mode::Tag);
-    assert!(
-        a.controller().wiring(main).own_bypass,
-        "{}: the active plugin has its own bypass",
-        F::NAME
-    );
+    site(a.controller().wiring(main), "active");
     for (bypassed, want) in [(true, 1.0), (false, 0.0)] {
-        assert!(
+        assert_eq!(
             a.controller_mut().set_bypassed(main, bypassed),
+            BypassWrite::Sent,
             "{}: the plugin takes a write of its bypass",
             F::NAME
         );

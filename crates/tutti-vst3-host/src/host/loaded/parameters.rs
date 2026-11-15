@@ -109,14 +109,6 @@ impl Vst3Loaded {
         apply_function_roles(list, &roles)
     }
 
-    /// Whether a parameter is flagged `kIsBypass`: the plugin has a bypass of
-    /// its own.
-    pub(crate) fn has_bypass_parameter(&self, main: MainThreadMarker) -> bool {
-        (0..self.parameter_count(main))
-            .filter_map(|i| self.parameter_info_at(main, i))
-            .any(|info| info.is_bypass())
-    }
-
     /// The plugin's own `[min, max]` for a parameter, recovered by asking its
     /// controller for the plain value at the normalized endpoints. The ends are
     /// data for display: converting any other value is the controller's own
@@ -690,27 +682,43 @@ mod measures_tests {
     }
 
     /// Each function a plugin answers for gives its parameter that function's
-    /// role; a parameter no function names has none, and no answer leaves every
-    /// role alone.
+    /// role, whichever pan axis it is; a parameter no function names has none,
+    /// no answer leaves every role alone, and a parameter two functions point
+    /// at keeps the first.
     #[test]
     fn a_function_name_gives_its_parameter_the_matching_role() {
         let list = || {
-            vec![
-                ParameterInfo::new(ParamId::new(1), "Cutoff"),
-                ParameterInfo::new(ParamId::new(2), "Mix"),
-                ParameterInfo::new(ParamId::new(3), "Pan"),
-            ]
+            ["Cutoff", "Mix", "PanX", "PanY", "PanZ", "Latency", "Twice"]
+                .into_iter()
+                .zip(1..)
+                .map(|(name, id)| ParameterInfo::new(ParamId::new(id), name))
+                .collect::<Vec<_>>()
         };
         let got = apply_function_roles(
             list(),
             &[
                 (ParamId::new(2), ControlRole::Mix),
-                (ParamId::new(3), ControlRole::Pan(Axis::Y)),
+                (ParamId::new(3), ControlRole::Pan(Axis::X)),
+                (ParamId::new(4), ControlRole::Pan(Axis::Y)),
+                (ParamId::new(5), ControlRole::Pan(Axis::Z)),
+                (ParamId::new(6), ControlRole::LowLatency),
+                (ParamId::new(7), ControlRole::Mix),
+                (ParamId::new(7), ControlRole::LowLatency),
             ],
         );
-        assert_eq!(got[0].role(), None);
-        assert_eq!(got[1].role(), Some(ControlRole::Mix));
-        assert_eq!(got[2].role(), Some(ControlRole::Pan(Axis::Y)));
+        let roles: Vec<_> = got.iter().map(ParameterInfo::role).collect();
+        assert_eq!(
+            roles,
+            [
+                None,
+                Some(ControlRole::Mix),
+                Some(ControlRole::Pan(Axis::X)),
+                Some(ControlRole::Pan(Axis::Y)),
+                Some(ControlRole::Pan(Axis::Z)),
+                Some(ControlRole::LowLatency),
+                Some(ControlRole::Mix),
+            ]
+        );
         let none = apply_function_roles(list(), &[]);
         assert!(none.iter().all(|p| p.role().is_none()));
     }

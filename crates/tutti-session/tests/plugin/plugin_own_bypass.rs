@@ -101,6 +101,7 @@ fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
         "the first plugin is bypassed"
     );
 
+    let outgoing_pid = s.plugin(node).expect("hosted").handle().server_pid();
     let incoming = PluginClient::new(
         tutti_plugin::BridgeConfig::default(),
         &tutti_fixtures::detached_work(),
@@ -116,8 +117,58 @@ fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
             tutti_graph::FadeLaw::EqualAmplitude,
         )
         .expect("the crossfade is accepted");
+    // The record now holds the incoming plugin's handle, which is what is read.
+    let incoming_pid = s.plugin(node).expect("hosted").handle().server_pid();
+    assert_ne!(
+        incoming_pid, outgoing_pid,
+        "the node's plugin is the new one"
+    );
     assert!(
         until_told(&mut s, node, 1.0),
         "the incoming plugin was not bypassed"
+    );
+}
+
+/// **A bypass the plugin is moved off is made the node's mode again.** The
+/// plugin's bypass is switched on behind the host's back (an editor click or
+/// an automation lane would), the state is restored, and the next ticks read it
+/// back, find it differs from the `Active` node, write the mode again and count
+/// it.
+#[test]
+fn a_restore_that_leaves_the_bypass_on_under_an_active_node_is_reconciled() {
+    let (mut s, node) = session_with_plugin();
+    // Let the install's reconciliation finish, so the session is not already
+    // comparing when the plugin is moved.
+    let mut block = vec![0.0f32; BLOCK * 2];
+    for _ in 0..8 {
+        s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
+        let _ = s.update();
+    }
+    let handle = s.plugin(node).expect("hosted").handle().clone();
+    handle
+        .any_thread()
+        .set_parameter_value(BYPASS, Normalized::of(1.0));
+    assert!(
+        until_told(&mut s, node, 1.0),
+        "the plugin's own bypass went on"
+    );
+    let state = s
+        .plugin(node)
+        .expect("hosted")
+        .state()
+        .save()
+        .expect("saves");
+    s.plugin(node)
+        .expect("hosted")
+        .state()
+        .restore(tutti_fixtures::main_thread(), &state)
+        .expect("restores");
+    assert!(
+        until_told(&mut s, node, 0.0),
+        "the session did not make the plugin's bypass the node's mode"
+    );
+    assert!(
+        handle.bypass_writes_unapplied() >= 1,
+        "the correction is counted"
     );
 }

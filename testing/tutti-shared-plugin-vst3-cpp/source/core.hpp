@@ -79,7 +79,6 @@ struct Core
 	std::vector<std::vector<double>> delay;
 	std::vector<Ev> events;
 
-	static bool known (uint32_t id) { return id < kListed; }
 	bool param (uint32_t id, double& v) const
 	{
 		if (id == kLevel) v = level; else if (id == kAux) v = aux; else if (id == kTone) v = tone; else if (id == kBypass) v = bypass;

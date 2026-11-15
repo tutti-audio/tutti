@@ -8,11 +8,12 @@
 
 use dpi::Size;
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, BlockCounts, ContentScale, Control, Delivered,
-    EditorCapabilities, EditorPresence, EditorWindow, Features, Health, LoadedPlugin,
-    MainThreadMarker, Normalized, ParamId, ParameterInfo, PluginDescriptor, PluginError,
-    PluginFailure, PluginResult, Preset, PresetId, ProcessWake, RenderMode, RenderModeSupport,
-    Request, SampleRate, StateError, StateUse, TerminationReason, TrackInfo, WindowHandle,
+    AnyThread, AutomationMode, AutomationModeError, BlockCounts, BypassWrite, ContentScale,
+    Control, Delivered, EditorCapabilities, EditorPresence, EditorWindow, Features, Health,
+    LoadedPlugin, MainThreadMarker, Normalized, OwnBypass, ParamId, ParameterInfo,
+    PluginDescriptor, PluginError, PluginFailure, PluginResult, Preset, PresetId, ProcessWake,
+    RenderMode, RenderModeSupport, Request, SampleRate, StateError, StateUse, TerminationReason,
+    TrackInfo, WindowHandle,
 };
 
 use super::{Ipc, IpcController};
@@ -76,17 +77,19 @@ macro_rules! served_control {
                 !self.link.bridge.is_crashed() && self.link.bridge.set_render_mode_rt(mode)
             }
 
+            /// The plugin's own bypass, written by the server as its format does
+            /// ([`HostMessage::SetBypassed`](crate::HostMessage::SetBypassed)).
+            fn set_bypassed(&self, _site: OwnBypass, bypassed: bool) -> BypassWrite {
+                match self.link.bridge.set_bypassed_rt(bypassed) {
+                    Delivered::Yes => BypassWrite::Sent,
+                    _ => BypassWrite::Lost,
+                }
+            }
+
             /// Delivered to both the audio subprocess and the in-process GUI
             /// (the knob-glow lives in the GUI). [`Delivered`] says whether
             /// the command was *queued*; no format confirms the plugin
             /// visibly reacted.
-            /// The plugin's own bypass, written by the server as its format does
-            /// ([`HostMessage::SetBypassed`](crate::HostMessage::SetBypassed)).
-            fn set_bypassed(&self, bypassed: bool) -> bool {
-                self.link.loaded.own_bypass
-                    && self.link.bridge.set_bypassed_rt(bypassed) == Delivered::Yes
-            }
-
             fn set_automation_mode(&self, mode: AutomationMode) -> Result<(), AutomationModeError> {
                 if self.link.bridge.is_crashed() {
                     return Err(AutomationModeError::PluginDead);
@@ -251,12 +254,15 @@ macro_rules! served_control {
                 self.link.bridge.current_preset()
             }
 
-            /// Advisory only: the outcome `AnyThread::set_automation_mode`
-            /// reports has no `Control` form.
-            fn set_bypassed(&mut self, _main: MainThreadMarker, bypassed: bool) -> bool {
-                AnyThread::set_bypassed(self, bypassed)
+            fn set_bypassed(&mut self, _main: MainThreadMarker, bypassed: bool) -> BypassWrite {
+                match self.link.loaded.own_bypass {
+                    Some(site) => AnyThread::set_bypassed(self, site, bypassed),
+                    None => BypassWrite::NoOwnBypass,
+                }
             }
 
+            /// Advisory only: the outcome `AnyThread::set_automation_mode`
+            /// reports has no `Control` form.
             fn set_automation_state(&mut self, _main: MainThreadMarker, mode: AutomationMode) {
                 let _ = AnyThread::set_automation_mode(self, mode);
             }

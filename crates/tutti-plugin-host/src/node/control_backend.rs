@@ -40,7 +40,8 @@ use super::instance::Instance;
 use crate::MainThreadControl;
 use crate::ParameterChangeSink;
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, Control, Health, InProcess, StateError,
+    AnyThread, AutomationMode, AutomationModeError, BypassWrite, Control, Health, InProcess,
+    OwnBypass, StateError,
 };
 use tutti_plugin_types::{
     Normalized, ParamId, ParameterInfo, PluginFailure, RenderMode, TerminationReason,
@@ -164,13 +165,13 @@ where
     /// parameter for VST3 and CLAP, a unit property for AU). Run on the main
     /// thread: off it, by its next tick, and `false` if that does not come
     /// within the deadline.
-    fn set_bypassed(&self, bypassed: bool) -> bool {
+    fn set_bypassed(&self, _site: OwnBypass, bypassed: bool) -> BypassWrite {
         self.on_main(move |main, instance| {
-            instance
-                .control()
-                .is_some_and(|control| control.set_bypassed(main, bypassed))
+            instance.control().map_or(BypassWrite::Lost, |control| {
+                control.set_bypassed(main, bypassed)
+            })
         })
-        .unwrap_or(false)
+        .unwrap_or(BypassWrite::Lost)
     }
 
     /// The format's own conversion ([`Control::parameter_plain`]).
@@ -511,15 +512,19 @@ mod off_main_tests {
         assert!(handle.any_thread().set_render_mode(RenderMode::Realtime));
     }
 
-    /// **A VST2 plugin that refuses `effSetBypass` is not written**: the
-    /// reference plugin advertises the soft bypass and declines it, so the
-    /// write through the backend and through the handle both say `false`.
+    /// **A VST2 plugin that advertises the soft bypass and refuses it claims no
+    /// bypass of its own**: the reference plugin answers `canDo(bypass)` and
+    /// declines `effSetBypass`, so its node keeps the executor's bypass and the
+    /// handle writes nothing.
     #[test]
-    fn a_plugin_that_refuses_its_soft_bypass_takes_no_bypass_write() {
+    fn a_plugin_that_refuses_its_soft_bypass_claims_no_bypass_of_its_own() {
         let (_client, handle, _pump) = loaded();
-        assert!(handle.loaded().own_bypass, "it advertises canDo(bypass)");
-        assert!(!handle.any_thread().set_bypassed(true));
-        assert!(!handle.set_bypassed(true));
+        assert_eq!(handle.loaded().own_bypass, None);
+        assert_eq!(
+            handle.set_bypassed(true),
+            tutti_plugin_types::BypassWrite::NoOwnBypass
+        );
+        assert_eq!(handle.bypass_writes_unapplied(), 0);
     }
 
     /// **No in-process format carries the automation advisory**, and says so

@@ -28,27 +28,28 @@ use std::time::Instant;
 use dpi::Size;
 
 use crate::{
-    AudioBufferMut, AutomationMode, ContentScale, EditorCapabilities, EditorWindow, KeyEvent,
-    KeyUse, LoadedPlugin, Normalized, ParamFlags, ParamId, ParameterInfo, PluginDescriptor,
+    AudioBufferMut, AutomationMode, BypassWrite, ContentScale, EditorCapabilities, EditorWindow,
+    KeyEvent, KeyUse, LoadedPlugin, Normalized, ParamId, ParameterInfo, PluginDescriptor,
     PluginError, PluginResult, PluginTail, Preset, PresetId, ProcessContext, ProcessOutput,
     ProcessWake, SampleRate, Samples, WindowHandle,
 };
-use crate::{Delivered, ParamEdit};
+use crate::{Delivered, ParamEdit, bypass_parameter, bypass_value};
 use crate::{
     FdId, MainThreadMarker, Prepare, Ready, RenderMode, RenderModeSupport, Request, RescanScope,
     RestartRules, StateUse, TimerId, TrackInfo, Wakeups,
 };
 
-/// The parameter a plugin flags as its own bypass, if it lists one.
-fn bypass_parameter(list: &[ParameterInfo]) -> Option<ParamId> {
-    list.iter()
-        .find(|p| p.flag(ParamFlags::BYPASS) == Some(true))
-        .map(ParameterInfo::id)
-}
-
-/// A bypass parameter's value: `1` bypassed, `0` processing.
-fn bypass_value(bypassed: bool) -> Normalized {
-    Normalized::clamped(if bypassed { 1.0 } else { 0.0 })
+/// Writes the plugin's bypass parameter, if it lists one: the default of
+/// [`Control::set_bypassed`] and what a wrapped plugin's write goes through, so
+/// an active plugin's reaches its Processor.
+fn write_bypass_parameter<C: Control + ?Sized>(
+    plugin: &mut C,
+    main: MainThreadMarker,
+    bypassed: bool,
+) -> Option<BypassWrite> {
+    let id = bypass_parameter(&plugin.parameters(main))?;
+    plugin.set_parameter(main, id, bypass_value(bypassed));
+    Some(BypassWrite::Sent)
 }
 
 /// What the main thread asks of a plugin, in any state that has one.
@@ -71,24 +72,22 @@ pub trait Control: EditorWindow {
     /// [`set_bypassed`](Self::set_bypassed).
     fn controls(&self, main: MainThreadMarker) -> Vec<ParameterInfo> {
         let mut list = self.parameters(main);
-        list.retain(|p| p.flag(ParamFlags::BYPASS) != Some(true));
+        let bypass = bypass_parameter(&list);
+        list.retain(|p| Some(p.id()) != bypass);
         list
     }
 
-    /// Writes the plugin's own bypass (`true` bypassed, `false` processing) and
-    /// returns whether the plugin has one
-    /// ([`LoadedPlugin::own_bypass`]): a plugin without one is left alone.
+    /// Writes the plugin's own bypass (`true` bypassed, `false` processing).
+    /// The result says whether it has one and whether the write was handed to
+    /// it; the plugin may still refuse, and
+    /// [`LoadedPlugin::own_bypass`] and a read back tell.
     ///
     /// The default writes the parameter flagged
-    /// [`BYPASS`](ParamFlags::BYPASS) (VST3, CLAP) to its maximum or its
-    /// minimum; AU, whose bypass is a unit property, overrides it. The host calls it
-    /// when the node's mode changes, never per block.
-    fn set_bypassed(&mut self, main: MainThreadMarker, bypassed: bool) -> bool {
-        let Some(id) = bypass_parameter(&self.parameters(main)) else {
-            return false;
-        };
-        self.set_parameter(main, id, bypass_value(bypassed));
-        true
+    /// [`BYPASS`](crate::ParamFlags::BYPASS) (VST3, CLAP) to its maximum or its
+    /// minimum; a format whose bypass is not a parameter (AU, VST2) overrides
+    /// it. The host calls it when the node's mode changes, never per block.
+    fn set_bypassed(&mut self, main: MainThreadMarker, bypassed: bool) -> BypassWrite {
+        write_bypass_parameter(self, main, bypassed).unwrap_or(BypassWrite::NoOwnBypass)
     }
 
     /// How many parameters the plugin declares: at least `parameters().len()`
@@ -560,16 +559,12 @@ impl<W: Wraps> Control for W {
     }
 
     /// A bypass that is a parameter is written as every parameter is, so an
-    /// active plugin's reaches its Processor ([`queue_write`](Wraps::queue_write));
-    /// one that is not (AU's unit property) is the plugin's own to write.
-    fn set_bypassed(&mut self, main: MainThreadMarker, bypassed: bool) -> bool {
-        match bypass_parameter(&self.parameters(main)) {
-            Some(id) => {
-                self.set_parameter(main, id, bypass_value(bypassed));
-                true
-            }
-            None => self.plugin_mut().set_bypassed(main, bypassed),
-        }
+    /// active plugin's reaches its Processor
+    /// ([`queue_write`](Wraps::queue_write)); one that is not (AU's unit
+    /// property) is the plugin's own to write.
+    fn set_bypassed(&mut self, main: MainThreadMarker, bypassed: bool) -> BypassWrite {
+        write_bypass_parameter(self, main, bypassed)
+            .unwrap_or_else(|| self.plugin_mut().set_bypassed(main, bypassed))
     }
 
     fn parameter_count(&self, main: MainThreadMarker) -> usize {

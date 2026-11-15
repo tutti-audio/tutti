@@ -4,10 +4,10 @@
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
-    AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
-    KeyUse, LoadedPlugin, ModifierConvention, Normalized, ParamEdit, ParamId, ParameterInfo,
-    PluginBus, PluginClass, PluginDescriptor, PluginError, PluginResult, Preset, PresetId,
-    RenderMode, RenderModeSupport, Request, StateUse, WindowHandle,
+    AutomationMode, BypassWrite, ContentScale, Control, EditorPresence, EditorWindow, Features,
+    KeyEvent, KeyUse, LoadedPlugin, ModifierConvention, Normalized, OwnBypass, ParamEdit, ParamId,
+    ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginError, PluginResult, Preset,
+    PresetId, RenderMode, RenderModeSupport, Request, StateUse, WindowHandle,
 };
 
 use crate::error::Vst2Error;
@@ -95,15 +95,21 @@ impl Control for Vst2Loaded {
             probed: probed::VST2,
             // A plugin that answers `canDo("bypass")` has the soft bypass the
             // host writes with `effSetBypass`; VST2 has no controller table.
-            own_bypass: self.supports_soft_bypass(main),
+            own_bypass: self.soft_bypass.then_some(OwnBypass::Unlisted),
             assignments: Vec::new(),
         }
     }
 
-    /// `effSetBypass`: VST2's bypass is an opcode, not a parameter. `false` for
-    /// a plugin that does not advertise it or refuses it.
-    fn set_bypassed(&mut self, main: MainThreadMarker, bypassed: bool) -> bool {
-        self.supports_soft_bypass(main) && self.set_bypass(main, bypassed)
+    /// `effSetBypass`: VST2's bypass is an opcode, not a parameter. A plugin that
+    /// does not claim it is left alone; one that refuses a write loses it.
+    fn set_bypassed(&mut self, main: MainThreadMarker, bypassed: bool) -> BypassWrite {
+        if !self.soft_bypass {
+            BypassWrite::NoOwnBypass
+        } else if self.set_bypass(main, bypassed) {
+            BypassWrite::Sent
+        } else {
+            BypassWrite::Lost
+        }
     }
 
     fn parameters(&self, _main: MainThreadMarker) -> Vec<ParameterInfo> {

@@ -2478,11 +2478,70 @@ impl Graph {
     /// node's mode says: on every change of mode, and when a plugin enters the
     /// node (an insert, a host, a replacement or a reload), so a plugin never
     /// plays unbypassed under a `Bypassed` node. A plugin without a bypass of
-    /// its own is left alone.
+    /// its own is left alone. The write is not assumed applied:
+    /// [`reconcile_own_bypass`](Self::reconcile_own_bypass) reads it back.
     #[cfg(feature = "plugin")]
     pub(crate) fn write_own_bypass(&self, node: NodeKey) {
         if let (Some(hosted), Ok(mode)) = (self.plugins.get(&node), self.mode(node)) {
+            hosted.bypass_check.store(
+                crate::plugin::JUST_WRITTEN,
+                std::sync::atomic::Ordering::Relaxed,
+            );
             let _ = hosted.handle.set_bypassed(mode == NodeMode::Bypassed);
+        }
+    }
+
+    /// Makes every hosted plugin's own bypass the node's mode, on the control
+    /// tick: reads the bypass back and writes the mode again where the plugin
+    /// differs (a write that was lost or refused, a restored state, automation
+    /// or the plugin's editor), counting each
+    /// ([`PluginHandle::bypass_writes_unapplied`](tutti_plugin_host::PluginHandle::bypass_writes_unapplied)).
+    /// An in-process plugin is read every tick; a served one's read is a round
+    /// trip, so it is read only after a write, a restore or an install, and not
+    /// on the tick right after a write (the command may not have landed). A
+    /// bypass that cannot be read (AU's, VST2's) stands as written.
+    ///
+    /// Until a plugin is back in the node's mode the executor does not bypass
+    /// its node, so it can play processed audio under `Bypassed` for the ticks
+    /// that take; a plugin that never takes the write keeps being re-asserted
+    /// and counted.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn reconcile_own_bypass(&self) {
+        use crate::plugin::{CLEAN, DUE, JUST_WRITTEN};
+        for (&node, hosted) in &self.plugins {
+            let handle = &hosted.handle;
+            if handle.loaded().own_bypass.is_none() {
+                continue;
+            }
+            let state = hosted
+                .bypass_check
+                .load(std::sync::atomic::Ordering::Relaxed);
+            if handle.server_pid().is_some() && state == CLEAN {
+                continue;
+            }
+            let Ok(mode) = self.mode(node) else { continue };
+            let want = mode == NodeMode::Bypassed;
+            if state == JUST_WRITTEN {
+                hosted
+                    .bypass_check
+                    .store(DUE, std::sync::atomic::Ordering::Relaxed);
+                continue;
+            }
+            match handle.bypassed() {
+                Some(now) if now == want => hosted
+                    .bypass_check
+                    .store(CLEAN, std::sync::atomic::Ordering::Relaxed),
+                Some(_) => {
+                    handle.count_unapplied_bypass();
+                    hosted
+                        .bypass_check
+                        .store(JUST_WRITTEN, std::sync::atomic::Ordering::Relaxed);
+                    let _ = handle.set_bypassed(want);
+                }
+                None => hosted
+                    .bypass_check
+                    .store(CLEAN, std::sync::atomic::Ordering::Relaxed),
+            }
         }
     }
 

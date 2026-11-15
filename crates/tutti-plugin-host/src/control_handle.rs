@@ -9,12 +9,12 @@ use crate::{
 };
 use dpi::Size;
 use std::sync::Arc;
-use tutti_plugin_types::BlockCounts;
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{
     AnyThread, AutomationMode, AutomationModeError, Control, EditorCapabilities, EditorError,
     Health, PluginError, PluginFailure, StateError, TerminationReason, WindowHandle,
 };
+use tutti_plugin_types::{BlockCounts, BypassWrite};
 use tutti_plugin_types::{ContentScale, KeyEvent, KeyUse};
 use tutti_plugin_types::{Delivered, TrackInfo};
 use tutti_plugin_types::{
@@ -196,6 +196,9 @@ pub struct PluginHandle {
     invalidate_sink: InvalidateSink,
     transport_sink: TransportSink,
     server_pid: Option<u32>,
+    /// The writes of the plugin's own bypass that were lost, refused or found
+    /// undone, shared by every clone of the handle.
+    bypass_unapplied: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl std::fmt::Debug for PluginHandle {
@@ -241,6 +244,7 @@ impl PluginHandle {
             transport_sink: TransportSink::default(),
             // No subprocess to name unless `with_server_pid` says so.
             server_pid: None,
+            bypass_unapplied: Arc::default(),
         }
     }
 
@@ -738,20 +742,58 @@ impl PluginHandle {
 
     // ---- Automation-state convenience --------------------------------------
 
-    /// Writes the plugin's own bypass, `true` bypassed and `false` processing,
-    /// and returns whether it has one ([`LoadedPlugin::own_bypass`]).
+    /// Writes the plugin's own bypass, `true` bypassed and `false` processing.
     ///
     /// **The host writes the plugin's bypass.** A node whose plugin has one
-    /// declares [`Shape::with_own_bypass`](tutti_graph::Shape::with_own_bypass),
-    /// so the executor leaves it running in
+    /// ([`LoadedPlugin::own_bypass`]) declares
+    /// [`Shape::with_own_bypass`](tutti_graph::Shape::with_own_bypass), so the
+    /// executor leaves it running in
     /// [`NodeMode::Bypassed`](tutti_graph::NodeMode::Bypassed) and nothing in the
-    /// plugin follows the mode on its own: whoever changes the node's mode calls
-    /// this once for the change, on the control side, never per block. A plugin
-    /// without a bypass of its own is left alone, and the executor's bypass
-    /// serves it. The write is fire-and-forget like
-    /// [`AnyThread::set_parameter_value`].
-    pub fn set_bypassed(&self, bypassed: bool) -> bool {
-        self.loaded.own_bypass && self.any_thread.set_bypassed(bypassed)
+    /// plugin follows the mode on its own: the node's mode is the bypass's one
+    /// owner, written on every change and read back
+    /// ([`bypassed`](Self::bypassed)) to be re-asserted when the plugin differs.
+    /// A plugin without a bypass of its own is
+    /// [`NoOwnBypass`](BypassWrite::NoOwnBypass) and the executor's bypass
+    /// serves it. A write is fire-and-forget:
+    /// [`Sent`](BypassWrite::Sent) is not applied, and a
+    /// [`Lost`](BypassWrite::Lost) one is counted
+    /// ([`bypass_writes_unapplied`](Self::bypass_writes_unapplied)).
+    pub fn set_bypassed(&self, bypassed: bool) -> BypassWrite {
+        let Some(site) = self.loaded.own_bypass else {
+            return BypassWrite::NoOwnBypass;
+        };
+        let written = self.any_thread.set_bypassed(site, bypassed);
+        if written == BypassWrite::Lost {
+            self.count_unapplied_bypass();
+        }
+        written
+    }
+
+    /// Whether the plugin's own bypass is on now, read back from the plugin;
+    /// `None` when the plugin has none, it cannot be read (AU's and VST2's are
+    /// not parameters), or it did not answer. A served plugin's read is a round
+    /// trip.
+    #[must_use]
+    pub fn bypassed(&self) -> Option<bool> {
+        self.any_thread.bypassed(self.loaded.own_bypass?)
+    }
+
+    /// Counts a write of the plugin's bypass that did not take: the host found
+    /// the plugin in the other state after writing it.
+    pub fn count_unapplied_bypass(&self) {
+        self.bypass_unapplied
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The writes of the plugin's own bypass that did not take, over the
+    /// plugin's life: lost on the way (a full queue, a dead plugin, the main
+    /// thread's deadline), refused by the format, or undone since (the plugin's
+    /// editor, a restored state, automation), each counted as the host found it.
+    /// Beside [`block_counts`](Self::block_counts) among the plugin's losses.
+    #[must_use]
+    pub fn bypass_writes_unapplied(&self) -> u64 {
+        self.bypass_unapplied
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Announces the host's [`AutomationMode`] to the plugin so its editor can

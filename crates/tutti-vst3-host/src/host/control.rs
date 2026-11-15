@@ -6,10 +6,10 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
-    KeyUse, LoadedPlugin, ModifierConvention, Normalized, ParamEdit, ParamId, ParamMapping,
-    ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, Preset,
-    PresetId, RenderModeSupport, Request, RescanScope, Samples, StateUse, Vst3SubCategories,
-    WindowHandle,
+    KeyUse, LoadedPlugin, ModifierConvention, Normalized, OwnBypass, ParamEdit, ParamId,
+    ParamMapping, ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginResult,
+    PluginTail, Preset, PresetId, RenderModeSupport, Request, RescanScope, Samples, StateUse,
+    Vst3SubCategories, WindowHandle, bypass_parameter,
 };
 
 use crate::error::Vst3Error;
@@ -239,7 +239,7 @@ impl Control for Vst3Loaded {
             tail: self.tail_figure(main),
             features: self.features(main),
             probed: probed::VST3,
-            own_bypass: self.has_bypass_parameter(main),
+            own_bypass: bypass_parameter(&self.parameter_list(main)).map(OwnBypass::Parameter),
             assignments: self.assignments.clone(),
         }
     }

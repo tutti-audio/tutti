@@ -478,11 +478,9 @@ impl AuMidiMapping {
     }
 }
 
-/// The mappings of `table` that drive a global-scope parameter from a Control
-/// Change, channel or key pressure, pitch bend or program change, as the assignments a plugin declares
-/// ([`MidiAssignment`]). A mapping on another scope or element, or one a note
-/// or system message triggers, names no [`MidiSource`] and is
-/// left out.
+/// The mappings of `table` that drive a global-scope parameter from a control
+/// surface message (Control Change, pressure, pitch bend, program change), as
+/// the assignments a plugin declares ([`MidiAssignment`]).
 pub(crate) fn declared(table: &[AuMidiMapping]) -> Vec<MidiAssignment> {
     table
         .iter()

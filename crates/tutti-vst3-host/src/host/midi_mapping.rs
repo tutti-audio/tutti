@@ -20,7 +20,9 @@
 //! `Steinberg::Vst::ControllerNumbers`.
 
 use vst3::Steinberg::Vst::{
-    ControllerNumbers_::{kAfterTouch, kCountCtrlNumber, kPitchBend},
+    ControllerNumbers_::{
+        kAfterTouch, kCountCtrlNumber, kCtrlPolyPressure, kCtrlProgramChange, kPitchBend,
+    },
     ParamID,
 };
 
@@ -28,6 +30,7 @@ use tutti_midi_protocol::channel_voice;
 use tutti_ump::{Address, MidiChannel, MidiGroup, U7, Ump, Voice2};
 
 use crate::events::{InputEvents, Stager};
+use crate::helpers::sdk_enum_i32;
 use crate::types::ParameterChanges;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
@@ -58,43 +61,63 @@ pub(crate) const CTRL_AFTERTOUCH: usize = kAfterTouch as usize;
 /// Synthetic controller index VST3 uses for pitch bend.
 pub(crate) const CTRL_PITCH_BEND: usize = kPitchBend as usize;
 
-/// The controller number of a program change, which `IMidiMapping` may name
-/// beside the SDK's own controller numbers (`kCtrlProgramChange`).
-const CTRL_PROGRAM_CHANGE: i16 = 130;
-/// The controller number of a polyphonic key pressure (`kCtrlPolyPressure`).
-const CTRL_POLY_PRESSURE: i16 = 131;
+/// One slot of the plugin's `IMidiMapping`: the channel and controller number
+/// it was asked for, and the parameter it names.
+#[derive(Clone, Copy)]
+pub(crate) struct Slot {
+    channel: i16,
+    controller: i16,
+    id: ParamID,
+}
 
-/// The plugin's controller table as declared assignments: one per mapped
-/// channel and message, scanned over every controller number the SDK gives a
-/// [`MidiSource`] (Control Change, channel pressure, pitch bend, program change
-/// and polyphonic pressure). The numbers past those are system messages, not
-/// controllers a parameter follows. Empty without an `IMidiMapping`. One
-/// scan, so a caller keeps the result; main thread.
-pub(crate) fn declared_assignments(main: MainThreadMarker, plugin: &Plugin) -> Vec<MidiAssignment> {
-    let mut out = Vec::new();
+/// Asks the plugin's `IMidiMapping` (event bus 0, the JUCE host contract) for
+/// every channel and every controller number the SDK gives a [`MidiSource`]:
+/// the Control Changes, channel pressure, pitch bend, program change and
+/// polyphonic pressure. The numbers past those are system messages, not
+/// controllers a parameter follows. The one scan both [`MidiCcMapping::from_slots`]
+/// and [`declared_assignments`] read; empty without an `IMidiMapping`. Main thread.
+pub(crate) fn scan(main: MainThreadMarker, plugin: &Plugin) -> Vec<Slot> {
+    let mut slots = Vec::new();
+    if !plugin.has_midi_mapping(main) {
+        return slots;
+    }
     plugin.midi_controller_assignments(
         main,
         0..NUM_CHANNELS as i16,
-        0..CTRL_POLY_PRESSURE + 1,
+        0..sdk_enum_i32(kCtrlPolyPressure) as i16 + 1,
         |channel, controller, id| {
-            let source = match controller {
-                c if c == CTRL_AFTERTOUCH as i16 => MidiSource::ChannelPressure,
-                c if c == CTRL_PITCH_BEND as i16 => MidiSource::PitchBend,
-                CTRL_PROGRAM_CHANGE => MidiSource::ProgramChange,
-                CTRL_POLY_PRESSURE => MidiSource::PolyPressure,
-                cc => match u8::try_from(cc).ok().and_then(U7::new) {
-                    Some(cc) => MidiSource::ControlChange(cc),
-                    None => return,
-                },
-            };
-            out.push(MidiAssignment {
-                channel: u8::try_from(channel).ok().and_then(MidiChannel::new),
-                source,
-                param: id.into(),
-            });
+            if id != NO_PARAM_ID {
+                slots.push(Slot {
+                    channel,
+                    controller,
+                    id,
+                });
+            }
         },
     );
-    out
+    slots
+}
+
+/// The slots as the plugin's declared assignments, one per mapped channel and
+/// message.
+pub(crate) fn declared_assignments(slots: &[Slot]) -> Vec<MidiAssignment> {
+    slots
+        .iter()
+        .filter_map(|slot| {
+            let source = match slot.controller {
+                c if c == CTRL_AFTERTOUCH as i16 => MidiSource::ChannelPressure,
+                c if c == CTRL_PITCH_BEND as i16 => MidiSource::PitchBend,
+                c if c == sdk_enum_i32(kCtrlProgramChange) as i16 => MidiSource::ProgramChange,
+                c if c == sdk_enum_i32(kCtrlPolyPressure) as i16 => MidiSource::PolyPressure,
+                cc => MidiSource::ControlChange(u8::try_from(cc).ok().and_then(U7::new)?),
+            };
+            Some(MidiAssignment {
+                channel: u8::try_from(slot.channel).ok().and_then(MidiChannel::new),
+                source,
+                param: slot.id.into(),
+            })
+        })
+        .collect()
 }
 
 /// A [`MidiCcMapping`] as the control thread publishes it to the Processor.
@@ -123,33 +146,23 @@ impl MidiCcMapping {
         }
     }
 
-    /// Queries the plugin's `IMidiMapping` (if its controller exposes one) for
-    /// every channel × controller slot and builds the table.
-    ///
-    /// Returns an [`empty`](Self::empty) table when the controller is absent
-    /// or doesn't implement `IMidiMapping`. Must run on the UI/main thread —
-    /// `IMidiMapping` is an `IEditController` extension.
-    pub(crate) fn query(main: MainThreadMarker, plugin: &Plugin) -> Self {
-        if !plugin.has_midi_mapping(main) {
-            return Self::empty();
-        }
-
+    /// The routing table of a scan of the plugin's `IMidiMapping`: the slots
+    /// that name one of the table's controllers ([`NUM_CONTROLLERS`]). An
+    /// [`empty`](Self::empty) table when nothing is mapped.
+    pub(crate) fn from_slots(slots: &[Slot]) -> Self {
         let mut table = vec![NO_PARAM_ID; NUM_CHANNELS * NUM_CONTROLLERS];
         let mut any_mapped = false;
-        // busIndex 0: CC mappings are reported against the first event bus
-        // (matches the JUCE host contract).
-        plugin.midi_controller_assignments(
-            main,
-            0..NUM_CHANNELS as i16,
-            0..NUM_CONTROLLERS as i16,
-            |channel, controller_number, id| {
-                if id != NO_PARAM_ID {
-                    table[channel as usize * NUM_CONTROLLERS + controller_number as usize] = id;
-                    any_mapped = true;
-                }
-            },
-        );
-
+        for slot in slots {
+            if let (Ok(channel), Ok(controller)) = (
+                usize::try_from(slot.channel),
+                usize::try_from(slot.controller),
+            ) && channel < NUM_CHANNELS
+                && controller < NUM_CONTROLLERS
+            {
+                table[channel * NUM_CONTROLLERS + controller] = slot.id;
+                any_mapped = true;
+            }
+        }
         if any_mapped {
             Self { table, any_mapped }
         } else {

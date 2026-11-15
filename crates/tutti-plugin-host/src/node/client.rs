@@ -212,7 +212,7 @@ impl Declared {
             // A plugin with a bypass of its own keeps running in
             // `NodeMode::Bypassed`: the host writes that bypass
             // ([`PluginHandle::set_bypassed`](crate::PluginHandle::set_bypassed)).
-            ports: if loaded.own_bypass {
+            ports: if loaded.own_bypass.is_some() {
                 ports.with_own_bypass()
             } else {
                 ports
@@ -1341,7 +1341,7 @@ mod declared_buses {
     #[test]
     fn only_a_plugin_with_its_own_bypass_declares_one() {
         let with = LoadedPlugin {
-            own_bypass: true,
+            own_bypass: Some(tutti_plugin_types::OwnBypass::Unlisted),
             ..LoadedPlugin::default()
         };
         assert!(Declared::of(&with).ports.own_bypass);

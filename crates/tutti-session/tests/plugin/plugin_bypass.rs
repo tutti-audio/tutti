@@ -156,6 +156,22 @@ fn a_bypassed_plugin_passes_a_click_its_declared_latency_late() {
     }
 }
 
+/// **A plugin without a bypass of its own is bypassed by the executor, and the
+/// host writes nothing to it.** The reference plugin lists no bypass: it claims
+/// none, its node is the executor's (the tests above), and across ticks of the
+/// session no write is lost, refused or re-asserted.
+#[test]
+fn a_plugin_without_its_own_bypass_is_left_to_the_executor() {
+    let mut r = rig(NodeMode::Bypassed);
+    let _ = r.render(2);
+    let _ = r.s.update();
+    let _ = r.s.update();
+    let plugin = r.s.plugin(r.plugin).expect("hosted");
+    assert_eq!(plugin.handle().loaded().own_bypass, None);
+    assert_eq!(plugin.handle().bypass_writes_unapplied(), 0);
+    assert_eq!(plugin.handle().bypassed(), None, "nothing to read back");
+}
+
 /// **A bypassed plugin is parked: its server is not called.** Bypassed from
 /// the start (so no fade), its server answers no block; made active again, it
 /// is reset, called and heard (its tag is not silence).

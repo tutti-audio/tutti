@@ -15,11 +15,12 @@ use dpi::{LogicalSize, Size};
 use tutti_au_ffi::{AuEditor, Scope};
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
-    AuComponentType, AutomationMode, ContentScale, Control, EditorCapabilities, EditorError,
-    EditorPresence, EditorWindow, Features, LoadedPlugin, MainThreadMarker, Normalized, ParamEdit,
-    ParamFlags, ParamId, ParamMapping, ParamRange, ParamSteps, ParameterInfo, PluginBus,
-    PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, Preset,
-    PresetId, RenderModeSupport, Request, RescanScope, StateUse, WindowHandle, Wraps, taken,
+    AuComponentType, AutomationMode, BypassWrite, ContentScale, Control, EditorCapabilities,
+    EditorError, EditorPresence, EditorWindow, Features, LoadedPlugin, MainThreadMarker,
+    Normalized, OwnBypass, ParamEdit, ParamFlags, ParamId, ParamMapping, ParamRange, ParamSteps,
+    ParameterInfo, PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError,
+    PluginResult, PluginTail, Preset, PresetId, RenderModeSupport, Request, RescanScope, StateUse,
+    WindowHandle, Wraps, taken,
 };
 use tutti_types::Samples;
 
@@ -289,7 +290,7 @@ impl Control for AuLoaded {
             probed: probed::AU,
             // A unit without `kAudioUnitProperty_BypassEffect` (every
             // instrument) refuses the read.
-            own_bypass: self.is_bypassed().is_ok(),
+            own_bypass: self.is_bypassed().is_ok().then_some(OwnBypass::Unlisted),
             // A unit that does not implement the mapping family (most effects)
             // refuses the read and declares none.
             assignments: self
@@ -376,8 +377,11 @@ impl Control for AuLoaded {
 
     /// Writes `kAudioUnitProperty_BypassEffect`: an AU's bypass is a unit
     /// property, never a parameter. `false` for a unit without one.
-    fn set_bypassed(&mut self, _main: MainThreadMarker, bypassed: bool) -> bool {
-        self.set_bypass(bypassed).is_ok()
+    fn set_bypassed(&mut self, _main: MainThreadMarker, bypassed: bool) -> BypassWrite {
+        match self.set_bypass(bypassed) {
+            Ok(()) => BypassWrite::Sent,
+            Err(_) => BypassWrite::NoOwnBypass,
+        }
     }
 
     /// Plain, in the AU's own units: `ParamBounds`'s [`ParamMapping`] over the
