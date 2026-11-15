@@ -631,7 +631,7 @@ mod tests {
     /// Wherever a bed places a left speaker, its azimuth is positive (tutti's
     /// convention: 90 is left), and a right one's negative.
     #[test]
-    fn a_bed_places_left_speakers_at_positive_azimuths() {
+    fn a_bed_places_sided_speakers_at_the_azimuth_sign_of_their_side() {
         let mut checked = 0;
         for bed in Bed::ALL {
             for s in NAMED {
