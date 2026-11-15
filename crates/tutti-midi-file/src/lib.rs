@@ -141,12 +141,12 @@ pub enum Error {
     /// variable-length quantity over four bytes, an event cut off inside its
     /// chunk), a track count that disagrees with the header, a zero
     /// ticks-per-beat division. The [`SmfParseError`] says which.
-    #[error("MIDI parse error: {0}")]
+    #[error("MIDI parse error")]
     MidiFileParse(#[source] SmfParseError),
 
     /// The file is cut off. What was read is not returned: a shorter file is
     /// not the file. The [`Truncated`] says what was being read.
-    #[error("the MIDI file is truncated: {0}")]
+    #[error("the MIDI file is truncated")]
     Truncated(#[source] Truncated),
 
     /// SMPTE/timecode division. The codec reads metrical timing only: beats

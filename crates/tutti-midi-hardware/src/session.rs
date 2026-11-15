@@ -175,6 +175,11 @@ impl DeviceQuery {
     }
 }
 
+const _: fn(MidiSession) = |session| {
+    fn is_send<T: Send>(_: T) {}
+    is_send(session);
+};
+
 /// What one [`MidiSession::poll`] found, for the device it names.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
@@ -589,8 +594,17 @@ impl MidiSession {
     /// [`poll`](Self::poll). It replaces what was served, and the Subscriptions
     /// the peers held end without a message. The session serves an empty store
     /// until this is called.
+    ///
+    /// Each device on each input serves its own copy of the store, and a peer's
+    /// Set changes that copy only: it is reported as
+    /// [`PropertyChange::Served`], and the copy the app gave is not changed.
+    /// The session has no way to tell a subscriber of a change the app makes,
+    /// so every entry is served as not subscribable: the ResourceList says so
+    /// and a Subscription Start is refused with the status for a Resource that
+    /// cannot be subscribed to (M2-103 §11.1). Publishing to subscribers is not
+    /// offered.
     pub fn serve_properties(&mut self, store: ResourceStore) {
-        self.properties = Arc::new(store);
+        self.properties = Arc::new(store.without_subscriptions());
     }
 
     /// The MIDI-CI peers of the open input `id` that declared Property Exchange

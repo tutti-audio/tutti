@@ -108,7 +108,7 @@ pub enum ProcessAction {
 pub enum ProcessError {
     /// A report is still waiting for its Reply or its End.
     #[error("a MIDI Message Report is already in flight")]
-    TooManyRequests,
+    AlreadyAsking,
     /// The peer's capabilities say it does not support MIDI Message Report.
     #[error("the peer does not support MIDI Message Report")]
     NotSupported,
@@ -157,15 +157,14 @@ impl ProcessInitiator {
         self.link.peer
     }
 
-    /// The features the peer's reply declared, `None` before one arrived and
-    /// while a new inquiry waits.
+    /// The features the peer's reply declared, `None` before one arrived; a new
+    /// inquiry keeps them until its reply, and a timeout or refusal drops them.
     #[must_use]
     pub fn features(&self) -> Option<ProcessFeatures> {
         self.capabilities.answer().copied()
     }
 
-    /// Asks for the capabilities again: a wait already running starts over, and
-    /// the features are unknown until the reply.
+    /// Asks for the capabilities again: a wait already running starts over.
     pub fn inquire(&mut self, now: Instant) -> Vec<ProcessAction> {
         self.capabilities.ask(now, PEER_REPLY_TIMEOUT, ());
         vec![self.send(CiDeviceId::FunctionBlock, |header, to| {
@@ -178,7 +177,7 @@ impl ProcessInitiator {
     ///
     /// # Errors
     ///
-    /// [`ProcessError::TooManyRequests`] while a report is waiting, and
+    /// [`ProcessError::AlreadyAsking`] while a report is waiting, and
     /// [`ProcessError::NotSupported`] once the peer's capabilities lack MIDI
     /// Message Report. A request made before the capabilities are known is sent:
     /// the spec does not require the inquiry first.
@@ -188,7 +187,7 @@ impl ProcessInitiator {
         now: Instant,
     ) -> Result<Vec<ProcessAction>, ProcessError> {
         if self.report.is_some() {
-            return Err(ProcessError::TooManyRequests);
+            return Err(ProcessError::AlreadyAsking);
         }
         if self
             .features()

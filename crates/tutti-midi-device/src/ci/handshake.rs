@@ -7,8 +7,9 @@ use std::time::Instant;
 /// for the answer, or answered.
 ///
 /// `A` is what the Initiator keeps while it waits (Profile Replies heard so far)
-/// and `K` what the answer gives. Asking again drops the answer: what the
-/// peer said before is not what it says now.
+/// and `K` what the answer gives. Asking again keeps the answer until the new
+/// one arrives, so what the peer said before still holds while it is asked; a
+/// refusal or a timeout of the new inquiry drops it.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Handshake<K, A = ()> {
     /// Not asked, or the wait ended with a refusal or a timeout.
@@ -19,6 +20,8 @@ pub(super) enum Handshake<K, A = ()> {
         deadline: Instant,
         /// What the wait has collected.
         progress: A,
+        /// The answer the peer gave before this inquiry, if it did.
+        previous: Option<K>,
     },
     /// The peer answered.
     Answered(K),
@@ -27,17 +30,24 @@ pub(super) enum Handshake<K, A = ()> {
 impl<K, A> Handshake<K, A> {
     /// The inquiry goes out at `now` and waits `wait`.
     pub(super) fn ask(&mut self, now: Instant, wait: std::time::Duration, progress: A) {
+        let previous = match std::mem::replace(self, Self::Unanswered) {
+            Self::Answered(answer) => Some(answer),
+            Self::Asking { previous, .. } => previous,
+            Self::Unanswered => None,
+        };
         *self = Self::Asking {
             deadline: now + wait,
             progress,
+            previous,
         };
     }
 
-    /// The answer, once it has come.
+    /// The answer, once it has come: while a new inquiry waits, the one before.
     pub(super) fn answer(&self) -> Option<&K> {
         match self {
             Self::Answered(answer) => Some(answer),
-            _ => None,
+            Self::Asking { previous, .. } => previous.as_ref(),
+            Self::Unanswered => None,
         }
     }
 

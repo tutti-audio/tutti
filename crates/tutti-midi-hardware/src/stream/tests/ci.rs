@@ -1941,7 +1941,7 @@ fn a_report_while_one_waits_is_not_sent() {
     let changes = polled(&mut wire, 110);
     assert_eq!(
         process_events(&changes),
-        [&ProcessChange::NotSent(ProcessError::TooManyRequests)]
+        [&ProcessChange::NotSent(ProcessError::AlreadyAsking)]
     );
     assert_eq!(payloads(&received(&wire)).len(), 1);
 }
@@ -2386,4 +2386,228 @@ fn a_lost_peer_drops_its_property_exchange() {
     let gone = polled(&mut wire, 410);
     assert!(property_events(&gone).contains(&&PropertyChange::Dropped));
     assert!(wire.session.property_peers(&wire.id).is_empty());
+}
+
+fn subscribable() -> ResourceStore {
+    let mut store = ResourceStore::new();
+    store.declare(
+        ResourceEntry::new(PeResource::LocalOn)
+            .unwrap()
+            .with_can_subscribe(true),
+    );
+    store
+        .put(None, PeData::LocalOn(PeLocalOn(true)))
+        .expect("declared");
+    store
+}
+
+/// A peer with Property Exchange whose Capabilities and ResourceList have come.
+fn ready_property_peer(store: ResourceStore) -> (Wire, Muid, Far) {
+    let (mut wire, ours, inquiry) = property_peer();
+    let (mut far, _) = Far::new(ours, store, None);
+    let said = answers(&mut far, &inquiry, 60, &wire);
+    let _ = pump(&mut wire, &mut far, said, 60);
+    assert_eq!(wire.session.property_peers(&wire.id).len(), 1);
+    (wire, ours, far)
+}
+
+/// The app asks the first listed peer for `call` at `ms`; the far end and the
+/// session trade messages until quiet.
+fn ask_and_pump(wire: &mut Wire, far: &mut Far, call: PropertyCall, ms: u64) -> Vec<Polled> {
+    let peers = wire.session.property_peers(&wire.id);
+    wire.session.ask_property(peers[0].ask(call)).unwrap();
+    let mut all = polled(wire, ms);
+    let sent: Vec<CiMessage> = ci_sent(wire).into_iter().map(|(_, m)| m).collect();
+    let said = answers(far, &sent, ms, wire);
+    all.extend(pump(wire, far, said, ms + 2));
+    all
+}
+
+fn resource_events(all: &[Polled]) -> Vec<ResourceEvent> {
+    property_events(all)
+        .into_iter()
+        .filter_map(|c| match c {
+            PropertyChange::Event(e) => Some((**e).clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// M2-103 section 11: a Subscription the peer allows starts with its Reply and ends
+/// with the Initiator's End.
+#[test]
+fn a_subscription_starts_and_ends_through_the_session() {
+    let (mut wire, _, mut far) = ready_property_peer(subscribable());
+    let get = ResourceGet::new(ResourceTarget::new(PeResource::LocalOn).unwrap());
+    let all = ask_and_pump(&mut wire, &mut far, PropertyCall::Subscribe(get), 300);
+    let events = resource_events(&all);
+    let Some(id) = events.iter().find_map(|e| match e {
+        ResourceEvent::Subscribed { subscribe_id, .. } => Some(subscribe_id.clone()),
+        _ => None,
+    }) else {
+        panic!("a Subscription started: {events:?}");
+    };
+    assert_eq!(far.resp.subscriptions().count(), 1);
+
+    let all = ask_and_pump(&mut wire, &mut far, PropertyCall::Unsubscribe(id), 600);
+    let events = resource_events(&all);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, ResourceEvent::Unsubscribed { result: Ok(_), .. })),
+        "{events:?}"
+    );
+    assert_eq!(far.resp.subscriptions().count(), 0);
+}
+
+/// A call the peer's ResourceList does not allow is refused when it is started,
+/// with the reason, and nothing is sent.
+#[test]
+fn a_call_the_peers_resource_list_refuses_is_a_not_sent_change() {
+    let (mut wire, _, mut far) = ready_property_peer(subscribable());
+    let get = ResourceGet::new(ResourceTarget::new(PeResource::DeviceInfo).unwrap());
+    let all = ask_and_pump(&mut wire, &mut far, PropertyCall::Get(get), 300);
+    let changes = property_events(&all);
+    assert!(
+        matches!(changes.as_slice(), [PropertyChange::NotSent { .. }]),
+        "{changes:?}"
+    );
+}
+
+/// A handle outlives its peer: asking from it is refused with the reason, whether
+/// the input closed or the peer went, and a call queued before the peer went is
+/// reported as not sent at the poll.
+#[test]
+fn a_call_for_a_peer_that_is_gone_is_refused_or_reported_not_sent() {
+    let (mut wire, _, _) = ready_property_peer(subscribable());
+    let handle = wire.session.property_peers(&wire.id)[0].clone();
+    let get = || {
+        PropertyCall::Get(ResourceGet::new(
+            ResourceTarget::new(PeResource::LocalOn).unwrap(),
+        ))
+    };
+
+    // Queued, then the peer is invalidated before the poll that would send it.
+    wire.session.ask_property(handle.ask(get())).unwrap();
+    say(
+        &wire,
+        GROUP_0,
+        &CiMessage::InvalidateMuid {
+            header: CiHeader::new(peer()),
+            target: peer(),
+        },
+        300,
+    );
+    let all = polled(&mut wire, 310);
+    let changes = property_events(&all);
+    assert!(
+        changes
+            .iter()
+            .any(|c| matches!(c, PropertyChange::PeerGone { .. })),
+        "{changes:?}"
+    );
+    assert_eq!(
+        wire.session.ask_property(handle.ask(get())),
+        Err(crate::PropertyError::NoSuchPeer)
+    );
+
+    wire.session.disconnect_input(&wire.id.clone());
+    assert_eq!(
+        wire.session.ask_property(handle.ask(get())),
+        Err(crate::PropertyError::NotOpen)
+    );
+}
+
+/// M2-101 section 5.11: a Property Exchange inquiry of a peer that declared no
+/// Property Exchange is NAKed as a message not supported, not left unanswered.
+#[test]
+fn an_inquiry_of_a_peer_that_declared_no_property_exchange_is_nakked() {
+    let (mut wire, ours) = midi1_running();
+    find_peer(&mut wire, GROUP_0, ours, 40);
+    let _ = ci_sent(&wire);
+    say(
+        &wire,
+        GROUP_0,
+        &CiMessage::PropertyExchange {
+            header: CiHeader::new(peer()),
+            to: ours,
+            message: PeCiMessage::CapabilitiesInquiry(PeCapabilities::new(
+                SimultaneousRequests::of(2),
+            )),
+        },
+        60,
+    );
+    let _ = polled(&mut wire, 70);
+    let sent = ci_sent(&wire);
+    let [(_, CiMessage::Nak { to, nak, .. })] = sent.as_slice() else {
+        panic!("one NAK: {sent:?}");
+    };
+    assert_eq!(*to, peer());
+    assert_eq!(nak.nak_sub_id2.get(), 0x30);
+    assert_eq!(
+        nak.status_code,
+        tutti_midi_device::Nak::STATUS_MESSAGE_NOT_SUPPORTED
+    );
+}
+
+/// M2-101 section 5.9: when the device's MUID changes its Responder is for the
+/// new one: an inquiry of the new MUID is answered from it.
+#[test]
+fn a_new_muid_renews_the_responder() {
+    let (mut wire, ours, _) = property_peer();
+    say(
+        &wire,
+        GROUP_0,
+        &CiMessage::InvalidateMuid {
+            header: CiHeader::new(peer()),
+            target: ours,
+        },
+        60,
+    );
+    let _ = polled(&mut wire, 70);
+    let sent = ci_sent(&wire);
+    let Some(new) = sent.iter().find_map(|(_, m)| match m {
+        CiMessage::Discovery { header, .. } => Some(header.source),
+        _ => None,
+    }) else {
+        panic!("a new round of Discovery: {sent:?}");
+    };
+    assert_ne!(new, ours);
+    say(
+        &wire,
+        GROUP_0,
+        &CiMessage::DiscoveryReply {
+            header: CiHeader::new(peer()),
+            to: new,
+            data: peer_data_of(CiCategories::PROPERTY_EXCHANGE),
+        },
+        80,
+    );
+    let _ = polled(&mut wire, 90);
+    let _ = ci_sent(&wire);
+    say(
+        &wire,
+        GROUP_0,
+        &CiMessage::PropertyExchange {
+            header: CiHeader::new(peer()),
+            to: new,
+            message: PeCiMessage::CapabilitiesInquiry(PeCapabilities::new(
+                SimultaneousRequests::of(2),
+            )),
+        },
+        100,
+    );
+    let _ = polled(&mut wire, 110);
+    let replies: Vec<_> = ci_sent(&wire)
+        .into_iter()
+        .filter_map(|(_, m)| match m {
+            CiMessage::PropertyExchange {
+                header,
+                message: PeCiMessage::CapabilitiesReply(_),
+                ..
+            } => Some(header.source),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(replies, [new]);
 }

@@ -361,15 +361,28 @@ impl ResourceResponder {
         self.queue.iter().filter(|q| q.peer == peer).count()
     }
 
-    /// Serves `peer`, whose Discovery gave `max_sysex`.
+    /// Serves `peer`, whose Discovery gave `max_sysex`. A peer already served keeps
+    /// its Subscriptions and what waits for it: a repeated Discovery changes
+    /// only its Receivable Maximum SysEx Message Size, and only an Invalidate
+    /// MUID ends a Subscription without a message ([`forget`](Self::forget),
+    /// M2-103 §11.5).
     pub fn accept(&mut self, peer: Muid, max_sysex: MaxSysexSize) {
-        self.forget(peer);
+        if let Some(served) = self.peers.iter_mut().find(|p| p.muid == peer) {
+            served.max_sysex = max_sysex;
+            return;
+        }
         self.peers.push(Peer {
             muid: peer,
             max_sysex,
             takes: SimultaneousRequests::ONE,
             ids: RequestIds::default(),
         });
+    }
+
+    /// Whether `peer` is served.
+    #[must_use]
+    pub fn serves(&self, peer: Muid) -> bool {
+        self.peer(peer).is_some()
     }
 
     /// Stops serving `peer` and drops its Subscriptions without a message: an

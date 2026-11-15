@@ -93,7 +93,7 @@ pub enum ClipFileError {
     #[error("clip body is not 32-bit-word aligned")]
     Unaligned,
     /// The stream ends too soon; the [`Truncated`] says in what.
-    #[error("clip file is truncated: {0}")]
+    #[error("clip file is truncated")]
     Truncated(#[source] Truncated),
     /// No DCTPQ (tick-unit declaration) in the file.
     #[error("clip file has no DCTPQ tick-unit declaration")]

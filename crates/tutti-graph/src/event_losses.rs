@@ -16,7 +16,8 @@ use std::ops::{Add, AddAssign};
 /// - [`evicted`](Self::evicted): held, then dropped to make room for another.
 ///   A full waiting list or a ring that overwrote its oldest.
 /// - [`refused`](Self::refused): a port or a node declined it: no room at the
-///   destination, or no destination (a Group with no port).
+///   destination, or no destination (a Group with no port). A MIDI-CI message
+///   that an output could not take whole counts as one.
 /// - [`late`](Self::late): found past its frame and delivered at the block's
 ///   first frame. Not a loss of the event, a loss of its time.
 ///

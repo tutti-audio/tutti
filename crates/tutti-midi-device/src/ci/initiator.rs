@@ -274,7 +274,7 @@ pub enum RequestError {
     /// The same request, or a Set On or Off of the same Profile at the same
     /// address, is still waiting for its answer.
     #[error("a request for that Profile at that address is already in flight")]
-    TooManyRequests,
+    AlreadyAsking,
 }
 
 /// One Profile of the table.
@@ -429,8 +429,8 @@ impl ProfileInitiator {
     }
 
     /// Whether an inquiry has ended with the final Reply, so the table is the peer's
-    /// whole declaration (and the Reports since). It is not while an inquiry is
-    /// waiting: the Replies heard so far have replaced only part of the table.
+    /// whole declaration (and the Reports since). A new inquiry keeps it until
+    /// the new final Reply, or drops it when the wait times out or is refused.
     #[must_use]
     pub fn is_known(&self) -> bool {
         self.inquiry.answer().is_some()
@@ -450,7 +450,7 @@ impl ProfileInitiator {
     ///
     /// # Errors
     ///
-    /// [`RequestError::TooManyRequests`] when a Set On or Off of that Profile at
+    /// [`RequestError::AlreadyAsking`] when a Set On or Off of that Profile at
     /// that address is waiting.
     pub fn set_on(
         &mut self,
@@ -475,7 +475,7 @@ impl ProfileInitiator {
     ///
     /// # Errors
     ///
-    /// [`RequestError::TooManyRequests`] as for [`set_on`](Self::set_on).
+    /// [`RequestError::AlreadyAsking`] as for [`set_on`](Self::set_on).
     pub fn set_off(
         &mut self,
         address: CiDeviceId,
@@ -496,7 +496,7 @@ impl ProfileInitiator {
     ///
     /// # Errors
     ///
-    /// [`RequestError::TooManyRequests`] when the same inquiry is waiting.
+    /// [`RequestError::AlreadyAsking`] when the same inquiry is waiting.
     pub fn details(
         &mut self,
         address: CiDeviceId,
@@ -551,9 +551,8 @@ impl ProfileInitiator {
         actions
     }
 
-    /// A CI message of the connection's Group arrived. A message needs no clock
-    /// reading here: `now` makes the call the same as the other Initiators'.
-    pub fn on_message(&mut self, decoded: &Decoded, _now: Instant) -> Vec<ProfileAction> {
+    /// A CI message of the connection's Group arrived.
+    pub fn on_message(&mut self, decoded: &Decoded) -> Vec<ProfileAction> {
         let mut actions = Vec::new();
         let Decoded::Message(message) = decoded else {
             return actions;
@@ -771,7 +770,7 @@ impl ProfileInitiator {
                     && pending.request.profile() == request.profile())
         });
         if clash {
-            return Err(RequestError::TooManyRequests);
+            return Err(RequestError::AlreadyAsking);
         }
         self.pending.push(Pending {
             request,

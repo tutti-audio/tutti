@@ -110,7 +110,10 @@
 //! message, runs its deadline on the same step as the device's, and sends its replies
 //! in the same batch. When the device's MUID changes the Responder is made again for
 //! the new one, over the store as the peers left it, and holds no Subscription. A lost
-//! peer's Initiator and Subscriptions go with it ([`PropertyChange::Dropped`]).
+//! peer's Initiator and Subscriptions go with it ([`PropertyChange::Dropped`]); a repeated
+//! Discovery of a peer keeps its Subscriptions. The store is served as not subscribable
+//! (there is no way to publish to a subscriber through the session), and an inquiry of a
+//! peer the Responder does not serve is NAK'd.
 //!
 //! The port copies the device's SysEx7 packets to the stream ring while any
 //! device is to run (`hears_sysex`); the graph still gets them all. They are
@@ -127,7 +130,8 @@
 //!
 //! - **Identity**: the app's, as given to `enable_ci`.
 //! - **Categories**: Profile Configuration, Process Inquiry and Property Exchange. The
-//!   devices initiate all three and answer Property Exchange from their store. They answer a Profile Inquiry with no Profiles (M2-101 §7.13 allows a device
+//!   devices initiate all three and answer Property Exchange from their store.
+//!   They answer a Profile Inquiry with no Profiles (M2-101 §7.13 allows a device
 //!   that has none to reply) and NAK a Set Profile On or Off; they answer an Inquiry:
 //!   Process Inquiry Capabilities with MIDI Message Report supported, and a MIDI Message
 //!   Report of the Function Block or Group with an empty Reply and the End (§9.6, §9.8),
@@ -903,7 +907,7 @@ impl Running {
             for member in self.members.iter_mut().filter(|m| m.group == group) {
                 let actions = member.device.on_message(&decoded, now);
                 member.apply(actions, now, &mut sends, changes);
-                member.route(&decoded, now, &mut sends, changes);
+                member.route(&decoded, &mut sends, changes);
                 member.route_process(&decoded, now, &mut sends, changes);
                 member.route_property(&decoded, now, &mut sends, changes);
             }
@@ -936,6 +940,15 @@ impl Running {
         let mut sends = Vec::new();
         for switch in queue.drain(..) {
             let Some(member) = self.members.iter_mut().find(|m| m.group == switch.group) else {
+                changes.profiles.push((
+                    PeerId {
+                        group: switch.group,
+                        muid: switch.muid,
+                    },
+                    ProfilesChange::PeerGone {
+                        profile: switch.profile,
+                    },
+                ));
                 continue;
             };
             member.start_switch(&switch, now, &mut sends, changes);
@@ -957,6 +970,13 @@ impl Running {
         let mut sends = Vec::new();
         for ask in asks.drain(..) {
             let Some(member) = self.members.iter_mut().find(|m| m.group == ask.peer.group) else {
+                changes.process.push((
+                    PeerId {
+                        group: ask.peer.group,
+                        muid: ask.peer.muid,
+                    },
+                    ProcessChange::PeerGone,
+                ));
                 continue;
             };
             member.start_report(&ask, now, &mut sends, changes);
@@ -1132,6 +1152,9 @@ impl Member {
         changes: &mut CiChanges,
     ) {
         let Some(initiator) = self.process.get_mut(&ask.peer.muid) else {
+            changes
+                .process
+                .push((self.peer_id(ask.peer.muid), ProcessChange::PeerGone));
             return;
         };
         match initiator.report(ask.request, now) {
@@ -1174,14 +1197,13 @@ impl Member {
     fn route(
         &mut self,
         decoded: &Decoded,
-        now: Instant,
         sends: &mut Vec<(MidiGroup, CiMessage)>,
         changes: &mut CiChanges,
     ) {
         let heard: Vec<_> = self
             .initiators
             .iter_mut()
-            .map(|(&muid, initiator)| (muid, initiator.on_message(decoded, now)))
+            .map(|(&muid, initiator)| (muid, initiator.on_message(decoded)))
             .collect();
         for (muid, actions) in heard {
             self.carry_out(muid, actions, sends, changes);
@@ -1214,6 +1236,12 @@ impl Member {
         changes: &mut CiChanges,
     ) {
         let Some(initiator) = self.initiators.get_mut(&switch.muid) else {
+            changes.profiles.push((
+                self.peer_id(switch.muid),
+                ProfilesChange::PeerGone {
+                    profile: switch.profile,
+                },
+            ));
             return;
         };
         let started = match switch.switch {
@@ -1509,5 +1537,30 @@ mod tests {
         let (mut short, _counters) = output_accepting(1);
         let (_, changes) = Running::start(&[G0], identity(), &mut entropy, now, &mut short);
         assert_eq!(changes.refused, Losses::refused(1));
+    }
+
+    // A Group that starts after the app gave its store serves that store: one
+    // store is held for every device of the input, not one per start.
+    #[test]
+    fn a_group_reconciled_after_the_store_was_given_serves_it() {
+        let (mut out, _counters) = output();
+        let now = Instant::now();
+        let (mut running, _) = Running::start(&[G0], identity(), &mut entropy, now, &mut out);
+        let mut store = ResourceStore::new();
+        store.declare(
+            tutti_midi_device::ResourceEntry::new(tutti_midi_device::PeResource::LocalOn).unwrap(),
+        );
+        running.serve(&store);
+        let mut changes = CiChanges::default();
+        running.reconcile(&[G0, G1], &mut entropy, now, &mut out, &mut changes);
+        assert_eq!(running.members.len(), 2);
+        for member in &running.members {
+            assert_eq!(
+                member.server.store().resource_list(),
+                store.resource_list(),
+                "{:?}",
+                member.group
+            );
+        }
     }
 }

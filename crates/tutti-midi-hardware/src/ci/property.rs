@@ -14,7 +14,7 @@ use tutti_midi_device::{
 };
 use tutti_ump::MidiGroup;
 
-use super::{CiChanges, Member, Running};
+use super::{CiChanges, Member, PeerId, Running};
 use crate::properties::{PropertyAsk, PropertyCall, PropertyChange};
 
 /// The requests of a peer this device takes at once.
@@ -133,6 +133,14 @@ impl Member {
         sends: &mut Vec<(MidiGroup, CiMessage)>,
         changes: &mut CiChanges,
     ) {
+        // The Management core leaves Property Exchange inquiries to the Responder, so
+        // one from a peer it does not serve is refused here (M2-101 §5.11).
+        if let Decoded::Message(message) = decoded
+            && !self.server.serves(message.header().source)
+            && let Some(nak) = self.device.refuse_property_exchange(decoded)
+        {
+            sends.push((self.group, nak));
+        }
         let served = self.server.on_message(decoded, now);
         self.carry_out_served(served, sends, changes);
         let heard: Vec<_> = self
@@ -177,6 +185,12 @@ impl Member {
     ) {
         let muid = ask.peer.muid;
         let Some(initiator) = self.properties.get_mut(&muid) else {
+            changes.properties.push((
+                self.peer_id(muid),
+                PropertyChange::PeerGone {
+                    call: Box::new(ask.call.clone()),
+                },
+            ));
             return;
         };
         let started = match &ask.call {
@@ -244,6 +258,7 @@ impl Member {
 impl Running {
     /// Gives each member's Responder `store`.
     pub(super) fn serve(&mut self, store: &ResourceStore) {
+        self.store = store.clone();
         for member in &mut self.members {
             member.serve(store.clone());
         }
@@ -261,6 +276,15 @@ impl Running {
         let mut sends = Vec::new();
         for ask in asks.drain(..) {
             let Some(member) = self.members.iter_mut().find(|m| m.group == ask.peer.group) else {
+                changes.properties.push((
+                    PeerId {
+                        group: ask.peer.group,
+                        muid: ask.peer.muid,
+                    },
+                    PropertyChange::PeerGone {
+                        call: Box::new(ask.call.clone()),
+                    },
+                ));
                 continue;
             };
             member.start_property(&ask, now, &mut sends, changes);

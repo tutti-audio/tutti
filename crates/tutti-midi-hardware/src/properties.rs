@@ -122,6 +122,12 @@ pub enum PropertyChange {
         /// Why not.
         error: CallError,
     },
+    /// A [`PropertyAsk`] was not started: the peer was lost between the request
+    /// and the poll that would have started it.
+    PeerGone {
+        /// What was asked.
+        call: Box<PropertyCall>,
+    },
     /// The peer did something to what this device serves: a Set changed the
     /// store, or a Subscription began or ended.
     Served(ResponderEvent),
