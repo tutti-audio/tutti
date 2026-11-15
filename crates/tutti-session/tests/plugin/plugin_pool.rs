@@ -76,8 +76,17 @@ fn servers() {
 /// What the plugin's next server reports as its port layout: the probe's
 /// `PortLayoutMode` as a number (`0` stereo, `1` stereo and an aux bus, `3` two
 /// mono buses).
+///
+/// The file is replaced whole (a temporary beside it, then a rename), so a
+/// server that starts meanwhile reads the old layout or the new one, never a
+/// truncated file.
 fn layout(mode: &str) {
-    std::fs::write(layout_file(), mode).expect("the layout file is written");
+    let file = layout_file();
+    let mut temporary = file.clone().into_os_string();
+    temporary.push(".new");
+    let temporary = std::path::PathBuf::from(temporary);
+    std::fs::write(&temporary, mode).expect("the layout is written");
+    std::fs::rename(&temporary, &file).expect("the layout file is replaced");
 }
 
 /// An offline session with `recovery` as its policy (`None`: recovery off).

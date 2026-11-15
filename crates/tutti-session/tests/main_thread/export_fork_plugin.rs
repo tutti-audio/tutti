@@ -92,10 +92,11 @@ fn probe_env(key: &str, value: impl ToString) {
     // IPC threads and a live server exist by the time a later switch is set,
     // so this is not single-threaded. What makes it sound: the threads in this
     // process are Rust threads, which read the environment only through
-    // `std::env` (behind std's environment lock), and no plugin code runs in
-    // it. The server reads a switch only at spawn, and `Command::spawn` takes
-    // that same lock to read `environ`; the already-running server never
-    // re-reads it.
+    // `std::env` (behind std's environment lock), and, for a served plugin (the
+    // crash case, which is why this is sound there), no plugin code runs in it.
+    // An in-process plugin sets its variables before any session exists. The
+    // server reads a switch only at spawn, and `Command::spawn` takes that same
+    // lock to read `environ`; the already-running server never re-reads it.
     unsafe { std::env::set_var(key, value.to_string()) };
 }
 

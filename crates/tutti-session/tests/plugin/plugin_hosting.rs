@@ -7,7 +7,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tutti_plugin::catalog::{Hosting, PluginRef};
 use tutti_plugin_types::BridgeError;
-
 use tutti_session::{Job, LoadError, PoolEvent, Session, SessionEvent};
 use tutti_types::{MaxBlock, Samples};
 
@@ -52,7 +51,8 @@ fn a_blacklisted_plugin_does_not_resolve_and_loads_once_unblacklisted() {
         .expect("an unblacklisted plugin loads");
 }
 
-/// The first pool event of `key` that is an outcome, on this thread.
+/// The first pool event that is an outcome (a load that landed or failed), on
+/// this thread.
 fn outcome(s: &mut Session, main: tutti_plugin_types::MainThreadMarker) -> PoolEvent {
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
