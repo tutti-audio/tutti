@@ -308,7 +308,8 @@ pub(super) fn new_node(
         PARAMS.iter().map(|&id| ParamId::new(id)),
         ParameterChanges::SPARE_QUEUES,
         None,
-    );
+    )
+    .expect("the wiring is within a block's width");
     client.go_offline();
     (Direct::new(client.bind(tempo), SR, CHUNK), record, threads)
 }
