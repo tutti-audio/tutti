@@ -75,7 +75,8 @@ unit! {
     /// it orders (left really is less than right).
     ///
     /// A control a caller sets. The engine's measured left/right balance is
-    /// [`StereoBalance`], a reading; there is no conversion between them.
+    /// [`StereoBalance`], a reading; there is no conversion between them. A
+    /// balance control on a stereo pair is [`Balance`].
     /// Distinct from [`Depth`]: a pan position and a modulation amount are
     /// different quantities that happen to share a range.
     pub struct Pan(pub f32): Unit, Ordered, Bounded, Signed;
@@ -98,6 +99,49 @@ impl Pan {
     #[must_use]
     pub fn new_clamped(v: f32) -> Pan {
         Pan(v).clamp(Self::LEFT, Self::RIGHT)
+    }
+}
+
+unit! {
+    /// A stereo balance, `-1..1`: `-1` keeps only the left channel, `0` both at
+    /// unity, `+1` only the right.
+    ///
+    /// A control on a signal that is already a left/right pair. It attenuates
+    /// the side it moves away from and never boosts the other, so its centre is
+    /// exactly unity, where a panner's equal-power law reads -3 dB on each
+    /// side, and it holds no power constant. A [`Pan`] places a source with a
+    /// panner's law, and [`StereoBalance`] is the engine's measured balance, a
+    /// reading; there is no conversion between the three.
+    pub struct Balance(pub f32): Unit, Ordered, Bounded, Signed;
+}
+// NOT `Scalable` / `Additive`: a position on a segment, as `Pan` is; half a
+// balance is not a balance, and two do not sum.
+
+impl Balance {
+    /// Only the left channel.
+    pub const LEFT: Balance = Balance(-1.0);
+    /// Both channels at unity.
+    pub const CENTER: Balance = Balance(0.0);
+    /// Only the right channel.
+    pub const RIGHT: Balance = Balance(1.0);
+
+    /// Constrain into `-1..=1`.
+    #[inline]
+    #[must_use]
+    pub fn new_clamped(v: f32) -> Balance {
+        Balance(v).clamp(Self::LEFT, Self::RIGHT)
+    }
+
+    /// The `(left, right)` amplitudes of the linear balance law:
+    /// `left = min(1, 1 - b)`, `right = min(1, 1 + b)`. `(1, 1)` at centre,
+    /// `(1, 0)` at [`LEFT`](Self::LEFT), `(0, 1)` at [`RIGHT`](Self::RIGHT).
+    /// A balance outside `-1..=1` reads as the nearer end, and a NaN as unity
+    /// on both sides. Neither side exceeds unity.
+    #[inline]
+    #[must_use]
+    pub fn gains(self) -> (Amplitude, Amplitude) {
+        let b = self.0.clamp(-1.0, 1.0);
+        (Amplitude((1.0 - b).min(1.0)), Amplitude((1.0 + b).min(1.0)))
     }
 }
 
