@@ -785,9 +785,12 @@ fn a_jump_back_behind_a_loop_edit_plays_the_new_loop() {
 }
 
 /// A sine loop's own largest step, and the most a fade between two unit
-/// sines may add to it per frame (`2 / (fade + 1)`).
+/// sines may add to it per frame (`2 * 15/8 / (fade + 1)`, the smootherstep's
+/// steepest slope over the unit gap).
 fn sine_bound() -> f32 {
-    (2.0 * (std::f64::consts::PI / PERIOD as f64).sin()) as f32 + 2.0 / (FADE + 1) as f32 + 1e-4
+    (2.0 * (std::f64::consts::PI / PERIOD as f64).sin()) as f32
+        + 2.0 * 1.875 / (FADE + 1) as f32
+        + 1e-4
 }
 
 /// Fades chain without a step: a loop
@@ -848,9 +851,9 @@ fn fades_chain_without_a_step() {
 /// A starved reader ramps out and back in: a jump outside the window
 /// with the streamer stalled plays the old continuation, which runs out after `OLD_FRAMES`; it ramps to silence over
 /// its last frames instead of cutting, and when the streamer resumes the ring
-/// ramps back in. On a sine, no step exceeds the sine's own plus a ramp's
-/// `1 / 64` per frame — where cut hard it steps by up to the sine's full
-/// swing.
+/// ramps back in. On a sine, no step exceeds the sine's own plus a fade's
+/// steepest step (the smootherstep's `15/8` over `DECLICK`) per frame — where
+/// cut hard it steps by up to the sine's full swing.
 #[test]
 fn a_starved_reader_ramps_out_and_back_in() {
     let dir = tempfile::tempdir().expect("a temp dir");
@@ -877,7 +880,7 @@ fn a_starved_reader_ramps_out_and_back_in() {
     );
     let (step, at) = max_step(&got);
     let own = (2.0 * (std::f64::consts::PI / PERIOD as f64).sin()) as f32;
-    let bound = own + 1.0 / crate::voice::live_read::RAMP_FRAMES as f32 + 1e-4;
+    let bound = own + 1.875 / tutti_graph::declick_frames(SampleRate::of(SR)).get() as f32 + 1e-4;
     assert!(
         step <= bound,
         "a step of {step} at frame {at}, above {bound}"

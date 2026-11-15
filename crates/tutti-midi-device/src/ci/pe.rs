@@ -104,14 +104,15 @@ mod tree;
 mod value;
 mod write;
 
-pub use body::{BodyLimit, PeBodyError, decode_body, encode_body};
+pub use body::{BodyLimit, NotABodyLimit, PeBodyError, decode_body, encode_body};
 pub use capabilities::{
-    PeCapabilities, PeCiMessage, PeVersion, SUB_ID2_PE_CAPABILITIES_INQUIRY,
-    SUB_ID2_PE_CAPABILITIES_REPLY, SUB_ID2_PE_NOTIFY, SimultaneousRequests,
+    NotASimultaneousRequests, PeCapabilities, PeCiMessage, PeVersion,
+    SUB_ID2_PE_CAPABILITIES_INQUIRY, SUB_ID2_PE_CAPABILITIES_REPLY, SUB_ID2_PE_NOTIFY,
+    SimultaneousRequests,
 };
 pub use chunk::{
-    ChunkNo, ChunkPosition, ChunkTotal, PE_MAX_CHUNK_DATA_LEN, PeChunk, PeChunkError, PeRequestId,
-    split_message,
+    ChunkNo, ChunkPosition, ChunkTotal, NotAChunkNo, NotARequestId, PE_MAX_CHUNK_DATA_LEN, PeChunk,
+    PeChunkError, PeRequestId, split_message,
 };
 pub use flow::{PE_TIMEOUT, PeAnswer, PeMessageKind, PeSignal, PeTerminator, PeTransaction};
 pub use header::{
@@ -123,19 +124,21 @@ pub use initiator::{
     PeNotification, PeOutcome, PeResponse, PeSet, PeSettings, PeSubscribed, PeUnreadable,
 };
 pub use limits::{
-    MediaType, NotInRange, NotValid, PeMessage, PropertyName, ResourceId, ResourceName, SubscribeId,
+    MediaType, NotValid, PeMessage, PropertyName, ResourceId, ResourceName, SubscribeId,
 };
 pub use partial::{JsonPointer, PartialError, PartialUpdate};
 pub use reassemble::{
-    BufferLimit, PeBuffered, PeExpired, PeFlowControl, PeHeld, PeReassembler, PeReassemblyError,
-    PeReassemblyLimits, PeReceived, PeRefused, PeStep, StreamLimit,
+    BufferLimit, NotABufferLimit, NotAStreamLimit, PeBuffered, PeExpired, PeFlowControl, PeHeld,
+    PeReassembler, PeReassemblyError, PeReassemblyLimits, PeReceived, PeRefused, PeStep,
+    StreamLimit,
 };
 pub use resource::{
     ActionError, Arrival, CallError, CallId, CanSet, CcIndex, ChangeKind, ClusterKind,
     ColumnSource, CommonState, ConfirmIcon, ConfirmType, Confirmation, CtrlControl, CtrlKind,
     CtrlRange, CtrlValueKind, CustomResource, DefaultMapNotCc, EntryError, GetStateError, LinkRole,
-    ListedTwice, MAX_LIST_ENTRIES, ModeId, NotVendorName, OpaqueBody, PaginationFault, ParamPath,
-    PeAllCtrlEntry, PeAllCtrlList, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx,
+    ListedTwice, MAX_LIST_ENTRIES, ModeId, NotAPeChannel, NotAPriority, NotAStateSize,
+    NotAStepCount, NotSignificantBits, NotUnixSeconds, NotVendorName, OpaqueBody, PaginationFault,
+    ParamPath, PeAllCtrlEntry, PeAllCtrlList, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx,
     PeChCtrlEntry, PeChCtrlList, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode,
     PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList, PeCurrentMode,
     PeData, PeDataError, PeDataFault, PeDeviceInfo, PeExtensions, PeExternalSync, PeJsonSchema,

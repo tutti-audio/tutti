@@ -285,6 +285,9 @@ mod tests {
     use super::*;
     use crate::testing::loop_frames;
 
+    const STREAM_1: StreamId = StreamId::of(1);
+    const STREAM_2: StreamId = StreamId::of(2);
+
     fn on(start: usize, end: usize) -> Option<Loop> {
         Some(loop_frames(start, end, 7))
     }
@@ -298,7 +301,7 @@ mod tests {
     #[test]
     fn a_stream_on_a_gone_streamer_reports_it() {
         let (tx, queue) = crossbeam_channel::bounded(8);
-        let mut stream = Stream::detached(StreamId(0), StreamerPort::new(tx));
+        let mut stream = Stream::detached(StreamId::of(1), StreamerPort::new(tx));
         drop(queue);
         assert_eq!(stream.set_loop(None), Err(StreamerGone));
         assert_eq!(stream.set_loop(on(0, 100)), Err(StreamerGone));
@@ -313,8 +316,8 @@ mod tests {
         let (tx, queue) = crossbeam_channel::bounded(16);
         let port = StreamerPort::new(tx);
         let (mut a, mut b) = (
-            Stream::detached(StreamId(1), port.clone()),
-            Stream::detached(StreamId(2), port),
+            Stream::detached(StreamId::of(1), port.clone()),
+            Stream::detached(StreamId::of(2), port),
         );
         a.set_loop(on(5, 100)).unwrap();
         b.set_loop(None).unwrap();
@@ -326,17 +329,17 @@ mod tests {
                 sent.as_slice(),
                 [
                     StreamerCommand::SetStreamLoop {
-                        stream: StreamId(1),
+                        stream: STREAM_1,
                         looped: first,
                     },
                     StreamerCommand::ClearStreamLoop {
-                        stream: StreamId(2)
+                        stream: STREAM_2
                     },
                     StreamerCommand::Close {
-                        stream: StreamId(1)
+                        stream: STREAM_1
                     },
                     StreamerCommand::Close {
-                        stream: StreamId(2)
+                        stream: STREAM_2
                     },
                 ] if *first == on(5, 100).unwrap()
             ),
@@ -351,7 +354,7 @@ mod tests {
     #[test]
     fn a_failed_send_leaves_the_stream_as_it_was() {
         let (tx, queue) = crossbeam_channel::bounded(8);
-        let mut stream = Stream::detached(StreamId(3), StreamerPort::new(tx));
+        let mut stream = Stream::detached(StreamId::of(3), StreamerPort::new(tx));
         assert_eq!(stream.loop_(), None);
         assert_eq!(stream.direction(), Direction::Forward);
         stream.set_loop(on(0, 100)).expect("the streamer lives");

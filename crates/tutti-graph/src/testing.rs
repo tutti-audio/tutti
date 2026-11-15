@@ -32,6 +32,20 @@ use tutti_ump::Ump;
 
 pub const RATE: SampleRate = SampleRate::SR_48K;
 
+/// [`DECLICK`](crate::DECLICK) in frames at [`RATE`].
+pub fn declick() -> usize {
+    crate::declick_frames(RATE).get()
+}
+
+/// `(out, in)` at frame `j` of an `n`-frame equal-amplitude fade, from the
+/// smootherstep `x³(6x² − 15x + 10)` at `x = (j + 1) / (n + 1)` written out in
+/// `f64`: the figure the fade tests hold the engine to.
+pub fn smooth_gains(j: usize, n: usize) -> (f64, f64) {
+    let x = (j + 1) as f64 / (n + 1) as f64;
+    let s = x * x * x * (6.0 * x * x - 15.0 * x + 10.0);
+    (1.0 - s, s)
+}
+
 /// How many times an `EventLag` forwards one event.
 pub const MAX_HOPS: u32 = 2;
 

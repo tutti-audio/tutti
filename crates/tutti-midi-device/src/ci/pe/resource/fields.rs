@@ -6,32 +6,45 @@ use std::fmt;
 
 use tutti_ump::{Bank, U7};
 
-use super::super::chunk::ranged;
-use super::super::limits::{NotInRange, NotValid, PropertyName, text_type};
+use super::super::limits::{NotValid, PropertyName, text_type};
 use super::super::tree::{PeJson, PeObject};
 
-ranged! {
+tutti_types::ranged! {
     /// A MIDI Channel of a Function Block: 1 to 256, counted from the first
     /// Channel of the first Group of the block and on across its Groups
     /// (M2-105 Table 10, M2-117 Table 5).
-    PeChannel(u16), "u16", 1, 256, "channel of a function block"
+    #[derive(Eq, Hash, PartialOrd, Ord)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u16", into = "u16"))]
+    PeChannel(u16), NotAPeChannel, "a channel of a function block (1 to 256)",
+    |raw| raw >= 1 && raw <= 256
 }
 
-ranged! {
+tutti_types::ranged! {
     /// The priority of a controller: 1, the most important, to 5, hidden
     /// (M2-117 §2.1.1.1).
-    Priority(u8), "u8", 1, 5, "priority"
+    #[derive(Eq, Hash, PartialOrd, Ord)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    Priority(u8), NotAPriority, "a priority (1 to 5)", |raw| raw >= 1 && raw <= 5
 }
 
-ranged! {
+tutti_types::ranged! {
     /// The significant bits of a 32-bit controller value: 1 to 32 (M2-117
     /// Table 5).
-    SignificantBits(u8), "u8", 1, 32, "count of significant bits"
+    #[derive(Eq, Hash, PartialOrd, Ord)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    SignificantBits(u8), NotSignificantBits, "a count of significant bits (1 to 32)",
+    |raw| raw >= 1 && raw <= 32
 }
 
-ranged! {
+tutti_types::ranged! {
     /// The number of steps of a stepped controller (M2-117 Table 5): at least 1.
-    StepCount(u32), "u32", 1, u32::MAX, "step count"
+    #[derive(Eq, Hash, PartialOrd, Ord)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u32", into = "u32"))]
+    StepCount(u32), NotAStepCount, "a step count (at least 1)", |raw| raw >= 1
 }
 
 text_type! {
@@ -316,12 +329,6 @@ impl PeDataError {
 
 impl From<NotValid> for PeDataFault {
     fn from(error: NotValid) -> Self {
-        Self::NotValid(error.what)
-    }
-}
-
-impl<R: fmt::Display + fmt::Debug> From<NotInRange<R>> for PeDataFault {
-    fn from(error: NotInRange<R>) -> Self {
         Self::NotValid(error.what)
     }
 }

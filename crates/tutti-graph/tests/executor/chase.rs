@@ -12,8 +12,8 @@ use common::{WORKERS, bits, prepare, test_pool};
 
 use tutti_fixtures::midi;
 use tutti_graph::{
-    Buses, Chase, CrossfadeCurve, Cx, Editor, Event, EventEdge, EventIn, EventKind, EventOut,
-    Executor, Fade, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable,
+    Buses, Chase, Cx, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, Fade,
+    FadeLaw, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{NodeKey, OutPort, Source};
 use tutti_types::{ChannelLayout, Samples};
@@ -174,7 +174,7 @@ fn blocks(exec: &mut Executor, outputs: usize) -> Vec<Vec<f32>> {
 }
 
 fn cut() -> Fade {
-    Fade::new(Samples(0), CrossfadeCurve::EqualPower)
+    Fade::new(Samples(0), FadeLaw::EqualPower)
 }
 
 /// A CC and its value set on the outgoing node sound from the incoming
@@ -225,7 +225,7 @@ fn a_crossfade_chases_the_incoming_node_alone() {
     let set = cc(7, 90);
     let (mut ed, mut exec) = rig(Keeper::new(Some(set), true, 8, &old_log));
     block(&mut exec);
-    let fade = Fade::new(Samples(4 * BLOCK), CrossfadeCurve::EqualPower);
+    let fade = Fade::new(Samples(4 * BLOCK), FadeLaw::EqualPower);
     ed.replace(
         NodeKey(1),
         Unforkable(Keeper::new(None, true, 8, &new_log)),
@@ -370,7 +370,7 @@ fn a_chase_renders_bit_identically_in_parallel() {
             let fade = if k % 2 == 0 {
                 cut()
             } else {
-                Fade::new(Samples(3 * BLOCK), CrossfadeCurve::EqualPower)
+                Fade::new(Samples(3 * BLOCK), FadeLaw::EqualPower)
             };
             ed.replace(
                 NodeKey(k),
@@ -387,7 +387,7 @@ fn a_chase_renders_bit_identically_in_parallel() {
             ed.replace(
                 NodeKey(k),
                 Unforkable(Keeper::new(None, true, 8, &log)),
-                Fade::new(Samples(2 * BLOCK), CrossfadeCurve::EqualPower),
+                Fade::new(Samples(2 * BLOCK), FadeLaw::EqualPower),
             )
             .expect("fits");
         }
@@ -416,7 +416,7 @@ fn a_replace_queued_behind_a_fade_is_chased_when_the_fade_ends() {
     let set = cc(7, 90);
     let (mut ed, mut exec) = rig(Keeper::new(Some(set), true, 8, &a));
     block(&mut exec);
-    let fade = || Fade::new(Samples(8 * BLOCK), CrossfadeCurve::EqualPower);
+    let fade = || Fade::new(Samples(8 * BLOCK), FadeLaw::EqualPower);
     ed.replace(
         NodeKey(1),
         Unforkable(Keeper::new(None, true, 8, &b)),
@@ -493,7 +493,7 @@ fn a_held_chase_counts_what_the_successor_cannot_take() {
         })]);
     ed.commit().expect("commits");
     block(&mut exec);
-    let fade = || Fade::new(Samples(4 * BLOCK), CrossfadeCurve::EqualPower);
+    let fade = || Fade::new(Samples(4 * BLOCK), FadeLaw::EqualPower);
     ed.replace(NodeKey(1), Unforkable(Mute), fade())
         .expect("fits");
     ed.commit().expect("commits");

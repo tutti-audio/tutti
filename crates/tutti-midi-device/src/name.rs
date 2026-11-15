@@ -1,11 +1,9 @@
 //! The bounded text of a UMP Stream: Endpoint Name, Product Instance Id and
-//! Function Block Name, held without allocating, split into packets and
-//! reassembled from them.
+//! Function Block Name, held without allocating.
 
 use std::fmt;
 use std::str::FromStr;
 
-use tutti_ump::Form;
 use unicode_normalization::{UnicodeNormalization, is_nfc};
 
 /// Why a text is not a name ([`Name::parse`], [`ProductInstanceId`] and
@@ -251,74 +249,6 @@ impl FromStr for ProductInstanceId {
 
     fn from_str(text: &str) -> Result<Self, NameError> {
         Self::parse(text)
-    }
-}
-
-/// Cuts `bytes` into packets of `W` bytes and hands each, with its form, to
-/// `emit`: one `Complete` packet when it fits, else `Start`, `Continue`s and
-/// `End`, the last padded with `0x00`. An empty text sends nothing.
-pub(crate) fn packets<const W: usize>(bytes: &[u8], mut emit: impl FnMut(Form, [u8; W])) {
-    let count = bytes.len().div_ceil(W);
-    for (i, chunk) in bytes.chunks(W).enumerate() {
-        let form = match (i, count) {
-            (_, 1) => Form::Complete,
-            (0, _) => Form::Start,
-            (i, n) if i == n - 1 => Form::End,
-            _ => Form::Continue,
-        };
-        let mut packet = [0; W];
-        packet[..chunk.len()].copy_from_slice(chunk);
-        emit(form, packet);
-    }
-}
-
-/// Reassembles a text from its packets (M2-104 §7.1.4). It holds at most `N`
-/// bytes: a longer message is dropped whole, and so is a `Continue` or `End`
-/// with no `Start` before it.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Assembler<const N: usize> {
-    buf: [u8; N],
-    len: usize,
-    open: bool,
-}
-
-impl<const N: usize> Assembler<N> {
-    pub(crate) const fn new() -> Self {
-        Self {
-            buf: [0; N],
-            len: 0,
-            open: false,
-        }
-    }
-
-    /// Takes one packet's bytes; a message it finishes comes back, cut at the
-    /// first `0x00`.
-    pub(crate) fn feed(&mut self, form: Form, bytes: &[u8]) -> Option<&[u8]> {
-        match form {
-            Form::Complete | Form::Start => {
-                self.len = 0;
-                self.open = true;
-            }
-            Form::Continue | Form::End => {}
-        }
-        if !self.open {
-            return None;
-        }
-        let end = self.len + bytes.len();
-        if end > N {
-            self.open = false;
-            return None;
-        }
-        self.buf[self.len..end].copy_from_slice(bytes);
-        self.len = end;
-        if matches!(form, Form::Complete | Form::End) {
-            self.open = false;
-            let text = &self.buf[..self.len];
-            let cut = text.iter().position(|&b| b == 0).unwrap_or(text.len());
-            Some(&text[..cut])
-        } else {
-            None
-        }
     }
 }
 

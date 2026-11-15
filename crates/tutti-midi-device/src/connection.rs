@@ -26,11 +26,12 @@ use std::time::{Duration, Instant};
 
 use bitflags::bitflags;
 use tutti_ump::{
-    BlockFilter, BlockSelect, DiscoveryFilter, Form, Message, Protocol, Stream, StreamConfig, Ump,
+    BlockFilter, BlockSelect, DiscoveryFilter, Message, Protocol, Stream, StreamConfig,
+    StreamTextAssembler, Ump,
 };
 
 use crate::endpoint::{Endpoint, MAX_FUNCTION_BLOCKS, UMP_VERSION};
-use crate::name::{Assembler, BlockName, EndpointName, ProductInstanceId};
+use crate::name::{BlockName, EndpointName, ProductInstanceId};
 
 /// How long a step waits for its answer before it is sent again.
 ///
@@ -111,10 +112,9 @@ pub struct Connection {
     sent: Instant,
     attempts: u8,
     endpoint: Endpoint,
-    endpoint_name: Assembler<98>,
-    instance_id: Assembler<42>,
-    block_name: Assembler<91>,
-    block_name_of: u8,
+    endpoint_name: StreamTextAssembler<98>,
+    instance_id: StreamTextAssembler<42>,
+    block_name: StreamTextAssembler<91>,
     block_names: [Option<BlockName>; MAX_FUNCTION_BLOCKS],
 }
 
@@ -145,10 +145,9 @@ impl Connection {
             sent: now,
             attempts: 1,
             endpoint: Endpoint::blank(),
-            endpoint_name: Assembler::new(),
-            instance_id: Assembler::new(),
-            block_name: Assembler::new(),
-            block_name_of: 0,
+            endpoint_name: StreamTextAssembler::new(),
+            instance_id: StreamTextAssembler::new(),
+            block_name: StreamTextAssembler::new(),
             block_names: [None; MAX_FUNCTION_BLOCKS],
         };
         let first = Action::Send(connection.packet_for_step());
@@ -259,12 +258,12 @@ impl Connection {
             }
             Stream::DeviceIdentity(identity) => self.endpoint.identity = Some(identity),
             Stream::EndpointName(form, bytes) => {
-                if let Some(text) = self.endpoint_name.feed(form, &bytes) {
+                if let Some(text) = self.endpoint_name.feed(0, form, &bytes) {
                     self.endpoint.name = EndpointName::from_bytes(text);
                 }
             }
             Stream::ProductInstanceId(form, bytes) => {
-                if let Some(text) = self.instance_id.feed(form, &bytes) {
+                if let Some(text) = self.instance_id.feed(0, form, &bytes) {
                     self.endpoint.instance_id = ProductInstanceId::from_bytes(text);
                 }
             }
@@ -315,11 +314,7 @@ impl Connection {
             }
             Stream::FunctionBlockName { block, form, bytes } => {
                 // One name is open at a time: another block's Start drops it.
-                if form == Form::Start || form == Form::Complete {
-                    self.block_name_of = block.get();
-                }
-                if block.get() == self.block_name_of
-                    && let Some(text) = self.block_name.feed(form, &bytes)
+                if let Some(text) = self.block_name.feed(block.get(), form, &bytes)
                     && let (Some(name_text), Some(slot)) = (
                         BlockName::from_bytes(text),
                         self.block_names.get_mut(usize::from(block.get())),
@@ -378,13 +373,7 @@ impl Connection {
                 Action::Changed
             }
             Stream::FunctionBlockName { block, form, bytes } => {
-                if form == Form::Start || form == Form::Complete {
-                    self.block_name_of = block.get();
-                }
-                if block.get() != self.block_name_of {
-                    return Action::Wait;
-                }
-                let Some(text) = self.block_name.feed(form, &bytes) else {
+                let Some(text) = self.block_name.feed(block.get(), form, &bytes) else {
                     return Action::Wait;
                 };
                 let (Some(name), Some(Some(held))) = (

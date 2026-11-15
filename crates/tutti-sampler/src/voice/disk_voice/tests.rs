@@ -43,7 +43,7 @@ fn make_reader_with_samples(samples: &[(f32, f32)]) -> (SharedReader, tutti_rt::
 /// `start..` (where a placed voice reads them).
 fn make_reader_at(samples: &[(f32, f32)], start: u64) -> (SharedReader, tutti_rt::PosReader) {
     let (mut writer, reader, pos) =
-        RegionBuffer::with_capacity(StreamId(1), PathBuf::new(), samples.len() + 64, 2u16);
+        RegionBuffer::with_capacity(StreamId::of(1), PathBuf::new(), samples.len() + 64, 2u16);
     writer.reset(start);
     writer.set_play(start);
     let flat: Vec<f32> = samples.iter().flat_map(|&(l, r)| [l, r]).collect();
@@ -386,7 +386,7 @@ fn a_stopped_clock_silences_a_fork() {
 #[test]
 fn a_severed_copy_holds_no_live_reader() {
     let (mut writer, ring, pos) =
-        RegionBuffer::with_capacity(StreamId(1), PathBuf::new(), 4_096, 2u16);
+        RegionBuffer::with_capacity(StreamId::of(1), PathBuf::new(), 4_096, 2u16);
     writer.push_interleaved(&[0.5; 2 * 1_000]);
     let state = Arc::new(Cells::new());
     let mut live = DiskVoice::new(
@@ -589,6 +589,29 @@ fn clip_reader_jump_edge_is_allocation_free() {
     });
 }
 
+/// The underrun path: the playhead alternates between the ring's frames and
+/// a place inside the window the ring does not hold, so the read underruns
+/// (the old side runs out over `DECLICK` and the voice goes silent) and the
+/// ring comes back (the recovery fade-in), every few blocks, with the jump
+/// fades between.
+#[test]
+fn clip_reader_underrun_and_recovery_are_allocation_free() {
+    let transport = MockTransport::rolling(Beat::new(5.0), Bpm::of(120.0)); // in the ring
+    let mut direct = warm_clip_reader(&transport, 64);
+    assert_no_alloc::assert_no_alloc(|| {
+        for i in 0..3_000 {
+            // Beat 7.0 is inside the window [4, 8) and past the ring's end.
+            let beat = if (i / 7) % 2 == 0 { 5.0 } else { 7.0 };
+            transport.set_beat(Beat::new(beat));
+            direct.block_in(&transport.env(64, SampleRate::SR_48K));
+        }
+    });
+    assert!(
+        direct.node.shared_state.take_underruns() > 0,
+        "the ring was starved: the run reached the underrun path"
+    );
+}
+
 /// One-frame blocks, the shortest a node is handed: the per-block work
 /// (the clock's runs, the ring's claim) allocates nothing either, with the
 /// transport moving a frame a block (so the reader keeps its continuation:
@@ -681,7 +704,7 @@ fn wide_value(k: u64, c: usize) -> f32 {
 fn wide_clip(width: usize) -> DiskVoice {
     const AT: u64 = 22_000;
     let (mut writer, reader, pos) = RegionBuffer::with_capacity(
-        StreamId(1),
+        StreamId::of(1),
         PathBuf::new(),
         4096,
         ChannelLayout::try_from(width).expect("a test width is small"),
@@ -774,7 +797,7 @@ fn placed_clip(topology: tutti_types::ChannelTopology) -> DiskVoice {
     const AT: u64 = 22_000;
     let width = topology.positions().len();
     let (mut writer, reader, pos) = RegionBuffer::for_file(
-        StreamId(1),
+        StreamId::of(1),
         PathBuf::new(),
         4096,
         topology,
@@ -1070,7 +1093,7 @@ fn reset_clears_state() {
 /// Build a `channels`-wide ring pre-filled with `frames` interleaved frames.
 fn make_wide_reader(frames: &[f32], channels: usize) -> (SharedReader, tutti_rt::PosReader) {
     let (mut writer, reader, pos) = RegionBuffer::with_capacity(
-        StreamId(1),
+        StreamId::of(1),
         PathBuf::new(),
         frames.len() / channels + 64,
         ChannelLayout::try_from(channels).expect("a test width is small"),
@@ -1441,8 +1464,13 @@ fn a_block_with_no_position_leaves_the_lanes_alone() {
 fn a_skipped_block_forgets_the_fade_and_the_last_position() {
     const BLOCK: usize = 64;
     const AT: u64 = 22_000;
-    let (mut writer, reader, pos) =
-        RegionBuffer::with_fade(StreamId(1), PathBuf::new(), 4096, 1u16, Samples::new(256));
+    let (mut writer, reader, pos) = RegionBuffer::with_fade(
+        StreamId::of(1),
+        PathBuf::new(),
+        4096,
+        1u16,
+        Samples::new(256),
+    );
     RegionBuffer::place(&mut writer, AT);
     let from = writer.window().0;
     let flat: Vec<f32> = (from..from + 2_000).map(|k| k as f32).collect();
@@ -1494,7 +1522,7 @@ fn a_skipped_block_releases_the_ring_to_the_writer() {
     const BLOCK: usize = 64;
     const AT: u64 = 22_000;
     let (mut writer, reader, pos) =
-        RegionBuffer::with_capacity(StreamId(1), PathBuf::new(), 4096, 1u16);
+        RegionBuffer::with_capacity(StreamId::of(1), PathBuf::new(), 4096, 1u16);
     writer.reset(AT);
     writer.set_play(AT);
     let flat: Vec<f32> = (AT..AT + 2_000).map(|k| k as f32).collect();

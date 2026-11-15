@@ -32,8 +32,8 @@ use common::probe::{ProbeUnit, Pulse};
 const RATE: f64 = 48_000.0;
 /// A lane's control step (`tutti_modulation::CONTROL_GRID`).
 const STEP: usize = 32;
-/// A port's connect crossfade (`PARAM_DECLICK`).
-const DECLICK: usize = 256;
+/// A port's connect crossfade: `DECLICK` at 48 kHz.
+const DECLICK: usize = 240;
 
 /// An offline session at 48 kHz, stereo.
 fn offline() -> Session {

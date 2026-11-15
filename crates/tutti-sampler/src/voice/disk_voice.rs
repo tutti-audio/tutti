@@ -20,7 +20,7 @@ use std::sync::Arc;
 use crate::MAX_SAMPLER_CHANNELS;
 use tutti_graph::{
     Cx, ForkCause, ForkFaultKind, ForkHealth, ForkMode, ForkSource, Forked, IntoNode, Io, Node,
-    NodeParts, Prepare, RenderMode, Shape, Status,
+    NodeParts, Prepare, RenderMode, Shape, Status, declick_frames,
 };
 use tutti_types::{
     Amplitude, ChannelLayout, PlaybackRate, ReadRate, SamplePosition, SampleRate, SrcRatio, Tail,
@@ -232,6 +232,9 @@ pub struct DiskVoice {
     /// and says so rather than play off pitch; a live voice never told one
     /// steps by the streamer's conversion for the session rate.
     sample_rate: Option<SampleRate>,
+    /// The live read's fade length in frames: `DECLICK` at `sample_rate`, or at
+    /// the file's rate until a rate is given.
+    declick: usize,
 
     /// The render mode `prepare` last gave this voice: a fork reads its file
     /// on the render's thread, which only an offline render allows.
@@ -347,6 +350,7 @@ impl Clone for DiskVoice {
             offline: self.offline.clone(),
             sample_rate: self.sample_rate,
             render_mode: self.render_mode,
+            declick: self.declick,
             clock: Clock::new(),
             tempo: self.tempo.clone(),
             // Unsized, so a clone stays allocation-free as it was: a copy
@@ -377,6 +381,7 @@ impl DiskVoice {
             offline: None,
             sample_rate: None,
             render_mode: RenderMode::Realtime,
+            declick: declick_frames(config.file_sample_rate).get(),
             clock: Clock::new(),
             tempo: None,
             positions: Vec::new(),
@@ -682,6 +687,7 @@ impl DiskVoice {
         out: &mut Out<'_, F>,
     ) {
         let rate = self.step_rate();
+        let declick = self.declick;
         let gain = audible(self.shared_state.gain().get());
         // Borrowed beside `inner`, not cloned: `self` holds a strong
         // reference, so a clone only adds two atomic refcount updates.
@@ -693,6 +699,7 @@ impl DiskVoice {
                 &positions[a - base..b - base],
                 run.generation,
                 rate.get(),
+                declick,
                 gain,
                 state,
                 a - base,
@@ -769,6 +776,7 @@ impl DiskVoice {
     pub(crate) fn set_render(&mut self, sample_rate: SampleRate, mode: RenderMode) {
         self.sample_rate = Some(sample_rate);
         self.render_mode = mode;
+        self.declick = declick_frames(sample_rate).get();
     }
 
     /// Forget the read's jump state (a slot's flush at a jump, a reset).

@@ -4,7 +4,7 @@
 //!
 //! Every figure is analytic: the steady states are the input (delayed by the
 //! declared latency) or silence, bit for bit, and a fade is the formula the
-//! doc gives written out here with `CrossfadeCurve::EqualAmplitude`'s gains.
+//! doc gives written out here with `FadeLaw::EqualAmplitude`'s gains.
 //! A render is compared with another only as the doc prescribes: the
 //! executor against the reference interpreter (`Pair`, on every block of every
 //! test that uses it), serial against parallel.
@@ -24,8 +24,8 @@ use std::sync::{Arc, Mutex};
 use common::{Kind, Pair, Ringer, SpecBehaviour, TestNode, bits, prepare};
 use tutti_buffers::{Float, FoldError};
 use tutti_graph::{
-    Bus, BusRole, Buses, CrossfadeCurve, Cx, Edge, Editor, Event, EventEdge, EventIn, EventKind,
-    EventOut, Executor, ForkByClone, ForkMode, ForkTarget, GraphInvalid, GraphSpec, InPort, Io,
+    Bus, BusRole, Buses, Cx, Edge, Editor, Event, EventEdge, EventIn, EventKind, EventOut,
+    Executor, FadeLaw, ForkByClone, ForkMode, ForkTarget, GraphInvalid, GraphSpec, InPort, Io,
     ModeError, Node, NodeKey, NodeMode, Offset, OutPort, PassError, Prepare, Shape, Source, Status,
     Topology, TransportPosition, Unforkable, ValidGraph,
 };
@@ -35,8 +35,8 @@ use tutti_ump::Ump;
 const BLOCK: usize = 64;
 /// The most a block here is: what every `Pair` is prepared for.
 const MAX_BLOCK: usize = 128;
-/// `MODE_DECLICK`.
-const FADE: usize = 256;
+/// `DECLICK` at the rig's 48 kHz.
+const FADE: usize = 240;
 
 fn key(n: u64) -> NodeKey {
     NodeKey(n)
@@ -62,7 +62,8 @@ fn direct(node: u64) -> Edge {
 
 /// `(g_in, g_out)` of frame `k` of a mode fade: the one function the doc names.
 fn gains(k: usize) -> (f32, f32) {
-    CrossfadeCurve::EqualAmplitude.gains(k, FADE)
+    let (out, inn) = FadeLaw::EqualAmplitude.gains(k, FADE);
+    (inn, out)
 }
 
 /// A `Pair` over `kinds` (keys `1..`), wired by `wire`, with `modes` set
@@ -563,7 +564,7 @@ fn a_muted_node_is_positive_zero() {
 // The declick
 // ---------------------------------------------------------------------------
 
-/// **The 256-frame fade follows `CrossfadeCurve::EqualAmplitude`'s gains
+/// **The `DECLICK` fade follows `FadeLaw::EqualAmplitude`'s gains
 /// exactly**, in both directions and into and out of mute. The node is an
 /// in-place gain of 3 on a constant input of 1, so `y = 3`, `x = 1`:
 ///
@@ -746,7 +747,7 @@ fn a_bypassed_output_carries_its_inputs_flags() {
 /// **Un-bypass is reset, warm up for `L`, fade in**: leaving Bypassed, the
 /// aligned input (the input delayed by `L`, the line having been fed all the
 /// while) stays audible for `L` frames with the node's output discarded, and
-/// then the 256-frame fade runs from the aligned input to the output:
+/// then the `DECLICK` fade runs from the aligned input to the output:
 /// `y * g_in + x̂ * g_out`. The node is a gain of 2 declaring 100 frames it
 /// does not realise, so `y` is `2x` now and `x̂` is `x` of 100 frames ago.
 #[test]

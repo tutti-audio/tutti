@@ -557,13 +557,8 @@ mod tests {
     }
 
     fn name(tag: &str) -> String {
-        use std::sync::atomic::{AtomicU32, Ordering};
-        static N: AtomicU32 = AtomicU32::new(0);
-        format!(
-            "slab_{tag}_{}_{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        )
+        static N: tutti_types::Mint = tutti_types::Mint::new();
+        format!("slab_{tag}_{}_{}", std::process::id(), N.mint())
     }
 
     /// Both ends of one slab in this process: the host's input writer

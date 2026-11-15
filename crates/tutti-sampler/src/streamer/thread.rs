@@ -309,7 +309,7 @@ mod tests {
         let bell = Arc::clone(&built.shared().bell);
         let mut streamer = built.start().expect("the thread starts");
 
-        for stream in [StreamId(90), StreamId(91)] {
+        for stream in [StreamId::of(90), StreamId::of(91)] {
             until_asleep(&bell);
             tx.try_send(StreamerCommand::Close { stream })
                 .expect("room in an empty queue");
@@ -380,7 +380,7 @@ mod tests {
         drop(unstarted);
         assert_eq!(
             port.send(StreamerCommand::Close {
-                stream: StreamId(0)
+                stream: StreamId::of(1)
             }),
             Err(StreamerGone),
             "a streamer dropped before it started"
@@ -391,7 +391,7 @@ mod tests {
         let mut streamer = built.start().expect("the thread starts");
         assert_eq!(
             port.send(StreamerCommand::Close {
-                stream: StreamId(0)
+                stream: StreamId::of(1)
             }),
             Ok(())
         );
@@ -399,7 +399,7 @@ mod tests {
         streamer.stop();
         assert_eq!(
             port.send(StreamerCommand::Close {
-                stream: StreamId(0)
+                stream: StreamId::of(1)
             }),
             Err(StreamerGone)
         );
@@ -413,7 +413,7 @@ mod tests {
         let port = StreamerPort::new(streamer.command_sender());
         assert_eq!(
             port.send(StreamerCommand::Close {
-                stream: StreamId(0)
+                stream: StreamId::of(1)
             }),
             Ok(())
         );
@@ -422,7 +422,7 @@ mod tests {
             let port = port.clone();
             thread::spawn(move || {
                 let _ = done_tx.send(port.send(StreamerCommand::Close {
-                    stream: StreamId(1),
+                    stream: StreamId::of(1),
                 }));
             })
         };
@@ -456,7 +456,7 @@ mod tests {
         assert!(
             within(Duration::from_secs(10), || matches!(
                 tx.try_send(StreamerCommand::Close {
-                    stream: StreamId(0)
+                    stream: StreamId::of(1)
                 }),
                 Err(crossbeam_channel::TrySendError::Disconnected(_))
             )),
@@ -464,7 +464,7 @@ mod tests {
         );
         assert_eq!(
             StreamerPort::new(tx).send(StreamerCommand::Close {
-                stream: StreamId(0)
+                stream: StreamId::of(1)
             }),
             Err(StreamerGone)
         );

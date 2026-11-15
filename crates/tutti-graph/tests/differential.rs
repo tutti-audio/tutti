@@ -570,8 +570,8 @@ proptest! {
             let summed: Vec<bool> = desc.spec.topology.outputs.iter().map(|s| s.len() > 1).collect();
             let channels = outputs.len();
             let mut spec = desc.spec.clone();
-            spec.topology.taps.insert(TapId(1), TapSpec::aligned(outputs.clone()));
-            spec.topology.taps.insert(TapId(2), TapSpec::Outputs { width: channels });
+            spec.topology.taps.insert(TapId::of(1), TapSpec::aligned(outputs.clone()));
+            spec.topology.taps.insert(TapId::of(2), TapSpec::Outputs { width: channels });
             let valid = spec.validate().expect("generated graphs are valid");
             let mut pair = Pair::with_workers(MAX_BLOCK, workers);
             // The harness compiles the spec itself; the readers' lanes ride the
@@ -580,8 +580,8 @@ proptest! {
             // harness compiles `spec` itself: give the editor the same nodes.
             pair.editor.spec_mut().topology.nodes = spec.topology.nodes.clone();
             pair.editor.spec_mut().topology.inputs = spec.topology.inputs;
-            let mut tap = pair.editor.open_tap(TapId(1), outputs, TapAlign::ToOutput, Samples(1 << 16)).expect("the sources exist");
-            let mut heard = pair.editor.open_output_tap(TapId(2), channels, Samples(1 << 16)).expect("the sources exist");
+            let mut tap = pair.editor.open_tap(TapId::of(1), outputs, TapAlign::ToOutput, Samples(1 << 16)).expect("the sources exist");
+            let mut heard = pair.editor.open_output_tap(TapId::of(2), channels, Samples(1 << 16)).expect("the sources exist");
             pair.switch(&valid, &desc.kinds);
             let width = tap.width();
             prop_assert_eq!(heard.width(), channels);
@@ -1924,9 +1924,9 @@ fn fits(a: &Kind, b: &Kind) -> bool {
 
 fn random_fade(rng: &mut Rng) -> tutti_graph::Fade {
     let curve = if rng.chance(50) {
-        tutti_graph::CrossfadeCurve::EqualPower
+        tutti_graph::FadeLaw::EqualPower
     } else {
-        tutti_graph::CrossfadeCurve::EqualAmplitude
+        tutti_graph::FadeLaw::EqualAmplitude
     };
     // Mostly shorter than the rounds between edits, often longer, so fades
     // end mid-block, run across edits, and queue behind each other.

@@ -21,16 +21,11 @@ use std::any::Any;
 use std::sync::Arc;
 
 use tutti_cpal::{AudioHost, DeviceSelector, MONITOR_RING_FRAMES, MicConfig, MicIn, StreamLatency};
-use tutti_graph::{CrossfadeCurve, InletNode, InletRing};
-use tutti_types::{SampleRate, Samples, Seconds};
+use tutti_graph::{DECLICK, FadeLaw, InletNode, InletRing};
+use tutti_types::{Mint, SampleRate, Samples};
 
 use crate::graph::CrossfadeRefused;
 use crate::{DeviceEvent, Error, Key, Result, Session, SessionEvent};
-
-/// How long a reopened input's new ring takes over from the old one in its
-/// node: the old ring is silent by then (its stream was dropped first), so
-/// this only smooths the step.
-const REOPEN_FADE: Seconds = Seconds(0.01);
 
 /// What [`Session::add_input`] opens: the capture device, which of its inputs,
 /// and how deep the ring that carries them into the graph is.
@@ -241,8 +236,8 @@ pub(crate) struct Inputs {
     /// Where the output stream's callback reports its delay, once the session
     /// has a device ([`Device::latency`](crate::Device::latency)'s `output`).
     output_latency: Option<Arc<StreamLatency>>,
-    /// The takes begun, for their ids.
-    takes: u64,
+    /// Names the takes begun.
+    takes: Mint,
 }
 
 impl std::fmt::Debug for Inputs {
@@ -262,7 +257,7 @@ impl Inputs {
             opener: opener.unwrap_or_else(|| Box::new(Capture)),
             held: Vec::new(),
             output_latency: None,
-            takes: 0,
+            takes: Mint::new(),
         }
     }
 
@@ -288,10 +283,9 @@ impl Inputs {
         crate::take::LatencyProbe::new(Arc::clone(&self.latency), self.output_latency.clone())
     }
 
-    /// The next take's id.
-    pub(crate) fn next_take(&mut self) -> u64 {
-        self.takes += 1;
-        self.takes
+    /// What names the takes begun.
+    pub(crate) fn takes(&self) -> &Mint {
+        &self.takes
     }
 
     /// The cell the capture callbacks report into.
@@ -372,7 +366,9 @@ impl Session {
             .open(&self.inputs.mic(&input.config), rate)?;
         let node = self.graph.inlet_node(opened.ring)?;
         self.graph
-            .crossfade(input.node, node, REOPEN_FADE, CrossfadeCurve::default())?;
+            // The old ring is silent by now (its stream was dropped first), so
+            // the fade only smooths the step.
+            .crossfade(input.node, node, DECLICK, FadeLaw::default())?;
         input.keep = Some(opened.keep);
         input.lead = opened.lead;
         Ok(())
