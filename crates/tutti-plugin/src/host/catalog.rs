@@ -365,8 +365,9 @@ impl Catalog {
     /// `plugin-probe` does not record the file under its name: it is a failure.
     ///
     /// A link whose target has another extension (`Foo.clap` to `libfoo.so`) is
-    /// probed as named and recorded under its target, as CLAP. Loading it by that
-    /// key is not covered yet: the load picks the format by extension.
+    /// probed as named and recorded under its target, as CLAP. A load picks the
+    /// format by the file's extension, so loading that key does not read it as
+    /// CLAP.
     ///
     /// # Errors
     ///

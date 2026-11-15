@@ -40,6 +40,14 @@ impl PluginFormat {
             PluginFormat::AudioUnit => "au",
         }
     }
+
+    /// The format whose [`extension_id`](Self::extension_id) is `id`.
+    #[must_use]
+    pub fn from_extension_id(id: &str) -> Option<Self> {
+        [Self::Vst3, Self::Vst2, Self::Clap, Self::AudioUnit]
+            .into_iter()
+            .find(|f| f.extension_id() == id)
+    }
 }
 
 // Compile-time projection of the extension column out of `FORMAT_BY_EXTENSION`.
@@ -63,3 +71,26 @@ const fn extension_names<const N: usize>() -> [&'static str; N] {
 }
 
 const EXTENSION_NAMES: [&str; 6] = extension_names::<6>();
+
+#[cfg(test)]
+mod tests {
+    use super::PluginFormat;
+
+    /// **`from_extension_id` inverts `extension_id`** for every format, so the
+    /// name a caller sends to `plugin-probe --as` is the one it reads back.
+    #[test]
+    fn every_extension_id_names_its_own_format() {
+        for format in [
+            PluginFormat::Vst3,
+            PluginFormat::Vst2,
+            PluginFormat::Clap,
+            PluginFormat::AudioUnit,
+        ] {
+            assert_eq!(
+                PluginFormat::from_extension_id(format.extension_id()),
+                Some(format)
+            );
+        }
+        assert_eq!(PluginFormat::from_extension_id("vst"), None);
+    }
+}

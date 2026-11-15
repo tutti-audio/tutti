@@ -32,7 +32,8 @@
 
 use std::path::Path;
 use std::process::ExitCode;
-use tutti_plugin_probe::{Format, describe, describe_measured};
+use tutti_plugin_db::PluginFormat;
+use tutti_plugin_probe::{describe, describe_measured};
 use tutti_plugin_types::{MainThreadMarker, ProbeOutcome, write_result};
 
 fn main() -> ExitCode {
@@ -45,7 +46,7 @@ fn main() -> ExitCode {
     };
     let mut rest: Vec<_> = args.collect();
     let format = match rest.as_slice() {
-        [a, f, ..] if a == "--as" => match f.to_str().and_then(Format::from_name) {
+        [a, f, ..] if a == "--as" => match f.to_str().and_then(PluginFormat::from_extension_id) {
             Some(format) => Some(format),
             None => {
                 eprintln!("{USAGE}");

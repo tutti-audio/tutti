@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 use std::path::Path;
+use tutti_plugin_db::{PluginFormat, format_from_path};
 use tutti_plugin_types::{MainThreadMarker, PluginDescriptor};
 
 mod measure;
@@ -16,55 +17,17 @@ pub use measure::{
     measure_at,
 };
 
-/// A plugin format a caller can name, to have a file read as it whatever the
-/// file's extension (a link `Foo.clap` to a file named `libfoo.so` is CLAP).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Format {
-    /// CLAP.
-    Clap,
-    /// Steinberg VST3.
-    Vst3,
-    /// Steinberg VST2.
-    Vst2,
-    /// Apple Audio Unit.
-    Au,
-}
-
-impl Format {
-    /// The format a command-line name (`clap`, `vst3`, `vst2`, `au`) names.
-    #[must_use]
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "clap" => Some(Self::Clap),
-            "vst3" => Some(Self::Vst3),
-            "vst2" => Some(Self::Vst2),
-            "au" => Some(Self::Au),
-            _ => None,
-        }
-    }
-}
-
-/// The routing key of a file: the extension of the loader that reads it. It is
-/// `format`'s when the caller names one, and the path's own extension otherwise.
-fn routing(path: &Path, format: Option<Format>) -> String {
-    match format {
-        Some(Format::Clap) => "clap".to_string(),
-        Some(Format::Vst3) => "vst3".to_string(),
-        Some(Format::Vst2) => "vst".to_string(),
-        Some(Format::Au) => "component".to_string(),
-        None => path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_lowercase(),
-    }
+/// The format a file is read as: `format` when the caller names one, and the
+/// one its extension names otherwise.
+fn routing(path: &Path, format: Option<PluginFormat>) -> Option<PluginFormat> {
+    format.or_else(|| format_from_path(path))
 }
 
 /// The descriptor of every plugin the file at `path` holds, read as `format` or,
 /// with none, as its extension says, in the file's own order, or the reason it
-/// could not be read. A CLAP factory
-/// gives each plugin it lists, a VST3 factory each audio class, an AU bundle each
-/// unit it declares, a VST2 shell each sub-plugin; any other file is one plugin.
+/// could not be read. A CLAP factory gives each plugin it lists, a VST3 factory
+/// each audio class, an AU bundle each unit it declares, a VST2 shell each
+/// sub-plugin; any other file is one plugin.
 /// `main` proves the caller is on the main thread, which VST2's load needs and the
 /// other formats' probes do not.
 ///
@@ -75,24 +38,24 @@ fn routing(path: &Path, format: Option<Format>) -> String {
 pub fn describe(
     main: MainThreadMarker,
     path: &Path,
-    format: Option<Format>,
+    format: Option<PluginFormat>,
 ) -> Result<Vec<PluginDescriptor>, String> {
     if !path.exists() {
         return Err(format!("Plugin not found: {}", path.display()));
     }
-    let extension = routing(path, format);
     // Only VST2 reads it; a build without that format has nothing to hand it to.
     let _ = main;
-    match extension.as_str() {
+    match routing(path, format) {
         #[cfg(feature = "vst3")]
-        "vst3" => vst3(path),
+        Some(PluginFormat::Vst3) => vst3(path),
         #[cfg(feature = "clap")]
-        "clap" => clap(path),
+        Some(PluginFormat::Clap) => clap(path),
         #[cfg(feature = "vst2")]
-        "vst" | "dll" | "so" => vst2(main, path),
+        Some(PluginFormat::Vst2) => vst2(main, path),
         #[cfg(all(feature = "au", target_os = "macos"))]
-        "component" => au(path),
-        _ => Err(format!("Unsupported format: .{extension}")),
+        Some(PluginFormat::AudioUnit) => au(path),
+        Some(format) => Err(format!("Unsupported format: {}", format.extension_id())),
+        None => Err(format!("Unsupported format: {}", path.display())),
     }
 }
 
@@ -181,23 +144,29 @@ fn au(path: &Path) -> Result<Vec<PluginDescriptor>, String> {
 pub fn describe_measured(
     main: MainThreadMarker,
     path: &Path,
-    format: Option<Format>,
+    format: Option<PluginFormat>,
     state: Option<&[u8]>,
 ) -> Result<Vec<PluginDescriptor>, String> {
     let mut plugins = describe(main, path, format)?;
-    let extension = routing(path, format);
+    let read_as = routing(path, format);
     for plugin in &mut plugins {
-        plugin.measured = match extension.as_str() {
+        plugin.measured = match read_as {
             #[cfg(feature = "vst3")]
-            "vst3" => measure::<tutti_vst3_host::Vst3Loaded>(main, path, plugin, state)?,
+            Some(PluginFormat::Vst3) => {
+                measure::<tutti_vst3_host::Vst3Loaded>(main, path, plugin, state)?
+            }
             #[cfg(feature = "clap")]
-            "clap" => measure::<tutti_clap_host::ClapLoaded>(main, path, plugin, state)?,
+            Some(PluginFormat::Clap) => {
+                measure::<tutti_clap_host::ClapLoaded>(main, path, plugin, state)?
+            }
             #[cfg(feature = "vst2")]
-            "vst" | "dll" | "so" => {
+            Some(PluginFormat::Vst2) => {
                 measure::<tutti_vst2_host::Vst2Loaded>(main, path, plugin, state)?
             }
             #[cfg(all(feature = "au", target_os = "macos"))]
-            "component" => measure::<tutti_au_host::AuLoaded>(main, path, plugin, state)?,
+            Some(PluginFormat::AudioUnit) => {
+                measure::<tutti_au_host::AuLoaded>(main, path, plugin, state)?
+            }
             _ => None,
         };
     }

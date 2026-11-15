@@ -203,8 +203,8 @@ impl Scanner {
     /// immediately, whether or not a row for them is up to date: the delta of
     /// each replaces its file's row. Each file comes with the format the caller
     /// knows it as. The probe reads each file as that format, whatever its
-    /// extension (a link `Foo.clap` to `libfoo.so` is CLAP). A row is keyed by the file's
-    /// canonical path, as a scan keys it. In every other respect as
+    /// extension (a link `Foo.clap` to `libfoo.so` is CLAP). A row is keyed by
+    /// the file's canonical path, as a scan keys it. In every other respect as
     /// [`spawn`](Self::spawn): the same pedal, claim, deltas and drop.
     ///
     /// # Errors
