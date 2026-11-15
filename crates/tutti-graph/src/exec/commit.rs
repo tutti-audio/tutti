@@ -8,6 +8,7 @@ use std::sync::atomic::AtomicU64;
 
 use ringbuf::traits::{Producer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
+use tutti_curve::FadeLaw;
 use tutti_rt::RtScope;
 
 use super::state::{State, Unit};
@@ -16,7 +17,6 @@ use crate::NodeKey;
 use crate::arena::Arena;
 use crate::event::Event;
 use crate::event_tap::EventTapWriter;
-use crate::fade::CrossfadeCurve;
 use crate::gain::GainCell;
 use crate::held::Tables;
 use crate::io::Io;
@@ -113,7 +113,7 @@ pub(crate) struct Crossfade {
     /// Frames of the fade rendered so far.
     pub(super) done: usize,
     pub(super) len: usize,
-    pub(super) curve: CrossfadeCurve,
+    pub(super) law: FadeLaw,
     /// While this fade waits behind the one running at its key: what the unit
     /// fading in wrote for the unit that waits (`Node::chase`), delivered to
     /// it when this fade starts. Empty otherwise.
@@ -253,7 +253,7 @@ impl Commit {
                             scratch: Arena::new(width as usize, max_block),
                             done: 0,
                             len: f.duration.get(),
-                            curve: f.curve,
+                            law: f.law,
                             chase: Vec::new(),
                         })
                     });

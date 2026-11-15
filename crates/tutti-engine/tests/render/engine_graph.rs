@@ -6,7 +6,7 @@
 //! - a graph rendered through `Engine` is the graph rendered by its executor
 //!   directly, bit for bit;
 //! - the engine folds a root to the device width by position (`Fold`), and its
-//!   declick is the linear fade it is specified to be;
+//!   declick is the smootherstep fade it is specified to be;
 //! - a transport command at `At::Frame` / `At::Beat` lands on its frame in a
 //!   graph node's `Env`;
 //! - a graph `At::Beat` command scheduled against a timestamped start lands
@@ -239,19 +239,19 @@ fn graph_engine_render_is_bit_identical_to_the_executor() {
 }
 
 /// The engine folds a root to the device width, and its declick is a
-/// linear fade: the same source (`Surround`), stereo and
+/// smootherstep fade: the same source (`Surround`), stereo and
 /// 5.1, to stereo and 5.1 devices, rolling and then stopped with a declick
 /// mid-run.
 ///
 /// The oracle is computed here: each frame of the source (deterministic and
 /// libm-free), folded by the ITU/Dolby matrices (plain
 /// arithmetic, written out below), times the declick gain — 1 before the stop, zero on the
-/// stop's frame (an untimed stop has no lead) and `k / 480` for `k` frames
-/// after it, up to 1. Bit-equal wherever the gain is 1; within `f32`
-/// rounding of the ramp inside it: the fader accumulates `1/480` a frame in
-/// `f32`, at most 480 roundings of half an ulp of 1 (under 3e-5, relative).
+/// stop's frame (an untimed stop has no lead) and the smootherstep at
+/// `k / 241` for `k` frames after it, up to 1 at the 241st. Bit-equal wherever
+/// the gain is 1; within `f32` rounding of the smootherstep inside it (under
+/// 3e-5, relative).
 #[test]
-fn fold_and_declick_are_the_fold_matrix_and_a_linear_fade() {
+fn fold_and_declick_are_the_fold_matrix_and_a_smootherstep_fade() {
     let blocks = [256usize, 256, 300, 64, 128, 512, 256];
     let total: usize = blocks.iter().sum();
     // The untimed stop lands on the first frame of the fourth block.
@@ -295,10 +295,14 @@ fn fold_and_declick_are_the_fold_matrix_and_a_linear_fade() {
                 _ => frame.clone(),
             };
             let at = &got[f * ch..(f + 1) * ch];
-            if f < stop || f >= stop + 480 {
+            if f < stop || f > stop + FADE {
                 assert_eq!(bits(at), bits(&folded), "{src} → {device}, frame {f}");
             } else {
-                let gain = (f - stop) as f32 / 480.0;
+                let gain = if f == stop {
+                    0.0
+                } else {
+                    rise(f - stop - 1) as f32
+                };
                 for (c, (&g, &x)) in at.iter().zip(&folded).enumerate() {
                     assert!(
                         (g - x * gain).abs() <= x.abs() * 3e-5,
@@ -468,8 +472,32 @@ fn max_step(out: &[f32], except: &[usize]) -> f32 {
         .fold(0.0, f32::max)
 }
 
-/// One fade's step, with room for `f32` rounding.
-const FADE_STEP: f32 = 1.0 / 480.0 + 1e-5;
+/// `DECLICK` at `SR`: 5 ms.
+const FADE: usize = 240;
+
+/// The incoming gain at frame `k` of an `n`-frame fade: the smootherstep
+/// `x³(6x² − 15x + 10)` at `x = (k + 1) / (n + 1)`, written out in `f64`.
+fn rise_of(k: usize, n: usize) -> f64 {
+    let x = (k + 1) as f64 / (n + 1) as f64;
+    x * x * x * (6.0 * x * x - 15.0 * x + 10.0)
+}
+
+/// [`rise_of`] over a [`FADE`]-frame fade.
+fn rise(k: usize) -> f64 {
+    rise_of(k, FADE)
+}
+
+/// The most one fade of `n` frames moves the gain in a frame: the
+/// smootherstep's steepest slope, `15/8`, over `n + 1` frames, with room for
+/// `f32` rounding.
+fn step_of(n: usize) -> f32 {
+    1.875 / (n + 1) as f32 + 1e-5
+}
+
+/// One fade's step.
+fn fade_step() -> f32 {
+    step_of(FADE)
+}
 
 /// Run `script` against a DC source, rolling from beat 0, in 256-frame
 /// blocks for `blocks` blocks; `script(motion, i)` is called before block
@@ -502,10 +530,11 @@ fn dc_run(
 }
 
 /// A seek to beat 10 at `At::Frame(1000)`, mid-block, with a declick: the
-/// old position's audio fades out over the 480 frames **before** the seek
-/// (from 520), reaching zero exactly on frame 1 000, where the transport
-/// jumps; the new position's audio fades in from there. The gain never moves
-/// by more than one fade step a frame.
+/// old position's audio fades out over the 240 frames **before** the seek
+/// (from 760), reaching zero exactly on frame 1 000, where the transport
+/// jumps; the new position's audio fades in from there along the smootherstep
+/// and is at full level 241 frames on. The gain never moves by more than one
+/// fade step a frame.
 #[test]
 fn a_timed_declicked_seek_fades_out_before_and_in_after_its_frame() {
     let (out, t) = dc_run(12, |m, i| {
@@ -521,12 +550,25 @@ fn a_timed_declicked_seek_fades_out_before_and_in_after_its_frame() {
             .expect("room");
         }
     });
-    assert_eq!(out[519], 1.0, "full level before the lead");
-    assert!(out[520] < 1.0, "the fade-out starts 480 ahead");
+    assert_eq!(out[759], 1.0, "full level before the lead");
+    assert!(out[760] < 1.0, "the fade-out starts 240 ahead");
+    for (k, &g) in out[760..1_000].iter().enumerate() {
+        let want = 1.0 - rise(k);
+        assert!(
+            (f64::from(g) - want).abs() < 3e-6,
+            "fade-out frame {k}: {g}, want {want}"
+        );
+    }
     assert_eq!(out[1_000], 0.0, "zero on the command frame");
-    assert!(out[1_001] > 0.0, "the fade-in starts there");
-    assert_eq!(out[1_480], 1.0, "back to full level");
-    assert!(max_step(&out, &[]) <= FADE_STEP, "continuous");
+    for (k, &g) in out[1_001..=1_000 + FADE].iter().enumerate() {
+        assert!(
+            (f64::from(g) - rise(k)).abs() < 3e-6,
+            "fade-in frame {k}: {g}, want {}",
+            rise(k)
+        );
+    }
+    assert_eq!(out[1_000 + FADE + 1], 1.0, "back to full level");
+    assert!(max_step(&out, &[]) <= fade_step(), "continuous");
     // The transport jumps on the command frame.
     assert!(t[999].0 < 1.0, "old position up to 999");
     assert_eq!(t[1_000].0, 10.0, "beat 10 from frame 1 000");
@@ -555,7 +597,7 @@ fn a_declicked_seek_with_short_notice_fades_over_what_is_left() {
     assert_eq!(out[1_023], 1.0);
     assert!(out[1_024] < 1.0, "fading from the first frame it is seen");
     assert_eq!(out[1_224], 0.0, "zero on the command frame");
-    assert!(max_step(&out, &[]) <= 1.0 / 200.0 + 1e-5, "continuous");
+    assert!(max_step(&out, &[]) <= step_of(200), "continuous");
     assert_eq!(t[1_224].0, 10.0, "jumps on its frame");
 }
 
@@ -571,20 +613,21 @@ fn a_timed_declicked_stop_fades_out_before_its_frame() {
                 .expect("room");
         }
     });
-    assert!(out[520] < 1.0 && out[519] == 1.0);
+    assert!(out[1_000 - FADE] < 1.0 && out[1_000 - FADE - 1] == 1.0);
     assert_eq!(out[1_000], 0.0);
-    assert!(max_step(&out, &[]) <= FADE_STEP, "continuous");
+    assert!(max_step(&out, &[]) <= fade_step(), "continuous");
     assert!(t[999].1, "rolling up to the stop");
     assert!(!t[1_000].1, "stopped on its frame");
 }
 
-/// A declick lasts 10 ms at the engine's rate, not a fixed frame count: a
-/// timed stop at frame 4 000 starts fading `fade` frames before it, is at
-/// zero on it, and is back at full level `fade` frames after.
+/// A declick lasts `DECLICK` (5 ms) at the engine's rate, not a fixed frame
+/// count: a timed stop at frame 4 000 starts fading `fade` frames before it,
+/// is at zero on it, and is back at full level `fade + 1` frames after, with
+/// `fade = round(rate * 0.005)`.
 #[test]
-fn a_declick_lasts_ten_milliseconds_at_any_rate() {
+fn a_declick_lasts_five_milliseconds_at_any_rate() {
     for rate in [44_100.0, 48_000.0, 96_000.0, 192_000.0] {
-        let fade = (rate * 0.01) as usize;
+        let fade = (rate * 0.005f64).round() as usize;
         let transport = Transport::new(SampleRate::of(rate));
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::of(rate),
@@ -605,15 +648,21 @@ fn a_declick_lasts_ten_milliseconds_at_any_rate() {
             .expect("room");
         let out = render(&engine, ChannelLayout::MONO, &[256; 40]);
         assert_eq!(out[4_000 - fade - 1], 1.0, "{rate}: full before the lead");
-        assert!(
-            out[4_000 - fade] < 1.0,
-            "{rate}: the fade-out starts {fade} ahead"
-        );
+        // Frame k of the fade-out is `1 - s((k + 1) / (fade + 1))`; the first
+        // gains are within an `f32` of 1, so the fade starts at most at 1.
+        assert!(out[4_000 - fade] <= 1.0, "{rate}: the fade-out starts");
+        for (k, &g) in out[4_000 - fade..4_000].iter().enumerate() {
+            let want = 1.0 - rise_of(k, fade);
+            assert!(
+                (f64::from(g) - want).abs() < 3e-6,
+                "{rate}: fade-out frame {k}: {g}, want {want}"
+            );
+        }
         assert_eq!(out[4_000], 0.0, "{rate}: zero on the command frame");
-        assert!(out[4_000 + fade - 1] < 1.0, "{rate}: still rising");
-        // The ramp accumulates `1/fade` in `f32`, so "full" is within rounding.
-        assert!(
-            (1.0 - out[4_000 + fade]).abs() < 3e-5,
+        assert!(out[4_000 + fade / 2] < 1.0, "{rate}: still rising");
+        assert_eq!(
+            out[4_000 + fade + 1],
+            1.0,
             "{rate}: full {fade} frames after"
         );
     }
@@ -638,8 +687,8 @@ fn a_next_block_declicked_seek_fades_in_after_the_jump() {
     let jump = 3 * 256;
     assert_eq!(out[jump - 1], 1.0, "no lead, full level");
     assert_eq!(out[jump], 0.0, "zero on the jump frame");
-    assert!(max_step(&out, &[jump]) <= FADE_STEP, "fade-in continuous");
-    assert_eq!(out[jump + 480], 1.0);
+    assert!(max_step(&out, &[jump]) <= fade_step(), "fade-in continuous");
+    assert_eq!(out[jump + FADE + 1], 1.0);
     assert_eq!(t[jump].0, 10.0, "jumps on the block's first frame");
 }
 
@@ -1246,7 +1295,7 @@ fn two_declicked_commands_close_together_stay_continuous() {
         assert_eq!(out[a], 0.0, "{a}/{b}");
         assert!(out[a..=b].iter().all(|&g| g == 0.0), "held at zero");
         assert!(out[b + 1] > 0.0, "fades in from the second");
-        assert!(max_step(&out, &[]) <= FADE_STEP, "{a}/{b}: continuous");
+        assert!(max_step(&out, &[]) <= fade_step(), "{a}/{b}: continuous");
         assert_eq!(t[a].0, 10.0, "the first lands on its frame");
         if stop {
             assert!(!t[b].1, "stopped on its frame");
@@ -1265,7 +1314,7 @@ fn two_declicked_commands_close_together_stay_continuous() {
     });
     assert!(out[768..=868].iter().all(|&g| g == 0.0), "held at zero");
     assert!(
-        max_step(&out, &[768]) <= FADE_STEP,
+        max_step(&out, &[768]) <= fade_step(),
         "continuous past the jump"
     );
     assert_eq!(t[768].0, 10.0);

@@ -14,8 +14,8 @@ use tutti_curve::{Breakpoint, Trajectory};
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, ForkByClone, ForkMode,
-    ForkTarget, Io, Law, Node, Offset, PARAM_DECLICK, ParamIn, ParamRange, ParamSegment, Prepare,
-    Shape, Status, TransportChanges, TransportPosition,
+    ForkTarget, Io, Law, Node, Offset, ParamIn, ParamRange, ParamSegment, Prepare, Shape, Status,
+    TransportChanges, TransportPosition, declick_frames,
 };
 use tutti_graph::{OutPort, Source};
 use tutti_modulation::{
@@ -602,7 +602,7 @@ fn an_export_is_the_live_render_bit_for_bit() {
 /// One LFO on two targets is phase-coherent: a second lane with the same
 /// program, wired in later at a frame off the grid, renders the first's
 /// bits from its first grid point after its connect crossfade (the port
-/// fades in from its base over `PARAM_DECLICK`).
+/// fades in from its base over `DECLICK`).
 #[test]
 fn one_lfo_on_two_targets_is_phase_coherent() {
     let p = || {
@@ -629,7 +629,7 @@ fn one_lfo_on_two_targets_is_phase_coherent() {
     ed.commit().expect("commits");
     let blocks = ragged(20_000, 128);
     host.roll(&mut ed, &mut exec, blocks[0], &mut all);
-    let from = (joined + PARAM_DECLICK.get()).next_multiple_of(STEP);
+    let from = (joined + declick_frames(SampleRate::of(RATE)).get()).next_multiple_of(STEP);
     for &n in &blocks[1..] {
         host.roll(&mut ed, &mut exec, n, &mut all);
     }
@@ -1207,11 +1207,11 @@ fn a_resync_sends_a_steady_lane_to_its_new_target() {
         );
     }
     controls.resync();
-    // The port's connect crossfade (`PARAM_DECLICK` frames from the commit,
+    // The port's connect crossfade (`DECLICK` frames from the commit,
     // 192 frames ago) is still running: the value it fades to is now 250,
     // so frame 0 already moves, and from the crossfade's end the port reads
     // 250 exactly.
-    let done = PARAM_DECLICK.get() - 3 * 64;
+    let done = declick_frames(SampleRate::of(RATE)).get() - 3 * 64;
     let mut after = Vec::new();
     for _ in 0..3 {
         append(&mut after, run(&mut ed, &mut exec));

@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_codec::Wave;
 use tutti_graph::{
-    CrossfadeCurve, Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
+    Cx, FadeLaw, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
     param_parts,
 };
 use tutti_transport::TempoReader;
@@ -1248,7 +1248,7 @@ impl MemorySource {
 /// frame is lane frame 0.
 ///
 /// A head in the middle of a sound is `head * g_in + tail * g_out` at
-/// [`CrossfadeCurve`]'s equal-power gains: the two are different stretches
+/// [`FadeLaw::EqualPower`]'s gains: the two are different stretches
 /// of the source, which add in power. A head that is the clip's own start
 /// (`Gate::begins_with_loop`) keeps unity, `head + tail * g_out`: its attack
 /// is not ramped, and the join steps as the clip's first pass does. Both
@@ -1276,8 +1276,7 @@ fn crossfade_wraps<H: AsMut<[f32]>>(
         let end = run.end.min(run.start + wrap.left());
         for at in run.start..end {
             let i = at - base;
-            let (g_in, g_out) =
-                CrossfadeCurve::EqualPower.gains(wrap.ago + at - run.start, wrap.len);
+            let (g_out, g_in) = FadeLaw::EqualPower.gains(wrap.ago + at - run.start, wrap.len);
             let g_in = if own_start { 1.0 } else { g_in };
             // A tail that has ended leaves the head to finish its ramp.
             let sounding = positions[i].is_some();

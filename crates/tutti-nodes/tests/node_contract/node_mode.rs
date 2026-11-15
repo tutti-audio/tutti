@@ -4,12 +4,12 @@
 //! again. The nodes hold no flag of their own.
 //!
 //! The figures are analytic (the input itself, zero, the fader's gain), never
-//! another render. The declick is 256 frames (`MODE_DECLICK`), counted from
+//! another render. The declick is `DECLICK` (240 frames at 48 kHz), counted from
 //! the block the toggle lands on; each render below is longer, and only the
 //! frames after it are compared.
 
 use tutti_fixtures::signal::bits;
-use tutti_graph::{IntoNode, MODE_DECLICK, NodeMode, Prepare, Solo};
+use tutti_graph::{IntoNode, NodeMode, Prepare, Solo, declick_frames};
 use tutti_nodes::{BusStripNode, EqBandNode, SvfType};
 use tutti_types::MaxBlock;
 use tutti_types::{Amplitude, Db, Hz, Q, SampleRate, Samples, UnitParam};
@@ -35,8 +35,8 @@ fn input() -> Vec<f32> {
     let mut x: Vec<f32> = (0..FRAMES)
         .map(|i| (std::f32::consts::TAU * 1_000.0 * i as f32 / 48_000.0).sin())
         .collect();
-    x[MODE_DECLICK.get() + 10] = -0.0;
-    x[MODE_DECLICK.get() + 11] = f32::from_bits(1);
+    x[declick_frames(RATE).get() + 10] = -0.0;
+    x[declick_frames(RATE).get() + 11] = f32::from_bits(1);
     x
 }
 
@@ -54,7 +54,7 @@ fn a_bypassed_band_is_its_input_bit_for_bit() {
     set_mode(&mut s, NodeMode::Bypassed);
     let x = input();
     let y = s.render_input(&[&x]).remove(0);
-    let from = MODE_DECLICK.get();
+    let from = declick_frames(RATE).get();
     assert_eq!(bits(&y[from..]), bits(&x[from..]));
 }
 
@@ -66,8 +66,8 @@ fn a_muted_strip_is_silence_and_un_muted_is_its_fader() {
     assert!(s.controls().set(UnitParam::Volume, 0.75));
     // No denormal: the node multiplies under flush-to-zero, this test does not.
     let mut x = input();
-    x[MODE_DECLICK.get() + 11] = 0.5;
-    let from = MODE_DECLICK.get();
+    x[declick_frames(RATE).get() + 11] = 0.5;
+    let from = declick_frames(RATE).get();
 
     set_mode(&mut s, NodeMode::Muted);
     let muted = s.render_input(&[&x, &x]);

@@ -254,7 +254,7 @@ impl GraphSpec {
     /// source **replaces** the base from its first event on (ramps and
     /// segments addressed to [`EdgeGain::ADDR`]), the value is clamped to
     /// the entry's `range`, a source that changes (or goes) crossfades over
-    /// [`PARAM_DECLICK`](crate::PARAM_DECLICK), an undriven lane reads its
+    /// [`DECLICK`](crate::DECLICK), an undriven lane reads its
     /// base, and a lane's first block starts at its value. The rules are the
     /// param port's, stated once in [`param`](crate::ParamMod)'s docs and on
     /// [`connect_param`](Self::connect_param). The step is the sum's own, so
@@ -442,7 +442,7 @@ impl GraphSpec {
     /// - **Connecting or disconnecting is declicked.** When a port's source
     ///   changes (a new one, or none), its output crossfades from where it
     ///   was — the last value it delivered, or the base — to the new value
-    ///   over [`PARAM_DECLICK`](crate::PARAM_DECLICK) frames. Nothing else
+    ///   over [`DECLICK`](crate::DECLICK). Nothing else
     ///   is smoothed: a step in a source lands on its frame (the
     ///   sample-accuracy contract). A unit's **first** block is not a change:
     ///   a unit placed by a commit (an insert, a hard replace, a fork, a

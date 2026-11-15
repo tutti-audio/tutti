@@ -46,16 +46,17 @@
 //! **The declick is audio only, and its fade-out ends on the command's
 //! frame.** A declick stop or seek moves the transport on its command's
 //! frame, as an immediate one does. The fade is the engine's, as a gain on
-//! the output, continuous at every frame:
+//! the output along [`FadeLaw::EqualAmplitude`]'s one side, continuous at
+//! every frame:
 //!
 //! - **A timed command** (`At::Frame`, `At::Beat`) is seen ahead: the walk
-//!   looks one fade (10 ms) past each block for the next declicked
-//!   command playback reaches, and the gain falls linearly on the *old*
+//!   looks one fade ([`DECLICK`](tutti_graph::DECLICK)) past each block for the next declicked
+//!   command playback reaches, and the gain falls on the *old*
 //!   position's audio to reach zero exactly on its frame. Seen with less
 //!   than a fade to go (sent late, or reached sooner after a tempo change),
 //!   it falls over whatever frames are left: steeper, still continuous.
 //! - **On the frame** the transport jumps or stops, sample-accurately, and
-//!   the gain rises from zero over one fade: the new position's audio after
+//!   the gain rises from zero over one fade ([`DECLICK`](tutti_graph::DECLICK)): the new position's audio after
 //!   a seek, and after a stop whatever still sounds while stopped (live
 //!   input, a reverb tail; transport-gated sources are already silent), so
 //!   the output never comes back with a step.
@@ -81,7 +82,8 @@
 //! callback never meets a graph it cannot render.
 
 use tutti_graph::{
-    CommitError, Due, Editor, Env, Executor, Limits, Offset, Playhead, TransportChanges,
+    CommitError, Due, Editor, Env, Executor, FadeLaw, Limits, Offset, Playhead, TransportChanges,
+    declick_frames,
 };
 
 use crate::block_clock::{BlockClock, BlockClockReader, Pose};
@@ -870,13 +872,9 @@ struct Walk {
     frames: usize,
 }
 
-/// How long a declick fades, out and in: long enough to kill a click, short
-/// enough not to read as a fade.
-const FADE_TIME: Seconds = Seconds(0.01);
-
-/// Frames a declick fades over at `rate`, at least one.
+/// Frames a declick fades over at `rate`: [`DECLICK`](tutti_graph::DECLICK), at least one.
 fn fade_frames(rate: SampleRate) -> usize {
-    FADE_TIME.to_samples(rate).get().max(1)
+    declick_frames(rate).get()
 }
 
 /// Whether `command` asks for a declick (the motion machine grants it only
@@ -968,11 +966,12 @@ impl GainPlan {
 /// The declick gain, carried across blocks: a fade-out that ends exactly on
 /// a declicked command's frame, and a fade-in that starts there.
 ///
-/// Continuous by construction: a fade-out falls linearly from wherever the
-/// gain is to zero at its target, so with a full fade of lead each frame
-/// moves it by at most `1/fade`; a fade-in rises by `1/fade` a frame. The one
-/// step is a declicked command with no lead time (`At::NextBlock`, a late
-/// command, an untimed `try_send`): the old audio ends on the jump frame
+/// A fade is one move of the gain from where it is to zero or to one, along
+/// [`FadeLaw::EqualAmplitude`]: a fade-out is `from * out` over the frames up
+/// to its target, a fade-in `from * out + in` over one [`DECLICK`](tutti_graph::DECLICK). The gain
+/// is continuous by construction: a fade starts from wherever the gain is, so
+/// the one step is a declicked command with no lead time (`At::NextBlock`, a
+/// late command, an untimed `try_send`): the old audio ends on the jump frame
 /// with the gain at zero there, and the new audio fades in.
 #[derive(Clone, Copy, Debug)]
 struct Fader {
@@ -980,6 +979,35 @@ struct Fader {
     aim: Option<Frame>,
     /// Frames a fade spans, at the rate of the block being shaped.
     fade: usize,
+    /// The fade the gain is on, if any.
+    run: Option<Run>,
+}
+
+/// One fade of the gain: `n` frames from `from` to silence (a fade-out that
+/// ends on `aim`) or to unity, `k` of them done.
+#[derive(Clone, Copy, Debug)]
+struct Run {
+    from: f32,
+    k: usize,
+    n: usize,
+    /// The frame a fade-out ends on; `None`: a fade-in.
+    aim: Option<Frame>,
+}
+
+impl Run {
+    /// The gain of the fade's next frame, and the run moved past it; `None`
+    /// once it has reached its end.
+    fn step(self) -> (f32, Option<Self>) {
+        let to = if self.aim.is_some() { 0.0 } else { 1.0 };
+        let gain = FadeLaw::EqualAmplitude.between(self.from, to, self.k, self.n);
+        // A fade-in lasts one frame past its last law step, which is the
+        // gain's exact end; a fade-out ends on its aim, which is zero.
+        let next = Self {
+            k: self.k + 1,
+            ..self
+        };
+        (gain, (next.k <= self.n).then_some(next))
+    }
 }
 
 impl Fader {
@@ -988,7 +1016,18 @@ impl Fader {
             gain: 1.0,
             aim: None,
             fade,
+            run: None,
         }
+    }
+
+    /// A fade-in from silence, starting on the next frame.
+    fn rise(fade: usize) -> Option<Run> {
+        Some(Run {
+            from: 0.0,
+            k: 0,
+            n: fade,
+            aim: None,
+        })
     }
 
     /// Shape frames `base..base + frames` of the interleaved `output`
@@ -1008,7 +1047,7 @@ impl Fader {
         // Nothing to do on a block with no event, full gain, and no fade-out
         // starting inside it: the common case.
         let quiet = self.aim.is_none_or(|to| to.get() > end + fade as u64);
-        if plan.len == 0 && self.gain == 1.0 && quiet {
+        if plan.len == 0 && self.gain == 1.0 && self.run.is_none() && quiet {
             return;
         }
         let mut next = 0;
@@ -1029,6 +1068,7 @@ impl Fader {
             let x = frame0.get() + i as u64;
             if jump {
                 self.gain = 0.0;
+                self.run = Self::rise(fade);
             } else {
                 match self.aim {
                     Some(to) if x >= to.get() => {
@@ -1036,12 +1076,38 @@ impl Fader {
                         // here (whether or not the command was applied).
                         self.gain = 0.0;
                         self.aim = None;
+                        self.run = Self::rise(fade);
                     }
                     Some(to) if to.get() - x <= fade as u64 => {
-                        let left = (to.get() - x) as f32;
-                        self.gain *= left / (left + 1.0);
+                        // A fade-out over the frames left, from the gain the
+                        // frame has (a fade-in cut short continues from there).
+                        let run = match self.run {
+                            Some(r) if r.aim == Some(to) => r,
+                            _ => Run {
+                                from: self.gain,
+                                k: 0,
+                                n: (to.get() - x) as usize,
+                                aim: Some(to),
+                            },
+                        };
+                        (self.gain, self.run) = run.step();
                     }
-                    _ => self.gain = (self.gain + 1.0 / fade as f32).min(1.0),
+                    _ => {
+                        let run = match self.run {
+                            Some(r) if r.aim.is_none() => Some(r),
+                            _ if self.gain < 1.0 => Some(Run {
+                                from: self.gain,
+                                k: 0,
+                                n: fade,
+                                aim: None,
+                            }),
+                            _ => None,
+                        };
+                        match run {
+                            Some(r) => (self.gain, self.run) = r.step(),
+                            None => self.run = None,
+                        }
+                    }
                 }
             }
             if self.gain != 1.0 {
@@ -1506,7 +1572,7 @@ mod tests {
         transport
             .motion()
             .schedule(
-                At::Frame(Frame::new(812)),
+                At::Frame(Frame::new(700)),
                 tutti_transport::MotionEvent::stop(),
             )
             .expect("room");
@@ -1522,7 +1588,7 @@ mod tests {
             &mut pieces,
         );
         assert_eq!(walk.gain.len, 1);
-        assert_eq!(walk.gain.items[0], (0, Gain::Aim(Some(Frame::new(812)))));
+        assert_eq!(walk.gain.items[0], (0, Gain::Aim(Some(Frame::new(700)))));
     }
 
     /// A block refused the graph is a dropout the meter counts, not times:

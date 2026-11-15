@@ -35,8 +35,8 @@
 //! its next cycle, following `Ring::play`), the old side plays on alone, and
 //! the fade starts once the new side sounds. So once a fade is done the output
 //! is the memory tier's again. A continuation that runs out, and the ring
-//! coming back after a frame it could not supply (an underrun), are ramped
-//! over [`RAMP_FRAMES`], never cut.
+//! coming back after a frame it could not supply (an underrun), are faded
+//! over [`DECLICK`](tutti_graph::DECLICK), never cut.
 //!
 //! Nothing here allocates, locks or blocks: the buffers are sized at
 //! construction, the control (the map in it) is read once per block (through a `Reader`
@@ -53,6 +53,7 @@
 //! instead. A block that reads nothing tells the ring so (`PosReader::idle`), so a
 //! paused voice holds no refill back.
 
+use tutti_graph::FadeLaw;
 use tutti_types::{SamplePosition, Samples};
 
 use crate::streamer::{Arrangement, Block, Cells, RingMap, RingReader, SharedReader};
@@ -65,10 +66,6 @@ use crate::lanes::{Gather, Lane};
 /// Output frames of continuation rendered at a discontinuity: the refill gap
 /// plus the fade, with room to spare.
 pub(crate) const OLD_FRAMES: usize = 2_048;
-
-/// Output frames a continuation ramps out over as it runs out, and the ring
-/// ramps back in over after an underrun.
-pub(crate) const RAMP_FRAMES: usize = 64;
 
 /// How far a frame's position may sit from the last one's continuation before
 /// it counts as a jump. Under a frame: a seat re-anchored by the clock lands on
@@ -88,14 +85,12 @@ struct Fade {
 }
 
 impl Fade {
-    /// The new side's weight at fade frame `k`.
+    /// The new side's weight at fade frame `k`: the incoming side of
+    /// [`FadeLaw::EqualAmplitude`] (the two sides are one source, in phase), and
+    /// 1 from the fade's end on.
     #[inline]
     fn weight(frames: usize, k: usize) -> f32 {
-        if k >= frames {
-            1.0
-        } else {
-            (k + 1) as f32 / (frames + 1) as f32
-        }
+        FadeLaw::EqualAmplitude.between(0.0, 1.0, k, frames)
     }
 }
 
@@ -295,6 +290,7 @@ impl LiveRead {
         positions: &[Option<SamplePosition>],
         segment: u64,
         rate: f64,
+        declick: usize,
         gain: f32,
         state: &Cells,
         at: usize,
@@ -395,12 +391,12 @@ impl LiveRead {
                 pos,
                 &mut frame[..w],
             );
-            let sounded = st.mix(new, &mut frame[..w]);
+            let sounded = st.mix(new, &mut frame[..w], declick);
             if sounded {
                 if let Some(r) = st.recover {
-                    let g = (r + 1) as f32 / (RAMP_FRAMES + 1) as f32;
+                    let g = FadeLaw::EqualAmplitude.between(0.0, 1.0, r, declick);
                     frame[..w].iter_mut().for_each(|s| *s *= g);
-                    st.recover = (r + 1 < RAMP_FRAMES).then_some(r + 1);
+                    st.recover = (r + 1 < declick).then_some(r + 1);
                 }
             } else {
                 state.report_underrun();
@@ -597,16 +593,20 @@ impl State {
     /// Mix one frame: `frame` holds the ring's read (`new`: it sounded). Plays
     /// the fade in progress, if any, into `frame`; `true` when the frame
     /// sounded.
-    fn mix(&mut self, new: bool, frame: &mut [f32]) -> bool {
+    fn mix(&mut self, new: bool, frame: &mut [f32], declick: usize) -> bool {
         let w = self.width;
         let Some(mut fade) = self.fade else {
             return new;
         };
         let left = self.old_len.saturating_sub(self.old_k);
         let old = (left > 0).then(|| &self.old[self.old_k * w..(self.old_k + 1) * w]);
-        // Running out ramps: the old side's gain (alone) or weight (in a
-        // fade) goes to the new side over its last `RAMP_FRAMES`.
-        let out_ramp = (left as f32 / RAMP_FRAMES as f32).min(1.0);
+        // Running out fades: the old side's gain (alone) or weight (in a
+        // fade) goes to the new side over its last `declick` frames.
+        let out_ramp = if left > declick {
+            1.0
+        } else {
+            FadeLaw::EqualAmplitude.between(1.0, 0.0, declick - left, declick)
+        };
         fade.started |= new;
 
         match (fade.started, old) {

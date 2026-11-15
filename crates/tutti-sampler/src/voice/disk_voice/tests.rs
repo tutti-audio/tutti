@@ -536,6 +536,29 @@ fn clip_reader_jump_edge_is_allocation_free() {
     });
 }
 
+/// The underrun path: the playhead alternates between the ring's frames and
+/// a place inside the window the ring does not hold, so the read underruns
+/// (the old side runs out over `DECLICK` and the voice goes silent) and the
+/// ring comes back (the recovery fade-in), every few blocks, with the jump
+/// fades between.
+#[test]
+fn clip_reader_underrun_and_recovery_are_allocation_free() {
+    let transport = MockTransport::rolling(Beat::new(5.0), Bpm::of(120.0)); // in the ring
+    let mut direct = warm_clip_reader(&transport, 64);
+    assert_no_alloc::assert_no_alloc(|| {
+        for i in 0..3_000 {
+            // Beat 7.0 is inside the window [4, 8) and past the ring's end.
+            let beat = if (i / 7) % 2 == 0 { 5.0 } else { 7.0 };
+            transport.set_beat(Beat::new(beat));
+            direct.block_in(&transport.env(64, SampleRate::SR_48K));
+        }
+    });
+    assert!(
+        direct.node.shared_state.take_underruns() > 0,
+        "the ring was starved: the run reached the underrun path"
+    );
+}
+
 /// One-frame blocks, the shortest a node is handed: the per-block work
 /// (the clock's runs, the ring's claim) allocates nothing either, with the
 /// transport moving a frame a block (so the reader keeps its continuation:

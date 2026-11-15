@@ -180,8 +180,9 @@ fn connecting_and_disconnecting_a_bus_edge_round_trips() {
 }
 
 /// **A bus edge fades per lane** (doc 030 section 4): both lanes of the fold
-/// rise from exactly 0 to their weight over 256 frames (the fifth 64-frame
-/// block is at the weight), and a disconnect fades them out again.
+/// rise from 0 to their weight along the smootherstep over `DECLICK`, 240 frames
+/// (the fifth 64-frame block is at the weight), and a disconnect fades them
+/// out again.
 #[test]
 fn a_bus_edge_fades_in_and_out_lane_by_lane() {
     let mut r = rig();
@@ -189,11 +190,14 @@ fn a_bus_edge_fades_in_and_out_lane_by_lane() {
     g.connect(BusSource::Node(bus(r.stereo)), bus(r.sink))
         .unwrap();
     let first = out0(&mut r.s);
-    assert_eq!(first[0].to_bits(), 0.0f32.to_bits(), "from exactly 0");
     for (j, &x) in first.iter().enumerate() {
-        let w = 0.5 * (j as f32 / 256.0);
-        let want = (0.0 + w * 0.25) + w * 0.75;
-        assert_eq!(x.to_bits(), want.to_bits(), "frame {j}");
+        let k = (j + 1) as f64 / 241.0;
+        let s = k * k * k * (6.0 * k * k - 15.0 * k + 10.0);
+        let want = 0.5 * s;
+        assert!(
+            (f64::from(x) - want).abs() < 1e-6,
+            "frame {j}: {x}, smootherstep {want}"
+        );
     }
     for _ in 0..3 {
         out0(&mut r.s);
@@ -207,7 +211,10 @@ fn a_bus_edge_fades_in_and_out_lane_by_lane() {
     );
     assert!(g.bus_sources(BusRef::new(r.sink, 0)).unwrap().is_empty());
     let down = out0(&mut r.s);
-    assert_eq!(down[0], 0.5, "leaves from the weight it had");
+    assert!(
+        (down[0] - 0.5).abs() < 1e-3,
+        "leaves from the weight it had"
+    );
     assert!(down[BLOCK - 1] < down[0]);
     for _ in 0..3 {
         out0(&mut r.s);
