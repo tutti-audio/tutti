@@ -1,17 +1,19 @@
 //! The feed-forward [`CompressorNode`] with an external side-chain, soft knee and
 //! makeup gain.
 
-use tutti_dsp::{CompressorControls, CompressorFamily, KeySource};
-use tutti_types::{BusTopology, CompressionRatio, Db, SampleRate, Seconds};
+use tutti_buffers::{Float, Planes, PlanesMut};
+use tutti_dsp::{COEFF_INTERVAL, CompressorBank, CompressorControls, CompressorLanes, KeySource};
+use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_types::{BusTopology, CompressionRatio, Db, MaxBlock, SampleRate, Seconds, Tail};
 
-use crate::reverb::{FamilyNode, NodeFamily, Rings};
+use crate::kernel::{ControlLanes, Kernel, KernelNode};
 
 /// A compressor: `channels = N` means N audio inputs, then (for a side-chain key) N key
 /// inputs, and N outputs, with one **linked** gain computed from the loudest key channel and
 /// applied to every output.
 ///
-/// A [`FamilyNode`] over [`CompressorFamily`], the detector and the gain being the
-/// family's recurrence; this file holds the cells and how the graph reaches them.
+/// A [`KernelNode`] over [`CompressorKernel`], the detector and the gain being
+/// [`CompressorBank`]'s; this file holds the cells and how the graph reaches them.
 ///
 /// - [`new`](Self::new): any width up to one bus (16 channels), on a checked
 ///   [`BusTopology`], with the [`KeySource`] and the [`CompressorControls`] you give it.
@@ -42,20 +44,20 @@ use crate::reverb::{FamilyNode, NodeFamily, Rings};
 /// 0, a ratio under 1 as 1 and a time under 0 as 0: a compressor does not expand).
 ///
 /// **The threshold is read per frame** when the graph drives it: a lane on its port is the
-/// recurrence's own ([`Inputs`](tutti_dsp::Inputs) lane 0), and the cell is the base a frame
-/// nobody drives (or a non-finite one) is compared against. **Every other control is on
-/// the stream grid** (16 frames from the last reset, [`Family::CADENCE`](tutti_dsp::Family::CADENCE)):
-/// a cell write or a driven port is sampled at the grid's solve frame, so it reaches the
-/// render within 16 frames and the render does not depend on how the stream is cut into
-/// blocks. The detector's controls land whole (the follower smooths them), and the makeup
-/// glides over [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE), 5 ms.
+/// bank's own ([`CompressorLanes`]), and the cell is the base a frame nobody drives (or a
+/// non-finite one) is compared against. **Every other control is on the stream grid** (16
+/// frames from the last reset, [`Kernel::GRID`]): a cell write or a driven port is sampled
+/// at the grid's solve frame, so it reaches the render within 16 frames and the render does
+/// not depend on how the stream is cut into blocks. The detector's controls land whole (the
+/// follower smooths them), and the makeup is a ramp, a control moving to a target: it glides
+/// over [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE), 5 ms.
 ///
 /// # In a graph
 ///
 /// A graph node ([`IntoNode`](tutti_graph::IntoNode)): inserted, a fork of it starts from
 /// the values last set through its [`ParamSet`](tutti_graph::ParamSet). The graph prepares
 /// it at the device rate before its first block.
-pub type CompressorNode = FamilyNode<CompressorFamily>;
+pub type CompressorNode = KernelNode<CompressorKernel>;
 
 impl CompressorNode {
     /// A compressor on the bus `input`, its detector on `key`, running at `controls`.
@@ -79,7 +81,7 @@ impl CompressorNode {
     /// names what it wants: `CompressorControls { threshold, ratio, ..CompressorControls::DEFAULT }`.
     #[must_use]
     pub fn new(input: BusTopology, key: KeySource, controls: CompressorControls) -> Self {
-        Self::live(CompressorFamily::new(input, key), controls)
+        Self::with_kernel(CompressorKernel::new(input, key), CompressorSet, controls)
     }
 
     /// Returns a mono compressor that listens to its own signal: 1 input, 1 output.
@@ -113,7 +115,7 @@ control_set! {
     Ratio => CompressionRatio = ratio { whole },
     Attack => Seconds = attack { whole },
     Release => Seconds = release { whole },
-    // The makeup glides in the recurrence, over `GAIN_GLIDE`: the reader must not ramp it
+    // The makeup glides in the bank, over `GAIN_GLIDE`: the reader must not ramp it
     // across the block as well. It is addressed as `GainDb`.
     GainDb => Db = makeup { whole };
 
@@ -122,22 +124,106 @@ control_set! {
     }
 }
 
+/// The compressor as a [`Kernel`]: a [`CompressorBank`] sized at the prepared rate, its
+/// detector on the [`KeySource`] it was built with.
+///
 /// A compressor rings on only as a gain (it scales its input), so it declares no tail and
 /// never parks: its follower must keep tracking the key, which the main input's silence
 /// says nothing of.
-impl NodeFamily for CompressorFamily {
+#[derive(Clone, Debug)]
+pub struct CompressorKernel {
+    input: BusTopology,
+    key: KeySource,
+    /// `None` until [`prepare`](Kernel::prepare).
+    bank: Option<CompressorBank>,
+    /// Whether the first retarget after `prepare` has landed.
+    landed: bool,
+}
+
+impl CompressorKernel {
+    /// A compressor on `input` whose detector reads `key`.
+    fn new(input: BusTopology, key: KeySource) -> Self {
+        Self {
+            input,
+            key,
+            bank: None,
+            landed: false,
+        }
+    }
+}
+
+impl Kernel for CompressorKernel {
     type Set = CompressorSet;
 
-    fn rings(&self) -> Rings {
-        Rings::Silent
-    }
-    const SAMPLING: tutti_dsp::Cadence = <Self as tutti_dsp::Family>::CADENCE;
+    /// A cell that moves reaches the render within 16 frames, wherever the blocks fall.
+    const GRID: usize = COEFF_INTERVAL;
 
-    fn set(&self, _: &CompressorControls) -> CompressorSet {
-        CompressorSet
+    /// The input bus, then, for a [`KeySource::Sidechain`], the key bus as wide; one output
+    /// bus where the input is.
+    fn shape(&self) -> Shape {
+        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
+        let main = Buses::main(self.input);
+        let inputs = match self.key {
+            KeySource::Own => main,
+            KeySource::Sidechain => main
+                .with(Bus::new(self.input, BusRole::Sidechain))
+                .expect("a main bus and a key are two buses"),
+        };
+        Shape::buses(inputs, Buses::NONE.with(output).expect("one bus")).with_cost(Cost::Moderate)
     }
 
-    fn capacity(&self, _: SampleRate) {}
+    fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
+        self.bank = Some(CompressorBank::new(rate));
+        self.landed = false;
+    }
+
+    fn reset(&mut self) {
+        if let Some(bank) = &mut self.bank {
+            bank.reset();
+        }
+    }
+
+    fn retarget(&mut self, controls: &CompressorControls) {
+        let Some(bank) = &mut self.bank else { return };
+        bank.aim(controls);
+        if !self.landed {
+            bank.settle();
+            self.landed = true;
+        }
+    }
+
+    fn render<S: Float>(
+        &mut self,
+        input: Planes<'_, S>,
+        lanes: ControlLanes<'_, S>,
+        output: PlanesMut<'_, '_, S>,
+    ) {
+        self.render_keyed(input, input, lanes, output);
+    }
+
+    fn render_keyed<S: Float>(
+        &mut self,
+        input: Planes<'_, S>,
+        key: Planes<'_, S>,
+        lanes: ControlLanes<'_, S>,
+        output: PlanesMut<'_, '_, S>,
+    ) {
+        let lanes = CompressorLanes {
+            threshold: lanes.get(CompressorSet::THRESHOLD_LANE),
+        };
+        if let Some(bank) = &mut self.bank {
+            bank.process(lanes, key, input, output);
+        }
+    }
+
+    fn tail(&self) -> Tail {
+        Tail::None
+    }
+}
+
+impl CompressorSet {
+    /// The lane of the threshold: the one [`fast`](crate::ControlRead::Fast) row.
+    const THRESHOLD_LANE: usize = 0;
 }
 
 #[cfg(test)]
@@ -438,7 +524,7 @@ mod tests {
     /// no tail, at every width.
     #[test]
     fn compressor_declares_its_params() {
-        let m = comp(-20.0, 4.0, 0.0001, 0.1);
+        let m = prepared_at(comp(-20.0, 4.0, 0.0001, 0.1), RATE_44K);
         let shape = m.shape();
         assert_eq!(
             shape.params.as_slice(),

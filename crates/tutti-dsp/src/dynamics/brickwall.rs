@@ -1,23 +1,21 @@
-//! [`BrickwallFamily`]: the hard clipper as a [`Family`].
+//! [`BrickwallBank`]: the hard clipper over buffers views.
 //!
 //! A brickwall clamps every sample to `+-c` and has nothing else: no state, no
-//! envelope, no lookahead and so no latency and no tail. It is the one family whose
-//! only control is a **fast lane**: the ceiling is read per frame from the
-//! [`Inputs`] when the graph drives it,
-//! and the member's ceiling is the base for a frame nobody drives.
+//! envelope, no lookahead and so no latency and no tail. Its only control is the ceiling,
+//! which is read per frame when the graph drives it ([`BrickwallLanes`]); the aimed ceiling
+//! is the one a frame nobody drives is clamped at. The clamp bounds the **sample** peak of
+//! the output for any finite or infinite input; a NaN input passes as NaN. It is not a
+//! true-peak limit.
 //!
 //! The ceiling is in dB and the clamp bound is its amplitude. `+inf` dB passes
 //! everything and `-inf` dB mutes (both are ceilings); only a NaN has no level, and it
 //! is ignored wherever it comes from (the node keeps the last ceiling for a NaN
-//! cell, and a NaN frame on the lane clamps at the member's ceiling).
+//! cell, and a NaN frame on the lane clamps at the aimed ceiling).
 
-use core::ops::Range;
+use tutti_buffers::{Float, Mono, Planes, PlanesMut, Sample};
+use tutti_types::{Amplitude, Db};
 
-use tutti_types::{BusTopology, Db, SampleRate, Samples, Seconds};
-
-use crate::{Channels, Effort, Family, Glide, Inputs, Recurrence, Ring, Start, System};
-
-/// The controls of a [`BrickwallFamily`]: the ceiling.
+/// The controls of a [`BrickwallBank`]: the ceiling.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BrickwallControls {
     /// The level samples are clamped to, in dB (`+-inf` are ceilings; a NaN has no
@@ -50,140 +48,84 @@ fn clip(x: f32, ceiling: f32) -> f32 {
     x.clamp(-ceiling, ceiling)
 }
 
-/// A brickwall at one ceiling: `y = clamp(x, -c, c)`, memoryless, so no latency and no
-/// tail.
+/// The per-frame lane a brickwall reads beside its audio, in the audio's sample format,
+/// `None` where nothing drives it. A lane is at least as long as the frames a call renders;
+/// a frame past its end is not driven.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BrickwallLanes<'a, S: Float = f32> {
+    /// The ceiling in dB. A frame that is NaN clamps at the aimed ceiling.
+    pub ceiling: Option<Mono<'a, S>>,
+}
+
+/// A brickwall at one ceiling, every channel clamped to it: `y = clamp(x, -c, c)`,
+/// memoryless, so no latency and no tail. The ceiling lands whole (a glided bound would let
+/// a sample past the new one), and the clip is memoryless, so the render does not depend on
+/// how the input is cut into blocks.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BrickwallMember {
-    ceiling: f32,
+pub struct BrickwallBank {
+    ceiling: Amplitude,
 }
 
-impl BrickwallMember {
-    /// The clamp bound, as an amplitude (never NaN).
+impl BrickwallBank {
+    /// A clipper at the full scale, 0 dB.
     #[must_use]
-    pub fn ceiling(&self) -> f32 {
-        self.ceiling
-    }
-
-    /// `x` through the clip: `clamp(x, -c, c)`.
-    #[must_use]
-    pub fn apply(&self, x: f32) -> f32 {
-        clip(x, self.ceiling)
-    }
-}
-
-impl System for BrickwallMember {
-    fn latency(&self) -> Samples {
-        Samples::ZERO
-    }
-
-    fn tail(&self, _: Db) -> Ring {
-        Ring::Finite(Seconds(0.0))
-    }
-}
-
-/// The [`Family`] of the hard clipper, as wide as its input bus. Every channel is
-/// clamped to the same ceiling.
-#[derive(Clone, Copy, Debug)]
-pub struct BrickwallFamily {
-    input: BusTopology,
-}
-
-impl BrickwallFamily {
-    /// A brickwall on the bus `input`, one output bus where it is.
-    #[must_use]
-    pub const fn new(input: BusTopology) -> Self {
-        Self { input }
-    }
-}
-
-impl Family for BrickwallFamily {
-    type Controls = BrickwallControls;
-    type Member = BrickwallMember;
-    type Recurrence = BrickwallRecurrence;
-
-    fn channels(&self) -> Channels {
-        Channels::same(self.input)
-    }
-
-    fn blank(&self, _: SampleRate) -> BrickwallMember {
-        BrickwallMember { ceiling: 1.0 }
-    }
-
-    fn member_into(&self, c: &BrickwallControls, _: SampleRate, out: &mut BrickwallMember) {
-        out.ceiling = amplitude(c.ceiling).unwrap_or(1.0);
-    }
-
-    fn recurrence(&self, _: SampleRate) -> BrickwallRecurrence {
-        BrickwallRecurrence
-    }
-}
-
-/// The [`Recurrence`] of a [`BrickwallFamily`]: the clamp at the ceiling the member
-/// asks for, or at each frame's own when lane 0 of the [`Inputs`] drives it.
-///
-/// **Lane 0 is the ceiling in dB, per frame.** A NaN frame clamps at the member's
-/// ceiling. The ceiling lands whole (a glided bound would let a sample past the new
-/// one), and the clip is memoryless, so the render does not depend on how the input
-/// is cut into blocks.
-#[derive(Clone, Copy, Debug)]
-pub struct BrickwallRecurrence;
-
-impl Recurrence for BrickwallRecurrence {
-    type Member = BrickwallMember;
-    type Capacity = ();
-    type Target = f32;
-    type Coeffs = Glide<f32>;
-    type State = ();
-
-    const STEP: usize = 1;
-
-    fn start(&self, member: &BrickwallMember) -> Start<Self> {
-        Start {
-            coeffs: Glide::landed(member.ceiling).by(0),
-            state: (),
-            target: member.ceiling,
+    pub const fn new() -> Self {
+        Self {
+            ceiling: Amplitude::UNITY,
         }
     }
 
-    fn coefficients_into(&self, member: &BrickwallMember, target: &mut f32) -> bool {
-        *target = member.ceiling;
-        true
+    /// Aims at `controls`: a NaN ceiling is the default's, 0 dB.
+    pub fn aim(&mut self, controls: &BrickwallControls) {
+        self.ceiling = Amplitude(amplitude(controls.ceiling).unwrap_or(1.0));
     }
 
-    fn clear(&self, _: &mut ()) {}
-
-    fn run(
+    /// Runs `input` into `output`, every frame clamped at the ceiling: its own on a driven
+    /// frame, the aimed one on any other (a NaN is not a level).
+    ///
+    /// Channel `c` of `input` feeds channel `c` of `output`; a channel past the narrower of
+    /// the two views is not touched. No allocation.
+    pub fn process<S: Float>(
         &self,
-        coeffs: &Glide<f32>,
-        _: &mut (),
-        feed: &Inputs<'_>,
-        output: &mut [&mut [f32]],
-        frames: Range<usize>,
-        _: usize,
+        lanes: BrickwallLanes<'_, S>,
+        input: Planes<'_, S>,
+        mut output: PlanesMut<'_, '_, S>,
     ) {
-        let base = coeffs.now();
-        match feed.lanes[0] {
+        let frames = input.frames().get().min(output.frames().get());
+        let width = input.channels().min(output.channels());
+        let base = self.ceiling.get();
+        match lanes.ceiling {
             // Each frame's ceiling is converted once, for every channel.
             Some(lane) => {
-                for i in frames {
-                    let ceiling = amplitude(Db(lane[i])).unwrap_or(base);
-                    for (out, input) in output.iter_mut().zip(feed.audio) {
-                        out[i] = clip(input[i], ceiling);
+                let lane = lane.samples();
+                for i in 0..frames {
+                    let ceiling = lane
+                        .get(i)
+                        .and_then(|x| amplitude(Db(x.convert_to::<f32>())))
+                        .unwrap_or(base);
+                    for c in 0..width {
+                        let x = input.plane(c).samples()[i].convert_to::<f32>();
+                        output.plane_mut(c).samples_mut()[i] = clip(x, ceiling).convert_to::<S>();
                     }
                 }
             }
             None => {
-                for (out, input) in output.iter_mut().zip(feed.audio) {
-                    for (o, &x) in out[frames.clone()].iter_mut().zip(&input[frames.clone()]) {
-                        *o = clip(x, base);
+                for c in 0..width {
+                    let xs = &input.plane(c).samples()[..frames];
+                    let mut plane = output.plane_mut(c);
+                    let ys = &mut plane.samples_mut()[..frames];
+                    for (y, x) in ys.iter_mut().zip(xs) {
+                        *y = clip(x.convert_to::<f32>(), base).convert_to::<S>();
                     }
                 }
             }
         }
     }
+}
 
-    fn effort(&self) -> Effort {
-        Effort::Light
+impl Default for BrickwallBank {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

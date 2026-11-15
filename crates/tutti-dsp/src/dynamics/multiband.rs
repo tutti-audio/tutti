@@ -2,7 +2,7 @@
 //!
 //! A Linkwitz-Riley crossover (the tree of [`CrossoverModel`], one
 //! per channel) splits the signal into 2 to 4 bands; each band is compressed by its own
-//! compressor (the frame step of [`CompressorFamily`](super::CompressorFamily), one
+//! compressor (the frame step of [`CompressorBank`](super::CompressorBank), one
 //! copy of it) with a gain **linked** across channels, from the loudest channel of the
 //! band; and the bands are summed. The detector is the band itself: there is no
 //! side-chain.
@@ -96,7 +96,7 @@ impl Default for MultibandSettings {
 }
 
 /// A multiband compressor at one set of controls and one rate: the crossover's design, a
-/// [`CompressorMember`] a band, and which bands are bypassed and soloed. No latency (the
+/// compressor a band, and which bands are bypassed and soloed. No latency (the
 /// bands are not delayed) and a tail of the crossover's ring: the splits' sections ring
 /// after the input stops, and the compressors only scale.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -228,7 +228,7 @@ impl Family for MultibandFamily {
 
     /// The controls, made runnable: the crossover as [`CrossoverModel::design_into`] makes it
     /// (total: a set out of order is solved with its splits no lower than the one before),
-    /// and each band as [`CompressorFamily`](super::CompressorFamily) does.
+    /// and each band as [`CompressorBank`](super::CompressorBank) does.
     fn member_into(&self, c: &MultibandSettings, rate: SampleRate, out: &mut MultibandMember) {
         out.crossover.design_into(&c.crossover, rate);
         out.count = self.bands();
@@ -369,7 +369,7 @@ impl Readout for MultibandRecurrence {
 ///
 /// K, per frame: each channel through its crossover tree; then, per band in order, the
 /// band's level (the loudest channel of the band, a NaN reading as quiet), its compressor
-/// (the frame step of [`CompressorRecurrence`](super::CompressorRecurrence), at the
+/// (the frame step of [`CompressorBank`](super::CompressorBank), at the
 /// threshold of lane `b` of the [`Inputs`] when it is finite, else the member's), the bypass
 /// blend `g (1 - w) + w` (skipped at `w = 0`), the audible multiply (skipped at 1, and the
 /// band left out of the sum at 0) and each channel's `x g` added to its sum. The bands
