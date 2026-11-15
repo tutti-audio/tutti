@@ -124,6 +124,7 @@ struct Options {
     #[cfg(feature = "plugin")]
     hang: crate::HangPolicy,
     spawner: crate::jobs::Spawner,
+    pool: crate::PoolConfig,
 }
 
 /// A MIDI backend a host supplies, held until the session takes it.
@@ -168,6 +169,7 @@ impl Default for Options {
             #[cfg(feature = "plugin")]
             hang: crate::HangPolicy::default(),
             spawner: crate::jobs::Spawner::default(),
+            pool: crate::PoolConfig::default(),
         }
     }
 }
@@ -667,6 +669,14 @@ impl<C: Clock> SessionBuilder<C> {
         self
     }
 
+    /// How the pool runs its loads ([`PoolConfig`](crate::PoolConfig)): how
+    /// many worker stages run at once. Default four.
+    #[must_use]
+    pub const fn pool_config(mut self, config: crate::PoolConfig) -> Self {
+        self.opts.pool = config;
+        self
+    }
+
     /// Open the OS MIDI layer (reached through [`Session::midi`](crate::Session::midi): `connect_input`, `connect_output`, `devices`) and feed the engine's
     /// MIDI ingest node, an event inlet for each connected device. Default off.
     #[cfg(feature = "midi-hardware")]
@@ -929,7 +939,7 @@ impl<C: Clock> SessionBuilder<C> {
             running,
             graph: parts.graph,
             resource_ids: crate::peer::ResourceIds::new(),
-            pool: crate::Pool::default(),
+            pool: crate::Pool::new(self.opts.pool),
             transport: parts.transport,
             load: None,
             heard: None,

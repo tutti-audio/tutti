@@ -765,7 +765,8 @@ impl<C: Clock> Session<C> {
             Phase::Collect => {
                 // First, so what a job landed is in the graph this update commits.
                 self.land_jobs(out);
-                // What those landings and the holds' ends changed.
+                // What those landings and the holds' ends changed, and the pool's
+                // stages on this thread.
                 self.pool_events(out);
                 // What the graph's own removals left declared.
                 self.forget_removed();

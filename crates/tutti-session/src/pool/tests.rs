@@ -11,6 +11,8 @@ use crate::peer::sealed;
 use crate::{HandleError, Job, Peer, PeerError, Presence, Resource, ResourceId, Session};
 use crate::{SessionEvent, jobs::JobFailed};
 
+mod loads;
+
 /// The loads a session handed its spawner, held until the test runs them.
 #[derive(Clone, Default)]
 struct Spawned(Arc<Mutex<Vec<Job>>>);
@@ -146,6 +148,8 @@ fn state(session: &crate::DetachedSession, key: &'static str) -> Option<String> 
         PoolState::Loading => "loading".to_owned(),
         PoolState::Loaded => "loaded".to_owned(),
         PoolState::Reloading => "reloading".to_owned(),
+        PoolState::WaitingForMainThread => "waiting-for-main".to_owned(),
+        PoolState::Opening => "opening".to_owned(),
         PoolState::Failed(_) => "failed".to_owned(),
         PoolState::Held => "held".to_owned(),
     })
@@ -756,6 +760,29 @@ mod audio {
             s.audio(&"kick"),
             Err(HandleError::NotPooled("kick"))
         ));
+    }
+
+    #[test]
+    fn two_keys_of_one_audio_path_share_one_decode_and_one_wave() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.wav");
+        write_wav(&path, 10);
+        let (mut s, spawned) = session();
+        s.pool((audio_file("kick", &path), audio_file("again", &path)))
+            .unwrap();
+        let jobs = spawned.take();
+        assert_eq!(jobs.len(), 1, "one decode for both keys");
+        for job in jobs {
+            job.run();
+        }
+        assert_eq!(
+            events(&mut s),
+            [
+                ("kick", "loaded".to_owned()),
+                ("again", "loaded".to_owned())
+            ]
+        );
+        assert!(Arc::ptr_eq(&wave(&s, "kick"), &wave(&s, "again")));
     }
 
     #[test]
