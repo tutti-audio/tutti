@@ -6,14 +6,18 @@
 
 use assert_no_alloc::assert_no_alloc;
 use tutti_buffers::{Fold, Interleaved, InterleavedMut, MonoMut, Planes, PlanesMut};
-use tutti_types::{ChannelLayout, ChannelTopology, Speaker};
+use tutti_types::{
+    AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrdering, ChannelLayout,
+    ChannelTopology, Speaker,
+};
 
 fn smpte(n: u16) -> ChannelTopology {
-    ChannelTopology::smpte(ChannelLayout::from(n)).unwrap()
+    ChannelTopology::assumed(ChannelLayout::from(n))
 }
 
 /// 12 -> 2 is the summed group, 6 -> 1 the mono mix, the permutation and
-/// 2 -> 6 the copy and zero rows, 5.1 -> 2 plain sums. 200 frames is past the
+/// 2 -> 6 the copy and zero rows, ambisonic conversions the rescaled, reordered,
+/// dropped and zero-filled rows, 5.1 -> 2 plain sums. 200 frames is past the
 /// planar group's 64-frame chunk.
 #[test]
 fn applying_a_fold_is_allocation_free() {
@@ -25,18 +29,35 @@ fn applying_a_fold_is_allocation_free() {
         SideLeft,
         SideRight,
         LowFrequency,
-    ]);
+    ])
+    .unwrap();
     let pairs = [
         (smpte(12), smpte(2)),
         (smpte(6), smpte(1)),
         (smpte(6), dts),
         (smpte(2), smpte(6)),
         (smpte(6), smpte(2)),
+        (
+            AmbisonicFormat::ambix(AmbisonicOrder::of(3)).into(),
+            AmbisonicFormat::new(
+                AmbisonicOrder::of(2),
+                AmbisonicOrdering::FuMa,
+                AmbisonicNormalization::N3d,
+            )
+            .into(),
+        ),
+        (
+            AmbisonicFormat::fuma(AmbisonicOrder::of(1)).into(),
+            AmbisonicFormat::ambix(AmbisonicOrder::of(3)).into(),
+        ),
     ];
     const FRAMES: usize = 200;
     for (src, dst) in &pairs {
         let fold = Fold::between(src, dst).unwrap();
-        let (sw, dw) = (src.positions().len(), dst.positions().len());
+        let (sw, dw) = (
+            usize::from(src.width().count()),
+            usize::from(dst.width().count()),
+        );
         let data: Vec<f32> = (0..sw * FRAMES).map(|i| (i as f32 * 0.37).sin()).collect();
         let planes: Vec<Vec<f32>> = (0..sw)
             .map(|c| data.chunks_exact(sw).map(|f| f[c]).collect())
@@ -58,12 +79,12 @@ fn applying_a_fold_is_allocation_free() {
                 }
                 fold.fold_planar_to_interleaved(
                     planar,
-                    InterleavedMut::new(&mut block, dst.layout()).unwrap(),
+                    InterleavedMut::new(&mut block, dst.width()).unwrap(),
                 )
                 .unwrap();
                 fold.fold(
-                    Interleaved::new(&data, src.layout()).unwrap(),
-                    InterleavedMut::new(&mut flat, dst.layout()).unwrap(),
+                    Interleaved::new(&data, src.width()).unwrap(),
+                    InterleavedMut::new(&mut flat, dst.width()).unwrap(),
                 )
                 .unwrap();
                 fold.fold_planar(planar, PlanesMut::from_vecs(&mut folded).unwrap())

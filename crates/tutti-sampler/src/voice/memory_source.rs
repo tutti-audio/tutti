@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_codec::Wave;
 use tutti_graph::{
-    CrossfadeCurve, Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
+    Cx, FadeLaw, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
     param_parts,
 };
 use tutti_transport::TempoReader;
@@ -29,7 +29,8 @@ use super::loop_span::{Loop, LoopSpan, blend};
 use super::slot::Piece;
 use super::types::Direction;
 use crate::lanes::{Gather, Lane, UNPREPARED_FRAMES, audible, scale};
-use crate::{MAX_SAMPLER_CHANNELS, PlaceError, nonempty};
+use crate::{PlaceError, nonempty};
+use tutti_types::MAX_CHANNELS;
 
 /// The span of timeline a voice occupies: where it starts, and how long it
 /// lasts.
@@ -815,7 +816,7 @@ impl MemorySource {
             && len <= u32::MAX as usize
             && (src_ch == 1 || (src_ch == n && self.channel_place.is_direct()));
         if !along_time {
-            let mut frame = [0.0f32; MAX_SAMPLER_CHANNELS];
+            let mut frame = [0.0f32; MAX_CHANNELS];
             for (i, pos) in positions.iter().enumerate() {
                 match pos {
                     Some(pos) => self.read_placed_into(*pos, direction, &mut frame[..n]),
@@ -1115,8 +1116,7 @@ impl MemorySource {
         }
         let span = self.placed_tail(clock, range.clone(), positions);
         let first = span.as_ref().map_or(0, |s| s.start);
-        let mut views: [&mut [f32]; MAX_SAMPLER_CHANNELS] =
-            std::array::from_fn(|_| Default::default());
+        let mut views: [&mut [f32]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
         for (view, lane) in views.iter_mut().zip(tail.iter_mut()) {
             *view = lane
                 .as_mut()
@@ -1160,14 +1160,14 @@ impl MemorySource {
         tail: &mut [Lane],
         out: &mut [&mut [f32]],
     ) {
-        let n = out.len().min(MAX_SAMPLER_CHANNELS);
-        let mut frame = [0.0f32; MAX_SAMPLER_CHANNELS];
+        let n = out.len().min(MAX_CHANNELS);
+        let mut frame = [0.0f32; MAX_CHANNELS];
         let base = range.start;
         if self.placement.is_some() {
             let frames = range.len();
             let positions = &mut positions[..frames];
             if gather.frames() >= frames {
-                let mut lanes: [&mut [f32]; MAX_SAMPLER_CHANNELS] =
+                let mut lanes: [&mut [f32]; MAX_CHANNELS] =
                     std::array::from_fn(|_| Default::default());
                 for (lane, ch) in lanes.iter_mut().zip(out.iter_mut()) {
                     *lane = &mut ch[range.clone()];
@@ -1248,7 +1248,7 @@ impl MemorySource {
 /// frame is lane frame 0.
 ///
 /// A head in the middle of a sound is `head * g_in + tail * g_out` at
-/// [`CrossfadeCurve`]'s equal-power gains: the two are different stretches
+/// [`FadeLaw::EqualPower`]'s gains: the two are different stretches
 /// of the source, which add in power. A head that is the clip's own start
 /// (`Gate::begins_with_loop`) keeps unity, `head + tail * g_out`: its attack
 /// is not ramped, and the join steps as the clip's first pass does. Both
@@ -1276,8 +1276,7 @@ fn crossfade_wraps<H: AsMut<[f32]>>(
         let end = run.end.min(run.start + wrap.left());
         for at in run.start..end {
             let i = at - base;
-            let (g_in, g_out) =
-                CrossfadeCurve::EqualPower.gains(wrap.ago + at - run.start, wrap.len);
+            let (g_out, g_in) = FadeLaw::EqualPower.gains(wrap.ago + at - run.start, wrap.len);
             let g_in = if own_start { 1.0 } else { g_in };
             // A tail that has ended leaves the head to finish its ramp.
             let sounding = positions[i].is_some();
@@ -1396,7 +1395,7 @@ impl Node for MemorySource {
         self.positions.resize(frames, None);
         self.positions.shrink_to_fit();
         self.gather.resize(frames);
-        let width = (self.channels.count() as usize).min(MAX_SAMPLER_CHANNELS);
+        let width = (self.channels.count() as usize).min(MAX_CHANNELS);
         self.tail.resize_with(width, Vec::new);
         for lane in &mut self.tail {
             lane.clear();
@@ -1418,13 +1417,12 @@ impl Node for MemorySource {
         let frames = io.frames();
         let (_, mut outs) = io.split();
         let width = outs.len();
-        let n = width.min(MAX_SAMPLER_CHANNELS);
+        let n = width.min(MAX_CHANNELS);
         // A node wider than the sampler reads leaves the rest silent.
         for c in n..width {
             outs.get(c).fill(0.0);
         }
-        let mut refs: [&mut [f32]; MAX_SAMPLER_CHANNELS] =
-            std::array::from_fn(|_| Default::default());
+        let mut refs: [&mut [f32]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
         for (slot, ch) in refs.iter_mut().zip(outs.iter_mut()) {
             *slot = ch;
         }

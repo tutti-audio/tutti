@@ -68,7 +68,7 @@ fn tap_with_ring(frames: &[(f32, f32)], ring: usize) -> TapReader {
     ed.spec_mut().topology.set_outputs(vec![port(0), port(1)]);
     let reader = ed
         .open_tap(
-            TapId(0),
+            TapId::of(1),
             vec![port(0), port(1)],
             TapAlign::ToOutput,
             Samples(ring),
@@ -177,7 +177,7 @@ fn the_layout_follows_the_taps_width() {
     for width in [1usize, 2, 6] {
         let reader = ed
             .open_tap(
-                TapId(width as u32),
+                TapId::of(width as u64),
                 vec![Origin::Zero; width],
                 TapAlign::Raw,
                 Samples(8),

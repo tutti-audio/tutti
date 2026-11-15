@@ -2,8 +2,8 @@
 //! and the instrument's edge that reassembles, filters by device id and reads.
 
 use tutti_midi_protocol::{
-    Addressed, Addressee, GeneralMidi, Heard, MtcFullMessage, MtcRate, NotSysexDeviceId, Read,
-    Recipient, SysexDeviceId, Universal, UniversalReader, read,
+    Addressed, Addressee, GeneralMidi, Heard, MtcFullMessage, MtcRate, MtcTimeCode,
+    NotSysexDeviceId, Read, Recipient, SysexDeviceId, Universal, UniversalReader, read,
 };
 use tutti_types::Seconds;
 use tutti_ump::Voice1;
@@ -134,6 +134,72 @@ fn an_mtc_full_message_reads_its_position_and_rate_code() {
             Universal::MtcFullMessage(MtcFullMessage::new(rate, 23, 59, 58, 17).unwrap())
         );
     }
+}
+
+/// M1 p.53 and T-9: the Full Message the generator writes is the bytes the
+/// reader reads, with `hr` as `0rrhhhhh`; the payload of 25 fps `01:02:03:04`
+/// is `7F 7F 01 01 21 02 03 04`.
+#[test]
+fn an_mtc_full_message_writes_the_bytes_of_t9_and_reads_back() {
+    let message = MtcFullMessage::new(MtcRate::Fps25, 1, 2, 3, 4).unwrap();
+    assert_eq!(
+        message.payload(),
+        [0x7F, 0x7F, 0x01, 0x01, 0x21, 0x02, 0x03, 0x04]
+    );
+    for rate in MtcRate::ALL {
+        let message = MtcFullMessage::new(rate, 23, 59, 58, 17).unwrap();
+        let mut framed = vec![0xF0];
+        framed.extend(message.payload());
+        framed.push(0xF7);
+        assert_eq!(heard(&framed).message, Universal::MtcFullMessage(message));
+    }
+}
+
+/// UMP section 7.7 (System Exclusive 7): the Full Message of 25 fps
+/// `01:02:03:04` is a Start of `7F 7F 01 01 21 02` and an End of `03 04`, in
+/// words `3616_7F7F 0101_2102` and `3632_0304 0`, on Group 6.
+#[test]
+fn an_mtc_full_message_is_a_start_and_an_end_packet() {
+    let message = MtcFullMessage::new(MtcRate::Fps25, 1, 2, 3, 4).unwrap();
+    let [start, end] = message.packets(tutti_ump::MidiGroup::of(6));
+    assert_eq!(start.0, [0x3616_7F7F, 0x0101_2102, 0, 0]);
+    assert_eq!(end.0, [0x3632_0304, 0, 0, 0]);
+}
+
+/// M1 p.53 (Quarter Frame Messages): piece `n` carries the nibbles frames
+/// low, frames high, seconds low, seconds high, minutes low, minutes high,
+/// hours low, hours high over the rate code (`0rrh`), so `19:20:21:22` at 30 fps
+/// is the nibbles `6 1 5 1 4 1 3 7` and the data bytes `0n` through `7n`.
+#[test]
+fn the_quarter_frame_pieces_of_a_position_are_the_nibbles_of_t9() {
+    let at = MtcFullMessage::new(MtcRate::Fps30, 19, 20, 21, 22)
+        .unwrap()
+        .time_code();
+    assert_eq!(at.nibbles(), [6, 1, 5, 1, 4, 1, 3, 7]);
+    assert_eq!(
+        at.quarter_frames().map(U7::get),
+        [0x06, 0x11, 0x25, 0x31, 0x44, 0x51, 0x63, 0x77]
+    );
+    assert_eq!(MtcTimeCode::from_nibbles(at.nibbles()), Some(at));
+}
+
+/// Every position at every rate reads back from its own nibbles; a nibble
+/// set whose fields no clock reads (frame 31) is `None`, and the reserved
+/// bits above a field are not read.
+#[test]
+fn nibbles_invert_for_every_rate_and_refuse_a_position_no_clock_reads() {
+    for rate in MtcRate::ALL {
+        for (h, m, s, f) in [(0, 0, 0, 0), (23, 59, 59, rate.labels_per_second() - 1)] {
+            let at = MtcTimeCode::new(rate, h, m, s, f).unwrap();
+            assert_eq!(MtcTimeCode::from_nibbles(at.nibbles()), Some(at));
+        }
+    }
+    assert_eq!(MtcTimeCode::from_nibbles([15, 1, 0, 0, 0, 0, 0, 6]), None);
+    let origin = MtcTimeCode::origin(MtcRate::Fps24);
+    let mut n = origin.nibbles();
+    n[1] |= 0x0E;
+    n[3] |= 0x0C;
+    assert_eq!(MtcTimeCode::from_nibbles(n), Some(origin));
 }
 
 /// A position no clock reads is not a Full Message: the frame field is below
@@ -325,15 +391,9 @@ fn a_tuning_dump_crosses_the_reader_and_a_corrupt_one_is_counted() {
 /// read as `Recipient::AllCall` in a header.
 #[test]
 fn the_all_call_is_no_devices_own_id() {
-    assert_eq!(SysexDeviceId::new(U7::of(0x7F)), None);
-    assert_eq!(
-        SysexDeviceId::try_from(U7::of(0x7F)),
-        Err(NotSysexDeviceId(U7::of(0x7F)))
-    );
-    assert_eq!(
-        SysexDeviceId::new(U7::of(0x7E)).map(SysexDeviceId::get),
-        Some(U7::of(0x7E))
-    );
+    assert_eq!(SysexDeviceId::new(0x7F), None);
+    assert_eq!(SysexDeviceId::try_from(0x7F), Err(NotSysexDeviceId(0x7F)));
+    assert_eq!(SysexDeviceId::new(0x7E).map(SysexDeviceId::get), Some(0x7E));
     assert_eq!(Recipient::of_byte(U7::of(0x7F)), Recipient::AllCall);
     assert_eq!(
         Recipient::of_byte(U7::of(0x7E)),
@@ -1109,4 +1169,43 @@ mod machine_control {
         );
         assert_eq!(at(86_400.0), None);
     }
+}
+
+/// RP-013 p.8: a subframe count is hundredths of a frame, 0 to 99.
+#[test]
+fn a_subframe_count_keeps_the_range_contract() {
+    use tutti_midi_protocol::MmcSubframes;
+    tutti_fixtures::check_range_contract(&tutti_fixtures::RangeContract {
+        new: MmcSubframes::new,
+        get: MmcSubframes::get,
+        of: Some(MmcSubframes::of),
+        valid: &[0, 50, 99],
+        invalid: &[100, 127, 255],
+    });
+}
+
+/// The ranged ids keep the range-checked contract: `00` to `7E`, and serde
+/// refuses `7F` and every byte above.
+#[test]
+fn a_device_id_and_a_slot_keep_the_range_contract() {
+    use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
+    use tutti_midi_protocol::MmcSlot;
+    let ids = RangeContract {
+        new: SysexDeviceId::new,
+        get: SysexDeviceId::get,
+        of: Some(SysexDeviceId::of),
+        valid: &[0, 1, 0x7E],
+        invalid: &[0x7F, 0x80, 0xFF],
+    };
+    check_range_contract(&ids);
+    check_range_serde(&ids);
+    let slots = RangeContract {
+        new: MmcSlot::new,
+        get: MmcSlot::get,
+        of: Some(MmcSlot::of),
+        valid: &[0, 1, 0x7E],
+        invalid: &[0x7F, 0x80, 0xFF],
+    };
+    check_range_contract(&slots);
+    check_range_serde(&slots);
 }

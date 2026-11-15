@@ -32,13 +32,14 @@
 //! - **Convolution** — `Convolver`, a uniform or non-uniform partitioned FFT
 //!   convolution over an IR's shared, read-only `IrSpectra`.
 //! - **Delay** — `DelayLine`, a fractional-read ring with an `InterpolationMode`;
-//!   `DelayFamily`, the feedback delay (a checked `MaxDelay`, `Routing` and
-//!   `ChannelTimes`, its time and feedback per-frame lanes); and `ModDelayFamily`, the chorus and flanger (a checked `Sweep` and `Stagger`, a `Grows`
+//!   `DelayBank`, the feedback delay over buffers views (a `DelayLayout` of a checked
+//!   `MaxDelay`, `Routing` and `ChannelTimes`; its time and feedback `Glide`s and per-frame
+//!   `DelayLanes`); and `ModDelayFamily`, the chorus and flanger (a checked `Sweep` and `Stagger`, a `Grows`
 //!   family over a `MaxDelay`; the LFO's phase is state of its recurrence on the stream's clock,
 //!   its sine solved every `COEFF_INTERVAL` frames of the stream and interpolated between); and
-//!   `PhaserFamily`, the phaser (a checked `Stages`, `SweepRange` and `Stagger`; a swept all-pass chain
-//!   on the same stream grid and clock, its member `Lti` frozen at a sweep position, its tail
-//!   `Ring::Unbounded`).
+//!   `PhaserChain`, the phaser's swept all-pass chain over buffers views (a checked `Stages`,
+//!   `SweepRange` and `Stagger`; one `Glide` per channel's coefficient and one for the
+//!   feedback).
 //! - **Waveshaping** — `ShapeKind`, six memoryless curves with block kernels.
 //! - **Reverb** — the reverb model, a `Network` with analytic queries
 //!   (RT60, tail, stability, densities), and two families over it: `FreeverbFamily` and
@@ -127,12 +128,12 @@
 //!   both ways.
 //! - **Convolution**: [`Convolver`] over a shared [`IrSpectra`].
 //! - **Delay and modulation** (`delay.rs`, `modulation/`): [`DelayLine`] with an
-//!   [`InterpolationMode`]; the feedback delay as a family ([`DelayFamily`], run by
-//!   [`DelayRecurrence`], a [`Grows`] family over a [`MaxDelay`], its cross-feedback a
-//!   checked [`Routing`], its time and feedback lanes of the [`Feed`]); the chorus and flanger as a family ([`ModDelayFamily`], run by [`ModDelayRecurrence`], a [`Grows`] family over a
+//!   [`InterpolationMode`]; the feedback delay ([`DelayBank`] over a [`DelayLayout`]: a
+//!   [`MaxDelay`], its cross-feedback a checked [`Routing`], its time and feedback
+//!   [`Glide`]s and the per-frame [`DelayLanes`]); the chorus and flanger as a family ([`ModDelayFamily`], run by [`ModDelayRecurrence`], a [`Grows`] family over a
 //!   [`MaxDelay`], its [`Sweep`] and [`Stagger`] checked, its LFO state on the stream's clock); the phaser
-//!   as a family ([`PhaserFamily`], run by [`PhaserRecurrence`]: its [`Stages`] and [`SweepRange`]
-//!   checked, the same stream grid and clock, [`allpass_chain`] and [`allpass_coeff`] its pure pieces).
+//!   ([`PhaserChain`]: its [`Stages`] and [`SweepRange`] checked, a [`Glide`] per channel's
+//!   coefficient, [`sweep_hz`] and [`allpass_coeff`] the pure pieces the sweep is solved from).
 //! - **Spatial** (`spatial/`): VBAP ([`SpeakerLayout`], Pulkki's pairs and triplets and
 //!   the gain solve over them, [`SpeakerGeometryError`]; [`VbapKernel`] and
 //!   [`VbapGains`], a block's gains and one channel ramped between two) and the HRTF
@@ -193,9 +194,9 @@ pub use balance::balance_gains;
 pub use control::{COEFF_INTERVAL, LANES, Ramp};
 pub use convolver::{Convolver, IrSpectra};
 pub use delay::{
-    ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayCapacity, DelayControls, DelayFamily,
-    DelayLine, DelayMember, DelayRecurrence, InterpolationMode, MAX_DELAY_CHANNELS, MaxDelay,
-    MaxDelayError, Routing, RoutingError, delay_step, fractional_samples,
+    ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayGlides, DelayLanes,
+    DelayLayout, DelayLine, InterpolationMode, MAX_DELAY_CHANNELS, MaxDelay, MaxDelayError,
+    Routing, RoutingError, delay_step, fractional_samples,
 };
 pub use dither::sink::{DitherSink, DitherSpec};
 pub use dither::{DitherNoise, DitherShape};
@@ -223,14 +224,14 @@ pub use model::{
     MaxDecay, MaxDecayError, Reach, Readout, Realized, Recurrence, Ring, Setup, Start, Step,
     System, TAIL_FLOOR,
 };
-pub use modulation::allpass::{allpass_chain, allpass_coeff, sweep_hz};
+pub use modulation::allpass::{allpass_coeff, sweep_hz};
 pub use modulation::mod_delay::{
     MAX_MOD_DELAY_CHANNELS, MIN_RATE, ModDelayCapacity, ModDelayControls, ModDelayFamily,
     ModDelayMember, ModDelayRecurrence,
 };
 pub use modulation::phaser::{
-    MAX_PHASER_CHANNELS, PhaserControls, PhaserFamily, PhaserMember, PhaserRecurrence, Stages,
-    StagesError, SweepRange, SweepRangeError,
+    MAX_PHASER_CHANNELS, PhaserChain, PhaserControls, Stages, StagesError, SweepRange,
+    SweepRangeError,
 };
 pub use modulation::sweep::{Stagger, StaggerError, Sweep, SweepError};
 pub use oscillator::{Oscillator, OscillatorWave};
@@ -247,8 +248,8 @@ pub use reverb::network::{
 pub use rustfft::num_complex::Complex64;
 pub use smoother::Smoother;
 pub use spatial::{
-    HRTF_LATENCY, HRTF_STEP, HrtfBinaural, HrtfBinauralError, MAX_PREPARED_RATE, MAX_SPEAKERS,
-    MAX_SPHERE_RATE, MIN_SPHERE_RATE, SpeakerGeometryError, SpeakerLayout, VbapGains, VbapKernel,
+    HRTF_LATENCY, HRTF_STEP, HrtfBinaural, HrtfBinauralError, MAX_PREPARED_RATE, MAX_SPHERE_RATE,
+    MIN_SPHERE_RATE, SpeakerGeometryError, SpeakerLayout, VbapGains, VbapKernel,
 };
 pub use stft::error::{Error, Result};
 pub use stft::geometry::StftGeometry;

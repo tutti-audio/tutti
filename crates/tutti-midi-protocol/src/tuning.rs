@@ -22,54 +22,22 @@ use tutti_ump::{MidiChannel, NoteNumber, U7, U14};
 /// Steps of a [`TuningFrequency`] in a semitone: the 14-bit fraction.
 const FRACTION_STEPS: u32 = 1 << 14;
 
-/// One frequency data word of MTS: 21 bits, the semitone (7 bits) over the
-/// fraction of a semitone (14 bits). See the frequency data format in the module docs.
-///
-/// `new` refuses a raw with a bit above the 21st; the raw is `semitone << 14 |
-/// fraction`. [`NO_CHANGE`](Self::NO_CHANGE) (`7F 7F 7F`, the raw `0x1F_FFFF`)
-/// is a value like any other; [`pitch`](Self::pitch) is `None` for it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct TuningFrequency(u32);
-
-/// A raw refused by [`TuningFrequency::try_from`]: it has a bit above the 21st.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{:#x} is more than 21 bits", .0)]
-pub struct NotFrequencyData(pub u32);
+tutti_types::ranged! {
+    /// One frequency data word of MTS: 21 bits, the semitone (7 bits) over the
+    /// fraction of a semitone (14 bits). See the frequency data format in the module docs.
+    ///
+    /// `new` refuses a raw with a bit above the 21st; the raw is `semitone << 14 |
+    /// fraction`. [`NO_CHANGE`](Self::NO_CHANGE) (`7F 7F 7F`, the raw `0x1F_FFFF`)
+    /// is a value like any other; [`pitch`](Self::pitch) is `None` for it.
+    #[derive(Eq, Hash)]
+    TuningFrequency(u32), NotFrequencyData, "frequency data (21 bits)", |raw| raw <= 0x1F_FFFF
+}
 
 impl TuningFrequency {
     /// `7F 7F 7F`: no change (the instrument keeps what it has for the key).
     pub const NO_CHANGE: Self = Self(0x1F_FFFF);
     /// `7F 7F 7E`: the top of the range, the highest frequency a word names.
     pub const TOP: Self = Self(0x1F_FFFE);
-
-    /// The word with raw `raw`, or `None` above 21 bits.
-    #[must_use]
-    pub const fn new(raw: u32) -> Option<Self> {
-        if raw <= Self::NO_CHANGE.0 {
-            Some(Self(raw))
-        } else {
-            None
-        }
-    }
-
-    /// The word with raw `raw`. For a literal.
-    ///
-    /// # Panics
-    ///
-    /// Above 21 bits.
-    #[must_use]
-    pub const fn of(raw: u32) -> Self {
-        match Self::new(raw) {
-            Some(word) => word,
-            None => panic!("frequency data is 21 bits"),
-        }
-    }
-
-    /// The raw: `semitone << 14 | fraction`.
-    #[must_use]
-    pub const fn get(self) -> u32 {
-        self.0
-    }
 
     /// The word of `semitone` and `fraction` of a semitone above it.
     #[must_use]
@@ -122,20 +90,6 @@ impl TuningFrequency {
         } else {
             Self(steps as u32)
         }
-    }
-}
-
-impl TryFrom<u32> for TuningFrequency {
-    type Error = NotFrequencyData;
-
-    fn try_from(raw: u32) -> Result<Self, NotFrequencyData> {
-        Self::new(raw).ok_or(NotFrequencyData(raw))
-    }
-}
-
-impl From<TuningFrequency> for u32 {
-    fn from(word: TuningFrequency) -> u32 {
-        word.0
     }
 }
 

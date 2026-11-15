@@ -775,7 +775,7 @@ fn shelf_handed_back(block: usize) -> Vec<f32> {
 
 /// A control a lane lets go of is handed back to its cell without a step: the
 /// port declicks from the lane's last value to its base, the cell, over
-/// `PARAM_DECLICK` (256 frames), delivering frames all the while, so the node
+/// `DECLICK` (240 frames at 48 kHz), delivering frames all the while, so the node
 /// reads the port until it stands at the cell and never sees the jump. A low
 /// shelf held at +12 dB by a lane (a DC gain of 3.98) whose route is removed
 /// at frame 512 is still above 3 sixteen frames later (a step to its 0 dB

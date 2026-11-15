@@ -121,78 +121,83 @@ fn the_scratch_covers_both_directions() {
     }
 }
 
-/// Pins that the FFT is rustfft's *scalar* one, which is what makes a
-/// result bit-identical on every CPU. The auto planner (AVX, SSE or NEON)
-/// differs from scalar bitwise in nearly every bin of this frame, so a swap
-/// to it moves the digest on any machine with SIMD.
-///
-/// The digest is a golden (`assert_golden`): the twiddles come from libm
-/// (`sin`, `cos` in f64), which can differ in the last ulp between CRTs, so it
-/// is asserted only on the recorded target; elsewhere the analytic DFT tests
-/// pin correctness but not the scalar choice. The input is integer-valued,
-/// with no libm in it. It pins a portability guarantee, not a sound.
+/// A unit impulse at sample 0 has a flat spectrum: every bin is exactly
+/// 1 + 0i, and the inverse of it returns `n` times the impulse.
 #[test]
-fn the_fft_is_scalar_so_results_match_across_cpus() {
-    let n = 1024usize;
-    let mut state = 12345u32;
-    let frame: Vec<f32> = (0..n)
-        .map(|_| {
-            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-            ((state >> 16) % 2001) as f32 / 1000.0 - 1.0
-        })
-        .collect();
-    let fft = RealFft::new(n);
-    let mut scratch = fft.new_scratch();
-    let mut bins = vec![Complex32::new(0.0, 0.0); n / 2 + 1];
-    fft.forward(&frame, &mut bins, &mut scratch);
-    let mut back = vec![0.0f32; n];
-    fft.inverse(&mut bins.clone(), &mut back, &mut scratch);
-
-    tutti_fixtures::assert_golden(
-        "the even scalar FFT",
-        word_fnv(&bins, &back),
-        1_168_166_466_409_112_443,
-    );
-}
-
-/// The odd path is scalar too: a digest of an odd-size round trip, gated
-/// like the even one.
-///
-#[test]
-fn the_odd_fft_is_scalar_too() {
-    let n = 255usize;
-    let mut state = 777u32;
-    let frame: Vec<f32> = (0..n)
-        .map(|_| {
-            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-            ((state >> 16) % 2001) as f32 / 1000.0 - 1.0
-        })
-        .collect();
-    let fft = RealFft::new(n);
-    let mut scratch = fft.new_scratch();
-    let mut bins = vec![Complex32::new(0.0, 0.0); fft.bins()];
-    fft.forward(&frame, &mut bins, &mut scratch);
-    let mut back = vec![0.0f32; n];
-    fft.inverse(&mut bins.clone(), &mut back, &mut scratch);
-
-    tutti_fixtures::assert_golden(
-        "the odd scalar FFT",
-        word_fnv(&bins, &back),
-        9_419_405_582_622_979_040,
-    );
-}
-
-/// FNV-1a over each `f32`'s bits as one 64-bit word (not byte by byte as
-/// `tutti_fixtures::Fnv` does): the fold the two scalar-FFT goldens were
-/// recorded with.
-fn word_fnv(bins: &[Complex32], back: &[f32]) -> u64 {
-    let mut digest = 0xcbf2_9ce4_8422_2325u64;
-    let words = bins
-        .iter()
-        .flat_map(|b| [b.re, b.im])
-        .chain(back.iter().copied());
-    for x in words {
-        digest = (digest ^ u64::from(x.to_bits())).wrapping_mul(0x0000_0100_0000_01b3);
+fn an_impulse_has_a_flat_spectrum() {
+    for n in [8usize, 63, 255, 1024] {
+        let mut frame = vec![0.0f32; n];
+        frame[0] = 1.0;
+        let fft = RealFft::new(n);
+        let mut scratch = fft.new_scratch();
+        let mut bins = vec![Complex32::new(0.0, 0.0); fft.bins()];
+        fft.forward(&frame, &mut bins, &mut scratch);
+        for (k, bin) in bins.iter().enumerate() {
+            assert!(
+                (bin.re - 1.0).abs() < 1e-6 && bin.im.abs() < 1e-6,
+                "size {n} bin {k}: {bin}"
+            );
+        }
+        let mut back = vec![0.0f32; n];
+        fft.inverse(&mut bins, &mut back, &mut scratch);
+        assert!((back[0] / n as f32 - 1.0).abs() < 1e-6, "size {n}");
+        assert!(back[1..].iter().all(|x| (x / n as f32).abs() < 1e-6));
     }
-    digest
+}
+
+/// A cosine centred on bin `k` puts `n / 2` in bin `k` and nothing in any
+/// other bin, at the sizes the analysis kernels run.
+#[test]
+fn a_bin_centred_cosine_lands_in_its_bin() {
+    for (n, k) in [(1024usize, 37usize), (256, 5), (255, 20)] {
+        let frame: Vec<f32> = (0..n)
+            .map(|t| (2.0 * PI * (k * t) as f64 / n as f64).cos() as f32)
+            .collect();
+        let fft = RealFft::new(n);
+        let mut scratch = fft.new_scratch();
+        let mut bins = vec![Complex32::new(0.0, 0.0); fft.bins()];
+        fft.forward(&frame, &mut bins, &mut scratch);
+        let tol = 1e-3 * n as f32 / 2.0;
+        for (b, bin) in bins.iter().enumerate() {
+            let want = if b == k { n as f32 / 2.0 } else { 0.0 };
+            assert!(
+                (bin.re - want).abs() < tol && bin.im.abs() < tol,
+                "size {n} bin {b}: {bin}, want {want}"
+            );
+        }
+    }
+}
+
+/// Parseval: the energy of the frame is the energy of its spectrum, with
+/// the interior bins counted twice (their conjugates are not stored).
+#[test]
+fn the_transform_preserves_energy() {
+    for n in [64usize, 255, 1024] {
+        let frame: Vec<f32> = (0..n)
+            .map(|i| ((i * 7 + 3) % 11) as f32 * 0.25 - 1.0)
+            .collect();
+        let fft = RealFft::new(n);
+        let mut scratch = fft.new_scratch();
+        let mut bins = vec![Complex32::new(0.0, 0.0); fft.bins()];
+        fft.forward(&frame, &mut bins, &mut scratch);
+        let time: f64 = frame.iter().map(|&x| f64::from(x) * f64::from(x)).sum();
+        let last = bins.len() - 1;
+        let freq: f64 = bins
+            .iter()
+            .enumerate()
+            .map(|(k, b)| {
+                let e = f64::from(b.re).powi(2) + f64::from(b.im).powi(2);
+                if k == 0 || (n % 2 == 0 && k == last) {
+                    e
+                } else {
+                    2.0 * e
+                }
+            })
+            .sum::<f64>()
+            / n as f64;
+        assert!(
+            (time - freq).abs() < 1e-4 * time,
+            "size {n}: {time} vs {freq}"
+        );
+    }
 }

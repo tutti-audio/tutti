@@ -28,12 +28,12 @@
 
 use std::path::PathBuf;
 
-use tutti::plugin::catalog::{CatalogConfig, PluginDb};
+use tutti::plugin::catalog::{CatalogConfig, PluginDb, ScanPoll};
 use tutti::ump::{Address, Message, NoteNumber, U7, Ump, Voice1};
 use tutti::{
-    Beat, Bounce, Catalog, Format, Hosting, MaxBlock, MidiChannel, Normalized, ParamId, Pcm,
-    PluginEvent, PluginLoadRequest, PluginRef, PresetError, PresetKind, Range, Root, SampleRate,
-    Samples, Session, SessionEvent, TimedMidiEvent,
+    Beat, Bounce, Catalog, Format, MaxBlock, MidiChannel, Normalized, ParamId, Pcm, PluginEvent,
+    PluginLoadRequest, PluginRef, PresetError, PresetKind, Range, Root, SampleRate, Samples,
+    Session, SessionEvent, TimedMidiEvent,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -56,7 +56,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         CatalogConfig::new(std::env::temp_dir(), dirs),
         |_| Ok(()),
     );
-    let scanned = catalog.scan()?;
+    //    The scan is a task: this example has nothing else to do, so it polls it to
+    //    its end; a host with a frame loop calls `try_apply` once per frame.
+    let mut scan = catalog.scan()?;
+    let scanned = loop {
+        match catalog.try_apply(&mut scan) {
+            ScanPoll::Running => std::thread::sleep(std::time::Duration::from_millis(10)),
+            ScanPoll::Done(result) => break result,
+            ScanPoll::Died => return Err("the scan's worker died".into()),
+        }
+    };
     eprintln!("scanned {} plugin file(s)", scanned.scanned);
 
     // 2. Pick by name. An entry knows its file, its format and its descriptor;
@@ -66,10 +75,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .find(|e| e.descriptor.name == name)
         .ok_or_else(|| format!("no plugin named {name:?} in the scan"))?;
     let instrument = entry.is_instrument();
-    // `Hosting::Auto` is what a ref starts with: CLAP, VST3 and AU are served
-    //    from a `plugin-server` process, VST2 runs here. `Hosting::InProcess`
+    // The request's `Hosting::Auto` serves CLAP, VST3 and AU from a
+    //    `plugin-server` process and runs VST2 here; `.hosting(Hosting::InProcess)`
     //    asks for this process where the format allows it.
-    let plugin = PluginRef::from(&entry).with_hosting(Hosting::Auto);
+    let plugin = PluginRef::from(&entry);
     eprintln!("{name}: {:?} in {}", plugin.id(), plugin.path().display());
 
     // 3. Load it into an offline session. The load is a job (a server launch

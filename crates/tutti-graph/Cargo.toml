@@ -24,6 +24,8 @@ contract = []
 # executor with: test support (about 2,700 lines), so off by default. This
 # crate's own tests turn it on through the self dev-dependency below.
 testing = ["dep:assert_no_alloc"]
+# `Serialize` and `Deserialize` on `RenderMode`, which a plugin's IPC carries.
+serde = ["dep:serde"]
 
 [dependencies]
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
@@ -41,13 +43,10 @@ tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false
 # comes from the element type, the reinterpretation from a checked `Pod` cast,
 # and the disjoint borrows from `split_at_mut`. See `src/arena.rs`.
 bytemuck = { version = "1.16", features = ["derive"] }
-# The preallocated SPSC rings between an editor and its executor: commits in,
-# retired boxes back. Already the engine's ring (tutti-metering,
-# tutti-sampler use it); lock-free and allocation-free once built, which is
-# what the audio-thread side of the queue needs.
-ringbuf = { version = "0.6", default-features = false, features = ["alloc"] }
 # `testing` only: `TestPool::no_alloc` runs each participant under the gate.
 assert_no_alloc = { version = "1", default-features = false, optional = true }
+# `RenderMode`'s wire form, with `serde`.
+serde = { version = "1", features = ["derive"], optional = true }
 # The `Error` derive of the crate's error types.
 thiserror = { workspace = true }
 
@@ -73,6 +72,10 @@ harness = false
 
 [[bench]]
 name = "held_keys"
+harness = false
+
+[[bench]]
+name = "tap_lanes"
 harness = false
 
 [package.metadata.docs.rs]

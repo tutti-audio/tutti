@@ -1,8 +1,8 @@
 #![doc = include_str!("../README.md")]
-//! Native-UMP OS MIDI I/O for the Tutti audio engine: enumerate endpoints, connect
-//! them, send MIDI 2.0 out and receive it back, through CoreMIDI (macOS) and the
-//! ALSA UMP sequencer (Linux). Re-exported by `tutti` as `tutti::midi_hardware`
-//! (feature `midi-hardware`).
+//! OS MIDI I/O for the Tutti audio engine: enumerate endpoints, connect
+//! them, send MIDI out and receive it back, through CoreMIDI (macOS), the
+//! ALSA UMP sequencer (Linux) and Windows Multimedia (Windows). Re-exported by
+//! `tutti` as `tutti::midi_hardware` (feature `midi-hardware`).
 //!
 //! Events reach the wire as UMP words, not MIDI 1.0 bytes, so MIDI-2-only messages
 //! (per-note controllers, per-note pitch bend, JR Timestamps) survive where the
@@ -59,8 +59,12 @@
 //!   [`DeviceId`] is the endpoint's `MIDIUniqueID`. Untested by the author.
 //! - If the watch ends on its own, [`DeviceEvents::recv_timeout`] says why, once the events the watch reported are taken, and the list
 //!   stays as it was.
-//! - **Windows (and Linux without alsa-lib 1.2.10):** the list is empty and stays
-//!   so, as enumeration is; opening reports [`Error::Unsupported`].
+//! - **Windows:** Windows Multimedia has no notification, so the watch lists the
+//!   ports once a second and reports the difference; a device shows within about
+//!   that long. A [`DeviceId`] is the device interface path the driver reports,
+//!   or the product name and ids when it reports none, with the direction.
+//! - **Linux without alsa-lib 1.2.10:** the list is empty and stays so, as
+//!   enumeration is; opening reports [`Error::Unsupported`].
 //!
 //! A [`DeviceId`] built on the UMP Product Instance Id is in the types, but no
 //! backend reads one yet: alsa-lib exposes none, and CoreMIDI's unique id stands in.
@@ -72,7 +76,8 @@
 //! [`VirtualSpec`] gives the name, the [`VirtualProtocol`] and the Function
 //! Blocks. A destination delivers into an [`InputProducerHandle`], so its events
 //! take the path a device input's do. Where the platform cannot publish what the
-//! spec asks, opening says so: [`Error::Unsupported`] with no backend (Windows),
+//! spec asks, opening says so: [`Error::Unsupported`] where there is no backend
+//! or the API has no virtual ports (Windows Multimedia),
 //! [`Error::VirtualBlocksUnsupported`] for Function Blocks on macOS, where an
 //! endpoint carries a name and a protocol only. On Linux the sequencer is
 //! opened as a MIDI 2.0 client when the kernel has that mode and as a MIDI 1.0
@@ -160,14 +165,15 @@
 //! |---|---|---|
 //! | macOS | CoreMIDI | `MIDIInputPortCreateWithProtocol` / `MIDISendEventList`. |
 //! | Linux | ALSA UMP sequencer | Needs alsa-lib ≥ 1.2.10. Kernel ≥ 6.5 converts UMP↔legacy at the port boundary, so it works against MIDI 1.0 hardware. |
-//! | Windows | stub | No `windows` crate version binds Windows MIDI Services; WinRT `Devices.Midi` is MIDI 1.0 message types. Enumerates nothing, [`Error::Unsupported`] on open. |
+//! | Windows | Windows Multimedia (winmm) | MIDI 1.0 bytes, carried as MIDI 1.0 UMP and widened as a legacy ALSA port is. Polled device watch, no virtual ports. An output holds each event until its send time on a thread of its own. Windows MIDI Services (UMP-native) is not used. |
+//! | Elsewhere | stub | Enumerates nothing, [`Error::Unsupported`] on open. |
 //!
 //! [`MidiSession::open`] picks one, once, at construction; nothing downstream learns
 //! which OS it is talking to.
 //!
 //! **A build may have no backend, and it is not an error.** On Linux, the
 //! `tutti-alsa-ffi` build script probes alsa-lib via `pkg-config`; below 1.2.10 (or with no alsa-lib) it emits a
-//! `cargo:warning` naming the version and compiles the same stub Windows gets:
+//! `cargo:warning` naming the version and compiles the stub:
 //! zero endpoints, and [`Error::Unsupported`] naming the reason. So code using this
 //! crate compiles everywhere and simply enumerates nothing where there is no
 //! backend.
@@ -180,6 +186,9 @@
 //! - `sequencer-tests`: the suites that run `Devices` against the real ALSA
 //!   sequencer, with user-space clients as the devices. Linux only; needs the
 //!   `snd-seq` module and a readable `/dev/snd/seq`. Off by default.
+//! - `synth-tests`: the suites that open Windows' GS Wavetable Synth through
+//!   the winmm backend. Windows only; needs an audio endpoint, which a hosted
+//!   CI runner lacks. Off by default.
 //!
 //! ## Where it sits
 //!
@@ -207,10 +216,10 @@
 mod backend;
 // Compiled everywhere so its tests run on every platform; only the native
 // backends (ALSA, CoreMIDI) convert an OS block, so it is dead where the stub
-// is the backend.
+// or winmm is the backend.
 #[cfg_attr(
-    midi_backend = "none",
-    allow(dead_code, reason = "only a native backend converts OS blocks")
+    any(midi_backend = "none", midi_backend = "winmm"),
+    allow(dead_code, reason = "only a UMP backend converts OS blocks")
 )]
 mod block;
 mod capability;
@@ -228,10 +237,13 @@ mod port;
 mod process;
 mod profiles;
 mod session;
-// Only the native backends convert an OS timestamp.
+// Only the backends with a clock of their own to read convert its timestamp.
 #[cfg_attr(
-    midi_backend = "none",
-    allow(dead_code, reason = "only the OS backends convert a stamp")
+    any(midi_backend = "none", midi_backend = "winmm"),
+    allow(
+        dead_code,
+        reason = "only the ALSA and CoreMIDI backends convert a clock"
+    )
 )]
 mod stamp;
 mod stream;
@@ -256,8 +268,8 @@ pub use error::{Error, Result};
 pub use port::{HardwareMidiInputs, InputProducerHandle, PortInfo, Pushed, StreamDrain};
 pub use process::{ProcessChange, ReportAsk, ReportError, ReportPeer};
 pub use profiles::{
-    ChannelCount, ChannelProfile, ListedProfile, PeerProfiles, ProfileError, ProfileSwitch,
-    ProfilesChange, Whole, WholeProfile,
+    ChannelCount, ChannelProfile, ListedProfile, NotAChannelCount, PeerProfiles, ProfileError,
+    ProfileSwitch, ProfilesChange, Whole, WholeProfile,
 };
 pub use session::{DeviceQuery, MidiSession, Polled};
 pub use stream::{Basis, DeviceStream, InputTiming};

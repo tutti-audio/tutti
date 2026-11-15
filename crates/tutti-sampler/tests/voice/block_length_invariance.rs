@@ -14,9 +14,7 @@
 //!
 //! The seat is a float computation (beat → seconds → frames), so "where the
 //! step would have put it" holds to the bit at this clock (48 kHz, 120 BPM,
-//! a frame-derived beat) and to rounding in general; the golden digests in
-//! `tutti-export`, recorded with 64-frame pieces, are
-//! unchanged by the one-piece render.
+//! a frame-derived beat) and to rounding in general.
 //!
 //! What may move with the blocks, and is held still here: a control read
 //! once per block (a voice's gain, varispeed and stretch, the disk tier's

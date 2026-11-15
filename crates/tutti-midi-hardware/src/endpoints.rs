@@ -1,7 +1,7 @@
 //! The backend seam: enumerate and open this OS's MIDI endpoints.
 //!
-//! One implementation per platform — CoreMIDI, ALSA seq-UMP, and a stub where
-//! neither exists. [`MidiSession::open`](crate::MidiSession::open) picks one, and that is the
+//! One implementation per platform — CoreMIDI, ALSA seq-UMP, winmm, and a stub where
+//! none exists. [`MidiSession::open`](crate::MidiSession::open) picks one, and that is the
 //! **only** place in the crate a `#[cfg(target_os)]` decides anything.
 //!
 //! # Why this trait, and why it stops here
@@ -41,6 +41,7 @@ use crate::InputProducerHandle;
 use crate::capability::EndpointInfo;
 use crate::devices::ChangeSink;
 use crate::error::Result;
+use tutti_graph::Losses;
 use tutti_midi_device::EndpointId;
 use tutti_midi_runtime::MidiOut;
 use tutti_ump::Protocol;
@@ -133,7 +134,7 @@ pub trait MidiEndpoints: Send + Sync {
     ///
     /// As [`open_input`](Self::open_input), plus
     /// [`Error::Unsupported`](crate::Error::Unsupported) from the stub backend
-    /// on a platform with no native-UMP path.
+    /// on a platform with no backend.
     fn open_output(&self, id: EndpointId) -> Result<Box<dyn DeviceOut>>;
 }
 
@@ -146,6 +147,36 @@ pub trait MidiEndpoints: Send + Sync {
 /// that one, not the one the OS reported when the output opened: a negotiation
 /// can settle on the other.
 pub trait DeviceOut: MidiOut {
+    /// Whether the output can still send.
+    ///
+    /// An output with a sender thread of its own answers under that thread's
+    /// lock, held briefly, and returns `false` from then on once the thread has
+    /// ended other than by a stop; it takes no more events. An output that
+    /// sends inside [`queue`](MidiOut::queue) cannot end on its own, so it is
+    /// alive for as long as it is open, which is the default.
+    fn is_alive(&self) -> bool {
+        true
+    }
+
+    /// What the output took and then could not send: a send the device refused
+    /// is [`lost`](Losses::lost), and an event waiting when the sender ended is
+    /// [`refused`](Losses::refused). An output that sends inside `queue` takes
+    /// nothing it does not send (a failure there is the shorter count `queue`
+    /// returns), so it loses nothing after taking, which is the default.
+    fn losses(&self) -> Losses {
+        Losses::NONE
+    }
+
+    /// How many events this crate's own sender thread has taken and not yet
+    /// sent: waiting for their time or for the thread, read under the thread's
+    /// lock, held briefly. An output that sends
+    /// inside `queue` has no such thread, so the default is 0. For ALSA and
+    /// CoreMIDI, which hand timed events to the OS's scheduler, 0 means this
+    /// crate holds none, not that the OS has sent them.
+    fn pending(&self) -> usize {
+        0
+    }
+
     /// The batches from now on are in `protocol`. Called when the output opens
     /// and whenever the device's configuration changes, never during a
     /// [`queue`](MidiOut::queue). The default is for a transport that does not

@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use ringbuf::traits::{Consumer, Producer};
 use tutti_rt::FaultLatch;
 use tutti_types::At;
 
@@ -13,6 +12,7 @@ use crate::exec::{Channels, Commit, Crossfade, FADE_CAPACITY, QUEUE_CAPACITY};
 use crate::gain::EdgeFade;
 use crate::spec::EventIn;
 use crate::{EdgeId, Executor};
+use tutti_rt::PushError;
 
 /// The control end of the rings to the paired executor, and the counts that
 /// keep every push within them.
@@ -95,8 +95,16 @@ impl Link {
     }
 
     fn push(&mut self, commit: Box<Commit>) {
-        if self.channels.to_executor.try_push(commit).is_err() {
-            unreachable!("the queue has a free slot for every credit");
+        // Full cannot happen: the credit count keeps the queue below capacity.
+        // With the executor gone nothing applies the commit, and it counts as
+        // sent all the same, so the credits run out as they would behind a
+        // stalled one.
+        if let Err(refused) = self.channels.to_executor.push(commit) {
+            assert_eq!(
+                refused.error,
+                PushError::Disconnected,
+                "the queue has a free slot for every credit"
+            );
         }
         self.sent += 1;
         self.out += 1;
@@ -104,7 +112,7 @@ impl Link {
 
     /// The next commit the executor handed back, applied.
     pub(super) fn pop_returned(&mut self) -> Option<Box<Commit>> {
-        let done = self.channels.returned.try_pop()?;
+        let done = self.channels.returned.pop()?;
         self.out -= 1;
         self.acked += 1;
         Some(done)
@@ -132,19 +140,19 @@ impl Link {
 
     /// The next crossfade the executor handed back.
     pub(super) fn pop_faded(&mut self) -> Option<Box<Crossfade>> {
-        let x = self.channels.faded.try_pop()?;
+        let x = self.channels.faded.pop()?;
         self.fades_out -= 1;
         Some(x)
     }
 
     /// The next edge whose declick fade ended, by the kind that did.
     pub(super) fn pop_edge_fade(&mut self) -> Option<(EdgeId, EdgeFade)> {
-        self.channels.edge_fades.try_pop()
+        self.channels.edge_fades.pop()
     }
 
     /// The next port that lost events.
     pub(super) fn pop_loss(&mut self) -> Option<crate::EventLoss> {
-        self.channels.losses.try_pop()
+        self.channels.losses.pop()
     }
 
     /// Refusals since the last call that no loss names.

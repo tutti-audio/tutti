@@ -58,10 +58,10 @@ impl FileChannels<'_> {
             ConfigError::Placement(tutti_buffers::BufferError::TooWide { channels: outputs }.into())
         })?;
         if let Some(root) = root
-            && root.layout() != graph
+            && root.width() != graph
         {
             return Err(ConfigError::Root(tutti_graph::RootError::Width {
-                declared: root.layout(),
+                declared: root.width(),
                 requested: graph,
             })
             .into());
@@ -80,7 +80,7 @@ impl FileChannels<'_> {
         // A file that names no speaker takes the graph's channels by index,
         // as it says; `between` never pads by a guess.
         if topology.is_unassigned() {
-            return Fold::by_index(from.layout(), topology.layout())
+            return Fold::by_index(from.width(), topology.width())
                 .map_err(|e| ConfigError::Placement(e).into());
         }
         Fold::between(&from, topology).map_err(|e| ConfigError::Placement(e).into())

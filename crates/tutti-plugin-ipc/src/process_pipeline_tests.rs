@@ -47,6 +47,7 @@ fn no_editor(
     _: tutti_plugin_types::MainThreadMarker,
     _: &tutti_plugin_types::MainWorkHandle,
     path: &std::path::Path,
+    _: tutti_plugin_types::PluginFormat,
     _: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     Err(tutti_plugin_types::BridgeError::LoadFailed {
@@ -113,14 +114,8 @@ impl Planar {
 }
 
 fn unique_shm_name(label: &str) -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    format!(
-        "test_{}_{}_{}",
-        label,
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    )
+    static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
+    format!("test_{}_{}_{}", label, std::process::id(), COUNTER.mint())
 }
 
 /// `None` on a clean EOF — the host side closing the socket at teardown is
@@ -222,6 +217,7 @@ fn bridge_with_server(
         path.clone(),
         Arc::clone(host_slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
             no_editor,
             tutti_fixtures::detached_work(),
@@ -920,6 +916,7 @@ fn bridge_with_no_server() -> (Arc<PluginBridge>, BridgeThread, SlabWriter) {
         path,
         Arc::clone(host_slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
             no_editor,
             tutti_fixtures::detached_work(),
@@ -1426,6 +1423,7 @@ fn stamped_server(stall: std::time::Duration, first_only: bool, rate: SampleRate
         path.clone(),
         Arc::clone(host_slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
             no_editor,
             tutti_fixtures::detached_work(),
@@ -1689,6 +1687,7 @@ fn a_refused_chunk_reports_its_midi_lost() {
         path,
         Arc::clone(slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
             no_editor,
             tutti_fixtures::detached_work(),
@@ -1819,6 +1818,7 @@ fn two_stale_blocks(
         path.clone(),
         Arc::clone(slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
             no_editor,
             tutti_fixtures::detached_work(),

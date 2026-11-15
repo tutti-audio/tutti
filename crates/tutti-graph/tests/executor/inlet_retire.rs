@@ -3,8 +3,8 @@
 //! side (the executor hands the old unit back; `Editor::collect` drops it), as
 //! a tap's lanes are.
 
-use tutti_graph::{CrossfadeCurve, Editor, Fade, InletNode, Prepare, TapReader, TransportPosition};
-use tutti_graph::{NodeKey, TapId};
+use tutti_graph::NodeKey;
+use tutti_graph::{Editor, Fade, FadeLaw, InletNode, Prepare, TapReader, TransportPosition};
 use tutti_graph::{OutPort, Source};
 use tutti_types::MaxBlock;
 use tutti_types::{Beat, Bpm, ChannelLayout, SampleRate, Samples};
@@ -48,8 +48,8 @@ fn replacing_and_removing_an_inlet_drops_it_on_the_control_side() {
 
     // A cut, then a crossfade, each over a fresh ring.
     for fade in [
-        Fade::new(Samples(0), CrossfadeCurve::default()),
-        Fade::new(Samples(96), CrossfadeCurve::default()),
+        Fade::new(Samples(0), FadeLaw::default()),
+        Fade::new(Samples(96), FadeLaw::default()),
     ] {
         let (next, mut w) = inlet();
         ed.replace(KEY, next, fade).expect("replaces");
@@ -104,7 +104,7 @@ impl tutti_graph::IntoNode for DropsInBlock {
 #[cfg(debug_assertions)]
 #[should_panic(expected = "tap reader")]
 fn a_reader_dropped_in_a_block_panics() {
-    let (reader, _writer) = TapReader::pair(TapId(0), 2, Samples(8));
+    let (reader, _writer) = TapReader::pair(2, Samples(8));
     let (mut ed, mut exec) =
         Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
     ed.insert(KEY, "drops", DropsInBlock(Some(reader)));

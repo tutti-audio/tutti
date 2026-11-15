@@ -46,7 +46,7 @@ pub fn memory_voice(
 
 /// The width a voice should run at, given what the file has.
 ///
-/// Clamped to [`MAX_SAMPLER_CHANNELS`](crate::MAX_SAMPLER_CHANNELS) because that is the sampler's own
+/// Clamped to [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS) because that is the sampler's own
 /// per-read stack ceiling — deliberately equal to the graph root's, since a
 /// voice wider than the root can render is a voice nobody can hear.
 ///
@@ -64,14 +64,14 @@ pub fn voice_width(file: ChannelLayout) -> ChannelLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::MAX_SAMPLER_CHANNELS;
+    use tutti_types::MAX_CHANNELS;
 
-    /// `voice_width` is the file's own width clamped to `1..=MAX_SAMPLER_CHANNELS`
+    /// `voice_width` is the file's own width clamped to `1..=MAX_CHANNELS`
     /// — the device is deliberately not consulted, or a voice would be narrowed
     /// twice on a wider project.
     #[test]
     fn voice_width_clamps_to_what_the_graph_can_carry() {
-        let ceiling = MAX_SAMPLER_CHANNELS;
+        let ceiling = MAX_CHANNELS;
         let cases: &[(ChannelLayout, usize, &str)] = &[
             (ChannelLayout::STEREO, 2, "a stereo file stays stereo"),
             (

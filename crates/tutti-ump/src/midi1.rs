@@ -69,6 +69,9 @@ impl Midi1Bytes {
 }
 
 impl U14 {
+    /// `0x2000`, a pitch bend at rest (M1).
+    pub const CENTER: Self = Self::of(0x2000);
+
     /// The value whose upper seven bits are `msb` and lower seven `lsb`: the
     /// inverse of [`msb`](Self::msb) and [`lsb`](Self::lsb).
     #[must_use]

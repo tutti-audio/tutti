@@ -40,7 +40,7 @@
 3 crates/tutti-clap-host/tests/conformance/clap_params_state_conformance.rs
 1 crates/tutti-codec/src/contract.rs
 1 crates/tutti-codec/src/decode/extensions.rs
-1 crates/tutti-codec/tests/decode_golden.rs
+1 crates/tutti-codec/tests/decode_fixtures.rs
 1 crates/tutti-coremidi-ffi/src/destination.rs
 1 crates/tutti-dsp/src/convolver.rs
 3 crates/tutti-dsp/src/fft/real.rs

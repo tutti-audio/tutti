@@ -82,16 +82,19 @@ pub use ci::{
     CustomResource, DISCOVERY_WINDOW, DataControl, Decoded, DefaultMapNotCc, Destination,
     DetailsData, DiscoveryData, EndpointInfo, EndpointStatus, EntryError, GetStateError,
     InquiryTarget, JsonPointer, LinkRole, ListTooLong, ListedTwice, MAX_LIST_ENTRIES,
-    ManufacturerProfile, MaxSysexSize, MediaType, MessageText, ModeId, Muid, Nak, NotADataControl,
-    NotADeviceId, NotAMuid, NotASysexSize, NotAVersion, NotInRange, NotValid, NotVendorName,
-    NoteData, OpaqueBody, Outcome, PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN, PE_MAX_HEADER_LEN,
-    PE_TIMEOUT, PEER_REPLY_TIMEOUT, PaginationFault, ParamPath, PartialError, PartialUpdate,
-    PeAction, PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx,
-    PeBasicChannelTx, PeBodyError, PeBuffered, PeCall, PeCapabilities, PeCapabilitiesFailure,
-    PeChCtrlEntry, PeChCtrlList, PeChange, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode,
-    PeChunk, PeChunkError, PeCiMessage, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry,
-    PeCtrlMapList, PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo,
-    PeEncoding, PeEndedBy, PeError, PeExpired, PeExtensions, PeExternalSync, PeExtra, PeExtraError,
+    ManufacturerProfile, MaxSysexSize, MediaType, MessageText, ModeId, Muid, Nak, NotABodyLimit,
+    NotABufferLimit, NotAChunkNo, NotADataControl, NotADeviceId, NotAMuid, NotAPeChannel,
+    NotAPriority, NotARequestId, NotASimultaneousRequests, NotAStateSize, NotAStepCount,
+    NotAStreamLimit, NotASysexSize, NotATimeoutWait, NotAVersion, NotProfileChannels,
+    NotSignificantBits, NotUnixSeconds, NotValid, NotVendorName, NoteData, OpaqueBody, Outcome,
+    PE_JSON_MAX_DEPTH, PE_MAX_CHUNK_DATA_LEN, PE_MAX_HEADER_LEN, PE_TIMEOUT, PEER_REPLY_TIMEOUT,
+    PaginationFault, ParamPath, PartialError, PartialUpdate, PeAction, PeAllCtrlEntry,
+    PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx, PeBasicChannelTx, PeBodyError,
+    PeBuffered, PeCall, PeCapabilities, PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList,
+    PeChange, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode, PeChunk, PeChunkError,
+    PeCiMessage, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList,
+    PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding,
+    PeEndedBy, PeError, PeExpired, PeExtensions, PeExternalSync, PeExtra, PeExtraError,
     PeFlowControl, PeGet, PeHeader, PeHeaderError, PeHeaderTooLong, PeHeld, PeInitiator, PeJson,
     PeJsonError, PeJsonSchema, PeKind, PeLink, PeLocalOn, PeMessage, PeMessageKind, PeMidiMode,
     PeModeEntry, PeModeList, PeNotification, PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry,
@@ -124,11 +127,11 @@ pub use ci::{
 
 pub use connection::{Action, Connection, Ending, MAX_ATTEMPTS, NAME_GRACE, STEP_TIMEOUT};
 pub use endpoint::{
-    BlockError, Capabilities, Endpoint, FunctionBlock, FunctionBlockBuilder, MAX_FUNCTION_BLOCKS,
-    UMP_VERSION,
+    BlockError, Capabilities, Configuration, Endpoint, FunctionBlock, FunctionBlockBuilder,
+    MAX_FUNCTION_BLOCKS, Reply, UMP_VERSION,
 };
 pub use entropy::{EntropyError, EntropyWords, random_bytes};
-pub use id::{DeviceId, DeviceInfo, EndpointId, Identity, PortDirection};
+pub use id::{DeviceId, DeviceInfo, EndpointId, Identity, PortDirection, WinMmDevice};
 pub use inquiry::{INQUIRY_ATTEMPTS, INQUIRY_TIMEOUT, IdentityInquiry, InquiryAction};
 pub use jr::{ClockHeard, JrLock, JrReceiver, JrTime, TICK_HZ, Unmapped};
 pub use learned::{Learned, Match, SavedDevice};

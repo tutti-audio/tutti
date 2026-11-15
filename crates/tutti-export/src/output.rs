@@ -87,7 +87,7 @@ impl Width {
     fn layout(&self) -> ChannelLayout {
         match self {
             Self::Count(layout) => *layout,
-            Self::Placed(topology) => topology.layout(),
+            Self::Placed(topology) => topology.width(),
         }
     }
 

@@ -61,3 +61,46 @@ fn serde_carries_the_bare_bits() {
         PitchBendSensitivity::from_rpn_bits(u32::MAX)
     );
 }
+
+/// **RPN #00/00's data is whole semitones then cents** (M2-104 section 7.4.7.1,
+/// M2-115 section 4.1): 2 semitones 50 cents is 2.5 semitones, not the 2.39 the
+/// same word is as a binary fraction (50 / 128).
+/// Spec: m2-104/7.4.7.1#1
+#[test]
+fn channel_data_is_semitones_and_cents() {
+    let data = RegisteredData::new(U7::of(2), U7::of(50));
+    assert_eq!(data.to_word(), 2 << 25 | 50 << 18);
+    let sens = PitchBendSensitivity::from_channel_data(data);
+    assert_eq!(sens.semitones().get(), 2.5);
+    assert_eq!(sens.to_channel_data(), data);
+    // The word read as the per-note 7.25 fixed point is another figure.
+    let binary = PitchBendSensitivity::from_rpn_bits(data.to_word())
+        .semitones()
+        .get();
+    assert_eq!(binary, 2.0 + 50.0 / 128.0);
+    assert_ne!(binary, 2.5);
+}
+
+/// The cents field is hundredths of a semitone, so every (semitones, cents)
+/// pair with cents below 100 comes back from its sensitivity.
+/// Spec: m2-104/7.4.7.1#1
+#[test]
+fn channel_data_round_trips_every_cent() {
+    for semitones in 0..=127 {
+        for cents in 0..100 {
+            let data = RegisteredData::new(U7::of(semitones), U7::of(cents));
+            let sens = PitchBendSensitivity::from_channel_data(data);
+            assert_eq!(sens.to_channel_data(), data, "{semitones} st {cents} c");
+        }
+    }
+}
+
+/// A sensitivity within half a cent of 128 semitones saturates at the largest
+/// channel data, and a whole-semitone range writes no cents.
+#[test]
+fn channel_data_saturates_at_127_semitones_99_cents() {
+    let top = PitchBendSensitivity::from_rpn_bits(u32::MAX).to_channel_data();
+    assert_eq!((top.msb().get(), top.lsb().get()), (127, 99));
+    let whole = PitchBendSensitivity::of(48).to_channel_data();
+    assert_eq!((whole.msb().get(), whole.lsb().get()), (48, 0));
+}

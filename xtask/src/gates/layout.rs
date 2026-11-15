@@ -52,6 +52,7 @@ pub(super) const LAYERS: &[&[&str]] = &[
     &[
         "tutti-alsa-ffi",
         "tutti-coremidi-ffi",
+        "tutti-winmm-ffi",
         "tutti-ump",
         "tutti-types",
         "tutti-plugin-ipc-ffi",
@@ -108,7 +109,7 @@ pub(super) const LAYERS: &[&[&str]] = &[
 /// The crates whose normal and build dependencies on workspace crates are exactly these.
 const ONLY: &[(&str, &[&str])] = &[
     ("tutti-midi-protocol", &["tutti-ump", "tutti-types"]),
-    ("tutti-midi-device", &["tutti-ump"]),
+    ("tutti-midi-device", &["tutti-ump", "tutti-types"]),
     // The unit vocabulary a `Gauge<U>` reads through (`Reading` for a `Unit`).
     ("tutti-rt", &["tutti-types"]),
     ("tutti-midi-network", &["tutti-ump", "tutti-midi-device"]),
@@ -123,7 +124,7 @@ const ONLY: &[(&str, &[&str])] = &[
         "tutti-transport",
         &["tutti-types", "tutti-rt", "tutti-graph", "tutti-tempo"],
     ),
-    ("tutti-plugin-db", &["tutti-plugin-types"]),
+    ("tutti-plugin-db", &["tutti-plugin-types", "tutti-types"]),
     (
         "tutti-plugin-ipc",
         &[
@@ -164,10 +165,15 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-au-host",
         ],
     ),
+    // The probe reads one file as a format host would: the hosts, the descriptor
+    // types, the experiment's units, and the catalog's extension table
+    // (`format_from_path`) for a path with no `--as`.
+    // No hosting (`tutti-plugin-ipc`, `tutti-plugin-host`, `tutti-plugin`).
     (
         "tutti-plugin-probe",
         &[
             "tutti-plugin-types",
+            "tutti-plugin-db",
             "tutti-types",
             "tutti-graph",
             "tutti-ump",
@@ -670,7 +676,7 @@ mod tests {
     fn a_layered_workspace_passes() {
         let r = run(&base());
         assert!(r.passed(), "{:?}", r.findings);
-        assert_eq!(r.out[0], "check-layout: ok (6 members, 48 ranked)");
+        assert_eq!(r.out[0], "check-layout: ok (6 members, 49 ranked)");
     }
 
     #[test]

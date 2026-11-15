@@ -254,8 +254,8 @@ fn a_ramp_puts_a_clips_frames_within_the_grid_bound_of_the_maps() {
 /// pool bound to a constant map is at source frame `f - 24 000` exactly from
 /// frame 24 000, at every block size: the voice reads a constant map the way
 /// it reads no map (the beats over the tempo, not the map's seconds). The bits
-/// are held by the golden digests and `block_length_invariance`; this case
-/// pins the figure through a bound reader.
+/// are held by `block_length_invariance`; this case pins the figure through a
+/// bound reader.
 #[test]
 fn a_constant_map_keeps_the_clip_where_it_was() {
     let m = map(&[(0.0, 120.0, Transition::Step)]);

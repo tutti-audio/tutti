@@ -18,7 +18,7 @@
 use tutti_midi_protocol::{signed_f32_to_bend, unit_f32_to_value};
 use tutti_types::{Cents, Pan, Seconds, Semitones};
 use tutti_ump::ControlValue;
-use tutti_ump::{CCNumber, NoteNumber, Rpn, U7, U14, Voice2};
+use tutti_ump::{CCNumber, NoteNumber, RegisteredData, Rpn, U7, U14, Voice2};
 
 /// What a full Modulation Wheel spans until RPN 5 says otherwise: General MIDI
 /// 2 section 3.4.4, default 00H/40H (+/-50 cents) (MSB semitones, LSB
@@ -30,6 +30,11 @@ const PORTAMENTO_TIME_LSB: CCNumber = CCNumber::PORTAMENTO_TIME.lsb().unwrap();
 const VOLUME_LSB: CCNumber = CCNumber::VOLUME.lsb().unwrap();
 const PAN_LSB: CCNumber = CCNumber::PAN.lsb().unwrap();
 const EXPRESSION_LSB: CCNumber = CCNumber::EXPRESSION.lsb().unwrap();
+
+/// The data of a Registered Controller from two field values, each 7 bits.
+fn registered(msb: u32, lsb: u32) -> RegisteredData {
+    RegisteredData::new(U7::masked(msb as u8), U7::masked(lsb as u8))
+}
 
 /// A 14-bit controller with its most significant 7 bits replaced (CC 0 to 31).
 /// The least significant 7 bits go to zero: M1 p.12, a receiver sets its concept of the
@@ -176,8 +181,8 @@ impl ChannelState {
     /// semitones and LSB 100/128 cent (GM2 section 3.4.4), zero-extended as the
     /// translator sends it.
     pub(crate) fn set_modulation_range(&mut self, value: u32) {
-        let semitones = (value >> 25) as f32;
-        let eighths = ((value >> 18) & 0x7F) as f32;
+        let data = RegisteredData::from_word(value);
+        let (semitones, eighths) = (f32::from(data.msb().get()), f32::from(data.lsb().get()));
         self.modulation_range = Cents(semitones * 100.0 + eighths * 100.0 / 128.0);
     }
 
@@ -266,20 +271,24 @@ impl ChannelState {
                 // MSB semitones, LSB cents: `bend_sensitivity`'s inverse.
                 let hundredths =
                     (self.bend.range.get() * 100.0).round().clamp(0.0, 12_799.0) as u32;
-                Some((hundredths / 100) << 25 | (hundredths % 100) << 18)
+                Some(registered(hundredths / 100, hundredths % 100).to_word())
             }
             Rpn::CHANNEL_FINE_TUNING => {
                 let fourteen = ((self.bend.fine.get() + 1.0) * 8192.0)
                     .round()
                     .clamp(0.0, 16_383.0);
-                Some((fourteen as u32) << 18)
+                Some(RegisteredData::from_fourteen(U14::masked(fourteen as u16)).to_word())
             }
             Rpn::CHANNEL_COARSE_TUNING => {
                 let msb = (self.bend.coarse.get() + 64.0).round().clamp(0.0, 127.0);
-                Some((msb as u32) << 25)
+                Some(registered(msb as u32, 0).to_word())
             }
-            Rpn::TUNING_PROGRAM_SELECT => Some(u32::from(self.tuning_program.get()) << 25),
-            Rpn::TUNING_BANK_SELECT => Some(u32::from(self.tuning_bank.get()) << 25),
+            Rpn::TUNING_PROGRAM_SELECT => {
+                Some(RegisteredData::new(self.tuning_program, U7::of(0)).to_word())
+            }
+            Rpn::TUNING_BANK_SELECT => {
+                Some(RegisteredData::new(self.tuning_bank, U7::of(0)).to_word())
+            }
             Rpn::MODULATION_DEPTH_RANGE => {
                 // MSB semitones, LSB 100/128 cent: `set_modulation_range`'s inverse.
                 let cents = self.modulation_range.get().clamp(0.0, 12_700.0);
@@ -287,7 +296,7 @@ impl ChannelState {
                 let eighths = ((cents - semitones * 100.0) * 128.0 / 100.0)
                     .round()
                     .min(127.0);
-                Some((semitones as u32) << 25 | (eighths as u32) << 18)
+                Some(registered(semitones as u32, eighths as u32).to_word())
             }
             _ => None,
         }

@@ -50,10 +50,11 @@ impl Editor {
     /// # Errors
     ///
     /// Refused, changing nothing, with the error the commit would fail on:
-    /// [`GraphInvalid::BadParamRange`] for a NaN bound, and
+    /// [`GraphInvalid::BadParamRange`] for a NaN bound or crossed bounds on a
+    /// circular param (`ParamRange::arc` writes one), and
     /// [`GraphInvalid::UnknownParamNode`] for a key with no node.
     pub fn set_param_range(&mut self, at: ParamIn, range: ParamRange) -> Result<(), GraphInvalid> {
-        if range.min.is_nan() || range.max.is_nan() {
+        if range.min.is_nan() || range.max.is_nan() || !range.fits(at.param.param) {
             return Err(GraphInvalid::BadParamRange { at, range });
         }
         if !self.spec.topology.nodes.contains_key(&at.node) {
@@ -387,11 +388,17 @@ impl Editor {
             .map_or(Ok(()), |shape| Pass::of(shape).map(drop))
     }
 
+    /// Whether `key`'s shape declares its own bypass
+    /// ([`Shape::with_own_bypass`](crate::Shape::with_own_bypass)).
+    fn bypasses_itself(&self, key: NodeKey) -> bool {
+        self.shapes.get(&key).is_some_and(|shape| shape.own_bypass)
+    }
+
     /// Refuses a spec that would hear a node's pass where it has none: a
     /// bypass, a mix short of [`Mix::WET`], or a lane on the mix.
     pub(super) fn check_passes(&self) -> Result<(), CommitError> {
         let heard = |key: NodeKey| {
-            self.spec.mode(key) == NodeMode::Bypassed
+            (self.spec.mode(key) == NodeMode::Bypassed && !self.bypasses_itself(key))
                 || self.spec.mix(key) != Mix::WET
                 || self
                     .spec
@@ -419,8 +426,8 @@ impl Editor {
     /// compiled or sent, so the plan is the same `Arc` and a host may call
     /// this for every click.
     ///
-    /// A change of mode is a crossfade of [`MODE_DECLICK`](crate::MODE_DECLICK)
-    /// frames, counted from the first frame of the block it lands on; see
+    /// A change of mode is a crossfade of [`DECLICK`](crate::DECLICK),
+    /// counted from the first frame of the block it lands on; see
     /// [`NodeMode`] and `src/mode.rs` for what each mode does. A fork starts
     /// every unit steady in the mode the spec holds, with no fade.
     ///
@@ -438,6 +445,7 @@ impl Editor {
             return Err(ModeError::NoSuchNode { node: key });
         }
         if mode == NodeMode::Bypassed
+            && !self.bypasses_itself(key)
             && let Err(error) = self.check_pass(key)
         {
             return Err(ModeError::Unplaced { node: key, error });

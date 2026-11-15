@@ -1,6 +1,7 @@
 use super::*;
 
 use tutti_buffers::{Interleaved, InterleavedMut, Sink};
+use tutti_engine::{BackendErrorKind, STALL_GRACE};
 
 /// A device that supports `[min, max]` at `format`.
 fn range(min: u32, max: u32, format: cpal::SampleFormat) -> cpal::SupportedStreamConfigRange {
@@ -127,13 +128,13 @@ fn mic_without_a_device() -> MicIn {
 /// [`mic_without_a_device`] `width` wide, and the writer its callback would
 /// hold.
 fn mic_with_ring(width: u16, frames: usize) -> (MicIn, TapWriter) {
-    let (reader, writer) = TapReader::pair(TapId(0), usize::from(width), Samples(frames));
+    let (reader, writer) = TapReader::pair(usize::from(width), Samples(frames));
     let mic = MicIn {
         tap: reader,
         sample_rate: SampleRate::SR_48K,
         device_inputs: ChannelLayout::from(width),
         faults: Arc::new(StreamFaults::new()),
-        latency: Arc::new(crate::StreamLatency::new()),
+        latency: Arc::new(StreamLatency::new()),
         _stream: StreamHandle(Owned::spawn("test-input", || Ok(())).expect("spawn")),
     };
     (mic, writer)
@@ -157,15 +158,15 @@ fn a_full_ring_counts_the_frames_the_callback_dropped() {
 fn capture(device: u16, inputs: &[usize], frames: usize) -> (Capture, MicIn, TapReader) {
     let select = Fold::select(ChannelLayout::from(device), inputs).expect("a selection");
     let width = select.dst_layout();
-    let (reader, rec) = TapReader::pair(TapId(0), usize::from(width.count()), Samples(frames));
-    let (ring, mon) = TapReader::pair(TapId(0), usize::from(width.count()), Samples(frames));
+    let (reader, rec) = TapReader::pair(usize::from(width.count()), Samples(frames));
+    let (ring, mon) = TapReader::pair(usize::from(width.count()), Samples(frames));
     let capture = Capture::new(select, ChannelLayout::from(device), rec, Some(mon));
     let mic = MicIn {
         tap: reader,
         sample_rate: SampleRate::SR_48K,
         device_inputs: ChannelLayout::from(device),
         faults: Arc::new(StreamFaults::new()),
-        latency: Arc::new(crate::StreamLatency::new()),
+        latency: Arc::new(StreamLatency::new()),
         _stream: StreamHandle(Owned::spawn("test-input", || Ok(())).expect("spawn")),
     };
     (capture, mic, ring)
@@ -186,7 +187,7 @@ fn inputs_three_and_four_of_sixteen_are_the_recording() {
     cap.block(&data);
     assert_eq!(Source::layout(&mic), ChannelLayout::STEREO);
     assert_eq!(
-        mic.topology().positions(),
+        mic.topology().positions().unwrap(),
         [tutti_types::Speaker::Unassigned; 2]
     );
     assert_eq!(mic.device_inputs(), ChannelLayout::from(16u16));
@@ -277,7 +278,7 @@ fn an_input_past_the_devices_last_is_an_error() {
 
 /// A disconnect reported through the shared fault record fails the source, and
 /// `faults()` is that same record. Another backend error does not: it may be
-/// transient. cpal's error callback is `move |err| faults.record(&err)`; the
+/// transient. cpal's error callback is `move |err| edge::record(&faults, &err)`; the
 /// registration itself needs a device and is not exercised here.
 #[test]
 fn a_disconnect_fails_the_mic_and_a_transient_error_does_not() {
@@ -288,8 +289,7 @@ fn a_disconnect_fails_the_mic_and_a_transient_error_does_not() {
         "a live mic with an empty ring is late, not finished"
     );
 
-    mic.faults()
-        .record(&cpal::Error::with_message(cpal::ErrorKind::Xrun, "xrun"));
+    mic.faults().record(BackendErrorKind::Other, &"xrun");
     assert!(mic.faults().is_faulted());
     assert_eq!(
         verdict(&mut mic),
@@ -298,7 +298,7 @@ fn a_disconnect_fails_the_mic_and_a_transient_error_does_not() {
     );
 
     mic.faults()
-        .record(&cpal::Error::new(cpal::ErrorKind::DeviceNotAvailable));
+        .record(BackendErrorKind::DeviceGone, &"device not available");
     assert_eq!(verdict(&mut mic), Pull::Failed);
 }
 
@@ -319,7 +319,7 @@ fn a_disconnected_mic_hands_over_its_buffered_frames_then_reads_failed() {
         .unwrap();
 
     prod.push_interleaved(&[0.5, -0.5]);
-    faults.record(&cpal::Error::new(cpal::ErrorKind::DeviceNotAvailable));
+    faults.record(BackendErrorKind::DeviceGone, &"device not available");
     // The pump's pass: the frame the ring held is written first.
     let mut scratch = [0.0f32; 8];
     let Pull::Frames(n) = pull_into(&mut mic, &mut scratch) else {
@@ -345,14 +345,14 @@ fn a_disconnected_mic_hands_over_its_buffered_frames_then_reads_failed() {
 fn a_mic_whose_backend_keeps_failing_without_audio_is_failed() {
     let mut mic = mic_without_a_device();
     let faults = mic.faults();
-    let t0 = faults.epoch;
-    let err = cpal::Error::with_message(
-        cpal::ErrorKind::BackendError,
-        "`alsa::poll()` returned POLLERR",
-    );
-    faults.record_at(&err, t0);
+    let err = "`alsa::poll()` returned POLLERR";
+    faults.record(BackendErrorKind::Other, &err);
     assert_eq!(verdict(&mut mic), Pull::Starved);
-    faults.record_at(&err, t0 + crate::faults::STALL_GRACE);
+    // The run of errors becomes a disconnect once the grace has passed with no
+    // audio delivered; the faults' own test of the clock injects the time, which
+    // a mic's record cannot, so this waits it out.
+    std::thread::sleep(STALL_GRACE);
+    faults.record(BackendErrorKind::Other, &err);
     assert_eq!(verdict(&mut mic), Pull::Failed);
 }
 

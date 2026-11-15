@@ -154,7 +154,7 @@ fn rig(map: &Arc<TempoMap>, mtc: bool) -> Rig {
     );
     master.set_enabled(true);
     master.set_send_mtc(mtc);
-    let out = std::cell::RefCell::new(common::sink(&mut ed, 0, &[(1, 0)]));
+    let out = std::cell::RefCell::new(common::sink(&mut ed, 1, &[(1, 0)]));
     ed.commit().expect("commits");
     let transport = Transport::new(SampleRate::of(SR));
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
@@ -183,13 +183,15 @@ impl Rig {
             done += n;
             loop {
                 let got = self.out.borrow_mut().poll_into(&mut ring);
-                sent.extend(ring[..got].iter().map(|&(frame, ump)| {
-                    let Ok(Message::System(_, system)) = ump.decode() else {
-                        panic!("the clock sends System messages: {ump:?}")
-                    };
-                    Sent {
-                        system,
-                        frame: u64::from(frame),
+                sent.extend(ring[..got].iter().filter_map(|&(frame, ump)| {
+                    match ump.decode() {
+                        Ok(Message::System(_, system)) => Some(Sent {
+                            system,
+                            frame: u64::from(frame),
+                        }),
+                        // The MTC Full Message of a locate.
+                        Ok(Message::Sysex7(..)) => None,
+                        _ => panic!("the clock sends System messages and Full Messages: {ump:?}"),
                     }
                 }));
                 if got < ring.len() {

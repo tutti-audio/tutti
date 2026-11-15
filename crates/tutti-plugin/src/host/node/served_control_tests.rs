@@ -36,6 +36,7 @@ fn the_served_control_and_any_thread_answer_alike() {
     let Launched { ipc, .. } = Ipc::launch(
         BridgeConfig::default(),
         tutti_fixtures::clap_probe().to_path_buf(),
+        tutti_plugin_types::PluginFormat::Clap,
         tutti_plugin_types::Load::new(),
         SampleRate::SR_48K,
         None,
@@ -114,6 +115,7 @@ fn a_live_served_load_reaches_the_plugin_in_the_context_it_names() {
     let Launched { ipc, .. } = Ipc::launch(
         BridgeConfig::default(),
         tutti_fixtures::clap_probe().to_path_buf(),
+        tutti_plugin_types::PluginFormat::Clap,
         tutti_plugin_types::Load::new(),
         SampleRate::SR_48K,
         None,
@@ -159,6 +161,7 @@ fn a_client_with_no_editor_loader_asks_the_real_server_for_its_editor() {
     let Launched { mut ipc, .. } = Ipc::launch(
         BridgeConfig::default(),
         tutti_fixtures::clap_probe().to_path_buf(),
+        tutti_plugin_types::PluginFormat::Clap,
         tutti_plugin_types::Load::new(),
         SampleRate::SR_48K,
         None,

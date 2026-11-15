@@ -196,7 +196,7 @@ fn one_u7(bytes: &[u8]) -> Option<U7> {
 }
 
 fn slot(byte: u8) -> Option<MmcSlot> {
-    MmcSlot::new(U7::new(byte)?)
+    MmcSlot::new(byte)
 }
 
 fn selection(byte: u8) -> Option<MmcSelection> {
@@ -597,7 +597,7 @@ fn event(d: &[u8]) -> Option<MmcEvent> {
 fn group(d: &[u8]) -> Option<MmcGroup> {
     match d.split_first()? {
         (0, [id, rest @ ..]) => Some(MmcGroup::Assign {
-            group: SysexDeviceId::new(U7::new(*id)?)?,
+            group: SysexDeviceId::new(*id)?,
             devices: sequence(rest)?,
         }),
         (1, [id, rest @ ..]) => Some(MmcGroup::DisAssign {
@@ -635,7 +635,7 @@ fn counted_command(code: u8, d: &[u8]) -> Option<MmcCommand> {
         }),
         0x49 => MmcCommand::AssignSystemMaster(match *d {
             [0x7F] => MmcSystemMaster::Nobody,
-            [id] => MmcSystemMaster::Device(SysexDeviceId::new(U7::new(id)?)?),
+            [id] => MmcSystemMaster::Device(SysexDeviceId::new(id)?),
             _ => return None,
         }),
         0x4A => MmcCommand::GeneratorCommand(one(d, GeneratorAction::from_wire)?),

@@ -69,13 +69,13 @@ fn rig(g: GraphBuilder) -> Rig {
 
 impl Rig {
     /// A tap on both channels of `node`, on the outputs' time, committed.
-    fn tap(&mut self, id: u32, node: NodeKey) -> TapReader {
+    fn tap(&mut self, id: u64, node: NodeKey) -> TapReader {
         let sources = (0..2)
             .map(|port| Source::Node(OutPort { node, port }))
             .collect();
         let reader = self
             .editor
-            .open_tap(TapId(id), sources, TapAlign::ToOutput, Samples(2048))
+            .open_tap(TapId::of(id), sources, TapAlign::ToOutput, Samples(2048))
             .expect("the node exists");
         self.editor.commit().expect("commits");
         self.executor.apply_pending();

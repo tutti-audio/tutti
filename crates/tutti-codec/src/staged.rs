@@ -1,7 +1,6 @@
 //! A file being written beside its destination.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 /// A temporary beside `target`: removed when dropped unless
 /// [`commit`](Self::commit)ted. A leftover that cannot be removed is logged,
@@ -14,14 +13,14 @@ pub(crate) struct Staged {
 
 impl Staged {
     pub(crate) fn beside(target: &Path) -> Self {
-        static NEXT: AtomicU32 = AtomicU32::new(0);
+        static NEXT: tutti_types::Mint = tutti_types::Mint::new();
         let name = target
             .file_name()
             .map_or_else(|| "export".to_owned(), |n| n.to_string_lossy().into_owned());
         let temp = target.with_file_name(format!(
             ".{name}.{}.{}.tmp",
             std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
+            NEXT.mint()
         ));
         Self {
             temp,

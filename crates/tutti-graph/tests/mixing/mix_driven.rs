@@ -23,8 +23,8 @@ use std::sync::atomic::Ordering;
 use common::{Kind, Pair, SpecBehaviour, bits, driver_value, input_signal, prepare};
 use tutti_graph::{
     CompileError, CycleEdge, Edge, Editor, EventOut, ForkMode, ForkTarget, GraphInvalid, GraphSpec,
-    InPort, NodeKey, NodeMix, NodeMode, OutPort, PARAM_DECLICK, ParamIn, ParamPorts,
-    ParamPortsError, ParamRange, Source, Topology, TransportPosition, ValidGraph, compile,
+    InPort, NodeKey, NodeMix, NodeMode, OutPort, ParamIn, ParamPorts, ParamPortsError, ParamRange,
+    Source, Topology, TransportPosition, ValidGraph, compile,
 };
 use tutti_types::{ChannelLayout, Mix, Tail, UnitAddr, UnitParam};
 
@@ -311,11 +311,12 @@ fn a_range_moved_between_blocks_clamps_from_the_next() {
 }
 
 /// Before its first event a driven mix reads its base, and a source that goes
-/// declicks from where it was to the base over `PARAM_DECLICK` frames (the
+/// declicks from where it was to the base over `DECLICK` (the
 /// param port's rule, one copy): one step (frame 0's, `-1.0`, clamped to
 /// `0.0`) held, then a commit that
 /// disconnects the source. Frame `j` after it is
-/// `base + (held - base) * (1 - (j + 1) / PARAM_DECLICK)`, and after that the
+/// `held * (1 - s) + base * s`, `s` the smootherstep at `(j + 1) / (DECLICK + 1)`,
+/// and after that the
 /// base: the node is the static blend (and, once the base is WET, plain again).
 #[test]
 fn a_source_that_goes_is_declicked_to_the_base() {
@@ -344,19 +345,17 @@ fn a_source_that_goes_is_declicked_to_the_base() {
     }
     rig.spec.disconnect_param(mix_of(2), lane_out(1));
     pair.switch(&rig.graph(), &rig.kinds);
-    let d = PARAM_DECLICK.get();
+    let d = common::declick();
     let (got, x) = run(&mut pair, 2 * BLOCK, d / BLOCK + 2);
     for (j, &g) in got.iter().enumerate() {
         let m = if j < d {
-            base + (held - base) * (1.0 - (j + 1) as f32 / d as f32)
+            let (out, inn) = common::smooth_gains(j, d);
+            (f64::from(held) * out + f64::from(base) * inn) as f32
         } else {
             base
         };
-        assert_eq!(
-            g.to_bits(),
-            blend(3.0 * x[j], x[j], m).to_bits(),
-            "frame {j}"
-        );
+        let want = blend(3.0 * x[j], x[j], m);
+        assert!((g - want).abs() < 1e-5, "frame {j}: {g}, want {want}");
     }
 }
 

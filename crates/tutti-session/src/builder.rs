@@ -4,11 +4,11 @@
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use tutti_graph::MAX_ROOT_CHANNELS;
 use tutti_graph::NodeKey;
 use tutti_graph::PrerollTable;
 use tutti_nodes::{ClickNode, ClickSettings};
 use tutti_transport::Transport;
+use tutti_types::MAX_CHANNELS;
 use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock, SampleRate, Samples};
 
 use crate::graph::{Graph, LIVE_MAX_BLOCK};
@@ -357,7 +357,7 @@ impl SessionBuilder<Offline> {
     pub fn build_detached(mut self, rate: SampleRate) -> Result<Session> {
         let outputs = self.opts.root.as_ref().map_or_else(
             || usize::from(self.opts.outputs_floor.count()),
-            |r| r.positions().len(),
+            |r| usize::from(r.width().count()),
         );
         let transport = Transport::new(rate);
         let mut graph = Graph::new(
@@ -413,7 +413,7 @@ impl SessionBuilder<OnDevice> {
 
     /// [`build`](Self::build) on a stream driver of the
     /// caller's choosing, `spec` standing for the config its device reports:
-    /// the device-free build (a `tutti_cpal::ManualStreamDriver`, for a test
+    /// the device-free build (a `tutti_engine::ManualStreamDriver`, for a test
     /// that renders the callback itself). Behind `testing`: a host builds on a
     /// device.
     ///
@@ -423,12 +423,12 @@ impl SessionBuilder<OnDevice> {
     #[cfg(feature = "testing")]
     pub fn build_device_on<D>(
         self,
-        spec: tutti_cpal::OutputSpec,
+        spec: tutti_engine::OutputSpec,
         driver: D,
     ) -> Result<crate::LiveSession>
     where
-        D: tutti_cpal::StreamDriver,
-        D::Running: 'static,
+        D: tutti_engine::StreamDriver,
+        D::Error: Into<tutti_cpal::Error>,
     {
         let device = self.state.device.clone();
         self.build_on(
@@ -802,6 +802,7 @@ impl<S> SessionBuilder<S> {
         Ok(Session {
             graph: parts.graph,
             resource_ids: crate::peer::ResourceIds::new(),
+            pool: crate::Pool::default(),
             transport: parts.transport,
             load,
             heard: None,
@@ -834,7 +835,7 @@ impl<S> SessionBuilder<S> {
             #[cfg(feature = "sampler")]
             disk_streamer,
             #[cfg(feature = "sampler")]
-            sampler_opens: 0,
+            sampler_opens: tutti_types::Mint::new(),
             #[cfg(feature = "device")]
             faults: None,
             #[cfg(feature = "device")]
@@ -879,7 +880,7 @@ impl<S> SessionBuilder<S> {
         chosen: tutti_cpal::DeviceSelector,
         start: impl FnOnce(
             &mut tutti_cpal::AudioEngine,
-            Arc<tutti_cpal::AudioCallbackState>,
+            Arc<tutti_engine::AudioCallbackState>,
         ) -> tutti_cpal::Result<()>,
     ) -> Result<crate::LiveSession> {
         let spec = audio_engine.spec().clone();
@@ -905,7 +906,7 @@ impl<S> SessionBuilder<S> {
         session.clock = Some(clock);
         #[cfg(feature = "audio-io")]
         session.inputs.set_output_latency(audio_engine.latency());
-        let state = Arc::new(tutti_cpal::AudioCallbackState::new(engine));
+        let state = Arc::new(tutti_engine::AudioCallbackState::new(engine));
         start(&mut audio_engine, Arc::clone(&state))?;
         #[cfg(feature = "audio-io")]
         let input_latency = session.inputs.latency();
@@ -940,7 +941,7 @@ impl<S> SessionBuilder<S> {
     fn root_width(&self, device: ChannelLayout) -> usize {
         self.opts.root.as_ref().map_or_else(
             || root_width(self.opts.outputs_floor, device),
-            |root| root.positions().len(),
+            |root| usize::from(root.width().count()),
         )
     }
 
@@ -950,7 +951,7 @@ impl<S> SessionBuilder<S> {
     /// is empty or wider than the engine renders); an undeclared one is a bare
     /// width.
     ///
-    /// The root is at least as wide as the device up to [`MAX_ROOT_CHANNELS`],
+    /// The root is at least as wide as the device up to [`MAX_CHANNELS`],
     /// so what this refuses of an undeclared root is a project wider than the
     /// device where either width has no channel order (a 6-channel project on
     /// a 5-channel interface).
@@ -998,14 +999,14 @@ impl<S> SessionBuilder<S> {
 /// the extra device channels permanently silent: the fold zero-fills
 /// rather than upmixing, so nothing downstream can recover them.
 ///
-/// The [`MAX_ROOT_CHANNELS`] clamp is applied here, at construction:
+/// The [`MAX_CHANNELS`] clamp is applied here, at construction:
 /// `Engine::new` bounds the editor to that many global outputs, so a wider
 /// root would be refused at its first commit and never play. An export's
 /// fork is prepared on its own, with no such cap.
 pub fn root_width(project: ChannelLayout, device: ChannelLayout) -> usize {
     usize::from(project.count())
         .max(usize::from(device.count()))
-        .clamp(1, MAX_ROOT_CHANNELS)
+        .clamp(1, MAX_CHANNELS)
 }
 
 #[cfg(test)]

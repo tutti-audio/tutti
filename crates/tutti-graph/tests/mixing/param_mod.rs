@@ -49,8 +49,8 @@ use proptest::prelude::*;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     CommitError, Cx, Editor, Event, EventOut, Executor, ForkByClone, ForkMode, ForkTarget,
-    GraphInvalid, Io, Law, Node, PARAM_DECLICK, ParamIn, ParamInput, ParamRamp, ParamRange,
-    ParamSegment, Prepare, Reference, Shape, Status, TransportPosition, Unforkable,
+    GraphInvalid, Io, Law, Node, ParamIn, ParamInput, ParamRamp, ParamRange, ParamSegment, Prepare,
+    Reference, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_types::{
@@ -58,6 +58,18 @@ use tutti_types::{
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;
+
+/// `DECLICK` in frames at [`RATE`].
+fn declick() -> usize {
+    tutti_graph::declick_frames(RATE).get()
+}
+
+/// The smootherstep `x³(6x² − 15x + 10)` at frame `j` of an `n`-frame fade,
+/// `x = (j + 1) / (n + 1)`, written out in `f64`.
+fn smootherstep(j: usize, n: usize) -> f64 {
+    let x = (j + 1) as f64 / (n + 1) as f64;
+    x * x * x * (6.0 * x * x - 15.0 * x + 10.0)
+}
 
 fn prepare(max: usize) -> Prepare {
     Prepare::new(RATE, MaxBlock::of(Samples(max)))
@@ -487,8 +499,8 @@ fn a_base_move_under_modulation_ramps_across_the_block() {
 }
 
 /// Connecting a source at full swing, and disconnecting it, crossfade over
-/// `PARAM_DECLICK` frames: no frame-to-frame step larger than the fade's
-/// slope, and a disconnected param is back on its base (`Base`) once the
+/// `DECLICK`: no frame-to-frame step larger than the fade's
+/// steepest slope (the smootherstep's, `15/8` per fade length), and a disconnected param is back on its base (`Base`) once the
 /// fade is over.
 #[test]
 fn connecting_and_disconnecting_at_runtime_does_not_click() {
@@ -512,7 +524,7 @@ fn connecting_and_disconnecting_at_runtime_does_not_click() {
     assert_eq!(*off[2].last().expect("rendered"), 0.0, "reading Base again");
     all.extend(&off[0]);
 
-    let slope = 1.0 / PARAM_DECLICK.get() as f32 + 1e-6;
+    let slope = 1.875 / declick() as f32 + 1e-6;
     for (i, w) in all.windows(2).enumerate() {
         assert!(
             (w[1] - w[0]).abs() <= slope,
@@ -651,7 +663,7 @@ fn removing_a_node_drops_its_param_edges() {
     );
     ed.commit().expect("the value names no removed node");
     // Past the cutoff's declick back to its base.
-    let out = render(&mut exec, &mut ed, PARAM_DECLICK.get() + 64, 64);
+    let out = render(&mut exec, &mut ed, declick() + 64, 64);
     assert_eq!(*out[2].last().expect("rendered"), 2.0, "Q is still driven");
 }
 
@@ -691,7 +703,7 @@ fn a_fade_keeps_the_params_it_declares() {
     ed.commit().expect("commits");
     let _ = render(&mut exec, &mut ed, 512, 64);
 
-    let fade = tutti_graph::Fade::new(Samples(128), tutti_graph::CrossfadeCurve::EqualAmplitude);
+    let fade = tutti_graph::Fade::new(Samples(128), tutti_graph::FadeLaw::EqualAmplitude);
     assert!(
         matches!(
             ed.replace(NodeKey(PROBE), Unforkable(CutoffOnly), fade),
@@ -860,12 +872,19 @@ fn an_event_source_replaces_the_base_from_its_first_event() {
             .disconnect_param(param(PROBE, UnitParam::Cutoff), ev(2))
     );
     ed.commit().expect("disconnects");
-    let d = PARAM_DECLICK.get();
+    let d = declick();
     let out = render(&mut exec, &mut ed, 2 * d, 64);
     // From 500 to the knob (3000) through the declick: frame `j` of the
-    // fade is `3000 + (500 - 3000) · (1 - (j + 1) / d)`.
-    let g = 1.0 - 1.0 / d as f32;
-    assert_eq!(out[0][0], 3000.0 + (500.0 - 3000.0) * g);
+    // fade is `500 · (1 - s) + 3000 · s`, `s` the smootherstep at
+    // `(j + 1) / (d + 1)`.
+    for (j, &v) in out[0].iter().enumerate().take(d) {
+        let s = smootherstep(j, d);
+        let want = 500.0 * (1.0 - s) + 3000.0 * s;
+        assert!(
+            (f64::from(v) - want).abs() < 1e-2,
+            "frame {j}: {v}, want {want}"
+        );
+    }
     assert!(out[0][d..].iter().all(|&x| x == 3000.0), "back on the knob");
 }
 
@@ -898,7 +917,7 @@ fn a_second_event_source_replaces_the_first() {
     );
     assert_eq!(ed.spec().params[&at].source, Some(ev(3)));
     ed.commit().expect("one source");
-    let out = render(&mut exec, &mut ed, PARAM_DECLICK.get() + 64, 64);
+    let out = render(&mut exec, &mut ed, declick() + 64, 64);
     assert_eq!(*out[0].last().expect("rendered"), 3.0, "the new source");
 }
 
@@ -1913,7 +1932,7 @@ fn a_range_move_reaches_a_unit_that_faded_in() {
     ed.commit().expect("commits");
     let _ = render(&mut exec, &mut ed, 128, 64);
 
-    let fade = tutti_graph::Fade::new(Samples(128), tutti_graph::CrossfadeCurve::EqualAmplitude);
+    let fade = tutti_graph::Fade::new(Samples(128), tutti_graph::FadeLaw::EqualAmplitude);
     let (c2, q2) = (Cell::new(0.0), Cell::new(0.0));
     ed.replace(NodeKey(PROBE), Unforkable(Probe::new(&c2, &q2)), fade)
         .expect("the same params fade");

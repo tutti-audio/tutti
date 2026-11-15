@@ -2660,7 +2660,6 @@ dependencies = [
  "libm",
  "rand",
  "rustfft",
- "serde",
  "thiserror 2.0.21",
  "tutti-buffers",
  "tutti-dsp",
@@ -2675,7 +2674,6 @@ version = "0.0.1"
 dependencies = [
  "assert_no_alloc",
  "bytemuck",
- "ringbuf",
  "thiserror 2.0.21",
  "tutti-buffers",
  "tutti-fixtures",
@@ -2742,7 +2740,7 @@ dependencies = [
  "criterion",
  "libc",
  "proptest",
- "ringbuf",
+ "serde",
  "thiserror 2.0.21",
  "tutti-buffers",
  "tutti-curve",
@@ -2789,6 +2787,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tutti-fixtures",
+ "tutti-types",
  "tutti-ump",
  "unicode-normalization",
  "winnow",
@@ -2830,6 +2829,7 @@ dependencies = [
  "tutti-rt",
  "tutti-types",
  "tutti-ump",
+ "tutti-winmm-ffi",
 ]
 
 [[package]]
@@ -2851,6 +2851,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "tutti-fixtures",
  "tutti-midi-protocol",
  "tutti-types",
  "tutti-ump",
@@ -3073,6 +3074,7 @@ dependencies = [
  "tutti-clap-host",
  "tutti-fixtures",
  "tutti-graph",
+ "tutti-plugin-db",
  "tutti-plugin-types",
  "tutti-types",
  "tutti-ump",
@@ -3523,6 +3525,15 @@ dependencies = [
  "tutti-vst3-ffi",
  "tutti-vst3-host",
  "vst3",
+]
+
+[[package]]
+name = "tutti-winmm-ffi"
+version = "0.0.1"
+dependencies = [
+ "thiserror 2.0.21",
+ "tutti-fixtures",
+ "windows-sys",
 ]
 
 [[package]]

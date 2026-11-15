@@ -100,9 +100,9 @@ fn the_limit_is_judged_at_the_output_rate() {
     );
 }
 
-/// A topology reaches the file: four channels declare the quad mask `0x33` only
-/// when told they are quad, six declare 5.1 by their width, and a bare four
-/// are unassigned.
+/// A topology reaches the file: four channels declare the quad mask `0x33`,
+/// told they are quad or assumed by their width, six declare 5.1 by their
+/// width, and four unassigned channels declare none.
 ///
 /// This restores the export-level half of the old
 /// `an_export_at_the_limit_succeeds_and_declares_its_mask`; the limit half
@@ -111,8 +111,15 @@ fn the_limit_is_judged_at_the_output_rate() {
 fn the_topology_reaches_the_file() {
     let dir = tempfile::tempdir().unwrap();
     for (channels, topology, mask) in [
-        (4u16, Some(tutti_types::ChannelTopology::quad()), 0x33u32),
-        (4, None, 0),
+        (4u16, Some(tutti_types::Bed::Quad.topology()), 0x33u32),
+        (4, None, 0x33),
+        (
+            4,
+            Some(tutti_types::ChannelTopology::unassigned(
+                ChannelLayout::QUAD,
+            )),
+            0,
+        ),
         (6, None, 0x60F),
     ] {
         let mut cfg = config(channels, Pcm::Int24);

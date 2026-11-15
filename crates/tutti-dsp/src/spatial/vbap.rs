@@ -7,7 +7,7 @@
 //! speaker's channel with [`VbapGains::render_channel`].
 
 use tutti_buffers::Fold;
-use tutti_types::{ArcDegrees, Azimuth, Elevation, Spread, StereoWidth};
+use tutti_types::{ArcDegrees, Azimuth, Elevation, MAX_CHANNELS, Spread, StereoWidth};
 
 mod error;
 mod layout;
@@ -15,7 +15,7 @@ mod math;
 mod select;
 
 pub use error::SpeakerGeometryError;
-pub use layout::{MAX_SPEAKERS, SpeakerLayout};
+pub use layout::SpeakerLayout;
 
 /// A width below this folds the stereo pair to mono and pans one source.
 const MONO_WIDTH: f32 = 0.001;
@@ -31,8 +31,8 @@ const WIDTH_HALF_ANGLE: f32 = 15.0;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VbapGains {
     mono: bool,
-    a: [f32; MAX_SPEAKERS],
-    b: [f32; MAX_SPEAKERS],
+    a: [f32; MAX_CHANNELS],
+    b: [f32; MAX_CHANNELS],
 }
 
 impl VbapGains {
@@ -196,17 +196,17 @@ impl VbapKernel {
         let width = width.get().max(0.0);
         let count = self.layout.speaker_count();
         if width < MONO_WIDTH {
-            let mut a = [0.0; MAX_SPEAKERS];
+            let mut a = [0.0; MAX_CHANNELS];
             self.layout
                 .gains_into(azimuth, elevation, spread, &mut a[..count]);
             return VbapGains {
                 mono: true,
                 a,
-                b: [0.0; MAX_SPEAKERS],
+                b: [0.0; MAX_CHANNELS],
             };
         }
         let (left, right) = virtual_sources(azimuth, width);
-        let (mut a, mut b) = ([0.0; MAX_SPEAKERS], [0.0; MAX_SPEAKERS]);
+        let (mut a, mut b) = ([0.0; MAX_CHANNELS], [0.0; MAX_CHANNELS]);
         self.layout
             .gains_into(left, elevation, spread, &mut a[..count]);
         self.layout

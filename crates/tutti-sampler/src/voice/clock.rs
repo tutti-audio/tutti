@@ -31,7 +31,7 @@
 //! # Wrap crossfade
 //!
 //! A wrap is a jump in the playhead and a cut in a voice that plays through
-//! it. So a run that follows a wrap carries a [`Wrap`]: for [`WRAP_FADE`]
+//! it. So a run that follows a wrap carries a [`Wrap`]: for [`DECLICK`](tutti_graph::DECLICK)
 //! after the wrap (at most half a pass of the loop), the voice also sounds
 //! where the playhead would be had it run on past the loop's end, a loop's
 //! length ahead of it, and blends that tail out under the loop's start. The
@@ -65,15 +65,9 @@
 
 use std::ops::Range;
 
-use tutti_graph::{Env, TransportPosition};
+use tutti_graph::{Env, TransportPosition, declick_frames};
 use tutti_tempo::TempoMap;
-use tutti_types::{Beat, BeatDuration, Bpm, FrameClock, LoopRange, SampleRate, Samples, Seconds};
-
-/// How long a placed memory voice crossfades across a loop wrap: the tail it
-/// was playing past the loop's end fades out as the loop's start fades in.
-/// A time, so it is the same 5 ms at every sample rate; short enough that a
-/// hit on the loop's first frame keeps its attack.
-pub(crate) const WRAP_FADE: Seconds = Seconds(0.005);
+use tutti_types::{Beat, BeatDuration, Bpm, FrameClock, LoopRange, SampleRate, Samples};
 
 /// How far from where the playhead would have been, in frames, a run may
 /// start and still continue it. Far below anything audible (a thousandth of
@@ -98,7 +92,7 @@ struct Next {
 pub(crate) struct Wrap {
     /// Frames since the wrap, at the run's first frame.
     pub(crate) ago: usize,
-    /// The crossfade's length in frames: [`WRAP_FADE`], at most half a pass
+    /// The crossfade's length in frames: [`DECLICK`](tutti_graph::DECLICK), at most half a pass
     /// so a short loop still has a pass of its own.
     pub(crate) len: usize,
     /// How far back the playhead jumped: the loop's length.
@@ -110,7 +104,7 @@ impl Wrap {
     /// frame to run over.
     fn new(region: LoopRange, tempo: Bpm, rate: SampleRate) -> Option<Self> {
         let pass = region.len().get() * rate.get() * 60.0 / tempo.get();
-        let len = WRAP_FADE.to_samples(rate).0.min((pass / 2.0) as usize);
+        let len = declick_frames(rate).get().min((pass / 2.0) as usize);
         (len > 0).then_some(Self {
             ago: 0,
             len,
@@ -795,7 +789,7 @@ mod tests {
         assert_eq!(fades(&clock.observe(&e)), [None]);
     }
 
-    /// The crossfade is [`WRAP_FADE`] at the rate, at most half a pass.
+    /// The crossfade is `DECLICK` at the rate, at most half a pass.
     #[test]
     fn the_crossfade_is_the_fade_or_half_a_pass() {
         let rate = SampleRate::SR_48K;

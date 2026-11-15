@@ -1,26 +1,22 @@
-//! How an [`OutputBlock`] is *run*.
+//! How an output stream runs on a sound card.
 //!
-//! `tutti-session`'s recorder keeps one pass apart from where it runs the same
-//! way: its `PumpLoop` is one pass with no thread and no clock, which a test
-//! steps by hand and `Recorder` runs on a thread. Here [`OutputBlock`] is the
-//! pass, [`StreamDriver`] decides where it runs, [`CpalDriver`] runs it on
-//! CPAL's thread and [`ManualStreamDriver`] / [`ManualStream`] let a test call
-//! it ([`RunningStream`] is the handle).
-//!
-//! [`CpalDriver`]'s closure body is `move |data, _| block.render(data)`, and
-//! [`ManualStream::callback_once`] calls the same method, so a manual stream
-//! runs exactly the callback CPAL runs.
+//! The block seam ([`StreamDriver`], [`OutputBlock`], [`OutputSpec`]) is
+//! `tutti-engine`'s; [`CpalDriver`] is the driver that runs it on CPAL's thread.
+//! Its closure body is one call to [`OutputBlock::render_delayed_with`], the
+//! method a manual stream's callback calls too, so a manual stream runs exactly
+//! the callback CPAL runs.
 
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, StreamTrait};
-use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
+use tutti_buffers::SampleFormat;
+use tutti_engine::{
+    MAX_FRAMES, OutputBlock, OutputSpec, RunningStream, StreamDriver, StreamFaults,
+};
+use tutti_types::{ChannelLayout, MAX_CHANNELS, MaxBlock, SampleRate, Samples};
 
-use crate::MAX_FRAMES;
-use crate::block::OutputBlock;
+use crate::edge;
 use crate::error::{Error, Result};
-use crate::faults::StreamFaults;
 use crate::owner::Owned;
 
 /// The rate a device reports, or [`Error::InvalidDevice`] when it reports 0 Hz.
@@ -29,82 +25,59 @@ pub(crate) fn device_rate(rate: cpal::SampleRate) -> Result<SampleRate> {
         .ok_or_else(|| Error::InvalidDevice("the device reports a sample rate of 0 Hz".into()))
 }
 
-/// The configuration an output stream is opened with: rate, width, sample
-/// format and callback size.
-///
-/// [`AudioEngine`](crate::AudioEngine) reads it from the device's default
-/// output config; build one with [`new`](Self::new) for a device-free engine
-/// ([`AudioEngine::from_spec`](crate::AudioEngine::from_spec)).
-#[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
-pub struct OutputSpec {
-    /// Frames per second the stream runs at.
-    pub sample_rate: SampleRate,
-    /// The device's channel count; the graph root is folded to this width.
-    pub channels: ChannelLayout,
-    /// The device's native sample type. `I8`/`I16`/`I32`, `U8`/`U16`/`U32`,
-    /// `F32` and `F64` are supported; any other fails to open with
-    /// [`Error::InvalidConfig`].
-    pub sample_format: cpal::SampleFormat,
-    /// The frames every callback carries, when the stream is opened with a
-    /// fixed buffer size (`None`: the backend's default, whose size is not
-    /// known until it calls back). A graph is prepared with it
-    /// (`tutti_graph::Prepare::with_quantum`), so a node that keeps work in
-    /// step with the device — a hosted out-of-process plugin, which ships one
-    /// callback's worth to its server per callback — can.
-    pub quantum: Option<MaxBlock>,
-}
-
 /// The callback size asked of a device that offers a range: 512 frames
 /// (10.7 ms at 48 kHz), a common DAW default, clamped into what the device
 /// supports.
 pub const PREFERRED_QUANTUM: MaxBlock = MaxBlock::of(Samples(512));
 
-impl OutputSpec {
-    /// Creates a spec with no fixed callback size (the backend's default).
-    #[must_use]
-    pub fn new(
-        sample_rate: SampleRate,
-        channels: ChannelLayout,
-        sample_format: cpal::SampleFormat,
-    ) -> Self {
-        Self {
-            sample_rate,
-            channels,
-            sample_format,
-            quantum: None,
-        }
+/// The [`SampleFormat`] a device's `format` reports in an [`OutputSpec`], or
+/// [`Error::InvalidConfig`] for a type the driver does not build. `I8`, `I16`,
+/// `I32`, `F32` and `F64` are themselves; `U8`, `U16` and `U32` are offset
+/// binary and report the signed type of their width.
+fn spec_format(format: cpal::SampleFormat) -> Result<SampleFormat> {
+    match format {
+        cpal::SampleFormat::I8 | cpal::SampleFormat::U8 => Ok(SampleFormat::I8),
+        cpal::SampleFormat::I16 | cpal::SampleFormat::U16 => Ok(SampleFormat::I16),
+        cpal::SampleFormat::I32 | cpal::SampleFormat::U32 => Ok(SampleFormat::I32),
+        cpal::SampleFormat::F32 => Ok(SampleFormat::F32),
+        cpal::SampleFormat::F64 => Ok(SampleFormat::F64),
+        other => Err(Error::InvalidConfig(format!(
+            "Unsupported sample format: {other:?}"
+        ))),
     }
+}
 
-    /// Returns this spec with a fixed `quantum`-frame callback buffer.
-    ///
-    /// Keep `quantum` at or below [`MAX_FRAMES`]; a larger callback is
-    /// clamped and its tail silenced. A quantum is a [`MaxBlock`], so a zero
-    /// one cannot be written.
-    #[must_use]
-    pub fn with_quantum(mut self, quantum: MaxBlock) -> Self {
-        self.quantum = Some(quantum);
-        self
+/// A device's default output config, as the spec a stream opens at and the
+/// exact sample type its callback converts to.
+pub(crate) fn spec_from_supported(
+    c: &cpal::SupportedStreamConfig,
+) -> Result<(OutputSpec, cpal::SampleFormat)> {
+    if usize::from(c.channels()) > MAX_CHANNELS {
+        return Err(Error::InvalidConfig(format!(
+            "the device has {} channels; at most {MAX_CHANNELS} are supported",
+            c.channels()
+        )));
     }
+    let spec = OutputSpec::new(
+        device_rate(c.sample_rate())?,
+        ChannelLayout::from(c.channels().max(1)),
+        spec_format(c.sample_format())?,
+    );
+    let spec = match quantum_for(c.buffer_size()) {
+        Some(quantum) => spec.with_quantum(quantum),
+        None => spec,
+    };
+    Ok((spec, c.sample_format()))
+}
 
-    pub(crate) fn from_supported(c: &cpal::SupportedStreamConfig) -> Result<Self> {
-        Ok(Self {
-            sample_rate: device_rate(c.sample_rate())?,
-            channels: ChannelLayout::from(c.channels().max(1)),
-            sample_format: c.sample_format(),
-            quantum: quantum_for(c.buffer_size()),
-        })
-    }
-
-    pub(crate) fn stream_config(&self) -> cpal::StreamConfig {
-        cpal::StreamConfig {
-            channels: self.channels.count(),
-            sample_rate: self.sample_rate.get().round() as cpal::SampleRate,
-            buffer_size: match self.quantum {
-                Some(q) => cpal::BufferSize::Fixed(q.get_u32()),
-                None => cpal::BufferSize::Default,
-            },
-        }
+fn stream_config(spec: &OutputSpec) -> cpal::StreamConfig {
+    cpal::StreamConfig {
+        channels: spec.channels.count(),
+        sample_rate: spec.sample_rate.get().round() as cpal::SampleRate,
+        buffer_size: match spec.quantum {
+            Some(q) => cpal::BufferSize::Fixed(q.get_u32()),
+            None => cpal::BufferSize::Default,
+        },
     }
 }
 
@@ -124,43 +97,6 @@ fn quantum_for(range: &cpal::SupportedBufferSize) -> Option<MaxBlock> {
     }
 }
 
-/// Decides where an output stream's callback runs.
-///
-/// [`AudioEngine`](crate::AudioEngine) owns the spec, the fault record and the
-/// stop, and hands a driver only the [`OutputBlock`] to run.
-/// [`CpalDriver`] runs it on a real device; [`ManualStreamDriver`] lets the
-/// caller run it by hand.
-pub trait StreamDriver {
-    /// The handle of the started stream; dropping it stops the stream.
-    type Running: RunningStream;
-
-    /// Opens and starts a stream at `spec`, running `block` once per callback
-    /// and recording backend errors into `faults`.
-    ///
-    /// # Errors
-    /// Whatever the driver cannot open; for [`CpalDriver`],
-    /// [`Error::InvalidConfig`] for an unsupported sample format, or
-    /// [`Error::BuildStream`] / [`Error::PlayStream`] from CPAL.
-    fn open(
-        self,
-        spec: &OutputSpec,
-        block: OutputBlock,
-        faults: Arc<StreamFaults>,
-    ) -> Result<Self::Running>;
-}
-
-/// The handle a [`StreamDriver`] hands back. Dropping it stops the stream.
-// `Box<Self>` rather than `self`: `AudioEngine` stores this as a
-// `dyn RunningStream`, and a by-value `self` cannot be called on a trait
-// object.
-pub trait RunningStream: Send {
-    /// Stops the stream. Dropping the handle does the same; this makes the
-    /// stop explicit at the call site.
-    fn stop(self: Box<Self>);
-}
-
-// ------------------------------------------------------------- production --
-
 /// The device driver: runs the callback on a real `cpal::Stream`.
 ///
 /// Created internally by [`AudioEngine::start`](crate::AudioEngine::start) and
@@ -168,6 +104,9 @@ pub trait RunningStream: Send {
 /// device.
 pub struct CpalDriver {
     device: cpal::Device,
+    /// The device's exact sample type, which `spec.sample_format` cannot say
+    /// for the offset-binary formats; one [`spec_format`] accepts.
+    format: cpal::SampleFormat,
 }
 
 impl std::fmt::Debug for CpalDriver {
@@ -177,8 +116,13 @@ impl std::fmt::Debug for CpalDriver {
 }
 
 impl CpalDriver {
-    pub(crate) fn from_device(device: cpal::Device) -> Self {
-        Self { device }
+    /// A driver over `device` at the sample type `format` of its config.
+    ///
+    /// # Errors
+    /// [`Error::InvalidConfig`] for a sample type the driver does not build.
+    pub(crate) fn new(device: cpal::Device, format: cpal::SampleFormat) -> Result<Self> {
+        spec_format(format)?;
+        Ok(Self { device, format })
     }
 }
 
@@ -201,6 +145,7 @@ impl RunningStream for CpalStream {
 
 impl StreamDriver for CpalDriver {
     type Running = CpalStream;
+    type Error = Error;
 
     fn open(
         self,
@@ -208,23 +153,8 @@ impl StreamDriver for CpalDriver {
         block: OutputBlock,
         faults: Arc<StreamFaults>,
     ) -> Result<CpalStream> {
-        let config = spec.stream_config();
-        let format = spec.sample_format;
-        if !matches!(
-            format,
-            cpal::SampleFormat::I8
-                | cpal::SampleFormat::I16
-                | cpal::SampleFormat::I32
-                | cpal::SampleFormat::U8
-                | cpal::SampleFormat::U16
-                | cpal::SampleFormat::U32
-                | cpal::SampleFormat::F32
-                | cpal::SampleFormat::F64
-        ) {
-            return Err(Error::InvalidConfig(format!(
-                "Unsupported sample format: {format:?}"
-            )));
-        }
+        let config = stream_config(spec);
+        let format = self.format;
         Owned::spawn("tutti-output-stream", move || {
             let stream = match format {
                 cpal::SampleFormat::I8 => self.build::<i8>(&config, block, faults)?,
@@ -235,8 +165,8 @@ impl StreamDriver for CpalDriver {
                 cpal::SampleFormat::U32 => self.build::<u32>(&config, block, faults)?,
                 cpal::SampleFormat::F32 => self.build::<f32>(&config, block, faults)?,
                 cpal::SampleFormat::F64 => self.build::<f64>(&config, block, faults)?,
-                // Checked above, before the thread is spawned.
-                _ => unreachable!("sample format checked before spawn"),
+                // Checked by `CpalDriver::new`.
+                _ => unreachable!("sample format checked at construction"),
             };
             stream.play().map_err(Error::PlayStream)?;
             Ok(stream)
@@ -263,7 +193,7 @@ impl CpalDriver {
                 move |data: &mut [T], info: &cpal::OutputCallbackInfo| {
                     // The CPAL contract: a callback no larger than MAX_FRAMES.
                     // The assertion lives HERE, at the boundary CPAL crosses, and
-                    // not inside `render` — it is a claim about CPAL, not about
+                    // not inside `render_with`: it is a claim about CPAL, not about
                     // the block, and keeping it out is what lets a debug-build
                     // test observe the clamp instead of panicking before it.
                     debug_assert!(
@@ -271,207 +201,17 @@ impl CpalDriver {
                         "CPAL callback frames {} exceeds MAX_FRAMES {MAX_FRAMES}",
                         data.len() / channels
                     );
-                    block.render_delayed(data, crate::latency::output_delay(&info.timestamp()));
+                    block.render_delayed_with(
+                        data,
+                        edge::output_delay(&info.timestamp()),
+                        T::from_sample,
+                    );
                     delivering.delivered();
                 },
-                move |err| faults.record(&err),
+                move |err| edge::record(&faults, &err),
                 None,
             )
             .map_err(Error::BuildStream)
-    }
-}
-
-// ------------------------------------------------------------------ tests --
-
-/// A driver that runs no callbacks of its own: the caller runs them through
-/// the paired [`ManualStream`].
-///
-/// For device-free tests of a host's lifecycle: pass it to
-/// [`AudioEngine::start_with`](crate::AudioEngine::start_with) or
-/// [`TuttiDriver::start_with`](crate::TuttiDriver::start_with) and render
-/// blocks with [`ManualStream::render_block`].
-///
-/// # Examples
-///
-/// ```
-/// use tutti_types::MaxBlock;
-/// use std::sync::Arc;
-/// use tutti_engine::Engine;
-/// use tutti_transport::Transport;
-/// use tutti_types::{ChannelLayout, SampleRate, Samples};
-/// use tutti_cpal::{AudioCallbackState, AudioEngine, ManualStreamDriver, OutputSpec};
-/// use tutti_graph::{Editor, Prepare};
-///
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let rate = SampleRate::SR_48K;
-/// let transport = Transport::new(rate);
-/// let (mut editor, executor) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples(512))));
-/// let engine = Engine::new(&transport, &mut editor, executor)?;
-/// let state = Arc::new(AudioCallbackState::new(engine));
-///
-/// let spec = OutputSpec::new(rate, ChannelLayout::STEREO, tutti_cpal::cpal::SampleFormat::F32);
-/// let mut audio = AudioEngine::from_spec(spec);
-/// let (driver, stream) = ManualStreamDriver::new();
-/// audio.start_with(state, driver)?;
-///
-/// let block = stream.render_block(256).expect("the stream is open");
-/// assert_eq!(block.len(), 256 * 2);
-///
-/// audio.stop();
-/// assert!(!stream.is_open());
-/// # Ok(())
-/// # }
-/// ```
-#[derive(Debug)]
-pub struct ManualStreamDriver {
-    slot: Arc<Mutex<Option<OutputBlock>>>,
-    faults: Arc<Mutex<Option<Arc<StreamFaults>>>>,
-}
-
-/// The caller's half of a [`ManualStreamDriver`], used to run callbacks by
-/// hand.
-///
-/// Once the stream is stopped every method returns `None` (or `false`), which
-/// is how a test observes the stop. Each call takes a mutex around the block;
-/// this type is for tests and tools, not the audio thread.
-#[derive(Debug)]
-pub struct ManualStream {
-    slot: Arc<Mutex<Option<OutputBlock>>>,
-    faults: Arc<Mutex<Option<Arc<StreamFaults>>>>,
-}
-
-impl ManualStreamDriver {
-    /// Creates a driver and the handle that runs its callbacks.
-    #[allow(clippy::new_without_default, reason = "returns a pair, not Self")]
-    #[must_use]
-    pub fn new() -> (Self, ManualStream) {
-        let slot = Arc::new(Mutex::new(None));
-        let faults = Arc::new(Mutex::new(None));
-        (
-            Self {
-                slot: Arc::clone(&slot),
-                faults: Arc::clone(&faults),
-            },
-            ManualStream { slot, faults },
-        )
-    }
-}
-
-impl ManualStream {
-    fn with_block<R>(&self, f: impl FnOnce(&mut OutputBlock) -> R) -> Option<R> {
-        let mut guard = self.slot.lock().unwrap_or_else(|p| p.into_inner());
-        guard.as_mut().map(f)
-    }
-
-    /// Runs one callback, exactly as CPAL would, into a device buffer of the
-    /// caller's sample type. Returns `None` if no stream is open.
-    pub fn callback_once<T>(&self, data: &mut [T]) -> Option<()>
-    where
-        T: cpal::SizedSample + cpal::FromSample<f32>,
-    {
-        self.with_block(|b| b.render(data))
-    }
-
-    /// Renders `frames` frames at the stream's width and returns the
-    /// interleaved `f32` buffer, or `None` if no stream is open. Allocates the
-    /// returned buffer.
-    pub fn render_block(&self, frames: usize) -> Option<Vec<f32>> {
-        self.render_block_inner(frames, None)
-    }
-
-    /// [`render_block`](Self::render_block) as a callback whose timestamp
-    /// reports `delay` between the callback and the block's playing, as a
-    /// backend's `OutputCallbackInfo` does: what
-    /// [`AudioEngine::latency`](crate::AudioEngine::latency) then reads.
-    pub fn render_block_delayed(&self, frames: usize, delay: Duration) -> Option<Vec<f32>> {
-        self.render_block_inner(frames, Some(delay))
-    }
-
-    fn render_block_inner(&self, frames: usize, delay: Option<Duration>) -> Option<Vec<f32>> {
-        let channels = self.with_block(|b| b.channels())?;
-        let mut out = vec![0.0f32; frames * channels];
-        self.with_block(|b| b.render_delayed(&mut out, delay))?;
-        if let Some(faults) = self
-            .faults
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .as_ref()
-        {
-            faults.delivered();
-        }
-        Some(out)
-    }
-
-    /// Returns the frames the last callback actually rendered, after the
-    /// [`MAX_FRAMES`] clamp.
-    pub fn last_rendered_frames(&self) -> Option<usize> {
-        self.with_block(|b| b.last_rendered_frames())
-    }
-
-    /// Returns the channel count this stream was opened at.
-    pub fn channels(&self) -> Option<usize> {
-        self.with_block(|b| b.channels())
-    }
-
-    /// Delivers a backend error exactly as CPAL's error callback would, so a
-    /// test can exercise the fault path without unplugging a device. Does
-    /// nothing before the stream is first opened.
-    pub fn fail(&self, err: cpal::Error) {
-        if let Some(faults) = self
-            .faults
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .as_ref()
-        {
-            faults.record(&err);
-        }
-    }
-
-    /// Returns whether a stream is currently open on this handle.
-    #[must_use]
-    pub fn is_open(&self) -> bool {
-        self.slot
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .is_some()
-    }
-}
-
-/// The running handle of a [`ManualStreamDriver`] stream. Dropping it stops
-/// the stream: every [`ManualStream`] call then returns `None`.
-#[derive(Debug)]
-pub struct ManualRunning {
-    slot: Arc<Mutex<Option<OutputBlock>>>,
-}
-
-impl RunningStream for ManualRunning {
-    fn stop(self: Box<Self>) {
-        // Drop does it.
-    }
-}
-
-impl Drop for ManualRunning {
-    fn drop(&mut self) {
-        *self.slot.lock().unwrap_or_else(|p| p.into_inner()) = None;
-    }
-}
-
-impl StreamDriver for ManualStreamDriver {
-    type Running = ManualRunning;
-
-    fn open(
-        self,
-        _spec: &OutputSpec,
-        block: OutputBlock,
-        faults: Arc<StreamFaults>,
-    ) -> Result<ManualRunning> {
-        // The engine's sink reaches the handle here rather than through a
-        // separate wiring call: `open` is the one place both the driver and
-        // the sink are in scope, and a generic `start_with` cannot know it is
-        // holding a manual driver.
-        *self.faults.lock().unwrap_or_else(|p| p.into_inner()) = Some(faults);
-        *self.slot.lock().unwrap_or_else(|p| p.into_inner()) = Some(block);
-        Ok(ManualRunning { slot: self.slot })
     }
 }
 

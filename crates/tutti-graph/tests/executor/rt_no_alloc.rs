@@ -28,8 +28,8 @@ use common::{Kind, TestNode, prepare};
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Buses, CrossfadeCurve, Cx, Editor, EventEdge, EventIn, EventKind, EventOut, Fade, Io, Law,
-    Node, ParamRamp, ParamSegment, Prepare, Shape, Status, TransportPosition, Unforkable,
+    Buses, Cx, Editor, EventEdge, EventIn, EventKind, EventOut, Fade, FadeLaw, Io, Law, Node,
+    ParamRamp, ParamSegment, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, FeedbackFrom, InPort, OutPort, Source};
 use tutti_types::{At, Beat, ChannelLayout, Frame, Latency, Samples, Tail};
@@ -338,7 +338,7 @@ fn crossfades_are_allocation_free_on(workers: usize) {
     ed.collect();
 
     // A long fade, one queued behind it, and one on the event node.
-    let fade = |n| Fade::new(Samples(n), CrossfadeCurve::EqualPower);
+    let fade = |n| Fade::new(Samples(n), FadeLaw::EqualPower);
     ed.replace(NodeKey(1), Unforkable(gain(2.0)), fade(3_000))
         .expect("fits");
     ed.commit().expect("commits");
@@ -451,7 +451,7 @@ fn a_held_chase_is_delivered_allocation_free_on(workers: usize) {
         exec.process(64, &transport, &[], &mut slices);
     };
     block(&mut exec);
-    let fade = |n| Fade::new(Samples(n), CrossfadeCurve::EqualPower);
+    let fade = |n| Fade::new(Samples(n), FadeLaw::EqualPower);
     for k in 0..KEYS {
         ed.replace(
             NodeKey(k + 1),
@@ -912,6 +912,116 @@ fn modulated_params_are_allocation_free() {
 #[test]
 fn parallel_modulated_params_are_allocation_free() {
     modulated_params_are_allocation_free_on(4);
+}
+
+/// Declares `Azimuth` (base 0) and writes what it reads.
+struct AzimuthSink;
+
+impl Node for AzimuthSink {
+    fn shape(&self) -> Shape {
+        Shape::through_unassigned(ChannelLayout::MONO)
+            .with_params(&[tutti_types::UnitParam::Azimuth])
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        for i in 0..io.frames() {
+            io.output(0)[i] = io.param(0).frames().map_or(0.0, |v| v[i]);
+        }
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+    fn param_base(&self, port: usize) -> Option<f32> {
+        (port == 0).then_some(0.0)
+    }
+}
+
+/// An `Azimuth` segment every 29 frames across the seam, both ways, over
+/// every shape class.
+struct SeamEvery;
+
+impl Node for SeamEvery {
+    fn shape(&self) -> Shape {
+        Shape::EMPTY.with_events(0, 1).with_event_capacity(16)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
+        let start = cx.env.frame.get();
+        for i in 0..io.frames() {
+            let f = start + i as u64;
+            if f.is_multiple_of(29) {
+                let o = io.offset(i).expect("inside");
+                let (from, to) = if (f / 29).is_multiple_of(2) {
+                    (170.0, -170.0)
+                } else {
+                    (-175.0, 175.0)
+                };
+                let shape = [Law::Linear, Law::PowerIn(Exponent::of(2.0)), Law::Hold]
+                    [(f / 87) as usize % 3];
+                let seg = ParamSegment::unit(
+                    tutti_types::UnitParam::Azimuth,
+                    from,
+                    to,
+                    Samples(40),
+                    shape,
+                );
+                let _ = io.event_out(0).push(tutti_graph::Event::segment(o, seg));
+            }
+        }
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+/// A bearing's port, wrapping and short-arc interpolating, with its range
+/// moved between blocks (an arc across ±180, the whole circle, unbounded),
+/// allocates nothing.
+#[test]
+fn an_azimuth_param_port_is_allocation_free() {
+    use tutti_graph::{ParamIn, ParamRange};
+    use tutti_types::{ArcDegrees, Azimuth};
+    let (mut ed, mut exec) = Editor::new(prepare(256));
+    ed.insert(NodeKey(1), "sink", Unforkable(AzimuthSink));
+    ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
+    ed.spec_mut()
+        .topology
+        .set_outputs(vec![Source::Node(OutPort {
+            node: NodeKey(1),
+            port: 0,
+        })]);
+    let azimuth = ParamIn {
+        node: NodeKey(1),
+        param: tutti_types::UnitParam::Azimuth.into(),
+    };
+    ed.spec_mut().connect_param(
+        azimuth,
+        EventOut {
+            node: NodeKey(4),
+            port: 0,
+        },
+    );
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    let transport = TransportPosition::default();
+    let mut out = vec![0.0f32; 256];
+    let ranges = [
+        ParamRange::arc(Azimuth(180.0), ArcDegrees(30.0)),
+        ParamRange::new(-180.0, 180.0),
+        ParamRange::UNBOUNDED,
+    ];
+    let sizes = [256usize, 1, 7, 64, 100, 255, 33];
+    for i in 0..60 {
+        ed.set_param_range(azimuth, ranges[i % ranges.len()])
+            .expect("a bearing's range");
+        for &n in &sizes {
+            assert_no_alloc::assert_no_alloc(|| {
+                exec.process(n, &transport, &[], &mut [&mut out[..n]]);
+            });
+        }
+    }
+    assert!(
+        out.iter().all(|v| (-180.0..180.0).contains(v)),
+        "the bearings are wrapped"
+    );
 }
 
 /// `contract::Direct`, the by-hand driver an instrument's allocation gate
@@ -1442,6 +1552,68 @@ fn parallel_toggling_modes_are_allocation_free() {
     toggling_modes_are_allocation_free_on(4);
 }
 
+/// A node that declares its own bypass is called in `Bypassed`, and toggling
+/// its mode and rendering inside `assert_no_alloc` allocates nothing: the
+/// executor neither blends nor parks it, so no fade, reset or park runs. Its
+/// calls are counted: one per block, bypassed or not.
+fn own_bypass_toggling_is_allocation_free_on(workers: usize) {
+    use tutti_graph::NodeMode;
+    use tutti_graph::Unforkable;
+    let (mut ed, mut exec) = Editor::new(prepare(256));
+    use_pool(&mut exec, workers);
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let kind = Kind::OwnBypass {
+        inner: Box::new(Kind::Gain {
+            gain: 2.0,
+            width: 1,
+        }),
+    };
+    ed.insert(
+        NodeKey(1),
+        "own",
+        Unforkable(TestNode::counted(kind, Arc::clone(&calls))),
+    );
+    ed.spec_mut().topology.inputs = ChannelLayout::from_count(1);
+    let t = &mut ed.spec_mut().topology;
+    t.connect(at(1, 0), Edge::Direct(Source::Global(0)));
+    t.set_outputs(vec![Source::Node(OutPort {
+        node: NodeKey(1),
+        port: 0,
+    })]);
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    ed.collect();
+    let input = vec![0.5f32; 256];
+    let mut out = vec![0.0f32; 256];
+    for block in 0..60usize {
+        let mode = [NodeMode::Active, NodeMode::Bypassed][(block / 3) % 2];
+        ed.set_mode(NodeKey(1), mode).expect("a node");
+        assert_no_alloc::assert_no_alloc(|| {
+            exec.process(
+                64,
+                &TransportPosition::default(),
+                &[&input[..64]],
+                &mut [&mut out[..64]],
+            );
+        });
+        assert!(
+            out[..64].iter().all(|&x| x == 1.0),
+            "block {block} in {mode:?}: the node's own output, never blended"
+        );
+    }
+    assert_eq!(calls.load(Ordering::Relaxed), 60, "called every block");
+}
+
+#[test]
+fn own_bypass_toggling_is_allocation_free() {
+    own_bypass_toggling_is_allocation_free_on(1);
+}
+
+#[test]
+fn parallel_own_bypass_toggling_is_allocation_free() {
+    own_bypass_toggling_is_allocation_free_on(4);
+}
+
 /// Moving mixes and rendering inside `assert_no_alloc`, on `workers`
 /// participants: the graph of
 /// the mode gate with every node's mix moved every few blocks (the ends and
@@ -1752,7 +1924,7 @@ fn a_swap_is_allocation_free_on(workers: usize) {
             Unforkable(Chaser {
                 seen: Arc::clone(second),
             }),
-            Fade::new(Samples(0), CrossfadeCurve::EqualPower),
+            Fade::new(Samples(0), FadeLaw::EqualPower),
         )
         .expect("fits");
     }
@@ -1783,4 +1955,64 @@ fn a_swap_is_allocation_free() {
 #[test]
 fn parallel_swap_is_allocation_free() {
     a_swap_is_allocation_free_on(4);
+}
+
+/// An edge fading in, out and back in, and a weight ramping beside it, render
+/// inside `assert_no_alloc`: the fade kernel (`Weight::Fade`) and the ramp run
+/// on every block, across commits (which allocate, outside the gate).
+#[test]
+fn edge_fades_are_allocation_free() {
+    use tutti_graph::{EdgeFade, EdgeGain, EdgeId, Sink};
+    use tutti_types::Amplitude;
+    const BLOCK: usize = 64;
+    let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
+    for n in 1..=2u64 {
+        let k = Kind::Const {
+            value: n as f32,
+            width: 1,
+        };
+        ed.insert(NodeKey(n), "const", Unforkable(TestNode::new(k)));
+    }
+    let src = |n: u64| {
+        Source::Node(OutPort {
+            node: NodeKey(n),
+            port: 0,
+        })
+    };
+    ed.spec_mut().topology.outputs = vec![vec![src(1), src(2)]];
+    let id = |n: u64| EdgeId {
+        sink: Sink::Output(0),
+        from: Edge::Direct(src(n)),
+    };
+    ed.spec_mut()
+        .set_edge_gain(id(1), EdgeGain::new(Amplitude::new(0.5)));
+    ed.spec_mut()
+        .set_edge_gain(id(2), EdgeGain::new(Amplitude::new(0.25)));
+    ed.set_edge_fade(id(1), EdgeFade::In).expect("the edge");
+    ed.commit().expect("commits");
+    exec.apply_pending();
+    ed.collect();
+    let mut out = vec![0.0f32; BLOCK];
+    let mut heard = false;
+    for block in 0..40usize {
+        match block % 10 {
+            3 => ed.set_edge_fade(id(1), EdgeFade::Out).expect("the edge"),
+            6 => ed.set_edge_fade(id(1), EdgeFade::In).expect("the edge"),
+            8 => ed
+                .set_edge_gain(id(2), Amplitude::new(0.75))
+                .expect("the edge"),
+            _ => {}
+        }
+        assert_no_alloc::assert_no_alloc(|| {
+            exec.process(
+                BLOCK,
+                &TransportPosition::default(),
+                &[],
+                &mut [&mut out[..]],
+            );
+        });
+        heard |= out.iter().any(|&x| x != 0.0);
+        ed.collect();
+    }
+    assert!(heard);
 }

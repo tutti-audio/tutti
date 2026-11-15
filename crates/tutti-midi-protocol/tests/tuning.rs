@@ -407,3 +407,16 @@ fn a_message_of_127_changes_is_read() {
     assert_eq!(changes.as_slice().len(), 127);
     assert_eq!(changes.as_slice()[126].frequency.get(), 126 << 14);
 }
+
+/// M1 MTS: frequency data is 21 bits, so `new`, `of`, `TryFrom` and `Into`
+/// agree on `0..=0x1F_FFFF` and refuse the first raw with a 22nd bit.
+#[test]
+fn frequency_data_keeps_the_range_contract() {
+    tutti_fixtures::check_range_contract(&tutti_fixtures::RangeContract {
+        new: TuningFrequency::new,
+        get: TuningFrequency::get,
+        of: Some(TuningFrequency::of),
+        valid: &[0, 1, 0x1F_FFFE, 0x1F_FFFF],
+        invalid: &[0x20_0000, u32::MAX],
+    });
+}
