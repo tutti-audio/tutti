@@ -8,8 +8,9 @@ use std::fmt;
 ///
 /// The session has no key parameter yet, so a pool entry's key is held erased:
 /// [`get`](Self::get) reads it back as the type the app declared it with. Two
-/// keys are equal when they have the same type and are equal; they order by
-/// type, then by value.
+/// keys are equal when they have the same type and are equal. Keys of one type
+/// compare by value, keys of different types by their `TypeId`, so the order is
+/// total.
 pub struct PoolKey(Box<dyn Erased>);
 
 trait Erased: Send {

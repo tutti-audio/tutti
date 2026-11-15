@@ -8,8 +8,7 @@ use crate::pool::entry::{Declared, Life, Load, LoadError, PoolEntry};
 
 /// A wave file, decoded whole: [`audio_file`]'s entry.
 ///
-/// Its identity is the path. A streamed tier and a content stamp, which the
-/// pool's design adds to a file's identity, are not here yet.
+/// Its identity is the path.
 #[cfg(feature = "sampler")]
 #[derive(Clone, Debug)]
 pub struct AudioFile {

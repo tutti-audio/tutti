@@ -9,6 +9,11 @@
 //! holds it, and **released** at the last hold's drop; declaring a held key
 //! again with the same identity adopts it with no reload.
 //!
+//! A key declared again with the same identity keeps what it has, a failed
+//! load included: it does not retry. When an identity changes, the old value
+//! stays until the new load lands; if that load fails the old value is dropped,
+//! its handles read closed, and the entry reads failed.
+//!
 //! Each kind of entry is a [`PoolEntry`]; `audio_file` (feature `sampler`) and
 //! `soundfont` (feature `soundfont`) are the data kinds. A load's outcome lands
 //! in [`Session::update`] as a [`SessionEvent::Pool`], and
@@ -47,15 +52,21 @@ impl Session {
     /// holds it and released otherwise. Declaring a held key again with its
     /// identity adopts it, with no reload.
     ///
+    /// The declaration is whole across key types too: a call with keys of
+    /// another type undeclares every entry declared under the first type.
+    /// Declaring a key again with the same identity does not retry a failed
+    /// load.
+    ///
     /// Returns at once. Each load's outcome lands as a
     /// [`SessionEvent::Pool`] in a later [`update`](Self::update), those of one
-    /// update in the order the set names them.
+    /// update in the order the set names them, then the releases in key order.
+    /// An outcome that landed while its entry was held is reported when the
+    /// pool declares the entry again.
     ///
     /// # Errors
     ///
-    /// [`PoolError::DuplicateKey`] for a key the set names twice,
-    /// [`PoolError::WrongKind`] for a key a node uses. The call refuses the set
-    /// whole: nothing of it is applied.
+    /// [`PoolError::DuplicateKey`] for a key the set names twice. The call
+    /// refuses the set whole: nothing of it is applied.
     pub fn pool<K>(&mut self, parts: impl IntoPool<K>) -> Result<(), PoolError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + 'static,
@@ -93,5 +104,40 @@ impl Session {
     pub(crate) fn pool_events(&mut self, out: &mut Vec<SessionEvent>) {
         self.pool.sweep();
         self.pool.drain_events(out);
+    }
+}
+
+#[cfg(feature = "sampler")]
+impl Session {
+    /// The wave of the `audio_file` entry under `key`.
+    ///
+    /// # Errors
+    ///
+    /// [`HandleError::NotPooled`] when the key is not declared (never, or
+    /// released); [`HandleError::WrongKind`] when it is another kind of entry;
+    /// [`HandleError::NotLoaded`] before the load lands, or after it failed.
+    pub fn audio<K>(&self, key: &K) -> Result<std::sync::Arc<tutti_codec::Wave>, HandleError<K>>
+    where
+        K: Ord + Clone + fmt::Debug + Send + 'static,
+    {
+        self.pool.handle::<K, AudioFile>(key)
+    }
+}
+
+#[cfg(feature = "soundfont")]
+impl Session {
+    /// The SoundFont of the `soundfont` entry under `key`, shared by its `Arc`.
+    ///
+    /// # Errors
+    ///
+    /// As `Session::audio`, for a `soundfont` entry.
+    pub fn soundfont<K>(
+        &self,
+        key: &K,
+    ) -> Result<std::sync::Arc<tutti_sf2::SoundFont>, HandleError<K>>
+    where
+        K: Ord + Clone + fmt::Debug + Send + 'static,
+    {
+        self.pool.handle::<K, SoundFontFile>(key)
     }
 }

@@ -22,9 +22,14 @@ pub enum PoolState {
     /// Declared and loaded.
     Loaded,
     /// Declared and loaded; its identity changed and the new load has not
-    /// landed.
+    /// landed. The old value and its handles stay until the new load lands;
+    /// if it fails, they end (the old handles read
+    /// [`Presence::Closed`](crate::Presence::Closed)) and the entry is
+    /// `Failed`.
     Reloading,
-    /// Declared; its load failed.
+    /// Declared; its load failed. Declaring the key again with the same
+    /// identity does not load again; a retry does. A failed reload leaves no
+    /// value: the old one is dropped.
     Failed(LoadError),
     /// No longer declared, and kept by a node or a snapshot until their last
     /// hold is dropped.
@@ -55,22 +60,20 @@ pub enum PoolError<K: fmt::Debug> {
     /// The set names this key twice.
     #[error("the pool names key {0:?} twice")]
     DuplicateKey(K),
-    /// This key names a node, not a pool entry.
-    #[error("key {0:?} names a node, not a pool entry")]
-    WrongKind(K),
 }
 
-/// Why a key's handle could not be had.
+/// Why a key's reader (`Session::audio`, `Session::soundfont`) found nothing.
 #[derive(Clone, Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum HandleError<K: fmt::Debug> {
-    /// The pool does not declare this key.
+    /// The key was never declared, or its entry was released or is no longer
+    /// declared.
     #[error("key {0:?} is not in the pool")]
     NotPooled(K),
-    /// The key is declared as another kind of entry.
+    /// The key is declared as another kind of entry than the reader's.
     #[error("key {0:?} is a pool entry of another kind")]
     WrongKind(K),
-    /// The entry has not landed: the state says why.
+    /// The entry has not landed; the state says why (loading, or failed).
     #[error("the pool entry has not landed: {0:?}")]
     NotLoaded(PoolState),
 }
@@ -103,6 +106,9 @@ struct Slot {
     life: Life,
     loaded: Option<Value>,
     state: PoolState,
+    /// The outcome that landed while the entry was held: reported when the
+    /// pool declares the entry again.
+    unreported: Option<PoolEvent>,
     /// The load that may land: an older one is stale.
     generation: u64,
 }
@@ -140,10 +146,10 @@ struct Queued {
 #[derive(Default)]
 pub(crate) struct Pool {
     slots: BTreeMap<PoolKey, Slot>,
-    /// The keys a node of the session uses. A pool key never names one.
-    pub(crate) nodes: BTreeSet<PoolKey>,
     last_generation: u64,
     queued: Vec<Queued>,
+    /// Released since the last report.
+    released: Vec<PoolKey>,
 }
 
 impl fmt::Debug for Pool {
@@ -166,19 +172,14 @@ impl Pool {
     ///
     /// # Errors
     ///
-    /// [`PoolError::DuplicateKey`] for a key named twice;
-    /// [`PoolError::WrongKind`] for a key a node uses. Nothing is applied.
+    /// [`PoolError::DuplicateKey`] for a key named twice. Nothing is applied.
     pub(crate) fn declare<K: Ord + Clone + fmt::Debug + Send + 'static>(
         &mut self,
         set: PoolSet<K>,
     ) -> Result<Vec<Start>, PoolError<K>> {
         let mut named = BTreeSet::new();
         for item in &set.items {
-            let key = PoolKey::new(&item.key);
-            if self.nodes.contains(&key) {
-                return Err(PoolError::WrongKind(item.key.clone()));
-            }
-            if !named.insert(key) {
+            if !named.insert(PoolKey::new(&item.key)) {
                 return Err(PoolError::DuplicateKey(item.key.clone()));
             }
         }
@@ -218,6 +219,7 @@ impl Pool {
                     life: Life::new(),
                     loaded: None,
                     state: PoolState::Loading,
+                    unreported: None,
                     generation,
                 },
             );
@@ -230,8 +232,16 @@ impl Pool {
         slot.declared = true;
         slot.order = order;
         if slot.kind == item.kind && slot.identity.same(&*item.identity) {
+            if let Some(event) = slot.unreported.take() {
+                self.queued.push(Queued {
+                    order,
+                    key: key.clone(),
+                    event,
+                });
+            }
             return None;
         }
+        slot.unreported = None;
         slot.kind = item.kind;
         slot.identity = item.identity;
         slot.generation = generation;
@@ -263,11 +273,7 @@ impl Pool {
         for key in released {
             if let Some(slot) = self.slots.remove(&key) {
                 slot.life.close();
-                self.queued.push(Queued {
-                    order: slot.order,
-                    key,
-                    event: PoolEvent::Released,
-                });
+                self.released.push(key);
             }
         }
     }
@@ -307,10 +313,13 @@ impl Pool {
                 key: key.clone(),
                 event,
             });
+        } else {
+            slot.unreported = Some(event);
         }
     }
 
-    /// The events since the last call, in declaration order.
+    /// The events since the last call: landings in the order the current set
+    /// names them, then releases in key order.
     pub(crate) fn drain_events(&mut self, out: &mut Vec<SessionEvent>) {
         self.queued.sort_by_key(|queued| queued.order);
         out.extend(
@@ -318,6 +327,11 @@ impl Pool {
                 .drain(..)
                 .map(|Queued { key, event, .. }| SessionEvent::Pool { key, event }),
         );
+        self.released.sort();
+        out.extend(self.released.drain(..).map(|key| SessionEvent::Pool {
+            key,
+            event: PoolEvent::Released,
+        }));
     }
 
     pub(crate) fn state(&self, key: &PoolKey) -> Option<PoolState> {
@@ -337,8 +351,11 @@ impl Pool {
 
     /// `E`'s handle for the loaded entry under `key`.
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the per-kind handles by key are built over it")
+        not(any(test, feature = "sampler", feature = "soundfont")),
+        expect(
+            dead_code,
+            reason = "the readers of the data kinds (features `sampler`, `soundfont`) are its callers"
+        )
     )]
     pub(crate) fn handle<K, E>(&self, key: &K) -> Result<E::Handle, HandleError<K>>
     where

@@ -101,7 +101,7 @@ impl PoolEntry for Probe {
         Load::on_worker(move || {
             runs.fetch_add(1, Ordering::SeqCst);
             if fail {
-                Err(LoadError::ClockCannotServe)
+                Err(LoadError::Job(JobFailed::Dropped))
             } else {
                 Ok(version * 100 + initial)
             }
@@ -434,17 +434,6 @@ fn a_key_named_twice_is_refused_and_nothing_of_the_set_is_applied() {
 }
 
 #[test]
-fn a_key_a_node_uses_is_refused() {
-    let (mut s, spawned) = session();
-    let runs = runs();
-    s.pool.nodes.insert(PoolKey::new(&"node"));
-    let refused = s.pool((entry("a", probe(1, &runs)), entry("node", probe(1, &runs))));
-    assert_eq!(refused, Err(PoolError::WrongKind("node")));
-    assert_eq!(state(&s, "a"), None, "the call refuses the set whole");
-    assert!(spawned.take().is_empty());
-}
-
-#[test]
 fn a_handle_of_another_kind_or_an_undeclared_key_is_refused() {
     struct Other;
     impl PoolEntry for Other {
@@ -487,10 +476,156 @@ fn a_released_key_can_be_declared_again_and_loads_afresh() {
     assert_eq!(runs.load(Ordering::SeqCst), 2);
 }
 
+/// A second kind with the same identity type and value as [`Probe`].
+struct Twin(u32);
+
+impl PoolEntry for Twin {
+    type Identity = u32;
+    type Loaded = u32;
+    type Handle = u32;
+
+    fn identity(&self) -> u32 {
+        self.0
+    }
+
+    fn load(&self) -> Load<u32> {
+        let version = self.0;
+        Load::on_worker(move || Ok(version))
+    }
+
+    fn handle(loaded: &u32, _: &Life) -> u32 {
+        *loaded
+    }
+}
+
+#[test]
+fn a_key_declared_as_another_kind_with_an_equal_identity_reloads() {
+    let (mut s, spawned) = session();
+    let runs = runs();
+    s.pool(entry("a", probe(1, &runs))).unwrap();
+    spawned.run_all();
+    let _ = events(&mut s);
+    let old = handle(&s, "a").unwrap();
+    s.pool(Declared::new("a", Twin(1))).unwrap();
+    assert_eq!(state(&s, "a").as_deref(), Some("reloading"));
+    assert_eq!(spawned.take().len(), 1, "a load started");
+    s.pool(Declared::new("a", Twin(1))).unwrap();
+    assert!(matches!(handle(&s, "a"), Err(HandleError::WrongKind("a"))));
+    drop(old);
+}
+
+#[test]
+fn a_failed_reload_drops_the_old_value_and_closes_its_handles() {
+    let (mut s, spawned) = session();
+    let runs = runs();
+    s.pool(entry("a", probe(1, &runs))).unwrap();
+    spawned.run_all();
+    let _ = events(&mut s);
+    let old = handle(&s, "a").unwrap();
+    let bad = Probe {
+        fail: true,
+        ..probe(2, &runs)
+    };
+    s.pool(entry("a", bad)).unwrap();
+    assert_eq!(old.presence(), Presence::Live, "until the reload lands");
+    spawned.run_all();
+    let landed = events(&mut s);
+    assert!(landed[0].1.starts_with("failed"), "{landed:?}");
+    assert_eq!(old.presence(), Presence::Closed);
+    assert_eq!(state(&s, "a").as_deref(), Some("failed"));
+    assert!(handle(&s, "a").is_err());
+}
+
+#[test]
+fn a_failed_entry_declared_again_with_its_identity_does_not_retry() {
+    let (mut s, spawned) = session();
+    let runs = runs();
+    let bad = || Probe {
+        fail: true,
+        ..probe(1, &runs)
+    };
+    s.pool(entry("a", bad())).unwrap();
+    spawned.run_all();
+    let _ = events(&mut s);
+    s.pool(entry("a", bad())).unwrap();
+    assert!(spawned.take().is_empty());
+    assert_eq!(state(&s, "a").as_deref(), Some("failed"));
+}
+
+#[test]
+fn an_outcome_that_landed_while_held_is_reported_when_the_entry_is_adopted() {
+    let (mut s, spawned) = session();
+    let runs = runs();
+    s.pool(entry("a", probe(1, &runs))).unwrap();
+    let hold = s.pool.hold(&PoolKey::new(&"a")).unwrap();
+    undeclare(&mut s);
+    spawned.run_all();
+    assert!(events(&mut s).is_empty(), "held: nothing to report yet");
+    s.pool(entry("a", probe(1, &runs))).unwrap();
+    assert_eq!(events(&mut s), [("a", "loaded".to_owned())], "once");
+    assert!(events(&mut s).is_empty());
+    drop(hold);
+}
+
+#[test]
+fn releases_are_reported_after_the_sets_landings_in_key_order() {
+    let (mut s, spawned) = session();
+    let runs = runs();
+    s.pool((
+        entry("z", probe(1, &runs)),
+        entry("m", probe(1, &runs)),
+        entry("b", probe(1, &runs)),
+    ))
+    .unwrap();
+    spawned.run_all();
+    let _ = events(&mut s);
+    s.pool(entry("new", probe(1, &runs))).unwrap();
+    spawned.run_all();
+    assert_eq!(
+        events(&mut s),
+        [
+            ("new", "loaded".to_owned()),
+            ("b", "released".to_owned()),
+            ("m", "released".to_owned()),
+            ("z", "released".to_owned()),
+        ]
+    );
+}
+
+#[test]
+fn a_refused_set_applies_nothing_while_a_release_is_pending() {
+    let (mut s, spawned) = session();
+    let runs = runs();
+    s.pool(entry("gone", probe(1, &runs))).unwrap();
+    spawned.run_all();
+    let _ = events(&mut s);
+    s.pool(entry("kept", probe(1, &runs))).unwrap(); // releases "gone", unreported
+    spawned.run_all();
+    let refused = s.pool((
+        entry("new", probe(1, &runs)),
+        entry("twice", probe(1, &runs)),
+        entry("twice", probe(1, &runs)),
+    ));
+    assert_eq!(refused, Err(PoolError::DuplicateKey("twice")));
+    assert_eq!(
+        state(&s, "kept").as_deref(),
+        Some("loading"),
+        "still declared"
+    );
+    assert_eq!(state(&s, "new"), None);
+    assert_eq!(
+        events(&mut s),
+        [
+            ("kept", "loaded".to_owned()),
+            ("gone", "released".to_owned())
+        ]
+    );
+}
+
 #[cfg(feature = "sampler")]
 mod audio {
     use super::*;
-    use crate::{AudioFile, audio_file};
+    use crate::audio_file;
 
     fn write_wav(path: &std::path::Path, frames: u32) {
         let spec = hound::WavSpec {
@@ -509,7 +644,7 @@ mod audio {
     }
 
     fn wave(session: &Session, key: &'static str) -> Arc<tutti_codec::Wave> {
-        session.pool.handle::<_, AudioFile>(&key).unwrap()
+        session.audio(&key).unwrap()
     }
 
     #[test]
@@ -536,6 +671,39 @@ mod audio {
     }
 
     #[test]
+    fn the_audio_reader_names_why_there_is_no_wave() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.wav");
+        write_wav(&path, 10);
+        let (mut s, spawned) = session();
+        assert!(matches!(
+            s.audio(&"kick"),
+            Err(HandleError::NotPooled("kick"))
+        ));
+        s.pool((
+            audio_file("kick", &path),
+            Declared::new("other", probe(1, &runs())),
+        ))
+        .unwrap();
+        assert!(matches!(
+            s.audio(&"kick"),
+            Err(HandleError::NotLoaded(PoolState::Loading))
+        ));
+        spawned.run_all();
+        let _ = s.update();
+        assert!(s.audio(&"kick").is_ok());
+        assert!(matches!(
+            s.audio(&"other"),
+            Err(HandleError::WrongKind("other"))
+        ));
+        undeclare(&mut s);
+        assert!(matches!(
+            s.audio(&"kick"),
+            Err(HandleError::NotPooled("kick"))
+        ));
+    }
+
+    #[test]
     fn a_missing_audio_file_fails_with_a_decode_error() {
         let dir = tempfile::tempdir().unwrap();
         let (mut s, spawned) = session();
@@ -546,6 +714,10 @@ mod audio {
         assert!(matches!(
             s.pool_state(&"kick"),
             Some(PoolState::Failed(LoadError::Decode(_)))
+        ));
+        assert!(matches!(
+            s.audio(&"kick"),
+            Err(HandleError::NotLoaded(PoolState::Failed(_)))
         ));
     }
 
@@ -567,7 +739,7 @@ mod audio {
 #[cfg(feature = "soundfont")]
 mod font {
     use super::*;
-    use crate::{SoundFontFile, soundfont};
+    use crate::soundfont;
 
     #[test]
     fn a_soundfont_declared_loads_its_presets_and_is_shared_by_its_arc() {
@@ -576,8 +748,8 @@ mod font {
         s.pool(soundfont("gm", &path)).unwrap();
         spawned.run_all();
         assert_eq!(events(&mut s), [("gm", "loaded".to_owned())]);
-        let font = s.pool.handle::<_, SoundFontFile>(&"gm").unwrap();
-        let again = s.pool.handle::<_, SoundFontFile>(&"gm").unwrap();
+        let font = s.soundfont(&"gm").unwrap();
+        let again = s.soundfont(&"gm").unwrap();
         assert!(Arc::ptr_eq(&font, &again), "one parsed font");
         assert!(!font.presets().is_empty());
     }

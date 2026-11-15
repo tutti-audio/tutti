@@ -147,10 +147,6 @@ pub enum LoadError {
     #[cfg(feature = "soundfont")]
     #[error(transparent)]
     SoundFont(Arc<tutti_sf2::Error>),
-    /// The session's clock cannot serve the entry (a capture on a system
-    /// clock).
-    #[error("the session's clock cannot serve this entry")]
-    ClockCannotServe,
     /// The load's job did not finish: it panicked, or the spawner dropped it.
     #[error(transparent)]
     Job(#[from] JobFailed),
@@ -258,7 +254,7 @@ impl<K, T: IntoPool<K>, const N: usize> IntoPool<K> for [T; N] {
 macro_rules! tuples {
     ($(($($part:ident),+))+) => {$(
         impl<K, $($part: IntoPool<K>),+> IntoPool<K> for ($($part,)+) {
-            #[allow(non_snake_case)]
+            #[expect(non_snake_case, reason = "the parts are named by their type parameters")]
             fn into_pool(self, set: &mut PoolSet<K>) {
                 let ($($part,)+) = self;
                 $($part.into_pool(set);)+
