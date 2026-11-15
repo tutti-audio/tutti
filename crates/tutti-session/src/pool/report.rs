@@ -80,7 +80,7 @@ impl<K> PoolReport<K> {
 }
 
 /// Why [`PoolLoaded::wait`] did not return a report.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
 pub enum PoolWaitError {
     /// An entry waits for its main-thread stage, and the calling thread is not
