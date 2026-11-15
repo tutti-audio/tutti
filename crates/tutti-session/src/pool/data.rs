@@ -9,7 +9,7 @@ use crate::pool::entry::{Declared, Life, Load, LoadError, PoolEntry};
 /// A wave file: [`audio_file`]'s entry, decoded whole (resident) or probed for
 /// a disk stream ([`streamed`](Declared::streamed)).
 ///
-/// Its identity is the path and the tier.
+/// Its identity is the path and the tier ([`Tier`]).
 #[cfg(feature = "sampler")]
 #[derive(Clone, Debug)]
 pub struct AudioFile {
@@ -20,11 +20,19 @@ pub struct AudioFile {
 /// Where a file's samples are read from: half of [`AudioFile`]'s identity.
 #[cfg(feature = "sampler")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Tier {
     /// Decoded whole into memory.
     Resident,
     /// Read from disk by a stream.
     Streamed,
+    /// By the file's size: streamed when the file can be streamed and its
+    /// decoded size (`frames * channels * 4` bytes of `f32`) is more than
+    /// `above` bytes, resident otherwise.
+    Auto {
+        /// The decoded size, in bytes, past which the file streams.
+        above: u64,
+    },
 }
 
 /// What a landed [`audio_file`] entry reads as: the decoded wave of a resident
@@ -68,6 +76,19 @@ impl StreamInfo {
     }
 }
 
+#[cfg(feature = "sampler")]
+impl AudioFile {
+    /// The default threshold of [`auto`](Declared::auto): 32 MiB of decoded
+    /// `f32` samples, 95 seconds of 44.1 kHz stereo.
+    ///
+    /// A resident wave costs its decoded size for as long as it lives, and a
+    /// session holds one per file in use; a stream costs a ring and a decode
+    /// on the streamer's thread whatever the file's length. Samples, loops and
+    /// stems of a minute or so sit under the line, where a wave in memory seeks
+    /// and loops with no read behind it; a song or a long take sits over it.
+    pub const STREAM_ABOVE_BYTES: u64 = 32 * 1024 * 1024;
+}
+
 /// Declares the wave file at `path` under `key`, decoded whole; the entry reads
 /// as [`AudioEntry::Resident`]. Another key declared with the same path shares
 /// the one decode, and every handle is the same `Arc`.
@@ -91,6 +112,28 @@ impl<K> Declared<K, AudioFile> {
         self.entry.tier = Tier::Streamed;
         self
     }
+
+    /// The tier chosen by the file's size, past [`AudioFile::STREAM_ABOVE_BYTES`]:
+    /// [`streamed_above`](Self::streamed_above) with that threshold.
+    pub fn auto(self) -> Self {
+        self.streamed_above(AudioFile::STREAM_ABOVE_BYTES)
+    }
+
+    /// The tier chosen by the file's size: the entry reads as
+    /// [`AudioEntry::Streamed`] when the file can be streamed and its decoded
+    /// size (`frames * channels * 4` bytes) is more than `bytes`, and as
+    /// [`AudioEntry::Resident`] otherwise, a file that cannot be streamed
+    /// included. The threshold is part of the identity: changing it reloads.
+    ///
+    /// The choice is the file's alone: it does not ask whether the session has
+    /// a disk streamer, so a streamed reading of a session built without one
+    /// fails at [`open_stream`](crate::Session::open_stream) with
+    /// [`SamplerError::NoStreamer`](crate::SamplerError::NoStreamer), the call
+    /// that needs the streamer.
+    pub fn streamed_above(mut self, bytes: u64) -> Self {
+        self.entry.tier = Tier::Auto { above: bytes };
+        self
+    }
 }
 
 #[cfg(feature = "sampler")]
@@ -104,22 +147,29 @@ impl PoolEntry for AudioFile {
     }
 
     fn load(&self) -> Load<Self::Loaded> {
-        let path = self.path.clone();
-        match self.tier {
-            Tier::Resident => Load::on_worker(move || {
-                tutti_codec::Wave::read(path)
-                    .map(|wave| AudioEntry::Resident(Arc::new(wave)))
-                    .map_err(|error| LoadError::Decode(Arc::new(error)))
-            }),
-            Tier::Streamed => Load::on_worker(move || {
-                let facts = tutti_sampler::probe(&path)
-                    .map_err(|error| LoadError::Probe(Arc::new(error)))?;
-                if !facts.streamable {
-                    return Err(LoadError::NotStreamable(path));
+        let (path, tier) = (self.path.clone(), self.tier);
+        Load::on_worker(move || match tier {
+            Tier::Resident => resident(path),
+            Tier::Streamed => {
+                let facts = probe(&path)?;
+                if facts.streamable {
+                    Ok(streamed(path, facts))
+                } else {
+                    Err(LoadError::NotStreamable(path))
                 }
-                Ok(AudioEntry::Streamed(Arc::new(StreamInfo { path, facts })))
-            }),
-        }
+            }
+            Tier::Auto { above } => {
+                let facts = probe(&path)?;
+                let bytes = facts.frames.map_or(0, |frames| {
+                    frames.get() as u64 * u64::from(facts.layout.count()) * 4
+                });
+                if facts.streamable && bytes > above {
+                    Ok(streamed(path, facts))
+                } else {
+                    resident(path)
+                }
+            }
+        })
     }
 
     fn file(&self) -> Option<&std::path::Path> {
@@ -129,6 +179,23 @@ impl PoolEntry for AudioFile {
     fn handle(loaded: &Self::Loaded, _: &Life) -> Self::Handle {
         loaded.clone()
     }
+}
+
+#[cfg(feature = "sampler")]
+fn probe(path: &std::path::Path) -> Result<tutti_sampler::SampleFacts, LoadError> {
+    tutti_sampler::probe(path).map_err(|error| LoadError::Probe(Arc::new(error)))
+}
+
+#[cfg(feature = "sampler")]
+fn streamed(path: PathBuf, facts: tutti_sampler::SampleFacts) -> AudioEntry {
+    AudioEntry::Streamed(Arc::new(StreamInfo { path, facts }))
+}
+
+#[cfg(feature = "sampler")]
+fn resident(path: PathBuf) -> Result<AudioEntry, LoadError> {
+    tutti_codec::Wave::read(path)
+        .map(|wave| AudioEntry::Resident(Arc::new(wave)))
+        .map_err(|error| LoadError::Decode(Arc::new(error)))
 }
 
 /// A SoundFont file, parsed: [`soundfont`]'s entry.

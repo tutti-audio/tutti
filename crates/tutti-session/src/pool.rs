@@ -72,7 +72,7 @@ mod wait;
 
 pub use config::PoolConfig;
 #[cfg(feature = "sampler")]
-pub use data::{AudioEntry, AudioFile, StreamInfo, audio_file};
+pub use data::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 #[cfg(feature = "soundfont")]
 pub use data::{SoundFontFile, soundfont};
 pub use entry::{
@@ -81,7 +81,7 @@ pub use entry::{
 pub use key::PoolKey;
 pub use open::OpenCx;
 pub use refresh::RefreshPool;
-pub use report::{PoolLoaded, PoolOutcome, PoolReport};
+pub use report::{PoolOutcome, PoolReport};
 pub(crate) use table::Pool;
 pub use table::{HandleError, PoolError, PoolEvent, PoolState, RetryError, WhenLoadedError};
 pub use wait::PoolWait;
@@ -164,7 +164,7 @@ impl Session {
     ///
     /// `K` is the type of the keys the pool was declared with; keys of another
     /// type are not in the report.
-    pub fn pool_loaded<K>(&mut self) -> PoolLoaded<K>
+    pub fn pool_loaded<K>(&mut self) -> PoolWait<PoolReport<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
@@ -184,6 +184,12 @@ impl Session {
     /// [`PoolState::Reloading`] until it lands). It is dropped without
     /// running when its entry is released, and while the entry is only held it
     /// waits.
+    ///
+    /// The runs of one update go one at a time, each checked against the pool
+    /// as the run before it left it: a run whose entry an earlier run released
+    /// is dropped. A run asked from inside a run waits for the next update. A
+    /// run that panics unwinds out of `update`, and the runs after it stay
+    /// asked for the next one.
     ///
     /// # Errors
     ///
@@ -208,7 +214,9 @@ impl Session {
     /// whose stamp differs reloads as it does for a changed identity (the old
     /// value stays until the new one lands, as a [`PoolEvent::Reloaded`]), and
     /// two keys that share a load reload with one. An entry whose file can no
-    /// longer be read keeps what it has, and is named as unreadable.
+    /// longer be read keeps what it has, and is named as unreadable. An entry
+    /// with no stamp (its stat failed when it loaded, or its load had no worker
+    /// stage) is stamped by this check, and loads again once the file reads.
     ///
     /// This is the one place the pool reads file metadata: [`pool`](Self::pool)
     /// never does, so a key declared after its file changed shares the loaded

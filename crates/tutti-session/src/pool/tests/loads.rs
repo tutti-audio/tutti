@@ -1108,3 +1108,52 @@ fn when_loaded_names_a_key_the_pool_does_not_declare_at_the_call() {
         Err(crate::WhenLoadedError::NotPooled("a"))
     );
 }
+
+#[test]
+fn a_when_loaded_run_whose_entry_an_earlier_run_released_is_dropped() {
+    let (mut s, spawned) = session();
+    let log = Log::default();
+    s.pool((
+        declare(&stub("a", How::Worker, &log)),
+        declare(&stub("b", How::Worker, &log)),
+    ))
+    .unwrap();
+    spawned.run_all();
+    let _ = s.update();
+    let ran = Arc::new(Mutex::new(Vec::new()));
+    let (first, second) = (Arc::clone(&ran), Arc::clone(&ran));
+    s.when_loaded(&"a", move |session: &mut Session| {
+        first.lock().unwrap().push("a");
+        session.pool::<&'static str>(()).unwrap();
+    })
+    .unwrap();
+    s.when_loaded(&"b", move |_: &mut Session| {
+        second.lock().unwrap().push("b")
+    })
+    .unwrap();
+    let _ = s.update();
+    assert_eq!(*ran.lock().unwrap(), ["a"], "b was released by a's run");
+}
+
+#[test]
+fn a_when_loaded_run_asked_inside_a_run_waits_for_the_next_update() {
+    let (mut s, spawned) = session();
+    let log = Log::default();
+    s.pool(declare(&stub("a", How::Worker, &log))).unwrap();
+    spawned.run_all();
+    let _ = s.update();
+    let count = Arc::new(Mutex::new(0));
+    let inner = Arc::clone(&count);
+    s.when_loaded(&"a", move |session: &mut Session| {
+        *inner.lock().unwrap() += 1;
+        let again = Arc::clone(&inner);
+        session
+            .when_loaded(&"a", move |_: &mut Session| *again.lock().unwrap() += 10)
+            .unwrap();
+    })
+    .unwrap();
+    let _ = s.update();
+    assert_eq!(*count.lock().unwrap(), 1);
+    let _ = s.update();
+    assert_eq!(*count.lock().unwrap(), 11);
+}

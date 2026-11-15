@@ -31,15 +31,16 @@ impl RefreshPool {
     }
 }
 
-/// One entry's file, checked: the stamp it was read under and the stamp now.
+/// One entry's file, checked: the stamp it was read under (none when the stat
+/// failed at its load) and the stamp now.
 pub(crate) struct Checked {
     pub(crate) key: PoolKey,
-    pub(crate) was: Stamp,
+    pub(crate) was: Option<Stamp>,
     pub(crate) now: Result<Stamp, io::ErrorKind>,
 }
 
 /// Takes each file's stamp again. This is the refresh's worker stage.
-pub(crate) fn check(files: Vec<(PoolKey, PathBuf, Stamp)>) -> Vec<Checked> {
+pub(crate) fn check(files: Vec<(PoolKey, PathBuf, Option<Stamp>)>) -> Vec<Checked> {
     files
         .into_iter()
         .map(|(key, path, was)| Checked {

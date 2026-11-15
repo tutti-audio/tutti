@@ -189,11 +189,11 @@ pub use plugin::{
 };
 pub(crate) use pool::Pool;
 #[cfg(feature = "sampler")]
-pub use pool::{AudioEntry, AudioFile, StreamInfo, audio_file};
+pub use pool::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 pub use pool::{
     Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, Parking, PoolConfig, PoolEntry,
-    PoolError, PoolEvent, PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet, PoolState,
-    PoolWait, RefreshPool, RetryError, WhenLoadedError, stranded_loads,
+    PoolError, PoolEvent, PoolKey, PoolOutcome, PoolReport, PoolSet, PoolState, PoolWait,
+    RefreshPool, RetryError, WhenLoadedError, stranded_loads,
 };
 #[cfg(feature = "soundfont")]
 pub use pool::{SoundFontFile, soundfont};

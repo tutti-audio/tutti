@@ -119,7 +119,11 @@ impl Session {
         self.pool_openings();
         self.pool.sweep();
         self.pool.poll_waiters();
-        for then in self.pool.take_loaded() {
+        // One at a time, each over the pool as the run before it left it. A run
+        // asked during these waits for the next update; one that panics leaves
+        // the rest waiting.
+        let through = self.pool.last_when();
+        while let Some(then) = self.pool.next_loaded(through) {
             then(self);
         }
         self.pool.drain_events(out);

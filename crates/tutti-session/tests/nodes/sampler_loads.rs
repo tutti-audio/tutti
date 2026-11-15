@@ -236,3 +236,79 @@ fn a_clip_of_either_tier_plays_the_files_samples() {
         }
     }
 }
+
+/// Updates until the entry under `key` has landed.
+fn settle(s: &mut Session, key: &'static str) {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !matches!(s.pool_state(&key), Some(PoolState::Loaded)) {
+        assert!(Instant::now() < deadline, "the entry never loaded");
+        let _ = s.update();
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// **`auto` decides by the file's decoded size.** A short file reads resident,
+/// holding the ramp the test wrote (frame `i` is `value(i)`); one past
+/// `AudioFile::STREAM_ABOVE_BYTES` of decoded audio reads streamed, with the
+/// frame count the test wrote. (The long file is 16-bit mono, whose decoded
+/// `f32` form is twice its size on disk.)
+#[test]
+fn auto_streams_a_file_past_the_threshold_and_holds_a_short_one() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let short = dir.path().join("short.wav");
+    write_ramp(&short);
+    let long = dir.path().join("long.wav");
+    let frames = (tutti_session::AudioFile::STREAM_ABOVE_BYTES / 4) as usize + 1;
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 8_000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut w = hound::WavWriter::create(&long, spec).expect("creates");
+    for _ in 0..frames {
+        w.write_sample(0i16).expect("writes");
+    }
+    w.finalize().expect("finalizes");
+
+    let mut s = session();
+    s.pool((
+        audio_file("short", &short).auto(),
+        audio_file("long", &long).auto(),
+    ))
+    .expect("a declaration");
+    settle(&mut s, "short");
+    settle(&mut s, "long");
+    let AudioEntry::Resident(wave) = s.audio(&"short").expect("loaded") else {
+        panic!("a short file is resident");
+    };
+    for i in 0..LEN {
+        assert_eq!(wave.at(0, i), value(i), "frame {i}");
+    }
+    let AudioEntry::Streamed(info) = s.audio(&"long").expect("loaded") else {
+        panic!("a file past the line streams");
+    };
+    assert_eq!(info.facts().frames.map(|f| f.get()), Some(frames));
+}
+
+/// The threshold is part of the identity: a file under the default line reads
+/// streamed under a lower one, after a reload.
+#[test]
+fn the_threshold_is_part_of_the_identity() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("ramp.wav");
+    write_ramp(&path);
+    let mut s = session();
+    s.pool(audio_file("a", &path).auto())
+        .expect("a declaration");
+    settle(&mut s, "a");
+    assert!(matches!(s.audio(&"a"), Ok(AudioEntry::Resident(_))));
+    s.pool(audio_file("a", &path).streamed_above((LEN as u64) * 4 - 1))
+        .expect("a declaration");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !matches!(s.audio(&"a"), Ok(AudioEntry::Streamed(_))) {
+        assert!(Instant::now() < deadline, "the entry never reloaded");
+        let _ = s.update();
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}

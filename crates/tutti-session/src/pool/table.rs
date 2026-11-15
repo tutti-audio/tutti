@@ -319,6 +319,7 @@ pub(crate) struct MainItem {
 
 /// What the app asked to run once an entry is loaded.
 struct WhenLoaded {
+    seq: u64,
     key: PoolKey,
     then: Box<dyn FnOnce(&mut crate::Session) + Send>,
 }
@@ -353,6 +354,7 @@ pub(crate) struct Pool {
     waiters: Vec<Box<dyn FnMut(&Pool) -> bool + Send>>,
     /// Runs waiting for an entry to load, in the order they were asked.
     when_loaded: Vec<WhenLoaded>,
+    last_when: u64,
 }
 
 impl fmt::Debug for Pool {
@@ -381,6 +383,7 @@ impl Pool {
             last_rank: 0,
             waiters: Vec::new(),
             when_loaded: Vec::new(),
+            last_when: 0,
         }
     }
 
@@ -580,6 +583,7 @@ impl Pool {
         self.slots.iter().find_map(|(other, slot)| {
             let alike = other != key
                 && slot.kind == own.kind
+                && slot.declared
                 && slot.share.is_some()
                 && matches!(slot.state, PoolState::Loaded)
                 && slot.identity.same(&*own.identity);
@@ -971,34 +975,47 @@ impl Pool {
         if !self.slots.get(&erased).is_some_and(|slot| slot.declared) {
             return Err(WhenLoadedError::NotPooled(key.clone()));
         }
-        self.when_loaded.push(WhenLoaded { key: erased, then });
+        self.last_when += 1;
+        self.when_loaded.push(WhenLoaded {
+            seq: self.last_when,
+            key: erased,
+            then,
+        });
         Ok(())
     }
 
-    /// The runs whose entry is declared and loaded, in the order they were
-    /// asked, taken out. A run whose entry was released is dropped; one whose
-    /// entry is loading, failed or held keeps waiting.
-    pub(crate) fn take_loaded(&mut self) -> Vec<Box<dyn FnOnce(&mut crate::Session) + Send>> {
+    /// The next run, of those asked up to `through`, whose entry is declared
+    /// and loaded now, taken out. A run whose entry was released is dropped;
+    /// one whose entry is loading, failed or held keeps waiting. The caller
+    /// asks again after each run, so a run sees what the one before it did.
+    pub(crate) fn next_loaded(
+        &mut self,
+        through: u64,
+    ) -> Option<Box<dyn FnOnce(&mut crate::Session) + Send>> {
         let slots = &self.slots;
         self.when_loaded.retain(|run| slots.contains_key(&run.key));
-        let (ready, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.when_loaded)
-            .into_iter()
-            .partition(|run| {
-                slots
+        let at = self.when_loaded.iter().position(|run| {
+            run.seq <= through
+                && slots
                     .get(&run.key)
                     .is_some_and(|slot| slot.declared && matches!(slot.state, PoolState::Loaded))
-            });
-        self.when_loaded = waiting;
-        ready.into_iter().map(|run| run.then).collect()
+        })?;
+        Some(self.when_loaded.remove(at).then)
+    }
+
+    /// The newest run asked: the bound of one update's runs.
+    pub(crate) const fn last_when(&self) -> u64 {
+        self.last_when
     }
 
     /// The declared, loaded entries that read a file, with the file and the
-    /// stamp it was read under.
-    pub(crate) fn stamped_files(&self) -> Vec<(PoolKey, PathBuf, Stamp)> {
+    /// stamp it was read under, `None` for one whose stat failed at its load
+    /// (the refresh tries again).
+    pub(crate) fn stamped_files(&self) -> Vec<(PoolKey, PathBuf, Option<Stamp>)> {
         self.slots
             .iter()
             .filter(|(_, slot)| slot.declared && matches!(slot.state, PoolState::Loaded))
-            .filter_map(|(key, slot)| Some((key.clone(), slot.file.clone()?, slot.stamp.clone()?)))
+            .filter_map(|(key, slot)| Some((key.clone(), slot.file.clone()?, slot.stamp.clone())))
             .collect()
     }
 
@@ -1010,15 +1027,13 @@ impl Pool {
         let mut refreshed = RefreshPool::default();
         for Checked { key, was, now } in checked {
             let current = self.slots.get(&key).is_some_and(|slot| {
-                slot.declared
-                    && matches!(slot.state, PoolState::Loaded)
-                    && slot.stamp.as_ref() == Some(&was)
+                slot.declared && matches!(slot.state, PoolState::Loaded) && slot.stamp == was
             });
             if !current {
                 continue;
             }
             match now {
-                Ok(now) if now == was => {}
+                Ok(now) if Some(&now) == was.as_ref() => {}
                 Ok(_) => refreshed.reloaded.push(key),
                 Err(kind) => refreshed.unreadable.push((key, kind)),
             }

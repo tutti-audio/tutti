@@ -1,7 +1,6 @@
 //! The pool's settled outcome, and the handle that waits for it.
 
 use crate::pool::entry::LoadError;
-use crate::pool::wait::PoolWait;
 
 /// How one declared entry ended its load.
 #[derive(Clone, Debug)]
@@ -72,10 +71,3 @@ impl<K> PoolReport<K> {
         self.failures().next().is_none()
     }
 }
-
-/// Every declared entry's outcome, once none is pending: what
-/// [`Session::pool_loaded`](crate::Session::pool_loaded) lands. The app calls
-/// [`update`](crate::Session::update) until
-/// [`has_landed`](PoolWait::has_landed), then [`take`](PoolWait::take)s the
-/// report.
-pub type PoolLoaded<K> = PoolWait<PoolReport<K>>;

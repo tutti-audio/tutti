@@ -197,3 +197,81 @@ fn a_kind_with_no_file_is_not_refreshed() {
     let found = refreshed(&mut s, &spawned);
     assert!(found.reloaded().is_empty() && found.unreadable().is_empty());
 }
+
+/// A kind whose value lands with no worker stage, so no stamp was taken.
+struct Unstamped {
+    path: PathBuf,
+}
+
+impl PoolEntry for Unstamped {
+    type Identity = PathBuf;
+    type Loaded = u8;
+    type Handle = u8;
+
+    fn identity(&self) -> PathBuf {
+        self.path.clone()
+    }
+
+    fn load(&self) -> Load<u8> {
+        Load::ready(0)
+    }
+
+    fn file(&self) -> Option<&Path> {
+        Some(&self.path)
+    }
+
+    fn handle(loaded: &u8, _: &Life) -> u8 {
+        *loaded
+    }
+}
+
+#[test]
+fn an_entry_with_no_stamp_is_stamped_by_the_refresh_and_loads_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("a.bin");
+    std::fs::write(&path, b"one").unwrap();
+    let (mut s, spawned) = session();
+    s.pool(Declared::new("a", Unstamped { path })).unwrap();
+    let _ = events(&mut s);
+    assert!(
+        s.pool
+            .stamped_files()
+            .iter()
+            .all(|(_, _, was)| was.is_none())
+    );
+    let found = refreshed(&mut s, &spawned);
+    assert_eq!(
+        found.reloaded(),
+        [PoolKey::new(&"a")],
+        "now readable, so stamped by loading"
+    );
+}
+
+#[test]
+fn a_reload_never_copies_the_stale_value_of_a_held_sibling() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("a.bin");
+    std::fs::write(&path, b"one").unwrap();
+    let (mut s, spawned) = session();
+    let reads = Arc::new(AtomicUsize::new(0));
+    s.pool((read("a", &path, &reads), read("b", &path, &reads)))
+        .unwrap();
+    spawned.run_all();
+    let _ = events(&mut s);
+    let _hold = s
+        .pool
+        .hold(&PoolKey::new(&"b"), crate::pool::table::HoldKind::Node)
+        .unwrap();
+    s.pool(read("a", &path, &reads)).unwrap();
+    assert_eq!(state(&s, "b").as_deref(), Some("held"));
+    std::fs::write(&path, b"changed").unwrap();
+    refreshed(&mut s, &spawned);
+    assert_eq!(
+        state(&s, "a").as_deref(),
+        Some("reloading"),
+        "not the held sibling's old value"
+    );
+    spawned.run_all();
+    let _ = events(&mut s);
+    assert_eq!(bytes(&s, "a"), b"changed");
+}
