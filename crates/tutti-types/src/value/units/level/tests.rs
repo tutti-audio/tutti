@@ -165,6 +165,20 @@ fn a_gain_converts_to_and_from_an_amplitude() {
 }
 
 #[test]
+fn a_gain_magnitude_drops_the_sign_and_keeps_the_level() {
+    assert_eq!(Gain(-0.5).magnitude(), Amplitude(0.5));
+    assert_eq!(Gain(0.5).magnitude(), Amplitude(0.5));
+    assert_eq!(Gain::INVERTING.magnitude(), Amplitude::UNITY);
+    assert_eq!(Gain::SILENT.magnitude(), Amplitude::SILENT);
+    assert_eq!(Gain(-0.0).magnitude().get().to_bits(), 0.0f32.to_bits());
+    assert!(Gain(f32::NAN).magnitude().get().is_nan());
+    for g in [-4.0, -1.0, -0.25, 0.0, 0.25, 1.0, 4.0] {
+        assert_eq!(Gain(g).magnitude(), Gain(-g).magnitude());
+        assert_eq!(Gain(g).magnitude().get(), g.abs());
+    }
+}
+
+#[test]
 fn a_gain_reciprocal_undoes_it_and_refuses_zero() {
     assert_eq!(Gain(4.0).recip(), Some(Gain(0.25)));
     assert_eq!(Gain(-0.5).recip(), Some(Gain(-2.0)));
