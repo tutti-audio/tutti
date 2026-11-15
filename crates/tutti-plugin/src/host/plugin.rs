@@ -28,8 +28,7 @@ use tutti_plugin_types::BridgeResult;
     all(feature = "au", target_os = "macos")
 ))]
 use tutti_plugin_types::PluginFormat;
-use tutti_plugin_types::PluginRole;
-use tutti_plugin_types::{Features, LoadedPlugin, PluginDescriptor};
+use tutti_plugin_types::{Features, LoadedPlugin, PluginDescriptor, PluginRole};
 use tutti_types::SampleRate;
 
 /// The audio node, wherever it runs.
@@ -224,7 +223,8 @@ impl Plugin {
     ) -> BridgeResult<(Self, Option<std::result::Result<(), String>>)> {
         let sample_rate = sample_rate.into();
         if plugin.placement()? == Hosting::InProcess {
-            // A served load asks the blacklist in `PluginClient::open`.
+            // A served load asks the blacklist in `PluginClient::open`; a
+            // session load has asked it once already, before it defers.
             plugin.check()?;
             // An in-process plugin loads in this process, on the main thread:
             // the caller says it is there by passing the token.

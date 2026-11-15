@@ -33,8 +33,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 use tutti_plugin_probe::{describe, describe_measured};
-use tutti_plugin_types::PluginFormat;
-use tutti_plugin_types::{MainThreadMarker, ProbeOutcome, write_result};
+use tutti_plugin_types::{MainThreadMarker, PluginFormat, ProbeOutcome, write_result};
 
 fn main() -> ExitCode {
     const USAGE: &str = "usage: plugin-probe <plugin-path> <result-file> [--as <format>] \

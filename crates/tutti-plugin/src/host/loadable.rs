@@ -160,8 +160,10 @@ impl Loadable {
         self
     }
 
-    /// This load's hosting and blacklist, for `plugin`: the reload of a plugin
-    /// that loaded as this one did.
+    /// This load with its plugin replaced by `plugin`, keeping its hosting and
+    /// its blacklist view: the reload of a plugin that loaded as this one did.
+    /// The view is the catalog's live blacklist, so the new plugin is asked
+    /// about as it stands when the load opens it.
     #[must_use]
     pub fn retargeted(mut self, plugin: PluginRef) -> Self {
         self.plugin = plugin;
@@ -274,5 +276,74 @@ mod tests {
             Err(BindError::Ambiguous(c)) if c.len() == 2
         ));
         assert!(matches!(Resolved::Missing.bind(), Err(BindError::Missing)));
+    }
+
+    /// **`Auto` is the format's default**: CLAP, VST3 and AU
+    /// are served, whatever the build holds.
+    #[test]
+    fn auto_serves_every_format_but_vst2() {
+        for format in [
+            PluginFormat::Clap,
+            PluginFormat::Vst3,
+            PluginFormat::AudioUnit,
+        ] {
+            let path = Path::new("P");
+            assert_eq!(
+                Hosting::Auto.resolve(path, format).unwrap(),
+                Hosting::OutOfProcess,
+                "{format:?}"
+            );
+        }
+    }
+
+    /// **VST2 cannot be served, and is not quietly hosted here instead.**
+    #[test]
+    fn vst2_asked_for_out_of_process_is_refused() {
+        let err = Hosting::OutOfProcess
+            .resolve(Path::new("P.vst"), PluginFormat::Vst2)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            BridgeError::NotOutOfProcess { format: "VST2", .. }
+        ));
+    }
+
+    /// **A hosting the build has no host for is refused, typed**: the format's
+    /// feature decides, for `Auto` on VST2 as for an explicit `InProcess`.
+    #[cfg(not(feature = "vst2"))]
+    #[test]
+    fn vst2_in_process_needs_its_feature() {
+        for hosting in [Hosting::Auto, Hosting::InProcess] {
+            let err = hosting
+                .resolve(Path::new("P.vst"), PluginFormat::Vst2)
+                .unwrap_err();
+            assert!(matches!(
+                err,
+                BridgeError::NotInProcess { format: "VST2", .. }
+            ));
+        }
+    }
+
+    #[cfg(not(feature = "clap"))]
+    #[test]
+    fn clap_in_process_needs_its_feature() {
+        let err = Hosting::InProcess
+            .resolve(Path::new("P.clap"), PluginFormat::Clap)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            BridgeError::NotInProcess { format: "CLAP", .. }
+        ));
+    }
+
+    #[cfg(feature = "clap")]
+    #[test]
+    fn clap_in_process_is_admitted_with_its_feature() {
+        assert_eq!(
+            Hosting::InProcess
+                .resolve(Path::new("P.clap"), PluginFormat::Clap)
+                .unwrap(),
+            Hosting::InProcess
+        );
     }
 }
