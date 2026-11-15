@@ -260,11 +260,15 @@ pub fn parameters_listed<F: Format>() {
             );
         }
         if param == Param::Meter {
-            assert_ne!(
-                info.flag(ParamFlags::AUTOMATABLE),
-                Some(true),
-                "the meter is not automatable"
-            );
+            // A format with no read-only bit has no per-parameter automatable
+            // bit either (VST2 says every parameter is).
+            if F::SURFACE.reports_read_only {
+                assert_ne!(
+                    info.flag(ParamFlags::AUTOMATABLE),
+                    Some(true),
+                    "the meter is not automatable"
+                );
+            }
         } else {
             assert_ne!(
                 info.flag(ParamFlags::AUTOMATABLE),
