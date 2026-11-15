@@ -29,6 +29,7 @@ use tutti_ump::{
 };
 
 use crate::MidiFileKind;
+use crate::smf::SmfDivision;
 use crate::write::{Existing, WriteOptions};
 use crate::{ConfigError, Error, OutOfOrder, Refusal, Result, clip_file, smf};
 
@@ -50,13 +51,14 @@ impl Tick {
     ///
     /// ```
     /// use tutti_midi_file::Tick;
+    /// use tutti_ump::TicksPerQuarterNote;
     ///
-    /// assert_eq!(Tick::quarters(4, 480), Tick(1_920));
+    /// assert_eq!(Tick::quarters(4, TicksPerQuarterNote::of(480)), Tick(1_920));
     /// ```
     #[inline]
     #[must_use]
-    pub const fn quarters(count: u64, ticks_per_quarter: u16) -> Self {
-        Self(count * ticks_per_quarter as u64)
+    pub const fn quarters(count: u64, ticks_per_quarter: TicksPerQuarterNote) -> Self {
+        Self(count * ticks_per_quarter.get() as u64)
     }
 
     /// This tick in quarter notes: the tick over the division
@@ -65,13 +67,14 @@ impl Tick {
     /// ```
     /// use tutti_midi_file::Tick;
     /// use tutti_types::Beat;
+    /// use tutti_ump::TicksPerQuarterNote;
     ///
-    /// assert_eq!(Tick(720).beats(480), Beat(1.5));
+    /// assert_eq!(Tick(720).beats(TicksPerQuarterNote::of(480)), Beat(1.5));
     /// ```
     #[inline]
     #[must_use]
-    pub fn beats(self, ticks_per_quarter: u16) -> Beat {
-        Beat(self.0 as f64 / f64::from(ticks_per_quarter))
+    pub fn beats(self, ticks_per_quarter: TicksPerQuarterNote) -> Beat {
+        Beat(self.0 as f64 / f64::from(ticks_per_quarter.get()))
     }
 
     /// The tick nearest `beat` in a file of division `ticks_per_quarter`: the
@@ -85,18 +88,19 @@ impl Tick {
     /// ```
     /// use tutti_midi_file::Tick;
     /// use tutti_types::Beat;
+    /// use tutti_ump::TicksPerQuarterNote;
     ///
-    /// assert_eq!(Tick::from_beat(Beat(1.5), 480), Some(Tick(720)));
+    /// assert_eq!(Tick::from_beat(Beat(1.5), TicksPerQuarterNote::of(480)), Some(Tick(720)));
     /// // 0.5 tick at 128 ticks per quarter rounds up.
-    /// assert_eq!(Tick::from_beat(Beat(1.0 / 256.0), 128), Some(Tick(1)));
-    /// assert_eq!(Tick::from_beat(Beat(-1.0), 480), None);
+    /// assert_eq!(Tick::from_beat(Beat(1.0 / 256.0), TicksPerQuarterNote::of(128)), Some(Tick(1)));
+    /// assert_eq!(Tick::from_beat(Beat(-1.0), TicksPerQuarterNote::of(480)), None);
     /// ```
     #[inline]
     #[must_use]
-    pub fn from_beat(beat: Beat, ticks_per_quarter: u16) -> Option<Self> {
+    pub fn from_beat(beat: Beat, ticks_per_quarter: TicksPerQuarterNote) -> Option<Self> {
         // `round` takes a tie away from zero, which is later for a beat at or
         // after 0. A beat in (-0.5 tick, 0) is before 0 and is refused.
-        let ticks = (beat.get() * f64::from(ticks_per_quarter)).round();
+        let ticks = (beat.get() * f64::from(ticks_per_quarter.get())).round();
         // `u64::MAX as f64` is 2^64, the first value out of range.
         (beat.get() >= 0.0 && ticks < u64::MAX as f64).then_some(Self(ticks as u64))
     }
@@ -473,7 +477,10 @@ impl Track {
     /// The track's events as the packets a clip plays, at their beats for a
     /// file of division `ticks_per_quarter`, in the track's order. The rule is
     /// [`MidiFile::timeline`]'s.
-    pub fn timeline(&self, ticks_per_quarter: u16) -> impl Iterator<Item = (Beat, Ump)> + '_ {
+    pub fn timeline(
+        &self,
+        ticks_per_quarter: TicksPerQuarterNote,
+    ) -> impl Iterator<Item = (Beat, Ump)> + '_ {
         self.events.iter().flat_map(move |(tick, event)| {
             let beat = tick.beats(ticks_per_quarter);
             packets(event).map(move |ump| (beat, ump))
@@ -598,9 +605,9 @@ pub struct PairedNote {
 }
 
 /// The container a file was read from, and with it the rules it is written by.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Container {
-    Smf(SmfFormat),
+    Smf(SmfFormat, SmfDivision),
     Clip,
 }
 
@@ -617,14 +624,14 @@ enum Container {
 /// ([`tempo_map_of`](Self::tempo_map_of) is each one's own).
 ///
 /// ```
-/// use tutti_midi_file::{Meta, MidiFile, SmfFormat, Tick, Track};
+/// use tutti_midi_file::{Meta, MidiFile, SmfDivision, SmfFormat, Tick, Track};
 /// use tutti_types::{Beat, Bpm, Seconds};
 /// use tutti_ump::{MidiChannel, NoteNumber, U7};
 ///
 /// let track = Track::new()
 ///     .meta(Tick(0), Meta::tempo(Bpm::of(120.0)))
 ///     .note(Tick(0), 480, MidiChannel::FIRST, NoteNumber::of(60), U7::of(100));
-/// let file = MidiFile::smf(SmfFormat::SingleTrack, 480, vec![track])?;
+/// let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::of(480), vec![track])?;
 ///
 /// let again = MidiFile::from_bytes(&file.to_bytes()?)?;
 /// assert_eq!(again, file);
@@ -660,20 +667,20 @@ impl MidiFile {
     /// detecting rather than trusting any of them.
     pub const EXTENSIONS: &'static [&'static str] = &["mid", "midi", "mid2", "midi2"];
 
-    /// An SMF of `format` and division `ticks_per_quarter` over `tracks`.
+    /// An SMF of `format` and `division` over `tracks`.
     ///
     /// # Errors
     ///
     /// [`Error::Config`] if there is no track, a format 0 file does not have
-    /// exactly one, the division is zero or over 15 bits, a track's events
+    /// exactly one, a track's events
     /// are out of order or past its end, two events are further apart than
     /// the wire's 28-bit delta, a message is not a group 0 MIDI 1.0 channel
     /// message, a Set Tempo is over 24 bits (the [`ConfigError`] names which
     /// and where); [`Error::Tempo`] if the tempo events do not make a
     /// [`TempoMap`].
     #[must_use = "an Err means no file was built"]
-    pub fn smf(format: SmfFormat, ticks_per_quarter: u16, tracks: Vec<Track>) -> Result<Self> {
-        Self::build(Container::Smf(format), ticks_per_quarter, tracks)
+    pub fn smf(format: SmfFormat, division: SmfDivision, tracks: Vec<Track>) -> Result<Self> {
+        Self::build(Container::Smf(format, division), division.into(), tracks)
     }
 
     /// A Clip File of division `ticks_per_quarter` over one sequence and its
@@ -681,7 +688,7 @@ impl MidiFile {
     ///
     /// # Errors
     ///
-    /// [`Error::Config`] if the division is zero, the events or the
+    /// [`Error::Config`] if the events or the
     /// header's are out of order or the events past the track's end, the header
     /// ends before its last message, two are further apart than a `u32`, or an
     /// event is not a packet (`SysEx`, `Escape` and `Meta` are SMF's), is a
@@ -693,23 +700,20 @@ impl MidiFile {
     /// 0);
     /// [`Error::Tempo`] if the Set Tempo messages do not make a
     /// [`TempoMap`].
-    pub fn clip(ticks_per_quarter: u16, track: Track) -> Result<Self> {
+    pub fn clip(ticks_per_quarter: TicksPerQuarterNote, track: Track) -> Result<Self> {
         Self::build(Container::Clip, ticks_per_quarter, vec![track])
     }
 
-    fn build(container: Container, ticks_per_quarter: u16, tracks: Vec<Track>) -> Result<Self> {
+    fn build(
+        container: Container,
+        ticks_per_quarter: TicksPerQuarterNote,
+        tracks: Vec<Track>,
+    ) -> Result<Self> {
         let invalid = |why: ConfigError| Err(Error::Config(why));
-        // The one refusal of a division: zero is no division, and an SMF's has
-        // 15 bits (the top bit of the header's word says SMPTE timing).
-        let Some(ticks) = TicksPerQuarterNote::new(ticks_per_quarter)
-            .filter(|_| !matches!(container, Container::Smf(_)) || ticks_per_quarter <= 0x7FFF)
-        else {
-            return invalid(ConfigError::Division { ticks_per_quarter });
-        };
         if tracks.is_empty() {
             return invalid(ConfigError::NoTracks);
         }
-        if matches!(container, Container::Smf(SmfFormat::SingleTrack)) && tracks.len() != 1 {
+        if matches!(container, Container::Smf(SmfFormat::SingleTrack, _)) && tracks.len() != 1 {
             return invalid(ConfigError::SingleTrack {
                 tracks: tracks.len(),
             });
@@ -721,7 +725,7 @@ impl MidiFile {
         }
         // The widest gap the wire holds: 28 bits in an SMF, 32 in a Clip File.
         let max_gap = match container {
-            Container::Smf(_) => 0x0FFF_FFFF,
+            Container::Smf(..) => 0x0FFF_FFFF,
             Container::Clip => u64::from(u32::MAX),
         };
         for (i, track) in tracks.iter().enumerate() {
@@ -809,7 +813,7 @@ impl MidiFile {
             }
         }
         let tempo_maps = match container {
-            Container::Smf(SmfFormat::Sequential) => tracks
+            Container::Smf(SmfFormat::Sequential, _) => tracks
                 .iter()
                 .map(|t| tempo_map(container, ticks_per_quarter, std::slice::from_ref(t)))
                 .collect::<Result<_>>()?,
@@ -817,7 +821,7 @@ impl MidiFile {
         };
         Ok(Self {
             container,
-            ticks_per_quarter: ticks,
+            ticks_per_quarter,
             tracks,
             tempo_maps,
         })
@@ -844,8 +848,8 @@ impl MidiFile {
             Some(MidiFileKind::StandardMidiFile) => {
                 let parts = smf::read(bytes)?;
                 Self::build(
-                    Container::Smf(parts.format),
-                    parts.ticks_per_quarter,
+                    Container::Smf(parts.format, parts.division),
+                    parts.division.into(),
                     parts.tracks,
                 )
             }
@@ -899,9 +903,7 @@ impl MidiFile {
     /// refuses (an SMF past 65535 tracks or an event of 256 MB).
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
         match self.container {
-            Container::Smf(format) => {
-                smf::write(format, self.ticks_per_quarter.get(), &self.tracks)
-            }
+            Container::Smf(format, division) => smf::write(format, division, &self.tracks),
             Container::Clip => {
                 let track = &self.tracks[0];
                 let packets = |events: &[(Tick, FileEvent)]| -> Vec<(u64, Ump)> {
@@ -957,10 +959,10 @@ impl MidiFile {
     /// place, so a crash leaves no partial file under `path`.
     ///
     /// ```
-    /// # use tutti_midi_file::{Error, MidiFile, SmfFormat, Track};
+    /// # use tutti_midi_file::{Error, MidiFile, SmfDivision, SmfFormat, Track};
     /// # let dir = tempfile::tempdir()?;
     /// # let path = dir.path().join("song.mid");
-    /// let file = MidiFile::smf(SmfFormat::SingleTrack, 480, vec![Track::new()])?;
+    /// let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::of(480), vec![Track::new()])?;
     /// file.write(&path)?;
     /// assert!(matches!(file.write(&path), Err(Error::Exists { .. })));
     /// file.write_options().replace().write(&path)?;
@@ -992,7 +994,7 @@ impl MidiFile {
     /// Which container this file is.
     pub fn kind(&self) -> MidiFileKind {
         match self.container {
-            Container::Smf(_) => MidiFileKind::StandardMidiFile,
+            Container::Smf(..) => MidiFileKind::StandardMidiFile,
             Container::Clip => MidiFileKind::ClipFile,
         }
     }
@@ -1000,14 +1002,15 @@ impl MidiFile {
     /// An SMF's format, `None` for a Clip File.
     pub fn smf_format(&self) -> Option<SmfFormat> {
         match self.container {
-            Container::Smf(format) => Some(format),
+            Container::Smf(format, _) => Some(format),
             Container::Clip => None,
         }
     }
 
     /// The division: ticks per quarter note.
-    pub fn ticks_per_quarter(&self) -> u16 {
-        self.ticks_per_quarter.get()
+    #[must_use]
+    pub fn ticks_per_quarter(&self) -> TicksPerQuarterNote {
+        self.ticks_per_quarter
     }
 
     /// The tracks, as the file has them (a Clip File's is one).
@@ -1046,8 +1049,9 @@ impl MidiFile {
     }
 
     /// `tick` in quarter notes: the tick over the division.
+    #[must_use]
     pub fn beat_at(&self, tick: Tick) -> Beat {
-        tick.beats(self.ticks_per_quarter.get())
+        tick.beats(self.ticks_per_quarter)
     }
 
     /// The tick nearest `beat`: the inverse of [`beat_at`](Self::beat_at),
@@ -1055,8 +1059,9 @@ impl MidiFile {
     /// and tempo does not enter). Rounds as [`Tick::from_beat`] does: halfway
     /// goes to the later tick, and `None` is a beat before 0 or past the last
     /// tick.
+    #[must_use]
     pub fn tick_at(&self, beat: Beat) -> Option<Tick> {
-        Tick::from_beat(beat, self.ticks_per_quarter.get())
+        Tick::from_beat(beat, self.ticks_per_quarter)
     }
 
     /// Seconds from beat 0 to `at` over the [`tempo_map`](Self::tempo_map),
@@ -1087,7 +1092,7 @@ impl MidiFile {
     pub fn events(
         &self,
     ) -> std::result::Result<impl Iterator<Item = (Beat, &FileEvent)>, NoCommonTimeline> {
-        if self.container == Container::Smf(SmfFormat::Sequential) {
+        if matches!(self.container, Container::Smf(SmfFormat::Sequential, _)) {
             return Err(NoCommonTimeline);
         }
         let mut all: Vec<(Tick, &FileEvent)> = self
@@ -1133,12 +1138,12 @@ impl MidiFile {
     /// The Clip File's [`header`](Track::header) is not on the timeline.
     ///
     /// ```
-    /// use tutti_midi_file::{MidiFile, SmfFormat, Tick, Track};
+    /// use tutti_midi_file::{MidiFile, SmfDivision, SmfFormat, Tick, Track};
     /// use tutti_types::Beat;
     /// use tutti_ump::{MidiChannel, NoteNumber, U7, Ump};
     ///
     /// let track = Track::new().note(Tick(480), 480, MidiChannel::FIRST, NoteNumber::of(60), U7::of(100));
-    /// let file = MidiFile::smf(SmfFormat::SingleTrack, 480, vec![track])?;
+    /// let file = MidiFile::smf(SmfFormat::SingleTrack, SmfDivision::of(480), vec![track])?;
     /// let clip: Vec<(Beat, Ump)> = file.timeline()?.collect();
     /// assert_eq!(clip.len(), 2);
     /// assert_eq!(clip[0].0, Beat(1.0));
@@ -1202,21 +1207,21 @@ impl TryFrom<&[u8]> for MidiFile {
 /// Why `container` cannot hold `event`, `None` if it can.
 fn refuses(container: Container, event: &FileEvent) -> Option<Refusal> {
     match (container, event) {
-        (Container::Smf(_), FileEvent::Message(Message::Midi1(address, _))) => {
+        (Container::Smf(..), FileEvent::Message(Message::Midi1(address, _))) => {
             (address.group != MidiGroup::FIRST).then_some(Refusal::SmfGroup)
         }
-        (Container::Smf(_), FileEvent::Message(_) | FileEvent::Unknown(_)) => {
+        (Container::Smf(..), FileEvent::Message(_) | FileEvent::Unknown(_)) => {
             Some(Refusal::SmfPacket)
         }
         (
-            Container::Smf(_),
+            Container::Smf(..),
             FileEvent::Meta(Meta::Tempo {
                 micros_per_quarter, ..
             }),
         ) if *micros_per_quarter > MAX_MICROS_PER_QUARTER => Some(Refusal::TempoOver24Bits {
             micros_per_quarter: *micros_per_quarter,
         }),
-        (Container::Smf(_), _) => None,
+        (Container::Smf(..), _) => None,
         (Container::Clip, FileEvent::SysEx(_) | FileEvent::Escape(_) | FileEvent::Meta(_)) => {
             Some(Refusal::ClipSmfEvent)
         }
@@ -1246,7 +1251,7 @@ fn set_tempo(message: &Message) -> Option<Bpm> {
 /// The tempo map of one timeline: `tracks`' Set Tempo events as steps.
 fn tempo_map(
     container: Container,
-    ticks_per_quarter: u16,
+    ticks_per_quarter: TicksPerQuarterNote,
     tracks: &[Track],
 ) -> Result<Arc<TempoMap>> {
     // The MIDI default, which a file that sets none at its start plays at.
@@ -1266,7 +1271,7 @@ fn tempo_map(
         }
         for (tick, event) in &track.events {
             let bpm = match (container, event) {
-                (Container::Smf(_), FileEvent::Meta(meta)) => meta.bpm(),
+                (Container::Smf(..), FileEvent::Meta(meta)) => meta.bpm(),
                 (Container::Clip, FileEvent::Message(message)) => set_tempo(message),
                 _ => None,
             };

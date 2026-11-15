@@ -1,3 +1,5 @@
+use tutti_ump::TicksPerQuarterNote;
+
 use super::{bar_step, snap, whole_tick_step};
 
 /// The grid position nearest a tick (a tie later) is analytic: a step of 20
@@ -34,9 +36,9 @@ fn snap_cannot_overflow_near_the_top_of_u64() {
 /// quarter of 100 ticks has a clock grid every 25 ticks.
 #[test]
 fn bar_and_clock_steps_are_whole_ticks() {
-    assert_eq!(bar_step(96, 4, 2), 384);
-    assert_eq!(bar_step(480, 6, 3), 1440);
-    assert_eq!(bar_step(100, 7, 4), 175);
+    assert_eq!(bar_step(TicksPerQuarterNote::of(96), 4, 2), 384);
+    assert_eq!(bar_step(TicksPerQuarterNote::of(480), 6, 3), 1440);
+    assert_eq!(bar_step(TicksPerQuarterNote::of(100), 7, 4), 175);
     assert_eq!(whole_tick_step(100, 24), 25);
     assert_eq!(whole_tick_step(480, 24), 20);
 }

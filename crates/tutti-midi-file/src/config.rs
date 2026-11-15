@@ -15,13 +15,6 @@ pub enum ConfigError {
     /// The track list is empty.
     #[error("a file needs at least one track")]
     NoTracks,
-    /// The division is zero, or an SMF's is over 15 bits (the top bit of the
-    /// header's word says SMPTE timing).
-    #[error("a division of {ticks_per_quarter} ticks per quarter note cannot be written")]
-    Division {
-        /// The division refused.
-        ticks_per_quarter: u16,
-    },
     /// A format 0 file has exactly one track.
     #[error("a format 0 file has one track, not {tracks}")]
     SingleTrack {

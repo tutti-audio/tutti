@@ -2,7 +2,7 @@
 
 use std::os::unix::fs::PermissionsExt;
 
-use tutti_midi_file::{MidiFile, SmfFormat};
+use tutti_midi_file::{MidiFile, SmfDivision, SmfFormat};
 
 use crate::common::track;
 
@@ -15,10 +15,14 @@ fn a_written_file_has_the_umask_mode_not_the_private_temp_mode() {
     std::fs::write(&reference, b"").unwrap();
     let expected = std::fs::metadata(&reference).unwrap().permissions().mode();
     let path = dir.path().join("a.mid");
-    MidiFile::smf(SmfFormat::SingleTrack, 96, vec![track(vec![])])
-        .unwrap()
-        .write(&path)
-        .unwrap();
+    MidiFile::smf(
+        SmfFormat::SingleTrack,
+        SmfDivision::of(96),
+        vec![track(vec![])],
+    )
+    .unwrap()
+    .write(&path)
+    .unwrap();
     let mode = std::fs::metadata(&path).unwrap().permissions().mode();
     assert_eq!(mode, expected);
 }

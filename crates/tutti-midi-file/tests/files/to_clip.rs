@@ -11,7 +11,8 @@
 use crate::common::{note, track};
 use core::num::NonZeroU8;
 use tutti_midi_file::{
-    DropReason, Error, FileEvent, Meta, MidiFile, SmfFormat, TextKind, Tick, ToClipError, Track,
+    DropReason, Error, FileEvent, Meta, MidiFile, SmfDivision, SmfFormat, TextKind, Tick,
+    ToClipError, Track,
 };
 use tutti_types::{Beat, Seconds};
 use tutti_ump::{
@@ -20,6 +21,7 @@ use tutti_ump::{
 };
 
 const TPQ: u16 = 480;
+const SMF_DIVISION: SmfDivision = SmfDivision::of(TPQ);
 
 fn meta(m: Meta) -> FileEvent {
     FileEvent::Meta(m)
@@ -34,7 +36,7 @@ fn flex(f: Flex) -> FileEvent {
 }
 
 fn format0(events: Vec<(u64, FileEvent)>) -> MidiFile {
-    MidiFile::smf(SmfFormat::SingleTrack, TPQ, vec![track(events)]).unwrap()
+    MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![track(events)]).unwrap()
 }
 
 fn events_of(file: &MidiFile) -> &[(Tick, FileEvent)] {
@@ -293,7 +295,7 @@ fn format_1_merges_by_tick_ties_in_track_order() {
     let c = note(1, 63); // track 1 at 50
     let smf = MidiFile::smf(
         SmfFormat::Parallel,
-        TPQ,
+        SMF_DIVISION,
         vec![
             track(vec![(100, a.0.clone()), (100, a.1.clone())]),
             track(vec![(50, c.clone()), (100, b.clone())]),
@@ -315,7 +317,7 @@ fn format_1_merges_by_tick_ties_in_track_order() {
 fn format_2_is_refused() {
     let smf = MidiFile::smf(
         SmfFormat::Sequential,
-        TPQ,
+        SMF_DIVISION,
         vec![track(vec![(0, note(0, 60))]), track(vec![(0, note(0, 61))])],
     )
     .unwrap();
@@ -341,7 +343,7 @@ fn a_clip_is_not_converted_again() {
 fn the_first_tempo_and_signature_lead_the_clip() {
     let smf = MidiFile::smf(
         SmfFormat::Parallel,
-        TPQ,
+        SMF_DIVISION,
         vec![
             track(vec![(0, note(0, 60))]),
             track(vec![
@@ -438,7 +440,7 @@ fn a_tempo_at_tick_zero_is_not_defaulted() {
 fn the_division_and_the_end_carry_over() {
     let smf = MidiFile::smf(
         SmfFormat::Parallel,
-        96,
+        SmfDivision::of(96),
         vec![
             Track {
                 header: vec![],
@@ -456,7 +458,7 @@ fn the_division_and_the_end_carry_over() {
     )
     .unwrap();
     let clip = smf.to_clip().unwrap().clip;
-    assert_eq!(clip.ticks_per_quarter(), 96);
+    assert_eq!(clip.ticks_per_quarter().get(), 96);
     assert_eq!(clip.tracks()[0].end, Tick(400));
     assert!(clip.tracks()[0].header.is_empty());
 }
@@ -564,7 +566,7 @@ fn what_has_no_successor_is_reported_with_its_tick() {
 fn the_first_track_names_the_sequence_and_the_others_are_reported() {
     let smf = MidiFile::smf(
         SmfFormat::Parallel,
-        TPQ,
+        SMF_DIVISION,
         vec![
             track(vec![(0, text(TextKind::TrackName, "Sonata"))]),
             track(vec![(0, text(TextKind::TrackName, "Violin"))]),
@@ -691,7 +693,7 @@ fn property_exchange_and_empty_text_are_reported() {
 fn the_clip_round_trips_through_its_bytes() {
     let smf = MidiFile::smf(
         SmfFormat::Parallel,
-        TPQ,
+        SMF_DIVISION,
         vec![
             track(vec![
                 (
@@ -792,7 +794,7 @@ fn a_tempo_off_the_clock_grid_moves_to_the_nearest_position() {
 fn the_clock_grid_of_an_odd_division_is_its_whole_tick_positions() {
     let smf = MidiFile::smf(
         SmfFormat::SingleTrack,
-        100,
+        SmfDivision::of(100),
         vec![track(vec![(30, tempo_event(400_000)), (60, note(0, 60))])],
     )
     .unwrap();
@@ -808,7 +810,7 @@ fn the_clock_grid_of_an_odd_division_is_its_whole_tick_positions() {
 fn a_tempo_does_not_move_past_the_end_of_the_clip() {
     let smf = MidiFile::smf(
         SmfFormat::SingleTrack,
-        96,
+        SmfDivision::of(96),
         vec![Track {
             header: vec![],
             header_end: Tick(0),
@@ -867,7 +869,12 @@ fn events_on_their_grids_are_not_moved() {
 }
 
 fn smf_at(tpq: u16, events: Vec<(u64, FileEvent)>) -> MidiFile {
-    MidiFile::smf(SmfFormat::SingleTrack, tpq, vec![track(events)]).unwrap()
+    MidiFile::smf(
+        SmfFormat::SingleTrack,
+        SmfDivision::of(tpq),
+        vec![track(events)],
+    )
+    .unwrap()
 }
 
 fn flex_events(clip: &MidiFile, wanted: fn(&FileEvent) -> bool) -> Vec<(u64, FileEvent)> {

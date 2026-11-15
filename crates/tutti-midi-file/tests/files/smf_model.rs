@@ -9,16 +9,20 @@
 
 use crate::common::track;
 use crate::support::{Division, RawEvent, build_smf, decode_smf};
+use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_midi_file::{
-    Error, FileEvent, Meta, MidiFile, MidiFileKind, PairedNote, SmfFormat, TextKind, Tick, Track,
-    Truncated,
+    Error, FileEvent, Meta, MidiFile, MidiFileKind, PairedNote, SmfDivision, SmfFormat, TextKind,
+    Tick, Track, Truncated,
 };
 use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::{
-    Address, ControlValue, Message, MidiChannel, MidiGroup, NoteNumber, U7, U14, Voice1,
+    Address, ControlValue, Message, MidiChannel, MidiGroup, NoteNumber, TicksPerQuarterNote, U7,
+    U14, Voice1,
 };
 
 const TPQ: u16 = 480;
+const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);
+const SMF_DIVISION: SmfDivision = SmfDivision::of(TPQ);
 const BEAT: u32 = TPQ as u32;
 
 fn smf(format: u16, tracks: &[Vec<RawEvent>]) -> Vec<u8> {
@@ -114,7 +118,7 @@ fn every_event_kind_survives_a_read_and_a_write() {
         let bytes = smf(format, &tracks);
         let file = read(&bytes);
         assert_eq!(file.kind(), MidiFileKind::StandardMidiFile);
-        assert_eq!(file.ticks_per_quarter(), TPQ);
+        assert_eq!(file.ticks_per_quarter(), DIVISION);
 
         let events = &file.tracks()[0].events;
         let at = |i: usize| &events[i];
@@ -671,7 +675,7 @@ fn a_velocity_zero_note_on_stays_a_note_on_in_the_file() {
 fn the_writer_is_read_by_a_foreign_decoder() {
     let file = MidiFile::smf(
         SmfFormat::Parallel,
-        TPQ,
+        SMF_DIVISION,
         vec![
             track(vec![(0, FileEvent::Meta(Meta::tempo(Bpm::of(90.0))))]),
             track(vec![
@@ -699,23 +703,30 @@ fn the_writer_is_read_by_a_foreign_decoder() {
 fn a_format_0_file_has_one_track() {
     let two = vec![Track::default(), Track::default()];
     assert!(matches!(
-        MidiFile::smf(SmfFormat::SingleTrack, TPQ, two),
+        MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, two),
         Err(Error::Config(_))
     ));
 }
 
 #[test]
-fn an_empty_track_list_and_a_bad_division_are_refused() {
+fn an_empty_track_list_is_refused() {
     assert!(matches!(
-        MidiFile::smf(SmfFormat::Parallel, TPQ, vec![]),
+        MidiFile::smf(SmfFormat::Parallel, SMF_DIVISION, vec![]),
         Err(Error::Config(_))
     ));
-    for tpq in [0u16, 0x8000] {
-        assert!(matches!(
-            MidiFile::smf(SmfFormat::Parallel, tpq, vec![Track::default()]),
-            Err(Error::Config(_))
-        ));
-    }
+}
+
+/// SMF 1.0 section 2.1: the division word's top bit says SMPTE, so 15 bits are
+/// ticks per quarter note, and zero is no division.
+#[test]
+fn an_smf_division_is_1_to_32767() {
+    check_range_contract(&RangeContract {
+        new: SmfDivision::new,
+        get: SmfDivision::get,
+        of: Some(SmfDivision::of),
+        valid: &[1, 96, 480, 0x7FFF],
+        invalid: &[0, 0x8000, 0xFFFF],
+    });
 }
 
 #[test]
@@ -726,7 +737,7 @@ fn events_out_of_order_are_refused() {
         ..Track::default()
     };
     assert!(matches!(
-        MidiFile::smf(SmfFormat::SingleTrack, TPQ, vec![out_of_order]),
+        MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![out_of_order]),
         Err(Error::Config(_))
     ));
     // An end before the last event.
@@ -736,7 +747,7 @@ fn events_out_of_order_are_refused() {
         ..Track::default()
     };
     assert!(matches!(
-        MidiFile::smf(SmfFormat::SingleTrack, TPQ, vec![early_end]),
+        MidiFile::smf(SmfFormat::SingleTrack, SMF_DIVISION, vec![early_end]),
         Err(Error::Config(_))
     ));
 }
@@ -745,7 +756,13 @@ fn events_out_of_order_are_refused() {
 /// another group, a tempo over 24 bits, a gap over 28 bits.
 #[test]
 fn what_an_smf_cannot_hold_is_refused() {
-    let one = |event| MidiFile::smf(SmfFormat::SingleTrack, TPQ, vec![track(vec![(0, event)])]);
+    let one = |event| {
+        MidiFile::smf(
+            SmfFormat::SingleTrack,
+            SMF_DIVISION,
+            vec![track(vec![(0, event)])],
+        )
+    };
     let group_1 = FileEvent::Message(Message::Midi1(
         Address {
             group: MidiGroup::new(1).unwrap(),
@@ -766,7 +783,7 @@ fn what_an_smf_cannot_hold_is_refused() {
     assert!(matches!(one(slow), Err(Error::Config(_))));
     let gap = MidiFile::smf(
         SmfFormat::SingleTrack,
-        TPQ,
+        SMF_DIVISION,
         vec![track(vec![(0x1000_0000, on(0, 60, 1))])],
     );
     assert!(matches!(gap, Err(Error::Config(_))));
@@ -777,7 +794,7 @@ fn what_an_smf_cannot_hold_is_refused() {
 fn the_widest_delta_round_trips() {
     let file = MidiFile::smf(
         SmfFormat::SingleTrack,
-        TPQ,
+        SMF_DIVISION,
         vec![track(vec![(0x0FFF_FFFF, on(0, 60, 1))])],
     )
     .unwrap();
@@ -792,7 +809,7 @@ fn a_file_reads_and_writes_a_path() {
     let path = dir.path().join("x.mid");
     let file = MidiFile::smf(
         SmfFormat::SingleTrack,
-        TPQ,
+        SMF_DIVISION,
         vec![track(vec![(0, on(0, 60, 1))])],
     )
     .unwrap();
