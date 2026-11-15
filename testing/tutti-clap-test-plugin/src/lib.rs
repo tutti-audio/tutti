@@ -413,6 +413,10 @@ unsafe extern "C" fn plugin_deactivate(plugin: *const clap_plugin) {
         if !state.active.swap(false, Ordering::SeqCst) {
             refusal::note_inactive_deactivation();
         }
+        // THREADING: `[main-thread]`; a host that closes the plugin where it
+        // does not run on the main thread is told so by this site.
+        // SAFETY: the host this plugin was created with, live until `destroy`.
+        unsafe { threading::record_thread_roles(threading::Site::Deactivate, plugin_host(plugin)) };
         // SAFETY: the host this plugin was created with, live until `destroy`.
         unsafe { threading::run_pending_command(threading::Site::Deactivate, plugin_host(plugin)) };
     }

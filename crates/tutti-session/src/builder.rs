@@ -931,6 +931,8 @@ impl<S> SessionBuilder<S> {
             graph: parts.graph,
             resource_ids: crate::peer::ResourceIds::new(),
             pool: crate::Pool::new(self.opts.pool),
+            #[cfg(feature = "plugin")]
+            pooled_swaps: std::collections::BTreeSet::new(),
             transport: parts.transport,
             load,
             heard: None,

@@ -8,9 +8,8 @@
 //!
 //! A plugin may also be a pool entry ([`Session::plugin_entry`]): the pool
 //! loads it, [`Session::add_pooled_plugin`] puts its node in the graph through
-//! `install_plugin` (the one function `add_plugin` installs through
-//! too), and the node's record holds the entry. The record's `pooled` link is
-//! dropped with the record.
+//! the install [`Session::add_plugin`] shares, and the node's record holds the
+//! entry until the record retires.
 //!
 //! # The record
 //!
@@ -222,7 +221,7 @@ pub struct PluginLoad {
     loadable: Loadable,
     rate: SampleRate,
     config: AudioConfig,
-    state: Option<PluginState>,
+    state: Option<Arc<PluginState>>,
     /// The session's collector of main-thread work, which the plugin's handles hold.
     work: tutti_plugin_types::MainWorkHandle,
 }
@@ -332,7 +331,7 @@ impl PluginLoad {
             &self.config,
             &self.loadable,
             self.rate,
-            self.state.as_ref().map(PluginState::bytes),
+            self.state.as_deref().map(PluginState::bytes),
         ) {
             Ok((plugin, restore)) => (Ok(plugin), restore),
             // The server died, or stopped answering, inside the step that
@@ -1011,6 +1010,22 @@ impl HostedPlugin {
         outgoing
     }
 
+    /// [`replace`](Self::replace) for a plugin hosted in process, which has the
+    /// node's controls and no plugin controls.
+    #[must_use = "the outgoing handle goes to the graveyard"]
+    pub(crate) fn replace_hosted(
+        &mut self,
+        handle: PluginHandle,
+        node: NodeControls,
+        plugin: PluginRef,
+    ) -> Outgoing {
+        self.plugin = plugin;
+        let outgoing = self.adopt(handle);
+        self.node = Some(node);
+        self.controls = None;
+        outgoing
+    }
+
     /// [`replace`](Self::replace)'s handle half: everything but the
     /// controls.
     fn adopt(&mut self, handle: PluginHandle) -> Outgoing {
@@ -1316,7 +1331,7 @@ impl Session {
             loadable: Loadable::uncatalogued(request.plugin).hosting(request.hosting),
             rate: self.graph.prepared().sample_rate(),
             config: AudioConfig::default(),
-            state: request.state,
+            state: request.state.map(Arc::new),
             work: self.work.clone(),
         }
     }
@@ -1898,7 +1913,7 @@ impl Session {
             loadable: origin.loadable.retargeted(hosted.plugin.clone()),
             rate,
             config: origin.config,
-            state: hosted.snapshot.clone(),
+            state: hosted.snapshot.clone().map(Arc::new),
             work: self.work.clone(),
         };
         let token = Arc::clone(&hosted.reload.token);
@@ -1988,6 +2003,11 @@ impl Session {
                 PluginStatus::Dead { cause } => Some(cause),
                 _ => None,
             };
+            if cause.is_some()
+                && let Some(link) = hosted.pooled.as_ref()
+            {
+                link.died();
+            }
             if matches!(hosted.status, PluginLiveness::Recovering { .. }) {
                 self.drive_reload(node, now, out, &mut gave_up);
                 continue;

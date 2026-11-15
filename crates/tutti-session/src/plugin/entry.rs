@@ -2,18 +2,27 @@
 //! loads it, [`Session::add_pooled_plugin`] puts its node in the graph, and
 //! [`Session::pooled_plugin`] is its handle.
 //!
-//! The entry's identity is the [`PluginId`] and the [`Hosting`]. The load is
-//! the one a [`PluginLoad`] runs: resolved by the catalog when the entry is
-//! built, bound inside the job, the state going in before the plugin is
-//! activated. A served plugin loads on a worker; an in-process one finishes on
-//! the main thread, in an [`update`](Session::update) there.
+//! The entry's identity is the [`PluginId`] and the [`Hosting`]. The id is
+//! resolved and bound against the catalog when the entry is built; the load
+//! then opens the plugin, the state going in before it is activated. A served
+//! plugin loads on a worker; an in-process one finishes on the main thread, in
+//! an [`update`](Session::update) there.
 //!
 //! What the pool holds is a plugin opened and not yet in a graph
 //! ([`LoadedPlugin`]). The node takes it out once; the entry stays, and the
 //! node holds it, so an entry the app stops declaring is released with its
-//! node. A changed identity under the key loads the new plugin, and the node
-//! swaps to it when it lands.
+//! node. Removing the node leaves the entry loaded with its plugin gone: the
+//! entry reloads (a changed identity, or [`retry`](Session::retry) on a lost
+//! one), and the new plugin is the next node's.
+//!
+//! A changed identity under the key loads the new plugin. When it lands, a
+//! node over the key swaps to it if its audio ports and MIDI output match the
+//! node's (a crossfade when the shapes fit the graph's check, else a plain
+//! swap), waiting for a graph that is re-preparing. A plugin whose ports differ
+//! fails the entry with [`LoadError::PluginPorts`] and the node keeps the
+//! plugin it has: re-inserting a node with new ports is a later change.
 
+use std::cell::Cell;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -24,15 +33,14 @@ use tutti_plugin::catalog::{
 };
 use tutti_plugin::error::StateError;
 use tutti_plugin_host::PluginHandle;
-use tutti_plugin_types::{BridgeError, MainThreadMarker, MainWorkHandle};
+use tutti_plugin_types::{BridgeError, Features, MainThreadMarker, MainWorkHandle};
 use tutti_types::SampleRate;
 
 use super::{HostPlugin, Mirror, Open, Origin, PluginLoad, PluginLoaded, PluginNode};
 use crate::peer::{ResourceIds, sealed};
-use crate::pool::Hold;
 use crate::{
-    Declared, HandleError, IntoPool, Key, Life, Load, LoadError, Peer, PoolEntry, PoolEvent,
-    PoolKey, PoolSet, Presence, Resource, ResourceId, Session, SessionEvent,
+    Declared, HandleError, Hold, IntoPool, Key, Life, Load, LoadError, Peer, PoolEntry, PoolEvent,
+    PoolKey, PoolSet, PortCounts, Presence, Resource, ResourceId, Session, SessionEvent,
 };
 
 /// What a pooled plugin's load needs of the session that declared it.
@@ -99,24 +107,42 @@ impl<T: Send + 'static> Drop for Affine<T> {
 
 /// The reading of whether a pooled plugin's live part is gone, shared by the
 /// loaded value, the node's record and the handles.
+///
+/// It holds the plugin's handle only while the plugin is in the entry; the
+/// node takes it out ([`release_handle`](Self::release_handle)), so a handle
+/// to the entry never keeps a server alive past its node.
 struct Standing {
-    handle: Affine<PluginHandle>,
+    handle: Mutex<Option<Affine<PluginHandle>>>,
     /// The session recovers a plugin that dies at its node.
     recovery: bool,
     /// A node hosts the plugin (and so recovery can act on it).
     hosted: AtomicBool,
+    /// The session saw the bridge dead (once a node hosts the plugin).
+    dead: AtomicBool,
     /// Recovery gave up on it.
     gave_up: AtomicBool,
 }
 
 impl Standing {
-    /// The bridge's lifecycle: the server is dead and nothing is bringing it
-    /// back (recovery is off, or no node hosts it for recovery to act on), or
-    /// recovery gave up.
+    /// The bridge is dead: seen by the session at the node, or by the handle
+    /// while the plugin is still in the entry.
+    fn crashed(&self) -> bool {
+        self.dead.load(Ordering::Acquire)
+            || self
+                .handle
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .as_ref()
+                .is_some_and(|handle| handle.get().is_crashed())
+    }
+
+    /// The bridge's lifecycle: recovery gave up, or the server is dead and
+    /// nothing is bringing it back (recovery is off, or no node hosts the
+    /// plugin for recovery to act on). A plugin that recovery reloads in place
+    /// reads live throughout.
     fn lost(&self) -> bool {
         self.gave_up.load(Ordering::Acquire)
-            || (self.handle.get().is_crashed()
-                && !(self.recovery && self.hosted.load(Ordering::Acquire)))
+            || (self.crashed() && !(self.recovery && self.hosted.load(Ordering::Acquire)))
     }
 
     fn cause(&self) -> PluginCause {
@@ -125,6 +151,16 @@ impl Standing {
         } else {
             PluginCause::Died
         }
+    }
+
+    /// The node has the plugin: its death is seen there from now on.
+    fn release_handle(&self) {
+        let released = self
+            .handle
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        drop(released);
     }
 }
 
@@ -142,6 +178,11 @@ impl PooledLink {
     pub(crate) fn gave_up(&self) {
         self.standing.gave_up.store(true, Ordering::Release);
     }
+
+    /// The session saw the plugin's bridge dead.
+    pub(crate) fn died(&self) {
+        self.standing.dead.store(true, Ordering::Release);
+    }
 }
 
 impl Drop for PooledLink {
@@ -156,6 +197,7 @@ pub struct PluginInfo {
     plugin: PluginRef,
     descriptor: PluginDescriptor,
     hosting: Hosting,
+    server_pid: Option<u32>,
 }
 
 impl PluginInfo {
@@ -169,6 +211,13 @@ impl PluginInfo {
     #[must_use]
     pub const fn descriptor(&self) -> &PluginDescriptor {
         &self.descriptor
+    }
+
+    /// The `plugin-server` process that hosts the plugin, `None` for an
+    /// in-process plugin.
+    #[must_use]
+    pub const fn server_pid(&self) -> Option<u32> {
+        self.server_pid
     }
 
     /// Where the plugin runs: [`Hosting::InProcess`] or
@@ -199,10 +248,10 @@ pub struct LoadedPlugin {
     id: ResourceId,
     info: Arc<PluginInfo>,
     standing: Arc<Standing>,
-    /// Served by a `plugin-server`: its node can swap to a reloaded plugin.
-    served: bool,
+    /// The plugin's ports as a node over it would have them.
+    ports: PortCounts,
     /// What the node takes, once.
-    install: Mutex<Option<Affine<Install>>>,
+    install: Cell<Option<Affine<Install>>>,
 }
 
 impl fmt::Debug for LoadedPlugin {
@@ -231,23 +280,26 @@ impl LoadedPlugin {
         let hosting = plugin.hosting();
         let served = hosting == Hosting::OutOfProcess;
         let handle = plugin.handle().clone();
+        let ports = ports_of(&handle);
         let info = PluginInfo {
             plugin: plugin.plugin().clone(),
             descriptor: handle.descriptor().clone(),
             hosting,
+            server_pid: handle.server_pid(),
         };
         let main_only = !served;
         Ok(Self {
-            id: cx.ids.clone().mint(),
+            id: cx.ids.mint(),
             info: Arc::new(info),
             standing: Arc::new(Standing {
-                handle: Affine::new(handle, &cx.work, main_only),
+                handle: Mutex::new(Some(Affine::new(handle, &cx.work, main_only))),
                 recovery: cx.recovery,
                 hosted: AtomicBool::new(false),
+                dead: AtomicBool::new(false),
                 gave_up: AtomicBool::new(false),
             }),
-            served,
-            install: Mutex::new(Some(Affine::new(
+            ports,
+            install: Cell::new(Some(Affine::new(
                 Install {
                     plugin,
                     mirror,
@@ -261,11 +313,26 @@ impl LoadedPlugin {
 
     /// The plugin and what opened it, once: `None` after a node took it.
     fn take_install(&self) -> Option<Install> {
-        self.install
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-            .map(Affine::into_inner)
+        self.install.take().map(Affine::into_inner)
+    }
+
+    /// Whether a node has not taken the plugin yet.
+    fn has_install(&self) -> bool {
+        let install = self.install.take();
+        let held = install.is_some();
+        self.install.set(install);
+        held
+    }
+}
+
+/// The ports a node over `handle`'s plugin has: what a swap compares.
+fn ports_of(handle: &PluginHandle) -> PortCounts {
+    let loaded = handle.loaded();
+    PortCounts {
+        audio_in: loaded.total_inputs(),
+        audio_out: loaded.total_outputs(),
+        event_in: 1,
+        event_out: usize::from(loaded.features.contains(Features::MIDI_OUT)),
     }
 }
 
@@ -282,7 +349,7 @@ pub struct PluginEntry {
     id: PluginId,
     resolved: Result<Loadable, BindError>,
     hosting: Hosting,
-    state: Option<PluginState>,
+    state: Option<Arc<PluginState>>,
     cx: Context,
 }
 
@@ -378,7 +445,7 @@ impl<K> PluginDeclaration<K> {
         if let Ok(loadable) = &self.entry.resolved {
             state.check_for(loadable.plugin())?;
         }
-        self.entry.state = Some(state);
+        self.entry.state = Some(Arc::new(state));
         Ok(self)
     }
 }
@@ -392,9 +459,11 @@ impl<K: Ord + Clone + fmt::Debug + Send + Sync + 'static> IntoPool<K> for Plugin
 
 /// A pooled plugin's handle: [`Session::pooled_plugin`].
 ///
-/// It exists from the entry's first landing, owns nothing, and follows the
-/// entry across a reload. Once the entry is released or swapped to another
-/// identity it reads [`Presence::Closed`].
+/// It exists from the entry's first landing and owns nothing: the plugin lives
+/// in its node, and a handle never keeps its server alive. A handle belongs to
+/// one load of the entry: once the entry is released or reloaded (a changed
+/// identity, a [`retry`](Session::retry)) it reads [`Presence::Closed`], and
+/// [`Session::pooled_plugin`] gives the new one.
 #[derive(Clone)]
 pub struct PooledPlugin {
     id: ResourceId,
@@ -446,24 +515,38 @@ pub enum AddPluginError<K: fmt::Debug> {
     /// The key has no loaded plugin entry.
     #[error(transparent)]
     Entry(#[from] HandleError<K>),
-    /// The entry's plugin is already in a node.
-    #[error("the plugin of {0:?} is already in a node")]
+    /// The entry's plugin is in a node already, or was and the node is gone:
+    /// an entry has one plugin, and a new one comes with a reload.
+    #[error("the plugin of {0:?} is already in a node, or was")]
     Installed(K),
+    /// The entry's plugin is lost; [`retry`](Session::retry) loads it again.
+    #[error("the plugin of {0:?} is lost")]
+    Lost(K),
+}
+
+/// What a swap to a reloaded plugin came to.
+enum Swapped {
+    /// The node has the new plugin, or no node waits for it.
+    Done,
+    /// The graph is re-preparing: try again at the next update.
+    Waiting,
 }
 
 impl Session {
     /// A plugin to keep loaded under `key`: declare it with
     /// [`pool`](Self::pool), and the session loads it.
     ///
-    /// `id` is resolved by `catalog` now ([`Catalog::resolve`]) and bound
-    /// inside the load job, so a plugin that is missing or in two files
-    /// fails the load ([`LoadError::Unresolved`]); a retry resolves the same
-    /// answer. The load runs at the session's rate and under the catalog's
-    /// blacklist. A served plugin loads on a worker; an in-process one
-    /// ([`PluginDeclaration::hosting`], or VST2) finishes in an
+    /// `id` is resolved and bound against `catalog` now
+    /// ([`Catalog::resolve`]), and the entry keeps the answer: a plugin that is
+    /// missing or in two files fails the load ([`LoadError::Unresolved`]),
+    /// and [`retry`](Self::retry) reuses this answer, so it does not see a
+    /// plugin installed since. Declare the entry again, built from a catalog
+    /// that holds it. The load runs at the session's rate and under the
+    /// catalog's blacklist. A served plugin loads on a worker; an in-process
+    /// one ([`PluginDeclaration::hosting`], or VST2) finishes in an
     /// [`update`](Self::update) on the main thread, and [`pool`](Self::pool)
     /// refuses it with [`PoolError::NeedsMainThread`](crate::PoolError::NeedsMainThread)
-    /// when none will run.
+    /// when none will run. Two keys declared with the same id load two plugins.
     ///
     /// The loaded plugin has no node: [`add_pooled_plugin`](Self::add_pooled_plugin)
     /// puts it in the graph.
@@ -510,22 +593,27 @@ impl Session {
     /// app still declares it, until the node is removed).
     ///
     /// The one way a pooled plugin enters the graph; it installs as
-    /// [`add_plugin`](Self::add_plugin) does. When the entry reloads under a
-    /// changed identity, the node swaps to the new plugin
-    /// (`Graph::crossfade_plugin`: a crossfade when the shapes fit, else a
-    /// plain swap) when it lands; an in-process plugin's node keeps the plugin
-    /// it has.
+    /// [`add_plugin`](Self::add_plugin) does. An in-process plugin was opened
+    /// on the main thread by the load, so this call needs no main thread.
+    /// An entry has one plugin: after the node is removed the entry stays
+    /// loaded and this call is [`AddPluginError::Installed`] until the entry
+    /// reloads. See the module for the swap when the entry's identity changes.
     ///
     /// # Errors
     ///
     /// [`AddPluginError::Entry`] when the key has no loaded plugin entry;
-    /// [`AddPluginError::Installed`] when a node took its plugin already.
+    /// [`AddPluginError::Installed`] when a node took its plugin already;
+    /// [`AddPluginError::Lost`] when the plugin is lost (it stays so until
+    /// [`retry`](Self::retry)).
     pub fn add_pooled_plugin<K>(&mut self, key: &K) -> Result<Key<PluginNode>, AddPluginError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         let pool_key = PoolKey::new(key);
         let loaded = self.pool.loaded::<K, PluginEntry>(key)?;
+        if loaded.standing.lost() {
+            return Err(AddPluginError::Lost(key.clone()));
+        }
         let hold = self
             .pool
             .hold(&pool_key)
@@ -544,7 +632,8 @@ impl Session {
         Ok(node)
     }
 
-    /// Records that `node` is over the pool entry `key`.
+    /// Records that `node` is over the pool entry `key`: the plugin is the
+    /// node's now, so the entry's handle to it is let go.
     fn link_pooled(
         &mut self,
         node: Key<PluginNode>,
@@ -553,6 +642,7 @@ impl Session {
         standing: Arc<Standing>,
     ) {
         standing.hosted.store(true, Ordering::Release);
+        standing.release_handle();
         if let Some(hosted) = self.graph.plugins.get_mut(&node.erase()) {
             hosted.pooled = Some(PooledLink {
                 key,
@@ -563,59 +653,94 @@ impl Session {
     }
 
     /// Swaps the node of every plugin entry that reloaded to the plugin the
-    /// reload brought. A node of an in-process plugin keeps its plugin.
+    /// reload brought, and those still waiting for a graph that was
+    /// re-preparing. An entry whose swap cannot be made fails
+    /// ([`LoadError::PluginPorts`], [`LoadError::PluginSwap`]); its unused
+    /// plugin drops with the entry's value.
     pub(crate) fn swap_pooled_plugins(&mut self, events: &[SessionEvent]) {
         for event in events {
-            let SessionEvent::Pool {
+            if let SessionEvent::Pool {
                 key,
                 event: PoolEvent::Reloaded,
             } = event
-            else {
-                continue;
-            };
-            let Some((node, hold)) = self.graph.plugins.iter().find_map(|(node, hosted)| {
-                let link = hosted.pooled.as_ref().filter(|link| link.key == *key)?;
-                Some((*node, link._hold.clone()))
-            }) else {
-                continue;
-            };
-            let Some(loaded) = self.pool.loaded_of::<PluginEntry>(key) else {
-                continue;
-            };
-            if !loaded.served {
-                tracing::warn!(
-                    "plugin {node:?}: its entry reloaded, and an in-process node keeps its plugin"
-                );
-                continue;
+            {
+                self.pooled_swaps.insert(key.clone());
             }
-            let standing = Arc::clone(&loaded.standing);
-            let Some(Install { plugin, origin, .. }) = loaded.take_install() else {
-                continue;
-            };
-            let Ok(client) = plugin.into_client() else {
-                continue;
-            };
-            client
-                .controls()
-                .set_meter(self.click_settings.project_meter());
-            match self.graph.crossfade_plugin(
-                node,
-                client,
-                tutti_graph::DECLICK,
-                tutti_graph::FadeLaw::default(),
-            ) {
-                Ok(_) => {
-                    if let Some(hosted) = self.graph.plugins.get_mut(&node) {
-                        hosted.origin = Some(origin);
-                    }
-                    self.link_pooled(Key::new(node), key.clone(), hold, standing);
+        }
+        for key in std::mem::take(&mut self.pooled_swaps) {
+            match self.swap_pooled(&key) {
+                Ok(Swapped::Done) => {}
+                Ok(Swapped::Waiting) => {
+                    self.pooled_swaps.insert(key);
                 }
-                Err(refused) => {
-                    tracing::warn!(
-                        "plugin {node:?}: the swap to its reloaded plugin was refused: {refused}"
-                    );
-                }
+                Err(error) => self.pool.fail_loaded(&key, error),
             }
+        }
+    }
+
+    fn swap_pooled(&mut self, key: &PoolKey) -> Result<Swapped, LoadError> {
+        let Some((node, hold, was)) = self.graph.plugins.iter().find_map(|(node, hosted)| {
+            let link = hosted.pooled.as_ref().filter(|link| link.key == *key)?;
+            Some((*node, link._hold.clone(), ports_of(&hosted.handle)))
+        }) else {
+            return Ok(Swapped::Done);
+        };
+        let Some(loaded) = self.pool.loaded_of::<PluginEntry>(key) else {
+            return Ok(Swapped::Done);
+        };
+        if !loaded.has_install() {
+            return Ok(Swapped::Done);
+        }
+        // A replacement with other ports would leave the node's edges on ports
+        // that are gone and refuse every later commit.
+        if loaded.ports != was {
+            return Err(LoadError::PluginPorts {
+                got: loaded.ports,
+                was,
+            });
+        }
+        if self.graph.is_repreparing() {
+            return Ok(Swapped::Waiting);
+        }
+        let standing = Arc::clone(&loaded.standing);
+        let Some(Install { plugin, origin, .. }) = loaded.take_install() else {
+            return Ok(Swapped::Done);
+        };
+        let (fade, law) = (tutti_graph::DECLICK, tutti_graph::FadeLaw::default());
+        let swapped = match plugin.into_client() {
+            Ok(client) => {
+                client
+                    .controls()
+                    .set_meter(self.click_settings.project_meter());
+                let swapped = self.graph.replace_plugin(node, client, fade, law);
+                if swapped.is_ok()
+                    && let Some(hosted) = self.graph.plugins.get_mut(&node)
+                {
+                    hosted.origin = Some(origin);
+                }
+                swapped.map_err(|refused| match refused {
+                    crate::ReplaceRefused::Failed(refused) => refused.to_string(),
+                    crate::ReplaceRefused::Busy(_) => "the graph was re-preparing".to_owned(),
+                })
+            }
+            Err(plugin) => {
+                plugin
+                    .node_controls()
+                    .set_meter(self.click_settings.project_meter());
+                self.graph
+                    .replace_hosted_plugin(node, plugin, fade, law)
+                    .map_err(|refused| match refused {
+                        crate::ReplaceRefused::Failed(refused) => refused.to_string(),
+                        crate::ReplaceRefused::Busy(_) => "the graph was re-preparing".to_owned(),
+                    })
+            }
+        };
+        match swapped {
+            Ok(()) => {
+                self.link_pooled(Key::new(node), key.clone(), hold, standing);
+                Ok(Swapped::Done)
+            }
+            Err(reason) => Err(LoadError::PluginSwap(reason.into())),
         }
     }
 }

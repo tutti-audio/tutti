@@ -188,6 +188,8 @@ pub use plugin::{
     PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginLoad, PluginLoadRequest,
     PluginLoaded, PluginNode, PooledPlugin, SNAPSHOT_INTERVAL, StateRestore, StateView,
 };
+#[cfg(feature = "plugin")]
+pub(crate) use pool::Hold;
 pub(crate) use pool::Pool;
 #[cfg(feature = "sampler")]
 pub use pool::{AudioFile, audio_file};

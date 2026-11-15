@@ -5,16 +5,45 @@
 //!
 //! Build the probe first: `cargo build -p tutti-plugin-probe`.
 
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use tutti_clap_test_plugin::{ClapProbe, ClapSwitch, Site, ThreadAnswer};
+
 use tutti_plugin::catalog::{Catalog, CatalogConfig, Hosting, Locator, NO_SCAN_DIRS, PluginId};
 use tutti_plugin_db::{PluginDb, PluginFormat, ScanPoll};
-use tutti_plugin_types::MainWork;
-use tutti_session::{Peer, PoolError, PoolEvent, PoolState, Presence, Session, SessionEvent};
+use tutti_session::{
+    LoadError, Peer, PoolError, PoolEvent, PoolState, Presence, Session, SessionEvent,
+};
 use tutti_types::{MaxBlock, Samples};
 
 use crate::support::clap_probe;
+
+fn probe() -> &'static ClapProbe {
+    static PROBE: OnceLock<ClapProbe> = OnceLock::new();
+    PROBE.get_or_init(|| {
+        ClapProbe::open(
+            &tutti_fixtures::cdylib("tutti_clap_test_plugin", "tutti-clap-test-plugin"),
+            &clap_probe(),
+        )
+    })
+}
+
+/// Where the plugin's last `deactivate` ran: the in-process instance closes
+/// there when its last owner drops.
+fn deactivation() -> ThreadAnswer {
+    probe().thread_capture().sites[Site::Deactivate as usize]
+}
+
+fn second_id() -> PluginId {
+    PluginId::new(
+        PluginFormat::Clap,
+        tutti_clap_test_plugin::SECOND_PLUGIN_ID
+            .to_str()
+            .expect("utf-8"),
+    )
+}
 
 fn id() -> PluginId {
     PluginId::new(
@@ -129,12 +158,12 @@ fn an_in_process_plugin_needs_the_main_thread_and_is_refused_without_one() {
     s.close(tutti_fixtures::main_thread());
 }
 
-/// **A released entry's main-affine parts are dropped on the main thread**,
-/// whichever thread releases it: the entry is released in an update on another
-/// thread, which hands the drop of the in-process plugin and of its handle to
-/// the session's main-work collector (`MainWork::deferred_drops` counts each),
-/// and the main thread's next update runs them.
-fn a_released_in_process_plugin_is_dropped_on_the_main_thread() {
+/// **A released entry's in-process plugin is closed on the main thread**,
+/// whichever thread releases it: the release in an update on another thread
+/// leaves the plugin open (its `deactivate` has not run), and the main thread's
+/// next update closes it, the plugin saying it ran there.
+fn a_released_in_process_plugin_is_closed_on_the_main_thread() {
+    probe().thread_reset();
     let (catalog, _dir) = catalog();
     let mut s = session();
     s.pool(
@@ -144,7 +173,6 @@ fn a_released_in_process_plugin_is_dropped_on_the_main_thread() {
     .unwrap();
     assert!(matches!(next_event(&mut s, "verb"), PoolEvent::Loaded));
 
-    let before = MainWork::deferred_drops();
     let mut s = thread::spawn(move || {
         let mut s = s;
         s.pool::<&'static str>(()).expect("an empty set");
@@ -163,18 +191,20 @@ fn a_released_in_process_plugin_is_dropped_on_the_main_thread() {
     })
     .join()
     .unwrap();
-    assert_eq!(
-        MainWork::deferred_drops() - before,
-        2,
-        "the plugin and the handle it was read through were handed to the main thread"
+    assert!(
+        !deactivation().observed,
+        "released off the main thread, the plugin is still open"
     );
     let _ = s.update();
+    let closed = deactivation();
+    assert!(closed.observed, "the main thread's update closed it");
+    assert!(closed.is_main, "and the plugin saw the main thread");
     s.close(tutti_fixtures::main_thread());
 }
 
-/// **Released on the main thread, the same parts drop in place**: nothing is
-/// handed over.
-fn a_released_in_process_plugin_on_the_main_thread_is_not_deferred() {
+/// **Released on the main thread, the plugin closes there at once.**
+fn a_released_in_process_plugin_on_the_main_thread_is_closed_in_place() {
+    probe().thread_reset();
     let (catalog, _dir) = catalog();
     let mut s = session();
     s.pool(
@@ -183,16 +213,116 @@ fn a_released_in_process_plugin_on_the_main_thread_is_not_deferred() {
     )
     .unwrap();
     assert!(matches!(next_event(&mut s, "verb"), PoolEvent::Loaded));
-    let before = MainWork::deferred_drops();
+    assert!(!deactivation().observed);
     s.pool::<&'static str>(()).unwrap();
     assert!(matches!(next_event(&mut s, "verb"), PoolEvent::Released));
-    assert_eq!(MainWork::deferred_drops(), before);
+    let closed = deactivation();
+    assert!(closed.observed && closed.is_main, "{closed:?}");
+    s.close(tutti_fixtures::main_thread());
+}
+
+/// The key's pool events of the first update that has any, on this thread.
+fn events_of(s: &mut Session, key: &'static str) -> Vec<PoolEvent> {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let events: Vec<PoolEvent> = s
+            .update()
+            .into_iter()
+            .filter_map(|event| match event {
+                SessionEvent::Pool { key: k, event } if k.get::<&'static str>() == Some(&key) => {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect();
+        if !events.is_empty() {
+            return events;
+        }
+        assert!(Instant::now() < deadline, "no event for {key}");
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// **A changed identity swaps an in-process node too**: the landing runs in an
+/// update on the main thread, and the node is the second plugin after it.
+fn a_changed_identity_swaps_an_in_process_node() {
+    let (catalog, _dir) = catalog();
+    let mut s = session();
+    s.pool(
+        s.plugin_entry("fx", &id(), &catalog)
+            .hosting(Hosting::InProcess),
+    )
+    .unwrap();
+    assert!(matches!(next_event(&mut s, "fx"), PoolEvent::Loaded));
+    let node = s.add_pooled_plugin(&"fx").unwrap();
+    let first = s.pooled_plugin(&"fx").unwrap();
+    let second = tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap();
+    assert_ne!(s.plugin(node).unwrap().descriptor().id, second);
+
+    s.pool(
+        s.plugin_entry("fx", &second_id(), &catalog)
+            .hosting(Hosting::InProcess),
+    )
+    .unwrap();
+    assert!(matches!(next_event(&mut s, "fx"), PoolEvent::Reloaded));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while s.plugin(node).unwrap().descriptor().id != second {
+        assert!(Instant::now() < deadline, "the node never swapped");
+        let _ = s.update();
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(first.presence(), Presence::Closed);
+    assert!(matches!(s.pool_state(&"fx"), Some(PoolState::Loaded)));
+    s.close(tutti_fixtures::main_thread());
+}
+
+/// **An in-process plugin with other ports fails the entry and the node keeps
+/// its plugin**, as a served one does.
+fn an_in_process_swap_to_other_ports_fails_the_entry() {
+    let (catalog, _dir) = catalog();
+    let mut s = session();
+    s.pool(
+        s.plugin_entry("fx", &id(), &catalog)
+            .hosting(Hosting::InProcess),
+    )
+    .unwrap();
+    assert!(matches!(next_event(&mut s, "fx"), PoolEvent::Loaded));
+    let node = s.add_pooled_plugin(&"fx").unwrap();
+    let before = s.plugin(node).unwrap().descriptor().id.clone();
+
+    // The next plugin opened has the probe's aux-bus layout.
+    probe().set(ClapSwitch::PortLayout, 1);
+    s.pool(
+        s.plugin_entry("fx", &second_id(), &catalog)
+            .hosting(Hosting::InProcess),
+    )
+    .unwrap();
+    let mut events = Vec::new();
+    while !events
+        .iter()
+        .any(|event| matches!(event, PoolEvent::Failed(_)))
+    {
+        events.extend(events_of(&mut s, "fx"));
+    }
+    assert!(
+        matches!(
+            events.as_slice(),
+            [
+                PoolEvent::Reloaded,
+                PoolEvent::Failed(LoadError::PluginPorts { .. })
+            ]
+        ),
+        "{events:?}"
+    );
+    assert_eq!(s.plugin(node).unwrap().descriptor().id, before);
     s.close(tutti_fixtures::main_thread());
 }
 
 pub(crate) const CASES: &[(&str, fn())] = tutti_fixtures::cases!["plugin_pool_main";
 an_in_process_plugin_lands_in_an_update_on_the_main_thread,
 an_in_process_plugin_needs_the_main_thread_and_is_refused_without_one,
-a_released_in_process_plugin_is_dropped_on_the_main_thread,
-a_released_in_process_plugin_on_the_main_thread_is_not_deferred,
+a_released_in_process_plugin_is_closed_on_the_main_thread,
+a_released_in_process_plugin_on_the_main_thread_is_closed_in_place,
+a_changed_identity_swaps_an_in_process_node,
+an_in_process_swap_to_other_ports_fails_the_entry,
 ];

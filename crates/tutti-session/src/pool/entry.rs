@@ -369,6 +369,20 @@ pub enum LoadError {
     #[cfg(feature = "plugin")]
     #[error(transparent)]
     Unresolved(tutti_plugin::catalog::BindError),
+    /// The reloaded plugin has other ports than the node over the entry, which
+    /// keeps the plugin it has.
+    #[cfg(feature = "plugin")]
+    #[error("the plugin has {got} where its node has {was}")]
+    PluginPorts {
+        /// The reloaded plugin's ports.
+        got: crate::PortCounts,
+        /// The node's.
+        was: crate::PortCounts,
+    },
+    /// The node could not swap to the reloaded plugin.
+    #[cfg(feature = "plugin")]
+    #[error("the node could not swap to the reloaded plugin: {0}")]
+    PluginSwap(Arc<str>),
     /// The load's job did not finish: it panicked, or the spawner dropped it.
     #[error(transparent)]
     Job(#[from] JobFailed),

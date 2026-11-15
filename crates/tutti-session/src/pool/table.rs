@@ -676,6 +676,30 @@ impl Pool {
         }
     }
 
+    /// Fails an entry that has landed: its loaded value is dropped, its handles
+    /// read closed, and it reads failed with `error`
+    /// ([`PoolEvent::Failed`], at the next report).
+    #[cfg(feature = "plugin")]
+    pub(crate) fn fail_loaded(&mut self, key: &PoolKey, error: LoadError) {
+        let Some(slot) = self.slots.get_mut(key) else {
+            return;
+        };
+        slot.loaded = None;
+        slot.life.close();
+        slot.life = Life::new();
+        slot.state = PoolState::Failed(error.clone());
+        let event = PoolEvent::Failed(error);
+        if slot.declared {
+            self.queued.push(Pending {
+                order: slot.order,
+                key: key.clone(),
+                event,
+            });
+        } else {
+            slot.unreported = Some(event);
+        }
+    }
+
     /// Loads the declared entry under `key` again: one that failed, or one the
     /// kind reads as lost.
     ///

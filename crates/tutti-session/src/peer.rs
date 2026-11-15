@@ -52,7 +52,7 @@ impl ResourceIds {
 
     /// The next id: distinct from every one this source (and its clones)
     /// returned before.
-    pub(crate) fn mint(&mut self) -> ResourceId {
+    pub(crate) fn mint(&self) -> ResourceId {
         ResourceId(self.last.fetch_add(1, Ordering::Relaxed) + 1)
     }
 }

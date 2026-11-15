@@ -7,17 +7,21 @@
 
 use std::time::{Duration, Instant};
 
+use tutti_buffers::InterleavedMut;
 use tutti_plugin::catalog::{
     Catalog, CatalogConfig, Hosting, Locator, NO_SCAN_DIRS, PluginId, PluginRef, PluginState,
 };
 use tutti_plugin::error::StateError;
 use tutti_plugin_db::{PluginDb, PluginFormat, ScanPoll};
 use tutti_plugin_types::TerminationReason;
+use tutti_plugin_types::{Normalized, ParamId};
 use tutti_session::{
-    AddPluginError, LoadError, Peer, PluginCause, PoolEvent, PoolState, Presence, RetryError,
-    Session, SessionEvent,
+    AddPluginError, LoadError, Peer, PluginCause, PluginHealth, PoolEvent, PoolState, Presence,
+    RecoveryPolicy, Resource, RetryError, Session, SessionEvent,
 };
-use tutti_types::{MaxBlock, Samples};
+use tutti_types::{ChannelLayout, MaxBlock, Samples};
+
+const BLOCK: usize = 512;
 
 use crate::support::{clap_probe, plugin_server};
 
@@ -61,17 +65,42 @@ fn catalog() -> (Catalog, tempfile::TempDir) {
     (catalog, dir)
 }
 
+fn set_env(key: &str, value: impl AsRef<std::ffi::OsStr>) {
+    // SAFETY: nextest runs each test in its own process, and every variable is
+    // set from the test's own thread while no load is running.
+    unsafe { std::env::set_var(key, value) };
+}
+
+/// An offline session with `recovery` as its policy (`None`: recovery off).
+fn session_with(recovery: Option<RecoveryPolicy>) -> Session {
+    set_env("TUTTI_PLUGIN_SERVER", plugin_server());
+    Session::builder()
+        .max_block(MaxBlock::of(Samples(BLOCK)))
+        .plugin_recovery(recovery)
+        .build()
+        .expect("an offline session builds")
+}
+
 fn session(recovery: bool) -> Session {
-    // SAFETY: nextest runs each test in its own process, and this is set from
-    // the test's own thread before anything spawns a server.
-    unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", plugin_server()) };
-    let builder = Session::builder().max_block(MaxBlock::of(Samples(512)));
-    let builder = if recovery {
-        builder
-    } else {
-        builder.plugin_recovery(None)
-    };
-    builder.build().expect("an offline session builds")
+    session_with(recovery.then(RecoveryPolicy::default))
+}
+
+/// One update, a block rendered and a short wait: what moves a plugin's health.
+fn pump(s: &mut Session) -> Vec<SessionEvent> {
+    let events = s.update();
+    let mut out = vec![0.0f32; BLOCK * 2];
+    s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
+    std::thread::sleep(Duration::from_millis(5));
+    events
+}
+
+/// Pumps until `done`.
+fn pump_until(s: &mut Session, what: &str, mut done: impl FnMut(&mut Session) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !done(s) {
+        assert!(Instant::now() < deadline, "{what} never happened");
+        let _ = pump(s);
+    }
 }
 
 /// Updates until `done` finds what it waits for in an update's pool events.
@@ -89,6 +118,28 @@ fn until(
             {
                 return event;
             }
+        }
+        assert!(Instant::now() < deadline, "{what} never happened");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// The key's pool events of the first update that has any.
+fn until_all(s: &mut Session, what: &str, key: &'static str) -> Vec<PoolEvent> {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let events: Vec<PoolEvent> = s
+            .update()
+            .into_iter()
+            .filter_map(|event| match event {
+                SessionEvent::Pool { key: k, event } if k.get::<&'static str>() == Some(&key) => {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect();
+        if !events.is_empty() {
+            return events;
         }
         assert!(Instant::now() < deadline, "{what} never happened");
         std::thread::sleep(Duration::from_millis(2));
@@ -177,8 +228,9 @@ fn an_initial_state_of_another_plugin_is_refused() {
 }
 
 /// **The server's death with recovery off is `Lost`, on the pool's one
-/// reading, and `retry` loads the entry again.** The old handle then reads
-/// closed, the new one live.
+/// reading, and `retry` loads the entry again.** The node goes (recovery is
+/// off), an entry that is lost refuses a node, the old handle reads closed
+/// after the reload, and the reloaded plugin is the next node's.
 #[test]
 fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
     let (catalog, _dir) = catalog();
@@ -201,12 +253,14 @@ fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
             blocks: 16,
             held: Duration::from_secs(5),
         });
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while before.presence().is_live() {
-        assert!(Instant::now() < deadline, "the death never showed");
-        std::thread::sleep(Duration::from_millis(2));
-    }
+    pump_until(&mut s, "the death", |_| !before.presence().is_live());
     assert_eq!(before.presence(), Presence::Lost(PluginCause::Died));
+    pump_until(&mut s, "the node's removal", |s| s.plugin(node).is_err());
+    assert_eq!(
+        before.presence(),
+        Presence::Lost(PluginCause::Died),
+        "removing the node does not revive the entry"
+    );
 
     s.retry(&"verb").expect("a lost entry reloads");
     let event = until(&mut s, "the reload", |k, _| *k == "verb");
@@ -217,6 +271,144 @@ fn a_dead_server_with_recovery_off_is_lost_and_retry_reloads() {
         "its entry was reloaded"
     );
     assert_eq!(s.pooled_plugin(&"verb").unwrap().presence(), Presence::Live);
+    s.add_pooled_plugin(&"verb")
+        .expect("the reloaded plugin is the next node's");
+}
+
+/// **With recovery on, a dead server reads live while the session reloads it
+/// in place**, and `Lost(GaveUp)` once recovery gives up.
+#[test]
+fn recovery_keeps_a_plugin_live_until_it_gives_up() {
+    let (catalog, _dir) = catalog();
+    let kill = |s: &Session, node| {
+        s.plugin(node)
+            .unwrap()
+            .diagnostics()
+            .terminate(TerminationReason::Hung {
+                blocks: 16,
+                held: Duration::from_secs(5),
+            });
+    };
+
+    let mut s = session(true);
+    s.pool(s.plugin_entry("verb", &first_id(), &catalog))
+        .unwrap();
+    loaded(&mut s, "verb");
+    let node = s.add_pooled_plugin(&"verb").unwrap();
+    let handle = s.pooled_plugin(&"verb").unwrap();
+    kill(&s, node);
+    pump_until(&mut s, "the reload to start", |s| {
+        matches!(
+            s.plugin(node).map(|p| p.health()),
+            Ok(PluginHealth::Reloading { .. })
+        )
+    });
+    assert_eq!(handle.presence(), Presence::Live, "recovering reads live");
+
+    let mut s = session_with(Some(RecoveryPolicy {
+        max_failures: 0,
+        ..RecoveryPolicy::default()
+    }));
+    s.pool(s.plugin_entry("verb", &first_id(), &catalog))
+        .unwrap();
+    loaded(&mut s, "verb");
+    let node = s.add_pooled_plugin(&"verb").unwrap();
+    let handle = s.pooled_plugin(&"verb").unwrap();
+    kill(&s, node);
+    pump_until(&mut s, "the give-up", |_| !handle.presence().is_live());
+    assert_eq!(handle.presence(), Presence::Lost(PluginCause::GaveUp));
+}
+
+/// **An initial state is restored before the plugin is read, and two keys
+/// with one id are two plugins.** A value set on one plugin and saved is the
+/// value the other loads with; their servers are two processes.
+#[test]
+fn an_initial_state_is_restored_and_two_keys_load_two_plugins() {
+    const CUTOFF: ParamId = ParamId::new(101);
+    let (catalog, _dir) = catalog();
+    let mut s = session(true);
+    s.pool(s.plugin_entry("a", &first_id(), &catalog)).unwrap();
+    loaded(&mut s, "a");
+    let a = s.add_pooled_plugin(&"a").unwrap();
+    let set = Normalized::of(0.9);
+    s.plugin(a)
+        .unwrap()
+        .params()
+        .get(CUTOFF)
+        .unwrap()
+        .set(set)
+        .unwrap();
+    let state = s.plugin(a).unwrap().state().save().expect("a state");
+
+    s.pool((
+        s.plugin_entry("a", &first_id(), &catalog),
+        s.plugin_entry("b", &first_id(), &catalog)
+            .initial_state(state)
+            .expect("its own plugin's state"),
+    ))
+    .unwrap();
+    loaded(&mut s, "b");
+    let b = s.add_pooled_plugin(&"b").unwrap();
+    let read = s
+        .plugin(b)
+        .unwrap()
+        .params()
+        .get(CUTOFF)
+        .unwrap()
+        .normalized();
+    assert!(
+        (read.get() - set.get()).abs() < 1e-6,
+        "the state's value, not the default: {read:?}"
+    );
+    let pid = |node| s.plugin(node).unwrap().diagnostics().server_pid();
+    assert_ne!(pid(a), pid(b), "two plugins, two servers");
+    assert_ne!(
+        s.pooled_plugin(&"a").unwrap().id(),
+        s.pooled_plugin(&"b").unwrap().id()
+    );
+}
+
+/// **A reloaded plugin with other ports fails the entry, named, and the node
+/// keeps the plugin it has**: swapping would leave the node's edges on ports
+/// that are gone and refuse every later commit, so the swap is not made and
+/// the unused plugin is dropped with the entry's value.
+#[test]
+fn a_swap_to_a_plugin_with_other_ports_fails_the_entry() {
+    let (catalog, _dir) = catalog();
+    let mut s = session(true);
+    s.pool(s.plugin_entry("fx", &first_id(), &catalog)).unwrap();
+    loaded(&mut s, "fx");
+    let node = s.add_pooled_plugin(&"fx").unwrap();
+    let first = tutti_clap_test_plugin::PLUGIN_ID.to_str().unwrap();
+
+    // The next server starts with the probe's aux-bus layout.
+    set_env("TUTTI_CLAP_PROBE_PORT_LAYOUT", "1");
+    s.pool(s.plugin_entry("fx", &second_id(), &catalog))
+        .unwrap();
+    let events = until_all(&mut s, "the failure", "fx");
+    assert!(
+        matches!(
+            events.as_slice(),
+            [
+                PoolEvent::Reloaded,
+                PoolEvent::Failed(LoadError::PluginPorts { .. })
+            ]
+        ),
+        "{events:?}"
+    );
+    assert!(matches!(
+        s.pool_state(&"fx"),
+        Some(PoolState::Failed(LoadError::PluginPorts { .. }))
+    ));
+    assert!(s.pooled_plugin(&"fx").is_err(), "the unused plugin is gone");
+    assert_eq!(s.plugin(node).unwrap().descriptor().id, first);
+    let _ = pump(&mut s);
+    assert!(
+        s.update()
+            .iter()
+            .all(|event| !matches!(event, SessionEvent::CommitRefused(_))),
+        "the graph still commits"
+    );
 }
 
 /// **A changed identity under the same key loads the new plugin and the node
@@ -276,4 +468,72 @@ fn a_node_holds_its_entry_until_it_is_removed() {
     let event = until(&mut s, "the release", |k, _| *k == "fx");
     assert!(matches!(event, PoolEvent::Released), "{event:?}");
     assert_eq!(handle.presence(), Presence::Closed);
+}
+
+/// The cases that name the server by its process id.
+#[cfg(target_os = "linux")]
+mod process {
+    use super::*;
+
+    /// **A plugin that died before it had a node stays lost** under recovery too
+    /// (nothing recovers a plugin no node hosts): the entry refuses a node, never
+    /// reading live again without `retry`.
+    #[test]
+    fn a_plugin_dead_before_its_node_is_lost_and_refuses_one() {
+        let (catalog, _dir) = catalog();
+        let mut s = session(true);
+        s.pool(s.plugin_entry("verb", &first_id(), &catalog))
+            .unwrap();
+        loaded(&mut s, "verb");
+        let handle = s.pooled_plugin(&"verb").unwrap();
+        let pid = handle.info().server_pid().expect("a served plugin");
+        let killed = std::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .status()
+            .expect("kill runs");
+        assert!(killed.success());
+        pump_until(&mut s, "the loss", |_| !handle.presence().is_live());
+        assert_eq!(handle.presence(), Presence::Lost(PluginCause::Died));
+        assert!(matches!(
+            s.add_pooled_plugin(&"verb"),
+            Err(AddPluginError::Lost("verb"))
+        ));
+    }
+
+    /// **Removing the node leaves the entry loaded with its plugin gone**: the
+    /// entry's handle keeps no server alive, and a second node is refused
+    /// (`Installed`) until the entry reloads.
+    #[test]
+    fn a_removed_node_leaves_the_entry_without_a_plugin_and_frees_its_server() {
+        let (catalog, _dir) = catalog();
+        let mut s = session(true);
+        s.pool(s.plugin_entry("fx", &first_id(), &catalog)).unwrap();
+        loaded(&mut s, "fx");
+        let node = s.add_pooled_plugin(&"fx").unwrap();
+        let handle = s.pooled_plugin(&"fx").unwrap();
+        let pid = s
+            .plugin(node)
+            .unwrap()
+            .diagnostics()
+            .server_pid()
+            .expect("a served plugin has its server");
+        let alive = || std::path::Path::new(&format!("/proc/{pid}")).exists();
+        assert!(alive());
+
+        s.remove(node).unwrap();
+        pump_until(&mut s, "the server's end", |s| {
+            let _ = s.main(tutti_fixtures::main_thread()).update();
+            !alive()
+        });
+        assert_eq!(
+            handle.presence(),
+            Presence::Live,
+            "the entry is still loaded"
+        );
+        assert!(matches!(s.pool_state(&"fx"), Some(PoolState::Loaded)));
+        assert!(matches!(
+            s.add_pooled_plugin(&"fx"),
+            Err(AddPluginError::Installed("fx"))
+        ));
+    }
 }

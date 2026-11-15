@@ -117,6 +117,8 @@ impl Session {
             let landed = out.split_off(first);
             self.swap_pooled_plugins(&landed);
             out.extend(landed);
+            // What a swap that could not be made reports.
+            self.pool.drain_events(out);
         }
     }
 }
