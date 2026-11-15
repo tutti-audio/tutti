@@ -108,6 +108,51 @@ pub(crate) struct Inject {
     /// While a commit's flush is written: how many of `events` came before
     /// the closes of the edges it cut.
     pub(super) closed_from: usize,
+    /// What the edges this commit cut held and `events` had no room for: one
+    /// table for each edge, built with the commit. Drained into the sink's
+    /// events at the end of each block, as much as the block takes, until
+    /// empty; a table never overflows, so no note off is lost.
+    pub(super) owed: Vec<crate::held::Held>,
+}
+
+impl Inject {
+    /// Whether closes are still owed to the sink.
+    pub(super) fn draining(&self) -> bool {
+        self.owed.iter().any(|h| !h.is_empty())
+    }
+
+    /// Appends what is owed to `events`, as far as it takes, at the offset of
+    /// the last event it holds: after everything flushed to the sink, and
+    /// ahead of what its sources write at that offset, as the closes of a cut
+    /// edge are (a close never passes the note it closes).
+    pub(super) fn drain_owed(&mut self) {
+        let end = self
+            .events
+            .last()
+            .map_or(crate::time::Offset::ZERO, |e| e.offset);
+        let start = self.events.len();
+        for h in &mut self.owed {
+            h.drain_into(&mut self.events);
+        }
+        for e in &mut self.events[start..] {
+            e.offset = end;
+        }
+    }
+
+    /// What the sink's next call has consumed: the flushed events go, the
+    /// sink stays live while closes are owed.
+    pub(super) fn consumed(&mut self) {
+        self.events.clear();
+        self.merged.clear();
+        self.live = self.draining();
+    }
+
+    /// The sink is parked: what was flushed and owed is discarded with the
+    /// events it would have been sent.
+    pub(super) fn discard(&mut self) {
+        self.owed.iter_mut().for_each(crate::held::Held::clear);
+        self.consumed();
+    }
 }
 
 /// Everything the executor rebuilds when applying: the arenas, the delay and

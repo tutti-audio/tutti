@@ -22,12 +22,6 @@ use tutti_ump::{Address, KeyBitset, KeyEvent, Lane, LaneSet, Protocol, Ump};
 use crate::event::{Event, EventKind};
 use crate::time::Offset;
 
-/// The most events closing one [`Held`] can take: a note off for each of the
-/// 2^16 keys a [`Key`](tutti_ump::Key) packs into and a pedal up for each
-/// [`Lane`]. The set is bounded by its type, so a buffer of this size takes
-/// any close whole.
-pub(crate) const MAX_CLOSES: usize = (u16::MAX as usize + 1) + Lane::COUNT;
-
 #[derive(Clone, Debug)]
 pub(crate) struct Held {
     keys: Box<KeyBitset>,
@@ -88,7 +82,7 @@ impl Held {
     }
 
     /// Forget everything held.
-    fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.keys.clear();
         self.pedals.clear();
     }
@@ -144,19 +138,10 @@ impl Held {
         }
     }
 
-    /// The messages that close everything held: pedals up, then every note
-    /// off, at offset 0 (ties keep this order), as many as `out`'s capacity
-    /// takes. Returns how many did not fit. Allocates nothing.
-    pub(crate) fn close_into(&self, out: &mut Vec<Event>) -> usize {
-        let mut lost = 0;
-        self.for_each_close(|e| {
-            if out.len() < out.capacity() {
-                out.push(e);
-            } else {
-                lost += 1;
-            }
-        });
-        lost
+    /// Calls `f` with the messages that close everything held: pedals up,
+    /// then every note off, at offset 0 (ties keep this order).
+    pub(crate) fn close_each(&self, f: impl FnMut(Event)) {
+        self.for_each_close(f);
     }
 
     fn for_each_close(&self, mut f: impl FnMut(Event)) {

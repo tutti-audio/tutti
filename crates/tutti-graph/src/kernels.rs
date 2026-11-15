@@ -247,6 +247,11 @@ impl EventFifo {
         self.reserve = reserve.min(room - self.limit);
     }
 
+    /// How many events are queued.
+    pub(crate) fn queued(&self) -> usize {
+        self.q.len()
+    }
+
     /// Take over `old`'s queue and clock into this FIFO, which was built on
     /// the control side for the new length and rate with room for all of
     /// it: what a retune and a [`resize`](Self::resize) leave. Allocates
@@ -430,6 +435,22 @@ mod tests {
             new.pending().any(|e| e.is_note_off()),
             "the note-off evicted a note-on"
         );
+    }
+
+    /// A queue that is all note-offs has none to evict: the one that does not
+    /// fit is counted lost, and the queue does not grow. (A FIFO the editor
+    /// stages holds all of the queue it takes, so this is a bug's backstop.)
+    #[test]
+    fn a_transfer_into_a_queue_of_note_offs_counts_what_does_not_fit() {
+        let mut old = EventFifo::sized(Samples(64), 4, 8);
+        old.push(&[note(0, true, 1), note(0, true, 2), note(0, true, 3)]);
+        let mut new = EventFifo::sized(Samples(64), 4, 8);
+        new.q = VecDeque::with_capacity(2);
+        let room = new.q.capacity();
+        let lost = new.transfer_from(&mut old);
+        assert_eq!(lost, 3 - room);
+        assert_eq!(new.q.capacity(), room);
+        assert!(new.pending().all(|e| e.is_note_off()));
     }
 
     /// An event is delivered `len` frames later, in whichever block that is.

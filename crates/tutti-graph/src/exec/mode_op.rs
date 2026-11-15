@@ -152,9 +152,7 @@ fn park<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
         let unit = rec.unit;
         if st.has_inject[st.at] {
             for inj in st.inject.iter_mut().filter(|i| i.unit == unit) {
-                inj.events.clear();
-                inj.merged.clear();
-                inj.live = false;
+                inj.discard();
             }
             st.has_inject[st.at] = false;
         }

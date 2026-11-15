@@ -476,13 +476,24 @@ impl Executor {
             }
         }
         if let Some(op) = old_plan {
-            for inj in old.inject.iter().filter(|i| i.live) {
+            for inj in old.inject.iter_mut().filter(|i| i.live) {
                 let at = EventIn {
                     node: op.units[inj.unit as usize].key,
                     port: inj.port,
                 };
                 if let Some((u, shell)) = flush_target(plan, inject, has_inject, at) {
-                    let lost = fill(&mut shell.events, &inj.events);
+                    let mut lost = fill(&mut shell.events, &inj.events);
+                    // What was owed there is still owed: the tables move.
+                    for table in inj.owed.drain(..) {
+                        if shell.owed.len() < shell.owed.capacity() {
+                            shell.owed.push(table);
+                        } else if let Some(first) = shell.owed.first_mut() {
+                            first.merge(&table);
+                        } else {
+                            debug_assert!(false, "room was made for every table owed");
+                            lost = lost.saturating_add(1);
+                        }
+                    }
                     self.dropped.at_node(u, lost);
                 }
             }
@@ -550,7 +561,8 @@ impl Executor {
                     None => (None, None),
                 }
             };
-            for &(from, at) in &st.closers {
+            for closer in &mut st.closers {
+                let (from, at) = (closer.from, closer.at);
                 let in_plan = plan.event_edges.binary_search(&(from, at)).is_ok();
                 if (in_plan && !source_gone(from.node)) || departed.replaced.contains(&at.node) {
                     continue;
@@ -567,18 +579,25 @@ impl Executor {
                     .iter()
                     .position(|d| d.key == DelayKey::Event { at, from });
                 if in_plan && let Some(Some(Ring::Event(f))) = delay.map(|i| &mut new.rings[i]) {
-                    st.closes.clear();
-                    let missed: usize = owing.map(|h| h.close_into(&mut st.closes)).sum();
-                    let lost = f.push(&st.closes);
-                    self.dropped.charge_source(from, lost);
-                    if let Ok(u) = plan.units.binary_search_by_key(&at.node, |u| u.key) {
-                        self.dropped
-                            .at_node(u as u32, u32::try_from(missed).unwrap_or(u32::MAX));
+                    let mut lost = 0;
+                    for h in owing {
+                        h.close_each(|e| lost += f.push(&[e]));
                     }
-                } else if let Some((u, shell)) = flush_target(plan, inject, has_inject, at) {
-                    let missed: usize = owing.map(|h| h.close_into(&mut shell.events)).sum();
-                    self.dropped
-                        .at_node(u, u32::try_from(missed).unwrap_or(u32::MAX));
+                    self.dropped.charge_source(from, lost);
+                } else if let Some((_, shell)) = flush_target(plan, inject, has_inject, at)
+                    && let Some(mut table) = closer.table.take()
+                {
+                    for h in owing {
+                        table.merge(h);
+                    }
+                    // What fits goes now, after the flush; the rest is owed.
+                    table.drain_into(&mut shell.events);
+                    if table.is_empty() {
+                        closer.table = Some(table);
+                    } else {
+                        debug_assert!(shell.owed.len() < shell.owed.capacity());
+                        shell.owed.push(table);
+                    }
                 }
             }
             // The closes land at the end of what was flushed, after it.
@@ -682,8 +701,12 @@ fn move_ring(target: Option<&mut Ring>, carried: Option<Ring>, spare: &mut Vec<R
         }
         (_, Some(o)) => {
             debug_assert!(false, "a carried ring has a ring built for it");
+            let lost = match &o {
+                Ring::Event(f) => f.queued(),
+                Ring::Audio(_) => 0,
+            };
             spare.push(o);
-            0
+            lost
         }
         (_, None) => 0,
     }

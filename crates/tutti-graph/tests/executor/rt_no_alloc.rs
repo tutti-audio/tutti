@@ -2068,6 +2068,16 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         }
     };
     let slots = |exec: &tutti_graph::Executor| exec.plan().expect("applied").slots(PortKind::Audio);
+    // From the wide plan on, every apply leaves the executor in the mode the
+    // pool names.
+    let applied = |exec: &mut tutti_graph::Executor| {
+        apply(exec);
+        assert_eq!(
+            exec.is_parallel(),
+            workers > 1,
+            "the gate runs the mode it names"
+        );
+    };
 
     // The first plan: the empty state gives way to a staged one.
     ed.commit().expect("commits");
@@ -2118,14 +2128,9 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         .topology
         .set_outputs(vec![out_of(first), out_of(second), out_of(wide)]);
     ed.commit().expect("commits");
-    apply(&mut exec);
+    applied(&mut exec);
     assert!(slots(&exec) > before, "the arena grew");
     assert!(exec.plan().expect("applied").units().len() > 2 * units);
-    assert_eq!(
-        exec.is_parallel(),
-        workers > 1,
-        "the gate runs the mode it names"
-    );
     blocks(&mut exec, 16, 64);
     ed.collect();
 
@@ -2139,12 +2144,12 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         .expect("the source exists");
     drop(std::mem::replace(&mut tap, reopened));
     ed.commit().expect("commits");
-    apply(&mut exec);
+    applied(&mut exec);
     blocks(&mut exec, 24, 64);
     ed.collect();
     ed.set_latency(lag, Latency::new(Samples(3))).expect("fits");
     ed.commit().expect("commits");
-    apply(&mut exec);
+    applied(&mut exec);
     blocks(&mut exec, 24, 64);
     ed.collect();
 
@@ -2211,7 +2216,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         out_of(gain),
     ]);
     ed.commit().expect("commits");
-    apply(&mut exec);
+    applied(&mut exec);
     blocks(&mut exec, 24, 64);
     ed.collect();
     // The feedback delays change: new keys, and the old FIFOs flush.
@@ -2222,7 +2227,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     ed.spec_mut().disconnect_events(sink(312, 1), ev(311, 0));
     ed.spec_mut().connect_events(sink(312, 1), efb(192));
     ed.commit().expect("commits");
-    apply(&mut exec);
+    applied(&mut exec);
     blocks(&mut exec, 24, 64);
     ed.collect();
 
@@ -2234,7 +2239,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     ed.spec_mut()
         .set_edge_gain(edge(first), EdgeGain::new(Amplitude::new(0.5)));
     ed.commit().expect("commits");
-    apply(&mut exec);
+    applied(&mut exec);
     blocks(&mut exec, 8, 64);
     ed.collect();
     ed.insert(
@@ -2247,7 +2252,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     );
     ed.spec_mut().connect_edge_gain(edge(first), ev(400, 0));
     ed.commit().expect("commits");
-    apply(&mut exec);
+    applied(&mut exec);
     blocks(&mut exec, 24, 64);
     ed.collect();
     // The driven lane and the tap, event tap and meter ride a plain commit.
@@ -2257,7 +2262,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         Unforkable(TestNode::new(Kind::Smooth)),
     );
     ed.commit().expect("commits");
-    apply(&mut exec);
+    applied(&mut exec);
     blocks(&mut exec, 8, 64);
     ed.collect();
 
@@ -2274,7 +2279,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     )
     .expect("fits");
     ed.commit().expect("commits");
-    apply(&mut exec);
+    applied(&mut exec);
     blocks(&mut exec, 24, 64);
     ed.collect();
 
@@ -2282,19 +2287,19 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     let chaser = |n: u64| HeldChaser(Arc::new(AtomicU64::new(n)));
     ed.insert(NodeKey(500), "chaser", Unforkable(chaser(0)));
     ed.commit().expect("commits");
-    apply(&mut exec);
+    applied(&mut exec);
     blocks(&mut exec, 4, 64);
     ed.collect();
     let fade = |n| Fade::new(Samples(n), FadeLaw::EqualPower);
     ed.replace(NodeKey(500), Unforkable(chaser(1)), fade(1_000))
         .expect("fits");
     ed.commit().expect("commits");
-    apply(&mut exec);
+    applied(&mut exec);
     blocks(&mut exec, 2, 64);
     ed.replace(NodeKey(500), Unforkable(chaser(2)), fade(1_000))
         .expect("fits");
     ed.commit().expect("commits");
-    apply(&mut exec);
+    applied(&mut exec);
     blocks(&mut exec, 40, 64);
     ed.collect();
 
@@ -2304,10 +2309,10 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         tutti_graph::Prepare::new(SampleRate::SR_44K1, MaxBlock::of(Samples(64))),
     ] {
         ed.reprepare(next).expect("accepted");
-        apply(&mut exec);
+        applied(&mut exec);
         blocks(&mut exec, 2, 64);
         ed.collect();
-        apply(&mut exec);
+        applied(&mut exec);
         blocks(&mut exec, 24, 64);
         ed.collect();
     }
@@ -2329,8 +2334,12 @@ fn applying_a_commit_allocates_nothing_in_parallel() {
 }
 
 /// **A pool set while a commit is in flight**: the commit was staged for no
-/// pool, `set_pool` gives it the parallel state for this one, and applying it
-/// allocates and frees nothing.
+/// pool, `set_pool` re-stages it with the parallel state for this one, and
+/// applying it allocates and frees nothing; then the pool goes and the commit
+/// is re-staged serial. This covers the re-staged path. The race, a commit
+/// staged for the old pool by another thread while `set_pool` runs, cannot be
+/// reproduced deterministically; its answer (the unused parallel state goes
+/// back in the commit box) is the same hand-back.
 #[test]
 fn a_pool_set_across_a_commit_in_flight_allocates_nothing() {
     let (mut ed, mut exec) = Editor::new(prepare(64));

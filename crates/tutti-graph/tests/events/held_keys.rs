@@ -1349,14 +1349,17 @@ fn cutting_an_edge_around_a_promotion_closes_once() {
     );
 }
 
-/// A source holds the keys of 16 channels, 2048 in all, far more than a
-/// buffer for a handful of notes takes: cutting its edge closes every one at
-/// the sink, none is left sounding.
+/// A source holds the keys of 16 channels, 2048 in all, and a sustain pedal,
+/// far more than one block of the sink takes: cutting its edge closes every
+/// key at the sink, over as many blocks as it takes, the pedal up first, and
+/// none is left sounding.
 #[test]
-fn cutting_an_edge_closes_every_key_of_a_full_keyboard() {
+fn cutting_an_edge_closes_every_key_of_a_full_keyboard_over_blocks() {
     for mode in MODES {
         let mut r = Rig::new(mode, &[2]);
         r.wire(&[(1, 2)]);
+        r.block();
+        r.send(m1_controller(CCNumber::SUSTAIN, 127));
         r.block();
         for channel in 0..16u8 {
             for half in 0..4u8 {
@@ -1367,7 +1370,38 @@ fn cutting_an_edge_closes_every_key_of_a_full_keyboard() {
             }
         }
         r.wire(&[]);
-        for _ in 0..4 {
+        for _ in 0..200 {
+            r.block();
+        }
+        let words = r.words(2);
+        let closes: Vec<&Words> = words
+            .iter()
+            .skip_while(|w| (w[0] >> 20) & 0xf != 0x8 && **w != m1_controller(CCNumber::SUSTAIN, 0))
+            .collect();
+        let offs = closes.iter().filter(|w| (w[0] >> 20) & 0xf == 0x8).count();
+        assert_eq!(offs, 2048, "{mode:?}: every held key is closed");
+        assert_eq!(
+            closes.first().copied(),
+            Some(&m1_controller(CCNumber::SUSTAIN, 0)),
+            "{mode:?}: the pedal goes up first"
+        );
+    }
+}
+
+/// A held source replaced hard behind an event delay: the close travels the
+/// delay, behind what is in flight, and every key of it is closed.
+#[test]
+fn a_replaced_source_behind_a_delay_closes_every_key() {
+    for mode in MODES {
+        let mut r = Rig::with_lag(mode, &[2], true);
+        r.wire(&[(1, 2)]);
+        r.block();
+        for note in 0..20u8 {
+            r.send(m1_on(0, note));
+        }
+        r.block();
+        r.replace_source();
+        for _ in 0..40 {
             r.block();
         }
         let offs = r
@@ -1375,7 +1409,10 @@ fn cutting_an_edge_closes_every_key_of_a_full_keyboard() {
             .iter()
             .filter(|w| (w[0] >> 20) & 0xf == 0x8)
             .count();
-        assert_eq!(offs, 2048, "{mode:?}: every held key is closed");
+        assert_eq!(
+            offs, 20,
+            "{mode:?}: every held key is closed through the delay"
+        );
     }
 }
 

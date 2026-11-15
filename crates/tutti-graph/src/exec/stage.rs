@@ -38,7 +38,7 @@ use crate::command::overlay_capacity;
 use crate::event::Event;
 use crate::event_tap::EventTapWriter;
 use crate::gain::SumLane;
-use crate::held::{Keys, MAX_CLOSES};
+use crate::held::{Held, Keys};
 use crate::kernels::{AudioRing, EventFifo};
 use crate::meter::MeterWriter;
 use crate::par::Par;
@@ -59,6 +59,17 @@ pub(super) enum RingFrom {
     /// The old ring at this index is copied into the one built for the new
     /// length, and goes back in the commit.
     Move { from: u32 },
+}
+
+/// An old event edge whose source's held keys are closed at its sink.
+pub(super) struct Closer {
+    pub(super) from: EventOut,
+    pub(super) at: EventIn,
+    /// For an edge that does not go on through a delay: the table the source's
+    /// held and owed keys merge into, drained into the sink's injection buffer
+    /// as far as it takes and, for the rest, block by block. A table holds
+    /// every key and pedal there is, so it cannot overflow.
+    pub(super) table: Option<Held>,
 }
 
 /// A delay or feedback FIFO that goes away: its queue flushes into `at`.
@@ -90,16 +101,13 @@ pub(super) struct Staged {
     pub(super) gone_delays: Vec<Vanished>,
     pub(super) gone_feedback: Vec<Vanished>,
     /// Old event edges whose held keys may need closing at the sink.
-    pub(super) closers: Vec<(EventOut, EventIn)>,
+    pub(super) closers: Vec<Closer>,
     /// Units (plan indices) that may hold a crossfade queued behind a
     /// running one.
     pub(super) queued: Vec<u32>,
     /// The store index and the lane state of each unit whose mix a plan
     /// drives and that may have none.
     pub(super) drives: Vec<(u32, ParamState)>,
-    /// Room for what a held-key close writes before it moves on
-    /// ([`MAX_CLOSES`], the most one set of held keys can close).
-    pub(super) closes: Vec<Event>,
     pub(super) spare_rings: Vec<Ring>,
     pub(super) spare_drives: Vec<ParamState>,
     /// The parallel state a pool set since this was staged left unused.
@@ -138,6 +146,8 @@ struct Shell {
     port: u16,
     flush: usize,
     room: usize,
+    /// Tables of owed closes it can hold.
+    owed: usize,
 }
 
 /// What [`Stager::stage`] needs from the commit's editor.
@@ -302,17 +312,10 @@ impl Stager {
         let (lanes, lanes_from) = lanes(c, &cx);
         let drives = drives(c, &cx, input.mix_lane);
         let mut flush = self.flush(c, &cx);
-        let extra = widen(&cx, &ring_fifo.extra, &efb_fifo.extra);
-        let slot_capacity = |i: usize| plan.event_slot_capacity[i].events(cx.cap) + extra[i];
-        let widest = (0..plan.event_slot_capacity.len())
-            .map(slot_capacity)
-            .max()
-            .unwrap_or(0);
-        let extra_total: usize = extra.iter().sum();
-        let flushed_total: usize = flush.rooms.values().map(|r| r.flush).sum();
-        let held_total: usize = flush.rooms.values().map(|r| r.room).sum();
-        let (inject, shells) = self.shells(&cx, &flush, widest);
-        let overlay = overlay_capacity(&plan, cx.cap, flushed_total + held_total + extra_total);
+        let sizes = Sizes::of(&cx, &ring_fifo, &efb_fifo, &flush);
+        let (inject, shells) = self.shells(&cx, &flush, sizes.widest);
+        let slot_capacity = |i: usize| plan.event_slot_capacity[i].events(cx.cap) + sizes.extra[i];
+        let overlay = overlay_capacity(&plan, cx.cap, sizes.flowing());
         let store_len = self.store_len.max(c.delta.store_len as usize);
         let participants = self.pool.load(Ordering::Acquire);
         let par = par_for(
@@ -380,11 +383,6 @@ impl Stager {
             lanes: lanes_from,
             gone_delays: std::mem::take(&mut flush.gone_delays),
             gone_feedback: std::mem::take(&mut flush.gone_feedback),
-            closes: Vec::with_capacity(if flush.closers.is_empty() {
-                0
-            } else {
-                MAX_CLOSES
-            }),
             closers: std::mem::take(&mut flush.closers),
             queued: std::mem::take(&mut flush.queued),
             spare_drives: Vec::with_capacity(spare_drives),
@@ -573,6 +571,7 @@ impl Stager {
                 let r = rooms.entry((u, s.port)).or_default();
                 r.flush += s.flush;
                 r.room = r.room.max(s.room);
+                r.carried += s.owed;
             }
         }
         // Event delays and feedback that no longer exist, in key order.
@@ -662,16 +661,17 @@ impl Stager {
     /// The old event edges whose held keys may need closing at the sink: an
     /// edge that ended, or one whose source may be gone, from a source that
     /// carries notes. A close goes through the edge's delay when the edge
-    /// goes on with one, and otherwise into the sink's injection buffer, made
-    /// for the most one edge's held keys can close ([`MAX_CLOSES`]: a
-    /// note off for every key of the set and a pedal up for every pedal), so
-    /// no close is ever refused for room and no note is left stuck.
+    /// goes on with one, and otherwise into a table built here for the edge
+    /// (`Closer::table`): it holds every key and pedal there is, so it cannot
+    /// overflow, and it is drained into the sink's events block by block, as
+    /// the owed keys of a bypassed unit are. No close is ever refused for
+    /// room, and no note is left stuck.
     fn closers(
         &self,
         c: &Commit,
         cx: &Cx<'_>,
         rooms: &mut BTreeMap<(u32, u16), Room>,
-    ) -> Vec<(EventOut, EventIn)> {
+    ) -> Vec<Closer> {
         let Some(old) = cx.old else {
             return Vec::new();
         };
@@ -717,9 +717,10 @@ impl Stager {
                 .iter()
                 .any(|d| d.key == DelayKey::Event { at, from });
             if !(in_plan && delay) {
-                rooms.entry((u, at.port)).or_default().flush += MAX_CLOSES;
+                rooms.entry((u, at.port)).or_default().closers += 1;
             }
-            closers.push((from, at));
+            let table = (!(in_plan && delay)).then(Held::new);
+            closers.push(Closer { from, at, table });
         }
         closers
     }
@@ -732,12 +733,16 @@ impl Stager {
             .rooms
             .iter()
             .map(|(&(unit, port), r)| {
-                let events = r.flush + r.room;
+                // A sink owed closes has a block's worth of room more, for them.
+                let owed = r.closers + r.carried;
+                let drain = if owed > 0 { widest.max(cx.cap) } else { 0 };
+                let events = r.flush + r.room + drain;
                 shells.push(Shell {
                     key: cx.plan.units[unit as usize].key,
                     port,
-                    flush: r.flush,
+                    flush: r.flush + drain,
                     room: r.room,
+                    owed,
                 });
                 Inject {
                     unit,
@@ -746,6 +751,7 @@ impl Stager {
                     merged: Vec::with_capacity(events + widest),
                     live: false,
                     closed_from: 0,
+                    owed: Vec::with_capacity(owed),
                 }
             })
             .collect();
@@ -783,8 +789,51 @@ struct Flush {
     rooms: BTreeMap<(u32, u16), Room>,
     gone_delays: Vec<Vanished>,
     gone_feedback: Vec<Vanished>,
-    closers: Vec<(EventOut, EventIn)>,
+    closers: Vec<Closer>,
     queued: Vec<u32>,
+}
+
+/// The sizes a plan's slots and buffers are built to.
+struct Sizes {
+    /// Per event slot, what a FIFO carried past its new bound can add.
+    extra: Vec<usize>,
+    /// The widest event slot.
+    widest: usize,
+    extra_total: usize,
+    flushed_total: usize,
+    held_total: usize,
+    /// Room for closes drained a block at a time, over every sink owed some.
+    drained_total: usize,
+}
+
+impl Sizes {
+    fn of(cx: &Cx<'_>, rings: &FifoPlan, feedback: &FifoPlan, flush: &Flush) -> Self {
+        let plan = cx.plan;
+        let extra = widen(cx, &rings.extra, &feedback.extra);
+        let widest = (0..plan.event_slot_capacity.len())
+            .map(|i| plan.event_slot_capacity[i].events(cx.cap) + extra[i])
+            .max()
+            .unwrap_or(0);
+        let drained = flush
+            .rooms
+            .values()
+            .filter(|r| r.closers + r.carried > 0)
+            .count();
+        Self {
+            extra_total: extra.iter().sum(),
+            flushed_total: flush.rooms.values().map(|r| r.flush).sum(),
+            held_total: flush.rooms.values().map(|r| r.room).sum(),
+            drained_total: drained * widest.max(cx.cap),
+            extra,
+            widest,
+        }
+    }
+
+    /// Everything that can flow into one node's inputs at once, past the
+    /// slots: the overlay's room.
+    fn flowing(&self) -> usize {
+        self.flushed_total + self.held_total + self.extra_total + self.drained_total
+    }
 }
 
 /// What can flow into one injection buffer.
@@ -794,6 +843,11 @@ struct Room {
     flush: usize,
     /// What a fade's end delivers later.
     room: usize,
+    /// Edges cut into this sink whose held keys are closed through a table:
+    /// each table is drained into the buffer, a block's worth at a time.
+    closers: usize,
+    /// Tables still owed from the commit before, which move over.
+    carried: usize,
 }
 
 /// The writers a plan names, taps first: each is the one opened since the
