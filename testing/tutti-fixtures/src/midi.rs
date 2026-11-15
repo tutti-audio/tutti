@@ -12,8 +12,8 @@
 
 use tutti_midi_protocol::{MpeMode, MpeZone, MpeZoneConfig, MpeZones, PitchBendSensitivity};
 use tutti_ump::{
-    Address, Bank, BendValue, CCNumber, ControlValue, Message, MidiChannel, NoteNumber,
-    NoteVelocity, Rpn, U7, Ump, Voice1, Voice2,
+    Address, Attribute, Bank, BendValue, CCNumber, ControlValue, Direction, Message, Midi1Port,
+    MidiChannel, NoteNumber, NoteVelocity, Protocol, Rpn, Stream, U7, Ump, Voice1, Voice2,
 };
 
 /// A MIDI 2.0 Note On with no attribute.
@@ -202,6 +202,61 @@ pub const GS_RESET: [u8; 11] = [
 
 /// Part of the name the Windows built-in synth is listed under.
 pub const GS_WAVETABLE: &str = "GS Wavetable";
+
+/// An attribute of a reserved type, read from the wire as a receiver reads one:
+/// no sender can name a reserved value, so a test takes it from the packet.
+///
+/// # Panics
+///
+/// When `kind` is a defined attribute type (`0..=3`).
+#[must_use]
+pub fn reserved_attribute(kind: u8, data: u16) -> Attribute {
+    assert!(kind >= 4, "attribute type {kind} is defined");
+    let packet = Ump([
+        0x4090_3C00 | u32::from(kind),
+        0x8000_0000 | u32::from(data),
+        0,
+        0,
+    ]);
+    match packet.decode() {
+        Ok(Message::Midi2(_, Voice2::NoteOn { attribute, .. })) => attribute,
+        other => unreachable!("a Note On with attribute type {kind} decoded as {other:?}"),
+    }
+}
+
+/// A reserved protocol value, read from the wire as a receiver reads one.
+///
+/// # Panics
+///
+/// When `raw` is `1` or `2`, the protocols M2-104 §7.1.6 defines.
+#[must_use]
+pub fn reserved_protocol(raw: u8) -> Protocol {
+    assert!(!matches!(raw, 1 | 2), "protocol {raw} is defined");
+    match (Ump([0xF006_0000 | u32::from(raw) << 8, 0, 0, 0])).decode() {
+        Ok(Message::Stream(Stream::StreamConfigurationNotification(config))) => config.protocol,
+        other => unreachable!("a Stream Configuration Notification decoded as {other:?}"),
+    }
+}
+
+fn reserved_block_info(word0: u32) -> tutti_ump::FunctionBlockInfo {
+    let packet = Ump([0xF011_0000 | word0, 0x0001_0000, 0, 0]);
+    match packet.decode() {
+        Ok(Message::Stream(Stream::FunctionBlockInfo(info))) => info,
+        other => unreachable!("a Function Block Info decoded as {other:?}"),
+    }
+}
+
+/// The reserved Function Block direction (`0b00`), read from the wire.
+#[must_use]
+pub fn reserved_direction() -> Direction {
+    reserved_block_info(0).direction
+}
+
+/// The reserved Function Block MIDI 1.0 port value (`0x03`), read from the wire.
+#[must_use]
+pub fn reserved_midi1_port() -> Midi1Port {
+    reserved_block_info(0b1101).midi1
+}
 
 #[cfg(test)]
 mod tests {

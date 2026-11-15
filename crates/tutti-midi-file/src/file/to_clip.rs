@@ -6,9 +6,11 @@
 //! What has no replacement is returned beside the clip, never dropped
 //! silently.
 
+use core::num::NonZeroU8;
+
 use tutti_ump::{
-    Flex, FlexAddress, FlexTextKind, KeySignature, Letter, Message, Metronome, MidiGroup,
-    SharpsFlats, SysexMessage, TimeSignature, Ump, flex_text_packets,
+    BarAccents, Flex, FlexAddress, FlexTextKind, KeySignature, Letter, Message, Metronome,
+    MidiGroup, SharpsFlats, SysexMessage, TimeSignature, Ump, flex_text_packets,
 };
 
 use unicode_normalization::UnicodeNormalization;
@@ -207,15 +209,18 @@ fn tempo(micros_per_quarter: u32) -> FileEvent {
     flex(Flex::SetTempo(micros_per_quarter * TEN_NS_PER_MICRO))
 }
 
+/// The four beats of the 4/4 bar a file with no time signature has.
+const FOUR_BEATS: NonZeroU8 = NonZeroU8::new(4).unwrap();
+
 fn signature(
-    numerator: u8,
+    numerator: NonZeroU8,
     denominator: u8,
     thirty_seconds: u8,
     clocks_per_click: u8,
 ) -> [FileEvent; 2] {
     [
         flex(Flex::SetTimeSignature(TimeSignature {
-            numerator,
+            numerator: numerator.get(),
             denominator,
             thirty_seconds,
         })),
@@ -225,9 +230,7 @@ fn signature(
         // means none (M2-104 section 7.5.5).
         flex(Flex::SetMetronome(Metronome {
             clocks_per_click,
-            accent_1: numerator,
-            accent_2: 0,
-            accent_3: 0,
+            accents: BarAccents::Undivided(numerator),
             subdivision_1: 0,
             subdivision_2: 0,
         })),
@@ -315,13 +318,11 @@ fn convert(
                 if *denominator_power == 0 {
                     return Err(DropReason::WholeNoteDenominator);
                 }
-                if *numerator == 0 {
-                    return Err(DropReason::ZeroNumerator);
-                }
+                let numerator = NonZeroU8::new(*numerator).ok_or(DropReason::ZeroNumerator)?;
                 Ok((
                     Rank::Signature,
                     signature(
-                        *numerator,
+                        numerator,
                         *denominator_power,
                         *thirty_seconds_per_quarter,
                         *clocks_per_click,
@@ -532,7 +533,7 @@ impl MidiFile {
             placed.push((Tick(0), Rank::Tempo, tempo(500_000)));
         }
         if !live_at_start(|m| matches!(m, Meta::TimeSignature { .. })) {
-            for ev in signature(4, 2, 8, 24) {
+            for ev in signature(FOUR_BEATS, 2, 8, 24) {
                 placed.push((Tick(0), Rank::Signature, ev));
             }
         }

@@ -13,6 +13,7 @@ mod constructors;
 mod fields;
 mod flex_setup;
 mod key_event;
+mod mono_mode;
 mod mpe_zone;
 mod no_alloc;
 mod note_id;

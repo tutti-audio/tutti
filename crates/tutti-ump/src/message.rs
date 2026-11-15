@@ -1,12 +1,16 @@
 //! The message catalogue: one value per defined M2-104 message, `Copy`, with
 //! no lifetime.
 
+use core::num::NonZeroU8;
+
 use crate::field::{
-    DeltaTicks, FirstGroup, FunctionBlockId, GroupSpan, NoteNumber, Pitch, SharpsFlats, U4, U7, U14,
+    ChordType, DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan, NoteNumber,
+    Pitch, SharpsFlats, TicksPerQuarterNote, U4, U7, U14,
 };
 use crate::{
-    BendValue, CCNumber, ControlValue, ManufacturerId, MdsChunk, MdsChunkSize, MdsChunks,
-    MdsIdentity, MidiChannel, MidiGroup, NoteVelocity, Rpn, Ump,
+    ArticulationAttribute, BendValue, CCNumber, ControlValue, Field, ManufacturerId, MdsChunk,
+    MdsChunkSize, MdsChunks, MdsIdentity, MidiChannel, MidiGroup, NoteVelocity, Reserved,
+    ReservedAccents, ReservedAttribute, Rpn, Ump,
 };
 
 /// One UMP, decoded.
@@ -68,8 +72,10 @@ pub enum Utility {
     JrClock(u16),
     /// The time of the following messages, in ticks of 1/31250 s.
     JrTimestamp(u16),
-    /// Delta Clockstamp ticks per quarter note; `0` is reserved and kept.
-    TicksPerQuarterNote(u16),
+    /// Delta Clockstamp ticks per quarter note.
+    TicksPerQuarterNote(TicksPerQuarterNote),
+    /// A Ticks Per Quarter Note of the reserved `0`, as read from the wire.
+    ReservedTicksPerQuarterNote(Reserved),
     /// Ticks since the last event.
     DeltaClockstamp(DeltaTicks),
 }
@@ -445,7 +451,8 @@ pub struct MixedDataHeader {
 // ---- MIDI 2.0 channel voice ------------------------------------------------
 
 /// A Note On or Note Off attribute (§7.4.14). An attribute type of `0x00`
-/// carries no data, and `0x04` to `0xFF` are reserved.
+/// carries no data. Types `0x10` to `0x1F` are the articulation attributes of
+/// the M2-123 Profile; the rest of `0x04` to `0xFF` are reserved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Attribute {
     /// Type `0x00`.
@@ -456,22 +463,20 @@ pub enum Attribute {
     Profile(u16),
     /// Type `0x03`: Q7.9 pitch in half-tone units.
     Pitch(u16),
-    /// A reserved type (`0x04` to `0xFF`), kept with its data.
-    Reserved {
-        /// The attribute type.
-        kind: u8,
-        /// The attribute data.
-        data: u16,
-    },
+    /// Types `0x10` to `0x1F`: an articulation of the M2-123 Profile, which
+    /// [`NoteArticulation`](crate::NoteArticulation) and
+    /// [`NoteOffArticulation`](crate::NoteOffArticulation) write.
+    Articulation(ArticulationAttribute),
+    /// A type neither M2-104 nor a Profile this crate types defines, with its
+    /// data: read from the wire, and written by no sender.
+    Reserved(ReservedAttribute),
 }
 
 /// A Registered Per-Note Controller number (M2-104 Appendix A, Table 22, and
-/// M2-123 §8.2's Playing Position). A number the table leaves reserved is kept
-/// in [`Reserved`](Self::Reserved), so its message re-encodes exactly. Build
-/// one from a wire number with [`From<u8>`], which names every number the table
-/// defines and only then falls back to `Reserved`. A hand-built `Reserved(7)`
-/// encodes as 7 but does not compare equal to, or match,
-/// [`Volume`](Self::Volume).
+/// M2-123 §8.2's Playing Position). A number the table leaves reserved is read
+/// as [`Reserved`](Self::Reserved), which only the decoder builds, so its
+/// message re-encodes exactly and no sender names one. [`TryFrom<u8>`] names a
+/// number the table defines and refuses a reserved one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RegisteredPerNoteController {
     /// 1: Modulation.
@@ -522,7 +527,7 @@ pub enum RegisteredPerNoteController {
     /// 95: Effects 5 Depth (formerly Phaser Depth).
     Effects5Depth,
     /// A number the table reserves.
-    Reserved(u8),
+    Reserved(Reserved),
 }
 
 impl RegisteredPerNoteController {
@@ -553,13 +558,15 @@ impl RegisteredPerNoteController {
             Self::ChorusSend => 93,
             Self::Effects4Depth => 94,
             Self::Effects5Depth => 95,
-            Self::Reserved(n) => n,
+            Self::Reserved(r) => r.get(),
         }
     }
 }
 
-impl From<u8> for RegisteredPerNoteController {
-    fn from(number: u8) -> Self {
+impl RegisteredPerNoteController {
+    /// The controller of a wire number: a number the table defines is named,
+    /// any other is [`Reserved`](Self::Reserved).
+    pub(crate) const fn wire(number: u8) -> Self {
         match number {
             1 => Self::Modulation,
             2 => Self::Breath,
@@ -584,7 +591,20 @@ impl From<u8> for RegisteredPerNoteController {
             93 => Self::ChorusSend,
             94 => Self::Effects4Depth,
             95 => Self::Effects5Depth,
-            n => Self::Reserved(n),
+            n => Self::Reserved(Reserved::wire(n)),
+        }
+    }
+}
+
+impl TryFrom<u8> for RegisteredPerNoteController {
+    type Error = Reserved;
+
+    /// The controller Appendix A defines at `number`, or the reserved number
+    /// itself.
+    fn try_from(number: u8) -> Result<Self, Reserved> {
+        match Self::wire(number) {
+            Self::Reserved(r) => Err(r),
+            defined => Ok(defined),
         }
     }
 }
@@ -914,8 +934,8 @@ pub enum FlexAddress {
     Channel(MidiChannel),
     /// The Group.
     Group,
-    /// A reserved address (2 or 3), kept.
-    Reserved(u8),
+    /// A reserved address (2 or 3), as read.
+    Reserved(Reserved),
 }
 
 /// A note letter: `A` is 1 to `G` is 7. The field's `0` is `None` where a
@@ -936,8 +956,8 @@ pub enum Letter {
     F,
     /// G.
     G,
-    /// A reserved value (8 to 15), kept.
-    Reserved(u8),
+    /// A reserved value (8 to 15), as read.
+    Reserved(Reserved),
 }
 
 /// Flex Data messages (M2-104 §7.5). Set Tempo, Set Time Signature and Set
@@ -979,17 +999,89 @@ pub struct TimeSignature {
     pub thirty_seconds: u8,
 }
 
+/// The Bar Accent fields of Set Metronome (§7.5.5): how a bar divides.
+///
+/// The three parts are the beats of each division, and they add up to the
+/// beats in the bar. An undivided bar has its beat count in Part 1 and zero in
+/// Parts 2 and 3; a bar divided in two has Part 3 zero; a part is never zero
+/// before one that is not. The variants hold exactly those shapes, so the
+/// message cannot be written with a part after a zero part, or an undivided
+/// bar with a second part. A packet of another shape is read as
+/// [`Reserved`](Self::Reserved), which only the decoder builds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BarAccents {
+    /// The bar is not divided: Part 1 is the bar's beat count.
+    Undivided(NonZeroU8),
+    /// The bar is divided in two, like 3 + 2 in 5/4.
+    Two(NonZeroU8, NonZeroU8),
+    /// The bar is divided in three, like 3 + 3 + 3 or 4 + 4 + 1 in 9/4.
+    Three(NonZeroU8, NonZeroU8, NonZeroU8),
+    /// A shape §7.5.5 does not have, as read from the wire: Part 1 zero, or a
+    /// part after a zero part.
+    Reserved(ReservedAccents),
+}
+
+impl BarAccents {
+    /// The beats in the bar these parts add up to.
+    ///
+    /// ```
+    /// use core::num::NonZeroU8;
+    /// use tutti_ump::BarAccents;
+    ///
+    /// let part = |n| NonZeroU8::new(n).unwrap();
+    /// assert_eq!(BarAccents::Three(part(4), part(4), part(1)).beats(), 9);
+    /// ```
+    #[must_use]
+    pub const fn beats(self) -> u16 {
+        let [a, b, c] = self.parts();
+        a as u16 + b as u16 + c as u16
+    }
+
+    /// Part 1, 2 and 3 as the fields carry them, a part the bar does not have
+    /// being zero.
+    #[must_use]
+    pub const fn parts(self) -> [u8; 3] {
+        match self {
+            Self::Undivided(a) => [a.get(), 0, 0],
+            Self::Two(a, b) => [a.get(), b.get(), 0],
+            Self::Three(a, b, c) => [a.get(), b.get(), c.get()],
+            Self::Reserved(r) => r.parts(),
+        }
+    }
+
+    /// The accents of three fields, or `None` for a shape §7.5.5 does not
+    /// have: Part 1 zero, or a part after a zero part.
+    #[must_use]
+    pub const fn from_parts(parts: [u8; 3]) -> Option<Self> {
+        match (
+            NonZeroU8::new(parts[0]),
+            NonZeroU8::new(parts[1]),
+            NonZeroU8::new(parts[2]),
+        ) {
+            (Some(a), None, None) => Some(Self::Undivided(a)),
+            (Some(a), Some(b), None) => Some(Self::Two(a, b)),
+            (Some(a), Some(b), Some(c)) => Some(Self::Three(a, b, c)),
+            _ => None,
+        }
+    }
+
+    /// The accents of the three fields as the wire carried them: a shape
+    /// §7.5.5 does not have is kept as [`Reserved`](Self::Reserved).
+    pub(crate) const fn wire(parts: [u8; 3]) -> Self {
+        match Self::from_parts(parts) {
+            Some(accents) => accents,
+            None => Self::Reserved(ReservedAccents::wire(parts)),
+        }
+    }
+}
+
 /// Set Metronome fields (§7.5.5).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Metronome {
     /// MIDI clocks per primary click.
     pub clocks_per_click: u8,
-    /// Bar accent part 1.
-    pub accent_1: u8,
-    /// Bar accent part 2.
-    pub accent_2: u8,
-    /// Bar accent part 3.
-    pub accent_3: u8,
+    /// How the bar divides, its parts adding up to the bar's beats.
+    pub accents: BarAccents,
     /// Subdivision clicks, first set.
     pub subdivision_1: u8,
     /// Subdivision clicks, second set.
@@ -1018,8 +1110,8 @@ pub enum Accidental {
     Sharp,
     /// Two sharps.
     DoubleSharp,
-    /// A value the tables reserve, kept as the raw nibble.
-    Reserved(u8),
+    /// A value the tables reserve, as read.
+    Reserved(Reserved),
 }
 
 /// What an alteration does to a chord degree.
@@ -1035,8 +1127,8 @@ pub enum AlterationKind {
     Raise,
     /// Lower the degree, adding it if needed.
     Lower,
-    /// A reserved type (5 to 15), kept.
-    Reserved(u8),
+    /// A reserved type (5 to 15), as read.
+    Reserved(Reserved),
 }
 
 /// A chord alteration: a kind and the degree it acts on.
@@ -1046,29 +1138,6 @@ pub struct Alteration {
     pub kind: AlterationKind,
     /// The degree (1 is the root, 3 the third).
     pub degree: U4,
-}
-
-/// A chord type, `0x00..=0x1B` (Table 14). A reserved type read from the wire
-/// is kept.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ChordType(u8);
-
-impl ChordType {
-    /// The type, or `None` above `0x1B`.
-    #[must_use]
-    pub const fn new(raw: u8) -> Option<Self> {
-        if raw <= 0x1B { Some(Self(raw)) } else { None }
-    }
-
-    /// The Table 14 value.
-    #[must_use]
-    pub const fn get(self) -> u8 {
-        self.0
-    }
-
-    pub(crate) const fn wire(raw: u8) -> Self {
-        Self(raw)
-    }
 }
 
 /// A chord note with its accidental.
@@ -1087,7 +1156,7 @@ pub struct ChordBass {
     /// note `0`).
     pub pitch: Option<ChordPitch>,
     /// The bass chord type; `0` clears the bass chord.
-    pub chord_type: ChordType,
+    pub chord_type: Field<ChordType>,
     /// Up to two alterations of the bass chord.
     pub alterations: [Alteration; 2],
 }
@@ -1100,7 +1169,7 @@ pub struct ChordName {
     /// The tonic; `None` is unknown (no chord).
     pub tonic: Option<Letter>,
     /// The chord type.
-    pub chord_type: ChordType,
+    pub chord_type: Field<ChordType>,
     /// Up to four alterations.
     pub alterations: [Alteration; 4],
     /// The bass.
@@ -1165,12 +1234,62 @@ pub enum Form {
 }
 
 /// A UMP version (Table 5).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// Versions are ordered by major, then minor: a device that receives an
+/// Endpoint Discovery compares the version it carries with its own to choose
+/// how much of the message it reads (§7.1.1).
+///
+/// ```
+/// use tutti_ump::UmpVersion;
+///
+/// assert!(UmpVersion::new(1, 0) < UmpVersion::V1_1);
+/// assert!(UmpVersion::new(1, 255) < UmpVersion::new(2, 0));
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UmpVersion {
-    /// Major.
+    /// Major. Declared first, so it orders before the minor.
     pub major: u8,
     /// Minor.
     pub minor: u8,
+}
+
+impl UmpVersion {
+    /// UMP 1.1, the version of M2-104 v1.1 (Table 5).
+    pub const V1_1: Self = Self::new(1, 1);
+
+    /// The version `major.minor`.
+    #[must_use]
+    pub const fn new(major: u8, minor: u8) -> Self {
+        Self { major, minor }
+    }
+}
+
+/// The Function Block count of an Endpoint Info Notification: `0..=32`, or a
+/// reserved count (`33..=127`) as read from the wire, which only the decoder
+/// builds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FunctionBlocks {
+    /// A count M2-104 defines.
+    Count(FunctionBlockCount),
+    /// A reserved count, as read.
+    Reserved(Reserved),
+}
+
+impl FunctionBlocks {
+    /// The count, or `None` for a reserved one.
+    #[must_use]
+    pub const fn count(self) -> Option<FunctionBlockCount> {
+        match self {
+            Self::Count(count) => Some(count),
+            Self::Reserved(_) => None,
+        }
+    }
+}
+
+impl From<FunctionBlockCount> for FunctionBlocks {
+    fn from(count: FunctionBlockCount) -> Self {
+        Self::Count(count)
+    }
 }
 
 /// Which notifications an Endpoint Discovery asks for (§7.1.1).
@@ -1195,10 +1314,9 @@ pub struct EndpointInfo {
     pub version: UmpVersion,
     /// The Function Blocks never change.
     pub static_function_blocks: bool,
-    /// How many Function Blocks.
-    /// How many Function Blocks: `0..=32` is defined, `33..=127` reserved and
-    /// kept.
-    pub function_blocks: U7,
+    /// How many Function Blocks: `0..=32` is defined, a `33..=127` read from
+    /// the wire is reserved and kept.
+    pub function_blocks: FunctionBlocks,
     /// Supports the MIDI 2.0 Protocol.
     pub midi2: bool,
     /// Supports the MIDI 1.0 Protocol.
@@ -1234,8 +1352,8 @@ pub enum Protocol {
     Midi1,
     /// MIDI 2.0 (`0x02`).
     Midi2,
-    /// A reserved value, kept.
-    Reserved(u8),
+    /// A reserved value, as read.
+    Reserved(Reserved),
 }
 
 /// The payload of Stream Configuration Request and Notification.
@@ -1252,10 +1370,12 @@ pub struct StreamConfig {
 /// Which Function Block a Discovery asks about (§7.1.7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BlockSelect {
-    /// One block. A number above 31 is reserved and kept.
+    /// One block.
     One(FunctionBlockId),
     /// All of them (`0xFF`).
     All,
+    /// A number above 31 other than `0xFF`, as read.
+    Reserved(Reserved),
 }
 
 /// Which notifications a Function Block Discovery asks for.
@@ -1276,8 +1396,8 @@ pub enum Direction {
     Output,
     /// Both.
     Bidirectional,
-    /// The reserved `0b00`, kept.
-    Reserved(u8),
+    /// The reserved `0b00`, as read.
+    Reserved(Reserved),
 }
 
 /// The primary role a Function Block declares.
@@ -1302,8 +1422,8 @@ pub enum Midi1Port {
     Unrestricted,
     /// A MIDI 1.0 port restricted to 31.25 kbps.
     Restricted,
-    /// The reserved `0x03`, kept.
-    Reserved(u8),
+    /// The reserved `0x03`, as read.
+    Reserved(Reserved),
 }
 
 /// A Function Block Info Notification (§7.1.8).
@@ -1312,7 +1432,7 @@ pub struct FunctionBlockInfo {
     /// Whether the block is active.
     pub active: bool,
     /// Which block.
-    pub id: FunctionBlockId,
+    pub id: Field<FunctionBlockId>,
     /// Its direction.
     pub direction: Direction,
     /// Its UI hint.
@@ -1320,9 +1440,9 @@ pub struct FunctionBlockInfo {
     /// MIDI 1.0 port status.
     pub midi1: Midi1Port,
     /// The first Group it spans.
-    pub first_group: FirstGroup,
+    pub first_group: Field<FirstGroup>,
     /// How many Groups it spans.
-    pub groups_spanned: GroupSpan,
+    pub groups_spanned: Field<GroupSpan>,
     /// The MIDI-CI message version, `0` for none.
     pub midi_ci_version: u8,
     /// Simultaneous SysEx 8 streams supported.
@@ -1364,7 +1484,7 @@ pub enum Stream {
     /// Function Block Name Notification: 13 UTF-8 bytes, zero-padded.
     FunctionBlockName {
         /// Which block.
-        block: FunctionBlockId,
+        block: Field<FunctionBlockId>,
         /// The packet's place.
         form: Form,
         /// The bytes.

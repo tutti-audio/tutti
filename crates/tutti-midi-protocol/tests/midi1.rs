@@ -3,6 +3,7 @@
 //! The expected bytes are written out from M2-104 Appendix D and M2-115, or
 //! follow from `widen` and the figures `tests/narrow.rs` pins.
 
+use tutti_fixtures::midi;
 use tutti_midi_protocol::{NoMidi1Form, midi1, narrow, widen};
 use tutti_ump::{
     Address, Attribute, Bank, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
@@ -74,11 +75,8 @@ fn a_note_with_any_attribute_type_sends_bytes() {
         Attribute::Manufacturer(0x1234),
         Attribute::Profile(7),
         Attribute::Pitch(0x3C00),
-        Attribute::Reserved { kind: 4, data: 1 },
-        Attribute::Reserved {
-            kind: 255,
-            data: 0xFFFF,
-        },
+        midi::reserved_attribute(4, 1),
+        midi::reserved_attribute(255, 0xFFFF),
     ];
     for attribute in attributes {
         let on = Message::Midi2(

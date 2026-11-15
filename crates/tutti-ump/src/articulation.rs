@@ -686,10 +686,10 @@ impl NoteArticulation {
             | (self.stroke as u16) << 6
             | (self.reset_round_robin as u16) << 3
             | self.string.bits();
-        Attribute::Reserved {
-            kind: self.articulation.classification().attribute_type(),
+        Attribute::Articulation(ArticulationAttribute::wire(
+            self.articulation.classification().attribute_type(),
             data,
-        }
+        ))
     }
 
     /// The articulation a Note On attribute carries.
@@ -705,7 +705,8 @@ impl NoteArticulation {
             Attribute::Manufacturer(data) => (0x01, data),
             Attribute::Profile(data) => (0x02, data),
             Attribute::Pitch(data) => (0x03, data),
-            Attribute::Reserved { kind, data } => (kind, data),
+            Attribute::Reserved(r) => (r.kind(), r.data()),
+            Attribute::Articulation(a) => (a.kind(), a.data()),
         };
         let classification = Classification::from_attribute_type(kind)?;
         let subclass = U4::masked((data >> 12) as u8);
@@ -874,10 +875,7 @@ impl NoteOffArticulation {
         let data = (self.ending.subclass().get() as u16) << 12
             | (self.variation.get() as u16) << 8
             | self.string.bits();
-        Attribute::Reserved {
-            kind: Self::ATTRIBUTE_TYPE,
-            data,
-        }
+        Attribute::Articulation(ArticulationAttribute::wire(Self::ATTRIBUTE_TYPE, data))
     }
 
     /// The articulation a Note Off attribute carries.
@@ -892,7 +890,8 @@ impl NoteOffArticulation {
             Attribute::Manufacturer(data) => (0x01, data),
             Attribute::Profile(data) => (0x02, data),
             Attribute::Pitch(data) => (0x03, data),
-            Attribute::Reserved { kind, data } => (kind, data),
+            Attribute::Reserved(r) => (r.kind(), r.data()),
+            Attribute::Articulation(a) => (a.kind(), a.data()),
         };
         if kind != Self::ATTRIBUTE_TYPE {
             return Err(ArticulationError::NotAnArticulation(kind));
@@ -938,5 +937,39 @@ impl NoteOffArticulation {
             )),
             _ => Err(ArticulationError::NotANoteOff),
         }
+    }
+}
+
+/// A Note On or Note Off attribute of an M2-123 articulation type (`0x10` to
+/// `0x1F`), with its data. [`NoteArticulation::to_attribute`] and
+/// [`NoteOffArticulation::to_attribute`] write one for a defined articulation;
+/// the decoder reads one for any type of the range, a reserved Classification
+/// included, which [`NoteArticulation::from_attribute`] then refuses by name.
+///
+/// ```compile_fail,E0451
+/// use tutti_ump::ArticulationAttribute;
+/// let _ = ArticulationAttribute { kind: 0x18, data: 0 };
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ArticulationAttribute {
+    kind: u8,
+    data: u16,
+}
+
+impl ArticulationAttribute {
+    pub(crate) const fn wire(kind: u8, data: u16) -> Self {
+        Self { kind, data }
+    }
+
+    /// The attribute type, `0x10..=0x1F`.
+    #[must_use]
+    pub const fn kind(self) -> u8 {
+        self.kind
+    }
+
+    /// The attribute data.
+    #[must_use]
+    pub const fn data(self) -> u16 {
+        self.data
     }
 }

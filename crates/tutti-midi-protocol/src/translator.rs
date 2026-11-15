@@ -100,6 +100,10 @@ struct Channel {
 ///   Program Change as its bank. The halves are kept across Program Changes,
 ///   so a lone CC 32 pairs with the CC 0 last sent (0 if never); a Program
 ///   Change with no Bank Select since the one before carries no bank.
+/// - **A MIDI 2.0 Control Change of CC 0, 6, 32, 38 or 98 to 101** is
+///   dropped, and returns `None`: the MIDI 2.0 Protocol has the Program Change,
+///   Registered Controller and Assignable Controller messages for what they
+///   carry, and a receiver ignores them (M2-104 section 7.4.6).
 /// - **Every other packet** passes through unchanged: a MIDI 2.0 message (a
 ///   Note On at velocity 0 stays a Note On), system, SysEx, Flex Data, UMP
 ///   Stream, utility, and a packet no definition covers. Data Increment and
@@ -221,14 +225,24 @@ impl Translator {
     }
 
     /// Translates one packet: `None` for an absorbed select, Data Entry or
-    /// Bank Select that ends no run, and the packet it becomes otherwise (a
+    /// Bank Select that ends no run, or a MIDI 2.0 Control Change the Protocol
+    /// ignores, and the packet it becomes otherwise (a
     /// select or a CC 6 that ends a run sends that run's controller, and is
     /// itself absorbed). Never more than one packet: a clip's loader puts the
     /// result in its source's place. A `Message` is accepted as its packet.
     pub fn translate(&mut self, packet: impl Into<Ump>) -> Option<Ump> {
         let ump = packet.into();
-        let Ok(Message::Midi1(address, voice)) = ump.decode() else {
-            return Some(ump);
+        let (address, voice) = match ump.decode() {
+            Ok(Message::Midi1(address, voice)) => (address, voice),
+            // The MIDI 2.0 Protocol has messages of its own for what these
+            // controllers carry, and a receiver ignores them as Control Change
+            // (M2-104 section 7.4.6).
+            Ok(Message::Midi2(_, Voice2::ControlChange { controller, .. }))
+                if controller.is_ignored_in_midi2() =>
+            {
+                return None;
+            }
+            _ => return Some(ump),
         };
         let channel = &mut self.channels[address.index()];
         let mut sent = None;

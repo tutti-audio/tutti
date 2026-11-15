@@ -319,7 +319,7 @@ fn values_told_before_a_note_on_are_its_initial_events() {
                 Address::new(group(0), ch(2)),
                 Voice2::RegisteredPerNote {
                     note: NoteNumber::of(64),
-                    controller: RegisteredPerNoteController::from(74),
+                    controller: RegisteredPerNoteController::Brightness,
                     value: ControlValue::CENTER,
                 },
             )),
@@ -377,7 +377,7 @@ fn per_note_pitch_and_the_pitch_attribute_are_tunings() {
             Address::new(group(0), ch(0)),
             Voice2::RegisteredPerNote {
                 note: NoteNumber::of(60),
-                controller: RegisteredPerNoteController::from(3),
+                controller: RegisteredPerNoteController::Pitch,
                 value: ControlValue::new((60 << 25) | (1 << 23)),
             },
         ))],
@@ -467,7 +467,7 @@ fn a_pitch_then_a_bend_is_one_tuning_from_the_key() {
             Address::new(group(0), ch(0)),
             Voice2::RegisteredPerNote {
                 note: NoteNumber::of(60),
-                controller: RegisteredPerNoteController::from(3),
+                controller: RegisteredPerNoteController::Pitch,
                 value: ControlValue::new((60 << 25) | (1 << 24)),
             },
         ));

@@ -930,7 +930,7 @@ fn a_render_that_starts_mid_clip_starts_from_the_timelines_state() {
                 Address::new(g, c0),
                 Voice2::RegisteredPerNote {
                     note: NoteNumber::of(60),
-                    controller: RegisteredPerNoteController::from(3),
+                    controller: RegisteredPerNoteController::Pitch,
                     value: ControlValue::new(0x4000_0000),
                 },
             )),
