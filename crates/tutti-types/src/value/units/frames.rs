@@ -15,9 +15,9 @@ crate::ranged! {
     ///
     /// **Range-checked**: [`new`](Self::new) refuses NaN, the infinities and
     /// anything below zero (negative zero included), and so do `TryFrom<f64>`
-    /// and serde. [`of`](Self::of) is for a literal. [`clamped`](Self::clamped) is the one saturating
-    /// constructor; [`Unit::from_raw`] is it too, since a parameter cell holds
-    /// any float.
+    /// and serde. [`of`](Self::of) is for a literal. [`clamped`](Self::clamped)
+    /// is the one saturating constructor; [`Unit::from_raw`] is it too, since a
+    /// parameter cell holds any float.
     ///
     /// ```
     /// use tutti_types::{SamplePosition, SampleRate, SampleSpan, Seconds};
