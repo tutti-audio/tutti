@@ -12,7 +12,7 @@ use tutti_ump::{
     Address, CCNumber, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity,
     PerNoteManagement, Sysex7Packets, SysexStatus, System, U7, U14, Ump, Voice2,
 };
-use tutti_ump::{BendValue, ControlValue};
+use tutti_ump::{BendValue, ControlValue, RegisteredPerNoteController};
 use tutti_vst3_ffi::EventList;
 
 /// A packet from its words, zero-padded to four, at offset 0.
@@ -81,7 +81,7 @@ fn inbound_generic_data_cc_promotes_to_cv2() {
     // vocabulary regardless of source (the same widening the hardware input
     // path makes).
     let vst3 = Event::at(0, Payload::Data(Data::inline(0, [0xB1, 74, 100])));
-    let back = vst3.to_midi().expect("cc decodes");
+    let back = vst3.to_midi(&mut OutputStream::new()).expect("cc decodes");
     match back.ump.decode().expect("valid UMP") {
         Message::Midi2(address, Voice2::ControlChange { controller, .. }) => {
             assert_eq!(address.channel.get(), 1);
@@ -96,7 +96,9 @@ fn inbound_system_message_passes_through() {
     // A System real-time message (Timing Clock 0xF8) in a plugin's output has no
     // CV form and must pass through unchanged, not be dropped or widened.
     let vst3 = Event::at(0, Payload::Data(Data::inline(0, [0xF8, 0, 0])));
-    let back = vst3.to_midi().expect("clock decodes");
+    let back = vst3
+        .to_midi(&mut OutputStream::new())
+        .expect("clock decodes");
     assert!(
         matches!(
             back.ump.decode(),
@@ -120,7 +122,7 @@ fn note_on_lands_in_note_on_variant() {
         _ => panic!("expected NoteOn variant"),
     }
 
-    let back = vst3.to_midi().expect("round-trip");
+    let back = vst3.to_midi(&mut OutputStream::new()).expect("round-trip");
     assert!(matches!(
         channel_voice(back.ump),
         Some((_, Voice2::NoteOn { note, .. })) if note == NoteNumber::of(60)
@@ -146,7 +148,7 @@ fn note_off_lands_in_note_off_variant() {
         _ => panic!("expected NoteOff variant"),
     }
 
-    let back = vst3.to_midi().expect("round-trip");
+    let back = vst3.to_midi(&mut OutputStream::new()).expect("round-trip");
     assert!(back.ump.is_note_off());
     let Some((_, Voice2::NoteOff { note, velocity, .. })) = channel_voice(back.ump) else {
         panic!("a note-off");
@@ -196,7 +198,7 @@ fn poly_pressure_lands_in_poly_pressure_variant() {
         p.noteId, id,
         "the pressure is for the note that is sounding"
     );
-    let back = vst3.to_midi().expect("round-trip");
+    let back = vst3.to_midi(&mut OutputStream::new()).expect("round-trip");
     assert!(matches!(
         channel_voice(back.ump),
         Some((_, Voice2::PolyPressure { note, .. })) if note == NoteNumber::of(60)
@@ -456,22 +458,29 @@ fn an_in_range_expression_value_is_untouched() {
     }
 }
 
+/// A note expression names its voice by a note id; one that is not the host's
+/// `channel * 128 + note` (a plugin's own id space) names no `(channel, note)`
+/// and is no MIDI event.
 #[test]
-fn note_expression_is_not_a_midi_event() {
+fn a_note_expression_of_a_plugins_own_note_id_is_not_a_midi_event() {
     let expr = NoteExpressionValue {
         sample_offset: 0,
-        note_id: 1,
+        note_id: 5000,
         expression_type: NoteExpressionType::Tuning,
         value: 0.5,
     };
     let vst3 = expr.to_event().expect("Tuning is VST3-encodable");
-    assert!(vst3.to_midi().is_none());
+    assert!(vst3.to_midi(&mut OutputStream::new()).is_none());
 }
 
 #[test]
 fn data_event_with_truncated_size_fails_gracefully() {
     let data = Data::new(0, &[0xB0]).expect("fits inline");
-    assert!(Event::at(0, Payload::Data(data)).to_midi().is_none());
+    assert!(
+        Event::at(0, Payload::Data(data))
+            .to_midi(&mut OutputStream::new())
+            .is_none()
+    );
 }
 
 /// A Note On has a `noteId` of its own, minted above every `(channel, key)`
@@ -534,7 +543,7 @@ fn per_note_pitch_bend_becomes_tuning_expression() {
     assert_eq!(vst3.sample_offset(), 12);
     assert!((expr.value - 0.5).abs() < 0.01, "center bend → 0.5");
     // It is NOT a MIDI channel-voice event.
-    assert!(vst3.to_midi().is_none());
+    assert!(vst3.to_midi(&mut OutputStream::new()).is_none());
 }
 
 /// A per-note pitch bend is told to the plugin as the semitones it
@@ -687,7 +696,9 @@ fn single_packet_sysex_round_trips_through_data_event() {
         _ => panic!("expected Data variant for SysEx"),
     }
 
-    let back = vst3.to_midi().expect("SysEx Data round-trips");
+    let back = vst3
+        .to_midi(&mut OutputStream::new())
+        .expect("SysEx Data round-trips");
     let Ok(Message::Sysex7(_, packet)) = back.ump.decode() else {
         panic!("decodes as SysEx7");
     };
@@ -726,7 +737,7 @@ fn note_on_velocity_round_trips_at_full_width() {
         midi::note_on(MidiChannel::FIRST, 60, velocity_u16),
     );
     let vst3 = encode(&event).expect("converts");
-    let back = vst3.to_midi().expect("round-trips");
+    let back = vst3.to_midi(&mut OutputStream::new()).expect("round-trips");
     match back.ump.decode().expect("decodes") {
         Message::Midi2(_, Voice2::NoteOn { velocity: raw, .. }) => {
             let velocity = velocity_to_unit_f32(raw);
@@ -767,7 +778,10 @@ fn note_expression_int_round_trips_with_its_sign() {
     assert_eq!(raw.value, (-1234i64).cast_unsigned(), "the same 64 bits");
     assert_eq!(raw.noteId, spec_note_id(1, 50));
     assert_eq!((raw.typeId, event.sample_offset()), (3, 9));
-    assert!(event.to_midi().is_none(), "not a MIDI message");
+    assert!(
+        event.to_midi(&mut OutputStream::new()).is_none(),
+        "not a MIDI message"
+    );
 }
 
 /// A chord, scale and text value stage into a list, intern their text, and read
@@ -837,7 +851,7 @@ fn harmony_values_round_trip_through_a_list() {
         assert_eq!(back.text.slice(staged.text), Some(text.text.as_slice()));
         assert!(
             by_kind(|p| matches!(p, Payload::Chord(_)))
-                .to_midi()
+                .to_midi(&mut OutputStream::new())
                 .is_none()
         );
     });
@@ -851,7 +865,7 @@ fn legacy_cc_out_decodes_to_midi() {
 
     // Plain CC 74 = 100 on channel 3.
     let cc = Event::at(5, Payload::LegacyCcOut(legacy_cc(74, 3, 100, 0)));
-    let m = cc.to_midi().expect("CC decodes");
+    let m = cc.to_midi(&mut OutputStream::new()).expect("CC decodes");
     assert_eq!(m.offset, 5);
     match m.ump.decode().expect("UMP") {
         Message::Midi2(address, Voice2::ControlChange { controller, value }) => {
@@ -867,7 +881,7 @@ fn legacy_cc_out_decodes_to_midi() {
         0,
         Payload::LegacyCcOut(legacy_cc(kPitchBend as u8, 0, 0, 0x40)),
     );
-    let pb_m = pb.to_midi().unwrap();
+    let pb_m = pb.to_midi(&mut OutputStream::new()).unwrap();
     match pb_m.ump.decode().expect("UMP") {
         Message::Midi2(_, Voice2::PitchBend(bend)) => {
             assert!(bend_to_signed_f32(bend).abs() < 0.01)
@@ -880,7 +894,7 @@ fn legacy_cc_out_decodes_to_midi() {
         0,
         Payload::LegacyCcOut(legacy_cc(kCtrlPolyPressure as u8, 3, 60, 0x21)),
     );
-    let pp_m = pp.to_midi().unwrap();
+    let pp_m = pp.to_midi(&mut OutputStream::new()).unwrap();
     assert_eq!(
         pp_m.ump.decode(),
         Ok(Message::Midi2(
@@ -900,7 +914,7 @@ fn legacy_cc_out_decodes_to_midi() {
         0,
         Payload::LegacyCcOut(legacy_cc(kAfterTouch as u8, 1, 127, 0)),
     );
-    let at_m = at.to_midi().unwrap();
+    let at_m = at.to_midi(&mut OutputStream::new()).unwrap();
     match at_m.ump.decode().expect("UMP") {
         Message::Midi2(address, Voice2::ChannelPressure(_)) => {
             assert_eq!(address.channel.get(), 1)
@@ -922,7 +936,9 @@ fn legacy_cc_out_numbers_above_the_controllers_are_program_change_and_system() {
             Payload::LegacyCcOut(legacy_cc(control, 5, value, value2)),
         );
         event.header.bus_index = 2;
-        event.to_midi().map(|m| m.ump.decode())
+        event
+            .to_midi(&mut OutputStream::new())
+            .map(|m| m.ump.decode())
     };
     assert_eq!(
         decode(130, 42, 0),
@@ -967,7 +983,7 @@ fn legacy_cc_out_numbers_above_the_controllers_are_program_change_and_system() {
 fn an_output_events_bus_index_is_its_group() {
     let on_bus = |bus: i32, mut event: Event| {
         event.header.bus_index = bus;
-        event.to_midi()
+        event.to_midi(&mut OutputStream::new())
     };
     let group_of = |midi: Option<tutti_plugin_types::WireMidi>| match midi.unwrap().ump.decode() {
         Ok(Message::Midi2(address, _)) => address.group,
@@ -1010,7 +1026,7 @@ fn harmony_events_are_not_midi() {
             text: TextRef::default(),
         }),
     );
-    assert!(chord.to_midi().is_none());
+    assert!(chord.to_midi(&mut OutputStream::new()).is_none());
 }
 
 // ── reading through `tutti_ump::Message` ─────────────────────────────────
@@ -1309,7 +1325,7 @@ mod message {
     #[test]
     fn raw_midi1_from_a_plugin_is_widened() {
         let on = Event::at(4, Payload::Data(Data::inline(0, [0x92, 60, 0])));
-        let back = on.to_midi().expect("decodes");
+        let back = on.to_midi(&mut OutputStream::new()).expect("decodes");
         assert_eq!(back.offset, 4);
         assert_eq!(
             back.ump.decode(),
@@ -1322,7 +1338,8 @@ mod message {
                 }
             ))
         );
-        let clock = Event::at(0, Payload::Data(Data::inline(0, [0xF8, 0, 0]))).to_midi();
+        let clock = Event::at(0, Payload::Data(Data::inline(0, [0xF8, 0, 0])))
+            .to_midi(&mut OutputStream::new());
         assert_eq!(
             clock.map(|m| m.ump.decode()),
             Some(Ok(Message::System(MidiGroup::FIRST, System::TimingClock)))
@@ -1442,7 +1459,10 @@ mod message {
         .map(|bytes| Event::at(1, Payload::Data(Data::inline(0, bytes))))
         .collect();
         for event in &raw {
-            assert!(event.to_midi().is_some(), "{event:?} did not decode");
+            assert!(
+                event.to_midi(&mut OutputStream::new()).is_some(),
+                "{event:?} did not decode"
+            );
         }
         let legacy = Event::at(2, Payload::LegacyCcOut(legacy_cc(74, 3, 100, 0)));
         let mut encoder = MidiEncoder::default();
@@ -1451,9 +1471,9 @@ mod message {
                 let _ = encoder.encode(event);
             }
             for event in &raw {
-                let _ = event.to_midi();
+                let _ = event.to_midi(&mut OutputStream::new());
             }
-            let _ = legacy.to_midi();
+            let _ = legacy.to_midi(&mut OutputStream::new());
         });
     }
 
@@ -1476,9 +1496,12 @@ mod message {
         let good = Event::at(3, Payload::Data(Data::inline(0, [0xB0, 7, 99])));
         assert_no_alloc::assert_no_alloc(|| {
             for event in &hostile {
-                assert!(event.to_midi().is_none(), "{event:?} read as a message");
+                assert!(
+                    event.to_midi(&mut OutputStream::new()).is_none(),
+                    "{event:?} read as a message"
+                );
             }
-            assert!(good.to_midi().is_some());
+            assert!(good.to_midi(&mut OutputStream::new()).is_some());
         });
     }
 
@@ -1490,7 +1513,7 @@ mod message {
     fn a_plugins_sysex_data_event_is_forwarded_only_when_whole() {
         let data = |bytes: &[u8]| Event::at(2, Payload::Data(Data::new(0, bytes).unwrap()));
         let whole = data(&[0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7])
-            .to_midi()
+            .to_midi(&mut OutputStream::new())
             .unwrap();
         assert_eq!(whole.offset, 2);
         assert_eq!(
@@ -1499,9 +1522,70 @@ mod message {
                 .expect("a payload of 7-bit bytes")
                 .collect::<Vec<Ump>>()[0]
         );
-        assert!(data(&[0xF0, 0x7E, 0x7F, 0x06, 0x01]).to_midi().is_none());
-        assert!(data(&[0xF0, 0x7E, 0x80, 0xF7]).to_midi().is_none());
-        assert!(data(&[0xF0, 1, 2, 3, 4, 5, 6, 7, 0xF7]).to_midi().is_none());
+        assert!(
+            data(&[0xF0, 0x7E, 0x7F, 0x06, 0x01])
+                .to_midi(&mut OutputStream::new())
+                .is_none()
+        );
+        assert!(
+            data(&[0xF0, 0x7E, 0x80, 0xF7])
+                .to_midi(&mut OutputStream::new())
+                .is_none()
+        );
+        assert!(
+            data(&[0xF0, 1, 2, 3, 4, 5, 6, 7, 0xF7])
+                .to_midi(&mut OutputStream::new())
+                .is_none()
+        );
+    }
+
+    /// **A SysEx the block's MIDI has no room for is dropped whole and lost**:
+    /// one of 67 packets does not fit the 64 a block holds, so none of it is
+    /// emitted and the stream counts one lost message (what the host reports in
+    /// `midi_dropped`); one that fits is emitted and costs nothing.
+    #[test]
+    fn a_sysex_that_does_not_fit_the_block_is_counted_lost() {
+        let drain = |bytes: usize| {
+            let payload: Vec<u8> = (0..bytes).map(|i| 1 + (i % 100) as u8).collect();
+            let events: Vec<UmpAt> = Sysex7Packets::from_payload(MidiGroup::FIRST, &payload)
+                .expect("7-bit bytes")
+                .map(|ump| (at(7), ump))
+                .collect();
+            let list = EventList::input();
+            assert!(Stager::default().stage(
+                &list,
+                &InputEvents {
+                    midi: &events,
+                    ..Default::default()
+                },
+            ));
+            let mut stream = OutputStream::new();
+            let mut out = tutti_plugin_types::RtMidiEvents::new();
+            drain_midi(&list, &mut stream, &mut out);
+            (out.len(), stream.lost_total(), stream.sysex_dropped())
+        };
+        let (emitted, lost, sysex) = drain(6 * 64);
+        assert_eq!((emitted, lost, sysex), (64, 0, 0), "64 packets fit");
+        let (emitted, lost, sysex) = drain(6 * 64 + 1);
+        assert_eq!((emitted, lost, sysex), (0, 1, 1), "65 packets do not");
+    }
+
+    /// **A list the plugin holds is lost, counted once**: a block whose output
+    /// list a plugin thread holds is not read, and the stream counts one lost
+    /// event for it (the least it holds), which is what `midi_dropped` reports.
+    #[test]
+    fn an_output_list_the_plugin_holds_is_counted_lost() {
+        let list = EventList::input();
+        let mut stream = OutputStream::new();
+        let mut out = tutti_plugin_types::RtMidiEvents::new();
+        {
+            let _plugin_writing = list.begin();
+            drain_midi(&list, &mut stream, &mut out);
+        }
+        assert!(out.is_empty());
+        assert_eq!((stream.lists_busy(), stream.lost_total()), (1, 1));
+        drain_midi(&list, &mut stream, &mut out);
+        assert_eq!(stream.lost_total(), 1, "a free list costs nothing");
     }
 
     /// A chord at one frame stages as three Note Ons, in order, each at the
@@ -1547,4 +1631,457 @@ mod message {
             vec![(60, velocity, 7), (64, velocity, 7), (67, velocity, 7)]
         );
     }
+}
+
+/// **A plugin's note expression is the per-note message of its dimension**, on
+/// the Group of its event bus: volume, pan and brightness are the Registered
+/// Per-Note Controllers 7, 10 and 74 (M2-104 Appendix A), over the full 32 bits
+/// of the unit; a tuning of `0.5 + 12/240` is 12 semitones, which is Registered
+/// Per-Note Controller 3, Pitch 7.25, at the absolute pitch 72.0 (§7.4.15.2).
+/// A dimension with no per-note message, a custom id, a note id the plugin did
+/// not start, a value that is not a number and a tuning past Pitch 7.25's range
+/// are dropped, and each is counted lost once.
+#[test]
+fn a_plugins_note_expression_is_the_per_note_message_of_its_dimension() {
+    use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
+
+    let note_id = spec_note_id(2, 60);
+    // The note the plugin started under this id: an expression names a note only
+    // through an id the plugin started.
+    let mut stream = OutputStream::new();
+    let started = Event::at(0, Payload::NoteOn(NoteOn::new(2, 60, 0.5, note_id)));
+    assert!(started.to_midi(&mut stream).is_some());
+    let mut decode = |type_id: u32, id: i32, value: f64| {
+        let mut event = Event::at(
+            4,
+            Payload::ExpressionValue(ExpressionValue::new(type_id, id, value)),
+        );
+        event.header.bus_index = 5;
+        event
+            .to_midi(&mut stream)
+            .map(|m| (m.offset, m.ump.decode()))
+    };
+    let per_note = |voice| {
+        Some((
+            4,
+            Ok(Message::Midi2(
+                Address {
+                    group: MidiGroup::of(5),
+                    channel: MidiChannel::of(2),
+                },
+                voice,
+            )),
+        ))
+    };
+    let controller = |controller, value| Voice2::RegisteredPerNote {
+        note: NoteNumber::of(60),
+        controller,
+        value: ControlValue::new(value),
+    };
+    // Volume is `0` for silence, `0.25` for 0 dB and `1` for +12 dB
+    // (`ivstnoteexpression.h`): unity is full scale, half of unity is half
+    // scale (2^31, rounded), and a boost saturates.
+    assert_eq!(
+        decode(Ids::kVolumeTypeID, note_id, 0.25),
+        per_note(controller(RegisteredPerNoteController::Volume, u32::MAX))
+    );
+    assert_eq!(
+        decode(Ids::kVolumeTypeID, note_id, 0.125),
+        per_note(controller(RegisteredPerNoteController::Volume, 0x8000_0000))
+    );
+    assert_eq!(
+        decode(Ids::kVolumeTypeID, note_id, 1.0),
+        per_note(controller(RegisteredPerNoteController::Volume, u32::MAX))
+    );
+    assert_eq!(
+        decode(Ids::kPanTypeID, note_id, 1.0),
+        per_note(controller(RegisteredPerNoteController::Pan, u32::MAX))
+    );
+    assert_eq!(
+        decode(Ids::kBrightnessTypeID, note_id, 0.0),
+        per_note(controller(RegisteredPerNoteController::Brightness, 0))
+    );
+    assert_eq!(
+        decode(Ids::kTuningTypeID, note_id, 0.5 + 12.0 / 240.0),
+        per_note(controller(RegisteredPerNoteController::Pitch, 72 << 25))
+    );
+    assert_eq!(
+        decode(Ids::kTuningTypeID, note_id, 0.5 + 80.0 / 240.0),
+        None,
+        "key 60 + 80 semitones is past Pitch 7.25's range"
+    );
+    assert_eq!(decode(Ids::kVibratoTypeID, note_id, 0.5), None);
+    assert_eq!(decode(Ids::kExpressionTypeID, note_id, 0.5), None);
+    assert_eq!(decode(Ids::kCustomStart, note_id, 0.5), None);
+    assert_eq!(
+        decode(Ids::kVolumeTypeID, 99_999, 0.25),
+        None,
+        "a plugin's own id"
+    );
+    assert_eq!(decode(Ids::kVolumeTypeID, -1, 0.5), None, "the wildcard");
+    assert_eq!(decode(Ids::kVolumeTypeID, note_id, f64::NAN), None);
+    // Each of the seven drops above is one lost event: the tuning past its
+    // range, vibrato, expression, a custom id, a plugin's own id, the wildcard
+    // and a value that is not a number.
+    assert_eq!(stream.expressions_dropped(), 7);
+    assert_eq!(stream.lost_total(), 7);
+}
+
+/// **Events with no UMP form are counted lost**: bytes that are no MIDI
+/// message, a Data event too short to be one, a SysEx too long for one packet
+/// or with a payload byte past 127, a controller number with no message (Cable
+/// Select 135) and the dimensions the host does not translate (an expression's
+/// text, a chord). A message the translator holds in a run is not a loss.
+#[test]
+fn events_with_no_ump_form_are_counted_lost() {
+    let mut stream = OutputStream::new();
+    let data = |bytes: &[u8]| Event::at(0, Payload::Data(Data::new(0, bytes).unwrap()));
+    // A lone data byte, then bytes whose status is not a message.
+    for bytes in [&[0x90][..], &[0x90, 60][..], &[0x00, 1, 2][..]] {
+        assert!(data(bytes).to_midi(&mut stream).is_none(), "{bytes:?}");
+    }
+    assert_eq!(stream.untranslated_dropped(), 3);
+    // A SysEx of two packets, and one with an 8-bit payload byte.
+    assert!(
+        data(&[0xF0, 1, 2, 3, 4, 5, 6, 7, 0xF7])
+            .to_midi(&mut stream)
+            .is_none()
+    );
+    assert!(data(&[0xF0, 1, 0x80, 0xF7]).to_midi(&mut stream).is_none());
+    assert_eq!(stream.sysex_dropped(), 2);
+    // Cable Select (135) has no message, and an expression's integer value has
+    // no UMP form.
+    let cable_select = Event::at(0, Payload::LegacyCcOut(legacy_cc(135, 0, 0, 0)));
+    assert!(cable_select.to_midi(&mut stream).is_none());
+    let int_value = Event::at(0, Payload::ExpressionInt(ExpressionInt::new(3, 7, 1)));
+    assert!(int_value.to_midi(&mut stream).is_none());
+    assert_eq!(stream.untranslated_dropped(), 5);
+    assert_eq!(stream.lost_total(), 7);
+    // A message the translator takes into a run is held, not lost.
+    let select = Event::at(0, Payload::LegacyCcOut(legacy_cc(101, 0, 0, 0)));
+    assert!(select.to_midi(&mut stream).is_none());
+    assert_eq!(stream.lost_total(), 7, "an RPN select is held, not lost");
+}
+
+/// **A parameter run assembles across blocks**: the Data Entry LSB that ends a
+/// Registered Parameter run arrives in a later drain than the select and the
+/// MSB (M2-104 Appendix D.3.3), and the run is one controller (pitch bend
+/// sensitivity of 12 semitones, zero-extended, M2-115 section 4.1).
+#[test]
+fn a_plugins_parameter_run_assembles_across_blocks() {
+    let drain = |translator: &mut OutputStream, controls: &[(u8, i8)]| {
+        let list = EventList::input();
+        let mut staging = list.begin();
+        for &(control, value) in controls {
+            let event = Event::at(0, Payload::LegacyCcOut(legacy_cc(control, 0, value, 0)));
+            assert!(staging.push(event));
+        }
+        staging.finish();
+        let mut out = tutti_plugin_types::RtMidiEvents::new();
+        drain_midi(&list, translator, &mut out);
+        out.iter().map(|m| m.ump.decode()).collect::<Vec<_>>()
+    };
+    let mut translator = OutputStream::new();
+    assert!(drain(&mut translator, &[(101, 0), (100, 0), (6, 12)]).is_empty());
+    let got = drain(&mut translator, &[(38, 0)]);
+    let [Ok(Message::Midi2(_, Voice2::Registered { bank, index, value }))] = got[..] else {
+        panic!("expected one Registered Controller, got {got:?}");
+    };
+    assert_eq!((bank.get(), index.get(), value.get()), (0, 0, 12 << 25));
+}
+
+/// **A plugin's expression on a note it started under its own id is that note's
+/// message**: the id table is fed by the plugin's NoteOn and freed by its NoteOff
+/// (by id, or by channel and pitch when the off names no id).
+#[test]
+fn a_plugins_expression_on_its_own_note_id_is_translated() {
+    use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
+
+    let mut stream = OutputStream::new();
+    let own_id = 9_000;
+    let pan = |id| {
+        Event::at(
+            0,
+            Payload::ExpressionValue(ExpressionValue::new(Ids::kPanTypeID, id, 1.0)),
+        )
+    };
+    let note_on = Event::at(0, Payload::NoteOn(NoteOn::new(3, 62, 0.5, own_id)));
+    assert!(
+        pan(own_id).to_midi(&mut stream).is_none(),
+        "no such note yet"
+    );
+    assert!(note_on.to_midi(&mut stream).is_some());
+    let got = pan(own_id)
+        .to_midi(&mut stream)
+        .expect("the plugin's own note");
+    assert_eq!(
+        got.ump.decode(),
+        Ok(Message::Midi2(
+            Address {
+                group: MidiGroup::FIRST,
+                channel: MidiChannel::of(3)
+            },
+            Voice2::RegisteredPerNote {
+                note: NoteNumber::of(62),
+                controller: RegisteredPerNoteController::Pan,
+                value: ControlValue::new(u32::MAX),
+            },
+        ))
+    );
+    // Ended by channel and pitch: the entry stays for the release.
+    let off = Event::at(0, Payload::NoteOff(NoteOff::new(3, 62, 0.0, -1)));
+    assert!(off.to_midi(&mut stream).is_some());
+    assert!(pan(own_id).to_midi(&mut stream).is_some());
+}
+
+/// What a note's volume expressions are after `events` (a Note On on `note` 60
+/// first), by `kVolumeTypeID` (0).
+fn volumes_after(follow: Voice2) -> Vec<f64> {
+    let mut encoder = MidiEncoder::default();
+    let on = Message::Midi2(
+        Address {
+            group: MidiGroup::FIRST,
+            channel: MidiChannel::of(0),
+        },
+        Voice2::note_on(NoteNumber::of(60), NoteVelocity::CENTER),
+    );
+    encoder.encode(&(Offset::ZERO, Ump::from(on)));
+    encoder
+        .encode(&(
+            Offset::ZERO,
+            Ump::from(Message::Midi2(
+                Address {
+                    group: MidiGroup::FIRST,
+                    channel: MidiChannel::of(0),
+                },
+                follow,
+            )),
+        ))
+        .iter()
+        .filter_map(|event| match event.payload {
+            Payload::ExpressionValue(e) if e.typeId == 0 => Some(e.value),
+            _ => None,
+        })
+        .collect()
+}
+
+/// **A Per-Note volume stages on VST3's scale**: `kVolumeTypeID` is `0` for
+/// silence, `0.25` for 0 dB and `1` for +12 dB (`ivstnoteexpression.h`), and a
+/// per-note controller's full scale is unity, so full scale is `0.25` and half
+/// of it `0.125`.
+#[test]
+fn a_full_scale_per_note_volume_stages_at_vst3_unity() {
+    let volume = |value: u32| Voice2::AssignablePerNote {
+        note: NoteNumber::of(60),
+        controller: 7,
+        value: ControlValue::new(value),
+    };
+    assert_eq!(volumes_after(volume(u32::MAX)), [0.25]);
+    let half = volumes_after(volume(0x8000_0000));
+    assert!((half[0] - 0.125).abs() < 1e-6, "{half:?}");
+    assert_eq!(volumes_after(volume(0)), [0.0]);
+}
+
+/// **A Per-Note Management Reset puts a note's volume back to unity**, which on
+/// VST3's scale is `0.25`, not `1` (+12 dB).
+#[test]
+fn a_per_note_reset_sends_volume_at_vst3_unity() {
+    let reset = Voice2::PerNoteManagement {
+        note: NoteNumber::of(60),
+        management: PerNoteManagement::Reset,
+    };
+    assert_eq!(volumes_after(reset), [0.25]);
+}
+
+/// **Every event of the plugin's output reaches the stream, whether or not the
+/// block's list has room**: a run's Data Entry LSB and a note's start that
+/// arrive after the list is full are read, so the run is one controller in the
+/// block after and the note's expression is that note's.
+#[test]
+fn a_run_and_a_note_through_a_full_list_are_still_read() {
+    use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
+
+    let drain = |stream: &mut OutputStream, events: Vec<Event>| {
+        let list = EventList::input();
+        let mut staging = list.begin();
+        for event in events {
+            assert!(staging.push(event));
+        }
+        staging.finish();
+        let mut out = tutti_plugin_types::RtMidiEvents::new();
+        drain_midi(&list, stream, &mut out);
+        (
+            out.iter().map(|m| m.ump.decode()).collect::<Vec<_>>(),
+            out.is_overflowed(),
+        )
+    };
+    let cc = |control: u8, value: i8| {
+        Event::at(0, Payload::LegacyCcOut(legacy_cc(control, 0, value, 0)))
+    };
+    let mut stream = OutputStream::new();
+    // Block 1: the list fills with notes, then a run and an own-id note arrive.
+    let mut first: Vec<Event> = (0..tutti_plugin_types::RT_MIDI_CAPACITY)
+        .map(|_| Event::at(0, Payload::NoteOn(NoteOn::new(0, 60, 0.5, -1))))
+        .collect();
+    first.extend([cc(101, 0), cc(100, 0), cc(6, 12), cc(38, 0)]);
+    first.push(Event::at(
+        0,
+        Payload::NoteOn(NoteOn::new(3, 62, 0.5, 9_000)),
+    ));
+    let (got, overflowed) = drain(&mut stream, first);
+    assert!(overflowed);
+    assert_eq!(
+        got.len(),
+        tutti_plugin_types::RT_MIDI_CAPACITY,
+        "no room for the rest"
+    );
+    // Block 2: RPN 0/0 is still selected, so one more value is one controller,
+    // and the note under id 9000 takes an expression.
+    let pan = Event::at(
+        0,
+        Payload::ExpressionValue(ExpressionValue::new(Ids::kPanTypeID, 9_000, 1.0)),
+    );
+    let (got, _) = drain(&mut stream, vec![cc(6, 7), cc(38, 0), pan]);
+    let [
+        Ok(Message::Midi2(_, Voice2::Registered { value, .. })),
+        Ok(Message::Midi2(
+            address,
+            Voice2::RegisteredPerNote {
+                note, controller, ..
+            },
+        )),
+    ] = got[..]
+    else {
+        panic!("expected a controller and an expression, got {got:?}");
+    };
+    assert_eq!(value.get(), 7 << 25);
+    assert_eq!(
+        (address.channel.get(), note.get(), controller),
+        (3, 62, RegisteredPerNoteController::Pan)
+    );
+}
+
+/// **An id the plugin's output has not started names no note**: a low own id is
+/// not read as the host's `channel * 128 + note` (id 5 is not channel 0 key 5),
+/// whether never started or started with id `-1`; it is dropped and counted.
+#[test]
+fn an_expression_on_an_id_no_output_note_started_is_dropped_and_counted() {
+    use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
+
+    let mut stream = OutputStream::new();
+    let pan = |id| {
+        Event::at(
+            0,
+            Payload::ExpressionValue(ExpressionValue::new(Ids::kPanTypeID, id, 1.0)),
+        )
+    };
+    assert!(pan(5).to_midi(&mut stream).is_none(), "never started");
+    let anonymous = Event::at(0, Payload::NoteOn(NoteOn::new(2, 40, 0.5, -1)));
+    assert!(anonymous.to_midi(&mut stream).is_some());
+    assert!(
+        pan(5).to_midi(&mut stream).is_none(),
+        "a note on with no id"
+    );
+    let on = Event::at(0, Payload::NoteOn(NoteOn::new(2, 40, 0.5, 5)));
+    assert!(on.to_midi(&mut stream).is_some());
+    assert!(pan(5).to_midi(&mut stream).is_some(), "while it sounds");
+    assert_eq!(stream.expressions_dropped(), 2);
+    let not_a_number = Event::at(
+        0,
+        Payload::ExpressionValue(ExpressionValue::new(Ids::kPanTypeID, 5, f64::NAN)),
+    );
+    assert!(not_a_number.to_midi(&mut stream).is_none());
+    assert_eq!(stream.expressions_dropped(), 3, "a NaN is counted too");
+}
+
+/// **A voice in its release keeps its expressions**: the plugin's note off ends
+/// the note, but an expression on its id after it is still that note's.
+#[test]
+fn a_release_phase_expression_after_the_note_off_is_translated() {
+    use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
+
+    let mut stream = OutputStream::new();
+    let on = Event::at(0, Payload::NoteOn(NoteOn::new(2, 40, 0.5, 9_000)));
+    assert!(on.to_midi(&mut stream).is_some());
+    let off = Event::at(0, Payload::NoteOff(NoteOff::new(2, 40, 0.0, 9_000)));
+    assert!(off.to_midi(&mut stream).is_some());
+    let pan = Event::at(
+        0,
+        Payload::ExpressionValue(ExpressionValue::new(Ids::kPanTypeID, 9_000, 1.0)),
+    );
+    let got = pan
+        .to_midi(&mut stream)
+        .expect("the release is that note's");
+    assert!(matches!(
+        got.ump.decode(),
+        Ok(Message::Midi2(a, Voice2::RegisteredPerNote { note, .. }))
+            if a.channel == MidiChannel::of(2) && note == NoteNumber::of(40)
+    ));
+    assert_eq!(stream.expressions_dropped(), 0);
+}
+
+/// **A full table gives up an ended note before a live one**, however old: a
+/// release that has run its course does not cost a sounding note its id.
+#[test]
+fn a_full_table_evicts_an_ended_note_before_the_oldest_live_one() {
+    use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
+
+    let mut stream = OutputStream::new();
+    for id in 0..256 {
+        let on = Event::at(0, Payload::NoteOn(NoteOn::new(0, 60, 0.5, 10_000 + id)));
+        let _ = on.to_midi(&mut stream);
+    }
+    // The newest but one ends; the oldest stays live.
+    let off = Event::at(0, Payload::NoteOff(NoteOff::new(0, 60, 0.0, 10_254)));
+    let _ = off.to_midi(&mut stream);
+    let extra = Event::at(0, Payload::NoteOn(NoteOn::new(0, 61, 0.5, 20_000)));
+    let _ = extra.to_midi(&mut stream);
+    assert_eq!(stream.notes_evicted(), 1);
+    assert_eq!(
+        stream.lost_total(),
+        0,
+        "an eviction loses a mapping, not an event"
+    );
+    let pan = |id| {
+        Event::at(
+            0,
+            Payload::ExpressionValue(ExpressionValue::new(Ids::kPanTypeID, id, 1.0)),
+        )
+    };
+    assert!(
+        pan(10_254).to_midi(&mut stream).is_none(),
+        "the ended note went"
+    );
+    assert!(
+        pan(10_000).to_midi(&mut stream).is_some(),
+        "the oldest live stayed"
+    );
+}
+
+/// **A full table of live notes evicts its oldest** for a new one, and counts
+/// it: stale entries (a note off the plugin never sent) do not pin the table.
+#[test]
+fn a_full_note_table_evicts_the_oldest() {
+    use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
+
+    let mut stream = OutputStream::new();
+    for id in 0..257 {
+        let on = Event::at(0, Payload::NoteOn(NoteOn::new(0, 60, 0.5, 10_000 + id)));
+        let _ = on.to_midi(&mut stream);
+    }
+    assert_eq!(stream.notes_evicted(), 1);
+    let pan = |id| {
+        Event::at(
+            0,
+            Payload::ExpressionValue(ExpressionValue::new(Ids::kPanTypeID, id, 1.0)),
+        )
+    };
+    assert!(
+        pan(10_000).to_midi(&mut stream).is_none(),
+        "the oldest went"
+    );
+    assert!(
+        pan(10_256).to_midi(&mut stream).is_some(),
+        "the newest is held"
+    );
 }

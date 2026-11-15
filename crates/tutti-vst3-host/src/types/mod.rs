@@ -53,6 +53,10 @@ pub struct ProcessOutput {
 pub struct ProcessOutputRef<'a> {
     /// MIDI the plugin emitted this block, in the pooled buffer.
     pub midi_events: &'a [WireMidi],
+    /// MIDI the plugin emitted this block that is not in `midi_events`: events
+    /// the pool had no room for, on a bus past the Groups, or on an id no note
+    /// holds.
+    pub midi_lost: usize,
     /// Parameter changes the plugin reported via `outputParameterChanges`.
     pub parameter_changes: &'a ParameterChanges,
 }

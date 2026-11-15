@@ -306,8 +306,9 @@ fn accepting_the_callback_write_does_not_mean_the_au_emits_midi() {
                 )
             });
         // Withdraw explicitly so the AU's status is seen rather than dropped.
+        // The unit was never initialized, so nothing renders.
         registration
-            .remove()
+            .withdraw()
             .unwrap_or_else(|e| panic!("{}: withdrawing the callback failed: {e:?}", unit.label));
     }
 }
@@ -339,9 +340,13 @@ fn install_then_withdraw_leaves_the_au_renderable() {
         support::corpus::render(&mut au, &input, &mut output, BLOCK)
             .unwrap_or_else(|e| panic!("{}: render with callback installed: {e:?}", unit.label));
 
+        // The unit stops rendering before the state is freed, and renders again
+        // after.
+        au.uninitialize().expect("uninitialize");
         registration
-            .remove()
+            .withdraw()
             .unwrap_or_else(|e| panic!("{}: withdraw failed: {e:?}", unit.label));
+        au.initialize().expect("initialize again");
 
         // Renders again after the boxed state has been freed. If the withdrawal
         // had run in the wrong order, the AU would still hold a pointer into freed
@@ -418,7 +423,9 @@ fn no_delivery_arrives_after_the_callback_is_withdrawn() {
     let calls_before = calls.load(Ordering::SeqCst);
     let events_before = events.load(Ordering::SeqCst);
 
-    registration.remove().expect("withdraw succeeds");
+    au.uninitialize().expect("uninitialize");
+    registration.withdraw().expect("withdraw succeeds");
+    au.initialize().expect("initialize again");
 
     // Render well past the removal. Any call now would be against freed state.
     for _ in 0..32 {
@@ -499,37 +506,34 @@ fn dropping_the_registration_withdraws_the_callback() {
     assert!(peak < 1e-3, "silence in, silence out; got {peak}");
 }
 
-/// Installing twice in a row is safe: the second install supersedes the first.
-///
-/// A host re-arming a track does this. The hazard is that the first registration's
-/// `Drop` runs *after* the second install and clears the property the second one
-/// just wrote, leaving the AU with no callback and the host believing it has one.
-/// Ordering the drops explicitly is what the test checks: the first registration is
-/// dropped before the second is created, which is the sequence a host should
-/// follow — and the render afterwards proves whatever happened left the unit
-/// intact.
+/// A unit has one registration: a second install while the first is held is
+/// refused (the property cannot be read back, so the unit carries the claim), and
+/// succeeds once the first is withdrawn. Dropping a handle that was refused
+/// cannot null another's callback, because there is no other handle.
 #[test]
-fn reinstalling_the_callback_is_safe() {
+fn a_second_install_on_a_unit_is_refused_until_the_first_is_withdrawn() {
     let _g = lock();
     let mut au = DELAY.open_uninitialized(RATE, BLOCK);
 
     let first = au
         .install_midi_output(Box::new(|_, _| {}))
         .expect("first install");
-    // Withdraw before re-installing. The reverse order — install then drop the
-    // old handle — would have the old handle's `clear` remove the NEW callback,
-    // which is why a host must not do it and why the API returns a handle rather
-    // than being a fire-and-forget setter.
-    first.remove().expect("first withdraw");
+    assert!(
+        au.install_midi_output(Box::new(|_, _| {})).is_err(),
+        "a unit with a registration refuses another"
+    );
+    first.withdraw().expect("first withdraw");
 
     let second = au
         .install_midi_output(Box::new(|_, _| {}))
-        .expect("second install");
+        .expect("second install, after the first was withdrawn");
     au.initialize().expect("initialize");
     let input = support::corpus::silence(2, BLOCK as usize);
     let mut output = support::corpus::silence(2, BLOCK as usize);
     support::corpus::render(&mut au, &input, &mut output, BLOCK).expect("render");
-    second.remove().expect("second withdraw");
+    au.uninitialize().expect("uninitialize");
+    second.withdraw().expect("second withdraw");
+    au.initialize().expect("initialize again");
     support::corpus::render(&mut au, &input, &mut output, BLOCK).expect("render after withdraw");
 
     let peak = support::corpus::peak(&output);
@@ -801,7 +805,7 @@ fn an_orphan_data_byte_is_dropped() {
 ///
 /// 1. it never reads past the **declared** window, so a truncated message at the
 ///    window's end is dropped rather than completed from adjacent memory;
-/// 2. it never honours a length beyond Apple's documented 256-byte maximum, since
+/// 2. it stops at a length beyond Apple's documented 256-byte maximum, since
 ///    a `u16` can claim 65535 and that read *would* leave the allocation.
 #[test]
 fn a_packet_claiming_more_bytes_than_it_holds_is_not_over_read() {
@@ -853,32 +857,15 @@ fn a_packet_claiming_more_bytes_than_it_holds_is_not_over_read() {
         "a status byte with no data bytes at all must be dropped"
     );
 
-    // The second guarantee: a length beyond Apple's documented maximum is clamped.
-    // `u16::MAX` is 65535 — 255 packets' worth of memory the AU never wrote — and
-    // honouring it would read ~61 KiB past this 512-byte-slack allocation.
-    //
-    // The clamp to 256 bounds the walk at **127** messages, and the arithmetic is
-    // worth spelling out because getting it wrong is how this assertion was first
-    // written twice over. The 256-byte window holds `90 3C 64` (3 bytes) followed by
-    // 253 zeros. Those zeros are consumed as running-status note-ons at **two** bytes
-    // each — running status reuses the status byte, so a continuation costs 2, not 3.
-    // 1 + floor(253 / 2) = 1 + 126 = 127. (A `size_of - header` bound of 258 gives
-    // 128, which is how the padding bug in `MAX_PACKET_PAYLOAD` first showed up
-    // here.)
-    //
-    // Asserted as an exact equality rather than a bound, because the count is the
-    // evidence the clamp landed on exactly 256: larger means the 65535 claim was
-    // honoured and the walk left the allocation; smaller means the clamp is tighter
-    // than Apple's documented maximum and would truncate a legitimate full packet.
+    // The second guarantee: a length beyond Apple's documented maximum ends the
+    // walk. `u16::MAX` is 65535 — 255 packets' worth of memory the AU never wrote —
+    // and where the next packet starts cannot be told from a length that is a lie,
+    // so nothing of the list from that packet on is read.
     let list = PacketListBuf::from_raw_overclaiming(&[(0, u16::MAX, &[0x90, 60, 100])]);
-    let split = list.split();
-    assert_eq!(split[0], (0, vec![0x90, 60, 100]));
-    assert_eq!(
-        split.len(),
-        127,
-        "a 65535-byte claim must be clamped to Apple's `Byte data[256]` maximum: \
-         3 bytes of explicit message + floor(253/2) running-status continuations \
-         = 127. See the comment above for why 128 is the wrong answer."
+    assert!(
+        list.split().is_empty(),
+        "a length past Apple's `Byte data[256]` maximum ends the walk, got {:?}",
+        list.split()
     );
 }
 

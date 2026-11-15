@@ -719,6 +719,9 @@ jobs:
       # `Gauge` and `Counter` (a counter never goes back, a closed cell is read
       # at its final value, a gauge is never torn), against the shipped code.
       - run: cargo test --locked -p tutti-rt --release --test gauge_loom
+      # `RenderCount`: a render that starts after a quiescent check sees what the
+      # clearer wrote, against the shipped code.
+      - run: cargo test --locked -p tutti-rt --release --test render_count_loom
 
   # The one check the merge queue requires: it passes when every other job succeeded or was skipped.
   # A job added to this file is added to `needs`.

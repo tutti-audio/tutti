@@ -49,18 +49,18 @@ fn unframed(message: &[u8]) -> &[u8] {
     payload.strip_suffix(&[0xF7]).unwrap_or(payload)
 }
 
-/// The SysEx7 packets (on the first group) of a plugin's `message`, with its
+/// The SysEx7 packets (on `group`) of a plugin's `message`, with its
 /// `0xF0` and `0xF7` delimiters or without (the one place the formats'
 /// unchecked byte slices meet [`Sysex7Packets::from_payload`]; a message known to be
 /// framed is a `tutti_ump::SysexMessage` and has its own `packets`), or `None` if a payload byte is 128
 /// or more: a plugin emitted a malformed message, which the caller drops
 /// (nothing is masked into a different message).
 #[must_use]
-pub fn sysex_packets(message: &[u8]) -> Option<Sysex7Packets<'_>> {
-    Sysex7Packets::from_payload(MidiGroup::FIRST, unframed(message)).ok()
+pub fn sysex_packets(group: MidiGroup, message: &[u8]) -> Option<Sysex7Packets<'_>> {
+    Sysex7Packets::from_payload(group, unframed(message)).ok()
 }
 
-/// Pushes one complete SysEx message a plugin emitted onto `out` as UMP
+/// Pushes one complete SysEx message a plugin emitted on `group` onto `out` as UMP
 /// SysEx7 packets (a lone `SINGLE`, or `START`, `CONTINUE`*, `END`), every
 /// packet at `frame_offset`, the inverse of what [`SysexAssembler`] does on
 /// the input side. `message` may carry its `0xF0` and `0xF7` delimiters or
@@ -73,8 +73,13 @@ pub fn sysex_packets(message: &[u8]) -> Option<Sysex7Packets<'_>> {
 /// whether it was pushed. A message with a payload byte of 128 or more is
 /// malformed ([`sysex_packets`]): it is dropped, not pushed, and `out` does not
 /// latch (it did not overflow).
-pub fn push_sysex(out: &mut RtMidiEvents, frame_offset: u32, message: &[u8]) -> bool {
-    let Some(packets) = sysex_packets(message) else {
+pub fn push_sysex(
+    out: &mut RtMidiEvents,
+    group: MidiGroup,
+    frame_offset: u32,
+    message: &[u8],
+) -> bool {
+    let Some(packets) = sysex_packets(group, message) else {
         return false;
     };
     if packets.len() > out.remaining() {
@@ -165,7 +170,10 @@ mod tests {
             let body = tutti_fixtures::midi::sysex_payload(len);
             for message in [framed(&body), body.clone()] {
                 let mut out = RtMidiEvents::new();
-                assert!(push_sysex(&mut out, 9, &message), "{len} bytes");
+                assert!(
+                    push_sysex(&mut out, MidiGroup::FIRST, 9, &message),
+                    "{len} bytes"
+                );
                 assert!(out.iter().all(|e| e.offset == 9));
                 assert!(!out.is_overflowed());
                 assert_eq!(
@@ -184,10 +192,15 @@ mod tests {
         let body = [1, 2, 3];
         let want: Vec<Ump> = packets(MidiGroup::FIRST, &body);
         for message in [&[0xF0, 1, 2, 3, 0xF7][..], &[1, 2, 3][..]] {
-            assert_eq!(sysex_packets(message).unwrap().collect::<Vec<_>>(), want);
+            assert_eq!(
+                sysex_packets(MidiGroup::FIRST, message)
+                    .unwrap()
+                    .collect::<Vec<_>>(),
+                want
+            );
         }
-        assert!(sysex_packets(&[0xF0, 1, 0x80, 0xF7]).is_none());
-        assert!(sysex_packets(&[1, 0x80]).is_none());
+        assert!(sysex_packets(MidiGroup::FIRST, &[0xF0, 1, 0x80, 0xF7]).is_none());
+        assert!(sysex_packets(MidiGroup::FIRST, &[1, 0x80]).is_none());
     }
 
     /// **A message that does not fit the pool is dropped whole and
@@ -198,7 +211,7 @@ mod tests {
         let mut out = RtMidiEvents::new();
         let room = out.remaining();
         let too_long = tutti_fixtures::midi::sysex_payload(room * 6 + 1);
-        assert!(!push_sysex(&mut out, 0, &too_long));
+        assert!(!push_sysex(&mut out, MidiGroup::FIRST, 0, &too_long));
         assert!(out.is_empty(), "no partial message");
         assert!(out.is_overflowed());
 
@@ -210,12 +223,14 @@ mod tests {
         }));
         assert!(!push_sysex(
             &mut out,
+            MidiGroup::FIRST,
             0,
             &tutti_fixtures::midi::sysex_payload((room - 1) * 6 + 1)
         ));
         assert_eq!(out.len(), 1);
         assert!(push_sysex(
             &mut out,
+            MidiGroup::FIRST,
             0,
             &tutti_fixtures::midi::sysex_payload((room - 1) * 6)
         ));

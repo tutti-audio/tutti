@@ -13,6 +13,7 @@ use tutti_tempo::TempoMap;
 use tutti_transport::{FadeOut, LoopEdit, MotionEvent, QueueFull, ScheduleFull, Then, Transport};
 use tutti_types::{At, Beat, Bpm, ChannelLayout, ChannelTopology, LoopRange, Samples};
 
+use crate::RootDeclaration;
 use crate::graph::{Committed, CrossfadeId, Graph, Retried};
 use crate::{Clock, Offline, RealTime};
 use crate::{HeardOpen, HeardTapError, Playhead, RemoveError, ScheduleError, TempoError};
@@ -661,7 +662,15 @@ impl<C: Clock> Session<C> {
     /// narrowed (channels past it are dropped), with no floor of the device's
     /// ([`root_width`](crate::root_width)). Afterwards the width and the
     /// declaration cannot disagree: [`Graph::widen_outputs`] refuses to widen a
-    /// declared root. Declare again to change both. An export of the master
+    /// declared root. Declare again to change both.
+    ///
+    /// A declaration that changes the root crossfades: the old root's outputs
+    /// fade out and the new root's fade in over the declick length (5 ms),
+    /// both rendering the same nodes, so a change of layout never steps the
+    /// sound. [`.hard()`](RootDeclaration::hard) on the returned declaration
+    /// cuts at one block instead. A commit that lands while the fade runs ends
+    /// it at that block, as a hard edit ends a unit's crossfade; the new root
+    /// is heard alone from there. An export of the master
     /// places the file from the declaration (`tutti_export::Setup::with_root`, set by the export's fork).
     ///
     /// The device a declaration must place on is the one the session renders
@@ -675,22 +684,24 @@ impl<C: Clock> Session<C> {
     /// renders ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)), or the
     /// device cannot place it (an unassigned root wider than the device, a channel
     /// no speaker names). Nothing is changed.
-    pub fn declare_root_topology(&mut self, root: Option<ChannelTopology>) -> crate::Result<()> {
+    pub fn declare_root_topology(
+        &mut self,
+        root: Option<ChannelTopology>,
+    ) -> crate::Result<RootDeclaration<'_>> {
         // The same request again, in force, is nothing to do.
-        if root == self.root_request && self.root_refusal.is_none() {
-            return Ok(());
-        }
-        self.root_request = root.clone();
-        match self.graph.declare_root(root) {
-            Ok(()) => {
-                self.root_refusal = None;
-                Ok(())
-            }
-            Err(e) => {
-                self.root_refusal = Some(e);
-                Err(e.into())
+        if !(root == self.root_request && self.root_refusal.is_none()) {
+            self.root_request = root.clone();
+            match self.graph.declare_root(root, false) {
+                Ok(()) => self.root_refusal = None,
+                Err(e) => {
+                    self.root_refusal = Some(e);
+                    return Err(e.into());
+                }
             }
         }
+        Ok(RootDeclaration {
+            graph: &mut self.graph,
+        })
     }
 
     /// The topology last asked for with

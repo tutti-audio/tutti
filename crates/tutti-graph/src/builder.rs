@@ -887,8 +887,16 @@ impl Renderer {
             let n = (frames - done).min(self.block);
             let transport = (self.transport)(self.executor.frame());
             let block_in: Vec<&[f32]> = input.iter().map(|c| &c[done..done + n]).collect();
-            let mut block_out: Vec<&mut [f32]> =
-                output.iter_mut().map(|c| &mut c[done..done + n]).collect();
+            // The plan renders an old root's channels beside the root's while a
+            // root change crossfades: scratch for them, not returned.
+            self.executor.apply_pending();
+            let rendered = self.rendered_outputs();
+            let mut spare = vec![vec![0.0f32; n]; rendered.saturating_sub(outs)];
+            let mut block_out: Vec<&mut [f32]> = output
+                .iter_mut()
+                .map(|c| &mut c[done..done + n])
+                .chain(spare.iter_mut().map(|c| &mut c[..]))
+                .collect();
             self.executor
                 .process(n, &transport, &block_in, &mut block_out);
             self.editor.collect();
@@ -902,6 +910,14 @@ impl Renderer {
 
     fn global_outputs(&self) -> usize {
         self.editor.spec().topology.outputs.len()
+    }
+
+    /// The channels the executor renders: the root's and, while a root change
+    /// crossfades, the old root's after them. The renderer returns the root's.
+    fn rendered_outputs(&self) -> usize {
+        self.executor
+            .plan()
+            .map_or_else(|| self.global_outputs(), |p| p.rendered_outputs())
     }
 
     /// The editor, to inspect the graph.

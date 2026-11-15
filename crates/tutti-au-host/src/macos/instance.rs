@@ -356,7 +356,9 @@ impl AuLoaded {
     }
 
     /// The raw `AudioUnit` pointer, for a test that makes an AudioToolbox call
-    /// this crate does not wrap. Using it is the caller's `unsafe`.
+    /// this crate does not wrap. Using it is the caller's `unsafe`. A render
+    /// made through it is not counted: hold `unit().rendering()` across it, or
+    /// keep it from overlapping `AuMidiOutput::withdraw`.
     #[cfg(feature = "testing")]
     pub fn raw_unit(&self) -> AudioUnit {
         self.unit().as_raw()

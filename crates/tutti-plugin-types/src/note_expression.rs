@@ -17,6 +17,10 @@
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use tutti_midi_protocol::unit_f32_to_value;
+use tutti_ump::{CCNumber, ControlValue, NoteNumber, RegisteredPerNoteController, Voice2};
+
+use crate::Normalized;
 
 /// A per-note expression dimension.
 ///
@@ -75,7 +79,7 @@ pub struct NoteExpressionValue {
     /// Which dimension is being driven.
     pub expression_type: NoteExpressionType,
     /// The value, in the dimension's own convention — **not** uniformly
-    /// normalized, and not a [`Normalized`](crate::Normalized). VST3 scales most
+    /// normalized, and not a [`Normalized`]. VST3 scales most
     /// dimensions `0..=1` but tuning in semitones; each host crate converts at
     /// its own boundary.
     pub value: f64,
@@ -115,5 +119,187 @@ impl NoteExpressionChanges {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.changes.is_empty()
+    }
+}
+
+/// The Registered Per-Note Controllers a plugin's note expression stands for
+/// (M2-104 Appendix A): Volume is controller 7, Pan 10 and Brightness 74 (Sound
+/// Controller 5). The one table both directions of every format read.
+const PER_NOTE_EXPRESSIONS: [(CCNumber, NoteExpressionType); 3] = [
+    (CCNumber::VOLUME, NoteExpressionType::Volume),
+    (CCNumber::PAN, NoteExpressionType::Pan),
+    (CCNumber::BRIGHTNESS, NoteExpressionType::Brightness),
+];
+
+/// The expression the per-note controller `number` is (volume 7, pan 10 and
+/// brightness 74), or `None` for a number with no counterpart.
+#[must_use]
+pub fn expression_of_per_note_controller(number: u8) -> Option<NoteExpressionType> {
+    PER_NOTE_EXPRESSIONS
+        .iter()
+        .find(|(controller, _)| controller.get() == number)
+        .map(|&(_, expression)| expression)
+}
+
+/// The per-note controller `expression` is ([`PER_NOTE_EXPRESSIONS`]), or
+/// `None` for a dimension that is not one.
+#[must_use]
+fn per_note_controller_of_expression(expression: NoteExpressionType) -> Option<CCNumber> {
+    PER_NOTE_EXPRESSIONS
+        .iter()
+        .find(|&&(_, ty)| ty == expression)
+        .map(|&(controller, _)| controller)
+}
+
+/// The Registered Per-Note Controller #3, Pitch 7.25 (M2-104 §7.4.15.2), a
+/// plugin's Tuning of `semitones` from `note`'s key is: the absolute pitch
+/// `note + semitones` as Q7.25, so no bend range is assumed. A pitch just under
+/// 128 rounds past the top word and saturates at `u32::MAX`. `None` for a value
+/// that is not finite or lands outside what 7.25 holds (`0..128` notes): the
+/// caller counts it lost.
+#[must_use]
+pub fn per_note_tuning(note: NoteNumber, semitones: f64) -> Option<Voice2> {
+    let pitch = f64::from(note.get()) + semitones;
+    if !pitch.is_finite() || !(0.0..128.0).contains(&pitch) {
+        return None;
+    }
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "in 0..128, so the Q7.25 word fits 32 bits but for a rounding past the top, which saturates"
+    )]
+    let bits = (pitch * f64::from(1u32 << 25)).round() as u32;
+    Some(Voice2::RegisteredPerNote {
+        note,
+        controller: RegisteredPerNoteController::Pitch,
+        value: ControlValue::new(bits),
+    })
+}
+
+/// The MIDI 2.0 per-note message a plugin's `expression` on `note` is at
+/// `unit`, a [`Normalized`] (checked onto `0..=1` and finite by construction; a
+/// caller with a raw float makes it with [`Normalized::clamped`] or
+/// [`Normalized::new`]): Polyphonic Pressure for Pressure, the Registered
+/// Per-Note Controller of its number for Volume, Pan and Brightness. `None`
+/// for a dimension with no such message: Tuning (see [`per_note_tuning`]),
+/// Vibrato, Expression and a custom id.
+#[must_use]
+pub fn per_note_message(
+    expression: NoteExpressionType,
+    note: NoteNumber,
+    unit: Normalized,
+) -> Option<Voice2> {
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "a controller value is 32 bits"
+    )]
+    let value = unit_f32_to_value(unit.get() as f32);
+    if expression == NoteExpressionType::Pressure {
+        return Some(Voice2::PolyPressure { note, value });
+    }
+    Some(Voice2::RegisteredPerNote {
+        note,
+        controller: RegisteredPerNoteController::from(
+            per_note_controller_of_expression(expression)?.get(),
+        ),
+        value,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Volume, Pan and Brightness are the per-note controllers 7, 10 and 74, and
+    /// the two lookups are one table read both ways; nothing else is in it.
+    #[test]
+    fn the_table_is_the_usual_controller_assignments_both_ways() {
+        for (number, expression) in [
+            (7, NoteExpressionType::Volume),
+            (10, NoteExpressionType::Pan),
+            (74, NoteExpressionType::Brightness),
+        ] {
+            assert_eq!(expression_of_per_note_controller(number), Some(expression));
+            assert_eq!(
+                per_note_controller_of_expression(expression).map(CCNumber::get),
+                Some(number)
+            );
+        }
+        assert_eq!(expression_of_per_note_controller(1), None);
+        for expression in [
+            NoteExpressionType::Tuning,
+            NoteExpressionType::Pressure,
+            NoteExpressionType::Vibrato,
+            NoteExpressionType::Expression,
+            NoteExpressionType::Custom(5),
+        ] {
+            assert_eq!(per_note_controller_of_expression(expression), None);
+        }
+    }
+
+    /// A tuning is the absolute pitch `note + semitones` as Q7.25 (M2-104
+    /// §7.4.15.2): 12 semitones above key 60 is 72.0, a quarter tone below is
+    /// 59.75, and no range is assumed. A value that is not finite, or leaves
+    /// `0..128`, has no message.
+    #[test]
+    fn a_tuning_is_an_absolute_pitch_in_q7_25() {
+        let note = NoteNumber::of(60);
+        let bits = |semitones| match per_note_tuning(note, semitones) {
+            Some(Voice2::RegisteredPerNote {
+                controller: RegisteredPerNoteController::Pitch,
+                value,
+                ..
+            }) => value.get(),
+            other => panic!("not Registered Pitch 7.25: {other:?}"),
+        };
+        assert_eq!(bits(0.0), 60 << 25);
+        assert_eq!(bits(12.0), 72 << 25);
+        assert_eq!(bits(-0.25), (59 << 25) | (3 << 23));
+        assert_eq!(bits(-60.0), 0);
+        // Just under 128 rounds to 2^32 in Q7.25 and saturates at the top word.
+        assert_eq!(bits(128.0 - 60.0 - 1e-9), u32::MAX);
+        assert_eq!(per_note_tuning(note, 68.0), None, "128 is past the range");
+        assert_eq!(per_note_tuning(note, -61.0), None, "below note 0");
+        assert_eq!(per_note_tuning(note, f64::NAN), None);
+        assert_eq!(per_note_tuning(note, f64::INFINITY), None);
+    }
+
+    /// Pressure is Polyphonic Pressure, the table's expressions are the
+    /// Registered Per-Note Controller of their number, over the 32 bits of the
+    /// unit, clamped; the rest have no message.
+    #[test]
+    fn the_message_of_an_expression_is_its_per_note_message() {
+        let note = NoteNumber::of(64);
+        assert_eq!(
+            per_note_message(NoteExpressionType::Pressure, note, Normalized::of(1.0)),
+            Some(Voice2::PolyPressure {
+                note,
+                value: ControlValue::new(u32::MAX)
+            })
+        );
+        assert_eq!(
+            per_note_message(NoteExpressionType::Pan, note, Normalized::of(0.5)),
+            Some(Voice2::RegisteredPerNote {
+                note,
+                controller: RegisteredPerNoteController::Pan,
+                value: ControlValue::new(0x8000_0000)
+            })
+        );
+        assert_eq!(
+            per_note_message(NoteExpressionType::Volume, note, Normalized::clamped(7.0)),
+            Some(Voice2::RegisteredPerNote {
+                note,
+                controller: RegisteredPerNoteController::Volume,
+                value: ControlValue::new(u32::MAX)
+            })
+        );
+        for none in [
+            NoteExpressionType::Tuning,
+            NoteExpressionType::Vibrato,
+            NoteExpressionType::Expression,
+            NoteExpressionType::Custom(9),
+        ] {
+            assert_eq!(per_note_message(none, note, Normalized::of(0.5)), None);
+        }
     }
 }
