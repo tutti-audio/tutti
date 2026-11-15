@@ -42,8 +42,8 @@ use tutti_types::{ChannelLayout, SampleRate};
 use super::{HostPlugin, Mirror, Open, Origin, PluginLoad, PluginLoaded, PluginNode};
 use crate::peer::{ResourceIds, sealed};
 use crate::{
-    Declared, HandleError, Hold, IntoPool, Key, Life, Load, LoadError, Peer, PoolEntry, PoolKey,
-    PoolSet, Presence, ReplaceRefused, Resource, ResourceId, Session,
+    Declared, HandleError, Hold, HoldKind, IntoPool, Key, Life, Load, LoadError, Peer, PoolEntry,
+    PoolKey, PoolSet, Presence, ReplaceRefused, Resource, ResourceId, Session,
 };
 
 /// What a pooled plugin's load needs of the session that declared it.
@@ -653,13 +653,12 @@ impl Session {
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         let pool_key = PoolKey::new(key);
-        let loaded = self.pool.loaded::<K, PluginEntry>(key)?;
-        if loaded.standing.lost() {
+        if self.pool.loaded::<K, PluginEntry>(key)?.standing.lost() {
             return Err(AddPluginError::Lost(key.clone()));
         }
         let hold = self
             .pool
-            .hold(&pool_key)
+            .hold(&pool_key, HoldKind::Node)
             .ok_or_else(|| HandleError::NotPooled(key.clone()))?;
         // A node over the key has the plugin the entry's next one swaps in.
         let linked = self.graph.plugins.values().any(|hosted| {
@@ -671,6 +670,7 @@ impl Session {
         if linked {
             return Err(AddPluginError::Installed(key.clone()));
         }
+        let loaded = self.pool.loaded::<K, PluginEntry>(key)?;
         let Some(install) = loaded.take_install() else {
             return Err(AddPluginError::Installed(key.clone()));
         };

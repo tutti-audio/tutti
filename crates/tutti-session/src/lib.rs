@@ -189,8 +189,6 @@ pub use plugin::{
     PluginLoaded, PluginNode, PluginPorts, PooledPlugin, SNAPSHOT_INTERVAL, StateRestore,
     StateView,
 };
-#[cfg(feature = "plugin")]
-pub(crate) use pool::Hold;
 pub(crate) use pool::Pool;
 #[cfg(feature = "sampler")]
 pub use pool::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
@@ -199,6 +197,8 @@ pub use pool::{
     PoolError, PoolEvent, PoolKey, PoolOutcome, PoolReport, PoolSet, PoolState, PoolWait,
     RefreshPool, RetryError, WhenLoadedError, stranded_loads,
 };
+#[cfg(feature = "plugin")]
+pub(crate) use pool::{Hold, HoldKind};
 #[cfg(feature = "soundfont")]
 pub use pool::{SoundFontFile, soundfont};
 

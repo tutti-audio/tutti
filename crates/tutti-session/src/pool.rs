@@ -84,10 +84,10 @@ pub use key::PoolKey;
 pub use open::OpenCx;
 pub use refresh::RefreshPool;
 pub use report::{PoolOutcome, PoolReport};
-#[cfg(feature = "plugin")]
-pub(crate) use table::Hold;
 pub(crate) use table::Pool;
 pub use table::{HandleError, PoolError, PoolEvent, PoolState, RetryError, WhenLoadedError};
+#[cfg(feature = "plugin")]
+pub(crate) use table::{Hold, HoldKind};
 pub use wait::PoolWait;
 
 #[cfg(test)]

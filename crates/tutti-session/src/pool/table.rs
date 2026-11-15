@@ -139,10 +139,10 @@ pub enum WhenLoadedError<K: fmt::Debug> {
 /// What a [`Hold`] is for: whether the entry parks when the hold is old.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(
-    not(test),
+    not(any(test, feature = "plugin")),
     expect(
         dead_code,
-        reason = "a node over an entry and a snapshot take holds; neither exists yet"
+        reason = "a node over an entry (feature `plugin`) and a snapshot take holds"
     )
 )]
 pub(crate) enum HoldKind {
