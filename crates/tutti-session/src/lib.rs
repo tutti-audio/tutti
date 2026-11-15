@@ -3,10 +3,12 @@
 //!
 //! A [`Session`] is a [`Graph`] (a `tutti-graph` editor, the nodes inserted
 //! through it, their event feeds), its transport, and the engine side it
-//! renders on, built by a [`SessionBuilder`]: offline (the host pulls blocks
-//! with [`Session::render`]), on a device (`device`: the `!Send`
-//! `Device` stays on the thread that opened it), or detached (the
-//! executor stays on this side). One call, [`Session::update`], runs the
+//! renders on, built by a [`SessionBuilder`]. Its type parameter is its
+//! [`Clock`], what runs its blocks: [`Offline`] (the host pulls blocks with
+//! [`Session::render`]), `DeviceClock` (`device`: a sound card's callback; the
+//! `!Send` `Device` stays on the thread that opened it) or [`SystemClock`] (an
+//! OS timer thread, for an app that plays MIDI); a call a clock cannot serve
+//! is not a method of its session. One call, [`Session::update`], runs the
 //! steps of a frame in [`PHASES`] order.
 //!
 //! ```
@@ -59,6 +61,7 @@
 #[cfg(feature = "export")]
 mod bounce;
 mod builder;
+mod clock;
 #[cfg(feature = "device")]
 mod device;
 mod edge;
@@ -110,7 +113,6 @@ mod recovery;
 #[cfg(feature = "sampler")]
 mod sampler;
 mod session;
-mod system;
 #[cfg(all(feature = "device", feature = "audio-io"))]
 mod take;
 #[cfg(feature = "device")]
@@ -122,11 +124,12 @@ pub use bounce::{
     BounceLatency, BounceRendered, BounceTail, Bounced, BufferMaster, BufferStem, ExportClock,
     FileMaster, FileStem, Master, NoMaster, PrepareEdit, PreparedGraph, Range, Stem, StemGain,
 };
+pub use builder::{BlockConfig, SessionBuilder, Workers, root_width};
 #[cfg(feature = "device")]
-pub use builder::OnDevice;
-pub use builder::{
-    BlockConfig, HasBlockConfig, Offline, SessionBuilder, SystemClock, Workers, root_width,
-};
+pub use clock::DeviceClock;
+pub use clock::{Clock, Offline, OfflineSession, RealTime, SystemClock, SystemSession};
+#[cfg(feature = "testing")]
+pub use clock::{Detached, DetachedSession};
 #[cfg(feature = "device")]
 pub use device::{
     Device, DeviceEvent, DeviceLatency, DeviceRestart, DeviceRestarted, LiveSession, RestartError,
@@ -233,7 +236,6 @@ pub use session::MidiNodes;
 #[cfg(feature = "modulation")]
 pub use session::ModInput;
 pub use session::{PHASES, Phase, PhaseCx, RootTopologyStatus, Session, SessionEvent};
-pub use system::SystemSession;
 #[cfg(all(feature = "device", feature = "audio-io"))]
 pub use take::{
     Armed, InFlight, Placement, Punch, PunchError, Recorded, Rolling, Start, Take, TakeEnd,

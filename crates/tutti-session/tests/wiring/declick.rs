@@ -11,7 +11,7 @@
 
 use tutti_graph::{ForkByClone, declick_frames};
 use tutti_nodes::testing::Const;
-use tutti_session::{OutPort, Root, Session};
+use tutti_session::{DetachedSession, OutPort, Root, Session};
 use tutti_types::ChannelLayout;
 use tutti_types::SampleRate;
 
@@ -24,7 +24,7 @@ fn smooth(j: usize) -> f64 {
     x * x * x * (6.0 * x * x - 15.0 * x + 10.0)
 }
 
-fn session() -> Session {
+fn session() -> DetachedSession {
     Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::SR_48K)
@@ -32,7 +32,7 @@ fn session() -> Session {
 }
 
 /// `n` frames of output channel 0, one render call each.
-fn frames(s: &mut Session, n: usize) -> Vec<f32> {
+fn frames(s: &mut DetachedSession, n: usize) -> Vec<f32> {
     (0..n)
         .map(|_| {
             let mut frame = [f32::NAN; 2];

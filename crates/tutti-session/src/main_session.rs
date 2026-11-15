@@ -68,7 +68,7 @@ use tutti_plugin_types::{
 
 use crate::plugin::HostedPlugin;
 use crate::plugin_diagnostics::Figures;
-use crate::{NoSuchNode, PluginChange, PluginEvent, Session, SessionEvent};
+use crate::{Clock, NoSuchNode, Offline, PluginChange, PluginEvent, Session, SessionEvent};
 
 /// A session and the proof that the caller is on the main thread. Made by
 /// [`Session::main`]; see the module docs.
@@ -81,16 +81,16 @@ use crate::{NoSuchNode, PluginChange, PluginEvent, Session, SessionEvent};
 /// share of an update (the graveyard, the editors) is visible where it is
 /// written.
 #[derive(Debug)]
-pub struct MainSession<'a> {
-    session: &'a mut Session,
+pub struct MainSession<'a, C: Clock = Offline> {
+    session: &'a mut Session<C>,
     main: MainThreadMarker,
 }
 
-impl Session {
+impl<C: Clock> Session<C> {
     /// The main-thread view of this session, for the caller that holds the
     /// proof ([`MainThreadMarker::new`]). `MainThreadMarker` is a `Copy`, zero-sized
     /// value passed as it is.
-    pub fn main(&mut self, main: MainThreadMarker) -> MainSession<'_> {
+    pub fn main(&mut self, main: MainThreadMarker) -> MainSession<'_, C> {
         MainSession {
             session: self,
             main,
@@ -98,16 +98,16 @@ impl Session {
     }
 }
 
-impl MainSession<'_> {
+impl<C: Clock> MainSession<'_, C> {
     /// The session, to read.
-    pub fn session(&self) -> &Session {
+    pub fn session(&self) -> &Session<C> {
         self.session
     }
 
     /// The session, to change: wiring, transport, anything that is not the
     /// main thread's. Its [`Session::update`] is not this view's
     /// [`update`](Self::update): it leaves the graveyard and the editors alone.
-    pub fn session_mut(&mut self) -> &mut Session {
+    pub fn session_mut(&mut self) -> &mut Session<C> {
         self.session
     }
 

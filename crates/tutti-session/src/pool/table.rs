@@ -9,7 +9,6 @@ use std::sync::{Arc, Weak};
 
 use tutti_rt::MainThreadMarker;
 
-use crate::SessionEvent;
 use crate::pool::config::PoolConfig;
 use crate::pool::entry::{
     Cloner, ErasedIdentity, Item, Life, Load, LoadError, MainStage, PoolEntry, PoolSet, Reload,
@@ -20,6 +19,7 @@ use crate::pool::refresh::{Checked, RefreshPool};
 use crate::pool::report::{PoolOutcome, PoolReport};
 use crate::pool::stamp::Stamp;
 use crate::pool::wait::Landing;
+use crate::{Clock, SessionEvent};
 
 /// Where a pool entry stands.
 ///
@@ -320,10 +320,10 @@ pub(crate) struct MainItem {
 }
 
 /// What the app asked to run once an entry is loaded.
-struct WhenLoaded {
+struct WhenLoaded<C: Clock> {
     seq: u64,
     key: PoolKey,
-    then: Box<dyn FnOnce(&mut crate::Session) + Send>,
+    then: Box<dyn FnOnce(&mut crate::Session<C>) + Send>,
 }
 
 struct Pending {
@@ -334,7 +334,7 @@ struct Pending {
 
 /// The pool: every key's entry, the loads in flight, and the events not yet
 /// reported.
-pub(crate) struct Pool {
+pub(crate) struct Pool<C: Clock> {
     config: PoolConfig,
     slots: BTreeMap<PoolKey, Slot>,
     last_generation: u64,
@@ -353,13 +353,13 @@ pub(crate) struct Pool {
     /// The snapshot holds, with their order.
     ranks: Vec<Rank>,
     last_rank: u64,
-    waiters: Vec<Box<dyn FnMut(&Pool) -> bool + Send>>,
+    waiters: Vec<Box<dyn FnMut(&Pool<C>) -> bool + Send>>,
     /// Runs waiting for an entry to load, in the order they were asked.
-    when_loaded: Vec<WhenLoaded>,
+    when_loaded: Vec<WhenLoaded<C>>,
     last_when: u64,
 }
 
-impl fmt::Debug for Pool {
+impl<C: Clock> fmt::Debug for Pool<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Pool")
             .field("entries", &self.slots.len())
@@ -367,7 +367,7 @@ impl fmt::Debug for Pool {
     }
 }
 
-impl Pool {
+impl<C: Clock> Pool<C> {
     pub(crate) fn new(config: PoolConfig) -> Self {
         Self {
             config,
@@ -983,7 +983,7 @@ impl Pool {
         &mut self,
         landing: Landing<PoolReport<K>>,
     ) {
-        let waiter = move |pool: &Pool| {
+        let waiter = move |pool: &Pool<C>| {
             if landing.orphaned() {
                 return true;
             }
@@ -1016,7 +1016,7 @@ impl Pool {
     pub(crate) fn when_loaded<K>(
         &mut self,
         key: &K,
-        then: Box<dyn FnOnce(&mut crate::Session) + Send>,
+        then: Box<dyn FnOnce(&mut crate::Session<C>) + Send>,
     ) -> Result<(), WhenLoadedError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
@@ -1041,7 +1041,7 @@ impl Pool {
     pub(crate) fn next_loaded(
         &mut self,
         through: u64,
-    ) -> Option<Box<dyn FnOnce(&mut crate::Session) + Send>> {
+    ) -> Option<Box<dyn FnOnce(&mut crate::Session<C>) + Send>> {
         let slots = &self.slots;
         self.when_loaded.retain(|run| slots.contains_key(&run.key));
         let at = self.when_loaded.iter().position(|run| {

@@ -12,8 +12,8 @@ use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_types::{Normalized, ParamId};
 use tutti_session::{
-    EventInPort, Feeder, PHASES, ParamRef, PhaseCx, PluginLoadRequest, RouteSpec, Session,
-    SessionEvent,
+    DetachedSession, EventInPort, Feeder, PHASES, ParamRef, PhaseCx, PluginLoadRequest, RouteSpec,
+    Session, SessionEvent,
 };
 use tutti_types::{ChannelLayout, Depth, SampleRate};
 
@@ -25,7 +25,7 @@ fn vst2_probe() -> std::path::PathBuf {
 
 /// A detached stereo session at 48 kHz with the probe loaded in process, on
 /// the outputs, its parameter values read.
-fn session_with_probe() -> (Session, NodeKey) {
+fn session_with_probe() -> (DetachedSession, NodeKey) {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
@@ -46,7 +46,7 @@ fn session_with_probe() -> (Session, NodeKey) {
 }
 
 /// One update at `now`, every phase, as a frame of a host.
-fn update(s: &mut Session, now: Instant) -> Vec<SessionEvent> {
+fn update(s: &mut DetachedSession, now: Instant) -> Vec<SessionEvent> {
     let mut out = Vec::new();
     for &phase in PHASES {
         s.run_phase(phase, PhaseCx::at(now), &mut out);
@@ -55,7 +55,7 @@ fn update(s: &mut Session, now: Instant) -> Vec<SessionEvent> {
 }
 
 /// Updates until `target` has a lane, and its knob.
-fn knob_of(s: &mut Session, target: ParamRef) -> f32 {
+fn knob_of(s: &mut DetachedSession, target: ParamRef) -> f32 {
     let deadline = Instant::now() + Duration::from_secs(10);
     let now = Instant::now();
     loop {
@@ -185,7 +185,7 @@ fn a_plugins_midi_rewiring_keeps_its_lanes() {
     let (clip, _) = s.graph().add(tutti_graph::ForkByClone(EventSource1));
     let _ = s.update();
     let mut side = s.graph().take_audio_side();
-    let value = |s: &Session| {
+    let value = |s: &DetachedSession| {
         s.plugin(node)
             .expect("the handle")
             .handle()
@@ -194,7 +194,7 @@ fn a_plugins_midi_rewiring_keeps_its_lanes() {
             .expect("a value")
     };
     let mut out = vec![Vec::new(), Vec::new()];
-    let mut check = |s: &mut Session, want: &[NodeKey], what: &str| {
+    let mut check = |s: &mut DetachedSession, want: &[NodeKey], what: &str| {
         let mut want = want.to_vec();
         want.sort();
         for _ in 0..2 {

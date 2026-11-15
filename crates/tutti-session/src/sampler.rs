@@ -81,7 +81,7 @@ pub enum SamplerError {
     Job(#[from] JobFailed),
 }
 
-impl Session {
+impl<C: crate::Clock> Session<C> {
     /// Opens `path` as a disk stream, its reader starting at `place`, on the
     /// session's spawner. Returns at once; the stream lands as
     /// [`SamplerEvent::Opened`] with the returned id in a later

@@ -6,15 +6,15 @@ use tutti_graph::ForkByClone;
 use tutti_graph::{FadeLaw, GraphInvalid, NodeKey, ParamRange};
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    ConnectError, Crossfade, CrossfadeRefused, EventInPort, EventOutPort, InPort, OutPort, Root,
-    Session,
+    ConnectError, Crossfade, CrossfadeRefused, DetachedSession, EventInPort, EventOutPort, InPort,
+    OutPort, Root, Session,
 };
 use tutti_types::{ChannelLayout, SampleRate, Seconds, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const GHOST: NodeKey = NodeKey(u64::MAX);
 
-fn detached() -> Session {
+fn detached() -> DetachedSession {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(RATE)

@@ -30,7 +30,7 @@ use tutti_nodes::testing::Osc;
 use tutti_nodes::{
     DistortionNode, LimiterControls, LimiterNode, ShapeKind, SvfFilterNode, SvfType,
 };
-use tutti_session::{AudioSide, InPort, Key, OutPort, Root, Session};
+use tutti_session::{AudioSide, DetachedSession, InPort, Key, OutPort, Root, Session};
 use tutti_types::MaxBlock;
 use tutti_types::{ChannelLayout, Db, Drive, Hz, Q, SampleRate, Samples, Seconds};
 
@@ -59,7 +59,7 @@ const DRIVE: f32 = 1.5;
 
 /// The nodes a scene declares, for the tests that edit it.
 struct Scene {
-    session: Session,
+    session: DetachedSession,
     side: AudioSide,
     filter: NodeKey,
     drive: Key<DistortionNode>,
