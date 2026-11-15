@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering as StdOrdering};
 /// handed back, counted, and nothing queued is overwritten.
 #[test]
 fn drop_newest_refuses_the_pushed_value_and_counts_it() {
-    let (mut writer, mut reader) = Ring::<u32>::pair(2, Overflow::DropNewest);
+    let (mut writer, mut reader) = ring::<u32>(2, Overflow::DropNewest);
     writer.push(1).unwrap();
     writer.push(2).unwrap();
     let back = writer.push(3).unwrap_err();
@@ -22,18 +22,18 @@ fn drop_newest_refuses_the_pushed_value_and_counts_it() {
 /// the caller's to decide.
 #[test]
 fn refuse_hands_the_value_back_without_counting() {
-    let (mut writer, reader) = Ring::<u32>::pair(1, Overflow::Refuse);
+    let (mut writer, reader) = ring::<u32>(1, Overflow::Refuse);
     writer.push(1).unwrap();
     assert_eq!(writer.push(2).unwrap_err().value, 2);
     assert_eq!(writer.lost(), 0);
     assert_eq!(reader.lost(), 0);
 }
 
-/// **An `Evict` ring keeps the newest `capacity` values in order** and counts
-/// one loss per value it dropped.
+/// **An evicting ring keeps the newest `capacity` values in order** and
+/// counts one loss per value it dropped.
 #[test]
 fn evict_keeps_the_newest_values_in_order() {
-    let (mut writer, mut reader) = Ring::<u32>::pair(3, Overflow::Evict);
+    let (mut writer, mut reader) = evicting_ring::<u32>(3);
     for n in 0..10 {
         writer.push(n).unwrap();
     }
@@ -43,8 +43,8 @@ fn evict_keeps_the_newest_values_in_order() {
     assert_eq!(reader.pop(), Some(10));
 }
 
-/// **Evicting drops the oldest value on the pushing thread, exactly once**:
-/// the dropped values are the oldest ones.
+/// **Evicting drops each evicted value on the pushing thread, exactly once**,
+/// and the values left queued drop with the ring.
 #[test]
 fn evict_drops_each_evicted_value_once() {
     static DROPS: AtomicUsize = AtomicUsize::new(0);
@@ -54,7 +54,7 @@ fn evict_drops_each_evicted_value_once() {
             DROPS.fetch_add(1, StdOrdering::Relaxed);
         }
     }
-    let (mut writer, mut reader) = Ring::<Counted>::pair(2, Overflow::Evict);
+    let (mut writer, mut reader) = evicting_ring::<Counted>(2);
     for n in 0..5 {
         writer.push(Counted(n)).unwrap();
     }
@@ -71,7 +71,7 @@ fn evict_drops_each_evicted_value_once() {
 /// **Values come out in order across many laps**, for a ring of three.
 #[test]
 fn values_wrap_around_in_order() {
-    let (mut writer, mut reader) = Ring::<u64>::pair(3, Overflow::Refuse);
+    let (mut writer, mut reader) = ring::<u64>(3, Overflow::Refuse);
     let (mut next, mut expect) = (0, 0);
     for lap in 0..50 {
         for _ in 0..(lap % 3) + 1 {
@@ -90,7 +90,7 @@ fn values_wrap_around_in_order() {
 /// outlives both ends.
 #[test]
 fn take_lost_resets_and_lost_accumulates() {
-    let (mut writer, mut reader) = Ring::<u8>::pair(1, Overflow::DropNewest);
+    let (mut writer, mut reader) = ring::<u8>(1, Overflow::DropNewest);
     let view = writer.losses();
     writer.push(0).unwrap();
     let _ = writer.push(1);
@@ -108,14 +108,14 @@ fn take_lost_resets_and_lost_accumulates() {
 /// dropped writer is seen by the reader after what it pushed.
 #[test]
 fn a_dropped_end_is_seen_by_the_other() {
-    let (mut writer, reader) = Ring::<u8>::pair(2, Overflow::DropNewest);
+    let (mut writer, reader) = ring::<u8>(2, Overflow::DropNewest);
     drop(reader);
     assert!(writer.is_disconnected());
     let back = writer.push(7).unwrap_err();
     assert_eq!((back.error, back.value), (PushError::Disconnected, 7));
     assert_eq!(writer.lost(), 0, "a gone reader is not a loss");
 
-    let (mut writer, mut reader) = Ring::<u8>::pair(2, Overflow::DropNewest);
+    let (mut writer, mut reader) = ring::<u8>(2, Overflow::DropNewest);
     writer.push(1).unwrap();
     drop(writer);
     assert!(reader.is_disconnected());
@@ -123,26 +123,40 @@ fn a_dropped_end_is_seen_by_the_other() {
     assert_eq!(reader.pop(), None);
 }
 
-/// **A zero-capacity ring refuses everything and holds nothing.**
+/// **A zero-capacity ring refuses everything and holds nothing**, on both
+/// shapes.
 #[test]
 fn a_zero_capacity_ring_is_always_full() {
-    let (mut writer, mut reader) = Ring::<u8>::pair(0, Overflow::Refuse);
+    let (mut writer, mut reader) = ring::<u8>(0, Overflow::Refuse);
     assert!(writer.is_full());
     assert_eq!(writer.push(1).unwrap_err().error, PushError::Full);
     assert_eq!(reader.pop(), None);
     assert!(reader.iter().next().is_none());
+
+    let (mut writer, mut reader) = evicting_ring::<u8>(0);
+    assert_eq!(writer.push(1).unwrap_err().error, PushError::Full);
+    assert_eq!(reader.pop(), None);
 }
 
-/// **The slice helpers move whole runs in order** and report the count.
+/// **The slice helpers move whole runs in order**, report the count, and
+/// count the values that did not fit on a `DropNewest` ring.
 #[test]
 fn slices_move_in_order() {
-    let (mut writer, mut reader) = Ring::<f32>::pair(4, Overflow::Refuse);
+    let (mut writer, mut reader) = ring::<f32>(4, Overflow::DropNewest);
     assert_eq!(writer.push_slice(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]), 4);
+    assert_eq!(writer.lost(), 2);
     assert_eq!(writer.vacant(), 0);
     let mut out = [0.0; 3];
     assert_eq!(reader.pop_slice(&mut out), 3);
     assert_eq!(out, [1.0, 2.0, 3.0]);
-    assert_eq!(reader.skip(5), 1);
+    assert_eq!(
+        writer.push_slice(&[7.0, 8.0, 9.0]),
+        3,
+        "room freed by the pop"
+    );
+    let mut rest = [0.0; 8];
+    assert_eq!(reader.pop_slice(&mut rest), 4);
+    assert_eq!(rest[..4], [4.0, 7.0, 8.0, 9.0], "across the wrap");
     assert!(reader.is_empty());
 }
 
@@ -150,7 +164,7 @@ fn slices_move_in_order() {
 /// only what was queued when it began.
 #[test]
 fn iter_and_peek_leave_values_queued_and_drain_is_bounded() {
-    let (mut writer, mut reader) = Ring::<u32>::pair(4, Overflow::Refuse);
+    let (mut writer, mut reader) = ring::<u32>(4, Overflow::Refuse);
     for n in 1..=3 {
         writer.push(n).unwrap();
     }
@@ -170,50 +184,91 @@ fn iter_and_peek_leave_values_queued_and_drain_is_bounded() {
     assert_eq!(reader.pop(), Some(4));
 }
 
-/// **A borrow of an evicting ring's values is refused**: its writer may take
-/// them.
-#[test]
-#[should_panic(expected = "evicting")]
-fn an_evicting_ring_cannot_be_borrowed() {
-    let (_writer, reader) = Ring::<u32>::pair(2, Overflow::Evict);
-    let _ = reader.peek();
-}
-
-/// **Queued values drop with the ring**, none leaked and none twice.
+/// **Queued values drop with the ring**, none leaked and none twice, on both
+/// shapes.
 #[test]
 fn queued_values_drop_with_the_ring() {
     let live = std::sync::Arc::new(());
-    let (mut writer, reader) = Ring::<std::sync::Arc<()>>::pair(4, Overflow::Refuse);
+    let (mut writer, reader) = ring::<std::sync::Arc<()>>(4, Overflow::Refuse);
     for _ in 0..3 {
         writer.push(live.clone()).unwrap();
     }
     assert_eq!(std::sync::Arc::strong_count(&live), 4);
     drop((writer, reader));
     assert_eq!(std::sync::Arc::strong_count(&live), 1);
+
+    let (mut writer, reader) = evicting_ring::<std::sync::Arc<()>>(4);
+    for _ in 0..6 {
+        writer.push(live.clone()).unwrap();
+    }
+    assert_eq!(std::sync::Arc::strong_count(&live), 5);
+    drop((writer, reader));
+    assert_eq!(std::sync::Arc::strong_count(&live), 1);
 }
 
-/// **Across two threads every accepted value arrives once, in order**, on a
-/// `DropNewest` ring whose losses plus arrivals are the pushes.
+/// **The writer's drop frees nothing**: queued values wait for the reader,
+/// which is where they are freed.
 #[test]
-fn two_threads_lose_nothing_unaccounted() {
-    const PUSHES: u32 = if cfg!(miri) { 200 } else { 20_000 };
-    let (mut writer, mut reader) = Ring::<u32>::pair(8, Overflow::DropNewest);
-    let producer = std::thread::spawn(move || {
-        for n in 0..PUSHES {
-            let _ = writer.push(n);
-        }
-        writer.lost()
-    });
+fn the_writer_drop_leaves_queued_values_to_the_reader() {
+    let live = std::sync::Arc::new(());
+    let (mut writer, mut reader) = ring::<std::sync::Arc<()>>(4, Overflow::Refuse);
+    writer.push(live.clone()).unwrap();
+    drop(writer);
+    assert_eq!(std::sync::Arc::strong_count(&live), 2, "still queued");
+    assert!(reader.pop().is_some());
+}
+
+/// **Freeing queued values inside an audio block is a debug panic**, so an
+/// audio-thread end is caught being dropped where it must not be.
+#[test]
+#[cfg(debug_assertions)]
+fn dropping_a_reader_with_queued_values_inside_a_block_panics() {
+    let (mut writer, reader) = ring::<Box<u8>>(2, Overflow::Refuse);
+    writer.push(Box::new(1)).unwrap();
+    let guard = crate::RtScope::enter();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(reader)));
+    drop(guard);
+    assert!(result.is_err());
+}
+
+fn two_threads<W: Send + 'static, R>(
+    push: impl FnOnce(u32) -> W + Send + 'static,
+    pop: impl Fn(&mut R) -> Option<u32>,
+    reader: R,
+    done: impl Fn(&R) -> bool,
+) -> (Vec<u32>, W) {
+    let producer = std::thread::spawn(move || push(PUSHES));
+    let mut reader = reader;
     let mut got = Vec::new();
     loop {
-        let gone = reader.is_disconnected();
-        match reader.pop() {
+        let gone = done(&reader);
+        match pop(&mut reader) {
             Some(n) => got.push(n),
             None if gone => break,
             None => std::thread::yield_now(),
         }
     }
-    let lost = producer.join().unwrap();
+    (got, producer.join().unwrap())
+}
+
+const PUSHES: u32 = if cfg!(miri) { 200 } else { 20_000 };
+
+/// **Across two threads every accepted value arrives once, in order**, on a
+/// `DropNewest` ring whose losses plus arrivals are the pushes.
+#[test]
+fn two_threads_lose_nothing_unaccounted() {
+    let (mut writer, reader) = ring::<u32>(8, Overflow::DropNewest);
+    let (got, lost) = two_threads(
+        move |pushes| {
+            for n in 0..pushes {
+                let _ = writer.push(n);
+            }
+            writer.lost()
+        },
+        |r: &mut RingReader<u32>| r.pop(),
+        reader,
+        RingReader::is_disconnected,
+    );
     assert!(
         got.windows(2).all(|w| w[0] < w[1]),
         "order kept, none repeated"
@@ -225,27 +280,70 @@ fn two_threads_lose_nothing_unaccounted() {
 /// value**, and what it lost plus what arrived is what was pushed.
 #[test]
 fn an_evicting_ring_with_a_reader_keeps_order_and_counts() {
-    const PUSHES: u32 = if cfg!(miri) { 200 } else { 20_000 };
-    let (mut writer, mut reader) = Ring::<u32>::pair(4, Overflow::Evict);
-    let producer = std::thread::spawn(move || {
-        for n in 0..PUSHES {
-            let _ = writer.push(n);
-        }
-        writer.lost()
-    });
-    let mut got = Vec::new();
-    loop {
-        let gone = reader.is_disconnected();
-        match reader.pop() {
-            Some(n) => got.push(n),
-            None if gone => break,
-            None => std::thread::yield_now(),
-        }
-    }
-    let lost = producer.join().unwrap();
+    let (mut writer, reader) = evicting_ring::<u32>(4);
+    let (got, lost) = two_threads(
+        move |pushes| {
+            for n in 0..pushes {
+                let _ = writer.push(n);
+            }
+            writer.lost()
+        },
+        |r: &mut EvictReader<u32>| r.pop(),
+        reader,
+        EvictReader::is_disconnected,
+    );
     assert!(
         got.windows(2).all(|w| w[0] < w[1]),
         "order kept, none repeated"
     );
     assert_eq!(got.len() as u64 + lost, u64::from(PUSHES));
+}
+
+/// **Bulk runs across threads arrive whole and in order**: `push_slice` and
+/// `pop_slice` with one publish each.
+#[test]
+fn bulk_runs_across_threads_keep_order() {
+    let (mut writer, mut reader) = ring::<u32>(16, Overflow::Refuse);
+    let producer = std::thread::spawn(move || {
+        let mut next = 0u32;
+        while next < PUSHES {
+            let run: Vec<u32> = (next..(next + 5).min(PUSHES)).collect();
+            next += writer.push_slice(&run) as u32;
+        }
+    });
+    let mut expect = 0u32;
+    let mut out = [0u32; 7];
+    while expect < PUSHES {
+        let n = reader.pop_slice(&mut out);
+        for v in &out[..n] {
+            assert_eq!(*v, expect);
+            expect += 1;
+        }
+        if n == 0 {
+            std::thread::yield_now();
+        }
+    }
+    producer.join().unwrap();
+}
+
+/// **A reader dropped while the writer pushes frees every value exactly
+/// once**, whichever side finds it queued.
+#[test]
+fn a_reader_dropped_during_pushes_leaves_no_value_behind() {
+    let rounds = if cfg!(miri) { 20 } else { 5_000 };
+    for _ in 0..rounds {
+        let token = std::sync::Arc::new(());
+        let values: Vec<_> = (0..6).map(|_| token.clone()).collect();
+        let (mut writer, mut reader) = ring::<std::sync::Arc<()>>(2, Overflow::DropNewest);
+        let producer = std::thread::spawn(move || {
+            for value in values {
+                let _ = writer.push(value);
+            }
+        });
+        let first = reader.pop();
+        drop(reader);
+        producer.join().unwrap();
+        drop(first);
+        assert_eq!(std::sync::Arc::strong_count(&token), 1);
+    }
 }
