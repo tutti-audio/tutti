@@ -1363,6 +1363,7 @@ impl Session {
                 let mut hosted = HostedPlugin::new(handle, loaded_ref);
                 hosted.node = Some(node_controls);
                 self.graph.plugins.insert(node.erase(), hosted);
+                self.graph.write_own_bypass(node.erase());
                 Key::new(node.erase())
             }
         };

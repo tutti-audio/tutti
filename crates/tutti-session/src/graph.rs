@@ -816,6 +816,7 @@ impl Graph {
             },
         );
         self.plugins.insert(node, hosted);
+        self.write_own_bypass(node);
         self.edited = true;
         Key::new(node)
     }
@@ -860,6 +861,7 @@ impl Graph {
         }
         self.plugins
             .insert(node, crate::plugin::HostedPlugin::new(handle, plugin));
+        self.write_own_bypass(node);
         Ok(Key::new(node))
     }
 
@@ -919,6 +921,7 @@ impl Graph {
                         );
                     }
                 }
+                self.write_own_bypass(node);
                 Ok(())
             }
             Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
@@ -2467,10 +2470,20 @@ impl Graph {
         // node declares it), so its bypass is written here, once per change.
         // `set_bypassed` leaves a plugin without one alone.
         #[cfg(feature = "plugin")]
-        if let Some(hosted) = self.plugins.get(&node) {
+        self.write_own_bypass(node);
+        Ok(())
+    }
+
+    /// Writes the bypass of the plugin hosted at `node`, if any, to what the
+    /// node's mode says: on every change of mode, and when a plugin enters the
+    /// node (an insert, a host, a replacement or a reload), so a plugin never
+    /// plays unbypassed under a `Bypassed` node. A plugin without a bypass of
+    /// its own is left alone.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn write_own_bypass(&self, node: NodeKey) {
+        if let (Some(hosted), Ok(mode)) = (self.plugins.get(&node), self.mode(node)) {
             let _ = hosted.handle.set_bypassed(mode == NodeMode::Bypassed);
         }
-        Ok(())
     }
 
     /// `node`'s mode, [`NodeMode::Active`] for a node never given one.

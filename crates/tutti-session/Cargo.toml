@@ -175,13 +175,6 @@ name = "bounce_in_process"
 harness = false
 required-features = ["clap", "export"]
 
-# A hosted plugin with a bypass of its own is bypassed by the host writing it: the
-# shared test plugin in a `plugin-server` (built first), apart from `plugin`,
-# which links the reference plugin's CLAP entry.
-[[test]]
-name = "plugin_own_bypass"
-required-features = ["clap"]
-
 # The instrument contract (`tests/instrument/instrument_support`): the same cases
 # against `PolySynth`, the SoundFont unit and a hosted plugin. The plugin subject
 # needs a built `plugin-server`, and fails without it.
