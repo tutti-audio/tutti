@@ -359,7 +359,7 @@ impl SessionBuilder<Offline> {
     }
 
     /// A session with no engine: the executor stays on this side, every
-    /// commit is applied at once, and [`Session::render_frame`] renders it
+    /// commit is applied at once, and `Session::render_frame` renders it
     /// (or `Graph::take_audio_side` hands it to a test). No metronome and
     /// no MIDI nodes are inserted, and no disk streamer is started: the
     /// graph is exactly `outputs_floor` wide (a declared

@@ -383,7 +383,7 @@ pub enum RootTopologyStatus {
 /// Built with [`SessionBuilder`](crate::SessionBuilder): offline (the host
 /// pulls blocks with [`render`](Self::render)), on a device (with a
 /// `Device`, feature `device`), or detached (the executor stays on
-/// this side: [`render_frame`](Self::render_frame)).
+/// this side: `render_frame`).
 ///
 /// `Send`, not `Sync`: one control thread owns it, whichever thread that is.
 /// Nothing the session frees needs the main thread: a plugin a removal, a
@@ -593,7 +593,7 @@ impl Session<crate::Detached> {
         self.render_frame_at(&tutti_graph::TransportPosition::default(), output);
     }
 
-    /// [`render_frame`](Self::render_frame) with the transport at
+    /// `render_frame` with the transport at
     /// `transport`: what plays a clip in a graph driven by hand.
     pub fn render_frame_at(
         &mut self,
@@ -1454,7 +1454,7 @@ impl<C: Clock> Session<C> {
     /// [`Meters::master`](crate::Meters::master)), declared and on
     /// from the build, so every render feeds it: a device callback,
     /// [`render`](Self::render), and a detached session's
-    /// [`render_frame`](Self::render_frame). It reads before the engine's fold
+    /// `render_frame`. It reads before the engine's fold
     /// to the device and its declick, aligned to the outputs' time. A block
     /// the engine refuses (rendered silent because the control side held the
     /// graph for that callback) runs no op, so it does not touch the meter:

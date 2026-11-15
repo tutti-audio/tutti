@@ -251,7 +251,7 @@ fn declaring_the_same_topology_again_changes_nothing() {
 #[test]
 fn an_export_is_placed_from_the_declaration() {
     use tutti_session::{Bounce, BounceLatency, BounceTail, ExportClock, Range};
-    let planes = |s: &mut DetachedSession| {
+    let planes = |s: &mut tutti_session::DetachedSession| {
         let request = Bounce::project()
             .master_buffers()
             .channels(ChannelLayout::from(6u16))

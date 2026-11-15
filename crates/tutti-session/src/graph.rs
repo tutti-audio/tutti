@@ -25,7 +25,7 @@
 //! `take_audio_side` or the session builder hands it
 //! to an engine. While it is local, a commit is applied at once on this
 //! thread and its box collected, so a detached graph never meets
-//! back-pressure, and [`Session::render_frame`](crate::Session::render_frame)
+//! back-pressure, and `Session::render_frame`
 //! runs it.
 //!
 //! # `set_param` lands on the next block, never at once
@@ -38,6 +38,8 @@
 use std::any::Any;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
+#[cfg(feature = "testing")]
+use tutti_graph::TransportPosition;
 
 #[cfg(feature = "export")]
 use crate::fork::PendingExport;
@@ -48,7 +50,7 @@ use tutti_graph::{BusRef, BusSource, Buses, EdgeFade, EdgeGain};
 use tutti_graph::{
     CommitError, Editor, EventEdge, EventIn, EventOut, Executor, Fade, GraphInvalid, InletNode,
     InletRing, IntoNode, MeterReader, MixError, ModeError, NodeMode, ParamIn, ParamMod, ParamRange,
-    ParamSet, Prepare, RenderMode, TapWriter, TransportPosition,
+    ParamSet, Prepare, RenderMode, TapWriter,
 };
 use tutti_graph::{
     Edge as RawEdge, EdgeId, InPort as RawIn, NodeKey, OutPort as RawOut, Sink, Source,
