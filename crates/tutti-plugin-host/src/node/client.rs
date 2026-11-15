@@ -85,6 +85,10 @@ pub struct InProcClient<F: Loaded> {
     /// counters and the chunk counters are the node's own. `None` for an
     /// in-process plugin, whose figures are the control side's.
     pub(super) controls: Option<PluginControls>,
+    /// The parameters the delivery has a slot for, and the spare slots it
+    /// learns unlisted ones into: what a successor node's delivery is made from.
+    pub(super) parameters: Vec<ParamId>,
+    pub(super) spares: usize,
     /// The pin counts, latency and tail the plugin declared when the node was
     /// built: what `shape` and `process` size by while the instance lock is
     /// held elsewhere. Moves are reported through the handle
@@ -497,7 +501,8 @@ impl<F: Loaded> InProcClient<F> {
         let counters = controls
             .as_ref()
             .map_or_else(Arc::default, PluginControls::delivery_counters);
-        let params = ParamDelivery::with_spares(parameters, counters, spares);
+        let parameters: Vec<ParamId> = parameters.into_iter().collect();
+        let params = ParamDelivery::with_spares(parameters.iter().copied(), counters, spares);
         let transport = controls
             .as_ref()
             .map_or_else(TransportFeed::new, |c| TransportFeed::over(c.meter()));
@@ -515,6 +520,8 @@ impl<F: Loaded> InProcClient<F> {
             out: ProcessOutput::default(),
             transport,
             controls,
+            parameters,
+            spares,
             features,
             sample_rate,
             pending_sample_rate,

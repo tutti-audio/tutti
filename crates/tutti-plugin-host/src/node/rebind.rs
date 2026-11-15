@@ -155,17 +155,7 @@ where
     pub fn rebind(&self, main: MainThreadMarker) -> Result<PluginNode<F>, RebindError> {
         let mut instance = self.inner.lock();
         let (layout, latency, tail) = instance.reading().ok_or(RebindError::NoPorts)?;
-        if let Some(limit) = self.limit {
-            let (now_inputs, now_outputs) = (layout.total_inputs(), layout.total_outputs());
-            if (now_inputs, now_outputs) != (limit.inputs, limit.outputs) {
-                return Err(RebindError::OutsideSlab {
-                    inputs: limit.inputs,
-                    outputs: limit.outputs,
-                    now_inputs,
-                    now_outputs,
-                });
-            }
-        }
+        self.fits(layout)?;
         let declared = Declared::from_layout(layout, latency, tail);
         let rt = instance.rehand(main)?;
         drop(instance);
@@ -191,6 +181,44 @@ where
             Some(pipeline),
         )
         .bind(self.tempo.clone()))
+    }
+
+    /// The ports the plugin has now, as its lifecycle last read them: what a
+    /// node [`rebind`](Self::rebind) builds now would declare. `None` for a
+    /// lost plugin or before a layout was read.
+    #[must_use]
+    pub fn layout(&self) -> Option<tutti_plugin_types::Layout> {
+        self.inner
+            .lock()
+            .reading()
+            .map(|(layout, ..)| layout.clone())
+    }
+
+    /// What [`rebind`](Self::rebind) would refuse before it changes anything:
+    /// no ports, or ports outside the [`PortLimit`]. Changes nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`NoPorts`](RebindError::NoPorts) and [`OutsideSlab`](RebindError::OutsideSlab).
+    pub fn check_ports(&self) -> Result<(), RebindError> {
+        let instance = self.inner.lock();
+        let (layout, ..) = instance.reading().ok_or(RebindError::NoPorts)?;
+        self.fits(layout)
+    }
+
+    fn fits(&self, layout: &tutti_plugin_types::Layout) -> Result<(), RebindError> {
+        if let Some(limit) = self.limit {
+            let (now_inputs, now_outputs) = (layout.total_inputs(), layout.total_outputs());
+            if (now_inputs, now_outputs) != (limit.inputs, limit.outputs) {
+                return Err(RebindError::OutsideSlab {
+                    inputs: limit.inputs,
+                    outputs: limit.outputs,
+                    now_inputs,
+                    now_outputs,
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Where the Processor's way is: see [`Settlement`].
@@ -222,14 +250,8 @@ impl<F: Loaded> PluginNode<F> {
     /// The [`Rebinder`] for this node, binding its successors to the tempo
     /// reader the node was bound to. See [`InProcClient::rebinder`].
     #[must_use]
-    pub fn rebinder(
-        &self,
-        parameters: Vec<ParamId>,
-        spares: usize,
-        limit: Option<PortLimit>,
-    ) -> Rebinder<F> {
-        self.client
-            .rebinder(self.tempo.clone(), parameters, spares, limit)
+    pub fn rebinder(&self, limit: Option<PortLimit>) -> Rebinder<F> {
+        self.client.rebinder(self.tempo.clone(), limit)
     }
 }
 
@@ -238,16 +260,8 @@ impl<F: Loaded> InProcClient<F> {
     /// successors to `tempo`. `limit` is the ports a rebuilt node may have:
     /// `None` for a plugin whose node has no fixed pipeline, `Some` for a
     /// served one.
-    ///
-    /// `parameters` and `spares` are what the node's delivery was made from.
     #[must_use]
-    pub fn rebinder(
-        &self,
-        tempo: TempoReader,
-        parameters: Vec<ParamId>,
-        spares: usize,
-        limit: Option<PortLimit>,
-    ) -> Rebinder<F> {
+    pub fn rebinder(&self, tempo: TempoReader, limit: Option<PortLimit>) -> Rebinder<F> {
         Rebinder {
             inner: Arc::clone(&self.inner),
             descriptor: self.descriptor.clone(),
@@ -256,8 +270,8 @@ impl<F: Loaded> InProcClient<F> {
             sample_rate: self.sample_rate,
             pending_sample_rate: Arc::clone(&self.pending_sample_rate),
             unlent: Arc::clone(&self.unlent),
-            parameters,
-            spares,
+            parameters: self.parameters.clone(),
+            spares: self.spares,
             controls: self.controls.clone(),
             pipeline: self.pipeline,
             tempo,
@@ -320,7 +334,7 @@ mod tests {
             0,
             None,
         );
-        let rebinder = client.rebinder(tempo(), Vec::new(), 0, limit);
+        let rebinder = client.rebinder(tempo(), limit);
         let inner = Arc::clone(&client.inner);
         let node = contract::prepared(client.bind(tempo()), SR, BLOCK);
         (fake, rebinder, node, inner)

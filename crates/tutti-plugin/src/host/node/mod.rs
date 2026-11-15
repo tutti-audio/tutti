@@ -130,9 +130,6 @@ pub struct Unbound {
     /// is tens of KiB, and the client moves several times on its way into a
     /// graph (a debug build's frames hold a copy each).
     client: Box<InProcClient<Ipc>>,
-    /// The parameters the client's delivery has a slot for, which a rebuilt
-    /// node's has too.
-    parameters: Vec<ParamId>,
 }
 
 /// The typestate of a [`PluginClient`] that holds its node and can go into a
@@ -147,9 +144,6 @@ pub struct Bound {
     /// The project's tempo map reader the node was bound to, kept so a fork
     /// clones it on the control side (its own registration on the same cell).
     tempo: tutti_transport::TempoReader,
-    /// The parameters the node's delivery has a slot for, which a rebuilt
-    /// node's has too.
-    parameters: Vec<ParamId>,
 }
 
 impl std::fmt::Debug for Bound {
@@ -460,7 +454,6 @@ impl PluginClient<Unbound> {
             fork_watch: None,
             state: Unbound {
                 client: Box::new(client),
-                parameters: params,
             },
         })
     }
@@ -498,7 +491,7 @@ impl PluginClient<Unbound> {
             origin,
             plugin,
             fork_watch,
-            state: Unbound { client, parameters },
+            state: Unbound { client },
         } = self;
 
         PluginClient {
@@ -520,7 +513,6 @@ impl PluginClient<Unbound> {
             state: Bound {
                 node: Box::new((*client).bind(tempo.clone())),
                 tempo,
-                parameters,
             },
         }
     }
@@ -539,14 +531,10 @@ impl PluginClient<Bound> {
     /// The rebinder keeps the plugin instance alive until it is dropped.
     #[must_use]
     pub fn rebinder(&self) -> Rebinder<Ipc> {
-        self.state.node.rebinder(
-            self.state.parameters.clone(),
-            ParameterChanges::SPARE_QUEUES,
-            Some(PortLimit {
-                inputs: self.inputs,
-                outputs: self.outputs,
-            }),
-        )
+        self.state.node.rebinder(Some(PortLimit {
+            inputs: self.inputs,
+            outputs: self.outputs,
+        }))
     }
 }
 

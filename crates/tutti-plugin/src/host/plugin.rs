@@ -578,6 +578,149 @@ pub struct BoundPlugin {
     bound: BoundPlaced,
 }
 
+impl BoundPlugin {
+    /// The node's controls of an in-process plugin: its meter cell and its
+    /// parameter delivery's counters. `None` for a served plugin, whose
+    /// controls are [`PluginControls`](tutti_plugin_host::PluginControls).
+    #[must_use]
+    pub fn node_controls(&self) -> Option<tutti_plugin_host::NodeControls> {
+        match &self.bound {
+            BoundPlaced::Served(_) => None,
+            #[cfg(feature = "vst2")]
+            BoundPlaced::Vst2(c) => Some(c.controls()),
+            #[cfg(feature = "clap")]
+            BoundPlaced::Clap(c) => Some(c.controls()),
+            #[cfg(feature = "vst3")]
+            BoundPlaced::Vst3(c) => Some(c.controls()),
+            #[cfg(all(feature = "au", target_os = "macos"))]
+            BoundPlaced::Au(c) => Some(c.controls()),
+        }
+    }
+
+    /// The builder of the node that replaces this one when the plugin changes
+    /// its audio ports, over the same plugin. Take it before the plugin goes
+    /// into a graph. A served plugin's is limited to the ports it was launched
+    /// with.
+    #[must_use]
+    pub fn rebinder(&self) -> PluginRebinder {
+        let placed = match &self.bound {
+            BoundPlaced::Served(c) => RebinderPlaced::Served(c.rebinder()),
+            #[cfg(feature = "vst2")]
+            BoundPlaced::Vst2(c) => RebinderPlaced::Vst2(c.rebinder(None)),
+            #[cfg(feature = "clap")]
+            BoundPlaced::Clap(c) => RebinderPlaced::Clap(c.rebinder(None)),
+            #[cfg(feature = "vst3")]
+            BoundPlaced::Vst3(c) => RebinderPlaced::Vst3(c.rebinder(None)),
+            #[cfg(all(feature = "au", target_os = "macos"))]
+            BoundPlaced::Au(c) => RebinderPlaced::Au(c.rebinder(None)),
+        };
+        PluginRebinder { placed }
+    }
+}
+
+/// Builds the node that replaces a plugin's node when the plugin changes its
+/// audio ports ([`BoundPlugin::rebinder`]): an in-process plugin's successor
+/// is over the same instance, and the Processor moves to it with no
+/// restart. A served plugin's launch fixed its shared-memory slab, so ports
+/// of other widths are refused by name and nothing is built.
+///
+/// `Clone`: every clone drives the same plugin.
+#[derive(Clone)]
+pub struct PluginRebinder {
+    placed: RebinderPlaced,
+}
+
+#[derive(Clone)]
+enum RebinderPlaced {
+    Served(tutti_plugin_host::Rebinder<tutti_plugin_ipc::Ipc>),
+    #[cfg(feature = "vst2")]
+    Vst2(tutti_plugin_host::Rebinder<tutti_vst2_host::Vst2Loaded>),
+    #[cfg(feature = "clap")]
+    Clap(tutti_plugin_host::Rebinder<tutti_clap_host::ClapLoaded>),
+    #[cfg(feature = "vst3")]
+    Vst3(tutti_plugin_host::Rebinder<tutti_vst3_host::Vst3Loaded>),
+    #[cfg(all(feature = "au", target_os = "macos"))]
+    Au(tutti_plugin_host::Rebinder<tutti_au_host::AuLoaded>),
+}
+
+impl std::fmt::Debug for PluginRebinder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PluginRebinder").finish_non_exhaustive()
+    }
+}
+
+/// Runs `$e` on the rebinder of whichever hosting a [`RebinderPlaced`] holds.
+macro_rules! rebinder_of {
+    ($placed:expr, $r:ident => $e:expr) => {
+        match $placed {
+            RebinderPlaced::Served($r) => $e,
+            #[cfg(feature = "vst2")]
+            RebinderPlaced::Vst2($r) => $e,
+            #[cfg(feature = "clap")]
+            RebinderPlaced::Clap($r) => $e,
+            #[cfg(feature = "vst3")]
+            RebinderPlaced::Vst3($r) => $e,
+            #[cfg(all(feature = "au", target_os = "macos"))]
+            RebinderPlaced::Au($r) => $e,
+        }
+    };
+}
+
+impl PluginRebinder {
+    /// The rebinder of a served plugin's bound client
+    /// ([`PluginClient::rebinder`](crate::handles::PluginClient::rebinder)).
+    #[must_use]
+    pub fn served(rebinder: tutti_plugin_host::Rebinder<tutti_plugin_ipc::Ipc>) -> Self {
+        Self {
+            placed: RebinderPlaced::Served(rebinder),
+        }
+    }
+
+    /// The ports the plugin has now, as its lifecycle last read them. `None`
+    /// for a lost plugin.
+    #[must_use]
+    pub fn layout(&self) -> Option<tutti_plugin_types::Layout> {
+        rebinder_of!(&self.placed, r => r.layout())
+    }
+
+    /// Where the Processor's way is after the last [`rebind`](Self::rebind).
+    #[must_use]
+    pub fn settled(&self) -> tutti_plugin_host::Settlement {
+        rebinder_of!(&self.placed, r => r.settled())
+    }
+
+    /// A node over the plugin's ports as they are now, with its Processor on
+    /// the way to it: see [`Rebinder::rebind`](tutti_plugin_host::Rebinder::rebind).
+    /// `Ok(None)` for a served plugin whose ports still fit its slab: its node
+    /// stays.
+    ///
+    /// # Errors
+    ///
+    /// The refusals of [`Rebinder::rebind`](tutti_plugin_host::Rebinder::rebind);
+    /// for a served plugin, [`OutsideSlab`](tutti_plugin_host::RebindError::OutsideSlab)
+    /// when its ports changed width.
+    pub fn rebind(
+        &self,
+        main: MainThreadMarker,
+    ) -> std::result::Result<Option<BoundPlugin>, tutti_plugin_host::RebindError> {
+        let bound = match &self.placed {
+            RebinderPlaced::Served(r) => {
+                r.check_ports()?;
+                return Ok(None);
+            }
+            #[cfg(feature = "vst2")]
+            RebinderPlaced::Vst2(r) => BoundPlaced::Vst2(Box::new(r.rebind(main)?)),
+            #[cfg(feature = "clap")]
+            RebinderPlaced::Clap(r) => BoundPlaced::Clap(Box::new(r.rebind(main)?)),
+            #[cfg(feature = "vst3")]
+            RebinderPlaced::Vst3(r) => BoundPlaced::Vst3(Box::new(r.rebind(main)?)),
+            #[cfg(all(feature = "au", target_os = "macos"))]
+            RebinderPlaced::Au(r) => BoundPlaced::Au(Box::new(r.rebind(main)?)),
+        };
+        Ok(Some(BoundPlugin { bound }))
+    }
+}
+
 enum BoundPlaced {
     Served(Box<PluginClient<crate::host::node::Bound>>),
     #[cfg(feature = "vst2")]

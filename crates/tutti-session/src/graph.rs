@@ -853,11 +853,12 @@ impl Graph {
         let hosted = crate::plugin::HostedPlugin::new(client.handle(), client.plugin().clone())
             .with_controls(client.controls());
         let tempo = self.tempo.clone();
+        let bound = client.bind(tempo);
+        let rebinder = tutti_plugin::catalog::PluginRebinder::served(bound.rebinder());
+        let mut hosted = hosted;
+        hosted.rebind = Some(crate::plugin::RebindState::of(rebinder));
         // A fresh key has no wiring recorded, so nothing is unwired.
-        let _controls = self
-            .editor
-            .insert(node, PLUGIN_KIND, client.bind(tempo))
-            .controls;
+        let _controls = self.editor.insert(node, PLUGIN_KIND, bound).controls;
         self.nodes.insert(
             node,
             Entry {
@@ -949,7 +950,9 @@ impl Graph {
         let controls = client.controls();
         let plugin = client.plugin().clone();
         let tempo = self.tempo.clone();
-        match self.swap_unit(node, client.bind(tempo), fade, law) {
+        let bound = client.bind(tempo);
+        let rebinder = tutti_plugin::catalog::PluginRebinder::served(bound.rebinder());
+        match self.swap_unit(node, bound, fade, law) {
             Ok(_controls) => {
                 // The record is carried over to the incoming plugin (unlike
                 // `replace`, which takes it out): its handle is what the
@@ -959,14 +962,14 @@ impl Graph {
                 match self.plugins.get_mut(&node) {
                     Some(hosted) => {
                         let outgoing = hosted.replace(handle, controls, plugin);
+                        hosted.rebind = Some(crate::plugin::RebindState::of(rebinder));
                         self.graveyard.bury_handle(outgoing);
                     }
                     None => {
-                        self.plugins.insert(
-                            node,
-                            crate::plugin::HostedPlugin::new(handle, plugin)
-                                .with_controls(controls),
-                        );
+                        let mut hosted = crate::plugin::HostedPlugin::new(handle, plugin)
+                            .with_controls(controls);
+                        hosted.rebind = Some(crate::plugin::RebindState::of(rebinder));
+                        self.plugins.insert(node, hosted);
                     }
                 }
                 Ok(())
@@ -1006,16 +1009,19 @@ impl Graph {
         let controls = plugin.node_controls();
         let plugin_ref = plugin.plugin().clone();
         let bound = (*plugin).bind(self.tempo.clone());
+        let rebinder = bound.rebinder();
         match self.swap_unit(node, bound, fade, law) {
             Ok(_) => {
                 match self.plugins.get_mut(&node) {
                     Some(hosted) => {
                         let outgoing = hosted.replace_hosted(handle, controls, plugin_ref);
+                        hosted.rebind = Some(crate::plugin::RebindState::of(rebinder));
                         self.graveyard.bury_handle(outgoing);
                     }
                     None => {
                         let mut hosted = crate::plugin::HostedPlugin::new(handle, plugin_ref);
                         hosted.node = Some(controls);
+                        hosted.rebind = Some(crate::plugin::RebindState::of(rebinder));
                         self.plugins.insert(node, hosted);
                     }
                 }
@@ -1023,6 +1029,42 @@ impl Graph {
             }
             Err(ReplaceRefused::Failed(refused)) => Err(ReplaceRefused::Failed(refused)),
             Err(ReplaceRefused::Busy(_)) => unreachable!("checked above"),
+        }
+    }
+
+    /// Whether a node over the plugin at `node` can be swapped in now:
+    /// the graph is not poisoned or re-preparing, and `node` is in it. Asked
+    /// before a rebind moves the plugin's Processor to the new node, which
+    /// nothing may then refuse.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn can_swap(&self, node: NodeKey) -> bool {
+        self.editor.poison_cause().is_none()
+            && self.nodes.contains_key(&node)
+            && !self.editor.is_repreparing()
+    }
+
+    /// Swaps the node of the plugin at `node` for `bound`, the node
+    /// [`PluginRebinder::rebind`](tutti_plugin::catalog::PluginRebinder::rebind)
+    /// built over the same plugin with the ports it has now: the key, and the
+    /// wiring to the ports the new node keeps, stay, and the wiring to the ports
+    /// it lacks is dropped and reported
+    /// ([`SessionEvent::Unwired`](crate::SessionEvent::Unwired)). The plugin's
+    /// record stays.
+    ///
+    /// # Errors
+    ///
+    /// A poisoned graph, or a `node` not in it; a graph that re-prepares is
+    /// refused ([`can_swap`](Self::can_swap) first).
+    #[cfg(feature = "plugin")]
+    pub(crate) fn replace_rebound(
+        &mut self,
+        node: NodeKey,
+        bound: tutti_plugin::catalog::BoundPlugin,
+    ) -> Result<(), CrossfadeRefused> {
+        match self.swap_unit(node, bound, tutti_graph::DECLICK, FadeLaw::default()) {
+            Ok(_) => Ok(()),
+            Err(ReplaceRefused::Failed(refused)) => Err(refused),
+            Err(ReplaceRefused::Busy(_)) => Err(CrossfadeRefused::NoSuchNode(node)),
         }
     }
 

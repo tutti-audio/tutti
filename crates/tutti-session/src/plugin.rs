@@ -140,6 +140,7 @@ use tutti_types::{SampleRate, Samples};
 
 mod entry;
 mod lost;
+mod rebind;
 pub(crate) use lost::Lost;
 
 use entry::PooledLink;
@@ -501,8 +502,19 @@ pub enum PluginChange {
         /// The new tail, which may be bounded, unbounded or unreported.
         tail: PluginTail,
     },
-    /// The plugin's bus layout changed: re-read it and rewire.
+    /// The plugin's bus layout changed. A pooled in-process plugin's node is
+    /// re-inserted at its key with the new ports by the session
+    /// ([`SessionEvent::Unwired`](crate::SessionEvent::Unwired) names the
+    /// wiring a narrower shape dropped); another plugin's node keeps its ports,
+    /// and the app re-reads and rewires.
     IoChanged,
+    /// The plugin's ports changed to a width its node cannot take, and the
+    /// node stays as it is: a served plugin's shared-memory slab is laid out
+    /// at launch.
+    PortsRefused {
+        /// Why the ports were refused.
+        why: tutti_plugin_host::RebindError,
+    },
     /// The plugin asked its editor window to take a size (a zoom control, a
     /// collapsing panel), found while [`MainSession::update`](crate::MainSession::update)
     /// serviced the editor. Answer with
@@ -740,6 +752,32 @@ pub(crate) struct HostedPlugin {
     /// The pool entry this plugin's node is over, `None` for a plugin added
     /// outside the pool. Dropped when the record retires, which ends the hold.
     pub(crate) pooled: Option<PooledLink>,
+    /// Builds the node that replaces this plugin's when it changes its ports,
+    /// and the ports the node at this key was built for. `None` for a record
+    /// that no pool entry holds.
+    pub(crate) rebind: Option<RebindState>,
+}
+
+/// What a pooled plugin's record keeps to re-insert its node when the plugin
+/// changes its ports.
+#[derive(Debug)]
+pub(crate) struct RebindState {
+    pub(crate) rebinder: tutti_plugin::catalog::PluginRebinder,
+    /// The ports the node at the key declares.
+    pub(crate) laid_out: Option<tutti_plugin_types::Layout>,
+    /// A rebuilt node was inserted and the Processor has not reached it yet.
+    pub(crate) settling: bool,
+}
+
+impl RebindState {
+    pub(crate) fn of(rebinder: tutti_plugin::catalog::PluginRebinder) -> Self {
+        let laid_out = rebinder.layout();
+        Self {
+            rebinder,
+            laid_out,
+            settling: false,
+        }
+    }
 }
 
 /// The part of a plugin's record a [`ParamGesture`](crate::ParamGesture) keeps:
@@ -860,6 +898,7 @@ impl HostedPlugin {
             mirror_token: Arc::new(()),
             silenced: false,
             pooled: None,
+            rebind: None,
         }
     }
 
@@ -927,6 +966,8 @@ impl HostedPlugin {
         self.gate = Gate::default();
         // What the outgoing plugin reported and nobody drained is its own.
         (self.notices, self.hearing) = hear(&handle);
+        // The incoming plugin has a rebinder of its own, set by the caller.
+        self.rebind = None;
         let outgoing = Outgoing {
             handle: std::mem::replace(&mut self.handle, handle),
             editor_open: std::mem::replace(&mut self.editor_open, false),
@@ -1241,9 +1282,12 @@ impl<C: crate::Clock> Session<C> {
             Err(plugin) => {
                 let node_controls = plugin.node_controls();
                 node_controls.set_meter(meter);
-                let (node, _) = self.graph.place((*plugin).bind(self.graph.tempo.clone()));
+                let bound = (*plugin).bind(self.graph.tempo.clone());
+                let rebinder = bound.rebinder();
+                let (node, _) = self.graph.place(bound);
                 let mut hosted = HostedPlugin::new(handle, loaded_ref);
                 hosted.node = Some(node_controls);
+                hosted.rebind = Some(RebindState::of(rebinder));
                 self.graph.plugins.insert(node.erase(), hosted);
                 Key::new(node.erase())
             }
