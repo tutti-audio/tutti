@@ -1,15 +1,16 @@
-//! A change of the root's width opens again what reads the root: a tap on it
-//! and the master meter arrive as `SessionEvent::TapReopened` with the new
-//! topology, the old reader reads closed, and a reader of a port whose width
-//! did not change is left alone.
+//! A root of another width opens again what reads the root: a tap on it and
+//! the master meter are announced by `SessionEvent::RootReaderReopened` with
+//! the new topology and claimed with `Session::take_reopened`, the old reader
+//! reads closed, and a reader that has the root's width is left alone.
 //!
 //! Every figure is analytic: the source is the constant frame (0.25, 0.75), so
 //! the stereo root carries 0.25 and 0.75 and a mono root keeps channel 0.
 
 use tutti_buffers::{InterleavedMut, Pull, Source};
 use tutti_graph::ForkByClone;
+use tutti_graph::TapId;
 use tutti_nodes::testing::Const;
-use tutti_session::{OutPort, Reopened, Root, Session, SessionEvent};
+use tutti_session::{NotReopened, OutPort, Reopened, Root, RootReader, Session, SessionEvent};
 use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock, SampleRate, Samples};
 
 const BLOCK: usize = 64;
@@ -43,15 +44,23 @@ fn mono() -> ChannelTopology {
     ChannelTopology::assumed(ChannelLayout::MONO)
 }
 
-/// The readers `events` reopened.
-fn reopened(events: Vec<SessionEvent>) -> Vec<(Reopened, ChannelTopology)> {
+/// The readers `events` announce.
+fn reopened(events: Vec<SessionEvent>) -> Vec<(RootReader, ChannelTopology)> {
     events
         .into_iter()
         .filter_map(|e| match e {
-            SessionEvent::TapReopened { reader, topology } => Some((reader, topology)),
+            SessionEvent::RootReaderReopened { id, topology } => Some((id, topology)),
             _ => None,
         })
         .collect()
+}
+
+/// The tap `s` holds under `id`.
+fn claim_tap(s: &mut Session, id: RootReader) -> tutti_graph::TapReader {
+    match s.take_reopened(id).expect("held") {
+        Reopened::Tap(tap) => tap,
+        other => panic!("a tap, not {other:?}"),
+    }
 }
 
 /// Everything `tap` reads until it starves or ends, interleaved, and whether
@@ -93,10 +102,10 @@ fn a_root_width_change_reopens_the_root_tap_and_closes_the_old_reader() {
         .hard();
     let mut events = reopened(s.update());
     assert_eq!(events.len(), 1, "one reopen for the one tap");
-    let (Reopened::Tap(mut new), topology) = events.remove(0) else {
-        panic!("a tap")
-    };
+    let (id, topology) = events.remove(0);
     assert_eq!(topology, mono(), "carries the new topology");
+    assert_eq!(Some(id), old.id().map(RootReader::Tap));
+    let mut new = claim_tap(&mut s, id);
     assert_eq!(new.width(), 1);
     assert_eq!(new.id(), old.id(), "the new reader takes the old one's id");
 
@@ -145,7 +154,7 @@ fn a_root_width_change_reopens_the_root_tap_and_closes_the_old_reader() {
 /// declaration of the stereo the root already is changes the declaration and
 /// not the width, so no event arrives and the reader keeps reading.
 #[test]
-fn a_root_declaration_of_the_same_width_leaves_the_tap_alone() {
+fn a_declaration_that_keeps_the_width_leaves_the_tap_alone() {
     let mut s = session();
     let mut tap = s
         .graph()
@@ -180,10 +189,12 @@ fn the_taken_master_meter_reopens_with_the_new_width() {
         .hard();
     let mut events = reopened(block(&mut s));
     assert_eq!(events.len(), 1, "the meter, and no tap, was opened");
-    let (Reopened::Meter(mut new), topology) = events.remove(0) else {
+    let (id, topology) = events.remove(0);
+    assert!(matches!(id, RootReader::Meter(_)));
+    assert_eq!(topology, mono());
+    let Reopened::Meter(mut new) = s.take_reopened(id).expect("held") else {
         panic!("a meter")
     };
-    assert_eq!(topology, mono());
     assert!(new.is_enabled());
     let _ = block(&mut s);
     let _ = s.update();
@@ -195,10 +206,10 @@ fn the_taken_master_meter_reopens_with_the_new_width() {
     assert_eq!(levels[0].rms.get(), 0.25);
 }
 
-/// **The master meter a host did not take follows the root in place**: no
-/// event, and the graph's own reader is the new one.
+/// **A meter nobody took is replaced in place**: no event, and the graph's own
+/// reader is the new one.
 #[test]
-fn the_held_master_meter_is_replaced_in_place() {
+fn a_meter_nobody_took_is_replaced_without_an_event() {
     let mut s = session();
     s.declare_root_topology(Some(mono()))
         .expect("a mono root")
@@ -210,10 +221,10 @@ fn the_held_master_meter_is_replaced_in_place() {
     assert_eq!(meter.read()[0].peak.get(), 0.25);
 }
 
-/// **Two changes before one update reopen once, at the last width**: the
-/// reader of the first change was never sent, and is not reported.
+/// **Only the last of two changes before an update is reported**, at the last
+/// width, and the first reader never existed outside the graph.
 #[test]
-fn two_changes_before_an_update_report_the_last_reader_only() {
+fn only_the_last_of_two_changes_before_an_update_is_reported() {
     let mut s = session();
     let mut old = s.graph().taps().open_output(Samples(4096)).expect("opens");
     let _ = block(&mut s);
@@ -223,11 +234,105 @@ fn two_changes_before_an_update_report_the_last_reader_only() {
         .hard();
     let mut events = reopened(s.update());
     assert_eq!(events.len(), 1);
-    let (Reopened::Tap(new), _) = events.remove(0) else {
-        panic!("a tap")
-    };
+    let new = claim_tap(&mut s, events.remove(0).0);
     assert_eq!(new.width(), 4);
     let _ = block(&mut s);
     let _ = s.update();
     assert!(drain(&mut old).1, "the first reader ends");
+}
+
+/// **A second reopen before the claim replaces the held reader**: the one
+/// announced first is gone, the claim is the last width, and the reader it
+/// superseded ends.
+#[test]
+fn a_second_reopen_before_the_claim_replaces_the_held_reader() {
+    let mut s = session();
+    let _old = s.graph().taps().open_output(Samples(4096)).expect("opens");
+    s.declare_root_topology(Some(mono())).expect("mono").hard();
+    let first = reopened(block(&mut s));
+    assert_eq!(first.len(), 1);
+    s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::from_count(4))))
+        .expect("quad")
+        .hard();
+    let second = reopened(block(&mut s));
+    assert_eq!(second.len(), 1, "announced again");
+    assert_eq!(first[0].0, second[0].0, "under the one id");
+    assert_eq!(claim_tap(&mut s, second[0].0).width(), 4);
+    assert_eq!(
+        s.take_reopened(second[0].0).unwrap_err(),
+        NotReopened(second[0].0),
+        "claimed once"
+    );
+}
+
+/// **An ignored event loses nothing**: the reader stays held through later
+/// updates and is claimable then, with frames from the commit on.
+#[test]
+fn an_unclaimed_reader_survives_ignored_updates_and_is_claimed_later() {
+    let mut s = session();
+    let _old = s.graph().taps().open_output(Samples(4096)).expect("opens");
+    s.declare_root_topology(Some(mono())).expect("mono").hard();
+    let events = reopened(block(&mut s));
+    assert_eq!(events.len(), 1);
+    for _ in 0..3 {
+        assert!(reopened(block(&mut s)).is_empty(), "announced once");
+    }
+    let mut late = claim_tap(&mut s, events[0].0);
+    assert_eq!(late.width(), 1);
+    let (frames, _) = drain(&mut late);
+    assert_eq!(frames.len(), 4 * BLOCK, "every block since the commit");
+    assert!(frames.iter().all(|&x| x == 0.25));
+}
+
+/// **A claim of an id nothing was reopened under is an error at the call.**
+#[test]
+fn a_claim_of_an_unknown_id_is_refused() {
+    let mut s = session();
+    let id = RootReader::Tap(TapId::of(99));
+    assert_eq!(s.take_reopened(id).unwrap_err(), NotReopened(id));
+}
+
+/// **A reader keeps no width the root lacks, and is left alone when it has it**:
+/// a 2-wide tap, the root widened to 4 (the tap stays 2-wide), then declared 2
+/// wide: the tap has the root's width and is not reopened.
+#[test]
+fn a_tap_that_has_the_roots_width_after_a_widen_and_a_declaration_is_not_reopened() {
+    let mut s = session();
+    let mut tap = s.graph().taps().open_output(Samples(4096)).expect("opens");
+    s.graph().widen_outputs(4).expect("widens");
+    let _ = block(&mut s);
+    s.declare_root_topology(Some(ChannelTopology::assumed(ChannelLayout::STEREO)))
+        .expect("stereo")
+        .hard();
+    let events = reopened(block(&mut s));
+    assert!(
+        events
+            .iter()
+            .all(|(id, _)| matches!(id, RootReader::Meter(_))),
+        "no tap is reopened"
+    );
+    let (frames, ended) = drain(&mut tap);
+    assert!(!ended);
+    assert_eq!(frames.len(), 2 * BLOCK * 2);
+}
+
+/// **The converse**: the root widened to 4 and declared 4 wide leaves a 2-wide
+/// tap with the wrong width, so it is reopened at 4 although the declaration
+/// did not move the root's width.
+#[test]
+fn a_tap_narrower_than_the_declared_root_is_reopened_at_its_width() {
+    let mut s = session();
+    let old = s.graph().taps().open_output(Samples(4096)).expect("opens");
+    s.graph().widen_outputs(4).expect("widens");
+    let _ = block(&mut s);
+    let four = ChannelTopology::assumed(ChannelLayout::from_count(4));
+    s.declare_root_topology(Some(four.clone()))
+        .expect("quad")
+        .hard();
+    let mut events = reopened(block(&mut s));
+    events.retain(|(id, _)| matches!(id, RootReader::Tap(_)));
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].1, four);
+    assert_eq!(Some(events[0].0), old.id().map(RootReader::Tap));
+    assert_eq!(claim_tap(&mut s, events[0].0).width(), 4);
 }

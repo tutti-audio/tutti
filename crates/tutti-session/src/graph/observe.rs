@@ -15,20 +15,46 @@ use tutti_types::Samples;
 use super::Graph;
 use crate::{EventTapPort, OutPort};
 
-/// A reader the session opened again because the port it reads changed width,
-/// carried by [`SessionEvent::TapReopened`](crate::SessionEvent::TapReopened).
+/// What a reader of the root is named by: the id of the tap or of the meter.
+/// The reader a reopen opens takes the id of the one it supersedes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[non_exhaustive]
+pub enum RootReader {
+    /// A tap on the root ([`Taps::open_output`]).
+    Tap(TapId),
+    /// The master meter.
+    Meter(MeterId),
+}
+
+/// A reader the session opened again because the root's width changed, claimed
+/// with [`Session::take_reopened`](crate::Session::take_reopened) after
+/// [`SessionEvent::RootReaderReopened`](crate::SessionEvent::RootReaderReopened).
 ///
 /// The reader it supersedes reads closed: a tap's old reader reads the frames
 /// its rings hold and then answers [`Pull::Ended`](tutti_buffers::Pull::Ended);
 /// a meter's old reader reads [`is_closed`](MeterReader::is_closed) once the
-/// plan that ran it is retired. The new reader keeps the id of the old.
+/// plan that ran it is retired.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Reopened {
-    /// A tap on the root ([`Taps::open_output`]), as wide as the root now.
+    /// A tap on the root, as wide as the root.
     Tap(TapReader),
-    /// The master meter, measuring the root as wide as it is now. It is on.
+    /// The master meter, measuring the root as wide as it is. It is on.
     Meter(MeterReader),
+}
+
+/// No reopened reader is held under the id: it was never reopened, or was
+/// claimed already.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("no reopened reader is held under {0:?}")]
+pub struct NotReopened(pub RootReader);
+
+/// A reopened reader the graph holds, and whether its event was sent.
+#[derive(Debug)]
+pub(super) struct Held {
+    reader: Reopened,
+    topology: tutti_types::ChannelTopology,
+    announced: bool,
 }
 
 /// The taps of a [`Graph`]: copies of its audio and of one event port, read
@@ -121,15 +147,19 @@ impl Taps<'_> {
     /// output count when it was opened, and a later
     /// [`widen_outputs`](Graph::widen_outputs) does not widen it.
     ///
-    /// **A declared root of another width reopens it**
-    /// ([`Session::declare_root_topology`](crate::Session::declare_root_topology)):
-    /// the session opens the tap again at the root's new width and reports it
-    /// as [`SessionEvent::TapReopened`](crate::SessionEvent::TapReopened). The
-    /// new reader is fed from the first block of the plan that carries the
-    /// change, and never reads the old root's channels. This reader reads what
-    /// its rings hold, none of it counted lost, and then ends
-    /// ([`Pull::Ended`](tutti_buffers::Pull::Ended)), so no reader takes twelve
-    /// channels for two. A declaration that keeps the width leaves it open.
+    /// **A widen leaves the tap at its width, a declared root reopens it when
+    /// the widths differ.** A declaration
+    /// ([`Session::declare_root_topology`](crate::Session::declare_root_topology))
+    /// that leaves the root a width other than the tap's opens the tap again at
+    /// the root's, and the session reports it as
+    /// [`SessionEvent::RootReaderReopened`](crate::SessionEvent::RootReaderReopened);
+    /// [`Session::take_reopened`](crate::Session::take_reopened) claims the new
+    /// reader. A declaration that leaves the root the tap's width leaves the tap
+    /// open, however the root got there. The new reader is fed from the first
+    /// block of the plan that carries the change and never reads the old root's
+    /// channels. The old reader reads what its rings hold, none of it counted
+    /// lost, and then ends ([`Pull::Ended`](tutti_buffers::Pull::Ended)), so no
+    /// reader takes twelve channels for two.
     ///
     /// This is the signal the graph produces, before the engine's declick
     /// fader and the fold to the device's width; see [`open`](Self::open)
@@ -148,7 +178,7 @@ impl Taps<'_> {
         let id = TapId::mint(&self.graph.ids);
         let width = self.graph.outputs();
         let reader = self.graph.editor.open_output_tap(id, width, capacity)?;
-        self.graph.output_taps.insert(id, capacity);
+        self.graph.output_taps.insert(id, (capacity, width));
         self.graph.edited = true;
         Ok(reader)
     }
@@ -395,7 +425,8 @@ impl<'g> Meters<'g> {
     /// **A declared root of another width replaces it**
     /// ([`Session::declare_root_topology`](crate::Session::declare_root_topology)):
     /// the one the graph holds is swapped in place, and one a host took is
-    /// reported as [`SessionEvent::TapReopened`](crate::SessionEvent::TapReopened)
+    /// announced by [`SessionEvent::RootReaderReopened`](crate::SessionEvent::RootReaderReopened),
+    /// claimed with [`Session::take_reopened`](crate::Session::take_reopened),
     /// and reads closed ([`is_closed`](MeterReader::is_closed)).
     pub fn master(self) -> Option<&'g mut MeterReader> {
         self.graph.master_meter.as_mut()
@@ -410,58 +441,90 @@ impl<'g> Meters<'g> {
 }
 
 impl Graph {
-    /// Opens again every reader of the root, as wide as the root is now: the
-    /// taps [`Taps::open_output`] made and the master meter. Called when the
-    /// root's width changed; a reader of a port whose width did not change is
-    /// not touched.
+    /// Opens again each reader of the root whose width is not the root's now.
+    /// A tap is reopened when its own width differs from the root's, whatever
+    /// moved the root; the master meter follows the root's width as it widens,
+    /// so it is reopened when `resized`, the declaration having changed the
+    /// root's width. No reader keeps a width the root no longer has.
     ///
     /// The new reader takes the old one's id, so the commit that carries the
     /// change swaps the executor's writer for the new one at that block, and
     /// the old reader ends once that commit is applied
-    /// (`Editor::open_output_tap`). The master meter held by the graph is
-    /// replaced in place; one a host took is reported.
-    pub(super) fn reopen_root_readers(&mut self) {
+    /// (`Editor::reopen_output_tap`). The master meter held by the graph is
+    /// replaced in place; one a host took is held under its id to be claimed.
+    pub(super) fn reopen_root_readers(&mut self, resized: bool) {
         let width = self.outputs();
         let topology = self.root_in_force();
-        let taps: Vec<(TapId, Samples)> = self.output_taps.iter().map(|(&i, &c)| (i, c)).collect();
-        for (id, capacity) in taps {
-            match self.editor.open_output_tap(id, width, capacity) {
-                Ok(reader) => self.report_reopened(Reopened::Tap(reader), &topology),
-                // An output names a source that is gone: nothing reads it.
+        let stale: Vec<(TapId, Samples)> = self
+            .output_taps
+            .iter()
+            .filter(|&(_, &(_, w))| w != width)
+            .map(|(&id, &(capacity, _))| (id, capacity))
+            .collect();
+        for (id, capacity) in stale {
+            match self.editor.reopen_output_tap(id, width, capacity) {
+                Ok(reader) => {
+                    self.output_taps.insert(id, (capacity, width));
+                    self.hold(RootReader::Tap(id), Reopened::Tap(reader), &topology);
+                }
+                // Closed since: no reader is left to end.
                 Err(_) => {
                     self.output_taps.remove(&id);
                 }
             }
         }
         let id = self.master_meter_id;
-        if self.editor.spec().topology.meters.contains_key(&id)
-            && let Ok(reader) = self.editor.open_meter(id, MeterSpec::Outputs)
-        {
+        if resized && self.editor.spec().topology.meters.contains_key(&id) {
+            let reader = self
+                .editor
+                .open_meter(id, MeterSpec::Outputs)
+                .expect("the outputs meter names no source");
             reader.enable();
             if self.master_meter.is_some() {
                 self.master_meter = Some(reader);
             } else {
-                self.report_reopened(Reopened::Meter(reader), &topology);
+                self.hold(RootReader::Meter(id), Reopened::Meter(reader), &topology);
             }
         }
     }
 
-    /// Holds `reader` for the next report, in place of one for the same id
-    /// that was never reported (its commit has not been sent, so nobody read
-    /// it).
-    fn report_reopened(&mut self, reader: Reopened, topology: &tutti_types::ChannelTopology) {
-        let same = |a: &Reopened| match (a, &reader) {
-            (Reopened::Tap(a), Reopened::Tap(b)) => a.id() == b.id(),
-            (Reopened::Meter(a), Reopened::Meter(b)) => a.id() == b.id(),
-            _ => false,
-        };
-        self.reopened.retain(|(held, _)| !same(held));
-        self.reopened.push((reader, topology.clone()));
+    /// Holds `reader` under `id` to be claimed, in place of one held for `id`
+    /// and not claimed: that one is dropped, and the editor ended it when this
+    /// one replaced it.
+    fn hold(&mut self, id: RootReader, reader: Reopened, topology: &tutti_types::ChannelTopology) {
+        self.reopened.insert(
+            id,
+            Held {
+                reader,
+                topology: topology.clone(),
+                announced: false,
+            },
+        );
     }
 
-    /// The readers opened again since the last call, each with the root's
-    /// topology it was opened for.
-    pub(crate) fn take_reopened(&mut self) -> Vec<(Reopened, tutti_types::ChannelTopology)> {
-        std::mem::take(&mut self.reopened)
+    /// The ids reopened since the last call, each with the root's topology it
+    /// was opened for, once each until the reader under it is replaced.
+    pub(crate) fn announce_reopened(&mut self) -> Vec<(RootReader, tutti_types::ChannelTopology)> {
+        self.reopened
+            .iter_mut()
+            .filter(|(_, held)| !held.announced)
+            .map(|(&id, held)| {
+                held.announced = true;
+                (id, held.topology.clone())
+            })
+            .collect()
+    }
+
+    /// Claims the reader reopened under `id`: it is held until then, whether
+    /// or not the event was read.
+    ///
+    /// # Errors
+    ///
+    /// [`NotReopened`] when none is held under `id`.
+    pub fn take_reopened(&mut self, id: RootReader) -> Result<Reopened, NotReopened> {
+        self.reopened
+            .remove(&id)
+            .map(|held| held.reader)
+            .ok_or(NotReopened(id))
     }
 }

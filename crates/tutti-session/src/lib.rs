@@ -153,7 +153,7 @@ pub use graph::RenderWorkerStart;
 pub use graph::{AudioSide, Testing};
 pub use graph::{
     Committed, Crossfade, CrossfadeId, CrossfadeRefused, Feeder, Graph, LIVE_MAX_BLOCK, Meters,
-    Reopened, ReplaceRefused, Taps,
+    NotReopened, Reopened, ReplaceRefused, RootReader, Taps,
 };
 #[cfg(all(feature = "device", feature = "audio-io"))]
 pub use input::{Input, InputConfig, InputOpener, OpenedInput, Trim};

@@ -70,7 +70,7 @@ mod observe;
 #[cfg(feature = "testing")]
 mod testing;
 
-pub use observe::{Meters, Reopened, Taps};
+pub use observe::{Meters, NotReopened, Reopened, RootReader, Taps};
 #[cfg(feature = "testing")]
 pub use testing::{AudioSide, Testing};
 
@@ -332,14 +332,12 @@ pub struct Graph {
     master_meter: Option<MeterReader>,
     /// The master meter's id: the one meter that reads the root.
     master_meter_id: MeterId,
-    /// Each open tap on the root ([`Taps::open_output`]) with its capacity,
-    /// so a change of the root's width ([`Session::declare_root_topology`](crate::Session::declare_root_topology))
-    /// can open it again.
-    output_taps: BTreeMap<TapId, Samples>,
-    /// The readers the root's last width change opened again, held until the
-    /// session's next commit phase reports them
-    /// ([`SessionEvent::TapReopened`](crate::SessionEvent::TapReopened)).
-    reopened: Vec<(Reopened, tutti_types::ChannelTopology)>,
+    /// Each open tap on the root ([`Taps::open_output`]) with its capacity and
+    /// the width its reader has, so a root of another width opens it again.
+    output_taps: BTreeMap<TapId, (Samples, usize)>,
+    /// The readers the root's width opened again, each held under its id until
+    /// claimed ([`Graph::take_reopened`]).
+    reopened: BTreeMap<RootReader, observe::Held>,
     /// Crossfades refused `Busy`, in request order.
     parked: VecDeque<Parked>,
     /// The nodes [`remove`](Self::remove) took out since the session last
@@ -505,7 +503,7 @@ impl Graph {
             master_meter: Some(master_meter),
             master_meter_id,
             output_taps: BTreeMap::new(),
-            reopened: Vec::new(),
+            reopened: BTreeMap::new(),
             parked: VecDeque::new(),
             removed: Vec::new(),
             root: None,
@@ -3180,13 +3178,15 @@ impl Graph {
         }
         self.root = root;
         self.widen_refusal = None;
+        let mut resized = false;
         let outputs = &mut self.editor.spec_mut().topology.outputs;
         if outputs.len() != width {
             outputs.resize(width, Vec::new());
             self.drop_stale_gains();
             self.edited = true;
-            self.reopen_root_readers();
+            resized = true;
         }
+        self.reopen_root_readers(resized);
         Ok(())
     }
 
