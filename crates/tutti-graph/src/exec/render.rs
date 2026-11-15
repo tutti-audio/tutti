@@ -1,5 +1,7 @@
 //! Rendering a block: the serial and parallel paths over a plan's ops.
 
+use std::sync::atomic::Ordering;
+
 use tutti_rt::RingWriter;
 use tutti_rt::{RtScope, with_no_denormals};
 use tutti_types::Samples;
@@ -218,6 +220,9 @@ impl Executor {
                 parked: _,
                 chase: _,
                 pool,
+                pool_participants: _,
+                rendered,
+                stash: _,
             } = self;
             let mut env = Env {
                 frame: *frame,
@@ -529,6 +534,7 @@ impl Executor {
                 end_fades(plan, store, fade_back, inject, has_inject);
             }
             *frame += Samples(frames);
+            rendered.fetch_add(1, Ordering::Release);
         });
     }
 }

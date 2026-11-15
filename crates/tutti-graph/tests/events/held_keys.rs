@@ -1349,6 +1349,150 @@ fn cutting_an_edge_around_a_promotion_closes_once() {
     );
 }
 
+/// Plays the 2048 keys of 16 channels, and a sustain pedal, through a source
+/// into `sinks`.
+fn full_keyboard(r: &mut Rig) {
+    r.block();
+    r.send(m1_controller(CCNumber::SUSTAIN, 127));
+    r.block();
+    for channel in 0..16u8 {
+        for half in 0..4u8 {
+            for note in 0..32u8 {
+                r.send(m1_on(channel, half * 32 + note));
+            }
+            r.block();
+        }
+    }
+}
+
+/// The note-off keys a sink was sent, in order, and what came first among
+/// its closes.
+fn closes(words: &[Words]) -> (Vec<(u8, u8)>, Option<Words>) {
+    let first = words
+        .iter()
+        .find(|w| (w[0] >> 20) & 0xf == 0x8 || **w == m1_controller(CCNumber::SUSTAIN, 0))
+        .copied();
+    let keys = words
+        .iter()
+        .filter(|w| (w[0] >> 20) & 0xf == 0x8)
+        .map(|w| (((w[0] >> 16) & 0xf) as u8, ((w[0] >> 8) & 0x7f) as u8))
+        .collect();
+    (keys, first)
+}
+
+/// Every key of the keyboard, once.
+fn every_key_once(keys: &[(u8, u8)]) -> bool {
+    let distinct: std::collections::BTreeSet<_> = keys.iter().copied().collect();
+    keys.len() == 2048
+        && distinct.len() == 2048
+        && (0..16).all(|c| (0..128).all(|n| distinct.contains(&(c, n))))
+}
+
+/// A source holds the keys of 16 channels, 2048 in all, and a sustain pedal,
+/// far more than one block of the sink takes: cutting its edge closes every
+/// key at the sink, over as many blocks as it takes, the pedal up first, and
+/// none is left sounding.
+#[test]
+fn cutting_an_edge_closes_every_key_of_a_full_keyboard_over_blocks() {
+    for mode in MODES {
+        let mut r = Rig::new(mode, &[2]);
+        r.wire(&[(1, 2)]);
+        full_keyboard(&mut r);
+        r.wire(&[]);
+        for _ in 0..200 {
+            r.block();
+        }
+        let (keys, first) = closes(&r.words(2));
+        assert!(every_key_once(&keys), "{mode:?}: every key is closed, once");
+        assert_eq!(
+            first,
+            Some(m1_controller(CCNumber::SUSTAIN, 0)),
+            "{mode:?}: the pedal goes up first"
+        );
+    }
+}
+
+/// Two commits cut two edges with no block between: what the first owed
+/// still moves to the next, and each sink closes every key once, the pedal
+/// up first. The serial and the parallel executor send the same stream, bit
+/// for bit.
+#[test]
+fn closes_owed_across_two_commits_with_no_block_between_reach_every_sink() {
+    let run = |mode: Mode| {
+        let mut r = Rig::new(mode, &[2, 3]);
+        r.wire(&[(1, 2), (1, 3)]);
+        full_keyboard(&mut r);
+        r.wire(&[(1, 3)]);
+        r.wire(&[]);
+        for _ in 0..200 {
+            r.block();
+        }
+        // What each sink was sent, with the frame it came on.
+        let mut by_sink = Vec::new();
+        for sink in [2, 3] {
+            let (keys, first) = closes(&r.words(sink));
+            assert!(
+                every_key_once(&keys),
+                "{mode:?}: sink {sink} closes every key, once"
+            );
+            assert_eq!(first, Some(m1_controller(CCNumber::SUSTAIN, 0)));
+            by_sink.push(r.got(sink));
+        }
+        by_sink
+    };
+    assert_eq!(run(Mode::Serial), run(Mode::Parallel));
+}
+
+/// A held source replaced hard behind an event delay: the close travels the
+/// delay, behind what is in flight, and every key of it is closed.
+#[test]
+fn a_replaced_source_behind_a_delay_closes_every_key() {
+    for mode in MODES {
+        let mut r = Rig::with_lag(mode, &[2], true);
+        r.wire(&[(1, 2)]);
+        r.block();
+        for note in 0..20u8 {
+            r.send(m1_on(0, note));
+        }
+        r.block();
+        r.replace_source();
+        for _ in 0..40 {
+            r.block();
+        }
+        let offs = r
+            .words(2)
+            .iter()
+            .filter(|w| (w[0] >> 20) & 0xf == 0x8)
+            .count();
+        assert_eq!(
+            offs, 20,
+            "{mode:?}: every held key is closed through the delay"
+        );
+    }
+}
+
+/// A held set larger than the delay's FIFO holds: the closes the queue has no
+/// room for stay owed and pour in as room frees, so every key is closed
+/// (executors only: the reference closes all at once).
+#[test]
+fn a_replaced_source_behind_a_delay_closes_a_set_larger_than_the_fifo() {
+    let run = |mode: Mode| {
+        let mut r = Rig::with_lag(mode, &[2], true);
+        r.wire(&[(1, 2)]);
+        full_keyboard(&mut r);
+        r.replace_source();
+        for _ in 0..300 {
+            r.block();
+        }
+        let (keys, first) = closes(&r.words(2));
+        assert!(every_key_once(&keys), "{mode:?}: every key closed, once");
+        assert_eq!(first, Some(m1_controller(CCNumber::SUSTAIN, 0)));
+        assert_eq!(r.exec.as_ref().unwrap().dropped_event_count(), 0);
+        r.got(2)
+    };
+    assert_eq!(run(Mode::Serial), run(Mode::Parallel));
+}
+
 /// The resume commit of a re-prepare replaces the held source: the old
 /// unit's tables are closed, not handed to the new one.
 #[test]
@@ -1406,10 +1550,11 @@ fn a_replaced_sink_is_not_sent_a_close() {
     assert!(r.words(22).is_empty(), "the new sink hears nothing");
 }
 
-/// The closes owed on a delayed edge past what its FIFO holds are counted as
-/// lost, not dropped silently.
+/// More held keys than the FIFO of a delayed edge can queue: the closes it has
+/// no room for stay owed and pour in as room frees, so none is lost and every
+/// key is closed.
 #[test]
-fn closes_the_delay_cannot_hold_are_counted() {
+fn closes_the_delay_cannot_hold_stay_owed_until_it_can() {
     let mut r = Rig::with_lag(Mode::Serial, &[2], true);
     r.wire(&[(1, 2)]);
     // Distinct held keys, a block's worth at a time, more than the FIFO of
@@ -1421,14 +1566,76 @@ fn closes_the_delay_cannot_hold_are_counted() {
         }
         r.block();
     }
-    let before = r.exec.as_ref().unwrap().lost_event_count();
-    assert_eq!(before, 0, "no event was lost before the replace");
+    assert_eq!(r.exec.as_ref().unwrap().lost_event_count(), 0);
     r.replace_source();
-    r.block();
-    r.block();
-    r.block();
-    let lost = r.exec.as_ref().unwrap().lost_event_count();
-    assert!(lost > 0, "the closes the FIFO could not hold are counted");
+    for _ in 0..60 {
+        r.block();
+    }
+    assert_eq!(
+        r.exec.as_ref().unwrap().lost_event_count(),
+        0,
+        "nothing the FIFO could not hold is lost"
+    );
+    let offs: std::collections::BTreeSet<(u32, u32)> = r
+        .words(2)
+        .iter()
+        .filter(|w| (w[0] >> 20) & 0xf == 0x8)
+        .map(|w| ((w[0] >> 16) & 0xf, (w[0] >> 8) & 0x7f))
+        .collect();
+    assert_eq!(offs.len(), 512, "every held key is closed, once");
+    assert!(
+        (0..8).all(|c| (0..64).all(|n| offs.contains(&(c, n)))),
+        "and they are the keys that were held"
+    );
+}
+
+/// A set larger than the delay's FIFO drains over many blocks while the
+/// replacement source plays a note of its own and ends it: the owed closes
+/// never use the FIFO's note-off reserve nor take the room of the source's
+/// block, so the live note and its note off both reach the sink, in order, and
+/// every owed key still closes once.
+#[test]
+fn a_live_note_during_a_long_drain_is_neither_refused_nor_left_sounding() {
+    let run = |mode: Mode| {
+        let mut r = Rig::with_lag(mode, &[2], true);
+        r.wire(&[(1, 2)]);
+        full_keyboard(&mut r);
+        r.replace_source();
+        r.block();
+        r.send(m2_on(0, 0));
+        r.block();
+        for _ in 0..3 {
+            r.block();
+        }
+        r.send(m2_off(0, 0));
+        for _ in 0..300 {
+            r.block();
+        }
+        assert_eq!(
+            r.exec.as_ref().unwrap().dropped_event_count(),
+            0,
+            "{mode:?}: nothing live was refused"
+        );
+        let words = r.words(2);
+        let live: Vec<usize> = [m2_on(0, 0), m2_off(0, 0)]
+            .iter()
+            .map(|w| {
+                words
+                    .iter()
+                    .position(|x| x == w)
+                    .unwrap_or_else(|| panic!("{mode:?}: the live note's {w:?} never arrived"))
+            })
+            .collect();
+        assert!(live[0] < live[1], "{mode:?}: on, then off");
+        let m1: Vec<Words> = words.into_iter().filter(|w| w[0] >> 28 == 2).collect();
+        let (keys, _) = closes(&m1);
+        assert!(
+            every_key_once(&keys),
+            "{mode:?}: every owed key closed once"
+        );
+        r.got(2)
+    };
+    assert_eq!(run(Mode::Serial), run(Mode::Parallel));
 }
 
 /// A source that declares no note events keeps no table and closes nothing.
