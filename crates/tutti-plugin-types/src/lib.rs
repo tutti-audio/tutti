@@ -168,6 +168,7 @@
 // One `unsafe` item: `WindowHandle::from_u64`, the constructor whose caller
 // vouches for a window's bare platform number.
 #![deny(unsafe_code)]
+#![deny(clippy::undocumented_unsafe_blocks, clippy::missing_safety_doc)]
 
 mod any_thread;
 mod automation;
