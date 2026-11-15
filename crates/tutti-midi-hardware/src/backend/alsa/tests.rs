@@ -1151,7 +1151,7 @@ fn a_device_on_the_sequencer_is_negotiated_through_the_pump_and_the_output() {
             }
         })
     };
-    session
+    let _ = session
         .connect_input(&id, crate::InputTiming::Arrival)
         .unwrap();
     let deadline = Instant::now() + PATIENCE;

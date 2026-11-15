@@ -6,7 +6,6 @@
 //! block begins and its frame) and renders blocks as real time passes, logging
 //! what the inlets emit.
 
-use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tutti_types::MaxBlock;
@@ -125,7 +124,7 @@ impl Listener {
                 port: 0,
             })]);
         if ingest {
-            editor.insert(INGEST, "ingest", MidiIngestNode::new(NonZeroUsize::MIN));
+            editor.insert(INGEST, "ingest", MidiIngestNode::new());
             for port in 0..ports as u16 {
                 editor.spec_mut().connect_events(
                     EventIn { node: SINK, port },

@@ -89,7 +89,8 @@ fn txjr_is_asked_for_only_by_an_input_opened_for_jr() {
             PortDirection::Duplex,
             offering_both(),
         );
-        wire.session
+        let _ = wire
+            .session
             .connect_input(&wire.id.clone(), timing)
             .unwrap();
         let mut asked = Vec::new();
@@ -233,7 +234,8 @@ fn changing_an_open_inputs_timing_keeps_its_queued_events() {
         );
     }
     let id = wire.id.clone();
-    wire.session
+    let _ = wire
+        .session
         .connect_input(&id, InputTiming::JitterReduction)
         .unwrap();
     assert_eq!(wire.counters.opens(), 1, "the port is not reopened");

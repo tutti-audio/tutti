@@ -70,6 +70,10 @@ struct FakeDevices {
     outputs: Vec<EndpointInfo>,
     /// Whether opening an output fails, as one held by another app does.
     refuse_outputs: bool,
+    /// Whether opening an input fails.
+    refuse_inputs: bool,
+    /// The inputs whose reader has ended on an error: open, and silent.
+    dead_inputs: Vec<EndpointId>,
     watches: Vec<(u64, Sender<Delivery>)>,
     next_watch: u64,
 }
@@ -231,6 +235,19 @@ impl FakeCounters {
         self.devices().refuse_outputs = refuse;
     }
 
+    /// Makes every later input open fail (or succeed again); the listed devices
+    /// stay as they are.
+    pub fn refuse_input_opens(&self, refuse: bool) {
+        self.devices().refuse_inputs = refuse;
+    }
+
+    /// Ends the reader of the open input of device `id` on an error, as a
+    /// backend's does: the connection is still held and the device still listed,
+    /// and [`InputConnection::is_alive`] reads `false` until it is opened again.
+    pub fn kill_input_reader(&self, id: EndpointId) {
+        self.devices().dead_inputs.push(id);
+    }
+
     /// Unplugs the device with `id` from both lists and tells every running
     /// watch, returning once each has reported it. A held connection to it stays open, as an OS leaves one.
     pub fn unplug(&self, id: EndpointId) {
@@ -277,10 +294,20 @@ impl Drop for Running {
 /// An open input: its producer is the fake device's, and goes with it.
 struct FakeConn {
     producers: Producers,
+    devices: Arc<Mutex<FakeDevices>>,
     id: EndpointId,
 }
 
-impl InputConnection for FakeConn {}
+impl InputConnection for FakeConn {
+    fn is_alive(&self) -> bool {
+        !self
+            .devices
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .dead_inputs
+            .contains(&self.id)
+    }
+}
 
 impl Drop for FakeConn {
     fn drop(&mut self) {
@@ -464,8 +491,16 @@ impl MidiEndpoints for FakeBackend {
         id: EndpointId,
         producer: InputProducerHandle,
     ) -> Result<Box<dyn InputConnection>> {
-        if !self.devices().inputs.iter().any(|e| e.id == id) {
-            return Err(Error::device("no such input"));
+        {
+            let mut devices = self.devices();
+            if devices.refuse_inputs {
+                return Err(Error::device("input in use"));
+            }
+            if !devices.inputs.iter().any(|e| e.id == id) {
+                return Err(Error::device("no such input"));
+            }
+            // A new connection has a reader of its own.
+            devices.dead_inputs.retain(|dead| *dead != id);
         }
         self.opens.fetch_add(1, Ordering::SeqCst);
         self.producers
@@ -474,6 +509,7 @@ impl MidiEndpoints for FakeBackend {
             .push((id, producer));
         Ok(Box::new(FakeConn {
             producers: Arc::clone(&self.producers),
+            devices: Arc::clone(&self.devices),
             id,
         }))
     }

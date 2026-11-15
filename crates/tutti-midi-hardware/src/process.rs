@@ -70,6 +70,38 @@ pub struct ReportAsk {
     pub(crate) request: ReportRequest,
 }
 
+impl ReportAsk {
+    /// The input device the request was made from.
+    #[must_use]
+    pub const fn device(&self) -> &DeviceId {
+        &self.peer.device
+    }
+
+    /// The peer the request is for.
+    #[must_use]
+    pub const fn peer(&self) -> crate::ci::PeerId {
+        crate::ci::PeerId {
+            group: self.peer.group,
+            muid: self.peer.muid,
+        }
+    }
+
+    /// Whether `peers`, the peers an input can ask for a report now, still hold
+    /// the request's peer.
+    ///
+    /// # Errors
+    ///
+    /// [`ReportError::NoSuchPeer`] when the peer is gone or no longer supports
+    /// MIDI Message Report.
+    pub fn check(&self, peers: &[ReportPeer]) -> Result<(), ReportError> {
+        if peers.contains(&self.peer) {
+            Ok(())
+        } else {
+            Err(ReportError::NoSuchPeer)
+        }
+    }
+}
+
 /// The peers of one input that can be asked for a report.
 pub(crate) type Snapshot = Arc<[ReportPeer]>;
 
@@ -98,6 +130,10 @@ pub enum ProcessChange {
     ReportRefused(Nak),
     /// The peer did not finish the report in time.
     ReportTimedOut,
+    /// A [`ReportAsk`] a call accepted was not queued: the peer went between the
+    /// call and the next poll. A call that is refused at once
+    /// (`ReportAsk::check`) never gets here.
+    NotQueued(ReportError),
     /// A [`ReportAsk`] was not sent: one was already waiting, or the peer has since
     /// said it does not support MIDI Message Report.
     NotSent(ProcessError),

@@ -84,25 +84,23 @@ struct Rig {
 
 impl Rig {
     /// `ports` are the inlets of the ports of `inputs` that were opened: they
-    /// are added here, each feeding the ingest node's one event input in turn.
+    /// are added here, each feeding an ingest node of its own.
     fn new(inputs: &HardwareMidiInputs, ports: Vec<EventInletNode>) -> Self {
         let inlets = inputs.inlets();
         let (mut editor, exec) = Editor::new(Prepare::new(
             SampleRate::of(RATE),
             MaxBlock::of(Samples(1024)),
         ));
-        editor.insert(
-            INGEST,
-            "in",
-            MidiIngestNode::new(std::num::NonZeroUsize::new(ports.len()).expect("a port")),
-        );
+        // An ingest node for each port, the first one's channel 0 under the tap.
         for (input, node) in ports.into_iter().enumerate() {
+            let ingest = NodeKey(INGEST.0 + 1000 * input as u64);
+            editor.insert(ingest, "in", MidiIngestNode::new());
             let key = NodeKey(100 + input as u64);
             editor.insert(key, "inlet", node);
             editor.spec_mut().connect_events(
                 EventIn {
-                    node: INGEST,
-                    port: input as u16,
+                    node: ingest,
+                    port: 0,
                 },
                 EventEdge::Direct(EventOut { node: key, port: 0 }),
             );

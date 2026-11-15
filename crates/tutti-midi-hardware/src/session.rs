@@ -172,6 +172,7 @@ impl DeviceQuery {
 
 /// What [`MidiSession::connect_input`] did.
 #[derive(Debug)]
+#[must_use = "an opened input's inlet is to be added to the graph"]
 pub enum Connected {
     /// The input was opened: the inlet node its port pushes into, for the caller
     /// to add to the graph.
