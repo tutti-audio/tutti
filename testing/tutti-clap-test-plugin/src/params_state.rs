@@ -254,6 +254,7 @@ pub unsafe fn apply_param_events(list: *const clap_input_events) {
     let (Some(size_fn), Some(get_fn)) = (unsafe { (*list).size }, unsafe { (*list).get }) else {
         return;
     };
+    ensure_values_init();
     let n = unsafe { size_fn(list) };
     for i in 0..n {
         let hdr_ptr = unsafe { get_fn(list, i) };
@@ -266,7 +267,6 @@ pub unsafe fn apply_param_events(list: *const clap_input_events) {
         }
         let pv = unsafe { &*(hdr_ptr as *const clap_event_param_value) };
         if let Some(idx) = index_of_id(pv.param_id) {
-            ensure_values_init();
             store_value(idx, pv.value);
         }
     }

@@ -1173,7 +1173,9 @@ impl<'a> StateView<'a> {
 
     /// Saves the plugin's state now, as a blocking round trip to it (ten
     /// seconds at worst; an in-process plugin's is run by the main thread's
-    /// next tick, see the module docs).
+    /// next tick, see the module docs). A pooled plugin's state is saved by
+    /// [`Session::save_state`], a job that lands in an update; this view goes
+    /// with `Plugin` in the plan's slice 8.
     ///
     /// # Errors
     ///
@@ -1185,7 +1187,9 @@ impl<'a> StateView<'a> {
     }
 
     /// Restores `state` into the plugin. The parameter mirror is read again by
-    /// the next `Phase::Plugins`, whatever values the state moved.
+    /// the next `Phase::Plugins`, whatever values the state moved. A pooled
+    /// plugin's state is restored by [`Session::restore_state`], a job; this
+    /// view goes with `Plugin` in the plan's slice 8.
     ///
     /// # Errors
     ///

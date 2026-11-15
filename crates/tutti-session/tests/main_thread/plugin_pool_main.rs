@@ -482,6 +482,40 @@ fn a_restore_job_applies_the_saved_state_to_a_served_plugin() {
     restore_round_trip(Hosting::OutOfProcess);
 }
 
+/// **An in-process save the main thread does not run answers `Unavailable`:**
+/// the worker waits the off-main deadline for the main thread's work, which no
+/// update runs, and the job ends as `StateJobFailed::State(Unavailable)`.
+fn an_in_process_save_the_main_thread_does_not_run_is_unavailable() {
+    let (catalog, _dir) = catalog();
+    let mut s = session();
+    s.pool(
+        s.plugin_entry("verb", &id(), &catalog)
+            .hosting(Hosting::InProcess),
+    )
+    .unwrap();
+    assert!(matches!(next_event(&mut s, "verb"), PoolEvent::Loaded));
+    let _node = s.add_pooled_plugin(&"verb").unwrap();
+    let saving = s.save_state(&"verb").expect("a node holds the plugin");
+    // No update on the main thread meanwhile, longer than the deadline.
+    thread::sleep(Duration::from_millis(2500));
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !saving.has_landed() {
+        assert!(Instant::now() < deadline, "the save never landed");
+        let _ = s.update();
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert!(
+        matches!(
+            saving.take(),
+            Some(Err(tutti_session::StateJobFailed::State(
+                tutti_plugin::error::StateError::Unavailable
+            )))
+        ),
+        "the main thread did not run it in time"
+    );
+    s.close(tutti_fixtures::main_thread());
+}
+
 pub(crate) const CASES: &[(&str, fn())] = tutti_fixtures::cases!["plugin_pool_main";
 an_in_process_plugin_lands_in_an_update_on_the_main_thread,
 an_in_process_plugin_needs_the_main_thread_and_is_refused_without_one,
@@ -492,4 +526,5 @@ an_in_process_swap_to_other_ports_fails_the_entry,
 an_in_process_swap_waits_for_the_main_thread,
 a_restore_job_applies_the_saved_state_to_an_in_process_plugin,
 a_restore_job_applies_the_saved_state_to_a_served_plugin,
+an_in_process_save_the_main_thread_does_not_run_is_unavailable,
 ];

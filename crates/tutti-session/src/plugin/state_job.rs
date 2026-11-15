@@ -2,16 +2,29 @@
 //! [`Session::restore_state`], each answering a [`PoolWait`] that lands in a
 //! later [`update`](Session::update).
 //!
-//! A save is a round trip to the plugin, so it runs on the session's spawner,
-//! as the plugin's [`AnyThread`](tutti_plugin_host) save does. A restore is
-//! the plugin's main thread's (every format's `load_state` takes the main
-//! thread's proof): it is posted to the session's main work and runs in the
-//! first `update` on the main thread, for a served plugin as for an in-process
-//! one.
+//! A save is a round trip to the plugin, so it starts on a worker of the
+//! session's spawner, which asks the plugin's
+//! [`AnyThread`](tutti_plugin_types::AnyThread) save. A served plugin answers
+//! it there. An in-process plugin's save runs on the **main thread**, through
+//! the session's main work: the worker waits for it, so the app must keep
+//! calling [`update`](Session::update) on the main thread, and a save the
+//! main thread does not run within the off-main deadline (two seconds) ends
+//! as [`StateJobFailed::State`] with [`StateError::Unavailable`], as it does
+//! when the session's main work was never run.
+//!
+//! A restore is the plugin's main thread's (every format's `load_state` takes
+//! the main thread's proof): it is posted to the session's main work and runs
+//! in the first `update` on the main thread, for a served plugin as for an
+//! in-process one.
+//!
+//! A wait lands in an `update` of its session: dropping the session ends the
+//! job and its wait never lands. A restore and a save of one plugin asked
+//! before either landed are unordered; wait for one before asking the other.
 
 use std::fmt;
 
 use tutti_plugin::error::StateError;
+use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::PluginRefresh;
 
 use super::entry::PluginEntry;
@@ -49,8 +62,12 @@ pub enum StateJobFailed {
 
 impl<C: crate::Clock> Session<C> {
     /// Saves the state of the plugin in the node over the entry under `key`.
-    /// The round trip runs on the session's spawner; the state lands in a
-    /// later [`update`](Self::update).
+    /// The round trip starts on the session's spawner and the state lands in a
+    /// later [`update`](Self::update). An in-process plugin saves on the main
+    /// thread, through the session's main work: keep calling `update` there,
+    /// or the save ends as [`StateJobFailed::State`] with
+    /// [`StateError::Unavailable`] after the off-main deadline (two seconds).
+    /// The wait never lands once the session is dropped.
     ///
     /// # Errors
     ///
@@ -81,9 +98,10 @@ impl<C: crate::Clock> Session<C> {
     /// Restores `state` into the plugin in the node over the entry under
     /// `key`, in the first [`update`](Self::update) on the main thread: the
     /// outcome lands there, and the parameter mirror is read again by the
-    /// next plugin phase when it was applied. Restoring in the same update
-    /// as a save of the same plugin is unordered; wait for one before asking
-    /// the other.
+    /// next plugin phase when it was applied. A restore and a save of the same
+    /// plugin asked before either landed are unordered; wait for one before
+    /// asking the other. The wait never lands once the session is dropped, or
+    /// when no update runs on the main thread.
     ///
     /// # Errors
     ///
@@ -118,12 +136,15 @@ impl<C: crate::Clock> Session<C> {
     fn state_parts<K>(
         &self,
         key: &K,
-    ) -> Result<(tutti_plugin_host::PluginHandle, PluginRef, super::Notices), StateJobError<K>>
+    ) -> Result<(PluginHandle, PluginRef, super::Notices), StateJobError<K>>
     where
         K: Ord + Clone + fmt::Debug + Send + Sync + 'static,
     {
         self.pool.loaded::<K, PluginEntry>(key)?;
         let pool_key = PoolKey::new(key);
+        // At most one node links a key: `add_pooled_plugin` refuses a key a
+        // node already holds (`AddPluginError::Installed`) and a swap keeps
+        // the node it replaces, so the first match is the only one.
         let hosted = self
             .graph
             .plugins

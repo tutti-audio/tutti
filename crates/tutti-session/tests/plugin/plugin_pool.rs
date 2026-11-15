@@ -17,7 +17,7 @@ use tutti_plugin_types::{PluginFailure, TerminationReason};
 use tutti_session::{
     AddPluginError, CrossfadeRefused, DetachedSession, HandleError, LoadError, Peer, PluginCause,
     PluginHealth, PoolEvent, PoolState, Presence, RecoveryPolicy, Resource, RetryError, Session,
-    SessionEvent, StateJobError,
+    SessionEvent, StateJobError, StateJobFailed,
 };
 use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples, Tail};
 
@@ -506,6 +506,10 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
         PluginState::new(PluginRef::from(&entry), Vec::new())
     };
     assert!(matches!(
+        s.restore_state(&"idle", foreign.clone()),
+        Err(StateJobError::NoNode("idle"))
+    ));
+    assert!(matches!(
         s.restore_state(&"a", foreign),
         Err(StateJobError::OtherPlugin(StateError::OtherPlugin { .. }))
     ));
@@ -543,6 +547,31 @@ fn a_state_job_saves_what_the_plugin_holds_and_refuses_by_name() {
     assert!(
         (read.get() - set.get()).abs() < 1e-6,
         "the saved value, not the default: {read:?}"
+    );
+}
+
+/// **A save of a plugin whose server was terminated lands the plugin's
+/// refusal, not a state:** the job ends as `StateJobFailed::State`, and no
+/// empty state is saved as the real thing.
+#[test]
+fn a_state_job_of_a_dead_plugin_lands_the_plugins_refusal() {
+    let (catalog, _dir) = catalog();
+    let mut s = session(false);
+    s.pool(s.plugin_entry("a", &first_id(), &catalog)).unwrap();
+    loaded(&mut s, "a");
+    let node = s.add_pooled_plugin(&"a").unwrap();
+    s.plugin_view(node)
+        .unwrap()
+        .diagnostics()
+        .terminate(TerminationReason::Hung {
+            blocks: 16,
+            held: Duration::from_secs(5),
+        });
+    let saving = s.save_state(&"a").expect("the node is still there");
+    settle_until(&mut s, "the save", |_| saving.has_landed());
+    assert!(
+        matches!(saving.take(), Some(Err(StateJobFailed::State(_)))),
+        "the plugin's refusal"
     );
 }
 
