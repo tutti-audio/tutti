@@ -21,6 +21,12 @@
 //! drop and the `Acquire` load order what the render did before what the
 //! clearer does after seeing zero.
 //!
+//! A guard that is leaked (`mem::forget`) keeps the count above zero for good,
+//! so `quiescent` never returns `true` again: the clearer then leaves what it
+//! would have freed allocated, which is the safe direction. The count is a
+//! `usize`, and it cannot wrap in practice: it would take more than `usize::MAX`
+//! guards held at once.
+//!
 //! The model in `tests/render_count_loom.rs` runs this code.
 
 use sync::{AtomicUsize, Ordering, fence};
@@ -53,8 +59,10 @@ impl RenderCount {
         }
     }
 
-    /// Counts a render in flight until the guard drops. Call it before the
-    /// render reads anything a [`quiescent`](Self::quiescent) caller clears.
+    /// Counts a render in flight until the guard drops (a guard that is leaked
+    /// counts forever: [`quiescent`](Self::quiescent) then stays `false`). Call
+    /// it before the render reads anything a [`quiescent`](Self::quiescent)
+    /// caller clears.
     /// Two atomic operations and a fence: never allocates, locks or waits.
     pub fn enter(&self) -> RenderGuard<'_> {
         self.in_flight.fetch_add(1, Ordering::Relaxed);

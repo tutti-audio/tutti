@@ -218,7 +218,9 @@ impl Unit {
     /// (`AudioUnitRender`, `AudioUnitProcess`, `AudioUnitProcessMultiple`) holds
     /// one across it. Two atomic operations and a fence
     /// ([`RenderCount::enter`](tutti_rt::RenderCount::enter)): no lock, so the
-    /// render thread may call it.
+    /// render thread may call it. A guard that is leaked counts forever, so
+    /// [`AuMidiOutput::withdraw`](crate::AuMidiOutput::withdraw) on this unit
+    /// always refuses and leaves the callback's state allocated.
     ///
     /// A render made through the raw handle (`as_raw` (the `testing` feature),
     /// [`RenderUnit::get`]) is not counted for its caller: it holds this guard

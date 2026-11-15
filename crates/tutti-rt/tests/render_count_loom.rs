@@ -77,7 +77,7 @@ fn a_render_after_a_quiescent_check_sees_the_cleared_slot() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected = "Causality violation")]
 fn a_clearer_that_frees_without_asking_is_a_race() {
     loom::model(|| {
         let count = Arc::new(RenderCount::new());

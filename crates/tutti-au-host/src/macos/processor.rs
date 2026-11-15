@@ -205,7 +205,8 @@ impl Drop for MidiOut {
     /// ([`AuMidiOutput::withdraw`]).
     fn drop(&mut self) {
         if let Some(registration) = self.registration.take() {
-            // Teardown: the status has nowhere to go.
+            // Teardown: a refused withdrawal is dropped here, which leaks its
+            // state on purpose (a render may still read it).
             let _ = registration.withdraw();
         }
     }

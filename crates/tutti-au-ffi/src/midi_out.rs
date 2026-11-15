@@ -393,6 +393,7 @@ impl AuMidiOutput {
     ///
     /// An AU that refuses the clearing write of a handle that is then dropped
     /// keeps the unit's claim for good, so the unit cannot register again.
+    #[must_use = "a refused withdrawal hands the registration back, with its state"]
     pub fn withdraw(mut self) -> std::result::Result<(), (Self, Error)> {
         if let Err(refused) = self.clear_callback() {
             return Err((self, refused));
