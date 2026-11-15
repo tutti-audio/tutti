@@ -66,7 +66,7 @@ mod stereo;
 pub use convert::{convert, convert_planes, deinterleave, interleave};
 pub use edge::{FiniteSource, Pull, Sink, SinkFailed, Source, Stop};
 pub use error::BufferError;
-pub use fold::{Fold, FoldEnd, FoldError};
+pub use fold::{Fold, FoldEnd, FoldError, FoldLevel, FoldLevels, FoldSpec};
 pub use i24::{I24, I24OutOfRange};
 pub use interleaved::{Frames, FramesMut, Interleaved, InterleavedMut};
 pub use mono::{Mono, MonoMut};

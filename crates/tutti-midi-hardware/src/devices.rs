@@ -18,14 +18,14 @@ use tutti_midi_device::{
     DeviceEvent, DeviceId, DeviceInfo, DeviceTable, EndpointId, OsChange, OsDevice, PortDirection,
     Resolved,
 };
-use tutti_midi_runtime::{DeviceSlot, Outgoing};
+use tutti_midi_runtime::{DeviceSlot, Outgoing, Taken};
 use tutti_ump::StreamConfig;
 
 use crate::HardwareMidiInputs;
 use crate::backend;
 use crate::capability::UmpCapability;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
-use crate::error::{Error, Result};
+use crate::error::{Error, NotFound, Result};
 use crate::wire::Wire;
 
 // Only a native backend reports through it; the stub has none.
@@ -64,7 +64,7 @@ pub enum RecvTimeoutError {
     Timeout,
     /// The watch ended and every event it reported has been taken: nothing
     /// more will arrive.
-    #[error("the MIDI device watch ended: {0}")]
+    #[error("the MIDI device watch ended")]
     Ended(#[source] WatchFailure),
 }
 
@@ -331,7 +331,7 @@ impl Devices {
     ///
     /// # Errors
     ///
-    /// [`Error::NoDevice`] when `id` is not present, [`Error::WrongDirection`]
+    /// [`Error::NotFound`] when `id` is not present, [`Error::WrongDirection`]
     /// when it is not an input, [`Error::NoFreeSlot`] when every slot is held,
     /// or the platform error from opening it. A failed open leaves no port in
     /// `ports`.
@@ -357,7 +357,7 @@ impl Devices {
     ///
     /// # Errors
     ///
-    /// [`Error::NoDevice`] when `id` is not present, [`Error::WrongDirection`]
+    /// [`Error::NotFound`] when `id` is not present, [`Error::WrongDirection`]
     /// when it is not an output, or the platform error from opening it.
     pub fn open_output(&self, id: &DeviceId) -> Result<OpenOutput> {
         let (info, handle) = self.present(id, PortDirection::is_output)?;
@@ -369,6 +369,7 @@ impl Devices {
             info,
             sink,
             wire: Wire::new(described),
+            refused: 0,
         })
     }
 
@@ -384,7 +385,7 @@ impl Devices {
             .table
             .get(id)
             .zip(state.table.handle(id))
-            .ok_or_else(|| Error::NoDevice(id.clone()))?;
+            .ok_or_else(|| NotFound::Device(id.clone()))?;
         wanted(info.direction)
             .then(|| (info.clone(), handle))
             .ok_or_else(|| Error::WrongDirection {
@@ -592,6 +593,8 @@ pub struct OpenOutput {
     info: DeviceInfo,
     sink: Box<dyn DeviceOut>,
     wire: Wire,
+    /// The packets the sink had no room for, for [`losses`](Self::losses).
+    refused: u64,
 }
 
 impl core::fmt::Debug for OpenOutput {
@@ -610,11 +613,12 @@ impl OpenOutput {
         self.sink.is_alive()
     }
 
-    /// What the output took and then could not send; see
-    /// [`DeviceOut::losses`].
+    /// What the output did not send: what the device had no room for when
+    /// [`queue`](Self::queue) offered it (refused), and what the output took
+    /// and then could not send ([`DeviceOut::losses`]).
     #[must_use]
     pub fn losses(&self) -> Losses {
-        self.sink.losses()
+        self.sink.losses() + Losses::refused(self.refused)
     }
 
     /// How many events the output has taken and not yet sent; see
@@ -662,24 +666,26 @@ impl OpenOutput {
     }
 }
 
-/// Queues `events` in the device's wire form (see the type). Returns how many
-/// of them the device took: an event that has no form on the wire (a JR
-/// Timestamp the device does not take, a per-note controller for MIDI 1.0)
-/// counts as taken, and one of several packets counts when all went.
 impl OpenOutput {
-    /// Queues `events` in the device's wire form, each to go now. Returns how
-    /// many the device took.
-    pub fn queue(&mut self, events: &[UmpAt]) -> usize {
+    /// Queues `events` in the device's wire form, each to go now, and returns
+    /// what the device [`Taken`]. An event that has no form on the wire (a JR
+    /// Timestamp the device does not take, a per-note controller for MIDI 1.0)
+    /// counts as taken. What is taken ends between two messages, so a System
+    /// Exclusive message goes whole or not at all; what is not taken is
+    /// counted in [`losses`](Self::losses). For a control thread: it allocates
+    /// the batch it converts, and never blocks.
+    pub fn queue(&mut self, events: &[UmpAt]) -> Taken {
         self.queue_timed(&Outgoing::now_batch(events))
     }
 
     /// As [`queue`](Self::queue), each packet going to the device at its
     /// [`SendAt`](tutti_midi_runtime::SendAt), which the conversion keeps with
     /// the event it came from.
-    pub fn queue_timed(&mut self, events: &[Outgoing]) -> usize {
+    pub fn queue_timed(&mut self, events: &[Outgoing]) -> Taken {
         self.wire.convert(events);
         let taken = self.sink.queue_timed(self.wire.batch());
-        self.wire.accepted(taken)
+        self.refused += taken.left_of(self.wire.batch()) as u64;
+        self.wire.accepted(taken, events)
     }
 }
 

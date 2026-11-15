@@ -5,6 +5,10 @@ use crate::{BufferError, Float, Interleaved, InterleavedMut, MonoMut, Planes, Pl
 use tutti_types::{AmbisonicNormalization, ChannelLayout, ChannelTopology, Speaker};
 
 mod ambisonic;
+mod compose;
+mod levels;
+
+pub use levels::{FoldLevel, FoldLevels, FoldSpec};
 
 /// Which end of a fold a [`FoldError`] is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -71,6 +75,12 @@ pub enum FoldError {
         src: ChannelLayout,
         /// The destination width.
         dst: ChannelLayout,
+    },
+    /// A downmix level is not a gain: NaN, infinite or negative.
+    #[error("the {level:?} level is not a gain (NaN, infinite or negative)")]
+    NotAGain {
+        /// Which level.
+        level: FoldLevel,
     },
     /// [`Fold::select`] named a channel the source does not have.
     #[error("channel {channel} is not in a {width:?} source")]
@@ -197,6 +207,37 @@ impl<F: Float> Expr<F> {
                 }
             }
         }
+    }
+}
+
+/// The `(source, gain)` pairs a row sums, unsorted, one per source.
+fn row_coefficients<F: Float>(row: &Row<F>) -> Vec<(usize, F)> {
+    let mut acc = Vec::new();
+    match row {
+        Row::One(e) => e.contribute(F::ONE, &mut acc),
+        Row::Mix { a, b, scale } => {
+            a.contribute(*scale, &mut acc);
+            b.contribute(*scale, &mut acc);
+        }
+    }
+    acc
+}
+
+/// The expression summing `gain · x[src]` for each pair, one source a term,
+/// in the order given: a lone unity pair is a copy, none is silence.
+fn expr_of_coefficients<F: Float>(pairs: Vec<(usize, F)>) -> Expr<F> {
+    match &*pairs {
+        [] => Expr::Zero,
+        [(c, g)] if *g == F::ONE => Expr::Copy(narrow(*c)),
+        _ => Expr::Sum(
+            pairs
+                .into_iter()
+                .map(|(c, gain)| Term {
+                    gain,
+                    srcs: Box::new([narrow(c)]),
+                })
+                .collect(),
+        ),
     }
 }
 
@@ -358,13 +399,49 @@ pub struct Fold<F: Float = f32> {
     rows: Box<[Row<F>]>,
 }
 
+/// What a [`Hit`] is.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    /// The same speaker on both sides (or a lone mono fan-out), not a fold.
+    Direct,
+    /// A side or rear speaker moved to its counterpart the source lacks.
+    Reposition,
+    /// A speaker the destination lacks, folded into the nearest ones.
+    Folded,
+}
+
 /// One source channel's contribution to one destination channel.
 struct Hit<F> {
     src: usize,
     dst: usize,
     gain: F,
-    /// The same speaker on both sides (or a lone mono fan-out), not a fold.
-    direct: bool,
+    kind: Kind,
+}
+
+/// The gains a fold applies where a speaker folds, as the float `F`.
+#[derive(Clone, Copy)]
+struct Gains<F> {
+    centre: F,
+    surround: F,
+    height: F,
+    lfe: Option<F>,
+}
+
+impl<F: Float> Gains<F> {
+    /// The gain a missing speaker folds at: by the class it belongs to.
+    fn of(&self, missing: Speaker) -> F {
+        use Speaker::*;
+        if is_overhead(missing) {
+            self.height
+        } else if matches!(
+            missing,
+            FrontCenter | FrontLeftOfCenter | FrontRightOfCenter
+        ) {
+            self.centre
+        } else {
+            self.surround
+        }
+    }
 }
 
 /// Where a speaker the destination lacks folds, in order of preference: the
@@ -428,7 +505,11 @@ fn narrow(i: usize) -> u16 {
 }
 
 /// Every source channel's hits into `dst`, or the first channel with none.
-fn hits<F: Float>(src: &[Speaker], dst: &[Speaker]) -> Result<Vec<Hit<F>>, FoldError> {
+fn hits<F: Float>(
+    src: &[Speaker],
+    dst: &[Speaker],
+    gains: &Gains<F>,
+) -> Result<Vec<Hit<F>>, FoldError> {
     let lone_mono = src == [Speaker::FrontCenter];
     src.iter()
         .enumerate()
@@ -438,16 +519,32 @@ fn hits<F: Float>(src: &[Speaker], dst: &[Speaker]) -> Result<Vec<Hit<F>>, FoldE
                     src: i,
                     dst: j,
                     gain: F::ONE,
-                    direct: true,
+                    kind: Kind::Direct,
                 }]);
-            }
-            if sp.is_lfe() {
-                return Ok(Vec::new());
             }
             let unplaced = FoldError::Unplaced {
                 channel: i,
                 speaker: sp,
             };
+            if sp.is_lfe() {
+                // Omitted unless the caller sends it to the front pair.
+                let Some(gain) = gains.lfe else {
+                    return Ok(Vec::new());
+                };
+                return index(dst, Speaker::FrontLeft)
+                    .zip(index(dst, Speaker::FrontRight))
+                    .map(|(l, r)| {
+                        [l, r]
+                            .map(|j| Hit {
+                                src: i,
+                                dst: j,
+                                gain,
+                                kind: Kind::Folded,
+                            })
+                            .into()
+                    })
+                    .ok_or(unplaced);
+            }
             if lone_mono {
                 return index(dst, Speaker::FrontLeft)
                     .zip(index(dst, Speaker::FrontRight))
@@ -457,7 +554,7 @@ fn hits<F: Float>(src: &[Speaker], dst: &[Speaker]) -> Result<Vec<Hit<F>>, FoldE
                                 src: i,
                                 dst: j,
                                 gain: F::ONE,
-                                direct: true,
+                                kind: Kind::Direct,
                             })
                             .into()
                     })
@@ -479,8 +576,12 @@ fn hits<F: Float>(src: &[Speaker], dst: &[Speaker]) -> Result<Vec<Hit<F>>, FoldE
                             Hit {
                                 src: i,
                                 dst: j,
-                                gain: if reposition { F::ONE } else { F::MINUS_3_DB },
-                                direct: false,
+                                gain: if reposition { F::ONE } else { gains.of(sp) },
+                                kind: if reposition {
+                                    Kind::Reposition
+                                } else {
+                                    Kind::Folded
+                                },
                             }
                         })
                         .collect()
@@ -492,30 +593,41 @@ fn hits<F: Float>(src: &[Speaker], dst: &[Speaker]) -> Result<Vec<Hit<F>>, FoldE
 }
 
 /// The expression of destination channel `j`: the direct channel, then the
-/// folded ones in source order; with overhead speakers in the source the −3 dB
-/// ones are summed first and scaled once.
+/// folded ones in source order; with overhead speakers in the source the ones
+/// that fold at one gain are summed first and scaled once.
 fn expr<F: Float>(src: &[Speaker], hits: &[Hit<F>], j: usize) -> Expr<F> {
     let mine = || hits.iter().filter(move |h| h.dst == j);
     let single = |h: &Hit<F>| Term {
         gain: h.gain,
         srcs: Box::new([narrow(h.src)]),
     };
-    let folded = || mine().filter(|h| !h.direct);
+    let folded = || mine().filter(|h| h.kind != Kind::Direct);
     let grouped = src.iter().copied().any(is_overhead);
     let (summed, apart): (Vec<&Hit<F>>, Vec<&Hit<F>>) = if grouped {
-        folded().partition(|h| h.gain == F::MINUS_3_DB)
+        folded().partition(|h| h.kind == Kind::Folded)
     } else {
         (Vec::new(), folded().collect())
     };
-    let group = (!summed.is_empty()).then(|| Term {
-        gain: F::MINUS_3_DB,
-        srcs: summed.iter().map(|h| narrow(h.src)).collect(),
-    });
+    // One group per distinct gain, in order of first appearance.
+    let mut groups: Vec<Term<F>> = Vec::new();
+    for h in summed {
+        match groups.iter_mut().find(|t| t.gain == h.gain) {
+            Some(t) => {
+                let mut srcs = t.srcs.to_vec();
+                srcs.push(narrow(h.src));
+                t.srcs = srcs.into();
+            }
+            None => groups.push(Term {
+                gain: h.gain,
+                srcs: Box::new([narrow(h.src)]),
+            }),
+        }
+    }
     let terms: Vec<Term<F>> = mine()
-        .filter(|h| h.direct)
+        .filter(|h| h.kind == Kind::Direct)
         .map(single)
         .chain(apart.into_iter().map(single))
-        .chain(group)
+        .chain(groups)
         .collect();
     match &*terms {
         [] => Expr::Zero,
@@ -533,6 +645,38 @@ impl<F: Float> Fold<F> {
     ///
     /// [`FoldError`] when a channel cannot be placed, never a silent drop.
     pub fn between(src: &ChannelTopology, dst: &ChannelTopology) -> Result<Self, FoldError> {
+        Self::spec(src, dst).build()
+    }
+
+    /// The fold from `src` into `dst` as a spec, to state other downmix levels
+    /// than the defaults ([`FoldSpec::levels`]) before it is
+    /// [`build`](FoldSpec::build)t. [`between`](Self::between) is the default
+    /// spec.
+    pub fn spec<'a>(src: &'a ChannelTopology, dst: &'a ChannelTopology) -> FoldSpec<'a, F> {
+        FoldSpec::new(src, dst)
+    }
+
+    fn build(
+        src: &ChannelTopology,
+        dst: &ChannelTopology,
+        levels: FoldLevels,
+    ) -> Result<Self, FoldError> {
+        levels.check()?;
+        // The default -3 dB is the float's own, so a `Fold<f64>` keeps the
+        // double-precision figure and not the single's widened.
+        let level = |a: tutti_types::Amplitude| {
+            if a.get().to_bits() == f32::MINUS_3_DB.to_bits() {
+                F::MINUS_3_DB
+            } else {
+                F::from_f32(a.get())
+            }
+        };
+        let gains = Gains {
+            centre: level(levels.centre),
+            surround: level(levels.surround),
+            height: level(levels.height),
+            lfe: levels.lfe.map(level),
+        };
         let (Some(s), Some(d)) = (src.positions(), dst.positions()) else {
             return Self::between_ambisonic(src, dst);
         };
@@ -552,9 +696,9 @@ impl<F: Float> Fold<F> {
                 }
             }
             if let [_] = d {
-                Self::mono(s)?
+                Self::mono(s, &gains)?
             } else {
-                Self::placed(s, d)?
+                Self::placed(s, d, &gains)?
             }
         };
         Ok(Self {
@@ -668,12 +812,12 @@ impl<F: Float> Fold<F> {
             .collect())
     }
 
-    fn placed(s: &[Speaker], d: &[Speaker]) -> Result<Box<[Row<F>]>, FoldError> {
-        let hits = hits(s, d)?;
+    fn placed(s: &[Speaker], d: &[Speaker], gains: &Gains<F>) -> Result<Box<[Row<F>]>, FoldError> {
+        let hits = hits(s, d, gains)?;
         Ok((0..d.len()).map(|j| Row::One(expr(s, &hits, j))).collect())
     }
 
-    fn mono(s: &[Speaker]) -> Result<Box<[Row<F>]>, FoldError> {
+    fn mono(s: &[Speaker], gains: &Gains<F>) -> Result<Box<[Row<F>]>, FoldError> {
         use Speaker::{FrontLeft, FrontRight};
         let row = match (s, index(s, FrontLeft), index(s, FrontRight)) {
             ([_], ..) => Row::One(Expr::Copy(0)),
@@ -684,13 +828,29 @@ impl<F: Float> Fold<F> {
             },
             _ => {
                 let pair = [FrontLeft, FrontRight];
-                let hits = hits(s, &pair)?;
+                // The LFE joins the mono channel itself, below, not the pair.
+                let pair_gains = Gains {
+                    lfe: None,
+                    ..*gains
+                };
+                let hits = hits(s, &pair, &pair_gains)?;
                 Row::Mix {
                     a: expr(s, &hits, 0),
                     b: expr(s, &hits, 1),
                     scale: F::MINUS_3_DB,
                 }
             }
+        };
+        let row = match gains.lfe {
+            // A mono destination takes the LFE at its own gain, the centre.
+            Some(g) if s.iter().any(|p| p.is_lfe()) => {
+                let mut acc = row_coefficients(&row);
+                for (c, _) in s.iter().enumerate().filter(|(_, p)| p.is_lfe()) {
+                    acc.push((c, g));
+                }
+                Row::One(expr_of_coefficients(acc))
+            }
+            _ => row,
         };
         Ok(Box::new([row]))
     }
@@ -908,14 +1068,7 @@ impl<F: Float> Fold<F> {
     /// If `dst_c` is not below the destination width.
     #[must_use]
     pub fn contributions(&self, dst_c: usize) -> Vec<(usize, F)> {
-        let mut acc = Vec::new();
-        match &self.rows[dst_c] {
-            Row::One(e) => e.contribute(F::ONE, &mut acc),
-            Row::Mix { a, b, scale } => {
-                a.contribute(*scale, &mut acc);
-                b.contribute(*scale, &mut acc);
-            }
-        }
+        let mut acc = row_coefficients(&self.rows[dst_c]);
         acc.sort_unstable_by_key(|&(src, _)| src);
         acc
     }

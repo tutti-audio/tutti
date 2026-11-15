@@ -38,10 +38,10 @@ fn open_client(spec: &VirtualSpec, blocking: Blocking) -> Result<(Client, Virtua
     let name = spec.name().as_str();
     match super::client::open(name, blocking, version_of(spec.protocol())) {
         Ok(client) => Ok((client, spec.protocol())),
-        Err(Error::Alsa {
+        Err(Error::Os(tutti_alsa_ffi::Error::Call {
             operation: SET_VERSION,
             code,
-        }) if spec.protocol() == VirtualProtocol::Midi2 => {
+        })) if spec.protocol() == VirtualProtocol::Midi2 => {
             tracing::debug!("virtual MIDI endpoint falls back to MIDI 1.0 ({code})");
             Ok((
                 super::client::open(name, blocking, UmpVersion::Midi1)?,
@@ -125,7 +125,6 @@ pub(crate) fn source(spec: &VirtualSpec) -> Result<(AlsaVirtualSource, VirtualPr
         TYPE_MIDI_GENERIC | TYPE_APPLICATION,
     )?;
     publish(&client, spec, protocol)?;
-    let port = super::output::seq_addr_byte(port, "snd_seq_create_simple_port")?;
     Ok((
         AlsaVirtualSource {
             inner: std::sync::Mutex::new((client, port)),

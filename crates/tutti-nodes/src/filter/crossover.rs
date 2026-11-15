@@ -1,17 +1,18 @@
-//! The Linkwitz-Riley crossover as a graph node: [`CrossoverNode`] is a
-//! [`FamilyNode`] over [`CrossoverFamily`]. The algorithm is `tutti-dsp`'s; this
-//! file holds the cells and how a block reads them.
+//! The Linkwitz-Riley crossover as a graph node: [`CrossoverNode`] is a [`KernelNode`] over
+//! [`CrossoverKernel`]. The algorithm is `tutti-dsp`'s ([`CrossoverBank`]); this file holds the
+//! kernel, the cells and how a block reads them.
 
+use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_dsp::{
-    CrossoverControls, CrossoverError, CrossoverFamily, CrossoverTree, MAX_SPLITS, fit_to_rate,
+    CrossoverBank, CrossoverControls, CrossoverError, CrossoverModel, MAX_SPLITS, fit_to_rate,
 };
-use tutti_types::{BusTopology, ChannelLayout, Hz, Param, SampleRate};
+use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_types::{BusTopology, ChannelLayout, Hz, MaxBlock, Param, SampleRate, Tail};
 #[cfg(test)]
 use tutti_types::{UnitAddr, UnitParam};
 
-use super::NodeRecurrence;
+use crate::kernel::{ControlLanes, Kernel, KernelNode};
 use crate::ramp::LastGood;
-use crate::reverb::FamilyNode;
 
 /// The crossover frequency cells of a node, and the last finite value each
 /// held. Used by the multiband compressor.
@@ -69,16 +70,16 @@ impl Splits {
 }
 
 /// A graph node splitting its input into bands with a Linkwitz-Riley crossover per
-/// channel: a [`FamilyNode`] over [`CrossoverFamily`].
+/// channel: a [`KernelNode`] over [`CrossoverKernel`].
 ///
 /// `channels` inputs, `bands * channels` outputs, band-major: output
 /// `band * channels + channel`. That layout is fixed, and `bands * channels`
 /// is at most the graph's 64 ports ([`CrossoverNode::new`] refuses more). The
 /// bands are not delayed and the node adds no
 /// latency; the sum of the bands has flat magnitude and the phase of the
-/// crossovers' all-pass (see [`CrossoverModel`](tutti_dsp::CrossoverModel) for why, and for
+/// crossovers' all-pass (see [`CrossoverModel`] for why, and for
 /// what "not linear-phase" means for the bands). Its tail is
-/// [`Tail::Unknown`](tutti_types::Tail::Unknown), as the other IIR filters': the
+/// [`Tail::Unknown`], as the other IIR filters': the
 /// sections ring after the input stops, and it never parks.
 ///
 /// # Params
@@ -94,7 +95,7 @@ impl Splits {
 /// port does not glide while another's cell does). The design holds each split between
 /// the one below it and about 0.499 of the rate, so a set out of order is solved with
 /// its splits no lower than the one before, and a non-finite write reads as unchanged.
-pub type CrossoverNode = FamilyNode<CrossoverFamily>;
+pub type CrossoverNode = KernelNode<CrossoverKernel>;
 
 impl CrossoverNode {
     /// A crossover over `layout` with one split at each of `frequencies`.
@@ -110,11 +111,104 @@ impl CrossoverNode {
         let controls = CrossoverControls::ordered(frequencies)?;
         let channels = usize::from(layout.count());
         let input = BusTopology::assumed(layout).ok_or(CrossoverError::Channels { channels })?;
-        let design = CrossoverFamily::new(input, frequencies.len() + 1)?;
-        if channels * design.bands() > tutti_graph::MAX_PORTS {
+        let kernel = CrossoverKernel::new(input, frequencies.len() + 1, &controls)?;
+        if channels * kernel.bands() > tutti_graph::MAX_PORTS {
             return Err(CrossoverError::Channels { channels });
         }
-        Ok(Self::live(design, controls))
+        let set = CrossoverSet {
+            splits: frequencies.len(),
+        };
+        Ok(Self::with_kernel(kernel, set, controls))
+    }
+}
+
+/// The Linkwitz-Riley crossover as a [`Kernel`]: a [`CrossoverBank`] and the model every
+/// channel is run at. A design lands whole: a blend of a split's low-pass, high-pass and
+/// all-pass is not one, so the bands would stop summing to an all-pass inside it, and a
+/// split that moves is a ramp in hertz of the controls (a cell glides), not of the
+/// coefficients.
+#[derive(Clone, Debug)]
+pub struct CrossoverKernel {
+    input: BusTopology,
+    bank: CrossoverBank,
+    model: CrossoverModel,
+    rate: SampleRate,
+}
+
+impl CrossoverKernel {
+    /// A crossover of `bands` bands on the bus `input`, each band where it is. Allocates the
+    /// state. Its model until the first retarget is `controls` at 48 kHz: an unprepared node
+    /// renders nothing, and the first block designs for the rate `prepare` was given.
+    ///
+    /// # Errors
+    ///
+    /// [`CrossoverError::Bands`] outside 2 to 6, and [`CrossoverError::Channels`] for no
+    /// channels.
+    fn new(
+        input: BusTopology,
+        bands: usize,
+        controls: &CrossoverControls,
+    ) -> Result<Self, CrossoverError> {
+        if input.layout().count() == 0 {
+            return Err(CrossoverError::Channels { channels: 0 });
+        }
+        let rate = SampleRate::SR_48K;
+        Ok(Self {
+            input,
+            bank: CrossoverBank::new(input.layout()),
+            model: CrossoverModel::designed(bands, controls, rate)?,
+            rate,
+        })
+    }
+
+    /// How many bands it makes.
+    fn bands(&self) -> usize {
+        self.model.bands()
+    }
+}
+
+impl Kernel for CrossoverKernel {
+    type Set = CrossoverSet;
+
+    const GRID: usize = 16;
+
+    fn shape(&self) -> Shape {
+        // Band-major outputs: output `band * channels + channel`.
+        let bands = u8::try_from(self.bands()).expect("a crossover has at most six bands");
+        let output = Bus::banded(self.input, BusRole::Main, bands).expect("a crossover has bands");
+        Shape::buses(
+            Buses::main(self.input),
+            Buses::NONE.with(output).expect("one bus"),
+        )
+        .with_cost(Cost::Moderate)
+    }
+
+    fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
+        self.rate = rate;
+    }
+
+    fn reset(&mut self) {
+        self.bank.reset();
+    }
+
+    fn retarget(&mut self, controls: &CrossoverControls) {
+        self.model.design_into(controls, self.rate);
+    }
+
+    fn render<S: Float>(
+        &mut self,
+        input: Planes<'_, S>,
+        _: ControlLanes<'_, S>,
+        output: PlanesMut<'_, '_, S>,
+    ) {
+        self.bank.process(&self.model, input, output);
+    }
+
+    /// An IIR's sections ring after the input stops, as long as the slowest split says,
+    /// which is too dear to find per block: unknown, so the graph's tail fold never reads
+    /// it as none.
+    fn tail(&self) -> Tail {
+        Tail::Unknown
     }
 }
 
@@ -139,16 +233,6 @@ control_set! {
     fn defaults(&self) -> CrossoverControls {
         CrossoverControls {
             frequencies: [Hz(0.0); MAX_SPLITS],
-        }
-    }
-}
-
-impl NodeRecurrence for CrossoverTree {
-    type Set = CrossoverSet;
-
-    fn set(&self, _: &CrossoverControls) -> CrossoverSet {
-        CrossoverSet {
-            splits: self.bands() - 1,
         }
     }
 }

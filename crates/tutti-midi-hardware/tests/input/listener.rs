@@ -17,6 +17,9 @@ use tutti_midi_runtime::InletChange;
 use tutti_types::{Frame, SampleRate};
 use tutti_ump::Ump;
 
+/// How long [`Listener::hear`] plays on after the events it waited for.
+const SETTLE: Duration = Duration::from_millis(100);
+
 const RATE: f64 = 44_100.0;
 const BLOCK: usize = 64;
 const SINK: NodeKey = EventRig::SINK;
@@ -103,6 +106,19 @@ impl Listener {
             self.rig.block(BLOCK);
             self.frames += BLOCK as u64;
         }
+    }
+
+    /// Plays until `count` events have arrived or `patience` has passed, then
+    /// for [`SETTLE`] more, so that an event beyond `count` is heard too, and
+    /// returns what arrived. The wait is for the events, not a span guessed to
+    /// be long enough for a loaded machine.
+    pub fn hear(&mut self, count: usize, patience: Duration) -> Vec<Ump> {
+        let end = Instant::now() + patience;
+        while self.rig.seen.lock().unwrap().len() < count && Instant::now() < end {
+            self.play();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        self.listen(SETTLE)
     }
 
     /// Plays for `span` of real time and returns what arrived.

@@ -980,6 +980,8 @@ impl<C: Clock> SessionBuilder<C> {
             clock: None,
             root_request: self.opts.root.clone(),
             root_refusal: None,
+            output_policy: crate::OutputPolicy::default(),
+            output_policy_staged: false,
             click: parts.click,
             click_settings: parts.click_settings,
             compensation: parts.compensation,

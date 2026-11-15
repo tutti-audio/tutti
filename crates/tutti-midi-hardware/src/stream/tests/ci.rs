@@ -8,7 +8,7 @@ use tutti_midi_device::{
     CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DiscoveryData,
     INQUIRY_TIMEOUT, MaxSysexSize, Muid,
 };
-use tutti_ump::{MidiGroup, MpeChannels, MpeZoneSpan, U7};
+use tutti_ump::{MidiGroup, MpeChannels, MpeOverlap, MpeZoneSpan, U7};
 
 const GROUP_0: MidiGroup = MidiGroup::of(0);
 
@@ -1341,6 +1341,54 @@ fn an_enabled_mpe_profile_is_a_zone_of_the_channels_its_report_gave() {
     );
     let _ = polled(&mut wire, 150);
     assert_eq!(zones(&wire), None, "disabled again");
+}
+
+/// M2-120 section 3.4: a zone that shares a Channel with a lower one is not a
+/// zone of the peer, and the session says so rather than leaving it out in
+/// silence: a change names the zone and why.
+#[test]
+fn an_mpe_zone_sharing_channels_with_a_lower_one_is_reported_refused() {
+    let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
+    known_profiles(&mut wire, ours, vec![], vec![ProfileId::MPE], vec![]);
+    let enable = |wire: &Wire, manager: u8, channels: u8, ms: u64| {
+        say(
+            wire,
+            GROUP_0,
+            &CiMessage::ProfileEnabled {
+                header: CiHeader {
+                    device_id: channel(manager),
+                    ..CiHeader::new(peer())
+                },
+                profile: ProfileId::MPE,
+                channels: ProfileChannels::of(channels.into()),
+            },
+            ms,
+        );
+    };
+    enable(&wire, 0, 5, 120);
+    let first = polled(&mut wire, 130);
+    let refused = |polled: &[Polled]| {
+        polled
+            .iter()
+            .filter_map(|p| match p {
+                Polled::Profile(_, _, ProfilesChange::MpeZoneRefused(overlap)) => Some(*overlap),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(refused(&first), [], "one zone is refused by none");
+    enable(&wire, 3, 4, 140);
+    let second = polled(&mut wire, 150);
+    let span = |manager: u8, channels: u8| {
+        MpeZoneSpan::new(MidiChannel::of(manager), MpeChannels::of(channels)).unwrap()
+    };
+    assert_eq!(
+        refused(&second),
+        [MpeOverlap {
+            held: span(0, 5),
+            added: span(3, 4)
+        }]
+    );
 }
 
 /// M2-120 section 3.6.3: the Channel Response Type Notification is Profile

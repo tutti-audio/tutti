@@ -194,3 +194,56 @@ fn the_tail_covers_the_measured_ring_and_the_norms_bound_the_output() {
     assert!(worst <= m.l1_norm(), "{worst} against {}", m.l1_norm());
     assert!(m.hinf_norm() <= m.l1_norm());
 }
+
+fn controls(low: f32, high: f32) -> CrossoverControls {
+    CrossoverControls {
+        frequencies: [Hz(low), Hz(high), Hz(0.0), Hz(0.0), Hz(0.0)],
+    }
+}
+
+/// A set is solved with every split inside `1 Hz..=SOLVE_CEILING * rate` and none below the
+/// one before, whatever the controls say (a NaN reads as the floor, a split out of order as
+/// the one before it).
+#[test]
+fn a_design_orders_and_caps_the_splits() {
+    let mut m = CrossoverModel::designed(3, &controls(100.0, 1_000.0), RATE).unwrap();
+    for set in [[5_000.0, 4_000.0], [30_000.0, 25_000.0], [-1.0, f32::NAN]] {
+        m.design_into(&controls(set[0], set[1]), RATE);
+        let (a, b) = (m.frequency(0).unwrap().get(), m.frequency(1).unwrap().get());
+        assert!(
+            1.0 <= a && a <= b && f64::from(b) <= SOLVE_CEILING * RATE.get(),
+            "{set:?}: {a} {b}"
+        );
+        assert_eq!(m.frequency(2), None);
+    }
+}
+
+/// A design in place is the design made whole: the same coefficients as `designed` at the
+/// new controls, whatever it held before.
+#[test]
+fn a_design_in_place_is_the_design_made_whole() {
+    let mut m = CrossoverModel::designed(3, &controls(100.0, 1_000.0), RATE).unwrap();
+    m.design_into(&controls(300.0, 4_000.0), RATE);
+    assert_eq!(
+        m,
+        CrossoverModel::designed(3, &controls(300.0, 4_000.0), RATE).unwrap()
+    );
+}
+
+/// The band count is 2 to 6.
+#[test]
+fn a_design_refuses_a_band_count_a_tree_does_not_have() {
+    let c = controls(100.0, 1_000.0);
+    for bands in [0, 1, 7] {
+        assert!(matches!(
+            CrossoverModel::designed(bands, &c, RATE),
+            Err(CrossoverError::Bands { .. })
+        ));
+    }
+    for bands in 2..=CrossoverModel::MAX_BANDS {
+        assert_eq!(
+            CrossoverModel::designed(bands, &c, RATE).unwrap().bands(),
+            bands
+        );
+    }
+}

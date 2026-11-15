@@ -65,7 +65,7 @@ impl UmpVirtualDestination {
     /// # Errors
     ///
     /// [`Error::VirtualBlocksUnsupported`] when `spec` declares blocks, and
-    /// [`Error::CoreMidi`] if CoreMIDI refuses the client or the endpoint.
+    /// [`Error::Os`](crate::Error::Os) if CoreMIDI refuses the client or the endpoint.
     pub(crate) fn open(
         spec: &VirtualSpec,
         mut producer: crate::InputProducerHandle,
@@ -91,7 +91,7 @@ impl UmpVirtualDestination {
     ///
     /// # Errors
     ///
-    /// [`Error::CoreMidi`] if CoreMIDI refuses either the client or the
+    /// [`Error::Os`](crate::Error::Os) if CoreMIDI refuses either the client or the
     /// destination endpoint.
     #[cfg(test)]
     pub(crate) fn new<F>(name: &str, protocol: VirtualProtocol, mut on_event: F) -> Result<Self>
