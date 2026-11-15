@@ -104,7 +104,12 @@ impl Chain {
 
 /// What a landed file is, for the caller: its size on disk, `0` if it cannot
 /// be stat'd.
-pub(crate) fn written(path: &Path, closed: Landed, dropped_events: u64) -> Written {
+pub(crate) fn written(
+    path: &Path,
+    closed: Landed,
+    dropped_events: u64,
+    placement: tutti_types::Placement,
+) -> Written {
     Written {
         path: path.to_path_buf(),
         bytes: std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
@@ -113,6 +118,7 @@ pub(crate) fn written(path: &Path, closed: Landed, dropped_events: u64) -> Writt
         clipped_samples: closed.clipped,
         gain: None,
         measured: None,
+        placement,
     }
 }
 

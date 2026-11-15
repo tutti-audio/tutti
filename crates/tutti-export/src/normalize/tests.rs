@@ -14,7 +14,11 @@ fn reading(lufs: f32, true_peak: f32) -> Loudness {
 #[test]
 fn peak_moves_the_true_peak_to_the_target() {
     let m = reading(-20.0, -6.0);
-    let gain = Normalize::peak(Db(-1.0)).gain_for(&m);
+    let gain = Reading::Peak {
+        measured: PeakReading::Placed(m),
+        target: Db(-1.0),
+    }
+    .gain();
     assert!(
         (gain.get() - 5.0).abs() < 1e-5,
         "−6 dBTP to a −1 dBTP target is +5 dB, got {gain:?}"
@@ -26,7 +30,12 @@ fn peak_moves_the_true_peak_to_the_target() {
 fn lufs_respects_the_true_peak_ceiling() {
     // +6 dB would put a −2 dBTP peak at +4, which is 5 dB over a −1 ceiling.
     let m = reading(-20.0, -2.0);
-    let gain = Normalize::lufs(Db(-14.0)).gain_for(&m);
+    let gain = Reading::Lufs {
+        loudness: m,
+        target: Db(-14.0),
+        ceiling: Db(-1.0),
+    }
+    .gain();
     assert!(
         (gain.get() - 1.0).abs() < 1e-5,
         "the ceiling must pull the loudness gain back, got {gain:?}"
@@ -127,7 +136,7 @@ mod measurer {
     use crate::control::{CancelToken, Progress};
     use crate::{Outcome, Rendered};
     use tutti_measure::{LoudnessConfig, measure_loudness};
-    use tutti_types::{Amplitude, Hz, Samples};
+    use tutti_types::{Amplitude, Bed, ChannelTopology, Hz, Samples};
 
     const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -150,9 +159,21 @@ mod measurer {
     ) -> Outcome<Loudness> {
         let mut control = Control::new(token).on_progress(report);
         control.weigh(Weights::Normalized);
-        Normalize::peak(Db(-1.0))
-            .measure(rendered, Samples(0), rendered.frames(), &mut control)
-            .expect("a measurable sine")
+        let outcome = Normalize::peak(Db(-1.0))
+            .measure(
+                rendered,
+                &Bed::Stereo.topology(),
+                Samples(0),
+                rendered.frames(),
+                &mut control,
+            )
+            .expect("a measurable sine");
+        match outcome {
+            Outcome::Finished(reading) => {
+                Outcome::Finished(reading.loudness().expect("stereo is placed"))
+            }
+            Outcome::Cancelled => Outcome::Cancelled,
+        }
     }
 
     /// The chunk is one second of audio, at least a frame.
@@ -195,7 +216,7 @@ mod measurer {
         );
 
         let one_shot = measure_loudness(
-            &LoudnessConfig::new(RATE, rendered.layout()),
+            &LoudnessConfig::new(RATE, Bed::Stereo.topology()).unwrap(),
             Interleaved::new(&rendered.interleaved(), rendered.layout()).unwrap(),
         )
         .expect("meterable");
@@ -217,7 +238,8 @@ mod measurer {
         let whole = measure(&rendered, &CancelToken::new(), &mut |_| {})
             .into_finished()
             .expect("not cancelled");
-        let mut fine = Measurer::new(RATE, rendered.layout()).expect("meterable");
+        let mut fine = Measurer::new(RATE, &Bed::Stereo.topology(), Normalize::peak(Db(-1.0)))
+            .expect("meterable");
         let frames = rendered.frames().get();
         let mut at = 0;
         while at < frames {
@@ -225,7 +247,7 @@ mod measurer {
             fine.feed(rendered.planes(), at..end).unwrap();
             at = end;
         }
-        let fine = fine.finish();
+        let fine = fine.finish().loudness().expect("stereo is placed");
         assert!((fine.lufs.get() - whole.lufs.get()).abs() < 0.01);
         assert!((fine.true_peak.get() - whole.true_peak.get()).abs() < 0.01);
     }
@@ -248,5 +270,48 @@ mod measurer {
         // readings that are, and the cadence delivers every 4096 frames, so a
         // chunk is one reading.
         assert_eq!(reported, 2, "two chunks were measured, then it stopped");
+    }
+
+    /// A topology of another width than the audio is a named error before any
+    /// frame is fed, not a buffer error from inside the meter.
+    #[test]
+    fn a_topology_of_another_width_is_refused_by_name() {
+        let rendered = sine(1, 0.1);
+        let err = Normalize::peak(Db(-1.0))
+            .gain_for_rendered(&rendered, &Bed::Surround51.topology())
+            .expect_err("stereo audio is not 5.1");
+        assert!(
+            matches!(
+                err,
+                crate::Error::TopologyWidth { topology, rendered: r }
+                    if topology == Bed::Surround51.width() && r == rendered.layout()
+            ),
+            "{err:?}"
+        );
+    }
+
+    /// Lufs needs the placement and says so; a peak does not.
+    #[test]
+    fn lufs_refuses_an_unplaced_topology_and_peak_does_not() {
+        let rendered = sine(2, 0.1);
+        let unplaced = ChannelTopology::unassigned(rendered.layout());
+        let err = Normalize::lufs(Db(-23.0))
+            .gain_for_rendered(&rendered, &unplaced)
+            .expect_err("two unassigned channels have no angles");
+        assert!(
+            matches!(
+                err,
+                crate::Error::Unmeasurable {
+                    reason: Unmeasured::Placement,
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
+        assert!(
+            Normalize::peak(Db(-1.0))
+                .gain_for_rendered(&rendered, &unplaced)
+                .is_ok()
+        );
     }
 }
