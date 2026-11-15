@@ -51,6 +51,7 @@ pub struct OutputStream {
     expressions_dropped: u64,
     buses_dropped: u64,
     full_dropped: u64,
+    sysex_dropped: u64,
 }
 
 impl Default for OutputStream {
@@ -71,6 +72,7 @@ impl OutputStream {
             expressions_dropped: 0,
             buses_dropped: 0,
             full_dropped: 0,
+            sysex_dropped: 0,
         }
     }
 
@@ -102,15 +104,23 @@ impl OutputStream {
         self.buses_dropped
     }
 
+    /// SysEx messages dropped whole because the block's MIDI had no room for
+    /// them, since construction.
+    #[must_use]
+    pub fn sysex_dropped(&self) -> u64 {
+        self.sysex_dropped
+    }
+
     /// The events lost since construction: expressions dropped, events on a bus
-    /// past the Groups, and events a full block list had no room for. What the
+    /// past the Groups, events a full block list had no room for, and SysEx
+    /// messages that did not fit. What the
     /// host reports as lost MIDI, by its change from block to block. An eviction
     /// is not here: it loses a mapping, not an event, and any expression it later
     /// costs is already in `expressions_dropped` ([`notes_evicted`](Self::notes_evicted)
     /// is its own reading).
     #[must_use]
     pub fn lost_total(&self) -> u64 {
-        self.expressions_dropped + self.buses_dropped + self.full_dropped
+        self.expressions_dropped + self.buses_dropped + self.full_dropped + self.sysex_dropped
     }
 
     pub(super) fn count_bus_dropped(&mut self) {
@@ -123,6 +133,10 @@ impl OutputStream {
 
     pub(super) fn count_full_dropped(&mut self) {
         self.full_dropped += 1;
+    }
+
+    pub(super) fn count_sysex_dropped(&mut self) {
+        self.sysex_dropped += 1;
     }
 
     /// The plugin started `note` on `channel` under `id` (`-1` is no id). A full

@@ -307,9 +307,8 @@ fn accepting_the_callback_write_does_not_mean_the_au_emits_midi() {
             });
         // Withdraw explicitly so the AU's status is seen rather than dropped.
         // The unit was never initialized, so nothing renders.
-        let proof = au.unit().uninitialized().expect("never initialized");
         registration
-            .withdraw(&proof)
+            .withdraw()
             .unwrap_or_else(|e| panic!("{}: withdrawing the callback failed: {e:?}", unit.label));
     }
 }
@@ -341,16 +340,11 @@ fn install_then_withdraw_leaves_the_au_renderable() {
         support::corpus::render(&mut au, &input, &mut output, BLOCK)
             .unwrap_or_else(|e| panic!("{}: render with callback installed: {e:?}", unit.label));
 
-        // The unit stops rendering before the state is freed, and renders again
-        // after.
-        {
-            au.uninitialize().expect("uninitialize");
-            let proof = au.unit().uninitialized().expect("uninitialized");
-            registration
-                .withdraw(&proof)
-                .unwrap_or_else(|e| panic!("{}: withdraw failed: {e:?}", unit.label));
-        }
-        au.initialize().expect("initialize again");
+        // Withdrawn with the unit initialized and between renders: the state is
+        // freed, and the unit renders again.
+        registration
+            .withdraw()
+            .unwrap_or_else(|e| panic!("{}: withdraw failed: {e:?}", unit.label));
 
         // Renders again after the boxed state has been freed. If the withdrawal
         // had run in the wrong order, the AU would still hold a pointer into freed
@@ -427,12 +421,7 @@ fn no_delivery_arrives_after_the_callback_is_withdrawn() {
     let calls_before = calls.load(Ordering::SeqCst);
     let events_before = events.load(Ordering::SeqCst);
 
-    {
-        au.uninitialize().expect("uninitialize");
-        let proof = au.unit().uninitialized().expect("uninitialized");
-        registration.withdraw(&proof).expect("withdraw succeeds");
-    }
-    au.initialize().expect("initialize again");
+    registration.withdraw().expect("withdraw succeeds");
 
     // Render well past the removal. Any call now would be against freed state.
     for _ in 0..32 {
@@ -529,10 +518,7 @@ fn a_second_install_on_a_unit_is_refused_until_the_first_is_withdrawn() {
         au.install_midi_output(Box::new(|_, _| {})).is_err(),
         "a unit with a registration refuses another"
     );
-    {
-        let proof = au.unit().uninitialized().expect("never initialized");
-        first.withdraw(&proof).expect("first withdraw");
-    }
+    first.withdraw().expect("first withdraw");
 
     let second = au
         .install_midi_output(Box::new(|_, _| {}))
@@ -541,12 +527,7 @@ fn a_second_install_on_a_unit_is_refused_until_the_first_is_withdrawn() {
     let input = support::corpus::silence(2, BLOCK as usize);
     let mut output = support::corpus::silence(2, BLOCK as usize);
     support::corpus::render(&mut au, &input, &mut output, BLOCK).expect("render");
-    {
-        au.uninitialize().expect("uninitialize");
-        let proof = au.unit().uninitialized().expect("uninitialized");
-        second.withdraw(&proof).expect("second withdraw");
-    }
-    au.initialize().expect("initialize again");
+    second.withdraw().expect("second withdraw");
     support::corpus::render(&mut au, &input, &mut output, BLOCK).expect("render after withdraw");
 
     let peak = support::corpus::peak(&output);

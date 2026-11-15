@@ -59,8 +59,8 @@ pub(crate) struct Rendering {
     pub(crate) notify: Option<RenderNotify>,
     pub(crate) renderer: Renderer,
     /// The MIDI the unit generates while it renders, for a unit that publishes
-    /// output streams. Last, so the callback is withdrawn only after the unit
-    /// is uninitialized and nothing renders.
+    /// output streams. Withdrawn when dropped, which frees its state when no
+    /// render of the unit is in flight.
     pub(crate) midi_out: Option<MidiOut>,
     /// The unit publishes MIDI output streams and refused the callback.
     pub(crate) midi_out_refusal: Option<String>,
@@ -79,6 +79,9 @@ pub(crate) struct MidiQueue {
     overflow: Arc<AtomicU64>,
     /// Every event lost to `overflow`, since activation.
     lost_total: u64,
+    /// Events lost and folded into `lost_total` by a [`clear`](Self::clear)
+    /// before a block told [`take_into`](Self::take_into)'s output of them.
+    untold: u64,
 }
 
 impl MidiQueue {
@@ -89,6 +92,7 @@ impl MidiQueue {
             queue: Arc::new(ArrayQueue::new(MIDI_STACK_CAPACITY)),
             overflow: Arc::new(AtomicU64::new(0)),
             lost_total: 0,
+            untold: 0,
         }
     }
 
@@ -107,19 +111,23 @@ impl MidiQueue {
     /// Moves what the callback queued into `out` in one pass, in order. What
     /// `out` has no room for, and what the queue had none for, is counted once
     /// in `out`'s `midi_dropped`, which is how every Processor reports MIDI it
-    /// lost.
+    /// lost; so is what a [`clear`](Self::clear) counted and no block told yet.
     pub(crate) fn take_into(&mut self, out: &mut ProcessOutput) {
         out.emit_midi(std::iter::from_fn(|| self.queue.pop()));
         let lost = self.overflow.swap(0, Ordering::Relaxed);
         self.lost_total += lost;
-        out.count_midi_dropped(usize::try_from(lost).unwrap_or(usize::MAX));
+        let told = std::mem::take(&mut self.untold) + lost;
+        out.count_midi_dropped(usize::try_from(told).unwrap_or(usize::MAX));
     }
 
-    /// Forgets what is queued. What was lost and not yet told stays counted in
-    /// [`lost`](Self::lost): it happened.
+    /// Forgets what is queued. What was lost and not yet told is counted in
+    /// [`lost`](Self::lost) now and told by the next block's
+    /// [`take_into`](Self::take_into): it happened.
     pub(crate) fn clear(&mut self) {
         while self.queue.pop().is_some() {}
-        self.lost_total += self.overflow.swap(0, Ordering::Relaxed);
+        let lost = self.overflow.swap(0, Ordering::Relaxed);
+        self.lost_total += lost;
+        self.untold += lost;
     }
 
     /// Events dropped for want of room in the queue, since activation.
@@ -132,13 +140,10 @@ impl MidiQueue {
 /// [`MidiQueue`] it fills.
 pub(crate) struct MidiOut {
     /// Keeps the callback installed for the activation. Taken by `Drop`, which
-    /// withdraws it: the state is freed only there, after the unit is
-    /// uninitialized.
+    /// withdraws it.
     registration: Option<AuMidiOutput>,
-    /// The unit, which says whether the registration may be freed.
-    unit: Unit,
     queue: MidiQueue,
-    /// Lists for an output stream with no reader, as far as `ProcessOutput`
+    /// Packets for an output stream with no reader, as far as `ProcessOutput`
     /// has been told.
     unrouted_told: u64,
 }
@@ -161,20 +166,20 @@ impl MidiOut {
         let registration = midi_out::install(unit, queue.sink())?;
         Ok(Some(Self {
             registration: Some(registration),
-            unit: unit.clone(),
             queue,
             unrouted_told: 0,
         }))
     }
 
-    /// [`MidiQueue::take_into`], and the lists the unit delivered for a stream
-    /// with no reader since the last block, which each count as lost MIDI.
+    /// [`MidiQueue::take_into`], and the packets the unit delivered for a stream
+    /// with no reader since the last block, which each count as lost MIDI (a
+    /// packet holds at least one message: this is the least that was lost).
     fn take_into(&mut self, out: &mut ProcessOutput) {
         self.queue.take_into(out);
         let unrouted = self
             .registration
             .as_ref()
-            .map_or(0, AuMidiOutput::unrouted_lists);
+            .map_or(0, AuMidiOutput::unrouted_packets);
         let fresh = unrouted.saturating_sub(self.unrouted_told);
         out.count_midi_dropped(usize::try_from(fresh).unwrap_or(usize::MAX));
         self.unrouted_told = unrouted;
@@ -195,20 +200,13 @@ impl MidiOut {
 }
 
 impl Drop for MidiOut {
-    /// Withdraws the registration, which frees its state only against the proof
-    /// that the unit is not initialized (`Unit::uninitialized`): in a
-    /// `Rendering`, after the `guard` (a field declared before this one)
-    /// uninitialized it, and on a failed `initialize`, on a unit that never
-    /// initialized. A unit that is initialized has no proof, and the state is
-    /// left allocated (never freed under a render that might read it).
+    /// Withdraws the registration, which frees its state when no render of the
+    /// unit is in flight, and leaves it allocated when one is
+    /// ([`AuMidiOutput::withdraw`]).
     fn drop(&mut self) {
         if let Some(registration) = self.registration.take() {
-            match self.unit.uninitialized() {
-                Some(proof) => {
-                    let _ = registration.withdraw(&proof);
-                }
-                None => drop(registration),
-            }
+            // Teardown: the status has nowhere to go.
+            let _ = registration.withdraw();
         }
     }
 }
@@ -1067,9 +1065,11 @@ mod midi_queue {
         assert_eq!(queue.lost(), 44);
     }
 
-    /// **A reset forgets what is queued** and what was lost and not yet told.
+    /// **A reset forgets what is queued and still tells what was lost**: the 5
+    /// events the queue had no room for are counted by the clear and reported
+    /// once, by the next block, not forgotten with the queue.
     #[test]
-    fn clear_forgets_the_queue() {
+    fn clear_forgets_the_queue_and_tells_the_loss() {
         let mut queue = MidiQueue::new();
         let sink = &mut queue.sink();
         let events: Vec<WireMidi> = (0..MIDI_STACK_CAPACITY as u32 + 5).map(event).collect();
@@ -1078,6 +1078,10 @@ mod midi_queue {
         let mut out = ProcessOutput::default();
         queue.take_into(&mut out);
         assert!(out.midi_events.is_empty());
-        assert_eq!(out.midi_dropped(), 0);
+        assert_eq!(out.midi_dropped(), 5);
+        assert_eq!(queue.lost(), 5);
+        let mut next = ProcessOutput::default();
+        queue.take_into(&mut next);
+        assert_eq!(next.midi_dropped(), 0, "told once");
     }
 }

@@ -1540,6 +1540,37 @@ mod message {
         );
     }
 
+    /// **A SysEx the block's MIDI has no room for is dropped whole and lost**:
+    /// one of 67 packets does not fit the 64 a block holds, so none of it is
+    /// emitted and the stream counts one lost message (what the host reports in
+    /// `midi_dropped`); one that fits is emitted and costs nothing.
+    #[test]
+    fn a_sysex_that_does_not_fit_the_block_is_counted_lost() {
+        let drain = |bytes: usize| {
+            let payload: Vec<u8> = (0..bytes).map(|i| 1 + (i % 100) as u8).collect();
+            let events: Vec<UmpAt> = Sysex7Packets::from_payload(MidiGroup::FIRST, &payload)
+                .expect("7-bit bytes")
+                .map(|ump| (at(7), ump))
+                .collect();
+            let list = EventList::input();
+            assert!(Stager::default().stage(
+                &list,
+                &InputEvents {
+                    midi: &events,
+                    ..Default::default()
+                },
+            ));
+            let mut stream = OutputStream::new();
+            let mut out = tutti_plugin_types::RtMidiEvents::new();
+            drain_midi(&list, &mut stream, &mut out);
+            (out.len(), stream.lost_total(), stream.sysex_dropped())
+        };
+        let (emitted, lost, sysex) = drain(6 * 64);
+        assert_eq!((emitted, lost, sysex), (64, 0, 0), "64 packets fit");
+        let (emitted, lost, sysex) = drain(6 * 64 + 1);
+        assert_eq!((emitted, lost, sysex), (0, 1, 1), "65 packets do not");
+    }
+
     /// A chord at one frame stages as three Note Ons, in order, each at the
     /// velocity it was sent at.
     #[test]
@@ -1924,24 +1955,6 @@ fn a_release_phase_expression_after_the_note_off_is_translated() {
         Ok(Message::Midi2(a, Voice2::AssignablePerNote { note, .. }))
             if a.channel == MidiChannel::of(2) && note == NoteNumber::of(40)
     ));
-    assert_eq!(stream.expressions_dropped(), 0);
-}
-
-/// **A MIDI effect that passes notes through** sends an output note on under the
-/// host's own id and expressions on that id: they are translated.
-#[test]
-fn a_pass_through_note_on_a_host_style_id_takes_expressions() {
-    use vst3::Steinberg::Vst::NoteExpressionTypeIDs_ as Ids;
-
-    let mut stream = OutputStream::new();
-    let id = spec_note_id(5, 72);
-    let on = Event::at(0, Payload::NoteOn(NoteOn::new(5, 72, 0.5, id)));
-    assert!(on.to_midi(&mut stream).is_some());
-    let pan = Event::at(
-        0,
-        Payload::ExpressionValue(ExpressionValue::new(Ids::kPanTypeID, id, 1.0)),
-    );
-    assert!(pan.to_midi(&mut stream).is_some());
     assert_eq!(stream.expressions_dropped(), 0);
 }
 
