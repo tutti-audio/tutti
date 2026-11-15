@@ -1,6 +1,6 @@
 use super::*;
 
-/// `record` must never wait on a reader holding `last`: it counts the fault
+/// `record` must never wait on a reader holding the slots: it counts the fault
 /// and drops the message.
 #[test]
 fn record_while_last_is_locked_counts_and_returns() {
@@ -112,4 +112,101 @@ fn a_route_change_and_a_refused_promotion_record_nothing() {
     faults.record(BackendErrorKind::Survivable, &"real-time promotion denied");
     assert!(!faults.is_faulted());
     assert_eq!(faults.count(), 0);
+}
+
+/// **Each overrun is one count, and the stream stays up.** Overruns recorded
+/// with no audio delivered between them are not a run of backend errors: they
+/// never promote to a disconnect however long they go on, and none raises the
+/// latch `is_running` reads.
+#[test]
+fn each_overrun_counts_once_and_never_disconnects() {
+    let faults = StreamFaults::new();
+    for expected in 1..=3 {
+        faults.record_overrun("late");
+        assert_eq!(faults.count(), expected);
+    }
+    assert!(!faults.is_disconnected());
+    assert_eq!(
+        faults.last().map(|f| f.kind),
+        Some(StreamFaultKind::Overrun)
+    );
+}
+
+/// **An overrun does not replace a latching fault's message**, and a panic
+/// does replace a lesser one: the first cause of a stream's end is the one
+/// `last` keeps from an overrun, and a panic is always the latest word.
+#[test]
+fn an_overrun_keeps_a_latching_message_and_a_panic_replaces_a_lesser_one() {
+    let faults = StreamFaults::new();
+    faults.record(BackendErrorKind::DeviceGone, &"unplugged");
+    faults.record_overrun("late");
+    let last = faults.last().expect("a fault");
+    assert_eq!(last.kind, StreamFaultKind::Disconnected);
+    assert_eq!(last.message, "unplugged");
+    assert_eq!(faults.count(), 2, "the overrun still counts");
+
+    let faults = StreamFaults::new();
+    faults.record(BackendErrorKind::Other, &"xrun");
+    faults.record_overrun("late");
+    let kept = faults.last().expect("a fault");
+    assert_eq!(kept.kind, StreamFaultKind::Backend);
+    assert_eq!(
+        kept.message, "xrun",
+        "the overrun left the owned text alone"
+    );
+    faults.record_panic("panicked");
+    assert_eq!(
+        faults.last().map(|f| f.kind),
+        Some(StreamFaultKind::CallbackPanicked)
+    );
+}
+
+/// **A panic retires the owned message it replaces** instead of dropping it
+/// on the render thread, and a control-side read frees it.
+#[test]
+fn a_panic_retires_an_owned_message_and_a_read_frees_it() {
+    let faults = StreamFaults::new();
+    faults.record(BackendErrorKind::Other, &"xrun");
+    faults.record_panic("panicked");
+    assert_eq!(
+        faults
+            .last_guard()
+            .retired
+            .as_ref()
+            .map(|f| f.message.clone()),
+        Some(Cow::Owned::<str>("xrun".to_string())),
+        "the replaced owned message is held aside"
+    );
+    let last = faults.last().expect("a fault");
+    assert_eq!(last.kind, StreamFaultKind::CallbackPanicked);
+    assert_eq!(last.message, "panicked");
+    assert!(faults.last_guard().retired.is_none(), "the read freed it");
+    assert_eq!(
+        faults.last().map(|f| f.kind),
+        Some(StreamFaultKind::CallbackPanicked)
+    );
+}
+
+/// **With the retired slot occupied, a second panic over an owned message
+/// leaks that message rather than freeing it:** the slot keeps the first one.
+#[test]
+fn a_panic_over_an_owned_message_with_the_slot_taken_leaves_the_slot_alone() {
+    let faults = StreamFaults::new();
+    faults.record(BackendErrorKind::Other, &"xrun");
+    faults.record_panic("first");
+    faults.record(BackendErrorKind::DeviceGone, &"gone");
+    faults.record_panic("second");
+    assert_eq!(
+        faults
+            .last_guard()
+            .retired
+            .as_ref()
+            .map(|f| f.message.to_string()),
+        Some("xrun".to_string())
+    );
+    assert_eq!(
+        faults.last().map(|f| f.message.to_string()),
+        Some("second".to_string())
+    );
+    assert_eq!(faults.count(), 4);
 }
