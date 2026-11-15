@@ -12,12 +12,11 @@
 //! and range edits between blocks.
 
 use tutti_fixtures::midi;
-use tutti_graph::IntoNode;
-use tutti_graph::ParamNode;
 use tutti_graph::contract::{BlockRig, Direct};
+use tutti_graph::{IntoNode, Node, ParamNode, ParamSet};
 use tutti_nodes::{
-    DelayControls, DelayNode, InterpolationMode, LfoNode, LfoShape, MaxDelay, ModDelayNode,
-    PhaserControls, PhaserNode, Stages, Stagger, SweepRange,
+    ChannelTimes, DelayControls, DelayLayout, DelayNode, InterpolationMode, LfoNode, LfoShape,
+    MaxDelay, ModDelayNode, PhaserControls, PhaserNode, Routing, Stages, Stagger, SweepRange,
 };
 use tutti_types::MaxBlock;
 use tutti_types::{
@@ -1439,4 +1438,192 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         sounded |= out.iter().any(|x| x.abs() > 1e-3);
     }
     assert!(sounded, "the filter rendered; the gate walked the graph");
+}
+
+/// A node through `Direct` at `rate`, its cells written by `between(i)` before block `i` and
+/// its ports fed `lanes` (one slice of 64 frames per port, `None` where it is not driven):
+/// eight blocks of warm-up, then 400 blocks under `assert_no_alloc`. Every sample of every
+/// output channel over the 400 is finite and at most `bound` in magnitude.
+fn corner<N: Node + ParamNode>(
+    node: N,
+    rate: SampleRate,
+    lanes: &[Option<&[f32]>],
+    bound: f32,
+    between: impl Fn(&ParamSet, usize),
+) {
+    let cells = node.param_set();
+    let mut rig = Direct::new(node, rate, 64);
+    let width = rig.inputs_mut().len();
+    for c in rig.inputs_mut() {
+        for (i, x) in c.iter_mut().enumerate() {
+            *x = if i % 2 == 0 { INPUT } else { -INPUT };
+        }
+    }
+    for (k, lane) in lanes.iter().enumerate() {
+        rig.feed(k, *lane);
+    }
+    let mut heard = 0.0f32;
+    for i in 0..8 {
+        between(&cells, i);
+        rig.block();
+        heard += rig.output(0).iter().map(|s| s.abs()).sum::<f32>();
+    }
+    assert!(
+        heard > 1e-6,
+        "the node rendered silence; the gate would walk no DSP"
+    );
+    let (mut peak, mut finite) = (0.0f32, true);
+    assert_no_alloc::assert_no_alloc(|| {
+        for i in 0..400 {
+            between(&cells, i);
+            rig.block();
+            for c in 0..width {
+                for s in rig.output(c) {
+                    finite &= s.is_finite();
+                    peak = peak.max(s.abs());
+                }
+            }
+        }
+    });
+    assert!(finite, "the output is finite");
+    assert!(peak <= bound, "the output peaks at {peak}, past {bound}");
+}
+
+/// The corner sweeps' input: an alternating signal of this amplitude.
+const INPUT: f32 = 0.5;
+
+/// A guard on the delay's output, `INPUT / (1 - g)` times 1.25, `g` the greatest stable
+/// feedback. For the convex reads (none, linear) `INPUT / (1 - g)` is a proof: a read's taps
+/// sum to one in magnitude, so the loop's gain is at most `g` and its geometric series is
+/// that. For the cubic Hermite read the taps sum in magnitude to at most 1.25, so the
+/// loop's worst-case gain is `1.25 g`, which exceeds 1: the 1.25 is a steady-state guard
+/// the sweep must stay under, not a proof of it.
+fn loop_bound() -> f32 {
+    INPUT * 1.25 / (1.0 - Feedback::MAX_STABLE.get())
+}
+
+/// A guard on the phaser's output, `INPUT / (1 - g)`: the peak gain of the frozen chain
+/// (its `H-infinity`, at DC). Under a swept coefficient the chain is time-varying and this
+/// is a guard the sweep must stay under, not a proof of it.
+fn phaser_bound() -> f32 {
+    INPUT / (1.0 - Feedback::MAX_STABLE.get())
+}
+
+/// A lane of 64 frames cycling through `values`.
+fn cycle(values: &[f32]) -> Vec<f32> {
+    (0..64).map(|i| values[i % values.len()]).collect()
+}
+
+/// The delay at the corners of everything it is built to and told: each longest delay at
+/// its extreme (a microsecond, and the 10 s cap at 48 kHz and at 192 kHz), each width (1, 2
+/// and the 16 of a bus), every interpolation, every cell at both ends of its range, rewritten
+/// every block, and the time, feedback and cross-feedback ports fed per frame with values at both ends and
+/// past them (a delay of nothing, one past the line, one that is not a number).
+#[test]
+fn the_delay_corners_are_allocation_free() {
+    let tiny = MaxDelay::of(Seconds::new(1e-6));
+    let cap = MaxDelay::of(MaxDelay::CAP);
+    let time = cycle(&[0.0, 1e9, f32::NAN, 10.0, -1.0, 1e-6]);
+    let feedback = cycle(&[-1.0, 5.0, f32::NAN, 0.99, 0.0]);
+    let cross = cycle(&[0.0, 1.0, f32::NAN, 0.5, -1.0]);
+    for (width, max, rate) in [
+        // One frame of line: a mono one, and a coupled stereo one.
+        (1u16, tiny, SampleRate::SR_48K),
+        (2, tiny, SampleRate::SR_48K),
+        (2, cap, SampleRate::SR_192K),
+        (16, cap, SampleRate::SR_48K),
+    ] {
+        for interpolation in [
+            InterpolationMode::None,
+            InterpolationMode::Linear,
+            InterpolationMode::CubicHermite,
+        ] {
+            let node = DelayNode::new(bus(width), max, interpolation, DelayControls::DEFAULT);
+            let write = |cells: &ParamSet, i: usize| {
+                assert!(cells.set(UnitParam::DelayTime, if i & 1 == 1 { 1e9 } else { 0.0 }));
+                assert!(cells.set(UnitParam::Feedback, if i & 2 == 2 { 1.0 } else { 0.0 }));
+                assert!(cells.set(UnitParam::CrossFeedback, if i & 4 == 4 { 1.0 } else { 0.0 }));
+            };
+            corner(node.clone(), rate, &[], loop_bound(), write);
+            corner(
+                node.clone(),
+                rate,
+                &[Some(&time[..]), Some(&feedback[..]), Some(&cross[..])],
+                loop_bound(),
+                write,
+            );
+        }
+    }
+    // Every channel of a bus recirculating into the next, each with a time of its own.
+    let wide = bus(16);
+    let layout = DelayLayout::new(wide, cap, InterpolationMode::CubicHermite)
+        .with_routing(Routing::ring(wide))
+        .expect("a ring on its own bus")
+        .with_times(ChannelTimes::each(&[Seconds::new(10.0); 15]).expect("fifteen times"))
+        .expect("one time for each channel past the first");
+    corner(
+        DelayNode::from_layout(layout, DelayControls::DEFAULT),
+        SampleRate::SR_48K,
+        &[Some(&time[..]), Some(&feedback[..]), Some(&cross[..])],
+        loop_bound(),
+        |cells, i| {
+            assert!(cells.set(UnitParam::Feedback, if i & 1 == 1 { 1.0 } else { 0.0 }));
+            assert!(cells.set(UnitParam::CrossFeedback, if i & 2 == 2 { 1.0 } else { 0.0 }));
+        },
+    );
+}
+
+/// The phaser at the corners of everything it is built to and told: the fewest and the most
+/// stages, one channel and 16, the narrowest sweep and the widest (past Nyquist at the low
+/// rate), the slowest and the fastest rate, both ends of the depth and the feedback in the
+/// cells, rewritten every block, and the three ports fed per frame past their ranges.
+#[test]
+fn the_phaser_corners_are_allocation_free() {
+    let rate_lane = cycle(&[-3.0, 0.0, 0.01, 400.0, f32::NAN, 20_000.0]);
+    let depth_lane = cycle(&[-8.0, 8.0, f32::NAN, 0.0, 1.0]);
+    let feedback_lane = cycle(&[-1.0, 5.0, f32::NAN, 0.99, 0.0]);
+    for (width, stages, range, step, sample_rate) in [
+        (
+            1u16,
+            2usize,
+            SweepRange::of(Hz::new(20.0), Hz::new(20.0)),
+            0.0,
+            8_000.0,
+        ),
+        (
+            16,
+            12,
+            SweepRange::of(Hz::new(20.0), Hz::new(40_000.0)),
+            0.5,
+            48_000.0,
+        ),
+        (2, 12, SweepRange::DEFAULT, 0.25, 192_000.0),
+    ] {
+        let node = PhaserNode::new(
+            bus(width),
+            Stages::of(stages),
+            range,
+            Stagger::of_step(PhaseIncrement(step)),
+            PhaserControls::DEFAULT,
+        )
+        .expect("a step fits any width");
+        let rate = SampleRate::of(sample_rate);
+        let write = |cells: &ParamSet, i: usize| {
+            assert!(cells.set(UnitParam::Rate, if i & 1 == 1 { 400.0 } else { 0.01 }));
+            assert!(cells.set(UnitParam::Depth, if i & 2 == 2 { 1.0 } else { -1.0 }));
+            assert!(cells.set(UnitParam::Feedback, if i & 4 == 4 { 0.99 } else { 0.0 }));
+        };
+        corner(node.clone(), rate, &[], phaser_bound(), write);
+        corner(
+            node,
+            rate,
+            &[
+                Some(&rate_lane[..]),
+                Some(&depth_lane[..]),
+                Some(&feedback_lane[..]),
+            ],
+            phaser_bound(),
+            write,
+        );
+    }
 }
