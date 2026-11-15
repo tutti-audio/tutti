@@ -351,13 +351,7 @@ impl SessionBuilder<Offline> {
         let mut engine = engine;
         let load = engine.take_load_meter();
         let clock = engine.block_clock();
-        let mut session = self.session(
-            parts,
-            crate::clock::OfflineEngine {
-                engine: Some(engine),
-            },
-            true,
-        )?;
+        let mut session = self.session(parts, crate::clock::OfflineEngine { engine }, true)?;
         session.load = load;
         session.clock = Some(clock);
         session.heard = Some((heard, layout));
@@ -378,7 +372,7 @@ impl SessionBuilder<Offline> {
     /// [`Error::Output`](crate::Error::Output) when the declared root topology is empty or wider
     /// than the engine renders; there is no device to place it on.
     #[cfg(feature = "testing")]
-    pub fn build_detached(mut self, rate: SampleRate) -> Result<Session<Offline>> {
+    pub fn build_detached(mut self, rate: SampleRate) -> Result<Session<crate::Detached>> {
         let outputs = self.opts.root.as_ref().map_or_else(
             || usize::from(self.opts.outputs_floor.count()),
             |r| usize::from(r.width().count()),
@@ -410,7 +404,7 @@ impl SessionBuilder<Offline> {
                 #[cfg(feature = "midi-hardware")]
                 device_events: None,
             },
-            crate::clock::OfflineEngine { engine: None },
+            crate::clock::DetachedGraph,
             false,
         )
     }
@@ -540,7 +534,8 @@ impl SessionBuilder<crate::DeviceClock> {
         let mut engine = parts.graph.engine(&parts.transport)?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph, spec.channels)?;
-        let mut session = self.session(parts, crate::device::DeviceHandle::vacant(), true)?;
+        let mut session: crate::LiveSession =
+            self.session(parts, crate::device::DeviceHandle::vacant(), true)?;
         session.load = engine.take_load_meter();
         session.heard = Some((engine.heard_taps(), spec.channels));
         let clock = engine.block_clock();
@@ -911,7 +906,12 @@ impl<C: Clock> SessionBuilder<C> {
 
     /// The session over `parts`, `engine` its offline engine if any, with
     /// (`sampler`) a disk streamer when `streamer`.
-    fn session(&mut self, parts: Parts, running: C::Running, streamer: bool) -> Result<Session<C>> {
+    fn session<K: Clock>(
+        &mut self,
+        parts: Parts,
+        running: K::Running,
+        streamer: bool,
+    ) -> Result<Session<K>> {
         #[cfg(feature = "sampler")]
         let disk_streamer = if streamer {
             Some(tutti_sampler::DiskStreamer::new(

@@ -8,14 +8,16 @@
 use tutti_buffers::{Float, FoldError, InterleavedMut};
 use tutti_graph::{ForkByClone, RootError};
 use tutti_nodes::testing::Const;
-use tutti_session::{Error, OutPort, Root, RootTopologyStatus, Session, SessionBuilder};
+use tutti_session::{
+    DetachedSession, Error, OutPort, Root, RootTopologyStatus, Session, SessionBuilder,
+};
 use tutti_types::MaxBlock;
 use tutti_types::{ChannelLayout, ChannelTopology, SampleRate, Samples, Speaker};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// The channels `values` hold, one per global output from channel 0.
-fn feed(session: &mut Session, values: &[f32]) {
+fn feed<C: tutti_session::Clock>(session: &mut Session<C>, values: &[f32]) {
     let (node, _) = session.graph().add(ForkByClone(Const::frame(values)));
     for c in 0..values.len() {
         session
@@ -251,7 +253,7 @@ fn declaring_the_same_topology_again_changes_nothing() {
 #[test]
 fn an_export_is_placed_from_the_declaration() {
     use tutti_session::{Bounce, BounceLatency, BounceTail, ExportClock, Range};
-    let planes = |s: &mut Session| {
+    let planes = |s: &mut DetachedSession| {
         let request = Bounce::project()
             .master_buffers()
             .channels(ChannelLayout::from(6u16))

@@ -2210,7 +2210,7 @@ mod tests {
     }
 
     struct Rig {
-        session: Session,
+        session: crate::DetachedSession,
         node: NodeKey,
         saves: Arc<AtomicUsize>,
         dead: Arc<AtomicBool>,

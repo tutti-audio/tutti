@@ -560,27 +560,35 @@ impl Session<Offline> {
     /// Renders one block into `output`, as a device callback would: what an
     /// offline session's host pulls. Every update's commit lands at the
     /// start of the next block.
-    ///
-    /// # Panics
-    ///
-    /// On a detached session (`SessionBuilder::build_detached`, behind
-    /// `testing`), which has no engine.
     pub fn render(&self, output: &mut tutti_buffers::InterleavedMut<'_>) {
-        self.running
-            .engine
-            .as_ref()
-            .expect("render needs an engine: this session is detached (`build_detached`)")
-            .process(output);
+        self.running.engine.process(output);
     }
+}
 
+impl<C: RealTime> Session<C> {
+    /// The stream's fault record: one entry each time the clock's stream
+    /// failed, a device unplugged, a callback that panicked, a timer that fell
+    /// more than four blocks behind and began its schedule again. The same
+    /// handle for the session's life; [`update`](Self::update) reports each new
+    /// fault as [`SessionEvent::Fault`] and takes its message from the record
+    /// ([`StreamFaults::take_last`](tutti_engine::StreamFaults::take_last)), so
+    /// [`count`](tutti_engine::StreamFaults::count) is the lasting reading.
+    #[must_use]
+    pub fn faults(&self) -> Arc<tutti_engine::StreamFaults> {
+        crate::clock::sealed::Streaming::output_stream(&self.running).faults()
+    }
+}
+
+/// A detached session: the executor stays on this side, and the caller renders.
+#[cfg(feature = "testing")]
+impl Session<crate::Detached> {
     /// Renders one frame on the calling thread under a stopped transport:
     /// no inputs, `output` one sample per global output. Commits any edit
     /// first.
     ///
     /// # Panics
     ///
-    /// On a session whose audio side an engine holds, or was taken
-    /// (`Graph::take_audio_side`, behind the `testing` feature).
+    /// On a session whose audio side was taken (`Graph::take_audio_side`).
     pub fn render_frame(&mut self, output: &mut [f32]) {
         self.render_frame_at(&tutti_graph::TransportPosition::default(), output);
     }
@@ -596,20 +604,6 @@ impl Session<Offline> {
             self.commit();
         }
         self.graph.render_local(transport, output);
-    }
-}
-
-impl<C: RealTime> Session<C> {
-    /// The stream's fault record: one entry each time the clock's stream
-    /// failed, a device unplugged, a callback that panicked, a timer that fell
-    /// more than four blocks behind and began its schedule again. The same
-    /// handle for the session's life; [`update`](Self::update) reports each new
-    /// fault as [`SessionEvent::Fault`] and takes its message from the record
-    /// ([`StreamFaults::take_last`](tutti_engine::StreamFaults::take_last)), so
-    /// [`count`](tutti_engine::StreamFaults::count) is the lasting reading.
-    #[must_use]
-    pub fn faults(&self) -> Arc<tutti_engine::StreamFaults> {
-        crate::clock::sealed::Streaming::output_stream(&self.running).faults()
     }
 }
 

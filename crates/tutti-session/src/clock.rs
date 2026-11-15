@@ -109,16 +109,33 @@ pub struct DeviceClock;
 
 impl sealed::Sealed for Offline {}
 impl sealed::Sealed for SystemClock {}
+#[cfg(feature = "testing")]
+impl sealed::Sealed for Detached {}
 #[cfg(feature = "device")]
 impl sealed::Sealed for DeviceClock {}
 
-/// What an offline session holds: the engine its host pulls blocks from, or
-/// none for a detached session (`SessionBuilder::build_detached`, behind
-/// `testing`), whose graph the caller renders by hand.
+/// What an offline session holds: the engine its host pulls blocks from.
 #[derive(Debug)]
 pub struct OfflineEngine {
-    pub(crate) engine: Option<Engine>,
+    pub(crate) engine: Engine,
 }
+
+/// The clock of a detached session (`SessionBuilder::build_detached`): no
+/// engine, so nothing renders blocks, and the caller renders the graph by
+/// hand (`Session::render_frame`) or takes its audio side. A test's seam.
+#[cfg(feature = "testing")]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Detached;
+
+/// A session on the detached clock: a test's, whose graph the caller renders.
+#[cfg(feature = "testing")]
+pub type DetachedSession = crate::Session<Detached>;
+
+/// What a detached session holds: nothing, its audio side stays with the
+/// graph.
+#[cfg(feature = "testing")]
+#[derive(Debug)]
+pub struct DetachedGraph;
 
 /// What a session on the system clock holds: the stream the timer thread runs
 /// the callback on. Dropping the session stops the thread.
@@ -179,3 +196,12 @@ impl sealed::Streaming for crate::device::DeviceHandle {
         self.device().output_stream()
     }
 }
+
+#[cfg(feature = "testing")]
+impl Clock for Detached {
+    type Config = ();
+    type Running = DetachedGraph;
+}
+
+#[cfg(feature = "testing")]
+impl sealed::Running for DetachedGraph {}

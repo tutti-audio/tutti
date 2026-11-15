@@ -6,11 +6,13 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use tutti_midi_file::{MidiFile, SmfFormat, Tick, Track};
-use tutti_session::{JobFailed, MidiError, MidiEvent, MidiLoad, Session, SessionEvent};
+use tutti_session::{
+    DetachedSession, JobFailed, MidiError, MidiEvent, MidiLoad, Session, SessionEvent,
+};
 use tutti_types::SampleRate;
 use tutti_ump::{MidiChannel, NoteNumber, U7};
 
-fn session() -> Session {
+fn session() -> DetachedSession {
     Session::builder()
         .build_detached(SampleRate::SR_48K)
         .expect("builds")
@@ -32,7 +34,11 @@ fn write_file(dir: &Path, name: &str, key: u8) -> (std::path::PathBuf, MidiFile)
 }
 
 /// Updates until `want` events of `pick` have landed, or panics after 10 s.
-fn land<T>(s: &mut Session, want: usize, mut pick: impl FnMut(MidiEvent) -> Option<T>) -> Vec<T> {
+fn land<T>(
+    s: &mut DetachedSession,
+    want: usize,
+    mut pick: impl FnMut(MidiEvent) -> Option<T>,
+) -> Vec<T> {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut got = Vec::new();
     while got.len() < want {

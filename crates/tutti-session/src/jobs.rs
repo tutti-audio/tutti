@@ -365,12 +365,12 @@ mod tests {
     use std::time::{Duration, Instant};
     use tutti_types::SampleRate;
 
-    fn session(builder: crate::SessionBuilder) -> Session {
+    fn session(builder: crate::SessionBuilder) -> crate::DetachedSession {
         builder.build_detached(SampleRate::SR_48K).unwrap()
     }
 
     /// Updates until `done` holds, or panics after a generous wait.
-    fn update_until(s: &mut Session, done: impl Fn() -> bool) -> Vec<SessionEvent> {
+    fn update_until(s: &mut crate::DetachedSession, done: impl Fn() -> bool) -> Vec<SessionEvent> {
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut events = Vec::new();
         while !done() {

@@ -125,6 +125,8 @@ pub use builder::{BlockConfig, SessionBuilder, Workers, root_width};
 #[cfg(feature = "device")]
 pub use clock::DeviceClock;
 pub use clock::{Clock, Offline, OfflineSession, RealTime, SystemClock, SystemSession};
+#[cfg(feature = "testing")]
+pub use clock::{Detached, DetachedSession};
 #[cfg(feature = "device")]
 pub use device::{
     Device, DeviceEvent, DeviceLatency, DeviceRestart, DeviceRestarted, LiveSession, RestartError,
