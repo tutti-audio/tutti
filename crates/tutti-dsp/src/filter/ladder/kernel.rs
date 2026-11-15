@@ -1,4 +1,4 @@
-//! The Moog-style four-stage ladder: coefficients and the per-sample step.
+//! The Moog-style four-stage ladder: coefficients and the per-sample step ([`ladder_step`]).
 //!
 //! Unlike the SVF this is a *nonlinear* filter: the resonance feedback runs
 //! through a `tanh` saturator, so pushing resonance or drive grits and
@@ -12,7 +12,9 @@
 //! `1 / ((1 + s/wc)^4 + k)` under the bilinear map prewarped at the cutoff, with
 //! the resonance where the continuous model puts it.
 
-use crate::{Lanes, Real};
+use tutti_buffers::Float;
+
+use crate::Lanes;
 use tutti_types::{Hz, Resonance, SampleRate};
 
 /// Which tap of the four-stage ladder is taken as the output, and so what
@@ -90,18 +92,18 @@ pub struct LadderCoefficients<L: Lanes> {
     pub k: L,
 }
 
-impl<F: Real> From<&LadderCoeffs> for LadderCoefficients<F> {
+impl<F: Float + Lanes> From<&LadderCoeffs> for LadderCoefficients<F> {
     /// The solve's `f64` set, with the stage gain divided out in `F`.
     fn from(c: &LadderCoeffs) -> Self {
         let g = F::from_f64(c.g);
         Self {
-            g1: g / (F::from_f64(1.0) + g),
+            g1: g / (F::ONE + g),
             k: F::from_f64(c.k),
         }
     }
 }
 
-impl<F: Real> LadderCoefficients<F> {
+impl<F: Float + Lanes> LadderCoefficients<F> {
     /// Linear blend toward `to` by `t` in `0..=1`: an interpolated set is only
     /// ever used for one sample and never stored.
     #[inline]

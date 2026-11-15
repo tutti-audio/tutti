@@ -42,7 +42,7 @@ pub enum MpeFeaturesError {
 ///
 /// # Errors
 ///
-/// [`RequestError::InFlight`] when the same inquiry is waiting.
+/// [`RequestError::AlreadyAsking`] when the same inquiry is waiting.
 pub fn ask_mpe_features(
     initiator: &mut ProfileInitiator,
     channel: MidiChannel,

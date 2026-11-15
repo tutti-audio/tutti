@@ -44,7 +44,8 @@ fn a_packet_sent_to_the_destination_reaches_its_callback() {
     }));
     let note = midi::note_on(MidiChannel::of(3), 60, 0x8000);
     assert_eq!(
-        out.queue(&[(Offset::ZERO, discovery), (Offset::ZERO, note)]),
+        out.queue(&[(Offset::ZERO, discovery), (Offset::ZERO, note)])
+            .packets(),
         2
     );
 

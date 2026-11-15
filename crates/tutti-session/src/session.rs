@@ -48,8 +48,9 @@ pub enum Phase {
     /// onto the graph, staging what is new for the commit. A refusal is
     /// `SessionEvent::Modulation`.
     Modulation,
-    /// The commit, iff the graph was edited since the last one, and the
-    /// compensation of the plan it sent (or of a re-prepare's resumed plan)
+    /// The output policy staged since the last update, applied
+    /// ([`Session::policy`]); then the commit, iff the graph was edited since
+    /// the last one, and the compensation of the plan it sent (or of a re-prepare's resumed plan)
     /// published.
     Commit,
     /// Modulation's re-apply and resyncs (feature `modulation`): while a
@@ -410,6 +411,9 @@ pub struct Session {
     pub(crate) resource_ids: crate::peer::ResourceIds,
     /// What the app declared loaded ([`Session::pool`]).
     pub(crate) pool: crate::Pool,
+    /// The plugin entries whose node waits to swap to a reloaded plugin.
+    #[cfg(feature = "plugin")]
+    pub(crate) pooled_swaps: std::collections::BTreeSet<crate::PoolKey>,
     pub(crate) transport: Transport,
     /// The engine, for an offline session (the host pulls blocks); `None` on
     /// a device (the callback holds it) or detached.
@@ -427,6 +431,10 @@ pub struct Session {
     pub(crate) root_request: Option<ChannelTopology>,
     /// Why `root_request` is not in force, if it is not.
     pub(crate) root_refusal: Option<tutti_graph::RootError>,
+    /// Where the mix lands, as set ([`Session::policy`]).
+    pub(crate) output_policy: crate::OutputPolicy,
+    /// Whether `output_policy` was set and not yet applied.
+    pub(crate) output_policy_staged: bool,
     pub(crate) click: Option<NodeKey>,
     pub(crate) click_settings: Arc<ClickSettings>,
     /// The per-channel pre-roll of the plan sent last, for sources outside
@@ -627,15 +635,14 @@ impl Session {
         if root == self.root_request && self.root_refusal.is_none() {
             return Ok(());
         }
-        let device = self.heard.as_ref().map(|(_, layout)| *layout);
         self.root_request = root.clone();
-        match self.graph.declare_root(root, device) {
+        match self.graph.declare_root(root) {
             Ok(()) => {
                 self.root_refusal = None;
                 Ok(())
             }
             Err(e) => {
-                self.root_refusal = Some(e.into());
+                self.root_refusal = Some(e);
                 Err(e.into())
             }
         }
@@ -679,6 +686,20 @@ impl Session {
     /// ([`declare_root_topology`](Self::declare_root_topology)), if one was.
     pub fn root_topology(&self) -> Option<&ChannelTopology> {
         self.graph.root_topology()
+    }
+
+    /// What the output device's channels are as the session folds the root
+    /// into them, and whether that was
+    /// [`Stated`](tutti_types::Placement::Stated)
+    /// ([`SessionBuilder::device_topology`](crate::SessionBuilder::device_topology),
+    /// `DeviceRestart::topology`) or
+    /// [`Assumed`](tutti_types::Placement::Assumed) from the device's width
+    /// alone ([`ChannelTopology::assumed`]). `None` for a session with no
+    /// engine (a detached one).
+    #[must_use]
+    pub fn output_device(&self) -> Option<crate::OutputPlacement> {
+        let (_, layout) = self.heard.as_ref()?;
+        self.graph.output_placement(*layout)
     }
 
     /// Runs every phase in [`PHASES`] order at `Instant::now()` with the
@@ -748,6 +769,7 @@ impl Session {
                 self.resumed |= repreparing && !self.graph.is_repreparing();
             }
             Phase::Commit => {
+                self.apply_output_policy();
                 let sent = self.graph.is_edited() && self.commit_reporting(out);
                 if !sent && self.resumed {
                     self.publish_sent();

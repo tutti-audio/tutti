@@ -2,6 +2,7 @@
 
 use std::any::{Any, TypeId};
 use std::fmt;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -48,6 +49,17 @@ pub trait PoolEntry: Send + 'static {
     /// The job that loads the entry, described and not started.
     fn load(&self) -> Load<Self::Loaded>;
 
+    /// The file the load reads, for a kind whose value comes from one.
+    ///
+    /// The worker that runs the load takes the file's stamp (its length and
+    /// modification time) before the load reads it, and
+    /// [`Session::refresh_pool`](crate::Session::refresh_pool) compares it
+    /// with the file's now and loads the entry again when they differ. The
+    /// pool's diff never reads the file. The default is a kind with no file.
+    fn file(&self) -> Option<&Path> {
+        None
+    }
+
     /// The handle for a loaded value. `life` is the entry's: it reads closed
     /// once the entry is released or swapped to another identity.
     fn handle(loaded: &Self::Loaded, life: &Life) -> Self::Handle;
@@ -63,6 +75,33 @@ pub trait PoolEntry: Send + 'static {
     fn is_lost(_loaded: &Self::Loaded) -> bool {
         false
     }
+
+    /// What the pool does with a loaded value that only snapshots hold, past
+    /// the depth ([`PoolConfig::live_holds`](crate::PoolConfig::live_holds)):
+    /// [`Parking::Keep`] it, as a data kind does (a shared `Arc` costs
+    /// memory, not a process or a device), or [`Parking::Release`] it, as a
+    /// kind with something live behind it does (a plugin's process, a capture's
+    /// device). The default keeps.
+    ///
+    /// A released value is dropped here, on the control thread, and the entry
+    /// stays held with its handles reading [`Presence::Closed`]. Declaring the
+    /// key again with the same identity loads it afresh, by
+    /// [`load`](Self::load): the recall of a parked hold reloads. A kind that
+    /// saves state before it releases and restores it on that load does so
+    /// through its own load.
+    fn park(loaded: Self::Loaded) -> Parking<Self::Loaded> {
+        Parking::Keep(loaded)
+    }
+}
+
+/// What [`PoolEntry::park`] decides for a loaded value.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum Parking<T> {
+    /// The value stays loaded, held.
+    Keep(T),
+    /// The value is dropped; the entry stays held, unloaded.
+    Release,
 }
 
 /// The description of a load: the stages that end in the loaded value or a
@@ -355,6 +394,15 @@ pub enum LoadError {
     /// A file could not be decoded.
     #[error(transparent)]
     Decode(Arc<tutti_codec::DecodeError>),
+    /// A file's header could not be read to stream it.
+    #[cfg(feature = "sampler")]
+    #[error(transparent)]
+    Probe(Arc<tutti_sampler::ProbeError>),
+    /// A file declared streamed cannot be streamed by this build: its container
+    /// reports no length, its decoder cannot seek, or no codec covers it.
+    #[cfg(feature = "sampler")]
+    #[error("{} cannot be streamed", .0.display())]
+    NotStreamable(std::path::PathBuf),
     /// A SoundFont could not be opened.
     #[cfg(feature = "soundfont")]
     #[error(transparent)]
@@ -363,6 +411,28 @@ pub enum LoadError {
     #[cfg(feature = "midi-hardware")]
     #[error(transparent)]
     Midi(Arc<crate::MidiPortError>),
+    /// A plugin did not open.
+    #[cfg(feature = "plugin")]
+    #[error(transparent)]
+    Plugin(Arc<tutti_plugin_types::BridgeError>),
+    /// The plugin's id names no plugin of the catalog, or several.
+    #[cfg(feature = "plugin")]
+    #[error(transparent)]
+    Unresolved(tutti_plugin::catalog::BindError),
+    /// The landed plugin has other ports than the node over the entry, which
+    /// keeps the plugin it has.
+    #[cfg(feature = "plugin")]
+    #[error("the plugin has {got} where its node has {was}")]
+    PluginPorts {
+        /// The landed plugin's ports.
+        got: crate::PluginPorts,
+        /// The node's.
+        was: crate::PluginPorts,
+    },
+    /// The graph refused the node's swap to the landed plugin.
+    #[cfg(feature = "plugin")]
+    #[error("the node could not swap to the landed plugin: {0}")]
+    PluginSwap(Arc<crate::CrossfadeRefused>),
     /// The load's job did not finish: it panicked, or the spawner dropped it.
     #[error(transparent)]
     Job(#[from] JobFailed),
@@ -400,6 +470,9 @@ pub(crate) struct Item<K> {
     pub(crate) load: Load<Value>,
     pub(crate) reload: Reload,
     pub(crate) lost: fn(&Value) -> bool,
+    pub(crate) park: fn(Value) -> Option<Value>,
+    /// The file the load reads, as the entry declared it.
+    pub(crate) file: Option<PathBuf>,
     pub(crate) share: Option<Cloner>,
 }
 
@@ -429,7 +502,7 @@ impl<K> fmt::Debug for PoolSet<K> {
 #[derive(Clone, Debug)]
 pub struct Declared<K, E> {
     key: K,
-    entry: E,
+    pub(crate) entry: E,
     share: Option<Cloner>,
 }
 
@@ -484,6 +557,18 @@ where
         .map(|loaded| Box::new(loaded.clone()) as Value)
 }
 
+/// `E`'s [`park`](PoolEntry::park) over an erased value: the value back when the
+/// kind keeps it.
+fn park<E: PoolEntry>(value: Value) -> Option<Value> {
+    match value.downcast::<E::Loaded>() {
+        Ok(loaded) => match E::park(*loaded) {
+            Parking::Keep(loaded) => Some(Box::new(loaded) as Value),
+            Parking::Release => None,
+        },
+        Err(value) => Some(value),
+    }
+}
+
 fn lost<E: PoolEntry>(value: &Value) -> bool {
     value.downcast_ref::<E::Loaded>().is_some_and(E::is_lost)
 }
@@ -504,6 +589,8 @@ impl<K, E: PoolEntry> IntoPool<K> for Declared<K, E> {
             identity: Box::new(entry.identity()),
             load: entry.load().erase(),
             lost: lost::<E>,
+            park: park::<E>,
+            file: entry.file().map(Path::to_path_buf),
             share,
             reload: Box::new(move || entry.load().erase()),
         });

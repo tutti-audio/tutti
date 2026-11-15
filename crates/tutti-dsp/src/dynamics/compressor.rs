@@ -9,7 +9,7 @@
 //! stereo image does not move when one side is louder.
 //!
 //! The threshold is the one control read **per frame** when the graph drives it (lane 0
-//! of the [`Feed`]): it is a level to
+//! of the [`Inputs`]): it is a level to
 //! compare against, not a coefficient. Every other control lands on the stream grid
 //! ([`Family::CADENCE`]), the detector's whole and the makeup over [`GAIN_GLIDE`]: a
 //! makeup multiplies the output directly, so a step in it is a click; the knee, the
@@ -25,7 +25,7 @@ use super::key_source::KeySource;
 use crate::control::COEFF_STREAM;
 use crate::smoother::Smoother;
 use crate::{
-    Approach, Cadence, Channels, Effort, Family, Feed, Glide, Recurrence, Ring, Setup, Start,
+    Approach, Cadence, Channels, Effort, Family, Glide, Inputs, Recurrence, Ring, Setup, Start,
     Steps, System,
 };
 
@@ -347,7 +347,7 @@ pub struct CompressorState {
 /// K, per frame: the key's level (the loudest channel of the [`KeySource`]'s source, the
 /// side-chain or the signal; a NaN reads as quiet) in dB
 /// (floored at [`Db::FLOOR`]), the static curve at the threshold (lane 0 of the
-/// [`Feed`] when it is finite, else the member's), the one-pole follower on the
+/// [`Inputs`] when it is finite, else the member's), the one-pole follower on the
 /// reduction (the attack coefficient while it rises, the release while it falls), and
 /// the gain `-reduction + makeup` as an amplitude. The gain of every frame is written
 /// first, and the channels are then multiplied by it, a multiply that vectorizes.
@@ -417,7 +417,7 @@ impl Recurrence for CompressorRecurrence {
         &self,
         coeffs: &CompressorCoeffs,
         state: &mut CompressorState,
-        feed: &Feed<'_>,
+        feed: &Inputs<'_>,
         output: &mut [&mut [f32]],
         frames: Range<usize>,
         _: usize,

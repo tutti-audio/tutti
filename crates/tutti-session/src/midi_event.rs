@@ -94,14 +94,6 @@ pub enum MidiEvent {
         /// or the job's ([`MidiError::Job`](crate::MidiError::Job)).
         file: Result<tutti_midi_file::MidiFile, crate::MidiError>,
     },
-    /// A `Midi::load_soundfont` ended: the unit, or why not.
-    #[cfg(feature = "soundfont")]
-    SoundFontLoaded {
-        /// The id `load_soundfont` returned.
-        load: crate::MidiLoad,
-        /// The unit built (boxed: a unit is large), or the font's or the unit's error, or the job's.
-        unit: Result<Box<tutti_soundfont::SoundFontUnit>, crate::MidiError>,
-    },
     /// A tempo the session follows ([`Midi::follow_tempo`](crate::Midi::follow_tempo))
     /// was published: a Set Tempo of the followed Group, as a step in the
     /// project's tempo map at the start of the next block. A source that

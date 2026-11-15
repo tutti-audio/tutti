@@ -134,7 +134,7 @@
 //!     Address::first(MidiChannel::FIRST),
 //!     Voice2::note_on(NoteNumber::of(60), NoteVelocity::new(0xC800)),
 //! ));
-//! assert_eq!(tx.queue(&[(Offset::ZERO, on)]), 1);
+//! assert_eq!(tx.queue(&[(Offset::ZERO, on)]).packets(), 1);
 //!
 //! let mut block = [(0, Ump([0; 4])); 8];
 //! assert_eq!(rx.poll_into(&mut block), 1);
@@ -225,10 +225,12 @@ mod held;
 mod ledger;
 mod live;
 mod mpe_features;
+mod mpe_zones;
 mod outbound;
 mod output_plan;
 mod schedule;
 mod sync;
+mod taken;
 mod tempo_follower;
 #[cfg(test)]
 mod test_support;
@@ -245,6 +247,7 @@ pub use live::{
     MpeTransformControls, MpeTransformNode, RouteRule, compile_routes,
 };
 pub use mpe_features::{MpeFeaturesError, ask_mpe_features, mpe_features};
+pub use mpe_zones::mpe_zones;
 pub use outbound::{
     ACTIVE_SENSING_INTERVAL, ActiveSensingSender, CLOCK_EVENT_CAPACITY, ClockControls, ClockMaster,
     ClockNode, JR_CLOCK_INTERVAL, JR_CLOCK_MAX_INTERVAL, JrClock, JrClockEmitter, JrStamper,
@@ -262,6 +265,7 @@ pub use sync::{
     ClockEvent, ClockFollower, ClockKind, ClockPosition, ClockTransportState, MachineControlEvent,
     MachineControlFollower, MidiClockDecoder, MtcDecoder,
 };
+pub use taken::Taken;
 pub use tempo_follower::{Followed, TempoFollower, TempoSource};
 pub use traits::MidiOut;
 // The counts a device's inlet keeps, as `DeviceInput::counts` returns them.

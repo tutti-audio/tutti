@@ -13,7 +13,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use tutti_dsp::{
-    BandSettings, CompressorControls, CrossoverControls, CrossoverError, Family, Feed,
+    BandSettings, CompressorControls, CrossoverControls, CrossoverError, Family, Inputs,
     MultibandFamily, MultibandMember, MultibandRecurrence, MultibandSettings, Realized, Setup,
 };
 use tutti_graph::{
@@ -258,7 +258,7 @@ impl Lanes<'_> {
 /// That is `bands * 6 + (bands - 1)` param ports the graph can modulate (27
 /// at 4 bands, under `MAX_PARAM_PORTS`), in the order of [`BAND_PARAMS`] band
 /// by band and then the crossovers. **The threshold is read per frame** when the
-/// graph drives it (lane `b` of the recurrence's [`Feed`], band `b`'s; the cell is the base a
+/// graph drives it (lane `b` of the recurrence's [`Inputs`], band `b`'s; the cell is the base a
 /// frame nobody drives or a non-finite one falls back to). **Every other control is on the
 /// stream grid** (16 frames from the last reset, [`Family::CADENCE`]): a cell write or a
 /// driven port is sampled at the grid's solve frame, so it reaches the render within 16
@@ -465,7 +465,7 @@ impl Tuned {
             *slot = &mut ch[frames.clone()];
         }
         let width = input.len();
-        let mut feed = Feed::new(&audio[..width]);
+        let mut feed = Inputs::new(&audio[..width]);
         for (b, lane) in lanes.band.iter().enumerate().take(rig.bands.len()) {
             if let Some(lane) = lane[THRESHOLD] {
                 feed = feed.with_lane(b, &lane[frames.clone()]);

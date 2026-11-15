@@ -388,7 +388,7 @@ fn a_second_report_is_refused_while_one_is_in_flight() {
     initiator.report(function_block(), now).unwrap();
     assert_eq!(
         initiator.report(function_block(), now),
-        Err(ProcessError::InFlight)
+        Err(ProcessError::AlreadyAsking)
     );
     initiator.on_message(&begin(everything(CiDeviceId::FunctionBlock)), now);
     initiator.on_message(&end(CiDeviceId::FunctionBlock), now);
@@ -416,7 +416,7 @@ fn a_message_from_another_source_or_to_another_muid_is_not_this_peers() {
 }
 
 #[test]
-fn asking_again_for_the_capabilities_starts_the_wait_over_and_keeps_the_features() {
+fn asking_again_for_the_capabilities_starts_the_wait_over_and_keeps_the_features_until_the_reply() {
     let (mut initiator, now) = known(ProcessFeatures::MIDI_MESSAGE_REPORT);
     let later = now + Duration::from_secs(60);
     let actions = initiator.inquire(later);
@@ -426,4 +426,7 @@ fn asking_again_for_the_capabilities_starts_the_wait_over_and_keeps_the_features
         initiator.features(),
         Some(ProcessFeatures::MIDI_MESSAGE_REPORT)
     );
+    // The new inquiry timing out drops what the old one said.
+    initiator.on_timeout(later + PEER_REPLY_TIMEOUT);
+    assert_eq!(initiator.features(), None);
 }

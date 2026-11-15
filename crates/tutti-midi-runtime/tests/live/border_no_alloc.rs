@@ -102,7 +102,7 @@ fn the_border_nodes_process_without_allocating() {
             );
             let n = out.poll_into(&mut drain);
             // Both halves of a mailbox, too.
-            tx.queue_stamped(&drain[..n.min(4)]);
+            let _ = tx.queue_stamped(&drain[..n.min(4)]);
             let _ = rx.poll_into(&mut drain);
         }
     });

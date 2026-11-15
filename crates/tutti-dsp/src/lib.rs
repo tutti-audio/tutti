@@ -3,7 +3,7 @@
 //! CPU-independent real FFT and the algorithms behind the built-in effect nodes: filters, dynamics,
 //! the partitioned convolver, delay lines, reverb, waveshapers and the export
 //! resampler. The analyzers (loudness, pitch, onsets, spectra, ...) are `tutti-measure`,
-//! built on this crate's FFT, windows and `StftGeometry` (whose refusals are `Error`).
+//! built on this crate's FFT, windows and `StftGeometry` (whose refusals are `StftError`).
 //!
 //! ## Effect algorithms
 //!
@@ -11,13 +11,13 @@
 //! ramps and the graph shape. Here they take plain typed values per call.
 //!
 //! - **Filters** — `SvfCoeffs` and `SvfBank<F>` (Simper's trapezoidal
-//!   state-variable filter, eight responses by `SvfType`);
-//!   `LadderCoeffs` and `LadderFamily<F>` (the Moog
-//!   ladder, `tanh` feedback); `CrossoverFamily`, a 2 to 6 band Linkwitz-Riley 4th-order
-//!   split (the design on a 16-frame grid, landing whole). The three
-//!   designs are one `Filter<R>` over a `ChannelRecurrence`, run by `Realized<PerChannel<R>>`. `Real` is the `f32` or `f64` the state
-//!   runs in; its transcendentals call `libm`, so results do not depend on the
-//!   platform's C math library.
+//!   state-variable filter, eight responses by `SvfType`); `LadderCoeffs` and
+//!   `LadderBank<F>` (the Moog ladder, `tanh` feedback); `CrossoverModel` and
+//!   `CrossoverBank`, a 2 to 6 band Linkwitz-Riley 4th-order split. Each bank is one
+//!   filter per channel over buffers views, its coefficients a `Glide` the caller aims
+//!   (the crossover's land whole). `F` is the `f32` or `f64` the state runs in; its
+//!   transcendentals call `libm`, so results do not depend on the platform's C math
+//!   library.
 //! - **Dynamics** — the curves
 //!   `compute_compressor_gain_reduction`, `compute_limiter_gain` and
 //!   `LimiterCurve`; the compressor and the noise gate as families (`CompressorFamily` and
@@ -42,8 +42,8 @@
 //!   feedback).
 //! - **Waveshaping** — `ShapeKind`, six memoryless curves with block kernels.
 //! - **Reverb** — the reverb model, a `Network` with analytic queries
-//!   (RT60, tail, stability, densities), and two families over it: `FreeverbFamily` and
-//!   `FdnFamily`, the feedback delay network.
+//!   (RT60, tail, stability, densities), `FreeverbFamily` over it, and `FdnBank`, the
+//!   feedback delay network over buffers views.
 //! - **Spatial** — vector base amplitude panning (`SpeakerLayout`, `VbapKernel`) and the
 //!   HRTF binaural convolver (`HrtfBinaural`).
 //! - **Resampling and dither** — `FftResampler` and `StreamingResampler` for export, and
@@ -97,23 +97,23 @@
 //!   [`hinf_norm`](Lti::hinf_norm), with [`Complex64`]). A [`Recurrence`] runs a member:
 //!   its [`coefficients_into`](Recurrence::coefficients_into) asks for the coefficient point
 //!   of a member, its [`Approach`] (a [`Glide`]) moves the coefficients there, and its
-//!   [`run`](Recurrence::run) is the per-frame math over a [`Feed`] (the audio, a side-chain
+//!   [`run`](Recurrence::run) is the per-frame math over an [`Inputs`] (the audio, a side-chain
 //!   key, and up to [`MAX_LANES`] per-frame control lanes); [`Realized`] is the one runner of
 //!   them. A family whose state grows with its member is also [`Grows`]: its
 //!   [`reach`](Grows::reach) over a [`Reach`] (with a family's [`Domain`], [`MaxDecay`] for a
 //!   reverb) is a [`Capacity`], what its recurrence allocates; [`Effort`] and [`Cadence`]
 //!   are the engineering that schedules it.
 //! - **Filters** (`filter/`): the SVF ([`SvfBank`], [`SvfModel`], [`SvfType`]), the
-//!   ladder ([`LadderFamily`], [`LadderModel`], [`LadderType`]) and the Linkwitz-Riley
-//!   crossover ([`CrossoverFamily`], [`CrossoverModel`]), each a [`ChannelRecurrence`] under the one
-//!   [`Filter`] family, run by [`PerChannel`]; [`Real`], the `f32` or `f64` their state
-//!   runs in, and the [`Biquad`] section they share.
+//!   ladder ([`LadderBank`], [`LadderModel`], [`LadderType`]) and the Linkwitz-Riley
+//!   crossover ([`CrossoverBank`], [`CrossoverModel`]), each one filter per channel over
+//!   buffers views; [`Lanes`], the arithmetic their steps run in, and the [`Biquad`]
+//!   section they share.
 //! - **Dynamics** (`dynamics/`): the
 //!   gain curves ([`LimiterCurve`] and the `compute_*` functions); the lookahead limiter as a family ([`LimiterFamily`], run by
-//!   [`LimiterRecurrence`], its threshold and ceiling lanes of the [`Feed`], its lookahead
+//!   [`LimiterRecurrence`], its threshold and ceiling lanes of the [`Inputs`], its lookahead
 //!   the member's latency); the brickwall clipper as a family
 //!   ([`BrickwallFamily`], run by [`BrickwallRecurrence`], its ceiling a per-frame lane of
-//!   the [`Feed`]); and the compressor ([`CompressorFamily`], run by
+//!   the [`Inputs`]); and the compressor ([`CompressorFamily`], run by
 //!   [`CompressorRecurrence`], keyed, its threshold a lane, its makeup gliding over
 //!   [`GAIN_GLIDE`]) and the noise gate ([`GateFamily`], run by [`GateRecurrence`], its
 //!   range gliding likewise). Both read a [`KeySource`]: a side-chain bus or the signal itself.
@@ -122,10 +122,10 @@
 //!   band, each band's makeup, bypass and solo gliding over [`GAIN_GLIDE`].
 //! - **Reverb** (`reverb/`): the model, a [`Network`] of [`Stage`]s with
 //!   analytic queries ([`Network::rt60`], [`tail`](System::tail),
-//!   [`is_stable`](Lti::is_stable), the densities) and a [`NetworkCapacity`] worst case; and two
-//!   families over it, [`FreeverbFamily`] (run by [`FreeverbRecurrence`]) and [`FdnFamily`]
-//!   (run by [`FdnRecurrence`]). [`loop_gain`] and [`rt60_from_gain`] are the RT60 formula
-//!   both ways.
+//!   [`is_stable`](Lti::is_stable), the densities) and a [`NetworkCapacity`] worst case;
+//!   [`FreeverbFamily`] (run by [`FreeverbRecurrence`]) and the feedback delay network over
+//!   buffers views ([`FdnBank`] over an [`FdnLayout`], its parameters [`Glide`]s in
+//!   [`FdnGlides`]). [`loop_gain`] and [`rt60_from_gain`] are the RT60 formula both ways.
 //! - **Convolution**: [`Convolver`] over a shared [`IrSpectra`].
 //! - **Delay and modulation** (`delay.rs`, `modulation/`): [`DelayLine`] with an
 //!   [`InterpolationMode`]; the feedback delay ([`DelayBank`] over a [`DelayLayout`]: a
@@ -136,14 +136,14 @@
 //!   coefficient, [`sweep_hz`] and [`allpass_coeff`] the pure pieces the sweep is solved from).
 //! - **Spatial** (`spatial/`): VBAP ([`SpeakerLayout`], Pulkki's pairs and triplets and
 //!   the gain solve over them, [`SpeakerGeometryError`]; [`VbapKernel`] and
-//!   [`VbapGains`], a block's gains and one channel ramped between two) and the HRTF
+//!   [`VbapGains`], one direction's gains and one channel rendered along a glide between two) and the HRTF
 //!   convolver ([`HrtfBinaural`]).
 //! - **FFT** (`fft/`): [`RealFft`], a real-input FFT whose arithmetic does not depend on
 //!   the CPU (the convolver also runs it in steps); [`FftScratch`], reusable
 //!   plans and buffers.
 //! - **STFT vocabulary** (`stft/`): [`CosineWindow`] and the [`Window`] trait,
 //!   [`StftGeometry`] (window, hop, shape and rate, validated together), and [`Grid`]
-//!   with its typed indices; [`enum@Error`] and [`Result`] are what they refuse with.
+//!   with its typed indices; [`StftError`] is what they refuse with.
 //! - **Resampling** (`resample/`): [`WindowedSinc`], [`FftResampler`] (failing with a
 //!   [`ResampleError`]) and [`StreamingResampler`], sized by a [`ChunkSize`].
 //! - **Dither** (`dither/`): [`DitherNoise`] ([`DitherShape`]) and [`DitherSink`], the
@@ -189,9 +189,10 @@ mod spatial;
 mod stft;
 #[cfg(test)]
 mod testing;
+mod xorshift;
 
 pub use balance::balance_gains;
-pub use control::{COEFF_INTERVAL, LANES, Ramp};
+pub use control::{COEFF_INTERVAL, LANES};
 pub use convolver::{Convolver, IrSpectra};
 pub use delay::{
     ChannelTimes, ChannelTimesError, DELAY_SLEW, DelayBank, DelayControls, DelayGlides, DelayLanes,
@@ -211,16 +212,15 @@ pub use dynamics::{
 };
 pub use fft::{Complex32, FftScratch, RealFft};
 pub use filter::{
-    Biquad, ChannelRecurrence, CrossoverControls, CrossoverError, CrossoverFamily, CrossoverModel,
-    CrossoverTree, DirectForm1, Filter, Ladder, LadderCoefficients, LadderCoeffs, LadderControls,
-    LadderFamily, LadderModel, LadderType, Lanes, MAX_SPLITS, PerChannel, Real, SOLVE_CEILING,
-    SvfBank, SvfCoefficients, SvfCoeffs, SvfControls, SvfModel, SvfType, fit_to_rate, ladder_step,
-    svf_step,
+    Biquad, CrossoverBank, CrossoverControls, CrossoverError, CrossoverModel, DirectForm1,
+    LadderBank, LadderCoefficients, LadderCoeffs, LadderControls, LadderDesign, LadderModel,
+    LadderType, Lanes, MAX_SPLITS, SOLVE_CEILING, SvfBank, SvfCoefficients, SvfCoeffs, SvfControls,
+    SvfModel, SvfType, fit_to_rate, ladder_step, svf_step,
 };
 pub use glide::{Glide, Lerp, Steps};
 pub use interp::cubic_hermite;
 pub use model::{
-    Approach, Cadence, Capacity, Channels, Domain, Effort, Family, Feed, Grows, Lti, MAX_LANES,
+    Approach, Cadence, Capacity, Channels, Domain, Effort, Family, Grows, Inputs, Lti, MAX_LANES,
     MaxDecay, MaxDecayError, Reach, Readout, Realized, Recurrence, Ring, Setup, Start, Step,
     System, TAIL_FLOOR,
 };
@@ -236,13 +236,13 @@ pub use modulation::phaser::{
 pub use modulation::sweep::{Stagger, StaggerError, Sweep, SweepError};
 pub use oscillator::{Oscillator, OscillatorWave};
 pub use resample::{ChunkSize, FftResampler, ResampleError, StreamingResampler, WindowedSinc};
-pub use reverb::fdn::design::{FdnControls, FdnFamily, MAX_PRE_DELAY, MIN_DECAY};
-pub use reverb::fdn::recurrence::FdnRecurrence;
+pub use reverb::fdn::bank::{FdnBank, FdnGlides};
+pub use reverb::fdn::design::{FdnControls, FdnLayout, MAX_PRE_DELAY, MIN_DECAY};
 pub use reverb::freeverb::design::{FreeverbControls, FreeverbFamily};
 pub use reverb::freeverb::recurrence::{Freeverb, FreeverbRecurrence};
 pub use reverb::network::{
     Absorption, AllPass, AllPassForm, Band, Fdn, FirSummary, Full, Gains, Inline, Line,
-    MAX_CHANNELS, MAX_DENSE, MAX_LINES, MAX_STAGES, MAX_TAPS, Matrix, Modulation, Network,
+    LineModulation, MAX_CHANNELS, MAX_DENSE, MAX_LINES, MAX_STAGES, MAX_TAPS, Matrix, Network,
     NetworkCapacity, OutputMap, Stage, Tap, Taps, loop_gain, pre_delay_frames, rt60_from_gain,
 };
 pub use rustfft::num_complex::Complex64;
@@ -251,8 +251,9 @@ pub use spatial::{
     HRTF_LATENCY, HRTF_STEP, HrtfBinaural, HrtfBinauralError, MAX_PREPARED_RATE, MAX_SPHERE_RATE,
     MIN_SPHERE_RATE, SpeakerGeometryError, SpeakerLayout, VbapGains, VbapKernel,
 };
-pub use stft::error::{Error, Result};
+pub use stft::error::StftError;
 pub use stft::geometry::StftGeometry;
 pub use stft::grid::{BinCount, BinIndex, FrameCount, FrameIndex, Grid};
 pub use stft::window::{CosineWindow, Window};
 pub use waveshape::{ShapeKind, Shaper};
+pub use xorshift::Xorshift32;

@@ -18,7 +18,7 @@ use tutti_types::{Bpm, ChannelLayout, Db, Hz, SampleRate, Samples};
 pub enum Error {
     /// The shared STFT infrastructure refused a geometry or a grid.
     #[error(transparent)]
-    Dsp(#[from] tutti_dsp::Error),
+    Dsp(#[from] tutti_dsp::StftError),
     /// A zero hop: frames would never advance.
     #[error("hop size is zero: frames would not advance")]
     ZeroHop,

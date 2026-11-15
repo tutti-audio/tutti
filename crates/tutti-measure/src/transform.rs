@@ -423,7 +423,7 @@ impl StftRequest {
     ///
     /// # Errors
     /// Everything [`resolve`](Self::resolve) rejects, plus
-    /// [`tutti_dsp::Error::NotColaCompliant`] (as [`Error::Dsp`]) when the hop does not divide the
+    /// [`tutti_dsp::StftError::NotColaCompliant`] (as [`Error::Dsp`]) when the hop does not divide the
     /// window at the overlap this geometry's window shape requires — 4x for
     /// Hann and Hamming, 8x for Blackman.
     pub fn resolve_cola(&self, len: Samples) -> Result<StftGeometry> {
@@ -650,8 +650,8 @@ mod tests {
         // The hop this resolves to is far wider than the window.
         assert!(matches!(
             stft(&samples, request, &mut fft),
-            Err(Error::Dsp(tutti_dsp::Error::HopExceedsWindow { .. }))
-                | Err(Error::Dsp(tutti_dsp::Error::NotColaCompliant { .. }))
+            Err(Error::Dsp(tutti_dsp::StftError::HopExceedsWindow { .. }))
+                | Err(Error::Dsp(tutti_dsp::StftError::NotColaCompliant { .. }))
         ));
 
         // The display path accepts it and yields a type with no inverse.
@@ -707,7 +707,7 @@ mod tests {
 
         assert!(matches!(
             stft(&samples, request, &mut fft),
-            Err(Error::Dsp(tutti_dsp::Error::NotColaCompliant {
+            Err(Error::Dsp(tutti_dsp::StftError::NotColaCompliant {
                 window_fn: CosineWindow::BLACKMAN,
                 ..
             }))

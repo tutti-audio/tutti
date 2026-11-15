@@ -122,11 +122,11 @@
 //! // Or by name: one `DeviceQuery` form for connect and disconnect.
 //! session.disconnect_input("keystep");
 //!
-//! // Outbound: the output is a value the caller owns; `queue` returns how many
-//! // events the device accepted.
+//! // Outbound: the output is a value the caller owns; `queue` returns what the
+//! // device took of them, always whole messages.
 //! let mut output = session.connect_output("iac")?;
 //! let note = midi::note_on(MidiChannel::FIRST, 60, 0x8000);
-//! assert_eq!(output.queue(&[(Offset::ZERO, note)]), 1);
+//! assert_eq!(output.queue(&[(Offset::ZERO, note)]).packets(), 1);
 //! # Ok::<(), tutti_midi_hardware::Error>(())
 //! ```
 //!
@@ -237,6 +237,7 @@ mod guard;
 mod port;
 mod process;
 mod profiles;
+mod properties;
 mod session;
 // Only the backends with a clock of their own to read convert its timestamp.
 #[cfg_attr(
@@ -265,13 +266,14 @@ pub use devices::{
     WatchFailure,
 };
 pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
-pub use error::{Error, Result};
+pub use error::{Error, NotFound, Result};
 pub use port::{HardwareMidiInputs, InputProducerHandle, PortInfo, Pushed, StreamDrain};
 pub use process::{ProcessChange, ReportAsk, ReportError, ReportPeer};
 pub use profiles::{
     ChannelCount, ChannelProfile, ListedProfile, NotAChannelCount, PeerProfiles, ProfileError,
     ProfileSwitch, ProfilesChange, Whole, WholeProfile,
 };
+pub use properties::{PropertyAsk, PropertyCall, PropertyChange, PropertyError, PropertyPeer};
 pub use session::{Connected, DeviceQuery, MidiSession, Polled};
 pub use stream::{Basis, DeviceStream, InputTiming};
 pub use tutti_midi_device::{

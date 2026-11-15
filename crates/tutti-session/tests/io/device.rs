@@ -138,7 +138,7 @@ fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
     assert!(at48 > Samples(0), "a lookahead to compensate");
 
     let (driver, new) = ManualStreamDriver::new();
-    s.restart_on(&mut device, spec_at(96_000.0), driver, None)
+    s.restart_on(&mut device, spec_at(96_000.0), driver, None, None)
         .expect("restarts");
     assert!(!old.is_open() && new.is_open(), "on the new device");
     assert_eq!(
@@ -306,7 +306,7 @@ fn following_the_default_restarts_and_reports_the_rate() {
     // The host runs it (here on a device-free driver at 48 kHz).
     let (driver, new) = ManualStreamDriver::new();
     session
-        .restart_on(&mut device, spec_at(48_000.0), driver, None)
+        .restart_on(&mut device, spec_at(48_000.0), driver, None, None)
         .unwrap();
     assert!(new.is_open());
     let events = poll(&mut session, base, 110);
@@ -322,7 +322,7 @@ fn following_the_default_restarts_and_reports_the_rate() {
     // Another restart at the same rate is not a rate change.
     let (driver, _s) = ManualStreamDriver::new();
     session
-        .restart_on(&mut device, spec_at(48_000.0), driver, None)
+        .restart_on(&mut device, spec_at(48_000.0), driver, None, None)
         .unwrap();
     let events = poll(&mut session, base, 120);
     let [SessionEvent::Device(DeviceEvent::Restarted(r))] = events.as_slice() else {
@@ -461,6 +461,7 @@ fn a_refused_restart_keeps_the_old_spec_and_is_retried_later() {
         spec_at(96_000.0),
         driver,
         Some(MaxBlock::of(Samples(16_384))),
+        None,
     );
     assert!(err.is_err());
     assert_eq!(
@@ -591,7 +592,7 @@ fn a_fault_after_a_restart_is_reported_again() {
     let base = Instant::now();
     let (driver, second) = ManualStreamDriver::new();
     session
-        .restart_on(&mut device, spec_at(48_000.0), driver, None)
+        .restart_on(&mut device, spec_at(48_000.0), driver, None, None)
         .unwrap();
     second.fail(BackendErrorKind::DeviceGone, &"device not available");
     let events = poll(&mut session, base, 0);
@@ -602,7 +603,7 @@ fn a_fault_after_a_restart_is_reported_again() {
     );
     let (driver, third) = ManualStreamDriver::new();
     session
-        .restart_on(&mut device, spec_at(48_000.0), driver, None)
+        .restart_on(&mut device, spec_at(48_000.0), driver, None, None)
         .unwrap();
     third.fail(BackendErrorKind::DeviceGone, &"device not available");
     let events = poll(&mut session, base, 20);
@@ -761,7 +762,7 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
         tutti_buffers::SampleFormat::F32,
     );
     let (driver, new) = ManualStreamDriver::new();
-    s.restart_on(&mut device, six, driver, None)
+    s.restart_on(&mut device, six, driver, None, None)
         .expect("restarts");
     new.render_block(64).expect("open");
     assert_eq!(across.available(), Samples(0), "the old width gets nothing");
@@ -835,21 +836,97 @@ fn a_restart_onto_a_device_that_cannot_place_the_declared_root_is_refused() {
 
     let (driver, _new) = ManualStreamDriver::new();
     session
-        .restart_on(&mut device, wide(44_100.0), driver, None)
+        .restart_on(&mut device, wide(44_100.0), driver, None, None)
         .expect("another six-wide device takes it");
     assert_eq!(session.graph_ref().outputs(), 4, "the device is no floor");
 
     let (driver, _stereo) = ManualStreamDriver::new();
-    let refused = session.restart_on(&mut device, spec_at(48_000.0), driver, None);
+    let refused = session.restart_on(&mut device, spec_at(48_000.0), driver, None, None);
     assert!(
         matches!(
             &refused,
             Err(e) if matches!(
                 e.error(),
-                tutti_session::Error::Output(tutti_buffers::FoldError::Unplaced { channel: 2, .. })
+                tutti_session::Error::Unplaceable {
+                    device,
+                    source: tutti_buffers::FoldError::Unplaced { channel: 2, .. },
+                    ..
+                } if device.count() == 2
             )
         ),
         "{refused:?}"
+    );
+}
+
+/// A restart takes what its own request states about the new device: the
+/// session reads `Stated` after a restart that says how the device is wired
+/// and `Assumed` after one that does not (another device is wired another
+/// way), and a statement that is not the new device's width is refused before
+/// the graph moves.
+#[test]
+fn a_restart_states_or_assumes_the_new_devices_placement() {
+    use tutti_types::{Bed, Placement};
+    let six = OutputSpec::new(
+        SampleRate::SR_48K,
+        ChannelLayout::from(6u16),
+        tutti_buffers::SampleFormat::F32,
+    );
+    let (driver, _stream) = ManualStreamDriver::new();
+    let (mut session, mut device) = Session::builder()
+        .device(Default::default())
+        .build_device_on(spec_at(48_000.0), driver)
+        .unwrap()
+        .into_parts();
+    assert_eq!(
+        session.output_device().map(|d| d.placement),
+        Some(Placement::Assumed)
+    );
+
+    let (driver, _new) = ManualStreamDriver::new();
+    let wired = Bed::Surround51.topology();
+    session
+        .restart_on(&mut device, six.clone(), driver, None, Some(wired.clone()))
+        .unwrap();
+    let placed = session.output_device().unwrap();
+    assert_eq!(
+        (placed.placement, placed.topology),
+        (Placement::Stated, wired)
+    );
+
+    // A statement of the wrong width is refused, and the old one stands.
+    let (driver, _new) = ManualStreamDriver::new();
+    let refused = session.restart_on(
+        &mut device,
+        six.clone(),
+        driver,
+        None,
+        Some(Bed::Stereo.topology()),
+    );
+    assert!(
+        matches!(
+            &refused,
+            Err(e) if matches!(
+                e.error(),
+                tutti_session::Error::Output(tutti_buffers::FoldError::Buffer(
+                    tutti_buffers::BufferError::WidthMismatch { .. }
+                ))
+            )
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(
+        session.output_device().map(|d| d.placement),
+        Some(Placement::Stated)
+    );
+
+    // The same width again with nothing stated: assumed again.
+    let (driver, _new) = ManualStreamDriver::new();
+    session
+        .restart_on(&mut device, six, driver, None, None)
+        .unwrap();
+    assert_eq!(
+        session.output_device().map(|d| d.placement),
+        Some(Placement::Assumed)
     );
 }
 
@@ -878,7 +955,9 @@ fn a_refused_declaration_is_retried_on_a_restart() {
         tutti_buffers::SampleFormat::F32,
     );
     let (driver, _new) = ManualStreamDriver::new();
-    session.restart_on(&mut device, wide, driver, None).unwrap();
+    session
+        .restart_on(&mut device, wide, driver, None, None)
+        .unwrap();
     assert_eq!(session.root_topology_status(), RootTopologyStatus::Applied);
     assert_eq!(session.root_topology(), Some(&buses));
     assert_eq!(session.graph_ref().outputs(), 4);
@@ -1007,4 +1086,67 @@ fn a_start_with_no_device_is_retried_once_the_device_is_listed() {
 #[test]
 fn a_listed_device_starts_nothing_with_retry_startup_off() {
     assert!(start_when_listed(false).is_empty());
+}
+
+/// **A restart onto a device the map does not fit is refused, and the map
+/// is kept**, never reset to the identity: the error names the map and the
+/// device, the old device is as it was, and once the host sets a map the new
+/// device has places for, the same restart goes through.
+#[test]
+fn a_restart_onto_a_device_the_map_does_not_fit_is_refused_and_keeps_the_map() {
+    use tutti_engine::OutputMap;
+    use tutti_session::OutputPolicy;
+    use tutti_types::Bed;
+    let spec = |channels: usize| {
+        OutputSpec::new(
+            SampleRate::SR_48K,
+            ChannelLayout::try_from(channels).unwrap(),
+            tutti_buffers::SampleFormat::F32,
+        )
+    };
+    let (driver, _stream) = ManualStreamDriver::new();
+    let (mut session, mut device) = Session::builder()
+        .device(Default::default())
+        .build_device_on(spec(6), driver)
+        .unwrap()
+        .into_parts();
+    let policy = OutputPolicy {
+        monitor: Some(Bed::Stereo.topology()),
+        map: OutputMap::channels([4, 5]).unwrap(),
+        ..OutputPolicy::default()
+    };
+    session
+        .policy::<OutputPolicy>()
+        .set(policy.clone())
+        .unwrap();
+    let _ = session.update();
+
+    let (driver, _four) = ManualStreamDriver::new();
+    let refused = session.restart_on(&mut device, spec(4), driver, None, None);
+    match refused {
+        Err(e) => match e.error() {
+            tutti_session::Error::MapUnplaceable { map, device, .. } => {
+                assert_eq!(map, &policy.map);
+                assert_eq!(device.count(), 4);
+            }
+            other => panic!("expected the map named, got {other:?}"),
+        },
+        Ok(_) => panic!("the map has no output 4 on a four-channel device"),
+    }
+    assert_eq!(
+        session.policy::<OutputPolicy>().get().map,
+        policy.map,
+        "never reset to the identity"
+    );
+    assert_eq!(session.output_device().unwrap().topology.width().count(), 6);
+
+    // A map the new device has places for, and the restart goes through.
+    let mut fits = policy;
+    fits.map = OutputMap::channels([2, 3]).unwrap();
+    session.policy::<OutputPolicy>().set(fits).unwrap();
+    let (driver, _four) = ManualStreamDriver::new();
+    session
+        .restart_on(&mut device, spec(4), driver, None, None)
+        .expect("outputs 3 and 4 are there");
+    assert_eq!(session.output_device().unwrap().topology.width().count(), 4);
 }

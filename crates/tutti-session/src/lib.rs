@@ -101,6 +101,7 @@ mod plugin_diagnostics;
 mod plugin_params;
 #[cfg(feature = "plugin")]
 mod plugin_presets;
+mod policy;
 mod pool;
 #[cfg(feature = "record")]
 mod recorder;
@@ -189,17 +190,21 @@ pub use params::{ParamError, RangeError, TypedParamRef};
 pub use peer::{Peer, PeerError, Presence, Resource, ResourceFact, ResourceId};
 #[cfg(feature = "plugin")]
 pub use plugin::{
-    Plugin, PluginChange, PluginEvent, PluginHealth, PluginLoad, PluginLoadRequest, PluginLoaded,
-    PluginNode, SNAPSHOT_INTERVAL, StateRestore, StateView,
+    AddPluginError, LoadedPlugin, Plugin, PluginCause, PluginChange, PluginDeclaration,
+    PluginEntry, PluginEvent, PluginHealth, PluginInfo, PluginLoad, PluginLoadRequest,
+    PluginLoaded, PluginNode, PluginPorts, PooledPlugin, SNAPSHOT_INTERVAL, StateRestore,
+    StateView,
 };
 pub(crate) use pool::Pool;
 #[cfg(feature = "sampler")]
-pub use pool::{AudioFile, audio_file};
+pub use pool::{AudioEntry, AudioFile, StreamInfo, Tier, audio_file};
 pub use pool::{
-    Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, PoolConfig, PoolEntry,
-    PoolError, PoolEvent, PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet, PoolState,
-    RetryError, stranded_loads,
+    Declared, HandleError, IntoPool, Life, Load, LoadError, OpenCx, Parking, PoolConfig, PoolEntry,
+    PoolError, PoolEvent, PoolKey, PoolOutcome, PoolReport, PoolSet, PoolState, PoolWait,
+    RefreshPool, RetryError, WhenLoadedError, stranded_loads,
 };
+#[cfg(feature = "plugin")]
+pub(crate) use pool::{Hold, HoldKind};
 #[cfg(feature = "soundfont")]
 pub use pool::{SoundFontFile, soundfont};
 
@@ -213,6 +218,7 @@ pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 pub use plugin_params::{Param, ParamGesture, Params, PluginParamError, TypedParam};
 #[cfg(feature = "plugin")]
 pub use plugin_presets::{PresetEntry, PresetKind, Presets};
+pub use policy::{OutputPolicy, OutputPolicyError, OutputPolicyHandle, Policy};
 #[cfg(feature = "record")]
 pub use recorder::{Finite, IDLE_PARK, Live, PumpLoop, PumpPass, Recorder, RecorderError};
 #[cfg(feature = "plugin")]
@@ -221,7 +227,7 @@ pub use recovery::{
     ReloadCause,
 };
 #[cfg(feature = "sampler")]
-pub use sampler::{Residency, STREAM_ABOVE_BYTES, SamplerError, SamplerEvent, SamplerLoad};
+pub use sampler::{SamplerError, SamplerEvent, SamplerLoad};
 #[cfg(feature = "midi")]
 pub use session::MidiNodes;
 #[cfg(feature = "modulation")]
@@ -237,7 +243,7 @@ pub use take::{
 pub use tutti_dsp::DitherShape;
 #[cfg(feature = "record")]
 pub use tutti_dsp::{DitherSink, DitherSpec};
-pub use tutti_engine::{HeardOpen, Playhead};
+pub use tutti_engine::{HeardOpen, OutputPlacement, Playhead};
 #[cfg(feature = "export")]
 pub use tutti_export::{
     EventLossPolicy, Normalize, Outcome, Produced, Progress, Rendered, Resample, Stage, Written,

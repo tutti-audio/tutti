@@ -11,9 +11,11 @@
 //! the inverse of each tuple's direction matrix. [`SpeakerLayout::gains_into`] then
 //! turns a bearing, a height and a spread into the speaker gains with no
 //! allocation, every control passed per call. A [`VbapKernel`] holds a layout and
-//! solves one block's [`VbapGains`] (the mono fold of a narrow width, two virtual
-//! sources otherwise, the last solve kept), and [`VbapGains::render_channel`] ramps one
-//! output channel between two of them.
+//! solves one direction's [`VbapGains`] (the mono fold of a narrow width, two virtual
+//! sources otherwise, the last solve kept), and [`VbapGains::render_channel`] renders one
+//! output channel along a [`Glide`](crate::Glide) between two of them. A [`SpeakerLayout`] of
+//! a [`Bed`](tutti_types::Bed) is [`SpeakerLayout::from_bed`]: the speakers sit where
+//! the bed's one table puts them.
 //!
 //! The mathematics is Pulkki's (1997): a source direction `p` is the sum of
 //! the tuple's speaker directions weighted by gains, `g = L^-1 p`, the tuple

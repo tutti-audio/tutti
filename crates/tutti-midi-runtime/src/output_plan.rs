@@ -38,7 +38,7 @@ use std::time::{Duration, Instant};
 
 use tutti_graph::Offset;
 use tutti_types::{Frame, Seconds};
-use tutti_ump::Ump;
+use tutti_ump::{Join, Spans, Ump, spans_joined};
 
 use crate::ClockMap;
 
@@ -71,19 +71,51 @@ pub struct Outgoing {
     pub send: SendAt,
     /// The packet.
     pub ump: Ump,
+    /// Whether the packet is a message of its own or goes with the one before
+    /// it.
+    join: Join,
 }
 
 impl Outgoing {
+    /// A packet that is a message of its own.
+    #[must_use]
+    pub const fn new(at: Offset, send: SendAt, ump: Ump) -> Self {
+        Self {
+            at,
+            send,
+            ump,
+            join: Join::Alone,
+        }
+    }
+
+    /// This packet as part of the message of the packet before it ([`Join`]):
+    /// a cut never falls between them.
+    #[must_use]
+    pub const fn joined_to_previous(self) -> Self {
+        Self {
+            join: Join::ToPrevious,
+            ..self
+        }
+    }
+
+    /// Whether the packet goes with the one before it.
+    #[must_use]
+    pub const fn join(&self) -> Join {
+        self.join
+    }
+
+    /// The messages of `events`, in order: what a cut keeps together
+    /// ([`spans_joined`]).
+    pub fn messages(events: &[Self]) -> Spans<'_, Self, fn(&Self) -> Ump, fn(&Self) -> Join> {
+        spans_joined(events, |event| event.ump, Self::join)
+    }
+
     /// `events`, each sent at once.
     #[must_use]
     pub fn now_batch(events: &[tutti_graph::UmpAt]) -> Vec<Self> {
         events
             .iter()
-            .map(|&(at, ump)| Self {
-                at,
-                send: SendAt::Now,
-                ump,
-            })
+            .map(|&(at, ump)| Self::new(at, SendAt::Now, ump))
             .collect()
     }
 }

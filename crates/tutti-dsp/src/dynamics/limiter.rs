@@ -25,7 +25,7 @@
 //! comes out within the latency, and gain on silence is silence.
 //!
 //! The threshold and the ceiling are the two controls read **per frame** when the graph drives
-//! them (lanes 0 and 1 of the [`Feed`]); a frame that is not finite falls back to the member's.
+//! them (lanes 0 and 1 of the [`Inputs`]); a frame that is not finite falls back to the member's.
 //! Every coefficient lands whole: a glided ceiling would let a sample past the new one.
 //!
 //! A prepare or a reset leaves the envelope **unset** (`+inf`, no history), and the first
@@ -46,7 +46,7 @@ use super::lookahead::{LookaheadRing, fold_peak};
 use crate::control::COEFF_STREAM;
 use crate::smoother::Smoother;
 use crate::{
-    Cadence, Channels, Effort, Family, Feed, Glide, Lerp, Recurrence, Ring, Setup, Start, System,
+    Cadence, Channels, Effort, Family, Glide, Inputs, Lerp, Recurrence, Ring, Setup, Start, System,
 };
 
 /// The controls of a [`LimiterFamily`].
@@ -356,7 +356,7 @@ pub struct LimiterState {
 /// The [`Recurrence`] of a [`LimiterFamily`].
 ///
 /// K, per frame: the linked peak (the loudest channel, a NaN ignored), the target gain
-/// (the member's curve, or, when a lane of the [`Feed`] drives the threshold or the
+/// (the member's curve, or, when a lane of the [`Inputs`] drives the threshold or the
 /// ceiling, the curve in dB at that frame's values), the envelope (taken at once when
 /// lower, released toward the target by the member's coefficient otherwise) and the
 /// minimum over the lookahead window, with which every channel's delayed sample is
@@ -375,7 +375,7 @@ pub struct LimiterRecurrence {
 impl LimiterRecurrence {
     /// The target gain of frame `i`, whose linked peak is `peak`.
     #[inline]
-    fn target_gain(target: &LimiterTarget, feed: &Feed<'_>, i: usize, peak: f32) -> f32 {
+    fn target_gain(target: &LimiterTarget, feed: &Inputs<'_>, i: usize, peak: f32) -> f32 {
         if feed.lanes[0].is_none() && feed.lanes[1].is_none() {
             return target.curve.gain(peak);
         }
@@ -452,7 +452,7 @@ impl Recurrence for LimiterRecurrence {
         &self,
         coeffs: &Glide<LimiterTarget>,
         state: &mut LimiterState,
-        feed: &Feed<'_>,
+        feed: &Inputs<'_>,
         output: &mut [&mut [f32]],
         frames: Range<usize>,
         _: usize,

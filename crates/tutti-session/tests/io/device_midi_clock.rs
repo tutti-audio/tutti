@@ -27,9 +27,10 @@ fn spec_at(rate: f64) -> OutputSpec {
 struct Wire(Arc<Mutex<Vec<Vec<UmpAt>>>>);
 
 impl MidiOut for Wire {
-    fn queue(&self, events: &[UmpAt]) -> usize {
+    fn queue_timed(&self, batch: &[tutti_midi_runtime::Outgoing]) -> tutti_midi_runtime::Taken {
+        let events: Vec<tutti_graph::UmpAt> = batch.iter().map(|e| (e.at, e.ump)).collect();
         self.0.lock().unwrap().push(events.to_vec());
-        events.len()
+        tutti_midi_runtime::Taken::within(batch, batch.len())
     }
 }
 
@@ -104,7 +105,7 @@ fn a_restart_re_rates_the_midi_clock() {
     assert!((ticks(&before) - 918.75).abs() < 0.05, "{}", ticks(&before));
 
     let (driver, new) = ManualStreamDriver::new();
-    s.restart_on(&mut device, spec_at(NEW), driver, None)
+    s.restart_on(&mut device, spec_at(NEW), driver, None, None)
         .expect("restarts");
     assert_eq!(
         s.midi().hardware_out_rate(),

@@ -46,9 +46,8 @@ use tutti_cpal::{DeviceId, DeviceSelector, SnapshotSource, TuttiDriver};
 use tutti_engine::{
     OutputSpec, Stopped, StreamDriver, StreamFault, StreamFaultKind, StreamFaults, StreamLatency,
 };
-use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples, Seconds};
+use tutti_types::{ChannelLayout, ChannelTopology, MaxBlock, SampleRate, Samples, Seconds};
 
-use crate::graph::Graph;
 use crate::{DevicePolicy, DeviceWatch, Error, FollowEvent, Result, Session, SessionEvent};
 
 /// A session and the [`Device`] that drives it, as
@@ -111,6 +110,13 @@ impl LiveSession {
     /// The session, mutably.
     pub fn session_mut(&mut self) -> &mut Session {
         &mut self.session
+    }
+
+    /// What the output device's channels are, stated or assumed
+    /// ([`Session::output_device`]).
+    #[must_use]
+    pub fn output_device(&self) -> Option<crate::OutputPlacement> {
+        self.session.output_device()
     }
 
     /// The device that drives the session.
@@ -416,6 +422,13 @@ pub struct DeviceRestart {
     /// callback it likes, and the engine renders one longer than this as
     /// consecutive graph blocks.
     pub max_block: Option<MaxBlock>,
+    /// What the new device's channels are, when the host states it
+    /// ([`topology`](Self::topology)); `None` takes the engine's order for
+    /// the device's width, and the device is read back as
+    /// [`Placement::Assumed`](tutti_types::Placement::Assumed). It is the
+    /// request's own: another device is wired another way, so a statement
+    /// made for the device the session opened on is not carried over.
+    pub topology: Option<ChannelTopology>,
     /// The device policy asked for it ([`DeviceEvent::RestartWanted`]): not a
     /// choice of the host's.
     wanted: bool,
@@ -431,6 +444,15 @@ impl DeviceRestart {
         }
     }
 
+    /// This restart stating what the new device's channels are: the graph
+    /// root is folded into `topology` by speaker. The restart is refused
+    /// ([`RestartError`]) when `topology` is not the new device's width.
+    #[must_use]
+    pub fn topology(mut self, topology: ChannelTopology) -> Self {
+        self.topology = Some(topology);
+        self
+    }
+
     /// This restart preparing the graph for blocks of up to `max_block`.
     #[must_use]
     pub fn max_block(mut self, max_block: MaxBlock) -> Self {
@@ -444,6 +466,7 @@ impl DeviceRestart {
         Self {
             device,
             max_block: None,
+            topology: None,
             wanted: true,
         }
     }
@@ -581,12 +604,13 @@ impl Session {
     ) -> std::result::Result<DeviceRestarted, RestartError> {
         let selector = request.device.clone();
         let max_block = request.max_block;
+        let topology = request.topology.clone();
         let outcome = self.check_restart(max_block).and_then(|()| {
             let previous = device.graph_rate();
             device
                 .driver
                 .restart_with(request.device, |spec, stopped| {
-                    self.rerate(spec, stopped, max_block)
+                    self.rerate(spec, stopped, max_block, topology)
                 })
                 .map(|()| previous)
         });
@@ -596,7 +620,9 @@ impl Session {
     /// A restart on a driver of the caller's choosing, `spec` standing for the
     /// config the new device reports: the device-free restart, for a test.
     /// It takes any `Device`, which a [`LiveSession`] does not allow, so it is
-    /// behind `testing`.
+    /// behind `testing`. `topology` states what the new device's channels are
+    /// ([`DeviceRestart::topology`]); `None` takes the engine's order for its
+    /// width.
     ///
     /// # Errors
     ///
@@ -608,6 +634,7 @@ impl Session {
         spec: OutputSpec,
         driver: D,
         max_block: Option<MaxBlock>,
+        topology: Option<ChannelTopology>,
     ) -> std::result::Result<DeviceRestarted, RestartError>
     where
         D::Error: Into<tutti_cpal::Error>,
@@ -617,7 +644,7 @@ impl Session {
             device
                 .driver
                 .restart_on(spec, driver, |spec, stopped| {
-                    self.rerate(spec, stopped, max_block)
+                    self.rerate(spec, stopped, max_block, topology)
                 })
                 .map(|()| previous)
         });
@@ -807,14 +834,57 @@ impl Session {
         spec: &OutputSpec,
         stopped: &Stopped<'_>,
         max_block: Option<MaxBlock>,
+        topology: Option<ChannelTopology>,
     ) -> Result<()> {
         let rate = spec.sample_rate;
-        // A declared root has to be placeable on the new device: refused
+        // The root in force has to be placeable on the new device, as the
+        // request states it or as the engine's order for its width: refused
         // before the graph moves, the stream still stopped, like any refusal
-        // here. An undeclared root is a bare width and is never refused.
-        if let Some(root) = self.graph.root_topology() {
-            Graph::check_root(root, spec.channels)?;
+        // here. The root a wider device will widen an undeclared one to is
+        // the root in force.
+        let placed = topology
+            .clone()
+            .unwrap_or_else(|| ChannelTopology::assumed(spec.channels));
+        if placed.width() != spec.channels {
+            return Err(tutti_buffers::FoldError::from(
+                tutti_buffers::BufferError::WidthMismatch {
+                    src: placed.width(),
+                    dst: spec.channels,
+                },
+            )
+            .into());
         }
+        // A map names the root's own channels, so a device swap does not widen
+        // a root that has one; without it a wider device widens an undeclared
+        // root by the build's rule.
+        let mapped = self.output_policy.map.targets().is_some();
+        let root = self.graph.root_topology().cloned().unwrap_or_else(|| {
+            let width = if mapped {
+                self.graph.outputs()
+            } else {
+                crate::root_width(ChannelLayout::clamped(self.graph.outputs()), spec.channels)
+            };
+            ChannelTopology::assumed(ChannelLayout::clamped(width))
+        });
+        // The policy in force has to place the root on the new device too: a
+        // device a map does not fit is refused, never reset to the identity;
+        // the host sets a new map.
+        self.output_policy
+            .routing()
+            .fold(&root, &placed)
+            .map_err(|refusal| match refusal {
+                tutti_engine::RoutingError::Fold(source) => Error::Unplaceable {
+                    root: self.graph.root_id(),
+                    width: root.width(),
+                    device: spec.channels,
+                    source,
+                },
+                map => Error::MapUnplaceable {
+                    map: self.output_policy.map.clone(),
+                    device: spec.channels,
+                    source: map,
+                },
+            })?;
         // The new device's callback size too: a hosted plugin's pipeline
         // follows it, and its declared latency with it.
         self.graph.reprepare(rate, max_block, spec.quantum)?;
@@ -830,6 +900,10 @@ impl Session {
         // A unit that panicked in `prepare`, or shapes that no longer
         // compile, poison the editor here: refuse, the stream still stopped.
         self.graph.check_reprepare(None)?;
+        // Every refusal above left the engine's device as it was: the new one
+        // is placed only now, so a refused restart moves nothing, and a
+        // restart onto the old device places it again.
+        self.graph.place_device(spec.channels, topology)?;
         // The hardware out's tap reads frames of one rate: reopened at the
         // new one, committed with the rest below.
         #[cfg(feature = "midi")]
@@ -839,15 +913,12 @@ impl Session {
         // A declaration a device refused is asked again of this one: if it
         // places, it is in force, committed and settled below with the rest.
         if self.root_refusal.is_some() {
-            match self
-                .graph
-                .declare_root(self.root_request.clone(), Some(spec.channels))
-            {
+            match self.graph.declare_root(self.root_request.clone()) {
                 Ok(()) => {
                     self.root_refusal = None;
                     self.commit();
                 }
-                Err(e) => self.root_refusal = Some(e.into()),
+                Err(e) => self.root_refusal = Some(e),
             }
         }
         // A wider device widens the root, by the build's rule; a narrower one
@@ -857,7 +928,7 @@ impl Session {
         // A declared root keeps the width it declared: the device is no floor
         // under it.
         let width = crate::root_width(ChannelLayout::clamped(self.graph.outputs()), spec.channels);
-        if self.graph.root_topology().is_none() && width > self.graph.outputs() {
+        if self.graph.root_topology().is_none() && !mapped && width > self.graph.outputs() {
             // Undeclared, so it cannot be refused.
             let widened = self.graph.widen_outputs(width);
             debug_assert!(widened.is_ok());

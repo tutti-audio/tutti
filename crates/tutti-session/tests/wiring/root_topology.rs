@@ -8,9 +8,9 @@
 use tutti_buffers::{Float, FoldError, InterleavedMut};
 use tutti_graph::{ForkByClone, RootError};
 use tutti_nodes::testing::Const;
-use tutti_session::{Error, OutPort, Root, RootTopologyStatus, Session, SessionBuilder};
+use tutti_session::{Committed, Error, OutPort, Root, RootTopologyStatus, Session, SessionBuilder};
 use tutti_types::MaxBlock;
-use tutti_types::{ChannelLayout, ChannelTopology, SampleRate, Samples, Speaker};
+use tutti_types::{ChannelLayout, ChannelTopology, Placement, SampleRate, Samples, Speaker};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -274,4 +274,147 @@ fn an_export_is_placed_from_the_declaration() {
     assert_eq!(planes(&mut declared), [0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
     declared.declare_root_topology(None).unwrap();
     assert_eq!(planes(&mut declared), [0.1, 0.2, 0.0, 0.0, 0.3, 0.4]);
+}
+
+/// The device's placement is stated or assumed, and the session says which: a
+/// device with nothing stated is the engine's order for its width and reads
+/// `Assumed`; one the build was told about reads `Stated`, with the topology it
+/// was told.
+#[test]
+fn the_output_device_reads_stated_or_assumed() {
+    let assumed = offline(Session::builder(), 6).unwrap();
+    let placed = assumed.output_device().expect("an engine renders it");
+    assert_eq!(placed.placement, Placement::Assumed);
+    assert_eq!(
+        placed.topology,
+        ChannelTopology::assumed(ChannelLayout::from(6u16))
+    );
+
+    let wired = ChannelTopology::new([
+        Speaker::FrontLeft,
+        Speaker::FrontRight,
+        Speaker::FrontCenter,
+        Speaker::LowFrequency,
+        Speaker::BackLeft,
+        Speaker::BackRight,
+    ])
+    .unwrap();
+    let stated = offline(Session::builder().device_topology(wired.clone()), 6).unwrap();
+    let placed = stated.output_device().unwrap();
+    assert_eq!(placed.placement, Placement::Stated);
+    assert_eq!(placed.topology, wired);
+
+    let detached = Session::builder().build_detached(RATE).unwrap();
+    assert_eq!(detached.output_device(), None, "no engine, no device");
+}
+
+/// A stated device is folded into by speaker: a stereo project into a device
+/// stated right then left lands its left on the device's second channel, where
+/// the assumed stereo device is the identity.
+#[test]
+fn a_stated_device_receives_the_root_by_speaker() {
+    let swapped = ChannelTopology::new([Speaker::FrontRight, Speaker::FrontLeft]).unwrap();
+    let mut s = offline(Session::builder().device_topology(swapped), 2).unwrap();
+    feed(&mut s, &[0.25, 0.75]);
+    assert_eq!(heard(&mut s, 2), [0.75, 0.25]);
+    let mut plain = offline(Session::builder(), 2).unwrap();
+    feed(&mut plain, &[0.25, 0.75]);
+    assert_eq!(heard(&mut plain, 2), [0.25, 0.75]);
+}
+
+/// A statement that is not the device's width is refused where the device is
+/// built, naming the widths, and builds nothing.
+#[test]
+fn a_statement_of_another_width_than_the_device_is_refused() {
+    let five_one = ChannelTopology::assumed(ChannelLayout::from(6u16));
+    match offline(Session::builder().device_topology(five_one), 2) {
+        Err(Error::Output(FoldError::Buffer(tutti_buffers::BufferError::WidthMismatch {
+            src,
+            dst,
+        }))) => {
+            assert_eq!((src.count(), dst.count()), (6, 2));
+        }
+        other => panic!("expected a width mismatch, got {:?}", other.map(|_| ())),
+    }
+}
+
+/// A root a device has no fold for is refused at the commit that makes the
+/// pair, naming it, and the plan sent last keeps sounding: five undeclared
+/// channels on a three-channel device would drop two.
+#[test]
+fn a_commit_with_no_fold_into_the_device_is_refused_by_name() {
+    let mut s = offline(
+        Session::builder().outputs_floor(ChannelLayout::from(3u16)),
+        3,
+    )
+    .unwrap();
+    feed(&mut s, &[0.1, 0.2, 0.3]);
+    assert_eq!(heard(&mut s, 3), [0.1, 0.2, 0.3]);
+    // Widening is the edit; the commit is where the pair is refused.
+    s.graph().widen_outputs(5).unwrap();
+    match s.commit() {
+        Committed::Refused(tutti_graph::CommitError::Unplaceable { width, device, .. }) => {
+            assert_eq!((width, device.count()), (5, 3))
+        }
+        other => panic!("expected Unplaceable, got {other:?}"),
+    }
+    // The plan sent last is still the one heard.
+    assert_eq!(heard(&mut s, 3), [0.1, 0.2, 0.3]);
+}
+
+/// A root changed after the build folds with the plan that carries it: the
+/// session publishes the root's folds, then sends the commit, and the block
+/// that renders the new plan has the new root's fold, not the old one's.
+#[test]
+fn a_root_declared_after_the_build_folds_from_the_plan_that_carries_it() {
+    let mut s = offline(Session::builder(), 6).unwrap();
+    feed(&mut s, &[0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
+    s.declare_root_topology(Some(buses(4))).unwrap();
+    assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
+    // Back to the bare root (the root is four wide now): quad, rears on 4, 5.
+    s.declare_root_topology(None).unwrap();
+    assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.0, 0.0, 0.3, 0.4]);
+}
+
+/// A session with no engine places nothing: with no device to fold into, a
+/// commit of any width is sent, since no block is ever folded.
+#[test]
+fn a_session_with_no_engine_commits_every_width() {
+    let mut s = Session::builder().build_detached(RATE).unwrap();
+    s.graph().widen_outputs(5).unwrap();
+    assert_eq!(s.commit(), Committed::Sent);
+    assert_eq!(s.graph_ref().outputs(), 5);
+}
+
+/// A root declared under a stream that is not rendering is bounded: the
+/// engine holds a few roots ahead of the plan in force, and past them a
+/// declaration is refused by name (`Error::Root`) with the root unchanged;
+/// one block frees the room.
+#[test]
+fn a_declaration_past_the_pending_roots_is_refused_by_name() {
+    let mut s = offline(Session::builder(), 6).unwrap();
+    let mut refused = None;
+    for i in 0..(tutti_engine::MAX_PENDING_ROOTS + 2) {
+        // Alternate, so each declaration is a new root.
+        let root = (i % 2 == 0).then(|| buses(4));
+        match s.declare_root_topology(root) {
+            Ok(()) => {}
+            Err(e) => {
+                refused = Some(e);
+                break;
+            }
+        }
+    }
+    assert!(
+        matches!(
+            refused,
+            Some(Error::Root(RootError::TooManyPending { limit }))
+                if limit == tutti_engine::MAX_PENDING_ROOTS
+        ),
+        "{refused:?}"
+    );
+    // A block renders the newest committed plan and the room is back.
+    let _ = heard(&mut s, 6);
+    let _ = s.update();
+    s.declare_root_topology(Some(buses(4))).unwrap();
 }

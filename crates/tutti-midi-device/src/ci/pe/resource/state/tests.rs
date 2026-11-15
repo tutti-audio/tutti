@@ -2,8 +2,7 @@
 
 use std::num::NonZeroU32;
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use tutti_ump::{DeviceIdentity, ManufacturerId, U7};
 
@@ -87,7 +86,7 @@ fn page() -> NonZeroU32 {
     NonZeroU32::new(8).unwrap()
 }
 
-// M2-111 §2.3, Table 3 and its example: the list's properties read, and written back
+// M2-111 §2.3 and its example: the list's properties read, and written back
 // as they came.
 #[test]
 fn a_state_list_entry_has_the_properties_of_table_3() {
@@ -106,7 +105,7 @@ fn a_state_list_entry_has_the_properties_of_table_3() {
     assert_eq!(PeData::StateList(list).to_json(), Some(json(&lower)));
 }
 
-// M2-111 §2.3, Table 3: `title` and `stateId` are required, the rest optional.
+// M2-111 §2.3: `title` and `stateId` are required, the rest optional.
 #[test]
 fn a_state_list_entry_requires_title_and_state_id() {
     let decode = |t: &str| PeData::decode(&PeResource::StateList, &json(t));
@@ -259,7 +258,8 @@ fn a_state_is_listed_fetched_and_restored_over_many_chunks() {
         .resp
         .store()
         .get(&ResourceTarget::entry(PeResource::State, state_id("buffer").resource_id()).unwrap())
-        .unwrap();
+        .unwrap()
+        .clone();
     let PeData::State(held) = held else {
         panic!("not a State");
     };
@@ -515,20 +515,20 @@ fn an_inquiry_for_state_without_a_res_id_is_refused_by_the_type() {
 #[derive(Debug)]
 struct Device {
     /// Each prefix length judged, and `usize::MAX` for the whole body.
-    asked: Rc<RefCell<Vec<(usize, bool)>>>,
+    asked: Arc<Mutex<Vec<(usize, bool)>>>,
     /// The prefixes judged, kept for comparison.
-    seen: Rc<RefCell<Vec<u8>>>,
+    seen: Arc<Mutex<Vec<u8>>>,
     refuse_prefix_from: Option<usize>,
     refuse_whole: bool,
 }
 
 impl Device {
-    fn new() -> (Self, Rc<RefCell<Vec<(usize, bool)>>>, Rc<RefCell<Vec<u8>>>) {
-        let asked = Rc::new(RefCell::new(Vec::new()));
-        let seen = Rc::new(RefCell::new(Vec::new()));
+    fn new() -> (Self, Arc<Mutex<Vec<(usize, bool)>>>, Arc<Mutex<Vec<u8>>>) {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::new(Mutex::new(Vec::new()));
         let device = Self {
-            asked: asked.clone(),
-            seen: seen.clone(),
+            asked: Arc::clone(&asked),
+            seen: Arc::clone(&seen),
             refuse_prefix_from: None,
             refuse_whole: false,
         };
@@ -540,8 +540,8 @@ impl StateDevice for Device {
     fn judge(&mut self, _: &StateId, arrival: Arrival<'_>) -> Verdict {
         match arrival {
             Arrival::Prefix(prefix) => {
-                self.asked.borrow_mut().push((prefix.len(), false));
-                *self.seen.borrow_mut() = prefix.to_vec();
+                self.asked.lock().unwrap().push((prefix.len(), false));
+                *self.seen.lock().unwrap() = prefix.to_vec();
                 match self.refuse_prefix_from {
                     Some(at) if prefix.len() >= at => Verdict::Refuse,
                     _ => Verdict::Undecided,
@@ -549,7 +549,8 @@ impl StateDevice for Device {
             }
             Arrival::Whole(state) => {
                 self.asked
-                    .borrow_mut()
+                    .lock()
+                    .unwrap()
                     .push((state.to_wire().1.len(), true));
                 if self.refuse_whole {
                     Verdict::Refuse
@@ -604,15 +605,16 @@ fn terminates(link: &Link, to_responder: bool) -> bool {
 
 fn stored_state(link: &Link, id: &str) -> PeState {
     let target = ResourceTarget::entry(PeResource::State, state_id(id).resource_id()).unwrap();
-    let Some(PeData::State(state)) = link.resp.store().get(&target) else {
+    let store = link.resp.store();
+    let Some(PeData::State(state)) = store.get(&target) else {
         panic!("no state");
     };
     state.clone()
 }
 
 fn listed(link: &Link, id: &str) -> PeStateEntry {
-    let Some(PeData::StateList(list)) = link.resp.store().get(&target(PeResource::StateList))
-    else {
+    let store = link.resp.store();
+    let Some(PeData::StateList(list)) = store.get(&target(PeResource::StateList)) else {
         panic!("no list");
     };
     list.entry(&state_id(id)).unwrap().clone()
@@ -699,7 +701,7 @@ fn a_refused_body_is_ended_midway_with_terminate_inquiry() {
     assert!(terminates(&link, false));
     let used = chunks(&link, true, PeMessageKind::SET_INQUIRY) - sent;
     assert!(used < 5, "{used} chunks of the body were sent");
-    assert!(asked.borrow().iter().all(|(_, whole)| !whole));
+    assert!(asked.lock().unwrap().iter().all(|(_, whole)| !whole));
     assert_eq!(stored_state(&link, "buffer"), before);
     assert!(matches!(
         link.served.last(),
@@ -720,13 +722,13 @@ fn the_device_is_asked_after_each_chunk_with_the_decoded_start_of_the_body() {
     let body = bytes(3000);
     let call = restore(&mut link, PeState::octets(body.clone()));
     assert_eq!(link.set_result(call), Ok(PeStatus::Ok));
-    let asked = asked.borrow();
+    let asked = asked.lock().unwrap();
     let (whole, prefixes): (Vec<&(usize, bool)>, Vec<&(usize, bool)>) =
         asked.iter().partition(|(_, w)| *w);
     assert_eq!(whole, [&(3000, true)]);
     assert!(prefixes.len() > 10);
     assert!(prefixes.windows(2).all(|w| w[0].0 < w[1].0));
-    let last = seen.borrow();
+    let last = seen.lock().unwrap();
     assert_eq!(&body[..last.len()], &last[..]);
 }
 

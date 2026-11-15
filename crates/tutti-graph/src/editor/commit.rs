@@ -5,12 +5,14 @@ use std::sync::Arc;
 
 use tutti_curve::declick_frames;
 
+use super::lifecycle::Resume;
 use super::{BusLanes, CommitError, Editor, starting};
 use crate::NodeKey;
 use crate::compile::compile;
 use crate::exec::Commit;
-use crate::exec::Opened;
+use crate::exec::{Opened, StageIn};
 use crate::node::Node;
+use crate::param::ParamState;
 use crate::plan::{Delta, Placement, Plan};
 
 impl Editor {
@@ -47,8 +49,10 @@ impl Editor {
         self.link.end_applied_taps();
         while let Some(x) = self.link.pop_faded() {
             keys.extend(std::iter::repeat_n(x.key(), x.units()));
+            self.stager.faded(x.key());
             drop(x);
         }
+        self.stager.observe(self.link.acked());
         keys
     }
 
@@ -84,10 +88,25 @@ impl Editor {
         Self::lower_and_validate(&self.spec, &self.shapes).map(|_| ())
     }
 
+    /// Refuses a root generation the attached host has no folds for.
+    fn check_root_published(&self) -> Result<(), CommitError> {
+        let outputs = self.spec.topology.outputs.len();
+        match &self.root_gate {
+            Some(gate) if outputs > 0 && !gate.published(self.spec.root_id, outputs) => {
+                Err(CommitError::RootNotPublished {
+                    root: self.spec.root_id,
+                    outputs,
+                })
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// The cheap checks of [`validate`](Self::validate), before the spec is
     /// lowered: what [`commit`](Self::commit) asks even when nothing changed.
     fn check_spec(&self) -> Result<(), CommitError> {
         self.limits.outputs(self.spec.topology.outputs.len())?;
+        self.check_root_published()?;
         self.check_tap_widths()?;
         self.check_meter_widths()?;
         self.check_passes()
@@ -157,13 +176,14 @@ impl Editor {
             return Ok(());
         }
         let (valid, weights) = Self::lower_and_validate(&self.spec, &self.shapes)?;
-        let (plan, mut delta) = compile(
+        let (mut plan, mut delta) = compile(
             &valid,
             &self.shapes,
             &self.prepare,
             self.base().map(|p| &**p),
         )
         .map_err(CommitError::Compile)?;
+        plan.root_id = self.spec.root_id;
         // The crossfades `replace` asked for, for the keys this delta
         // replaces (a key removed since has none to carry).
         delta.fades = delta
@@ -209,7 +229,7 @@ impl Editor {
             .map(|k| (k, self.placements.take_unit(k).expect("checked above")))
             .collect();
         self.placements.clear_fades_and_cuts();
-        self.send(plan, delta, units, &weights);
+        self.send(plan, delta, units, &weights, None);
         self.sync_ranges();
         self.life
             .set_committed(self.spec.clone(), self.shapes.clone());
@@ -247,18 +267,20 @@ impl Editor {
         // The plan was compiled elsewhere, from the spec as it stands (as a
         // caller that lowers it must have).
         let weights = self.lowered().map(|l| l.weights()).unwrap_or_default();
-        self.send(plan, delta, units, &weights);
+        self.send(plan, delta, units, &weights, None);
         Ok(())
     }
 
     /// Builds the commit of `plan` and sends it: the caller checked the
     /// link's room (`check_room`, `fade_room`), so the send cannot fail.
+    /// `resume` is a re-prepare's second half.
     pub(super) fn send(
         &mut self,
         plan: Plan,
         delta: Delta,
         units: BTreeMap<NodeKey, Box<dyn Node>>,
         bus_weights: &BusLanes,
+        resume: Option<Resume>,
     ) {
         self.touch();
         let fades = starting(&delta);
@@ -283,7 +305,7 @@ impl Editor {
         let taps = self.taps.take_pending();
         let event_taps = self.event_taps.take_pending();
         let meters = self.meters.take_pending();
-        let commit = Commit::build(
+        let mut commit = Commit::build(
             self.link.next_seq(),
             Arc::clone(&plan),
             delta,
@@ -296,6 +318,24 @@ impl Editor {
                 taps,
                 event_taps,
                 meters,
+            },
+        );
+        // Everything applying needs that is a function of the plan is built
+        // here, so the audio thread only swaps and moves.
+        let (max, declick) = (plan.prepare.max_block().get(), declick);
+        let mode_cells = &self.cells.modes;
+        let old = self.life.plan().map(Arc::clone);
+        self.stager.stage(
+            &mut commit,
+            StageIn {
+                old: old.as_deref(),
+                carry: resume.is_none_or(|r| r.carry),
+                resumed: resume.is_some(),
+                mix_lane: &|key| {
+                    mode_cells
+                        .get(key)
+                        .map(|cell| ParamState::lane(max, declick, cell.ranges()))
+                },
             },
         );
         self.cells.keep_placed(&plan, &self.spec);

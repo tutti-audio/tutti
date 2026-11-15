@@ -358,7 +358,7 @@ fn an_unknown_count_ends_at_the_chunk_that_declares_it() {
 /// Section 7.9.1: a sender out of data sends one more header-only chunk
 /// (size 16) that declares the count equal to its number, which closes the
 /// set with the data sent valid.
-/// Spec: m2-104/7.9.1#2, m2-104/7.9.1#4
+/// Spec: m2-104/7.9.1#1, m2-104/7.9.1#2, m2-104/7.9.1#4
 #[test]
 fn a_header_only_chunk_that_declares_its_number_closes_the_set() {
     let mut a = assembler(1);
@@ -478,4 +478,74 @@ fn only_mixed_data_umps_are_taken() {
         MixedDataStep::NotMixedData
     );
     assert_eq!(a.push(header(G0, 0, 32, 1, 1)), MixedDataStep::Held);
+}
+
+/// Section 7.9, Number of Valid Bytes: when the data does not fill the last
+/// payload UMP, the pad bytes are zero.
+/// Spec: m2-104/7.9#4
+#[test]
+fn the_last_payload_ump_is_padded_with_zero() {
+    for len in 1..=42usize {
+        let bytes = data(len);
+        let last = set(G0, 6, &bytes)
+            .packets(MdsChunkUmps::of(4094))
+            .unwrap()
+            .filter_map(|u| match u.decode() {
+                Ok(Message::Data128(_, Data128::MixedDataPayload { bytes, .. })) => Some(bytes),
+                _ => None,
+            })
+            .last()
+            .unwrap();
+        let used = match len % 14 {
+            0 => 14,
+            r => r,
+        };
+        assert_eq!(last[..used], bytes[len - used..], "{len}");
+        assert_eq!(last[used..], [0u8; 14][used..], "{len}");
+    }
+}
+
+/// Section 7.9, Device ID and Sub IDs: the header carries the 16-bit device id
+/// (`0xFFFF` is the all-call value) and both sub ids as written, whatever the
+/// manufacturer, so a manufacturer is free to define them.
+/// Spec: m2-104/7.9#8, m2-104/7.9#9, m2-104/7.9#10, m2-104/7.9#11
+#[test]
+fn the_header_carries_device_and_sub_ids_as_written() {
+    let manufacturers = [
+        ManufacturerId::NON_COMMERCIAL,
+        ManufacturerId::UNIVERSAL_NON_REAL_TIME,
+        ManufacturerId::UNIVERSAL_REAL_TIME,
+    ];
+    for (manufacturer, (device, sub_id_1, sub_id_2)) in manufacturers.into_iter().zip([
+        (0xFFFF, 0, 0xFFFF),
+        (0, 0x1234, 0x5678),
+        (0xABCD, 0xFFFF, 1),
+    ]) {
+        let identity = MdsIdentity {
+            manufacturer,
+            device,
+            sub_id_1,
+            sub_id_2,
+        };
+        let ump = Ump::from(Message::Data128(
+            G0,
+            Data128::MixedDataHeader(MixedDataHeader {
+                mds_id: U4::of(1),
+                chunk_size: MdsChunkSize::HEADER_ONLY,
+                chunks: MdsChunks::new(1),
+                chunk: MdsChunk::new(1),
+                identity,
+            }),
+        ));
+        // Word 2 is the manufacturer then the device, word 3 the two sub ids.
+        assert_eq!(
+            ump.0[2],
+            u32::from(manufacturer.get()) << 16 | u32::from(device)
+        );
+        assert_eq!(ump.0[3], u32::from(sub_id_1) << 16 | u32::from(sub_id_2));
+        let Ok(Message::Data128(_, Data128::MixedDataHeader(h))) = ump.decode() else {
+            panic!("not a header");
+        };
+        assert_eq!(h.identity, identity);
+    }
 }
