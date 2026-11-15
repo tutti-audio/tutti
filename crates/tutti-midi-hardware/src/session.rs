@@ -740,9 +740,9 @@ fn mpe_zone_refusals(
         else {
             continue;
         };
-        for (zone, why) in held.refused_mpe_zones() {
-            if named.is_none_or(|manager| zone.master_channel() == manager) {
-                said.push((*peer, ProfilesChange::MpeZoneRefused { zone, why }));
+        for overlap in held.refused_mpe_zones() {
+            if named.is_none_or(|manager| overlap.added.manager() == manager) {
+                said.push((*peer, ProfilesChange::MpeZoneRefused(overlap)));
             }
         }
     }
