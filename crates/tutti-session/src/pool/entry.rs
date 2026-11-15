@@ -5,6 +5,9 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use tutti_rt::MainThreadMarker;
+
+use crate::pool::open::OpenCx;
 use crate::{JobFailed, PeerError, Presence};
 
 /// What the session holds of a loaded entry, whatever its kind.
@@ -48,31 +51,181 @@ pub trait PoolEntry: Send + 'static {
     /// The handle for a loaded value. `life` is the entry's: it reads closed
     /// once the entry is released or swapped to another identity.
     fn handle(loaded: &Self::Loaded, life: &Life) -> Self::Handle;
+
+    /// Whether the live thing behind a loaded value is gone: what a peer
+    /// handle reads as [`Presence::Lost`] (a plugin that gave up, a capture
+    /// whose device left). The kind decides presence; the pool only asks, and
+    /// [`Session::retry`](crate::Session::retry) reopens such an entry by
+    /// running [`load`](Self::load) again. The default is `false`: a data kind
+    /// is never lost.
+    fn is_lost(_loaded: &Self::Loaded) -> bool {
+        false
+    }
 }
 
-/// The description of a load: work for the session's spawner that ends in the
-/// loaded value or a [`LoadError`].
+/// The description of a load: the stages that end in the loaded value or a
+/// [`LoadError`], and the thread each runs on.
+///
+/// - [`on_worker`](Self::on_worker): one stage on a thread of the session's
+///   spawner, which finishes the load there.
+/// - [`on_worker_then_main`](Self::on_worker_then_main): a worker stage whose
+///   output goes by value to a stage on the main thread, which finishes it.
+/// - [`on_session`](Self::on_session): one stage on the session's own thread,
+///   inside [`Session::update`](crate::Session::update), with no worker stage.
+/// - [`ready`](Self::ready): no stage; the value lands when the pool declares
+///   the entry.
 #[must_use = "a load runs when the pool declares its entry"]
 pub struct Load<T> {
-    work: Box<dyn FnOnce() -> Result<T, LoadError> + Send>,
+    pub(crate) step: Step<T>,
+    /// Whether a worker stage hands on to a main-thread stage.
+    main: bool,
+}
+
+/// What a load's stages are, by the thread the first one runs on.
+pub(crate) enum Step<T> {
+    Ready(T),
+    Worker(Box<dyn FnOnce() -> Result<Staged<T>, LoadError> + Send>),
+    Session(Box<dyn FnOnce(&mut OpenCx<'_>) -> Result<T, LoadError> + Send>),
+}
+
+/// What a worker stage hands on: the finished value, or the main-thread stage
+/// that finishes it.
+pub(crate) enum Staged<T> {
+    Done(T),
+    Main(MainStage<T>),
+}
+
+/// A load's main-thread stage with the worker's output inside it. It runs or
+/// is discarded only with a [`MainThreadMarker`], so the worker's output is
+/// consumed or dropped on the main thread and nowhere else.
+pub(crate) struct MainStage<T>(
+    Box<dyn FnOnce(MainThreadMarker, Turn) -> Option<Result<T, LoadError>> + Send>,
+);
+
+/// What a [`MainStage`] is asked to do with the worker's output.
+enum Turn {
+    Run,
+    Discard,
+}
+
+impl<T: Send + 'static> MainStage<T> {
+    fn new<W: Send + 'static>(
+        output: W,
+        main: impl FnOnce(W, MainThreadMarker) -> Result<T, LoadError> + Send + 'static,
+    ) -> Self {
+        Self(Box::new(move |marker, turn| match turn {
+            Turn::Run => Some(main(output, marker)),
+            Turn::Discard => {
+                drop(output);
+                None
+            }
+        }))
+    }
+
+    fn map<U>(self, map: impl FnOnce(T) -> U + Send + 'static) -> MainStage<U>
+    where
+        U: Send + 'static,
+    {
+        MainStage(Box::new(move |marker, turn| {
+            (self.0)(marker, turn).map(|done| done.map(map))
+        }))
+    }
+
+    /// Runs the stage on the main thread.
+    pub(crate) fn run(self, main: MainThreadMarker) -> Result<T, LoadError> {
+        (self.0)(main, Turn::Run).expect("a stage asked to run answers")
+    }
+
+    /// Drops the worker's output on the main thread, running nothing.
+    pub(crate) fn discard(self, main: MainThreadMarker) {
+        let _ = (self.0)(main, Turn::Discard);
+    }
+}
+
+impl<T: Send + 'static> Staged<T> {
+    fn map<U: Send + 'static>(self, map: impl FnOnce(T) -> U + Send + 'static) -> Staged<U> {
+        match self {
+            Self::Done(done) => Staged::Done(map(done)),
+            Self::Main(stage) => Staged::Main(stage.map(map)),
+        }
+    }
 }
 
 impl<T: Send + 'static> Load<T> {
-    /// A load that runs `work` on a thread of the session's spawner.
+    /// A load that finishes in one stage: `work`, on a thread of the session's
+    /// spawner.
     pub fn on_worker(work: impl FnOnce() -> Result<T, LoadError> + Send + 'static) -> Self {
         Self {
-            work: Box::new(work),
+            step: Step::Worker(Box::new(move || work().map(Staged::Done))),
+            main: false,
         }
     }
 
-    pub(crate) fn erase(self) -> Load<Value> {
-        Load::on_worker(move || (self.work)().map(|loaded| Box::new(loaded) as Value))
+    /// A load of a worker stage and then a main-thread stage: `work` runs on a
+    /// thread of the session's spawner, and its output `W` goes by value to
+    /// `main`, which runs on the main thread in an
+    /// [`update`](crate::Session::update) on it and makes the loaded value.
+    ///
+    /// The entry reads [`PoolState::WaitingForMainThread`](crate::PoolState::WaitingForMainThread)
+    /// between the stages, and [`Session::pool`](crate::Session::pool) refuses
+    /// the entry with [`PoolError::NeedsMainThread`](crate::PoolError::NeedsMainThread)
+    /// when the session has no main thread to run `main` on. A load cancelled
+    /// or superseded between the stages never runs `main`: its `W` is dropped
+    /// on the main thread, by the same queue that would have run `main`.
+    pub fn on_worker_then_main<W: Send + 'static>(
+        work: impl FnOnce() -> Result<W, LoadError> + Send + 'static,
+        main: impl FnOnce(W, MainThreadMarker) -> Result<T, LoadError> + Send + 'static,
+    ) -> Self {
+        Self {
+            step: Step::Worker(Box::new(move || {
+                work().map(|output| Staged::Main(MainStage::new(output, main)))
+            })),
+            main: true,
+        }
     }
-}
 
-impl<T> Load<T> {
-    pub(crate) fn run(self) -> Result<T, LoadError> {
-        (self.work)()
+    /// A load that is one stage on the session's own thread, run inside the
+    /// [`update`](crate::Session::update) after the entry is declared, with no
+    /// worker stage. `open` is given what the session thread owns that an open
+    /// needs ([`OpenCx`]); the entry reads
+    /// [`PoolState::Opening`](crate::PoolState::Opening) until it runs.
+    pub fn on_session(
+        open: impl FnOnce(&mut OpenCx<'_>) -> Result<T, LoadError> + Send + 'static,
+    ) -> Self {
+        Self {
+            step: Step::Session(Box::new(open)),
+            main: false,
+        }
+    }
+
+    /// A load with nothing to do: `value` lands when the pool declares the
+    /// entry, as a provided `Arc` does.
+    pub const fn ready(value: T) -> Self {
+        Self {
+            step: Step::Ready(value),
+            main: false,
+        }
+    }
+
+    /// Whether the load has a main-thread stage.
+    pub(crate) const fn needs_main(&self) -> bool {
+        self.main
+    }
+
+    pub(crate) fn erase(self) -> Load<Value> {
+        let step = match self.step {
+            Step::Ready(value) => Step::Ready(Box::new(value) as Value),
+            Step::Worker(work) => Step::Worker(Box::new(move || {
+                work().map(|staged| staged.map(|done| Box::new(done) as Value))
+            })),
+            Step::Session(open) => Step::Session(Box::new(move |cx| {
+                open(cx).map(|done| Box::new(done) as Value)
+            })),
+        };
+        Load {
+            step,
+            main: self.main,
+        }
     }
 }
 
@@ -168,12 +321,23 @@ impl<T: Eq + fmt::Debug + Send + 'static> ErasedIdentity for T {
     }
 }
 
+/// What loads an entry again: the kind's `load`, kept for a retry.
+pub(crate) type Reload = Box<dyn Fn() -> Load<Value> + Send>;
+
+/// Another owner of a loaded value, for an entry declared with
+/// [`Declared::shared`].
+pub(crate) type Cloner = fn(&Value) -> Option<Value>;
+
 /// One declared entry, its kind and its load erased.
 pub(crate) struct Item<K> {
     pub(crate) key: K,
     pub(crate) kind: TypeId,
     pub(crate) identity: Box<dyn ErasedIdentity>,
-    pub(crate) load: Box<dyn FnOnce() -> Load<Value> + Send>,
+    /// The load, described when the set was made.
+    pub(crate) load: Load<Value>,
+    pub(crate) reload: Reload,
+    pub(crate) lost: fn(&Value) -> bool,
+    pub(crate) share: Option<Cloner>,
 }
 
 /// The entries of one [`Session::pool`](crate::Session::pool) call, in
@@ -203,13 +367,50 @@ impl<K> fmt::Debug for PoolSet<K> {
 pub struct Declared<K, E> {
     key: K,
     entry: E,
+    share: Option<Cloner>,
 }
 
 impl<K, E: PoolEntry> Declared<K, E> {
-    /// `entry`, declared under `key`.
+    /// `entry`, declared under `key`: one instance per key, even when another
+    /// key is declared with the same identity.
     pub const fn new(key: K, entry: E) -> Self {
-        Self { key, entry }
+        Self {
+            key,
+            entry,
+            share: None,
+        }
     }
+
+    /// `entry`, declared under `key` as a resource that shares: another key
+    /// declared with the same kind and identity, and shared too, shares this
+    /// one's load, and every handle reads the same loaded value (a
+    /// [`Clone`] of it, an `Arc`). The data kinds ([`audio_file`](crate::audio_file),
+    /// [`soundfont`](crate::soundfont)) are declared this way; a kind with
+    /// something live behind it (a plugin client, a capture) uses
+    /// [`new`](Self::new).
+    pub const fn shared(key: K, entry: E) -> Self
+    where
+        E::Loaded: Clone,
+    {
+        Self {
+            key,
+            entry,
+            share: Some(clone_loaded::<E>),
+        }
+    }
+}
+
+fn clone_loaded<E: PoolEntry>(value: &Value) -> Option<Value>
+where
+    E::Loaded: Clone,
+{
+    value
+        .downcast_ref::<E::Loaded>()
+        .map(|loaded| Box::new(loaded.clone()) as Value)
+}
+
+fn lost<E: PoolEntry>(value: &Value) -> bool {
+    value.downcast_ref::<E::Loaded>().is_some_and(E::is_lost)
 }
 
 /// What [`Session::pool`](crate::Session::pool) takes: an entry, a tuple of
@@ -221,12 +422,15 @@ pub trait IntoPool<K> {
 
 impl<K, E: PoolEntry> IntoPool<K> for Declared<K, E> {
     fn into_pool(self, set: &mut PoolSet<K>) {
-        let Self { key, entry } = self;
+        let Self { key, entry, share } = self;
         set.items.push(Item {
             key,
             kind: TypeId::of::<E>(),
             identity: Box::new(entry.identity()),
-            load: Box::new(move || entry.load().erase()),
+            load: entry.load().erase(),
+            lost: lost::<E>,
+            share,
+            reload: Box::new(move || entry.load().erase()),
         });
     }
 }
