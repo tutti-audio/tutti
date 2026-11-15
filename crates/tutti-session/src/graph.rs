@@ -181,6 +181,7 @@ struct Entry {
 struct Local {
     exec: Executor,
     /// Planar scratch, one `Vec` per global output.
+    #[cfg(feature = "testing")]
     scratch: Vec<Vec<f32>>,
 }
 
@@ -463,6 +464,7 @@ impl Graph {
             editor,
             local: Some(Local {
                 exec,
+                #[cfg(feature = "testing")]
                 scratch: Vec::new(),
             }),
             nodes: BTreeMap::new(),
@@ -3110,6 +3112,7 @@ impl Graph {
     }
 
     /// Render one frame on the local executor, under `transport`.
+    #[cfg(feature = "testing")]
     pub(crate) fn render_local(&mut self, transport: &TransportPosition, output: &mut [f32]) {
         let local = self
             .local
@@ -3124,6 +3127,7 @@ impl Graph {
 ///
 /// `output` wider than the plan reads silence past it; narrower, the extra
 /// channels are dropped — the width a caller passes is its own business.
+#[cfg(feature = "testing")]
 fn render(
     exec: &mut Executor,
     scratch: &mut Vec<Vec<f32>>,

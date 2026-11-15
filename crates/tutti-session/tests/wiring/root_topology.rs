@@ -8,9 +8,7 @@
 use tutti_buffers::{Float, FoldError, InterleavedMut};
 use tutti_graph::{ForkByClone, RootError};
 use tutti_nodes::testing::Const;
-use tutti_session::{
-    DetachedSession, Error, OutPort, Root, RootTopologyStatus, Session, SessionBuilder,
-};
+use tutti_session::{Error, OutPort, Root, RootTopologyStatus, Session, SessionBuilder};
 use tutti_types::MaxBlock;
 use tutti_types::{ChannelLayout, ChannelTopology, SampleRate, Samples, Speaker};
 
