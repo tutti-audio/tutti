@@ -1,8 +1,11 @@
 //! Wire-width integers: a value of a stated range, so a field cannot hold one
 //! the packet cannot carry.
 //!
-//! The public constructor refuses a value out of range. The codec builds one
-//! from bits it has just masked, through the private `wire`.
+//! The public constructor refuses a value out of range, and no constructor
+//! stores one. The codec builds a bit-width field from bits it has just masked,
+//! through `masked`; a bounded value out of range it reads as a `Field::Reserved`.
+
+use crate::ControlValue;
 
 /// A raw number above the largest the type holds, from `TryFrom` on an
 /// address type or a bit-width field.
@@ -129,17 +132,10 @@ macro_rules! bounded {
                 }
             }
 
-            /// The raw value.
+            /// The raw value, always in range.
             #[must_use]
             pub const fn get(self) -> $repr {
                 self.0
-            }
-
-            // The value as the wire sent it, in range or not: a reserved value
-            // is kept so the message re-encodes exactly.
-            #[allow(dead_code)] // `SharpsFlats` has no reserved value to keep.
-            pub(crate) const fn wire(raw: $repr) -> Self {
-                Self(raw)
             }
         }
     };
@@ -252,26 +248,134 @@ pub fn first_non_seven_bit(bytes: &[u8]) -> Option<usize> {
     bytes.iter().position(|&b| b & 0x80 != 0)
 }
 
+// `From` into the raw and `TryFrom` from it, for a bounded type with an
+// unsigned raw.
+macro_rules! bounded_conversions {
+    ($name:ident, $repr:ty, $max:expr) => {
+        impl From<$name> for $repr {
+            fn from(value: $name) -> $repr {
+                value.get()
+            }
+        }
+
+        impl TryFrom<$repr> for $name {
+            type Error = OutOfRange;
+
+            fn try_from(raw: $repr) -> Result<Self, OutOfRange> {
+                Self::new(raw).ok_or(OutOfRange {
+                    what: stringify!($name),
+                    value: u32::from(raw),
+                    max: $max as u32,
+                })
+            }
+        }
+    };
+}
+
 bounded!(
-    /// A Function Block number (`0..=31`). A reserved number read from the wire
-    /// is kept, so such a message re-encodes exactly.
+    /// A Function Block number (`0..=31`). A reserved number read from the
+    /// wire is a [`Field::Reserved`](crate::Field::Reserved), not a value of
+    /// this type.
     FunctionBlockId, u8, 0, 31
 );
+bounded_conversions!(FunctionBlockId, u8, 31);
 bounded!(
     /// A Group number as a Function Block declares its first Group (`0..=15`).
-    /// A reserved number read from the wire is kept.
+    /// A reserved number read from the wire is a
+    /// [`Field::Reserved`](crate::Field::Reserved).
     FirstGroup, u8, 0, 15
 );
+bounded_conversions!(FirstGroup, u8, 15);
 bounded!(
     /// How many Groups a Function Block spans (`1..=16`). A reserved count read
-    /// from the wire is kept.
+    /// from the wire is a [`Field::Reserved`](crate::Field::Reserved).
     GroupSpan, u8, 1, 16
 );
+bounded_conversions!(GroupSpan, u8, 16);
 bounded!(
     /// How many channels an MPE Profile zone has, its Manager Channel and one
     /// to fifteen Member Channels: `2..=16` (M2-120 §2.1).
     MpeChannels, u8, 2, 16
 );
+bounded!(
+    /// A chord type, `0x00..=0x1B` (Table 14). A reserved type read from the
+    /// wire is a [`Field::Reserved`](crate::Field::Reserved), not a value of
+    /// this type.
+    ChordType, u8, 0, 0x1B
+);
+bounded_conversions!(ChordType, u8, 0x1B);
+
+bounded!(
+    /// How many Function Blocks an Endpoint Info Notification declares
+    /// (`0..=32`, M2-104 §7.1.2). A reserved count (`33..=127`) read from the
+    /// wire is a [`FunctionBlocks::Reserved`](crate::FunctionBlocks::Reserved),
+    /// not a value of this type.
+    FunctionBlockCount, u8, 0, 32
+);
+bounded_conversions!(FunctionBlockCount, u8, 32);
+
+impl FunctionBlockCount {
+    /// The most blocks an Endpoint declares.
+    pub const MAX: Self = Self(32);
+}
+
+bounded!(
+    /// The Delta Clockstamp ticks per quarter note (`1..=65535`, M2-104
+    /// §7.2.3.1); `0` is reserved. A zero read from the wire is a
+    /// [`Utility::ReservedTicksPerQuarterNote`](crate::Utility::ReservedTicksPerQuarterNote),
+    /// not a value of this type.
+    TicksPerQuarterNote, u16, 1, 65535
+);
+bounded_conversions!(TicksPerQuarterNote, u16, u16::MAX);
+
+impl TicksPerQuarterNote {
+    /// The most ticks, 65535.
+    pub const MAX: Self = Self(u16::MAX);
+}
+
+bounded!(
+    /// The channel count M of Mono Mode On, Control Change 126 (MIDI 1.0
+    /// Detailed Specification, Channel Mode Messages, Omni-Off/Mono): `1..=16`
+    /// channels from the Basic Channel, or `0`, which assigns every voice the
+    /// receiver has one channel each, up to Channel 16. The MIDI 2.0 Protocol
+    /// carries it in the top 7 bits of the Control Change's 32-bit value
+    /// (M2-104 §7.4.6.1).
+    MonoChannels, u8, 0, 16
+);
+
+impl MonoChannels {
+    /// `0`: one channel for each voice of the receiver.
+    pub const ALL_VOICES: Self = Self(0);
+
+    /// The count in a MIDI 2.0 Control Change 126's value: its top 7 bits,
+    /// the other 25 ignored (M2-104 §7.4.6.1). `None` for a count past 16,
+    /// which the MIDI 1.0 specification does not define.
+    #[must_use]
+    pub const fn from_value(value: ControlValue) -> Option<Self> {
+        Self::new((value.get() >> 25) as u8)
+    }
+
+    /// The value that carries this count: the count in the top 7 bits, the
+    /// other 25 zero.
+    #[must_use]
+    pub const fn to_value(self) -> ControlValue {
+        ControlValue::new((self.0 as u32) << 25)
+    }
+
+    /// The count in a MIDI 1.0 Control Change 126's data byte, or `None` for a
+    /// count past 16.
+    #[must_use]
+    pub const fn from_data_byte(byte: U7) -> Option<Self> {
+        Self::new(byte.get())
+    }
+
+    /// The data byte of a MIDI 1.0 Control Change 126 that carries this count.
+    #[must_use]
+    pub const fn to_data_byte(self) -> U7 {
+        U7::masked(self.0)
+    }
+}
+
 bounded!(
     /// Sharps (positive) or flats (negative) in a key signature, `-7..=7`.
     SharpsFlats, i8, -7, 7
@@ -395,6 +499,9 @@ mod tests {
         );
         assert_eq!(Attribute::None.pitch(), None);
         assert_eq!(Attribute::Manufacturer(61 << 9).pitch(), None);
-        assert_eq!(Attribute::Reserved { kind: 4, data: 1 }.pitch(), None);
+        assert_eq!(
+            Attribute::Reserved(crate::ReservedAttribute::wire(4, 1)).pitch(),
+            None
+        );
     }
 }

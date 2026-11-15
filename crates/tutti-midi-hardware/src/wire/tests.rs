@@ -238,7 +238,9 @@ fn jr_goes_only_where_the_configuration_enables_it() {
 #[test]
 fn a_clips_utility_messages_are_never_sent() {
     let clip = [
-        Ump::from(Message::Utility(Utility::TicksPerQuarterNote(480))),
+        Ump::from(Message::Utility(Utility::TicksPerQuarterNote(
+            tutti_ump::TicksPerQuarterNote::of(480),
+        ))),
         Ump::from(Message::Utility(Utility::DeltaClockstamp(
             tutti_ump::DeltaTicks::new(10).unwrap(),
         ))),

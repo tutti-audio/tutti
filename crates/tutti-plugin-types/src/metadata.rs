@@ -260,6 +260,27 @@ pub struct LoadedPlugin {
 }
 
 impl LoadedPlugin {
+    /// Whether every direction is within the width a block serves.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginTooWide`](crate::PluginTooWide) for the first direction past
+    /// [`MAX_BLOCK_CHANNELS`](crate::MAX_BLOCK_CHANNELS).
+    pub fn check_width(&self) -> Result<(), crate::PluginTooWide> {
+        for (direction, channels) in [
+            ("input", self.total_inputs()),
+            ("output", self.total_outputs()),
+        ] {
+            if channels > crate::MAX_BLOCK_CHANNELS {
+                return Err(crate::PluginTooWide {
+                    direction,
+                    channels,
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// Returns the total input channel width across all buses.
     pub fn total_inputs(&self) -> usize {
         width(&self.inputs)

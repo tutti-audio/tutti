@@ -13,7 +13,7 @@ use tutti_types::{Beat, Bpm, Seconds};
 use tutti_ump::ControlValue;
 use tutti_ump::{
     Address, DeltaTicks, Flex, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Stream,
-    U7, Ump, Utility, Voice1,
+    TicksPerQuarterNote, U7, Ump, Utility, Voice1,
 };
 
 const TPQ: u16 = 96;
@@ -25,8 +25,10 @@ fn utility(u: Utility) -> Ump {
 fn dcs(ticks: u32) -> Ump {
     utility(Utility::DeltaClockstamp(DeltaTicks::masked(ticks)))
 }
+/// A Ticks Per Quarter Note packet, a reserved zero included: a sender cannot
+/// name zero, so the packet is built from its words.
 fn dctpq(tpq: u16) -> Ump {
-    utility(Utility::TicksPerQuarterNote(tpq))
+    Ump([0x0030_0000 | u32::from(tpq), 0, 0, 0])
 }
 fn start() -> Ump {
     Message::Stream(Stream::StartOfClip).into()
@@ -340,7 +342,7 @@ fn what_a_clip_cannot_hold_is_refused() {
         Message::Stream(Stream::StartOfClip),
         Message::Stream(Stream::EndOfClip),
         Message::Utility(Utility::Noop),
-        Message::Utility(Utility::TicksPerQuarterNote(1)),
+        Message::Utility(Utility::TicksPerQuarterNote(TicksPerQuarterNote::of(1))),
     ] {
         assert!(matches!(one(packet(structure)), Err(Error::Config(_))));
     }
