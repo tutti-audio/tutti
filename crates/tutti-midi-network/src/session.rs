@@ -299,7 +299,7 @@ impl Session {
     }
 
     /// Takes one command of a received datagram.
-    pub(crate) fn receive(&mut self, now: Instant, command: Command) {
+    pub(crate) fn on_message(&mut self, command: Command, now: Instant) {
         self.last_heard = now;
         match command {
             Command::Ping(id) => self.out.push(Command::PingReply(id)),
@@ -724,8 +724,8 @@ impl Session {
 
     // ---- Time ----
 
-    /// The next instant `handle_timeout` has work at.
-    pub(crate) fn poll_timeout(&self) -> Option<Instant> {
+    /// The next instant `on_timeout` has work at.
+    pub(crate) fn deadline(&self) -> Option<Instant> {
         let cfg = &self.cfg;
         let earliest = |times: &[Option<Instant>]| times.iter().flatten().copied().min();
         match &self.phase {
@@ -756,7 +756,7 @@ impl Session {
         }
     }
 
-    pub(crate) fn handle_timeout(&mut self, now: Instant) {
+    pub(crate) fn on_timeout(&mut self, now: Instant) {
         let cfg = self.cfg;
         match &mut self.phase {
             Phase::Idle => {}

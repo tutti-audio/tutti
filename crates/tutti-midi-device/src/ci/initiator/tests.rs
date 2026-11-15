@@ -18,7 +18,7 @@ fn start() -> (ProfileInitiator, Vec<ProfileAction>, Instant) {
 /// An Initiator whose inquiry is over: nothing waits but what a test asks for.
 fn known() -> (ProfileInitiator, Instant) {
     let (mut i, _, now) = start();
-    i.on_message(&reply(CiDeviceId::FunctionBlock, &[], &[]));
+    i.on_message(&reply(CiDeviceId::FunctionBlock, &[], &[]), Instant::now());
     assert_eq!(i.deadline(), None);
     (i, now)
 }
@@ -84,15 +84,21 @@ fn the_set_is_complete_at_the_final_reply_on_7f_and_not_before() {
     // M2-102 §2.4: Channels first, then Groups, then a final reply on address 0x7F.
     let (mut i, _, _) = start();
     assert!(
-        i.on_message(&reply(channel(0), &[profile(1)], &[]))
+        i.on_message(&reply(channel(0), &[profile(1)], &[]), Instant::now())
             .is_empty()
     );
     assert!(
-        i.on_message(&reply(CiDeviceId::Group, &[], &[profile(2)]))
-            .is_empty()
+        i.on_message(
+            &reply(CiDeviceId::Group, &[], &[profile(2)]),
+            Instant::now()
+        )
+        .is_empty()
     );
     assert!(!i.is_known());
-    let actions = i.on_message(&reply(CiDeviceId::FunctionBlock, &[profile(3)], &[]));
+    let actions = i.on_message(
+        &reply(CiDeviceId::FunctionBlock, &[profile(3)], &[]),
+        Instant::now(),
+    );
     assert_eq!(actions, [ProfileAction::ProfilesKnown]);
     assert!(i.is_known());
     assert_eq!(i.deadline(), None);
@@ -105,7 +111,10 @@ fn the_set_is_complete_at_the_final_reply_on_7f_and_not_before() {
 #[test]
 fn the_enabled_list_is_enabled_and_the_disabled_list_disabled() {
     let (mut i, _, _) = start();
-    i.on_message(&reply(channel(4), &[profile(1)], &[profile(2)]));
+    i.on_message(
+        &reply(channel(4), &[profile(1)], &[profile(2)]),
+        Instant::now(),
+    );
     assert_eq!(
         state(&i, channel(4), profile(1)),
         Some(ProfileState::Enabled)
@@ -127,8 +136,8 @@ fn a_final_reply_with_no_profiles_ends_the_inquiry_and_prunes_the_silent_address
     // M2-102 §2.4: the empty 0x7F reply shows that no further replies will
     // follow, so an address that did not reply this round has no Profiles now.
     let (mut i, _, now) = start();
-    i.on_message(&reply(channel(0), &[profile(1)], &[]));
-    i.on_message(&reply(CiDeviceId::FunctionBlock, &[], &[]));
+    i.on_message(&reply(channel(0), &[profile(1)], &[]), Instant::now());
+    i.on_message(&reply(CiDeviceId::FunctionBlock, &[], &[]), Instant::now());
     assert!(i.is_known());
     assert_eq!(i.table().addresses().count(), 1);
     // A second inquiry: channel 0 is not heard again, so the final Reply drops it.
@@ -138,16 +147,23 @@ fn a_final_reply_with_no_profiles_ends_the_inquiry_and_prunes_the_silent_address
         i.table().get(channel(0), profile(1)).is_some(),
         "kept until the final Reply"
     );
-    i.on_message(&reply(CiDeviceId::FunctionBlock, &[], &[]));
+    assert!(
+        !i.is_known(),
+        "the table is not whole while an inquiry waits"
+    );
+    i.on_message(&reply(CiDeviceId::FunctionBlock, &[], &[]), Instant::now());
     assert!(i.table().is_empty());
 }
 
 #[test]
 fn a_reply_replaces_its_address_whole() {
     let (mut i, _, now) = start();
-    i.on_message(&reply(channel(0), &[profile(1)], &[profile(2)]));
+    i.on_message(
+        &reply(channel(0), &[profile(1)], &[profile(2)]),
+        Instant::now(),
+    );
     i.inquire(now);
-    i.on_message(&reply(channel(0), &[], &[profile(3)]));
+    i.on_message(&reply(channel(0), &[], &[profile(3)]), Instant::now());
     assert_eq!(state(&i, channel(0), profile(1)), None);
     assert_eq!(state(&i, channel(0), profile(2)), None);
     assert_eq!(
@@ -160,23 +176,17 @@ fn a_reply_replaces_its_address_whole() {
 fn a_reply_from_another_muid_or_to_another_muid_is_not_ours() {
     let (mut i, _, _) = start();
     assert!(
-        i.on_message(&reply_from(
-            OTHER,
-            OURS,
-            CiDeviceId::FunctionBlock,
-            &[profile(1)],
-            &[]
-        ))
+        i.on_message(
+            &reply_from(OTHER, OURS, CiDeviceId::FunctionBlock, &[profile(1)], &[]),
+            Instant::now()
+        )
         .is_empty()
     );
     assert!(
-        i.on_message(&reply_from(
-            PEER,
-            OTHER,
-            CiDeviceId::FunctionBlock,
-            &[profile(1)],
-            &[]
-        ))
+        i.on_message(
+            &reply_from(PEER, OTHER, CiDeviceId::FunctionBlock, &[profile(1)], &[]),
+            Instant::now()
+        )
         .is_empty()
     );
     assert!(!i.is_known());
@@ -186,8 +196,8 @@ fn a_reply_from_another_muid_or_to_another_muid_is_not_ours() {
 #[test]
 fn a_reply_when_no_inquiry_is_waiting_changes_nothing() {
     let (mut i, _, _) = start();
-    i.on_message(&reply(CiDeviceId::FunctionBlock, &[], &[]));
-    let actions = i.on_message(&reply(channel(0), &[profile(1)], &[]));
+    i.on_message(&reply(CiDeviceId::FunctionBlock, &[], &[]), Instant::now());
+    let actions = i.on_message(&reply(channel(0), &[profile(1)], &[]), Instant::now());
     assert!(actions.is_empty());
     assert!(i.table().is_empty());
 }
@@ -195,7 +205,7 @@ fn a_reply_when_no_inquiry_is_waiting_changes_nothing() {
 #[test]
 fn an_inquiry_that_is_never_finished_times_out_and_keeps_what_it_heard() {
     let (mut i, _, now) = start();
-    i.on_message(&reply(channel(0), &[profile(1)], &[]));
+    i.on_message(&reply(channel(0), &[profile(1)], &[]), Instant::now());
     assert!(
         i.on_timeout(now + PEER_REPLY_TIMEOUT - Duration::from_millis(1))
             .is_empty()
@@ -220,7 +230,7 @@ fn a_nak_of_the_inquiry_ends_it() {
         to: Muid::of(OURS),
         nak: Nak::new(U7::of(0x20), Nak::STATUS_MESSAGE_NOT_SUPPORTED),
     });
-    let actions = i.on_message(&refusal);
+    let actions = i.on_message(&refusal, Instant::now());
     assert!(
         matches!(&actions[..], [ProfileAction::InquiryRefused(n)] if n.status_code == Nak::STATUS_MESSAGE_NOT_SUPPORTED)
     );
@@ -244,16 +254,16 @@ fn the_reports_update_the_table_and_say_what_changed() {
         profile: p,
     });
     assert_eq!(
-        i.on_message(&added),
+        i.on_message(&added, Instant::now()),
         [changed(channel(1), ProfileChange::Added)]
     );
     assert_eq!(state(&i, channel(1), p), Some(ProfileState::Disabled));
     // The same Report again changes nothing.
-    assert!(i.on_message(&added).is_empty());
+    assert!(i.on_message(&added, Instant::now()).is_empty());
 
     // Enabled (§7.10), with its Channel count.
     assert_eq!(
-        i.on_message(&enabled(channel(1), p, 3)),
+        i.on_message(&enabled(channel(1), p, 3), Instant::now()),
         [changed(channel(1), ProfileChange::Enabled)]
     );
     let entry = *i.table().get(channel(1), p).unwrap();
@@ -261,14 +271,17 @@ fn the_reports_update_the_table_and_say_what_changed() {
         (entry.state(), entry.channels()),
         (ProfileState::Enabled, Some(ProfileChannels::of(3)))
     );
-    assert!(i.on_message(&enabled(channel(1), p, 3)).is_empty());
+    assert!(
+        i.on_message(&enabled(channel(1), p, 3), Instant::now())
+            .is_empty()
+    );
     // An Added Report of an enabled Profile does not disable it.
-    assert!(i.on_message(&added).is_empty());
+    assert!(i.on_message(&added, Instant::now()).is_empty());
     assert_eq!(state(&i, channel(1), p), Some(ProfileState::Enabled));
 
     // Disabled (§7.11).
     assert_eq!(
-        i.on_message(&disabled(channel(1), p, 3)),
+        i.on_message(&disabled(channel(1), p, 3), Instant::now()),
         [changed(channel(1), ProfileChange::Disabled)]
     );
     assert_eq!(state(&i, channel(1), p), Some(ProfileState::Disabled));
@@ -279,20 +292,20 @@ fn the_reports_update_the_table_and_say_what_changed() {
         profile: p,
     });
     assert_eq!(
-        i.on_message(&removed),
+        i.on_message(&removed, Instant::now()),
         [changed(channel(1), ProfileChange::Removed)]
     );
     assert_eq!(state(&i, channel(1), p), None);
     assert!(i.table().is_empty());
     // A Profile that is not there cannot be removed again.
-    assert!(i.on_message(&removed).is_empty());
+    assert!(i.on_message(&removed, Instant::now()).is_empty());
 }
 
 #[test]
 fn a_report_of_a_profile_the_table_lacks_adds_it() {
     let (mut i, _, _) = start();
-    i.on_message(&enabled(CiDeviceId::Group, profile(1), 0));
-    i.on_message(&disabled(CiDeviceId::Group, profile(2), 0));
+    i.on_message(&enabled(CiDeviceId::Group, profile(1), 0), Instant::now());
+    i.on_message(&disabled(CiDeviceId::Group, profile(2), 0), Instant::now());
     assert_eq!(
         state(&i, CiDeviceId::Group, profile(1)),
         Some(ProfileState::Enabled)
@@ -311,16 +324,16 @@ fn a_report_from_another_source_is_not_this_peers() {
         profile: profile(1),
         channels: ProfileChannels::of(1),
     });
-    assert!(i.on_message(&other).is_empty());
+    assert!(i.on_message(&other, Instant::now()).is_empty());
     assert!(i.table().is_empty());
 }
 
 #[test]
 fn a_report_at_one_address_leaves_the_same_profile_at_another_alone() {
     let (mut i, _, _) = start();
-    i.on_message(&reply(channel(0), &[], &[profile(1)]));
-    i.on_message(&reply(channel(1), &[], &[profile(1)]));
-    i.on_message(&enabled(channel(0), profile(1), 1));
+    i.on_message(&reply(channel(0), &[], &[profile(1)]), Instant::now());
+    i.on_message(&reply(channel(1), &[], &[profile(1)]), Instant::now());
+    i.on_message(&enabled(channel(0), profile(1), 1), Instant::now());
     assert_eq!(
         state(&i, channel(0), profile(1)),
         Some(ProfileState::Enabled)
@@ -336,11 +349,14 @@ fn a_version_1_peers_report_has_no_channel_count() {
     let (mut i, _, _) = start();
     let mut h = header_from(PEER, channel(0));
     h.ci_version = CiVersion::of(1);
-    i.on_message(&Decoded::Message(CiMessage::ProfileEnabled {
-        header: h,
-        profile: profile(1),
-        channels: ProfileChannels::BY_ADDRESS,
-    }));
+    i.on_message(
+        &Decoded::Message(CiMessage::ProfileEnabled {
+            header: h,
+            profile: profile(1),
+            channels: ProfileChannels::BY_ADDRESS,
+        }),
+        Instant::now(),
+    );
     assert_eq!(
         i.table().get(channel(0), profile(1)).unwrap().channels(),
         None
@@ -408,20 +424,20 @@ fn set_on_resolves_on_the_enabled_report_of_that_profile_at_that_address() {
         profile: profile(1),
     };
     // Another Profile, and the same Profile at another address, are not the answer.
-    let actions = i.on_message(&enabled(channel(0), profile(2), 2));
+    let actions = i.on_message(&enabled(channel(0), profile(2), 2), Instant::now());
     assert!(
         actions
             .iter()
             .all(|a| !matches!(a, ProfileAction::Resolved { .. }))
     );
-    let actions = i.on_message(&enabled(channel(1), profile(1), 2));
+    let actions = i.on_message(&enabled(channel(1), profile(1), 2), Instant::now());
     assert!(
         actions
             .iter()
             .all(|a| !matches!(a, ProfileAction::Resolved { .. }))
     );
     // The Report is.
-    let actions = i.on_message(&enabled(channel(0), profile(1), 2));
+    let actions = i.on_message(&enabled(channel(0), profile(1), 2), Instant::now());
     assert!(actions.contains(&ProfileAction::Resolved {
         request,
         outcome: Outcome::Reported {
@@ -437,7 +453,7 @@ fn set_on_answered_by_a_disabled_report_is_the_peer_unable_to_comply() {
     // M2-102 §2.6: the device replies with a Profile Disabled Report.
     let (mut i, _, now) = start();
     i.set_on(ProfileTarget::Group, profile(1), now).unwrap();
-    let actions = i.on_message(&disabled(CiDeviceId::Group, profile(1), 0));
+    let actions = i.on_message(&disabled(CiDeviceId::Group, profile(1), 0), Instant::now());
     assert!(actions.contains(&ProfileAction::Resolved {
         request: Request::SetOn {
             address: CiDeviceId::Group,
@@ -467,7 +483,7 @@ fn set_off_resolves_on_the_disabled_report_or_the_enabled_one_if_the_peer_could_
             panic!("a Set Off");
         };
         assert_eq!((header.device_id, *p), (channel(3), profile(1)));
-        let actions = i.on_message(&report);
+        let actions = i.on_message(&report, Instant::now());
         assert!(actions.contains(&ProfileAction::Resolved {
             request: Request::SetOff {
                 address: channel(3),
@@ -490,7 +506,7 @@ fn a_report_from_another_muid_does_not_resolve_a_request() {
         profile: profile(1),
         channels: ProfileChannels::of(1),
     });
-    assert!(i.on_message(&other).is_empty());
+    assert!(i.on_message(&other, Instant::now()).is_empty());
     assert!(i.deadline().is_some());
 }
 
@@ -500,12 +516,15 @@ fn a_nak_of_a_set_resolves_it_as_refused_whatever_its_status() {
         let (mut i, now) = known();
         i.set_on(ProfileTarget::FunctionBlock, profile(1), now)
             .unwrap();
-        let actions = i.on_message(&nak_with(
-            CiDeviceId::FunctionBlock,
-            0x22,
-            status,
-            profile(1).to_bytes(),
-        ));
+        let actions = i.on_message(
+            &nak_with(
+                CiDeviceId::FunctionBlock,
+                0x22,
+                status,
+                profile(1).to_bytes(),
+            ),
+            Instant::now(),
+        );
         let [
             ProfileAction::Resolved {
                 request,
@@ -552,7 +571,7 @@ fn a_nak_for_another_profile_or_another_message_resolves_nothing() {
             profile(1).to_bytes(),
         ),
     ] {
-        assert!(i.on_message(&refusal).is_empty());
+        assert!(i.on_message(&refusal, Instant::now()).is_empty());
     }
     assert!(i.deadline().is_some());
 }
@@ -567,14 +586,14 @@ fn a_nak_from_another_muid_resolves_nothing() {
         nak: Nak::new(U7::of(0x22), Nak::STATUS_PROFILE_NOT_SUPPORTED)
             .with_details(profile(1).to_bytes().map(U7::of)),
     });
-    assert!(i.on_message(&foreign).is_empty());
+    assert!(i.on_message(&foreign, Instant::now()).is_empty());
 }
 
 #[test]
 fn a_request_with_no_answer_times_out() {
     let (mut i, _, now) = start();
     let later = now + Duration::from_secs(10);
-    i.on_message(&reply(CiDeviceId::FunctionBlock, &[], &[]));
+    i.on_message(&reply(CiDeviceId::FunctionBlock, &[], &[]), Instant::now());
     i.set_on(ProfileTarget::Group, profile(1), later).unwrap();
     assert_eq!(i.deadline(), Some(later + PEER_REPLY_TIMEOUT));
     assert!(i.on_timeout(later).is_empty());
@@ -596,17 +615,17 @@ fn the_same_set_cannot_be_asked_twice_at_once() {
     i.set_on(ProfileTarget::Group, profile(1), now).unwrap();
     assert_eq!(
         i.set_on(ProfileTarget::Group, profile(1), now),
-        Err(RequestError::InFlight)
+        Err(RequestError::TooManyRequests)
     );
     assert_eq!(
         i.set_off(CiDeviceId::Group, profile(1), now),
-        Err(RequestError::InFlight)
+        Err(RequestError::TooManyRequests)
     );
     // Another Profile or address is a request of its own.
     assert!(i.set_on(ProfileTarget::Group, profile(2), now).is_ok());
     assert!(i.set_off(channel(0), profile(1), now).is_ok());
     // And once it ends the same one can be asked again.
-    i.on_message(&enabled(CiDeviceId::Group, profile(1), 0));
+    i.on_message(&enabled(CiDeviceId::Group, profile(1), 0), Instant::now());
     assert!(i.set_on(ProfileTarget::Group, profile(1), now).is_ok());
 }
 
@@ -657,9 +676,12 @@ fn details_resolves_on_the_reply_that_echoes_the_profile_and_target() {
         answer(channel(3), profile(1), target, OURS),
         answer(channel(2), profile(1), target, OTHER),
     ] {
-        assert!(i.on_message(&wrong).is_empty());
+        assert!(i.on_message(&wrong, Instant::now()).is_empty());
     }
-    let actions = i.on_message(&answer(channel(2), profile(1), target, OURS));
+    let actions = i.on_message(
+        &answer(channel(2), profile(1), target, OURS),
+        Instant::now(),
+    );
     assert_eq!(
         actions,
         [ProfileAction::Resolved {
@@ -679,12 +701,15 @@ fn details_is_refused_by_a_nak_0x04_and_times_out() {
     let (mut i, now) = known();
     let target = InquiryTarget::NUMBER_OF_CHANNELS;
     i.details(channel(2), profile(1), target, now).unwrap();
-    let actions = i.on_message(&nak_with(
-        channel(2),
-        0x28,
-        Nak::STATUS_PROFILE_NOT_SUPPORTED,
-        profile(1).to_bytes(),
-    ));
+    let actions = i.on_message(
+        &nak_with(
+            channel(2),
+            0x28,
+            Nak::STATUS_PROFILE_NOT_SUPPORTED,
+            profile(1).to_bytes(),
+        ),
+        Instant::now(),
+    );
     assert!(matches!(
         &actions[..],
         [ProfileAction::Resolved { outcome: Outcome::Refused(n), .. }] if n.status_code == Nak::STATUS_PROFILE_NOT_SUPPORTED
@@ -711,7 +736,7 @@ fn profile_specific_data_from_the_peer_is_handed_out_whole() {
             data: data.clone(),
         });
         assert_eq!(
-            i.on_message(&message),
+            i.on_message(&message, Instant::now()),
             [ProfileAction::SpecificData {
                 address: channel(9),
                 profile: profile(1),
@@ -731,7 +756,7 @@ fn profile_specific_data_for_another_muid_or_from_another_source_is_not_ours() {
             profile: profile(1),
             data: SpecificData::default(),
         });
-        assert!(i.on_message(&message).is_empty());
+        assert!(i.on_message(&message, Instant::now()).is_empty());
     }
 }
 
@@ -786,12 +811,10 @@ fn a_timeout_wait_adds_its_time_to_a_sets_deadline() {
     i.set_on(ProfileTarget::Group, profile(1), now).unwrap();
     // 50 x 100 ms = 5 s, added to the 3 s the set had.
     assert!(
-        i.on_message(&wait_with(
-            CiDeviceId::Group,
-            0x22,
-            50,
-            profile(1).to_bytes()
-        ))
+        i.on_message(
+            &wait_with(CiDeviceId::Group, 0x22, 50, profile(1).to_bytes()),
+            Instant::now()
+        )
         .is_empty()
     );
     assert_eq!(
@@ -802,7 +825,7 @@ fn a_timeout_wait_adds_its_time_to_a_sets_deadline() {
     assert!(i.on_timeout(now + PEER_REPLY_TIMEOUT).is_empty());
     let at_4s = now + Duration::from_secs(4);
     assert!(i.on_timeout(at_4s).is_empty());
-    let actions = i.on_message(&enabled(CiDeviceId::Group, profile(1), 0));
+    let actions = i.on_message(&enabled(CiDeviceId::Group, profile(1), 0), Instant::now());
     assert!(matches!(
         actions.last(),
         Some(ProfileAction::Resolved {
@@ -837,7 +860,7 @@ fn a_timeout_wait_that_is_not_for_the_set_extends_nothing() {
                 .with_details(profile(1).to_bytes().map(U7::of)),
         }),
     ] {
-        assert!(i.on_message(&ack).is_empty());
+        assert!(i.on_message(&ack, Instant::now()).is_empty());
         assert_eq!(i.deadline(), before);
     }
 }
@@ -849,20 +872,16 @@ fn a_zero_wait_changes_nothing_and_each_wait_adds_its_own() {
     let (mut i, now) = known();
     i.set_on(ProfileTarget::Group, profile(1), now).unwrap();
     let before = i.deadline().unwrap();
-    i.on_message(&wait_with(
-        CiDeviceId::Group,
-        0x22,
-        0,
-        profile(1).to_bytes(),
-    ));
+    i.on_message(
+        &wait_with(CiDeviceId::Group, 0x22, 0, profile(1).to_bytes()),
+        Instant::now(),
+    );
     assert_eq!(i.deadline(), Some(before));
     for _ in 0..2 {
-        i.on_message(&wait_with(
-            CiDeviceId::Group,
-            0x22,
-            5,
-            profile(1).to_bytes(),
-        ));
+        i.on_message(
+            &wait_with(CiDeviceId::Group, 0x22, 5, profile(1).to_bytes()),
+            Instant::now(),
+        );
     }
     assert_eq!(i.deadline(), Some(before + Duration::from_secs(1)));
 }
@@ -878,7 +897,7 @@ fn a_success_ack_does_not_end_a_set() {
         ack: Ack::new(U7::of(0x22), Ack::STATUS_ACK)
             .with_details(profile(1).to_bytes().map(U7::of)),
     });
-    assert!(i.on_message(&ack).is_empty());
+    assert!(i.on_message(&ack, Instant::now()).is_empty());
     assert_eq!(i.deadline(), Some(now + PEER_REPLY_TIMEOUT));
 }
 
@@ -886,16 +905,14 @@ fn a_success_ack_does_not_end_a_set() {
 fn a_timeout_wait_for_nothing_in_flight_is_ignored() {
     let (mut i, _) = known();
     assert!(
-        i.on_message(&wait_with(
-            CiDeviceId::Group,
-            0x22,
-            50,
-            profile(1).to_bytes()
-        ))
+        i.on_message(
+            &wait_with(CiDeviceId::Group, 0x22, 50, profile(1).to_bytes()),
+            Instant::now()
+        )
         .is_empty()
     );
     assert!(
-        i.on_message(&wait(CiDeviceId::FunctionBlock, 0x20, 50))
+        i.on_message(&wait(CiDeviceId::FunctionBlock, 0x20, 50), Instant::now())
             .is_empty()
     );
     assert_eq!(i.deadline(), None);
@@ -906,7 +923,10 @@ fn a_timeout_wait_extends_a_details_request() {
     let (mut i, now) = known();
     let target = InquiryTarget::NUMBER_OF_CHANNELS;
     i.details(channel(2), profile(1), target, now).unwrap();
-    i.on_message(&wait_with(channel(2), 0x28, 100, profile(1).to_bytes()));
+    i.on_message(
+        &wait_with(channel(2), 0x28, 100, profile(1).to_bytes()),
+        Instant::now(),
+    );
     assert_eq!(
         i.deadline(),
         Some(now + PEER_REPLY_TIMEOUT + Duration::from_secs(10))
@@ -916,14 +936,14 @@ fn a_timeout_wait_extends_a_details_request() {
 #[test]
 fn an_inquiry_with_a_timeout_wait_outlives_the_profile_timeout() {
     let (mut i, _, now) = start();
-    i.on_message(&wait(CiDeviceId::FunctionBlock, 0x20, 100));
+    i.on_message(&wait(CiDeviceId::FunctionBlock, 0x20, 100), Instant::now());
     assert!(i.on_timeout(now + PEER_REPLY_TIMEOUT).is_empty());
     assert!(i.on_timeout(now + Duration::from_secs(9)).is_empty());
     // The set still completes at the final Reply, and a wait past the end is the timeout.
-    let actions = i.on_message(&reply(CiDeviceId::FunctionBlock, &[], &[]));
+    let actions = i.on_message(&reply(CiDeviceId::FunctionBlock, &[], &[]), Instant::now());
     assert_eq!(actions, [ProfileAction::ProfilesKnown]);
     let (mut i, _, now) = start();
-    i.on_message(&wait(CiDeviceId::FunctionBlock, 0x20, 100));
+    i.on_message(&wait(CiDeviceId::FunctionBlock, 0x20, 100), Instant::now());
     assert!(
         i.on_timeout(now + PEER_REPLY_TIMEOUT + Duration::from_secs(10) - Duration::from_nanos(1))
             .is_empty()
@@ -974,7 +994,9 @@ fn an_inquiry_of_tuttis_own_responder_completes_with_an_empty_table() {
             }
         }
         for message in to_initiator {
-            events.extend(initiator.on_message(&CiMessage::decode(&message.encode())));
+            events.extend(
+                initiator.on_message(&CiMessage::decode(&message.encode()), Instant::now()),
+            );
         }
     }
     assert_eq!(events, [ProfileAction::ProfilesKnown]);

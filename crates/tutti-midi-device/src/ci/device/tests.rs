@@ -835,3 +835,26 @@ fn a_property_exchange_inquiry_is_nakked_and_the_rest_is_left_to_the_initiator()
         );
     }
 }
+
+// A device that declares Property Exchange leaves the inquiries to its Responder:
+// the Management core sends no NAK for them (M2-101 Table 7, bit D3).
+#[test]
+fn a_device_that_declares_property_exchange_does_not_nak_its_inquiries() {
+    let now = Instant::now();
+    let (mut device, _) = CiDevice::new(
+        identity(),
+        CiCategories::PROPERTY_EXCHANGE,
+        MaxSysexSize::of(512),
+        {
+            let mut n = 0x0400_0000u32;
+            move || {
+                n += 1;
+                n
+            }
+        },
+        now,
+    );
+    for kind in [PeMessageKind::GET_INQUIRY, PeMessageKind::SET_INQUIRY] {
+        assert!(device.on_message(&pe_message(kind), now).is_empty());
+    }
+}

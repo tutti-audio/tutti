@@ -781,7 +781,7 @@ impl Running {
             for member in self.members.iter_mut().filter(|m| m.group == group) {
                 let actions = member.device.on_message(&decoded, now);
                 member.apply(actions, now, &mut sends, changes);
-                member.route(&decoded, &mut sends, changes);
+                member.route(&decoded, now, &mut sends, changes);
                 member.route_process(&decoded, now, &mut sends, changes);
             }
         }
@@ -1046,13 +1046,14 @@ impl Member {
     fn route(
         &mut self,
         decoded: &Decoded,
+        now: Instant,
         sends: &mut Vec<(MidiGroup, CiMessage)>,
         changes: &mut CiChanges,
     ) {
         let heard: Vec<_> = self
             .initiators
             .iter_mut()
-            .map(|(&muid, initiator)| (muid, initiator.on_message(decoded)))
+            .map(|(&muid, initiator)| (muid, initiator.on_message(decoded, now)))
             .collect();
         for (muid, actions) in heard {
             self.carry_out(muid, actions, sends, changes);

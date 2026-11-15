@@ -1938,7 +1938,7 @@ fn a_report_while_one_waits_is_not_sent() {
     let changes = polled(&mut wire, 110);
     assert_eq!(
         process_events(&changes),
-        [&ProcessChange::NotSent(ProcessError::InFlight)]
+        [&ProcessChange::NotSent(ProcessError::TooManyRequests)]
     );
     assert_eq!(payloads(&received(&wire)).len(), 1);
 }

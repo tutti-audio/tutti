@@ -391,14 +391,20 @@ impl<R: FnMut() -> u32> CiDevice<R> {
                     self.answer_process(message, header, actions);
                 }
             }
-            // A Property Exchange Responder is not the Management core's: the
-            // inquiries it would answer are refused, the rest is the Initiator's.
+            // A Property Exchange Responder is not the Management core's: a device
+            // that declares none refuses the inquiries one would answer, and one
+            // that declares it leaves them to its Responder. The rest is the
+            // Initiator's.
             CiMessage::PropertyExchange {
                 header,
                 to,
                 message,
             } => {
                 if *to == self.muid
+                    && !self
+                        .own
+                        .categories
+                        .contains(CiCategories::PROPERTY_EXCHANGE)
                     && matches!(
                         message,
                         PeCiMessage::CapabilitiesInquiry(_)

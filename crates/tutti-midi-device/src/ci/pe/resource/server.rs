@@ -107,6 +107,20 @@ pub enum ResponderEvent {
     },
 }
 
+impl ResponderEvent {
+    /// The Initiator the event is about.
+    #[must_use]
+    pub const fn peer(&self) -> Muid {
+        match self {
+            Self::Changed { peer, .. }
+            | Self::Subscribed { peer, .. }
+            | Self::Unsubscribed { peer, .. }
+            | Self::StateRefused { peer, .. }
+            | Self::Deferred { peer, .. } => *peer,
+        }
+    }
+}
+
 /// What the driver does next.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]

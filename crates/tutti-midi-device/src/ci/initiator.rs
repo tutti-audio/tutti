@@ -70,6 +70,7 @@ use std::time::Instant;
 use std::vec::Vec;
 
 use super::TimeoutWait;
+use super::handshake::Handshake;
 use super::link::Link;
 
 use tutti_ump::{MidiChannel, U7};
@@ -273,7 +274,7 @@ pub enum RequestError {
     /// The same request, or a Set On or Off of the same Profile at the same
     /// address, is still waiting for its answer.
     #[error("a request for that Profile at that address is already in flight")]
-    InFlight,
+    TooManyRequests,
 }
 
 /// One Profile of the table.
@@ -384,13 +385,6 @@ impl ProfileTable {
 }
 
 #[derive(Clone, Debug)]
-struct Inquiry {
-    deadline: Instant,
-    /// The addresses that replied.
-    replied: BTreeSet<CiDeviceId>,
-}
-
-#[derive(Clone, Debug)]
 struct Pending {
     request: Request,
     deadline: Instant,
@@ -401,8 +395,9 @@ struct Pending {
 pub struct ProfileInitiator {
     link: Link,
     table: ProfileTable,
-    known: bool,
-    inquiry: Option<Inquiry>,
+    /// The Profile Inquiry: waiting with the addresses that replied, or answered
+    /// by the final Reply.
+    inquiry: Handshake<(), BTreeSet<CiDeviceId>>,
     pending: Vec<Pending>,
 }
 
@@ -414,8 +409,7 @@ impl ProfileInitiator {
         let mut initiator = Self {
             link: Link { own, peer },
             table: ProfileTable::default(),
-            known: false,
-            inquiry: None,
+            inquiry: Handshake::Unanswered,
             pending: Vec::new(),
         };
         let actions = initiator.inquire(now);
@@ -435,19 +429,17 @@ impl ProfileInitiator {
     }
 
     /// Whether an inquiry has ended with the final Reply, so the table is the peer's
-    /// whole declaration (and the Reports since).
+    /// whole declaration (and the Reports since). It is not while an inquiry is
+    /// waiting: the Replies heard so far have replaced only part of the table.
     #[must_use]
     pub fn is_known(&self) -> bool {
-        self.known
+        self.inquiry.answer().is_some()
     }
 
     /// Asks again, to the Function Block: a new inquiry starts (one already waiting
     /// is replaced). The table is kept until the final Reply replaces it.
     pub fn inquire(&mut self, now: Instant) -> Vec<ProfileAction> {
-        self.inquiry = Some(Inquiry {
-            deadline: now + PEER_REPLY_TIMEOUT,
-            replied: BTreeSet::new(),
-        });
+        self.inquiry.ask(now, PEER_REPLY_TIMEOUT, BTreeSet::new());
         vec![self.send(CiDeviceId::FunctionBlock, |header, to| {
             CiMessage::ProfileInquiry { header, to }
         })]
@@ -458,8 +450,8 @@ impl ProfileInitiator {
     ///
     /// # Errors
     ///
-    /// [`RequestError::InFlight`] when a Set On or Off of that Profile at that
-    /// address is waiting.
+    /// [`RequestError::TooManyRequests`] when a Set On or Off of that Profile at
+    /// that address is waiting.
     pub fn set_on(
         &mut self,
         target: ProfileTarget,
@@ -483,7 +475,7 @@ impl ProfileInitiator {
     ///
     /// # Errors
     ///
-    /// [`RequestError::InFlight`] as for [`set_on`](Self::set_on).
+    /// [`RequestError::TooManyRequests`] as for [`set_on`](Self::set_on).
     pub fn set_off(
         &mut self,
         address: CiDeviceId,
@@ -504,7 +496,7 @@ impl ProfileInitiator {
     ///
     /// # Errors
     ///
-    /// [`RequestError::InFlight`] when the same inquiry is waiting.
+    /// [`RequestError::TooManyRequests`] when the same inquiry is waiting.
     pub fn details(
         &mut self,
         address: CiDeviceId,
@@ -535,8 +527,8 @@ impl ProfileInitiator {
     #[must_use]
     pub fn deadline(&self) -> Option<Instant> {
         self.inquiry
-            .iter()
-            .map(|inquiry| inquiry.deadline)
+            .deadline()
+            .into_iter()
             .chain(self.pending.iter().map(|pending| pending.deadline))
             .min()
     }
@@ -545,12 +537,7 @@ impl ProfileInitiator {
     /// harmless.
     pub fn on_timeout(&mut self, now: Instant) -> Vec<ProfileAction> {
         let mut actions = Vec::new();
-        if self
-            .inquiry
-            .as_ref()
-            .is_some_and(|inquiry| now >= inquiry.deadline)
-        {
-            self.inquiry = None;
+        if self.inquiry.expire(now) {
             actions.push(ProfileAction::InquiryTimedOut);
         }
         let (expired, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.pending)
@@ -564,8 +551,9 @@ impl ProfileInitiator {
         actions
     }
 
-    /// A CI message of the connection's Group arrived.
-    pub fn on_message(&mut self, decoded: &Decoded) -> Vec<ProfileAction> {
+    /// A CI message of the connection's Group arrived. A message needs no clock
+    /// reading here: `now` makes the call the same as the other Initiators'.
+    pub fn on_message(&mut self, decoded: &Decoded, _now: Instant) -> Vec<ProfileAction> {
         let mut actions = Vec::new();
         let Decoded::Message(message) = decoded else {
             return actions;
@@ -677,17 +665,16 @@ impl ProfileInitiator {
         actions: &mut Vec<ProfileAction>,
     ) {
         // A Reply is only an answer to an Inquiry.
-        let Some(inquiry) = self.inquiry.as_mut() else {
+        let Some(replied) = self.inquiry.progress_mut() else {
             return;
         };
-        inquiry.replied.insert(address);
+        replied.insert(address);
         self.table.replace(address, lists);
         if address == CiDeviceId::FunctionBlock {
             // The final reply, with no Profiles, shows that no further replies will follow (M2-102 §2.4).
-            let replied = std::mem::take(&mut inquiry.replied);
-            self.inquiry = None;
+            let replied = std::mem::take(replied);
+            self.inquiry = Handshake::Answered(());
             self.table.addresses.retain(|at, _| replied.contains(at));
-            self.known = true;
             actions.push(ProfileAction::ProfilesKnown);
         }
     }
@@ -734,9 +721,9 @@ impl ProfileInitiator {
         let original = ack.ack_sub_id2.get();
         if original == SUB_ID2_PROFILE_INQUIRY {
             if address == CiDeviceId::FunctionBlock
-                && let Some(inquiry) = self.inquiry.as_mut()
+                && let Some(deadline) = self.inquiry.deadline_mut()
             {
-                wait.extend(&mut inquiry.deadline);
+                wait.extend(deadline);
             }
             return;
         }
@@ -753,7 +740,7 @@ impl ProfileInitiator {
     fn on_nak(&mut self, address: CiDeviceId, nak: &Nak, actions: &mut Vec<ProfileAction>) {
         let original = nak.nak_sub_id2.get();
         if original == SUB_ID2_PROFILE_INQUIRY {
-            if self.inquiry.take().is_some() {
+            if self.inquiry.refuse() {
                 actions.push(ProfileAction::InquiryRefused(nak.clone()));
             }
             return;
@@ -784,7 +771,7 @@ impl ProfileInitiator {
                     && pending.request.profile() == request.profile())
         });
         if clash {
-            return Err(RequestError::InFlight);
+            return Err(RequestError::TooManyRequests);
         }
         self.pending.push(Pending {
             request,
