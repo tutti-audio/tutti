@@ -203,9 +203,10 @@ fn crossover(dir: &Path, cases: &mut Cases) {
         let c = CrossoverControls::new(&hz, rate).expect("controls");
         let model = CrossoverModel::designed(splits.len() + 1, &c, rate).expect("bands");
         let mut bank = CrossoverBank::new(ChannelLayout::MONO);
+        let mut coefficients = Glide::landed(model.coefficients());
         // One channel per band, band 0 first.
         let out = blocks(&impulse(1.0), model.bands(), |x, y| {
-            bank.process(&model, x, y);
+            bank.process(&mut coefficients, x, y);
         });
         wav(dir, name, RATE, &out);
         cases.push(name, "crossover", RATE, &format!(r#""splits": {splits:?}"#));

@@ -6,63 +6,27 @@
 //! own and the all-pass of every later one (see `state.rs`), so each band's
 //! response is the product of those, in closed form.
 
-use core::f64::consts::{FRAC_1_SQRT_2, PI};
+use core::f64::consts::PI;
 
 use tutti_types::{Db, Hz, SampleRate, Samples};
 
-use super::CrossoverControls;
 use super::bands::{CrossoverError, MAX_BANDS, MAX_SPLITS, SOLVE_CEILING, check_bands, validate};
-use crate::filter::biquad::{Biquad, decay_ring, section_l1};
+use super::coefficients::Tpt;
+use super::{CrossoverCoefficients, CrossoverControls};
+use crate::filter::biquad::{decay_ring, section_l1};
 use crate::{Complex64, Lti, Ring, System};
 
-/// The three biquads one split needs, from one warped frequency.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct Split {
-    pub(super) low: Biquad,
-    pub(super) high: Biquad,
-    pub(super) all_pass: Biquad,
-}
-
-impl Split {
-    /// The Butterworth (Q = 1/sqrt(2)) low-pass, high-pass and all-pass at
-    /// `hz` against `rate` (bilinear transform).
-    pub(super) fn solve(hz: Hz, rate: SampleRate) -> Self {
-        let hz = f64::from(hz.get()).min(SOLVE_CEILING * rate.get());
-        let k = libm::tan(PI * hz / rate.get());
-        let k2 = k * k;
-        let norm = 1.0 / (1.0 + k / FRAC_1_SQRT_2 + k2);
-        let a1 = 2.0 * (k2 - 1.0) * norm;
-        let a2 = (1.0 - k / FRAC_1_SQRT_2 + k2) * norm;
-        let low = k2 * norm;
-        Self {
-            low: Biquad {
-                b0: low,
-                b1: 2.0 * low,
-                b2: low,
-                a1,
-                a2,
-            },
-            high: Biquad {
-                b0: norm,
-                b1: -2.0 * norm,
-                b2: norm,
-                a1,
-                a2,
-            },
-            all_pass: Biquad {
-                b0: a2,
-                b1: a1,
-                b2: 1.0,
-                a1,
-                a2,
-            },
-        }
-    }
+/// The sections' coefficients of the split at `hz` against `rate`, the frequency held under
+/// [`SOLVE_CEILING`] of the rate.
+fn solve_split(hz: Hz, rate: SampleRate) -> Tpt {
+    let hz = f64::from(hz.get()).min(SOLVE_CEILING * rate.get());
+    Tpt::new(libm::tan(PI * hz / rate.get()))
 }
 
 /// The design of a Linkwitz-Riley crossover: its sample rate, the frequencies its
 /// coefficients are solved at and those coefficients. A value without state; the
-/// crossover that runs it keeps the integrators and the ramp between two of these.
+/// crossover that runs it keeps the integrators and the glide between two of these
+/// ([`coefficients`](Self::coefficients)).
 ///
 /// It is an [`Lti`] with one input and one output a band, lowest first: the bands
 /// are at -6.02 dB at their crossover and sum to unit magnitude.
@@ -71,7 +35,7 @@ pub struct CrossoverModel {
     pub(super) rate: SampleRate,
     pub(super) bands: usize,
     pub(super) freqs: [Hz; MAX_SPLITS],
-    pub(super) coeffs: [Split; MAX_SPLITS],
+    pub(super) coeffs: [Tpt; MAX_SPLITS],
 }
 
 impl CrossoverModel {
@@ -131,7 +95,7 @@ impl CrossoverModel {
     /// A model of `bands` bands at `rate` before any design: every split at 1 kHz, with
     /// the coefficients of 1 kHz at 48 kHz. [`design_into`](Self::design_into) is what sets them.
     fn empty(bands: usize, rate: SampleRate) -> Self {
-        let split = Split::solve(Hz(1_000.0), SampleRate::SR_48K);
+        let split = solve_split(Hz(1_000.0), SampleRate::SR_48K);
         Self {
             rate,
             bands,
@@ -143,7 +107,16 @@ impl CrossoverModel {
     /// Solves every split's coefficients at `self.freqs`.
     fn solve(&mut self) {
         for j in 0..self.splits() {
-            self.coeffs[j] = Split::solve(self.freqs[j], self.rate);
+            self.coeffs[j] = solve_split(self.freqs[j], self.rate);
+        }
+    }
+
+    /// The coefficients the sections run at: each split's integrator gain `tan(pi f / rate)`.
+    #[must_use]
+    pub fn coefficients(&self) -> CrossoverCoefficients {
+        CrossoverCoefficients {
+            bands: self.bands,
+            split: self.coeffs,
         }
     }
 
@@ -197,13 +170,13 @@ impl Lti for CrossoverModel {
                 let mut h = Complex64::new(1.0, 0.0);
                 for (j, c) in self.coeffs[..self.splits()].iter().enumerate() {
                     if j < output {
-                        let hp = c.high.response(w);
+                        let hp = c.high().response(w);
                         h *= hp * hp;
                     } else if j == output {
-                        let lp = c.low.response(w);
+                        let lp = c.low().response(w);
                         h *= lp * lp;
                     } else {
-                        h *= c.all_pass.response(w);
+                        h *= c.all_pass().response(w);
                     }
                 }
                 h
@@ -218,7 +191,7 @@ impl Lti for CrossoverModel {
     fn spectral_radius(&self) -> f64 {
         self.coeffs[..self.splits()]
             .iter()
-            .map(|c| c.low.spectral_radius())
+            .map(|c| c.low().spectral_radius())
             .fold(0.0, f64::max)
     }
 
@@ -231,9 +204,9 @@ impl Lti for CrossoverModel {
                     .map(|j| {
                         let c = &self.coeffs[j];
                         match j.cmp(&band) {
-                            std::cmp::Ordering::Less => section_l1(&c.high).powi(2),
-                            std::cmp::Ordering::Equal => section_l1(&c.low).powi(2),
-                            std::cmp::Ordering::Greater => section_l1(&c.all_pass),
+                            std::cmp::Ordering::Less => section_l1(&c.high()).powi(2),
+                            std::cmp::Ordering::Equal => section_l1(&c.low()).powi(2),
+                            std::cmp::Ordering::Greater => section_l1(&c.all_pass()),
                         }
                     })
                     .product::<f64>()
