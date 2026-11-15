@@ -3,7 +3,7 @@
 //! ports; these are the nodes at its border.
 //!
 //! - [`MidiIngestNode`] reads the event inlets of the hardware devices
-//!   ([`DeviceInlets`]), translates, and sends each event out of its channel's
+//!   ([`InputInlets`]), translates, and sends each event out of its channel's
 //!   port: routing by channel is which ports a listener is wired to.
 //! - [`MpeTransformNode`] is the same transform as a node of one event stream
 //!   (a clip's), the one holder of the zones there.
@@ -16,8 +16,9 @@
 //! - [`compile_routes`] turns inbound routing rules into which of the input
 //!   node's ports each listener takes.
 
-pub mod device_inlets;
+pub mod device_epochs;
 pub mod ingest_node;
+pub mod input_inlets;
 pub mod keys;
 pub mod mailbox;
 pub mod mpe_ingest;
@@ -26,13 +27,12 @@ mod route;
 mod sensing;
 pub mod transform_node;
 
-pub use device_inlets::{
-    ArrivalClock, Changes, DeviceInlets, DeviceInput, DeviceSlot, InletChange, NoFreeSlot,
-};
+pub use device_epochs::DeviceEpochs;
 pub use ingest_node::{
     CHANNELLESS_PORT, MIDI_INPUT_DENSITY, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS,
-    MidiIngestControls, MidiIngestNode, MidiInputPorts, SlotCountMismatch,
+    MidiIngestControls, MidiIngestNode, MidiInputPorts,
 };
+pub use input_inlets::{ArrivalClock, DeviceInput, InputId, InputInlets};
 pub use keys::{LIVE_INLET_CAPACITY, MidiKeys};
 pub use mailbox::{MAILBOX_CAPACITY, MidiMailbox, MidiReceiver, MidiSender};
 pub use mpe_ingest::MpeIngest;

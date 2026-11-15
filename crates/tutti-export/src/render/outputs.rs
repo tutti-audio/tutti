@@ -18,13 +18,13 @@ use tutti_buffers::{Fold, Interleaved, InterleavedMut, Planes};
 use tutti_graph::TapReader;
 use tutti_measure::Loudness;
 use tutti_transport::RenderClock;
-use tutti_types::{ChannelLayout, Db, SampleRate, Samples};
+use tutti_types::{ChannelLayout, ChannelTopology, Db, SampleRate, Samples};
 
 use crate::control::{Control, Outcome, Stage, Weights};
 use crate::encode::{
     Chain, Landed, Resampler, open_file, output_rate, replay_through, resampler_for, written,
 };
-use crate::normalize::{Measurer, Normalize, chunk_frames};
+use crate::normalize::{Measurer, Normalize, Reading, chunk_frames};
 use crate::output::{FileTarget, GainSource, NormalizeSpec, Output, Produced, Target, TargetError};
 use crate::render::{
     FileChannels, REPLAY_BLOCK, RenderPlan, Replay, check_loss, drive, with_source,
@@ -69,6 +69,8 @@ struct Lane {
     /// Set for a tap feed; the graph's planes otherwise.
     tap: Option<TapFeed>,
     layout: ChannelLayout,
+    /// Whether the target stated its channels' topology.
+    placement: tutti_types::Placement,
     /// The interleaved frames of one block's window, at the target's layout.
     scratch: Vec<f32>,
     sink: Sink,
@@ -182,6 +184,22 @@ fn check_outputs(outputs: &[Output]) -> Result<()> {
         }
         let Some(file) = file else { continue };
         if let Some(normalize) = file.normalize()
+            && normalize.gain() == GainSource::Own
+            && matches!(normalize.mode(), Normalize::Lufs { .. })
+        {
+            // Loudness is weighted by placement: refused here, not after the render.
+            if tutti_measure::LoudnessConfig::new(
+                tutti_types::SampleRate::SR_48K,
+                file.effective_topology(),
+            )
+            .is_err()
+            {
+                return Err(target_error(TargetError::UnplacedLoudness {
+                    channels: file.channels(),
+                }));
+            }
+        }
+        if let Some(normalize) = file.normalize()
             && let GainSource::FromOutput(j) = normalize.gain()
         {
             let measures = outputs.get(j).is_some_and(|other| {
@@ -211,7 +229,7 @@ fn open_lanes(
     job: &Job,
     plan: &RenderPlan,
     graph_outputs: usize,
-    root: Option<&tutti_types::ChannelTopology>,
+    root: Option<&ChannelTopology>,
     max_block: usize,
 ) -> Result<Vec<Lane>> {
     let mut lanes = Vec::with_capacity(outputs.len());
@@ -220,6 +238,11 @@ fn open_lanes(
         let (layout, topology) = match &target {
             Target::File(f) => (f.channels(), f.topology()),
             Target::Buffers(b) => (b.channels(), b.topology()),
+        };
+        let placement = if topology.is_some() {
+            tutti_types::Placement::Stated
+        } else {
+            tutti_types::Placement::Assumed
         };
         let channels = FileChannels { layout, topology };
         let (fold, tap) = match feed {
@@ -270,6 +293,7 @@ fn open_lanes(
             fold,
             tap,
             layout,
+            placement,
             scratch: vec![0.0; max_block * usize::from(layout.count())],
             sink,
         });
@@ -372,8 +396,8 @@ fn finish(
             };
             done = at;
             chosen[i] = Some(Chosen {
-                gain: normalize.gain_for(&reading),
-                measured: Some(reading),
+                gain: reading.gain(),
+                measured: reading.loudness(),
             });
         }
         for &i in &waiting {
@@ -431,6 +455,7 @@ fn finish(
     // Finalizing.
     let mut produced: Vec<Option<Produced>> = Vec::with_capacity(lanes.len());
     let mut files: Vec<PendingFile> = Vec::new();
+    let placements: Vec<tutti_types::Placement> = lanes.iter().map(|l| l.placement).collect();
     for (i, lane) in lanes.into_iter().enumerate() {
         match lane.sink {
             Sink::Buffers { planes } => {
@@ -452,7 +477,7 @@ fn finish(
         return Ok(Outcome::Cancelled);
     };
     for (index, path, file) in landed {
-        let mut w = written(&path, file, lost);
+        let mut w = written(&path, file, lost, placements[index]);
         if let Some(c) = chosen[index] {
             w.gain = Some(c.gain);
             w.measured = c.measured;
@@ -490,7 +515,7 @@ fn measure(
     mut done: Samples,
     total: Samples,
     control: &mut Control<'_>,
-) -> Result<Outcome<(Loudness, Samples)>> {
+) -> Result<Outcome<(Reading, Samples)>> {
     let out_rate = output_rate(&waiting.target, rate);
     let unmeasurable = |reason: Unmeasured| Error::Unmeasurable {
         output: Some(output),
@@ -498,8 +523,8 @@ fn measure(
         sample_rate: out_rate,
         reason,
     };
-    let mut measurer =
-        Measurer::new(out_rate, layout).ok_or_else(|| unmeasurable(Unmeasured::Format))?;
+    let mut measurer = Measurer::new(out_rate, &waiting.target.effective_topology(), normalize)
+        .map_err(unmeasurable)?;
     let ch = usize::from(layout.count());
     let mut resampler: Option<Resampler> = resampler_for(&waiting.target, rate, ch)?;
     let mut staging: Vec<f32> = Vec::new();
@@ -534,7 +559,7 @@ fn measure(
         feed_planes(&mut measurer, out, &mut staging, layout)?;
     }
     let reading = measurer.finish();
-    normalize.check(&reading).map_err(unmeasurable)?;
+    reading.check().map_err(unmeasurable)?;
     Ok(Outcome::Finished((reading, done)))
 }
 

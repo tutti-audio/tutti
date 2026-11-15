@@ -14,11 +14,12 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 use tutti_graph::{Losses, UmpAt};
 
+use tutti_graph::EventInletNode;
 use tutti_midi_device::{
     DeviceEvent, DeviceId, DeviceInfo, DeviceTable, EndpointId, OsChange, OsDevice, PortDirection,
     Resolved,
 };
-use tutti_midi_runtime::{DeviceSlot, Outgoing, Taken};
+use tutti_midi_runtime::{InputId, Outgoing, Taken};
 use tutti_ump::StreamConfig;
 
 use crate::HardwareMidiInputs;
@@ -315,15 +316,15 @@ impl Devices {
     }
 
     /// Opens `id` for input. Its events land in an event inlet of `ports`, read
-    /// by the audio thread on their frames; the returned [`OpenInput`] holds the
-    /// connection and the port, and dropping it closes both.
+    /// by the audio thread on their frames: the node to add to the graph is
+    /// returned with the [`OpenInput`], which holds the connection and the
+    /// port, and dropping it closes both.
     ///
-    /// Control thread only: it takes a slot of `ports` and
-    /// the backend may start a thread.
+    /// Control thread only: the backend may start a thread.
     ///
     /// Opening an id that is already open opens a second connection to the
     /// device, and every event arrives twice. `Devices` does not track what is
-    /// open; the session does, and its `connect_input` is idempotent.
+    /// open; the session does, and its `connect_input` opens a device once.
     ///
     /// The list is not held while the OS opens the handle. A device that left
     /// in between, and whose handle the OS gave to another at once, opens that
@@ -332,25 +333,24 @@ impl Devices {
     /// # Errors
     ///
     /// [`Error::NotFound`] when `id` is not present, [`Error::WrongDirection`]
-    /// when it is not an input, [`Error::NoFreeSlot`] when every slot is held,
-    /// or the platform error from opening it. A failed open leaves no port in
-    /// `ports`.
+    /// when it is not an input, or the platform error from opening it. A failed
+    /// open leaves no port in `ports`.
     pub(crate) fn open_input(
         &self,
         id: &DeviceId,
         ports: &Arc<HardwareMidiInputs>,
-    ) -> Result<OpenInput> {
+    ) -> Result<(OpenInput, EventInletNode)> {
         let (info, handle) = self.present(id, PortDirection::is_input)?;
-        let producer = ports.open_input_port(info.name.as_str())?;
+        let (producer, inlet) = ports.open_input_port(info.name.as_str());
         let mut input = OpenInput {
             connection: None,
-            port: producer.slot(),
+            port: producer.port(),
             ports: Arc::clone(ports),
             info,
         };
         // On an error `input` drops here, and takes the port with it.
         input.connection = Some(self.inner.backend.open_input(handle, producer)?);
-        Ok(input)
+        Ok((input, inlet))
     }
 
     /// Opens `id` for output.
@@ -524,8 +524,7 @@ impl<'a> IntoIterator for &'a DeviceEvents {
 /// events land in.
 ///
 /// Dropping it closes both, connection first, so nothing is still pushing into
-/// a ring that is being retired (the connection's end of the port, its
-/// producer handle, gives the slot back as it drops). Drop it on a control
+/// a ring that is being retired. Drop it on a control
 /// thread only: closing the connection joins the backend's thread and retiring
 /// the port publishes. A device that leaves does not close it: the
 /// holder learns from a [`DeviceEvent::Removed`] naming [`id`](Self::id) and
@@ -533,7 +532,7 @@ impl<'a> IntoIterator for &'a DeviceEvents {
 pub struct OpenInput {
     /// `None` only while [`Devices::open_input`] is still opening it.
     connection: Option<Box<dyn InputConnection>>,
-    port: DeviceSlot,
+    port: InputId,
     ports: Arc<HardwareMidiInputs>,
     info: DeviceInfo,
 }
@@ -568,10 +567,9 @@ impl OpenInput {
         self.connection.as_ref().is_some_and(|c| c.is_alive())
     }
 
-    /// The port its events land in (its slot), for the list's
-    /// `set_port_active`.
+    /// The port its events land in, for the list's `set_port_active`.
     #[must_use]
-    pub fn slot(&self) -> DeviceSlot {
+    pub fn port(&self) -> InputId {
         self.port
     }
 }

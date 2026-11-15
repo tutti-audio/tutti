@@ -230,6 +230,19 @@ pub enum Error {
         /// The config's layout.
         config: ChannelLayout,
     },
+    /// An ambisonic topology has no speaker angles to weigh loudness by.
+    #[error(
+        "ambisonic input has no speaker placement to weigh loudness by: decode it to speakers first"
+    )]
+    AmbisonicLoudness,
+    /// Speakers that are not a known bed's have no angles to weigh loudness by.
+    #[error(
+        "{width:?} speakers are not a known bed, so their placement is unknown and loudness cannot be weighted"
+    )]
+    UnplacedLoudnessChannels {
+        /// The channel count of the refused topology.
+        width: ChannelLayout,
+    },
     /// The loudness meter could not be built.
     #[error("the loudness meter could not be built")]
     MeterUnavailable,

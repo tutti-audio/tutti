@@ -10,6 +10,7 @@
 
 use std::collections::BTreeSet;
 
+use crate::common::with_input;
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_midi_runtime::{CHANNELLESS_PORT, MIDI_INPUT_PORTS};
@@ -32,10 +33,7 @@ impl Node for Sink {
 }
 
 fn session() -> (Session, NodeKey) {
-    let mut s = Session::builder().build().expect("builds");
-    let input = s.midi_nodes().expect("the builder's MIDI nodes").input;
-    let _ = s.update();
-    (s, input)
+    with_input(None)
 }
 
 /// The input ports that feed `node` by the routes.

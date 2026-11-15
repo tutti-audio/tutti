@@ -20,9 +20,9 @@ use tutti_graph::GraphBuilder;
 use tutti_measure::{LoudnessConfig, measure_loudness};
 use tutti_nodes::testing::{Const, Osc};
 use tutti_transport::FrozenClock;
-use tutti_types::ChannelLayout;
 use tutti_types::Db;
 use tutti_types::{Amplitude, Hz, SampleRate, Samples, Seconds};
+use tutti_types::{Bed, ChannelLayout};
 
 /// The rate every render below runs at.
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -202,7 +202,7 @@ fn main() -> tutti_export::Result<()> {
     .into_finished()
     .and_then(Produced::into_buffers)
     .expect("nothing cancels a control with no token");
-    let cfg = LoudnessConfig::new(audio.sample_rate(), ChannelLayout::STEREO);
+    let cfg = LoudnessConfig::new(audio.sample_rate(), Bed::Stereo.topology()).unwrap();
     let flat = audio.interleaved();
     let before = measure_loudness(
         &cfg,

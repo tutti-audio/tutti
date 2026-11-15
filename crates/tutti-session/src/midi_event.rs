@@ -5,7 +5,9 @@
 ///
 /// A variant about one device carries its `DeviceId`
 /// as a field; a count over every input or the output has no device, and is its
-/// own variant. Reported in the order they were seen, from `Phase::Poll` and
+/// own variant. What happens to a port (its device gone or back, what it
+/// learned) is a [`ResourceChanged`](crate::SessionEvent::ResourceChanged) of
+/// its handle. Reported in the order they were seen, from `Phase::Poll` and
 /// `Phase::MidiOut`.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -30,83 +32,14 @@ pub enum MidiEvent {
         /// Its listing now; `info.id` is the device.
         info: tutti_midi_hardware::DeviceInfo,
     },
-    /// A device the session held open as an input vanished: its connection
-    /// is closed and its port retired, after the [`Removed`](Self::Removed)
-    /// that said so. What the device had queued is discarded; the notes,
-    /// pedals and bends it held are released downstream by the ingest node.
-    /// The session keeps the device as one the app wants, and opens it again
-    /// when it returns and is surely the same one
-    /// ([`InputRestored`](Self::InputRestored)).
-    #[cfg(feature = "midi-hardware")]
-    InputLost {
-        /// Its last listing; `info.id` is the device.
-        info: tutti_midi_hardware::DeviceInfo,
-    },
-    /// The device the session held open as its output vanished: the output
-    /// is closed, and what the hardware out sends is counted as dropped
-    /// ([`OutputDropped`](Self::OutputDropped)) until another is connected or
-    /// this one returns and is surely the same device
-    /// ([`OutputRestored`](Self::OutputRestored)); its stamp stream carries on.
-    #[cfg(feature = "midi-hardware")]
-    OutputLost {
-        /// Its last listing; `info.id` is the device.
-        info: tutti_midi_hardware::DeviceInfo,
-    },
-    /// A device that was lost as an input ([`InputLost`](Self::InputLost))
-    /// returned and is surely the same one: the input is open again.
-    #[cfg(feature = "midi-hardware")]
-    InputRestored {
-        /// Its listing now; `info.id` is the device.
-        info: tutti_midi_hardware::DeviceInfo,
-    },
-    /// The device that was lost as the output ([`OutputLost`](Self::OutputLost))
-    /// returned and is surely the same one: the output is open again.
-    #[cfg(feature = "midi-hardware")]
-    OutputRestored {
-        /// Its listing now; `info.id` is the device.
-        info: tutti_midi_hardware::DeviceInfo,
-    },
-    /// A lost device returned and is surely the same one, but opening it
-    /// failed. It stays wanted: it is tried again when it next returns.
-    #[cfg(feature = "midi-hardware")]
-    RestoreFailed {
-        /// Its listing now; `info.id` is the device.
-        info: tutti_midi_hardware::DeviceInfo,
-        /// Why it did not open.
-        error: crate::MidiError,
-    },
-    /// A device the session holds open as an input has settled its UMP Stream
-    /// negotiation (M2-104 §7.1.6.1): the Endpoint it declared,
-    /// or the OS's description of it where it did not answer, and the Protocol
-    /// in use. Reported once per connection, from `Phase::Poll`; the state
-    /// stays readable as
-    /// [`MidiSession::stream`](tutti_midi_hardware::MidiSession::stream).
-    #[cfg(feature = "midi-hardware")]
-    StreamSettled {
-        /// The device.
-        device: tutti_midi_hardware::DeviceId,
-        /// What is known of it (boxed: an Endpoint is large).
-        stream: Box<tutti_midi_hardware::DeviceStream>,
-    },
-    /// A MIDI-CI peer of a device the session holds open as an input was
-    /// found, changed or lost (M2-101): the session runs a
-    /// MIDI-CI Device (Management only) on the input for as long as it is open
-    /// and reports each change once, from `Phase::Poll`. The peers now are
-    /// [`Midi::ci_peers`](crate::Midi::ci_peers).
-    #[cfg(feature = "midi-hardware")]
-    CiPeer {
-        /// The device.
-        device: tutti_midi_hardware::DeviceId,
-        /// The peer.
-        peer: tutti_midi_hardware::PeerId,
-        /// What happened to it.
-        change: tutti_midi_hardware::CiChange,
-    },
     /// A MIDI-CI peer's Profiles became known or changed, a request to switch one
     /// ended, or the peer's Profiles were dropped with it (M2-101 section 7): the
     /// session is the Initiator with every peer that declares Profile
     /// Configuration, and reports each change once, from `Phase::Poll`. The
-    /// Profiles now are [`Midi::profiles`](crate::Midi::profiles).
+    /// Profiles now are the input's
+    /// [`MidiInputInfo::profiles`](crate::MidiInputInfo::profiles), and a change
+    /// is also a [`ResourceChanged`](crate::SessionEvent::ResourceChanged) of its
+    /// input.
     #[cfg(feature = "midi-hardware")]
     CiProfiles {
         /// The device.
@@ -122,8 +55,8 @@ pub enum MidiEvent {
     /// peer that declares Process Inquiry, and reports each change once, from
     /// `Phase::Poll`. The messages of a report are not events of this kind: they
     /// reach the graph as the input's MIDI, between the began and the ended. The
-    /// peers that can be asked are
-    /// [`Midi::report_peers`](crate::Midi::report_peers).
+    /// peers that can be asked are the input's
+    /// [`MidiInputInfo::report_peers`](crate::MidiInputInfo::report_peers).
     #[cfg(feature = "midi-hardware")]
     CiProcess {
         /// The device.

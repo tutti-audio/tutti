@@ -20,8 +20,8 @@
 use tutti::measure::{LoudnessConfig, measure_loudness};
 use tutti::nodes::testing::{Const, Osc};
 use tutti::{
-    Amplitude, Bounce, ChannelLayout, Format, Hz, Interleaved, Pcm, Range, Root, SampleRate,
-    Seconds, Session,
+    Amplitude, Bounce, ChannelLayout, ChannelTopology, Format, Hz, Interleaved, Pcm, Range, Root,
+    SampleRate, Seconds, Session,
 };
 
 /// The rate every render below runs at.
@@ -74,7 +74,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 2. The same project into memory, and a measurement of it.
     let rendered = tone().bounce(first(1.0).master_buffers())?.into_master();
     let flat = rendered.interleaved();
-    let cfg = LoudnessConfig::new(rendered.sample_rate(), ChannelLayout::STEREO);
+    // `tutti` exports no path to `Bed`, so the placement is the assumed one for
+    // two channels, which is a stereo bed.
+    let cfg = LoudnessConfig::new(
+        rendered.sample_rate(),
+        ChannelTopology::assumed(ChannelLayout::STEREO),
+    )
+    .unwrap();
     let loudness = measure_loudness(
         &cfg,
         Interleaved::new(&flat, ChannelLayout::STEREO).unwrap(),
