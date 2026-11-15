@@ -123,7 +123,7 @@ impl Cents {
     #[inline]
     #[must_use]
     pub fn to_pitch_ratio(self) -> f32 {
-        2.0_f32.powf(self.0 / 1200.0)
+        libm::exp2f(self.0 / 1200.0)
     }
 
     /// The interval a frequency multiplier spans. Inverse of
@@ -137,7 +137,7 @@ impl Cents {
     #[must_use]
     pub fn from_pitch_ratio(ratio: f32) -> Cents {
         if ratio > 0.0 {
-            Cents(1200.0 * ratio.log2())
+            Cents(1200.0 * libm::log2f(ratio))
         } else {
             Cents(0.0)
         }
@@ -305,7 +305,7 @@ impl Semitones {
     #[inline]
     #[must_use]
     pub fn to_pitch_ratio(self) -> f32 {
-        2.0_f32.powf(self.0 / 12.0)
+        libm::exp2f(self.0 / 12.0)
     }
 
     /// The interval a frequency multiplier spans. Inverse of
@@ -321,7 +321,7 @@ impl Semitones {
     #[must_use]
     pub fn from_pitch_ratio(ratio: f32) -> Semitones {
         if ratio > 0.0 {
-            Semitones(12.0 * ratio.log2())
+            Semitones(12.0 * libm::log2f(ratio))
         } else {
             Semitones(0.0)
         }
