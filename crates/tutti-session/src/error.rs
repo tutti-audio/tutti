@@ -475,6 +475,11 @@ pub enum Error {
     #[error(transparent)]
     Modulation(#[from] crate::RouteError),
 
+    /// The system clock's timer thread did not start
+    /// ([`SessionBuilder::system_clock`](crate::SessionBuilder::system_clock)).
+    #[error(transparent)]
+    Clock(#[from] tutti_engine::StartError<tutti_engine::TimerError>),
+
     /// Audio device failure: enumeration, stream construction, or playback.
     /// Wraps `tutti_cpal::Error`, which owns every CPAL concern.
     #[cfg(feature = "device")]

@@ -1,7 +1,7 @@
 //! The `served!` table: which formats this server runs, as one enum.
 //!
 //! A row is a variant, the format's [`Loaded`](tutti_plugin_types::Loaded)
-//! type, and the extension its files carry. The row's type is the argument of
+//! type, and the [`PluginFormat`] a load names for it. The row's type is the argument of
 //! [`Served`], which is bounded by
 //! [`OutOfProcess`](tutti_plugin_types::OutOfProcess) (through
 //! [`ServerSide`](super::ServerSide)), so a row for a format that cannot be
@@ -12,14 +12,15 @@
 use std::path::Path;
 
 use tutti_plugin_types::{
-    Hand, Load, LoadStage, MainThreadMarker, MainWorkHandle, PluginError, PluginResult, StateUse,
+    Hand, Load, LoadStage, MainThreadMarker, MainWorkHandle, PluginError, PluginFormat,
+    PluginResult, StateUse,
 };
 
 use super::{Served, ServedPlugin};
 use crate::render::{End, RenderEnd};
 
 macro_rules! served {
-    ($($(#[$cfg:meta])* $name:ident($loaded:ty, $extension:literal)),* $(,)?) => {
+    ($($(#[$cfg:meta])* $name:ident($loaded:ty, $format:path)),* $(,)?) => {
         /// One loaded plugin, whichever format backs it.
         ///
         /// Every variant is behind its format's feature (AU also behind macOS),
@@ -31,7 +32,9 @@ macro_rules! served {
 
         impl AnyServed {
             /// Loads the plugin `load` chooses in the file at `path` and
-            /// activates it, choosing the format from the file's extension.
+            /// activates it, as `format`: the file's extension does not choose
+            /// it, so a link whose target has another extension is opened as
+            /// the format it was catalogued as.
             /// Its Processor is lent to the render thread: the third value is
             /// the seat it arrives in ([`crate::render::End`]), which that
             /// thread installs.
@@ -39,13 +42,14 @@ macro_rules! served {
             /// # Errors
             ///
             /// [`PluginError::Load`] at [`LoadStage::Scanning`] when the path
-            /// does not exist, at [`LoadStage::Opening`] for an extension no
-            /// row names, else the format's own.
+            /// does not exist, at [`LoadStage::Opening`] for a format no row
+            /// names, else the format's own.
             #[allow(clippy::too_many_arguments)] // one load's parameters, as the wire carries them
             pub(crate) fn load(
                 main: MainThreadMarker,
                 work: &MainWorkHandle,
                 path: &Path,
+                format: PluginFormat,
                 load: &Load,
                 sample_rate: tutti_plugin_types::SampleRate,
                 block_size: usize,
@@ -59,13 +63,8 @@ macro_rules! served {
                         reason: "Plugin not found".to_string(),
                     });
                 }
-                let extension = path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("")
-                    .to_lowercase();
-                match extension.as_str() {
-                    $($(#[$cfg])* $extension => {
+                match format {
+                    $($(#[$cfg])* $format => {
                         let (hand, rt) = Hand::threaded();
                         let (plugin, state_error) = Served::<$loaded>::load(
                             main,
@@ -83,11 +82,13 @@ macro_rules! served {
                         Ok((Self::$name(plugin), state_error, Box::new(end)))
                     })*
                     _ => {
-                        let served: &[&str] = &[$($(#[$cfg])* concat!(".", $extension)),*];
+                        let served: &[&str] =
+                            &[$($(#[$cfg])* $format.extension_id()),*];
                         Err(PluginError::Load {
                             stage: LoadStage::Opening,
                             reason: format!(
-                                "Unsupported plugin format: {extension}. Supported: {}.",
+                                "Unsupported plugin format: {}. Supported: {}.",
+                                format.extension_id(),
                                 served.join(", ")
                             ),
                         })
@@ -118,9 +119,9 @@ macro_rules! served {
 
 served! {
     #[cfg(feature = "clap")]
-    Clap(tutti_clap_host::ClapLoaded, "clap"),
+    Clap(tutti_clap_host::ClapLoaded, PluginFormat::Clap),
     #[cfg(feature = "vst3")]
-    Vst3(tutti_vst3_host::Vst3Loaded, "vst3"),
+    Vst3(tutti_vst3_host::Vst3Loaded, PluginFormat::Vst3),
     #[cfg(all(feature = "au", target_os = "macos"))]
-    Au(tutti_au_host::AuLoaded, "component"),
+    Au(tutti_au_host::AuLoaded, PluginFormat::AudioUnit),
 }

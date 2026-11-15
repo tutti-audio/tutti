@@ -96,11 +96,11 @@ pub enum BridgeError {
 
     /// The catalog records this plugin as having brought a scan down.
     ///
-    /// Only a load that names the catalog (`PluginLoad::with_catalog`, which
-    /// asks `Catalog::check`) returns this: `Plugin::open` has no catalog and
-    /// so no crash history. `reason` lets a host say *which* plugin misbehaved
-    /// and offer to load it anyway, with a load that does not name the
-    /// catalog.
+    /// A load of a plugin a catalog resolved (`Catalog::resolve`) returns this
+    /// when the catalog blacklisted it since the resolve: the
+    /// `Loadable` asks the catalog's blacklist where the load opens the plugin.
+    /// `reason` lets a host say *which* plugin misbehaved and offer to
+    /// unblacklist it and resolve again.
     ///
     /// False positives are expected: the scanner's dead-man's pedal fires on a
     /// force-quit, a power loss, or an OOM kill as readily as on a real crash.

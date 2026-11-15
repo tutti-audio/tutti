@@ -5,8 +5,8 @@
 //! same server then loads a good plugin. A server that exited on the failed
 //! load (the host reports that as `ProcessCrashed`) fails the second step.
 //!
-//! The wire is unchanged: `BridgeMessage::Error` already existed and the host
-//! already turns it into `LoadFailed`, so `PROTOCOL_VERSION` is untouched.
+//! The reference CLAP plugin loads under its library's own name, which no
+//! format claims by extension: the load names the format.
 
 #![cfg(all(unix, feature = "clap", feature = "vst3"))]
 
@@ -18,7 +18,7 @@ use interprocess::local_socket::Stream;
 use interprocess::local_socket::traits::Stream as _;
 use tutti_plugin_ipc::{BridgeMessage, HostMessage, read_frame, socket_name, write_frame};
 use tutti_plugin_types::SampleFormat;
-use tutti_plugin_types::{Load, SampleRate};
+use tutti_plugin_types::{Load, PluginFormat, SampleRate};
 
 /// Kills the server if the test fails before it shuts it down.
 struct Server(Child);
@@ -45,15 +45,21 @@ fn connect(socket: &Path, server: &mut Server) -> Stream {
     }
 }
 
-fn load(stream: &mut Stream, path: &Path) -> BridgeMessage {
-    load_choosing(stream, path, Load::new())
+fn load(stream: &mut Stream, path: &Path, format: PluginFormat) -> BridgeMessage {
+    load_choosing(stream, path, format, Load::new())
 }
 
-fn load_choosing(stream: &mut Stream, path: &Path, load: Load) -> BridgeMessage {
+fn load_choosing(
+    stream: &mut Stream,
+    path: &Path,
+    format: PluginFormat,
+    load: Load,
+) -> BridgeMessage {
     write_frame(
         stream,
         &HostMessage::LoadPlugin {
             path: path.to_path_buf(),
+            format,
             load,
             sample_rate: SampleRate::SR_48K,
             block_size: 512,
@@ -66,15 +72,12 @@ fn load_choosing(stream: &mut Stream, path: &Path, load: Load) -> BridgeMessage 
     read_frame(stream).expect("the server answers a load; it did not exit")
 }
 
-/// The reference CLAP plugin's library under a `.vst3` name, which the server
-/// reads as VST3 and the library is not, and under its `.clap` name, which
-/// loads. The library's own name is `.so`, `.dylib` or `.dll` by platform, and
-/// the server dispatches on the extension, so both names are links.
+/// The reference CLAP plugin's library, and a copy of it named `.vst3` that
+/// the VST3 format refuses because the library is not VST3.
 fn fixtures() -> (PathBuf, PathBuf) {
     let real = tutti_fixtures::cdylib("tutti_clap_test_plugin", "tutti-clap-test-plugin");
     let not_a_plugin = tutti_fixtures::publish_with_extension(&real, "vst3");
-    let good = tutti_fixtures::publish_with_extension(&real, "clap");
-    (not_a_plugin, good)
+    (not_a_plugin, real)
 }
 
 /// A `plugin-server` process and its handshake connection, past `Ready`.
@@ -104,7 +107,7 @@ fn a_failed_load_is_answered_and_the_server_still_loads_a_good_plugin() {
     let (not_a_plugin, good) = fixtures();
     let (mut server, mut stream) = start_server();
 
-    match load(&mut stream, &not_a_plugin) {
+    match load(&mut stream, &not_a_plugin, PluginFormat::Vst3) {
         BridgeMessage::Error { message } => {
             assert!(
                 !message.contains("Unsupported plugin format"),
@@ -123,7 +126,10 @@ fn a_failed_load_is_answered_and_the_server_still_loads_a_good_plugin() {
     );
 
     assert!(
-        matches!(load(&mut stream, &good), BridgeMessage::PluginLoaded { .. }),
+        matches!(
+            load(&mut stream, &good, PluginFormat::Clap),
+            BridgeMessage::PluginLoaded { .. }
+        ),
         "the same server loads a good plugin after a failed one"
     );
 
@@ -148,7 +154,7 @@ fn a_load_that_names_a_plugin_loads_that_plugin_in_the_server() {
         .expect("utf-8");
 
     assert_eq!(
-        id_of(load(&mut stream, &good)),
+        id_of(load(&mut stream, &good, PluginFormat::Clap)),
         tutti_clap_test_plugin::PLUGIN_ID.to_str().expect("utf-8"),
         "no choice loads the first plugin"
     );
@@ -156,6 +162,7 @@ fn a_load_that_names_a_plugin_loads_that_plugin_in_the_server() {
         id_of(load_choosing(
             &mut stream,
             &good,
+            PluginFormat::Clap,
             Load::new().plugin(second)
         )),
         second,

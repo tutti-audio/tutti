@@ -13,7 +13,7 @@ use std::fmt;
 /// total.
 pub struct PoolKey(Box<dyn Erased>);
 
-trait Erased: Send {
+trait Erased: Send + Sync {
     fn clone_box(&self) -> Box<dyn Erased>;
     fn as_any(&self) -> &dyn Any;
     fn type_id_of(&self) -> TypeId;
@@ -21,7 +21,7 @@ trait Erased: Send {
     fn debug(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result;
 }
 
-impl<K: Ord + Clone + fmt::Debug + Send + 'static> Erased for K {
+impl<K: Ord + Clone + fmt::Debug + Send + Sync + 'static> Erased for K {
     fn clone_box(&self) -> Box<dyn Erased> {
         Box::new(self.clone())
     }
@@ -47,7 +47,7 @@ impl<K: Ord + Clone + fmt::Debug + Send + 'static> Erased for K {
 }
 
 impl PoolKey {
-    pub(crate) fn new<K: Ord + Clone + fmt::Debug + Send + 'static>(key: &K) -> Self {
+    pub(crate) fn new<K: Ord + Clone + fmt::Debug + Send + Sync + 'static>(key: &K) -> Self {
         Self(Box::new(key.clone()))
     }
 

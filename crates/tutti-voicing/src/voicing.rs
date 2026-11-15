@@ -1715,6 +1715,7 @@ mod tests {
     use tutti_midi_protocol::widen;
     use tutti_ump::BendValue;
     use tutti_ump::NoteVelocity;
+    use tutti_ump::PerNoteManagement;
     use tutti_ump::{Attribute, CCNumber, Pitch, RegisteredPerNoteController, U7, Voice1};
 
     /// One voice per note, no group.
@@ -2982,13 +2983,12 @@ mod tests {
         )
     }
 
-    fn management(s: &mut Sim, c: u8, k: u8, detach: bool, reset: bool) -> Vec<Command> {
+    fn management(s: &mut Sim, c: u8, k: u8, management: PerNoteManagement) -> Vec<Command> {
         s.send(
             c,
             Voice2::PerNoteManagement {
                 note: NoteNumber::of(k),
-                detach,
-                reset,
+                management,
             },
             &One,
         )
@@ -3003,7 +3003,7 @@ mod tests {
     #[test]
     fn a_pitch_sent_before_its_note_on_is_what_the_note_starts_with() {
         let mut s = Sim::new(POLY);
-        management(&mut s, 0, 0, true, true);
+        management(&mut s, 0, 0, PerNoteManagement::DetachAndReset);
         pnc(&mut s, 0, 0, RegisteredPerNoteController::Pitch, PITCH_60);
         let c = s.on(0, 0);
         assert!(matches!(c[0], Command::Start { .. }), "{c:?}");
@@ -3048,7 +3048,7 @@ mod tests {
         assert!(s.core.phase(id(1)).is_some_and(|p| p == Phase::Releasing));
         let c = per_note_bend(&mut s, 0, 5, 0xC000_0000);
         assert_eq!(told(&c), vec![id(1), id(2)], "{c:?}");
-        management(&mut s, 0, 5, true, false);
+        management(&mut s, 0, 5, PerNoteManagement::Detach);
         let c = per_note_bend(&mut s, 0, 5, 0x4000_0000);
         assert_eq!(told(&c), vec![], "{c:?}");
     }
@@ -3100,7 +3100,7 @@ mod tests {
     fn after_a_detach_the_next_pitch_is_for_the_next_note_alone() {
         let mut s = Sim::new(POLY);
         s.on(0, 5);
-        assert_eq!(management(&mut s, 0, 5, true, false), vec![]);
+        assert_eq!(management(&mut s, 0, 5, PerNoteManagement::Detach), vec![]);
         // No voice responds: the value is only stored.
         pnc(&mut s, 0, 5, RegisteredPerNoteController::Pitch, PITCH_60);
         let c = s.on(0, 5);
@@ -3130,7 +3130,10 @@ mod tests {
         let mut s = Sim::new(POLY);
         s.on(0, 5);
         per_note_bend(&mut s, 0, 5, 0xC000_0000);
-        assert_eq!(management(&mut s, 0, 5, true, true), vec![]);
+        assert_eq!(
+            management(&mut s, 0, 5, PerNoteManagement::DetachAndReset),
+            vec![]
+        );
         let c = s.on(0, 5);
         assert!(
             c.iter().any(|c| matches!(c, Command::Start { .. }))
@@ -3149,7 +3152,7 @@ mod tests {
         pnc(&mut s, 0, 5, RegisteredPerNoteController::Volume, 1 << 30);
         s.on(0, 5);
         assert_eq!(
-            management(&mut s, 0, 5, false, true),
+            management(&mut s, 0, 5, PerNoteManagement::Reset),
             vec![Command::ResetControls(id(1))]
         );
         let c = s.on(0, 5);

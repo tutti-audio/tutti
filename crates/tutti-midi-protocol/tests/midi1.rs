@@ -6,7 +6,8 @@
 use tutti_midi_protocol::{NoMidi1Form, midi1, narrow, widen};
 use tutti_ump::{
     Address, Attribute, Bank, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity,
-    RegisteredPerNoteController, Sysex7Packet, SysexStatus, System, U7, U14, Voice1, Voice2,
+    PerNoteManagement, RegisteredPerNoteController, Sysex7Packet, SysexStatus, System, U7, U14,
+    Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
 
@@ -204,8 +205,7 @@ fn messages_without_a_midi1_form_send_nothing() {
         },
         Voice2::PerNoteManagement {
             note: NoteNumber::of(60),
-            detach: true,
-            reset: false,
+            management: PerNoteManagement::Detach,
         },
     ];
     for voice in none {
@@ -280,8 +280,7 @@ fn a_refusal_names_why_there_is_no_midi1_message() {
     assert_eq!(
         narrow(Voice2::PerNoteManagement {
             note,
-            detach: true,
-            reset: false
+            management: PerNoteManagement::Detach
         }),
         Err(NoMidi1Form::PerNoteManagement)
     );

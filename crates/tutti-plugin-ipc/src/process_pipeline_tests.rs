@@ -47,6 +47,7 @@ fn no_editor(
     _: tutti_plugin_types::MainThreadMarker,
     _: &tutti_plugin_types::MainWorkHandle,
     path: &std::path::Path,
+    _: tutti_plugin_types::PluginFormat,
     _: &tutti_plugin_types::Load,
 ) -> tutti_plugin_types::BridgeResult<Box<dyn tutti_plugin_types::Editor>> {
     Err(tutti_plugin_types::BridgeError::LoadFailed {
@@ -216,6 +217,7 @@ fn bridge_with_server(
         path.clone(),
         Arc::clone(host_slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
             no_editor,
             tutti_fixtures::detached_work(),
@@ -914,6 +916,7 @@ fn bridge_with_no_server() -> (Arc<PluginBridge>, BridgeThread, SlabWriter) {
         path,
         Arc::clone(host_slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
             no_editor,
             tutti_fixtures::detached_work(),
@@ -1420,6 +1423,7 @@ fn stamped_server(stall: std::time::Duration, first_only: bool, rate: SampleRate
         path.clone(),
         Arc::clone(host_slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
             no_editor,
             tutti_fixtures::detached_work(),
@@ -1683,6 +1687,7 @@ fn a_refused_chunk_reports_its_midi_lost() {
         path,
         Arc::clone(slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
             no_editor,
             tutti_fixtures::detached_work(),
@@ -1813,6 +1818,7 @@ fn two_stale_blocks(
         path.clone(),
         Arc::clone(slab.slab()),
         tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
+        tutti_plugin_types::PluginFormat::Vst3,
         Some(crate::EditorLoader::new(
             no_editor,
             tutti_fixtures::detached_work(),

@@ -98,7 +98,7 @@ impl fmt::Display for ParamPath {
 }
 
 /// A Bank Select and Program Change, as the `bankPC` property carries them: the
-/// three 7-bit values, 0-based (M2-105 Table 10, M2-107 Table 2).
+/// three 7-bit values, 0-based (M2-105 Table 10, M2-107 §2.2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PeBankProgram {
     /// The Bank MSB and LSB.
