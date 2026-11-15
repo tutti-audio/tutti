@@ -529,4 +529,49 @@ mod links {
         let args = std::fs::read_to_string(log).expect("the probe ran");
         assert!(args.contains("--as clap"), "{args:?}");
     }
+
+    /// **A scanned link to a differently named target loads by its catalog
+    /// key**: the row is CLAP though its file is `libfoo.so`, so the load that
+    /// resolves the plugin's id opens the target as CLAP, in a server, and the
+    /// plugin that comes back is the row's.
+    #[test]
+    fn a_scanned_link_to_a_differently_named_target_loads_by_its_catalog_key() {
+        use tutti_plugin::catalog::{Hosting, Plugin, PluginId};
+        use tutti_plugin_db::PluginFormat;
+        let dir = tempfile::TempDir::new().expect("a scratch directory");
+        let target = dir.path().join("libfoo.so");
+        std::fs::copy(tutti_fixtures::clap_probe(), &target).expect("a plugin");
+        let scanned = dir.path().join("plugins");
+        std::fs::create_dir(&scanned).expect("the scanned directory");
+        std::os::unix::fs::symlink(&target, scanned.join("Foo.clap")).expect("a link");
+        let config = CatalogConfig::new(dir.path(), vec![scanned])
+            .probe_locator(Locator::at(tutti_fixtures::plugin_probe()));
+        let mut catalog = Catalog::new(PluginDb::new(), config, |_| Ok(()));
+        let result = scan(&mut catalog);
+        assert!(result.failures.is_empty(), "{:?}", result.failures);
+        let (listed, descriptor) = catalog.iter().next().expect("the link is one row");
+        assert_eq!(listed.path(), tutti_plugin_db::canonical_path(&target));
+        let id = PluginId::new(PluginFormat::Clap, descriptor.id.clone());
+
+        let loadable = catalog
+            .resolve(&id)
+            .bind()
+            .expect("the scanned id is in the catalog")
+            .hosting(Hosting::OutOfProcess);
+        assert_eq!(loadable.format(), PluginFormat::Clap);
+        let mut env = tutti_fixtures::ScopedEnv::new();
+        env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
+        let plugin = Plugin::open(
+            None,
+            &tutti_fixtures::detached_work(),
+            &loadable,
+            tutti_types::SampleRate::SR_48K,
+        )
+        .expect("the target loads as CLAP, though its extension names VST2");
+
+        assert_eq!(plugin.descriptor().id, id.id);
+        assert_eq!(plugin.plugin().format(), PluginFormat::Clap);
+        assert_eq!(plugin.plugin().path(), listed.path());
+        assert!(plugin.handle().server_pid().is_some());
+    }
 }

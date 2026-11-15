@@ -8,6 +8,7 @@ pub struct Clap;
 
 impl Format for Clap {
     const NAME: &'static str = "clap";
+    const FORMAT: tutti_plugin_types::PluginFormat = tutti_plugin_types::PluginFormat::Clap;
     const SURFACE: spec::Surface = spec::CLAP;
     type L = tutti_clap_host::ClapLoaded;
     const PARAM_TIMING: ParamTiming = ParamTiming::SampleAccurate;
@@ -40,6 +41,7 @@ pub struct Vst2;
 
 impl Format for Vst2 {
     const NAME: &'static str = "vst2";
+    const FORMAT: tutti_plugin_types::PluginFormat = tutti_plugin_types::PluginFormat::Vst2;
     const SURFACE: spec::Surface = spec::VST2;
     type L = tutti_vst2_host::Vst2Loaded;
     /// VST2 has no sample offset on a parameter: the host's changes land at the
@@ -73,6 +75,7 @@ pub struct Vst3;
 
 impl Format for Vst3 {
     const NAME: &'static str = "vst3";
+    const FORMAT: tutti_plugin_types::PluginFormat = tutti_plugin_types::PluginFormat::Vst3;
     const SURFACE: spec::Surface = spec::VST3;
     type L = tutti_vst3_host::Vst3Loaded;
     const PARAM_TIMING: ParamTiming = ParamTiming::SampleAccurate;
@@ -90,6 +93,7 @@ pub struct Vst3Cpp;
 
 impl Format for Vst3Cpp {
     const NAME: &'static str = "vst3-cpp";
+    const FORMAT: tutti_plugin_types::PluginFormat = tutti_plugin_types::PluginFormat::Vst3;
     const SURFACE: spec::Surface = spec::VST3_CPP;
     type L = tutti_vst3_host::Vst3Loaded;
     const PARAM_TIMING: ParamTiming = ParamTiming::SampleAccurate;
@@ -110,6 +114,7 @@ pub struct Au;
 #[cfg(target_os = "macos")]
 impl Format for Au {
     const NAME: &'static str = "au";
+    const FORMAT: tutti_plugin_types::PluginFormat = tutti_plugin_types::PluginFormat::AudioUnit;
     const SURFACE: spec::Surface = spec::AU;
     type L = tutti_au_host::AuLoaded;
     /// The host schedules each segment between two points as a ramped event and

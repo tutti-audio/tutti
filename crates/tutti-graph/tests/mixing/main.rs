@@ -1,5 +1,6 @@
 //! Weighted edges, mix, mode, param ports and audio fan-in.
 
+mod azimuth_arc;
 mod declared_reads;
 mod edge_fade;
 mod edge_gain;

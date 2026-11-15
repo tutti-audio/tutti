@@ -237,7 +237,9 @@ fn open_routes_a_vst2_to_the_in_process_backend() {
     let plugin = tutti_plugin::catalog::Plugin::open(
         Some(main_thread()),
         &tutti_fixtures::pumped_work(),
-        &tutti_plugin::catalog::PluginRef::file(staged.clone()).expect("a plugin file"),
+        &tutti_plugin::catalog::Loadable::uncatalogued(
+            tutti_plugin::catalog::PluginRef::file(staged.clone()).expect("a plugin file"),
+        ),
         tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
     )
     .expect("Plugin::open should load a .vst in-process");
@@ -331,7 +333,9 @@ fn the_node_carries_midi_on_its_event_ports() {
         let plugin = tutti_plugin::catalog::Plugin::open(
             Some(main_thread()),
             &tutti_fixtures::pumped_work(),
-            &tutti_plugin::catalog::PluginRef::file(staged.clone()).expect("a plugin file"),
+            &tutti_plugin::catalog::Loadable::uncatalogued(
+                tutti_plugin::catalog::PluginRef::file(staged.clone()).expect("a plugin file"),
+            ),
             tutti_plugin_types::SampleRate::of(SAMPLE_RATE),
         )
         .unwrap_or_else(|e| panic!("in-process VST2 load failed for {staged:?}: {e:?}"));

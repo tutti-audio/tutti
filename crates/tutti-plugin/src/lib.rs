@@ -24,7 +24,10 @@
 //! use tutti_types::MaxBlock;
 //! use tutti_types::SampleRate;
 //! use tutti_graph::{Editor, Prepare};
-//! use tutti_plugin::catalog::{Plugin, PluginRef};
+//! use tutti_plugin::catalog::{
+//!     Catalog, CatalogConfig, NO_SCAN_DIRS, Plugin, PluginId,
+//! };
+//! use tutti_plugin_db::{PluginDb, PluginFormat};
 //! use tutti_types::Samples;
 //! use tutti_graph::NodeKey;
 //! use tutti_transport::TempoReader;
@@ -32,9 +35,17 @@
 //!
 //! // `sample_rate` takes anything convertible to `SampleRate` — the engine's
 //! // unit type, not a bare rate that could be a block size.
-//! let file = PluginRef::file("/usr/lib/vst3/MyPlugin.vst3").expect("a plugin file");
+//! // A saved id names the plugin; the catalog says where it is on this machine, and
+//! // a load takes what the catalog resolved (so its blacklist is asked).
+//! let catalog = Catalog::new(
+//!     PluginDb::new(), // or the one the app deserialized
+//!     CatalogConfig::new("/my/app/state", NO_SCAN_DIRS),
+//!     |_db| Ok(()),
+//! );
+//! let id = PluginId::new(PluginFormat::Vst3, "vst3.00112233-44556677-8899AABB-CCDDEEFF");
+//! let loadable = catalog.resolve(&id).bind()?;
 //! let (_collector, work) = tutti_plugin::MainWork::new();
-//! let plugin = Plugin::open(None, &work, &file, SampleRate::SR_48K)?;
+//! let plugin = Plugin::open(None, &work, &loadable, SampleRate::SR_48K)?;
 //! println!("{} by {}", plugin.descriptor().name, plugin.descriptor().vendor);
 //!
 //! // Two handles, one subprocess: keep the control surface before the node goes
@@ -50,10 +61,10 @@
 //! let tempo = TempoReader::constant(Bpm::of(120.0)).expect("a tempo");
 //! let (mut editor, _executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
 //! let _controls = editor.insert(NodeKey(1), "plugin", plugin.bind(tempo));
-//! # Ok::<(), tutti_plugin_types::BridgeError>(())
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! A host that does not already know the path discovers one first — see
+//! A host that does not already know where its plugin is discovers one first — see
 //! [`catalog`], whose [`Catalog`](catalog::Catalog) scans, registers and measures plugin files
 //! as cancellable tasks, recovers from a crashed scan, and says what is
 //! blacklisted (the session's load asks it). It needs no feature flag.
@@ -142,7 +153,7 @@
 //!   [`Plugin::open`](catalog::Plugin::open) hosts `.vst` plugins in the host
 //!   process.
 //!
-//! Where a plugin runs is its ref's [`Hosting`](catalog::Hosting): `Auto` (the
+//! Where a plugin runs is its load's [`Hosting`](catalog::Hosting) ([`Loadable::hosting`](catalog::Loadable::hosting)): `Auto` (the
 //! default) serves CLAP, VST3 and AU and hosts VST2 in process; `InProcess` hosts a
 //! CLAP, VST3 or AU plugin in the host process too (with that format's feature),
 //! and `OutOfProcess` on VST2 is refused.
@@ -425,14 +436,15 @@ pub mod catalog {
     pub use tutti_plugin_types::{Helper, Locator};
     // Named in `Plugin::role` and `Catalog::iter`.
     pub use crate::host::catalog::{BlacklistView, Catalog, PersistError};
+    pub use crate::host::loadable::{BindError, Hosting, Loadable, Resolved};
     pub use crate::host::plugin::{BoundPlugin, Plugin};
-    pub use crate::host::plugin_ref::{Hosting, PluginRef, PluginState};
+    pub use crate::host::plugin_ref::{PluginRef, PluginState};
     pub use tutti_plugin_db::{
         FileFailure, FilesError, PluginDb, ProbeFailure, ProbeFailureKind, Scan, ScanBusy,
         ScanPoll, ScanResult,
     };
     pub use tutti_plugin_ipc::{AudioConfig, CatalogConfig, NO_SCAN_DIRS};
-    pub use tutti_plugin_types::{PluginDescriptor, PluginRole};
+    pub use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRole};
 }
 
 // The graph node of a served plugin and its two states. The control handle,
