@@ -800,7 +800,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// ended and its death is what this decides.
     ///
     /// It covers out-of-process plugins loaded through the session's load
-    /// path ([`Session::add_plugin`](crate::Session::add_plugin)). It does not
+    /// path ([`Session::add_pooled_plugin`](crate::Session::add_pooled_plugin)). It does not
     /// cover an in-process VST2 plugin (its crash takes the process, and a
     /// hang in it is not observed), nor one a host inserted itself with
     /// `Graph::insert_plugin` or `Graph::host_plugin` (the session does not

@@ -6,8 +6,8 @@ use tutti_ump::U7;
 use crate::smpte::MtcRate;
 
 use super::values::{
-    MmcFragment, MmcName, MmcPosition, MmcShortTimeCode, MmcSlot, MmcSpeed, MmcTimeCode,
-    MmcTrackBitmap, MmcUserBits, wire_enum,
+    MmcFragment, MmcName, MmcPosition, MmcSegmentBytes, MmcShortTimeCode, MmcSlot, MmcSpeed,
+    MmcTimeCode, MmcTrackBitmap, MmcUserBits, wire_enum,
 };
 use super::{MmcCommands, MmcNames};
 
@@ -536,14 +536,18 @@ wire_enum! {
 pub struct MmcSegment {
     place: MmcSegmentPlace,
     remaining: u8,
-    bytes: MmcFragment,
+    bytes: MmcSegmentBytes,
 }
 
 impl MmcSegment {
     /// The segment `bytes` at `place` in its string, with `remaining`
     /// segments still to come (0..=63; the last is `0`), or `None` above 63.
     #[must_use]
-    pub const fn new(place: MmcSegmentPlace, remaining: u8, bytes: MmcFragment) -> Option<Self> {
+    pub const fn new(
+        place: MmcSegmentPlace,
+        remaining: u8,
+        bytes: MmcSegmentBytes,
+    ) -> Option<Self> {
         if remaining < 64 {
             Some(Self {
                 place,
@@ -569,7 +573,7 @@ impl MmcSegment {
 
     /// This segment's bytes, which need not end on a message boundary.
     #[must_use]
-    pub const fn bytes(&self) -> &MmcFragment {
+    pub const fn bytes(&self) -> &MmcSegmentBytes {
         &self.bytes
     }
 }

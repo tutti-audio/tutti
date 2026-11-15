@@ -17,6 +17,7 @@
 //! every test here fails, naming that command. They must fail rather than
 //! skip.
 
+use crate::pooled::{LoadPlugin, Spec};
 use crate::support;
 
 use std::time::{Duration, Instant};
@@ -26,7 +27,7 @@ use support::{clap_probe, plugin_server};
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_plugin::catalog::PluginRef;
-use tutti_session::{InPort, NodeMode, OutPort, PluginLoadRequest, Root, Session};
+use tutti_session::{InPort, NodeMode, OutPort, Root, Session};
 use tutti_types::{ChannelLayout, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -40,6 +41,8 @@ const FIRE: usize = 100;
 /// SAFETY: nextest runs each test in its own process, and both are set before
 /// the first server is spawned, from the test's own thread.
 fn set_server() {
+    // The plugin's file is probed before its variables are set.
+    crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
     unsafe {
         std::env::set_var("TUTTI_PLUGIN_SERVER", plugin_server());
         std::env::set_var("TUTTI_CLAP_PROBE_RENDER_MODE", "1");
@@ -87,9 +90,9 @@ fn rig(mode: NodeMode) -> Rig {
         .build()
         .expect("an offline session builds");
     let plugin = s
-        .add_plugin_blocking(
+        .load_plugin_blocking(
             tutti_fixtures::main_thread(),
-            PluginLoadRequest::new(PluginRef::file(clap_probe()).expect("a plugin file")),
+            Spec::new(PluginRef::file(clap_probe()).expect("a plugin file")),
         )
         .expect("the reference CLAP plugin loads");
     let g = s.graph();
@@ -122,7 +125,7 @@ impl Rig {
     /// The blocks the plugin's server has answered.
     fn replies(&self) -> u64 {
         self.s
-            .plugin(self.plugin)
+            .plugin_view(self.plugin)
             .expect("hosted")
             .diagnostics()
             .block_counts()

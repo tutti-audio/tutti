@@ -43,12 +43,14 @@ pub enum InterpolationMode {
 /// A fractional-delay ring buffer: push a sample per frame, read back at any
 /// real-valued delay.
 ///
-/// The read position is fractional and interpolated
-/// ([`InterpolationMode`]), which is what makes it usable as the core of a
-/// modulated delay. Capacity is fixed at construction — [`read_sample`] clamps
-/// rather than growing, so the line never allocates on the audio thread.
+/// One ring, two readers. [`read_sample`] reads a fractional delay, interpolated
+/// ([`InterpolationMode`]): the core of a modulated delay. [`read_whole`] reads a whole
+/// number of frames back with no interpolation: a fixed delay, such as the limiter's
+/// lookahead. Capacity is fixed at construction: both clamp rather than grow, so the line
+/// never allocates on the audio thread.
 ///
 /// [`read_sample`]: Self::read_sample
+/// [`read_whole`]: Self::read_whole
 #[derive(Clone)]
 pub struct DelayLine {
     buffer: Vec<f32>,
@@ -114,22 +116,22 @@ impl DelayLine {
         match mode {
             InterpolationMode::None => {
                 let idx = delay.round() as usize;
-                self.read_at(idx)
+                self.read_whole(idx)
             }
             InterpolationMode::Linear => {
                 let floor = delay.floor() as usize;
                 let frac = delay - floor as f32;
-                let s0 = self.read_at(floor);
-                let s1 = self.read_at(floor + 1);
+                let s0 = self.read_whole(floor);
+                let s1 = self.read_whole(floor + 1);
                 s0 + frac * (s1 - s0)
             }
             InterpolationMode::CubicHermite => {
                 let floor = delay.floor() as usize;
                 let frac = delay - floor as f32;
-                let sm1 = self.read_at(floor.saturating_sub(1));
-                let s0 = self.read_at(floor);
-                let s1 = self.read_at(floor + 1);
-                let s2 = self.read_at(floor + 2);
+                let sm1 = self.read_whole(floor.saturating_sub(1));
+                let s0 = self.read_whole(floor);
+                let s1 = self.read_whole(floor + 1);
+                let s2 = self.read_whole(floor + 2);
                 crate::cubic_hermite(sm1, s0, s1, s2, frac)
             }
         }
@@ -144,12 +146,16 @@ impl DelayLine {
         self.write_pos = 0;
     }
 
+    /// Reads the line `frames` frames back from the newest write, a whole number and no
+    /// interpolation: `0` is the sample just pushed, and a `frames` past the line's
+    /// capacity reads the oldest it holds. Does not allocate.
     #[inline]
-    fn read_at(&self, delay_samples: usize) -> f32 {
+    #[must_use]
+    pub fn read_whole(&self, frames: usize) -> f32 {
         let len = self.buffer.len();
         // `write_pos < len` and the clamped delay is below `len`, so the sum
         // is below `2 * len`: one conditional subtract wraps it.
-        let idx = self.write_pos + len - 1 - delay_samples.min(self.max_delay_samples);
+        let idx = self.write_pos + len - 1 - frames.min(self.max_delay_samples);
         self.buffer[if idx >= len { idx - len } else { idx }]
     }
 }

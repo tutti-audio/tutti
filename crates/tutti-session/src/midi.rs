@@ -2204,7 +2204,9 @@ impl Midi<'_> {
     /// it). A LOCATE and a play in one message locate and then play. Every
     /// command is placed at the next block (`At::NextBlock`). A command the
     /// transport has no counterpart for is reported as
-    /// [`MidiEvent::MachineControlIgnored`]; no response is sent.
+    /// [`MidiEvent::MachineControlIgnored`]; no response is sent. COMMAND SEGMENT
+    /// strings are reassembled first, and a segment that does not belong is
+    /// [`MidiEvent::MachineControlSegmentation`].
     ///
     /// **One at a time**: following again replaces the first, forgetting the
     /// groups it was assigned to.

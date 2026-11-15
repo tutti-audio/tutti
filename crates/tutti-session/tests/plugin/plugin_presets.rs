@@ -7,9 +7,10 @@
 //! its saved state); VST2 over the reference plugin in process, whose program
 //! count the environment sets.
 
+use crate::pooled::{LoadPlugin, Spec};
 use tutti_plugin::catalog::PluginRef;
 use tutti_plugin_types::PresetError;
-use tutti_session::{DetachedSession, PluginLoadRequest, PresetKind, Session};
+use tutti_session::{DetachedSession, PresetKind, Session};
 use tutti_types::{ChannelLayout, SampleRate};
 
 #[cfg(feature = "clap")]
@@ -20,6 +21,8 @@ mod clap {
     use tutti_types::{MaxBlock, Samples};
 
     fn loaded() -> (Session, NodeKey) {
+        // The plugin's file is probed before its variables are set.
+        crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
         // SAFETY: nextest runs each test in its own process, and this is set
         // before the first server is spawned, from the test's own thread.
         unsafe {
@@ -32,9 +35,9 @@ mod clap {
             .build()
             .expect("an offline session builds");
         let node = s
-            .add_plugin_blocking(
+            .load_plugin_blocking(
                 tutti_fixtures::main_thread(),
-                PluginLoadRequest::new(PluginRef::file(clap_probe()).expect("a plugin file")),
+                Spec::new(PluginRef::file(clap_probe()).expect("a plugin file")),
             )
             .expect("the reference CLAP plugin loads")
             .erase();
@@ -42,7 +45,7 @@ mod clap {
     }
 
     fn saved<C: tutti_session::Clock>(s: &Session<C>, node: NodeKey) -> Vec<u8> {
-        s.plugin(node)
+        s.plugin_view(node)
             .unwrap()
             .state()
             .save()
@@ -91,7 +94,7 @@ mod clap {
 
     /// The mirror's value of the plugin's first parameter (Cutoff).
     fn cutoff<C: tutti_session::Clock>(s: &Session<C>, node: NodeKey) -> Option<f64> {
-        let plugin = s.plugin(node).unwrap();
+        let plugin = s.plugin_view(node).unwrap();
         let params = plugin.params();
         let first = params.iter().next()?.id();
         params.get(first).ok().map(|p| p.normalized().get())
@@ -106,7 +109,7 @@ mod clap {
     fn a_loaded_preset_file_moves_the_mirror() {
         let (mut s, node) = loaded();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while !s.plugin(node).is_ok_and(|p| p.params().is_ready()) {
+        while !s.plugin_view(node).is_ok_and(|p| p.params().is_ready()) {
             assert!(
                 std::time::Instant::now() < deadline,
                 "the read never landed"
@@ -150,9 +153,9 @@ mod vst2 {
             .build_detached(SampleRate::DEFAULT)
             .expect("a detached session builds");
         let node = s
-            .add_plugin_blocking(
+            .load_plugin_blocking(
                 tutti_fixtures::main_thread(),
-                PluginLoadRequest::new(
+                Spec::new(
                     PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf())
                         .expect("a plugin file"),
                 ),

@@ -8,6 +8,7 @@
 //! embeddable editor open: an X11 window id is what its editor embeds into, so
 //! the module is one `cfg` on its declaration.
 
+use crate::pooled::{LoadPlugin, Spec};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -17,7 +18,7 @@ use tutti_clap_test_plugin::{
 use tutti_fixtures::StandInWindow;
 use tutti_plugin::catalog::{Hosting, PluginRef};
 use tutti_plugin_types::ContentScale;
-use tutti_session::{PluginLoadRequest, Session};
+use tutti_session::Session;
 use tutti_types::{MaxBlock, Samples};
 
 use crate::support::clap_probe;
@@ -44,9 +45,11 @@ fn session_with_open_editor(command: u32) -> Session {
         .build()
         .expect("an offline session builds");
     let plugin = PluginRef::file(clap_probe()).expect("a plugin file");
-    let load = s.plugin_load(PluginLoadRequest::new(plugin).hosting(Hosting::InProcess));
     let node = s
-        .add_plugin(tutti_fixtures::main_thread(), load.run())
+        .load_plugin_blocking(
+            tutti_fixtures::main_thread(),
+            Spec::new(plugin).hosting(Hosting::InProcess),
+        )
         .expect("the reference plugin loads in this process");
     s.main(tutti_fixtures::main_thread())
         .plugin(node)
