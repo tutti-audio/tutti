@@ -298,7 +298,8 @@ pub struct Surface {
     /// Whether the format reports a parameter's read-only bit: every format but
     /// VST2, whose `effGetParameterProperties` has none. Where `true`, the
     /// parameter list reports [`Param::Meter`] read-only and every other
-    /// parameter not.
+    /// parameter not. Where `false` the format has no read-only parameter, and
+    /// the cases about one do not apply.
     pub reports_access: bool,
     /// Whether the format reports a parameter's automatable bit: CLAP and VST3.
     /// An AUv2 unit advertises only `kAudioUnitParameterFlag_IsWritable`, and VST2 says nothing per

@@ -47,17 +47,7 @@ impl Format for Vst2 {
     /// VST2 has no sample offset on a parameter: the host's changes land at the
     /// block head.
     const PARAM_TIMING: ParamTiming = ParamTiming::BlockHead;
-    const GAPS: &'static [(&'static str, Gap)] = &[
-        NO_TRANSPORT_EVENT,
-        (
-            "read_only_parameter_write_is_refused",
-            Gap {
-                why: "VST2 has no opcode for a read-only parameter (`effGetParameterProperties` \
-                      carries no such flag), so the host cannot know the meter is one and writes it",
-                fails_with: "read-only write refused",
-            },
-        ),
-    ];
+    const GAPS: &'static [(&'static str, Gap)] = &[NO_TRANSPORT_EVENT];
 
     fn load() -> Self::L {
         tutti_vst2_host::Vst2Loaded::load(

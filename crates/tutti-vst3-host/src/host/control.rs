@@ -404,6 +404,10 @@ impl Control for Vst3Loaded {
     fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
         match self.program_write(main, id) {
             Some((param, value)) => {
+                // A refused write leaves what is carried as it was.
+                if self.parameter_writable(main, param).is_err() {
+                    return false;
+                }
                 // A program replaces the plugin's other parameters too.
                 self.carried.clear();
                 if self.set_parameter(main, param, value).is_err() {

@@ -833,7 +833,7 @@ impl ParamWriteError {
     /// # Errors
     ///
     /// As [`check`](Self::check).
-    pub fn check_info(id: ParamId, info: Option<&ParameterInfo>) -> Result<(), Self> {
+    pub(crate) fn check_info(id: ParamId, info: Option<&ParameterInfo>) -> Result<(), Self> {
         Self::check(id, info.map(ParamAccess::of))
     }
 }

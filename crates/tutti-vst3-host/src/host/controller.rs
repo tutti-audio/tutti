@@ -9,9 +9,9 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_rt::{DrainMark, DrainWatch};
 
 use tutti_plugin_types::{
-    Control, Controller, Edit, EditDrain, EditQueue, EditSink, Loaded, Normalized, ParamEdit,
-    ParamId, PluginError, PluginResult, PluginTail, Prepare, Processor, Refused, Request,
-    RestartRules, SampleFormat, Samples, Stuck, Wraps,
+    Control, Controller, Edit, EditDrain, EditQueue, EditSink, Loaded, Normalized, ParamAccess,
+    ParamEdit, ParamId, ParameterInfo, PluginError, PluginResult, PluginTail, Prepare, Processor,
+    Refused, Request, RestartRules, SampleFormat, Samples, Stuck, Wraps,
 };
 
 use crate::types::{ProcessMode, Vst3Sample};
@@ -416,6 +416,14 @@ impl Vst3Loaded {
             });
         };
         let context_requirements = loaded.context_requirements();
+        // What the plugin declares read-only now: no write of the host reaches it.
+        let mut read_only: Vec<ParamId> = loaded
+            .parameter_list(main)
+            .iter()
+            .filter(|info| ParamAccess::of(info) == ParamAccess::ReadOnly)
+            .map(ParameterInfo::id)
+            .collect();
+        read_only.sort_unstable();
         let shell = Arc::new(Shell::new());
         let (sink, drain) = tutti_plugin_types::edits(EDIT_CAPACITY);
         let (reports_in, reports_out) = tutti_plugin_types::edits(EDIT_CAPACITY);
@@ -437,6 +445,7 @@ impl Vst3Loaded {
             reports: reports_in,
             beat,
             carried,
+            read_only: read_only.into(),
         });
         Ok((
             processor,

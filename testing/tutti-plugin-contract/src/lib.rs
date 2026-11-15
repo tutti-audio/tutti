@@ -62,6 +62,7 @@ macro_rules! contract {
             unlisted_parameter_is_none,
             undeclared_parameter_write_is_refused,
             read_only_parameter_write_is_refused,
+            automation_to_a_read_only_parameter_is_not_applied,
             active_write_applied,
             automation_point_offset,
             automation_segment_and_step,

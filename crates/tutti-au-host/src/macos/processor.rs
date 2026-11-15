@@ -257,6 +257,9 @@ pub struct AuProcessor {
     block_size: u32,
     /// The block's staged automation, which the render notify schedules.
     stage: SharedStage,
+    /// Automation points for a parameter the AU does not declare writable, which
+    /// are not applied, since activation.
+    param_points_dropped: u64,
 }
 
 /// What `send_midi` delivers through: the protocol the unit takes, the list
@@ -385,6 +388,7 @@ impl AuProcessor {
             midi: MidiDelivery::new(midi_protocol),
             block_size,
             stage,
+            param_points_dropped: 0,
         }
     }
 
@@ -550,6 +554,13 @@ impl AuProcessor {
         }
     }
 
+    /// Automation points dropped since activation because the AU does not
+    /// declare their parameter writable (`kAudioUnitParameterFlag_IsWritable`
+    /// clear): the host writes none of them.
+    pub fn param_points_dropped(&self) -> u64 {
+        self.param_points_dropped
+    }
+
     /// Channel voice messages dropped since activation because they were of a
     /// Group other than 0 on the legacy path (see [`send_midi`](Self::send_midi)).
     /// Zero on a unit that takes MIDI 2.0, which is sent the Group.
@@ -713,6 +724,12 @@ impl AuProcessor {
             let scheduled = self.rendering.notify.is_some();
             for queue in &changes.queues {
                 let id = queue.param_id.get();
+                // A parameter the AU does not declare writable is never
+                // written: its points are counted, not applied.
+                if table.is_read_only(id) {
+                    self.param_points_dropped += queue.points.len() as u64;
+                    continue;
+                }
                 let (Some(bounds), Some(slot), Some(last)) =
                     (table.bounds(id), table.slot(id), queue.points.last())
                 else {

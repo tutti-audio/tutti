@@ -69,6 +69,24 @@ fn input_list(queues: usize, room: usize) -> ComWrapper<ParameterChangesImpl> {
     ParameterChangesImpl::with_queues(queues, floor, PointPool::new(blocks, room + 1, queues))
 }
 
+/// **A refill that refuses a parameter leaves its queue out and counts its
+/// points**: of three parameters with two points each, the one `keep` refuses
+/// does not reach the plugin and costs two dropped points; the others fill the
+/// list's queues in order.
+#[test]
+fn a_refill_leaves_out_the_parameter_it_refuses() {
+    let list = unpooled(3, 2);
+    let changes = changes_with(3, 2);
+    list.begin()
+        .refill_where(&changes, |id| id != ParamId::new(1))
+        .unwrap();
+    assert_eq!(list.points_dropped(), 2, "the refused queue's points");
+    let mut out = ParameterChanges::reserved(4, 4);
+    assert!(list.try_fill_changes(&mut out));
+    let ids: Vec<u32> = out.queues.iter().map(|q| q.param_id.get()).collect();
+    assert_eq!(ids, [0, 2], "parameter 1 never reaches the list");
+}
+
 /// Plugin threads reading the list at once all get it.
 #[test]
 fn concurrent_reads_of_the_list_both_succeed() {

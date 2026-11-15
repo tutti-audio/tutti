@@ -16,7 +16,7 @@ use tutti_plugin_types::{
 use super::DeclaredCache;
 
 use crate::{
-    AudioSlab, BridgeConfig, BridgeMessage, HostMessage, Ipc, IpcController, IpcParts,
+    AudioSlab, BridgeConfig, BridgeEvent, BridgeMessage, HostMessage, Ipc, IpcController, IpcParts,
     IpcProcessor, PROTOCOL_VERSION, PluginBridge, ProcessGuard, RING_SLOTS, SlabLayout,
     unique_socket_path,
 };
@@ -635,32 +635,76 @@ fn a_served_write_is_checked_against_one_ask() {
     );
 }
 
-/// **A resync that changes the list flips the answer**: the plugin says its
-/// parameters changed, the cache is forgotten, and the next write asks again and
-/// sees the parameter that became read-only.
+/// **A resync that changes the list flips the answer, with no command to
+/// carry it**: the plugin says its parameters changed on an idle bridge, the
+/// bridge reads it off the connection, and the first write after the event
+/// reached the listener asks again and sees the parameter that became
+/// read-only.
 #[test]
 fn a_resync_with_a_changed_list_flips_the_answer() {
-    use tutti_plugin_types::{Normalized, ParamWriteError};
+    use tutti_plugin_types::{Normalized, ParamWriteError, ResyncKind};
     let _machine = machine_lock();
     let (mut ipc, server) = mock();
     *server.parameters.lock().unwrap() = vec![param(3, false)];
     let main = main_thread();
     let half = Normalized::of(0.5);
     assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
+    let arrived = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let heard = Arc::clone(&arrived);
+    ipc.forward_events(Some(Arc::new(move |event| {
+        if matches!(event, BridgeEvent::Resync(ResyncKind::ParamTitles)) {
+            heard.store(true, std::sync::atomic::Ordering::Release);
+        }
+    })));
     *server.parameters.lock().unwrap() = vec![param(3, true)];
     server.say(&BridgeMessage::PluginParamTitlesChanged);
-    // An idle bridge reads nothing: a command's reply reads it, and the event
-    // is forwarded after the cache is forgotten.
     let start = Instant::now();
-    loop {
-        let _ = ipc.parameters(main);
-        match ipc.set_parameter(main, ParamId::new(3), half) {
-            Err(ParamWriteError::ReadOnly(_)) => break,
-            other => assert!(start.elapsed() < Duration::from_secs(5), "got {other:?}"),
-        }
-        std::thread::sleep(Duration::from_millis(5));
+    while !arrived.load(std::sync::atomic::Ordering::Acquire) {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "the event never arrived"
+        );
+        std::thread::sleep(Duration::from_millis(1));
     }
+    // The cache is forgotten before the event is forwarded: no read of the
+    // bridge stands between the event and this write.
+    assert_eq!(
+        ipc.set_parameter(main, ParamId::new(3), half),
+        Err(ParamWriteError::ReadOnly(ParamId::new(3)))
+    );
     assert!(list_asks(&server) >= 2, "the list was asked again");
+}
+
+/// **A value resync does not forget the list**: every dropped parameter event
+/// raises `ParamValues`, which says nothing of the declarations, so the next
+/// write is still answered from the cache.
+#[test]
+fn a_values_resync_keeps_the_declared_list() {
+    use tutti_plugin_types::{Normalized, ResyncKind};
+    let _machine = machine_lock();
+    let (mut ipc, server) = mock();
+    *server.parameters.lock().unwrap() = vec![param(3, false)];
+    let main = main_thread();
+    let half = Normalized::of(0.5);
+    assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
+    let arrived = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let heard = Arc::clone(&arrived);
+    ipc.forward_events(Some(Arc::new(move |event| {
+        if matches!(event, BridgeEvent::Resync(ResyncKind::ParamValues)) {
+            heard.store(true, std::sync::atomic::Ordering::Release);
+        }
+    })));
+    server.say(&BridgeMessage::PluginParamValuesChanged);
+    let start = Instant::now();
+    while !arrived.load(std::sync::atomic::Ordering::Acquire) {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "the event never arrived"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(ipc.set_parameter(main, ParamId::new(3), half), Ok(()));
+    assert_eq!(list_asks(&server), 1, "the write asked nothing");
 }
 
 /// **A lost plugin is refused with `Lost`**, from the first check: a write that

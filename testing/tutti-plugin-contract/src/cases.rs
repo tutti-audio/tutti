@@ -380,9 +380,15 @@ pub fn unlisted_parameter_is_none<F: Format>() {
 /// plugin's record of what the host sent has no event for the meter. (A format
 /// that delivers a write directly, as AU's `AudioUnitSetParameter` and VST2's
 /// `setParameter` do, leaves no event for either, so the transcript half is
-/// vacuous there and `Err(ReadOnly)` is the check; VST2 reports no access at all
-/// and is a Gap.)
+/// vacuous there and `Err(ReadOnly)` is the check.)
+///
+/// VST2 is not applicable by its spec: no opcode carries a read-only bit
+/// (`effGetParameterProperties` has none), so the format has no read-only
+/// parameter to refuse a write to ([`spec::Surface::reports_access`]).
 pub fn read_only_parameter_write_is_refused<F: Format>() {
+    if !F::SURFACE.reports_access {
+        return;
+    }
     let main = main_thread();
     let id = Param::Meter.id();
     let refused = Err(ParamWriteError::ReadOnly(id));
@@ -411,6 +417,39 @@ pub fn read_only_parameter_write_is_refused<F: Format>() {
     assert!(
         t.of(Kind::Param).all(|e| e.id != id.get()),
         "the refused write reached the plugin: {:?}",
+        t.events
+    );
+}
+
+/// Automation for the read-only parameter is not applied: a block whose
+/// automation names the meter and the level moves the level and sends the
+/// plugin no event for the meter, whichever route carries the points. (A format
+/// that delivers a point directly leaves no event for either, so the transcript
+/// half is vacuous there, as in [`read_only_parameter_write_is_refused`]; VST2
+/// is not applicable for the same spec reason.)
+pub fn automation_to_a_read_only_parameter_is_not_applied<F: Format>() {
+    if !F::SURFACE.reports_access {
+        return;
+    }
+    let mut a = active_in::<F>(Mode::Level);
+    let points = changes(&[
+        (Param::Meter, 0, spec::WRITE),
+        (Param::Level, 0, spec::WRITE),
+    ]);
+    let out = a.render(
+        &silence(BLOCK),
+        BLOCK,
+        &ProcessContext::new().params(&points),
+    );
+    assert!(
+        out[0].iter().all(|&v| v == spec::WRITE as f32),
+        "the writable parameter took its point"
+    );
+    tutti_plugin_types::Control::flush_edits(a.controller_mut(), main_thread());
+    let t = transcript::<F, _>(a.controller_mut());
+    assert!(
+        t.of(Kind::Param).all(|e| e.id != Param::Meter.id().get()),
+        "automation reached the read-only parameter: {:?}",
         t.events
     );
 }

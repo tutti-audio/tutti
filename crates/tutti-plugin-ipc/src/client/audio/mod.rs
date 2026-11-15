@@ -219,6 +219,21 @@ impl AudioBridge {
         self.lifecycle.is_crashed()
     }
 
+    /// Waits, for at most `within`, until the bridge has handed the listener
+    /// everything it was told the server said (the news its watcher saw is read
+    /// and delivered). `false` when it did not settle in time or the bridge is
+    /// dead. When nothing is pending this is one atomic load.
+    pub fn news_settled(&self, within: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + within;
+        while self.channels.news_pending() {
+            if self.lifecycle.is_crashed() || std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        }
+        !self.lifecycle.is_crashed()
+    }
+
     /// Why this bridge died, or `None` while it is alive.
     ///
     /// Latched at the detection site, so it answers for a crash that happened

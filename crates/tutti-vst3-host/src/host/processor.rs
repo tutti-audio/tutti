@@ -214,8 +214,12 @@ pub struct Vst3Processor<T: Vst3Sample> {
     /// a rejoin carried over from the last activation before the first block.
     /// Reserved for the ring's room, so no block grows it.
     pending: Vec<(ParamId, Normalized)>,
-    /// Edits the block could not hold, since activation.
+    /// Edits the block could not hold, and writes to a read-only parameter, since
+    /// activation.
     edits_dropped: u64,
+    /// The ids the plugin declared read-only at activation, sorted: the host
+    /// writes none of them, by a Controller write or by automation.
+    read_only: Box<[ParamId]>,
     /// Whether `setProcessing(1)` is the plugin's last word.
     processing: bool,
     /// Last: the plugin outlives everything above, and a last holder retires
@@ -242,6 +246,7 @@ pub(super) struct ProcessorParts {
     pub reports: EditSink,
     pub beat: DrainBeat,
     pub carried: Vec<(ParamId, Normalized)>,
+    pub read_only: Box<[ParamId]>,
 }
 
 impl<T: Vst3Sample> Vst3Processor<T> {
@@ -255,6 +260,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             reports,
             beat,
             mut carried,
+            read_only,
         } = parts;
         carried.reserve(EDIT_CAPACITY);
         Self {
@@ -268,6 +274,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             beat,
             pending: carried,
             edits_dropped: 0,
+            read_only,
             processing: true,
             shell: Hold::new(shell),
         }
@@ -323,7 +330,8 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     }
 
     /// Writes the ring held that no block took, since activation, for want of
-    /// room in the block in hand.
+    /// room in the block in hand, and those to a parameter the plugin declared
+    /// read-only (which no write reaches).
     #[must_use]
     pub fn edits_dropped(&self) -> u64 {
         self.edits_dropped
@@ -336,10 +344,15 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             drain,
             pending,
             edits_dropped,
+            read_only,
             ..
         } = self;
         drain.drain(|edit| {
             let (id, value) = match edit {
+                Edit::Param { id, .. } if read_only.binary_search(&id).is_ok() => {
+                    *edits_dropped += 1;
+                    return;
+                }
                 Edit::Param { id, value } => (id, value),
                 // What came before is stale; what came after is not.
                 Edit::Reset => {
@@ -451,7 +464,9 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         let staged = (|| {
             let mut staging = self.audio.input.param_changes.try_begin().ok_or(Busy)?;
             if let Some(changes) = input_params {
-                staging.refill(changes)?;
+                // Automation never writes a parameter the plugin declared
+                // read-only: its points are counted with the dropped ones.
+                staging.refill_where(changes, |id| self.read_only.binary_search(&id).is_err())?;
             }
             for &(id, value) in &self.pending {
                 staging.prepend(id, value)?;
