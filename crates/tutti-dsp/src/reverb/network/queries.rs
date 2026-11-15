@@ -1,6 +1,6 @@
 //! The analytic queries of a [`Network`]: pure functions of the value.
 
-use tutti_types::{Db, Hz, SampleRate, SampleSpan, Samples, Seconds};
+use tutti_types::{Amplitude, Db, Hz, SampleRate, SampleSpan, Samples, Seconds};
 
 use crate::{Ring, System};
 
@@ -44,7 +44,7 @@ impl Fdn {
                 let s = energy(v);
                 let peak = v
                     .iter()
-                    .map(|&x| f64::from(x.get()).abs())
+                    .map(|&x| f64::from(x.magnitude().get()))
                     .fold(0.0, f64::max);
                 4.0 * (s - 1.0).abs() * peak * peak
             }
@@ -130,8 +130,9 @@ impl Fdn {
     pub(super) fn lines_hold(&self) -> bool {
         self.lines.iter().all(|l| {
             l.length > SampleSpan::ZERO
-                && l.diffuser
-                    .is_none_or(|d| d.form == AllPassForm::Lattice && d.gain.get().abs() < 1.0)
+                && l.diffuser.is_none_or(|d| {
+                    d.form == AllPassForm::Lattice && d.gain.magnitude() < Amplitude::UNITY
+                })
         })
     }
 
@@ -178,7 +179,7 @@ impl Fdn {
         let mut longest = 0.0f64;
         for l in self.lines.iter() {
             let peak = l.diffuser.map_or(0.0, |d| {
-                let g = f64::from(d.gain.get()).abs();
+                let g = f64::from(d.gain.magnitude().get());
                 d.delay.get() * (1.0 + g) / (1.0 - g)
             });
             let m = l.length.get() + peak;
@@ -296,7 +297,7 @@ impl Fdn {
 /// Frames an all-pass keeps ringing: its delay times the trips its geometric
 /// train takes to fall to `amplitude` (infinity when `|g| >= 1`).
 fn all_pass_ring(a: &AllPass, amplitude: f64) -> f64 {
-    let g = f64::from(a.gain.get()).abs();
+    let g = f64::from(a.gain.magnitude().get());
     if g >= 1.0 {
         return f64::INFINITY;
     }

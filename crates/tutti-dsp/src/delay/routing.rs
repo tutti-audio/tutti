@@ -118,7 +118,7 @@ impl Routing {
         let mut r = Self::checked(input, matrix)?;
         let n = r.width();
         for (c, row) in matrix.chunks(n).enumerate() {
-            let sum: f32 = row.iter().map(|w| w.get().abs()).sum();
+            let sum: f32 = row.iter().map(|w| w.magnitude().get()).sum();
             if sum > 1.0 {
                 return Err(RoutingError::Row {
                     row: c,
@@ -141,7 +141,7 @@ impl Routing {
         let mut r = Self::checked(input, matrix)?;
         let n = r.width();
         for (c, row) in matrix.chunks(n).enumerate() {
-            let sum: f32 = row.iter().map(|w| w.get().abs()).sum();
+            let sum: f32 = row.iter().map(|w| w.magnitude().get()).sum();
             let scale = Gain::new(if sum > 1.0 { 1.0 / sum } else { 1.0 });
             for (j, &w) in row.iter().enumerate() {
                 r.weights[c][j] = w * scale;
