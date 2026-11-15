@@ -130,6 +130,8 @@ mod latency;
 mod manual;
 mod output;
 mod restart;
+mod routing;
+mod stage;
 mod stream;
 mod timer;
 pub use block_clock::{BlockClockReader, BlockReading, Playhead};
@@ -141,5 +143,9 @@ pub use latency::StreamLatency;
 pub use manual::{ManualRunning, ManualStream, ManualStreamDriver};
 pub use output::{MAX_PENDING_ROOTS, OutputControl, OutputPlacement};
 pub use restart::{Stopped, StreamHost};
+pub use routing::{
+    OutputLevels, OutputMap, OutputMapError, OutputPast, OutputStrip, Routing, RoutingError,
+    StageTargets,
+};
 pub use stream::{OutputSpec, OutputStream, RunningStream, StartError, StreamDriver};
 pub use timer::{DEFAULT_BLOCK, TimerDriver, TimerError, TimerRunning};

@@ -88,6 +88,8 @@ use tutti_graph::{
 
 use crate::block_clock::{BlockClock, BlockClockReader, Pose};
 use crate::output::{DEFAULT_DEVICE_WIDTHS, OutputControl, OutputFolds};
+use crate::routing::StageTargets;
+use crate::stage::OutputStage;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
@@ -180,6 +182,8 @@ pub struct Engine {
     output: OutputControl,
     /// The audio thread's reader of `output`, lent once per call.
     folds: AudioThreadCell<Reader<OutputFolds>>,
+    /// The gain each device output is ramped to, published beside the folds.
+    stage: AudioThreadCell<Reader<StageTargets>>,
 }
 
 impl std::fmt::Debug for Engine {
@@ -216,6 +220,16 @@ struct GraphRender {
     /// The root of the plan the last block rendered, for the control side to
     /// retire the older roots' folds by ([`OutputControl::reclaim`]).
     installed: Arc<AtomicU64>,
+    /// Where each device output's gain ramp stands.
+    stage: OutputStage,
+}
+
+/// What the control side published, lent for one segment: the folds and the
+/// gains the outputs ramp to.
+#[derive(Clone, Copy)]
+struct Lent<'a> {
+    folds: &'a OutputFolds,
+    stage: &'a StageTargets,
 }
 
 impl GraphRender {
@@ -351,6 +365,7 @@ impl Engine {
         let output = OutputControl::new(OutputFolds::up_to(DEFAULT_DEVICE_WIDTHS));
         editor.set_root_gate(Arc::new(output.clone()));
         let folds = AudioThreadCell::new(output.cell().reader());
+        let stage = AudioThreadCell::new(output.stage().reader());
         Ok(Self {
             graph: AudioThreadCell::new(GraphRender {
                 exec: executor,
@@ -361,6 +376,7 @@ impl Engine {
                 dropped_seen,
                 clock,
                 installed: Arc::clone(output.installed()),
+                stage: OutputStage::new(),
             }),
             fader: AudioThreadCell::new(Fader::new(fade_frames(rate))),
             capacity: Samples(stride),
@@ -371,6 +387,7 @@ impl Engine {
             clock_reader,
             output,
             folds,
+            stage,
         })
     }
 
@@ -528,6 +545,7 @@ impl Engine {
         // fold. The loan lasts this statement; each segment lends again after
         // its `settle`, below.
         let mut reader = self.folds.borrow_mut();
+        let mut stages = self.stage.borrow_mut();
         let declared = reader.lend().has_device(out_ch);
         // Refused only while the control side holds the graph
         // (`apply_pending` racing a callback): this block is silent.
@@ -575,8 +593,12 @@ impl Engine {
             // the root's folds were published before the commit that
             // carries its id, so a snapshot taken now holds them. The loan
             // ends with the segment.
-            let folds = reader.lend();
-            unplaced |= !g.render(output, &folds, out_ch, done, len, &t, &ahead.changes);
+            let (folds, stage) = (reader.lend(), stages.lend());
+            let lent = Lent {
+                folds: &folds,
+                stage: &stage,
+            };
+            unplaced |= !g.render(output, lent, out_ch, done, len, &t, &ahead.changes);
             self.hearing
                 .borrow_mut()
                 .write(&output[done * out_ch..(done + len) * out_ch], out_ch);
@@ -638,6 +660,7 @@ impl Engine {
         // the fader is private to this method, and the pending list is
         // reached only under the graph borrow (here, or `apply_pending`'s).
         let mut reader = self.folds.borrow_mut();
+        let mut stages = self.stage.borrow_mut();
         let declared = reader.lend().has_device(out_ch);
         let graph = self.graph.try_borrow_mut();
         let (true, Some(mut graph)) = (declared, graph) else {
@@ -682,8 +705,12 @@ impl Engine {
             budget += Samples(len).to_seconds(rate);
             // Lent after `settle` installed the plan this segment renders
             // (see `process_segment`).
-            let folds = reader.lend();
-            unplaced |= !g.render(output, &folds, out_ch, done, len, &walk.start, &changes);
+            let (folds, stage) = (reader.lend(), stages.lend());
+            let lent = Lent {
+                folds: &folds,
+                stage: &stage,
+            };
+            unplaced |= !g.render(output, lent, out_ch, done, len, &walk.start, &changes);
             let mut fader = self.fader.borrow_mut();
             fader.fade = fade_frames(rate);
             fader.apply(&walk.gain, frame0, output, out_ch, done, len);
@@ -1234,7 +1261,7 @@ impl GraphRender {
     fn render(
         &mut self,
         output: &mut [f32],
-        folds: &OutputFolds,
+        lent: Lent<'_>,
         out_ch: usize,
         at: usize,
         len: usize,
@@ -1272,7 +1299,7 @@ impl GraphRender {
         // The fold of this width into the device, built on the control side.
         // `width` is within `1..=MAX_CHANNELS` (the editor's limits), so a
         // fold is there.
-        match folds.get(root, out_ch, width) {
+        match lent.folds.get(root, out_ch, width) {
             Some(fold) => {
                 let mut device = ChannelLayout::try_from(out_ch)
                     .ok()
@@ -1293,8 +1320,13 @@ impl GraphRender {
                 if folded.is_err() {
                     // Not placed: silent, and the caller counts it.
                     device.samples_mut().fill(0.0);
+                    return false;
                 }
-                folded.is_ok()
+                // The output gains, ramped over the declick length.
+                let ramp = declick_frames(self.exec.prepare().sample_rate()).get();
+                self.stage
+                    .apply(device.samples_mut(), out_ch, lent.stage, ramp);
+                true
             }
             // A root width that cannot be placed on this device: silent, and
             // the caller counts it.
@@ -1727,13 +1759,18 @@ mod tests {
         // the gap is not in this snapshot, and its plan is not installed.
         let mut reader = engine.folds.borrow_mut();
         let folds = reader.lend();
+        let mut stages = engine.stage.borrow_mut();
+        let stage = stages.lend();
         between();
         let t = g.transport.begin_block();
         g.transport.advance(len, &t);
         let mut out = vec![-9.0f32; len * out_ch];
         g.render(
             &mut out,
-            &folds,
+            Lent {
+                folds: &folds,
+                stage: &stage,
+            },
             out_ch,
             0,
             len,
@@ -2190,6 +2227,138 @@ mod tests {
             .publish_root(unheard, None, ChannelLayout::STEREO)
             .unwrap();
         ed.commit().expect("published, so it commits");
+    }
+
+    /// The monitor format folds the root into what is heard, and the map places
+    /// the heard channels on the device: a 5.1 root heard as stereo on outputs 3
+    /// and 4 of a six-output device is the ITU stereo fold on those two outputs
+    /// and silence elsewhere, at the analytic figures.
+    #[test]
+    fn a_monitor_and_a_map_compose_into_the_one_fold() {
+        use crate::{OutputMap, Routing};
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        rewire(&mut ed, 6);
+        let _ = first_frame(&engine, 6);
+        let control = engine.output_control();
+        let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
+        assert_eq!(
+            first_frame(&engine, 6),
+            [61.0, 62.0, 63.0, 64.0, 65.0, 66.0],
+            "no routing: the identity by speaker"
+        );
+        control.set_routing(Routing {
+            monitor: Some(tutti_types::Bed::Stereo.topology()),
+            map: OutputMap::channels([2, 3]).unwrap(),
+            ..Routing::default()
+        });
+        let (l, r) = (61.0 + m * 63.0 + m * 65.0, 62.0 + m * 63.0 + m * 66.0);
+        assert_eq!(first_frame(&engine, 6), [0.0, 0.0, l, r, 0.0, 0.0]);
+        // The same routing on a stereo device has no place for outputs 3 and 4:
+        // no fold, so a commit or restart would name it.
+        assert!(!control.has_fold(RootId::GENESIS, 6, ChannelLayout::STEREO));
+        // Taken back: by speaker again.
+        control.set_routing(Routing::default());
+        assert_eq!(
+            first_frame(&engine, 6),
+            [61.0, 62.0, 63.0, 64.0, 65.0, 66.0]
+        );
+    }
+
+    /// The monitor fold takes the policy's levels: the centre and the surrounds
+    /// at their own gains instead of -3 dB.
+    #[test]
+    fn the_monitor_fold_takes_the_levels() {
+        use crate::Routing;
+        use tutti_buffers::FoldLevels;
+        use tutti_types::Amplitude;
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        rewire(&mut ed, 6);
+        let _ = first_frame(&engine, 2);
+        engine.output_control().set_routing(Routing {
+            monitor: Some(tutti_types::Bed::Stereo.topology()),
+            levels: FoldLevels {
+                centre: Amplitude(0.5),
+                surround: Amplitude(0.25),
+                ..FoldLevels::default()
+            },
+            ..Routing::default()
+        });
+        // Channels 61..66: L = 61 + 0.5 * 63 + 0.25 * 65, R likewise.
+        assert_eq!(
+            first_frame(&engine, 2),
+            [
+                61.0 + 0.5 * 63.0 + 0.25 * 65.0,
+                62.0 + 0.5 * 63.0 + 0.25 * 66.0
+            ]
+        );
+    }
+
+    /// A gain change ramps over the declick length, linearly, across segments,
+    /// and swaps no fold: the published fold set is the same allocation after
+    /// it. Frame `k` of the ramp is `from + (to - from) * (k + 1) / n`, and it
+    /// ends exactly at the target.
+    #[test]
+    fn an_output_gain_ramps_over_the_declick_and_swaps_no_fold() {
+        use crate::{OutputLevels, OutputStrip};
+        use tutti_types::Amplitude;
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) =
+            Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(64))));
+        let engine = Engine::new(&transport, &mut ed, exec).expect("empty graph");
+        rewire(&mut ed, 2);
+        let _ = first_frame(&engine, 2);
+        let control = engine.output_control();
+        let folds = control.cell().current();
+        let mut levels = OutputLevels::new();
+        levels
+            .set_strip(
+                0,
+                OutputStrip {
+                    gain: Amplitude(0.5),
+                    ..OutputStrip::default()
+                },
+            )
+            .unwrap();
+        control.set_levels(&levels);
+        assert!(
+            Arc::ptr_eq(&folds, &control.cell().current()),
+            "no fold was swapped"
+        );
+        let n = declick_frames(SampleRate::SR_48K).get();
+        let frames = n + 64;
+        let mut out = vec![0.0f32; frames * 2];
+        engine.process_segment(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
+        for k in 0..frames {
+            let gain = if k + 1 >= n {
+                0.5
+            } else {
+                1.0 + (0.5 - 1.0) * ((k + 1) as f32 / n as f32)
+            };
+            assert_eq!(out[2 * k], 21.0 * gain, "left, frame {k}");
+            assert_eq!(out[2 * k + 1], 22.0, "right is untouched, frame {k}");
+        }
+        // Muted, it ramps down from where it stands, and the dim scales the rest.
+        levels
+            .set_strip(
+                0,
+                OutputStrip {
+                    mute: true,
+                    ..OutputStrip::default()
+                },
+            )
+            .unwrap();
+        control.set_levels(&levels.with_dim(Some(Amplitude(0.5))));
+        let mut out = vec![0.0f32; frames * 2];
+        engine.process_segment(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
+        assert_eq!(out[2 * (frames - 1)], 0.0);
+        assert_eq!(out[2 * (frames - 1) + 1], 22.0 * 0.5);
+        assert!(out[0] > 0.0 && out[0] < 21.0 * 0.5, "mid-ramp: {}", out[0]);
     }
 
     /// A root with no fold into the device (five buses into three) is

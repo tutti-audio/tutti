@@ -779,3 +779,75 @@ fn a_declared_root_into_a_stated_device_is_allocation_free() {
         }
     }
 }
+
+/// A routing set live (a stereo monitor on outputs 3 and 4) and output gains
+/// ramping (a mute and a dim) are applied without allocating: the blocks
+/// through the ramp and after it are guarded, and carry the folded figures.
+#[test]
+fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
+    use tutti_engine::{OutputLevels, OutputMap, OutputStrip, Routing};
+    use tutti_graph::{Editor, NodeKey, OutPort, Prepare, Source, Unforkable};
+    use tutti_types::{Amplitude, Bed};
+
+    let transport = Transport::new(SampleRate::of(48_000.0));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::of(48_000.0),
+        tutti_types::MaxBlock::of(tutti_types::Samples(512)),
+    ));
+    ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
+    ed.spec_mut().topology.set_outputs((0..12).map(|port| {
+        Source::Node(OutPort {
+            node: NodeKey(1),
+            port,
+        })
+    }));
+    ed.commit().expect("commits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
+    let twelve = ChannelLayout::from(12u16);
+    engine.support_output(twelve).expect("a width");
+    let control = engine.output_control();
+    let mut out = vec![0.0f32; 512 * 12];
+    // The first block adopts the plan.
+    engine.process(&mut InterleavedMut::new(&mut out, twelve).unwrap());
+
+    control.set_routing(Routing {
+        monitor: Some(Bed::Stereo.topology()),
+        map: OutputMap::channels([2, 3]).unwrap(),
+        ..Routing::default()
+    });
+    let mut levels = OutputLevels::new();
+    levels
+        .set_strip(
+            2,
+            OutputStrip {
+                mute: true,
+                ..OutputStrip::default()
+            },
+        )
+        .unwrap();
+    control.set_levels(&levels.with_dim(Some(Amplitude(0.5))));
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..8 {
+            engine.process(&mut InterleavedMut::new(&mut out, twelve).unwrap());
+        }
+    });
+    // Settled: output 3 (muted) is silent, output 4 is the stereo fold's right
+    // channel at the dim, and the rest are silent.
+    let v = |c: usize| (c + 1) as f32 / 16.0;
+    let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
+    let right = v(1) + m * (v(2) + v(5) + v(7) + v(9) + v(11));
+    for frame in out.as_chunks::<12>().0 {
+        assert_eq!(frame[2], 0.0);
+        assert!(
+            (frame[3] - right * 0.5).abs() < 1e-5,
+            "{} vs {}",
+            frame[3],
+            right * 0.5
+        );
+        for (c, &s) in frame.iter().enumerate() {
+            if c != 3 {
+                assert_eq!(s, 0.0, "output {c}");
+            }
+        }
+    }
+}
