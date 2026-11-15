@@ -435,9 +435,17 @@ pub struct MidiNodes {
 /// Whether the root is as it was asked to be
 /// ([`Session::root_topology_status`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RootTopologyStatus {
     /// In force: the root is what was declared (or nothing was).
     Applied,
+    /// Declared and waiting for a running root crossfade to end: the root in
+    /// force is the previous declaration, and
+    /// [`requested_root_topology`](Session::requested_root_topology) is the
+    /// waiting one. It applies in the first update after the fade has ended
+    /// (which needs blocks rendered), or is `Refused` if it cannot be placed
+    /// then.
+    Pending,
     /// Not in force, and why. The previous state stands.
     Refused(tutti_graph::RootError),
 }
@@ -748,7 +756,13 @@ impl<C: Clock> Session<C> {
     /// that update with the audio; until then the root in force, its taps and
     /// [`root_topology`](Self::root_topology) are the running fade's, and
     /// [`requested_root_topology`](Self::requested_root_topology) is the
-    /// waiting one. It is heard up to one fade length (5 ms) late. If the
+    /// waiting one ([`Pending`](RootTopologyStatus::Pending)). It is heard up
+    /// to one fade length (5 ms) late, and the fade only ends as blocks render:
+    /// with none rendering (a stopped stream, an offline session nobody
+    /// pulls) it waits. It stays with the graph through a device restart or a
+    /// clock switch, and is checked against the device it finds when it is
+    /// applied. A declaration refused at its call drops nothing: the waiting
+    /// one still applies. If the
     /// device no longer places it when it is applied,
     /// [`root_topology_status`](Self::root_topology_status) is `Refused` with
     /// the error and the root in force stays. A
@@ -771,6 +785,7 @@ impl<C: Clock> Session<C> {
         &mut self,
         root: Option<ChannelTopology>,
     ) -> crate::Result<RootDeclaration<'_>> {
+        self.sync_root_refusal();
         // The same request again, in force, is nothing to do.
         if !(root == self.root_request && self.root_refusal.is_none()) {
             self.root_request = root.clone();
@@ -785,6 +800,14 @@ impl<C: Clock> Session<C> {
         Ok(RootDeclaration {
             graph: &mut self.graph,
         })
+    }
+
+    /// Takes the refusal of a declaration that waited and could not be
+    /// applied into `root_refusal`, where a device restart re-attempts it.
+    pub(crate) fn sync_root_refusal(&mut self) {
+        if let Some(e) = self.graph.take_apply_refusal() {
+            self.root_refusal = Some(e);
+        }
     }
 
     /// The topology last asked for with
@@ -806,6 +829,9 @@ impl<C: Clock> Session<C> {
     ///   **device restart re-attempts the request**: it is
     ///   [`Applied`](RootTopologyStatus::Applied) as soon as the new device
     ///   places it.
+    /// - The same when a declaration that waited for a root crossfade
+    ///   ([`declare_root_topology`](Self::declare_root_topology)) could not be
+    ///   placed once the fade ended; a later widening does not replace it.
     /// - Otherwise `Refused` with [`Graph::widen_outputs`]'s last refusal: a
     ///   widening the declared root could not take
     ///   ([`RootError::Width`](tutti_graph::RootError::Width)), or
@@ -813,10 +839,19 @@ impl<C: Clock> Session<C> {
     ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), as a
     ///   [`RootError::Fold`](tutti_graph::RootError::Fold)); that
     ///   is what a host's `MasterSources` longer than the root comes to.
-    /// - Otherwise `Applied`.
+    /// - Otherwise [`Pending`](RootTopologyStatus::Pending) while a declaration
+    ///   waits for a root crossfade, and `Applied`.
+    ///
+    /// "The previous declaration" includes one that is waiting: a declaration
+    /// refused at its call drops nothing, so a waiting one still applies.
     pub fn root_topology_status(&self) -> RootTopologyStatus {
-        match self.root_refusal.or(self.graph.widen_refusal()) {
+        match self
+            .root_refusal
+            .or(self.graph.apply_refusal())
+            .or(self.graph.widen_refusal())
+        {
             Some(e) => RootTopologyStatus::Refused(e),
+            None if self.graph.root_pending() => RootTopologyStatus::Pending,
             None => RootTopologyStatus::Applied,
         }
     }
@@ -893,6 +928,7 @@ impl<C: Clock> Session<C> {
                 }
                 let repreparing = self.graph.is_repreparing();
                 self.graph.collect();
+                self.sync_root_refusal();
                 // Closes a plugin that was dropped off its own thread (a pool thread at an
                 // export's end, say): it handed the close to this session's collector, which
                 // runs on the process's main thread (`MainThreadMarker::new` is `Some` only there).

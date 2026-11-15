@@ -204,7 +204,10 @@ fn a_redeclare_of_another_width_mid_fade_applies_with_everything_that_reads_the_
     );
 }
 
-/// **Two declarations during one fade give one applied, the newest.**
+/// **Two declarations during one fade give one applied, the newest**, and the
+/// audio after it is the newest root's fade-in: the 5.1 root keeps channel 0
+/// (0.25) on the left and nothing on the right, which fades in from the mono
+/// root's 0.25.
 #[test]
 fn two_redeclares_mid_fade_apply_the_newest_once() {
     let mut s = session();
@@ -214,12 +217,71 @@ fn two_redeclares_mid_fade_apply_the_newest_once() {
     s.declare_root_topology(Some(root(6))).expect("5.1");
     assert_eq!(s.requested_root_topology(), Some(&root(6)));
     let mut announced = Vec::new();
+    let mut applied = Vec::new();
     for _ in 0..8 {
-        announced.extend(reopened(&block(&mut s).0));
+        let (events, frames) = block(&mut s);
+        let now = reopened(&events);
+        if !now.is_empty() {
+            applied.clear();
+        }
+        announced.extend(now);
+        applied.extend(frames);
     }
     assert_eq!(announced.len(), 1, "one declaration was applied");
     assert_eq!(announced[0].1, root(6));
     assert_eq!(s.graph_ref().outputs(), 6);
+    for (k, f) in applied.iter().enumerate() {
+        let (o, _) = gains(k);
+        assert!(
+            (f[0] - 0.25).abs() < 1e-6 && (f[1] - 0.25 * o).abs() < 1e-6,
+            "frame {k} of the newest root's fade-in: {f:?}"
+        );
+    }
+}
+
+/// **Waiting is a status**: `Pending` while the declaration waits, with the
+/// request the waiting one, `Applied` once it is in force.
+#[test]
+fn a_waiting_declaration_is_pending_until_it_applies() {
+    use tutti_session::RootTopologyStatus;
+    let mut s = session();
+    let _tap = start_fade(&mut s);
+    assert_eq!(s.root_topology_status(), RootTopologyStatus::Applied);
+    s.declare_root_topology(Some(root(4))).expect("quad");
+    assert_eq!(s.root_topology_status(), RootTopologyStatus::Pending);
+    assert_eq!(s.requested_root_topology(), Some(&root(4)));
+    let _ = block(&mut s);
+    assert_eq!(s.root_topology_status(), RootTopologyStatus::Pending);
+    for _ in 0..4 {
+        let _ = block(&mut s);
+    }
+    assert_eq!(s.root_topology_status(), RootTopologyStatus::Applied);
+    assert_eq!(s.root_topology(), Some(&root(4)));
+}
+
+/// **A declaration refused at its call drops nothing**: the one waiting still
+/// applies, and the refusal is the status of the last request.
+#[test]
+fn a_refused_newer_declaration_leaves_the_waiting_one_to_apply() {
+    use tutti_session::RootTopologyStatus;
+    let mut s = session();
+    let _tap = start_fade(&mut s);
+    s.declare_root_topology(Some(root(4))).expect("quad");
+    let buses = ChannelTopology::unassigned(ChannelLayout::from_count(4));
+    assert!(
+        s.declare_root_topology(Some(buses.clone())).is_err(),
+        "four buses have no place on a stereo device"
+    );
+    assert!(matches!(
+        s.root_topology_status(),
+        RootTopologyStatus::Refused(_)
+    ));
+    for _ in 0..5 {
+        let _ = block(&mut s);
+    }
+    assert_eq!(s.root_topology(), Some(&root(4)), "the waiting one applied");
+    assert_eq!(s.graph_ref().outputs(), 4);
+    assert_eq!(s.requested_root_topology(), Some(&buses));
 }
 
 /// **A `.hard()` declaration mid-fade applies at once** and drops a waiting

@@ -714,3 +714,34 @@ mod no_alloc {
         commit_and_render(4);
     }
 }
+
+/// `Editor::root_fade_running` is true from the commit that sends the old
+/// root until the fade's end is settled, and false after a cut.
+#[test]
+fn root_fade_running_is_true_while_the_bank_runs_and_false_after_settling_or_a_cut() {
+    let mut r = rig();
+    step(&mut r, BLOCK);
+    assert!(!r.editor().root_fade_running(), "no root change yet");
+    declare(&mut r, 2, fade(FadeLaw::EqualAmplitude));
+    assert!(r.editor().root_fade_running(), "sent, not yet rendered");
+    for _ in 0..3 {
+        step(&mut r, BLOCK);
+    }
+    assert!(
+        r.editor().root_fade_running(),
+        "rendered through, but not reported until settled"
+    );
+    assert!(r.editor_mut().settle_fades());
+    assert!(!r.editor().root_fade_running(), "settled");
+
+    let mut r = rig();
+    step(&mut r, BLOCK);
+    declare(&mut r, 2, fade(FadeLaw::EqualAmplitude));
+    step(&mut r, BLOCK);
+    r.editor_mut().set_root_fade(None);
+    let ed = r.editor_mut();
+    ed.spec_mut().root_id = ed.spec().root_id.next();
+    ed.spec_mut().topology.set_outputs(vec![source(3)]);
+    ed.commit().expect("commits");
+    assert!(!r.editor().root_fade_running(), "a cut carries no old root");
+}

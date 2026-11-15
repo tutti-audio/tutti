@@ -918,6 +918,7 @@ impl<C: Clock> Session<C> {
         // sends the resumed plan, and the executor adopts it.
         stopped.apply_pending();
         self.graph.collect();
+        self.sync_root_refusal();
         // A unit that panicked in `prepare`, or shapes that no longer
         // compile, poison the editor here: refuse, the stream still stopped.
         self.graph.check_reprepare(None)?;

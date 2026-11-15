@@ -357,10 +357,14 @@ pub struct Graph {
     /// folds to publish exactly when it has a device to place them on; a
     /// graph with no engine has neither, and nothing folds its root.
     output: Option<Placed>,
-    /// The last widening [`widen_outputs`](Self::widen_outputs) refused, or
-    /// the declaration that waited for a root crossfade and could not be
-    /// applied when it ended.
+    /// The last widening [`widen_outputs`](Self::widen_outputs) refused.
     widen_refusal: Option<tutti_graph::RootError>,
+    /// Why the declaration that waited for a root crossfade, or a hard one
+    /// made through [`harden_root`](Self::harden_root), could not be applied;
+    /// the session takes it as its declaration refusal
+    /// ([`take_apply_refusal`](Self::take_apply_refusal)). A slot of its own,
+    /// so a widening neither hides nor erases it.
+    apply_refusal: Option<tutti_graph::RootError>,
     /// A root declared while a root crossfade ran, applied when it ends:
     /// the newest declaration (`Some(None)` takes the declaration back).
     pending_root: Option<Option<tutti_types::ChannelTopology>>,
@@ -528,6 +532,7 @@ impl Graph {
             root: None,
             output: None,
             widen_refusal: None,
+            apply_refusal: None,
             pending_root: None,
             #[cfg(feature = "plugin")]
             plugins: BTreeMap::new(),
@@ -3304,10 +3309,26 @@ impl Graph {
         }
     }
 
+    /// Whether a root declaration waits for the running crossfade to end.
+    pub(crate) fn root_pending(&self) -> bool {
+        self.pending_root.is_some()
+    }
+
+    /// The refusal of a declaration when it was applied, taken: the session
+    /// holds it as its own. See [`apply_refusal`](Self).
+    pub(crate) fn take_apply_refusal(&mut self) -> Option<tutti_graph::RootError> {
+        self.apply_refusal.take()
+    }
+
+    /// The refusal of a declaration when it was applied, not yet taken.
+    pub(crate) fn apply_refusal(&self) -> Option<tutti_graph::RootError> {
+        self.apply_refusal
+    }
+
     /// Applies the declaration that waited, once the crossfade it waited for
     /// is over: the spec, the readers and the announcement change together.
     /// A refusal now (the device no longer places it, the roots in flight are
-    /// at their limit) is [`widen_refusal`](Self::widen_refusal)'s.
+    /// at their limit) is [`take_apply_refusal`](Self::take_apply_refusal)'s.
     fn apply_pending_root(&mut self) {
         if self.editor.root_fade_running() {
             return;
@@ -3322,7 +3343,7 @@ impl Graph {
             .check_declaration(&root)
             .and_then(|width| self.apply_root(root, hard, width));
         if let Err(e) = applied {
-            self.widen_refusal = Some(e);
+            self.apply_refusal = Some(e);
         }
     }
 
@@ -3334,7 +3355,11 @@ impl Graph {
     /// While a root crossfade runs, a declaration that is not `hard` is held
     /// (checked now, applied by [`collect`](Self::collect) once the fade is
     /// over, the newest replacing an older one): the spec, the readers and the
-    /// root in force do not change until then.
+    /// root in force do not change until then. A declaration refused at the
+    /// call drops nothing: the one waiting still applies. The fade is over
+    /// when the executor has rendered it, so a held declaration also waits
+    /// while no blocks render, and travels with the graph through a restart,
+    /// to be checked against the device it finds when it is applied.
     pub(crate) fn declare_root(
         &mut self,
         root: Option<tutti_types::ChannelTopology>,
@@ -3343,10 +3368,11 @@ impl Graph {
         let width = self.check_declaration(&root)?;
         if !hard && self.editor.root_fade_running() {
             self.pending_root = Some(root);
-            self.widen_refusal = None;
+            self.apply_refusal = None;
             return Ok(());
         }
         self.pending_root = None;
+        self.apply_refusal = None;
         self.apply_root(root, hard, width)
     }
 
