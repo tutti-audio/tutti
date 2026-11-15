@@ -646,7 +646,6 @@ impl<F: Float> Fold<F> {
     /// than the defaults ([`FoldSpec::levels`]) before it is
     /// [`build`](FoldSpec::build)t. [`between`](Self::between) is the default
     /// spec.
-    #[must_use]
     pub fn spec<'a>(src: &'a ChannelTopology, dst: &'a ChannelTopology) -> FoldSpec<'a, F> {
         FoldSpec::new(src, dst)
     }
