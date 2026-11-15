@@ -418,6 +418,8 @@ impl MidiFile {
     /// previous one of its kind, whether both moved there or both were at
     /// that tick, the later wins and the earlier is in
     /// [`Converted::dropped`] as [`DropReason::Superseded`].
+    /// A Time Signature that replaces another counts its bars from the signature
+    /// before the replaced one.
     ///
     /// Moving an event changes its order against the events that stay: a
     /// moved tempo or time signature can sit after a note it preceded in the
@@ -471,38 +473,41 @@ impl MidiFile {
             superseded: bool,
         }
         let mut landings: Vec<Landing<'_>> = Vec::with_capacity(all.len());
-        let mut bars = (0, bar_step(tpq, 4, 2));
+        // The bar grids of the signatures that stand, the last being current.
+        let mut grids = vec![(0, bar_step(tpq, 4, 2))];
         let (mut last_tempo, mut last_signature) = (None::<usize>, None::<usize>);
         for (from, track, event) in all {
-            let (grid, last) = match event {
-                FileEvent::Meta(Meta::Tempo { .. }) => (Some((0, tempo_step)), &mut last_tempo),
+            let is_tempo = matches!(event, FileEvent::Meta(Meta::Tempo { .. }));
+            let bar = match event {
                 FileEvent::Meta(Meta::TimeSignature {
                     numerator,
                     denominator_power,
                     ..
                 }) if has_bar_grid(*numerator, *denominator_power) => {
-                    (Some(bars), &mut last_signature)
+                    Some(bar_step(tpq, *numerator, *denominator_power))
                 }
-                _ => (None, &mut last_tempo),
+                _ => None,
             };
-            let to = match grid {
-                Some((origin, step)) => Tick(snap(from.0, origin, step, end.0)),
-                None => from,
-            };
-            if grid.is_some() {
-                if let Some(earlier) = last.filter(|&i| landings[i].to == to) {
+            let snapped = |grid: (u64, u64)| Tick(snap(from.0, grid.0, grid.1, end.0));
+            let mut to = from;
+            if is_tempo {
+                to = snapped((0, tempo_step));
+                if let Some(earlier) = last_tempo.filter(|&i| landings[i].to == to) {
                     landings[earlier].superseded = true;
                 }
-                *last = Some(landings.len());
-            }
-            if let FileEvent::Meta(Meta::TimeSignature {
-                numerator,
-                denominator_power,
-                ..
-            }) = event
-                && grid.is_some()
-            {
-                bars = (to.0, bar_step(tpq, *numerator, *denominator_power));
+                last_tempo = Some(landings.len());
+            } else if let Some(step) = bar {
+                let current = *grids.last().expect("the 4/4 grid is never popped");
+                to = snapped(current);
+                if let Some(earlier) = last_signature.filter(|&i| landings[i].to == to) {
+                    // The earlier signature is replaced, so the later one
+                    // counts its bars from the signature before it.
+                    landings[earlier].superseded = true;
+                    grids.pop();
+                    to = snapped(*grids.last().expect("the 4/4 grid is never popped"));
+                }
+                last_signature = Some(landings.len());
+                grids.push((to.0, step));
             }
             landings.push(Landing {
                 track,

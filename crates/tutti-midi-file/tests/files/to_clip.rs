@@ -980,3 +980,35 @@ fn ticks_at_the_largest_gap_stay_on_their_grids() {
     assert!(tempo <= at && at - tempo < 20 && tempo.is_multiple_of(20));
     assert!(signature <= at && at - signature < 1920 && signature.is_multiple_of(1920));
 }
+
+/// A Time Signature that replaces another counts its bars from the signature
+/// before the replaced one. At 96 ticks per quarter, 1/4 from tick 0 has a bar
+/// of 96 ticks, so 4/4 at 200 sits at 192 (the bar line nearest) and has bars
+/// of 384. 3/4 at 250 is within half of those bars of 192, which would put it
+/// there, replacing the 4/4; counted on the 1/4 bars of 96 it is nearest 288.
+/// The 4/4 is reported superseded and the 3/4 sits at 288.
+/// Spec: m2-104/7.5.4#3, m2-116/6.1.2#3
+#[test]
+fn a_replacing_signature_counts_its_bars_from_the_one_before_the_replaced() {
+    let smf = smf_at(
+        96,
+        vec![
+            (0, signature_meta(1, 2)),
+            (200, signature_meta(4, 2)),
+            (250, signature_meta(3, 2)),
+            (400, note(0, 60)),
+        ],
+    );
+    let done = smf.to_clip().unwrap();
+    let ticks = at_ticks(&done.clip, is_signature);
+    assert_eq!(ticks, [0, 288]);
+    let [three_four, _] = signature_events(3, 2, 8, 24);
+    assert_eq!(
+        flex_events(&done.clip, is_signature).pop(),
+        Some((288, three_four))
+    );
+    let dropped: Vec<_> = done.dropped.iter().map(|d| (d.tick.0, d.reason)).collect();
+    assert_eq!(dropped, [(200, DropReason::Superseded)]);
+    let moves: Vec<_> = done.moved.iter().map(|m| (m.from.0, m.to.0)).collect();
+    assert_eq!(moves, [(250, 288)]);
+}
