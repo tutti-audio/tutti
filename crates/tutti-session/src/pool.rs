@@ -25,7 +25,7 @@
 //! `soundfont` (feature `soundfont`) are the data kinds. A load's outcome lands
 //! in [`Session::update`] as a [`SessionEvent::Pool`](crate::SessionEvent::Pool), and
 //! [`Session::pool_state`] reads where an entry stands. A handle read by key
-//! ([`Session::audio`], [`Session::soundfont`]) is a clone that owns nothing:
+//! (`Session::audio`, `Session::soundfont`) is a clone that owns nothing:
 //! dropping it leaves its entry loaded. [`Session::when_loaded`] runs a
 //! closure once an entry is loaded.
 //!
@@ -52,7 +52,7 @@
 //! (`BounceError::PoolPending`, feature `export`).
 
 use std::fmt;
-#[cfg(any(feature = "sampler", feature = "soundfont"))]
+#[cfg(feature = "soundfont")]
 use std::sync::Arc;
 
 use crate::Session;

@@ -19,7 +19,7 @@ pub struct AudioFile {
 
 /// Where a file's samples are read from: half of [`AudioFile`]'s identity.
 #[cfg(feature = "sampler")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Tier {
     /// Decoded whole into memory.
     Resident,
