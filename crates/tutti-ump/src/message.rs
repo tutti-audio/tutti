@@ -4,7 +4,8 @@
 use core::num::NonZeroU8;
 
 use crate::field::{
-    DeltaTicks, FirstGroup, FunctionBlockId, GroupSpan, NoteNumber, Pitch, SharpsFlats, U4, U7, U14,
+    DeltaTicks, FirstGroup, FunctionBlockId, GroupSpan, NoteNumber, Pitch, SharpsFlats,
+    TicksPerQuarterNote, U4, U7, U14,
 };
 use crate::{
     BendValue, CCNumber, ControlValue, ManufacturerId, MdsChunk, MdsChunkSize, MdsChunks,
@@ -70,8 +71,9 @@ pub enum Utility {
     JrClock(u16),
     /// The time of the following messages, in ticks of 1/31250 s.
     JrTimestamp(u16),
-    /// Delta Clockstamp ticks per quarter note; `0` is reserved and kept.
-    TicksPerQuarterNote(u16),
+    /// Delta Clockstamp ticks per quarter note; a `0` read from the wire is
+    /// reserved and kept.
+    TicksPerQuarterNote(TicksPerQuarterNote),
     /// Ticks since the last event.
     DeltaClockstamp(DeltaTicks),
 }

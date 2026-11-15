@@ -290,10 +290,10 @@ fn reserved_values_are_kept() {
     let stream = Message::Stream;
 
     // A Delta Clockstamp Ticks Per Quarter Note of 0 is reserved (§7.2.3.1).
-    kept(
-        [0x0030_0000, 0, 0, 0],
-        Message::Utility(Utility::TicksPerQuarterNote(0)),
-    );
+    let Message::Utility(Utility::TicksPerQuarterNote(zero)) = read([0x0030_0000, 0, 0, 0]) else {
+        panic!("a Ticks Per Quarter Note")
+    };
+    assert_eq!(zero.get(), 0);
     // Attribute types 4 to 255 are reserved (Table 8): the data is kept too.
     for (words, on, kind, data) in [
         ([0x4192_3C04u32, 0xABCD_1234, 0, 0], true, 4u8, 0x1234u16),

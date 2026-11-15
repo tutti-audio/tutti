@@ -97,7 +97,7 @@ struct Packet {
 fn classify(ump: Ump) -> Packet {
     let kind = match ump.decode() {
         Ok(Message::Utility(Utility::DeltaClockstamp(ticks))) => Kind::Dcs(ticks.get()),
-        Ok(Message::Utility(Utility::TicksPerQuarterNote(ticks))) => Kind::Dctpq(ticks),
+        Ok(Message::Utility(Utility::TicksPerQuarterNote(ticks))) => Kind::Dctpq(ticks.get()),
         Ok(Message::Utility(Utility::Noop)) => Kind::Noop,
         Ok(Message::Utility(Utility::JrClock(_) | Utility::JrTimestamp(_))) => Kind::Pad,
         Err(_) if ump.message_type() == 0x0 => Kind::Pad,

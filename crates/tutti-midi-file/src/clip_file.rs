@@ -37,7 +37,10 @@
 use std::vec::Vec;
 
 use crate::Truncated;
-use tutti_ump::{DeltaTicks, Flex, FlexTextKind, Form, Message, Stream, SysexStatus, Ump, Utility};
+use tutti_ump::{
+    DeltaTicks, Flex, FlexTextKind, Form, Message, Stream, SysexStatus, TicksPerQuarterNote, Ump,
+    Utility,
+};
 
 mod read;
 
@@ -324,9 +327,9 @@ fn push_delta(out: &mut Vec<u8>, mut ticks: u64) {
 }
 
 fn dctpq(ticks_per_quarter: u16) -> Ump {
-    Ump::from(Message::Utility(Utility::TicksPerQuarterNote(
-        ticks_per_quarter,
-    )))
+    // `ConfigError::Division` refuses a zero division at construction.
+    let ticks = TicksPerQuarterNote::new(ticks_per_quarter).expect("a division is not zero");
+    Ump::from(Message::Utility(Utility::TicksPerQuarterNote(ticks)))
 }
 
 fn start_of_clip() -> Ump {

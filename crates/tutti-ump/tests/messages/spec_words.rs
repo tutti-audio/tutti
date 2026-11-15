@@ -16,7 +16,7 @@ use tutti_ump::{
     SysexStatus, System, TimeSignature, U4, U7, U14, UiHint, Ump, UmpVersion, Utility, Voice1,
     Voice2,
 };
-use tutti_ump::{BendValue, ControlValue};
+use tutti_ump::{BendValue, ControlValue, TicksPerQuarterNote};
 use tutti_ump::{ManufacturerId, Unknown};
 
 fn g(n: u8) -> MidiGroup {
@@ -62,7 +62,7 @@ fn utility() {
     // Delta Clockstamp Ticks Per Quarter Note: status 3, 480 = 0x01E0.
     pin(
         [0x0030_01E0, 0, 0, 0],
-        Message::Utility(Utility::TicksPerQuarterNote(480)),
+        Message::Utility(Utility::TicksPerQuarterNote(TicksPerQuarterNote::of(480))),
     );
     // Delta Clockstamp: status 4, 20 bits in 19-0.
     pin(

@@ -59,7 +59,7 @@ fn utility(u: Utility) -> u32 {
         Utility::Noop => 0,
         Utility::JrClock(t) => (0x1 << 20) | u32::from(t),
         Utility::JrTimestamp(t) => (0x2 << 20) | u32::from(t),
-        Utility::TicksPerQuarterNote(n) => (0x3 << 20) | u32::from(n),
+        Utility::TicksPerQuarterNote(n) => (0x3 << 20) | u32::from(n.get()),
         Utility::DeltaClockstamp(t) => (0x4 << 20) | t.get(),
     }
 }

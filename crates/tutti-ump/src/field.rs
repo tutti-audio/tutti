@@ -274,6 +274,43 @@ bounded!(
     /// to fifteen Member Channels: `2..=16` (M2-120 §2.1).
     MpeChannels, u8, 2, 16
 );
+// `From` into the raw and `TryFrom` from it, for a bounded type with an
+// unsigned raw.
+macro_rules! bounded_conversions {
+    ($name:ident, $repr:ty) => {
+        impl From<$name> for $repr {
+            fn from(value: $name) -> $repr {
+                value.get()
+            }
+        }
+
+        impl TryFrom<$repr> for $name {
+            type Error = OutOfRange;
+
+            fn try_from(raw: $repr) -> Result<Self, OutOfRange> {
+                Self::new(raw).ok_or(OutOfRange {
+                    what: stringify!($name),
+                    value: u32::from(raw),
+                    max: u32::from(<$repr>::from(Self::MAX)),
+                })
+            }
+        }
+    };
+}
+
+bounded!(
+    /// The Delta Clockstamp ticks per quarter note (`1..=65535`, M2-104
+    /// §7.2.3.1); `0` is reserved. A zero read from the wire is kept, so such a
+    /// message re-encodes exactly.
+    TicksPerQuarterNote, u16, 1, 65535
+);
+bounded_conversions!(TicksPerQuarterNote, u16);
+
+impl TicksPerQuarterNote {
+    /// The most ticks, 65535.
+    pub const MAX: Self = Self(u16::MAX);
+}
+
 bounded!(
     /// The channel count M of Mono Mode On, Control Change 126 (MIDI 1.0
     /// Detailed Specification, Channel Mode Messages, Omni-Off/Mono): `1..=16`

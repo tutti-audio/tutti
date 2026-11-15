@@ -17,7 +17,8 @@
 //! SysEx 7 data), which is part of the byte being 7-bit, not a reserved bit.
 
 use crate::field::{
-    DeltaTicks, FirstGroup, FunctionBlockId, GroupSpan, NoteNumber, SharpsFlats, U4, U7, U14,
+    DeltaTicks, FirstGroup, FunctionBlockId, GroupSpan, NoteNumber, SharpsFlats,
+    TicksPerQuarterNote, U4, U7, U14,
 };
 use crate::message::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockFilter,
@@ -127,7 +128,9 @@ fn utility(w0: u32) -> Option<Utility> {
         0x0 => Some(Utility::Noop),
         0x1 => Some(Utility::JrClock(low16)),
         0x2 => Some(Utility::JrTimestamp(low16)),
-        0x3 => Some(Utility::TicksPerQuarterNote(low16)),
+        0x3 => Some(Utility::TicksPerQuarterNote(TicksPerQuarterNote::wire(
+            low16,
+        ))),
         0x4 => Some(Utility::DeltaClockstamp(DeltaTicks::masked(w0 & 0xf_ffff))),
         _ => None,
     }
