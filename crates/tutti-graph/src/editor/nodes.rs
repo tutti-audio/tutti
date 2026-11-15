@@ -67,7 +67,7 @@ impl Editor {
     /// rules:
     ///
     /// - Both units run on the node's inputs for `fade.duration` frames and
-    ///   their outputs are blended along `fade.curve`; then the old unit
+    ///   their outputs are blended along `fade.law`; then the old unit
     ///   retires, on the control thread, through the next
     ///   [`collect`](Self::collect), which reports its key.
     /// - The fade holds no commit: the next [`commit`](Self::commit) and

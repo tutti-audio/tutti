@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, StreamTrait};
-use tutti_types::{ChannelLayout, MaxBlock, SampleRate, Samples};
+use tutti_types::{ChannelLayout, MAX_CHANNELS, MaxBlock, SampleRate, Samples};
 
 use crate::MAX_FRAMES;
 use crate::block::OutputBlock;
@@ -88,6 +88,12 @@ impl OutputSpec {
     }
 
     pub(crate) fn from_supported(c: &cpal::SupportedStreamConfig) -> Result<Self> {
+        if usize::from(c.channels()) > MAX_CHANNELS {
+            return Err(Error::InvalidConfig(format!(
+                "the device has {} channels; at most {MAX_CHANNELS} are supported",
+                c.channels()
+            )));
+        }
         Ok(Self {
             sample_rate: device_rate(c.sample_rate())?,
             channels: ChannelLayout::from(c.channels().max(1)),

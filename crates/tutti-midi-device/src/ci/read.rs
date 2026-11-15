@@ -43,7 +43,7 @@ use winnow::combinator::{alt, cut_err, eof, seq};
 use winnow::error::ContextError;
 use winnow::token::{any, literal, take};
 
-use tutti_ump::{DeviceIdentity, FunctionBlockId, ManufacturerId, U7, U14};
+use tutti_ump::{DeviceIdentity, FunctionBlockId, ManufacturerId, U7, U14, U28};
 
 use super::{
     CI_SUB_ID_1, CI_UNIVERSAL_SYSEX, CiCategories, CiDeviceId, DataControl, Destination,
@@ -130,12 +130,8 @@ fn identity(input: &mut &[u8]) -> Res<DeviceIdentity> {
 fn max_sysex_size(input: &mut &[u8]) -> Res<MaxSysexSize> {
     (u7, u7, u7, u7)
         .verify_map(|(a, b, c, d)| {
-            MaxSysexSize::new(
-                u32::from(a.get())
-                    | (u32::from(b.get()) << 7)
-                    | (u32::from(c.get()) << 14)
-                    | (u32::from(d.get()) << 21),
-            )
+            let size = U28::from_le7([a, b, c, d].map(U7::get))?;
+            MaxSysexSize::new(size.get())
         })
         .parse_next(input)
 }
@@ -175,7 +171,7 @@ pub(super) fn discovery_body(is_reply: bool, mut body: &[u8]) -> Option<Discover
 /// A 14-bit value, least significant byte first.
 fn u14(input: &mut &[u8]) -> Res<U14> {
     (u7, u7)
-        .map(|(lsb, msb)| U14::masked(u16::from(msb.get()) << 7 | u16::from(lsb.get())))
+        .map(|(lsb, msb)| U14::from_halves(msb, lsb))
         .parse_next(input)
 }
 
@@ -336,20 +332,7 @@ pub(super) fn specific_data_body(mut body: &[u8]) -> Option<(ProfileId, Specific
     (
         profile_id,
         wire4
-            .verify_map(|b| {
-                b.iter()
-                    .all(|byte| byte & 0x80 == 0)
-                    .then(|| {
-                        usize::try_from(
-                            u32::from(b[0])
-                                | (u32::from(b[1]) << 7)
-                                | (u32::from(b[2]) << 14)
-                                | (u32::from(b[3]) << 21),
-                        )
-                        .ok()
-                    })
-                    .flatten()
-            })
+            .verify_map(|b| usize::try_from(U28::from_le7(b)?.get()).ok())
             .flat_map(take)
             .verify_map(|data: &[u8]| SpecificData::new(data.to_vec()).ok()),
     )

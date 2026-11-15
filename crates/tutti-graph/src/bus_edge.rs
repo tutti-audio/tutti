@@ -146,7 +146,7 @@ pub enum BusError {
         side: BusSide,
     },
     /// The global input is wider than a bus holds
-    /// ([`MAX_BUS_CHANNELS`](tutti_types::MAX_BUS_CHANNELS)).
+    /// ([`MAX_CHANNELS`](tutti_types::MAX_CHANNELS)).
     #[error("the global input ({width} channels) is wider than a bus")]
     GlobalTooWide {
         /// The global input's width.
@@ -389,7 +389,7 @@ impl GraphSpec {
         from: BusSource,
         fold: BusFold,
     ) -> Result<Vec<(EdgeId, f32)>, BusError> {
-        // The engine's roots (`MAX_ROOT_CHANNELS`, 8) all fit a bus (16), so
+        // The engine's roots are at most `MAX_CHANNELS` wide, a bus's width, so
         // a root with no `BusTopology` is one never declared.
         let root = self.root.ok_or(BusError::RootUndeclared)?;
         self.fold_lanes(shapes, from, root, fold, |c| Sink::Output(c as u16))
@@ -439,7 +439,7 @@ impl GraphSpec {
         .map_err(LaneError::Fold)?;
 
         let mut lanes = Vec::new();
-        for c in 0..sink.positions().len() {
+        for c in 0..usize::from(sink.layout().count()) {
             for (k, gain) in fold.contributions(c) {
                 let source = match source_node {
                     Some(node) => Source::Node(OutPort {

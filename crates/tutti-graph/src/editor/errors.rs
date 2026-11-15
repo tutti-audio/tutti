@@ -106,7 +106,7 @@ pub enum CommitError {
     /// with ([`Editor::open_tap`](crate::Editor::open_tap) fixed the reader's and the writer's width
     /// there): the spec's `TapSpec::Ports` sources were edited. Nothing was sent.
     /// Close the tap and open another to change its width.
-    #[error("tap {} names {sources} lanes but was opened with {opened}", .tap.0)]
+    #[error("tap {} names {sources} lanes but was opened with {opened}", .tap)]
     TapWidth {
         /// The tap.
         tap: TapId,
@@ -118,9 +118,9 @@ pub enum CommitError {
     /// A meter's lanes in the spec do not fit the cells it was opened with
     /// ([`Editor::open_meter`](crate::Editor::open_meter) fixed them there): the spec's
     /// `MeterSpec::Ports` was edited, or the outputs a master meter follows
-    /// grew past [`MAX_ROOT_CHANNELS`](crate::MAX_ROOT_CHANNELS). Nothing was sent. Close the meter and
+    /// grew past [`MAX_CHANNELS`](tutti_types::MAX_CHANNELS). Nothing was sent. Close the meter and
     /// open another to change its width.
-    #[error("meter {} names {sources} lanes but its cells hold {capacity}", .meter.0)]
+    #[error("meter {} names {sources} lanes but its cells hold {capacity}", .meter)]
     MeterWidth {
         /// The meter.
         meter: MeterId,
@@ -167,13 +167,13 @@ pub enum CommitError {
 #[non_exhaustive]
 pub enum CloseError {
     /// No plan tap with this id is open.
-    #[error("no tap {} is open", .0.0)]
+    #[error("no tap {} is open", .0)]
     Tap(TapId),
     /// No event tap with this id is open.
-    #[error("no event tap {} is open", .0.0)]
+    #[error("no event tap {} is open", .0)]
     EventTap(EventTapId),
     /// No meter with this id is open.
-    #[error("no meter {} is open", .0.0)]
+    #[error("no meter {} is open", .0)]
     Meter(MeterId),
 }
 

@@ -12,7 +12,6 @@ use tutti_ump::ControlValue;
 use crate::support;
 
 use support::Hand;
-use tutti_fixtures::assert_golden;
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_midi_protocol::widen_velocity;
@@ -621,21 +620,32 @@ fn test_clone_creates_independent_instance() {
     assert!(rms_clone > rms_original);
 }
 
-/// FNV-1a over the frames' little-endian `f32` bits, left then right.
-fn digest(samples: &[(f32, f32)]) -> u64 {
-    let mut h = tutti_fixtures::Fnv::new();
-    for &(l, r) in samples {
-        h.f32(l);
-        h.f32(r);
-    }
-    h.finish()
+/// One note on channel 3: middle C at velocity 100, `blocks` blocks of
+/// `support::BLOCK` frames from `unit` as it stands.
+fn first_note(unit: SoundFontUnit, blocks: usize) -> Vec<(f32, f32)> {
+    const CHANNEL: MidiChannel = MidiChannel::of(3);
+    let mut hand = Hand::new(unit);
+    hand.note_on(
+        CHANNEL,
+        NoteNumber::of(60),
+        NoteVelocity::new(widen_velocity(U7::of(100)).get()),
+    );
+    render_process_blocks(&mut hand, support::BLOCK, blocks, &[])
 }
 
-/// A unit whose channel was `select`ed renders that preset: preset 40
-/// (TimGM6mb's violin) on channel 3 at 44.1 kHz, middle C at velocity 100,
-/// 2048 frames in 64-frame blocks. The digest was recorded on the golden target
-/// from this unit's render; elsewhere only the sound is asserted, so the preset
-/// itself is pinned only by the glibc golden digest.
+/// The level of the note in the tenth-of-a-second window `i` (4 410 frames) of
+/// a one-second render.
+fn window_rms(out: &[(f32, f32)], i: usize) -> f32 {
+    rms(&out[i * 4_410..(i + 1) * 4_410])
+}
+
+/// A unit whose channel was `select`ed plays that preset's note: preset 40
+/// (TimGM6mb's violin) on channel 3 sustains where the channel's default
+/// preset (0:0, the piano) decays. Over a second of middle C, the violin's
+/// level in the 0.8 s window is at least 0.7 of its level in the 0.1 s window
+/// (measured 0.87), the piano's is under 0.5 of its own (measured 0.34): a
+/// bowed string holds its level and a struck one dies away, whichever sample
+/// the font maps. Both notes sound: each 0.1 s window is above 1e-3 RMS.
 #[test]
 fn a_selected_presets_first_note_on_renders_that_preset() {
     const CHANNEL: MidiChannel = MidiChannel::of(3);
@@ -645,21 +655,25 @@ fn a_selected_presets_first_note_on_renders_that_preset() {
         .iter()
         .find(|p| p.bank() == Some(Bank::Melodic(U7::of(0))) && p.patch() == Some(U7::of(40)))
         .expect("TimGM6mb has the violin at 0:40");
+    let blocks = 44_100 / support::BLOCK;
+    let piano = first_note(
+        SoundFontUnit::new(font.clone(), Settings::new()).expect("builds"),
+        blocks,
+    );
     let mut unit = SoundFontUnit::new(font.clone(), Settings::new()).expect("builds");
     unit.select(CHANNEL, violin)
         .expect("the violin is playable");
+    let out = first_note(unit, blocks);
 
-    let mut hand = Hand::new(unit);
-    hand.note_on(
-        CHANNEL,
-        NoteNumber::of(60),
-        NoteVelocity::new(widen_velocity(U7::of(100)).get()),
+    for (what, render) in [("the violin", &out), ("the piano", &piano)] {
+        let level = window_rms(render, 1);
+        assert!(level > 1e-3, "{what} sounds: rms {level}");
+    }
+    let held = window_rms(&out, 8) / window_rms(&out, 1);
+    let decayed = window_rms(&piano, 8) / window_rms(&piano, 1);
+    assert!(held > 0.7, "the selected preset does not sustain: {held}");
+    assert!(
+        decayed < 0.5,
+        "the default preset does not decay: {decayed}"
     );
-    let out = render_process_blocks(&mut hand, support::BLOCK, 2048 / support::BLOCK, &[]);
-    assert!(rms(&out) > 1e-3, "the note sounds: rms {}", rms(&out));
-
-    let got = digest(&out);
-    // The voice calls `sin`, `exp` and `pow`, so the digest is libm's. It pins the
-    // unit's dry pair (outputs 0 and 1) alone: the effects are not in the unit.
-    assert_golden("the soundfont voice", got, 0x5c2f_0b4b_6293_6239);
 }

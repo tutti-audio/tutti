@@ -9,10 +9,10 @@
 use tutti_ump::{
     BlockFilter, BlockSelect, DeviceIdentity, Direction as BlockDirection, DiscoveryFilter,
     FirstGroup, FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, Midi1Port, Protocol,
-    Stream, StreamConfig, U7, UiHint, Ump, UmpVersion,
+    Stream, StreamConfig, U7, UiHint, Ump, UmpVersion, text_packets,
 };
 
-use crate::name::{BlockName, EndpointName, ProductInstanceId, packets};
+use crate::name::{BlockName, EndpointName, ProductInstanceId};
 
 /// How many Function Blocks an Endpoint holds (M2-104 §7.1.7: numbers `0..=31`).
 pub const MAX_FUNCTION_BLOCKS: usize = 32;
@@ -559,7 +559,9 @@ impl Endpoint {
     /// - Endpoint Discovery (§7.1.1): one reply for each filter bit set, in
     ///   the order Endpoint Info, Device Identity, Endpoint Name, Product
     ///   Instance Id, Stream Configuration Notification. A reply for a part
-    ///   the Endpoint does not have (no identity, no name) is left out.
+    ///   the Endpoint does not have (no identity, no name) is left out. A name
+    ///   that is empty is answered with one Complete message of zeros: each
+    ///   Filter bit set is owed a reply (M2-104 section 7.1.1).
     /// - Function Block Discovery (§7.1.7): Function Block Info (§7.1.8) for
     ///   the block asked for, or for every known block for `0xFF`, then, if
     ///   asked, each Function Block Name (§7.1.9). A number above 31, or of a
@@ -628,14 +630,14 @@ impl Endpoint {
             send(out, Stream::DeviceIdentity(identity));
         }
         if let (true, Some(name)) = (filter.endpoint_name, &self.name) {
-            packets::<14>(name.as_bytes(), |form, b| {
+            for (form, b) in text_packets::<14>(name.as_bytes()) {
                 send(out, Stream::EndpointName(form, b));
-            });
+            }
         }
         if let (true, Some(id)) = (filter.product_instance_id, &self.instance_id) {
-            packets::<14>(id.as_str().as_bytes(), |form, b| {
+            for (form, b) in text_packets::<14>(id.as_str().as_bytes()) {
                 send(out, Stream::ProductInstanceId(form, b));
-            });
+            }
         }
         if filter.stream_configuration {
             send(out, Stream::StreamConfigurationNotification(self.active));
@@ -667,7 +669,7 @@ impl Endpoint {
         if filter.name {
             for block in asked.iter().flatten() {
                 if let Some(name) = &block.name {
-                    packets::<13>(name.as_bytes(), |form, bytes| {
+                    for (form, bytes) in text_packets::<13>(name.as_bytes()) {
                         send(
                             out,
                             Stream::FunctionBlockName {
@@ -676,7 +678,7 @@ impl Endpoint {
                                 bytes,
                             },
                         );
-                    });
+                    }
                 }
             }
         }

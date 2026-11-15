@@ -21,7 +21,7 @@ use std::time::Instant;
 use tutti_ump::{MidiChannel, NoteNumber, U7};
 
 use tutti_graph::NodeKey;
-use tutti_graph::{CrossfadeCurve, Cx, Event, ForkByClone, Io, Node, Prepare, Shape, Status};
+use tutti_graph::{Cx, Event, FadeLaw, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_modulation::{
     Adsr, CompileError, Curve, Declarations, Follower, Lfo, NoteEnvelope, RouteDecl, RouteKey,
     RouteTarget, Source, SourceKey, TargetKey,
@@ -45,8 +45,8 @@ const RATE: f64 = 48_000.0;
 const TEMPO: Bpm = Bpm::of(120.0);
 /// A lane's control step (`tutti_modulation::CONTROL_GRID`).
 const STEP: usize = 32;
-/// A port's connect crossfade (`PARAM_DECLICK`).
-const DECLICK: usize = 256;
+/// A port's connect crossfade: `DECLICK` at 48 kHz.
+const DECLICK: usize = 240;
 
 /// A detached session of `outputs` channels at 48 kHz, its audio side taken:
 /// the executor on this side, played in device-sized blocks.
@@ -723,7 +723,7 @@ fn a_node_crossfaded_to_another_param_list_keeps_modulating() {
             probe,
             ProbeUnit::new(400.0).with_extra(UnitParam::Q),
             Seconds(0.005),
-            CrossfadeCurve::EqualAmplitude,
+            FadeLaw::EqualAmplitude,
         )
         .expect("the crossfade starts");
     // The update that commits the new node re-applies after its commit: the

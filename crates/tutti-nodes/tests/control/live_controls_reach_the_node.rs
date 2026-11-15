@@ -24,7 +24,7 @@
 //! the one that renders, and a test that reads a control back proves only
 //! that the write happened somewhere.
 
-use tutti_graph::{CrossfadeCurve, Fade, IntoNode, NodeMode, Prepare, Solo};
+use tutti_graph::{Fade, FadeLaw, IntoNode, NodeMode, Prepare, Solo};
 use tutti_nodes::{EqBandNode, SvfType};
 use tutti_types::MaxBlock;
 use tutti_types::UnitParam;
@@ -109,11 +109,7 @@ fn a_by_value_change_reaches_the_audio_by_replacing_the_node() {
     let key = s.key();
     let editor = s.renderer_mut().editor_mut();
     editor
-        .replace(
-            key,
-            high_pass,
-            Fade::new(Samples(1), CrossfadeCurve::default()),
-        )
+        .replace(key, high_pass, Fade::new(Samples(1), FadeLaw::default()))
         .expect("same shape");
     editor.commit().expect("commits");
     let replaced = energy(&mut s);

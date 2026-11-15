@@ -67,13 +67,13 @@ pub struct Sink {
 /// Opens a raw tap of [`SINK_CAPACITY`] on each `(node, port)` of `sources`,
 /// ids `first_id` upward, and returns their readers as one sink. Every source
 /// node is in `ed` already; commit after.
-pub fn sink(ed: &mut Editor, first_id: u32, sources: &[(u64, u16)]) -> Sink {
+pub fn sink(ed: &mut Editor, first_id: u64, sources: &[(u64, u16)]) -> Sink {
     let taps = sources
         .iter()
         .zip(first_id..)
         .map(|(&(node, port), id)| {
             ed.open_event_tap(
-                EventTapId(id),
+                EventTapId::of(id),
                 EventOut {
                     node: NodeKey(node),
                     port,

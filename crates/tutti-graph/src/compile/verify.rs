@@ -1789,7 +1789,8 @@ mod tests {
     /// units whose shapes agree in all but the tail.
     #[test]
     fn fades_are_checked_against_both_plans() {
-        use crate::fade::{CrossfadeCurve, Fade};
+        use crate::fade::Fade;
+        use tutti_curve::FadeLaw;
         let (a, b) = (NodeKey(1), NodeKey(2));
         let generator = || Shape::source_unassigned(ChannelLayout::MONO);
         let build = |shape_a: Shape, gen_a: u32, prev: Option<&Plan>| {
@@ -1814,7 +1815,7 @@ mod tests {
             compile(&spec.validate().expect("valid"), &shapes, &prepare, prev).expect("compiles")
         };
         let (base, _) = build(generator(), 0, None);
-        let fade = Fade::new(tutti_types::Samples(32), CrossfadeCurve::EqualPower);
+        let fade = Fade::new(tutti_types::Samples(32), FadeLaw::EqualPower);
         let check = |shape_a: Shape, fades: Vec<(NodeKey, Fade)>| {
             let (plan, mut delta) = build(shape_a, 1, Some(&base));
             delta.fades = fades;

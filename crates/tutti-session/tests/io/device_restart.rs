@@ -10,7 +10,7 @@
 
 use tutti_cpal::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::NodeKey;
-use tutti_graph::{CrossfadeCurve, ForkByClone};
+use tutti_graph::{FadeLaw, ForkByClone};
 use tutti_nodes::testing::{Osc, Through};
 use tutti_nodes::{LimiterControls, LimiterNode};
 use tutti_session::{Crossfade, Error, InPort, OutPort, Root, Session};
@@ -356,7 +356,7 @@ fn a_crossfade_after_the_restart_lands_at_once() {
             osc,
             ForkByClone(Osc::sine(Hz(2_000.0))),
             Seconds(0.005),
-            CrossfadeCurve::EqualAmplitude,
+            FadeLaw::EqualAmplitude,
         )
         .expect("the crossfade is accepted");
     assert!(

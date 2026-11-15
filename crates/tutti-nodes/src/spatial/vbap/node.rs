@@ -173,7 +173,7 @@ impl VbapPannerNode {
     /// Returns [`VbapError::NoBed`] for a
     /// topology that is not one of those five beds.
     pub fn for_topology(topology: &ChannelTopology) -> Result<Self> {
-        let layout = topology.layout();
+        let layout = topology.width();
         let speakers = match layout.count() {
             2 => SpeakerLayout::stereo(),
             4 => SpeakerLayout::quad(),
@@ -276,8 +276,10 @@ impl VbapPannerNode {
 /// Allocates, so it runs at construction only.
 fn speaker_of_channel(topology: &ChannelTopology) -> Vec<Option<usize>> {
     let mut next = 0;
+    // The bed's topology is speakers.
     topology
         .positions()
+        .unwrap_or_default()
         .iter()
         .map(|position| {
             (!position.is_lfe()).then(|| {

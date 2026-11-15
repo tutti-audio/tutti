@@ -4,7 +4,7 @@
 //!
 //! Every figure is analytic: the steady states are the input (delayed by the
 //! declared latency) or silence, bit for bit, and a fade is the formula the
-//! doc gives written out here with `CrossfadeCurve::EqualAmplitude`'s gains.
+//! doc gives written out here with `FadeLaw::EqualAmplitude`'s gains.
 //! A render is compared with another only as the doc prescribes: the
 //! executor against the reference interpreter (`Pair`, on every block of every
 //! test that uses it), serial against parallel.
@@ -24,8 +24,8 @@ use std::sync::{Arc, Mutex};
 use common::{Kind, Pair, Ringer, SpecBehaviour, TestNode, bits, prepare};
 use tutti_buffers::{Float, FoldError};
 use tutti_graph::{
-    Bus, BusRole, Buses, CrossfadeCurve, Cx, Edge, Editor, Event, EventEdge, EventIn, EventKind,
-    EventOut, Executor, ForkByClone, ForkMode, ForkTarget, GraphInvalid, GraphSpec, InPort, Io,
+    Bus, BusRole, Buses, Cx, Edge, Editor, Event, EventEdge, EventIn, EventKind, EventOut,
+    Executor, FadeLaw, ForkByClone, ForkMode, ForkTarget, GraphInvalid, GraphSpec, InPort, Io,
     ModeError, Node, NodeKey, NodeMode, Offset, OutPort, PassError, Prepare, Shape, Source, Status,
     Topology, TransportPosition, Unforkable, ValidGraph,
 };
@@ -35,8 +35,8 @@ use tutti_ump::Ump;
 const BLOCK: usize = 64;
 /// The most a block here is: what every `Pair` is prepared for.
 const MAX_BLOCK: usize = 128;
-/// `MODE_DECLICK`.
-const FADE: usize = 256;
+/// `DECLICK` at the rig's 48 kHz.
+const FADE: usize = 240;
 
 fn key(n: u64) -> NodeKey {
     NodeKey(n)
@@ -62,7 +62,8 @@ fn direct(node: u64) -> Edge {
 
 /// `(g_in, g_out)` of frame `k` of a mode fade: the one function the doc names.
 fn gains(k: usize) -> (f32, f32) {
-    CrossfadeCurve::EqualAmplitude.gains(k, FADE)
+    let (out, inn) = FadeLaw::EqualAmplitude.gains(k, FADE);
+    (inn, out)
 }
 
 /// A `Pair` over `kinds` (keys `1..`), wired by `wire`, with `modes` set
@@ -387,7 +388,7 @@ fn main_bus(topology: ChannelTopology) -> Bus {
 }
 
 fn smpte(n: u16) -> Bus {
-    main_bus(ChannelTopology::smpte(ChannelLayout::from_count(n)).expect("an SMPTE width"))
+    main_bus(ChannelTopology::assumed(ChannelLayout::from_count(n)))
 }
 
 fn unassigned(n: u16) -> Bus {
@@ -563,7 +564,7 @@ fn a_muted_node_is_positive_zero() {
 // The declick
 // ---------------------------------------------------------------------------
 
-/// **The 256-frame fade follows `CrossfadeCurve::EqualAmplitude`'s gains
+/// **The `DECLICK` fade follows `FadeLaw::EqualAmplitude`'s gains
 /// exactly**, in both directions and into and out of mute. The node is an
 /// in-place gain of 3 on a constant input of 1, so `y = 3`, `x = 1`:
 ///
@@ -746,7 +747,7 @@ fn a_bypassed_output_carries_its_inputs_flags() {
 /// **Un-bypass is reset, warm up for `L`, fade in**: leaving Bypassed, the
 /// aligned input (the input delayed by `L`, the line having been fed all the
 /// while) stays audible for `L` frames with the node's output discarded, and
-/// then the 256-frame fade runs from the aligned input to the output:
+/// then the `DECLICK` fade runs from the aligned input to the output:
 /// `y * g_in + x̂ * g_out`. The node is a gain of 2 declaring 100 frames it
 /// does not realise, so `y` is `2x` now and `x̂` is `x` of 100 frames ago.
 #[test]
@@ -807,6 +808,8 @@ struct Probe {
     /// Answers `Status::Idle` ("park me until input") when it was sent no
     /// event: the node the silence skip trusts.
     idle: bool,
+    /// Declares `Shape::with_own_bypass`.
+    own_bypass: bool,
     events_in: u16,
     state: f32,
     calls: Arc<AtomicUsize>,
@@ -826,6 +829,7 @@ impl Probe {
             gain,
             integrate: false,
             idle: false,
+            own_bypass: false,
             events_in: 0,
             state: 0.0,
             calls: Arc::new(AtomicUsize::new(0)),
@@ -847,13 +851,18 @@ impl Probe {
 impl Node for Probe {
     fn shape(&self) -> Shape {
         let ch = |n| ChannelLayout::try_from(n).expect("a width");
-        Shape::buses(
+        let shape = Shape::buses(
             tutti_graph::Buses::unassigned(ch(self.ins)),
             tutti_graph::Buses::unassigned(ch(self.outs)),
         )
         .with_latency(Latency::new(Samples(self.latency)))
         .with_events(self.events_in, 0)
-        .with_tail(Tail::Unbounded)
+        .with_tail(Tail::Unbounded);
+        if self.own_bypass {
+            shape.with_own_bypass()
+        } else {
+            shape
+        }
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -1476,4 +1485,91 @@ fn a_valid_graph_carries_its_modes() {
     spec.set_mode(key(1), NodeMode::Bypassed);
     let v: ValidGraph = spec.validate().expect("valid");
     assert_eq!(v.modes().get(&key(1)), Some(&NodeMode::Bypassed));
+}
+
+/// **A node that declares its own bypass is still called when bypassed**, and
+/// the executor applies no crossfade: its output is its own `process`'s, bit
+/// for bit, from the first block of the mode on, through the mode and back
+/// out of it, and it is never reset (the executor's un-bypass reset is for a
+/// node it parked). Its latency stays declared, so the output is not aligned
+/// to anything the executor built.
+#[test]
+fn an_own_bypass_node_runs_its_process_with_no_crossfade() {
+    let mut p = Probe::new(3.0);
+    p.own_bypass = true;
+    p.latency = 40;
+    let mut s = probe_chain(p.clone(), None);
+    let half = |_: u64| 0.5f32;
+    s.run(4, BLOCK, &half);
+    s.mode(1, NodeMode::Bypassed);
+    let bypassed = s.run(12, BLOCK, &half);
+    assert_eq!(p.calls(), 16, "called every block, bypassed or not");
+    assert!(
+        bypassed.iter().all(|v| v.to_bits() == 1.5f32.to_bits()),
+        "its own output at every frame: no blend with the input, no fade"
+    );
+    s.mode(1, NodeMode::Active);
+    let back = s.run(8, BLOCK, &half);
+    assert!(back.iter().all(|v| v.to_bits() == 1.5f32.to_bits()));
+    assert_eq!(p.resets(), 0, "the executor parked and reset nothing");
+}
+
+/// **A node with no pass can be set `Bypassed` when it bypasses itself**
+/// (the executor never needs to guess where its input goes), and is still
+/// refused `Mix`, which is the executor's blend.
+#[test]
+fn an_own_bypass_node_needs_no_pass() {
+    let (mut ed, _exec) = Editor::new(prepare(MAX_BLOCK));
+    let mut wide = Probe::new(1.0);
+    wide.ins = 6;
+    wide.outs = 2;
+    let mut own = wide.clone();
+    own.own_bypass = true;
+    ed.insert(key(1), "plain", Unforkable(wide));
+    ed.insert(key(2), "own", Unforkable(own));
+    assert!(matches!(
+        ed.set_mode(key(1), NodeMode::Bypassed),
+        Err(ModeError::Unplaced { .. })
+    ));
+    assert_eq!(ed.set_mode(key(2), NodeMode::Bypassed), Ok(()));
+    assert_eq!(ed.mode(key(2)), NodeMode::Bypassed);
+}
+
+/// **`Muted` stays the executor's for a node with its own bypass**: no format
+/// has a mute, so the node is called and its output fades to silence.
+#[test]
+fn an_own_bypass_node_is_muted_by_the_executor() {
+    let mut p = Probe::new(3.0);
+    p.own_bypass = true;
+    let mut s = probe_chain(p.clone(), None);
+    s.mode(1, NodeMode::Muted);
+    let muted = s.run(8, BLOCK, &|_| 0.5);
+    for (k, &v) in muted.iter().enumerate().take(FADE) {
+        let (_, g_out) = gains(k);
+        assert_eq!(v.to_bits(), (1.5 * g_out).to_bits(), "fade frame {k}");
+    }
+    assert!(muted[FADE..].iter().all(|v| v.to_bits() == 0));
+}
+
+/// **A plain node is bypassed by the executor as before**: the output is the
+/// blend of its own and the input over the declick, from the first frame, and
+/// the node is parked once the fade is done.
+#[test]
+fn a_plain_node_is_still_blended_and_parked_when_bypassed() {
+    let p = Probe::new(3.0);
+    let mut s = probe_chain(p.clone(), None);
+    let half = |_: u64| 0.5f32;
+    s.run(4, BLOCK, &half);
+    s.mode(1, NodeMode::Bypassed);
+    let out = s.run(8, BLOCK, &half);
+    for (k, &v) in out.iter().enumerate().take(FADE) {
+        let (g_in, g_out) = gains(k);
+        assert_eq!(
+            v.to_bits(),
+            (1.5 * g_out + 0.5 * g_in).to_bits(),
+            "fade frame {k}"
+        );
+    }
+    assert!(out[FADE..].iter().all(|v| v.to_bits() == 0.5f32.to_bits()));
+    assert_eq!(p.calls(), 8, "called through the fade, then parked");
 }

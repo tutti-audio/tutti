@@ -84,7 +84,10 @@ fn declared_buses_sit_in_port_order() {
         [Some(0), Some(6), Some(7), None]
     );
     assert_eq!(buses.get(1).unwrap().role, BusRole::Sidechain);
-    assert_eq!(buses.get(0).unwrap().topology.positions()[3], LowFrequency);
+    assert_eq!(
+        buses.get(0).unwrap().topology.positions().unwrap()[3],
+        LowFrequency
+    );
 
     let shape = Shape::buses(buses, Buses::unassigned(width(2)));
     assert_eq!(*shape.buses_in(), buses);

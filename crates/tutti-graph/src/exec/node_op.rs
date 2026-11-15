@@ -236,15 +236,15 @@ pub(super) fn fading_node_op<A: AudioSlots, F: SlotFlags + ?Sized, E: EventSlots
         },
     );
 
-    // The blend: `incoming * g_in + outgoing * g_out` while the fade lasts,
-    // the incoming unit alone after it (`CrossfadeCurve::gains`).
+    // The blend: `outgoing * g_out + incoming * g_in` while the fade lasts,
+    // the incoming unit alone after it (`FadeLaw::gains`).
     let x = u.fade.as_mut().expect("still fading");
     let n = (x.len - x.done).min(frames);
     for (c, &s) in (0u32..).zip(aout) {
         let y = st.arena.slot_mut(s, frames);
         let out = x.scratch.slot(c, frames);
         for (i, (y, &o)) in y[..n].iter_mut().zip(&out[..n]).enumerate() {
-            let (g_in, g_out) = x.curve.gains(x.done + i, x.len);
+            let (g_out, g_in) = x.law.gains(x.done + i, x.len);
             *y = *y * g_in + o * g_out;
         }
         st.flags.set(s, 0);

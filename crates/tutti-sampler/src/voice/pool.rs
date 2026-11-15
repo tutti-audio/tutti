@@ -5,9 +5,10 @@
 //! summing unit: adding or removing a voice then costs a queued command instead
 //! of a graph edit, which is what keeps voice churn off the commit path.
 
+use crate::nonempty;
 use crate::streamer::StreamId;
 use crate::stretch;
-use crate::{MAX_SAMPLER_CHANNELS, nonempty};
+use tutti_types::MAX_CHANNELS;
 
 use super::clock::{BlockClock, Clock};
 use super::command::{
@@ -23,8 +24,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_codec::Wave;
 use tutti_graph::{
-    Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare, Shape,
-    Status,
+    Cx, ForkCause, ForkMode, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare,
+    RenderMode, Shape, Status,
 };
 use tutti_transport::TempoReader;
 use tutti_types::{ChannelLayout, SampleRate, Tail};
@@ -216,10 +217,10 @@ impl Voice {
 }
 
 /// A [`VoicePool`] asked for more channels than the sampler reads
-/// ([`MAX_SAMPLER_CHANNELS`]).
+/// ([`MAX_CHANNELS`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error(
-    "a voice pool {} channels wide: the sampler reads at most {MAX_SAMPLER_CHANNELS}",
+    "a voice pool {} channels wide: the sampler reads at most {MAX_CHANNELS}",
     channels.count()
 )]
 pub struct PoolTooWide {
@@ -294,6 +295,9 @@ pub struct VoicePool {
     /// `prepare` and forwarded to each of them, so a device-rate change
     /// cannot leave a filter tuned to the old one.
     pub(crate) sample_rate: SampleRate,
+    /// The render mode the pool was last prepared in, given to every source
+    /// (a fork's file read waits only when it is offline).
+    render_mode: RenderMode,
     /// The rate, shared with the handle, so a filter the handle builds for a
     /// command is built at the rate the pool runs at.
     pub(crate) rate: SharedRate,
@@ -364,6 +368,7 @@ impl VoicePool {
             voices: Vec::with_capacity(MAX_RESIDENT_VOICES),
             rx: bounded(0).1,
             sample_rate,
+            render_mode: RenderMode::Realtime,
             rate: SharedRate::new(sample_rate),
             channels,
             clock: Clock::new(),
@@ -416,12 +421,12 @@ impl VoicePool {
     ///
     /// # Errors
     ///
-    /// [`PoolTooWide`] past [`MAX_SAMPLER_CHANNELS`]: the pool's read stacks
+    /// [`PoolTooWide`] past [`MAX_CHANNELS`]: the pool's read stacks
     /// and lanes are that wide, so a wider pool would declare outputs it never
     /// writes (a caller reading them sees whatever the buffer held).
     pub fn with_channels(channels: impl Into<ChannelLayout>) -> Result<Self, PoolTooWide> {
         let channels = channels.into();
-        if channels.count() as usize > MAX_SAMPLER_CHANNELS {
+        if channels.count() as usize > MAX_CHANNELS {
             return Err(PoolTooWide { channels });
         }
         Ok(Self::from_parts(channels))
@@ -674,7 +679,9 @@ impl VoicePool {
         // The source runs at the pool's rate (the memory tier's conversion,
         // the disk tier's step), as `prepare` sets every resident slot's.
         // Allocation-free: a rate and a ratio.
-        slot.voice.source.prepare_rate(self.sample_rate);
+        slot.voice
+            .source
+            .set_render(self.sample_rate, self.render_mode);
         self.voices.push(slot);
 
         // Realise the remaining intent through the same appliers the update
@@ -853,6 +860,7 @@ impl Clone for VoicePool {
             },
             rx: bounded(0).1,
             sample_rate: self.sample_rate,
+            render_mode: self.render_mode,
             rate: SharedRate::new(self.sample_rate),
             clock: Clock::new(),
             tempo: self.tempo.clone(),
@@ -888,11 +896,12 @@ impl Node for VoicePool {
     fn prepare(&mut self, p: &Prepare) {
         let sample_rate = p.sample_rate();
         self.sample_rate = sample_rate;
+        self.render_mode = p.render_mode();
         self.rate.store(sample_rate);
         self.scratch
             .resize(p.max_block().get(), self.channels.count() as usize);
         for slot in &mut self.voices {
-            slot.voice.source.prepare_rate(sample_rate);
+            slot.voice.source.set_render(sample_rate, self.render_mode);
             slot.sample_rate = sample_rate;
             if let Some(unit) = &mut slot.stretch {
                 unit.set_sample_rate(sample_rate);
@@ -915,9 +924,8 @@ impl Node for VoicePool {
         // Stride derived once per block, above the loops.
         let n = (self.channels.count() as usize)
             .min(outs.len())
-            .min(MAX_SAMPLER_CHANNELS);
-        let mut refs: [&mut [f32]; MAX_SAMPLER_CHANNELS] =
-            std::array::from_fn(|_| Default::default());
+            .min(MAX_CHANNELS);
+        let mut refs: [&mut [f32]; MAX_CHANNELS] = std::array::from_fn(|_| Default::default());
         for (slot, ch) in refs.iter_mut().zip(outs.iter_mut()) {
             *slot = ch;
         }

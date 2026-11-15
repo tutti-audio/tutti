@@ -8,9 +8,8 @@ use std::time::Instant;
 use tutti_ump::DeviceIdentity;
 
 use super::super::body::BodyLimit;
-use super::super::chunk::ranged;
 use super::super::header::PeEncoding;
-use super::super::limits::{MediaType, NotInRange, NotValid, PropertyName, ResourceId, text_type};
+use super::super::limits::{MediaType, NotValid, PropertyName, ResourceId, text_type};
 use super::super::tree::{PeJson, PeObject};
 use super::super::value::PeExtra;
 use super::client::{CallError, CallId, ResourceInitiator};
@@ -23,16 +22,24 @@ use super::kind::PeResource;
 use super::request::{RequestRefused, ResourceGet, ResourceSet, ResourceTarget};
 use super::store::{ResourceStore, StoreError};
 
-ranged! {
+tutti_types::ranged! {
     /// A time as Unix seconds: seconds since 1 January 1970 UTC, leap seconds not
     /// counted, as the `timestamp` of a state is (M2-111 §2.3, Table 4). The
     /// largest value is the largest JSON integer the crate reads.
-    UnixSeconds(u64), "u64", 0, 0x7FFF_FFFF_FFFF_FFFF, "time in Unix seconds"
+    #[derive(Eq, Hash, PartialOrd, Ord)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u64", into = "u64"))]
+    UnixSeconds(u64), NotUnixSeconds, "a time in Unix seconds (below 2^63)",
+    |raw| raw <= 0x7FFF_FFFF_FFFF_FFFF
 }
 
-ranged! {
+tutti_types::ranged! {
     /// The size of a state in bytes, the `size` of a StateList entry (M2-111 §2.3).
-    StateSize(u64), "u64", 0, 0x7FFF_FFFF_FFFF_FFFF, "state size"
+    #[derive(Eq, Hash, PartialOrd, Ord)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u64", into = "u64"))]
+    StateSize(u64), NotAStateSize, "a state size (below 2^63)",
+    |raw| raw <= 0x7FFF_FFFF_FFFF_FFFF
 }
 
 text_type! {

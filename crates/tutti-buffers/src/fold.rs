@@ -40,14 +40,11 @@ pub enum FoldError {
         /// Its channel index.
         channel: usize,
     },
-    /// A speaker appears twice, so which channel feeds it is ambiguous.
-    #[error("{end:?} feeds {speaker:?} from two channels")]
-    Duplicate {
-        /// Which topology holds it.
-        end: FoldEnd,
-        /// The repeated speaker.
-        speaker: Speaker,
-    },
+    /// An ambisonic set meets anything but itself. Speakers to ambisonic and
+    /// back need an encoder or decoder node, and a conversion between ambisonic
+    /// formats is not a fold yet.
+    #[error("an ambisonic set folds only into itself")]
+    Ambisonic,
     /// An unassigned side meets another at a different width. The only rule is a
     /// one to one relabelling of equal widths; by index is
     /// [`Fold::by_index`], asked for by name.
@@ -293,12 +290,13 @@ impl<F: Float> Row<F> {
 ///   width it is [`FoldError::Unassigned`], since a channel that names no
 ///   speaker says nothing about where it goes. A caller that wants channels by
 ///   index says so: [`Fold::by_index`] widens and zero-fills, [`Fold::select`]
-///   chooses. B-format is not speaker feeds and has no [`Speaker`]: a signal
-///   that has it is declared unassigned, never quad.
+///   chooses.
+/// - **Ambisonic** sets are not speaker feeds: one folds only into an equal
+///   set (an identity) and is otherwise [`FoldError::Ambisonic`].
 /// - **Not silent.** A source channel the destination has no place for is
 ///   [`FoldError::Unplaced`]; an [`Unknown`](Speaker::Unknown) speaker is
 ///   [`FoldError::Unnamed`] (unless the two topologies are identical, which is
-///   an identity), and a speaker listed twice is [`FoldError::Duplicate`].
+///   an identity).
 ///
 /// The matrix is **not normalised**: full scale on every 5.1 channel gives
 /// `1 + 2·`[`MINUS_3_DB`](Float::MINUS_3_DB)` = 2.414` per side. Headroom is
@@ -306,8 +304,7 @@ impl<F: Float> Row<F> {
 ///
 /// # Summing order
 ///
-/// For the topologies [`ChannelTopology::smpte`] (and
-/// [`quad`](ChannelTopology::quad)) gives, a fold to one or two channels sums
+/// For the topologies [`Bed::topology`](tutti_types::Bed::topology) gives, a fold to one or two channels sums
 /// in a fixed order: the direct channel, then each folded channel in source
 /// order, `acc + gain·x`. With overhead speakers in the source (7.1.4) the
 /// −3 dB channels of a side are summed first and then scaled once; summing then
@@ -319,10 +316,10 @@ impl<F: Float> Row<F> {
 ///
 /// ```
 /// use tutti_buffers::{Float, Fold};
-/// use tutti_types::{ChannelLayout, ChannelTopology};
+/// use tutti_types::Bed;
 ///
-/// let five_one = ChannelTopology::smpte(ChannelLayout::from(6u16)).unwrap();
-/// let stereo = ChannelTopology::smpte(ChannelLayout::STEREO).unwrap();
+/// let five_one = Bed::Surround51.topology();
+/// let stereo = Bed::Stereo.topology();
 /// let fold: Fold = Fold::between(&five_one, &stereo).unwrap();
 ///
 /// // Only the centre active: both sides get it at −3 dB.
@@ -502,13 +499,6 @@ fn expr<F: Float>(src: &[Speaker], hits: &[Hit<F>], j: usize) -> Expr<F> {
     }
 }
 
-fn first_duplicate(of: &[Speaker]) -> Option<Speaker> {
-    of.iter()
-        .enumerate()
-        .find(|&(i, sp)| !sp.is_unassigned() && of[..i].contains(sp))
-        .map(|(_, &sp)| sp)
-}
-
 impl<F: Float> Fold<F> {
     /// Builds the fold from `src` into `dst`.
     ///
@@ -518,7 +508,9 @@ impl<F: Float> Fold<F> {
     ///
     /// [`FoldError`] when a channel cannot be placed, never a silent drop.
     pub fn between(src: &ChannelTopology, dst: &ChannelTopology) -> Result<Self, FoldError> {
-        let (s, d) = (src.positions(), dst.positions());
+        let (Some(s), Some(d)) = (src.positions(), dst.positions()) else {
+            return Self::between_ambisonic(src, dst);
+        };
         if s.is_empty() || d.is_empty() {
             return Err(BufferError::ZeroWidth.into());
         }
@@ -533,9 +525,6 @@ impl<F: Float> Fold<F> {
                 if let Some(channel) = side.iter().position(|p| matches!(p, Speaker::Unknown(_))) {
                     return Err(FoldError::Unnamed { end, channel });
                 }
-                if let Some(speaker) = first_duplicate(side) {
-                    return Err(FoldError::Duplicate { end, speaker });
-                }
             }
             if let [_] = d {
                 Self::mono(s)?
@@ -546,6 +535,18 @@ impl<F: Float> Fold<F> {
         Ok(Self {
             src: narrow(s.len()),
             rows,
+        })
+    }
+
+    /// An ambisonic set folds only into an equal one, as an identity.
+    fn between_ambisonic(src: &ChannelTopology, dst: &ChannelTopology) -> Result<Self, FoldError> {
+        if src != dst {
+            return Err(FoldError::Ambisonic);
+        }
+        let width = src.width().count();
+        Ok(Self {
+            src: width,
+            rows: (0..width).map(|i| Row::One(Expr::Copy(i))).collect(),
         })
     }
 
@@ -631,14 +632,14 @@ impl<F: Float> Fold<F> {
         src: &ChannelTopology,
         dst: &ChannelTopology,
     ) -> Result<Box<[Row<F>]>, FoldError> {
-        if src.layout() != dst.layout() {
+        if src.width() != dst.width() {
             return Err(FoldError::Unassigned {
-                src: src.layout(),
-                dst: dst.layout(),
+                src: src.width(),
+                dst: dst.width(),
             });
         }
-        Ok((0..src.positions().len())
-            .map(|i| Row::One(Expr::Copy(narrow(i))))
+        Ok((0..src.width().count())
+            .map(|i| Row::One(Expr::Copy(i)))
             .collect())
     }
 
@@ -866,10 +867,10 @@ impl<F: Float> Fold<F> {
     ///
     /// ```
     /// use tutti_buffers::{Float, Fold};
-    /// use tutti_types::{ChannelLayout, ChannelTopology};
+    /// use tutti_types::Bed;
     ///
-    /// let five_one = ChannelTopology::smpte(ChannelLayout::from(6u16)).unwrap();
-    /// let stereo = ChannelTopology::smpte(ChannelLayout::STEREO).unwrap();
+    /// let five_one = Bed::Surround51.topology();
+    /// let stereo = Bed::Stereo.topology();
     /// let fold: Fold = Fold::between(&five_one, &stereo).unwrap();
     /// // Left: the front left, the centre at -3 dB, the left surround at -3 dB;
     /// // the LFE (channel 3) is dropped.

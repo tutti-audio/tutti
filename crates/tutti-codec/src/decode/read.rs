@@ -1,8 +1,8 @@
 //! Decoding a file into a [`Wave`], and reading its header without decoding.
 //!
 //! The entry points are [`Wave::read`], [`Wave::read_metadata`] and
-//! [`Wave::from_bytes`]. Decoded samples are pinned bit-for-bit by
-//! `tests/decode_golden.rs` against committed fixtures.
+//! [`Wave::from_bytes`]. Decoded samples are held to the
+//! generator of the committed fixtures by `tests/decode_fixtures.rs`.
 
 use std::fs::File;
 use std::path::Path;
@@ -22,10 +22,10 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::packet::Packet;
 
 use super::error::convert;
-use super::placement::{topology_of, unstated};
+use super::placement::topology_of;
 use crate::DecodeError;
 use crate::Wave;
-use tutti_types::ChannelTopology;
+use tutti_types::{ChannelTopology, Placement};
 
 /// Container metadata read from an audio file without decoding any audio.
 ///
@@ -45,16 +45,20 @@ pub struct WaveMetadata {
     /// [`Wave::topology`] and [`FileIn::topology`](crate::FileIn::topology)
     /// give it): a lone channel is the centre, a speaker the vocabulary has no
     /// name for is [`Speaker::Unknown`](tutti_types::Speaker::Unknown), and a
-    /// container that does not say is stereo. A caller deciding whether a file
+    /// container that states a count and no placement is
+    /// [`ChannelTopology::assumed`] ([`placement`](Self::placement)). A caller deciding whether a file
     /// can be placed asks this before it loads or opens the file.
     pub topology: ChannelTopology,
+    /// Whether the container stated [`topology`](Self::topology) or only a
+    /// channel count it was assumed from.
+    pub placement: Placement,
 }
 
 impl WaveMetadata {
     /// The file's channel count: the width of its [`topology`](Self::topology).
     #[must_use]
     pub fn channels(&self) -> usize {
-        self.topology.positions().len()
+        usize::from(self.topology.width().count())
     }
 }
 
@@ -235,10 +239,12 @@ impl Wave {
     pub fn read_metadata(path: impl AsRef<Path>) -> Result<WaveMetadata, DecodeError> {
         let reader = probe_path(path.as_ref()).map_err(convert)?;
         let (track, params) = first_audio_track(&*reader)?;
+        let (topology, placement) = topology_of(params.channels.as_ref());
         Ok(WaveMetadata {
             total_frames: total_frames_of(track, params),
             sample_rate: sample_rate_of(params)?,
-            topology: params.channels.as_ref().map_or_else(unstated, topology_of),
+            topology,
+            placement,
         })
     }
 
@@ -262,11 +268,11 @@ fn decode(mut reader: Box<dyn FormatReader>) -> Result<Wave, DecodeError> {
     let total_frames = total_frames_of(track, params);
     let sample_rate = sample_rate_of(params)?;
     let mut decoder = PacketDecoder::new(params).map_err(convert)?;
-    let topology = params.channels.as_ref().map_or_else(unstated, topology_of);
+    let (topology, placement) = topology_of(params.channels.as_ref());
 
     // Pre-allocate using the metadata frame count when available (WAV, FLAC).
     let mut wave: Option<Wave> = total_frames.map(|total| {
-        let mut wave = Wave::with_topology(topology, sample_rate);
+        let mut wave = Wave::with_placement(topology, placement, sample_rate);
         for ch in 0..wave.channels() {
             wave.channel_vec_mut(ch).reserve_exact(total as usize);
         }
@@ -294,7 +300,8 @@ fn decode(mut reader: Box<dyn FormatReader>) -> Result<Wave, DecodeError> {
             none => {
                 let spec = decoder.spec();
                 let rate = SampleRate::from_hz(spec.rate()).ok_or(DecodeError::NoSampleRate)?;
-                none.insert(Wave::with_topology(topology_of(spec.channels()), rate))
+                let (topology, placement) = topology_of(Some(spec.channels()));
+                none.insert(Wave::with_placement(topology, placement, rate))
             }
         };
 

@@ -52,6 +52,8 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 
+use tutti_ump::first_non_seven_bit;
+
 use crate::universal::{Recipient, SysexDeviceId};
 
 pub use command::{
@@ -110,7 +112,7 @@ impl MmcBytes {
     pub(crate) fn extend(&mut self, bytes: &[u8]) -> Result<(), MmcTooLong> {
         let at = usize::from(self.len);
         let end = at + bytes.len();
-        if end > MMC_MAX_DATA || bytes.iter().any(|b| *b >= 0x80) {
+        if end > MMC_MAX_DATA || first_non_seven_bit(bytes).is_some() {
             return Err(MmcTooLong);
         }
         self.buf[at..end].copy_from_slice(bytes);
@@ -326,7 +328,7 @@ impl MmcFields {
     /// fields`), the bytes between `F0` and `F7`.
     #[must_use]
     pub fn payload(&self, source: SysexDeviceId) -> Vec<u8> {
-        framed(source.get().get(), 0x07, self.as_bytes())
+        framed(source.get(), 0x07, self.as_bytes())
     }
 }
 

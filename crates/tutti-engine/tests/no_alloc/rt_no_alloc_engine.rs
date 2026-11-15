@@ -636,3 +636,90 @@ fn graph_engine_on_a_worker_pool_is_allocation_free() {
     });
     assert!(output.iter().any(|&x| x != 0.0), "the graph rendered");
 }
+
+/// A source of twelve channels, one constant per channel.
+struct TwelveWide;
+
+impl tutti_graph::Node for TwelveWide {
+    fn shape(&self) -> tutti_graph::Shape {
+        tutti_graph::Shape::source_unassigned(ChannelLayout::from(12u16))
+            .with_tail(tutti_types::Tail::Unbounded)
+    }
+    fn prepare(&mut self, _: &tutti_graph::Prepare) {}
+    fn process(
+        &mut self,
+        _: &tutti_graph::Cx<'_>,
+        mut io: tutti_graph::Io<'_>,
+    ) -> tutti_graph::Status {
+        for c in 0..12 {
+            io.output(c).fill((c + 1) as f32 / 16.0);
+        }
+        tutti_graph::Status::Modified
+    }
+    fn reset(&mut self) {}
+}
+
+/// A 7.1.4 root (twelve channels, the widest the cap allows past the old
+/// eight) renders into a twelve-wide device straight and into a stereo one
+/// through its fold without allocating, and the blocks carry the signal.
+#[test]
+fn a_714_root_block_is_allocation_free() {
+    use tutti_graph::{Editor, NodeKey, OutPort, Prepare, Source, Unforkable};
+
+    let transport = Transport::new(SampleRate::of(48_000.0));
+    let (mut ed, exec) = Editor::new(Prepare::new(
+        SampleRate::of(48_000.0),
+        tutti_types::MaxBlock::of(tutti_types::Samples(512)),
+    ));
+    ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
+    ed.spec_mut().topology.set_outputs((0..12).map(|port| {
+        Source::Node(OutPort {
+            node: NodeKey(1),
+            port,
+        })
+    }));
+    ed.commit().expect("commits");
+    let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
+    engine
+        .support_output(ChannelLayout::from(12u16))
+        .expect("a width");
+
+    let mut wide = vec![0.0f32; 512 * 12];
+    let mut stereo = vec![0.0f32; 512 * 2];
+    let layout = ChannelLayout::from(12u16);
+    // The commit applies on the first block, which may allocate.
+    engine.process(&mut InterleavedMut::new(&mut wide, layout).unwrap());
+    assert_no_alloc::assert_no_alloc(|| {
+        for _ in 0..16 {
+            engine.process(&mut InterleavedMut::new(&mut wide, layout).unwrap());
+            engine.process(&mut InterleavedMut::new(&mut stereo, ChannelLayout::STEREO).unwrap());
+        }
+    });
+    // Every channel of the twelve-wide device is its own constant, in every frame.
+    for frame in wide.as_chunks::<12>().0 {
+        for (c, &s) in frame.iter().enumerate() {
+            assert_eq!(s, (c + 1) as f32 / 16.0, "channel {c}");
+        }
+    }
+    // The 7.1.4 root (FL FR FC LFE SL SR BL BR TFL TFR TBL TBR) into stereo by
+    // `Fold`'s documented rule: ITU-R BS.775 for the fronts (straight), the
+    // centre (-3 dB into both) and the surrounds (-3 dB into the front on their
+    // side), the LFE omitted, and tutti's table for the heights (-3 dB into the
+    // front on their side).
+    let v = |c: usize| (c + 1) as f32 / 16.0;
+    let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;
+    let left = v(0) + m * (v(2) + v(4) + v(6) + v(8) + v(10));
+    let right = v(1) + m * (v(2) + v(5) + v(7) + v(9) + v(11));
+    for frame in stereo.as_chunks::<2>().0 {
+        assert!(
+            (frame[0] - left).abs() < 1e-5,
+            "left {} vs {left}",
+            frame[0]
+        );
+        assert!(
+            (frame[1] - right).abs() < 1e-5,
+            "right {} vs {right}",
+            frame[1]
+        );
+    }
+}

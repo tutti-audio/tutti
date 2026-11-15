@@ -18,7 +18,7 @@ use tutti_types::ChannelLayout;
 
 const A: f32 = 0.25;
 const BLOCK: usize = 64;
-/// More than `MODE_DECLICK` (256): a mode set before these blocks has
+/// More than `DECLICK` (240 frames at 48 kHz): a mode set before these blocks has
 /// finished its fade by the last one.
 const SETTLE_BLOCKS: usize = 6;
 

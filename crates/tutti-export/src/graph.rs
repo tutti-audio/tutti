@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tutti_types::SampleRate;
 
 use tutti_graph::GraphTail;
-use tutti_graph::{Editor, Executor, Pool, Prepare};
+use tutti_graph::{Editor, Executor, Pool, Prepare, RenderMode};
 use tutti_types::{ChannelTopology, MaxBlock, Samples};
 
 use crate::{ConfigError, Result};
@@ -18,13 +18,10 @@ use crate::{ConfigError, Result};
 ///
 /// 1024 frames: long enough that the executor's per-block walk is paid rarely
 /// on a long bounce, short enough that a block's planes stay in cache.
-// A multiple of 64, from when the sampler's clip readers rendered 64-frame
-// pieces from each block's start: the golden digests `tests/graph_export/graph_source.rs`
-// pins were recorded with those pieces. The readers now render each block in
-// one piece (scratch sized from `Prepare::max_block`) and re-seat once per
-// block where their step would have put them, and the digests are unchanged
-// (tutti-sampler's `tests/voice/block_length_invariance.rs` pins that a voice's
-// frames do not depend on its blocks).
+// A multiple of 64. The sampler's clip readers render each block in one piece
+// (scratch sized from `Prepare::max_block`), and tutti-sampler's
+// `tests/voice/block_length_invariance.rs` pins that a voice's frames do not
+// depend on its blocks.
 pub const GRAPH_MAX_BLOCK: MaxBlock = MaxBlock::of(Samples(1024));
 
 /// How a [`RenderGraph`] is assembled beyond its pair: the pool the render
@@ -218,9 +215,10 @@ impl RenderGraph {
     }
 
     /// What a graph is prepared at to render at `sample_rate`: that
-    /// rate, and [`GRAPH_MAX_BLOCK`].
+    /// rate, [`GRAPH_MAX_BLOCK`], and [`RenderMode::Offline`], so a node
+    /// that waits for its inputs or spends more per block for quality does.
     pub fn prepare(sample_rate: SampleRate) -> Prepare {
-        Prepare::new(sample_rate, GRAPH_MAX_BLOCK)
+        Prepare::new(sample_rate, GRAPH_MAX_BLOCK).with_render_mode(RenderMode::Offline)
     }
 
     /// The look-ahead latency the graph reports, as a frame count — the

@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use ringbuf::traits::Consumer;
+use tutti_curve::declick_frames;
 use tutti_rt::RtScope;
 
 use super::commit::{Commit, Incoming, Opened, Relined, cut_fades, retire_fade, send_back};
@@ -558,6 +559,7 @@ impl Executor {
                         .unwrap_or_default(),
                     driven,
                     max_block,
+                    declick_frames(plan.prepare.sample_rate()).get(),
                 ),
             })
             .collect();

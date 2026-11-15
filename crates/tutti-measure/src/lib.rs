@@ -154,7 +154,7 @@
 //! editor.insert(NodeKey(1), "tone", Unforkable(Tone));
 //! let out = |port| Source::Node(OutPort { node: NodeKey(1), port });
 //! editor.spec_mut().topology.set_outputs([out(0), out(1)]);
-//! let mut tap = editor.open_tap(TapId(0), vec![out(0), out(1)], TapAlign::ToOutput, Samples(256)).expect("the ports exist");
+//! let mut tap = editor.open_tap(TapId::of(1), vec![out(0), out(1)], TapAlign::ToOutput, Samples(256)).expect("the ports exist");
 //! editor.commit().expect("compiles");
 //! executor.apply_pending();
 //! editor.collect();

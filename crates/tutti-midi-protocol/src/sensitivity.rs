@@ -1,7 +1,7 @@
 //! Per-note pitch-bend sensitivity as the MIDI 2.0 wire value.
 
 use tutti_types::Semitones;
-use tutti_ump::Pitch;
+use tutti_ump::{Pitch, RegisteredData, U7};
 
 /// Per-note pitch bend range as the spec's 7.25 fixed-point semitone value
 /// (M2-104 §7.4.13, RPN #00/07, Sensitivity of Per-Note Pitch Bend): 7 integer
@@ -85,6 +85,40 @@ impl PitchBendSensitivity {
     #[must_use]
     pub const fn from_rpn_bits(bits: u32) -> Self {
         Self(bits)
+    }
+
+    /// The sensitivity a Channel Pitch Bend Sensitivity message (RPN #00/00)
+    /// sets: its MSB is whole semitones and its LSB cents (M2-104 section 7.4.7.1,
+    /// M2-115 section 4.1). A cents field of 100 or more reads as the cents it
+    /// says, and the top saturates at the largest word.
+    #[must_use]
+    pub const fn from_channel_data(data: RegisteredData) -> Self {
+        let cents = (data.lsb().get() as u64) << Self::FRAC_BITS;
+        let fraction = (cents + 50) / 100;
+        let bits = ((data.msb().get() as u64) << Self::FRAC_BITS) + fraction;
+        Self(if bits > u32::MAX as u64 {
+            u32::MAX
+        } else {
+            bits as u32
+        })
+    }
+
+    /// The data of a Channel Pitch Bend Sensitivity message (RPN #00/00) that
+    /// sets this sensitivity: whole semitones and cents, rounded to the nearest
+    /// cent (a word within half a cent of 128 semitones saturates at 127
+    /// semitones 99 cents).
+    #[must_use]
+    pub const fn to_channel_data(self) -> RegisteredData {
+        let hundredths = (self.0 as u64 * 100 + (1 << (Self::FRAC_BITS - 1))) >> Self::FRAC_BITS;
+        let hundredths = if hundredths > 12_799 {
+            12_799
+        } else {
+            hundredths
+        };
+        RegisteredData::new(
+            U7::masked((hundredths / 100) as u8),
+            U7::masked((hundredths % 100) as u8),
+        )
     }
 
     /// The sensitivity in semitones (integer and fractional parts). The `f32`

@@ -1,57 +1,22 @@
 //! The Property Data of a message in its encoding (M2-103 §6.1.6, Table 12):
 //! ASCII as it is, Mcoded7, or zlib compression (RFC 1950) then Mcoded7.
 
-use std::num::NonZeroUsize;
-
 use miniz_oxide::deflate::compress_to_vec_zlib;
 use miniz_oxide::inflate::{TINFLStatus, decompress_to_vec_zlib_with_limit};
 
 use super::PeEncoding;
-use super::limits::NotInRange;
 use super::mcoded7::{self, Mcoded7Error};
 
 /// The zlib compression level of [`encode_body`]: 6, zlib's default.
 const ZLIB_LEVEL: u8 = 6;
 
-/// The most bytes a decoded body may have: the caller's bound on what a peer
-/// can make it allocate, since a few bytes of zlib inflate to a great many.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "usize", into = "usize"))]
-pub struct BodyLimit(NonZeroUsize);
-
-impl BodyLimit {
-    /// The limit, or `None` for 0.
-    #[must_use]
-    pub const fn new(bytes: usize) -> Option<Self> {
-        match NonZeroUsize::new(bytes) {
-            Some(n) => Some(Self(n)),
-            None => None,
-        }
-    }
-
-    /// The limit in bytes.
-    #[must_use]
-    pub const fn get(self) -> usize {
-        self.0.get()
-    }
-}
-
-impl TryFrom<usize> for BodyLimit {
-    type Error = NotInRange<usize>;
-
-    fn try_from(raw: usize) -> Result<Self, NotInRange<usize>> {
-        Self::new(raw).ok_or(NotInRange {
-            what: "body limit",
-            raw,
-        })
-    }
-}
-
-impl From<BodyLimit> for usize {
-    fn from(limit: BodyLimit) -> usize {
-        limit.get()
-    }
+tutti_types::ranged! {
+    /// The most bytes a decoded body may have: the caller's bound on what a peer
+    /// can make it allocate, since a few bytes of zlib inflate to a great many.
+    #[derive(Eq, Hash, PartialOrd, Ord)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "usize", into = "usize"))]
+    BodyLimit(usize), NotABodyLimit, "a body limit (at least 1)", |raw| raw >= 1
 }
 
 /// A body that cannot be encoded or decoded.

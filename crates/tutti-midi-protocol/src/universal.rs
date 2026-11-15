@@ -53,64 +53,20 @@ use tutti_ump::{
     SysexStep, U7, U14, Ump,
 };
 
-/// A device's own Universal System Exclusive id: `00` to `7E`. `7F` is the
-/// all-call (M1 p.40), which every device answers and none has as its own, so
-/// [`new`](Self::new) refuses it; a message's header is a [`Recipient`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct SysexDeviceId(U7);
-
-/// A `7F`, which is the all-call and no device's own id.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{:#04x} is the all-call, not a device's own id", .0.get())]
-pub struct NotSysexDeviceId(pub U7);
+tutti_types::ranged! {
+    /// A device's own Universal System Exclusive id: `00` to `7E`. `7F` is the
+    /// all-call (M1 p.40), which every device answers and none has as its own, so
+    /// [`new`](Self::new) refuses it; a message's header is a [`Recipient`].
+    #[derive(Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "serde", serde(try_from = "u8", into = "u8"))]
+    SysexDeviceId(u8), NotSysexDeviceId, "a device's own id (00 to 7E, not the all-call 7F)",
+    |raw| raw <= 0x7E
+}
 
 impl SysexDeviceId {
     /// The id a device that has none set takes: `00`.
-    pub const DEFAULT: Self = Self(U7::of(0));
-
-    /// The id `id`, or `None` for `7F`, the all-call.
-    #[must_use]
-    pub const fn new(id: U7) -> Option<Self> {
-        if id.get() == U7::MAX.get() {
-            None
-        } else {
-            Some(Self(id))
-        }
-    }
-
-    /// The id for a literal or a constant.
-    ///
-    /// # Panics
-    ///
-    /// When `id` is above `7E`; in a `const` that is a compile error.
-    #[must_use]
-    #[track_caller]
-    pub const fn of(id: u8) -> Self {
-        match Self::new(U7::of(id)) {
-            Some(id) => id,
-            None => panic!("7F is the all-call, not a device's own id"),
-        }
-    }
-
-    /// The id as its 7-bit byte.
-    #[must_use]
-    pub const fn get(self) -> U7 {
-        self.0
-    }
-}
-
-impl From<SysexDeviceId> for U7 {
-    fn from(id: SysexDeviceId) -> Self {
-        id.0
-    }
-}
-
-impl TryFrom<U7> for SysexDeviceId {
-    type Error = NotSysexDeviceId;
-
-    fn try_from(id: U7) -> Result<Self, Self::Error> {
-        Self::new(id).ok_or(NotSysexDeviceId(id))
-    }
+    pub const DEFAULT: Self = Self::of(0);
 }
 
 /// A time code at a rate that has an MTC code (24, 25, 29.97 drop-frame or 30
@@ -357,7 +313,7 @@ impl Recipient {
     /// The recipient a header byte names.
     #[must_use]
     pub const fn of_byte(id: U7) -> Self {
-        match SysexDeviceId::new(id) {
+        match SysexDeviceId::new(id.get()) {
             Some(device) => Self::Device(device),
             None => Self::AllCall,
         }
