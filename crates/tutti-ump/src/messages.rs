@@ -19,8 +19,8 @@
 //! message before it.
 
 use crate::{
-    Data128, Flex, FlexAddress, FlexTextKind, Form, FunctionBlockId, Message, MidiGroup, Stream,
-    SysexStatus, Ump,
+    Data128, Field, Flex, FlexAddress, FlexTextKind, Form, FunctionBlockId, Message, MidiGroup,
+    Stream, SysexStatus, Ump,
 };
 
 /// Which message of several packets a packet belongs to.
@@ -31,7 +31,7 @@ enum Run {
     FlexText(MidiGroup, FlexAddress, FlexTextKind),
     EndpointName,
     ProductInstanceId,
-    BlockName(FunctionBlockId),
+    BlockName(Field<FunctionBlockId>),
 }
 
 /// A packet's place in what it is part of.

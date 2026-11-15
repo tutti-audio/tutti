@@ -15,11 +15,13 @@
 //! `spec_words.rs`), the MIDI 1.0 controller roster (`cc_number.rs`).
 //! Every other number-to-name table is held by `spec_words.rs`.
 
+use core::num::NonZeroU8;
+use tutti_ump::FunctionBlockCount;
 use tutti_ump::{
-    Accidental, Alteration, AlterationKind, ChordBass, ChordName, ChordPitch, ChordType, Direction,
-    DiscoveryFilter, EndpointInfo, FirstGroup, Flex, FlexAddress, FlexTextKind, Form,
-    FunctionBlockId, FunctionBlockInfo, GroupSpan, Letter, Message, Metronome, Midi1Port,
-    MidiGroup, Protocol, Stream, StreamConfig, U4, U7, UiHint, Ump, UmpVersion,
+    Accidental, Alteration, AlterationKind, BarAccents, ChordBass, ChordName, ChordPitch,
+    ChordType, Direction, DiscoveryFilter, EndpointInfo, FirstGroup, Flex, FlexAddress,
+    FlexTextKind, Form, FunctionBlockId, FunctionBlockInfo, GroupSpan, Letter, Message, Metronome,
+    Midi1Port, MidiGroup, Protocol, Stream, StreamConfig, U4, UiHint, Ump, UmpVersion,
 };
 
 /// Decode gives the message, and encode gives the words back.
@@ -107,11 +109,11 @@ fn accidentals_are_tables_13_and_15() {
                 ChordName {
                     tonic_accidental,
                     tonic: Some(Letter::C),
-                    chord_type: major,
+                    chord_type: major.into(),
                     alterations: [no_alteration; 4],
                     bass: ChordBass {
                         pitch,
-                        chord_type: clear,
+                        chord_type: clear.into(),
                         alterations: [no_alteration; 2],
                     },
                 },
@@ -145,12 +147,12 @@ fn function_block_fields() {
     let info = |direction, ui_hint, midi1| {
         Message::Stream(Stream::FunctionBlockInfo(FunctionBlockInfo {
             active: false,
-            id: FunctionBlockId::new(0).unwrap(),
+            id: FunctionBlockId::new(0).unwrap().into(),
             direction,
             ui_hint,
             midi1,
-            first_group: FirstGroup::new(0).unwrap(),
-            groups_spanned: GroupSpan::new(1).unwrap(),
+            first_group: FirstGroup::new(0).unwrap().into(),
+            groups_spanned: GroupSpan::new(1).unwrap().into(),
             midi_ci_version: 0,
             max_sysex8_streams: 0,
         }))
@@ -173,26 +175,37 @@ fn function_block_fields() {
         (0b01, Direction::Input),
         (0b10, Direction::Output),
         (0b11, Direction::Bidirectional),
-        (0b00, Direction::Reserved(0)),
     ] {
         pin(
             [0xF011_0000 | bits, word2, 0, 0],
             info(direction, UiHint::Unknown, Midi1Port::No),
         );
     }
+    // The reserved 0b00 is read, and re-encodes to the same bits.
+    let Ok(Message::Stream(Stream::FunctionBlockInfo(zero))) =
+        Ump([0xF011_0000, word2, 0, 0]).decode()
+    else {
+        panic!()
+    };
+    assert!(matches!(zero.direction, Direction::Reserved(r) if r.get() == 0));
     // MIDI 1.0: 0x00 not, 0x01 yes unrestricted, 0x02 yes restricted to
     // 31.25 kbps, 0x03 reserved.
     for (bits, port) in [
         (0x00, Midi1Port::No),
         (0x01, Midi1Port::Unrestricted),
         (0x02, Midi1Port::Restricted),
-        (0x03, Midi1Port::Reserved(3)),
     ] {
         pin(
             [0xF011_0001 | bits << 2, word2, 0, 0],
             info(Direction::Input, UiHint::Unknown, port),
         );
     }
+    let Ok(Message::Stream(Stream::FunctionBlockInfo(three))) =
+        Ump([0xF011_000D, word2, 0, 0]).decode()
+    else {
+        panic!()
+    };
+    assert!(matches!(three.midi1, Midi1Port::Reserved(r) if r.get() == 3));
 }
 
 // §7.1.6, Figures 18 and 19: the protocol is the byte in bits 15-8, 0x01 for
@@ -240,7 +253,7 @@ fn the_version_is_major_then_minor() {
         Message::Stream(Stream::EndpointInfo(EndpointInfo {
             version,
             static_function_blocks: false,
-            function_blocks: U7::new(0).unwrap(),
+            function_blocks: FunctionBlockCount::of(0).into(),
             midi2: false,
             midi1: false,
             rx_jr: false,
@@ -256,7 +269,7 @@ fn endpoint_info_flags_each_alone() {
     let none = EndpointInfo {
         version: UmpVersion { major: 1, minor: 1 },
         static_function_blocks: false,
-        function_blocks: U7::new(0).unwrap(),
+        function_blocks: FunctionBlockCount::of(0).into(),
         midi2: false,
         midi1: false,
         rx_jr: false,
@@ -278,7 +291,7 @@ fn endpoint_info_flags_each_alone() {
     case(
         0x0500_0000,
         EndpointInfo {
-            function_blocks: U7::new(5).unwrap(),
+            function_blocks: FunctionBlockCount::of(5).into(),
             ..none
         },
     );
@@ -395,9 +408,11 @@ fn metronome_fields_in_order() {
             MidiGroup::FIRST,
             Flex::SetMetronome(Metronome {
                 clocks_per_click: 24,
-                accent_1: 3,
-                accent_2: 4,
-                accent_3: 5,
+                accents: BarAccents::Three(
+                    NonZeroU8::new(3).unwrap(),
+                    NonZeroU8::new(4).unwrap(),
+                    NonZeroU8::new(5).unwrap(),
+                ),
                 subdivision_1: 6,
                 subdivision_2: 7,
             }),

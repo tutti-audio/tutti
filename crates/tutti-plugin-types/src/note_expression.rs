@@ -199,9 +199,10 @@ pub fn per_note_message(
     }
     Some(Voice2::RegisteredPerNote {
         note,
-        controller: RegisteredPerNoteController::from(
+        controller: RegisteredPerNoteController::try_from(
             per_note_controller_of_expression(expression)?.get(),
-        ),
+        )
+        .ok()?,
         value,
     })
 }

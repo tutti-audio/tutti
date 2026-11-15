@@ -7,6 +7,7 @@ use tutti_ump::{
 
 use super::*;
 use crate::name::{BlockName, EndpointName, ProductInstanceId};
+use tutti_fixtures::midi;
 
 const ALL: DiscoveryFilter = DiscoveryFilter {
     endpoint_info: true,
@@ -407,7 +408,10 @@ fn what_an_endpoint_cannot_do_is_not_done() {
         }
     );
     // A reserved Protocol changes nothing.
-    let c = notified(&ask(&mut e, request(Protocol::Reserved(7), false, false)));
+    let c = notified(&ask(
+        &mut e,
+        request(midi::reserved_protocol(7), false, false),
+    ));
     assert_eq!(c.protocol, Protocol::Midi2);
 }
 
@@ -477,13 +481,13 @@ fn a_function_block_stays_inside_the_groups() {
     assert_eq!(new(15, 2, bi).build(), Err(past(15, 2)));
     assert_eq!(new(1, 16, bi).build(), Err(past(1, 16)));
     assert_eq!(
-        new(0, 1, BlockDirection::Reserved(0)).build(),
+        new(0, 1, midi::reserved_direction()).build(),
         Err(BlockError::ReservedDirection)
     );
     let one = || new(2, 1, bi);
     assert!(one().midi1(Midi1Port::Restricted).build().is_ok());
     assert_eq!(
-        one().midi1(Midi1Port::Reserved(3)).build(),
+        one().midi1(midi::reserved_midi1_port()).build(),
         Err(BlockError::ReservedMidi1Port)
     );
     let two = || new(2, 2, bi);
@@ -548,7 +552,7 @@ fn a_request_is_reported_as_granted_or_reduced() {
     assert_eq!(c.active(), granted);
     // A reserved Protocol is a part not done.
     assert!(matches!(
-        replied(&mut e, request(Protocol::Reserved(7), true, false)),
+        replied(&mut e, request(midi::reserved_protocol(7), true, false)),
         Reply::Configured(Configuration::Reduced { .. })
     ));
 }
@@ -599,7 +603,13 @@ fn a_local_endpoint_declares_one_static_block_over_its_groups() {
     };
     assert!(b.active);
     assert_eq!(b.direction, BlockDirection::Bidirectional);
-    assert_eq!((b.first_group.get(), b.groups_spanned.get()), (0, 4));
+    assert_eq!(
+        (
+            b.first_group.value().map(FirstGroup::get),
+            b.groups_spanned.value().map(GroupSpan::get)
+        ),
+        (Some(0), Some(4))
+    );
     assert_eq!(blocks.len(), 1);
 }
 

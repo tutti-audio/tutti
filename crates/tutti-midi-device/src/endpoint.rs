@@ -8,8 +8,8 @@
 
 use tutti_ump::{
     BlockFilter, BlockSelect, DeviceIdentity, Direction as BlockDirection, DiscoveryFilter,
-    FirstGroup, FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, Midi1Port, Protocol,
-    Stream, StreamConfig, U7, UiHint, Ump, UmpVersion, text_packets,
+    FirstGroup, FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, GroupSpan, Message,
+    Midi1Port, Protocol, Stream, StreamConfig, UiHint, Ump, UmpVersion, text_packets,
 };
 
 use crate::name::{BlockName, EndpointName, ProductInstanceId};
@@ -331,12 +331,12 @@ impl FunctionBlock {
     fn info(&self) -> FunctionBlockInfo {
         FunctionBlockInfo {
             active: self.active,
-            id: self.id,
+            id: self.id.into(),
             direction: self.direction,
             ui_hint: self.ui_hint,
             midi1: self.midi1,
-            first_group: self.first_group,
-            groups_spanned: self.groups,
+            first_group: self.first_group.into(),
+            groups_spanned: self.groups.into(),
             midi_ci_version: self.midi_ci_version,
             max_sysex8_streams: self.max_sysex8_streams,
         }
@@ -346,9 +346,9 @@ impl FunctionBlock {
     /// field the wire kept is out of range: a number above 31, a Group span
     /// off the end, or a reserved direction.
     pub(crate) fn from_info(info: &FunctionBlockInfo) -> Option<Self> {
-        let id = FunctionBlockId::new(info.id.get())?;
-        let first_group = FirstGroup::new(info.first_group.get())?;
-        let groups = GroupSpan::new(info.groups_spanned.get())?;
+        let id = info.id.value()?;
+        let first_group = info.first_group.value()?;
+        let groups = info.groups_spanned.value()?;
         // A peer's reserved MIDI 1.0 value, or a port over several Groups, is
         // kept as not a port: the block is still usable as MIDI 2.0.
         let midi1 = match info.midi1 {
@@ -464,7 +464,7 @@ pub struct Endpoint {
     pub(crate) instance_id: Option<ProductInstanceId>,
     pub(crate) static_function_blocks: bool,
     /// The count Endpoint Info declares: `0..=32`.
-    pub(crate) declared_blocks: u8,
+    pub(crate) declared_blocks: FunctionBlockCount,
     pub(crate) blocks: [Option<FunctionBlock>; MAX_FUNCTION_BLOCKS],
 }
 
@@ -507,7 +507,7 @@ impl Endpoint {
             name: None,
             instance_id: None,
             static_function_blocks: false,
-            declared_blocks: 0,
+            declared_blocks: FunctionBlockCount::of(0),
             blocks: [None; MAX_FUNCTION_BLOCKS],
         }
     }
@@ -630,8 +630,10 @@ impl Endpoint {
     pub(crate) fn insert_block(&mut self, block: FunctionBlock) {
         let i = usize::from(block.id.get());
         self.blocks[i] = Some(block);
-        let count = u8::try_from(i + 1).unwrap_or(u8::MAX);
-        self.declared_blocks = self.declared_blocks.max(count);
+        // A block's number is at most 31, so its count is at most 32.
+        if let Some(count) = u8::try_from(i + 1).ok().and_then(FunctionBlockCount::new) {
+            self.declared_blocks = self.declared_blocks.max(count);
+        }
     }
 
     /// The UMP version it declares.
@@ -679,7 +681,7 @@ impl Endpoint {
     /// The number of Function Blocks it declares (§7.1.2), `0..=32`.
     #[must_use]
     pub const fn declared_function_blocks(&self) -> u8 {
-        self.declared_blocks
+        self.declared_blocks.get()
     }
 
     /// Function Block `id`, when it is known.
@@ -775,7 +777,7 @@ impl Endpoint {
             Stream::EndpointInfo(tutti_ump::EndpointInfo {
                 version: self.version,
                 static_function_blocks: self.static_function_blocks,
-                function_blocks: U7::masked(self.declared_blocks),
+                function_blocks: self.declared_blocks.into(),
                 midi2: self.capabilities.midi2,
                 midi1: self.capabilities.midi1,
                 rx_jr: self.capabilities.rx_jr,
@@ -882,7 +884,7 @@ impl Endpoint {
                         send(
                             out,
                             Stream::FunctionBlockName {
-                                block: block.id,
+                                block: block.id.into(),
                                 form,
                                 bytes,
                             },
@@ -910,6 +912,8 @@ impl Endpoint {
                 }
                 None => return,
             },
+            // A number no Endpoint has.
+            BlockSelect::Reserved(_) => return,
         };
         if filter.info {
             for block in asked.iter().flatten() {
@@ -923,7 +927,7 @@ impl Endpoint {
                         send(
                             out,
                             Stream::FunctionBlockName {
-                                block: block.id,
+                                block: block.id.into(),
                                 form,
                                 bytes,
                             },
@@ -956,12 +960,12 @@ impl Endpoint {
     /// with more.
     #[must_use]
     pub(crate) fn apply_info(&mut self, info: &tutti_ump::EndpointInfo) -> bool {
-        if usize::from(info.function_blocks.get()) > MAX_FUNCTION_BLOCKS {
+        let Some(declared) = info.function_blocks.count() else {
             return false;
-        }
+        };
         self.version = info.version;
         self.static_function_blocks = info.static_function_blocks;
-        self.declared_blocks = info.function_blocks.get();
+        self.declared_blocks = declared;
         self.capabilities = Capabilities {
             midi1: info.midi1,
             midi2: info.midi2,
@@ -980,7 +984,7 @@ impl Endpoint {
     /// block (`from_info`: §7.1.8 requires it to span one Group).
     pub(crate) fn read_block(&self, info: &FunctionBlockInfo) -> Option<FunctionBlock> {
         let mut block = FunctionBlock::from_info(info)?;
-        if block.id.get() >= self.declared_blocks {
+        if block.id.get() >= self.declared_blocks.get() {
             return None;
         }
         if self.static_function_blocks {
@@ -996,7 +1000,7 @@ impl Endpoint {
         self.active = MIDI1_NO_JR;
         self.capabilities.midi1 = true;
         if self.function_blocks().next().is_none() {
-            self.declared_blocks = 0;
+            self.declared_blocks = FunctionBlockCount::of(0);
             self.insert_inferred_block();
         }
     }

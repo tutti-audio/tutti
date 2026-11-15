@@ -1262,7 +1262,7 @@ fn test_pitch_7_25_retunes_only_the_addressed_note() {
         MidiChannel::of(1),
         Voice2::RegisteredPerNote {
             note: NoteNumber::of(60),
-            controller: RegisteredPerNoteController::from(3),
+            controller: RegisteredPerNoteController::Pitch,
             value,
         },
     ));
@@ -1431,7 +1431,7 @@ fn pitch_of(channel: u8, note: u8, hcu: u32) -> Ump {
         MidiChannel::of(channel),
         Voice2::RegisteredPerNote {
             note: NoteNumber::of(note),
-            controller: RegisteredPerNoteController::from(3),
+            controller: RegisteredPerNoteController::Pitch,
             value: ControlValue::new(hcu << 25),
         },
     ))
@@ -1612,7 +1612,7 @@ fn test_midi2_registered_per_note_controller_brightness_sets_only_addressed_slid
             MidiChannel::of(1),
             Voice2::RegisteredPerNote {
                 note: NoteNumber::of(60),
-                controller: RegisteredPerNoteController::from(74),
+                controller: RegisteredPerNoteController::Brightness,
                 value: ControlValue::MAX,
             },
         ))],
@@ -2578,10 +2578,7 @@ fn per_note_management_flags_are_read_from_the_spec_bits() {
 /// for them, so the attribute is not read. `midi2` refused the packet, so the note was dropped and an off for it left the voice stuck.
 #[test]
 fn a_reserved_attribute_type_does_not_stop_a_note() {
-    let reserved = Attribute::Reserved {
-        kind: 5,
-        data: 0x1234,
-    };
+    let reserved = midi::reserved_attribute(5, 0x1234);
     let mut synth = poly_synth();
     synth.apply_midi(ump(Message::Midi2(
         address(0),
@@ -3126,7 +3123,7 @@ fn a_per_note_pitch_survives_a_glide() {
         MidiChannel::of(2),
         Voice2::RegisteredPerNote {
             note: NoteNumber::of(72),
-            controller: RegisteredPerNoteController::from(3),
+            controller: RegisteredPerNoteController::Pitch,
             value: ControlValue::new(74u32 << 25),
         },
     ));
@@ -3164,7 +3161,7 @@ fn a_legato_move_returns_the_voice_to_the_new_keys_own_pitch() {
         MidiChannel::of(1),
         Voice2::RegisteredPerNote {
             note: NoteNumber::of(60),
-            controller: RegisteredPerNoteController::from(3),
+            controller: RegisteredPerNoteController::Pitch,
             value: ControlValue::new(70u32 << 25),
         },
     ));

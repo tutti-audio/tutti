@@ -3035,6 +3035,30 @@ mod tests {
         assert_eq!(told(&c), vec![id(1), id(2)], "{c:?}");
     }
 
+    /// A Registered Per-Note Controller number Appendix A reserves (M2-104
+    /// §7.4.4) means nothing to a receiver: it moves no note, and a note that
+    /// starts after it is told nothing.
+    #[test]
+    fn a_reserved_per_note_controller_number_moves_no_note() {
+        let reserved = |number: u8| {
+            let word = 0x4002_0000 | u32::from(NoteNumber::of(5).get()) << 8 | u32::from(number);
+            match tutti_ump::Ump([word, 1 << 30, 0, 0]).decode() {
+                Ok(tutti_ump::Message::Midi2(_, voice)) => voice,
+                other => panic!("{other:?}"),
+            }
+        };
+        let mut s = Sim::new(POLY);
+        let c = s.on(0, 5);
+        assert!(matches!(c[0], Command::Start { .. }), "{c:?}");
+        for number in [0u8, 4, 9, 13, 69, 80, 96, 255] {
+            let c = s.send(0, reserved(number), &One);
+            assert_eq!(told(&c), vec![], "{number}: {c:?}");
+        }
+        s.off(0, 5);
+        let c = s.on(0, 5);
+        assert_eq!(told(&c), vec![], "{c:?}");
+    }
+
     /// M2-104 section 7.4.5: only a Detach makes previous notes on the
     /// referenced Note Number stop responding, so until then the tail of the
     /// first strike (released by the second on the same key) follows a value

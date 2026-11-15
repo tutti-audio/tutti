@@ -1,7 +1,11 @@
 //! `ControlValue` and `BendValue`: the 32-bit data word of a MIDI 2.0 message,
 //! whose whole range is the raw.
 
-use tutti_ump::{BendValue, CCNumber, ControlValue, Message, MidiChannel, NoteNumber, Ump, Voice2};
+use core::cmp::Ordering;
+use tutti_ump::{
+    BendValue, CCNumber, ControlValue, Message, MidiChannel, NoteNumber, Stream, Ump, UmpVersion,
+    Voice2,
+};
 
 /// The Pitch Bend data word is `0x8000_0000` at the centre (M2-104 section
 /// 7.4.11), the lowest bend is 0 and the highest is `0xFFFF_FFFF`.
@@ -77,5 +81,36 @@ fn a_block_request_names_a_number_from_0_to_31() {
             },
         }));
         assert_eq!(request.0[0] >> 8 & 0xFF, u32::from(n));
+    }
+}
+
+/// An Endpoint Discovery's version compares with the receiver's own as the
+/// spec orders versions (M2-104 §7.1.1, Table 5): the major decides, and the
+/// minor only between equal majors, so a newer received version is one with a
+/// higher major, or the same major and a higher minor.
+/// Spec: m2-104/7.1.1#2
+#[test]
+fn a_received_version_compares_with_the_receivers_own() {
+    let own = UmpVersion::V1_1;
+    let received =
+        |major: u32, minor: u32| match Ump([0xF000_0000 | major << 8 | minor, 0, 0, 0]).decode() {
+            Ok(Message::Stream(Stream::EndpointDiscovery { version, .. })) => version,
+            other => panic!("{other:?}"),
+        };
+    for (major, minor, relation) in [
+        (1, 1, Ordering::Equal),
+        (1, 2, Ordering::Greater),
+        (1, 255, Ordering::Greater),
+        (2, 0, Ordering::Greater),
+        (2, 255, Ordering::Greater),
+        (1, 0, Ordering::Less),
+        (0, 255, Ordering::Less),
+        (0, 0, Ordering::Less),
+    ] {
+        assert_eq!(
+            received(major, minor).cmp(&own),
+            relation,
+            "{major}.{minor} against 1.1"
+        );
     }
 }
