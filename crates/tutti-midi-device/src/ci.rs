@@ -29,6 +29,7 @@ use tutti_ump::{MidiChannel, MidiGroup, Sysex7Packets, U7, U28, Ump};
 mod default_cc;
 mod device;
 mod discovery;
+mod drum_map;
 mod endpoint;
 mod escape;
 mod initiator;
@@ -48,6 +49,10 @@ pub use discovery::{
     CiCategories, DiscoveryData, MaxSysexSize, NotASysexSize, SUB_ID2_ACK, SUB_ID2_DISCOVERY,
     SUB_ID2_DISCOVERY_REPLY, SUB_ID2_ENDPOINT_INQUIRY, SUB_ID2_ENDPOINT_REPLY,
     SUB_ID2_INVALIDATE_MUID, SUB_ID2_NAK,
+};
+pub use drum_map::{
+    BitmapPosition, DrumControl, DrumFeatures, DrumInstrument, DrumNoteMapLevel, DrumSounds,
+    MutuallyExclusiveSet,
 };
 pub use endpoint::{CiInstanceId, EndpointInfo, EndpointStatus};
 pub use initiator::{
