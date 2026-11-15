@@ -484,6 +484,7 @@ tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::Plugi
 tutti-plugin-ipc  setter  crates/tutti-plugin-ipc/src/client/composite.rs::PluginBridge::set_track_info
 
 # tutti-plugin-types
+tutti-plugin-types  ctor-result  crates/tutti-plugin-types/src/format.rs::PluginFormat::from_extension
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/lifecycle.rs::Prepare::with_format
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/lifecycle.rs::Prepare::with_mode
 tutti-plugin-types  with-prefix  crates/tutti-plugin-types/src/lifecycle.rs::Prepare::with_rate
