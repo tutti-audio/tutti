@@ -638,6 +638,7 @@ impl GraphBuilder {
     pub fn build(self, prepare: Prepare) -> Result<(Editor, Executor), CommitError> {
         let (mut editor, mut executor) = Editor::new(prepare);
         for Pending { key, kind, unit } in self.units {
+            // No wiring is recorded yet (it moves across below), so nothing is unwired.
             editor.insert(key, &kind, unit);
         }
         // `insert` wrote each node's spec from its prepared shape; the

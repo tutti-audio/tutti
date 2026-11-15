@@ -57,7 +57,7 @@
 //! // clip or a keyboard's queue node to it with `GraphSpec::connect_events`).
 //! let (mut editor, _executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
 //! let synth_key = NodeKey(1);
-//! let params = editor.insert(synth_key, "synth", synth);
+//! let params = editor.insert(synth_key, "synth", synth).controls;
 //! editor.spec_mut().topology.set_outputs((0..2)
 //!     .map(|port| Source::Node(OutPort { node: synth_key, port })));
 //! editor.commit().expect("a one-node graph commits");

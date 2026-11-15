@@ -284,16 +284,19 @@ fn a_shape_mismatch_is_refused() {
         width: 2,
     });
     assert_eq!(
-        ed.replace(NODE, Unforkable(wider), fade),
+        ed.replace(NODE, Unforkable(wider), fade)
+            .map(|placed| placed.controls),
         Err(CommitError::FadeShape { node: NODE })
     );
     let not_in_place = TestNode::new(Kind::Thru { width: 1 });
     assert_eq!(
-        ed.replace(NODE, Unforkable(not_in_place), fade),
+        ed.replace(NODE, Unforkable(not_in_place), fade)
+            .map(|placed| placed.controls),
         Err(CommitError::FadeShape { node: NODE })
     );
     assert_eq!(
-        ed.replace(NodeKey(9), Unforkable(gain(1.0)), fade),
+        ed.replace(NodeKey(9), Unforkable(gain(1.0)), fade)
+            .map(|placed| placed.controls),
         Err(CommitError::NotRunning { node: NodeKey(9) })
     );
     ed.commit().expect("nothing changed");
@@ -328,7 +331,8 @@ fn a_shape_mismatch_is_refused() {
             lagged,
             Unforkable(TestNode::new(Kind::Lag { latency: 5 })),
             fade
-        ),
+        )
+        .map(|placed| placed.controls),
         Err(CommitError::FadeShape { node: lagged })
     );
     ed.replace(
@@ -353,7 +357,8 @@ fn a_shape_mismatch_is_refused() {
     exec.apply_pending();
     ed.collect();
     assert_eq!(
-        ed.replace(bursting, Unforkable(burst(3)), fade),
+        ed.replace(bursting, Unforkable(burst(3)), fade)
+            .map(|placed| placed.controls),
         Err(CommitError::FadeShape { node: bursting })
     );
     ed.replace(bursting, Unforkable(burst(2)), fade)

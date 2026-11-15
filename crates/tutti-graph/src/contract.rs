@@ -2047,7 +2047,7 @@ impl BlockRig {
     pub fn new<N: IntoNode>(node: N, rate: SampleRate, frames: usize) -> (Self, N::Controls) {
         let (mut editor, mut exec) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples(frames))));
         let key = NodeKey(1);
-        let controls = editor.insert(key, N::kind(), node);
+        let controls = editor.insert(key, N::kind(), node).controls;
         let shape = editor
             .spec()
             .topology

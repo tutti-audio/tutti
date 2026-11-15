@@ -239,7 +239,7 @@ const PORTS_PER_GROUP: usize = MIDI_INPUT_PORTS;
 ///
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples(512))));
 /// // The inlet is not wired yet.
-/// let controls = editor.insert(NodeKey(1), "midi in", MidiIngestNode::new());
+/// let controls = editor.insert(NodeKey(1), "midi in", MidiIngestNode::new()).controls;
 /// controls.set_mpe_mode(tutti_midi_protocol::MpeMode::Disabled);
 /// ```
 pub struct MidiIngestNode {
