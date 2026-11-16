@@ -150,6 +150,7 @@ fn execute(step: &Step, ctx: &Ctx) -> Result<(), u8> {
         }
         Step::DocFeatures => doc_features(ctx),
         Step::Package => package(ctx),
+        Step::UmbrellaApi(dir) => umbrella_api(ctx, dir.as_deref()),
         Step::Release(v) => release::run(&ctx.root, v).map_err(|e| {
             eprintln!("xtask: release: {e}");
             1
@@ -250,6 +251,103 @@ fn doc_features(ctx: &Ctx) -> Result<(), u8> {
     }
     eprintln!("FAIL: rustdoc failed for: {}", failed.join(" "));
     Err(1)
+}
+
+/// `umbrella-api [<dir>]`: the unnameable types of what the umbrella exports and
+/// the seeds ranked by how many each pulls in. The texts come from `public-api`
+/// for each crate the umbrella exports from and each crate their signatures name,
+/// or from `<dir>/<package>.txt` when a directory is given.
+fn umbrella_api(ctx: &Ctx, dir: Option<&str>) -> Result<(), u8> {
+    let lib_path = ctx.root.join("crates/tutti/src/lib.rs");
+    let lib = std::fs::read_to_string(&lib_path).map_err(|e| {
+        eprintln!("xtask: cannot read {}: {e}", lib_path.display());
+        1
+    })?;
+    // `None` is a crate with no text: not a package, or no file in `dir`.
+    let fetch = |krate: &str| -> Result<Option<String>, String> {
+        let package = krate.replace('_', "-");
+        if let Some(dir) = dir {
+            return match std::fs::read_to_string(Path::new(dir).join(format!("{package}.txt"))) {
+                Ok(t) => Ok(Some(t)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(e.to_string()),
+            };
+        }
+        let is_package = ["crates", "testing"]
+            .iter()
+            .any(|d| ctx.root.join(d).join(&package).join("Cargo.toml").is_file());
+        if !is_package {
+            return Ok(None);
+        }
+        let c = Cmd::sh(&recipes::public_api_cmd(&package));
+        println!("+ {}", c.display());
+        let out = command(&c, ctx)
+            .output()
+            .map_err(|e| format!("cannot run `{}`: {e}", c.display()))?;
+        if !out.status.success() {
+            return Err(format!(
+                "`{}` failed ({}):\n{}",
+                c.display(),
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim_end()
+            ));
+        }
+        Ok(Some(String::from_utf8_lossy(&out.stdout).into_owned()))
+    };
+    let (_, analysis) = gates::collect(&lib, &fetch).map_err(|e| {
+        eprintln!("xtask: umbrella-api: {e}");
+        1
+    })?;
+    for krate in &analysis.skipped {
+        let why = if dir.is_some() {
+            "no public-api text"
+        } else {
+            "not a package"
+        };
+        println!("skipped {krate}: {why}");
+    }
+    println!(
+        "seeds: unexported types pulled in, of them internal or behind an internal one, item:"
+    );
+    for s in &analysis.seeds {
+        println!("  {:4}  {:4}  {}", s.pulled, s.internal_or_behind, s.item);
+    }
+    if !analysis.decisions.is_empty() {
+        println!("re-exports covered (re-exporter -> covered path):");
+        for d in &analysis.decisions {
+            println!("  {d}");
+        }
+    }
+    if !analysis.ambiguous.is_empty() {
+        println!("re-exports covering nothing (ambiguous or unresolved):");
+        for d in &analysis.ambiguous {
+            println!("  {d}");
+        }
+    }
+    if !analysis.leaks.is_empty() {
+        println!("internal types the exported items name (findings for their owners):");
+        for l in &analysis.leaks {
+            println!("  {l}");
+        }
+    }
+    if !analysis.stale.is_empty() {
+        println!("rows that match no type the texts name (stale, or for a crate not reached):");
+        for r in &analysis.stale {
+            println!("  {r}");
+        }
+    }
+    for m in &analysis.missing {
+        println!("{m}");
+    }
+    println!(
+        "umbrella-api: {} unnameable type(s)",
+        analysis.missing.len()
+    );
+    if analysis.missing.is_empty() {
+        Ok(())
+    } else {
+        Err(1)
+    }
 }
 
 /// `cargo package` over every crate under `crates/`: a directory there holding
