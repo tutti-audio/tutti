@@ -32,6 +32,7 @@ pub(crate) fn plugin_error(error: Vst3Error) -> PluginError {
             reason: format!("the plugin returned code {code}"),
         },
         Vst3Error::StateError(reason) => PluginError::State(reason),
+        Vst3Error::StateFrame(frame) => PluginError::State(frame.to_string()),
         Vst3Error::EditorError(reason) => {
             PluginError::Editor(tutti_plugin_types::EditorError::PluginError(reason))
         }

@@ -164,17 +164,6 @@ pub struct DescriptorInfo {
     version_of_clap: clap_version,
 }
 
-/// Copies a fixed C char field up to its first nul (or its end), lossily.
-#[must_use]
-pub fn chars_to_string(field: &[c_char]) -> String {
-    let bytes: Vec<u8> = field
-        .iter()
-        .take_while(|&&c| c != 0)
-        .map(|&c| c as u8)
-        .collect();
-    String::from_utf8_lossy(&bytes).into_owned()
-}
-
 /// Global registry for CLAP entry init/deinit lifecycle.
 ///
 /// The CLAP spec requires `clap_entry.init()` once when a library is first

@@ -19,8 +19,8 @@ use tutti_plugin_types::{
     EditorError, EditorPresence, EditorWindow, Features, LoadedPlugin, MainThreadMarker,
     Normalized, OwnBypass, ParamEdit, ParamFlags, ParamId, ParamMapping, ParamRange, ParamSteps,
     ParamWriteError, ParameterInfo, PluginBus, PluginBuses, PluginClass, PluginDescriptor,
-    PluginError, PluginResult, PluginTail, Preset, PresetId, RenderModeSupport, Request,
-    RescanScope, StateUse, WindowHandle, Wraps, taken,
+    PluginError, PluginResult, PluginTail, PluginVersion, Preset, PresetId, RenderModeSupport,
+    Request, RescanScope, StateUse, WindowHandle, Wraps, taken,
 };
 use tutti_types::Samples;
 
@@ -82,7 +82,11 @@ pub(crate) fn describe(handle: &AuHandle) -> PluginDescriptor {
             info.manufacturer.clone(),
             info.version.clone(),
         ),
-        None => (String::from("au.unknown"), String::new(), String::new()),
+        None => (
+            String::from("au.unknown"),
+            String::new(),
+            PluginVersion::Absent,
+        ),
     };
     PluginDescriptor {
         id,
@@ -94,6 +98,17 @@ pub(crate) fn describe(handle: &AuHandle) -> PluginDescriptor {
         },
         editor: EditorPresence::measured(AuEditor::has_editor(handle.unit())),
         measured: None,
+    }
+}
+
+/// `READ_ONLY` for a parameter the host cannot write: one that is not
+/// `kAudioUnitParameterFlag_IsWritable`, or that is `kAudioUnitParameterFlag_MeterReadOnly`
+/// (a meter the unit writes and the host only reads).
+fn read_only_flags(writable: bool, meter_read_only: bool) -> ParamFlags {
+    if writable && !meter_read_only {
+        ParamFlags::empty()
+    } else {
+        ParamFlags::READ_ONLY
     }
 }
 
@@ -350,11 +365,7 @@ impl Control for AuLoaded {
                     .and_then(|c| clump_names.get(&c))
                     .cloned()
                     .unwrap_or_default();
-                let flags = if p.writable {
-                    ParamFlags::empty()
-                } else {
-                    ParamFlags::READ_ONLY
-                };
+                let flags = read_only_flags(p.writable, p.meter_read_only);
                 // `AudioUnitParameterID` is AU's opaque plugin-chosen handle.
                 ParameterInfo::new(p.id.into(), p.name)
                     .with_unit(p.unit.to_string())
@@ -667,5 +678,21 @@ mod tests {
             None,
             "a CLAP preset path must not yield an AU selector"
         );
+    }
+}
+
+#[cfg(test)]
+mod flag_tests {
+    use super::*;
+
+    /// A writable parameter is not read-only; one that is not writable is; a meter is,
+    /// whatever its writable bit says.
+    /// Spec: au.param.flag.MeterReadOnly
+    #[test]
+    fn a_meter_parameter_is_read_only_even_when_it_is_writable() {
+        assert_eq!(read_only_flags(true, false), ParamFlags::empty());
+        assert_eq!(read_only_flags(false, false), ParamFlags::READ_ONLY);
+        assert_eq!(read_only_flags(true, true), ParamFlags::READ_ONLY);
+        assert_eq!(read_only_flags(false, true), ParamFlags::READ_ONLY);
     }
 }

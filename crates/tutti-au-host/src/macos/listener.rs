@@ -4,7 +4,10 @@
 //! The listener, its events and the notifying writes are `tutti-au-ffi`'s; they
 //! are re-exported here under the paths this crate has always used.
 
+#[cfg(feature = "testing")]
+#[doc(hidden)]
+pub use tutti_au_ffi::emit_gesture;
 pub use tutti_au_ffi::{
-    AuEvent, AuParameterListener, EventAddress, emit_gesture, notify_all_parameters,
-    notify_parameter, set_parameter_notifying,
+    AuEvent, AuParameterListener, EventAddress, notify_all_parameters, notify_parameter,
+    set_parameter_notifying,
 };
