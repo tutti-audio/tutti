@@ -71,7 +71,7 @@
 //! | `tutti::midi` | the common MIDI path: files, messages, keys, routes, devices, profiles | `midi` |
 //! | `tutti::codec` | audio file settings: `Spec`, `Quality`, `FlacLevel`, `IntDepth` and the decode errors | `codec` |
 //! | `tutti::sampler` | sample playback voices and loops | `sampler` |
-//! | `tutti::modulation` | modulation sources, curves and their errors | `modulation` |
+//! | `tutti::modulation` | modulation sources, curves and their errors | always |
 //! | `tutti::polysynth` | the polyphonic synth node and its configs | `synth` |
 //! | `tutti::soundfont` | the SoundFont playback node and its settings | `soundfont` |
 //! | `tutti::plugin` | hosting settings, the main-thread proof and the plugin catalog | `plugin` + a format |
@@ -103,7 +103,7 @@
 //! - `export` — `Bounce` and its results (implies `encode-wav`).
 //! - `midi` — `tutti::midi`. `crates/tutti/examples/midi_all.rs` uses every piece together, offline.
 //! - `midi-hardware` — OS MIDI I/O in `tutti::midi` (implies `midi`).
-//! - `synth`, `soundfont`, `sampler`, `modulation` — the matching module.
+//! - `synth`, `soundfont`, `sampler` — the matching module.
 //!   `soundfont` implies `midi`; `sampler` implies `decode-wav`.
 //! - `plugin` — `tutti::plugin` (implies `midi`), with one or more formats:
 //!   `vst2`, `vst3`, `clap`, `au`. Each format links its SDK, which is why none
@@ -201,7 +201,7 @@ pub use tutti_session::{
 pub use tutti_session::{InstrumentHandle, Midi, MidiReport};
 #[cfg(all(feature = "session", feature = "midi-hardware"))]
 pub use tutti_session::{MidiInput, MidiOutput};
-#[cfg(all(feature = "session", feature = "modulation"))]
+#[cfg(feature = "session")]
 pub use tutti_session::{ParamRef, RouteSpec};
 #[cfg(all(feature = "session", feature = "sampler"))]
 pub use tutti_session::{SamplerEvent, SamplerLoad};
@@ -400,7 +400,6 @@ pub mod session {
     };
     #[cfg(feature = "sampler")]
     pub use tutti_session::{AudioEntry, AudioFile, SamplerError, StreamInfo, Tier, audio_file};
-    #[cfg(feature = "modulation")]
     pub use tutti_session::{
         AutomationTake, MixRef, ModInput, ModKeys, ModRefusal, ModRouteId, ModSourceId, ModState,
         ModTarget, Mods, ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged,
@@ -472,7 +471,6 @@ pub mod sampler {
 
 /// Modulation (`tutti-modulation`): the sources and curves an application
 /// declares, and the `Lfo` and `Follower` that read them.
-#[cfg(feature = "modulation")]
 pub mod modulation {
     pub use tutti_modulation::{
         Amount, CompileError, ControlSource, Corners, Curve, CurveSegment, DepthBy, Follower,

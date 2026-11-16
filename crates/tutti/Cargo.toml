@@ -54,7 +54,7 @@ tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types", option
 # `Session`. `default-features = false` (its default is empty anyway): each
 # feature below turns on the session's feature of the same name with `?`, so
 # a build without `session` gets no session edge from a feature.
-tutti-session = { version = "0.0.1", path = "../tutti-session", default-features = false, optional = true }
+tutti-session = { version = "0.0.1", path = "../tutti-session", default-features = false, features = ["modulation"], optional = true }
 
 [dev-dependencies]
 # The `testing` nodes (`Osc`, `Const`) this crate's own tests, examples and README
@@ -192,13 +192,13 @@ required-features = ["session", "device"]
 # LFO on the cutoff, the transport and a bounce to a WAV.
 [[example]]
 name = "song_bounce"
-required-features = ["session", "export", "sampler", "modulation"]
+required-features = ["session", "export", "sampler"]
 test = true
 
 # Modulation, headless, in one import.
 [[example]]
 name = "headless_modulation"
-required-features = ["session", "modulation"]
+required-features = ["session"]
 
 # Load a plugin, play a MIDI file, export to WAV, in one
 # import. Run as a test (`test = true`) so CI plays it; it needs
