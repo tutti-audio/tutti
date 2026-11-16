@@ -55,6 +55,7 @@ fn bend(v: u16) -> u32 {
 }
 
 /// Table 5, upscale 7 to 16 bits.
+/// Spec: m2-115/2.1#1, m2-115/2.3#1, m2-115/3.1#1
 #[test]
 fn m2_115_table_5_velocity() {
     for (v, want) in [
@@ -89,6 +90,7 @@ fn widen_velocity_keeps_the_anchors_and_narrow_inverts_it() {
 }
 
 /// Table 6, upscale 7 to 32 bits.
+/// Spec: m2-115/2.1#1, m2-115/2.3#1, m2-115/3.1#1
 #[test]
 fn m2_115_table_6_controller_value() {
     for (v, want) in [
@@ -114,6 +116,7 @@ fn seven_bit_values_match_the_repeat_rule() {
     }
 }
 
+/// Spec: m2-115/3.1#1
 #[test]
 fn fourteen_bit_bends_match_the_repeat_rule() {
     for v in 0..=16383u16 {
@@ -269,6 +272,7 @@ fn the_widened_message_is_a_message() {
 /// `widen_value` and `widen_bend` are M2-115 section 3's Min-Center-Max
 /// scaling of the one value: the minimum, the centre and the maximum land on
 /// the 32-bit minimum, centre and maximum, and the repeat rule fills the rest.
+/// Spec: m2-115/3.1#1
 #[test]
 fn widen_value_and_bend_land_on_the_32_bit_corners() {
     use tutti_midi_protocol::{widen_bend, widen_value};

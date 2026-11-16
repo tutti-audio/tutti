@@ -78,7 +78,7 @@
 //!   gains of frame `k` of [`FadeLaw::gains`] (the one thing shared
 //!   with the executor); the aligned input is the input through a
 //!   `VecDeque` of the declared latency. A bypassed node whose fade is done
-//!   is **not called**; leaving Bypassed resets it and keeps the aligned
+//!   is **not processed**; leaving Bypassed resets it and keeps the aligned
 //!   input audible for the latency before the fade in. A node whose shape
 //!   declares its own bypass is never Bypassed here: it reads as Active. A kept key's state
 //!   survives a new graph, a swap without a fade starts steady, and a swap

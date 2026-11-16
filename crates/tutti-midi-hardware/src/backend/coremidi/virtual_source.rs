@@ -49,7 +49,7 @@ impl UmpVirtualSource {
     /// # Errors
     ///
     /// [`Error::VirtualBlocksUnsupported`] when `spec` declares blocks,
-    /// and [`Error::Os`](crate::Error::Os) if CoreMIDI refuses the client or the endpoint.
+    /// and [`Error::Os`] if CoreMIDI refuses the client or the endpoint.
     pub(crate) fn open(spec: &VirtualSpec) -> Result<Self> {
         if !spec.function_blocks().is_empty() {
             return Err(Error::VirtualBlocksUnsupported);
@@ -78,7 +78,7 @@ impl SourceBackend for UmpVirtualSource {
     ///
     /// # Errors
     ///
-    /// [`Error::Os`](crate::Error::Os) when the message will not fit the event list, or when
+    /// [`Error::Os`] when the message will not fit the event list, or when
     /// `MIDIReceivedEventList` returns a non-zero `OSStatus`.
     fn send(&self, words: &[u32]) -> Result<()> {
         Ok(self.source.send(words)?)

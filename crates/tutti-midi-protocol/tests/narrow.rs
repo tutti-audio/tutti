@@ -11,6 +11,7 @@ use tutti_ump::{CCNumber, NoteNumber, NoteVelocity, U7, U14, Voice1, Voice2};
 /// Table 8, downscale 16 to 7 bits. `0x15FF` is not in the table: it is the
 /// value Table 10's rounding method sends to 11, which the plain shift of
 /// section 3.4 sends to 10.
+/// Spec: m2-115/2.2#2, m2-115/2.3#1
 #[test]
 fn m2_115_table_8_velocity() {
     for (v, want) in [
@@ -44,6 +45,7 @@ fn the_extremes_and_the_centre_keep_their_places() {
 
 /// Section 3.4 stated bit by bit: the result is the source's top bits, so the
 /// value is exact on the multiple of the step and constant over the step.
+/// Spec: m2-115/2.2#2
 #[test]
 fn the_top_bits_are_kept() {
     for v in 0..=127u32 {

@@ -1,0 +1,44 @@
+# MIDI 2.0 Bit Scaling and Resolution (M2-115 v1.0.1) inventory. The spec text is not in
+# the repo: `TUTTI_MIDI_SPECS=<dir> cargo xtask conformance-inventory midi`
+# regenerates the id, kind, section and facts columns from the text that
+# `pdftotext -layout` (26.01.0) makes of the M2-115 PDF in that directory (or a
+# .txt of it beside the PDF); the other columns are written by hand, in our own
+# words. `cargo xtask check-conformance` holds the generated columns to the
+# text when `TUTTI_MIDI_SPECS` is set. Nothing of the spec is quoted here: ids,
+# section numbers, keyword kinds and functional facts only.
+#
+# Columns: id | side | maturity | kind | section | paraphrase | facts | na-kind | cite
+#
+# Ids:
+#   m2-115/<section>#<n>          the nth sentence under the numbered section
+#                                 (appendix letters lowercase: d.2.1) that carries
+#                                 a conformance word. kind: shall is required,
+#                                 should recommended, may permitted; the negated
+#                                 forms keep the kind and carry the fact neg=1.
+# This document has its own conformance-word table (its Table 2), the same three
+# rows as M2-104's, and no negated forms either. Its Table 3 lists must,
+# will, can and might as words that are never conformance statements: a
+# sentence with only those has no row. Sentence rows only: no table of the
+# document has a row per item.
+# side: sender, receiver or both (todo marks a row not yet read).
+m2-115/1.3#1 | both |  | required | M2-115 §1.3 | special per-controller translation rules defined in the MIDI 1.0 spec replace this document's rules for those controllers |  |  |
+m2-115/1.4#1 | both |  | recommended | M2-115 §1.4 | new specifications define values at 16 or 32 bits |  |  |
+m2-115/1.6.1#1 | both |  | permitted | M2-115 §1.6.1 | glossary: Property Exchange lets one device read another's data, definition only |  |  |
+m2-115/1.6.1#2 | both |  | permitted | M2-115 §1.6.1 | glossary: a Transaction can have several replies, definition only |  |  |
+m2-115/1.6.1#3 | both |  | permitted | M2-115 §1.6.1 | glossary: a Transaction can be a longer multi-step exchange, definition only |  |  |
+m2-115/2#1 | sender |  | permitted | M2-115 §2 | a device can capture fewer significant bits than the Protocol field holds |  |  |
+m2-115/2.1#1 | sender |  | required | M2-115 §2.1 | a sender upscales the data it has to the full width of the target field before sending, with this document's methods |  |  |
+m2-115/2.2#1 | receiver |  | required | M2-115 §2.2 | a receiver takes every received value as expressed at the full field width |  |  |
+m2-115/2.2#2 | receiver |  | required | M2-115 §2.2 | a receiver that cannot hold the full width downscales the value with this document's methods |  |  |
+m2-115/2.3#1 | both |  | required | M2-115 §2.3 | a translator upscales or downscales as needed so the target field has its full width |  |  |
+m2-115/2.3#2 | both |  | permitted | M2-115 §2.3 | after a narrowing translation the value read back can differ from the one sent | neg=1 |  |
+m2-115/2.4#1 | sender |  | permitted | M2-115 §2.4 | relative controller steps with fewer significant bits than the receiver's own may leave the controller unchanged |  |  |
+m2-115/3.1#1 | both |  | required | M2-115 §3.1 | a translator scales the listed controllers (Control Change, Pitch Bend, pressure and similar) Min-Center-Max |  |  |
+m2-115/4#1 | both |  | recommended | M2-115 §4 | a receiver ignores the low-bit noise zero-extension leaves, and a sender does not send it |  |  |
+m2-115/4.1#1 | both |  | required | M2-115 §4.1 | a translator zero-extends the Registered Controller (RPN) messages whose index is 0 to 31, rounding when narrowing |  |  |
+m2-115/4.3#1 | both |  | recommended | M2-115 §4.3 | zero-extension upscaling fills the new low bits with zero, a left shift |  |  |
+m2-115/4.3#2 | both |  | recommended | M2-115 §4.3 | zero-extension is not used to upscale a one-bit on/off value | neg=1 |  |
+m2-115/4.3#3 | both |  | permitted | M2-115 §4.3 | a one-bit value of one lands at the halfway point after zero-extension, which may be too coarse to use | neg=1 |  |
+m2-115/4.4#1 | receiver |  | recommended | M2-115 §4.4 | fixed-point values narrowing to fewer bits are rounded |  |  |
+m2-115/4.4#2 | receiver |  | permitted | M2-115 §4.4 | rounding on narrowing is followed by a clamp, because rounding can leave the range |  |  |
+m2-115/5#1 | both |  | recommended | M2-115 §5 | stepped values and enumerations keep the full resolution |  |  |

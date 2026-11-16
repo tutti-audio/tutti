@@ -17,10 +17,12 @@
 //! the next update's pump: the plugin is silent from the swap to then, at least
 //! one block and one update.
 //!
-//! A [`Bypassed`](crate::NodeMode::Bypassed) node is parked and never polled, so
-//! the Processor never leaves it: the plugin's port change, and any restart,
-//! waits until the bypass ends. A plugin with a bypass of its own keeps running
-//! and is not affected.
+//! A [`Bypassed`](crate::NodeMode::Bypassed) node is parked and not rendered,
+//! but the executor still calls its
+//! [`poll_parked`](tutti_graph::Node::poll_parked) each block, which answers the
+//! recall, so a port change, a restart or a rate change completes while the
+//! bypass lasts. A plugin with a bypass of its own keeps running and is not
+//! affected.
 //!
 //! The record is `Settling` until the rebinder says
 //! [`Moved`](tutti_plugin_host::Settlement::Moved), or

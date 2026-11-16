@@ -61,13 +61,11 @@ use std::time::Duration;
 
 #[cfg(not(loom))]
 use std::hint::spin_loop;
-#[cfg(all(not(loom), any(target_os = "linux", target_os = "android")))]
-use std::thread::yield_now;
 #[cfg(not(loom))]
 use std::time::Instant;
 
 #[cfg(loom)]
-use loom::{hint::spin_loop, thread::yield_now};
+use loom::thread::yield_now;
 
 /// How long a participant of a parallel block waits before it gives way:
 /// the audio thread by yielding its core once, a helper by leaving the
@@ -130,112 +128,20 @@ impl Default for BlockWaits {
 #[cfg(not(loom))]
 pub(super) const CLOCK_EVERY: u32 = 64;
 
-/// Under loom: the caller's waits without progress per yield.
-#[cfg(loom)]
-const LOOM_CALLER_SPINS: u32 = 2;
-
 /// Under loom: the waits a helper spins before it leaves on the next.
 #[cfg(loom)]
 const LOOM_HELPER_SPINS: u32 = 2;
 
-/// A wait that spins, then yields its core after
-/// [`BlockWaits::caller_yield_after`] without progress (on Linux). See the
-/// module docs (`src/spin.rs`).
-pub(super) struct SpinThenYield {
-    /// The counter's value at the last wait.
-    seen: u32,
-    /// Waits since the last clock read (or, under loom, since progress or
-    /// the last yield).
-    #[cfg(any(loom, target_os = "linux", target_os = "android"))]
-    spins: u32,
-    /// When the counter was first seen unmoved, by the clock's reads; `None`
-    /// until the first read after progress or a yield.
-    #[cfg(all(not(loom), any(target_os = "linux", target_os = "android")))]
-    since: Option<Instant>,
-    /// How long the counter may stay unmoved.
-    #[cfg(all(not(loom), any(target_os = "linux", target_os = "android")))]
-    budget: Duration,
-}
-
-impl SpinThenYield {
-    /// A wait on a counter now at `seen`, yielding after `budget` without
-    /// progress (ignored where the caller only spins, and under loom).
-    pub(super) fn new(seen: u32, budget: Duration) -> Self {
-        #[cfg(any(loom, not(any(target_os = "linux", target_os = "android"))))]
-        let _ = budget;
-        Self {
-            seen,
-            #[cfg(any(loom, target_os = "linux", target_os = "android"))]
-            spins: 0,
-            #[cfg(all(not(loom), any(target_os = "linux", target_os = "android")))]
-            since: None,
-            #[cfg(all(not(loom), any(target_os = "linux", target_os = "android")))]
-            budget,
-        }
-    }
-
-    /// One step of the wait, given the counter's current value `now`.
-    pub(super) fn wait(&mut self, now: u32) {
-        if now != self.seen {
-            self.seen = now;
-            self.restart();
-        }
-        if self.due() {
-            self.restart();
-            #[cfg(all(test, not(loom)))]
-            tests::count_yield();
-            #[cfg(any(loom, target_os = "linux", target_os = "android"))]
-            yield_now();
-        } else {
-            spin_loop();
-        }
-    }
-
-    /// Start the budget again: after progress, or after a yield.
-    fn restart(&mut self) {
-        #[cfg(any(loom, target_os = "linux", target_os = "android"))]
-        {
-            self.spins = 0;
-        }
-        #[cfg(all(not(loom), any(target_os = "linux", target_os = "android")))]
-        {
-            self.since = None;
-        }
-    }
-
-    /// Whether this wait spends the budget.
-    #[cfg(loom)]
-    fn due(&mut self) -> bool {
-        self.spins += 1;
-        self.spins >= LOOM_CALLER_SPINS
-    }
-
-    /// Whether this wait spends the budget: every `CLOCK_EVERY` waits, a
-    /// clock read, and the first read after a restart starts the clock.
-    #[cfg(all(not(loom), any(target_os = "linux", target_os = "android")))]
-    fn due(&mut self) -> bool {
-        self.spins += 1;
-        if self.spins < CLOCK_EVERY {
-            return false;
-        }
-        self.spins = 0;
-        let t = now();
-        match self.since {
-            None => {
-                self.since = Some(t);
-                false
-            }
-            Some(s) => t.saturating_duration_since(s) >= self.budget,
-        }
-    }
-
-    /// Off Linux the caller only spins (see the module docs, "Only on
-    /// Linux").
-    #[cfg(all(not(loom), not(any(target_os = "linux", target_os = "android"))))]
-    fn due(&mut self) -> bool {
-        false
-    }
-}
+#[cfg_attr(
+    any(loom, target_os = "linux", target_os = "android"),
+    path = "spin/yielding.rs"
+)]
+#[cfg_attr(
+    not(any(loom, target_os = "linux", target_os = "android")),
+    path = "spin/spinning.rs"
+)]
+mod caller;
+pub(super) use caller::SpinThenYield;
 
 /// A helper's wait for work another participant is finishing: it spins
 /// until [`BlockWaits::helper_leave_after`] has passed with nothing to take,

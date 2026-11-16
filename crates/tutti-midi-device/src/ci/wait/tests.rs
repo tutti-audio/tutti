@@ -29,6 +29,7 @@ fn only_a_timeout_wait_ack_is_a_wait() {
 
 // M2-103 §12.2.1, Example 1: a wait of 0x3C (6 s) is added to the 3 s in hand,
 // 9 s in all; a second wait adds again, and a wait of 0 adds nothing.
+/// Spec: m2-103/12.2.1#2
 #[test]
 fn a_wait_is_added_to_the_time_left() {
     let now = Instant::now();

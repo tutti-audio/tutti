@@ -28,6 +28,7 @@ fn raw(details: &[U7; 5]) -> [u8; 5] {
 // M2-103 §12.2.1, Table 61: ACK 0x10, the status data the wait in tenths of a
 // second (0x1E is 3 s, 0x3C 6 s, 0x7F 12.7 s), then the Request ID and the chunk
 // number, least significant byte first.
+/// Spec: m2-103/12.2.1#1
 #[test]
 fn a_timeout_wait_ack_lays_out_table_61() {
     let wait = ack(PeSignal::TimeoutWait {
@@ -74,6 +75,7 @@ fn a_flow_control_ack_lays_out_table_94() {
 }
 
 // M2-103 §15.4, Table 97: NAK 0x12, the Request ID and the last successful chunk.
+/// Spec: m2-103/15.4#1
 #[test]
 fn a_resend_nak_lays_out_table_97() {
     let resend = nak(
@@ -90,6 +92,7 @@ fn a_resend_nak_lays_out_table_97() {
 
 // M2-103 §12.1.1, §12.1.2: NAK 0x20, the status data 0 when the Responder ends
 // the transaction and 1 when the Initiator does.
+/// Spec: m2-103/12.1.1#1, m2-103/12.1.2#1
 #[test]
 fn a_terminate_nak_says_who_ends_the_transaction() {
     let by = |by| {
@@ -108,6 +111,7 @@ fn a_terminate_nak_says_who_ends_the_transaction() {
 
 // M2-101 Table 16 and M2-103 §12.2.3: 0x21 out of sequence, 0x41 malformed and
 // 0x42 timeout have status data 0.
+/// Spec: m2-103/12.2.3#1
 #[test]
 fn the_failure_naks_carry_their_codes() {
     for (signal, code) in [
