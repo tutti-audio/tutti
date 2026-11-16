@@ -329,7 +329,7 @@ impl Node for TestNode {
         let rate = p.sample_rate().get();
         if let Some(old) = self.rate.filter(|&old| old != rate) {
             for (due, _) in &mut self.pending {
-                *due = Frame::new((due.get() as f64 * rate / old).round() as u64);
+                *due = due.scaled(rate / old);
             }
         }
         self.rate = Some(rate);

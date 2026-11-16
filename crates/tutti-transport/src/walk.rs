@@ -21,7 +21,7 @@
 
 use tutti_graph::{Offset, TransportChanges, TransportPosition};
 use tutti_tempo::{CellGrid, TempoMap, TempoView};
-use tutti_types::{Beat, Frame, FrameClock, LoopRange, Samples, first_frame_at_or_after};
+use tutti_types::{Beat, Frame, FrameClock, LoopRange, Samples};
 
 /// The one cell grid: a cell is at most this many frames, whatever the block
 /// length (one engine constant, never per block).
@@ -69,7 +69,7 @@ impl TempoWalk {
         let beat = clock.beat();
         let mut view = map.view(rate);
         self.frame = if beat.get() < 0.0 {
-            first_frame_at_or_after(view.seconds_at(beat).get() * rate.get())
+            view.frames_between(Beat(0.0), beat)
         } else {
             view.frame_at_or_after(beat).get() as i64
         };

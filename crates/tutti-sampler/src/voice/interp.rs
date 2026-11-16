@@ -27,7 +27,7 @@ use tutti_dsp::cubic_hermite;
 use tutti_graph::fold_to_width;
 use tutti_types::{
     Beat, BeatDuration, Bpm, ChannelLayout, ChannelTopology, Frame, ReadRate, SamplePosition,
-    SampleRate, Samples, Speaker, TimelineSegment, snap_to_whole_frame,
+    SampleRate, Samples, Speaker, TimelineSegment, first_frame_at_or_after, snap_to_whole_frame,
 };
 
 use super::clock::{BlockClock, Run, Wrap};
@@ -215,8 +215,8 @@ impl Gate {
             return to;
         }
         let fpb = run.frames_per_beat().unwrap_or(1.0);
-        let est = ((target - run.beat_at(from)).get() * fpb).ceil();
-        let mut j = if est.is_finite() && est >= 1.0 {
+        let est = first_frame_at_or_after((target - run.beat_at(from)).get() * fpb);
+        let mut j = if est >= 1 {
             (from + est as usize).min(to - 1)
         } else {
             from + 1
