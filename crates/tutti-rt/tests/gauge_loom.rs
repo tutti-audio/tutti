@@ -59,6 +59,12 @@ fn each_tally_of_a_counter_never_goes_back_and_closed_is_whole() {
             let Two([a1, b1]) = total.get();
             let Two([a2, b2]) = total.get();
             assert!(a2 >= a1 && b2 >= b1, "a tally went back");
+            for (a, b) in [(a1, b1), (a2, b2)] {
+                assert!(
+                    matches!(a, 0 | 1 | 3) && matches!(b, 0 | 10 | 30),
+                    "a tally is not a prefix total: ({a}, {b})"
+                );
+            }
             if closed {
                 assert_eq!((a1, b1), (3, 30), "a closed counter read short");
             }
@@ -142,6 +148,35 @@ fn a_reopened_writer_sees_the_last_value_of_the_dropped_one() {
         let won = handle.join().unwrap();
         if !won {
             // The reopen ran while the writer was live; it is closed now.
+            assert!(total.reopen().is_some());
+        }
+    });
+}
+
+#[test]
+fn a_reopened_two_tally_writer_sees_every_tally_of_the_dropped_one() {
+    loom::model(|| {
+        let (mut writer, total) = counter::<Two>();
+        let reopener = total.clone();
+        let handle = thread::spawn(move || {
+            if let Some(mut next) = reopener.reopen() {
+                assert_eq!(
+                    reopener.get(),
+                    Two([3, 30]),
+                    "a reopened counter read short"
+                );
+                next.add(Two([1, 10]));
+                assert_eq!(reopener.get(), Two([4, 40]));
+                true
+            } else {
+                false
+            }
+        });
+        writer.add(Two([1, 10]));
+        writer.add(Two([2, 20]));
+        drop(writer);
+        let won = handle.join().unwrap();
+        if !won {
             assert!(total.reopen().is_some());
         }
     });

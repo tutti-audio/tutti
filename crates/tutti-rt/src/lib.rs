@@ -148,7 +148,7 @@
 //!   flip, so a block lands in one take with its peak and frames together.
 //! - [`gauge()`] / [`counter()`] — a reading a node writes and any thread reads: a
 //!   level that moves both ways ([`Gauge`]) or a count that only grows
-//!   ([`Counter`]), each one word, never reset by a read.
+//!   ([`Counter`], one or several tallies), each tally one word, never reset by a read.
 //! - [`RenderCount`] — the renders of one thing in flight (an `enter` that
 //!   returns a [`RenderGuard`]), and a `quiescent` check for the thread that has
 //!   cleared what they read, so it frees only when none can still read it.
@@ -229,7 +229,9 @@ pub use doorbell::Doorbell;
 pub use drain_clock::{DrainBeat, DrainMark, DrainWatch, drain_clock};
 pub use edits::{EditReader, EditWriter, RingFull, edit_ring};
 pub use fault_latch::{Drained, FaultLatch};
-pub use gauge::{Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, counter, gauge};
+pub use gauge::{
+    Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, Words, counter, gauge,
+};
 pub use handoff::{Hand, Rt, handoff};
 pub use job_gate::JobGate;
 pub use level_cell::{LevelReader, LevelSpan, LevelWriter, level_cell};

@@ -13,7 +13,7 @@
 //!   ([`Count`]). [`CounterWriter::add`] adds to each and saturates it;
 //!   no tally of [`Counter::get`] is less than in an earlier `get`.
 //!
-//! Nothing resets on read, and a reader never blocks: one load of one word.
+//! Nothing resets on read, and a reader never blocks: one load per word (one word for a gauge).
 //! The writer is not `Clone` and writes through `&mut self`, so the cell has
 //! one writer at a time by type (a shared reference cannot write, and two
 //! threads cannot race a read-modify-write). Writing is audio-thread safe: no
@@ -121,6 +121,44 @@ where
     }
 }
 
+/// A [`Count`]'s tallies: `[u64; N]` with `N >= 1`, and nothing else. Sealed,
+/// so a count's width is fixed by its type and the counter's cells always
+/// match it.
+pub trait Words: words::Sealed + Copy {
+    /// The number of tallies: `N`, a compile error when `N` is 0.
+    const LEN: usize;
+    /// All tallies zero.
+    fn zeroed() -> Self;
+    /// The tallies as a slice of `LEN` words.
+    fn as_slice(&self) -> &[u64];
+    /// The tallies as a mutable slice of `LEN` words.
+    fn as_mut_slice(&mut self) -> &mut [u64];
+}
+
+mod words {
+    pub trait Sealed {}
+    impl<const N: usize> Sealed for [u64; N] {}
+}
+
+impl<const N: usize> Words for [u64; N] {
+    const LEN: usize = {
+        assert!(N >= 1, "a count has at least one tally");
+        N
+    };
+    #[inline]
+    fn zeroed() -> Self {
+        [0; N]
+    }
+    #[inline]
+    fn as_slice(&self) -> &[u64] {
+        self
+    }
+    #[inline]
+    fn as_mut_slice(&mut self) -> &mut [u64] {
+        self
+    }
+}
+
 /// A quantity a [`Counter`] counts: one or several whole-number tallies.
 ///
 /// A value is a fixed array of words, one per tally ([`Words`](Self::Words),
@@ -138,7 +176,7 @@ where
 /// and not a bare number.
 pub trait Count: Copy + Send + 'static {
     /// The tallies: `[u64; N]`, one word per tally.
-    type Words: Copy + Default + AsRef<[u64]> + AsMut<[u64]>;
+    type Words: Words;
     /// The value as its tallies.
     fn to_words(self) -> Self::Words;
     /// The value whose tallies `to_words` returned.
@@ -391,20 +429,23 @@ impl<U: Count> Counter<U> {
     /// Each word is read on its own, in order, so a read that races the
     /// writer may pair word 0 from before an `add` with a later word from
     /// after it. Every word is a real total of its own tally; none is torn.
-    /// A closed counter is read whole: its writer's last store precedes the
-    /// `closed` flag.
+    /// `get` does not load the `closed` flag: a reader that wants the final
+    /// total reads [`is_closed`](Self::is_closed) first, and once that is
+    /// `true` the `get` that follows reads every tally whole (the writer's
+    /// last store precedes its `Release` store of `closed`).
     #[inline]
     #[must_use]
     pub fn get(&self) -> U {
-        let mut words = U::Words::default();
-        for (i, word) in words.as_mut().iter_mut().enumerate() {
+        let mut words = U::Words::zeroed();
+        for (i, word) in words.as_mut_slice().iter_mut().enumerate() {
             *word = self.cell.word(i).load(Ordering::Acquire);
         }
         U::from_words(words)
     }
 
     /// Whether the writer is gone: the total read is final until a
-    /// [`reopen`](Self::reopen).
+    /// [`reopen`](Self::reopen). A `get` after this answers `true` reads
+    /// every tally the writer wrote; a `get` before it may read mid-run.
     #[inline]
     #[must_use]
     pub fn is_closed(&self) -> bool {
@@ -450,10 +491,13 @@ impl<U: Count> CounterWriter<U> {
     #[inline]
     pub fn add(&mut self, by: U) {
         let by = by.to_words();
-        for (i, add) in by.as_ref().iter().enumerate() {
+        for (i, add) in by.as_slice().iter().enumerate() {
             let word = self.cell.word(i);
             let total = word.load(Ordering::Relaxed).saturating_add(*add);
-            word.store(total, Ordering::Release);
+            // Relaxed: this word's coherence order keeps each tally monotonic
+            // for a reader, and the `Release` store of `closed` in the drop
+            // publishes every word to a reader that saw it closed.
+            word.store(total, Ordering::Relaxed);
         }
     }
 }
@@ -467,7 +511,7 @@ impl<U: Count> Drop for CounterWriter<U> {
 /// A counter at zero, and its writer. Allocates: control side.
 #[must_use = "the writer is the only way to count"]
 pub fn counter<U: Count>() -> (CounterWriter<U>, Counter<U>) {
-    let cell = Shared::new(0, U::Words::default().as_ref().len().saturating_sub(1));
+    let cell = Shared::new(0, <U::Words as Words>::LEN - 1);
     (
         CounterWriter {
             cell: Arc::clone(&cell),
