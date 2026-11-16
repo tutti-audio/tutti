@@ -54,7 +54,7 @@ use winnow::token::{literal, take};
 
 use tutti_ump::{MidiGroup, Voice1, parse_exact};
 
-use super::SmfParts;
+use super::{SmfDivision, SmfParts};
 use crate::file::{FileEvent, Meta, SmfFormat, TextKind, Tick, Track};
 use crate::{Error, Result, SmfParseError, Truncated};
 
@@ -114,20 +114,21 @@ fn counted<'a>(
 struct Header {
     format: SmfFormat,
     tracks: u16,
-    ticks_per_quarter: u16,
+    division: SmfDivision,
 }
 
 /// The division word: ticks per quarter note, or (top bit set) an SMPTE
 /// frame rate and ticks per frame (SMF 1.0 section 2.1), which is refused.
-fn division(input: &mut &[u8]) -> Res<u16> {
+fn division(input: &mut &[u8]) -> Res<SmfDivision> {
     let raw = be_u16.parse_next(input)?;
     let [high, _] = raw.to_be_bytes();
     // With the top bit set, the high byte is the negated frame rate as an i8.
-    match (raw, i8::from_be_bytes([high])) {
-        (0, _) => refuse(SmfParseError::ZeroTicksPerBeat).parse_next(input),
+    // With the top bit clear, the only word out of range is 0.
+    match (SmfDivision::new(raw), i8::from_be_bytes([high])) {
         (_, -24 | -25 | -29 | -30) => fail.context(Fault::Timecode).parse_next(input),
         (_, ..0) => refuse(SmfParseError::InvalidFrameRate).parse_next(input),
-        (raw, _) => Ok(raw),
+        (Some(division), _) => Ok(division),
+        (None, _) => refuse(SmfParseError::ZeroTicksPerBeat).parse_next(input),
     }
 }
 
@@ -145,11 +146,11 @@ fn header_body(input: &mut &[u8]) -> Res<Header> {
         .context(malformed(SmfParseError::UnknownFormat))
         .parse_next(input)?;
     let tracks = be_u16.parse_next(input)?;
-    let ticks_per_quarter = division.parse_next(input)?;
+    let division = division.parse_next(input)?;
     Ok(Header {
         format,
         tracks,
-        ticks_per_quarter,
+        division,
     })
 }
 
@@ -416,7 +417,7 @@ pub(crate) fn read(bytes: &[u8]) -> Result<SmfParts> {
         .map_err(|e| error_of(&e))?;
     Ok(SmfParts {
         format: header.format,
-        ticks_per_quarter: header.ticks_per_quarter,
+        division: header.division,
         tracks,
     })
 }

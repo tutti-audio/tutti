@@ -1,31 +1,32 @@
-//! One reader for the cells of every [`FamilyNode`](crate::FamilyNode) family.
+//! One reader for the cells of every [`KernelNode`](crate::KernelNode).
 //!
-//! A family writes a [`ControlSet`]: its addresses, and the conversion between its
+//! A kernel writes a [`ControlSet`]: its addresses, and the conversion between its
 //! `Controls` and the `f32`s the ports carry. [`Params`] is the one reader over it,
 //! with one rule for every control: the lane's value at
 //! the solve frame when a lane drives it, else a glide from the controls last
 //! designed to the cell's value, each read through [`LastGood`]. Sanitising
 //! (floors, clamps, whole-set validation) is the design's, never the reader's.
 //!
-//! A control the family reads **per frame** is [`ControlRead::Fast`]: the
-//! recurrence takes its port's frames from the [`Inputs`](tutti_dsp::Inputs) lanes
+//! A control the kernel reads **per frame** is [`ControlRead::Fast`]: the
+//! kernel takes its port's frames from the [`ControlLanes`](crate::ControlLanes)
 //! (`Params::lanes`), and the reader sees only its cell, the base the member is
 //! designed at.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
 
-use tutti_dsp::{GAIN_GLIDE, Glide, MAX_LANES};
+use tutti_dsp::{GAIN_GLIDE, Glide};
 use tutti_graph::{Io, ParamSetBuilder};
 use tutti_types::{AtomicF32, SampleRate, UnitAddr};
 
+use crate::kernel::MAX_LANES;
 use crate::ramp::LastGood;
 
-/// The most controls a family has: the compressor's six, the gate's five and the
+/// The most controls a kernel has: the compressor's six, the gate's five and the
 /// limiter's three fit with room.
 const MAX_CONTROLS: usize = 16;
 
-/// A family's controls as a list of `f32` cells.
+/// A kernel's controls as a list of `f32` cells.
 pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
     /// The design's own `Controls`.
     type Controls: Copy + PartialEq + Send;
@@ -73,10 +74,10 @@ pub enum ControlRead {
     /// port is read at the solve frame when a lane drives it.
     Glide,
     /// As [`Glide`](Self::Glide), but a moved cell lands whole: a control whose glide
-    /// is the recurrence's own (a detector's) is not ramped by the reader.
+    /// is the kernel's own (a detector's) is not ramped by the reader.
     Whole,
-    /// Read **per frame** by the recurrence, from its port, into a
-    /// [`Inputs`](tutti_dsp::Inputs) lane (the fast controls fill the lanes in row order).
+    /// Read **per frame** by the kernel, from its port, into a
+    /// [`ControlLanes`](crate::ControlLanes) lane (the fast controls fill the lanes in row order).
     /// The reader takes only its cell, the base the member is designed at, and a
     /// frame nobody drives is clamped at that member. A fast control lands whole.
     Fast,
@@ -117,7 +118,7 @@ impl Control {
         }
     }
 
-    /// The row flag `fast`: read per frame from an [`Inputs`](tutti_dsp::Inputs) lane.
+    /// The row flag `fast`: read per frame from a [`ControlLanes`](crate::ControlLanes) lane.
     #[must_use]
     pub(crate) const fn fast(self) -> Self {
         Self {
@@ -161,8 +162,8 @@ impl Control {
 
 /// That a [`ControlSet`] has a control of the kind `P` (a packed
 /// [`UnitAddr`] at index 0), in the unit `Unit`: what
-/// `control_set!` writes from the family's own `Controls` fields, and what
-/// the typed key of a [`FamilyNode`](crate::FamilyNode) reads
+/// `control_set!` writes from the kernel's own `Controls` fields, and what
+/// the typed key of a [`KernelNode`](crate::KernelNode) reads
 /// ([`HasParam`](tutti_graph::HasParam)).
 pub trait HasControl<const P: u16> {
     /// The unit the control's value is in.
@@ -172,7 +173,7 @@ pub trait HasControl<const P: u16> {
 /// That a [`ControlSet`] has several controls of the kind `P`, numbered from 0.
 pub trait HasControls<const P: u16>: HasControl<P> {}
 
-/// Writes a family's [`ControlSet`] from its `Controls` fields, once: the
+/// Writes a kernel's [`ControlSet`] from its `Controls` fields, once: the
 /// addresses, the conversion to the `f32`s the ports carry and back, and the
 /// unit of each control ([`HasControl`]). The unit a row states is checked
 /// against the field's own type (`flatten` reads it as that unit), so a
@@ -198,7 +199,7 @@ pub trait HasControls<const P: u16>: HasControl<P> {}
 /// `Kind[0] => Unit = field[0]` the first of several of a kind (`HasControls`),
 /// and `Kind[i]` with `i` above 0 the others. A row may end in flags, `{ .. }`, that
 /// say how the reader takes it ([`Control`]): `whole` (lands whole, no glide), `fast`
-/// (read per frame into an [`Inputs`](tutti_dsp::Inputs) lane, in row order; more fast rows
+/// (read per frame into a [`ControlLanes`](crate::ControlLanes) lane, in row order; more fast rows
 /// than [`MAX_LANES`] do not compile) and `not_nan` (accepts `+-inf`). A flag that is
 /// not one of these does not compile.
 macro_rules! control_set {
@@ -226,8 +227,8 @@ macro_rules! control_set {
                     $crate::params::Control::GLIDE $($(.$flag())*)?
                 ),+];
                 const _: () = assert!(
-                    $crate::params::Control::fast_count(ALL) <= tutti_dsp::MAX_LANES,
-                    "more fast controls than an Inputs has lanes",
+                    $crate::params::Control::fast_count(ALL) <= $crate::MAX_LANES,
+                    "more fast controls than a ControlLanes has lanes",
                 );
                 ALL[k]
             }
@@ -341,7 +342,7 @@ impl<S: ControlSet> Params<S> {
     ///
     /// # Panics
     ///
-    /// If `set` has more [`ControlRead::Fast`] controls than an [`Inputs`](tutti_dsp::Inputs) has
+    /// If `set` has more [`ControlRead::Fast`] controls than [`ControlLanes`](crate::ControlLanes) has
     /// lanes ([`MAX_LANES`]): only a hand-written [`ControlSet`] can, since
     /// `control_set!` refuses it at compile time.
     #[must_use]
@@ -358,7 +359,7 @@ impl<S: ControlSet> Params<S> {
             if controls[k].read == ControlRead::Fast {
                 assert!(
                     fast_len < MAX_LANES,
-                    "more fast controls than an Inputs has lanes"
+                    "more fast controls than a ControlLanes has lanes"
                 );
                 fast[fast_len] = k;
                 fast_len += 1;
@@ -382,8 +383,8 @@ impl<S: ControlSet> Params<S> {
     }
 
     /// Takes the rate a cell's glide is measured at, and whether a moved cell glides
-    /// at all: a family whose realization glides its own coefficients between block
-    /// designs (a block cadence) lands it whole. Every cell lands whole on the next
+    /// at all: a kernel that glides its own coefficients between block
+    /// designs lands it whole. Every cell lands whole on the next
     /// block, as after [`land`](Self::land).
     pub(crate) fn retune(&mut self, rate: SampleRate, glides: bool) {
         self.glide = if glides {
@@ -526,7 +527,7 @@ impl<S: ControlSet> Params<S> {
     }
 
     /// The per-frame lanes of the [`ControlRead::Fast`] controls, for the
-    /// [`Inputs`](tutti_dsp::Inputs): the port's frames in the port's own unit, `None` where
+    /// [`ControlLanes`](crate::ControlLanes): the port's frames in the port's own unit, `None` where
     /// nothing drives it. They are the block's, so a caller slices them by the frames it
     /// renders.
     pub(crate) fn lanes<'a>(&self, io: &Io<'a>) -> [Option<&'a [f32]>; MAX_LANES] {

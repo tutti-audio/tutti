@@ -25,7 +25,7 @@ use tutti_ump::Ump;
 /// piece on every frame whose play count is a multiple of the stride.
 ///
 /// Its own type, so a play stride is never taken for an effect's stream
-/// period (`tutti_dsp::Cadence`): the play clock restarts at every play start,
+/// period (`tutti_dsp::COEFF_INTERVAL`): the play clock restarts at every play start,
 /// the stream clock does not. Every `NonZeroU32` is a stride.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PlayGrid(NonZeroU32);

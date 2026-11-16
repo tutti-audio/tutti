@@ -8,6 +8,7 @@
 
 use tutti_ump::{Message, Midi1Bytes};
 
+use super::SmfDivision;
 use crate::file::{FileEvent, Meta, SmfFormat, TextKind, Tick, Track};
 use crate::{ConfigError, Error, Result};
 
@@ -199,18 +200,14 @@ fn chunk(kind: &[u8; 4], body: &[u8]) -> Result<Vec<u8>> {
 ///
 /// [`ConfigError::TooLarge`] if the SMF cannot hold it: more than 65535 tracks,
 /// an event or a chunk too long for its length field.
-pub(crate) fn write(
-    format: SmfFormat,
-    ticks_per_quarter: u16,
-    tracks: &[Track],
-) -> Result<Vec<u8>> {
+pub(crate) fn write(format: SmfFormat, division: SmfDivision, tracks: &[Track]) -> Result<Vec<u8>> {
     let format_word: u16 = match format {
         SmfFormat::SingleTrack => 0,
         SmfFormat::Parallel => 1,
         SmfFormat::Sequential => 2,
     };
     let count = u16::try_from(tracks.len()).map_err(|_| too_large())?;
-    let header: Vec<u8> = [format_word, count, ticks_per_quarter]
+    let header: Vec<u8> = [format_word, count, division.get()]
         .into_iter()
         .flat_map(u16::to_be_bytes)
         .collect();

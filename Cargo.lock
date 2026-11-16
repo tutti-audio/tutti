@@ -2585,6 +2585,7 @@ dependencies = [
 name = "tutti-curve"
 version = "0.0.1"
 dependencies = [
+ "libm",
  "thiserror 2.0.21",
  "tutti-fixtures",
  "tutti-types",
@@ -2599,7 +2600,6 @@ dependencies = [
  "rustfft",
  "thiserror 2.0.21",
  "tutti-buffers",
- "tutti-dsp",
  "tutti-fixtures",
  "tutti-types",
  "wide",
@@ -2676,6 +2676,7 @@ dependencies = [
  "bytemuck",
  "criterion",
  "libc",
+ "libm",
  "proptest",
  "serde",
  "thiserror 2.0.21",
@@ -2944,6 +2945,7 @@ dependencies = [
  "dpi",
  "libloading 0.9.1",
  "parking_lot",
+ "thiserror 2.0.21",
  "tracing",
  "tutti-fixtures",
  "tutti-graph",

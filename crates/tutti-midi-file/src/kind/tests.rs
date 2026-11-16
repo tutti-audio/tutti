@@ -3,15 +3,18 @@ use crate::MidiFile;
 
 #[test]
 fn detect_tells_the_two_midi_formats_apart() {
-    let clip = MidiFile::clip(96, crate::Track::default())
-        .unwrap()
-        .to_bytes()
-        .unwrap();
+    let clip = MidiFile::clip(
+        tutti_ump::TicksPerQuarterNote::of(96),
+        crate::Track::default(),
+    )
+    .unwrap()
+    .to_bytes()
+    .unwrap();
     assert_eq!(MidiFileKind::detect(&clip), Some(MidiFileKind::ClipFile));
 
     let smf = MidiFile::smf(
         crate::SmfFormat::SingleTrack,
-        480,
+        crate::SmfDivision::of(480),
         vec![crate::Track::default()],
     )
     .unwrap()
@@ -41,10 +44,13 @@ fn detect_path_reads_the_magic_not_the_extension() {
     // A clip file under an SMF extension still detects as a clip file, and
     // the SMF reader rejects it rather than mis-parsing it.
     let misnamed = dir.path().join("misnamed.mid");
-    MidiFile::clip(96, crate::Track::default())
-        .unwrap()
-        .write(&misnamed)
-        .unwrap();
+    MidiFile::clip(
+        tutti_ump::TicksPerQuarterNote::of(96),
+        crate::Track::default(),
+    )
+    .unwrap()
+    .write(&misnamed)
+    .unwrap();
     assert_eq!(
         MidiFileKind::detect_path(&misnamed).unwrap(),
         Some(MidiFileKind::ClipFile)

@@ -1,6 +1,6 @@
 use super::*;
 use crate::filter::ladder::kernel::{LadderCoefficients, ladder_step};
-use crate::{Complex32, RealFft};
+use crate::{Complex32, RealFft, Ring};
 use tutti_buffers::Float;
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -204,12 +204,10 @@ fn the_radius_and_the_tail_are_what_the_linearised_filter_rings() {
 fn a_full_resonance_is_unstable_at_small_signal() {
     assert!(!model(LadderType::LP24, 1_000.0, 1.0).is_stable());
     assert!(model(LadderType::LP24, 1_000.0, 0.5).is_stable());
-    assert!(
-        model(LadderType::LP24, 1_000.0, 0.5)
-            .tail(Db(-60.0))
-            .seconds()
-            .is_some()
-    );
+    assert!(matches!(
+        model(LadderType::LP24, 1_000.0, 0.5).tail(Db(-60.0)),
+        Ring::Finite(_)
+    ));
     assert_eq!(
         model(LadderType::LP24, 1_000.0, 1.0).tail(Db(-60.0)),
         Ring::Unbounded
