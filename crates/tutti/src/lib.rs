@@ -186,8 +186,9 @@ pub use tutti_session::{
 #[cfg(feature = "session")]
 pub use tutti_session::{
     Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Job, JobId, JobKind, JobStatus,
-    Key, Landed, NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime, Root, Session,
-    SessionBuilder, SessionEvent, SystemClock, SystemSession, TypedParamRef, WaitError, Workers,
+    Key, Landed, NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime, RestoreState,
+    Root, SaveState, Session, SessionBuilder, SessionEvent, SystemClock, SystemSession,
+    TypedParamRef, WaitError, Workers,
 };
 #[cfg(all(feature = "session", feature = "device"))]
 pub use tutti_session::{Device, DeviceClock, DeviceEvent, LiveSession};
@@ -266,7 +267,10 @@ pub mod types {
         Frames, FramesMut, Mono, MonoMut, PlaneIter, PlaneIterMut, Planes, PlanesMut,
     };
     pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
-    pub use tutti_rt::{Drained, LevelSpan, Panicked, PosFrame, PushError, Reclaim};
+    pub use tutti_rt::{
+        Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter, LevelSpan, Panicked, PosFrame,
+        PushError, Reading, Reclaim,
+    };
     pub use tutti_types::{
         Adsr, AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
         AmbisonicOrdering, ArcDegrees, AtomicSampleRate, Azimuth, Balance, BarCount, BarPosition,
@@ -369,9 +373,10 @@ pub mod session {
     pub use tutti_session::Load as PoolLoad;
     pub use tutti_session::{
         Declared, HandleError, IntoPool, Life, LoadError, OpenCx, Parking, PoolConfig, PoolEntry,
-        PoolError, PoolEvent, PoolKey, PoolOutcome, PoolReport, PoolSet, PoolState, RefreshPool,
-        RetryError, WhenLoadedError, stranded_loads,
+        PoolError, PoolEvent, PoolJobError, PoolKey, PoolLoaded, PoolOutcome, PoolReport, PoolSet,
+        PoolState, RefreshPool, RefreshReport, RetryError, WhenLoadedError, stranded_loads,
     };
+    pub use tutti_session::{Task, WorkerError};
 
     #[cfg(any(feature = "io", feature = "export"))]
     pub use tutti_session::DitherShape;
