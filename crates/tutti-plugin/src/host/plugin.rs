@@ -754,9 +754,9 @@ impl std::fmt::Debug for PluginRebinder {
 
 impl PluginRebinder {
     /// The rebinder of a served plugin's bound client
-    /// ([`PluginClient::rebinder`](crate::handles::PluginClient::rebinder)).
+    /// ([`PluginClient::rebinder`](crate::PluginClient::rebinder)).
     #[must_use]
-    pub fn served(client: &crate::handles::PluginClient<crate::host::node::Bound>) -> Self {
+    pub fn served(client: &crate::PluginClient<crate::host::node::Bound>) -> Self {
         Self {
             inner: std::sync::Arc::new(std::sync::Mutex::new(ServedRebind {
                 rebinder: client.rebinder(),

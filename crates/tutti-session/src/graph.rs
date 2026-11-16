@@ -11,7 +11,6 @@
 //! | `set_param` | the node's [`ParamSet`], when it has one |
 //! | `replace`, `crossfade` | `Editor::replace_or_swap` with a [`Fade`]: a plain swap when there is nothing to fade from |
 //! | `node_latency`, `node_tail`, `node_inputs`, `node_outputs` | the editor's [`Shapes`](tutti_graph::Shapes) |
-//! | `latency_plan` | `tutti_graph::latency_plan` over the whole spec: audio edges plus event and param-modulation sources |
 //! | `set_feed`, `move_feeds` | the union of every feeder's sources, written as a sink's event edges beside the host's own |
 //! | `refresh_node_latency` | `Editor::set_latency` |
 //! | `insert_plugin`, `replace_plugin` | the bound `PluginClient` itself, a node with its own fork source |
@@ -57,7 +56,7 @@ use tutti_graph::{
 };
 use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, EventTapId, MeterId, MeterSpec, MissingSource,
-    TapAlign, TapId, Topology,
+    TapAlign, TapId,
 };
 #[cfg(feature = "plugin")]
 use tutti_types::Latency;
@@ -228,7 +227,7 @@ where
 }
 
 #[cfg(feature = "plugin")]
-struct PluginSwap(Box<tutti_plugin::handles::PluginClient>);
+struct PluginSwap(Box<tutti_plugin::PluginClient>);
 
 #[cfg(feature = "plugin")]
 impl ErasedSwap for PluginSwap {
@@ -399,7 +398,7 @@ pub(crate) struct Unwiring {
 /// index (`1..`), before it takes work: see
 /// [`SessionBuilder::render_worker_start`](crate::SessionBuilder::render_worker_start).
 #[derive(Clone)]
-pub struct RenderWorkerStart(Arc<dyn Fn(usize) + Send + Sync>);
+pub(crate) struct RenderWorkerStart(Arc<dyn Fn(usize) + Send + Sync>);
 
 impl RenderWorkerStart {
     /// Wrap `hook`.
@@ -861,7 +860,7 @@ impl Graph {
     fn address<N: SessionNode>(&mut self, node: NodeKey, controls: &N::Controls) {
         if let Some(entry) = self.nodes.get_mut(&node) {
             entry.params = N::params(controls);
-            entry.reclaimer = N::reclaimer(controls);
+            entry.reclaimer = N::reclaimer(controls).into_reclaimer();
         }
     }
 
@@ -879,7 +878,7 @@ impl Graph {
     #[cfg(feature = "plugin")]
     pub fn insert_plugin(
         &mut self,
-        client: Box<tutti_plugin::handles::PluginClient>,
+        client: Box<tutti_plugin::PluginClient>,
     ) -> Key<crate::PluginNode> {
         let (key, rebinder) = self.insert_plugin_with_rebinder(client);
         if let Some(hosted) = self.plugins.get_mut(&key.erase()) {
@@ -893,7 +892,7 @@ impl Graph {
     #[cfg(feature = "plugin")]
     pub(crate) fn insert_plugin_with_rebinder(
         &mut self,
-        client: Box<tutti_plugin::handles::PluginClient>,
+        client: Box<tutti_plugin::PluginClient>,
     ) -> (
         Key<crate::PluginNode>,
         tutti_plugin::catalog::PluginRebinder,
@@ -978,10 +977,10 @@ impl Graph {
     pub fn replace_plugin(
         &mut self,
         node: impl Into<NodeKey>,
-        client: Box<tutti_plugin::handles::PluginClient>,
+        client: Box<tutti_plugin::PluginClient>,
         fade: Seconds,
         law: FadeLaw,
-    ) -> Result<(), ReplaceRefused<Box<tutti_plugin::handles::PluginClient>>> {
+    ) -> Result<(), ReplaceRefused<Box<tutti_plugin::PluginClient>>> {
         let node = node.into();
         let rebinder = self.replace_plugin_with_rebinder(node, client, fade, law)?;
         if let Some(hosted) = self.plugins.get_mut(&node) {
@@ -1000,12 +999,12 @@ impl Graph {
     pub(crate) fn replace_plugin_with_rebinder(
         &mut self,
         node: impl Into<NodeKey>,
-        client: Box<tutti_plugin::handles::PluginClient>,
+        client: Box<tutti_plugin::PluginClient>,
         fade: Seconds,
         law: FadeLaw,
     ) -> Result<
         tutti_plugin::catalog::PluginRebinder,
-        ReplaceRefused<Box<tutti_plugin::handles::PluginClient>>,
+        ReplaceRefused<Box<tutti_plugin::PluginClient>>,
     > {
         let node = node.into();
         // Asked here, before binding: `replace` hands back what it refuses,
@@ -1460,7 +1459,7 @@ impl Graph {
     pub fn crossfade_plugin(
         &mut self,
         node: impl Into<NodeKey>,
-        client: Box<tutti_plugin::handles::PluginClient>,
+        client: Box<tutti_plugin::PluginClient>,
         fade: Seconds,
         law: FadeLaw,
     ) -> Result<Crossfade<()>, CrossfadeRefused> {
@@ -1961,6 +1960,15 @@ impl Graph {
             self.edited = true;
         }
         Ok((applied, host.plugin_targets.into_inner()))
+    }
+
+    /// Points each hosted plugin's driven parameters at the lanes `state` holds:
+    /// where a set of a driven parameter goes.
+    #[cfg(all(feature = "modulation", feature = "plugin"))]
+    pub(crate) fn refresh_driven(&self, state: &crate::modulation::ModState) {
+        for (&node, hosted) in &self.plugins {
+            hosted.driven.replace(state.plugin_lanes(node));
+        }
     }
 
     /// Schedules the note-envelope resyncs `m` owes, after the commit that
@@ -3246,18 +3254,6 @@ impl Graph {
         self.widen_refusal
     }
 
-    /// The audio wiring as it stands: the nodes, the edges into every input
-    /// port, the root's output sources and its input width, including edits
-    /// no commit has sent yet ([`is_edited`](Self::is_edited)). A read-only
-    /// view of what [`connect`](Self::connect) and its kin write; the
-    /// graph's other declarations (event edges, params, modes) are not part
-    /// of it.
-    ///
-    /// An edge that is fading out stays here until its fade ends.
-    pub fn topology(&self) -> &Topology {
-        &self.editor.spec().topology
-    }
-
     /// The generation of the root the next commit carries
     /// ([`RootId`](tutti_graph::RootId)); a restart names it.
     #[cfg(feature = "device")]
@@ -3544,19 +3540,6 @@ impl Graph {
 
     // --- Latency ---
 
-    /// What compensation this graph needs, folded over the graph as edited
-    /// (committed or not): audio edges plus each node's event and
-    /// param-modulation sources. Mutates nothing.
-    pub fn latency_plan(&self) -> Compensation {
-        // The bus edges as the lanes they commit to; a spec whose bus edges
-        // do not lower has none to fold (the commit will say why).
-        let rate = self.editor.prepare().sample_rate();
-        match self.editor.lowered() {
-            Ok(lowered) => tutti_graph::latency_plan(&lowered.spec, rate),
-            Err(_) => tutti_graph::latency_plan(self.editor.spec(), rate),
-        }
-    }
-
     /// Whether an edit waits for a commit: what the session's next update
     /// commits on.
     pub fn is_edited(&self) -> bool {
@@ -3811,8 +3794,8 @@ struct ModHostOver<'a> {
     #[cfg(feature = "plugin")]
     plugins: &'a BTreeMap<NodeKey, crate::plugin::HostedPlugin>,
     keys: &'a dyn ModKeys,
-    /// Each plugin target the apply resolved, by node and parameter: where
-    /// `Phase::Plugins` writes a GUI edit (`ModState::plugin_target`).
+    /// Each plugin target the apply resolved, by node and parameter: which
+    /// plugin parameters a lane drives (`ModState::plugin_lanes`).
     plugin_targets: std::cell::RefCell<PluginTargets>,
 }
 

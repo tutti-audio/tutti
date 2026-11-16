@@ -93,12 +93,12 @@
 //! A loaded [`Plugin`](catalog::Plugin) yields two values that share the plugin's
 //! lifetime — it dies only when the last of either drops:
 //!
-//! - [`handles::PluginClient`] — the client of a served plugin and its audio-graph
+//! - [`PluginClient`] — the client of a served plugin and its audio-graph
 //!   node (`tutti-plugin-host`'s generic `PluginNode` over the served hosting).
 //!   Loaded `Unbound`; `bind()` makes it a `PluginClient<Bound>`, which holds the
 //!   node and is what a graph inserts. `Plugin` does this for you when inserted directly.
 //! - [`PluginHandle`](tutti_plugin_host::PluginHandle) (`tutti-plugin-host`'s;
-//!   [`PluginClient::handle`](handles::PluginClient::handle) makes one) — the
+//!   [`PluginClient::handle`] makes one) — the
 //!   control surface: the editor, state restore and presets (main thread), and the
 //!   parameters, state save and render mode (`PluginHandle::any_thread`, from any
 //!   thread: a served plugin answers concurrently, an in-process one hops to the
@@ -118,7 +118,7 @@
 //!   recovery),
 //!   and the [`PluginDescriptor`](catalog::PluginDescriptor) identity type. The
 //!   scanner, the catalog traits and their records are `tutti-plugin-db`'s.
-//! - [`handles`] — [`PluginClient`](handles::PluginClient), the client and graph
+//! - [`PluginClient`] — the client and graph
 //!   node of a served plugin. The control surface over it, [`PluginHandle`](tutti_plugin_host::PluginHandle),
 //!   the node's [`PluginControls`](tutti_plugin_host::PluginControls), the in-process
 //!   node and the host policy written once for every host
@@ -449,4 +449,4 @@ pub mod catalog {
 
 // The graph node of a served plugin and its two states. The control handle,
 // the node's controls and the host policy over a handle are `tutti-plugin-host`'s.
-pub use host::handles;
+pub use host::node::{Bound, PluginClient, TransportView, Unbound};

@@ -19,6 +19,9 @@ mod midi_ports;
 // A MIDI input handle reads the timing of its clock map and its resyncs.
 #[cfg(feature = "midi-hardware")]
 mod midi_input_timing;
+// A MIDI input handle reads what its port lost: the inlet, across a replug.
+#[cfg(feature = "midi-hardware")]
+mod midi_input_losses;
 // Who the session is on the wire (`MidiPolicy`): its Endpoint and MIDI-CI identity.
 #[cfg(feature = "midi-hardware")]
 mod midi_policy;

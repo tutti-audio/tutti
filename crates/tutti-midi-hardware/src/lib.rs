@@ -142,7 +142,7 @@
 //!   the caller owns and sends through.
 //! - [`HardwareMidiInputs`]: the open input ports, each named by its
 //!   [`InputId`](tutti_midi_runtime::InputId) and the [`InputProducerHandle`] its driver thread pushes through,
-//!   whose `push` answers [`Pushed`].
+//!   whose `push` answers a `Result` of [`Delivered`].
 //! - [`DeviceInfo`](tutti_midi_device::DeviceInfo), [`DeviceId`](tutti_midi_device::DeviceId), [`DeviceEvent`](tutti_midi_device::DeviceEvent): what the list holds and reports;
 //!   they live in `tutti-midi-device`, with the pure `DeviceTable` behind them.
 //! - [`OsEndpoint`], [`EndpointId`](tutti_midi_device::EndpointId), [`UmpCapability`]: what a backend enumerates.
@@ -273,7 +273,7 @@ pub use devices::{
 };
 pub use endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 pub use error::{Error, NotFound, Result};
-pub use port::{HardwareMidiInputs, InputProducerHandle, PortInfo, Pushed, StreamDrain};
+pub use port::{Delivered, HardwareMidiInputs, InputProducerHandle, PortInfo, StreamDrain};
 pub use process::{ProcessChange, ReportAsk, ReportError, ReportPeer};
 pub use profiles::{
     ChannelCount, ChannelProfile, ListedProfile, NotAChannelCount, PeerProfiles, ProfileError,

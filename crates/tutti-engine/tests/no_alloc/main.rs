@@ -10,5 +10,6 @@ static ALLOC: AllocDisabler = AllocDisabler;
 mod support;
 
 mod block_no_alloc;
+mod fault_records;
 mod load_meter;
 mod rt_no_alloc_engine;

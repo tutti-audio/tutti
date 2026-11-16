@@ -72,7 +72,6 @@
 //! Its fork is silent: an offline render reads no wire.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_graph::{Losses, UmpAt};
 
 use tutti_graph::{
@@ -81,7 +80,7 @@ use tutti_graph::{
 };
 use tutti_midi_protocol::Translator;
 use tutti_midi_protocol::{MpeMode, MpeZones};
-use tutti_rt::{ArcLend, Reader};
+use tutti_rt::{ArcLend, Counter, CounterWriter, Reader, counter};
 use tutti_types::{Frame, SampleRate, Samples};
 use tutti_ump::{Message, MidiChannel, MidiGroup, System, Ump};
 
@@ -271,7 +270,9 @@ pub struct MidiIngestNode {
     profiles_generation: u64,
     /// Translated events a block had no room for in `out`
     /// ([`MidiIngestControls::losses`]).
-    dropped: Arc<AtomicU64>,
+    dropped: CounterWriter<u64>,
+    /// The reading end of `dropped`, given to the controls.
+    dropped_reader: Counter<u64>,
     /// The events a block translates and each port holds, from the block the
     /// node was prepared for.
     capacity: usize,
@@ -409,7 +410,7 @@ impl std::fmt::Debug for MidiIngestNode {
             .field("mpe_mode", &self.mpe_mode)
             .field("mpe_request", &self.mpe_request)
             .field("profiles", &self.profiles)
-            .field("dropped", &self.dropped)
+            .field("dropped", &self.dropped_reader)
             .finish_non_exhaustive()
     }
 }
@@ -425,6 +426,7 @@ impl MidiIngestNode {
     #[must_use]
     pub fn new() -> Self {
         let cell = Arc::new(ArcLend::new(Requests::new()));
+        let (dropped, dropped_reader) = counter();
         Self {
             mpe_request: cell.reader(),
             device: Device::new(MpeMode::Disabled),
@@ -435,7 +437,8 @@ impl MidiIngestNode {
                 .into_boxed_slice(),
             ports: MidiInputPorts::FIRST_GROUP,
             mpe_mode: MpeMode::Disabled,
-            dropped: Arc::new(AtomicU64::new(0)),
+            dropped,
+            dropped_reader,
             capacity: MIDI_INPUT_EVENT_CAPACITY,
         }
     }
@@ -503,7 +506,7 @@ pub struct MidiIngestControls {
     /// What the node reads; the controls publish to it and read it back with
     /// `ArcLend::current`.
     request: Arc<ArcLend<Requests>>,
-    dropped: Arc<AtomicU64>,
+    dropped: Counter<u64>,
 }
 
 impl MidiIngestControls {
@@ -564,7 +567,7 @@ impl MidiIngestControls {
     /// hold is counted at the inlet, not here
     /// ([`InputInlets`](crate::InputInlets)).
     pub fn losses(&self) -> Losses {
-        Losses::refused(self.dropped.load(Ordering::Relaxed))
+        Losses::refused(self.dropped.get())
     }
 }
 
@@ -695,7 +698,7 @@ impl Node for MidiIngestNode {
             .map(|_| device.epoch);
         let Staging { kept, dropped, .. } = staging;
         if dropped > 0 {
-            self.dropped.fetch_add(dropped, Ordering::Relaxed);
+            self.dropped.add(dropped);
             // The executor's too, so an export watching its count sees it.
             io.count_lost(dropped);
         }
@@ -797,7 +800,7 @@ impl IntoNode for MidiIngestNode {
         let fork = SilentInput { ports: self.ports };
         let controls = MidiIngestControls {
             request: Arc::clone(self.mpe_request.cell()),
-            dropped: Arc::clone(&self.dropped),
+            dropped: self.dropped_reader.clone(),
         };
         NodeParts {
             node: Box::new(self),
