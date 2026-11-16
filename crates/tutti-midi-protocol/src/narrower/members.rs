@@ -115,15 +115,15 @@ impl Members {
                 if slot.pressed {
                     send(member, Voice1::ChannelPressure(U7::of(0)));
                 }
-                // M2-120 section 5 has a sender give initial values before a
-                // Note On but states none for Control Change 74; 0 is the
-                // lowest.
+                // M1-100 A.4.3 (Relative): Control Change 74 at a Note On is
+                // 0x40, and its section 2.2 example sends 0x40 as the initial
+                // timbre; M2-120 section 5 asks for initial values and gives none.
                 if slot.slid {
                     send(
                         member,
                         Voice1::ControlChange {
                             controller: CCNumber::BRIGHTNESS,
-                            value: U7::of(0),
+                            value: U7::of(0x40),
                         },
                     );
                 }

@@ -72,7 +72,7 @@ struct Channel {
 /// as MPE on a zone's member channels (D.2.8, [`PerNoteTranslation`]). In the MPE
 /// mode a Note On takes the member idle longest, or steals the oldest note's
 /// when all play; a per-note message for a note that does not sound sends
-/// nothing, and every message that is not per-note goes on the zone's Manager Channel.
+/// nothing, and every message that is not per-note goes on the zone's Manager Channel.  A MIDI 1.0 message passes unchanged.
 ///
 /// A Control Change that passes through and moves what this narrower tracks
 /// (CC 101, 100, 99, 98, CC 0 or 32, or CC 121) makes it forget that state, so

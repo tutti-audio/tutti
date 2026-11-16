@@ -657,11 +657,12 @@ fn mpe_retriggers_a_key_on_its_member_after_a_note_off() {
 }
 
 /// **A reused member starts from reset expression**: a slide sent to the first
-/// note is zeroed (M2-120 section 5 has initial values sent before a Note On
-/// and states none for CC 74) before the next note on that channel.
+/// note is centred to 0x40 (M1-100 A.4.3: CC 74 at Note On is 0x40, and the
+/// section 2.2 example's initial timbre is 0xB2 0x4A 0x40) before the next
+/// note on that channel.
 /// Spec: m2-104/d.2.8#1
 #[test]
-fn mpe_zeroes_a_reused_members_slide() {
+fn mpe_centres_a_reused_members_slide() {
     let mut n = mpe(one_member_zone());
     let _ = feed(&mut n, note_on(60));
     let slide = Message::Midi2(
@@ -677,7 +678,7 @@ fn mpe_zeroes_a_reused_members_slide() {
     // One member only: the next note reuses Ch2.
     assert_eq!(
         feed(&mut n, note_on(62)),
-        [vec![0xB1, 74, 0], vec![0x91, 62, 0x40]]
+        [vec![0xB1, 74, 0x40], vec![0x91, 62, 0x40]]
     );
 }
 
@@ -688,4 +689,23 @@ fn one_member_zone() -> MpeZoneConfig {
         PitchBendSensitivity::MPE_MEMBER_DEFAULT,
     )
     .unwrap()
+}
+
+/// **The Manager Channel is the zone's, not index 0**: the upper zone's Manager
+/// is Ch16 (index 15, RP-053), and a Profile Manager on Ch4 (index 3) is its
+/// own; a bend from source Ch1 goes there.
+/// Spec: m2-104/d.2.8#1
+#[test]
+fn mpe_manager_channel_is_the_zones_own() {
+    let bend = Message::Midi2(A, Voice2::PitchBend(BendValue::new(0x8000_0000)));
+    let upper = MpeZoneConfig::upper(
+        2,
+        PitchBendSensitivity::MPE_MASTER_DEFAULT,
+        PitchBendSensitivity::MPE_MEMBER_DEFAULT,
+    )
+    .unwrap();
+    assert_eq!(feed(&mut mpe(upper), bend), [vec![0xEF, 0x00, 0x40]]);
+    let span = MpeZoneSpan::new(MidiChannel::of(3), MpeChannels::of(3)).unwrap();
+    let profile = MpeZoneConfig::profile(span, PitchBendSensitivity::MPE_PROFILE_DEFAULT);
+    assert_eq!(feed(&mut mpe(profile), bend), [vec![0xE3, 0x00, 0x40]]);
 }

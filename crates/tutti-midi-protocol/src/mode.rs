@@ -122,6 +122,10 @@ pub enum PerNoteTranslation {
     /// says how the mode was selected: [`MpeSpec::Profile`](crate::MpeSpec::Profile)
     /// by the MIDI-CI MPE Profile (D.4.1), [`MpeSpec::Mpe11`](crate::MpeSpec::Mpe11)
     /// by other means such as the MPE Configuration Message (D.4.2).
+    ///
+    /// A [`Message::Midi1`](tutti_ump::Message::Midi1) input passes unchanged:
+    /// its channel is the sender's, and a MIDI 1.0 note on a member channel is
+    /// not seen by the allocator.
     Mpe(MpeZoneConfig),
 }
 
