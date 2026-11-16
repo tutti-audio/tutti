@@ -36,7 +36,7 @@ tutti-engine = { version = "0.0.1", path = "../tutti-engine" }
 # arrival stamps are related to it); `ArcLend` for the tests that publish.
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 tutti-nodes = { version = "0.0.1", path = "../tutti-nodes", default-features = false }
-tracing = "0.1"
+tracing.workspace = true
 thiserror.workspace = true
 serde = { version = "1", optional = true, features = ["derive"] }
 
