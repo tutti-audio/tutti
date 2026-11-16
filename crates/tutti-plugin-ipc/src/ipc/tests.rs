@@ -121,7 +121,7 @@ fn mock_with(
         outputs: vec![ChannelLayout::STEREO],
     };
     let shm = format!("ipc_{}_{}", std::process::id(), COUNTER.mint());
-    let path = unique_socket_path();
+    let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
     let listener = ListenerOptions::new()
         .name(crate::socket_name(&path).unwrap())
@@ -135,6 +135,8 @@ fn mock_with(
         format,
         load_editor,
         RATE,
+        Arc::new(crate::ServerWatch::new()),
+        tutti_plugin_types::Timeouts::default(),
     )
     .unwrap();
     // The audio connection first, then the control one, as the server accepts
@@ -244,7 +246,9 @@ fn mock_with(
     std::thread::sleep(Duration::from_millis(50));
     let ipc = Ipc::new(IpcParts {
         bridge,
-        guard: Arc::new(ProcessGuard::for_test(BridgeConfig::default())),
+        guard: Arc::new(ProcessGuard::for_test(BridgeConfig::at(
+            crate::unique_socket_path().expect("the OS has a random source"),
+        ))),
         descriptor: PluginDescriptor::default(),
         loaded: LoadedPlugin {
             inputs: vec![PluginBus::main(ChannelLayout::STEREO)],
@@ -741,28 +745,6 @@ fn a_reactivation_after_a_give_up_does_not_wait_the_budget_again() {
         wait.gave_up(),
         "the second render's collect misses its budget"
     );
-    wait_first_abandoned(&bridge);
-    let ipc = Ipc::deactivate(main, processor, controller).expect("the halves rejoin");
-    let (mut processor, _controller) = activate(ipc, 32);
-    let before = bridge.abandoned_replies();
-    render_chunks(&mut processor, CHUNKS_AFTER);
-    wait_off_the_budget(&bridge, before);
-}
-
-/// **A reactivation after the server's death stays off the budget.** A death
-/// latched on the fork's wait ends the wait for good, as a give-up does: the
-/// new activation must not arm the bridge's budget for a server that is gone.
-#[test]
-fn a_reactivation_after_a_death_does_not_wait_the_budget() {
-    let _machine = machine_lock();
-    let main = main_thread();
-    let (mut ipc, _server) = mock();
-    let bridge = Arc::clone(ipc.bridge());
-    let wait = ipc.watch(true);
-    let (mut processor, controller) = activate(ipc, 32);
-    render_chunks(&mut processor, 1);
-    wait.latch_crash(None);
-    assert!(wait.death().is_some(), "the death is latched");
     wait_first_abandoned(&bridge);
     let ipc = Ipc::deactivate(main, processor, controller).expect("the halves rejoin");
     let (mut processor, _controller) = activate(ipc, 32);

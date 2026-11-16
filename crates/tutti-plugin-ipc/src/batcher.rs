@@ -397,13 +397,11 @@ impl Batcher {
     /// fork's health probe turns the latch into `ForkFaultKind::TimedOut`,
     /// which the renderer reports.
     ///
-    /// **A dead server ends the wait at once**, and reads as `Crashed`. The
-    /// bridge alone would not notice in time: it learns of a dead peer only
-    /// when it next reads the socket, which it does for a command, and this
-    /// wait sends none. So the wait also asks the process itself
-    /// ([`OfflineWait::server_died`]), every `PROCESS_POLL`.
+    /// **A dead server ends the wait at once**, and reads as `Crashed`: the
+    /// bridge's crash latch is the server's [`ServerWatch`](crate::ServerWatch),
+    /// which the process's end sets as well as the stream's, so a wait that
+    /// sends no command (and so never reads the socket) still sees it.
     fn await_output(&mut self, bridge: &PluginBridge) {
-        const PROCESS_POLL: Duration = Duration::from_millis(5);
         let (Some(watch), Some(seq)) = (&self.offline_wait, self.expect_seq) else {
             return;
         };
@@ -421,16 +419,8 @@ impl Batcher {
             return;
         }
         let deadline = Instant::now() + watch.budget();
-        let mut next_poll = Instant::now() + PROCESS_POLL;
         while !bridge.is_crashed() && !bridge.audio_buffer().has_output(seq) {
-            let now = Instant::now();
-            if now >= next_poll {
-                if watch.server_died() {
-                    return;
-                }
-                next_poll = now + PROCESS_POLL;
-            }
-            if now >= deadline {
+            if Instant::now() >= deadline {
                 watch.give_up();
                 // No reply is awaited past the live bound from here on: a
                 // hung server must not hold the bridge thread one budget per
@@ -448,12 +438,10 @@ impl Batcher {
             // the core more than this loop does.
             std::thread::sleep(Duration::from_micros(50));
         }
-        // Latch what the bridge saw into the watch: the health probe holds the
-        // bridge weakly, and a render that ends before the next process poll
-        // drops it (with the executor) before anyone asks, which read as a
-        // healthy fork.
+        // The latch outlives the bridge: the health probe reads the watch, and
+        // a render that ends before the next poll drops the bridge (with the
+        // executor) before anyone asks.
         if bridge.is_crashed() {
-            watch.latch_crash(bridge.crash_cause());
             return;
         }
         // The server publishes a chunk's audio, then sends its reply: wait

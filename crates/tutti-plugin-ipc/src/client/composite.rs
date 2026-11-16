@@ -2,6 +2,7 @@
 
 use super::audio::{AudioBridge, BridgeListener, BridgeThread, HarmonyInputs, Submitted};
 use super::remote_editor::RemoteEditor;
+use crate::ServerWatch;
 use crate::protocol::{
     MidiEventVec, Normalized, NoteExpressionChanges, ParamId, ParameterChanges, ParameterInfo,
     Preset, PresetId, TransportChanges, TransportInfo,
@@ -19,7 +20,7 @@ use tutti_plugin_types::{ContentScale, EditorCapabilities, WindowHandle};
 use tutti_plugin_types::{
     Edit, EditDrain, EditSink, MainThreadMarker, MainWorkHandle, ParamEdit, edits,
 };
-use tutti_plugin_types::{Editor, EditorWindow, Load, Origin, PluginFormat};
+use tutti_plugin_types::{Editor, EditorWindow, Load, Origin, PluginFormat, Timeouts};
 use tutti_types::SampleRate;
 
 /// Gives the audio instance the editor instance's state when the user changed
@@ -232,7 +233,7 @@ impl PluginBridge {
     ///
     /// # Errors
     ///
-    /// The bridge thread cannot be spawned.
+    /// The bridge thread cannot be spawned, or `timeouts` has a zero deadline.
     pub fn new(
         socket_path: PathBuf,
         audio_buffer: Arc<AudioSlab>,
@@ -240,38 +241,12 @@ impl PluginBridge {
         format: PluginFormat,
         load_editor: Option<EditorLoader>,
         sample_rate: SampleRate,
+        watch: Arc<ServerWatch>,
+        timeouts: Timeouts,
     ) -> BridgeResult<(Arc<Self>, BridgeThread)> {
-        let (audio, bridge_thread) = AudioBridge::new(socket_path, audio_buffer, sample_rate)?;
-        let bridge = Arc::new(Self {
-            remote: Mutex::new(RemoteEditor::new(audio.clone())),
-            audio,
-            origin,
-            format,
-            load_editor,
-            gui: Mutex::new(None),
-            baseline: Mutex::new(None),
-            mirror: GuiMirror::new(),
-        });
-        Ok((bridge, bridge_thread))
-    }
-
-    /// As [`new`](Self::new), with a shortened state-transfer progress deadline.
-    ///
-    /// Exists so the stall path can be asserted in milliseconds rather than by
-    /// sleeping out the real deadline. Set before the `Arc` is formed because
-    /// that is the last moment the bridge is uniquely owned.
-    #[cfg(test)]
-    pub(crate) fn new_with_state_progress_timeout(
-        socket_path: PathBuf,
-        audio_buffer: Arc<AudioSlab>,
-        origin: Origin,
-        format: PluginFormat,
-        load_editor: Option<EditorLoader>,
-        sample_rate: SampleRate,
-        state_progress_timeout: Duration,
-    ) -> BridgeResult<(Arc<Self>, BridgeThread)> {
-        let (mut audio, bridge_thread) = AudioBridge::new(socket_path, audio_buffer, sample_rate)?;
-        audio.set_state_progress_timeout(state_progress_timeout);
+        timeouts.validate()?;
+        let (audio, bridge_thread) =
+            AudioBridge::new(socket_path, audio_buffer, sample_rate, watch, timeouts)?;
         let bridge = Arc::new(Self {
             remote: Mutex::new(RemoteEditor::new(audio.clone())),
             audio,
@@ -463,6 +438,11 @@ impl PluginBridge {
         self.audio.crash_cause()
     }
 
+    /// The server's watch: whether it is alive, and why not.
+    pub fn watch(&self) -> &Arc<ServerWatch> {
+        self.audio.watch()
+    }
+
     /// The refused rate and reason, while the plugin is refused. See
     /// `AudioBridge::rate_refusal`.
     pub fn rate_refusal(&self) -> Option<(SampleRate, String)> {
@@ -472,12 +452,6 @@ impl PluginBridge {
     /// See `AudioBridge::rate_refused`.
     pub fn rate_refused(&self) -> bool {
         self.audio.rate_refused()
-    }
-
-    /// See `AudioBridge::set_rate_timeout`.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn set_rate_timeout(&self, timeout: Duration) {
-        self.audio.set_rate_timeout(timeout);
     }
 
     /// Runs a call of the editor in the server, its refusal as the

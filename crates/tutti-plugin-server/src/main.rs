@@ -17,10 +17,7 @@ fn main() -> BridgeResult<()> {
         .nth(1)
         .expect("Socket path required as first argument");
 
-    let config = BridgeConfig {
-        socket_path: socket_path.into(),
-        ..Default::default()
-    };
+    let config = BridgeConfig::at(socket_path.into());
 
     PluginServer::new(config)?.run()
 }

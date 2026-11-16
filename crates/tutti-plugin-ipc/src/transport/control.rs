@@ -533,7 +533,7 @@ mod tests {
 
     fn pair() -> Pair {
         use interprocess::local_socket::traits::Listener as _;
-        let path = crate::unique_socket_path();
+        let path = crate::unique_socket_path().expect("the OS has a random source");
         let _ = std::fs::remove_file(&path);
         let name = crate::transport::control::socket_name(&path).unwrap();
         let listener = ListenerOptions::new().name(name).create_sync().unwrap();
@@ -784,7 +784,7 @@ mod tests {
         #[test]
         fn a_send_to_a_peer_that_reads_nothing_is_bounded() {
             use interprocess::local_socket::traits::Listener as _;
-            let path = crate::unique_socket_path();
+            let path = crate::unique_socket_path().expect("the OS has a random source");
             let _ = std::fs::remove_file(&path);
             let name = socket_name(&path).unwrap();
             let listener = ListenerOptions::new().name(name).create_sync().unwrap();

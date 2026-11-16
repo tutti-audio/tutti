@@ -50,37 +50,9 @@ const MAX_PROCESS_TIMEOUT: Duration = Duration::from_millis(50);
 /// once it has gone quiet: news the server sent is already in the socket.
 const DRAIN_UNSOLICITED: Duration = Duration::from_millis(1);
 
-/// How long the bridge waits for the server to answer a query, and so the
-/// deadline the host's wait for the bridge's answer is built on.
-pub(super) const PARAM_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// How long the bridge waits for the server to open its editor or resize it:
-/// a plugin builds its window in the call, which a large one takes seconds to
-/// do.
-pub(super) const EDITOR_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// How long the bridge waits for a plugin to re-activate at a new rate.
-/// Longer than [`PARAM_TIMEOUT`]: it tears down and rebuilds the plugin's
-/// processing, which a large instrument can take seconds to do.
-pub(super) const RATE_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// The slice [`RATE_TIMEOUT`] is waited in, between checks that the bridge is
+/// The slice [`Timeouts::rate`](tutti_plugin_types::Timeouts::rate) is waited in, between checks that the bridge is
 /// still running.
 const RATE_SLICE: Duration = Duration::from_millis(100);
-
-/// How long [`next_reply`] will wait to finish a reply that has *already
-/// started* arriving when its own budget runs out.
-///
-/// Larger than any request's budget, and the split is the point: the decision
-/// to *wait* for a reply is the request's, and is short for a block, but once
-/// bytes of a frame are moving the reply is arriving and finishing it costs
-/// little. (The cursor would resume a half-read frame correctly anyway; this
-/// only lets a reply that is already landing count for its own request.)
-///
-/// A few hundred bytes over a local socket cannot plausibly take this long
-/// without the peer being dead, which the read reports as EOF rather than as a
-/// timeout.
-const DRAIN_FINISH: Duration = Duration::from_millis(500);
 
 /// How many blocks behind the newest submitted block a queued `Process` may be
 /// and still be worth sending.
@@ -152,8 +124,17 @@ fn is_stale(seq: u64, newest: u64) -> bool {
 /// a sharing that does not exist. The [`PartialFrame`] must have exactly this
 /// scope for a different reason — it describes a position in *this* connection's
 /// stream, so it lives and dies with the stream.
-#[derive(Default)]
 pub(super) struct Owed {
+    /// How long a reply that has already started arriving gets to finish when
+    /// its request's own budget runs out ([`Timeouts::drain`](tutti_plugin_types::Timeouts::drain)).
+    ///
+    /// Larger than any request's budget, and the split is the point: the
+    /// decision to *wait* for a reply is the request's, and is short for a
+    /// block, but once bytes of a frame are moving the reply is arriving and
+    /// finishing it costs little. A few hundred bytes over a local socket
+    /// cannot plausibly take this long without the peer being dead, which the
+    /// read reports as EOF rather than as a timeout.
+    finish: Duration,
     /// What is still owed, oldest first: the order the frames arrive in.
     late: VecDeque<Late>,
     /// Where the last read stopped, so a timeout resumes rather than restarts.
@@ -169,6 +150,17 @@ pub(super) struct Owed {
 }
 
 impl Owed {
+    /// Nothing owed, on a connection whose begun replies get `finish` to end.
+    pub(super) fn finishing(finish: Duration) -> Self {
+        Self {
+            finish,
+            late: VecDeque::new(),
+            partial: PartialFrame::default(),
+            carried: Vec::new(),
+            intake: MidiIntake::default(),
+        }
+    }
+
     /// Keep a skipped block's parameter changes: each parameter's last value.
     ///
     /// The plugin node sends a parameter only when its value changes, so a
@@ -333,10 +325,10 @@ pub(super) enum Late {
 /// A timeout on a frame boundary is not an error: the stream is synchronised
 /// and the session healthy, so the caller answers its own caller and the
 /// bridge goes on. A budget that expires **part-way through a frame** gets
-/// [`DRAIN_FINISH`] to complete *that frame*, and the read ends there (with
+/// [`Timeouts::drain`](tutti_plugin_types::Timeouts::drain) to complete *that frame*, and the read ends there (with
 /// the frame, when it is the answer): extending the whole read instead let a
 /// chatty peer start a new frame at the extended deadline, and a live peer was
-/// declared unable to frame. A frame still unfinished after `DRAIN_FINISH` is
+/// declared unable to frame. A frame still unfinished after `Timeouts::drain` is
 /// a peer that cannot frame (a few hundred bytes over a local socket do not
 /// take that long from a live one), and that timeout propagates with the
 /// transport's errors (EOF, a frame over the cap), which `pump` crashes on.
@@ -357,7 +349,7 @@ fn next_reply(
                 }
             }
             Err(BridgeError::Timeout { partial: true, .. }) => {
-                let frame = ipc::recv_resumable(stream, DRAIN_FINISH, &mut owed.partial)?;
+                let frame = ipc::recv_resumable(stream, owed.finish, &mut owed.partial)?;
                 let answer = absorb(inbox, frame).and_then(|msg| owed.take(msg, channels));
                 return Ok(answer);
             }
@@ -547,7 +539,8 @@ pub(super) fn handle(
             // carry it in. Nothing waits: a frame begun is finished (and one a
             // late request still owes is taken off), and the rest is for later.
             if ipc::has_pending(stream) {
-                next_reply(stream, inbox, owed, channels, DRAIN_FINISH)?;
+                let finish = owed.finish;
+                next_reply(stream, inbox, owed, channels, finish)?;
             }
         }
         Command::SetParameter { param_id, value } => {
@@ -570,9 +563,9 @@ pub(super) fn handle(
             //
             // Waited in slices, so a shutdown (dropping the node joins this
             // thread) ends the wait within one slice rather than after
-            // `RATE_TIMEOUT`. A slice that expires part-way through a frame
+            // `Timeouts::rate`. A slice that expires part-way through a frame
             // resumes it (`owed.partial`), so slicing never unframes the stream.
-            let budget = lifecycle.rate_timeout();
+            let budget = lifecycle.timeouts().rate;
             let deadline = std::time::Instant::now() + budget;
             loop {
                 let reply = match next_reply(stream, inbox, owed, channels, RATE_SLICE)? {
@@ -714,7 +707,7 @@ pub(super) fn handle(
         }
         Command::GetParameterList { reply } => {
             ipc::send(stream, &HostMessage::GetParameterList)?;
-            let value = match ask(stream, inbox, owed, channels, |m| {
+            let value = match ask(stream, inbox, owed, channels, lifecycle, |m| {
                 matches!(m, BridgeMessage::ParameterList { .. })
             })? {
                 Some(BridgeMessage::ParameterList { parameters }) => Some(parameters),
@@ -724,7 +717,7 @@ pub(super) fn handle(
         }
         Command::GetPresetList { reply } => {
             ipc::send(stream, &HostMessage::GetPresetList)?;
-            let value = match ask(stream, inbox, owed, channels, |m| {
+            let value = match ask(stream, inbox, owed, channels, lifecycle, |m| {
                 matches!(m, BridgeMessage::PresetList { .. })
             })? {
                 Some(BridgeMessage::PresetList { presets }) => Some(presets),
@@ -735,7 +728,7 @@ pub(super) fn handle(
         Command::LoadPreset { id, reply } => {
             ipc::send(stream, &HostMessage::LoadPreset { id })?;
             let ok = matches!(
-                ask(stream, inbox, owed, channels, |m| matches!(
+                ask(stream, inbox, owed, channels, lifecycle, |m| matches!(
                     m,
                     BridgeMessage::PresetLoaded { .. }
                 ))?,
@@ -745,7 +738,7 @@ pub(super) fn handle(
         }
         Command::GetCurrentPreset { reply } => {
             ipc::send(stream, &HostMessage::GetCurrentPreset)?;
-            let value = match ask(stream, inbox, owed, channels, |m| {
+            let value = match ask(stream, inbox, owed, channels, lifecycle, |m| {
                 matches!(m, BridgeMessage::CurrentPreset { .. })
             })? {
                 Some(BridgeMessage::CurrentPreset { id }) => id,
@@ -755,7 +748,7 @@ pub(super) fn handle(
         }
         Command::GetParameter { param_id, reply } => {
             ipc::send(stream, &HostMessage::GetParameter { param_id })?;
-            let value = match ask(stream, inbox, owed, channels, |m| {
+            let value = match ask(stream, inbox, owed, channels, lifecycle, |m| {
                 matches!(m, BridgeMessage::ParameterValue { .. })
             })? {
                 Some(BridgeMessage::ParameterValue { value }) => value,
@@ -769,7 +762,7 @@ pub(super) fn handle(
             reply,
         } => {
             ipc::send(stream, &HostMessage::GetParameterText { param_id, value })?;
-            let text = match ask(stream, inbox, owed, channels, |m| {
+            let text = match ask(stream, inbox, owed, channels, lifecycle, |m| {
                 matches!(m, BridgeMessage::ParameterText { .. })
             })? {
                 Some(BridgeMessage::ParameterText { text }) => text,
@@ -786,7 +779,7 @@ pub(super) fn handle(
                 stream,
                 &HostMessage::GetParameterValueFromText { param_id, text },
             )?;
-            let value = match ask(stream, inbox, owed, channels, |m| {
+            let value = match ask(stream, inbox, owed, channels, lifecycle, |m| {
                 matches!(m, BridgeMessage::ParameterValueFromText { .. })
             })? {
                 Some(BridgeMessage::ParameterValueFromText { value }) => value,
@@ -800,7 +793,7 @@ pub(super) fn handle(
             reply,
         } => {
             ipc::send(stream, &HostMessage::GetParameterPlain { param_id, value })?;
-            let plain = match ask(stream, inbox, owed, channels, |m| {
+            let plain = match ask(stream, inbox, owed, channels, lifecycle, |m| {
                 matches!(m, BridgeMessage::ParameterPlain { .. })
             })? {
                 Some(BridgeMessage::ParameterPlain { plain }) => plain,
@@ -819,14 +812,15 @@ pub(super) fn handle(
                 inbox,
                 owed,
                 channels,
-                EDITOR_TIMEOUT,
+                lifecycle.timeouts().editor,
                 Late::Answer(|m| matches!(m, BridgeMessage::EditorOpened { .. })),
             )? {
                 Some(BridgeMessage::EditorOpened { result }) => result,
                 Some(BridgeMessage::Error { message }) => Err(message),
                 Some(other) => Err(format!("unexpected reply to OpenEditor: {other:?}")),
                 None => Err(format!(
-                    "the server did not open the editor within {EDITOR_TIMEOUT:?}"
+                    "the server did not open the editor within {:?}",
+                    lifecycle.timeouts().editor
                 )),
             };
             reply.send(value);
@@ -841,14 +835,15 @@ pub(super) fn handle(
                 inbox,
                 owed,
                 channels,
-                EDITOR_TIMEOUT,
+                lifecycle.timeouts().editor,
                 Late::Answer(|m| matches!(m, BridgeMessage::EditorSized { .. })),
             )? {
                 Some(BridgeMessage::EditorSized { result }) => result,
                 Some(BridgeMessage::Error { message }) => Err(message),
                 Some(other) => Err(format!("unexpected reply to SetEditorSize: {other:?}")),
                 None => Err(format!(
-                    "the server did not resize the editor within {EDITOR_TIMEOUT:?}"
+                    "the server did not resize the editor within {:?}",
+                    lifecycle.timeouts().editor
                 )),
             };
             reply.send(value);
@@ -862,7 +857,7 @@ pub(super) fn handle(
                 stream,
                 &HostMessage::GetParameterNormalized { param_id, plain },
             )?;
-            let value = match ask(stream, inbox, owed, channels, |m| {
+            let value = match ask(stream, inbox, owed, channels, lifecycle, |m| {
                 matches!(m, BridgeMessage::ParameterNormalized { .. })
             })? {
                 Some(BridgeMessage::ParameterNormalized { value }) => value,
@@ -874,7 +869,7 @@ pub(super) fn handle(
     Ok(())
 }
 
-/// A query's reply, within [`PARAM_TIMEOUT`]: `None` when it does not come
+/// A query's reply, within [`Timeouts::param`](tutti_plugin_types::Timeouts::param): `None` when it does not come
 /// in time, which the query answers as "cannot be asked" (and the reply is
 /// owed). A timeout here was a `?` that crashed a healthy bridge.
 fn ask(
@@ -882,6 +877,7 @@ fn ask(
     inbox: &mut Unsolicited,
     owed: &mut Owed,
     channels: &Channels,
+    lifecycle: &Lifecycle,
     answers: fn(&BridgeMessage) -> bool,
 ) -> BridgeResult<Option<BridgeMessage>> {
     answer(
@@ -889,7 +885,7 @@ fn ask(
         inbox,
         owed,
         channels,
-        PARAM_TIMEOUT,
+        lifecycle.timeouts().param,
         Late::Answer(answers),
     )
 }
@@ -1031,6 +1027,7 @@ fn absorb(inbox: &mut Unsolicited, msg: BridgeMessage) -> Option<BridgeMessage> 
 mod tests {
     use super::*;
     use crate::protocol::ParamId;
+    use tutti_plugin_types::Timeouts;
 
     fn processed(seq: u64) -> BridgeMessage {
         BridgeMessage::AudioProcessed {
@@ -1061,7 +1058,7 @@ mod tests {
     #[test]
     fn owed_frames_are_taken_in_order_before_the_answer() {
         let channels = Channels::new(SampleRate::SR_48K);
-        let mut owed = Owed::default();
+        let mut owed = Owed::finishing(Timeouts::default().drain);
         owed.owe(Late::Block);
         owed.owe(Late::Answer(is_value));
         owed.owe(Late::StateRest);
@@ -1100,7 +1097,7 @@ mod tests {
             parameters: Vec::new(),
         };
 
-        let mut owed = Owed::default();
+        let mut owed = Owed::finishing(Timeouts::default().drain);
         owed.owe(Late::Answer(is_value));
         owed.owe(Late::StateRest);
         assert!(matches!(
@@ -1124,7 +1121,7 @@ mod tests {
     /// with a 10-point queue among its reserved ones.
     #[test]
     fn a_carried_value_fills_a_reserved_queue() {
-        let mut owed = Owed::default();
+        let mut owed = Owed::finishing(Timeouts::default().drain);
         let mut skipped = ParameterChanges::reserved(1, 1);
         skipped.add_change(ParamId::new(7), 3, 0.25);
         owed.carry(&skipped);
@@ -1162,7 +1159,7 @@ mod tests {
         skipped.add_change(ParamId::new(7), 3, 0.25);
         skipped.add_change(ParamId::new(8), 3, 0.5);
 
-        let mut owed = Owed::default();
+        let mut owed = Owed::finishing(Timeouts::default().drain);
         owed.carry(&skipped);
         let mut block = ParameterChanges::reserved_bridged(1, 40);
         assert!(block.add_change(ParamId::new(1), 5, 0.5));
@@ -1170,7 +1167,7 @@ mod tests {
         assert_eq!(block.queues.len(), 1);
         assert_eq!(block.points_overflowed(), 2);
 
-        let mut owed = Owed::default();
+        let mut owed = Owed::finishing(Timeouts::default().drain);
         owed.carry(&skipped);
         let mut placeholder = ParameterChanges::new();
         owed.merge_carried(&mut placeholder);
@@ -1209,7 +1206,7 @@ mod tests {
         for i in 0..PARAMS {
             assert!(skipped.add_change(addr(i), 7, 0.25));
         }
-        let mut owed = Owed::default();
+        let mut owed = Owed::finishing(Timeouts::default().drain);
         owed.carry(&skipped);
 
         // Filled as the node's delivery fills it: a full queue takes points

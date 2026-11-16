@@ -237,18 +237,16 @@ impl Scanner {
         let (progress_tx, progress_rx) = crossbeam_channel::unbounded();
         let (tx, rx) = crossbeam_channel::unbounded();
 
-        let worker = std::thread::Builder::new()
-            .name("plugin-scanner".into())
-            .spawn(move || {
-                let result = job.run(Some(&progress_tx), |delta| {
-                    tx.send(Message::Delta(delta)).is_ok()
-                });
-                // Release the pedal before announcing the end, so a caller that
-                // sees `Done` can start the next scan.
-                drop(job);
-                let _ = tx.send(Message::Done(result));
-            })
-            .expect("failed to spawn plugin scanner thread");
+        let worker = tutti_rt::spawn_named("plugin-scanner", None, move |_| {
+            let result = job.run(Some(&progress_tx), |delta| {
+                tx.send(Message::Delta(delta)).is_ok()
+            });
+            // Release the pedal before announcing the end, so a caller that
+            // sees `Done` can start the next scan.
+            drop(job);
+            let _ = tx.send(Message::Done(result));
+        })
+        .expect("failed to spawn plugin scanner thread");
 
         Scan {
             progress_rx,
@@ -378,7 +376,7 @@ pub struct Scan {
     pub progress_rx: Receiver<ScanProgress>,
     rx: Receiver<Message>,
     cancel: Cancel,
-    worker: Option<std::thread::JoinHandle<()>>,
+    worker: Option<tutti_rt::ThreadHandle<()>>,
 }
 
 impl Drop for Scan {
@@ -1614,7 +1612,8 @@ mod tests {
 
         // The drop waits for the parked probe: release it from this thread,
         // once the drop has asked the worker to stop.
-        let dropping = std::thread::spawn(move || drop(scan));
+        let dropping = tutti_rt::spawn_named("scan-dropper", None, move |_| drop(scan))
+            .expect("the dropping thread starts");
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         while !stop.is_cancelled() {
             assert!(
