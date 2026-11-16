@@ -273,7 +273,7 @@ mod tests {
         let cancel = Cancel::new();
         let raiser = {
             let (cancel, pid_file) = (cancel.clone(), pid_file.clone());
-            thread::spawn(move || {
+            tutti_rt::spawn_named("probe-raiser", None, move |_| {
                 // The child has written its whole pid (a line) once it is running;
                 // a child that never starts is a failure, not a hang.
                 let deadline = Instant::now() + Duration::from_secs(30);
@@ -283,6 +283,7 @@ mod tests {
                 }
                 cancel.cancel();
             })
+            .expect("the raiser starts")
         };
 
         let started = Instant::now();
