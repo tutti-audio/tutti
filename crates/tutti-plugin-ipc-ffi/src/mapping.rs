@@ -11,8 +11,8 @@
 //! A mapping exists only together with its one [`MappingWriter`] (not `Clone`,
 //! `write` takes `&mut self`), so within this process every store into the data
 //! region is ordered by the borrow checker. That, and the file being made here
-//! (exclusively, at 0600 on unix and in the temp directory's ACL on Windows) and never resized, is what lets every call in this
-//! module be safe.
+//! (exclusively, at 0600 on unix and in the temp directory's ACL on Windows) and
+//! never resized, is what lets every call in this module be safe.
 //!
 //! The backing file's platform is one module, chosen once above: where it lives,
 //! how it is opened, and what keeps it from outliving its last mapping.
@@ -104,9 +104,9 @@ impl MappingWriter {
     /// header, before any peer can know the name.
     ///
     /// The file is created exclusively, at 0600 on unix (the temp directory's
-    /// ACL on Windows): a name that already exists (a
-    /// symlink included) is an error, never a file to truncate, since another
-    /// process could hold that file mapped, or have planted it. The file ends
+    /// ACL on Windows): a name that already exists (a symlink included) is an
+    /// error, never a file to truncate, since another process could hold that
+    /// file mapped, or have planted it. The file ends
     /// with the creator's mapping: on unix the creator's drop unlinks it, and on
     /// Windows it is opened delete-on-close and the creator keeps that handle,
     /// so it is deleted when the last handle and view of it close.
@@ -121,11 +121,8 @@ impl MappingWriter {
     /// If `size` is smaller than [`SLAB_HEADER_BYTES`]: the caller sizes the
     /// slab from a layout that always includes the header.
     pub fn create(name: &str, size: usize) -> Result<Self, SlabError> {
-        let writer = Self::map(
-            platform::open_file(name, size, Open::Create)?,
-            name,
-            Open::Create,
-        )?;
+        let (file, backing) = platform::open_file(name, size, Open::Create)?;
+        let writer = Self::map(file, backing)?;
         // Stamp before anyone can open it: the peer is told the slab's name only
         // after this returns, and `initialize` releases the magic last so an
         // opener that sees the magic sees a fully written header.
@@ -149,7 +146,7 @@ impl MappingWriter {
     ///
     /// As for [`create`](Self::create).
     pub fn open(name: &str, size: usize) -> Result<Self, SlabError> {
-        let file = platform::open_file(name, size, Open::Existing)?;
+        let (file, backing) = platform::open_file(name, size, Open::Existing)?;
         let actual = file
             .metadata()
             .map_err(|e| SlabError::File(format!("failed to read shared memory size: {e}")))?
@@ -162,12 +159,12 @@ impl MappingWriter {
                 expected: size,
             });
         }
-        let writer = Self::map(file, name, Open::Existing)?;
+        let writer = Self::map(file, backing)?;
         writer.mapping.header().validate()?;
         Ok(writer)
     }
 
-    fn map(file: File, name: &str, mode: Open) -> Result<Self, SlabError> {
+    fn map(file: File, backing: platform::Backing) -> Result<Self, SlabError> {
         // SAFETY: `memmap2`'s contract is that the file is not truncated or
         // resized by anyone while mapped. `open_file` is the only code that makes
         // or opens a slab file: it creates one exclusively (0600 on unix) and sizes it
@@ -178,10 +175,7 @@ impl MappingWriter {
         let map = unsafe { MmapMut::map_mut(&file) }
             .map_err(|e| SlabError::File(format!("failed to map shared memory: {e}")))?;
         Ok(Self {
-            mapping: Arc::new(SharedMapping::new(
-                map,
-                platform::Backing::keep(file, name, mode),
-            )),
+            mapping: Arc::new(SharedMapping::new(map, backing)),
         })
     }
 
@@ -427,6 +421,20 @@ mod tests {
         assert!(
             MappingWriter::open(&n, size).is_err(),
             "the slab opens after its mappings are gone"
+        );
+    }
+
+    /// A creation that fails after the file exists leaves no file: a slab
+    /// shorter than its header trips the mapping's assertion, and no file is
+    /// left once the panic has unwound.
+    #[test]
+    fn a_failed_create_leaves_no_file() {
+        let n = name("failed");
+        let made = std::panic::catch_unwind(|| MappingWriter::create(&n, 1));
+        assert!(made.is_err(), "a slab shorter than its header was made");
+        assert!(
+            !platform::path(&n).exists(),
+            "the failed create left its file"
         );
     }
 }

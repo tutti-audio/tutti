@@ -8,18 +8,10 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 
 /// What ends the name: the creator's carries the path and unlinks it on drop,
-/// which leaves a peer's mapping intact; an opener's carries nothing.
+/// which leaves a peer's mapping intact; an opener's carries nothing. It exists
+/// from the moment the creator's file does, so a failure after that unlinks it.
 #[derive(Debug)]
 pub(super) struct Backing(Option<PathBuf>);
-
-impl Backing {
-    /// Takes the end of the name from `file`'s creator; an opener's file is only
-    /// released, since the mapping does not need the descriptor.
-    pub(super) fn keep(file: File, name: &str, mode: Open) -> Self {
-        drop(file);
-        Self(matches!(mode, Open::Create).then(|| path(name)))
-    }
-}
 
 impl Drop for Backing {
     fn drop(&mut self) {
@@ -29,7 +21,8 @@ impl Drop for Backing {
     }
 }
 
-pub(super) fn open_file(name: &str, size: usize, mode: Open) -> Result<File, SlabError> {
+/// Creates or opens the slab file, with the [`Backing`] that ends it.
+pub(super) fn open_file(name: &str, size: usize, mode: Open) -> Result<(File, Backing), SlabError> {
     let mut opts = OpenOptions::new();
     opts.read(true).write(true);
     match mode {
@@ -47,11 +40,12 @@ pub(super) fn open_file(name: &str, size: usize, mode: Open) -> Result<File, Sla
     let file = opts
         .open(path(name))
         .map_err(|e| SlabError::File(format!("failed to open shared memory file: {e}")))?;
+    let backing = Backing(matches!(mode, Open::Create).then(|| path(name)));
     if matches!(mode, Open::Create) {
         file.set_len(size as u64)
             .map_err(|e| SlabError::File(format!("failed to set file size: {e}")))?;
     }
-    Ok(file)
+    Ok((file, backing))
 }
 
 pub(super) fn path(name: &str) -> PathBuf {

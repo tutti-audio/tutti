@@ -21,21 +21,17 @@ use windows_sys::Win32::Storage::FileSystem::{
     DELETE, FILE_FLAG_DELETE_ON_CLOSE, FILE_FLAG_OPEN_REPARSE_POINT,
 };
 
-/// The open file handle kept for as long as the mapping lives: the creator's
+/// A handle to the file kept for as long as the mapping lives: the creator's
 /// carries the delete-on-close, and the name stays openable while it is held.
+/// It exists from the moment the creator's file does, so a failure after that
+/// closes it and deletes the file.
 #[derive(Debug)]
 pub(super) struct Backing {
     _file: File,
 }
 
-impl Backing {
-    /// Keeps `file` open; closing it, with the last view, ends the file.
-    pub(super) fn keep(file: File, _name: &str, _mode: Open) -> Self {
-        Self { _file: file }
-    }
-}
-
-pub(super) fn open_file(name: &str, size: usize, mode: Open) -> Result<File, SlabError> {
+/// Creates or opens the slab file, with the [`Backing`] that ends it.
+pub(super) fn open_file(name: &str, size: usize, mode: Open) -> Result<(File, Backing), SlabError> {
     let mut opts = OpenOptions::new();
     match mode {
         Open::Create => {
@@ -58,11 +54,16 @@ pub(super) fn open_file(name: &str, size: usize, mode: Open) -> Result<File, Sla
     let file = opts
         .open(path(name))
         .map_err(|e| SlabError::File(format!("failed to open shared memory file: {e}")))?;
+    let backing = Backing {
+        _file: file
+            .try_clone()
+            .map_err(|e| SlabError::File(format!("failed to duplicate the file handle: {e}")))?,
+    };
     if matches!(mode, Open::Create) {
         file.set_len(size as u64)
             .map_err(|e| SlabError::File(format!("failed to set file size: {e}")))?;
     }
-    Ok(file)
+    Ok((file, backing))
 }
 
 pub(super) fn path(name: &str) -> PathBuf {
