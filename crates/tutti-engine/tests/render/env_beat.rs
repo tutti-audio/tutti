@@ -9,7 +9,7 @@
 //!   and ragged device blocks;
 //! - `ClickNode`, reading its block's `Env`, clicks on the frames the beat
 //!   model reaches each beat on;
-//! - an offline render driven by `OfflineTimeline::render_graph` hands the
+//! - an offline render driven by `RenderClock::render_graph` hands the
 //!   graph the transport a live graph engine hands it for the same timeline:
 //!   the `Env` per block.
 //!
@@ -35,8 +35,8 @@ use tutti_graph::{
 use tutti_graph::{Edge, InPort, OutPort, Source};
 use tutti_nodes::{ClickNode, ClickSettings, MetronomeMode};
 use tutti_transport::{
-    FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, Then, Timeline,
-    Transport, TransportCommand,
+    FadeOut, LoopEdit, MotionEvent, OfflineTimeline, OfflineTimelineConfig, RenderClock, Then,
+    Timeline, Transport, TransportCommand,
 };
 use tutti_types::{
     Amplitude, At, Beat, Bpm, ChannelLayout, Frame, LoopRange, SampleRate, Samples, Tail,
@@ -420,7 +420,7 @@ fn env_graph(max_block: usize, log: &Arc<Mutex<Vec<Env>>>) -> (Editor, Executor)
 }
 
 /// An offline render from bar 2 (beat 4), at 100 BPM, looping beats 6–7,
-/// driven by `OfflineTimeline::render_graph`, hands the graph the time a
+/// driven by `RenderClock::render_graph`, hands the graph the time a
 /// live graph engine hands it for the same timeline:
 ///
 /// **per block, the `Env`**: the same play state, tempo and loop, no

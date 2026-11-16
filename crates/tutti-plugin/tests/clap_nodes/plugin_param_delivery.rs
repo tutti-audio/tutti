@@ -29,7 +29,7 @@ use tutti_graph::{ForkMode, ForkTarget, Prepare, TransportPosition};
 use tutti_nodes::automation::{ControlLaneNode, LaneControls};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::ParamId;
-use tutti_transport::{OfflineTimeline, OfflineTimelineConfig};
+use tutti_transport::{OfflineTimeline, OfflineTimelineConfig, RenderClock};
 use tutti_types::{Beat, Bpm, SampleRate, Samples};
 
 const SAMPLE_RATE: f64 = 48_000.0;
