@@ -713,9 +713,6 @@ impl OpenOutput {
     pub fn queue_timed(&mut self, events: &[Outgoing]) -> Taken {
         let (taken, refused) = self.offer(events);
         self.refused += refused;
-        if let Some(heartbeat) = &self.heartbeat {
-            heartbeat.sent();
-        }
         taken
     }
 
@@ -727,6 +724,12 @@ impl OpenOutput {
         self.wire.convert(events);
         let taken = self.sink.queue_timed(self.wire.batch());
         let refused = taken.left_of(self.wire.batch()) as u64;
+        // Every send passes here: a packet the device took is traffic.
+        if let Some(heartbeat) = &self.heartbeat
+            && (self.wire.batch().len() as u64) > refused
+        {
+            heartbeat.sent();
+        }
         (self.wire.accepted(taken, events), refused)
     }
 

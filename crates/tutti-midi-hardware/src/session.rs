@@ -6,12 +6,15 @@
 //!    [`MidiEndpoints`], so this file has no `#[cfg]` at all.
 //! 2. **It holds no output.** [`connect_output`](MidiSession::connect_output)
 //!    hands the caller the [`OpenOutput`] it opened, which the caller owns and
-//!    queues through with `&mut self`: nothing here sends, so nothing shares an
-//!    output with the session, and an unconnected output is a value the caller
-//!    does not have rather than a sink that silently swallows.
-//! 3. **No background threads.** A native-UMP send is a non-blocking syscall
-//!    and connections are held right here, so nothing needs an output thread.
-//!    (The ALSA *input* pump is the backend's own thread, not this type's.)
+//!    queues through with `&mut self`: nothing here sends, so the session
+//!    shares no output, and an unconnected output is a value the caller does
+//!    not have rather than a sink that silently swallows.
+//! 3. **No background threads of its own.** A native-UMP send is a
+//!    non-blocking syscall and connections are held right here. The threads
+//!    that exist belong to the values handed out: the ALSA *input* pump is the
+//!    backend's, and an [`OpenOutput`] asked to
+//!    [`active_sensing`](OpenOutput::active_sensing) runs one thread that
+//!    shares that output's sink with its owner until it drops.
 //!
 //! # Threading
 //!

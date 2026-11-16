@@ -750,13 +750,13 @@ mod sensing {
         );
     }
 
-    /// **Traffic defers it**: an output that sends every 100 ms for a second is
+    /// **Traffic defers it**: an output that sends every 10 ms for a second is
     /// never silent for an interval, so none is sent.
     #[test]
     fn traffic_defers_active_sensing() {
         let (mut out, fake, _devices) = output_in(Protocol::Midi1, true);
-        for _ in 0..10 {
-            std::thread::sleep(Duration::from_millis(100));
+        for _ in 0..100 {
+            std::thread::sleep(Duration::from_millis(10));
             let _ = out.queue(&[(Offset::ZERO, clock())]);
         }
         let busy = sent(&fake);

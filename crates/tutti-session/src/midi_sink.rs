@@ -340,13 +340,12 @@ impl Sinks {
         }
     }
 
-    /// Sends `batch` to every sink, each event on its frame. Whether there is
-    /// one.
+    /// Sends `batch` to every sink, each event on its frame.
     pub(crate) fn route(
         &mut self,
         batch: &[(tutti_types::Frame, tutti_ump::Ump)],
         timing: Option<&OutputTiming>,
-    ) -> bool {
+    ) {
         for port in self
             .ports
             .iter_mut()
@@ -354,7 +353,6 @@ impl Sinks {
         {
             route_batch(Some(&mut port.out), &mut port.losses, timing, batch);
         }
-        self.ports.iter().any(|port| port.token.strong_count() > 0)
     }
 }
 
