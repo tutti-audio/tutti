@@ -40,6 +40,7 @@ pub(crate) use batcher::Batcher;
 pub use batcher::{BlockPayload, Chunks};
 pub(crate) use client::audio::BridgeListener;
 pub use client::audio::{BridgeEvent, BridgeThread, HarmonyInputs, Submitted};
+pub(crate) use client::audio::{FATES, Fate};
 pub use client::{EditorLoader, PluginBridge};
 // The bridge's free-buffer pool, for the delivery test in `tutti-plugin` that
 // fills it the way the node does.

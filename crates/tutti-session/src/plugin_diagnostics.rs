@@ -71,15 +71,24 @@ impl<'a> Diagnostics<'a> {
             .map_or(0, tutti_plugin_host::PluginControls::late_chunks)
     }
 
-    /// Of the [`missed_chunks`](Self::missed_chunks), those never seen answered
-    /// before the chunk's ring slot was reused: the plugin's pipeline refused
-    /// or skipped them, or answered between two looks. Zero for a plugin that
-    /// runs in this process.
-    pub fn lost_chunks(&self) -> u64 {
+    /// Of the [`missed_chunks`](Self::missed_chunks), those the plugin's
+    /// server refused because the chunk's ring slot was recycled before it ran.
+    /// Zero for a plugin that runs in this process.
+    pub fn refused_chunks(&self) -> u64 {
         self.hosted
             .controls
             .as_ref()
-            .map_or(0, tutti_plugin_host::PluginControls::lost_chunks)
+            .map_or(0, tutti_plugin_host::PluginControls::refused_chunks)
+    }
+
+    /// Of the [`missed_chunks`](Self::missed_chunks), those never seen answered
+    /// that the server did not refuse and the pipeline did not skip: a loss no
+    /// counter explains. Zero for a plugin that runs in this process.
+    pub fn unanswered_chunks(&self) -> u64 {
+        self.hosted
+            .controls
+            .as_ref()
+            .map_or(0, tutti_plugin_host::PluginControls::unanswered_chunks)
     }
 
     /// Chunks dropped because the plugin fell more than one chunk behind: the

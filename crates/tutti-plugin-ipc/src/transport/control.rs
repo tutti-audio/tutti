@@ -570,6 +570,7 @@ mod tests {
             seq: 1,
             midi_out: Default::default(),
             status: Default::default(),
+            refused: false,
         };
         let mut round = || {
             send(&mut p.host, &block).expect("send");

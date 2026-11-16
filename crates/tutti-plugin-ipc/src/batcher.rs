@@ -66,7 +66,7 @@
 //! else: the `f64` stays inside the node.
 
 use crate::OfflineWait;
-use crate::{HarmonyInputs, PluginBridge, RING_SLOTS, SlabWriter};
+use crate::{FATES, Fate, HarmonyInputs, PluginBridge, SlabWriter};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -277,9 +277,8 @@ pub(crate) struct Batcher {
     counters: Arc<ChunkCounters>,
     /// Chunks collected unanswered, and not yet seen answered
     /// ([`Self::watch_late`]); `0` for an empty entry (sequences start at 1).
-    /// At most `RING_SLOTS` matter: a slot reused by a later chunk cannot show
-    /// the older one.
-    unanswered: [u64; RING_SLOTS],
+    /// At most `FATES` matter: the bridge remembers no more.
+    unanswered: [u64; FATES],
 }
 
 impl std::fmt::Debug for Batcher {
@@ -320,7 +319,7 @@ impl Batcher {
             reply: MidiEventVec::new(),
             said: BlockStatus::Continue,
             counters: Arc::default(),
-            unanswered: [0; RING_SLOTS],
+            unanswered: [0; FATES],
         }
     }
 
@@ -471,7 +470,7 @@ impl Batcher {
     /// audio from arriving.
     pub fn reset(&mut self) {
         self.expect_seq = None;
-        self.unanswered = [0; RING_SLOTS];
+        self.unanswered = [0; FATES];
         self.counters.in_flight.store(0, Ordering::Release);
         self.pos = 0;
         self.reply.clear();
@@ -551,30 +550,27 @@ impl Batcher {
         self.counters.in_flight.store(0, Ordering::Release);
     }
 
-    /// Notes `seq`, collected unanswered, to be counted late if the server
-    /// publishes it before its slot is reused: into an empty entry, else over
-    /// the oldest (counted [`lost`](ChunkCounters::lost)).
+    /// Notes `seq`, collected unanswered, to be resolved when the server's
+    /// answer is seen: into an empty entry, else over the oldest, which is
+    /// counted [`unanswered`](ChunkCounters::unanswered).
     fn remember_unanswered(&mut self, seq: u64) {
         let at = self
             .unanswered
             .iter()
             .position(|&s| s == 0)
-            .unwrap_or_else(|| {
-                (0..RING_SLOTS)
-                    .min_by_key(|&i| self.unanswered[i])
-                    .unwrap_or(0)
-            });
+            .unwrap_or_else(|| (0..FATES).min_by_key(|&i| self.unanswered[i]).unwrap_or(0));
         if self.unanswered[at] != 0 {
-            // The oldest, never seen published: its entry goes to this one.
-            self.counters.lost.fetch_add(1, Ordering::Relaxed);
+            self.counters.unanswered.fetch_add(1, Ordering::Relaxed);
         }
         self.unanswered[at] = seq;
     }
 
-    /// Counts the chunks collected unanswered that the server has published
-    /// since ([`ChunkCounters::late`]), and the ones whose slot a later chunk
-    /// may have reused (`RING_SLOTS` chunks submitted on) without a sighting,
-    /// which can no longer be told ([`ChunkCounters::lost`]). A relaxed add and loads of the slab's sequence words: RT-safe.
+    /// Resolves the chunks collected unanswered whose fate is known: published
+    /// ([`ChunkCounters::late`]), refused ([`ChunkCounters::refused`]) or
+    /// skipped (counted by the bridge). A chunk whose fate the bridge never
+    /// learned within the last [`FATES`] chunks is
+    /// [`unanswered`](ChunkCounters::unanswered). Relaxed adds and loads of
+    /// the slab's sequence words and the bridge's fate words: RT-safe.
     fn watch_late(&mut self, bridge: &PluginBridge) {
         for seq in &mut self.unanswered {
             if *seq == 0 {
@@ -583,9 +579,23 @@ impl Batcher {
             if bridge.audio_buffer().has_output(*seq) {
                 self.counters.late.fetch_add(1, Ordering::Relaxed);
                 *seq = 0;
-            } else if *seq + (RING_SLOTS as u64) < self.next_seq {
-                self.counters.lost.fetch_add(1, Ordering::Relaxed);
-                *seq = 0;
+                continue;
+            }
+            match bridge.chunk_fate(*seq) {
+                Some(Fate::Published) => {
+                    self.counters.late.fetch_add(1, Ordering::Relaxed);
+                    *seq = 0;
+                }
+                Some(Fate::Refused) => {
+                    self.counters.refused.fetch_add(1, Ordering::Relaxed);
+                    *seq = 0;
+                }
+                Some(Fate::Skipped) => *seq = 0,
+                None if *seq + (FATES as u64) / 2 < self.next_seq => {
+                    self.counters.unanswered.fetch_add(1, Ordering::Relaxed);
+                    *seq = 0;
+                }
+                None => {}
             }
         }
     }
@@ -733,23 +743,24 @@ mod tests {
         assert_eq!(b.next_seq, 1, "0 means 'never published' in the slab");
     }
 
-    /// **A full list of unanswered chunks forgets the oldest**: the newest
-    /// misses are the ones whose slot can still show them, so a third miss
-    /// replaces the earliest of two, and `reset` forgets them all.
+    /// **A full list of unanswered chunks counts the oldest unanswered**: the
+    /// newest misses are the ones whose fate can still be learned, so one more
+    /// than the list holds replaces the earliest, which is counted
+    /// ([`ChunkCounters::unanswered`]); `reset` forgets them all.
     #[test]
-    fn a_full_unanswered_list_drops_the_oldest() {
-        let mut b = Batcher::new(2, 2, SampleFormat::Float32, MAX_CHUNK, slab(MAX_CHUNK));
-        b.remember_unanswered(5);
-        b.remember_unanswered(6);
-        let mut held = b.unanswered;
-        held.sort_unstable();
-        assert_eq!(held, [5, 6]);
-        b.remember_unanswered(7);
-        let mut held = b.unanswered;
-        held.sort_unstable();
-        assert_eq!(held, [6, 7], "5, the oldest, is replaced");
+    fn a_full_unanswered_list_counts_the_oldest() {
+        let counters = Arc::new(ChunkCounters::default());
+        let mut b = Batcher::new(2, 2, SampleFormat::Float32, MAX_CHUNK, slab(MAX_CHUNK))
+            .with_counters(Arc::clone(&counters));
+        for seq in 1..=FATES as u64 {
+            b.remember_unanswered(seq);
+        }
+        assert_eq!(counters.unanswered(), 0, "the list was not full yet");
+        b.remember_unanswered(FATES as u64 + 1);
+        assert_eq!(counters.unanswered(), 1, "chunk 1, the oldest, is replaced");
+        assert!(!b.unanswered.contains(&1));
         b.reset();
-        assert_eq!(b.unanswered, [0; RING_SLOTS]);
+        assert_eq!(b.unanswered, [0; FATES]);
     }
 
     /// `reset` (a seek) drops the in-flight chunk but must NOT rewind the

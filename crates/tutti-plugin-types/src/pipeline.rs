@@ -28,7 +28,7 @@ pub struct BlockCounts {
 }
 
 /// What the pipeline reports to its controls
-/// (`PluginControls::missed_chunks`, `late_chunks`, `lost_chunks`, `skipped_chunks` and `chunk_in_flight_answered`
+/// (`PluginControls::missed_chunks`, `late_chunks`, `refused_chunks`, `skipped_chunks`, `unanswered_chunks` and `chunk_in_flight_answered`
 /// in `tutti-plugin-host`):
 /// written on the audio thread with relaxed atomics, read anywhere.
 ///
@@ -46,12 +46,16 @@ pub struct ChunkCounters {
     /// Of the chunks counted in [`missed`](Self::missed), those the server
     /// published after all, before the chunk's ring slot was reused.
     pub late: AtomicU64,
-    /// Of the chunks counted in [`missed`](Self::missed), those never seen
-    /// published before their ring slot was reused: the server refused the
-    /// chunk (its input slot was recycled before it ran), the bridge skipped
-    /// it, or the answer came and went between two looks. Each missed chunk
-    /// ends as late or lost, once (at most, for a chunk a reset dropped).
-    pub lost: AtomicU64,
+    /// Of the chunks counted in [`missed`](Self::missed), those the server
+    /// refused: it did not publish the audio because the chunk's input slot
+    /// was recycled before it ran, and said so in its reply.
+    pub refused: AtomicU64,
+    /// Of the chunks counted in [`missed`](Self::missed), those the bridge
+    /// skipped, the server refused or the server published, none of which was
+    /// learned within the last few chunks: the server never said what became
+    /// of them. A loss no other counter explains. Each missed chunk is late,
+    /// refused, skipped or unanswered (a chunk a reset dropped, none).
+    pub unanswered: AtomicU64,
     /// Chunks the bridge dropped because the plugin fell more than one chunk
     /// behind, counted by the bridge thread (set by [`attach_skipped`](Self::attach_skipped)).
     skipped: OnceLock<Arc<AtomicU64>>,
@@ -67,7 +71,8 @@ impl std::fmt::Debug for ChunkCounters {
             .field("in_flight", &self.in_flight)
             .field("missed", &self.missed)
             .field("late", &self.late)
-            .field("lost", &self.lost)
+            .field("refused", &self.refused)
+            .field("unanswered", &self.unanswered)
             .field("skipped", &self.skipped())
             .finish_non_exhaustive()
     }
@@ -101,9 +106,14 @@ impl ChunkCounters {
         self.late.load(Ordering::Relaxed)
     }
 
-    /// See `PluginControls::lost_chunks`.
-    pub fn lost(&self) -> u64 {
-        self.lost.load(Ordering::Relaxed)
+    /// See `PluginControls::refused_chunks`.
+    pub fn refused(&self) -> u64 {
+        self.refused.load(Ordering::Relaxed)
+    }
+
+    /// See `PluginControls::unanswered_chunks`.
+    pub fn unanswered(&self) -> u64 {
+        self.unanswered.load(Ordering::Relaxed)
     }
 
     /// See `PluginControls::chunk_in_flight_answered`.

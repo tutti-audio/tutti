@@ -115,7 +115,10 @@ pub(crate) mod wire;
 /// - **Version 43** gives `PluginIoChanged` the buses the plugin has now, when they
 ///   differ from the ones the host was last told: the host's picture of a
 ///   served plugin's ports followed none of its changes.
-pub const PROTOCOL_VERSION: u32 = 43;
+/// - **Version 44** adds `refused` to `AudioProcessed`: the server did not
+///   publish the block's audio (its input slot was recycled before it ran), so
+///   the host counts the chunk refused rather than leaving it unexplained.
+pub const PROTOCOL_VERSION: u32 = 44;
 
 /// Largest control-socket frame body either end will allocate for, in bytes.
 ///
@@ -670,6 +673,7 @@ mod tests {
             seq: 7,
             midi_out,
             status: tutti_plugin_types::BlockStatus::Sleep,
+            refused: true,
         };
         let bytes = postcard::to_allocvec(&msg).unwrap();
         let back: BridgeMessage = postcard::from_bytes(&bytes).unwrap();
@@ -679,7 +683,9 @@ mod tests {
                 seq,
                 midi_out,
                 status,
+                refused,
             } => {
+                assert!(refused);
                 assert_eq!(latency_us, 42);
                 assert_eq!(status, tutti_plugin_types::BlockStatus::Sleep);
                 // The block-identity echo. Not load-bearing for audio
@@ -732,13 +738,13 @@ mod tests {
     /// index, `latency_us`, `seq`, then a length and each event as
     /// `offset` and four data words, each integer a postcard varint (seven
     /// bits a byte, low group first), then the block's `status` (the
-    /// `BlockStatus` variant index: 2 is *sleep*). The bytes are
+    /// `BlockStatus` variant index: 2 is *sleep*) and `refused`. The bytes are
     /// written out, so a layout change fails here instead of as a desync
     /// between two binaries built apart.
     #[test]
     fn audio_processed_midi_out_has_pinned_bytes() {
         #[rustfmt::skip]
-        const BYTES: [u8; 26] = [
+        const BYTES: [u8; 27] = [
             1, // variant
             42, // latency_us
             7, // seq
@@ -746,6 +752,7 @@ mod tests {
             5, 0xC0, 0xF8, 0xC0, 0x84, 0x02, 0, 0, 0, // offset 5, 0x2090_3C40, 0, 0, 0
             0x84, 0x86, 0x88, 0x08, 1, 2, 3, 0xFF, 0xFF, 0xFF, 0xFF, 0x0F, // 0x0102_0304; 1, 2, 3, u32::MAX
             2, // status: sleep
+            1, // refused
         ];
         let midi_out: MidiEventVec = [
             WireMidi {
@@ -764,6 +771,7 @@ mod tests {
             seq: 7,
             midi_out,
             status: tutti_plugin_types::BlockStatus::Sleep,
+            refused: true,
         };
         assert_eq!(postcard::to_allocvec(&msg).unwrap(), BYTES);
         let back: BridgeMessage = postcard::from_bytes(&BYTES).unwrap();

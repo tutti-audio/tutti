@@ -241,15 +241,23 @@ impl PluginControls {
         self.chunks.late()
     }
 
+    /// Of the [`missed_chunks`](Self::missed_chunks), how many the plugin-server
+    /// refused: its input slot in the shared ring had been recycled before the
+    /// server ran the chunk, so it published nothing. Telemetry beside
+    /// [`late_chunks`](Self::late_chunks): an overloaded plugin or machine.
+    /// RT-safe: one relaxed load.
+    pub fn refused_chunks(&self) -> u64 {
+        self.chunks.refused()
+    }
+
     /// Of the [`missed_chunks`](Self::missed_chunks), how many were never seen
-    /// published before the chunk's slot in the shared ring was reused: the
-    /// server refused the chunk because its input slot was recycled before it
-    /// ran, the bridge skipped it ([`skipped_chunks`](Self::skipped_chunks)),
-    /// or the answer came and went between two looks. Every missed chunk is
-    /// counted late or lost once its slot is reused, so this is the loss the
-    /// late count does not cover. RT-safe: one relaxed load.
-    pub fn lost_chunks(&self) -> u64 {
-        self.chunks.lost()
+    /// published and are neither [refused](Self::refused_chunks) nor
+    /// [skipped](Self::skipped_chunks): the server never said what became of
+    /// them. Not zero is a loss no counter explains: a server that drops
+    /// chunks silently, or an answer that came and went between two looks.
+    /// RT-safe: relaxed loads.
+    pub fn unanswered_chunks(&self) -> u64 {
+        self.chunks.unanswered()
     }
 
     /// Chunks dropped because the plugin fell more than one chunk behind: the

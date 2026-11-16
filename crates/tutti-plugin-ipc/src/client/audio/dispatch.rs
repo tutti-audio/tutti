@@ -1,6 +1,6 @@
 //! Per-command IPC choreography for the bridge thread.
 
-use super::channels::Channels;
+use super::channels::{Channels, Fate};
 use super::lifecycle::Lifecycle;
 use super::messages::{AudioResponse, Command, Unsolicited};
 use super::payload_pool::PayloadPool;
@@ -262,9 +262,18 @@ impl Owed {
                         seq,
                         midi_out,
                         status,
+                        refused,
                         ..
                     } = msg
                     {
+                        channels.note_fate(
+                            seq,
+                            if refused {
+                                Fate::Refused
+                            } else {
+                                Fate::Published
+                            },
+                        );
                         channels.push_audio_response(AudioResponse::AudioProcessed {
                             seq,
                             midi_out,
@@ -420,6 +429,7 @@ pub(super) fn handle(
             // thread stopped expecting this block two blocks ago.
             if is_stale(seq, channels.newest_submitted()) {
                 channels.note_skipped();
+                channels.note_fate(seq, Fate::Skipped);
                 // Its MIDI is lost, counted, and so is the rest of every
                 // SysEx open in it: the server's reassembler would otherwise
                 // complete it from the next block's packets, with these
@@ -513,8 +523,17 @@ pub(super) fn handle(
                             seq,
                             midi_out,
                             status,
+                            refused,
                             ..
                         } => {
+                            channels.note_fate(
+                                seq,
+                                if refused {
+                                    Fate::Refused
+                                } else {
+                                    Fate::Published
+                                },
+                            );
                             channels.push_audio_response(AudioResponse::AudioProcessed {
                                 seq,
                                 midi_out,
@@ -1040,6 +1059,7 @@ mod tests {
             seq,
             midi_out: Default::default(),
             status: Default::default(),
+            refused: false,
         }
     }
 

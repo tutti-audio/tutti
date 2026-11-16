@@ -534,6 +534,8 @@ impl RenderSide {
             seq,
             midi_out: MidiEventVec::new(),
             status: BlockStatus::Continue,
+            // Nothing is published on these paths.
+            refused: true,
         };
 
         // NOTE: both early returns below reply WITHOUT publishing to the slab,
@@ -596,6 +598,7 @@ impl RenderSide {
             // thread. See [`AudioOutput`](crate::audio_pipeline::AudioOutput).
             midi_out: encode_midi_out(pipeline.midi_out(), pipeline.midi_dropped()),
             status: pipeline.status(),
+            refused: output.refused,
         })
     }
 

@@ -88,6 +88,9 @@ pub(super) struct Channels {
     /// host's again. Shared with the pipeline's counters
     /// (`ChunkCounters::attach_skipped`).
     skipped: Arc<AtomicU64>,
+    /// What became of each of the last [`FATES`] chunks the bridge thread
+    /// dealt with, for the batcher to look up.
+    fates: Arc<Fates>,
     /// The control connection has something the bridge thread has not read:
     /// set by the watcher thread, cleared by the bridge thread after it has
     /// read the lane dry. The bridge's doorbell is rung with it, so a bridge
@@ -98,6 +101,53 @@ pub(super) struct Channels {
     /// has not read are there, which `news` alone misses between the bridge's
     /// clearing it and the watcher's setting it again.
     probe: Arc<std::sync::Mutex<Option<Arc<crate::transport::control::Watch>>>>,
+}
+
+/// How many chunks back [`Fates`] remembers.
+pub(crate) const FATES: usize = 16;
+
+/// What the bridge thread learned of a chunk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Fate {
+    /// The server published its audio: the reply said so.
+    Published,
+    /// The server did not publish it: its input slot had been recycled.
+    Refused,
+    /// The bridge never sent it: more than a chunk behind.
+    Skipped,
+}
+
+/// The last [`FATES`] chunks' fates, one word each: the sequence above two
+/// bits of fate, so a lookup of a sequence the entry no longer holds finds
+/// nothing. Written by the bridge thread, read on the audio thread.
+struct Fates([AtomicU64; FATES]);
+
+impl Fates {
+    fn new() -> Self {
+        Self(std::array::from_fn(|_| AtomicU64::new(0)))
+    }
+
+    fn record(&self, seq: u64, fate: Fate) {
+        let code = match fate {
+            Fate::Published => 1,
+            Fate::Refused => 2,
+            Fate::Skipped => 3,
+        };
+        self.0[(seq % FATES as u64) as usize].store(seq << 2 | code, Ordering::Release);
+    }
+
+    fn get(&self, seq: u64) -> Option<Fate> {
+        let word = self.0[(seq % FATES as u64) as usize].load(Ordering::Acquire);
+        if word >> 2 != seq {
+            return None;
+        }
+        match word & 3 {
+            1 => Some(Fate::Published),
+            2 => Some(Fate::Refused),
+            3 => Some(Fate::Skipped),
+            _ => None,
+        }
+    }
 }
 
 impl Channels {
@@ -115,6 +165,7 @@ impl Channels {
             dropped_param_events: Arc::new(AtomicU64::new(0)),
             dropped_midi: Arc::new(AtomicU64::new(0)),
             skipped: Arc::new(AtomicU64::new(0)),
+            fates: Arc::new(Fates::new()),
             news: Arc::default(),
             probe: Arc::default(),
         }
@@ -293,6 +344,16 @@ impl Channels {
     /// nothing branches on.
     pub(super) fn note_skipped(&self) {
         self.skipped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record what became of chunk `seq`. Bridge thread only.
+    pub(super) fn note_fate(&self, seq: u64, fate: Fate) {
+        self.fates.record(seq, fate);
+    }
+
+    /// What became of chunk `seq`, while it is among the last [`FATES`].
+    pub(super) fn fate(&self, seq: u64) -> Option<Fate> {
+        self.fates.get(seq)
     }
 
     /// The cell [`note_skipped`](Self::note_skipped) counts into.
