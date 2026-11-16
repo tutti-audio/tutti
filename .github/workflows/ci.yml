@@ -224,6 +224,23 @@ jobs:
       # AU alone: the one-format loop in `clippy` runs on Linux, where the AU row is empty. `--lib` because the
       # server's dev-dependency `tutti-vst3-host` builds the VST3 SDK, which this job does not check out.
       - run: cargo clippy --locked -p tutti-plugin-server --no-default-features --features au --lib -- -D warnings
+      # Rustdoc over what only macOS compiles, in the merge queue, so a broken link fails before it reaches main;
+      # `rustdoc` documents the rest of the workspace on Linux.
+      # `tutti-vst3-ffi` needs the VST3 SDK, which this job does not check out, so its macOS view code is the one
+      # piece left out.
+      - run: >-
+          cargo doc --locked --no-deps -p tutti-au-ffi -p tutti-au-host -p tutti-coremidi-ffi -p tutti-midi-hardware
+          -p tutti-plugin-types -p tutti-plugin-ipc-ffi -p tutti-clap-ffi -p tutti-rt
+        env:
+          RUSTDOCFLAGS: -D warnings --document-private-items
+      - run: cargo doc --locked --no-deps -p tutti-plugin --features au --lib
+        env:
+          RUSTDOCFLAGS: -D warnings --document-private-items
+      - run: >-
+          cargo doc --locked --no-deps -p tutti-plugin-server -p tutti-plugin-probe --no-default-features
+          --features tutti-plugin-server/clap,tutti-plugin-server/au,tutti-plugin-probe/clap,tutti-plugin-probe/au --lib
+        env:
+          RUSTDOCFLAGS: -D warnings --document-private-items
 
   # Not a required check: it finds out whether the shared plugin loads on a Windows runner.
   contract-windows:
@@ -517,25 +534,6 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings --cfg docsrs
 
-  # The Linux job compiles the AU, CoreMIDI and macOS plugin paths to nothing, so a broken intra-doc link in them
-  # is invisible there. Submodules: `tutti-vst3-host`'s build script wants the VST3 SDK.
-  doc-macos:
-    name: rustdoc (macos)
-    needs: changes
-    if: needs.changes.outputs.macos_main == 'true'
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: recursive
-      - run: rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo doc --locked --workspace --no-deps
-        env:
-          RUSTDOCFLAGS: -D warnings --document-private-items
-
   # Miri over `tutti-rt`'s `unsafe`: most other `unsafe` is a C ABI miri does not execute, and `arc-lend` runs its
   # own miri and loom in its CI. Its own job because it needs nightly and is slow.
   miri:
@@ -574,8 +572,8 @@ jobs:
   # `code`: false when every change is prose nothing compiles (top-level `docs/`, or a root `*.md`). A crate's
   # README is pulled in by `include_str!`, so it counts as code. `canonical paths` still runs for prose.
   # `loom`: the change can affect a loom model: `tutti-rt`, `tutti-shm-model`, the lock, the toolchain or this file.
-  # `macos`: the change touches code that differs on macOS. It gates `clippy (macos)` and the macOS `test`;
-  # `macos_main` (editor, release and doctest runs, macOS rustdoc) is for pushes only.
+  # `macos`: the change touches code that differs on macOS. It gates `clippy (macos)` (which also runs rustdoc over
+  # the macOS-only crates) and the macOS `test`; the macOS editor, release and doctest runs are for pushes only.
   # `deps`: a manifest, the lock, `deny.toml`, the toolchain or this file changed, which is what `cargo deny` reads.
   # `full`: false on a pull request, which runs the light set (static gates, Linux clippy, the Linux `test`,
   # rustdoc, `cargo deny` when `deps`); the merge group and the push run the rest. `cargo xtask check-windows`
@@ -587,7 +585,6 @@ jobs:
       code: ${{ steps.diff.outputs.code }}
       loom: ${{ steps.diff.outputs.loom }}
       macos: ${{ steps.diff.outputs.macos }}
-      macos_main: ${{ steps.diff.outputs.macos_main }}
       test_os: ${{ steps.diff.outputs.test_os }}
       test_more_os: ${{ steps.diff.outputs.test_more_os }}
       deps: ${{ steps.diff.outputs.deps }}
@@ -605,7 +602,6 @@ jobs:
             echo "code=true" >> "$GITHUB_OUTPUT"
             echo "loom=true" >> "$GITHUB_OUTPUT"
             echo "macos=true" >> "$GITHUB_OUTPUT"
-            echo "macos_main=true" >> "$GITHUB_OUTPUT"
             echo 'test_os=["ubuntu-latest","macos-latest"]' >> "$GITHUB_OUTPUT"
             echo 'test_more_os=["ubuntu-latest","macos-latest"]' >> "$GITHUB_OUTPUT"
             echo "deps=true" >> "$GITHUB_OUTPUT"
@@ -631,9 +627,8 @@ jobs:
           else
             echo "loom=false" >> "$GITHUB_OUTPUT"
           fi
-          # The editor, release and doctest runs and the macOS rustdoc are for pushes only: Linux runs the same tests,
-          # and `clippy (macos)` lints what only macOS compiles.
-          echo "macos_main=false" >> "$GITHUB_OUTPUT"
+          # The macOS editor, release and doctest runs are for pushes only: Linux runs the same tests, and
+          # `clippy (macos)` lints and documents what only macOS compiles.
           echo 'test_more_os=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
           if echo "$changed" | grep -qE '^(Cargo\.(toml|lock)|deny\.toml|rust-toolchain\.toml|\.github/workflows/ci\.yml)$|/Cargo\.toml$'; then
             echo "deps=true" >> "$GITHUB_OUTPUT"
@@ -751,7 +746,6 @@ jobs:
       - test
       - test-more
       - doc
-      - doc-macos
       - miri
       - changes
       - loom
