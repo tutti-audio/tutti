@@ -8,7 +8,7 @@ use tutti_graph::testing as common;
 use common::{TestPool, prepare, test_pool};
 use tutti_graph::{
     Cx, Editor, Executor, Io, LogFilter, LogGate, Node, NodeKey, Prepare, RtLevel, RtLogReader,
-    RtRecord, RtTarget, RtValue, Shape, Status, TransportPosition, Unforkable,
+    RtLogReaders, RtRecord, RtTarget, RtValue, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutPort, Source};
 use tutti_types::{ChannelLayout, Frame, Tail};
@@ -318,4 +318,75 @@ fn logging_and_flushing_allocate_nothing_on_either_executor() {
             assert_eq!(drain(&mut readers).len(), 8, "{workers} workers");
         }
     }
+}
+
+/// A registry over a fresh executor, its gate stored by the first drain.
+fn registry(loggers: Vec<Vec<Act>>, max_block: usize) -> (Editor, Executor, RtLogReaders) {
+    let (ed, mut exec, _readers, _gate) = build(loggers, max_block, None);
+    // `build` took the readers: this registry sees the executor as resized.
+    exec.set_pool(None);
+    let readers = RtLogReaders::new(&mut exec);
+    readers.drain(ALL, |_| {});
+    (ed, exec, readers)
+}
+
+fn collect(readers: &RtLogReaders) -> (Vec<RtRecord>, u64) {
+    let mut out = Vec::new();
+    let lost = readers.drain(ALL, |r| out.push(*r));
+    (out, lost)
+}
+
+#[test]
+fn a_drain_hands_the_records_of_every_node_in_frame_order_whatever_order_they_ran_in() {
+    // The first node logs late in the block, the second early: the ring holds
+    // them in the order they ran.
+    let (_ed, mut exec, readers) = registry(vec![vec![log(A, 50, 0)], vec![log(B, 5, 0)]], 64);
+    render(&mut exec, 64, 2);
+    let frames: Vec<_> = collect(&readers).0.iter().map(RtRecord::frame).collect();
+    assert_eq!(frames, [Frame::new(5), Frame::new(50)]);
+}
+
+#[test]
+fn a_drain_across_a_pools_rings_is_ordered_by_frame_and_complete() {
+    let (_ed, mut exec, _taken, _gate) = build(busy(), 64, None);
+    // The sizing the registry adopts: one ring per participant.
+    exec.set_pool(Some(test_pool(3)));
+    let readers = RtLogReaders::new(&mut exec);
+    readers.drain(ALL, |_| {});
+    for _ in 0..8 {
+        render(&mut exec, 64, 4);
+    }
+    let (records, lost) = collect(&readers);
+    assert_eq!(lost, 0);
+    assert_eq!(records.len(), 8 * 4 * 2);
+    assert!(records.windows(2).all(|w| w[0].frame() <= w[1].frame()));
+}
+
+#[test]
+fn records_past_a_rings_room_are_counted_once_in_the_drain_that_sees_them() {
+    let acts = (0..4).map(|v| log(A, 0, v)).collect();
+    let (_ed, mut exec, readers) = registry(vec![acts], 8);
+    for _ in 0..70 {
+        render(&mut exec, 8, 1);
+    }
+    let (records, lost) = collect(&readers);
+    assert_eq!((records.len(), lost), (256, 4 * 70 - 256));
+    assert_eq!(collect(&readers).1, 0, "a loss is reported once");
+}
+
+#[test]
+fn resizing_the_executor_delivers_what_the_old_rings_held_and_reads_the_new_ones() {
+    let (_ed, mut exec, readers) = registry(vec![vec![log(A, 1, 0)]], 64);
+    render(&mut exec, 64, 1);
+    exec.set_pool(Some(test_pool(3)));
+    readers.adopt(&mut exec);
+    render(&mut exec, 64, 1);
+    let (records, lost) = collect(&readers);
+    assert_eq!(lost, 0);
+    let frames: Vec<_> = records.iter().map(RtRecord::frame).collect();
+    assert_eq!(
+        frames,
+        [Frame::new(1), Frame::new(64 + 1)],
+        "the block before the resize, and the one after"
+    );
 }

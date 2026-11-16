@@ -665,8 +665,8 @@ pub use root::{
     RootBank, RootError, RootId, fold_to_topology, fold_to_topology_with, fold_to_width,
 };
 pub use rtlog::{
-    LogFilter, LogGate, MAX_FIELDS, RtLevel, RtLogReader, RtRecord, RtTarget, RtValue,
-    TEXT_CAPACITY,
+    LogFilter, LogGate, MAX_FIELDS, RtLevel, RtLogReader, RtLogReaders, RtRecord, RtTarget,
+    RtValue, TEXT_CAPACITY,
 };
 pub use tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};
 pub use wake::Wake;
