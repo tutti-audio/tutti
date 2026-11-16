@@ -49,7 +49,7 @@
 //! ```
 //!
 //! The server's path is the one the host chose (`BridgeConfig::at`):
-//! `BridgeConfig::new` derives a unique path per call, which could never meet
+//! `unique_socket_path` derives a unique path per call, which could never meet
 //! the host that spawned this process.
 //!
 //! [`BridgeConfig`] is re-exported from

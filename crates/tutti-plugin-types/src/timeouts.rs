@@ -17,6 +17,10 @@ use thiserror::Error;
 /// [`Default`] is what a host runs with unless it chooses otherwise; each field
 /// is the deadline of one kind of wait and none is a total (a state transfer's
 /// is the gap between chunks).
+///
+/// Non-exhaustive, so a deadline can be added: build one from the default and
+/// set the fields to change (`let mut t = Timeouts::default(); t.call = ..;`).
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Timeouts {
@@ -49,9 +53,6 @@ pub struct Timeouts {
     /// What a host adds to a bridge deadline before it gives up on the answer:
     /// the bridge answers at its deadline, so the host must outlast it. 1 s.
     pub reply_margin: Duration,
-    /// An in-process plugin's call from off the main thread waiting for the
-    /// main thread to run its work: 2 s.
-    pub off_main: Duration,
 }
 
 impl Default for Timeouts {
@@ -66,7 +67,6 @@ impl Default for Timeouts {
             rate: Duration::from_secs(10),
             drain: Duration::from_millis(500),
             reply_margin: Duration::from_secs(1),
-            off_main: Duration::from_secs(2),
         }
     }
 }
@@ -129,7 +129,6 @@ impl Timeouts {
             ("rate", self.rate),
             ("drain", self.drain),
             ("reply_margin", self.reply_margin),
-            ("off_main", self.off_main),
         ];
         match fields.into_iter().find(|(_, d)| d.is_zero()) {
             Some((field, _)) => Err(ZeroTimeout { field }),
@@ -157,7 +156,6 @@ mod tests {
             rate: Duration::from_millis(50),
             drain: Duration::from_millis(1),
             reply_margin: Duration::from_millis(1),
-            off_main: Duration::from_millis(1),
         };
         for t in [Timeouts::default(), short] {
             assert_eq!(t.validate(), Ok(()));
@@ -176,13 +174,12 @@ mod tests {
     /// strict is one of them.
     #[test]
     fn a_zero_deadline_is_refused_by_name() {
-        for field in ["call", "param", "reply_margin", "off_main"] {
+        for field in ["call", "param", "reply_margin"] {
             let mut t = Timeouts::default();
             match field {
                 "call" => t.call = Duration::ZERO,
                 "param" => t.param = Duration::ZERO,
-                "reply_margin" => t.reply_margin = Duration::ZERO,
-                _ => t.off_main = Duration::ZERO,
+                _ => t.reply_margin = Duration::ZERO,
             }
             assert_eq!(t.validate(), Err(ZeroTimeout { field }));
         }

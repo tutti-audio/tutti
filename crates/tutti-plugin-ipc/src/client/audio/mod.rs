@@ -941,10 +941,11 @@ mod tests {
     #[test]
     fn an_answer_after_the_bridges_deadline_is_heard_within_the_margin() {
         const ATTEMPTS: usize = 5;
-        let timeouts = Timeouts {
-            param: Duration::from_millis(100),
-            reply_margin: Duration::from_millis(200),
-            ..Timeouts::default()
+        let timeouts = {
+            let mut t = Timeouts::default();
+            t.param = Duration::from_millis(100);
+            t.reply_margin = Duration::from_millis(200);
+            t
         };
         let (deadline, margin) = (timeouts.param, timeouts.reply_margin);
         for _ in 0..ATTEMPTS {
@@ -971,10 +972,11 @@ mod tests {
     /// margin after its deadline.
     #[test]
     fn a_bridge_that_never_answers_is_given_up_on_after_the_margin() {
-        let timeouts = Timeouts {
-            param: Duration::from_millis(50),
-            reply_margin: Duration::from_millis(200),
-            ..Timeouts::default()
+        let timeouts = {
+            let mut t = Timeouts::default();
+            t.param = Duration::from_millis(50);
+            t.reply_margin = Duration::from_millis(200);
+            t
         };
         let (deadline, margin) = (timeouts.param, timeouts.reply_margin);
         let (waiting, _reply) = ask::ask::<u8>();

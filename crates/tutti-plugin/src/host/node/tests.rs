@@ -30,7 +30,9 @@ fn handle_over(
     loaded: LoadedPlugin,
 ) -> PluginHandle {
     let guard = Arc::new(tutti_plugin_ipc::ProcessGuard::for_test(
-        tutti_plugin_ipc::BridgeConfig::new().expect("the OS has a random source"),
+        tutti_plugin_ipc::BridgeConfig::at(
+            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
+        ),
     ));
     let ipc = tutti_plugin_ipc::Ipc::new(tutti_plugin_ipc::IpcParts {
         bridge,

@@ -1,9 +1,9 @@
 //! [`ExitWait`]: a wait for a child process to end that the OS wakes, so the
 //! host learns of a server's death when it happens and not at the next poll.
 //!
-//! One platform module is chosen here and nowhere else: a pidfd on Linux, the
-//! process handle on Windows, and a short nap on every other Unix (which has no
-//! descriptor for a child's exit that a safe call can wait on).
+//! One platform module is chosen here and nowhere else: a pidfd on Linux, a
+//! kqueue `NOTE_EXIT` on macOS, the process handle on Windows, and a short nap
+//! everywhere else.
 
 #[cfg(target_os = "linux")]
 #[path = "exit/pidfd.rs"]
@@ -11,7 +11,10 @@ mod platform;
 #[cfg(windows)]
 #[path = "exit/handle.rs"]
 mod platform;
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(target_os = "macos")]
+#[path = "exit/kqueue.rs"]
+mod platform;
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 #[path = "exit/polled.rs"]
 mod platform;
 

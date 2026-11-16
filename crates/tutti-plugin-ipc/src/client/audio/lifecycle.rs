@@ -106,7 +106,7 @@ impl Lifecycle {
     }
 
     pub(super) fn is_running(&self) -> bool {
-        self.running.load(Ordering::Relaxed)
+        self.running.load(Ordering::Acquire)
     }
 
     /// The latched cause, if the server is gone.
@@ -128,7 +128,7 @@ impl Lifecycle {
     }
 
     pub(super) fn request_shutdown(&self) {
-        self.running.store(false, Ordering::Relaxed);
+        self.running.store(false, Ordering::Release);
     }
 }
 

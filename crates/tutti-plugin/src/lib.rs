@@ -365,7 +365,7 @@ pub use error::{
 mod format;
 mod host;
 
-pub use tutti_plugin_ipc::BridgeConfig;
+pub use tutti_plugin_ipc::{BridgeConfig, unique_socket_path};
 
 // The main-thread token the editor, state and polling entries take; a host
 // makes it once, on its UI thread, with `MainThreadMarker::new`. `MainWork` is the

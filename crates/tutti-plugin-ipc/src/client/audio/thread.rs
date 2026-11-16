@@ -58,6 +58,14 @@ impl BridgeThread {
         })
     }
 
+    /// Asks the thread to stop, without waiting for it: from here on a failure
+    /// it reads (the server's end, say) is not declared a death.
+    pub fn request_stop(&self) {
+        self.lifecycle.request_shutdown();
+        self.channels.push_command(Command::Shutdown);
+        self.channels.wake();
+    }
+
     /// Asks the thread to stop and joins it. Idempotent.
     pub fn shutdown(&mut self) {
         self.lifecycle.request_shutdown();
@@ -310,7 +318,17 @@ fn pump(
 /// handshake-failure sites usually have no subscriber yet. That is exactly why
 /// the latch comes first and is authoritative: `Lifecycle::crash_cause` answers
 /// for a crash nobody heard.
+///
+/// **A bridge that was asked to stop declares nothing.** Its owner ends the
+/// server on the way out (the guard kills it), and the EOF that follows is the
+/// teardown's, not a death: the shared watch must not read it as one, because
+/// an offline fork's wait holds that watch beyond the teardown. The stop is
+/// requested before the kill, so every failure the kill causes is read after
+/// the request.
 fn crash(lifecycle: &Lifecycle, listener: &ListenerSlot, cause: PluginFailure) {
+    if !lifecycle.is_running() {
+        return;
+    }
     lifecycle.mark_crashed(cause.clone());
     let cb = listener.lock().clone();
     if let Some(f) = cb.as_ref() {

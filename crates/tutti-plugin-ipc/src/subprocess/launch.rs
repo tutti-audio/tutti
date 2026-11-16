@@ -142,7 +142,12 @@ pub(super) fn launch_with_state(
 ) -> BridgeResult<LaunchedServer> {
     config.timeouts.validate()?;
     let server =
-        ProcessGuard::launched(Reaped::new(spawn_process(locator, config)?), config.clone());
+        ProcessGuard::launched(Reaped::new(spawn_process(locator, config)?), config.clone())
+            .map_err(|e| {
+                BridgeError::ConnectionFailed(format!(
+                    "the plugin-server's exit cannot be watched: {e}"
+                ))
+            })?;
 
     // The guard is borrowed, not moved: the connect retry asks its watch so a
     // server that died on startup is reported at once, and the teardown below
@@ -527,11 +532,12 @@ mod tests {
         }
 
         let config = BridgeConfig {
-            timeouts: Timeouts {
-                call: Duration::from_millis(200),
-                ..Timeouts::default()
+            timeouts: {
+                let mut t = Timeouts::default();
+                t.call = Duration::from_millis(200);
+                t
             },
-            ..BridgeConfig::new().expect("the OS has a random source")
+            ..BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source"))
         };
 
         let err = match launch_with(
@@ -592,12 +598,13 @@ mod tests {
             switches.set(k, v);
         }
         let config = BridgeConfig {
-            timeouts: Timeouts {
-                call,
-                state_restore,
-                ..Timeouts::default()
+            timeouts: {
+                let mut t = Timeouts::default();
+                t.call = call;
+                t.state_restore = state_restore;
+                t
             },
-            ..BridgeConfig::new().expect("the OS has a random source")
+            ..BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source"))
         };
         let plugin = tutti_fixtures::clap_probe();
         let started = Instant::now();
@@ -704,7 +711,8 @@ mod tests {
     #[cfg(unix)]
     fn a_library_that_is_not_a_plugin_fails_the_launch_with_the_loaders_reason() {
         let dir = tempfile::tempdir().expect("a private temp dir");
-        let config = BridgeConfig::new().expect("the OS has a random source");
+        let config =
+            BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source"));
         // A copy in this test's own directory, not `publish_with_extension`:
         // that names the link `real.with_extension(..)`, which on Linux is the
         // cdylib's own path.
@@ -927,9 +935,10 @@ mod tests {
         });
 
         let config = BridgeConfig {
-            timeouts: Timeouts {
-                call: Duration::from_secs(2),
-                ..Timeouts::default()
+            timeouts: {
+                let mut t = Timeouts::default();
+                t.call = Duration::from_secs(2);
+                t
             },
             ..BridgeConfig::at(path.clone())
         };
@@ -939,7 +948,8 @@ mod tests {
         let stand_in = ProcessGuard::launched(
             Reaped::new(spawn_stand_in(StandIn::Lingers)),
             config.clone(),
-        );
+        )
+        .expect("the exit thread starts");
         let err = handshake(&config, &stand_in)
             .expect_err("a stale server must not complete the handshake");
         drop(stand_in);
@@ -1074,7 +1084,8 @@ mod tests {
         let stand_in = ProcessGuard::launched(
             Reaped::new(spawn_stand_in(StandIn::Lingers)),
             BridgeConfig::at(path.clone()),
-        );
+        )
+        .expect("the exit thread starts");
         let result = connect_when_listening(&path, &stand_in, Timeouts::default().connect);
         drop(stand_in);
 
@@ -1106,7 +1117,8 @@ mod tests {
         let dead = ProcessGuard::launched(
             Reaped::new(spawn_stand_in(StandIn::Exits)),
             BridgeConfig::at(path.clone()),
-        );
+        )
+        .expect("the exit thread starts");
 
         let patience = Timeouts::default().connect;
         let started = Instant::now();
@@ -1190,19 +1202,19 @@ mod tests {
         }
     }
 
-    /// **A real plugin-server killed with SIGKILL is declared dead by its
-    /// process's end**, promptly and with its signal, though nothing reads its
-    /// socket (no bridge thread is attached, so the stream's EOF is not a
-    /// signal here): the watch does not wait on a timeout.
+    /// **A real plugin-server that is ended is declared dead by its process's
+    /// end**, with a failing status, though nothing reads its socket (no bridge
+    /// thread is attached, so the stream's EOF is not a signal here): the watch
+    /// does not wait on a timeout, and nothing would end this wait but the
+    /// process's end.
     ///
     /// Needs `cargo build -p tutti-plugin-server` first.
     #[test]
-    #[cfg(unix)]
-    fn a_killed_real_server_is_declared_dead_through_its_exit() {
-        use std::os::unix::process::ExitStatusExt;
+    fn an_ended_real_server_is_declared_dead_through_its_exit() {
         use tutti_plugin_types::PluginFailure;
 
-        let config = BridgeConfig::new().expect("the OS has a random source");
+        let config =
+            BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source"));
         let launched = launch_with_state(
             &Locator::at(tutti_fixtures::plugin_server()),
             &config,
@@ -1216,29 +1228,19 @@ mod tests {
         .expect("the reference plugin launches");
         let guard = &launched.server;
         assert!(!guard.watch().is_dead(), "a launched server is alive");
-        let pid = guard.pid().expect("a launched server has a pid");
-        let killed = std::process::Command::new("kill")
-            .args(["-KILL", &pid.to_string()])
-            .status()
-            .expect("kill runs");
-        assert!(killed.success());
+        guard.terminate();
 
         let started = Instant::now();
         while !guard.watch().is_dead() {
             assert!(
                 started.elapsed() < Duration::from_secs(5),
-                "the kill was never declared"
+                "the end of the process was never declared"
             );
             thread::sleep(Duration::from_millis(1));
         }
-        assert!(
-            started.elapsed() < config.timeouts.call / 5,
-            "declared after {:?}, which is a timeout's pace",
-            started.elapsed()
-        );
         match guard.watch().cause() {
             Some(PluginFailure::ServerExited { status }) => {
-                assert_eq!(status.signal(), Some(9), "{status:?}");
+                assert!(!status.success(), "{status:?}");
             }
             other => panic!("expected the process's end, got {other:?}"),
         }

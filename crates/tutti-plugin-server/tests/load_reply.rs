@@ -83,9 +83,10 @@ fn fixtures() -> (PathBuf, PathBuf) {
 /// A `plugin-server` process and its handshake connection, past `Ready`.
 fn start_server() -> (Server, Stream) {
     // The default config makes a fresh socket path that fits a socket address.
-    let socket = tutti_plugin_ipc::BridgeConfig::new()
-        .expect("the OS has a random source")
-        .socket_path;
+    let socket = tutti_plugin_ipc::BridgeConfig::at(
+        tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
+    )
+    .socket_path;
 
     let mut server = Server(
         Command::new(env!("CARGO_BIN_EXE_plugin-server"))

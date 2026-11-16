@@ -52,11 +52,14 @@ fn a_late_rate_answer_does_not_silence_an_offline_fork() {
     let live = PluginClient::new(
         BridgeConfig {
             // The fork reopens under the live plugin's configuration.
-            timeouts: Timeouts {
-                rate: RATE_TIMEOUT,
-                ..Timeouts::default()
+            timeouts: {
+                let mut t = Timeouts::default();
+                t.rate = RATE_TIMEOUT;
+                t
             },
-            ..BridgeConfig::new().expect("the OS has a random source")
+            ..BridgeConfig::at(
+                tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
+            )
         },
         &tutti_fixtures::detached_work(),
         &crate::catalog::Loadable::uncatalogued(

@@ -463,11 +463,12 @@ fn a_fork_whose_server_hangs_is_a_timed_out_fault_after_one_budget() {
     let _lock = machine_lock();
     let _env = env();
     let config = BridgeConfig {
-        timeouts: Timeouts {
-            call: Duration::from_secs(1),
-            ..Timeouts::default()
+        timeouts: {
+            let mut t = Timeouts::default();
+            t.call = Duration::from_secs(1);
+            t
         },
-        ..BridgeConfig::new().expect("the OS has a random source")
+        ..BridgeConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source"))
     };
     let probe = load_probe_with(config, SAMPLE_RATE);
     let _hang = ProbeEnv::new().block_from(5);
@@ -684,11 +685,12 @@ fn an_export_through_a_failing_fork_fails_by_name() {
     let _lock = machine_lock();
     let _env = env();
     let config = BridgeConfig {
-        timeouts: Timeouts {
-            call: Duration::from_secs(1),
-            ..Timeouts::default()
+        timeouts: {
+            let mut t = Timeouts::default();
+            t.call = Duration::from_secs(1);
+            t
         },
-        ..BridgeConfig::new().expect("the OS has a random source")
+        ..BridgeConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source"))
     };
     let probe = load_probe_with(config, SAMPLE_RATE);
     probe.client.set_parameter(GAIN, gain_at(-6.0));

@@ -62,10 +62,9 @@ const STATE_PROGRESS_TIMEOUT: Duration = Duration::from_millis(400);
 /// The default [`Timeouts`] with the wait for a rate change's answer set to
 /// `ms` milliseconds.
 fn rate_timeout(ms: u64) -> Timeouts {
-    Timeouts {
-        rate: Duration::from_millis(ms),
-        ..Timeouts::default()
-    }
+    let mut t = Timeouts::default();
+    t.rate = Duration::from_millis(ms);
+    t
 }
 
 /// Poll `cond` until it holds, or [`NOTICE_TIMEOUT`] passes.
@@ -351,9 +350,10 @@ impl MockServer {
         state_progress: Duration,
         respond: impl Fn(HostMessage) -> Action + Send + 'static,
     ) -> Self {
-        let timeouts = Timeouts {
-            state_progress,
-            ..Timeouts::default()
+        let timeouts = {
+            let mut t = Timeouts::default();
+            t.state_progress = state_progress;
+            t
         };
         Self::start_with_timeouts(label, timeouts, respond)
     }
@@ -365,9 +365,10 @@ impl MockServer {
         timeouts: Timeouts,
         respond: impl Fn(HostMessage) -> Action + Send + 'static,
     ) -> Self {
-        let timeouts = Timeouts {
-            reply_margin: REPLY_MARGIN,
-            ..timeouts
+        let timeouts = {
+            let mut t = timeouts;
+            t.reply_margin = REPLY_MARGIN;
+            t
         };
         let path = unique_socket_path().expect("the OS has a random source");
         let _ = std::fs::remove_file(&path);

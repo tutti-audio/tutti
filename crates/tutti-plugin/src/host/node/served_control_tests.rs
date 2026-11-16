@@ -34,7 +34,9 @@ fn the_served_control_and_any_thread_answer_alike() {
     let mut env = tutti_fixtures::ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", plugin_server_path());
     let Launched { ipc, .. } = Ipc::launch(
-        BridgeConfig::new().expect("the OS has a random source"),
+        BridgeConfig::at(
+            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
+        ),
         tutti_fixtures::clap_probe().to_path_buf(),
         tutti_plugin_types::PluginFormat::Clap,
         tutti_plugin_types::Load::new(),
@@ -113,7 +115,9 @@ fn a_live_served_load_reaches_the_plugin_in_the_context_it_names() {
     env.set("TUTTI_PLUGIN_SERVER", plugin_server_path());
     env.set("TUTTI_CLAP_PROBE_LOAD_ONLY_CONTEXT", "2");
     let Launched { ipc, .. } = Ipc::launch(
-        BridgeConfig::new().expect("the OS has a random source"),
+        BridgeConfig::at(
+            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
+        ),
         tutti_fixtures::clap_probe().to_path_buf(),
         tutti_plugin_types::PluginFormat::Clap,
         tutti_plugin_types::Load::new(),
@@ -159,7 +163,9 @@ fn a_client_with_no_editor_loader_asks_the_real_server_for_its_editor() {
     let mut env = tutti_fixtures::ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", plugin_server_path());
     let Launched { mut ipc, .. } = Ipc::launch(
-        BridgeConfig::new().expect("the OS has a random source"),
+        BridgeConfig::at(
+            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
+        ),
         tutti_fixtures::clap_probe().to_path_buf(),
         tutti_plugin_types::PluginFormat::Clap,
         tutti_plugin_types::Load::new(),
@@ -200,7 +206,9 @@ fn a_served_bypass_write_is_lost_when_the_link_is_dead() {
     let mut env = tutti_fixtures::ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", plugin_server_path());
     let Launched { ipc, .. } = Ipc::launch(
-        BridgeConfig::new().expect("the OS has a random source"),
+        BridgeConfig::at(
+            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
+        ),
         tutti_fixtures::clap_probe().to_path_buf(),
         tutti_plugin_types::PluginFormat::Clap,
         tutti_plugin_types::Load::new(),
@@ -233,4 +241,38 @@ fn a_served_bypass_write_is_lost_when_the_link_is_dead() {
         tutti_plugin_types::BypassWrite::Lost,
         "a dead link takes nothing"
     );
+}
+
+/// **Ending a served plugin the normal way does not read as its death.** The
+/// guard kills the server as the plugin is dropped, and the bridge, which is
+/// still attached, reads the EOF that follows; an offline fork's wait holds the
+/// watch beyond the teardown, so a death declared by it would fail a good
+/// render.
+#[test]
+fn a_normal_teardown_leaves_the_forks_watch_alive() {
+    let _lock = machine_lock();
+    let mut env = tutti_fixtures::ScopedEnv::new();
+    env.set("TUTTI_PLUGIN_SERVER", plugin_server_path());
+    let Launched { mut ipc, .. } = Ipc::launch(
+        BridgeConfig::at(
+            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
+        ),
+        tutti_fixtures::clap_probe().to_path_buf(),
+        tutti_plugin_types::PluginFormat::Clap,
+        tutti_plugin_types::Load::new(),
+        SampleRate::SR_48K,
+        None,
+        tutti_plugin_types::StateUse::Project,
+        None,
+    )
+    .expect("the probe launches in a real plugin-server");
+    let wait = ipc.watch(true);
+    assert!(!wait.server_died(), "a launched server is alive");
+    drop(ipc);
+    assert!(
+        !wait.server_died(),
+        "the teardown declared a death: {:?}",
+        wait.death()
+    );
+    assert!(wait.death().is_none());
 }

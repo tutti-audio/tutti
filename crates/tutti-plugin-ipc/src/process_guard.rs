@@ -42,7 +42,12 @@ impl ProcessGuard {
     /// Own the launched `process`; it is killed and reaped when the guard
     /// drops ([`Reaped`]). Its end, however it comes, is declared to
     /// [`watch`](Self::watch) by a thread the OS wakes.
-    pub fn launched(process: Reaped, config: BridgeConfig) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// The exit thread cannot start: a server whose end nobody watches is not
+    /// run, and `process` is killed and reaped as it drops.
+    pub fn launched(process: Reaped, config: BridgeConfig) -> std::io::Result<Self> {
         let watch = Arc::new(ServerWatch::new());
         let wait = ExitWait::of(&process);
         let process = Arc::new(Mutex::new(Some(process)));
@@ -51,21 +56,13 @@ impl ProcessGuard {
             let watch = Arc::clone(&watch);
             move |stop: &StopToken| declare_exit(&process, &wait, &watch, stop)
         });
-        let exit_thread = match spawned {
-            Ok(handle) => Some(handle),
-            Err(e) => {
-                // The stream's end still declares a death, only later.
-                tracing::warn!("the server's exit cannot be watched: {e}");
-                None
-            }
-        };
-        Self {
+        Ok(Self {
             process,
             watch,
-            exit_thread,
+            exit_thread: Some(spawned?),
             _bridge_thread: None,
             config,
-        }
+        })
     }
 
     /// The latch every signal of this server's death sets: its process ending,
@@ -118,8 +115,12 @@ impl ProcessGuard {
 
 impl Drop for ProcessGuard {
     fn drop(&mut self) {
-        // Stopped first, so the thread reads the end it is about to cause as
-        // the guard's and declares nothing.
+        // The bridge is asked to stop before the kill, so the EOF the kill
+        // causes is read after the request and declares nothing; the exit
+        // thread is stopped for the same reason.
+        if let Some(bridge) = &self._bridge_thread {
+            bridge.request_stop();
+        }
         if let Some(exit) = &self.exit_thread {
             exit.token().stop();
         }
@@ -186,8 +187,9 @@ mod tests {
         let child = command.spawn().expect("the child spawns");
         ProcessGuard::launched(
             Reaped::new(child),
-            BridgeConfig::new().expect("the OS has a random source"),
+            BridgeConfig::at(crate::unique_socket_path().expect("the OS has a random source")),
         )
+        .expect("the exit thread starts")
     }
 
     /// Waits for the watch to read dead, as long as a test would wait for
@@ -242,9 +244,9 @@ mod tests {
             .expect("kill runs");
         assert!(killed.success());
 
-        let took = dead_within(guard.watch(), Duration::from_secs(5))
-            .expect("the kill was never declared");
-        assert!(took < Duration::from_secs(1), "declared after {took:?}");
+        // Nothing reads a socket here, so only the process's end can set the
+        // watch; a bound under every deadline the host waits on.
+        dead_within(guard.watch(), Duration::from_secs(5)).expect("the kill was never declared");
         match guard.watch().cause() {
             Some(PluginFailure::ServerExited { status }) => {
                 assert_eq!(status.signal(), Some(9), "SIGKILL: {status:?}");

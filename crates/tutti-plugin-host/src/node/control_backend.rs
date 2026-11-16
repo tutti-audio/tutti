@@ -22,7 +22,7 @@
 //! work is posted to the owner's [`MainWork`](tutti_plugin_types::MainWork) and the
 //! caller waits for the answer, which costs one main-thread tick (`Session::update`
 //! runs the session's `MainWork` every tick). The wait has
-//! a deadline (the collector's [`MainWorkHandle::deadline`]): the host's main thread must keep
+//! a deadline ([`OFF_MAIN_DEADLINE`]): the host's main thread must keep
 //! pumping, and a host that blocks its main thread on such a call (joining the
 //! job from the main thread) gets the trait's "unavailable" answer (`None`,
 //! `Err`, `false`) when it expires. A timed-out call's work still runs at the
@@ -31,6 +31,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::mpsc::sync_channel;
+use std::time::Duration;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
 
 use parking_lot::Mutex;
@@ -69,6 +70,19 @@ pub(crate) struct ControlBackend<F: InProcess> {
     pub(crate) work: MainWorkHandle,
 }
 
+/// How long an off-main-thread call waits for the main thread to run its work
+/// (see the module docs, "Threads"). A collector that has never run
+/// ([`MainWorkHandle::is_pumped`]) is not waited for at all: the call answers
+/// "unavailable" at once, as a call with no main thread does, and a post is
+/// refused rather than queued without bound. Under `cfg(test)` it is shortened to one
+/// second so the test of the expiry does not stall the suite; the pumped tests
+/// answer in one tick.
+const OFF_MAIN_DEADLINE: Duration = if cfg!(test) {
+    Duration::from_secs(1)
+} else {
+    Duration::from_secs(2)
+};
+
 impl<F> ControlBackend<F>
 where
     F: InProcess + 'static,
@@ -77,7 +91,7 @@ where
     /// Runs `work` on the plugin on the main thread, under the instance lock,
     /// from whichever thread asks. `None` when it cannot be answered: the
     /// collector has never run, or the main thread did not run the work within
-    /// the collector's [`MainWorkHandle::deadline`].
+    /// [`OFF_MAIN_DEADLINE`].
     fn on_main<R: Send + 'static>(
         &self,
         work: impl FnOnce(MainThreadMarker, &mut Instance<F>) -> R + Send + 'static,
@@ -93,7 +107,7 @@ where
         self.work.defer(move |main| {
             let _ = answer.send(work(main, &mut inner.lock()));
         });
-        wait.recv_timeout(self.work.deadline()).ok()
+        wait.recv_timeout(OFF_MAIN_DEADLINE).ok()
     }
 
     /// `work` on the plugin now, when this is the main thread and the instance is
@@ -360,7 +374,7 @@ where
 }
 
 /// The off-main-thread routing of the handle's methods (`on_main`), against the
-/// reference VST2 plugin. the tests' collectors wait one second ([`TEST_DEADLINE`])
+/// reference VST2 plugin. `OFF_MAIN_DEADLINE` is one second under `cfg(test)`
 /// (not injectable: the backend sits behind the handle's `Arc<dyn ..>`).
 #[cfg(test)]
 mod off_main_tests {
@@ -373,10 +387,6 @@ mod off_main_tests {
     use tutti_vst2_host::Vst2Loaded;
 
     use crate::PluginHandle;
-
-    /// How long a test's collector lets an off-main call wait: short, so the
-    /// test of the expiry does not stall the suite.
-    const TEST_DEADLINE: std::time::Duration = std::time::Duration::from_secs(1);
 
     /// The probe, loaded in process on this thread, which is not the main thread
     /// (the harness runs tests on threads it spawns), with a thread standing in for
@@ -439,7 +449,7 @@ mod off_main_tests {
     /// "unavailable" at once**, well under the deadline, and queues nothing.
     #[test]
     fn a_never_run_collector_gets_the_unavailable_answer_at_once() {
-        let (collector, work) = MainWork::within(TEST_DEADLINE);
+        let (collector, work) = MainWork::new();
         let (_client, handle) = load(&work);
         let id = ParamId::new(1);
         let started = std::time::Instant::now();
@@ -454,7 +464,7 @@ mod off_main_tests {
         assert!(matches!(state, Err(StateError::Unavailable)), "{state:?}");
         assert_eq!(value, None);
         assert!(
-            started.elapsed() < TEST_DEADLINE / 4,
+            started.elapsed() < super::OFF_MAIN_DEADLINE / 4,
             "answered in {:?}, not after the deadline",
             started.elapsed()
         );
@@ -465,7 +475,7 @@ mod off_main_tests {
     /// the deadline**, not never.
     #[test]
     fn a_stalled_main_thread_gets_the_unavailable_answer_after_the_deadline() {
-        let (collector, work) = MainWork::within(TEST_DEADLINE);
+        let (collector, work) = MainWork::new();
         let (_client, handle) = load(&work);
         assert_eq!(collector.run(main_thread()), 0);
         let id = ParamId::new(1);

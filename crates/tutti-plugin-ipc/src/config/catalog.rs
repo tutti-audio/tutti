@@ -190,7 +190,7 @@ impl AudioConfig {
             preferred_format: self.format,
             max_buffer_size: self.buffer_size,
             timeouts: self.timeouts,
-            ..BridgeConfig::new()?
+            ..BridgeConfig::at(crate::unique_socket_path()?)
         })
     }
 }

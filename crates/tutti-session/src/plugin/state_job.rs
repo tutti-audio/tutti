@@ -9,7 +9,7 @@
 //! the session's main work: the worker waits for it, so the app must keep
 //! calling [`update`](Session::update) on the main thread, and a save the
 //! main thread does not run within the off-main deadline
-//! (`Timeouts::off_main`) ends
+//! (`tutti-plugin-host`'s `OFF_MAIN_DEADLINE`) ends
 //! as [`StateJobFailed::State`] with [`StateError::Unavailable`], as it does
 //! when the session's main work was never run.
 //!

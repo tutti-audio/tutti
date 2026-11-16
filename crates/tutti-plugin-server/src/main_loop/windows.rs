@@ -1,8 +1,9 @@
 //! The Windows backend of the main loop: a named pipe has no `poll`, so the wait
-//! is `PeekNamedPipe` with a back-off, and the host watchdog is a thread asking the OS
-//! whether the recorded host still runs. A native loop (`MsgWaitForMultipleObjectsEx` over overlapped pipe I/O,
-//! which also pumps the Win32 message queue a floating editor needs) replaces the
-//! wait and the pump together, without touching the loop's logic.
+//! is `PeekNamedPipe` with a back-off, and the host watchdog is a thread asking
+//! the OS whether the recorded host still runs. A native loop
+//! (`MsgWaitForMultipleObjectsEx` over overlapped pipe I/O, which also pumps the
+//! Win32 message queue a floating editor needs) replaces the wait and the pump
+//! together, without touching the loop's logic.
 
 use crate::transport::Transport;
 use tutti_plugin_types::{BridgeResult, MainThreadMarker, Ready, Wakeups};
@@ -133,7 +134,9 @@ pub(crate) fn wait_for_connection(_listener: &Listener) -> BridgeResult<super::W
         while !stop.wait(HOST_POLL) {
             if !tutti_plugin_ipc_ffi::process_exists(host) {
                 tracing::info!("host process is gone while the server waits to accept; exiting");
-                std::process::exit(1);
+                // Terminated outright: a plugin library's detach must not run on an
+                // orphan whose other threads are killed mid-call.
+                tutti_plugin_ipc_ffi::terminate_process(1);
             }
         }
     });

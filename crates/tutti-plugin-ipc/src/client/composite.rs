@@ -426,12 +426,12 @@ impl PluginBridge {
         self.audio.crash_cause()
     }
 
-    /// The refused rate and reason, while the plugin is refused. See
     /// The server's watch: whether it is alive, and why not.
     pub fn watch(&self) -> &Arc<ServerWatch> {
         self.audio.watch()
     }
 
+    /// The refused rate and reason, while the plugin is refused. See
     /// `AudioBridge::rate_refusal`.
     pub fn rate_refusal(&self) -> Option<(SampleRate, String)> {
         self.audio.rate_refusal()

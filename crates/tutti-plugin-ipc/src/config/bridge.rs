@@ -115,18 +115,19 @@ fn unguessable() -> Result<String, RandomSourceError> {
 /// `BridgeConfig` from it. `tutti-plugin-server` takes one to know where to
 /// listen.
 ///
-/// [`new`](Self::new) uses a fresh, unique socket path, the `tutti_audio_` slab
+/// [`at`](Self::at) takes the socket path and uses the `tutti_audio_` slab
 /// prefix, 8192-frame blocks, the default [`Timeouts`] and 32-bit float
-/// samples. There is no `Default`: a fresh path needs the operating system's
-/// random source, which can fail.
+/// samples. There is no `Default`: a fresh path ([`unique_socket_path`]) needs
+/// the operating system's random source, which can fail, and a fixed one would
+/// make every default a collision.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BridgeConfig {
     /// Local-socket path this bridge's host/server pair meet on (on Windows,
     /// its final component names a named pipe).
     ///
     /// Must be unique per bridge: binding unlinks whatever is already there,
-    /// so two bridges sharing a path break each other. [`Default`] generates a
-    /// unique one per call.
+    /// so two bridges sharing a path break each other. [`unique_socket_path`]
+    /// makes one.
     pub socket_path: PathBuf,
     /// Prefix for the shared-memory audio slab's OS name.
     pub shm_prefix: String,
@@ -141,24 +142,13 @@ pub struct BridgeConfig {
 }
 
 impl BridgeConfig {
-    /// A configuration with a socket path no other bridge uses.
+    /// A configuration whose bridge meets its server at `socket_path`: a fresh
+    /// [`unique_socket_path`] for a host, the path the host chose for the
+    /// server.
     ///
-    /// **`socket_path` is unique per call, not a constant.** A fixed path would
-    /// make every `..BridgeConfig::new()` a latent collision: the second
-    /// bridge to bind unlinks the first's live socket, and the symptom is a
-    /// plugin dying when an unrelated plugin is unloaded. Deriving it here
-    /// means a caller must go out of its way to *create* a collision rather
-    /// than to avoid one.
-    ///
-    /// # Errors
-    ///
-    /// The operating system's random source cannot be read.
-    pub fn new() -> Result<Self, RandomSourceError> {
-        Ok(Self::at(unique_socket_path()?))
-    }
-
-    /// A configuration whose bridge meets its server at `socket_path`, the
-    /// path the other side chose: the server's, which is told it.
+    /// **A host's path is unique per bridge.** Two bridges on one path break each
+    /// other: the second to bind unlinks the first's live socket, and the
+    /// symptom is a plugin dying when an unrelated plugin is unloaded.
     #[must_use]
     pub fn at(socket_path: PathBuf) -> Self {
         Self {
@@ -180,8 +170,8 @@ mod tests {
     /// test of the helper alone passes even when `new()` stops calling it.
     #[test]
     fn each_new_config_gets_its_own_socket_path() {
-        let a = BridgeConfig::new().expect("the OS has a random source");
-        let b = BridgeConfig::new().expect("the OS has a random source");
+        let a = BridgeConfig::at(unique_socket_path().expect("the OS has a random source"));
+        let b = BridgeConfig::at(unique_socket_path().expect("the OS has a random source"));
         assert_ne!(
             a.socket_path, b.socket_path,
             "two fresh configs share a socket path: the second bridge to bind \
@@ -257,11 +247,11 @@ mod tests {
     fn partial_update_from_default_still_gets_a_unique_socket() {
         let a = BridgeConfig {
             max_buffer_size: 1,
-            ..BridgeConfig::new().expect("the OS has a random source")
+            ..BridgeConfig::at(unique_socket_path().expect("the OS has a random source"))
         };
         let b = BridgeConfig {
             max_buffer_size: 2,
-            ..BridgeConfig::new().expect("the OS has a random source")
+            ..BridgeConfig::at(unique_socket_path().expect("the OS has a random source"))
         };
         assert_ne!(a.socket_path, b.socket_path);
     }

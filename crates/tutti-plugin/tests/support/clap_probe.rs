@@ -408,7 +408,7 @@ pub struct LoadedProbe {
 /// failure to load is a broken fixture rather than an outcome worth asserting.
 pub fn load_probe(sample_rate: f64) -> LoadedProbe {
     load_probe_with(
-        BridgeConfig::new().expect("the OS has a random source"),
+        BridgeConfig::at(tutti_plugin::unique_socket_path().expect("the OS has a random source")),
         sample_rate,
     )
 }

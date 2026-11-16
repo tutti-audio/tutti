@@ -246,9 +246,9 @@ fn mock_with(
     std::thread::sleep(Duration::from_millis(50));
     let ipc = Ipc::new(IpcParts {
         bridge,
-        guard: Arc::new(ProcessGuard::for_test(
-            BridgeConfig::new().expect("the OS has a random source"),
-        )),
+        guard: Arc::new(ProcessGuard::for_test(BridgeConfig::at(
+            crate::unique_socket_path().expect("the OS has a random source"),
+        ))),
         descriptor: PluginDescriptor::default(),
         loaded: LoadedPlugin {
             inputs: vec![PluginBus::main(ChannelLayout::STEREO)],

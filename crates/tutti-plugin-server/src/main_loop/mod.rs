@@ -110,6 +110,8 @@ pub(crate) use sys::{
 /// host that dies during its child's startup is reparented first). Duplicated
 /// in `tutti-plugin-ipc`'s launch rather than shared: it is the wire between
 /// the two, as the socket-path argument is.
+// Read by the Unix and Windows backends; the fallback has no host to name.
+#[allow(dead_code)]
 const HOST_PID_ENV: &str = "TUTTI_PLUGIN_HOST_PID";
 
 /// What keeps watching the host while the `accept` after

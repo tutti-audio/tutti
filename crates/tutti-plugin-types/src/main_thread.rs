@@ -29,9 +29,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::time::Duration;
-
-use crate::Timeouts;
 
 pub use tutti_rt::MainThreadMarker;
 
@@ -102,20 +99,12 @@ pub struct MainWork {
 pub struct MainWorkHandle {
     queue: Sender<Work>,
     pumped: Arc<AtomicBool>,
-    deadline: Duration,
 }
 
 impl MainWork {
     /// A collector and the handle that feeds it.
     #[must_use]
     pub fn new() -> (MainWork, MainWorkHandle) {
-        Self::within(Timeouts::default().off_main)
-    }
-
-    /// A collector and its handle, whose off-main callers wait `deadline` for
-    /// the main thread to run their work ([`Timeouts::off_main`]).
-    #[must_use]
-    pub fn within(deadline: Duration) -> (MainWork, MainWorkHandle) {
         let (queue, inbox) = channel();
         let pumped = Arc::new(AtomicBool::new(false));
         (
@@ -123,11 +112,7 @@ impl MainWork {
                 queue: inbox,
                 pumped: Arc::clone(&pumped),
             },
-            MainWorkHandle {
-                queue,
-                pumped,
-                deadline,
-            },
+            MainWorkHandle { queue, pumped },
         )
     }
 
@@ -188,13 +173,6 @@ impl Drop for MainWork {
 }
 
 impl MainWorkHandle {
-    /// How long a call from off the main thread waits for the main thread to
-    /// run its work ([`Timeouts::off_main`]).
-    #[must_use]
-    pub fn deadline(&self) -> Duration {
-        self.deadline
-    }
-
     /// Whether the collector has run at least once. A collector nobody runs
     /// (its owner never reaches the main thread) never answers `true`, so a
     /// caller that would wait for deferred work declines to wait.
