@@ -548,7 +548,8 @@ fn asking_for_capabilities_does_not_wake_the_watch() {
 /// a device that comes and goes: the exit the kernel announces for the old
 /// owner arrives after the look that already shows the new one, and the new
 /// device must be added once and never removed while it lives. One `Devices`,
-/// `A` dropped and `B` plugged at once, `B` held for 150 ms.
+/// `A` dropped and `B` plugged at once; once `B` is added it is watched for
+/// 150 ms more, the window the old owner's exit lands in.
 ///
 /// The old owner's `CLIENT_EXIT` is posted after the number is free, so it can
 /// arrive after the look that shows `B`; only a start says a number has a new
@@ -565,17 +566,20 @@ fn a_device_that_takes_a_departed_clients_number_is_added_once() {
         let name = unique(&format!("flap-b-{cycle}"));
         drop(a);
         let b = plug(&name);
-        let end = Instant::now() + Duration::from_millis(150);
         let mut seen = Vec::new();
+        until_in(&devices, &mut seen, added(&name));
+        let end = Instant::now() + Duration::from_millis(150);
         while let Some(left) = end.checked_duration_since(Instant::now()) {
             seen.extend(devices.wait(left));
         }
-        let of_b: Vec<_> = seen
+        let more_of_b: Vec<_> = seen
             .iter()
             .filter(|e| e.info().name.starts_with(&format!("{name}:")))
-            .map(|e| matches!(e, DeviceEvent::Added(_)))
             .collect();
-        assert_eq!(of_b, [true], "cycle {cycle}: events for the live device");
+        assert!(
+            more_of_b.is_empty(),
+            "cycle {cycle}: the live device, once added, saw {more_of_b:?}"
+        );
         assert!(
             devices
                 .list()
