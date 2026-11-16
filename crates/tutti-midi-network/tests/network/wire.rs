@@ -36,12 +36,14 @@ fn cmd_bytes(command: &Command) -> Vec<u8> {
     v
 }
 
+/// Spec: m2-124/5.2#1
 #[test]
 fn signature_is_midi_in_ascii() {
     assert_eq!(SIGNATURE, 0x4D49_4449);
     assert_eq!(&datagram(&[])[..], b"MIDI");
 }
 
+/// Spec: m2-124/6.4#14, m2-124/6.4#16
 #[test]
 fn invitation_matches_the_specification_example_byte_for_byte() {
     // M2-124 A.1.1: capabilities 0, name "MyDev" (padded with zero), id "8shYe3h5".
@@ -70,6 +72,7 @@ fn ump_data_matches_the_timing_clock_example() {
     assert_eq!(datagram(&[Command::UmpData(data)]), expected);
 }
 
+/// Spec: m2-124/7.1#7
 #[test]
 fn one_command_holds_two_umps_in_order() {
     // M2-124 A.1.3: Note On and Note Off on group 6 channel 1 under sequence 0x0011.
@@ -84,6 +87,7 @@ fn one_command_holds_two_umps_in_order() {
     assert_eq!(data.packets().collect::<Vec<_>>(), vec![on, off]);
 }
 
+/// Spec: m2-124/7.1#10
 #[test]
 fn a_datagram_carries_several_ump_data_commands() {
     // M2-124 A.1.4: sequences 0x3456 and 0x3457, one UMP each.
@@ -150,6 +154,7 @@ fn retransmit_error_puts_the_reason_in_the_header_and_the_sequence_in_the_payloa
     assert_eq!(one(&cmd_bytes(&err)).unwrap(), err);
 }
 
+/// Spec: m2-124/5.3#2, m2-124/6.15#3
 #[test]
 fn nak_carries_the_refused_header_then_padded_text() {
     let nak = Command::Nak(Nak {
@@ -176,6 +181,7 @@ fn nak_carries_the_refused_header_then_padded_text() {
     );
 }
 
+/// Spec: m2-124/5.3#4, m2-124/6.16#6
 #[test]
 fn bye_carries_the_reason_in_the_header_and_optional_text() {
     let plain = Command::Bye(Bye::new(ByeReason::Timeout));
@@ -369,6 +375,7 @@ fn every_command_round_trips() {
 
 // ---- Refusals ----
 
+/// Spec: m2-124/5.2#2, m2-124/5.2#3
 #[test]
 fn a_datagram_without_the_signature_is_ignored_whole() {
     assert_eq!(
@@ -425,6 +432,7 @@ fn a_ping_without_its_payload_word_is_refused_for_length() {
     );
 }
 
+/// Spec: m2-124/5.3#7
 #[test]
 fn payload_words_past_the_defined_fields_are_ignored() {
     let c = one(&[0x20, 0x02, 0xAB, 0xCD, 0, 0, 0, 5, 9, 9, 9, 9]).unwrap();
@@ -504,6 +512,7 @@ fn a_non_ascii_nonce_is_refused() {
     assert_eq!(one(&bytes).unwrap_err().error, ParseError::Nonce);
 }
 
+/// Spec: m2-124/7.1#3
 #[test]
 fn ump_data_over_sixty_four_words_is_refused() {
     let mut bytes = vec![0xFF, 65, 0, 0];
@@ -524,6 +533,7 @@ fn ump_data_that_ends_inside_a_packet_is_refused() {
     assert_eq!(e.error, ParseError::UmpData(UmpDataError::EndsInsidePacket));
 }
 
+/// Spec: m2-124/7.1#3
 #[test]
 fn building_ump_data_over_sixty_four_words_is_refused() {
     let seventeen = [Ump([0x5000_0000, 0, 0, 0]); 17];
@@ -533,6 +543,7 @@ fn building_ump_data_over_sixty_four_words_is_refused() {
     );
 }
 
+/// Spec: m2-124/7.1#9
 #[test]
 fn chunks_split_at_sixty_four_words_without_splitting_a_packet_and_number_on() {
     // 17 four-word packets are 68 words: 16 packets fill a command.
