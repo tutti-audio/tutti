@@ -2,7 +2,7 @@
 //! host learns of a server's death when it happens and not at the next poll.
 //!
 //! One platform module is chosen here and nowhere else: a pidfd on Linux, a
-//! kqueue `NOTE_EXIT` on macOS, the process handle on Windows, and a short nap
+//! kqueue process-exit event on macOS, the process handle on Windows, and a short nap
 //! everywhere else.
 
 #[cfg(target_os = "linux")]

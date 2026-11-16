@@ -240,7 +240,7 @@ pub fn parent_process_id() -> Option<u32> {
 /// Ends this process at once with `code`, without running a plugin library's
 /// detach or any other thread's cleanup (`TerminateProcess` on the current
 /// process), for a server whose host is gone: a plain `exit` would run every
-/// loaded library's `DllMain` detach while other threads are killed mid-call.
+/// loaded library's detach routine while other threads are killed mid-call.
 /// Aborts if the OS refuses.
 #[cfg(windows)]
 pub fn terminate_process(code: u32) -> ! {

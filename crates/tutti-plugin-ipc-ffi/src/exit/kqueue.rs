@@ -1,4 +1,4 @@
-//! macOS: a kqueue watching the process for `NOTE_EXIT`.
+//! macOS: a kqueue watching the process for the process-exit event.
 
 use rustix::event::Timespec;
 use rustix::event::kqueue::{
