@@ -840,13 +840,6 @@ impl MidiState {
         }
     }
 
-    /// The state with the timing the input ports are opened with.
-    #[cfg(feature = "midi-hardware")]
-    pub(crate) fn with_input_timing(mut self, timing: tutti_midi_hardware::InputTiming) -> Self {
-        self.ports.set_timing(timing);
-        self
-    }
-
     /// The outputs are timed by `clock` from now on (a session with an
     /// audio device, or the system clock's zero-latency output).
     pub(crate) fn set_output_clock(&mut self, clock: OutputClockSource) {

@@ -91,12 +91,14 @@ use tutti_midi_device::DeviceId;
 
 /// Where an input's event times come from: what a device is asked to send, and
 /// what the input edge reads.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 #[repr(u8)]
 pub enum InputTiming {
     /// The OS's arrival stamp of each event. The device is asked for no JR
     /// Timestamps, and one that sends them anyway has them ignored.
+    #[default]
     Arrival = 0,
     /// The device's JR Timestamps (M2-104 §7.2.2), where its configuration says
     /// it sends them: it is asked to (TXJR), and a device that agrees has each
@@ -387,17 +389,6 @@ impl Negotiation {
         }
     }
 
-    /// The input is now opened with `timing`: a device that is asked what it is
-    /// is asked again, with the request `timing` makes, and is unsettled until
-    /// it answers. A device that is not asked has nothing to renegotiate.
-    pub(crate) fn retime(&mut self, timing: InputTiming) {
-        self.timing = timing;
-        self.stop = StopJr::Settled;
-        if self.os.is_ump_endpoint() && self.out.is_some() {
-            self.run = Run::Idle;
-        }
-    }
-
     /// What is known, once it is settled.
     pub(crate) fn settled(&self) -> Option<DeviceStream> {
         match &self.run {
@@ -407,10 +398,12 @@ impl Negotiation {
     }
 
     /// Whether the port should copy the SysEx7 packets the device sends to the
-    /// stream ring: an Identity Request is about to go out or is out, or
-    /// MIDI-CI is enabled (`ci`) and running or about to.
-    pub(crate) fn hears_sysex(&self, ci: bool) -> bool {
-        matches!(self.inquire, Inquire::Idle | Inquire::Asking(_)) || self.ci.hears_sysex(ci)
+    /// stream ring: an Identity Request is about to go out or is out, or the
+    /// session has a MIDI-CI identity (`has_identity`) and its devices run or
+    /// are about to.
+    pub(crate) fn hears_sysex(&self, has_identity: bool) -> bool {
+        matches!(self.inquire, Inquire::Idle | Inquire::Asking(_))
+            || self.ci.hears_sysex(has_identity)
     }
 
     /// The input is closing: MIDI-CI ends on the device's output (see
@@ -518,7 +511,7 @@ impl Negotiation {
     /// Returns the stream when this call settled it, or, after that, changed
     /// it, and the peers' changes.
     ///
-    /// `ci` is the identity MIDI-CI is enabled with, if it is.
+    /// `ci` is the identity the session runs MIDI-CI with, if it has one.
     ///
     /// MIDI-CI steps first: what a settle or an inquiry's end makes it start is
     /// started by the next poll, after the port has been asked to copy SysEx.

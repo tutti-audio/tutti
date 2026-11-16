@@ -944,14 +944,7 @@ impl<C: Clock> SessionBuilder<C> {
             midi_state: crate::midi::MidiState::default().with_mpe(self.opts.mpe_mode),
             #[cfg(feature = "midi-hardware")]
             midi_state: crate::midi::MidiState::with_device_events(parts.device_events)
-                .with_mpe(self.opts.mpe_mode)
-                .with_input_timing(
-                    self.opts
-                        .midi_hardware
-                        .map_or(tutti_midi_hardware::InputTiming::Arrival, |o| {
-                            o.input_timing
-                        }),
-                ),
+                .with_mpe(self.opts.mpe_mode),
             #[cfg(feature = "modulation")]
             mods: crate::modulation::ModSession::new(self.opts.unresolved_warning),
             #[cfg(feature = "midi-hardware")]

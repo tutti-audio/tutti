@@ -100,7 +100,7 @@
 //! ```rust,no_run
 //! use std::sync::Arc;
 //! use tutti_midi_runtime::InputInlets;
-//! use tutti_midi_hardware::{InputTiming, MidiHardwareOptions, MidiSession};
+//! use tutti_midi_hardware::{MidiHardwareOptions, MidiSession};
 //! use tutti_graph::Offset;
 //! use tutti_fixtures::midi;
 //! use tutti_ump::{MidiChannel, NoteVelocity};
@@ -119,7 +119,7 @@
 //! // Connect by id when the choice matters (see "Matching by name" below).
 //! if let Some(first) = session.inputs().first() {
 //!     // The inlet node of a newly opened input is the graph's to add and wire.
-//!     let _inlet = session.connect_input(&first.id, InputTiming::Arrival)?;
+//!     let _inlet = session.connect_input(&first.id)?;
 //! }
 //! // Or by name: one `DeviceQuery` form for connect and disconnect.
 //! session.disconnect_input("keystep");

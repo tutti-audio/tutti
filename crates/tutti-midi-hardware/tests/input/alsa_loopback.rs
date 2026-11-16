@@ -53,9 +53,8 @@ fn open() -> Loopback {
     let (Some(inp), Some(out)) = (pick(&inputs), pick(&outputs)) else {
         panic!("no `Midi Through` port: `sudo modprobe snd-seq-dummy`");
     };
-    let tutti_midi_hardware::Connected::Opened(inlet) = io
-        .connect_input(&inp.id, tutti_midi_hardware::InputTiming::Arrival)
-        .expect("connect input")
+    let tutti_midi_hardware::Connected::Opened(inlet) =
+        io.connect_input(&inp.id).expect("connect input")
     else {
         panic!("a new input opens");
     };

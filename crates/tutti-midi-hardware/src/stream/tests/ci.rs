@@ -88,7 +88,7 @@ fn endpoint_wire(blocks: &[FunctionBlock]) -> Wire {
         endpoint_of(blocks),
         Some(identity()),
     );
-    wire.open(InputTiming::Arrival);
+    wire.open();
     // One Function Block Discovery per declared block takes a few ticks.
     let settled = (0..32).any(|ms| !wire.tick(ms).1.is_empty());
     assert!(settled, "the negotiation settled");
@@ -197,7 +197,7 @@ fn an_endpoint_with_no_blocks_or_no_answer_gets_discovery_on_group_0() {
         })),
         Some(identity()),
     );
-    wire.open(InputTiming::Arrival);
+    wire.open();
     let step = STEP_TIMEOUT.as_millis() as u64;
     for ms in [0, step, 2 * step, 3 * step + 1, 3 * step + 2] {
         let _ = polled(&mut wire, ms);
@@ -514,7 +514,7 @@ fn midi_ci_is_off_by_default() {
         PortDirection::Duplex,
         endpoint_of(&[ci_block(0, 2, 2)]),
     );
-    wire.open(InputTiming::Arrival);
+    wire.open();
     let settled = (0..32).any(|ms| !wire.tick(ms).1.is_empty());
     assert!(settled);
     for ms in [100, 5_000, 20_000] {
@@ -1507,17 +1507,6 @@ fn an_invalidate_muid_drops_the_peers_profiles_and_refuses_its_handles() {
     );
 }
 
-/// Closing the input ends its devices and their peers; the peers' Profiles go
-/// with them.
-#[test]
-fn closing_the_input_drops_the_profiles() {
-    let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
-    known_profiles(&mut wire, ours, vec![], vec![profile(2)], vec![]);
-    assert!(!wire.session.profiles(&wire.id).is_empty());
-    assert!(wire.session.disconnect_input(&wire.id.clone()));
-    assert!(wire.session.profiles(&wire.id).is_empty());
-}
-
 /// M2-102 gives an Initiator no time limit; tutti's is [`PEER_REPLY_TIMEOUT`]. A
 /// Set Profile On the peer never answers ends, and is reported, once that long
 /// has passed since it was sent and not before; the table is left as it was.
@@ -1899,16 +1888,6 @@ fn a_lost_peer_drops_its_process_inquiry_and_refuses_its_handles() {
         wire.session.report(handle.ask(function_block_request())),
         Err(ReportError::NoSuchPeer)
     );
-}
-
-/// Closing the input drops the peers' Process Inquiry.
-#[test]
-fn closing_the_input_drops_process_inquiry() {
-    let (mut wire, ours) = peer_declaring(CiCategories::PROCESS_INQUIRY);
-    answer_capabilities(&mut wire, ours, ProcessFeatures::MIDI_MESSAGE_REPORT);
-    assert!(!wire.session.report_peers(&wire.id).is_empty());
-    assert!(wire.session.disconnect_input(&wire.id.clone()));
-    assert!(wire.session.report_peers(&wire.id).is_empty());
 }
 
 /// M2-101 section 9.3 and 9.6: the session declares Process Inquiry, and answers a

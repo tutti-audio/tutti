@@ -57,7 +57,7 @@
 //!
 //! # What it does
 //!
-//! It runs while enabled and the input is open: the Discovery it sends when it
+//! It runs while the session has an identity and the input is open: the Discovery it sends when it
 //! starts is only the first round, and it answers a Discovery or an Invalidate
 //! MUID from anyone, at any time (M2-101 Appendix E: a Responder). It speaks
 //! Management, as the Initiator Profile Configuration, Process Inquiry and Property
@@ -435,26 +435,27 @@ impl Ci {
         }
     }
 
-    /// MIDI-CI is to run on `groups` when it is enabled.
+    /// MIDI-CI is to run on `groups` when the session has an identity.
     pub(crate) fn decide(&mut self, groups: Vec<MidiGroup>) {
         self.groups = groups;
     }
 
-    /// Whether the port should copy SysEx7 packets to the stream ring: it is
-    /// enabled (`enabled`) and there is a device to run, or one runs.
-    pub(crate) fn hears_sysex(&self, enabled: bool) -> bool {
-        enabled && (!self.groups.is_empty() || self.running.is_some())
+    /// Whether the port should copy SysEx7 packets to the stream ring: the
+    /// session has an identity (`has_identity`) and there is a device to run,
+    /// or one runs.
+    pub(crate) fn hears_sysex(&self, has_identity: bool) -> bool {
+        has_identity && (!self.groups.is_empty() || self.running.is_some())
     }
 
-    /// One step at `now`, with the identity the session runs MIDI-CI with, if it
-    /// does: starts the devices if they are to run and do not, else hands the
-    /// running ones what the port heard and the time. What they send goes out on `out`. Returns the
-    /// peers' changes.
+    /// One step at `now`, with the identity the session runs MIDI-CI with, if
+    /// it has one: starts the devices if they are to run and do not, else hands
+    /// the running ones what the port heard and the time. What they send goes
+    /// out on `out`. Returns the peers' changes.
     pub(crate) fn poll(
         &mut self,
         now: Instant,
         heard: &Heard<'_>,
-        enabled: Option<DeviceIdentity>,
+        identity: Option<DeviceIdentity>,
         store: &Arc<Mutex<ResourceStore>>,
         out: &mut OpenOutput,
     ) -> CiChanges {
@@ -465,7 +466,7 @@ impl Ci {
                 running.serve(&self.store);
             }
         }
-        match (&mut self.running, enabled) {
+        match (&mut self.running, identity) {
             (Some(running), _) => {
                 running.reconcile(&self.groups, &mut entropy, now, out, &mut changes);
                 running.step(now, heard, out, &mut changes);
@@ -505,20 +506,12 @@ impl Ci {
 
     /// The input is closing: each running device announces its MUID invalid
     /// on `out` (M2-101 §5.9), best effort. **Nothing is reported to the app**:
-    /// it closed the input, so it knows the peers went with it.
+    /// it closed the input, so it knows the peers went with it; the input and
+    /// this state are dropped by the caller.
     pub(crate) fn close(&mut self, out: &mut OpenOutput) {
         if let Some(running) = self.running.take() {
-            let mut changes = CiChanges::default();
-            running.stop(out, &mut changes);
-            self.refused += changes.refused;
+            running.stop(out, &mut CiChanges::default());
         }
-        self.peers = Arc::default();
-        self.profiles = Arc::default();
-        self.reporters = Arc::default();
-        self.property_peers = Arc::default();
-        self.queue.clear();
-        self.reports.clear();
-        self.calls.clear();
     }
 
     /// Every peer's Profiles, by Group then MUID: only the peers that declared

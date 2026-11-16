@@ -22,8 +22,8 @@ use std::sync::{Arc, Mutex, PoisonError, Weak};
 use tutti_graph::{EventTapReader, NodeKey};
 use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, Resolved, SavedDevice};
 use tutti_midi_hardware::{
-    CiPeerInfo, DeviceStream, InputTiming, MidiSession, PeerProfiles, ProfileError, ProfileSwitch,
-    ReportAsk, ReportError, ReportPeer,
+    CiPeerInfo, DeviceStream, MidiSession, PeerProfiles, ProfileError, ProfileSwitch, ReportAsk,
+    ReportError, ReportPeer,
 };
 use tutti_midi_runtime::{DeviceEpochs, JrStream, MidiIngestControls, MidiInputPorts};
 use tutti_ump::StreamConfig;
@@ -613,22 +613,11 @@ struct Retiring {
 }
 
 /// The ports of the session, and what they are opened with.
+#[derive(Default)]
 pub(crate) struct Ports {
-    timing: InputTiming,
     inputs: Vec<InputPort>,
     outputs: Vec<OutputPort>,
     retiring: Vec<Retiring>,
-}
-
-impl Default for Ports {
-    fn default() -> Self {
-        Self {
-            timing: InputTiming::Arrival,
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            retiring: Vec::new(),
-        }
-    }
 }
 
 impl std::fmt::Debug for Ports {
@@ -718,11 +707,6 @@ impl InputPort {
 }
 
 impl Ports {
-    /// The input ports are opened with `timing` from now on.
-    pub(crate) fn set_timing(&mut self, timing: InputTiming) {
-        self.timing = timing;
-    }
-
     /// Every input port ingests classic MPE in `mode` from the next block.
     pub(crate) fn set_mpe_mode(&self, mode: tutti_midi_protocol::MpeMode) {
         for port in &self.inputs {
@@ -784,10 +768,9 @@ impl Ports {
         graph: &mut crate::graph::Graph,
         info: &DeviceInfo,
     ) -> Result<(), MidiPortError> {
-        let timing = self.timing;
         let port = &mut self.inputs[at];
         match io
-            .connect_input(&info.id, timing)
+            .connect_input(&info.id)
             .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?
         {
             tutti_midi_hardware::Connected::Opened(inlet) => {

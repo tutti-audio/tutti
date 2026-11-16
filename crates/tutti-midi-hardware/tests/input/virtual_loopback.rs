@@ -67,9 +67,8 @@ fn what_a_virtual_source_sends_reaches_a_session_input_in_order() {
     let source = VirtualSource::open(&spec).expect("a virtual source");
     let (mut io, mut graph) = session();
     let device = listed(|| io.inputs(), &spec);
-    let tutti_midi_hardware::Connected::Opened(inlet) = io
-        .connect_input(&device.id, tutti_midi_hardware::InputTiming::Arrival)
-        .expect("connects")
+    let tutti_midi_hardware::Connected::Opened(inlet) =
+        io.connect_input(&device.id).expect("connects")
     else {
         panic!("a new input opens");
     };

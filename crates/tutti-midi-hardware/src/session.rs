@@ -89,7 +89,8 @@ pub struct MidiSession {
 
 /// What an OS MIDI layer is opened with: [`MidiSession::open`]'s second
 /// argument. A session runs with these for its whole life.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct MidiHardwareOptions {
     /// The identity MIDI-CI announces in Discovery; `None` is a session without
@@ -135,12 +136,6 @@ impl MidiHardwareOptions {
     pub const fn input_timing(mut self, timing: InputTiming) -> Self {
         self.input_timing = timing;
         self
-    }
-}
-
-impl Default for MidiHardwareOptions {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -358,19 +353,16 @@ impl MidiSession {
     ///
     /// The device's output, if it has one, is opened too, for discovery alone
     /// (the UMP Stream negotiation, or a MIDI 1.0 port's Identity Request, then
-    /// MIDI-CI once enabled, all stepped by [`poll`](Self::poll)): it is not an output a caller holds, which
+    /// MIDI-CI when the session has an identity, all stepped by [`poll`](Self::poll)): it is not an output a caller holds, which
     /// [`connect_output`](Self::connect_output) opens, and it closes with the
     /// input. An output that will not open
     /// leaves the input connected and the device as the OS describes it.
     ///
-    /// `timing` is the source of the input's event times:
+    /// The source of the input's event times is the session's
+    /// [`MidiHardwareOptions::input_timing`]:
     /// [`InputTiming::JitterReduction`] asks the device for JR Timestamps and
     /// places its events by them once it agrees, while [`InputTiming::Arrival`]
-    /// is the OS's arrival stamp. An input already open with another timing
-    /// keeps its port and its queued events: its time source follows at once
-    /// (arrival until the device agrees to JR), and the UMP Stream negotiation
-    /// runs again with the new request, reported by [`poll`](Self::poll) as a
-    /// settle is.
+    /// is the OS's arrival stamp. An input already open is kept as it is.
     ///
     /// # Errors
     ///
@@ -380,21 +372,15 @@ impl MidiSession {
     /// shape a stale id takes after a hot-plug — and [`Error::WrongDirection`]
     /// when it is not an input. Otherwise whatever the backend raises while
     /// opening the port.
-    pub fn connect_input(
-        &mut self,
-        device: impl Into<DeviceQuery>,
-        timing: InputTiming,
-    ) -> Result<Connected> {
+    pub fn connect_input(&mut self, device: impl Into<DeviceQuery>) -> Result<Connected> {
+        let timing = self.options.input_timing;
         let id = device.into().pick(self.inputs())?;
         // An input whose reader died is replaced, not kept: it is silent.
-        if let Some(held) = self.inputs.get_mut(&id)
-            && held.input.is_alive()
+        if self
+            .inputs
+            .get(&id)
+            .is_some_and(|held| held.input.is_alive())
         {
-            if held.timing != timing {
-                held.stream.retime(timing);
-                held.timing = timing;
-                follow_timing(&self.ports, held);
-            }
             return Ok(Connected::AlreadyOpen);
         }
         if let Some(mut held) = self.inputs.remove(&id) {
