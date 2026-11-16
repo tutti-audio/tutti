@@ -78,6 +78,52 @@ use tutti_plugin_types::{
 
 use crate::plugin::{Gate, HostedPlugin, Notices, queue};
 
+/// The lane knobs of a plugin's driven parameters, by id: where a set of one
+/// goes. The session fills it in `Phase::Plugins` from the lanes the last
+/// apply resolved, so a parameter without a lane (or whose lane was removed)
+/// is absent and a set of it goes to the plugin.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Driven {
+    #[cfg(feature = "modulation")]
+    knobs: std::sync::Arc<
+        std::sync::Mutex<std::collections::BTreeMap<u32, tutti_nodes::automation::LaneControls>>,
+    >,
+}
+
+impl Driven {
+    /// Writes `value` into parameter `id`'s lane knob. `false` when no lane
+    /// with a knob drives it.
+    #[cfg(feature = "modulation")]
+    pub(crate) fn write(&self, id: ParamId, value: Normalized) -> bool {
+        let knobs = self
+            .knobs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        knobs
+            .get(&id.get())
+            .is_some_and(|lane| lane.set_knob(value.get() as f32))
+    }
+
+    /// Without modulation no lane drives a parameter.
+    #[cfg(not(feature = "modulation"))]
+    #[allow(clippy::unused_self, reason = "the same call as with modulation")]
+    pub(crate) fn write(&self, _id: ParamId, _value: Normalized) -> bool {
+        false
+    }
+
+    /// Replaces the driven parameters with `knobs`.
+    #[cfg(feature = "modulation")]
+    pub(crate) fn replace(
+        &self,
+        knobs: std::collections::BTreeMap<u32, tutti_nodes::automation::LaneControls>,
+    ) {
+        *self
+            .knobs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = knobs;
+    }
+}
+
 /// Why a call on a plugin's parameters did not do what it was asked.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
@@ -298,6 +344,9 @@ impl<'a> Param<'a> {
 
     /// The value now: what the plugin last reported or the host last set, else
     /// what was read. From the session's mirror, so it asks the plugin nothing.
+    ///
+    /// A parameter a modulation lane drives reads its base, the lane's knob;
+    /// the value the plugin plays is that plus the lane's routes.
     #[must_use]
     pub fn normalized(&self) -> Normalized {
         self.params.hosted.mirror.value_at(self.position)
@@ -328,12 +377,18 @@ impl<'a> Param<'a> {
     }
 
     /// Sends `value` to the plugin and reads it back at once.
+    ///
+    /// A parameter a modulation lane drives takes the value as the lane's knob
+    /// and sends the plugin nothing: the lane sends the plugin the knob plus
+    /// its routes.
     fn send(&self, value: Normalized) {
         let hosted = self.params.hosted;
-        hosted
-            .handle
-            .any_thread()
-            .set_parameter_value(self.id(), value);
+        if !hosted.driven.write(self.id(), value) {
+            hosted
+                .handle
+                .any_thread()
+                .set_parameter_value(self.id(), value);
+        }
         hosted.mirror.report(self.id(), value);
     }
 
@@ -438,6 +493,7 @@ impl<'a> Param<'a> {
             node: self.params.node,
             id: self.id(),
             gate: hosted.gate.clone(),
+            driven: hosted.driven.clone(),
             handle: hosted.handle.clone(),
             notices: std::sync::Arc::clone(&hosted.notices),
             reporter: hosted.mirror.reporter(),
@@ -467,6 +523,7 @@ pub struct ParamGesture {
     node: NodeKey,
     id: ParamId,
     gate: Gate,
+    driven: Driven,
     handle: PluginHandle,
     notices: Notices,
     reporter: ParamReporter,
@@ -497,7 +554,9 @@ impl ParamGesture {
         if !self.gate.holds(self.id) {
             return Err(PluginParamError::Gone(self.id));
         }
-        self.handle.any_thread().set_parameter_value(self.id, value);
+        if !self.driven.write(self.id, value) {
+            self.handle.any_thread().set_parameter_value(self.id, value);
+        }
         self.reporter.report(self.id, value);
         queue(
             &self.notices,

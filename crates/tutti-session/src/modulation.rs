@@ -737,6 +737,18 @@ impl ModState {
         self.plugin_targets.get(&(node, id)).copied()
     }
 
+    /// The lanes with a knob that drive `node`'s plugin parameters, by id.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn plugin_lanes(&self, node: NodeKey) -> BTreeMap<u32, LaneControls> {
+        self.plugin_targets
+            .range((node, 0)..=(node, u32::MAX))
+            .filter_map(|(&(_, id), &target)| {
+                let (_, lane) = self.lane(target)?;
+                lane.knob().is_some().then(|| (id, lane.clone()))
+            })
+            .collect()
+    }
+
     /// Signal source `source`'s node (a follower's, a note envelope's).
     pub fn source_node(&self, source: ModSourceId) -> Option<NodeKey> {
         self.modulation.source(SourceKey(source.get()))
