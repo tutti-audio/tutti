@@ -469,6 +469,75 @@ fn a_set_after_the_lane_is_removed_goes_to_the_plugin() {
     }
 }
 
+/// **A read of the plugin does not put the played value in the mirror.** The
+/// gain is set to 0.5 under a lane that plays 0.25 (a macro of -0.25 over the
+/// knob). A preset load makes the session read the plugin's values again; the
+/// read finds the played 0.25, and the parameter still reads the knob.
+#[test]
+fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
+    // The plugin's file is probed before its variables are set; the reference
+    // plugin answers `clap.preset-load` only when asked.
+    crate::pooled::prime(&PluginRef::file(clap_probe()).expect("a plugin file"));
+    set_env("TUTTI_CLAP_PROBE_PRESET_LOAD", "1");
+    let mut s = detached();
+    let mut drive = Drive::new();
+    let node = add_probe(&mut s);
+    drive.update(&mut s);
+    wait_for_values(&mut drive, &mut s, node);
+    let gain = node.param(ParamId::new(GAIN));
+    {
+        let mut m = s.mods_mut();
+        m.range_raw(gain, 0.0, 1.0).unwrap();
+        let source = m.macro_(1.0);
+        m.route(RouteSpec::new(source, gain, Depth::of(-0.25)))
+            .unwrap();
+    }
+    lane_of(&mut drive, &mut s, gain);
+    set_gain(&s, node, 0.5);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !near(gain_value(&s, node), 0.25) {
+        assert!(Instant::now() < deadline, "the lane never played the knob");
+        drive.frame(&mut s);
+    }
+
+    // The preset sets only the first parameter (Cutoff), so the read it
+    // causes has landed once the mirror's Cutoff moved.
+    let cutoff = |s: &DetachedSession| {
+        let plugin = s.plugin_view(node).unwrap();
+        let params = plugin.params();
+        let first = params.iter().next().expect("a parameter").id();
+        params.get(first).unwrap().normalized()
+    };
+    let before = cutoff(&s);
+    s.main(tutti_fixtures::main_thread())
+        .plugin(node)
+        .unwrap()
+        .presets()
+        .unwrap()
+        .load_file("/nowhere/bright.tutti-preset")
+        .expect("the plugin takes the preset");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while cutoff(&s) == before {
+        assert!(Instant::now() < deadline, "the read never landed");
+        drive.update(&mut s);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // The knob reported as the read landed is applied by the next update.
+    drive.update(&mut s);
+
+    let read = s
+        .plugin_view(node)
+        .unwrap()
+        .params()
+        .get(ParamId::new(GAIN))
+        .unwrap()
+        .normalized();
+    assert!(
+        near(Some(read), 0.5),
+        "the mirror holds {read:?}, not the knob 0.5"
+    );
+}
+
 /// **Export == live on a plugin's parameter.** The reference CLAP plugin
 /// renders a constant tag scaled by its gain (id 77, applied sample-accurately
 /// at each parameter event's frame); a 3 Hz sine at depth 0.1 modulates the

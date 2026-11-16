@@ -718,10 +718,7 @@ impl ModState {
 
     /// The lanes with a knob that drive `node`'s plugin parameters, by id.
     #[cfg(feature = "plugin")]
-    pub(crate) fn plugin_lanes(
-        &self,
-        node: NodeKey,
-    ) -> BTreeMap<tutti_plugin_types::ParamId, LaneControls> {
+    pub(crate) fn plugin_lanes(&self, node: NodeKey) -> crate::plugin_params::Knobs {
         self.plugin_targets
             .range((node, 0)..=(node, u32::MAX))
             .filter_map(|(&(_, id), &target)| {
