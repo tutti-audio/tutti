@@ -1787,16 +1787,22 @@ mod tests {
         // The OS's monotonic clock: `Instant` reads the same clock on
         // every platform (`CLOCK_MONOTONIC`, `CLOCK_UPTIME_RAW`, QPC), so
         // a reading sits between two of its own, with a millisecond of
-        // slack for the conversions.
+        // slack for the conversions. The second reading is taken once the
+        // clock has moved 20 ms; a clock that never moves trips the guard.
         let before = Instant::now();
         let x = HostClock.now_ns();
-        std::thread::sleep(std::time::Duration::from_millis(20));
-        let y = HostClock.now_ns();
+        let mut y = HostClock.now_ns();
+        while y < x + 20_000_000 {
+            assert!(
+                before.elapsed() < std::time::Duration::from_secs(60),
+                "the clock did not advance"
+            );
+            y = HostClock.now_ns();
+        }
         let elapsed = i64::try_from(before.elapsed().as_nanos()).expect("fits");
-        assert!(y >= x + 20_000_000, "a later reading is 20 ms on");
         assert!(
             y - x <= elapsed + 1_000_000,
-            "and no further than Instant says"
+            "a reading is no further on than Instant says"
         );
     }
 }
