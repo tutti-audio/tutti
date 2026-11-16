@@ -273,7 +273,7 @@ fn a_first_chunk_for_an_id_in_use_is_refused() {
 }
 
 // M2-103 §5.3: Request IDs may be reused after a Transaction is complete.
-/// Spec: m2-103/3.3#9
+/// Spec: m2-103/5.3#9
 #[test]
 fn an_id_is_free_again_when_its_message_is_complete() {
     let now = Instant::now();
@@ -285,7 +285,7 @@ fn an_id_is_free_again_when_its_message_is_complete() {
 
 // M2-103 §5.3: an ID is unique only to the pair of MUIDs, so the same ID from two
 // peers is two messages; M2-101 §8.4: and an inquiry and a reply of one ID are two.
-/// Spec: m2-103/3.3#10, m2-101/8.4#5
+/// Spec: m2-103/5.3#10, m2-101/8.4#5
 #[test]
 fn an_id_is_unique_to_a_peer_and_a_direction() {
     let now = Instant::now();
@@ -347,7 +347,7 @@ fn a_count_that_disagrees_ends_the_message() {
 
 // M2-103 §12.2: the time between consecutive chunks is under 3 seconds, so the
 // message times out at 3 seconds and not a nanosecond before, and the NAK is 0x42.
-/// Spec: m2-103/10#5
+/// Spec: m2-103/12.2#2
 #[test]
 fn a_message_times_out_after_three_seconds_from_its_last_chunk() {
     let t0 = Instant::now();
@@ -404,6 +404,7 @@ fn an_id_is_free_again_after_a_timeout() {
 
 // M2-103 §12.2.1, Example 1: a wait of 0x3C (6 s) is added to the 3 s in hand, so
 // the message times out at 9 s.
+/// Spec: m2-103/12.2.1#2
 #[test]
 fn a_timeout_wait_extends_the_deadline_by_the_wait() {
     let t0 = Instant::now();
@@ -589,6 +590,7 @@ fn flow_control_acknowledges_every_chunk_of_a_get_reply() {
 
 // M2-103 §15.2: without `flowControl` the Responder sends the data with no ACK
 // between chunks, so none is sent.
+/// Spec: m2-103/15.2#2
 #[test]
 fn no_flow_control_means_no_acknowledgement() {
     let now = Instant::now();
@@ -602,6 +604,7 @@ fn no_flow_control_means_no_acknowledgement() {
 
 // M2-103 §15.4: a receiver that cannot use a chunk asks for the most recent one
 // again, naming the last it received intact.
+/// Spec: m2-103/15.4#1
 #[test]
 fn a_resend_request_names_the_last_good_chunk() {
     let now = Instant::now();

@@ -1,4 +1,4 @@
-# MIDI Capability Inquiry (M2-101 v1.2) inventory. The spec text is not in
+# MIDI Capability Inquiry (M2-101 v1.2.1) inventory. The spec text is not in
 # the repo: `TUTTI_MIDI_SPECS=<dir> cargo xtask conformance-inventory midi`
 # regenerates the id, kind, section and facts columns from the text that
 # `pdftotext -layout` (26.01.0) makes of the M2-101 PDF in that directory (or a
@@ -23,7 +23,7 @@
 # side: initiator, responder or both (todo marks a row not yet read).
 m2-101/1.3#1 | both |  | required | M2-101 §1.3 | every MIDI-CI implementation follows the version-compatibility rules of the Message Format Version section |  |  |
 m2-101/1.3#2 | both |  | permitted | M2-101 §1.3 | one detail a Profile Details Inquiry can find is how many Channels a multi-Channel Profile can use |  |  |
-m2-101/1.3#3 | both |  | permitted | M2-101 §1.3 | which Profile details exist is set by the specification of the Profile Id asked about |  |  |
+m2-101/1.3#3 | both |  | permitted | M2-101 §1.3 | which Profile details exist is set by the specification of the Profile ID asked about |  |  |
 m2-101/1.3#4 | both |  | permitted | M2-101 §1.3 | a device can have one or more Function Blocks |  |  |
 m2-101/1.5.1#1 | both |  | permitted | M2-101 §1.5.1 | the Initiator and Responder roles can swap between two devices |  |  |
 m2-101/1.5.1#2 | both |  | permitted | M2-101 §1.5.1 | either device can start a Transaction at any time |  |  |
@@ -92,22 +92,22 @@ m2-101/5.5.1#2 | both |  | required | M2-101 §5.5.1 | a model update that chang
 m2-101/5.5.2#1 | both |  | required | M2-101 §5.5.2 | every MIDI-CI device supports the Management Messages, Sub-ID#2 0x70 to 0x7F |  |  |
 m2-101/5.5.3#1 | both |  | required | M2-101 §5.5.3 | every MIDI-CI device supports SysEx messages of at least 128 bytes |  |  |
 m2-101/5.5.3#2 | initiator |  | required | M2-101 §5.5.3 | a device that can start Profile Configuration or Property Exchange supports at least 512 byte messages |  |  |
-m2-101/5.5.4#1 | initiator |  | recommended | M2-101 §5.5.4 | an Initiator with several MIDI Out connections gives each a unique Output Path Id |  |  |
-m2-101/5.5.4#2 | initiator |  | recommended | M2-101 §5.5.4 | each MIDI Out connection keeps the same Output Path Id |  |  |
+m2-101/5.5.4#1 | initiator |  | recommended | M2-101 §5.5.4 | an Initiator with several MIDI Out connections gives each a unique Output Path ID |  |  |
+m2-101/5.5.4#2 | initiator |  | recommended | M2-101 §5.5.4 | each MIDI Out connection keeps the same Output Path ID |  |  |
 m2-101/5.5.4#3 | initiator |  | recommended | M2-101 §5.5.4 | an Initiator with one output, or not needing the feature, sets the Output Path Id to 0 |  |  |
 m2-101/5.5.5#1 | initiator |  | required | M2-101 §5.5.5 | after Discovery an Initiator waits at least three seconds for all replies |  |  |
 m2-101/5.6#1 | responder |  | required | M2-101 §5.6 | a device receiving Discovery becomes a Responder and sends Reply to Discovery |  |  |
 m2-101/5.6#2 | responder |  | permitted | M2-101 §5.6 | a device with no MIDI-CI Categories can still send the reply to announce itself |  |  |
-m2-101/5.6.1#1 | responder |  | required | M2-101 §5.6.1 | the reply returns the Output Path Id of the Discovery |  |  |
+m2-101/5.6.1#1 | responder |  | required | M2-101 §5.6.1 | the reply returns the Output Path ID of the Discovery |  |  |
 m2-101/5.6.2#1 | responder |  | required | M2-101 §5.6.2 | the reply states the Function Block number the Responder represents |  |  |
 m2-101/5.7#1 | initiator |  | permitted | M2-101 §5.7 | an Initiator can send Inquiry: Endpoint Information to learn about the UMP Endpoint holding a Function Block |  |  |
 m2-101/5.8#1 | responder |  | recommended | M2-101 §5.8 | a device replies to Inquiry: Endpoint Information with Reply to Endpoint Information |  |  |
 m2-101/5.8#2 | responder |  | recommended | M2-101 §5.8 | a device that cannot give the requested information replies with NAK |  |  |
-m2-101/5.8.3.1#1 | responder |  | required | M2-101 §5.8.3.1 | the Product Instance Id matches the one in a UMP Product Instance Id Notification |  |  |
-m2-101/5.8.3.1#2 | responder |  | recommended | M2-101 §5.8.3.1 | the Product Instance Id is the device serial number where possible and unique per manufacturer, family and model |  |  |
-m2-101/5.8.3.1#3 | responder |  | recommended | M2-101 §5.8.3.1 | the Product Instance Id persists across power cycles |  |  |
-m2-101/5.8.3.1#4 | responder |  | required | M2-101 §5.8.3.1 | the Product Instance Id is ASCII text in the range 32 to 126 |  |  |
-m2-101/5.8.3.1#5 | responder |  | required | M2-101 §5.8.3.1 | the Product Instance Id is at most 16 bytes | neg=1 |  |
+m2-101/5.8.3.1#1 | responder |  | required | M2-101 §5.8.3.1 | the Product Instance ID matches the one in a UMP Product Instance ID Notification |  |  |
+m2-101/5.8.3.1#2 | responder |  | recommended | M2-101 §5.8.3.1 | the Product Instance ID is the device serial number where possible and unique per manufacturer, family and model |  |  |
+m2-101/5.8.3.1#3 | responder |  | recommended | M2-101 §5.8.3.1 | the Product Instance ID persists across power cycles |  |  |
+m2-101/5.8.3.1#4 | responder |  | required | M2-101 §5.8.3.1 | the Product Instance ID is ASCII text in the range 32 to 126 |  |  |
+m2-101/5.8.3.1#5 | responder |  | required | M2-101 §5.8.3.1 | the Product Instance ID is at most 42 bytes | neg=1 |  |
 m2-101/5.9#1 | both |  | required | M2-101 §5.9 | every MIDI-CI device processes received Invalidate MUID messages |  |  |
 m2-101/5.9#2 | both |  | required | M2-101 §5.9 | a device told its own MUID is invalid ends active Transactions and makes a new MUID |  |  |
 m2-101/5.9#3 | both |  | required | M2-101 §5.9 | a device told another discovered device's MUID is invalid ends Transactions with it and drops its cached information |  |  |
@@ -143,7 +143,7 @@ m2-101/7.5#1 | responder |  | recommended | M2-101 §7.5 | a device that already
 m2-101/7.5#2 | responder |  | required | M2-101 §7.5 | a Profile Removed Report goes to the broadcast MUID |  |  |
 m2-101/7.5#3 | responder |  | required | M2-101 §7.5 | removing an enabled Profile sends Profile Disabled Report before the Removed Report |  |  |
 m2-101/7.6#1 | both |  | permitted | M2-101 §7.6 | a Profile Details Inquiry can find how many Channels a multi-Channel Profile can use |  |  |
-m2-101/7.6#2 | both |  | permitted | M2-101 §7.6 | which details exist is set by the specification of the Profile Id |  |  |
+m2-101/7.6#2 | both |  | permitted | M2-101 §7.6 | which Profile details exist is set by the specification of the Profile ID asked about |  |  |
 m2-101/7.6#3 | initiator |  | permitted | M2-101 §7.6 | details can be found before a Profile is enabled |  |  |
 m2-101/7.6#4 | initiator |  | permitted | M2-101 §7.6 | some Profiles need the Channel count known before they are enabled |  |  |
 m2-101/7.6#5 | initiator |  | permitted | M2-101 §7.6 | Profile Details Inquiry can also run while the Profile is enabled |  |  |
@@ -162,8 +162,7 @@ m2-101/7.11#3 | responder |  | recommended | M2-101 §7.11 | a Program Change th
 m2-101/7.11#4 | responder |  | required | M2-101 §7.11 | a device that cannot comply with Set Profile On sends Profile Disabled Report |  |  |
 m2-101/7.11#5 | responder |  | required | M2-101 §7.11 | a Profile Disabled Report always goes to the broadcast MUID |  |  |
 m2-101/7.12#1 | both |  | permitted | M2-101 §7.12 | a Profile spec can use Profile Specific Data and set its contents freely |  |  |
-m2-101/7.12#2 | both |  | required | M2-101 §7.12 | Profile Specific Data goes to the broadcast MUID only if the Profile spec defines it | neg=1 |  |
-m2-101/7.12#3 | both |  | required | M2-101 §7.12 | a Profile Specific Data message to the broadcast MUID is at most 512 bytes or chunked | neg=1 |  |
+m2-101/7.12#2 | both |  | required | M2-101 §7.12 | a Profile Specific Data message to the broadcast MUID is at most 512 bytes or chunked | neg=1 |  |
 m2-101/7.13#1 | responder |  | recommended | M2-101 §7.13 | a device with no Profiles says in Discovery that it has no Profile Configuration |  |  |
 m2-101/7.13#2 | responder |  | permitted | M2-101 §7.13 | such a device can answer Profile Inquiry with zero enabled and zero disabled |  |  |
 m2-101/7.13#3 | responder |  | required | M2-101 §7.13 | a device that supports Profiles but has none on that Channel, Group or Function Block replies with zero counts |  |  |
@@ -206,7 +205,9 @@ m2-101/8.11#1 | initiator |  | permitted | M2-101 §8.11 | an Initiator can open
 m2-101/8.11#2 | responder |  | permitted | M2-101 §8.11 | a Responder then sends updates or ends the subscription with Subscription messages |  |  |
 m2-101/8.11#3 | initiator |  | required | M2-101 §8.11 | an Initiator never sends data updates in a Subscription message and uses Set Property Data instead | neg=1 |  |
 m2-101/8.12#1 | both |  | required | M2-101 §8.12 | a device replies to every Subscription message it receives |  |  |
-m2-101/8.13#1 | both |  | permitted | M2-101 §8.13 | Notify is an informative message either side can send to report errors or other information |  |  |
+m2-101/8.13#1 | both |  | recommended | M2-101 §8.13 | devices avoid sending Notify and send ACK and NAK messages instead | neg=1 |  |
+m2-101/8.13#2 | both |  | required | M2-101 §8.13 | devices still honour a received Notify under the Property Exchange common rules |  |  |
+m2-101/8.13#3 | both |  | permitted | M2-101 §8.13 | the original Notify was an informative message either side could send to report errors or other information |  |  |
 m2-101/9.2#1 | initiator |  | required | M2-101 §9.2 | Process Inquiry Capabilities is always addressed to 0x7F, the Function Block |  |  |
 m2-101/9.3#1 | responder |  | required | M2-101 §9.3 | a Responder that supports Process Inquiry answers Process Inquiry Capabilities with Reply to Process Inquiry |  |  |
 m2-101/9.4#1 | initiator |  | permitted | M2-101 §9.4 | an Initiator can also use the reported messages as commands, for instance to sync values |  |  |
@@ -264,8 +265,11 @@ m2-101/b.3#2 | both |  | recommended | M2-101 §B.3 | existing fields are left a
 m2-101/b.3#3 | both |  | required | M2-101 §B.3 | an extended message says which fields each version added |  | other-side | M2-101 Appendix B.3: rule on the authors of MIDI-CI specification updates
 m2-101/b.4#1 | both |  | required | M2-101 §B.4 | a removed or deprecated message keeps its last definition or points to the version that holds it |  | other-side | M2-101 Appendix B.4: rule on the authors of MIDI-CI specification updates
 m2-101/b.4#2 | both |  | required | M2-101 §B.4 | the version in which a message was removed or deprecated is stated |  | other-side | M2-101 Appendix B.4: rule on the authors of MIDI-CI specification updates
-m2-101/c#1 | both |  | permitted | M2-101 §C | a garbled fragment about devices that may not carry MIDI-CI, no behaviour of its own | neg=1 |  |
+m2-101/c#1 | both |  | permitted | M2-101 §C | a device may not support changes negotiated between two other devices on a chain | neg=1 |  |
 m2-101/c#2 | both |  | permitted | M2-101 §C | some devices can offer an intelligent Thru or merge that converts messages for mixed topologies |  |  |
-m2-101/e#1 | both |  | required | M2-101 §E | the minimum for MIDI-CI support is the list of general requirements that follows |  |  |
-m2-101/e#2 | both |  | required | M2-101 §E | every MIDI-CI device meets the general requirements |  |  |
-m2-101/e#3 | both |  | required | M2-101 §E | a device implements several features of the specification to meet those general requirements |  |  |
+m2-101/d#1 | both |  | permitted | M2-101 §D | the special manufacturer ID 0x7C is usable on a public product that earns no money from it |  |  |
+m2-101/d#2 | both |  | permitted | M2-101 §D | special ID 0x7C is for the listed non-commercial purposes only |  |  |
+m2-101/d#3 | both |  | required | M2-101 §D | special ID 0x7C is not used for the listed mechanisms, such as UMP Endpoint discovery | neg=1 |  |
+m2-101/f#1 | both |  | required | M2-101 §F | the minimum for MIDI-CI support is the list of general requirements that follows |  |  |
+m2-101/f#2 | both |  | required | M2-101 §F | every MIDI-CI device meets the general requirements |  |  |
+m2-101/f#3 | both |  | required | M2-101 §F | a device implements several features of the specification to meet those general requirements |  |  |

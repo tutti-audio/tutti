@@ -34,7 +34,7 @@ fn name(text: &str) -> PropertyName {
 }
 
 // §8.6.2 Table 21: a List Resource inquiry carries offset and limit together.
-/// Spec: m2-103/6.6.2#2
+/// Spec: m2-103/8.6.2#2
 #[test]
 fn a_pagination_request_reads_offset_and_limit() {
     let got = request(r#"{"resource":"SongList","offset":20,"limit":3}"#);
@@ -50,7 +50,7 @@ fn a_pagination_request_reads_offset_and_limit() {
 
 // §8.6.2 Table 19: offset is an integer of at least 0, limit an integer of at
 // least 1, and both are present if either is.
-/// Spec: m2-103/6.6.2#3
+/// Spec: m2-103/8.6.2#3
 #[test]
 fn pagination_limits_are_those_of_table_19() {
     assert!(
@@ -71,7 +71,7 @@ fn pagination_limits_are_those_of_table_19() {
 }
 
 // §7.3 Table 14, §7.4: a reply has status first; an error reply says why.
-/// Spec: m2-103/5.4#1
+/// Spec: m2-103/7.4#1
 #[test]
 fn reply_examples_read() {
     assert_eq!(reply(r#"{"status":200}"#), PeReply::new(PeStatus::Ok));
@@ -107,7 +107,7 @@ fn cache_time_is_a_non_negative_integer() {
 }
 
 // §7.4.1 Table 15 and §12: the codes a header may carry, and no others.
-/// Spec: m2-103/5.4.1#1
+/// Spec: m2-103/7.4.1#1
 #[test]
 fn status_is_a_code_of_the_table() {
     let listed = [
@@ -145,7 +145,7 @@ fn mutual_encoding_is_one_of_the_three_standard_values() {
 
 // §7.2 Table 13: resource is 1 to 36 ASCII alphanumerics; §8.4: or the X- prefix
 // of a custom Resource.
-/// Spec: m2-103/6.4#3
+/// Spec: m2-103/8.4#3
 #[test]
 fn resource_name_limits() {
     assert!(ResourceName::new(&"a".repeat(36)).is_some());
@@ -181,7 +181,6 @@ fn resource_id_limits() {
 }
 
 // §11.1 Table 39: subscribeId is 1 to 8 characters of a-z, 0-9 and underscore.
-/// Spec: m2-103/9.1#2
 #[test]
 fn subscribe_id_limits() {
     assert!(SubscribeId::new("abcdefgh").is_some());
@@ -194,7 +193,7 @@ fn subscribe_id_limits() {
 
 // §6.1, §7.1.1, §6.1.4: a property name is camelCase ASCII of at most 20
 // characters, not only digits; a manufacturer's starts x-.
-/// Spec: m2-103/4.1#1, m2-103/4.1#2, m2-103/5.1.1#3, m2-103/4.1.4#2
+/// Spec: m2-103/6.1#1, m2-103/6.1#2, m2-103/7.1.1#3, m2-103/6.1.4#2
 #[test]
 fn property_name_limits() {
     assert!(PropertyName::new(&"a".repeat(20)).is_some());
@@ -245,7 +244,7 @@ fn message_is_at_most_512_bytes_escaped() {
 
 // §7.1.1: requests start with resource, replies with status and subscription
 // messages with command.
-/// Spec: m2-103/5.1.1#4, m2-103/5.1.1#5, m2-103/5.1.1#6
+/// Spec: m2-103/7.1.1#4, m2-103/7.1.1#5, m2-103/7.1.1#6
 #[test]
 fn the_first_property_gives_the_shape() {
     assert!(matches!(
@@ -263,7 +262,7 @@ fn the_first_property_gives_the_shape() {
 }
 
 // §7.1.1: a header has no whitespace outside a string and is all on one line.
-/// Spec: m2-103/5.1.1#7, m2-103/5.1.1#8
+/// Spec: m2-103/7.1.1#7, m2-103/7.1.1#8
 #[test]
 fn whitespace_outside_a_string_is_refused() {
     for bad in [
@@ -287,7 +286,7 @@ fn whitespace_outside_a_string_is_refused() {
 }
 
 // §7.1.1: a property is a number, a boolean or a string.
-/// Spec: m2-103/5.1.1#1
+/// Spec: m2-103/7.1.1#1
 #[test]
 fn a_property_value_is_a_number_boolean_or_string() {
     for bad in [
@@ -351,7 +350,7 @@ fn truncated_and_garbled_headers_are_malformed() {
 }
 
 // §6.1.1: Header Data is 7-bit ASCII; anything else is a JSON \u escape.
-/// Spec: m2-103/4.1.1#2
+/// Spec: m2-103/6.1.1#2
 #[test]
 fn a_non_ascii_byte_is_refused() {
     let mut bytes = br#"{"status":400,"message":"caf"#.to_vec();
@@ -369,7 +368,7 @@ fn a_non_ascii_byte_is_refused() {
 
 // §6.1.1: characters outside 7-bit ASCII are UTF-16 units escaped with \u; a
 // character past the BMP is a surrogate pair; a slash may be written either way.
-/// Spec: m2-103/4.1.1#1, m2-103/4.1.1#2
+/// Spec: m2-103/6.1.1#1, m2-103/6.1.1#2
 #[test]
 fn escapes_read_as_json_reads_them() {
     let got = reply(r#"{"status":400,"message":"Beats\u266a \ud83c\udfb9 a\/b \"q\" \\ \n"}"#);
@@ -389,7 +388,7 @@ fn escapes_read_as_json_reads_them() {
     }
 }
 
-/// Spec: m2-103/4.1.1#2
+/// Spec: m2-103/6.1.1#2
 #[test]
 fn the_writer_escapes_everything_outside_printable_ascii() {
     let mut reply = PeReply::new(PeStatus::BadRequest);
@@ -509,7 +508,7 @@ fn subscription_messages_read() {
     }
 }
 
-/// Spec: m2-103/5.1.1#4, m2-103/5.1.1#5, m2-103/5.1.1#6
+/// Spec: m2-103/7.1.1#4, m2-103/7.1.1#5, m2-103/7.1.1#6
 #[test]
 fn the_writer_puts_the_required_property_first() {
     let mut start = PeRequest::new(ResourceName::new("Mode").unwrap());
@@ -652,7 +651,7 @@ fn a_header_is_held_to_the_receivable_sysex_size() {
 // bytes become a sign byte then their low seven bits; the sign byte holds the
 // data bytes' top bits, the first at bit 6 down to the seventh at bit 0.
 
-/// Spec: m2-103/4.3.1#1
+/// Spec: m2-103/6.1.7#1
 #[test]
 fn mcoded7_known_vectors() {
     // Three bytes, a short group: tops 1,0,1 sit at bits 6,5,4, so the sign byte
@@ -684,7 +683,7 @@ fn pattern(len: usize) -> Vec<u8> {
         .collect()
 }
 
-/// Spec: m2-103/4.3.1#1
+/// Spec: m2-103/6.1.7#1
 #[test]
 fn mcoded7_round_trips_at_the_group_edges() {
     for len in [0, 1, 2, 6, 7, 8, 13, 14, 15, 21] {
@@ -737,7 +736,7 @@ fn mcoded7_writes_into_the_callers_buffer() {
     );
 }
 
-/// Spec: m2-103/4.3.1#1
+/// Spec: m2-103/6.1.7#1
 #[test]
 fn mcoded7_refuses_a_byte_with_the_top_bit_set_and_a_cut_group() {
     assert_eq!(

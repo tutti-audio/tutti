@@ -54,7 +54,6 @@ fn an_empty_and_a_sixteen_byte_id_round_trip() {
     }
 }
 
-/// Spec: m2-101/5.8.3.1#5
 #[test]
 fn an_id_over_sixteen_bytes_is_not_a_ci_id_and_is_refused_on_the_wire() {
     // §5.8.3.1: at most 16 bytes, where M2-104 allows 42.

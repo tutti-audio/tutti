@@ -49,7 +49,7 @@ mod tests {
     }
 
     // M2-101 §5.10.4 and M2-103 §6.1.1 examples: the note sign is `♪`.
-    /// Spec: m2-101/5.10.4#4, m2-103/4.1.1#2
+    /// Spec: m2-101/5.10.4#4, m2-103/6.1.1#2
     #[test]
     fn a_character_outside_ascii_is_one_u_escape_of_its_utf16_unit() {
         assert_eq!(escaped('\u{266a}'), "\\u266a");
@@ -58,7 +58,7 @@ mod tests {
 
     // Both specs say "converted to UTF-16, then escaped as JSON": a character
     // past the Basic Multilingual Plane is a surrogate pair.
-    /// Spec: m2-101/5.10.4#4, m2-103/4.1.1#2
+    /// Spec: m2-101/5.10.4#4, m2-103/6.1.1#2
     #[test]
     fn a_character_past_the_bmp_is_a_surrogate_pair_of_two_escapes() {
         assert_eq!(escaped('\u{1d11e}'), "\\ud834\\udd1e");

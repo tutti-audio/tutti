@@ -69,7 +69,7 @@ fn zero_is_the_unknown_count_and_the_abandoning_number() {
 }
 
 // M2-101 §8.3: a message whose SysEx fits the peer's maximum is not broken.
-/// Spec: m2-101/8.3#2, m2-103/3.2#2
+/// Spec: m2-101/8.3#2, m2-103/5.2#4
 #[test]
 fn a_body_that_fits_exactly_is_one_chunk() {
     let chunks = split_message(id(), &header(), &body(FIRST_ROOM), SMALLEST).unwrap();
@@ -81,7 +81,7 @@ fn a_body_that_fits_exactly_is_one_chunk() {
 
 // M2-101 §8.3: a message past the maximum is broken into chunks, each labelled
 // with the count and its number from 1.
-/// Spec: m2-101/8.3#2, m2-101/8.3#4, m2-103/3.2#2
+/// Spec: m2-101/8.3#2, m2-101/8.3#4, m2-103/5.2#4
 #[test]
 fn a_body_one_byte_over_is_two_chunks() {
     let body = body(FIRST_ROOM + 1);
@@ -280,7 +280,7 @@ fn a_chunk_whose_lengths_do_not_fill_its_bytes_is_refused() {
 }
 
 // M2-103 §6.1.6: the data of a SysEx message is 7-bit.
-/// Spec: m2-103/4.2#2
+/// Spec: m2-103/6.1.5#2
 #[test]
 fn a_body_with_a_top_bit_is_refused() {
     assert_eq!(

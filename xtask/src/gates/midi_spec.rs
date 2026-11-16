@@ -17,10 +17,9 @@
 //!   strongest. A word in quotation marks names the word and is not a use of
 //!   it, and neither is the first cell of a table row (the table that
 //!   defines the words). Notes and examples are not set apart: the spec says
-//!   the words are used solely for conformance. M2-101, M2-102 and M2-115
-//!   carry the same Table 2 (and a Table 3 of words that are not conformance
-//!   words: must, will, can, might); M2-103 has no table and uses the same
-//!   three words.
+//!   the words are used solely for conformance. M2-101, M2-102, M2-103 and
+//!   M2-115 carry the same Table 2 (and a Table 3 of words that are not conformance
+//!   words: must, will, can, might).
 //! - `m2-104/mt/<mt>`: one per Message Type of the allocation table
 //!   ([`Tables::Messages`]), facts `mt` and `bytes`, the UMP size.
 //! - `m2-104/msg/<mt>/<status>`: one per defined message of the message
@@ -39,9 +38,7 @@
 //! contents, and is skipped. A heading is a line that is the next sibling or
 //! first child of a heading already seen (`7.4.2` after `7.4.1`, `D.1` after
 //! `Appendix D:`), so a wrapped line that starts with a number is not one. A
-//! document with [`Doc::dotted_top`] writes a top-level heading `7. Title`;
-//! the dot is read only at the left margin, so an indented list item `2. Do`
-//! is no heading. A document with [`Doc::implicit_levels`] also takes a heading whose missing
+//! document with [`Doc::implicit_levels`] also takes a heading whose missing
 //! ancestors would each be the first of their level (`6.2.1.1` straight after
 //! `6.2`); the missing levels count as seen.
 //!
@@ -100,9 +97,6 @@ pub(super) struct Doc {
     /// Take a heading whose missing ancestors are each the first of their
     /// level.
     implicit_levels: bool,
-    /// A top-level heading is written with a dot after its number (`7.
-    /// Resources`), at the left margin.
-    dotted_top: bool,
     pub(super) tables: Tables,
 }
 
@@ -112,7 +106,7 @@ pub(super) const DOCS: &[Doc] = &[M2_101, M2_102, M2_103, M2_104, M2_115, M2_116
 pub(super) const M2_101: Doc = Doc {
     prefix: "m2-101",
     label: "M2-101",
-    title: "MIDI Capability Inquiry (M2-101 v1.2)",
+    title: "MIDI Capability Inquiry (M2-101 v1.2.1)",
     file: "midi-m2-101.txt",
     source: "M2-101-UM",
     sides: "initiator, responder or both",
@@ -124,7 +118,6 @@ pub(super) const M2_101: Doc = Doc {
 # document has a row per item.
 ",
     implicit_levels: false,
-    dotted_top: false,
     tables: Tables::None,
 };
 
@@ -143,25 +136,24 @@ pub(super) const M2_102: Doc = Doc {
 # document has a row per item.
 ",
     implicit_levels: false,
-    dotted_top: false,
     tables: Tables::None,
 };
 
 pub(super) const M2_103: Doc = Doc {
     prefix: "m2-103",
     label: "M2-103",
-    title: "Common Rules for MIDI-CI Property Exchange (M2-103 v1.1)",
+    title: "Common Rules for MIDI-CI Property Exchange (M2-103 v1.2)",
     file: "midi-m2-103.txt",
     source: "M2-103-UM",
     sides: "initiator, responder or both",
     note: "\
-# M2-103 has no conformance-word table of its own; it uses shall, should and
-# may as M2-101's Table 2 defines them (shall required, should recommended,
-# may permitted), with no negated forms. Top-level headings are written
-# `7. Title`. Sentence rows only: no table of the document has a row per item.
+# M2-103 has its own conformance-word table (its Table 2), the same three
+# rows as M2-104's, and no negated forms either. Its Table 3 lists must,
+# will, can and might as words that are never conformance statements: a
+# sentence with only those has no row. Sentence rows only: no table of the
+# document has a row per item.
 ",
     implicit_levels: false,
-    dotted_top: true,
     tables: Tables::None,
 };
 
@@ -180,7 +172,6 @@ pub(super) const M2_115: Doc = Doc {
 # document has a row per item.
 ",
     implicit_levels: false,
-    dotted_top: false,
     tables: Tables::None,
 };
 
@@ -193,7 +184,6 @@ pub(super) const M2_104: Doc = Doc {
     sides: "sender, receiver or both",
     note: "",
     implicit_levels: false,
-    dotted_top: false,
     tables: Tables::Messages {
         mt_table: 4,
         messages: &[(34, Rows::Formats), (16, Rows::FlexStatus)],
@@ -215,7 +205,6 @@ pub(super) const M2_116: Doc = Doc {
 #                                 byte (1-based) and value
 ",
     implicit_levels: true,
-    dotted_top: false,
     tables: Tables::FileHeader { table: 5 },
 };
 
@@ -315,7 +304,7 @@ fn render(label: &Label) -> String {
 }
 
 /// A heading candidate: the label and nothing about whether it is expected.
-fn parse_heading(line: &str, dotted_top: bool) -> Option<Label> {
+fn parse_heading(line: &str) -> Option<Label> {
     let indent = line.len() - line.trim_start().len();
     let t = line.trim();
     if indent > 6 || t.contains(".....") || t.len() > 160 {
@@ -330,10 +319,6 @@ fn parse_heading(line: &str, dotted_top: bool) -> Option<Label> {
     }
     let (label, title) = t.split_once(char::is_whitespace)?;
     let title = title.trim_start();
-    let label = match label.strip_suffix('.') {
-        Some(n) if dotted_top && indent == 0 => n,
-        _ => label,
-    };
     // A table row (`8   Balance   -`) has a gap inside what would be the title.
     if title.contains("   ")
         || !title
@@ -468,7 +453,7 @@ fn classify(lines: &[String], doc: &Doc) -> Result<Vec<Line>, String> {
             }
             continue;
         }
-        if let Some(label) = parse_heading(l, doc.dotted_top) {
+        if let Some(label) = parse_heading(l) {
             let first = !started && label == (false, vec![1]);
             if first || (started && outline.accept(&label)) {
                 if first {
@@ -981,34 +966,10 @@ mod tests {
     }
 
     #[test]
-    fn a_dotted_top_level_heading_is_read_only_at_the_left_margin() {
-        let text = doc(&[
-            TOC,
-            "1. Alpha\n1.1 Beta\nA frob shall spin.\n   2. A list item that shall not count\n2. Gamma\nA bar may idle.\n5. Out of order\nA bar should hum.\n3. Delta\nA bar shall go.\n",
-            "",
-            "",
-        ]);
-        let items = extract(&M2_103, &text).unwrap();
-        assert_eq!(
-            ids(&items),
-            [
-                ("m2-103/1.1#1", "required"),
-                ("m2-103/1.1#2", "required"),
-                ("m2-103/2#1", "permitted"),
-                ("m2-103/2#2", "recommended"),
-                ("m2-103/3#1", "required"),
-            ]
-        );
-        // Without the knob `1.` is not a heading label, so no body starts.
-        assert!(extract(&M2_101, &text).is_err());
-    }
-
-    #[test]
     fn a_document_with_no_tables_gives_keyword_rows_alone() {
         for d in [&M2_101, &M2_102, &M2_103, &M2_115] {
-            let head = if d.dotted_top { "1. Alpha" } else { "1 Alpha" };
-            let body = format!("{head}\nA frob shall spin.\n");
-            let items = extract(d, &doc(&[TOC, &body, "", ""])).unwrap();
+            let body = "1 Alpha\nA frob shall spin.\n";
+            let items = extract(d, &doc(&[TOC, body, "", ""])).unwrap();
             assert_eq!(items.len(), 1);
             assert!(items[0].id.starts_with(d.prefix));
             assert_eq!(items[0].section, format!("{} \u{a7}1", d.label));

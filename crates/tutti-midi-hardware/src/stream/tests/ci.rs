@@ -2353,7 +2353,7 @@ fn resource_events(all: &[Polled]) -> Vec<ResourceEvent> {
 
 /// M2-103 section 11: a Subscription the peer allows starts with its Reply and ends
 /// with the Initiator's End.
-/// Spec: m2-103/9#4, m2-103/9.5#1
+/// Spec: m2-103/11#4, m2-103/11.5#1
 #[test]
 fn a_subscription_starts_and_ends_through_the_session() {
     let (mut wire, _, mut far) = ready_property_peer(subscribable());
