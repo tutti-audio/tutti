@@ -46,7 +46,7 @@ use super::units::Beat;
 
 unit! {
     /// An absolute frame position on the engine's clock: frames rendered since it
-    /// started. See the [module docs](self).
+    /// started. See the module docs.
     ///
     /// Two positions do not add, and do not subtract with `-`:
     ///

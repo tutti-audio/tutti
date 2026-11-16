@@ -70,8 +70,7 @@
 //! - **No threading and no scheduling.** A host that wants these results on a
 //!   background thread owns that plumbing itself.
 //!
-//! The `tutti` crate re-exports this one as `tutti::dsp` behind its `dsp` feature. `tutti-nodes`, `tutti-sampler` and
-//! `tutti-export` use it.
+//! `tutti-nodes`, `tutti-sampler` and `tutti-export` use it.
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 //!

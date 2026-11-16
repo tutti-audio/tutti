@@ -125,7 +125,7 @@
 // generic as `unit!` would sit permanently at the root of a published crate,
 // un-renameable and un-feature-gateable.
 #[macro_use]
-pub mod value;
+mod value;
 
 // `ranged!` is `#[macro_export]`ed: it is the one way any crate writes a
 // range-checked type, used as `tutti_types::ranged!`.
@@ -144,7 +144,7 @@ mod bus;
 mod channels;
 mod topology;
 
-pub mod meter;
+mod meter;
 
 // The cell a `Param` shares (`Param::as_atomic`), named here so a crate that
 // addresses params without their unit types need not depend on `atomic_float`
@@ -191,6 +191,7 @@ pub use topology::{ChannelTopology, Placement, Speaker, Speakers, TopologyError}
 
 // Musical meter.
 pub use meter::{
-    BarCount, BarNumber, BarPosition, BeatsPerBar, InvalidBeatsPerBar, InvalidNoteValue, Meter,
-    MeterChange, MeterMap, NoteValue, TimeSignature,
+    BarCount, BarNumber, BarPosition, BeatsPerBar, InvalidBeatsPerBar, InvalidNoteValue,
+    MAX_BEATS_PER_BAR, MAX_NOTE_VALUE, MIN_NOTE_VALUE, Meter, MeterChange, MeterMap, NoteValue,
+    TimeSignature,
 };

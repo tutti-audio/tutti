@@ -9,7 +9,7 @@
 //! One walker serves every reader: `check-session` reads the whole-crate leaves of
 //! each statement ([`statements`]) and `umbrella-api` the exported items ([`uses`]).
 
-use super::lex::blank;
+use super::lex::{blank, find_word_from, line_of, matching};
 
 pub(super) fn is_word(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
@@ -86,6 +86,13 @@ impl Leaf {
     /// The crate the item comes from; empty for a bare name.
     pub(super) fn krate(&self) -> &str {
         self.path.first().map_or("", String::as_str)
+    }
+
+    /// The item's full path, crate, modules and name.
+    pub(super) fn item(&self) -> String {
+        let mut p = self.path.clone();
+        p.push(self.source.clone());
+        p.join("::")
     }
 }
 
@@ -179,6 +186,65 @@ pub(super) fn uses(src: &str) -> Vec<Leaf> {
         .collect()
 }
 
+/// A `pub use` leaf and where it stands.
+pub(super) struct Use {
+    pub(super) leaf: Leaf,
+    /// The inline `mod` blocks around it, outermost first.
+    pub(super) module: Vec<String>,
+    /// Its line, 1-based.
+    pub(super) line: usize,
+}
+
+/// The `pub use` leaves of the source `src` with their inline modules and lines.
+pub(super) fn placed_uses(src: &str) -> Vec<Use> {
+    let code = blank(src);
+    let mods = inline_mods(&code);
+    let mut out = Vec::new();
+    for s in statements(&code) {
+        let module: Vec<String> = mods
+            .iter()
+            .filter(|(_, open, close)| *open < s.at && s.at < *close)
+            .map(|(n, ..)| n.clone())
+            .collect();
+        let line = line_of(&code, s.at);
+        out.extend(s.leaves.into_iter().map(|leaf| Use {
+            leaf,
+            module: module.clone(),
+            line,
+        }));
+    }
+    out
+}
+
+/// The inline `mod NAME { .. }` blocks of lexed `code`, as `(name, open, close)`.
+fn inline_mods(code: &str) -> Vec<(String, usize, usize)> {
+    let b = code.as_bytes();
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(at) = find_word_from(code, "mod", from) {
+        from = at + 3;
+        let mut i = from;
+        while i < b.len() && b[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        let s = i;
+        while i < b.len() && is_word(b[i]) {
+            i += 1;
+        }
+        let name = &code[s..i];
+        while i < b.len() && b[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if !name.is_empty()
+            && b.get(i) == Some(&b'{')
+            && let Some(close) = matching(code, i, b'{', b'}')
+        {
+            out.push((name.to_owned(), i, close));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,5 +311,17 @@ mod tests {
     #[test]
     fn comments_and_strings_are_not_code() {
         assert!(uses("// pub use a::A;\nconst S: &str = \"pub use b::B;\";\n").is_empty());
+    }
+
+    #[test]
+    fn an_inline_module_and_the_line_are_kept() {
+        let u = placed_uses(
+            "pub use a::A;\npub mod m {\n    pub mod n {\n        pub use b::B;\n    }\n}\n",
+        );
+        assert_eq!((u[0].module.clone(), u[0].line), (vec![], 1));
+        assert_eq!(
+            (u[1].module.clone(), u[1].line),
+            (vec!["m".to_owned(), "n".to_owned()], 4)
+        );
     }
 }

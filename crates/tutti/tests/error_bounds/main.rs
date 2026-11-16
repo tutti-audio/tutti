@@ -35,43 +35,24 @@ fn types_errors_are_boxable() {
 }
 
 fn buffers_errors_are_boxable() {
-    err::<tutti::buffers::BufferError>();
-    err::<tutti::buffers::FoldError>();
-    err::<tutti::buffers::I24OutOfRange>();
-    err::<tutti::buffers::SinkFailed>();
+    use tutti::types::{BufferError, FoldError, SinkFailed};
+    err::<BufferError>();
+    err::<FoldError>();
+    err::<SinkFailed>();
 }
 
-fn rt_transport_and_engine_errors_are_boxable() {
-    err::<tutti::rt::ClaimConflict>();
-    err::<tutti::rt::Contended>();
-    err::<tutti::rt::RequestBitOutOfRange>();
-    err::<tutti::transport::AudioTaken>();
-    err::<tutti::transport::TimedError<tutti::transport::TransportCommand>>();
-    err::<tutti::engine::GraphEngineError>();
-}
-
-fn graph_errors_are_boxable() {
-    use tutti::graph::{
-        BusError, CloseError, CommitError, CompileError, EventCapacityError, EventOrderError,
-        ForkError, ForkFault, MissingSource, MixError, ModeError, ParamPortsError, PassError,
-        ScheduleError, TransportChangeRejected, VerifyError,
+#[cfg(feature = "session")]
+fn session_graph_errors_are_boxable() {
+    use tutti::session::{
+        BusError, CloseError, CommitError, MissingSource, MixError, ModeError, PassError,
     };
     err::<BusError>();
     err::<CloseError>();
     err::<CommitError>();
-    err::<CompileError>();
-    err::<EventCapacityError>();
-    err::<EventOrderError>();
-    err::<ForkError>();
-    err::<ForkFault>();
     err::<MissingSource>();
     err::<MixError>();
     err::<ModeError>();
-    err::<ParamPortsError>();
     err::<PassError>();
-    err::<ScheduleError>();
-    err::<TransportChangeRejected>();
-    err::<VerifyError>();
 }
 
 #[cfg(feature = "session")]
@@ -85,13 +66,12 @@ fn device_errors_are_boxable() {
     err::<tutti::session::RestartError>();
 }
 
-#[cfg(feature = "modulation")]
 fn modulation_errors_are_boxable() {
     err::<tutti::modulation::CompileError>();
     err::<tutti::modulation::ProgramError>();
 }
 
-#[cfg(all(feature = "session", feature = "modulation"))]
+#[cfg(feature = "session")]
 fn session_modulation_errors_are_boxable() {
     err::<tutti::session::ModRefusal>();
     err::<tutti::session::Problem>();

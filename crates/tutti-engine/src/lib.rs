@@ -12,7 +12,7 @@
 //!
 //! Use it directly when you drive the audio callback yourself (a custom device
 //! layer, an offline renderer, a test harness); otherwise take the `tutti` facade,
-//! which re-exports this crate as `tutti::engine`.
+//! whose `Session` owns an engine.
 //!
 //! ## What this crate does not own
 //!

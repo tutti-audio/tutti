@@ -34,12 +34,11 @@ mod support;
 
 use std::path::{Path, PathBuf};
 
-use tutti::export::Written;
 use tutti::midi::{MidiChannel, MidiFile, NoteNumber, Tick, Track};
-use tutti::session::Master;
+use tutti::session::{Master, PoolEvent};
 use tutti::{
-    Beat, Bounce, Bpm, Format, MaxBlock, NodeKey, Pcm, PluginRef, PluginState, PoolEvent, Range,
-    Root, SampleRate, Samples, Session, SessionEvent,
+    Beat, Bounce, Bpm, Format, MaxBlock, NodeKey, Pcm, PluginRef, PluginState, Range, Root,
+    SampleRate, Samples, Session, SessionEvent, Written,
 };
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -158,8 +157,7 @@ fn play_to_file(
 /// Two bars: a note on each beat, 120 BPM for the first four beats and 60
 /// for the last four, as a file with a tempo map.
 fn phrase(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    use tutti::midi::{TicksPerQuarterNote, U7};
-    use tutti::midi_file::{Meta, SmfDivision, SmfFormat};
+    use tutti::midi::{Meta, SmfDivision, SmfFormat, TicksPerQuarterNote, U7};
     const TPQ: u16 = 480;
     const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);
     const SMF_DIVISION: SmfDivision = SmfDivision::of(TPQ);
