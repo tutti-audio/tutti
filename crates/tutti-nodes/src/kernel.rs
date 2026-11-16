@@ -148,6 +148,13 @@ pub trait Kernel: Clone + Send + 'static {
 /// ([`Status::Idle`]): what rings is below the kernel's floor, and a parked node is a fresh
 /// one when it wakes (its stream clock restarts with it).
 ///
+/// # Non-finite audio
+///
+/// A kernel never latches a NaN or an infinity. A block whose output holds one is passed on
+/// as rendered, and the kernel is reset after it, so the next block starts from silence: one
+/// non-finite input sample is heard in at most one block. A kernel fed non-finite input for
+/// longer renders each block from it sample for sample, and resets after each.
+///
 /// # In a graph
 ///
 /// Inserted with its [`ParamSet`] as its controls ([`tutti_graph::param_parts`]); a fork
@@ -360,6 +367,14 @@ impl<K: Kernel> KernelNode<K> {
         }
     }
 
+    /// Whether the block's output holds a NaN or an infinity.
+    fn wrote_non_finite(&self, io: &mut Io<'_>) -> bool {
+        let (_, mut outs) = io.split();
+        outs.bus(self.out)
+            .into_channels()
+            .any(|ch| !ch.iter().all(|s| s.is_finite()))
+    }
+
     fn apply(&mut self, controls: <K::Set as ControlSet>::Controls) {
         self.kernel.retarget(&controls);
         if let Some(t) = &mut self.tuned {
@@ -529,6 +544,8 @@ impl<K: Kernel> Node for KernelNode<K> {
                 ch[live..size].fill(0.0);
             }
             self.park();
+        } else if self.wrote_non_finite(&mut io) {
+            self.clear();
         }
         Status::Modified
     }
