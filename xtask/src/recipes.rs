@@ -766,6 +766,7 @@ const NO_STD_TARGET: &str = "aarch64-unknown-none";
 /// The `#![no_std]` crates, each with the features (besides `std`) built on top of
 /// the bare build. A crate that becomes `no_std` is one line here.
 const NO_STD_CRATES: &[(&str, &[&str])] = &[
+    ("tutti-tempo", &["serde"]),
     ("tutti-curve", &[]),
     ("tutti-metering", &[]),
     ("tutti-types", &["serde"]),
