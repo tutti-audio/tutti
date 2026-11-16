@@ -13,12 +13,21 @@
 //! region is ordered by the borrow checker. That, and the file being made here
 //! (exclusively, at 0600) and never resized, is what lets every call in this
 //! module be safe.
+//!
+//! The backing file's platform is one module, chosen once above: where it lives,
+//! how it is opened, and what keeps it from outliving its last mapping.
+
+#[cfg(unix)]
+#[path = "mapping/unix.rs"]
+mod platform;
+#[cfg(windows)]
+#[path = "mapping/windows.rs"]
+mod platform;
 
 use crate::SlabError;
 use crate::header::{SLAB_HEADER_BYTES, SlabHeader};
 use memmap2::MmapMut;
-use std::fs::{File, OpenOptions};
-use std::path::PathBuf;
+use std::fs::File;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
@@ -32,6 +41,8 @@ pub struct SharedMapping {
     /// every access goes through `base`, so no borrow of it exists that the
     /// raw copies could alias.
     _map: MmapMut,
+    /// What the platform keeps open beside the mapping.
+    _backing: platform::Backing,
     /// The mapping's first byte. Page-aligned.
     base: NonNull<u8>,
     /// The mapping's length in bytes, at least [`SLAB_HEADER_BYTES`].
@@ -82,7 +93,7 @@ pub struct MappingWriter {
     mapping: Arc<SharedMapping>,
 }
 
-/// Whether [`open_file`] creates the backing file or opens the peer's.
+/// Whether [`platform::open_file`] creates the backing file or opens the peer's.
 enum Open {
     Create,
     Existing,
@@ -95,7 +106,9 @@ impl MappingWriter {
     /// The file is created exclusively, at 0600: a name that already exists (a
     /// symlink included) is an error, never a file to truncate, since another
     /// process could hold that file mapped, or have planted it. The creator
-    /// removes it with [`remove`].
+    /// removes it with [`remove`]; on Windows the file also ends with the last
+    /// mapping of it, whichever process holds that, because the creator opens it
+    /// delete-on-close and keeps that handle for as long as its mapping lives.
     ///
     /// # Errors
     ///
@@ -107,7 +120,7 @@ impl MappingWriter {
     /// If `size` is smaller than [`SLAB_HEADER_BYTES`]: the caller sizes the
     /// slab from a layout that always includes the header.
     pub fn create(name: &str, size: usize) -> Result<Self, SlabError> {
-        let writer = Self::map(open_file(name, size, Open::Create)?)?;
+        let writer = Self::map(platform::open_file(name, size, Open::Create)?)?;
         // Stamp before anyone can open it: the peer is told the slab's name only
         // after this returns, and `initialize` releases the magic last so an
         // opener that sees the magic sees a fully written header.
@@ -131,7 +144,7 @@ impl MappingWriter {
     ///
     /// As for [`create`](Self::create).
     pub fn open(name: &str, size: usize) -> Result<Self, SlabError> {
-        let file = open_file(name, size, Open::Existing)?;
+        let file = platform::open_file(name, size, Open::Existing)?;
         let actual = file
             .metadata()
             .map_err(|e| SlabError::File(format!("failed to read shared memory size: {e}")))?
@@ -160,7 +173,7 @@ impl MappingWriter {
         let map = unsafe { MmapMut::map_mut(&file) }
             .map_err(|e| SlabError::File(format!("failed to map shared memory: {e}")))?;
         Ok(Self {
-            mapping: Arc::new(SharedMapping::new(map)),
+            mapping: Arc::new(SharedMapping::new(map, platform::Backing::keep(file))),
         })
     }
 
@@ -194,12 +207,12 @@ impl MappingWriter {
 }
 
 impl SharedMapping {
-    /// Takes ownership of `map`.
+    /// Takes ownership of `map` and of what the platform keeps beside it.
     ///
     /// # Panics
     ///
     /// If the mapping is smaller than the header.
-    fn new(mut map: MmapMut) -> Self {
+    fn new(mut map: MmapMut, backing: platform::Backing) -> Self {
         let len = map.len();
         assert!(
             len >= SLAB_HEADER_BYTES,
@@ -208,6 +221,7 @@ impl SharedMapping {
         let base = NonNull::new(map.as_mut_ptr()).expect("a non-empty mapping has a base");
         Self {
             _map: map,
+            _backing: backing,
             base,
             len,
         }
@@ -290,56 +304,12 @@ impl SharedMapping {
 
 /// Removes the backing file of the slab named `name`, as its creator does when
 /// it is done with it. A peer that still has it mapped keeps its mapping.
+///
+/// On Windows a file with a mapped view cannot be removed here; the creator's
+/// open handle (see [`MappingWriter::create`]) removes it when the last mapping
+/// of it closes.
 pub fn remove(name: &str) {
-    let _ = std::fs::remove_file(path(name));
-}
-
-fn open_file(name: &str, size: usize, mode: Open) -> Result<File, SlabError> {
-    let mut opts = OpenOptions::new();
-    opts.read(true).write(true);
-    match mode {
-        Open::Create => {
-            // Exclusive (`O_CREAT | O_EXCL`): an existing name, a symlink
-            // included, is refused. Truncating one would shrink a file that
-            // another process may have mapped, which faults it (SIGBUS), and a
-            // planted file or link would put our audio where its owner chose.
-            opts.create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                opts.mode(0o600);
-            }
-        }
-        Open::Existing => {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                opts.custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32);
-            }
-        }
-    }
-    let file = opts
-        .open(path(name))
-        .map_err(|e| SlabError::File(format!("failed to open shared memory file: {e}")))?;
-    if matches!(mode, Open::Create) {
-        file.set_len(size as u64)
-            .map_err(|e| SlabError::File(format!("failed to set file size: {e}")))?;
-    }
-    Ok(file)
-}
-
-#[cfg(unix)]
-fn path(name: &str) -> PathBuf {
-    #[cfg(target_os = "linux")]
-    let base = PathBuf::from("/dev/shm");
-    #[cfg(target_os = "macos")]
-    let base = std::env::temp_dir();
-    base.join(format!("tutti_{name}"))
-}
-
-#[cfg(windows)]
-fn path(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("tutti_{name}"))
+    let _ = std::fs::remove_file(platform::path(name));
 }
 
 #[cfg(test)]
@@ -370,7 +340,7 @@ mod tests {
     fn the_magic_sits_at_offset_zero() {
         let n = name("magic");
         let _w = MappingWriter::create(&n, SLAB_HEADER_BYTES + 64).unwrap();
-        let bytes = std::fs::read(path(&n)).unwrap();
+        let bytes = std::fs::read(platform::path(&n)).unwrap();
         remove(&n);
         assert_eq!(
             u64::from_le_bytes(bytes[..8].try_into().unwrap()),
@@ -405,7 +375,7 @@ mod tests {
         let real = name("real");
         let _owner = MappingWriter::create(&real, size).unwrap();
         let link = name("link");
-        std::os::unix::fs::symlink(path(&real), path(&link)).unwrap();
+        std::os::unix::fs::symlink(platform::path(&real), platform::path(&link)).unwrap();
         let opened = MappingWriter::open(&link, size);
         let created = MappingWriter::create(&link, size);
         remove(&link);
@@ -420,12 +390,36 @@ mod tests {
     fn opening_a_foreign_file_is_refused() {
         let size = SLAB_HEADER_BYTES + 64;
         let n = name("foreign");
-        std::fs::write(path(&n), vec![0xABu8; size]).unwrap();
+        std::fs::write(platform::path(&n), vec![0xABu8; size]).unwrap();
         let err = MappingWriter::open(&n, size).expect_err("a foreign file must not open");
         remove(&n);
         assert!(
             err.to_string().contains("not a tutti audio slab"),
             "expected a magic failure, got: {err}"
+        );
+    }
+
+    /// No file and no openable mapping outlives the last of a slab's mappings:
+    /// the creator's `remove` (what dropping the owning slab runs) and the drop
+    /// of both ends leave nothing at the name. On Windows `remove` cannot delete
+    /// a file that is mapped, so this holds only if the file ends with its last
+    /// mapping.
+    #[test]
+    fn nothing_outlives_the_last_mapping() {
+        let size = SLAB_HEADER_BYTES + 64;
+        let n = name("gone");
+        let owner = MappingWriter::create(&n, size).unwrap();
+        let peer = MappingWriter::open(&n, size).unwrap();
+        remove(&n);
+        drop(owner);
+        drop(peer);
+        assert!(
+            !platform::path(&n).exists(),
+            "the file outlived its mappings"
+        );
+        assert!(
+            MappingWriter::open(&n, size).is_err(),
+            "the slab opens after its mappings are gone"
         );
     }
 }
