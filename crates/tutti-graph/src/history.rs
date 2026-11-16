@@ -100,7 +100,8 @@ const _: () = assert!(JUMPS > MAX_TRANSPORT_CHANGES + 1);
 /// checkpoint spacing + `MaxBlock` frames. The roll is closed form except for
 /// loop wraps, which it walks one by one: the worst case, a loop one frame
 /// long, is about one wrap per frame of the spacing (8 200 at 48 kHz, for a
-/// query at a 64-frame maximum block); a loop of a beat at 120 BPM and 48 kHz wraps at most once.
+/// query at a 64-frame maximum block); a loop of a beat at 120 BPM and 48 kHz
+/// wraps at most once.
 ///
 /// # Where it stops
 ///

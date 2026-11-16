@@ -3899,30 +3899,64 @@ mod tail_tests {
         )
     }
 
-    /// **The tail and latency limits are the graph's rate's**: at 96 kHz a tail of
-    /// 4 000 000 frames (41.7 s) is a figure and 5 760 001 is `Unbounded`; at 48 kHz
-    /// the first is already `Unbounded`. A reported latency is clamped to 960 000
-    /// frames (ten seconds) at 96 kHz and to 480 000 at 48 kHz.
+    /// **The tail and latency limits are the graph's rate's**: sixty and ten
+    /// seconds in frames at the graph's rate. A tail at the limit is a figure and
+    /// one past it is `Unbounded`; a tail of 4 000 000 frames (83 s at 48 kHz,
+    /// 41.7 s at 96 kHz) is `Unbounded` at 48 kHz and a figure at 96 kHz. A
+    /// reported latency at the limit is kept and one past it is clamped to it.
     #[test]
     fn plugin_refreshes_use_the_graphs_rate() {
-        for (rate, tail_ok, latency) in [
-            (SampleRate::SR_48K, false, 480_000),
-            (SampleRate::SR_96K, true, 960_000),
-        ] {
-            let mut g = graph_at(rate);
-            let (node, _) = g.add(ForkByClone(Const::mono(0.0)));
-            g.commit();
-            let tail = Tail::Finite(Samples(4_000_000));
-            assert!(g.refresh_node_tail(node, tail));
-            let want = if tail_ok { tail } else { Tail::Unbounded };
-            assert_eq!(g.node_tail(node), Ok(want), "{rate:?}");
-            let past = Tail::Finite(Samples(5_760_001));
-            assert!(g.refresh_node_tail(node, past) || !tail_ok);
-            assert_eq!(g.node_tail(node), Ok(Tail::Unbounded), "{rate:?}");
+        use tutti_graph::{MAX_NODE_LATENCY, MAX_NODE_TAIL};
+        for rate in [SampleRate::SR_48K, SampleRate::SR_96K] {
+            let tail_limit = MAX_NODE_TAIL.to_samples_ceil(rate);
+            let latency_limit = MAX_NODE_LATENCY.to_samples_ceil(rate);
+            // The two rates' limits, spelled out.
+            let (want_tail, want_latency) = if rate == SampleRate::SR_48K {
+                (Samples(2_880_000), Samples(480_000))
+            } else {
+                (Samples(5_760_000), Samples(960_000))
+            };
+            assert_eq!((tail_limit, latency_limit), (want_tail, want_latency));
 
-            let over = Latency::new(Samples(960_001));
-            assert!(g.refresh_node_latency(node, over));
-            assert_eq!(g.node_latency(node), Ok(Samples(latency)), "{rate:?}");
+            let tail_after = |frames: Samples| {
+                let mut g = graph_at(rate);
+                let (node, _) = g.add(ForkByClone(Const::mono(0.0)));
+                g.commit();
+                assert!(g.refresh_node_tail(node, Tail::Finite(frames)), "{rate:?}");
+                g.node_tail(node).expect("a node")
+            };
+            assert_eq!(tail_after(tail_limit), Tail::Finite(tail_limit), "{rate:?}");
+            assert_eq!(
+                tail_after(Samples(tail_limit.get() + 1)),
+                Tail::Unbounded,
+                "{rate:?}"
+            );
+            let four_million = Samples(4_000_000);
+            let finite_here = four_million <= tail_limit;
+            assert_eq!(finite_here, rate == SampleRate::SR_96K);
+            let want = if finite_here {
+                Tail::Finite(four_million)
+            } else {
+                Tail::Unbounded
+            };
+            assert_eq!(tail_after(four_million), want, "{rate:?}");
+
+            let latency_after = |frames: Samples| {
+                let mut g = graph_at(rate);
+                let (node, _) = g.add(ForkByClone(Const::mono(0.0)));
+                g.commit();
+                assert!(
+                    g.refresh_node_latency(node, Latency::new(frames)),
+                    "{rate:?}"
+                );
+                g.node_latency(node).expect("a node")
+            };
+            assert_eq!(latency_after(latency_limit), latency_limit, "{rate:?}");
+            assert_eq!(
+                latency_after(Samples(latency_limit.get() + 1)),
+                latency_limit,
+                "{rate:?}"
+            );
         }
     }
 
