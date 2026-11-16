@@ -780,8 +780,8 @@ pub(crate) struct HostedPlugin {
     plugin: PluginRef,
     pub(crate) handle: PluginHandle,
     pub(crate) controls: Option<PluginControls>,
-    /// What the node counts and holds (its meter cell and delivery counters):
-    /// every plugin the session added; `None` for one the host inserted itself.
+    /// What the node counts and holds (its meter cell and delivery counters).
+    /// The project meter is installed only for a plugin the session added.
     pub(crate) node: NodeControls,
     /// What the plugins this record held before the current one lost, as
     /// [`Plugin::losses`] counts: banked when a plugin or its node is replaced,
