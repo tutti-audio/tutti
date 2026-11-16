@@ -724,6 +724,27 @@ fn a_reactivation_after_a_give_up_does_not_wait_the_budget_again() {
     wait_abandoned(&bridge, 9, Duration::from_secs(1));
 }
 
+/// **A reactivation after the server's death stays off the budget.** A death
+/// latched on the fork's wait ends the wait for good, as a give-up does: the
+/// new activation must not arm the bridge's budget for a server that is gone.
+#[test]
+fn a_reactivation_after_a_death_does_not_wait_the_budget() {
+    let _machine = machine_lock();
+    let main = main_thread();
+    let (mut ipc, _server) = mock();
+    let bridge = Arc::clone(ipc.bridge());
+    let wait = ipc.watch(true);
+    let (mut processor, controller) = activate(ipc, 32);
+    render_chunks(&mut processor, 1);
+    wait.latch_crash(None);
+    assert!(wait.death().is_some(), "the death is latched");
+    wait_abandoned(&bridge, 1, Duration::from_secs(3));
+    let ipc = Ipc::deactivate(main, processor, controller).expect("the halves rejoin");
+    let (mut processor, _controller) = activate(ipc, 32);
+    render_chunks(&mut processor, 8);
+    wait_abandoned(&bridge, 8, Duration::from_secs(1));
+}
+
 /// How many times the mock server was asked for its parameter list.
 fn list_asks(server: &Mock) -> usize {
     server

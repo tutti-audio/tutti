@@ -12,7 +12,10 @@
 //! pacing sleep's own overshoot), from the stall's start to the pipeline's
 //! refill after its end; every block is either the input delayed by exactly the
 //! declared latency (137 + quantum) or silence, and the graph declares that
-//! latency. On a machine that did not stall, one silent block fails.
+//! latency. On a machine that did not stall, one silent block fails, and a run
+//! whose stalls excuse more than a quarter of its judged blocks is rerun (twice
+//! at most) or reported as too loaded to judge. A stall local to the server
+//! process that no canary sees is an accepted limit: that block fails.
 //!
 //! Needs `cargo build -p tutti-plugin-server` first (see `CLAUDE.md`).
 
@@ -76,7 +79,7 @@ struct Run {
     wrong: Vec<usize>,
     /// The blocks a measured stall explains ([`excused_blocks`]).
     excused: Vec<usize>,
-    /// How many stalls were measured ([`LATE`] or later) over the run.
+    /// How many stalls were measured ([`late`] or later) over the run.
     stalls: usize,
 }
 
@@ -153,11 +156,13 @@ const BURST: usize = 3;
 /// an idle or contended CPU runs late, and the bridge thread and the server
 /// are woken the same way. A block's reply is due one period after its
 /// callback (10 ms at 480 frames, 48 kHz), so only a stall of this order can
-/// cost one.
-const LATE: Duration = Duration::from_millis(5);
+/// cost one: 5 ms, and no more than half a period.
+fn late(period: Duration) -> Duration {
+    Duration::from_millis(5).min(period / 2)
+}
 
 /// Threads sleeping 1 ms in a loop, as the bridge thread and the server sleep,
-/// recording every wake-up [`LATE`] or later as the interval the thread was
+/// recording every wake-up [`late`] or later as the interval the thread was
 /// not running. The server's and the bridge's stalls are invisible to the test
 /// thread, so the machine's own scheduling is measured beside the run, from
 /// other threads, and a block is excused only where it shows a stall.
@@ -167,22 +172,22 @@ struct Canaries {
 }
 
 impl Canaries {
-    fn new() -> Self {
+    fn new(late: Duration) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let threads = (0..4)
             .map(|_| {
                 let stop = stop.clone();
                 std::thread::spawn(move || {
-                    let mut late = Vec::new();
+                    let mut stalls = Vec::new();
                     while !stop.load(Ordering::Relaxed) {
                         let slept = Instant::now();
                         std::thread::sleep(Duration::from_millis(1));
                         let woke = Instant::now();
-                        if woke - slept > Duration::from_millis(1) + LATE {
-                            late.push((slept + Duration::from_millis(1), woke));
+                        if woke - slept > Duration::from_millis(1) + late {
+                            stalls.push((slept + Duration::from_millis(1), woke));
                         }
                     }
-                    late
+                    stalls
                 })
             })
             .collect();
@@ -250,7 +255,6 @@ fn judge_silence(silent: &[usize], excused: &[usize], neutral: Range<usize>) -> 
 fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -> Run {
     let probe = load_probe(rate);
     let _awake = KeepAwake::new();
-    let canaries = Canaries::new();
     let inputs = probe.client.inputs();
     let prepare = Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples(quantum)))
         .with_quantum(MaxBlock::of(Samples(quantum)));
@@ -282,6 +286,8 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
     let transport = Transport::new(SampleRate::of(rate));
     let engine = Engine::new(&transport, &mut ed, exec).expect("the engine builds");
     let period = Duration::from_secs_f64(quantum as f64 / rate);
+    let late = late(period);
+    let canaries = Canaries::new(late);
     let warm_up = 8 + declared.get().div_ceil(quantum);
     let mut buf = vec![0.0f32; quantum];
     let (mut silent, mut wrong) = (Vec::new(), Vec::new());
@@ -317,7 +323,7 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
         }
         std::thread::sleep(next - now);
         let woke = Instant::now();
-        if woke - next > LATE {
+        if woke - next > late {
             stalls.push((next, woke));
         }
     }
@@ -375,23 +381,57 @@ fn a_stall_excuses_its_blocks_and_the_ring_refill_after_it() {
     );
 }
 
+/// Runs a run whose stalls may excuse this many judged blocks, at most.
+const MAX_EXCUSED: (usize, usize) = (1, 4);
+
+/// Runs of `run` before a machine is called too loaded to judge.
+const JUDGEABLE_RUNS: usize = 3;
+
+/// The first run of `run` that can be judged: no block wrong, and its stalls
+/// excuse at most a quarter of the blocks judged (`from` on, outside
+/// `neutral`). More than that and a stall explains nearly every block, so the
+/// run asserts almost nothing: it is run again on a fresh server, up to
+/// [`JUDGEABLE_RUNS`] times, and then reported. A run under the cap is
+/// returned whatever its silence is, and a wrong block fails at once.
+fn judgeable_run(
+    what: &str,
+    mut run: impl FnMut() -> Run,
+    from: usize,
+    neutral: Range<usize>,
+) -> Run {
+    let mut seen = Vec::new();
+    for attempt in 1..=JUDGEABLE_RUNS {
+        let run = run();
+        assert!(
+            run.wrong.is_empty(),
+            "{what}: blocks {:?} are neither silent nor the input delayed by {:?}",
+            run.wrong,
+            run.declared
+        );
+        let judged = (from..run.blocks).filter(|b| !neutral.contains(b)).count();
+        let excused = run
+            .excused
+            .iter()
+            .filter(|&&b| b >= from && !neutral.contains(&b))
+            .count();
+        eprintln!(
+            "{what}: run {attempt}: {} of {} judged blocks excused by {} measured stalls, {} silent",
+            excused,
+            judged,
+            run.stalls,
+            run.silent.len()
+        );
+        if excused * MAX_EXCUSED.1 <= judged * MAX_EXCUSED.0 {
+            return run;
+        }
+        seen.push(format!("{excused} of {judged}"));
+    }
+    panic!("{what}: machine too loaded to judge: blocks excused per run: {seen:?}");
+}
+
 fn assert_live(rate: f64, quantum: usize) {
     let what = format!("{quantum}-frame callbacks");
-    let run = run_live(rate, quantum, 200, None);
-    eprintln!(
-        "{what}: declared {:?}, {} of {} blocks silent, {} wrong, {} stalls measured",
-        run.declared,
-        run.silent.len(),
-        run.blocks,
-        run.wrong.len(),
-        run.stalls
-    );
-    assert!(
-        run.wrong.is_empty(),
-        "{what}: blocks {:?} are neither silent nor the input delayed by {:?}",
-        run.wrong,
-        run.declared
-    );
+    let run = judgeable_run(&what, || run_live(rate, quantum, 200, None), 0, 0..0);
     if let Err(why) = judge_silence(&run.silent, &run.excused, 0..0) {
         panic!(
             "{what}: {why} of {} blocks, {} stalls measured: the server was not given the \
@@ -449,20 +489,14 @@ fn a_burst_of_callbacks_loses_blocks_but_never_corrupts_them() {
     let _lock = machine_lock();
     let _env = ProbeEnv::new().render_mode(render::LATENCY);
 
-    let run = run_live(48_000.0, QUANTUM, BLOCKS, Some(BURST_AT));
-
-    assert!(
-        run.wrong.is_empty(),
-        "blocks {:?} are neither silent nor the input delayed by {:?}: a block \
-         the ring dropped surfaced as data",
-        run.wrong,
-        run.declared
-    );
-    eprintln!(
-        "burst at {BURST_AT}: silent blocks {:?}, {} stalls measured",
-        run.silent, run.stalls
-    );
     let window = BURST_AT..BURST_AT + BURST + RING_SLOTS;
+    let run = judgeable_run(
+        "a burst of callbacks",
+        || run_live(48_000.0, QUANTUM, BLOCKS, Some(BURST_AT)),
+        SETTLE,
+        window.clone(),
+    );
+    eprintln!("burst at {BURST_AT}: silent blocks {:?}", run.silent);
     let silent: Vec<usize> = run
         .silent
         .iter()
