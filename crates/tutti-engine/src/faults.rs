@@ -7,8 +7,15 @@
 //! [`StreamFaults::record`] can run on the audio thread: some backends call
 //! their error callback on the data callback's worker thread, and CoreAudio can
 //! call it inside the render callback. So `record` never waits: the counters
-//! are atomics, and the lock around the last fault is only `try_lock`ed there.
-//! It still allocates the message string, as a backend's own error path does.
+//! are atomics, and the lock around the last owned fault is only `try_lock`ed
+//! there. It still allocates the message string, as a backend's own error path
+//! does.
+//!
+//! [`StreamFaults::record_panic`] and [`StreamFaults::record_overrun`] are the
+//! render thread's own: they take no lock, allocate nothing and free nothing.
+//! Each writes its `&'static str` into a sequence cell of its own
+//! ([`SeqWriter`]) and counts; the control side builds the owned message when
+//! it reads.
 
 use std::borrow::Cow;
 use std::fmt::Display;
@@ -16,7 +23,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use tutti_rt::{Drained, FaultLatch};
+use bytemuck::{Pod, Zeroable};
+use tutti_rt::{AudioThreadCell, Drained, FaultLatch, SeqReader, SeqWriter};
 
 /// How long backend errors may arrive with no audio delivered before the
 /// stream counts as gone.
@@ -57,8 +65,9 @@ pub enum StreamFaultKind {
 pub struct StreamFault {
     /// Whether the device went away or the backend reported something else.
     pub kind: StreamFaultKind,
-    /// The backend's message, as its `Display` rendered it; a fixed text for a
-    /// panic, which is recorded on the audio thread and must not allocate.
+    /// The backend's message, as its `Display` rendered it; for a panic or an
+    /// overrun, the text its recorder passed, cut to
+    /// [`RT_TEXT_BYTES`] bytes at a character boundary.
     pub message: Cow<'static, str>,
 }
 
@@ -78,12 +87,103 @@ pub enum BackendErrorKind {
     Other,
 }
 
-/// The messages a [`StreamFaults`] holds: the latest fault, and a message the
-/// render thread replaced, which the control side frees.
+/// The longest text a render-thread fault keeps, in bytes: what
+/// [`StreamFaults::record_panic`] and [`StreamFaults::record_overrun`] are
+/// given is cut here, at a character boundary.
+pub const RT_TEXT_BYTES: usize = 126;
+
+/// One render-thread fault as the sequence cell carries it: plain bytes, so
+/// writing it allocates nothing. `stamp` orders it against every other fault
+/// of the stream (zero is never a stamp).
+#[derive(Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+struct RtFault {
+    stamp: u64,
+    kind: u8,
+    len: u8,
+    text: [u8; RT_TEXT_BYTES],
+}
+
+impl RtFault {
+    const PANIC: u8 = 0;
+    const OVERRUN: u8 = 1;
+
+    fn new(stamp: u64, kind: u8, what: &str) -> Self {
+        let mut len = what.len().min(RT_TEXT_BYTES);
+        while !what.is_char_boundary(len) {
+            len -= 1;
+        }
+        let mut text = [0; RT_TEXT_BYTES];
+        text[..len].copy_from_slice(&what.as_bytes()[..len]);
+        Self {
+            stamp,
+            kind,
+            len: len as u8,
+            text,
+        }
+    }
+
+    fn fault(&self) -> StreamFault {
+        let kind = if self.kind == Self::PANIC {
+            StreamFaultKind::CallbackPanicked
+        } else {
+            StreamFaultKind::Overrun
+        };
+        let len = usize::from(self.len).min(RT_TEXT_BYTES);
+        StreamFault {
+            kind,
+            message: Cow::Owned(String::from_utf8_lossy(&self.text[..len]).into_owned()),
+        }
+    }
+}
+
+/// A render-thread fault cell: the write side behind an [`AudioThreadCell`]
+/// (a second writer is refused, not waited for) and its reader.
+struct RtCell {
+    writer: AudioThreadCell<SeqWriter<RtFault>>,
+    reader: SeqReader<RtFault>,
+}
+
+impl RtCell {
+    fn new() -> Self {
+        let writer = SeqWriter::new();
+        let reader = writer.reader();
+        Self {
+            writer: AudioThreadCell::new(writer),
+            reader,
+        }
+    }
+
+    /// Wait-free; allocates and frees nothing. Dropped if another thread is
+    /// mid-write.
+    fn write(&self, fault: RtFault) {
+        if let Some(mut writer) = self.writer.try_borrow_mut() {
+            writer.write(fault);
+        }
+    }
+
+    /// The last completed write newer than `floor`. Control side: it retries
+    /// past a write in flight and gives up (`None`) after a bounded number.
+    fn read(&self, floor: u64) -> Option<RtFault> {
+        match self.reader.read(1024) {
+            Ok(Some(fault)) if fault.stamp > floor => Some(fault),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Debug for RtCell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RtCell(..)")
+    }
+}
+
+/// What the control side holds: the latest owned fault with its stamp, and
+/// the stamp at or below which every fault is forgotten.
 #[derive(Debug, Default)]
 struct Slots {
-    last: Option<StreamFault>,
-    retired: Option<StreamFault>,
+    owned: Option<(u64, StreamFault)>,
+    floor: u64,
 }
 
 /// The accumulated faults of one output stream, shared between the backend's
@@ -100,6 +200,12 @@ pub struct StreamFaults {
     /// `drain`, before its ring.
     disconnected: FaultLatch,
     slots: Mutex<Slots>,
+    /// Hands out the stamp that orders one fault against another.
+    order: AtomicU64,
+    /// The latest panic, written on the render thread.
+    panic: RtCell,
+    /// The latest overrun, written on the timer's thread.
+    overrun: RtCell,
     /// Zero point of `run_start`.
     pub(crate) epoch: Instant,
     /// Nanoseconds after `epoch`, plus one, at which the current run of
@@ -121,6 +227,9 @@ impl StreamFaults {
             count: AtomicU64::new(0),
             disconnected: FaultLatch::new(),
             slots: Mutex::new(Slots::default()),
+            order: AtomicU64::new(0),
+            panic: RtCell::new(),
+            overrun: RtCell::new(),
             epoch: Instant::now(),
             run_start: AtomicU64::new(0),
         }
@@ -141,8 +250,9 @@ impl StreamFaults {
     ///
     /// Lock-free. A per-frame consumer compares this against what it saw last
     /// and calls [`last`](Self::last) only when it moved. The message of a
-    /// fault recorded while the slots were being read is dropped, so `last` can
-    /// lag the count.
+    /// fault recorded while the slots were being read is dropped, and one
+    /// written while the control side reads is seen by the next read, so `last`
+    /// can lag the count.
     pub fn count(&self) -> u64 {
         self.count.load(Ordering::Acquire)
     }
@@ -169,12 +279,35 @@ impl StreamFaults {
         self.disconnected.drain(pop)
     }
 
+    /// The fault `last` reports and its stamp: the newest of the owned fault
+    /// and the latest panic; an overrun only when neither is there, so it
+    /// never replaces a latching fault's message or an owned one.
+    fn newest(&self, slots: &Slots) -> Option<(u64, StreamFault)> {
+        let panic = self
+            .panic
+            .read(slots.floor)
+            .map(|fault| (fault.stamp, fault.fault()));
+        let firm = [
+            slots
+                .owned
+                .clone()
+                .filter(|(stamp, _)| *stamp > slots.floor),
+            panic,
+        ]
+        .into_iter()
+        .flatten()
+        .max_by_key(|(stamp, _)| *stamp);
+        firm.or_else(|| {
+            self.overrun
+                .read(slots.floor)
+                .map(|fault| (fault.stamp, fault.fault()))
+        })
+    }
+
     /// Returns a copy of the most recent fault, if any.
     pub fn last(&self) -> Option<StreamFault> {
-        let mut slots = self.last_guard();
-        // A message the render thread replaced is freed here, on the control side.
-        slots.retired = None;
-        slots.last.clone()
+        let slots = self.last_guard();
+        self.newest(&slots).map(|(_, fault)| fault)
     }
 
     /// Takes the most recent fault, leaving `None`, for a host that shows each
@@ -182,8 +315,15 @@ impl StreamFaults {
     /// [`is_disconnected`](Self::is_disconnected) are unaffected.
     pub fn take_last(&self) -> Option<StreamFault> {
         let mut slots = self.last_guard();
-        slots.retired = None;
-        slots.last.take()
+        let (stamp, fault) = self.newest(&slots)?;
+        // Everything recorded so far goes with it, an overrun it outranked
+        // included.
+        slots.floor = slots
+            .floor
+            .max(stamp)
+            .max(self.overrun.read(0).map_or(0, |fault| fault.stamp));
+        slots.owned = None;
+        Some(fault)
     }
 
     /// Records a fault from the backend's error callback: `kind` is the
@@ -238,82 +378,59 @@ impl StreamFaults {
     }
 
     /// Records that a callback of this stream panicked, from the audio thread
-    /// that caught it: `what` names the callback. Allocates nothing and never
-    /// waits (the message is dropped if another thread holds `slots`). Raises
+    /// that caught it: `what` names the callback. Allocates, locks and
+    /// frees nothing, and never waits. Raises
     /// the same latch a disconnect does, so
     /// [`OutputStream::is_running`](crate::OutputStream::is_running) reads
     /// `false` and a capture source answers `Failed`.
     ///
-    /// The panic's message replaces the one in [`last`](Self::last); the
-    /// message it replaces is kept aside and freed by the next control-side
-    /// read ([`last`](Self::last), [`take_last`](Self::take_last)), never here.
+    /// The audio side does a `fetch_add` on the stamp (`Relaxed`: it only
+    /// orders faults), a [`SeqWriter`] write of the text (a few `Relaxed`
+    /// atomic stores between two `Release` marks) and the count; the panic's
+    /// text, cut to [`RT_TEXT_BYTES`], is what [`last`](Self::last) then
+    /// reports (it replaces any other fault), and the owned `String` is built
+    /// there, on the control side. A second thread writing the same cell at
+    /// the same instant loses its text; the count still moves.
     pub fn record_panic(&self, what: &'static str) {
         self.publish_rt(StreamFaultKind::CallbackPanicked, what);
     }
 
     /// Records that a clock paced by a thread of its own fell too far behind
     /// and re-anchored ([`StreamFaultKind::Overrun`]): `what` says so. The
-    /// stream continues, so this raises no disconnect. Allocates nothing and
-    /// never waits.
+    /// stream continues, so this raises no disconnect. Allocates, locks and
+    /// frees nothing, and never waits (see [`record_panic`](Self::record_panic)).
     ///
     /// An overrun counts, but it does not replace the message of a latching
-    /// fault or of an owned one: [`last`](Self::last) may keep an older
+    /// fault, a panic or an owned one: [`last`](Self::last) may keep an older
     /// message, and an older kind, than the overrun.
     pub fn record_overrun(&self, what: &'static str) {
         self.publish_rt(StreamFaultKind::Overrun, what);
     }
 
-    /// [`publish`](Self::publish) for a fault recorded on the render thread,
-    /// which must not free: the message it replaces is never dropped there.
-    ///
-    /// - An overrun never replaces the message of a latching fault
-    ///   ([`Disconnected`](StreamFaultKind::Disconnected),
-    ///   [`CallbackPanicked`](StreamFaultKind::CallbackPanicked)), nor an owned
-    ///   message it could not free; it only counts.
-    /// - A panic replaces any message. An owned one moves to `retired`, which
-    ///   the control side frees; if that is occupied (a second panic after an
-    ///   owned message was published since, which a latched stream does not
-    ///   reach in practice) the old message is leaked.
+    /// A fault recorded on the render thread: the text and a stamp go into
+    /// the kind's own cell. No lock, no allocation, no free; see
+    /// [`record_panic`](Self::record_panic).
     fn publish_rt(&self, kind: StreamFaultKind, what: &'static str) {
-        let place = |slots: &mut Slots| {
-            let keep = kind == StreamFaultKind::Overrun
-                && slots.last.as_ref().is_some_and(|old| {
-                    matches!(
-                        old.kind,
-                        StreamFaultKind::Disconnected | StreamFaultKind::CallbackPanicked
-                    ) || matches!(old.message, Cow::Owned(_))
-                });
-            if keep {
-                return;
+        let stamp = self.order.fetch_add(1, Ordering::Relaxed) + 1;
+        match kind {
+            StreamFaultKind::CallbackPanicked => {
+                self.panic.write(RtFault::new(stamp, RtFault::PANIC, what))
             }
-            let fault = StreamFault {
-                kind,
-                message: Cow::Borrowed(what),
-            };
-            let Some(old) = slots.last.replace(fault) else {
-                return;
-            };
-            if !matches!(old.message, Cow::Owned(_)) {
-                // Borrowed: dropping frees nothing.
-            } else if slots.retired.is_none() {
-                slots.retired = Some(old);
-            } else {
-                std::mem::forget(old);
-            }
-        };
-        match self.slots.try_lock() {
-            Ok(mut slots) => place(&mut slots),
-            Err(std::sync::TryLockError::Poisoned(p)) => place(&mut p.into_inner()),
-            Err(std::sync::TryLockError::WouldBlock) => {}
+            _ => self
+                .overrun
+                .write(RtFault::new(stamp, RtFault::OVERRUN, what)),
         }
         self.raise_and_count(kind);
     }
 
     fn publish(&self, kind: StreamFaultKind, message: Cow<'static, str>) {
         let fault = StreamFault { kind, message };
+        let stamp = self.order.fetch_add(1, Ordering::Relaxed) + 1;
         match self.slots.try_lock() {
-            Ok(mut slots) => slots.last = Some(fault),
-            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner().last = Some(fault),
+            Ok(mut slots) => slots.owned = Some((stamp, fault)),
+            Err(std::sync::TryLockError::Poisoned(p)) => {
+                p.into_inner().owned = Some((stamp, fault));
+            }
             Err(std::sync::TryLockError::WouldBlock) => {}
         }
         self.raise_and_count(kind);
@@ -332,7 +449,10 @@ impl StreamFaults {
 
     /// Forgets everything. Called when a stream starts.
     pub(crate) fn clear(&self) {
-        *self.last_guard() = Slots::default();
+        let mut slots = self.last_guard();
+        slots.owned = None;
+        slots.floor = self.order.load(Ordering::Relaxed);
+        drop(slots);
         self.disconnected.clear();
         self.count.store(0, Ordering::Release);
         self.run_start.store(0, Ordering::Relaxed);

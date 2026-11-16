@@ -161,52 +161,96 @@ fn an_overrun_keeps_a_latching_message_and_a_panic_replaces_a_lesser_one() {
     );
 }
 
-/// **A panic retires the owned message it replaces** instead of dropping it
-/// on the render thread, and a control-side read frees it.
+/// **A panic after an owned message is the latest word, and nothing owned is
+/// touched:** the owned message stays where it was (a render-thread fault never
+/// replaces or frees it), and a later owned one is newer again.
 #[test]
-fn a_panic_retires_an_owned_message_and_a_read_frees_it() {
+fn a_panic_leaves_the_owned_message_alone_and_a_later_owned_one_outranks_it() {
     let faults = StreamFaults::new();
     faults.record(BackendErrorKind::Other, &"xrun");
     faults.record_panic("panicked");
     assert_eq!(
         faults
             .last_guard()
-            .retired
+            .owned
             .as_ref()
-            .map(|f| f.message.clone()),
+            .map(|(_, f)| f.message.clone()),
         Some(Cow::Owned::<str>("xrun".to_string())),
-        "the replaced owned message is held aside"
+        "the owned message was not replaced"
     );
     let last = faults.last().expect("a fault");
     assert_eq!(last.kind, StreamFaultKind::CallbackPanicked);
     assert_eq!(last.message, "panicked");
-    assert!(faults.last_guard().retired.is_none(), "the read freed it");
-    assert_eq!(
-        faults.last().map(|f| f.kind),
-        Some(StreamFaultKind::CallbackPanicked)
-    );
+
+    faults.record(BackendErrorKind::DeviceGone, &"gone");
+    assert_eq!(faults.last().expect("a fault").message, "gone");
+    faults.record_panic("second");
+    assert_eq!(faults.last().expect("a fault").message, "second");
+    assert_eq!(faults.count(), 4);
 }
 
-/// **With the retired slot occupied, a second panic over an owned message
-/// leaks that message rather than freeing it:** the slot keeps the first one.
+/// **A fault raised on the render side is read with its kind and text, however
+/// often it was raised before the control side looked:** the latest text wins
+/// and every raise is counted.
 #[test]
-fn a_panic_over_an_owned_message_with_the_slot_taken_leaves_the_slot_alone() {
+fn a_render_side_fault_raised_repeatedly_is_read_with_its_latest_text() {
+    let faults = StreamFaults::new();
+    for _ in 0..1000 {
+        faults.record_overrun("late");
+    }
+    faults.record_overrun("the last overrun");
+    let last = faults.last().expect("a fault");
+    assert_eq!(last.kind, StreamFaultKind::Overrun);
+    assert_eq!(last.message, "the last overrun");
+    assert_eq!(faults.count(), 1001);
+
+    for _ in 0..1000 {
+        faults.record_panic("panicked");
+    }
+    faults.record_panic("the last panic");
+    let last = faults.last().expect("a fault");
+    assert_eq!(last.kind, StreamFaultKind::CallbackPanicked);
+    assert_eq!(last.message, "the last panic");
+    assert_eq!(faults.count(), 2002);
+    assert!(faults.is_disconnected(), "a panic latches the stream");
+}
+
+/// **A text longer than `RT_TEXT_BYTES` is cut at a character boundary**, never
+/// in the middle of one.
+#[test]
+fn a_long_render_side_text_is_cut_at_a_character_boundary() {
+    let faults = StreamFaults::new();
+    // 125 ASCII bytes then a 2-byte character straddling the limit.
+    let text: &'static str = Box::leak(format!("{}é{}", "a".repeat(125), "z").into_boxed_str());
+    faults.record_panic(text);
+    let message = faults.last().expect("a fault").message;
+    assert_eq!(message, "a".repeat(125));
+    assert!(message.len() <= RT_TEXT_BYTES);
+}
+
+/// **`take_last` shows each fault once, and an overrun it outranked does not
+/// come back:** after the take there is nothing until the next fault.
+#[test]
+fn take_last_forgets_everything_recorded_so_far() {
     let faults = StreamFaults::new();
     faults.record(BackendErrorKind::Other, &"xrun");
-    faults.record_panic("first");
-    faults.record(BackendErrorKind::DeviceGone, &"gone");
-    faults.record_panic("second");
-    assert_eq!(
-        faults
-            .last_guard()
-            .retired
-            .as_ref()
-            .map(|f| f.message.to_string()),
-        Some("xrun".to_string())
-    );
-    assert_eq!(
-        faults.last().map(|f| f.message.to_string()),
-        Some("second".to_string())
-    );
-    assert_eq!(faults.count(), 4);
+    faults.record_overrun("late");
+    assert_eq!(faults.take_last().expect("a fault").message, "xrun");
+    assert!(faults.last().is_none(), "the overrun it outranked is gone");
+    faults.record_overrun("later");
+    assert_eq!(faults.last().expect("a fault").message, "later");
+}
+
+/// **A restart forgets render-side faults too:** `clear` leaves `last` empty
+/// though the cells still hold the old text.
+#[test]
+fn clear_forgets_render_side_faults() {
+    let faults = StreamFaults::new();
+    faults.record_panic("panicked");
+    faults.record_overrun("late");
+    faults.clear();
+    assert!(faults.last().is_none());
+    assert_eq!(faults.count(), 0);
+    faults.record_overrun("after");
+    assert_eq!(faults.last().expect("a fault").message, "after");
 }
