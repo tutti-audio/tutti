@@ -134,7 +134,7 @@ vendor/             third-party code we never edit
 
 ## Unit Types (MANDATORY)
 
-`tutti_types::value::units` defines the engine's measurement vocabulary. **Use
+`tutti_types` defines the engine's measurement vocabulary. **Use
 the unit newtype, never the bare float**, for any quantity one covers — in struct
 fields, function signatures, `Param<U>`, and return types alike.
 

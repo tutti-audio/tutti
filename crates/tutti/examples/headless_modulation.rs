@@ -8,7 +8,7 @@
 //! no plan sent. Prints the output's level per 50 ms window.
 //!
 //! ```text
-//! cargo run -p tutti --features modulation --example headless_modulation
+//! cargo run -p tutti --example headless_modulation
 //! ```
 //!
 //! The umbrella's, so that it imports as an application does, from `tutti`'s

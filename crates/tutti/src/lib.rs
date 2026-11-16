@@ -318,9 +318,9 @@ pub mod graph {
         GraphInvalid, Harmony, HarmonyKind, InPlaceMask, LoopRange as TransportLoop, NodeParts,
         Offset, ParamInput, ParamMod, ParamPorts, ParamPortsError, ParamRamp, ParamRange,
         ParamRangeReader, ParamSegment, Pass as DryPath, PlayClock, RenderMode, Resolution,
-        SilenceMask, Sink as GraphSink, SortedEvents, SubBlocks, TransportChange,
-        TransportChangeRejected, TransportChanges, TransportHistory, TransportPosition, UmpAt,
-        VerifyError, Wake,
+        SilenceMask, Sink as GraphSink, SortedEvents, Source as GraphSource, SubBlocks,
+        TransportChange, TransportChangeRejected, TransportChanges, TransportHistory,
+        TransportPosition, UmpAt, VerifyError, Wake,
     };
     pub use tutti_graph::{EdgeGain, FeedbackFrom, Invalid, NodeMix, RangeView};
 }
@@ -424,8 +424,8 @@ pub mod session {
     };
     #[cfg(feature = "midi")]
     pub use tutti_session::{
-        FollowClock, FollowMachineControl, MIDI_INPUT_DROP_REPORT, MidiNodes, MidiRouteId,
-        NoSuchMidiRoute, NotInstrument, SendMachineControl, SinkLoaded,
+        FollowClock, FollowMachineControl, MidiNodes, MidiRouteId, NoSuchMidiRoute, NotInstrument,
+        SendMachineControl, SinkLoaded,
     };
     #[cfg(feature = "soundfont")]
     pub use tutti_session::{GeneralMidi, SoundFontFile, soundfont};

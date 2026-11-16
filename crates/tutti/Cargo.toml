@@ -153,6 +153,7 @@ audio-io = ["io", "tutti-cpal?/capture", "tutti-session?/audio-io"]
 # AIFF are pure Rust and opt-in (`encode-flac`, `encode-aiff`), and `encode-vorbis` is the one path to C (the
 # Vorbis library, `ogg_next_sys`).
 export = ["dep:tutti-export", "encode-wav", "tutti-session?/export"]
+# No-op: modulation is always on. Kept until the feature is removed everywhere.
 modulation = ["tutti-session?/modulation"]
 
 # --- plugin hosting ---------------------------------------------------------

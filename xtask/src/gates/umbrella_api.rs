@@ -59,22 +59,22 @@ const INTERNAL: &[(&str, &str, &str)] = &[
     (
         "tutti_transport",
         "Transport",
-        "the transport's surface is 6 types; owner: core-engine, lane core-leaks",
+        "the engine's playback transport; an app drives it through `Session`",
     ),
     (
         "tutti_graph",
         "Editor",
-        "the editor's surface is 55 types; owner: core-engine, lane core-leaks",
+        "the graph editor; the session wraps it",
     ),
     (
         "tutti_engine",
         "StreamDriver",
-        "the driver's surface is 13 types; owner: core-engine, lane core-leaks",
+        "a device backend's driver; the session runs it",
     ),
     (
         "tutti_plugin_host",
         "PluginHandle",
-        "the handle's surface is 26 types; owner: core-engine, lane core-leaks",
+        "the host's control handle of a plugin; `Plugin` wraps it",
     ),
     (
         "tutti_engine",
@@ -84,47 +84,42 @@ const INTERNAL: &[(&str, &str, &str)] = &[
     (
         "tutti_transport",
         "RenderClock",
-        "the export render's clock; owner: core-engine, lane core-leaks",
+        "the export render's clock; `ExportClock` wraps it",
     ),
     (
         "tutti_transport",
         "OfflineClock",
-        "the export render's clock; owner: core-engine, lane core-leaks",
+        "the export render's clock; `ExportClock` wraps it",
     ),
     (
         "tutti_graph",
         "Topology",
-        "the compiler's view of a graph; owner: core-engine, lane core-leaks",
+        "the compiler's view of a graph; the session wraps it",
     ),
     (
         "tutti_graph",
         "Compensation",
-        "a compiler record; owner: core-engine, lane core-leaks",
+        "a compiler record of latency compensation",
     ),
     (
         "tutti_graph",
         "EventEdge",
-        "the compiler's edge; the session's `EventEdge` is another; owner: core-engine, lane core-leaks",
+        "the compiler's edge; the session's `EventEdge` is another",
     ),
     (
         "tutti_graph",
         "InPort",
-        "the compiler's port; the session's `InPort` is another; owner: core-engine, lane core-leaks",
+        "the compiler's port; the session's `InPort` is another",
     ),
     (
         "tutti_graph",
         "OutPort",
-        "the compiler's port; the session's `OutPort` is another; owner: core-engine, lane core-leaks",
-    ),
-    (
-        "tutti_graph",
-        "Source",
-        "a graph edge's source; the buffers' `Source` is another; owner: core-engine, lane core-leaks",
+        "the compiler's port; the session's `OutPort` is another",
     ),
     (
         "tutti_plugin",
         "PluginClient",
-        "owner: plugin lane, needs a root pub use",
+        "the host's client of a served plugin; `Plugin` wraps it",
     ),
     (
         "tutti_midi_protocol",

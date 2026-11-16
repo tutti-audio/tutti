@@ -3,11 +3,11 @@
 //! beats bounced to a WAV file (the reverb's tail rings on past the eighth).
 //!
 //! ```text
-//! cargo run -p tutti --features "export,sampler,modulation" --example song_bounce -- <outdir>
+//! cargo run -p tutti --features "export,sampler" --example song_bounce -- <outdir>
 //! ```
 //!
-//! `tutti`'s root carries the session, the units, the sampler's `Clip`, `Lfo`,
-//! `Bounce` and `Format`; the nodes are `tutti::nodes`; the two bus names a fold
+//! `tutti`'s root carries the session, the units, the sampler's `Clip`,
+//! `Bounce` and `Format`; the `Lfo` is `tutti::modulation::Lfo`; the nodes are `tutti::nodes`; the two bus names a fold
 //! needs are `tutti::session::` paths. Every fallible call returns the one
 //! `Error`, so `?` runs the whole program.
 
