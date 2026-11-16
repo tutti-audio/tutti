@@ -166,7 +166,7 @@ pub(crate) fn wait_readable(stream: &Stream, timeout: std::time::Duration) -> Br
 ///
 /// A liveness check rather than a deadline: a host under load can legitimately be
 /// slow to connect, so the wait is bounded by whether the parent still exists.
-pub(crate) fn wait_for_connection(listener: &Listener) -> BridgeResult<()> {
+pub(crate) fn wait_for_connection(listener: &Listener) -> BridgeResult<super::Watching> {
     use std::os::fd::AsFd;
 
     /// How long each `poll` waits before host liveness is re-checked. Also the
@@ -181,7 +181,7 @@ pub(crate) fn wait_for_connection(listener: &Listener) -> BridgeResult<()> {
             Err(e) => return Err(e.into()),
             // Readable means a connection is queued: the accept that follows will
             // not block.
-            Ok(true) => return Ok(()),
+            Ok(true) => return Ok(super::Watching::nothing()),
             Ok(false) => {}
         }
         // Timed out with nothing pending — the only moment worth asking whether
@@ -204,14 +204,7 @@ pub(crate) fn wait_for_connection(listener: &Listener) -> BridgeResult<()> {
 /// Compared against rather than tested for pid 1 — see [`parent_is_alive`].
 static ORIGINAL_PPID: std::sync::OnceLock<i32> = std::sync::OnceLock::new();
 
-/// Environment variable through which the host states its own PID.
-///
-/// See [`record_parent_pid`] for why `getppid()` cannot be trusted to answer
-/// the same question. Set by `tutti_plugin`'s `spawn_process`; the constant is
-/// duplicated there rather than shared, because the two sides are separate
-/// crates and this is the wire between them — the same relationship the socket
-/// path argument has.
-const HOST_PID_ENV: &str = "TUTTI_PLUGIN_HOST_PID";
+use super::HOST_PID_ENV;
 
 /// Records the spawning host's PID. Call once, as early as possible.
 ///

@@ -105,6 +105,32 @@ pub(crate) use sys::{
     Listener, Native, Stream, record_parent_pid, wait_for_connection, wait_readable,
 };
 
+/// Environment variable through which the host states its own PID at spawn,
+/// before this process exists: neither platform can recover it afterwards (a
+/// host that dies during its child's startup is reparented first). Duplicated
+/// in `tutti-plugin-ipc`'s launch rather than shared: it is the wire between
+/// the two, as the socket-path argument is.
+// Read by the Unix and Windows backends; the fallback has no host to name.
+#[allow(dead_code)]
+const HOST_PID_ENV: &str = "TUTTI_PLUGIN_HOST_PID";
+
+/// What keeps watching the host while the `accept` after
+/// [`wait_for_connection`] blocks, ended by dropping it when the accept
+/// returns. A platform whose wait is the check itself (Unix polls the
+/// listener) returns [`Watching::nothing`].
+#[derive(Debug, Default)]
+pub(crate) struct Watching {
+    /// Held for its drop, which stops the watch and joins it.
+    _watch: Option<tutti_rt::ThreadHandle<()>>,
+}
+
+impl Watching {
+    /// No watch outlives the wait.
+    pub(crate) fn nothing() -> Self {
+        Self { _watch: None }
+    }
+}
+
 /// Serves `transport`, the host's control connection, until the host
 /// disconnects or asks for shutdown. `render` is the thread serving its audio
 /// connection: the loop ends if that peer breaks the protocol.

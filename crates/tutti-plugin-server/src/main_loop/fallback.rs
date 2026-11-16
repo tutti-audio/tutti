@@ -52,8 +52,8 @@ pub(crate) fn wait_readable(_stream: &Stream, _timeout: std::time::Duration) -> 
 }
 
 /// Neither Unix nor Windows: nothing to key on, so wait in `accept` as before.
-pub(crate) fn wait_for_connection(_listener: &Listener) -> BridgeResult<()> {
-    Ok(())
+pub(crate) fn wait_for_connection(_listener: &Listener) -> BridgeResult<super::Watching> {
+    Ok(super::Watching::nothing())
 }
 
 /// Nothing is recorded.

@@ -78,6 +78,9 @@ tutti-clap-host = { version = "0.0.1", path = "../tutti-clap-host", optional = t
 tutti-au-host = { version = "0.0.1", path = "../tutti-au-host", optional = true }
 tutti-vst2-host = { version = "0.0.1", path = "../tutti-vst2-host", optional = true }
 
+# `spawn_named`: the catalog's background save and the probe's tests' threads.
+tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
+
 # The probe's private result directory (pure Rust; removed on drop, panic included).
 tempfile = "3"
 
@@ -86,7 +89,6 @@ tutti-buffers = { path = "../tutti-buffers" }
 tutti-midi-protocol = { path = "../tutti-midi-protocol" }
 # A size for `set_editor_size`.
 dpi.workspace = true
-tutti-rt = { path = "../tutti-rt" }
 tutti-ump = { path = "../tutti-ump", default-features = false }
 # The tests' mock listeners.
 parking_lot = "0.13"
@@ -95,7 +97,7 @@ interprocess = { version = "2" }
 postcard = { version = "1.1.3", default-features = false, features = ["use-std"] }
 # The catalog tests' scan hand-off.
 crossbeam-channel = "0.5"
-# The client's test-only knobs (`set_rate_timeout`, `settled_replies`).
+# The client's test-only knobs (`settled_replies`).
 tutti-plugin-ipc = { path = "../tutti-plugin-ipc", features = ["testing"] }
 tutti-engine = { path = "../tutti-engine" }
 # `contract::{drive_input, Direct}`: the in-process VST2 node driven by hand, as

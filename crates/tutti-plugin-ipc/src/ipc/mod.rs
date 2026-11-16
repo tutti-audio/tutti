@@ -93,7 +93,7 @@ impl IpcOrigin {
         let config = BridgeConfig {
             // Its own rendezvous: two bridges on one socket path is the
             // collision `unique_socket_path` exists to prevent.
-            socket_path: unique_socket_path(),
+            socket_path: unique_socket_path()?,
             ..self.config.clone()
         };
         Ipc::launch(
@@ -139,7 +139,7 @@ pub struct IpcParts {
     /// How many parameters the plugin lists: what the bridge's parameter
     /// buffers are sized by.
     pub parameters: usize,
-    /// The per-chunk wait of an offline fork (`BridgeConfig::timeout_ms`).
+    /// The per-chunk wait of an offline fork (`Timeouts::call`).
     pub timeout: Duration,
     /// Where it came from, or `None` for one that cannot be reopened.
     pub origin: Option<IpcOrigin>,
@@ -505,9 +505,10 @@ impl Ipc {
     ) -> BridgeResult<Launched> {
         let server = launch(&config, &path, format, &load, rate, state, state_use)?;
         let restored = server.state_restore.clone();
-        // Guarded before the first fallible step below: an `Err` from
-        // `PluginBridge::new` would otherwise drop a bare child process.
-        let mut guard = ProcessGuard::launched(server.process, config.clone());
+        // Guarded since the spawn: an `Err` from `PluginBridge::new` drops the
+        // guard, which kills and reaps the child. The bridge shares the guard's
+        // watch, so the stream's end and the process's end set one latch.
+        let mut guard = server.server;
         let (bridge, thread) = PluginBridge::new(
             config.socket_path.clone(),
             Arc::clone(server.slab.slab()),
@@ -515,13 +516,15 @@ impl Ipc {
             format,
             load_editor.clone(),
             rate,
+            Arc::clone(guard.watch()),
+            config.timeouts,
         )?;
         guard.attach(thread);
         // The parameter list, once, while loading blocks anyway: the bridge's
         // buffers are sized by it at activation, which may not make the trip.
         let parameters = bridge.parameters().map_or(0, |list| list.len());
         let ceiling = config.max_buffer_size.min(tutti_plugin_types::MAX_CHUNK);
-        let timeout = Duration::from_millis(config.timeout_ms);
+        let timeout = config.timeouts.call;
         let ipc = Self::new(IpcParts {
             bridge,
             guard: Arc::new(guard),
@@ -583,7 +586,7 @@ impl Ipc {
     pub fn watch(&mut self, offline: bool) -> Arc<OfflineWait> {
         let wait = Arc::new(OfflineWait::new(
             self.link.timeout,
-            Arc::downgrade(&self.link.guard),
+            Arc::clone(self.link.bridge.watch()),
         ));
         *self
             .link

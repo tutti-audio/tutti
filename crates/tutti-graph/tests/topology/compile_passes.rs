@@ -17,7 +17,7 @@ use tutti_graph::{
     Edge, Feed, FeedbackFrom, InPort, InputDelay, Invalid, NodeSpec, OutPort, Source,
 };
 use tutti_graph::{NodeKey, Topology, delays, latency_plan};
-use tutti_types::{ChannelLayout, Latency, Samples, Tail};
+use tutti_types::{ChannelLayout, Latency, SampleRate, Samples, Tail};
 
 /// The `MaxBlock` every plan in this file is compiled for.
 const PREP: usize = 128;
@@ -337,7 +337,7 @@ fn pdc_delays_equal_latency_delays() {
     let mut nonzero = 0;
     for (name, t) in shapes() {
         let plan = compiled(&t);
-        let rec = delays(&t);
+        let rec = delays(&t, SampleRate::SR_48K);
         let comp = rec.compensation().clone();
 
         let mut want_in: Vec<(DelayKey, Samples)> = rec
@@ -863,7 +863,7 @@ fn a_global_input_merging_with_a_latent_path_is_delayed() {
     assert_eq!(plan.delay(key), Samples(48));
     // The pure pass agrees.
     assert_eq!(
-        delays(&t).inputs(),
+        delays(&t, SampleRate::SR_48K).inputs(),
         &[InputDelay {
             node: C,
             port: 1,
@@ -940,12 +940,12 @@ fn an_event_source_counts_toward_arrival_in_both_solves() {
         Samples(64),
         "the dry port waits for the events"
     );
-    let comp = latency_plan(&g);
+    let comp = latency_plan(&g, SampleRate::SR_48K);
     assert_eq!(comp.total(), Samples(64));
     assert_eq!(plan.total_latency().samples(), comp.total());
     assert_eq!(plan.compensation(), comp.channels());
     assert_eq!(
-        delays(&g).inputs(),
+        delays(&g, SampleRate::SR_48K).inputs(),
         &[InputDelay {
             node: C,
             port: 0,
@@ -955,7 +955,7 @@ fn an_event_source_counts_toward_arrival_in_both_solves() {
         "and the pass puts the delay on the same port"
     );
     // Over the topology alone the event path is invisible.
-    assert!(latency_plan(&t).is_empty());
+    assert!(latency_plan(&t, SampleRate::SR_48K).is_empty());
 }
 
 /// N3: a shape whose latency or tail disagrees with its spec is refused, as
