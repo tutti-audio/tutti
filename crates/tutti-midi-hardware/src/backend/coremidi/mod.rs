@@ -78,7 +78,9 @@ pub(crate) fn shared_client() -> std::result::Result<&'static Client, coremidi::
     if let Some(client) = *slot {
         return Ok(client);
     }
-    let client: &'static Client = Box::leak(Box::new(Client::new("tutti-midi")?));
+    let client: &'static Client = Box::leak(Box::new(tutti_coremidi_ffi::create_client(|| {
+        Client::new("tutti-midi")
+    })?));
     *slot = Some(client);
     Ok(client)
 }
