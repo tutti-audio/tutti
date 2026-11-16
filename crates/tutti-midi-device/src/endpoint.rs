@@ -12,6 +12,7 @@ use tutti_ump::{
     Midi1Port, Protocol, Stream, StreamConfig, UiHint, Ump, UmpVersion, text_packets,
 };
 
+use crate::entropy::{EntropyError, random_bytes};
 use crate::name::{BlockName, EndpointName, ProductInstanceId};
 
 /// How many Function Blocks an Endpoint holds (M2-104 §7.1.7: numbers `0..=31`).
@@ -619,6 +620,22 @@ impl Endpoint {
         self
     }
 
+    /// The Product Instance Id it declares (§7.1.5: Devices should declare
+    /// one): the one it has, else a new
+    /// [`ProductInstanceId::from_random`] one, which it keeps and answers
+    /// Endpoint Discovery with from then on.
+    ///
+    /// # Errors
+    ///
+    /// [`EntropyError`] when it has none and the operating system has no
+    /// random bytes to give.
+    pub fn ensure_instance_id(&mut self) -> Result<&ProductInstanceId, EntropyError> {
+        match &mut self.instance_id {
+            Some(id) => Ok(id),
+            none => Ok(none.insert(ProductInstanceId::from_random(random_bytes()?))),
+        }
+    }
+
     /// The Endpoint declaring whether its Function Blocks never change
     /// (§7.1.2).
     #[must_use]
@@ -727,16 +744,19 @@ impl Endpoint {
     /// granted whole, so the owner of the port can switch to the Protocol and JR
     /// Timestamps now active.
     ///
-    /// The requester's UMP version (§7.1.1) changes no answer, and that is the
-    /// rule applied: Table 5 gives 1.1 as the first version, and every field
-    /// this reads (the five filter bits) is defined in it, so a higher version
-    /// is answered with the fields of 1.1 (its appended fields and reserved
-    /// bits are not read), and the spec defines no lower one to answer in.
+    /// The requester's UMP version is compared with [`UMP_VERSION`]
+    /// (§7.1.1). The same version, or a higher one, is answered with the
+    /// fields of 1.1: the five filter bits, with its appended fields and
+    /// reserved bits not read. A lower one is read as that version defines
+    /// the message, and Table 5 gives 1.0 no Stream messages (and no version
+    /// below it), so it defines no filter bit and gets no answer
+    /// ([`Reply::Ignored`]).
     pub fn reply(&mut self, message: Message, out: &mut impl Extend<Ump>) -> Reply {
         let Message::Stream(stream) = message else {
             return Reply::Ignored;
         };
         match stream {
+            Stream::EndpointDiscovery { version, .. } if version < UMP_VERSION => Reply::Ignored,
             Stream::EndpointDiscovery { filter, .. } => {
                 self.answer_discovery(filter, out);
                 Reply::Answered

@@ -9,6 +9,7 @@ use super::super::{Unread, UnreadReason};
 use super::*;
 use crate::PeStatus;
 use tutti_ump::ManufacturerId;
+use tutti_ump::SoftwareRevision;
 
 fn identity() -> DeviceIdentity {
     DeviceIdentity {
@@ -16,7 +17,7 @@ fn identity() -> DeviceIdentity {
             .unwrap(),
         family: [U7::of(1), U7::of(2)],
         model: [U7::of(3), U7::of(4)],
-        revision: [U7::of(5), U7::of(6), U7::of(7), U7::of(8)],
+        revision: SoftwareRevision::from_bytes([U7::of(5), U7::of(6), U7::of(7), U7::of(8)]),
     }
 }
 

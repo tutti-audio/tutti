@@ -2,6 +2,7 @@
 //! no lifetime.
 
 use core::num::NonZeroU8;
+use core::str::FromStr;
 
 use crate::field::{
     ChordType, DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan, NoteNumber,
@@ -1341,7 +1342,94 @@ pub struct DeviceIdentity {
     /// The model id, LSB first.
     pub model: [U7; 2],
     /// The software revision.
-    pub revision: [U7; 4],
+    pub revision: SoftwareRevision,
+}
+
+/// A Device's Software Revision Level (§7.1.3): four bytes of 7 bits, "typically
+/// the version of software or firmware but may also be the version of
+/// hardware". The format is the Device's own; a product's version is
+/// `major.minor.patch` in the first three bytes and a build number in the
+/// fourth (`str::parse` reads one from the text `CARGO_PKG_VERSION`
+/// holds).
+///
+/// ```
+/// use tutti_ump::SoftwareRevision;
+///
+/// let revision = "1.2.3".parse::<SoftwareRevision>().unwrap();
+/// assert_eq!(revision.get().map(|byte| byte.get()), [1, 2, 3, 0]);
+/// assert!("1.128.0".parse::<SoftwareRevision>().is_err());
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "[U7; 4]", into = "[U7; 4]"))]
+pub struct SoftwareRevision([U7; 4]);
+
+impl From<[U7; 4]> for SoftwareRevision {
+    fn from(bytes: [U7; 4]) -> Self {
+        Self::from_bytes(bytes)
+    }
+}
+
+impl From<SoftwareRevision> for [U7; 4] {
+    fn from(revision: SoftwareRevision) -> Self {
+        revision.get()
+    }
+}
+
+/// Why [`SoftwareRevision::parse`] refuses a text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("not a software revision: `major.minor[.patch[.build]]`, each part 0 to 127")]
+pub struct NotASoftwareRevision;
+
+impl SoftwareRevision {
+    /// The revision `major.minor.patch` with build number `build`.
+    #[must_use]
+    pub const fn new(major: U7, minor: U7, patch: U7, build: U7) -> Self {
+        Self([major, minor, patch, build])
+    }
+
+    /// The four bytes as the wire carries them, a revision a peer declares in
+    /// its own format.
+    #[must_use]
+    pub const fn from_bytes(bytes: [U7; 4]) -> Self {
+        Self(bytes)
+    }
+
+    /// The four bytes.
+    #[must_use]
+    pub const fn get(self) -> [U7; 4] {
+        self.0
+    }
+}
+
+impl FromStr for SoftwareRevision {
+    type Err = NotASoftwareRevision;
+
+    /// A product's version text: `major.minor`, `.patch` and `.build` after it
+    /// if present (a part left out is 0), each 0 to 127. A pre-release or build
+    /// suffix (`-` or `+` and what follows) is not part of the revision.
+    fn from_str(version: &str) -> Result<Self, NotASoftwareRevision> {
+        let core = version.split(['-', '+']).next().unwrap_or("");
+        let mut bytes = [U7::masked(0); 4];
+        let mut parts = core.split('.');
+        for (i, byte) in bytes.iter_mut().enumerate() {
+            match parts.next() {
+                Some(part) if !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()) => {
+                    *byte = part
+                        .parse()
+                        .ok()
+                        .and_then(U7::new)
+                        .ok_or(NotASoftwareRevision)?;
+                }
+                None if i >= 2 => {}
+                _ => return Err(NotASoftwareRevision),
+            }
+        }
+        match parts.next() {
+            None => Ok(Self(bytes)),
+            Some(_) => Err(NotASoftwareRevision),
+        }
+    }
 }
 
 /// The MIDI Protocol of a stream (§7.1.6.2).

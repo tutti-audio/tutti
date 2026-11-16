@@ -213,6 +213,25 @@ impl ProductInstanceId {
         Name::parse(text).map(Self)
     }
 
+    /// An Id for a Device that has no serial number to give (§7.1.5 "should
+    /// declare a Product Instance Id"): the 128 `random` bits (from
+    /// [`random_bytes`](crate::random_bytes)) as 32 lowercase hex digits, so it
+    /// is unique per Manufacturer, Family and Model for every practical purpose.
+    ///
+    /// The Id re-identifies a Device after power cycling only if the Device
+    /// keeps it: the owner stores the Id (it is serde with the `serde`
+    /// feature) and declares the stored one next time, making one only when
+    /// there is none stored.
+    #[must_use]
+    pub fn from_random(random: [u8; 16]) -> Self {
+        Self::hex(u128::from_be_bytes(random))
+    }
+
+    fn hex(bits: u128) -> Self {
+        Self::new(&format!("{bits:032x}"))
+            .expect("32 hex digits are printable ASCII and at most 42 bytes")
+    }
+
     pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Self> {
         Self::parse(std::str::from_utf8(bytes).ok()?).ok()
     }

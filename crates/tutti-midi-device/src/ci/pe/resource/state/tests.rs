@@ -4,7 +4,7 @@ use std::num::NonZeroU32;
 
 use std::sync::{Arc, Mutex};
 
-use tutti_ump::{DeviceIdentity, ManufacturerId, U7};
+use tutti_ump::{DeviceIdentity, ManufacturerId, SoftwareRevision, U7};
 
 use super::super::super::body::BodyLimit;
 use super::super::super::capabilities::PeCiMessage;
@@ -39,13 +39,13 @@ fn device() -> DeviceIdentity {
             .unwrap(),
         family: [U7::of(0), U7::of(0)],
         model: [U7::of(48), U7::of(0)],
-        revision: [U7::of(0), U7::of(0), U7::of(1), U7::of(0)],
+        revision: SoftwareRevision::from_bytes([U7::of(0), U7::of(0), U7::of(1), U7::of(0)]),
     }
 }
 
 fn other_version() -> DeviceIdentity {
     DeviceIdentity {
-        revision: [U7::of(0), U7::of(0), U7::of(2), U7::of(0)],
+        revision: SoftwareRevision::from_bytes([U7::of(0), U7::of(0), U7::of(2), U7::of(0)]),
         ..device()
     }
 }

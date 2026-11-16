@@ -1,12 +1,12 @@
 use super::*;
-use tutti_ump::{ManufacturerId, U7};
+use tutti_ump::{ManufacturerId, SoftwareRevision, U7};
 
 fn identity() -> DeviceIdentity {
     DeviceIdentity {
         manufacturer: ManufacturerId::new(0x41).unwrap(),
         family: [U7::of(1), U7::of(2)],
         model: [U7::of(3), U7::of(4)],
-        revision: [U7::of(5), U7::of(6), U7::of(7), U7::of(8)],
+        revision: SoftwareRevision::from_bytes([U7::of(5), U7::of(6), U7::of(7), U7::of(8)]),
     }
 }
 

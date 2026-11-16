@@ -149,7 +149,7 @@ impl DiscoveryData {
                 .iter()
                 .chain(&id.family)
                 .chain(&id.model)
-                .chain(&id.revision)
+                .chain(&id.revision.get())
                 .map(|b| b.get()),
         );
         out.extend(self.categories.bits().to_le_bytes());

@@ -43,7 +43,7 @@ use winnow::combinator::{alt, cut_err, eof, seq};
 use winnow::error::ContextError;
 use winnow::token::{any, literal, take};
 
-use tutti_ump::{DeviceIdentity, FunctionBlockId, ManufacturerId, U7, U14, U28};
+use tutti_ump::{DeviceIdentity, FunctionBlockId, ManufacturerId, SoftwareRevision, U7, U14, U28};
 
 use super::{
     CI_SUB_ID_1, CI_UNIVERSAL_SYSEX, CiCategories, CiDeviceId, DataControl, Destination,
@@ -120,7 +120,7 @@ fn identity(input: &mut &[u8]) -> Res<DeviceIdentity> {
         manufacturer: manufacturer,
         family: (u7, u7).map(|(a, b)| [a, b]),
         model: (u7, u7).map(|(a, b)| [a, b]),
-        revision: (u7, u7, u7, u7).map(|(a, b, c, d)| [a, b, c, d]),
+        revision: (u7, u7, u7, u7).map(|(a, b, c, d)| SoftwareRevision::from_bytes([a, b, c, d])),
     })
     .parse_next(input)
 }

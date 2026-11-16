@@ -2,6 +2,7 @@ use super::super::testing::{DST, decoded, header};
 use super::super::*;
 use super::*;
 use tutti_ump::ManufacturerId;
+use tutti_ump::SoftwareRevision;
 
 fn is_malformed(body: &[u8], is_reply: bool) -> bool {
     DiscoveryData::decode_body(is_reply, body).is_none()
@@ -13,7 +14,7 @@ fn sample_discovery() -> DiscoveryData {
             manufacturer: ManufacturerId::of(0xA109),
             family: [0x34, 0x24].map(U7::of),
             model: [0x55, 0x00].map(U7::of),
-            revision: [1, 2, 3, 4].map(U7::of),
+            revision: SoftwareRevision::from_bytes([1, 2, 3, 4].map(U7::of)),
         },
         categories: CiCategories::PROFILE_CONFIGURATION | CiCategories::PROPERTY_EXCHANGE,
         max_sysex_size: MaxSysexSize::of(512),

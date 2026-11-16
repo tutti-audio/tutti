@@ -9,7 +9,7 @@ use tutti_types::Seconds;
 use tutti_ump::Voice1;
 use tutti_ump::{
     Address, DeviceIdentity, ManufacturerId, Message, MidiChannel, MidiGroup, NoteNumber,
-    Sysex7Packets, SysexMessage, U7, Ump,
+    SoftwareRevision, Sysex7Packets, SysexMessage, U7, Ump,
 };
 
 fn parse(bytes: &[u8]) -> Read {
@@ -51,7 +51,7 @@ fn an_identity_reply_has_a_one_or_three_byte_manufacturer() {
             manufacturer: ManufacturerId::of(0x41),
             family: u7s([1, 2]),
             model: u7s([3, 4]),
-            revision: u7s([5, 6, 7, 8]),
+            revision: SoftwareRevision::from_bytes(u7s([5, 6, 7, 8])),
         })
     );
     let three = heard(&[
@@ -62,7 +62,7 @@ fn an_identity_reply_has_a_one_or_three_byte_manufacturer() {
         panic!()
     };
     assert_eq!(id.manufacturer, ManufacturerId::of(0xA109));
-    assert_eq!(id.revision, u7s([5, 6, 7, 8]));
+    assert_eq!(id.revision.get(), u7s([5, 6, 7, 8]));
 }
 
 /// M1 p.52: `09 01` is General MIDI On and `09 02` Off.

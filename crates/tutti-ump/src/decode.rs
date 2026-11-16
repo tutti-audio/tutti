@@ -25,8 +25,9 @@ use crate::message::{
     BlockSelect, ChordBass, ChordName, ChordPitch, Data128, DeviceIdentity, Direction,
     DiscoveryFilter, EndpointInfoNotification, Flex, FlexAddress, FlexTextKind, FlexTimeSignature,
     Form, FunctionBlockInfo, FunctionBlocks, KeySignature, Letter, Message, Metronome, Midi1Port,
-    MixedDataHeader, PerNoteManagement, Protocol, Stream, StreamConfig, Sysex7Packet, Sysex8Packet,
-    SysexStatus, System, UiHint, UmpVersion, Unknown, Utility, Voice1, Voice2,
+    MixedDataHeader, PerNoteManagement, Protocol, SoftwareRevision, Stream, StreamConfig,
+    Sysex7Packet, Sysex8Packet, SysexStatus, System, UiHint, UmpVersion, Unknown, Utility, Voice1,
+    Voice2,
 };
 use crate::{
     ArticulationAttribute, BendValue, CCNumber, ControlValue, Field, ManufacturerId, MdsChunk,
@@ -566,7 +567,12 @@ fn stream(w: [u32; 4]) -> Option<Stream> {
             ])?,
             family: [u7(w[2], 3), u7(w[2], 2)],
             model: [u7(w[2], 1), u7(w[2], 0)],
-            revision: [u7(w[3], 3), u7(w[3], 2), u7(w[3], 1), u7(w[3], 0)],
+            revision: SoftwareRevision::from_bytes([
+                u7(w[3], 3),
+                u7(w[3], 2),
+                u7(w[3], 1),
+                u7(w[3], 0),
+            ]),
         })),
         0x03 => Some(Stream::EndpointName(form(w0, 26), text14(w))),
         0x04 => Some(Stream::ProductInstanceId(form(w0, 26), text14(w))),

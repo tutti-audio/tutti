@@ -12,9 +12,9 @@ use tutti_ump::{
     FlexAddress, FlexTextKind, FlexTimeSignature, Form, FunctionBlockId, FunctionBlockInfo,
     GroupSpan, KeySignature, Letter, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Message,
     Metronome, Midi1Port, MidiChannel, MidiGroup, MixedDataHeader, NoteNumber, NoteVelocity,
-    PerNoteManagement, Protocol, RegisteredPerNoteController, SharpsFlats, Stream, StreamConfig,
-    Sysex7Packet, Sysex8Packet, SysexStatus, System, U4, U7, U14, UiHint, Ump, UmpVersion, Utility,
-    Voice1, Voice2,
+    PerNoteManagement, Protocol, RegisteredPerNoteController, SharpsFlats, SoftwareRevision,
+    Stream, StreamConfig, Sysex7Packet, Sysex8Packet, SysexStatus, System, U4, U7, U14, UiHint,
+    Ump, UmpVersion, Utility, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue, FunctionBlockCount, TicksPerQuarterNote};
 use tutti_ump::{ManufacturerId, Unknown};
@@ -738,6 +738,33 @@ fn stream_endpoint_info() {
     );
 }
 
+/// The Software Revision Level is "typically the version of software or
+/// firmware" (§7.1.3, Figure 14, word 4: four 7-bit bytes), so a product's
+/// version text `1.2.3` is the bytes 01 02 03 00, and a part that no 7-bit byte
+/// holds is no revision.
+/// Spec: m2-104/7.1.3#2
+#[test]
+fn a_revision_is_set_from_the_products_version() {
+    let identity = |version: &str| DeviceIdentity {
+        manufacturer: ManufacturerId::of(0xA06B),
+        family: [U7::of(1), U7::of(2)],
+        model: [U7::of(3), U7::of(4)],
+        revision: version.parse::<SoftwareRevision>().unwrap(),
+    };
+    for (version, word) in [
+        ("1.2.3", 0x0102_0300),
+        ("0.1.0-alpha.2", 0x0001_0000),
+        ("127.127", 0x7F7F_0000),
+        ("1.2.3.4", 0x0102_0304),
+    ] {
+        let ump = Ump::from(Message::Stream(Stream::DeviceIdentity(identity(version))));
+        assert_eq!(ump.0[3], word, "{version}");
+    }
+    for refused in ["", "1", "1.128", "a.b", "1.2.3.4.5", "1..2", "-1.0"] {
+        assert!(refused.parse::<SoftwareRevision>().is_err(), "{refused:?}");
+    }
+}
+
 /// Spec: m2-104/msg/f/2, m2-104/msg/f/3, m2-104/msg/f/4
 #[test]
 fn stream_identity_and_names() {
@@ -750,7 +777,7 @@ fn stream_identity_and_names() {
             manufacturer: ManufacturerId::of(0xA06B),
             family: [U7::of(1), U7::of(2)],
             model: [U7::of(3), U7::of(4)],
-            revision: b([5, 6, 7, 8]),
+            revision: SoftwareRevision::from_bytes(b([5, 6, 7, 8])),
         })),
     );
     // Endpoint Name: two bytes in word 1 (15-8, 7-0), then twelve.

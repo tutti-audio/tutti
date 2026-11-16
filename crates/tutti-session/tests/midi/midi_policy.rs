@@ -33,7 +33,7 @@ fn device(model: u8) -> DeviceIdentity {
         manufacturer: ManufacturerId::NON_COMMERCIAL,
         family: [U7::of(1); 2],
         model: [U7::of(model); 2],
-        revision: [U7::of(3); 4],
+        revision: tutti_ump::SoftwareRevision::from_bytes([U7::of(3); 4]),
     }
 }
 

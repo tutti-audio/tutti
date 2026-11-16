@@ -36,7 +36,7 @@ use winnow::combinator::{alt, eof, fail, preceded, seq};
 use winnow::error::ContextError;
 use winnow::token::{any, literal};
 
-use tutti_ump::{DeviceIdentity, ManufacturerId, NoteNumber, U7, U14};
+use tutti_ump::{DeviceIdentity, ManufacturerId, NoteNumber, SoftwareRevision, U7, U14};
 
 use super::{GeneralMidi, MtcFullMessage, Recipient, Universal, machine_control};
 use crate::tuning::{
@@ -84,7 +84,7 @@ fn identity(input: &mut &[u8]) -> Res<DeviceIdentity> {
         manufacturer: manufacturer,
         family: (u7, u7).map(|(a, b)| [a, b]),
         model: (u7, u7).map(|(a, b)| [a, b]),
-        revision: (u7, u7, u7, u7).map(|(a, b, c, d)| [a, b, c, d]),
+        revision: (u7, u7, u7, u7).map(|(a, b, c, d)| SoftwareRevision::from_bytes([a, b, c, d])),
     })
     .parse_next(input)
 }
