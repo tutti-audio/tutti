@@ -1158,9 +1158,10 @@ impl BounceState {
         Arc::strong_count(&self.token) > 1
     }
 
-    /// Watches for a leaked token at `now`: warns once when an bounce has
-    /// been in flight (as the collects saw it) for an hour. Its clock restarts when nothing is in flight, and when an bounce
-    /// starts ([`restart_stall_watch`](Self::restart_stall_watch)).
+    /// Watches for a leaked token at `now`: warns once when a bounce has been
+    /// in flight (as the collects saw it) for an hour. Its clock restarts when
+    /// nothing is in flight, and when a bounce starts
+    /// ([`restart_stall_watch`](Self::restart_stall_watch)).
     pub(crate) fn watch_stall(&mut self, now: Instant) {
         if !self.in_flight() {
             self.since = None;

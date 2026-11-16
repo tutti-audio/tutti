@@ -72,8 +72,8 @@
 //!   per parameter, landed in a later [`Session::update`]. Until then the
 //!   mirror is not ready, and a lane on the plugin waits for it.
 //! - **Snapshots.** A healthy plugin's state is captured every
-//!   `SessionBuilder::snapshot_interval` (8 s by default) of `now`,
-//!   as a job on the same spawner (a blocking round trip), landed in a later
+//!   `snapshot_interval` (8 s by default, set on the `SessionBuilder`) of
+//!   `now`, as a job on the same spawner (a blocking round trip), landed in a later
 //!   update. One is in flight per plugin at most: the landing holds the
 //!   plugin's snapshot token until it lands, whether the job ran, panicked or
 //!   was dropped.

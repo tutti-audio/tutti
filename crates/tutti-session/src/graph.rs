@@ -11,7 +11,6 @@
 //! | `set_param` | the node's [`ParamSet`], when it has one |
 //! | `replace`, `crossfade` | `Editor::replace_or_swap` with a [`Fade`]: a plain swap when there is nothing to fade from |
 //! | `node_latency`, `node_tail`, `node_inputs`, `node_outputs` | the editor's [`Shapes`](tutti_graph::Shapes) |
-//! | `latency_plan` | `tutti_graph::latency_plan` over the whole spec: audio edges plus event and param-modulation sources |
 //! | `set_feed`, `move_feeds` | the union of every feeder's sources, written as a sink's event edges beside the host's own |
 //! | `refresh_node_latency` | `Editor::set_latency` |
 //! | `insert_plugin`, `replace_plugin` | the bound `PluginClient` itself, a node with its own fork source |
