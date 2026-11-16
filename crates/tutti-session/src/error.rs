@@ -197,8 +197,9 @@ pub enum ConnectError {
 }
 
 /// Why a MIDI call of the session failed: one error for the area, each cause
-/// carried as its source. `tutti::midi::Error` in the umbrella; the session's own [`Error::Midi`] holds it, and every cause
-/// below converts into both with `?`.
+/// carried as its source. `tutti::midi::Error` in the umbrella; the session's
+/// own [`Error::Midi`] holds it, and every cause below converts into both with
+/// `?`.
 #[cfg(feature = "midi")]
 #[derive(Error, Debug)]
 #[non_exhaustive]
@@ -472,8 +473,7 @@ pub enum Error {
 
     /// A MIDI failure of any kind: the OS port layer, a file, a send, a
     /// route, or a target that takes no MIDI. One variant for the area;
-    /// [`MidiError`] says which, each with its
-    /// own error as the source.
+    /// [`MidiError`] says which, each with its own error as the source.
     #[cfg(feature = "midi")]
     #[error(transparent)]
     Midi(#[from] MidiError),

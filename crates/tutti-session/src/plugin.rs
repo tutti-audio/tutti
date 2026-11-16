@@ -159,7 +159,7 @@ use crate::{
     WorkerError,
 };
 
-/// How often a healthy plugin's state is captured, by default: 8 s (design 015 §4.4).
+/// How often a healthy plugin's state is captured, by default: 8 s.
 /// [`SessionBuilder::snapshot_interval`](crate::SessionBuilder::snapshot_interval)
 /// sets another.
 pub(crate) const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(8);

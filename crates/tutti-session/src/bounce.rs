@@ -38,8 +38,7 @@
 //! **A token that never drops** (a job `mem::forget`ed, or kept unrun
 //! forever) keeps the bounce in flight: the plugins stay Offline and every
 //! later bounce is refused. [`Phase::Collect`](crate::Phase::Collect) warns,
-//! once, when one has been in flight for an hour of its
-//! `now`.
+//! once, when one has been in flight for an hour of its `now`.
 //!
 //! **Leftovers drop on the main thread.** The rendered graph, what a failed
 //! fork build had made, an edit that never ran: each is wrapped so that
@@ -885,9 +884,9 @@ impl<M: Master> Bounced<M> {
 ///
 /// - [`frozen`](Self::frozen): no musical time (an effect tail, a synth
 ///   patch, a test tone). The renderer's transport is stopped at beat 0.
-/// - [`timeline`](Self::timeline): an `OfflineTimeline`
-///   (never the live transport), seeded at the
-///   tempo and beat to render from, at the render's rate.
+/// - [`timeline`](Self::timeline): an `OfflineTimeline` (never the live
+///   transport), seeded at the tempo and beat to render from, at the render's
+///   rate.
 #[derive(Clone)]
 pub struct ExportClock(Clock);
 
@@ -1160,8 +1159,7 @@ impl BounceState {
     }
 
     /// Watches for a leaked token at `now`: warns once when an bounce has
-    /// been in flight (as the collects saw it) for an hour.
-    /// Its clock restarts when nothing is in flight, and when an bounce
+    /// been in flight (as the collects saw it) for an hour. Its clock restarts when nothing is in flight, and when an bounce
     /// starts ([`restart_stall_watch`](Self::restart_stall_watch)).
     pub(crate) fn watch_stall(&mut self, now: Instant) {
         if !self.in_flight() {
@@ -1378,8 +1376,7 @@ const PREPARING_STEPS: u32 = 4;
 /// `mem::forget`ed, or kept unrun forever, keeps its token: the bounce
 /// stays in flight, hosted plugins stay Offline, and every later
 /// [`Session::bounce_start`] is refused with [`BounceError::InFlight`].
-/// Nothing else reports it; the session warns once after
-/// an hour.
+/// Nothing else reports it; the session warns once after an hour.
 #[must_use = "a bounce renders nothing until it is run and finished"]
 pub struct BounceJob<M: Master> {
     pending: ToMain<PendingExport>,
