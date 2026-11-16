@@ -1348,7 +1348,7 @@ impl Figures {
     /// The job of these counts, refused as the bounce reports it.
     fn provisional(&self, latency: Samples, tail: Samples) -> Result<Job, BounceError> {
         match Job::new(self.rate, self.length, latency, tail) {
-            Ok(job) => Ok(job.with_event_loss(self.on_event_loss)),
+            Ok(job) => Ok(job.event_loss(self.on_event_loss)),
             // Planes that cannot be held are the pipeline's error, as when
             // the allocation fails.
             Err(JobError::TooLong { total: Some(total) }) if self.held_in_memory.is_some() => {
@@ -1789,18 +1789,18 @@ impl<C: crate::Clock> Session<C> {
             Some(FileMaster { path, format }) => {
                 let file = FileTarget::new(path, format, channels);
                 let file = match file_topology {
-                    Some(topology) => file.with_topology(topology),
+                    Some(topology) => file.topology(topology),
                     None => file,
                 }
-                .with_resample(resample)
-                .with_dither(dither)
-                .with_normalize(normalize.map(NormalizeSpec::own));
+                .resample(resample)
+                .dither(dither)
+                .normalize(normalize.map(NormalizeSpec::own));
                 file.into()
             }
             None => {
                 let planes = BufferTarget::new(channels);
                 match file_topology {
-                    Some(topology) => planes.with_topology(topology),
+                    Some(topology) => planes.topology(topology),
                     None => planes,
                 }
                 .into()
@@ -1849,9 +1849,9 @@ impl<C: crate::Clock> Session<C> {
                         )),
                     };
                     FileTarget::new(path, format, layout)
-                        .with_resample(resample)
-                        .with_dither(dither)
-                        .with_normalize(gain)
+                        .resample(resample)
+                        .dither(dither)
+                        .normalize(gain)
                         .into()
                 }
                 StemTo::Buffers => BufferTarget::new(layout).into(),
