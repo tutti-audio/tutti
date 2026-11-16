@@ -480,3 +480,48 @@ fn a_job_lands_in_the_update_after_the_poll_that_read_the_answer() {
     wire.step(1);
     assert_eq!(wire.result(&job), Some(Ok(ProfileState::Enabled)));
 }
+
+/// An identical request that follows a different one is its own: enable, disable,
+/// enable sends all three in order, and each job lands the state of its own
+/// answer.
+#[test]
+fn an_enable_after_a_disable_is_sent_again_and_lands_enabled() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Answer);
+    let first = wire.profile().enable(four());
+    let off = wire.profile().disable();
+    let last = wire.profile().enable(four());
+    wire.run(60);
+    assert_eq!(
+        wire.peer.asked,
+        [
+            Asked::On(ProfileChannels::of(4)),
+            Asked::Off,
+            Asked::On(ProfileChannels::of(4))
+        ]
+    );
+    assert_eq!(wire.result(&first), Some(Ok(ProfileState::Enabled)));
+    assert_eq!(wire.result(&off), Some(Ok(ProfileState::Disabled)));
+    assert_eq!(wire.result(&last), Some(Ok(ProfileState::Enabled)));
+    assert_eq!(wire.state(), ProfileState::Enabled);
+}
+
+/// A report A, a report B and a report A again are three asks, in order.
+#[test]
+fn a_report_after_another_kind_is_asked_again() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Answer);
+    let a1 = wire.reporter().request(everything());
+    let b = wire.reporter().request(notes_only());
+    let a2 = wire.reporter().request(everything());
+    wire.run(60);
+    assert_eq!(
+        wire.peer.asked,
+        [
+            Asked::Report(scope(everything())),
+            Asked::Report(scope(notes_only())),
+            Asked::Report(scope(everything()))
+        ]
+    );
+    for job in [&a1, &b, &a2] {
+        assert_eq!(wire.result(job), Some(Ok(())));
+    }
+}

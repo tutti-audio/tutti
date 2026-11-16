@@ -314,7 +314,8 @@ struct Slot<R, J: crate::JobKind> {
 /// A peer answers one switch of a Profile at an address, and one report, at a
 /// time, so a request that differs from the one in flight for the same target
 /// waits behind it and is sent when that one ends. An identical request joins the
-/// one in flight, or the one waiting, and lands with its answer.
+/// last request for its target, in flight or waiting, and lands with its answer;
+/// one that follows a different request queues its own.
 #[derive(Default)]
 pub(crate) struct Pending {
     switches: Vec<Slot<ProfileSwitch, SwitchProfile>>,
@@ -330,7 +331,13 @@ impl Pending {
         switch: ProfileSwitch,
         ticket: Ticket<SwitchProfile>,
     ) {
-        if let Some(slot) = self.switches.iter_mut().find(|s| s.request == switch) {
+        let key = (switch.peer(), switch_at(&switch.request()));
+        let last = self
+            .switches
+            .iter_mut()
+            .rev()
+            .find(|s| (s.peer, switch_at(&s.request.request())) == key);
+        if let Some(slot) = last.filter(|s| s.request == switch) {
             slot.tickets.push(ticket);
             return;
         }
@@ -351,7 +358,8 @@ impl Pending {
         ask: ReportAsk,
         ticket: Ticket<RequestReport>,
     ) {
-        if let Some(slot) = self.reports.iter_mut().find(|s| s.request == ask) {
+        let last = self.reports.iter_mut().rev().find(|s| s.peer == ask.peer());
+        if let Some(slot) = last.filter(|s| s.request == ask) {
             slot.tickets.push(ticket);
             return;
         }
