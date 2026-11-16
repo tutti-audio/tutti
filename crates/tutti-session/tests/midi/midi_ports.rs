@@ -832,8 +832,8 @@ fn a_ports_id_names_it_in_the_events() {
 
 const SYNTH: u32 = 10;
 
-/// Long against the thread's 270 ms interval, so a loaded machine cannot miss.
-/// The wait of a check that nothing is sent: about four Active Sensing intervals.
+/// The wait of a check that nothing is sent: about four of the thread's 270 ms
+/// Active Sensing intervals.
 const SECOND: std::time::Duration = std::time::Duration::from_secs(1);
 
 fn is_active_sensing(u: &tutti_ump::Ump) -> bool {

@@ -48,7 +48,7 @@ fn wav(path: &std::path::Path) -> FileOut {
 /// length carries no meaning and no assertion depends on it: the deadline only
 /// makes a broken driver fail with a message instead of hanging until nextest's
 /// timeout.
-const WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+const WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// A finite source: hands out `frames` frames of a known ramp, then reports
 /// end-of-stream. `the thread` must break its own loop on that.
@@ -66,9 +66,7 @@ struct Ramp {
     drained: Arc<AtomicBool>,
     /// Total polls, including the drained ones. Once the driver has broken on
     /// [`PumpPass::Ended`] this stops advancing; a driver that does NOT break
-    /// spins on the dry source and it climbs without bound. That difference is
-    /// the only externally visible consequence of the break, so it is what the
-    /// test asserts.
+    /// spins on the dry source and it climbs without bound.
     polls: Arc<AtomicUsize>,
     /// Wall time burned per poll, to give a take a measurable *duration*.
     ///
@@ -81,6 +79,14 @@ struct Ramp {
     /// the difference between a complete take and a truncated one is not a
     /// coin flip.
     delay: std::time::Duration,
+    /// Set when the source is dropped, which the pump thread does as it ends.
+    released: Arc<AtomicBool>,
+}
+
+impl Drop for Ramp {
+    fn drop(&mut self) {
+        self.released.store(true, Ordering::Release);
+    }
 }
 
 impl FiniteSource for Ramp {}
@@ -196,6 +202,7 @@ fn a_sink_that_fails_to_close_reports_its_own_error() {
             drained: Arc::new(AtomicBool::new(false)),
             polls: Arc::new(AtomicUsize::new(0)),
             delay: std::time::Duration::ZERO,
+            released: Arc::default(),
         },
         DiskFull,
     )
@@ -222,8 +229,9 @@ fn sink(path: &std::path::Path) -> FileOut {
 /// The frame count is exact, and the values are checked too — a count alone
 /// would pass on duplicated or channel-rotated frames.
 ///
-/// The poll count is read once the source has drained and again after `finish`
-/// joined the thread: a driver that kept polling the dry source moved it.
+/// The pump thread ends by itself once the source has drained: it releases the
+/// source before anything stops it, and the poll count stays at the drained
+/// poll.
 #[test]
 fn a_finite_source_ends_its_own_take_and_the_file_is_readable() {
     let dir = tempfile::tempdir().unwrap();
@@ -232,6 +240,7 @@ fn a_finite_source_ends_its_own_take_and_the_file_is_readable() {
     const FRAMES: usize = 5000;
     let drained = Arc::new(AtomicBool::new(false));
     let polls = Arc::new(AtomicUsize::new(0));
+    let released = Arc::new(AtomicBool::new(false));
     let rec = Recorder::start(
         Ramp {
             frames: FRAMES,
@@ -239,6 +248,7 @@ fn a_finite_source_ends_its_own_take_and_the_file_is_readable() {
             drained: Arc::clone(&drained),
             polls: Arc::clone(&polls),
             delay: std::time::Duration::ZERO,
+            released: Arc::clone(&released),
         },
         sink(&path),
     )
@@ -248,11 +258,14 @@ fn a_finite_source_ends_its_own_take_and_the_file_is_readable() {
         drained.load(Ordering::Acquire)
     });
 
-    // The driver must now have LEFT its loop, not merely noticed the zero.
-    // Without the `Ended => break` arm the thread re-polls a dry source as
-    // fast as it can until `finish` stops it, so the count climbs past the
-    // drained poll; with it, the count is frozen at the drained poll.
     let at_drain = polls.load(Ordering::Acquire);
+    // Without the `Ended => break` arm the thread re-polls the dry source
+    // until something stops it, so it never releases the source on its own.
+    wait_until(
+        "the pump to end and release the drained source",
+        WAIT,
+        || released.load(Ordering::Acquire),
+    );
 
     rec.finish()
         .expect("a healthy finite take finalizes cleanly");
@@ -408,6 +421,7 @@ fn wait_returns_a_complete_finite_take_without_sequencing_on_the_pump() {
             drained: Arc::new(AtomicBool::new(false)),
             polls: Arc::new(AtomicUsize::new(0)),
             delay: std::time::Duration::from_millis(1),
+            released: Arc::default(),
         },
         sink(&path),
     )
@@ -456,6 +470,7 @@ fn is_finished_reports_a_finite_take_ending_itself_without_blocking() {
             drained: Arc::new(AtomicBool::new(false)),
             polls: Arc::new(AtomicUsize::new(0)),
             delay: std::time::Duration::ZERO,
+            released: Arc::default(),
         },
         sink(&path),
     )

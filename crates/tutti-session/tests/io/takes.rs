@@ -363,7 +363,8 @@ fn started_then_finished_once() {
         .expect("armed");
     let id = take.id();
     rig.run_until(finished);
-    // More updates see nothing more of it.
+    // `Finished` is the job's end: the pump has returned, and what it sent
+    // before landed first. More updates see nothing more of it.
     for _ in 0..8 {
         rig.step(BLOCK);
     }
@@ -435,6 +436,7 @@ fn a_take_ends_when_its_input_is_removed() {
     rig.step(BLOCK);
     rig.session.remove(rig.input.node()).unwrap();
     rig.run_until(finished);
+    // `Finished` is the job's end: more updates see nothing more of it.
     for _ in 0..8 {
         rig.step(BLOCK);
     }
