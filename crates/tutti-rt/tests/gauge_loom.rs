@@ -11,6 +11,8 @@
 //!   smaller total;
 //! - **closed is final**: a reader that sees the cell closed reads every value
 //!   the writer wrote (the last gauge value, the whole count);
+//! - **a multi-word counter's tallies each never go back**, and a closed one
+//!   reads whole (every tally of every add);
 //! - **a gauge is never torn**: a read returns the initial value or one store;
 //! - **a reopened writer starts from the last value** the dropped one wrote;
 //! - **of two concurrent reopens exactly one wins**, and none wins while a
@@ -19,7 +21,7 @@
 #![cfg(loom)]
 
 use loom::thread;
-use tutti_rt::{Reading, counter, gauge};
+use tutti_rt::{Count, Reading, counter, gauge};
 
 /// Two halves of one word: a torn read would pair halves of two stores.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -32,6 +34,40 @@ impl Reading for Pair {
     fn from_bits(bits: u64) -> Self {
         Self([(bits >> 32) as u32, bits as u32])
     }
+}
+
+/// Two tallies, each a word of its own.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Two([u64; 2]);
+
+impl Count for Two {
+    type Words = [u64; 2];
+    fn to_words(self) -> [u64; 2] {
+        self.0
+    }
+    fn from_words(words: [u64; 2]) -> Self {
+        Self(words)
+    }
+}
+
+#[test]
+fn each_tally_of_a_counter_never_goes_back_and_closed_is_whole() {
+    loom::model(|| {
+        let (mut writer, total) = counter::<Two>();
+        let observer = thread::spawn(move || {
+            let closed = total.is_closed();
+            let Two([a1, b1]) = total.get();
+            let Two([a2, b2]) = total.get();
+            assert!(a2 >= a1 && b2 >= b1, "a tally went back");
+            if closed {
+                assert_eq!((a1, b1), (3, 30), "a closed counter read short");
+            }
+        });
+        writer.add(Two([1, 10]));
+        writer.add(Two([2, 20]));
+        drop(writer);
+        observer.join().unwrap();
+    });
 }
 
 #[test]

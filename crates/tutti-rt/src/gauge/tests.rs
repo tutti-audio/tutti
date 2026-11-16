@@ -7,11 +7,29 @@ use super::{Count, Counter, CounterWriter, Gauge, GaugeWriter, Reading, counter,
 struct Dropped(u64);
 
 impl Count for Dropped {
-    fn count(self) -> u64 {
-        self.0
+    type Words = [u64; 1];
+    fn to_words(self) -> [u64; 1] {
+        [self.0]
     }
-    fn from_count(count: u64) -> Self {
+    fn from_words([count]: [u64; 1]) -> Self {
         Self(count)
+    }
+}
+
+/// An owner's two-tally count.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Two {
+    lost: u64,
+    late: u64,
+}
+
+impl Count for Two {
+    type Words = [u64; 2];
+    fn to_words(self) -> [u64; 2] {
+        [self.lost, self.late]
+    }
+    fn from_words([lost, late]: [u64; 2]) -> Self {
+        Self { lost, late }
     }
 }
 
@@ -192,4 +210,66 @@ fn a_gauge_holds_its_last_reading_across_writers() {
     assert_eq!(level.get(), Db(-9.0));
     second.set(Db(-2.0));
     assert_eq!(level.get(), Db(-2.0));
+}
+
+#[test]
+fn a_two_tally_counter_adds_each_tally_on_its_own() {
+    let (mut writer, total) = counter::<Two>();
+    writer.add(Two { lost: 1, late: 10 });
+    writer.add(Two { lost: 2, late: 0 });
+    assert_eq!(total.get(), Two { lost: 3, late: 10 });
+}
+
+#[test]
+fn a_tally_saturates_without_carrying_into_the_next() {
+    let (mut writer, total) = counter::<Two>();
+    writer.add(Two {
+        lost: u64::MAX - 1,
+        late: 4,
+    });
+    writer.add(Two { lost: 5, late: 1 });
+    assert_eq!(
+        total.get(),
+        Two {
+            lost: u64::MAX,
+            late: 5
+        },
+        "the full tally stops at the top and the other goes on"
+    );
+}
+
+#[test]
+fn a_two_tally_counter_stays_cumulative_across_writers() {
+    let (mut first, total) = counter::<Two>();
+    first.add(Two { lost: 2, late: 3 });
+    drop(first);
+    assert!(total.is_closed());
+    let mut second = total.reopen().unwrap();
+    second.add(Two { lost: 1, late: 1 });
+    assert_eq!(total.get(), Two { lost: 3, late: 4 });
+}
+
+#[test]
+fn a_reader_of_a_two_tally_counter_never_sees_a_tally_go_back() {
+    let (mut writer, total) = counter::<Two>();
+    let reader = std::thread::spawn(move || {
+        let mut last = Two { lost: 0, late: 0 };
+        while !total.is_closed() {
+            let now = total.get();
+            assert!(now.lost >= last.lost && now.late >= last.late);
+            last = now;
+        }
+        total.get()
+    });
+    for _ in 0..10_000 {
+        writer.add(Two { lost: 1, late: 2 });
+    }
+    drop(writer);
+    assert_eq!(
+        reader.join().unwrap(),
+        Two {
+            lost: 10_000,
+            late: 20_000
+        }
+    );
 }
