@@ -872,18 +872,20 @@ impl Graph {
     /// and declares its latency in its `Shape`. Capture its controls first:
     /// the plugin is out of reach once inserted.
     ///
-    /// The node's rebinder is dropped: a plugin inserted this way is not
-    /// re-inserted when it changes its ports, and a served one is not
-    /// restarted into a new slab unless its owner ticks it (its handle's
-    /// `editor_idle` for an in-process plugin; for a served one only a pooled
-    /// plugin, which the session ticks, restarts). Pool the plugin
-    /// (`Session::add_pooled_plugin`) to have a port change applied.
+    /// The session ticks the plugin's rebinder at each update, as a pooled
+    /// plugin's: when the plugin changes its audio ports, a served one
+    /// restarts into a new slab and the node at this key is replaced by one
+    /// over the new ports.
     #[cfg(feature = "plugin")]
     pub fn insert_plugin(
         &mut self,
         client: Box<tutti_plugin::handles::PluginClient>,
     ) -> Key<crate::PluginNode> {
-        self.insert_plugin_with_rebinder(client).0
+        let (key, rebinder) = self.insert_plugin_with_rebinder(client);
+        if let Some(hosted) = self.plugins.get_mut(&key.erase()) {
+            hosted.set_rebinder(rebinder);
+        }
+        key
     }
 
     /// [`insert_plugin`](Self::insert_plugin), and the builder of the node
@@ -979,8 +981,12 @@ impl Graph {
         fade: Seconds,
         law: FadeLaw,
     ) -> Result<(), ReplaceRefused<Box<tutti_plugin::handles::PluginClient>>> {
-        self.replace_plugin_with_rebinder(node, client, fade, law)
-            .map(|_| ())
+        let node = node.into();
+        let rebinder = self.replace_plugin_with_rebinder(node, client, fade, law)?;
+        if let Some(hosted) = self.plugins.get_mut(&node) {
+            hosted.set_rebinder(rebinder);
+        }
+        Ok(())
     }
 
     /// [`replace_plugin`](Self::replace_plugin), and the builder of the node

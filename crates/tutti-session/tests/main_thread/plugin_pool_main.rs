@@ -888,13 +888,46 @@ fn port_change_file() -> std::path::PathBuf {
     ))
 }
 
+/// Updates and renders a block at a time until `done` (given the session and the
+/// last frame of the block) holds, failing after 30 s. Whether an update reported
+/// a refused port change.
+fn render_until(
+    s: &mut Session,
+    what: &str,
+    done: &mut dyn FnMut(&Session, [f32; 2]) -> bool,
+) -> bool {
+    use tutti_session::{PluginChange, PluginEvent};
+    let mut refused = false;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        refused |= s.update().iter().any(|event| {
+            matches!(
+                event,
+                SessionEvent::Plugin(PluginEvent {
+                    change: PluginChange::PortsRefused { .. },
+                    ..
+                })
+            )
+        });
+        let mut out = vec![0.0f32; 512 * 2];
+        s.render(
+            &mut tutti_buffers::InterleavedMut::new(&mut out, tutti_types::ChannelLayout::STEREO)
+                .unwrap(),
+        );
+        if done(s, [out[out.len() - 2], out[out.len() - 1]]) {
+            return refused;
+        }
+        assert!(Instant::now() < deadline, "{what} never happened");
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+
 /// **A served plugin that grows its ports gets a wider node, at the same key,
 /// and renders through it.** The stereo plugin announces a stereo and a mono
 /// bus while it runs: the server tells the host, the lifecycle restarts the
 /// plugin into a new slab, pipeline and node, the node declares three outputs,
 /// nothing is refused, and the tags of its first two outputs still play.
 fn a_served_plugin_that_grows_its_ports_gets_a_wider_node() {
-    use tutti_session::{PluginChange, PluginEvent};
     // The server inherits these: it renders each output channel's tag, and
     // changes its ports when the file appears.
     // SAFETY: the harness runs this on its one thread, before any server.
@@ -920,31 +953,7 @@ fn a_served_plugin_that_grows_its_ports_gets_a_wider_node() {
     let mut refused = false;
     let mut until =
         |s: &mut Session, what: &str, done: &mut dyn FnMut(&Session, [f32; 2]) -> bool| {
-            let deadline = Instant::now() + Duration::from_secs(30);
-            loop {
-                refused |= s.update().iter().any(|event| {
-                    matches!(
-                        event,
-                        SessionEvent::Plugin(PluginEvent {
-                            change: PluginChange::PortsRefused { .. },
-                            ..
-                        })
-                    )
-                });
-                let mut out = vec![0.0f32; 512 * 2];
-                s.render(
-                    &mut tutti_buffers::InterleavedMut::new(
-                        &mut out,
-                        tutti_types::ChannelLayout::STEREO,
-                    )
-                    .unwrap(),
-                );
-                if done(s, [out[out.len() - 2], out[out.len() - 1]]) {
-                    return;
-                }
-                assert!(Instant::now() < deadline, "{what} never happened");
-                thread::sleep(Duration::from_millis(2));
-            }
+            refused |= render_until(s, what, done);
         };
     until(&mut s, "the stereo tags", &mut |_, t| t == [1.0, 2.0]);
     assert_eq!(s.graph_ref().node_outputs(node).unwrap(), 2);
@@ -963,6 +972,50 @@ fn a_served_plugin_that_grows_its_ports_gets_a_wider_node() {
     });
     until(&mut s, "the tags of two mono buses", &mut |_, t| {
         t == [1.0, 1001.0]
+    });
+    assert!(!refused, "a change the slab can follow is not refused");
+    s.close(tutti_fixtures::main_thread());
+}
+
+/// **A served plugin inserted with `Graph::insert_plugin`, no pool entry
+/// behind it, that grows its ports gets a wider node at the same key and
+/// renders through it**: the session ticks the node's rebinder, so the
+/// plugin restarts into a new slab and the node follows. The tags of its first
+/// two outputs play before and after.
+fn an_inserted_served_plugin_that_grows_its_ports_gets_a_wider_node() {
+    // SAFETY: the harness runs this on its one thread, before any server.
+    unsafe {
+        std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
+        std::env::set_var("TUTTI_CLAP_PROBE_RENDER_MODE", "2");
+        std::env::set_var("TUTTI_CLAP_PROBE_PORT_CHANGE_FILE", port_change_file());
+    }
+    let mut s = session();
+    let client = tutti_plugin::handles::PluginClient::new(
+        tutti_plugin::BridgeConfig::at(
+            tutti_plugin::unique_socket_path().expect("the OS has a random source"),
+        ),
+        &tutti_fixtures::detached_work(),
+        &tutti_plugin::catalog::Loadable::uncatalogued(
+            tutti_plugin::catalog::PluginRef::file(clap_probe()).expect("a plugin file"),
+        ),
+        SampleRate::SR_48K,
+    )
+    .expect("the reference plugin loads");
+    let node = s.graph().insert_plugin(Box::new(client));
+    for (from, to) in [
+        (node.out(0), tutti_session::Root::output(0)),
+        (node.out(1), tutti_session::Root::output(1)),
+    ] {
+        s.graph().connect(from, to).unwrap().hard();
+    }
+    let mut refused = render_until(&mut s, "the stereo tags", &mut |_, t| t == [1.0, 2.0]);
+    assert_eq!(s.graph_ref().node_outputs(node).unwrap(), 2);
+    std::fs::write(port_change_file(), "1").expect("the change is asked");
+    refused |= render_until(&mut s, "the wider node", &mut |s, _| {
+        s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
+    });
+    refused |= render_until(&mut s, "the tags through the new node", &mut |_, t| {
+        t == [1.0, 2.0]
     });
     assert!(!refused, "a change the slab can follow is not refused");
     s.close(tutti_fixtures::main_thread());
@@ -987,4 +1040,5 @@ a_bypassed_plugin_node_is_re_inserted_and_takes_its_processor,
 a_port_change_during_a_sample_rate_change_ends_with_the_new_ports,
 a_node_removed_while_its_rebuild_settles_leaves_nothing_behind,
 a_served_plugin_that_grows_its_ports_gets_a_wider_node,
+an_inserted_served_plugin_that_grows_its_ports_gets_a_wider_node,
 ];
