@@ -181,7 +181,7 @@ pub use dynamics::{
     LookaheadError, MultibandBank, MultibandLanes, MultibandSettings, amplitude_to_db,
     compute_compressor_gain_reduction, compute_limiter_gain,
 };
-pub use fft::{Complex32, FftScratch, RealFft};
+pub use fft::{Complex32, Complex64, FftScratch, RealFft};
 pub use filter::{
     Biquad, CrossoverBank, CrossoverCoefficients, CrossoverControls, CrossoverError,
     CrossoverModel, DirectForm1, LadderBank, LadderCoefficients, LadderCoeffs, LadderControls,
@@ -212,7 +212,6 @@ pub use reverb::network::{
     LineModulation, MAX_CHANNELS, MAX_DENSE, MAX_LINES, MAX_STAGES, MAX_TAPS, Matrix, Network,
     NetworkCapacity, OutputMap, Stage, Tap, Taps, loop_gain, pre_delay_frames, rt60_from_gain,
 };
-pub use rustfft::num_complex::Complex64;
 pub use smoother::Smoother;
 pub use spatial::{
     HRTF_LATENCY, HRTF_STEP, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,

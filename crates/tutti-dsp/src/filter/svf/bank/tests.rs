@@ -1,6 +1,6 @@
 use std::f64::consts::PI;
 
-use rustfft::num_complex::Complex64;
+use crate::Complex64;
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_types::{ChannelLayout, Db, Hz, Q, SampleRate};
 
