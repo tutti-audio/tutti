@@ -360,7 +360,7 @@ impl ClickNode {
                 } else {
                     1.0 - (t - hold_end) / release_len
                 };
-                let sample = phase.to_radians().sin() * env * accent_volume.get();
+                let sample = phase.sin() * env * accent_volume.get();
                 phase = phase.advance(phase_inc);
                 sample
             })

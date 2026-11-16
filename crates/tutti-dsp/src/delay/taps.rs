@@ -13,7 +13,7 @@ pub(crate) fn trips(q: f64, floor: Db) -> f64 {
     if q <= 0.0 {
         return 0.0;
     }
-    let target = libm::log(10f64.powf(f64::from(floor.get()) / 20.0));
+    let target = libm::log(f64::from(floor.to_amplitude().get()));
     (target / libm::log(q)).ceil().max(0.0)
 }
 

@@ -208,7 +208,7 @@ use std::sync::Arc;
 use tutti_graph::{EventKind, SubBlocks};
 use tutti_midi_protocol::channel_voice;
 use tutti_sf2::{Preset, SoundFont};
-use tutti_types::{SampleRate, Tail};
+use tutti_types::{SampleRate, Seconds, Tail};
 use tutti_ump::{Attribute, MidiChannel, NoteNumber, NoteVelocity, U7, Ump, Voice2};
 
 use crate::player::{Heard, Plane, Planes, Player};
@@ -305,7 +305,7 @@ pub struct SoundFontUnit {
     player: Player,
     /// The longest the unit can keep sounding after its last key is up, in
     /// seconds, if that is bounded: see [`Self::shape_tail`].
-    ring_out: Option<f64>,
+    ring_out: Option<Seconds>,
     sample_rate: SampleRate,
     /// One block's output, a plane each (see `player::Plane`), sized in the
     /// node's `prepare` to the graph's largest block and never resized on the
@@ -370,9 +370,7 @@ impl SoundFontUnit {
     /// at the unit's rate, or unbounded if a release has no finite length.
     pub(crate) fn shape_tail(&self) -> Tail {
         match self.ring_out {
-            Some(seconds) => Tail::Finite(tutti_types::Samples(
-                (seconds * self.sample_rate.get()).ceil() as usize,
-            )),
+            Some(seconds) => Tail::Finite(seconds.to_samples_ceil(self.sample_rate)),
             None => Tail::Unbounded,
         }
     }
