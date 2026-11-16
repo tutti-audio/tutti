@@ -20,9 +20,13 @@
 //! - the type from a crate that re-exports it: the crate's text holds a `pub use`
 //!   line for the name and no definition at that path, and the type is where the
 //!   crate defines the name, or, when it defines none, a path of the name its
-//!   text names.
+//!   text names. Exactly one such path is covered, and printed as a decision;
+//!   several, or none, are listed as ambiguous and cover nothing. A glob
+//!   re-export appears in the text as one `pub use` line per item, at the path
+//!   `lib.rs` names it at.
 //!
-//! An all-capitals final segment (a `MAX_CH` of a crate path) is a constant, not a type.
+//! A final segment is a constant when a `pub const` or `pub static` line of the
+//! texts defines that path, whatever its case; an all-capitals type is a type.
 //! A whole-crate or glob export (`pub use tutti_x as x;`, `pub use tutti_x::m::*;`)
 //! is ignored: it names no item, so the recipe reads an umbrella that exports
 //! single items.
@@ -211,13 +215,13 @@ struct Ty {
     name: String,
 }
 
-/// Whether `name` is a value (a function, or a constant in capitals), not a type.
+/// The constants and statics the texts define, by path: a final segment is a
+/// constant only when its path is here, so an all-capitals type (`UMP`) is a type.
+type Consts = BTreeSet<Ty>;
+
+/// Whether `name` is a function: not capitalised, so not a type.
 fn is_value(name: &str) -> bool {
     !name.starts_with(|c: char| c.is_ascii_uppercase())
-        || (name.len() > 1
-            && name
-                .bytes()
-                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_'))
 }
 
 impl Ty {
@@ -275,14 +279,14 @@ fn named_at(s: &str, at: usize) -> Option<(Ty, usize)> {
     Some((Ty { krate, mods, name }, i))
 }
 
-/// Every type the `tutti_` paths in `s` name (not functions or constants).
-fn types(s: &str) -> impl Iterator<Item = Ty> + '_ {
+/// Every type the `tutti_` paths in `s` name (not functions or `consts`).
+fn types<'a>(s: &'a str, consts: &'a Consts) -> impl Iterator<Item = Ty> + 'a {
     let b = s.as_bytes();
     s.match_indices("tutti_")
         .filter(|(i, _)| *i == 0 || !is_word(b[i - 1]))
         .filter_map(|(i, _)| named_at(s, i))
         .map(|(t, _)| t)
-        .filter(|t| !t.is_value())
+        .filter(|t| !t.is_value() && !consts.contains(t))
 }
 
 /// What follows `pub ` on a line of the text, after any attributes
@@ -318,13 +322,21 @@ fn strip_qualifiers(mut s: &str) -> &str {
 /// A `pub` line of the text: the keyword before its path (`struct`, `fn`, none for
 /// a field) and the line from the path on.
 struct Item<'a> {
+    /// The line is a `const` or `static` item.
+    constant: bool,
     keyword: Option<&'a str>,
     from: &'a str,
 }
 
 impl<'a> Item<'a> {
     fn read(line: &'a str) -> Option<Item<'a>> {
-        let rest = strip_qualifiers(public(line)?);
+        let public = public(line)?;
+        let constant = ["const ", "static "].iter().any(|k| {
+            public
+                .strip_prefix(k)
+                .is_some_and(|r| r.starts_with("tutti_"))
+        });
+        let rest = strip_qualifiers(public);
         let at = rest.find("tutti_")?;
         let before = &rest[..at];
         if !(before.is_empty() || before.ends_with(' ')) {
@@ -335,6 +347,7 @@ impl<'a> Item<'a> {
             return None;
         }
         Some(Item {
+            constant,
             keyword: words.last().copied(),
             from: &rest[at..],
         })
@@ -356,10 +369,25 @@ impl<'a> Item<'a> {
         (!rest.starts_with("::")).then_some(t)
     }
 
+    /// The constant or static the line defines.
+    fn constant(&self) -> Option<Ty> {
+        let (t, rest) = self.subject()?;
+        (self.constant && rest.starts_with(':') && !rest.starts_with("::")).then_some(t)
+    }
+
     /// The path a `pub use` line re-exports at.
     fn re_exports(&self) -> Option<Ty> {
         (self.keyword == Some("use")).then(|| self.subject().map(|s| s.0))?
     }
+}
+
+fn consts(texts: &[(&str, &str)]) -> Consts {
+    texts
+        .iter()
+        .flat_map(|(_, t)| t.lines())
+        .filter_map(Item::read)
+        .filter_map(|i| i.constant())
+        .collect()
 }
 
 /// What `lib.rs` exports, as the item or module each `pub use` leaf names. A
@@ -388,12 +416,16 @@ struct Covers {
     items: BTreeSet<Ty>,
     /// The exported modules, as `(crate, path)`; a function is one too.
     modules: Vec<(String, Vec<String>)>,
-    /// The paths a crate that re-exports an exported name defines it at.
+    /// The paths a crate that re-exports an exported name has it at.
     foreign: BTreeSet<Ty>,
+    /// `re-exporter::Name -> covered path` for each foreign cover.
+    decisions: Vec<String>,
+    /// The re-exports of a name that more than one path could be, or none names.
+    ambiguous: Vec<String>,
 }
 
 impl Covers {
-    fn new(lib: &str, texts: &[(&str, &str)]) -> Covers {
+    fn new(lib: &str, texts: &[(&str, &str)], consts: &Consts) -> Covers {
         let mut defined = BTreeSet::new();
         let mut re_exported = BTreeSet::new();
         for (_, text) in texts {
@@ -402,12 +434,18 @@ impl Covers {
                 re_exported.extend(item.re_exports());
             }
         }
-        let (mut items, mut modules, mut foreign) = (BTreeSet::new(), Vec::new(), BTreeSet::new());
+        let mut c = Covers {
+            items: BTreeSet::new(),
+            modules: Vec::new(),
+            foreign: BTreeSet::new(),
+            decisions: Vec::new(),
+            ambiguous: Vec::new(),
+        };
         for e in exports(lib) {
             if e.is_value() {
                 let mut path = e.mods.clone();
                 path.push(e.name.clone());
-                modules.push((e.krate.clone(), path));
+                c.modules.push((e.krate.clone(), path));
             }
             let text = texts.iter().find(|(c, _)| *c == e.krate).map(|(_, t)| *t);
             if let Some(text) = text
@@ -415,24 +453,38 @@ impl Covers {
                 && !defined.contains(&e)
             {
                 // The crate's own definitions of the name, else (a type of another
-                // crate) the paths its text names it at.
-                let own: Vec<&Ty> = defined
+                // crate) the other paths of the name its text names. Exactly one
+                // is the type; more, or none, is reported and covers nothing.
+                let mut cands: BTreeSet<Ty> = defined
                     .iter()
                     .filter(|t| t.krate == e.krate && t.name == e.name)
+                    .cloned()
                     .collect();
-                if own.is_empty() {
-                    foreign.extend(types(text).filter(|t| t.name == e.name));
-                } else {
-                    foreign.extend(own.into_iter().cloned());
+                if cands.is_empty() {
+                    cands = types(text, consts)
+                        .filter(|t| t.name == e.name && *t != e)
+                        .collect();
+                }
+                let mut paths = cands.iter().map(Ty::show);
+                match (paths.next(), paths.next()) {
+                    (Some(one), None) => {
+                        c.decisions.push(format!("{} -> {one}", e.show()));
+                        c.foreign.extend(cands);
+                    }
+                    (Some(_), Some(_)) => {
+                        let all: Vec<String> = cands.iter().map(Ty::show).collect();
+                        c.ambiguous
+                            .push(format!("{}: ambiguous: {}", e.show(), all.join(", ")));
+                    }
+                    (None, _) => c.ambiguous.push(format!(
+                        "{}: unresolved: no signature of its crate names it",
+                        e.show()
+                    )),
                 }
             }
-            items.insert(e);
+            c.items.insert(e);
         }
-        Covers {
-            items,
-            modules,
-            foreign,
-        }
+        c
     }
 
     fn covers(&self, t: &Ty) -> bool {
@@ -473,12 +525,18 @@ pub(crate) struct Analysis {
     pub(crate) stale: Vec<String>,
     /// Crates named that have no text (not packages).
     pub(crate) skipped: Vec<String>,
+    /// `re-exporter::Name -> path` for each name covered by what its crate
+    /// re-exports, so a wrong cover is visible.
+    pub(crate) decisions: Vec<String>,
+    /// Re-exported names that more than one path could be, or that no signature
+    /// names: covered by nothing.
+    pub(crate) ambiguous: Vec<String>,
 }
 
 /// The signature types of every item in `texts`, by the item's path.
 type Edges = BTreeMap<Ty, Vec<Ty>>;
 
-fn edges(texts: &[(&str, &str)]) -> Edges {
+fn edges(texts: &[(&str, &str)], consts: &Consts) -> Edges {
     let mut out = Edges::new();
     for item in texts
         .iter()
@@ -488,7 +546,7 @@ fn edges(texts: &[(&str, &str)]) -> Edges {
         let Some((subject, rest)) = item.subject() else {
             continue;
         };
-        out.entry(subject).or_default().extend(types(rest));
+        out.entry(subject).or_default().extend(types(rest, consts));
     }
     out
 }
@@ -587,8 +645,9 @@ fn stale_rows(
 /// The types the exported items of `texts` name that the umbrella does not export,
 /// and the seeds ranked by how many each pulls in.
 fn analyze(texts: &[(&str, &str)], lib: &str) -> Analysis {
-    let covers = Covers::new(lib, texts);
-    let edges = edges(texts);
+    let consts = consts(texts);
+    let covers = Covers::new(lib, texts, &consts);
+    let edges = edges(texts, &consts);
     let loaded: BTreeSet<&str> = texts.iter().map(|(c, _)| *c).collect();
     let mut a = Analysis::default();
     let (mut missing, mut leaks) = (BTreeMap::new(), BTreeMap::new());
@@ -608,6 +667,8 @@ fn analyze(texts: &[(&str, &str)], lib: &str) -> Analysis {
                 .or_insert_with(BTreeSet::new)
                 .insert(user.clone());
         }
+        // `near` stops at internal types (their users are the leaks); `far` follows
+        // them, for the count and for the crates still to load.
         let far = reach(&edges, &covers, &me, refs, true);
         a.wanted.extend(
             far.iter()
@@ -631,7 +692,9 @@ fn analyze(texts: &[(&str, &str)], lib: &str) -> Analysis {
     a.leaks = list(leaks);
     a.wanted.sort();
     a.wanted.dedup();
-    let named: BTreeSet<Ty> = texts.iter().flat_map(|(_, t)| types(t)).collect();
+    let named: BTreeSet<Ty> = texts.iter().flat_map(|(_, t)| types(t, &consts)).collect();
+    a.decisions = covers.decisions;
+    a.ambiguous = covers.ambiguous;
     a.stale = stale_rows(&named, &loaded, INTERNAL, TESTING, OWNER_PRIVATE, EXCLUDED);
     a
 }
@@ -980,12 +1043,23 @@ pub use tutti_nodes::SvfType;
     }
 
     #[test]
-    fn a_constant_in_a_signature_is_not_a_type() {
+    fn a_constant_is_known_by_its_definition_and_an_all_caps_type_is_a_type() {
         let api = "pub struct tutti_graph::Node\n\
                    pub const tutti_graph::MAX_CH: usize\n\
+                   pub static tutti_graph::spec::Table: [u8; 4]\n\
+                   pub struct tutti_graph::UMP\n\
                    pub fn tutti_graph::Node::a(&self) -> [f32; tutti_graph::MAX_CH]\n\
-                   pub fn tutti_graph::Node::b(&self) -> [f32; tutti_graph::spec::LANES_2]\n";
-        assert_eq!(missing(api), none());
+                   pub fn tutti_graph::Node::b(&self) -> &tutti_graph::spec::Table\n\
+                   pub fn tutti_graph::Node::c(&self) -> tutti_graph::UMP\n\
+                   pub fn tutti_graph::Node::d(&self) -> tutti_graph::SF2\n";
+        // The path decides, not the case: `Table` is a static, `UMP` and `SF2` types.
+        assert_eq!(
+            missing(api),
+            [
+                "tutti_graph::SF2 <- tutti_graph::Node",
+                "tutti_graph::UMP <- tutti_graph::Node"
+            ]
+        );
     }
 
     #[test]
@@ -1149,5 +1223,89 @@ pub use tutti_nodes::SvfType;
             _ => Err("boom".to_owned()),
         };
         assert_eq!(collect(lib, &reach).unwrap_err(), "tutti_b: boom");
+    }
+
+    fn re_export(nodes: &str) -> Analysis {
+        analyze(
+            &[("tutti_nodes", nodes)],
+            "pub use tutti_nodes::{LfoNode, Amp};\n",
+        )
+    }
+
+    #[test]
+    fn a_re_export_with_one_candidate_is_covered_and_reported_as_a_decision() {
+        let a = re_export(
+            "pub use tutti_nodes::Amp\n\
+             pub fn tutti_nodes::LfoNode::f(&self, tutti_types::level::Amp, tutti_types::level::Other)\n",
+        );
+        assert_eq!(
+            a.missing,
+            ["tutti_types::level::Other <- tutti_nodes::LfoNode"]
+        );
+        assert_eq!(a.decisions, ["tutti_nodes::Amp -> tutti_types::level::Amp"]);
+        assert_eq!(a.ambiguous, none());
+    }
+
+    #[test]
+    fn a_name_defined_in_two_modules_is_ambiguous_and_covers_neither() {
+        let a = re_export(
+            "pub use tutti_nodes::Amp\n\
+             pub struct tutti_nodes::a::Amp\n\
+             pub struct tutti_nodes::b::Amp\n\
+             pub fn tutti_nodes::LfoNode::f(&self, tutti_nodes::a::Amp, tutti_nodes::b::Amp)\n",
+        );
+        assert_eq!(
+            a.ambiguous,
+            ["tutti_nodes::Amp: ambiguous: tutti_nodes::a::Amp, tutti_nodes::b::Amp"]
+        );
+        assert_eq!(a.decisions, none());
+        assert_eq!(
+            a.missing,
+            [
+                "tutti_nodes::a::Amp <- tutti_nodes::LfoNode",
+                "tutti_nodes::b::Amp <- tutti_nodes::LfoNode"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_leaf_named_from_two_crates_is_ambiguous() {
+        let a = re_export(
+            "pub use tutti_nodes::Amp\n\
+             pub fn tutti_nodes::LfoNode::f(&self, tutti_types::Amp, tutti_dsp::Amp)\n",
+        );
+        assert_eq!(
+            a.ambiguous,
+            ["tutti_nodes::Amp: ambiguous: tutti_dsp::Amp, tutti_types::Amp"]
+        );
+        assert_eq!(a.decisions, none());
+    }
+
+    #[test]
+    fn a_re_export_no_signature_names_is_unresolved() {
+        let a = re_export("pub use tutti_nodes::Amp\npub struct tutti_nodes::LfoNode\n");
+        assert_eq!(
+            a.ambiguous,
+            ["tutti_nodes::Amp: unresolved: no signature of its crate names it"]
+        );
+    }
+
+    #[test]
+    fn a_re_export_in_a_module_is_read_at_the_path_the_text_prints() {
+        // A glob re-export prints as one `pub use` line per item, at the path of
+        // the module the glob sits in; `lib.rs` names that path.
+        let lib = "pub use tutti_nodes::automation::{Curve, Law};\n";
+        let nodes = "pub use tutti_nodes::automation::Curve\n\
+                     pub use tutti_nodes::automation::Law\n\
+                     pub fn tutti_nodes::automation::Lane::f(&self, tutti_types::curve::Curve, tutti_types::curve::Law)\n";
+        let a = analyze(&[("tutti_nodes", nodes)], lib);
+        assert_eq!(
+            a.decisions,
+            [
+                "tutti_nodes::automation::Curve -> tutti_types::curve::Curve",
+                "tutti_nodes::automation::Law -> tutti_types::curve::Law"
+            ]
+        );
+        assert_eq!(a.ambiguous, none());
     }
 }

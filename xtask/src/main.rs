@@ -299,13 +299,30 @@ fn umbrella_api(ctx: &Ctx, dir: Option<&str>) -> Result<(), u8> {
         1
     })?;
     for krate in &analysis.skipped {
-        println!("skipped {krate}: not a package");
+        let why = if dir.is_some() {
+            "no public-api text"
+        } else {
+            "not a package"
+        };
+        println!("skipped {krate}: {why}");
     }
     println!(
         "seeds: unexported types pulled in, of them internal or behind an internal one, item:"
     );
     for s in &analysis.seeds {
         println!("  {:4}  {:4}  {}", s.pulled, s.internal_or_behind, s.item);
+    }
+    if !analysis.decisions.is_empty() {
+        println!("re-exports covered (re-exporter -> covered path):");
+        for d in &analysis.decisions {
+            println!("  {d}");
+        }
+    }
+    if !analysis.ambiguous.is_empty() {
+        println!("re-exports covering nothing (ambiguous or unresolved):");
+        for d in &analysis.ambiguous {
+            println!("  {d}");
+        }
     }
     if !analysis.leaks.is_empty() {
         println!("internal types the exported items name (findings for their owners):");
