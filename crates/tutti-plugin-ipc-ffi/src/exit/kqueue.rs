@@ -66,7 +66,7 @@ impl Imp {
         // the event list is a live buffer of one slot.
         let ready = unsafe { kevent_timespec(queue, &[], &mut taken[..], Some(&timeout)) };
         match ready {
-            Ok((events, _)) if events.is_empty() => false,
+            Ok(([], _)) => false,
             Ok(_) => {
                 self.seen.store(true, Ordering::Release);
                 true
