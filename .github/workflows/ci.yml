@@ -727,7 +727,6 @@ jobs:
       - run: cargo test --locked -p tutti-rt --release --test level_cell_loom
       - run: cargo test --locked -p tutti-rt --release --test drain_clock_loom -- --nocapture
       - run: cargo test --locked -p tutti-rt --release --test fault_latch_loom -- --nocapture
-      - run: cargo test --locked -p tutti-rt --release --test wake_flag_loom
       # `Gauge` and `Counter` (a counter never goes back, a closed cell is read
       # at its final value, a gauge is never torn), against the shipped code.
       - run: cargo test --locked -p tutti-rt --release --test gauge_loom

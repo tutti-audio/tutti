@@ -151,9 +151,6 @@
 //!   cleared what they read, so it frees only when none can still read it.
 //! - [`RequestWord`] — up to 32 kinds of request a callee raises from any
 //!   thread (one `fetch_or`) and a control thread takes whole.
-//! - [`WakeFlag`] — a flag any thread raises (one store) and the audio thread
-//!   takes (raised since the last take), so a parked node can be woken from
-//!   outside the block.
 //! - [`ring()`] — a bounded single-producer single-consumer queue of any `Send` value, with the full-ring policy chosen at
 //!   construction ([`Overflow`]: refuse and count, or refuse and leave the count to the caller)
 //!   and the losses counted by the ring ([`RingWriter::take_lost`], [`RingWriter::lost`]); its
@@ -213,7 +210,6 @@ mod split;
 mod task_graph;
 mod thread;
 mod vec;
-mod wake_flag;
 
 pub use cell::{AudioThreadCell, BorrowGuard, BorrowRef};
 pub use clock::monotonic_ns;
@@ -245,7 +241,6 @@ pub use split::{ClaimConflict, ClaimTable, Claimed, ClaimedRun, Held, RwView, Sp
 pub use task_graph::{Participant, TaskGraph};
 pub use thread::{Panicked, StopToken, ThreadHandle, spawn_named};
 pub use vec::RtVec;
-pub use wake_flag::WakeFlag;
 
 // The cell non-scalar state reaches the audio thread through: a control
 // thread publishes, the audio thread only borrows (`Loan`), so it never frees.
