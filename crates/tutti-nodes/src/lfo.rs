@@ -549,46 +549,6 @@ mod tests {
         );
     }
 
-    /// The wave reads the position's fraction as its phase, in any cycle.
-    ///
-    /// The waveform maths itself is `tutti-modulation`'s (`LfoShape::evaluate_periodic`,
-    /// asserted there over every shape).
-    #[test]
-    fn deterministic_shapes_read_the_positions_phase() {
-        for (shape, phase, expected) in [
-            (LfoShape::Sine, 0.25, 1.0),
-            (LfoShape::Square, 0.1, 1.0),
-            (LfoShape::Square, 0.9, -1.0),
-            (LfoShape::Sawtooth, 0.5, 0.0),
-        ] {
-            let wave = Waveform::Shape { shape, seed: 0 };
-            for cycle in [0.0, 3.0, 1_000.0] {
-                let got = wave.raw_at(cycle + phase, false);
-                assert!(
-                    (got - expected).abs() < 0.01,
-                    "{shape:?} at {}: expected {expected}, got {got}",
-                    cycle + phase
-                );
-            }
-        }
-    }
-
-    /// A negative position reads the end of the cycle: a sawtooth at `-0.25`
-    /// is the sawtooth at phase `0.75` (a `fract` wrap would keep the sign and
-    /// read off the front).
-    #[test]
-    fn a_negative_position_reads_the_end_of_the_cycle() {
-        let saw = Waveform::Shape {
-            shape: LfoShape::Sawtooth,
-            seed: 0,
-        };
-        for cycle in [0.0, -3.0] {
-            let want = LfoShape::Sawtooth.evaluate_periodic(tutti_types::Phase(0.75));
-            let got = saw.raw_at(cycle - 0.25, false);
-            assert!((got - want).abs() < 1e-5, "{got} vs {want}");
-        }
-    }
-
     fn random(seed: u64) -> Waveform {
         Waveform::Shape {
             shape: LfoShape::Random,

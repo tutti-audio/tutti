@@ -40,7 +40,7 @@
 //!   `PhaserChain`, the phaser's swept all-pass chain over buffers views (a checked `Stages`,
 //!   `SweepRange` and `Stagger`; one `Glide` per channel's coefficient and one for the
 //!   feedback).
-//! - **Waveshaping** — `ShapeKind`, six memoryless curves, and `WaveshaperBank`, the drive a glide or a per-frame lane.
+//! - **Waveshaping** — `ShapeKind`, six memoryless curves, and `WaveshaperBank`, which runs one over a block at a gliding or per-frame drive.
 //! - **Reverb** — the reverb model, a `Network` with analytic queries
 //!   (RT60, tail, stability, densities), `FreeverbBank`, Freeverb's combs and
 //!   all-passes over buffers views, and `FdnBank`, the feedback delay network.

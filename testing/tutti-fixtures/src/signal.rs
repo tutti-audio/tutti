@@ -1,7 +1,7 @@
 //! The signals a test feeds a node or checks one against, defined once: a sine,
 //! an impulse, the level readings [`peak`] and [`rms`], the bit patterns of a
-//! render ([`bits`]), the impulse responses [`decay_ir`] and [`room_ir`] and a float WAV on disk ([`write_wav_f32`],
-//! [`read_wav_f32`]).
+//! render ([`bits`]), the impulse responses [`decay_ir`] and [`room_ir`], and a float
+//! WAV on disk ([`write_wav_f32`], [`read_wav_f32`]).
 //!
 //! Noise is [`noise`](crate::noise) and a bit hash is [`Fnv`](crate::Fnv), both in
 //! this crate's root. Every figure here is plain

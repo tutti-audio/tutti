@@ -165,9 +165,9 @@ fn a_lane_is_read_per_frame_on_every_channel() {
     }
 }
 
-/// A lane frame that is not finite reads the aimed drive, a finite one its own.
+/// A lane frame that is not finite reads the drive in force, a finite one its own.
 #[test]
-fn a_non_finite_lane_frame_reads_the_aimed_drive() {
+fn a_non_finite_lane_frame_reads_the_drive_in_force() {
     let mut bank = landed(ShapeKind::HardClip, 2.0);
     let lane = [f32::NAN, 4.0, f32::INFINITY, f32::NEG_INFINITY];
     let out = run(&mut bank, Some(&lane), &[vec![0.25; 4]]);
@@ -218,4 +218,68 @@ fn settle_lands_on_the_target() {
     bank.settle();
     let out = run(&mut bank, None, &[vec![1.0]]);
     assert_eq!(out[0][0], 0.75);
+}
+
+/// A non-finite lane frame in the middle of a glide reads the glide's value at that frame:
+/// frame `i` of a hard clip of `0.2` is `0.2 (1 + 2 (i + 1) / n)`, and a finite frame in
+/// the lane (frame 5, drive 2) reads its own.
+#[test]
+fn a_non_finite_lane_frame_mid_glide_reads_the_glide() {
+    let n = GAIN_GLIDE.to_samples_ceil(RATE).get();
+    let mut bank = landed(ShapeKind::HardClip, 1.0);
+    bank.aim(&WaveshaperControls { drive: Drive(3.0) });
+    let mut lane = vec![f32::NAN; 20];
+    lane[5] = 2.0;
+    let out = run(&mut bank, Some(&lane), &[vec![0.2; 20]]).remove(0);
+    for (i, &y) in out.iter().enumerate() {
+        let drive = if i == 5 {
+            2.0
+        } else {
+            1.0 + 2.0 * (i + 1) as f64 / n as f64
+        };
+        assert!((f64::from(y) - 0.2 * drive).abs() < 1e-6, "frame {i}: {y}");
+    }
+}
+
+/// Drive below 0 shapes as 0 and a staircase's below 1 as 1, on the lane and on the glide.
+#[test]
+fn the_drive_floors_hold_on_the_lane_and_the_glide() {
+    // Lane: a hard clip at -2 is drive 0 (silence); a crush at 0.5 is one level per unit.
+    let mut clip = landed(ShapeKind::HardClip, 1.0);
+    let out = run(&mut clip, Some(&[-2.0; 4]), &[vec![0.25; 4]]);
+    assert_eq!(out[0], [0.0; 4]);
+    let mut crush = landed(ShapeKind::Crush, 4.0);
+    let out = run(&mut crush, Some(&[0.5, 0.0, -1.0, 0.5]), &[vec![0.6; 4]]);
+    assert_eq!(out[0], [1.0; 4]);
+    // Hardness 1 puts a quarter on the soft step's rational 12826 / 262144; hardness 4 would
+    // put it on 0.25.
+    let mut soft = landed(ShapeKind::SoftCrush, 4.0);
+    let out = run(&mut soft, Some(&[0.5, 0.0, -1.0, 0.5]), &[vec![0.25; 4]]);
+    for y in &out[0] {
+        assert!((f64::from(*y) - 12826.0 / 262144.0).abs() < 1e-6, "{y}");
+    }
+    // Glide: a drive aimed below the floor never reads below it, on the way or on arrival.
+    let mut clip = landed(ShapeKind::HardClip, 1.0);
+    clip.aim(&WaveshaperControls { drive: Drive(-2.0) });
+    let n = GAIN_GLIDE.to_samples_ceil(RATE).get();
+    let out = run(&mut clip, None, &[vec![0.25; n + 10]]).remove(0);
+    for (i, &y) in out.iter().enumerate() {
+        // The line 1 -> -2, floored at 0.
+        let drive = (1.0 - 3.0 * (i + 1) as f64 / n as f64).max(0.0);
+        assert!((f64::from(y) - 0.25 * drive).abs() < 1e-6, "frame {i}: {y}");
+    }
+    let mut crush = landed(ShapeKind::Crush, 4.0);
+    crush.aim(&WaveshaperControls { drive: Drive(-3.0) });
+    let out = run(&mut crush, None, &[vec![0.6; n + 10]]).remove(0);
+    // One level per unit once the line is under 1: round(0.6) = 1; above it the line is at
+    // hardness h and the output is round(0.6 h) / h.
+    for (i, &y) in out.iter().enumerate() {
+        let h = (4.0 - 7.0 * (i + 1) as f64 / n as f64).max(1.0);
+        let want = (0.6 * h).round() / h;
+        assert!(
+            (f64::from(y) - want).abs() < 1e-5,
+            "frame {i}: {y} vs {want}"
+        );
+    }
+    assert_eq!(out[n + 9], 1.0);
 }

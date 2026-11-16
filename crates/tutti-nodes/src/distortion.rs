@@ -23,13 +23,13 @@ use crate::kernel::{ControlLanes, Kernel, KernelNode};
 /// was.
 ///
 /// **It is read per frame** when the graph drives it: a lane on its port is the bank's own,
-/// and a frame of it that is not finite reads the cell's drive. A cell that moves is sampled
+/// and a frame of it that is not finite reads the drive in force: the cell's, gliding to its value. A cell that moves is sampled
 /// at the stream grid (16 frames from the last reset, [`Kernel::GRID`]) and glides over
 /// [`GAIN_GLIDE`](tutti_dsp::GAIN_GLIDE), 5 ms, so a write is no step at a block's edge and
 /// renders the same whatever the blocks.
 ///
-/// The node declares no tail: the curves are memoryless, so a silent input is a silent
-/// output.
+/// The node declares no tail once prepared (the shape of a kernel node is unknown until it has
+/// a rate): the curves are memoryless, so a silent input is a silent output.
 ///
 /// # In a graph
 ///
@@ -140,8 +140,10 @@ impl Kernel for DistortionKernel {
         self.landed = false;
     }
 
+    /// Silence, and the next design lands at once, as a fresh node's first does.
     fn reset(&mut self) {
         self.bank.settle();
+        self.landed = false;
     }
 
     fn retarget(&mut self, controls: &WaveshaperControls) {
@@ -160,6 +162,8 @@ impl Kernel for DistortionKernel {
     ) {
         self.bank
             .process(lanes.get(DistortionSet::DRIVE_LANE), input, output);
+        // A design after a render is a move, which glides.
+        self.landed = true;
     }
 
     fn tail(&self) -> Tail {
@@ -308,6 +312,21 @@ mod tests {
         let mut built = hard_clip(1, f32::NAN);
         let out = drive_block(&mut built, &[&x]);
         assert!(out[0].iter().all(|&y| y == 0.25), "built with NaN");
+    }
+
+    /// A cell written after a reset lands on the first frame, as a fresh node's first design
+    /// does: a hard clip of `0.2` reads `0.6` at drive 3 from frame 0, though the drive was
+    /// 1 before.
+    #[test]
+    fn a_cell_written_after_a_reset_lands_whole() {
+        let mut n = hard_clip(1, 1.0);
+        let x = vec![0.2f32; 64];
+        drive_block(&mut n, &[&x]);
+        Node::reset(&mut n);
+        assert!(n.param_set().set(UnitParam::Drive, 3.0));
+        let out = drive_block(&mut n, &[&x]);
+        assert_eq!(out[0][0], 0.2 * 3.0);
+        assert!(out[0].iter().all(|&y| y == 0.2 * 3.0));
     }
 
     /// A reset lands a drive in flight on its target: the render after it is the held curve
