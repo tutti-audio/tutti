@@ -356,7 +356,7 @@ fn an_instruments_tail_is_measured_from_its_note_off() {
 /// `NotChecked`**: a held note has no lower bound to report.
 #[test]
 fn an_instrument_that_does_not_settle_in_the_budget_is_not_checked() {
-    let forever = 70 * 48_000;
+    let forever = Seconds(70.0).to_samples_ceil(primary().rate).get();
     let m = measure_at(
         &mut Fake::new(0, forever),
         instrument(finite(1000)),
@@ -375,7 +375,7 @@ fn an_instrument_that_does_not_settle_in_the_budget_is_not_checked() {
 /// figure the plugin outlives.
 #[test]
 fn an_effect_that_outlasts_the_budget_raises_the_ceiling_to_unbounded() {
-    let forever = 70 * 48_000;
+    let forever = Seconds(70.0).to_samples_ceil(primary().rate).get();
     let m = measure_at(
         &mut Fake::new(0, forever),
         effect(finite(1000), 0),
@@ -385,18 +385,24 @@ fn an_effect_that_outlasts_the_budget_raises_the_ceiling_to_unbounded() {
     let TailVerdict::TailLonger { measured, .. } = m.verdict.tail else {
         panic!("{:?}", m.verdict.tail);
     };
-    assert!(measured > MAX_NODE_TAIL, "{measured:?}");
-    let ceiling = Processing::new(finite(1000)).with_measured(m).ceiling();
+    assert!(
+        measured > MAX_NODE_TAIL.to_samples_ceil(primary().rate),
+        "{measured:?}"
+    );
+    let ceiling = Processing::new(finite(1000))
+        .with_measured(m)
+        .ceiling(primary().rate);
     assert_eq!(ceiling, PluginTail::Unbounded);
 }
 
 /// **The budget is the graph's bound plus a margin at every rate**: a ring past
-/// it reads as a figure beyond `MAX_NODE_TAIL` at each configuration, even at
-/// 44.1 kHz where 65 s of audio is fewer frames than the bound.
+/// it reads as a figure beyond `MAX_NODE_TAIL` (sixty seconds at the configuration's
+/// rate) at each configuration, including 96 kHz where the bound is twice the frames it
+/// is at 48 kHz.
 #[test]
 fn the_budget_exceeds_the_graphs_bound_at_every_rate() {
     for (rate, block) in CONFIGS {
-        let forever = MAX_NODE_TAIL.get() + 10 * 48_000;
+        let forever = (MAX_NODE_TAIL + Seconds(10.0)).to_samples_ceil(rate).get();
         let m = measure_at(
             &mut Fake::new(0, forever),
             effect(finite(1000), 0),
@@ -406,12 +412,44 @@ fn the_budget_exceeds_the_graphs_bound_at_every_rate() {
         let TailVerdict::TailLonger { measured, .. } = m.verdict.tail else {
             panic!("{rate:?}: {:?}", m.verdict.tail);
         };
-        assert!(measured > MAX_NODE_TAIL, "{rate:?}: {measured:?}");
+        assert!(
+            measured > MAX_NODE_TAIL.to_samples_ceil(rate),
+            "{rate:?}: {measured:?}"
+        );
         assert_eq!(
-            Processing::new(finite(1000)).with_measured(m).ceiling(),
+            Processing::new(finite(1000)).with_measured(m).ceiling(rate),
             PluginTail::Unbounded
         );
     }
+}
+
+/// **The bound is sixty seconds at the rate the plugin was measured at**: at 96 kHz a
+/// 55 s ring (5 280 000 frames, past the 2 880 000 that bounded a tail at 48 kHz) is a
+/// figure the ceiling keeps, and a 62 s ring (5 952 000 frames) is past the bound and
+/// raises the ceiling to `Unbounded`.
+#[test]
+fn the_bound_follows_the_measured_rate() {
+    let rate = SampleRate::SR_96K;
+    let block = CONFIGS[0].1;
+    let run = |seconds: f64| {
+        let ring = Seconds(seconds).to_samples_ceil(rate).get();
+        let m = measure_at(
+            &mut Fake::new(0, ring),
+            effect(finite(1000), 0),
+            config(rate, block),
+        )
+        .unwrap();
+        (
+            ring,
+            Processing::new(finite(1000)).with_measured(m).ceiling(rate),
+        )
+    };
+    let (ring, ceiling) = run(55.0);
+    assert_eq!(ring, 5_280_000);
+    assert_eq!(ceiling, finite(5_280_000));
+    let (ring, ceiling) = run(62.0);
+    assert_eq!(ring, 5_952_000);
+    assert_eq!(ceiling, PluginTail::Unbounded);
 }
 
 /// The record of a measured honest plugin raises no ceiling; a longer one raises it
@@ -420,7 +458,9 @@ fn the_budget_exceeds_the_graphs_bound_at_every_rate() {
 fn a_measurement_raises_the_ceiling_by_what_it_found() {
     let m = measure_at(&mut Fake::new(0, 9000), effect(finite(8191), 0), primary()).unwrap();
     assert_eq!(
-        Processing::new(finite(8191)).with_measured(m).ceiling(),
+        Processing::new(finite(8191))
+            .with_measured(m)
+            .ceiling(primary().rate),
         finite(9000)
     );
 }

@@ -2,7 +2,6 @@
 //! past, so a node behind a latent path reads the transport its input audio
 //! was rendered at ([`Cx::transport_at`](crate::Cx::transport_at)).
 
-use crate::MAX_NODE_LATENCY;
 use tutti_types::{Frame, Latency, SampleRate, Samples};
 
 use crate::node::{Env, MAX_TRANSPORT_CHANGES, TransportPosition};
@@ -40,16 +39,13 @@ const EMPTY: Piece = Piece {
 /// Pieces a history keeps: see [`TransportHistory`], "Size".
 const JUMPS: usize = 256;
 
-/// The longest continuous stretch between pieces: see
-/// [`TransportHistory::CHECKPOINT`].
-const CHECKPOINT: usize = 8_192;
+/// The longest continuous stretch between pieces at 48 kHz and below: see
+/// [`TransportHistory::checkpoint`].
+const CHECKPOINT_AT_48K: usize = 8_192;
 
 // One block's pieces (its start and every change) and the one covering the
 // frame before it always fit.
 const _: () = assert!(JUMPS > MAX_TRANSPORT_CHANGES + 1);
-// Continuous playback is exact back to `(JUMPS - 1) * CHECKPOINT` frames:
-// at least four maxed-out nodes in series.
-const _: () = assert!((JUMPS - 1) * CHECKPOINT >= 4 * MAX_NODE_LATENCY.get());
 
 /// The transport's jumps over the graph's recent past: what a node behind a
 /// latent path reads its transport from ([`Env::transport_before`],
@@ -79,7 +75,7 @@ const _: () = assert!((JUMPS - 1) * CHECKPOINT >= 4 * MAX_NODE_LATENCY.get());
 ///   loop edit, an untimed command landing on a block start, a host whose
 ///   position is not a frame count ([`TransportPosition::new`]), the first block;
 /// - a **checkpoint**: a block's first frame when the newest piece is
-///   [`CHECKPOINT`](Self::CHECKPOINT) frames or more behind it, so no roll
+///   [`checkpoint`](Self::checkpoint) frames or more behind it, so no roll
 ///   (whose cost grows with the loop wraps it walks) is ever longer than
 ///   that plus a block.
 ///
@@ -101,10 +97,11 @@ const _: () = assert!((JUMPS - 1) * CHECKPOINT >= 4 * MAX_NODE_LATENCY.get());
 /// allocates or frees.
 ///
 /// A query is a binary search (8 steps) and one roll of under
-/// `CHECKPOINT` + `MaxBlock` frames. The roll is closed form except for loop
-/// wraps, which it walks one by one: the worst case, a loop one frame long,
-/// is about 8 200 wraps (one per frame) for a query at a 64-frame maximum
-/// block; a loop of a beat at 120 BPM and 48 kHz wraps at most once.
+/// checkpoint spacing + `MaxBlock` frames. The roll is closed form except for
+/// loop wraps, which it walks one by one: the worst case, a loop one frame
+/// long, is about one wrap per frame of the spacing (8 200 at 48 kHz, for a
+/// query at a 64-frame maximum block); a loop of a beat at 120 BPM and 48 kHz
+/// wraps at most once.
 ///
 /// # Where it stops
 ///
@@ -118,11 +115,13 @@ const _: () = assert!((JUMPS - 1) * CHECKPOINT >= 4 * MAX_NODE_LATENCY.get());
 ///   nothing at the new one, so the history is [cleared](Self::clear);
 /// - **past more than `JUMPS` pieces**: when more than 256 pieces fall
 ///   inside a node's arrival, the oldest are dropped. Continuous playback
-///   spends one checkpoint per `CHECKPOINT` frames, so with no jump at all
-///   it is exact back to `(JUMPS - 1) * CHECKPOINT` = **2 088 960 frames**
-///   (43.5 s at 48 kHz), and clamps past that. An arrival is a sum of node
-///   latencies, each clamped to `MAX_NODE_LATENCY` (480 000), so that is
-///   four maxed-out nodes in series and some; a fifth goes past it. Jumps
+///   spends one checkpoint per [`checkpoint`](Self::checkpoint) frames, which
+///   scales with the rate (8 192 frames at 48 kHz, 16 384 at 96 kHz), so with
+///   no jump at all it is exact back to `(JUMPS - 1)` spacings: 2 088 960
+///   frames, **43.5 s at 48 kHz and at every rate above it**, and clamps past
+///   that. An arrival is a sum of node latencies, each clamped to
+///   `MAX_NODE_LATENCY` (ten seconds), so that is four maxed-out nodes in
+///   series and some at any rate; a fifth goes past it. Jumps
 ///   inside the arrival spend pieces too: a 10-second lookahead at 48 kHz
 ///   holds 59 checkpoints and leaves room for some 196 jumps (a burst of
 ///   seeks, or a host reporting a hand-built transport or a new tempo, a
@@ -149,10 +148,16 @@ impl TransportHistory {
     /// How many pieces it keeps.
     pub const JUMPS: usize = JUMPS;
 
-    /// The longest continuous stretch, in frames, between pieces: a block
-    /// starting this far (or further) past the newest piece is recorded as a
-    /// checkpoint.
-    pub const CHECKPOINT: Samples = Samples(CHECKPOINT);
+    /// The longest continuous stretch, in frames, between pieces at `rate`: a
+    /// block starting this far (or further) past the newest piece is recorded
+    /// as a checkpoint. It is 8 192 frames up to 48 kHz and grows with the
+    /// rate above it (the frames of the same 170.7 ms, rounded up), so the
+    /// reach in time is the same at every rate.
+    #[must_use]
+    pub fn checkpoint(rate: SampleRate) -> Samples {
+        let scaled = (CHECKPOINT_AT_48K as f64 * rate.get() / 48_000.0).ceil() as usize;
+        Samples(scaled.max(CHECKPOINT_AT_48K))
+    }
 
     /// An empty history. Nothing is allocated, now or later.
     #[must_use]
@@ -196,7 +201,8 @@ impl TransportHistory {
                     let gap = piece.frame.since(p.frame).unwrap_or(Samples::ZERO);
                     p.rate != env.sample_rate
                         || roll(p.transport, p.rate, gap) != t
-                        || (start == Offset::ZERO && gap.get() >= Self::CHECKPOINT.get())
+                        || (start == Offset::ZERO
+                            && gap.get() >= Self::checkpoint(env.sample_rate).get())
                 }
             };
             if keep {
@@ -366,9 +372,19 @@ mod tests {
     const FPB: f64 = 24_000.0;
 
     fn env(frame: u64, len: usize, transport: TransportPosition, changes: TransportChanges) -> Env {
+        env_at(frame, len, transport, changes, SR)
+    }
+
+    fn env_at(
+        frame: u64,
+        len: usize,
+        transport: TransportPosition,
+        changes: TransportChanges,
+        rate: SampleRate,
+    ) -> Env {
         Env {
             frame: Frame::new(frame),
-            sample_rate: SR,
+            sample_rate: rate,
             block_len: Samples(len),
             transport,
             changes,
@@ -382,13 +398,17 @@ mod tests {
 
     /// A host that counts frames, at `beat` (its segment's first frame).
     fn counted(beat: f64, looping: Option<LoopRange>) -> TransportPosition {
+        counted_at(beat, looping, SR)
+    }
+
+    fn counted_at(beat: f64, looping: Option<LoopRange>, rate: SampleRate) -> TransportPosition {
         TransportPosition::counted(
             true,
             Bpm::of(120.0),
             SegmentOrigin {
                 beat: Beat(beat),
                 frame: Frame::new(0),
-                sample_rate: SR,
+                sample_rate: rate,
             },
             looping,
         )
@@ -665,31 +685,43 @@ mod tests {
         assert!(!same(p.truth(oldest - 1), p.truth(oldest)));
     }
 
-    /// The bound for continuous playback, exactly: blocks of `CHECKPOINT`
-    /// frames make every block start a checkpoint, so the newest 256 pieces
-    /// reach back `(JUMPS - 1) * CHECKPOINT` = 2 088 960 frames from the
-    /// last block's start (at least four `MAX_NODE_LATENCY`s). That frame
+    /// The bound for continuous playback, exactly, at every rate: blocks of
+    /// `checkpoint(rate)` frames make every block start a checkpoint, so the
+    /// newest 256 pieces reach back `(JUMPS - 1)` spacings from the last
+    /// block's start: 2 088 960 frames at 48 kHz, 4 177 920 at 96 kHz and
+    /// 8 355 840 at 192 kHz, at least four `MAX_NODE_LATENCY`s each. That frame
     /// reads its block; the one before it reads the clamp (the oldest piece,
     /// unmoved).
     #[test]
     fn continuous_playback_is_exact_back_to_the_documented_bound() {
-        let block = TransportHistory::CHECKPOINT.get();
-        let bound = (JUMPS as u64 - 1) * block as u64;
-        assert_eq!(bound, 2_088_960);
-        assert!(bound >= 4 * MAX_NODE_LATENCY.get() as u64);
-        let mut p = Played::default();
-        let mut next = counted(0.0, None);
-        for b in 0..300u64 {
-            let e = env(b * block as u64, block, next, TransportChanges::NONE);
-            p.play(e);
-            next = end_of(&e);
+        for (rate, bound) in [
+            (SampleRate::SR_48K, 2_088_960u64),
+            (SampleRate::SR_96K, 4_177_920),
+            (SampleRate::SR_192K, 8_355_840),
+        ] {
+            let block = TransportHistory::checkpoint(rate).get();
+            assert_eq!((JUMPS as u64 - 1) * block as u64, bound, "{rate:?}");
+            let four = 4 * crate::MAX_NODE_LATENCY.to_samples_ceil(rate).get() as u64;
+            assert!(bound >= four, "{rate:?}: {bound} against {four}");
+            let mut p = Played::default();
+            let mut next = counted_at(0.0, None, rate);
+            for b in 0..300u64 {
+                let e = env_at(b * block as u64, block, next, TransportChanges::NONE, rate);
+                p.play(e);
+                next = end_of(&e);
+            }
+            let last = *p.blocks.last().expect("played");
+            let back = |n: u64| last.transport_before(off(0), lat(n as usize), &p.history);
+            let edge = last.frame.get() - bound;
+            assert_eq!(back(four), p.truth(last.frame.get() - four), "{rate:?}");
+            assert_eq!(back(bound), p.truth(edge), "{rate:?}: just inside: exact");
+            assert_eq!(
+                back(bound + 1),
+                p.truth(edge),
+                "{rate:?}: just past: the clamp"
+            );
+            assert_ne!(p.truth(edge - 1), p.truth(edge));
         }
-        let last = *p.blocks.last().expect("played");
-        let back = |n: u64| last.transport_before(off(0), lat(n as usize), &p.history);
-        let edge = last.frame.get() - bound;
-        assert_eq!(back(bound), p.truth(edge), "just inside: exact");
-        assert_eq!(back(bound + 1), p.truth(edge), "just past: the clamp");
-        assert_ne!(p.truth(edge - 1), p.truth(edge));
     }
 
     /// A host that counts frames changes one field and keeps its position:

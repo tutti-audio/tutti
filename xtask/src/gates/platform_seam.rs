@@ -64,7 +64,6 @@ pub(super) const ALLOW: &[(&str, usize, &str)] = &[
         CORE,
     ),
     ("testing/tutti-fixtures/src/lib.rs", 9, CORE),
-    ("testing/tutti-fixtures/src/plugin.rs", 2, CORE),
     ("testing/tutti-fixtures/src/vst3_cpp.rs", 2, CORE),
     ("crates/tutti-au-host/src/unit_code.rs", 1, PLUGINS),
     (

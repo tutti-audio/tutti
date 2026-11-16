@@ -24,7 +24,7 @@ fn main() {
     use std::hint::black_box;
     use std::time::Instant;
     use tutti_dsp::Convolver;
-    use tutti_nodes::generate_test_ir;
+    use tutti_fixtures::signal::decay_ir;
     use tutti_types::SampleRate;
 
     println!(
@@ -68,7 +68,7 @@ fn main() {
     };
     for secs in [0.5f32, 2.0, 5.0] {
         let len = (secs * 48_000.0) as usize;
-        let ir = generate_test_ir(
+        let ir = decay_ir(
             len,
             tutti_types::Seconds::from_f32(secs.min(1.0)),
             SampleRate::SR_48K,
@@ -92,7 +92,7 @@ fn main() {
         (128, 0.3),
         (128, 0.5),
     ] {
-        let ir = generate_test_ir(
+        let ir = decay_ir(
             (secs * 48_000.0) as usize,
             tutti_types::Seconds::from_f32(secs.min(1.0)),
             SampleRate::SR_48K,
@@ -105,7 +105,7 @@ fn main() {
         );
     }
     // A ragged mix: three small calls and one that crosses a boundary.
-    let ir = generate_test_ir(96_000, Seconds::new(1.0), SampleRate::SR_48K);
+    let ir = decay_ir(96_000, Seconds::new(1.0), SampleRate::SR_48K);
     let (mean, p99, p999, max) = run(&ir, 512, &[64, 64, 64, 500]);
     println!(
         "{:>9} {:>6} {:>6} {mean:>9.2} {p99:>9.2} {p999:>9.2} {max:>9.2} {:>9.2}",
