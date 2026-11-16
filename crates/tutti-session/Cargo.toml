@@ -111,7 +111,7 @@ au = ["plugin", "tutti-plugin/au"]
 # What a test reads of the graph's plumbing (`Graph::testing`, `take_audio_side`,
 # `AudioSide`). Off by default; this crate's own tests turn it on through the
 # dev-dependency on itself below, as `tutti-graph` does.
-testing = []
+testing = ["tutti-cpal?/testing"]
 
 [dev-dependencies]
 # Turns `testing` on for this crate's own tests, benches and doctests.
