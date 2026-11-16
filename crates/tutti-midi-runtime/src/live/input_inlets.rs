@@ -25,6 +25,19 @@
 //! (`late` in [`InletCounts::losses`]), only when the
 //! thread's push comes more than the lead after its arrival.
 //!
+//! # Timing
+//!
+//! Each [`DeviceInput`] reports how steady its map is through the
+//! [`ClockWriters`] it is opened with ([`open_with`](InputInlets::open_with)):
+//! a gauge of the latest correction the map made (signed, positive when a
+//! reading came late) and a counter of its re-anchors, a [`Resyncs`] each. The
+//! readers are made once, by [`ClockWriters::new`], and outlive any one
+//! connection: [`ClockWriters::reopen`] hands the writers to the next
+//! connection once the last has dropped, so the counter is cumulative across
+//! connections and the gauge holds its last reading until the next map writes
+//! one. The device's thread writes with atomic stores, so reading them blocks
+//! nothing.
+//!
 //! # One inlet per input
 //!
 //! [`open`](InputInlets::open) makes one inlet for one input: the [`DeviceInput`]
@@ -38,8 +51,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use tutti_graph::{EventCapacity, EventInletNode, EventInletWriter, InletCounts, Stamp};
-use tutti_rt::{ArcLend, Reader};
-use tutti_types::Moment;
+use tutti_rt::{ArcLend, Counter, CounterWriter, Gauge, GaugeWriter, Reader, counter, gauge};
+use tutti_types::{Moment, Resyncs, Seconds};
 use tutti_ump::Ump;
 
 use crate::clock_map::{ClockMap, ClockReading, Observed};
@@ -131,6 +144,13 @@ impl InputInlets {
     /// and the [`DeviceInput`] (dropped).
     #[must_use = "the node is the inlet's graph side: until it is added, what the device sends goes nowhere"]
     pub fn open(&self) -> (DeviceInput, EventInletNode) {
+        self.open_with(ClockWriters::new().0)
+    }
+
+    /// [`open`](Self::open) with the input's timing written to `clock`: the
+    /// readers of its cells stay with whoever made them ([`ClockWriters::new`]).
+    #[must_use = "the node is the inlet's graph side: until it is added, what the device sends goes nowhere"]
+    pub fn open_with(&self, clock: ClockWriters) -> (DeviceInput, EventInletNode) {
         let id = self.last.fetch_add(1, Ordering::Relaxed) + 1;
         let (node, writer) = EventInletNode::pair(self.capacity);
         let input = DeviceInput {
@@ -141,6 +161,8 @@ impl InputInlets {
             lead: Arc::clone(&self.lead),
             seen: None,
             map: None,
+            timing: clock.timing,
+            resyncs: clock.resyncs,
         };
         (input, node)
     }
@@ -148,6 +170,38 @@ impl InputInlets {
 
 fn nanos(d: Duration) -> u64 {
     u64::try_from(d.as_nanos()).unwrap_or(u64::MAX)
+}
+
+/// The writing ends of an input's timing cells: the latest correction its clock
+/// map made and the count of its re-anchors. One set writes at a time; the
+/// device's end ([`DeviceInput`]) owns it for a connection, and dropping the
+/// input closes the cells until [`reopen`](Self::reopen) hands the writers on.
+#[derive(Debug)]
+#[must_use = "the writers are how an input reports its timing"]
+pub struct ClockWriters {
+    timing: GaugeWriter<Seconds>,
+    resyncs: CounterWriter<Resyncs>,
+}
+
+impl ClockWriters {
+    /// New cells and their writers, with their readers: a gauge reading 0 s
+    /// and a counter at zero. Allocates: control side.
+    pub fn new() -> (Self, Gauge<Seconds>, Counter<Resyncs>) {
+        let (timing, gauge) = gauge(Seconds::new(0.0));
+        let (resyncs, counter) = counter();
+        (Self { timing, resyncs }, gauge, counter)
+    }
+
+    /// The writers of cells whose last writers have dropped; `None` while a
+    /// connection still holds them. The count carries on from where it was and
+    /// the gauge holds its last reading (it is not reset: it reads the latest
+    /// correction made, until the next map makes one). Control side.
+    pub fn reopen(timing: &Gauge<Seconds>, resyncs: &Counter<Resyncs>) -> Option<Self> {
+        // If only the first reopens, its writer drops here and closes it again.
+        let timing = timing.reopen()?;
+        let resyncs = resyncs.reopen()?;
+        Some(Self { timing, resyncs })
+    }
 }
 
 /// One device's end of its inlet: stamp each arrival with a frame and push it.
@@ -163,6 +217,10 @@ pub struct DeviceInput {
     /// The latest reading the map was fed.
     seen: Option<(Instant, Moment)>,
     map: Option<ClockMap>,
+    /// The latest correction the map made.
+    timing: GaugeWriter<Seconds>,
+    /// The map's re-anchors.
+    resyncs: CounterWriter<Resyncs>,
 }
 
 impl std::fmt::Debug for DeviceInput {
@@ -222,20 +280,30 @@ impl DeviceInput {
 
     /// Feeds the map a reading: it follows the engine's clock, or is built
     /// again where the clock was restarted (a reading the map rejects, a
-    /// frame that went back) or at another rate.
+    /// frame that went back). The correction the map made
+    /// is the timing reading. A re-anchor on a far reading and a rebuild after
+    /// a rejection each count as one resync; the first map does not. A change
+    /// of rate rescales the map to the same instant (it is not a rebuild), so
+    /// it counts only if the reading after it is itself far off.
     fn follow(&mut self, (os, at): (Instant, Moment)) {
         let reading = ClockReading::new(os, at.frame());
-        let rebuild = match self.map.as_mut() {
-            None => true,
-            Some(map) => {
-                if map.rate() != at.rate() {
-                    map.set_rate(at.rate());
-                }
-                map.observe(reading) == Observed::Rejected
-            }
-        };
-        if rebuild {
+        let Some(map) = self.map.as_mut() else {
             self.map = Some(ClockMap::new(at.rate(), reading));
+            return;
+        };
+        if map.rate() != at.rate() {
+            map.set_rate(at.rate());
+        }
+        match map.observe(reading) {
+            Observed::Followed { correction } => self.timing.set(correction),
+            Observed::Resynced { correction } => {
+                self.timing.set(correction);
+                self.resyncs.add(Resyncs::new(1));
+            }
+            Observed::Rejected => {
+                self.map = Some(ClockMap::new(at.rate(), reading));
+                self.resyncs.add(Resyncs::new(1));
+            }
         }
     }
 }

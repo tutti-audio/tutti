@@ -14,7 +14,7 @@ use tutti_clap_test_plugin::{ClapProbe, ClapSwitch, Site, ThreadAnswer};
 use tutti_plugin::catalog::{Catalog, CatalogConfig, Hosting, Locator, NO_SCAN_DIRS, PluginId};
 use tutti_plugin_db::{PluginDb, PluginFormat, ScanPoll};
 use tutti_session::{
-    LoadError, Peer, PoolError, PoolEvent, PoolState, Presence, Session, SessionEvent,
+    JobStatus, LoadError, Peer, PoolError, PoolEvent, PoolState, Presence, Session, SessionEvent,
 };
 use tutti_types::{MaxBlock, SampleRate, Samples};
 
@@ -436,25 +436,17 @@ fn restore_round_trip(hosting: Hosting) {
     set(&s, 0.9);
     blocks(&mut s);
     let saving = s.save_state(&"verb").expect("a node holds the plugin");
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while !saving.has_landed() {
-        assert!(Instant::now() < deadline, "the save never landed");
-        let _ = s.update();
-        thread::sleep(Duration::from_millis(2));
-    }
-    let state = saving.take().expect("landed").expect("a state");
+    let state = saving.wait(&mut s).expect("a state");
 
     set(&s, 0.1);
     blocks(&mut s);
     let restoring = s.restore_state(&"verb", state).expect("its own plugin's");
-    assert!(!restoring.has_landed(), "it lands in an update");
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while !restoring.has_landed() {
-        assert!(Instant::now() < deadline, "the restore never landed");
-        let _ = s.update();
-        thread::sleep(Duration::from_millis(2));
-    }
-    restoring.take().expect("landed").expect("applied");
+    assert_eq!(
+        restoring.status(),
+        JobStatus::WaitingForMainThread,
+        "it runs in an update on the main thread"
+    );
+    restoring.wait(&mut s).expect("applied");
     // The mirror is read again by a job the next updates land.
     let deadline = Instant::now() + Duration::from_secs(30);
     while (knob(&s) - 0.9).abs() > 1e-6 {
@@ -500,18 +492,12 @@ fn an_in_process_save_the_main_thread_does_not_run_is_unavailable() {
     // deadline: the job's end only lands in an update, so the wait cannot be
     // polled, and the worker has timed out long before the first update.
     thread::sleep(Duration::from_secs(4));
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while !saving.has_landed() {
-        assert!(Instant::now() < deadline, "the save never landed");
-        let _ = s.update();
-        thread::sleep(Duration::from_millis(2));
-    }
     assert!(
         matches!(
-            saving.take(),
-            Some(Err(tutti_session::StateJobFailed::State(
+            saving.wait(&mut s),
+            Err(tutti_session::StateJobFailed::State(
                 tutti_plugin::error::StateError::Unavailable
-            )))
+            ))
         ),
         "the main thread did not run it in time"
     );

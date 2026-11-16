@@ -152,6 +152,10 @@ impl std::fmt::Debug for ModInput<'_> {
 /// Something an [`update`](Session::update) found for the host.
 #[non_exhaustive]
 pub enum SessionEvent {
+    /// A [`Job`](crate::Job) finished: take its result with
+    /// [`Landed::take`](crate::Landed::take). Reported once, in the update
+    /// that found it, unless a [`Job::wait`](crate::Job::wait) took it.
+    Landed(crate::Landed),
     /// The graph's edits could not be committed: the plan sent last keeps
     /// playing. Each update tries again; a refusal is reported once, until a
     /// commit is sent or it fails another way.
@@ -350,6 +354,7 @@ pub enum SessionEvent {
 impl std::fmt::Debug for SessionEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Landed(landed) => f.debug_tuple("Landed").field(landed).finish(),
             Self::CommitRefused(e) => f.debug_tuple("CommitRefused").field(e).finish(),
             Self::CrossfadeLanded { node, id, .. } => f
                 .debug_struct("CrossfadeLanded")
@@ -1088,7 +1093,8 @@ impl<C: Clock> Session<C> {
     /// services the editors (see the type docs).
     #[must_use = "the events carry faults and dropouts (a refused commit, a plugin that died, a lost block): handle them, or bind `let _events` with a reason"]
     pub fn update(&mut self) -> Vec<SessionEvent> {
-        let mut out = Vec::new();
+        // What a `Job::wait` updated through comes first: it happened first.
+        let mut out = self.jobs.take_held();
         let cx = PhaseCx::at(Instant::now());
         for &phase in PHASES {
             self.run_phase(phase, cx, &mut out);
@@ -1142,6 +1148,8 @@ impl<C: Clock> Session<C> {
                 }
                 self.report_event_losses(out);
                 self.report_silenced(out);
+                // Last: the landings this update's own stages queued.
+                self.jobs.report_landed(out);
                 // A re-prepare resumed in that collect: it sent the resumed
                 // plan, whose shapes are new (a lookahead is a time, so a
                 // rate change moves latencies).

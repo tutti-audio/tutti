@@ -106,7 +106,12 @@ fn a_late_reading_moves_the_map_by_an_eighth() {
     let t0 = base();
     let mut map = map_at(t0, 0);
     let late = ClockReading::new(t0 + Duration::from_secs(1) + ms(8), Frame::new(48_000));
-    assert_eq!(map.observe(late), Observed::Followed);
+    assert_eq!(
+        map.observe(late),
+        Observed::Followed {
+            correction: Seconds::new(0.001)
+        }
+    );
     assert_eq!(map.anchor().frame(), Frame::new(48_000));
     assert_eq!(map.anchor().os(), t0 + Duration::from_secs(1) + ms(1));
     assert_eq!(
@@ -121,7 +126,12 @@ fn an_early_reading_moves_the_map_back_by_an_eighth() {
     let t0 = base();
     let mut map = map_at(t0, 0);
     let early = ClockReading::new(t0 + Duration::from_secs(1) - ms(8), Frame::new(48_000));
-    assert_eq!(map.observe(early), Observed::Followed);
+    assert_eq!(
+        map.observe(early),
+        Observed::Followed {
+            correction: Seconds::new(-0.001)
+        }
+    );
     assert_eq!(map.anchor().os(), t0 + Duration::from_secs(1) - ms(1));
 }
 
@@ -131,7 +141,12 @@ fn a_reading_far_off_re_anchors_exactly() {
     let t0 = base();
     let mut map = map_at(t0, 0);
     let far = ClockReading::new(t0 + Duration::from_secs(1) + ms(50), Frame::new(48_000));
-    assert_eq!(map.observe(far), Observed::Resynced);
+    assert_eq!(
+        map.observe(far),
+        Observed::Resynced {
+            correction: Seconds::new(0.05)
+        }
+    );
     assert_eq!(map.anchor(), far);
 }
 
@@ -149,7 +164,7 @@ fn the_map_follows_a_drifting_clock_within_its_bound() {
     let mut map = map_at(t0, 0);
     for k in 1..=2000u64 {
         let reading = ClockReading::new(at(k as f64), Frame::new(k * 512));
-        assert_eq!(map.observe(reading), Observed::Followed);
+        assert!(matches!(map.observe(reading), Observed::Followed { .. }));
     }
     let delta = 0.005; // seconds past the last reading
     for query in [0.0, 0.0025, delta] {
@@ -181,7 +196,12 @@ fn a_reading_that_goes_backwards_is_rejected() {
         assert_eq!(map, before);
     }
     // The same reading again is the anchor, not a fault.
-    assert_eq!(map.observe(map.anchor()), Observed::Followed);
+    assert_eq!(
+        map.observe(map.anchor()),
+        Observed::Followed {
+            correction: Seconds::new(0.0)
+        }
+    );
     assert_eq!(map, before);
 }
 
@@ -202,4 +222,96 @@ fn a_rate_change_keeps_the_instant_of_the_anchor() {
         map.os_at(Frame::new(88_200)),
         Some(t0 + Duration::from_secs(1))
     );
+}
+
+fn seconds_of(observed: Observed) -> f64 {
+    observed.correction().expect("a reading was taken").get()
+}
+
+// A reading `e` late is followed by `e / GAIN`, for any `e` within RESYNC, and
+// early the same by the opposite sign: the correction is the step the anchor
+// moved, so the anchor lands that far from the prediction.
+#[test]
+fn a_follow_corrects_by_the_error_over_gain_with_the_readings_sign() {
+    let t0 = base();
+    let predicted = t0 + Duration::from_secs(1);
+    for error_ms in [1u64, 8, 16, 20] {
+        let error = error_ms as f64 / 1000.0;
+        let mut late = map_at(t0, 0);
+        let step = seconds_of(late.observe(ClockReading::new(
+            predicted + ms(error_ms),
+            Frame::new(48_000),
+        )));
+        assert!(
+            (step - error / f64::from(GAIN)).abs() < 1e-12,
+            "late {error_ms} ms: {step}"
+        );
+        let mut early = map_at(t0, 0);
+        let step = seconds_of(early.observe(ClockReading::new(
+            predicted - ms(error_ms),
+            Frame::new(48_000),
+        )));
+        assert!(
+            (step + error / f64::from(GAIN)).abs() < 1e-12,
+            "early {error_ms} ms: {step}"
+        );
+    }
+}
+
+// Past RESYNC the correction is the whole error, not an eighth of it, signed.
+#[test]
+fn a_resync_corrects_by_the_whole_error_with_the_readings_sign() {
+    let t0 = base();
+    let predicted = t0 + Duration::from_secs(1);
+    for error_ms in [21u64, 50, 400] {
+        let error = error_ms as f64 / 1000.0;
+        let mut late = map_at(t0, 0);
+        let observed = late.observe(ClockReading::new(
+            predicted + ms(error_ms),
+            Frame::new(48_000),
+        ));
+        assert!(
+            matches!(observed, Observed::Resynced { .. }),
+            "{error_ms} ms"
+        );
+        assert!(
+            (seconds_of(observed) - error).abs() < 1e-12,
+            "late {error_ms} ms"
+        );
+        let mut early = map_at(t0, 0);
+        let observed = early.observe(ClockReading::new(
+            predicted - ms(error_ms),
+            Frame::new(48_000),
+        ));
+        assert!(
+            matches!(observed, Observed::Resynced { .. }),
+            "{error_ms} ms"
+        );
+        assert!(
+            (seconds_of(observed) + error).abs() < 1e-12,
+            "early {error_ms} ms"
+        );
+    }
+}
+
+// The error exactly at RESYNC is still followed (the rule is "further than").
+#[test]
+fn an_error_of_exactly_resync_is_followed_not_resynced() {
+    let t0 = base();
+    let mut map = map_at(t0, 0);
+    let observed = map.observe(ClockReading::new(
+        t0 + Duration::from_secs(1) + RESYNC,
+        Frame::new(48_000),
+    ));
+    assert!(matches!(observed, Observed::Followed { .. }));
+}
+
+// A rejected reading made no correction.
+#[test]
+fn a_rejected_reading_has_no_correction() {
+    let t0 = base();
+    let mut map = map_at(t0, 48_000);
+    let observed = map.observe(ClockReading::new(t0 - ms(1), Frame::new(48_512)));
+    assert_eq!(observed, Observed::Rejected);
+    assert_eq!(observed.correction(), None);
 }
