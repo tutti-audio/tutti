@@ -374,11 +374,6 @@ impl<'a, T> SplitRw<'a, T> {
         }
     }
 
-    /// Chunks.
-    pub fn chunks(&self) -> usize {
-        self.chunks
-    }
-
     /// Elements per chunk.
     pub fn stride(&self) -> usize {
         self.stride
