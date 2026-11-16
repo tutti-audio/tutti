@@ -650,8 +650,9 @@ pub mod midi {
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
-        ChannelCount, CiChange, CiPeerInfo, DeviceQuery, MidiHardwareOptions, PeerId, PeerProfiles,
-        ProfilesChange, Whole,
+        ChannelCount, ChannelSwitcher, CiChange, CiPeerInfo, DeviceQuery, MidiHardwareOptions,
+        PeerId, PeerProfiles, ProfileError, ProfileSwitch, ProfilesChange, Switcher, Whole,
+        WholeSwitcher,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
