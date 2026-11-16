@@ -800,10 +800,7 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
         "a server that dies mid-swap is a refusal"
     );
     assert!(started.elapsed() < Duration::from_secs(10));
-    assert!(
-        dying.wait_for_crash(),
-        "and the bridge says the server is gone"
-    );
+    dying.wait_for_crash("the bridge to say the server is gone");
 }
 
 /// A crash that happens **before** any listener exists is still reported.
