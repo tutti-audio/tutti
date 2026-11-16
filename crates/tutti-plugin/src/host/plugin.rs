@@ -673,50 +673,14 @@ trait Rebind: Send {
     fn prepare(&self) -> std::result::Result<Rebuilt, tutti_plugin_host::RebindError>;
 }
 
-/// An in-process format's rebinder, and the variant of [`BoundPlaced`] its
-/// nodes go in.
-#[cfg_attr(
-    not(any(
-        feature = "vst2",
-        feature = "clap",
-        feature = "vst3",
-        all(feature = "au", target_os = "macos")
-    )),
-    expect(
-        dead_code,
-        reason = "a build with no in-process format has only served plugins"
-    )
-)]
-struct InProcessRebind<F: tutti_plugin_types::InProcess> {
-    rebinder: tutti_plugin_host::Rebinder<F>,
-    wrap: fn(Box<tutti_plugin_host::PluginNode<F>>) -> BoundPlaced,
-}
-
-impl<F> Rebind for InProcessRebind<F>
-where
-    F: tutti_plugin_types::InProcess + 'static,
-    F::Processor: 'static,
-{
-    fn layout(&self) -> Option<tutti_plugin_types::Layout> {
-        self.rebinder.layout()
-    }
-
-    fn settled(&self) -> tutti_plugin_host::Settlement {
-        self.rebinder.settled()
-    }
-
-    fn prepare(&self) -> std::result::Result<Rebuilt, tutti_plugin_host::RebindError> {
-        let (node, pending) = self.rebinder.prepare()?;
-        let controls = node.controls();
-        Ok(Rebuilt {
-            bound: BoundPlugin {
-                bound: (self.wrap)(Box::new(node)),
-            },
-            controls: Some(controls),
-            commit: Commit(Box::new(move |main| pending.commit(main))),
-        })
-    }
-}
+/// An in-process format's rebinder.
+#[cfg(any(
+    feature = "vst2",
+    feature = "clap",
+    feature = "vst3",
+    all(feature = "au", target_os = "macos")
+))]
+mod in_process;
 
 /// A served plugin's rebinder. The node it builds goes into the graph with the
 /// served fork source of the node it replaces (which reopens the plugin from
@@ -767,31 +731,6 @@ impl PluginRebinder {
                 rebinder: client.rebinder(),
                 fork: crate::host::node::fork::ServedFork::of(client),
             })),
-        }
-    }
-
-    #[cfg_attr(
-        not(any(
-            feature = "vst2",
-            feature = "clap",
-            feature = "vst3",
-            all(feature = "au", target_os = "macos")
-        )),
-        expect(
-            dead_code,
-            reason = "a build with no in-process format has only served plugins"
-        )
-    )]
-    fn in_process<F>(
-        rebinder: tutti_plugin_host::Rebinder<F>,
-        wrap: fn(Box<tutti_plugin_host::PluginNode<F>>) -> BoundPlaced,
-    ) -> Self
-    where
-        F: tutti_plugin_types::InProcess + 'static,
-        F::Processor: 'static,
-    {
-        Self {
-            inner: std::sync::Arc::new(std::sync::Mutex::new(InProcessRebind { rebinder, wrap })),
         }
     }
 
