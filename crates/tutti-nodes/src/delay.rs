@@ -214,6 +214,7 @@ impl Kernel for DelayKernel {
             bank.reset();
         }
         self.glides.settle();
+        self.landed = false;
     }
 
     fn retarget(&mut self, controls: &DelayControls) {
@@ -238,6 +239,8 @@ impl Kernel for DelayKernel {
         if let Some(bank) = &mut self.bank {
             bank.process(&mut self.glides, lanes, input, output);
         }
+        // A design after a render is a move, which glides.
+        self.landed = true;
     }
 
     /// A recirculating line rings for as long as its feedback says: unknown, so the graph
@@ -618,6 +621,30 @@ mod tests {
         blocks(&mut used, 100);
         used.reset();
         assert_eq!(blocks(&mut used, 0), blocks(&mut make(), 0));
+    }
+
+    /// A feedback written after a reset lands whole, as a fresh node's first design does: a
+    /// one-frame delay of a constant `1` is `y[n] = x[n - 1] + f y[n - 1]`, so at feedback
+    /// `0.5` from frame 0 it reads `0, 1, 1.5, 1.75, ...` (`2 - 2^(1 - n)` for `n >= 1`),
+    /// where a glide from 0 would not.
+    #[test]
+    fn a_feedback_written_after_a_reset_lands_whole() {
+        let mut node = prepared(
+            DelayNode::mono(MAX, controls(frames(1.0), 0.0, 0.0)),
+            RATE,
+            64,
+        );
+        let set = node.param_set();
+        let x = vec![1.0f32; 32];
+        drive(&mut node, RATE, &[&x], &[]);
+        node.reset();
+        assert!(set.set(UnitParam::Feedback, 0.5));
+        let out = drive(&mut node, RATE, &[&x], &[]).remove(0);
+        assert_eq!(out[0], 0.0);
+        for (n, &y) in out.iter().enumerate().skip(1) {
+            let want = 2.0 - 2.0f64.powi(1 - n as i32);
+            assert!((f64::from(y) - want).abs() < 1e-6, "frame {n}: {y}");
+        }
     }
 
     /// A cell that moves **between** grid points starts at the next grid point: the

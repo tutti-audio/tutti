@@ -87,7 +87,7 @@ pub struct Rebinder<F: Loaded> {
     descriptor: PluginDescriptor,
     reload: Option<Reload>,
     features: Features,
-    sample_rate: f64,
+    sample_rate: tutti_types::SampleRate,
     pending_sample_rate: Arc<AtomicU64>,
     unlent: Arc<AtomicU64>,
     parameters: Vec<ParamId>,

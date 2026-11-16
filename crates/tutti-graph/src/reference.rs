@@ -752,8 +752,9 @@ impl Reference {
         // node's figure without touching the unit, whose own `shape()` may
         // lag. The compiler reads the spec
         // too, and checks it against the shapes it was handed.
-        let lat =
-            |k: NodeKey| Latency::new(t.nodes[&k].latency).min(Latency::new(MAX_NODE_LATENCY));
+        let max_latency =
+            Latency::new(MAX_NODE_LATENCY.to_samples_ceil(self.prepare.sample_rate()));
+        let lat = |k: NodeKey| Latency::new(t.nodes[&k].latency).min(max_latency);
         let mut arrival: BTreeMap<NodeKey, Latency> = BTreeMap::new();
         fn arrive(
             k: NodeKey,

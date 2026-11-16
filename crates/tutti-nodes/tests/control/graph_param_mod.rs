@@ -1003,7 +1003,12 @@ fn plain_distortion(d: f32) -> Vec<f32> {
 #[test]
 fn an_authored_write_moves_the_base_under_modulation() {
     let node = DistortionNode::with_channels(1u16, ShapeKind::Tanh, Drive::new(1.0));
-    let cell = node.drive().as_atomic();
+    let tutti_types::ParamCell::F32(cell) = tutti_graph::ParamNode::param_set(&node)
+        .cell(UnitParam::Drive)
+        .expect("a distortion has a drive")
+    else {
+        unreachable!("the drive is an f32 cell")
+    };
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (n, _) = g.add_with_controls(node);
     g.connect_input(0, n, 0).connect_output(n, 0, 0);

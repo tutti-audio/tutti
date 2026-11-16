@@ -1,7 +1,7 @@
 //! The signals a test feeds a node or checks one against, defined once: a sine,
 //! an impulse, the level readings [`peak`] and [`rms`], the bit patterns of a
-//! render ([`bits`]) and a float WAV on disk ([`write_wav_f32`],
-//! [`read_wav_f32`]).
+//! render ([`bits`]), the impulse responses [`decay_ir`] and [`room_ir`], and a float
+//! WAV on disk ([`write_wav_f32`], [`read_wav_f32`]).
 //!
 //! Noise is [`noise`](crate::noise) and a bit hash is [`Fnv`](crate::Fnv), both in
 //! this crate's root. Every figure here is plain
@@ -12,7 +12,7 @@
 //! another render.
 
 use std::path::Path;
-use tutti_types::{Amplitude, Hz, SampleRate, Samples};
+use tutti_types::{Amplitude, Hz, SampleRate, Samples, Seconds};
 
 /// `len` samples of a sine: `amplitude * sin(2 pi * hz * i / rate)` for sample
 /// `i`, with phase 0 at sample 0 (the first sample is exactly `0.0`).
@@ -116,6 +116,61 @@ pub fn read_wav_f32(path: &Path) -> Vec<Vec<f32>> {
     (0..channels)
         .map(|c| samples.iter().skip(c).step_by(channels).copied().collect())
         .collect()
+}
+
+/// An impulse response of `len` taps decaying exponentially: `exp(-t / decay_time)` at tap
+/// `t`, sampled at `rate`.
+#[must_use]
+pub fn decay_ir(
+    len: usize,
+    decay_time: impl Into<Seconds>,
+    rate: impl Into<SampleRate>,
+) -> Vec<f32> {
+    let (decay_time, rate) = (decay_time.into(), rate.into().get());
+    // One coefficient: computed exactly, rounded once to the `f32` the loop runs in.
+    let decay_rate = (-1.0 / (decay_time.get() * rate)) as f32;
+    (0..len).map(|i| (decay_rate * i as f32).exp()).collect()
+}
+
+/// A synthetic room impulse response of `1.5 * decay_time` seconds at `rate`: a unit
+/// impulse, six early reflections at delays scaled by `room_size` and a noisy exponential
+/// tail from 50 ms on.
+#[must_use]
+pub fn room_ir(
+    room_size: f32,
+    decay_time: impl Into<Seconds>,
+    rate: impl Into<SampleRate>,
+) -> Vec<f32> {
+    let (decay_time, rate) = (decay_time.into(), rate.into().get());
+    let mut out = vec![0.0f32; (decay_time.get() * rate * 1.5) as usize];
+    let Some(first) = out.first_mut() else {
+        return out;
+    };
+    *first = 1.0;
+    let reflections = [
+        (0.010 * room_size, 0.7_f32),
+        (0.015 * room_size, 0.5),
+        (0.023 * room_size, 0.4),
+        (0.031 * room_size, 0.3),
+        (0.041 * room_size, 0.25),
+        (0.053 * room_size, 0.2),
+    ];
+    for (delay_factor, amplitude) in reflections {
+        let idx = (delay_factor * rate as f32) as usize;
+        if let Some(tap) = out.get_mut(idx) {
+            *tap = amplitude;
+        }
+    }
+    let tail_start = (0.05 * rate as f32) as usize;
+    // One coefficient: computed exactly, rounded once to the `f32` the loop runs in.
+    let decay_rate = (-1.0 / (decay_time.get() * rate)) as f32;
+    let mut rng = 12345u32;
+    for (offset, slot) in out.iter_mut().skip(tail_start).enumerate() {
+        rng = rng.wrapping_mul(1103515245).wrapping_add(12345);
+        let noise = ((rng >> 16) as f32 / 32768.0) - 1.0;
+        *slot += noise * (decay_rate * offset as f32).exp() * 0.1;
+    }
+    out
 }
 
 #[cfg(test)]
