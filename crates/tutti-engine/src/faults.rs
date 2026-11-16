@@ -143,9 +143,9 @@ impl RtFault {
         }
     }
 
-    /// The record for `kind` with the text `text` renders, cut to fit. Calls
-    /// `Display::fmt` on the caller's thread; allocates nothing itself.
-    fn new(stamp: u64, kind: StreamFaultKind, text: &dyn Display) -> Self {
+    /// `text` rendered into a fixed buffer, cut to fit. Calls `Display::fmt`
+    /// on the caller's thread; allocates nothing itself.
+    fn render(text: &dyn Display) -> Sink {
         let mut sink = Sink {
             text: [0; RT_TEXT_BYTES],
             len: 0,
@@ -153,7 +153,7 @@ impl RtFault {
         };
         // A cut is the sink's refusal; the text so far is what is kept.
         let _ = write!(sink, "{text}");
-        Self::of(stamp, kind, sink)
+        sink
     }
 
     fn of(stamp: u64, kind: StreamFaultKind, sink: Sink) -> Self {
@@ -197,11 +197,15 @@ impl RtCell {
         }
     }
 
-    /// Wait-free; allocates and frees nothing. Dropped if another thread is
-    /// mid-write.
-    fn write(&self, fault: RtFault) {
+    /// Claims the cell, takes the next stamp from `order` and writes the
+    /// record `sink` and `kind` make with it. The stamp is taken inside the
+    /// claim, so the stamps written to one cell rise in write order. Wait-free;
+    /// allocates and frees nothing. Dropped (no stamp taken) if another thread
+    /// is mid-write.
+    fn write(&self, order: &AtomicU64, kind: StreamFaultKind, sink: Sink) {
         if let Some(mut writer) = self.writer.try_borrow_mut() {
-            writer.write(fault);
+            let stamp = order.fetch_add(1, Ordering::Relaxed) + 1;
+            writer.write(RtFault::of(stamp, kind, sink));
         }
     }
 
@@ -217,6 +221,12 @@ impl fmt::Debug for RtCell {
         f.write_str("RtCell(..)")
     }
 }
+
+/// A read found a fault cell mid-write and gave up after its retries: ask
+/// again. Not an answer about the faults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("a fault was being written; ask again")]
+pub struct Lagging;
 
 /// What the control side holds: the stamp at or below which every fault is
 /// forgotten.
@@ -328,13 +338,17 @@ impl StreamFaults {
     /// the panic; an overrun only when neither is there, so it never replaces
     /// a latching fault's message. Also the largest stamp seen in any cell.
     ///
-    /// A cell that is mid-write after the retries makes the read lag: `None`,
+    /// A cell that is mid-write after the retries makes the read [`Lagging`],
     /// never a lower-priority fault than the one that cell may hold.
-    fn newest(&self, floor: u64, ceiling: u64) -> Option<((u64, StreamFault), u64)> {
+    fn newest(
+        &self,
+        floor: u64,
+        ceiling: u64,
+    ) -> Result<Option<((u64, StreamFault), u64)>, Lagging> {
         let read = |cell: &RtCell| {
             cell.read()
-                .ok()
                 .map(|fault| fault.filter(|f| f.stamp > floor && f.stamp <= ceiling))
+                .map_err(|Contended| Lagging)
         };
         let (backend, panic, overrun) = (
             read(&self.backend)?,
@@ -351,8 +365,8 @@ impl StreamFaults {
             .into_iter()
             .flatten()
             .max_by_key(|f| f.stamp)
-            .or(overrun)?;
-        Some(((chosen.stamp, chosen.fault()), seen))
+            .or(overrun);
+        Ok(chosen.map(|chosen| ((chosen.stamp, chosen.fault()), seen)))
     }
 
     /// Returns a copy of the most recent fault, if any.
@@ -364,6 +378,8 @@ impl StreamFaults {
     pub fn last(&self) -> Option<StreamFault> {
         let slots = self.last_guard();
         self.newest(slots.floor, u64::MAX)
+            .ok()
+            .flatten()
             .map(|((_, fault), _)| fault)
     }
 
@@ -374,19 +390,36 @@ impl StreamFaults {
     /// What it forgets is what existed when it began (one snapshot of the
     /// stamp counter): the fault it returns and anything older, an overrun it
     /// outranked included. A fault recorded after the snapshot is reported by
-    /// the next [`last`](Self::last). Like `last`, it answers `None` and
-    /// forgets nothing when a cell is mid-write.
-    pub fn take_last(&self) -> Option<StreamFault> {
+    /// the next [`last`](Self::last).
+    ///
+    /// `Ok(None)` is an answer: nothing newer than what was taken. It is also
+    /// what a counted fault whose text was lost leaves (a second thread wrote
+    /// the same cell at that instant), so a caller that advances its seen count
+    /// on `Ok(None)` does not spin on it. [`Lagging`] is not an answer: a cell
+    /// was mid-write after the retries, nothing was taken or forgotten, and the
+    /// caller asks again.
+    ///
+    /// One window remains across cells: a fault stamped and not yet written in
+    /// one cell, older than a fault another cell already holds, is hidden by
+    /// the take that reports the newer one (its count stands). Stamps in one
+    /// cell rise in write order, so a cell never hides its own.
+    ///
+    /// # Errors
+    ///
+    /// [`Lagging`], as above.
+    pub fn take_last(&self) -> Result<Option<StreamFault>, Lagging> {
         self.take_up_to(self.order.load(Ordering::Acquire))
     }
 
     /// [`take_last`](Self::take_last) over the faults stamped `ceiling` or
     /// less.
-    fn take_up_to(&self, ceiling: u64) -> Option<StreamFault> {
+    fn take_up_to(&self, ceiling: u64) -> Result<Option<StreamFault>, Lagging> {
         let mut slots = self.last_guard();
-        let ((_, fault), seen) = self.newest(slots.floor, ceiling)?;
+        let Some(((_, fault), seen)) = self.newest(slots.floor, ceiling)? else {
+            return Ok(None);
+        };
         slots.floor = slots.floor.max(seen);
-        Some(fault)
+        Ok(Some(fault))
     }
 
     /// Records a fault from the backend's error callback: `kind` is the
@@ -479,16 +512,17 @@ impl StreamFaults {
     }
 
     /// Writes `text` as a fault of `kind` into the kind's cell, then raises the
-    /// latch and counts. The stamp comes first, so a fault written after
-    /// another is newer; a reader that sees the count sees the record.
+    /// latch and counts. A reader that sees the count sees the record, unless
+    /// another thread was writing the same cell, whose loser loses its text and
+    /// keeps its count.
     fn publish(&self, kind: StreamFaultKind, text: &dyn Display) {
-        let stamp = self.order.fetch_add(1, Ordering::Relaxed) + 1;
+        let sink = RtFault::render(text);
         let cell = match kind {
             StreamFaultKind::CallbackPanicked => &self.panic,
             StreamFaultKind::Overrun => &self.overrun,
             StreamFaultKind::Disconnected | StreamFaultKind::Backend => &self.backend,
         };
-        cell.write(RtFault::new(stamp, kind, text));
+        cell.write(&self.order, kind, sink);
         self.raise_and_count(kind);
     }
 

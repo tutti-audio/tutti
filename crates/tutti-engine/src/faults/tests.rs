@@ -225,7 +225,14 @@ fn take_last_forgets_everything_recorded_so_far() {
     let faults = StreamFaults::new();
     faults.record(BackendErrorKind::Other, &"xrun");
     faults.record_overrun("late");
-    assert_eq!(faults.take_last().expect("a fault").message, "xrun");
+    assert_eq!(
+        faults
+            .take_last()
+            .expect("not lagging")
+            .expect("a fault")
+            .message,
+        "xrun"
+    );
     assert!(faults.last().is_none(), "the overrun it outranked is gone");
     faults.record_overrun("later");
     assert_eq!(faults.last().expect("a fault").message, "later");
@@ -255,14 +262,25 @@ fn a_fault_after_take_lasts_snapshot_is_reported_by_the_next_last() {
     let snapshot = faults.order.load(Ordering::Acquire);
     faults.record_panic("late");
     assert_eq!(
-        faults.take_up_to(snapshot).expect("a fault").message,
+        faults
+            .take_up_to(snapshot)
+            .expect("not lagging")
+            .expect("a fault")
+            .message,
         "old",
         "the later panic is past the snapshot"
     );
     let last = faults.last().expect("the late fault survives the take");
     assert_eq!(last.kind, StreamFaultKind::CallbackPanicked);
     assert_eq!(last.message, "late");
-    assert_eq!(faults.take_last().expect("a fault").message, "late");
+    assert_eq!(
+        faults
+            .take_last()
+            .expect("not lagging")
+            .expect("a fault")
+            .message,
+        "late"
+    );
     assert!(faults.last().is_none());
 }
 
@@ -318,7 +336,7 @@ fn render_side_writers_and_a_control_reader_agree_on_priority_and_lose_nothing()
                         other => panic!("a kind nobody recorded: {other:?}"),
                     }
                 }
-                if let Some(fault) = faults.take_last() {
+                if let Ok(Some(fault)) = faults.take_last() {
                     let expected = match fault.kind {
                         StreamFaultKind::CallbackPanicked => "a panic",
                         StreamFaultKind::Overrun => "an overrun",
@@ -336,10 +354,100 @@ fn render_side_writers_and_a_control_reader_agree_on_priority_and_lose_nothing()
 
     assert_eq!(faults.count(), 2 * RAISES, "every raise was counted");
     // One more of each, with no reader: the panic outranks the later overrun.
-    faults.take_last();
+    let _ = faults.take_last();
     faults.record_panic("final panic");
     faults.record_overrun("final overrun");
     let last = faults.last().expect("a fault");
     assert_eq!(last.kind, StreamFaultKind::CallbackPanicked);
     assert_eq!(last.message, "final panic");
+}
+
+/// **Nothing to take is an answer, not a lag:** an empty record and a record
+/// already taken both answer `Ok(None)`, so a caller that moves its seen count
+/// on `Ok(None)` is not left retrying.
+#[test]
+fn take_last_with_nothing_newer_is_ok_none() {
+    let faults = StreamFaults::new();
+    assert_eq!(faults.take_last(), Ok(None));
+    faults.record_overrun("late");
+    assert!(faults.take_last().expect("not lagging").is_some());
+    assert_eq!(faults.take_last(), Ok(None));
+}
+
+/// **Two writers on the same cell lose no count, and no text but a loser's:**
+/// two threads raise panics at once (the `try_borrow_mut` loser path: a
+/// collision drops its text, never its count) while a third raises overruns
+/// and the control side calls `last`. Every message read is one writer's whole
+/// text, the count is exact, and once a panic has been raised and returned an
+/// overrun is never what `last` answers (it lags to `None` or reports a panic).
+#[test]
+fn two_writers_on_one_cell_keep_the_count_and_whole_texts() {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::thread;
+
+    const RAISES: u64 = 20_000;
+    let faults = Arc::new(StreamFaults::new());
+    let panics_returned = Arc::new(AtomicU64::new(0));
+    let stop = Arc::new(AtomicBool::new(false));
+
+    let panic_writer = |text: &'static str| {
+        let faults = Arc::clone(&faults);
+        let returned = Arc::clone(&panics_returned);
+        thread::spawn(move || {
+            for _ in 0..RAISES {
+                faults.record_panic(text);
+                returned.fetch_add(1, Ordering::Release);
+            }
+        })
+    };
+    let a = panic_writer("panic from a");
+    let b = panic_writer("panic from b");
+    let overruns = {
+        let faults = Arc::clone(&faults);
+        thread::spawn(move || {
+            for _ in 0..RAISES {
+                faults.record_overrun("an overrun");
+            }
+        })
+    };
+    let reader = {
+        let faults = Arc::clone(&faults);
+        let returned = Arc::clone(&panics_returned);
+        let stop = Arc::clone(&stop);
+        thread::spawn(move || {
+            while !stop.load(Ordering::Acquire) {
+                let panicked = returned.load(Ordering::Acquire) > 0;
+                match faults.last() {
+                    Some(fault) if fault.kind == StreamFaultKind::CallbackPanicked => {
+                        assert!(
+                            fault.message == "panic from a" || fault.message == "panic from b",
+                            "a torn text: {:?}",
+                            fault.message
+                        );
+                    }
+                    Some(fault) => {
+                        assert!(!panicked, "an overrun reported over a returned panic");
+                        assert_eq!(fault.message, "an overrun");
+                    }
+                    None => {}
+                }
+            }
+        })
+    };
+    a.join().expect("writer a");
+    b.join().expect("writer b");
+    overruns.join().expect("overrun writer");
+    stop.store(true, Ordering::Release);
+    reader.join().expect("control reader");
+
+    assert_eq!(
+        faults.count(),
+        3 * RAISES,
+        "a lost text never loses a count"
+    );
+    assert_eq!(
+        faults.take_last().expect("not lagging").map(|f| f.kind),
+        Some(StreamFaultKind::CallbackPanicked)
+    );
 }
