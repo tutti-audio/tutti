@@ -240,7 +240,7 @@ impl Plugin {
         }
 
         let ((client, restored), handle) =
-            PluginClient::open(audio.to_bridge_config(), work, plugin, sample_rate, state).map(
+            PluginClient::open(audio.to_bridge_config()?, work, plugin, sample_rate, state).map(
                 |(client, restored)| {
                     let handle = client.handle();
                     ((client, restored), handle)

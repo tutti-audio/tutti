@@ -143,11 +143,11 @@ fn run_thread(
     let mut lanes = Lanes {
         audio: Lane {
             stream,
-            owed: Owed::default(),
+            owed: Owed::finishing(lifecycle.timeouts().drain),
         },
         control: Lane {
             stream: control,
-            owed: Owed::default(),
+            owed: Owed::finishing(lifecycle.timeouts().drain),
         },
     };
     // The control connection is also read when the server speaks unprompted
@@ -366,7 +366,10 @@ mod tests {
         use tutti_plugin_types::WireMidi;
 
         let channels = Channels::new(SampleRate::SR_48K);
-        let lifecycle = Lifecycle::new();
+        let lifecycle = Lifecycle::new(
+            Arc::new(crate::ServerWatch::new()),
+            tutti_plugin_types::Timeouts::default(),
+        );
         let mut payload = Box::new(ProcessPayload::empty());
         for _ in 0..4 {
             payload.midi_events.push(WireMidi {

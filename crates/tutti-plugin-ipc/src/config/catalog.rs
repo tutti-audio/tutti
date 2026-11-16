@@ -16,11 +16,11 @@
 //! The caller supplies `pedal_dir` and `scan_dirs` — this library has no opinion
 //! on OS conventions or app names.
 
-use super::bridge::BridgeConfig;
+use super::bridge::{BridgeConfig, RandomSourceError};
 use crate::protocol::SampleFormat;
 use std::path::PathBuf;
 use std::time::Duration;
-use tutti_plugin_types::Locator;
+use tutti_plugin_types::{Locator, Timeouts};
 
 /// Where the scanner keeps its crash sentinel and which directories to scan.
 #[derive(Debug, Clone)]
@@ -132,8 +132,8 @@ pub struct AudioConfig {
     /// a later block may not exceed it.
     pub buffer_size: usize,
 
-    /// How long to wait on a subprocess reply before erroring.
-    pub timeout: Duration,
+    /// How long each wait on a subprocess runs before erroring.
+    pub timeouts: Timeouts,
 }
 
 impl Default for AudioConfig {
@@ -141,14 +141,14 @@ impl Default for AudioConfig {
         Self {
             format: SampleFormat::Float32,
             buffer_size: 8192,
-            timeout: Duration::from_secs(5),
+            timeouts: Timeouts::default(),
         }
     }
 }
 
 impl AudioConfig {
     /// Creates the default config: 32-bit float samples, 8192-frame blocks and
-    /// a 5 s IPC timeout.
+    /// the default [`Timeouts`] (a 5 s call).
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -170,23 +170,28 @@ impl AudioConfig {
         self
     }
 
-    /// Sets how long to wait on a subprocess reply before erroring.
+    /// Sets how long each wait on a subprocess runs before erroring.
     #[must_use]
-    pub fn timeout(mut self, d: Duration) -> Self {
-        self.timeout = d;
+    pub fn timeouts(mut self, timeouts: Timeouts) -> Self {
+        self.timeouts = timeouts;
         self
     }
 
     // --- internal resolution ---
 
     /// The bridge configuration a plugin loaded under this catalog config gets.
-    pub fn to_bridge_config(&self) -> BridgeConfig {
-        BridgeConfig {
+    ///
+    /// # Errors
+    ///
+    /// The operating system's random source cannot be read, so no socket name
+    /// can be made.
+    pub fn to_bridge_config(&self) -> Result<BridgeConfig, RandomSourceError> {
+        Ok(BridgeConfig {
             preferred_format: self.format,
             max_buffer_size: self.buffer_size,
-            timeout_ms: self.timeout.as_millis() as u64,
-            ..BridgeConfig::default()
-        }
+            timeouts: self.timeouts,
+            ..BridgeConfig::new()?
+        })
     }
 }
 

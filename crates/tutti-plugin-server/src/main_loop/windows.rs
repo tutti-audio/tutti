@@ -1,6 +1,6 @@
 //! The Windows backend of the main loop: a named pipe has no `poll`, so the wait
-//! is `PeekNamedPipe` with a back-off, and the host watchdog walks the process
-//! table. A native loop (`MsgWaitForMultipleObjectsEx` over overlapped pipe I/O,
+//! is `PeekNamedPipe` with a back-off, and the host watchdog is a thread asking the OS
+//! whether the recorded host still runs. A native loop (`MsgWaitForMultipleObjectsEx` over overlapped pipe I/O,
 //! which also pumps the Win32 message queue a floating editor needs) replaces the
 //! wait and the pump together, without touching the loop's logic.
 
@@ -91,16 +91,37 @@ pub(crate) fn wait_readable(stream: &Stream, timeout: std::time::Duration) -> Br
     }
 }
 
-/// Windows counterpart of the poll loop above.
+/// The spawning host's process id, recorded once by [`record_parent_pid`]:
+/// `None` when neither the host's statement nor the process table names one.
+static HOST_PID: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
+
+/// How often the watch on the host asks whether it still runs. Also the delay
+/// between the host's death and this server's exit while an accept blocks.
+const HOST_POLL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Starts the watch on a host that dies while the accept after this blocks, and
+/// refuses the connection at once when the host is already gone.
 ///
-/// Windows named pipes expose no fd to `poll`, and `interprocess` gives no
-/// timed accept, so liveness is checked *before* committing to a blocking
-/// accept rather than interleaved with it. That is a weaker guarantee than the
-/// Unix arm: a host that dies once this process is blocked in `accept` is not
-/// noticed until it connects or the process is killed. It still covers the case
-/// that actually strands servers — the host dying between spawn and connect.
-pub(crate) fn wait_for_connection(_listener: &Listener) -> BridgeResult<()> {
-    if !parent_is_alive() {
+/// `interprocess` gives no timed accept and a named pipe no `poll`, so the
+/// accept cannot be interleaved with a check: the returned [`Watching`] is a
+/// thread that asks the OS whether the host still runs every [`HOST_POLL`] and
+/// ends this process when it does not, until the accept returns and the guard
+/// drops. A host that dies after it connected is the pipe's EOF, read by the
+/// loop.
+///
+/// A server whose host is unknown (no statement in the environment and no
+/// parent in the process table) cannot watch it: that is logged by name, and
+/// the accept waits as it did before, with only the host's connection to end
+/// it.
+pub(crate) fn wait_for_connection(_listener: &Listener) -> BridgeResult<super::Watching> {
+    let Some(host) = HOST_PID.get().copied().flatten() else {
+        tracing::warn!(
+            "the host's process id is unknown: this server cannot notice a host that dies \
+             before it connects"
+        );
+        return Ok(super::Watching::nothing());
+    };
+    if !tutti_plugin_ipc_ffi::process_exists(host) {
         tracing::info!("host process is gone before it connected; exiting rather than waiting");
         return Err(std::io::Error::new(
             std::io::ErrorKind::ConnectionAborted,
@@ -108,35 +129,48 @@ pub(crate) fn wait_for_connection(_listener: &Listener) -> BridgeResult<()> {
         )
         .into());
     }
-    Ok(())
+    let armed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let watch = std::sync::Arc::clone(&armed);
+    let spawned = std::thread::Builder::new()
+        .name("host-watchdog".to_string())
+        .spawn(move || {
+            while watch.load(std::sync::atomic::Ordering::Acquire) {
+                std::thread::sleep(HOST_POLL);
+                if watch.load(std::sync::atomic::Ordering::Acquire)
+                    && !tutti_plugin_ipc_ffi::process_exists(host)
+                {
+                    tracing::info!(
+                        "host process is gone while the server waits to accept; exiting"
+                    );
+                    std::process::exit(1);
+                }
+            }
+        });
+    if let Err(e) = spawned {
+        tracing::warn!("the host watchdog cannot start: {e}");
+        return Ok(super::Watching::nothing());
+    }
+    // The watch runs while the flag holds: the guard's drop clears it.
+    Ok(super::Watching(Some(armed)))
 }
 
-/// Windows records nothing: the parent's id is read from the process table when
-/// it is asked.
-pub(crate) fn record_parent_pid() {}
-
-/// Whether the spawning host process is still running.
+/// Records the spawning host's process id: the host's own statement in
+/// [`HOST_PID_ENV`](super::HOST_PID_ENV), else the parent in the process table.
 ///
-/// Windows has no `getppid` and, crucially, **does not reparent orphans**: the
-/// parent PID recorded for this process stays whatever it was, pointing at a
-/// dead process rather than at init. So the Unix trick of comparing against
-/// pid 1 has no analogue, and the check is necessarily two steps — find the
-/// parent PID by walking the process table, then ask whether that PID is alive.
+/// Windows does not reparent orphans, so the table's parent stays whatever it
+/// was, pointing at a dead process, which is why [`process_exists`] is the
+/// question asked of it. A process id can be reused, so a host that died and
+/// whose id was recycled reads as running: that errs toward waiting, the safe
+/// direction. **"Cannot determine" means running**, on every path: only a
+/// positive answer is a death.
 ///
-/// PIDs are reused on Windows, so a false *positive* is possible if the parent
-/// died and its PID was recycled before this ran. That errs toward waiting,
-/// which is the safe direction: this check exists to stop stranded servers, and
-/// a stranded server is better than one that exits while its host is still
-/// coming up.
-///
-/// **"Cannot determine" therefore means alive, on every path** — only a positive
-/// answer counts as death. Treating a failed `OpenProcess` as death is wrong in
-/// exactly the case most likely to occur: it returns null for *access denied* as
-/// readily as for *no such process*, so a host at a higher integrity level than
-/// its own plugin server (a UAC-elevated DAW) would have every server decide it
-/// was orphaned and exit at startup. Telling the two apart needs `GetLastError`,
-/// so it is consulted rather than assumed.
-fn parent_is_alive() -> bool {
-    // Could not determine the parent: assume alive and keep waiting.
-    tutti_plugin_ipc_ffi::parent_process_id().is_none_or(tutti_plugin_ipc_ffi::process_exists)
+/// [`process_exists`]: tutti_plugin_ipc_ffi::process_exists
+pub(crate) fn record_parent_pid() {
+    HOST_PID.get_or_init(|| {
+        std::env::var(super::HOST_PID_ENV)
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .filter(|&pid| pid > 0)
+            .or_else(tutti_plugin_ipc_ffi::parent_process_id)
+    });
 }

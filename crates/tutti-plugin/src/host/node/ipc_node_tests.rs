@@ -343,7 +343,7 @@ fn a_served_plugin_reopens_and_restores_off_the_main_thread() {
     let mut env = tutti_fixtures::ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     let first = Ipc::launch(
-        BridgeConfig::default(),
+        BridgeConfig::new().expect("the OS has a random source"),
         tutti_fixtures::clap_probe().to_path_buf(),
         tutti_plugin_types::PluginFormat::Clap,
         tutti_plugin_types::Load::new(),
@@ -398,7 +398,7 @@ fn a_chosen_plugin_is_the_one_a_reopen_loads() {
         .to_str()
         .expect("utf-8");
     let first = Ipc::launch(
-        BridgeConfig::default(),
+        BridgeConfig::new().expect("the OS has a random source"),
         tutti_fixtures::clap_probe().to_path_buf(),
         tutti_plugin_types::PluginFormat::Clap,
         Load::new().plugin(second),

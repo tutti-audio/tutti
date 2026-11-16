@@ -29,6 +29,7 @@ mod ipc;
 mod offline_wait;
 mod process_guard;
 mod protocol;
+mod server_watch;
 mod subprocess;
 mod transport;
 
@@ -44,7 +45,9 @@ pub use client::{EditorLoader, PluginBridge};
 // fills it the way the node does.
 #[doc(hidden)]
 pub use client::audio::{PARAM_BUFFERS, PayloadPool};
-pub use config::{AudioConfig, BridgeConfig, CatalogConfig, NO_SCAN_DIRS, unique_socket_path};
+pub use config::{
+    AudioConfig, BridgeConfig, CatalogConfig, NO_SCAN_DIRS, RandomSourceError, unique_socket_path,
+};
 pub use error::PluginRenderFault;
 pub use ipc::{Ipc, IpcController, IpcOrigin, IpcParts, IpcProcessor, Launched};
 pub use offline_wait::OfflineWait;
@@ -54,6 +57,7 @@ pub use protocol::{
     BridgeMessage, HostMessage, MAX_FRAME_BYTES, MAX_STATE_BYTES, PROTOCOL_VERSION,
     ProcessAudioData, STATE_CHUNK_BYTES, SlabLayout, StagedState,
 };
+pub use server_watch::ServerWatch;
 pub use subprocess::{LaunchedServer, Reaped, launch};
 pub use transport::control::socket_name;
 pub use transport::shm::{AudioSlab, RING_SLOTS, SlabLayoutError, SlabWriter};

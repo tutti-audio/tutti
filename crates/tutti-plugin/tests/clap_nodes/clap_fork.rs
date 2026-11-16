@@ -36,7 +36,7 @@ use tutti_graph::{
 };
 use tutti_graph::{OutPort, Source};
 use tutti_plugin::handles::PluginClient;
-use tutti_plugin::{BridgeConfig, PluginRenderFault};
+use tutti_plugin::{BridgeConfig, PluginRenderFault, Timeouts};
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::PluginForkError;
 use tutti_plugin_types::{Normalized, ParamId};
@@ -463,8 +463,11 @@ fn a_fork_whose_server_hangs_is_a_timed_out_fault_after_one_budget() {
     let _lock = machine_lock();
     let _env = env();
     let config = BridgeConfig {
-        timeout_ms: 1_000,
-        ..BridgeConfig::default()
+        timeouts: Timeouts {
+            call: Duration::from_secs(1),
+            ..Timeouts::default()
+        },
+        ..BridgeConfig::new().expect("the OS has a random source")
     };
     let probe = load_probe_with(config, SAMPLE_RATE);
     let _hang = ProbeEnv::new().block_from(5);
@@ -681,8 +684,11 @@ fn an_export_through_a_failing_fork_fails_by_name() {
     let _lock = machine_lock();
     let _env = env();
     let config = BridgeConfig {
-        timeout_ms: 1_000,
-        ..BridgeConfig::default()
+        timeouts: Timeouts {
+            call: Duration::from_secs(1),
+            ..Timeouts::default()
+        },
+        ..BridgeConfig::new().expect("the OS has a random source")
     };
     let probe = load_probe_with(config, SAMPLE_RATE);
     probe.client.set_parameter(GAIN, gain_at(-6.0));

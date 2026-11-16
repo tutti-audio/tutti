@@ -34,7 +34,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tutti_fixtures::main_thread;
-use tutti_plugin_types::{BridgeError, PluginFailure, StateError};
+use tutti_plugin_types::{BridgeError, PluginFailure, StateError, Timeouts};
 use tutti_types::SampleRate;
 
 use interprocess::local_socket::{ListenerOptions, Stream, traits::Listener as _};
@@ -46,8 +46,10 @@ use interprocess::local_socket::{ListenerOptions, Stream, traits::Listener as _}
 /// finite so a genuine hang is a failure rather than a hung test run.
 const NOTICE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The real deadline, used by every mock that is not testing the deadline.
-const PRODUCTION_STATE_PROGRESS_TIMEOUT: Duration = Duration::from_secs(10);
+/// What the host adds to a bridge deadline before it gives up on an answer, in
+/// these tests: shorter than production's, so a test of a timeout does not wait
+/// out the real margin.
+const REPLY_MARGIN: Duration = Duration::from_millis(200);
 
 /// The shortened deadline the stall tests run with (the slow-transfer test has
 /// its own, wider one).
@@ -56,6 +58,15 @@ const PRODUCTION_STATE_PROGRESS_TIMEOUT: Duration = Duration::from_secs(10);
 /// in a fraction of a second, and comfortably over the 20 ms poll interval so a
 /// scheduling hiccup does not read as a stall.
 const STATE_PROGRESS_TIMEOUT: Duration = Duration::from_millis(400);
+
+/// The default [`Timeouts`] with the wait for a rate change's answer set to
+/// `ms` milliseconds.
+fn rate_timeout(ms: u64) -> Timeouts {
+    Timeouts {
+        rate: Duration::from_millis(ms),
+        ..Timeouts::default()
+    }
+}
 
 /// Poll `cond` until it holds, or [`NOTICE_TIMEOUT`] passes.
 ///
@@ -325,7 +336,7 @@ impl MockServer {
         // and it is exactly the "big state fails as a timeout" shape this change
         // exists to remove. Shortening the deadline by default would reintroduce
         // it in miniature.
-        Self::start_with_state_progress_timeout(label, PRODUCTION_STATE_PROGRESS_TIMEOUT, respond)
+        Self::start_with_timeouts(label, Timeouts::default(), respond)
     }
 
     /// As [`start`](Self::start), with an explicit state-transfer progress
@@ -337,10 +348,28 @@ impl MockServer {
     /// exactly the kind of slow test that gets deleted rather than fixed.
     fn start_with_state_progress_timeout(
         label: &str,
-        state_progress_timeout: Duration,
+        state_progress: Duration,
         respond: impl Fn(HostMessage) -> Action + Send + 'static,
     ) -> Self {
-        let path = unique_socket_path();
+        let timeouts = Timeouts {
+            state_progress,
+            ..Timeouts::default()
+        };
+        Self::start_with_timeouts(label, timeouts, respond)
+    }
+
+    /// As [`start`](Self::start), under `timeouts` (with [`REPLY_MARGIN`] as
+    /// the margin).
+    fn start_with_timeouts(
+        label: &str,
+        timeouts: Timeouts,
+        respond: impl Fn(HostMessage) -> Action + Send + 'static,
+    ) -> Self {
+        let timeouts = Timeouts {
+            reply_margin: REPLY_MARGIN,
+            ..timeouts
+        };
+        let path = unique_socket_path().expect("the OS has a random source");
         let _ = std::fs::remove_file(&path);
         let name = crate::transport::control::socket_name(&path).expect("socket name");
         let listener = ListenerOptions::new()
@@ -354,7 +383,7 @@ impl MockServer {
                 .expect("create slab")
                 .slab(),
         );
-        let (bridge, thread) = PluginBridge::new_with_state_progress_timeout(
+        let (bridge, thread) = PluginBridge::new(
             path.clone(),
             slab,
             tutti_plugin_types::Origin::new("test.vst3", tutti_plugin_types::Load::new()),
@@ -364,7 +393,8 @@ impl MockServer {
                 tutti_fixtures::detached_work(),
             )),
             SampleRate::SR_48K,
-            state_progress_timeout,
+            Arc::new(crate::ServerWatch::new()),
+            timeouts,
         )
         .expect("bridge");
 
@@ -1082,13 +1112,13 @@ fn a_refused_rate_is_reported_without_crashing_the_bridge() {
 }
 
 /// **A rate change that is not answered in time is a refusal, not a crash, and
-/// its late answer settles it.** The wait is shortened to 300 ms; the server
+/// its late answer settles it.** The wait is 300 ms; the server
 /// answers (accepted) after 800 ms. In between the bridge reports the refusal
 /// ("did not answer") and stays healthy; the late reply is taken off the stream
 /// and clears it.
 #[test]
 fn an_unanswered_rate_change_is_a_refusal_and_its_late_answer_clears_it() {
-    let mock = MockServer::start("late_rate", |msg| match msg {
+    let mock = MockServer::start_with_timeouts("late_rate", rate_timeout(300), |msg| match msg {
         HostMessage::SetSampleRate { rate } => Action::ReplyManySlowly {
             msgs: vec![BridgeMessage::SampleRateSet { rate, error: None }],
             gap: Duration::from_millis(800),
@@ -1100,7 +1130,6 @@ fn an_unanswered_rate_change_is_a_refusal_and_its_late_answer_clears_it() {
         }
         _ => Action::Silent,
     });
-    mock.bridge.set_rate_timeout(Duration::from_millis(300));
     assert!(mock.bridge.set_sample_rate_rt(SampleRate::SR_96K));
     assert!(wait_until(|| mock.bridge.rate_refusal().is_some()));
     let (rate, reason) = mock.bridge.rate_refusal().unwrap();
@@ -1128,14 +1157,14 @@ fn an_unanswered_rate_change_is_a_refusal_and_its_late_answer_clears_it() {
 }
 
 /// **A late answer is applied in stream order.** Rate change A times out
-/// (300 ms), then B is sent. The server answers A (accepted) while B waits,
+/// (1 s), then B is sent. The server answers A (accepted) while B waits,
 /// then B ("no") at once. B's answer is the later one in the stream and wins:
 /// the refusal stands, naming B's rate. Applied after B (the late answer parked
 /// until the command ended) A's success cleared B's refusal.
 ///
 /// The order is made by handshakes, not by delays. The server holds A's answer
 /// until the test has seen A refused, so A has timed out first. B's wait is
-/// 30 s, which B's reply (a loopback write once released) cannot miss. The
+/// the same 1 s, which B's reply (a loopback write once released) cannot miss. The
 /// barrier is a round trip behind B: the bridge handles commands one at a
 /// time, so B's command, and anything it applies when it ends, is done before
 /// the barrier returns.
@@ -1143,33 +1172,33 @@ fn an_unanswered_rate_change_is_a_refusal_and_its_late_answer_clears_it() {
 fn a_late_rate_answer_does_not_override_a_later_one() {
     let calls = std::sync::atomic::AtomicU32::new(0);
     let (release, released) = std::sync::mpsc::channel::<()>();
-    let mock = MockServer::start("late_then_refused", move |msg| match msg {
-        HostMessage::SetSampleRate { rate } => {
-            if calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
-                // A: accepted, but only once the test has seen the bridge give up.
-                if released.recv().is_err() {
-                    return Action::Silent;
+    let mock =
+        MockServer::start_with_timeouts("late_then_refused", rate_timeout(1_000), move |msg| {
+            match msg {
+                HostMessage::SetSampleRate { rate } => {
+                    if calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                        // A: accepted, but only once the test has seen the bridge give up.
+                        if released.recv().is_err() {
+                            return Action::Silent;
+                        }
+                        Action::Reply(Box::new(BridgeMessage::SampleRateSet { rate, error: None }))
+                    } else {
+                        Action::Reply(Box::new(BridgeMessage::SampleRateSet {
+                            rate,
+                            error: Some("no".to_string()),
+                        }))
+                    }
                 }
-                Action::Reply(Box::new(BridgeMessage::SampleRateSet { rate, error: None }))
-            } else {
-                Action::Reply(Box::new(BridgeMessage::SampleRateSet {
-                    rate,
-                    error: Some("no".to_string()),
-                }))
+                HostMessage::GetParameter { .. } => {
+                    Action::Reply(Box::new(BridgeMessage::ParameterValue {
+                        value: Some(Normalized::of(0.5)),
+                    }))
+                }
+                _ => Action::Silent,
             }
-        }
-        HostMessage::GetParameter { .. } => {
-            Action::Reply(Box::new(BridgeMessage::ParameterValue {
-                value: Some(Normalized::of(0.5)),
-            }))
-        }
-        _ => Action::Silent,
-    });
-    mock.bridge.set_rate_timeout(Duration::from_millis(300));
+        });
     assert!(mock.bridge.set_sample_rate_rt(SampleRate::SR_96K));
     assert!(wait_until(|| mock.bridge.rate_refusal().is_some()));
-    // Only A's release gates B's answer, so B's wait is far beyond any stall.
-    mock.bridge.set_rate_timeout(Duration::from_secs(30));
     // B, queued behind A's wait; its answer follows A's on the stream.
     assert!(mock.bridge.set_sample_rate_rt(SampleRate::SR_88K2));
     release.send(()).expect("the mock is listening");

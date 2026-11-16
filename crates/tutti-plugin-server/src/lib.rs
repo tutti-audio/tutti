@@ -40,10 +40,7 @@
 //!
 //! // `max_buffer_size` is in frames and sizes the shared-memory slab, so a later
 //! // block may not exceed it. The other fields keep their defaults.
-//! let config = BridgeConfig {
-//!     socket_path: std::env::args().nth(1).expect("socket path").into(),
-//!     ..Default::default()
-//! };
+//! let config = BridgeConfig::at(std::env::args().nth(1).expect("socket path").into());
 //!
 //! PluginServer::new(config)
 //!     .expect("record parent pid")
@@ -51,9 +48,9 @@
 //!     .expect("session");
 //! ```
 //!
-//! Always set `socket_path` to the path the host chose: `BridgeConfig::default`
-//! derives a unique path per call, which could never meet the host that spawned
-//! this process.
+//! The server's path is the one the host chose (`BridgeConfig::at`):
+//! `BridgeConfig::new` derives a unique path per call, which could never meet
+//! the host that spawned this process.
 //!
 //! [`BridgeConfig`] is re-exported from
 //! `tutti-plugin-ipc`, and `BridgeError` is `tutti-plugin-types`'; the wire protocol

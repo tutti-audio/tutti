@@ -34,7 +34,7 @@ fn the_served_control_and_any_thread_answer_alike() {
     let mut env = tutti_fixtures::ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", plugin_server_path());
     let Launched { ipc, .. } = Ipc::launch(
-        BridgeConfig::default(),
+        BridgeConfig::new().expect("the OS has a random source"),
         tutti_fixtures::clap_probe().to_path_buf(),
         tutti_plugin_types::PluginFormat::Clap,
         tutti_plugin_types::Load::new(),
@@ -113,7 +113,7 @@ fn a_live_served_load_reaches_the_plugin_in_the_context_it_names() {
     env.set("TUTTI_PLUGIN_SERVER", plugin_server_path());
     env.set("TUTTI_CLAP_PROBE_LOAD_ONLY_CONTEXT", "2");
     let Launched { ipc, .. } = Ipc::launch(
-        BridgeConfig::default(),
+        BridgeConfig::new().expect("the OS has a random source"),
         tutti_fixtures::clap_probe().to_path_buf(),
         tutti_plugin_types::PluginFormat::Clap,
         tutti_plugin_types::Load::new(),
@@ -159,7 +159,7 @@ fn a_client_with_no_editor_loader_asks_the_real_server_for_its_editor() {
     let mut env = tutti_fixtures::ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", plugin_server_path());
     let Launched { mut ipc, .. } = Ipc::launch(
-        BridgeConfig::default(),
+        BridgeConfig::new().expect("the OS has a random source"),
         tutti_fixtures::clap_probe().to_path_buf(),
         tutti_plugin_types::PluginFormat::Clap,
         tutti_plugin_types::Load::new(),
@@ -200,7 +200,7 @@ fn a_served_bypass_write_is_lost_when_the_link_is_dead() {
     let mut env = tutti_fixtures::ScopedEnv::new();
     env.set("TUTTI_PLUGIN_SERVER", plugin_server_path());
     let Launched { ipc, .. } = Ipc::launch(
-        BridgeConfig::default(),
+        BridgeConfig::new().expect("the OS has a random source"),
         tutti_fixtures::clap_probe().to_path_buf(),
         tutti_plugin_types::PluginFormat::Clap,
         tutti_plugin_types::Load::new(),

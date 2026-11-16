@@ -4,6 +4,20 @@
 use crate::protocol::SampleFormat;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use thiserror::Error;
+use tutti_plugin_types::{BridgeError, Timeouts};
+
+/// The operating system's random source could not be read, so no name that
+/// another local user cannot guess can be made.
+#[derive(Error, Debug)]
+#[error("the operating system's random source is unreadable: {0}")]
+pub struct RandomSourceError(getrandom::Error);
+
+impl From<RandomSourceError> for BridgeError {
+    fn from(e: RandomSourceError) -> Self {
+        Self::Io(std::io::Error::other(e))
+    }
+}
 
 /// A socket path no other bridge will pick, and no other user can guess.
 ///
@@ -24,15 +38,14 @@ use std::path::PathBuf;
 /// macOS's per-user `/var/folders/…/T/`) moves the socket rather than failing
 /// the launch.
 ///
-/// # Panics
+/// # Errors
 ///
-/// If the operating system has no random source to read (`getrandom` fails).
-#[must_use]
-pub fn unique_socket_path() -> PathBuf {
-    socket_path_in(
+/// The operating system's random source cannot be read.
+pub fn unique_socket_path() -> Result<PathBuf, RandomSourceError> {
+    Ok(socket_path_in(
         &std::env::temp_dir(),
-        &format!("{}.sock", unique_name("tutti-bridge")),
-    )
+        &format!("{}.sock", unique_name("tutti-bridge")?),
+    ))
 }
 
 /// The longest socket path every Unix takes: `sun_path` is 104 bytes on macOS
@@ -67,17 +80,17 @@ fn socket_path_in(temp: &std::path::Path, name: &str) -> PathBuf {
 /// One count for both, so no two names this process makes are alike
 /// whatever their stems.
 ///
-/// # Panics
+/// # Errors
 ///
-/// If the operating system has no random source to read.
-pub(crate) fn unique_name(stem: &str) -> String {
+/// The operating system's random source cannot be read.
+pub(crate) fn unique_name(stem: &str) -> Result<String, RandomSourceError> {
     static COUNTER: tutti_types::Mint = tutti_types::Mint::new();
-    format!(
+    Ok(format!(
         "{stem}-{}-{}-{}",
         std::process::id(),
         COUNTER.mint(),
-        unguessable(),
-    )
+        unguessable()?,
+    ))
 }
 
 /// Sixteen hex digits from the operating system's random source, for a name in
@@ -86,13 +99,13 @@ pub(crate) fn unique_name(stem: &str) -> String {
 /// guessing is not an attack, short enough that a macOS socket path (104 bytes,
 /// under a long per-user temporary directory) still fits.
 ///
-/// # Panics
+/// # Errors
 ///
-/// If the operating system has no random source to read.
-fn unguessable() -> String {
+/// The operating system's random source cannot be read.
+fn unguessable() -> Result<String, RandomSourceError> {
     let mut bytes = [0u8; 8];
-    getrandom::fill(&mut bytes).expect("the operating system's random source is readable");
-    format!("{:016x}", u64::from_ne_bytes(bytes))
+    getrandom::fill(&mut bytes).map_err(RandomSourceError)?;
+    Ok(format!("{:016x}", u64::from_ne_bytes(bytes)))
 }
 
 /// Low-level settings for one plugin-server connection.
@@ -102,8 +115,10 @@ fn unguessable() -> String {
 /// `BridgeConfig` from it. `tutti-plugin-server` takes one to know where to
 /// listen.
 ///
-/// The default uses a fresh, unique socket path, the `tutti_audio_` slab
-/// prefix, 8192-frame blocks, a 5000 ms timeout and 32-bit float samples.
+/// [`new`](Self::new) uses a fresh, unique socket path, the `tutti_audio_` slab
+/// prefix, 8192-frame blocks, the default [`Timeouts`] and 32-bit float
+/// samples. There is no `Default`: a fresh path needs the operating system's
+/// random source, which can fail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BridgeConfig {
     /// Local-socket path this bridge's host/server pair meet on (on Windows,
@@ -118,28 +133,39 @@ pub struct BridgeConfig {
     /// Largest block, in **frames**, the plugin will be asked to process. Sizes
     /// the slab, so a later block may not exceed it.
     pub max_buffer_size: usize,
-    /// How long to wait on a subprocess reply before erroring, in milliseconds.
-    pub timeout_ms: u64,
+    /// How long each wait on the subprocess runs before erroring.
+    pub timeouts: Timeouts,
     /// Sample format to request; the subprocess replies with what it negotiated.
     #[serde(default)]
     pub preferred_format: SampleFormat,
 }
 
-impl Default for BridgeConfig {
-    /// **`socket_path` is unique per call, not a constant.**
+impl BridgeConfig {
+    /// A configuration with a socket path no other bridge uses.
     ///
-    /// A fixed path would make every `..BridgeConfig::default()` a latent
-    /// collision — the second bridge to bind unlinks the first's live socket,
-    /// and the symptom is a plugin dying when an unrelated plugin is unloaded.
-    /// A default that is safe only when overridden is not a default: deriving it
-    /// here means a caller must go out of its way to *create* a collision rather
+    /// **`socket_path` is unique per call, not a constant.** A fixed path would
+    /// make every `..BridgeConfig::new()` a latent collision: the second
+    /// bridge to bind unlinks the first's live socket, and the symptom is a
+    /// plugin dying when an unrelated plugin is unloaded. Deriving it here
+    /// means a caller must go out of its way to *create* a collision rather
     /// than to avoid one.
-    fn default() -> Self {
+    ///
+    /// # Errors
+    ///
+    /// The operating system's random source cannot be read.
+    pub fn new() -> Result<Self, RandomSourceError> {
+        Ok(Self::at(unique_socket_path()?))
+    }
+
+    /// A configuration whose bridge meets its server at `socket_path`, the
+    /// path the other side chose: the server's, which is told it.
+    #[must_use]
+    pub fn at(socket_path: PathBuf) -> Self {
         Self {
-            socket_path: unique_socket_path(),
+            socket_path,
             shm_prefix: "tutti_audio_".to_string(),
             max_buffer_size: 8192,
-            timeout_ms: 5000,
+            timeouts: Timeouts::default(),
             preferred_format: SampleFormat::Float32,
         }
     }
@@ -149,16 +175,16 @@ impl Default for BridgeConfig {
 mod tests {
     use super::*;
 
-    /// Asserted on `default()` itself rather than on `unique_socket_path`: the
-    /// property that matters is that a *default* config does not collide, and a
-    /// test of the helper alone passes even when `default()` stops calling it.
+    /// Asserted on `new()` itself rather than on `unique_socket_path`: the
+    /// property that matters is that a fresh config does not collide, and a
+    /// test of the helper alone passes even when `new()` stops calling it.
     #[test]
-    fn each_default_config_gets_its_own_socket_path() {
-        let a = BridgeConfig::default();
-        let b = BridgeConfig::default();
+    fn each_new_config_gets_its_own_socket_path() {
+        let a = BridgeConfig::new().expect("the OS has a random source");
+        let b = BridgeConfig::new().expect("the OS has a random source");
         assert_ne!(
             a.socket_path, b.socket_path,
-            "two default configs share a socket path: the second bridge to bind \
+            "two fresh configs share a socket path: the second bridge to bind \
              will unlink the first's live socket"
         );
     }
@@ -166,10 +192,10 @@ mod tests {
     /// The socket's name carries sixty-four random bits, so another local user
     /// cannot predict it and bind it first. The pid and the
     /// counter alone keep names unique, which is why
-    /// `each_default_config_gets_its_own_socket_path` cannot see this.
+    /// `each_new_config_gets_its_own_socket_path` cannot see this.
     #[test]
     fn the_socket_name_has_an_unguessable_part() {
-        let path = unique_socket_path();
+        let path = unique_socket_path().expect("a random source");
         let stem = path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -177,7 +203,11 @@ mod tests {
         let random = stem.rsplit('-').next().expect("a last field");
         assert_eq!(random.len(), 16, "{stem}");
         assert!(random.chars().all(|c| c.is_ascii_hexdigit()), "{stem}");
-        assert_ne!(unguessable(), unguessable(), "two draws should differ");
+        assert_ne!(
+            unguessable().expect("a random source"),
+            unguessable().expect("a random source"),
+            "two draws should differ"
+        );
     }
 
     /// A temporary directory too deep for a socket address moves the socket
@@ -194,7 +224,10 @@ mod tests {
         let base = tempfile::tempdir().expect("a temporary directory");
         let deep = base.path().join("d".repeat(SOCKET_PATH_MAX));
         std::fs::create_dir_all(&deep).expect("the deep directory");
-        let name = format!("{}.sock", unique_name("tutti-bridge"));
+        let name = format!(
+            "{}.sock",
+            unique_name("tutti-bridge").expect("a random source")
+        );
 
         let path = socket_path_in(&deep, &name);
         assert!(!path.starts_with(&deep), "{path:?}");
@@ -223,12 +256,12 @@ mod tests {
     #[test]
     fn partial_update_from_default_still_gets_a_unique_socket() {
         let a = BridgeConfig {
-            timeout_ms: 1,
-            ..BridgeConfig::default()
+            max_buffer_size: 1,
+            ..BridgeConfig::new().expect("the OS has a random source")
         };
         let b = BridgeConfig {
-            timeout_ms: 2,
-            ..BridgeConfig::default()
+            max_buffer_size: 2,
+            ..BridgeConfig::new().expect("the OS has a random source")
         };
         assert_ne!(a.socket_path, b.socket_path);
     }

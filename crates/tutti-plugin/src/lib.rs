@@ -371,7 +371,7 @@ pub use tutti_plugin_ipc::BridgeConfig;
 // makes it once, on its UI thread, with `MainThreadMarker::new`. `MainWork` is the
 // collector a host runs on that thread, and `MainWorkHandle` what a plugin it loads
 // defers its close through.
-pub use tutti_plugin_types::{MainThreadMarker, MainWork, MainWorkHandle};
+pub use tutti_plugin_types::{MainThreadMarker, MainWork, MainWorkHandle, Timeouts};
 // `PluginClient::set_automation_state` takes this, so callers must be able to
 // name it without depending on tutti-plugin-types directly.
 pub use tutti_plugin_types::AutomationMode;

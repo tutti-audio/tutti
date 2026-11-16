@@ -30,7 +30,7 @@ fn handle_over(
     loaded: LoadedPlugin,
 ) -> PluginHandle {
     let guard = Arc::new(tutti_plugin_ipc::ProcessGuard::for_test(
-        tutti_plugin_ipc::BridgeConfig::default(),
+        tutti_plugin_ipc::BridgeConfig::new().expect("the OS has a random source"),
     ));
     let ipc = tutti_plugin_ipc::Ipc::new(tutti_plugin_ipc::IpcParts {
         bridge,
@@ -130,7 +130,7 @@ fn handle_with_mock_server(
 ) -> (PluginHandle, BridgeThread, std::thread::JoinHandle<()>) {
     use interprocess::local_socket::ListenerOptions;
 
-    let path = unique_socket_path();
+    let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
     let name = tutti_plugin_ipc::socket_name(&path).unwrap();
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
@@ -158,6 +158,8 @@ fn handle_with_mock_server(
             tutti_fixtures::detached_work(),
         )),
         SampleRate::SR_48K,
+        Arc::new(tutti_plugin_ipc::ServerWatch::new()),
+        tutti_plugin_types::Timeouts::default(),
     )
     .unwrap();
 
@@ -221,7 +223,7 @@ fn handle_with_multi_reply_server(
 ) {
     use interprocess::local_socket::ListenerOptions;
 
-    let path = unique_socket_path();
+    let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
     let name = tutti_plugin_ipc::socket_name(&path).unwrap();
     let listener = ListenerOptions::new().name(name).create_sync().unwrap();
@@ -249,6 +251,8 @@ fn handle_with_multi_reply_server(
             tutti_fixtures::detached_work(),
         )),
         SampleRate::SR_48K,
+        Arc::new(tutti_plugin_ipc::ServerWatch::new()),
+        tutti_plugin_types::Timeouts::default(),
     )
     .unwrap();
 

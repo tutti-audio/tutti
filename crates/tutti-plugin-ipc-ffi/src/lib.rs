@@ -10,6 +10,9 @@
 //!   layout is the ABI between them), and the only copies in and out. A mapping
 //!   exists only with its one writer, which is what makes the copies safe to
 //!   call. What the data region holds, and where, is `tutti-plugin-ipc`'s.
+//! - **The wait for a child's end** ([`ExitWait`]): the host's wait for a server
+//!   process to end, which the OS wakes (a pidfd on Linux, the process handle on
+//!   Windows).
 //! - **The OS calls** (`wait_readable` and `Poller` (the server's wait on its
 //!   socket and the descriptors a plugin asked to have watched, and an
 //!   in-process host's zero-timeout look at the same) on unix, `process_exists`, and
@@ -19,10 +22,12 @@
 //!
 //! It names no tutti crate.
 
+mod exit;
 mod header;
 mod mapping;
 mod os;
 
+pub use exit::ExitWait;
 pub use header::{Direction, RING_SLOTS, SLAB_HEADER_BYTES, SlabHeader, slot_for};
 pub use mapping::{MappingWriter, SharedMapping, remove};
 pub use os::process_exists;

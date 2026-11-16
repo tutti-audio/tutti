@@ -277,7 +277,7 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
     );
 
     let incoming = PluginClient::new(
-        tutti_plugin::BridgeConfig::default(),
+        tutti_plugin::BridgeConfig::new().expect("the OS has a random source"),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(clap_probe()).expect("a plugin file")),
         RATE,

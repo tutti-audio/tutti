@@ -1,32 +1,31 @@
-//! Shared running/crashed flags between the audio-bridge handle and the
-//! bridge thread.
+//! What the audio-bridge handle and the bridge thread share: whether the
+//! bridge runs, the server's [`ServerWatch`], the refused rate and the editor's
+//! news.
 
+use crate::ServerWatch;
 use dpi::Size;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tutti_plugin_types::PluginFailure;
+use tutti_plugin_types::{PluginFailure, Timeouts};
 use tutti_types::SampleRate;
 
 #[derive(Clone)]
 pub(super) struct Lifecycle {
     running: Arc<AtomicBool>,
-    crashed: Arc<AtomicBool>,
-    /// Why the bridge died, latched at the moment it was noticed.
+    /// Whether the server is alive, and why not: the one latch every signal of
+    /// its death sets. The bridge thread declares the stream's end and
+    /// failures here, the process guard the process's end, the host its own
+    /// verdict; the first cause stands, so a stream's death cascading into
+    /// follow-on errors keeps the first as the diagnosis.
     ///
-    /// The flag alone cannot say *why*, and the error that carried the reason
-    /// is dropped as soon as the failing call returns — so a host that asks
-    /// later gets nothing. Latching here is what lets the cause outlive the
-    /// call, and it is deliberately **not** only delivered by the crash
-    /// notification: two of the three crash sites run before a listener is
-    /// installed (`PluginBridge::new` spawns this thread, `set_listener` is
-    /// called afterwards), so a callback-only design would drop exactly the
-    /// failures a host most needs — a plugin that never connected.
-    ///
-    /// Write-once in practice: `mark_crashed` refuses to overwrite an existing
-    /// cause, so the *first* failure is kept rather than the last. A stream
-    /// death cascades into follow-on errors, and the first one is the
-    /// diagnosis.
-    cause: Arc<Mutex<Option<PluginFailure>>>,
+    /// The latch (not a notification alone) is authoritative because two of the
+    /// three crash sites run before a listener is installed
+    /// (`PluginBridge::new` spawns the thread, `set_listener` is called
+    /// afterwards), so a callback-only design would drop exactly the failures a
+    /// host most needs: a plugin that never connected.
+    watch: Arc<ServerWatch>,
+    /// Every deadline of the bridge's waits.
+    timeouts: Timeouts,
     /// The sample rate the plugin refused and why, while it is refused. Not a
     /// crash: the plugin stays loaded and is retried at every later rate
     /// change, which clears this when it takes one.
@@ -35,8 +34,6 @@ pub(super) struct Lifecycle {
     /// without the lock or the reason's clone. Stored after the
     /// slot, so a reader that sees it set finds the reason.
     refused: Arc<AtomicBool>,
-    /// How long a rate change is waited on, in milliseconds.
-    rate_timeout_ms: Arc<AtomicU64>,
     /// The size the server's editor asked its window to take
     /// (`EditorWantsSize`), until the host takes it.
     editor_wants: Arc<Mutex<Option<Size>>>,
@@ -46,16 +43,13 @@ pub(super) struct Lifecycle {
 }
 
 impl Lifecycle {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(watch: Arc<ServerWatch>, timeouts: Timeouts) -> Self {
         Self {
             running: Arc::new(AtomicBool::new(true)),
-            crashed: Arc::new(AtomicBool::new(false)),
-            cause: Arc::new(Mutex::new(None)),
+            watch,
+            timeouts,
             refusal: Arc::new(Mutex::new(None)),
             refused: Arc::new(AtomicBool::new(false)),
-            rate_timeout_ms: Arc::new(AtomicU64::new(
-                super::dispatch::RATE_TIMEOUT.as_millis() as u64
-            )),
             editor_wants: Arc::new(Mutex::new(None)),
             editor_closed: Arc::new(AtomicBool::new(false)),
         }
@@ -83,14 +77,9 @@ impl Lifecycle {
         self.editor_closed.swap(false, Ordering::AcqRel)
     }
 
-    pub(super) fn rate_timeout(&self) -> std::time::Duration {
-        std::time::Duration::from_millis(self.rate_timeout_ms.load(Ordering::Relaxed))
-    }
-
-    #[cfg(any(test, feature = "testing"))]
-    pub(super) fn set_rate_timeout(&self, timeout: std::time::Duration) {
-        self.rate_timeout_ms
-            .store(timeout.as_millis() as u64, Ordering::Relaxed);
+    /// The deadlines the bridge's waits run under.
+    pub(super) fn timeouts(&self) -> &Timeouts {
+        &self.timeouts
     }
 
     /// The refused rate (Hz) and the plugin's reason, while one stands.
@@ -111,32 +100,31 @@ impl Lifecycle {
         }
     }
 
+    /// Whether the server is gone, by any signal. Wait-free.
     pub(super) fn is_crashed(&self) -> bool {
-        self.crashed.load(Ordering::Acquire)
+        self.watch.is_dead()
     }
 
     pub(super) fn is_running(&self) -> bool {
         self.running.load(Ordering::Relaxed)
     }
 
-    /// The latched cause, if this bridge has crashed.
+    /// The latched cause, if the server is gone.
     ///
-    /// `None` while healthy. A crashed bridge always has one — every
-    /// `mark_crashed` call site passes a reason.
+    /// `None` while healthy. A dead server always has one: every
+    /// declaration passes a reason.
     pub(super) fn crash_cause(&self) -> Option<PluginFailure> {
-        self.cause.lock().ok().and_then(|c| c.clone())
+        self.watch.cause()
     }
 
-    /// Mark the bridge dead and latch why.
-    ///
-    /// The first cause wins: a connection-level failure ends every in-flight
-    /// request, so the follow-on errors describe the consequence rather than
-    /// the fault.
+    /// Declare the server gone and latch why; the first cause wins.
     pub(super) fn mark_crashed(&self, cause: PluginFailure) {
-        if let Ok(mut slot) = self.cause.lock() {
-            slot.get_or_insert(cause);
-        }
-        self.crashed.store(true, Ordering::Release);
+        self.watch.declare(cause);
+    }
+
+    /// The server's watch, for the guard and the fork to share.
+    pub(super) fn watch(&self) -> &Arc<ServerWatch> {
+        &self.watch
     }
 
     pub(super) fn request_shutdown(&self) {
@@ -155,7 +143,7 @@ mod tests {
     /// call site passes a reason.
     #[test]
     fn a_cause_appears_exactly_when_the_bridge_crashes() {
-        let life = Lifecycle::new();
+        let life = Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default());
         assert!(!life.is_crashed());
         assert!(
             life.crash_cause().is_none(),
@@ -178,7 +166,7 @@ mod tests {
     /// told "request cancelled" for a plugin that segfaulted.
     #[test]
     fn the_first_cause_survives_later_ones() {
-        let life = Lifecycle::new();
+        let life = Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default());
         life.mark_crashed(PluginFailure::StreamClosed);
         life.mark_crashed(PluginFailure::Unreported);
         assert!(
@@ -194,7 +182,7 @@ mod tests {
     /// notification from every `mark_crashed` site.
     #[test]
     fn requesting_shutdown_does_not_report_a_crash() {
-        let life = Lifecycle::new();
+        let life = Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default());
         life.request_shutdown();
         assert!(!life.is_running());
         assert!(!life.is_crashed(), "a clean shutdown is not a crash");
@@ -205,7 +193,7 @@ mod tests {
     /// cleared with it, and answering never allocates.
     #[test]
     fn the_refused_flag_follows_the_refusal_without_allocating() {
-        let life = Lifecycle::new();
+        let life = Lifecycle::new(Arc::new(ServerWatch::new()), Timeouts::default());
         assert!(!life.is_rate_refused());
         life.set_rate_refusal(Some((SampleRate::SR_44K1, "no".into())));
         let refused = assert_no_alloc::assert_no_alloc(|| life.is_rate_refused());

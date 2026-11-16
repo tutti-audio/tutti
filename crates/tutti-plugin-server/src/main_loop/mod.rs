@@ -105,6 +105,35 @@ pub(crate) use sys::{
     Listener, Native, Stream, record_parent_pid, wait_for_connection, wait_readable,
 };
 
+/// Environment variable through which the host states its own PID at spawn,
+/// before this process exists: neither platform can recover it afterwards (a
+/// host that dies during its child's startup is reparented first). Duplicated
+/// in `tutti-plugin-ipc`'s launch rather than shared: it is the wire between
+/// the two, as the socket-path argument is.
+const HOST_PID_ENV: &str = "TUTTI_PLUGIN_HOST_PID";
+
+/// What keeps watching the host while the `accept` after
+/// [`wait_for_connection`] blocks, ended by dropping it when the accept
+/// returns. A platform whose wait is the check itself (Unix polls the
+/// listener) returns [`Watching::nothing`].
+#[derive(Debug, Default)]
+pub(crate) struct Watching(Option<std::sync::Arc<std::sync::atomic::AtomicBool>>);
+
+impl Watching {
+    /// No watch outlives the wait.
+    pub(crate) fn nothing() -> Self {
+        Self(None)
+    }
+}
+
+impl Drop for Watching {
+    fn drop(&mut self) {
+        if let Some(armed) = &self.0 {
+            armed.store(false, std::sync::atomic::Ordering::Release);
+        }
+    }
+}
+
 /// Serves `transport`, the host's control connection, until the host
 /// disconnects or asks for shutdown. `render` is the thread serving its audio
 /// connection: the loop ends if that peer breaks the protocol.

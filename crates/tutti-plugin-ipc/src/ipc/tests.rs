@@ -121,7 +121,7 @@ fn mock_with(
         outputs: vec![ChannelLayout::STEREO],
     };
     let shm = format!("ipc_{}_{}", std::process::id(), COUNTER.mint());
-    let path = unique_socket_path();
+    let path = unique_socket_path().expect("the OS has a random source");
     let _ = std::fs::remove_file(&path);
     let listener = ListenerOptions::new()
         .name(crate::socket_name(&path).unwrap())
@@ -135,6 +135,8 @@ fn mock_with(
         format,
         load_editor,
         RATE,
+        Arc::new(crate::ServerWatch::new()),
+        tutti_plugin_types::Timeouts::default(),
     )
     .unwrap();
     // The audio connection first, then the control one, as the server accepts
@@ -244,7 +246,9 @@ fn mock_with(
     std::thread::sleep(Duration::from_millis(50));
     let ipc = Ipc::new(IpcParts {
         bridge,
-        guard: Arc::new(ProcessGuard::for_test(BridgeConfig::default())),
+        guard: Arc::new(ProcessGuard::for_test(
+            BridgeConfig::new().expect("the OS has a random source"),
+        )),
         descriptor: PluginDescriptor::default(),
         loaded: LoadedPlugin {
             inputs: vec![PluginBus::main(ChannelLayout::STEREO)],

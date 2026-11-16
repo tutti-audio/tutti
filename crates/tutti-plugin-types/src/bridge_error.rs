@@ -19,6 +19,10 @@ use crate::{EditorError, LoadStage, PluginError, StateError};
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum BridgeError {
+    /// A [`Timeouts`](crate::Timeouts) with a zero deadline was configured.
+    #[error("Bridge configuration refused: {0}")]
+    Timeouts(#[from] crate::ZeroTimeout),
+
     /// The host could not reach the subprocess over its control socket.
     #[error("Bridge connection failed: {0}")]
     ConnectionFailed(String),

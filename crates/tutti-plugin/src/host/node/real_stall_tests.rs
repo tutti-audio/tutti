@@ -127,7 +127,7 @@ fn load_probe(env: &mut ScopedEnv, render_mode: u32) -> (PluginClient, PluginHan
         release_path().to_string_lossy().into_owned(),
     );
     let client = PluginClient::new(
-        BridgeConfig::default(),
+        BridgeConfig::new().expect("the OS has a random source"),
         &tutti_fixtures::detached_work(),
         &crate::catalog::Loadable::uncatalogued(
             crate::catalog::PluginRef::file(tutti_fixtures::clap_probe()).expect("a plugin file"),

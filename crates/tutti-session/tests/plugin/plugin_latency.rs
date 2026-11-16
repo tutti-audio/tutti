@@ -220,7 +220,7 @@ fn a_crossfaded_plugins_latency_is_the_incoming_ones() {
     let outgoing = s.graph_ref().node_latency(node).unwrap();
 
     let incoming = PluginClient::new(
-        tutti_plugin::BridgeConfig::default(),
+        tutti_plugin::BridgeConfig::new().expect("the OS has a random source"),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(clap_probe()).expect("a plugin file")),
         RATE,
@@ -286,7 +286,7 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
         .expect("builds with no device");
 
     let client = PluginClient::new(
-        tutti_plugin::BridgeConfig::default(),
+        tutti_plugin::BridgeConfig::new().expect("the OS has a random source"),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(clap_probe()).expect("a plugin file")),
         RATE,
