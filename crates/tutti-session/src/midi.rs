@@ -59,8 +59,8 @@ const DRAIN_CHUNK: usize = 256;
 /// status, comes at most every 640 microseconds: 1,563 a second. 2,048 holds
 /// that for 1.3 s, where an event waits for its frame only the lead (one block,
 /// [`input_lead`]) and a ring is emptied every block, so a full ring means a
-/// stalled graph, which the inlet reports as lost
-/// (`MidiReport::InputsDropped`) and does not block on. A device faster than a
+/// stalled graph, which the inlet counts as lost
+/// ([`MidiInput::losses`](crate::MidiInput::losses)) and does not block on. A device faster than a
 /// DIN cable (USB) fills it sooner, at its own rate, for the same stall.
 #[cfg(feature = "midi-hardware")]
 pub(crate) const MIDI_INPUT_INLET_CAPACITY: tutti_graph::EventCapacity =
@@ -783,10 +783,6 @@ pub(crate) struct MidiState {
     output_clock: Option<OutputClockSource>,
     /// The outputs' own latency and offset ([`Midi::set_output_latency`]).
     output_latency: OutputLatency,
-    /// The hardware input's drop total the last `Poll` phase reported, and
-    /// when.
-    #[cfg(feature = "midi-hardware")]
-    input_drops_seen: u64,
     /// The session's subscription to the device list: `Phase::Poll` reads it
     /// and nothing else does.
     #[cfg(feature = "midi-hardware")]
@@ -794,8 +790,6 @@ pub(crate) struct MidiState {
     /// Whether the device watch's failure has been reported.
     #[cfg(feature = "midi-hardware")]
     watch_failure_reported: bool,
-    #[cfg(feature = "midi-hardware")]
-    input_reported_at: Option<Instant>,
 }
 
 impl std::fmt::Debug for MidiState {
@@ -810,12 +804,6 @@ impl std::fmt::Debug for MidiState {
             .finish_non_exhaustive()
     }
 }
-
-/// How often a rising count of events the hardware inputs' inlets dropped is
-/// reported at most
-/// (`MidiReport::InputsDropped`, feature `midi-hardware`):
-/// a stalled audio callback with a busy controller drops on every update.
-pub const MIDI_INPUT_DROP_REPORT: Duration = Duration::from_secs(1);
 
 impl MidiState {
     /// A state whose `Phase::Poll` reads `device_events`.
@@ -869,9 +857,7 @@ impl MidiState {
     /// the devices that came and went (each a [`MidiReport`], and a port that
     /// held one reads it as its [`Presence`](crate::Presence)), sends what the
     /// handles asked of the MIDI-CI peers, steps the UMP Stream negotiations and
-    /// the MIDI-CI of the open inputs, and reports the events the inputs' inlets
-    /// dropped when their total rose, at most once per [`MIDI_INPUT_DROP_REPORT`]
-    /// of `now`. Whether the graph was edited.
+    /// the MIDI-CI of the open inputs. Whether the graph was edited.
     #[cfg(feature = "midi-hardware")]
     pub(crate) fn midi_input_phase(
         &mut self,
@@ -902,15 +888,6 @@ impl MidiState {
         {
             self.watch_failure_reported = true;
             out.push(MidiReport::WatchFailed(why).into());
-        }
-        let total = io.ports().losses().dropped();
-        let due = self
-            .input_reported_at
-            .is_none_or(|at| now.saturating_duration_since(at) >= MIDI_INPUT_DROP_REPORT);
-        if total != self.input_drops_seen && due {
-            self.input_drops_seen = total;
-            self.input_reported_at = Some(now);
-            out.push(MidiReport::InputsDropped { total }.into());
         }
         edits.graph || edits.routes
     }

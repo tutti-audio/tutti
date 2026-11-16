@@ -7,9 +7,8 @@
 //!
 //! - [`db_probe`] — the subprocess probe that `tutti-plugin-db` scans with.
 //! - [`node`] — the [`PluginClient`](node::PluginClient): the generic plugin
-//!   node over the served hosting, and what the host keeps beside it.
-//! - [`handles`] — the client's typestates ([`PluginClient`](node::PluginClient)
-//!   is born `Unbound` and binds into a graph node).
+//!   node over the served hosting, its typestates (born `Unbound`, bound into a
+//!   graph node) and what the host keeps beside it.
 //! - [`plugin`] / [`catalog`] / [`loadable`] — the public load API.
 //!
 //! The control handle, the node's controls and the host policy written once
@@ -17,7 +16,6 @@
 
 pub mod catalog;
 pub mod db_probe;
-pub mod handles;
 pub mod loadable;
 pub mod node;
 pub mod plugin;

@@ -158,13 +158,13 @@ fn topology_shows_the_edge_a_connect_wrote() {
         .graph()
         .add(ForkByClone(Through::new(ChannelLayout::STEREO)));
     assert!(
-        s.graph().topology().edges.is_empty(),
+        s.graph().testing().topology().edges.is_empty(),
         "nothing feeds the pass-through yet"
     );
     s.graph().connect(src, through).expect("both are stereo");
     for c in 0..2 {
         assert_eq!(
-            s.graph().topology().edges.get(&InPort {
+            s.graph().testing().topology().edges.get(&InPort {
                 node: through.erase(),
                 port: c,
             }),

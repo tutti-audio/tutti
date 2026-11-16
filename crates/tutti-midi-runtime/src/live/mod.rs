@@ -29,7 +29,9 @@ pub use ingest_node::{
     CHANNELLESS_PORT, MIDI_INPUT_DENSITY, MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS,
     MidiIngestControls, MidiIngestNode, MidiInputPorts,
 };
-pub use input_inlets::{ArrivalClock, ClockWriters, DeviceInput, InputId, InputInlets};
+pub use input_inlets::{
+    ArrivalClock, DeviceInput, DeviceWriters, InputId, InputInlets, InputReaders, InputWriters,
+};
 pub use keys::{LIVE_INLET_CAPACITY, MidiKeys};
 pub use mpe_ingest::MpeIngest;
 pub use route::{RouteRule, compile_routes};
