@@ -63,7 +63,10 @@ impl<'a> Diagnostics<'a> {
     /// Of the [`missed_chunks`](Self::missed_chunks), those the plugin's
     /// pipeline answered after the node had played the silence: a late answer
     /// (an overloaded plugin or machine: raise the buffer size), not a lost
-    /// one. Zero for a plugin that runs in this process.
+    /// one. Every missed chunk ends as exactly one of late,
+    /// [refused](Self::refused_chunks), [skipped](Self::skipped_chunks) or
+    /// [unanswered](Self::unanswered_chunks). Zero for a plugin that runs in
+    /// this process.
     pub fn late_chunks(&self) -> u64 {
         self.hosted
             .controls
@@ -72,8 +75,10 @@ impl<'a> Diagnostics<'a> {
     }
 
     /// Of the [`missed_chunks`](Self::missed_chunks), those the plugin's
-    /// server refused because the chunk's ring slot was recycled before it ran.
-    /// Zero for a plugin that runs in this process.
+    /// server refused: it did not publish the audio (the chunk's ring slot
+    /// recycled before it ran, a block that did not fit, an output channel not
+    /// written, or a refused rate). Zero for a plugin that runs in this
+    /// process.
     pub fn refused_chunks(&self) -> u64 {
         self.hosted
             .controls
@@ -81,9 +86,9 @@ impl<'a> Diagnostics<'a> {
             .map_or(0, tutti_plugin_host::PluginControls::refused_chunks)
     }
 
-    /// Of the [`missed_chunks`](Self::missed_chunks), those never seen answered
-    /// that the server did not refuse and the pipeline did not skip: a loss no
-    /// counter explains. Zero for a plugin that runs in this process.
+    /// Of the [`missed_chunks`](Self::missed_chunks), those that are neither
+    /// late, refused nor skipped: the server never said what became of them. A
+    /// loss no counter explains. Zero for a plugin that runs in this process.
     pub fn unanswered_chunks(&self) -> u64 {
         self.hosted
             .controls

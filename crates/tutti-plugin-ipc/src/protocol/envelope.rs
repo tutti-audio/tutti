@@ -344,9 +344,11 @@ pub enum BridgeMessage {
         /// block's output was silent, so the host may park on it.
         #[serde(default)]
         status: BlockStatus,
-        /// The server did not publish the block's audio: its input slot had
-        /// been recycled, or an output channel was not written. The host reads
-        /// the block as silence, and counts it refused.
+        /// The server did not publish the block's audio, for any reason: its
+        /// input slot had been recycled before it ran, the block did not fit
+        /// the slab or the plugin's ports, an output channel was not written,
+        /// or the plugin refused the sample rate. The host reads the block as
+        /// silence, and counts a missed one refused.
         #[serde(default)]
         refused: bool,
     },

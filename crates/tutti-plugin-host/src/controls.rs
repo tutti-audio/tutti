@@ -231,31 +231,33 @@ impl PluginControls {
     }
 
     /// Of the [`missed_chunks`](Self::missed_chunks), how many the plugin-server
-    /// published after the node had played the silence, before the chunk's
-    /// slot in the shared ring was reused: a late answer, not a lost one.
-    /// Telemetry: a late chunk means an overloaded plugin or machine (raise
-    /// the device buffer size); a miss that is never counted late was lost,
-    /// the server never answered it. A late chunk is noticed on a later chunk,
-    /// within the ring's depth. RT-safe: one relaxed load.
+    /// published after the node had played the silence: a late answer, not a
+    /// lost one. Telemetry: a late chunk means an overloaded plugin or machine
+    /// (raise the device buffer size). It is seen in the shared ring or in the
+    /// server's reply, so it can be counted a few chunks after it was missed.
+    /// Every missed chunk ends as exactly one of late, [refused](Self::refused_chunks),
+    /// [skipped](Self::skipped_chunks) or [unanswered](Self::unanswered_chunks).
+    /// RT-safe: one relaxed load.
     pub fn late_chunks(&self) -> u64 {
         self.chunks.late()
     }
 
     /// Of the [`missed_chunks`](Self::missed_chunks), how many the plugin-server
-    /// refused: its input slot in the shared ring had been recycled before the
-    /// server ran the chunk, so it published nothing. Telemetry beside
+    /// refused: it did not publish the chunk's audio, and said so in its reply.
+    /// Its reasons are the chunk's input slot in the shared ring recycled
+    /// before the server ran it, a block that did not fit, an output channel
+    /// not written, and a refused sample rate. Telemetry beside
     /// [`late_chunks`](Self::late_chunks): an overloaded plugin or machine.
     /// RT-safe: one relaxed load.
     pub fn refused_chunks(&self) -> u64 {
         self.chunks.refused()
     }
 
-    /// Of the [`missed_chunks`](Self::missed_chunks), how many were never seen
-    /// published and are neither [refused](Self::refused_chunks) nor
+    /// Of the [`missed_chunks`](Self::missed_chunks), how many are neither
+    /// [late](Self::late_chunks), [refused](Self::refused_chunks) nor
     /// [skipped](Self::skipped_chunks): the server never said what became of
-    /// them. Not zero is a loss no counter explains: a server that drops
-    /// chunks silently, or an answer that came and went between two looks.
-    /// RT-safe: relaxed loads.
+    /// them within the last few chunks. Not zero is a loss no counter explains:
+    /// a server that drops chunks silently. RT-safe: one relaxed load.
     pub fn unanswered_chunks(&self) -> u64 {
         self.chunks.unanswered()
     }

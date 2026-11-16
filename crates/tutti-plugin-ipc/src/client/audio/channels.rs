@@ -119,7 +119,11 @@ pub(crate) enum Fate {
 
 /// The last [`FATES`] chunks' fates, one word each: the sequence above two
 /// bits of fate, so a lookup of a sequence the entry no longer holds finds
-/// nothing. Written by the bridge thread, read on the audio thread.
+/// nothing. Written by the bridge thread alone, read on the audio thread.
+///
+/// Each word stands alone and nothing is published through it (the audio is
+/// gated by the slab's sequence words), so the accesses are `Relaxed`: a
+/// reader sees a fate or not yet, and tries again at its next look.
 struct Fates([AtomicU64; FATES]);
 
 impl Fates {
@@ -127,17 +131,25 @@ impl Fates {
         Self(std::array::from_fn(|_| AtomicU64::new(0)))
     }
 
+    /// Stores `seq`'s fate, unless the word already holds a newer chunk's: a
+    /// late reply to an old chunk (a server that stalled for more than
+    /// [`FATES`] chunks) must not erase the newer fate. A plain load decides:
+    /// only the bridge thread writes.
     fn record(&self, seq: u64, fate: Fate) {
         let code = match fate {
             Fate::Published => 1,
             Fate::Refused => 2,
             Fate::Skipped => 3,
         };
-        self.0[(seq % FATES as u64) as usize].store(seq << 2 | code, Ordering::Release);
+        let word = &self.0[(seq % FATES as u64) as usize];
+        if word.load(Ordering::Relaxed) >> 2 > seq {
+            return;
+        }
+        word.store(seq << 2 | code, Ordering::Relaxed);
     }
 
     fn get(&self, seq: u64) -> Option<Fate> {
-        let word = self.0[(seq % FATES as u64) as usize].load(Ordering::Acquire);
+        let word = self.0[(seq % FATES as u64) as usize].load(Ordering::Relaxed);
         if word >> 2 != seq {
             return None;
         }

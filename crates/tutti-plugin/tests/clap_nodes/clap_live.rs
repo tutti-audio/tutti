@@ -10,15 +10,15 @@
 //! device period to answer. Asserted here: every block is either the input
 //! delayed by exactly the declared latency (137 + quantum) or silence, and the
 //! graph declares that latency. A silent block is a chunk the node collected
-//! unanswered (`PluginControls::missed_chunks`), and it is excused only when the
-//! server then published that chunk before its ring slot was reused
-//! (`late_chunks`), a late answer a loaded machine produces, when the server
-//! refused it because its input slot was recycled before it ran
-//! (`refused_chunks`), or when the bridge skipped it as more than a chunk
-//! behind (`skipped_chunks`). A silent block whose chunk was none of these, or
-//! that no collect missed, fails; so does a run with a missed chunk the server
-//! never accounted for (`unanswered_chunks`): a server that drops a chunk
-//! silently.
+//! unanswered (`PluginControls::missed_chunks`), and every missed chunk ends as
+//! one of four: published after all (`late_chunks`, a late answer a loaded
+//! machine produces), refused by the server, which did not publish it
+//! (`refused_chunks`: its input slot was recycled before it ran), skipped by
+//! the bridge as more than a chunk behind (`skipped_chunks`), or unanswered
+//! (`unanswered_chunks`). A silent block is excused only by the first three,
+//! counted within a few blocks of the miss; a silent block whose chunk was none
+//! of these, or that no collect missed, fails; so does a run with an
+//! unanswered chunk: a server that drops a chunk silently.
 //! A run in which more than a quarter of the judged blocks were late is rerun
 //! (twice at most) or reported as too loaded to judge.
 //!
@@ -170,16 +170,18 @@ const BURST: usize = 3;
 /// The unjudged callbacks after a run's last block.
 const TRAILING: usize = 16;
 
-/// How many blocks after a miss a refusal or a skip may be counted: the bridge
-/// thread counts both, and it can be a stall behind the audio thread.
+/// How many blocks after a miss a late answer, a refusal or a skip may be
+/// counted: the bridge thread learns each, and it can be a stall behind the
+/// audio thread. A late answer is seen in the shared ring within `RING_SLOTS`
+/// chunks, or later in the server's reply once the slot has been reused, so it
+/// has the window of the others. The strong check is that no missed chunk is
+/// unanswered.
 const SKIP_WINDOW: usize = RING_SLOTS + 2;
 
 /// The missed blocks whose chunk the plugin side accounts for: published
-/// after all, refused by the server, or skipped by the bridge. A miss at block `b` is counted late in
-/// `b` (the same callback's submit), `b + 1` (the next collect) or `b + 2`,
-/// while the chunk's ring slot still shows it (`RING_SLOTS` chunks on); a
-/// refusal or skip is counted within [`SKIP_WINDOW`] blocks of it. Each count
-/// answers one miss, the earliest.
+/// after all, refused by the server, or skipped by the bridge. Each is counted
+/// within [`SKIP_WINDOW`] blocks of the miss, and answers one miss, the
+/// earliest.
 fn excused(misses: &[usize], lates: &[usize], refuses: &[usize], skips: &[usize]) -> Vec<usize> {
     let (mut lates, mut refuses, mut skips) = (lates.to_vec(), refuses.to_vec(), skips.to_vec());
     let mut excused = Vec::new();
@@ -191,7 +193,7 @@ fn excused(misses: &[usize], lates: &[usize], refuses: &[usize], skips: &[usize]
                 .map(|at| events.remove(at))
                 .is_some()
         };
-        if take(&mut lates, RING_SLOTS)
+        if take(&mut lates, SKIP_WINDOW)
             || take(&mut refuses, SKIP_WINDOW)
             || take(&mut skips, SKIP_WINDOW)
         {
@@ -366,7 +368,15 @@ fn a_miss_is_accounted_for_only_by_a_late_refused_or_skipped_count_in_its_window
         [10],
         "while its slot still shows it"
     );
-    assert!(excused(&[10], &[13], &[], &[]).is_empty(), "past the ring");
+    assert_eq!(
+        excused(&[10], &[13], &[], &[]),
+        [10],
+        "a reply that says published, after the slot was reused"
+    );
+    assert!(
+        excused(&[10], &[15], &[], &[]).is_empty(),
+        "past the window"
+    );
     assert!(excused(&[10], &[9], &[], &[]).is_empty(), "before the miss");
     assert!(excused(&[10], &[], &[], &[]).is_empty(), "never published");
     assert_eq!(

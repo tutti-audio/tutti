@@ -44,17 +44,19 @@ pub struct ChunkCounters {
     /// (played as silence), the bridge alive.
     pub missed: AtomicU64,
     /// Of the chunks counted in [`missed`](Self::missed), those the server
-    /// published after all, before the chunk's ring slot was reused.
+    /// published after all: seen in the shared ring, or said published in the
+    /// server's reply, which can come after the chunk's ring slot was reused.
     pub late: AtomicU64,
     /// Of the chunks counted in [`missed`](Self::missed), those the server
-    /// refused: it did not publish the audio because the chunk's input slot
-    /// was recycled before it ran, and said so in its reply.
+    /// refused: it did not publish the audio, and said so in its reply. Its
+    /// reasons are the chunk's input slot recycled before it ran, a block that
+    /// did not fit, an output channel not written, and a refused rate.
     pub refused: AtomicU64,
-    /// Of the chunks counted in [`missed`](Self::missed), those the bridge
-    /// skipped, the server refused or the server published, none of which was
-    /// learned within the last few chunks: the server never said what became
-    /// of them. A loss no other counter explains. Each missed chunk is late,
-    /// refused, skipped or unanswered (a chunk a reset dropped, none).
+    /// Of the chunks counted in [`missed`](Self::missed), those whose fate
+    /// (published, refused or skipped) was not learned within the last few
+    /// chunks: the server never said what became of them. A loss no other
+    /// counter explains. Every missed chunk is late, refused, skipped (counted
+    /// by the bridge) or unanswered; a chunk a reset dropped is none.
     pub unanswered: AtomicU64,
     /// Chunks the bridge dropped because the plugin fell more than one chunk
     /// behind, counted by the bridge thread (set by [`attach_skipped`](Self::attach_skipped)).

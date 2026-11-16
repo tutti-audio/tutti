@@ -518,7 +518,9 @@ pub(super) fn handle(
                         // the RT thread only drains it. Whether the *audio* is
                         // there is settled by the slab's sequence numbers,
                         // which the server published before sending this; the
-                        // echoed `seq` is for diagnostics and ordering.
+                        // echoed `seq` and `refused` are the chunk's fate for
+                        // the batcher's accounting (late, refused, skipped or
+                        // unanswered) and for ordering.
                         BridgeMessage::AudioProcessed {
                             seq,
                             midi_out,
