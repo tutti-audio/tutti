@@ -251,9 +251,6 @@ pub(crate) struct InputShared {
     /// room for. Made once with the entry; a connection writes them and closes
     /// them when it ends, and the counts are cumulative across connections.
     cells: InputReaders,
-    /// The MIDI-CI messages the device's output refused, cumulative across
-    /// connections: the port owns the CI conversation, so the refusal is its.
-    ci_refused: Counter<u64>,
     /// What the port's ingest node lost: translated events its mailbox had no
     /// room for. The node outlives every connection.
     ingest: MidiIngestControls,
@@ -479,10 +476,12 @@ impl MidiInput {
 
     /// What this port did not take in, cumulative over its life and across an
     /// unplug and a replug: [`lost`](Losses::lost) are events its device's inlet
-    /// had no room for (a stalled audio callback with a busy controller), and
-    /// [`refused`](Losses::refused) are translated events its ingest node's
-    /// mailbox had no room for in one block, and the MIDI-CI messages its
-    /// conversation sent that the device's output refused (a refused message is
+    /// had no room for (a stalled audio callback with a busy controller),
+    /// [`evicted`](Losses::evicted) are events its inlet dropped from its waiting
+    /// list for room, and [`refused`](Losses::refused) are events the inlet's
+    /// port refused, translated events its ingest node's mailbox had no room for
+    /// in one block, and the MIDI-CI messages its conversation sent that the
+    /// device's output refused (a refused message is
     /// not sent again, so the count is how many a peer may never have heard).
     /// The CI count is the input's because the input owns the conversation, its
     /// peers and Profiles ([`MidiInputInfo::profiles`]); the session's MIDI
@@ -491,7 +490,10 @@ impl MidiInput {
     pub fn losses(&self) -> Losses {
         Losses::lost(self.shared.cells.lost.get())
             + self.shared.ingest.losses()
-            + Losses::refused(self.shared.ci_refused.get())
+            + Losses::evicted(self.shared.cells.inlet.evicted())
+            + Losses::refused(
+                self.shared.cells.inlet.refused() + self.shared.cells.ci_refused.get(),
+            )
     }
 
     /// Asks a peer to enable or disable a Profile it lists
@@ -885,13 +887,8 @@ impl Ports {
         // without readings.
         let clock = InputWriters::reopen(&port.shared.cells)
             .ok_or_else(|| MidiPortError::CellsHeld(info.id.clone()))?;
-        let ci_refused = port
-            .shared
-            .ci_refused
-            .reopen()
-            .ok_or_else(|| MidiPortError::CellsHeld(info.id.clone()))?;
         match io
-            .connect_input_with(&info.id, clock, ci_refused)
+            .connect_input_with(&info.id, clock)
             .map_err(|e| MidiPortError::Hardware(Arc::new(e)))?
         {
             tutti_midi_hardware::Connected::Opened(inlet) => {
@@ -1339,8 +1336,6 @@ impl crate::Midi<'_> {
         // The cells start closed: a connection reopens them.
         let (writers, cells) = InputWriters::new();
         drop(writers);
-        let (ci_writer, ci_refused) = tutti_rt::counter();
-        drop(ci_writer);
         let shared = Arc::new(InputShared {
             id,
             cell: Mutex::new(Cell {
@@ -1349,7 +1344,6 @@ impl crate::Midi<'_> {
             }),
             requests: Mutex::new(Vec::new()),
             cells,
-            ci_refused,
             ingest: controls.clone(),
         });
         self.state.ports.inputs.push(InputPort {

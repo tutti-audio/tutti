@@ -2,7 +2,7 @@
 //! had no room for, cumulative for the entry and carried across an unplug and a
 //! replug on the same cells.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::common::blocks;
 use tutti_graph::Losses;
@@ -101,4 +101,60 @@ fn the_lost_count_survives_an_unplug_and_keeps_counting_after_the_replug() {
         "cumulative across the replug"
     );
     assert_eq!(s.midi_input(&"keys").unwrap().losses().lost, 2 * first);
+}
+
+/// `n` events from the device stamped ten seconds ahead, so they wait in the
+/// inlet's list for their frame.
+fn push_ahead(fake: &FakeCounters, n: u64) {
+    let at = Instant::now() + Duration::from_secs(10);
+    for i in 0..n {
+        let ump = Ump::from(Message::midi2(
+            MidiChannel::FIRST,
+            Voice2::note_on(NoteNumber::of((i % 128) as u8), NoteVelocity::new(0x8000)),
+        ));
+        let _ = fake.send_input(EndpointId::from_raw(u64::from(KEYS)), ump, at);
+    }
+}
+
+/// **What the inlet evicts from its waiting list is the port's, across a
+/// replug**: 100 events more than the full list holds are evicted, read through
+/// the handle as `evicted`; the second connection's inlet, a new one, adds its
+/// own to the same total.
+#[test]
+fn an_inlet_eviction_raises_the_ports_count_and_carries_across_a_replug() {
+    let (mut s, fake) = session();
+    plug(&fake);
+    let _ = s.update();
+    let saved = keys(&mut s);
+    s.pool(midi_input("keys", saved)).expect("declares");
+    let _ = s.update();
+    let port = s.midi_input(&"keys").expect("loaded");
+    assert_eq!(port.losses(), Losses::NONE);
+    // The engine's clock reads, so an arrival is placed ahead of its block.
+    blocks(&s, 2);
+    push_ahead(&fake, INLET);
+    blocks(&s, 2);
+    push_ahead(&fake, 100);
+    blocks(&s, 2);
+    assert_eq!(port.losses().evicted, 100);
+
+    fake.unplug(EndpointId::from_raw(u64::from(KEYS)));
+    let _ = s.update();
+    blocks(&s, 4);
+    let _ = s.update();
+    assert_eq!(
+        port.losses().evicted,
+        100,
+        "the count stays while it is away"
+    );
+
+    plug(&fake);
+    let _ = s.update();
+    assert!(!port.timing().is_closed(), "the cells reopened");
+    blocks(&s, 2);
+    push_ahead(&fake, INLET);
+    blocks(&s, 2);
+    push_ahead(&fake, 100);
+    blocks(&s, 2);
+    assert_eq!(port.losses().evicted, 200, "cumulative across the replug");
 }

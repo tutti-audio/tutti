@@ -52,7 +52,7 @@ use tutti_graph::EventInletNode;
 use tutti_midi_device::{CiDeviceId, ProfileChange, ProfileId};
 use tutti_midi_device::{DeviceId, DeviceInfo, EntropyError, Learned, MidiIdentity, SavedDevice};
 use tutti_midi_runtime::{InputInlets, InputWriters};
-use tutti_rt::{CounterWriter, counter};
+use tutti_rt::counter;
 use tutti_ump::{GroupSpan, MidiGroup};
 
 /// The set of open MIDI inputs, and the endpoints available to open.
@@ -375,17 +375,17 @@ impl MidiSession {
     /// when it is not an input. Otherwise whatever the backend raises while
     /// opening the port.
     pub fn connect_input(&mut self, device: impl Into<DeviceQuery>) -> Result<Connected> {
-        self.connect_input_with(device, InputWriters::new().0, counter().0)
+        self.connect_input_with(device, InputWriters::new().0)
     }
 
-    /// [`connect_input`](Self::connect_input), the input's clock map reporting
-    /// its timing to `clock` and its inlet's losses to it too: the readers stay
-    /// with whoever made them ([`InputWriters::new`]) and outlive the
-    /// connection. `ci_refused` counts the MIDI-CI messages the device's output
-    /// refused (a full or gone output; a refused message is not sent again, so
-    /// the count is how many a peer may never have heard). The writers drop
-    /// with the input, whether it is refused here (already open, or the OS
-    /// failed) or closed later, and their cells close until reopened.
+    /// [`connect_input`](Self::connect_input), the input reporting to `writers`:
+    /// its clock map's timing, its inlet's losses and the MIDI-CI messages the
+    /// device's output refused (a full or gone output; a refused message is not
+    /// sent again, so the count is how many a peer may never have heard). The
+    /// readers stay with whoever made them ([`InputWriters::new`]) and outlive
+    /// the connection. The writers drop with the input, whether it is refused
+    /// here (already open, or the OS failed) or closed later, and their cells
+    /// close until reopened.
     ///
     /// # Errors
     ///
@@ -393,9 +393,9 @@ impl MidiSession {
     pub fn connect_input_with(
         &mut self,
         device: impl Into<DeviceQuery>,
-        clock: InputWriters,
-        ci_refused: CounterWriter<u64>,
+        mut writers: InputWriters,
     ) -> Result<Connected> {
+        let ci_refused = writers.take_ci_refused().unwrap_or_else(|| counter().0);
         let timing = self.options.input_timing;
         let id = device.into().pick(self.inputs())?;
         // An input whose reader died is replaced, not kept: it is silent.
@@ -411,7 +411,7 @@ impl MidiSession {
         }
 
         // One ring per connection, retired with it.
-        let (input, inlet) = self.devices.open_input(&id, &self.ports, clock)?;
+        let (input, inlet) = self.devices.open_input(&id, &self.ports, writers)?;
         // A UMP Endpoint with an output is asked what it is by the next
         // `poll`. Its output is the negotiation's own, not the session's one
         // destination: asking must not wait for, or disturb, that choice.
