@@ -1129,6 +1129,45 @@ fn a_chunk_never_published_is_missed_and_never_late() {
     bridge_thread.shutdown();
 }
 
+/// **A missed chunk is accounted for once its ring slot is reused: late if it
+/// was seen published, else lost.** The mock server refuses a chunk whose input
+/// slot a later chunk recycled before it ran (as the real one does), and
+/// publishes nothing for it; the batcher never sees an answer, so only the
+/// lost count can account for the chunk. Driven back to back against a 50 ms
+/// stall, every chunk but the last `RING_SLOTS` is past its slot's reuse.
+#[test]
+fn a_missed_chunk_is_late_or_lost_once_its_slot_is_reused() {
+    let (bridge, mut bridge_thread, _server, slab) =
+        bridge_with_server_stall(std::time::Duration::from_millis(50));
+    let counters = Arc::new(ChunkCounters::default());
+    let mut batcher = Batcher::new(CHANNELS, CHANNELS, SampleFormat::Float32, BATCH_SIZE, slab)
+        .with_counters(Arc::clone(&counters));
+    let input = Planar::new();
+    let mut output = Planar::new();
+    let mut midi_out = MidiEventVec::new();
+
+    let blocks: u64 = 10;
+    for _ in 0..blocks {
+        drive_one_block(&mut batcher, &bridge, &input, &mut output, &mut midi_out);
+    }
+    let missed = counters.missed();
+    assert_eq!(missed, blocks - 1, "every chunk but the last was collected");
+    let accounted = counters.late() + counters.lost();
+    assert!(
+        accounted <= missed && accounted + RING_SLOTS as u64 >= missed,
+        "{missed} chunks missed, {} late and {} lost: all but the last {RING_SLOTS} \
+         must be one or the other",
+        counters.late(),
+        counters.lost()
+    );
+    assert!(
+        counters.lost() > 0,
+        "the server cannot have published the chunks it refused"
+    );
+
+    bridge_thread.shutdown();
+}
+
 /// Nothing has ever been published, so every block takes the sequence-mismatch
 /// path into `silence_block`.
 #[test]

@@ -553,7 +553,7 @@ impl Batcher {
 
     /// Notes `seq`, collected unanswered, to be counted late if the server
     /// publishes it before its slot is reused: into an empty entry, else over
-    /// the oldest.
+    /// the oldest (counted [`lost`](ChunkCounters::lost)).
     fn remember_unanswered(&mut self, seq: u64) {
         let at = self
             .unanswered
@@ -564,13 +564,17 @@ impl Batcher {
                     .min_by_key(|&i| self.unanswered[i])
                     .unwrap_or(0)
             });
+        if self.unanswered[at] != 0 {
+            // The oldest, never seen published: its entry goes to this one.
+            self.counters.lost.fetch_add(1, Ordering::Relaxed);
+        }
         self.unanswered[at] = seq;
     }
 
     /// Counts the chunks collected unanswered that the server has published
-    /// since ([`ChunkCounters::late`]), and forgets those whose slot a later
-    /// chunk may have reused (`RING_SLOTS` chunks submitted on), which can no longer be
-    /// told. A relaxed add and loads of the slab's sequence words: RT-safe.
+    /// since ([`ChunkCounters::late`]), and the ones whose slot a later chunk
+    /// may have reused (`RING_SLOTS` chunks submitted on) without a sighting,
+    /// which can no longer be told ([`ChunkCounters::lost`]). A relaxed add and loads of the slab's sequence words: RT-safe.
     fn watch_late(&mut self, bridge: &PluginBridge) {
         for seq in &mut self.unanswered {
             if *seq == 0 {
@@ -580,6 +584,7 @@ impl Batcher {
                 self.counters.late.fetch_add(1, Ordering::Relaxed);
                 *seq = 0;
             } else if *seq + (RING_SLOTS as u64) < self.next_seq {
+                self.counters.lost.fetch_add(1, Ordering::Relaxed);
                 *seq = 0;
             }
         }

@@ -241,6 +241,17 @@ impl PluginControls {
         self.chunks.late()
     }
 
+    /// Of the [`missed_chunks`](Self::missed_chunks), how many were never seen
+    /// published before the chunk's slot in the shared ring was reused: the
+    /// server refused the chunk because its input slot was recycled before it
+    /// ran, the bridge skipped it ([`skipped_chunks`](Self::skipped_chunks)),
+    /// or the answer came and went between two looks. Every missed chunk is
+    /// counted late or lost once its slot is reused, so this is the loss the
+    /// late count does not cover. RT-safe: one relaxed load.
+    pub fn lost_chunks(&self) -> u64 {
+        self.chunks.lost()
+    }
+
     /// Chunks dropped because the plugin fell more than one chunk behind: the
     /// bridge skipped the chunk (the shared ring holds one chunk behind the
     /// newest) and never sent it, so it plays as silence and is never

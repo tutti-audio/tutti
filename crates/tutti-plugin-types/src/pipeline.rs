@@ -28,7 +28,7 @@ pub struct BlockCounts {
 }
 
 /// What the pipeline reports to its controls
-/// (`PluginControls::missed_chunks`, `late_chunks`, `skipped_chunks` and `chunk_in_flight_answered`
+/// (`PluginControls::missed_chunks`, `late_chunks`, `lost_chunks`, `skipped_chunks` and `chunk_in_flight_answered`
 /// in `tutti-plugin-host`):
 /// written on the audio thread with relaxed atomics, read anywhere.
 ///
@@ -46,6 +46,12 @@ pub struct ChunkCounters {
     /// Of the chunks counted in [`missed`](Self::missed), those the server
     /// published after all, before the chunk's ring slot was reused.
     pub late: AtomicU64,
+    /// Of the chunks counted in [`missed`](Self::missed), those never seen
+    /// published before their ring slot was reused: the server refused the
+    /// chunk (its input slot was recycled before it ran), the bridge skipped
+    /// it, or the answer came and went between two looks. Each missed chunk
+    /// ends as late or lost, once (at most, for a chunk a reset dropped).
+    pub lost: AtomicU64,
     /// Chunks the bridge dropped because the plugin fell more than one chunk
     /// behind, counted by the bridge thread (set by [`attach_skipped`](Self::attach_skipped)).
     skipped: OnceLock<Arc<AtomicU64>>,
@@ -61,6 +67,7 @@ impl std::fmt::Debug for ChunkCounters {
             .field("in_flight", &self.in_flight)
             .field("missed", &self.missed)
             .field("late", &self.late)
+            .field("lost", &self.lost)
             .field("skipped", &self.skipped())
             .finish_non_exhaustive()
     }
@@ -92,6 +99,11 @@ impl ChunkCounters {
     /// See `PluginControls::late_chunks`.
     pub fn late(&self) -> u64 {
         self.late.load(Ordering::Relaxed)
+    }
+
+    /// See `PluginControls::lost_chunks`.
+    pub fn lost(&self) -> u64 {
+        self.lost.load(Ordering::Relaxed)
     }
 
     /// See `PluginControls::chunk_in_flight_answered`.
