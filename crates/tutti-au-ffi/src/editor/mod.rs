@@ -34,7 +34,8 @@ pub fn leaked_editor_views() -> usize {
 /// `Send` because the retained `NSView` pointer is self-contained, but all
 /// AppKit calls must still originate from the main thread: every entry takes
 /// the [`MainThreadMarker`] that proves it, and `Drop`, which cannot take one,
-/// asks `MainThreadMarker::new` and leaks the view off the main thread.
+/// asks `MainThreadMarker::new` and leaks the view off the main thread, counted
+/// in [`leaked_editor_views`].
 pub struct AuEditor {
     view: *mut AnyObject,
     unit: Unit,
@@ -48,9 +49,8 @@ impl std::fmt::Debug for AuEditor {
 
 // SAFETY: the view is touched only on the main thread: `open`, `close` and
 // `editor_size` take the marker, and `Drop` leaks the view instead of
-// releasing it off the main thread, so a
-// moved value never makes an AppKit call from another thread. The `Unit` it
-// holds is `Send`.
+// releasing it off the main thread, so a moved value never makes an AppKit
+// call from another thread. The `Unit` it holds is `Send`.
 unsafe impl Send for AuEditor {}
 
 impl AuEditor {
@@ -82,9 +82,11 @@ impl AuEditor {
         if let Some(handle) = parent {
             let parent_obj = handle.as_ptr() as *mut AnyObject;
             if !parent_obj.is_null() {
-                // SAFETY: `WindowHandle` carries its constructor's claim that
-                // the parent is a live NSView; `view` is the live view just
-                // created, and `addSubview:` retains it.
+                // SAFETY: the `MainThreadMarker` parameter proves this is the
+                // main thread, where AppKit may be called. `WindowHandle`
+                // carries its constructor's claim that the parent is a live
+                // NSView; `view` is the live view just created, and
+                // `addSubview:` retains it.
                 let _: () = unsafe { msg_send![parent_obj, addSubview: view] };
             }
         }
@@ -109,8 +111,9 @@ impl AuEditor {
     /// there and leaks the view elsewhere.
     pub fn close(&mut self, _main: MainThreadMarker) {
         if !self.view.is_null() {
-            // SAFETY: `view` is the live +1 view this editor owns (non-null,
-            // checked); it leaves its superview and the reference is released
+            // SAFETY: the `MainThreadMarker` parameter proves this is the main
+            // thread, where AppKit may be called. `view` is the live +1 view
+            // this editor owns (non-null, checked); it leaves its superview and the reference is released
             // once, then the pointer is nulled below.
             unsafe {
                 let _: () = msg_send![self.view, removeFromSuperview];
@@ -126,7 +129,9 @@ impl AuEditor {
         if self.view.is_null() {
             return LogicalSize::new(0, 0);
         }
-        // SAFETY: `view` is the live view this editor owns (non-null, checked).
+        // SAFETY: the `MainThreadMarker` parameter proves this is the main
+        // thread, where AppKit may be called. `view` is the live view this
+        // editor owns (non-null, checked).
         unsafe {
             let frame: NSRect = msg_send![self.view, frame];
             LogicalSize::new(frame.size.width, frame.size.height).cast()

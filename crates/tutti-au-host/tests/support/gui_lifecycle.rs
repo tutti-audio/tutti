@@ -456,6 +456,37 @@ fn an_au_without_a_cocoa_view_is_refused_cleanly() {
 }
 
 gui_test! {
+/// An editor dropped off the main thread gives up its view without touching
+/// AppKit: exactly one view is counted in `leaked_editor_views`, and the unit
+/// is still usable (a new editor opens on it) afterwards.
+fn dropping_off_the_main_thread_leaks_and_counts_the_view() {
+    let _g = lock();
+    let (unit, _, _) = WITH_COCOA_VIEW[0];
+    let au = ready(unit);
+    // SAFETY: `au` is live and initialized, and this runs on the main thread.
+    let editor = unsafe { open_headless(&au) }
+        .unwrap_or_else(|e| panic!("{}: open failed: {e:?}", unit.label));
+
+    let before = tutti_au_ffi::leaked_editor_views();
+    std::thread::spawn(move || drop(editor))
+        .join()
+        .expect("the drop off the main thread must not panic");
+    assert_eq!(
+        tutti_au_ffi::leaked_editor_views(),
+        before + 1,
+        "{}: a drop off the main thread leaks its view and counts it once",
+        unit.label
+    );
+
+    // SAFETY: as above.
+    let mut again = unsafe { open_headless(&au) }
+        .unwrap_or_else(|e| panic!("{}: reopen after the leak failed: {e:?}", unit.label));
+    assert!(!again.view_ptr().is_null());
+    again.close(on_main());
+}
+}
+
+gui_test! {
 /// Dropping an open editor without calling `close()` must be safe.
 ///
 /// `Drop` routes through `close`, which is the single teardown path. A host
