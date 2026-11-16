@@ -45,6 +45,7 @@ pub(crate) fn catch<R>(f: impl FnOnce() -> R) -> Result<R, ObjcException> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use objc2::rc::Retained;
     use objc2_foundation::NSString;
 
     /// A raised `NSException` comes back as an error carrying its name and
@@ -61,7 +62,9 @@ mod tests {
                     None,
                 )
             };
-            exception::throw(exception)
+            // SAFETY: `Exception` is the type `throw` takes for any thrown
+            // object, and an `NSException` is one.
+            exception::throw(unsafe { Retained::cast_unchecked::<exception::Exception>(exception) })
         });
         assert_eq!(
             raised,
