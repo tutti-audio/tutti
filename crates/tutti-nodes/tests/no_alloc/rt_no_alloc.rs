@@ -27,17 +27,19 @@ fn gate_at<N: tutti_graph::IntoNode>(node: N, block: usize) {
 }
 #[test]
 fn convolver_process_is_allocation_free() {
-    use tutti_nodes::{ConvolverNode, generate_test_ir};
+    use tutti_fixtures::signal::decay_ir;
+    use tutti_nodes::ConvolverNode;
 
-    let ir = generate_test_ir(2048, Seconds::new(0.3), SampleRate::SR_48K);
+    let ir = decay_ir(2048, Seconds::new(0.3), SampleRate::SR_48K);
     gate(ConvolverNode::new(&ir, 512));
 }
 #[test]
 fn dual_mono_convolver_process_is_allocation_free() {
-    use tutti_nodes::{ConvolverNode, generate_test_ir};
+    use tutti_fixtures::signal::decay_ir;
+    use tutti_nodes::ConvolverNode;
 
-    let ir_l = generate_test_ir(2048, Seconds::new(0.3), SampleRate::SR_48K);
-    let ir_r = generate_test_ir(2048, Seconds::new(0.4), SampleRate::SR_48K);
+    let ir_l = decay_ir(2048, Seconds::new(0.3), SampleRate::SR_48K);
+    let ir_r = decay_ir(2048, Seconds::new(0.4), SampleRate::SR_48K);
     gate(ConvolverNode::per_channel(&[&ir_l, &ir_r], 512).unwrap());
 }
 
@@ -46,9 +48,10 @@ fn dual_mono_convolver_process_is_allocation_free() {
 /// that do not (37, 100) and one longer than a partition (1000 against 256).
 #[test]
 fn convolver_mid_cycle_blocks_are_allocation_free() {
-    use tutti_nodes::{ConvolverNode, generate_test_ir};
+    use tutti_fixtures::signal::decay_ir;
+    use tutti_nodes::ConvolverNode;
 
-    let ir = generate_test_ir(8192, Seconds::new(0.3), SampleRate::SR_48K);
+    let ir = decay_ir(8192, Seconds::new(0.3), SampleRate::SR_48K);
     for block in [37usize, 100, 128, 1000] {
         gate_at(ConvolverNode::new(&ir, 256), block);
     }
@@ -60,9 +63,9 @@ fn convolver_mid_cycle_blocks_are_allocation_free() {
 #[test]
 fn convolver_ragged_calls_are_allocation_free() {
     use tutti_dsp::Convolver;
-    use tutti_nodes::generate_test_ir;
+    use tutti_fixtures::signal::decay_ir;
 
-    let ir = generate_test_ir(8192, Seconds::new(0.3), SampleRate::SR_48K);
+    let ir = decay_ir(8192, Seconds::new(0.3), SampleRate::SR_48K);
     let mut c = Convolver::new(&ir, 128);
     let x: Vec<f32> = (0..513).map(|i| ((i as f32) * 0.31).sin()).collect();
     let mut y = vec![0.0f32; 513];
@@ -87,9 +90,9 @@ fn convolver_ragged_calls_are_allocation_free() {
 #[test]
 fn convolver_tail_levels_are_allocation_free() {
     use tutti_dsp::Convolver;
-    use tutti_nodes::generate_test_ir;
+    use tutti_fixtures::signal::decay_ir;
 
-    let ir = generate_test_ir(240_000, Seconds::new(1.0), SampleRate::SR_48K);
+    let ir = decay_ir(240_000, Seconds::new(1.0), SampleRate::SR_48K);
     let mut c = Convolver::new(&ir, 512);
     let x: Vec<f32> = (0..5000).map(|i| ((i as f32) * 0.31).sin()).collect();
     let mut y = vec![0.0f32; 5000];
@@ -112,11 +115,12 @@ fn convolver_tail_levels_are_allocation_free() {
 /// channels, so the fold does real work rather than the stereo average.
 #[test]
 fn folded_six_channel_convolver_process_is_allocation_free() {
-    use tutti_nodes::{ConvolverNode, generate_test_ir};
+    use tutti_fixtures::signal::decay_ir;
+    use tutti_nodes::ConvolverNode;
 
     let irs: Vec<Vec<f32>> = (0..6)
         .map(|c| {
-            generate_test_ir(
+            decay_ir(
                 1024,
                 tutti_types::Seconds::from_f32(0.2 + 0.05 * c as f32),
                 SampleRate::SR_48K,
@@ -127,10 +131,8 @@ fn folded_six_channel_convolver_process_is_allocation_free() {
     gate(ConvolverNode::folded(&refs, 256).unwrap());
 }
 
-/// Every curve of the shaper, unfed (the block-rate drive) and with its
-/// drive port fed a per-frame ramp (the path that writes each frame's
-/// hardness into channel 0 and shapes it last), 1 000 blocks each under
-/// `assert_no_alloc`. `Direct` feeds the port, which `BlockRig` cannot.
+/// Every curve of the shaper, unfed and with its drive port fed a per-frame ramp, 1 000
+/// blocks each under `assert_no_alloc`. `Direct` feeds the port, which `BlockRig` cannot.
 #[test]
 fn distortion_process_is_allocation_free_fed_and_unfed() {
     use tutti_graph::contract::Direct;

@@ -22,7 +22,9 @@ use tutti_graph::{
     Lowering, NodeKey, Op, OutPort, Plan, Sink, Source, TransportPosition, Unforkable, ValidGraph,
     compile,
 };
-use tutti_types::{Amplitude, BusTopology, ChannelLayout, ChannelTopology, Samples, Tail};
+use tutti_types::{
+    Amplitude, BusTopology, ChannelLayout, ChannelTopology, SampleRate, Samples, Tail,
+};
 
 const BLOCK: usize = 64;
 
@@ -879,9 +881,15 @@ fn a_bus_edges_lanes_align_like_any_edges() {
     assert_eq!(got, expected);
     // The lowered spec is what the latency fold reads, too.
     let lowered = rig.lowering().unwrap().spec;
-    assert_eq!(tutti_graph::latency_plan(&lowered).total(), Samples(9),);
-    let unlowered = tutti_graph::latency_plan(&rig.spec);
-    assert_ne!(unlowered, tutti_graph::latency_plan(&lowered));
+    assert_eq!(
+        tutti_graph::latency_plan(&lowered, SampleRate::SR_48K).total(),
+        Samples(9),
+    );
+    let unlowered = tutti_graph::latency_plan(&rig.spec, SampleRate::SR_48K);
+    assert_ne!(
+        unlowered,
+        tutti_graph::latency_plan(&lowered, SampleRate::SR_48K)
+    );
 }
 
 // ---------------------------------------------------------------------------

@@ -4,7 +4,8 @@
 //! and runs a body that receives a [`StopToken`]. The [`ThreadHandle`] it
 //! returns stops the thread and joins it when dropped, so a thread never
 //! outlives its owner by accident; [`ThreadHandle::detach`] is the one
-//! spelling of "let it run on".
+//! spelling of "let it run on". [`ThreadHandle::stop_within`] bounds the wait
+//! for an owner that must not hang on a stuck body.
 //!
 //! This is control-side code: spawning allocates, joining blocks, and the
 //! token's [`wait`](StopToken::wait) sleeps. None of it is for the audio
@@ -43,6 +44,47 @@ struct StopState {
     /// Held only to order a stop against a sleeper's check.
     gate: Mutex<()>,
     wake: Condvar,
+}
+
+/// Set once by the spawned thread when the body's outcome is decided: it has
+/// returned or panicked. The thread's exit (its thread-local destructors)
+/// follows.
+#[derive(Debug, Default)]
+struct Ended {
+    ended: Mutex<bool>,
+    wake: Condvar,
+}
+
+impl Ended {
+    fn set(&self) {
+        *self
+            .ended
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+        self.wake.notify_all();
+    }
+
+    /// Waits at most `timeout` for [`set`](Self::set); returns whether it came.
+    fn wait(&self, timeout: Duration) -> bool {
+        let ended = self
+            .ended
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *self
+            .wake
+            .wait_timeout_while(ended, timeout, |ended| !*ended)
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .0
+    }
+}
+
+/// Sets [`Ended`] when dropped, on the thread's normal exit or its unwind.
+struct SetOnDrop(Arc<Ended>);
+
+impl Drop for SetOnDrop {
+    fn drop(&mut self) {
+        self.0.set();
+    }
 }
 
 /// A stop request a thread's body polls or sleeps on: a shared flag and a wake.
@@ -114,13 +156,15 @@ impl StopToken {
 /// stop and joins.
 ///
 /// `T` is what the body returns. A body that never looks at its token ends
-/// by itself (a closed queue, say), and the drop's join waits for that.
+/// by itself (a closed queue, say), and the drop's join waits for that;
+/// [`stop_within`](Self::stop_within) bounds the wait.
 #[must_use = "dropping the handle stops the thread and waits for it; `detach` lets it run on"]
 #[derive(Debug)]
 pub struct ThreadHandle<T> {
     name: String,
     stop: StopToken,
     priority: Option<PriorityOutcome>,
+    ended: Arc<Ended>,
     join: Option<JoinHandle<Result<T, Panicked>>>,
 }
 
@@ -161,6 +205,27 @@ impl<T> ThreadHandle<T> {
             // panic outside the catch, reported the same way.
             Some(join) => join.join().unwrap_or_else(|_| Err(lost(&self.name))),
             None => Err(lost(&self.name)),
+        }
+    }
+
+    /// Requests the stop and waits at most `timeout` for the body to end, then
+    /// joins and hands back what [`join`](Self::join) would.
+    ///
+    /// The bound covers the body; the join after it waits for the thread's
+    /// exit, which runs its thread-local destructors.
+    ///
+    /// # Errors
+    ///
+    /// The handle itself when the body has not ended within `timeout`. The
+    /// stop stays requested; the caller retries, joins, or
+    /// [`detach`](Self::detach)es. Dropping the returned handle joins again
+    /// without a bound; `detach` is the way to give up on a stuck thread.
+    pub fn stop_within(self, timeout: Duration) -> Result<Result<T, Panicked>, Self> {
+        self.stop.stop();
+        if self.ended.wait(timeout) {
+            Ok(self.join())
+        } else {
+            Err(self)
         }
     }
 
@@ -212,10 +277,12 @@ where
     F: FnOnce(&StopToken) -> T + Send + 'static,
 {
     let stop = StopToken::new();
+    let ended = Arc::new(Ended::default());
     let (applied_tx, applied_rx) = mpsc::sync_channel::<Option<PriorityOutcome>>(1);
     let join = {
-        let (stop, name_owned) = (stop.clone(), name.to_owned());
+        let (stop, ended, name_owned) = (stop.clone(), Arc::clone(&ended), name.to_owned());
         Builder::new().name(name.to_owned()).spawn(move || {
+            let _ended = SetOnDrop(ended);
             catch_unwind(AssertUnwindSafe(move || {
                 let _ = applied_tx.send(priority.map(request_priority));
                 body(&stop)
@@ -233,6 +300,7 @@ where
         name: name.to_owned(),
         stop,
         priority,
+        ended,
         join: Some(join),
     })
 }
