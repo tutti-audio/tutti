@@ -100,6 +100,8 @@ std only. A rule the compiler already enforces is not a gate.
   the serial render bit for bit.
 - Never make memory safety depend on an exact float result (nodes run inside
   `with_no_denormals`).
+- A node never latches a NaN or an infinity from its input: a block that wrote one is
+  passed on and the recursive state resets after it (`KernelNode` does this for a kernel).
 - A node that changes width declares its buses; the graph never guesses a dry path. A node
   reads a non-main bus through the handle its shape issued.
 - Summing is the graph's: several sources into one port sum. Never add a node to sum.
