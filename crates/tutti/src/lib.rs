@@ -335,7 +335,10 @@ pub mod midi {
     };
 
     #[cfg(feature = "midi-hardware")]
-    pub use tutti_midi_device::{DeviceId, DeviceInfo, Learned, Match, SavedDevice};
+    pub use tutti_midi_device::{
+        DeviceId, DeviceInfo, EndpointName, Learned, Match, MidiIdentity, ProductInstanceId,
+        SavedDevice,
+    };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{
         ChannelCount, ChannelProfile, CiChange, CiPeerInfo, DeviceQuery, ListedProfile,

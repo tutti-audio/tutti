@@ -1,8 +1,8 @@
 use std::time::Instant;
 
 use tutti_midi_device::{
-    CiDeviceId, CiHeader, CiMessage, Decoded, Endpoint, Muid, ProfileChannels, ProfileId,
-    ProfileInitiator,
+    Capabilities, CiDeviceId, CiHeader, CiMessage, Decoded, Endpoint, Muid, ProfileChannels,
+    ProfileId, ProfileInitiator, Supports,
 };
 use tutti_ump::{FunctionBlockId, GroupSpan, MidiChannel};
 
@@ -20,7 +20,14 @@ fn dialect(zones: &[(u8, u16)]) -> Dialect {
             channels: ProfileChannels::of(channels),
         }));
     }
-    let endpoint = Endpoint::local(GroupSpan::new(1).unwrap());
+    let endpoint = Endpoint::local(
+        Supports::of(Capabilities {
+            midi1: true,
+            midi2: true,
+            ..Capabilities::default()
+        }),
+        GroupSpan::new(1).unwrap(),
+    );
     Dialect::of(&endpoint, FunctionBlockId::new(0).unwrap(), peer.table()).unwrap()
 }
 

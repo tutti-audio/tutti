@@ -569,6 +569,9 @@ pub struct Session<C: Clock = Offline> {
     pub(crate) mods: crate::modulation::ModSession,
     #[cfg(feature = "midi-hardware")]
     pub(crate) midi_io: Option<tutti_midi_hardware::MidiSession>,
+    /// Who the session is on the wire, as set ([`Session::policy`]).
+    #[cfg(feature = "midi-hardware")]
+    pub(crate) midi_policy: crate::MidiPolicy,
     #[cfg(feature = "sampler")]
     pub(crate) disk_streamer: Option<tutti_sampler::DiskStreamer>,
     /// Names the [`SamplerLoad`](crate::SamplerLoad)s.
@@ -786,6 +789,8 @@ impl<C: Clock> Session<C> {
             mods,
             #[cfg(feature = "midi-hardware")]
             midi_io,
+            #[cfg(feature = "midi-hardware")]
+            midi_policy,
             #[cfg(feature = "sampler")]
             disk_streamer,
             #[cfg(feature = "sampler")]
@@ -850,6 +855,8 @@ impl<C: Clock> Session<C> {
                 mods,
                 #[cfg(feature = "midi-hardware")]
                 midi_io,
+                #[cfg(feature = "midi-hardware")]
+                midi_policy,
                 #[cfg(feature = "sampler")]
                 disk_streamer,
                 #[cfg(feature = "sampler")]
@@ -1204,6 +1211,10 @@ impl<C: Clock> Session<C> {
                 self.render_mode_phase()
             }
             Phase::Poll => {
+                // Who the session is on the wire is in force before the devices
+                // are stepped.
+                #[cfg(feature = "midi-hardware")]
+                self.apply_midi_policy();
                 // A device that connected is heard from the plan that holds
                 // its inlet: committed now, not an update later.
                 #[cfg(feature = "midi-hardware")]
