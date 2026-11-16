@@ -22,8 +22,8 @@ use core::marker::PhantomData;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use super::units::Unit;
+use alloc::sync::Arc;
 use atomic_float::{AtomicF32, AtomicF64};
-use std::sync::Arc;
 
 mod sealed {
     pub trait Sealed {}

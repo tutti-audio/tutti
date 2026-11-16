@@ -90,7 +90,7 @@ pub const FRAME_TOLERANCE: f64 = 1e-6;
 /// ```
 #[inline]
 pub fn first_frame_at_or_after(frames_ahead: f64) -> i64 {
-    (frames_ahead - FRAME_TOLERANCE).ceil() as i64
+    libm::ceil(frames_ahead - FRAME_TOLERANCE) as i64
 }
 
 /// Musical time covered by one audio sample at `tempo` and `sample_rate`.
@@ -139,7 +139,7 @@ pub fn frames_per_beat(tempo: Bpm, rate: SampleRate) -> Option<f64> {
 /// frame 128 only to within an ulp, not exactly.
 #[inline]
 pub fn snap_to_whole_frame(position: f64) -> f64 {
-    let whole = position.round();
+    let whole = libm::round(position);
     if (position - whole).abs() < FRAME_TOLERANCE {
         whole
     } else {

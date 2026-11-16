@@ -20,7 +20,7 @@ tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = f
 # The portamento rate (`glide_rate`) is `libm`'s pure-Rust `expf`/`logf`, so the
 # render does not depend on the platform's libm.
 libm = "0.2.15"
-thiserror = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 assert_no_alloc = { version = "1", default-features = false }

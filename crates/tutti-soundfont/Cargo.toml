@@ -26,7 +26,7 @@ tutti-dsp = { version = "0.0.1", path = "../tutti-dsp" }
 tutti-sf2 = { version = "0.0.1", path = "../tutti-sf2" }
 tutti-voicing = { version = "0.0.1", path = "../tutti-voicing" }
 
-thiserror = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
 tutti-types = { version = "0.0.1", path = "../tutti-types", default-features = false }
 # The render's transcendentals are `libm`'s pure-Rust ones, so a render does not depend on the platform's C math library.
 libm = "0.2.15"

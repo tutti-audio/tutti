@@ -332,9 +332,10 @@ list of such crates is `NO_STD_CRATES` in `xtask/src/recipes.rs`.
 - **S5. No spin locks.** A `no_std` crate takes no lock; shared state goes
   through `tutti-rt` (`CLAUDE.md`).
 - **S6. The build is the check.** `cargo xtask check-no-std` builds each listed
-  crate, bare and with each of its features, for `thumbv7em-none-eabihf`
-  (`rustup target add thumbv7em-none-eabihf`); CI's dark-features job runs it.
+  crate, bare and with each of its features, for `aarch64-unknown-none`
+  (`rustup target add aarch64-unknown-none`); CI's dark-features job runs it.
   A `std` use fails to compile there, so no text gate looks for the attribute.
+  The target is 64-bit because `Param<f64>` and `AtomicF64` need 64-bit atomics.
 
 ---
 

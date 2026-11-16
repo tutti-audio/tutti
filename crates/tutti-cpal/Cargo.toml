@@ -42,7 +42,7 @@ jack = ["cpal/jack"]
 
 [dependencies]
 cpal = "0.18"
-thiserror.workspace = true
+thiserror = { workspace = true, features = ["std"] }
 
 tutti-transport = { version = "0.0.1", path = "../tutti-transport" }
 tutti-engine = { version = "0.0.1", path = "../tutti-engine" }

@@ -26,7 +26,7 @@ tutti-plugin-types = { version = "0.0.1", path = "../tutti-plugin-types" }
 # `unsafe`.
 tutti-au-ffi = { version = "0.0.1", path = "../tutti-au-ffi" }
 # Structured errors (`AuError`), matching the sibling format hosts.
-thiserror.workspace = true
+thiserror = { workspace = true, features = ["std"] }
 # `Offset`: where an event sits in the block `send_midi` is given; `Ump`: the packet.
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }

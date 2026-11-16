@@ -45,6 +45,9 @@
 //! # Ok::<(), tutti_tempo::TempoError>(())
 //! ```
 #![forbid(unsafe_code)]
+#![cfg_attr(not(test), no_std)]
+
+extern crate alloc;
 
 mod builder;
 mod error;
