@@ -5,9 +5,9 @@
 use std::sync::Arc;
 
 use tutti_graph::NodeKey;
-use tutti_plugin_host::PluginHandle;
-use tutti_plugin_types::{Normalized, ParamId, ParameterInfo, PluginFailure};
-use tutti_types::SampleRate;
+use tutti_plugin_host::{PluginControls, PluginHandle};
+use tutti_plugin_types::{Normalized, ParamId, ParameterInfo, PluginFailure, PluginTail};
+use tutti_types::{SampleRate, Samples};
 
 use crate::plugin::HostedPlugin;
 use crate::{Clock, Key, PluginNode, Session};
@@ -27,10 +27,11 @@ pub(super) fn host<C: Clock>(
     plugin: PluginRef,
 ) -> Key<PluginNode> {
     let node = node.into();
+    let controls = PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K);
     let previous = session
         .graph
         .plugins
-        .insert(node, HostedPlugin::new(handle, plugin));
+        .insert(node, HostedPlugin::new(handle, plugin, (*controls).clone()));
     assert!(previous.is_none(), "{node:?} hosts one plugin");
     session.graph.write_own_bypass(node);
     Key::new(node)

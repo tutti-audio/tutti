@@ -898,8 +898,11 @@ impl Graph {
         tutti_plugin::catalog::PluginRebinder,
     ) {
         let node = NodeKey::fresh();
-        let hosted = crate::plugin::HostedPlugin::served(client.handle(), client.plugin().clone())
-            .with_controls(client.controls());
+        let hosted = crate::plugin::HostedPlugin::served(
+            client.handle(),
+            client.plugin().clone(),
+            client.controls(),
+        );
         let tempo = self.tempo.clone();
         let bound = client.bind(tempo);
         let rebinder = tutti_plugin::catalog::PluginRebinder::served(&bound);
@@ -997,8 +1000,7 @@ impl Graph {
                     None => {
                         self.plugins.insert(
                             node,
-                            crate::plugin::HostedPlugin::served(handle, plugin)
-                                .with_controls(controls),
+                            crate::plugin::HostedPlugin::served(handle, plugin, controls),
                         );
                     }
                 }
@@ -1051,9 +1053,10 @@ impl Graph {
                         outgoing.retire().settle(&mut self.graveyard);
                     }
                     None => {
-                        let mut hosted = crate::plugin::HostedPlugin::new(handle, plugin_ref);
-                        hosted.node = Some(controls);
-                        self.plugins.insert(node, hosted);
+                        self.plugins.insert(
+                            node,
+                            crate::plugin::HostedPlugin::new(handle, plugin_ref, controls),
+                        );
                     }
                 }
                 Ok(rebinder)
@@ -1186,8 +1189,7 @@ impl Graph {
             + self
                 .plugins
                 .values()
-                .filter_map(|hosted| hosted.node.as_ref())
-                .map(|node| node.meter().reclaim())
+                .map(|hosted| hosted.node.meter().reclaim())
                 .sum::<usize>();
         pinned
     }

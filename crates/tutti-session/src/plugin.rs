@@ -782,7 +782,7 @@ pub(crate) struct HostedPlugin {
     pub(crate) controls: Option<PluginControls>,
     /// What the node counts and holds (its meter cell and delivery counters):
     /// every plugin the session added; `None` for one the host inserted itself.
-    pub(crate) node: Option<NodeControls>,
+    pub(crate) node: NodeControls,
     /// What the plugins this record held before the current one lost, as
     /// [`Plugin::losses`] counts: banked when a plugin or its node is replaced,
     /// so the record's count only grows.
@@ -985,17 +985,29 @@ impl std::fmt::Debug for HostedPlugin {
 }
 
 impl HostedPlugin {
-    /// The record of a plugin hosted in this process.
-    pub(crate) fn new(handle: PluginHandle, plugin: PluginRef) -> Self {
-        Self::placed(Placement::InProcess, handle, plugin)
+    /// The record of a plugin hosted in this process, whose node counts with
+    /// `node`.
+    pub(crate) fn new(handle: PluginHandle, plugin: PluginRef, node: NodeControls) -> Self {
+        Self::placed(Placement::InProcess, handle, plugin, node)
     }
 
-    /// The record of a plugin served from a plugin server.
-    pub(crate) fn served(handle: PluginHandle, plugin: PluginRef) -> Self {
-        Self::placed(Placement::Served, handle, plugin)
+    /// The record of a plugin served from a plugin server, with its `controls`.
+    pub(crate) fn served(
+        handle: PluginHandle,
+        plugin: PluginRef,
+        controls: PluginControls,
+    ) -> Self {
+        let mut record = Self::placed(Placement::Served, handle, plugin, (*controls).clone());
+        record.controls = Some(controls);
+        record
     }
 
-    fn placed(placement: Placement, handle: PluginHandle, plugin: PluginRef) -> Self {
+    fn placed(
+        placement: Placement,
+        handle: PluginHandle,
+        plugin: PluginRef,
+        node: NodeControls,
+    ) -> Self {
         let (notices, hearing) = hear(&handle);
         let (mirror, read) = tutti_plugin_host::PluginParamValues::start(&handle);
         Self {
@@ -1004,7 +1016,7 @@ impl HostedPlugin {
             plugin,
             handle,
             controls: None,
-            node: None,
+            node,
             banked: tutti_graph::Losses::NONE,
             liveness: Liveness::new(),
             hang: HangDetector::default(),
@@ -1038,15 +1050,10 @@ impl HostedPlugin {
         matches!(self.status, PluginLiveness::Healthy)
     }
 
-    pub(crate) fn with_controls(mut self, controls: PluginControls) -> Self {
-        self.node = Some((*controls).clone());
-        self.controls = Some(controls);
-        self
-    }
-
     /// The incoming plugin of a crossfade at the same node: its handle and
     /// controls, a fresh debounce, and not yet told the render mode. Nothing
-    /// of the outgoing plugin's state carries over: its last good state is
+    /// of the outgoing plugin's state carries over but what it lost
+    /// ([`Plugin::losses`] stays cumulative): its last good state is
     /// cleared (its bytes would restore the wrong plugin), a fresh snapshot token
     /// makes a job of the outgoing plugin still in flight land nowhere, the
     /// snapshot clock restarts, and its own-bypass state (the episode, the waits
@@ -1072,7 +1079,7 @@ impl HostedPlugin {
     ) -> Outgoing {
         self.plugin = plugin;
         let outgoing = self.adopt(handle, Placement::Served);
-        self.set_node(Some((*controls).clone()));
+        self.set_node((*controls).clone());
         self.controls = Some(controls);
         outgoing
     }
@@ -1088,7 +1095,7 @@ impl HostedPlugin {
     ) -> Outgoing {
         self.plugin = plugin;
         let outgoing = self.adopt(handle, Placement::InProcess);
-        self.set_node(Some(node));
+        self.set_node(node);
         self.controls = None;
         outgoing
     }
@@ -1105,7 +1112,7 @@ impl HostedPlugin {
 
     /// The node's controls, `node` in place of the ones held: what the held
     /// ones counted is banked first.
-    pub(crate) fn set_node(&mut self, node: Option<NodeControls>) {
+    pub(crate) fn set_node(&mut self, node: NodeControls) {
         self.banked += self.node_losses();
         self.node = node;
     }
@@ -1116,11 +1123,8 @@ impl HostedPlugin {
     /// deliver as they were.
     fn node_losses(&self) -> tutti_graph::Losses {
         use tutti_graph::Losses;
-        let Some(node) = self.node.as_ref() else {
-            return Losses::NONE;
-        };
-        let points = node.param_delivery();
-        Losses::lost(node.dropped_midi_in())
+        let points = self.node.param_delivery();
+        Losses::lost(self.node.dropped_midi_in())
             + Losses::lost(points.grid_points_dropped)
             + Losses::evicted(points.points_merged)
             + Losses::refused(points.points_dropped)
@@ -1246,8 +1250,8 @@ impl HostedPlugin {
     }
 }
 
-/// The type of a hosted plugin's [`Key`]: what [`Session::add_pooled_plugin`],
-/// [`Graph::insert_plugin`](crate::Graph::insert_plugin) return, so a plugin's
+/// The type of a hosted plugin's [`Key`]: what [`Session::add_pooled_plugin`]
+/// and [`Graph::insert_plugin`](crate::Graph::insert_plugin) return, so a plugin's
 /// ports and parameters are methods of its key as a native node's are.
 ///
 /// A marker only: no value of it exists, and every plugin format, in or out
@@ -1513,8 +1517,7 @@ impl<C: crate::Clock> Session<C> {
                 node_controls.set_meter(meter);
                 let (bound, rebinder) = (*plugin).bind_with_rebinder(self.graph.tempo.clone());
                 let (node, _) = self.graph.place(bound);
-                let mut hosted = HostedPlugin::new(handle, loaded_ref);
-                hosted.node = Some(node_controls);
+                let hosted = HostedPlugin::new(handle, loaded_ref, node_controls);
                 self.graph.plugins.insert(node.erase(), hosted);
                 self.graph.write_own_bypass(node.erase());
                 (Key::new(node.erase()), rebinder)
@@ -2359,6 +2362,11 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tutti_plugin_types::{Normalized, ParamId, ParameterInfo};
 
+    /// The controls of a plugin's node, counting nothing yet.
+    fn node_controls() -> NodeControls {
+        (*PluginControls::new(Samples(0), PluginTail::default(), SampleRate::SR_48K)).clone()
+    }
+
     /// A backend that answers `state` (or declines), counts its saves, and
     /// is dead while `dead` is set.
     struct Fake {
@@ -2672,7 +2680,7 @@ mod tests {
             .plugins
             .get_mut(&rig.node)
             .expect("hosted")
-            .node = Some((*controls).clone());
+            .node = (*controls).clone();
         assert!(meter.has_meter(), "the project's meter is followed");
 
         let mut block = meter.probe_reader();
@@ -2807,6 +2815,7 @@ mod tests {
             let mut record = HostedPlugin::new(
                 outgoing,
                 PluginRef::file("fake.clap").expect("a plugin file"),
+                node_controls(),
             );
             record.editor_open = open;
             let (incoming, _) = fake_handle(None, Vec::new());
@@ -3185,6 +3194,7 @@ mod tests {
         let mut hosted = HostedPlugin::new(
             outgoing.clone(),
             PluginRef::file("fake.clap").expect("a plugin file"),
+            node_controls(),
         );
         hosted
             .bypass
@@ -3220,6 +3230,7 @@ mod tests {
         let mut hosted = HostedPlugin::new(
             outgoing.clone(),
             PluginRef::file("fake.clap").expect("a plugin file"),
+            node_controls(),
         );
         hosted
             .bypass

@@ -145,7 +145,7 @@ impl<C: Clock> Session<C> {
                         if let (Some(hosted), Some(controls)) =
                             (self.graph.plugins.get_mut(&node), controls)
                         {
-                            hosted.set_node(Some(controls));
+                            hosted.set_node(controls);
                         }
                         state.with(now, true)
                     }

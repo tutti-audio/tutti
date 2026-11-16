@@ -42,6 +42,8 @@ struct Counters {
     /// The bridge thread's count of the MIDI events it did not send.
     bridge_midi: Arc<AtomicU64>,
     delivery: ParamDelivery,
+    /// The points a parameter's queue holds in the chunk the delivery is prepared for.
+    queue_room: usize,
 }
 
 impl Counters {
@@ -51,12 +53,13 @@ impl Counters {
         let bridge_midi = Arc::new(AtomicU64::new(0));
         delivery_counters.attach_bridge_midi(Arc::clone(&bridge_midi));
         let mut delivery = ParamDelivery::new([ParamId::new(0)], delivery_counters);
-        delivery.prepare(64);
+        let queue_room = delivery.prepare(64);
         delivery.begin();
         Self {
             controls,
             bridge_midi,
             delivery,
+            queue_room,
         }
     }
 
@@ -70,8 +73,8 @@ impl Counters {
     fn lose_one_point_of_each_kind(&mut self) {
         let value = |k: usize| if k.is_multiple_of(2) { 0.25 } else { 0.75 };
         let slots = self.delivery.room();
-        // A queue of corners is full at its room: `prepare(64)` gives 2 + 1 + 256.
-        let queue = 2 + 1 + 256;
+        // A queue of corners is full at its room.
+        let queue = self.queue_room;
         for k in 0..queue {
             assert!(self.delivery.point(ParamId::new(0), k as i32, value(k)));
         }
@@ -106,7 +109,7 @@ fn hosted() -> (DetachedSession, NodeKey, Counters, FakePlugin) {
         .plugins
         .get_mut(&node)
         .expect("hosted")
-        .set_node(Some((*counters.controls).clone()));
+        .set_node((*counters.controls).clone());
     (s, node, counters, fake)
 }
 
@@ -157,7 +160,7 @@ fn losses_keep_what_a_rebuilt_node_and_a_swapped_plugin_lost() {
         .plugins
         .get_mut(&node)
         .unwrap()
-        .set_node(Some((*rebuilt.controls).clone()));
+        .set_node((*rebuilt.controls).clone());
     assert_eq!(losses(&s, node), before, "the rebuild lost nothing");
     rebuilt.lose_midi(2);
     assert_eq!(losses(&s, node), before + Losses::lost(2));

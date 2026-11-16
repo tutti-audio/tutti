@@ -152,10 +152,7 @@ impl<'a> Diagnostics<'a> {
     /// ([`Graph::insert_plugin`](crate::Graph::insert_plugin)), whose node the
     /// session did not give a meter.
     pub fn follows_project_meter(&self) -> bool {
-        self.hosted
-            .node
-            .as_ref()
-            .is_some_and(tutti_plugin_host::NodeControls::has_meter)
+        self.hosted.node.has_meter()
     }
 
     /// Ends the plugin's server process: the death follows as it would for any
