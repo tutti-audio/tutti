@@ -53,11 +53,14 @@ mod tests {
     fn a_raised_exception_is_returned_with_its_name_and_reason() {
         assert_eq!(catch(|| 7), Ok(7));
         let raised = catch(|| {
-            let exception = NSException::exceptionWithName_reason_userInfo(
-                &NSString::from_str("TuttiTest"),
-                Some(&NSString::from_str("because")),
-                None,
-            );
+            // SAFETY: no `userInfo` is passed, so its generic type is unused.
+            let exception = unsafe {
+                NSException::exceptionWithName_reason_userInfo(
+                    &NSString::from_str("TuttiTest"),
+                    Some(&NSString::from_str("because")),
+                    None,
+                )
+            };
             exception::throw(exception)
         });
         assert_eq!(

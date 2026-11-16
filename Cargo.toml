@@ -132,7 +132,7 @@ coremidi = "0.9"
 coremidi-sys = "3.2"
 core-foundation = "0.10"
 objc2 = { version = "0.6", default-features = false, features = ["std", "exception"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSException", "NSString"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSEnumerator", "NSException", "NSObjCRuntime", "NSString"] }
 objc2-core-midi = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-foundation", "MIDIMessages", "MIDIServices", "MIDIUMPCI", "MIDIUMPEndpoint", "MIDIUMPEndpointManager", "MIDIUMPFunctionBlock"] }
 
 # Release codegen with line tables, for a sampling profiler:
